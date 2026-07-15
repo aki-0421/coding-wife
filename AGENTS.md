@@ -1,8 +1,13 @@
 # AGENTS.md
 
-## 目的
+## ハッカソン
 
-このアプリはハッカソン「OpenAI Build Week」(Deadline 2026年7月22日 @ 9:00am GMT+9)へ応募するのを目標にしています。
+このアプリはハッカソン「OpenAI Build Week」への応募を目標にする。
+提出期限は **2026年7月22日 09:00 JST**。
+
+ハッカソン要件と提出準備は [docs/hackathon/](docs/hackathon/) から確認する。
+公開Web情報を再確認するときは `agent-browser` を使い、Official Rulesを最優先する。
+Web情報を更新した場合は、対象文書の `updated` と `last_verified` も更新する。
 
 ## 言語
 
