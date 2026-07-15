@@ -8,6 +8,7 @@
 ハッカソン要件と提出準備は [docs/hackathon/](docs/hackathon/) から確認する。
 公開Web情報を再確認するときは `agent-browser` を使い、Official Rulesを最優先する。
 Web情報を更新した場合は、対象文書の `updated` と `last_verified` も更新する。
+ハッカソン成果物の実装証跡を残すため、PR本文にはターゲットブランチとの差分を基準として、このブランチで行った変更、その意図、検証結果を正確かつ漏れなく記載する。
 
 ## 言語
 
