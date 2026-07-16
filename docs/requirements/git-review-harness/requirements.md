@@ -139,7 +139,7 @@ Full accessのCodexはfile変更、test、commit、remote操作まで実行で�
 | GIT-F-035 | 全main/support turnをcanonical worktree別exclusive turn leaseで直列化する。 | [SUP-F-038〜SUP-F-044](../support-agent-orchestration/requirements.md#同一worktreeの競合制御)と同じRust管理leaseを`turn/start`前に取得し、terminalまで保持する。AskUserQuestion待機、Quit、timeout、crash、stale lease回復を含め同一worktreeのactive turnは最大1件、別worktreeは並行可とする。 | Draft | 非該当 |
 | GIT-F-036 | collectorは同じexclusive turn leaseの下でsnapshotを収集する。 | GIT-F-004またはGIT-F-005の時間境界内にleaseを取得した場合だけGIT-F-021を実行し、結果保存まで保持する。取得できなければGitを読まず`read_only_evidence_unavailable`として`incomplete`にし、turnやsession操作を止めない。 | Draft | 非該当 |
 | GIT-F-037 | turn leaseが外部processの変更を防ぐとは扱わない。 | lease対象はアプリが開始するmain/support turnとcollectorだけとし、editor、shell、別Git client等を遮断したと表示しない。外部変化はGIT-F-021で検出し、帰属できなければ`external_or_unknown`にする。 | Draft | 非該当 |
-| GIT-F-038 | secret redactionを保存、表示、診断copyの前にRust側で行う。 | fixtureのAPI key、access token、cookie、authorization header、credential付きURL、secret環境変数、secret質問回答が各出力へ0件で、置換後のtypeと短いerror codeだけを確認できる。 | Draft | 非該当 |
+| GIT-F-038 | secret redactionを保存、表示、診断copyの前にRust側で行う。 | 一般credential fixtureのAPI key、access token、cookie、authorization header、credential付きURL、secret環境変数値が各出力へ0件で、置換後のtypeと短いerror codeだけを確認できる。 | Draft | 非該当 |
 | GIT-F-039 | evidence保存をSQLite transactionで原子的に行う。 | snapshot本体と参照recordが全件commitされるか全件rollbackされ、クラッシュ注入後に部分snapshotを`complete`として表示しない。 | Draft | 非該当 |
 | GIT-F-040 | アプリ再起動時に保存済みevidence indexを復元する。 | session、turn、snapshot、command、test、review、commitのID対応を再構築し、同じfilter結果とfinal evidenceを表示してcollector command、test、reviewを自動再実行しない。 | Draft | 非該当 |
 | GIT-F-041 | 収集中のクラッシュまたはQuitを未完了として復元する。 | terminal statusのないsnapshotを`予期しない中断`または`アプリ終了により中断`へ変え、保存済みrecordを保持し、ユーザーが`再収集`を実行するまで追加Git読取を行わない。 | Draft | 非該当 |

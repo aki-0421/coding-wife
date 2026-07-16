@@ -93,7 +93,7 @@ status: "Draft"
 | commit・remote | commit/parent ID、redacted subject、前後branch、観測turn/UTC、operation・exit分類 | author email、署名、diff、remote URL、PR本文・response本文 |
 | model | owner turn/assignment、requested/actual model、actual effort、preset、fallback有無・理由 | hidden reasoning、raw response |
 | support | assignment ID、固定role、source、actual model/effort、status、redacted summary、evidence refs、開始/終了 | support thread ID、prompt、raw output・reasoning |
-| question | 非secretの質問・option・回答・resolved理由/UTC。secretはanswered flagとresolved理由/UTC | secret値、長さ、hash、label、TTS内容 |
+| question | 到達可能な非secret質問、server提供の2〜3 option、client追加の`Other`、回答、resolved理由/UTC。secretまたはfree-form-only requestはprotocol error code、理由enum、検出・解決UTCだけ | 互換性違反requestの質問文、question ID、option、回答、入力内容、値の長さ・hash、TTS内容 |
 | review・checkpoint・skill | severity、finding、relative file/line、再現条件、`no_findings`、目的・変更・検証・残課題、skill status | 自動採用、source修正、固定skill順、承認gate |
 
 ## 表示状態
@@ -185,7 +185,7 @@ status: "Draft"
 | filter・search・選択 | SQLite / UI state | 条件・route変更 | 同じsession再表示 | session履歴削除 | default条件へ戻し通知 |
 | source・Git実体 | repository/worktree | この画面は保存しない | read-only再収集時に参照 | この画面は削除しない | unavailable/incomplete表示 |
 | raw patch・output・reasoning | 保存しない | 非該当 | 復元しない | 収集処理終了時にmemory破棄 | metadataだけ表示 |
-| secret質問回答 | answered flagだけSQLite | 解決時 | detail表示 | 履歴削除 | 値を復元・copyしない |
+| 質問互換性違反 | request/turn/item ID、method、error code、理由enum、UTCだけSQLite | secretまたはfree-form-only request拒否時 | compatibility failure detail表示 | 履歴削除 | 質問・option・回答・入力内容を復元・copyしない |
 | derived data | FTS/index/cache/owned evidence/backup | primary削除後にcleanup | query時 | primaryと同じ明示削除 | app UI/query/再起動から復元できない場合だけ完了。OS backup/forensic eraseは保証外 |
 
 ## OS差分
