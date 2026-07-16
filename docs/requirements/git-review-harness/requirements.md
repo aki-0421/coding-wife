@@ -1,8 +1,8 @@
 ---
 title: "Gitレビュー支援 要件定義"
 description: "CodexのGit・command・test・review結果を変更判断から分離して収集し、read-only evidenceとして再表示する要件。"
-updated: 2026-07-16
-last_verified: 2026-07-16
+updated: 2026-07-17
+last_verified: 2026-07-17
 status: "Draft"
 prefix: "GIT"
 read_when:
@@ -29,9 +29,9 @@ Full accessのCodexはfile変更、test、commit、remote操作まで実行で�
 |---|---|
 | Git outcome | commit、push、PR作成、merge、revert、reset、branch作成・切替・削除の結果。 |
 | collector | Git状態、diff統計、command・test eventを読み取り、worktreeとGitを変更しないRust側の収集処理。 |
-| evidence snapshot | sessionの特定時点について、HEAD、branch、dirty fingerprint、command、test、reviewへの参照を固定した構造化record。 |
+| evidence snapshot | sessionの特定時点について、HEAD、branch、Git state fingerprint、command、test、reviewへの参照を固定した構造化record。 |
 | final evidence | 最新snapshotまでの目的、変更、検証、review、commit、残課題をS-003で再表示するread-onlyなまとめ。 |
-| dirty fingerprint | HEAD、index、tracked変更、untracked fileのrelative path・種別・内容hashから算出する識別値。file内容そのものは含めない。 |
+| Git state fingerprint | HEADのsymbolic refとOID、indexのstage・mode・object・path hash、tracked worktree diff hash、untracked manifestのpath・種別・内容hash、merge・rebase等のoperation markerから算出する識別値。file内容そのものは保存しない。 |
 
 ## 目的
 
@@ -40,7 +40,7 @@ Full accessのCodexはfile変更、test、commit、remote操作まで実行で�
 | 操作判断と証跡を分離する | desktop shellがGit outcomeを自動決定せず、ユーザー指示を受けたSolの操作とcollectorの読取操作をactor別に確認できる。 |
 | 変更と検証を追跡可能にする | branch、HEAD、dirty状態、diff統計、command、test、review、commitを同じsession evidenceとしてS-003で再表示できる。 |
 | 支援を非強制にする | 組込みskill、Detached Reviewer、Checkpoint Curatorがtriggerに応じて利用され、未適用または失敗でもmainを継続できる。 |
-| 競合と秘密漏えいを防ぐ | 共有worktreeの書込前照合とGit排他lockを適用し、秘密値とsource本文を永続evidenceから除外できる。 |
+| 競合と秘密漏えいを抑える | アプリ管理turnをworktree別leaseで直列化し、外部変更は安定snapshotで検出し、秘密値とsource本文を永続evidenceから除外できる。 |
 
 ## スコープ
 
@@ -53,7 +53,7 @@ Full accessのCodexはfile変更、test、commit、remote操作まで実行で�
 | 実行evidence | App Serverから観測したcommand、test、Git operationのactor、分類、status、時間、結果を保存する。 |
 | review支援 | 組込みskillの適用状況、Detached Reviewerのfinding、Checkpoint Curatorのsummaryをsnapshotへ関連付ける。 |
 | 完了時収集 | main turn終了時とsession終了要求時にread-only snapshotを作り、承認待ちにせずS-003へ表示する。 |
-| 競合・復旧 | support要件のfingerprint、session lock、stale判定を共有し、再起動後にevidence indexを復元する。 |
+| 競合・復旧 | support要件のcanonical worktree別turn lease、安定snapshot、stale判定を共有し、再起動後にevidence indexを復元する。 |
 
 ### 含めない
 
@@ -71,7 +71,7 @@ Full accessのCodexはfile変更、test、commit、remote操作まで実行で�
 | アクター | 説明 | 許可する操作 | 拒否時の動作 |
 |---|---|---|---|
 | ユーザー | Git outcomeの意図をmainへ伝える利用者 | prompt、evidence閲覧・filter・copy、再収集要求 | UIから直接Git変更する操作は提供しない |
-| main agent（Sol） | ユーザー指示と現在状態から作業を判断する主体 | Full accessのtool操作、skill選択、support依頼、結果説明 | lock・fingerprint・固定session境界に違反する操作は失敗として受け取る |
+| main agent（Sol） | ユーザー指示と現在状態から作業を判断する主体 | Full accessのtool操作、skill選択、support依頼、結果説明 | turn leaseを取得できない、または固定session境界が不一致ならturnを開始しない |
 | support agent | QA、Detached Reviewer、Checkpoint Curatorを含む支援主体 | role契約内の検証、review、summary | outcome決定、ユーザー質問、競合書込を拒否する |
 | Rust collector | App Server event、Git、SQLiteの信頼境界 | read-only収集、分類、redaction、lock調停、保存 | 不正相関、秘密、staleな結果を永続正本へ採用しない |
 | React WebView | evidenceを表示する非特権UI | session内のfilter、選択、copy要求 | 任意shell、Git argument、absolute path、raw SQLite queryを拒否する |
@@ -99,7 +99,7 @@ Full accessのCodexはfile変更、test、commit、remote操作まで実行で�
 | GIT-F-010 | アプリは組込みskillへ固定実行順を設定しない。 | skill利用eventがないturnではskill assignmentが0件で、複数skillが適用されるturnでもアプリ定義の全体順queueまたは必須先行skillが存在しない。 | Draft | 非該当 |
 | GIT-F-011 | skillの未適用をmain turnの失敗として扱わない。 | terminal turnにskill eventが0件の場合、final evidenceへ`skill evidenceなし`と表示し、warning、承認gate、自動再実行を作成しない。 | Draft | 非該当 |
 | GIT-F-012 | skillのloadまたは実行失敗を対象支援だけの縮退として扱う。 | skill name、`load_failed`または`execution_failed`、短い理由、代替を記録し、main turnをskill失敗だけで中断せず、raw skill input・outputを保存しない。 | Draft | 非該当 |
-| GIT-F-013 | Detached Reviewerを固定snapshotに対する独立reviewとして関連付けられる。 | Solまたはskill triggerで起動した場合、review開始時のHEADとdirty fingerprint、findingのseverity、relative file、line、再現条件、evidence refs、または`no_findings`を同じsnapshotへ保存する。 | Draft | 非該当 |
+| GIT-F-013 | Detached Reviewerを固定snapshotに対する独立reviewとして関連付けられる。 | Solまたはskill triggerで起動した場合、review開始時のHEADとGit state fingerprint、findingのseverity、relative file、line、再現条件、evidence refs、または`no_findings`を同じsnapshotへ保存する。 | Draft | 非該当 |
 | GIT-F-014 | Detached Reviewerの結果をGit outcomeまたは完了gateへ変換しない。 | blocker findingが存在してもアプリがfile変更、commit取消、revert、main interrupt、承認要求を実行せず、Solが結果を採否できるadvisory表示になる。 | Draft | 非該当 |
 | GIT-F-015 | Checkpoint Curatorの構造化summaryをevidenceへ関連付けられる。 | roleが実行された場合、目的、変更区分、影響、検証、commit参照、review参照、残課題を保存し、Git・testの元recordを変更せずS-003で参照できる。 | Draft | 非該当 |
 | GIT-F-016 | ReviewerまたはCuratorの失敗でmainを停止しない。 | roleが`failed`、`interrupted`、`unavailable`、`stale`でもfinal evidenceを`支援未完了`として作成し、main statusとGit状態を変更せず再試行可否を表示する。 | Draft | 非該当 |
@@ -112,7 +112,7 @@ Full accessのCodexはfile変更、test、commit、remote操作まで実行で�
 | GIT-F-018 | snapshotへ現在branch、HEAD、base、upstream有無を保存する。 | attached時はbranch名と40桁commit ID、detached時は`detached`とcommit ID、unborn時は`unborn`を記録し、存在しないupstreamを推測しない。 | Draft | 非該当 |
 | GIT-F-019 | dirty状態をstaged、unstaged、untrackedへ分けて保存する。 | 各区分のfile数、canonical relative path、change種別、内容SHA-256を記録し、ignored fileとabsolute pathを含めず、0件は明示的に0と表示する。 | Draft | 非該当 |
 | GIT-F-020 | merge、rebase、cherry-pick、revert、bisect中の状態をsnapshotへ記録する。 | 検出したoperation名を列挙して`operation_in_progress`を表示し、collectorがcontinue、abort、commit、checkoutを実行せずread-only evidenceの収集だけを行う。 | Draft | 非該当 |
-| GIT-F-021 | snapshot収集中のbranchまたはHEAD外部変更をstaleとして扱う。 | 収集前後のbranch・HEADが異なる場合は結果を採用せず1回だけ再収集し、再度変化した場合は`git_state_changed`と両revisionを保存して`incomplete`にする。 | Draft | 非該当 |
+| GIT-F-021 | snapshot収集中のGit状態変化をfail closedで扱う。 | lease取得後、GIT-F-018〜GIT-F-020の全要素を100 ms間隔の2回読取で固定したbefore snapshot、evidence読取後のafter snapshotを比較する。不一致なら結果を破棄して全収集を1回だけ再試行し、再度不一致なら`UNSTABLE`、両fingerprint、`read_only_evidence_unavailable`を保存して`incomplete`にする。 | Draft | 非該当 |
 | GIT-F-022 | diff evidenceをbase、HEAD、index、worktreeの比較対象ごとに分離する。 | diff evidence ID、snapshot ID、生成UTC、比較元・先revision、staged・unstaged区分、file status、rename元・先、追加・削除行数を記録し、比較対象が解決できない区分を`unavailable`にする。 | Draft | 非該当 |
 | GIT-F-023 | binary fileのdiffは本文を取得・保存せずmetadataだけを記録する。 | binary判定されたfileはrelative path、change種別、変更前後byte数、変更前後hash、`binary`を保存し、line統計とpatch本文を空にする。 | Draft | 非該当 |
 | GIT-F-024 | 大規模diffを境界付きsummaryへ縮退する。 | 変更fileが500件超、または一時生成したtext patchが5 MiB超のどちらかで`large_diff`と実数を表示し、全体統計、relative path順の先頭500件、未表示件数だけを保存してpatch生成を打ち切る。 | Draft | 非該当 |
@@ -136,14 +136,14 @@ Full accessのCodexはfile変更、test、commit、remote操作まで実行で�
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| GIT-F-035 | mainまたはsupportによるGit index、branch、commit、worktree変更をsession exclusive lockで直列化する。 | [SUP-F-042〜SUP-F-044](../support-agent-orchestration/requirements.md#同一worktreeの競合制御)と同じlock owner・30秒timeout・crash recoveryを使い、同じsessionで変更Git processが同時に2件起動しない。 | Draft | 非該当 |
-| GIT-F-036 | supportまたはskillのfile書込へbase fingerprint再照合を適用する。 | [SUP-F-038〜SUP-F-041](../support-agent-orchestration/requirements.md#同一worktreeの競合制御)と同じrelative path・SHA-256を使用し、不一致時は上書きせず`write_conflict` evidenceをmainへ返す。 | Draft | 非該当 |
-| GIT-F-037 | collectorのread-only Git操作はsession exclusive lockを取得せずsnapshot整合性で競合を検出する。 | `status`、`diff --no-ext-diff --no-textconv`、`rev-parse`相当の収集中に変更operationを妨げず、GIT-F-021の前後照合でstaleを検出し、external diff、index、refs、worktree fileを変更しない。 | Draft | 非該当 |
+| GIT-F-035 | 全main/support turnをcanonical worktree別exclusive turn leaseで直列化する。 | [SUP-F-038〜SUP-F-044](../support-agent-orchestration/requirements.md#同一worktreeの競合制御)と同じRust管理leaseを`turn/start`前に取得し、terminalまで保持する。AskUserQuestion待機、Quit、timeout、crash、stale lease回復を含め同一worktreeのactive turnは最大1件、別worktreeは並行可とする。 | Draft | 非該当 |
+| GIT-F-036 | collectorは同じexclusive turn leaseの下でsnapshotを収集する。 | GIT-F-004またはGIT-F-005の時間境界内にleaseを取得した場合だけGIT-F-021を実行し、結果保存まで保持する。取得できなければGitを読まず`read_only_evidence_unavailable`として`incomplete`にし、turnやsession操作を止めない。 | Draft | 非該当 |
+| GIT-F-037 | turn leaseが外部processの変更を防ぐとは扱わない。 | lease対象はアプリが開始するmain/support turnとcollectorだけとし、editor、shell、別Git client等を遮断したと表示しない。外部変化はGIT-F-021で検出し、帰属できなければ`external_or_unknown`にする。 | Draft | 非該当 |
 | GIT-F-038 | secret redactionを保存、表示、診断copyの前にRust側で行う。 | fixtureのAPI key、access token、cookie、authorization header、credential付きURL、secret環境変数、secret質問回答が各出力へ0件で、置換後のtypeと短いerror codeだけを確認できる。 | Draft | 非該当 |
 | GIT-F-039 | evidence保存をSQLite transactionで原子的に行う。 | snapshot本体と参照recordが全件commitされるか全件rollbackされ、クラッシュ注入後に部分snapshotを`complete`として表示しない。 | Draft | 非該当 |
 | GIT-F-040 | アプリ再起動時に保存済みevidence indexを復元する。 | session、turn、snapshot、command、test、review、commitのID対応を再構築し、同じfilter結果とfinal evidenceを表示してcollector command、test、reviewを自動再実行しない。 | Draft | 非該当 |
 | GIT-F-041 | 収集中のクラッシュまたはQuitを未完了として復元する。 | terminal statusのないsnapshotを`予期しない中断`または`アプリ終了により中断`へ変え、保存済みrecordを保持し、ユーザーが`再収集`を実行するまで追加Git読取を行わない。 | Draft | 非該当 |
-| GIT-F-042 | 再収集時に現在revisionと元snapshotを混同しない。 | 新しいsnapshot ID、現在HEAD、dirty fingerprint、再収集元IDを保存し、元snapshotを上書きせず、revision差分がある場合は`current state`として別表示する。 | Draft | 非該当 |
+| GIT-F-042 | 再収集時に現在revisionと元snapshotを混同しない。 | 新しいsnapshot ID、現在HEAD、Git state fingerprint、再収集元IDを保存し、元snapshotを上書きせず、revision差分がある場合は`current state`として別表示する。 | Draft | 非該当 |
 
 ## 入力項目要件
 
@@ -166,7 +166,8 @@ Git outcomeを直接実行するbutton、Git argument入力、commit message入�
 | 履歴操作中 | 通常 | operation名を付けてsnapshotを作る。continue、abort、commitしない |
 | 任意 | binary | metadataだけを保存する |
 | 任意 | 500 file超またはtext patch 5 MiB超 | `large_diff` summaryへ縮退する |
-| 収集中にbranchまたはHEAD変化 | 任意 | 1回再収集し、再変化ならincompleteにする |
+| turn lease取得不能 | 任意 | Gitを読まず`read_only_evidence_unavailable`でincompleteにする |
+| 収集中にGit state fingerprint変化 | 任意 | 結果を破棄して1回再収集し、再変化なら`UNSTABLE`でincompleteにする |
 
 ## デスクトップ固有要件
 
@@ -201,7 +202,7 @@ Git outcomeを直接実行するbutton、Git argument入力、commit message入�
 
 | 領域 | 要件 |
 |---|---|
-| セキュリティ | collectorはallowlist済みread-only Git commandを引数配列で実行し、WebView入力をshellへ渡さない。worktreeへの書込はSUPのfingerprintとlockを経由し、Full accessをsandboxと誤表示しない。 |
+| セキュリティ | collectorはallowlist済みread-only Git commandを引数配列で実行し、WebView入力をshellへ渡さない。turn leaseはアプリ管理turnだけを直列化し、Full accessまたは外部processをsandbox化すると誤表示しない。 |
 | 権限 | evidence閲覧は選択session内に限定し、session・thread・turn・evidence IDをRust側で照合する。Git outcomeを実行するCapabilityをReactへ提供しない。 |
 | プライバシー | relative path、hash、統計、秘匿化summaryだけを保存する。secret、absolute path、remote URL、source patch、raw output、raw responseをSQLite、通知、診断copyへ含めない。 |
 | 監査・ログ | snapshot、actor、trigger、revision、Git状態、command/test/review/commit参照、status、UTC、error code、redaction versionを保存する。collector自身の失敗も記録する。 |
@@ -217,7 +218,7 @@ Git outcomeを直接実行するbutton、Git argument入力、commit message入�
 | [デスクトップ共通仕様](../../screen-design/desktop-common-specification.md) | SQLite、Quit、redaction、Full access、3OS、通知の共通契約を適用する。 | 解決済み | evidenceの安全な保存・復元ができない |
 | [workspace-sessions要件](../workspace-sessions/requirements.md) | session専用worktree、branch、archive、cleanup、Git実体検証を提供する。 | Draft間で整合確認予定 | GIT-F-017とsession終了時収集を検証できない |
 | [codex-main-session要件](../codex-main-session/requirements.md) | main turn event、ユーザー指示、Skill入力、Git outcome主体を提供する。 | Draft間で整合確認予定 | actorとtriggerを相関できない |
-| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | Reviewer、Curator、QA、fingerprint、session exclusive lock、stale判定を提供する。 | Draft間で整合確認予定 | GIT-F-013〜GIT-F-016とGIT-F-035〜GIT-F-037を検証できない |
+| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | Reviewer、Curator、QA、canonical worktree別turn lease、安定snapshot、stale判定を提供する。 | Draft間で整合確認予定 | GIT-F-013〜GIT-F-016とGIT-F-035〜GIT-F-037を検証できない |
 | [activity-history要件](../activity-history/requirements.md) | HIST-F-003、HIST-F-008〜HIST-F-012、HIST-F-014〜HIST-F-021、HIST-F-028〜HIST-F-036で構造化recordの保存、redaction、復元、表示、削除を提供する。 | Draft間で整合済み | 再起動後のS-003表示と削除を検証できない |
 | Git executable | session作成時に検証済みのGitでread-only状態とdiffを取得する。 | 解決済み: runtime診断を定義済み | 不在・非対応ならsnapshotをincompleteにする |
 | Codex App Server 0.144.5 | command、turn、support、skill eventの相関元とする。 | 解決済み: CODE要件で固定 | event欠落時はactorと実行結果を推測せずincompleteにする |
