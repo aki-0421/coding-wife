@@ -2,6 +2,8 @@
 title: "デスクトップ共通仕様"
 description: "React + TypeScript + Vite + Tauri v2デスクトップアプリに共通する実行境界、ウィンドウ、ライフサイクル、権限、保存、OS検証の確定仕様。"
 updated: 2026-07-17
+status: "Approved"
+approval_date: 2026-07-17
 read_when:
   - "Tauriウィンドウ、tray、終了、再開、OS差分、ネイティブ連携を設計するとき。"
   - "Codex App Server、TTS、ローカルデータ、Full accessの共通境界を実装または検証するとき。"

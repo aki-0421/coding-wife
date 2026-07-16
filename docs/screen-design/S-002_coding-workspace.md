@@ -6,7 +6,9 @@ read_when:
   - "コーディング画面のlayout、composer、AskUserQuestion、session切替、緊急停止を実装するとき。"
   - "Live2D、音声実況、support role status、offline・再開状態をS-002へ統合するとき。"
 screen_id: "S-002"
-status: "Draft"
+status: "Approved"
+approved_by: "プロダクトオーナー（PO）"
+approval_date: 2026-07-17
 ---
 # S-002 コーディングワークスペース
 
@@ -218,12 +220,12 @@ lease ownerがsupportならmainはqueuedとし、support terminalと安定snapsh
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| なし | 本文の3領域layout、main-only質問、固定companion、常時緊急停止で実装する | 仕様責任者レビューで実装と8要件の双方向IDを確認する | いいえ |
+| なし | 本文の3領域layout、main-only質問、固定companion、常時緊急停止で実装する | 実装時に8要件の双方向IDを機械照合する | いいえ |
 
 ## レビュー確認
 
 - [x] front matterの `screen_id`、タイトル、ファイル名の画面IDが一致している。
-- [x] `status` が `Draft`、`Approved`、`Deprecated` のいずれかである。
+- [x] `status` が `Approved` である。
 - [x] 目的と対象外が一意である。
 - [x] 初期化、通常、空、処理中、オフライン、エラー、権限不足を確認した。
 - [x] キャンセル、閉じる、再表示、未保存データの動作が決まっている。

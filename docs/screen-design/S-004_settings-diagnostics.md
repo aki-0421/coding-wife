@@ -6,7 +6,9 @@ read_when:
   - "言語、appearance、Live2D、TTS、通知、履歴削除の設定画面を実装するとき。"
   - "Codex、Git、SQLite、WebGL、audio、model asset、OS artifactの診断とredactionを検証するとき。"
 screen_id: "S-004"
-status: "Draft"
+status: "Approved"
+approved_by: "プロダクトオーナー（PO）"
+approval_date: 2026-07-17
 ---
 # S-004 設定・診断
 
@@ -298,7 +300,7 @@ analytics SDK、tracking pixel、remote crash upload、usage telemetry、A/B tes
 ## レビュー確認
 
 - [x] front matterの`screen_id`、タイトル、ファイル名の画面IDが一致している。
-- [x] `status`が`Draft`である。
+- [x] `status`が`Approved`である。
 - [x] 目的と対象外が一意である。
 - [x] 初期化、通常、空、処理中、オフライン、エラー、権限不足を定義した。
 - [x] キャンセル、閉じる、再表示、未保存データの動作を定義した。

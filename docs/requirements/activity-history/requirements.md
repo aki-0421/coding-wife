@@ -2,6 +2,7 @@
 title: アクティビティ履歴 要件定義
 description: workspaceとsessionの再開情報、turn、質問、コマンド、Git、test、modelの構造化証跡をlocal SQLiteへ保存・再表示する要件を定義する。
 updated: 2026-07-17
+status: "Approved"
 read_when:
   - アクティビティ履歴の保存、検索、削除を実装するとき
   - S-002またはS-003でsession証跡を表示するとき
@@ -13,10 +14,10 @@ read_when:
 | 項目 | 内容 |
 |---|---|
 | Prefix | `HIST` |
-| 状態 | Draft |
-| 仕様責任者 | プロダクトオーナー |
+| 状態 | Approved |
+| 仕様責任者 | プロダクトオーナー（PO） |
 | 作成日 | 2026-07-16 |
-| 最終レビュー日 | 未レビュー |
+| 最終レビュー日 | 2026-07-17 |
 
 ## 背景
 
@@ -80,57 +81,57 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| HIST-F-001 | app-owned履歴の正本をOS application data内の単一SQLite databaseにする。 | writer接続を開くたび`journal_mode=WAL`、`synchronous=FULL`、`foreign_keys=ON`、`secure_delete=ON`、`busy_timeout=5000`、`wal_autocheckpoint=1000` pagesを設定・読戻し、一致後だけ履歴を利用可能にする。process再起動後もrecord数と非秘密fieldが一致し、network・Web Storageへ複製しない。 | Draft | 非該当 |
-| HIST-F-002 | eventへ一意ID、session内連番、UTC発生時刻を付ける。 | 同一sessionの連番が1から重複・逆転なく増え、同時刻eventも連番順で再表示され、表示時刻だけOS timezoneへ変換される。 | Draft | 非該当 |
-| HIST-F-003 | eventを定義済みtypeとstatusへ正規化してappend-only保存する。 | lifecycle、main turn、support、question、command、snapshot、diff、commit、test、review、skill、model、diagnosticを識別でき、状態変更は旧event更新でなく新event追加になる。 | Draft | 非該当 |
-| HIST-F-004 | main sessionの再開locatorを保存する。 | workspace/session ID、main root thread ID、last turn ID、branch、canonical worktree、lifecycleを1 transactionで保存し、再起動後も同じ組合せを解決できる。 | Draft | 非該当 |
-| HIST-F-005 | supportはassignment summaryだけを保存する。 | assignment ID、role、source、requested/actual model、effort、fallback、status、redacted summary、evidence refs、開始・終了UTCを再表示でき、thread IDとraw contentが0件である。 | Draft | 非該当 |
-| HIST-F-006 | 到達可能な非secret AskUserQuestionの質問・回答を保存する。 | 各問がserver提供の2〜3 optionとclient追加の`Other`だけであるrequestについて、request/question ID、質問文、option、選択labelまたは`Other`本文、resolved理由・UTCをredaction後に保存し、再起動後に解決済みとして1回だけ表示する。 | Draft | 非該当 |
-| HIST-F-007 | secretまたはfree-form-only AskUserQuestionを互換性違反として記録する。 | `isSecret: true`または`options: null|[]`を受信したとき、request/thread/turn/item ID、protocol method、`-32004`、理由enum、検出・解決UTCだけをprotocol error metadataとして保存する。質問文、question ID、option label/description、回答、入力内容、answered flag、値の長さ・hashはSQLite・index・backup・logに0件である。 | Draft | 非該当 |
-| HIST-F-008 | commandの実行証跡を保存する。 | command evidence ID、thread/turn/item ID、actor、分類、executable、argument数・redacted summary、workspace-relative cwd、開始・終了UTC、duration、exit code/signal、terminal status、result summary・output digestを確認でき、stdinとraw stdout/stderrを保存しない。 | Draft | 非該当 |
-| HIST-F-009 | diff参照をコード本文なしで保存する。 | diff evidence/snapshot ID、比較元・先revision、Git state fingerprint、staged/unstaged、relative path、file status・rename、file数・追加削除行数、binary/large diff metadata、生成UTCを確認でき、hunk・patch・file本文が0件である。 | Draft | 非該当 |
-| HIST-F-010 | commit証跡を保存する。 | commit evidence ID、session ID、40桁commit ID、parent ID、redacted subject、前後branch、観測main turn ID・UTCを確認でき、commit本文、author email、署名payloadを保存しない。 | Draft | 非該当 |
-| HIST-F-011 | modelとreasoning effortの実値をownerへ関連付ける。 | main turnまたはsupport assignmentごとにrequested/actual model、actual effort、fallback有無・理由、preset IDを確認できる。 | Draft | 非該当 |
-| HIST-F-012 | testと検証evidenceを保存する。 | test/command evidence ID、framework、対象summary、開始・終了UTC、duration、exit、terminal status、pass/fail/skip数または`counts_unavailable`、未検証範囲を確認でき、test output本文を保存しない。 | Draft | 非該当 |
-| HIST-F-013 | hidden chain-of-thoughtとraw reasoningを永続化しない。 | main/supportのreasoning eventを含むfixtureで、SQLite全column、FTS、backup、永続logにreasoning本文のmarkerが0件である。 | Draft | 非該当 |
-| HIST-F-014 | secretをSQLite transaction前にredactする。 | schemaのsecret field、Authorization/Cookie、key名がpassword/token/secret/api_keyの値、URL userinfo、既知credential fixtureが`<redacted>`またはfield削除になり、元値・hashが全local copyに0件である。 | Draft | 非該当 |
-| HIST-F-015 | コード・file本文を永続化しない。 | patch、diff hunk、file content、heredoc、`-c`/`--eval` payload、stdinを除去したcommand summaryだけが残り、fixture markerがSQLite・index・backupに0件である。 | Draft | 非該当 |
-| HIST-F-016 | 音声dataを永続化しない。 | TTS request/stream/playback後もencoded audio、PCM、buffer、音声fileがSQLite、cache、backupに0件で、text eventだけが残る。 | Draft | 非該当 |
-| HIST-F-017 | pathを所有境界に応じて保存する。 | repository/worktree rootはresume tableだけにcanonical absolute pathで保存し、配下のevent pathはseparatorを`/`にしたrelative path、外部pathは`<outside-workspace-path>`として保存する。 | Draft | 非該当 |
-| HIST-F-018 | 表示用textをbounded redacted summaryに限定する。 | titleは256、summary・質問・回答・command summaryは各4,096 Unicode scalar以下で、超過分を保存せず`truncated: true`を表示し、raw prompt/responseは保存しない。 | Draft | 非該当 |
+| HIST-F-001 | app-owned履歴の正本をOS application data内の単一SQLite databaseにする。 | writer接続を開くたび`journal_mode=WAL`、`synchronous=FULL`、`foreign_keys=ON`、`secure_delete=ON`、`busy_timeout=5000`、`wal_autocheckpoint=1000` pagesを設定・読戻し、一致後だけ履歴を利用可能にする。process再起動後もrecord数と非秘密fieldが一致し、network・Web Storageへ複製しない。 | Approved | 非該当 |
+| HIST-F-002 | eventへ一意ID、session内連番、UTC発生時刻を付ける。 | 同一sessionの連番が1から重複・逆転なく増え、同時刻eventも連番順で再表示され、表示時刻だけOS timezoneへ変換される。 | Approved | 非該当 |
+| HIST-F-003 | eventを定義済みtypeとstatusへ正規化してappend-only保存する。 | lifecycle、main turn、support、question、command、snapshot、diff、commit、test、review、skill、model、diagnosticを識別でき、状態変更は旧event更新でなく新event追加になる。 | Approved | 非該当 |
+| HIST-F-004 | main sessionの再開locatorを保存する。 | workspace/session ID、main root thread ID、last turn ID、branch、canonical worktree、lifecycleを1 transactionで保存し、再起動後も同じ組合せを解決できる。 | Approved | 非該当 |
+| HIST-F-005 | supportはassignment summaryだけを保存する。 | assignment ID、role、source、requested/actual model、effort、fallback、status、redacted summary、evidence refs、開始・終了UTCを再表示でき、thread IDとraw contentが0件である。 | Approved | 非該当 |
+| HIST-F-006 | 到達可能な非secret AskUserQuestionの質問・回答を保存する。 | 各問がserver提供の2〜3 optionとclient追加の`Other`だけであるrequestについて、request/question ID、質問文、option、選択labelまたは`Other`本文、resolved理由・UTCをredaction後に保存し、再起動後に解決済みとして1回だけ表示する。 | Approved | 非該当 |
+| HIST-F-007 | secretまたはfree-form-only AskUserQuestionを互換性違反として記録する。 | `isSecret: true`または`options: null|[]`を受信したとき、request/thread/turn/item ID、protocol method、`-32004`、理由enum、検出・解決UTCだけをprotocol error metadataとして保存する。質問文、question ID、option label/description、回答、入力内容、answered flag、値の長さ・hashはSQLite・index・backup・logに0件である。 | Approved | 非該当 |
+| HIST-F-008 | commandの実行証跡を保存する。 | command evidence ID、thread/turn/item ID、actor、分類、executable、argument数・redacted summary、workspace-relative cwd、開始・終了UTC、duration、exit code/signal、terminal status、result summary・output digestを確認でき、stdinとraw stdout/stderrを保存しない。 | Approved | 非該当 |
+| HIST-F-009 | diff参照をコード本文なしで保存する。 | diff evidence/snapshot ID、比較元・先revision、Git state fingerprint、staged/unstaged、relative path、file status・rename、file数・追加削除行数、binary/large diff metadata、生成UTCを確認でき、hunk・patch・file本文が0件である。 | Approved | 非該当 |
+| HIST-F-010 | commit証跡を保存する。 | commit evidence ID、session ID、40桁commit ID、parent ID、redacted subject、前後branch、観測main turn ID・UTCを確認でき、commit本文、author email、署名payloadを保存しない。 | Approved | 非該当 |
+| HIST-F-011 | modelとreasoning effortの実値をownerへ関連付ける。 | main turnまたはsupport assignmentごとにrequested/actual model、actual effort、fallback有無・理由、preset IDを確認できる。 | Approved | 非該当 |
+| HIST-F-012 | testと検証evidenceを保存する。 | test/command evidence ID、framework、対象summary、開始・終了UTC、duration、exit、terminal status、pass/fail/skip数または`counts_unavailable`、未検証範囲を確認でき、test output本文を保存しない。 | Approved | 非該当 |
+| HIST-F-013 | hidden chain-of-thoughtとraw reasoningを永続化しない。 | main/supportのreasoning eventを含むfixtureで、SQLite全column、FTS、backup、永続logにreasoning本文のmarkerが0件である。 | Approved | 非該当 |
+| HIST-F-014 | secretをSQLite transaction前にredactする。 | schemaのsecret field、Authorization/Cookie、key名がpassword/token/secret/api_keyの値、URL userinfo、既知credential fixtureが`<redacted>`またはfield削除になり、元値・hashが全local copyに0件である。 | Approved | 非該当 |
+| HIST-F-015 | コード・file本文を永続化しない。 | patch、diff hunk、file content、heredoc、`-c`/`--eval` payload、stdinを除去したcommand summaryだけが残り、fixture markerがSQLite・index・backupに0件である。 | Approved | 非該当 |
+| HIST-F-016 | 音声dataを永続化しない。 | TTS request/stream/playback後もencoded audio、PCM、buffer、音声fileがSQLite、cache、backupに0件で、text eventだけが残る。 | Approved | 非該当 |
+| HIST-F-017 | pathを所有境界に応じて保存する。 | repository/worktree rootはresume tableだけにcanonical absolute pathで保存し、配下のevent pathはseparatorを`/`にしたrelative path、外部pathは`<outside-workspace-path>`として保存する。 | Approved | 非該当 |
+| HIST-F-018 | 表示用textをbounded redacted summaryに限定する。 | titleは256、summary・質問・回答・command summaryは各4,096 Unicode scalar以下で、超過分を保存せず`truncated: true`を表示し、raw prompt/responseは保存しない。 | Approved | 非該当 |
 
 ### 再起動、crash、migration
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| HIST-F-019 | 起動時に保存済み履歴をrehydrateする。 | workspace/session一覧、選択session、main resume、最新100 event、filter条件をSQLiteから復元し、support threadをresumeしない。 | Draft | 非該当 |
-| HIST-F-020 | terminal記録のない実行を自動再実行しない。 | clean-shutdown markerがない起動ではWAL recovery後の`quick_check`が`ok`の場合だけ、`running`/`waiting_for_user`のturn・command・assignmentを`予期しない中断`または`結果不明`eventで閉じる。prompt、command、Git、testを自動送信しない。 | Draft | 非該当 |
-| HIST-F-021 | 1 eventと対応evidenceをatomic transactionで書く。 | single writerが各eventを`BEGIN IMMEDIATE`で開始し、event、typed evidence、参照、session last sequenceを全件commitまたは全件rollbackする。途中fault後の孤立参照、半端なevent、同じidempotency keyの重複は0件である。 | Draft | 非該当 |
-| HIST-F-022 | 履歴write失敗を成功扱いにしない。 | I/O、disk full、または5,000 msのbusy待機後のlock失敗は同じidempotency keyで1回だけretryし、再失敗時に`HIST_WRITE_FAILED`と手動retryを表示する。成功済みtransactionだけを再表示し、重複eventを作らない。 | Draft | 非該当 |
-| HIST-F-023 | schema versionを検査してforward migrationする。 | 同版は変更せず、旧版はmigration前にSQLite backup APIで整合性確認済み1世代backupを作り、全stepを1 transactionで実行する。新版databaseは`HIST_SCHEMA_NEWER`で無変更停止する。 | Draft | 非該当 |
-| HIST-F-024 | migration、WAL recovery、integrity check失敗時に元databaseを保護する。 | 起動時の`quick_check`またはmigration検査が`ok`以外ならwriterを閉じ、DB・WAL・SHM・backupを上書き、削除、置換せず、sidecar/sessionを開始しない。S-004にpathを伏せた`HIST_DB_INTEGRITY_FAILED`、backup有無、再試行、明示的新規database開始を表示する。 | Draft | 非該当 |
-| HIST-F-025 | migration backupを限定期間だけ保持する。 | 成功したmigration後の次回正常起動でintegrity checkが成功するまで1世代を保持し、成功後に削除する。primary履歴はHIST-F-036の保持契約に従う。 | Draft | 非該当 |
-| HIST-F-026 | SQLite writerを1 process・1 FIFO queueへ限定する。 | 二重起動、main/support同時event、削除、migrationでwriter connectionが最大1つ、全writeが`BEGIN IMMEDIATE`で直列となり、2個目のprocessはDB connectionを開かない。graceful Quitは受付済みqueueをdrainし、`wal_checkpoint(TRUNCATE)`の`busy=0`とWALのtruncated状態を確認してからDB外のapp-owned clean-shutdown markerをatomic replaceし、失敗時は正常終了済みと記録しない。 | Draft | 非該当 |
+| HIST-F-019 | 起動時に保存済み履歴をrehydrateする。 | workspace/session一覧、選択session、main resume、最新100 event、filter条件をSQLiteから復元し、support threadをresumeしない。 | Approved | 非該当 |
+| HIST-F-020 | terminal記録のない実行を自動再実行しない。 | clean-shutdown markerがない起動ではWAL recovery後の`quick_check`が`ok`の場合だけ、`running`/`waiting_for_user`のturn・command・assignmentを`予期しない中断`または`結果不明`eventで閉じる。prompt、command、Git、testを自動送信しない。 | Approved | 非該当 |
+| HIST-F-021 | 1 eventと対応evidenceをatomic transactionで書く。 | single writerが各eventを`BEGIN IMMEDIATE`で開始し、event、typed evidence、参照、session last sequenceを全件commitまたは全件rollbackする。途中fault後の孤立参照、半端なevent、同じidempotency keyの重複は0件である。 | Approved | 非該当 |
+| HIST-F-022 | 履歴write失敗を成功扱いにしない。 | I/O、disk full、または5,000 msのbusy待機後のlock失敗は同じidempotency keyで1回だけretryし、再失敗時に`HIST_WRITE_FAILED`と手動retryを表示する。成功済みtransactionだけを再表示し、重複eventを作らない。 | Approved | 非該当 |
+| HIST-F-023 | schema versionを検査してforward migrationする。 | 同版は変更せず、旧版はmigration前にSQLite backup APIで整合性確認済み1世代backupを作り、全stepを1 transactionで実行する。新版databaseは`HIST_SCHEMA_NEWER`で無変更停止する。 | Approved | 非該当 |
+| HIST-F-024 | migration、WAL recovery、integrity check失敗時に元databaseを保護する。 | 起動時の`quick_check`またはmigration検査が`ok`以外ならwriterを閉じ、DB・WAL・SHM・backupを上書き、削除、置換せず、sidecar/sessionを開始しない。S-004にpathを伏せた`HIST_DB_INTEGRITY_FAILED`、backup有無、再試行、明示的新規database開始を表示する。 | Approved | 非該当 |
+| HIST-F-025 | migration backupを限定期間だけ保持する。 | 成功したmigration後の次回正常起動でintegrity checkが成功するまで1世代を保持し、成功後に削除する。primary履歴はHIST-F-036の保持契約に従う。 | Approved | 非該当 |
+| HIST-F-026 | SQLite writerを1 process・1 FIFO queueへ限定する。 | 二重起動、main/support同時event、削除、migrationでwriter connectionが最大1つ、全writeが`BEGIN IMMEDIATE`で直列となり、2個目のprocessはDB connectionを開かない。graceful Quitは受付済みqueueをdrainし、`wal_checkpoint(TRUNCATE)`の`busy=0`とWALのtruncated状態を確認してからDB外のapp-owned clean-shutdown markerをatomic replaceし、失敗時は正常終了済みと記録しない。 | Approved | 非該当 |
 
 ### 閲覧、filter、search
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| HIST-F-027 | workspaceとsessionの履歴一覧を表示する。 | workspaceは表示名・session数・最終活動UTC、sessionは名前・lifecycle・branch・event数・最終eventを表示し、0件では新規sessionへのempty stateを表示する。 | Draft | 非該当 |
-| HIST-F-028 | session timelineを100件単位で遅延読込する。 | S-002は最新100件、S-003は最新100件と`以前を読み込む`を表示し、追加pageに重複・欠落がなく、全件を一括DOM展開しない。 | Draft | 非該当 |
-| HIST-F-029 | timelineを複数条件でfilterできる。 | local date範囲、event type、status、actor/role、model、test resultをAND結合し、解除で同じsessionの全eventへ戻る。開始日が終了日より後ならqueryしない。 | Draft | 非該当 |
-| HIST-F-030 | redacted textを部分一致searchできる。 | 1〜200文字のqueryをNFC正規化し、title、summary、command summary、commit ID/subject、test framework・対象summaryを日本語・英語で検索する。secret除外fieldをindexせず、0件時はno-resultを表示する。 | Draft | 非該当 |
-| HIST-F-031 | evidence詳細と欠落状態を表示する。 | eventからsnapshot、command、diff、commit、test、review、model、support evidenceへ移動でき、参照先が外部削除・不整合なら推測せず`HIST_EVIDENCE_MISSING`、ID、再診断を表示する。 | Draft | 非該当 |
+| HIST-F-027 | workspaceとsessionの履歴一覧を表示する。 | workspaceは表示名・session数・最終活動UTC、sessionは名前・lifecycle・branch・event数・最終eventを表示し、0件では新規sessionへのempty stateを表示する。 | Approved | 非該当 |
+| HIST-F-028 | session timelineを100件単位で遅延読込する。 | S-002は最新100件、S-003は最新100件と`以前を読み込む`を表示し、追加pageに重複・欠落がなく、全件を一括DOM展開しない。 | Approved | 非該当 |
+| HIST-F-029 | timelineを複数条件でfilterできる。 | local date範囲、event type、status、actor/role、model、test resultをAND結合し、解除で同じsessionの全eventへ戻る。開始日が終了日より後ならqueryしない。 | Approved | 非該当 |
+| HIST-F-030 | redacted textを部分一致searchできる。 | 1〜200文字のqueryをNFC正規化し、title、summary、command summary、commit ID/subject、test framework・対象summaryを日本語・英語で検索する。secret除外fieldをindexせず、0件時はno-resultを表示する。 | Approved | 非該当 |
+| HIST-F-031 | evidence詳細と欠落状態を表示する。 | eventからsnapshot、command、diff、commit、test、review、model、support evidenceへ移動でき、参照先が外部削除・不整合なら推測せず`HIST_EVIDENCE_MISSING`、ID、再診断を表示する。 | Approved | 非該当 |
 
 ### 削除とretention
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| HIST-F-032 | 終了済みsessionをapp履歴から明示削除できる。 | `running`/`waiting_for_user`を0件と確認し、削除対象数、resume不能、Git非削除を確認後にsession、main resume、turn、support summary、event、evidenceを削除する。cancelでは0件変更する。 | Draft | 非該当 |
-| HIST-F-033 | workspace単位で全app履歴を明示削除できる。 | 配下sessionが全てHIST-F-032の終了条件を満たす場合だけ件数と影響を確認し、workspace rootを含む全recordを削除する。1件でも実行中なら全体を無変更で拒否する。 | Draft | 非該当 |
-| HIST-F-034 | 削除時にapp-owned派生dataも論理消去する。 | `secure_delete=ON`のprimary/FTS行削除をcommit後、WAL checkpoint/truncate、関連index・cache・集計・app-owned evidence file・対象backup削除、必要時VACUUMをbest effortで行う。app UI/query/再起動から対象IDと本文を復元できないことを検証し、一部失敗を完了表示しない。 | Draft | 非該当 |
-| HIST-F-035 | 履歴削除でrepositoryとCodex外部dataを変更しない。 | local branch、commit、worktree、source file、Codex CLI所有rolloutにdelete/reset/cleanを発行せず、削除確認に非対象を表示する。 | Draft | 非該当 |
-| HIST-F-036 | primary履歴を明示削除まで無期限保持する。 | age、件数、容量、archive、app updateを理由にeventを自動削除・要約置換せず、保存上限とTTL設定を設けない。disk full時はHIST-F-022を適用する。 | Draft | 非該当 |
+| HIST-F-032 | 終了済みsessionをapp履歴から明示削除できる。 | `running`/`waiting_for_user`を0件と確認し、削除対象数、resume不能、Git非削除を確認後にsession、main resume、turn、support summary、event、evidenceを削除する。cancelでは0件変更する。 | Approved | 非該当 |
+| HIST-F-033 | workspace単位で全app履歴を明示削除できる。 | 配下sessionが全てHIST-F-032の終了条件を満たす場合だけ件数と影響を確認し、workspace rootを含む全recordを削除する。1件でも実行中なら全体を無変更で拒否する。 | Approved | 非該当 |
+| HIST-F-034 | 削除時にapp-owned派生dataも論理消去する。 | `secure_delete=ON`のprimary/FTS行削除をcommit後、WAL checkpoint/truncate、関連index・cache・集計・app-owned evidence file・対象backup削除、必要時VACUUMをbest effortで行う。app UI/query/再起動から対象IDと本文を復元できないことを検証し、一部失敗を完了表示しない。 | Approved | 非該当 |
+| HIST-F-035 | 履歴削除でrepositoryとCodex外部dataを変更しない。 | local branch、commit、worktree、source file、Codex CLI所有rolloutにdelete/reset/cleanを発行せず、削除確認に非対象を表示する。 | Approved | 非該当 |
+| HIST-F-036 | primary履歴を明示削除まで無期限保持する。 | age、件数、容量、archive、app updateを理由にeventを自動削除・要約置換せず、保存上限とTTL設定を設けない。disk full時はHIST-F-022を適用する。 | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -217,10 +218,10 @@ writer接続はHIST-F-001の6設定を毎回読戻し、1つでも不一致な�
 | 依存・前提 | 内容 | 状態 | 未解決時の影響 |
 |---|---|---|---|
 | [デスクトップ共通仕様](../../screen-design/desktop-common-specification.md) | single instance、Quit、SQLite、秘密、通知、3OS契約 | 解決済み | 保存・復旧境界を保証できない |
-| [workspace-sessions要件](../workspace-sessions/requirements.md) | workspace/session/worktree mappingとlifecycle eventを提供する | Draft | resumeと一覧を構成できない |
-| [codex-main-session要件](../codex-main-session/requirements.md) | main thread/turn、到達可能AskUserQuestion、互換性違反分類を提供する | Draft | HIST-F-004、HIST-F-006、HIST-F-007を検証できない |
-| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | ephemeral assignment summaryとmodel evidenceを提供する | Draft | HIST-F-005、HIST-F-011を検証できない |
-| [git-review-harness要件](../git-review-harness/requirements.md) | snapshot、command、diff、commit、test、review evidenceとproducer fieldを提供する | Draft間で整合済み | GIT-F-004〜GIT-F-042が欠けるとHIST-F-003、HIST-F-008〜HIST-F-012、HIST-F-031を検証できない |
+| [workspace-sessions要件](../workspace-sessions/requirements.md) | workspace/session/worktree mappingとlifecycle eventを提供する | Approved | resumeと一覧を構成できない |
+| [codex-main-session要件](../codex-main-session/requirements.md) | main thread/turn、到達可能AskUserQuestion、互換性違反分類を提供する | Approved | HIST-F-004、HIST-F-006、HIST-F-007を検証できない |
+| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | ephemeral assignment summaryとmodel evidenceを提供する | Approved | HIST-F-005、HIST-F-011を検証できない |
+| [git-review-harness要件](../git-review-harness/requirements.md) | snapshot、command、diff、commit、test、review evidenceとproducer fieldを提供する | Approved | GIT-F-004〜GIT-F-042が欠けるとHIST-F-003、HIST-F-008〜HIST-F-012、HIST-F-031を検証できない |
 | SQLite | bundle済みlibraryでtransaction、WAL、backup API、integrity checkを利用できる | runtime/build検証 | 利用不能時はappを起動しない |
 
 ## 未確定事項
@@ -256,9 +257,9 @@ writer接続はHIST-F-001の6設定を毎回読戻し、1つでも不一致な�
 | 項目 | 内容 |
 |---|---|
 | レビュー結果 | Not Ready |
-| 仕様責任者 | プロダクトオーナー |
-| 合意日 | 未合意 |
-| 残る非ブロック論点 | 仕様責任者合意 |
+| 仕様責任者 | プロダクトオーナー（PO） |
+| 合意日 | 2026-07-17 |
+| 残る非ブロック論点 | なし |
 
 ## 着手可チェック
 
@@ -271,4 +272,4 @@ writer接続はHIST-F-001の6設定を毎回読戻し、1つでも不一致な�
 - [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
-- [ ] 仕様責任者がレビューし、合意した。
+- [x] 仕様責任者がレビューし、合意した。

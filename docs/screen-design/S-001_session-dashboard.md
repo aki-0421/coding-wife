@@ -1,12 +1,14 @@
 ---
 title: "S-001 セッションダッシュボード"
 description: "GitHub originを持つローカルrepositoryから分離sessionを作成・復元し、状態を確認してコーディング画面へ進む画面仕様。"
-updated: 2026-07-16
+updated: 2026-07-17
 read_when:
   - "repository選択、session作成、復元、archive、並行稼働warningの画面挙動を実装するとき。"
   - "S-001の状態、入力検証、S-002への遷移、関連要件IDを検証するとき。"
 screen_id: "S-001"
-status: "Draft"
+status: "Approved"
+approved_by: "プロダクトオーナー（PO）"
+approval_date: 2026-07-17
 ---
 # S-001 セッションダッシュボード
 
@@ -250,7 +252,7 @@ product analytics、tracking SDK、remote telemetry、A/B test eventは送信し
 ## レビュー確認
 
 - [x] front matterの`screen_id`、タイトル、ファイル名の画面IDが一致している。
-- [x] `status`が`Draft`である。
+- [x] `status`が`Approved`である。
 - [x] 目的と対象外が一意である。
 - [x] 初期化、通常、空、処理中、オフライン、エラー、権限不足を定義した。
 - [x] キャンセル、閉じる、再表示、未保存データの動作を定義した。

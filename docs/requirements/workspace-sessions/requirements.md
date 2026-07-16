@@ -6,7 +6,7 @@ last_verified: 2026-07-17
 read_when:
   - "repository選択、workspace登録、session作成、Git worktree分離を実装するとき。"
   - "sessionの再開、archive、cleanup、Git異常状態からの復旧を検証するとき。"
-status: "Draft"
+status: "Approved"
 prefix: "WORK"
 ---
 
@@ -15,10 +15,10 @@ prefix: "WORK"
 | 項目 | 内容 |
 |---|---|
 | Prefix | `WORK` |
-| 状態 | Draft |
-| 仕様責任者 | プロダクトオーナー |
+| 状態 | Approved |
+| 仕様責任者 | プロダクトオーナー（PO） |
 | 作成日 | 2026-07-16 |
-| 最終レビュー日 | 未レビュー |
+| 最終レビュー日 | 2026-07-17 |
 
 ## 背景
 
@@ -85,74 +85,74 @@ prefix: "WORK"
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| WORK-F-001 | sessionが0件のworkspaceで、ユーザーがrepository選択を開始できる。 | sessionが0件の状態でrepository選択操作が表示され、実行するとOS directory pickerが開く。 | Draft | 非該当 |
-| WORK-F-002 | ユーザーはOS directory pickerからdirectoryを1件選択できる。 | fileと複数directoryは選択できず、選択したdirectoryだけがRust側の診断対象になる。 | Draft | 非該当 |
-| WORK-F-003 | repository選択をキャンセルすると操作前状態を維持する。 | pickerを閉じた場合、workspace、session、branch、worktreeを作成せず、エラーを表示しない。 | Draft | 非該当 |
-| WORK-F-004 | 選択directoryをcanonical Git rootへ解決し、bareではなく読み書き可能なlocal working treeか検証する。 | 条件を満たす場合だけ次の診断へ進み、満たさない場合は`WORK_REPOSITORY_INVALID`を表示して選択値を保存しない。 | Draft | 非該当 |
-| WORK-F-005 | dirtyな元checkoutからのsession作成を拒否する。 | staged、unstaged、untrackedのいずれかが1件以上なら件数と`WORK_SOURCE_DIRTY`を表示し、fetch、branch作成、worktree作成を実行しない。 | Draft | 非該当 |
-| WORK-F-006 | detached HEADの元checkoutからのsession作成を拒否する。 | symbolic branchを解決できない場合は`WORK_SOURCE_DETACHED`を表示し、元checkoutのHEADを変更しない。 | Draft | 非該当 |
-| WORK-F-007 | Git履歴操作が進行中の元checkoutからのsession作成を拒否する。 | merge、rebase、cherry-pick、revert、bisectの検出結果を列挙して`WORK_SOURCE_OPERATION_IN_PROGRESS`を表示し、Git履歴を変更しない。 | Draft | 非該当 |
-| WORK-F-008 | submodule宣言またはsparse checkoutを検出したrepositoryからのsession作成を拒否する。 | どちらかを検出した場合は該当状態と`WORK_REPOSITORY_LAYOUT_UNSUPPORTED`を表示し、fetchを開始しない。 | Draft | 非該当 |
-| WORK-F-009 | `origin`のfetch URLが許可したGitHub HTTPS/SSH形式か検証する。 | `https://github.com/<owner>/<repo>[.git]`、`git@github.com:<owner>/<repo>[.git]`、`ssh://git@github.com/<owner>/<repo>[.git]`を各1件だけ受理し、HTTPS userinfo、query、fragment、別host・remoteを拒否する。 | Draft | 非該当 |
-| WORK-F-010 | 診断合格repositoryで`origin`をfetchする。 | 1秒以内に進行中・cancelを表示し、成功結果を記録する。credential helper/SSH agentで認証できなければ秘密値なしで`WORK_ORIGIN_AUTH_FAILED`を表示する。 | Draft | 非該当 |
-| WORK-F-011 | fetchの失敗時にsessionを作成しない。 | network、認証、remote不在、Git process失敗のいずれでもsession、local branch、専用worktreeが0件のままになり、ユーザー操作による再試行を表示する。 | Draft | 非該当 |
-| WORK-F-012 | fetch後に`origin`が広告するdefault branchと対応remote-tracking headを解決する。 | default branch名と`refs/remotes/origin/<branch>`のcommitを一意に解決し、そのcommit SHAを新規sessionのbase evidenceとして保存する。 | Draft | 非該当 |
-| WORK-F-013 | `origin`のdefault branchを解決できない場合に推測せず停止する。 | remote HEAD不在、対応remote-tracking ref不在、複数解釈のいずれかでは`main`または`master`を補完せず、`WORK_DEFAULT_BRANCH_UNKNOWN`を表示してbranchを作成しない。 | Draft | 非該当 |
+| WORK-F-001 | sessionが0件のworkspaceで、ユーザーがrepository選択を開始できる。 | sessionが0件の状態でrepository選択操作が表示され、実行するとOS directory pickerが開く。 | Approved | 非該当 |
+| WORK-F-002 | ユーザーはOS directory pickerからdirectoryを1件選択できる。 | fileと複数directoryは選択できず、選択したdirectoryだけがRust側の診断対象になる。 | Approved | 非該当 |
+| WORK-F-003 | repository選択をキャンセルすると操作前状態を維持する。 | pickerを閉じた場合、workspace、session、branch、worktreeを作成せず、エラーを表示しない。 | Approved | 非該当 |
+| WORK-F-004 | 選択directoryをcanonical Git rootへ解決し、bareではなく読み書き可能なlocal working treeか検証する。 | 条件を満たす場合だけ次の診断へ進み、満たさない場合は`WORK_REPOSITORY_INVALID`を表示して選択値を保存しない。 | Approved | 非該当 |
+| WORK-F-005 | dirtyな元checkoutからのsession作成を拒否する。 | staged、unstaged、untrackedのいずれかが1件以上なら件数と`WORK_SOURCE_DIRTY`を表示し、fetch、branch作成、worktree作成を実行しない。 | Approved | 非該当 |
+| WORK-F-006 | detached HEADの元checkoutからのsession作成を拒否する。 | symbolic branchを解決できない場合は`WORK_SOURCE_DETACHED`を表示し、元checkoutのHEADを変更しない。 | Approved | 非該当 |
+| WORK-F-007 | Git履歴操作が進行中の元checkoutからのsession作成を拒否する。 | merge、rebase、cherry-pick、revert、bisectの検出結果を列挙して`WORK_SOURCE_OPERATION_IN_PROGRESS`を表示し、Git履歴を変更しない。 | Approved | 非該当 |
+| WORK-F-008 | submodule宣言またはsparse checkoutを検出したrepositoryからのsession作成を拒否する。 | どちらかを検出した場合は該当状態と`WORK_REPOSITORY_LAYOUT_UNSUPPORTED`を表示し、fetchを開始しない。 | Approved | 非該当 |
+| WORK-F-009 | `origin`のfetch URLが許可したGitHub HTTPS/SSH形式か検証する。 | `https://github.com/<owner>/<repo>[.git]`、`git@github.com:<owner>/<repo>[.git]`、`ssh://git@github.com/<owner>/<repo>[.git]`を各1件だけ受理し、HTTPS userinfo、query、fragment、別host・remoteを拒否する。 | Approved | 非該当 |
+| WORK-F-010 | 診断合格repositoryで`origin`をfetchする。 | 1秒以内に進行中・cancelを表示し、成功結果を記録する。credential helper/SSH agentで認証できなければ秘密値なしで`WORK_ORIGIN_AUTH_FAILED`を表示する。 | Approved | 非該当 |
+| WORK-F-011 | fetchの失敗時にsessionを作成しない。 | network、認証、remote不在、Git process失敗のいずれでもsession、local branch、専用worktreeが0件のままになり、ユーザー操作による再試行を表示する。 | Approved | 非該当 |
+| WORK-F-012 | fetch後に`origin`が広告するdefault branchと対応remote-tracking headを解決する。 | default branch名と`refs/remotes/origin/<branch>`のcommitを一意に解決し、そのcommit SHAを新規sessionのbase evidenceとして保存する。 | Approved | 非該当 |
+| WORK-F-013 | `origin`のdefault branchを解決できない場合に推測せず停止する。 | remote HEAD不在、対応remote-tracking ref不在、複数解釈のいずれかでは`main`または`master`を補完せず、`WORK_DEFAULT_BRANCH_UNKNOWN`を表示してbranchを作成しない。 | Approved | 非該当 |
 
 ### branchと専用worktreeの作成
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| WORK-F-014 | session用local branch名を衝突なく生成する。 | `sol/session-<32文字の小文字16進UUID>`を生成し、local・`origin` tracking・worktree branchとの衝突時は最大5回再生成する。全失敗時は`WORK_BRANCH_COLLISION`で停止する。 | Draft | 非該当 |
-| WORK-F-015 | session用worktree pathをapplication data内へ一意に生成する。 | `<appDataDir>/worktrees/<repository UUID>/<session UUID>`がcanonical root内かつfilesystem・worktree一覧に未登録なら使う。最大5回の再生成後も衝突すれば`WORK_WORKTREE_COLLISION`で停止する。 | Draft | 非該当 |
-| WORK-F-016 | アプリが発行する同一repositoryのworkspace Git操作を直列化する。 | Rust側が発行するfetch、worktree add、repair、removeだけをrepositoryごとのFIFO queueで同時に1件とし、待機中は変更前にcancelできる。このqueueがagentまたは外部processのGit操作を防ぐとは扱わない。 | Draft | 非該当 |
-| WORK-F-017 | 解決済みbase commitから新しいlocal branchと専用linked worktreeを作る。 | 作成後の専用worktreeが生成branchをcheckoutし、HEADがWORK-F-012で保存したcommitと一致し、アプリはbranchへupstreamを設定しない。 | Draft | 非該当 |
-| WORK-F-018 | session作成で元checkoutのcheckout状態を変更しない。 | 作成前後の元checkoutについてsymbolic branch、HEAD commit、index、staged・unstaged・untracked一覧が一致する。`origin`のremote-tracking refsと`FETCH_HEAD`の更新は差分判定から除く。 | Draft | 非該当 |
-| WORK-F-019 | 作成したworktreeを検証してからsessionを利用可能にする。 | directoryの存在、Git common directory、生成branch、base HEAD、clean状態、読み書き可をすべて確認した後だけsessionを`available`にし、1項目でも不一致ならturn開始操作を表示しない。 | Draft | 非該当 |
-| WORK-F-020 | sessionの復元情報をSQLiteへ保存する。 | workspace/repository/session ID、sanitized origin、default branch、base commit、local branch、worktree、main thread ID、support assignment証跡、lifecycleを1 transactionで保存し、support thread IDは保存しない。 | Draft | 非該当 |
-| WORK-F-021 | 作成途中の失敗でアプリが作ったartifactだけを安全に回収する。 | app-owned worktreeがcleanかつbase commitのままならforceなしでremoveし、app-owned branchに追加commitがなければ削除する。安全条件を満たさないartifactは削除せず`repair_required` recordとして表示する。 | Draft | 非該当 |
-| WORK-F-022 | session作成中のキャンセル要求を外部Git操作の終了後に整合させる。 | ユーザーがキャンセルすると進行中Git processへ終了要求を送り、process終了後にWORK-F-021を実行し、`available` sessionを作らない。回収できない場合は回復対象を表示する。 | Draft | 非該当 |
+| WORK-F-014 | session用local branch名を衝突なく生成する。 | `sol/session-<32文字の小文字16進UUID>`を生成し、local・`origin` tracking・worktree branchとの衝突時は最大5回再生成する。全失敗時は`WORK_BRANCH_COLLISION`で停止する。 | Approved | 非該当 |
+| WORK-F-015 | session用worktree pathをapplication data内へ一意に生成する。 | `<appDataDir>/worktrees/<repository UUID>/<session UUID>`がcanonical root内かつfilesystem・worktree一覧に未登録なら使う。最大5回の再生成後も衝突すれば`WORK_WORKTREE_COLLISION`で停止する。 | Approved | 非該当 |
+| WORK-F-016 | アプリが発行する同一repositoryのworkspace Git操作を直列化する。 | Rust側が発行するfetch、worktree add、repair、removeだけをrepositoryごとのFIFO queueで同時に1件とし、待機中は変更前にcancelできる。このqueueがagentまたは外部processのGit操作を防ぐとは扱わない。 | Approved | 非該当 |
+| WORK-F-017 | 解決済みbase commitから新しいlocal branchと専用linked worktreeを作る。 | 作成後の専用worktreeが生成branchをcheckoutし、HEADがWORK-F-012で保存したcommitと一致し、アプリはbranchへupstreamを設定しない。 | Approved | 非該当 |
+| WORK-F-018 | session作成で元checkoutのcheckout状態を変更しない。 | 作成前後の元checkoutについてsymbolic branch、HEAD commit、index、staged・unstaged・untracked一覧が一致する。`origin`のremote-tracking refsと`FETCH_HEAD`の更新は差分判定から除く。 | Approved | 非該当 |
+| WORK-F-019 | 作成したworktreeを検証してからsessionを利用可能にする。 | directoryの存在、Git common directory、生成branch、base HEAD、clean状態、読み書き可をすべて確認した後だけsessionを`available`にし、1項目でも不一致ならturn開始操作を表示しない。 | Approved | 非該当 |
+| WORK-F-020 | sessionの復元情報をSQLiteへ保存する。 | workspace/repository/session ID、sanitized origin、default branch、base commit、local branch、worktree、main thread ID、support assignment証跡、lifecycleを1 transactionで保存し、support thread IDは保存しない。 | Approved | 非該当 |
+| WORK-F-021 | 作成途中の失敗でアプリが作ったartifactだけを安全に回収する。 | app-owned worktreeがcleanかつbase commitのままならforceなしでremoveし、app-owned branchに追加commitがなければ削除する。安全条件を満たさないartifactは削除せず`repair_required` recordとして表示する。 | Approved | 非該当 |
+| WORK-F-022 | session作成中のキャンセル要求を外部Git操作の終了後に整合させる。 | ユーザーがキャンセルすると進行中Git processへ終了要求を送り、process終了後にWORK-F-021を実行し、`available` sessionを作らない。回収できない場合は回復対象を表示する。 | Approved | 非該当 |
 
 ### 複数sessionとagentのworktree共有
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| WORK-F-023 | 同一repositoryから複数のmain sessionを作成できる。 | 同じworkspaceで2件以上を作成したとき、各sessionのsession ID、local branch、worktree pathが相互に異なり、各baseは作成直前のfetch後default headである。 | Draft | 非該当 |
-| WORK-F-024 | 1つのsessionのmainと7つのsupport roleへ同じcanonical worktreeとexclusive turn leaseを割り当てる。 | mainと7 root threadは同じworktreeを使い、全`turn/start`がRust管理のpath別lease取得後だけ送信される。同一pathのactive turnは1件、別pathは並行可とする。AskUserQuestion待機中もterminalまで保持し、Quit・timeout・crash時はterminalまたはprocess tree消滅と安定post snapshotを確認して解放する。再起動時はowner不在と安定snapshotを確認したstale leaseだけを回収する。 | Draft | 非該当 |
-| WORK-F-025 | 保存session数と同時稼働session数へhard capを設けない。 | 任意の正整数件のsession recordを保存でき、利用可能resourceがある限り4件目以降の作成・開始を件数だけを理由に拒否しない。 | Draft | 非該当 |
-| WORK-F-026 | 4件目以降の同時稼働sessionを開始する前にresource warningを出す。 | 開始後の同時稼働数が4以上になる操作では現在数、CPU・memory・model利用増加の可能性、`続行`、`キャンセル`を表示し、続行時は開始し、キャンセル時はsessionとturn状態を変更しない。 | Draft | 非該当 |
+| WORK-F-023 | 同一repositoryから複数のmain sessionを作成できる。 | 同じworkspaceで2件以上を作成したとき、各sessionのsession ID、local branch、worktree pathが相互に異なり、各baseは作成直前のfetch後default headである。 | Approved | 非該当 |
+| WORK-F-024 | 1つのsessionのmainと7つのsupport roleへ同じcanonical worktreeとexclusive turn leaseを割り当てる。 | mainと7 root threadは同じworktreeを使い、全`turn/start`がRust管理のpath別lease取得後だけ送信される。同一pathのactive turnは1件、別pathは並行可とする。AskUserQuestion待機中もterminalまで保持し、Quit・timeout・crash時はterminalまたはprocess tree消滅と安定post snapshotを確認して解放する。再起動時はowner不在と安定snapshotを確認したstale leaseだけを回収する。 | Approved | 非該当 |
+| WORK-F-025 | 保存session数と同時稼働session数へhard capを設けない。 | 任意の正整数件のsession recordを保存でき、利用可能resourceがある限り4件目以降の作成・開始を件数だけを理由に拒否しない。 | Approved | 非該当 |
+| WORK-F-026 | 4件目以降の同時稼働sessionを開始する前にresource warningを出す。 | 開始後の同時稼働数が4以上になる操作では現在数、CPU・memory・model利用増加の可能性、`続行`、`キャンセル`を表示し、続行時は開始し、キャンセル時はsessionとturn状態を変更しない。 | Approved | 非該当 |
 
 ### 再起動、再開、外部変更
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| WORK-F-027 | アプリ再起動時に保存済みworkspaceとsessionの対応を復元する。 | 正常終了またはクラッシュ後の起動で、session一覧、選択session、lifecycle state、main thread ID、branch、worktreeをSQLiteから復元し、Git実体の再検証結果を併記する。 | Draft | 非該当 |
-| WORK-F-028 | 終了またはクラッシュで中断したturnを自動再実行しない。 | 完了記録のないturnを`アプリ終了により中断`または`予期しない中断`と表示し、起動後にprompt送信、thread resume、Git変更を自動実行しない。 | Draft | 非該当 |
-| WORK-F-029 | ユーザーは保存済みsessionを同じmain thread、local branch、専用worktreeで明示再開できる。 | `再開`実行後の新しいmain turnが保存済みmain thread IDとcanonical worktreeを使用し、別branchまたは新規worktreeを作らない。 | Draft | 非該当 |
-| WORK-F-030 | dirtyなsession worktreeを変更を保ったまま再開できる。 | staged、unstaged、untrackedの件数とdirty表示を出し、stash、reset、clean、commitを実行せず、ユーザーの`再開`後に同じworktreeで新しいturnを始める。 | Draft | 非該当 |
-| WORK-F-031 | detached HEADまたはGit履歴操作中のsessionを注意状態として扱う。 | detached HEAD、merge、rebase、cherry-pick、revert、bisectを検出すると通常prompt送信を停止し、状態名と`解消のため再開`を表示する。ユーザーが実行した場合だけ同じmain threadとworktreeで新しいturnを始める。 | Draft | 非該当 |
-| WORK-F-032 | session worktreeが保存済みbranchとは別のattached branchへ変更された場合に通常再開を拒否する。 | branch不一致を検出すると`WORK_SESSION_BRANCH_MISMATCH`と期待branch・現在branchを表示し、自動checkoutせず、外部で期待branchへ戻るまで通常promptを開始しない。 | Draft | 非該当 |
-| WORK-F-033 | session worktreeの外部削除またはGit linkage破損時にturnを開始しない。 | path不在、`.git` linkage不正、repository不一致、読取不可、書込不可、`prunable`のいずれかを検出すると`repair_required`にし、原因、再診断、archiveを表示してworktreeを自動再作成しない。 | Draft | 非該当 |
-| WORK-F-034 | directoryが存在するsession worktreeのlinkageをユーザー操作でrepairできる。 | 確認後に対象pathだけへGit worktree repairを実行し、repository、branch、HEAD、dirty状態を再検証して合格時だけ元のlifecycle stateへ戻す。失敗時は既存fileを削除しない。 | Draft | 非該当 |
-| WORK-F-035 | 既存sessionをremote default headへ自動追従させない。 | `origin`のdefault branch名またはhead commitが変わっても、既存sessionのlocal branchへrebase、merge、reset、checkoutを実行せず、新規sessionだけが次回fetch後のheadを使用する。 | Draft | 非該当 |
+| WORK-F-027 | アプリ再起動時に保存済みworkspaceとsessionの対応を復元する。 | 正常終了またはクラッシュ後の起動で、session一覧、選択session、lifecycle state、main thread ID、branch、worktreeをSQLiteから復元し、Git実体の再検証結果を併記する。 | Approved | 非該当 |
+| WORK-F-028 | 終了またはクラッシュで中断したturnを自動再実行しない。 | 完了記録のないturnを`アプリ終了により中断`または`予期しない中断`と表示し、起動後にprompt送信、thread resume、Git変更を自動実行しない。 | Approved | 非該当 |
+| WORK-F-029 | ユーザーは保存済みsessionを同じmain thread、local branch、専用worktreeで明示再開できる。 | `再開`実行後の新しいmain turnが保存済みmain thread IDとcanonical worktreeを使用し、別branchまたは新規worktreeを作らない。 | Approved | 非該当 |
+| WORK-F-030 | dirtyなsession worktreeを変更を保ったまま再開できる。 | staged、unstaged、untrackedの件数とdirty表示を出し、stash、reset、clean、commitを実行せず、ユーザーの`再開`後に同じworktreeで新しいturnを始める。 | Approved | 非該当 |
+| WORK-F-031 | detached HEADまたはGit履歴操作中のsessionを注意状態として扱う。 | detached HEAD、merge、rebase、cherry-pick、revert、bisectを検出すると通常prompt送信を停止し、状態名と`解消のため再開`を表示する。ユーザーが実行した場合だけ同じmain threadとworktreeで新しいturnを始める。 | Approved | 非該当 |
+| WORK-F-032 | session worktreeが保存済みbranchとは別のattached branchへ変更された場合に通常再開を拒否する。 | branch不一致を検出すると`WORK_SESSION_BRANCH_MISMATCH`と期待branch・現在branchを表示し、自動checkoutせず、外部で期待branchへ戻るまで通常promptを開始しない。 | Approved | 非該当 |
+| WORK-F-033 | session worktreeの外部削除またはGit linkage破損時にturnを開始しない。 | path不在、`.git` linkage不正、repository不一致、読取不可、書込不可、`prunable`のいずれかを検出すると`repair_required`にし、原因、再診断、archiveを表示してworktreeを自動再作成しない。 | Approved | 非該当 |
+| WORK-F-034 | directoryが存在するsession worktreeのlinkageをユーザー操作でrepairできる。 | 確認後に対象pathだけへGit worktree repairを実行し、repository、branch、HEAD、dirty状態を再検証して合格時だけ元のlifecycle stateへ戻す。失敗時は既存fileを削除しない。 | Approved | 非該当 |
+| WORK-F-035 | 既存sessionをremote default headへ自動追従させない。 | `origin`のdefault branch名またはhead commitが変わっても、既存sessionのlocal branchへrebase、merge、reset、checkoutを実行せず、新規sessionだけが次回fetch後のheadを使用する。 | Approved | 非該当 |
 
 ### archiveとcleanup
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| WORK-F-036 | turnが動いていないsessionをarchiveできる。 | archive後はactive一覧と新規turn対象から外れ、main thread ID、support assignment証跡、local branch、専用worktree、dirty file、timeline evidenceを変更せず保持する。 | Draft | 非該当 |
-| WORK-F-037 | 実行中またはユーザー回答待ちturnがあるsessionのarchiveを拒否する。 | mainまたはsupportに`running`が1件以上ある場合、またはmainが`waiting_for_user`の場合は対象turnを表示し、interruptもarchiveも実行しない。 | Draft | 非該当 |
-| WORK-F-038 | archived sessionを再検証後にunarchiveできる。 | WORK-F-032からWORK-F-034の検証に合格したsessionだけを`available`へ戻し、不合格時は`repair_required`のまま原因を表示する。 | Draft | 非該当 |
-| WORK-F-039 | cleanupの確認またはキャンセルをユーザーが選べる。 | archived sessionの名前、local branch、worktree path、保持されるbranch・evidence、削除されるworktreeを表示し、キャンセル時はGit、filesystem、SQLiteを変更しない。 | Draft | 非該当 |
-| WORK-F-040 | cleanかつ正常なapp-owned archived worktreeだけをforceなしでcleanupする。 | no-running-turn、turn lease ownerなし、correct branch、attached HEAD、no-operation-in-progress、cleanをすべて満たす場合だけ`git worktree remove`相当をforceなしで実行し、満たさない場合は該当条件を表示して削除しない。 | Draft | 非該当 |
-| WORK-F-041 | cleanup後もlocal branchとsession evidenceを保持する。 | worktree directory削除後にlocal branch、commit、main thread ID、support assignment証跡、timeline evidence、test evidenceを残し、sessionを`cleaned`と表示する。local branchとremote branchを削除するGit操作を発行しない。 | Draft | 非該当 |
+| WORK-F-036 | turnが動いていないsessionをarchiveできる。 | archive後はactive一覧と新規turn対象から外れ、main thread ID、support assignment証跡、local branch、専用worktree、dirty file、timeline evidenceを変更せず保持する。 | Approved | 非該当 |
+| WORK-F-037 | 実行中またはユーザー回答待ちturnがあるsessionのarchiveを拒否する。 | mainまたはsupportに`running`が1件以上ある場合、またはmainが`waiting_for_user`の場合は対象turnを表示し、interruptもarchiveも実行しない。 | Approved | 非該当 |
+| WORK-F-038 | archived sessionを再検証後にunarchiveできる。 | WORK-F-032からWORK-F-034の検証に合格したsessionだけを`available`へ戻し、不合格時は`repair_required`のまま原因を表示する。 | Approved | 非該当 |
+| WORK-F-039 | cleanupの確認またはキャンセルをユーザーが選べる。 | archived sessionの名前、local branch、worktree path、保持されるbranch・evidence、削除されるworktreeを表示し、キャンセル時はGit、filesystem、SQLiteを変更しない。 | Approved | 非該当 |
+| WORK-F-040 | cleanかつ正常なapp-owned archived worktreeだけをforceなしでcleanupする。 | no-running-turn、turn lease ownerなし、correct branch、attached HEAD、no-operation-in-progress、cleanをすべて満たす場合だけ`git worktree remove`相当をforceなしで実行し、満たさない場合は該当条件を表示して削除しない。 | Approved | 非該当 |
+| WORK-F-041 | cleanup後もlocal branchとsession evidenceを保持する。 | worktree directory削除後にlocal branch、commit、main thread ID、support assignment証跡、timeline evidence、test evidenceを残し、sessionを`cleaned`と表示する。local branchとremote branchを削除するGit操作を発行しない。 | Approved | 非該当 |
 
 ### 禁止操作と証跡
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| WORK-F-042 | desktop shellはworkspace lifecycleを契機にcommit、push、PR作成、merge、remote branch削除を自動実行しない。 | session作成、再開、archive、unarchive、cleanup、turn完了の各試験で、shellが発行したGit・GitHub操作に前記5操作が0件である。ユーザー指示に基づくmain Codex turnの操作は別 actorとしてtimelineへ記録する。 | Draft | 非該当 |
-| WORK-F-043 | workspace lifecycleとGit診断の結果を構造化eventとして保存する。 | repository診断、fetch、default head解決、作成、再検証、再開、archive、unarchive、repair、cleanup、キャンセルごとにsession ID、event type、status、UTC時刻、短いerror codeを保存し、credential、remote userinfo、絶対pathを永続ログへ含めない。 | Draft | 非該当 |
+| WORK-F-042 | desktop shellはworkspace lifecycleを契機にcommit、push、PR作成、merge、remote branch削除を自動実行しない。 | session作成、再開、archive、unarchive、cleanup、turn完了の各試験で、shellが発行したGit・GitHub操作に前記5操作が0件である。ユーザー指示に基づくmain Codex turnの操作は別 actorとしてtimelineへ記録する。 | Approved | 非該当 |
+| WORK-F-043 | workspace lifecycleとGit診断の結果を構造化eventとして保存する。 | repository診断、fetch、default head解決、作成、再検証、再開、archive、unarchive、repair、cleanup、キャンセルごとにsession ID、event type、status、UTC時刻、短いerror codeを保存し、credential、remote userinfo、絶対pathを永続ログへ含めない。 | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -231,16 +231,16 @@ branch名、worktree path、base branch、Git credentialの自由入力欄は提
 | GitHub `origin` | 1件の許可形式fetch URL、remote HEAD、default branchが存在し、fetchに必要な既存credential helperまたはSSH agentが利用できる。 | 解決済み: runtime診断を定義済み | WORK-F-009からWORK-F-013で停止する |
 | Tauri dialog・path | native directory pickerとapplication data directoryを使用する。 | 解決済み | repository選択または専用worktree作成を開始できない |
 | [デスクトップ共通仕様](../../screen-design/desktop-common-specification.md) | lifecycle、SQLite、Full access同意、Capability、OS差分、ログ秘匿を適用する。 | 解決済み | 全sessionの安全な起動・復元を保証できない |
-| [codex-main-session要件](../codex-main-session/requirements.md) | main root threadの作成、turn開始、AskUserQuestion、interruptを提供する。 | Draft間で整合確認予定 | main sessionを開始・再開できない |
-| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | 7つのsupport role、ephemeral root thread、[canonical worktree別turn lease](../support-agent-orchestration/requirements.md#同一worktreeの競合制御)を提供する。 | Draft | WORK-F-024の共有と直列化を検証できない |
-| [activity-history要件](../activity-history/requirements.md) | lifecycle eventとGit evidenceをtimelineへ表示する。 | Draft間で整合確認予定 | WORK-F-043のeventをユーザーが追跡できない |
-| [git-review-harness要件](../git-review-harness/requirements.md) | Codex turnによるGit操作、diff、test、reviewの証跡を扱う。 | Draft間で整合確認予定 | shell操作とCodex Git操作のactorを区別できない |
+| [codex-main-session要件](../codex-main-session/requirements.md) | main root threadの作成、turn開始、AskUserQuestion、interruptを提供する。 | Approved | main sessionを開始・再開できない |
+| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | 7つのsupport role、ephemeral root thread、[canonical worktree別turn lease](../support-agent-orchestration/requirements.md#同一worktreeの競合制御)を提供する。 | Approved | WORK-F-024の共有と直列化を検証できない |
+| [activity-history要件](../activity-history/requirements.md) | lifecycle eventとGit evidenceをtimelineへ表示する。 | Approved | WORK-F-043のeventをユーザーが追跡できない |
+| [git-review-harness要件](../git-review-harness/requirements.md) | Codex turnによるGit操作、diff、test、reviewの証跡を扱う。 | Approved | shell操作とCodex Git操作のactorを区別できない |
 
 ## 未確定事項
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| なし | 本文の契約でハッカソン版を実装する | 仕様責任者レビューで8機能間のID対応だけを確認する | いいえ |
+| なし | 本文の契約でハッカソン版を実装する | 実装時に8機能間のID対応を機械照合する | いいえ |
 
 ## 参照資料
 
@@ -262,9 +262,9 @@ branch名、worktree path、base branch、Git credentialの自由入力欄は提
 | 項目 | 内容 |
 |---|---|
 | レビュー結果 | Not Ready |
-| 仕様責任者 | プロダクトオーナー |
-| 合意日 | 未合意 |
-| 残る非ブロック論点 | 8機能のDraft間における画面ID・thread lifecycle・timeline eventの相互参照確認 |
+| 仕様責任者 | プロダクトオーナー（PO） |
+| 合意日 | 2026-07-17 |
+| 残る非ブロック論点 | 8機能間における画面ID・thread lifecycle・timeline eventの相互参照確認 |
 
 ## 着手可チェック
 
@@ -277,4 +277,4 @@ branch名、worktree path、base branch、Git credentialの自由入力欄は提
 - [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
-- [ ] 仕様責任者がレビューし、合意した。
+- [x] 仕様責任者がレビューし、合意した。

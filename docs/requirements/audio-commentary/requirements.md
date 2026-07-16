@@ -3,7 +3,7 @@ title: "音声実況 要件定義"
 description: "現在workspaceのmain eventを即時実況し、terminal後だけNarratorが補足するtext・TTS要件。"
 updated: 2026-07-17
 last_verified: 2026-07-16
-status: "Draft"
+status: "Approved"
 prefix: "NARR"
 read_when:
   - "Narrator、優先queue、質問中の沈黙を実装・検証するとき。"
@@ -14,10 +14,10 @@ read_when:
 | 項目 | 内容 |
 |---|---|
 | Prefix | `NARR` |
-| 状態 | Draft |
-| 仕様責任者 | プロダクトオーナー |
+| 状態 | Approved |
+| 仕様責任者 | プロダクトオーナー（PO） |
 | 作成日 | 2026-07-16 |
-| 最終レビュー日 | 未レビュー |
+| 最終レビュー日 | 2026-07-17 |
 
 ## 背景
 
@@ -74,77 +74,77 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| NARR-F-001 | text生成をRust rendererと固定`Narrator`の二層にする。 | main running中はrendererだけ、terminal後はNarratorだけが補足を生成する。両者はRustのredactionと同じvoiceを通り、raw outputを直接TTSへ渡さない。 | Draft | 非該当 |
-| NARR-F-002 | actorの表示名を固定する。 | transcriptで使用できるrole名が`Sol`、`Planner`、`Narrator`、`Decision Explainer`、`Risk Sentinel`、`QA`、`Detached Reviewer`、`Checkpoint Curator`と一致し、ユーザーが変更・翻訳できない。 | Draft | 非該当 |
-| NARR-F-003 | APPのactive workspaceだけを実況対象にする。 | workspace IDがactive値と一致するeventだけを処理し、activeなし・別workspaceではtranscript、TTS、expression変更を0件にする。 | Draft | 非該当 |
-| NARR-F-004 | active workspace変更でgeneration IDを更新し旧実況を停止する。 | 変更・解除から100 ms以内に旧stream、buffer、playing、nextを破棄し、新active eventだけを受け付け、旧音声を追加再生しない。 | Draft | 非該当 |
-| NARR-F-005 | realtime実況triggerを正規化main eventに限定する。 | typeとsource evidenceを持つmain eventだけをrendererへ渡す。Narratorはterminal＋安定post snapshot後だけ起動し、timer、heartbeat、token delta、raw log、同status再通知では両者を0件にする。 | Draft | 非該当 |
-| NARR-F-006 | 同じ状態を表すeventを重複排除する。 | workspace、session、event type、phase、result、evidence refsから作るfingerprintが直前発話と同じ場合は新しいtranscriptとTTS requestを作らず、状態変化後の同種eventは受け付ける。 | Draft | 非該当 |
-| NARR-F-007 | 5種類の必須main eventを必ずtextへ反映する。 | action開始、phase変更、質問、失敗、完了の一意なeventを分母、renderer transcriptを分子としてcoverageを100%にし、Narrator成否を影響させない。 | Draft | 非該当 |
-| NARR-F-008 | 通常eventの発話間隔を8秒以上にする。 | 重要event以外は直前の通常発話開始から8,000 ms未満ならnextへ最大1件集約し、重要eventは間隔制限を適用しない。 | Draft | 非該当 |
-| NARR-F-009 | 実況contextを6要素で管理する。 | `purpose`、`current_action`、`reason`、`expectation`、`actual_result`、`impact_or_next`をnullable fieldとして持ち、1つのwork unitの開始から終了までに該当する全fieldがtranscriptまたは`not_applicable`で解決される。 | Draft | 非該当 |
-| NARR-F-010 | 未確定の期待を仮説として表現する。 | `expectation`を含む日英fixtureで「見込み」「予想」または`expect`、`likely`のいずれかを含み、結果を示す過去形または成功断定を含まない。 | Draft | 非該当 |
-| NARR-F-011 | 実結果をterminal evidence受信後だけ発話する。 | test、command、turn、reviewの開始eventでは成功・失敗を断定せず、対応するterminal statusとevidence受信後にだけ`actual_result`を生成する。 | Draft | 非該当 |
-| NARR-F-012 | rendererでmainの現在状態を伝える。 | action開始、phase変更、質問、失敗、完了の各fixtureで、200 ms以内に`current_action`または`actual_result`を含むtextを100%表示する。 | Draft | 非該当 |
-| NARR-F-013 | terminal後のNarratorがcolor commentaryを補う。 | freshなterminal snapshotだけを入力し、10分scenarioで`reason`、`expectation`、`impact_or_next`を各1回以上補足し、根拠のない感情やriskを事実として追加しない。 | Draft | 非該当 |
-| NARR-F-014 | 1発話を1〜2文かつ1〜500 Unicode scalarに制限する。 | renderer templateは常に境界内とする。Narratorの0文、3文、501 scalarはTTSへ送らずNARR-F-018へ移り、1文・500 scalarは受理する。 | Draft | 非該当 |
-| NARR-F-015 | 読み上げ禁止情報をtranscript生成前に除外する。 | code・diff・file本文、raw stdout/stderr、prompt/response全文、API key、token、credential、UUID、request/thread/turn/item ID、commit SHAがtranscriptとSpeech API inputへ0件となる。 | Draft | 非該当 |
-| NARR-F-016 | pathを一般化して読み上げる。 | absolute pathを0件にし、relative pathが必要な場合も最後のfile名を40 scalarまで表示し、超過またはworkspace外pathは日英の`対象ファイル`相当へ置換する。 | Draft | 非該当 |
-| NARR-F-017 | 実況textを日本語または英語の1言語で生成する。 | 発話ごとに`ja`または`en`が1つあり、選択言語とtranscriptが一致し、同じ発話内で固定role名以外のUI文言を混在させない。 | Draft | 非該当 |
-| NARR-F-018 | Narrator unavailableでもrendererを継続する。 | timeout、unavailable、stale、schema不正でもNARR-F-007/012を通常処理し、terminal colorだけをtype、status、次の操作から作る500 scalar以内の決定論的summaryへ2秒以内に置換する。 | Draft | 非該当 |
+| NARR-F-001 | text生成をRust rendererと固定`Narrator`の二層にする。 | main running中はrendererだけ、terminal後はNarratorだけが補足を生成する。両者はRustのredactionと同じvoiceを通り、raw outputを直接TTSへ渡さない。 | Approved | 非該当 |
+| NARR-F-002 | actorの表示名を固定する。 | transcriptで使用できるrole名が`Sol`、`Planner`、`Narrator`、`Decision Explainer`、`Risk Sentinel`、`QA`、`Detached Reviewer`、`Checkpoint Curator`と一致し、ユーザーが変更・翻訳できない。 | Approved | 非該当 |
+| NARR-F-003 | APPのactive workspaceだけを実況対象にする。 | workspace IDがactive値と一致するeventだけを処理し、activeなし・別workspaceではtranscript、TTS、expression変更を0件にする。 | Approved | 非該当 |
+| NARR-F-004 | active workspace変更でgeneration IDを更新し旧実況を停止する。 | 変更・解除から100 ms以内に旧stream、buffer、playing、nextを破棄し、新active eventだけを受け付け、旧音声を追加再生しない。 | Approved | 非該当 |
+| NARR-F-005 | realtime実況triggerを正規化main eventに限定する。 | typeとsource evidenceを持つmain eventだけをrendererへ渡す。Narratorはterminal＋安定post snapshot後だけ起動し、timer、heartbeat、token delta、raw log、同status再通知では両者を0件にする。 | Approved | 非該当 |
+| NARR-F-006 | 同じ状態を表すeventを重複排除する。 | workspace、session、event type、phase、result、evidence refsから作るfingerprintが直前発話と同じ場合は新しいtranscriptとTTS requestを作らず、状態変化後の同種eventは受け付ける。 | Approved | 非該当 |
+| NARR-F-007 | 5種類の必須main eventを必ずtextへ反映する。 | action開始、phase変更、質問、失敗、完了の一意なeventを分母、renderer transcriptを分子としてcoverageを100%にし、Narrator成否を影響させない。 | Approved | 非該当 |
+| NARR-F-008 | 通常eventの発話間隔を8秒以上にする。 | 重要event以外は直前の通常発話開始から8,000 ms未満ならnextへ最大1件集約し、重要eventは間隔制限を適用しない。 | Approved | 非該当 |
+| NARR-F-009 | 実況contextを6要素で管理する。 | `purpose`、`current_action`、`reason`、`expectation`、`actual_result`、`impact_or_next`をnullable fieldとして持ち、1つのwork unitの開始から終了までに該当する全fieldがtranscriptまたは`not_applicable`で解決される。 | Approved | 非該当 |
+| NARR-F-010 | 未確定の期待を仮説として表現する。 | `expectation`を含む日英fixtureで「見込み」「予想」または`expect`、`likely`のいずれかを含み、結果を示す過去形または成功断定を含まない。 | Approved | 非該当 |
+| NARR-F-011 | 実結果をterminal evidence受信後だけ発話する。 | test、command、turn、reviewの開始eventでは成功・失敗を断定せず、対応するterminal statusとevidence受信後にだけ`actual_result`を生成する。 | Approved | 非該当 |
+| NARR-F-012 | rendererでmainの現在状態を伝える。 | action開始、phase変更、質問、失敗、完了の各fixtureで、200 ms以内に`current_action`または`actual_result`を含むtextを100%表示する。 | Approved | 非該当 |
+| NARR-F-013 | terminal後のNarratorがcolor commentaryを補う。 | freshなterminal snapshotだけを入力し、10分scenarioで`reason`、`expectation`、`impact_or_next`を各1回以上補足し、根拠のない感情やriskを事実として追加しない。 | Approved | 非該当 |
+| NARR-F-014 | 1発話を1〜2文かつ1〜500 Unicode scalarに制限する。 | renderer templateは常に境界内とする。Narratorの0文、3文、501 scalarはTTSへ送らずNARR-F-018へ移り、1文・500 scalarは受理する。 | Approved | 非該当 |
+| NARR-F-015 | 読み上げ禁止情報をtranscript生成前に除外する。 | code・diff・file本文、raw stdout/stderr、prompt/response全文、API key、token、credential、UUID、request/thread/turn/item ID、commit SHAがtranscriptとSpeech API inputへ0件となる。 | Approved | 非該当 |
+| NARR-F-016 | pathを一般化して読み上げる。 | absolute pathを0件にし、relative pathが必要な場合も最後のfile名を40 scalarまで表示し、超過またはworkspace外pathは日英の`対象ファイル`相当へ置換する。 | Approved | 非該当 |
+| NARR-F-017 | 実況textを日本語または英語の1言語で生成する。 | 発話ごとに`ja`または`en`が1つあり、選択言語とtranscriptが一致し、同じ発話内で固定role名以外のUI文言を混在させない。 | Approved | 非該当 |
+| NARR-F-018 | Narrator unavailableでもrendererを継続する。 | timeout、unavailable、stale、schema不正でもNARR-F-007/012を通常処理し、terminal colorだけをtype、status、次の操作から作る500 scalar以内の決定論的summaryへ2秒以内に置換する。 | Approved | 非該当 |
 
 ### 優先queue、interrupt、質問待ち
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| NARR-F-019 | 実況eventを固定優先順位へ分類する。 | `question > failure > completion > phase_changed > action_started > 通常event`で解決し、同一priorityはevent sequence順になる。 | Draft | 非該当 |
-| NARR-F-020 | audio queueをplaying 1件とnext 1件へ制限する。 | 100 eventを入力してもaudio slotが最大2件、同時再生が最大1streamで、3件目のaudio bufferまたはHTTP requestを先行生成しない。 | Draft | 非該当 |
-| NARR-F-021 | 新しいeventでnextを優先度とfreshnessにより置換・集約する。 | 高priorityは既存nextを置換し、同priorityの通常eventは最新stateへ集約する。置換された重要eventはtextを保持してaudio statusを`superseded`にする。 | Draft | 非該当 |
-| NARR-F-022 | 発話を文単位のSpeech API requestへ分割して文境界でinterruptする。 | 2文発話を2requestとして順に再生し、高priority到着時は再生中の文を完了後100 ms以内に残りの文を破棄してnextを開始する。 | Draft | 非該当 |
-| NARR-F-023 | interruption後に元topicへ戻る場合だけtopic returnを1回発話する。 | 中断元work unitがactiveのまま高priority topicが解決した場合は「元の作業へ戻る」相当を1回だけ出し、元topicが完了・変更済みならreturn発話を出さない。保持する中断元は1件だけとする。 | Draft | 非該当 |
-| NARR-F-024 | validなmain AskUserQuestionをtext、audio、通知で知らせる。 | CODE-F-038〜042適合eventだけを1回表示・発話し、window非表示なら1件通知する。secret、free-form-only、範囲外origin・件数・option・timeoutではtranscript、TTS、通知、Narratorを0件にする。 | Draft | 非該当 |
-| NARR-F-025 | AskUserQuestion告知後は回答または解決まで沈黙する。 | `waiting_for_user`中は新しいrenderer text、Narrator assignment、TTS requestが0件で、既存nextを破棄し回答待ちtextだけを維持する。 | Draft | 非該当 |
-| NARR-F-026 | AskUserQuestion解決後に最新状態から実況を再開する。 | answer、timeout、server resolutionで待機解除後、古いdeferred audioを再生せずrendererを最新phaseから再開し、main terminal前にNarratorを起動しない。 | Draft | 非該当 |
-| NARR-F-027 | transcriptをaudio開始前に表示する。 | valid textはTTS状態を問わず200 ms以内にARIA statusとtimelineへ表示し、readyかつ非muteの場合だけ、その後にaudio requestを開始する。 | Draft | 非該当 |
-| NARR-F-028 | audio再生をLive2D mouth envelopeと相関する。 | audio request IDとworkspaceがLIVE-F-029の現在値に一致する間だけ0.0〜1.0 envelopeを30 Hz以上で送り、停止・silence・別workspace・errorから100 ms以内に0へ戻し、semantic expressionを変更しない。 | Draft | 非該当 |
-| NARR-F-029 | window非表示中もcommentary workspaceのTTSを継続する。 | close後もplaying、next、HTTP stream、audio deviceを維持し、trayから再表示しても二重再生せず、別workspace eventを実況しない。 | Draft | 非該当 |
-| NARR-F-030 | mute、workspace切替、緊急停止、Quitではaudioを即時停止する。 | 操作から100 ms以内にHTTP stream、buffer、device playback、mouth envelopeを停止しgeneration IDを更新する。停止した発話をunmute・再表示・再起動時に再生しない。 | Draft | 非該当 |
+| NARR-F-019 | 実況eventを固定優先順位へ分類する。 | `question > failure > completion > phase_changed > action_started > 通常event`で解決し、同一priorityはevent sequence順になる。 | Approved | 非該当 |
+| NARR-F-020 | audio queueをplaying 1件とnext 1件へ制限する。 | 100 eventを入力してもaudio slotが最大2件、同時再生が最大1streamで、3件目のaudio bufferまたはHTTP requestを先行生成しない。 | Approved | 非該当 |
+| NARR-F-021 | 新しいeventでnextを優先度とfreshnessにより置換・集約する。 | 高priorityは既存nextを置換し、同priorityの通常eventは最新stateへ集約する。置換された重要eventはtextを保持してaudio statusを`superseded`にする。 | Approved | 非該当 |
+| NARR-F-022 | 発話を文単位のSpeech API requestへ分割して文境界でinterruptする。 | 2文発話を2requestとして順に再生し、高priority到着時は再生中の文を完了後100 ms以内に残りの文を破棄してnextを開始する。 | Approved | 非該当 |
+| NARR-F-023 | interruption後に元topicへ戻る場合だけtopic returnを1回発話する。 | 中断元work unitがactiveのまま高priority topicが解決した場合は「元の作業へ戻る」相当を1回だけ出し、元topicが完了・変更済みならreturn発話を出さない。保持する中断元は1件だけとする。 | Approved | 非該当 |
+| NARR-F-024 | validなmain AskUserQuestionをtext、audio、通知で知らせる。 | CODE-F-038〜042適合eventだけを1回表示・発話し、window非表示なら1件通知する。secret、free-form-only、範囲外origin・件数・option・timeoutではtranscript、TTS、通知、Narratorを0件にする。 | Approved | 非該当 |
+| NARR-F-025 | AskUserQuestion告知後は回答または解決まで沈黙する。 | `waiting_for_user`中は新しいrenderer text、Narrator assignment、TTS requestが0件で、既存nextを破棄し回答待ちtextだけを維持する。 | Approved | 非該当 |
+| NARR-F-026 | AskUserQuestion解決後に最新状態から実況を再開する。 | answer、timeout、server resolutionで待機解除後、古いdeferred audioを再生せずrendererを最新phaseから再開し、main terminal前にNarratorを起動しない。 | Approved | 非該当 |
+| NARR-F-027 | transcriptをaudio開始前に表示する。 | valid textはTTS状態を問わず200 ms以内にARIA statusとtimelineへ表示し、readyかつ非muteの場合だけ、その後にaudio requestを開始する。 | Approved | 非該当 |
+| NARR-F-028 | audio再生をLive2D mouth envelopeと相関する。 | audio request IDとworkspaceがLIVE-F-029の現在値に一致する間だけ0.0〜1.0 envelopeを30 Hz以上で送り、停止・silence・別workspace・errorから100 ms以内に0へ戻し、semantic expressionを変更しない。 | Approved | 非該当 |
+| NARR-F-029 | window非表示中もcommentary workspaceのTTSを継続する。 | close後もplaying、next、HTTP stream、audio deviceを維持し、trayから再表示しても二重再生せず、別workspace eventを実況しない。 | Approved | 非該当 |
+| NARR-F-030 | mute、workspace切替、緊急停止、Quitではaudioを即時停止する。 | 操作から100 ms以内にHTTP stream、buffer、device playback、mouth envelopeを停止しgeneration IDを更新する。停止した発話をunmute・再表示・再起動時に再生しない。 | Approved | 非該当 |
 
 ### OpenAI Speech APIとcredential
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| NARR-F-031 | Speech API endpointとmodel snapshotを固定する。 | `POST https://api.openai.com/v1/audio/speech`へ`model: "gpt-4o-mini-tts-2025-12-15"`だけを送り、alias、別snapshot、Realtime API、別providerへfallbackしない。 | Draft | 非該当 |
-| NARR-F-032 | 1文ごとに最小のSpeech request bodyを送る。 | bodyが`model`、redacted `input`、allowlist済み`voice`、`response_format: "pcm"`、`stream_format: "audio"`だけを持ち、workspace/session/role ID、evidence、path、logを含まない。 | Draft | 非該当 |
-| NARR-F-033 | PCM audioをchunked responseから逐次再生する。 | 24 kHz・16-bit signed little-endian mono PCMとしてheaderなしでdecodeし、全response完了前に先頭chunkを再生でき、chunk順序の欠落・逆転・奇数byteではstreamを停止する。 | Draft | 非該当 |
-| NARR-F-034 | Speech API通信とaudio device操作をRust側だけで行う。 | browser network traceとWebView heapにAPI key、Authorization header、PCM byteが0件で、Reactはrequest ID、status、transcript、envelope statusだけを受け取る。 | Draft | 非該当 |
-| NARR-F-035 | TTSへCodex/ChatGPT認証とは別のOpenAI Platform API keyを使用する。 | S-004へ「Codex loginではTTSを利用できない」とPlatform API課金の案内を表示し、Codex auth file、ChatGPT session、App Server tokenをSpeech requestへ使用しない。 | Draft | 非該当 |
-| NARR-F-036 | TTS API keyをOS credential storeだけへ保存・削除する。 | 削除時はaudioを停止し`deleting`を保存後にstoreを消去する。成功だけ`unset`、失敗・crashは`delete_failed`/text-onlyとし再試行する。SQLite、Web Storage、平文file、環境変数、logへkeyのfallbackを作らない。 | Draft | 非該当 |
-| NARR-F-037 | API key入力を保存完了後にmemoryから消去する。 | masked入力をRustへ1回渡し、credential storeの成功・失敗response後100 ms以内にReact値とRust request bufferをzeroizeし、key値、長さ、末尾文字を再表示・copyしない。 | Draft | 非該当 |
-| NARR-F-038 | 初回audio再生前にAI生成音声であることを明示する。 | 日英で「人間ではなくAI生成音声」と常時S-004へ表示し、初回TTS有効化時に同内容を確認するまでaudioを再生せず、text実況は継続する。 | Draft | 非該当 |
-| NARR-F-039 | voiceをsnapshot対応の組込み13種類へ限定する。 | `alloy`、`ash`、`ballad`、`coral`、`echo`、`fable`、`onyx`、`nova`、`sage`、`shimmer`、`verse`、`marin`、`cedar`だけを選択でき、defaultは`cedar`、custom voice IDは拒否する。 | Draft | 非該当 |
-| NARR-F-040 | OpenAIへ送るcustomer contentを発話1文だけに限定する。 | static fieldを除くrequest dataがNARR-F-014〜NARR-F-016を通過した1〜500 scalarの`input`だけで、会話、source event、evidence、workspace名、user識別子を送らない。 | Draft | 非該当 |
-| NARR-F-041 | Speech APIの外部data境界をTTS有効化前に表示する。 | `/v1/audio/speech`はAPI training利用なし、標準abuse monitoring最大30日、application state保持なし、ZDR対象であることと組織設定で差があることを日英で表示し、公式data controlsへlinkする。 | Draft | 非該当 |
-| NARR-F-042 | 生成audioをlocalへ永続化しない。 | PCM、encoded audio、stream chunk、ring bufferがSQLite、cache、file、Web Storage、backup、crash logへ0件で、再生終了・失敗・停止後1秒以内にmemory bufferを破棄し、transcriptだけをHISTへ保存する。 | Draft | 非該当 |
+| NARR-F-031 | Speech API endpointとmodel snapshotを固定する。 | `POST https://api.openai.com/v1/audio/speech`へ`model: "gpt-4o-mini-tts-2025-12-15"`だけを送り、alias、別snapshot、Realtime API、別providerへfallbackしない。 | Approved | 非該当 |
+| NARR-F-032 | 1文ごとに最小のSpeech request bodyを送る。 | bodyが`model`、redacted `input`、allowlist済み`voice`、`response_format: "pcm"`、`stream_format: "audio"`だけを持ち、workspace/session/role ID、evidence、path、logを含まない。 | Approved | 非該当 |
+| NARR-F-033 | PCM audioをchunked responseから逐次再生する。 | 24 kHz・16-bit signed little-endian mono PCMとしてheaderなしでdecodeし、全response完了前に先頭chunkを再生でき、chunk順序の欠落・逆転・奇数byteではstreamを停止する。 | Approved | 非該当 |
+| NARR-F-034 | Speech API通信とaudio device操作をRust側だけで行う。 | browser network traceとWebView heapにAPI key、Authorization header、PCM byteが0件で、Reactはrequest ID、status、transcript、envelope statusだけを受け取る。 | Approved | 非該当 |
+| NARR-F-035 | TTSへCodex/ChatGPT認証とは別のOpenAI Platform API keyを使用する。 | S-004へ「Codex loginではTTSを利用できない」とPlatform API課金の案内を表示し、Codex auth file、ChatGPT session、App Server tokenをSpeech requestへ使用しない。 | Approved | 非該当 |
+| NARR-F-036 | TTS API keyをOS credential storeだけへ保存・削除する。 | 削除時はaudioを停止し`deleting`を保存後にstoreを消去する。成功だけ`unset`、失敗・crashは`delete_failed`/text-onlyとし再試行する。SQLite、Web Storage、平文file、環境変数、logへkeyのfallbackを作らない。 | Approved | 非該当 |
+| NARR-F-037 | API key入力を保存完了後にmemoryから消去する。 | masked入力をRustへ1回渡し、credential storeの成功・失敗response後100 ms以内にReact値とRust request bufferをzeroizeし、key値、長さ、末尾文字を再表示・copyしない。 | Approved | 非該当 |
+| NARR-F-038 | 初回audio再生前にAI生成音声であることを明示する。 | 日英で「人間ではなくAI生成音声」と常時S-004へ表示し、初回TTS有効化時に同内容を確認するまでaudioを再生せず、text実況は継続する。 | Approved | 非該当 |
+| NARR-F-039 | voiceをsnapshot対応の組込み13種類へ限定する。 | `alloy`、`ash`、`ballad`、`coral`、`echo`、`fable`、`onyx`、`nova`、`sage`、`shimmer`、`verse`、`marin`、`cedar`だけを選択でき、defaultは`cedar`、custom voice IDは拒否する。 | Approved | 非該当 |
+| NARR-F-040 | OpenAIへ送るcustomer contentを発話1文だけに限定する。 | static fieldを除くrequest dataがNARR-F-014〜NARR-F-016を通過した1〜500 scalarの`input`だけで、会話、source event、evidence、workspace名、user識別子を送らない。 | Approved | 非該当 |
+| NARR-F-041 | Speech APIの外部data境界をTTS有効化前に表示する。 | `/v1/audio/speech`はAPI training利用なし、標準abuse monitoring最大30日、application state保持なし、ZDR対象であることと組織設定で差があることを日英で表示し、公式data controlsへlinkする。 | Approved | 非該当 |
+| NARR-F-042 | 生成audioをlocalへ永続化しない。 | PCM、encoded audio、stream chunk、ring bufferがSQLite、cache、file、Web Storage、backup、crash logへ0件で、再生終了・失敗・停止後1秒以内にmemory bufferを破棄し、transcriptだけをHISTへ保存する。 | Approved | 非該当 |
 
 ### 設定、障害、復元、受け入れ試験
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| NARR-F-043 | S-004へTTSの利用可能状態と診断を表示する。 | `text_only|ready|muted|offline|invalid_key|rate_limited|api_unavailable|device_unavailable|deleting|delete_failed`の1値、最終成功UTC、短いerror codeを表示し、keyとprovider本文を表示しない。 | Draft | 非該当 |
-| NARR-F-044 | key未設定・store利用不能・削除中/失敗ではtext＋expressionへ縮退する。 | Speech request 0件、transcript・expression維持、mouth closed、turn継続とし、S-004に設定・store復旧・削除再試行を表示する。 | Draft | 非該当 |
-| NARR-F-045 | 401、403、model unavailableではtext＋expressionへ縮退する。 | 当該発話のaudioを再試行せず`invalid_key`または`api_unavailable`を表示し、keyをlog・timelineへ出さず、別modelへfallbackせず、次のmain turnを許可する。 | Draft | 非該当 |
-| NARR-F-046 | 429、network、timeout、5xxではfreshnessを優先してtext＋expressionへ縮退する。 | 自動retryを0回とし、connect 5秒、first byte 10秒、inter-chunk 5秒、1文全体60秒のいずれかを超えたstreamをcancelしてstatusを分類し、次のevent処理を継続する。 | Draft | 非該当 |
-| NARR-F-047 | audio device・PCM decode失敗ではtext＋expressionへ縮退する。 | device open、device loss、unsupported format、decode、buffer overflowでstreamを停止しmouthを閉じ、既定deviceの再診断を表示してmainとtranscriptを維持する。 | Draft | 非該当 |
-| NARR-F-048 | chunk再生前にgeneration IDとrequest IDを再照合する。 | どちらかがcurrent値と異なるchunkをaudio deviceとmouthへ0件渡し、`stale_audio_discarded`だけを記録して新しいgenerationを止めない。 | Draft | 非該当 |
-| NARR-F-049 | 非秘密音声設定をSQLiteへ保存する。 | TTS enabled、mute、integer volume、voice、language、AI音声確認versionをtransaction保存して再起動後に復元し、API keyとaudioを含めない。 | Draft | 非該当 |
-| NARR-F-050 | 音声設定の初期値を固定する。 | 初回はTTS disabled、mute false、volume 70、voice `cedar`、language `ui`で、valid key保存とAI音声確認後にユーザーがTTSを明示有効化できる。 | Draft | 非該当 |
-| NARR-F-051 | 設定変更を安全な再生境界で反映する。 | muteとTTS disableは即時停止、volumeは0〜100を現在streamへ250 ms以内、voice・languageは次の文から反映し、範囲外値では直前設定を維持する。 | Draft | 非該当 |
-| NARR-F-052 | 再起動時にaudio queueを復元・再生しない。 | transcriptと設定だけを復元し、audio/requestを空から開始する。`deleting`は`delete_failed`/text-onlyで復旧し、自動発話・自動削除を行わない。 | Draft | 非該当 |
-| NARR-F-053 | 日英で10分のheadphone-only scenarioを合格させる。 | healthyなkey・API・macOS deviceで日本語1回、英語1回を行い、画面を見ない評価者が目的、現在phase、直近結果、次の一手、回答要否の5問中4問以上へ各言語で正答する。 | Draft | 非該当 |
-| NARR-F-054 | event coverageと沈黙を自動検証する。 | 5必須event各10件、重複・state不変各100件、質問待ち60秒、Narrator unavailableで、coverage 100%、重複0件、質問告知後から解決まで発話0件とする。 | Draft | 非該当 |
-| NARR-F-055 | adapterのlocal性能とmemoryを制限する。 | 8 CPU core・16 GBのmacOSで1,000 event/分を10分入力し、Narrator/API待ちを除くqueue更新・text反映p95 200 ms、audio buffer 2 MiB以下、UI threadの1秒超block 0回とする。 | Draft | 非該当 |
-| NARR-F-056 | microphone・STT機能と権限を持たない。 | 3OS artifactのCapability、permission manifest、OS prompt、UI、network traceにmicrophone、audio input、speech transcriptionが0件で、lip-sync sourceがNARR-F-028のTTSだけとなる。 | Draft | 非該当 |
+| NARR-F-043 | S-004へTTSの利用可能状態と診断を表示する。 | `text_only|ready|muted|offline|invalid_key|rate_limited|api_unavailable|device_unavailable|deleting|delete_failed`の1値、最終成功UTC、短いerror codeを表示し、keyとprovider本文を表示しない。 | Approved | 非該当 |
+| NARR-F-044 | key未設定・store利用不能・削除中/失敗ではtext＋expressionへ縮退する。 | Speech request 0件、transcript・expression維持、mouth closed、turn継続とし、S-004に設定・store復旧・削除再試行を表示する。 | Approved | 非該当 |
+| NARR-F-045 | 401、403、model unavailableではtext＋expressionへ縮退する。 | 当該発話のaudioを再試行せず`invalid_key`または`api_unavailable`を表示し、keyをlog・timelineへ出さず、別modelへfallbackせず、次のmain turnを許可する。 | Approved | 非該当 |
+| NARR-F-046 | 429、network、timeout、5xxではfreshnessを優先してtext＋expressionへ縮退する。 | 自動retryを0回とし、connect 5秒、first byte 10秒、inter-chunk 5秒、1文全体60秒のいずれかを超えたstreamをcancelしてstatusを分類し、次のevent処理を継続する。 | Approved | 非該当 |
+| NARR-F-047 | audio device・PCM decode失敗ではtext＋expressionへ縮退する。 | device open、device loss、unsupported format、decode、buffer overflowでstreamを停止しmouthを閉じ、既定deviceの再診断を表示してmainとtranscriptを維持する。 | Approved | 非該当 |
+| NARR-F-048 | chunk再生前にgeneration IDとrequest IDを再照合する。 | どちらかがcurrent値と異なるchunkをaudio deviceとmouthへ0件渡し、`stale_audio_discarded`だけを記録して新しいgenerationを止めない。 | Approved | 非該当 |
+| NARR-F-049 | 非秘密音声設定をSQLiteへ保存する。 | TTS enabled、mute、integer volume、voice、language、AI音声確認versionをtransaction保存して再起動後に復元し、API keyとaudioを含めない。 | Approved | 非該当 |
+| NARR-F-050 | 音声設定の初期値を固定する。 | 初回はTTS disabled、mute false、volume 70、voice `cedar`、language `ui`で、valid key保存とAI音声確認後にユーザーがTTSを明示有効化できる。 | Approved | 非該当 |
+| NARR-F-051 | 設定変更を安全な再生境界で反映する。 | muteとTTS disableは即時停止、volumeは0〜100を現在streamへ250 ms以内、voice・languageは次の文から反映し、範囲外値では直前設定を維持する。 | Approved | 非該当 |
+| NARR-F-052 | 再起動時にaudio queueを復元・再生しない。 | transcriptと設定だけを復元し、audio/requestを空から開始する。`deleting`は`delete_failed`/text-onlyで復旧し、自動発話・自動削除を行わない。 | Approved | 非該当 |
+| NARR-F-053 | 日英で10分のheadphone-only scenarioを合格させる。 | healthyなkey・API・macOS deviceで日本語1回、英語1回を行い、画面を見ない評価者が目的、現在phase、直近結果、次の一手、回答要否の5問中4問以上へ各言語で正答する。 | Approved | 非該当 |
+| NARR-F-054 | event coverageと沈黙を自動検証する。 | 5必須event各10件、重複・state不変各100件、質問待ち60秒、Narrator unavailableで、coverage 100%、重複0件、質問告知後から解決まで発話0件とする。 | Approved | 非該当 |
+| NARR-F-055 | adapterのlocal性能とmemoryを制限する。 | 8 CPU core・16 GBのmacOSで1,000 event/分を10分入力し、Narrator/API待ちを除くqueue更新・text反映p95 200 ms、audio buffer 2 MiB以下、UI threadの1秒超block 0回とする。 | Approved | 非該当 |
+| NARR-F-056 | microphone・STT機能と権限を持たない。 | 3OS artifactのCapability、permission manifest、OS prompt、UI、network traceにmicrophone、audio input、speech transcriptionが0件で、lip-sync sourceがNARR-F-028のTTSだけとなる。 | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -218,10 +218,10 @@ read_when:
 | 依存・前提 | 内容 | 状態 | 未解決時の影響 |
 |---|---|---|---|
 | [デスクトップ共通仕様](../../screen-design/desktop-common-specification.md) | Rust trust boundary、tray、Quit、通知、credential store、SQLite、3OS契約を適用する。 | 解決済み | key、audio、lifecycleを安全に扱えない |
-| [codex-main-session要件](../codex-main-session/requirements.md) | main event、CODE-F-038〜CODE-F-042適合質問、workspace相関を提供する。 | Draft | 質問待ちとmain phaseを実況できない |
-| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | terminal後のNarrator、構造化output、lease、stale判定を提供する。 | Draft | color commentaryだけが決定論的summaryになる |
-| [Live2Dコンパニオン要件](../live2d-companion/requirements.md) | main semantic expression、TTS request ID、mouth envelope、text縮退を提供する。 | Draft | expressionとlip-syncを表示できないがtext・audioは継続可能 |
-| [アクティビティ履歴要件](../activity-history/requirements.md) | transcript eventを保存しaudio byteを保存しない。 | Draft | 再起動後に過去transcriptを表示できない |
+| [codex-main-session要件](../codex-main-session/requirements.md) | main event、CODE-F-038〜CODE-F-042適合質問、workspace相関を提供する。 | Approved | 質問待ちとmain phaseを実況できない |
+| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | terminal後のNarrator、構造化output、lease、stale判定を提供する。 | Approved | color commentaryだけが決定論的summaryになる |
+| [Live2Dコンパニオン要件](../live2d-companion/requirements.md) | main semantic expression、TTS request ID、mouth envelope、text縮退を提供する。 | Approved | expressionとlip-syncを表示できないがtext・audioは継続可能 |
+| [アクティビティ履歴要件](../activity-history/requirements.md) | transcript eventを保存しaudio byteを保存しない。 | Approved | 再起動後に過去transcriptを表示できない |
 | OpenAI Platform | Speech APIを利用できるproject、API key、billing、`gpt-4o-mini-tts-2025-12-15` accessが必要である。 | runtime検証 | text＋expressionへ縮退する |
 | OS audio・credential | 既定output deviceとOS credential storeが利用可能である。 | runtime検証 | text＋expressionへ縮退する |
 
@@ -229,7 +229,7 @@ read_when:
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| なし | 本文の決定論的play-by-play、terminal Narrator、固定Speech API、text＋expression縮退で実装する | 仕様責任者レビューとlive API smoke evidenceを確認する | いいえ |
+| なし | 本文の決定論的play-by-play、terminal Narrator、固定Speech API、text＋expression縮退で実装する | live API smoke evidenceを確認する | いいえ |
 
 ## 参照資料
 
@@ -250,9 +250,9 @@ read_when:
 | 項目 | 内容 |
 |---|---|
 | レビュー結果 | Not Ready |
-| 仕様責任者 | プロダクトオーナー |
-| 合意日 | 未合意 |
-| 残る非ブロック論点 | live Speech API smoke evidence、仕様責任者合意 |
+| 仕様責任者 | プロダクトオーナー（PO） |
+| 合意日 | 2026-07-17 |
+| 残る非ブロック論点 | live Speech API smoke evidence |
 
 ## 着手可チェック
 
@@ -265,4 +265,4 @@ read_when:
 - [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
-- [ ] 仕様責任者がレビューし、合意した。
+- [x] 仕様責任者がレビューし、合意した。

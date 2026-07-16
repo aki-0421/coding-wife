@@ -18,13 +18,13 @@ read_when:
 | 提出期限 | 2026年7月22日 09:00 JST |
 | 必須機能数 | 8機能 |
 | 機能要件数 | 381件 |
-| 全体readiness | Not Ready（全8要件定義書はDraft） |
+| 全体readiness | Not Ready（全8要件定義書はApproved） |
 | 完了条件 | 8機能すべてが統合され、macOS実機E2E、Windows CI、Ubuntu CI、3OS artifactの合格条件を満たす |
 | 機能削減 | 8機能の一部だけを提出する案は採用しない |
 
 8機能はすべて提出必須である。各機能は要件定義書の「含める」をハッカソン版へ実装し、「含めない」は期限後の拡張として扱う。追加機能は、8機能の統合導線と提出検証が完了するまで着手しない。
 
-2026年7月16日の仕様責任者判断として、381件の機能要件と8機能を降格・削除せず維持する。同時に、2026年7月22日 09:00 JSTまでの全件実装・3OS検証に実行可能な計画がないdeadline blockerを既知riskとして受容する。このrisk受容はReady判定ではなく、全体readinessは`Not Ready`、各要件定義書は`Draft`のままとする。
+2026年7月16日の仕様責任者判断として、381件の機能要件と8機能を降格・削除せず維持する。同時に、2026年7月22日 09:00 JSTまでの全件実装・3OS検証に実行可能な計画がないdeadline blockerを既知riskとして受容する。2026年7月17日にプロダクトオーナー（PO）が全8要件定義書をレビューし、仕様として承認した。この承認は実装完了、evidence整備、release gate合格、またはReady判定を意味しない。deadline blockerは残り、全体readinessは`Not Ready（全8要件定義書はApproved）`とする。
 
 ハッカソン要件と提出準備は[ハッカソン文書索引](../hackathon/README.md)を正本とする。
 
@@ -32,14 +32,14 @@ read_when:
 
 | Prefix | 機能 | 要件定義書 | 提出で示す価値 | 状態 |
 |---|---|---|---|---|
-| `WORK` | workspace-sessions | [要件定義書](workspace-sessions/requirements.md) | repositoryを診断し、同一repositoryから複数の専用worktree sessionを管理できる | Draft |
-| `CODE` | codex-main-session | [要件定義書](codex-main-session/requirements.md) | Solとのmain chatを中心にCodexの作業とユーザー判断を進められる | Draft |
-| `SUP` | support-agent-orchestration | [要件定義書](support-agent-orchestration/requirements.md) | 7つのsupport roleが独立threadでmainを支援し、同じworktreeで協働できる | Draft |
-| `GIT` | git-review-harness | [要件定義書](git-review-harness/requirements.md) | diff、test、reviewの結果を収集し、Git操作の判断材料を提示できる | Draft |
-| `HIST` | activity-history | [要件定義書](activity-history/requirements.md) | agent、turn、test、Git、modelの構造化された実行証跡を追跡できる | Draft |
-| `LIVE` | live2d-companion | [要件定義書](live2d-companion/requirements.md) | 同梱Live2D companionが作業状態を視覚的に伝えられる | Draft |
-| `NARR` | audio-commentary | [要件定義書](audio-commentary/requirements.md) | 重要な作業状況を日本語または英語のtextとAI生成音声で実況できる | Draft |
-| `APP` | desktop-shell | [要件定義書](desktop-shell/requirements.md) | 3OS artifact、tray、復元、設定・診断、安全停止を一体化できる | Draft |
+| `WORK` | workspace-sessions | [要件定義書](workspace-sessions/requirements.md) | repositoryを診断し、同一repositoryから複数の専用worktree sessionを管理できる | Approved |
+| `CODE` | codex-main-session | [要件定義書](codex-main-session/requirements.md) | Solとのmain chatを中心にCodexの作業とユーザー判断を進められる | Approved |
+| `SUP` | support-agent-orchestration | [要件定義書](support-agent-orchestration/requirements.md) | 7つのsupport roleが独立threadでmainを支援し、同じworktreeで協働できる | Approved |
+| `GIT` | git-review-harness | [要件定義書](git-review-harness/requirements.md) | diff、test、reviewの結果を収集し、Git操作の判断材料を提示できる | Approved |
+| `HIST` | activity-history | [要件定義書](activity-history/requirements.md) | agent、turn、test、Git、modelの構造化された実行証跡を追跡できる | Approved |
+| `LIVE` | live2d-companion | [要件定義書](live2d-companion/requirements.md) | 同梱Live2D companionが作業状態を視覚的に伝えられる | Approved |
+| `NARR` | audio-commentary | [要件定義書](audio-commentary/requirements.md) | 重要な作業状況を日本語または英語のtextとAI生成音声で実況できる | Approved |
+| `APP` | desktop-shell | [要件定義書](desktop-shell/requirements.md) | 3OS artifact、tray、復元、設定・診断、安全停止を一体化できる | Approved |
 
 Prefix、状態、責任者、正規pathは[ID管理ルール](../rules/id-management-rules.md#prefix要件定義書台帳)を正本とする。
 
@@ -88,7 +88,7 @@ Prefix、状態、責任者、正規pathは[ID管理ルール](../rules/id-manag
 ## 文書管理
 
 - 要件定義書は[要件定義基準](../rules/requirements-definition-standards.md)と[要件定義書テンプレート](../rules/requirements-definition-template.md)に従う。
-- 8機能の要件定義書は`Draft`から開始し、仕様責任者のレビューと合意後に`Approved`へ変更する。
+- 全8機能の要件定義書は、2026年7月17日のプロダクトオーナー（PO）によるレビューと合意を受け、`Approved`として管理する。
 - 要件IDと画面IDは[ID管理ルール](../rules/id-management-rules.md)に従い、廃止後も再利用しない。
 - 要件の根拠として参照する外部資料は、OpenAI、Tauri、Live2Dを含む提供元の恒久的な一次資料に限定する。変更され得る仕様には`last_verified`を記録する。
 - 本索引、8機能の要件定義書、`docs/rules/`、`docs/screen-design/`、`docs/hackathon/`の管理対象文書だけを要件の参照先とし、調査入力と作業用資料へリンクしない。

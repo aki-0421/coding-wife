@@ -3,7 +3,7 @@ title: "Live2Dコンパニオン 要件定義"
 description: "許諾済みの同梱モデル1体だけでmain Solの状態を表現し、描画不能時もtextへ安全に縮退する要件。"
 updated: 2026-07-17
 last_verified: 2026-07-17
-status: "Draft"
+status: "Approved"
 prefix: "LIVE"
 read_when:
   - "同梱Live2Dモデルのasset境界、状態表現、描画、lip-syncを実装または検証するとき。"
@@ -15,10 +15,10 @@ read_when:
 | 項目 | 内容 |
 |---|---|
 | Prefix | `LIVE` |
-| 状態 | Draft |
-| 仕様責任者 | プロダクトオーナー |
+| 状態 | Approved |
+| 仕様責任者 | プロダクトオーナー（PO） |
 | 作成日 | 2026-07-16 |
-| 最終レビュー日 | 未レビュー |
+| 最終レビュー日 | 2026-07-17 |
 
 ## 背景
 
@@ -75,17 +75,17 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| LIVE-F-001 | release artifactへ同梱モデルを1体だけ含める。 | artifact展開検査でmodel descriptorとcompiled modelが各1件で同じresource IDに属し、2体目のdescriptor、compiled model、model catalogが0件である。 | Draft | 非該当 |
-| LIVE-F-002 | 許諾済みsource assetから固定bundleへruntime resourceだけを複製する。 | clean buildでdescriptor、compiled model、texture、physics、display metadata、16 expressions、previewだけを複製し、editor source、配信tool設定、補助資料を除外する。 | Draft | 非該当 |
-| LIVE-F-003 | resource manifestで配布内容とhashを固定する。 | 各resourceのrelative path、SHA-256、media type、byte長が1件あり、欠落、余分、hash不一致、重複、motionがあればbuildと起動診断を`LIVE_ASSET_INVALID`にする。 | Draft | 非該当 |
-| LIVE-F-004 | resource pathをapplication bundle内へ閉じる。 | manifest記載relative pathだけを受理し、absolute、`..`、URL、bundle外symlink、workspace、home、application data参照をdecode前に拒否する。 | Draft | 非該当 |
-| LIVE-F-005 | model追加用UIとOS入力を提供しない。 | S-002、S-004、menu、context menuにmodel picker、import、drag and drop、URL、watch folder、model選択が存在せず、model fileをdropしても状態とfilesystemが変化しない。 | Draft | 非該当 |
-| LIVE-F-006 | model追加用外部起動経路を登録しない。 | Deep Link、file association、CLI argument、clipboard、network responseからmodel resourceを登録するhandlerが0件で、該当入力を与えても同梱モデルresource IDが変化しない。 | Draft | 非該当 |
-| LIVE-F-007 | pluginとhidden APIからmodelを交換できない。 | Tauri Command、IPC message、JavaScript global、plugin hook、config keyにmodel path、model URL、model bytes、model swapを受け取るpublic entryが0件であることをrelease API surface testで確認できる。 | Draft | 非該当 |
-| LIVE-F-008 | runtimeで外部modelを取得または保存しない。 | animated、static、hidden、retry、offlineの各試験でmodel用HTTP request、filesystem picker、directory watcher、application dataへのmodel bytes書き込みが0件である。 | Draft | 非該当 |
-| LIVE-F-009 | 同梱modelの16表情とmotionなしを固定inventoryとして検証する。 | build manifestのexpression IDが次の16件と完全一致し、motion groupとmotion fileが0件である。 | Draft | 非該当 |
-| LIVE-F-010 | Cubism配布記録と必須noticeを含める。 | SDK/Core/Framework・EULA・`RedistributableFiles.txt`のversion/date/hashと本人同意を記録する。指定Coreをas-isでのみ配布しFrameworkをアプリへ統合、license/notice/copyrightとend-user保護条項を保持する。起動時Live2D logoとREADME/提出説明のLive2D言及、creator表記を必須とする。 | Draft | 非該当 |
-| LIVE-F-011 | Publication License免除と非Expandableをrelease gateにする。 | publisherが個人/General UserまたはSmall-Scale Enterpriseで直近年商1,000万円未満、かつLIVE-F-001/005〜008の固定1model・非Expandableである場合だけ契約・申請・料金不要と記録する。無料配布だけを根拠にせず、条件変更・不明・Expandable化は配布をblockし、必要な契約をreleaseの1か月以上前に完了する。 | Draft | 非該当 |
+| LIVE-F-001 | release artifactへ同梱モデルを1体だけ含める。 | artifact展開検査でmodel descriptorとcompiled modelが各1件で同じresource IDに属し、2体目のdescriptor、compiled model、model catalogが0件である。 | Approved | 非該当 |
+| LIVE-F-002 | 許諾済みsource assetから固定bundleへruntime resourceだけを複製する。 | clean buildでdescriptor、compiled model、texture、physics、display metadata、16 expressions、previewだけを複製し、editor source、配信tool設定、補助資料を除外する。 | Approved | 非該当 |
+| LIVE-F-003 | resource manifestで配布内容とhashを固定する。 | 各resourceのrelative path、SHA-256、media type、byte長が1件あり、欠落、余分、hash不一致、重複、motionがあればbuildと起動診断を`LIVE_ASSET_INVALID`にする。 | Approved | 非該当 |
+| LIVE-F-004 | resource pathをapplication bundle内へ閉じる。 | manifest記載relative pathだけを受理し、absolute、`..`、URL、bundle外symlink、workspace、home、application data参照をdecode前に拒否する。 | Approved | 非該当 |
+| LIVE-F-005 | model追加用UIとOS入力を提供しない。 | S-002、S-004、menu、context menuにmodel picker、import、drag and drop、URL、watch folder、model選択が存在せず、model fileをdropしても状態とfilesystemが変化しない。 | Approved | 非該当 |
+| LIVE-F-006 | model追加用外部起動経路を登録しない。 | Deep Link、file association、CLI argument、clipboard、network responseからmodel resourceを登録するhandlerが0件で、該当入力を与えても同梱モデルresource IDが変化しない。 | Approved | 非該当 |
+| LIVE-F-007 | pluginとhidden APIからmodelを交換できない。 | Tauri Command、IPC message、JavaScript global、plugin hook、config keyにmodel path、model URL、model bytes、model swapを受け取るpublic entryが0件であることをrelease API surface testで確認できる。 | Approved | 非該当 |
+| LIVE-F-008 | runtimeで外部modelを取得または保存しない。 | animated、static、hidden、retry、offlineの各試験でmodel用HTTP request、filesystem picker、directory watcher、application dataへのmodel bytes書き込みが0件である。 | Approved | 非該当 |
+| LIVE-F-009 | 同梱modelの16表情とmotionなしを固定inventoryとして検証する。 | build manifestのexpression IDが次の16件と完全一致し、motion groupとmotion fileが0件である。 | Approved | 非該当 |
+| LIVE-F-010 | Cubism配布記録と必須noticeを含める。 | SDK/Core/Framework・EULA・`RedistributableFiles.txt`のversion/date/hashと本人同意を記録する。指定Coreをas-isでのみ配布しFrameworkをアプリへ統合、license/notice/copyrightとend-user保護条項を保持する。起動時Live2D logoとREADME/提出説明のLive2D言及、creator表記を必須とする。 | Approved | 非該当 |
+| LIVE-F-011 | Publication License免除と非Expandableをrelease gateにする。 | publisherが個人/General UserまたはSmall-Scale Enterpriseで直近年商1,000万円未満、かつLIVE-F-001/005〜008の固定1model・非Expandableである場合だけ契約・申請・料金不要と記録する。無料配布だけを根拠にせず、条件変更・不明・Expandable化は配布をblockし、必要な契約をreleaseの1か月以上前に完了する。 | Approved | 非該当 |
 
 #### 同梱expression inventory
 
@@ -100,19 +100,19 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| LIVE-F-012 | semantic stateを開いているworkspaceのmain Solだけから導出する。 | session IDとmain thread IDが現在値へ一致するeventだけを反映し、別workspace、thread、sessionでは表示を変えない。 | Draft | 非該当 |
-| LIVE-F-013 | support roleの状態をcompanionへ反映しない。 | 7 roleそれぞれの`running`、`completed`、`failed`、`waiting` eventを単独発生させてもsemantic state、expression、mouth以外のparameterが変化せず、support avatarが作成されない。 | Draft | 非該当 |
-| LIVE-F-014 | semantic stateを9種類へ限定する。 | runtime state IDが`idle`、`planning`、`working`、`testing`、`waiting_for_user`、`succeeded`、`warning`、`failed`、`interrupted`のいずれかで、追加値を受け取るとLIVE-F-019へ縮退する。 | Draft | 非該当 |
-| LIVE-F-015 | semantic stateとexpressionを固定表どおり対応させる。 | 9状態を1件ずつ発生させるE2Eで、現在expressionが次表のIDと一致し、表にないexpressionをUIまたはeventから選択できない。 | Draft | 非該当 |
-| LIVE-F-016 | 同時main状態を固定優先順位で1件へ解決する。 | `interrupted > failed > waiting_for_user > warning > succeeded > testing > working > planning > idle`の先頭だけを表示し、同じfixtureを100回処理して一致する。 | Draft | 非該当 |
-| LIVE-F-017 | state eventをsession、main thread、sequenceで相関する。 | 現在値より大きいmonotonic sequenceだけを適用し、重複または小さいsequenceを受け取っても現在state、terminal latch、expressionを変更しない。 | Draft | 非該当 |
-| LIVE-F-018 | rapid state changeを最新状態へ集約する。 | 100 ms内の非terminal eventを最新1件にし、20 event/秒を5秒入力してerror 0件、最終eventから500 ms以内に表示を一致させる。質問待ち、失敗、中断は即時反映する。 | Draft | 非該当 |
-| LIVE-F-019 | 不正semantic stateを`idle`へ縮退する。 | enum外、相関field欠落、負のsequenceでbase poseへ戻し、日英textと`LIVE_STATE_UNKNOWN`を表示して継続する。 | Draft | 非該当 |
-| LIVE-F-020 | workspace切替時に切替先mainの最新状態を表示する。 | 2 workspaceを切り替えると250 ms以内に切替先の保存済みmain statusから再評価し、切替元のterminal latchとexpressionを引き継がない。 | Draft | 非該当 |
-| LIVE-F-021 | main statusが未取得の初期状態を`idle`にする。 | 初回表示、session未選択、main thread開始前ではbase poseと`待機中`または英語訳を表示し、loadingをerrorとして扱わない。 | Draft | 非該当 |
-| LIVE-F-022 | terminal stateを3秒後に`idle`へ戻す。 | 4 terminal stateを後続eventなしで3,000±100 ms保持し、高優先度またはactive stateは即時置換する。 | Draft | 非該当 |
-| LIVE-F-023 | Live2D表示と同じsemantic stateをHTML textで常時表示する。 | animated、static、hidden、reduced motionの全状態でS-002のARIA statusに同じ日本語または英語のstate labelが1件あり、canvasだけを見なくても状態を識別できる。 | Draft | 非該当 |
-| LIVE-F-024 | 1つのmain windowへcompanion canvasを1つだけ作成する。 | workspaceとsessionを3件作成して切り替えてもcanvas数が1、loaded compiled model数が1で、support role数とsession数に比例して増えない。 | Draft | 非該当 |
+| LIVE-F-012 | semantic stateを開いているworkspaceのmain Solだけから導出する。 | session IDとmain thread IDが現在値へ一致するeventだけを反映し、別workspace、thread、sessionでは表示を変えない。 | Approved | 非該当 |
+| LIVE-F-013 | support roleの状態をcompanionへ反映しない。 | 7 roleそれぞれの`running`、`completed`、`failed`、`waiting` eventを単独発生させてもsemantic state、expression、mouth以外のparameterが変化せず、support avatarが作成されない。 | Approved | 非該当 |
+| LIVE-F-014 | semantic stateを9種類へ限定する。 | runtime state IDが`idle`、`planning`、`working`、`testing`、`waiting_for_user`、`succeeded`、`warning`、`failed`、`interrupted`のいずれかで、追加値を受け取るとLIVE-F-019へ縮退する。 | Approved | 非該当 |
+| LIVE-F-015 | semantic stateとexpressionを固定表どおり対応させる。 | 9状態を1件ずつ発生させるE2Eで、現在expressionが次表のIDと一致し、表にないexpressionをUIまたはeventから選択できない。 | Approved | 非該当 |
+| LIVE-F-016 | 同時main状態を固定優先順位で1件へ解決する。 | `interrupted > failed > waiting_for_user > warning > succeeded > testing > working > planning > idle`の先頭だけを表示し、同じfixtureを100回処理して一致する。 | Approved | 非該当 |
+| LIVE-F-017 | state eventをsession、main thread、sequenceで相関する。 | 現在値より大きいmonotonic sequenceだけを適用し、重複または小さいsequenceを受け取っても現在state、terminal latch、expressionを変更しない。 | Approved | 非該当 |
+| LIVE-F-018 | rapid state changeを最新状態へ集約する。 | 100 ms内の非terminal eventを最新1件にし、20 event/秒を5秒入力してerror 0件、最終eventから500 ms以内に表示を一致させる。質問待ち、失敗、中断は即時反映する。 | Approved | 非該当 |
+| LIVE-F-019 | 不正semantic stateを`idle`へ縮退する。 | enum外、相関field欠落、負のsequenceでbase poseへ戻し、日英textと`LIVE_STATE_UNKNOWN`を表示して継続する。 | Approved | 非該当 |
+| LIVE-F-020 | workspace切替時に切替先mainの最新状態を表示する。 | 2 workspaceを切り替えると250 ms以内に切替先の保存済みmain statusから再評価し、切替元のterminal latchとexpressionを引き継がない。 | Approved | 非該当 |
+| LIVE-F-021 | main statusが未取得の初期状態を`idle`にする。 | 初回表示、session未選択、main thread開始前ではbase poseと`待機中`または英語訳を表示し、loadingをerrorとして扱わない。 | Approved | 非該当 |
+| LIVE-F-022 | terminal stateを3秒後に`idle`へ戻す。 | 4 terminal stateを後続eventなしで3,000±100 ms保持し、高優先度またはactive stateは即時置換する。 | Approved | 非該当 |
+| LIVE-F-023 | Live2D表示と同じsemantic stateをHTML textで常時表示する。 | animated、static、hidden、reduced motionの全状態でS-002のARIA statusに同じ日本語または英語のstate labelが1件あり、canvasだけを見なくても状態を識別できる。 | Approved | 非該当 |
+| LIVE-F-024 | 1つのmain windowへcompanion canvasを1つだけ作成する。 | workspaceとsessionを3件作成して切り替えてもcanvas数が1、loaded compiled model数が1で、support role数とsession数に比例して増えない。 | Approved | 非該当 |
 
 #### semantic state mapping
 
@@ -132,51 +132,51 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| LIVE-F-025 | modelへ適用するanimation入力を表情、blink、breath、position/scale、TTS mouth parameterへ限定する。 | renderer instrumentationで前記5分類以外のmotion start、random pose、camera、pointer追従、gaze、user parameter入力が0件である。 | Draft | 非該当 |
-| LIVE-F-026 | expression切替時に前stateをresetして現在stateのexpressionを1件だけ適用する。 | 9状態の全遷移72組で前expressionの加算状態が残らず、現在stateに対応するexpressionまたはbase poseだけが有効になる。 | Draft | 非該当 |
-| LIVE-F-027 | animated表示中にblinkとbreathをmodel parameterで生成する。 | `EyeBlink` groupの左右eye parameterと`ParamBreath`だけがidle loopで時間変化し、60秒試験で左右blinkが1回以上、breath cycleが3〜15回、値がmodel定義範囲内になる。 | Draft | 非該当 |
-| LIVE-F-028 | positionとscaleをcompanion領域へresponsiveにfitする。 | 800×600から3,840×2,160のwindow、100%・150%・200% scaleでmodel比率を維持し、headとbody中心がcompanion領域外へ出ず、resize完了から250 ms以内に最終transformへ到達する。 | Draft | 非該当 |
-| LIVE-F-029 | TTS envelopeを`ParamMouthOpenY`へ同期する。 | 現在audioと一致する0.0〜1.0値を30 Hz以上で適用し、有声音で0より大きく、pause・終了から100 ms以内に0へ戻す。expressionは変えない。 | Draft | 非該当 |
-| LIVE-F-030 | TTS音声がない場合はmouthを閉じたままにする。 | API key未設定、text-only、offline、TTS error、queue空、別workspace音声の各試験で`ParamMouthOpenY`が0となり、mic、system audio、推測波形を入力に使わない。 | Draft | 非該当 |
-| LIVE-F-031 | reduced motionで非必須animationを停止する。 | 250 ms以内にblink、breath、transform、lip-syncを止め、expression、ARIA status、transcriptを保持する。 | Draft | 非該当 |
-| LIVE-F-032 | window非表示中にrender loopを停止する。 | closeから2秒以内にframe・drawを0件/秒にし、最新stateだけを保持する。再表示から500 ms以内に描画し、Codex・TTSは継続する。 | Draft | 非該当 |
-| LIVE-F-033 | 明示Quitでrenderer resourceを解放する。 | Quit時にanimation frame、WebGL texture、buffer、context listenerを破棄し、プロセス終了まで新しいdraw、asset load、retryを開始しない。 | Draft | 非該当 |
-| LIVE-F-034 | expressionとanimationの一時状態を永続化しない。 | SQLite、Web Storage、設定fileにexpression ID、mouth envelope、blink phase、breath phase、transform frameが保存されず、再起動時はLIVE-F-021から再評価する。 | Draft | 非該当 |
+| LIVE-F-025 | modelへ適用するanimation入力を表情、blink、breath、position/scale、TTS mouth parameterへ限定する。 | renderer instrumentationで前記5分類以外のmotion start、random pose、camera、pointer追従、gaze、user parameter入力が0件である。 | Approved | 非該当 |
+| LIVE-F-026 | expression切替時に前stateをresetして現在stateのexpressionを1件だけ適用する。 | 9状態の全遷移72組で前expressionの加算状態が残らず、現在stateに対応するexpressionまたはbase poseだけが有効になる。 | Approved | 非該当 |
+| LIVE-F-027 | animated表示中にblinkとbreathをmodel parameterで生成する。 | `EyeBlink` groupの左右eye parameterと`ParamBreath`だけがidle loopで時間変化し、60秒試験で左右blinkが1回以上、breath cycleが3〜15回、値がmodel定義範囲内になる。 | Approved | 非該当 |
+| LIVE-F-028 | positionとscaleをcompanion領域へresponsiveにfitする。 | 800×600から3,840×2,160のwindow、100%・150%・200% scaleでmodel比率を維持し、headとbody中心がcompanion領域外へ出ず、resize完了から250 ms以内に最終transformへ到達する。 | Approved | 非該当 |
+| LIVE-F-029 | TTS envelopeを`ParamMouthOpenY`へ同期する。 | 現在audioと一致する0.0〜1.0値を30 Hz以上で適用し、有声音で0より大きく、pause・終了から100 ms以内に0へ戻す。expressionは変えない。 | Approved | 非該当 |
+| LIVE-F-030 | TTS音声がない場合はmouthを閉じたままにする。 | API key未設定、text-only、offline、TTS error、queue空、別workspace音声の各試験で`ParamMouthOpenY`が0となり、mic、system audio、推測波形を入力に使わない。 | Approved | 非該当 |
+| LIVE-F-031 | reduced motionで非必須animationを停止する。 | 250 ms以内にblink、breath、transform、lip-syncを止め、expression、ARIA status、transcriptを保持する。 | Approved | 非該当 |
+| LIVE-F-032 | window非表示中にrender loopを停止する。 | closeから2秒以内にframe・drawを0件/秒にし、最新stateだけを保持する。再表示から500 ms以内に描画し、Codex・TTSは継続する。 | Approved | 非該当 |
+| LIVE-F-033 | 明示Quitでrenderer resourceを解放する。 | Quit時にanimation frame、WebGL texture、buffer、context listenerを破棄し、プロセス終了まで新しいdraw、asset load、retryを開始しない。 | Approved | 非該当 |
+| LIVE-F-034 | expressionとanimationの一時状態を永続化しない。 | SQLite、Web Storage、設定fileにexpression ID、mouth envelope、blink phase、breath phase、transform frameが保存されず、再起動時はLIVE-F-021から再評価する。 | Approved | 非該当 |
 
 ### 描画縮退と復旧
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| LIVE-F-035 | 表示をanimated、static、hiddenの3段階で縮退する。 | modelとWebGLが有効ならanimated、animated不能かつpreview有効ならstatic、previewも無効ならhiddenとなり、全段階でLIVE-F-023のtext statusが表示される。 | Draft | 非該当 |
-| LIVE-F-036 | asset欠落・破損でstaticへ縮退する。 | 各resource欠落、hash不一致、JSON失敗で外部探索せず`LIVE_ASSET_INVALID`を表示し、有効previewがあればstaticにする。 | Draft | 非該当 |
-| LIVE-F-037 | state対応expressionがruntimeで利用不能ならbase poseへ縮退する。 | mapping対象expressionを1件読取不能にするとmodel全体を停止せずbase poseとtext stateを表示し、expression IDを含む`LIVE_EXPRESSION_UNAVAILABLE`をS-004へ1件記録する。 | Draft | 非該当 |
-| LIVE-F-038 | WebGLを作成できない場合はstatic表示へ縮退する。 | WebGL無効、context作成失敗、shader compile失敗、texture上限不足の各fixtureでrendererがdrawを開始せず、previewが有効ならstaticと`LIVE_WEBGL_UNAVAILABLE`を表示する。 | Draft | 非該当 |
-| LIVE-F-039 | context lossから1回だけ自動復旧する。 | lossでdrawを止めてstaticへ移り、5秒以内にmanifest検証と初期化を1回行う。失敗・2回目では自動再試行しない。 | Draft | 非該当 |
-| LIVE-F-040 | S-004からrendererを明示再試行できる。 | static・hidden時だけ有効で、1操作につきasset検証と初期化を各1回行う。失敗時も外部取得・model交換しない。 | Draft | 非該当 |
-| LIVE-F-041 | renderer障害をCodex sessionから分離する。 | asset、WebGL、expression、animation frameのuncaught errorを発生させてもmain/support turn、TTS text、prompt draftが停止せず、回復不能通知は共通仕様の条件を満たす場合だけ送る。 | Draft | 非該当 |
+| LIVE-F-035 | 表示をanimated、static、hiddenの3段階で縮退する。 | modelとWebGLが有効ならanimated、animated不能かつpreview有効ならstatic、previewも無効ならhiddenとなり、全段階でLIVE-F-023のtext statusが表示される。 | Approved | 非該当 |
+| LIVE-F-036 | asset欠落・破損でstaticへ縮退する。 | 各resource欠落、hash不一致、JSON失敗で外部探索せず`LIVE_ASSET_INVALID`を表示し、有効previewがあればstaticにする。 | Approved | 非該当 |
+| LIVE-F-037 | state対応expressionがruntimeで利用不能ならbase poseへ縮退する。 | mapping対象expressionを1件読取不能にするとmodel全体を停止せずbase poseとtext stateを表示し、expression IDを含む`LIVE_EXPRESSION_UNAVAILABLE`をS-004へ1件記録する。 | Approved | 非該当 |
+| LIVE-F-038 | WebGLを作成できない場合はstatic表示へ縮退する。 | WebGL無効、context作成失敗、shader compile失敗、texture上限不足の各fixtureでrendererがdrawを開始せず、previewが有効ならstaticと`LIVE_WEBGL_UNAVAILABLE`を表示する。 | Approved | 非該当 |
+| LIVE-F-039 | context lossから1回だけ自動復旧する。 | lossでdrawを止めてstaticへ移り、5秒以内にmanifest検証と初期化を1回行う。失敗・2回目では自動再試行しない。 | Approved | 非該当 |
+| LIVE-F-040 | S-004からrendererを明示再試行できる。 | static・hidden時だけ有効で、1操作につきasset検証と初期化を各1回行う。失敗時も外部取得・model交換しない。 | Approved | 非該当 |
+| LIVE-F-041 | renderer障害をCodex sessionから分離する。 | asset、WebGL、expression、animation frameのuncaught errorを発生させてもmain/support turn、TTS text、prompt draftが停止せず、回復不能通知は共通仕様の条件を満たす場合だけ送る。 | Approved | 非該当 |
 
 ### 性能と3OS検証
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| LIVE-F-042 | high-DPI描画のbacking storeを制限する。 | device pixel ratioを1.0〜4.0で変化させてもrender DPRを最大2.0、canvas一辺を最大4,096 pxへclampし、CSS表示寸法とpointer非入力のlayoutが変化しない。 | Draft | 非該当 |
-| LIVE-F-043 | macOS実機でsemantic stateを250 ms以内に描画する。 | macOS 13以降のApple Silicon実機でevent受信からexpressionとARIA status更新までp95 250 ms以内、60秒のvisible idleで平均28〜30 fps、1秒区間の最小20 fps以上となる。 | Draft | 非該当 |
-| LIVE-F-044 | macOS実機でrenderer CPU利用を制限する。 | 8 CPU core・16 GB RAMのApple Siliconでvisible idle 60秒の平均が1 logical coreの20%以下、TTS lip-sync中が35%以下、window非表示2秒後が1%以下となる。 | Draft | 非該当 |
-| LIVE-F-045 | macOS実機でrenderer memoryを制限する。 | 1体を10分表示したrenderer有効時のprocess RSS増分が非表示baseline比512 MiB以下で、2分時点から10分時点の増加が32 MiB以下となる。 | Draft | 非該当 |
-| LIVE-F-046 | macOS artifactで主要導線を実機E2E検証する。 | `.dmg`から起動し、16 expression inventory、9 state mapping、TTS mouth、TTSなし、reduced motion、resize/DPI、context loss、asset破損、static・hidden縮退、Quitを全件実行したevidenceがある。 | Draft | 非該当 |
-| LIVE-F-047 | Windows 11 x64をCI検証しpreview表示する。 | interactive VMで`.msi`を起動し、model load、WebGL/texture、animation、no-import、fallbackを検証する。README・S-004に実機未検証と表示する。 | Draft | 非該当 |
-| LIVE-F-048 | Ubuntu 24.04 x64 artifactをCI検証しpreview表示する。 | Xvfb/DBus環境で`.AppImage`を起動しLIVE-F-047と同項目を検証する。READMEとS-004にLive2D/Tauri WebView実機未検証と表示する。 | Draft | 非該当 |
-| LIVE-F-049 | release artifactごとにmodel拡張入口が0件であることを検査する。 | macOS、Windows、UbuntuのartifactへLIVE-F-005〜LIVE-F-008のUI、handler、API、network、watcher検査を行い、1件でも検出したartifactをrelease候補にしない。 | Draft | 非該当 |
+| LIVE-F-042 | high-DPI描画のbacking storeを制限する。 | device pixel ratioを1.0〜4.0で変化させてもrender DPRを最大2.0、canvas一辺を最大4,096 pxへclampし、CSS表示寸法とpointer非入力のlayoutが変化しない。 | Approved | 非該当 |
+| LIVE-F-043 | macOS実機でsemantic stateを250 ms以内に描画する。 | macOS 13以降のApple Silicon実機でevent受信からexpressionとARIA status更新までp95 250 ms以内、60秒のvisible idleで平均28〜30 fps、1秒区間の最小20 fps以上となる。 | Approved | 非該当 |
+| LIVE-F-044 | macOS実機でrenderer CPU利用を制限する。 | 8 CPU core・16 GB RAMのApple Siliconでvisible idle 60秒の平均が1 logical coreの20%以下、TTS lip-sync中が35%以下、window非表示2秒後が1%以下となる。 | Approved | 非該当 |
+| LIVE-F-045 | macOS実機でrenderer memoryを制限する。 | 1体を10分表示したrenderer有効時のprocess RSS増分が非表示baseline比512 MiB以下で、2分時点から10分時点の増加が32 MiB以下となる。 | Approved | 非該当 |
+| LIVE-F-046 | macOS artifactで主要導線を実機E2E検証する。 | `.dmg`から起動し、16 expression inventory、9 state mapping、TTS mouth、TTSなし、reduced motion、resize/DPI、context loss、asset破損、static・hidden縮退、Quitを全件実行したevidenceがある。 | Approved | 非該当 |
+| LIVE-F-047 | Windows 11 x64をCI検証しpreview表示する。 | interactive VMで`.msi`を起動し、model load、WebGL/texture、animation、no-import、fallbackを検証する。README・S-004に実機未検証と表示する。 | Approved | 非該当 |
+| LIVE-F-048 | Ubuntu 24.04 x64 artifactをCI検証しpreview表示する。 | Xvfb/DBus環境で`.AppImage`を起動しLIVE-F-047と同項目を検証する。READMEとS-004にLive2D/Tauri WebView実機未検証と表示する。 | Approved | 非該当 |
+| LIVE-F-049 | release artifactごとにmodel拡張入口が0件であることを検査する。 | macOS、Windows、UbuntuのartifactへLIVE-F-005〜LIVE-F-008のUI、handler、API、network、watcher検査を行い、1件でも検出したartifactをrelease候補にしない。 | Approved | 非該当 |
 
 ### privacy、offline、多言語
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| LIVE-F-050 | model dataとstateを外部送信しない。 | network traceでSDK、model、expression、state、WebGL診断を送るHTTP、WebSocket、telemetryが0件で、TTS通信を別actorと識別できる。 | Draft | 非該当 |
-| LIVE-F-051 | 診断logから秘密とpathを除外する。 | error、tier、expression、WebGL分類、UTCだけを記録し、model、texture、絶対path、workspace、会話、key、tokenが0件となる。 | Draft | 非該当 |
-| LIVE-F-052 | offlineでも同梱modelとtext statusを表示する。 | networkを遮断して起動してもlocal assetだけでanimatedまたは定義済み縮退を表示し、network再接続を要求しない。TTS不能時はLIVE-F-030を適用する。 | Draft | 非該当 |
-| LIVE-F-053 | Live2D関連UIを日本語と英語で提供する。 | state label、static・hidden理由、retry、preview表示、license、error guidanceが両localeにあり、state ID、expression ID、error code、SDK versionは翻訳しない。 | Draft | 非該当 |
-| LIVE-F-054 | companionを補助的な視覚表現として扱う。 | canvasとstatic previewをaccessibility treeから除外し、ARIA status、診断、retryをkeyboardとscreen readerで利用でき、色または表情だけを状態の唯一の伝達手段にしない。 | Draft | 非該当 |
+| LIVE-F-050 | model dataとstateを外部送信しない。 | network traceでSDK、model、expression、state、WebGL診断を送るHTTP、WebSocket、telemetryが0件で、TTS通信を別actorと識別できる。 | Approved | 非該当 |
+| LIVE-F-051 | 診断logから秘密とpathを除外する。 | error、tier、expression、WebGL分類、UTCだけを記録し、model、texture、絶対path、workspace、会話、key、tokenが0件となる。 | Approved | 非該当 |
+| LIVE-F-052 | offlineでも同梱modelとtext statusを表示する。 | networkを遮断して起動してもlocal assetだけでanimatedまたは定義済み縮退を表示し、network再接続を要求しない。TTS不能時はLIVE-F-030を適用する。 | Approved | 非該当 |
+| LIVE-F-053 | Live2D関連UIを日本語と英語で提供する。 | state label、static・hidden理由、retry、preview表示、license、error guidanceが両localeにあり、state ID、expression ID、error code、SDK versionは翻訳しない。 | Approved | 非該当 |
+| LIVE-F-054 | companionを補助的な視覚表現として扱う。 | canvasとstatic previewをaccessibility treeから除外し、ARIA status、診断、retryをkeyboardとscreen readerで利用でき、色または表情だけを状態の唯一の伝達手段にしない。 | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -242,15 +242,15 @@ read_when:
 | Live2D Cubism SDK for Web | LIVE-F-010〜011のpublisher/EULA/再配布記録とversionを固定する。 | 条件付き解決 | 記録または配布条件の不備でartifact公開不可 |
 | WebGL / Tauri WebView | Tauri・WKWebView・WebView2・WebKitGTKはCubism公式対応表に明記されないため、3OSの実artifact起動をgateにする。 | OS別検証 | 不能時は配布block、runtimeはstatic/hidden縮退 |
 | [デスクトップ共通仕様](../../screen-design/desktop-common-specification.md) | 3OS artifact、単一window、close、Quit、通知、reduced motion、text fallbackを提供する。 | 解決済み | 共通lifecycleとOS表示を検証できない |
-| [codex-main-session要件](../codex-main-session/requirements.md) | main thread、turn、item、AskUserQuestion、interruptの相関済み状態を提供する。 | Draft | LIVE-F-012〜LIVE-F-023を導出できない |
-| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | support roleをmainとは別主体として識別する。 | Draft | LIVE-F-013の分離を検証できない |
-| [audio-commentary要件](../audio-commentary/requirements.md) | TTS audio request ID、再生状態、envelope、text fallbackを提供する。 | Draft | LIVE-F-029、LIVE-F-030はmouth closedへ縮退 |
+| [codex-main-session要件](../codex-main-session/requirements.md) | main thread、turn、item、AskUserQuestion、interruptの相関済み状態を提供する。 | Approved | LIVE-F-012〜LIVE-F-023を導出できない |
+| [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | support roleをmainとは別主体として識別する。 | Approved | LIVE-F-013の分離を検証できない |
+| [audio-commentary要件](../audio-commentary/requirements.md) | TTS audio request ID、再生状態、envelope、text fallbackを提供する。 | Approved | LIVE-F-029、LIVE-F-030はmouth closedへ縮退 |
 
 ## 未確定事項
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| なし | 同梱1model、固定mapping、no motion/import、3段階縮退で実装する | 仕様責任者がpublisher/EULA/再配布release recordに合意する | いいえ |
+| なし | 同梱1model、固定mapping、no motion/import、3段階縮退で実装する | release時にpublisher/EULA/再配布evidenceを確認する | いいえ |
 
 ## 参照資料
 
@@ -274,9 +274,9 @@ read_when:
 | 項目 | 内容 |
 |---|---|
 | レビュー結果 | Not Ready |
-| 仕様責任者 | プロダクトオーナー |
-| 合意日 | 未合意 |
-| 残る非ブロック論点 | publisher/EULA/再配布release evidenceと仕様責任者合意 |
+| 仕様責任者 | プロダクトオーナー（PO） |
+| 合意日 | 2026-07-17 |
+| 残る非ブロック論点 | publisher/EULA/再配布release evidence |
 
 ## 着手可チェック
 
@@ -289,4 +289,4 @@ read_when:
 - [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
-- [ ] 仕様責任者がレビューし、合意した。
+- [x] 仕様責任者がレビューし、合意した。

@@ -6,7 +6,9 @@ read_when:
   - "session timeline、filter、search、evidence詳細、final summaryを実装するとき。"
   - "欠落・stale・large diff・履歴削除をGit非変更のまま表示または検証するとき。"
 screen_id: "S-003"
-status: "Draft"
+status: "Approved"
+approved_by: "プロダクトオーナー（PO）"
+approval_date: 2026-07-17
 ---
 # S-003 セッション証跡
 
@@ -222,12 +224,12 @@ status: "Draft"
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| なし | 本文の2-pane read-only表示、100件page、型別縮退、app履歴だけの明示削除で実装する | 仕様責任者レビューで実装と6要件の双方向IDを確認する | いいえ |
+| なし | 本文の2-pane read-only表示、100件page、型別縮退、app履歴だけの明示削除で実装する | 実装時に6要件の双方向IDを機械照合する | いいえ |
 
 ## レビュー確認
 
 - [x] front matterの `screen_id`、タイトル、ファイル名の画面IDが一致している。
-- [x] `status` が `Draft`、`Approved`、`Deprecated` のいずれかである。
+- [x] `status` が `Approved` である。
 - [x] 目的と対象外が一意である。
 - [x] 初期化、通常、空、処理中、オフライン、エラー、権限不足を確認した。
 - [x] キャンセル、閉じる、再表示、未保存データの動作が決まっている。
