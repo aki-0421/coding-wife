@@ -1,8 +1,8 @@
 ---
 title: "デスクトップシェル 要件定義"
-description: "単一window、4 routes、tray、child lifecycle、設定・診断、3OS artifactを統合するデスクトップshellの要件。"
-updated: 2026-07-16
-last_verified: 2026-07-16
+description: "単一window、4 routes、tray、process-tree lifecycle、設定・診断、3OS artifactを統合するデスクトップshellの要件。"
+updated: 2026-07-17
+last_verified: 2026-07-17
 status: "Draft"
 prefix: "APP"
 read_when:
@@ -18,7 +18,7 @@ read_when:
 | 状態 | Draft |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-16 |
-| 最終レビュー日 | 未レビュー |
+| 最終レビュー日 | 2026-07-17 |
 
 ## 背景
 
@@ -29,9 +29,9 @@ read_when:
 | 用語 | 定義 |
 |---|---|
 | active workspace | current routeがS-002またはS-003で示すworkspace。hidden中は保持し、S-001・S-004ではなし。 |
-| managed child | appが起動・追跡するApp Server、command/test process、spawnした場合のTTS/audio helper。 |
+| managed process tree | appが起動・追跡するApp Server、command/test、TTS/audio helperと、そのapp-owned descendant。 |
 | explicit Quit | OS shortcut、app menu、trayからapp process全体を終了する操作。window closeとは別。 |
-| emergency stop | appを残したまま新規実行を拒否し、全turn、audio、managed childを停止する操作。 |
+| emergency stop | appを残したまま新規実行を拒否し、全turn、audio、managed process treeを停止する操作。 |
 
 ## 目的
 
@@ -50,9 +50,9 @@ read_when:
 | 対象 | 内容 |
 |---|---|
 | shell | Tauri v2 / RustとReact + TypeScript / Viteの境界、single instance、1 window、4 routes、tray。 |
-| lifecycle | close、explicit Quit、emergency stop、managed child、crash復旧。 |
+| lifecycle | close、explicit Quit、emergency stop、managed process tree、crash復旧。 |
 | settings・診断 | shell設定の検証、credential状態、component診断、redacted copy。 |
-| release | `.dmg`、`.msi`、`.AppImage`のbuild・配布、checksum、起動smoke、macOS用install/launch shell、preview表示。 |
+| release | `.dmg`、`.msi`、`.AppImage`、SHA-256 manifest、OS別事前検証、GUI smoke、macOS用safe shell、preview表示。 |
 | security・A11y | IPC allowlist、CSP、path検証、日英、keyboard、OS表示設定。 |
 
 ### 含めない
@@ -62,7 +62,7 @@ read_when:
 | 複数window・複数WebView | 期限内の状態管理を単一境界へ閉じるため | [デスクトップ共通仕様](../../screen-design/desktop-common-specification.md) |
 | 通常turnのPause / Resume | App Serverのinterruptとsession再開へ状態を限定するため | emergency、Quit、crash後の明示再開だけ提供 |
 | 有料Developer ID / Windows証明書、macOS notarization、store公開 | 証明書取得と審査を期限外にするため | macOS ad-hoc signingとunsigned Windowsの警告・起動手順を提供 |
-| Windows/Linux custom bootstrapper、enterprise silent install | 標準artifactのbuildとsmokeを優先するため | macOS用user shell以外は`.msi`、`.AppImage`の標準導線を使う |
+| custom installer UI、enterprise silent install | 標準artifactを優先するため | OS別checksum verifierから`.msi`、`.AppImage`、macOS用safe shellを起動する |
 | 自動update、差分配信、rollback updater | schemaと主要導線を優先するため | 新artifactを手動導入 |
 | Deep Link、file association、global shortcut | 外部入力面とOS別検証を増やさないため | handlerを登録しない |
 | cloud settings同期、crash upload、telemetry | local-firstとprivacy境界を維持するため | local診断だけ保存 |
@@ -86,12 +86,12 @@ read_when:
 | APP-F-001 | release appをTauri v2 / RustとReact + TypeScript / Viteで構成する。 | 3 artifactがVite生成static assetをbundleし、起動中のfrontend dev server、remote UI、2個目のWebViewが0件である。 | Draft | 非該当 |
 | APP-F-002 | 1 processにつき`main` windowを1つだけ生成する。 | 初回起動、route移動、tray再表示、二重起動を各10回行ってもwindow label `main`とWebViewが各1件である。 | Draft | 非該当 |
 | APP-F-003 | `main`に4 routesだけを提供する。 | `/sessions`=`S-001`、`/workspace/:sessionId`=`S-002`、`/evidence/:sessionId`=`S-003`、`/settings`=`S-004`となり、5番目のproduct routeを登録しない。 | Draft | 非該当 |
-| APP-F-004 | routeとactive workspaceを検証・復元する。 | 再表示と再起動で最後のvalid route/sessionを復元し、不在・別workspaceのsession IDまたは未知routeはchildを起動せずS-001へ戻して理由を表示する。 | Draft | 非該当 |
+| APP-F-004 | routeとactive workspaceを検証・復元する。 | 再表示と再起動で最後のvalid route/sessionを復元し、不在・別workspaceのsession IDまたは未知routeはprocessを起動せずS-001へ戻して理由を表示する。 | Draft | 非該当 |
 | APP-F-005 | trayへ`Show`、`Emergency Stop`、`Quit`だけを順番どおり表示する。 | 日英label、enabled状態、各操作が共通仕様と一致し、session・model・pause項目が0件である。 | Draft | 非該当 |
 | APP-F-006 | OS window closeで`main`だけを非表示にする。 | close後もapp、tray、全session/turn、TTS生成・再生が継続し、非秘密draftを保存し、Live2D render loopだけを停止する。 | Draft | 非該当 |
 | APP-F-007 | tray、Dock、taskbarから既存`main`を再表示する。 | 500 ms以内に同じwindow、route、active workspaceを前面化し、新規window、sidecar、SQLite writerを作成しない。 | Draft | 非該当 |
 | APP-F-008 | trayを作成できない場合はwindow closeを無効化する。 | `APP_TRAY_UNAVAILABLE`、再試行、explicit Quitを表示し、close操作で到達不能なbackground processを作らない。 | Draft | 非該当 |
-| APP-F-009 | 二重起動を既存processへ集約する。 | 2個目は既存`main`を前面化して終了し、window、tray、SQLite writer、managed childを0件生成する。引数値をlogへ残さない。 | Draft | 非該当 |
+| APP-F-009 | 二重起動を既存processへ集約する。 | 2個目は既存`main`を前面化して終了し、window、tray、SQLite writer、managed treeを0件生成する。引数値をlogへ残さない。 | Draft | 非該当 |
 | APP-F-010 | active workspaceだけをcompanionと実況の対象にする。 | background eventはtimeline保存だけ行い、Live2D、transcript、audioを変えない。active変更・解除ではgenerationを更新し、旧audio stateを100 ms以内に破棄する。 | Draft | 非該当 |
 
 ### Quit、emergency、crash
@@ -101,14 +101,14 @@ read_when:
 | APP-F-011 | OS shortcut、app menu、trayの3経路を同じexplicit Quitへ集約する。 | macOS `Command+Q`、Windows・Ubuntu `Ctrl+Q`、menu、trayの各fixtureで同じ順序・error処理が1回だけ実行される。 | Draft | 非該当 |
 | APP-F-012 | explicit Quit開始後に新しい処理を拒否する。 | lifecycleを`quitting`にし、prompt、support assignment、Git/test、TTS、route由来の再試行を開始せず、実行中main/support turnへinterruptを1回送る。 | Draft | 非該当 |
 | APP-F-013 | explicit Quitで状態をatomic保存しdirty worktreeを保持する。 | workspace/session、main thread、support assignment、turn、timeline、draft、route、window状態を1 transactionで保存し、stash、reset、clean、checkout、commitを発行しない。 | Draft | 非該当 |
-| APP-F-014 | explicit Quitで全managed childを終了する。 | App Server、app-owned command/test、TTS/audio helperへgraceful stopを送り、5秒後の残存process treeをforce killし、app終了時のchildを0件にする。 | Draft | 非該当 |
+| APP-F-014 | explicit Quitで全managed process treeを終了する。 | spawn時にmacOS/Ubuntuは専用process groupとliveness pipe、Windowsはbreakaway禁止の`KILL_ON_JOB_CLOSE`相当Job Objectへ帰属させる。interrupt、stdin/stream close、5秒後のgroup/job kill、wait/reapを経てowned descendantを0件にする。 | Draft | 非該当 |
 | APP-F-015 | Quit保存失敗時にユーザーが再試行または未保存終了を選べる。 | `保存を再試行`は同じtransactionを1回実行し、`最新状態を保存せず終了`はAPP-F-012とAPP-F-014を完了する。cancelではappを残す。 | Draft | 非該当 |
 | APP-F-016 | 通常turnのPause / Resume UIとIPCを提供しない。 | button、menu、shortcut、tray、IPCにpause/resume操作が0件で、interrupt後の再開は新しいmain turnとしてユーザー操作でだけ開始する。 | Draft | 非該当 |
 | APP-F-017 | emergency stopをS-002とtrayから常時利用可能にする。 | foreground、hidden、offline、質問待ち、error表示中の各状態で操作でき、実行から250 ms以内に新規prompt、assignment、TTSを拒否する。 | Draft | 非該当 |
-| APP-F-018 | emergency stopをinterruptからkillへ段階実行する。 | 全main/support turnをinterruptし、audio queue/stream/playbackを100 ms以内に停止する。3秒後のmanaged childをterminateし、さらに2秒後の残存process treeをforce killする。 | Draft | 非該当 |
+| APP-F-018 | emergency stopをinterruptからtree killへ段階実行する。 | 全turnをinterruptしaudioを100 ms以内に停止する。3秒後にstdinを閉じ、さらに2秒後も残るAPP-F-014のgroup/jobをkillしてowned descendantを0件にする。 | Draft | 非該当 |
 | APP-F-019 | emergency stop後もappと既存変更を保持する。 | 全sessionを`停止中`にし、SQLite履歴、branch、worktree、dirty fileを削除・rollbackせず、sidecar再診断とsessionの明示再開まで新規turnを拒否する。 | Draft | 非該当 |
-| APP-F-020 | crash後に保存済みshell状態を復元する。 | route、window、workspace/sessionを復元し、terminal recordのないturn/childを`予期しない中断`にし、自動prompt、command、Git、test、TTSを0件にする。 | Draft | 非該当 |
-| APP-F-021 | crash後にapp-owned orphan childだけを回収する。 | instance nonce、PID、executable、start timeが保存recordと一致するprocessだけをterminateし、不一致processをkillせず`APP_ORPHAN_UNVERIFIED`としてS-004へ表示する。 | Draft | 非該当 |
+| APP-F-020 | crash後に保存済みshell状態を復元する。 | OSのliveness pipe EOF / Job closeでowned treeを終了し、route、workspace/sessionを復元する。未完了turnを`予期しない中断`にし、自動prompt、command、Git、test、TTSを0件にする。 | Draft | 非該当 |
+| APP-F-021 | crash後にapp-owned orphanだけを安全に回収する。 | PIDだけではkillせず、spawn UUID handshake、process-group/job identity、executable file identity、start timeが全一致するtreeだけを回収する。PID再利用fixtureの無関係processを残し、owned orphanを0件にする。 | Draft | 非該当 |
 
 ### 通知、初回、offline、設定
 
@@ -116,7 +116,7 @@ read_when:
 |---|---|---|---|---|
 | APP-F-022 | OS通知をmain AskUserQuestion、main turn完了、回復不能失敗の3 typeに限定する。 | `main`がhiddenまたはinactiveの場合だけ送り、clickで順にS-002回答、S-002末尾、S-004へ移動する。support完了、Git/test、audio、closeでは0件である。 | Draft | 非該当 |
 | APP-F-023 | 通知拒否と秘密を安全に扱う。 | permission拒否後は再要求せず同じapp内表示を維持し、通知title/bodyにprompt、response、code、key、token、absolute pathが0件である。 | Draft | 非該当 |
-| APP-F-024 | 初回起動をsidecarなしで完了できる。 | DB初期化、OS locale選択、Full access同意をS-001の初回状態で行い、同意前はmanaged childが0件である。拒否時もS-004とQuitを利用できる。 | Draft | 非該当 |
+| APP-F-024 | 初回起動をsidecarなしで完了できる。 | DB初期化、OS locale選択、Full access同意をS-001の初回状態で行い、同意前はmanaged treeが0件である。拒否時もS-004とQuitを利用できる。 | Draft | 非該当 |
 | APP-F-025 | offline時もlocal shell機能を提供する。 | S-001、保存済みS-002/S-003、S-004、設定、履歴削除を利用でき、Codex/TTSを開始せずdraftを保持し、再接続後も自動送信・再生しない。 | Draft | 非該当 |
 | APP-F-026 | errorを影響範囲へ分離して再試行可能にする。 | route/component errorはerror boundary、I/Oは1回自動retry後に手動retry、回復不能DB/child初期化はS-004へ移し、非秘密入力と正常sessionを保持する。 | Draft | 非該当 |
 | APP-F-027 | shell設定をRust側で検証してatomic保存する。 | locale、TTS enabled、mute、volume、voice、narration language、AI音声確認version、notification preferenceをschema検証し、未知fieldと境界外値は全件保存せず項目別errorを返す。model、sandbox、approvalはread-onlyである。 | Draft | 非該当 |
@@ -127,7 +127,7 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | APP-F-029 | S-004からcomponent診断を一括または個別実行できる。 | check ID、`pass|warn|fail|unavailable`、開始・終了UTC、error code、再試行可否を表示し、同一checkのrunningを最大1件にする。 | Draft | 非該当 |
-| APP-F-030 | Codex CLIとApp Server契約を診断する。 | executable検出、CLI version `0.144.5`、login status、`app-server --stdio` handshake、stable/experimental schema fingerprint、`gpt-5.6-sol`、support model catalogを個別表示する。 | Draft | 非該当 |
+| APP-F-030 | Codex CLIとApp Server契約を診断する。 | CODE-F-004/008/033〜036の実field/pathだけを表示し、欠落・null・非対応は`unavailable`とする。workspace名、instruction scope/status、capability echoを推定せず、`plugin/list`は開発診断だけでproduction/release gateにしない。ServerRequest routingはCODE-F-009〜011だけを正本とする。 | Draft | 非該当 |
 | APP-F-031 | TTS credential、model、audio outputを診断する。 | NARR-F-031のendpoint・snapshot、credential/key状態、default output、user起動sample、最終成功UTC、NARR-F-043の接続分類を表示し、key値とdevice IDを保存しない。 | Draft | 非該当 |
 | APP-F-032 | Live2D assetとWebGLを診断する。 | 同梱model descriptor、manifest/hash、preview、16 expression、WebGL context/renderer tierを確認し、外部model探索とasset downloadを行わない。 | Draft | 非該当 |
 | APP-F-033 | storage、schema、Gitを診断する。 | app dataのread/write、SQLite schema/integrity/backup/free bytes、Git executable/version/worktree support、選択sessionのrepository/worktree対応を個別表示する。 | Draft | 非該当 |
@@ -145,8 +145,8 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | APP-F-037 | macOS、Windows、Ubuntuの標準artifactを生成・配布する。 | macOS 13+ Apple Silicon `.dmg`、Windows 11 x64 `.msi`、Ubuntu 24.04 x64 `.AppImage`がclean buildから1件ずつ生成され、同一versionのrelease bundleへ収録される。 | Draft | 非該当 |
-| APP-F-038 | 各artifactで起動smokeを実行する。 | packageから起動し、5秒以内にS-001またはS-004、単一`main`、trayを確認し、explicit Quit後にmanaged childが0件となる。`.msi`はinstall/uninstallも確認する。 | Draft | 非該当 |
-| APP-F-039 | OS別release gateとpreview表示を適用する。 | macOS実機E2Eと3OS smokeが成功した場合だけrelease候補にし、Windows/UbuntuはREADMEとS-004へCI build/test済み・実機未検証と表示する。 | Draft | 非該当 |
+| APP-F-038 | 各artifactでwindow・tray・Quit smokeを実行する。 | macOS実機、interactive desktop上のWindows 11 x64 runner、Xvfb `:99`+DBus+Xfce StatusNotifier panel+FUSEのUbuntu 24.04 x64 runnerで検証済みpackageを起動し、単一`main`、tray操作、Quit後owned descendant 0件を確認する。screenshot、操作log、process inventoryを保存し、Windowsはinstall/uninstallも行う。 | Draft | 非該当 |
+| APP-F-039 | OS別release gateとpreview表示を適用する。 | macOS実機E2EとAPP-F-038の3OS GUI smokeが成功した場合だけrelease候補にする。build/package成功だけでは合格にせず、Windows/UbuntuはCI GUI検証済み・実機未検証と表示する。 | Draft | 非該当 |
 | APP-F-040 | 無料で再現できるtoolchainだけをrelease・提出gateにする。 | macOSはad-hoc signed app、Windowsはunsigned `.msi`、Ubuntuは`.AppImage`を生成し、有料Developer ID / Windows証明書、notarization、store receiptの不在を失敗にしない。updater、Deep Link、file associationは0件である。 | Draft | 非該当 |
 
 ### IPC、CSP、path
@@ -169,10 +169,10 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| APP-F-047 | 3OSの配布物へSHA-256 checksumを添付する。 | 配布manifestが各platform package、macOS shell、version、byte数、SHA-256を列挙し、欠落・不一致をreleaseとinstallの双方で拒否する。 | Draft | 非該当 |
+| APP-F-047 | 3OS配布物へSHA-256 manifestと事前検証entrypointを同梱する。 | manifestがpackage、verifier、macOS shell、version、byte数、SHA-256を列挙する。PowerShell、POSIX shell、macOS safe shellが導入・初回起動前に対象を検証し、欠落・size/hash不一致ならartifactを実行せず非0で停止する。 | Draft | 非該当 |
 | APP-F-048 | macOS appへ再現可能なad-hoc signingを行う。 | clean build手順が無料のOS標準toolで`.app`をad-hoc signし、package前後にbundle全体の署名検証が成功する。有料identityやnetwork serviceを要求しない。 | Draft | 非該当 |
 | APP-F-049 | macOSのinstallから初回起動までを日英で提供する。 | JA/EN手順と`/bin/sh`用user installer/launcherを配布し、GUI手順だけでも完了できる。shellは非対話CI buildと別artifactで、CIやdownload直後に自動実行されない。 | Draft | 非該当 |
-| APP-F-050 | macOS shellを失敗安全にする。 | 対象artifact名とAPP-F-047のchecksumを検証し、既定で`$HOME/Applications`へsudoなしで導入する。既存版は確認後にbackupし、失敗時rollback、全pathのquote、成功・取消・検証失敗・導入失敗の終了codeを保証する。 | Draft | 非該当 |
+| APP-F-050 | macOS shellを失敗安全にする。 | APP-F-047を検証し`$HOME/Applications`へsudoなしで導入する。更新時は既存appへQuitを要求しowned descendant 0件を確認してからbackup/置換し、失敗時rollbackする。全pathをquoteし、取消・検証・終了・導入失敗を別codeにする。 | Draft | 非該当 |
 | APP-F-051 | Gatekeeper / quarantine対応を最小権限にする。 | まずFinderの`開く`というOS標準導線を案内し、なお遮断される場合だけrisk説明と明示同意後に、checksum検証済みの正確な`.app` bundleの`com.apple.quarantine`だけを扱う。任意path、親directory、広範囲属性操作を拒否する。 | Draft | 非該当 |
 
 ## 入力項目要件
@@ -200,7 +200,7 @@ read_when:
 | `hidden` | background event経由のみ | 継続 | Show、Quit、emergency |
 | `quitting` | 拒否 | interrupt後に終了 | process終了またはsave cancel |
 | `emergency_stopped` | 拒否 | kill fallback後0件 | 診断合格とsession明示再開 |
-| `recovering` | 拒否 | app-owned orphanだけ回収 | integrity・child診断完了 |
+| `recovering` | 拒否 | app-owned orphanだけ回収 | integrity・tree診断完了 |
 
 ## デスクトップ固有要件
 
@@ -208,7 +208,7 @@ read_when:
 
 | 領域 | 要件 | 対象要件ID |
 |---|---|---|
-| 対象OS・OS差分 | macOS実機E2E、Windows/Ubuntu CI previewとし、3OSでartifact起動smokeを行う。 | APP-F-037〜APP-F-040 |
+| 対象OS・OS差分 | macOS実機E2E、Windows/Ubuntu GUI-capable CI previewとし、3OSでartifactのwindow/tray/Quit smokeを行う。 | APP-F-037〜APP-F-040 |
 | ウィンドウ生成・再利用 | 単一`main`と4 routesを再利用する。 | APP-F-002〜APP-F-004 |
 | 閉じる・アプリ終了 | close、Quit、emergency、crashをAPP-F-006、APP-F-011〜APP-F-021で区別する。 | APP-F-006、APP-F-011〜APP-F-021 |
 | 未保存データ | 非秘密draftと構造化状態を保存し、dirty worktreeを変更しない。 | APP-F-013、APP-F-015、APP-F-020 |
@@ -240,7 +240,7 @@ read_when:
 | 監査・ログ | app/version/OS、lifecycle遷移、child ID/type/status、diagnostic check/error code、UTCだけを構造化保存し、HISTのretention/deletionを適用する。 |
 | 性能 | 8 CPU core・16 GBのmacOSでprocess開始からS-001/S-004表示p95 5秒、route切替p95 250 ms、tray Show p95 500 msとする。初回migration、OS security dialog、model/API待ちは除外する。 |
 | 並行負荷 | 3 main session稼働中のroute切替p95を500 ms以下、30回中誤workspace表示0件とする。4件目以降はwarningを必須とし性能値を保証しない。 |
-| 信頼性・復旧 | child registry、idempotent lifecycle、single instance、atomic state、orphan照合をfault injectionで検証し、未知processをkillしない。 |
+| 信頼性・復旧 | tree registry、idempotent lifecycle、single instance、atomic state、orphan照合をfault injectionで検証し、未知processをkillしない。 |
 | アクセシビリティ | WCAG 2.2 AAを目標とし、APP-F-045〜APP-F-046、text label、44×44 CSS pxの主要target、200% text zoomをmacOS実機で検証する。 |
 | 多言語・地域 | 日本語・英語を提供し、UTC保存・OS timezone表示、locale切替後のroute/tray/notification同期を行う。 |
 
@@ -248,9 +248,9 @@ read_when:
 
 | OS | Artifact | 必須検証 | 表示 |
 |---|---|---|---|
-| macOS 13+ Apple Silicon | ad-hoc signed `.dmg`、JA/EN手順、`.sh`、checksum | build、shell/GUI install、初回起動smoke、主要導線E2E、Quit/復元、Codex/TTS/Live2D | 実機保証 |
-| Windows 11 x64 | unsigned `.msi`、JA/EN手順、checksum | 無料toolchainのCI build/test、install/start/uninstall smoke | preview・実機未検証 |
-| Ubuntu 24.04 x64 | `.AppImage`、JA/EN手順、checksum | 無料toolchainのCI build/test、permission/start smoke | preview・実機未検証 |
+| macOS 13+ Apple Silicon | ad-hoc signed `.dmg`、JA/EN手順、safe `.sh`、manifest | 実機で検証・install、window/tray/Quit、主要導線、Codex/TTS/Live2D | 実機保証 |
+| Windows 11 x64 | unsigned `.msi`、JA/EN手順、manifest/verifier | interactive desktop VMで検証・install、window/tray/Quit、uninstall | preview・実機未検証 |
+| Ubuntu 24.04 x64 | `.AppImage`、JA/EN手順、manifest/verifier | Xvfb+DBus+Xfce panel+FUSEで検証・window/tray/Quit | preview・実機未検証 |
 
 ## 依存関係・前提
 
@@ -258,13 +258,13 @@ read_when:
 |---|---|---|---|
 | [デスクトップ共通仕様](../../screen-design/desktop-common-specification.md) | lifecycle、SQLite、notification、Full access、3OSの正本 | 解決済み | APP差分を適用できない |
 | [workspace-sessions要件](../workspace-sessions/requirements.md) | session/worktree、3並行、4件目warningを提供する | Draft | APP-F-004、APP-F-035〜APP-F-036を検証できない |
-| [codex-main-session要件](../codex-main-session/requirements.md) | CLI 0.144.5、App Server、main interrupt/resumeを提供する | Draft | child lifecycleとAPP-F-030を検証できない |
+| [codex-main-session要件](../codex-main-session/requirements.md) | CLI 0.144.5、App Server、main interrupt/resumeを提供する | Draft | tree lifecycleとAPP-F-030を検証できない |
 | [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | ephemeral support、interrupt、model catalogを提供する | Draft | Quit/emergencyの全turn停止を検証できない |
 | [git-review-harness要件](../git-review-harness/requirements.md) | Git/test childとevidenceを提供する | Draft | child分類とGit診断を統合できない |
 | [activity-history要件](../activity-history/requirements.md) | SQLite、migration、recovery、redactionを提供する | Draft | 保存、crash復旧、診断logを検証できない |
 | [live2d-companion要件](../live2d-companion/requirements.md) | 同梱asset、WebGL、active workspace表示を提供する | Draft | APP-F-010、APP-F-032、APP-F-046を検証できない |
 | [audio-commentary要件](../audio-commentary/requirements.md) | current active workspaceだけのtext/TTS、queue、Speech、設定、audio outputを提供する | Draft | APP-F-010、APP-F-018、APP-F-027〜APP-F-031を統合検証できない |
-| CI runners | macOS arm64実機、Windows 11 x64、Ubuntu 24.04 x64環境 | release gate | 1環境でも欠けるとAPP-F-037〜APP-F-040をrelease合格にできない |
+| CI runners | macOS arm64実機、unlocked interactive Windows 11 x64 VM、Xvfb/DBus/Xfce/FUSE付きUbuntu 24.04 x64 VM | release gate | 1環境でも欠けるとAPP-F-037〜APP-F-040をrelease合格にできない |
 
 ## 未確定事項
 

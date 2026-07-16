@@ -1,7 +1,7 @@
 ---
 title: "デスクトップ共通仕様"
 description: "React + TypeScript + Vite + Tauri v2デスクトップアプリに共通する実行境界、ウィンドウ、ライフサイクル、権限、保存、OS検証の確定仕様。"
-updated: 2026-07-16
+updated: 2026-07-17
 read_when:
   - "Tauriウィンドウ、tray、終了、再開、OS差分、ネイティブ連携を設計するとき。"
   - "Codex App Server、TTS、ローカルデータ、Full accessの共通境界を実装または検証するとき。"
@@ -18,6 +18,8 @@ read_when:
 - Codex App Server sidecarは、ユーザー導入済みCodex CLI 0.144.5の`codex app-server --stdio`をTauri / Rustが子プロセスとして起動し、メインセッションと支援セッションのthread、turn、通知を調停する。アプリはCodex CLIを同梱、自動install、自動updateしない。
 - sidecarとのtransportはstdin / stdout上の改行区切りJSON（JSONL）だけを使用する。実行する0.144.5からstableと`--experimental`の両方で生成したJSON SchemaおよびTypeScript生成物をwire contractの正本とし、adapterのcontract testでrequest、response、notificationを検証する。
 - OpenAI Text-to-Speech APIへの通信はRust側から行い、API keyをReact state、Web Storage、SQLite、ログへ保存しない。
+- App Serverのaccount、initialize、instruction、app/plugin診断は[codex-main-session要件](../requirements/codex-main-session/requirements.md)の実field契約だけを表示し、欠落・null・非対応を`unavailable`とする。workspace名、instruction scope/status、capability echoを推定しない。experimental `plugin/list`は開発診断だけに限定し、production起動・session・releaseを止めない。
+- 生成`ServerRequest` unionと未知requestのrouting・解決はcodex-main-session要件だけを正本とし、shell独自fallbackを定義しない。
 
 | 実行境界 | 責務 | 禁止事項 |
 |---|---|---|
@@ -35,13 +37,25 @@ read_when:
 | OS | アーキテクチャ | 最低バージョン | artifact | 検証水準 | 実機保証 |
 |---|---|---|---|---|---|
 | macOS | Apple Silicon（arm64） | macOS 13 | `.dmg` | 実機E2E、artifactからの起動、主要導線、Codex、TTS、Live2D、終了・復元を検証する | ハッカソン版の保証対象 |
-| Windows | x64 | Windows 11 | `.msi` | Windows CIでbuildとautomated testを実行する | 実機未検証。Live2D描画とTauri WebView挙動を保証しない |
-| Linux | x64 | Ubuntu 24.04 | `.AppImage` | Ubuntu CIでbuildとautomated testを実行する | 実機未検証。Live2D描画とTauri WebView挙動を保証しない |
+| Windows | x64 | Windows 11 | `.msi` | unlocked interactive desktop VM runnerでbuild、install、window、tray、Quit、uninstallを自動検証する | 実機未検証。Live2D描画とTauri WebView挙動を保証しない |
+| Linux | x64 | Ubuntu 24.04 | `.AppImage` | Xvfb `:99`、DBus、Xfce panel、FUSEを備えたVM runnerでbuild、window、tray、Quitを自動検証する | 実機未検証。Live2D描画とTauri WebView挙動を保証しない |
 
-- macOS実機E2Eの成功と、Windows・Linux CIのbuildおよびautomated testの成功をrelease artifact作成の合格条件とする。
+- macOS実機E2Eと3OSのwindow・tray・Quit artifact smokeをrelease合格条件とし、build/package成功だけでは合格にしない。
 - Windows・Linux artifactはpreviewとしてラベル表示し、READMEとアプリ内診断画面へ実機未検証の制約を表示する。
 - Live2DとTauri WebViewの視覚・入力・音声同期はmacOS 13以降のApple Silicon実機だけを保証する。
 - App Store、Microsoft Store、Linux package repositoryへの公開、自動アップデート、配布署名の取得はハッカソン版の対象外とする。署名されていないartifactにはOS警告を回避せず、起動手順へ警告が表示される事実を記載する。
+- release bundleへpackage、OS別verifier、macOS safe shell、version、byte数、SHA-256を列挙するmanifestを同梱する。PowerShell/POSIX shell/macOS safe shellは導入・初回起動前にsize/hashを検証し、欠落・不一致ならpackageを実行せず非0で停止する。導入手順は日本語・英語を提供する。
+
+## managed process tree
+
+| OS | 所有境界 | crash時 |
+|---|---|---|
+| macOS / Ubuntu | appだけが非継承write endを持つliveness pipeをtree supervisorが監視し、App Server、command/test、spawnしたTTS/audio helperとapp-owned descendantを専用process groupへ入れる。supervisor自身は対象group外に置く | app側pipeのEOFでsupervisorがgroup全体を終了しwait/reapする |
+| Windows | managed childをsuspendedで起動し、breakawayを禁止した`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`相当Job Objectへ割り当ててからresumeする | appのJob handle closeでOSがJob内processを終了する |
+
+- tree registryはspawn UUID handshake、owner session、process-group/job identity、leader PID、executable file identity、start time、状態を持つ。PIDだけでkillせず、再起動時に全identityが一致しないprocessは残して`APP_ORPHAN_UNVERIFIED`を表示する。
+- stdout JSONLとstderrは別pipeで継続drainし、stderrはbounded bufferと秘匿化を適用する。終了は新規処理拒否、protocol interrupt、stdin/HTTP stream/audio close、最大5秒のgrace、group/job kill、wait/reapの順とする。
+- explicit Quit、emergency stop、crash、手動installer updateのfixtureを各OSで10回実行し、app-owned descendant 0件を確認する。PID再利用fixtureの無関係processは終了させない。手動更新はこの結果を確認できない場合、既存appを置換しない。
 
 ## ウィンドウとtray
 
@@ -96,8 +110,8 @@ read_when:
 2. 実行中のmain turnと7つのsupport roleで実行中のturnへinterruptを送る。
 3. TTSの待機queueを破棄し、HTTP音声streamと再生中bufferを停止する。
 4. workspace、worktree、mainのApp Server thread ID、support assignment証跡、turn状態、timeline、未送信draft、選択view、window状態を1つのSQLite transactionで保存する。
-5. Codex App Server sidecarへshutdownを送り、5秒以内に終了しない場合は子プロセスを強制終了する。
-6. SQLite connection、tray、`main`を破棄してプロセスを終了する。
+5. 全managed treeへprotocol interruptとstdin/stream closeを行い、5秒以内に終了しないtreeをprocess group / Job単位で終了してwait/reapする。
+6. owned descendantが0件であることを確認し、SQLite connection、tray、`main`を破棄してプロセスを終了する。
 
 - 手順4のtransactionが失敗した場合はQuitを中止し、`保存を再試行`と`最新状態を保存せず終了`を表示する。後者を選んだ場合も、turn interruptとsidecar終了を実行してから終了する。
 - sidecarを強制終了した場合は、次回起動時に診断イベントを1件表示する。API key、prompt、応答本文、ファイル内容、絶対パスを診断イベントへ含めない。
@@ -237,7 +251,7 @@ Codexのmain/supportは`danger-full-access`かつ`approval: never`で実行す�
 
 | 項目 | macOS 13+ arm64 | Windows 11 x64 | Ubuntu 24.04 x64 |
 |---|---|---|---|
-| 検証 | Apple Silicon実機E2E | CI build + automated test、実機未検証 | CI build + automated test、実機未検証 |
+| 検証 | Apple Silicon実機E2E | interactive desktop VMでwindow/tray/Quit smoke、実機未検証 | Xvfb+DBus+Xfce panel+FUSEでwindow/tray/Quit smoke、実機未検証 |
 | 明示Quit | `Command+Q`、アプリメニュー、tray | `Ctrl+Q`、アプリメニュー、tray | `Ctrl+Q`、アプリメニュー、tray |
 | window close | 非表示、処理継続 | 非表示、処理継続 | 非表示、処理継続 |
 | 再表示 | Dockまたはtray | タスクバーまたはtray | タスクバーまたはtray |
