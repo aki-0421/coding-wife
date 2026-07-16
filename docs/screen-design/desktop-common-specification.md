@@ -57,12 +57,12 @@ read_when:
 
 | OS | 所有境界 | crash時 |
 |---|---|---|
-| macOS / Ubuntu | appだけが非継承write endを持つliveness pipeをtree supervisorが監視し、App Server、command/test、spawnしたTTS/audio helperとapp-owned descendantを専用process groupへ入れる。supervisor自身は対象group外に置く | app側pipeのEOFでsupervisorがgroup全体を終了しwait/reapする |
+| macOS / Ubuntu | app-owned sidecar/helperはdaemonize、`setsid`、double-forkを行わないlauncher契約でspawn時に専用supervised process groupへ登録する。appだけが非継承write endを持つliveness pipeをgroup外のsupervisorが監視する | app側pipeのEOFでsupervisorがgroupを終了し、登録group memberが0件になるまでwait/reapする |
 | Windows | managed childをsuspendedで起動し、breakawayを禁止した`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`相当Job Objectへ割り当ててからresumeする | appのJob handle closeでOSがJob内processを終了する |
 
-- tree registryはspawn UUID handshake、owner session、process-group/job identity、leader PID、executable file identity、start time、状態を持つ。PIDだけでkillせず、再起動時に全identityが一致しないprocessは残して`APP_ORPHAN_UNVERIFIED`を表示する。
+- tree registryはspawn UUID handshake、owner session、process-group/job identity、leader PID、executable file identity、start time、状態を持つ。登録group/job内だけをapp-ownedとし、Full access taskがgroupからescapeしたprocessまたは外部processは、検出できた場合も`external_or_unknown`として警告し、PIDだけでkillせず絶対終了を保証しない。
 - stdout JSONLとstderrは別pipeで継続drainし、stderrはbounded bufferと秘匿化を適用する。終了は新規処理拒否、protocol interrupt、stdin/HTTP stream/audio close、最大5秒のgrace、group/job kill、wait/reapの順とする。
-- explicit Quit、emergency stop、crash、手動installer updateのfixtureを各OSで10回実行し、app-owned descendant 0件を確認する。PID再利用fixtureの無関係processは終了させない。手動更新はこの結果を確認できない場合、既存appを置換しない。
+- explicit Quit、emergency stop、crash、手動installer updateのfixtureを各OSで10回実行し、登録group/job member 0件を確認する。escape/external fixtureは警告し無関係processを終了させない。手動更新はこの結果を確認できない場合、既存appを置換しない。
 
 ## ウィンドウとtray
 
@@ -117,8 +117,8 @@ read_when:
 2. 実行中のmain turnと7つのsupport roleで実行中のturnへinterruptを送る。
 3. TTSの待機queueを破棄し、HTTP音声streamと再生中bufferを停止する。
 4. workspace、worktree、mainのApp Server thread ID、support assignment証跡、turn状態、timeline、未送信draft、選択view、window状態を1つのSQLite transactionで保存する。
-5. 全managed treeへprotocol interruptとstdin/stream closeを行い、5秒以内に終了しないtreeをprocess group / Job単位で終了してwait/reapする。
-6. owned descendantが0件であることを確認し、SQLite connection、tray、`main`を破棄してプロセスを終了する。
+5. 全managed treeへprotocol interruptとstdin/stream closeを行い、5秒以内に終了しない登録group / Jobを終了してwait/reapする。
+6. 登録group/job memberが0件であることを確認し、`external_or_unknown`は警告として保存して、SQLite connection、tray、`main`を破棄しappを終了する。
 
 - 手順4のtransactionが失敗した場合はQuitを中止し、`保存を再試行`と`最新状態を保存せず終了`を表示する。後者を選んだ場合も、turn interruptとsidecar終了を実行してから終了する。
 - sidecarを強制終了した場合は、次回起動時に診断イベントを1件表示する。API key、prompt、応答本文、ファイル内容、絶対パスを診断イベントへ含めない。
@@ -145,10 +145,12 @@ read_when:
 | ユーザー設定 | model、sandbox、approval policyを変更できない | model、sandbox、approval policyを変更できない |
 
 - 通常のtool approvalではturnを停止しない。ユーザー回答を待つ停止状態は、mainが実行した`AskUserQuestion`だけが作成できる。
-- mainが`AskUserQuestion`を実行した場合、main turnを待機状態にし、回答overlayを表示する。既に実行中のsupport turnは完了またはinterruptまで継続できるが、新しいsupport assignmentは回答後まで作成しない。
+- canonical worktreeごとのexclusive turn leaseによりactive App Server turnを全thread合計1件にする。support中にmain要求を受理した場合はmainをqueueし、supportを強制cancelせずterminalと安定post snapshot後にmainがleaseを取得する。別worktreeのsessionは並行できる。
+- mainが`AskUserQuestion`を出す時点で同sessionのrunning supportは0件である。main turnを待機させてleaseを保持し、回答overlayを表示する。新しいsupport assignmentは`deferred`にして回答後に再評価する。
 - supportの質問要求はApp Server tool errorとして拒否し、質問内容をsupport結果としてmainへ返す。supportからユーザーへ直接overlayやOS通知を出さない。
 - App Server開始時と再起動時に`model/list`を先頭から`nextCursor: null`まで取得し、support-agent-orchestration要件のrole mappingへ一致する利用可能modelを選ぶ。mainの`gpt-5.6-sol`が一覧にない場合はsessionを開始せず、設定・診断画面へ接続エラーを表示する。
 - 内蔵skillsの実行順は固定しない。各agentがskillのtriggerと現在のtaskに基づいて選択する。
+- main turn中のactive workspace eventはRustの決定論的event rendererがApp Server turnなしで即時play-by-playと重要event textを作り、TTSとLive2Dへ渡す。Narrator supportはmain terminal後のfresh snapshotでleaseを取得できる場合だけcolor commentary / turn summaryを補強し、失敗しても決定論的経路を継続する。
 - desktop shellはtask完了を契機に`git commit`、`git push`、PR作成、mergeを自動実行しない。Git操作はユーザー指示とmainの判断に従うCodex turnだけが実行し、結果をtimelineへ記録する。
 
 ## 通知

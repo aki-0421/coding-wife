@@ -29,7 +29,7 @@ read_when:
 | 用語 | 定義 |
 |---|---|
 | active workspace | current routeがS-002またはS-003で示すworkspace。hidden中は保持し、S-001・S-004ではなし。 |
-| managed process tree | appが起動・追跡するApp Server、command/test、TTS/audio helperと、そのapp-owned descendant。 |
+| managed process tree | app登録済みApp Server等のsupervised group / Job member。Full access taskがescapeしたprocessと外部processは`external_or_unknown`でありapp-ownedに含めない。 |
 | explicit Quit | OS shortcut、app menu、trayからapp process全体を終了する操作。window closeとは別。 |
 | emergency stop | appを残したまま新規実行を拒否し、全turn、audio、managed process treeを停止する操作。 |
 
@@ -101,14 +101,14 @@ read_when:
 | APP-F-011 | OS shortcut、app menu、trayの3経路を同じexplicit Quitへ集約する。 | macOS `Command+Q`、Windows・Ubuntu `Ctrl+Q`、menu、trayの各fixtureで同じ順序・error処理が1回だけ実行される。 | Draft | 非該当 |
 | APP-F-012 | explicit Quit開始後に新しい処理を拒否する。 | lifecycleを`quitting`にし、prompt、support assignment、Git/test、TTS、route由来の再試行を開始せず、実行中main/support turnへinterruptを1回送る。 | Draft | 非該当 |
 | APP-F-013 | explicit Quitで状態をatomic保存しdirty worktreeを保持する。 | workspace/session、main thread、support assignment、turn、timeline、draft、route、window状態を1 transactionで保存し、stash、reset、clean、checkout、commitを発行しない。 | Draft | 非該当 |
-| APP-F-014 | explicit Quitで全managed process treeを終了する。 | spawn時にmacOS/Ubuntuは専用process groupとliveness pipe、Windowsはbreakaway禁止の`KILL_ON_JOB_CLOSE`相当Job Objectへ帰属させる。interrupt、stdin/stream close、5秒後のgroup/job kill、wait/reapを経てowned descendantを0件にする。 | Draft | 非該当 |
+| APP-F-014 | explicit Quitで全managed process treeを終了する。 | macOS/Ubuntuのapp-owned sidecarはdaemonize/setsid/double-fork禁止でsupervised group+liveness pipe、Windowsはbreakaway禁止Jobへ登録する。interrupt/close/grace/kill/wait後に登録memberを0件にし、escaped/externalは警告して絶対終了を主張しない。 | Draft | 非該当 |
 | APP-F-015 | Quit保存失敗時にユーザーが再試行または未保存終了を選べる。 | `保存を再試行`は同じtransactionを1回実行し、`最新状態を保存せず終了`はAPP-F-012とAPP-F-014を完了する。cancelではappを残す。 | Draft | 非該当 |
 | APP-F-016 | 通常turnのPause / Resume UIとIPCを提供しない。 | button、menu、shortcut、tray、IPCにpause/resume操作が0件で、interrupt後の再開は新しいmain turnとしてユーザー操作でだけ開始する。 | Draft | 非該当 |
 | APP-F-017 | emergency stopをS-002とtrayから常時利用可能にする。 | foreground、hidden、offline、質問待ち、error表示中の各状態で操作でき、実行から250 ms以内に新規prompt、assignment、TTSを拒否する。 | Draft | 非該当 |
-| APP-F-018 | emergency stopをinterruptからtree killへ段階実行する。 | 全turnをinterruptしaudioを100 ms以内に停止する。3秒後にstdinを閉じ、さらに2秒後も残るAPP-F-014のgroup/jobをkillしてowned descendantを0件にする。 | Draft | 非該当 |
+| APP-F-018 | emergency stopをinterruptからtree killへ段階実行する。 | 全turnをinterruptしaudioを100 ms以内に停止する。3秒後にstdin、さらに2秒後にAPP-F-014のgroup/jobをkillし、登録memberを0件にする。`external_or_unknown`は警告してkillを保証しない。 | Draft | 非該当 |
 | APP-F-019 | emergency stop後もappと既存変更を保持する。 | 全sessionを`停止中`にし、SQLite履歴、branch、worktree、dirty fileを削除・rollbackせず、sidecar再診断とsessionの明示再開まで新規turnを拒否する。 | Draft | 非該当 |
-| APP-F-020 | crash後に保存済みshell状態を復元する。 | OSのliveness pipe EOF / Job closeでowned treeを終了し、route、workspace/sessionを復元する。未完了turnを`予期しない中断`にし、自動prompt、command、Git、test、TTSを0件にする。 | Draft | 非該当 |
-| APP-F-021 | crash後にapp-owned orphanだけを安全に回収する。 | PIDだけではkillせず、spawn UUID handshake、process-group/job identity、executable file identity、start timeが全一致するtreeだけを回収する。PID再利用fixtureの無関係processを残し、owned orphanを0件にする。 | Draft | 非該当 |
+| APP-F-020 | crash後に保存済みshell状態を復元する。 | liveness pipe EOF / Job closeで登録group/jobを終了し、route、workspace/sessionを復元する。未完了turnを`予期しない中断`にし、自動prompt、command、Git、test、TTSを0件にする。 | Draft | 非該当 |
+| APP-F-021 | crash後に登録済みapp-owned orphanだけを安全に回収する。 | spawn UUID、group/job identity、executable identity、start timeが全一致する対象だけを回収して登録memberを0件にする。escape、外部、PID再利用は残して`external_or_unknown`を警告し、絶対killを保証しない。 | Draft | 非該当 |
 
 ### 通知、初回、offline、設定
 
@@ -137,7 +137,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| APP-F-035 | 3つのmain sessionを別worktreeで同時稼働できる。 | 3 sessionのmain turnと必要なsupportをrunningにし、S-001/S-002を30回切り替えても各session ID、thread、worktree、timelineが混在せず、background turnが継続する。 | Draft | 非該当 |
+| APP-F-035 | 3つのmain sessionを別worktreeで同時稼働できる。 | 異なる3 canonical worktreeでA/CのmainとBのsupportを各1 turn同時runningにし、同一worktreeはactive turn最大1件とする。S-001/S-002を30回切り替えてもsession/thread/timelineが混在しない。 | Draft | 非該当 |
 | APP-F-036 | session数へfixed capを設けない。 | 4件目以降の同時稼働開始前に現在数、CPU/memory/model負荷、`続行`、`キャンセル`を表示し、続行では開始し、cancelでは状態を変えない。件数だけで拒否しない。 | Draft | 非該当 |
 
 ### artifactとrelease gate
@@ -145,7 +145,7 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | APP-F-037 | macOS、Windows、Ubuntuの標準artifactを生成・配布する。 | macOS 13+ Apple Silicon `.dmg`、Windows 11 x64 `.msi`、Ubuntu 24.04 x64 `.AppImage`がclean buildから1件ずつ生成され、同一versionのrelease bundleへ収録される。 | Draft | 非該当 |
-| APP-F-038 | 各artifactでGUI・Live2D・Quit smokeを実行する。 | macOS実機、interactive Windows 11 runner、Xvfb+DBus+Xfce+FUSEのUbuntu runnerでpackageを起動し、window、tray、Live2D model/WebGL、Quit後owned descendant 0件を確認する。screenshot、log、process inventoryを保存し、Windowsはinstall/uninstallも行う。 | Draft | 非該当 |
+| APP-F-038 | 各artifactでGUI・Live2D・Quit smokeを実行する。 | macOS実機、interactive Windows、Xvfb+DBus+Xfce+FUSEのUbuntuでwindow/tray/Live2DとQuit後の登録member 0件を確認し、escape/external fixtureでは警告する。screenshot、log、process inventoryを保存しWindowsはinstall/uninstallも行う。 | Draft | 非該当 |
 | APP-F-039 | OS別release gateとpreview表示を適用する。 | macOS実機E2EとAPP-F-038の3OS GUI smokeが成功した場合だけrelease候補にする。build/package成功だけでは合格にせず、Windows/UbuntuはCI GUI検証済み・実機未検証と表示する。 | Draft | 非該当 |
 | APP-F-040 | 無料で再現できるtoolchainだけをrelease・提出gateにする。 | macOSはad-hoc signed app、Windowsはunsigned `.msi`、Ubuntuは`.AppImage`を生成し、有料Developer ID / Windows証明書、notarization、store receiptの不在を失敗にしない。updater、Deep Link、file associationは0件である。 | Draft | 非該当 |
 
@@ -172,7 +172,7 @@ read_when:
 | APP-F-047 | 3OS配布物へSHA-256 manifestと事前検証entrypointを同梱する。 | manifestがpackage、verifier、macOS shell、version、byte数、SHA-256を列挙する。PowerShell、POSIX shell、macOS safe shellが導入・初回起動前に対象を検証し、欠落・size/hash不一致ならartifactを実行せず非0で停止する。 | Draft | 非該当 |
 | APP-F-048 | macOS appへ再現可能なad-hoc signingを行う。 | clean build手順が無料のOS標準toolで`.app`をad-hoc signし、package前後にbundle全体の署名検証が成功する。有料identityやnetwork serviceを要求しない。 | Draft | 非該当 |
 | APP-F-049 | macOSのinstallから初回起動までを日英で提供する。 | JA/EN手順と`/bin/sh`用user installer/launcherを配布し、GUI手順だけでも完了できる。shellは非対話CI buildと別artifactで、CIやdownload直後に自動実行されない。 | Draft | 非該当 |
-| APP-F-050 | macOS shellを失敗安全にする。 | APP-F-047を検証し`$HOME/Applications`へsudoなしで導入する。更新時は既存appへQuitを要求しowned descendant 0件を確認してからbackup/置換し、失敗時rollbackする。全pathをquoteし、取消・検証・終了・導入失敗を別codeにする。 | Draft | 非該当 |
+| APP-F-050 | macOS shellを失敗安全にする。 | APP-F-047を検証し`$HOME/Applications`へsudoなしで導入する。更新時は既存appへQuitを要求し登録group member 0件を確認してからbackup/置換し、失敗時rollbackする。全pathをquoteし、取消・検証・終了・導入失敗を別codeにする。 | Draft | 非該当 |
 | APP-F-051 | Gatekeeper / quarantine対応を最小権限にする。 | まずFinderの`開く`というOS標準導線を案内し、なお遮断される場合だけrisk説明と明示同意後に、checksum検証済みの正確な`.app` bundleの`com.apple.quarantine`だけを扱う。任意path、親directory、広範囲属性操作を拒否する。 | Draft | 非該当 |
 
 ## 入力項目要件
@@ -239,7 +239,7 @@ read_when:
 | プライバシー | credential値、conversation、code、audio、absolute pathをshell log、notification、diagnostic copy、crash recordへ保存しない。 |
 | 監査・ログ | app/version/OS、lifecycle遷移、child ID/type/status、diagnostic check/error code、UTCだけを構造化保存し、HISTのretention/deletionを適用する。 |
 | 性能 | 8 CPU core・16 GBのmacOSでprocess開始からS-001/S-004表示p95 5秒、route切替p95 250 ms、tray Show p95 500 msとする。初回migration、OS security dialog、model/API待ちは除外する。 |
-| 並行負荷 | 3 main session稼働中のroute切替p95を500 ms以下、30回中誤workspace表示0件とする。4件目以降はwarningを必須とし性能値を保証しない。 |
+| 並行負荷 | 別worktreeの3 sessionで各active turn最大1件とし、route切替p95 500 ms以下、30回中誤workspace表示0件とする。4件目以降はwarningを必須とし性能値を保証しない。 |
 | 信頼性・復旧 | tree registry、idempotent lifecycle、single instance、atomic state、orphan照合をfault injectionで検証し、未知processをkillしない。 |
 | アクセシビリティ | WCAG 2.2 AAを目標とし、APP-F-045〜APP-F-046、text label、44×44 CSS pxの主要target、200% text zoomをmacOS実機で検証する。 |
 | 多言語・地域 | 日本語・英語を提供し、UTC保存・OS timezone表示、locale切替後のroute/tray/notification同期を行う。 |

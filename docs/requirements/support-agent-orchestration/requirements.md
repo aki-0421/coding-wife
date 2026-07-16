@@ -31,7 +31,7 @@ read_when:
 | オンデマンド支援 | Sol、event、skillが要求したroleだけを起動する |
 | 一時履歴と証跡 | raw履歴を残さず、assignment、実model・effort、status、summary、evidence参照を確認できる |
 | 競合検出 | worktree単位のturn leaseと安定snapshotで同時agent turnを避け、外部変更は検出して帰属を断定しない |
-| main非阻害 | support失敗時もmainを継続し、status、代替、再試行可否を返す |
+| main非阻害 | support失敗時もqueued mainを継続し、status、代替、再試行可否を返す |
 
 ## スコープ
 
@@ -77,8 +77,8 @@ read_when:
 | SUP-F-002 | ハッカソン提出物へ7 roleすべてを含める。 | macOS E2Eで各roleへ1件以上のassignmentを実行し、7件すべてでrole固有の検証済みoutputまたは定義済み縮退statusをS-002とS-003から確認できる。 | Draft | 非該当 |
 | SUP-F-003 | assignment sourceをSol、正規化event、skill triggerの3種類に限定する。 | 作成済みassignmentの`source`が`main`、`event`、`skill`のいずれかで、source IDと選択roleを記録し、UI操作やtimerだけをsourceとするassignmentを作成しない。 | Draft | 非該当 |
 | SUP-F-004 | workflowとskillへ固定順序または全role一括起動を適用しない。 | triggerのないmain turnでassignmentが0件であり、単一roleのtriggerではそのroleだけを作成し、アプリ定義のrole順queueまたは全skill強制実行が存在しない。 | Draft | 非該当 |
-| SUP-F-005 | 同じcanonical worktreeのmain/support turnを直列化する。 | worktreeごとの`running` turnは全thread合計1件、2件目以降のassignmentは`queued`とする。別worktreeは独立leaseで並行できる。 | Draft | 非該当 |
-| SUP-F-006 | mainが`AskUserQuestion`回答待ちの間は新しいsupport assignmentを禁止する。 | main turnがleaseをterminalまで保持するためsupport turnは0件。triggerはassignmentを作らず`deferred` eventにし、回答後にsnapshotを作り直して評価する。 | Draft | 非該当 |
+| SUP-F-005 | 同じcanonical worktreeのmain/support turnを直列化する。 | active App Server turnは全thread合計1件とする。support中にmain要求を受理するとmainを`queued`にし、supportを強制cancelせずterminalと安定post snapshot後にmainがleaseを取得する。別worktreeは独立leaseで並行できる。 | Draft | 非該当 |
+| SUP-F-006 | mainが`AskUserQuestion`回答待ちの間は新しいsupport assignmentを禁止する。 | mainが質問を出す時点で同sessionのrunning supportは0件である。mainは回答またはterminalまでleaseを保持し、新triggerはassignmentを作らず`deferred` eventにして回答後にsnapshotを作り直す。 | Draft | 非該当 |
 | SUP-F-007 | 各assignmentへversion付き構造化contextを渡す。 | experimental `turn/start.additionalContext`へ`coding-wife.assignment.v1`（`kind:"application"`）と`coding-wife.evidence.v1`（`kind:"untrusted"`）を各1件入れ、値を次のcontext契約のcanonical JSONとする。 | Draft | 非該当 |
 | SUP-F-008 | assignment contextの境界違反をmodel送信前に拒否する。 | UTF-8 JSONが256 KiB以下、evidence refsが0〜100件、許可対象pathが0〜100件で、session IDとsnapshotが有効な場合だけ送信し、違反時は値を推測せず`insufficient_context`または`context_too_large`を返す。 | Draft | 非該当 |
 | SUP-F-009 | support assignmentの失敗でmain turnを停止しない。 | supportが`failed`、`interrupted`、`conflicted`、`stale`、`insufficient_context`、`unavailable`のいずれになってもmainのturn statusがsupportを理由に失敗へ変わらず、代替または再試行可否がmainへ返る。 | Draft | 非該当 |
@@ -148,7 +148,7 @@ output schemaは`build-week-support-output-v1/<role>/1`とversion/hashをmanifes
 | 要件ID | Role・責務 | Trigger・入力 | 観測可能な出力 | role境界 | 失敗時縮退 | 状態 | 廃止 |
 |---|---|---|---|---|---|---|---|
 | SUP-F-028 | Planner: 次の作業案を構造化する | Sol依頼、goal変更、plan失効、skill trigger。goal、制約、plan、evidence refs | 順序付きstep、依存、完了条件、未解決質問 | source fileとGitを変更せず最終方針を決めない | `planner_unavailable`を返しSolのplanを維持 | Draft | 非該当 |
-| SUP-F-029 | Narrator: 重要な状態変化を実況する | phase変更、test完了、失敗、判断待ち、checkpoint、skill trigger。秘匿化event | 1〜2文text、importance、speech eligibility、evidence refs | TTSを直接実行せず感情を事実としない | event typeから決定論的status textを表示 | Draft | 非該当 |
+| SUP-F-029 | Narrator: terminal後の実況を補強する | main terminal/checkpointと安定post snapshot、skill trigger。main中eventはassignmentにせずRust rendererへ渡す | 決定論的play-by-playへ重ねる1〜2文のcolor commentary / turn summary、importance、speech eligibility、evidence refs | TTSを直接実行せず即時実況を担わない | rendererのtext / TTS / Live2Dを通常継続 | Draft | 非該当 |
 | SUP-F-030 | Decision Explainer: mainの選択肢の影響を説明する | main質問、Sol依頼、skill trigger。元質問・選択肢、証拠参照 | 選択肢別の影響、risk、可逆性、推奨元、質問候補 | 選択肢を改変せずユーザーへ質問しない | 元のmain質問を変更せず表示 | Draft | 非該当 |
 | SUP-F-031 | Risk Sentinel: 変更と検証のriskを評価する | 危険path、権限、削除、migration、依存、検証弱化、反復失敗。diff・test・policy | severity、finding、根拠、影響、推奨action | source修正とrisk受容を行わない | `risk_scan_unavailable`と未評価範囲を返す | Draft | 非該当 |
 | SUP-F-032 | QA: 受け入れ条件の検証を実行・評価する | Sol依頼、checkpoint、skill trigger。要件、変更範囲、許可test、既存証拠 | command種別、exit status、合否、未検証範囲、evidence refs | source修正、test弱化、Git outcomeを行わない | 合格を推測せず再試行command候補を返す | Draft | 非該当 |
@@ -167,13 +167,13 @@ output schemaは`build-week-support-output-v1/<role>/1`とversion/hashをmanifes
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| SUP-F-038 | Rust orchestratorはcanonical worktree単位のexclusive turn leaseを持つ。 | main/supportを問わず`turn/start`前に取得し、同一worktreeのactive turnを最大1件にする。別worktreeは独立して並行でき、modelへfile単位hookを守らせない。 | Draft | 非該当 |
+| SUP-F-038 | Rust orchestratorはcanonical worktree単位のexclusive turn leaseを持つ。 | main/supportを問わず`turn/start`前に取得し、同一worktreeのactive App Server turnを最大1件にする。別worktreeは独立して並行でき、modelへfile単位hookを守らせない。 | Draft | 非該当 |
 | SUP-F-039 | lease取得後に安定pre-turn snapshotを確定する。 | HEAD ref+OID、index hash、tracked diff hash、untracked manifest/content hash、operation markerから成るGit state fingerprintを100 ms間隔で2回読んで一致させる。不一致なら1組だけ再試行し、再不一致は`worktree_unstable`でturnを送らない。 | Draft | 非該当 |
-| SUP-F-040 | turn leaseをturnの全停止中に保持する。 | `turn/start`直前からcompleted/failed/interrupted terminalまで保持し、mainのAskUserQuestion待機中も解放しない。同worktreeのqueued main/supportから`turn/start`は0件とする。 | Draft | 非該当 |
+| SUP-F-040 | turn leaseをturnの全停止中に保持する。 | `turn/start`直前からcompleted/failed/interrupted terminalまで保持し、mainのAskUserQuestion待機中も解放しない。質問時のrunning supportと同worktreeのqueued main/supportからの`turn/start`は各0件とする。 | Draft | 非該当 |
 | SUP-F-041 | terminal後に安定post-turn snapshotとApp Server eventを照合する。 | SUP-F-039と同じ2回読取後、変更pathをcommand/file change eventと照合する。未相関は`external_or_unknown`、相関/未相関混在は`mixed_provenance`とし、外部processの変更を防止したとは表示しない。 | Draft | 非該当 |
 | SUP-F-042 | queuedまたは再試行assignmentは期待snapshotを再照合する。 | lease取得時に保存snapshotと安定pre snapshotが異なればturnを送らず`stale`にし、mainへ再作成可否を返す。 | Draft | 非該当 |
 | SUP-F-043 | supportのturn lease取得timeoutを30秒にする。 | timeout時は`turn/start`を送らず`turn_lease_timeout`、現在owner種別、再試行可を返す。mainのturnは失敗化しない。 | Draft | 非該当 |
-| SUP-F-044 | support timeout / crashでもleaseを早期解放しない。 | supportを300秒で`turn/interrupt`し3秒待つ。terminalがなければCODE-F-007のsidecar process treeを終了し、全turnをinterrupted化する。terminalまたはtree消滅と安定post snapshotの両方を確認してから解放し、自動再送しない。 | Draft | 非該当 |
+| SUP-F-044 | support timeout / crashでもleaseを早期解放しない。 | 300秒で`turn/interrupt`し3秒待つ。terminalがなければCODE-F-007の登録済みapp-owned group/jobを終了する。terminalまたは登録member 0と安定post snapshotの両方を確認してから解放し、escaped/externalの絶対終了を主張しない。 | Draft | 非該当 |
 | SUP-F-045 | 古いまたは帰属不明のresultを現在判断へ適用しない。 | main turn ID、安定snapshot、event sequenceの不一致、`external_or_unknown`、`mixed_provenance`のresultを`stale`にし、narration/review合否へ使わず理由だけを保存する。 | Draft | 非該当 |
 
 ### 空状態、異常、停止
@@ -235,8 +235,8 @@ output schemaは`build-week-support-output-v1/<role>/1`とversion/hashをmanifes
 | 権限 | roleとmodel・effort・sandbox・approvalを変更不可にする。QAは許可済み検証、他roleは読み取りだけとし、supportへGit outcomeを許可しない。 |
 | プライバシー | contextがOpenAIへ送信され得ることを表示する。raw contextは処理後に破棄し、HISTへSUP-F-018のfieldだけを保存する。 |
 | 監査・ログ | assignment、role、source、実model・effort、fallback、status、UTC、summary、evidence refs、error codeを記録し、生内容、secret、絶対pathを除外する。 |
-| 性能 | 8 core / 16 GB macOS、1,000 event/分でstatus更新p95 250 ms、cache model解決p95 50 ms。同worktree 1 turn、3 worktreeを並行できる。 |
-| 信頼性・復旧 | support失敗をmainへ伝播させず、schemaだけ1回再試行する。terminal/tree消滅と安定post snapshot前にleaseを解放しない。 |
+| 性能 | 8 core / 16 GB macOS、1,000 event/分でstatus更新p95 250 ms、cache model解決p95 50 ms。同worktreeはactive App Server turn 1件、別の3 worktreeは並行できる。 |
+| 信頼性・復旧 | support失敗をmainへ伝播させず、schemaだけ1回再試行する。terminalまたは登録app-owned member 0と安定post snapshot前にleaseを解放しない。 |
 | アクセシビリティ | role、status、summary、warning、conflict、再試行をtext表示し、S-002とS-003をkeyboard操作できる。 |
 | 多言語・地域 | 日本語・英語を提供する。canonical IDとerror codeは翻訳せず、UTC保存・OS timezone表示とする。 |
 
