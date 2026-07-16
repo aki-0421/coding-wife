@@ -225,7 +225,7 @@ Codexのmain/supportは`danger-full-access`かつ`approval: never`で実行す�
 | ユーザーキャンセル | エラー表示を出さず操作前状態へ戻す | ユーザーが再操作する | 操作前状態を保持する |
 | Capability / OS権限不足 | 拒否された機能とOS設定の確認手順を表示する | 権限変更後にユーザーが再実行する | 入力とsessionを保持する |
 | ローカルI/O失敗 | 対象操作、短いerror code、再試行を表示する | 最大1回の自動再試行後、ユーザー操作へ切り替える | 成功済みtransactionだけを正とする |
-| Codex / TTS API失敗 | 影響を受けたsession、HTTP status分類、再実行可否を表示する | rate limitと一時障害だけを上限3回で再試行する | prompt draftとtext timelineを保持する |
+| Codex / TTS API失敗 | 影響を受けたsession、HTTP status分類、再実行可否を表示する | Codexのrate limit・一時障害は上限3回、TTSは[audio-commentary要件](../requirements/audio-commentary/requirements.md)どおり自動再試行0回 | prompt draftとtext timelineを保持する |
 | sidecar切断 | 全実行中turnを中断表示し、sidecar再起動を提示する | ユーザーが再起動を実行する | SQLite履歴とworktreeを保持する |
 | 復旧不能な初期化失敗 | 回復不能通知と設定・診断viewを表示する | migrationまたはcredential storeの診断結果に従う | 元databaseとbackupを上書きしない |
 
