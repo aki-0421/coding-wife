@@ -1,7 +1,7 @@
 ---
 title: "音声実況 要件定義"
 description: "現在workspaceの状態変化を1人のNarratorがtextとOpenAI TTSで実況する要件。"
-updated: 2026-07-16
+updated: 2026-07-17
 last_verified: 2026-07-16
 status: "Draft"
 prefix: "NARR"
@@ -119,7 +119,7 @@ read_when:
 | NARR-F-033 | PCM audioをchunked responseから逐次再生する。 | 24 kHz・16-bit signed little-endian mono PCMとしてheaderなしでdecodeし、全response完了前に先頭chunkを再生でき、chunk順序の欠落・逆転・奇数byteではstreamを停止する。 | Draft | 非該当 |
 | NARR-F-034 | Speech API通信とaudio device操作をRust側だけで行う。 | browser network traceとWebView heapにAPI key、Authorization header、PCM byteが0件で、Reactはrequest ID、status、transcript、envelope statusだけを受け取る。 | Draft | 非該当 |
 | NARR-F-035 | TTSへCodex/ChatGPT認証とは別のOpenAI Platform API keyを使用する。 | S-004へ「Codex loginではTTSを利用できない」とPlatform API課金の案内を表示し、Codex auth file、ChatGPT session、App Server tokenをSpeech requestへ使用しない。 | Draft | 非該当 |
-| NARR-F-036 | TTS API keyをOS credential storeだけへ保存する。 | macOS Keychain、Windows Credential Manager、Ubuntu Secret Service互換storeへ保存し、SQLite、Web Storage、平文file、環境変数、logへのfallbackが0件となる。 | Draft | 非該当 |
+| NARR-F-036 | TTS API keyをOS credential storeだけへ保存・削除する。 | 削除時はaudioを停止し`deleting`を保存後にstoreを消去する。成功だけ`unset`、失敗・crashは`delete_failed`/text-onlyとし再試行する。SQLite、Web Storage、平文file、環境変数、logへkeyのfallbackを作らない。 | Draft | 非該当 |
 | NARR-F-037 | API key入力を保存完了後にmemoryから消去する。 | masked入力をRustへ1回渡し、credential storeの成功・失敗response後100 ms以内にReact値とRust request bufferをzeroizeし、key値、長さ、末尾文字を再表示・copyしない。 | Draft | 非該当 |
 | NARR-F-038 | 初回audio再生前にAI生成音声であることを明示する。 | 日英で「人間ではなくAI生成音声」と常時S-004へ表示し、初回TTS有効化時に同内容を確認するまでaudioを再生せず、text実況は継続する。 | Draft | 非該当 |
 | NARR-F-039 | voiceをsnapshot対応の組込み13種類へ限定する。 | `alloy`、`ash`、`ballad`、`coral`、`echo`、`fable`、`onyx`、`nova`、`sage`、`shimmer`、`verse`、`marin`、`cedar`だけを選択でき、defaultは`cedar`、custom voice IDは拒否する。 | Draft | 非該当 |
@@ -131,8 +131,8 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| NARR-F-043 | S-004へTTSの利用可能状態と診断を表示する。 | `text_only`、`ready`、`muted`、`offline`、`invalid_key`、`rate_limited`、`api_unavailable`、`device_unavailable`の1値、最終成功UTC、短いerror codeを表示し、keyとprovider本文を表示しない。 | Draft | 非該当 |
-| NARR-F-044 | API key未設定・credential store利用不能ではtext＋expressionへ縮退する。 | Speech requestが0件、transcriptとmain semantic expressionが維持され、mouthは閉じ、main/support turnを継続し、S-004へ設定またはstore復旧案内を表示する。 | Draft | 非該当 |
+| NARR-F-043 | S-004へTTSの利用可能状態と診断を表示する。 | `text_only|ready|muted|offline|invalid_key|rate_limited|api_unavailable|device_unavailable|deleting|delete_failed`の1値、最終成功UTC、短いerror codeを表示し、keyとprovider本文を表示しない。 | Draft | 非該当 |
+| NARR-F-044 | key未設定・store利用不能・削除中/失敗ではtext＋expressionへ縮退する。 | Speech request 0件、transcript・expression維持、mouth closed、turn継続とし、S-004に設定・store復旧・削除再試行を表示する。 | Draft | 非該当 |
 | NARR-F-045 | 401、403、model unavailableではtext＋expressionへ縮退する。 | 当該発話のaudioを再試行せず`invalid_key`または`api_unavailable`を表示し、keyをlog・timelineへ出さず、別modelへfallbackせず、次のmain turnを許可する。 | Draft | 非該当 |
 | NARR-F-046 | 429、network、timeout、5xxではfreshnessを優先してtext＋expressionへ縮退する。 | 自動retryを0回とし、connect 5秒、first byte 10秒、inter-chunk 5秒、1文全体60秒のいずれかを超えたstreamをcancelしてstatusを分類し、次のevent処理を継続する。 | Draft | 非該当 |
 | NARR-F-047 | audio device・PCM decode失敗ではtext＋expressionへ縮退する。 | device open、device loss、unsupported format、decode、buffer overflowでstreamを停止しmouthを閉じ、既定deviceの再診断を表示してmainとtranscriptを維持する。 | Draft | 非該当 |
@@ -140,7 +140,7 @@ read_when:
 | NARR-F-049 | 非秘密音声設定をSQLiteへ保存する。 | TTS enabled、mute、integer volume、voice、language、AI音声確認versionをtransaction保存して再起動後に復元し、API keyとaudioを含めない。 | Draft | 非該当 |
 | NARR-F-050 | 音声設定の初期値を固定する。 | 初回はTTS disabled、mute false、volume 70、voice `cedar`、language `ui`で、valid key保存とAI音声確認後にユーザーがTTSを明示有効化できる。 | Draft | 非該当 |
 | NARR-F-051 | 設定変更を安全な再生境界で反映する。 | muteとTTS disableは即時停止、volumeは0〜100を現在streamへ250 ms以内、voice・languageは次の文から反映し、範囲外値では直前設定を維持する。 | Draft | 非該当 |
-| NARR-F-052 | 再起動時にaudio queueを復元・再生しない。 | transcriptと設定だけを復元し、playing、next、generation、PCM、HTTP requestを空から開始し、中断発話を自動生成・送信しない。 | Draft | 非該当 |
+| NARR-F-052 | 再起動時にaudio queueを復元・再生しない。 | transcriptと設定だけを復元し、audio/requestを空から開始する。`deleting`は`delete_failed`/text-onlyで復旧し、自動発話・自動削除を行わない。 | Draft | 非該当 |
 | NARR-F-053 | 日英で10分のheadphone-only scenarioを合格させる。 | healthyなkey・API・macOS deviceで日本語1回、英語1回を行い、画面を見ない評価者が目的、現在phase、直近結果、次の一手、回答要否の5問中4問以上へ各言語で正答する。 | Draft | 非該当 |
 | NARR-F-054 | event coverageと沈黙を自動検証する。 | 6重要eventを各10件、重複・state不変eventを各100件、質問待ち60秒を入力し、重要transcript coverage 100%、重複発話0件、質問発話後から解決まで発話0件となる。 | Draft | 非該当 |
 | NARR-F-055 | 実況adapterのlocal性能とmemoryを制限する。 | 8 CPU core・16 GBのmacOSで1,000 event/分を10分入力し、model/API待ちを除くevent受付からqueue更新p95 200 ms、transcript反映p95 200 ms、audio buffer 2 MiB以下、UI threadの1秒超block 0回となる。 | Draft | 非該当 |
@@ -228,7 +228,7 @@ read_when:
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| なし | 本文の1人実況、event-driven queue、固定Speech API、text＋expression fallbackでハッカソン版を実装する | 仕様責任者レビューでS-002・S-004の双方向IDとlive API smoke evidenceを確認する | いいえ |
+| なし | 本文の1人実況、event-driven queue、固定Speech API、text＋expression fallbackでハッカソン版を実装する | 仕様責任者レビューとlive API smoke evidenceを確認する | いいえ |
 
 ## 参照資料
 
@@ -251,7 +251,7 @@ read_when:
 | レビュー結果 | Not Ready |
 | 仕様責任者 | プロダクトオーナー |
 | 合意日 | 未合意 |
-| 残る非ブロック論点 | S-002・S-004からの逆参照、live Speech API smoke evidence、仕様責任者合意 |
+| 残る非ブロック論点 | live Speech API smoke evidence、仕様責任者合意 |
 
 ## 着手可チェック
 
@@ -261,7 +261,7 @@ read_when:
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [ ] 画面IDと要件IDの相互参照が一致している。
+- [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
 - [ ] 仕様責任者がレビューし、合意した。

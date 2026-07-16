@@ -216,7 +216,7 @@ read_when:
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-001` | セッションダッシュボード | CODE-F-006、CODE-F-012〜CODE-F-015、CODE-F-047 | 参照 | [S-001 セッションダッシュボード](../../screen-design/S-001_session-dashboard.md) |
+| `S-001` | セッションダッシュボード | CODE-F-006、CODE-F-012〜CODE-F-015、CODE-F-021、CODE-F-047 | 参照 | [S-001 セッションダッシュボード](../../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | CODE-F-016〜CODE-F-032、CODE-F-038〜CODE-F-049 | 変更 | [S-002 コーディングワークスペース](../../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証跡 | CODE-F-023、CODE-F-044、CODE-F-046、CODE-F-050 | 参照 | [S-003 セッション証跡](../../screen-design/S-003_session-evidence.md) |
 | `S-004` | 設定・診断 | CODE-F-001〜CODE-F-012、CODE-F-017〜CODE-F-020、CODE-F-033〜CODE-F-037、CODE-F-046〜CODE-F-050 | 変更 | [S-004 設定・診断](../../screen-design/S-004_settings-diagnostics.md) |

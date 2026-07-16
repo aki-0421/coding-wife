@@ -225,6 +225,7 @@ output schemaは`build-week-support-output-v1/<role>/1`とversion/hashをmanifes
 |---|---|---|---|---|
 | `S-002` | コーディングワークスペース | SUP-F-001〜SUP-F-015、SUP-F-020〜SUP-F-037、SUP-F-045〜SUP-F-049 | 新規 | [S-002 コーディングワークスペース](../../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証跡 | SUP-F-016〜SUP-F-019、SUP-F-026、SUP-F-028〜SUP-F-034、SUP-F-038〜SUP-F-045、SUP-F-048、SUP-F-049 | 新規 | [S-003 セッション証跡](../../screen-design/S-003_session-evidence.md) |
+| `S-004` | 設定・診断 | SUP-F-020〜SUP-F-027 | 参照 | [S-004 設定・診断](../../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
 
@@ -287,7 +288,7 @@ output schemaは`build-week-support-output-v1/<role>/1`とversion/hashをmanifes
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [ ] 画面IDと要件IDの相互参照が一致している。
+- [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
 - [ ] 仕様責任者がレビューし、合意した。

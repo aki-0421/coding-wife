@@ -1,8 +1,8 @@
 ---
 title: "Live2Dコンパニオン 要件定義"
 description: "許諾済みの同梱モデル1体だけでmain Solの状態を表現し、描画不能時もtextへ安全に縮退する要件。"
-updated: 2026-07-16
-last_verified: 2026-07-16
+updated: 2026-07-17
+last_verified: 2026-07-17
 status: "Draft"
 prefix: "LIVE"
 read_when:
@@ -84,8 +84,8 @@ read_when:
 | LIVE-F-007 | pluginとhidden APIからmodelを交換できない。 | Tauri Command、IPC message、JavaScript global、plugin hook、config keyにmodel path、model URL、model bytes、model swapを受け取るpublic entryが0件であることをrelease API surface testで確認できる。 | Draft | 非該当 |
 | LIVE-F-008 | runtimeで外部modelを取得または保存しない。 | animated、static、hidden、retry、offlineの各試験でmodel用HTTP request、filesystem picker、directory watcher、application dataへのmodel bytes書き込みが0件である。 | Draft | 非該当 |
 | LIVE-F-009 | 同梱modelの16表情とmotionなしを固定inventoryとして検証する。 | build manifestのexpression IDが次の16件と完全一致し、motion groupとmotion fileが0件である。 | Draft | 非該当 |
-| LIVE-F-010 | Live2Dとcreatorの配布noticeを含める。 | 3OS artifactにSDK version、copyright、適用EULA参照、creator表記、許諾確認IDがあり、S-004からoffline閲覧できる。 | Draft | 非該当 |
-| LIVE-F-011 | Expandable Application機能をrelease gateで禁止する。 | LIVE-F-001、LIVE-F-005〜LIVE-F-008が合格し、任意modelを追加できない境界と適用契約の確認記録がある場合だけ公開候補にする。 | Draft | 非該当 |
+| LIVE-F-010 | Cubism配布記録と必須noticeを含める。 | SDK/Core/Framework・EULA・`RedistributableFiles.txt`のversion/date/hashと本人同意を記録する。指定Coreをas-isでのみ配布しFrameworkをアプリへ統合、license/notice/copyrightとend-user保護条項を保持する。起動時Live2D logoとREADME/提出説明のLive2D言及、creator表記を必須とする。 | Draft | 非該当 |
+| LIVE-F-011 | Publication License免除と非Expandableをrelease gateにする。 | publisherが個人/General UserまたはSmall-Scale Enterpriseで直近年商1,000万円未満、かつLIVE-F-001/005〜008の固定1model・非Expandableである場合だけ契約・申請・料金不要と記録する。無料配布だけを根拠にせず、条件変更・不明・Expandable化は配布をblockし、必要な契約をreleaseの1か月以上前に完了する。 | Draft | 非該当 |
 
 #### 同梱expression inventory
 
@@ -164,8 +164,8 @@ read_when:
 | LIVE-F-044 | macOS実機でrenderer CPU利用を制限する。 | 8 CPU core・16 GB RAMのApple Siliconでvisible idle 60秒の平均が1 logical coreの20%以下、TTS lip-sync中が35%以下、window非表示2秒後が1%以下となる。 | Draft | 非該当 |
 | LIVE-F-045 | macOS実機でrenderer memoryを制限する。 | 1体を10分表示したrenderer有効時のprocess RSS増分が非表示baseline比512 MiB以下で、2分時点から10分時点の増加が32 MiB以下となる。 | Draft | 非該当 |
 | LIVE-F-046 | macOS artifactで主要導線を実機E2E検証する。 | `.dmg`から起動し、16 expression inventory、9 state mapping、TTS mouth、TTSなし、reduced motion、resize/DPI、context loss、asset破損、static・hidden縮退、Quitを全件実行したevidenceがある。 | Draft | 非該当 |
-| LIVE-F-047 | Windows 11 x64をCI検証しpreview表示する。 | `.msi`とmanifest、mapping、path、no-import、fallback、reduced motion testが合格し、README・S-004に実機未検証と表示する。 | Draft | 非該当 |
-| LIVE-F-048 | Ubuntu 24.04 x64 artifactをCI build/testしpreview表示する。 | `.AppImage`を生成し、LIVE-F-047と同じautomated testが合格する。READMEとS-004にLive2D/Tauri WebView実機未検証のpreview表示がある。 | Draft | 非該当 |
+| LIVE-F-047 | Windows 11 x64をCI検証しpreview表示する。 | interactive VMで`.msi`を起動し、model load、WebGL/texture、animation、no-import、fallbackを検証する。README・S-004に実機未検証と表示する。 | Draft | 非該当 |
+| LIVE-F-048 | Ubuntu 24.04 x64 artifactをCI検証しpreview表示する。 | Xvfb/DBus環境で`.AppImage`を起動しLIVE-F-047と同項目を検証する。READMEとS-004にLive2D/Tauri WebView実機未検証と表示する。 | Draft | 非該当 |
 | LIVE-F-049 | release artifactごとにmodel拡張入口が0件であることを検査する。 | macOS、Windows、UbuntuのartifactへLIVE-F-005〜LIVE-F-008のUI、handler、API、network、watcher検査を行い、1件でも検出したartifactをrelease候補にしない。 | Draft | 非該当 |
 
 ### privacy、offline、多言語
@@ -239,8 +239,8 @@ read_when:
 | 依存・前提 | 内容 | 状態 | 未解決時の影響 |
 |---|---|---|---|
 | 許諾済み同梱model | creatorの再配布許諾がある1体、16 expression、motionなしをbuild sourceとする。 | 解決済み | manifestを生成できずrelease不可 |
-| Live2D Cubism SDK for Web | runtime CDNを使わず、buildでversionとintegrityを固定し、適用契約とnoticeをrelease evidenceへ記録する。 | release gate | version、契約、noticeを確定できなければartifact公開不可 |
-| WebGL / Tauri WebView | macOS実機だけを保証対象とし、Windows・Ubuntuは公式platform情報を参照したpreviewとする。 | OS別検証 | WebGL不能時はstaticまたはhiddenへ縮退 |
+| Live2D Cubism SDK for Web | LIVE-F-010〜011のpublisher/EULA/再配布記録とversionを固定する。 | 条件付き解決 | 記録または配布条件の不備でartifact公開不可 |
+| WebGL / Tauri WebView | Tauri・WKWebView・WebView2・WebKitGTKはCubism公式対応表に明記されないため、3OSの実artifact起動をgateにする。 | OS別検証 | 不能時は配布block、runtimeはstatic/hidden縮退 |
 | [デスクトップ共通仕様](../../screen-design/desktop-common-specification.md) | 3OS artifact、単一window、close、Quit、通知、reduced motion、text fallbackを提供する。 | 解決済み | 共通lifecycleとOS表示を検証できない |
 | [codex-main-session要件](../codex-main-session/requirements.md) | main thread、turn、item、AskUserQuestion、interruptの相関済み状態を提供する。 | Draft | LIVE-F-012〜LIVE-F-023を導出できない |
 | [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | support roleをmainとは別主体として識別する。 | Draft | LIVE-F-013の分離を検証できない |
@@ -250,7 +250,7 @@ read_when:
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| なし | 同梱モデル1体、固定mapping、no motion、no import、3段階縮退で実装する | 仕様責任者レビューで適用Live2D契約のrelease evidenceとS-002・S-004の相互参照を確認する | いいえ |
+| なし | 同梱1model、固定mapping、no motion/import、3段階縮退で実装する | 仕様責任者がpublisher/EULA/再配布release recordに合意する | いいえ |
 
 ## 参照資料
 
@@ -260,6 +260,8 @@ read_when:
 | [ID管理ルール](../../rules/id-management-rules.md) | `LIVE` Prefix、要件ID、画面IDの正本 |
 | [デスクトップ共通仕様](../../screen-design/desktop-common-specification.md) | 3OS、window lifecycle、通知、reduced motion、text fallbackの共通契約 |
 | [Live2D Cubism SDK License](https://www.live2d.com/en/sdk/license/) | SDK利用と配布時に確認する公式license案内 |
+| [Live2D SDK契約要否FAQ](https://help.live2d.com/en/sdk/sdk_001/) | General User/Small-Scale Enterpriseの契約免除条件 |
+| [Live2D publisher規模FAQ](https://help.live2d.com/en/sdk/sdk_007/) | 直近年商1,000万円未満のpublisher判定 |
 | [Live2D Expandable Application](https://www.live2d.com/en/sdk/license/expandable/) | ユーザーが任意modelを追加できる機能を本製品へ含めない根拠 |
 | [Live2D Proprietary Software License Agreement](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html) | Cubism Coreを含むproprietary componentの適用条件確認 |
 | [Live2D Open Software License Agreement](https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html) | Cubism Componentsのopen software条件とnotice確認 |
@@ -274,7 +276,7 @@ read_when:
 | レビュー結果 | Not Ready |
 | 仕様責任者 | プロダクトオーナー |
 | 合意日 | 未合意 |
-| 残る非ブロック論点 | 適用Live2D契約のrelease evidence、S-002・S-004からの逆参照、仕様責任者合意 |
+| 残る非ブロック論点 | publisher/EULA/再配布release evidenceと仕様責任者合意 |
 
 ## 着手可チェック
 
@@ -284,7 +286,7 @@ read_when:
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [ ] 画面IDと要件IDの相互参照が一致している。
+- [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
 - [ ] 仕様責任者がレビューし、合意した。

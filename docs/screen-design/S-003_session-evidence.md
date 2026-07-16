@@ -1,7 +1,7 @@
 ---
 title: "S-003 セッション証跡"
 description: "sessionの履歴、Git・command・test・review evidenceを検索し、read-onlyで検証する画面仕様。"
-updated: 2026-07-16
+updated: 2026-07-17
 read_when:
   - "session timeline、filter、search、evidence詳細、final summaryを実装するとき。"
   - "欠落・stale・large diff・履歴削除をGit非変更のまま表示または検証するとき。"
@@ -88,7 +88,7 @@ status: "Draft"
 |---|---|---|
 | command | actor、分類、executable、argument数・redacted summary、relative cwd、開始/終了、duration、exit code/signal、terminal status、digest | command全文、stdin、raw stdout/stderr、absolute path |
 | test | framework、対象summary、duration、exit、pass/fail/skipまたは`counts_unavailable`、未検証範囲 | raw test output。interrupted/timeout/crashをpassにしない |
-| Git snapshot | branch、HEAD、base、upstream有無、dirty fingerprint、staged/unstaged/untracked件数、履歴操作中、actor | 自動修復、成功推測、Git変更操作 |
+| Git snapshot | branch、HEAD、base、upstream有無、Git state fingerprint、staged/unstaged/untracked件数、履歴操作中、actor | 自動修復、成功推測、Git変更操作 |
 | diff | 比較元・先、staged/unstaged、relative path、status/rename、追加削除行数、hash、hunk数 | patch・file本文。binaryは前後byte/hashだけ。largeは全体統計、先頭500件、未表示数だけ |
 | commit・remote | commit/parent ID、redacted subject、前後branch、観測turn/UTC、operation・exit分類 | author email、署名、diff、remote URL、PR本文・response本文 |
 | model | owner turn/assignment、requested/actual model、actual effort、preset、fallback有無・理由 | hidden reasoning、raw response |
@@ -124,7 +124,7 @@ status: "Draft"
 | evidence選択 | list itemあり | 型別detailと参照を表示 | 非該当 | 欠落を推測せずIDと影響表示 | [HIST-F-031](../requirements/activity-history/requirements.md#閲覧filtersearch) |
 | snapshot再収集 | worktreeがreadableなactive/archived session | current HEAD/fingerprintの新snapshotを作り元recordを不変保持 | collector開始前なら変更なし | `incomplete`と再収集可否を表示しmainを止めない | [GIT-F-040〜GIT-F-042](../requirements/git-review-harness/requirements.md#共有worktree秘密再開) |
 | summary copy | redacted summaryあり | 選択summaryだけをclipboardへcopy | 変更なし | 元表示を維持しcopy error | [GIT-F-038](../requirements/git-review-harness/requirements.md#共有worktree秘密再開) |
-| session履歴削除 | running/waitingが0件 | 確認後にsession、resume、event、evidence、derived dataをtransaction削除しS-001へ戻る | 0件変更 | 完了表示せず再試行。Git/filesystemは不変 | [HIST-F-032、HIST-F-034〜HIST-F-035](../requirements/activity-history/requirements.md#削除とretention) |
+| session履歴削除 | running/waitingが0件 | 確認後にsession、resume、event、evidence、derived dataをtransaction削除しS-001へ戻る | 0件変更 | 完了表示せず再試行。Git/worktree/source/Codexは不変 | [HIST-F-032、HIST-F-034〜HIST-F-035](../requirements/activity-history/requirements.md#削除とretention) |
 | workspace履歴削除 | 配下sessionがすべて終了 | 全recordとapp-owned derived dataを削除しS-001へ戻る | 0件変更 | 1件でも実行中なら全体を無変更で拒否 | [HIST-F-033〜HIST-F-035](../requirements/activity-history/requirements.md#削除とretention) |
 
 この画面のDOM、menu、context menu、IPCにはcommit、push、PR、merge、revert、reset、stash、clean、checkout、approvalのbuttonを作らない。`再収集`はallowlist済みread-only Git commandだけを使い、Git index、refs、worktree fileを変更しない。
@@ -186,7 +186,7 @@ status: "Draft"
 | source・Git実体 | repository/worktree | この画面は保存しない | read-only再収集時に参照 | この画面は削除しない | unavailable/incomplete表示 |
 | raw patch・output・reasoning | 保存しない | 非該当 | 復元しない | 収集処理終了時にmemory破棄 | metadataだけ表示 |
 | secret質問回答 | answered flagだけSQLite | 解決時 | detail表示 | 履歴削除 | 値を復元・copyしない |
-| derived data | FTS/index/cache/owned evidence | primary transactionに従う | query時 | primaryと同じ明示削除 | 削除完了を表示しない |
+| derived data | FTS/index/cache/owned evidence/backup | primary削除後にcleanup | query時 | primaryと同じ明示削除 | app UI/query/再起動から復元できない場合だけ完了。OS backup/forensic eraseは保証外 |
 
 ## OS差分
 

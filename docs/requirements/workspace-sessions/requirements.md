@@ -205,7 +205,7 @@ branch名、worktree path、base branch、Git credentialの自由入力欄は提
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-001` | セッションダッシュボード | WORK-F-001〜WORK-F-026、WORK-F-036〜WORK-F-041 | 新規 | [S-001 セッションダッシュボード](../../screen-design/S-001_session-dashboard.md) |
+| `S-001` | セッションダッシュボード | WORK-F-001〜WORK-F-034、WORK-F-036〜WORK-F-041 | 新規 | [S-001 セッションダッシュボード](../../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | WORK-F-024、WORK-F-027〜WORK-F-035 | 新規 | [S-002 コーディングワークスペース](../../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証跡 | WORK-F-012、WORK-F-020、WORK-F-027、WORK-F-028、WORK-F-043 | 新規 | [S-003 セッション証跡](../../screen-design/S-003_session-evidence.md) |
 | `S-004` | 設定・診断 | WORK-F-004〜WORK-F-013、WORK-F-021、WORK-F-022、WORK-F-031〜WORK-F-034 | 新規 | [S-004 設定・診断](../../screen-design/S-004_settings-diagnostics.md) |
@@ -274,7 +274,7 @@ branch名、worktree path、base branch、Git credentialの自由入力欄は提
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [ ] 画面IDと要件IDの相互参照が一致している。
+- [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
 - [ ] 仕様責任者がレビューし、合意した。

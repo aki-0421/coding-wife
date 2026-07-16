@@ -46,6 +46,13 @@ read_when:
 - App Store、Microsoft Store、Linux package repositoryへの公開、自動アップデート、配布署名の取得はハッカソン版の対象外とする。署名されていないartifactにはOS警告を回避せず、起動手順へ警告が表示される事実を記載する。
 - release bundleへpackage、OS別verifier、macOS safe shell、version、byte数、SHA-256を列挙するmanifestを同梱する。PowerShell/POSIX shell/macOS safe shellは導入・初回起動前にsize/hashを検証し、欠落・不一致ならpackageを実行せず非0で停止する。導入手順は日本語・英語を提供する。
 
+### Cubism配布境界
+
+- release publisherは個人/General Userとし、実質的な管理主体と直近年商が1,000万円未満であることをrelease recordへ固定する。固定同梱1modelかつimport/追加/切替なしの非Expandableである間は、[Live2D公式FAQ](https://help.live2d.com/en/sdk/sdk_001/)と[publisher規模FAQ](https://help.live2d.com/en/sdk/sdk_007/)に基づきPublication License契約・申請・料金は不要とする。アプリが無料であることだけを免除根拠にしない。
+- SDK取得者本人がProprietary/Open EULAに同意し、SDK release、Core/Framework、EULA、`RedistributableFiles.txt`のversion/date/hashをrelease recordへ残す。artifactは同fileが指定するCoreだけをas-isで含め、Frameworkをアプリの主要機能へ統合し、license・notice・copyrightとCore保護のend-user条項を保持する。
+- 安全側のrelease gateとして、起動時のLive2D logo表示とREADME/提出説明のLive2D言及を必須にする。publisher条件の変更・不明化、Expandable化、配布file/notice/end-user条項の不備は配布をblockする。Publication Licenseが必要な場合は[releaseの1か月以上前](https://www.live2d.com/en/sdk/license/)に契約を完了する。
+- Tauri WebViewは[Cubism公式platform表](https://docs.live2d.com/en/cubism-sdk-manual/platform/)にhostとして列挙されない。build成功で代替せず、`.dmg`、`.msi`、`.AppImage`の実artifactを対象OS環境で起動し、model load、WebGL/texture、animation、縮退をrelease gateで検証する。
+
 ## managed process tree
 
 | OS | 所有境界 | crash時 |

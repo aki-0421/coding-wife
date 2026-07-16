@@ -119,8 +119,8 @@ read_when:
 | APP-F-024 | 初回起動をsidecarなしで完了できる。 | DB初期化、OS locale選択、Full access同意をS-001の初回状態で行い、同意前はmanaged treeが0件である。拒否時もS-004とQuitを利用できる。 | Draft | 非該当 |
 | APP-F-025 | offline時もlocal shell機能を提供する。 | S-001、保存済みS-002/S-003、S-004、設定、履歴削除を利用でき、Codex/TTSを開始せずdraftを保持し、再接続後も自動送信・再生しない。 | Draft | 非該当 |
 | APP-F-026 | errorを影響範囲へ分離して再試行可能にする。 | route/component errorはerror boundary、I/Oは1回自動retry後に手動retry、回復不能DB/child初期化はS-004へ移し、非秘密入力と正常sessionを保持する。 | Draft | 非該当 |
-| APP-F-027 | shell設定をRust側で検証してatomic保存する。 | locale、TTS enabled、mute、volume、voice、narration language、AI音声確認version、notification preferenceをschema検証し、未知fieldと境界外値は全件保存せず項目別errorを返す。model、sandbox、approvalはread-onlyである。 | Draft | 非該当 |
-| APP-F-028 | TTS API keyをwrite-only secretとして扱う。 | 入力をcredential storeへ1回渡し、成功・未設定・利用不能だけを返してUI値を消去する。key値をSQLite、Web Storage、log、diagnostic、IPC responseへ返さない。 | Draft | 非該当 |
+| APP-F-027 | shell設定をRustで検証しatomic保存する。 | locale、theme（`system|light|dark`）、TTS、notificationをschema検証する。`system`はOS変更に追従し、明示themeは維持、forced colorsはOS優先とする。不正値・write失敗は全fieldを直前commitへ戻し、model/sandbox/approvalはread-onlyとする。 | Draft | 非該当 |
+| APP-F-028 | TTS API keyをwrite-onlyで設定・削除する。 | 削除はTTSを停止し`deleting`をatomic保存してからcredential storeを消去する。成功だけ`unset`、失敗・再起動は`delete_failed`/text-onlyとし再試行する。key値をUI、SQLite、Web Storage、log、diagnostic、IPC responseへ残さない。 | Draft | 非該当 |
 
 ### 設定・診断
 
@@ -129,7 +129,7 @@ read_when:
 | APP-F-029 | S-004からcomponent診断を一括または個別実行できる。 | check ID、`pass|warn|fail|unavailable`、開始・終了UTC、error code、再試行可否を表示し、同一checkのrunningを最大1件にする。 | Draft | 非該当 |
 | APP-F-030 | Codex CLIとApp Server契約を診断する。 | CODE-F-004/008/033〜036の実field/pathだけを表示し、欠落・null・非対応は`unavailable`とする。workspace名、instruction scope/status、capability echoを推定せず、`plugin/list`は開発診断だけでproduction/release gateにしない。ServerRequest routingはCODE-F-009〜011だけを正本とする。 | Draft | 非該当 |
 | APP-F-031 | TTS credential、model、audio outputを診断する。 | NARR-F-031のendpoint・snapshot、credential/key状態、default output、user起動sample、最終成功UTC、NARR-F-043の接続分類を表示し、key値とdevice IDを保存しない。 | Draft | 非該当 |
-| APP-F-032 | Live2D assetとWebGLを診断する。 | 同梱model descriptor、manifest/hash、preview、16 expression、WebGL context/renderer tierを確認し、外部model探索とasset downloadを行わない。 | Draft | 非該当 |
+| APP-F-032 | Live2D asset・WebGL・公開条件を診断する。 | asset/WebGLに加え、個人/General User・直近年商1,000万円未満・固定1model/非Expandableの記録を表示し、満たす場合だけPublication License契約・申請・料金不要と判定する。条件不明はrelease failとする。 | Draft | 非該当 |
 | APP-F-033 | storage、schema、Gitを診断する。 | app dataのread/write、SQLite schema/integrity/backup/free bytes、Git executable/version/worktree support、選択sessionのrepository/worktree対応を個別表示する。 | Draft | 非該当 |
 | APP-F-034 | 診断表示とcopyをredactする。 | API key、token、credential、prompt、response、code本文、username、remote userinfo、absolute pathを除去し、repository名、component、version、status、error codeだけをcopyできる。 | Draft | 非該当 |
 
@@ -145,7 +145,7 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | APP-F-037 | macOS、Windows、Ubuntuの標準artifactを生成・配布する。 | macOS 13+ Apple Silicon `.dmg`、Windows 11 x64 `.msi`、Ubuntu 24.04 x64 `.AppImage`がclean buildから1件ずつ生成され、同一versionのrelease bundleへ収録される。 | Draft | 非該当 |
-| APP-F-038 | 各artifactでwindow・tray・Quit smokeを実行する。 | macOS実機、interactive desktop上のWindows 11 x64 runner、Xvfb `:99`+DBus+Xfce StatusNotifier panel+FUSEのUbuntu 24.04 x64 runnerで検証済みpackageを起動し、単一`main`、tray操作、Quit後owned descendant 0件を確認する。screenshot、操作log、process inventoryを保存し、Windowsはinstall/uninstallも行う。 | Draft | 非該当 |
+| APP-F-038 | 各artifactでGUI・Live2D・Quit smokeを実行する。 | macOS実機、interactive Windows 11 runner、Xvfb+DBus+Xfce+FUSEのUbuntu runnerでpackageを起動し、window、tray、Live2D model/WebGL、Quit後owned descendant 0件を確認する。screenshot、log、process inventoryを保存し、Windowsはinstall/uninstallも行う。 | Draft | 非該当 |
 | APP-F-039 | OS別release gateとpreview表示を適用する。 | macOS実機E2EとAPP-F-038の3OS GUI smokeが成功した場合だけrelease候補にする。build/package成功だけでは合格にせず、Windows/UbuntuはCI GUI検証済み・実機未検証と表示する。 | Draft | 非該当 |
 | APP-F-040 | 無料で再現できるtoolchainだけをrelease・提出gateにする。 | macOSはad-hoc signed app、Windowsはunsigned `.msi`、Ubuntuは`.AppImage`を生成し、有料Developer ID / Windows証明書、notarization、store receiptの不在を失敗にしない。updater、Deep Link、file associationは0件である。 | Draft | 非該当 |
 
@@ -225,10 +225,10 @@ read_when:
 
 | 画面ID | Route | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|---|
-| `S-001` | `/sessions` | セッションダッシュボード | APP-F-003〜APP-F-004、APP-F-024〜APP-F-026、APP-F-035〜APP-F-036、APP-F-044〜APP-F-046 | 新規 | [S-001 セッションダッシュボード](../../screen-design/S-001_session-dashboard.md) |
+| `S-001` | `/sessions` | セッションダッシュボード | APP-F-003〜APP-F-004、APP-F-022〜APP-F-026、APP-F-035〜APP-F-036、APP-F-044〜APP-F-046 | 新規 | [S-001 セッションダッシュボード](../../screen-design/S-001_session-dashboard.md) |
 | `S-002` | `/workspace/:sessionId` | コーディングワークスペース | APP-F-003〜APP-F-007、APP-F-010〜APP-F-023、APP-F-035〜APP-F-036、APP-F-044〜APP-F-046 | 新規 | [S-002 コーディングワークスペース](../../screen-design/S-002_coding-workspace.md) |
 | `S-003` | `/evidence/:sessionId` | セッション証跡 | APP-F-003〜APP-F-004、APP-F-010、APP-F-022〜APP-F-026、APP-F-034〜APP-F-036、APP-F-044〜APP-F-046 | 新規 | [S-003 セッション証跡](../../screen-design/S-003_session-evidence.md) |
-| `S-004` | `/settings` | 設定・診断 | APP-F-003〜APP-F-004、APP-F-008、APP-F-015、APP-F-019〜APP-F-034、APP-F-037〜APP-F-046 | 新規 | [S-004 設定・診断](../../screen-design/S-004_settings-diagnostics.md) |
+| `S-004` | `/settings` | 設定・診断 | APP-F-003〜APP-F-004、APP-F-008、APP-F-015、APP-F-019〜APP-F-051 | 新規 | [S-004 設定・診断](../../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
 
@@ -262,7 +262,7 @@ read_when:
 | [support-agent-orchestration要件](../support-agent-orchestration/requirements.md) | ephemeral support、interrupt、model catalogを提供する | Draft | Quit/emergencyの全turn停止を検証できない |
 | [git-review-harness要件](../git-review-harness/requirements.md) | Git/test childとevidenceを提供する | Draft | child分類とGit診断を統合できない |
 | [activity-history要件](../activity-history/requirements.md) | SQLite、migration、recovery、redactionを提供する | Draft | 保存、crash復旧、診断logを検証できない |
-| [live2d-companion要件](../live2d-companion/requirements.md) | 同梱asset、WebGL、active workspace表示を提供する | Draft | APP-F-010、APP-F-032、APP-F-046を検証できない |
+| [live2d-companion要件](../live2d-companion/requirements.md) | 固定1model、SDK/EULA配布記録、公開条件、3OS WebView smokeを提供する | Draft | APP-F-010、APP-F-032、APP-F-038を検証できない |
 | [audio-commentary要件](../audio-commentary/requirements.md) | current active workspaceだけのtext/TTS、queue、Speech、設定、audio outputを提供する | Draft | APP-F-010、APP-F-018、APP-F-027〜APP-F-031を統合検証できない |
 | CI runners | macOS arm64実機、unlocked interactive Windows 11 x64 VM、Xvfb/DBus/Xfce/FUSE付きUbuntu 24.04 x64 VM | release gate | 1環境でも欠けるとAPP-F-037〜APP-F-040をrelease合格にできない |
 
@@ -270,7 +270,7 @@ read_when:
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| 画面相互参照 | 本書の4 screen/route対応を使用する | 各画面詳細仕様作成時にAPP要件IDの逆参照を追加する | いいえ |
+| 画面相互参照 | 4 screen/route対応を使用する | 要件表と画面表の機械照合で差分0件を維持する | いいえ |
 
 ## 参照資料
 
@@ -290,7 +290,7 @@ read_when:
 | レビュー結果 | Not Ready |
 | 仕様責任者 | プロダクトオーナー |
 | 合意日 | 未合意 |
-| 残る非ブロック論点 | S-001〜S-004画面詳細仕様の相互参照 |
+| 残る非ブロック論点 | 仕様責任者合意 |
 
 ## 着手可チェック
 
@@ -300,7 +300,7 @@ read_when:
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [ ] 画面IDと要件IDの相互参照が一致している。
+- [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
 - [ ] 仕様責任者がレビューし、合意した。

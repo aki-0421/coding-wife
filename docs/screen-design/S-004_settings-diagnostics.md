@@ -1,7 +1,7 @@
 ---
 title: "S-004 設定・診断"
 description: "言語・表示・同梱Live2D・音声・通知・履歴を設定し、Codex、Git、storage、renderer、audio、配布物を秘密値なしで診断する画面仕様。"
-updated: 2026-07-16
+updated: 2026-07-17
 read_when:
   - "言語、appearance、Live2D、TTS、通知、履歴削除の設定画面を実装するとき。"
   - "Codex、Git、SQLite、WebGL、audio、model asset、OS artifactの診断とredactionを検証するとき。"
@@ -31,7 +31,7 @@ status: "Draft"
 | 対象 | 内容 |
 |---|---|
 | general・appearance | 日本語/英語、system/light/dark theme、OSのreduced motion・high contrast・text scale状態を扱う。 |
-| Live2D | 許諾済み同梱model 1体の表示、asset/renderer状態、license、明示retryを扱う。 |
+| Live2D | 同梱1model、asset/renderer、publisher免除条件、SDK/EULA/再配布記録、logo・notice、明示retryを扱う。 |
 | audio commentary | TTS enabled、mute、volume、組込みvoice、言語、AI音声同意、text-only縮退を扱う。 |
 | TTS credential | Codex loginとは別のOpenAI Platform API keyをwrite-onlyで設定・状態確認・削除する。 |
 | notifications | OS permissionと、質問・main完了・回復不能失敗の3通知だけを設定する。 |
@@ -82,7 +82,7 @@ status: "Draft"
 | persistent header | `設定・診断 / Settings & diagnostics`、戻る、全session状態、常時表示の`緊急停止 / Emergency stop` | 戻る、緊急停止 |
 | General | UI language、theme、app version、固定main model/sandbox/approvalのread-only表示 | locale/theme変更 |
 | Accessibility | OS reduced motion、forced colors/high contrast、text scale、keyboard modeの現在値 | OS設定手順を確認 |
-| Companion | 同梱model preview/名前、animated/static/hidden、manifest、SDK/creator notice。import UIは0件 | renderer retry、license表示 |
+| Companion | 同梱model preview、animated/static/hidden、manifest、publisher/SDK/EULA/再配布記録、logo/creator notice。import UIは0件 | renderer retry、license・release gate表示 |
 | Audio commentary | TTS enabled、mute、volume、voice、narration language、AI音声表示、text-only status | setting変更、sample診断 |
 | API key | Platform API keyの未設定/設定済み/credential store利用不能。値、長さ、末尾文字は表示しない | masked key設定、key削除 |
 | Notifications | OS permission、app preference、対象3イベント | permission要求、app内通知切替 |
@@ -108,6 +108,7 @@ status: "Draft"
 | Git/worktree | Git version、GitHub origin/default head、選択sessionのrepository・branch・linkage | invalid、auth、operation in progress、repair required | WORK-F-004〜WORK-F-013、WORK-F-031〜WORK-F-034 |
 | storage/history | app data read/write、schema、integrity、backup、free bytes、evidence refs | write、newer schema、migration、integrity、missing ref | HIST-F-022〜HIST-F-025、HIST-F-031 |
 | model asset | descriptor、manifest/hash、1 model、16 expression、notice、preview | missing、extra、hash、expression | LIVE-F-001〜LIVE-F-011、LIVE-F-036〜LIVE-F-037 |
+| Cubism release | 個人/General User・年商1,000万円未満・非Expandable、SDK/EULA/RedistributableFiles、end-user条項、logo/言及、3OS実artifact | 条件不明/変更、配布file/notice不備、WebView smoke | LIVE-F-010〜LIVE-F-011、LIVE-F-046〜LIVE-F-049、APP-F-032、APP-F-038 |
 | WebGL renderer | context、renderer tier、static/hidden fallback、explicit retry | unavailable、context loss、shader/texture | LIVE-F-038〜LIVE-F-040、LIVE-F-043〜LIVE-F-049 |
 | TTS/audio | fixed endpoint/model、credential state、API分類、default output、sample、last success | text only、invalid key、rate limit、API/device unavailable | NARR-F-031〜NARR-F-048 |
 | OS artifact | OS/arch/version、package、startup smoke、preview、SHA-256、signing/install guide | unsupported OS、checksum、smoke、unsigned warning | APP-F-037〜APP-F-040、APP-F-047〜APP-F-051 |
@@ -133,15 +134,15 @@ status: "Draft"
 | 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
 |---|---|---|---|---|---|
 | localeを変更 | `ja`または`en` | 4 routes、tray、通知、error、diagnosticを即時切替して保存 | 直前値 | field error、直前localeを維持 | APP-F-027、APP-F-044 |
-| themeを変更 | `system`、`light`、`dark` | app chromeへ適用し保存。forced colorsとreduced motionはOS値を優先 | 直前値 | contrastを壊さず直前themeを維持 | APP-F-027、APP-F-046 |
+| themeを変更 | `system`、`light`、`dark` | atomic保存し、`system`はOS変更に追従、明示themeは維持。forced colorsはOS優先 | 直前値 | 全fieldを直前commitへ戻しcontrastを維持 | APP-F-027、APP-F-046 |
 | Live2D rendererを再試行 | staticまたはhidden | asset検証と初期化を各1回行いstatusを更新 | 非該当 | 縮退表示とtext statusを維持 | LIVE-F-036〜LIVE-F-041 |
 | TTS設定を変更 | input境界内 | mute/disableは即時、volumeは250 ms以内、voice/languageは次文から適用 | 直前値 | 全fieldを保存せず項目別error | NARR-F-049〜NARR-F-052、APP-F-027 |
 | API keyを設定 | 1〜512 ASCII、前後空白なし | credential store成功状態だけを返しinputを消去 | keyを消去 | keyを保持せずstore復旧・再入力を表示 | NARR-F-035〜NARR-F-037、APP-F-028 |
-| API keyを削除 | 設定済み、確認済み | credential storeから削除しTTSをdisabled/text-onlyへ変更、再生を停止 | keyと設定を維持 | 値なしの短いerrorと再試行 | NARR-F-036〜NARR-F-037、NARR-F-044、APP-F-028 |
+| API keyを削除 | 設定済み、確認済み | 再生/生成を停止し`deleting`を保存、store削除成功後だけ`unset`/text-only | 操作前なら0件変更 | 失敗・再起動は`delete_failed`/text-onlyとし、削除済みと推測せず再試行 | NARR-F-036〜NARR-F-037、NARR-F-043〜NARR-F-044、NARR-F-052、APP-F-028 |
 | TTSを初回有効化 | valid key、AI音声・外部data説明の確認済み | TTS enabledを保存し次のvalid textから音声化 | text-onlyを維持 | text-onlyと理由を表示 | NARR-F-038〜NARR-F-041、NARR-F-050 |
 | notificationを有効化 | app preferenceがoff | OS permissionを1回要求し、許可時だけon | offを維持 | 再要求せずapp内状態を維持 | APP-F-022〜APP-F-023 |
-| session履歴を削除 | running/waitingが0件 | resume、event、evidence、派生dataを削除しGit/worktreeを維持 | 0件変更 | 完了表示せず再試行 | HIST-F-032、HIST-F-034〜HIST-F-035 |
-| workspace履歴を削除 | 全sessionが終了条件合格 | 対象全recordと派生dataを削除 | 0件変更 | 1件でも実行中なら全体無変更 | HIST-F-033〜HIST-F-035 |
+| session履歴を削除 | running/waitingが0件 | `secure_delete=ON`、WAL checkpoint、FTS/cache/owned file/backup消去を行い、app query/再起動から復元不能にする。Git/worktreeは維持 | 0件変更 | cleanup不完全は完了表示せず再試行 | HIST-F-032、HIST-F-034〜HIST-F-035 |
+| workspace履歴を削除 | 全sessionが終了条件合格 | 対象全recordとapp-owned派生dataを同境界で消去 | 0件変更 | 1件でも実行中またはcleanup失敗なら完了表示しない | HIST-F-033〜HIST-F-035 |
 | 診断を一括・個別実行 | 同じcheckがrunningでない | check ID、status、UTC、error、再試行可否を更新 | 未開始checkを維持 | 対象checkだけfail/unavailable | APP-F-029〜APP-F-033 |
 | 診断summaryをcopy | terminal checkが1件以上 | redacted textだけをclipboardへ渡す | 非該当 | 元表示を維持しcopy失敗 | APP-F-034、GIT-F-038 |
 | 緊急停止 | 常時 | 新規実行を拒否し全turnをinterrupt、audio停止、必要時child kill、app/data/worktreeを維持 | 非該当 | 残存childとerrorを診断へ表示 | APP-F-017〜APP-F-019 |
@@ -173,7 +174,7 @@ Live2D model/path/URL、Codex model/sandbox/approval、custom voice、Git argume
 | ユーザー操作 | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
 |---|---|---|---|---|---|
 | setting保存 | Rust + SQLite | typed settings command | allowlist field、schema、single writer | 直前値 | transaction全体をrollback |
-| API key設定・削除 | Rust + OS credential store | command名未定 | user gesture、write/deleteだけ。read valueなし | memoryをzeroize | keyを保存・表示せずstatusだけ返す |
+| API key設定・削除 | Rust + OS credential store | typed set/delete command | user gesture、write/deleteだけ。read valueなし | 開始前ならmemoryをzeroizeし変更0件 | `ready|deleting|unset|delete_failed`だけ返し、失敗はtext-only |
 | notification permission | OS notification plugin | permission request | user gesture、未決定時だけ | preference off | 再要求せずapp内fallback |
 | diagnostic process/Git | Rust child process | fixed check commands | executable/argument allowlist、timeout、redaction | 未開始checkを維持 | childを終了し分類だけ返す |
 | Speech/audio sample | Rust HTTP + output device | fixed Speech check | valid key、AI音声確認、fixed endpoint、no microphone | streamを停止 | text-only、mouth closed |
@@ -213,7 +214,7 @@ Live2D model/path/URL、Codex model/sandbox/approval、custom voice、Git argume
 | データ | 正本・保存先 | 保存契機 | 復元契機 | 破棄条件 | 失敗時 |
 |---|---|---|---|---|---|
 | locale、theme、TTS、notification | local SQLite | valid field transaction | 起動・再表示 | 明示変更または履歴削除範囲 | 直前値を維持 |
-| API key | OS credential store | 明示設定成功時 | 値は復元せず状態だけ照会 | 明示削除 | TTS disabled/text-only |
+| API key | OS credential store | 明示設定成功時 | 値を読まずstatus照会 | 明示削除成功 | `deleting/delete_failed`はTTS disabled/text-only、再試行 |
 | diagnostic result | local SQLiteの構造化event | check terminal時 | S-004再表示 | 対象履歴削除 | 前回結果と失敗を区別 |
 | model manifest・notice | application bundle | build時 | 起動・retry | app更新 | invalidならstatic/hidden |
 | release manifest・guide | application bundle | build時 | S-004表示 | app更新 | checksum/statusをfail表示 |
@@ -249,6 +250,7 @@ Live2D model/path/URL、Codex model/sandbox/approval、custom voice、Git argume
 | AI音声 | `音声は人間ではなくAIが生成します。` | `This voice is generated by AI, not a human.` |
 | key状態 | `API keyは設定済みです。値は表示できません。` | `The API key is set. Its value cannot be displayed.` |
 | bundled model | `許諾済みの同梱モデル1体を使用します。モデルの追加・交換はできません。` | `This app uses one licensed bundled model. Models cannot be added or replaced.` |
+| Cubism公開条件 | `個人・年商1,000万円未満・非Expandableの記録に基づき公開免除条件を判定します。` | `Release eligibility is based on the recorded publisher scale and non-Expandable design.` |
 | preview artifact | `CIでbuild/test済み。実機では未検証です。` | `Built and tested in CI. Not verified on physical hardware.` |
 | emergency | `緊急停止は処理と音声を止めます。既存の変更は元に戻しません。` | `Emergency stop halts work and audio. It does not undo existing changes.` |
 | history delete | `アプリ履歴を削除します。Git branch、worktree、ソースファイルは削除しません。` | `This deletes app history. Git branches, worktrees, and source files are kept.` |
@@ -259,11 +261,11 @@ analytics SDK、tracking pixel、remote crash upload、usage telemetry、A/B tes
 
 ## 画面受け入れ条件
 
-1. locale/theme/TTS/notificationのvalid変更だけがatomic保存され、不正値では直前値を維持し項目別errorを表示する。
-2. API keyはcredential store以外へ残らず、設定・失敗・削除後にUIとrequest memoryから消え、画面には状態だけを表示する。
-3. Live2Dは同梱model 1体だけを表示し、picker、drop、URL、path、import、swap UI/APIが0件である。renderer失敗時もtextとCodexを維持する。
+1. locale/theme/TTS/notificationのvalid変更だけがatomic保存され、system/explicit themeとOS forced colorsの優先順が守られ、不正値・write失敗は直前commitを維持する。
+2. API key削除は`deleting`でaudioを停止し、store消去成功だけ`unset`、失敗・再起動は`delete_failed`/text-onlyとなる。key値はUI、request memory、SQLite、logへ残らない。
+3. Live2Dは同梱1model、publisher免除条件、SDK/EULA/再配布記録、logo/noticeのgateが合格し、picker/drop/URL/path/import/swapが0件である。不備時は配布をblockする。
 4. 診断matrixの全checkが一括・個別に実行でき、status、UTC、error、再試行可否を表示し、copy結果にsecret、会話、code、absolute pathがない。
-5. session/workspace履歴削除はrunning/waitingを拒否し、cancel・失敗で0件変更し、成功してもGit、worktree、source、Codex rolloutを変更しない。
+5. session/workspace履歴削除はrunning/waitingを拒否し、app UI/query/再起動から対象を復元できない場合だけ完了とする。Git/worktree/source/Codexは不変で、OS backup/snapshot/forensic eraseは保証外と表示する。
 6. 緊急停止は全stateでkeyboardから到達でき、既存変更をrollbackせずturn/audio/managed childを定義時間内に停止する。
 7. macOS実機保証とWindows/Linux preview、artifact checksum、signing、install/launch手順が日英で正しく表示される。
 8. screen reader、forced colors、reduced motion、200% zoom、800×600で全主要操作を完了できる。

@@ -1,7 +1,7 @@
 ---
 title: アクティビティ履歴 要件定義
 description: workspaceとsessionの再開情報、turn、質問、コマンド、Git、test、modelの構造化証跡をlocal SQLiteへ保存・再表示する要件を定義する。
-updated: 2026-07-16
+updated: 2026-07-17
 read_when:
   - アクティビティ履歴の保存、検索、削除を実装するとき
   - S-002またはS-003でsession証跡を表示するとき
@@ -62,6 +62,7 @@ read_when:
 | support thread ID、rollout、生履歴の保存・再開 | supportはephemeral固定のため | assignment summaryだけ保存 |
 | 履歴のCSV・JSON・archive export/import | 主要導線を期限内に完成させるため | ハッカソン版にbutton、IPC、CLIを設けない |
 | cloud同期、共有、telemetry送信 | local-first境界を守るため | 期限後に再検討 |
+| OS snapshot、外部backup、SSDの物理・forensic secure erase | アプリから消去を保証できないため | app-owned DB・WAL・index・cache・backupの論理消去をbest effortで行い、OS/device領域は保証外と表示 |
 
 ## アクターと権限
 
@@ -87,7 +88,7 @@ read_when:
 | HIST-F-006 | 非secretのAskUserQuestion質問・回答を保存する。 | request/question ID、質問文、選択肢、選択labelまたはfree-form回答、resolved理由・UTCをredaction後に保存し、再起動後に解決済みとして1回だけ表示する。 | Draft | 非該当 |
 | HIST-F-007 | secret AskUserQuestionは値を保存せず回答事実だけを保存する。 | `isSecret: true`ではrequest/question ID、`answered: true|false`、resolved理由・UTCだけが残り、値、長さ、hash、選択labelがSQLite・index・backupに0件である。 | Draft | 非該当 |
 | HIST-F-008 | commandの実行証跡を保存する。 | command evidence ID、thread/turn/item ID、actor、分類、executable、argument数・redacted summary、workspace-relative cwd、開始・終了UTC、duration、exit code/signal、terminal status、result summary・output digestを確認でき、stdinとraw stdout/stderrを保存しない。 | Draft | 非該当 |
-| HIST-F-009 | diff参照をコード本文なしで保存する。 | diff evidence/snapshot ID、比較元・先revision、dirty fingerprint、staged/unstaged、relative path、file status・rename、file数・追加削除行数、binary/large diff metadata、生成UTCを確認でき、hunk・patch・file本文が0件である。 | Draft | 非該当 |
+| HIST-F-009 | diff参照をコード本文なしで保存する。 | diff evidence/snapshot ID、比較元・先revision、Git state fingerprint、staged/unstaged、relative path、file status・rename、file数・追加削除行数、binary/large diff metadata、生成UTCを確認でき、hunk・patch・file本文が0件である。 | Draft | 非該当 |
 | HIST-F-010 | commit証跡を保存する。 | commit evidence ID、session ID、40桁commit ID、parent ID、redacted subject、前後branch、観測main turn ID・UTCを確認でき、commit本文、author email、署名payloadを保存しない。 | Draft | 非該当 |
 | HIST-F-011 | modelとreasoning effortの実値をownerへ関連付ける。 | main turnまたはsupport assignmentごとにrequested/actual model、actual effort、fallback有無・理由、preset IDを確認できる。 | Draft | 非該当 |
 | HIST-F-012 | testと検証evidenceを保存する。 | test/command evidence ID、framework、対象summary、開始・終了UTC、duration、exit、terminal status、pass/fail/skip数または`counts_unavailable`、未検証範囲を確認でき、test output本文を保存しない。 | Draft | 非該当 |
@@ -127,7 +128,7 @@ read_when:
 |---|---|---|---|---|
 | HIST-F-032 | 終了済みsessionをapp履歴から明示削除できる。 | `running`/`waiting_for_user`を0件と確認し、削除対象数、resume不能、Git非削除を確認後にsession、main resume、turn、support summary、event、evidenceを削除する。cancelでは0件変更する。 | Draft | 非該当 |
 | HIST-F-033 | workspace単位で全app履歴を明示削除できる。 | 配下sessionが全てHIST-F-032の終了条件を満たす場合だけ件数と影響を確認し、workspace rootを含む全recordを削除する。1件でも実行中なら全体を無変更で拒否する。 | Draft | 非該当 |
-| HIST-F-034 | 削除時にapp-owned派生dataも消去する。 | 対象のFTS/index、cache、集計、app-owned evidence file、対象dataを含むbackupを消去し、再検索・再起動・filesystem走査で復元できない。失敗時は完了表示せず再試行を出す。 | Draft | 非該当 |
+| HIST-F-034 | 削除時にapp-owned派生dataも論理消去する。 | `secure_delete=ON`のprimary/FTS行削除をcommit後、WAL checkpoint/truncate、関連index・cache・集計・app-owned evidence file・対象backup削除、必要時VACUUMをbest effortで行う。app UI/query/再起動から対象IDと本文を復元できないことを検証し、一部失敗を完了表示しない。 | Draft | 非該当 |
 | HIST-F-035 | 履歴削除でrepositoryとCodex外部dataを変更しない。 | local branch、commit、worktree、source file、Codex CLI所有rolloutにdelete/reset/cleanを発行せず、削除確認に非対象を表示する。 | Draft | 非該当 |
 | HIST-F-036 | primary履歴を明示削除まで無期限保持する。 | age、件数、容量、archive、app updateを理由にeventを自動削除・要約置換せず、保存上限とTTL設定を設けない。disk full時はHIST-F-022を適用する。 | Draft | 非該当 |
 
@@ -155,7 +156,7 @@ read_when:
 | snapshot/command/Git/test/review/model | HIST-F-008〜HIST-F-012とGIT-F-004〜GIT-F-034のfield | code・raw outputなし |
 | search_index | redacted検索対象とevent ID | primary削除と同じtransactionでcascade |
 
-foreign keyを有効化し、session内sequence、event ID、evidence IDへunique制約を置く。event type、status、schema versionはallowlist外の値を保存しない。
+foreign keyを有効化し、session内sequence、event ID、evidence IDへunique制約を置く。event type、status、schema versionはallowlist外の値を保存しない。全write connectionで`secure_delete=ON`を確認し、削除後はcheckpointと所有ファイル消去の個別成否を記録する。OS snapshot、外部backup、解放済みblock、SSD wear levelingからの物理復元防止は保証しない。
 
 ### 例外・復旧マトリクス
 
@@ -167,6 +168,7 @@ foreign keyを有効化し、session内sequence、event ID、evidence IDへuniqu
 | evidence欠落 | `HIST_EVIDENCE_MISSING` | eventを残し参照切れを表示する |
 | disk full | 空き容量の確保と再試行 | 既存recordを自動purgeしない |
 | offline | offline label | 一覧、search、詳細、削除をlocalで利用できる |
+| 削除cleanup失敗 | `HIST_DELETE_INCOMPLETE`、再試行、保証外境界 | app UI/queryで対象を表示せず、残るapp-owned派生dataのcleanupを再試行する |
 
 ## デスクトップ固有要件
 
@@ -193,7 +195,8 @@ foreign keyを有効化し、session内sequence、event ID、evidence IDへuniqu
 |---|---|---|---|---|
 | `S-002` | コーディングワークスペース | HIST-F-002〜HIST-F-012、HIST-F-019〜HIST-F-022、HIST-F-028 | 変更 | [S-002 コーディングワークスペース](../../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証跡 | HIST-F-005〜HIST-F-012、HIST-F-027〜HIST-F-036 | 新規 | [S-003 セッション証跡](../../screen-design/S-003_session-evidence.md) |
-| `S-004` | 設定・診断 | HIST-F-022〜HIST-F-025、HIST-F-031 | 変更 | [S-004 設定・診断](../../screen-design/S-004_settings-diagnostics.md) |
+| `S-001` | セッションダッシュボード | HIST-F-003、HIST-F-019、HIST-F-020、HIST-F-027 | 参照 | [S-001 セッションダッシュボード](../../screen-design/S-001_session-dashboard.md) |
+| `S-004` | 設定・診断 | HIST-F-022〜HIST-F-025、HIST-F-031〜HIST-F-036 | 変更 | [S-004 設定・診断](../../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
 
@@ -224,7 +227,7 @@ foreign keyを有効化し、session内sequence、event ID、evidence IDへuniqu
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| 画面相互参照 | S-002/S-003/S-004へ本要件IDを追加する | 画面詳細仕様作成時に双方向対応を確認する | いいえ |
+| 画面相互参照 | S-001〜S-004との双方向ID対応を維持する | 要件表と画面表を機械照合し差分0件を確認する | いいえ |
 
 ## トレーサビリティ
 
@@ -255,7 +258,7 @@ foreign keyを有効化し、session内sequence、event ID、evidence IDへuniqu
 | レビュー結果 | Not Ready |
 | 仕様責任者 | プロダクトオーナー |
 | 合意日 | 未合意 |
-| 残る非ブロック論点 | 未作成の画面詳細仕様について双方向IDを照合する |
+| 残る非ブロック論点 | 仕様責任者合意 |
 
 ## 着手可チェック
 
@@ -265,7 +268,7 @@ foreign keyを有効化し、session内sequence、event ID、evidence IDへuniqu
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [ ] 画面IDと要件IDの相互参照が一致している。
+- [x] 画面IDと要件IDの相互参照が一致している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
 - [ ] 仕様責任者がレビューし、合意した。
