@@ -1,7 +1,7 @@
 ---
 title: "S-002 コーディングワークスペース"
 description: "現在のworkspaceでSolへ入力し、main・support・Live2D・音声実況の進行とAskUserQuestionを扱う画面仕様。"
-updated: 2026-07-16
+updated: 2026-07-17
 read_when:
   - "コーディング画面のlayout、composer、AskUserQuestion、session切替、緊急停止を実装するとき。"
   - "Live2D、音声実況、support role status、offline・再開状態をS-002へ統合するとき。"
@@ -31,9 +31,9 @@ status: "Draft"
 | 対象 | 内容 |
 |---|---|
 | Sol | latest timeline、固定実行契約、turn状態、全5種類のCodex入力を扱う中央領域 |
-| main質問 | 1〜3問、選択肢、`Other`、free-form、secret、timeout、解決済み状態を扱うoverlay |
-| support | 固定7 roleのidle・queue・実行・結果・縮退・実model/effortを表示する |
-| companion・実況 | current workspaceのmain Sol 1体、HTML state、実況text、TTS状態、muteを扱う |
+| main質問 | 1〜3問、各2〜3 option、client追加の`Other`、到達wire値のtimeout、解決済み状態を扱うoverlay |
+| support | 固定7 roleのidle・lease owner・queued・deferred・結果・縮退・実model/effortを表示する |
+| companion・実況 | current workspaceのmain Sol 1体、決定論的play-by-play、terminal後のcolor commentary、TTS状態、muteを扱う |
 | lifecycle | session切替、turn中断、offline、再接続、明示再開、緊急停止、tray再表示を扱う |
 
 ### 含めない
@@ -75,12 +75,12 @@ status: "Draft"
 | 領域 | 表示内容 | 主な操作 |
 |---|---|---|
 | 上部bar | workspace/session名、branch、lifecycle、online状態、`Sol`、`gpt-5.6-sol`、Full access / neverのread-only badge | session switcher、S-003、S-004、常時表示の`緊急停止` |
-| 左rail | Planner、Narrator、Decision Explainer、Risk Sentinel、QA、Detached Reviewer、Checkpoint Curatorのstatus、actual model/effort、fallback、最新summary | role詳細をtimelineまたはS-003で開く。role作成・model変更は不可 |
+| 左rail | 7 roleのidle・lease owner・queued・deferred、actual model/effort、fallback、最新summary | role詳細をtimelineまたはS-003で開く。role作成・model変更は不可 |
 | Sol中央領域 | 最新100 event、Solのredacted message summary、command/test/Git/review status、snapshot収集中・結果 | event選択、末尾へ移動、turn実行中の`turnを中断` |
 | composer | Text textarea、InlineImage/LocalImage chip、Skill picker、Mention picker、byte・画像count、送信error | item追加・削除、`Solへ送信`。remote画像と汎用fileは受け付けない |
-| 質問overlay | mainだけの1〜3 question card、option説明、`Other`、free-form、secret mask、残り時間、回答送信状態 | 全問回答、1回送信。未解決overlayは閉じて回避できない |
+| 質問overlay | mainだけの1〜3 question card、各2〜3 option、client追加の`Other`、残り時間、回答送信状態 | radioで全問回答し、`Other`選択時だけ任意文を入力して1回送信。未解決overlayは閉じられない |
 | 固定companion | 同梱Live2D 1体、main semantic stateのHTML label、animated/static/hidden理由 | 表示のみ。model・expression選択なし |
-| 実況panel | current workspaceの最新transcript、audio status、mute、回答待ちの沈黙表示 | mute切替、S-004を開く。voice等は変更しない |
+| 実況panel | Rust rendererの即時play-by-play、terminal後のNarrator color commentary、audio status、mute、回答待ちの沈黙表示 | mute切替、S-004を開く。voice等は変更しない |
 | live status | turn、質問、送信、error、session切替、実況textを通知するARIA領域 | 操作なし |
 
 1,360 CSS px以上は左rail 248 px・中央min 600 px・右companion 304 pxの3列とする。800〜1,359 pxは左railを上部barから開くdrawerにし、中央と右240 pxを維持する。実効幅799 px以下では中央、compact companion、support drawerの順へ1列化し、composerと緊急停止を常に到達可能にする。canvasは全breakpointで1つだけである。
@@ -90,9 +90,9 @@ status: "Draft"
 | 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
 |---|---|---|---|---|
 | 初期化中 | route検証、最新100件、main/worktree照合中 | skeleton、session名、緊急停止 | 画面遷移と緊急停止だけ可 | 全照合がterminalになる |
-| 通常・idle | main turnと未解決質問なし | composer、`待機中`、support status | 入力、送信、切替、mute可 | turn開始、質問、障害 |
-| 処理中 | main turnがrunning | streaming status、実行item、support並行状態 | draft編集、turn中断、切替、緊急停止可。同じmainへの送信不可 | terminalまたは質問待ち |
-| 回答待ち | validなmain AskUserQuestionが未解決 | overlay、`回答待ち`、TTSは質問1回後に沈黙 | 回答と緊急停止可。composer送信と新規support assignment不可 | 回答、timeout、server解決、interrupt |
+| 通常・idle | main turn、main queue、未解決質問なし | composer、`待機中`、lease ownerなし、support status | 入力、送信、切替、mute可 | turn開始、queue、質問、障害 |
+| 処理中 | main/supportがlease owner、またはmainがqueued | owner、queued/deferred、streaming status、実行item | support owner中はmainをqueue可。main owner中はdraft編集、turn中断、切替、緊急停止可 | owner terminal後の安定snapshot、または質問待ち |
+| 回答待ち | validなmain AskUserQuestionが未解決 | mainがlease owner、support running 0件、overlay、質問を1回告知後に沈黙 | 回答と緊急停止可。composer送信不可、support triggerはdeferred | 回答、timeout、server解決、interrupt後のturn terminal |
 | データなし | session ID不在・別workspace・削除済み | 理由を表示してS-001へ戻る | 緊急停止と遷移だけ可 | valid sessionを選ぶ |
 | オフライン | network unavailable | 保存timeline、draft、`offline`、text companion | local閲覧・編集・切替・緊急停止可。turn/TTS送信不可 | 再接続後にユーザーが送信する |
 | 停止中 | emergency stop後 | 全session停止、既存変更は未取消、診断案内 | 閲覧、S-004、対象sessionの明示再開可 | 診断合格後にユーザーが再開 |
@@ -106,16 +106,18 @@ status: "Draft"
 | 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
 |---|---|---|---|---|---|
 | session切替 | 保存済みsessionが選択可能 | draftを保存しrouteを変更。旧audioを100 ms以内に破棄し、新sessionのmain stateを250 ms以内に表示 | 元sessionを維持 | S-001へ戻さず元sessionと理由を表示 | [APP-F-004、APP-F-010](../requirements/desktop-shell/requirements.md#runtimewindowroutetray)、[LIVE-F-020](../requirements/live2d-companion/requirements.md#main-solのsemantic-state) |
-| Solへ送信 | idle、online、質問なし、valid itemが1件以上 | Rust再検証後に同じmain thread/worktreeへ1 turnを開始し、draftをclear | 非該当 | 非秘密draftを保持し項目別error | [CODE-F-016](../requirements/codex-main-session/requirements.md#main-threadと固定実行契約)、[CODE-F-024〜CODE-F-032](../requirements/codex-main-session/requirements.md#turn入力) |
+| Solへ送信 | main turnなし、online、質問なし、valid itemが1件以上 | Rust再検証後、leaseが空なら開始し、support owner中ならmainをqueuedにする。受付成功時にdraftをclear | 非該当 | 非秘密draftを保持し項目別error | [CODE-F-016](../requirements/codex-main-session/requirements.md#main-threadと固定実行契約)、[CODE-F-024〜CODE-F-032](../requirements/codex-main-session/requirements.md#turn入力) |
 | 画像を追加 | composer利用可 | paste画像をInlineImage、picker画像をLocalImage chipとして追加 | 変更なし | 違反MIME・size・pathを表示し全turnを未送信 | [CODE-F-026〜CODE-F-029](../requirements/codex-main-session/requirements.md#turn入力) |
 | Skill / Mention追加 | effective catalog entryが利用可能 | 明示選択したentryだけをitemにする | 変更なし | itemを追加せず理由と再読込案内 | [CODE-F-030〜CODE-F-031](../requirements/codex-main-session/requirements.md#turn入力) |
 | turnを中断 | main turnがrunning | 対象turnへinterruptを1回送りterminal表示にする。Pause状態を作らない | 確認を閉じれば継続 | 相関失敗を表示し緊急停止を維持 | [CODE-F-022](../requirements/codex-main-session/requirements.md#main-threadと固定実行契約) |
-| 質問へ回答 | main-only request、全問valid、未解決 | request IDへ1回だけresponseを送り、overlayを解決済みにしてsecret memoryを消去 | 無期限質問は待機を維持 | 自動再送せず、secretを消去して再入力可否を表示 | [CODE-F-038〜CODE-F-045](../requirements/codex-main-session/requirements.md#askuserquestion) |
+| 質問へ回答 | CODE-F-038〜CODE-F-042適合、全問valid、未解決 | request IDへ選択labelまたは`Other`本文を1回だけ送りoverlayを解決済みにする | `autoResolutionMs: null`は待機を維持 | 自動再送せず送信状態と再入力可否を表示 | [CODE-F-038〜CODE-F-045](../requirements/codex-main-session/requirements.md#askuserquestion) |
 | mute切替 | S-002表示中 | muteは即時audio停止、unmuteは過去発話を再生せず次発話から有効 | 非該当 | text実況を維持しS-004診断を案内 | [NARR-F-030](../requirements/audio-commentary/requirements.md#優先queueinterrupt質問待ち) |
 | 証跡を開く | valid session | 同じsessionの[S-003 セッション証跡](S-003_session-evidence.md)へ遷移 | 非該当 | S-002を維持しerror表示 | [HIST-F-028](../requirements/activity-history/requirements.md#閲覧filtersearch) |
 | 緊急停止 | 常時 | 250 ms以内に新規処理を拒否し、全turnをinterrupt、audioを100 ms以内に停止、必要時にchildを段階終了 | 確認は置かず即時実行 | appを残し残存childとerrorをS-004へ表示 | [APP-F-017〜APP-F-019](../requirements/desktop-shell/requirements.md#quitemergencycrash) |
 
-timeout付き質問は残り時間を1秒単位で表示し、0で全questionの空answerを1回だけ送って`timeout`へ遷移する。既にanswerまたは`serverRequest/resolved`が確定したrequestへのclick、Enter、timeout、後着eventは無視する。質問待ち前からrunningのsupportは完了またはinterruptまで表示更新し、待ち開始後のtriggerはassignmentを作らずdeferred eventとして保持する。
+`autoResolutionMs`がnullなら無期限、到達wire値60,000〜240,000 msなら残り時間を1秒単位で表示し、0で全questionの空answerを1回だけ送る。既にanswerまたは`serverRequest/resolved`済みの操作・後着eventは無視する。secret、free-form-only、`isOther: false`、範囲外件数・option・timeout、組込みmain質問以外のoriginはcompatibility failureとし、overlay、OS通知、実況text/TTS、answer保存を作らない。
+
+lease ownerがsupportならmainはqueuedとし、support terminalと安定snapshot後まで`turn/start`を送らない。main実行中と質問待ちでは同じsessionのsupport runningを0件、triggerをdeferredにする。別canonical worktreeのsessionだけは並行できる。
 
 ## 入力項目
 
@@ -127,9 +129,7 @@ timeout付き質問は残り時間を1秒単位で表示し、0で全questionの
 | 全画像 | 0件 | 任意 | 最大10件、各20 MiB、decode後合計50 MiB、各辺1〜8,192 px | 違反した実値と境界を一覧上部へ表示 | 保存しない |
 | Skill | なし | 任意 | enabled effective catalogのnameとabsolute `SKILL.md`が一致 | entry消失・load error | item選択だけをdraft保存 |
 | Mention | なし | 任意 | accessibleな導入済みapp/plugin catalog entry | 任意scheme・未導入entryを拒否 | item選択だけをdraft保存 |
-| option質問 | 未選択 | 各問必須 | 2〜3択の単一選択または`Other`のfree-form | 未回答、無効option | 非secretだけ解決時に履歴保存 |
-| free-form質問 | 空 | 各問必須 | optionsがnullのとき1入力。server schemaに従う | 未入力を質問card内へ表示 | 非secretだけ解決時に履歴保存 |
-| secret回答 | 空 | 条件付き | mask、copy不可、memoryだけ、responseへ1回 | 送信失敗時は消去して再入力要求 | 値・長さ・hashを保存しない |
+| option質問 | 未選択 | 各問必須 | 2〜3 optionの単一選択＋client `Other`。`Other`選択時だけ任意文欄を表示し、空は未回答 | 未回答、無効option、空の`Other`本文 | 適合requestの解決時だけ履歴保存 |
 | autoResolutionMs | server値 | 任意 | nullまたは60,000〜240,000 ms | 範囲外requestはcompatibility failure | timeout結果だけ保存 |
 
 ## ネイティブ連携
@@ -140,7 +140,7 @@ timeout付き質問は残り時間を1秒単位で表示し、0で全questionの
 |---|---|---|---|---|---|
 | turn送信・中断 | Rust Command / App Server | `main_turn_start` / `main_turn_interrupt` | session・thread・cwd・schemaのRust再照合 | 送信前ならdraft維持 | sidecarへ未検証値を送らずerror |
 | LocalImage選択 | Tauri dialog / Rust | `dialog.open` / `validate_local_image` | file 1件の選択とRust側canonical検証 | itemを追加しない | basenameと違反理由だけ表示 |
-| 質問回答 | Rust Command / App Server | `answer_user_question` | main threadとrequest/turn/item ID照合 | 待機維持 | 二重送信せずsecret消去 |
+| 質問回答 | Rust Command / App Server | `answer_user_question` | main threadとrequest/turn/item ID、CODE-F-038〜CODE-F-042を照合 | 待機維持 | 二重送信せずcompatibility failureを表示 |
 | mute | Rust Command / audio | `set_narration_mute` | current workspaceとgeneration照合 | 非該当 | text-onlyへ縮退 |
 | 緊急停止 | Rust lifecycle | `emergency_stop` | `main`とtrayから常時許可 | 非該当 | kill対象を照合し未知processを残す |
 | 通知click | Tauri notification / router | `focus_notification_target` | 3種類のallowlist eventだけ | 非該当 | S-001へ安全に戻す |
@@ -157,7 +157,7 @@ timeout付き質問は残り時間を1秒単位で表示し、0で全questionの
 | 最大化・全画面 | OS標準操作を許可し、状態を共通仕様どおり保存 |
 | 常に手前へ表示 | 不可 |
 | 閉じる操作 | 非表示。turn、support、TTSを止めずLive2D drawだけ停止 |
-| 未保存変更がある場合 | 非秘密draftを保存して非表示。secret回答中でも値を保存せず、再表示時に再入力を求める |
+| 未保存変更がある場合 | 非秘密draftを保存して非表示。未解決質問は回答を保存せず、再表示時に同じrequestからoverlayを復元する |
 
 ## メニュー・ショートカット
 
@@ -175,7 +175,7 @@ timeout付き質問は残り時間を1秒単位で表示し、0で全questionの
 |---|---|---|---|---|---|
 | 非秘密draft | SQLite / session | 編集、close、session切替 | 同じsessionの再表示・再起動 | turn送信成功またはユーザーclear | 画面に保持し再試行 |
 | timeline・evidence参照 | SQLite append-only | Rust transaction成功時 | 最新100件を表示 | 明示履歴削除 | 未保存を成功表示しない |
-| secret回答 | UI/Rust memory | 保存しない | 復元しない | response結果、失敗、interrupt、Quit | 消去して再入力を要求 |
+| 質問回答 | SQLite / history | 適合requestの解決時 | 解決済み表示 | 明示履歴削除 | compatibility failureではrecordを作らない |
 | InputItem画像byte | memory | 保存しない | 復元しない | 送信、削除、route離脱、Quit | itemを外しdraft textを維持 |
 | support status | SQLite summaryとruntime | assignment terminal時 | 再表示ではsummary、次回は新thread | 明示履歴削除 | raw outputを保存しない |
 | expression・audio queue | runtime memory | 永続保存しない | main statusから再評価 | 切替、mute、停止、Quit | textへ縮退 |
@@ -194,7 +194,7 @@ timeout付き質問は残り時間を1秒単位で表示し、0で全questionの
 
 - focus順を上部bar、左railまたはdrawer、Sol timeline、composer、右companion・実況の順に固定する。
 - 質問overlayは最初のquestionへfocusし、未解決中はoverlay内へtrapする。解決後はcomposer、停止時は復旧操作へ戻す。
-- optionはquestionごとのradio group、`Other`はradio選択後のlabel付きinput、secretはmask状態をaccessible nameで伝える。
+- optionはquestionごとのradio group、`Other`は選択後だけlabel付き任意文inputを表示する。
 - timelineとsupport更新を過剰に読み上げず、main terminal、質問、error、実況textを別のARIA statusへ通知する。
 - Live2D canvasとstatic previewをaccessibility treeから除外し、同じsemantic stateをHTML textで常時表示する。
 - status、role、test、error、audioを色だけで示さずtext labelとicon形状を併用する。
