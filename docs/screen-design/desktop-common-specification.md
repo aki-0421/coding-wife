@@ -15,14 +15,15 @@ read_when:
 - デスクトップシェルはTauri v2、フロントエンドはReact + TypeScript、ビルドはViteを使用する。
 - Viteが生成した静的アセットをTauriへバンドルし、リリース版でフロントエンド開発サーバーを起動しない。
 - Reactは表示、入力、画面内状態、画面遷移を担当する。OS操作、秘密情報、プロセス管理、永続化はRust側を信頼境界とする。
-- Codex App ServerはTauriが管理するsidecarとして起動し、メインセッションと支援セッションのthread、turn、通知を調停する。
+- Codex App Server sidecarは、ユーザー導入済みCodex CLI 0.144.5の`codex app-server --stdio`をTauri / Rustが子プロセスとして起動し、メインセッションと支援セッションのthread、turn、通知を調停する。アプリはCodex CLIを同梱、自動install、自動updateしない。
+- sidecarとのtransportはstdin / stdout上の改行区切りJSON（JSONL）だけを使用する。実行する0.144.5からstableと`--experimental`の両方で生成したJSON SchemaおよびTypeScript生成物をwire contractの正本とし、adapterのcontract testでrequest、response、notificationを検証する。
 - OpenAI Text-to-Speech APIへの通信はRust側から行い、API keyをReact state、Web Storage、SQLite、ログへ保存しない。
 
 | 実行境界 | 責務 | 禁止事項 |
 |---|---|---|
 | React WebView | 表示、入力、画面遷移、アクセシブルな状態通知 | 任意コマンド実行、資格情報の永続化、OSパスの無検証利用 |
 | Tauri / Rust | Capability検査、OS操作、SQLite、資格情報、sidecar、通知、TTS音声ストリーム | WebView入力を無検証でshellへ渡すこと |
-| Codex App Server sidecar | main/support threadとturnの実行、イベント配信、interrupt | UIへ秘密情報を返すこと、アプリの終了要求を無視して常駐すること |
+| Codex App Server sidecar | ユーザー導入済み0.144.5の子プロセスとして、stdio JSONLでmain/support threadとturnの実行、イベント配信、interruptを行う | UIへ秘密情報を返すこと、stdio以外のlistenerを開くこと、アプリの終了要求を無視して常駐すること |
 | OpenAI API | CodexモデルとTTSモデルのオンライン推論 | デスクトップのローカル状態の正本になること |
 
 参考: [Tauri公式 Viteガイド](https://v2.tauri.app/start/frontend/vite/)、[Tauri公式 Process Model](https://v2.tauri.app/concept/process-model/)
@@ -94,7 +95,7 @@ read_when:
 1. ライフサイクルを`quitting`へ変更し、新しいprompt、support assignment、TTS要求を拒否する。
 2. 実行中のmain turnと7つのsupport roleで実行中のturnへinterruptを送る。
 3. TTSの待機queueを破棄し、HTTP音声streamと再生中bufferを停止する。
-4. workspace、worktree、App Server thread ID、turn状態、timeline、未送信draft、選択view、window状態を1つのSQLite transactionで保存する。
+4. workspace、worktree、mainのApp Server thread ID、support assignment証跡、turn状態、timeline、未送信draft、選択view、window状態を1つのSQLite transactionで保存する。
 5. Codex App Server sidecarへshutdownを送り、5秒以内に終了しない場合は子プロセスを強制終了する。
 6. SQLite connection、tray、`main`を破棄してプロセスを終了する。
 
@@ -107,14 +108,14 @@ read_when:
 - 次回起動時に、Quit前のworkspaceとsessionを一覧へ戻し、最後に選択していたsessionを選択状態にする。
 - interrupt済みturnは`アプリ終了により中断`と表示し、自動継続、自動再送、自動Git操作を行わない。
 - ユーザーが中断sessionで`再開`を実行すると、同じmain root threadと同じ専用worktreeを使用し、Quitによる中断事実を含む新しいmain turnを開始する。
-- support root threadの履歴は保持する。interrupt済みsupport turnは自動再開せず、mainが再開後に同じroleへ新しいassignmentを作成する。
+- support root threadとその生履歴は保持・再開しない。mainの再開後に同じroleへ次のassignmentが作成された時点で、新しい`ephemeral: true` root threadを作成し、保存済みの構造化contextとevidence参照を再投入する。
 - 復元したworktreeが存在しない、Git repositoryでなくなった、読み取りできない、書き込みできない場合はCodex turnを開始せず、診断結果とrepository再選択操作を表示する。
 
 ## Codexセッションと支援エージェントの共通契約
 
 | 項目 | main | support |
 |---|---|---|
-| App Server thread | sessionごとに1つのroot thread | 7 roleそれぞれが別root thread |
+| App Server thread | sessionごとに1つの永続root thread | role別に最初のassignmentで作成するオンデマンドroot thread。`ephemeral: true`固定 |
 | worktree | session専用worktree | 対応するmainと同じsession専用worktree |
 | model | `gpt-5.6-sol`固定 | role mappingとApp Serverの`model/list`結果から自動選択 |
 | sandbox | `danger-full-access`固定 | `danger-full-access`固定 |
@@ -125,7 +126,7 @@ read_when:
 - 通常のtool approvalではturnを停止しない。ユーザー回答を待つ停止状態は、mainが実行した`AskUserQuestion`だけが作成できる。
 - mainが`AskUserQuestion`を実行した場合、main turnを待機状態にし、回答overlayを表示する。既に実行中のsupport turnは完了またはinterruptまで継続できるが、新しいsupport assignmentは回答後まで作成しない。
 - supportの質問要求はApp Server tool errorとして拒否し、質問内容をsupport結果としてmainへ返す。supportからユーザーへ直接overlayやOS通知を出さない。
-- supportのmodelはsession開始時と再開時に`model/list`を取得し、support-agent-orchestration要件のrole mappingへ一致する利用可能modelを選ぶ。mainの`gpt-5.6-sol`が一覧にない場合はsessionを開始せず、設定・診断画面へ接続エラーを表示する。
+- App Server開始時と再起動時に`model/list`を先頭から`nextCursor: null`まで取得し、support-agent-orchestration要件のrole mappingへ一致する利用可能modelを選ぶ。mainの`gpt-5.6-sol`が一覧にない場合はsessionを開始せず、設定・診断画面へ接続エラーを表示する。
 - 内蔵skillsの実行順は固定しない。各agentがskillのtriggerと現在のtaskに基づいて選択する。
 - desktop shellはtask完了を契機に`git commit`、`git push`、PR作成、mergeを自動実行しない。Git操作はユーザー指示とmainの判断に従うCodex turnだけが実行し、結果をtimelineへ記録する。
 
@@ -190,7 +191,7 @@ Codexのmain/supportは`danger-full-access`かつ`approval: never`で実行す�
 
 ### SQLite
 
-- OSのapplication data directoryにSQLite databaseを1つ作成し、workspace、session、App Server thread、turn、support assignment、timeline event、Git evidence、test result、model evidence、window state、ユーザー設定を構造化して保存する。
+- OSのapplication data directoryにSQLite databaseを1つ作成し、workspace、session、mainのApp Server thread ID、turn、support assignment、timeline event、Git evidence、test result、model evidence、window state、ユーザー設定を構造化して保存する。supportはthread IDや生履歴を保存せず、assignment ID、role、実model・effort、status、秘匿化summary、evidence参照を保存する。
 - timelineは発生時刻をUTCで保存し、表示時にOS timezoneへ変換する。eventはsession ID、role、event type、status、表示用summary、参照先IDを持つ。
 - 書き込みはtransactionで行う。migration前にdatabaseを同じapplication data directoryへ1世代backupし、migration成功後もbackupを次の正常起動まで保持する。
 - 起動時の整合性検査またはmigrationに失敗した場合、元databaseを上書きせず、sidecarとsessionを起動しない。設定・診断viewでdatabase pathを伏せたerror code、backup有無、`再試行`、`新規databaseで開始`を表示する。
@@ -261,7 +262,7 @@ Codexのmain/supportは`danger-full-access`かつ`approval: never`で実行す�
 - 単一main window、tray、window close後のバックグラウンド継続、明示Quit、復元、二重起動集約。
 - macOS実機E2E、Windows CI、Ubuntu CI、3OS artifact。
 - SQLite構造化履歴、OS credential store、Full access同意、緊急停止。
-- mainと7 support roleのApp Server root thread、固定実行権限、AskUserQuestion待機。
+- sessionごとのmain永続root threadと、7 support roleのオンデマンド`ephemeral: true` root thread、固定実行権限、AskUserQuestion待機。
 - 日本語・英語、キーボード操作、text transcript。
 
 ### 含めない
