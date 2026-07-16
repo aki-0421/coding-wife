@@ -1,6 +1,6 @@
 ---
 title: "画面詳細仕様テンプレート"
-description: "Tauri + Next.js デスクトップアプリの個別画面仕様を作成するための雛形。"
+description: "React + TypeScript + Vite + Tauri v2 デスクトップアプリの個別画面仕様を作成するための雛形。"
 updated: 2026-07-16
 read_when:
   - "新しい `S-NNN` 画面詳細仕様を作成するとき。"
@@ -39,7 +39,7 @@ status: "Draft"
 | 項目 | 内容 |
 |---|---|
 | window label | `<label>` |
-| Next.js path / view key | `<pathまたはview key>` |
+| React route / view key | `<routeまたはview key>` |
 | 対象OS | `<macOS / Windows / Linux / 共通>` |
 | デザイン | `<参照先 / 未作成>` |
 | 共通仕様 | [デスクトップ共通仕様](desktop-common-specification.md) |
@@ -128,7 +128,7 @@ status: "Draft"
 |---|---|---|---|---|---|
 | `<操作>` | `<WebView / Tauri plugin / Rust Command / 外部API>` | `<名称 / 未定>` | `<permission / Rust側認可 / 非該当>` | `<動作>` | `<表示・状態維持>` |
 
-画面IDやNext.js path / view keyをCapability境界として扱わない。同じwindow label内で画面ごとに異なる権限が必要なら、Rust側の認可条件またはウィンドウ分離を記載する。
+画面IDやReact route / view keyをCapability境界として扱わない。同じwindow label内で画面ごとに異なる権限が必要なら、Rust側の認可条件またはウィンドウ分離を記載する。
 
 ## ウィンドウ固有動作
 

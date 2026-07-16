@@ -1,6 +1,6 @@
 ---
 title: "要件定義書テンプレート"
-description: "Tauri + Next.js デスクトップアプリの機能単位の要件定義書を作成するための雛形。"
+description: "React + TypeScript + Vite + Tauri v2 デスクトップアプリの機能単位の要件定義書を作成するための雛形。"
 updated: 2026-07-16
 read_when:
   - "新しい機能の要件定義書を作成するとき。"
