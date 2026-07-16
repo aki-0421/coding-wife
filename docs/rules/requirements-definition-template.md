@@ -1,7 +1,7 @@
 ---
 title: "要件定義書テンプレート"
 description: "Tauri + Next.js デスクトップアプリの機能単位の要件定義書を作成するための雛形。"
-updated: 2026-07-15
+updated: 2026-07-16
 read_when:
   - "新しい機能の要件定義書を作成するとき。"
   - "機能要件、受け入れ条件、デスクトップ固有要件の記述形式を確認するとき。"
@@ -11,7 +11,7 @@ read_when:
 ## 使い方
 
 1. [要件定義基準](requirements-definition-standards.md)を読む。
-2. [Prefix・要件定義書台帳](../specification-management/id-management-rules.md#prefix要件定義書台帳)へ、重複しない2〜4文字の大文字Prefixを登録する。
+2. [Prefix・要件定義書台帳](id-management-rules.md#prefix要件定義書台帳)へ、重複しない2〜4文字の大文字Prefixを登録する。
 3. 「テンプレート本体」以下をコピーする。
 4. `docs/requirements/<feature-name>/requirements.md` として保存する。
 5. 要件IDを `<PREFIX>-F-001` から採番する。
@@ -19,7 +19,7 @@ read_when:
 7. 不要な領域は空欄にせず「非該当」と理由を書く。
 8. 着手可チェックを実行し、仕様責任者のレビューへ回す。
 
-> テンプレート本体の `../../screen-design/...` リンクは、コピー先の `docs/requirements/<feature-name>/requirements.md` を基準にしている。このテンプレート原本上では解決しないが、指定の配置へコピーすると解決するため書き換えない。
+> テンプレート本体の `../../screen-design/...` と `../../rules/...` のリンクは、コピー先の `docs/requirements/<feature-name>/requirements.md` を基準にしている。このテンプレート原本上では解決しないが、指定の配置へコピーすると解決するため書き換えない。
 
 ---
 
@@ -108,7 +108,7 @@ read_when:
 
 ## 画面・UI
 
-画面のレイアウト、表示状態、操作フローは[画面詳細仕様テンプレート](../../screen-design/screen-detail-specification-template.md)に基づく個別画面仕様を正本とする。ここでは画面IDと対象要件IDの対応だけを持つ。
+画面のレイアウト、表示状態、操作フローは[画面詳細仕様テンプレート](../../rules/screen-detail-specification-template.md)に基づく個別画面仕様を正本とする。ここでは画面IDと対象要件IDの対応だけを持つ。
 
 UIを伴わない機能では「非該当: `<理由>`」とする。
 

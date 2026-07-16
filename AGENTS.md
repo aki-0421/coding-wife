@@ -21,6 +21,8 @@ Web情報を更新した場合は、対象文書の `updated` と `last_verified
 
 [docs/](docs/) からリポジトリドキュメントをたどる。
 
+規約、基準、テンプレートは [docs/rules/](docs/rules/) から確認し、新規作成・移動時も同ディレクトリへ配置する。
+
 `agent-docs list docs` でリポジトリ管理ドキュメントを探し、必要なドキュメントを `agent-docs read <file>` で確認する。
 本文が必要な場合にだけ `agent-docs read <file> --body` を使う。
 

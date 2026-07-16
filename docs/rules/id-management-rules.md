@@ -1,7 +1,7 @@
 ---
 title: "ID管理ルール"
 description: "画面IDと機能要件IDを安定して採番・参照・廃止するための正本。"
-updated: 2026-07-15
+updated: 2026-07-16
 read_when:
   - "画面または機能要件へ新しいIDを付けるとき。"
   - "既存IDを維持するか、新しいIDを発行するか判断するとき。"
@@ -17,7 +17,7 @@ IDは並び順や実装場所ではなく、仕様上の同一性を表す。
 
 | 対象 | 形式 | 例 | 正本 |
 |---|---|---|---|
-| 画面 | `S-NNN` | `S-001` | [画面一覧](../screen-design/screen-list.md) |
+| 画面 | `S-NNN` | `S-001` | `agent-docs` 管理対象の各画面詳細仕様 |
 | 機能要件 | `<PREFIX>-F-NNN` | `FILE-F-001` | 各機能の要件定義書 |
 
 - `NNN` は `001` から始まる3桁の連番とする。
@@ -25,6 +25,17 @@ IDは並び順や実装場所ではなく、仕様上の同一性を表す。
 - Prefixの重複は[Prefix・要件定義書台帳](#prefix要件定義書台帳)で防ぐ。
 - IDへ画面名、状態、優先度、担当者名を埋め込まない。
 - 欠番を許容し、番号を詰めるための振り直しを行わない。
+
+## 画面詳細仕様の管理
+
+画面一覧のための集約文書は作成しない。画面ごとに `docs/screen-design/S-NNN_<screen-name>.md` を作成し、各画面詳細仕様を正本とする。
+
+- 各画面詳細仕様には `agent-docs` が要求するfront matterを付ける。
+- front matterの `title` は `S-NNN` から始め、`screen_id` に同じ画面IDを記録する。
+- front matterの `status` は `Draft`、`Approved`、`Deprecated` のいずれかとする。
+- ファイル名、`title`、`screen_id` の画面IDを一致させる。
+- 画面詳細仕様は `agent-docs list docs/screen-design` で探索し、必要な本文だけを `agent-docs read <file> --body` で確認する。
+- 廃止した画面詳細仕様も削除せず、`status: "Deprecated"`、廃止理由、後継画面IDを残す。
 
 ## Prefix・要件定義書台帳
 
@@ -67,7 +78,7 @@ IDは並び順や実装場所ではなく、仕様上の同一性を表す。
 1. IDはプロジェクト内で一意にする。
 2. 一度発行したIDは削除・再利用しない。
 3. 表示順の変更を理由にIDを振り直さない。
-4. 廃止した仕様は台帳や文書から消さず、`Deprecated` と後継IDを記録する。
+4. 廃止した仕様は管理対象文書から消さず、`Deprecated` と後継IDを記録する。
 5. 既存仕様の説明を明確にするだけなら、同じIDを維持する。
 6. 独立して合否を判定できる新しい振る舞いには、新しい要件IDを発行する。
 7. 採番時は既存文書を検索し、重複がないことを確認する。
@@ -116,11 +127,12 @@ IDは並び順や実装場所ではなく、仕様上の同一性を表す。
 
 ### 画面ID
 
-1. [画面一覧](../screen-design/screen-list.md)で既存画面と同じ目的でないことを確認する。
-2. 既存の最大番号より大きい未使用番号を採番する。
-3. 画面一覧へ `Draft` として登録する。
-4. [画面詳細仕様テンプレート](../screen-design/screen-detail-specification-template.md)から詳細仕様を作成する。
+1. `agent-docs list docs/screen-design` で既存の画面詳細仕様を確認する。
+2. 必要な仕様を `agent-docs read <file> --body` で読み、同じユーザー目的の画面がないことを確認する。
+3. 既存の最大番号より大きい未使用番号を採番する。
+4. [画面詳細仕様テンプレート](screen-detail-specification-template.md)から詳細仕様を作成し、front matterの `screen_id` と `status: "Draft"` を設定する。
 5. 関連する要件定義書へ画面IDを追加する。
+6. `agent-docs lint` を実行する。
 
 ### 要件ID
 
