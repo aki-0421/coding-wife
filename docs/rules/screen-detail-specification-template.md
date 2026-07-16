@@ -1,7 +1,7 @@
 ---
 title: "画面詳細仕様テンプレート"
 description: "Tauri + Next.js デスクトップアプリの個別画面仕様を作成するための雛形。"
-updated: 2026-07-15
+updated: 2026-07-16
 read_when:
   - "新しい `S-NNN` 画面詳細仕様を作成するとき。"
   - "個別画面で決めるべき状態、操作、ネイティブ連携を確認するとき。"
@@ -10,28 +10,41 @@ read_when:
 
 ## 使い方
 
-1. 「テンプレート本体」以下をコピーする。
-2. `docs/screen-design/S-NNN_<screen-name>.md` として保存する。
-3. [画面一覧](screen-list.md)に同じ画面IDを登録する。
-4. `<...>` をすべて実値へ置き換える。決められない内容は「未確定事項」へ移す。
-5. [デスクトップ共通仕様](desktop-common-specification.md)と重複する内容は書かず、この画面固有の動作または差分だけを書く。
-6. 関連する要件定義書と要件IDの相互参照を確認する。
+1. `agent-docs list docs/screen-design` で既存の画面詳細仕様を確認する。
+2. [ID管理ルール](id-management-rules.md#画面id)に従い、未使用の画面IDを決める。
+3. 「テンプレート本体」以下をコピーする。
+4. `docs/screen-design/S-NNN_<screen-name>.md` として保存する。
+5. front matterを含む `<...>` をすべて実値へ置き換える。決められない内容は「未確定事項」へ移す。
+6. [デスクトップ共通仕様](../screen-design/desktop-common-specification.md)と重複する内容は書かず、この画面固有の動作または差分だけを書く。
+7. 関連する要件定義書と要件IDの相互参照を確認する。
+8. `agent-docs lint` を実行する。
+
+> テンプレート本体の `desktop-common-specification.md` リンクは、コピー先の `docs/screen-design/S-NNN_<screen-name>.md` を基準にしている。このテンプレート原本上では解決しないが、指定の配置へコピーすると解決するため書き換えない。
 
 ---
 
 ## テンプレート本体
 
+---
+title: "S-NNN <画面名>"
+description: "<この画面の目的を1文で記載する。>"
+updated: <YYYY-MM-DD>
+read_when:
+  - "<この画面の仕様、状態、操作、関連要件を確認するとき。>"
+screen_id: "S-NNN"
+status: "Draft"
+---
 # S-NNN \<画面名\>
 
 | 項目 | 内容 |
 |---|---|
-| 画面ID | `S-NNN` |
-| 状態 | Draft / Approved / Deprecated |
 | window label | `<label>` |
 | Next.js path / view key | `<pathまたはview key>` |
 | 対象OS | `<macOS / Windows / Linux / 共通>` |
 | デザイン | `<参照先 / 未作成>` |
 | 共通仕様 | [デスクトップ共通仕様](desktop-common-specification.md) |
+| 廃止理由 | `<理由 / 非該当>` |
+| 後継画面ID | `<S-NNN / 非該当>` |
 
 ## 目的
 
@@ -177,7 +190,8 @@ read_when:
 
 ## レビュー確認
 
-- [ ] 画面一覧と画面ID、名称、window label、path / view keyが一致している。
+- [ ] front matterの `screen_id`、タイトル、ファイル名の画面IDが一致している。
+- [ ] `status` が `Draft`、`Approved`、`Deprecated` のいずれかである。
 - [ ] 目的と対象外が一意である。
 - [ ] 初期化、通常、空、処理中、オフライン、エラー、権限不足を確認した。
 - [ ] キャンセル、閉じる、再表示、未保存データの動作が決まっている。
@@ -185,3 +199,4 @@ read_when:
 - [ ] OS差分を確認し、未確認を「共通」としていない。
 - [ ] 関連要件IDが要件定義書と一致している。
 - [ ] 着手ブロックが「はい」または「不明」の未確定事項が残っていない。
+- [ ] `agent-docs lint` が成功している。
