@@ -39,10 +39,18 @@ IDは並び順や実装場所ではなく、仕様上の同一性を表す。
 
 ## Prefix・要件定義書台帳
 
-機能単位で1つの要件定義書を作成し、`docs/requirements/<feature-name>/requirements.md` に置く。現時点で機能Prefixは未登録である。
+機能単位で1つの要件定義書を作成し、`docs/requirements/<feature-name>/requirements.md` に置く。
 
 | Prefix | 機能名 | 要件定義書 | 状態 | 責任者 |
 |---|---|---|---|---|
+| `WORK` | workspace-sessions | [要件定義書](../requirements/workspace-sessions/requirements.md) | Draft | プロダクトオーナー |
+| `CODE` | codex-main-session | [要件定義書](../requirements/codex-main-session/requirements.md) | Draft | プロダクトオーナー |
+| `SUP` | support-agent-orchestration | [要件定義書](../requirements/support-agent-orchestration/requirements.md) | Draft | プロダクトオーナー |
+| `GIT` | git-review-harness | [要件定義書](../requirements/git-review-harness/requirements.md) | Draft | プロダクトオーナー |
+| `HIST` | activity-history | [要件定義書](../requirements/activity-history/requirements.md) | Draft | プロダクトオーナー |
+| `LIVE` | live2d-companion | [要件定義書](../requirements/live2d-companion/requirements.md) | Draft | プロダクトオーナー |
+| `NARR` | audio-commentary | [要件定義書](../requirements/audio-commentary/requirements.md) | Draft | プロダクトオーナー |
+| `APP` | desktop-shell | [要件定義書](../requirements/desktop-shell/requirements.md) | Draft | プロダクトオーナー |
 
 ### Prefixのルール
 
@@ -59,11 +67,11 @@ IDは並び順や実装場所ではなく、仕様上の同一性を表す。
 |---|---|---|
 | 画面ID `S-NNN` | プロダクト仕様上の画面を参照する | ユーザーが達成する目的 |
 | Tauri window label | Window / WebViewとCapabilityの実行境界を識別する | Tauriのウィンドウ構成 |
-| Next.js path / view key | WebView内の表示・遷移を識別する | フロントエンドのルーティング設計 |
+| React route / view key | WebView内の表示・遷移を識別する | フロントエンドのルーティング設計 |
 
 1つのTauriウィンドウ内に複数の画面IDが存在してよい。反対に、同じ画面を複数ウィンドウで表示する場合も、ユーザー目的と振る舞いが同一なら画面IDを共有してよい。
 
-画面名、window label、Next.js path / view keyのいずれかが変わっただけでは、画面IDを変更しない。
+画面名、window label、React route / view keyのいずれかが変わっただけでは、画面IDを変更しない。
 
 ## 状態
 
