@@ -22,6 +22,12 @@ use codex::commands::{
 };
 use codex::supervisor::CodexSupervisor;
 use codex::workspace::WorkspaceService;
+use git_review::commands::{
+    cancel_git_restore, compare_checkpoints, confirm_git_restore,
+    evaluate_and_checkpoint_work_unit, inspect_git_baseline, list_git_review_packs,
+    preview_git_restore, read_evidence_diff, read_git_review_pack,
+};
+use git_review::GitReviewService;
 use workspace_history::commands::{
     history_append_domain_event, workspace_create_session, workspace_delete,
     workspace_issue_delete_challenge, workspace_list, workspace_list_timeline,
@@ -167,7 +173,13 @@ pub fn run() {
                 history_store,
                 setup_workspace_service.clone(),
             );
+            let git_review_service = GitReviewService::production(
+                setup_workspace_service.clone(),
+                history_service.clone(),
+            )
+            .map_err(|error| std::io::Error::other(error.code))?;
             app.manage(history_service.clone());
+            app.manage(git_review_service);
             tauri::async_runtime::spawn(async move {
                 history_service.restore_startup().await;
             });
@@ -219,6 +231,15 @@ pub fn run() {
             workspace_issue_delete_challenge,
             workspace_delete,
             history_append_domain_event,
+            inspect_git_baseline,
+            evaluate_and_checkpoint_work_unit,
+            list_git_review_packs,
+            read_git_review_pack,
+            read_evidence_diff,
+            compare_checkpoints,
+            preview_git_restore,
+            confirm_git_restore,
+            cancel_git_restore,
             character_library_get,
             character_import_pick,
             character_read_asset,

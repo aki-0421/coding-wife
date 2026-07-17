@@ -21,6 +21,9 @@ use super::types::{
     InspectGitBaselineRequest, OwnershipClass, PreviewRestoreRequest, RestoreKind,
     RestorePreviewStatus, VerificationEvidence, VerificationResult, GIT_REVIEW_SCHEMA_VERSION,
 };
+use crate::codex::supervisor::CodexSupervisor;
+use crate::codex::workspace::{AppPrivateWorkspaceRecord, WorkspaceService};
+use crate::workspace_history::{WorkspaceHistoryService, WorkspaceHistoryStore};
 
 const WORKSPACE_ID: &str = "workspace-git-review-test";
 
@@ -642,4 +645,53 @@ async fn restore_requires_preview_and_supports_revert_recovery_cancel_and_replay
         ])
         .status
         .success());
+}
+
+#[tokio::test]
+async fn production_service_follows_the_trusted_workspace_lifecycle() {
+    let repository = DisposableRepository::new();
+    repository.write("app.txt", b"fixture\n");
+    repository.commit_all("fixture");
+    let data = std::env::temp_dir().join(format!(
+        "coding-wife-git-review-history-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let workspace = WorkspaceService::production(CodexSupervisor::new());
+    let candidate = workspace
+        .validate_private_candidate(&AppPrivateWorkspaceRecord {
+            workspace_id: WORKSPACE_ID.to_owned(),
+            alias: "Git review fixture".to_owned(),
+            canonical_root: repository.path().to_path_buf(),
+        })
+        .await
+        .expect("validated workspace");
+    let store = WorkspaceHistoryStore::open(&data).expect("history store");
+    store
+        .register_candidate(&candidate)
+        .expect("persist workspace");
+    workspace
+        .activate_candidate(candidate)
+        .await
+        .expect("activate workspace");
+    let history = WorkspaceHistoryService::new(store, workspace.clone());
+    let service = GitReviewService::production(workspace.clone(), history)
+        .expect("production Git review service");
+
+    let inspected = baseline(&service).await;
+    assert_eq!(inspected.workspace_id, WORKSPACE_ID);
+    workspace
+        .deactivate_workspace(WORKSPACE_ID)
+        .await
+        .expect("deactivate workspace");
+    assert_eq!(
+        service
+            .inspect_baseline(InspectGitBaselineRequest {
+                workspace_id: WORKSPACE_ID.to_owned(),
+            })
+            .await
+            .expect_err("deactivated workspace must be rejected")
+            .code,
+        "GIT-WORKSPACE-NOT-TRUSTED"
+    );
+    let _ = fs::remove_dir_all(data);
 }
