@@ -128,10 +128,14 @@ pub fn run() {
             setup_supervisor.start_signal_loop();
             let app_data_directory = app.path().app_data_dir()?;
             let history_store = WorkspaceHistoryStore::open(&app_data_directory)?;
-            let history_service =
-                WorkspaceHistoryService::new(history_store, setup_workspace_service.clone());
-            tauri::async_runtime::block_on(history_service.restore_startup());
-            app.manage(history_service);
+            let history_service = WorkspaceHistoryService::new_pending_restore(
+                history_store,
+                setup_workspace_service.clone(),
+            );
+            app.manage(history_service.clone());
+            tauri::async_runtime::spawn(async move {
+                history_service.restore_startup().await;
+            });
             let resource_directory = app.path().resource_dir()?;
             let character_storage = CharacterStorage::open(&app_data_directory)?;
             let character_service = CharacterService::production(

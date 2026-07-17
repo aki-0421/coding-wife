@@ -1,8 +1,9 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
@@ -23,6 +24,52 @@ const PICK_CANCELED_CODE: &str = "CODEX-WORKSPACE-PICK-CANCELED";
 const CONTEXT_CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTEXT_STDOUT_LIMIT: usize = 1024 * 1024;
 const CONTEXT_STDERR_LIMIT: usize = 4 * 1024;
+const STARTUP_PENDING: u8 = 0;
+const STARTUP_READY: u8 = 1;
+const STARTUP_FAILED: u8 = 2;
+
+struct StartupReadiness {
+    state: AtomicU8,
+    notify: Notify,
+}
+
+impl StartupReadiness {
+    fn new(ready: bool) -> Self {
+        Self {
+            state: AtomicU8::new(if ready {
+                STARTUP_READY
+            } else {
+                STARTUP_PENDING
+            }),
+            notify: Notify::new(),
+        }
+    }
+
+    fn finish(&self, state: u8) {
+        self.state.store(state, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+}
+
+struct StartupRestoreGuard {
+    readiness: Arc<StartupReadiness>,
+    finished: bool,
+}
+
+impl StartupRestoreGuard {
+    fn complete(mut self) {
+        self.readiness.finish(STARTUP_READY);
+        self.finished = true;
+    }
+}
+
+impl Drop for StartupRestoreGuard {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.readiness.finish(STARTUP_FAILED);
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct StartupRestoreReport {
@@ -37,14 +84,28 @@ pub struct WorkspaceHistoryService {
     store: WorkspaceHistoryStore,
     workspace: WorkspaceService,
     operation_lock: Arc<Mutex<()>>,
+    startup: Arc<StartupReadiness>,
 }
 
 impl WorkspaceHistoryService {
     pub fn new(store: WorkspaceHistoryStore, workspace: WorkspaceService) -> Self {
+        Self::with_startup_state(store, workspace, true)
+    }
+
+    pub fn new_pending_restore(store: WorkspaceHistoryStore, workspace: WorkspaceService) -> Self {
+        Self::with_startup_state(store, workspace, false)
+    }
+
+    fn with_startup_state(
+        store: WorkspaceHistoryStore,
+        workspace: WorkspaceService,
+        ready: bool,
+    ) -> Self {
         Self {
             store,
             workspace,
             operation_lock: Arc::new(Mutex::new(())),
+            startup: Arc::new(StartupReadiness::new(ready)),
         }
     }
 
@@ -54,17 +115,37 @@ impl WorkspaceHistoryService {
             .map_err(|error| history_error("workspace_list", error))
     }
 
+    pub async fn list_after_startup(
+        &self,
+    ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        loop {
+            let notified = self.startup.notify.notified();
+            if self.startup.state.load(Ordering::Acquire) != STARTUP_PENDING {
+                break;
+            }
+            notified.await;
+        }
+        self.ensure_startup_ready("workspace_list")?;
+        self.list()
+    }
+
     pub async fn restore_startup(&self) -> StartupRestoreReport {
+        let guard = StartupRestoreGuard {
+            readiness: self.startup.clone(),
+            finished: false,
+        };
         let _operation = self.operation_lock.lock().await;
         let mut report = StartupRestoreReport::default();
         if self.store.status().mode != HistoryMode::Ready {
             report.skipped_read_only = true;
+            guard.complete();
             return report;
         }
         let records = match self.store.private_workspace_records() {
             Ok(records) => records,
             Err(_) => {
                 report.unavailable += 1;
+                guard.complete();
                 return report;
             }
         };
@@ -100,10 +181,12 @@ impl WorkspaceHistoryService {
                 }
             }
         }
+        guard.complete();
         report
     }
 
     pub async fn pick_register(&self) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_pick_register")?;
         let _operation = self.operation_lock.lock().await;
         let candidate = match self.workspace.pick_validated().await {
             Ok(candidate) => candidate,
@@ -133,6 +216,7 @@ impl WorkspaceHistoryService {
         &self,
         request: WorkspaceCreateSessionRequest,
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_create_session")?;
         let _operation = self.operation_lock.lock().await;
         let persisted = self
             .store
@@ -223,6 +307,7 @@ impl WorkspaceHistoryService {
         &self,
         request: WorkspaceSelectRequest,
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_select")?;
         let _operation = self.operation_lock.lock().await;
         let was_trusted = self
             .workspace
@@ -271,6 +356,7 @@ impl WorkspaceHistoryService {
         &self,
         request: WorkspaceUpdateLifecycleRequest,
     ) -> Result<WorkspaceSummary, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_update_lifecycle")?;
         let _operation = self.operation_lock.lock().await;
         self.store
             .update_lifecycle(
@@ -285,6 +371,7 @@ impl WorkspaceHistoryService {
         &self,
         request: WorkspaceSaveDraftRequest,
     ) -> Result<WorkspaceDraftView, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_save_draft")?;
         let _operation = self.operation_lock.lock().await;
         self.store
             .save_draft(
@@ -300,6 +387,7 @@ impl WorkspaceHistoryService {
         &self,
         request: WorkspaceSaveContextRequest,
     ) -> Result<ContextSnapshotView, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_save_context_snapshot")?;
         let _operation = self.operation_lock.lock().await;
         let root = self
             .workspace
@@ -322,6 +410,7 @@ impl WorkspaceHistoryService {
         &self,
         request: WorkspaceTimelineRequest,
     ) -> Result<TimelinePage, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_list_timeline")?;
         self.store
             .timeline(
                 &request.workspace_id,
@@ -336,6 +425,7 @@ impl WorkspaceHistoryService {
         &self,
         workspace_id: &str,
     ) -> Result<WorkspaceDeleteChallengeView, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_issue_delete_challenge")?;
         let challenge = self
             .store
             .issue_delete_challenge(workspace_id)
@@ -352,6 +442,7 @@ impl WorkspaceHistoryService {
         &self,
         request: WorkspaceDeleteRequest,
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_delete")?;
         let _operation = self.operation_lock.lock().await;
         let was_trusted = self
             .workspace
@@ -394,6 +485,7 @@ impl WorkspaceHistoryService {
         &self,
         request: AppendDomainEventRequest,
     ) -> Result<AppendDomainEventResponse, WorkspaceCommandError> {
+        self.ensure_startup_ready("history_append_domain_event")?;
         let _operation = self.operation_lock.lock().await;
         let result = self
             .store
@@ -480,6 +572,22 @@ impl WorkspaceHistoryService {
                 }
                 Err(history_error(operation, error))
             }
+        }
+    }
+
+    fn ensure_startup_ready(&self, operation: &str) -> Result<(), WorkspaceCommandError> {
+        match self.startup.state.load(Ordering::Acquire) {
+            STARTUP_READY => Ok(()),
+            STARTUP_PENDING => Err(WorkspaceCommandError::new(
+                "WORKSPACE-STARTUP-PENDING",
+                operation,
+                true,
+            )),
+            _ => Err(WorkspaceCommandError::new(
+                "WORKSPACE-STARTUP-FAILED",
+                operation,
+                true,
+            )),
         }
     }
 }
@@ -769,5 +877,37 @@ mod tests {
         for root in roots {
             let _ = fs::remove_dir_all(root);
         }
+    }
+
+    #[tokio::test]
+    async fn native_list_waits_for_restore_and_mutations_fail_while_pending() {
+        let data = temp_directory("history-service-startup-gate");
+        let workspace = WorkspaceService::production(CodexSupervisor::new());
+        let service = WorkspaceHistoryService::new_pending_restore(
+            WorkspaceHistoryStore::open(&data).expect("store"),
+            workspace,
+        );
+        let list_service = service.clone();
+        let list_task = tokio::spawn(async move { list_service.list_after_startup().await });
+        tokio::task::yield_now().await;
+
+        assert!(!list_task.is_finished());
+        assert_eq!(
+            service
+                .issue_delete_challenge("workspace-pending")
+                .expect_err("startup must gate mutations")
+                .code,
+            "WORKSPACE-STARTUP-PENDING"
+        );
+
+        let report = service.restore_startup().await;
+        assert_eq!(report.ready, 0);
+        assert!(list_task
+            .await
+            .expect("list task")
+            .expect("state")
+            .workspaces
+            .is_empty());
+        let _ = fs::remove_dir_all(data);
     }
 }

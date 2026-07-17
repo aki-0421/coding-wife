@@ -11,10 +11,10 @@ use super::types::{
 };
 
 #[tauri::command]
-pub fn workspace_list(
+pub async fn workspace_list(
     service: State<'_, WorkspaceHistoryService>,
 ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
-    service.list()
+    service.list_after_startup().await
 }
 
 #[tauri::command]
