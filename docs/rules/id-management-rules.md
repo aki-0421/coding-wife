@@ -1,7 +1,7 @@
 ---
 title: "ID管理ルール"
 description: "画面IDと機能要件IDを安定して採番・参照・廃止するための正本。"
-updated: 2026-07-17
+updated: 2026-07-18
 read_when:
   - "画面または機能要件へ新しいIDを付けるとき。"
   - "既存IDを維持するか、新しいIDを発行するか判断するとき。"
@@ -39,18 +39,18 @@ IDは並び順や実装場所ではなく、仕様上の同一性を表す。
 
 ## Prefix・要件定義書台帳
 
-機能単位で1つの要件定義書を作成し、`docs/requirements/<feature-name>/requirements.md` に置く。
+機能単位で1つの要件定義書を作成し、`docs/requirements/<feature-name>.md` に置く。要件定義書ごとのサブディレクトリは作成しない。
 
 | Prefix | 機能名 | 要件定義書 | 状態 | 責任者 |
 |---|---|---|---|---|
-| `WORK` | workspace-sessions | [要件定義書](../requirements/workspace-sessions/requirements.md) | Approved | プロダクトオーナー |
-| `CODE` | codex-main-session | [要件定義書](../requirements/codex-main-session/requirements.md) | Approved | プロダクトオーナー |
-| `SUP` | support-agent-orchestration | [要件定義書](../requirements/support-agent-orchestration/requirements.md) | Approved | プロダクトオーナー |
-| `GIT` | git-review-harness | [要件定義書](../requirements/git-review-harness/requirements.md) | Approved | プロダクトオーナー |
-| `HIST` | activity-history | [要件定義書](../requirements/activity-history/requirements.md) | Approved | プロダクトオーナー |
-| `LIVE` | live2d-companion | [要件定義書](../requirements/live2d-companion/requirements.md) | Approved | プロダクトオーナー |
-| `NARR` | audio-commentary | [要件定義書](../requirements/audio-commentary/requirements.md) | Approved | プロダクトオーナー |
-| `APP` | desktop-shell | [要件定義書](../requirements/desktop-shell/requirements.md) | Approved | プロダクトオーナー |
+| `WORK` | workspace-sessions | [要件定義書](../requirements/workspace-sessions.md) | Approved | プロダクトオーナー |
+| `CODE` | codex-main-session | [要件定義書](../requirements/codex-main-session.md) | Approved | プロダクトオーナー |
+| `SUP` | support-agent-orchestration | [要件定義書](../requirements/support-agent-orchestration.md) | Approved | プロダクトオーナー |
+| `GIT` | git-review-harness | [要件定義書](../requirements/git-review-harness.md) | Approved | プロダクトオーナー |
+| `HIST` | activity-history | [要件定義書](../requirements/activity-history.md) | Approved | プロダクトオーナー |
+| `LIVE` | live2d-companion | [要件定義書](../requirements/live2d-companion.md) | Approved | プロダクトオーナー |
+| `NARR` | audio-commentary | [要件定義書](../requirements/audio-commentary.md) | Approved | プロダクトオーナー |
+| `APP` | desktop-shell | [要件定義書](../requirements/desktop-shell.md) | Approved | プロダクトオーナー |
 
 ### Prefixのルール
 

@@ -1,7 +1,7 @@
 ---
 title: "要件定義基準"
 description: "React + TypeScript + Vite + Tauri v2 デスクトップアプリの機能要件を一意かつ検証可能に定義し、着手可否を判断する基準。"
-updated: 2026-07-16
+updated: 2026-07-18
 read_when:
   - "機能の要件定義を書き始める前に、必要な項目と粒度を確認するとき。"
   - "要件定義書の曖昧さや実装着手可否をレビューするとき。"
@@ -44,6 +44,7 @@ read_when:
 
 要件IDの形式、維持、廃止は[ID管理ルール](id-management-rules.md)を正本とする。
 
+- 要件定義書は機能単位で `docs/requirements/<feature-name>.md` に置き、要件定義書ごとのサブディレクトリは作成しない。
 - 機能ごとに `<PREFIX>-F-NNN` で採番する。
 - Prefixは[Prefix・要件定義書台帳](id-management-rules.md#prefix要件定義書台帳)へ先に登録する。
 - 要件IDは表示順を表さない。並べ替え後も変更しない。

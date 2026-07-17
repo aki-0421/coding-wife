@@ -1,7 +1,7 @@
 ---
 title: "画面詳細仕様テンプレート"
 description: "React + TypeScript + Vite + Tauri v2 デスクトップアプリの個別画面仕様を作成するための雛形。"
-updated: 2026-07-16
+updated: 2026-07-18
 read_when:
   - "新しい `S-NNN` 画面詳細仕様を作成するとき。"
   - "個別画面で決めるべき状態、操作、ネイティブ連携を確認するとき。"
@@ -16,7 +16,7 @@ read_when:
 4. `docs/screen-design/S-NNN_<screen-name>.md` として保存する。
 5. front matterを含む `<...>` をすべて実値へ置き換える。決められない内容は「未確定事項」へ移す。
 6. [デスクトップ共通仕様](../screen-design/desktop-common-specification.md)と重複する内容は書かず、この画面固有の動作または差分だけを書く。
-7. 関連する要件定義書と要件IDの相互参照を確認する。
+7. `docs/requirements/<feature-name>.md` に置いた関連する要件定義書と、要件IDの相互参照を確認する。
 8. `agent-docs lint` を実行する。
 
 > テンプレート本体の `desktop-common-specification.md` リンクは、コピー先の `docs/screen-design/S-NNN_<screen-name>.md` を基準にしている。このテンプレート原本上では解決しないが、指定の配置へコピーすると解決するため書き換えない。
