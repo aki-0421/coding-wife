@@ -24,6 +24,7 @@ import {
   readJson,
   readPngDimensions,
 } from "./file-utils.mjs"
+import { syncReleaseNotices } from "./release-notices.mjs"
 
 const projectRoot = fileURLToPath(new URL("../..", import.meta.url))
 const destination = path.join(
@@ -209,6 +210,7 @@ function main() {
 
     rmSync(destination, { force: true, recursive: true })
     renameSync(staging, destination)
+    syncReleaseNotices(projectRoot)
   } catch (error) {
     rmSync(staging, { force: true, recursive: true })
     throw error

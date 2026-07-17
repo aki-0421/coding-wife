@@ -25,6 +25,41 @@ const assetSuffixByRole: Readonly<Record<CharacterPackFile["role"], string>> = {
   display_info: ".cdi3.json",
 }
 
+export type CharacterResourceMediaKind =
+  CharacterPackFile["role"] | "manifest" | "shader"
+
+const expectedContentTypeByKind: Readonly<
+  Record<CharacterResourceMediaKind, string>
+> = {
+  manifest: "application/json",
+  model: "application/json",
+  moc: "application/octet-stream",
+  texture: "image/png",
+  motion: "application/json",
+  physics: "application/json",
+  pose: "application/json",
+  display_info: "application/json",
+  shader: "text/plain",
+}
+
+export function expectedCharacterResourceContentType(
+  kind: CharacterResourceMediaKind,
+): string {
+  return expectedContentTypeByKind[kind]
+}
+
+export function isAcceptedCharacterResourceContentType(
+  kind: CharacterResourceMediaKind,
+  receivedContentType: string | null,
+): boolean {
+  const receivedType =
+    receivedContentType?.split(";", 1)[0]?.trim().toLowerCase() ?? ""
+  if ((kind === "moc" || kind === "shader") && receivedType === "") {
+    return true
+  }
+  return receivedType === expectedContentTypeByKind[kind]
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -237,22 +272,6 @@ export function parseCharacterPackManifest(
   return value as unknown as CharacterPackManifest
 }
 
-function expectedContentType(asset: CharacterPackFile): string {
-  if (asset.role === "texture") return "image/png"
-  if (asset.role === "moc") return "application/octet-stream"
-  return "application/json"
-}
-
-function hasAcceptedContentType(
-  asset: CharacterPackFile,
-  receivedContentType: string | null,
-): boolean {
-  const receivedType =
-    receivedContentType?.split(";", 1)[0]?.trim().toLocaleLowerCase() ?? ""
-  if (asset.role === "moc" && receivedType === "") return true
-  return receivedType === expectedContentType(asset)
-}
-
 async function computeSha256(buffer: ArrayBuffer): Promise<string> {
   if (globalThis.crypto?.subtle === undefined) {
     throw new CharacterError(
@@ -322,6 +341,19 @@ export class CharacterPackClient {
       throw new CharacterError(
         "asset_fetch_failed",
         `Character manifest returned HTTP ${response.status}`,
+      )
+    }
+
+    if (
+      !isAcceptedCharacterResourceContentType(
+        "manifest",
+        response.headers.get("content-type"),
+      )
+    ) {
+      throw new CharacterError(
+        "asset_type_mismatch",
+        "Character manifest used an unexpected media type",
+        false,
       )
     }
 
@@ -402,7 +434,12 @@ export class CharacterPackClient {
       )
     }
 
-    if (!hasAcceptedContentType(asset, response.headers.get("content-type"))) {
+    if (
+      !isAcceptedCharacterResourceContentType(
+        asset.role,
+        response.headers.get("content-type"),
+      )
+    ) {
       throw new CharacterError(
         "asset_type_mismatch",
         `Character asset ${asset.role} used an unexpected media type`,
@@ -439,6 +476,8 @@ export class CharacterPackClient {
   public async blob(assetId: string, signal: AbortSignal): Promise<Blob> {
     const asset = this.getAsset(assetId)
     const buffer = await this.arrayBuffer(assetId, signal)
-    return new Blob([buffer], { type: expectedContentType(asset) })
+    return new Blob([buffer], {
+      type: expectedCharacterResourceContentType(asset.role),
+    })
   }
 }

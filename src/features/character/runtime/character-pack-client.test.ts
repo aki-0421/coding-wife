@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import hiyoriPack from "../../../../src-tauri/resources/characters/builtin-hiyori/pack.json"
+import type { CharacterPackFile } from "@/features/character/model"
 import {
   CharacterPackClient,
+  isAcceptedCharacterResourceContentType,
   isSafeCharacterAssetId,
   parseCharacterPackManifest,
 } from "@/features/character/runtime/character-pack-client"
@@ -10,29 +12,36 @@ import {
 const fixtureSha256 =
   "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a"
 
-function createPackWithMoc(bytes: Uint8Array, hash = fixtureSha256) {
+function createPackWithAsset(
+  role: CharacterPackFile["role"],
+  bytes: Uint8Array,
+  hash = fixtureSha256,
+) {
   const pack = structuredClone(hiyoriPack)
-  const moc = pack.files.find((file) => file.role === "moc")
-  if (moc === undefined) throw new Error("MOC fixture is missing")
-  moc.bytes = bytes.byteLength
-  moc.sha256 = hash
+  const asset = pack.files.find((file) => file.role === role)
+  if (asset === undefined) throw new Error(`${role} fixture is missing`)
+  asset.bytes = bytes.byteLength
+  asset.sha256 = hash
   pack.inventory.totalBytes = pack.files.reduce(
     (total, file) => total + file.bytes,
     0,
   )
-  return { assetId: moc.assetId, pack }
+  return { assetId: asset.assetId, pack }
 }
 
-async function loadMocFixture(
+async function loadAssetFixture(
+  role: CharacterPackFile["role"],
   bytes: Uint8Array,
   contentType: string | null,
   options: Readonly<{
     hash?: string
+    manifestContentType?: string | null
     responseBytes?: Uint8Array
   }> = {},
 ) {
-  const { assetId, pack } = createPackWithMoc(bytes, options.hash)
+  const { assetId, pack } = createPackWithAsset(role, bytes, options.hash)
   const responseBytes = options.responseBytes ?? bytes
+  const manifestContentType = options.manifestContentType ?? "application/json"
   vi.stubGlobal(
     "fetch",
     vi.fn((input: URL | RequestInfo) => {
@@ -43,10 +52,15 @@ async function loadMocFixture(
             ? input
             : input.url
       if (url.endsWith("/pack.json")) {
+        const responseOptions =
+          manifestContentType === null
+            ? undefined
+            : { headers: { "content-type": manifestContentType } }
         return Promise.resolve(
-          new Response(JSON.stringify(pack), {
-            headers: { "content-type": "application/json" },
-          }),
+          new Response(
+            new TextEncoder().encode(JSON.stringify(pack)),
+            responseOptions,
+          ),
         )
       }
       const responseOptions =
@@ -65,6 +79,24 @@ async function loadMocFixture(
     signal,
   )
   return { assetId, client, signal }
+}
+
+function stubManifestResponse(contentType: string | null) {
+  const responseOptions =
+    contentType === null
+      ? undefined
+      : { headers: { "content-type": contentType } }
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          new TextEncoder().encode(JSON.stringify(hiyoriPack)),
+          responseOptions,
+        ),
+      ),
+    ),
+  )
 }
 
 afterEach(() => {
@@ -122,11 +154,86 @@ describe("character pack manifest", () => {
     )
   })
 
+  it.each(["application/json", "application/json; charset=utf-8"])(
+    "accepts the manifest media type %s",
+    async (contentType) => {
+      stubManifestResponse(contentType)
+
+      await expect(
+        CharacterPackClient.load(
+          { manifestUrl: "/characters/test/pack.json" },
+          new AbortController().signal,
+        ),
+      ).resolves.toBeInstanceOf(CharacterPackClient)
+    },
+  )
+
+  it.each([null, "text/html", "text/plain; charset=utf-8"])(
+    "rejects the manifest media type %s",
+    async (contentType) => {
+      stubManifestResponse(contentType)
+
+      await expect(
+        CharacterPackClient.load(
+          { manifestUrl: "/characters/test/pack.json" },
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow("unexpected media type")
+    },
+  )
+
+  it("rejects a cross-origin manifest before fetching it", async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal("fetch", fetch)
+
+    await expect(
+      CharacterPackClient.load(
+        { manifestUrl: "https://example.com/pack.json" },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("same-origin")
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["manifest", "application/json"],
+    ["manifest", "application/json; charset=utf-8"],
+    ["model", "application/json"],
+    ["motion", "application/json; charset=utf-8"],
+    ["physics", "application/json"],
+    ["pose", "application/json"],
+    ["display_info", "application/json"],
+    ["texture", "image/png"],
+    ["moc", "application/octet-stream"],
+    ["moc", null],
+    ["shader", "text/plain; charset=utf-8"],
+    ["shader", null],
+  ] as const)("accepts %s only as %s", (kind, contentType) => {
+    expect(isAcceptedCharacterResourceContentType(kind, contentType)).toBe(true)
+  })
+
+  it.each([
+    ["manifest", "text/html"],
+    ["model", "text/html"],
+    ["motion", "text/html"],
+    ["physics", "text/plain"],
+    ["pose", "application/octet-stream"],
+    ["display_info", "image/png"],
+    ["texture", "application/json"],
+    ["moc", "text/plain"],
+    ["shader", "text/html"],
+  ] as const)("rejects unexpected %s media type %s", (kind, contentType) => {
+    expect(isAcceptedCharacterResourceContentType(kind, contentType)).toBe(
+      false,
+    )
+  })
+
   it.each([null, "application/octet-stream"])(
     "accepts a verified MOC with %s media type",
     async (contentType) => {
       const bytes = Uint8Array.from([1, 2, 3, 4])
-      const { assetId, client, signal } = await loadMocFixture(
+      const { assetId, client, signal } = await loadAssetFixture(
+        "moc",
         bytes,
         contentType,
       )
@@ -139,18 +246,49 @@ describe("character pack manifest", () => {
 
   it("rejects an explicit unexpected MOC media type", async () => {
     const bytes = Uint8Array.from([1, 2, 3, 4])
-    const { assetId, client, signal } = await loadMocFixture(bytes, "text/html")
+    const { assetId, client, signal } = await loadAssetFixture(
+      "moc",
+      bytes,
+      "text/html",
+    )
 
     await expect(client.arrayBuffer(assetId, signal)).rejects.toThrow(
       "unexpected media type",
     )
   })
 
+  it.each([
+    ["model", "text/html"],
+    ["physics", "text/html"],
+    ["pose", "text/plain"],
+    ["motion", "application/octet-stream"],
+    ["texture", "application/json"],
+  ] as const)(
+    "rejects fetched %s bytes with unexpected media type %s",
+    async (role, contentType) => {
+      const bytes = Uint8Array.from([1, 2, 3, 4])
+      const { assetId, client, signal } = await loadAssetFixture(
+        role,
+        bytes,
+        contentType,
+      )
+
+      await expect(client.arrayBuffer(assetId, signal)).rejects.toThrow(
+        "unexpected media type",
+      )
+    },
+  )
+
   it("rejects MOC bytes whose hash differs from the manifest", async () => {
     const bytes = Uint8Array.from([1, 2, 3, 4])
-    const { assetId, client, signal } = await loadMocFixture(bytes, null, {
-      hash: "0".repeat(64),
-    })
+    const { assetId, client, signal } = await loadAssetFixture(
+      "moc",
+      bytes,
+      null,
+      {
+        hash: "0".repeat(64),
+      },
+    )
 
     await expect(client.arrayBuffer(assetId, signal)).rejects.toThrow(
       "hash did not match",
@@ -159,9 +297,14 @@ describe("character pack manifest", () => {
 
   it("rejects MOC bytes whose length differs from the manifest", async () => {
     const bytes = Uint8Array.from([1, 2, 3, 4])
-    const { assetId, client, signal } = await loadMocFixture(bytes, null, {
-      responseBytes: Uint8Array.from([1, 2, 3, 4, 5]),
-    })
+    const { assetId, client, signal } = await loadAssetFixture(
+      "moc",
+      bytes,
+      null,
+      {
+        responseBytes: Uint8Array.from([1, 2, 3, 4, 5]),
+      },
+    )
 
     await expect(client.arrayBuffer(assetId, signal)).rejects.toThrow(
       "length did not match",

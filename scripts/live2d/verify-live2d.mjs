@@ -28,6 +28,7 @@ import {
   readJson,
   sha256,
 } from "./file-utils.mjs"
+import { verifyReleaseNotices } from "./release-notices.mjs"
 
 const projectRoot = fileURLToPath(new URL("../..", import.meta.url))
 const vendorRoot = path.join(
@@ -193,10 +194,12 @@ function verifyHiyori() {
 export function verifyLive2dSupplyChain() {
   verifySdk()
   verifyHiyori()
+  const releaseNotices = verifyReleaseNotices(projectRoot)
   return {
     frameworkSources: FRAMEWORK_SOURCE_FILES.length,
     shaders: SHADER_FILES.length,
     hiyoriRuntimeFiles: HIYORI_RUNTIME_FILES.length,
+    releaseNoticeFiles: releaseNotices.files,
   }
 }
 
@@ -208,7 +211,7 @@ if (invokedDirectly) {
   try {
     const result = verifyLive2dSupplyChain()
     console.log(
-      `[live2d] verified vendor: ${result.frameworkSources} Framework sources, ${result.shaders} shaders, ${result.hiyoriRuntimeFiles} Hiyori runtime files`,
+      `[live2d] verified vendor: ${result.frameworkSources} Framework sources, ${result.shaders} shaders, ${result.hiyoriRuntimeFiles} Hiyori runtime files, ${result.releaseNoticeFiles} third-party notice files`,
     )
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))

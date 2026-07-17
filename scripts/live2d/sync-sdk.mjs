@@ -23,6 +23,7 @@ import {
   SHADER_FILES,
 } from "./constants.mjs"
 import { assertHash, fail, sha256 } from "./file-utils.mjs"
+import { syncReleaseNotices } from "./release-notices.mjs"
 
 const projectRoot = fileURLToPath(new URL("../..", import.meta.url))
 const vendorParent = path.join(projectRoot, "vendor/live2d")
@@ -147,6 +148,7 @@ function main() {
     rmSync(destination, { force: true, recursive: true })
     renameSync(staging, destination)
     copyPublicRuntime(destination)
+    syncReleaseNotices(projectRoot)
   } catch (error) {
     rmSync(staging, { force: true, recursive: true })
     throw error

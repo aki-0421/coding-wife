@@ -3,6 +3,9 @@ import path from "node:path"
 
 import { HIYORI_RESOURCE_WEB_PATH } from "./constants.mjs"
 import { fail, readJson } from "./file-utils.mjs"
+import { createReleaseNoticeAssetMap } from "./release-notices.mjs"
+
+const RELEASE_NOTICE_WEB_PATH = "legal"
 
 const CONTENT_TYPES = Object.freeze({
   ".json": "application/json; charset=utf-8",
@@ -66,6 +69,7 @@ export function live2dAssetsPlugin(projectRoot) {
     "src-tauri/resources/characters/builtin-hiyori",
   )
   const assetMap = createAssetMap(resourceRoot)
+  const releaseNoticeAssetMap = createReleaseNoticeAssetMap(projectRoot)
   const route = `/${HIYORI_RESOURCE_WEB_PATH}`
 
   return {
@@ -90,6 +94,13 @@ export function live2dAssetsPlugin(projectRoot) {
         this.emitFile({
           type: "asset",
           fileName: `${HIYORI_RESOURCE_WEB_PATH}/${relative}`,
+          source: readFileSync(absolute),
+        })
+      }
+      for (const [relative, absolute] of releaseNoticeAssetMap) {
+        this.emitFile({
+          type: "asset",
+          fileName: `${RELEASE_NOTICE_WEB_PATH}/${relative}`,
           source: readFileSync(absolute),
         })
       }

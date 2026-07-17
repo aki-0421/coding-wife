@@ -14,6 +14,7 @@ import { CubismShaderManager_WebGL } from "@cubism/rendering/cubismshader_webgl"
 
 import { CharacterError } from "@/features/character/model"
 import type { CharacterPackClient } from "@/features/character/runtime/character-pack-client"
+import { verifyCubismShaderSources } from "@/features/character/runtime/shader-source-preflight"
 
 const SHADER_PATH = "/vendor/live2d/shaders/webgl/"
 const IDLE_GROUP = "Idle"
@@ -307,6 +308,8 @@ export class CubismCharacterModel extends CubismUserModel {
       )
     }
     this.#idleMotion.setEffectIds(this.#eyeBlinkIds, this.#lipSyncIds)
+
+    await verifyCubismShaderSources(SHADER_PATH, signal)
 
     this.createRenderer(width, height)
     const renderer = this.getRenderer()

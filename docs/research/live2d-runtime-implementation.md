@@ -25,7 +25,7 @@ inactive tabではstageをremountせず、`ResizeObserver`が報告する0×0で
 
 ## 通常の検証順序
 
-1. `pnpm live2d:verify` で59 Framework sources、13 shaders、17 Hiyori runtime filesと固定hashを検査する。
+1. `pnpm live2d:verify` で59 Framework sources、13 shaders、17 Hiyori runtime files、8 release notice filesと固定hashを検査する。
 2. `pnpm typecheck` で公式FrameworkをTypeScript 5.9.3で再生成し、アプリのstrict type checkを行う。
 3. `pnpm test` でsupply-chain、manifest fail-closed、Core one-shot/version、state generation、motion policy、backing sizeを検査する。
 4. `pnpm lint` でReact lifecycleとruntime error pathを含む静的検査を行う。
@@ -45,7 +45,11 @@ reducedはneutral frame後の500 msでframe countとsignature changeが不変だ
 
 通常Appのproduction previewでは1470×836でCSS 607.86×755、backing 608×755、非透明sample 2,410、16.7 ms、960×640でCSS/backing 376×559、非透明sample 2,562を確認した。頭頂、両手、裾はcanvas内に収まった。Commit tabではCSS 0×0、backing 1×1となり750 msのframe countが2,744のまま停止し、Chat復帰後は同じcanvas、asset request 8件のまま2,792へ再開した。workspace切替でもgeneration 1→2、同じcanvas、asset request 8→8だった。mute中はanimatedのままframeが1,408→1,464、generationは1のまま、reducedは750 msでframe 5,696とsignature change 712が不変だった。
 
-Vite production previewは`.moc3`へ空の`Content-Type`を返す場合がある。clientはmanifestでrole別suffixをallowlistし、same-originを確認したMOCに限ってmissing typeを`application/octet-stream`相当として扱う。その場合を含め全assetでbody byte lengthとSHA-256をimmutable manifestへ照合する。明示されたunexpected MIME、length不一致、hash不一致はfail closedで拒否する。
+pack manifestはsame-originかつ`application/json`（charset parameterは許可）を必須とし、missing、HTML、plain textをfail closedで拒否する。manifest内assetはroleごとにJSON=`application/json`、texture=`image/png`、MOC=`application/octet-stream`だけを受理する。Vite production previewが`.moc3`へ空の`Content-Type`を返す場合に限り、same-origin、manifest allowlist、role別suffix、body byte length、SHA-256の全照合を代替証跡としてmissing MIMEを受理する。
+
+shaderは`text/plain`（charset parameterは許可）を期待する。production previewでMIMEが欠落する場合を含め、読み込み前preflightで13 filesすべてをsame-originのbundled canonical Framework sourceとbyte-for-byte照合する。明示されたunexpected MIMEまたはcanonical sourceとの差分は、Framework rendererへ渡す前に拒否する。
+
+配布時の第三者通知は`src-tauri/resources/legal/THIRD-PARTY-NOTICES.md`を単一entry pointとする。ここからCubism SDK/Core/Frameworkの原文LICENSE、`RedistributableFiles.txt`、固定した`UPSTREAM.json`と`checksums.sha256`、Hiyoriの原文NOTICEへ辿れる。各コピーはcanonical vendor/resource sourceとbyte-for-byte一致しなければ`sync`後のverify、Vite build、Tauri resource packagingを通過しない。
 
 ## 障害の切り分け
 
