@@ -1,0 +1,236 @@
+---
+title: "S-001 セッションダッシュボード"
+description: "ローカルGit projectを安全に追加・診断し、workspaceの状態を一覧して作成・選択・復元する画面仕様。"
+updated: 2026-07-18
+read_when:
+  - "project picker、preflight、workspace sidebar、lifecycle、filter、selectionを実装するとき。"
+  - "S-001とWORK、CODE、HIST、APP要件の対応を確認するとき。"
+screen_id: "S-001"
+status: "Draft"
+---
+
+# S-001 セッションダッシュボード
+
+| 項目 | 内容 |
+|---|---|
+| window label | `main` |
+| React route / view key | `/sessions` / `session-dashboard` |
+| 対象OS | macOS 14以降、Apple Silicon |
+| デザイン | [DESIGN.md](../../DESIGN.md)、Figma node `8:2`のworkspace sidebar、[demo.png](../thinking/demo.png) |
+| 共通仕様 | [デスクトップ共通仕様](desktop-common-specification.md) |
+| 廃止理由 | 非該当 |
+| 後継画面ID | 非該当 |
+
+## 目的
+
+利用者が既存のローカルGit projectを破壊的変更なしで登録・診断し、作業単位のworkspaceを作成する。workspaceのlifecycleと介入要否を一覧から理解し、同じrepo、branch、draft、履歴を持つ作業面へ移動できるようにする。
+
+## 対象範囲
+
+### 含める
+
+| 対象 | 内容 |
+|---|---|
+| Project追加 | OS folder picker、canonicalization、Git worktree検証、重複選択 |
+| Preflight | Git、Codex executable、login、GPT-5.6 Sol、character packのready/warning/blocked |
+| Workspace作成 | name、goal、Backlog登録 |
+| Sidebar | lifecycle group、attention、repo、branch、filter、active selection |
+| Continuity | active workspace、filter、draft、scroll、summaryの復元 |
+| Safe removal | workspace cancel、project metadata登録解除。sourceとGit refは削除しない |
+
+### 含めない
+
+| 非対象 | 理由 | 扱う画面・文書 |
+|---|---|---|
+| repository clone / fetch | network credentialと競合解決をMVPへ含めない | 外部Git client |
+| 自動worktree作成 | 既存変更とownershipを優先する | 将来のworkspace isolation |
+| 同時に複数turnを実行 | MVPはactive execution 1件 | [S-002](S-002_coding-workspace.md) |
+| manual commit / terminal | workspace作成の目的ではない | [S-003](S-003_session-evidence.md)、read-only tool event |
+| Context本文編集 | active workspaceを選んでから行う | [S-002](S-002_coding-workspace.md) Context tab |
+
+## 表示契機と終了
+
+| 項目 | 内容 |
+|---|---|
+| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、S-002〜S-004からSessionsへ戻る |
+| 表示前提 | app-private DBをreadできること。読めない場合はrecovery stateを表示する |
+| 初期フォーカス | 0件時は`Projectを追加`、通常時はactive workspace item、error時は最初の回復操作 |
+| 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |
+| キャンセル | picker/dialog開始前の一覧、active selection、filter、入力を維持する |
+| 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う |
+| 再表示 | group、active selection、filter、sidebar scroll、preflight結果をRust DBから復元する |
+
+## 利用者と権限
+
+| 利用者・ロール | 表示 | 操作 | 拒否時の動作 |
+|---|---|---|---|
+| ローカル利用者 | project、workspace、preflightの非秘密情報 | add、create、filter、select、cancel、登録解除、再診断 | 無効path・権限・実行中turnではmutationせず理由を表示 |
+| React WebView | pack ID、workspace ID、sanitized repo/branch | typed picker/create/select request | absolute home path、任意Git引数、任意shellを送れない |
+| Rust project service | canonical path、Git metadata、DB | picker result検証、read-only preflight、metadata transaction | 不正path、I/O、duplicateを構造化errorにする |
+| Codex supervisor | preflight statusだけ | executable/login/model capability診断 | blockedならSend不可のstatusを返しthreadを開始しない |
+
+## 画面構成
+
+### 標準1470×836
+
+| 領域 | 実装拘束値 | 表示内容 | 主な操作 |
+|---|---:|---|---|
+| custom titlebar | sidebar上40.5px | traffic lights | close、minimize、zoom |
+| workspace heading | sidebar内40.5px | `Workspaces`、ListFilter、FolderPlus、Plus | filter、project追加、workspace作成 |
+| workspace list | sidebar幅255.04px、item 242.25×49.5px | Done / In review / In progress / Backlog / Canceled | select、attention確認、overflow |
+| sidebar footer | 40.5px | Settings gear | [S-004](S-004_settings-diagnostics.md)へ移動 |
+| main header | sidebar右、81px | `Sessions` breadcrumb、preflight summary | current project切替、診断詳細 |
+| project surface | main content | project概要、preflight、workspace create/empty/recovery | add、recheck、create、open |
+
+S-001のmain contentはChat/Companionを描画せず、main幅中央へ最大760pxの一続きの設定面を置く。projectごとに同型cardをgrid表示せず、選択project 1件の詳細とsidebar一覧を表示する。960〜1279pxでは64px rail + portal drawerを使い、project surfaceを残幅へ広げる。
+
+### sidebar visual state
+
+| lifecycle | shape | color token | label |
+|---|---|---|---|
+| Done | fill + check | successの代わりにwarm done fill | `Done / 完了` |
+| In review | outline circle | `success` | `In review / レビュー可能` |
+| In progress | outline circle | `running` | `In progress / 実行中` |
+| Backlog | dashed circle | `text-muted-accessible` | `Backlog / 未着手` |
+| Canceled | fill + x | `canceled` | `Canceled / 中止` |
+
+attentionはlifecycleを変更せず、`Needs answer / Approval required / Test failed / High risk`のicon、text、countをitem右端へ付ける。active itemだけ`selected-row`、strong text、branch violet iconを使う。repo/branchは一行ellipsis + tooltipとする。
+
+### preflight
+
+| check | Ready | Warning | Blocked |
+|---|---|---|---|
+| Git | worktree/HEAD readable | detached HEAD | non-Git、bare、missing、permission |
+| Codex | executable/initialize usable | optional capability不足 | spawn/protocol不可 |
+| Login | authenticated | 診断更新待ち | unauthenticated |
+| Sol | `gpt-5.6-sol` usable | effort一部だけ | model unavailable |
+| Character | selected/default pack usable | static/reduced fallback | text-only。workspaceは作成可、Send可否は他checkで決める |
+
+Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効にする。CharacterだけのBlockedはChatを止めずtext-onlyへ縮退する。
+
+## 表示状態
+
+| 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
+|---|---|---|---|---|
+| 初期化中 | DB、workspace、Git linkageを読込中 | sidebar/list/project surfaceのskeleton、locale、Quit | Quitだけ | queryとmigrationがterminalになる |
+| 通常 | 1件以上のvalid workspace | group list、active project、preflight、primary action 1件 | filter、select、add、create、state action | 操作開始、offline、error |
+| データなし | projectまたはworkspace 0件 | 理由、`Projectを追加`、shortcut。空gridは出さない | picker、Settings、Quit | project登録またはrehydrate |
+| 処理中 | picker後検証、preflight、create、cancel、remove | 対象stepとprogress、他workspaceは利用可能 | 可能なCancel、影響外select | success、cancel、error |
+| オフライン | network/Codex接続なし | local list、Git/DB status、Codex offline | filter、Context、local project操作可。Send不可 | 明示preflight成功 |
+| エラー | Git I/O、DB write、Codex診断失敗 | code、対象、保持data、retry/reselect/details | 影響外workspaceを開ける | 明示回復または登録解除 |
+| 権限不足 | selected rootまたは`.git` read不可 | 拒否pathはbasenameだけ、OS権限案内、再選択 | 再選択、Settings、Quit | permission変更後の再診断 |
+| キャンセル後 | picker/create/remove確認をcancel | 開始前の一覧、selection、input、fingerprint | 元操作または別操作 | 次の明示操作 |
+| 再起動復旧 | crash、missing repo、migration rollback | active selection、Interrupted badge、last summary、Missing/Recovery | reselect、open read-only、diagnostic、remove | linkage/preflight成功 |
+| filter 0件 | queryに一致するworkspaceなし | queryと`Filterを解除` | query変更、clear | 1件以上一致 |
+| active execution競合 | 別workspaceを開始しようとした | 現在workspace、`既存を停止して切替`、`戻る` | 二つの明示操作だけ | stop完了またはcancel |
+
+## 操作
+
+| 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
+|---|---|---|---|---|---|
+| Projectを追加 | FolderPlusまたはempty CTA | native pickerの1 directoryをRust診断し、validならprojectを1件追加 | 一覧とselection維持、errorなし | 登録せず原因と再選択 | `WORK-F-044`〜`WORK-F-049` |
+| preflight再診断 | project rootが存在 | Git/Codex/login/Sol/characterを更新 | 非該当 | check単位でBlocked、既存履歴維持 | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
+| Workspace作成 | registered project、name valid | Backlogへ1件追加し選択する | dialog入力を破棄し一覧維持 | 入力保持、field error | `WORK-F-050` |
+| filter | query 0〜200文字 | repo/branch/nameの部分一致を100ms以内に表示 | Escapeで直前query維持 | 一覧維持、境界表示 | `WORK-F-051` |
+| workspace選択 | itemがMissing以外 | header、Chat、Commit、Context、Companionを同一IDへ100ms以内に切替 | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
+| running workspaceから切替 | active turnあり | viewだけ切替。新規Send時に競合判断を出す | 元選択へ戻る | eventをworkspace間で混在させない | `WORK-F-058`, `WORK-F-059` |
+| workspaceをCanceledへ移動 | confirm、active turn停止可能 | source/refを残しCanceled groupへ移動 | lifecycle、Git fingerprint不変 | 元group維持、理由表示 | `WORK-F-056` |
+| project登録解除 | running turnなし、confirm | app metadataだけ削除 | DB/repo/file不変 | 完了表示せずretry | `WORK-F-057` |
+| missing repository再選択 | Missing item | canonical rootが同一repoならlinkage復旧 | Missing維持 | 候補を保存せず理由表示 | `WORK-F-062` |
+
+## 入力項目
+
+| 項目 | 初期値 | 必須 | 制約・境界 | エラー表示 | 保存契機 |
+|---|---|---|---|---|---|
+| repository folder | なし | project追加時必須 | regular Git worktree、canonical path、duplicate不可 | itemを作らず再選択 | 全preflight transaction成功 |
+| workspace name | `repo名 + timestamp` | 必須 | trim後1〜80 Unicode scalar、改行不可 | field直下、入力保持 | Create成功 |
+| goal | 空 | 任意 | 0〜4,000 Unicode scalar | 超過数、入力保持 | Create成功 |
+| filter query | 前回値 | 任意 | 0〜200 Unicode scalar、case-insensitive | query維持、検索未実行 | debounce後workspace単位 |
+
+## ネイティブ連携
+
+実際のCapability設定は`src-tauri/capabilities/`を正本とする。
+
+| ユーザー操作 | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
+|---|---|---|---|---|---|
+| project folder選択 | Tauri dialog → Rust | `select_project_root`（設計名） | directory picker 1件、選択rootのread診断 | 変更なし | path非表示のerror code |
+| Git preflight | Rust child process | `diagnose_project` | canonical root、read-only allowlist Git command | running checkをsafe abort | check別Blocked |
+| Codex preflight | Rust supervisor | `diagnose_codex` | executable/stdio capability、auth内容非読取 | 前回結果維持 | failure stageを表示 |
+| create/select/cancel | Rust DB | `create/select/cancel_workspace` | typed workspace/project ID、transaction | transaction前なら変更なし | 元state維持 |
+| project登録解除 | Rust DB | `unregister_project` | running 0件、metadata scope | 変更なし | source/Gitを変更しない |
+
+## ウィンドウ固有動作
+
+| 項目 | 動作 |
+|---|---|
+| 生成・再利用 | `main`の既存sidebarとproject surfaceを再利用 |
+| 初期サイズ・最小サイズ | 共通の1470×836 / 960×640 |
+| リサイズ | 960〜1279pxで64px rail + portal drawer。main formは最大760px |
+| 最大化・全画面 | 共通仕様どおり |
+| 常に手前へ表示 | 不可 |
+| 閉じる操作 | 共通仕様どおり |
+| 未保存変更がある場合 | create inputはdialog cancel/route離脱で破棄、既存workspace draftは保存 |
+
+## メニュー・ショートカット
+
+| 操作 | macOS | Windows / Linux | 有効条件 | 実行結果 |
+|---|---|---|---|---|
+| filterへfocus | `Command+K` | 非対応 | destructive dialogなし | drawerを開きqueryへfocus |
+| project追加 | toolbar/empty CTA | 非対応 | picker未起動 | native pickerを1回開く |
+| workspace開く | `Enter` | 非対応 | item focus、Missing以外 | S-002へ移動 |
+| drawer/menuを閉じる | `Escape` | 非対応 | non-destructive overlay | 入力維持、triggerへfocus |
+
+## データ保持
+
+| データ | 正本・保存先 | 保存契機 | 復元契機 | 破棄条件 | 失敗時 |
+|---|---|---|---|---|---|
+| project canonical path/metadata | Rust SQLite | registration transaction | cold start |明示登録解除 | 前回transaction維持 |
+| workspace/lifecycle/attention | Rust SQLite + normalized event | valid state transition | cold start/route return | history削除契約 | stale表示 |
+| active selection/filter/scroll | Rust SQLite | valid selection/query/scroll settle | route return/restart | Reset UI state | safe default + notice |
+| repo/branch | Gitを正本、DBはlast observed | focus/Send前preflight | query時再照合 | project登録解除 | stale/Missing |
+| create input | React transient state | 保存しない | dialog中だけ | success/cancel/route leave | input保持できる範囲で保持 |
+
+## OS差分
+
+| 項目 | macOS | Windows | Linux |
+|---|---|---|---|
+| support | macOS 14+ Apple Silicon | MVP非対応 | MVP非対応 |
+| folder picker | native directory picker | 非該当 | 非該当 |
+| path display | basename/repo名、private absolute path非表示 | 非該当 | 非該当 |
+| modifier | Command | 非該当 | 非該当 |
+
+## アクセシビリティ
+
+- focus順はheading actions、lifecycle group、workspace item、project surface、primary action、gearとする。
+- group headingへitem件数を付け、collapseしてもattention itemを見失わない。
+- lifecycle/attentionは色、label、icon、fill/outline/dashを併用する。
+- 12px visual iconは24×24px以上のhit areaとtooltipを持つ。
+- repo/branch ellipsisはfocus/hover tooltipとaccessible full valueを持つ。
+- processing updateはpolite、blocked/errorはassertive live regionへ1回だけ通知する。
+- 200% text zoomではdrawer内itemを2行のまま保ち、primary actionを欠落させない。
+
+## 関連要件
+
+| 要件ID | この画面での扱い | 要件定義書 |
+|---|---|---|
+| `WORK-F-044`〜`WORK-F-062` | project追加、preflight、workspace lifecycle、filter、selection、persistence | [workspace-sessions](../requirements/workspace-sessions.md) |
+| `CODE-F-051`, `CODE-F-075` | Codex/login/Sol preflightとblocked reason | [codex-main-session](../requirements/codex-main-session.md) |
+| `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | rehydrateとempty history導線 | [activity-history](../requirements/activity-history.md) |
+| `APP-F-052`〜`APP-F-062` | single window、layout、navigation、language、a11y | [desktop-shell](../requirements/desktop-shell.md) |
+
+## 未確定事項
+
+| 論点 | 初期判断 | 確認事項 | 着手ブロック |
+|---|---|---|---|
+| project surfaceの最終copy | ja/enの短文を実装時にlocalization tableへ置く | copy reviewでtoneを確認する | いいえ |
+| workspace 200件時のgroup collapse初期値 | active/attention groupを展開、他を前回状態で復元 | performance/usage testで確認する | いいえ |
+| character preflight Blocked | Chatをtext-onlyで継続し、Sendは他checkだけで判定 | Live2D integration testで確認する | いいえ |
+
+## レビュー確認
+
+- [x] front matter、title、filenameの`S-001`が一致する。
+- [x] `status: Draft`である。
+- [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
+- [x] native operation、cancel、permission、data retention、OS差分を定義した。
+- [x] 関連要件IDを要件定義書のS-001対応と一致させた。
+- [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。
