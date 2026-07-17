@@ -5,6 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
 use super::supervisor::CodexSupervisor;
@@ -66,6 +67,26 @@ pub struct AppPrivateBinaryRecord {
 }
 
 #[derive(Clone, Debug)]
+pub struct GitRepositoryIdentity {
+    pub canonical_root: PathBuf,
+    pub canonical_git_dir: PathBuf,
+    pub root_device: u64,
+    pub root_inode: u64,
+    pub git_device: u64,
+    pub git_inode: u64,
+    pub project_identity: String,
+    pub branch: String,
+    pub head: String,
+    pub detached: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ValidatedWorkspaceCandidate {
+    pub registration: WorkspaceRegistration,
+    pub git: GitRepositoryIdentity,
+}
+
+#[derive(Clone, Debug)]
 struct TrustedWorkspace {
     root: PathBuf,
     registration: WorkspaceRegistration,
@@ -92,12 +113,22 @@ impl WorkspaceService {
     }
 
     pub async fn pick_and_register(&self) -> Result<WorkspaceRegistration, CodexCommandError> {
+        let candidate = self.pick_validated().await?;
+        self.activate_candidate(candidate).await
+    }
+
+    pub async fn pick_validated(&self) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
         let selected = self
             .picker
             .pick_folder()
             .await
             .ok_or_else(|| workspace_error("CODEX-WORKSPACE-PICK-CANCELED", true))?;
-        self.register_new(selected).await
+        self.validate_candidate(
+            selected,
+            format!("workspace-{}", uuid::Uuid::new_v4()),
+            None,
+        )
+        .await
     }
 
     pub async fn restore_private_workspace(
@@ -106,8 +137,10 @@ impl WorkspaceService {
     ) -> Result<WorkspaceRegistration, CodexCommandError> {
         validate_workspace_id(&record.workspace_id)?;
         let alias = validate_alias(&record.alias)?;
-        self.validate_and_register(record.canonical_root, Some(record.workspace_id), alias)
-            .await
+        let candidate = self
+            .validate_candidate(record.canonical_root, record.workspace_id, Some(alias))
+            .await?;
+        self.activate_candidate(candidate).await
     }
 
     pub async fn apply_private_binary(
@@ -137,44 +170,71 @@ impl WorkspaceService {
             .map(|record| record.root.clone())
     }
 
-    async fn register_new(
+    pub async fn deactivate_workspace(&self, workspace_id: &str) -> Result<(), CodexCommandError> {
+        self.supervisor
+            .unregister_workspace_root(workspace_id)
+            .await?;
+        self.trusted.lock().await.remove(workspace_id);
+        Ok(())
+    }
+
+    pub async fn activate_candidate(
         &self,
-        selected: PathBuf,
+        candidate: ValidatedWorkspaceCandidate,
     ) -> Result<WorkspaceRegistration, CodexCommandError> {
-        let canonical = canonical_git_root(&selected).await?;
         if let Some(existing) = self
             .trusted
             .lock()
             .await
             .values()
-            .find(|record| record.root == canonical)
+            .find(|record| record.root == candidate.git.canonical_root)
             .map(|record| record.registration.clone())
         {
             return Ok(existing);
         }
-        let alias = repository_alias(&canonical);
-        self.validate_and_register(
-            canonical,
-            Some(format!("workspace-{}", uuid::Uuid::new_v4())),
-            alias,
+        let registration = candidate.registration;
+        self.supervisor
+            .register_workspace_root(
+                registration.workspace_id.clone(),
+                &candidate.git.canonical_root,
+            )
+            .await?;
+        self.trusted.lock().await.insert(
+            registration.workspace_id.clone(),
+            TrustedWorkspace {
+                root: candidate.git.canonical_root,
+                registration: registration.clone(),
+            },
+        );
+        Ok(registration)
+    }
+
+    pub async fn validate_private_candidate(
+        &self,
+        record: &AppPrivateWorkspaceRecord,
+    ) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
+        validate_workspace_id(&record.workspace_id)?;
+        let alias = validate_alias(&record.alias)?;
+        self.validate_candidate(
+            record.canonical_root.clone(),
+            record.workspace_id.clone(),
+            Some(alias),
         )
         .await
     }
 
-    async fn validate_and_register(
+    async fn validate_candidate(
         &self,
         selected: PathBuf,
-        workspace_id: Option<String>,
-        alias: String,
-    ) -> Result<WorkspaceRegistration, CodexCommandError> {
-        let canonical = canonical_git_root(&selected).await?;
-        validate_repository_ownership(&canonical).await?;
-        let workspace_id =
-            workspace_id.unwrap_or_else(|| format!("workspace-{}", uuid::Uuid::new_v4()));
+        workspace_id: String,
+        alias: Option<String>,
+    ) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
+        let git = validate_git_repository(&selected).await?;
         validate_workspace_id(&workspace_id)?;
+        let alias = alias.unwrap_or_else(|| repository_alias(&git.canonical_root));
         let registration = WorkspaceRegistration {
             schema_version: WORKSPACE_REGISTRATION_SCHEMA_VERSION,
-            workspace_id: workspace_id.clone(),
+            workspace_id,
             alias,
             preflight: WorkspacePreflight {
                 git_repository: true,
@@ -182,21 +242,13 @@ impl WorkspaceService {
                 writable: true,
             },
         };
-        self.supervisor
-            .register_workspace_root(workspace_id.clone(), &canonical)
-            .await?;
-        self.trusted.lock().await.insert(
-            workspace_id,
-            TrustedWorkspace {
-                root: canonical,
-                registration: registration.clone(),
-            },
-        );
-        Ok(registration)
+        Ok(ValidatedWorkspaceCandidate { registration, git })
     }
 }
 
-async fn canonical_git_root(selected: &Path) -> Result<PathBuf, CodexCommandError> {
+pub async fn validate_git_repository(
+    selected: &Path,
+) -> Result<GitRepositoryIdentity, CodexCommandError> {
     let canonical = tokio::fs::canonicalize(selected)
         .await
         .map_err(|_| workspace_error("CODEX-WORKSPACE-MISSING", true))?;
@@ -226,7 +278,9 @@ async fn canonical_git_root(selected: &Path) -> Result<PathBuf, CodexCommandErro
     if !head.is_file() || head.file_type().is_symlink() {
         return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
     }
-    Ok(canonical)
+    validate_repository_ownership(&canonical, &git_directory).await?;
+    validate_git_root_closure(&canonical, &git_directory).await?;
+    repository_identity(canonical, git_directory).await
 }
 
 async fn resolve_worktree_gitdir(root: &Path, marker: &Path) -> Result<PathBuf, CodexCommandError> {
@@ -254,33 +308,227 @@ async fn resolve_worktree_gitdir(root: &Path, marker: &Path) -> Result<PathBuf, 
     .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))
 }
 
-async fn validate_repository_ownership(root: &Path) -> Result<(), CodexCommandError> {
+async fn validate_repository_ownership(
+    root: &Path,
+    git_directory: &Path,
+) -> Result<(), CodexCommandError> {
     let root_metadata = tokio::fs::metadata(root)
         .await
         .map_err(|_| workspace_error("CODEX-WORKSPACE-MISSING", true))?;
-    let git_metadata = tokio::fs::metadata(root.join(".git"))
+    let git_metadata = tokio::fs::metadata(git_directory)
         .await
         .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    if !root_metadata.is_dir() || !git_metadata.is_dir() {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+    }
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
         let uid = unsafe { libc::geteuid() };
-        if root_metadata.uid() != uid || git_metadata.uid() != uid {
+        if !matches!(root_metadata.uid(), owner if owner == uid || owner == 0)
+            || !matches!(git_metadata.uid(), owner if owner == uid || owner == 0)
+        {
             return Err(workspace_error("CODEX-WORKSPACE-OWNER-MISMATCH", false));
         }
-        if root_metadata.permissions().mode() & 0o200 == 0 {
+        let root_mode = root_metadata.permissions().mode();
+        let git_mode = git_metadata.permissions().mode();
+        if root_mode & 0o022 != 0 || git_mode & 0o022 != 0 {
+            return Err(workspace_error("CODEX-WORKSPACE-WRITABLE-POLICY", false));
+        }
+        if root_metadata.uid() != uid
+            || git_metadata.uid() != uid
+            || root_mode & 0o200 == 0
+            || git_mode & 0o200 == 0
+        {
             return Err(workspace_error("CODEX-WORKSPACE-READ-ONLY", false));
         }
     }
 
     #[cfg(not(unix))]
-    if root_metadata.permissions().readonly() {
+    if root_metadata.permissions().readonly() || git_metadata.permissions().readonly() {
         return Err(workspace_error("CODEX-WORKSPACE-READ-ONLY", false));
     }
 
     Ok(())
+}
+
+async fn validate_git_root_closure(
+    root: &Path,
+    git_directory: &Path,
+) -> Result<(), CodexCommandError> {
+    let output = tokio::process::Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "rev-parse",
+            "--show-toplevel",
+            "--absolute-git-dir",
+            "--git-common-dir",
+        ])
+        .env_clear()
+        .env("LC_ALL", "C")
+        .kill_on_drop(true)
+        .output()
+        .await
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-UNAVAILABLE", true))?;
+    if !output.status.success() || output.stdout.len() > 12_288 || output.stderr.len() > 4_096 {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    let mut lines = stdout.lines();
+    let reported_root = lines
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    let reported_git_dir = lines
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    let reported_common_dir = lines
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    if lines.next().is_some() {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+    }
+
+    let reported_root = tokio::fs::canonicalize(reported_root)
+        .await
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    let reported_git_dir = tokio::fs::canonicalize(reported_git_dir)
+        .await
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    let common_path = Path::new(reported_common_dir);
+    let reported_common_dir = tokio::fs::canonicalize(if common_path.is_absolute() {
+        common_path.to_path_buf()
+    } else {
+        root.join(common_path)
+    })
+    .await
+    .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+
+    if reported_root != root || reported_git_dir != git_directory {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-CLOSURE", false));
+    }
+    if reported_common_dir != reported_git_dir
+        && !reported_git_dir.starts_with(&reported_common_dir)
+    {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-CLOSURE", false));
+    }
+    validate_repository_ownership(root, &reported_common_dir).await
+}
+
+async fn repository_identity(
+    canonical_root: PathBuf,
+    canonical_git_dir: PathBuf,
+) -> Result<GitRepositoryIdentity, CodexCommandError> {
+    let root_metadata = tokio::fs::metadata(&canonical_root)
+        .await
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-MISSING", true))?;
+    let git_metadata = tokio::fs::metadata(&canonical_git_dir)
+        .await
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    let head_value = tokio::fs::read_to_string(canonical_git_dir.join("HEAD"))
+        .await
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    if head_value.len() > 4_096 || head_value.contains('\0') {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+    }
+    let head_value = head_value.trim();
+    let (branch, head, detached) = if let Some(reference) = head_value.strip_prefix("ref: ") {
+        let branch = reference
+            .strip_prefix("refs/heads/")
+            .unwrap_or(reference)
+            .trim();
+        if branch.is_empty() || branch.chars().count() > 240 || branch.chars().any(char::is_control)
+        {
+            return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+        }
+        let head = read_reference(&canonical_git_dir, reference).await?;
+        (branch.to_owned(), head, false)
+    } else {
+        if !is_git_object_id(head_value) {
+            return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+        }
+        let short = head_value.chars().take(12).collect::<String>();
+        (short.clone(), short, true)
+    };
+
+    #[cfg(unix)]
+    let (root_device, root_inode, git_device, git_inode) = {
+        use std::os::unix::fs::MetadataExt;
+        (
+            root_metadata.dev(),
+            root_metadata.ino(),
+            git_metadata.dev(),
+            git_metadata.ino(),
+        )
+    };
+    #[cfg(not(unix))]
+    let (root_device, root_inode, git_device, git_inode) =
+        (0, root_metadata.len(), 0, git_metadata.len());
+
+    let mut identity = Sha256::new();
+    identity.update(root_device.to_le_bytes());
+    identity.update(root_inode.to_le_bytes());
+    identity.update(git_device.to_le_bytes());
+    identity.update(git_inode.to_le_bytes());
+    let project_identity = hex::encode(identity.finalize());
+
+    Ok(GitRepositoryIdentity {
+        canonical_root,
+        canonical_git_dir,
+        root_device,
+        root_inode,
+        git_device,
+        git_inode,
+        project_identity,
+        branch,
+        head,
+        detached,
+    })
+}
+
+async fn read_reference(
+    git_directory: &Path,
+    reference: &str,
+) -> Result<String, CodexCommandError> {
+    if reference.starts_with('/')
+        || reference.contains("..")
+        || reference.chars().any(char::is_control)
+    {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+    }
+    let loose = git_directory.join(reference);
+    if let Ok(value) = tokio::fs::read_to_string(&loose).await {
+        let value = value.trim();
+        if is_git_object_id(value) {
+            return Ok(value.chars().take(12).collect());
+        }
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+    }
+    let packed = tokio::fs::read_to_string(git_directory.join("packed-refs"))
+        .await
+        .unwrap_or_default();
+    if packed.len() > 8 * 1_024 * 1_024 {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+    }
+    for line in packed.lines() {
+        let Some((object_id, packed_reference)) = line.split_once(' ') else {
+            continue;
+        };
+        if packed_reference == reference && is_git_object_id(object_id) {
+            return Ok(object_id.chars().take(12).collect());
+        }
+    }
+    Ok("unborn".to_owned())
+}
+
+fn is_git_object_id(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.chars().all(|character| character.is_ascii_hexdigit())
 }
 
 fn repository_alias(root: &Path) -> String {
@@ -336,8 +584,13 @@ mod tests {
 
     fn git_repository() -> PathBuf {
         let root = std::env::temp_dir().join(format!("coding-wife-repo-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join(".git/objects")).expect("git directories");
-        fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").expect("git HEAD");
+        fs::create_dir_all(&root).expect("git root");
+        let status = std::process::Command::new("/usr/bin/git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(&root)
+            .status()
+            .expect("git init");
+        assert!(status.success());
         root
     }
 
@@ -371,5 +624,74 @@ mod tests {
         let error = service.pick_and_register().await.expect_err("not git");
         assert_eq!(error.code, "CODEX-WORKSPACE-NOT-GIT");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn resolved_external_git_directory_is_verified_but_never_serialized() {
+        let root =
+            std::env::temp_dir().join(format!("coding-wife-worktree-{}", uuid::Uuid::new_v4()));
+        let git_dir =
+            std::env::temp_dir().join(format!("coding-wife-gitdir-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("worktree root");
+        let status = std::process::Command::new("/usr/bin/git")
+            .arg("init")
+            .arg("-q")
+            .arg("-b")
+            .arg("main")
+            .arg("--separate-git-dir")
+            .arg(&git_dir)
+            .arg(&root)
+            .status()
+            .expect("separate git directory");
+        assert!(status.success());
+
+        let service =
+            WorkspaceService::new(CodexSupervisor::new(), Arc::new(FixedPicker(root.clone())));
+        let candidate = service.pick_validated().await.expect("validated candidate");
+        let encoded = serde_json::to_string(&candidate.registration).expect("serialize public DTO");
+
+        assert_eq!(
+            candidate.git.canonical_git_dir,
+            fs::canonicalize(&git_dir).expect("canonical git directory")
+        );
+        assert!(!encoded.contains(&git_dir.to_string_lossy().to_string()));
+
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(git_dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn writable_external_git_directory_is_rejected() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("coding-wife-worktree-{}", uuid::Uuid::new_v4()));
+        let git_dir =
+            std::env::temp_dir().join(format!("coding-wife-gitdir-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("worktree root");
+        let status = std::process::Command::new("/usr/bin/git")
+            .arg("init")
+            .arg("-q")
+            .arg("-b")
+            .arg("main")
+            .arg("--separate-git-dir")
+            .arg(&git_dir)
+            .arg(&root)
+            .status()
+            .expect("separate git directory");
+        assert!(status.success());
+        fs::set_permissions(&git_dir, fs::Permissions::from_mode(0o777))
+            .expect("unsafe permissions");
+
+        let error = validate_git_repository(&root)
+            .await
+            .expect_err("unsafe git directory");
+        assert_eq!(error.code, "CODEX-WORKSPACE-WRITABLE-POLICY");
+
+        fs::set_permissions(&git_dir, fs::Permissions::from_mode(0o700))
+            .expect("restore permissions");
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(git_dir);
     }
 }

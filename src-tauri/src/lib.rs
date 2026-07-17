@@ -1,4 +1,5 @@
 pub mod codex;
+pub mod workspace_history;
 
 use serde::{Deserialize, Serialize};
 

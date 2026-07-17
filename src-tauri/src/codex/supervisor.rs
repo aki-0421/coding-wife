@@ -162,6 +162,26 @@ impl CodexSupervisor {
         Ok(())
     }
 
+    pub async fn unregister_workspace_root(
+        &self,
+        workspace_id: &str,
+    ) -> Result<(), CodexCommandError> {
+        let mut state = self.inner.state.lock().await;
+        if state.active_workspace.as_deref() == Some(workspace_id) && state.active_turn_id.is_some()
+        {
+            return Err(command_error(
+                "CODEX-WORKSPACE-ACTIVE",
+                "codex.unregister",
+                true,
+            ));
+        }
+        state.workspaces.remove(workspace_id);
+        if state.active_workspace.as_deref() == Some(workspace_id) {
+            state.active_workspace = None;
+        }
+        Ok(())
+    }
+
     pub async fn set_explicit_binary(&self, path: Option<PathBuf>) {
         self.inner.state.lock().await.explicit_binary = path;
     }
