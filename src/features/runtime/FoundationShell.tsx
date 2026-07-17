@@ -1,7 +1,13 @@
+import { useState } from "react"
+
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useI18n, type TranslationKey } from "@/features/localization"
+import {
+  useI18n,
+  type SupportedLocale,
+  type TranslationKey,
+} from "@/features/localization"
 import { useRuntime } from "@/features/runtime/useRuntime"
 import type { IntegrationId } from "@/lib/contracts"
 import { cn } from "@/lib/utils"
@@ -32,32 +38,63 @@ function LoadingFoundation() {
 
 function LocaleSwitcher() {
   const { locale, setLocale, t } = useI18n()
+  const [failedLocale, setFailedLocale] = useState<SupportedLocale | null>(null)
+
+  const persistLocale = (nextLocale: SupportedLocale) => {
+    if (setLocale(nextLocale)) {
+      setFailedLocale(null)
+      return
+    }
+
+    setFailedLocale(nextLocale)
+  }
 
   return (
-    <div
-      aria-label={t("locale.switchLabel")}
-      className="flex flex-wrap items-center gap-xs"
-      role="group"
-    >
-      {(["ja", "en"] as const).map((option) => (
-        <Button
-          aria-pressed={locale === option}
-          key={option}
-          onClick={() => setLocale(option)}
-          size="xs"
-          type="button"
-          variant={locale === option ? "secondary" : "ghost"}
+    <div className="flex max-w-[20rem] flex-col items-end gap-xs">
+      <div
+        aria-label={t("locale.switchLabel")}
+        className="flex flex-wrap items-center justify-end gap-xs"
+        role="group"
+      >
+        {(["ja", "en"] as const).map((option) => (
+          <Button
+            aria-pressed={locale === option}
+            key={option}
+            onClick={() => persistLocale(option)}
+            size="xs"
+            type="button"
+            variant={locale === option ? "secondary" : "ghost"}
+          >
+            {t(`locale.${option}`)}
+          </Button>
+        ))}
+      </div>
+
+      {failedLocale === null ? null : (
+        <div
+          aria-live="assertive"
+          className="flex flex-wrap items-center justify-end gap-xs text-end"
         >
-          {t(`locale.${option}`)}
-        </Button>
-      ))}
+          <p className="m-0 text-caption text-destructive">
+            {t("locale.saveError")}
+          </p>
+          <Button
+            onClick={() => persistLocale(failedLocale)}
+            size="xs"
+            type="button"
+            variant="secondary"
+          >
+            {t("action.retry")}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
 
 export function FoundationShell() {
   const { t } = useI18n()
-  const { state, transportKind } = useRuntime()
+  const { refresh, state, transportKind } = useRuntime()
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background p-xl">
@@ -94,11 +131,21 @@ export function FoundationShell() {
               {t("foundation.error")}
             </p>
             <p className="m-0 font-mono text-label text-muted-foreground">
-              {state.errorCode}
+              {state.error.code}
             </p>
             <p className="m-0 text-caption text-muted-foreground">
               {t("foundation.retryHint")}
             </p>
+            <div>
+              <Button
+                onClick={refresh}
+                size="xs"
+                type="button"
+                variant="secondary"
+              >
+                {t("action.retry")}
+              </Button>
+            </div>
           </div>
         ) : null}
 

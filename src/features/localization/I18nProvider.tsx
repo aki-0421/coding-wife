@@ -17,14 +17,20 @@ import {
   type SupportedLocale,
 } from "@/features/localization/types"
 
-function getBrowserLanguageTags(): readonly string[] {
+interface BrowserLanguagePreference {
+  readonly languageTags: readonly string[]
+  readonly fallbackLanguage: string
+}
+
+function getBrowserLanguagePreference(): BrowserLanguagePreference {
   if (typeof navigator === "undefined") {
-    return ["en"]
+    return { languageTags: [], fallbackLanguage: "en" }
   }
 
-  return navigator.languages.length > 0
-    ? navigator.languages
-    : [navigator.language]
+  return {
+    languageTags: navigator.languages,
+    fallbackLanguage: navigator.language,
+  }
 }
 
 export interface I18nProviderProps {
@@ -34,7 +40,14 @@ export interface I18nProviderProps {
 
 export function I18nProvider({ children, store }: I18nProviderProps) {
   const [locale, setLocaleState] = useState<SupportedLocale>(() => {
-    return store.read() ?? detectSupportedLocale(getBrowserLanguageTags())
+    const browserLanguage = getBrowserLanguagePreference()
+    return (
+      store.read() ??
+      detectSupportedLocale(
+        browserLanguage.languageTags,
+        browserLanguage.fallbackLanguage,
+      )
+    )
   })
 
   useEffect(() => {
@@ -43,10 +56,18 @@ export function I18nProvider({ children, store }: I18nProviderProps) {
 
   const setLocale = useCallback(
     (nextLocale: SupportedLocale) => {
-      setLocaleState(nextLocale)
-      return store.write(nextLocale)
+      if (nextLocale === locale) {
+        return true
+      }
+
+      const didPersist = store.write(nextLocale)
+      if (didPersist) {
+        setLocaleState(nextLocale)
+      }
+
+      return didPersist
     },
-    [store],
+    [locale, store],
   )
 
   const t = useCallback(

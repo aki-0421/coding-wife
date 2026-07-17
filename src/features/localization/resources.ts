@@ -7,7 +7,9 @@ const en = {
     "The desktop shell is initializing its local runtime boundary.",
   "foundation.loading": "Checking the local runtime…",
   "foundation.error": "The local runtime could not be reached.",
-  "foundation.retryHint": "Restart the app and review the local diagnostics.",
+  "foundation.retryHint":
+    "Retry the runtime check. If it continues to fail, review the local diagnostics.",
+  "action.retry": "Retry",
   "runtime.modeLabel": "Runtime mode",
   "runtime.native": "Native desktop",
   "runtime.demo": "Browser demo",
@@ -24,6 +26,8 @@ const en = {
   "integration.live2d": "Live2D",
   "integration.history": "Local history",
   "locale.switchLabel": "Display language",
+  "locale.saveError":
+    "The display language could not be saved. The current language is unchanged.",
   "locale.ja": "日本語",
   "locale.en": "English",
 } as const
@@ -38,7 +42,9 @@ const ja = {
     "デスクトップシェルがローカル実行境界を初期化しています。",
   "foundation.loading": "ローカル実行環境を確認しています…",
   "foundation.error": "ローカル実行環境へ接続できませんでした。",
-  "foundation.retryHint": "アプリを再起動し、ローカル診断を確認してください。",
+  "foundation.retryHint":
+    "実行環境の確認を再試行してください。失敗が続く場合はローカル診断を確認してください。",
+  "action.retry": "再試行",
   "runtime.modeLabel": "実行モード",
   "runtime.native": "ネイティブデスクトップ",
   "runtime.demo": "ブラウザデモ",
@@ -55,6 +61,8 @@ const ja = {
   "integration.live2d": "Live2D",
   "integration.history": "ローカル履歴",
   "locale.switchLabel": "表示言語",
+  "locale.saveError":
+    "表示言語を保存できませんでした。現在の言語を維持しています。",
   "locale.ja": "日本語",
   "locale.en": "English",
 } as const satisfies TranslationResource

@@ -8,10 +8,9 @@ export function isSupportedLocale(value: unknown): value is SupportedLocale {
 
 export function detectSupportedLocale(
   languageTags: readonly string[],
+  fallbackLanguage = "en",
 ): SupportedLocale {
-  return languageTags.some((languageTag) =>
-    languageTag.toLowerCase().startsWith("ja"),
-  )
-    ? "ja"
-    : "en"
+  const primaryLanguage = languageTags[0] ?? fallbackLanguage
+
+  return primaryLanguage.toLowerCase().startsWith("ja") ? "ja" : "en"
 }

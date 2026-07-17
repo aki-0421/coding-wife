@@ -54,6 +54,8 @@ The frontend checks cover strict TypeScript, linting, the localized foundation s
 - `src/lib/contracts/` is the versioned TypeScript contract for domain events and IPC payloads.
 - `src-tauri/` is the trusted native boundary. Only `health_check` and `get_runtime_metadata` are exposed today; no generic shell, filesystem, process, or Git command is available.
 
+`src/test/fixtures/runtime-foundation.v1.json` is the shared Rust/TypeScript IPC fixture. Update it together with both parsers and contract tests whenever the foundation schema version changes; malformed or mismatched native responses must remain fail-closed.
+
 The Tauri transport calls that read-only command allowlist. The browser transport returns `demo_only` and `not_configured` states. Locale persistence is intentionally session-only in Tauri until the Rust settings store exists; only browser demo mode uses the `coding-wife:demo:*` Web Storage namespace.
 
 ## Intentionally not implemented yet

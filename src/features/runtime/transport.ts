@@ -1,7 +1,11 @@
 import { invoke, isTauri } from "@tauri-apps/api/core"
 
 import {
+  IpcBoundaryError,
   ipcCommands,
+  normalizeIpcError,
+  parseHealthCheckResponse,
+  parseRuntimeMetadata,
   type HealthCheckResponse,
   type IpcCommand,
   type IpcRequestMap,
@@ -9,6 +13,11 @@ import {
   type RuntimeKind,
   type RuntimeMetadata,
 } from "@/lib/contracts"
+
+export type IpcInvoker = (
+  command: IpcCommand,
+  payload: unknown,
+) => Promise<unknown>
 
 export interface AppTransport {
   readonly kind: RuntimeKind
@@ -25,14 +34,33 @@ const notConfiguredIntegrations = {
   history: "not_configured",
 } as const
 
-class TauriTransport implements AppTransport {
+const invokeTauri: IpcInvoker = (command, payload) => {
+  return invoke(
+    command,
+    payload as Readonly<Record<string, unknown>> | undefined,
+  )
+}
+
+export class TauriTransport implements AppTransport {
   readonly kind = "tauri"
 
-  request<K extends IpcCommand>(
+  constructor(private readonly invoker: IpcInvoker = invokeTauri) {}
+
+  async request<K extends IpcCommand>(
     command: K,
     payload: IpcRequestMap[K],
   ): Promise<IpcResponseMap[K]> {
-    return invoke<IpcResponseMap[K]>(command, payload)
+    try {
+      const response = await this.invoker(command, payload)
+
+      if (command === ipcCommands.healthCheck) {
+        return parseHealthCheckResponse(response) as IpcResponseMap[K]
+      }
+
+      return parseRuntimeMetadata(response) as IpcResponseMap[K]
+    } catch (error) {
+      throw new IpcBoundaryError(normalizeIpcError(command, error))
+    }
   }
 }
 
