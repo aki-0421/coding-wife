@@ -1,5 +1,19 @@
 import type { ReactNode } from "react"
 
+import type {
+  AttachmentKind,
+  AttachmentRegistrationResponse,
+  AttachmentSource,
+  CodexFallbackDecisionRequest,
+  CodexPendingResponseRequest,
+  PendingRequestView,
+} from "@/lib/contracts"
+import type {
+  CodexSemanticTimelineEvent,
+  CodexWorkspacePhase,
+  CodexReadiness,
+} from "@/features/codex"
+
 export type WorkspaceTab = "chat" | "commit" | "context" | "settings"
 export type WorkspaceLifecycle =
   "done" | "in_review" | "in_progress" | "backlog" | "canceled"
@@ -32,6 +46,10 @@ export interface AttachmentItem {
   readonly name: string
   readonly size: number
   readonly valid: boolean
+  readonly relativePath: string
+  readonly kind: AttachmentKind
+  readonly source: AttachmentSource
+  readonly expiresAt: string
 }
 
 export interface ContextSnapshotItem {
@@ -49,14 +67,27 @@ export interface WorkspaceDraft {
   readonly contextSnapshots: readonly ContextSnapshotItem[]
 }
 
-export interface WorkspaceTimelineItem {
+export interface PersistedWorkspaceTimelineItem {
   readonly id: string
   readonly sequence: number
   readonly producer: "app" | "work" | "code" | "live" | "hist" | "git"
-  readonly kind: string
+  readonly kind: "history"
+  readonly domainKind: string
   readonly occurredAt: string
   readonly status: string
   readonly errorCode?: string
+}
+
+export type WorkspaceTimelineItem =
+  PersistedWorkspaceTimelineItem | CodexSemanticTimelineEvent
+
+export interface WorkspaceCodexState {
+  readonly phase: CodexWorkspacePhase
+  readonly connected: boolean
+  readonly readiness: CodexReadiness
+  readonly pendingRequests: readonly PendingRequestView[]
+  readonly timeline: readonly CodexSemanticTimelineEvent[]
+  readonly errorCode: string | null
 }
 
 export interface WorkspaceAdapterDraft {
@@ -119,6 +150,26 @@ export interface WorkspaceViewAdapter {
     request: SendTurnRequest,
   ) => Promise<{ readonly accepted: boolean }>
   readonly stopTurn?: (workspaceId: string) => void | Promise<void>
+  readonly codexSnapshot?: () => WorkspaceCodexState
+  readonly subscribeCodex?: (
+    listener: (state: WorkspaceCodexState) => void,
+  ) => () => void
+  readonly pickAttachments?: (
+    workspaceId: string,
+    existingHandles: readonly string[],
+  ) => Promise<AttachmentRegistrationResponse>
+  readonly registerAttachmentPaths?: (
+    workspaceId: string,
+    source: "drop" | "paste",
+    paths: readonly string[],
+    existingHandles: readonly string[],
+  ) => Promise<AttachmentRegistrationResponse>
+  readonly respondPending?: (
+    request: CodexPendingResponseRequest,
+  ) => Promise<boolean>
+  readonly answerFallbackDecision?: (
+    request: CodexFallbackDecisionRequest,
+  ) => Promise<boolean>
   readonly deleteWorkspaceHistory?: (
     workspaceId: string,
   ) => Promise<WorkspaceAdapterState>

@@ -45,6 +45,13 @@ interface ChatViewProps {
   readonly onEffortChange: (effort: ReasoningEffort) => void
   readonly onMutedChange: (muted: boolean) => void
   readonly onOpenDiagnostics: () => void
+  readonly onPickAttachments?: (() => void | Promise<void>) | undefined
+  readonly onRegisterAttachmentPaths?:
+    | ((
+        source: "drop" | "paste",
+        paths: readonly string[],
+      ) => void | Promise<void>)
+    | undefined
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onRemoveContext: (snapshotId: string) => void
   readonly onRetryRuntime: () => void
@@ -73,6 +80,8 @@ export function ChatView({
   onEffortChange,
   onMutedChange,
   onOpenDiagnostics,
+  onPickAttachments,
+  onRegisterAttachmentPaths,
   onRemoveAttachment,
   onRemoveContext,
   onRetryRuntime,
@@ -180,6 +189,8 @@ export function ChatView({
           onCaptureContext={onCaptureContext}
           onDraftChange={onDraftChange}
           onEffortChange={onEffortChange}
+          onPickAttachments={onPickAttachments}
+          onRegisterAttachmentPaths={onRegisterAttachmentPaths}
           onRemoveAttachment={onRemoveAttachment}
           onRemoveContext={onRemoveContext}
           onSend={onSend}

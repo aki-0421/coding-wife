@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import type {
+  ApprovalDecision,
+  AttachmentRegistrationResponse,
+  PendingRequestView,
+} from "@/lib/contracts"
+
 import { initialWorkspaces } from "@/features/workspace-view/demo-data"
 import type {
   AttachmentItem,
@@ -8,6 +14,7 @@ import type {
   SendTurnRequest,
   SettingsSection,
   WorkspaceAdapterState,
+  WorkspaceCodexState,
   WorkspaceDraft,
   WorkspaceRecord,
   WorkspaceTab,
@@ -20,6 +27,54 @@ const emptyDraft: WorkspaceDraft = {
   effort: "fast",
   attachments: [],
   contextSnapshots: [],
+}
+
+const disconnectedCodexState: WorkspaceCodexState = {
+  phase: "idle",
+  connected: false,
+  readiness: {
+    ready: false,
+    fastAvailable: false,
+    maxAvailable: false,
+    reasonCode: "CODEX-NOT-CONNECTED",
+  },
+  pendingRequests: [],
+  timeline: [],
+  errorCode: null,
+}
+
+function initialCodexState(
+  adapter?: WorkspaceViewAdapter,
+): WorkspaceCodexState {
+  const snapshot = adapter?.codexSnapshot?.()
+  if (snapshot !== undefined) return snapshot
+  if (adapter?.connected !== true) return disconnectedCodexState
+  return {
+    ...disconnectedCodexState,
+    phase: "ready",
+    connected: true,
+    readiness: {
+      ready: true,
+      fastAvailable: true,
+      maxAvailable: true,
+      reasonCode: null,
+    },
+  }
+}
+
+function attachmentItems(
+  response: AttachmentRegistrationResponse,
+): readonly AttachmentItem[] {
+  return response.items.map((item) => ({
+    id: item.handle,
+    name: item.name,
+    size: item.sizeBytes,
+    valid: true,
+    relativePath: item.relativePath,
+    kind: item.kind,
+    source: item.source,
+    expiresAt: item.expiresAt,
+  }))
 }
 
 interface PendingDraftSave {
@@ -59,6 +114,9 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     Readonly<Record<string, WorkspaceDraft>>
   >({})
   const [turnState, setTurnState] = useState<TurnUiState>("idle")
+  const [codex, setCodex] = useState<WorkspaceCodexState>(() =>
+    initialCodexState(adapter),
+  )
   const [notice, setNotice] = useState<WorkspaceViewNotice | null>(null)
   const [adapterStatus, setAdapterStatus] = useState<WorkspaceAdapterStatus>(
     nativeHydration ? "loading" : "ready",
@@ -79,6 +137,20 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   const pendingDraftSaves = useRef(new Map<string, PendingDraftSave>())
   const draftSaveTimers = useRef(new Map<string, number>())
   const deletingWorkspaceIds = useRef(new Set<string>())
+
+  useEffect(() => {
+    if (adapter?.subscribeCodex === undefined) return
+    return adapter.subscribeCodex((snapshot) => {
+      setCodex(snapshot)
+      setTurnState((current) => {
+        if (snapshot.phase === "running" || snapshot.phase === "waiting") {
+          return "running"
+        }
+        if (snapshot.phase === "stopping") return "stopping"
+        return current === "sending" ? current : "idle"
+      })
+    })
+  }, [adapter])
 
   const applyAdapterState = useCallback((state: WorkspaceAdapterState) => {
     setWorkspaces(state.workspaces)
@@ -171,6 +243,21 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
       ),
     )
   }, [filter, workspaces])
+
+  const combinedTimeline = useMemo(() => {
+    const events = new Map(timeline.map((event) => [event.id, event] as const))
+    for (const event of codex.timeline) events.set(event.id, event)
+    return [...events.values()].sort((left, right) => {
+      const timestamp =
+        Date.parse(left.occurredAt) - Date.parse(right.occurredAt)
+      if (timestamp !== 0) return timestamp
+      const leftSequence =
+        left.kind === "history" ? left.sequence : left.sourceSequence
+      const rightSequence =
+        right.kind === "history" ? right.sequence : right.sourceSequence
+      return leftSequence - rightSequence
+    })
+  }, [codex.timeline, timeline])
 
   const updateDraft = useCallback(
     (
@@ -270,7 +357,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     ],
   )
 
-  const addAttachments = useCallback(
+  const addAttachmentFiles = useCallback(
     (files: readonly File[]) => {
       if (!adapterReady || !selectedWorkspace) return
       const additions: readonly AttachmentItem[] = files
@@ -280,6 +367,12 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
           name: file.name,
           size: file.size,
           valid: file.size <= 25 * 1024 * 1024,
+          relativePath: file.name,
+          kind: file.type.startsWith("image/")
+            ? ("image" as const)
+            : ("file" as const),
+          source: "drop" as const,
+          expiresAt: new Date(Date.now() + 30 * 60 * 1_000).toISOString(),
         }))
 
       updateDraft(selectedWorkspace.id, (current) => ({
@@ -288,6 +381,80 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
       }))
     },
     [adapterReady, selectedWorkspace, updateDraft],
+  )
+
+  const applyAttachmentRegistration = useCallback(
+    (workspaceId: string, response: AttachmentRegistrationResponse) => {
+      const additions = attachmentItems(response)
+      updateDraft(workspaceId, (current) => {
+        const byHandle = new Map(
+          current.attachments.map((attachment) => [attachment.id, attachment]),
+        )
+        for (const attachment of additions)
+          byHandle.set(attachment.id, attachment)
+        return {
+          ...current,
+          attachments: [...byHandle.values()].slice(0, 10),
+        }
+      })
+      const rejection = response.rejections[0]
+      setNotice(
+        rejection === undefined
+          ? null
+          : { tone: "error", message: rejection.code },
+      )
+    },
+    [updateDraft],
+  )
+
+  const pickAttachments = useCallback(async () => {
+    if (!adapterReady || !selectedWorkspace) return
+    if (adapter?.pickAttachments === undefined) return
+    const workspaceId = selectedWorkspace.id
+    try {
+      const response = await adapter.pickAttachments(
+        workspaceId,
+        selectedDraft.attachments.map((attachment) => attachment.id),
+      )
+      applyAttachmentRegistration(workspaceId, response)
+    } catch {
+      setNotice({ tone: "error", message: "CODEX-ATTACHMENT-PICK-FAILED" })
+    }
+  }, [
+    adapter,
+    adapterReady,
+    applyAttachmentRegistration,
+    selectedDraft.attachments,
+    selectedWorkspace,
+  ])
+
+  const registerAttachmentPaths = useCallback(
+    async (source: "drop" | "paste", paths: readonly string[]) => {
+      if (!adapterReady || !selectedWorkspace || paths.length === 0) return
+      if (adapter?.registerAttachmentPaths === undefined) return
+      const workspaceId = selectedWorkspace.id
+      try {
+        const response = await adapter.registerAttachmentPaths(
+          workspaceId,
+          source,
+          paths,
+          selectedDraft.attachments.map((attachment) => attachment.id),
+        )
+        applyAttachmentRegistration(workspaceId, response)
+      } catch {
+        setNotice({
+          tone: "error",
+          message: "CODEX-ATTACHMENT-REGISTER-FAILED",
+        })
+      }
+    },
+    [
+      adapter,
+      adapterReady,
+      applyAttachmentRegistration,
+      selectedDraft.attachments,
+      selectedWorkspace,
+    ],
   )
 
   const removeAttachment = useCallback(
@@ -396,10 +563,73 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     setTurnState("stopping")
     try {
       await adapter.stopTurn(selectedWorkspace.id)
-    } finally {
+    } catch {
       setTurnState("idle")
+      setNotice({ tone: "error", message: "CODEX-INTERRUPT-FAILED" })
     }
   }, [adapter, adapterReady, selectedWorkspace, turnState])
+
+  const answerDecision = useCallback(
+    async (
+      request: PendingRequestView,
+      answers: Readonly<Record<string, readonly string[]>>,
+    ) => {
+      if (!selectedWorkspace || request.kind !== "user_input") return false
+      try {
+        const accepted =
+          request.responseKind === "fallback_decision"
+            ? await adapter?.answerFallbackDecision?.({
+                workspaceId: selectedWorkspace.id,
+                decisionHandle: request.pendingId,
+                optionId: answers[request.questions[0].id]?.[0] ?? "",
+              })
+            : await adapter?.respondPending?.({
+                workspaceId: selectedWorkspace.id,
+                pendingId: request.pendingId,
+                response: { type: "user_input", answers },
+              })
+        if (accepted !== true) {
+          setNotice({
+            tone: "error",
+            message: "CODEX-DECISION-RESPONSE-REJECTED",
+          })
+          return false
+        }
+        setNotice(null)
+        return true
+      } catch {
+        setNotice({ tone: "error", message: "CODEX-DECISION-RESPONSE-FAILED" })
+        return false
+      }
+    },
+    [adapter, selectedWorkspace],
+  )
+
+  const answerApproval = useCallback(
+    async (request: PendingRequestView, decision: ApprovalDecision) => {
+      if (!selectedWorkspace || request.kind === "user_input") return false
+      try {
+        const accepted = await adapter?.respondPending?.({
+          workspaceId: selectedWorkspace.id,
+          pendingId: request.pendingId,
+          response: { type: "approval", decision },
+        })
+        if (accepted !== true) {
+          setNotice({
+            tone: "error",
+            message: "CODEX-APPROVAL-RESPONSE-REJECTED",
+          })
+          return false
+        }
+        setNotice(null)
+        return true
+      } catch {
+        setNotice({ tone: "error", message: "CODEX-APPROVAL-RESPONSE-FAILED" })
+        return false
+      }
+    },
+    [adapter, selectedWorkspace],
+  )
 
   const addWorkspace = useCallback(
     async (name: string, goal: string) => {
@@ -557,17 +787,22 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     activeTab,
     adapter,
     adapterStatus,
-    addAttachments,
+    addAttachmentFiles,
     addWorkspace,
+    answerApproval,
+    answerDecision,
     captureContext,
     characterHidden,
+    codex,
     deleteSelectedWorkspaceHistory,
     filteredWorkspaces,
     filter,
     muted,
     notice,
+    pickAttachments,
     history,
     reducedMotion,
+    registerAttachmentPaths,
     removeAttachment,
     removeContext,
     requestAddProject,
@@ -589,7 +824,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     setSettingsSection,
     settingsSection,
     stopTurn,
-    timeline,
+    timeline: combinedTimeline,
     turnState,
     workspaces,
   }

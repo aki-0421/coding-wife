@@ -417,7 +417,16 @@ export class CodexEventProjector {
           history: history(
             event,
             approval ? "code.approval.requested" : "code.decision.requested",
-            { request },
+            {
+              pendingId: request.pendingId,
+              responseKind: request.responseKind,
+              requestKind: request.kind,
+              operation: request.operation,
+              targetAlias: request.targetAlias,
+              questionCount: request.questions.length,
+              risk: request.approvalContext?.risk ?? null,
+              reversibility: request.approvalContext?.reversibility ?? null,
+            },
           ),
         }
       }

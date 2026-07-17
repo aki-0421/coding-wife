@@ -43,6 +43,13 @@ interface ComposerProps {
   ) => void | Promise<void>
   readonly onDraftChange: (value: string) => void
   readonly onEffortChange: (effort: ReasoningEffort) => void
+  readonly onPickAttachments?: (() => void | Promise<void>) | undefined
+  readonly onRegisterAttachmentPaths?:
+    | ((
+        source: "drop" | "paste",
+        paths: readonly string[],
+      ) => void | Promise<void>)
+    | undefined
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onRemoveContext: (snapshotId: string) => void
   readonly onSend: () => Promise<boolean>
@@ -61,6 +68,28 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MiB`
 }
 
+function fileSystemPaths(files: FileList | readonly File[]): string[] {
+  return Array.from(files).flatMap((file) => {
+    const path = (file as File & { readonly path?: unknown }).path
+    return typeof path === "string" && path.length > 0 ? [path] : []
+  })
+}
+
+function clipboardFilePaths(data: DataTransfer): string[] {
+  const paths = fileSystemPaths(data.files)
+  const uriList = data.getData("text/uri-list")
+  for (const line of uriList.split(/\r?\n/u)) {
+    if (line.length === 0 || line.startsWith("#")) continue
+    try {
+      const url = new URL(line)
+      if (url.protocol === "file:") paths.push(decodeURIComponent(url.pathname))
+    } catch {
+      // Non-file clipboard text remains composer text.
+    }
+  }
+  return [...new Set(paths)]
+}
+
 export function Composer({
   connected,
   copy,
@@ -70,6 +99,8 @@ export function Composer({
   onCaptureContext,
   onDraftChange,
   onEffortChange,
+  onPickAttachments,
+  onRegisterAttachmentPaths,
   onRemoveAttachment,
   onRemoveContext,
   onSend,
@@ -94,6 +125,11 @@ export function Composer({
 
   const addDroppedFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return
+    const paths = fileSystemPaths(files)
+    if (onRegisterAttachmentPaths !== undefined) {
+      if (paths.length > 0) void onRegisterAttachmentPaths("drop", paths)
+      return
+    }
     onAddAttachments(Array.from(files))
   }
 
@@ -182,6 +218,14 @@ export function Composer({
               }
             }}
             onPaste={(event) => {
+              if (onRegisterAttachmentPaths !== undefined) {
+                const paths = clipboardFilePaths(event.clipboardData)
+                if (paths.length > 0) {
+                  event.preventDefault()
+                  void onRegisterAttachmentPaths("paste", paths)
+                }
+                return
+              }
               const files = Array.from(event.clipboardData.files)
               if (files.length > 0) onAddAttachments(files)
             }}
@@ -202,7 +246,13 @@ export function Composer({
         <div className="flex min-h-8 flex-wrap items-end gap-xs pt-sm">
           <Button
             disabled={turnState === "sending" || turnState === "stopping"}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (onPickAttachments !== undefined) {
+                void onPickAttachments()
+              } else {
+                fileInputRef.current?.click()
+              }
+            }}
             size="xs"
             type="button"
             variant="outline"

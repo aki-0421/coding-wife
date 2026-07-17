@@ -74,7 +74,8 @@ export function projectWorkspaceState(
       id: event.eventId,
       sequence: event.sequence,
       producer: event.producer,
-      kind: event.kind,
+      kind: "history",
+      domainKind: event.kind,
       occurredAt: event.occurredAt,
       ...timelineStatus(event.payload),
     })),
@@ -262,7 +263,7 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
   }
 }
 
-export function createWorkspaceViewAdapter(
+export function createPersistentWorkspaceViewAdapter(
   runtimeKind: "tauri" | "demo",
 ): WorkspaceViewAdapter {
   const transport =

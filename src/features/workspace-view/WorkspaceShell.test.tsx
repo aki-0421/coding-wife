@@ -275,7 +275,8 @@ describe("WorkspaceShell", () => {
           id: "event-restored",
           sequence: 9,
           producer: "code",
-          kind: "code.session.status.changed",
+          kind: "history",
+          domainKind: "code.session.status.changed",
           occurredAt: "2026-07-18T00:00:45.000Z",
           status: "failed",
           errorCode: "CODEX-TURN-FAILED",
@@ -669,6 +670,6 @@ describe("WorkspaceShell", () => {
     const stop = await screen.findByRole("button", { name: "Stop" })
     fireEvent.click(stop)
     expect(stoppedWorkspaceIds).toEqual(["build-live2d-desktop-app"])
-    expect(await screen.findByRole("button", { name: "Send" })).toBeDisabled()
+    expect(await screen.findByRole("button", { name: "Stop" })).toBeDisabled()
   })
 })

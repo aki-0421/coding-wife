@@ -46,6 +46,19 @@ function eventStatus(
   return event.status.replaceAll("_", " ")
 }
 
+function eventSequence(event: WorkspaceTimelineItem): number {
+  return event.kind === "history" ? event.sequence : event.sourceSequence
+}
+
+function eventCode(event: WorkspaceTimelineItem): string | undefined {
+  if (event.kind === "history") return event.errorCode
+  return event.kind === "error" ? event.errorCode : undefined
+}
+
+function eventLabel(event: WorkspaceTimelineItem): string {
+  return event.kind === "history" ? event.domainKind : event.kind
+}
+
 function TimelineEventRow({
   copy,
   event,
@@ -54,7 +67,8 @@ function TimelineEventRow({
   readonly event: WorkspaceTimelineItem
 }) {
   const { locale } = useI18n()
-  const failed = event.status === "failed" || event.errorCode !== undefined
+  const errorCode = eventCode(event)
+  const failed = event.status === "failed" || errorCode !== undefined
   const completed = event.status === "completed" || event.status === "done"
   const Icon = failed
     ? CircleXIcon
@@ -68,7 +82,7 @@ function TimelineEventRow({
 
   return (
     <article
-      aria-posinset={event.sequence}
+      aria-posinset={eventSequence(event)}
       className="grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-sm rounded-control px-xs py-sm hover:bg-muted"
       data-event-kind={event.kind}
     >
@@ -86,12 +100,12 @@ function TimelineEventRow({
             {eventStatus(copy, event)}
           </span>
           <code className="max-w-full truncate rounded-control bg-code-chip px-xs py-xxs font-mono text-label text-text-secondary">
-            {event.kind}
+            {eventLabel(event)}
           </code>
         </div>
-        {event.errorCode ? (
+        {errorCode ? (
           <p className="m-0 mt-xxs font-mono text-label text-destructive">
-            {event.errorCode}
+            {errorCode}
           </p>
         ) : null}
       </div>

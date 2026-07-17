@@ -4,6 +4,7 @@ import {
   WorkspaceHistoryContractError,
   parseAppendDomainEventResponse,
   parsePersistedContextSnapshot,
+  parsePersistedTimelineEvent,
   parsePersistedTimelinePage,
   parsePersistedWorkspaceDraft,
   parsePersistedWorkspaceSummary,
@@ -149,6 +150,35 @@ describe("workspace history contract", () => {
             payload: { status: "failed", reasoning: "hidden" },
           },
         ],
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
+  })
+
+  it("parses only the exact rich Codex history allowlist", () => {
+    const event = {
+      ...fixture.timeline.items[0],
+      eventId: "event-codex-tool",
+      producer: "code",
+      kind: "code.tool.output",
+      payload: {
+        generation: 7,
+        sourceSequence: 12,
+        itemHandle: "item-safe",
+        excerpt: "Tests passed",
+      },
+    }
+
+    expect(parsePersistedTimelineEvent(event)).toEqual(event)
+    expect(() =>
+      parsePersistedTimelineEvent({
+        ...event,
+        payload: { ...event.payload, rawStderr: "not allowed" },
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
+    expect(() =>
+      parsePersistedTimelineEvent({
+        ...event,
+        payload: { ...event.payload, excerpt: "x".repeat(16 * 1024 + 1) },
       }),
     ).toThrow(WorkspaceHistoryContractError)
   })

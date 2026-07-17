@@ -1312,12 +1312,17 @@ fn validate_event_shape(
             }
         }
         ("code", "code.session.status.changed") => {
-            if !exact(&["status"], &[])
-                || !matches!(
+            let legacy = exact(&["status"], &[])
+                && matches!(
                     object.get("status").and_then(Value::as_str),
                     Some("idle" | "running" | "waiting" | "interrupted" | "failed" | "completed")
-                )
-            {
+                );
+            if !legacy && !validate_codex_history_event(kind, object) {
+                return Err(history_error("HIST-EVENT-PAYLOAD", false));
+            }
+        }
+        ("code", kind) => {
+            if !validate_codex_history_event(kind, object) {
                 return Err(history_error("HIST-EVENT-PAYLOAD", false));
             }
         }
@@ -1357,6 +1362,190 @@ fn validate_event_shape(
         _ => return Err(history_error("HIST-EVENT-KIND", false)),
     }
     Ok(())
+}
+
+fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Value>) -> bool {
+    let exact = |fields: &[&str]| {
+        let required = ["generation", "sourceSequence"]
+            .into_iter()
+            .chain(fields.iter().copied())
+            .collect::<Vec<_>>();
+        required.iter().all(|key| object.contains_key(*key))
+            && object.keys().all(|key| required.contains(&key.as_str()))
+    };
+    let bounded_string = |key: &str, maximum: usize, allow_empty: bool| {
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| {
+                (allow_empty || !value.trim().is_empty())
+                    && value.chars().count() <= maximum
+                    && !value.chars().any(char::is_control)
+            })
+    };
+    let unsigned = |key: &str, maximum: u64| {
+        object
+            .get(key)
+            .and_then(Value::as_u64)
+            .is_some_and(|value| value <= maximum)
+    };
+    let one_of = |key: &str, values: &[&str]| {
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| values.contains(&value))
+    };
+    let base = unsigned("generation", u64::MAX)
+        && object
+            .get("generation")
+            .and_then(Value::as_u64)
+            .is_some_and(|value| value > 0)
+        && unsigned("sourceSequence", u64::MAX);
+    if !base {
+        return false;
+    }
+
+    match kind {
+        "code.thread.status.changed" => {
+            exact(&["threadHandle", "status"])
+                && bounded_string("threadHandle", 128, false)
+                && one_of("status", &["active", "idle", "systemError", "notLoaded"])
+        }
+        "code.session.status.changed" => {
+            exact(&["threadHandle", "turnHandle", "status"])
+                && bounded_string("threadHandle", 128, false)
+                && bounded_string("turnHandle", 128, false)
+                && one_of(
+                    "status",
+                    &[
+                        "running",
+                        "inProgress",
+                        "waiting",
+                        "interrupted",
+                        "failed",
+                        "completed",
+                        "canceled",
+                    ],
+                )
+        }
+        "code.user.instruction.accepted" => {
+            exact(&["text", "effort", "attachmentCount"])
+                && bounded_string("text", 64 * 1024, true)
+                && one_of("effort", &["low", "max"])
+                && unsigned("attachmentCount", 10)
+        }
+        "code.item.status.changed" => {
+            exact(&["itemHandle", "itemType", "status"])
+                && bounded_string("itemHandle", 128, false)
+                && one_of(
+                    "itemType",
+                    &[
+                        "agentMessage",
+                        "commandExecution",
+                        "fileChange",
+                        "mcpToolCall",
+                        "webSearch",
+                        "plan",
+                        "userMessage",
+                        "enteredReviewMode",
+                        "exitedReviewMode",
+                        "contextCompaction",
+                    ],
+                )
+                && one_of("status", &["running", "completed"])
+        }
+        "code.message.completed" => {
+            exact(&["itemHandle", "text"])
+                && bounded_string("itemHandle", 128, false)
+                && bounded_string("text", 64 * 1024, true)
+        }
+        "code.plan.updated" => exact(&["stepCount"]) && unsigned("stepCount", 1_000),
+        "code.diff.updated" => {
+            exact(&["byteCount", "detailRef"])
+                && unsigned("byteCount", 1024 * 1024)
+                && bounded_string("detailRef", 128, false)
+        }
+        "code.tool.output" => {
+            exact(&["itemHandle", "excerpt"])
+                && bounded_string("itemHandle", 128, false)
+                && bounded_string("excerpt", 16 * 1024, true)
+        }
+        "code.file_change.updated" => {
+            exact(&["itemHandle", "pathAlias", "changeKind"])
+                && bounded_string("itemHandle", 128, false)
+                && bounded_string("pathAlias", 512, false)
+                && one_of("changeKind", &["create", "update", "delete", "unknown"])
+        }
+        "code.decision.requested" | "code.approval.requested" => {
+            exact(&[
+                "pendingId",
+                "responseKind",
+                "requestKind",
+                "operation",
+                "targetAlias",
+                "questionCount",
+                "risk",
+                "reversibility",
+            ]) && bounded_string("pendingId", 128, false)
+                && one_of(
+                    "responseKind",
+                    &["native_server_request", "fallback_decision"],
+                )
+                && one_of(
+                    "requestKind",
+                    &[
+                        "command_approval",
+                        "file_change_approval",
+                        "permissions_approval",
+                        "user_input",
+                    ],
+                )
+                && bounded_string("operation", 128, false)
+                && bounded_string("targetAlias", 256, false)
+                && unsigned("questionCount", 3)
+                && object.get("risk").is_some_and(|value| {
+                    value.is_null()
+                        || value
+                            .as_str()
+                            .is_some_and(|value| ["low", "medium", "high"].contains(&value))
+                })
+                && object.get("reversibility").is_some_and(|value| {
+                    value.is_null()
+                        || value.as_str().is_some_and(|value| {
+                            [
+                                "reversible",
+                                "partially_reversible",
+                                "not_reversible",
+                                "unknown",
+                            ]
+                            .contains(&value)
+                        })
+                })
+        }
+        "code.pending.resolved" => {
+            exact(&["pendingId", "status"])
+                && bounded_string("pendingId", 128, false)
+                && one_of("status", &["accepted", "expired", "failed"])
+        }
+        "code.session.diagnostic" => {
+            exact(&["code", "willRetry", "detailRef"])
+                && bounded_string("code", 128, false)
+                && object.get("willRetry").is_some_and(Value::is_boolean)
+                && bounded_string("detailRef", 128, false)
+        }
+        "code.model.violation" => {
+            exact(&["fromModel", "toModel"])
+                && bounded_string("fromModel", 128, false)
+                && bounded_string("toModel", 128, false)
+        }
+        "code.protocol.unsupported" => {
+            exact(&["methodHash", "byteCount", "detailRef"])
+                && bounded_string("methodHash", 128, false)
+                && unsigned("byteCount", 1024 * 1024)
+                && bounded_string("detailRef", 128, false)
+        }
+        _ => false,
+    }
 }
 
 fn sanitize_json(
@@ -2004,6 +2193,119 @@ mod tests {
         assert_eq!(
             store.append_event(&cross_workspace_event).unwrap_err().code,
             "HIST-EVENT-SESSION-WORKSPACE"
+        );
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn rich_codex_events_use_an_exact_bounded_allowlist_and_are_redacted() {
+        let data = temp_directory("history-codex-events");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let workspace = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace;
+        let events = [
+            (
+                "code.thread.status.changed",
+                json!({"generation": 1, "sourceSequence": 1, "threadHandle": "thread-safe", "status": "active"}),
+            ),
+            (
+                "code.session.status.changed",
+                json!({"generation": 1, "sourceSequence": 2, "threadHandle": "thread-safe", "turnHandle": "turn-safe", "status": "running"}),
+            ),
+            (
+                "code.user.instruction.accepted",
+                json!({"generation": 1, "sourceSequence": 3, "text": "Inspect /Users/private/secret.txt", "effort": "low", "attachmentCount": 1}),
+            ),
+            (
+                "code.item.status.changed",
+                json!({"generation": 1, "sourceSequence": 4, "itemHandle": "item-safe", "itemType": "commandExecution", "status": "running"}),
+            ),
+            (
+                "code.message.completed",
+                json!({"generation": 1, "sourceSequence": 5, "itemHandle": "item-message", "text": "Done"}),
+            ),
+            (
+                "code.plan.updated",
+                json!({"generation": 1, "sourceSequence": 6, "stepCount": 3}),
+            ),
+            (
+                "code.diff.updated",
+                json!({"generation": 1, "sourceSequence": 7, "byteCount": 42, "detailRef": "detail-diff"}),
+            ),
+            (
+                "code.tool.output",
+                json!({"generation": 1, "sourceSequence": 8, "itemHandle": "item-tool", "excerpt": "checks passed"}),
+            ),
+            (
+                "code.file_change.updated",
+                json!({"generation": 1, "sourceSequence": 9, "itemHandle": "item-file", "pathAlias": "project/src/main.rs", "changeKind": "update"}),
+            ),
+            (
+                "code.decision.requested",
+                json!({"generation": 1, "sourceSequence": 10, "pendingId": "pending-decision", "responseKind": "fallback_decision", "requestKind": "user_input", "operation": "decision/fallback", "targetAlias": "current turn", "questionCount": 1, "risk": null, "reversibility": null}),
+            ),
+            (
+                "code.approval.requested",
+                json!({"generation": 1, "sourceSequence": 11, "pendingId": "pending-approval", "responseKind": "native_server_request", "requestKind": "command_approval", "operation": "item/commandExecution/requestApproval", "targetAlias": "project command", "questionCount": 0, "risk": "medium", "reversibility": "reversible"}),
+            ),
+            (
+                "code.pending.resolved",
+                json!({"generation": 1, "sourceSequence": 12, "pendingId": "pending-approval", "status": "accepted"}),
+            ),
+            (
+                "code.session.diagnostic",
+                json!({"generation": 1, "sourceSequence": 13, "code": "CODEX-WARNING", "willRetry": true, "detailRef": "detail-warning"}),
+            ),
+            (
+                "code.model.violation",
+                json!({"generation": 1, "sourceSequence": 14, "fromModel": "unexpected", "toModel": "gpt-5.6-sol"}),
+            ),
+            (
+                "code.protocol.unsupported",
+                json!({"generation": 1, "sourceSequence": 15, "methodHash": "method-deadbeef", "byteCount": 24, "detailRef": "detail-protocol"}),
+            ),
+        ];
+
+        for (index, (kind, payload)) in events.into_iter().enumerate() {
+            store
+                .append_event(&NormalizedDomainEvent {
+                    schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+                    event_id: format!("event-codex-{index}"),
+                    workspace_id: workspace.workspace_id.clone(),
+                    session_id: None,
+                    producer: "code".to_owned(),
+                    kind: kind.to_owned(),
+                    occurred_at: format!("2026-07-18T00:00:{index:02}.000Z"),
+                    payload,
+                })
+                .expect("allowed Codex event");
+        }
+
+        let timeline = store
+            .timeline(&workspace.workspace_id, None, 200, None)
+            .expect("timeline");
+        let encoded = serde_json::to_string(&timeline).expect("timeline JSON");
+        assert!(!encoded.contains("/Users/private"));
+        assert!(encoded.contains("code.approval.requested"));
+
+        let rejected = NormalizedDomainEvent {
+            schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+            event_id: "event-codex-invalid".to_owned(),
+            workspace_id: workspace.workspace_id,
+            session_id: None,
+            producer: "code".to_owned(),
+            kind: "code.tool.output".to_owned(),
+            occurred_at: "2026-07-18T00:01:00.000Z".to_owned(),
+            payload: json!({"generation": 1, "sourceSequence": 16, "itemHandle": "item-tool", "excerpt": "ok", "rawStderr": "forbidden"}),
+        };
+        assert_eq!(
+            store.append_event(&rejected).unwrap_err().code,
+            "HIST-EVENT-FORBIDDEN-FIELD"
         );
 
         let _ = fs::remove_dir_all(data);

@@ -79,7 +79,21 @@ export interface PersistedTimelineEvent {
   readonly kind:
     | "app.runtime.changed"
     | "work.workspace.lifecycle.changed"
+    | "code.thread.status.changed"
     | "code.session.status.changed"
+    | "code.user.instruction.accepted"
+    | "code.item.status.changed"
+    | "code.message.completed"
+    | "code.plan.updated"
+    | "code.diff.updated"
+    | "code.tool.output"
+    | "code.file_change.updated"
+    | "code.decision.requested"
+    | "code.approval.requested"
+    | "code.pending.resolved"
+    | "code.session.diagnostic"
+    | "code.model.violation"
+    | "code.protocol.unsupported"
     | "live.renderer.status.changed"
     | "hist.writer.status.changed"
     | "git.checkpoint.status.changed"
@@ -478,6 +492,218 @@ export function parsePersistedContextSnapshot(
   }
 }
 
+const codexHistoryBaseKeys = ["generation", "sourceSequence"] as const
+
+function isPublicText(value: unknown, maximum: number): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= maximum &&
+    !value.includes("\0") &&
+    !containsPrivateMaterial(value)
+  )
+}
+
+function hasCodexHistoryShape(
+  payload: Readonly<Record<string, unknown>>,
+  required: readonly string[],
+): boolean {
+  return (
+    hasExactKeys(payload, [...codexHistoryBaseKeys, ...required]) &&
+    isSafeUnsignedInteger(payload.generation) &&
+    payload.generation > 0 &&
+    isSafeUnsignedInteger(payload.sourceSequence)
+  )
+}
+
+function parseCodexHistoryPayload(
+  kind: unknown,
+  payload: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> | null {
+  if (
+    kind === "code.thread.status.changed" &&
+    hasCodexHistoryShape(payload, ["threadHandle", "status"]) &&
+    validatePublicString(payload.threadHandle, 128) &&
+    oneOf(payload.status, [
+      "active",
+      "idle",
+      "systemError",
+      "notLoaded",
+    ] as const)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.session.status.changed" &&
+    hasCodexHistoryShape(payload, ["threadHandle", "turnHandle", "status"]) &&
+    validatePublicString(payload.threadHandle, 128) &&
+    validatePublicString(payload.turnHandle, 128) &&
+    oneOf(payload.status, [
+      "running",
+      "inProgress",
+      "waiting",
+      "interrupted",
+      "failed",
+      "completed",
+      "canceled",
+    ] as const)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.user.instruction.accepted" &&
+    hasCodexHistoryShape(payload, ["text", "effort", "attachmentCount"]) &&
+    isPublicText(payload.text, 64 * 1024) &&
+    oneOf(payload.effort, ["low", "max"] as const) &&
+    isSafeUnsignedInteger(payload.attachmentCount) &&
+    payload.attachmentCount <= 10
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.item.status.changed" &&
+    hasCodexHistoryShape(payload, ["itemHandle", "itemType", "status"]) &&
+    validatePublicString(payload.itemHandle, 128) &&
+    oneOf(payload.itemType, [
+      "agentMessage",
+      "commandExecution",
+      "fileChange",
+      "mcpToolCall",
+      "webSearch",
+      "plan",
+      "userMessage",
+      "enteredReviewMode",
+      "exitedReviewMode",
+      "contextCompaction",
+    ] as const) &&
+    oneOf(payload.status, ["running", "completed"] as const)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.message.completed" &&
+    hasCodexHistoryShape(payload, ["itemHandle", "text"]) &&
+    validatePublicString(payload.itemHandle, 128) &&
+    isPublicText(payload.text, 64 * 1024)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.plan.updated" &&
+    hasCodexHistoryShape(payload, ["stepCount"]) &&
+    isSafeUnsignedInteger(payload.stepCount) &&
+    payload.stepCount <= 1_000
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.diff.updated" &&
+    hasCodexHistoryShape(payload, ["byteCount", "detailRef"]) &&
+    isSafeUnsignedInteger(payload.byteCount) &&
+    payload.byteCount <= 1024 * 1024 &&
+    validatePublicString(payload.detailRef, 128)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.tool.output" &&
+    hasCodexHistoryShape(payload, ["itemHandle", "excerpt"]) &&
+    validatePublicString(payload.itemHandle, 128) &&
+    isPublicText(payload.excerpt, 16 * 1024)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.file_change.updated" &&
+    hasCodexHistoryShape(payload, ["itemHandle", "pathAlias", "changeKind"]) &&
+    validatePublicString(payload.itemHandle, 128) &&
+    validatePublicString(payload.pathAlias, 512) &&
+    oneOf(payload.changeKind, [
+      "create",
+      "update",
+      "delete",
+      "unknown",
+    ] as const)
+  ) {
+    return { ...payload }
+  }
+  if (
+    (kind === "code.decision.requested" ||
+      kind === "code.approval.requested") &&
+    hasCodexHistoryShape(payload, [
+      "pendingId",
+      "responseKind",
+      "requestKind",
+      "operation",
+      "targetAlias",
+      "questionCount",
+      "risk",
+      "reversibility",
+    ]) &&
+    validatePublicString(payload.pendingId, 128) &&
+    oneOf(payload.responseKind, [
+      "native_server_request",
+      "fallback_decision",
+    ] as const) &&
+    oneOf(payload.requestKind, [
+      "command_approval",
+      "file_change_approval",
+      "permissions_approval",
+      "user_input",
+    ] as const) &&
+    validatePublicString(payload.operation, 128) &&
+    validatePublicString(payload.targetAlias, 256) &&
+    isSafeUnsignedInteger(payload.questionCount) &&
+    payload.questionCount <= 3 &&
+    (payload.risk === null ||
+      oneOf(payload.risk, ["low", "medium", "high"] as const)) &&
+    (payload.reversibility === null ||
+      oneOf(payload.reversibility, [
+        "reversible",
+        "partially_reversible",
+        "not_reversible",
+        "unknown",
+      ] as const))
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.pending.resolved" &&
+    hasCodexHistoryShape(payload, ["pendingId", "status"]) &&
+    validatePublicString(payload.pendingId, 128) &&
+    oneOf(payload.status, ["accepted", "expired", "failed"] as const)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.session.diagnostic" &&
+    hasCodexHistoryShape(payload, ["code", "willRetry", "detailRef"]) &&
+    validatePublicString(payload.code, 128) &&
+    typeof payload.willRetry === "boolean" &&
+    validatePublicString(payload.detailRef, 128)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.model.violation" &&
+    hasCodexHistoryShape(payload, ["fromModel", "toModel"]) &&
+    validatePublicString(payload.fromModel, 128) &&
+    validatePublicString(payload.toModel, 128)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.protocol.unsupported" &&
+    hasCodexHistoryShape(payload, ["methodHash", "byteCount", "detailRef"]) &&
+    validatePublicString(payload.methodHash, 128) &&
+    isSafeUnsignedInteger(payload.byteCount) &&
+    payload.byteCount <= 1024 * 1024 &&
+    validatePublicString(payload.detailRef, 128)
+  ) {
+    return { ...payload }
+  }
+  return null
+}
+
 function parseEventPayload(
   producer: unknown,
   kind: unknown,
@@ -488,6 +714,16 @@ function parseEventPayload(
   readonly payload: Readonly<Record<string, unknown>>
 } {
   if (!isRecord(payload)) return violation()
+  if (producer === "code") {
+    const codexPayload = parseCodexHistoryPayload(kind, payload)
+    if (codexPayload !== null) {
+      return {
+        producer,
+        kind: kind as PersistedTimelineEvent["kind"],
+        payload: codexPayload,
+      }
+    }
+  }
   if (
     producer === "app" &&
     kind === "app.runtime.changed" &&

@@ -82,19 +82,22 @@ export function WorkspaceShell({
     getSystemReducedMotion,
   )
 
-  const connected =
-    adapter?.connected === true && runtime.state.status === "ready"
+  const connected = view.codex.connected && runtime.state.status === "ready"
   const connection: HeaderConnectionState =
-    runtime.state.status === "loading"
+    runtime.state.status === "loading" || view.codex.phase === "connecting"
       ? "checking"
       : runtime.state.status === "error"
         ? "offline"
-        : connected
-          ? "ready"
-          : "preview"
+        : adapter?.hydrationMode === "demo" || adapter === undefined
+          ? "preview"
+          : connected
+            ? "ready"
+            : "offline"
   const reducedMotion =
     view.reducedMotion === "reduce" ||
     (view.reducedMotion === "system" && systemReducedMotion)
+  const activeTab = view.activeTab
+  const registerAttachmentPaths = view.registerAttachmentPaths
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return
@@ -104,6 +107,38 @@ export function WorkspaceShell({
     media.addEventListener("change", update)
     return () => media.removeEventListener("change", update)
   }, [])
+
+  useEffect(() => {
+    if (
+      adapter?.hydrationMode !== "native" ||
+      adapter.registerAttachmentPaths === undefined
+    ) {
+      return
+    }
+    let active = true
+    let unlisten: (() => void) | undefined
+    void import("@tauri-apps/api/webview")
+      .then(({ getCurrentWebview }) =>
+        getCurrentWebview().onDragDropEvent((event) => {
+          if (
+            active &&
+            activeTab === "chat" &&
+            event.payload.type === "drop"
+          ) {
+            void registerAttachmentPaths("drop", event.payload.paths)
+          }
+        }),
+      )
+      .then((dispose) => {
+        if (active) unlisten = dispose
+        else dispose()
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+      unlisten?.()
+    }
+  }, [activeTab, adapter, registerAttachmentPaths])
 
   useEffect(() => {
     const handleKeyboard = (event: KeyboardEvent) => {
@@ -277,7 +312,7 @@ export function WorkspaceShell({
             draft={view.selectedDraft}
             history={view.history}
             muted={view.muted}
-            onAddAttachments={view.addAttachments}
+            onAddAttachments={view.addAttachmentFiles}
             onCaptureContext={(source) =>
               view.captureContext(source, copy.contextUnavailable)
             }
@@ -285,6 +320,16 @@ export function WorkspaceShell({
             onEffortChange={view.setEffort}
             onMutedChange={view.setMuted}
             onOpenDiagnostics={() => openSettings("diagnostics")}
+            onPickAttachments={
+              adapter?.pickAttachments === undefined
+                ? undefined
+                : view.pickAttachments
+            }
+            onRegisterAttachmentPaths={
+              adapter?.registerAttachmentPaths === undefined
+                ? undefined
+                : view.registerAttachmentPaths
+            }
             onRemoveAttachment={view.removeAttachment}
             onRemoveContext={view.removeContext}
             onRetryRuntime={runtime.refresh}
