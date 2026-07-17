@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-18T01:47:07+09:00",
+  "title": "Design System: Coding Wife",
+  "extensions": {
+    "colorMeta": {
+      "app-bg": {
+        "role": "neutral",
+        "displayName": "Continuous Desk",
+        "canonical": "oklch(19.77% 0.0038 48.5)",
+        "tonalRamp": ["oklch(15% 0.0038 48.5)", "oklch(25% 0.0038 48.5)", "oklch(35% 0.0038 48.5)", "oklch(45% 0.0038 48.5)", "oklch(55% 0.0038 48.5)", "oklch(70% 0.0038 48.5)", "oklch(83% 0.0038 48.5)", "oklch(95% 0.0038 48.5)"]
+      },
+      "sidebar": {
+        "role": "neutral",
+        "displayName": "Workspace Rail",
+        "canonical": "oklch(21.97% 0.0037 48.6)",
+        "tonalRamp": ["oklch(15% 0.0037 48.6)", "oklch(25% 0.0037 48.6)", "oklch(35% 0.0037 48.6)", "oklch(45% 0.0037 48.6)", "oklch(55% 0.0037 48.6)", "oklch(70% 0.0037 48.6)", "oklch(83% 0.0037 48.6)", "oklch(95% 0.0037 48.6)"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Working Surface",
+        "canonical": "oklch(24.11% 0.0036 48.6)",
+        "tonalRamp": ["oklch(15% 0.0036 48.6)", "oklch(25% 0.0036 48.6)", "oklch(35% 0.0036 48.6)", "oklch(45% 0.0036 48.6)", "oklch(55% 0.0036 48.6)", "oklch(70% 0.0036 48.6)", "oklch(83% 0.0036 48.6)", "oklch(95% 0.0036 48.6)"]
+      },
+      "selected-row": {
+        "role": "neutral",
+        "displayName": "Selected Row",
+        "canonical": "oklch(28.27% 0.0035 48.6)",
+        "tonalRamp": ["oklch(15% 0.0035 48.6)", "oklch(25% 0.0035 48.6)", "oklch(35% 0.0035 48.6)", "oklch(45% 0.0035 48.6)", "oklch(55% 0.0035 48.6)", "oklch(70% 0.0035 48.6)", "oklch(83% 0.0035 48.6)", "oklch(95% 0.0035 48.6)"]
+      },
+      "code-chip": {
+        "role": "neutral",
+        "displayName": "Code Chip",
+        "canonical": "oklch(27.11% 0.0058 56.1)",
+        "tonalRamp": ["oklch(15% 0.0058 56.1)", "oklch(25% 0.0058 56.1)", "oklch(35% 0.0058 56.1)", "oklch(45% 0.0058 56.1)", "oklch(55% 0.0058 56.1)", "oklch(70% 0.0058 56.1)", "oklch(83% 0.0058 56.1)", "oklch(95% 0.0058 56.1)"]
+      },
+      "divider": {
+        "role": "neutral",
+        "displayName": "Quiet Divider",
+        "canonical": "oklch(29.96% 0.0056 56.2)",
+        "tonalRamp": ["oklch(15% 0.0056 56.2)", "oklch(25% 0.0056 56.2)", "oklch(35% 0.0056 56.2)", "oklch(45% 0.0056 56.2)", "oklch(55% 0.0056 56.2)", "oklch(70% 0.0056 56.2)", "oklch(83% 0.0056 56.2)", "oklch(95% 0.0056 56.2)"]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Primary Copy",
+        "canonical": "oklch(87.11% 0.0055 286.3)",
+        "tonalRamp": ["oklch(15% 0.0055 286.3)", "oklch(25% 0.0055 286.3)", "oklch(35% 0.0055 286.3)", "oklch(45% 0.0055 286.3)", "oklch(55% 0.0055 286.3)", "oklch(70% 0.0055 286.3)", "oklch(83% 0.0055 286.3)", "oklch(95% 0.0055 286.3)"]
+      },
+      "text-strong": {
+        "role": "neutral",
+        "displayName": "Strong Copy",
+        "canonical": "oklch(96.74% 0.0013 286.4)",
+        "tonalRamp": ["oklch(15% 0.0013 286.4)", "oklch(25% 0.0013 286.4)", "oklch(35% 0.0013 286.4)", "oklch(45% 0.0013 286.4)", "oklch(55% 0.0013 286.4)", "oklch(70% 0.0013 286.4)", "oklch(83% 0.0013 286.4)", "oklch(95% 0.0013 286.4)"]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Secondary Copy",
+        "canonical": "oklch(70.57% 0.0144 286)",
+        "tonalRamp": ["oklch(15% 0.0144 286)", "oklch(25% 0.0144 286)", "oklch(35% 0.0144 286)", "oklch(45% 0.0144 286)", "oklch(55% 0.0144 286)", "oklch(70% 0.0144 286)", "oklch(83% 0.0144 286)", "oklch(95% 0.0144 286)"]
+      },
+      "text-muted-accessible": {
+        "role": "neutral",
+        "displayName": "Accessible Muted Copy",
+        "canonical": "oklch(62% 0.015 286)",
+        "tonalRamp": ["oklch(15% 0.015 286)", "oklch(25% 0.015 286)", "oklch(35% 0.015 286)", "oklch(45% 0.015 286)", "oklch(55% 0.015 286)", "oklch(70% 0.015 286)", "oklch(83% 0.015 286)", "oklch(95% 0.015 286)"]
+      },
+      "text-disabled": {
+        "role": "neutral",
+        "displayName": "Disabled Copy",
+        "canonical": "oklch(55.2% 0.0153 285.9)",
+        "tonalRamp": ["oklch(15% 0.0153 285.9)", "oklch(25% 0.0153 285.9)", "oklch(35% 0.0153 285.9)", "oklch(45% 0.0153 285.9)", "oklch(55% 0.0153 285.9)", "oklch(70% 0.0153 285.9)", "oklch(83% 0.0153 285.9)", "oklch(95% 0.0153 285.9)"]
+      },
+      "warm-active": {
+        "role": "primary",
+        "displayName": "Warm Active Rose",
+        "canonical": "oklch(78.37% 0.0411 45.7)",
+        "tonalRamp": ["oklch(15% 0.0411 45.7)", "oklch(25% 0.0411 45.7)", "oklch(35% 0.0411 45.7)", "oklch(45% 0.0411 45.7)", "oklch(55% 0.0411 45.7)", "oklch(70% 0.0411 45.7)", "oklch(83% 0.0411 45.7)", "oklch(95% 0.0411 45.7)"]
+      },
+      "branch-selected": {
+        "role": "secondary",
+        "displayName": "Branch Violet",
+        "canonical": "oklch(77.46% 0.1244 291)",
+        "tonalRamp": ["oklch(15% 0.1244 291)", "oklch(25% 0.1244 291)", "oklch(35% 0.1244 291)", "oklch(45% 0.1244 291)", "oklch(55% 0.1244 291)", "oklch(70% 0.1244 291)", "oklch(83% 0.1244 291)", "oklch(95% 0.1244 291)"]
+      },
+      "error": {
+        "role": "tertiary",
+        "displayName": "Evidence Red",
+        "canonical": "oklch(65.75% 0.185 21.5)",
+        "tonalRamp": ["oklch(15% 0.185 21.5)", "oklch(25% 0.185 21.5)", "oklch(35% 0.185 21.5)", "oklch(45% 0.185 21.5)", "oklch(55% 0.185 21.5)", "oklch(70% 0.185 21.5)", "oklch(83% 0.185 21.5)", "oklch(95% 0.185 21.5)"]
+      },
+      "success": {
+        "role": "tertiary",
+        "displayName": "Review Green",
+        "canonical": "#3bd677",
+        "tonalRamp": ["oklch(15% 0.16 145)", "oklch(25% 0.16 145)", "oklch(35% 0.16 145)", "oklch(45% 0.16 145)", "oklch(55% 0.16 145)", "oklch(70% 0.16 145)", "oklch(83% 0.16 145)", "oklch(95% 0.16 145)"]
+      },
+      "running": {
+        "role": "tertiary",
+        "displayName": "In-Progress Yellow",
+        "canonical": "#e5c400",
+        "tonalRamp": ["oklch(15% 0.16 95)", "oklch(25% 0.16 95)", "oklch(35% 0.16 95)", "oklch(45% 0.16 95)", "oklch(55% 0.16 95)", "oklch(70% 0.16 95)", "oklch(83% 0.16 95)", "oklch(95% 0.16 95)"]
+      },
+      "canceled": {
+        "role": "neutral",
+        "displayName": "Canceled Gray",
+        "canonical": "oklch(44.22% 0.0162 285.7)",
+        "tonalRamp": ["oklch(15% 0.0162 285.7)", "oklch(25% 0.0162 285.7)", "oklch(35% 0.0162 285.7)", "oklch(45% 0.0162 285.7)", "oklch(55% 0.0162 285.7)", "oklch(70% 0.0162 285.7)", "oklch(83% 0.0162 285.7)", "oklch(95% 0.0162 285.7)"]
+      },
+      "action-fill": {
+        "role": "primary",
+        "displayName": "Quiet Action Fill",
+        "canonical": "#d7d4d2",
+        "tonalRamp": ["oklch(15% 0.005 60)", "oklch(25% 0.005 60)", "oklch(35% 0.005 60)", "oklch(45% 0.005 60)", "oklch(55% 0.005 60)", "oklch(70% 0.005 60)", "oklch(83% 0.005 60)", "oklch(95% 0.005 60)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Workspace Breadcrumb", "purpose": "現在のprojectとworkspaceを示す最上位UI文字。" },
+      "headline": { "displayName": "Panel Heading", "purpose": "Workspacesと主要panel見出し。" },
+      "title": { "displayName": "Navigation Title", "purpose": "tab、status group、decision title。" },
+      "body": { "displayName": "Conversation Body", "purpose": "assistant messageと説明文。" },
+      "label": { "displayName": "Compact Label", "purpose": "24px control、menu、metadata。" },
+      "mono": { "displayName": "Evidence Mono", "purpose": "branch、command、SHA、path、shortcut。" },
+      "caption": { "displayName": "Readable Helper", "purpose": "helperとsecondary hintのアクセシブルな最小サイズ。" }
+    },
+    "shadows": [
+      { "name": "window-ambient", "value": "0 18.75px 37.5px -9px rgba(0, 0, 0, 0.25)", "purpose": "OS window previewまたはwindow-level visualだけ。" },
+      { "name": "composer-lift", "value": "0 9px 9px rgba(0, 0, 0, 0.18)", "purpose": "固定composerをtimelineから分離する。" },
+      { "name": "overlay-lift", "value": "0 9px 10.5px rgba(0, 0, 0, 0.42)", "purpose": "portalされたdropdown、popover、decision overlayだけ。" }
+    ],
+    "motion": [
+      { "name": "press", "value": "120ms cubic-bezier(0.25, 1, 0.5, 1)", "purpose": "button active feedback。" },
+      { "name": "state", "value": "150ms cubic-bezier(0.25, 1, 0.5, 1)", "purpose": "hover、selection、focusの標準遷移。" },
+      { "name": "overlay", "value": "200ms cubic-bezier(0.25, 1, 0.5, 1)", "purpose": "tab、popover、dropdownの出現。" },
+      { "name": "panel", "value": "250ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "sidebar collapseとcompanion縮退。" },
+      { "name": "reduced", "value": "80ms linear", "purpose": "reduced motion時のcrossfade。位置とscaleは動かさない。" }
+    ],
+    "breakpoints": [
+      { "name": "minimum-window", "value": "960px" },
+      { "name": "wide-workspace", "value": "1280px" },
+      { "name": "figma-reference", "value": "1470px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Send Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "有効なprompt、attachment、contextを送信する画面唯一のprimary action。",
+      "html": "<button class=\"ds-send\" type=\"button\">Send&nbsp;↗</button>",
+      "css": ".ds-send { height: 24px; padding: 4px 9px; border: 0; border-radius: 4.5px; background: #d7d4d2; color: #171514; font: 500 10.5px/1.5 Inter, 'Noto Sans JP', system-ui, sans-serif; transition: background 150ms cubic-bezier(.25,1,.5,1), transform 120ms cubic-bezier(.25,1,.5,1); } .ds-send:hover { background: #f4f4f5; } .ds-send:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-send:active { transform: translateY(1px); } .ds-send:disabled { background: #52525c; color: #898993; cursor: not-allowed; }"
+    },
+    {
+      "name": "Secondary Control",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "AddとContextに使う24px compact control。",
+      "html": "<button class=\"ds-secondary\" type=\"button\">+ Add</button>",
+      "css": ".ds-secondary { height: 24px; padding: 4px 9px; border: 1px solid #484340; border-radius: 4.5px; background: #211f1e; color: #d4d4d8; font: 500 10.5px/1.5 Inter, 'Noto Sans JP', system-ui, sans-serif; transition: background 150ms cubic-bezier(.25,1,.5,1), border-color 150ms cubic-bezier(.25,1,.5,1); } .ds-secondary:hover { background: #2b2928; border-color: #898993; } .ds-secondary:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-secondary:active { background: #292624; }"
+    },
+    {
+      "name": "Workspace Tabs",
+      "kind": "nav",
+      "refersTo": "tab-active",
+      "description": "同一workspace内のChat、Commit、Context、Settingsを切り替える二段header下段。",
+      "html": "<nav class=\"ds-tabs\" aria-label=\"Workspace views\"><button class=\"ds-tab ds-tab-active\">Chat</button><button class=\"ds-tab\">Commit</button><button class=\"ds-tab\">Context</button><button class=\"ds-tab\">Settings</button></nav>",
+      "css": ".ds-tabs { display: flex; align-items: stretch; height: 40.5px; gap: 18px; padding-left: 21px; border-bottom: 1px solid #302d2b; background: #211f1e; } .ds-tab { position: relative; padding: 0 3px; border: 0; background: transparent; color: #898993; font: 400 12px/40.5px Inter, 'Noto Sans JP', system-ui, sans-serif; } .ds-tab:hover { color: #d4d4d8; } .ds-tab:focus-visible { outline: 2px solid #d0b1a3; outline-offset: -2px; } .ds-tab-active { color: #f4f4f5; font-weight: 500; } .ds-tab-active::after { content: ''; position: absolute; right: 0; bottom: 0; left: 0; height: 1.5px; background: #d0b1a3; }"
+    },
+    {
+      "name": "Composer Field",
+      "kind": "input",
+      "refersTo": "composer-field",
+      "description": "prompt、attachment、context、effort、sendを一面へまとめる固定composer。",
+      "html": "<div class=\"ds-composer\"><textarea class=\"ds-composer-input\" aria-label=\"Prompt\" placeholder=\"Ask Codex to plan, build, explain, or fix anything…\"></textarea><p class=\"ds-composer-help\">Attach files or images · use @ to reference context</p></div>",
+      "css": ".ds-composer { width: 571.11px; min-height: 128.25px; padding: 12.75px; border: 1px solid #3a3633; border-radius: 9px; background: #211f1e; box-shadow: 0 9px 9px rgba(0,0,0,.18); } .ds-composer:focus-within { border-color: #d0b1a3; outline: 2px solid rgba(208,177,163,.35); outline-offset: 2px; } .ds-composer-input { display: block; width: 100%; min-height: 48px; resize: none; border: 0; outline: 0; background: transparent; color: #d4d4d8; font: 400 13.5px/21px Inter, 'Noto Sans JP', system-ui, sans-serif; } .ds-composer-input::placeholder { color: #898993; opacity: 1; } .ds-composer-help { margin: 0; color: #898993; font: 400 11px/16.5px Inter, 'Noto Sans JP', system-ui, sans-serif; }"
+    },
+    {
+      "name": "Selected Workspace Item",
+      "kind": "nav",
+      "refersTo": "workspace-selected",
+      "description": "repository、branch、lifecycleを49.5pxで示すsidebarの選択行。",
+      "html": "<button class=\"ds-workspace\" type=\"button\"><span class=\"ds-workspace-name\">coding-wife</span><span class=\"ds-workspace-branch\">build-live2d-desktop-app-v1</span></button>",
+      "css": ".ds-workspace { display: flex; width: 242.25px; height: 49.5px; flex-direction: column; justify-content: center; gap: 0; padding: 6px 9px 6px 30px; overflow: hidden; border: 0; border-radius: 4.5px; background: #2b2928; color: #f4f4f5; text-align: left; } .ds-workspace:hover { background: #302d2b; } .ds-workspace:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 1px; } .ds-workspace-name { overflow: hidden; font: 500 13.5px/20.25px Inter, 'Noto Sans JP', system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; } .ds-workspace-branch { overflow: hidden; color: #b6a7ff; font: 400 10.5px/15.75px 'JetBrains Mono', ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }"
+    },
+    {
+      "name": "Tool Event Chip",
+      "kind": "chip",
+      "refersTo": "code-chip",
+      "description": "terminalではなくread-onlyのtool execution summaryを展開・copyできるchip。",
+      "html": "<button class=\"ds-tool-chip\" type=\"button\">pnpm test --run</button>",
+      "css": ".ds-tool-chip { max-width: 360px; padding: 3px 6px; overflow: hidden; border: 0; border-radius: 4.5px; background: #292624; color: #9f9fa9; font: 400 10.5px/15.75px 'JetBrains Mono', ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; } .ds-tool-chip:hover { background: #302d2b; color: #d4d4d8; } .ds-tool-chip:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-tool-chip:active { background: #211f1e; }"
+    },
+    {
+      "name": "Decision Card",
+      "kind": "custom",
+      "refersTo": "decision-card",
+      "description": "why now、options、risk、reversibility、recommendationを一つのkeyboard-operable面へまとめる。",
+      "html": "<section class=\"ds-decision\"><h3 class=\"ds-decision-title\">変更範囲を選んでください</h3><p class=\"ds-decision-copy\">今決める理由: checkpointの所有範囲を確定します。</p><label class=\"ds-decision-option\"><input type=\"radio\" name=\"decision\" checked> 推奨範囲だけ変更</label><label class=\"ds-decision-option\"><input type=\"radio\" name=\"decision\"> 関連領域も変更</label></section>",
+      "css": ".ds-decision { padding: 15px; border: 1px solid #3a3633; border-radius: 9px; background: #211f1e; color: #d4d4d8; font-family: Inter, 'Noto Sans JP', system-ui, sans-serif; box-shadow: 0 9px 10.5px rgba(0,0,0,.42); } .ds-decision-title { margin: 0 0 6px; color: #f4f4f5; font-size: 13.5px; line-height: 20.25px; } .ds-decision-copy { margin: 0 0 9px; color: #9f9fa9; font-size: 13.5px; line-height: 21px; } .ds-decision-option { display: flex; min-height: 30px; align-items: center; gap: 9px; border-radius: 4.5px; font-size: 13.5px; } .ds-decision-option:hover { background: #2b2928; } .ds-decision-option:focus-within { outline: 2px solid #d0b1a3; outline-offset: 1px; } .ds-decision-option input { accent-color: #d0b1a3; }"
+    },
+    {
+      "name": "Narration Mute Toggle",
+      "kind": "button",
+      "refersTo": "icon-toggle",
+      "description": "companion右下で次の発話からmute状態を切り替える27px circle。",
+      "html": "<button class=\"ds-mute\" type=\"button\" aria-pressed=\"false\" aria-label=\"Mute narration\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M11 5 6 9H2v6h4l5 4V5Zm4.5 3.5a5 5 0 0 1 0 7M18 6a8 8 0 0 1 0 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\"/></svg></button>",
+      "css": ".ds-mute { display: grid; width: 27px; height: 27px; padding: 0; place-items: center; border: 1px solid rgba(255,255,255,.1); border-radius: 9999px; background: rgba(39,37,35,.8); color: #d4d4d8; transition: background 150ms cubic-bezier(.25,1,.5,1); } .ds-mute svg { width: 12px; height: 12px; } .ds-mute:hover { background: #2b2928; } .ds-mute:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-mute[aria-pressed='true'] { color: #ed575d; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "静かな作戦室",
+    "overview": "Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面を基準にする。左 255.04px の workspace sidebar、上 81px の二段 header、中央 607.11px の Chat、右 607.84px の Live2D companion を一続きの暗い面として構成する。標準サイズでは sidebar / chat / companion を `255 / 607 / 608` の比率で固定し、Chat と companion の間へ可視 divider や card を置かない。\n\n色戦略は Restrained。ほぼ無彩色の暗い面を基礎に、温かいローズを active state、状態色を証拠、Hiyori の色を人格表現へ限定する。shadcn は Tabs、Button、Textarea、ScrollArea、Popover、Dialog、RadioGroup、Tooltip、Skeleton の interaction primitive としてだけ使い、layout、密度、色、文字、radius はこの文書へ合わせる。\n\nこれは terminal clone、game HUD、neon purple AI dashboard ではない。glassmorphism と generic card grid を拒み、通常の message、tool event、error をカードへ分断せず、文字階層と 3px 系列の rhythm で読む。chatty mascot や emotional coercion によって判断を誘導せず、キャラクターは証拠の横で静かに状態を伝える。",
+    "keyCharacteristics": [
+      "1470×836 を基準にした 255 / 607 / 608 の三領域",
+      "同じ背景へ同居し、枠へ閉じ込めない Live2D companion",
+      "3px 刻みの高密度な spacing と 4.5px 中心の小さな radius",
+      "Inter / Noto Sans JP と JetBrains Mono の二系統だけ",
+      "文字・形・icon を併用する証拠中心の semantic state",
+      "150〜250ms の状態 transition と完全な reduced-motion 代替"
+    ],
+    "rules": [
+      { "name": "The Continuous Desk Rule", "body": "Chat と companion は一つの机である。通常状態で二つの card や中央 divider に分割してはならない。", "section": "overview" },
+      { "name": "The Evidence Priority Rule", "body": "判断、error、review diff、test result が必要な時は companion を縮小または静止し、証拠と操作の可読領域を優先する。", "section": "overview" },
+      { "name": "The Ten Percent Rule", "body": "warm active、branch violet、semantic status を合わせても一画面の 10% を超えさせない。色の希少性が意味を守る。", "section": "colors" },
+      { "name": "The Evidence Is Not Color Rule", "body": "error、success、running、canceled は label、icon、fill/outline/dash の形と併用し、色だけで区別しない。", "section": "colors" },
+      { "name": "The Two-Family Rule", "body": "UI sans と code mono 以外の font family を追加しない。button、tab、label に display font を使うことは禁止する。", "section": "typography" },
+      { "name": "The Fixed Density Rule", "body": "product UI の type scale は固定 px とし、`clamp()` で流動化しない。200% text zoom 時は container を拡張または折り返し、文字を縮めない。", "section": "typography" },
+      { "name": "The Flat-by-Default Rule", "body": "surface は静止時に flat。border と 16px 以上の soft shadow を同じ card に組み合わせる ghost-card pattern を禁止する。", "section": "elevation" },
+      { "name": "The Semantic Stack Rule", "body": "z-order は timeline < sticky composer < dropdown/popover < decision overlay < toast/tooltip とし、任意の巨大な z-index を使わない。", "section": "elevation" }
+    ],
+    "dos": [
+      "Do 1470×836 で sidebar 255.04px、header 81px、Chat 607.11px、companion 607.84px を基準にし、主要 boundary を Figma node `8:2` の ±2 CSS px に収める。",
+      "Do card を selected workspace、code chip、composer、必要な overlay へ限定し、通常 message と tool event は連続面へ置く。",
+      "Do status を色、label、icon、fill/outline/dash の少なくとも三つで示す。",
+      "Do normal text contrast 4.5:1、visible focus、24×24px 以上の hit target、200% text zoom を検証する。",
+      "Do shadcn を interaction primitive に限定し、この文書の density、radius、color、type で theme する。",
+      "Do すべての motion に reduced-motion の静止または短い crossfade 代替を用意する。"
+    ],
+    "donts": [
+      "Don't 「汎用 AI chat の複製」にし、状態、証拠、復元を会話の奥へ隠す。",
+      "Don't 「terminal clone」にし、shell の生入出力や汎用 terminal control を主画面へ置く。",
+      "Don't 「game HUD」の常時点滅、報酬演出、過剰な gauge で作業を奪う。",
+      "Don't 「neon purple AI dashboard」の紫 gradient、発光 border、full-saturation accent を装飾として使う。",
+      "Don't 「glassmorphism と generic card grid」で作業面を半透明 card へ分断する。",
+      "Don't 「chatty mascot」として Live2D の発話、表情、音声だけで承認、危険、失敗を伝える。",
+      "Don't 「emotional coercion」によって、キャラクターへの好意や罪悪感から推奨や継続を選ばせる。",
+      "Don't colored side stripe、gradient text、decorative grid background、32px 以上の card radius、border と 16px 以上の soft shadow を組み合わせる。",
+      "Don't dropdown を overflow container 内へ absolute 配置する。portal を使う。",
+      "Don't Inter / Noto Sans JP / JetBrains Mono 以外の font、Tailwind class 名、shadcn default の大 radius を design vocabulary として持ち込む。"
+    ]
+  }
+}
