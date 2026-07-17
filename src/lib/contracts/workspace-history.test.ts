@@ -104,6 +104,31 @@ describe("workspace history contract", () => {
     ).toThrow(WorkspaceHistoryContractError)
   })
 
+  it("accepts explicit ephemeral demo history without recovery metadata", () => {
+    const ephemeralState = {
+      ...fixture.state,
+      history: {
+        schemaVersion: 1,
+        mode: "ephemeral",
+        errorCode: null,
+        backupName: null,
+      },
+    }
+
+    expect(parseWorkspaceStateSnapshot(ephemeralState).history).toEqual(
+      ephemeralState.history,
+    )
+    expect(() =>
+      parseWorkspaceStateSnapshot({
+        ...ephemeralState,
+        history: {
+          ...ephemeralState.history,
+          errorCode: "HIST-RECOVERY-REQUIRED",
+        },
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
+  })
+
   it("rejects private paths, secret-like text, and raw reasoning before UI state", () => {
     for (const text of [
       "Read /Users/private/project/secret.txt",

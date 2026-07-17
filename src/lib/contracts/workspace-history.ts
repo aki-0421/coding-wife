@@ -14,7 +14,8 @@ export const workspaceHistoryCommands = {
   appendDomainEvent: "history_append_domain_event",
 } as const
 
-export type WorkspaceHistoryMode = "ready" | "read_only" | "recovery_required"
+export type WorkspaceHistoryMode =
+  "ready" | "ephemeral" | "read_only" | "recovery_required"
 export type WorkspaceLifecycle =
   "backlog" | "in_progress" | "in_review" | "done" | "canceled"
 export type WorkspaceAttention =
@@ -320,10 +321,17 @@ function parseHistoryStatus(value: unknown): WorkspaceHistoryStatus {
       "backupName",
     ]) ||
     value.schemaVersion !== workspaceHistorySchemaVersion ||
-    !oneOf(value.mode, ["ready", "read_only", "recovery_required"] as const) ||
+    !oneOf(value.mode, [
+      "ready",
+      "ephemeral",
+      "read_only",
+      "recovery_required",
+    ] as const) ||
     !isNullableString(value.errorCode, 128) ||
     !isNullableString(value.backupName, 255) ||
-    (typeof value.backupName === "string" && /[\\/]/.test(value.backupName))
+    (typeof value.backupName === "string" && /[\\/]/.test(value.backupName)) ||
+    (value.mode === "ephemeral" &&
+      (value.errorCode !== null || value.backupName !== null))
   ) {
     return violation()
   }

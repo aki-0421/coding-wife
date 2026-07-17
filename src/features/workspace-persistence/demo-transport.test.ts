@@ -5,6 +5,20 @@ import { workspaceHistoryCommands } from "@/lib/contracts/workspace-history"
 import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
 
 describe("DemoWorkspaceHistoryTransport", () => {
+  it("reports preview memory as ephemeral instead of native persistence", async () => {
+    const transport = new DemoWorkspaceHistoryTransport()
+
+    await expect(
+      transport.request(workspaceHistoryCommands.list, undefined),
+    ).resolves.toMatchObject({
+      history: {
+        mode: "ephemeral",
+        errorCode: null,
+        backupName: null,
+      },
+    })
+  })
+
   it("keeps deterministic workspace-local drafts across selection", async () => {
     const transport = new DemoWorkspaceHistoryTransport()
     const initial = await transport.request(

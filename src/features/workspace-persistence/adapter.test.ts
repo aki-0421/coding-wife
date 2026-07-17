@@ -41,6 +41,11 @@ describe("PersistentWorkspaceViewAdapter", () => {
       new DemoWorkspaceHistoryTransport(),
     )
     const initial = await adapter.loadState()
+    expect(initial.history).toEqual({
+      mode: "ephemeral",
+      errorCode: null,
+      backupName: null,
+    })
     const workspaceId = initial.activeWorkspaceId
     if (workspaceId === null) throw new Error("demo fixture")
 

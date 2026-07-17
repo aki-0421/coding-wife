@@ -189,7 +189,7 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       schemaVersion: 1,
       history: {
         schemaVersion: 1,
-        mode: "ready",
+        mode: "ephemeral",
         errorCode: null,
         backupName: null,
       },

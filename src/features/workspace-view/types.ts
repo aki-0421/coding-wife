@@ -72,7 +72,7 @@ export interface WorkspaceAdapterState {
   readonly draft: WorkspaceAdapterDraft | null
   readonly timeline: readonly WorkspaceTimelineItem[]
   readonly history: {
-    readonly mode: "ready" | "read_only" | "recovery_required"
+    readonly mode: "ready" | "ephemeral" | "read_only" | "recovery_required"
     readonly errorCode: string | null
     readonly backupName: string | null
   }
