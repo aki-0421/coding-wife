@@ -22,6 +22,10 @@ export default defineConfig({
     rollupOptions: {
       input: {
         app: path.resolve(projectRoot, "index.html"),
+        characterImportPreview: path.resolve(
+          projectRoot,
+          "character-import-preview.html",
+        ),
         live2dPreview: path.resolve(projectRoot, "live2d-preview.html"),
       },
     },

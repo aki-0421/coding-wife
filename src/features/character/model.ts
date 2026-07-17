@@ -37,16 +37,42 @@ export interface CharacterRuntimeError {
   readonly recoverable: boolean
 }
 
+export type CharacterAssetRole =
+  | "model"
+  | "moc"
+  | "texture"
+  | "motion"
+  | "expression"
+  | "physics"
+  | "pose"
+  | "display_info"
+  | "user_data"
+
 export interface CharacterPackFile {
   readonly assetId: string
-  readonly role:
-    "model" | "moc" | "texture" | "motion" | "physics" | "pose" | "display_info"
+  readonly role: CharacterAssetRole
   readonly bytes: number
   readonly sha256: string
   readonly dimensions?: Readonly<{
     width: number
     height: number
   }>
+}
+
+export interface CharacterDeveloperProvenance {
+  readonly sourceKind: "developer-provided"
+  readonly sourceNotice: string
+  readonly sourceRuntime: string
+  readonly illustration: string
+  readonly modeling: string
+  readonly sdkSampleSubstitution: false
+  readonly noticeSha256: string
+}
+
+export interface CharacterUserImportedProvenance {
+  readonly sourceKind: "user_imported"
+  readonly sourceLabel: "Local folder"
+  readonly importedAt: string
 }
 
 export interface CharacterPackManifest {
@@ -56,15 +82,9 @@ export interface CharacterPackManifest {
   readonly bundledVersion: string
   readonly entrypoint: string
   readonly immutable: true
-  readonly provenance: Readonly<{
-    sourceKind: "developer-provided"
-    sourceNotice: string
-    sourceRuntime: string
-    illustration: string
-    modeling: string
-    sdkSampleSubstitution: false
-    noticeSha256: string
-  }>
+  readonly provenance:
+    | Readonly<CharacterDeveloperProvenance>
+    | Readonly<CharacterUserImportedProvenance>
   readonly inventory: Readonly<{
     runtimeFileCount: number
     totalBytes: number
@@ -84,15 +104,46 @@ export interface CharacterPackManifest {
   readonly compatibility: Readonly<{
     modelSchemaVersion: number
     mocVersion: number
-    expectedParameters: number
-    expectedParts: number
-    expectedDrawables: number
+    expectedParameters: number | null
+    expectedParts: number | null
+    expectedDrawables: number | null
   }>
   readonly files: readonly CharacterPackFile[]
+  readonly importedAt?: string
+  readonly thumbnailSha256?: string
 }
 
-export interface CharacterPackRef {
+export interface CharacterUrlPackRef {
+  readonly kind: "url"
   readonly manifestUrl: string
+}
+
+export interface CharacterNativePackRef {
+  readonly kind: "native"
+  readonly manifest: CharacterPackManifest
+  readonly manifestHash: string
+  readonly previewToken: string | null
+  readonly readAsset: (
+    assetId: string,
+    expectedMime: string,
+    signal: AbortSignal,
+  ) => Promise<ArrayBuffer>
+}
+
+export interface CharacterMemoryPackRef {
+  readonly kind: "memory"
+  readonly manifest: CharacterPackManifest
+  readonly assets: ReadonlyMap<string, ArrayBuffer>
+}
+
+export type CharacterPackRef =
+  CharacterUrlPackRef | CharacterNativePackRef | CharacterMemoryPackRef
+
+export interface CharacterModelInventory {
+  readonly parameterCount: number
+  readonly partCount: number
+  readonly drawableCount: number
+  readonly textureDecodeCount: number
 }
 
 export interface CharacterFrameMetrics {
@@ -103,6 +154,8 @@ export interface CharacterFrameMetrics {
   readonly backingWidth: number
   readonly backingHeight: number
   readonly lastDeltaMilliseconds: number
+  readonly webglError: number
+  readonly modelInventory: CharacterModelInventory | null
 }
 
 export interface CharacterControllerStatus {

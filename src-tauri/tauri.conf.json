@@ -30,8 +30,8 @@
     ],
     "security": {
       "freezePrototype": true,
-      "csp": "default-src 'self'; base-uri 'self'; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; form-action 'none'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'",
-      "devCsp": "default-src 'self' http://localhost:1420; base-uri 'self'; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420; font-src 'self' data: http://localhost:1420; form-action 'none'; frame-ancestors 'none'; img-src 'self' data: blob: http://localhost:1420; object-src 'none'; script-src 'self' http://localhost:1420; style-src 'self' 'unsafe-inline' http://localhost:1420"
+      "csp": "default-src 'self'; base-uri 'self'; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; form-action 'none'; frame-ancestors 'self'; frame-src 'self'; img-src 'self' data: blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'",
+      "devCsp": "default-src 'self' http://localhost:1420; base-uri 'self'; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420; font-src 'self' data: http://localhost:1420; form-action 'none'; frame-ancestors 'self'; frame-src 'self' http://localhost:1420; img-src 'self' data: blob: http://localhost:1420; object-src 'none'; script-src 'self' http://localhost:1420; style-src 'self' 'unsafe-inline' http://localhost:1420"
     }
   },
   "bundle": {

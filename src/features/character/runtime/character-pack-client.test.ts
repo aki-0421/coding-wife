@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import hiyoriPack from "../../../../src-tauri/resources/characters/builtin-hiyori/pack.json"
+import characterFixture from "@/test/fixtures/character-library.v1.json"
 import type { CharacterPackFile } from "@/features/character/model"
 import {
   CharacterPackClient,
@@ -75,7 +76,7 @@ async function loadAssetFixture(
 
   const signal = new AbortController().signal
   const client = await CharacterPackClient.load(
-    { manifestUrl: "/characters/test/pack.json" },
+    { kind: "url", manifestUrl: "/characters/test/pack.json" },
     signal,
   )
   return { assetId, client, signal }
@@ -112,6 +113,16 @@ describe("character pack manifest", () => {
     expect(manifest.inventory.motionCount).toBe(10)
   })
 
+  it("accepts an unattested custom preview from the Rust contract", () => {
+    const manifest = parseCharacterPackManifest(
+      structuredClone(characterFixture.importResponse.preview.manifest),
+    )
+
+    expect(manifest.packId).toBe("custom:11111111-1111-4111-8111-111111111111")
+    expect(manifest.provenance.sourceKind).toBe("user_imported")
+    expect(manifest.compatibility.expectedDrawables).toBeNull()
+  })
+
   it.each([
     "",
     "/runtime/model.moc3",
@@ -140,7 +151,7 @@ describe("character pack manifest", () => {
     const drift = structuredClone(hiyoriPack)
     drift.inventory.totalBytes++
     expect(() => parseCharacterPackManifest(drift)).toThrow(
-      "reviewed Hiyori contract",
+      "inventory does not match",
     )
   })
 
@@ -154,6 +165,16 @@ describe("character pack manifest", () => {
     )
   })
 
+  it("rejects unknown manifest and file fields", () => {
+    expect(() =>
+      parseCharacterPackManifest({ ...hiyoriPack, sourcePath: "/tmp/model" }),
+    ).toThrow("manifest shape")
+
+    const pack = structuredClone(hiyoriPack)
+    Object.assign(pack.files[0]!, { executable: "plugin.js" })
+    expect(() => parseCharacterPackManifest(pack)).toThrow("file entry")
+  })
+
   it.each(["application/json", "application/json; charset=utf-8"])(
     "accepts the manifest media type %s",
     async (contentType) => {
@@ -161,7 +182,7 @@ describe("character pack manifest", () => {
 
       await expect(
         CharacterPackClient.load(
-          { manifestUrl: "/characters/test/pack.json" },
+          { kind: "url", manifestUrl: "/characters/test/pack.json" },
           new AbortController().signal,
         ),
       ).resolves.toBeInstanceOf(CharacterPackClient)
@@ -175,7 +196,7 @@ describe("character pack manifest", () => {
 
       await expect(
         CharacterPackClient.load(
-          { manifestUrl: "/characters/test/pack.json" },
+          { kind: "url", manifestUrl: "/characters/test/pack.json" },
           new AbortController().signal,
         ),
       ).rejects.toThrow("unexpected media type")
@@ -188,7 +209,7 @@ describe("character pack manifest", () => {
 
     await expect(
       CharacterPackClient.load(
-        { manifestUrl: "https://example.com/pack.json" },
+        { kind: "url", manifestUrl: "https://example.com/pack.json" },
         new AbortController().signal,
       ),
     ).rejects.toThrow("same-origin")
@@ -310,4 +331,43 @@ describe("character pack manifest", () => {
       "length did not match",
     )
   })
+
+  it.each(["native", "memory"] as const)(
+    "verifies %s binary assets without creating an asset URL",
+    async (kind) => {
+      const bytes = Uint8Array.from([1, 2, 3, 4])
+      const { assetId, pack } = createPackWithAsset("moc", bytes)
+      const manifest = parseCharacterPackManifest(pack)
+      const readAsset = vi.fn(() => Promise.resolve(bytes.buffer))
+      const ref =
+        kind === "native"
+          ? {
+              kind,
+              manifest,
+              manifestHash: "d".repeat(64),
+              previewToken: null,
+              readAsset,
+            }
+          : {
+              kind,
+              manifest,
+              assets: new Map([[assetId, bytes.buffer]]),
+            }
+      const client = await CharacterPackClient.load(
+        ref,
+        new AbortController().signal,
+      )
+
+      await expect(
+        client.arrayBuffer(assetId, new AbortController().signal),
+      ).resolves.toEqual(bytes.buffer)
+      if (kind === "native") {
+        expect(readAsset).toHaveBeenCalledWith(
+          assetId,
+          "application/octet-stream",
+          expect.any(AbortSignal),
+        )
+      }
+    },
+  )
 })

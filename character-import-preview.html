@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-ancestors 'self'; img-src blob: data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Isolated character preview</title>
+  </head>
+  <body>
+    <div id="character-import-preview-root"></div>
+    <script
+      type="module"
+      src="/src/features/character/import-preview/main.tsx"
+    ></script>
+  </body>
+</html>

@@ -1,5 +1,7 @@
 {
   "schemaVersion": 1,
+  "generationBoundary": 9007199254740991,
+  "generationOverflow": 9007199254740992,
   "libraryRequest": {
     "workspaceId": "workspace-fixture"
   },

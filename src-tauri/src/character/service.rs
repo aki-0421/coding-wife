@@ -19,6 +19,7 @@ use super::validation::snapshot_character_folder;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(10 * 60);
 const BUILTIN_MANIFEST_FILE: &str = "pack.json";
+const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 
 pub type CharacterPickerFuture<'a> = Pin<Box<dyn Future<Output = Option<PathBuf>> + Send + 'a>>;
 
@@ -792,7 +793,7 @@ fn validate_workspace_id(workspace_id: &str, operation: &str) -> CharacterResult
 
 fn random_generation() -> u64 {
     let bytes = *uuid::Uuid::new_v4().as_bytes();
-    u64::from_be_bytes(bytes[0..8].try_into().unwrap_or([0; 8])).max(1)
+    (u64::from_be_bytes(bytes[0..8].try_into().unwrap_or([0; 8])) & MAX_JS_SAFE_INTEGER).max(1)
 }
 
 pub fn resolve_builtin_directory(resource_directory: &Path) -> PathBuf {
@@ -908,7 +909,9 @@ mod tests {
 
     #[test]
     fn random_preview_generation_is_nonzero() {
-        assert_ne!(random_generation(), 0);
+        for _ in 0..1_000 {
+            assert!((1..=MAX_JS_SAFE_INTEGER).contains(&random_generation()));
+        }
     }
 
     #[test]
@@ -923,6 +926,14 @@ mod tests {
         assert_eq!(
             fixture.get("schemaVersion").and_then(Value::as_u64),
             Some(u64::from(CHARACTER_SCHEMA_VERSION))
+        );
+        assert_eq!(
+            fixture.get("generationBoundary").and_then(Value::as_u64),
+            Some(MAX_JS_SAFE_INTEGER)
+        );
+        assert_eq!(
+            fixture.get("generationOverflow").and_then(Value::as_u64),
+            Some(MAX_JS_SAFE_INTEGER + 1)
         );
         assert_fixture_contract::<CharacterLibraryRequest>(&fixture, "libraryRequest");
         assert_fixture_contract::<CharacterAssetRequest>(&fixture, "assetRequest");

@@ -5,6 +5,7 @@ import type {
   CharacterControllerStatus,
   CharacterFrameMetrics,
   CharacterMotionPolicy,
+  CharacterPackRef,
   CharacterState,
 } from "@/features/character/model"
 import { CharacterController } from "@/features/character/runtime/character-controller"
@@ -30,18 +31,21 @@ export interface Live2dCharacterProps {
   readonly motionPolicy?: CharacterMotionPolicy
   readonly locale?: SupportedLocale
   readonly manifestUrl?: string
+  readonly packRef?: CharacterPackRef
   readonly reloadToken?: string | number
   readonly preserveDrawingBuffer?: boolean
   readonly showCaption?: boolean
   readonly onControllerChange?: (controller: CharacterController | null) => void
   readonly onStatusChange?: (status: CharacterControllerStatus) => void
   readonly onMetricsChange?: (metrics: CharacterFrameMetrics) => void
+  readonly onStaticPreviewChange?: (dataUrl: string) => void
 }
 
 interface CallbackProps {
   readonly onControllerChange?: Live2dCharacterProps["onControllerChange"]
   readonly onStatusChange?: Live2dCharacterProps["onStatusChange"]
   readonly onMetricsChange?: Live2dCharacterProps["onMetricsChange"]
+  readonly onStaticPreviewChange?: Live2dCharacterProps["onStaticPreviewChange"]
 }
 
 export function Live2dCharacter({
@@ -51,12 +55,14 @@ export function Live2dCharacter({
   motionPolicy = "animated",
   locale = "ja",
   manifestUrl = BUILTIN_HIYORI_MANIFEST_URL,
+  packRef,
   reloadToken = 0,
   preserveDrawingBuffer = false,
   showCaption = true,
   onControllerChange,
   onStatusChange,
   onMetricsChange,
+  onStaticPreviewChange,
 }: Live2dCharacterProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -73,25 +79,37 @@ export function Live2dCharacter({
     motionPolicy,
   }))
   const [staticPreview, setStaticPreview] = useState<string | null>(null)
+  const [mountedController, setMountedController] =
+    useState<CharacterController | null>(null)
+  const activePackRef = useMemo<CharacterPackRef>(
+    () => packRef ?? { kind: "url", manifestUrl },
+    [manifestUrl, packRef],
+  )
 
   useEffect(() => {
     callbackPropsRef.current = {
       onControllerChange,
       onStatusChange,
       onMetricsChange,
+      onStaticPreviewChange,
     }
-  }, [onControllerChange, onMetricsChange, onStatusChange])
+  }, [
+    onControllerChange,
+    onMetricsChange,
+    onStaticPreviewChange,
+    onStatusChange,
+  ])
 
   useEffect(() => {
     const canvas = canvasRef.current
     const host = hostRef.current
     if (canvas === null || host === null) return
 
-    const loadController = new AbortController()
     const controller = new CharacterController({
       preserveDrawingBuffer,
       callbacks: {
         onStatus: (nextStatus) => {
+          if (nextStatus.phase === "loading") setStaticPreview(null)
           setStatus(nextStatus)
           callbackPropsRef.current.onStatusChange?.(nextStatus)
         },
@@ -109,9 +127,25 @@ export function Live2dCharacter({
           host.dataset.characterLastDeltaMilliseconds = String(
             metrics.lastDeltaMilliseconds,
           )
+          host.dataset.characterWebglError = String(metrics.webglError)
+          host.dataset.characterParameterCount = String(
+            metrics.modelInventory?.parameterCount ?? 0,
+          )
+          host.dataset.characterPartCount = String(
+            metrics.modelInventory?.partCount ?? 0,
+          )
+          host.dataset.characterDrawableCount = String(
+            metrics.modelInventory?.drawableCount ?? 0,
+          )
+          host.dataset.characterTextureDecodeCount = String(
+            metrics.modelInventory?.textureDecodeCount ?? 0,
+          )
           callbackPropsRef.current.onMetricsChange?.(metrics)
         },
-        onStaticPreview: setStaticPreview,
+        onStaticPreview: (dataUrl) => {
+          setStaticPreview(dataUrl)
+          callbackPropsRef.current.onStaticPreviewChange?.(dataUrl)
+        },
       },
     })
     controllerRef.current = controller
@@ -144,27 +178,42 @@ export function Live2dCharacter({
       window.addEventListener("resize", syncSize)
     }
 
-    void controller
-      .mount(canvas)
-      .then(() => {
+    let active = true
+    void controller.mount(canvas).then(
+      () => {
+        if (!active) return
         syncSize()
-        return controller.loadPack({ manifestUrl }, loadController.signal)
-      })
-      .catch(() => {
+        setMountedController(controller)
+      },
+      () => {
         // CharacterController emits a localized, non-blocking fallback status.
-      })
+      },
+    )
 
     return () => {
-      loadController.abort()
+      active = false
       resizeObserver?.disconnect()
       window.removeEventListener("resize", syncSize)
       mediaQuery?.removeEventListener("change", syncReducedMotion)
       controller.dispose()
+      setMountedController((current) =>
+        current === controller ? null : current,
+      )
       if (controllerRef.current === controller) controllerRef.current = null
       callbackPropsRef.current.onControllerChange?.(null)
     }
-    // A changed reload token intentionally rebuilds every GPU-owned resource.
-  }, [manifestUrl, preserveDrawingBuffer, reloadToken])
+  }, [preserveDrawingBuffer])
+
+  useEffect(() => {
+    if (mountedController === null) return
+    const loadController = new AbortController()
+    void mountedController
+      .loadPack(activePackRef, loadController.signal)
+      .catch(() => {
+        // CharacterController emits a localized, non-blocking fallback status.
+      })
+    return () => loadController.abort()
+  }, [activePackRef, mountedController, reloadToken])
 
   useEffect(() => {
     controllerRef.current?.setState(state, stateGeneration)

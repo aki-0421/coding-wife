@@ -147,6 +147,7 @@ export class CharacterController {
   #signature = "00000000"
   #signatureChanges = 0
   #lastDeltaMilliseconds = 0
+  #webglError = 0
   #cssWidth = 1
   #cssHeight = 1
 
@@ -362,6 +363,8 @@ export class CharacterController {
       backingWidth: this.#canvas?.width ?? 0,
       backingHeight: this.#canvas?.height ?? 0,
       lastDeltaMilliseconds: this.#lastDeltaMilliseconds,
+      webglError: this.#webglError,
+      modelInventory: this.#model?.inventory ?? null,
     }
   }
 
@@ -500,6 +503,7 @@ export class CharacterController {
       this.#gl.viewport(0, 0, this.#canvas.width, this.#canvas.height)
       this.#model.draw(this.#canvas.width, this.#canvas.height)
       this.#gl.flush()
+      this.#webglError = this.#gl.getError()
     } catch (error) {
       if (this.#gl.isContextLost()) {
         this.enterContextLostState()
@@ -623,6 +627,7 @@ export class CharacterController {
     this.#signature = "00000000"
     this.#signatureChanges = 0
     this.#lastDeltaMilliseconds = 0
+    this.#webglError = 0
     if (clearStaticPreview) this.#hasStaticPreview = false
   }
 

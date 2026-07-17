@@ -1,32 +1,46 @@
 import {
   CharacterError,
+  type CharacterAssetRole,
   type CharacterPackFile,
   type CharacterPackManifest,
   type CharacterPackRef,
 } from "@/features/character/model"
 
+const MAX_FILES = 128
+const MAX_TOTAL_BYTES = 100 * 1024 * 1024
+const MAX_FILE_BYTES = 32 * 1024 * 1024
+const MAX_TEXTURE_DIMENSION = 8192
+const MAX_MODEL_ITEMS = 1_000_000
 const sha256Pattern = /^[a-f0-9]{64}$/
-const assetRoles = new Set<CharacterPackFile["role"]>([
+const customPackIdPattern =
+  /^custom:[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
+
+const assetRoles = new Set<CharacterAssetRole>([
   "model",
   "moc",
   "texture",
   "motion",
+  "expression",
   "physics",
   "pose",
   "display_info",
+  "user_data",
 ])
-const assetSuffixByRole: Readonly<Record<CharacterPackFile["role"], string>> = {
+
+const assetSuffixByRole: Readonly<Record<CharacterAssetRole, string>> = {
   model: ".model3.json",
   moc: ".moc3",
   texture: ".png",
   motion: ".motion3.json",
+  expression: ".exp3.json",
   physics: ".physics3.json",
   pose: ".pose3.json",
   display_info: ".cdi3.json",
+  user_data: ".userdata3.json",
 }
 
 export type CharacterResourceMediaKind =
-  CharacterPackFile["role"] | "manifest" | "shader"
+  CharacterAssetRole | "manifest" | "shader"
 
 const expectedContentTypeByKind: Readonly<
   Record<CharacterResourceMediaKind, string>
@@ -36,11 +50,43 @@ const expectedContentTypeByKind: Readonly<
   moc: "application/octet-stream",
   texture: "image/png",
   motion: "application/json",
+  expression: "application/json",
   physics: "application/json",
   pose: "application/json",
   display_info: "application/json",
+  user_data: "application/json",
   shader: "text/plain",
 }
+
+const manifestKeys = [
+  "schemaVersion",
+  "packId",
+  "displayName",
+  "bundledVersion",
+  "entrypoint",
+  "immutable",
+  "provenance",
+  "inventory",
+  "compatibility",
+  "files",
+] as const
+
+const inventoryKeys = [
+  "runtimeFileCount",
+  "totalBytes",
+  "textureCount",
+  "motionCount",
+  "expressionCount",
+  "motionGroups",
+] as const
+
+const compatibilityKeys = [
+  "modelSchemaVersion",
+  "mocVersion",
+  "expectedParameters",
+  "expectedParts",
+  "expectedDrawables",
+] as const
 
 export function expectedCharacterResourceContentType(
   kind: CharacterResourceMediaKind,
@@ -60,21 +106,67 @@ export function isAcceptedCharacterResourceContentType(
   return receivedType === expectedContentTypeByKind[kind]
 }
 
+function violation(message: string): never {
+  throw new CharacterError("manifest_invalid", message, false)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0
+function hasExactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const allowed = new Set([...required, ...optional])
+  return (
+    required.every((key) => Object.hasOwn(value, key)) &&
+    Object.keys(value).every((key) => allowed.has(key))
+  )
+}
+
+function isNonEmptyString(value: unknown, maxLength = 512): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    [...value].length <= maxLength
+  )
+}
+
+function isBoundedInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= minimum &&
+    value <= maximum
+  )
+}
+
+function isRfc3339(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 40 &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+      value,
+    ) &&
+    Number.isFinite(Date.parse(value))
+  )
 }
 
 export function isSafeCharacterAssetId(assetId: string): boolean {
   if (
     assetId === "" ||
+    assetId.length > 512 ||
     assetId.startsWith("/") ||
     assetId.includes("\\") ||
     assetId.includes("\0") ||
-    /^[a-z][a-z0-9+.-]*:/i.test(assetId)
+    assetId.includes("%") ||
+    assetId.includes(":")
   ) {
     return false
   }
@@ -85,8 +177,11 @@ export function isSafeCharacterAssetId(assetId: string): boolean {
 }
 
 function parsePackFile(value: unknown): CharacterPackFile {
-  if (!isRecord(value)) {
-    throw new CharacterError("manifest_invalid", "Pack file entry is invalid")
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["assetId", "role", "bytes", "sha256"], ["dimensions"])
+  ) {
+    return violation("Pack file entry is invalid")
   }
 
   const { assetId, role, bytes, sha256, dimensions } = value
@@ -94,185 +189,331 @@ function parsePackFile(value: unknown): CharacterPackFile {
     typeof assetId !== "string" ||
     !isSafeCharacterAssetId(assetId) ||
     typeof role !== "string" ||
-    !assetRoles.has(role as CharacterPackFile["role"]) ||
-    !assetId.endsWith(
-      assetSuffixByRole[role as CharacterPackFile["role"]] ?? "\0",
-    ) ||
-    typeof bytes !== "number" ||
-    !Number.isSafeInteger(bytes) ||
-    bytes <= 0 ||
+    !assetRoles.has(role as CharacterAssetRole) ||
+    !assetId.endsWith(assetSuffixByRole[role as CharacterAssetRole] ?? "\0") ||
+    !isBoundedInteger(bytes, 1, MAX_FILE_BYTES) ||
     typeof sha256 !== "string" ||
     !sha256Pattern.test(sha256)
   ) {
-    throw new CharacterError(
-      "manifest_invalid",
-      "Pack file metadata is outside the reviewed schema",
-    )
+    return violation("Pack file metadata is outside the reviewed schema")
   }
 
-  if (dimensions !== undefined) {
+  const typedRole = role as CharacterAssetRole
+  if (typedRole === "texture") {
     if (
       !isRecord(dimensions) ||
-      typeof dimensions.width !== "number" ||
-      typeof dimensions.height !== "number" ||
-      !Number.isSafeInteger(dimensions.width) ||
-      !Number.isSafeInteger(dimensions.height) ||
-      dimensions.width <= 0 ||
-      dimensions.height <= 0
+      !hasExactKeys(dimensions, ["width", "height"]) ||
+      !isBoundedInteger(dimensions.width, 1, MAX_TEXTURE_DIMENSION) ||
+      !isBoundedInteger(dimensions.height, 1, MAX_TEXTURE_DIMENSION)
     ) {
-      throw new CharacterError(
-        "manifest_invalid",
-        "Pack texture dimensions are invalid",
-      )
+      return violation("Pack texture dimensions are invalid")
     }
     return {
       assetId,
-      role: role as CharacterPackFile["role"],
+      role: typedRole,
       bytes,
       sha256,
-      dimensions: {
-        width: dimensions.width,
-        height: dimensions.height,
-      },
+      dimensions: { width: dimensions.width, height: dimensions.height },
     }
   }
 
-  return {
-    assetId,
-    role: role as CharacterPackFile["role"],
-    bytes,
-    sha256,
+  if (dimensions !== undefined) {
+    return violation("Pack file dimensions do not match the asset role")
   }
+  return { assetId, role: typedRole, bytes, sha256 }
+}
+
+function parseFiles(value: unknown): readonly CharacterPackFile[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_FILES) {
+    return violation("Pack file inventory is outside the resource bounds")
+  }
+  const files = value.map(parsePackFile)
+  const assetIds = files.map((file) => file.assetId)
+  if (new Set(assetIds).size !== assetIds.length) {
+    return violation("Pack manifest contains duplicate asset IDs")
+  }
+  return files
+}
+
+function parseMotionGroups(
+  value: unknown,
+  filesByAssetId: ReadonlyMap<string, CharacterPackFile>,
+  motionCount: number,
+): Readonly<
+  Record<string, readonly Readonly<{ cueId: string; assetId: string }>[]>
+> {
+  if (!isRecord(value)) return violation("Pack motion groups are invalid")
+  const parsed: Record<
+    string,
+    readonly Readonly<{ cueId: string; assetId: string }>[]
+  > = {}
+  const referenced = new Set<string>()
+  for (const [group, rawCues] of Object.entries(value)) {
+    if (!isNonEmptyString(group, 80) || !Array.isArray(rawCues)) {
+      return violation("Pack motion groups are invalid")
+    }
+    parsed[group] = rawCues.map((rawCue, index) => {
+      if (
+        !isRecord(rawCue) ||
+        !hasExactKeys(rawCue, ["cueId", "assetId"]) ||
+        rawCue.cueId !== `${group}[${String(index)}]` ||
+        typeof rawCue.assetId !== "string" ||
+        filesByAssetId.get(rawCue.assetId)?.role !== "motion" ||
+        referenced.has(rawCue.assetId)
+      ) {
+        return violation("Pack motion cue is outside the reviewed schema")
+      }
+      referenced.add(rawCue.assetId)
+      return { cueId: rawCue.cueId, assetId: rawCue.assetId }
+    })
+  }
+  if (referenced.size !== motionCount) {
+    return violation("Pack motion inventory does not match its files")
+  }
+  return parsed
+}
+
+interface ParsedInventory {
+  readonly runtimeFileCount: number
+  readonly totalBytes: number
+  readonly textureCount: number
+  readonly motionCount: number
+  readonly expressionCount: number
+  readonly motionGroups: Readonly<
+    Record<string, readonly Readonly<{ cueId: string; assetId: string }>[]>
+  >
+}
+
+function parseInventory(
+  value: unknown,
+  files: readonly CharacterPackFile[],
+): ParsedInventory {
+  if (!isRecord(value) || !hasExactKeys(value, inventoryKeys)) {
+    return violation("Pack inventory is invalid")
+  }
+  const totalBytes = files.reduce((total, file) => total + file.bytes, 0)
+  const roleCount = (role: CharacterAssetRole) =>
+    files.filter((file) => file.role === role).length
+  if (
+    value.runtimeFileCount !== files.length ||
+    value.totalBytes !== totalBytes ||
+    totalBytes > MAX_TOTAL_BYTES ||
+    value.textureCount !== roleCount("texture") ||
+    value.motionCount !== roleCount("motion") ||
+    value.expressionCount !== roleCount("expression") ||
+    !isBoundedInteger(value.textureCount, 1, MAX_FILES) ||
+    !isBoundedInteger(value.motionCount, 0, MAX_FILES) ||
+    !isBoundedInteger(value.expressionCount, 0, MAX_FILES)
+  ) {
+    return violation("Pack inventory does not match its files")
+  }
+  const filesByAssetId = new Map(files.map((file) => [file.assetId, file]))
+  return {
+    runtimeFileCount: files.length,
+    totalBytes,
+    textureCount: value.textureCount,
+    motionCount: value.motionCount,
+    expressionCount: value.expressionCount,
+    motionGroups: parseMotionGroups(
+      value.motionGroups,
+      filesByAssetId,
+      value.motionCount,
+    ),
+  }
+}
+
+function parseCompatibility(
+  value: unknown,
+  builtin: boolean,
+): CharacterPackManifest["compatibility"] {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, compatibilityKeys) ||
+    value.modelSchemaVersion !== 3 ||
+    !isBoundedInteger(value.mocVersion, 1, 6)
+  ) {
+    return violation("Pack compatibility is invalid")
+  }
+  const expected = [
+    value.expectedParameters,
+    value.expectedParts,
+    value.expectedDrawables,
+  ]
+  const allNull = expected.every((item) => item === null)
+  const allPresent = expected.every((item) =>
+    isBoundedInteger(item, 1, MAX_MODEL_ITEMS),
+  )
+  if ((!allNull && !allPresent) || (builtin && !allPresent)) {
+    return violation("Pack model inventory attestation is invalid")
+  }
+  return {
+    modelSchemaVersion: 3,
+    mocVersion: value.mocVersion,
+    expectedParameters: value.expectedParameters as number | null,
+    expectedParts: value.expectedParts as number | null,
+    expectedDrawables: value.expectedDrawables as number | null,
+  }
+}
+
+function validateCoreManifest(
+  value: Record<string, unknown>,
+  files: readonly CharacterPackFile[],
+): void {
+  const filesByAssetId = new Map(files.map((file) => [file.assetId, file]))
+  if (
+    value.schemaVersion !== 1 ||
+    !isNonEmptyString(value.displayName, 80) ||
+    !isNonEmptyString(value.bundledVersion, 80) ||
+    typeof value.entrypoint !== "string" ||
+    !isSafeCharacterAssetId(value.entrypoint) ||
+    filesByAssetId.get(value.entrypoint)?.role !== "model" ||
+    files.filter((file) => file.role === "model").length !== 1 ||
+    files.filter((file) => file.role === "moc").length !== 1 ||
+    value.immutable !== true
+  ) {
+    return violation("Pack manifest core fields are invalid")
+  }
+}
+
+function parseBuiltinManifest(
+  value: Record<string, unknown>,
+): CharacterPackManifest {
+  if (
+    !hasExactKeys(value, manifestKeys) ||
+    value.packId !== "builtin:hiyori_pro"
+  ) {
+    return violation("Bundled Hiyori manifest shape is invalid")
+  }
+  const files = parseFiles(value.files)
+  validateCoreManifest(value, files)
+  const provenance = value.provenance
+  if (
+    !isRecord(provenance) ||
+    !hasExactKeys(provenance, [
+      "sourceKind",
+      "sourceNotice",
+      "sourceRuntime",
+      "illustration",
+      "modeling",
+      "sdkSampleSubstitution",
+      "noticeSha256",
+    ]) ||
+    provenance.sourceKind !== "developer-provided" ||
+    typeof provenance.sourceNotice !== "string" ||
+    !isSafeCharacterAssetId(provenance.sourceNotice) ||
+    !isNonEmptyString(provenance.sourceRuntime) ||
+    !isNonEmptyString(provenance.illustration, 80) ||
+    !isNonEmptyString(provenance.modeling, 80) ||
+    provenance.sdkSampleSubstitution !== false ||
+    typeof provenance.noticeSha256 !== "string" ||
+    !sha256Pattern.test(provenance.noticeSha256)
+  ) {
+    return violation("Bundled Hiyori provenance is invalid")
+  }
+  const inventory = parseInventory(value.inventory, files)
+  const compatibility = parseCompatibility(value.compatibility, true)
+  if (
+    files.length !== 17 ||
+    inventory.textureCount !== 2 ||
+    inventory.motionCount !== 10 ||
+    inventory.expressionCount !== 0 ||
+    compatibility.mocVersion !== 3 ||
+    compatibility.expectedParameters !== 70 ||
+    compatibility.expectedParts !== 24 ||
+    compatibility.expectedDrawables !== 134 ||
+    !inventory.motionGroups.Idle?.some((cue) => cue.cueId === "Idle[0]")
+  ) {
+    return violation(
+      "Pack manifest does not match the reviewed Hiyori contract",
+    )
+  }
+  return {
+    schemaVersion: 1,
+    packId: "builtin:hiyori_pro",
+    displayName: value.displayName as string,
+    bundledVersion: value.bundledVersion as string,
+    entrypoint: value.entrypoint as string,
+    immutable: true,
+    provenance: {
+      sourceKind: "developer-provided",
+      sourceNotice: provenance.sourceNotice,
+      sourceRuntime: provenance.sourceRuntime,
+      illustration: provenance.illustration,
+      modeling: provenance.modeling,
+      sdkSampleSubstitution: false,
+      noticeSha256: provenance.noticeSha256,
+    },
+    inventory,
+    compatibility,
+    files,
+  }
+}
+
+function parseCustomManifest(
+  value: Record<string, unknown>,
+): CharacterPackManifest {
+  if (
+    !hasExactKeys(
+      value,
+      [...manifestKeys, "importedAt"],
+      ["thumbnailSha256"],
+    ) ||
+    typeof value.packId !== "string" ||
+    !customPackIdPattern.test(value.packId) ||
+    value.bundledVersion !== "custom-import-v1" ||
+    !isRfc3339(value.importedAt) ||
+    (value.thumbnailSha256 !== undefined &&
+      (typeof value.thumbnailSha256 !== "string" ||
+        !sha256Pattern.test(value.thumbnailSha256)))
+  ) {
+    return violation("Custom pack manifest shape is invalid")
+  }
+  const files = parseFiles(value.files)
+  validateCoreManifest(value, files)
+  const provenance = value.provenance
+  if (
+    !isRecord(provenance) ||
+    !hasExactKeys(provenance, ["sourceKind", "sourceLabel", "importedAt"]) ||
+    provenance.sourceKind !== "user_imported" ||
+    provenance.sourceLabel !== "Local folder" ||
+    provenance.importedAt !== value.importedAt
+  ) {
+    return violation("Custom pack provenance is invalid")
+  }
+  const manifest: CharacterPackManifest = {
+    schemaVersion: 1,
+    packId: value.packId,
+    displayName: value.displayName as string,
+    bundledVersion: "custom-import-v1",
+    entrypoint: value.entrypoint as string,
+    immutable: true,
+    provenance: {
+      sourceKind: "user_imported",
+      sourceLabel: "Local folder",
+      importedAt: value.importedAt,
+    },
+    inventory: parseInventory(value.inventory, files),
+    compatibility: parseCompatibility(value.compatibility, false),
+    files,
+    importedAt: value.importedAt,
+  }
+  return value.thumbnailSha256 === undefined
+    ? manifest
+    : { ...manifest, thumbnailSha256: value.thumbnailSha256 }
 }
 
 export function parseCharacterPackManifest(
   value: unknown,
 ): CharacterPackManifest {
-  if (!isRecord(value) || !Array.isArray(value.files)) {
-    throw new CharacterError("manifest_invalid", "Pack manifest is invalid")
-  }
-
-  const files = value.files.map(parsePackFile)
-  const assetIds = files.map((file) => file.assetId)
-  if (new Set(assetIds).size !== assetIds.length) {
-    throw new CharacterError(
-      "manifest_invalid",
-      "Pack manifest contains duplicate asset IDs",
-    )
-  }
-
-  const filesByAssetId = new Map(files.map((file) => [file.assetId, file]))
-  const roleCounts = new Map<CharacterPackFile["role"], number>()
-  for (const file of files) {
-    roleCounts.set(file.role, (roleCounts.get(file.role) ?? 0) + 1)
-    if (
-      (file.role === "texture" && file.dimensions === undefined) ||
-      (file.role !== "texture" && file.dimensions !== undefined)
-    ) {
-      throw new CharacterError(
-        "manifest_invalid",
-        "Pack file dimensions do not match the asset role",
-      )
-    }
-  }
-
-  const provenance = value.provenance
-  const inventory = value.inventory
-  const compatibility = value.compatibility
-
-  if (
-    value.schemaVersion !== 1 ||
-    value.packId !== "builtin:hiyori_pro" ||
-    !isNonEmptyString(value.displayName) ||
-    !isNonEmptyString(value.bundledVersion) ||
-    typeof value.entrypoint !== "string" ||
-    !isSafeCharacterAssetId(value.entrypoint) ||
-    value.immutable !== true ||
-    !isRecord(provenance) ||
-    provenance.sourceKind !== "developer-provided" ||
-    typeof provenance.sourceNotice !== "string" ||
-    !isSafeCharacterAssetId(provenance.sourceNotice) ||
-    !isNonEmptyString(provenance.sourceRuntime) ||
-    !isNonEmptyString(provenance.illustration) ||
-    !isNonEmptyString(provenance.modeling) ||
-    provenance.sdkSampleSubstitution !== false ||
-    typeof provenance.noticeSha256 !== "string" ||
-    !sha256Pattern.test(provenance.noticeSha256) ||
-    !isRecord(inventory) ||
-    inventory.runtimeFileCount !== 17 ||
-    inventory.totalBytes !==
-      files.reduce((total, file) => total + file.bytes, 0) ||
-    inventory.textureCount !== 2 ||
-    inventory.motionCount !== 10 ||
-    inventory.expressionCount !== 0 ||
-    !isRecord(inventory.motionGroups) ||
-    !isRecord(compatibility) ||
-    compatibility.modelSchemaVersion !== 3 ||
-    compatibility.mocVersion !== 3 ||
-    compatibility.expectedParameters !== 70 ||
-    compatibility.expectedParts !== 24 ||
-    compatibility.expectedDrawables !== 134 ||
-    files.length !== 17 ||
-    filesByAssetId.get(value.entrypoint)?.role !== "model" ||
-    roleCounts.get("model") !== 1 ||
-    roleCounts.get("moc") !== 1 ||
-    roleCounts.get("texture") !== 2 ||
-    roleCounts.get("motion") !== 10 ||
-    roleCounts.get("physics") !== 1 ||
-    roleCounts.get("pose") !== 1 ||
-    roleCounts.get("display_info") !== 1
-  ) {
-    throw new CharacterError(
-      "manifest_invalid",
-      "Pack manifest does not match the reviewed Hiyori contract",
-    )
-  }
-
-  let motionCueCount = 0
-  const referencedMotionAssets = new Set<string>()
-  let hasReviewedIdleCue = false
-  for (const [group, rawCues] of Object.entries(inventory.motionGroups)) {
-    if (!isNonEmptyString(group) || !Array.isArray(rawCues)) {
-      throw new CharacterError(
-        "manifest_invalid",
-        "Pack motion groups are invalid",
-      )
-    }
-    for (const rawCue of rawCues) {
-      if (
-        !isRecord(rawCue) ||
-        !isNonEmptyString(rawCue.cueId) ||
-        !isNonEmptyString(rawCue.assetId) ||
-        filesByAssetId.get(rawCue.assetId)?.role !== "motion" ||
-        referencedMotionAssets.has(rawCue.assetId)
-      ) {
-        throw new CharacterError(
-          "manifest_invalid",
-          "Pack motion cue is outside the reviewed schema",
-        )
-      }
-      motionCueCount++
-      referencedMotionAssets.add(rawCue.assetId)
-      if (group === "Idle" && rawCue.cueId === "Idle[0]") {
-        hasReviewedIdleCue = true
-      }
-    }
-  }
-  if (
-    motionCueCount !== inventory.motionCount ||
-    referencedMotionAssets.size !== roleCounts.get("motion") ||
-    !hasReviewedIdleCue
-  ) {
-    throw new CharacterError(
-      "manifest_invalid",
-      "Pack motion inventory does not match the reviewed Hiyori contract",
-    )
-  }
-
-  return value as unknown as CharacterPackManifest
+  if (!isRecord(value)) return violation("Pack manifest is invalid")
+  return value.packId === "builtin:hiyori_pro"
+    ? parseBuiltinManifest(value)
+    : parseCustomManifest(value)
 }
 
-async function computeSha256(buffer: ArrayBuffer): Promise<string> {
+export async function computeCharacterSha256(
+  buffer: ArrayBuffer,
+): Promise<string> {
   if (globalThis.crypto?.subtle === undefined) {
     throw new CharacterError(
       "asset_fetch_failed",
@@ -280,10 +521,11 @@ async function computeSha256(buffer: ArrayBuffer): Promise<string> {
       false,
     )
   }
-
-  let digest: ArrayBuffer
   try {
-    digest = await globalThis.crypto.subtle.digest("SHA-256", buffer)
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer)
+    return Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("")
   } catch (error) {
     throw new CharacterError(
       "asset_fetch_failed",
@@ -292,27 +534,73 @@ async function computeSha256(buffer: ArrayBuffer): Promise<string> {
       { cause: error },
     )
   }
-
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("")
 }
 
+function abortIfNeeded(signal: AbortSignal): void {
+  if (!signal.aborted) return
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new CharacterError("disposed", "Character asset load was canceled")
+}
+
+type AssetLoader = (
+  asset: CharacterPackFile,
+  signal: AbortSignal,
+) => Promise<ArrayBuffer>
+
 export class CharacterPackClient {
-  readonly #assetBaseUrl: URL
   readonly #assets: ReadonlyMap<string, CharacterPackFile>
+  readonly #loadAsset: AssetLoader
   public readonly manifest: CharacterPackManifest
 
-  private constructor(manifestUrl: URL, manifest: CharacterPackManifest) {
+  private constructor(manifest: CharacterPackManifest, loadAsset: AssetLoader) {
     this.manifest = manifest
-    this.#assetBaseUrl = new URL("./", manifestUrl)
     this.#assets = new Map(manifest.files.map((file) => [file.assetId, file]))
+    this.#loadAsset = loadAsset
   }
 
   public static async load(
     pack: CharacterPackRef,
     signal: AbortSignal,
   ): Promise<CharacterPackClient> {
+    abortIfNeeded(signal)
+    if (pack.kind === "native") {
+      if (!sha256Pattern.test(pack.manifestHash)) {
+        throw new CharacterError(
+          "manifest_invalid",
+          "Native manifest hash is invalid",
+          false,
+        )
+      }
+      const manifest = parseCharacterPackManifest(pack.manifest)
+      return new CharacterPackClient(manifest, async (asset, assetSignal) => {
+        abortIfNeeded(assetSignal)
+        const bytes = await pack.readAsset(
+          asset.assetId,
+          expectedCharacterResourceContentType(asset.role),
+          assetSignal,
+        )
+        abortIfNeeded(assetSignal)
+        return bytes
+      })
+    }
+
+    if (pack.kind === "memory") {
+      const manifest = parseCharacterPackManifest(pack.manifest)
+      return new CharacterPackClient(manifest, (asset, assetSignal) => {
+        abortIfNeeded(assetSignal)
+        const bytes = pack.assets.get(asset.assetId)
+        if (bytes === undefined) {
+          throw new CharacterError(
+            "asset_not_allowed",
+            "Character asset is absent from isolated preview memory",
+            false,
+          )
+        }
+        return Promise.resolve(bytes.slice(0))
+      })
+    }
+
     const manifestUrl = new URL(pack.manifestUrl, window.location.href)
     if (manifestUrl.origin !== window.location.origin) {
       throw new CharacterError(
@@ -321,7 +609,6 @@ export class CharacterPackClient {
         false,
       )
     }
-
     let response: Response
     try {
       response = await fetch(manifestUrl, {
@@ -340,10 +627,9 @@ export class CharacterPackClient {
     if (!response.ok) {
       throw new CharacterError(
         "asset_fetch_failed",
-        `Character manifest returned HTTP ${response.status}`,
+        `Character manifest returned HTTP ${String(response.status)}`,
       )
     }
-
     if (
       !isAcceptedCharacterResourceContentType(
         "manifest",
@@ -356,7 +642,6 @@ export class CharacterPackClient {
         false,
       )
     }
-
     let rawManifest: unknown
     try {
       rawManifest = await response.json()
@@ -368,10 +653,52 @@ export class CharacterPackClient {
         { cause: error },
       )
     }
-    return new CharacterPackClient(
-      manifestUrl,
-      parseCharacterPackManifest(rawManifest),
-    )
+    const manifest = parseCharacterPackManifest(rawManifest)
+    const assetBaseUrl = new URL("./", manifestUrl)
+    return new CharacterPackClient(manifest, async (asset, assetSignal) => {
+      const url = new URL(asset.assetId, assetBaseUrl)
+      if (url.origin !== assetBaseUrl.origin) {
+        throw new CharacterError(
+          "asset_not_allowed",
+          "Character asset escaped the same-origin boundary",
+          false,
+        )
+      }
+      let assetResponse: Response
+      try {
+        assetResponse = await fetch(url, {
+          cache: "force-cache",
+          credentials: "same-origin",
+          signal: assetSignal,
+        })
+      } catch (error) {
+        throw new CharacterError(
+          "asset_fetch_failed",
+          `Unable to load character asset ${asset.role}`,
+          true,
+          { cause: error },
+        )
+      }
+      if (!assetResponse.ok) {
+        throw new CharacterError(
+          "asset_fetch_failed",
+          `Character asset ${asset.role} returned HTTP ${String(assetResponse.status)}`,
+        )
+      }
+      if (
+        !isAcceptedCharacterResourceContentType(
+          asset.role,
+          assetResponse.headers.get("content-type"),
+        )
+      ) {
+        throw new CharacterError(
+          "asset_type_mismatch",
+          `Character asset ${asset.role} used an unexpected media type`,
+          false,
+        )
+      }
+      return assetResponse.arrayBuffer()
+    })
   }
 
   public getAsset(assetId: string): CharacterPackFile {
@@ -398,72 +725,21 @@ export class CharacterPackClient {
     return base === "" ? relativeAssetId : `${base}/${relativeAssetId}`
   }
 
-  private async fetchAssetResponse(
-    assetId: string,
-    signal: AbortSignal,
-  ): Promise<Response> {
-    const asset = this.getAsset(assetId)
-    const url = new URL(asset.assetId, this.#assetBaseUrl)
-    if (url.origin !== this.#assetBaseUrl.origin) {
-      throw new CharacterError(
-        "asset_not_allowed",
-        "Character asset escaped the same-origin boundary",
-        false,
-      )
-    }
-
-    let response: Response
-    try {
-      response = await fetch(url, {
-        cache: "force-cache",
-        credentials: "same-origin",
-        signal,
-      })
-    } catch (error) {
-      throw new CharacterError(
-        "asset_fetch_failed",
-        `Unable to load character asset ${asset.role}`,
-        true,
-        { cause: error },
-      )
-    }
-    if (!response.ok) {
-      throw new CharacterError(
-        "asset_fetch_failed",
-        `Character asset ${asset.role} returned HTTP ${response.status}`,
-      )
-    }
-
-    if (
-      !isAcceptedCharacterResourceContentType(
-        asset.role,
-        response.headers.get("content-type"),
-      )
-    ) {
-      throw new CharacterError(
-        "asset_type_mismatch",
-        `Character asset ${asset.role} used an unexpected media type`,
-        false,
-      )
-    }
-    return response
-  }
-
   public async arrayBuffer(
     assetId: string,
     signal: AbortSignal,
   ): Promise<ArrayBuffer> {
     const asset = this.getAsset(assetId)
-    const response = await this.fetchAssetResponse(assetId, signal)
-    const buffer = await response.arrayBuffer()
-    if (buffer.byteLength !== asset.bytes) {
+    const buffer = await this.#loadAsset(asset, signal)
+    abortIfNeeded(signal)
+    if (!(buffer instanceof ArrayBuffer) || buffer.byteLength !== asset.bytes) {
       throw new CharacterError(
         "asset_fetch_failed",
         `Character asset ${asset.role} length did not match its manifest`,
         false,
       )
     }
-    if ((await computeSha256(buffer)) !== asset.sha256) {
+    if ((await computeCharacterSha256(buffer)) !== asset.sha256) {
       throw new CharacterError(
         "asset_fetch_failed",
         `Character asset ${asset.role} hash did not match its manifest`,
@@ -480,4 +756,24 @@ export class CharacterPackClient {
       type: expectedCharacterResourceContentType(asset.role),
     })
   }
+}
+
+export interface MaterializedCharacterPack {
+  readonly manifest: CharacterPackManifest
+  readonly assets: ReadonlyMap<string, ArrayBuffer>
+}
+
+export async function materializeCharacterPack(
+  pack: CharacterPackRef,
+  signal: AbortSignal,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<MaterializedCharacterPack> {
+  const client = await CharacterPackClient.load(pack, signal)
+  const assets = new Map<string, ArrayBuffer>()
+  for (const [index, asset] of client.manifest.files.entries()) {
+    abortIfNeeded(signal)
+    assets.set(asset.assetId, await client.arrayBuffer(asset.assetId, signal))
+    onProgress?.(index + 1, client.manifest.files.length)
+  }
+  return { manifest: client.manifest, assets }
 }

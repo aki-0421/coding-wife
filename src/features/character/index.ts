@@ -5,6 +5,37 @@ export {
 } from "@/features/character/components/Live2dCharacter"
 export { DefaultCharacterStageRenderer } from "@/features/character/components/DefaultCharacterStageRenderer"
 export {
+  IsolatedCharacterPreview,
+  type IsolatedCharacterPreviewPhase,
+  type IsolatedCharacterPreviewProps,
+} from "@/features/character/import-preview/IsolatedCharacterPreview"
+export {
+  builtinHiyoriPackId,
+  characterLibraryCommands,
+  characterLibrarySchemaVersion,
+  type CharacterConfirmImportRequest,
+  type CharacterImportResponse,
+  type CharacterLibrarySnapshot,
+  type CharacterPackView,
+  type CharacterPreviewAttestationRequest,
+  type CharacterPreviewSession,
+} from "@/features/character/library/contracts"
+export {
+  CharacterLibraryProvider,
+  CharacterLibraryStore,
+  useCharacterLibrary,
+  useCharacterLibraryStore,
+  type CharacterLibraryMutation,
+  type CharacterLibraryState,
+} from "@/features/character/library/provider"
+export {
+  CharacterLibraryOperationError,
+  createCharacterLibraryGateway,
+  DemoCharacterLibraryGateway,
+  NativeCharacterLibraryGateway,
+  type CharacterLibraryGateway,
+} from "@/features/character/library/transport"
+export {
   getCharacterCaption,
   getCharacterErrorMessage,
 } from "@/features/character/copy"
@@ -31,6 +62,7 @@ export {
   type CharacterFallbackLevel,
   type CharacterFrameMetrics,
   type CharacterMotionPolicy,
+  type CharacterPackRef,
   type CharacterRuntimeError,
   type CharacterState,
 } from "@/features/character/model"

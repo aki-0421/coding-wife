@@ -102,6 +102,8 @@ export function projectCharacterRuntime(
               ? "loading"
               : "loading"
 
+  const packProvenance = status.pack?.provenance
+
   return {
     rendererKind: "builtin_hiyori",
     phase: status.phase,
@@ -113,9 +115,18 @@ export function projectCharacterRuntime(
           packId: status.pack.packId,
           displayName: status.pack.displayName,
           bundledVersion: status.pack.bundledVersion,
-          illustration: status.pack.provenance.illustration,
-          modeling: status.pack.provenance.modeling,
-          noticeSha256: status.pack.provenance.noticeSha256,
+          illustration:
+            packProvenance?.sourceKind === "developer-provided"
+              ? packProvenance.illustration
+              : (packProvenance?.sourceLabel ?? "Local folder"),
+          modeling:
+            packProvenance?.sourceKind === "developer-provided"
+              ? packProvenance.modeling
+              : "User imported",
+          noticeSha256:
+            packProvenance?.sourceKind === "developer-provided"
+              ? packProvenance.noticeSha256
+              : (status.pack.thumbnailSha256 ?? "—"),
         }
       : BUILTIN_HIYORI_PACK,
     currentErrorCode:

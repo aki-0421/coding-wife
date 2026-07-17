@@ -12,7 +12,10 @@ import type { CubismMotion } from "@cubism/motion/cubismmotion"
 import { CubismWebGLOffscreenManager } from "@cubism/rendering/cubismoffscreenmanager"
 import { CubismShaderManager_WebGL } from "@cubism/rendering/cubismshader_webgl"
 
-import { CharacterError } from "@/features/character/model"
+import {
+  CharacterError,
+  type CharacterModelInventory,
+} from "@/features/character/model"
 import type { CharacterPackClient } from "@/features/character/runtime/character-pack-client"
 import { verifyCubismShaderSources } from "@/features/character/runtime/shader-source-preflight"
 
@@ -175,7 +178,7 @@ export class CubismCharacterModel extends CubismUserModel {
     if (!CubismMoc.hasMocConsistency(mocBytes)) {
       throw new CharacterError(
         "moc_invalid",
-        "Bundled Hiyori MOC is invalid",
+        "The selected Live2D MOC is invalid",
         false,
       )
     }
@@ -183,24 +186,33 @@ export class CubismCharacterModel extends CubismUserModel {
     if (mocVersion !== this.#client.manifest.compatibility.mocVersion) {
       throw new CharacterError(
         "moc_invalid",
-        "Bundled Hiyori MOC version differs from its manifest",
+        "The selected Live2D MOC version differs from its manifest",
         false,
       )
     }
     this.loadModel(mocBytes, true)
     if (this._model === null) {
-      throw new CharacterError("moc_invalid", "Cubism could not create Hiyori")
+      throw new CharacterError(
+        "moc_invalid",
+        "Cubism could not create the selected model",
+      )
     }
 
     const compatibility = this.#client.manifest.compatibility
+    const expectedInventory = [
+      compatibility.expectedParameters,
+      compatibility.expectedParts,
+      compatibility.expectedDrawables,
+    ]
     if (
-      this._model.getParameterCount() !== compatibility.expectedParameters ||
-      this._model.getPartCount() !== compatibility.expectedParts ||
-      this._model.getDrawableCount() !== compatibility.expectedDrawables
+      expectedInventory.every((value) => value !== null) &&
+      (this._model.getParameterCount() !== compatibility.expectedParameters ||
+        this._model.getPartCount() !== compatibility.expectedParts ||
+        this._model.getDrawableCount() !== compatibility.expectedDrawables)
     ) {
       throw new CharacterError(
         "model_inventory_mismatch",
-        "Bundled Hiyori runtime inventory differs from the reviewed model",
+        "The selected model inventory differs from its preview attestation",
         false,
       )
     }
@@ -278,36 +290,31 @@ export class CubismCharacterModel extends CubismUserModel {
     this._modelMatrix.setHeight(2)
 
     const idleFile = setting.getMotionFileName(IDLE_GROUP, IDLE_INDEX)
-    if (idleFile === "") {
-      throw new CharacterError(
-        "manifest_invalid",
-        "Bundled Hiyori is missing the reviewed Idle[0] motion",
-        false,
+    if (idleFile !== "") {
+      const idleBytes = await this.#client.arrayBuffer(
+        this.#client.resolveFromEntrypoint(idleFile),
+        signal,
       )
-    }
-    const idleBytes = await this.#client.arrayBuffer(
-      this.#client.resolveFromEntrypoint(idleFile),
-      signal,
-    )
-    this.#idleMotion = this.loadMotion(
-      idleBytes,
-      idleBytes.byteLength,
-      "Idle[0]",
-      undefined,
-      undefined,
-      setting,
-      IDLE_GROUP,
-      IDLE_INDEX,
-      true,
-    )
-    if (this.#idleMotion === null) {
-      throw new CharacterError(
-        "manifest_invalid",
-        "Cubism rejected the reviewed Idle[0] motion",
-        false,
+      this.#idleMotion = this.loadMotion(
+        idleBytes,
+        idleBytes.byteLength,
+        "Idle[0]",
+        undefined,
+        undefined,
+        setting,
+        IDLE_GROUP,
+        IDLE_INDEX,
+        true,
       )
+      if (this.#idleMotion === null) {
+        throw new CharacterError(
+          "manifest_invalid",
+          "Cubism rejected the selected Idle[0] motion",
+          false,
+        )
+      }
+      this.#idleMotion.setEffectIds(this.#eyeBlinkIds, this.#lipSyncIds)
     }
-    this.#idleMotion.setEffectIds(this.#eyeBlinkIds, this.#lipSyncIds)
 
     await verifyCubismShaderSources(SHADER_PATH, signal)
 
@@ -316,9 +323,27 @@ export class CubismCharacterModel extends CubismUserModel {
     renderer.startUp(this.#gl)
     renderer.setIsPremultipliedAlpha(true)
 
+    if (
+      setting.getTextureCount() !== this.#client.manifest.inventory.textureCount
+    ) {
+      throw new CharacterError(
+        "model_inventory_mismatch",
+        "The model texture references differ from its manifest",
+        false,
+      )
+    }
+    const textureAssetIds = new Set<string>()
     for (let index = 0; index < setting.getTextureCount(); index++) {
       const relative = setting.getTextureFileName(index)
       const assetId = this.#client.resolveFromEntrypoint(relative)
+      if (textureAssetIds.has(assetId)) {
+        throw new CharacterError(
+          "model_inventory_mismatch",
+          "The model references a texture more than once",
+          false,
+        )
+      }
+      textureAssetIds.add(assetId)
       const blob = await this.#client.blob(assetId, signal)
 
       let decoded: Awaited<ReturnType<typeof decodeTexture>>
@@ -327,7 +352,7 @@ export class CubismCharacterModel extends CubismUserModel {
       } catch (error) {
         throw new CharacterError(
           "texture_decode_failed",
-          "Unable to decode a bundled Hiyori texture",
+          "Unable to decode a texture for the selected model",
           true,
           { cause: error },
         )
@@ -344,6 +369,15 @@ export class CubismCharacterModel extends CubismUserModel {
 
     this.resetToNeutral()
     renderer.loadShaders(SHADER_PATH)
+  }
+
+  public get inventory(): CharacterModelInventory {
+    return {
+      parameterCount: this._model.getParameterCount(),
+      partCount: this._model.getPartCount(),
+      drawableCount: this._model.getDrawableCount(),
+      textureDecodeCount: this.#textures.length,
+    }
   }
 
   public resize(width: number, height: number): void {
