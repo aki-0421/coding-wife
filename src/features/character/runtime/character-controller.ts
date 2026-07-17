@@ -157,16 +157,7 @@ export class CharacterController {
 
   readonly #handleContextLost = (event: Event) => {
     event.preventDefault()
-    this.#contextLost = true
-    this.stopFrameLoop()
-    const error = new CharacterError(
-      "context_lost",
-      "The Live2D WebGL context was lost",
-    )
-    this.#error = error
-    this.#phase = "recovering"
-    this.#fallbackLevel = this.#hasStaticPreview ? "static" : "text_only"
-    this.emitStatus()
+    this.enterContextLostState()
   }
 
   readonly #handleContextRestored = () => {
@@ -492,13 +483,28 @@ export class CharacterController {
 
     if (policy === "animated" && delta > 0) this.#model.update(delta)
 
-    this.#gl.disable(this.#gl.SCISSOR_TEST)
-    this.#gl.colorMask(true, true, true, true)
-    this.#gl.clearColor(0, 0, 0, 0)
-    this.#gl.clear(this.#gl.COLOR_BUFFER_BIT | this.#gl.STENCIL_BUFFER_BIT)
-    this.#gl.viewport(0, 0, this.#canvas.width, this.#canvas.height)
-    this.#model.draw(this.#canvas.width, this.#canvas.height)
-    this.#gl.flush()
+    try {
+      this.#gl.disable(this.#gl.SCISSOR_TEST)
+      this.#gl.colorMask(true, true, true, true)
+      this.#gl.clearColor(0, 0, 0, 0)
+      this.#gl.clear(this.#gl.COLOR_BUFFER_BIT | this.#gl.STENCIL_BUFFER_BIT)
+      this.#gl.viewport(0, 0, this.#canvas.width, this.#canvas.height)
+      this.#model.draw(this.#canvas.width, this.#canvas.height)
+      this.#gl.flush()
+    } catch (error) {
+      if (this.#gl.isContextLost()) {
+        this.enterContextLostState()
+        return
+      }
+      const characterError = toCharacterError(error, "shader_load_failed")
+      this.stopFrameLoop()
+      this.#error = characterError
+      this.#phase = "error"
+      this.#fallbackLevel = this.#hasStaticPreview ? "static" : "text_only"
+      this.rejectFirstFrame(characterError)
+      this.emitStatus()
+      return
+    }
     this.#frameCount++
 
     const shouldSample =
@@ -609,6 +615,19 @@ export class CharacterController {
     this.#signatureChanges = 0
     this.#lastDeltaMilliseconds = 0
     if (clearStaticPreview) this.#hasStaticPreview = false
+  }
+
+  private enterContextLostState(): void {
+    this.#contextLost = true
+    this.stopFrameLoop()
+    const error = new CharacterError(
+      "context_lost",
+      "The Live2D WebGL context was lost",
+    )
+    this.#error = error
+    this.#phase = "recovering"
+    this.#fallbackLevel = this.#hasStaticPreview ? "static" : "text_only"
+    this.emitStatus()
   }
 
   private emitStatus(): void {
