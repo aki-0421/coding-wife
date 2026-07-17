@@ -25,6 +25,8 @@ def main():
         return 0
 
     pathlib.Path(state).write_text(str(grandchild), encoding="utf-8")
+    if os.environ.get("CODING_WIFE_PROCESS_TREE_PARENT_EXIT") == "1":
+        return 0
     hold_stdio()
     return 0
 

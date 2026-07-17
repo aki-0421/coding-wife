@@ -16,7 +16,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
-use super::process::terminate_child_process_group;
+use super::process::{process_group_exists, terminate_child_process_group};
 use super::types::{BinarySource, CapabilityState, CodexCapabilities};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -345,11 +345,12 @@ async fn run_bounded(
 
     let mut child = command.spawn().map_err(|_| BinaryError::ProbeFailed)?;
     let pid = child.id().ok_or(BinaryError::ProbeFailed)?;
+    let deadline = tokio::time::Instant::now() + PROBE_TIMEOUT;
     let stdout = child.stdout.take().ok_or(BinaryError::ProbeFailed)?;
     let stderr = child.stderr.take().ok_or(BinaryError::ProbeFailed)?;
     let (abort_tx, mut abort_rx) = mpsc::channel(3);
-    let stdout_task = tokio::spawn(capture_bounded(stdout, abort_tx.clone()));
-    let stderr_task = tokio::spawn(capture_bounded(stderr, abort_tx.clone()));
+    let mut stdout_task = tokio::spawn(capture_bounded(stdout, abort_tx.clone()));
+    let mut stderr_task = tokio::spawn(capture_bounded(stderr, abort_tx.clone()));
     let schema_monitor = schema_root
         .map(|root| tokio::spawn(monitor_schema_tree(root.to_path_buf(), abort_tx.clone())));
 
@@ -379,7 +380,7 @@ async fn run_bounded(
                 }
             })
         }
-        _ = tokio::time::sleep(PROBE_TIMEOUT) => Err(BinaryError::Timeout),
+        _ = tokio::time::sleep_until(deadline) => Err(BinaryError::Timeout),
     };
 
     let status = match outcome {
@@ -403,11 +404,37 @@ async fn run_bounded(
             return Err(error);
         }
     };
+    let captures = tokio::select! {
+        captures = async {
+            let stdout = (&mut stdout_task).await.map_err(|_| BinaryError::ProbeFailed)??;
+            let stderr = (&mut stderr_task).await.map_err(|_| BinaryError::ProbeFailed)??;
+            Ok::<_, BinaryError>((stdout, stderr))
+        } => captures,
+        abort = abort_rx.recv() => Err(match abort {
+            Some(ProbeAbort::SchemaLimit) => BinaryError::SchemaUnsupported,
+            Some(ProbeAbort::OutputLimit) | None => BinaryError::ProbeFailed,
+        }),
+        _ = tokio::time::sleep_until(deadline) => Err(BinaryError::Timeout),
+    };
+    let (stdout, stderr) = match captures {
+        Ok(captures) => captures,
+        Err(error) => {
+            if let Some(monitor) = schema_monitor {
+                monitor.abort();
+            }
+            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            stdout_task.abort();
+            stderr_task.abort();
+            return Err(error);
+        }
+    };
     if let Some(monitor) = schema_monitor {
         monitor.abort();
     }
-    let stdout = stdout_task.await.map_err(|_| BinaryError::ProbeFailed)??;
-    let stderr = stderr_task.await.map_err(|_| BinaryError::ProbeFailed)??;
+    if process_group_exists(pid) {
+        terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+        return Err(BinaryError::ProbeFailed);
+    }
     identity.revalidate().await?;
     if !status.success() {
         return Err(BinaryError::ProbeFailed);

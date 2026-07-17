@@ -154,7 +154,10 @@ impl ProcessRuntime {
         let started = tokio::time::Instant::now();
 
         while started.elapsed() < GRACEFUL_STDIN_WAIT {
-            if process_exited(&self.child).await.unwrap_or(false) {
+            if process_tree_exited(&self.child, self.pid)
+                .await
+                .unwrap_or(false)
+            {
                 self.connection.fail_pending().await;
                 return;
             }
@@ -163,7 +166,10 @@ impl ProcessRuntime {
 
         let _ = signal_process_group(self.pid, SIGTERM);
         while started.elapsed() < TOTAL_SHUTDOWN_WAIT {
-            if process_exited(&self.child).await.unwrap_or(false) {
+            if process_tree_exited(&self.child, self.pid)
+                .await
+                .unwrap_or(false)
+            {
                 self.connection.fail_pending().await;
                 return;
             }
@@ -176,7 +182,9 @@ impl ProcessRuntime {
     }
 
     pub async fn has_exited(&self) -> bool {
-        process_exited(&self.child).await.unwrap_or(false)
+        process_tree_exited(&self.child, self.pid)
+            .await
+            .unwrap_or(false)
     }
 
     pub fn expected_shutdown(&self) -> bool {
@@ -188,8 +196,9 @@ impl ProcessRuntime {
     }
 }
 
-async fn process_exited(child: &Arc<Mutex<Child>>) -> Result<bool, std::io::Error> {
-    child.lock().await.try_wait().map(|status| status.is_some())
+async fn process_tree_exited(child: &Arc<Mutex<Child>>, pid: u32) -> Result<bool, std::io::Error> {
+    let child_exited = child.lock().await.try_wait()?.is_some();
+    Ok(child_exited && !process_group_exists(pid))
 }
 
 const SIGTERM: i32 = 15;
@@ -210,6 +219,10 @@ fn signal_process_group(pid: u32, signal: i32) -> Result<(), ()> {
     }
 }
 
+pub(super) fn process_group_exists(pid: u32) -> bool {
+    signal_process_group(pid, 0).is_ok()
+}
+
 pub(super) async fn terminate_child_process_group(
     child: &mut Child,
     pid: u32,
@@ -218,17 +231,24 @@ pub(super) async fn terminate_child_process_group(
     let _ = signal_process_group(pid, SIGTERM);
     let deadline = tokio::time::Instant::now() + term_grace;
     loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return,
-            Ok(None) | Err(_) if tokio::time::Instant::now() < deadline => {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            Ok(None) | Err(_) => break,
+        let _ = child.try_wait();
+        if !process_group_exists(pid) {
+            return;
         }
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
     let _ = signal_process_group(pid, SIGKILL);
-    let _ = child.kill().await;
+    if !matches!(child.try_wait(), Ok(Some(_))) {
+        let _ = child.kill().await;
+    }
     let _ = tokio::time::timeout(Duration::from_millis(500), child.wait()).await;
+    let kill_deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    while process_group_exists(pid) && tokio::time::Instant::now() < kill_deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 #[cfg(test)]
@@ -256,10 +276,6 @@ mod tests {
             std::process::id(),
             uuid::Uuid::new_v4()
         ))
-    }
-
-    fn process_group_exists(pid: u32) -> bool {
-        signal_process_group(pid, 0).is_ok()
     }
 
     #[tokio::test]
@@ -292,6 +308,39 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(!process_group_exists(pid), "process group survived SIGKILL");
+        let _ = std::fs::remove_file(state);
+    }
+
+    #[tokio::test]
+    async fn exited_parent_does_not_hide_a_grandchild_holding_stdio() {
+        let state = temporary_state_file();
+        let mut command = Command::new(process_tree_fixture());
+        command
+            .env("CODING_WIFE_PROCESS_TREE_STATE", &state)
+            .env("CODING_WIFE_PROCESS_TREE_PARENT_EXIT", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        command.as_std_mut().process_group(0);
+        let mut child = command.spawn().expect("spawn process-tree fixture");
+        let pid = child.id().expect("fixture pid");
+        let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while !state.exists() {
+            assert!(
+                tokio::time::Instant::now() < ready_deadline,
+                "grandchild fixture did not become ready"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        child.wait().await.expect("parent exits");
+        assert!(process_group_exists(pid), "grandchild fixture is alive");
+
+        terminate_child_process_group(&mut child, pid, Duration::from_millis(100)).await;
+        assert!(
+            !process_group_exists(pid),
+            "grandchild process group survived"
+        );
         let _ = std::fs::remove_file(state);
     }
 }
