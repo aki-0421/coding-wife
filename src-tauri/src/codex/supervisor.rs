@@ -10,8 +10,8 @@ use tokio::sync::{mpsc, Mutex};
 
 use super::binary::{discover_binary, probe_schema, BinaryError, BinaryInfo, SchemaProbe};
 use super::decision::{
-    fallback_continuation_input, FallbackDecisionContext, FallbackDecisionError,
-    FallbackDecisionLedger, FallbackRegisterOutcome,
+    fallback_continuation_input, FallbackDecisionClaim, FallbackDecisionContext,
+    FallbackDecisionError, FallbackDecisionLedger, FallbackRegisterOutcome,
 };
 use super::dynamic_tools::DynamicToolRegistry;
 use super::normalizer::EventNormalizer;
@@ -43,6 +43,27 @@ const MAX_MODEL_PAGES: usize = 20;
 const MAX_RESTARTS: usize = 3;
 const RESTART_WINDOW: Duration = Duration::from_secs(60);
 
+#[derive(Clone, Debug)]
+enum PendingTurnStartPurpose {
+    User,
+    Fallback(FallbackDecisionClaim),
+}
+
+#[derive(Clone, Debug)]
+struct PendingTurnStart {
+    token: u64,
+    generation: u64,
+    workspace_id: String,
+    raw_thread_id: String,
+    thread_handle: String,
+    effort: ReasoningPreset,
+    client_message_id: String,
+    raw_turn_id: Option<String>,
+    turn_handle: Option<String>,
+    terminal: bool,
+    purpose: PendingTurnStartPurpose,
+}
+
 #[derive(Default)]
 struct SupervisorState {
     workspaces: HashMap<String, PathBuf>,
@@ -59,7 +80,8 @@ struct SupervisorState {
     active_thread_id: Option<String>,
     active_turn_id: Option<String>,
     active_turn_effort: Option<ReasoningPreset>,
-    fallback_continuation_in_flight: bool,
+    pending_turn_start: Option<PendingTurnStart>,
+    next_turn_start_token: u64,
     requests: ServerRequestLedger,
     fallback_decisions: FallbackDecisionLedger,
     restart_times: VecDeque<Instant>,
@@ -78,6 +100,35 @@ struct SupervisorInner {
 #[derive(Clone)]
 pub struct CodexSupervisor {
     inner: Arc<SupervisorInner>,
+}
+
+struct PendingTurnStartGuard {
+    supervisor: CodexSupervisor,
+    generation: u64,
+    token: u64,
+    armed: bool,
+}
+
+impl PendingTurnStartGuard {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingTurnStartGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let supervisor = self.supervisor.clone();
+        let generation = self.generation;
+        let token = self.token;
+        tauri::async_runtime::spawn(async move {
+            supervisor
+                .rollback_pending_turn_start(generation, token, true)
+                .await;
+        });
+    }
 }
 
 struct HandshakeResult {
@@ -175,7 +226,8 @@ impl CodexSupervisor {
         workspace_id: &str,
     ) -> Result<(), CodexCommandError> {
         let mut state = self.inner.state.lock().await;
-        if state.active_workspace.as_deref() == Some(workspace_id) && state.active_turn_id.is_some()
+        if state.active_workspace.as_deref() == Some(workspace_id)
+            && (state.active_turn_id.is_some() || state.pending_turn_start.is_some())
         {
             return Err(command_error(
                 "CODEX-WORKSPACE-ACTIVE",
@@ -386,7 +438,7 @@ impl CodexSupervisor {
         state.active_thread_id = None;
         state.active_turn_id = None;
         state.active_turn_effort = None;
-        state.fallback_continuation_in_flight = false;
+        state.pending_turn_start = None;
         state.requests.clear_pending();
         state.fallback_decisions.clear();
         state.diagnostic.child_state = ChildState::Initializing;
@@ -703,6 +755,8 @@ impl CodexSupervisor {
             state.diagnostic.error_code = Some("CODEX-THREAD-POLICY-MISMATCH".to_owned());
             state.active_thread_id = None;
             state.active_turn_id = None;
+            state.active_turn_effort = None;
+            state.pending_turn_start = None;
             state.thread_handles.clear();
             state.turn_handles.clear();
             state.requests.clear_pending();
@@ -731,18 +785,40 @@ impl CodexSupervisor {
             return Err(command_error("CODEX-TURN-INVALID", "turn/start", false));
         }
         let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
-        let raw_thread = {
-            let state = self.inner.state.lock().await;
-            if state.active_turn_id.is_some() || state.fallback_continuation_in_flight {
+        let (raw_thread, token) = {
+            let mut state = self.inner.state.lock().await;
+            ensure_generation(&state, generation, "turn/start")?;
+            if state.active_turn_id.is_some() || state.pending_turn_start.is_some() {
                 return Err(command_error("CODEX-TURN-ACTIVE", "turn/start", false));
             }
-            state
+            let raw_thread = state
                 .thread_handles
                 .get(&request.thread_handle)
                 .cloned()
-                .ok_or_else(|| command_error("CODEX-THREAD-STALE", "turn/start", false))?
+                .ok_or_else(|| command_error("CODEX-THREAD-STALE", "turn/start", false))?;
+            let token = next_turn_start_token(&mut state);
+            state.pending_turn_start = Some(PendingTurnStart {
+                token,
+                generation,
+                workspace_id: request.workspace_id.clone(),
+                raw_thread_id: raw_thread.clone(),
+                thread_handle: request.thread_handle.clone(),
+                effort: request.effort,
+                client_message_id: request.client_user_message_id.clone(),
+                raw_turn_id: None,
+                turn_handle: None,
+                terminal: false,
+                purpose: PendingTurnStartPurpose::User,
+            });
+            (raw_thread, token)
         };
-        let result = connection
+        let mut guard = PendingTurnStartGuard {
+            supervisor: self.clone(),
+            generation,
+            token,
+            armed: true,
+        };
+        let result = match connection
             .request_default(
                 "turn/start",
                 turn_start_params(
@@ -753,24 +829,67 @@ impl CodexSupervisor {
                 ),
             )
             .await
-            .map_err(|error| rpc_command_error(error, "turn/start"))?;
-        let raw_turn = result
+        {
+            Ok(result) => result,
+            Err(error) => {
+                self.rollback_pending_turn_start(generation, token, true)
+                    .await;
+                guard.disarm();
+                return Err(rpc_command_error(error, "turn/start"));
+            }
+        };
+        let Some(raw_turn) = result
             .pointer("/turn/id")
             .and_then(Value::as_str)
-            .ok_or_else(|| command_error("CODEX-RESPONSE-SHAPE", "turn/start", false))?;
-        let mut state = self.inner.state.lock().await;
-        ensure_generation(&state, generation, "turn/start")?;
-        let turn_handle = state
-            .normalizer
-            .as_mut()
-            .ok_or_else(|| command_error("CODEX-NORMALIZER-MISSING", "turn/start", false))?
-            .turn_handle(raw_turn);
-        state
-            .turn_handles
-            .insert(turn_handle.clone(), raw_turn.to_owned());
-        state.active_thread_id = Some(raw_thread);
-        state.active_turn_id = Some(raw_turn.to_owned());
-        state.active_turn_effort = Some(request.effort);
+            .filter(|turn| !turn.is_empty() && turn.len() <= 256)
+            .map(str::to_owned)
+        else {
+            self.rollback_pending_turn_start(generation, token, true)
+                .await;
+            guard.disarm();
+            return Err(command_error("CODEX-RESPONSE-SHAPE", "turn/start", false));
+        };
+        let turn_handle = {
+            let mut state = self.inner.state.lock().await;
+            match confirm_pending_turn_start(
+                &mut state,
+                generation,
+                token,
+                &raw_thread,
+                &raw_turn,
+                "turn/start",
+            ) {
+                Ok((_, turn_handle)) => {
+                    if !matches!(
+                        state
+                            .pending_turn_start
+                            .as_ref()
+                            .map(|pending| &pending.purpose),
+                        Some(PendingTurnStartPurpose::User)
+                    ) {
+                        drop(state);
+                        self.rollback_pending_turn_start(generation, token, true)
+                            .await;
+                        guard.disarm();
+                        return Err(command_error(
+                            "CODEX-TURN-START-MISMATCH",
+                            "turn/start",
+                            false,
+                        ));
+                    }
+                    state.pending_turn_start = None;
+                    turn_handle
+                }
+                Err(error) => {
+                    drop(state);
+                    self.rollback_pending_turn_start(generation, token, true)
+                        .await;
+                    guard.disarm();
+                    return Err(error);
+                }
+            }
+        };
+        guard.disarm();
         Ok(TurnResponse {
             thread_handle: request.thread_handle,
             turn_handle,
@@ -781,8 +900,8 @@ impl CodexSupervisor {
         &self,
         request: CodexTurnInterruptRequest,
     ) -> Result<AcceptedResponse, CodexCommandError> {
-        let (connection, _root, _generation) = self.ready_context(&request.workspace_id).await?;
-        let (raw_thread, raw_turn) = {
+        let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
+        let (raw_thread, raw_turn, pending_token) = {
             let state = self.inner.state.lock().await;
             let thread = state
                 .thread_handles
@@ -794,7 +913,14 @@ impl CodexSupervisor {
                 .get(&request.turn_handle)
                 .cloned()
                 .ok_or_else(|| command_error("CODEX-TURN-STALE", "turn/interrupt", false))?;
-            (thread, turn)
+            let pending_token = state
+                .pending_turn_start
+                .as_ref()
+                .filter(|pending| {
+                    pending.raw_thread_id == thread && pending.raw_turn_id.as_deref() == Some(&turn)
+                })
+                .map(|pending| pending.token);
+            (thread, turn, pending_token)
         };
         connection
             .request(
@@ -804,6 +930,10 @@ impl CodexSupervisor {
             )
             .await
             .map_err(|error| rpc_command_error(error, "turn/interrupt"))?;
+        if let Some(token) = pending_token {
+            self.rollback_pending_turn_start(generation, token, false)
+                .await;
+        }
         // Acceptance is not terminal; turn/completed remains authoritative.
         Ok(AcceptedResponse { accepted: true })
     }
@@ -899,10 +1029,11 @@ impl CodexSupervisor {
         request: CodexFallbackDecisionRequest,
     ) -> Result<TurnResponse, CodexCommandError> {
         let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
-        let claim = {
+        let client_message_id = format!("decision-continuation-{}", uuid::Uuid::new_v4());
+        let (claim, token) = {
             let mut state = self.inner.state.lock().await;
             ensure_generation(&state, generation, "codex.decision.answer")?;
-            if state.active_turn_id.is_some() || state.fallback_continuation_in_flight {
+            if state.active_turn_id.is_some() || state.pending_turn_start.is_some() {
                 return Err(command_error(
                     "CODEX-TURN-ACTIVE",
                     "codex.decision.answer",
@@ -919,11 +1050,41 @@ impl CodexSupervisor {
                     Instant::now(),
                 )
                 .map_err(fallback_command_error)?;
-            state.fallback_continuation_in_flight = true;
-            claim
+            let Some(thread_handle) = state
+                .thread_handles
+                .iter()
+                .find_map(|(handle, raw)| (raw == &claim.thread_id).then(|| handle.clone()))
+            else {
+                state.fallback_decisions.restore(&claim);
+                return Err(command_error(
+                    "CODEX-THREAD-STALE",
+                    "codex.decision.answer",
+                    false,
+                ));
+            };
+            let token = next_turn_start_token(&mut state);
+            state.pending_turn_start = Some(PendingTurnStart {
+                token,
+                generation,
+                workspace_id: request.workspace_id.clone(),
+                raw_thread_id: claim.thread_id.clone(),
+                thread_handle,
+                effort: claim.effort,
+                client_message_id: client_message_id.clone(),
+                raw_turn_id: None,
+                turn_handle: None,
+                terminal: false,
+                purpose: PendingTurnStartPurpose::Fallback(claim.clone()),
+            });
+            (claim, token)
+        };
+        let mut guard = PendingTurnStartGuard {
+            supervisor: self.clone(),
+            generation,
+            token,
+            armed: true,
         };
         let input = fallback_continuation_input(&claim.decision_handle, &claim.option_id);
-        let client_message_id = format!("decision-continuation-{}", uuid::Uuid::new_v4());
         let result = match connection
             .request_default(
                 "turn/start",
@@ -933,8 +1094,9 @@ impl CodexSupervisor {
         {
             Ok(result) => result,
             Err(error) => {
-                self.finish_fallback_claim(&claim, generation, PendingResolutionStatus::Failed)
+                self.rollback_pending_turn_start(generation, token, true)
                     .await;
+                guard.disarm();
                 return Err(rpc_command_error(error, "codex.decision.answer"));
             }
         };
@@ -944,8 +1106,9 @@ impl CodexSupervisor {
             .filter(|turn| !turn.is_empty() && turn.len() <= 256)
             .map(str::to_owned)
         else {
-            self.finish_fallback_claim(&claim, generation, PendingResolutionStatus::Failed)
+            self.rollback_pending_turn_start(generation, token, true)
                 .await;
+            guard.disarm();
             return Err(command_error(
                 "CODEX-RESPONSE-SHAPE",
                 "codex.decision.answer",
@@ -955,39 +1118,61 @@ impl CodexSupervisor {
 
         let (response, event) = {
             let mut state = self.inner.state.lock().await;
-            ensure_generation(&state, generation, "codex.decision.answer")?;
+            let (thread_handle, turn_handle) = match confirm_pending_turn_start(
+                &mut state,
+                generation,
+                token,
+                &claim.thread_id,
+                &raw_turn,
+                "codex.decision.answer",
+            ) {
+                Ok(confirmation) => confirmation,
+                Err(error) => {
+                    drop(state);
+                    self.rollback_pending_turn_start(generation, token, true)
+                        .await;
+                    guard.disarm();
+                    return Err(error);
+                }
+            };
+            let claim_matches = matches!(
+                state
+                    .pending_turn_start
+                    .as_ref()
+                    .map(|pending| &pending.purpose),
+                Some(PendingTurnStartPurpose::Fallback(pending_claim)) if pending_claim == &claim
+            );
+            if !claim_matches {
+                drop(state);
+                self.rollback_pending_turn_start(generation, token, true)
+                    .await;
+                guard.disarm();
+                return Err(command_error(
+                    "CODEX-TURN-START-MISMATCH",
+                    "codex.decision.answer",
+                    false,
+                ));
+            }
             if !state.fallback_decisions.complete(&claim) {
-                state.fallback_continuation_in_flight = false;
+                drop(state);
+                self.rollback_pending_turn_start(generation, token, true)
+                    .await;
+                guard.disarm();
                 return Err(command_error(
                     "CODEX-DECISION-STALE",
                     "codex.decision.answer",
                     false,
                 ));
             }
-            state.fallback_continuation_in_flight = false;
-            let thread_handle = state
-                .thread_handles
-                .iter()
-                .find_map(|(handle, raw)| (raw == &claim.thread_id).then(|| handle.clone()))
-                .ok_or_else(|| {
-                    command_error("CODEX-THREAD-STALE", "codex.decision.answer", false)
-                })?;
-            let normalizer = state.normalizer.as_mut().ok_or_else(|| {
-                command_error("CODEX-NORMALIZER-MISSING", "codex.decision.answer", false)
-            })?;
-            let turn_handle = normalizer.turn_handle(&raw_turn);
-            let event = normalizer
-                .pending_resolved_event(
-                    claim.decision_handle.clone(),
-                    PendingResolutionStatus::Accepted,
-                )
-                .ok();
-            state
-                .turn_handles
-                .insert(turn_handle.clone(), raw_turn.clone());
-            state.active_thread_id = Some(claim.thread_id.clone());
-            state.active_turn_id = Some(raw_turn);
-            state.active_turn_effort = Some(claim.effort);
+            state.pending_turn_start = None;
+            let event = state.normalizer.as_mut().and_then(|normalizer| {
+                normalizer
+                    .pending_resolved_event(
+                        claim.decision_handle.clone(),
+                        PendingResolutionStatus::Accepted,
+                    )
+                    .ok()
+            });
             (
                 TurnResponse {
                     thread_handle,
@@ -996,33 +1181,78 @@ impl CodexSupervisor {
                 event,
             )
         };
+        guard.disarm();
         if let Some(event) = event {
             self.emit_event(&event);
         }
         Ok(response)
     }
 
-    async fn finish_fallback_claim(
+    async fn rollback_pending_turn_start(
         &self,
-        claim: &super::decision::FallbackDecisionClaim,
         generation: u64,
-        status: PendingResolutionStatus,
+        token: u64,
+        interrupt_committed: bool,
     ) {
-        let event = {
+        let (connection, interrupt, event) = {
             let mut state = self.inner.state.lock().await;
-            if state.generation != generation {
+            if state.generation != generation
+                || state
+                    .pending_turn_start
+                    .as_ref()
+                    .is_none_or(|pending| pending.token != token)
+            {
                 return;
             }
-            state.fallback_continuation_in_flight = false;
-            state.fallback_decisions.complete(claim);
-            state.normalizer.as_mut().and_then(|normalizer| {
-                normalizer
-                    .pending_resolved_event(claim.decision_handle.clone(), status)
-                    .ok()
-            })
+            let pending = state
+                .pending_turn_start
+                .take()
+                .expect("checked pending start");
+            let committed = pending.raw_turn_id.as_ref().and_then(|turn_id| {
+                (state.active_thread_id.as_deref() == Some(&pending.raw_thread_id)
+                    && state.active_turn_id.as_deref() == Some(turn_id))
+                .then(|| (pending.raw_thread_id.clone(), turn_id.clone()))
+            });
+            if committed.is_some() {
+                state.active_turn_id = None;
+                state.active_turn_effort = None;
+                state.requests.clear_pending();
+            }
+            let event = match pending.purpose {
+                PendingTurnStartPurpose::Fallback(claim) => {
+                    state.fallback_decisions.complete(&claim);
+                    state.normalizer.as_mut().and_then(|normalizer| {
+                        normalizer
+                            .pending_resolved_event(
+                                claim.decision_handle,
+                                PendingResolutionStatus::Failed,
+                            )
+                            .ok()
+                    })
+                }
+                PendingTurnStartPurpose::User => None,
+            };
+            let connection = state
+                .runtime
+                .as_ref()
+                .map(|runtime| runtime.connection.clone());
+            (
+                connection,
+                interrupt_committed.then_some(committed).flatten(),
+                event,
+            )
         };
         if let Some(event) = event {
             self.emit_event(&event);
+        }
+        if let (Some(connection), Some((thread_id, turn_id))) = (connection, interrupt) {
+            let _ = connection
+                .request(
+                    "turn/interrupt",
+                    turn_interrupt_params(&thread_id, &turn_id),
+                    INTERRUPT_ACK_TIMEOUT,
+                )
+                .await;
         }
     }
 
@@ -1035,7 +1265,7 @@ impl CodexSupervisor {
             state.fallback_decisions.clear();
             state.active_turn_id = None;
             state.active_turn_effort = None;
-            state.fallback_continuation_in_flight = false;
+            state.pending_turn_start = None;
             state.runtime.take()
         };
         if let Some(runtime) = runtime {
@@ -1232,6 +1462,8 @@ impl CodexSupervisor {
     ) {
         let mut events = Vec::new();
         let mut interrupt = None;
+        let mut protocol_violation = false;
+        let mut terminal_rollback = None;
         let connection;
         {
             let mut state = self.inner.state.lock().await;
@@ -1244,20 +1476,41 @@ impl CodexSupervisor {
             connection = runtime.connection.clone();
 
             if method == "turn/started" {
-                if let Some(thread_id) = params.get("threadId").and_then(Value::as_str) {
-                    state.active_thread_id = Some(thread_id.to_owned());
-                }
-                if let Some(turn_id) = params.pointer("/turn/id").and_then(Value::as_str) {
-                    state.active_turn_id = Some(turn_id.to_owned());
-                }
+                let thread_id = params.get("threadId").and_then(Value::as_str);
+                let turn_id = params.pointer("/turn/id").and_then(Value::as_str);
+                protocol_violation = match thread_id.zip(turn_id) {
+                    Some((thread_id, turn_id)) => {
+                        if let Some(token) = state
+                            .pending_turn_start
+                            .as_ref()
+                            .map(|pending| pending.token)
+                        {
+                            confirm_pending_turn_start(
+                                &mut state,
+                                generation,
+                                token,
+                                thread_id,
+                                turn_id,
+                                "turn/started",
+                            )
+                            .is_err()
+                        } else {
+                            state.active_thread_id.as_deref() != Some(thread_id)
+                                || state.active_turn_id.as_deref() != Some(turn_id)
+                        }
+                    }
+                    None => true,
+                };
             }
 
-            let normalized = state
-                .normalizer
-                .as_mut()
-                .map(|normalizer| normalizer.normalize(&method, &params, byte_count));
+            let normalized = (!protocol_violation).then(|| {
+                state
+                    .normalizer
+                    .as_mut()
+                    .map(|normalizer| normalizer.normalize(&method, &params, byte_count))
+            });
             match normalized {
-                Some(Ok(mut outcome)) => {
+                Some(Some(Ok(mut outcome))) => {
                     if let Some(view) = outcome.fallback_decision.take() {
                         let context = params
                             .get("threadId")
@@ -1316,7 +1569,7 @@ impl CodexSupervisor {
                             .zip(state.active_turn_id.clone());
                     }
                 }
-                Some(Err(_)) => {
+                Some(Some(Err(_))) => {
                     if let Some(normalizer) = state.normalizer.as_mut() {
                         if let Ok(event) = normalizer.unsupported(&method, byte_count) {
                             events.push(event);
@@ -1327,10 +1580,10 @@ impl CodexSupervisor {
                         .clone()
                         .zip(state.active_turn_id.clone());
                 }
-                None => {}
+                Some(None) | None => {}
             }
 
-            if method == "turn/completed" {
+            if !protocol_violation && method == "turn/completed" {
                 let thread_id = params.get("threadId").and_then(Value::as_str);
                 let turn_id = params.pointer("/turn/id").and_then(Value::as_str);
                 let completed =
@@ -1348,11 +1601,33 @@ impl CodexSupervisor {
                             }
                         }
                     }
+                    if let Some(pending) = state.pending_turn_start.as_mut().filter(|pending| {
+                        pending.raw_thread_id == thread_id
+                            && pending.raw_turn_id.as_deref() == Some(turn_id)
+                    }) {
+                        if completed {
+                            pending.terminal = true;
+                        } else {
+                            terminal_rollback = Some(pending.token);
+                        }
+                    }
+                    let matches_active = state.active_thread_id.as_deref() == Some(thread_id)
+                        && state.active_turn_id.as_deref() == Some(turn_id);
+                    if matches_active {
+                        state.active_turn_id = None;
+                        state.active_turn_effort = None;
+                        state.requests.clear_pending();
+                    }
                 }
-                state.active_turn_id = None;
-                state.active_turn_effort = None;
-                state.requests.clear_pending();
             }
+        }
+        if protocol_violation {
+            self.handle_protocol_violation(generation).await;
+            return;
+        }
+        if let Some(token) = terminal_rollback {
+            self.rollback_pending_turn_start(generation, token, false)
+                .await;
         }
         for event in events {
             self.emit_event(&event);
@@ -1384,7 +1659,7 @@ impl CodexSupervisor {
             state.fallback_decisions.clear();
             state.active_turn_id = None;
             state.active_turn_effort = None;
-            state.fallback_continuation_in_flight = false;
+            state.pending_turn_start = None;
             let restart_attempt = reserve_restart(&mut state);
             state.diagnostic.child_state = if restart_attempt.is_some() {
                 ChildState::Restarting
@@ -1455,7 +1730,7 @@ impl CodexSupervisor {
             }
             state.active_turn_id = None;
             state.active_turn_effort = None;
-            state.fallback_continuation_in_flight = false;
+            state.pending_turn_start = None;
             let restart_attempt = reserve_restart(&mut state);
             (
                 state.active_workspace.clone(),
@@ -1704,6 +1979,70 @@ fn ensure_generation(
     }
 }
 
+fn next_turn_start_token(state: &mut SupervisorState) -> u64 {
+    state.next_turn_start_token = state.next_turn_start_token.wrapping_add(1).max(1);
+    state.next_turn_start_token
+}
+
+fn confirm_pending_turn_start(
+    state: &mut SupervisorState,
+    generation: u64,
+    token: u64,
+    raw_thread_id: &str,
+    raw_turn_id: &str,
+    operation: &str,
+) -> Result<(String, String), CodexCommandError> {
+    ensure_generation(state, generation, operation)?;
+    if raw_thread_id.is_empty()
+        || raw_thread_id.len() > 256
+        || raw_turn_id.is_empty()
+        || raw_turn_id.len() > 256
+    {
+        return Err(command_error("CODEX-TURN-START-MISMATCH", operation, false));
+    }
+    let pending = state
+        .pending_turn_start
+        .as_ref()
+        .filter(|pending| pending.token == token)
+        .ok_or_else(|| command_error("CODEX-TURN-START-STALE", operation, false))?
+        .clone();
+    if pending.generation != generation
+        || pending.workspace_id != state.active_workspace.as_deref().unwrap_or_default()
+        || pending.raw_thread_id != raw_thread_id
+        || pending.client_message_id.is_empty()
+        || pending
+            .raw_turn_id
+            .as_deref()
+            .is_some_and(|committed| committed != raw_turn_id)
+    {
+        return Err(command_error("CODEX-TURN-START-MISMATCH", operation, false));
+    }
+    let turn_handle = match pending.turn_handle {
+        Some(handle) => handle,
+        None => state
+            .normalizer
+            .as_mut()
+            .ok_or_else(|| command_error("CODEX-NORMALIZER-MISSING", operation, false))?
+            .turn_handle(raw_turn_id),
+    };
+    state
+        .turn_handles
+        .insert(turn_handle.clone(), raw_turn_id.to_owned());
+    let pending = state
+        .pending_turn_start
+        .as_mut()
+        .filter(|pending| pending.token == token)
+        .ok_or_else(|| command_error("CODEX-TURN-START-STALE", operation, false))?;
+    pending.raw_turn_id = Some(raw_turn_id.to_owned());
+    pending.turn_handle = Some(turn_handle.clone());
+    if !pending.terminal {
+        state.active_thread_id = Some(raw_thread_id.to_owned());
+        state.active_turn_id = Some(raw_turn_id.to_owned());
+        state.active_turn_effort = Some(pending.effort);
+    }
+    Ok((pending.thread_handle.clone(), turn_handle))
+}
+
 fn clear_probe_evidence(state: &mut SupervisorState, operation: &str) {
     state.binary = None;
     state.schema = None;
@@ -1713,7 +2052,7 @@ fn clear_probe_evidence(state: &mut SupervisorState, operation: &str) {
     state.active_thread_id = None;
     state.active_turn_id = None;
     state.active_turn_effort = None;
-    state.fallback_continuation_in_flight = false;
+    state.pending_turn_start = None;
     state.requests.clear_pending();
     state.fallback_decisions.clear();
     state.diagnostic = CodexDiagnostic {
@@ -1816,5 +2155,70 @@ mod tests {
             effort: ReasoningPreset::Low,
         };
         assert_eq!(turn.effort.as_wire(), "low");
+    }
+
+    #[test]
+    fn pending_turn_start_confirmation_is_order_independent_and_fail_closed() {
+        let mut state = SupervisorState {
+            active_workspace: Some("workspace".to_owned()),
+            generation: 7,
+            normalizer: Some(EventNormalizer::new(
+                "workspace".to_owned(),
+                PathBuf::from("/workspace"),
+                7,
+            )),
+            pending_turn_start: Some(PendingTurnStart {
+                token: 11,
+                generation: 7,
+                workspace_id: "workspace".to_owned(),
+                raw_thread_id: "thread-raw".to_owned(),
+                thread_handle: "thread-handle".to_owned(),
+                effort: ReasoningPreset::Max,
+                client_message_id: "message-1".to_owned(),
+                raw_turn_id: None,
+                turn_handle: None,
+                terminal: false,
+                purpose: PendingTurnStartPurpose::User,
+            }),
+            ..SupervisorState::default()
+        };
+
+        let first =
+            confirm_pending_turn_start(&mut state, 7, 11, "thread-raw", "turn-raw", "turn/started")
+                .expect("notification commits reservation");
+        let second =
+            confirm_pending_turn_start(&mut state, 7, 11, "thread-raw", "turn-raw", "turn/start")
+                .expect("response confirms the same reservation");
+        assert_eq!(first, second);
+        assert_eq!(state.active_turn_id.as_deref(), Some("turn-raw"));
+        assert_eq!(state.active_turn_effort, Some(ReasoningPreset::Max));
+
+        assert_eq!(
+            confirm_pending_turn_start(
+                &mut state,
+                7,
+                11,
+                "thread-raw",
+                "turn-other",
+                "turn/start",
+            )
+            .expect_err("wrong turn must fail closed")
+            .code,
+            "CODEX-TURN-START-MISMATCH"
+        );
+        assert_eq!(
+            confirm_pending_turn_start(&mut state, 8, 11, "thread-raw", "turn-raw", "turn/start",)
+                .expect_err("stale generation must fail closed")
+                .code,
+            "CODEX-GENERATION-STALE"
+        );
+
+        state.active_turn_id = None;
+        state.active_turn_effort = None;
+        state.pending_turn_start.as_mut().expect("pending").terminal = true;
+        confirm_pending_turn_start(&mut state, 7, 11, "thread-raw", "turn-raw", "turn/start")
+            .expect("late response remains idempotent");
+        assert!(state.active_turn_id.is_none());
+        assert!(state.active_turn_effort.is_none());
     }
 }

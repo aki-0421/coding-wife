@@ -541,6 +541,61 @@ async fn fallback_decision_validates_then_starts_exactly_one_structured_continua
 }
 
 #[tokio::test]
+async fn notification_first_turn_start_preserves_fallback_display_and_answer() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("decision_notification_first");
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("connect");
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("thread");
+    let response = supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            client_user_message_id: "message-notification-first".to_owned(),
+            text: "Produce a decision.".to_owned(),
+            effort: ReasoningPreset::Max,
+        })
+        .await
+        .expect("notification-first turn");
+    assert!(!response.turn_handle.is_empty());
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("decision_notifications_before_response"));
+    assert!(!state.contains("interrupt_received"));
+
+    let (decision_handle, option_id) = fallback_handles();
+    let continuation = supervisor
+        .answer_fallback_decision(CodexFallbackDecisionRequest {
+            workspace_id: "workspace".to_owned(),
+            decision_handle,
+            option_id,
+        })
+        .await
+        .expect("answer notification-first decision");
+    assert!(!continuation.turn_handle.is_empty());
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("decision_continuation_ok").count(), 1);
+    assert!(!state.contains("decision_continuation_invalid"));
+    assert!(!state.contains("interrupt_received"));
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
 async fn failed_fallback_continuation_is_terminal_and_never_replayed() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("decision_continuation_crash");

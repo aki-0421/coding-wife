@@ -253,7 +253,9 @@ def main():
                     }
                 )
                 continue
-            result(message_id, {"turn": {"id": "turn-fixture", "status": "inProgress"}})
+            notification_first = MODE == "decision_notification_first"
+            if not notification_first:
+                result(message_id, {"turn": {"id": "turn-fixture", "status": "inProgress"}})
             send(
                 {
                     "method": "turn/started",
@@ -302,6 +304,7 @@ def main():
                 "decision_fallback",
                 "decision_invalid",
                 "decision_continuation_crash",
+                "decision_notification_first",
             ):
                 output = (
                     json.dumps(
@@ -327,7 +330,11 @@ def main():
                         },
                         separators=(",", ":"),
                     )
-                    if MODE in ("decision_fallback", "decision_continuation_crash")
+                    if MODE in (
+                        "decision_fallback",
+                        "decision_continuation_crash",
+                        "decision_notification_first",
+                    )
                     else "Choose Continue or Stop"
                 )
                 send(
@@ -353,6 +360,13 @@ def main():
                                 "turn": {"id": "turn-fixture", "status": "completed"},
                             },
                         }
+                    )
+                if notification_first:
+                    record("decision_notifications_before_response")
+                    time.sleep(0.15)
+                    result(
+                        message_id,
+                        {"turn": {"id": "turn-fixture", "status": "inProgress"}},
                     )
             continue
         if method == "turn/interrupt":
