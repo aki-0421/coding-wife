@@ -3,5 +3,8 @@ export type { WorkspaceShellProps } from "@/features/workspace-view/WorkspaceShe
 export type {
   CharacterStageRenderer,
   CharacterStageRenderProps,
+  WorkspaceAdapterState,
+  WorkspaceCreateRequest,
+  WorkspaceTimelineItem,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"

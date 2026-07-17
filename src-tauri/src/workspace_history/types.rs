@@ -328,8 +328,6 @@ pub struct WorkspaceSaveDraftRequest {
 pub struct WorkspaceSaveContextRequest {
     pub workspace_id: String,
     pub source: ContextSource,
-    pub label: String,
-    pub content: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

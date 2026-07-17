@@ -1,4 +1,4 @@
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import {
   ArrowUpIcon,
   AtSignIcon,
@@ -76,6 +76,7 @@ export function Composer({
   onStop,
 }: ComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [contextOpen, setContextOpen] = useState(false)
   const validAttachments = draft.attachments.filter((item) => item.valid)
   const hasContent =
     draft.text.trim().length > 0 ||
@@ -210,7 +211,7 @@ export function Composer({
             {copy.add}
           </Button>
 
-          <Popover>
+          <Popover onOpenChange={setContextOpen} open={contextOpen}>
             <PopoverTrigger asChild>
               <Button
                 disabled={isBusy}
@@ -234,7 +235,10 @@ export function Composer({
                   <Button
                     className="w-full justify-start"
                     key={source}
-                    onClick={() => void onCaptureContext(source)}
+                    onClick={() => {
+                      setContextOpen(false)
+                      void onCaptureContext(source)
+                    }}
                     size="xs"
                     type="button"
                     variant="ghost"

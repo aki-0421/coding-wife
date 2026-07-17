@@ -1,136 +1,115 @@
-import { useState } from "react"
 import {
+  ActivityIcon,
+  AlertTriangleIcon,
   CheckCircle2Icon,
-  ChevronRightIcon,
   CircleXIcon,
-  FileCheck2Icon,
-  TerminalSquareIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { useI18n } from "@/features/localization"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import type {
+  WorkspaceAdapterState,
+  WorkspaceLifecycle,
+  WorkspaceTimelineItem,
+} from "@/features/workspace-view/types"
 
 interface TimelineProps {
   readonly copy: WorkspaceCopy
+  readonly events: readonly WorkspaceTimelineItem[]
+  readonly history: WorkspaceAdapterState["history"]
   readonly onOpenDiagnostics: () => void
 }
 
-interface ToolRowProps {
-  readonly copy: WorkspaceCopy
-  readonly command: string
-  readonly detail: string
-  readonly status?: "completed" | "failed"
+const lifecycleValues: readonly WorkspaceLifecycle[] = [
+  "done",
+  "in_review",
+  "in_progress",
+  "backlog",
+  "canceled",
+]
+
+function isLifecycle(value: string): value is WorkspaceLifecycle {
+  return lifecycleValues.some((lifecycle) => lifecycle === value)
 }
 
-function ToolRow({
-  command,
+function eventStatus(
+  copy: WorkspaceCopy,
+  event: WorkspaceTimelineItem,
+): string {
+  if (isLifecycle(event.status)) return copy.lifecycle[event.status]
+  if (event.status === "completed") return copy.completed
+  if (event.status === "failed") return copy.failed
+  return event.status.replaceAll("_", " ")
+}
+
+function TimelineEventRow({
   copy,
-  detail,
-  status = "completed",
-}: ToolRowProps) {
-  return (
-    <details className="group/tool w-full">
-      <summary className="flex min-h-8 cursor-pointer list-none items-center gap-xs rounded-control px-xxs text-caption text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-        <ChevronRightIcon className="size-3 shrink-0 transition-transform group-open/tool:rotate-90 motion-reduce:transition-none" />
-        <TerminalSquareIcon className="size-3 shrink-0" />
-        <span className="shrink-0 text-title text-foreground">Bash</span>
-        <code className="min-w-0 truncate rounded-control bg-code-chip px-xs py-xxs font-mono text-label text-text-secondary">
-          {command}
-        </code>
-        <span className="sr-only">
-          {status === "completed" ? copy.completed : copy.failed}
-        </span>
-      </summary>
-      <div className="ml-[39px] mt-xxs max-w-[calc(100%-39px)] rounded-control bg-code-chip px-sm py-xs font-mono text-label text-text-secondary">
-        {detail}
-      </div>
-    </details>
-  )
-}
-
-function DecisionPreview({ copy }: { readonly copy: WorkspaceCopy }) {
-  const [selection, setSelection] = useState("small")
-  const [saved, setSaved] = useState(false)
+  event,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly event: WorkspaceTimelineItem
+}) {
+  const { locale } = useI18n()
+  const failed = event.status === "failed" || event.errorCode !== undefined
+  const completed = event.status === "completed" || event.status === "done"
+  const Icon = failed
+    ? CircleXIcon
+    : completed
+      ? CheckCircle2Icon
+      : ActivityIcon
+  const occurredAt = new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(event.occurredAt))
 
   return (
-    <section
-      aria-labelledby="decision-preview-title"
-      className="mt-md flex flex-col gap-md rounded-composer border border-warm-active/45 bg-surface p-lg"
+    <article
+      aria-posinset={event.sequence}
+      className="grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-sm rounded-control px-xs py-sm hover:bg-muted"
+      data-event-kind={event.kind}
     >
-      <div className="flex flex-wrap items-start justify-between gap-xs">
-        <div className="flex flex-col gap-xxs">
-          <Badge variant="outline">{copy.previewBadge}</Badge>
-          <h3
-            className="m-0 text-title text-text-strong"
-            id="decision-preview-title"
-          >
-            {copy.decisionTitle}
-          </h3>
+      <Icon
+        aria-hidden="true"
+        className={
+          failed
+            ? "mt-xxs size-3 text-destructive"
+            : "mt-xxs size-3 text-success"
+        }
+      />
+      <div className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-xs">
+          <span className="text-title text-text-strong">
+            {eventStatus(copy, event)}
+          </span>
+          <code className="max-w-full truncate rounded-control bg-code-chip px-xs py-xxs font-mono text-label text-text-secondary">
+            {event.kind}
+          </code>
         </div>
-        {saved ? <Badge variant="success">{copy.answerSaved}</Badge> : null}
+        {event.errorCode ? (
+          <p className="m-0 mt-xxs font-mono text-label text-destructive">
+            {event.errorCode}
+          </p>
+        ) : null}
       </div>
-      <div className="flex max-w-[70ch] flex-col gap-xs">
-        <p className="m-0 text-body text-text-strong">
-          {copy.decisionQuestion}
-        </p>
-        <p className="m-0 text-caption text-muted-foreground">
-          {copy.decisionWhy}
-        </p>
-      </div>
-      <RadioGroup
-        aria-label={copy.decisionQuestion}
-        onValueChange={(value) => {
-          setSelection(value)
-          setSaved(false)
-        }}
-        value={selection}
+      <time
+        className="whitespace-nowrap text-label text-muted-foreground"
+        dateTime={event.occurredAt}
       >
-        <label className="flex cursor-pointer items-start gap-sm rounded-control border border-divider px-md py-sm hover:bg-muted">
-          <RadioGroupItem aria-label={copy.decisionOptionSmall} value="small" />
-          <span className="flex flex-col gap-xxs">
-            <span className="text-title text-text-strong">
-              {copy.decisionOptionSmall}
-            </span>
-            <span className="text-caption text-muted-foreground">
-              {copy.decisionOptionSmallImpact}
-            </span>
-          </span>
-        </label>
-        <label className="flex cursor-pointer items-start gap-sm rounded-control border border-divider px-md py-sm hover:bg-muted">
-          <RadioGroupItem aria-label={copy.decisionOptionHold} value="hold" />
-          <span className="flex flex-col gap-xxs">
-            <span className="text-title text-text-strong">
-              {copy.decisionOptionHold}
-            </span>
-            <span className="text-caption text-muted-foreground">
-              {copy.decisionOptionHoldImpact}
-            </span>
-          </span>
-        </label>
-      </RadioGroup>
-      <div className="flex flex-wrap items-center justify-between gap-sm">
-        <div className="flex flex-col gap-xxs text-caption">
-          <span className="text-foreground">{copy.decisionRecommendation}</span>
-          <span className="text-muted-foreground">
-            {copy.decisionUncertainty}
-          </span>
-        </div>
-        <Button
-          onClick={() => setSaved(true)}
-          size="xs"
-          type="button"
-          variant="secondary"
-        >
-          {copy.answerPreview}
-        </Button>
-      </div>
-    </section>
+        {occurredAt}
+      </time>
+    </article>
   )
 }
 
-export function Timeline({ copy, onOpenDiagnostics }: TimelineProps) {
+export function Timeline({
+  copy,
+  events,
+  history,
+  onOpenDiagnostics,
+}: TimelineProps) {
+  const historyUnavailable = history.mode !== "ready"
   return (
     <div className="flex min-h-full flex-col pb-[162px] pt-lg">
       <div className="mb-sm flex items-start justify-between gap-md">
@@ -142,47 +121,24 @@ export function Timeline({ copy, onOpenDiagnostics }: TimelineProps) {
             {copy.timelineDescription}
           </p>
         </div>
-        <Badge variant="outline">{copy.previewBadge}</Badge>
+        <Badge variant={historyUnavailable ? "outline" : "success"}>
+          {historyUnavailable ? copy.historyUnavailable : copy.persistedBadge}
+        </Badge>
       </div>
 
-      <div className="flex flex-col gap-xxs" role="feed">
-        <ToolRow
-          command="agent-browser skills get core"
-          copy={copy}
-          detail="Reference event · no shell input is exposed by this row."
-        />
-        <ToolRow
-          command="agent-docs read docs/screen-design/S-002_coding-workspace.md"
-          copy={copy}
-          detail="Reference event · structured summary only."
-        />
-        <ToolRow
-          command="pnpm run typecheck"
-          copy={copy}
-          detail="Reference event · a live result will include duration and evidence ID."
-        />
-
-        <article className="mt-md max-w-[72ch] text-body text-foreground">
-          <p className="m-0">{copy.assistantPreview}</p>
-        </article>
-
-        <ToolRow
-          command="pnpm run check"
-          copy={copy}
-          detail="APP-DEMO-NOT-CONNECTED · no process was started."
-          status="failed"
-        />
-
+      {historyUnavailable ? (
         <div
-          className="mt-xs flex items-start gap-xs text-body text-destructive"
-          role="status"
+          className="mb-md flex items-start gap-sm rounded-control border border-destructive/40 bg-destructive/10 p-md"
+          role="alert"
         >
-          <CircleXIcon className="mt-[4px] size-3 shrink-0" />
-          <div className="flex min-w-0 flex-1 flex-col gap-xxs">
-            <span className="font-medium">{copy.errorTitle}</span>
-            <span className="text-caption text-destructive/90">
-              {copy.errorBody}
-            </span>
+          <AlertTriangleIcon className="mt-xxs size-3 shrink-0 text-destructive" />
+          <div className="min-w-0 flex-1">
+            <p className="m-0 text-title text-destructive">
+              {copy.historyUnavailable}
+            </p>
+            <p className="m-0 mt-xxs font-mono text-label text-destructive">
+              {history.errorCode ?? "HIST-READ-ONLY"}
+            </p>
           </div>
           <Button
             onClick={onOpenDiagnostics}
@@ -193,19 +149,28 @@ export function Timeline({ copy, onOpenDiagnostics }: TimelineProps) {
             {copy.diagnostics}
           </Button>
         </div>
+      ) : null}
 
-        <article className="mt-md flex max-w-[72ch] items-start gap-sm text-body text-foreground">
-          <FileCheck2Icon className="mt-[4px] size-3 shrink-0 text-success" />
-          <p className="m-0">{copy.verificationPreview}</p>
-        </article>
-
-        <div className="sr-only" aria-live="polite">
-          <CheckCircle2Icon />
-          {copy.previewNotice}
+      {events.length > 0 ? (
+        <div className="flex flex-col gap-xxs" role="feed">
+          {events.map((event) => (
+            <TimelineEventRow copy={copy} event={event} key={event.id} />
+          ))}
         </div>
-
-        <DecisionPreview copy={copy} />
-      </div>
+      ) : (
+        <div className="flex min-h-36 flex-col items-center justify-center gap-xs rounded-control border border-dashed border-divider px-xl text-center">
+          <ActivityIcon
+            aria-hidden="true"
+            className="size-5 text-muted-foreground"
+          />
+          <h3 className="m-0 text-title text-text-strong">
+            {copy.timelineEmptyTitle}
+          </h3>
+          <p className="m-0 max-w-[52ch] text-caption text-muted-foreground">
+            {copy.timelineEmptyBody}
+          </p>
+        </div>
+      )}
     </div>
   )
 }

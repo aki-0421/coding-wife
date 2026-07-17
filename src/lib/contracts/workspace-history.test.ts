@@ -49,7 +49,10 @@ describe("workspace history contract", () => {
 
   it("routes each command to its exact parser", () => {
     expect(
-      parseWorkspaceHistoryResponse(workspaceHistoryCommands.list, fixture.state),
+      parseWorkspaceHistoryResponse(
+        workspaceHistoryCommands.list,
+        fixture.state,
+      ),
     ).toEqual(fixture.state)
     expect(
       parseWorkspaceHistoryResponse(
@@ -88,7 +91,10 @@ describe("workspace history contract", () => {
       }),
     ).toThrow(WorkspaceHistoryContractError)
     expect(() =>
-      parsePersistedWorkspaceSummary({ ...fixture.summary, rawPath: "/tmp/repo" }),
+      parsePersistedWorkspaceSummary({
+        ...fixture.summary,
+        rawPath: "/tmp/repo",
+      }),
     ).toThrow(WorkspaceHistoryContractError)
     expect(() =>
       parseWorkspaceStateSnapshot({
@@ -138,7 +144,11 @@ describe("workspace history contract", () => {
         ...fixture.timeline,
         items: [
           { ...fixture.timeline.items[0], sequence: 2 },
-          { ...fixture.timeline.items[0], eventId: "event-second", sequence: 1 },
+          {
+            ...fixture.timeline.items[0],
+            eventId: "event-second",
+            sequence: 1,
+          },
         ],
       }),
     ).toThrow(WorkspaceHistoryContractError)

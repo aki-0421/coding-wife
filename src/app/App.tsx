@@ -10,6 +10,7 @@ import {
   type LocalePreferenceStore,
 } from "@/features/localization"
 import { createAppTransport, type AppTransport } from "@/features/runtime"
+import { createWorkspaceViewAdapter } from "@/features/workspace-persistence"
 import {
   WorkspaceShell,
   type CharacterStageRenderer,
@@ -39,6 +40,10 @@ export function App({
     () => createLocalePreferenceStore(activeTransport.kind),
     [activeTransport.kind],
   )
+  const fallbackWorkspaceAdapter = useMemo(
+    () => createWorkspaceViewAdapter(activeTransport.kind),
+    [activeTransport.kind],
+  )
 
   return (
     <AppProviders
@@ -47,7 +52,7 @@ export function App({
     >
       <CharacterRuntimeStatusProvider rendererKind={characterRendererKind}>
         <WorkspaceShell
-          adapter={workspaceAdapter}
+          adapter={workspaceAdapter ?? fallbackWorkspaceAdapter}
           characterRenderer={activeCharacterRenderer}
         />
       </CharacterRuntimeStatusProvider>

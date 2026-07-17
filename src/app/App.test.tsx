@@ -176,7 +176,7 @@ describe("App workspace shell", () => {
       screen.getAllByText(
         "Codex, Git, and local history are not connected. The bundled Live2D companion reports its renderer state separately.",
       ),
-    ).toHaveLength(2)
+    ).toHaveLength(1)
     expect(
       document.querySelector('[data-character-stage-default="bundled-hiyori"]'),
     ).toBeInTheDocument()

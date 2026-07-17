@@ -159,6 +159,14 @@ export function WorkspaceShell({
             <EmptyTitle>{copy.workspaces}</EmptyTitle>
             <EmptyDescription>{copy.noMatches}</EmptyDescription>
           </EmptyHeader>
+          <Button
+            onClick={() => void view.requestAddProject(copy.pickerUnavailable)}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            {copy.addProject}
+          </Button>
         </Empty>
       </main>
     )
@@ -208,6 +216,7 @@ export function WorkspaceShell({
             connected={connected}
             copy={copy}
             draft={view.selectedDraft}
+            history={view.history}
             muted={view.muted}
             onAddAttachments={view.addAttachments}
             onCaptureContext={(source) =>
@@ -228,6 +237,7 @@ export function WorkspaceShell({
             reducedMotion={reducedMotion}
             renderer={characterRenderer}
             runtimeError={runtime.state.status === "error"}
+            timeline={view.timeline}
             turnState={view.turnState}
             workspaceId={selectedWorkspace.id}
           />
@@ -264,6 +274,7 @@ export function WorkspaceShell({
             muted={view.muted}
             onCharacterHiddenChange={view.setCharacterHidden}
             onMutedChange={view.setMuted}
+            onDeleteHistory={view.deleteSelectedWorkspaceHistory}
             onOpenContext={() => view.setActiveTab("context")}
             onReducedMotionChange={view.setReducedMotion}
             onResetUi={view.resetUiState}
@@ -279,6 +290,7 @@ export function WorkspaceShell({
               })
             }
             reducedMotion={view.reducedMotion}
+            historyConnected={adapter?.deleteWorkspaceHistory !== undefined}
             runtimeState={runtime.state}
             section={view.settingsSection}
           />

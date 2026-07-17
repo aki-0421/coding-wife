@@ -24,6 +24,7 @@ const en = {
   },
   attention: {
     needs_answer: "Needs answer",
+    approval_required: "Approval required",
     test_failed: "Test failed",
     high_risk: "High risk",
   },
@@ -50,6 +51,11 @@ const en = {
   timelineTitle: "Activity",
   timelineDescription: "Structured, redacted workspace events",
   previewBadge: "Reference preview",
+  persistedBadge: "Persisted locally",
+  historyUnavailable: "History requires recovery",
+  timelineEmptyTitle: "No persisted activity yet",
+  timelineEmptyBody:
+    "Start the first turn or inspect project diagnostics before continuing.",
   tool: "Tool",
   completed: "Completed",
   failed: "Failed",
@@ -262,13 +268,21 @@ const en = {
       "Raw reasoning, generated audio, support prompt/response, and raw secrets.",
     deleteHistory: "Delete workspace history",
     deleteDisabled: "No connected history service; nothing was deleted.",
+    deleteReady:
+      "Deletes this workspace's app metadata and events. Repository files, commits, and branches are never changed.",
+    deleteConfirmTitle: "Delete this workspace history?",
+    deleteConfirmBody:
+      "This removes local app history for the selected workspace only. This action cannot be undone.",
+    deleteCancel: "Cancel",
+    deleteConfirm: "Delete history",
+    deleteInProgress: "Deleting…",
     localPreview:
       "Preview preference · not persisted to the native settings service",
   },
   createWorkspace: {
     title: "Create workspace",
     description:
-      "Adds a local Backlog entry. Repository operations require the native adapter.",
+      "Creates a Backlog session in the selected project and keeps its goal as the first draft.",
     name: "Workspace name",
     goal: "Goal",
     cancel: "Cancel",
@@ -302,6 +316,7 @@ const ja: typeof en = {
   },
   attention: {
     needs_answer: "回答待ち",
+    approval_required: "承認待ち",
     test_failed: "テスト失敗",
     high_risk: "高リスク",
   },
@@ -328,6 +343,11 @@ const ja: typeof en = {
   timelineTitle: "アクティビティ",
   timelineDescription: "構造化・秘匿化されたワークスペースイベント",
   previewBadge: "参照プレビュー",
+  persistedBadge: "ローカルに永続化済み",
+  historyUnavailable: "履歴の復旧が必要です",
+  timelineEmptyTitle: "永続化されたアクティビティはまだありません",
+  timelineEmptyBody:
+    "最初のターンを開始するか、続行前にプロジェクト診断を確認してください。",
   tool: "ツール",
   completed: "完了",
   failed: "失敗",
@@ -533,18 +553,26 @@ const ja: typeof en = {
     historyTitle: "履歴とプライバシー",
     stored: "ローカルに保存",
     storedBody:
-      "workspace metadata、正規化event、下書き、context、evidence pack。",
+      "ワークスペースのメタデータ、正規化済みイベント、下書き、コンテキスト、証拠パック。",
     neverStored: "保存しない",
     neverStoredBody:
-      "raw reasoning、生成音声、support prompt/response、raw secret。",
+      "推論の生データ、生成音声、支援用の入出力、秘匿情報の生データ。",
     deleteHistory: "ワークスペース履歴を削除",
-    deleteDisabled: "履歴serviceは未接続です。何も削除していません。",
+    deleteDisabled: "履歴サービスは未接続です。何も削除していません。",
+    deleteReady:
+      "このワークスペースのアプリ内メタデータとイベントを削除します。リポジトリのファイル、コミット、ブランチは変更しません。",
+    deleteConfirmTitle: "このワークスペースの履歴を削除しますか？",
+    deleteConfirmBody:
+      "選択中のワークスペースに属するローカルアプリ履歴だけを削除します。この操作は元に戻せません。",
+    deleteCancel: "キャンセル",
+    deleteConfirm: "履歴を削除",
+    deleteInProgress: "削除中…",
     localPreview: "プレビュー設定 · native settings serviceには未保存",
   },
   createWorkspace: {
     title: "ワークスペースを作成",
     description:
-      "ローカルのBacklog entryを追加します。repository操作にはnative adapterが必要です。",
+      "選択中のプロジェクトにBacklogセッションを作成し、目標を最初の下書きとして保存します。",
     name: "ワークスペース名",
     goal: "目標",
     cancel: "キャンセル",

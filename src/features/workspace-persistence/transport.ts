@@ -64,12 +64,12 @@ function boundaryError(
   })
 }
 
-export class TauriWorkspaceHistoryTransport
-  implements WorkspaceHistoryTransport
-{
+export class TauriWorkspaceHistoryTransport implements WorkspaceHistoryTransport {
   readonly kind = "tauri"
 
-  constructor(private readonly invoker: WorkspaceHistoryInvoker = invokeTauri) {}
+  constructor(
+    private readonly invoker: WorkspaceHistoryInvoker = invokeTauri,
+  ) {}
 
   async request<K extends WorkspaceHistoryCommand>(
     command: K,

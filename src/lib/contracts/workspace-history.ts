@@ -16,27 +16,13 @@ export const workspaceHistoryCommands = {
 
 export type WorkspaceHistoryMode = "ready" | "read_only" | "recovery_required"
 export type WorkspaceLifecycle =
-  | "backlog"
-  | "in_progress"
-  | "in_review"
-  | "done"
-  | "canceled"
+  "backlog" | "in_progress" | "in_review" | "done" | "canceled"
 export type WorkspaceAttention =
-  | "needs_answer"
-  | "approval_required"
-  | "test_failed"
-  | "high_risk"
+  "needs_answer" | "approval_required" | "test_failed" | "high_risk"
 export type WorkspaceHealth =
-  | "ready"
-  | "missing"
-  | "changed"
-  | "unreadable"
-  | "read_only"
+  "ready" | "missing" | "changed" | "unreadable" | "read_only"
 export type WorkspaceReasoningEffort = "fast" | "max"
-export type WorkspaceContextSource =
-  | "files"
-  | "git_diff"
-  | "terminal_output"
+export type WorkspaceContextSource = "files" | "git_diff" | "terminal_output"
 
 export interface WorkspaceHistoryStatus {
   readonly schemaVersion: typeof workspaceHistorySchemaVersion
@@ -149,8 +135,6 @@ export interface WorkspaceSaveDraftRequest {
 export interface WorkspaceSaveContextRequest {
   readonly workspaceId: string
   readonly source: WorkspaceContextSource
-  readonly label: string
-  readonly content: string
 }
 
 export interface WorkspaceTimelineRequest {
@@ -285,20 +269,23 @@ function isString(value: unknown, maximum = 512): value is string {
   )
 }
 
-function isNullableString(value: unknown, maximum = 512): value is string | null {
+function isNullableString(
+  value: unknown,
+  maximum = 512,
+): value is string | null {
   return value === null || isString(value, maximum)
 }
 
 function isTimestamp(value: unknown): value is string {
   return (
-    isString(value, 64) && value.includes("T") && Number.isFinite(Date.parse(value))
+    isString(value, 64) &&
+    value.includes("T") &&
+    Number.isFinite(Date.parse(value))
   )
 }
 
 function isSafeUnsignedInteger(value: unknown): value is number {
-  return (
-    typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-  )
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 }
 
 function oneOf<T extends string>(
@@ -624,9 +611,7 @@ export function parsePersistedTimelineEvent(
     value.schemaVersion !== workspaceHistorySchemaVersion ||
     !validatePublicString(value.eventId, 128) ||
     !validatePublicString(value.workspaceId, 128) ||
-    !(
-      value.sessionId === null || validatePublicString(value.sessionId, 128)
-    ) ||
+    !(value.sessionId === null || validatePublicString(value.sessionId, 128)) ||
     !isSafeUnsignedInteger(value.sequence) ||
     !isTimestamp(value.occurredAt)
   ) {
@@ -651,11 +636,7 @@ export function parsePersistedTimelinePage(
 ): PersistedTimelinePage {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, [
-      "schemaVersion",
-      "items",
-      "nextBeforeSequence",
-    ]) ||
+    !hasExactKeys(value, ["schemaVersion", "items", "nextBeforeSequence"]) ||
     value.schemaVersion !== workspaceHistorySchemaVersion ||
     !Array.isArray(value.items) ||
     value.items.length > 200 ||
@@ -667,7 +648,12 @@ export function parsePersistedTimelinePage(
     return violation()
   }
   const items = value.items.map(parsePersistedTimelineEvent)
-  if (items.some((event, index) => index > 0 && event.sequence <= items[index - 1]!.sequence)) {
+  if (
+    items.some(
+      (event, index) =>
+        index > 0 && event.sequence <= items[index - 1]!.sequence,
+    )
+  ) {
     return violation()
   }
   return {
@@ -696,7 +682,9 @@ export function parseWorkspaceStateSnapshot(
     value.workspaces.length > 200 ||
     !Array.isArray(value.contextSnapshots) ||
     value.contextSnapshots.length > 10 ||
-    !(value.activeWorkspaceId === null || isString(value.activeWorkspaceId, 128))
+    !(
+      value.activeWorkspaceId === null || isString(value.activeWorkspaceId, 128)
+    )
   ) {
     return violation()
   }
@@ -722,9 +710,7 @@ export function parseWorkspaceStateSnapshot(
     return violation()
   }
   const timeline = parsePersistedTimelinePage(value.timeline)
-  if (
-    timeline.items.some((event) => event.workspaceId !== activeWorkspaceId)
-  ) {
+  if (timeline.items.some((event) => event.workspaceId !== activeWorkspaceId)) {
     return violation()
   }
   return {
@@ -738,7 +724,9 @@ export function parseWorkspaceStateSnapshot(
   }
 }
 
-export function parseWorkspacePickResponse(value: unknown): WorkspacePickResponse {
+export function parseWorkspacePickResponse(
+  value: unknown,
+): WorkspacePickResponse {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ["schemaVersion", "outcome", "state"]) ||
@@ -827,34 +815,47 @@ export function parseWorkspaceCommandError(
   }
 }
 
-export function parseWorkspaceHistoryResponse<K extends WorkspaceHistoryCommand>(
-  command: K,
-  value: unknown,
-): WorkspaceHistoryResponseMap[K] {
+export function parseWorkspaceHistoryResponse<
+  K extends WorkspaceHistoryCommand,
+>(command: K, value: unknown): WorkspaceHistoryResponseMap[K] {
   switch (command) {
     case workspaceHistoryCommands.list:
     case workspaceHistoryCommands.createSession:
     case workspaceHistoryCommands.select:
     case workspaceHistoryCommands.delete:
-      return parseWorkspaceStateSnapshot(value) as WorkspaceHistoryResponseMap[K]
+      return parseWorkspaceStateSnapshot(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.pickRegister:
       return parseWorkspacePickResponse(value) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.updateLifecycle:
-      return parsePersistedWorkspaceSummary(value) as WorkspaceHistoryResponseMap[K]
+      return parsePersistedWorkspaceSummary(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.saveDraft:
-      return parsePersistedWorkspaceDraft(value) as WorkspaceHistoryResponseMap[K]
+      return parsePersistedWorkspaceDraft(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.saveContextSnapshot:
-      return parsePersistedContextSnapshot(value) as WorkspaceHistoryResponseMap[K]
+      return parsePersistedContextSnapshot(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.listTimeline:
       return parsePersistedTimelinePage(value) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.issueDeleteChallenge:
-      return parseWorkspaceDeleteChallenge(value) as WorkspaceHistoryResponseMap[K]
+      return parseWorkspaceDeleteChallenge(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.appendDomainEvent:
-      return parseAppendDomainEventResponse(value) as WorkspaceHistoryResponseMap[K]
+      return parseAppendDomainEventResponse(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
   }
 }
 
-function isWorkspaceHistoryCommand(value: unknown): value is WorkspaceHistoryCommand {
+function isWorkspaceHistoryCommand(
+  value: unknown,
+): value is WorkspaceHistoryCommand {
   return Object.values(workspaceHistoryCommands).some(
     (command) => command === value,
   )

@@ -17,7 +17,9 @@ import type {
   CharacterStageRenderer,
   ContextSnapshotItem,
   ReasoningEffort,
+  WorkspaceAdapterState,
   WorkspaceDraft,
+  WorkspaceTimelineItem,
 } from "@/features/workspace-view/types"
 import { cn } from "@/lib/utils"
 
@@ -27,11 +29,13 @@ interface ChatViewProps {
   readonly connected: boolean
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
+  readonly history: WorkspaceAdapterState["history"]
   readonly muted: boolean
   readonly reducedMotion: boolean
   readonly renderer?: CharacterStageRenderer | undefined
   readonly runtimeError: boolean
   readonly turnState: TurnUiState
+  readonly timeline: readonly WorkspaceTimelineItem[]
   readonly workspaceId: string
   readonly onAddAttachments: (files: readonly File[]) => void
   readonly onCaptureContext: (
@@ -55,11 +59,13 @@ export function ChatView({
   connected,
   copy,
   draft,
+  history,
   muted,
   reducedMotion,
   renderer,
   runtimeError,
   turnState,
+  timeline,
   workspaceId,
   onAddAttachments,
   onCaptureContext,
@@ -124,7 +130,12 @@ export function ChatView({
 
         <ScrollArea className="size-full pt-9">
           <div className="px-xl">
-            <Timeline copy={copy} onOpenDiagnostics={onOpenDiagnostics} />
+            <Timeline
+              copy={copy}
+              events={timeline}
+              history={history}
+              onOpenDiagnostics={onOpenDiagnostics}
+            />
           </div>
         </ScrollArea>
 

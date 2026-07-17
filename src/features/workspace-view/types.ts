@@ -21,7 +21,10 @@ export interface WorkspaceRecord {
   readonly name: string
   readonly branch: string
   readonly lifecycle: WorkspaceLifecycle
-  readonly attention?: "needs_answer" | "test_failed" | "high_risk"
+  readonly attention?:
+    "needs_answer" | "approval_required" | "test_failed" | "high_risk"
+  readonly health?: "ready" | "missing" | "changed" | "unreadable" | "read_only"
+  readonly updatedAt?: string
 }
 
 export interface AttachmentItem {
@@ -46,6 +49,43 @@ export interface WorkspaceDraft {
   readonly contextSnapshots: readonly ContextSnapshotItem[]
 }
 
+export interface WorkspaceTimelineItem {
+  readonly id: string
+  readonly sequence: number
+  readonly producer: "app" | "work" | "code" | "live" | "hist" | "git"
+  readonly kind: string
+  readonly occurredAt: string
+  readonly status: string
+  readonly errorCode?: string
+}
+
+export interface WorkspaceAdapterDraft {
+  readonly text: string
+  readonly effort: ReasoningEffort
+  readonly revision: number
+  readonly contextSnapshots: readonly ContextSnapshotItem[]
+}
+
+export interface WorkspaceAdapterState {
+  readonly workspaces: readonly WorkspaceRecord[]
+  readonly activeWorkspaceId: string | null
+  readonly draft: WorkspaceAdapterDraft | null
+  readonly timeline: readonly WorkspaceTimelineItem[]
+  readonly history: {
+    readonly mode: "ready" | "read_only" | "recovery_required"
+    readonly errorCode: string | null
+    readonly backupName: string | null
+  }
+}
+
+export interface WorkspaceCreateRequest {
+  readonly fromWorkspaceId: string
+  readonly name: string
+  readonly goal: string
+  readonly repository: string
+  readonly branch: string
+}
+
 export interface SendTurnRequest {
   readonly workspaceId: string
   readonly instruction: string
@@ -56,10 +96,20 @@ export interface SendTurnRequest {
 
 export interface WorkspaceViewAdapter {
   readonly connected?: boolean
-  readonly requestAddProject?: () => void | Promise<void>
+  readonly loadState?: () => Promise<WorkspaceAdapterState>
+  readonly selectWorkspace?: (
+    workspaceId: string,
+  ) => Promise<WorkspaceAdapterState>
+  readonly saveDraft?: (
+    workspaceId: string,
+    text: string,
+    effort: ReasoningEffort,
+  ) => Promise<void>
+  readonly requestAddProject?: () =>
+    void | WorkspaceAdapterState | Promise<void | WorkspaceAdapterState>
   readonly requestAddWorkspace?: (
-    workspace: Pick<WorkspaceRecord, "name" | "repository" | "branch">,
-  ) => void | Promise<void>
+    workspace: WorkspaceCreateRequest,
+  ) => void | WorkspaceAdapterState | Promise<void | WorkspaceAdapterState>
   readonly captureContext?: (
     workspaceId: string,
     source: ContextSnapshotItem["source"],
@@ -68,6 +118,9 @@ export interface WorkspaceViewAdapter {
     request: SendTurnRequest,
   ) => Promise<{ readonly accepted: boolean }>
   readonly stopTurn?: (workspaceId: string) => void | Promise<void>
+  readonly deleteWorkspaceHistory?: (
+    workspaceId: string,
+  ) => Promise<WorkspaceAdapterState>
 }
 
 export interface CharacterStageRenderProps {

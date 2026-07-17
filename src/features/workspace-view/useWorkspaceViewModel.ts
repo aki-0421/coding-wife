@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { initialWorkspaces } from "@/features/workspace-view/demo-data"
 import type {
@@ -7,9 +7,11 @@ import type {
   ReasoningEffort,
   SendTurnRequest,
   SettingsSection,
+  WorkspaceAdapterState,
   WorkspaceDraft,
   WorkspaceRecord,
   WorkspaceTab,
+  WorkspaceTimelineItem,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 
@@ -18,6 +20,11 @@ const emptyDraft: WorkspaceDraft = {
   effort: "fast",
   attachments: [],
   contextSnapshots: [],
+}
+
+interface PendingDraftSave {
+  readonly text: string
+  readonly effort: ReasoningEffort
 }
 
 function draftFor(
@@ -49,11 +56,74 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   >({})
   const [turnState, setTurnState] = useState<TurnUiState>("idle")
   const [notice, setNotice] = useState<WorkspaceViewNotice | null>(null)
+  const [adapterReady, setAdapterReady] = useState(!adapter?.loadState)
+  const [timeline, setTimeline] = useState<readonly WorkspaceTimelineItem[]>([])
+  const [history, setHistory] = useState<WorkspaceAdapterState["history"]>({
+    mode: "ready",
+    errorCode: null,
+    backupName: null,
+  })
   const [muted, setMuted] = useState(false)
   const [characterHidden, setCharacterHidden] = useState(false)
   const [reducedMotion, setReducedMotion] = useState<
     "system" | "reduce" | "allow"
   >("system")
+  const selectionVersion = useRef(0)
+  const pendingDraftSaves = useRef(new Map<string, PendingDraftSave>())
+  const draftSaveTimers = useRef(new Map<string, number>())
+
+  const applyAdapterState = useCallback((state: WorkspaceAdapterState) => {
+    setWorkspaces(state.workspaces)
+    setTimeline(state.timeline)
+    setHistory(state.history)
+    if (state.activeWorkspaceId === null) {
+      setSelectedWorkspaceId("")
+      return
+    }
+    const activeWorkspaceId = state.activeWorkspaceId
+    setSelectedWorkspaceId(activeWorkspaceId)
+    if (state.draft !== null) {
+      const adapterDraft = state.draft
+      const pendingDraft = pendingDraftSaves.current.get(activeWorkspaceId)
+      setDrafts((current) => {
+        const existing = draftFor(current, activeWorkspaceId)
+        return {
+          ...current,
+          [activeWorkspaceId]: {
+            text: pendingDraft?.text ?? adapterDraft.text,
+            effort: pendingDraft?.effort ?? adapterDraft.effort,
+            attachments: existing.attachments,
+            contextSnapshots: adapterDraft.contextSnapshots,
+          },
+        }
+      })
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!adapter?.loadState) return
+    let current = true
+    void adapter
+      .loadState()
+      .then((state) => {
+        if (current) {
+          applyAdapterState(state)
+          setAdapterReady(true)
+        }
+      })
+      .catch((error: unknown) => {
+        if (current) {
+          setNotice({
+            tone: "error",
+            message:
+              error instanceof Error ? error.message : "WORKSPACE-LOAD-FAILED",
+          })
+        }
+      })
+    return () => {
+      current = false
+    }
+  }, [adapter, applyAdapterState])
 
   const selectedWorkspace =
     workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ??
@@ -88,20 +158,76 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     [],
   )
 
+  const persistPendingDraft = useCallback(
+    (workspaceId: string) => {
+      const pending = pendingDraftSaves.current.get(workspaceId)
+      if (pending === undefined || !adapter?.saveDraft) return
+      void adapter
+        .saveDraft(workspaceId, pending.text, pending.effort)
+        .then(() => {
+          if (pendingDraftSaves.current.get(workspaceId) === pending) {
+            pendingDraftSaves.current.delete(workspaceId)
+          }
+        })
+        .catch((error: unknown) => {
+          setNotice({
+            tone: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "WORKSPACE-DRAFT-SAVE-FAILED",
+          })
+        })
+    },
+    [adapter],
+  )
+
+  const scheduleDraftSave = useCallback(
+    (workspaceId: string, text: string, effort: ReasoningEffort) => {
+      pendingDraftSaves.current.set(workspaceId, { text, effort })
+      const existingTimer = draftSaveTimers.current.get(workspaceId)
+      if (existingTimer !== undefined) window.clearTimeout(existingTimer)
+      if (!adapterReady || !adapter?.saveDraft) return
+      const timer = window.setTimeout(() => {
+        draftSaveTimers.current.delete(workspaceId)
+        persistPendingDraft(workspaceId)
+      }, 250)
+      draftSaveTimers.current.set(workspaceId, timer)
+    },
+    [adapter, adapterReady, persistPendingDraft],
+  )
+
+  useEffect(() => {
+    if (!adapterReady || !adapter?.saveDraft) return
+    for (const [workspaceId, pending] of pendingDraftSaves.current) {
+      scheduleDraftSave(workspaceId, pending.text, pending.effort)
+    }
+  }, [adapter, adapterReady, scheduleDraftSave])
+
+  useEffect(() => {
+    const timers = draftSaveTimers.current
+    return () => {
+      for (const timer of timers.values()) window.clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
+
   const setDraftText = useCallback(
     (text: string) => {
       if (!selectedWorkspace) return
       updateDraft(selectedWorkspace.id, (current) => ({ ...current, text }))
+      scheduleDraftSave(selectedWorkspace.id, text, selectedDraft.effort)
     },
-    [selectedWorkspace, updateDraft],
+    [scheduleDraftSave, selectedDraft.effort, selectedWorkspace, updateDraft],
   )
 
   const setEffort = useCallback(
     (effort: ReasoningEffort) => {
       if (!selectedWorkspace) return
       updateDraft(selectedWorkspace.id, (current) => ({ ...current, effort }))
+      scheduleDraftSave(selectedWorkspace.id, selectedDraft.text, effort)
     },
-    [selectedWorkspace, updateDraft],
+    [scheduleDraftSave, selectedDraft.text, selectedWorkspace, updateDraft],
   )
 
   const addAttachments = useCallback(
@@ -203,6 +329,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         attachments: [],
         contextSnapshots: [],
       }))
+      scheduleDraftSave(selectedWorkspace.id, "", draft.effort)
       setTurnState("running")
       setNotice(null)
       return true
@@ -210,7 +337,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
       setTurnState("idle")
       return false
     }
-  }, [adapter, drafts, selectedWorkspace, updateDraft])
+  }, [adapter, drafts, scheduleDraftSave, selectedWorkspace, updateDraft])
 
   const stopTurn = useCallback(async () => {
     if (!selectedWorkspace || !adapter?.stopTurn || turnState !== "running") {
@@ -229,6 +356,32 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     async (name: string, goal: string) => {
       const trimmedName = name.trim()
       if (trimmedName.length === 0) return false
+      if (adapter?.requestAddWorkspace && selectedWorkspace) {
+        try {
+          const state = await adapter.requestAddWorkspace({
+            fromWorkspaceId: selectedWorkspace.id,
+            name: trimmedName,
+            goal: goal.trim(),
+            repository: selectedWorkspace.repository,
+            branch: selectedWorkspace.branch,
+          })
+          if (state !== undefined) {
+            applyAdapterState(state)
+            setActiveTab("chat")
+            setNotice(null)
+            return true
+          }
+        } catch (error) {
+          setNotice({
+            tone: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "WORKSPACE-CREATE-FAILED",
+          })
+          return false
+        }
+      }
       const record: WorkspaceRecord = {
         id: `local-${Date.now()}`,
         repository: selectedWorkspace?.repository ?? "local-project",
@@ -243,14 +396,9 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         ...current,
         [record.id]: { ...emptyDraft, text: goal.trim() },
       }))
-      await adapter?.requestAddWorkspace?.({
-        name: record.name,
-        repository: record.repository,
-        branch: record.branch,
-      })
       return true
     },
-    [adapter, selectedWorkspace],
+    [adapter, applyAdapterState, selectedWorkspace],
   )
 
   const requestAddProject = useCallback(
@@ -259,11 +407,68 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         setNotice({ tone: "neutral", message: unavailableCopy })
         return
       }
-      await adapter.requestAddProject()
-      setNotice(null)
+      try {
+        const state = await adapter.requestAddProject()
+        if (state !== undefined) applyAdapterState(state)
+        setNotice(null)
+      } catch (error) {
+        setNotice({
+          tone: "error",
+          message: error instanceof Error ? error.message : unavailableCopy,
+        })
+      }
     },
-    [adapter],
+    [adapter, applyAdapterState],
   )
+
+  const selectWorkspace = useCallback(
+    (workspaceId: string) => {
+      selectionVersion.current += 1
+      const version = selectionVersion.current
+      const previousWorkspaceId = selectedWorkspaceId
+      setSelectedWorkspaceId(workspaceId)
+      if (!adapter?.selectWorkspace) return
+      void adapter
+        .selectWorkspace(workspaceId)
+        .then((state) => {
+          if (selectionVersion.current === version) applyAdapterState(state)
+        })
+        .catch((error: unknown) => {
+          if (selectionVersion.current === version) {
+            setSelectedWorkspaceId(previousWorkspaceId)
+            setNotice({
+              tone: "error",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "WORKSPACE-SELECT-FAILED",
+            })
+          }
+        })
+    },
+    [adapter, applyAdapterState, selectedWorkspaceId],
+  )
+
+  const deleteSelectedWorkspaceHistory = useCallback(async () => {
+    if (!selectedWorkspace || !adapter?.deleteWorkspaceHistory) return false
+    try {
+      const workspaceId = selectedWorkspace.id
+      applyAdapterState(await adapter.deleteWorkspaceHistory(workspaceId))
+      pendingDraftSaves.current.delete(workspaceId)
+      const timer = draftSaveTimers.current.get(workspaceId)
+      if (timer !== undefined) window.clearTimeout(timer)
+      draftSaveTimers.current.delete(workspaceId)
+      setNotice(null)
+      return true
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "WORKSPACE-DELETE-FAILED",
+      })
+      return false
+    }
+  }, [adapter, applyAdapterState, selectedWorkspace])
 
   const resetUiState = useCallback(() => {
     setFilter("")
@@ -279,10 +484,12 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     addWorkspace,
     captureContext,
     characterHidden,
+    deleteSelectedWorkspaceHistory,
     filteredWorkspaces,
     filter,
     muted,
     notice,
+    history,
     reducedMotion,
     removeAttachment,
     removeContext,
@@ -300,10 +507,11 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     setMuted,
     setNotice,
     setReducedMotion,
-    setSelectedWorkspaceId,
+    setSelectedWorkspaceId: selectWorkspace,
     setSettingsSection,
     settingsSection,
     stopTurn,
+    timeline,
     turnState,
     workspaces,
   }

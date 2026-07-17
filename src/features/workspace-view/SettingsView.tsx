@@ -17,6 +17,14 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Field,
   FieldDescription,
   FieldGroup,
@@ -48,11 +56,13 @@ interface SettingsViewProps {
   readonly characterHidden: boolean
   readonly characterRuntime: CharacterRuntimeView
   readonly copy: WorkspaceCopy
+  readonly historyConnected: boolean
   readonly muted: boolean
   readonly reducedMotion: "system" | "reduce" | "allow"
   readonly runtimeState: RuntimeState
   readonly section: SettingsSection
   readonly onCharacterHiddenChange: (hidden: boolean) => void
+  readonly onDeleteHistory: () => Promise<boolean>
   readonly onMutedChange: (muted: boolean) => void
   readonly onOpenContext: (section: "project" | "character") => void
   readonly onResetUi: () => void
@@ -698,7 +708,23 @@ function DiagnosticsSettings({
   )
 }
 
-function HistorySettings({ copy }: { readonly copy: WorkspaceCopy }) {
+function HistorySettings({
+  copy,
+  historyConnected,
+  onDeleteHistory,
+}: Pick<SettingsViewProps, "copy" | "historyConnected" | "onDeleteHistory">) {
+  const [confirmationOpen, setConfirmationOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const confirmDelete = async () => {
+    setDeleting(true)
+    try {
+      if (await onDeleteHistory()) setConfirmationOpen(false)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <section className="flex flex-col gap-xl">
       <h2 className="m-0 text-headline text-text-strong">
@@ -724,13 +750,58 @@ function HistorySettings({ copy }: { readonly copy: WorkspaceCopy }) {
       </div>
       <SettingRow
         action={
-          <Button disabled size="xs" type="button" variant="destructive">
+          <Button
+            disabled={!historyConnected}
+            onClick={() => setConfirmationOpen(true)}
+            size="xs"
+            type="button"
+            variant="destructive"
+          >
             {copy.settingsView.deleteHistory}
           </Button>
         }
-        description={copy.settingsView.deleteDisabled}
+        description={
+          historyConnected
+            ? copy.settingsView.deleteReady
+            : copy.settingsView.deleteDisabled
+        }
         label={copy.settingsView.deleteHistory}
       />
+      <Dialog
+        onOpenChange={(open) => {
+          if (!deleting) setConfirmationOpen(open)
+        }}
+        open={confirmationOpen}
+      >
+        <DialogContent showCloseButton={!deleting}>
+          <DialogHeader>
+            <DialogTitle>{copy.settingsView.deleteConfirmTitle}</DialogTitle>
+            <DialogDescription>
+              {copy.settingsView.deleteConfirmBody}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              disabled={deleting}
+              onClick={() => setConfirmationOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              {copy.settingsView.deleteCancel}
+            </Button>
+            <Button
+              disabled={deleting}
+              onClick={() => void confirmDelete()}
+              type="button"
+              variant="destructive"
+            >
+              {deleting
+                ? copy.settingsView.deleteInProgress
+                : copy.settingsView.deleteConfirm}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }
@@ -765,7 +836,7 @@ export function SettingsView(props: SettingsViewProps) {
       case "diagnostics":
         return <DiagnosticsSettings {...props} />
       case "history":
-        return <HistorySettings copy={props.copy} />
+        return <HistorySettings {...props} />
     }
   })()
 

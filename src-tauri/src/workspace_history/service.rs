@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -7,12 +8,13 @@ use crate::codex::workspace::{ValidatedWorkspaceCandidate, WorkspaceService};
 
 use super::store::WorkspaceHistoryStore;
 use super::types::{
-    AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, HistoryMode,
-    NormalizedDomainEvent, TimelinePage, WorkspaceCommandError, WorkspaceCreateSessionRequest,
-    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView, WorkspaceHealth,
-    WorkspacePickOutcome, WorkspacePickResponse, WorkspaceSaveContextRequest,
-    WorkspaceSaveDraftRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot, WorkspaceSummary,
-    WorkspaceTimelineRequest, WorkspaceUpdateLifecycleRequest, WORKSPACE_HISTORY_SCHEMA_VERSION,
+    AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, ContextSource,
+    HistoryMode, NormalizedDomainEvent, TimelinePage, WorkspaceCommandError,
+    WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
+    WorkspaceDraftView, WorkspaceHealth, WorkspacePickOutcome, WorkspacePickResponse,
+    WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest, WorkspaceSelectRequest,
+    WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineRequest,
+    WorkspaceUpdateLifecycleRequest, WORKSPACE_HISTORY_SCHEMA_VERSION,
 };
 
 const PICK_CANCELED_CODE: &str = "CODEX-WORKSPACE-PICK-CANCELED";
@@ -294,13 +296,20 @@ impl WorkspaceHistoryService {
         request: WorkspaceSaveContextRequest,
     ) -> Result<ContextSnapshotView, WorkspaceCommandError> {
         let _operation = self.operation_lock.lock().await;
+        let root = self
+            .workspace
+            .trusted_root(&request.workspace_id)
+            .await
+            .ok_or_else(|| {
+                WorkspaceCommandError::new(
+                    "WORKSPACE-CONTEXT-PREFLIGHT",
+                    "workspace_save_context_snapshot",
+                    true,
+                )
+            })?;
+        let (label, content) = capture_context(&root, request.source).await?;
         self.store
-            .save_context_snapshot(
-                &request.workspace_id,
-                request.source,
-                &request.label,
-                &request.content,
-            )
+            .save_context_snapshot(&request.workspace_id, request.source, label, &content)
             .map_err(|error| history_error("workspace_save_context_snapshot", error))
     }
 
@@ -470,6 +479,73 @@ impl WorkspaceHistoryService {
     }
 }
 
+async fn capture_context(
+    root: &Path,
+    source: ContextSource,
+) -> Result<(&'static str, String), WorkspaceCommandError> {
+    match source {
+        ContextSource::Files => Ok((
+            "Repository files",
+            run_git_capture(
+                root,
+                &["ls-files", "--cached", "--others", "--exclude-standard"],
+            )
+            .await?,
+        )),
+        ContextSource::GitDiff => {
+            let staged = run_git_capture(
+                root,
+                &["diff", "--cached", "--no-ext-diff", "--no-textconv", "--"],
+            )
+            .await?;
+            let working =
+                run_git_capture(root, &["diff", "--no-ext-diff", "--no-textconv", "--"]).await?;
+            let content = format!("Staged changes:\n{staged}\nWorking tree changes:\n{working}");
+            if content.len() > 1024 * 1024 {
+                return Err(WorkspaceCommandError::new(
+                    "WORKSPACE-CONTEXT-TOO-LARGE",
+                    "workspace_save_context_snapshot",
+                    false,
+                ));
+            }
+            Ok(("Working tree diff", content))
+        }
+        ContextSource::TerminalOutput => Err(WorkspaceCommandError::new(
+            "WORKSPACE-CONTEXT-SOURCE-UNAVAILABLE",
+            "workspace_save_context_snapshot",
+            true,
+        )),
+    }
+}
+
+async fn run_git_capture(root: &Path, arguments: &[&str]) -> Result<String, WorkspaceCommandError> {
+    let output = tokio::process::Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(root)
+        .args(arguments)
+        .env_clear()
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .kill_on_drop(true)
+        .output()
+        .await
+        .map_err(|_| {
+            WorkspaceCommandError::new(
+                "WORKSPACE-CONTEXT-GIT-UNAVAILABLE",
+                "workspace_save_context_snapshot",
+                true,
+            )
+        })?;
+    if !output.status.success() || output.stdout.len() > 1024 * 1024 || output.stderr.len() > 4096 {
+        return Err(WorkspaceCommandError::new(
+            "WORKSPACE-CONTEXT-CAPTURE-FAILED",
+            "workspace_save_context_snapshot",
+            true,
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 fn health_for_preflight_error(error: &CodexCommandError) -> WorkspaceHealth {
     match error.code.as_str() {
         "CODEX-WORKSPACE-MISSING" => WorkspaceHealth::Missing,
@@ -592,5 +668,44 @@ mod tests {
             service.list().expect("state").workspaces[0].health,
             WorkspaceHealth::Changed
         );
+    }
+
+    #[tokio::test]
+    async fn context_capture_reads_only_allowlisted_native_git_sources() {
+        let data = temp_directory("history-service-context");
+        let root = git_repository();
+        fs::write(root.join("fixture.txt"), "fixture context\n").expect("fixture file");
+        let workspace = WorkspaceService::production(CodexSupervisor::new());
+        let service = WorkspaceHistoryService::new(
+            WorkspaceHistoryStore::open(&data).expect("store"),
+            workspace.clone(),
+        );
+        let state = service
+            .register_validated_candidate(
+                candidate(&workspace, &root).await,
+                "workspace_pick_register",
+            )
+            .await
+            .expect("register and activate");
+        let workspace_id = state.active_workspace_id.expect("active workspace");
+
+        let snapshot = service
+            .save_context(WorkspaceSaveContextRequest {
+                workspace_id: workspace_id.clone(),
+                source: ContextSource::Files,
+            })
+            .await
+            .expect("capture repository files");
+        assert_eq!(snapshot.label, "Repository files");
+        assert!(snapshot.byte_count > 0);
+
+        let error = service
+            .save_context(WorkspaceSaveContextRequest {
+                workspace_id,
+                source: ContextSource::TerminalOutput,
+            })
+            .await
+            .expect_err("terminal output has no trusted producer yet");
+        assert_eq!(error.code, "WORKSPACE-CONTEXT-SOURCE-UNAVAILABLE");
     }
 }

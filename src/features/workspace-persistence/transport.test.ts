@@ -11,17 +11,24 @@ import {
 
 describe("TauriWorkspaceHistoryTransport", () => {
   it("invokes no-request commands without fabricating a payload", async () => {
-    const invoker = vi.fn<WorkspaceHistoryInvoker>().mockResolvedValue(fixture.state)
+    const invoker = vi
+      .fn<WorkspaceHistoryInvoker>()
+      .mockResolvedValue(fixture.state)
     const transport = new TauriWorkspaceHistoryTransport(invoker)
 
     await expect(
       transport.request(workspaceHistoryCommands.list, undefined),
     ).resolves.toEqual(fixture.state)
-    expect(invoker).toHaveBeenCalledWith(workspaceHistoryCommands.list, undefined)
+    expect(invoker).toHaveBeenCalledWith(
+      workspaceHistoryCommands.list,
+      undefined,
+    )
   })
 
   it("passes strict request objects and validates the matching response", async () => {
-    const invoker = vi.fn<WorkspaceHistoryInvoker>().mockResolvedValue(fixture.draft)
+    const invoker = vi
+      .fn<WorkspaceHistoryInvoker>()
+      .mockResolvedValue(fixture.draft)
     const transport = new TauriWorkspaceHistoryTransport(invoker)
     const request = {
       workspaceId: "workspace-fixture",
@@ -40,9 +47,13 @@ describe("TauriWorkspaceHistoryTransport", () => {
   })
 
   it("normalizes native envelopes only when the operation matches", async () => {
-    const transport = new TauriWorkspaceHistoryTransport(async () => {
-      throw fixture.error
-    })
+    const nativeError = Object.assign(
+      new Error(fixture.error.code),
+      fixture.error,
+    )
+    const transport = new TauriWorkspaceHistoryTransport(() =>
+      Promise.reject(nativeError),
+    )
 
     await expect(
       transport.request(workspaceHistoryCommands.select, {
@@ -56,15 +67,17 @@ describe("TauriWorkspaceHistoryTransport", () => {
   })
 
   it("turns malformed or private native values into a contract boundary error", async () => {
-    const transport = new TauriWorkspaceHistoryTransport(async () => ({
-      ...fixture.state,
-      workspaces: [
-        {
-          ...fixture.summary,
-          repository: "/Users/private/repository",
-        },
-      ],
-    }))
+    const transport = new TauriWorkspaceHistoryTransport(() =>
+      Promise.resolve({
+        ...fixture.state,
+        workspaces: [
+          {
+            ...fixture.summary,
+            repository: "/Users/private/repository",
+          },
+        ],
+      }),
+    )
 
     await expect(
       transport.request(workspaceHistoryCommands.list, undefined),

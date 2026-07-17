@@ -6,13 +6,14 @@ import {
   within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
 import type { LocalePreferenceStore } from "@/features/localization"
 import { DemoTransport } from "@/features/runtime"
 import type {
   SendTurnRequest,
+  WorkspaceAdapterState,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 
@@ -84,6 +85,156 @@ describe("WorkspaceShell", () => {
       }),
     )
     expect(composer).toHaveValue("Keep this draft with the Live2D workspace")
+  })
+
+  it("persists a pending draft when selection changes inside the debounce window", async () => {
+    const saveDraft = vi.fn().mockResolvedValue(undefined)
+    const stateFor = (activeWorkspaceId: string): WorkspaceAdapterState => ({
+      workspaces: [
+        {
+          id: "workspace-a",
+          repository: "fixture",
+          name: "workspace-a",
+          branch: "main",
+          lifecycle: "in_progress",
+        },
+        {
+          id: "workspace-b",
+          repository: "fixture",
+          name: "workspace-b",
+          branch: "main",
+          lifecycle: "backlog",
+        },
+      ],
+      activeWorkspaceId,
+      draft: {
+        text: "",
+        effort: "fast",
+        revision: 0,
+        contextSnapshots: [],
+      },
+      timeline: [],
+      history: { mode: "ready", errorCode: null, backupName: null },
+    })
+    const adapter: WorkspaceViewAdapter = {
+      loadState: () => Promise.resolve(stateFor("workspace-a")),
+      saveDraft,
+      selectWorkspace: (workspaceId) => Promise.resolve(stateFor(workspaceId)),
+    }
+
+    renderWorkspace(adapter)
+    const composer = await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    const workspaceNavigation = screen.getByRole("navigation", {
+      name: "Workspaces",
+    })
+    await waitFor(() =>
+      expect(
+        within(workspaceNavigation).getByRole("button", {
+          name: /fixture\/workspace-a/,
+        }),
+      ).toBeVisible(),
+    )
+    fireEvent.change(composer, { target: { value: "Keep draft A" } })
+    fireEvent.click(
+      within(workspaceNavigation).getByRole("button", {
+        name: /fixture\/workspace-b/,
+      }),
+    )
+
+    await waitFor(() =>
+      expect(saveDraft).toHaveBeenCalledWith(
+        "workspace-a",
+        "Keep draft A",
+        "fast",
+      ),
+    )
+    expect(saveDraft).not.toHaveBeenCalledWith("workspace-b", "", "fast")
+  })
+
+  it("hydrates the persisted draft and timeline before saving later edits", async () => {
+    const restoredState: WorkspaceAdapterState = {
+      workspaces: [
+        {
+          id: "workspace-restored",
+          repository: "coding-wife",
+          name: "restored-session",
+          branch: "feature/history",
+          lifecycle: "in_progress",
+          health: "ready",
+          updatedAt: "2026-07-18T00:01:00.000Z",
+        },
+      ],
+      activeWorkspaceId: "workspace-restored",
+      draft: {
+        text: "Restored after reload",
+        effort: "max",
+        revision: 4,
+        contextSnapshots: [],
+      },
+      timeline: [
+        {
+          id: "event-restored",
+          sequence: 9,
+          producer: "code",
+          kind: "code.session.status.changed",
+          occurredAt: "2026-07-18T00:00:45.000Z",
+          status: "failed",
+          errorCode: "CODEX-TURN-FAILED",
+        },
+      ],
+      history: { mode: "ready", errorCode: null, backupName: null },
+    }
+    const saveDraft = vi.fn().mockResolvedValue(undefined)
+    const captureContext = vi.fn().mockResolvedValue({
+      id: "context-restored",
+      source: "git_diff" as const,
+      label: "Working tree diff",
+      capturedAt: "2026-07-18T00:02:00.000Z",
+      byteCount: 42,
+    })
+    const adapter: WorkspaceViewAdapter = {
+      connected: false,
+      loadState: () => Promise.resolve(restoredState),
+      saveDraft,
+      captureContext,
+    }
+
+    renderWorkspace(adapter)
+
+    const composer = await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    await waitFor(() => expect(composer).toHaveValue("Restored after reload"))
+    expect(screen.getByText("code.session.status.changed")).toBeVisible()
+    expect(screen.getByText("CODEX-TURN-FAILED")).toBeVisible()
+
+    fireEvent.change(composer, { target: { value: "Persist this edit" } })
+    await waitFor(() =>
+      expect(saveDraft).toHaveBeenLastCalledWith(
+        "workspace-restored",
+        "Persist this edit",
+        "max",
+      ),
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Context" }))
+    fireEvent.click(screen.getByRole("button", { name: "Git diff" }))
+    await waitFor(() =>
+      expect(captureContext).toHaveBeenCalledWith(
+        "workspace-restored",
+        "git_diff",
+      ),
+    )
+    expect(
+      screen.queryByRole("button", { name: "Git diff" }),
+    ).not.toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", {
+        name: "Remove attachment: Working tree diff",
+      }),
+    ).toBeVisible()
   })
 
   it("opens compact navigation from the selected workspace and restores focus", async () => {
