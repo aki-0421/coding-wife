@@ -162,12 +162,14 @@ describe("CodexEventProjector", () => {
       occurredAt: "2026-07-18T00:00:09Z",
       text: "Run the focused tests.",
       effort: "max",
+      attachmentCount: 0,
     })
 
     expect(projection.timeline).toMatchObject({
       kind: "user",
       status: "accepted",
       text: "Run the focused tests.",
+      attachmentCount: 0,
     })
     expect(projection.history).toMatchObject({
       kind: "code.user.instruction.accepted",

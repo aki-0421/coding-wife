@@ -148,6 +148,7 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 | `normalizer.rs`                       | opaque handle、redaction済みCodexEventとDomainEvent                                     |
 | `supervisor.rs`                       | handshake、thread/turn/review、single active turn、restart budget                       |
 | `support.rs`                          | isolation unavailable時のcapacity 0と決定的fallback                                     |
+| `attachment.rs`                       | opaque handle発行、workspace/file identity検証、送信直前再検証、localImage/mention変換   |
 | `commands.rs`                         | WebViewへ公開するtyped Tauri command                                                    |
 | `types.rs`                            | adapter v1のpublic DTOとserde contract                                                  |
 | `workspace.rs`                        | native folder picker、Git/owner preflight、opaque workspace登録、app-private record復元 |
@@ -164,6 +165,7 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 | `src/features/codex/use-codex-workspace.ts` | workspace storeを購読するReact hook                                 |
 | `src/features/codex/client.ts`              | event購読とpending responseのsingle-claim制御                       |
 | `src/test/fixtures/codex-runtime.v1.json`   | RustとTypeScriptが共有するpublic contract fixture                   |
+| `src/test/fixtures/codex-attachments.v1.json` | absolute pathを含まないattachment public contract fixture         |
 
 `CodexEvent`はbase fieldだけでなくvariant payloadもcamelCaseでserializeする。Rust round-tripとTypeScript parser testが同じfixtureを読むため、一方だけのfield名変更はgateで失敗する。
 
@@ -181,6 +183,7 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 | `protocol_after_ready`                   | malformed JSONL後の3回/60秒bounded restart、turn非再送                                  |
 | `experimental_rejected`                  | 新processでstable initializeへfallbackし、experimental fieldを送らずreviewをwire前block |
 | `thread_policy_*`                        | model、cwd、approval policy、sandbox、ephemeralの各mutationをfail-stop                  |
+| `attachments`                            | attachment-only turnを`localImage`と`mention`へ安全に変換し、raw pathを公開しない       |
 | `native_rui`                             | strict 1問/2 optionのserver requestとtyped response round trip                          |
 | `decision_fallback` / `decision_invalid` | exact decision card化、structured continuation、自由文interrupt                         |
 | `decision_continuation_crash`            | fallback継続開始中のchild crashをterminal failureにし、自動再送しないこと               |

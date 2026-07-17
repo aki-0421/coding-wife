@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use coding_wife_lib::codex::attachment::{
+    AttachmentService, AttachmentSource, AttachmentWorkspaceContext,
+};
 use coding_wife_lib::codex::binary::{discover_binary, probe_schema};
 use coding_wife_lib::codex::process::spawn_process;
 use coding_wife_lib::codex::protocol::{client_notification, initialize_params};
@@ -202,6 +205,7 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
             client_user_message_id: "message-1".to_owned(),
             text: "Inspect the fixture.".to_owned(),
             effort: ReasoningPreset::Low,
+            attachment_handles: vec![],
         })
         .await
         .expect("turn start");
@@ -257,6 +261,110 @@ async fn native_picker_registers_private_paths_before_connect_and_thread_start()
         })
         .await
         .expect("thread start");
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn validated_opaque_attachments_reach_the_fake_server_as_local_image_and_mention() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("attachments");
+    let image = fixture.workspace.join("images/demo.png");
+    std::fs::create_dir_all(image.parent().expect("image parent")).expect("image parent");
+    std::fs::write(&image, b"\x89PNG\r\n\x1a\nfixture").expect("image fixture");
+    let notes = fixture.workspace.join("notes.txt");
+    std::fs::write(&notes, b"bounded notes").expect("notes fixture");
+
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    let workspace_service = WorkspaceService::new(
+        supervisor.clone(),
+        Arc::new(FixedPicker(fixture.workspace.clone())),
+    );
+    workspace_service
+        .apply_private_binary(AppPrivateBinaryRecord {
+            canonical_path: fixture_binary(),
+        })
+        .await
+        .expect("private binary");
+    let registration = workspace_service
+        .pick_and_register()
+        .await
+        .expect("workspace registration");
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: registration.workspace_id.clone(),
+        })
+        .await
+        .expect("connect");
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: registration.workspace_id.clone(),
+        })
+        .await
+        .expect("thread");
+    let identity = workspace_service
+        .trusted_identity(&registration.workspace_id)
+        .await
+        .expect("trusted identity");
+    let context = AttachmentWorkspaceContext {
+        workspace_id: registration.workspace_id.clone(),
+        generation: thread.generation,
+        canonical_root: identity.canonical_root,
+        root_device: identity.root_device,
+        root_inode: identity.root_inode,
+    };
+    let attachments = AttachmentService::production();
+    let registered = attachments
+        .register_paths(
+            context.clone(),
+            AttachmentSource::Drop,
+            vec![
+                std::fs::canonicalize(&image)
+                    .expect("canonical image")
+                    .to_string_lossy()
+                    .into_owned(),
+                std::fs::canonicalize(&notes)
+                    .expect("canonical notes")
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+            vec![],
+        )
+        .await
+        .expect("attachment registration");
+    assert_eq!(registered.items.len(), 2);
+    assert!(!serde_json::to_string(&registered)
+        .expect("public attachment response")
+        .contains(&fixture.workspace.to_string_lossy().to_string()));
+    let handles = registered
+        .items
+        .iter()
+        .map(|item| item.handle.clone())
+        .collect::<Vec<_>>();
+    let resolved = attachments
+        .resolve_for_turn(context.clone(), &handles)
+        .await
+        .expect("resolve attachments");
+    supervisor
+        .turn_start_resolved(
+            CodexTurnStartRequest {
+                workspace_id: registration.workspace_id,
+                thread_handle: thread.thread_handle,
+                client_user_message_id: "message-attachments".to_owned(),
+                text: String::new(),
+                effort: ReasoningPreset::Low,
+                attachment_handles: handles.clone(),
+            },
+            resolved.inputs,
+            context.generation,
+        )
+        .await
+        .expect("attachment turn");
+    attachments.consume(&context, &handles).await;
+
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("attachment_contract_ok"));
+    assert!(!state.contains("attachment_contract_invalid"));
     supervisor.shutdown().await;
 }
 
@@ -374,6 +482,7 @@ async fn native_rui_round_trips_one_strict_answer() {
             client_user_message_id: "message-rui".to_owned(),
             text: "Request a choice.".to_owned(),
             effort: ReasoningPreset::Low,
+            attachment_handles: vec![],
         })
         .await
         .expect("turn");
@@ -463,6 +572,7 @@ async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
                 client_user_message_id: format!("message-{mode}"),
                 text: "Produce a decision.".to_owned(),
                 effort: ReasoningPreset::Max,
+                attachment_handles: vec![],
             })
             .await
             .expect("turn");
@@ -509,6 +619,7 @@ async fn fallback_decision_validates_then_starts_exactly_one_structured_continua
             client_user_message_id: "message-decision".to_owned(),
             text: "Produce a decision.".to_owned(),
             effort: ReasoningPreset::Max,
+            attachment_handles: vec![],
         })
         .await
         .expect("turn");
@@ -570,6 +681,7 @@ async fn notification_first_turn_start_preserves_fallback_display_and_answer() {
             client_user_message_id: "message-notification-first".to_owned(),
             text: "Produce a decision.".to_owned(),
             effort: ReasoningPreset::Max,
+            attachment_handles: vec![],
         })
         .await
         .expect("notification-first turn");
@@ -625,6 +737,7 @@ async fn failed_fallback_continuation_is_terminal_and_never_replayed() {
             client_user_message_id: "message-crash-decision".to_owned(),
             text: "Produce a decision.".to_owned(),
             effort: ReasoningPreset::Low,
+            attachment_handles: vec![],
         })
         .await
         .expect("turn");
@@ -845,6 +958,7 @@ async fn unknown_server_request_is_rejected_and_turn_is_interrupted() {
             client_user_message_id: "message-unknown".to_owned(),
             text: "Trigger the request.".to_owned(),
             effort: ReasoningPreset::Max,
+            attachment_handles: vec![],
         })
         .await
         .expect("turn");

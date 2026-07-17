@@ -213,13 +213,21 @@ export class DemoCodexTransport implements CodexTransport {
         return Promise.resolve({
           threadHandle: "demo-thread-1",
           model: codexModel,
+          generation: 1,
         } as CodexResponseMap[K])
       case codexCommands.threadResume:
         return Promise.resolve({
           threadHandle: (request as CodexRequestMap["codex_thread_resume"])
             .threadHandle,
           model: codexModel,
+          generation: 1,
         } as CodexResponseMap[K])
+      case codexCommands.pickAttachments:
+      case codexCommands.registerAttachmentPaths:
+        return Promise.resolve({
+          items: [],
+          rejections: [],
+        } as unknown as CodexResponseMap[K])
       case codexCommands.turnStart: {
         const turnRequest = request as CodexRequestMap["codex_turn_start"]
         queueMicrotask(() => {

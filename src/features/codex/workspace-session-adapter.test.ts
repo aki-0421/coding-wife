@@ -41,6 +41,12 @@ class FakeCodexTransport implements CodexTransport {
       case codexCommands.threadStart:
       case codexCommands.threadResume:
         return Promise.resolve(fixture.thread as CodexResponseMap[K])
+      case codexCommands.pickAttachments:
+      case codexCommands.registerAttachmentPaths:
+        return Promise.resolve({
+          items: [],
+          rejections: [],
+        } as unknown as CodexResponseMap[K])
       case codexCommands.turnStart:
         if (this.turnFailure !== null) return Promise.reject(this.turnFailure)
         return Promise.resolve(fixture.turn as CodexResponseMap[K])
@@ -110,6 +116,7 @@ describe("CodexWorkspaceSessionAdapter", () => {
         workspaceId: "workspace-fixture",
         text: "Run the focused tests.",
         effort: "max",
+        attachmentHandles: [],
       }),
     ).resolves.toEqual({
       accepted: true,
@@ -129,14 +136,14 @@ describe("CodexWorkspaceSessionAdapter", () => {
       clientUserMessageId: "message-fixture-id",
       text: "Run the focused tests.",
       effort: "max",
+      attachmentHandles: [],
     })
-    expect(history.events).toEqual([
-      expect.objectContaining({
-        eventId: "message-fixture-id",
-        kind: "code.user.instruction.accepted",
-        payload: expect.objectContaining({ generation: 7 }),
-      }),
-    ])
+    expect(history.events).toHaveLength(1)
+    expect(history.events[0]).toMatchObject({
+      eventId: "message-fixture-id",
+      kind: "code.user.instruction.accepted",
+      payload: { generation: 7 },
+    })
   })
 
   it("reuses only the thread handle this composition owns", async () => {
@@ -160,6 +167,87 @@ describe("CodexWorkspaceSessionAdapter", () => {
       workspaceId: "workspace-fixture",
       threadHandle: "thread_handle_fixture",
     })
+  })
+
+  it("accepts an attachment-only turn and records only safe attachment metadata", async () => {
+    const { adapter, history, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    const attachmentHandle = "attachment-00000000-0000-4000-8000-000000000001"
+
+    await adapter.sendTurn({
+      workspaceId: "workspace-fixture",
+      text: "",
+      effort: "low",
+      attachmentHandles: [attachmentHandle],
+    })
+    await adapter.flushHistory("workspace-fixture")
+
+    expect(transport.calls.at(-1)).toEqual({
+      command: codexCommands.turnStart,
+      request: {
+        workspaceId: "workspace-fixture",
+        threadHandle: "thread_handle_fixture",
+        clientUserMessageId: "message-fixture-id",
+        text: "",
+        effort: "low",
+        attachmentHandles: [attachmentHandle],
+      },
+    })
+    expect(history.events.at(-1)).toMatchObject({
+      kind: "code.user.instruction.accepted",
+      payload: { text: "", attachmentCount: 1 },
+    })
+    expect(JSON.stringify(history.events)).not.toContain(attachmentHandle)
+  })
+
+  it("routes picker, drop, and paste candidates through typed native commands", async () => {
+    const { adapter, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+
+    await adapter.pickAttachments("workspace-fixture", [])
+    await adapter.registerAttachmentPaths(
+      "workspace-fixture",
+      "drop",
+      ["/workspace-fixture/notes.txt"],
+      [],
+    )
+    await adapter.registerAttachmentPaths(
+      "workspace-fixture",
+      "paste",
+      ["/workspace-fixture/demo.png"],
+      [],
+    )
+
+    expect(transport.calls.slice(-3)).toEqual([
+      {
+        command: codexCommands.pickAttachments,
+        request: { workspaceId: "workspace-fixture", existingHandles: [] },
+      },
+      {
+        command: codexCommands.registerAttachmentPaths,
+        request: {
+          workspaceId: "workspace-fixture",
+          source: "drop",
+          paths: ["/workspace-fixture/notes.txt"],
+          existingHandles: [],
+        },
+      },
+      {
+        command: codexCommands.registerAttachmentPaths,
+        request: {
+          workspaceId: "workspace-fixture",
+          source: "paste",
+          paths: ["/workspace-fixture/demo.png"],
+          existingHandles: [],
+        },
+      },
+    ])
   })
 
   it("supports an explicitly owned resume handle without adopting a listed thread", async () => {
@@ -250,6 +338,7 @@ describe("CodexWorkspaceSessionAdapter", () => {
         workspaceId: "workspace-fixture",
         text: "Keep this draft.",
         effort: "low",
+        attachmentHandles: [],
       }),
     ).rejects.toMatchObject({ code: "CODEX-TURN-REJECTED" })
     await adapter.flushHistory("workspace-fixture")
@@ -279,6 +368,7 @@ describe("CodexWorkspaceSessionAdapter", () => {
       workspaceId: "workspace-fixture",
       text: "Run until stopped.",
       effort: "low",
+      attachmentHandles: [],
     })
     transport.interrupt = new Promise(() => undefined)
 
@@ -308,6 +398,7 @@ describe("CodexWorkspaceSessionAdapter", () => {
       workspaceId: "workspace-fixture",
       text: "Stop at the boundary.",
       effort: "low",
+      attachmentHandles: [],
     })
 
     await adapter.stopTurn("workspace-fixture")

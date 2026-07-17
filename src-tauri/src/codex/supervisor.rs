@@ -8,6 +8,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 
+use super::attachment::ResolvedAttachment;
 use super::binary::{discover_binary, probe_schema, BinaryError, BinaryInfo, SchemaProbe};
 use super::decision::{
     fallback_continuation_input, FallbackDecisionClaim, FallbackDecisionContext,
@@ -576,6 +577,11 @@ impl CodexSupervisor {
         Ok((runtime.connection.clone(), root, state.generation))
     }
 
+    pub async fn active_generation(&self, workspace_id: &str) -> Result<u64, CodexCommandError> {
+        let (_, _, generation) = self.ready_context(workspace_id).await?;
+        Ok(generation)
+    }
+
     async fn outbound_profile(
         &self,
         generation: u64,
@@ -777,15 +783,50 @@ impl CodexSupervisor {
         &self,
         request: CodexTurnStartRequest,
     ) -> Result<TurnResponse, CodexCommandError> {
+        if !request.attachment_handles.is_empty() {
+            return Err(command_error(
+                "CODEX-ATTACHMENT-RESOLVER-REQUIRED",
+                "turn/start",
+                false,
+            ));
+        }
+        self.turn_start_with_resolved(request, Vec::new(), None)
+            .await
+    }
+
+    pub async fn turn_start_resolved(
+        &self,
+        request: CodexTurnStartRequest,
+        attachments: Vec<ResolvedAttachment>,
+        expected_generation: u64,
+    ) -> Result<TurnResponse, CodexCommandError> {
+        self.turn_start_with_resolved(request, attachments, Some(expected_generation))
+            .await
+    }
+
+    async fn turn_start_with_resolved(
+        &self,
+        request: CodexTurnStartRequest,
+        attachments: Vec<ResolvedAttachment>,
+        expected_generation: Option<u64>,
+    ) -> Result<TurnResponse, CodexCommandError> {
         if request.text.contains('\0')
             || request.text.chars().count() > 32_000
-            || request.text.trim().is_empty()
+            || (request.text.trim().is_empty() && attachments.is_empty())
             || request.client_user_message_id.trim().is_empty()
             || request.client_user_message_id.len() > 128
+            || request.attachment_handles.len() != attachments.len()
         {
             return Err(command_error("CODEX-TURN-INVALID", "turn/start", false));
         }
         let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
+        if expected_generation.is_some_and(|expected| expected != generation) {
+            return Err(command_error(
+                "CODEX-ATTACHMENT-HANDLE-STALE",
+                "turn/start",
+                true,
+            ));
+        }
         let (raw_thread, token) = {
             let mut state = self.inner.state.lock().await;
             ensure_generation(&state, generation, "turn/start")?;
@@ -827,6 +868,7 @@ impl CodexSupervisor {
                     &request.client_user_message_id,
                     &request.text,
                     request.effort,
+                    &attachments,
                 ),
             )
             .await
@@ -1089,7 +1131,13 @@ impl CodexSupervisor {
         let result = match connection
             .request_default(
                 "turn/start",
-                turn_start_params(&claim.thread_id, &client_message_id, &input, claim.effort),
+                turn_start_params(
+                    &claim.thread_id,
+                    &client_message_id,
+                    &input,
+                    claim.effort,
+                    &[],
+                ),
             )
             .await
         {
@@ -2154,6 +2202,7 @@ mod tests {
             client_user_message_id: "message".to_owned(),
             text: "Implement it".to_owned(),
             effort: ReasoningPreset::Low,
+            attachment_handles: vec![],
         };
         assert_eq!(turn.effort.as_wire(), "low");
     }

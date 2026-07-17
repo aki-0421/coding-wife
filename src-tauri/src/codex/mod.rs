@@ -1,3 +1,4 @@
+pub mod attachment;
 pub mod binary;
 pub mod commands;
 pub mod decision;

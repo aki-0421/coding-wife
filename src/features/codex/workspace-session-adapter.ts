@@ -1,5 +1,6 @@
 import {
   codexCommands,
+  type AttachmentRegistrationResponse,
   type CodexDiagnostic,
   type CodexEvent,
   type CodexFallbackDecisionRequest,
@@ -35,6 +36,7 @@ export interface StartCodexTurnRequest {
   readonly workspaceId: string
   readonly text: string
   readonly effort: ReasoningPreset
+  readonly attachmentHandles: readonly string[]
 }
 
 export interface StartCodexTurnResult {
@@ -56,6 +58,9 @@ const systemClock: CodexSessionClock = {
   clearTimeout: (handle) =>
     globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
 }
+
+const attachmentHandlePattern =
+  /^attachment-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
 
 function safeErrorCode(error: unknown, fallback: string): string {
   if (
@@ -258,8 +263,15 @@ export class CodexWorkspaceSessionAdapter {
       snapshot.phase === "running" ||
       snapshot.phase === "waiting" ||
       snapshot.phase === "stopping" ||
-      request.text.trim().length === 0 ||
+      (request.text.trim().length === 0 &&
+        request.attachmentHandles.length === 0) ||
       request.text.length > 32_000 ||
+      request.attachmentHandles.length > 10 ||
+      new Set(request.attachmentHandles).size !==
+        request.attachmentHandles.length ||
+      request.attachmentHandles.some(
+        (handle) => !attachmentHandlePattern.test(handle),
+      ) ||
       (request.effort === "low" && !snapshot.readiness.fastAvailable) ||
       (request.effort === "max" && !snapshot.readiness.maxAvailable)
     ) {
@@ -277,6 +289,7 @@ export class CodexWorkspaceSessionAdapter {
         clientUserMessageId,
         text: request.text,
         effort: request.effort,
+        attachmentHandles: request.attachmentHandles,
       })
       .then((turn) => {
         const latest = this.store.snapshot()
@@ -292,6 +305,7 @@ export class CodexWorkspaceSessionAdapter {
           occurredAt: this.clock.now(),
           text: request.text,
           effort: request.effort,
+          attachmentCount: request.attachmentHandles.length,
         })
         if (accepted.timeline !== null)
           this.store.applyTimeline(accepted.timeline)
@@ -314,6 +328,41 @@ export class CodexWorkspaceSessionAdapter {
       })
     this.turnStart = operation
     return operation
+  }
+
+  pickAttachments(
+    workspaceId: string,
+    existingHandles: readonly string[],
+  ): Promise<AttachmentRegistrationResponse> {
+    this.validateAttachmentRequest(workspaceId, existingHandles)
+    return this.transport.request(codexCommands.pickAttachments, {
+      workspaceId,
+      existingHandles,
+    })
+  }
+
+  registerAttachmentPaths(
+    workspaceId: string,
+    source: "drop" | "paste",
+    paths: readonly string[],
+    existingHandles: readonly string[],
+  ): Promise<AttachmentRegistrationResponse> {
+    this.validateAttachmentRequest(workspaceId, existingHandles)
+    if (
+      paths.length > 64 ||
+      paths.some(
+        (path) =>
+          path.length === 0 || path.length > 4_096 || path.includes("\0"),
+      )
+    ) {
+      throw new Error("CODEX-ATTACHMENT-PATHS-INVALID")
+    }
+    return this.transport.request(codexCommands.registerAttachmentPaths, {
+      workspaceId,
+      source,
+      paths,
+      existingHandles,
+    })
   }
 
   async stopTurn(workspaceId: string): Promise<void> {
@@ -361,6 +410,20 @@ export class CodexWorkspaceSessionAdapter {
 
   flushHistory(workspaceId: string): Promise<void> {
     return this.historyQueues.get(workspaceId) ?? Promise.resolve()
+  }
+
+  private validateAttachmentRequest(
+    workspaceId: string,
+    existingHandles: readonly string[],
+  ): void {
+    if (
+      this.store.snapshot().activeWorkspaceId !== workspaceId ||
+      existingHandles.length > 10 ||
+      new Set(existingHandles).size !== existingHandles.length ||
+      existingHandles.some((handle) => !attachmentHandlePattern.test(handle))
+    ) {
+      throw new Error("CODEX-ATTACHMENT-PREFLIGHT-BLOCKED")
+    }
   }
 
   private receiveEvent(

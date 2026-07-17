@@ -1,0 +1,23 @@
+{
+  "registration": {
+    "items": [
+      {
+        "schemaVersion": 1,
+        "handle": "attachment-00000000-0000-4000-8000-000000000001",
+        "name": "demo.png",
+        "relativePath": "assets/demo.png",
+        "sizeBytes": 120,
+        "kind": "image",
+        "source": "picker",
+        "expiresAt": "2026-07-18T00:30:00Z"
+      }
+    ],
+    "rejections": [
+      {
+        "candidateIndex": 1,
+        "code": "CODEX-ATTACHMENT-EXECUTABLE",
+        "recoverable": false
+      }
+    ]
+  }
+}

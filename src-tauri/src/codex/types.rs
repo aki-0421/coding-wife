@@ -223,6 +223,7 @@ pub struct CodexTurnStartRequest {
     pub client_user_message_id: String,
     pub text: String,
     pub effort: ReasoningPreset,
+    pub attachment_handles: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

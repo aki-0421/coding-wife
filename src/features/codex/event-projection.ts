@@ -51,6 +51,7 @@ export type CodexSemanticTimelineEvent = CodexTimelineEventBase &
         readonly kind: "user"
         readonly text: string
         readonly effort: "low" | "max"
+        readonly attachmentCount: number
       }
     | {
         readonly kind: "assistant"
@@ -141,6 +142,7 @@ export interface AcceptedUserTurn {
   readonly occurredAt: string
   readonly text: string
   readonly effort: "low" | "max"
+  readonly attachmentCount: number
 }
 
 function appendBounded(
@@ -502,6 +504,7 @@ export function projectAcceptedUserTurn(
     durable: true,
     text: accepted.text,
     effort: accepted.effort,
+    attachmentCount: accepted.attachmentCount,
   }
   return {
     timeline,
@@ -518,6 +521,7 @@ export function projectAcceptedUserTurn(
         sourceSequence: accepted.sourceSequence,
         text: accepted.text,
         effort: accepted.effort,
+        attachmentCount: accepted.attachmentCount,
       },
     },
   }

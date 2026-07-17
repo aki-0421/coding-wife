@@ -93,7 +93,16 @@ pub struct ValidatedWorkspaceCandidate {
 #[derive(Clone, Debug)]
 struct TrustedWorkspace {
     root: PathBuf,
+    root_device: u64,
+    root_inode: u64,
     registration: WorkspaceRegistration,
+}
+
+#[derive(Clone, Debug)]
+pub struct TrustedWorkspaceIdentity {
+    pub canonical_root: PathBuf,
+    pub root_device: u64,
+    pub root_inode: u64,
 }
 
 #[derive(Clone)]
@@ -174,6 +183,18 @@ impl WorkspaceService {
             .map(|record| record.root.clone())
     }
 
+    pub async fn trusted_identity(&self, workspace_id: &str) -> Option<TrustedWorkspaceIdentity> {
+        self.trusted
+            .lock()
+            .await
+            .get(workspace_id)
+            .map(|record| TrustedWorkspaceIdentity {
+                canonical_root: record.root.clone(),
+                root_device: record.root_device,
+                root_inode: record.root_inode,
+            })
+    }
+
     pub async fn deactivate_workspace(&self, workspace_id: &str) -> Result<(), CodexCommandError> {
         self.supervisor
             .unregister_workspace_root(workspace_id)
@@ -193,7 +214,10 @@ impl WorkspaceService {
             .get(&candidate.registration.workspace_id)
             .cloned()
         {
-            if existing.root != candidate.git.canonical_root {
+            if existing.root != candidate.git.canonical_root
+                || existing.root_device != candidate.git.root_device
+                || existing.root_inode != candidate.git.root_inode
+            {
                 return Err(workspace_error("CODEX-WORKSPACE-IDENTITY-CHANGED", false));
             }
             return Ok(existing.registration);
@@ -209,6 +233,8 @@ impl WorkspaceService {
             registration.workspace_id.clone(),
             TrustedWorkspace {
                 root: candidate.git.canonical_root,
+                root_device: candidate.git.root_device,
+                root_inode: candidate.git.root_inode,
                 registration: registration.clone(),
             },
         );

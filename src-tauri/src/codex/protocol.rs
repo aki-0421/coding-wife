@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
+use super::attachment::ResolvedAttachment;
 use super::types::{ReasoningPreset, ReviewTarget, CODEX_MODEL};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -348,11 +349,24 @@ pub fn turn_start_params(
     client_user_message_id: &str,
     text: &str,
     effort: ReasoningPreset,
+    attachments: &[ResolvedAttachment],
 ) -> Value {
+    let mut input = Vec::with_capacity(attachments.len() + 1);
+    if !text.trim().is_empty() {
+        input.push(json!({"type": "text", "text": text, "text_elements": []}));
+    }
+    input.extend(attachments.iter().map(|attachment| match attachment {
+        ResolvedAttachment::LocalImage { path } => {
+            json!({"type": "localImage", "path": path})
+        }
+        ResolvedAttachment::Mention { name, path } => {
+            json!({"type": "mention", "name": name, "path": path})
+        }
+    }));
     json!({
         "threadId": thread_id,
         "clientUserMessageId": client_user_message_id,
-        "input": [{"type": "text", "text": text, "text_elements": []}],
+        "input": input,
         "model": CODEX_MODEL,
         "effort": effort.as_wire(),
         "outputSchema": decision_output_schema(),
@@ -500,8 +514,8 @@ mod tests {
 
     #[test]
     fn turn_always_sets_exact_model_effort_and_omits_service_tier() {
-        let fast = turn_start_params("thread", "message", "hello", ReasoningPreset::Low);
-        let max = turn_start_params("thread", "message", "hello", ReasoningPreset::Max);
+        let fast = turn_start_params("thread", "message", "hello", ReasoningPreset::Low, &[]);
+        let max = turn_start_params("thread", "message", "hello", ReasoningPreset::Max, &[]);
 
         assert_eq!(fast["model"], CODEX_MODEL);
         assert_eq!(fast["effort"], "low");
@@ -509,6 +523,34 @@ mod tests {
         assert!(fast.get("serviceTier").is_none());
         assert!(fast.get("collaborationMode").is_none());
         assert!(fast.get("multiAgentMode").is_none());
+    }
+
+    #[test]
+    fn turn_projects_validated_images_and_files_without_an_empty_text_item() {
+        let attachments = [
+            ResolvedAttachment::LocalImage {
+                path: "/workspace/demo.png".to_owned(),
+            },
+            ResolvedAttachment::Mention {
+                name: "notes.txt".to_owned(),
+                path: "/workspace/notes.txt".to_owned(),
+            },
+        ];
+        let params = turn_start_params(
+            "thread",
+            "message",
+            "  ",
+            ReasoningPreset::Low,
+            &attachments,
+        );
+
+        assert_eq!(
+            params["input"],
+            json!([
+                {"type": "localImage", "path": "/workspace/demo.png"},
+                {"type": "mention", "name": "notes.txt", "path": "/workspace/notes.txt"}
+            ])
+        );
     }
 
     #[test]

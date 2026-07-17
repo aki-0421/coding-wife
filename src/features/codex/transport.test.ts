@@ -94,6 +94,7 @@ describe("DemoCodexTransport", () => {
         clientUserMessageId: "message-1",
         text: "Run the demo.",
         effort: "low",
+        attachmentHandles: [],
       }),
     ).resolves.toEqual({
       threadHandle: "demo-thread-1",

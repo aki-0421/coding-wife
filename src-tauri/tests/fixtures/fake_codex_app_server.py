@@ -220,6 +220,23 @@ def main():
                 and "collaborationMode" not in params
                 and "multiAgentMode" not in params
             )
+            if MODE == "attachments":
+                inputs = params.get("input")
+                attachment_valid = (
+                    isinstance(inputs, list)
+                    and len(inputs) == 2
+                    and inputs[0].get("type") == "localImage"
+                    and str(inputs[0].get("path", "")).endswith("/images/demo.png")
+                    and inputs[1].get("type") == "mention"
+                    and inputs[1].get("name") == "notes.txt"
+                    and str(inputs[1].get("path", "")).endswith("/notes.txt")
+                )
+                record(
+                    "attachment_contract_ok"
+                    if attachment_valid
+                    else "attachment_contract_invalid"
+                )
+                valid = valid and attachment_valid
             record("turn_contract_ok" if valid else "turn_contract_invalid")
             if not valid:
                 send({"id": message_id, "error": {"code": -32602, "message": "Invalid params"}})

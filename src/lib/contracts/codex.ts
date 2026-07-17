@@ -11,6 +11,8 @@ export const codexCommands = {
   threadList: "codex_thread_list",
   threadStart: "codex_thread_start",
   threadResume: "codex_thread_resume",
+  pickAttachments: "codex_pick_attachments",
+  registerAttachmentPaths: "codex_register_attachment_paths",
   turnStart: "codex_turn_start",
   turnInterrupt: "codex_turn_interrupt",
   reviewStart: "codex_review_start",
@@ -123,6 +125,44 @@ export interface CodexTurnStartRequest {
   readonly clientUserMessageId: string
   readonly text: string
   readonly effort: ReasoningPreset
+  readonly attachmentHandles: readonly string[]
+}
+
+export type AttachmentSource = "picker" | "drop" | "paste"
+export type AttachmentKind = "image" | "file"
+
+export interface AttachmentSelectionRequest {
+  readonly workspaceId: string
+  readonly existingHandles: readonly string[]
+}
+
+export interface AttachmentPathRegistrationRequest {
+  readonly workspaceId: string
+  readonly source: Exclude<AttachmentSource, "picker">
+  readonly paths: readonly string[]
+  readonly existingHandles: readonly string[]
+}
+
+export interface AttachmentView {
+  readonly schemaVersion: 1
+  readonly handle: string
+  readonly name: string
+  readonly relativePath: string
+  readonly sizeBytes: number
+  readonly kind: AttachmentKind
+  readonly source: AttachmentSource
+  readonly expiresAt: string
+}
+
+export interface AttachmentRejection {
+  readonly candidateIndex: number
+  readonly code: string
+  readonly recoverable: boolean
+}
+
+export interface AttachmentRegistrationResponse {
+  readonly items: readonly AttachmentView[]
+  readonly rejections: readonly AttachmentRejection[]
 }
 
 export interface CodexTurnInterruptRequest {
@@ -384,6 +424,8 @@ export interface CodexRequestMap {
   codex_thread_list: CodexThreadListRequest
   codex_thread_start: CodexThreadStartRequest
   codex_thread_resume: CodexThreadResumeRequest
+  codex_pick_attachments: AttachmentSelectionRequest
+  codex_register_attachment_paths: AttachmentPathRegistrationRequest
   codex_turn_start: CodexTurnStartRequest
   codex_turn_interrupt: CodexTurnInterruptRequest
   codex_review_start: CodexReviewStartRequest
@@ -399,6 +441,8 @@ export interface CodexResponseMap {
   codex_thread_list: ThreadListResponse
   codex_thread_start: ThreadResponse
   codex_thread_resume: ThreadResponse
+  codex_pick_attachments: AttachmentRegistrationResponse
+  codex_register_attachment_paths: AttachmentRegistrationResponse
   codex_turn_start: TurnResponse
   codex_turn_interrupt: AcceptedResponse
   codex_review_start: ReviewResponse
@@ -419,6 +463,9 @@ type UnknownRecord = Readonly<Record<string, unknown>>
 
 const privateValuePattern =
   /(?:\/(?:Users\/[^/\s]+|home\/[^/\s]+|Volumes|Library|Applications)(?:\/|\b)|[A-Za-z]:\\Users\\|\bBearer\s+[A-Za-z0-9._~+/-]+=*|\bsk-[A-Za-z0-9_-]{8,}|["']?(?:api[_-]?key|access[_-]?token|auth[_-]?cookie|session[_-]?id|set-cookie|authorization|cookie|token|password|secret)["']?\s*[:=]\s*["']?\S+)/iu
+const attachmentHandlePattern =
+  /^attachment-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+const attachmentErrorCodePattern = /^CODEX-ATTACHMENT-[A-Z0-9-]{2,96}$/u
 
 function violation(): never {
   throw new CodexContractError()
@@ -687,6 +734,102 @@ export function parseThreadResponse(value: unknown): ThreadResponse {
     threadHandle: value.threadHandle,
     model: codexModel,
     generation: value.generation,
+  }
+}
+
+function parseAttachmentView(value: unknown): AttachmentView {
+  if (
+    !isRecord(value) ||
+    !exact(value, [
+      "schemaVersion",
+      "handle",
+      "name",
+      "relativePath",
+      "sizeBytes",
+      "kind",
+      "source",
+      "expiresAt",
+    ]) ||
+    value.schemaVersion !== 1 ||
+    typeof value.handle !== "string" ||
+    !attachmentHandlePattern.test(value.handle) ||
+    !nonEmptyString(value.name) ||
+    value.name.length > 255 ||
+    /[\\/]/u.test(value.name) ||
+    [...value.name].some((character) => /\p{Cc}/u.test(character)) ||
+    !nonEmptyString(value.relativePath) ||
+    value.relativePath.length > 4_096 ||
+    value.relativePath.startsWith("/") ||
+    value.relativePath.includes("\\") ||
+    value.relativePath
+      .split("/")
+      .some(
+        (component) =>
+          component.length === 0 || component === "." || component === "..",
+      ) ||
+    !safeInteger(value.sizeBytes) ||
+    value.sizeBytes > 25 * 1024 * 1024 ||
+    !oneOf(value.kind, ["image", "file"] as const) ||
+    !oneOf(value.source, ["picker", "drop", "paste"] as const) ||
+    !timestamp(value.expiresAt)
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: 1,
+    handle: value.handle,
+    name: value.name,
+    relativePath: value.relativePath,
+    sizeBytes: value.sizeBytes,
+    kind: value.kind,
+    source: value.source,
+    expiresAt: value.expiresAt,
+  }
+}
+
+function parseAttachmentRejection(value: unknown): AttachmentRejection {
+  if (
+    !isRecord(value) ||
+    !exact(value, ["candidateIndex", "code", "recoverable"]) ||
+    !safeInteger(value.candidateIndex) ||
+    value.candidateIndex >= 64 ||
+    typeof value.code !== "string" ||
+    !attachmentErrorCodePattern.test(value.code) ||
+    typeof value.recoverable !== "boolean"
+  ) {
+    return violation()
+  }
+  return {
+    candidateIndex: value.candidateIndex,
+    code: value.code,
+    recoverable: value.recoverable,
+  }
+}
+
+export function parseAttachmentRegistrationResponse(
+  value: unknown,
+): AttachmentRegistrationResponse {
+  if (
+    !isRecord(value) ||
+    !exact(value, ["items", "rejections"]) ||
+    !Array.isArray(value.items) ||
+    value.items.length > 10 ||
+    !Array.isArray(value.rejections) ||
+    value.rejections.length > 64
+  ) {
+    return violation()
+  }
+  const items = value.items.map(parseAttachmentView)
+  if (
+    items.reduce((total, item) => total + item.sizeBytes, 0) >
+      50 * 1024 * 1024 ||
+    new Set(items.map((item) => item.handle)).size !== items.length
+  ) {
+    return violation()
+  }
+  return {
+    items,
+    rejections: value.rejections.map(parseAttachmentRejection),
   }
 }
 
@@ -1303,6 +1446,9 @@ export function parseCodexResponse<K extends CodexCommand>(
     case codexCommands.threadStart:
     case codexCommands.threadResume:
       return parseThreadResponse(value) as CodexResponseMap[K]
+    case codexCommands.pickAttachments:
+    case codexCommands.registerAttachmentPaths:
+      return parseAttachmentRegistrationResponse(value) as CodexResponseMap[K]
     case codexCommands.turnStart:
     case codexCommands.answerFallbackDecision:
       return parseTurnResponse(value) as CodexResponseMap[K]

@@ -12,10 +12,12 @@ use character::commands::{
 };
 use character::service::resolve_builtin_directory;
 use character::{CharacterService, CharacterStorage};
+use codex::attachment::AttachmentService;
 use codex::commands::{
-    codex_answer_fallback_decision, codex_connect, codex_get_diagnostic, codex_pick_workspace,
-    codex_probe, codex_respond_pending, codex_review_start, codex_thread_list, codex_thread_resume,
-    codex_thread_start, codex_turn_interrupt, codex_turn_start,
+    codex_answer_fallback_decision, codex_connect, codex_get_diagnostic, codex_pick_attachments,
+    codex_pick_workspace, codex_probe, codex_register_attachment_paths, codex_respond_pending,
+    codex_review_start, codex_thread_list, codex_thread_resume, codex_thread_start,
+    codex_turn_interrupt, codex_turn_start,
 };
 use codex::supervisor::CodexSupervisor;
 use codex::workspace::WorkspaceService;
@@ -149,10 +151,12 @@ pub fn run() {
     let setup_supervisor = supervisor.clone();
     let shutdown_supervisor = supervisor.clone();
     let workspace_service = WorkspaceService::production(supervisor.clone());
+    let attachment_service = AttachmentService::production();
     let setup_workspace_service = workspace_service.clone();
     let app = tauri::Builder::default()
         .manage(supervisor)
         .manage(workspace_service)
+        .manage(attachment_service)
         .setup(move |app| {
             setup_supervisor.attach_app_handle(app.handle().clone());
             setup_supervisor.start_signal_loop();
@@ -197,6 +201,8 @@ pub fn run() {
             codex_thread_start,
             codex_thread_resume,
             codex_turn_start,
+            codex_pick_attachments,
+            codex_register_attachment_paths,
             codex_turn_interrupt,
             codex_review_start,
             codex_respond_pending,

@@ -1,5 +1,9 @@
 use tauri::State;
 
+use super::attachment::{
+    AttachmentPathRegistrationRequest, AttachmentRegistrationResponse, AttachmentSelectionRequest,
+    AttachmentService, AttachmentWorkspaceContext,
+};
 use super::supervisor::CodexSupervisor;
 use super::types::{
     AcceptedResponse, CodexCommandError, CodexConnectRequest, CodexDiagnostic,
@@ -9,6 +13,31 @@ use super::types::{
     ThreadResponse, TurnResponse,
 };
 use super::workspace::{WorkspaceRegistration, WorkspaceService};
+
+async fn attachment_context(
+    workspace_id: &str,
+    supervisor: &CodexSupervisor,
+    workspace_service: &WorkspaceService,
+) -> Result<AttachmentWorkspaceContext, CodexCommandError> {
+    let identity = workspace_service
+        .trusted_identity(workspace_id)
+        .await
+        .ok_or_else(|| {
+            CodexCommandError::new(
+                "CODEX-ATTACHMENT-WORKSPACE-UNTRUSTED",
+                "codex.attachment",
+                false,
+            )
+        })?;
+    let generation = supervisor.active_generation(workspace_id).await?;
+    Ok(AttachmentWorkspaceContext {
+        workspace_id: workspace_id.to_owned(),
+        generation,
+        canonical_root: identity.canonical_root,
+        root_device: identity.root_device,
+        root_inode: identity.root_inode,
+    })
+}
 
 #[tauri::command]
 pub async fn codex_pick_workspace(
@@ -67,8 +96,66 @@ pub async fn codex_thread_resume(
 pub async fn codex_turn_start(
     request: CodexTurnStartRequest,
     supervisor: State<'_, CodexSupervisor>,
+    workspace_service: State<'_, WorkspaceService>,
+    attachment_service: State<'_, AttachmentService>,
 ) -> Result<TurnResponse, CodexCommandError> {
-    supervisor.turn_start(request).await
+    let context = attachment_context(
+        &request.workspace_id,
+        supervisor.inner(),
+        workspace_service.inner(),
+    )
+    .await?;
+    let attachments = attachment_service
+        .resolve_for_turn(context.clone(), &request.attachment_handles)
+        .await?;
+    let response = supervisor
+        .turn_start_resolved(request, attachments.inputs, context.generation)
+        .await?;
+    attachment_service
+        .consume(&context, &attachments.handles)
+        .await;
+    Ok(response)
+}
+
+#[tauri::command]
+pub async fn codex_pick_attachments(
+    request: AttachmentSelectionRequest,
+    supervisor: State<'_, CodexSupervisor>,
+    workspace_service: State<'_, WorkspaceService>,
+    attachment_service: State<'_, AttachmentService>,
+) -> Result<AttachmentRegistrationResponse, CodexCommandError> {
+    let context = attachment_context(
+        &request.workspace_id,
+        supervisor.inner(),
+        workspace_service.inner(),
+    )
+    .await?;
+    attachment_service
+        .pick_and_register(context, request.existing_handles)
+        .await
+}
+
+#[tauri::command]
+pub async fn codex_register_attachment_paths(
+    request: AttachmentPathRegistrationRequest,
+    supervisor: State<'_, CodexSupervisor>,
+    workspace_service: State<'_, WorkspaceService>,
+    attachment_service: State<'_, AttachmentService>,
+) -> Result<AttachmentRegistrationResponse, CodexCommandError> {
+    let context = attachment_context(
+        &request.workspace_id,
+        supervisor.inner(),
+        workspace_service.inner(),
+    )
+    .await?;
+    attachment_service
+        .register_paths(
+            context,
+            request.source,
+            request.paths,
+            request.existing_handles,
+        )
+        .await
 }
 
 #[tauri::command]

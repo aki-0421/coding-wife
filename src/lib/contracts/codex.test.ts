@@ -4,6 +4,7 @@ import {
   CodexContractError,
   codexCommands,
   parseAcceptedResponse,
+  parseAttachmentRegistrationResponse,
   parseCodexCommandError,
   parseCodexDiagnostic,
   parseCodexEvent,
@@ -14,6 +15,7 @@ import {
   parseTurnResponse,
   parseWorkspaceRegistration,
 } from "@/lib/contracts/codex"
+import attachmentFixture from "@/test/fixtures/codex-attachments.v1.json"
 import fixture from "@/test/fixtures/codex-runtime.v1.json"
 
 describe("Codex runtime contract", () => {
@@ -45,6 +47,12 @@ describe("Codex runtime contract", () => {
     expect(
       parseCodexResponse(codexCommands.answerFallbackDecision, fixture.turn),
     ).toEqual(fixture.turn)
+    expect(
+      parseCodexResponse(
+        codexCommands.pickAttachments,
+        attachmentFixture.registration,
+      ),
+    ).toEqual(attachmentFixture.registration)
     const workspace = {
       schemaVersion: 1,
       workspaceId: "workspace-fixture",
@@ -70,6 +78,34 @@ describe("Codex runtime contract", () => {
     ).toThrow(CodexContractError)
     expect(() =>
       parseCodexDiagnostic({ ...fixture.diagnostic, serviceTier: "fast" }),
+    ).toThrow(CodexContractError)
+  })
+
+  it("keeps attachment paths relative and rejects unsafe native output", () => {
+    expect(
+      parseAttachmentRegistrationResponse(attachmentFixture.registration),
+    ).toEqual(attachmentFixture.registration)
+    expect(() =>
+      parseAttachmentRegistrationResponse({
+        ...attachmentFixture.registration,
+        items: [
+          {
+            ...attachmentFixture.registration.items[0],
+            relativePath: "/Users/private/demo.png",
+          },
+        ],
+      }),
+    ).toThrow(CodexContractError)
+    expect(() =>
+      parseAttachmentRegistrationResponse({
+        ...attachmentFixture.registration,
+        items: [
+          {
+            ...attachmentFixture.registration.items[0],
+            sizeBytes: 25 * 1024 * 1024 + 1,
+          },
+        ],
+      }),
     ).toThrow(CodexContractError)
   })
 
