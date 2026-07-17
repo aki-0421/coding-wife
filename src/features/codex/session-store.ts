@@ -99,14 +99,18 @@ export class CodexSessionStore {
     return result
   }
 
-  claimPendingResponse(pendingId: string): boolean {
+  claimPendingResponse(request: CodexPendingResponseRequest): boolean {
+    const pending = this.pendingRequests.get(request.pendingId)
     if (
-      !this.pendingRequests.has(pendingId) ||
-      this.claimedPendingResponses.has(pendingId)
+      request.workspaceId !== this.workspaceId ||
+      pending === undefined ||
+      (pending.kind === "user_input") !==
+        (request.response.type === "user_input") ||
+      this.claimedPendingResponses.has(request.pendingId)
     ) {
       return false
     }
-    this.claimedPendingResponses.add(pendingId)
+    this.claimedPendingResponses.add(request.pendingId)
     return true
   }
 
@@ -117,13 +121,6 @@ export class CodexSessionStore {
   completePendingResponse(pendingId: string): void {
     this.claimedPendingResponses.delete(pendingId)
     if (this.pendingRequests.delete(pendingId)) this.notify()
-  }
-
-  hasPendingRequest(request: CodexPendingResponseRequest): boolean {
-    return (
-      request.workspaceId === this.workspaceId &&
-      this.pendingRequests.has(request.pendingId)
-    )
   }
 
   private resetForGeneration(workspaceId: string, generation: number): void {

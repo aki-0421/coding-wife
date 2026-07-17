@@ -30,10 +30,7 @@ export class CodexSessionClient {
   }
 
   async respondPending(request: CodexPendingResponseRequest): Promise<boolean> {
-    if (
-      !this.store.hasPendingRequest(request) ||
-      !this.store.claimPendingResponse(request.pendingId)
-    ) {
+    if (!this.store.claimPendingResponse(request)) {
       return false
     }
     try {

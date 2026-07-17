@@ -47,7 +47,7 @@ describe("CodexSessionStore", () => {
     })
   })
 
-  it("allows exactly one response for each pending request", async () => {
+  it("allows exactly one kind-matched response for each pending request", async () => {
     const request = {
       workspaceId: "workspace-fixture",
       pendingId: "pending_handle_fixture",
@@ -66,7 +66,20 @@ describe("CodexSessionStore", () => {
     } as CodexTransport
     const client = new CodexSessionClient(transport, store)
 
-    await expect(client.respondPending(request)).resolves.toBe(true)
+    await expect(
+      client.respondPending({
+        ...request,
+        response: {
+          type: "user_input",
+          answers: { choice: ["Continue"] },
+        },
+      }),
+    ).resolves.toBe(false)
+    const [first, second] = await Promise.all([
+      client.respondPending(request),
+      client.respondPending(request),
+    ])
+    expect([first, second].sort()).toEqual([false, true])
     await expect(client.respondPending(request)).resolves.toBe(false)
     expect(requestMock).toHaveBeenCalledOnce()
   })

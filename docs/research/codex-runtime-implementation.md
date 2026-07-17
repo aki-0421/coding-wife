@@ -24,18 +24,38 @@ read_when:
 5. raw reasoning、secret、home/workspaceのprivate absolute path、raw stderr、raw protocol payloadをWebView eventへ出さない。
 6. thread、turn、item、pending IDはopaque handleへ変換し、WebViewからraw App Server IDを参照できないようにする。
 7. support isolationは明示的なtool 0、cwdなし、filesystem/shell/MCPなしを証明できない限り`unavailable`である。現行実装のsupport capacityは0で、生成文を含まない決定的fallbackだけを返す。
+8. workspaceの絶対pathと明示Codex binary pathはapp-private recordにだけ保存する。WebViewはnative folder pickerが返すopaque workspace ID、alias、boolean preflightだけを受け取る。
+9. thread開始・再開はresponseのmodel、canonical cwd、thread cwd、approval policy、sandbox type、ephemeral=falseを全て照合する。不足・不一致時はhandleを保存せずchildを停止する。
+10. pending responseはresponse variantと値をimmutable recordに対して検証してからatomicに消費する。invalid responseはpendingを残し、TypeScript側もpending kindとresponse typeを一致させてからsingle-claimする。
+11. native RUIが使えない場合のassistant完了文は`result`または`decision_request`のJSON全体だけを受理する。自由文、freeform、approval代替、不正optionは表示せずactive turnをinterruptする。
+
+## Binary trustとprobe境界
+
+`VerifiedBinaryIdentity`はcanonical path、owner UID、device、inode、size、mtime秒・ナノ秒、SHA-256を一組として保持する。binaryはcurrent userまたはroot所有だけを許し、対象fileと親directory chainのsymlink・writable policyを検査する。version取得、schema生成、spawnの各境界で同じtupleを再検証し、spawn直後にも再検証する。差し替えを検知した場合はprocess groupを停止し、supervisorのbinary、schema、runtime cacheを全て破棄する。
+
+probeの上限はstdout/stderr各1 MiB、絶対deadline 10秒、schema depth 16、file数2,048、1 file 8 MiB、合計64 MiBである。schema tree内のfile/directory symlinkとnon-regular fileは拒否する。capabilityはmethod文字列の存在ではなく、request/notification unionのsingleton method discriminant、params `$ref`、required field、response object shapeをJSONとして構造照合した場合だけ`Supported`にする。
+
+schema正本fixtureは`src-tauri/tests/fixtures/codex_schema_subset_v0_144_5.json`、process tree fixtureは`src-tauri/tests/fixtures/codex_process_tree_fixture.py`である。Codex CLI versionまたは利用fieldを変えるときはactual generated schemaから前者を更新し、required field削除、params ref差し替え、method重複、descriptionへの文字列移動をmutationしてfail closedを確認する。単なるmethod一覧fixtureへ戻してはならない。
+
+probeとApp Serverの終了はPATH上の`kill` commandを使わず、process groupへ直接TERM、期限後にKILLを送る。親processの`try_wait`成功だけを終了条件にせず、stdioを保持するgrandchildとPGIDの生存も期限内に消滅させる。stderrはcredential・cookie・session ID・absolute pathをredactしてからtruncateし、順序を逆転させない。
+
+## Workspaceとpublic contract境界
+
+`codex_pick_workspace`だけが新しいworkspaceをproduction登録できる。native pickerで選択したdirectoryをcanonicalizeし、Git marker、HEAD、owner、writable policyをRust内で検査してからsupervisorへ登録する。app-private workspace復元と明示binary復元はserializable IPC requestにせず、`AppPrivateWorkspaceRecord`と`AppPrivateBinaryRecord`からのみ適用する。
+
+public `WorkspaceRegistration`にraw pathを追加してはならない。`PendingRequestView`のapproval cardもraw command、cwd、environment ID、host、reasonを公開せず、versioned `ApprovalContext`のcategory、hashed/path alias、scope、risk、reversibility、recommendation、固定evidence codeだけを公開する。
 
 ## Support isolation gate
 
-| 必要条件 | Codex 0.144.xの証拠 | 判定 |
-| --- | --- | --- |
-| `ephemeral=true` | responseで確認 | 対応 |
-| `thread/list`へ残らない | 同じ接続で非列挙 | 対応。ただし全永続先は別監査が必要 |
-| cwdなし | responseはAbsolutePathBufで、実測もworkspace cwd | 非対応 |
-| runtime workspace rootなし | 実測1件 | 非対応 |
-| dynamic tool 0 | `dynamicTools=[]`はclient-defined toolだけ | 未証明 |
-| shell/file/MCP 0 | thread単位の完全allowlistがschemaにない | 未証明 |
-| raw prompt/response非永続 | アプリ側では実装可能 | 対応可能 |
+| 必要条件                   | Codex 0.144.xの証拠                              | 判定                               |
+| -------------------------- | ------------------------------------------------ | ---------------------------------- |
+| `ephemeral=true`           | responseで確認                                   | 対応                               |
+| `thread/list`へ残らない    | 同じ接続で非列挙                                 | 対応。ただし全永続先は別監査が必要 |
+| cwdなし                    | responseはAbsolutePathBufで、実測もworkspace cwd | 非対応                             |
+| runtime workspace rootなし | 実測1件                                          | 非対応                             |
+| dynamic tool 0             | `dynamicTools=[]`はclient-defined toolだけ       | 未証明                             |
+| shell/file/MCP 0           | thread単位の完全allowlistがschemaにない          | 未証明                             |
+| raw prompt/response非永続  | アプリ側では実装可能                             | 対応可能                           |
 
 このため通常support sessionと固定reviewer support sessionはともに0件である。main event、Git/test/checkpoint metadata、既知error codeから固定summary keyを選ぶだけにし、AIの提案や自動判断を生成しない。
 
@@ -45,30 +65,34 @@ read_when:
 
 ### Rust
 
-| ファイル | 責務 |
-| --- | --- |
-| `src-tauri/src/codex/binary.rs` | binary discovery、canonical実体検査、hash、同じbinaryによるschema probe |
-| `jsonl.rs` | incremental framing、UTF-8、line/buffer上限 |
-| `rpc.rs` | request ID相関、timeout、server request/notification signal |
-| `protocol.rs` | 使用するApp Server subset、固定outbound parameter、model gate |
-| `process.rs` | 子process、環境allowlist、redacted stderr ring、5秒以内の段階的終了 |
-| `requests.rs` | approval/RUI exact validation、duplicate request ledger |
-| `normalizer.rs` | opaque handle、redaction済みCodexEventとDomainEvent |
-| `supervisor.rs` | handshake、thread/turn/review、single active turn、restart budget |
-| `support.rs` | isolation unavailable時のcapacity 0と決定的fallback |
-| `commands.rs` | WebViewへ公開するtyped Tauri command |
-| `types.rs` | adapter v1のpublic DTOとserde contract |
-| `src-tauri/tests/codex_supervisor.rs` | fake process integrationとopt-in live smoke |
+| ファイル                              | 責務                                                                                    |
+| ------------------------------------- | --------------------------------------------------------------------------------------- |
+| `src-tauri/src/codex/binary.rs`       | binary discovery、canonical実体検査、hash、同じbinaryによるschema probe                 |
+| `jsonl.rs`                            | incremental framing、UTF-8、line/buffer上限                                             |
+| `rpc.rs`                              | request ID相関、timeout、server request/notification signal                             |
+| `protocol.rs`                         | 使用するApp Server subset、固定outbound parameter、model gate                           |
+| `decision.rs`                         | 完了assistant JSONのexact result/decision parse、bounded option、opaque decision ID     |
+| `process.rs`                          | 子process、環境allowlist、redacted stderr ring、5秒以内の段階的終了                     |
+| `requests.rs`                         | approval/RUI exact validation、duplicate request ledger                                 |
+| `normalizer.rs`                       | opaque handle、redaction済みCodexEventとDomainEvent                                     |
+| `supervisor.rs`                       | handshake、thread/turn/review、single active turn、restart budget                       |
+| `support.rs`                          | isolation unavailable時のcapacity 0と決定的fallback                                     |
+| `commands.rs`                         | WebViewへ公開するtyped Tauri command                                                    |
+| `types.rs`                            | adapter v1のpublic DTOとserde contract                                                  |
+| `workspace.rs`                        | native folder picker、Git/owner preflight、opaque workspace登録、app-private record復元 |
+| `src-tauri/tests/codex_supervisor.rs` | fake process integrationとopt-in live smoke                                             |
 
 ### TypeScript
 
-| ファイル | 責務 |
-| --- | --- |
-| `src/lib/contracts/codex.ts` | response/eventのexact-key parserとpublic DTO |
-| `src/features/codex/transport.ts` | Tauri invoke/listen境界と決定的demo transport |
-| `src/features/codex/session-store.ts` | generation、sequence、duplicate、pending response state |
-| `src/features/codex/client.ts` | event購読とpending responseのsingle-claim制御 |
-| `src/test/fixtures/codex-runtime.v1.json` | RustとTypeScriptが共有するpublic contract fixture |
+| ファイル                                    | 責務                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------- |
+| `src/lib/contracts/codex.ts`                | response/eventのexact-key parserとpublic DTO                        |
+| `src/features/codex/transport.ts`           | Tauri invoke/listen境界と決定的demo transport                       |
+| `src/features/codex/session-store.ts`       | generation、sequence、duplicate、pending response state             |
+| `src/features/codex/workspace-store.ts`     | native pickerのsingle-flight、opaque registration、safe error state |
+| `src/features/codex/use-codex-workspace.ts` | workspace storeを購読するReact hook                                 |
+| `src/features/codex/client.ts`              | event購読とpending responseのsingle-claim制御                       |
+| `src/test/fixtures/codex-runtime.v1.json`   | RustとTypeScriptが共有するpublic contract fixture                   |
 
 `CodexEvent`はbase fieldだけでなくvariant payloadもcamelCaseでserializeする。Rust round-tripとTypeScript parser testが同じfixtureを読むため、一方だけのfield名変更はgateで失敗する。
 
@@ -76,40 +100,46 @@ read_when:
 
 `src-tauri/tests/fixtures/fake_codex_app_server.py`は`--version`、schema生成、stdio app-serverを実装したtest executableである。`CODING_WIFE_CODEX_FAKE_MODE`で次を選ぶ。
 
-| mode | 検証内容 |
-| --- | --- |
-| `fragmented` | 分割JSONL、handshake、固定turn contract、interrupt |
-| `out_of_order` | 応答順変更、ID相関、timeout後の非再送 |
-| `malformed` | 正常応答と同じreadへ入る不正frame、duplicate response |
-| `unknown_request` | 未知server requestへのerror応答とturn interrupt |
-| `crash_after_ready` | ready後crash、bounded restart、turn非再送 |
+| mode                                     | 検証内容                                                                                |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| `fragmented`                             | 分割JSONL、handshake、固定turn contract、interrupt                                      |
+| `out_of_order`                           | 応答順変更、ID相関、timeout後の非再送                                                   |
+| `malformed`                              | 正常応答と同じreadへ入る不正frame、duplicate response                                   |
+| `unknown_request`                        | 未知server requestへのerror応答とturn interrupt                                         |
+| `crash_after_ready`                      | ready後crash、bounded restart、turn非再送                                               |
+| `protocol_after_ready`                   | malformed JSONL後の3回/60秒bounded restart、turn非再送                                  |
+| `experimental_rejected`                  | 新processでstable initializeへfallbackし、experimental fieldを送らずreviewをwire前block |
+| `thread_policy_*`                        | model、cwd、approval policy、sandbox、ephemeralの各mutationをfail-stop                  |
+| `native_rui`                             | strict 1問/2 optionのserver requestとtyped response round trip                          |
+| `decision_fallback` / `decision_invalid` | exact decision card化と自由文interrupt                                                  |
 
 fixtureは秘密、実account、実path、promptを含めない。新しいprotocol edge caseはproduction parserを緩める前にfake modeまたは共有fixtureへ追加する。
 
 ## 通常gate
 
-~~~text
+```text
 cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --lib --tests -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --all -- --test-threads=1
+pnpm exec vitest run src/lib/contracts/codex.test.ts src/features/codex/transport.test.ts src/features/codex/session-store.test.ts src/features/codex/workspace-store.test.tsx
 pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
-~~~
+```
 
 fake integrationはcrash testが環境変数を共有するため`--test-threads=1`で実行する。通常testではlive smokeはignoredのままにする。
 
 ## 読み取り専用live smoke
 
-~~~text
+```text
 CODEX_LIVE_SMOKE=1 cargo test \
   --manifest-path src-tauri/Cargo.toml \
   --test codex_supervisor \
   live_installed_codex_completes_read_only_handshake \
   -- --ignored --test-threads=1
-~~~
+```
 
 このsmokeは選択binaryでschemaを生成し、initialize、account/read、config/read、model/listだけを行う。thread、turn、reviewを作らず、モデル利用を発生させない。出力へaccount内容、config値、`CODEX_HOME`、workspaceの絶対pathを追加してはならない。
 
@@ -122,4 +152,7 @@ CODEX_LIVE_SMOKE=1 cargo test \
 - 新しいserver requestは意味と権限を個別に審査し、default allowやgeneric toolへ流さない。
 - error pathでraw `serde_json::Value`、stderr、invoke errorをUI error messageへ含めない。
 - reconnect、workspace切替、future generationでpending approvalを再利用しない。
+- binary identity差し替え時に過去のbinary/schema cacheを残さない。
+- redaction fixtureはBearer/API keyだけでなくauth cookie、session ID、quoted/spaced credential key、`/Volumes`、`/Library`、`/Applications`を含める。
+- stable initialize fallbackではexperimental-only fieldを送らず、unsupported operationをwire call前にblockする。
 - support isolationを`supported`へ変える場合はdeny-all capabilityと`CODEX_HOME`差分のrelease evidenceを先に追加する。
