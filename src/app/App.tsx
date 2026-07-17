@@ -5,15 +5,26 @@ import {
   createLocalePreferenceStore,
   type LocalePreferenceStore,
 } from "@/features/localization"
-import { FoundationShell } from "@/features/runtime/FoundationShell"
 import { createAppTransport, type AppTransport } from "@/features/runtime"
+import {
+  WorkspaceShell,
+  type CharacterStageRenderer,
+  type WorkspaceViewAdapter,
+} from "@/features/workspace-view"
 
 export interface AppProps {
+  readonly characterRenderer?: CharacterStageRenderer
   readonly localeStore?: LocalePreferenceStore
   readonly transport?: AppTransport
+  readonly workspaceAdapter?: WorkspaceViewAdapter
 }
 
-export function App({ localeStore, transport }: AppProps) {
+export function App({
+  characterRenderer,
+  localeStore,
+  transport,
+  workspaceAdapter,
+}: AppProps) {
   const [fallbackTransport] = useState(createAppTransport)
   const activeTransport = transport ?? fallbackTransport
   const fallbackLocaleStore = useMemo(
@@ -26,7 +37,10 @@ export function App({ localeStore, transport }: AppProps) {
       localeStore={localeStore ?? fallbackLocaleStore}
       transport={activeTransport}
     >
-      <FoundationShell />
+      <WorkspaceShell
+        adapter={workspaceAdapter}
+        characterRenderer={characterRenderer}
+      />
     </AppProviders>
   )
 }

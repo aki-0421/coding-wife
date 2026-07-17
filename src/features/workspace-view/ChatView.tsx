@@ -1,0 +1,159 @@
+import { AlertTriangleIcon, InfoIcon } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
+import { Composer } from "@/features/workspace-view/Composer"
+import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import { Timeline } from "@/features/workspace-view/Timeline"
+import type { TurnUiState } from "@/features/workspace-view/useWorkspaceViewModel"
+import type {
+  CharacterStageRenderer,
+  ContextSnapshotItem,
+  ReasoningEffort,
+  WorkspaceDraft,
+} from "@/features/workspace-view/types"
+import { cn } from "@/lib/utils"
+
+interface ChatViewProps {
+  readonly characterHidden: boolean
+  readonly connected: boolean
+  readonly copy: WorkspaceCopy
+  readonly draft: WorkspaceDraft
+  readonly muted: boolean
+  readonly reducedMotion: boolean
+  readonly renderer?: CharacterStageRenderer | undefined
+  readonly runtimeError: boolean
+  readonly turnState: TurnUiState
+  readonly workspaceId: string
+  readonly onAddAttachments: (files: readonly File[]) => void
+  readonly onCaptureContext: (
+    source: ContextSnapshotItem["source"],
+  ) => void | Promise<void>
+  readonly onDraftChange: (value: string) => void
+  readonly onEffortChange: (effort: ReasoningEffort) => void
+  readonly onMutedChange: (muted: boolean) => void
+  readonly onOpenDiagnostics: () => void
+  readonly onRemoveAttachment: (attachmentId: string) => void
+  readonly onRemoveContext: (snapshotId: string) => void
+  readonly onRetryRuntime: () => void
+  readonly onSend: () => Promise<boolean>
+  readonly onStop: () => void | Promise<void>
+}
+
+export function ChatView({
+  characterHidden,
+  connected,
+  copy,
+  draft,
+  muted,
+  reducedMotion,
+  renderer,
+  runtimeError,
+  turnState,
+  workspaceId,
+  onAddAttachments,
+  onCaptureContext,
+  onDraftChange,
+  onEffortChange,
+  onMutedChange,
+  onOpenDiagnostics,
+  onRemoveAttachment,
+  onRemoveContext,
+  onRetryRuntime,
+  onSend,
+  onStop,
+}: ChatViewProps) {
+  const companionState = connected
+    ? turnState === "running" || turnState === "sending"
+      ? "acting"
+      : "idle"
+    : "disconnected"
+
+  return (
+    <div
+      className={cn(
+        "chat-layout grid size-full min-h-0 bg-app-bg",
+        characterHidden && "character-hidden",
+      )}
+    >
+      <section
+        aria-labelledby="activity-heading"
+        className="chat-pane relative min-h-0 overflow-hidden"
+      >
+        <h1 className="sr-only" id="activity-heading">
+          {copy.timelineTitle}
+        </h1>
+
+        <div
+          className={cn(
+            "absolute inset-x-0 top-0 z-10 flex min-h-9 items-center gap-xs border-b border-divider bg-surface px-xl py-xs text-caption",
+            runtimeError ? "text-destructive" : "text-muted-foreground",
+          )}
+          role={runtimeError ? "alert" : "status"}
+        >
+          {runtimeError ? (
+            <AlertTriangleIcon aria-hidden="true" className="size-3 shrink-0" />
+          ) : (
+            <InfoIcon aria-hidden="true" className="size-3 shrink-0" />
+          )}
+          <span className="min-w-0 flex-1 truncate">
+            {runtimeError ? copy.runtimeErrorTitle : copy.previewNotice}
+          </span>
+          {runtimeError ? (
+            <Button
+              onClick={onRetryRuntime}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              {copy.retry}
+            </Button>
+          ) : null}
+        </div>
+
+        <ScrollArea className="size-full pt-9">
+          <div className="px-xl">
+            <Timeline copy={copy} onOpenDiagnostics={onOpenDiagnostics} />
+          </div>
+        </ScrollArea>
+
+        <div className="companion-status-mobile absolute top-11 right-xl z-10 hidden items-center gap-xs rounded-control bg-surface px-xs py-xxs text-caption text-muted-foreground">
+          <span
+            aria-hidden="true"
+            className="size-[7px] rotate-45 border border-muted-foreground"
+          />
+          {copy.character.disconnected}
+        </div>
+
+        <Composer
+          connected={connected}
+          copy={copy}
+          draft={draft}
+          onAddAttachments={onAddAttachments}
+          onCaptureContext={onCaptureContext}
+          onDraftChange={onDraftChange}
+          onEffortChange={onEffortChange}
+          onRemoveAttachment={onRemoveAttachment}
+          onRemoveContext={onRemoveContext}
+          onSend={onSend}
+          onStop={onStop}
+          turnState={turnState}
+        />
+      </section>
+
+      {!characterHidden ? (
+        <CharacterStageSlot
+          copy={copy}
+          hidden={characterHidden}
+          muted={muted}
+          onMutedChange={onMutedChange}
+          reducedMotion={reducedMotion}
+          state={companionState}
+          workspaceId={workspaceId}
+          {...(renderer ? { renderer } : {})}
+        />
+      ) : null}
+    </div>
+  )
+}

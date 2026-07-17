@@ -159,6 +159,7 @@
 
   body {
     @apply m-0 min-h-dvh bg-background text-body text-foreground;
+    overflow: hidden;
   }
 
   button:not(:disabled),
@@ -178,7 +179,114 @@
 }
 
 #root {
+  width: 100dvw;
+  height: 100dvh;
   min-height: 100dvh;
+}
+
+@layer components {
+  .workspace-shell {
+    position: relative;
+    display: grid;
+    grid-template-columns: 255.04px minmax(0, 1fr);
+    width: 100dvw;
+    height: 100dvh;
+    min-width: 960px;
+    min-height: 640px;
+    overflow: hidden;
+    background: var(--app-bg);
+  }
+
+  .workspace-sidebar {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace-tabs {
+    display: grid;
+    grid-column: 2;
+    grid-row: 1;
+    grid-template-rows: 81px minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    gap: 0;
+  }
+
+  .workspace-header {
+    grid-row: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace-view {
+    grid-row: 2;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .chat-layout {
+    grid-template-columns:
+      minmax(520px, 607.11fr)
+      minmax(248px, 607.84fr);
+  }
+
+  .chat-layout.character-hidden {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat-pane {
+    grid-column: 1;
+  }
+
+  .companion-pane {
+    grid-column: 2;
+  }
+
+  .workspace-notice {
+    position: absolute;
+    z-index: 40;
+    top: 90px;
+    right: 18px;
+    max-width: min(420px, calc(100dvw - 100px));
+  }
+
+  [data-slot="scroll-area-viewport"] > div {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1279px) {
+  .workspace-shell {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .chat-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .companion-pane {
+    display: none;
+  }
+
+  .companion-status-mobile {
+    display: flex;
+  }
+}
+
+[data-reduced-motion="true"] *,
+[data-reduced-motion="true"] *::before,
+[data-reduced-motion="true"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
