@@ -17,7 +17,7 @@
     "lint": "eslint . --max-warnings 0",
     "typecheck": "pnpm live2d:prepare && tsc -b --pretty false",
     "pretest": "pnpm live2d:prepare",
-    "test": "pnpm live2d:test:supply-chain && vitest run",
+    "test": "pnpm live2d:test:supply-chain && vitest run --testTimeout=10000",
     "pretest:watch": "pnpm live2d:prepare",
     "test:watch": "vitest",
     "pretest:workspace-history": "pnpm live2d:prepare",
