@@ -8,8 +8,26 @@ const REDACTED: &str = "[redacted]";
 fn bearer_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r"(?i)\b(bearer|token|api[_ -]?key|password|secret)\s*[:=]?\s*[^\s,;]+")
-            .expect("redaction regex is valid")
+        Regex::new(r#"(?i)\bbearer\s+(?:"[^"\r\n]{1,4096}"|'[^'\r\n]{1,4096}'|[^\s,;]+)"#)
+            .expect("bearer redaction regex is valid")
+    })
+}
+
+fn credential_assignment_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    PATTERN.get_or_init(|| {
+        Regex::new(
+            r#"(?ix)
+            \b(
+                authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|
+                id[_-]?token|token|password|passwd|secret|client[_-]?secret|
+                auth[_-]?cookie|cookie|set-cookie|session[_-]?id|sessionid
+            )\b
+            \s*[:=]\s*
+            (?:"[^"\r\n]{0,4096}"|'[^'\r\n]{0,4096}'|[^\s,;]+)
+            "#,
+        )
+        .expect("credential assignment redaction regex is valid")
     })
 }
 
@@ -24,7 +42,7 @@ fn key_pattern() -> &'static Regex {
 fn absolute_path_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r#"(?:^|[\s=:'"(])/(?:Users|home|private|tmp|var|opt)/[^\s,'")]+"#)
+        Regex::new(r#"(?m)(^|[\s=:'"(,\[])(/[A-Za-z0-9_~.+@%{}$-][^\s,'")\]\[;]*)"#)
             .expect("path redaction regex is valid")
     })
 }
@@ -57,6 +75,9 @@ pub fn redact_text(value: &str, workspace_root: Option<&Path>, max_bytes: usize)
     }
 
     redacted = bearer_pattern()
+        .replace_all(&redacted, format!("bearer={REDACTED}"))
+        .into_owned();
+    redacted = credential_assignment_pattern()
         .replace_all(&redacted, |captures: &regex::Captures<'_>| {
             format!("{}={REDACTED}", &captures[1].to_ascii_lowercase())
         })
@@ -64,11 +85,8 @@ pub fn redact_text(value: &str, workspace_root: Option<&Path>, max_bytes: usize)
     redacted = key_pattern().replace_all(&redacted, REDACTED).into_owned();
     redacted = absolute_path_pattern()
         .replace_all(&redacted, |captures: &regex::Captures<'_>| {
-            let prefix = captures
-                .get(0)
-                .map(|capture| capture.as_str().chars().next().unwrap_or(' '))
-                .unwrap_or(' ');
-            if prefix == '/' {
+            let prefix = captures.get(1).map_or("", |capture| capture.as_str());
+            if prefix.is_empty() {
                 "<path>".to_owned()
             } else {
                 format!("{prefix}<path>")
@@ -96,6 +114,46 @@ mod tests {
         assert!(!redacted.contains("sk-123"));
         assert!(!redacted.contains("/Users/alice"));
         assert!(redacted.contains(REDACTED));
+    }
+
+    #[test]
+    fn cookies_sessions_and_quoted_credentials_are_removed() {
+        let value = concat!(
+            "Cookie: theme=light; sessionid = \"secret value with spaces\"\n",
+            "auth_cookie='another private value' access_token = top-secret\n",
+            "Authorization: Bearer bearer-secret"
+        );
+        let redacted = redact_text(value, None, 1024);
+
+        assert!(!redacted.contains("secret value"));
+        assert!(!redacted.contains("another private"));
+        assert!(!redacted.contains("top-secret"));
+        assert!(!redacted.contains("bearer-secret"));
+        assert!(redacted.matches(REDACTED).count() >= 4);
+    }
+
+    #[test]
+    fn general_absolute_paths_are_aliased_without_matching_urls_or_ratios() {
+        let value = concat!(
+            "/Volumes/External/project/file.rs ",
+            "/Library/Application Support/tool/config.json ",
+            "/Applications/Codex.app/Contents/MacOS/Codex ",
+            "/etc/hosts https://example.com/v1 1/2"
+        );
+        let redacted = redact_text(value, None, 1024);
+
+        assert!(!redacted.contains("/Volumes/External"));
+        assert!(!redacted.contains("/Library/Application"));
+        assert!(!redacted.contains("/Applications/Codex.app"));
+        assert!(!redacted.contains("/etc/hosts"));
+        assert!(redacted.contains("https://example.com/v1"));
+        assert!(redacted.contains("1/2"));
+    }
+
+    #[test]
+    fn credential_words_without_assignments_are_not_false_positives() {
+        let value = "token count is 42; keep the password guidance and secret classification";
+        assert_eq!(redact_text(value, None, 256), value);
     }
 
     #[test]

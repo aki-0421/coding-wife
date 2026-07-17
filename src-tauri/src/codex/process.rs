@@ -24,6 +24,8 @@ const TOTAL_SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 pub enum ProcessError {
     #[error("the Codex app-server process could not be spawned")]
     Spawn,
+    #[error("the verified Codex executable changed before startup completed")]
+    IdentityChanged,
     #[error("the Codex app-server process did not expose required stdio")]
     MissingStdio,
 }
@@ -75,6 +77,10 @@ pub async fn spawn_process(
     generation: u64,
     signals: mpsc::Sender<RuntimeSignal>,
 ) -> Result<ProcessRuntime, ProcessError> {
+    binary
+        .revalidate()
+        .await
+        .map_err(|_| ProcessError::IdentityChanged)?;
     let mut command = Command::new(&binary.canonical_path);
     command
         .arg("app-server")
@@ -91,6 +97,10 @@ pub async fn spawn_process(
 
     let mut child = command.spawn().map_err(|_| ProcessError::Spawn)?;
     let pid = child.id().ok_or(ProcessError::Spawn)?;
+    if binary.revalidate().await.is_err() {
+        terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+        return Err(ProcessError::IdentityChanged);
+    }
     let stdin = child.stdin.take().ok_or(ProcessError::MissingStdio)?;
     let stdout = child.stdout.take().ok_or(ProcessError::MissingStdio)?;
     let stderr = child.stderr.take().ok_or(ProcessError::MissingStdio)?;
@@ -144,29 +154,29 @@ impl ProcessRuntime {
         let started = tokio::time::Instant::now();
 
         while started.elapsed() < GRACEFUL_STDIN_WAIT {
-            if process_exited(&self.child).await {
+            if process_exited(&self.child).await.unwrap_or(false) {
                 self.connection.fail_pending().await;
                 return;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
-        signal_process_group("-TERM", self.pid).await;
+        let _ = signal_process_group(self.pid, SIGTERM);
         while started.elapsed() < TOTAL_SHUTDOWN_WAIT {
-            if process_exited(&self.child).await {
+            if process_exited(&self.child).await.unwrap_or(false) {
                 self.connection.fail_pending().await;
                 return;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
-        signal_process_group("-KILL", self.pid).await;
+        let _ = signal_process_group(self.pid, SIGKILL);
         let _ = self.child.lock().await.kill().await;
         self.connection.fail_pending().await;
     }
 
     pub async fn has_exited(&self) -> bool {
-        process_exited(&self.child).await
+        process_exited(&self.child).await.unwrap_or(false)
     }
 
     pub fn expected_shutdown(&self) -> bool {
@@ -178,29 +188,54 @@ impl ProcessRuntime {
     }
 }
 
-async fn process_exited(child: &Arc<Mutex<Child>>) -> bool {
-    child
-        .lock()
-        .await
-        .try_wait()
-        .map_or(true, |status| status.is_some())
+async fn process_exited(child: &Arc<Mutex<Child>>) -> Result<bool, std::io::Error> {
+    child.lock().await.try_wait().map(|status| status.is_some())
 }
 
-async fn signal_process_group(signal: &str, pid: u32) {
-    let _ = Command::new("kill")
-        .arg(signal)
-        .arg("--")
-        .arg(format!("-{pid}"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await;
+const SIGTERM: i32 = 15;
+const SIGKILL: i32 = 9;
+
+unsafe extern "C" {
+    fn kill(pid: i32, signal: i32) -> i32;
+}
+
+fn signal_process_group(pid: u32, signal: i32) -> Result<(), ()> {
+    let pid = i32::try_from(pid).map_err(|_| ())?;
+    // SAFETY: a negative pid targets the process group. No pointers cross the FFI boundary.
+    let result = unsafe { kill(-pid, signal) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
+pub(super) async fn terminate_child_process_group(
+    child: &mut Child,
+    pid: u32,
+    term_grace: Duration,
+) {
+    let _ = signal_process_group(pid, SIGTERM);
+    let deadline = tokio::time::Instant::now() + term_grace;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) | Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    let _ = signal_process_group(pid, SIGKILL);
+    let _ = child.kill().await;
+    let _ = tokio::time::timeout(Duration::from_millis(500), child.wait()).await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::time::Instant;
 
     #[test]
     fn environment_is_an_explicit_allowlist() {
@@ -208,5 +243,55 @@ mod tests {
         assert!(is_allowed_environment(OsStr::new("HTTPS_PROXY")));
         assert!(!is_allowed_environment(OsStr::new("RANDOM_SECRET")));
         assert!(!is_allowed_environment(OsStr::new("BASH_ENV")));
+    }
+
+    fn process_tree_fixture() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex_process_tree_fixture.py")
+    }
+
+    fn temporary_state_file() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "coding-wife-process-tree-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ))
+    }
+
+    fn process_group_exists(pid: u32) -> bool {
+        signal_process_group(pid, 0).is_ok()
+    }
+
+    #[tokio::test]
+    async fn direct_group_shutdown_kills_a_grandchild_holding_stdio() {
+        let state = temporary_state_file();
+        let mut command = Command::new(process_tree_fixture());
+        command
+            .env("CODING_WIFE_PROCESS_TREE_STATE", &state)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        command.as_std_mut().process_group(0);
+        let mut child = command.spawn().expect("spawn process-tree fixture");
+        let pid = child.id().expect("fixture pid");
+        let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while !state.exists() {
+            assert!(
+                tokio::time::Instant::now() < ready_deadline,
+                "grandchild fixture did not become ready"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let started = Instant::now();
+        terminate_child_process_group(&mut child, pid, Duration::from_millis(100)).await;
+        assert!(started.elapsed() < TOTAL_SHUTDOWN_WAIT);
+        let gone_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        while process_group_exists(pid) && tokio::time::Instant::now() < gone_deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!process_group_exists(pid), "process group survived SIGKILL");
+        let _ = std::fs::remove_file(state);
     }
 }

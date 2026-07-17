@@ -1,0 +1,91 @@
+{
+  "ClientRequest.json": {
+    "title": "ClientRequest",
+    "oneOf": [
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["thread/list"]},"params":{"$ref":"#/definitions/ThreadListParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["thread/start"]},"params":{"$ref":"#/definitions/ThreadStartParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["thread/resume"]},"params":{"$ref":"#/definitions/ThreadResumeParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["turn/start"]},"params":{"$ref":"#/definitions/TurnStartParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["turn/interrupt"]},"params":{"$ref":"#/definitions/TurnInterruptParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["review/start"]},"params":{"$ref":"#/definitions/ReviewStartParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["account/read"]},"params":{"$ref":"#/definitions/GetAccountParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["config/read"]},"params":{"$ref":"#/definitions/ConfigReadParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["model/list"]},"params":{"$ref":"#/definitions/ModelListParams"}}}
+    ]
+  },
+  "ServerNotification.json": {
+    "title": "ServerNotification",
+    "oneOf": [
+      {"type":"object","required":["method","params"],"properties":{"method":{"type":"string","enum":["error"]},"params":{"$ref":"#/definitions/ErrorNotification"}}},
+      {"type":"object","required":["method","params"],"properties":{"method":{"type":"string","enum":["turn/started"]},"params":{"$ref":"#/definitions/TurnStartedNotification"}}},
+      {"type":"object","required":["method","params"],"properties":{"method":{"type":"string","enum":["turn/completed"]},"params":{"$ref":"#/definitions/TurnCompletedNotification"}}},
+      {"type":"object","required":["method","params"],"properties":{"method":{"type":"string","enum":["item/started"]},"params":{"$ref":"#/definitions/ItemStartedNotification"}}},
+      {"type":"object","required":["method","params"],"properties":{"method":{"type":"string","enum":["item/completed"]},"params":{"$ref":"#/definitions/ItemCompletedNotification"}}},
+      {"type":"object","required":["method","params"],"properties":{"method":{"type":"string","enum":["item/agentMessage/delta"]},"params":{"$ref":"#/definitions/AgentMessageDeltaNotification"}}},
+      {"type":"object","required":["method","params"],"properties":{"method":{"type":"string","enum":["model/rerouted"]},"params":{"$ref":"#/definitions/ModelReroutedNotification"}}}
+    ]
+  },
+  "ServerRequest.json": {
+    "title": "ServerRequest",
+    "oneOf": [
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["item/tool/requestUserInput"]},"params":{"$ref":"#/definitions/ToolRequestUserInputParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["item/tool/call"]},"params":{"$ref":"#/definitions/DynamicToolCallParams"}}},
+      {"type":"object","required":["id","method","params"],"properties":{"id":{},"method":{"type":"string","enum":["item/permissions/requestApproval"]},"params":{"$ref":"#/definitions/PermissionsRequestApprovalParams"}}}
+    ]
+  },
+  "v2/ThreadListResponse.json": {
+    "title":"ThreadListResponse","type":"object","required":["data"],"properties":{"data":{}}
+  },
+  "v2/ThreadStartResponse.json": {
+    "title":"ThreadStartResponse","type":"object",
+    "required":["approvalPolicy","approvalsReviewer","cwd","model","modelProvider","sandbox","thread"],
+    "properties":{"approvalPolicy":{},"approvalsReviewer":{},"cwd":{},"model":{},"modelProvider":{},"sandbox":{},"thread":{}},
+    "definitions":{"Thread":{"type":"object","required":["cliVersion","createdAt","cwd","ephemeral","id","modelProvider","preview","sessionId","source","status","turns","updatedAt"],"properties":{"ephemeral":{"type":"boolean"}}}}
+  },
+  "v2/ThreadResumeResponse.json": {
+    "title":"ThreadResumeResponse","type":"object",
+    "required":["approvalPolicy","approvalsReviewer","cwd","model","modelProvider","sandbox","thread"],
+    "properties":{"approvalPolicy":{},"approvalsReviewer":{},"cwd":{},"model":{},"modelProvider":{},"sandbox":{},"thread":{}}
+  },
+  "v2/TurnStartResponse.json": {
+    "title":"TurnStartResponse","type":"object","required":["turn"],"properties":{"turn":{}}
+  },
+  "v2/GetAccountResponse.json": {
+    "title":"GetAccountResponse","type":"object","required":["requiresOpenaiAuth"],"properties":{"account":{},"requiresOpenaiAuth":{}}
+  },
+  "v2/ConfigReadResponse.json": {
+    "title":"ConfigReadResponse","type":"object","required":["config","origins"],"properties":{"config":{},"origins":{}}
+  },
+  "v2/ModelListResponse.json": {
+    "title":"ModelListResponse","type":"object","required":["data"],"properties":{"data":{}}
+  },
+  "ToolRequestUserInputParams.json": {
+    "title":"ToolRequestUserInputParams","type":"object","required":["itemId","questions","threadId","turnId"],"properties":{"itemId":{},"questions":{},"threadId":{},"turnId":{}}
+  },
+  "ToolRequestUserInputResponse.json": {
+    "title":"ToolRequestUserInputResponse","type":"object","required":["answers"],"properties":{"answers":{}}
+  },
+  "DynamicToolCallParams.json": {
+    "title":"DynamicToolCallParams","type":"object","required":["arguments","callId","threadId","tool","turnId"],"properties":{"arguments":{},"callId":{},"threadId":{},"tool":{},"turnId":{}}
+  },
+  "DynamicToolCallResponse.json": {
+    "title":"DynamicToolCallResponse","type":"object","required":["contentItems","success"],"properties":{"contentItems":{},"success":{}}
+  },
+  "PermissionsRequestApprovalParams.json": {
+    "title":"PermissionsRequestApprovalParams","type":"object","required":["cwd","itemId","permissions","startedAtMs","threadId","turnId"],"properties":{"cwd":{},"itemId":{},"permissions":{},"startedAtMs":{},"threadId":{},"turnId":{}}
+  },
+  "PermissionsRequestApprovalResponse.json": {
+    "title":"PermissionsRequestApprovalResponse","type":"object","required":["permissions"],"properties":{"permissions":{}}
+  },
+  "v2/ThreadStartParams.json": {
+    "title":"ThreadStartParams","type":"object","properties":{"dynamicTools":{"type":["array","null"],"items":{"$ref":"#/definitions/DynamicToolSpec"}},"ephemeral":{"type":["boolean","null"]}}
+  },
+  "v2/ReviewStartParams.json": {
+    "title":"ReviewStartParams","type":"object","required":["target","threadId"],
+    "properties":{"delivery":{"anyOf":[{"$ref":"#/definitions/ReviewDelivery"},{"type":"null"}]},"target":{},"threadId":{}},
+    "definitions":{"ReviewDelivery":{"type":"string","enum":["inline","detached"]}}
+  },
+  "v2/ReviewStartResponse.json": {
+    "title":"ReviewStartResponse","type":"object","required":["reviewThreadId","turn"],"properties":{"reviewThreadId":{},"turn":{}}
+  }
+}
