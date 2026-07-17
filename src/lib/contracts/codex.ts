@@ -1173,10 +1173,7 @@ export function parseCodexEvent(value: unknown): CodexEvent {
       }
     }
     case "pending_request_resolved": {
-      const payload = parseSimplePayload(value.payload, [
-        "pendingId",
-        "status",
-      ])
+      const payload = parseSimplePayload(value.payload, ["pendingId", "status"])
       if (
         !nonEmptyString(payload.pendingId) ||
         !oneOf(payload.status, ["accepted", "expired", "failed"] as const)

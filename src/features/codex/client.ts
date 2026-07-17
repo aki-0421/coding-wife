@@ -56,7 +56,10 @@ export class CodexSessionClient {
   ): Promise<boolean> {
     if (!this.store.claimFallbackDecision(request)) return false
     try {
-      await this.transport.request(codexCommands.answerFallbackDecision, request)
+      await this.transport.request(
+        codexCommands.answerFallbackDecision,
+        request,
+      )
       this.store.completePendingResponse(request.decisionHandle)
       return true
     } catch (error) {

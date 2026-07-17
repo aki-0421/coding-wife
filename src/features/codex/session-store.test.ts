@@ -88,7 +88,10 @@ describe("CodexSessionStore", () => {
   it("keeps fallback decisions after the source turn and claims one continuation", async () => {
     const pending = fixtureEvents[1]
     const running = fixtureEvents[0]
-    if (pending?.kind !== "pending_request" || running?.kind !== "turn_status") {
+    if (
+      pending?.kind !== "pending_request" ||
+      running?.kind !== "turn_status"
+    ) {
       throw new Error("fixture")
     }
     const fallback = parseCodexEvent({
