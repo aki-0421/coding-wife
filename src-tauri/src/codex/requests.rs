@@ -7,10 +7,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use super::protocol::{server_error, server_result, RpcId};
-use super::redaction::redact_text;
 use super::types::{
-    ApprovalDecision, CapabilityState, CodexCapabilities, PendingKind, PendingOption,
-    PendingQuestion, PendingRequestView, PendingResponse,
+    ApprovalContext, ApprovalDecision, CapabilityState, CodexCapabilities, PendingKind,
+    PendingOption, PendingQuestion, PendingRequestView, PendingResponse,
 };
 
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
@@ -158,17 +157,6 @@ fn pending_id(rpc_id: &RpcId, params_hash: &str) -> String {
     format!("pending-{}", &hex::encode(digest)[..20])
 }
 
-fn sanitized_reason(
-    params: &serde_json::Map<String, Value>,
-    workspace_root: &Path,
-) -> Option<String> {
-    params
-        .get("reason")
-        .and_then(Value::as_str)
-        .filter(|reason| !reason.trim().is_empty())
-        .map(|reason| redact_text(reason, Some(workspace_root), 512))
-}
-
 fn allowed_approval_decisions(
     params: &serde_json::Map<String, Value>,
 ) -> Result<Vec<ApprovalDecision>, RequestValidationError> {
@@ -280,10 +268,13 @@ fn approval_record(
         pending_id: id,
         kind,
         operation: operation.to_owned(),
-        target_alias: "workspace".to_owned(),
-        reason: sanitized_reason(object, workspace_root),
+        target_alias: approval_target_alias(method, object, workspace_root),
+        // Raw reasons can repeat a command, absolute cwd, or secret. The safe
+        // evidence projection below is the approval explanation boundary.
+        reason: None,
         questions: Vec::new(),
         allowed_decisions: decisions,
+        approval_context: Some(approval_context(method, object, workspace_root)),
     };
     Ok(PendingRecord {
         rpc_key: rpc_id.stable_key(),
@@ -391,6 +382,7 @@ fn user_input_record(
         reason: None,
         questions: views,
         allowed_decisions: Vec::new(),
+        approval_context: None,
     };
     Ok(PendingRecord {
         rpc_key: rpc_id.stable_key(),
@@ -453,79 +445,19 @@ impl ServerRequestLedger {
         pending_id: &str,
         response: &PendingResponse,
     ) -> Result<Resolution, RequestValidationError> {
+        let (message, interrupt) = {
+            let record = self
+                .pending_by_id
+                .get(pending_id)
+                .ok_or(RequestValidationError::StaleResponse)?;
+            build_resolution(record, response)?
+        };
+
         let record = self
             .pending_by_id
             .remove(pending_id)
             .ok_or(RequestValidationError::StaleResponse)?;
         self.pending_by_rpc.remove(&record.rpc_key);
-
-        let (message, interrupt) = match (&record.response_shape, response) {
-            (
-                ResponseShape::Command | ResponseShape::FileChange,
-                PendingResponse::Approval { decision },
-            ) => {
-                if !record.view.allowed_decisions.contains(decision) {
-                    return Err(RequestValidationError::InvalidResponse);
-                }
-                let decision = match decision {
-                    ApprovalDecision::ApproveOnce => "accept",
-                    ApprovalDecision::Reject => "decline",
-                    ApprovalDecision::Stop => "cancel",
-                };
-                (
-                    server_result(&record.rpc_id, json!({"decision": decision})),
-                    decision == "cancel",
-                )
-            }
-            (ResponseShape::Permissions { requested }, PendingResponse::Approval { decision }) => {
-                if !record.view.allowed_decisions.contains(decision) {
-                    return Err(RequestValidationError::InvalidResponse);
-                }
-                match decision {
-                    ApprovalDecision::ApproveOnce => (
-                        server_result(
-                            &record.rpc_id,
-                            json!({"permissions": requested, "scope": "turn"}),
-                        ),
-                        false,
-                    ),
-                    ApprovalDecision::Reject => (
-                        server_result(&record.rpc_id, json!({"permissions": {}, "scope": "turn"})),
-                        false,
-                    ),
-                    ApprovalDecision::Stop => (
-                        server_error(&record.rpc_id, -32000, "Request canceled by user"),
-                        true,
-                    ),
-                }
-            }
-            (
-                ResponseShape::UserInput { answers: expected },
-                PendingResponse::UserInput { answers },
-            ) => {
-                if expected.len() != answers.len() {
-                    return Err(RequestValidationError::InvalidResponse);
-                }
-                for (question_id, allowed) in expected {
-                    let selected = answers
-                        .get(question_id)
-                        .filter(|selected| selected.len() == 1)
-                        .ok_or(RequestValidationError::InvalidResponse)?;
-                    if !allowed.contains(&selected[0]) {
-                        return Err(RequestValidationError::InvalidResponse);
-                    }
-                }
-                let answers = answers
-                    .iter()
-                    .map(|(id, values)| (id.clone(), json!({"answers": values})))
-                    .collect::<serde_json::Map<_, _>>();
-                (
-                    server_result(&record.rpc_id, json!({"answers": answers})),
-                    false,
-                )
-            }
-            _ => return Err(RequestValidationError::InvalidResponse),
-        };
 
         self.record_resolution(&record, message.clone());
         Ok(Resolution {
@@ -576,6 +508,234 @@ impl ServerRequestLedger {
         self.pending_by_id.clear();
         self.pending_by_rpc.clear();
     }
+}
+
+fn build_resolution(
+    record: &PendingRecord,
+    response: &PendingResponse,
+) -> Result<(Value, bool), RequestValidationError> {
+    match (&record.response_shape, response) {
+        (
+            ResponseShape::Command | ResponseShape::FileChange,
+            PendingResponse::Approval { decision },
+        ) => {
+            if !record.view.allowed_decisions.contains(decision) {
+                return Err(RequestValidationError::InvalidResponse);
+            }
+            let decision = match decision {
+                ApprovalDecision::ApproveOnce => "accept",
+                ApprovalDecision::Reject => "decline",
+                ApprovalDecision::Stop => "cancel",
+            };
+            Ok((
+                server_result(&record.rpc_id, json!({"decision": decision})),
+                decision == "cancel",
+            ))
+        }
+        (ResponseShape::Permissions { requested }, PendingResponse::Approval { decision }) => {
+            if !record.view.allowed_decisions.contains(decision) {
+                return Err(RequestValidationError::InvalidResponse);
+            }
+            Ok(match decision {
+                ApprovalDecision::ApproveOnce => (
+                    server_result(
+                        &record.rpc_id,
+                        json!({"permissions": requested, "scope": "turn"}),
+                    ),
+                    false,
+                ),
+                ApprovalDecision::Reject => (
+                    server_result(&record.rpc_id, json!({"permissions": {}, "scope": "turn"})),
+                    false,
+                ),
+                ApprovalDecision::Stop => (
+                    server_error(&record.rpc_id, -32000, "Request canceled by user"),
+                    true,
+                ),
+            })
+        }
+        (
+            ResponseShape::UserInput { answers: expected },
+            PendingResponse::UserInput { answers },
+        ) => {
+            if expected.len() != answers.len() {
+                return Err(RequestValidationError::InvalidResponse);
+            }
+            for (question_id, allowed) in expected {
+                let selected = answers
+                    .get(question_id)
+                    .filter(|selected| selected.len() == 1)
+                    .ok_or(RequestValidationError::InvalidResponse)?;
+                if !allowed.contains(&selected[0]) {
+                    return Err(RequestValidationError::InvalidResponse);
+                }
+            }
+            let answers = answers
+                .iter()
+                .map(|(id, values)| (id.clone(), json!({"answers": values})))
+                .collect::<serde_json::Map<_, _>>();
+            Ok((
+                server_result(&record.rpc_id, json!({"answers": answers})),
+                false,
+            ))
+        }
+        _ => Err(RequestValidationError::InvalidResponse),
+    }
+}
+
+fn approval_context(
+    method: &str,
+    params: &serde_json::Map<String, Value>,
+    workspace_root: &Path,
+) -> ApprovalContext {
+    let target_alias = approval_target_alias(method, params, workspace_root);
+    let (category, target_kind, scope, risk, reversibility, recommendation, mut evidence) =
+        match method {
+            "item/commandExecution/requestApproval" => {
+                let network = params
+                    .get("networkApprovalContext")
+                    .is_some_and(|value| !value.is_null());
+                let additional = params
+                    .get("additionalPermissions")
+                    .is_some_and(|value| !value.is_null());
+                let known_read_only = params
+                    .get("commandActions")
+                    .and_then(Value::as_array)
+                    .is_some_and(|actions| {
+                        !actions.is_empty()
+                            && actions.iter().all(|action| {
+                                action
+                                    .get("type")
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|kind| {
+                                        ["read", "listFiles", "search"].contains(&kind)
+                                    })
+                            })
+                    });
+                if network || additional || !known_read_only {
+                    (
+                        "command_execution",
+                        if network { "network_host" } else { "workspace" },
+                        "command",
+                        "high",
+                        "unknown",
+                        ApprovalDecision::Reject,
+                        vec!["untrusted_command".to_owned()],
+                    )
+                } else {
+                    (
+                        "command_execution",
+                        "workspace_path",
+                        "command",
+                        "low",
+                        "reversible",
+                        ApprovalDecision::ApproveOnce,
+                        vec!["read_only_action".to_owned()],
+                    )
+                }
+            }
+            "item/fileChange/requestApproval" => (
+                "file_change",
+                "workspace_path",
+                "turn",
+                "medium",
+                "partially_reversible",
+                ApprovalDecision::Reject,
+                vec!["repository_mutation".to_owned()],
+            ),
+            _ => (
+                "permissions",
+                "workspace",
+                "turn",
+                "high",
+                "not_reversible",
+                ApprovalDecision::Reject,
+                permission_evidence(params.get("permissions")),
+            ),
+        };
+    evidence.sort();
+    evidence.dedup();
+    ApprovalContext {
+        schema_version: 1,
+        category: category.to_owned(),
+        target_kind: target_kind.to_owned(),
+        target_alias,
+        scope: scope.to_owned(),
+        risk: risk.to_owned(),
+        reversibility: reversibility.to_owned(),
+        recommendation,
+        evidence,
+    }
+}
+
+fn approval_target_alias(
+    method: &str,
+    params: &serde_json::Map<String, Value>,
+    workspace_root: &Path,
+) -> String {
+    if method == "item/commandExecution/requestApproval" {
+        if let Some(host) = params
+            .get("networkApprovalContext")
+            .and_then(Value::as_object)
+            .and_then(|context| context.get("host"))
+            .and_then(Value::as_str)
+        {
+            let digest = hex::encode(Sha256::digest(host.as_bytes()));
+            return format!("host-{}", &digest[..12]);
+        }
+        if let Some(path) = params
+            .get("commandActions")
+            .and_then(Value::as_array)
+            .and_then(|actions| actions.iter().find_map(|action| action.get("path")))
+            .and_then(Value::as_str)
+        {
+            return path_alias(path, workspace_root);
+        }
+    }
+    if method == "item/fileChange/requestApproval" {
+        if let Some(path) = params.get("grantRoot").and_then(Value::as_str) {
+            return path_alias(path, workspace_root);
+        }
+    }
+    "workspace".to_owned()
+}
+
+fn path_alias(raw: &str, workspace_root: &Path) -> String {
+    let path = Path::new(raw);
+    if let Ok(relative) = path.strip_prefix(workspace_root) {
+        if !relative
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            let display = relative.to_string_lossy();
+            return if display.is_empty() {
+                "workspace".to_owned()
+            } else {
+                format!("workspace/{display}")
+            };
+        }
+    }
+    "external_path".to_owned()
+}
+
+fn permission_evidence(value: Option<&Value>) -> Vec<String> {
+    let Some(object) = value.and_then(Value::as_object) else {
+        return vec!["permission_profile".to_owned()];
+    };
+    let mut evidence = Vec::new();
+    if object
+        .get("fileSystem")
+        .is_some_and(|value| !value.is_null())
+    {
+        evidence.push("filesystem_permission".to_owned());
+    }
+    if object.get("network").is_some_and(|value| !value.is_null()) {
+        evidence.push("network_permission".to_owned());
+    }
+    if evidence.is_empty() {
+        evidence.push("permission_profile".to_owned());
+    }
+    evidence
 }
 
 #[cfg(test)]
@@ -721,5 +881,149 @@ mod tests {
             ),
             Err(RequestValidationError::InvalidParams)
         );
+    }
+
+    #[test]
+    fn invalid_response_does_not_consume_the_pending_approval() {
+        let mut ledger = ServerRequestLedger::default();
+        let params = json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "startedAtMs": 1,
+            "reason": "write"
+        });
+        let RegisterOutcome::New(view) = ledger
+            .register(
+                RpcId::Unsigned(11),
+                "item/fileChange/requestApproval",
+                &params,
+                &active(),
+                Path::new("/workspace"),
+                &CodexCapabilities::default(),
+            )
+            .expect("register")
+        else {
+            panic!("new request expected");
+        };
+
+        assert!(matches!(
+            ledger.resolve(
+                &view.pending_id,
+                &PendingResponse::UserInput {
+                    answers: BTreeMap::new(),
+                },
+            ),
+            Err(RequestValidationError::InvalidResponse)
+        ));
+        assert!(ledger
+            .resolve(
+                &view.pending_id,
+                &PendingResponse::Approval {
+                    decision: ApprovalDecision::Reject,
+                },
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn invalid_user_input_answer_remains_pending_until_a_valid_answer() {
+        let mut ledger = ServerRequestLedger::default();
+        let capabilities = CodexCapabilities {
+            native_request_user_input: CapabilityState::Supported,
+            ..CodexCapabilities::default()
+        };
+        let params = json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "questions": [{
+                "id": "q1",
+                "header": "Choice",
+                "question": "Choose one",
+                "options": [
+                    {"label": "A", "description": "First"},
+                    {"label": "B", "description": "Second"}
+                ]
+            }]
+        });
+        let RegisterOutcome::New(view) = ledger
+            .register(
+                RpcId::Unsigned(12),
+                "item/tool/requestUserInput",
+                &params,
+                &active(),
+                Path::new("/workspace"),
+                &capabilities,
+            )
+            .expect("register")
+        else {
+            panic!("new request expected");
+        };
+
+        let invalid = BTreeMap::from([("q1".to_owned(), vec!["C".to_owned()])]);
+        assert!(matches!(
+            ledger.resolve(
+                &view.pending_id,
+                &PendingResponse::UserInput { answers: invalid },
+            ),
+            Err(RequestValidationError::InvalidResponse)
+        ));
+        let valid = BTreeMap::from([("q1".to_owned(), vec!["A".to_owned()])]);
+        assert!(ledger
+            .resolve(
+                &view.pending_id,
+                &PendingResponse::UserInput { answers: valid },
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn approval_view_projects_only_safe_structured_metadata() {
+        let mut ledger = ServerRequestLedger::default();
+        let params = json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "startedAtMs": 1,
+            "command": "curl -H 'Authorization: Bearer secret-value' https://private.example",
+            "cwd": "/Users/alice/project",
+            "environmentId": "environment-private",
+            "reason": "run curl -H Authorization secret-value",
+            "networkApprovalContext": {"host": "private.example"}
+        });
+        let RegisterOutcome::New(view) = ledger
+            .register(
+                RpcId::Unsigned(13),
+                "item/commandExecution/requestApproval",
+                &params,
+                &active(),
+                Path::new("/Users/alice/project"),
+                &CodexCapabilities::default(),
+            )
+            .expect("register")
+        else {
+            panic!("new request expected");
+        };
+        let encoded = serde_json::to_string(&view).expect("serialize");
+
+        assert!(view.target_alias.starts_with("host-"));
+        assert_eq!(
+            view.approval_context
+                .as_ref()
+                .expect("approval context")
+                .risk,
+            "high"
+        );
+        for private in [
+            "curl",
+            "Authorization",
+            "secret-value",
+            "private.example",
+            "/Users/alice/project",
+            "environment-private",
+        ] {
+            assert!(!encoded.contains(private), "leaked {private}");
+        }
     }
 }

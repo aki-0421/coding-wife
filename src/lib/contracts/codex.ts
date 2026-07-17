@@ -4,6 +4,7 @@ export const codexModel = "gpt-5.6-sol" as const
 export const codexEventChannel = "coding-wife://codex-event" as const
 
 export const codexCommands = {
+  pickWorkspace: "codex_pick_workspace",
   getDiagnostic: "codex_get_diagnostic",
   probe: "codex_probe",
   connect: "codex_connect",
@@ -86,6 +87,19 @@ export interface CodexDiagnostic {
 
 export interface CodexConnectRequest {
   readonly workspaceId: string
+}
+
+export interface WorkspacePreflight {
+  readonly gitRepository: true
+  readonly ownedByCurrentUser: true
+  readonly writable: true
+}
+
+export interface WorkspaceRegistration {
+  readonly schemaVersion: 1
+  readonly workspaceId: string
+  readonly alias: string
+  readonly preflight: WorkspacePreflight
 }
 
 export interface CodexThreadListRequest {
@@ -189,15 +203,42 @@ export interface PendingQuestion {
   readonly options: readonly PendingOption[]
 }
 
-export interface PendingRequestView {
+interface PendingRequestBase {
   readonly pendingId: string
-  readonly kind: PendingKind
   readonly operation: string
   readonly targetAlias: string
   readonly reason: string | null
-  readonly questions: readonly PendingQuestion[]
-  readonly allowedDecisions: readonly ApprovalDecision[]
 }
+
+export interface ApprovalContext {
+  readonly schemaVersion: 1
+  readonly category: "command_execution" | "file_change" | "permissions"
+  readonly targetKind: "network_host" | "workspace" | "workspace_path"
+  readonly targetAlias: string
+  readonly scope: "command" | "turn"
+  readonly risk: "low" | "medium" | "high"
+  readonly reversibility:
+    "reversible" | "partially_reversible" | "not_reversible" | "unknown"
+  readonly recommendation: ApprovalDecision
+  readonly evidence: readonly string[]
+}
+
+export interface ApprovalPendingRequest extends PendingRequestBase {
+  readonly kind: Exclude<PendingKind, "user_input">
+  readonly questions: readonly []
+  readonly allowedDecisions: readonly ApprovalDecision[]
+  readonly approvalContext: ApprovalContext
+}
+
+export interface UserInputPendingRequest extends PendingRequestBase {
+  readonly kind: "user_input"
+  readonly questions: readonly PendingQuestion[]
+  readonly allowedDecisions: readonly []
+  readonly approvalContext: null
+}
+
+export type PendingRequestView =
+  ApprovalPendingRequest | UserInputPendingRequest
 
 interface CodexEventBase {
   readonly schemaVersion: typeof codexEventSchemaVersion
@@ -308,6 +349,7 @@ export interface CodexCommandErrorEnvelope {
 }
 
 export interface CodexRequestMap {
+  codex_pick_workspace: undefined
   codex_get_diagnostic: undefined
   codex_probe: undefined
   codex_connect: CodexConnectRequest
@@ -321,6 +363,7 @@ export interface CodexRequestMap {
 }
 
 export interface CodexResponseMap {
+  codex_pick_workspace: WorkspaceRegistration
   codex_get_diagnostic: CodexDiagnostic
   codex_probe: CodexDiagnostic
   codex_connect: CodexDiagnostic
@@ -345,7 +388,7 @@ export class CodexContractError extends Error {
 type UnknownRecord = Readonly<Record<string, unknown>>
 
 const privateValuePattern =
-  /(?:\/Users\/[^/\s]+|\/home\/[^/\s]+|[A-Za-z]:\\Users\\|\bBearer\s+[A-Za-z0-9._~+/-]+=*|\bsk-[A-Za-z0-9_-]{8,}|\b(?:api[_-]?key|access[_-]?token|token|password)\s*[:=]\s*\S+)/iu
+  /(?:\/(?:Users\/[^/\s]+|home\/[^/\s]+|Volumes|Library|Applications)(?:\/|\b)|[A-Za-z]:\\Users\\|\bBearer\s+[A-Za-z0-9._~+/-]+=*|\bsk-[A-Za-z0-9_-]{8,}|["']?(?:api[_-]?key|access[_-]?token|auth[_-]?cookie|session[_-]?id|set-cookie|authorization|cookie|token|password|secret)["']?\s*[:=]\s*["']?\S+)/iu
 
 function violation(): never {
   throw new CodexContractError()
@@ -649,6 +692,43 @@ export function parseAcceptedResponse(value: unknown): AcceptedResponse {
   return { accepted: value.accepted }
 }
 
+export function parseWorkspaceRegistration(
+  value: unknown,
+): WorkspaceRegistration {
+  if (
+    !isRecord(value) ||
+    !exact(value, ["schemaVersion", "workspaceId", "alias", "preflight"]) ||
+    value.schemaVersion !== 1 ||
+    !nonEmptyString(value.workspaceId) ||
+    !/^workspace-[a-z0-9-]+$/iu.test(value.workspaceId) ||
+    !nonEmptyString(value.alias) ||
+    value.alias.length > 80 ||
+    value.alias.includes("/") ||
+    value.alias.includes("\\") ||
+    !isRecord(value.preflight) ||
+    !exact(value.preflight, [
+      "gitRepository",
+      "ownedByCurrentUser",
+      "writable",
+    ]) ||
+    value.preflight.gitRepository !== true ||
+    value.preflight.ownedByCurrentUser !== true ||
+    value.preflight.writable !== true
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: 1,
+    workspaceId: value.workspaceId,
+    alias: value.alias,
+    preflight: {
+      gitRepository: true,
+      ownedByCurrentUser: true,
+      writable: true,
+    },
+  }
+}
+
 function parsePendingOption(value: unknown): PendingOption {
   if (
     !isRecord(value) ||
@@ -670,7 +750,15 @@ function parsePendingQuestion(value: unknown): PendingQuestion {
     !nonEmptyString(value.header) ||
     !nonEmptyString(value.question) ||
     !Array.isArray(value.options) ||
+    value.options.length < 2 ||
     value.options.length > 3
+  ) {
+    return violation()
+  }
+  const options = value.options.map(parsePendingOption)
+  if (
+    new Set(options.map((option) => option.id)).size !== options.length ||
+    new Set(options.map((option) => option.label)).size !== options.length
   ) {
     return violation()
   }
@@ -678,7 +766,69 @@ function parsePendingQuestion(value: unknown): PendingQuestion {
     id: value.id,
     header: value.header,
     question: value.question,
-    options: value.options.map(parsePendingOption),
+    options,
+  }
+}
+
+const approvalCategories = [
+  "command_execution",
+  "file_change",
+  "permissions",
+] as const
+const approvalTargetKinds = [
+  "network_host",
+  "workspace",
+  "workspace_path",
+] as const
+const approvalScopes = ["command", "turn"] as const
+const approvalRisks = ["low", "medium", "high"] as const
+const approvalReversibility = [
+  "reversible",
+  "partially_reversible",
+  "not_reversible",
+  "unknown",
+] as const
+
+function parseApprovalContext(value: unknown): ApprovalContext {
+  if (
+    !isRecord(value) ||
+    !exact(value, [
+      "schemaVersion",
+      "category",
+      "targetKind",
+      "targetAlias",
+      "scope",
+      "risk",
+      "reversibility",
+      "recommendation",
+      "evidence",
+    ]) ||
+    value.schemaVersion !== 1 ||
+    !oneOf(value.category, approvalCategories) ||
+    !oneOf(value.targetKind, approvalTargetKinds) ||
+    !nonEmptyString(value.targetAlias) ||
+    !oneOf(value.scope, approvalScopes) ||
+    !oneOf(value.risk, approvalRisks) ||
+    !oneOf(value.reversibility, approvalReversibility) ||
+    !oneOf(value.recommendation, approvalDecisions) ||
+    !Array.isArray(value.evidence) ||
+    value.evidence.length < 1 ||
+    value.evidence.length > 8 ||
+    !value.evidence.every(nonEmptyString) ||
+    new Set(value.evidence).size !== value.evidence.length
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: 1,
+    category: value.category,
+    targetKind: value.targetKind,
+    targetAlias: value.targetAlias,
+    scope: value.scope,
+    risk: value.risk,
+    reversibility: value.reversibility,
+    recommendation: value.recommendation,
+    evidence: value.evidence,
   }
 }
 
@@ -693,6 +843,7 @@ function parsePendingRequest(value: unknown): PendingRequestView {
       "reason",
       "questions",
       "allowedDecisions",
+      "approvalContext",
     ]) ||
     !nonEmptyString(value.pendingId) ||
     !oneOf(value.kind, pendingKinds) ||
@@ -700,7 +851,6 @@ function parsePendingRequest(value: unknown): PendingRequestView {
     !nonEmptyString(value.targetAlias) ||
     !nullableString(value.reason) ||
     !Array.isArray(value.questions) ||
-    value.questions.length > 3 ||
     !Array.isArray(value.allowedDecisions) ||
     !value.allowedDecisions.every((decision) =>
       oneOf(decision, approvalDecisions),
@@ -708,14 +858,62 @@ function parsePendingRequest(value: unknown): PendingRequestView {
   ) {
     return violation()
   }
-  return {
+  const common = {
     pendingId: value.pendingId,
-    kind: value.kind,
     operation: value.operation,
     targetAlias: value.targetAlias,
     reason: value.reason,
-    questions: value.questions.map(parsePendingQuestion),
+  }
+  if (value.kind === "user_input") {
+    if (
+      value.questions.length < 1 ||
+      value.questions.length > 3 ||
+      value.allowedDecisions.length !== 0 ||
+      value.approvalContext !== null
+    ) {
+      return violation()
+    }
+    const questions = value.questions.map(parsePendingQuestion)
+    if (
+      new Set(questions.map((question) => question.id)).size !==
+      questions.length
+    )
+      return violation()
+    return {
+      ...common,
+      kind: "user_input",
+      questions,
+      allowedDecisions: [],
+      approvalContext: null,
+    }
+  }
+
+  if (
+    value.questions.length !== 0 ||
+    value.allowedDecisions.length < 1 ||
+    value.allowedDecisions.length > 3 ||
+    new Set(value.allowedDecisions).size !== value.allowedDecisions.length
+  ) {
+    return violation()
+  }
+  const approvalContext = parseApprovalContext(value.approvalContext)
+  const expectedCategory = {
+    command_approval: "command_execution",
+    file_change_approval: "file_change",
+    permissions_approval: "permissions",
+  } as const
+  if (
+    approvalContext.category !== expectedCategory[value.kind] ||
+    approvalContext.targetAlias !== value.targetAlias
+  ) {
+    return violation()
+  }
+  return {
+    ...common,
+    kind: value.kind,
+    questions: [],
     allowedDecisions: value.allowedDecisions,
+    approvalContext,
   }
 }
 
@@ -1021,6 +1219,8 @@ export function parseCodexResponse<K extends CodexCommand>(
   value: unknown,
 ): CodexResponseMap[K] {
   switch (command) {
+    case codexCommands.pickWorkspace:
+      return parseWorkspaceRegistration(value) as CodexResponseMap[K]
     case codexCommands.getDiagnostic:
     case codexCommands.probe:
     case codexCommands.connect:

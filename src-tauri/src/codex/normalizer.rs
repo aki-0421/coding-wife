@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use super::decision::{parse_completed_output, DecisionOutput};
 use super::redaction::{redact_text, safe_detail_ref};
 use super::types::{
     CodexEvent, CodexEventPayload, PendingRequestView, CODEX_EVENT_SCHEMA_VERSION, CODEX_MODEL,
@@ -12,7 +13,6 @@ use super::types::{
 
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_DELTA_BYTES: usize = 8 * 1024;
-const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_TOOL_EXCERPT_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
@@ -28,6 +28,7 @@ pub struct NormalizeOutcome {
     pub events: Vec<CodexEvent>,
     pub unsupported_terminal: bool,
     pub model_violation: bool,
+    pub decision_violation: bool,
 }
 
 #[derive(Default)]
@@ -117,7 +118,9 @@ impl EventNormalizer {
         &mut self,
         request: PendingRequestView,
     ) -> Result<CodexEvent, NormalizeError> {
-        self.event(CodexEventPayload::PendingRequest { request })
+        self.event(CodexEventPayload::PendingRequest {
+            request: Box::new(request),
+        })
     }
 
     pub fn diagnostic_event(
@@ -237,12 +240,25 @@ impl EventNormalizer {
                 let item_handle = self.item_handle(item_id);
                 if method == "item/completed" && item_type == "agentMessage" {
                     let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
-                    outcome
-                        .events
-                        .push(self.event(CodexEventPayload::AgentMessageCompleted {
-                            item_handle,
-                            text: redact_text(text, Some(&self.workspace_root), MAX_MESSAGE_BYTES),
-                        })?);
+                    match parse_completed_output(text, &self.workspace_root) {
+                        Ok(DecisionOutput::Result { message }) => {
+                            outcome.events.push(self.event(
+                                CodexEventPayload::AgentMessageCompleted {
+                                    item_handle,
+                                    text: message,
+                                },
+                            )?);
+                        }
+                        Ok(DecisionOutput::Request { view }) => {
+                            outcome.events.push(self.pending_event(*view)?);
+                        }
+                        Err(_) => {
+                            outcome.decision_violation = true;
+                            outcome.events.push(
+                                self.diagnostic_event("CODEX-DECISION-OUTPUT-INVALID", false)?,
+                            );
+                        }
+                    }
                 } else {
                     outcome
                         .events
@@ -503,7 +519,7 @@ mod tests {
                 &json!({"item": {
                     "id": "raw-item-id",
                     "type": "agentMessage",
-                    "text": "Bearer abc /Users/alice/project/src/main.rs"
+                    "text": r#"{"schemaVersion":1,"kind":"result","message":"Bearer abc /Users/alice/project/src/main.rs"}"#
                 }}),
                 100,
             )
@@ -512,6 +528,29 @@ mod tests {
         assert!(!encoded.contains("raw-item-id"));
         assert!(!encoded.contains("Bearer abc"));
         assert!(!encoded.contains("/Users/alice"));
+        assert!(!message.decision_violation);
+    }
+
+    #[test]
+    fn invalid_completed_output_is_not_rendered_and_requires_interrupt() {
+        let mut normalizer =
+            EventNormalizer::new("workspace-1".to_owned(), PathBuf::from("/workspace"), 1);
+        let outcome = normalizer
+            .normalize(
+                "item/completed",
+                &json!({"item": {
+                    "id": "raw-item-id",
+                    "type": "agentMessage",
+                    "text": "Approve this request"
+                }}),
+                100,
+            )
+            .expect("normalize");
+        let encoded = serde_json::to_string(&outcome.events).expect("serialize");
+
+        assert!(outcome.decision_violation);
+        assert!(encoded.contains("CODEX-DECISION-OUTPUT-INVALID"));
+        assert!(!encoded.contains("Approve this request"));
     }
 
     #[test]

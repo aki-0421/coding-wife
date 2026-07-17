@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use coding_wife_lib::codex::binary::{discover_binary, probe_schema};
@@ -7,9 +8,14 @@ use coding_wife_lib::codex::protocol::{client_notification, initialize_params};
 use coding_wife_lib::codex::rpc::{RpcRequestError, RuntimeSignal};
 use coding_wife_lib::codex::supervisor::CodexSupervisor;
 use coding_wife_lib::codex::types::{
-    CodexConnectRequest, CodexHealth, CodexThreadStartRequest, CodexTurnInterruptRequest,
-    CodexTurnStartRequest, ReasoningPreset,
+    CapabilityState, ChildState, CodexConnectRequest, CodexHealth, CodexPendingResponseRequest,
+    CodexReviewStartRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
+    CodexTurnStartRequest, PendingResponse, ReasoningPreset, ReviewTarget,
 };
+use coding_wife_lib::codex::workspace::{
+    AppPrivateBinaryRecord, FolderPicker, PickerFuture, WorkspaceService,
+};
+use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, Mutex};
 
 static ENVIRONMENT_LOCK: Mutex<()> = Mutex::const_new(());
@@ -34,12 +40,31 @@ struct FixtureEnvironment {
 impl FixtureEnvironment {
     fn new(mode: &str) -> Self {
         let workspace = temporary_directory("workspace");
-        std::fs::create_dir_all(&workspace).expect("workspace fixture directory");
+        std::fs::create_dir_all(workspace.join(".git")).expect("workspace fixture directory");
+        std::fs::write(workspace.join(".git/HEAD"), "ref: refs/heads/main\n")
+            .expect("workspace git marker");
         let state = temporary_directory("state");
         std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", mode);
         std::env::set_var("CODING_WIFE_CODEX_FAKE_STATE", &state);
         Self { workspace, state }
     }
+}
+
+struct FixedPicker(PathBuf);
+
+impl FolderPicker for FixedPicker {
+    fn pick_folder(&self) -> PickerFuture<'_> {
+        let path = self.0.clone();
+        Box::pin(async move { Some(path) })
+    }
+}
+
+fn pending_id(rpc_id: &str, params: &serde_json::Value) -> String {
+    let params_hash = hex::encode(Sha256::digest(
+        serde_json::to_vec(params).expect("serialize params"),
+    ));
+    let digest = Sha256::digest(format!("s:{rpc_id}:{params_hash}").as_bytes());
+    format!("pending-{}", &hex::encode(digest)[..20])
 }
 
 impl Drop for FixtureEnvironment {
@@ -158,6 +183,304 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
     let state = read_state(&fixture.state).await;
     assert!(state.contains("turn_contract_ok"));
     assert!(state.contains("interrupt_received"));
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn native_picker_registers_private_paths_before_connect_and_thread_start() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    let service = WorkspaceService::new(
+        supervisor.clone(),
+        Arc::new(FixedPicker(fixture.workspace.clone())),
+    );
+    service
+        .apply_private_binary(AppPrivateBinaryRecord {
+            canonical_path: fixture_binary(),
+        })
+        .await
+        .expect("private binary");
+    let registration = service
+        .pick_and_register()
+        .await
+        .expect("pick and register");
+    assert!(!serde_json::to_string(&registration)
+        .expect("serialize registration")
+        .contains(&fixture.workspace.to_string_lossy().to_string()));
+
+    let diagnostic = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: registration.workspace_id.clone(),
+        })
+        .await
+        .expect("connect registered workspace");
+    assert_eq!(diagnostic.health, CodexHealth::Ready);
+    supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: registration.workspace_id,
+        })
+        .await
+        .expect("thread start");
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn stable_initialize_fallback_omits_experimental_fields_and_blocks_review() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("experimental_rejected");
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    let diagnostic = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("stable connect");
+    assert!(!diagnostic.experimental_api_accepted);
+    assert_eq!(
+        diagnostic.capabilities.detached_review,
+        CapabilityState::Unavailable
+    );
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("stable thread");
+    let error = supervisor
+        .review_start(CodexReviewStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            target: ReviewTarget::UncommittedChanges,
+        })
+        .await
+        .expect_err("review must be blocked before wire");
+    assert_eq!(error.code, "CODEX-CAPABILITY-UNAVAILABLE");
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("experimental_initialize_rejected"));
+    assert!(state.contains("stable_initialize_accepted"));
+    assert!(state.contains("stable_thread_contract_ok"));
+    assert!(!state.contains("stable_thread_contract_invalid"));
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn each_thread_policy_mismatch_stops_without_storing_a_handle() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for mode in [
+        "thread_policy_missing",
+        "thread_policy_model",
+        "thread_policy_cwd",
+        "thread_policy_sandbox",
+        "thread_policy_ephemeral",
+    ] {
+        let fixture = FixtureEnvironment::new(mode);
+        let supervisor = CodexSupervisor::new();
+        supervisor.start_signal_loop();
+        supervisor
+            .register_workspace_root("workspace", &fixture.workspace)
+            .await
+            .expect("register workspace");
+        supervisor.set_explicit_binary(Some(fixture_binary())).await;
+        supervisor
+            .connect(CodexConnectRequest {
+                workspace_id: "workspace".to_owned(),
+            })
+            .await
+            .expect("connect");
+        let error = supervisor
+            .thread_start(CodexThreadStartRequest {
+                workspace_id: "workspace".to_owned(),
+            })
+            .await
+            .expect_err("policy mismatch");
+        assert_eq!(error.code, "CODEX-THREAD-POLICY-MISMATCH", "{mode}");
+        let diagnostic = supervisor.diagnostic().await;
+        assert_eq!(diagnostic.health, CodexHealth::ProtocolMismatch, "{mode}");
+        assert_eq!(diagnostic.child_state, ChildState::Stopped, "{mode}");
+        supervisor.shutdown().await;
+        drop(fixture);
+    }
+}
+
+#[tokio::test]
+async fn native_rui_round_trips_one_strict_answer() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("native_rui");
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("connect");
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("thread");
+    supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            client_user_message_id: "message-rui".to_owned(),
+            text: "Request a choice.".to_owned(),
+            effort: ReasoningPreset::Low,
+        })
+        .await
+        .expect("turn");
+    let params = serde_json::json!({
+        "threadId": "thread-fixture",
+        "turnId": "turn-fixture",
+        "itemId": "item-rui",
+        "questions": [{
+            "id": "choice",
+            "header": "Choice",
+            "question": "Choose a safe option",
+            "options": [
+                {"label": "Continue", "description": "Continue safely"},
+                {"label": "Stop", "description": "Stop this turn"}
+            ]
+        }]
+    });
+    let pending_id = pending_id("server-rui", &params);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        match supervisor
+            .respond_pending(CodexPendingResponseRequest {
+                workspace_id: "workspace".to_owned(),
+                pending_id: pending_id.clone(),
+                response: PendingResponse::UserInput {
+                    answers: std::collections::BTreeMap::from([(
+                        "choice".to_owned(),
+                        vec!["Continue".to_owned()],
+                    )]),
+                },
+            })
+            .await
+        {
+            Ok(_) => break,
+            Err(error) if error.code == "CODEX-PENDING-INVALID" => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "pending RUI missing"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(error) => panic!("unexpected RUI error: {}", error.code),
+        }
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while !read_state(&fixture.state)
+        .await
+        .contains("native_rui_answered")
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "RUI response missing"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for (mode, interrupted) in [("decision_fallback", false), ("decision_invalid", true)] {
+        let fixture = FixtureEnvironment::new(mode);
+        let supervisor = CodexSupervisor::new();
+        supervisor.start_signal_loop();
+        supervisor
+            .register_workspace_root("workspace", &fixture.workspace)
+            .await
+            .expect("register workspace");
+        supervisor.set_explicit_binary(Some(fixture_binary())).await;
+        supervisor
+            .connect(CodexConnectRequest {
+                workspace_id: "workspace".to_owned(),
+            })
+            .await
+            .expect("connect");
+        let thread = supervisor
+            .thread_start(CodexThreadStartRequest {
+                workspace_id: "workspace".to_owned(),
+            })
+            .await
+            .expect("thread");
+        supervisor
+            .turn_start(CodexTurnStartRequest {
+                workspace_id: "workspace".to_owned(),
+                thread_handle: thread.thread_handle,
+                client_user_message_id: format!("message-{mode}"),
+                text: "Produce a decision.".to_owned(),
+                effort: ReasoningPreset::Max,
+            })
+            .await
+            .expect("turn");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(
+            read_state(&fixture.state)
+                .await
+                .contains("interrupt_received"),
+            interrupted,
+            "{mode}"
+        );
+        supervisor.shutdown().await;
+        drop(fixture);
+    }
+}
+
+#[tokio::test]
+async fn protocol_violations_use_the_bounded_restart_budget_without_turn_replay() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("protocol_after_ready");
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("initial connect");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        let state = read_state(&fixture.state).await;
+        let violations = state.matches("protocol_violation_emitted").count();
+        let diagnostic = supervisor.diagnostic().await;
+        if violations >= 4
+            && diagnostic.health == CodexHealth::ProtocolMismatch
+            && diagnostic.child_state == ChildState::Stopped
+        {
+            assert!(!state.contains("turn_contract_ok"));
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "protocol restart budget did not stop: {violations:?} {diagnostic:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     supervisor.shutdown().await;
 }
 

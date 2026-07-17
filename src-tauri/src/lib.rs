@@ -3,11 +3,12 @@ pub mod codex;
 use serde::{Deserialize, Serialize};
 
 use codex::commands::{
-    codex_connect, codex_get_diagnostic, codex_probe, codex_respond_pending, codex_review_start,
-    codex_thread_list, codex_thread_resume, codex_thread_start, codex_turn_interrupt,
-    codex_turn_start,
+    codex_connect, codex_get_diagnostic, codex_pick_workspace, codex_probe, codex_respond_pending,
+    codex_review_start, codex_thread_list, codex_thread_resume, codex_thread_start,
+    codex_turn_interrupt, codex_turn_start,
 };
 use codex::supervisor::CodexSupervisor;
+use codex::workspace::WorkspaceService;
 
 const IPC_SCHEMA_VERSION: u16 = 1;
 
@@ -100,8 +101,10 @@ pub fn run() {
     let supervisor = CodexSupervisor::new();
     let setup_supervisor = supervisor.clone();
     let shutdown_supervisor = supervisor.clone();
+    let workspace_service = WorkspaceService::production(supervisor.clone());
     let app = tauri::Builder::default()
         .manage(supervisor)
+        .manage(workspace_service)
         .setup(move |app| {
             setup_supervisor.attach_app_handle(app.handle().clone());
             setup_supervisor.start_signal_loop();
@@ -110,6 +113,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             health_check,
             get_runtime_metadata,
+            codex_pick_workspace,
             codex_get_diagnostic,
             codex_probe,
             codex_connect,

@@ -1,5 +1,6 @@
 pub mod binary;
 pub mod commands;
+pub mod decision;
 pub mod dynamic_tools;
 pub mod jsonl;
 pub mod normalizer;
@@ -11,3 +12,4 @@ pub mod rpc;
 pub mod supervisor;
 pub mod support;
 pub mod types;
+pub mod workspace;

@@ -1,9 +1,38 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
 use super::types::{ReasoningPreset, ReviewTarget, CODEX_MODEL};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OutboundProfile {
+    Stable,
+    Experimental,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadPolicyResponse {
+    pub thread_id: String,
+    pub response_cwd: PathBuf,
+    pub thread_cwd: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
+pub enum ThreadPolicyError {
+    #[error("the thread response was missing a required field")]
+    MissingField,
+    #[error("the thread response did not preserve the selected model")]
+    Model,
+    #[error("the thread response did not preserve on-request approval")]
+    ApprovalPolicy,
+    #[error("the thread response did not preserve workspace-write sandboxing")]
+    Sandbox,
+    #[error("the thread response unexpectedly created an ephemeral thread")]
+    Ephemeral,
+    #[error("the thread response contained an invalid path")]
+    Path,
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum RpcId {
@@ -217,61 +246,100 @@ pub fn thread_list_params(cwd: &Path, cursor: Option<&str>) -> Value {
     })
 }
 
-pub fn thread_start_params(cwd: &Path) -> Value {
-    json!({
+pub fn thread_start_params(cwd: &Path, profile: OutboundProfile) -> Value {
+    let mut params = json!({
         "model": CODEX_MODEL,
-        "allowProviderModelFallback": false,
         "cwd": cwd.to_string_lossy(),
-        "runtimeWorkspaceRoots": [cwd.to_string_lossy()],
         "approvalPolicy": "on-request",
         "sandbox": "workspace-write",
         "ephemeral": false,
-        "experimentalRawEvents": false,
-        "dynamicTools": [],
-        "environments": [],
-    })
+    });
+    if profile == OutboundProfile::Experimental {
+        let object = params.as_object_mut().expect("thread params object");
+        object.insert("allowProviderModelFallback".to_owned(), Value::Bool(false));
+        object.insert(
+            "runtimeWorkspaceRoots".to_owned(),
+            json!([cwd.to_string_lossy()]),
+        );
+        object.insert("experimentalRawEvents".to_owned(), Value::Bool(false));
+        object.insert("dynamicTools".to_owned(), json!([]));
+        object.insert("environments".to_owned(), json!([]));
+    }
+    params
 }
 
-pub fn thread_resume_params(cwd: &Path, thread_id: &str) -> Value {
-    json!({
+pub fn thread_resume_params(cwd: &Path, thread_id: &str, profile: OutboundProfile) -> Value {
+    let mut params = json!({
         "threadId": thread_id,
         "model": CODEX_MODEL,
         "cwd": cwd.to_string_lossy(),
-        "runtimeWorkspaceRoots": [cwd.to_string_lossy()],
         "approvalPolicy": "on-request",
         "sandbox": "workspace-write",
         "excludeTurns": true,
-    })
+    });
+    if profile == OutboundProfile::Experimental {
+        params
+            .as_object_mut()
+            .expect("thread params object")
+            .insert(
+                "runtimeWorkspaceRoots".to_owned(),
+                json!([cwd.to_string_lossy()]),
+            );
+    }
+    params
 }
 
 pub fn decision_output_schema() -> Value {
     json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["schemaVersion", "kind", "message"],
-        "properties": {
-            "schemaVersion": {"const": 1},
-            "kind": {"enum": ["result", "decision_request"]},
-            "message": {"type": "string"},
-            "decisionId": {"type": "string"},
-            "question": {"type": "string"},
-            "options": {
-                "type": "array",
-                "minItems": 2,
-                "maxItems": 5,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["id", "label", "description"],
-                    "properties": {
-                        "id": {"type": "string"},
-                        "label": {"type": "string"},
-                        "description": {"type": "string"}
-                    }
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["schemaVersion", "kind", "message"],
+                "properties": {
+                    "schemaVersion": {"const": 1},
+                    "kind": {"const": "result"},
+                    "message": {"type": "string", "minLength": 1, "maxLength": 65536}
                 }
             },
-            "allowFreeform": {"const": false}
-        }
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "schemaVersion",
+                    "kind",
+                    "message",
+                    "decisionId",
+                    "question",
+                    "options",
+                    "allowFreeform"
+                ],
+                "properties": {
+                    "schemaVersion": {"const": 1},
+                    "kind": {"const": "decision_request"},
+                    "message": {"type": "string", "minLength": 1, "maxLength": 4096},
+                    "decisionId": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "question": {"type": "string", "minLength": 1, "maxLength": 4096},
+                    "options": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 3,
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["id", "label", "description"],
+                            "properties": {
+                                "id": {"type": "string", "minLength": 1, "maxLength": 128},
+                                "label": {"type": "string", "minLength": 1, "maxLength": 256},
+                                "description": {"type": "string", "maxLength": 1024}
+                            }
+                        }
+                    },
+                    "allowFreeform": {"const": false}
+                }
+            }
+        ]
     })
 }
 
@@ -295,9 +363,67 @@ pub fn turn_interrupt_params(thread_id: &str, turn_id: &str) -> Value {
     json!({"threadId": thread_id, "turnId": turn_id})
 }
 
-pub fn review_start_params(thread_id: &str, target: &ReviewTarget) -> Value {
+pub fn review_start_params(
+    thread_id: &str,
+    target: &ReviewTarget,
+    profile: OutboundProfile,
+) -> Option<Value> {
+    if profile != OutboundProfile::Experimental {
+        return None;
+    }
     let target = serde_json::to_value(target).expect("review target serialization cannot fail");
-    json!({"threadId": thread_id, "target": target, "delivery": "detached"})
+    Some(json!({"threadId": thread_id, "target": target, "delivery": "detached"}))
+}
+
+pub fn parse_thread_policy_response(
+    result: &Value,
+) -> Result<ThreadPolicyResponse, ThreadPolicyError> {
+    let object = result.as_object().ok_or(ThreadPolicyError::MissingField)?;
+    if object.get("model").and_then(Value::as_str) != Some(CODEX_MODEL) {
+        return Err(ThreadPolicyError::Model);
+    }
+    if object.get("approvalPolicy").and_then(Value::as_str) != Some("on-request") {
+        return Err(ThreadPolicyError::ApprovalPolicy);
+    }
+    if object
+        .get("sandbox")
+        .and_then(Value::as_object)
+        .and_then(|sandbox| sandbox.get("type"))
+        .and_then(Value::as_str)
+        != Some("workspaceWrite")
+    {
+        return Err(ThreadPolicyError::Sandbox);
+    }
+    let response_cwd = object
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|value| Path::new(value).is_absolute())
+        .map(PathBuf::from)
+        .ok_or(ThreadPolicyError::Path)?;
+    let thread = object
+        .get("thread")
+        .and_then(Value::as_object)
+        .ok_or(ThreadPolicyError::MissingField)?;
+    let thread_id = thread
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .map(str::to_owned)
+        .ok_or(ThreadPolicyError::MissingField)?;
+    let thread_cwd = thread
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|value| Path::new(value).is_absolute())
+        .map(PathBuf::from)
+        .ok_or(ThreadPolicyError::Path)?;
+    if thread.get("ephemeral").and_then(Value::as_bool) != Some(false) {
+        return Err(ThreadPolicyError::Ephemeral);
+    }
+    Ok(ThreadPolicyResponse {
+        thread_id,
+        response_cwd,
+        thread_cwd,
+    })
 }
 
 pub fn validate_model_page(result: &Value) -> (bool, bool, bool, Option<String>) {
@@ -387,12 +513,55 @@ mod tests {
 
     #[test]
     fn thread_disables_provider_fallback_and_raw_events() {
-        let params = thread_start_params(Path::new("/workspace"));
+        let params = thread_start_params(Path::new("/workspace"), OutboundProfile::Experimental);
 
         assert_eq!(params["model"], CODEX_MODEL);
         assert_eq!(params["allowProviderModelFallback"], false);
         assert_eq!(params["experimentalRawEvents"], false);
         assert!(params.get("serviceTier").is_none());
+    }
+
+    #[test]
+    fn stable_profile_omits_every_experimental_thread_field() {
+        let params = thread_start_params(Path::new("/workspace"), OutboundProfile::Stable);
+        for field in [
+            "allowProviderModelFallback",
+            "runtimeWorkspaceRoots",
+            "experimentalRawEvents",
+            "dynamicTools",
+            "environments",
+        ] {
+            assert!(params.get(field).is_none(), "unexpected {field}");
+        }
+        assert!(review_start_params(
+            "thread",
+            &ReviewTarget::UncommittedChanges,
+            OutboundProfile::Stable
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn thread_response_requires_the_complete_safety_policy() {
+        let response = json!({
+            "thread": {"id": "thread", "cwd": "/workspace", "ephemeral": false},
+            "model": CODEX_MODEL,
+            "cwd": "/workspace",
+            "approvalPolicy": "on-request",
+            "sandbox": {"type": "workspaceWrite"}
+        });
+        assert!(parse_thread_policy_response(&response).is_ok());
+        for pointer in ["model", "cwd", "approvalPolicy", "sandbox", "thread"] {
+            let mut mutated = response.clone();
+            mutated.as_object_mut().expect("object").remove(pointer);
+            assert!(parse_thread_policy_response(&mutated).is_err(), "{pointer}");
+        }
+        let mut ephemeral = response;
+        ephemeral["thread"]["ephemeral"] = Value::Bool(true);
+        assert_eq!(
+            parse_thread_policy_response(&ephemeral),
+            Err(ThreadPolicyError::Ephemeral)
+        );
     }
 
     #[test]

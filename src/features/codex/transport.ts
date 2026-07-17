@@ -182,6 +182,17 @@ export class DemoCodexTransport implements CodexTransport {
     request: CodexRequestMap[K],
   ): Promise<CodexResponseMap[K]> {
     switch (command) {
+      case codexCommands.pickWorkspace:
+        return Promise.resolve({
+          schemaVersion: 1,
+          workspaceId: "workspace-demo",
+          alias: "Demo repository",
+          preflight: {
+            gitRepository: true,
+            ownedByCurrentUser: true,
+            writable: true,
+          },
+        } as CodexResponseMap[K])
       case codexCommands.getDiagnostic:
       case codexCommands.probe:
       case codexCommands.connect:

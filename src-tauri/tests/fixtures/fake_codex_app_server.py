@@ -35,28 +35,14 @@ def send(value):
 
 
 def generate_schema(output):
-    output.mkdir(parents=True, exist_ok=True)
-    methods = [
-        "thread/list",
-        "thread/start",
-        "thread/resume",
-        "turn/start",
-        "turn/interrupt",
-        "review/start",
-        "account/read",
-        "config/read",
-        "model/list",
-        "item/tool/requestUserInput",
-        "ToolRequestUserInput",
-        "item/tool/call",
-        "item/permissions/requestApproval",
-        "dynamicTools",
-        "detached",
-        "ephemeral",
-    ]
-    (output / "fixture-schema.json").write_text(
-        json.dumps({"methods": methods}), encoding="utf-8"
+    fixture = pathlib.Path(__file__).with_name(
+        "codex_schema_subset_v0_144_5.json"
     )
+    documents = json.loads(fixture.read_text(encoding="utf-8"))
+    for relative, document in documents.items():
+        destination = output / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(document), encoding="utf-8")
 
 
 def result(message_id, value):
@@ -86,6 +72,25 @@ def main():
         params = message.get("params") or {}
 
         if method == "initialize":
+            if MODE == "protocol_after_ready":
+                record("initialize")
+            if (
+                MODE == "experimental_rejected"
+                and params.get("capabilities", {}).get("experimentalApi") is True
+            ):
+                record("experimental_initialize_rejected")
+                send(
+                    {
+                        "id": message_id,
+                        "error": {
+                            "code": -32600,
+                            "message": "experimentalApi is unsupported",
+                        },
+                    }
+                )
+                continue
+            if MODE == "experimental_rejected":
+                record("stable_initialize_accepted")
             result(
                 message_id,
                 {
@@ -133,23 +138,67 @@ def main():
                 state_path.write_text(str(count + 1), encoding="utf-8")
                 if count == 0:
                     threading.Timer(0.15, lambda: os._exit(17)).start()
+            if MODE == "protocol_after_ready":
+                def emit_protocol_violation():
+                    record("protocol_violation_emitted")
+                    sys.stdout.write("{malformed}\n")
+                    sys.stdout.flush()
+
+                threading.Timer(0.05, emit_protocol_violation).start()
             continue
         if method == "thread/list":
             result(message_id, {"data": [], "nextCursor": None})
             continue
         if method in ("thread/start", "thread/resume"):
             thread_id = params.get("threadId", "thread-fixture")
+            experimental_fields = {
+                "allowProviderModelFallback",
+                "runtimeWorkspaceRoots",
+                "experimentalRawEvents",
+                "dynamicTools",
+                "environments",
+            }
+            if MODE == "experimental_rejected":
+                stable = not any(field in params for field in experimental_fields)
+                record("stable_thread_contract_ok" if stable else "stable_thread_contract_invalid")
+                if not stable:
+                    send(
+                        {
+                            "id": message_id,
+                            "error": {"code": -32602, "message": "Invalid params"},
+                        }
+                    )
+                    continue
+            response = {
+                "thread": {
+                    "id": thread_id,
+                    "cwd": params.get("cwd"),
+                    "ephemeral": False,
+                },
+                "model": "gpt-5.6-sol",
+                "cwd": params.get("cwd"),
+                "approvalPolicy": "on-request",
+                "approvalsReviewer": "user",
+                "sandbox": {
+                    "type": "workspaceWrite",
+                    "writableRoots": [params.get("cwd")],
+                    "networkAccess": False,
+                },
+                "modelProvider": "openai",
+            }
+            if MODE == "thread_policy_missing":
+                response.pop("approvalPolicy")
+            elif MODE == "thread_policy_model":
+                response["model"] = "other-model"
+            elif MODE == "thread_policy_cwd":
+                response["thread"]["cwd"] = "/fixture/outside"
+            elif MODE == "thread_policy_sandbox":
+                response["sandbox"]["type"] = "dangerFullAccess"
+            elif MODE == "thread_policy_ephemeral":
+                response["thread"]["ephemeral"] = True
             result(
                 message_id,
-                {
-                    "thread": {"id": thread_id},
-                    "model": "gpt-5.6-sol",
-                    "cwd": params.get("cwd"),
-                    "approvalPolicy": "on-request",
-                    "approvalsReviewer": "user",
-                    "sandbox": "workspace-write",
-                    "modelProvider": "openai",
-                },
+                response,
             )
             continue
         if method == "turn/start":
@@ -183,6 +232,71 @@ def main():
                             "threadId": params["threadId"],
                             "turnId": "turn-fixture",
                             "itemId": "item-fixture",
+                        },
+                    }
+                )
+            if MODE == "native_rui":
+                send(
+                    {
+                        "id": "server-rui",
+                        "method": "item/tool/requestUserInput",
+                        "params": {
+                            "threadId": params["threadId"],
+                            "turnId": "turn-fixture",
+                            "itemId": "item-rui",
+                            "questions": [
+                                {
+                                    "id": "choice",
+                                    "header": "Choice",
+                                    "question": "Choose a safe option",
+                                    "options": [
+                                        {"label": "Continue", "description": "Continue safely"},
+                                        {"label": "Stop", "description": "Stop this turn"},
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                )
+            if MODE in ("decision_fallback", "decision_invalid"):
+                output = (
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "kind": "decision_request",
+                            "message": "A choice is required",
+                            "decisionId": "fixture-decision",
+                            "question": "Choose a safe option",
+                            "options": [
+                                {
+                                    "id": "continue",
+                                    "label": "Continue",
+                                    "description": "Continue safely",
+                                },
+                                {
+                                    "id": "stop",
+                                    "label": "Stop",
+                                    "description": "Stop this turn",
+                                },
+                            ],
+                            "allowFreeform": False,
+                        },
+                        separators=(",", ":"),
+                    )
+                    if MODE == "decision_fallback"
+                    else "Choose Continue or Stop"
+                )
+                send(
+                    {
+                        "method": "item/completed",
+                        "params": {
+                            "threadId": params["threadId"],
+                            "turnId": "turn-fixture",
+                            "item": {
+                                "id": "item-decision",
+                                "type": "agentMessage",
+                                "text": output,
+                            },
                         },
                     }
                 )
@@ -221,6 +335,12 @@ def main():
         if message_id == "server-unknown":
             if "error" in message:
                 record("unknown_request_rejected")
+            continue
+        if message_id == "server-rui":
+            if message.get("result", {}).get("answers", {}).get("choice") == {
+                "answers": ["Continue"]
+            }:
+                record("native_rui_answered")
             continue
         if message_id is not None:
             result(message_id, {})

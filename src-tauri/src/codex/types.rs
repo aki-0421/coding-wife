@@ -146,6 +146,7 @@ pub struct CodexCommandError {
     pub operation: String,
     pub recoverable: bool,
     pub user_message_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub detail_ref: Option<String>,
 }
 
@@ -355,6 +356,21 @@ pub struct PendingRequestView {
     pub reason: Option<String>,
     pub questions: Vec<PendingQuestion>,
     pub allowed_decisions: Vec<ApprovalDecision>,
+    pub approval_context: Option<ApprovalContext>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ApprovalContext {
+    pub schema_version: u16,
+    pub category: String,
+    pub target_kind: String,
+    pub target_alias: String,
+    pub scope: String,
+    pub risk: String,
+    pub reversibility: String,
+    pub recommendation: ApprovalDecision,
+    pub evidence: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -404,7 +420,7 @@ pub enum CodexEventPayload {
         change_kind: String,
     },
     PendingRequest {
-        request: PendingRequestView,
+        request: Box<PendingRequestView>,
     },
     Diagnostic {
         code: String,
@@ -442,8 +458,8 @@ mod contract_fixture_tests {
     use serde_json::Value;
 
     use super::{
-        AcceptedResponse, CodexDiagnostic, CodexEvent, ReviewResponse, ThreadListResponse,
-        ThreadResponse, TurnResponse,
+        AcceptedResponse, CodexCommandError, CodexDiagnostic, CodexEvent, ReviewResponse,
+        ThreadListResponse, ThreadResponse, TurnResponse,
     };
 
     const FIXTURE: &str = include_str!("../../../src/test/fixtures/codex-runtime.v1.json");
@@ -469,6 +485,7 @@ mod contract_fixture_tests {
         round_trip::<TurnResponse>(&fixture, "turn");
         round_trip::<ReviewResponse>(&fixture, "review");
         round_trip::<AcceptedResponse>(&fixture, "accepted");
+        round_trip::<CodexCommandError>(&fixture, "commandError");
 
         let events = fixture
             .get("events")

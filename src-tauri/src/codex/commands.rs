@@ -7,6 +7,14 @@ use super::types::{
     CodexThreadResumeRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
     CodexTurnStartRequest, ReviewResponse, ThreadListResponse, ThreadResponse, TurnResponse,
 };
+use super::workspace::{WorkspaceRegistration, WorkspaceService};
+
+#[tauri::command]
+pub async fn codex_pick_workspace(
+    workspace_service: State<'_, WorkspaceService>,
+) -> Result<WorkspaceRegistration, CodexCommandError> {
+    workspace_service.pick_and_register().await
+}
 
 #[tauri::command]
 pub async fn codex_get_diagnostic(

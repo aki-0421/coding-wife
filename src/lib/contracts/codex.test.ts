@@ -4,6 +4,7 @@ import {
   CodexContractError,
   codexCommands,
   parseAcceptedResponse,
+  parseCodexCommandError,
   parseCodexDiagnostic,
   parseCodexEvent,
   parseCodexResponse,
@@ -11,6 +12,7 @@ import {
   parseThreadListResponse,
   parseThreadResponse,
   parseTurnResponse,
+  parseWorkspaceRegistration,
 } from "@/lib/contracts/codex"
 import fixture from "@/test/fixtures/codex-runtime.v1.json"
 
@@ -24,6 +26,9 @@ describe("Codex runtime contract", () => {
     expect(parseTurnResponse(fixture.turn)).toEqual(fixture.turn)
     expect(parseReviewResponse(fixture.review)).toEqual(fixture.review)
     expect(parseAcceptedResponse(fixture.accepted)).toEqual(fixture.accepted)
+    expect(parseCodexCommandError(fixture.commandError)).toEqual(
+      fixture.commandError,
+    )
     expect(fixture.events.map(parseCodexEvent)).toEqual(fixture.events)
   })
 
@@ -36,6 +41,20 @@ describe("Codex runtime contract", () => {
     ).toEqual(fixture.threadList)
     expect(parseCodexResponse(codexCommands.turnStart, fixture.turn)).toEqual(
       fixture.turn,
+    )
+    const workspace = {
+      schemaVersion: 1,
+      workspaceId: "workspace-fixture",
+      alias: "Fixture repository",
+      preflight: {
+        gitRepository: true,
+        ownedByCurrentUser: true,
+        writable: true,
+      },
+    }
+    expect(parseWorkspaceRegistration(workspace)).toEqual(workspace)
+    expect(parseCodexResponse(codexCommands.pickWorkspace, workspace)).toEqual(
+      workspace,
     )
   })
 
@@ -65,6 +84,88 @@ describe("Codex runtime contract", () => {
         payload: {
           itemHandle: "item_handle_fixture",
           text: "Read /Users/private/project/secret.txt",
+        },
+      }),
+    ).toThrow(CodexContractError)
+    for (const privateValue of [
+      '"auth_cookie" = "private-cookie"',
+      "sessionid: private-session",
+      "set-cookie: private-cookie",
+      "/Volumes/Private/project.txt",
+      "/Library/Application Support/private.txt",
+      "/Applications/Private.app/Contents",
+    ]) {
+      expect(() =>
+        parseCodexEvent({
+          ...completed,
+          payload: {
+            itemHandle: "item_handle_fixture",
+            text: privateValue,
+          },
+        }),
+      ).toThrow(CodexContractError)
+    }
+  })
+
+  it("enforces discriminated pending request invariants", () => {
+    const pending = fixture.events[1]
+    if (pending?.kind !== "pending_request") throw new Error("fixture")
+    const base = pending.payload.request
+    const userInput = {
+      ...base,
+      kind: "user_input",
+      questions: [
+        {
+          id: "choice",
+          header: "Choice",
+          question: "Choose one",
+          options: [
+            { id: "a", label: "A", description: "First" },
+            { id: "b", label: "B", description: "Second" },
+          ],
+        },
+      ],
+      allowedDecisions: [],
+      approvalContext: null,
+    }
+    expect(
+      parseCodexEvent({
+        ...pending,
+        payload: { request: userInput },
+      }),
+    ).toMatchObject({ kind: "pending_request" })
+    expect(() =>
+      parseCodexEvent({
+        ...pending,
+        payload: {
+          request: {
+            ...userInput,
+            questions: [
+              {
+                ...userInput.questions[0],
+                options: [userInput.questions[0]?.options[0]],
+              },
+            ],
+          },
+        },
+      }),
+    ).toThrow(CodexContractError)
+    expect(() =>
+      parseCodexEvent({
+        ...pending,
+        payload: {
+          request: {
+            ...base,
+            questions: userInput.questions,
+          },
+        },
+      }),
+    ).toThrow(CodexContractError)
+    expect(() =>
+      parseCodexEvent({
+        ...pending,
+        payload: {
+          request: { ...userInput, allowedDecisions: ["reject"] },
         },
       }),
     ).toThrow(CodexContractError)

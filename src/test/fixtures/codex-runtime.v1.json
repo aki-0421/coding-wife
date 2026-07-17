@@ -60,6 +60,12 @@
   "accepted": {
     "accepted": true
   },
+  "commandError": {
+    "code": "CODEX-WORKSPACE-NOT-GIT",
+    "operation": "codex.workspace.pick",
+    "recoverable": false,
+    "userMessageKey": "codex.error.generic"
+  },
   "events": [
     {
       "schemaVersion": 1,
@@ -91,7 +97,18 @@
           "targetAlias": "project command",
           "reason": null,
           "questions": [],
-          "allowedDecisions": ["approve_once", "reject", "stop"]
+          "allowedDecisions": ["approve_once", "reject", "stop"],
+          "approvalContext": {
+            "schemaVersion": 1,
+            "category": "command_execution",
+            "targetKind": "workspace_path",
+            "targetAlias": "project command",
+            "scope": "command",
+            "risk": "low",
+            "reversibility": "reversible",
+            "recommendation": "approve_once",
+            "evidence": ["read_only_action"]
+          }
         }
       }
     },
