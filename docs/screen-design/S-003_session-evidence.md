@@ -6,7 +6,7 @@ read_when:
   - "Commit tab、checkpoint gate、review pack、compare、revert commit、recovery branchを実装するとき。"
   - "S-003とSUP、GIT、HIST、APP要件の対応を確認するとき。"
 screen_id: "S-003"
-status: "Draft"
+status: "Approved"
 ---
 
 # S-003 セッション証拠
@@ -228,7 +228,7 @@ dialogをcancelした場合、HEAD、refs、index、working treeが開始前fing
 | ユーザー操作・system event | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
 |---|---|---|---|---|---|
 | baseline/refresh | Rust Git service | `inspect_git_baseline` | canonical registered root、read-only allowlist |前snapshot維持 | stale/blocked |
-| gate/checkpoint | Rust Git service | `evaluate_and_checkpoint_work_unit` | owned manifest、4 gate Pass、temporary index相当、local commitだけ | safe abort可能stepだけ | source/index/user change保持 |
+| gate/checkpoint | Rust Git service | `evaluate_and_checkpoint_work_unit` | owned manifest、4 gate Pass、isolated temporary index、local commitだけ。実index fingerprint不変 | safe abort可能stepだけ | source/index/user change保持 |
 | diff/compare | Rust Git service | `read_evidence_diff` / `compare_checkpoints` | validated object ID、repo ID、size limit | loadだけ停止 |該当file/error envelope |
 | revert | Rust Git service | `create_revert_checkpoint` | fresh HEAD、clean safety check、validated SHA、confirm token |開始前なら全状態不変 | conflict/lock/disk/permissionをerror |
 | recovery branch | Rust Git service | `create_recovery_branch` | validated SHA/ref、local ref作成だけ、checkout禁止 | refs不変 | ref作成済みと表示しない |
@@ -318,8 +318,13 @@ dialogをcancelした場合、HEAD、refs、index、working treeが開始前fing
 
 ## レビュー確認
 
+| 項目 | 内容 |
+|---|---|
+| レビュー結果 | Approved |
+| レビュー日 | 2026-07-18 |
+
 - [x] front matter、title、filenameの`S-003`が一致する。
-- [x] `status: Draft`である。
+- [x] `status: Approved`である。
 - [x] Commit tabをmanual commitではなくcheckpoint/review evidenceとして定義した。
 - [x] Scope、Ownership、Verification、Risk gateとreview pack全項目を定義した。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。

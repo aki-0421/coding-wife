@@ -12,10 +12,10 @@ read_when:
 | 項目 | 内容 |
 |---|---|
 | Prefix | `APP` |
-| 状態 | Draft |
+| 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 未レビュー |
+| 最終レビュー日 | 2026-07-18 |
 
 ## 背景
 
@@ -65,42 +65,42 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-052` | 利用者はmacOS 14以降で単一main windowを起動できる | cold startでmain windowが1枚だけ表示され、二重起動要求は既存windowを前面へ出す | Draft | 非該当 |
-| `APP-F-053` | 利用者はFigma基準の三領域を表示できる | 1470×836 CSS pxでsidebar 255.04px、header 81px、Chat 607.11px、Companion 607.84pxとなり、主要境界が各基準値の±2px以内になる | Draft | 非該当 |
-| `APP-F-054` | 利用者はminimum window sizeでも主要操作を継続できる | windowは960×640 CSS px未満へ縮小できず、960×640でtab、timeline、composer、Send、停止操作が欠落しない | Draft | 非該当 |
-| `APP-F-055` | 利用者はS-001〜S-004の目的へ同じwindow内で移動できる | sidebar、Chat/Commit/Context/Settings tab、settings gearから対象viewへ移動し、戻った時にworkspace選択とcomposer draftが保たれる | Draft | 非該当 |
-| `APP-F-056` | 利用者はcustom titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になり、traffic-light周辺のdrag regionがbutton操作を奪わない | Draft | 非該当 |
+| `APP-F-052` | 利用者はmacOS 14以降で単一main windowを起動できる | cold startでmain windowが1枚だけ表示され、二重起動要求は既存windowを前面へ出す | Approved | 非該当 |
+| `APP-F-053` | 利用者はFigma基準の三領域を表示できる | 1470×836 CSS pxでsidebar 255.04px、header 81px、Chat 607.11px、Companion 607.84pxとなり、主要境界が各基準値の±2px以内になる | Approved | 非該当 |
+| `APP-F-054` | 利用者はminimum window sizeでも主要操作を継続できる | windowは960×640 CSS px未満へ縮小できず、960×640でtab、timeline、composer、Send、停止操作が欠落しない | Approved | 非該当 |
+| `APP-F-055` | 利用者はS-001〜S-004の目的へ同じwindow内で移動できる | sidebar、Chat/Commit/Context/Settings tab、settings gearから対象viewへ移動し、戻った時にworkspace選択とcomposer draftが保たれる | Approved | 非該当 |
+| `APP-F-056` | 利用者はcustom titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になり、traffic-light周辺のdrag regionがbutton操作を奪わない | Approved | 非該当 |
 
 ### 言語・アクセシビリティ
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-057` | アプリは初回言語を決定する | OS localeが`ja`で始まる場合は日本語、それ以外は英語で初回表示する | Draft | 非該当 |
-| `APP-F-058` | 利用者は日本語と英語を即時切り替えられる | Settingsで言語を変更すると再起動なしでsidebar、tabs、errors、decision、settings、notificationsが切り替わり、再起動後も選択が戻る | Draft | 非該当 |
-| `APP-F-059` | 利用者はkeyboardだけで主要フローを操作できる | workspace選択、tab移動、添付、context、effort、送信、判断回答、停止、mute、review、restoreへTab/Shift+Tab/矢印/Enter/Escapeで到達できる | Draft | 非該当 |
-| `APP-F-060` | 利用者は現在focusを視認できる | 全interactive controlの`:focus-visible`が背景に対して3:1以上の2px outlineを表示し、focus順が視覚順と一致する | Draft | 非該当 |
-| `APP-F-061` | 利用者は動きを抑制できる | OSまたはアプリのreduced motionが有効な時、idle/decorative motionと位置・scale transitionを停止し、状態変化は即時または80ms以下のcrossfadeになる | Draft | 非該当 |
-| `APP-F-062` | 利用者は200% text zoomで操作できる | 960×640で200% text zoomを適用しても主要labelが操作不能にならず、tabはscroll/overflow、composer controlはwrapしてSendを残す | Draft | 非該当 |
+| `APP-F-057` | アプリは初回言語を決定する | OS localeが`ja`で始まる場合は日本語、それ以外は英語で初回表示する | Approved | 非該当 |
+| `APP-F-058` | 利用者は日本語と英語を即時切り替えられる | Settingsで言語を変更すると再起動なしでsidebar、tabs、errors、decision、settings、notificationsが切り替わり、再起動後も選択が戻る | Approved | 非該当 |
+| `APP-F-059` | 利用者はkeyboardだけで主要フローを操作できる | workspace選択、tab移動、添付、context、effort、送信、判断回答、停止、mute、review、restoreへTab/Shift+Tab/矢印/Enter/Escapeで到達できる | Approved | 非該当 |
+| `APP-F-060` | 利用者は現在focusを視認できる | 全interactive controlの`:focus-visible`が背景に対して3:1以上の2px outlineを表示し、focus順が視覚順と一致する | Approved | 非該当 |
+| `APP-F-061` | 利用者は動きを抑制できる | OSまたはアプリのreduced motionが有効な時、idle/decorative motionと位置・scale transitionを停止し、状態変化は即時または80ms以下のcrossfadeになる | Approved | 非該当 |
+| `APP-F-062` | 利用者は200% text zoomで操作できる | 960×640で200% text zoomを適用しても主要labelが操作不能にならず、tabはscroll/overflow、composer controlはwrapしてSendを残す | Approved | 非該当 |
 
 ### ライフサイクル・安全境界
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-063` | 利用者は実行中turnがある状態でclose結果を選べる | close時に実行中turnがあれば「停止して終了」「終了しない」を表示し、終了しない場合はwindowとturnを維持する | Draft | 非該当 |
-| `APP-F-064` | アプリは終了時にchild processとwriterを停止する | 「停止して終了」後5秒以内にCodex childとaudio playbackを停止し、SQLite transactionを完了またはrollbackしてprocessが残らない | Draft | 非該当 |
-| `APP-F-065` | 利用者は異常終了後に安全な回復概要を確認できる | 再起動時に未完了turnを`Interrupted`として表示し、draft、最後のcheckpoint、未完了work unitを示し、turnを自動再送しない | Draft | 非該当 |
-| `APP-F-066` | 利用者はofflineでもlocal evidenceを確認できる | networkまたはCodex接続がない時もworkspace、timeline、Commit、Context、Settingsを開け、送信だけを理由付きで無効にする | Draft | 非該当 |
-| `APP-F-067` | WebViewは目的別native操作だけを要求できる | 任意command名、任意shell文字列、allowlist外absolute pathをIPCへ渡すtestが拒否され、OS処理が開始されない | Draft | 非該当 |
-| `APP-F-068` | release版はlocal bundleだけからscriptを実行する | CSP violation testで外部`http:`, `https:`, inline未許可scriptが拒否され、許可されたapp assetと限定character assetだけがloadされる | Draft | 非該当 |
-| `APP-F-069` | UI向けerrorは秘密情報を含まない | API key、auth token、home directoryを含むfixture errorを表示・log保存してもsecret値が`[REDACTED]`になり、raw値を検索できない | Draft | 非該当 |
+| `APP-F-063` | 利用者は実行中turnがある状態でclose結果を選べる | close時に実行中turnがあれば「停止して終了」「終了しない」を表示し、終了しない場合はwindowとturnを維持する | Approved | 非該当 |
+| `APP-F-064` | アプリは終了時にchild processとwriterを停止する | 「停止して終了」後5秒以内にCodex childとaudio playbackを停止し、SQLite transactionを完了またはrollbackしてprocessが残らない | Approved | 非該当 |
+| `APP-F-065` | 利用者は異常終了後に安全な回復概要を確認できる | 再起動時に未完了turnを`Interrupted`として表示し、draft、最後のcheckpoint、未完了work unitを示し、turnを自動再送しない | Approved | 非該当 |
+| `APP-F-066` | 利用者はofflineでもlocal evidenceを確認できる | networkまたはCodex接続がない時もworkspace、timeline、Commit、Context、Settingsを開け、送信だけを理由付きで無効にする | Approved | 非該当 |
+| `APP-F-067` | WebViewは目的別native操作だけを要求できる | 任意command名、任意shell文字列、allowlist外absolute pathをIPCへ渡すtestが拒否され、OS処理が開始されない | Approved | 非該当 |
+| `APP-F-068` | release版はlocal bundleだけからscriptを実行する | CSP violation testで外部`http:`, `https:`, inline未許可scriptが拒否され、許可されたapp assetと限定character assetだけがloadされる | Approved | 非該当 |
+| `APP-F-069` | UI向けerrorは秘密情報を含まない | API key、auth token、home directoryを含むfixture errorを表示・log保存してもsecret値が`[REDACTED]`になり、raw値を検索できない | Approved | 非該当 |
 
 ### 診断・性能
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-070` | 利用者は起動前提の診断結果を確認できる | SettingsにOS、app version、Codex/Git/DB/Live2Dの利用可否とerror codeを表示し、token、API key、完全なhome pathを表示しない | Draft | 非該当 |
-| `APP-F-071` | アプリは基準端末で作業面を短時間に表示する | Apple Silicon・16GB RAM・release build・既存workspace 20件の条件で、process開始から操作可能なshell表示までのp95が3,000ms以下になる | Draft | 非該当 |
-| `APP-F-072` | UIは通常操作へ短時間に反応する | tab、workspace、settings toggleの入力からvisual state更新までのp95が100ms以下になり、測定中のsampleを100回以上記録する | Draft | 非該当 |
+| `APP-F-070` | 利用者は起動前提の診断結果を確認できる | SettingsにOS、app version、Codex/Git/DB/Live2Dの利用可否とerror codeを表示し、token、API key、完全なhome pathを表示しない | Approved | 非該当 |
+| `APP-F-071` | アプリは基準端末で作業面を短時間に表示する | Apple Silicon・16GB RAM・release build・既存workspace 20件の条件で、process開始から操作可能なshell表示までのp95が3,000ms以下になる | Approved | 非該当 |
+| `APP-F-072` | UIは通常操作へ短時間に反応する | tab、workspace、settings toggleの入力からvisual state更新までのp95が100ms以下になり、測定中のsampleを100回以上記録する | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -111,7 +111,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 ## デスクトップ固有要件
 
-デスクトップ共通仕様は次工程で `docs/screen-design/desktop-common-specification.md` に作成する。本書では共通仕様へ渡す確定契約を記す。
+デスクトップ共通契約は[デスクトップ共通仕様](../screen-design/desktop-common-specification.md)を正本とし、本書の機能要件と相互参照する。
 
 | 領域 | 要件 | 対象要件ID |
 |---|---|---|
@@ -132,10 +132,10 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-001` | セッションダッシュボード | `APP-F-052`〜`APP-F-062` | 変更 | 次工程: `docs/screen-design/S-001_session-dashboard.md` |
-| `S-002` | コーディングワークスペース | `APP-F-053`〜`APP-F-069` | 変更 | 次工程: `docs/screen-design/S-002_coding-workspace.md` |
-| `S-003` | セッション証拠 | `APP-F-055`, `APP-F-059`〜`APP-F-062` | 変更 | 次工程: `docs/screen-design/S-003_session-evidence.md` |
-| `S-004` | 設定・診断 | `APP-F-055`, `APP-F-057`〜`APP-F-072` | 変更 | 次工程: `docs/screen-design/S-004_settings-diagnostics.md` |
+| `S-001` | セッションダッシュボード | `APP-F-052`〜`APP-F-062` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
+| `S-002` | コーディングワークスペース | `APP-F-053`〜`APP-F-069` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-003` | セッション証拠 | `APP-F-055`, `APP-F-059`〜`APP-F-062` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
+| `S-004` | 設定・診断 | `APP-F-055`, `APP-F-057`〜`APP-F-072` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
 
@@ -157,7 +157,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | Tauri v2 | React + TypeScript + Vite assetを単一WebViewへbundleする | 解決済み（採用決定） | 非該当 |
 | macOS 14以降 | Build Week MVPの検証対象 | 解決済み（MVP範囲） | 他OSは対応済みと表示しない |
 | PRODUCT / DESIGN | product registerとFigma tokenの正本 | 解決済み | 非該当 |
-| 画面詳細仕様 | S-001〜S-004とdesktop commonを次工程で作成する | 作成待ち | 独立レビュー前のため本書をApprovedにしない |
+| 画面詳細仕様 | S-001〜S-004とdesktop commonを相互参照する | 解決済み（同時レビュー） | 実装は承認済み画面仕様に従う |
 
 ## 未確定事項
 
@@ -179,9 +179,9 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 項目 | 内容 |
 |---|---|
-| レビュー結果 | Not Ready |
+| レビュー結果 | Ready |
 | 仕様責任者 | プロダクトオーナー |
-| 合意日 | 未合意 |
+| 合意日 | 2026-07-18 |
 | 残る非ブロック論点 | Intel Mac artifact、OS notification。どちらもMVP動作をブロックしない |
 
 ## 着手可チェック
@@ -192,7 +192,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [ ] 画面IDと要件IDの相互参照が一致している。画面詳細仕様は次工程で作成する。
+- [x] 画面IDと要件IDの相互参照が一致し、承認済み画面詳細仕様を参照している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
-- [ ] 仕様責任者がレビューし、合意した。
+- [x] 仕様責任者がレビューし、合意した。

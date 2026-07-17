@@ -6,7 +6,7 @@ read_when:
   - "Settings tab、診断、Live2D import、TTS、support、history/privacy設定を実装するとき。"
   - "S-004とWORK、CODE、SUP、GIT、HIST、LIVE、NARR、APP要件の対応を確認するとき。"
 screen_id: "S-004"
-status: "Draft"
+status: "Approved"
 ---
 
 # S-004 設定・診断
@@ -181,7 +181,7 @@ fresh profileと`Reset Audio Settings`後はTTSをoffにし、external request�
 | Enable TTS | default off。明示enable時だけproviderへ接続 | invalid key/offlineならoff相当のtext fallback |
 | API key |別用途のkeyをOS secret storeへ保存。UIはset/unsetとreplace/deleteだけ | raw値を再表示、DB、log、diagnosticへ出さない |
 | Voice | active UI localeに対応するallowlistだけ | 0件ならTTS disabled |
-| Rate | provider安全範囲内の段階値、初期1.0 | invalid値を保存しない |
+| Rate | 0.75〜1.25、0.05刻み、初期1.0 | invalid値を保存しない |
 | Test |固定ja/en sampleを先にtext表示し、その後request/playback | 5秒timeout。Cancel後100ms以内にabort/stop、設定入力維持 |
 | Mute |現在再生を100ms以内に停止しqueue clear、caption維持 | unmute後に過去eventを再生しない |
 | Reset | toggle off、voice/rate default、secret削除 |確認cancelで全設定不変 |
@@ -192,7 +192,7 @@ provider requestは240文字以下のredacted transcript、voice、formatだけ�
 
 | setting / status | 初期値・制約 | 動作 |
 |---|---|---|
-| Global enable | on。invalid persistenceはoffへfail closed | offでqueued/activeをcancelし、deterministic fallbackを維持 |
+| Global enable | default off。tool 0件/cwdなし/fs・shell・MCPなしを強制できるcapability合格時だけon可能 | capability不足またはoffでthreadを起動せず、queued/activeをcancelしdeterministic fallbackを維持 |
 | Presence / narration | on | deterministic eventだけで起動 |
 | Decision explainer | role policy値 | main decisionを補助し、直接質問しない |
 | Checkpoint reviewer | role policy値 | explicit triggerのfixed diff最大1MiBだけ |
@@ -277,7 +277,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | mapping | neutral/default | stateごと任意 | inventoryに存在するcueだけ | row内、前mapping維持 | mapping transaction |
 | TTS key |表示しない | enable時必須 | secret storeへ直接渡し、WebView persistence禁止 | set/unset statusだけ | secret store success |
 | voice | locale候補 | enable時必須 | allowlist voice ID | field直下 | testまたはsave成功 |
-| rate | 1.0 | 必須 | provider安全範囲のselect option | field直下 | valid変更時 |
+| rate | 1.0 | 必須 | 0.75〜1.25、0.05刻みのselect option | field直下 | valid変更時 |
 | support toggles | policy default | 必須 | allowlist role boolean | unknown role非保存 | valid変更時 |
 | history target | active workspace |削除時必須 | existing workspace ID、running 0 | dialog内 |削除transaction成功 |
 
@@ -389,8 +389,13 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 
 ## レビュー確認
 
+| 項目 | 内容 |
+|---|---|
+| レビュー結果 | Approved |
+| レビュー日 | 2026-07-18 |
+
 - [x] front matter、title、filenameの`S-004`が一致する。
-- [x] `status: Draft`である。
+- [x] `status: Approved`である。
 - [x] 8 section、project/character context分離、diagnostics、history/privacyを定義した。
 - [x] `tmp/hiyori_pro`をbuild入力とし、runtime 17 fileだけを同梱する契約を定義した。
 - [x] custom model importのpicker、closure、resource limit、quarantine、preview、mapping、deleteを定義した。

@@ -6,7 +6,7 @@ read_when:
   - "Chat/Context tab、composer、Codex event timeline、decision、Live2D companionを実装するとき。"
   - "S-002とWORK、CODE、SUP、GIT、HIST、LIVE、NARR、APP要件の対応を確認するとき。"
 screen_id: "S-002"
-status: "Draft"
+status: "Approved"
 ---
 
 # S-002 コーディングワークスペース
@@ -87,7 +87,7 @@ status: "Draft"
 | Companion pane | 607.84×754.99px | Live2D canvas、visible caption、mute | mute、fallback詳細 |
 | composer | Chat内571.11×128.25px、left/right 18px、bottom 15px | input、attachment、context、Sol、effort、send/stop | draft編集、popover、turn操作 |
 
-標準geometryではsidebar、81px header、Chat/Companion境界、composerをFigma node `8:2`の±2 CSS px以内に合わせる。ChatとCompanionの間へcard、rail、shadowを追加せず、1px dividerだけを許可する。Companion背景は大きなdecorative gradientやparticleを使わず、Live2Dと状態captionの可読性を優先する。
+標準geometryではsidebar、81px header、Chat/Companion境界、composerをFigma node `8:2`の±2 CSS px以内に合わせる。ChatとCompanionの間へcard、rail、shadow、visible dividerを追加しない。Companion背景は大きなdecorative gradientやparticleを使わず、Live2Dと状態captionの可読性を優先する。
 
 ### headerとtab
 
@@ -125,15 +125,15 @@ timeline最下部から48px以内なら新eventで追従する。48pxを超え�
 
 | control | 表示・動作 | 無効条件 |
 |---|---|---|
-| instruction | 1〜8行auto-grow。Enterは改行、`Command+Enter`で送信 |空、trim後0文字、offline、blocked preflight、decision未回答、別workspace実行競合 |
+| instruction | 1〜8行auto-grow。Enterは改行、`Command+Enter`で送信 | text、attachment、read-only contextがすべて空またはinvalid、offline、blocked preflight、decision未回答、別workspace実行競合 |
 | attachment | paperclip。native pickerでworkspace root内の許可fileを選択 | turn開始中、permission不足 |
-| Context | project / characterの二群を示すpopover。portalで描画 | context読込不可 |
+| Context | `Files & folders` / `Git diff` / `Terminal output`のread-only snapshotを選ぶpopover。portalで描画 | snapshot取得または検証不可 |
 | model | `GPT-5.6 Sol`固定label。picker chevronを出さない | 常時read-only |
-| effort | `Fast` / `Max`のsupported optionだけをselect | capability未確認時は前回valid値を表示してSend不可 |
+| effort | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけをselect。modelやservice tierは変更しない | 対応値未確認・未対応時は前回valid値を表示してSend不可 |
 | Send | primary icon button、accessible label `Send / 送信` | instruction条件不成立 |
 | Stop | running時にSend位置へ表示。明示clickだけ | turn非実行時 |
 
-attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。
+attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、Context tabのproject/character編集とは別の送信時参照として扱う。
 
 送信時はworkspace ID、draft hash、context versions、Git fingerprint、effort、attachment handlesをRustで再検証する。二重clickとkey repeatは同じidempotency keyに集約し、turnは1件だけ作る。
 
@@ -146,7 +146,7 @@ attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level 
 | Other | optional。選択時だけ1〜2,000文字の入力を必須にする |
 | Hold |作業を待機し、Git/sourceを変更しない。decisionを未回答のまま残す |
 | Interrupt | current turnとsupport taskを停止し、完了済みcheckpointと未完了workを分ける |
-| Approve | 具体的operation、scope、期限を示した場合だけ表示。包括承認を作らない |
+| Approve | 既知のApp Server approval request ID、具体的operation、scope、期限を示した場合だけ表示。包括承認や未知methodの許可を作らない |
 | Answer | 1回だけ送信し、answer eventと選択時fingerprintを履歴化する |
 
 decisionはtimeline内の強いoutline surfaceとして表示し、必要時だけ同じDOM内容をportal overlayでも提示する。Live2Dの表情、音声、色、animationで回答を急かさない。背景のSendは無効にするが、timeline、Context、Commit、Settingsのread-only閲覧は許可する。
@@ -222,9 +222,10 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 
 | 項目 | 初期値 | 必須 | 制約・境界 | エラー表示 | 保存契機 |
 |---|---|---|---|---|---|
-| instruction | workspace draft |送信時必須 | trim後1〜20,000 Unicode scalar、NUL不可 | composer内、draft保持 | debounceとroute leaveでencryptedでないlocal DB。secret警告後はredacted |
-| attachment | なし | 任意 | 10件、各10MiB、workspace root内、regular file、allowlist type | chip単位、無効handleは除外 | draftにはhandle metadataだけ |
-| effort |前回valid値、初回`Fast` | 必須 | capabilityが返した`Fast` / `Max`だけ | Send不可理由 | valid変更時workspace preference |
+| instruction | workspace draft | 条件付き | 0〜32,000 Unicode scalar、NUL不可。attachment/contextがなければtrim後1文字以上 | composer内、draft保持 | redaction合格後のdebounceとroute leave。secret-bearing raw値はReact transientだけに保持しDBへ保存しない |
+| attachment | なし | 任意 | 10件、各25MiB、合計50MiB、workspace root内のregular readable file。directory/symlink/executable不可 | chip単位、無効handleは除外 | draftにはhandle metadataだけ |
+| read-only context | なし | 任意 | 10件、各1MiBのFiles & folders / Git diff / Terminal output snapshot。sourceとcapture時刻必須 | 無効snapshotだけ除外 | redacted snapshot metadataとcontent hash |
+| effort |前回valid値、初回`Fast` | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | Send不可理由 | valid変更時workspace preference |
 | decision option | 未選択 |回答時必須 | server提示IDの1件 | decision surface | answer accepted時event |
 | Other text |空 | Other選択時必須 | trim後1〜2,000 Unicode scalar | field直下、入力保持 | answer accepted時event |
 | project context |前version | 任意 |各field 0〜8,000、総量32,000 Unicode scalar | section内 | section transaction成功 |
@@ -238,10 +239,12 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 | ユーザー操作 | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
 |---|---|---|---|---|---|
-| session開始/turn送信 | Rust → Codex stdio | `start_or_send_main_turn` | active workspace、Codex executable、typed payload、1 active execution | spawn前ならdraft維持 | stage別error、thread自動重複作成なし |
+| session開始/turn送信 | Rust → Codex stdio | `start_or_send_main_turn` | active workspace、Codex executable、typed payload、1 active execution。imageは`localImage`、fileは`mention`へRust内で変換 | spawn前ならdraft維持 | stage別error、thread自動重複作成なし |
 | Stop | Rust supervisor | `stop_main_turn` | owned process/thread/turn ID | confirmation cancelは継続 | timeout後process tree停止、Interrupted |
 | event購読 | Rust event bridge | `subscribe_workspace_events` | workspace ID、monotonic sequence、schema allowlist | route leaveでUI購読だけ解除 | gapでpauseし診断表示 |
 | attachment選択 | Tauri dialog → Rust | `select_workspace_attachments` | file picker、canonical workspace root、size/type |変更なし | invalid fileをhandle化しない |
+| read-only context取得 | Rust context adapter | `capture_turn_context` | source allowlist、1MiB、timestamp、redaction、content hash | draft不変 | raw terminal/pathへfallbackしない |
+| decision / approval回答 | Rust App Server adapter | `answer_decision_or_approval` | negotiated requestUserInputまたは既知approval method、元request ID、idempotency | Hold/cancelは未回答維持 | 未知method/schemaは許可せずBlocked |
 | Context保存 | Rust DB | `save_workspace_context` | workspace ID、section、expected version、schema |変更なし | optimistic conflictを表示 |
 | Live2D読込 | Rust asset protocol → WebView renderer | `load_character_pack` | selected verified pack ID、app-private root |前model維持 | static/text fallback |
 | mute/audio | Rust audio/TTS | `set_mute` / `stop_audio` | selected voice、redacted eligible text、secret handle |前設定維持 | text-only継続 |
@@ -337,8 +340,13 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 ## レビュー確認
 
+| 項目 | 内容 |
+|---|---|
+| レビュー結果 | Approved |
+| レビュー日 | 2026-07-18 |
+
 - [x] front matter、title、filenameの`S-002`が一致する。
-- [x] `status: Draft`である。
+- [x] `status: Approved`である。
 - [x] demo/Figmaのsidebar、81px header、Chat、Companion、composer寸法を定義した。
 - [x] modelは`GPT-5.6 Sol`固定で、`Fast` / `Max`はreasoning effortとして定義した。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。

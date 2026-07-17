@@ -5,7 +5,7 @@ updated: 2026-07-18
 read_when:
   - "S-001〜S-004の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
   - "個別画面仕様とdesktop-shell要件の整合を確認するとき。"
-status: "Draft"
+status: "Approved"
 ---
 
 # デスクトップ共通仕様
@@ -271,6 +271,11 @@ agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced moti
 | OS notification | MVPはapp内statusだけ | demo後に需要を計測する | いいえ |
 
 ## レビュー確認
+
+| 項目 | 内容 |
+|---|---|
+| レビュー結果 | Approved |
+| レビュー日 | 2026-07-18 |
 
 - [x] single main window、default/minimum geometry、titlebarを定義した。
 - [x] breakpoint、scroll owner、focus、keyboard、ja/enを定義した。

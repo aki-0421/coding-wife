@@ -12,10 +12,10 @@ read_when:
 | 項目 | 内容 |
 |---|---|
 | Prefix | `SUP` |
-| 状態 | Draft |
+| 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 未レビュー |
+| 最終レビュー日 | 2026-07-18 |
 
 ## 背景
 
@@ -66,41 +66,41 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `SUP-F-050` | support taskはmainと別のephemeral rootで実行される | invocationごとに新しいroot IDを作り、main thread IDをreuseせず、完了/cancel/timeout後にrootを再利用しない | Draft | 非該当 |
-| `SUP-F-051` | support roleはdeterministic eventで起動される | roleごとに定義したdecision requested、error、checkpoint completedのevent以外で起動せず、同一event IDを二重処理しない | Draft | 非該当 |
-| `SUP-F-052` | 通常supportはredacted normalized snapshotだけを受け取る | payloadにgoal、phase、event summary、evidence ID、locale、generationを含み、source file本文、absolute path、secret、raw reasoningを含まない | Draft | 非該当 |
-| `SUP-F-053` | 通常supportはtoolとrepositoryへアクセスできない | session start capabilityがtool 0件、cwdなし、filesystem/shell/MCPなしになり、access attemptがpolicy errorになる | Draft | 非該当 |
-| `SUP-F-054` | checkpoint reviewerは固定diff snapshotだけを読める | explicit review trigger時だけcontent-hash付きdiff最大1MiBをinputへ含め、repo path、Git command、追加file readを許可しない | Draft | 非該当 |
-| `SUP-F-055` | supportは別supportを起動できない | nested spawn request fixtureをschema/policy errorとして拒否し、active support root数を1から増やさない | Draft | 非該当 |
+| `SUP-F-050` | support taskはmainと別のephemeral rootで実行される | invocationごとに新しいroot IDを作り、main thread IDをreuseせず、完了/cancel/timeout後にrootを再利用しない | Approved | 非該当 |
+| `SUP-F-051` | support roleはdeterministic eventで起動される | roleごとに定義したdecision requested、error、checkpoint completedのevent以外で起動せず、同一event IDを二重処理しない | Approved | 非該当 |
+| `SUP-F-052` | 通常supportはredacted normalized snapshotだけを受け取る | payloadにgoal、phase、event summary、evidence ID、locale、generationを含み、source file本文、absolute path、secret、raw reasoningを含まない | Approved | 非該当 |
+| `SUP-F-053` | 通常supportはtoolとrepositoryへアクセスできない | 起動前probeでtool 0件、cwdなし、filesystem/shell/MCPなしを強制できる時だけsessionを開始し、access attemptがpolicy errorになる。強制capabilityがないruntimeではsupport threadを0件にしてdeterministic fallbackを使う | Approved | 非該当 |
+| `SUP-F-054` | checkpoint reviewerは固定diff snapshotだけを読める | explicit review trigger時だけcontent-hash付きdiff最大1MiBをinputへ含め、repo path、Git command、追加file readを許可しない | Approved | 非該当 |
+| `SUP-F-055` | supportは別supportを起動できない | nested spawn request fixtureをschema/policy errorとして拒否し、active support root数を1から増やさない | Approved | 非該当 |
 
 ### Output・stale・failure isolation
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `SUP-F-056` | supportはrole別schemaへ適合するoutputだけを返す | outputにschema version、role、source event ID、generation、summary、confidenceがあり、unknown/oversize fieldはrejectされる | Draft | 非該当 |
-| `SUP-F-057` | stale support outputを表示しない | output generationがactive workspace generationと一致しない場合、timeline/Live2D/narrationへ適用せずStale metadataだけを記録する | Draft | 非該当 |
-| `SUP-F-058` | support failureはmain turnを停止しない | timeout、model error、schema errorの各fixtureでmain turn statusが変わらず、deterministic text fallbackを500ms以内に表示する | Draft | 非該当 |
-| `SUP-F-059` | supportは利用者へ直接質問しない | question/tool-request outputをrejectし、main sessionへ新規decisionを捏造せずfallback summaryを返す | Draft | 非該当 |
-| `SUP-F-060` | support outputはtechnical policyを変更できない | permission、model、checkpoint gate、Live2D path、DOM actionを含むoutputを表示用提案としても実行せずpolicy violationを記録する | Draft | 非該当 |
-| `SUP-F-061` | 利用者は進行中supportをcancelできる | Cancel後1秒以内にinterrupt requestを送り、5秒以内にCanceledまたはTimeoutへ遷移し、mainを継続する | Draft | 非該当 |
+| `SUP-F-056` | supportはrole別schemaへ適合するoutputだけを返す | outputにschema version、role、source event ID、generation、summary、confidenceがあり、unknown/oversize fieldはrejectされる | Approved | 非該当 |
+| `SUP-F-057` | stale support outputを表示しない | output generationがactive workspace generationと一致しない場合、timeline/Live2D/narrationへ適用せずStale metadataだけを記録する | Approved | 非該当 |
+| `SUP-F-058` | support failureはmain turnを停止しない | timeout、model error、schema errorの各fixtureでmain turn statusが変わらず、deterministic text fallbackを500ms以内に表示する | Approved | 非該当 |
+| `SUP-F-059` | supportは利用者へ直接質問しない | question/tool-request outputをrejectし、main sessionへ新規decisionを捏造せずfallback summaryを返す | Approved | 非該当 |
+| `SUP-F-060` | support outputはtechnical policyを変更できない | permission、model、checkpoint gate、Live2D path、DOM actionを含むoutputを表示用提案としても実行せずpolicy violationを記録する | Approved | 非該当 |
+| `SUP-F-061` | 利用者は進行中supportをcancelできる | Cancel後1秒以内にinterrupt requestを送り、5秒以内にCanceledまたはTimeoutへ遷移し、mainを継続する | Approved | 非該当 |
 
 ### Budget・透明性・非永続化
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `SUP-F-062` | support concurrencyとqueueを制限する | active supportは1件、queueは最大10件とし、11件目は低優先eventをdropしてDropped metadataを記録する | Draft | 非該当 |
-| `SUP-F-063` | support taskは時間とtoken budgetを持つ | 1taskは15秒timeout、input+output合計16,000 token上限とし、超過時はcancelしてfallbackを返す | Draft | 非該当 |
-| `SUP-F-064` | 利用者はsupport利用状況を確認できる | Settings/diagnosticsにrole、status、model family、token usage、latency、queue、last errorを表示し、prompt/response本文は表示しない | Draft | 非該当 |
-| `SUP-F-065` | 利用者はsupportをglobalまたはrole単位で無効化できる | toggle off後にqueued taskをcancelし、新規invocationを0件にしてmainとdeterministic fallbackを維持する | Draft | 非該当 |
-| `SUP-F-066` | support raw historyをapp persistenceへ残さない | invocation完了後にapp DB、artifact、logを検索してもprompt/response本文が0件で、usage metadataだけが存在する | Draft | 非該当 |
-| `SUP-F-067` | release前にephemeral non-persistenceを監査する | test用CODEX_HOME snapshotのbefore/after差分にsupport thread history fileが0件であることをCI/manual release evidenceへ記録する | Draft | 非該当 |
-| `SUP-F-068` | support model familyとeffortはrole policyで固定される | role mappingに存在するGPT-5.6 family/effortだけをsession startへ渡し、support outputからmodelを変更できない | Draft | 非該当 |
+| `SUP-F-062` | support concurrencyとqueueを制限する | active supportは1件、queueは最大10件とし、11件目は低優先eventをdropしてDropped metadataを記録する | Approved | 非該当 |
+| `SUP-F-063` | support taskは時間とtoken budgetを持つ | 1taskは15秒timeout、input+output合計16,000 token上限とし、超過時はcancelしてfallbackを返す | Approved | 非該当 |
+| `SUP-F-064` | 利用者はsupport利用状況を確認できる | Settings/diagnosticsにrole、status、model family、token usage、latency、queue、last errorを表示し、prompt/response本文は表示しない | Approved | 非該当 |
+| `SUP-F-065` | 利用者はsupportをglobalまたはrole単位で無効化できる | toggle off後にqueued taskをcancelし、新規invocationを0件にしてmainとdeterministic fallbackを維持する | Approved | 非該当 |
+| `SUP-F-066` | support raw historyをapp persistenceへ残さない | invocation完了後にapp DB、artifact、logを検索してもprompt/response本文が0件で、usage metadataだけが存在する | Approved | 非該当 |
+| `SUP-F-067` | release前にephemeral non-persistenceを監査する | test用CODEX_HOME snapshotのbefore/after差分にsupport thread history fileが0件であることをCI/manual release evidenceへ記録する | Approved | 非該当 |
+| `SUP-F-068` | support model familyとeffortはrole policyで固定される | role mappingに存在するGPT-5.6 family/effortだけをsession startへ渡し、support outputからmodelを変更できない | Approved | 非該当 |
 
 ## 入力項目要件
 
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
 |---|---|---|---|---|---|
-| Settings | support enabled | on | 必須 | boolean | 不正値はoffにfail closed |
+| Settings | support enabled | off | 必須 | boolean。isolation capability合格時だけonへ変更可能 | 不正値またはcapability不足はoffにfail closed |
 | Settings | role enabled | presence on、他はpolicy値 | 必須 | allowlist roleごとのboolean | unknown roleを保存しない |
 | Task | snapshot | なし | 必須 | schema version、最大64KiB、redaction pass必須 | taskを起動せずfallback |
 | Review task | fixed diff | なし | 条件付き | explicit trigger、UTF-8最大1MiB、content hash必須 | reviewerを起動せずreview unavailable表示 |
@@ -126,9 +126,9 @@ read_when:
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-002` | コーディングワークスペース | `SUP-F-051`, `SUP-F-057`〜`SUP-F-061` | 変更 | 次工程: `docs/screen-design/S-002_coding-workspace.md` |
-| `S-003` | セッション証拠 | `SUP-F-054`, `SUP-F-056`〜`SUP-F-058` | 変更 | 次工程: `docs/screen-design/S-003_session-evidence.md` |
-| `S-004` | 設定・診断 | `SUP-F-062`〜`SUP-F-068` | 変更 | 次工程: `docs/screen-design/S-004_settings-diagnostics.md` |
+| `S-002` | コーディングワークスペース | `SUP-F-051`, `SUP-F-057`〜`SUP-F-061` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-003` | セッション証拠 | `SUP-F-054`, `SUP-F-056`〜`SUP-F-058` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
+| `S-004` | 設定・診断 | `SUP-F-062`〜`SUP-F-068` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
 
@@ -148,9 +148,9 @@ read_when:
 | 依存・前提 | 内容 | 状態 | 未解決時の影響 |
 |---|---|---|---|
 | Codex App Server | ephemeral rootとusage情報 | 解決済み（capability検査契約） | unavailable時はsupport off+fallback |
-| CODE | main eventとsingle user-question channel | 解決済み（同時Draft） | mainはsupport failureでも継続 |
-| HIST | usage metadata、raw history非保存 | 解決済み（同時Draft） | persistence testで監査 |
-| NARR/LIVE | validated summaryだけを表現へ使用 | 解決済み（同時Draft） | stale outputは適用しない |
+| CODE | main eventとsingle user-question channel | 解決済み（相互参照確認済み） | mainはsupport failureでも継続 |
+| HIST | usage metadata、raw history非保存 | 解決済み（相互参照確認済み） | persistence testで監査 |
+| NARR/LIVE | validated summaryだけを表現へ使用 | 解決済み（相互参照確認済み） | stale outputは適用しない |
 
 ## 未確定事項
 
@@ -171,9 +171,9 @@ read_when:
 
 | 項目 | 内容 |
 |---|---|
-| レビュー結果 | Not Ready |
+| レビュー結果 | Ready |
 | 仕様責任者 | プロダクトオーナー |
-| 合意日 | 未合意 |
+| 合意日 | 2026-07-18 |
 | 残る非ブロック論点 | role導入順、ephemeral capabilityはfallbackを定義済み |
 
 ## 着手可チェック
@@ -184,7 +184,7 @@ read_when:
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [ ] 画面IDと要件IDの相互参照が一致している。画面詳細仕様は次工程で作成する。
+- [x] 画面IDと要件IDの相互参照が一致し、承認済み画面詳細仕様を参照している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
-- [ ] 仕様責任者がレビューし、合意した。
+- [x] 仕様責任者がレビューし、合意した。

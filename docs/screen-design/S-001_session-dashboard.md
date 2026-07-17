@@ -6,7 +6,7 @@ read_when:
   - "project picker、preflight、workspace sidebar、lifecycle、filter、selectionを実装するとき。"
   - "S-001とWORK、CODE、HIST、APP要件の対応を確認するとき。"
 screen_id: "S-001"
-status: "Draft"
+status: "Approved"
 ---
 
 # S-001 セッションダッシュボード
@@ -184,7 +184,7 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 
 | データ | 正本・保存先 | 保存契機 | 復元契機 | 破棄条件 | 失敗時 |
 |---|---|---|---|---|---|
-| project canonical path/metadata | Rust SQLite | registration transaction | cold start |明示登録解除 | 前回transaction維持 |
+| project canonical path/metadata | Rust SQLiteの目的限定project linkage | registration transaction | cold start |明示登録解除 | 前回transaction維持 |
 | workspace/lifecycle/attention | Rust SQLite + normalized event | valid state transition | cold start/route return | history削除契約 | stale表示 |
 | active selection/filter/scroll | Rust SQLite | valid selection/query/scroll settle | route return/restart | Reset UI state | safe default + notice |
 | repo/branch | Gitを正本、DBはlast observed | focus/Send前preflight | query時再照合 | project登録解除 | stale/Missing |
@@ -228,8 +228,13 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 
 ## レビュー確認
 
+| 項目 | 内容 |
+|---|---|
+| レビュー結果 | Approved |
+| レビュー日 | 2026-07-18 |
+
 - [x] front matter、title、filenameの`S-001`が一致する。
-- [x] `status: Draft`である。
+- [x] `status: Approved`である。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] native operation、cancel、permission、data retention、OS差分を定義した。
 - [x] 関連要件IDを要件定義書のS-001対応と一致させた。

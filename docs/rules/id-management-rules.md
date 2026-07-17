@@ -43,14 +43,14 @@ IDは並び順や実装場所ではなく、仕様上の同一性を表す。
 
 | Prefix | 機能名 | 要件定義書 | 状態 | 責任者 |
 |---|---|---|---|---|
-| `WORK` | workspace-sessions | [要件定義書](../requirements/workspace-sessions.md) | Draft | プロダクトオーナー |
-| `CODE` | codex-main-session | [要件定義書](../requirements/codex-main-session.md) | Draft | プロダクトオーナー |
-| `SUP` | support-agent-orchestration | [要件定義書](../requirements/support-agent-orchestration.md) | Draft | プロダクトオーナー |
-| `GIT` | git-review-harness | [要件定義書](../requirements/git-review-harness.md) | Draft | プロダクトオーナー |
-| `HIST` | activity-history | [要件定義書](../requirements/activity-history.md) | Draft | プロダクトオーナー |
-| `LIVE` | live2d-companion | [要件定義書](../requirements/live2d-companion.md) | Draft | プロダクトオーナー |
-| `NARR` | audio-commentary | [要件定義書](../requirements/audio-commentary.md) | Draft | プロダクトオーナー |
-| `APP` | desktop-shell | [要件定義書](../requirements/desktop-shell.md) | Draft | プロダクトオーナー |
+| `WORK` | workspace-sessions | [要件定義書](../requirements/workspace-sessions.md) | Approved | プロダクトオーナー |
+| `CODE` | codex-main-session | [要件定義書](../requirements/codex-main-session.md) | Approved | プロダクトオーナー |
+| `SUP` | support-agent-orchestration | [要件定義書](../requirements/support-agent-orchestration.md) | Approved | プロダクトオーナー |
+| `GIT` | git-review-harness | [要件定義書](../requirements/git-review-harness.md) | Approved | プロダクトオーナー |
+| `HIST` | activity-history | [要件定義書](../requirements/activity-history.md) | Approved | プロダクトオーナー |
+| `LIVE` | live2d-companion | [要件定義書](../requirements/live2d-companion.md) | Approved | プロダクトオーナー |
+| `NARR` | audio-commentary | [要件定義書](../requirements/audio-commentary.md) | Approved | プロダクトオーナー |
+| `APP` | desktop-shell | [要件定義書](../requirements/desktop-shell.md) | Approved | プロダクトオーナー |
 
 ### Prefixのルール
 

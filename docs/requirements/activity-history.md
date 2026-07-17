@@ -12,10 +12,10 @@ read_when:
 | 項目 | 内容 |
 |---|---|
 | Prefix | `HIST` |
-| 状態 | Draft |
+| 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 未レビュー |
+| 最終レビュー日 | 2026-07-18 |
 
 ## 背景
 
@@ -65,37 +65,37 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `HIST-F-037` | appはnormalized domain eventを追記保存する | workspace/turn/type/version/payload/timestampを持つvalid eventを受け取ると、既存eventを変更せず新しいrowとして保存する | Draft | 非該当 |
-| `HIST-F-038` | appは重要event typeを区別する | goal、plan、tool、file、error、decision、approval、verification、checkpoint、restore、statusをtype filterで識別できる | Draft | 非該当 |
-| `HIST-F-039` | appはevent順序を安定させる | UTC timestampが同一でもworkspace単調増加sequenceで順序が一意になり、再起動前後で表示順が変わらない | Draft | 非該当 |
-| `HIST-F-040` | appはworkspace再開に必要な正本を保存する | project、workspace、turn、work unit、decision、checkpoint、selected character、locale、draftをRust DBから復元できる | Draft | 非該当 |
-| `HIST-F-041` | appは秘密を永続化前にredactする | API key、Bearer token、auth cookie、home path fixtureがwriter入力にある時、DB/WAL/log/artifactの全検索でraw値が0件になる | Draft | 非該当 |
-| `HIST-F-042` | appはraw reasoningを保存しない | reasoning fixtureを受け取ってもsummary、decision rationale、evidenceだけを保存し、chain-of-thought fieldをschemaが受理しない | Draft | 非該当 |
-| `HIST-F-043` | appはaudioとsupport raw historyを保存しない | generated audio byteとsupport prompt/responseをDBへ渡すtestが拒否され、transcript IDとusage/latency/error metadataだけが残る | Draft | 非該当 |
-| `HIST-F-044` | event correctionは追記で表す | 既存eventの内容訂正時に元rowを更新・削除せず、対象event IDを参照するcorrection eventを追加する | Draft | 非該当 |
+| `HIST-F-037` | appはnormalized domain eventを追記保存する | workspace/turn/type/version/payload/timestampを持つvalid eventを受け取ると、既存eventを変更せず新しいrowとして保存する | Approved | 非該当 |
+| `HIST-F-038` | appは重要event typeを区別する | goal、plan、tool、file、error、decision、approval、verification、checkpoint、restore、statusをtype filterで識別できる | Approved | 非該当 |
+| `HIST-F-039` | appはevent順序を安定させる | UTC timestampが同一でもworkspace単調増加sequenceで順序が一意になり、再起動前後で表示順が変わらない | Approved | 非該当 |
+| `HIST-F-040` | appはworkspace再開に必要な正本を保存する | project、workspace、turn、work unit、decision、checkpoint、selected character、locale、draftをRust DBから復元できる | Approved | 非該当 |
+| `HIST-F-041` | appは秘密を永続化前にredactする | API key、Bearer token、auth cookie、home path fixtureがnormalized event writerへ入る時、目的限定のproject linkage recordを除くDB/WAL/log/artifactの検索でraw値が0件になる。linkageからevent、diagnostic、support payloadへ派生するpathは必ずredactする | Approved | 非該当 |
+| `HIST-F-042` | appはraw reasoningを保存しない | reasoning fixtureを受け取ってもsummary、decision rationale、evidenceだけを保存し、chain-of-thought fieldをschemaが受理しない | Approved | 非該当 |
+| `HIST-F-043` | appはaudioとsupport raw historyを保存しない | generated audio byteとsupport prompt/responseをDBへ渡すtestが拒否され、transcript IDとusage/latency/error metadataだけが残る | Approved | 非該当 |
+| `HIST-F-044` | event correctionは追記で表す | 既存eventの内容訂正時に元rowを更新・削除せず、対象event IDを参照するcorrection eventを追加する | Approved | 非該当 |
 
 ### 再構築・閲覧・削除
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `HIST-F-045` | appは起動時にactive workspaceを再構築する | 20 workspace・各1,000 eventのfixtureでactive selection、last summary、draft、last checkpointを3秒以内に表示する | Draft | 非該当 |
-| `HIST-F-046` | crash中のturnをInterruptedにする | startedでterminal eventのないturnを再起動時にInterruptedとして表示し、自動再送・自動commitを行わない | Draft | 非該当 |
-| `HIST-F-047` | 利用者はtimelineを種類と期間でfilterできる | All/Decisions/Errors/Verification/CheckpointsとUTC期間を選び、0件時にfilter解除とempty説明を表示する | Draft | 非該当 |
-| `HIST-F-048` | timelineはpage単位で読み込む | 1page最大200 eventを取得し、100,000 eventのworkspaceで初回query p95 200ms以下、次page p95 200ms以下になる | Draft | 非該当 |
-| `HIST-F-049` | 利用者はworkspace historyを削除できる | 実行中turnがない対象で確認するとapp DB/artifactだけを削除し、Git repository、commit、branchを変更しない | Draft | 非該当 |
-| `HIST-F-050` | 利用者は履歴削除をcancelできる | confirmation cancel時にrow/artifact数が変わらず、workspace selectionとfilterを維持する | Draft | 非該当 |
-| `HIST-F-051` | empty historyは次の操作を示す | eventが0件なら「最初のturnを開始」「project診断を確認」を表示し、空のtable/card gridを表示しない | Draft | 非該当 |
+| `HIST-F-045` | appは起動時にactive workspaceを再構築する | 20 workspace・各1,000 eventのfixtureでactive selection、last summary、draft、last checkpointを3秒以内に表示する | Approved | 非該当 |
+| `HIST-F-046` | crash中のturnをInterruptedにする | startedでterminal eventのないturnを再起動時にInterruptedとして表示し、自動再送・自動commitを行わない | Approved | 非該当 |
+| `HIST-F-047` | 利用者はtimelineを種類と期間でfilterできる | All/Decisions/Errors/Verification/CheckpointsとUTC期間を選び、0件時にfilter解除とempty説明を表示する | Approved | 非該当 |
+| `HIST-F-048` | timelineはpage単位で読み込む | 1page最大200 eventを取得し、100,000 eventのworkspaceで初回query p95 200ms以下、次page p95 200ms以下になる | Approved | 非該当 |
+| `HIST-F-049` | 利用者はworkspace historyを削除できる | 実行中turnがない対象で確認するとapp DB/artifactだけを削除し、Git repository、commit、branchを変更しない | Approved | 非該当 |
+| `HIST-F-050` | 利用者は履歴削除をcancelできる | confirmation cancel時にrow/artifact数が変わらず、workspace selectionとfilterを維持する | Approved | 非該当 |
+| `HIST-F-051` | empty historyは次の操作を示す | eventが0件なら「最初のturnを開始」「project診断を確認」を表示し、空のtable/card gridを表示しない | Approved | 非該当 |
 
 ### Migration・破損・監査
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `HIST-F-052` | schema migrationはtransactionで適用される | N-1 fixtureを起動するとbackupを作成してNへ移行し、途中failure fixtureでは元DBが開ける状態で残る | Draft | 非該当 |
-| `HIST-F-053` | DB破損は他データを黙って削除しない | integrity check failureでread-only recovery modeとbackup path、error codeを表示し、自動初期化で既存DBを上書きしない | Draft | 非該当 |
-| `HIST-F-054` | writerは一つのtransaction queueで順序を保つ | 1,000 event concurrent input testでsequence重複・欠番・partial payloadが0件になる | Draft | 非該当 |
-| `HIST-F-055` | appはevent schema versionを保持する | 各eventにinteger versionがあり、unknown future versionをraw表示せずUnsupported event placeholderとdiagnosticへ隔離する | Draft | 非該当 |
-| `HIST-F-056` | appはsupport利用を透明に記録する | support invocationごとにrole、trigger、model family、token usage、latency、statusを記録し、prompt/response本文を記録しない | Draft | 非該当 |
-| `HIST-F-057` | event表示時刻はlocaleへ適応する | 保存UTC値をja/en localeで表示し、timezone変更後も同一instantとsequenceを維持する | Draft | 非該当 |
+| `HIST-F-052` | schema migrationはtransactionで適用される | N-1 fixtureを起動するとbackupを作成してNへ移行し、途中failure fixtureでは元DBが開ける状態で残る | Approved | 非該当 |
+| `HIST-F-053` | DB破損は他データを黙って削除しない | integrity check failureでread-only recovery modeとbackup path、error codeを表示し、自動初期化で既存DBを上書きしない | Approved | 非該当 |
+| `HIST-F-054` | writerは一つのtransaction queueで順序を保つ | 1,000 event concurrent input testでsequence重複・欠番・partial payloadが0件になる | Approved | 非該当 |
+| `HIST-F-055` | appはevent schema versionを保持する | 各eventにinteger versionがあり、unknown future versionをraw表示せずUnsupported event placeholderとdiagnosticへ隔離する | Approved | 非該当 |
+| `HIST-F-056` | appはsupport利用を透明に記録する | support invocationごとにrole、trigger、model family、token usage、latency、statusを記録し、prompt/response本文を記録しない | Approved | 非該当 |
+| `HIST-F-057` | event表示時刻はlocaleへ適応する | 保存UTC値をja/en localeで表示し、timezone変更後も同一instantとsequenceを維持する | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -127,10 +127,10 @@ read_when:
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-001` | セッションダッシュボード | `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | 変更 | 次工程: `docs/screen-design/S-001_session-dashboard.md` |
-| `S-002` | コーディングワークスペース | `HIST-F-037`〜`HIST-F-048`, `HIST-F-057` | 変更 | 次工程: `docs/screen-design/S-002_coding-workspace.md` |
-| `S-003` | セッション証拠 | `HIST-F-038`, `HIST-F-044`〜`HIST-F-051`, `HIST-F-057` | 変更 | 次工程: `docs/screen-design/S-003_session-evidence.md` |
-| `S-004` | 設定・診断 | `HIST-F-049`〜`HIST-F-056` | 変更 | 次工程: `docs/screen-design/S-004_settings-diagnostics.md` |
+| `S-001` | セッションダッシュボード | `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
+| `S-002` | コーディングワークスペース | `HIST-F-037`〜`HIST-F-048`, `HIST-F-057` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-003` | セッション証拠 | `HIST-F-038`, `HIST-F-044`〜`HIST-F-051`, `HIST-F-057` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
+| `S-004` | 設定・診断 | `HIST-F-049`〜`HIST-F-056` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
 
@@ -138,7 +138,7 @@ read_when:
 |---|---|
 | セキュリティ | schema validationとredactionをwrite前に行い、SQL parameter bindingを使う |
 | 権限 | DB/artifact/recovery backupをapp-private directoryへ限定する |
-| プライバシー | local-only、raw reasoning/secret/audio/support本文非保存、workspace単位削除を提供する |
+| プライバシー | local-only、raw reasoning/secret/audio/support本文非保存、canonical project rootは目的限定linkageだけに保存し、workspace単位削除を提供する |
 | 監査・ログ | event sequence、schema version、migration、deletion、corruption、support usage metadataを記録する |
 | 性能 | 100,000 eventでpage query p95 200ms、20,000 event rehydrate 3秒以下、1event 256KiB以下 |
 | 信頼性・復旧 | append-only、single writer、transaction migration、read-only recovery、no auto replay |
@@ -151,7 +151,7 @@ read_when:
 |---|---|---|---|
 | SQLite | app-private local database、single writer | 解決済み（採用決定） | 非該当 |
 | DomainEvent | CODE/GIT/WORK/LIVE/SUP/NARRのversioned normalized event | 解決済み（境界決定） | schema不正は隔離 |
-| APP | lifecycle、locale、app-private path | 解決済み（同時Draft） | 独立レビューで整合確認 |
+| APP | lifecycle、locale、app-private path | 解決済み（相互参照確認済み） | 独立レビューで整合確認 |
 
 ## 未確定事項
 
@@ -173,9 +173,9 @@ read_when:
 
 | 項目 | 内容 |
 |---|---|
-| レビュー結果 | Not Ready |
+| レビュー結果 | Ready |
 | 仕様責任者 | プロダクトオーナー |
-| 合意日 | 未合意 |
+| 合意日 | 2026-07-18 |
 | 残る非ブロック論点 | 自動retentionとexportはMVP非対象 |
 
 ## 着手可チェック
@@ -186,7 +186,7 @@ read_when:
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [ ] 画面IDと要件IDの相互参照が一致している。画面詳細仕様は次工程で作成する。
+- [x] 画面IDと要件IDの相互参照が一致し、承認済み画面詳細仕様を参照している。
 - [x] 非機能要件と依存関係を確認した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
-- [ ] 仕様責任者がレビューし、合意した。
+- [x] 仕様責任者がレビューし、合意した。
