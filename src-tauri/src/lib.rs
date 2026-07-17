@@ -1,3 +1,5 @@
+pub mod codex;
+
 use serde::{Deserialize, Serialize};
 
 const IPC_SCHEMA_VERSION: u16 = 1;
