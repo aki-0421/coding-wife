@@ -9,8 +9,8 @@
     "schemaVersion": 1,
     "runtime": "tauri",
     "appVersion": "0.1.0",
-    "platform": "fixture-os",
-    "architecture": "fixture-architecture",
+    "platform": "macos",
+    "architecture": "aarch64",
     "integrations": {
       "codex": "not_configured",
       "git": "not_configured",

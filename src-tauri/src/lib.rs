@@ -21,7 +21,7 @@ enum IntegrationReadiness {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct HealthCheckResponse {
     schema_version: u16,
     runtime: RuntimeKind,
@@ -29,6 +29,7 @@ struct HealthCheckResponse {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct IntegrationMetadata {
     codex: IntegrationReadiness,
     git: IntegrationReadiness,
@@ -37,7 +38,7 @@ struct IntegrationMetadata {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct RuntimeMetadata {
     schema_version: u16,
     runtime: RuntimeKind,
@@ -96,21 +97,24 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     const RUNTIME_CONTRACT_FIXTURE: &str =
         include_str!("../../src/test/fixtures/runtime-foundation.v1.json");
 
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct RuntimeContractFixture {
-        schema_version: u16,
-        health_check: HealthCheckResponse,
-        runtime_metadata: RuntimeMetadata,
-    }
-
-    fn contract_fixture() -> RuntimeContractFixture {
+    fn contract_fixture() -> Value {
         serde_json::from_str(RUNTIME_CONTRACT_FIXTURE)
             .expect("runtime contract fixture must deserialize")
+    }
+
+    fn fixture_response<'a>(fixture: &'a Value, key: &str) -> &'a Value {
+        fixture
+            .get(key)
+            .unwrap_or_else(|| panic!("fixture response {key} must exist"))
+    }
+
+    fn serialized_response(response: impl Serialize) -> Value {
+        serde_json::to_value(response).expect("command response must serialize")
     }
 
     #[test]
@@ -147,21 +151,42 @@ mod tests {
     #[test]
     fn serialized_responses_match_the_cross_language_fixture() {
         let fixture = contract_fixture();
-        let fixture_metadata = runtime_metadata(
-            fixture.runtime_metadata.app_version.clone(),
-            fixture.runtime_metadata.platform.clone(),
-            fixture.runtime_metadata.architecture.clone(),
-        );
 
-        assert_eq!(fixture.schema_version, IPC_SCHEMA_VERSION);
         assert_eq!(
-            serde_json::to_string(&health_check()).expect("health must serialize"),
-            serde_json::to_string(&fixture.health_check).expect("fixture health must serialize")
+            fixture.get("schemaVersion").and_then(Value::as_u64),
+            Some(u64::from(IPC_SCHEMA_VERSION))
         );
         assert_eq!(
-            serde_json::to_string(&fixture_metadata).expect("metadata must serialize"),
-            serde_json::to_string(&fixture.runtime_metadata)
-                .expect("fixture metadata must serialize")
+            serialized_response(health_check()),
+            *fixture_response(&fixture, "healthCheck")
         );
+        assert_eq!(
+            serialized_response(get_runtime_metadata()),
+            *fixture_response(&fixture, "runtimeMetadata")
+        );
+    }
+
+    #[test]
+    fn exact_fixture_comparison_rejects_unknown_and_missing_fields() {
+        let fixture = contract_fixture();
+        let actual_metadata = serialized_response(get_runtime_metadata());
+        let mut fixture_with_unknown = fixture_response(&fixture, "runtimeMetadata").clone();
+        fixture_with_unknown
+            .as_object_mut()
+            .expect("fixture metadata must be an object")
+            .insert("unexpectedField".to_owned(), Value::Bool(true));
+
+        let mut actual_with_missing_field = actual_metadata.clone();
+        actual_with_missing_field
+            .as_object_mut()
+            .expect("serialized metadata must be an object")
+            .remove("schemaVersion");
+
+        assert_ne!(actual_metadata, fixture_with_unknown);
+        assert_ne!(
+            actual_with_missing_field,
+            *fixture_response(&fixture, "runtimeMetadata")
+        );
+        assert!(serde_json::from_value::<RuntimeMetadata>(fixture_with_unknown).is_err());
     }
 }

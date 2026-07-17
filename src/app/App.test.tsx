@@ -86,6 +86,14 @@ class ScriptedDemoTransport implements AppTransport {
     health_check: 0,
     get_runtime_metadata: 0,
   }
+  readonly activeRequestCounts = {
+    health_check: 0,
+    get_runtime_metadata: 0,
+  }
+  readonly maximumActiveRequestCounts = {
+    health_check: 0,
+    get_runtime_metadata: 0,
+  }
 
   constructor(
     private readonly healthResponses: ResponseFactory<HealthCheckResponse>[],
@@ -97,7 +105,6 @@ class ScriptedDemoTransport implements AppTransport {
     payload: IpcRequestMap[K],
   ): Promise<IpcResponseMap[K]> {
     void payload
-    this.requestCounts[command] += 1
 
     const factory =
       command === ipcCommands.healthCheck
@@ -108,7 +115,17 @@ class ScriptedDemoTransport implements AppTransport {
       return Promise.reject(new Error("No scripted response"))
     }
 
-    return factory() as Promise<IpcResponseMap[K]>
+    this.requestCounts[command] += 1
+    this.activeRequestCounts[command] += 1
+    this.maximumActiveRequestCounts[command] = Math.max(
+      this.maximumActiveRequestCounts[command],
+      this.activeRequestCounts[command],
+    )
+
+    const response = factory() as Promise<IpcResponseMap[K]>
+    return response.finally(() => {
+      this.activeRequestCounts[command] -= 1
+    })
   }
 }
 
@@ -252,6 +269,42 @@ describe("App foundation shell", () => {
       healthRetry.resolve(demoHealth)
       metadataRetry.resolve(demoMetadata)
       await Promise.all([healthRetry.promise, metadataRetry.promise])
+    })
+
+    expect(await screen.findByText("ready")).toBeVisible()
+  })
+
+  it("coalesces a pending sibling command across repeated retries", async () => {
+    const pendingMetadata = createDeferred<RuntimeMetadata>()
+    const transport = new ScriptedDemoTransport(
+      [
+        () => Promise.reject(new IpcBoundaryError(unavailableError)),
+        () => Promise.resolve(demoHealth),
+      ],
+      [() => pendingMetadata.promise],
+    )
+
+    render(
+      <RuntimeProvider transport={transport}>
+        <DuplicateRefreshProbe />
+      </RuntimeProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry twice" }))
+
+    expect(screen.getByText("loading")).toBeVisible()
+    expect(transport.requestCounts).toEqual({
+      health_check: 2,
+      get_runtime_metadata: 1,
+    })
+    expect(transport.maximumActiveRequestCounts).toEqual({
+      health_check: 1,
+      get_runtime_metadata: 1,
+    })
+
+    await act(async () => {
+      pendingMetadata.resolve(demoMetadata)
+      await pendingMetadata.promise
     })
 
     expect(await screen.findByText("ready")).toBeVisible()

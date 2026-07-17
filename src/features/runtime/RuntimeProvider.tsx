@@ -28,6 +28,12 @@ interface InFlightRequest {
   readonly promise: Promise<ReadyRuntime>
 }
 
+interface InFlightCommands {
+  transport: AppTransport | null
+  health: Promise<HealthCheckResponse> | null
+  metadata: Promise<RuntimeMetadata> | null
+}
+
 export type RuntimeState =
   | { readonly status: "loading" }
   | ({ readonly status: "ready" } & ReadyRuntime)
@@ -38,10 +44,76 @@ export interface RuntimeProviderProps {
   readonly transport: AppTransport
 }
 
-async function requestRuntime(transport: AppTransport): Promise<ReadyRuntime> {
+function alignCommandCache(
+  commands: InFlightCommands,
+  transport: AppTransport,
+): void {
+  if (commands.transport !== transport) {
+    commands.transport = transport
+    commands.health = null
+    commands.metadata = null
+  }
+}
+
+function requestHealth(
+  commands: InFlightCommands,
+  transport: AppTransport,
+): Promise<HealthCheckResponse> {
+  alignCommandCache(commands, transport)
+  if (commands.health !== null) {
+    return commands.health
+  }
+
+  const request = transport.request(ipcCommands.healthCheck, undefined)
+  commands.health = request
+  void request.then(
+    () => {
+      if (commands.transport === transport && commands.health === request) {
+        commands.health = null
+      }
+    },
+    () => {
+      if (commands.transport === transport && commands.health === request) {
+        commands.health = null
+      }
+    },
+  )
+  return request
+}
+
+function requestMetadata(
+  commands: InFlightCommands,
+  transport: AppTransport,
+): Promise<RuntimeMetadata> {
+  alignCommandCache(commands, transport)
+  if (commands.metadata !== null) {
+    return commands.metadata
+  }
+
+  const request = transport.request(ipcCommands.getRuntimeMetadata, undefined)
+  commands.metadata = request
+  void request.then(
+    () => {
+      if (commands.transport === transport && commands.metadata === request) {
+        commands.metadata = null
+      }
+    },
+    () => {
+      if (commands.transport === transport && commands.metadata === request) {
+        commands.metadata = null
+      }
+    },
+  )
+  return request
+}
+
+async function requestRuntime(
+  transport: AppTransport,
+  commands: InFlightCommands,
+): Promise<ReadyRuntime> {
   const [health, metadata] = await Promise.all([
-    transport.request(ipcCommands.healthCheck, undefined),
-    transport.request(ipcCommands.getRuntimeMetadata, undefined),
+    requestHealth(commands, transport),
+    requestMetadata(commands, transport),
   ])
 
   validateRuntimeResponses(transport.kind, health, metadata)
@@ -52,6 +124,11 @@ export function RuntimeProvider({ children, transport }: RuntimeProviderProps) {
   const [requestVersion, setRequestVersion] = useState(0)
   const [state, setState] = useState<RuntimeState>({ status: "loading" })
   const inFlightRequest = useRef<InFlightRequest | null>(null)
+  const inFlightCommands = useRef<InFlightCommands>({
+    transport: null,
+    health: null,
+    metadata: null,
+  })
   const refreshQueued = useRef(false)
 
   const refresh = useCallback(() => {
@@ -72,7 +149,7 @@ export function RuntimeProvider({ children, transport }: RuntimeProviderProps) {
     if (request === null || request.transport !== transport) {
       request = {
         transport,
-        promise: requestRuntime(transport),
+        promise: requestRuntime(transport, inFlightCommands.current),
       }
       inFlightRequest.current = request
     }
