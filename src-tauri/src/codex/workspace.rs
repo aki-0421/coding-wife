@@ -270,6 +270,7 @@ pub async fn validate_git_repository(
     let git_directory = if marker_metadata.is_dir() {
         marker
     } else if marker_metadata.is_file() {
+        validate_private_regular_file(&marker_metadata)?;
         resolve_worktree_gitdir(&canonical, &marker).await?
     } else {
         return Err(workspace_error("CODEX-WORKSPACE-NOT-GIT", false));
@@ -280,9 +281,40 @@ pub async fn validate_git_repository(
     if !head.is_file() || head.file_type().is_symlink() {
         return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
     }
+    validate_private_regular_file(&head)?;
     validate_repository_ownership(&canonical, &git_directory).await?;
     validate_git_root_closure(&canonical, &git_directory).await?;
     repository_identity(canonical, git_directory).await
+}
+
+fn validate_private_regular_file(metadata: &std::fs::Metadata) -> Result<(), CodexCommandError> {
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let uid = unsafe { libc::geteuid() };
+        if metadata.uid() != uid && metadata.uid() != 0 {
+            return Err(workspace_error("CODEX-WORKSPACE-OWNER-MISMATCH", false));
+        }
+        let mode = metadata.permissions().mode();
+        if mode & 0o022 != 0 {
+            return Err(workspace_error("CODEX-WORKSPACE-WRITABLE-POLICY", false));
+        }
+        if mode & 0o200 == 0 {
+            return Err(workspace_error("CODEX-WORKSPACE-READ-ONLY", false));
+        }
+    }
+
+    #[cfg(not(unix))]
+    if metadata.permissions().readonly() {
+        return Err(workspace_error("CODEX-WORKSPACE-READ-ONLY", false));
+    }
+
+    Ok(())
 }
 
 async fn resolve_worktree_gitdir(root: &Path, marker: &Path) -> Result<PathBuf, CodexCommandError> {
@@ -784,5 +816,61 @@ mod tests {
             .expect("restore permissions");
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(git_dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn group_writable_git_marker_file_is_rejected() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("coding-wife-worktree-{}", uuid::Uuid::new_v4()));
+        let git_dir =
+            std::env::temp_dir().join(format!("coding-wife-gitdir-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("worktree root");
+        let status = std::process::Command::new("/usr/bin/git")
+            .arg("init")
+            .arg("-q")
+            .arg("-b")
+            .arg("main")
+            .arg("--separate-git-dir")
+            .arg(&git_dir)
+            .arg(&root)
+            .status()
+            .expect("separate git directory");
+        assert!(status.success());
+        let marker = root.join(".git");
+        fs::set_permissions(&marker, fs::Permissions::from_mode(0o666))
+            .expect("unsafe marker permissions");
+
+        let error = validate_git_repository(&root)
+            .await
+            .expect_err("unsafe marker file");
+        assert_eq!(error.code, "CODEX-WORKSPACE-WRITABLE-POLICY");
+
+        fs::set_permissions(&marker, fs::Permissions::from_mode(0o600))
+            .expect("restore marker permissions");
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(git_dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn group_writable_head_file_is_rejected() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = git_repository();
+        let head = root.join(".git/HEAD");
+        fs::set_permissions(&head, fs::Permissions::from_mode(0o666))
+            .expect("unsafe HEAD permissions");
+
+        let error = validate_git_repository(&root)
+            .await
+            .expect_err("unsafe HEAD file");
+        assert_eq!(error.code, "CODEX-WORKSPACE-WRITABLE-POLICY");
+
+        fs::set_permissions(&head, fs::Permissions::from_mode(0o600))
+            .expect("restore HEAD permissions");
+        let _ = fs::remove_dir_all(root);
     }
 }
