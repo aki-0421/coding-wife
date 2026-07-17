@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "state": {
+    "schemaVersion": 1,
+    "history": {
+      "schemaVersion": 1,
+      "mode": "ready",
+      "errorCode": null,
+      "backupName": null
+    },
+    "workspaces": [
+      {
+        "schemaVersion": 1,
+        "workspaceId": "workspace-fixture",
+        "projectId": "project-fixture",
+        "repository": "fixture-repository",
+        "name": "Fixture workspace",
+        "branch": "main",
+        "head": "0123456789ab",
+        "detached": false,
+        "lifecycle": "in_progress",
+        "attention": "test_failed",
+        "health": "ready",
+        "createdAt": "2026-07-18T00:00:00.000Z",
+        "updatedAt": "2026-07-18T00:01:00.000Z",
+        "lastSelectedAt": "2026-07-18T00:01:00.000Z"
+      }
+    ],
+    "activeWorkspaceId": "workspace-fixture",
+    "draft": {
+      "schemaVersion": 1,
+      "workspaceId": "workspace-fixture",
+      "text": "Verify the persisted workspace.",
+      "effort": "max",
+      "revision": 2,
+      "updatedAt": "2026-07-18T00:01:00.000Z"
+    },
+    "contextSnapshots": [
+      {
+        "schemaVersion": 1,
+        "snapshotId": "context-fixture",
+        "workspaceId": "workspace-fixture",
+        "source": "git_diff",
+        "label": "Working tree diff",
+        "capturedAt": "2026-07-18T00:00:30.000Z",
+        "byteCount": 42,
+        "contentHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    ],
+    "timeline": {
+      "schemaVersion": 1,
+      "items": [
+        {
+          "schemaVersion": 1,
+          "eventId": "event-fixture",
+          "workspaceId": "workspace-fixture",
+          "sessionId": "session-fixture",
+          "sequence": 7,
+          "producer": "code",
+          "kind": "code.session.status.changed",
+          "occurredAt": "2026-07-18T00:00:45.000Z",
+          "payload": {
+            "status": "failed"
+          }
+        }
+      ],
+      "nextBeforeSequence": null
+    }
+  },
+  "summary": {
+    "schemaVersion": 1,
+    "workspaceId": "workspace-fixture",
+    "projectId": "project-fixture",
+    "repository": "fixture-repository",
+    "name": "Fixture workspace",
+    "branch": "main",
+    "head": "0123456789ab",
+    "detached": false,
+    "lifecycle": "in_progress",
+    "attention": "test_failed",
+    "health": "ready",
+    "createdAt": "2026-07-18T00:00:00.000Z",
+    "updatedAt": "2026-07-18T00:01:00.000Z",
+    "lastSelectedAt": "2026-07-18T00:01:00.000Z"
+  },
+  "draft": {
+    "schemaVersion": 1,
+    "workspaceId": "workspace-fixture",
+    "text": "Verify the persisted workspace.",
+    "effort": "max",
+    "revision": 2,
+    "updatedAt": "2026-07-18T00:01:00.000Z"
+  },
+  "context": {
+    "schemaVersion": 1,
+    "snapshotId": "context-fixture",
+    "workspaceId": "workspace-fixture",
+    "source": "git_diff",
+    "label": "Working tree diff",
+    "capturedAt": "2026-07-18T00:00:30.000Z",
+    "byteCount": 42,
+    "contentHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "timeline": {
+    "schemaVersion": 1,
+    "items": [
+      {
+        "schemaVersion": 1,
+        "eventId": "event-fixture",
+        "workspaceId": "workspace-fixture",
+        "sessionId": "session-fixture",
+        "sequence": 7,
+        "producer": "code",
+        "kind": "code.session.status.changed",
+        "occurredAt": "2026-07-18T00:00:45.000Z",
+        "payload": {
+          "status": "failed"
+        }
+      }
+    ],
+    "nextBeforeSequence": null
+  },
+  "challenge": {
+    "schemaVersion": 1,
+    "workspaceId": "workspace-fixture",
+    "token": "delete-fixture",
+    "expiresAt": "2026-07-18T00:02:00.000Z"
+  },
+  "append": {
+    "schemaVersion": 1,
+    "sequence": 7,
+    "inserted": true
+  },
+  "error": {
+    "code": "WORKSPACE-NOT-FOUND",
+    "operation": "workspace_select",
+    "recoverable": false,
+    "userMessageKey": "workspace.error.generic"
+  }
+}

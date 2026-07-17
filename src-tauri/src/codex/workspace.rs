@@ -186,11 +186,13 @@ impl WorkspaceService {
             .trusted
             .lock()
             .await
-            .values()
-            .find(|record| record.root == candidate.git.canonical_root)
-            .map(|record| record.registration.clone())
+            .get(&candidate.registration.workspace_id)
+            .cloned()
         {
-            return Ok(existing);
+            if existing.root != candidate.git.canonical_root {
+                return Err(workspace_error("CODEX-WORKSPACE-IDENTITY-CHANGED", false));
+            }
+            return Ok(existing.registration);
         }
         let registration = candidate.registration;
         self.supervisor
@@ -439,15 +441,18 @@ async fn repository_identity(
     }
     let head_value = head_value.trim();
     let (branch, head, detached) = if let Some(reference) = head_value.strip_prefix("ref: ") {
+        if !is_safe_head_reference(reference) {
+            return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+        }
         let branch = reference
             .strip_prefix("refs/heads/")
-            .unwrap_or(reference)
+            .expect("validated head reference")
             .trim();
         if branch.is_empty() || branch.chars().count() > 240 || branch.chars().any(char::is_control)
         {
             return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
         }
-        let head = read_reference(&canonical_git_dir, reference).await?;
+        let head = read_head_object_id(&canonical_root).await?;
         (branch.to_owned(), head, false)
     } else {
         if !is_git_object_id(head_value) {
@@ -492,43 +497,52 @@ async fn repository_identity(
     })
 }
 
-async fn read_reference(
-    git_directory: &Path,
-    reference: &str,
-) -> Result<String, CodexCommandError> {
-    if reference.starts_with('/')
-        || reference.contains("..")
-        || reference.chars().any(char::is_control)
-    {
-        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
-    }
-    let loose = git_directory.join(reference);
-    if let Ok(value) = tokio::fs::read_to_string(&loose).await {
-        let value = value.trim();
-        if is_git_object_id(value) {
-            return Ok(value.chars().take(12).collect());
-        }
-        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
-    }
-    let packed = tokio::fs::read_to_string(git_directory.join("packed-refs"))
+async fn read_head_object_id(root: &Path) -> Result<String, CodexCommandError> {
+    let output = tokio::process::Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .env_clear()
+        .env("LC_ALL", "C")
+        .kill_on_drop(true)
+        .output()
         .await
-        .unwrap_or_default();
-    if packed.len() > 8 * 1_024 * 1_024 {
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-UNAVAILABLE", true))?;
+    if !output.status.success() {
+        if output.stdout.len() <= 128 && output.stderr.len() <= 4_096 {
+            return Ok("unborn".to_owned());
+        }
         return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
     }
-    for line in packed.lines() {
-        let Some((object_id, packed_reference)) = line.split_once(' ') else {
-            continue;
-        };
-        if packed_reference == reference && is_git_object_id(object_id) {
-            return Ok(object_id.chars().take(12).collect());
-        }
+    if output.stdout.len() > 128 || output.stderr.len() > 4_096 {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
     }
-    Ok("unborn".to_owned())
+    let value = String::from_utf8(output.stdout)
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    let value = value.trim();
+    if !is_git_object_id(value) {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+    }
+    Ok(value.chars().take(12).collect())
 }
 
 fn is_git_object_id(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.chars().all(|character| character.is_ascii_hexdigit())
+}
+
+fn is_safe_head_reference(value: &str) -> bool {
+    value.starts_with("refs/heads/")
+        && value.len() <= 251
+        && !value.contains("..")
+        && !value.contains("@{")
+        && !value.ends_with('.')
+        && !value.ends_with('/')
+        && !value
+            .chars()
+            .any(|character| character.is_control() || " ~^:?*[\\".contains(character))
+        && value.split('/').all(|component| {
+            !component.is_empty() && component != "." && !component.ends_with(".lock")
+        })
 }
 
 fn repository_alias(root: &Path) -> String {
@@ -658,6 +672,83 @@ mod tests {
 
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(git_dir);
+    }
+
+    #[tokio::test]
+    async fn linked_worktree_uses_the_resolved_gitdir_and_common_refs() {
+        let root = git_repository();
+        fs::write(root.join("README.md"), "fixture\n").expect("fixture file");
+        let add = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args(["add", "README.md"])
+            .status()
+            .expect("git add");
+        assert!(add.success());
+        let commit = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args([
+                "-c",
+                "user.name=Coding Wife Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "fixture",
+            ])
+            .status()
+            .expect("git commit");
+        assert!(commit.success());
+        let worktree = std::env::temp_dir().join(format!(
+            "coding-wife-linked-worktree-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let add_worktree = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args(["worktree", "add", "-q", "-b", "fixture-linked"])
+            .arg(&worktree)
+            .status()
+            .expect("git worktree add");
+        assert!(add_worktree.success());
+
+        let identity = validate_git_repository(&worktree)
+            .await
+            .expect("linked worktree identity");
+        let marker = fs::read_to_string(worktree.join(".git")).expect("worktree marker");
+        let raw_git_dir = marker.trim().trim_start_matches("gitdir: ");
+
+        assert_eq!(identity.branch, "fixture-linked");
+        assert_ne!(identity.head, "unborn");
+        assert_eq!(identity.head.len(), 12);
+        assert_eq!(
+            identity.canonical_git_dir,
+            fs::canonicalize(raw_git_dir).expect("canonical linked git directory")
+        );
+        let public = serde_json::to_string(&WorkspaceRegistration {
+            schema_version: WORKSPACE_REGISTRATION_SCHEMA_VERSION,
+            workspace_id: "workspace-linked-fixture".to_owned(),
+            alias: "Linked fixture".to_owned(),
+            preflight: WorkspacePreflight {
+                git_repository: true,
+                owned_by_current_user: true,
+                writable: true,
+            },
+        })
+        .expect("serialize public registration");
+        assert!(!public.contains(raw_git_dir));
+
+        let remove = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args(["worktree", "remove", "--force"])
+            .arg(&worktree)
+            .status()
+            .expect("git worktree remove");
+        assert!(remove.success());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

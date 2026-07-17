@@ -27,6 +27,7 @@ const CURRENT_DATABASE_VERSION: i64 = 1;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
 const MAX_TIMELINE_PAGE: u32 = 200;
+const MAX_WORKSPACES: i64 = 200;
 const DELETE_TOKEN_TTL: Duration = Duration::from_secs(60);
 
 const WORKSPACE_SELECT: &str = r#"
@@ -158,6 +159,13 @@ pub struct PersistedWorkspaceRegistration {
     pub duplicate: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct PersistedSessionWorkspace {
+    pub workspace: WorkspaceSummary,
+    pub private_record: AppPrivateWorkspaceRecord,
+    pub created: bool,
+}
+
 #[derive(Clone)]
 pub struct WorkspaceHistoryStore {
     inner: Arc<Mutex<StoreInner>>,
@@ -232,7 +240,6 @@ impl WorkspaceHistoryStore {
             .optional()
             .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?
         {
-            set_active_workspace(&transaction, &existing_id)?;
             let workspace = workspace_by_id(&transaction, &existing_id)?;
             let private_record = private_workspace_by_id(&transaction, &existing_id)?;
             transaction
@@ -244,6 +251,7 @@ impl WorkspaceHistoryStore {
                 duplicate: true,
             });
         }
+        ensure_workspace_capacity(&transaction)?;
 
         let now = now();
         let project_id = format!("project-{}", uuid::Uuid::new_v4());
@@ -276,7 +284,7 @@ impl WorkspaceHistoryStore {
                 "INSERT INTO workspaces (
                    id, project_id, name, goal, lifecycle, attention, health,
                    created_at, updated_at, last_selected_at
-                 ) VALUES (?1, ?2, ?3, '', 'backlog', NULL, 'ready', ?4, ?4, ?4)",
+                 ) VALUES (?1, ?2, ?3, '', 'backlog', NULL, 'ready', ?4, ?4, NULL)",
                 params![workspace_id, project_id, candidate.registration.alias, now],
             )
             .map_err(|_| history_error("HIST-WORKSPACE-INSERT", true))?;
@@ -294,7 +302,6 @@ impl WorkspaceHistoryStore {
                 params![workspace_id, now],
             )
             .map_err(|_| history_error("HIST-PREFERENCE-INSERT", true))?;
-        set_active_workspace(&transaction, &workspace_id)?;
         append_event_in_transaction(
             &transaction,
             &NormalizedDomainEvent {
@@ -347,6 +354,32 @@ impl WorkspaceHistoryStore {
                 params![workspace_id],
             )
             .map_err(|_| history_error("HIST-WORKSPACE-DELETE", true))?;
+        let active_workspace_id = transaction
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'active_workspace_id'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-SETTING-READ", true))?;
+        if active_workspace_id.as_deref() == Some(workspace_id) {
+            let fallback_workspace_id = transaction
+                .query_row(
+                    "SELECT id FROM workspaces
+                     ORDER BY last_selected_at DESC, updated_at DESC, id ASC LIMIT 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?;
+            if let Some(fallback_workspace_id) = fallback_workspace_id {
+                set_active_workspace(&transaction, &fallback_workspace_id)?;
+            } else {
+                transaction
+                    .execute("DELETE FROM settings WHERE key = 'active_workspace_id'", [])
+                    .map_err(|_| history_error("HIST-SETTING-WRITE", true))?;
+            }
+        }
         if let Some(project_id) = project_id {
             transaction
                 .execute(
@@ -388,13 +421,22 @@ impl WorkspaceHistoryStore {
             .map_err(|_| history_error("HIST-WORKSPACE-DECODE", false))
     }
 
+    pub fn private_workspace_record(
+        &self,
+        workspace_id: &str,
+    ) -> Result<AppPrivateWorkspaceRecord, WorkspaceHistoryError> {
+        validate_workspace_id(workspace_id)?;
+        let inner = self.lock();
+        private_workspace_by_id(&inner.connection, workspace_id)
+    }
+
     pub fn create_session_workspace(
         &self,
         from_workspace_id: &str,
         name: &str,
         goal: &str,
         client_request_id: &str,
-    ) -> Result<WorkspaceSummary, WorkspaceHistoryError> {
+    ) -> Result<PersistedSessionWorkspace, WorkspaceHistoryError> {
         validate_workspace_id(from_workspace_id)?;
         validate_client_request_id(client_request_id)?;
         let name = validate_workspace_name(name)?;
@@ -415,8 +457,15 @@ impl WorkspaceHistoryStore {
             .optional()
             .map_err(|_| history_error("HIST-SESSION-LOOKUP", true))?
         {
-            return workspace_by_id(&transaction, &existing_workspace_id);
+            let workspace = workspace_by_id(&transaction, &existing_workspace_id)?;
+            let private_record = private_workspace_by_id(&transaction, &existing_workspace_id)?;
+            return Ok(PersistedSessionWorkspace {
+                workspace,
+                private_record,
+                created: false,
+            });
         }
+        ensure_workspace_capacity(&transaction)?;
 
         let project_id = transaction
             .query_row(
@@ -435,7 +484,7 @@ impl WorkspaceHistoryStore {
                 "INSERT INTO workspaces (
                    id, project_id, name, goal, lifecycle, attention, health,
                    created_at, updated_at, last_selected_at
-                 ) VALUES (?1, ?2, ?3, ?4, 'backlog', NULL, 'ready', ?5, ?5, ?5)",
+                 ) VALUES (?1, ?2, ?3, ?4, 'backlog', NULL, 'ready', ?5, ?5, NULL)",
                 params![workspace_id, project_id, name, goal, now],
             )
             .map_err(|_| history_error("HIST-WORKSPACE-INSERT", true))?;
@@ -453,7 +502,6 @@ impl WorkspaceHistoryStore {
                 params![workspace_id, goal, now],
             )
             .map_err(|_| history_error("HIST-PREFERENCE-INSERT", true))?;
-        set_active_workspace(&transaction, &workspace_id)?;
         append_event_in_transaction(
             &transaction,
             &NormalizedDomainEvent {
@@ -469,10 +517,15 @@ impl WorkspaceHistoryStore {
             None,
         )?;
         let workspace = workspace_by_id(&transaction, &workspace_id)?;
+        let private_record = private_workspace_by_id(&transaction, &workspace_id)?;
         transaction
             .commit()
             .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
-        Ok(workspace)
+        Ok(PersistedSessionWorkspace {
+            workspace,
+            private_record,
+            created: true,
+        })
     }
 
     pub fn select_workspace(
@@ -787,7 +840,7 @@ impl WorkspaceHistoryStore {
         &self,
         workspace_id: &str,
         result: Result<&GitRepositoryIdentity, WorkspaceHealth>,
-    ) -> Result<(), WorkspaceHistoryError> {
+    ) -> Result<WorkspaceHealth, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
         self.ensure_writable("workspace.restore_preflight")?;
         let mut inner = self.lock();
@@ -805,7 +858,7 @@ impl WorkspaceHistoryStore {
             .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?
             .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
         let now = now();
-        match result {
+        let health = match result {
             Ok(git) => {
                 let prior_identity = transaction
                     .query_row(
@@ -819,32 +872,36 @@ impl WorkspaceHistoryStore {
                 } else {
                     WorkspaceHealth::Changed
                 };
-                transaction
-                    .execute(
-                        "UPDATE projects SET project_identity = ?1, root_device = ?2, root_inode = ?3,
-                           git_device = ?4, git_inode = ?5, branch = ?6, head = ?7, detached = ?8,
-                           health = ?9, updated_at = ?10 WHERE id = ?11",
-                        params![
-                            git.project_identity,
-                            git.root_device as i64,
-                            git.root_inode as i64,
-                            git.git_device as i64,
-                            git.git_inode as i64,
-                            git.branch,
-                            git.head,
-                            i64::from(git.detached),
-                            health.as_str(),
-                            now,
-                            project_id,
-                        ],
-                    )
-                    .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
+                if health == WorkspaceHealth::Ready {
+                    transaction
+                        .execute(
+                            "UPDATE projects SET branch = ?1, head = ?2, detached = ?3,
+                               health = ?4, updated_at = ?5 WHERE id = ?6",
+                            params![
+                                git.branch,
+                                git.head,
+                                i64::from(git.detached),
+                                health.as_str(),
+                                now,
+                                project_id,
+                            ],
+                        )
+                        .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
+                } else {
+                    transaction
+                        .execute(
+                            "UPDATE projects SET health = ?1, updated_at = ?2 WHERE id = ?3",
+                            params![health.as_str(), now, project_id],
+                        )
+                        .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
+                }
                 transaction
                     .execute(
                         "UPDATE workspaces SET health = ?1, updated_at = ?2 WHERE project_id = ?3",
                         params![health.as_str(), now, project_id],
                     )
                     .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
+                health
             }
             Err(health) => {
                 transaction
@@ -859,11 +916,13 @@ impl WorkspaceHistoryStore {
                         params![health.as_str(), now, project_id],
                     )
                     .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
+                health
             }
-        }
+        };
         transaction
             .commit()
-            .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))
+            .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
+        Ok(health)
     }
 
     pub fn issue_delete_challenge(
@@ -871,6 +930,7 @@ impl WorkspaceHistoryStore {
         workspace_id: &str,
     ) -> Result<DeleteChallenge, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
+        self.ensure_writable("workspace.delete.challenge")?;
         {
             let inner = self.lock();
             workspace_by_id(&inner.connection, workspace_id)?;
@@ -1055,6 +1115,18 @@ fn set_active_workspace(
     Ok(())
 }
 
+fn ensure_workspace_capacity(transaction: &Transaction<'_>) -> Result<(), WorkspaceHistoryError> {
+    let count = transaction
+        .query_row("SELECT COUNT(*) FROM workspaces", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|_| history_error("HIST-WORKSPACE-COUNT", true))?;
+    if count >= MAX_WORKSPACES {
+        return Err(history_error("WORKSPACE-LIMIT", false));
+    }
+    Ok(())
+}
+
 fn append_event_in_transaction(
     transaction: &Transaction<'_>,
     event: &NormalizedDomainEvent,
@@ -1141,7 +1213,30 @@ fn validate_event_shape(
                 .keys()
                 .all(|key| required.contains(&key.as_str()) || optional.contains(&key.as_str()))
     };
+    let optional_public_string = |key: &str| {
+        object.get(key).is_none_or(|value| {
+            value.as_str().is_some_and(|value| {
+                !value.trim().is_empty()
+                    && value.chars().count() <= 128
+                    && !value.chars().any(char::is_control)
+            })
+        })
+    };
     match (producer, kind) {
+        ("app", "app.runtime.changed") => {
+            if !exact(&["mode", "state"], &[])
+                || !matches!(
+                    object.get("mode").and_then(Value::as_str),
+                    Some("tauri" | "demo")
+                )
+                || !matches!(
+                    object.get("state").and_then(Value::as_str),
+                    Some("ready" | "demo_only" | "unavailable")
+                )
+            {
+                return Err(history_error("HIST-EVENT-PAYLOAD", false));
+            }
+        }
         ("work", "work.workspace.lifecycle.changed") => {
             if !exact(&["lifecycle"], &[])
                 || !matches!(
@@ -1162,12 +1257,24 @@ fn validate_event_shape(
                 return Err(history_error("HIST-EVENT-PAYLOAD", false));
             }
         }
+        ("live", "live.renderer.status.changed") => {
+            if !exact(&["level"], &["errorCode"])
+                || !matches!(
+                    object.get("level").and_then(Value::as_str),
+                    Some("animated" | "reduced" | "static" | "text_only")
+                )
+                || !optional_public_string("errorCode")
+            {
+                return Err(history_error("HIST-EVENT-PAYLOAD", false));
+            }
+        }
         ("hist", "hist.writer.status.changed") => {
             if !exact(&["status"], &["errorCode"])
                 || !matches!(
                     object.get("status").and_then(Value::as_str),
                     Some("ready" | "read_only" | "blocked")
                 )
+                || !optional_public_string("errorCode")
             {
                 return Err(history_error("HIST-EVENT-PAYLOAD", false));
             }
@@ -1178,6 +1285,7 @@ fn validate_event_shape(
                     object.get("status").and_then(Value::as_str),
                     Some("pending" | "blocked" | "review_ready" | "failed")
                 )
+                || !optional_public_string("checkpointId")
             {
                 return Err(history_error("HIST-EVENT-PAYLOAD", false));
             }
@@ -1634,6 +1742,9 @@ mod tests {
         assert!(second.duplicate);
         assert_eq!(first.workspace.workspace_id, second.workspace.workspace_id);
         assert_eq!(store.private_workspace_records().expect("records").len(), 1);
+        store
+            .select_workspace(&first.workspace.workspace_id)
+            .expect("select registered workspace");
         assert_eq!(
             store.snapshot(None).expect("snapshot").active_workspace_id,
             Some(first.workspace.workspace_id)
@@ -1676,7 +1787,7 @@ mod tests {
         assert_eq!(draft.text, "first draft");
         assert_eq!(
             store
-                .snapshot(Some(&second.workspace_id))
+                .snapshot(Some(&second.workspace.workspace_id))
                 .expect("second snapshot")
                 .draft
                 .unwrap()
@@ -1694,10 +1805,16 @@ mod tests {
             )
             .expect("redacted context");
         assert!(context.byte_count > 0);
-        let database = fs::read(data.join(DATABASE_FILE_NAME)).expect("database bytes");
-        let database_text = String::from_utf8_lossy(&database);
-        assert!(!database_text.contains("hidden-token"));
-        assert!(!database_text.contains("/Users/private"));
+        for entry in fs::read_dir(&data).expect("history directory") {
+            let path = entry.expect("history file").path();
+            if !path.is_file() {
+                continue;
+            }
+            let bytes = fs::read(path).expect("history bytes");
+            let text = String::from_utf8_lossy(&bytes);
+            assert!(!text.contains("hidden-token"));
+            assert!(!text.contains("/Users/private"));
+        }
 
         let event = NormalizedDomainEvent {
             schema_version: 1,

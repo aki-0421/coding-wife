@@ -41,9 +41,13 @@ struct FixtureEnvironment {
 impl FixtureEnvironment {
     fn new(mode: &str) -> Self {
         let workspace = temporary_directory("workspace");
-        std::fs::create_dir_all(workspace.join(".git")).expect("workspace fixture directory");
-        std::fs::write(workspace.join(".git/HEAD"), "ref: refs/heads/main\n")
-            .expect("workspace git marker");
+        std::fs::create_dir_all(&workspace).expect("workspace fixture directory");
+        let git_init = std::process::Command::new("/usr/bin/git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(&workspace)
+            .status()
+            .expect("initialize fixture repository");
+        assert!(git_init.success(), "fixture repository must be valid Git");
         let state = temporary_directory("state");
         std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", mode);
         std::env::set_var("CODING_WIFE_CODEX_FAKE_STATE", &state);

@@ -2,14 +2,22 @@ pub mod codex;
 pub mod workspace_history;
 
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 use codex::commands::{
-    codex_connect, codex_get_diagnostic, codex_pick_workspace, codex_probe, codex_respond_pending,
-    codex_review_start, codex_thread_list, codex_thread_resume, codex_thread_start,
-    codex_turn_interrupt, codex_turn_start,
+    codex_answer_fallback_decision, codex_connect, codex_get_diagnostic, codex_pick_workspace,
+    codex_probe, codex_respond_pending, codex_review_start, codex_thread_list, codex_thread_resume,
+    codex_thread_start, codex_turn_interrupt, codex_turn_start,
 };
 use codex::supervisor::CodexSupervisor;
 use codex::workspace::WorkspaceService;
+use workspace_history::commands::{
+    history_append_domain_event, workspace_create_session, workspace_delete,
+    workspace_issue_delete_challenge, workspace_list, workspace_list_timeline,
+    workspace_pick_register, workspace_save_context_snapshot, workspace_save_draft,
+    workspace_select, workspace_update_lifecycle,
+};
+use workspace_history::{WorkspaceHistoryService, WorkspaceHistoryStore};
 
 const IPC_SCHEMA_VERSION: u16 = 1;
 
@@ -103,12 +111,19 @@ pub fn run() {
     let setup_supervisor = supervisor.clone();
     let shutdown_supervisor = supervisor.clone();
     let workspace_service = WorkspaceService::production(supervisor.clone());
+    let setup_workspace_service = workspace_service.clone();
     let app = tauri::Builder::default()
         .manage(supervisor)
         .manage(workspace_service)
         .setup(move |app| {
             setup_supervisor.attach_app_handle(app.handle().clone());
             setup_supervisor.start_signal_loop();
+            let app_data_directory = app.path().app_data_dir()?;
+            let history_store = WorkspaceHistoryStore::open(app_data_directory)?;
+            let history_service =
+                WorkspaceHistoryService::new(history_store, setup_workspace_service.clone());
+            tauri::async_runtime::block_on(history_service.restore_startup());
+            app.manage(history_service);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -125,6 +140,18 @@ pub fn run() {
             codex_turn_interrupt,
             codex_review_start,
             codex_respond_pending,
+            codex_answer_fallback_decision,
+            workspace_list,
+            workspace_pick_register,
+            workspace_create_session,
+            workspace_select,
+            workspace_update_lifecycle,
+            workspace_save_draft,
+            workspace_save_context_snapshot,
+            workspace_list_timeline,
+            workspace_issue_delete_challenge,
+            workspace_delete,
+            history_append_domain_event,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the Coding Wife application");
