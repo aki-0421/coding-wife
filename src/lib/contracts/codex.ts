@@ -181,6 +181,7 @@ export interface ThreadListResponse {
 export interface ThreadResponse {
   readonly threadHandle: string
   readonly model: typeof codexModel
+  readonly generation: number
 }
 
 export interface TurnResponse {
@@ -674,13 +675,19 @@ export function parseThreadListResponse(value: unknown): ThreadListResponse {
 export function parseThreadResponse(value: unknown): ThreadResponse {
   if (
     !isRecord(value) ||
-    !exact(value, ["threadHandle", "model"]) ||
+    !exact(value, ["threadHandle", "model", "generation"]) ||
     !nonEmptyString(value.threadHandle) ||
-    value.model !== codexModel
+    value.model !== codexModel ||
+    !safeInteger(value.generation) ||
+    value.generation === 0
   ) {
     return violation()
   }
-  return { threadHandle: value.threadHandle, model: codexModel }
+  return {
+    threadHandle: value.threadHandle,
+    model: codexModel,
+    generation: value.generation,
+  }
 }
 
 export function parseTurnResponse(value: unknown): TurnResponse {

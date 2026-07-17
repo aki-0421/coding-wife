@@ -13,6 +13,27 @@ import fixture from "@/test/fixtures/codex-runtime.v1.json"
 const fixtureEvents = fixture.events.map(parseCodexEvent)
 
 describe("CodexSessionStore", () => {
+  it("rejects a future-generation event from a non-active workspace", () => {
+    const store = new CodexSessionStore()
+    const first = fixtureEvents[0]
+    if (first === undefined) throw new Error("fixture")
+    store.activateWorkspace("workspace-fixture")
+
+    expect(
+      store.apply({
+        ...first,
+        eventId: "event-other-workspace",
+        workspaceId: "workspace-other",
+        generation: first.generation + 1,
+      }),
+    ).toBe("workspace_mismatch")
+    expect(store.snapshot()).toMatchObject({
+      workspaceId: "workspace-fixture",
+      generation: null,
+      events: [],
+    })
+  })
+
   it("drops duplicates, stale generations, and out-of-order events", () => {
     const store = new CodexSessionStore()
     const first = fixtureEvents[0]

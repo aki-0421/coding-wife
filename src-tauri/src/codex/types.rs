@@ -306,6 +306,7 @@ pub struct ThreadListResponse {
 pub struct ThreadResponse {
     pub thread_handle: String,
     pub model: String,
+    pub generation: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

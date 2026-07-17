@@ -1,11 +1,15 @@
 import {
   codexCommands,
+  type CodexEvent,
   type CodexFallbackDecisionRequest,
   type CodexPendingResponseRequest,
 } from "@/lib/contracts"
 
 import type { CodexTransport } from "@/features/codex/transport"
-import { CodexSessionStore } from "@/features/codex/session-store"
+import {
+  CodexSessionStore,
+  type CodexEventApplyResult,
+} from "@/features/codex/session-store"
 
 export class CodexSessionClient {
   private unsubscribe: (() => void) | null = null
@@ -15,11 +19,15 @@ export class CodexSessionClient {
     readonly store = new CodexSessionStore(),
   ) {}
 
-  async start(onContractError: (error: Error) => void): Promise<void> {
+  async start(
+    onContractError: (error: Error) => void,
+    onEvent?: (event: CodexEvent, result: CodexEventApplyResult) => void,
+  ): Promise<void> {
     if (this.unsubscribe !== null) return
     this.unsubscribe = await this.transport.subscribe({
       onEvent: (event) => {
-        this.store.apply(event)
+        const result = this.store.apply(event)
+        onEvent?.(event, result)
       },
       onContractError,
     })

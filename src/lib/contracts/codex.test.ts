@@ -210,6 +210,9 @@ describe("Codex runtime contract", () => {
     expect(() =>
       parseThreadResponse({ ...fixture.thread, model: "gpt-5.6" }),
     ).toThrow(CodexContractError)
+    expect(() =>
+      parseThreadResponse({ ...fixture.thread, generation: 0 }),
+    ).toThrow(CodexContractError)
   })
 
   it("accepts a sanitized reroute target only as a violation event", () => {

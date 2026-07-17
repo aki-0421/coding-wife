@@ -737,6 +737,7 @@ impl CodexSupervisor {
         Ok(ThreadResponse {
             thread_handle: handle,
             model: super::types::CODEX_MODEL.to_owned(),
+            generation,
         })
     }
 

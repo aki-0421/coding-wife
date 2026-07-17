@@ -1,0 +1,105 @@
+import { describe, expect, it } from "vitest"
+
+import {
+  parseCodexDiagnostic,
+  parseCodexEvent,
+  type CodexDiagnostic,
+} from "@/lib/contracts"
+import fixture from "@/test/fixtures/codex-runtime.v1.json"
+
+import { CodexEventProjector } from "@/features/codex/event-projection"
+import { CodexSessionStore } from "@/features/codex/session-store"
+import {
+  CodexWorkspaceSessionStore,
+  evaluateCodexReadiness,
+} from "@/features/codex/workspace-session-store"
+
+const readyDiagnostic = parseCodexDiagnostic(fixture.diagnostic)
+
+describe("evaluateCodexReadiness", () => {
+  it("requires history, Sol, both efforts, account, and core capabilities", () => {
+    expect(evaluateCodexReadiness(readyDiagnostic, "ready")).toEqual({
+      ready: true,
+      fastAvailable: true,
+      maxAvailable: true,
+      reasonCode: null,
+    })
+    const withoutMax = {
+      ...readyDiagnostic,
+      maxAvailable: false,
+    } satisfies CodexDiagnostic
+    expect(evaluateCodexReadiness(withoutMax, "ready")).toMatchObject({
+      ready: false,
+      fastAvailable: true,
+      maxAvailable: false,
+      reasonCode: "CODEX-EFFORT-UNAVAILABLE",
+    })
+    expect(evaluateCodexReadiness(readyDiagnostic, "read_only")).toMatchObject({
+      ready: false,
+      reasonCode: "HIST-WRITER-NOT-READY",
+    })
+  })
+})
+
+describe("CodexWorkspaceSessionStore", () => {
+  it("keeps an active workspace and generation isolated while projecting events", () => {
+    const session = new CodexSessionStore()
+    const store = new CodexWorkspaceSessionStore()
+    const projector = new CodexEventProjector()
+    session.activateWorkspace("workspace-fixture")
+    store.beginActivation("workspace-fixture", "ready")
+    store.applyDiagnostic(readyDiagnostic)
+    store.markThreadReady("thread_handle_fixture", 7)
+
+    const current = parseCodexEvent(fixture.events[0])
+    expect(session.apply(current)).toBe("applied")
+    store.syncSession(session.snapshot())
+    const projection = projector.project(current)
+    if (projection.timeline === null) throw new Error("timeline fixture")
+    expect(store.applyTimeline(projection.timeline)).toBe(true)
+
+    const other = parseCodexEvent({
+      ...fixture.events[0],
+      eventId: "event-other",
+      workspaceId: "workspace-other",
+      generation: 8,
+    })
+    expect(session.apply(other)).toBe("workspace_mismatch")
+    const otherProjection = projector.project(other)
+    if (otherProjection.timeline === null) throw new Error("timeline fixture")
+    expect(store.applyTimeline(otherProjection.timeline)).toBe(false)
+    expect(store.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-fixture",
+      generation: 7,
+      phase: "running",
+      timeline: [{ workspaceId: "workspace-fixture" }],
+    })
+  })
+
+  it("lets a terminal event replace stopping without treating the ack as terminal", () => {
+    const session = new CodexSessionStore()
+    const store = new CodexWorkspaceSessionStore()
+    session.activateWorkspace("workspace-fixture")
+    store.beginActivation("workspace-fixture", "ready")
+    store.applyDiagnostic(readyDiagnostic)
+    store.markThreadReady("thread_handle_fixture", 7)
+
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    expect(session.apply(running)).toBe("applied")
+    store.syncSession(session.snapshot())
+    store.markStopping()
+    expect(store.snapshot().phase).toBe("stopping")
+
+    expect(
+      session.apply({
+        ...running,
+        eventId: "event-interrupted",
+        sequence: running.sequence + 1,
+        payload: { ...running.payload, status: "interrupted" },
+      }),
+    ).toBe("applied")
+    store.syncSession(session.snapshot())
+    expect(store.snapshot().phase).toBe("interrupted")
+  })
+})

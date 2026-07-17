@@ -35,6 +35,7 @@ const terminalTurnStatuses = new Set([
 ])
 
 export class CodexSessionStore {
+  private expectedWorkspaceId: string | null = null
   private workspaceId: string | null = null
   private generation: number | null = null
   private lastSequence = 0
@@ -74,7 +75,26 @@ export class CodexSessionStore {
     return () => this.listeners.delete(listener)
   }
 
+  activateWorkspace(workspaceId: string): void {
+    if (
+      workspaceId.trim().length === 0 ||
+      workspaceId.length > 128 ||
+      workspaceId.includes("\0")
+    ) {
+      throw new RangeError("workspaceId must be a bounded opaque identifier")
+    }
+    this.expectedWorkspaceId = workspaceId
+    this.resetForActivation(workspaceId)
+    this.notify()
+  }
+
   apply(event: CodexEvent): CodexEventApplyResult {
+    if (
+      this.expectedWorkspaceId !== null &&
+      event.workspaceId !== this.expectedWorkspaceId
+    ) {
+      return "workspace_mismatch"
+    }
     let result: CodexEventApplyResult = "applied"
     if (this.generation === null || event.generation > this.generation) {
       result = this.generation === null ? "applied" : "generation_advanced"
@@ -144,6 +164,20 @@ export class CodexSessionStore {
   private resetForGeneration(workspaceId: string, generation: number): void {
     this.workspaceId = workspaceId
     this.generation = generation
+    this.lastSequence = 0
+    this.turnStatus = "idle"
+    this.activeThreadHandle = null
+    this.activeTurnHandle = null
+    this.events = []
+    this.seenEventIds.clear()
+    this.pendingRequests.clear()
+    this.claimedPendingResponses.clear()
+    this.completedMessages.clear()
+  }
+
+  private resetForActivation(workspaceId: string): void {
+    this.workspaceId = workspaceId
+    this.generation = null
     this.lastSequence = 0
     this.turnStatus = "idle"
     this.activeThreadHandle = null

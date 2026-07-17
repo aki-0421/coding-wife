@@ -1,5 +1,15 @@
 export { CodexSessionClient } from "@/features/codex/client"
 export {
+  CodexEventProjector,
+  projectAcceptedUserTurn,
+  type AcceptedUserTurn,
+  type CodexEventProjection,
+  type CodexHistoryEvent,
+  type CodexHistoryEventKind,
+  type CodexSemanticKind,
+  type CodexSemanticTimelineEvent,
+} from "@/features/codex/event-projection"
+export {
   CodexSessionStore,
   type CodexEventApplyResult,
   type CodexSessionSnapshot,
@@ -23,3 +33,19 @@ export {
   type CodexWorkspaceSnapshot,
   type CodexWorkspaceStatus,
 } from "@/features/codex/workspace-store"
+export {
+  CodexWorkspaceSessionAdapter,
+  type ActivateCodexWorkspaceRequest,
+  type CodexHistorySink,
+  type CodexSessionClock,
+  type StartCodexTurnRequest,
+  type StartCodexTurnResult,
+} from "@/features/codex/workspace-session-adapter"
+export {
+  CodexWorkspaceSessionStore,
+  evaluateCodexReadiness,
+  type CodexHistoryMode,
+  type CodexReadiness,
+  type CodexWorkspacePhase,
+  type CodexWorkspaceSessionSnapshot,
+} from "@/features/codex/workspace-session-store"
