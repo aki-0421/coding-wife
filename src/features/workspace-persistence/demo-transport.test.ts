@@ -113,4 +113,24 @@ describe("DemoWorkspaceHistoryTransport", () => {
       label: "Working tree diff",
     })
   })
+
+  it("rejects terminal output without a trusted producer like native mode", async () => {
+    const transport = new DemoWorkspaceHistoryTransport()
+    const state = await transport.request(
+      workspaceHistoryCommands.list,
+      undefined,
+    )
+    if (state.activeWorkspaceId === null) throw new Error("demo fixture")
+
+    await expect(
+      transport.request(workspaceHistoryCommands.saveContextSnapshot, {
+        workspaceId: state.activeWorkspaceId,
+        source: "terminal_output",
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKSPACE-CONTEXT-SOURCE-UNAVAILABLE",
+      operation: workspaceHistoryCommands.saveContextSnapshot,
+      recoverable: true,
+    })
+  })
 })

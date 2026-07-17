@@ -14,6 +14,12 @@ const en = {
   branch: "Branch",
   active: "Active",
   noMatches: "No workspaces match this filter.",
+  loadingWorkspacesTitle: "Restoring workspace history",
+  loadingWorkspacesDescription:
+    "Checking local workspace records before enabling changes.",
+  workspaceLoadFailedTitle: "Workspace history could not be restored",
+  workspaceLoadFailedDescription:
+    "Demo data was not substituted. Retry the local history check to continue safely.",
   clearFilter: "Clear filter",
   lifecycle: {
     done: "Done",
@@ -306,6 +312,12 @@ const ja: typeof en = {
   branch: "ブランチ",
   active: "選択中",
   noMatches: "条件に一致するワークスペースはありません。",
+  loadingWorkspacesTitle: "ワークスペース履歴を復元中",
+  loadingWorkspacesDescription:
+    "変更を有効にする前にローカルのワークスペース記録を確認しています。",
+  workspaceLoadFailedTitle: "ワークスペース履歴を復元できませんでした",
+  workspaceLoadFailedDescription:
+    "デモデータへの置き換えは行っていません。安全に続行するにはローカル履歴を再確認してください。",
   clearFilter: "フィルターを解除",
   lifecycle: {
     done: "完了",

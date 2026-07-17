@@ -88,14 +88,18 @@ export function projectWorkspaceState(
 
 export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
   readonly connected = false
+  readonly hydrationMode: "native" | "demo"
   private readonly drafts = new Map<
     string,
     Pick<PersistedWorkspaceDraft, "text" | "effort" | "revision">
   >()
   private readonly draftQueues = new Map<string, Promise<void>>()
+  private readonly deletingWorkspaces = new Set<string>()
   private requestCounter = 0
 
-  constructor(private readonly transport: WorkspaceHistoryTransport) {}
+  constructor(private readonly transport: WorkspaceHistoryTransport) {
+    this.hydrationMode = transport.kind === "tauri" ? "native" : "demo"
+  }
 
   async loadState(): Promise<WorkspaceAdapterState> {
     return this.absorb(
@@ -142,6 +146,7 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
     text: string,
     effort: ReasoningEffort,
   ): Promise<void> {
+    if (this.deletingWorkspaces.has(workspaceId)) return
     const previousQueue = this.draftQueues.get(workspaceId) ?? Promise.resolve()
     const nextQueue = previousQueue
       .catch(() => undefined)
@@ -219,16 +224,28 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
   async deleteWorkspaceHistory(
     workspaceId: string,
   ): Promise<WorkspaceAdapterState> {
-    const challenge = await this.transport.request(
-      workspaceHistoryCommands.issueDeleteChallenge,
-      { workspaceId },
-    )
-    return this.absorb(
-      await this.transport.request(workspaceHistoryCommands.delete, {
-        workspaceId,
-        token: challenge.token,
-      }),
-    )
+    if (this.deletingWorkspaces.has(workspaceId)) {
+      throw new Error("WORKSPACE-DELETE-IN-PROGRESS")
+    }
+    this.deletingWorkspaces.add(workspaceId)
+    try {
+      await this.draftQueues.get(workspaceId)?.catch(() => undefined)
+      const challenge = await this.transport.request(
+        workspaceHistoryCommands.issueDeleteChallenge,
+        { workspaceId },
+      )
+      const state = this.absorb(
+        await this.transport.request(workspaceHistoryCommands.delete, {
+          workspaceId,
+          token: challenge.token,
+        }),
+      )
+      this.drafts.delete(workspaceId)
+      this.draftQueues.delete(workspaceId)
+      return state
+    } finally {
+      this.deletingWorkspaces.delete(workspaceId)
+    }
   }
 
   private absorb(state: WorkspaceStateSnapshot): WorkspaceAdapterState {

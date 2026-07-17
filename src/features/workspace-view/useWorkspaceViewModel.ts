@@ -35,6 +35,7 @@ function draftFor(
 }
 
 export type TurnUiState = "idle" | "sending" | "running" | "stopping"
+export type WorkspaceAdapterStatus = "loading" | "ready" | "error"
 
 export interface WorkspaceViewNotice {
   readonly tone: "neutral" | "error"
@@ -42,10 +43,13 @@ export interface WorkspaceViewNotice {
 }
 
 export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
-  const [workspaces, setWorkspaces] =
-    useState<readonly WorkspaceRecord[]>(initialWorkspaces)
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(
-    "build-live2d-desktop-app",
+  const nativeHydration =
+    adapter?.loadState !== undefined && adapter.hydrationMode !== "demo"
+  const [workspaces, setWorkspaces] = useState<readonly WorkspaceRecord[]>(
+    () => (nativeHydration ? [] : initialWorkspaces),
+  )
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(() =>
+    nativeHydration ? "" : "build-live2d-desktop-app",
   )
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat")
   const [settingsSection, setSettingsSection] =
@@ -56,7 +60,10 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   >({})
   const [turnState, setTurnState] = useState<TurnUiState>("idle")
   const [notice, setNotice] = useState<WorkspaceViewNotice | null>(null)
-  const [adapterReady, setAdapterReady] = useState(!adapter?.loadState)
+  const [adapterStatus, setAdapterStatus] = useState<WorkspaceAdapterStatus>(
+    nativeHydration ? "loading" : "ready",
+  )
+  const [adapterLoadAttempt, setAdapterLoadAttempt] = useState(0)
   const [timeline, setTimeline] = useState<readonly WorkspaceTimelineItem[]>([])
   const [history, setHistory] = useState<WorkspaceAdapterState["history"]>({
     mode: "ready",
@@ -71,6 +78,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   const selectionVersion = useRef(0)
   const pendingDraftSaves = useRef(new Map<string, PendingDraftSave>())
   const draftSaveTimers = useRef(new Map<string, number>())
+  const deletingWorkspaceIds = useRef(new Set<string>())
 
   const applyAdapterState = useCallback((state: WorkspaceAdapterState) => {
     setWorkspaces(state.workspaces)
@@ -103,27 +111,46 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   useEffect(() => {
     if (!adapter?.loadState) return
     let current = true
+    if (nativeHydration) {
+      queueMicrotask(() => {
+        if (!current) return
+        setAdapterStatus("loading")
+        setWorkspaces([])
+        setSelectedWorkspaceId("")
+        setDrafts({})
+        setTimeline([])
+        setNotice(null)
+      })
+    }
     void adapter
       .loadState()
       .then((state) => {
         if (current) {
           applyAdapterState(state)
-          setAdapterReady(true)
+          setAdapterStatus("ready")
         }
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (current) {
-          setNotice({
-            tone: "error",
-            message:
-              error instanceof Error ? error.message : "WORKSPACE-LOAD-FAILED",
-          })
+          if (nativeHydration) {
+            setWorkspaces([])
+            setSelectedWorkspaceId("")
+            setAdapterStatus("error")
+          } else {
+            setNotice({ tone: "error", message: "WORKSPACE-LOAD-FAILED" })
+          }
         }
       })
     return () => {
       current = false
     }
-  }, [adapter, applyAdapterState])
+  }, [adapter, adapterLoadAttempt, applyAdapterState, nativeHydration])
+
+  const retryAdapterLoad = useCallback(() => {
+    if (adapter?.loadState) setAdapterLoadAttempt((attempt) => attempt + 1)
+  }, [adapter])
+
+  const adapterReady = adapterStatus === "ready"
 
   const selectedWorkspace =
     workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ??
@@ -170,6 +197,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
           }
         })
         .catch((error: unknown) => {
+          if (deletingWorkspaceIds.current.has(workspaceId)) return
           setNotice({
             tone: "error",
             message:
@@ -214,25 +242,37 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
 
   const setDraftText = useCallback(
     (text: string) => {
-      if (!selectedWorkspace) return
+      if (!adapterReady || !selectedWorkspace) return
       updateDraft(selectedWorkspace.id, (current) => ({ ...current, text }))
       scheduleDraftSave(selectedWorkspace.id, text, selectedDraft.effort)
     },
-    [scheduleDraftSave, selectedDraft.effort, selectedWorkspace, updateDraft],
+    [
+      adapterReady,
+      scheduleDraftSave,
+      selectedDraft.effort,
+      selectedWorkspace,
+      updateDraft,
+    ],
   )
 
   const setEffort = useCallback(
     (effort: ReasoningEffort) => {
-      if (!selectedWorkspace) return
+      if (!adapterReady || !selectedWorkspace) return
       updateDraft(selectedWorkspace.id, (current) => ({ ...current, effort }))
       scheduleDraftSave(selectedWorkspace.id, selectedDraft.text, effort)
     },
-    [scheduleDraftSave, selectedDraft.text, selectedWorkspace, updateDraft],
+    [
+      adapterReady,
+      scheduleDraftSave,
+      selectedDraft.text,
+      selectedWorkspace,
+      updateDraft,
+    ],
   )
 
   const addAttachments = useCallback(
     (files: readonly File[]) => {
-      if (!selectedWorkspace) return
+      if (!adapterReady || !selectedWorkspace) return
       const additions: readonly AttachmentItem[] = files
         .slice(0, 10)
         .map((file, index) => ({
@@ -247,12 +287,12 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         attachments: [...current.attachments, ...additions].slice(0, 10),
       }))
     },
-    [selectedWorkspace, updateDraft],
+    [adapterReady, selectedWorkspace, updateDraft],
   )
 
   const removeAttachment = useCallback(
     (attachmentId: string) => {
-      if (!selectedWorkspace) return
+      if (!adapterReady || !selectedWorkspace) return
       updateDraft(selectedWorkspace.id, (current) => ({
         ...current,
         attachments: current.attachments.filter(
@@ -260,12 +300,12 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         ),
       }))
     },
-    [selectedWorkspace, updateDraft],
+    [adapterReady, selectedWorkspace, updateDraft],
   )
 
   const captureContext = useCallback(
     async (source: ContextSnapshotItem["source"], unavailableCopy: string) => {
-      if (!selectedWorkspace) return
+      if (!adapterReady || !selectedWorkspace) return
       if (!adapter?.captureContext) {
         setNotice({ tone: "neutral", message: unavailableCopy })
         return
@@ -278,22 +318,19 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         )
         updateDraft(selectedWorkspace.id, (current) => ({
           ...current,
-          contextSnapshots: [...current.contextSnapshots, snapshot].slice(
-            0,
-            10,
-          ),
+          contextSnapshots: [...current.contextSnapshots, snapshot].slice(-10),
         }))
         setNotice(null)
       } catch {
         setNotice({ tone: "error", message: unavailableCopy })
       }
     },
-    [adapter, selectedWorkspace, updateDraft],
+    [adapter, adapterReady, selectedWorkspace, updateDraft],
   )
 
   const removeContext = useCallback(
     (snapshotId: string) => {
-      if (!selectedWorkspace) return
+      if (!adapterReady || !selectedWorkspace) return
       updateDraft(selectedWorkspace.id, (current) => ({
         ...current,
         contextSnapshots: current.contextSnapshots.filter(
@@ -301,11 +338,11 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         ),
       }))
     },
-    [selectedWorkspace, updateDraft],
+    [adapterReady, selectedWorkspace, updateDraft],
   )
 
   const sendTurn = useCallback(async () => {
-    if (!selectedWorkspace || !adapter?.sendTurn) return false
+    if (!adapterReady || !selectedWorkspace || !adapter?.sendTurn) return false
     const draft = draftFor(drafts, selectedWorkspace.id)
     const request: SendTurnRequest = {
       workspaceId: selectedWorkspace.id,
@@ -337,10 +374,22 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
       setTurnState("idle")
       return false
     }
-  }, [adapter, drafts, scheduleDraftSave, selectedWorkspace, updateDraft])
+  }, [
+    adapter,
+    adapterReady,
+    drafts,
+    scheduleDraftSave,
+    selectedWorkspace,
+    updateDraft,
+  ])
 
   const stopTurn = useCallback(async () => {
-    if (!selectedWorkspace || !adapter?.stopTurn || turnState !== "running") {
+    if (
+      !adapterReady ||
+      !selectedWorkspace ||
+      !adapter?.stopTurn ||
+      turnState !== "running"
+    ) {
       return
     }
 
@@ -350,12 +399,12 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     } finally {
       setTurnState("idle")
     }
-  }, [adapter, selectedWorkspace, turnState])
+  }, [adapter, adapterReady, selectedWorkspace, turnState])
 
   const addWorkspace = useCallback(
     async (name: string, goal: string) => {
       const trimmedName = name.trim()
-      if (trimmedName.length === 0) return false
+      if (!adapterReady || trimmedName.length === 0) return false
       if (adapter?.requestAddWorkspace && selectedWorkspace) {
         try {
           const state = await adapter.requestAddWorkspace({
@@ -398,11 +447,12 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
       }))
       return true
     },
-    [adapter, applyAdapterState, selectedWorkspace],
+    [adapter, adapterReady, applyAdapterState, selectedWorkspace],
   )
 
   const requestAddProject = useCallback(
     async (unavailableCopy: string) => {
+      if (!adapterReady) return
       if (!adapter?.requestAddProject) {
         setNotice({ tone: "neutral", message: unavailableCopy })
         return
@@ -418,11 +468,12 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         })
       }
     },
-    [adapter, applyAdapterState],
+    [adapter, adapterReady, applyAdapterState],
   )
 
   const selectWorkspace = useCallback(
     (workspaceId: string) => {
+      if (!adapterReady) return
       selectionVersion.current += 1
       const version = selectionVersion.current
       const previousWorkspaceId = selectedWorkspaceId
@@ -446,29 +497,54 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
           }
         })
     },
-    [adapter, applyAdapterState, selectedWorkspaceId],
+    [adapter, adapterReady, applyAdapterState, selectedWorkspaceId],
   )
 
   const deleteSelectedWorkspaceHistory = useCallback(async () => {
-    if (!selectedWorkspace || !adapter?.deleteWorkspaceHistory) return false
+    if (
+      !adapterReady ||
+      !selectedWorkspace ||
+      !adapter?.deleteWorkspaceHistory
+    ) {
+      return false
+    }
+    const workspaceId = selectedWorkspace.id
+    const pendingDraft = pendingDraftSaves.current.get(workspaceId)
+    deletingWorkspaceIds.current.add(workspaceId)
+    pendingDraftSaves.current.delete(workspaceId)
+    const timer = draftSaveTimers.current.get(workspaceId)
+    if (timer !== undefined) window.clearTimeout(timer)
+    draftSaveTimers.current.delete(workspaceId)
     try {
-      const workspaceId = selectedWorkspace.id
       applyAdapterState(await adapter.deleteWorkspaceHistory(workspaceId))
-      pendingDraftSaves.current.delete(workspaceId)
-      const timer = draftSaveTimers.current.get(workspaceId)
-      if (timer !== undefined) window.clearTimeout(timer)
-      draftSaveTimers.current.delete(workspaceId)
+      setDrafts((current) => {
+        const next = { ...current }
+        delete next[workspaceId]
+        return next
+      })
       setNotice(null)
       return true
     } catch (error) {
+      deletingWorkspaceIds.current.delete(workspaceId)
+      if (pendingDraft !== undefined) {
+        scheduleDraftSave(workspaceId, pendingDraft.text, pendingDraft.effort)
+      }
       setNotice({
         tone: "error",
         message:
           error instanceof Error ? error.message : "WORKSPACE-DELETE-FAILED",
       })
       return false
+    } finally {
+      deletingWorkspaceIds.current.delete(workspaceId)
     }
-  }, [adapter, applyAdapterState, selectedWorkspace])
+  }, [
+    adapter,
+    adapterReady,
+    applyAdapterState,
+    scheduleDraftSave,
+    selectedWorkspace,
+  ])
 
   const resetUiState = useCallback(() => {
     setFilter("")
@@ -480,6 +556,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   return {
     activeTab,
     adapter,
+    adapterStatus,
     addAttachments,
     addWorkspace,
     captureContext,
@@ -494,6 +571,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     removeAttachment,
     removeContext,
     requestAddProject,
+    retryAdapterLoad,
     resetUiState,
     selectedDraft,
     selectedWorkspace,

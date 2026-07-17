@@ -9,6 +9,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Tooltip,
   TooltipContent,
@@ -149,6 +150,64 @@ export function WorkspaceShell({
 
   const setActiveTab = (value: string) => {
     if (isWorkspaceTab(value)) view.setActiveTab(value)
+  }
+
+  if (view.adapterStatus === "loading") {
+    return (
+      <main
+        aria-busy="true"
+        className="flex min-h-dvh w-full items-center justify-center bg-background p-xl"
+        data-workspace-hydration="loading"
+      >
+        <div
+          className="flex w-full max-w-lg flex-col gap-lg rounded-panel border border-divider bg-surface p-xl shadow-panel"
+          role="status"
+        >
+          <div className="flex flex-col gap-xs">
+            <span className="text-headline text-text-strong">
+              {copy.loadingWorkspacesTitle}
+            </span>
+            <span className="text-caption text-muted-foreground">
+              {copy.loadingWorkspacesDescription}
+            </span>
+          </div>
+          <Skeleton className="h-8 w-3/4" />
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-8 w-1/2" />
+        </div>
+      </main>
+    )
+  }
+
+  if (view.adapterStatus === "error") {
+    return (
+      <main
+        className="flex min-h-dvh w-full items-center justify-center bg-background p-xl"
+        data-workspace-hydration="error"
+      >
+        <div
+          className="flex w-full max-w-lg flex-col items-start gap-md rounded-panel border border-destructive/40 bg-surface p-xl shadow-panel"
+          role="alert"
+        >
+          <div className="flex flex-col gap-xs">
+            <span className="text-headline text-text-strong">
+              {copy.workspaceLoadFailedTitle}
+            </span>
+            <span className="text-caption text-muted-foreground">
+              {copy.workspaceLoadFailedDescription}
+            </span>
+          </div>
+          <Button
+            onClick={view.retryAdapterLoad}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            {copy.retry}
+          </Button>
+        </div>
+      </main>
+    )
   }
 
   if (!view.selectedWorkspace) {

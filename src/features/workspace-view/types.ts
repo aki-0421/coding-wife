@@ -96,6 +96,7 @@ export interface SendTurnRequest {
 
 export interface WorkspaceViewAdapter {
   readonly connected?: boolean
+  readonly hydrationMode?: "native" | "demo"
   readonly loadState?: () => Promise<WorkspaceAdapterState>
   readonly selectWorkspace?: (
     workspaceId: string,

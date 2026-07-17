@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -33,7 +34,103 @@ function renderWorkspace(adapter?: WorkspaceViewAdapter) {
   )
 }
 
+function nativeWorkspaceState(
+  contextSnapshots: NonNullable<
+    WorkspaceAdapterState["draft"]
+  >["contextSnapshots"] = [],
+): WorkspaceAdapterState {
+  return {
+    workspaces: [
+      {
+        id: "workspace-native",
+        repository: "native-repository",
+        name: "restored-workspace",
+        branch: "main",
+        lifecycle: "in_progress",
+      },
+    ],
+    activeWorkspaceId: "workspace-native",
+    draft: {
+      text: "",
+      effort: "fast",
+      revision: 0,
+      contextSnapshots,
+    },
+    timeline: [],
+    history: { mode: "ready", errorCode: null, backupName: null },
+  }
+}
+
 describe("WorkspaceShell", () => {
+  it("shows only a non-mutating skeleton while native history is pending", async () => {
+    let resolveState!: (state: WorkspaceAdapterState) => void
+    const requestAddProject = vi.fn()
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () =>
+        new Promise((resolve) => {
+          resolveState = resolve
+        }),
+      requestAddProject,
+    }
+
+    renderWorkspace(adapter)
+
+    expect(screen.getByText("Restoring workspace history")).toBeVisible()
+    expect(
+      screen.queryByText(/build-live2d-desktop-app/),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Add project" }),
+    ).not.toBeInTheDocument()
+    expect(requestAddProject).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveState(nativeWorkspaceState())
+      await Promise.resolve()
+    })
+    expect(
+      await screen.findByPlaceholderText(
+        "Ask Codex to plan, build, explain, or fix anything…",
+      ),
+    ).toBeVisible()
+  })
+
+  it("keeps native load failures separate from demo data and retries safely", async () => {
+    const requestAddProject = vi.fn()
+    const loadState = vi
+      .fn<() => Promise<WorkspaceAdapterState>>()
+      .mockRejectedValueOnce(new Error("/Users/private/history.sqlite3"))
+      .mockResolvedValueOnce(nativeWorkspaceState())
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState,
+      requestAddProject,
+    }
+
+    renderWorkspace(adapter)
+
+    expect(
+      await screen.findByText("Workspace history could not be restored"),
+    ).toBeVisible()
+    expect(screen.queryByText(/Users\/private/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/build-live2d-desktop-app/),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Add project" }),
+    ).not.toBeInTheDocument()
+    expect(requestAddProject).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(
+      await screen.findByPlaceholderText(
+        "Ask Codex to plan, build, explain, or fix anything…",
+      ),
+    ).toBeVisible()
+    expect(loadState).toHaveBeenCalledTimes(2)
+  })
+
   it("labels the workspace mark with the localized product name", () => {
     renderWorkspace()
 
@@ -233,6 +330,53 @@ describe("WorkspaceShell", () => {
     expect(
       await screen.findByRole("button", {
         name: "Remove attachment: Working tree diff",
+      }),
+    ).toBeVisible()
+  })
+
+  it("keeps the latest ten captured context items in the UI", async () => {
+    const contexts = Array.from({ length: 10 }, (_, index) => ({
+      id: `context-${String(index)}`,
+      source: "files" as const,
+      label: `Snapshot ${String(index)}`,
+      capturedAt: `2026-07-18T00:00:${String(index).padStart(2, "0")}.000Z`,
+      byteCount: index + 1,
+    }))
+    const captureContext = vi.fn().mockResolvedValue({
+      id: "context-new",
+      source: "git_diff" as const,
+      label: "Newest diff",
+      capturedAt: "2026-07-18T00:01:00.000Z",
+      byteCount: 42,
+    })
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState(contexts)),
+      captureContext,
+    }
+
+    renderWorkspace(adapter)
+    expect(
+      await screen.findByRole("button", {
+        name: "Remove attachment: Snapshot 0",
+      }),
+    ).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Context" }))
+    fireEvent.click(screen.getByRole("button", { name: "Git diff" }))
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Remove attachment: Newest diff",
+      }),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("button", {
+        name: "Remove attachment: Snapshot 0",
+      }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", {
+        name: "Remove attachment: Snapshot 1",
       }),
     ).toBeVisible()
   })

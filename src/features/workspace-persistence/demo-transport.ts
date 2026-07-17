@@ -366,12 +366,18 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       request.workspaceId,
       workspaceHistoryCommands.saveContextSnapshot,
     )
+    if (request.source === "terminal_output") {
+      throw this.error(
+        "WORKSPACE-CONTEXT-SOURCE-UNAVAILABLE",
+        workspaceHistoryCommands.saveContextSnapshot,
+        true,
+      )
+    }
     this.contextCounter += 1
     const digit = (this.contextCounter % 16).toString(16)
     const label = {
       files: "Repository files",
       git_diff: "Working tree diff",
-      terminal_output: "Terminal output",
     }[request.source]
     const snapshot: PersistedContextSnapshot = {
       schemaVersion: 1,

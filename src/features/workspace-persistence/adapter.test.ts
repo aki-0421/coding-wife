@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import {
   workspaceHistoryCommands,
@@ -127,5 +127,76 @@ describe("PersistentWorkspaceViewAdapter", () => {
       activeWorkspaceId: "workspace-fixture",
       draft: { text: "survives reload", effort: "max", revision: 3 },
     })
+  })
+
+  it("waits for an in-flight draft before deletion and purges the deleted cache", async () => {
+    let resolveDraft!: (value: unknown) => void
+    const commands: string[] = []
+    const deletedState: WorkspaceStateSnapshot = {
+      ...(fixture.state as WorkspaceStateSnapshot),
+      workspaces: [],
+      activeWorkspaceId: null,
+      draft: null,
+      contextSnapshots: [],
+      timeline: { schemaVersion: 1, items: [], nextBeforeSequence: null },
+    }
+    const invoker = vi.fn((command: string): Promise<unknown> => {
+      commands.push(command)
+      if (command === workspaceHistoryCommands.list) {
+        return Promise.resolve(fixture.state)
+      }
+      if (command === workspaceHistoryCommands.saveDraft) {
+        return new Promise((resolve) => {
+          resolveDraft = resolve
+        })
+      }
+      if (command === workspaceHistoryCommands.issueDeleteChallenge) {
+        return Promise.resolve(fixture.challenge)
+      }
+      if (command === workspaceHistoryCommands.delete) {
+        return Promise.resolve(deletedState)
+      }
+      if (command === workspaceHistoryCommands.select) {
+        return Promise.reject(
+          Object.assign(new Error(fixture.error.code), fixture.error),
+        )
+      }
+      return Promise.reject(new Error(`Unexpected command ${command}`))
+    })
+    const adapter = new PersistentWorkspaceViewAdapter(
+      new TauriWorkspaceHistoryTransport(invoker),
+    )
+    await adapter.loadState()
+    const save = adapter.saveDraft("workspace-fixture", "queued", "max")
+    await vi.waitFor(() =>
+      expect(commands).toContain(workspaceHistoryCommands.saveDraft),
+    )
+
+    const deletion = adapter.deleteWorkspaceHistory("workspace-fixture")
+    await expect(
+      adapter.saveDraft("workspace-fixture", "must not race", "fast"),
+    ).resolves.toBeUndefined()
+    expect(commands).not.toContain(
+      workspaceHistoryCommands.issueDeleteChallenge,
+    )
+
+    resolveDraft({
+      ...fixture.draft,
+      text: "queued",
+      revision: fixture.draft.revision + 1,
+    })
+    await save
+    await expect(deletion).resolves.toMatchObject({ activeWorkspaceId: null })
+    expect(commands).toEqual([
+      workspaceHistoryCommands.list,
+      workspaceHistoryCommands.saveDraft,
+      workspaceHistoryCommands.issueDeleteChallenge,
+      workspaceHistoryCommands.delete,
+    ])
+
+    await expect(
+      adapter.saveDraft("workspace-fixture", "after deletion", "fast"),
+    ).rejects.toMatchObject({ code: "WORKSPACE-NOT-FOUND" })
+    expect(commands.at(-1)).toBe(workspaceHistoryCommands.select)
   })
 })
