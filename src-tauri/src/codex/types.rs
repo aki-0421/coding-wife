@@ -358,7 +358,12 @@ pub struct PendingRequestView {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
+#[serde(
+    tag = "kind",
+    content = "payload",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum CodexEventPayload {
     ThreadStatus {
         thread_handle: String,
@@ -428,4 +433,54 @@ pub struct CodexEvent {
     pub occurred_at: String,
     #[serde(flatten)]
     pub payload: CodexEventPayload,
+}
+
+#[cfg(test)]
+mod contract_fixture_tests {
+    use serde::de::DeserializeOwned;
+    use serde::Serialize;
+    use serde_json::Value;
+
+    use super::{
+        AcceptedResponse, CodexDiagnostic, CodexEvent, ReviewResponse, ThreadListResponse,
+        ThreadResponse, TurnResponse,
+    };
+
+    const FIXTURE: &str = include_str!("../../../src/test/fixtures/codex-runtime.v1.json");
+
+    fn round_trip<T>(fixture: &Value, key: &str)
+    where
+        T: DeserializeOwned + Serialize,
+    {
+        let expected = fixture.get(key).expect("fixture key").clone();
+        let parsed: T = serde_json::from_value(expected.clone()).expect("deserialize fixture");
+        assert_eq!(
+            serde_json::to_value(parsed).expect("serialize fixture"),
+            expected
+        );
+    }
+
+    #[test]
+    fn rust_types_match_the_typescript_contract_fixture() {
+        let fixture: Value = serde_json::from_str(FIXTURE).expect("contract fixture");
+        round_trip::<CodexDiagnostic>(&fixture, "diagnostic");
+        round_trip::<ThreadListResponse>(&fixture, "threadList");
+        round_trip::<ThreadResponse>(&fixture, "thread");
+        round_trip::<TurnResponse>(&fixture, "turn");
+        round_trip::<ReviewResponse>(&fixture, "review");
+        round_trip::<AcceptedResponse>(&fixture, "accepted");
+
+        let events = fixture
+            .get("events")
+            .and_then(Value::as_array)
+            .expect("event fixtures");
+        for expected in events {
+            let parsed: CodexEvent =
+                serde_json::from_value(expected.clone()).expect("deserialize event fixture");
+            assert_eq!(
+                serde_json::to_value(parsed).expect("serialize event fixture"),
+                *expected
+            );
+        }
+    }
 }

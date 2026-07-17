@@ -1,0 +1,55 @@
+import {
+  codexCommands,
+  type CodexPendingResponseRequest,
+} from "@/lib/contracts"
+
+import type { CodexTransport } from "@/features/codex/transport"
+import { CodexSessionStore } from "@/features/codex/session-store"
+
+export class CodexSessionClient {
+  private unsubscribe: (() => void) | null = null
+
+  constructor(
+    readonly transport: CodexTransport,
+    readonly store = new CodexSessionStore(),
+  ) {}
+
+  async start(onContractError: (error: Error) => void): Promise<void> {
+    if (this.unsubscribe !== null) return
+    this.unsubscribe = await this.transport.subscribe({
+      onEvent: (event) => {
+        this.store.apply(event)
+      },
+      onContractError,
+    })
+  }
+
+  stop(): void {
+    this.unsubscribe?.()
+    this.unsubscribe = null
+  }
+
+  async respondPending(request: CodexPendingResponseRequest): Promise<boolean> {
+    if (
+      !this.store.hasPendingRequest(request) ||
+      !this.store.claimPendingResponse(request.pendingId)
+    ) {
+      return false
+    }
+    try {
+      const result = await this.transport.request(
+        codexCommands.respondPending,
+        request,
+      )
+      if (!result.accepted) {
+        this.store.releasePendingResponse(request.pendingId)
+        return false
+      }
+      this.store.completePendingResponse(request.pendingId)
+      return true
+    } catch (error) {
+      this.store.releasePendingResponse(request.pendingId)
+      throw error
+    }
+  }
+}
