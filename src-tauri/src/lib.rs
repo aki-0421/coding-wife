@@ -1,5 +1,6 @@
 pub mod character;
 pub mod codex;
+pub mod git_review;
 pub mod workspace_history;
 
 use serde::{Deserialize, Serialize};
