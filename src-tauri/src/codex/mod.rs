@@ -1,9 +1,13 @@
 pub mod binary;
+pub mod commands;
 pub mod dynamic_tools;
 pub mod jsonl;
 pub mod normalizer;
+pub mod process;
 pub mod protocol;
 pub mod redaction;
 pub mod requests;
 pub mod rpc;
+pub mod supervisor;
+pub mod support;
 pub mod types;

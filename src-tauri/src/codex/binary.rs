@@ -30,7 +30,7 @@ pub struct SchemaProbe {
     pub capabilities: CodexCapabilities,
 }
 
-#[derive(Debug, Error)]
+#[derive(Clone, Copy, Debug, Error)]
 pub enum BinaryError {
     #[error("no Codex executable was found")]
     Missing,

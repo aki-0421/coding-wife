@@ -2,6 +2,13 @@ pub mod codex;
 
 use serde::{Deserialize, Serialize};
 
+use codex::commands::{
+    codex_connect, codex_get_diagnostic, codex_probe, codex_respond_pending, codex_review_start,
+    codex_thread_list, codex_thread_resume, codex_thread_start, codex_turn_interrupt,
+    codex_turn_start,
+};
+use codex::supervisor::CodexSupervisor;
+
 const IPC_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -90,10 +97,38 @@ fn get_runtime_metadata() -> RuntimeMetadata {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![health_check, get_runtime_metadata])
-        .run(tauri::generate_context!())
-        .expect("failed to run the Coding Wife application");
+    let supervisor = CodexSupervisor::new();
+    let setup_supervisor = supervisor.clone();
+    let shutdown_supervisor = supervisor.clone();
+    let app = tauri::Builder::default()
+        .manage(supervisor)
+        .setup(move |app| {
+            setup_supervisor.attach_app_handle(app.handle().clone());
+            setup_supervisor.start_signal_loop();
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            health_check,
+            get_runtime_metadata,
+            codex_get_diagnostic,
+            codex_probe,
+            codex_connect,
+            codex_thread_list,
+            codex_thread_start,
+            codex_thread_resume,
+            codex_turn_start,
+            codex_turn_interrupt,
+            codex_review_start,
+            codex_respond_pending,
+        ])
+        .build(tauri::generate_context!())
+        .expect("failed to build the Coding Wife application");
+
+    app.run(move |_app_handle, event| {
+        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            tauri::async_runtime::block_on(shutdown_supervisor.shutdown());
+        }
+    });
 }
 
 #[cfg(test)]
