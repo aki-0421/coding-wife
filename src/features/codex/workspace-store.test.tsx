@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import { useCodexWorkspace } from "@/features/codex/use-codex-workspace"
 import { CodexWorkspaceStore } from "@/features/codex/workspace-store"
 import type { CodexTransport } from "@/features/codex/transport"
+import type { WorkspaceRegistration } from "@/lib/contracts"
 
 const registration = {
   schemaVersion: 1,
@@ -27,8 +28,8 @@ describe("CodexWorkspaceStore", () => {
     const store = new CodexWorkspaceStore(transport)
     const { result } = renderHook(() => useCodexWorkspace(store))
 
-    let first: Promise<typeof registration> | undefined
-    let second: Promise<typeof registration> | undefined
+    let first: Promise<WorkspaceRegistration> | undefined
+    let second: Promise<WorkspaceRegistration> | undefined
     await act(async () => {
       first = result.current.pickAndRegister()
       second = result.current.pickAndRegister()
