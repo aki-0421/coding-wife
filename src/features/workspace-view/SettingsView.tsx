@@ -49,14 +49,17 @@ import {
 import { useI18n, type SupportedLocale } from "@/features/localization"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type { RuntimeState } from "@/features/runtime"
-import type { SettingsSection } from "@/features/workspace-view/types"
+import type {
+  SettingsSection,
+  WorkspaceAdapterState,
+} from "@/features/workspace-view/types"
 import { cn } from "@/lib/utils"
 
 interface SettingsViewProps {
   readonly characterHidden: boolean
   readonly characterRuntime: CharacterRuntimeView
   readonly copy: WorkspaceCopy
-  readonly historyConnected: boolean
+  readonly history: WorkspaceAdapterState["history"]
   readonly muted: boolean
   readonly reducedMotion: "system" | "reduce" | "allow"
   readonly runtimeState: RuntimeState
@@ -622,6 +625,7 @@ function SupportSettings({ copy }: { readonly copy: WorkspaceCopy }) {
 function DiagnosticsSettings({
   characterRuntime,
   copy,
+  history,
   muted,
   runtimeState,
   onRetryCharacter,
@@ -630,6 +634,7 @@ function DiagnosticsSettings({
   SettingsViewProps,
   | "characterRuntime"
   | "copy"
+  | "history"
   | "muted"
   | "runtimeState"
   | "onRetryCharacter"
@@ -680,7 +685,7 @@ function DiagnosticsSettings({
         {copy.settingsView.integrations}
       </h3>
       <div className="flex flex-col">
-        {(["Codex", "Git", "Local history"] as const).map((integration) => (
+        {(["Codex", "Git"] as const).map((integration) => (
           <div
             className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption"
             key={integration}
@@ -689,6 +694,24 @@ function DiagnosticsSettings({
             <Badge variant="outline">{copy.settingsView.notConfigured}</Badge>
           </div>
         ))}
+        <div className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption">
+          <span>{copy.settingsView.localHistory}</span>
+          <Badge
+            variant={
+              history.mode === "ready"
+                ? "success"
+                : history.mode === "recovery_required"
+                  ? "destructive"
+                  : "outline"
+            }
+          >
+            {history.mode === "ready"
+              ? copy.persistedBadge
+              : history.mode === "read_only"
+                ? copy.settingsView.historyReadOnly
+                : copy.historyUnavailable}
+          </Badge>
+        </div>
         <div className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption">
           <span>{copy.settingsView.live2dStatus}</span>
           <CharacterReadinessBadge copy={copy} runtime={characterRuntime} />
@@ -710,9 +733,9 @@ function DiagnosticsSettings({
 
 function HistorySettings({
   copy,
-  historyConnected,
+  history,
   onDeleteHistory,
-}: Pick<SettingsViewProps, "copy" | "historyConnected" | "onDeleteHistory">) {
+}: Pick<SettingsViewProps, "copy" | "history" | "onDeleteHistory">) {
   const [confirmationOpen, setConfirmationOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -751,7 +774,7 @@ function HistorySettings({
       <SettingRow
         action={
           <Button
-            disabled={!historyConnected}
+            disabled={history.mode !== "ready"}
             onClick={() => setConfirmationOpen(true)}
             size="xs"
             type="button"
@@ -761,7 +784,7 @@ function HistorySettings({
           </Button>
         }
         description={
-          historyConnected
+          history.mode === "ready"
             ? copy.settingsView.deleteReady
             : copy.settingsView.deleteDisabled
         }

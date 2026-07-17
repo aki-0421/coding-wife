@@ -8,7 +8,8 @@ export const ipcCommands = {
 export type RuntimeKind = "tauri" | "demo"
 export type FoundationState = "ready" | "demo_only"
 export type IntegrationId = "codex" | "git" | "live2d" | "history"
-export type IntegrationReadiness = "not_configured"
+export type IntegrationReadiness =
+  "not_configured" | "ready" | "read_only" | "recovery_required"
 
 export interface HealthCheckResponse {
   readonly schemaVersion: typeof ipcSchemaVersion
@@ -127,6 +128,15 @@ function isFoundationState(value: unknown): value is FoundationState {
   return value === "ready" || value === "demo_only"
 }
 
+function isIntegrationReadiness(value: unknown): value is IntegrationReadiness {
+  return (
+    value === "not_configured" ||
+    value === "ready" ||
+    value === "read_only" ||
+    value === "recovery_required"
+  )
+}
+
 function isIpcCommand(value: unknown): value is IpcCommand {
   return (
     value === ipcCommands.healthCheck ||
@@ -187,9 +197,10 @@ export function parseRuntimeMetadata(value: unknown): RuntimeMetadata {
     !isNonEmptyString(value.platform) ||
     !isNonEmptyString(value.architecture) ||
     !hasExactKeys(integrations, integrationKeys) ||
-    !integrationKeys.every(
-      (integration) => integrations[integration] === "not_configured",
-    )
+    integrations.codex !== "not_configured" ||
+    integrations.git !== "not_configured" ||
+    integrations.live2d !== "not_configured" ||
+    !isIntegrationReadiness(integrations.history)
   ) {
     return contractViolation(operation)
   }
@@ -204,7 +215,7 @@ export function parseRuntimeMetadata(value: unknown): RuntimeMetadata {
       codex: "not_configured",
       git: "not_configured",
       live2d: "not_configured",
-      history: "not_configured",
+      history: integrations.history,
     },
   }
 }

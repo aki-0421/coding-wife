@@ -3,7 +3,7 @@ pub mod codex;
 pub mod workspace_history;
 
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Manager, State};
 
 use character::commands::{
     character_attest_preview, character_cancel_import, character_confirm_import,
@@ -45,6 +45,9 @@ enum FoundationState {
 #[serde(rename_all = "snake_case")]
 enum IntegrationReadiness {
     NotConfigured,
+    Ready,
+    ReadOnly,
+    RecoveryRequired,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -88,6 +91,7 @@ fn runtime_metadata(
     app_version: impl Into<String>,
     platform: impl Into<String>,
     architecture: impl Into<String>,
+    history: IntegrationReadiness,
 ) -> RuntimeMetadata {
     RuntimeMetadata {
         schema_version: IPC_SCHEMA_VERSION,
@@ -99,17 +103,25 @@ fn runtime_metadata(
             codex: IntegrationReadiness::NotConfigured,
             git: IntegrationReadiness::NotConfigured,
             live2d: IntegrationReadiness::NotConfigured,
-            history: IntegrationReadiness::NotConfigured,
+            history,
         },
     }
 }
 
 #[tauri::command]
-fn get_runtime_metadata() -> RuntimeMetadata {
+fn get_runtime_metadata(history: State<'_, WorkspaceHistoryService>) -> RuntimeMetadata {
+    let history = match history.history_mode() {
+        workspace_history::types::HistoryMode::Ready => IntegrationReadiness::Ready,
+        workspace_history::types::HistoryMode::ReadOnly => IntegrationReadiness::ReadOnly,
+        workspace_history::types::HistoryMode::RecoveryRequired => {
+            IntegrationReadiness::RecoveryRequired
+        }
+    };
     runtime_metadata(
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,
+        history,
     )
 }
 
@@ -222,9 +234,18 @@ mod tests {
         assert_eq!(response.foundation_state, FoundationState::Ready);
     }
 
+    fn runtime_fixture_metadata() -> RuntimeMetadata {
+        runtime_metadata(
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            IntegrationReadiness::Ready,
+        )
+    }
+
     #[test]
-    fn integrations_are_not_reported_as_configured() {
-        let metadata = get_runtime_metadata();
+    fn history_readiness_is_reported_separately_from_unconfigured_integrations() {
+        let metadata = runtime_fixture_metadata();
 
         assert_eq!(
             metadata.integrations.codex,
@@ -238,10 +259,7 @@ mod tests {
             metadata.integrations.live2d,
             IntegrationReadiness::NotConfigured
         );
-        assert_eq!(
-            metadata.integrations.history,
-            IntegrationReadiness::NotConfigured
-        );
+        assert_eq!(metadata.integrations.history, IntegrationReadiness::Ready);
     }
 
     #[test]
@@ -257,7 +275,7 @@ mod tests {
             *fixture_response(&fixture, "healthCheck")
         );
         assert_eq!(
-            serialized_response(get_runtime_metadata()),
+            serialized_response(runtime_fixture_metadata()),
             *fixture_response(&fixture, "runtimeMetadata")
         );
     }
@@ -265,7 +283,7 @@ mod tests {
     #[test]
     fn exact_fixture_comparison_rejects_unknown_and_missing_fields() {
         let fixture = contract_fixture();
-        let actual_metadata = serialized_response(get_runtime_metadata());
+        let actual_metadata = serialized_response(runtime_fixture_metadata());
         let mut fixture_with_unknown = fixture_response(&fixture, "runtimeMetadata").clone();
         fixture_with_unknown
             .as_object_mut()

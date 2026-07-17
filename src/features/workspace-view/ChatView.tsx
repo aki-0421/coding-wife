@@ -114,7 +114,11 @@ export function ChatView({
             <InfoIcon aria-hidden="true" className="size-3 shrink-0" />
           )}
           <span className="min-w-0 flex-1 truncate">
-            {runtimeError ? copy.runtimeErrorTitle : copy.previewNotice}
+            {runtimeError
+              ? copy.runtimeErrorTitle
+              : history.mode === "ready"
+                ? copy.previewNoticeWithHistory
+                : copy.previewNotice}
           </span>
           {runtimeError ? (
             <Button

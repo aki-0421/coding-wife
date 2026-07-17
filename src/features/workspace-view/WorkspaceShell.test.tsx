@@ -381,6 +381,26 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
   })
 
+  it("uses the persisted history mode consistently in chat and diagnostics", async () => {
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      deleteWorkspaceHistory: () => Promise.resolve(nativeWorkspaceState()),
+    }
+    renderWorkspace(adapter)
+
+    expect(
+      await screen.findByText(
+        "Codex and Git are not connected. Local workspace history is persisted and available.",
+      ),
+    ).toBeVisible()
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Diagnostics" }))
+
+    const localHistory = await screen.findByText("Local history")
+    expect(localHistory.parentElement).toHaveTextContent("Persisted locally")
+  })
+
   it("opens compact navigation from the selected workspace and restores focus", async () => {
     const user = userEvent.setup()
     renderWorkspace()

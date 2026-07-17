@@ -9,7 +9,7 @@ import {
   type TranslationKey,
 } from "@/features/localization"
 import { useRuntime } from "@/features/runtime/useRuntime"
-import type { IntegrationId } from "@/lib/contracts"
+import type { IntegrationId, IntegrationReadiness } from "@/lib/contracts"
 import { cn } from "@/lib/utils"
 
 const integrationLabelKeys: Readonly<Record<IntegrationId, TranslationKey>> = {
@@ -203,16 +203,22 @@ export function FoundationShell() {
                 {(
                   Object.entries(state.metadata.integrations) as [
                     IntegrationId,
-                    "not_configured",
+                    IntegrationReadiness,
                   ][]
-                ).map(([integration]) => (
+                ).map(([integration, readiness]) => (
                   <li
                     className="flex items-center justify-between gap-md border-b border-divider py-xs text-caption"
                     key={integration}
                   >
                     <span>{t(integrationLabelKeys[integration])}</span>
                     <span className="text-muted-foreground">
-                      {t("runtime.notConfigured")}
+                      {readiness === "ready"
+                        ? t("runtime.ready")
+                        : readiness === "read_only"
+                          ? t("runtime.readOnly")
+                          : readiness === "recovery_required"
+                            ? t("runtime.recoveryRequired")
+                            : t("runtime.notConfigured")}
                     </span>
                   </li>
                 ))}

@@ -49,6 +49,8 @@ const en = {
   previewNoticeTitle: "Design preview",
   previewNotice:
     "Codex, Git, and local history are not connected. The bundled Live2D companion reports its renderer state separately.",
+  previewNoticeWithHistory:
+    "Codex and Git are not connected. Local workspace history is persisted and available.",
   runtimeErrorTitle: "The local runtime could not be reached",
   runtimeErrorDescription:
     "Your draft and local view state are preserved. Retry the runtime check or review Diagnostics.",
@@ -265,6 +267,8 @@ const en = {
     platform: "Platform",
     integrations: "Integration readiness",
     notConfigured: "Not configured",
+    localHistory: "Local history",
+    historyReadOnly: "Read only",
     historyTitle: "History & privacy",
     stored: "Stored locally",
     storedBody:
@@ -347,6 +351,8 @@ const ja: typeof en = {
   previewNoticeTitle: "デザインプレビュー",
   previewNotice:
     "Codex、Git、ローカル履歴は未接続です。同梱Live2Dの描画状態は別に実測表示します。",
+  previewNoticeWithHistory:
+    "CodexとGitは未接続です。ローカルのワークスペース履歴は永続化され、利用できます。",
   runtimeErrorTitle: "ローカル実行環境へ接続できませんでした",
   runtimeErrorDescription:
     "下書きとローカル表示状態は保持されています。実行環境を再確認するか、診断を確認してください。",
@@ -562,6 +568,8 @@ const ja: typeof en = {
     platform: "プラットフォーム",
     integrations: "連携準備状況",
     notConfigured: "未構成",
+    localHistory: "ローカル履歴",
+    historyReadOnly: "読み取り専用",
     historyTitle: "履歴とプライバシー",
     stored: "ローカルに保存",
     storedBody:

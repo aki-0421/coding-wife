@@ -65,6 +65,24 @@ describe("IPC runtime contracts", () => {
         },
       }),
     ).toThrow("IPC contract")
+    expect(
+      parseRuntimeMetadata({
+        ...runtimeFixture.runtimeMetadata,
+        integrations: {
+          ...runtimeFixture.runtimeMetadata.integrations,
+          history: "recovery_required",
+        },
+      }).integrations.history,
+    ).toBe("recovery_required")
+    expect(() =>
+      parseRuntimeMetadata({
+        ...runtimeFixture.runtimeMetadata,
+        integrations: {
+          ...runtimeFixture.runtimeMetadata.integrations,
+          history: "unknown",
+        },
+      }),
+    ).toThrow("IPC contract")
   })
 
   it("rejects health and metadata from different runtimes", () => {

@@ -330,6 +330,7 @@ export function WorkspaceShell({
             characterHidden={view.characterHidden}
             characterRuntime={characterRuntime}
             copy={copy}
+            history={view.history}
             muted={view.muted}
             onCharacterHiddenChange={view.setCharacterHidden}
             onMutedChange={view.setMuted}
@@ -349,7 +350,6 @@ export function WorkspaceShell({
               })
             }
             reducedMotion={view.reducedMotion}
-            historyConnected={adapter?.deleteWorkspaceHistory !== undefined}
             runtimeState={runtime.state}
             section={view.settingsSection}
           />

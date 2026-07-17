@@ -115,6 +115,10 @@ impl WorkspaceHistoryService {
             .map_err(|error| history_error("workspace_list", error))
     }
 
+    pub fn history_mode(&self) -> HistoryMode {
+        self.store.status().mode
+    }
+
     pub async fn list_after_startup(
         &self,
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
