@@ -147,7 +147,7 @@
       "refersTo": "button-primary",
       "description": "有効なprompt、attachment、contextを送信する画面唯一のprimary action。",
       "html": "<button class=\"ds-send\" type=\"button\">Send&nbsp;↗</button>",
-      "css": ".ds-send { height: 24px; padding: 4px 9px; border: 0; border-radius: 4.5px; background: #d7d4d2; color: #171514; font: 500 10.5px/1.5 Inter, 'Noto Sans JP', system-ui, sans-serif; transition: background 150ms cubic-bezier(.25,1,.5,1), transform 120ms cubic-bezier(.25,1,.5,1); } .ds-send:hover { background: #f4f4f5; } .ds-send:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-send:active { transform: translateY(1px); } .ds-send:disabled { background: #52525c; color: #898993; cursor: not-allowed; }"
+      "css": ".ds-send { height: 24px; padding: 4px 9px; border: 0; border-radius: 4.5px; background: #d7d4d2; color: #171514; font: 500 11px/1.5 Inter, 'Noto Sans JP', system-ui, sans-serif; transition: background 150ms cubic-bezier(.25,1,.5,1), transform 120ms cubic-bezier(.25,1,.5,1); } .ds-send:hover { background: #f4f4f5; } .ds-send:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-send:active { transform: translateY(1px); } .ds-send:disabled { background: #52525c; color: #898993; cursor: not-allowed; }"
     },
     {
       "name": "Secondary Control",
@@ -155,7 +155,7 @@
       "refersTo": "button-secondary",
       "description": "AddとContextに使う24px compact control。",
       "html": "<button class=\"ds-secondary\" type=\"button\">+ Add</button>",
-      "css": ".ds-secondary { height: 24px; padding: 4px 9px; border: 1px solid #484340; border-radius: 4.5px; background: #211f1e; color: #d4d4d8; font: 500 10.5px/1.5 Inter, 'Noto Sans JP', system-ui, sans-serif; transition: background 150ms cubic-bezier(.25,1,.5,1), border-color 150ms cubic-bezier(.25,1,.5,1); } .ds-secondary:hover { background: #2b2928; border-color: #898993; } .ds-secondary:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-secondary:active { background: #292624; }"
+      "css": ".ds-secondary { height: 24px; padding: 4px 9px; border: 1px solid #484340; border-radius: 4.5px; background: #211f1e; color: #d4d4d8; font: 500 11px/1.5 Inter, 'Noto Sans JP', system-ui, sans-serif; transition: background 150ms cubic-bezier(.25,1,.5,1), border-color 150ms cubic-bezier(.25,1,.5,1); } .ds-secondary:hover { background: #2b2928; border-color: #898993; } .ds-secondary:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-secondary:active { background: #292624; }"
     },
     {
       "name": "Workspace Tabs",
@@ -179,7 +179,7 @@
       "refersTo": "workspace-selected",
       "description": "repository、branch、lifecycleを49.5pxで示すsidebarの選択行。",
       "html": "<button class=\"ds-workspace\" type=\"button\"><span class=\"ds-workspace-name\">coding-wife</span><span class=\"ds-workspace-branch\">build-live2d-desktop-app-v1</span></button>",
-      "css": ".ds-workspace { display: flex; width: 242.25px; height: 49.5px; flex-direction: column; justify-content: center; gap: 0; padding: 6px 9px 6px 30px; overflow: hidden; border: 0; border-radius: 4.5px; background: #2b2928; color: #f4f4f5; text-align: left; } .ds-workspace:hover { background: #302d2b; } .ds-workspace:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 1px; } .ds-workspace-name { overflow: hidden; font: 500 13.5px/20.25px Inter, 'Noto Sans JP', system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; } .ds-workspace-branch { overflow: hidden; color: #b6a7ff; font: 400 10.5px/15.75px 'JetBrains Mono', ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }"
+      "css": ".ds-workspace { display: flex; width: 242.25px; height: 49.5px; flex-direction: column; justify-content: center; gap: 0; padding: 6px 9px 6px 30px; overflow: hidden; border: 0; border-radius: 4.5px; background: #2b2928; color: #f4f4f5; text-align: left; } .ds-workspace:hover { background: #302d2b; } .ds-workspace:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 1px; } .ds-workspace-name { overflow: hidden; font: 500 13.5px/20.25px Inter, 'Noto Sans JP', system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; } .ds-workspace-branch { overflow: hidden; color: #b6a7ff; font: 400 11px/16.5px 'JetBrains Mono', ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }"
     },
     {
       "name": "Tool Event Chip",
@@ -187,7 +187,7 @@
       "refersTo": "code-chip",
       "description": "terminalではなくread-onlyのtool execution summaryを展開・copyできるchip。",
       "html": "<button class=\"ds-tool-chip\" type=\"button\">pnpm test --run</button>",
-      "css": ".ds-tool-chip { max-width: 360px; padding: 3px 6px; overflow: hidden; border: 0; border-radius: 4.5px; background: #292624; color: #9f9fa9; font: 400 10.5px/15.75px 'JetBrains Mono', ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; } .ds-tool-chip:hover { background: #302d2b; color: #d4d4d8; } .ds-tool-chip:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-tool-chip:active { background: #211f1e; }"
+      "css": ".ds-tool-chip { max-width: 360px; padding: 3px 6px; overflow: hidden; border: 0; border-radius: 4.5px; background: #292624; color: #9f9fa9; font: 400 11px/16.5px 'JetBrains Mono', ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; } .ds-tool-chip:hover { background: #302d2b; color: #d4d4d8; } .ds-tool-chip:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-tool-chip:active { background: #211f1e; }"
     },
     {
       "name": "Decision Card",

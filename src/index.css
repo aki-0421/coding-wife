@@ -285,6 +285,14 @@
   .companion-status-mobile {
     display: flex;
   }
+
+  .timeline-content {
+    padding-top: var(--spacing-sm);
+  }
+
+  .timeline-status-region {
+    gap: var(--spacing-xxs);
+  }
 }
 
 [data-reduced-motion="true"] *,

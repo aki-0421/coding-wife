@@ -279,6 +279,37 @@ describe("WorkspaceShell", () => {
     ).toHaveFocus()
   })
 
+  it("groups compact persistence and companion status without removing controls", async () => {
+    const user = userEvent.setup()
+    const { container } = renderWorkspace()
+    const statusRegion = container.querySelector<HTMLElement>(
+      "[data-chat-status-region]",
+    )
+    const persistenceStatus = container.querySelector<HTMLElement>(
+      "[data-persistence-status]",
+    )
+    const companionStatus = container.querySelector<HTMLElement>(
+      "[data-companion-status-mobile]",
+    )
+
+    expect(statusRegion).toContainElement(persistenceStatus)
+    expect(statusRegion).toContainElement(companionStatus)
+    expect(persistenceStatus).toHaveTextContent("Persisted locally")
+    expect(companionStatus).toHaveTextContent("Disconnected")
+
+    const mute = within(companionStatus as HTMLElement).getByRole("button", {
+      name: "Mute companion",
+    })
+    await user.click(mute)
+    expect(mute).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument()
+    expect(
+      screen.getByPlaceholderText(
+        "Ask Codex to plan, build, explain, or fix anything…",
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("clears only accepted turns and exposes a stop action", async () => {
     const requests: SendTurnRequest[] = []
     const stoppedWorkspaceIds: string[] = []

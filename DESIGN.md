@@ -47,13 +47,13 @@ typography:
     letterSpacing: "0"
   label:
     fontFamily: "Inter, Noto Sans JP, system-ui, sans-serif"
-    fontSize: "10.5px"
+    fontSize: "11px"
     fontWeight: 500
     lineHeight: 1.5
     letterSpacing: "0"
   mono:
     fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace"
-    fontSize: "10.5px"
+    fontSize: "11px"
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "0"
@@ -202,8 +202,8 @@ Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面
 - **Headline**（600、13.5px、20.25px）: Workspaces heading と panel heading。
 - **Title**（500、12px、18px）: tabs、status group、decision title。
 - **Body**（400、13.5px、21px）: assistant message と説明。長文は 65〜75ch を上限にする。
-- **Label**（500、10.5px、15.75px）: compact control、menu、metadata。
-- **Mono**（400、10.5px、15.75px）: branch、tool summary、SHA、path。長い値は ellipsis と全文表示を併用する。
+- **Label**（500、11px、16.5px）: compact control、menu、metadata。
+- **Mono**（400、11px、16.5px）: branch、tool summary、SHA、path。長い値は ellipsis と全文表示を併用する。
 - **Caption**（400、11px、16.5px）: helper と shortcut。Figma の 8.25〜9px source 値は通常表示に使わず、11px へ引き上げる。
 
 **The Two-Family Rule.** UI sans と code mono 以外の font family を追加しない。button、tab、label に display font を使うことは禁止する。
@@ -256,7 +256,7 @@ Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面
 
 ### Navigation
 
-Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の list だけを scroll させる。workspace item は 242.25×49.5px、active item だけ selected-row を持つ。header は 40.5px の breadcrumb row と 40.5px の tab row。active tab は strong text と 1.5px warm-active underline、inactive は readable muted text とし、keyboard roving focus を提供する。960〜1279px では sidebar を 64px rail または drawer へ畳み、960px 未満は MVP native window で許可しない。
+Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の list だけを scroll させる。workspace item は 242.25×49.5px、active item だけ selected-row を持つ。header は 40.5px の breadcrumb row と 40.5px の tab row。active tab は strong text と 1.5px warm-active underline、inactive は readable muted text とし、keyboard roving focus を提供する。960〜1279px では sidebar を 64px rail または drawer へ畳み、960px 未満は MVP native window で許可しない。200% text zoom などで有効幅が 700px 以下になる場合は、永続化状態と companion 状態を同じ status region で縦積みし、timeline、composer、Send、mute を隠さない。
 
 ### Live2D Companion
 

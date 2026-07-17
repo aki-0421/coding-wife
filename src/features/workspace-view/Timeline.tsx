@@ -4,6 +4,7 @@ import {
   CheckCircle2Icon,
   CircleXIcon,
 } from "lucide-react"
+import type { ReactNode } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,6 +17,7 @@ import type {
 } from "@/features/workspace-view/types"
 
 interface TimelineProps {
+  readonly compactStatus?: ReactNode
   readonly copy: WorkspaceCopy
   readonly events: readonly WorkspaceTimelineItem[]
   readonly history: WorkspaceAdapterState["history"]
@@ -104,6 +106,7 @@ function TimelineEventRow({
 }
 
 export function Timeline({
+  compactStatus,
   copy,
   events,
   history,
@@ -111,7 +114,7 @@ export function Timeline({
 }: TimelineProps) {
   const historyUnavailable = history.mode !== "ready"
   return (
-    <div className="flex min-h-full flex-col pb-[162px] pt-lg">
+    <div className="timeline-content flex min-h-full flex-col pb-[162px] pt-lg">
       <div className="mb-sm flex items-start justify-between gap-md">
         <div className="flex flex-col gap-xxs">
           <h2 className="m-0 text-headline text-text-strong">
@@ -121,9 +124,18 @@ export function Timeline({
             {copy.timelineDescription}
           </p>
         </div>
-        <Badge variant={historyUnavailable ? "outline" : "success"}>
-          {historyUnavailable ? copy.historyUnavailable : copy.persistedBadge}
-        </Badge>
+        <div
+          className="timeline-status-region flex shrink-0 flex-col items-end gap-xs"
+          data-chat-status-region=""
+        >
+          <Badge
+            data-persistence-status=""
+            variant={historyUnavailable ? "outline" : "success"}
+          >
+            {historyUnavailable ? copy.historyUnavailable : copy.persistedBadge}
+          </Badge>
+          {compactStatus}
+        </div>
       </div>
 
       {historyUnavailable ? (

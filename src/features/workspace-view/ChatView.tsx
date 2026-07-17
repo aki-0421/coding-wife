@@ -131,6 +131,33 @@ export function ChatView({
         <ScrollArea className="size-full pt-9">
           <div className="px-xl">
             <Timeline
+              compactStatus={
+                <div
+                  className="companion-status-mobile hidden max-w-full items-center gap-xs rounded-control bg-surface px-xs py-xxs text-caption text-muted-foreground"
+                  data-companion-status-mobile=""
+                >
+                  <span
+                    aria-hidden="true"
+                    className="size-[7px] rotate-45 border border-muted-foreground"
+                  />
+                  <span className="truncate">
+                    {copy.character.disconnected}
+                  </span>
+                  <Button
+                    aria-label={
+                      muted ? copy.character.unmute : copy.character.mute
+                    }
+                    aria-pressed={muted}
+                    className="-my-xxs"
+                    onClick={() => onMutedChange(!muted)}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {muted ? <VolumeXIcon /> : <Volume2Icon />}
+                  </Button>
+                </div>
+              }
               copy={copy}
               events={timeline}
               history={history}
@@ -138,25 +165,6 @@ export function ChatView({
             />
           </div>
         </ScrollArea>
-
-        <div className="companion-status-mobile absolute top-11 right-xl z-10 hidden max-w-[calc(100%-36px)] items-center gap-xs rounded-control bg-surface px-xs py-xxs text-caption text-muted-foreground">
-          <span
-            aria-hidden="true"
-            className="size-[7px] rotate-45 border border-muted-foreground"
-          />
-          <span className="truncate">{copy.character.disconnected}</span>
-          <Button
-            aria-label={muted ? copy.character.unmute : copy.character.mute}
-            aria-pressed={muted}
-            className="-my-xxs"
-            onClick={() => onMutedChange(!muted)}
-            size="icon-xs"
-            type="button"
-            variant="ghost"
-          >
-            {muted ? <VolumeXIcon /> : <Volume2Icon />}
-          </Button>
-        </div>
 
         <Composer
           connected={connected}
