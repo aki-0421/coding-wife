@@ -1,8 +1,10 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::Mutex;
 
+use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
 use crate::codex::workspace::{ValidatedWorkspaceCandidate, WorkspaceService};
 
@@ -18,6 +20,9 @@ use super::types::{
 };
 
 const PICK_CANCELED_CODE: &str = "CODEX-WORKSPACE-PICK-CANCELED";
+const CONTEXT_CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
+const CONTEXT_STDOUT_LIMIT: usize = 1024 * 1024;
+const CONTEXT_STDERR_LIMIT: usize = 4 * 1024;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct StartupRestoreReport {
@@ -483,12 +488,14 @@ async fn capture_context(
     root: &Path,
     source: ContextSource,
 ) -> Result<(&'static str, String), WorkspaceCommandError> {
+    let deadline = tokio::time::Instant::now() + CONTEXT_CAPTURE_TIMEOUT;
     match source {
         ContextSource::Files => Ok((
             "Repository files",
             run_git_capture(
                 root,
                 &["ls-files", "--cached", "--others", "--exclude-standard"],
+                deadline,
             )
             .await?,
         )),
@@ -496,12 +503,17 @@ async fn capture_context(
             let staged = run_git_capture(
                 root,
                 &["diff", "--cached", "--no-ext-diff", "--no-textconv", "--"],
+                deadline,
             )
             .await?;
-            let working =
-                run_git_capture(root, &["diff", "--no-ext-diff", "--no-textconv", "--"]).await?;
+            let working = run_git_capture(
+                root,
+                &["diff", "--no-ext-diff", "--no-textconv", "--"],
+                deadline,
+            )
+            .await?;
             let content = format!("Staged changes:\n{staged}\nWorking tree changes:\n{working}");
-            if content.len() > 1024 * 1024 {
+            if content.len() > CONTEXT_STDOUT_LIMIT {
                 return Err(WorkspaceCommandError::new(
                     "WORKSPACE-CONTEXT-TOO-LARGE",
                     "workspace_save_context_snapshot",
@@ -518,25 +530,46 @@ async fn capture_context(
     }
 }
 
-async fn run_git_capture(root: &Path, arguments: &[&str]) -> Result<String, WorkspaceCommandError> {
-    let output = tokio::process::Command::new("/usr/bin/git")
+async fn run_git_capture(
+    root: &Path,
+    arguments: &[&str],
+    deadline: tokio::time::Instant,
+) -> Result<String, WorkspaceCommandError> {
+    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+    if remaining.is_zero() {
+        return Err(WorkspaceCommandError::new(
+            "WORKSPACE-CONTEXT-CAPTURE-TIMEOUT",
+            "workspace_save_context_snapshot",
+            true,
+        ));
+    }
+    let mut command = tokio::process::Command::new("/usr/bin/git");
+    command
         .arg("-C")
         .arg(root)
         .args(arguments)
         .env_clear()
         .env("LC_ALL", "C")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .kill_on_drop(true)
-        .output()
-        .await
-        .map_err(|_| {
-            WorkspaceCommandError::new(
-                "WORKSPACE-CONTEXT-GIT-UNAVAILABLE",
-                "workspace_save_context_snapshot",
-                true,
-            )
-        })?;
-    if !output.status.success() || output.stdout.len() > 1024 * 1024 || output.stderr.len() > 4096 {
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let output = run_bounded_command(
+        command,
+        remaining,
+        CONTEXT_STDOUT_LIMIT,
+        CONTEXT_STDERR_LIMIT,
+    )
+    .await
+    .map_err(|error| {
+        let (code, recoverable) = match error {
+            BoundedCommandError::Spawn => ("WORKSPACE-CONTEXT-GIT-UNAVAILABLE", true),
+            BoundedCommandError::Timeout => ("WORKSPACE-CONTEXT-CAPTURE-TIMEOUT", true),
+            BoundedCommandError::StdoutLimit | BoundedCommandError::StderrLimit => {
+                ("WORKSPACE-CONTEXT-TOO-LARGE", false)
+            }
+            _ => ("WORKSPACE-CONTEXT-CAPTURE-FAILED", true),
+        };
+        WorkspaceCommandError::new(code, "workspace_save_context_snapshot", recoverable)
+    })?;
+    if !output.status.success() {
         return Err(WorkspaceCommandError::new(
             "WORKSPACE-CONTEXT-CAPTURE-FAILED",
             "workspace_save_context_snapshot",
@@ -571,6 +604,7 @@ fn codex_error(operation: &str, error: CodexCommandError) -> WorkspaceCommandErr
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
 
     use crate::codex::supervisor::CodexSupervisor;
     use crate::codex::workspace::{AppPrivateWorkspaceRecord, WorkspaceService};
@@ -707,5 +741,33 @@ mod tests {
             .await
             .expect_err("terminal output has no trusted producer yet");
         assert_eq!(error.code, "WORKSPACE-CONTEXT-SOURCE-UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn startup_restore_of_twenty_repositories_stays_within_the_budget() {
+        let data = temp_directory("history-service-restore-budget");
+        let workspace = WorkspaceService::production(CodexSupervisor::new());
+        let store = WorkspaceHistoryStore::open(&data).expect("store");
+        let mut roots = Vec::new();
+        for _ in 0..20 {
+            let root = git_repository();
+            store
+                .register_candidate(&candidate(&workspace, &root).await)
+                .expect("register fixture");
+            roots.push(root);
+        }
+        let service = WorkspaceHistoryService::new(store, workspace);
+
+        let started = Instant::now();
+        let report = service.restore_startup().await;
+
+        assert_eq!(report.ready, 20);
+        assert_eq!(report.changed, 0);
+        assert_eq!(report.unavailable, 0);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let _ = fs::remove_dir_all(data);
+        for root in roots {
+            let _ = fs::remove_dir_all(root);
+        }
     }
 }

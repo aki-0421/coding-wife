@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, Mutex};
 
@@ -19,6 +19,156 @@ use super::rpc::{RpcConnection, RuntimeSignal};
 const STDERR_RING_BYTES: usize = 64 * 1024;
 const GRACEFUL_STDIN_WAIT: Duration = Duration::from_secs(2);
 const TOTAL_SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BoundedCommandError {
+    Spawn,
+    MissingStdio,
+    Read,
+    StdoutLimit,
+    StderrLimit,
+    Timeout,
+    ProcessTree,
+}
+
+#[derive(Debug)]
+pub(crate) struct BoundedCommandOutput {
+    pub status: std::process::ExitStatus,
+    pub stdout: Vec<u8>,
+    #[allow(dead_code)]
+    pub stderr: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CaptureStream {
+    Stdout,
+    Stderr,
+}
+
+async fn capture_limited<R>(
+    mut reader: R,
+    limit: usize,
+    stream: CaptureStream,
+    aborts: mpsc::Sender<BoundedCommandError>,
+) -> Result<Vec<u8>, BoundedCommandError>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut captured = Vec::with_capacity(limit.min(16 * 1024));
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .await
+            .map_err(|_| BoundedCommandError::Read)?;
+        if count == 0 {
+            return Ok(captured);
+        }
+        if captured.len().saturating_add(count) > limit {
+            let error = match stream {
+                CaptureStream::Stdout => BoundedCommandError::StdoutLimit,
+                CaptureStream::Stderr => BoundedCommandError::StderrLimit,
+            };
+            let _ = aborts.send(error).await;
+            return Err(error);
+        }
+        captured.extend_from_slice(&buffer[..count]);
+    }
+}
+
+pub(crate) async fn run_bounded_command(
+    mut command: Command,
+    timeout: Duration,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<BoundedCommandOutput, BoundedCommandError> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    command.as_std_mut().process_group(0);
+
+    let mut child = command.spawn().map_err(|_| BoundedCommandError::Spawn)?;
+    let pid = child.id().ok_or(BoundedCommandError::Spawn)?;
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            return Err(BoundedCommandError::MissingStdio);
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            return Err(BoundedCommandError::MissingStdio);
+        }
+    };
+    let (abort_tx, mut abort_rx) = mpsc::channel(2);
+    let abort_guard = abort_tx.clone();
+    let mut stdout_task = tokio::spawn(capture_limited(
+        stdout,
+        stdout_limit,
+        CaptureStream::Stdout,
+        abort_tx.clone(),
+    ));
+    let mut stderr_task = tokio::spawn(capture_limited(
+        stderr,
+        stderr_limit,
+        CaptureStream::Stderr,
+        abort_tx,
+    ));
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    let status = tokio::select! {
+        status = child.wait() => status.map_err(|_| BoundedCommandError::Read),
+        abort = abort_rx.recv() => Err(abort.unwrap_or(BoundedCommandError::Read)),
+        _ = tokio::time::sleep_until(deadline) => Err(BoundedCommandError::Timeout),
+    };
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            stdout_task.abort();
+            stderr_task.abort();
+            return Err(error);
+        }
+    };
+
+    let captures = tokio::select! {
+        captures = async {
+            let stdout = (&mut stdout_task)
+                .await
+                .map_err(|_| BoundedCommandError::Read)??;
+            let stderr = (&mut stderr_task)
+                .await
+                .map_err(|_| BoundedCommandError::Read)??;
+            Ok::<_, BoundedCommandError>((stdout, stderr))
+        } => captures,
+        abort = abort_rx.recv() => Err(abort.unwrap_or(BoundedCommandError::Read)),
+        _ = tokio::time::sleep_until(deadline) => Err(BoundedCommandError::Timeout),
+    };
+    let (stdout, stderr) = match captures {
+        Ok(captures) => captures,
+        Err(error) => {
+            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            stdout_task.abort();
+            stderr_task.abort();
+            return Err(error);
+        }
+    };
+    drop(abort_guard);
+    if process_group_exists(pid) {
+        terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+        return Err(BoundedCommandError::ProcessTree);
+    }
+    Ok(BoundedCommandOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
 
 #[derive(Debug, Error)]
 pub enum ProcessError {
@@ -219,11 +369,11 @@ fn signal_process_group(pid: u32, signal: i32) -> Result<(), ()> {
     }
 }
 
-pub(super) fn process_group_exists(pid: u32) -> bool {
+pub(crate) fn process_group_exists(pid: u32) -> bool {
     signal_process_group(pid, 0).is_ok()
 }
 
-pub(super) async fn terminate_child_process_group(
+pub(crate) async fn terminate_child_process_group(
     child: &mut Child,
     pid: u32,
     term_grace: Duration,
@@ -342,5 +492,60 @@ mod tests {
             "grandchild process group survived"
         );
         let _ = std::fs::remove_file(state);
+    }
+
+    #[tokio::test]
+    async fn bounded_command_stops_oversized_stdout_and_stderr() {
+        let mut stdout_command = Command::new("/usr/bin/python3");
+        stdout_command.args([
+            "-c",
+            "import sys,time; sys.stdout.write('x' * 65536); sys.stdout.flush(); time.sleep(30)",
+        ]);
+        assert_eq!(
+            run_bounded_command(stdout_command, Duration::from_secs(2), 1024, 4096)
+                .await
+                .expect_err("stdout limit"),
+            BoundedCommandError::StdoutLimit
+        );
+
+        let mut stderr_command = Command::new("/usr/bin/python3");
+        stderr_command.args([
+            "-c",
+            "import sys,time; sys.stderr.write('x' * 65536); sys.stderr.flush(); time.sleep(30)",
+        ]);
+        assert_eq!(
+            run_bounded_command(stderr_command, Duration::from_secs(2), 4096, 1024)
+                .await
+                .expect_err("stderr limit"),
+            BoundedCommandError::StderrLimit
+        );
+    }
+
+    #[tokio::test]
+    async fn bounded_command_times_out_and_removes_the_process_tree() {
+        let state = temporary_state_file();
+        let parent_state = temporary_state_file();
+        let mut command = Command::new(process_tree_fixture());
+        command
+            .env("CODING_WIFE_PROCESS_TREE_STATE", &state)
+            .env("CODING_WIFE_PROCESS_TREE_PARENT_STATE", &parent_state);
+        let started = Instant::now();
+        assert_eq!(
+            run_bounded_command(command, Duration::from_millis(500), 4096, 4096)
+                .await
+                .expect_err("fixture must time out"),
+            BoundedCommandError::Timeout
+        );
+        assert!(started.elapsed() < Duration::from_secs(3));
+        let pid = std::fs::read_to_string(&parent_state)
+            .expect("parent pid")
+            .parse::<u32>()
+            .expect("numeric pid");
+        assert!(
+            !process_group_exists(pid),
+            "timed-out process group survived"
+        );
+        let _ = std::fs::remove_file(state);
+        let _ = std::fs::remove_file(parent_state);
     }
 }

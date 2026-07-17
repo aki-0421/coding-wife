@@ -18,6 +18,10 @@ def main():
     if not state:
         return 2
 
+    parent_state = os.environ.get("CODING_WIFE_PROCESS_TREE_PARENT_STATE")
+    if parent_state:
+        pathlib.Path(parent_state).write_text(str(os.getpid()), encoding="utf-8")
+
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     grandchild = os.fork()
     if grandchild == 0:

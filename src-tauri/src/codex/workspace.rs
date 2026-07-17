@@ -3,15 +3,19 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
+use super::process::{run_bounded_command, BoundedCommandError, BoundedCommandOutput};
 use super::supervisor::CodexSupervisor;
 use super::types::CodexCommandError;
 
 pub const WORKSPACE_REGISTRATION_SCHEMA_VERSION: u16 = 1;
+const WORKSPACE_GIT_TIMEOUT: Duration = Duration::from_secs(5);
+const WORKSPACE_GIT_STDERR_LIMIT: usize = 4 * 1024;
 
 pub type PickerFuture<'a> = Pin<Box<dyn Future<Output = Option<PathBuf>> + Send + 'a>>;
 
@@ -388,26 +392,50 @@ async fn validate_repository_ownership(
     Ok(())
 }
 
+async fn run_workspace_git(
+    root: &Path,
+    arguments: &[&str],
+    stdout_limit: usize,
+) -> Result<BoundedCommandOutput, CodexCommandError> {
+    let mut command = tokio::process::Command::new("/usr/bin/git");
+    command
+        .arg("-C")
+        .arg(root)
+        .args(arguments)
+        .env_clear()
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    run_bounded_command(
+        command,
+        WORKSPACE_GIT_TIMEOUT,
+        stdout_limit,
+        WORKSPACE_GIT_STDERR_LIMIT,
+    )
+    .await
+    .map_err(|error| match error {
+        BoundedCommandError::Spawn | BoundedCommandError::Timeout => {
+            workspace_error("CODEX-WORKSPACE-GIT-UNAVAILABLE", true)
+        }
+        _ => workspace_error("CODEX-WORKSPACE-GIT-INVALID", false),
+    })
+}
+
 async fn validate_git_root_closure(
     root: &Path,
     git_directory: &Path,
 ) -> Result<(), CodexCommandError> {
-    let output = tokio::process::Command::new("/usr/bin/git")
-        .arg("-C")
-        .arg(root)
-        .args([
+    let output = run_workspace_git(
+        root,
+        &[
             "rev-parse",
             "--show-toplevel",
             "--absolute-git-dir",
             "--git-common-dir",
-        ])
-        .env_clear()
-        .env("LC_ALL", "C")
-        .kill_on_drop(true)
-        .output()
-        .await
-        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-UNAVAILABLE", true))?;
-    if !output.status.success() || output.stdout.len() > 12_288 || output.stderr.len() > 4_096 {
+        ],
+        12_288,
+    )
+    .await?;
+    if !output.status.success() {
         return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
     }
     let stdout = String::from_utf8(output.stdout)
@@ -530,24 +558,9 @@ async fn repository_identity(
 }
 
 async fn read_head_object_id(root: &Path) -> Result<String, CodexCommandError> {
-    let output = tokio::process::Command::new("/usr/bin/git")
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "--verify", "HEAD"])
-        .env_clear()
-        .env("LC_ALL", "C")
-        .kill_on_drop(true)
-        .output()
-        .await
-        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-UNAVAILABLE", true))?;
+    let output = run_workspace_git(root, &["rev-parse", "--verify", "HEAD"], 128).await?;
     if !output.status.success() {
-        if output.stdout.len() <= 128 && output.stderr.len() <= 4_096 {
-            return Ok("unborn".to_owned());
-        }
-        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
-    }
-    if output.stdout.len() > 128 || output.stderr.len() > 4_096 {
-        return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
+        return Ok("unborn".to_owned());
     }
     let value = String::from_utf8(output.stdout)
         .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
