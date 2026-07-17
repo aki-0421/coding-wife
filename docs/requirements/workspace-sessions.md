@@ -95,6 +95,8 @@ read_when:
 | `WORK-F-061` | アプリは外部branch変更を検出する | active repositoryのHEADが外部で変わった場合、次のSendまたはwindow focus後1秒以内にstale warningを表示し、再preflightまでturnを開始しない | Approved | 非該当 |
 | `WORK-F-062` | 消失repositoryは復旧可能なerrorになる | 登録後にfolderが移動・削除された場合、workspace履歴を残してMissing表示にし、再選択または登録解除を提示する | Approved | 非該当 |
 | `WORK-F-063` | 利用者はproject contextとcharacter contextを分離して編集できる | Context tabで二つのsectionを別々に保存し、character contextからtechnical rule、permission、checkpoint policyを変更できない | Approved | 非該当 |
+| `WORK-F-064` | 利用者はboundedなread-only workspace contextを取得できる | FilesとGit diffはtrusted root内のnative Git processから5秒以内、stdout 1MiB・stderr 4KiB以内で取得し、超過・停止時はprocess treeを終了して保存しない。workspaceごとにcapture順で最新10件だけをUIとDBへ一致して残し、信頼できるproducerがないTerminal outputはdemoを含め成功表示しない | Approved | 非該当 |
+| `WORK-F-065` | native workspace読込はdemo状態と分離する | native初期化中はworkspace skeletonと読込状態だけを表示し、add/create/select/draft/context/deleteを開始しない。読込失敗時もdemo workspaceへfallbackせず、回復errorと再試行可能性だけを表示する | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -114,10 +116,10 @@ read_when:
 | 対象OS・OS差分 | macOS 14以降のfolder pickerとpath normalization | `WORK-F-044`〜`WORK-F-047` |
 | ウィンドウ生成・再利用 | single main window内のsidebarとtabを再利用 | `WORK-F-052` |
 | 閉じる・アプリ終了 | active executionの停止判断はAPP要件に従う | `WORK-F-058`, `WORK-F-060` |
-| 未保存データ | draftとContext入力をworkspace単位で保持 | `WORK-F-059`, `WORK-F-063` |
+| 未保存データ | draftとContext入力をworkspace単位で保持 | `WORK-F-059`, `WORK-F-063`, `WORK-F-064` |
 | ローカルデータ | canonical pathはRust管理DBの目的限定project linkageへ保存し、normalized eventやUI storageを正本にしない | `WORK-F-060` |
 | オフライン | project一覧、filter、Contextは利用可能 | `WORK-F-051`, `WORK-F-063` |
-| ファイル・OS操作 | picker cancel、権限不足、移動・削除を区別 | `WORK-F-045`, `WORK-F-047`, `WORK-F-062` |
+| ファイル・OS操作 | picker cancel、権限不足、移動・削除、bounded context process失敗を区別 | `WORK-F-045`, `WORK-F-047`, `WORK-F-062`, `WORK-F-064` |
 | メニュー・ショートカット | FolderPlusとPlusへ24×24px hit areaとaccessible nameを与える | `WORK-F-044`, `WORK-F-050` |
 | Deep Link・ファイル関連付け | 非該当: MVPで登録しない | 非該当 |
 | 通知 | attentionはapp内sidebarとheaderに表示 | `WORK-F-053` |
@@ -128,8 +130,8 @@ read_when:
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-001` | セッションダッシュボード | `WORK-F-044`〜`WORK-F-062` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
-| `S-002` | コーディングワークスペース | `WORK-F-052`〜`WORK-F-063` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-001` | セッションダッシュボード | `WORK-F-044`〜`WORK-F-062`, `WORK-F-065` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
+| `S-002` | コーディングワークスペース | `WORK-F-052`〜`WORK-F-065` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
 | `S-004` | 設定・診断 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件

@@ -65,7 +65,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `HIST-F-037` | appはnormalized domain eventを追記保存する | workspace/turn/type/version/payload/timestampを持つvalid eventを受け取ると、既存eventを変更せず新しいrowとして保存する | Approved | 非該当 |
+| `HIST-F-037` | appはnormalized domain eventを追記保存する | valid eventを新しいrowとして保存する。同じevent IDの再送はworkspace、session、producer、kind、schema version、timestamp、redaction後payloadがすべて一致する場合だけ元sequenceを返し、一項目でも異なる再送または別workspace所属sessionの参照は保存せずconflictにする | Approved | 非該当 |
 | `HIST-F-038` | appは重要event typeを区別する | goal、plan、tool、file、error、decision、approval、verification、checkpoint、restore、statusをtype filterで識別できる | Approved | 非該当 |
 | `HIST-F-039` | appはevent順序を安定させる | UTC timestampが同一でもworkspace単調増加sequenceで順序が一意になり、再起動前後で表示順が変わらない | Approved | 非該当 |
 | `HIST-F-040` | appはworkspace再開に必要な正本を保存する | project、workspace、turn、work unit、decision、checkpoint、selected character、locale、draftをRust DBから復元できる | Approved | 非該当 |
@@ -78,11 +78,11 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `HIST-F-045` | appは起動時にactive workspaceを再構築する | 20 workspace・各1,000 eventのfixtureでactive selection、last summary、draft、last checkpointを3秒以内に表示する | Approved | 非該当 |
+| `HIST-F-045` | appは起動時にactive workspaceを再構築する | native読込中はdemo rowを表示せずskeletonだけを表示しmutationを無効にする。20 workspace・各1,000 eventのfixtureはshell表示後に非同期復元し、成功時だけactive selection、last summary、draft、last checkpointへ置換し、失敗時は回復errorを表示してmutationを無効のままにする | Approved | 非該当 |
 | `HIST-F-046` | crash中のturnをInterruptedにする | startedでterminal eventのないturnを再起動時にInterruptedとして表示し、自動再送・自動commitを行わない | Approved | 非該当 |
 | `HIST-F-047` | 利用者はtimelineを種類と期間でfilterできる | All/Decisions/Errors/Verification/CheckpointsとUTC期間を選び、0件時にfilter解除とempty説明を表示する | Approved | 非該当 |
 | `HIST-F-048` | timelineはpage単位で読み込む | 1page最大200 eventを取得し、100,000 eventのworkspaceで初回query p95 200ms以下、次page p95 200ms以下になる | Approved | 非該当 |
-| `HIST-F-049` | 利用者はworkspace historyを削除できる | 実行中turnがない対象で確認するとapp DB/artifactだけを削除し、Git repository、commit、branchを変更しない | Approved | 非該当 |
+| `HIST-F-049` | 利用者はworkspace historyを削除できる | 実行中turnがない対象で確認すると対象のpending draft saveを新規開始不可にして既開始分を完了待ちし、app DB/artifactとUI/native draft cacheを削除する。成功後に遅延save errorを表示せず、Git repository、commit、branchを変更しない | Approved | 非該当 |
 | `HIST-F-050` | 利用者は履歴削除をcancelできる | confirmation cancel時にrow/artifact数が変わらず、workspace selectionとfilterを維持する | Approved | 非該当 |
 | `HIST-F-051` | empty historyは次の操作を示す | eventが0件なら「最初のturnを開始」「project診断を確認」を表示し、空のtable/card gridを表示しない | Approved | 非該当 |
 
@@ -90,12 +90,13 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `HIST-F-052` | schema migrationはtransactionで適用される | N-1 fixtureを起動するとbackupを作成してNへ移行し、途中failure fixtureでは元DBが開ける状態で残る | Approved | 非該当 |
-| `HIST-F-053` | DB破損は他データを黙って削除しない | integrity check failureでread-only recovery modeとbackup path、error codeを表示し、自動初期化で既存DBを上書きしない | Approved | 非該当 |
+| `HIST-F-052` | schema migrationはtransactionで適用される | 実fileのN-1 fixtureを一意なbackup名へ複製してNへ移行し、途中failure後に同じ元DBを再openできる。同一秒内の複数backupは互いを上書きしない | Approved | 非該当 |
+| `HIST-F-053` | DB破損は他データを黙って削除しない | integrity check failureでread-only recovery mode、backupのbasename、error codeを表示し、自動初期化で既存DBを上書きしない | Approved | 非該当 |
 | `HIST-F-054` | writerは一つのtransaction queueで順序を保つ | 1,000 event concurrent input testでsequence重複・欠番・partial payloadが0件になる | Approved | 非該当 |
 | `HIST-F-055` | appはevent schema versionを保持する | 各eventにinteger versionがあり、unknown future versionをraw表示せずUnsupported event placeholderとdiagnosticへ隔離する | Approved | 非該当 |
 | `HIST-F-056` | appはsupport利用を透明に記録する | support invocationごとにrole、trigger、model family、token usage、latency、statusを記録し、prompt/response本文を記録しない | Approved | 非該当 |
 | `HIST-F-057` | event表示時刻はlocaleへ適応する | 保存UTC値をja/en localeで表示し、timezone変更後も同一instantとsequenceを維持する | Approved | 非該当 |
+| `HIST-F-058` | app-private履歴のpermissionをfail closedにする | DB directory、DB/WAL/SHM、migration/recovery backupのowner-only permission適用に失敗するとwrite-readyで起動せず、既存dataを保持して構造化errorまたはread-only recoveryへ移行する | Approved | 非該当 |
 
 ## 入力項目要件
 

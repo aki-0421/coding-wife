@@ -189,7 +189,7 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 
 | 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
 |---|---|---|---|---|
-| 初期化中 | workspace、event、Codex、characterを読込中 | shell、timeline/composer/companionのshape skeleton | tab read-only、Quit | 全queryがterminalになる |
+| 初期化中 | workspace、event、Codex、characterを読込中 | shell、timeline/composer/companionのshape skeleton。demo workspace、draft、timelineを表示しない | tab read-only、Quit。workspace mutationとSendは開始しない | 全queryがterminalになる |
 | 通常 | connected、turnなし、decisionなし | timeline、enabled composer、idle companion | send、inspect、Context、tab移動 | send、offline、error |
 | データなし | event 0件 |一文の開始案内、composerをprimaryにする | draft、context、send | first turn作成 |
 | 処理中 | turn running | live timeline、phase、Stop、`thinking` / `acting` caption | stop、inspect、read-only tab、mute | completed、failed、stopped、decision |
@@ -224,7 +224,7 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 |---|---|---|---|---|---|
 | instruction | workspace draft | 条件付き | 0〜32,000 Unicode scalar、NUL不可。attachment/contextがなければtrim後1文字以上 | composer内、draft保持 | redaction合格後のdebounceとroute leave。secret-bearing raw値はReact transientだけに保持しDBへ保存しない |
 | attachment | なし | 任意 | 10件、各25MiB、合計50MiB、workspace root内のregular readable file。directory/symlink/executable不可 | chip単位、無効handleは除外 | draftにはhandle metadataだけ |
-| read-only context | なし | 任意 | 10件、各1MiBのFiles & folders / Git diff / Terminal output snapshot。sourceとcapture時刻必須 | 無効snapshotだけ除外 | redacted snapshot metadataとcontent hash |
+| read-only context | なし | 任意 | Files & folders / Git diffを各1MiB、workspaceごとにcapture順の最新10件。sourceとcapture時刻必須。Terminal outputはtrusted producer実装までunavailable | 無効snapshotを追加せず理由表示 | redacted snapshot metadataとcontent hash |
 | effort |前回valid値、初回`Fast` | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | Send不可理由 | valid変更時workspace preference |
 | decision option | 未選択 |回答時必須 | server提示IDの1件 | decision surface | answer accepted時event |
 | Other text |空 | Other選択時必須 | trim後1〜2,000 Unicode scalar | field直下、入力保持 | answer accepted時event |
@@ -243,7 +243,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | Stop | Rust supervisor | `stop_main_turn` | owned process/thread/turn ID | confirmation cancelは継続 | timeout後process tree停止、Interrupted |
 | event購読 | Rust event bridge | `subscribe_workspace_events` | workspace ID、monotonic sequence、schema allowlist | route leaveでUI購読だけ解除 | gapでpauseし診断表示 |
 | attachment選択 | Tauri dialog → Rust | `select_workspace_attachments` | file picker、canonical workspace root、size/type |変更なし | invalid fileをhandle化しない |
-| read-only context取得 | Rust context adapter | `capture_turn_context` | source allowlist、1MiB、timestamp、redaction、content hash | draft不変 | raw terminal/pathへfallbackしない |
+| read-only context取得 | Rust context adapter | `capture_turn_context` | source allowlist、5秒deadline、stdout 1MiB、stderr 4KiB、process tree cleanup、timestamp、redaction、content hash | draft不変 | raw terminal/pathへfallbackせず、Terminal outputはunsupportedを返す |
 | decision / approval回答 | Rust App Server adapter | `answer_decision_or_approval` | negotiated requestUserInputまたは既知approval method、元request ID、idempotency | Hold/cancelは未回答維持 | 未知method/schemaは許可せずBlocked |
 | Context保存 | Rust DB | `save_workspace_context` | workspace ID、section、expected version、schema |変更なし | optimistic conflictを表示 |
 | Live2D読込 | Rust asset protocol → WebView renderer | `load_character_pack` | selected verified pack ID、app-private root |前model維持 | static/text fallback |
@@ -320,7 +320,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 | 要件ID | この画面での扱い | 要件定義書 |
 |---|---|---|
-| `WORK-F-052`〜`WORK-F-063` | workspace切替、active execution、state分離、context、復元 | [workspace-sessions](../requirements/workspace-sessions.md) |
+| `WORK-F-052`〜`WORK-F-065` | workspace切替、active execution、state分離、bounded context、復元、native初期化境界 | [workspace-sessions](../requirements/workspace-sessions.md) |
 | `CODE-F-052`〜`CODE-F-076` | main session、event、composer、decision、Stop、reconnect、Sol | [codex-main-session](../requirements/codex-main-session.md) |
 | `SUP-F-051`, `SUP-F-057`〜`SUP-F-061` | main経由の委任、status、failure、interrupt、result統合 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-043`〜`GIT-F-055` | fingerprint、checkpoint、typed Git event、Commit tab導線 | [git-review-harness](../requirements/git-review-harness.md) |

@@ -84,7 +84,7 @@ sidebarと81px headerは他画面と同じ位置を維持し、Settings tabま�
 | settings main | 残幅、content max 780px | section heading、status、field、preview、danger zone | main単独 |
 | sticky action row | main下部、必要sectionだけ | Save / Cancel / Test cancel / Import cancel |固定 |
 
-section navは表の順にし、同型card gridではなく一つのform flowを使う。960〜1279pxではnavをportal drawerへ移してmainを最低640px確保する。200% text zoomではactionをwrapし、danger actionをprimary actionと隣接させない。
+section navは表の順にし、同型card gridではなく一つのform flowを使う。960〜1279pxではnavをportal drawerへ移してmainを最低640px確保する。960×640の200% text zoomでは実効480px幅の単一columnへ切り替え、section navとmainを別々に縦scroll可能にする。説明文とdanger actionを横方向にclipせず、actionをwrapし、danger actionをprimary actionと隣接させない。
 
 ## section仕様
 
@@ -218,6 +218,8 @@ role toggleをoffにするとqueued taskをcancelし、新規invocationを作ら
 
 診断はtoken、API key、cookie、完全なhome/source path、support prompt/response、raw stderrを表示しない。各resultはcode、checked time、scope、impact、recoverable、safe detail refを持つ。`Copy diagnostics`は同じsanitized summaryだけをclipboardへ出す。
 
+DB readinessはHistory & Privacyのbadgeと同じnative履歴状態を正本にする。`ready`でない時に`Persisted locally`を表示せず、read-onlyまたはrecovery errorとsanitized codeを一致して表示する。
+
 ### History & Privacy
 
 | 項目 | 表示・操作 |
@@ -235,7 +237,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 
 | 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
 |---|---|---|---|---|
-| 初期化中 | settings、diagnostics、libraryを読込中 | shell、section nav、field shape skeleton | section移動、Quit | query/migration terminal |
+| 初期化中 | settings、diagnostics、libraryを読込中 | shell、section nav、field shape skeleton。demo履歴を表示しない | section移動、Quit。保存、context取得、履歴削除は開始しない | query/migration terminal |
 | 通常 | DB read/write、section ready | current values、status、section action | edit、save、test、import、diagnose | operation開始/error |
 | データなし | custom pack、usage、history対象が0件 |理由と一つの次操作。空table/card gridなし | Import、Support enable、Chatへ戻る |対象data作成 |
 | 処理中 | save、diagnose、import/hash、preview、test、delete |対象step、progress、Cancel可能性、他section status |安全なCancel、影響外section | success/cancel/error |

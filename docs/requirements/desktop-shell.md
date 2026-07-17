@@ -80,7 +80,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-059` | 利用者はkeyboardだけで主要フローを操作できる | workspace選択、tab移動、添付、context、effort、送信、判断回答、停止、mute、review、restoreへTab/Shift+Tab/矢印/Enter/Escapeで到達できる | Approved | 非該当 |
 | `APP-F-060` | 利用者は現在focusを視認できる | 全interactive controlの`:focus-visible`が背景に対して3:1以上の2px outlineを表示し、focus順が視覚順と一致する | Approved | 非該当 |
 | `APP-F-061` | 利用者は動きを抑制できる | OSまたはアプリのreduced motionが有効な時、idle/decorative motionと位置・scale transitionを停止し、状態変化は即時または80ms以下のcrossfadeになる | Approved | 非該当 |
-| `APP-F-062` | 利用者は200% text zoomで操作できる | 960×640で200% text zoomを適用しても主要labelが操作不能にならず、tabはscroll/overflow、composer controlはwrapしてSendを残す | Approved | 非該当 |
+| `APP-F-062` | 利用者は200% text zoomで操作できる | 960×640で200% text zoomを適用した実効480px幅でも主要label、History & Privacyの保存説明、履歴削除actionが横方向に切れず、tabとsection navigationはscroll/overflow、composer controlはwrapしてSendを残す | Approved | 非該当 |
 
 ### ライフサイクル・安全境界
 
@@ -98,8 +98,8 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-070` | 利用者は起動前提の診断結果を確認できる | SettingsにOS、app version、Codex/Git/DB/Live2Dの利用可否とerror codeを表示し、token、API key、完全なhome pathを表示しない | Approved | 非該当 |
-| `APP-F-071` | アプリは基準端末で作業面を短時間に表示する | Apple Silicon・16GB RAM・release build・既存workspace 20件の条件で、process開始から操作可能なshell表示までのp95が3,000ms以下になる | Approved | 非該当 |
+| `APP-F-070` | 利用者は起動前提の診断結果を確認できる | SettingsにOS、app version、Codex/Git/DB/Live2Dの利用可否とerror codeを表示し、History badgeとDB診断は同じreadiness sourceから一致する値を示し、token、API key、完全なhome pathを表示しない | Approved | 非該当 |
+| `APP-F-071` | アプリは基準端末で作業面を短時間に表示する | Apple Silicon・16GB RAM・release build・既存workspace 20件の条件で、process開始からskeletonを持つ操作可能なshell表示までのp95が3,000ms以下になる。workspace Git再検証はsetupをblockせず非同期で開始し、各processを期限内に終了する | Approved | 非該当 |
 | `APP-F-072` | UIは通常操作へ短時間に反応する | tab、workspace、settings toggleの入力からvisual state更新までのp95が100ms以下になり、測定中のsampleを100回以上記録する | Approved | 非該当 |
 
 ## 入力項目要件

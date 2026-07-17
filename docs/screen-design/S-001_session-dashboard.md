@@ -112,7 +112,7 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 
 | 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
 |---|---|---|---|---|
-| 初期化中 | DB、workspace、Git linkageを読込中 | sidebar/list/project surfaceのskeleton、locale、Quit | Quitだけ | queryとmigrationがterminalになる |
+| 初期化中 | DB、workspace、Git linkageを読込中 | sidebar/list/project surfaceのskeleton、locale、Quit。demo workspaceを表示しない | Quitだけ。add/create/select/draft/context/deleteを開始しない | queryとmigrationがterminalになる |
 | 通常 | 1件以上のvalid workspace | group list、active project、preflight、primary action 1件 | filter、select、add、create、state action | 操作開始、offline、error |
 | データなし | projectまたはworkspace 0件 | 理由、`Projectを追加`、shortcut。空gridは出さない | picker、Settings、Quit | project登録またはrehydrate |
 | 処理中 | picker後検証、preflight、create、cancel、remove | 対象stepとprogress、他workspaceは利用可能 | 可能なCancel、影響外select | success、cancel、error |
@@ -121,6 +121,7 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 | 権限不足 | selected rootまたは`.git` read不可 | 拒否pathはbasenameだけ、OS権限案内、再選択 | 再選択、Settings、Quit | permission変更後の再診断 |
 | キャンセル後 | picker/create/remove確認をcancel | 開始前の一覧、selection、input、fingerprint | 元操作または別操作 | 次の明示操作 |
 | 再起動復旧 | crash、missing repo、migration rollback | active selection、Interrupted badge、last summary、Missing/Recovery | reselect、open read-only、diagnostic、remove | linkage/preflight成功 |
+| native読込失敗 | DB open、contract、復元taskがterminal error | demo dataを使わないempty recovery surface、sanitized error code、再試行案内 | Retry、Settings、Quitだけ | native queryが成功する |
 | filter 0件 | queryに一致するworkspaceなし | queryと`Filterを解除` | query変更、clear | 1件以上一致 |
 | active execution競合 | 別workspaceを開始しようとした | 現在workspace、`既存を停止して切替`、`戻る` | 二つの明示操作だけ | stop完了またはcancel |
 
@@ -213,7 +214,7 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 
 | 要件ID | この画面での扱い | 要件定義書 |
 |---|---|---|
-| `WORK-F-044`〜`WORK-F-062` | project追加、preflight、workspace lifecycle、filter、selection、persistence | [workspace-sessions](../requirements/workspace-sessions.md) |
+| `WORK-F-044`〜`WORK-F-062`, `WORK-F-065` | project追加、preflight、workspace lifecycle、filter、selection、persistence、native初期化境界 | [workspace-sessions](../requirements/workspace-sessions.md) |
 | `CODE-F-051`, `CODE-F-075` | Codex/login/Sol preflightとblocked reason | [codex-main-session](../requirements/codex-main-session.md) |
 | `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | rehydrateとempty history導線 | [activity-history](../requirements/activity-history.md) |
 | `APP-F-052`〜`APP-F-062` | single window、layout、navigation、language、a11y | [desktop-shell](../requirements/desktop-shell.md) |
