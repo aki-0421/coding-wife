@@ -8,7 +8,8 @@ use thiserror::Error;
 use super::decision::{parse_completed_output, DecisionOutput};
 use super::redaction::{redact_text, safe_detail_ref};
 use super::types::{
-    CodexEvent, CodexEventPayload, PendingRequestView, CODEX_EVENT_SCHEMA_VERSION, CODEX_MODEL,
+    CodexEvent, CodexEventPayload, PendingRequestView, PendingResolutionStatus,
+    CODEX_EVENT_SCHEMA_VERSION, CODEX_MODEL,
 };
 
 const MAX_EVENT_BYTES: usize = 256 * 1024;
@@ -29,6 +30,7 @@ pub struct NormalizeOutcome {
     pub unsupported_terminal: bool,
     pub model_violation: bool,
     pub decision_violation: bool,
+    pub fallback_decision: Option<PendingRequestView>,
 }
 
 #[derive(Default)]
@@ -121,6 +123,14 @@ impl EventNormalizer {
         self.event(CodexEventPayload::PendingRequest {
             request: Box::new(request),
         })
+    }
+
+    pub fn pending_resolved_event(
+        &mut self,
+        pending_id: String,
+        status: PendingResolutionStatus,
+    ) -> Result<CodexEvent, NormalizeError> {
+        self.event(CodexEventPayload::PendingRequestResolved { pending_id, status })
     }
 
     pub fn diagnostic_event(
@@ -250,7 +260,7 @@ impl EventNormalizer {
                             )?);
                         }
                         Ok(DecisionOutput::Request { view }) => {
-                            outcome.events.push(self.pending_event(*view)?);
+                            outcome.fallback_decision = Some(*view);
                         }
                         Err(_) => {
                             outcome.decision_violation = true;
@@ -423,6 +433,10 @@ impl EventNormalizer {
             CodexEventPayload::PendingRequest { request } => (
                 "code.pending.requested",
                 serde_json::to_value(request).ok()?,
+            ),
+            CodexEventPayload::PendingRequestResolved { pending_id, status } => (
+                "code.pending.resolved",
+                json!({"pendingId": pending_id, "status": status}),
             ),
             CodexEventPayload::Diagnostic {
                 code,

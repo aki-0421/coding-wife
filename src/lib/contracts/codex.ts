@@ -15,6 +15,7 @@ export const codexCommands = {
   turnInterrupt: "codex_turn_interrupt",
   reviewStart: "codex_review_start",
   respondPending: "codex_respond_pending",
+  answerFallbackDecision: "codex_answer_fallback_decision",
 } as const
 
 export type CapabilityState = "supported" | "unavailable" | "unverified"
@@ -159,6 +160,12 @@ export interface CodexPendingResponseRequest {
   readonly response: PendingResponse
 }
 
+export interface CodexFallbackDecisionRequest {
+  readonly workspaceId: string
+  readonly decisionHandle: string
+  readonly optionId: string
+}
+
 export interface ThreadSummary {
   readonly threadHandle: string
   readonly status: string
@@ -205,6 +212,7 @@ export interface PendingQuestion {
 
 interface PendingRequestBase {
   readonly pendingId: string
+  readonly responseKind: "native_server_request" | "fallback_decision"
   readonly operation: string
   readonly targetAlias: string
   readonly reason: string | null
@@ -225,20 +233,32 @@ export interface ApprovalContext {
 
 export interface ApprovalPendingRequest extends PendingRequestBase {
   readonly kind: Exclude<PendingKind, "user_input">
+  readonly responseKind: "native_server_request"
   readonly questions: readonly []
   readonly allowedDecisions: readonly ApprovalDecision[]
   readonly approvalContext: ApprovalContext
 }
 
-export interface UserInputPendingRequest extends PendingRequestBase {
+export interface NativeUserInputPendingRequest extends PendingRequestBase {
   readonly kind: "user_input"
+  readonly responseKind: "native_server_request"
   readonly questions: readonly PendingQuestion[]
   readonly allowedDecisions: readonly []
   readonly approvalContext: null
 }
 
+export interface FallbackDecisionPendingRequest extends PendingRequestBase {
+  readonly kind: "user_input"
+  readonly responseKind: "fallback_decision"
+  readonly questions: readonly [PendingQuestion]
+  readonly allowedDecisions: readonly []
+  readonly approvalContext: null
+}
+
 export type PendingRequestView =
-  ApprovalPendingRequest | UserInputPendingRequest
+  | ApprovalPendingRequest
+  | NativeUserInputPendingRequest
+  | FallbackDecisionPendingRequest
 
 interface CodexEventBase {
   readonly schemaVersion: typeof codexEventSchemaVersion
@@ -316,6 +336,13 @@ export type CodexEvent = CodexEventBase &
         readonly payload: { readonly request: PendingRequestView }
       }
     | {
+        readonly kind: "pending_request_resolved"
+        readonly payload: {
+          readonly pendingId: string
+          readonly status: "accepted" | "expired" | "failed"
+        }
+      }
+    | {
         readonly kind: "diagnostic"
         readonly payload: {
           readonly code: string
@@ -360,6 +387,7 @@ export interface CodexRequestMap {
   codex_turn_interrupt: CodexTurnInterruptRequest
   codex_review_start: CodexReviewStartRequest
   codex_respond_pending: CodexPendingResponseRequest
+  codex_answer_fallback_decision: CodexFallbackDecisionRequest
 }
 
 export interface CodexResponseMap {
@@ -374,6 +402,7 @@ export interface CodexResponseMap {
   codex_turn_interrupt: AcceptedResponse
   codex_review_start: ReviewResponse
   codex_respond_pending: AcceptedResponse
+  codex_answer_fallback_decision: TurnResponse
 }
 
 export type CodexCommand = keyof CodexRequestMap & keyof CodexResponseMap
@@ -838,6 +867,7 @@ function parsePendingRequest(value: unknown): PendingRequestView {
     !exact(value, [
       "pendingId",
       "kind",
+      "responseKind",
       "operation",
       "targetAlias",
       "reason",
@@ -847,6 +877,10 @@ function parsePendingRequest(value: unknown): PendingRequestView {
     ]) ||
     !nonEmptyString(value.pendingId) ||
     !oneOf(value.kind, pendingKinds) ||
+    !oneOf(value.responseKind, [
+      "native_server_request",
+      "fallback_decision",
+    ] as const) ||
     !nonEmptyString(value.operation) ||
     !nonEmptyString(value.targetAlias) ||
     !nullableString(value.reason) ||
@@ -860,6 +894,7 @@ function parsePendingRequest(value: unknown): PendingRequestView {
   }
   const common = {
     pendingId: value.pendingId,
+    responseKind: value.responseKind,
     operation: value.operation,
     targetAlias: value.targetAlias,
     reason: value.reason,
@@ -879,9 +914,24 @@ function parsePendingRequest(value: unknown): PendingRequestView {
       questions.length
     )
       return violation()
+    if (value.responseKind === "fallback_decision") {
+      if (value.operation !== "decision_fallback" || questions.length !== 1)
+        return violation()
+      const question = questions[0]
+      if (question === undefined) return violation()
+      return {
+        ...common,
+        kind: "user_input",
+        responseKind: "fallback_decision",
+        questions: [question],
+        allowedDecisions: [],
+        approvalContext: null,
+      }
+    }
     return {
       ...common,
       kind: "user_input",
+      responseKind: "native_server_request",
       questions,
       allowedDecisions: [],
       approvalContext: null,
@@ -889,6 +939,7 @@ function parsePendingRequest(value: unknown): PendingRequestView {
   }
 
   if (
+    value.responseKind !== "native_server_request" ||
     value.questions.length !== 0 ||
     value.allowedDecisions.length < 1 ||
     value.allowedDecisions.length > 3 ||
@@ -911,6 +962,7 @@ function parsePendingRequest(value: unknown): PendingRequestView {
   return {
     ...common,
     kind: value.kind,
+    responseKind: "native_server_request",
     questions: [],
     allowedDecisions: value.allowedDecisions,
     approvalContext,
@@ -1120,6 +1172,23 @@ export function parseCodexEvent(value: unknown): CodexEvent {
         payload: { request: parsePendingRequest(payload.request) },
       }
     }
+    case "pending_request_resolved": {
+      const payload = parseSimplePayload(value.payload, [
+        "pendingId",
+        "status",
+      ])
+      if (
+        !nonEmptyString(payload.pendingId) ||
+        !oneOf(payload.status, ["accepted", "expired", "failed"] as const)
+      ) {
+        return violation()
+      }
+      return {
+        ...base,
+        kind: value.kind,
+        payload: { pendingId: payload.pendingId, status: payload.status },
+      }
+    }
     case "diagnostic": {
       const payload = parseSimplePayload(value.payload, [
         "code",
@@ -1231,6 +1300,7 @@ export function parseCodexResponse<K extends CodexCommand>(
     case codexCommands.threadResume:
       return parseThreadResponse(value) as CodexResponseMap[K]
     case codexCommands.turnStart:
+    case codexCommands.answerFallbackDecision:
       return parseTurnResponse(value) as CodexResponseMap[K]
     case codexCommands.turnInterrupt:
     case codexCommands.respondPending:

@@ -279,6 +279,14 @@ pub struct CodexPendingResponseRequest {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CodexFallbackDecisionRequest {
+    pub workspace_id: String,
+    pub decision_handle: String,
+    pub option_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ThreadSummary {
     pub thread_handle: String,
     pub status: String,
@@ -329,6 +337,13 @@ pub enum PendingKind {
     UserInput,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PendingResponseKind {
+    NativeServerRequest,
+    FallbackDecision,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct PendingOption {
@@ -351,6 +366,7 @@ pub struct PendingQuestion {
 pub struct PendingRequestView {
     pub pending_id: String,
     pub kind: PendingKind,
+    pub response_kind: PendingResponseKind,
     pub operation: String,
     pub target_alias: String,
     pub reason: Option<String>,
@@ -371,6 +387,14 @@ pub struct ApprovalContext {
     pub reversibility: String,
     pub recommendation: ApprovalDecision,
     pub evidence: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PendingResolutionStatus {
+    Accepted,
+    Expired,
+    Failed,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -421,6 +445,10 @@ pub enum CodexEventPayload {
     },
     PendingRequest {
         request: Box<PendingRequestView>,
+    },
+    PendingRequestResolved {
+        pending_id: String,
+        status: PendingResolutionStatus,
     },
     Diagnostic {
         code: String,

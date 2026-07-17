@@ -5,6 +5,7 @@ import { CodexSessionStore } from "@/features/codex/session-store"
 import type { CodexTransport } from "@/features/codex/transport"
 import {
   parseCodexEvent,
+  type CodexFallbackDecisionRequest,
   type CodexPendingResponseRequest,
 } from "@/lib/contracts"
 import fixture from "@/test/fixtures/codex-runtime.v1.json"
@@ -27,7 +28,7 @@ describe("CodexSessionStore", () => {
 
   it("atomically resets transient state when generation advances", () => {
     const store = new CodexSessionStore()
-    for (const event of fixtureEvents) store.apply(event)
+    for (const event of fixtureEvents.slice(0, 3)) store.apply(event)
     expect(store.snapshot().pendingRequests).toHaveLength(1)
 
     const next = fixtureEvents[0]
@@ -82,5 +83,141 @@ describe("CodexSessionStore", () => {
     expect([first, second].sort()).toEqual([false, true])
     await expect(client.respondPending(request)).resolves.toBe(false)
     expect(requestMock).toHaveBeenCalledOnce()
+  })
+
+  it("keeps fallback decisions after the source turn and claims one continuation", async () => {
+    const pending = fixtureEvents[1]
+    const running = fixtureEvents[0]
+    if (pending?.kind !== "pending_request" || running?.kind !== "turn_status") {
+      throw new Error("fixture")
+    }
+    const fallback = parseCodexEvent({
+      ...pending,
+      eventId: "event-fallback",
+      sequence: 1,
+      payload: {
+        request: {
+          pendingId: "decision-fixture",
+          kind: "user_input",
+          responseKind: "fallback_decision",
+          operation: "decision_fallback",
+          targetAlias: "active_turn",
+          reason: "Choose a bounded continuation.",
+          questions: [
+            {
+              id: "decision",
+              header: "Decision",
+              question: "Continue?",
+              options: [
+                { id: "option-yes", label: "Yes", description: "Continue" },
+                { id: "option-no", label: "No", description: "Stop" },
+              ],
+            },
+          ],
+          allowedDecisions: [],
+          approvalContext: null,
+        },
+      },
+    })
+    const store = new CodexSessionStore()
+    store.apply(fallback)
+    store.apply({
+      ...running,
+      eventId: "event-source-completed",
+      sequence: 2,
+      payload: { ...running.payload, status: "completed" },
+    })
+    expect(store.snapshot().pendingRequests).toHaveLength(1)
+
+    const requestMock = vi.fn().mockResolvedValue({
+      threadHandle: "thread_handle_fixture",
+      turnHandle: "turn_decision_fixture",
+    })
+    const client = new CodexSessionClient(
+      {
+        kind: "demo",
+        request: requestMock,
+        subscribe: () => Promise.resolve(() => undefined),
+      } as CodexTransport,
+      store,
+    )
+    const request = {
+      workspaceId: "workspace-fixture",
+      decisionHandle: "decision-fixture",
+      optionId: "option-yes",
+    } satisfies CodexFallbackDecisionRequest
+
+    await expect(
+      client.answerFallbackDecision({ ...request, optionId: "unknown" }),
+    ).resolves.toBe(false)
+    const [first, second] = await Promise.all([
+      client.answerFallbackDecision(request),
+      client.answerFallbackDecision(request),
+    ])
+    expect([first, second].sort()).toEqual([false, true])
+    expect(requestMock).toHaveBeenCalledOnce()
+    expect(requestMock).toHaveBeenCalledWith(
+      "codex_answer_fallback_decision",
+      request,
+    )
+    expect(store.snapshot().pendingRequests).toHaveLength(0)
+  })
+
+  it("removes a fallback decision only after an explicit terminal event", () => {
+    const pending = fixtureEvents[1]
+    const running = fixtureEvents[0]
+    const resolved = fixtureEvents[3]
+    if (
+      pending?.kind !== "pending_request" ||
+      running?.kind !== "turn_status" ||
+      resolved?.kind !== "pending_request_resolved"
+    ) {
+      throw new Error("fixture")
+    }
+    const store = new CodexSessionStore()
+    store.apply(
+      parseCodexEvent({
+        ...pending,
+        eventId: "event-fallback",
+        sequence: 1,
+        payload: {
+          request: {
+            pendingId: "decision-fixture",
+            kind: "user_input",
+            responseKind: "fallback_decision",
+            operation: "decision_fallback",
+            targetAlias: "active_turn",
+            reason: null,
+            questions: [
+              {
+                id: "decision",
+                header: "Decision",
+                question: "Continue?",
+                options: [
+                  { id: "option-a", label: "A", description: "First" },
+                  { id: "option-b", label: "B", description: "Second" },
+                ],
+              },
+            ],
+            allowedDecisions: [],
+            approvalContext: null,
+          },
+        },
+      }),
+    )
+    store.apply({
+      ...running,
+      eventId: "event-source-completed",
+      sequence: 2,
+      payload: { ...running.payload, status: "completed" },
+    })
+    expect(store.snapshot().pendingRequests).toHaveLength(1)
+    store.apply({
+      ...resolved,
+      eventId: "event-decision-expired",
+      sequence: 3,
+      payload: { pendingId: "decision-fixture", status: "expired" },
+    })
+    expect(store.snapshot().pendingRequests).toHaveLength(0)
   })
 })

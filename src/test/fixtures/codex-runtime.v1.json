@@ -93,6 +93,7 @@
         "request": {
           "pendingId": "pending_handle_fixture",
           "kind": "command_approval",
+          "responseKind": "native_server_request",
           "operation": "item/commandExecution/requestApproval",
           "targetAlias": "project command",
           "reason": null,
@@ -123,6 +124,19 @@
       "payload": {
         "itemHandle": "item_handle_fixture",
         "text": "The fixture completed safely."
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "event-4",
+      "workspaceId": "workspace-fixture",
+      "generation": 7,
+      "sequence": 4,
+      "occurredAt": "2026-07-18T00:00:04Z",
+      "kind": "pending_request_resolved",
+      "payload": {
+        "pendingId": "pending_handle_fixture",
+        "status": "accepted"
       }
     }
   ]

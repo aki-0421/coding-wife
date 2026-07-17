@@ -1,5 +1,6 @@
 import {
   codexCommands,
+  type CodexFallbackDecisionRequest,
   type CodexPendingResponseRequest,
 } from "@/lib/contracts"
 
@@ -46,6 +47,20 @@ export class CodexSessionClient {
       return true
     } catch (error) {
       this.store.releasePendingResponse(request.pendingId)
+      throw error
+    }
+  }
+
+  async answerFallbackDecision(
+    request: CodexFallbackDecisionRequest,
+  ): Promise<boolean> {
+    if (!this.store.claimFallbackDecision(request)) return false
+    try {
+      await this.transport.request(codexCommands.answerFallbackDecision, request)
+      this.store.completePendingResponse(request.decisionHandle)
+      return true
+    } catch (error) {
+      this.store.releasePendingResponse(request.decisionHandle)
       throw error
     }
   }

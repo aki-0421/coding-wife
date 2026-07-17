@@ -9,6 +9,10 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 
 use super::binary::{discover_binary, probe_schema, BinaryError, BinaryInfo, SchemaProbe};
+use super::decision::{
+    fallback_continuation_input, FallbackDecisionContext, FallbackDecisionError,
+    FallbackDecisionLedger, FallbackRegisterOutcome,
+};
 use super::dynamic_tools::DynamicToolRegistry;
 use super::normalizer::EventNormalizer;
 use super::process::{spawn_process, ProcessError, ProcessRuntime};
@@ -24,10 +28,11 @@ use super::requests::{
 use super::rpc::{RpcConnection, RpcRequestError, RuntimeSignal};
 use super::types::{
     AcceptedResponse, CapabilityState, ChildState, CodexCommandError, CodexConnectRequest,
-    CodexDiagnostic, CodexEvent, CodexHealth, CodexPendingResponseRequest, CodexReviewStartRequest,
-    CodexThreadListRequest, CodexThreadResumeRequest, CodexThreadStartRequest,
-    CodexTurnInterruptRequest, CodexTurnStartRequest, ReviewResponse, ThreadListResponse,
-    ThreadResponse, ThreadSummary, TurnResponse,
+    CodexDiagnostic, CodexEvent, CodexFallbackDecisionRequest, CodexHealth,
+    CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadListRequest,
+    CodexThreadResumeRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
+    CodexTurnStartRequest, PendingResolutionStatus, ReasoningPreset, ReviewResponse,
+    ThreadListResponse, ThreadResponse, ThreadSummary, TurnResponse,
 };
 
 pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
@@ -53,7 +58,10 @@ struct SupervisorState {
     turn_handles: HashMap<String, String>,
     active_thread_id: Option<String>,
     active_turn_id: Option<String>,
+    active_turn_effort: Option<ReasoningPreset>,
+    fallback_continuation_in_flight: bool,
     requests: ServerRequestLedger,
+    fallback_decisions: FallbackDecisionLedger,
     restart_times: VecDeque<Instant>,
 }
 
@@ -191,13 +199,31 @@ impl CodexSupervisor {
     }
 
     pub async fn probe(&self) -> Result<CodexDiagnostic, CodexCommandError> {
-        let explicit = self.inner.state.lock().await.explicit_binary.clone();
-        let binary = discover_binary(explicit.as_deref())
-            .await
-            .map_err(|error| binary_command_error(error, "codex.probe"))?;
-        let schema = probe_schema(&binary)
-            .await
-            .map_err(|error| binary_command_error(error, "codex.probe"))?;
+        let _lifecycle = self.inner.lifecycle.lock().await;
+        let (explicit, runtime) = {
+            let mut state = self.inner.state.lock().await;
+            let explicit = state.explicit_binary.clone();
+            let runtime = state.runtime.take();
+            clear_probe_evidence(&mut state, "codex.probe");
+            (explicit, runtime)
+        };
+        if let Some(runtime) = runtime {
+            runtime.shutdown().await;
+        }
+        let binary = match discover_binary(explicit.as_deref()).await {
+            Ok(binary) => binary,
+            Err(error) => {
+                self.set_probe_failure(error, "codex.probe").await;
+                return Err(binary_command_error(error, "codex.probe"));
+            }
+        };
+        let schema = match probe_schema(&binary).await {
+            Ok(schema) => schema,
+            Err(error) => {
+                self.set_probe_failure(error, "codex.probe").await;
+                return Err(binary_command_error(error, "codex.probe"));
+            }
+        };
         let mut state = self.inner.state.lock().await;
         let diagnostic = diagnostic_from_probe(&binary, &schema);
         state.binary = Some(binary);
@@ -231,9 +257,7 @@ impl CodexSupervisor {
             if reset_restart_budget {
                 state.restart_times.clear();
             }
-            state.diagnostic.health = CodexHealth::Initializing;
-            state.diagnostic.child_state = ChildState::Probing;
-            state.diagnostic.checked_at = chrono::Utc::now().to_rfc3339();
+            clear_probe_evidence(&mut state, "codex.connect");
             (
                 workspace_root,
                 state.explicit_binary.clone(),
@@ -333,9 +357,7 @@ impl CodexSupervisor {
             Ok(runtime) => Arc::new(runtime),
             Err(ProcessError::IdentityChanged) => {
                 let mut state = self.inner.state.lock().await;
-                state.binary = None;
-                state.schema = None;
-                state.runtime = None;
+                clear_probe_evidence(&mut state, "codex.connect");
                 state.diagnostic.health = CodexHealth::BinaryUntrusted;
                 state.diagnostic.child_state = ChildState::Stopped;
                 state.diagnostic.error_code = Some("CODEX-BINARY-IDENTITY-CHANGED".to_owned());
@@ -363,7 +385,10 @@ impl CodexSupervisor {
         state.turn_handles.clear();
         state.active_thread_id = None;
         state.active_turn_id = None;
+        state.active_turn_effort = None;
+        state.fallback_continuation_in_flight = false;
         state.requests.clear_pending();
+        state.fallback_decisions.clear();
         state.diagnostic.child_state = ChildState::Initializing;
         Ok((runtime, generation))
     }
@@ -432,26 +457,32 @@ impl CodexSupervisor {
     }
 
     async fn set_probe_failure(&self, error: BinaryError, operation: &str) {
-        let mut state = self.inner.state.lock().await;
-        state.diagnostic.health = match error {
-            BinaryError::Missing => CodexHealth::BinaryMissing,
-            BinaryError::Untrusted => CodexHealth::BinaryUntrusted,
-            BinaryError::SchemaUnsupported => CodexHealth::SchemaUnsupported,
-            _ => CodexHealth::Disconnected,
+        let runtime = {
+            let mut state = self.inner.state.lock().await;
+            let runtime = state.runtime.take();
+            clear_probe_evidence(&mut state, operation);
+            state.diagnostic.health = match error {
+                BinaryError::Missing => CodexHealth::BinaryMissing,
+                BinaryError::Untrusted => CodexHealth::BinaryUntrusted,
+                BinaryError::SchemaUnsupported => CodexHealth::SchemaUnsupported,
+                _ => CodexHealth::Disconnected,
+            };
+            state.diagnostic.child_state = ChildState::Stopped;
+            state.diagnostic.error_code = Some(
+                match error {
+                    BinaryError::Missing => "CODEX-BINARY-MISSING",
+                    BinaryError::Untrusted => "CODEX-BINARY-UNTRUSTED",
+                    BinaryError::SchemaUnsupported => "CODEX-SCHEMA-UNSUPPORTED",
+                    BinaryError::Timeout => "CODEX-PROBE-TIMEOUT",
+                    BinaryError::ProbeFailed | BinaryError::Io => "CODEX-PROBE-FAILED",
+                }
+                .to_owned(),
+            );
+            runtime
         };
-        state.diagnostic.operation = operation.to_owned();
-        state.diagnostic.checked_at = chrono::Utc::now().to_rfc3339();
-        state.diagnostic.child_state = ChildState::Stopped;
-        state.diagnostic.error_code = Some(
-            match error {
-                BinaryError::Missing => "CODEX-BINARY-MISSING",
-                BinaryError::Untrusted => "CODEX-BINARY-UNTRUSTED",
-                BinaryError::SchemaUnsupported => "CODEX-SCHEMA-UNSUPPORTED",
-                BinaryError::Timeout => "CODEX-PROBE-TIMEOUT",
-                BinaryError::ProbeFailed | BinaryError::Io => "CODEX-PROBE-FAILED",
-            }
-            .to_owned(),
-        );
+        if let Some(runtime) = runtime {
+            runtime.shutdown().await;
+        }
     }
 
     async fn set_connection_failure(&self, error: &RpcRequestError) {
@@ -702,7 +733,7 @@ impl CodexSupervisor {
         let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
         let raw_thread = {
             let state = self.inner.state.lock().await;
-            if state.active_turn_id.is_some() {
+            if state.active_turn_id.is_some() || state.fallback_continuation_in_flight {
                 return Err(command_error("CODEX-TURN-ACTIVE", "turn/start", false));
             }
             state
@@ -739,6 +770,7 @@ impl CodexSupervisor {
             .insert(turn_handle.clone(), raw_turn.to_owned());
         state.active_thread_id = Some(raw_thread);
         state.active_turn_id = Some(raw_turn.to_owned());
+        state.active_turn_effort = Some(request.effort);
         Ok(TurnResponse {
             thread_handle: request.thread_handle,
             turn_handle,
@@ -862,11 +894,148 @@ impl CodexSupervisor {
         Ok(AcceptedResponse { accepted: true })
     }
 
+    pub async fn answer_fallback_decision(
+        &self,
+        request: CodexFallbackDecisionRequest,
+    ) -> Result<TurnResponse, CodexCommandError> {
+        let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
+        let claim = {
+            let mut state = self.inner.state.lock().await;
+            ensure_generation(&state, generation, "codex.decision.answer")?;
+            if state.active_turn_id.is_some() || state.fallback_continuation_in_flight {
+                return Err(command_error(
+                    "CODEX-TURN-ACTIVE",
+                    "codex.decision.answer",
+                    true,
+                ));
+            }
+            let claim = state
+                .fallback_decisions
+                .claim(
+                    &request.decision_handle,
+                    &request.option_id,
+                    &request.workspace_id,
+                    generation,
+                    Instant::now(),
+                )
+                .map_err(fallback_command_error)?;
+            state.fallback_continuation_in_flight = true;
+            claim
+        };
+        let input = fallback_continuation_input(&claim.decision_handle, &claim.option_id);
+        let client_message_id = format!("decision-continuation-{}", uuid::Uuid::new_v4());
+        let result = match connection
+            .request_default(
+                "turn/start",
+                turn_start_params(&claim.thread_id, &client_message_id, &input, claim.effort),
+            )
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                self.finish_fallback_claim(&claim, generation, PendingResolutionStatus::Failed)
+                    .await;
+                return Err(rpc_command_error(error, "codex.decision.answer"));
+            }
+        };
+        let Some(raw_turn) = result
+            .pointer("/turn/id")
+            .and_then(Value::as_str)
+            .filter(|turn| !turn.is_empty() && turn.len() <= 256)
+            .map(str::to_owned)
+        else {
+            self.finish_fallback_claim(&claim, generation, PendingResolutionStatus::Failed)
+                .await;
+            return Err(command_error(
+                "CODEX-RESPONSE-SHAPE",
+                "codex.decision.answer",
+                false,
+            ));
+        };
+
+        let (response, event) = {
+            let mut state = self.inner.state.lock().await;
+            ensure_generation(&state, generation, "codex.decision.answer")?;
+            if !state.fallback_decisions.complete(&claim) {
+                state.fallback_continuation_in_flight = false;
+                return Err(command_error(
+                    "CODEX-DECISION-STALE",
+                    "codex.decision.answer",
+                    false,
+                ));
+            }
+            state.fallback_continuation_in_flight = false;
+            let thread_handle = state
+                .thread_handles
+                .iter()
+                .find_map(|(handle, raw)| (raw == &claim.thread_id).then(|| handle.clone()))
+                .ok_or_else(|| {
+                    command_error("CODEX-THREAD-STALE", "codex.decision.answer", false)
+                })?;
+            let normalizer = state.normalizer.as_mut().ok_or_else(|| {
+                command_error("CODEX-NORMALIZER-MISSING", "codex.decision.answer", false)
+            })?;
+            let turn_handle = normalizer.turn_handle(&raw_turn);
+            let event = normalizer
+                .pending_resolved_event(
+                    claim.decision_handle.clone(),
+                    PendingResolutionStatus::Accepted,
+                )
+                .ok();
+            state
+                .turn_handles
+                .insert(turn_handle.clone(), raw_turn.clone());
+            state.active_thread_id = Some(claim.thread_id.clone());
+            state.active_turn_id = Some(raw_turn);
+            state.active_turn_effort = Some(claim.effort);
+            (
+                TurnResponse {
+                    thread_handle,
+                    turn_handle,
+                },
+                event,
+            )
+        };
+        if let Some(event) = event {
+            self.emit_event(&event);
+        }
+        Ok(response)
+    }
+
+    async fn finish_fallback_claim(
+        &self,
+        claim: &super::decision::FallbackDecisionClaim,
+        generation: u64,
+        status: PendingResolutionStatus,
+    ) {
+        let event = {
+            let mut state = self.inner.state.lock().await;
+            if state.generation != generation {
+                return;
+            }
+            state.fallback_continuation_in_flight = false;
+            state.fallback_decisions.complete(claim);
+            state.normalizer.as_mut().and_then(|normalizer| {
+                normalizer
+                    .pending_resolved_event(claim.decision_handle.clone(), status)
+                    .ok()
+            })
+        };
+        if let Some(event) = event {
+            self.emit_event(&event);
+        }
+    }
+
     pub async fn shutdown(&self) {
         let _lifecycle = self.inner.lifecycle.lock().await;
         let runtime = {
             let mut state = self.inner.state.lock().await;
             state.diagnostic.child_state = ChildState::Stopping;
+            state.requests.clear_pending();
+            state.fallback_decisions.clear();
+            state.active_turn_id = None;
+            state.active_turn_effort = None;
+            state.fallback_continuation_in_flight = false;
             state.runtime.take()
         };
         if let Some(runtime) = runtime {
@@ -1083,34 +1252,105 @@ impl CodexSupervisor {
                 }
             }
 
-            if let Some(normalizer) = state.normalizer.as_mut() {
-                match normalizer.normalize(&method, &params, byte_count) {
-                    Ok(outcome) => {
-                        events = outcome.events;
-                        if outcome.model_violation
-                            || outcome.unsupported_terminal
-                            || outcome.decision_violation
-                        {
-                            interrupt = state
-                                .active_thread_id
-                                .clone()
-                                .zip(state.active_turn_id.clone());
+            let normalized = state
+                .normalizer
+                .as_mut()
+                .map(|normalizer| normalizer.normalize(&method, &params, byte_count));
+            match normalized {
+                Some(Ok(mut outcome)) => {
+                    if let Some(view) = outcome.fallback_decision.take() {
+                        let context = params
+                            .get("threadId")
+                            .and_then(Value::as_str)
+                            .zip(params.get("turnId").and_then(Value::as_str))
+                            .zip(state.active_workspace.as_deref())
+                            .zip(state.active_turn_effort)
+                            .filter(|(((thread_id, turn_id), _), _)| {
+                                state.active_thread_id.as_deref() == Some(*thread_id)
+                                    && state.active_turn_id.as_deref() == Some(*turn_id)
+                            })
+                            .map(|(((thread_id, turn_id), workspace_id), effort)| {
+                                FallbackDecisionContext {
+                                    workspace_id: workspace_id.to_owned(),
+                                    generation,
+                                    thread_id: thread_id.to_owned(),
+                                    source_turn_id: turn_id.to_owned(),
+                                    effort,
+                                }
+                            });
+                        match context.and_then(|context| {
+                            state
+                                .fallback_decisions
+                                .register(view, context, Instant::now())
+                                .ok()
+                        }) {
+                            Some(FallbackRegisterOutcome::New(view)) => {
+                                if let Some(normalizer) = state.normalizer.as_mut() {
+                                    if let Ok(event) = normalizer.pending_event(*view) {
+                                        outcome.events.push(event);
+                                    }
+                                }
+                            }
+                            Some(FallbackRegisterOutcome::Existing) => {}
+                            None => {
+                                outcome.decision_violation = true;
+                                if let Some(normalizer) = state.normalizer.as_mut() {
+                                    if let Ok(event) = normalizer.diagnostic_event(
+                                        "CODEX-DECISION-REGISTRATION-INVALID",
+                                        false,
+                                    ) {
+                                        outcome.events.push(event);
+                                    }
+                                }
+                            }
                         }
                     }
-                    Err(_) => {
-                        if let Ok(event) = normalizer.unsupported(&method, byte_count) {
-                            events.push(event);
-                        }
+                    events = outcome.events;
+                    if outcome.model_violation
+                        || outcome.unsupported_terminal
+                        || outcome.decision_violation
+                    {
                         interrupt = state
                             .active_thread_id
                             .clone()
                             .zip(state.active_turn_id.clone());
                     }
                 }
+                Some(Err(_)) => {
+                    if let Some(normalizer) = state.normalizer.as_mut() {
+                        if let Ok(event) = normalizer.unsupported(&method, byte_count) {
+                            events.push(event);
+                        }
+                    }
+                    interrupt = state
+                        .active_thread_id
+                        .clone()
+                        .zip(state.active_turn_id.clone());
+                }
+                None => {}
             }
 
             if method == "turn/completed" {
+                let thread_id = params.get("threadId").and_then(Value::as_str);
+                let turn_id = params.pointer("/turn/id").and_then(Value::as_str);
+                let completed =
+                    params.pointer("/turn/status").and_then(Value::as_str) == Some("completed");
+                if let Some((thread_id, turn_id)) = thread_id.zip(turn_id) {
+                    let failed = state
+                        .fallback_decisions
+                        .mark_turn_terminal(thread_id, turn_id, completed);
+                    for pending_id in failed {
+                        if let Some(normalizer) = state.normalizer.as_mut() {
+                            if let Ok(event) = normalizer
+                                .pending_resolved_event(pending_id, PendingResolutionStatus::Failed)
+                            {
+                                events.push(event);
+                            }
+                        }
+                    }
+                }
                 state.active_turn_id = None;
+                state.active_turn_effort = None;
                 state.requests.clear_pending();
             }
         }
@@ -1141,7 +1381,10 @@ impl CodexSupervisor {
             state.diagnostic.health = CodexHealth::ProtocolMismatch;
             state.diagnostic.error_code = Some("CODEX-PROTOCOL-MISMATCH".to_owned());
             state.requests.clear_pending();
+            state.fallback_decisions.clear();
             state.active_turn_id = None;
+            state.active_turn_effort = None;
+            state.fallback_continuation_in_flight = false;
             let restart_attempt = reserve_restart(&mut state);
             state.diagnostic.child_state = if restart_attempt.is_some() {
                 ChildState::Restarting
@@ -1195,6 +1438,7 @@ impl CodexSupervisor {
             state.diagnostic.child_state = ChildState::Restarting;
             state.diagnostic.error_code = Some("CODEX-CONNECTION-LOST".to_owned());
             state.requests.clear_pending();
+            state.fallback_decisions.clear();
             let active = state
                 .active_thread_id
                 .clone()
@@ -1210,6 +1454,8 @@ impl CodexSupervisor {
                 }
             }
             state.active_turn_id = None;
+            state.active_turn_effort = None;
+            state.fallback_continuation_in_flight = false;
             let restart_attempt = reserve_restart(&mut state);
             (
                 state.active_workspace.clone(),
@@ -1250,15 +1496,30 @@ impl CodexSupervisor {
     }
 
     async fn expire_pending(&self) {
-        let (connection, expired) = {
+        let (connection, expired, events) = {
             let mut state = self.inner.state.lock().await;
             let Some(runtime) = state.runtime.as_ref() else {
                 return;
             };
             let connection = runtime.connection.clone();
-            let expired = state.requests.expire(Instant::now());
-            (connection, expired)
+            let now = Instant::now();
+            let expired = state.requests.expire(now);
+            let fallback_expired = state.fallback_decisions.expire(now);
+            let mut events = Vec::new();
+            for pending_id in fallback_expired {
+                if let Some(normalizer) = state.normalizer.as_mut() {
+                    if let Ok(event) = normalizer
+                        .pending_resolved_event(pending_id, PendingResolutionStatus::Expired)
+                    {
+                        events.push(event);
+                    }
+                }
+            }
+            (connection, expired, events)
         };
+        for event in events {
+            self.emit_event(&event);
+        }
         for (message, thread, turn) in expired {
             let _ = connection.send(message);
             let _ = connection
@@ -1443,6 +1704,28 @@ fn ensure_generation(
     }
 }
 
+fn clear_probe_evidence(state: &mut SupervisorState, operation: &str) {
+    state.binary = None;
+    state.schema = None;
+    state.normalizer = None;
+    state.thread_handles.clear();
+    state.turn_handles.clear();
+    state.active_thread_id = None;
+    state.active_turn_id = None;
+    state.active_turn_effort = None;
+    state.fallback_continuation_in_flight = false;
+    state.requests.clear_pending();
+    state.fallback_decisions.clear();
+    state.diagnostic = CodexDiagnostic {
+        health: CodexHealth::Initializing,
+        operation: operation.to_owned(),
+        checked_at: chrono::Utc::now().to_rfc3339(),
+        child_state: ChildState::Probing,
+        recoverable: true,
+        ..CodexDiagnostic::default()
+    };
+}
+
 fn reserve_restart(state: &mut SupervisorState) -> Option<usize> {
     let now = Instant::now();
     while state
@@ -1492,6 +1775,21 @@ fn rpc_error_code(error: &RpcRequestError) -> &'static str {
 fn rpc_command_error(error: RpcRequestError, operation: &str) -> CodexCommandError {
     let recoverable = !matches!(error, RpcRequestError::Protocol);
     command_error(rpc_error_code(&error), operation, recoverable)
+}
+
+fn fallback_command_error(error: FallbackDecisionError) -> CodexCommandError {
+    let (code, recoverable) = match error {
+        FallbackDecisionError::SourceTurnActive => ("CODEX-DECISION-TURN-ACTIVE", true),
+        FallbackDecisionError::Claimed => ("CODEX-DECISION-IN-PROGRESS", true),
+        FallbackDecisionError::Expired => ("CODEX-DECISION-EXPIRED", false),
+        FallbackDecisionError::InvalidOption | FallbackDecisionError::Invalid => {
+            ("CODEX-DECISION-OPTION-INVALID", false)
+        }
+        FallbackDecisionError::SessionMismatch
+        | FallbackDecisionError::Stale
+        | FallbackDecisionError::DuplicateMismatch => ("CODEX-DECISION-STALE", false),
+    };
+    command_error(code, "codex.decision.answer", recoverable)
 }
 
 #[cfg(test)]

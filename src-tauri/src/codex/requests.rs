@@ -9,7 +9,7 @@ use thiserror::Error;
 use super::protocol::{server_error, server_result, RpcId};
 use super::types::{
     ApprovalContext, ApprovalDecision, CapabilityState, CodexCapabilities, PendingKind,
-    PendingOption, PendingQuestion, PendingRequestView, PendingResponse,
+    PendingOption, PendingQuestion, PendingRequestView, PendingResponse, PendingResponseKind,
 };
 
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
@@ -267,6 +267,7 @@ fn approval_record(
     let view = PendingRequestView {
         pending_id: id,
         kind,
+        response_kind: PendingResponseKind::NativeServerRequest,
         operation: operation.to_owned(),
         target_alias: approval_target_alias(method, object, workspace_root),
         // Raw reasons can repeat a command, absolute cwd, or secret. The safe
@@ -377,6 +378,7 @@ fn user_input_record(
     let view = PendingRequestView {
         pending_id: id,
         kind: PendingKind::UserInput,
+        response_kind: PendingResponseKind::NativeServerRequest,
         operation: "request_user_input".to_owned(),
         target_alias: "active_turn".to_owned(),
         reason: None,

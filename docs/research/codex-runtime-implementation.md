@@ -28,6 +28,8 @@ read_when:
 9. thread開始・再開はresponseのmodel、canonical cwd、thread cwd、approval policy、sandbox type、ephemeral=falseを全て照合する。不足・不一致時はhandleを保存せずchildを停止する。
 10. pending responseはresponse variantと値をimmutable recordに対して検証してからatomicに消費する。invalid responseはpendingを残し、TypeScript側もpending kindとresponse typeを一致させてからsingle-claimする。
 11. native RUIが使えない場合のassistant完了文は`result`または`decision_request`のJSON全体だけを受理する。自由文、freeform、approval代替、不正optionは表示せずactive turnをinterruptする。
+12. fallback decisionはnative server request ledgerへ入れず、workspace、generation、source thread/turn、元のreasoning effortへ束縛した専用ledgerで管理する。source turnの正常完了後だけ、opaque decision handleとoption IDだけを含む固定JSONを同じthreadの新しいturnへ送る。invalid optionはcardを残し、同時応答は1件だけを開始し、開始失敗やchild crash後に自動再送しない。
+13. binary discovery、version、schema、identity、capability probeのいずれかが失敗した時点で、以前のbinary/schema cacheとdiagnostic上のversion、hash、fingerprint、capability/account証跡を一括消去し、active childを停止する。次のconnectは必ず新しいdiscoveryとprobeから始める。
 
 ## Binary trustとprobe境界
 
@@ -38,6 +40,8 @@ probeの上限はstdout/stderr各1 MiB、絶対deadline 10秒、schema depth 16�
 schema正本fixtureは`src-tauri/tests/fixtures/codex_schema_subset_v0_144_5.json`、process tree fixtureは`src-tauri/tests/fixtures/codex_process_tree_fixture.py`である。Codex CLI versionまたは利用fieldを変えるときはactual generated schemaから前者を更新し、required field削除、params ref差し替え、method重複、descriptionへの文字列移動をmutationしてfail closedを確認する。単なるmethod一覧fixtureへ戻してはならない。
 
 probeとApp Serverの終了はPATH上の`kill` commandを使わず、process groupへ直接TERM、期限後にKILLを送る。親processの`try_wait`成功だけを終了条件にせず、stdioを保持するgrandchildとPGIDの生存も期限内に消滅させる。stderrはcredential・cookie・session ID・absolute pathをredactしてからtruncateし、順序を逆転させない。
+
+probe失敗後のdiagnosticを調べるとき、以前の成功時の`cliVersion`、`binaryHashPrefix`、`schemaFingerprintPrefix`、`generatedBySameBinary`、capability/account値が残っていれば不具合である。`schema_malformed` fixtureは、成功接続後の再probeを失敗させてこれらが初期値へ戻り、その後の正常connectが新しい証跡を設定することを検証する。
 
 ## Workspaceとpublic contract境界
 
@@ -71,7 +75,7 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 | `jsonl.rs`                            | incremental framing、UTF-8、line/buffer上限                                             |
 | `rpc.rs`                              | request ID相関、timeout、server request/notification signal                             |
 | `protocol.rs`                         | 使用するApp Server subset、固定outbound parameter、model gate                           |
-| `decision.rs`                         | 完了assistant JSONのexact result/decision parse、bounded option、opaque decision ID     |
+| `decision.rs`                         | 完了assistant JSONのexact parse、context-bound fallback decision ledgerとsingle-claim   |
 | `process.rs`                          | 子process、環境allowlist、redacted stderr ring、5秒以内の段階的終了                     |
 | `requests.rs`                         | approval/RUI exact validation、duplicate request ledger                                 |
 | `normalizer.rs`                       | opaque handle、redaction済みCodexEventとDomainEvent                                     |
@@ -111,7 +115,9 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 | `experimental_rejected`                  | 新processでstable initializeへfallbackし、experimental fieldを送らずreviewをwire前block |
 | `thread_policy_*`                        | model、cwd、approval policy、sandbox、ephemeralの各mutationをfail-stop                  |
 | `native_rui`                             | strict 1問/2 optionのserver requestとtyped response round trip                          |
-| `decision_fallback` / `decision_invalid` | exact decision card化と自由文interrupt                                                  |
+| `decision_fallback` / `decision_invalid` | exact decision card化、structured continuation、自由文interrupt                         |
+| `decision_continuation_crash`            | fallback継続開始中のchild crashをterminal failureにし、自動再送しないこと               |
+| `schema_malformed`                       | 成功probe後のschema失敗で以前のidentity/capability証跡を消去し、fresh connectで回復      |
 
 fixtureは秘密、実account、実path、promptを含めない。新しいprotocol edge caseはproduction parserを緩める前にfake modeまたは共有fixtureへ追加する。
 
@@ -152,7 +158,10 @@ CODEX_LIVE_SMOKE=1 cargo test \
 - 新しいserver requestは意味と権限を個別に審査し、default allowやgeneric toolへ流さない。
 - error pathでraw `serde_json::Value`、stderr、invoke errorをUI error messageへ含めない。
 - reconnect、workspace切替、future generationでpending approvalを再利用しない。
+- fallback decisionの応答を`codex_respond_pending`へ流さず、`codex_answer_fallback_decision`だけで処理する。
+- fallback continuationへprompt、label、descriptionなどの表示文を戻さず、opaque decision handleと選択option IDだけを送る。
 - binary identity差し替え時に過去のbinary/schema cacheを残さない。
+- probe失敗時はbinary/schemaだけでなく、diagnosticに残る以前のversion/hash/fingerprint/capability/account証跡も消去する。
 - redaction fixtureはBearer/API keyだけでなくauth cookie、session ID、quoted/spaced credential key、`/Volumes`、`/Library`、`/Applications`を含める。
 - stable initialize fallbackではexperimental-only fieldを送らず、unsupported operationをwire call前にblockする。
 - support isolationを`supported`へ変える場合はdeny-all capabilityと`CODEX_HOME`差分のrelease evidenceを先に追加する。

@@ -42,6 +42,9 @@ describe("Codex runtime contract", () => {
     expect(parseCodexResponse(codexCommands.turnStart, fixture.turn)).toEqual(
       fixture.turn,
     )
+    expect(
+      parseCodexResponse(codexCommands.answerFallbackDecision, fixture.turn),
+    ).toEqual(fixture.turn)
     const workspace = {
       schemaVersion: 1,
       workspaceId: "workspace-fixture",
@@ -134,6 +137,38 @@ describe("Codex runtime contract", () => {
         payload: { request: userInput },
       }),
     ).toMatchObject({ kind: "pending_request" })
+    expect(
+      parseCodexEvent({
+        ...pending,
+        payload: {
+          request: {
+            ...userInput,
+            responseKind: "fallback_decision",
+            operation: "decision_fallback",
+            questions: [userInput.questions[0]],
+          },
+        },
+      }),
+    ).toMatchObject({
+      kind: "pending_request",
+      payload: {
+        request: {
+          responseKind: "fallback_decision",
+          operation: "decision_fallback",
+        },
+      },
+    })
+    expect(() =>
+      parseCodexEvent({
+        ...pending,
+        payload: {
+          request: {
+            ...userInput,
+            responseKind: "fallback_decision",
+          },
+        },
+      }),
+    ).toThrow(CodexContractError)
     expect(() =>
       parseCodexEvent({
         ...pending,

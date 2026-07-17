@@ -1,5 +1,6 @@
 import type {
   CodexEvent,
+  CodexFallbackDecisionRequest,
   CodexPendingResponseRequest,
   PendingRequestView,
 } from "@/lib/contracts"
@@ -104,6 +105,7 @@ export class CodexSessionStore {
     if (
       request.workspaceId !== this.workspaceId ||
       pending === undefined ||
+      pending.responseKind !== "native_server_request" ||
       (pending.kind === "user_input") !==
         (request.response.type === "user_input") ||
       this.claimedPendingResponses.has(request.pendingId)
@@ -111,6 +113,22 @@ export class CodexSessionStore {
       return false
     }
     this.claimedPendingResponses.add(request.pendingId)
+    return true
+  }
+
+  claimFallbackDecision(request: CodexFallbackDecisionRequest): boolean {
+    const pending = this.pendingRequests.get(request.decisionHandle)
+    if (
+      request.workspaceId !== this.workspaceId ||
+      pending?.responseKind !== "fallback_decision" ||
+      !pending.questions[0].options.some(
+        (option) => option.id === request.optionId,
+      ) ||
+      this.claimedPendingResponses.has(request.decisionHandle)
+    ) {
+      return false
+    }
+    this.claimedPendingResponses.add(request.decisionHandle)
     return true
   }
 
@@ -147,8 +165,12 @@ export class CodexSessionStore {
         this.activeTurnHandle = event.payload.turnHandle
         this.turnStatus = event.payload.status
         if (terminalTurnStatuses.has(event.payload.status)) {
-          this.pendingRequests.clear()
-          this.claimedPendingResponses.clear()
+          for (const [pendingId, pending] of this.pendingRequests) {
+            if (pending.responseKind === "native_server_request") {
+              this.pendingRequests.delete(pendingId)
+              this.claimedPendingResponses.delete(pendingId)
+            }
+          }
         }
         break
       case "agent_message_completed":
@@ -159,6 +181,10 @@ export class CodexSessionStore {
           event.payload.request.pendingId,
           event.payload.request,
         )
+        break
+      case "pending_request_resolved":
+        this.claimedPendingResponses.delete(event.payload.pendingId)
+        this.pendingRequests.delete(event.payload.pendingId)
         break
       default:
         break

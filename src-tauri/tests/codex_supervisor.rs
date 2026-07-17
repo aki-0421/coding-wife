@@ -8,9 +8,10 @@ use coding_wife_lib::codex::protocol::{client_notification, initialize_params};
 use coding_wife_lib::codex::rpc::{RpcRequestError, RuntimeSignal};
 use coding_wife_lib::codex::supervisor::CodexSupervisor;
 use coding_wife_lib::codex::types::{
-    CapabilityState, ChildState, CodexConnectRequest, CodexHealth, CodexPendingResponseRequest,
-    CodexReviewStartRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
-    CodexTurnStartRequest, PendingResponse, ReasoningPreset, ReviewTarget,
+    CapabilityState, ChildState, CodexConnectRequest, CodexFallbackDecisionRequest, CodexHealth,
+    CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadStartRequest,
+    CodexTurnInterruptRequest, CodexTurnStartRequest, PendingResponse, ReasoningPreset,
+    ReviewTarget,
 };
 use coding_wife_lib::codex::workspace::{
     AppPrivateBinaryRecord, FolderPicker, PickerFuture, WorkspaceService,
@@ -65,6 +66,35 @@ fn pending_id(rpc_id: &str, params: &serde_json::Value) -> String {
     ));
     let digest = Sha256::digest(format!("s:{rpc_id}:{params_hash}").as_bytes());
     format!("pending-{}", &hex::encode(digest)[..20])
+}
+
+fn contextual_handle(prefix: &str, components: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for component in components {
+        hasher.update((component.len() as u64).to_be_bytes());
+        hasher.update(component.as_bytes());
+    }
+    format!("{prefix}-{}", &hex::encode(hasher.finalize())[..20])
+}
+
+fn fallback_handles() -> (String, String) {
+    let raw_decision = format!(
+        "decision-{}",
+        &hex::encode(Sha256::digest(b"fixture-decision"))[..20]
+    );
+    let decision = contextual_handle(
+        "decision",
+        &[
+            &raw_decision,
+            "workspace",
+            "1",
+            "thread-fixture",
+            "turn-fixture",
+        ],
+    );
+    let raw_option = format!("option-{}", &hex::encode(Sha256::digest(b"continue"))[..20]);
+    let option = contextual_handle("option", &[&decision, &raw_option]);
+    (decision, option)
 }
 
 impl Drop for FixtureEnvironment {
@@ -443,6 +473,179 @@ async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
         supervisor.shutdown().await;
         drop(fixture);
     }
+}
+
+#[tokio::test]
+async fn fallback_decision_validates_then_starts_exactly_one_structured_continuation() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("decision_fallback");
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("connect");
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("thread");
+    supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            client_user_message_id: "message-decision".to_owned(),
+            text: "Produce a decision.".to_owned(),
+            effort: ReasoningPreset::Max,
+        })
+        .await
+        .expect("turn");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (decision_handle, option_id) = fallback_handles();
+    let invalid = supervisor
+        .answer_fallback_decision(CodexFallbackDecisionRequest {
+            workspace_id: "workspace".to_owned(),
+            decision_handle: decision_handle.clone(),
+            option_id: "option-invalid".to_owned(),
+        })
+        .await
+        .expect_err("invalid option");
+    assert_eq!(invalid.code, "CODEX-DECISION-OPTION-INVALID");
+
+    let request = CodexFallbackDecisionRequest {
+        workspace_id: "workspace".to_owned(),
+        decision_handle,
+        option_id,
+    };
+    let (first, second) = tokio::join!(
+        supervisor.answer_fallback_decision(request.clone()),
+        supervisor.answer_fallback_decision(request),
+    );
+    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("decision_continuation_ok").count(), 1);
+    assert!(!state.contains("decision_continuation_invalid"));
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn failed_fallback_continuation_is_terminal_and_never_replayed() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("decision_continuation_crash");
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("connect");
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("thread");
+    supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            client_user_message_id: "message-crash-decision".to_owned(),
+            text: "Produce a decision.".to_owned(),
+            effort: ReasoningPreset::Low,
+        })
+        .await
+        .expect("turn");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (decision_handle, option_id) = fallback_handles();
+    let request = CodexFallbackDecisionRequest {
+        workspace_id: "workspace".to_owned(),
+        decision_handle,
+        option_id,
+    };
+    supervisor
+        .answer_fallback_decision(request.clone())
+        .await
+        .expect_err("continuation process exits before accepting the turn");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        read_state(&fixture.state)
+            .await
+            .matches("decision_continuation_ok")
+            .count(),
+        1
+    );
+    supervisor
+        .answer_fallback_decision(request)
+        .await
+        .expect_err("failed decision claim is terminal");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        read_state(&fixture.state)
+            .await
+            .matches("decision_continuation_ok")
+            .count(),
+        1
+    );
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn failed_reprobe_clears_previous_identity_evidence_and_recovers_fresh() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    let ready = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("ready");
+    assert!(ready.binary_hash_prefix.is_some());
+
+    std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", "schema_malformed");
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect_err("schema failure");
+    let failed = supervisor.diagnostic().await;
+    assert_eq!(failed.health, CodexHealth::SchemaUnsupported);
+    assert!(failed.cli_version.is_none());
+    assert!(failed.binary_hash_prefix.is_none());
+    assert!(failed.schema_fingerprint_prefix.is_none());
+    assert!(!failed.generated_by_same_binary);
+
+    std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", "default");
+    let recovered = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("fresh recovery");
+    assert_eq!(recovered.health, CodexHealth::Ready);
+    assert!(recovered.binary_hash_prefix.is_some());
+    supervisor.shutdown().await;
 }
 
 #[tokio::test]

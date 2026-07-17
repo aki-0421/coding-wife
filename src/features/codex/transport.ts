@@ -243,6 +243,11 @@ export class DemoCodexTransport implements CodexTransport {
           turnHandle: "demo-turn-1",
         } as CodexResponseMap[K])
       }
+      case codexCommands.answerFallbackDecision:
+        return Promise.resolve({
+          threadHandle: "demo-thread-1",
+          turnHandle: "demo-decision-turn-1",
+        } as CodexResponseMap[K])
       case codexCommands.turnInterrupt: {
         const turnRequest = request as CodexRequestMap["codex_turn_interrupt"]
         queueMicrotask(() => {

@@ -56,6 +56,10 @@ def main():
         return 0
     if len(args) >= 5 and args[:2] == ["app-server", "generate-json-schema"]:
         output = pathlib.Path(args[args.index("--out") + 1])
+        if MODE == "schema_malformed":
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "ClientRequest.json").write_text("{}", encoding="utf-8")
+            return 0
         generate_schema(output)
         return 0
     if not args or args[0] != "app-server":
@@ -202,6 +206,13 @@ def main():
             )
             continue
         if method == "turn/start":
+            input_text = ""
+            if isinstance(params.get("input"), list) and params["input"]:
+                input_text = params["input"][0].get("text", "")
+            try:
+                continuation = json.loads(input_text)
+            except (json.JSONDecodeError, TypeError):
+                continuation = None
             valid = (
                 params.get("model") == "gpt-5.6-sol"
                 and params.get("effort") in ("low", "max")
@@ -212,6 +223,35 @@ def main():
             record("turn_contract_ok" if valid else "turn_contract_invalid")
             if not valid:
                 send({"id": message_id, "error": {"code": -32602, "message": "Invalid params"}})
+                continue
+            if isinstance(continuation, dict) and continuation.get("kind") == "decision_result":
+                structured = (
+                    continuation.get("schemaVersion") == 1
+                    and str(continuation.get("decisionHandle", "")).startswith("decision-")
+                    and str(continuation.get("optionId", "")).startswith("option-")
+                    and set(continuation) == {
+                        "schemaVersion",
+                        "kind",
+                        "decisionHandle",
+                        "optionId",
+                    }
+                )
+                record("decision_continuation_ok" if structured else "decision_continuation_invalid")
+                if MODE == "decision_continuation_crash":
+                    os._exit(23)
+                result(
+                    message_id,
+                    {"turn": {"id": "turn-decision-continuation", "status": "inProgress"}},
+                )
+                send(
+                    {
+                        "method": "turn/started",
+                        "params": {
+                            "threadId": params["threadId"],
+                            "turn": {"id": "turn-decision-continuation", "status": "inProgress"},
+                        },
+                    }
+                )
                 continue
             result(message_id, {"turn": {"id": "turn-fixture", "status": "inProgress"}})
             send(
@@ -258,7 +298,11 @@ def main():
                         },
                     }
                 )
-            if MODE in ("decision_fallback", "decision_invalid"):
+            if MODE in (
+                "decision_fallback",
+                "decision_invalid",
+                "decision_continuation_crash",
+            ):
                 output = (
                     json.dumps(
                         {
@@ -283,7 +327,7 @@ def main():
                         },
                         separators=(",", ":"),
                     )
-                    if MODE == "decision_fallback"
+                    if MODE in ("decision_fallback", "decision_continuation_crash")
                     else "Choose Continue or Stop"
                 )
                 send(
@@ -300,6 +344,16 @@ def main():
                         },
                     }
                 )
+                if MODE != "decision_invalid":
+                    send(
+                        {
+                            "method": "turn/completed",
+                            "params": {
+                                "threadId": params["threadId"],
+                                "turn": {"id": "turn-fixture", "status": "completed"},
+                            },
+                        }
+                    )
             continue
         if method == "turn/interrupt":
             record("interrupt_received")

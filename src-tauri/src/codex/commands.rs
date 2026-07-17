@@ -3,9 +3,10 @@ use tauri::State;
 use super::supervisor::CodexSupervisor;
 use super::types::{
     AcceptedResponse, CodexCommandError, CodexConnectRequest, CodexDiagnostic,
-    CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadListRequest,
-    CodexThreadResumeRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
-    CodexTurnStartRequest, ReviewResponse, ThreadListResponse, ThreadResponse, TurnResponse,
+    CodexFallbackDecisionRequest, CodexPendingResponseRequest, CodexReviewStartRequest,
+    CodexThreadListRequest, CodexThreadResumeRequest, CodexThreadStartRequest,
+    CodexTurnInterruptRequest, CodexTurnStartRequest, ReviewResponse, ThreadListResponse,
+    ThreadResponse, TurnResponse,
 };
 use super::workspace::{WorkspaceRegistration, WorkspaceService};
 
@@ -92,4 +93,12 @@ pub async fn codex_respond_pending(
     supervisor: State<'_, CodexSupervisor>,
 ) -> Result<AcceptedResponse, CodexCommandError> {
     supervisor.respond_pending(request).await
+}
+
+#[tauri::command]
+pub async fn codex_answer_fallback_decision(
+    request: CodexFallbackDecisionRequest,
+    supervisor: State<'_, CodexSupervisor>,
+) -> Result<TurnResponse, CodexCommandError> {
+    supervisor.answer_fallback_decision(request).await
 }
