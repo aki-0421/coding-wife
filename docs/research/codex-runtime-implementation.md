@@ -93,6 +93,10 @@ UI/HISTへ渡すCodex eventは、少なくとも次へ分類する。
 
 attachmentはRustが発行するopaque handleだけをturn requestへ渡す。native picker、drop、pasteは同じvalidatorを使い、active workspace内のregular readable non-symlink、non-executable fileだけを許可する。1件25MiB、10件、合計50MiBの境界をRustで再検証し、imageは`localImage`、他fileは`mention`へRust内で変換する。directory、root外、symlink、実行可能file、権限不足、期限切れhandleは無効itemだけを拒否し、draftと他のvalid itemを保持する。
 
+handleは発行時のworkspace ID、Codex generation、canonical rootのdevice/inode、source fileのdevice/inode/size/SHA-256へ束縛し、TTLは30分とする。pickerが返すpathとdrop/pasteで受け取るpathは同じRust validatorへ渡し、drop/pasteのabsolute pathは入力にだけ使ってresponse、event、logへechoしない。validatorはrootから対象までのsymlink componentを拒否し、`O_NOFOLLOW`で開いたregular fileを読み切って前後metadataとhashを確定する。PNG、JPEG、GIF、WebPのmagicに一致するraster imageだけを`localImage`、それ以外を`mention`へ投影する。
+
+turn送信直前にroot identity、active generation、TTL、件数、合計size、source metadata/hashを全件再照合する。1件でもhandleがstaleならApp Server requestを開始せず、draftと全attachment chipを保持する。検証済みhandleは`turn/start` responseが受理された後だけconsumeし、validation/transport failureでは再利用可能なまま保持する。validationとApp Server requestの間で自動copyやworkspace mutationは行わない。
+
 Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpathをturn payloadへ組み立てない。未実装の`terminal_output`を成功表示へfallbackしない。
 
 ## Workspace composition検証
