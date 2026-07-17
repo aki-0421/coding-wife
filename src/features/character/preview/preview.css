@@ -103,9 +103,9 @@
   display: block;
   overflow: hidden;
   margin-top: 1px;
-  color: var(--text-disabled);
+  color: var(--selected-row-secondary);
   font-family: var(--font-code);
-  font-size: 9px;
+  font-size: var(--text-label);
   font-weight: 400;
   text-overflow: ellipsis;
 }
@@ -131,7 +131,7 @@
 .preview-diagnostics > p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--text-label);
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -151,7 +151,7 @@
   background: var(--surface);
   color: var(--text-secondary);
   font: inherit;
-  font-size: 9px;
+  font-size: var(--text-label);
 }
 
 .preview-diagnostics button {
@@ -170,9 +170,9 @@
 }
 
 #live2d-metrics {
-  color: var(--text-disabled);
+  color: var(--muted-foreground);
   font-family: var(--font-code);
-  font-size: 8px;
+  font-size: var(--text-label);
   line-height: 1.45;
 }
 
@@ -230,7 +230,7 @@
   border-radius: 4px;
   background: #efb7cf;
   color: #8d4568;
-  font-size: 10px;
+  font-size: var(--text-label);
 }
 
 .preview-header nav {
@@ -246,7 +246,7 @@
   border: 0;
   background: transparent;
   padding: 0 9px;
-  color: var(--text-disabled);
+  color: var(--muted-foreground);
   font: inherit;
   font-size: 11px;
 }
@@ -293,7 +293,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 9px;
-  font-size: 10px;
+  font-size: var(--text-label);
 }
 
 .preview-tool-row svg,
@@ -310,9 +310,9 @@
   border-radius: var(--radius-control);
   background: var(--code-chip);
   padding: 4px 7px;
-  color: var(--text-disabled);
+  color: var(--text-secondary);
   font-family: var(--font-code);
-  font-size: 9px;
+  font-size: var(--text-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -349,7 +349,7 @@
 
 .preview-composer > p {
   margin: 0 0 40px;
-  color: var(--text-disabled);
+  color: var(--muted-foreground);
   font-size: 11px;
 }
 
@@ -358,7 +358,7 @@
   align-items: center;
   gap: 6px;
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: var(--text-label);
 }
 
 .preview-composer span,
