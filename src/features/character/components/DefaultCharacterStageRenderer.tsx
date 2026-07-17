@@ -1,7 +1,11 @@
-import { useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Live2dCharacter } from "@/features/character/components/Live2dCharacter"
-import type { CharacterState } from "@/features/character/model"
+import type {
+  CharacterControllerStatus,
+  CharacterState,
+} from "@/features/character/model"
+import { useCharacterRuntimeStatusStore } from "@/features/character/runtime-status"
 import { mapCompanionStateToCharacterState } from "@/features/character/semantic-state"
 import type {
   CharacterStageRenderProps,
@@ -34,9 +38,11 @@ export function DefaultCharacterStageRenderer({
   muted,
   reducedMotion,
 }: CharacterStageRenderProps) {
+  const runtimeStatus = useCharacterRuntimeStatusStore()
   const [presentation, setPresentation] = useState(() =>
     createPresentation(workspaceId, state, 1),
   )
+  const [reloadToken, setReloadToken] = useState(0)
 
   if (
     presentation.workspaceId !== workspaceId ||
@@ -46,6 +52,33 @@ export function DefaultCharacterStageRenderer({
       createPresentation(workspaceId, state, presentation.generation + 1),
     )
   }
+  const retry = useCallback(() => setReloadToken((token) => token + 1), [])
+  const runtimeGeneration = presentation.generation * 1_000_000 + reloadToken
+  const session = useMemo(
+    () =>
+      runtimeStatus.createSession(presentation.workspaceId, runtimeGeneration),
+    [presentation.workspaceId, runtimeGeneration, runtimeStatus],
+  )
+  const handleControllerChange = useCallback(
+    (controller: unknown) => {
+      if (controller === null) runtimeStatus.unmount(session)
+      else runtimeStatus.mount(session, retry)
+    },
+    [retry, runtimeStatus, session],
+  )
+  const handleStatusChange = useCallback(
+    (status: CharacterControllerStatus) => {
+      runtimeStatus.report(session, status, retry)
+    },
+    [retry, runtimeStatus, session],
+  )
+
+  useEffect(
+    () => () => {
+      runtimeStatus.unmount(session)
+    },
+    [runtimeStatus, session],
+  )
 
   return (
     <div
@@ -56,6 +89,9 @@ export function DefaultCharacterStageRenderer({
     >
       <Live2dCharacter
         motionPolicy={reducedMotion ? "reduced" : "animated"}
+        onControllerChange={handleControllerChange}
+        onStatusChange={handleStatusChange}
+        reloadToken={reloadToken}
         showCaption={false}
         state={presentation.characterState}
         stateGeneration={presentation.generation}

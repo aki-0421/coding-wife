@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -8,7 +9,10 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
-import { DefaultCharacterStageRenderer } from "@/features/character"
+import {
+  CharacterRuntimeStatusProvider,
+  DefaultCharacterStageRenderer,
+} from "@/features/character"
 import type { Live2dCharacterProps } from "@/features/character/components/Live2dCharacter"
 import type { LocalePreferenceStore } from "@/features/localization"
 import { DemoTransport } from "@/features/runtime"
@@ -18,10 +22,26 @@ import type {
 } from "@/features/workspace-view/types"
 
 const live2dCalls = vi.hoisted(() => [] as Live2dCharacterProps[])
+const reportedPresentations = vi.hoisted(() => new Set<string>())
 
 vi.mock("@/features/character/components/Live2dCharacter", () => {
   function MockLive2dCharacter(props: Live2dCharacterProps) {
     live2dCalls.push(props)
+    const reportKey = `${props.stateGeneration}:${props.motionPolicy}:${props.reloadToken}`
+    if (!reportedPresentations.has(reportKey)) {
+      reportedPresentations.add(reportKey)
+      queueMicrotask(() =>
+        props.onStatusChange?.({
+          phase: "ready",
+          state: props.state,
+          motionPolicy: props.motionPolicy ?? "animated",
+          fallbackLevel:
+            props.motionPolicy === "reduced" ? "reduced" : "animated",
+          error: null,
+          pack: null,
+        }),
+      )
+    }
     return (
       <div
         data-live2d-generation={props.stateGeneration}
@@ -51,6 +71,7 @@ function latestLive2dProps(): Live2dCharacterProps | undefined {
 describe("default App character integration", () => {
   beforeEach(() => {
     live2dCalls.length = 0
+    reportedPresentations.clear()
   })
 
   it("updates state generations without remounting for turns and workspaces", async () => {
@@ -127,23 +148,27 @@ describe("default App character integration", () => {
 
   it("maps reduced motion without treating mute as a motion policy", () => {
     const { rerender } = render(
-      <DefaultCharacterStageRenderer
-        muted={false}
-        reducedMotion={false}
-        state="reviewing"
-        workspaceId="workspace-a"
-      />,
+      <CharacterRuntimeStatusProvider rendererKind="builtin_hiyori">
+        <DefaultCharacterStageRenderer
+          muted={false}
+          reducedMotion={false}
+          state="reviewing"
+          workspaceId="workspace-a"
+        />
+      </CharacterRuntimeStatusProvider>,
     )
     const initialNode = screen.getByTestId("live2d-character")
     const initialGeneration = latestLive2dProps()?.stateGeneration
 
     rerender(
-      <DefaultCharacterStageRenderer
-        muted
-        reducedMotion
-        state="reviewing"
-        workspaceId="workspace-a"
-      />,
+      <CharacterRuntimeStatusProvider rendererKind="builtin_hiyori">
+        <DefaultCharacterStageRenderer
+          muted
+          reducedMotion
+          state="reviewing"
+          workspaceId="workspace-a"
+        />
+      </CharacterRuntimeStatusProvider>,
     )
 
     expect(screen.getByTestId("live2d-character")).toBe(initialNode)
@@ -178,5 +203,78 @@ describe("default App character integration", () => {
     expect(
       document.querySelector('[data-character-stage-default="bundled-hiyori"]'),
     ).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Diagnostics" }).at(-1)!,
+    )
+    expect(screen.getByText("External renderer")).toBeVisible()
+    expect(
+      screen.getByText("Unknown", { selector: "[data-slot=badge]" }),
+    ).toBeVisible()
+    expect(screen.queryByText("桃瀬ひより - PRO")).not.toBeInTheDocument()
+  })
+
+  it("reports Hiyori provenance, preferences, errors, and retry from the mounted renderer", async () => {
+    render(
+      <App localeStore={englishLocaleStore} transport={new DemoTransport()} />,
+    )
+
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-character-runtime-readiness="ready"]'),
+      ).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Companion" }))
+    expect(screen.getByText("桃瀬ひより - PRO")).toBeVisible()
+    expect(screen.getByText("hiyori_pro_t11")).toBeVisible()
+    expect(screen.getByText("かにビーム")).toBeVisible()
+
+    fireEvent.click(screen.getByRole("button", { name: "General" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Reduce" }))
+    fireEvent.click(screen.getByRole("button", { name: "Companion" }))
+    await waitFor(() =>
+      expect(screen.getAllByText("Reduced").length).toBeGreaterThan(0),
+    )
+
+    fireEvent.click(screen.getByRole("switch", { name: "Hide character" }))
+    expect(
+      screen.getByText("Hidden", { selector: "[data-slot=badge]" }),
+    ).toBeVisible()
+    fireEvent.click(screen.getByRole("switch", { name: "Hide character" }))
+
+    const failedStatus = {
+      phase: "error",
+      state: "disconnected",
+      motionPolicy: "reduced",
+      fallbackLevel: "text_only",
+      error: {
+        code: "asset_fetch_failed",
+        message: "do not render this raw detail",
+        recoverable: true,
+      },
+      pack: null,
+    } as const
+    act(() => latestLive2dProps()?.onStatusChange?.(failedStatus))
+    expect(
+      (await screen.findAllByText("asset_fetch_failed")).length,
+    ).toBeGreaterThan(0)
+    expect(
+      screen.queryByText("do not render this raw detail"),
+    ).not.toBeInTheDocument()
+
+    const previousReloadToken = latestLive2dProps()?.reloadToken
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Retry Live2D" }).at(-1)!,
+    )
+    await waitFor(() =>
+      expect(latestLive2dProps()?.reloadToken).not.toBe(previousReloadToken),
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-character-runtime-readiness="ready"]'),
+      ).toBeInTheDocument(),
+    )
   })
 })

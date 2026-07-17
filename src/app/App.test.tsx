@@ -174,7 +174,7 @@ describe("App workspace shell", () => {
     expect(await screen.findByText("Preview only")).toBeVisible()
     expect(
       screen.getAllByText(
-        "Codex, Git, Live2D, and local history are not connected. Controls remain available for UI verification, but no repository operation is reported as complete.",
+        "Codex, Git, and local history are not connected. The bundled Live2D companion reports its renderer state separately.",
       ),
     ).toHaveLength(2)
     expect(

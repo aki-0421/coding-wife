@@ -6,6 +6,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import {
+  getCharacterErrorMessage,
+  type CharacterRuntimeView,
+} from "@/features/character"
+import { useI18n } from "@/features/localization"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type {
   CharacterStageRenderer,
@@ -14,6 +19,7 @@ import type {
 
 interface CharacterStageSlotProps {
   readonly copy: WorkspaceCopy
+  readonly characterRuntime: CharacterRuntimeView
   readonly hidden: boolean
   readonly muted: boolean
   readonly reducedMotion: boolean
@@ -21,10 +27,12 @@ interface CharacterStageSlotProps {
   readonly state: CompanionSemanticState
   readonly workspaceId: string
   readonly onMutedChange: (muted: boolean) => void
+  readonly onRetryCharacter: () => void
 }
 
 export function CharacterStageSlot({
   copy,
+  characterRuntime,
   hidden,
   muted,
   reducedMotion,
@@ -32,11 +40,31 @@ export function CharacterStageSlot({
   state,
   workspaceId,
   onMutedChange,
+  onRetryCharacter,
 }: CharacterStageSlotProps) {
+  const { locale } = useI18n()
   const stateLabel =
     state === "disconnected"
       ? copy.character.disconnected
       : state.replaceAll("_", " ")
+  const runtimeDetail = (() => {
+    if (characterRuntime.rendererKind === "external") {
+      return copy.character.externalRenderer
+    }
+    if (characterRuntime.currentErrorCode !== null) {
+      return `${getCharacterErrorMessage(locale, characterRuntime.currentErrorCode)} ${copy.settingsView.characterFallbacks[characterRuntime.fallback]}`
+    }
+    if (characterRuntime.readiness === "loading") {
+      return copy.settingsView.live2dLoading
+    }
+    if (characterRuntime.readiness === "recovering") {
+      return `${copy.settingsView.live2dRecovering} · ${copy.settingsView.characterFallbacks[characterRuntime.fallback]}`
+    }
+    if (characterRuntime.readiness === "degraded") {
+      return `${copy.settingsView.live2dDegraded} · ${copy.settingsView.characterFallbacks[characterRuntime.fallback]}`
+    }
+    return null
+  })()
 
   return (
     <aside
@@ -68,7 +96,12 @@ export function CharacterStageSlot({
       ) : null}
 
       <div className="absolute inset-x-xl bottom-lg flex items-end justify-between gap-md">
-        <div className="min-w-0 rounded-control bg-app-bg/90 px-xs py-xxs">
+        <div
+          aria-live="polite"
+          className="min-w-0 max-w-[34ch] rounded-control bg-app-bg/90 px-xs py-xxs"
+          data-character-runtime-readiness={characterRuntime.readiness}
+          role={characterRuntime.currentErrorCode ? "alert" : "status"}
+        >
           <p className="m-0 text-label text-muted-foreground">
             {copy.character.state}
           </p>
@@ -79,6 +112,22 @@ export function CharacterStageSlot({
             {stateLabel} ·{" "}
             {muted ? copy.character.muted : copy.character.unmuted}
           </p>
+          {runtimeDetail ? (
+            <p className="m-0 text-caption text-muted-foreground">
+              {runtimeDetail}
+            </p>
+          ) : null}
+          {characterRuntime.canRetry ? (
+            <Button
+              className="mt-xs"
+              onClick={onRetryCharacter}
+              size="xs"
+              type="button"
+              variant="secondary"
+            >
+              {copy.character.retryRenderer}
+            </Button>
+          ) : null}
         </div>
 
         <Tooltip>

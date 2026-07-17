@@ -115,3 +115,10 @@ export function getCharacterCaption(
   }
   return { state, detail: null }
 }
+
+export function getCharacterErrorMessage(
+  locale: SupportedLocale,
+  code: CharacterErrorCode,
+): string {
+  return characterCopy[locale].errors[code]
+}

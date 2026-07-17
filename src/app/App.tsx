@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react"
 
 import { AppProviders } from "@/app/AppProviders"
-import { DefaultCharacterStageRenderer } from "@/features/character"
+import {
+  CharacterRuntimeStatusProvider,
+  DefaultCharacterStageRenderer,
+} from "@/features/character"
 import {
   createLocalePreferenceStore,
   type LocalePreferenceStore,
@@ -28,6 +31,8 @@ export function App({
 }: AppProps) {
   const [fallbackTransport] = useState(createAppTransport)
   const activeTransport = transport ?? fallbackTransport
+  const characterRendererKind =
+    characterRenderer === undefined ? "builtin_hiyori" : "external"
   const activeCharacterRenderer =
     characterRenderer ?? DefaultCharacterStageRenderer
   const fallbackLocaleStore = useMemo(
@@ -40,10 +45,12 @@ export function App({
       localeStore={localeStore ?? fallbackLocaleStore}
       transport={activeTransport}
     >
-      <WorkspaceShell
-        adapter={workspaceAdapter}
-        characterRenderer={activeCharacterRenderer}
-      />
+      <CharacterRuntimeStatusProvider rendererKind={characterRendererKind}>
+        <WorkspaceShell
+          adapter={workspaceAdapter}
+          characterRenderer={activeCharacterRenderer}
+        />
+      </CharacterRuntimeStatusProvider>
     </AppProviders>
   )
 }

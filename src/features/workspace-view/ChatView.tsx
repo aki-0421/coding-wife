@@ -7,6 +7,7 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import type { CharacterRuntimeView } from "@/features/character"
 import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { Composer } from "@/features/workspace-view/Composer"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils"
 
 interface ChatViewProps {
   readonly characterHidden: boolean
+  readonly characterRuntime: CharacterRuntimeView
   readonly connected: boolean
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
@@ -42,12 +44,14 @@ interface ChatViewProps {
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onRemoveContext: (snapshotId: string) => void
   readonly onRetryRuntime: () => void
+  readonly onRetryCharacter: () => void
   readonly onSend: () => Promise<boolean>
   readonly onStop: () => void | Promise<void>
 }
 
 export function ChatView({
   characterHidden,
+  characterRuntime,
   connected,
   copy,
   draft,
@@ -66,6 +70,7 @@ export function ChatView({
   onRemoveAttachment,
   onRemoveContext,
   onRetryRuntime,
+  onRetryCharacter,
   onSend,
   onStop,
 }: ChatViewProps) {
@@ -160,10 +165,12 @@ export function ChatView({
 
       {!characterHidden ? (
         <CharacterStageSlot
+          characterRuntime={characterRuntime}
           copy={copy}
           hidden={characterHidden}
           muted={muted}
           onMutedChange={onMutedChange}
+          onRetryCharacter={onRetryCharacter}
           reducedMotion={reducedMotion}
           state={companionState}
           workspaceId={workspaceId}

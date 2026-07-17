@@ -5,6 +5,26 @@ export {
 } from "@/features/character/components/Live2dCharacter"
 export { DefaultCharacterStageRenderer } from "@/features/character/components/DefaultCharacterStageRenderer"
 export {
+  getCharacterCaption,
+  getCharacterErrorMessage,
+} from "@/features/character/copy"
+export {
+  BUILTIN_HIYORI_PACK,
+  CharacterRuntimeStatusProvider,
+  CharacterRuntimeStatusStore,
+  useCharacterRuntimeStatus,
+  useCharacterRuntimeStatusStore,
+  type CharacterRendererKind,
+  type CharacterRuntimeSession,
+  type CharacterRuntimeSnapshot,
+} from "@/features/character/runtime-status"
+export {
+  projectCharacterRuntime,
+  type CharacterRuntimeReadiness,
+  type CharacterRuntimeView,
+  type CharacterRuntimeViewPhase,
+} from "@/features/character/runtime-view"
+export {
   characterStates,
   CharacterError,
   type CharacterControllerStatus,

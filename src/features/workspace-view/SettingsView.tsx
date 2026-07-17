@@ -1,6 +1,7 @@
 import { useState } from "react"
 import {
   ActivityIcon,
+  AlertTriangleIcon,
   BotIcon,
   ChevronDownIcon,
   DatabaseIcon,
@@ -12,6 +13,7 @@ import {
   SparklesIcon,
 } from "lucide-react"
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -32,6 +34,10 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  getCharacterErrorMessage,
+  type CharacterRuntimeView,
+} from "@/features/character"
 import { useI18n, type SupportedLocale } from "@/features/localization"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type { RuntimeState } from "@/features/runtime"
@@ -40,6 +46,7 @@ import { cn } from "@/lib/utils"
 
 interface SettingsViewProps {
   readonly characterHidden: boolean
+  readonly characterRuntime: CharacterRuntimeView
   readonly copy: WorkspaceCopy
   readonly muted: boolean
   readonly reducedMotion: "system" | "reduce" | "allow"
@@ -50,9 +57,152 @@ interface SettingsViewProps {
   readonly onOpenContext: (section: "project" | "character") => void
   readonly onResetUi: () => void
   readonly onRetryRuntime: () => void
+  readonly onRetryCharacter: () => void
   readonly onSectionChange: (section: SettingsSection) => void
   readonly onReducedMotionChange: (value: "system" | "reduce" | "allow") => void
   readonly onUnavailableAction: () => void
+}
+
+function CharacterReadinessBadge({
+  copy,
+  runtime,
+}: Pick<SettingsViewProps, "copy"> & {
+  readonly runtime: CharacterRuntimeView
+}) {
+  const label = {
+    loading: copy.settingsView.live2dLoading,
+    ready: copy.settingsView.live2dReady,
+    recovering: copy.settingsView.live2dRecovering,
+    degraded: copy.settingsView.live2dDegraded,
+    error: copy.settingsView.live2dError,
+    hidden: copy.settingsView.live2dHidden,
+    unknown: copy.settingsView.live2dUnknown,
+  }[runtime.readiness]
+  const variant =
+    runtime.readiness === "ready"
+      ? "success"
+      : runtime.readiness === "loading" || runtime.readiness === "recovering"
+        ? "running"
+        : runtime.readiness === "error"
+          ? "destructive"
+          : "outline"
+
+  return (
+    <Badge
+      data-character-runtime-readiness={runtime.readiness}
+      variant={variant}
+    >
+      {label}
+    </Badge>
+  )
+}
+
+function CharacterRuntimeDetails({
+  characterRuntime,
+  copy,
+  muted,
+}: Pick<SettingsViewProps, "characterRuntime" | "copy" | "muted">) {
+  const rendererLabel =
+    characterRuntime.rendererKind === "builtin_hiyori"
+      ? copy.settingsView.builtinRenderer
+      : copy.settingsView.externalRenderer
+  return (
+    <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-lg gap-y-xs text-caption">
+      <dt className="text-muted-foreground">{copy.settingsView.renderer}</dt>
+      <dd className="m-0 text-foreground">{rendererLabel}</dd>
+      {characterRuntime.pack ? (
+        <>
+          <dt className="text-muted-foreground">
+            {copy.settingsView.bundledModel}
+          </dt>
+          <dd className="m-0 text-foreground">
+            {characterRuntime.pack.displayName}
+          </dd>
+          <dt className="text-muted-foreground">
+            {copy.settingsView.bundledVersion}
+          </dt>
+          <dd className="m-0 font-mono text-foreground">
+            {characterRuntime.pack.bundledVersion}
+          </dd>
+          <dt className="text-muted-foreground">
+            {copy.settingsView.illustrationCredit}
+          </dt>
+          <dd className="m-0 text-foreground">
+            {characterRuntime.pack.illustration}
+          </dd>
+          <dt className="text-muted-foreground">
+            {copy.settingsView.modelingCredit}
+          </dt>
+          <dd className="m-0 text-foreground">
+            {characterRuntime.pack.modeling}
+          </dd>
+          <dt className="text-muted-foreground">
+            {copy.settingsView.noticeHash}
+          </dt>
+          <dd className="m-0 truncate font-mono text-label text-foreground">
+            {characterRuntime.pack.noticeSha256}
+          </dd>
+        </>
+      ) : null}
+      <dt className="text-muted-foreground">{copy.settingsView.phase}</dt>
+      <dd className="m-0 text-foreground">
+        {copy.settingsView.characterPhases[characterRuntime.phase]}
+      </dd>
+      <dt className="text-muted-foreground">{copy.settingsView.fallback}</dt>
+      <dd className="m-0 text-foreground">
+        {copy.settingsView.characterFallbacks[characterRuntime.fallback]}
+      </dd>
+      <dt className="text-muted-foreground">
+        {copy.settingsView.motionPolicy}
+      </dt>
+      <dd className="m-0 text-foreground">
+        {copy.settingsView.characterPolicies[characterRuntime.motionPolicy]}
+      </dd>
+      <dt className="text-muted-foreground">{copy.settingsView.audioState}</dt>
+      <dd className="m-0 text-foreground">
+        {muted ? copy.character.muted : copy.character.unmuted}
+      </dd>
+      <dt className="text-muted-foreground">{copy.settingsView.lastError}</dt>
+      <dd className="m-0 font-mono text-label text-foreground">
+        {characterRuntime.lastErrorCode ?? copy.settingsView.noRecordedError}
+      </dd>
+    </dl>
+  )
+}
+
+function CharacterRuntimeErrorAlert({
+  characterRuntime,
+  copy,
+  onRetryCharacter,
+}: Pick<SettingsViewProps, "characterRuntime" | "copy" | "onRetryCharacter">) {
+  const { locale } = useI18n()
+  if (characterRuntime.currentErrorCode === null) return null
+
+  return (
+    <Alert data-character-runtime-error="true">
+      <AlertTriangleIcon aria-hidden="true" className="text-destructive" />
+      <AlertTitle>{copy.settingsView.live2dError}</AlertTitle>
+      <AlertDescription className="flex flex-col items-start gap-xs">
+        <span>
+          {getCharacterErrorMessage(locale, characterRuntime.currentErrorCode)}{" "}
+          {copy.settingsView.characterErrorIntro}
+        </span>
+        <code className="font-mono text-label text-destructive">
+          {characterRuntime.currentErrorCode}
+        </code>
+        {characterRuntime.canRetry ? (
+          <Button
+            onClick={onRetryCharacter}
+            size="xs"
+            type="button"
+            variant="secondary"
+          >
+            {copy.settingsView.retryCharacter}
+          </Button>
+        ) : null}
+      </AlertDescription>
+    </Alert>
+  )
 }
 
 const sectionOrder: readonly SettingsSection[] = [
@@ -298,26 +448,40 @@ function ContextSettings({
 
 function CompanionSettings({
   characterHidden,
+  characterRuntime,
   copy,
+  muted,
   onCharacterHiddenChange,
+  onRetryCharacter,
   onUnavailableAction,
 }: Pick<
   SettingsViewProps,
-  "characterHidden" | "copy" | "onCharacterHiddenChange" | "onUnavailableAction"
+  | "characterHidden"
+  | "characterRuntime"
+  | "copy"
+  | "muted"
+  | "onCharacterHiddenChange"
+  | "onRetryCharacter"
+  | "onUnavailableAction"
 >) {
   return (
     <section className="flex flex-col gap-lg">
-      <h2 className="m-0 text-headline text-text-strong">
-        {copy.settingsView.companionTitle}
-      </h2>
-      <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-lg gap-y-xs text-caption">
-        <dt className="text-muted-foreground">
-          {copy.settingsView.bundledModel}
-        </dt>
-        <dd className="m-0 text-foreground">
-          {copy.settingsView.bundledModelValue}
-        </dd>
-      </dl>
+      <div className="flex items-center justify-between gap-md">
+        <h2 className="m-0 text-headline text-text-strong">
+          {copy.settingsView.companionTitle}
+        </h2>
+        <CharacterReadinessBadge copy={copy} runtime={characterRuntime} />
+      </div>
+      <CharacterRuntimeErrorAlert
+        characterRuntime={characterRuntime}
+        copy={copy}
+        onRetryCharacter={onRetryCharacter}
+      />
+      <CharacterRuntimeDetails
+        characterRuntime={characterRuntime}
+        copy={copy}
+        muted={muted}
+      />
       <SettingRow
         action={
           <Button
@@ -446,10 +610,21 @@ function SupportSettings({ copy }: { readonly copy: WorkspaceCopy }) {
 }
 
 function DiagnosticsSettings({
+  characterRuntime,
   copy,
+  muted,
   runtimeState,
+  onRetryCharacter,
   onRetryRuntime,
-}: Pick<SettingsViewProps, "copy" | "runtimeState" | "onRetryRuntime">) {
+}: Pick<
+  SettingsViewProps,
+  | "characterRuntime"
+  | "copy"
+  | "muted"
+  | "runtimeState"
+  | "onRetryCharacter"
+  | "onRetryRuntime"
+>) {
   return (
     <section className="flex flex-col gap-lg">
       <div className="flex items-center justify-between gap-md">
@@ -495,18 +670,30 @@ function DiagnosticsSettings({
         {copy.settingsView.integrations}
       </h3>
       <div className="flex flex-col">
-        {(["Codex", "Git", "Live2D", "Local history"] as const).map(
-          (integration) => (
-            <div
-              className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption"
-              key={integration}
-            >
-              <span>{integration}</span>
-              <Badge variant="outline">{copy.settingsView.notConfigured}</Badge>
-            </div>
-          ),
-        )}
+        {(["Codex", "Git", "Local history"] as const).map((integration) => (
+          <div
+            className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption"
+            key={integration}
+          >
+            <span>{integration}</span>
+            <Badge variant="outline">{copy.settingsView.notConfigured}</Badge>
+          </div>
+        ))}
+        <div className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption">
+          <span>{copy.settingsView.live2dStatus}</span>
+          <CharacterReadinessBadge copy={copy} runtime={characterRuntime} />
+        </div>
       </div>
+      <CharacterRuntimeErrorAlert
+        characterRuntime={characterRuntime}
+        copy={copy}
+        onRetryCharacter={onRetryCharacter}
+      />
+      <CharacterRuntimeDetails
+        characterRuntime={characterRuntime}
+        copy={copy}
+        muted={muted}
+      />
     </section>
   )
 }

@@ -16,6 +16,11 @@ import {
 } from "@/components/ui/tooltip"
 import { useI18n } from "@/features/localization"
 import { useRuntime } from "@/features/runtime"
+import {
+  projectCharacterRuntime,
+  useCharacterRuntimeStatus,
+  useCharacterRuntimeStatusStore,
+} from "@/features/character"
 import { ChatView } from "@/features/workspace-view/ChatView"
 import { ContextView } from "@/features/workspace-view/ContextView"
 import { getWorkspaceCopy } from "@/features/workspace-view/copy"
@@ -64,6 +69,14 @@ export function WorkspaceShell({
   const copy = getWorkspaceCopy(locale)
   const runtime = useRuntime()
   const view = useWorkspaceViewModel(adapter)
+  const characterRuntimeStore = useCharacterRuntimeStatusStore()
+  const characterRuntimeSnapshot = useCharacterRuntimeStatus(
+    view.selectedWorkspace?.id ?? "__no_workspace__",
+  )
+  const characterRuntime = projectCharacterRuntime(
+    characterRuntimeSnapshot,
+    view.characterHidden,
+  )
   const [systemReducedMotion, setSystemReducedMotion] = useState(
     getSystemReducedMotion,
   )
@@ -150,6 +163,7 @@ export function WorkspaceShell({
       </main>
     )
   }
+  const selectedWorkspace = view.selectedWorkspace
 
   return (
     <main
@@ -166,7 +180,7 @@ export function WorkspaceShell({
         onFilterChange={view.setFilter}
         onOpenSettings={() => openSettings("general")}
         onSelectWorkspace={view.setSelectedWorkspaceId}
-        selectedWorkspace={view.selectedWorkspace}
+        selectedWorkspace={selectedWorkspace}
         selectedWorkspaceId={view.selectedWorkspaceId}
       />
 
@@ -180,7 +194,7 @@ export function WorkspaceShell({
           activeTab={view.activeTab}
           connection={connection}
           copy={copy}
-          workspace={view.selectedWorkspace}
+          workspace={selectedWorkspace}
         />
 
         <TabsContent
@@ -190,6 +204,7 @@ export function WorkspaceShell({
         >
           <ChatView
             characterHidden={view.characterHidden}
+            characterRuntime={characterRuntime}
             connected={connected}
             copy={copy}
             draft={view.selectedDraft}
@@ -205,13 +220,16 @@ export function WorkspaceShell({
             onRemoveAttachment={view.removeAttachment}
             onRemoveContext={view.removeContext}
             onRetryRuntime={runtime.refresh}
+            onRetryCharacter={() => {
+              characterRuntimeStore.retry(selectedWorkspace.id)
+            }}
             onSend={view.sendTurn}
             onStop={view.stopTurn}
             reducedMotion={reducedMotion}
             renderer={characterRenderer}
             runtimeError={runtime.state.status === "error"}
             turnState={view.turnState}
-            workspaceId={view.selectedWorkspace.id}
+            workspaceId={selectedWorkspace.id}
           />
         </TabsContent>
 
@@ -231,7 +249,7 @@ export function WorkspaceShell({
           forceMount
           value="context"
         >
-          <ContextView copy={copy} workspaceId={view.selectedWorkspace.id} />
+          <ContextView copy={copy} workspaceId={selectedWorkspace.id} />
         </TabsContent>
 
         <TabsContent
@@ -241,6 +259,7 @@ export function WorkspaceShell({
         >
           <SettingsView
             characterHidden={view.characterHidden}
+            characterRuntime={characterRuntime}
             copy={copy}
             muted={view.muted}
             onCharacterHiddenChange={view.setCharacterHidden}
@@ -249,6 +268,9 @@ export function WorkspaceShell({
             onReducedMotionChange={view.setReducedMotion}
             onResetUi={view.resetUiState}
             onRetryRuntime={runtime.refresh}
+            onRetryCharacter={() => {
+              characterRuntimeStore.retry(selectedWorkspace.id)
+            }}
             onSectionChange={view.setSettingsSection}
             onUnavailableAction={() =>
               view.setNotice({
