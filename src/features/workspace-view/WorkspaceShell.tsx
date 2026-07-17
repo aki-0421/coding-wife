@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { AlertCircleIcon, InfoIcon } from "lucide-react"
+import { AlertCircleIcon, InfoIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -9,6 +9,11 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useI18n } from "@/features/localization"
 import { useRuntime } from "@/features/runtime"
 import { ChatView } from "@/features/workspace-view/ChatView"
@@ -161,6 +166,7 @@ export function WorkspaceShell({
         onFilterChange={view.setFilter}
         onOpenSettings={() => openSettings("general")}
         onSelectWorkspace={view.setSelectedWorkspaceId}
+        selectedWorkspace={view.selectedWorkspace}
         selectedWorkspaceId={view.selectedWorkspaceId}
       />
 
@@ -275,15 +281,20 @@ export function WorkspaceShell({
             />
           )}
           <span className="max-w-[48ch]">{view.notice.message}</span>
-          <Button
-            aria-label="Dismiss"
-            onClick={() => view.setNotice(null)}
-            size="icon-xs"
-            type="button"
-            variant="ghost"
-          >
-            ×
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={copy.dismiss}
+                onClick={() => view.setNotice(null)}
+                size="icon-xs"
+                type="button"
+                variant="ghost"
+              >
+                <XIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{copy.dismiss}</TooltipContent>
+          </Tooltip>
         </div>
       ) : null}
     </main>

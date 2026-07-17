@@ -3,6 +3,7 @@ import {
   EllipsisIcon,
   GitBranchIcon,
   LoaderCircleIcon,
+  SparklesIcon,
   WifiOffIcon,
 } from "lucide-react"
 
@@ -87,12 +88,18 @@ export function WorkspaceHeader({
         className="flex h-[40px] min-w-0 items-center gap-sm px-xl"
         data-tauri-drag-region=""
       >
-        <span
-          aria-hidden="true"
-          className="flex size-6 shrink-0 items-center justify-center rounded-control border border-warm-active/40 bg-warm-active text-[11px] text-app-bg"
-        >
-          ✦
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              aria-label={copy.appMark}
+              className="flex size-6 shrink-0 items-center justify-center rounded-control border border-warm-active/40 bg-warm-active text-app-bg"
+              role="img"
+            >
+              <SparklesIcon aria-hidden="true" className="size-3" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{copy.appMark}</TooltipContent>
+        </Tooltip>
         <span className="shrink-0 text-display font-medium text-muted-foreground">
           {workspace.repository}
         </span>
@@ -118,7 +125,7 @@ export function WorkspaceHeader({
           <TooltipContent>{workspace.branch}</TooltipContent>
         </Tooltip>
         <Button
-          aria-label="Workspace actions"
+          aria-label={copy.workspaceActions}
           size="icon-xs"
           type="button"
           variant="ghost"

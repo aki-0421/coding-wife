@@ -191,7 +191,7 @@ export function Composer({
         </div>
 
         <p
-          className="m-0 h-[17px] truncate pt-xxs text-[9px] leading-[13.5px] text-muted-foreground"
+          className="m-0 h-[17px] truncate text-caption leading-[16.5px] text-muted-foreground"
           id="composer-help"
           title={copy.composerHint}
         >
@@ -277,7 +277,10 @@ export function Composer({
             </ToggleGroupItem>
           </ToggleGroup>
 
-          <span className="ml-auto hidden shrink-0 font-mono text-[8.25px] text-text-disabled min-[1120px]:inline">
+          <span
+            className="ml-auto hidden shrink-0 font-mono text-caption text-muted-foreground min-[1120px]:inline"
+            data-composer-command-hint=""
+          >
             {copy.commandSend}
           </span>
 

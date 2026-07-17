@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import {
   CheckIcon,
+  CircleAlertIcon,
   FolderPlusIcon,
   GitBranchIcon,
   ListFilterIcon,
@@ -54,6 +55,7 @@ interface WorkspaceSidebarProps {
   readonly copy: WorkspaceCopy
   readonly filter: string
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
+  readonly selectedWorkspace: WorkspaceRecord
   readonly selectedWorkspaceId: string
   readonly onAddProject: () => void
   readonly onCreateWorkspace: (name: string, goal: string) => Promise<boolean>
@@ -122,7 +124,7 @@ function WorkspaceRow({
           aria-current={selected ? "page" : undefined}
           aria-label={`${fullName}, ${workspace.branch}, ${copy.lifecycle[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}`}
           className={cn(
-            "flex h-[49.5px] w-full items-center gap-sm rounded-control px-sm py-xs text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+            "group/workspace flex h-[49.5px] w-full items-center gap-sm rounded-control px-sm py-xs text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
             selected && "bg-selected-row",
           )}
           onClick={onSelect}
@@ -145,16 +147,19 @@ function WorkspaceRow({
               {fullName}
             </span>
             <span className="flex min-w-0 items-center gap-xs">
-              <span className="truncate font-mono text-label text-muted-foreground">
+              <span
+                className={cn(
+                  "truncate font-mono text-label text-muted-foreground transition-colors group-hover/workspace:text-selected-row-secondary group-focus-visible/workspace:text-selected-row-secondary",
+                  selected && "text-selected-row-secondary",
+                )}
+              >
                 {workspace.branch}
               </span>
               {workspace.attention ? (
-                <span
-                  className="shrink-0 text-[9px] text-destructive"
+                <CircleAlertIcon
                   aria-hidden="true"
-                >
-                  ●
-                </span>
+                  className="size-3 shrink-0 text-destructive"
+                />
               ) : null}
             </span>
           </span>
@@ -162,6 +167,7 @@ function WorkspaceRow({
       </TooltipTrigger>
       <TooltipContent side="right">
         {fullName} · {workspace.branch}
+        {workspace.attention ? ` · ${copy.attention[workspace.attention]}` : ""}
       </TooltipContent>
     </Tooltip>
   )
@@ -409,9 +415,21 @@ function SidebarPanel({
 }
 
 export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
-  const selected = props.filteredWorkspaces.find(
-    (workspace) => workspace.id === props.selectedWorkspaceId,
-  )
+  const [compactNavigationOpen, setCompactNavigationOpen] = useState(false)
+  const compactOpenerRef = useRef<HTMLButtonElement | null>(null)
+  const selected = props.selectedWorkspace
+
+  const openCompactNavigation = (opener: HTMLButtonElement) => {
+    compactOpenerRef.current = opener
+    setCompactNavigationOpen(true)
+  }
+
+  const closeCompactNavigation = () => setCompactNavigationOpen(false)
+
+  const selectFromCompactNavigation = (workspaceId: string) => {
+    props.onSelectWorkspace(workspaceId)
+    closeCompactNavigation()
+  }
 
   return (
     <aside className="workspace-sidebar border-r border-divider">
@@ -425,20 +443,25 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
           <span className="size-xs rounded-circle bg-[#febc2e]" />
           <span className="size-xs rounded-circle bg-[#28c840]" />
         </div>
-        <Dialog>
+        <Dialog
+          onOpenChange={setCompactNavigationOpen}
+          open={compactNavigationOpen}
+        >
           <Tooltip>
             <TooltipTrigger asChild>
-              <DialogTrigger asChild>
-                <Button
-                  aria-label={props.copy.compactSidebar}
-                  className="mt-xs"
-                  size="icon-sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  <MenuIcon />
-                </Button>
-              </DialogTrigger>
+              <Button
+                aria-controls="compact-workspace-navigation"
+                aria-expanded={compactNavigationOpen}
+                aria-haspopup="dialog"
+                aria-label={props.copy.compactSidebar}
+                className="mt-xs"
+                onClick={(event) => openCompactNavigation(event.currentTarget)}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+              >
+                <MenuIcon />
+              </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
               {props.copy.compactSidebar}
@@ -446,21 +469,51 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
           </Tooltip>
           <DialogContent
             className="top-0 left-0 h-dvh max-h-dvh w-[255.04px] max-w-[255.04px] translate-x-0 translate-y-0 rounded-none border-y-0 border-l-0 p-0"
+            id="compact-workspace-navigation"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              compactOpenerRef.current?.focus()
+            }}
+            onEscapeKeyDown={closeCompactNavigation}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") closeCompactNavigation()
+            }}
             showCloseButton={false}
           >
             <DialogTitle className="sr-only">
               {props.copy.workspaces}
             </DialogTitle>
-            <SidebarPanel {...props} showTrafficLights={false} />
+            <SidebarPanel
+              {...props}
+              onAddProject={() => {
+                closeCompactNavigation()
+                props.onAddProject()
+              }}
+              onCreateWorkspace={async (name, goal) => {
+                const created = await props.onCreateWorkspace(name, goal)
+                if (created) closeCompactNavigation()
+                return created
+              }}
+              onOpenSettings={() => {
+                closeCompactNavigation()
+                props.onOpenSettings()
+              }}
+              onSelectWorkspace={selectFromCompactNavigation}
+              showTrafficLights={false}
+            />
           </DialogContent>
-        </Dialog>
 
-        <div className="mt-md flex flex-1 flex-col items-center gap-sm">
-          {selected ? (
+          <div className="mt-md flex flex-1 flex-col items-center gap-sm">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  aria-label={`${selected.repository}/${selected.name}`}
+                  aria-controls="compact-workspace-navigation"
+                  aria-expanded={compactNavigationOpen}
+                  aria-haspopup="dialog"
+                  aria-label={`${props.copy.switchWorkspace}: ${selected.repository}/${selected.name}`}
+                  onClick={(event) =>
+                    openCompactNavigation(event.currentTarget)
+                  }
                   size="icon-sm"
                   type="button"
                   variant="secondary"
@@ -469,11 +522,12 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="right">
-                {selected.repository}/{selected.name}
+                {props.copy.switchWorkspace}: {selected.repository}/
+                {selected.name}
               </TooltipContent>
             </Tooltip>
-          ) : null}
-        </div>
+          </div>
+        </Dialog>
 
         <Button
           aria-label={props.copy.settings}

@@ -42,6 +42,7 @@
   --color-app-bg: var(--app-bg);
   --color-surface: var(--surface);
   --color-selected-row: var(--selected-row);
+  --color-selected-row-secondary: var(--selected-row-secondary);
   --color-code-chip: var(--code-chip);
   --color-divider: var(--divider);
   --color-text-strong: var(--text-strong);
@@ -124,6 +125,7 @@
   --input: #302d2b;
   --ring: #d0b1a3;
   --selected-row: #2b2928;
+  --selected-row-secondary: #9999a3;
   --code-chip: #292624;
   --divider: #302d2b;
   --text-strong: #f4f4f5;

@@ -5,6 +5,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
 
 import { App } from "@/app/App"
@@ -32,6 +33,14 @@ function renderWorkspace(adapter?: WorkspaceViewAdapter) {
 }
 
 describe("WorkspaceShell", () => {
+  it("labels the workspace mark with the localized product name", () => {
+    renderWorkspace()
+
+    expect(
+      screen.getByRole("img", { name: "Coding Wife workspace" }),
+    ).toBeVisible()
+  })
+
   it("supports keyboard tab cycling and the workspace filter shortcut", async () => {
     renderWorkspace()
 
@@ -75,6 +84,48 @@ describe("WorkspaceShell", () => {
       }),
     )
     expect(composer).toHaveValue("Keep this draft with the Live2D workspace")
+  })
+
+  it("opens compact navigation from the selected workspace and restores focus", async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    const selectedWorkspaceTrigger = screen.getByRole("button", {
+      name: "Switch workspace: coding-wife/build-live2d-desktop-app",
+    })
+    await user.click(selectedWorkspaceTrigger)
+
+    const dialog = await screen.findByRole("dialog", { name: "Workspaces" })
+    expect(selectedWorkspaceTrigger).toHaveAttribute("aria-expanded", "true")
+
+    fireEvent.keyDown(dialog, { code: "Escape", key: "Escape" })
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Workspaces" }),
+      ).not.toBeInTheDocument(),
+    )
+    await waitFor(() => expect(selectedWorkspaceTrigger).toHaveFocus())
+
+    await user.click(selectedWorkspaceTrigger)
+    const reopenedDialog = await screen.findByRole("dialog", {
+      name: "Workspaces",
+    })
+    await user.click(
+      within(reopenedDialog).getByRole("button", {
+        name: "coding-wife/sol-desktop, main, Done",
+      }),
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Workspaces" }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(
+      screen.getByRole("button", {
+        name: "Switch workspace: coding-wife/sol-desktop",
+      }),
+    ).toHaveFocus()
   })
 
   it("clears only accepted turns and exposes a stop action", async () => {
