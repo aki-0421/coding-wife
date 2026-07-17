@@ -1,0 +1,220 @@
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+
+import { getCharacterCaption } from "@/features/character/copy"
+import type {
+  CharacterControllerStatus,
+  CharacterFrameMetrics,
+  CharacterMotionPolicy,
+  CharacterState,
+} from "@/features/character/model"
+import { CharacterController } from "@/features/character/runtime/character-controller"
+import type { SupportedLocale } from "@/features/localization"
+import { cn } from "@/lib/utils"
+
+export const BUILTIN_HIYORI_MANIFEST_URL =
+  "/characters/builtin-hiyori/pack.json"
+
+const initialStatus: CharacterControllerStatus = {
+  phase: "idle",
+  state: "idle",
+  motionPolicy: "animated",
+  fallbackLevel: "text_only",
+  error: null,
+  pack: null,
+}
+
+export interface Live2dCharacterProps {
+  readonly className?: string
+  readonly state: CharacterState
+  readonly stateGeneration: number
+  readonly motionPolicy?: CharacterMotionPolicy
+  readonly locale?: SupportedLocale
+  readonly manifestUrl?: string
+  readonly reloadToken?: string | number
+  readonly preserveDrawingBuffer?: boolean
+  readonly showCaption?: boolean
+  readonly onControllerChange?: (controller: CharacterController | null) => void
+  readonly onStatusChange?: (status: CharacterControllerStatus) => void
+  readonly onMetricsChange?: (metrics: CharacterFrameMetrics) => void
+}
+
+interface CallbackProps {
+  readonly onControllerChange?: Live2dCharacterProps["onControllerChange"]
+  readonly onStatusChange?: Live2dCharacterProps["onStatusChange"]
+  readonly onMetricsChange?: Live2dCharacterProps["onMetricsChange"]
+}
+
+export function Live2dCharacter({
+  className,
+  state,
+  stateGeneration,
+  motionPolicy = "animated",
+  locale = "ja",
+  manifestUrl = BUILTIN_HIYORI_MANIFEST_URL,
+  reloadToken = 0,
+  preserveDrawingBuffer = false,
+  showCaption = true,
+  onControllerChange,
+  onStatusChange,
+  onMetricsChange,
+}: Live2dCharacterProps) {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const controllerRef = useRef<CharacterController | null>(null)
+  const callbackPropsRef = useRef<CallbackProps>({})
+  const initialPresentationRef = useRef({
+    state,
+    stateGeneration,
+    motionPolicy,
+  })
+  const [status, setStatus] = useState<CharacterControllerStatus>(() => ({
+    ...initialStatus,
+    state,
+    motionPolicy,
+  }))
+  const [staticPreview, setStaticPreview] = useState<string | null>(null)
+
+  useEffect(() => {
+    callbackPropsRef.current = {
+      onControllerChange,
+      onStatusChange,
+      onMetricsChange,
+    }
+  }, [onControllerChange, onMetricsChange, onStatusChange])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const host = hostRef.current
+    if (canvas === null || host === null) return
+
+    const loadController = new AbortController()
+    const controller = new CharacterController({
+      preserveDrawingBuffer,
+      callbacks: {
+        onStatus: (nextStatus) => {
+          setStatus(nextStatus)
+          callbackPropsRef.current.onStatusChange?.(nextStatus)
+        },
+        onMetrics: (metrics) => {
+          callbackPropsRef.current.onMetricsChange?.(metrics)
+        },
+        onStaticPreview: setStaticPreview,
+      },
+    })
+    controllerRef.current = controller
+    callbackPropsRef.current.onControllerChange?.(controller)
+    controller.setState(
+      initialPresentationRef.current.state,
+      initialPresentationRef.current.stateGeneration,
+    )
+    controller.setMotionPolicy(initialPresentationRef.current.motionPolicy)
+
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const syncReducedMotion = () => {
+      controller.setSystemPrefersReducedMotion(mediaQuery.matches)
+    }
+    syncReducedMotion()
+    mediaQuery.addEventListener("change", syncReducedMotion)
+
+    const syncSize = () => {
+      const bounds = host.getBoundingClientRect()
+      controller.resize(bounds.width, bounds.height, window.devicePixelRatio)
+    }
+    let resizeObserver: ResizeObserver | null = null
+    if (typeof ResizeObserver === "function") {
+      resizeObserver = new ResizeObserver(syncSize)
+      resizeObserver.observe(host)
+    } else {
+      window.addEventListener("resize", syncSize)
+    }
+
+    void controller
+      .mount(canvas)
+      .then(() => {
+        syncSize()
+        return controller.loadPack({ manifestUrl }, loadController.signal)
+      })
+      .catch(() => {
+        // CharacterController emits a localized, non-blocking fallback status.
+      })
+
+    return () => {
+      loadController.abort()
+      resizeObserver?.disconnect()
+      window.removeEventListener("resize", syncSize)
+      mediaQuery.removeEventListener("change", syncReducedMotion)
+      controller.dispose()
+      if (controllerRef.current === controller) controllerRef.current = null
+      callbackPropsRef.current.onControllerChange?.(null)
+    }
+    // A changed reload token intentionally rebuilds every GPU-owned resource.
+  }, [manifestUrl, preserveDrawingBuffer, reloadToken])
+
+  useEffect(() => {
+    controllerRef.current?.setState(state, stateGeneration)
+  }, [state, stateGeneration])
+
+  useEffect(() => {
+    controllerRef.current?.setMotionPolicy(motionPolicy)
+  }, [motionPolicy])
+
+  const caption = useMemo(
+    () => getCharacterCaption(locale, status),
+    [locale, status],
+  )
+  const showStaticPreview =
+    staticPreview !== null && status.fallbackLevel === "static"
+  const style = {
+    "--character-canvas-opacity":
+      status.motionPolicy === "hidden" || showStaticPreview ? 0 : 1,
+  } as CSSProperties
+
+  return (
+    <div
+      className={cn(
+        "relative isolate size-full min-h-0 overflow-hidden bg-app-bg",
+        className,
+      )}
+      data-character-fallback={status.fallbackLevel}
+      data-character-phase={status.phase}
+      data-character-policy={status.motionPolicy}
+      data-character-state={status.state}
+      ref={hostRef}
+      style={style}
+    >
+      {showStaticPreview ? (
+        <img
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 size-full object-contain object-bottom"
+          data-character-static-preview="trusted-frame"
+          src={staticPreview}
+        />
+      ) : null}
+
+      <canvas
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 size-full opacity-(--character-canvas-opacity)"
+        data-character-canvas="live2d"
+        ref={canvasRef}
+      />
+
+      {showCaption ? (
+        <div
+          aria-live="polite"
+          className="pointer-events-none absolute inset-x-xl bottom-lg z-10 max-w-80"
+          role="status"
+        >
+          <p className="m-0 text-caption font-medium text-foreground">
+            {caption.state}
+          </p>
+          {caption.detail !== null ? (
+            <p className="mt-xxs mb-0 text-caption text-muted-foreground">
+              {caption.detail}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}

@@ -18,6 +18,14 @@ export default defineConfig({
     },
   },
   clearScreen: false,
+  build: {
+    rollupOptions: {
+      input: {
+        app: path.resolve(projectRoot, "index.html"),
+        live2dPreview: path.resolve(projectRoot, "live2d-preview.html"),
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,

@@ -337,7 +337,7 @@ preview renderer は本画面と分離する。第一候補は capabilities を�
 | `src/features/character/runtime/character-controller.ts` | model lifecycle、RAF、update/draw、resize、context recovery |
 | `src/features/character/runtime/character-pack-client.ts` | pack ID と asset ID だけを使う fetch、AbortSignal、MIME 検査 |
 | `src/features/character/runtime/motion-policy.ts` | semantic state から allowlisted cue への決定的 mapping |
-| `src/features/character/components/live2d-character.tsx` | 1 canvas、ResizeObserver、reduced/hidden、HTML fallback |
+| `src/features/character/components/Live2dCharacter.tsx` | 1 canvas、ResizeObserver、reduced/hidden、HTML fallback |
 | `src/features/character/model.ts` | `CharacterState`、manifest DTO、安定した error code |
 | `src/features/character/**/*.test.ts(x)` | lifecycle、state、resize、fallback の unit/component tests |
 
@@ -367,6 +367,8 @@ preview renderer は本画面と分離する。第一候補は capabilities を�
 | `vendor/live2d/checksums.sha256` | upstream input と抽出物の reviewable な固定値 |
 
 同期スクリプトは source tree の未知ファイルを自動採用せず、期待 file set が変わったら停止する。
+
+実装済み経路の操作、数値証跡、障害切り分け、後続境界は [Live2Dランタイム実装・検証ガイド](live2d-runtime-implementation.md) を正本とする。
 
 ## 受け入れ試験
 
