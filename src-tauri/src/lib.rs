@@ -1,9 +1,17 @@
+pub mod character;
 pub mod codex;
 pub mod workspace_history;
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+use character::commands::{
+    character_attest_preview, character_cancel_import, character_confirm_import,
+    character_delete_pack, character_import_pick, character_library_get, character_read_asset,
+    character_select_pack,
+};
+use character::service::resolve_builtin_directory;
+use character::{CharacterService, CharacterStorage};
 use codex::commands::{
     codex_answer_fallback_decision, codex_connect, codex_get_diagnostic, codex_pick_workspace,
     codex_probe, codex_respond_pending, codex_review_start, codex_thread_list, codex_thread_resume,
@@ -119,11 +127,18 @@ pub fn run() {
             setup_supervisor.attach_app_handle(app.handle().clone());
             setup_supervisor.start_signal_loop();
             let app_data_directory = app.path().app_data_dir()?;
-            let history_store = WorkspaceHistoryStore::open(app_data_directory)?;
+            let history_store = WorkspaceHistoryStore::open(&app_data_directory)?;
             let history_service =
                 WorkspaceHistoryService::new(history_store, setup_workspace_service.clone());
             tauri::async_runtime::block_on(history_service.restore_startup());
             app.manage(history_service);
+            let resource_directory = app.path().resource_dir()?;
+            let character_storage = CharacterStorage::open(&app_data_directory)?;
+            let character_service = CharacterService::production(
+                character_storage,
+                resolve_builtin_directory(&resource_directory),
+            );
+            app.manage(character_service);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -152,6 +167,14 @@ pub fn run() {
             workspace_issue_delete_challenge,
             workspace_delete,
             history_append_domain_event,
+            character_library_get,
+            character_import_pick,
+            character_read_asset,
+            character_attest_preview,
+            character_confirm_import,
+            character_cancel_import,
+            character_select_pack,
+            character_delete_pack,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the Coding Wife application");

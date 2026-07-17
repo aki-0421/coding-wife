@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "libraryRequest": {
+    "workspaceId": "workspace-fixture"
+  },
+  "assetRequest": {
+    "packId": "custom:11111111-1111-4111-8111-111111111111",
+    "assetId": "texture.png",
+    "manifestHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "expectedMime": "image/png",
+    "previewToken": "22222222-2222-4222-8222-222222222222"
+  },
+  "attestationRequest": {
+    "previewToken": "22222222-2222-4222-8222-222222222222",
+    "previewNonce": "33333333-3333-4333-8333-333333333333",
+    "rendererNonce": "44444444-4444-4444-8444-444444444444",
+    "generation": 42,
+    "manifestHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "frameCount": 1,
+    "nonTransparentSamples": 16,
+    "signature": "deadbeef",
+    "textureDecodeCount": 1,
+    "stateCueObserved": true,
+    "webglError": 0,
+    "parameterCount": 70,
+    "partCount": 24,
+    "drawableCount": 134,
+    "thumbnailSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "attestationResponse": {
+    "schemaVersion": 1,
+    "attested": true,
+    "rendererNonce": "44444444-4444-4444-8444-444444444444"
+  },
+  "confirmRequest": {
+    "workspaceId": "workspace-fixture",
+    "previewToken": "22222222-2222-4222-8222-222222222222",
+    "previewNonce": "33333333-3333-4333-8333-333333333333",
+    "rendererNonce": "44444444-4444-4444-8444-444444444444",
+    "generation": 42,
+    "manifestHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "displayName": "Fixture model"
+  },
+  "cancelRequest": {
+    "previewToken": "22222222-2222-4222-8222-222222222222",
+    "previewNonce": "33333333-3333-4333-8333-333333333333",
+    "generation": 42
+  },
+  "selectRequest": {
+    "workspaceId": "workspace-fixture",
+    "packId": "custom:11111111-1111-4111-8111-111111111111"
+  },
+  "deleteRequest": {
+    "workspaceId": "workspace-fixture",
+    "packId": "custom:11111111-1111-4111-8111-111111111111"
+  },
+  "importResponse": {
+    "schemaVersion": 1,
+    "outcome": "selected",
+    "preview": {
+      "schemaVersion": 1,
+      "previewToken": "22222222-2222-4222-8222-222222222222",
+      "previewNonce": "33333333-3333-4333-8333-333333333333",
+      "generation": 42,
+      "packId": "custom:11111111-1111-4111-8111-111111111111",
+      "manifestHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "expiresAt": "2026-07-18T00:10:00.000Z",
+      "manifest": {
+        "schemaVersion": 1,
+        "packId": "custom:11111111-1111-4111-8111-111111111111",
+        "displayName": "fixture",
+        "bundledVersion": "custom-import-v1",
+        "entrypoint": "fixture.model3.json",
+        "immutable": true,
+        "provenance": {
+          "sourceKind": "user_imported",
+          "sourceLabel": "Local folder",
+          "importedAt": "2026-07-18T00:00:00.000Z"
+        },
+        "inventory": {
+          "runtimeFileCount": 3,
+          "totalBytes": 600,
+          "textureCount": 1,
+          "motionCount": 0,
+          "expressionCount": 0,
+          "motionGroups": {}
+        },
+        "compatibility": {
+          "modelSchemaVersion": 3,
+          "mocVersion": 3,
+          "expectedParameters": null,
+          "expectedParts": null,
+          "expectedDrawables": null
+        },
+        "files": [
+          {
+            "assetId": "fixture.model3.json",
+            "role": "model",
+            "bytes": 100,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "assetId": "fixture.moc3",
+            "role": "moc",
+            "bytes": 200,
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "assetId": "texture.png",
+            "role": "texture",
+            "bytes": 300,
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "dimensions": {
+              "width": 1,
+              "height": 1
+            }
+          }
+        ],
+        "importedAt": "2026-07-18T00:00:00.000Z"
+      }
+    }
+  },
+  "canceledImportResponse": {
+    "schemaVersion": 1,
+    "outcome": "canceled",
+    "preview": null
+  },
+  "librarySnapshot": {
+    "schemaVersion": 1,
+    "workspaceId": "workspace-fixture",
+    "selectedPackId": "builtin:hiyori_pro",
+    "fallbackApplied": false,
+    "diagnostics": [],
+    "packs": [
+      {
+        "schemaVersion": 1,
+        "packId": "builtin:hiyori_pro",
+        "displayName": "Hiyori",
+        "kind": "builtin",
+        "manifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "provenanceLabel": "かにビーム / Live2D",
+        "importedAt": null,
+        "runtimeFileCount": 17,
+        "totalBytes": 4923819,
+        "textureCount": 2,
+        "motionCount": 10,
+        "expressionCount": 0,
+        "selectedWorkspaceCount": 1,
+        "deletable": false,
+        "manifest": null,
+        "thumbnailSha256": null
+      }
+    ]
+  },
+  "error": {
+    "code": "CHARACTER-ASSET-HASH-MISMATCH",
+    "operation": "character_read_asset",
+    "recoverable": false,
+    "userMessageKey": "character.error.generic",
+    "detailRef": "character-library-v1"
+  }
+}

@@ -17,6 +17,7 @@ tauri-build = { version = "=2.6.3", features = [] }
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde"] }
 hex = "=0.4.3"
 libc = "=0.2.186"
+png = "=0.18.1"
 regex = "=1.13.1"
 rfd = { version = "=0.17.2", default-features = false }
 rusqlite = { version = "=0.37.0", features = ["bundled"] }
