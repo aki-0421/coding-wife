@@ -11,9 +11,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(projectRoot, "src"),
+      "@cubism": path.resolve(projectRoot, "vendor/live2d/dist"),
     },
   },
   test: {
+    include: ["src/**/*.test.{ts,tsx}"],
     environment: "jsdom",
     environmentOptions: {
       jsdom: {

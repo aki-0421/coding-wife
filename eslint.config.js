@@ -10,6 +10,7 @@ export default defineConfig([
     "dist",
     "node_modules",
     "src-tauri/target",
+    "vendor/live2d",
     ".context",
     "tmp",
   ]),

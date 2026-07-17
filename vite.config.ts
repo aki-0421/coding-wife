@@ -5,13 +5,16 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
+import { live2dAssetsPlugin } from "./scripts/live2d/vite-plugin-live2d-assets.mjs"
+
 const projectRoot = fileURLToPath(new URL(".", import.meta.url))
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [live2dAssetsPlugin(projectRoot), react(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(projectRoot, "src"),
+      "@cubism": path.resolve(projectRoot, "vendor/live2d/dist"),
     },
   },
   clearScreen: false,

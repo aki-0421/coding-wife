@@ -8,15 +8,22 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "predev": "pnpm live2d:verify && pnpm live2d:build:framework",
     "dev": "vite --host 127.0.0.1",
+    "prebuild": "pnpm live2d:verify && pnpm live2d:build:framework",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "lint": "eslint . --max-warnings 0",
-    "typecheck": "tsc -b --pretty false",
-    "test": "vitest run",
+    "typecheck": "pnpm live2d:verify && pnpm live2d:build:framework && tsc -b --pretty false",
+    "test": "pnpm live2d:test:supply-chain && vitest run",
     "test:watch": "vitest",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"src-tauri/**/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"src-tauri/**/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
+    "live2d:sync:sdk": "node scripts/live2d/sync-sdk.mjs",
+    "live2d:sync:hiyori": "node scripts/live2d/sync-hiyori.mjs",
+    "live2d:verify": "node scripts/live2d/verify-live2d.mjs",
+    "live2d:build:framework": "node scripts/live2d/build-framework.mjs",
+    "live2d:test:supply-chain": "node --test scripts/live2d/supply-chain.test.mjs",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/live2d/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/live2d/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -53,6 +60,7 @@
     "prettier": "3.9.5",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.2",
+    "typescript-cubism": "npm:typescript@5.9.3",
     "typescript-eslint": "8.62.0",
     "vite": "8.1.1",
     "vitest": "4.1.10"

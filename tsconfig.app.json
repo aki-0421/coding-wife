@@ -22,7 +22,8 @@
     "useUnknownInCatchVariables": true,
     "noImplicitOverride": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@cubism/*": ["./vendor/live2d/dist/*"]
     }
   },
   "include": ["src"]
