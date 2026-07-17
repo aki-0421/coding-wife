@@ -13,6 +13,15 @@ use crate::codex::redaction::redact_text;
 use crate::codex::workspace::{
     AppPrivateWorkspaceRecord, GitRepositoryIdentity, ValidatedWorkspaceCandidate,
 };
+use crate::git_review::history::OperationJournalEvent;
+use crate::git_review::repository::{
+    is_object_id, validate_opaque_id as validate_git_opaque_id, validate_relative_path,
+};
+use crate::git_review::types::{
+    CheckpointOperationState, DecisionEvidence, FailedAttemptEvidence, GateKind, GateOutcome,
+    GateResult, KnownRisk, ManifestEntry, ReviewPack, VerificationEvidence, VerificationResult,
+    GIT_REVIEW_SCHEMA_VERSION, MAX_CHANGED_BYTES, MAX_CHANGED_FILES, MAX_CHANGED_LINES,
+};
 
 use super::types::{
     AppendEventResult, ContextSnapshotView, ContextSource, HistoryMode, HistoryStatus,
@@ -24,7 +33,8 @@ use super::types::{
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
 const CURRENT_DATABASE_VERSION: i64 = 1;
-const MAX_EVENT_BYTES: usize = 256 * 1024;
+const MAX_EVENT_BYTES: usize = 1024 * 1024;
+const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
 const MAX_TIMELINE_PAGE: u32 = 200;
 const MAX_WORKSPACES: i64 = 200;
@@ -1151,7 +1161,7 @@ fn append_event_in_transaction(
 ) -> Result<AppendEventResult, WorkspaceHistoryError> {
     validate_domain_event(event)?;
     let sanitized = sanitize_json(&event.payload, workspace_root, 0)?;
-    validate_event_shape(&event.producer, &event.kind, &sanitized)?;
+    validate_event_shape(event, &sanitized)?;
     let payload_json =
         serde_json::to_string(&sanitized).map_err(|_| history_error("HIST-EVENT-ENCODE", false))?;
     if payload_json.len() > MAX_EVENT_BYTES {
@@ -1264,8 +1274,7 @@ fn validate_domain_event(event: &NormalizedDomainEvent) -> Result<(), WorkspaceH
 }
 
 fn validate_event_shape(
-    producer: &str,
-    kind: &str,
+    event: &NormalizedDomainEvent,
     payload: &Value,
 ) -> Result<(), WorkspaceHistoryError> {
     let object = payload
@@ -1286,7 +1295,7 @@ fn validate_event_shape(
             })
         })
     };
-    match (producer, kind) {
+    match (event.producer.as_str(), event.kind.as_str()) {
         ("app", "app.runtime.changed") => {
             if !exact(&["mode", "state"], &[])
                 || !matches!(
@@ -1317,7 +1326,7 @@ fn validate_event_shape(
                     object.get("status").and_then(Value::as_str),
                     Some("idle" | "running" | "waiting" | "interrupted" | "failed" | "completed")
                 );
-            if !legacy && !validate_codex_history_event(kind, object) {
+            if !legacy && !validate_codex_history_event(&event.kind, object) {
                 return Err(history_error("HIST-EVENT-PAYLOAD", false));
             }
         }
@@ -1359,9 +1368,234 @@ fn validate_event_shape(
                 return Err(history_error("HIST-EVENT-PAYLOAD", false));
             }
         }
+        ("git", "git.checkpoint.operation.changed" | "git.review_pack.recorded") => {
+            if !validate_git_history_event(event, object) {
+                return Err(history_error("HIST-EVENT-PAYLOAD", false));
+            }
+        }
         _ => return Err(history_error("HIST-EVENT-KIND", false)),
     }
     Ok(())
+}
+
+fn validate_git_history_event(
+    event: &NormalizedDomainEvent,
+    object: &serde_json::Map<String, Value>,
+) -> bool {
+    if event.session_id.is_some() {
+        return false;
+    }
+    let payload = Value::Object(object.clone());
+    match event.kind.as_str() {
+        "git.checkpoint.operation.changed" => {
+            serde_json::from_value::<OperationJournalEvent>(payload)
+                .is_ok_and(|journal| validate_git_operation(&journal, &event.workspace_id))
+        }
+        "git.review_pack.recorded" => serde_json::from_value::<ReviewPack>(payload)
+            .is_ok_and(|pack| validate_git_review_pack(&pack, &event.workspace_id)),
+        _ => false,
+    }
+}
+
+fn validate_git_operation(journal: &OperationJournalEvent, workspace_id: &str) -> bool {
+    if journal.schema_version != GIT_REVIEW_SCHEMA_VERSION
+        || journal.workspace_id != workspace_id
+        || !valid_git_id(&journal.operation_id)
+        || !valid_git_id(&journal.client_request_id)
+        || !valid_git_id(&journal.workspace_id)
+        || !valid_git_id(&journal.work_unit_id)
+        || !valid_git_id(&journal.baseline_id)
+        || !is_object_id(&journal.expected_head_sha)
+        || !valid_git_target_reference(&journal.target_reference)
+        || !journal.commit_sha.as_deref().is_none_or(is_object_id)
+        || !journal.pack_digest.as_deref().is_none_or(valid_sha256)
+        || !journal
+            .error_code
+            .as_deref()
+            .is_none_or(|value| valid_git_text(value, 160, false))
+        || validate_timestamp(&journal.observed_at).is_err()
+    {
+        return false;
+    }
+    if journal.pack_digest.is_some() && journal.commit_sha.is_none() {
+        return false;
+    }
+    match journal.state {
+        CheckpointOperationState::HistoryComplete => {
+            journal.commit_sha.is_some()
+                && journal.pack_digest.is_some()
+                && journal.error_code.is_none()
+        }
+        CheckpointOperationState::Failed => journal.error_code.is_some(),
+        _ => journal.error_code.is_none(),
+    }
+}
+
+fn validate_git_review_pack(pack: &ReviewPack, workspace_id: &str) -> bool {
+    if pack.schema_version != GIT_REVIEW_SCHEMA_VERSION
+        || pack.workspace_id != workspace_id
+        || !valid_git_id(&pack.workspace_id)
+        || !valid_git_id(&pack.work_unit_id)
+        || !valid_git_id(&pack.checkpoint.checkpoint_id)
+        || !is_object_id(&pack.checkpoint.commit_sha)
+        || !is_object_id(&pack.checkpoint.parent_sha)
+        || pack.checkpoint.commit_sha == pack.checkpoint.parent_sha
+        || !valid_git_target_reference(&pack.checkpoint.target_reference)
+        || !valid_git_text(&pack.checkpoint.message, 8 * 1024, false)
+        || !valid_git_text(&pack.checkpoint.author_name, 256, false)
+        || !valid_git_text(&pack.checkpoint.author_email, 512, false)
+        || validate_timestamp(&pack.checkpoint.created_at).is_err()
+        || !valid_git_text(&pack.objective, 500, false)
+        || !(1..=20).contains(&pack.acceptance.len())
+        || !pack
+            .acceptance
+            .iter()
+            .all(|item| valid_git_text(item, 1024, false))
+        || !validate_git_gates(&pack.gates)
+        || pack.manifest.is_empty()
+        || pack.manifest.len() > MAX_CHANGED_FILES
+        || !pack.manifest.iter().all(validate_git_manifest_entry)
+        || pack.diff_summary.files_changed > MAX_CHANGED_FILES as u64
+        || pack.diff_summary.binary_files > pack.diff_summary.files_changed
+        || pack.diff_summary.total_bytes > MAX_CHANGED_BYTES
+        || pack
+            .diff_summary
+            .additions
+            .saturating_add(pack.diff_summary.deletions)
+            > MAX_CHANGED_LINES
+        || pack.verification.is_empty()
+        || pack.verification.len() > 100
+        || !pack.verification.iter().all(validate_git_verification)
+        || pack.decisions.len() > 100
+        || !pack.decisions.iter().all(validate_git_decision)
+        || pack.failed_attempts.len() > 100
+        || !pack.failed_attempts.iter().all(validate_git_failed_attempt)
+        || pack.risks.len() > 100
+        || !pack.risks.iter().all(validate_git_risk)
+        || pack.restore_guidance.is_empty()
+        || pack.restore_guidance.len() > 10
+        || !pack
+            .restore_guidance
+            .iter()
+            .all(|item| valid_git_text(item, 4096, false))
+        || pack.operation_state != CheckpointOperationState::HistoryComplete
+        || !valid_sha256(&pack.pack_digest)
+        || pack.history_sequence.is_some()
+    {
+        return false;
+    }
+
+    let mut digest_source = pack.clone();
+    digest_source.pack_digest.clear();
+    digest_source.history_sequence = None;
+    serde_json::to_vec(&digest_source).is_ok_and(|encoded| {
+        pack.pack_digest == format!("sha256:{}", hex::encode(Sha256::digest(encoded)))
+    })
+}
+
+fn validate_git_gates(gates: &[GateResult]) -> bool {
+    if gates.len() != 4 {
+        return false;
+    }
+    let mut seen = [false; 4];
+    for gate in gates {
+        let index = match gate.gate {
+            GateKind::Scope => 0,
+            GateKind::Ownership => 1,
+            GateKind::Verification => 2,
+            GateKind::Risk => 3,
+        };
+        if seen[index]
+            || gate.outcome != GateOutcome::Pass
+            || gate.reason_codes.len() > 20
+            || !gate
+                .reason_codes
+                .iter()
+                .all(|code| valid_git_text(code, 256, false))
+            || !valid_sha256(&gate.observed_repository_fingerprint)
+        {
+            return false;
+        }
+        seen[index] = true;
+    }
+    seen.into_iter().all(|value| value)
+}
+
+fn validate_git_manifest_entry(entry: &ManifestEntry) -> bool {
+    valid_git_id(&entry.file_id)
+        && validate_relative_path(&entry.relative_path).is_ok()
+        && entry.before_hash.as_deref().is_none_or(valid_sha256)
+        && entry.after_hash.as_deref().is_none_or(valid_sha256)
+        && entry.additions <= MAX_CHANGED_LINES
+        && entry.deletions <= MAX_CHANGED_LINES
+        && entry
+            .reason_code
+            .as_deref()
+            .is_none_or(|value| valid_git_text(value, 256, false))
+}
+
+fn validate_git_verification(evidence: &VerificationEvidence) -> bool {
+    valid_git_id(&evidence.evidence_id)
+        && valid_git_text(&evidence.check, 512, false)
+        && evidence.result == VerificationResult::Passed
+        && evidence.duration_ms <= 24 * 60 * 60 * 1_000
+        && valid_git_text(&evidence.summary, 4096, true)
+        && valid_sha256(&evidence.observed_repository_fingerprint)
+}
+
+fn validate_git_decision(decision: &DecisionEvidence) -> bool {
+    valid_git_id(&decision.decision_id)
+        && valid_git_text(&decision.summary, 2048, false)
+        && valid_git_text(&decision.answer, 2048, false)
+        && valid_git_text(&decision.rationale, 4096, true)
+}
+
+fn validate_git_failed_attempt(attempt: &FailedAttemptEvidence) -> bool {
+    valid_git_id(&attempt.attempt_id)
+        && valid_git_text(&attempt.approach, 2048, false)
+        && valid_git_text(&attempt.outcome, 1024, false)
+        && valid_git_text(&attempt.learning, 2048, true)
+}
+
+fn validate_git_risk(risk: &KnownRisk) -> bool {
+    valid_git_id(&risk.risk_id)
+        && valid_git_text(&risk.category, 256, false)
+        && valid_git_text(&risk.summary, 2048, false)
+        && valid_git_text(&risk.mitigation, 2048, true)
+}
+
+fn valid_git_id(value: &str) -> bool {
+    validate_git_opaque_id(value, "GIT-HISTORY-ID").is_ok()
+}
+
+fn valid_git_text(value: &str, maximum: usize, allow_empty: bool) -> bool {
+    (allow_empty || !value.trim().is_empty())
+        && value.chars().count() <= maximum
+        && value
+            .chars()
+            .all(|character| !character.is_control() || matches!(character, '\n' | '\r' | '\t'))
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_git_target_reference(value: &str) -> bool {
+    value == "HEAD"
+        || (value.starts_with("refs/heads/")
+            && value.len() <= 251
+            && !value.contains("..")
+            && !value.contains("@{")
+            && !value.ends_with('.')
+            && !value.ends_with('/')
+            && !value
+                .chars()
+                .any(|character| character.is_control() || " ~^:?*[\\".contains(character))
+            && value.split('/').all(|component| {
+                !component.is_empty() && component != "." && !component.ends_with(".lock")
+            }))
 }
 
 fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Value>) -> bool {
@@ -1564,7 +1798,7 @@ fn sanitize_json(
             MAX_EVENT_BYTES,
         ))),
         Value::Array(values) => {
-            if values.len() > 256 {
+            if values.len() > MAX_EVENT_ARRAY_ITEMS {
                 return Err(history_error("HIST-EVENT-ARRAY", false));
             }
             values
@@ -1995,6 +2229,70 @@ mod tests {
             .expect("validated candidate")
     }
 
+    fn git_review_pack_payload(workspace_id: &str) -> Value {
+        let fingerprint = format!("sha256:{}", "c".repeat(64));
+        let payload = json!({
+            "schemaVersion": 1,
+            "checkpoint": {
+                "checkpointId": "checkpoint-fixture",
+                "commitSha": "a".repeat(40),
+                "parentSha": "b".repeat(40),
+                "targetReference": "refs/heads/main",
+                "message": "feat: add fixture\n\n- verify the bounded history shape",
+                "authorName": "Fixture Author",
+                "authorEmail": "fixture@example.invalid",
+                "createdAt": "2026-07-18T00:00:02.000Z"
+            },
+            "workspaceId": workspace_id,
+            "workUnitId": "work-unit-fixture",
+            "objective": "Persist a bounded review pack",
+            "acceptance": ["The exact review pack can be restored"],
+            "gates": [
+                {"gate": "scope", "outcome": "pass", "reasonCodes": [], "observedRepositoryFingerprint": fingerprint},
+                {"gate": "ownership", "outcome": "pass", "reasonCodes": [], "observedRepositoryFingerprint": fingerprint},
+                {"gate": "verification", "outcome": "pass", "reasonCodes": [], "observedRepositoryFingerprint": fingerprint},
+                {"gate": "risk", "outcome": "pass", "reasonCodes": [], "observedRepositoryFingerprint": fingerprint}
+            ],
+            "manifest": [{
+                "fileId": "file-fixture",
+                "relativePath": "src/main.rs",
+                "changeKind": "modified",
+                "ownership": "owned",
+                "beforeHash": format!("sha256:{}", "d".repeat(64)),
+                "afterHash": format!("sha256:{}", "e".repeat(64)),
+                "additions": 4,
+                "deletions": 1,
+                "reasonCode": null
+            }],
+            "diffSummary": {
+                "filesChanged": 1,
+                "additions": 4,
+                "deletions": 1,
+                "binaryFiles": 0,
+                "totalBytes": 128
+            },
+            "verification": [{
+                "evidenceId": "evidence-fixture",
+                "check": "cargo test",
+                "result": "passed",
+                "durationMs": 1200,
+                "summary": "All focused tests passed",
+                "observedRepositoryFingerprint": fingerprint
+            }],
+            "decisions": [],
+            "failedAttempts": [],
+            "risks": [],
+            "restoreGuidance": ["Preview the affected files before creating a revert commit."],
+            "operationState": "history_complete",
+            "packDigest": "",
+            "historySequence": null
+        });
+        let mut pack = serde_json::from_value::<ReviewPack>(payload).expect("review pack fixture");
+        let encoded = serde_json::to_vec(&pack).expect("digest source");
+        pack.pack_digest = format!("sha256:{}", hex::encode(Sha256::digest(encoded)));
+        serde_json::to_value(pack).expect("review pack payload")
+    }
+
     #[tokio::test]
     async fn migration_registration_and_restore_are_idempotent() {
         let data = temp_directory("history-data");
@@ -2307,6 +2605,133 @@ mod tests {
             store.append_event(&rejected).unwrap_err().code,
             "HIST-EVENT-FORBIDDEN-FIELD"
         );
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn git_history_events_require_exact_versioned_owned_payloads() {
+        let data = temp_directory("history-git-events");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let workspace = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace;
+        let pack_payload = git_review_pack_payload(&workspace.workspace_id);
+        let operation_payload = json!({
+            "schemaVersion": 1,
+            "operationId": "operation-fixture",
+            "clientRequestId": "request-fixture",
+            "workspaceId": workspace.workspace_id,
+            "workUnitId": "work-unit-fixture",
+            "baselineId": "baseline-fixture",
+            "state": "prepared",
+            "expectedHeadSha": "b".repeat(40),
+            "targetReference": "refs/heads/main",
+            "commitSha": null,
+            "packDigest": null,
+            "errorCode": null,
+            "observedAt": "2026-07-18T00:00:01.000Z"
+        });
+        let operation = NormalizedDomainEvent {
+            schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+            event_id: "git-operation-fixture-prepared".to_owned(),
+            workspace_id: workspace.workspace_id.clone(),
+            session_id: None,
+            producer: "git".to_owned(),
+            kind: "git.checkpoint.operation.changed".to_owned(),
+            occurred_at: "2026-07-18T00:00:01.000Z".to_owned(),
+            payload: operation_payload.clone(),
+        };
+        let pack = NormalizedDomainEvent {
+            schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+            event_id: "git-pack-checkpoint-fixture".to_owned(),
+            workspace_id: workspace.workspace_id.clone(),
+            session_id: None,
+            producer: "git".to_owned(),
+            kind: "git.review_pack.recorded".to_owned(),
+            occurred_at: "2026-07-18T00:00:03.000Z".to_owned(),
+            payload: pack_payload.clone(),
+        };
+
+        assert!(
+            store
+                .append_event(&operation)
+                .expect("operation event")
+                .inserted
+        );
+        assert!(store.append_event(&pack).expect("review pack").inserted);
+        assert!(
+            !store
+                .append_event(&pack)
+                .expect("exact review pack replay")
+                .inserted
+        );
+
+        let extra_field = NormalizedDomainEvent {
+            event_id: "git-operation-extra-field".to_owned(),
+            payload: {
+                let mut payload = operation_payload.clone();
+                payload
+                    .as_object_mut()
+                    .expect("operation object")
+                    .insert("rawCommand".to_owned(), json!("git commit"));
+                payload
+            },
+            ..operation.clone()
+        };
+        assert_eq!(
+            store.append_event(&extra_field).unwrap_err().code,
+            "HIST-EVENT-PAYLOAD"
+        );
+
+        let wrong_workspace = NormalizedDomainEvent {
+            event_id: "git-pack-wrong-workspace".to_owned(),
+            payload: {
+                let mut payload = pack_payload.clone();
+                payload
+                    .as_object_mut()
+                    .expect("pack object")
+                    .insert("workspaceId".to_owned(), json!("workspace-other"));
+                payload
+            },
+            ..pack.clone()
+        };
+        assert_eq!(
+            store.append_event(&wrong_workspace).unwrap_err().code,
+            "HIST-EVENT-PAYLOAD"
+        );
+
+        let invalid_digest = NormalizedDomainEvent {
+            event_id: "git-pack-invalid-digest".to_owned(),
+            payload: {
+                let mut payload = pack_payload;
+                payload.as_object_mut().expect("pack object").insert(
+                    "packDigest".to_owned(),
+                    json!(format!("sha256:{}", "f".repeat(64))),
+                );
+                payload
+            },
+            ..pack
+        };
+        assert_eq!(
+            store.append_event(&invalid_digest).unwrap_err().code,
+            "HIST-EVENT-PAYLOAD"
+        );
+
+        let timeline = store
+            .timeline(&workspace.workspace_id, None, 200, None)
+            .expect("timeline");
+        assert!(timeline
+            .items
+            .iter()
+            .any(|event| event.kind == "git.checkpoint.operation.changed"));
+        assert!(timeline
+            .items
+            .iter()
+            .any(|event| event.kind == "git.review_pack.recorded"));
 
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);

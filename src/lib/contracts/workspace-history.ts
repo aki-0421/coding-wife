@@ -97,6 +97,8 @@ export interface PersistedTimelineEvent {
     | "live.renderer.status.changed"
     | "hist.writer.status.changed"
     | "git.checkpoint.status.changed"
+    | "git.checkpoint.operation.changed"
+    | "git.review_pack.recorded"
   readonly occurredAt: string
   readonly payload: Readonly<Record<string, unknown>>
 }
@@ -704,10 +706,452 @@ function parseCodexHistoryPayload(
   return null
 }
 
+const gitOperationStates = [
+  "prepared",
+  "objects_ready",
+  "ref_updated",
+  "history_complete",
+  "failed",
+] as const
+
+function isGitText(
+  value: unknown,
+  maximum: number,
+  allowEmpty = false,
+): value is string {
+  return (
+    typeof value === "string" &&
+    (allowEmpty || value.trim().length > 0) &&
+    value.length <= maximum &&
+    Array.from(value).every((character) => {
+      const code = character.codePointAt(0) ?? 0
+      return (
+        (code >= 32 && code !== 127) ||
+        character === "\n" ||
+        character === "\r" ||
+        character === "\t"
+      )
+    }) &&
+    !containsPrivateMaterial(value)
+  )
+}
+
+function isGitId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 160 &&
+    /^[A-Za-z0-9._-]+$/u.test(value)
+  )
+}
+
+function isGitObjectId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/u.test(value)
+  )
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^sha256:[a-fA-F0-9]{64}$/u.test(value)
+}
+
+function isGitTargetReference(value: unknown): value is string {
+  if (value === "HEAD") return true
+  if (
+    typeof value !== "string" ||
+    !value.startsWith("refs/heads/") ||
+    value.length > 251 ||
+    value.includes("..") ||
+    value.includes("@{") ||
+    value.endsWith(".") ||
+    value.endsWith("/") ||
+    Array.from(value).some((character) => {
+      const code = character.codePointAt(0) ?? 0
+      return code <= 32 || code === 127 || "~^:?*[\\".includes(character)
+    })
+  ) {
+    return false
+  }
+  return value
+    .split("/")
+    .every(
+      (component) =>
+        component.length > 0 &&
+        component !== "." &&
+        !component.endsWith(".lock"),
+    )
+}
+
+function isGitRelativePath(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 4096 ||
+    value.startsWith("/") ||
+    value.startsWith("-") ||
+    value.includes("\\") ||
+    value.includes(",") ||
+    containsPrivateMaterial(value)
+  ) {
+    return false
+  }
+  const components = value.split("/")
+  return components.every(
+    (component) =>
+      component.length > 0 &&
+      component !== "." &&
+      component !== ".." &&
+      component.toLocaleLowerCase() !== ".git",
+  )
+}
+
+function isBoundedUnsigned(value: unknown, maximum: number): value is number {
+  return isSafeUnsignedInteger(value) && value <= maximum
+}
+
+function isGitGate(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "gate",
+      "outcome",
+      "reasonCodes",
+      "observedRepositoryFingerprint",
+    ]) &&
+    oneOf(value.gate, [
+      "scope",
+      "ownership",
+      "verification",
+      "risk",
+    ] as const) &&
+    value.outcome === "pass" &&
+    Array.isArray(value.reasonCodes) &&
+    value.reasonCodes.length <= 20 &&
+    value.reasonCodes.every((code) => isGitText(code, 256)) &&
+    isSha256(value.observedRepositoryFingerprint)
+  )
+}
+
+function isGitManifestEntry(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "fileId",
+      "relativePath",
+      "changeKind",
+      "ownership",
+      "beforeHash",
+      "afterHash",
+      "additions",
+      "deletions",
+      "reasonCode",
+    ]) &&
+    isGitId(value.fileId) &&
+    isGitRelativePath(value.relativePath) &&
+    oneOf(value.changeKind, [
+      "added",
+      "modified",
+      "deleted",
+      "type_changed",
+    ] as const) &&
+    oneOf(value.ownership, [
+      "owned",
+      "pre_existing",
+      "external",
+      "overlap",
+      "unowned",
+    ] as const) &&
+    (value.beforeHash === null || isSha256(value.beforeHash)) &&
+    (value.afterHash === null || isSha256(value.afterHash)) &&
+    isBoundedUnsigned(value.additions, 50_000) &&
+    isBoundedUnsigned(value.deletions, 50_000) &&
+    (value.reasonCode === null || isGitText(value.reasonCode, 256))
+  )
+}
+
+function isGitVerification(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "evidenceId",
+      "check",
+      "result",
+      "durationMs",
+      "summary",
+      "observedRepositoryFingerprint",
+    ]) &&
+    isGitId(value.evidenceId) &&
+    isGitText(value.check, 512) &&
+    value.result === "passed" &&
+    isBoundedUnsigned(value.durationMs, 24 * 60 * 60 * 1000) &&
+    isGitText(value.summary, 4096, true) &&
+    isSha256(value.observedRepositoryFingerprint)
+  )
+}
+
+function isGitDecision(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "decisionId",
+      "summary",
+      "answer",
+      "rationale",
+      "reversible",
+    ]) &&
+    isGitId(value.decisionId) &&
+    isGitText(value.summary, 2048) &&
+    isGitText(value.answer, 2048) &&
+    isGitText(value.rationale, 4096, true) &&
+    typeof value.reversible === "boolean"
+  )
+}
+
+function isGitFailedAttempt(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["attemptId", "approach", "outcome", "learning"]) &&
+    isGitId(value.attemptId) &&
+    isGitText(value.approach, 2048) &&
+    isGitText(value.outcome, 1024) &&
+    isGitText(value.learning, 2048, true)
+  )
+}
+
+function isGitRisk(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "riskId",
+      "category",
+      "level",
+      "summary",
+      "mitigation",
+      "resolved",
+    ]) &&
+    isGitId(value.riskId) &&
+    isGitText(value.category, 256) &&
+    oneOf(value.level, ["low", "medium", "high", "critical"] as const) &&
+    isGitText(value.summary, 2048) &&
+    isGitText(value.mitigation, 2048, true) &&
+    typeof value.resolved === "boolean"
+  )
+}
+
+function isGitCheckpoint(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "checkpointId",
+      "commitSha",
+      "parentSha",
+      "targetReference",
+      "message",
+      "authorName",
+      "authorEmail",
+      "createdAt",
+    ]) &&
+    isGitId(value.checkpointId) &&
+    isGitObjectId(value.commitSha) &&
+    isGitObjectId(value.parentSha) &&
+    value.commitSha !== value.parentSha &&
+    isGitTargetReference(value.targetReference) &&
+    isGitText(value.message, 8 * 1024) &&
+    isGitText(value.authorName, 256) &&
+    isGitText(value.authorEmail, 512) &&
+    isTimestamp(value.createdAt)
+  )
+}
+
+function isGitDiffSummary(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "filesChanged",
+      "additions",
+      "deletions",
+      "binaryFiles",
+      "totalBytes",
+    ]) &&
+    isBoundedUnsigned(value.filesChanged, 500) &&
+    isBoundedUnsigned(value.additions, 50_000) &&
+    isBoundedUnsigned(value.deletions, 50_000) &&
+    value.additions + value.deletions <= 50_000 &&
+    isBoundedUnsigned(value.binaryFiles, value.filesChanged) &&
+    isBoundedUnsigned(value.totalBytes, 50 * 1024 * 1024)
+  )
+}
+
+function isGitOperationPayload(
+  payload: Readonly<Record<string, unknown>>,
+  workspaceId: string,
+): boolean {
+  if (
+    !hasExactKeys(
+      payload,
+      [
+        "schemaVersion",
+        "operationId",
+        "clientRequestId",
+        "workspaceId",
+        "workUnitId",
+        "baselineId",
+        "state",
+        "expectedHeadSha",
+        "targetReference",
+        "observedAt",
+      ],
+      ["commitSha", "packDigest", "errorCode"],
+    ) ||
+    payload.schemaVersion !== 1 ||
+    payload.workspaceId !== workspaceId ||
+    !isGitId(payload.operationId) ||
+    !isGitId(payload.clientRequestId) ||
+    !isGitId(payload.workspaceId) ||
+    !isGitId(payload.workUnitId) ||
+    !isGitId(payload.baselineId) ||
+    !oneOf(payload.state, gitOperationStates) ||
+    !isGitObjectId(payload.expectedHeadSha) ||
+    !isGitTargetReference(payload.targetReference) ||
+    !(
+      payload.commitSha === undefined ||
+      payload.commitSha === null ||
+      isGitObjectId(payload.commitSha)
+    ) ||
+    !(
+      payload.packDigest === undefined ||
+      payload.packDigest === null ||
+      isSha256(payload.packDigest)
+    ) ||
+    !(
+      payload.errorCode === undefined ||
+      payload.errorCode === null ||
+      isGitText(payload.errorCode, 160)
+    ) ||
+    !isTimestamp(payload.observedAt) ||
+    (payload.packDigest !== undefined &&
+      payload.packDigest !== null &&
+      (payload.commitSha === undefined || payload.commitSha === null))
+  ) {
+    return false
+  }
+  if (payload.state === "history_complete") {
+    return (
+      typeof payload.commitSha === "string" &&
+      typeof payload.packDigest === "string" &&
+      (payload.errorCode === undefined || payload.errorCode === null)
+    )
+  }
+  if (payload.state === "failed") {
+    return typeof payload.errorCode === "string"
+  }
+  return payload.errorCode === undefined || payload.errorCode === null
+}
+
+function isGitReviewPackPayload(
+  payload: Readonly<Record<string, unknown>>,
+  workspaceId: string,
+): boolean {
+  if (
+    !hasExactKeys(
+      payload,
+      [
+        "schemaVersion",
+        "checkpoint",
+        "workspaceId",
+        "workUnitId",
+        "objective",
+        "acceptance",
+        "gates",
+        "manifest",
+        "diffSummary",
+        "verification",
+        "decisions",
+        "failedAttempts",
+        "risks",
+        "restoreGuidance",
+        "operationState",
+        "packDigest",
+      ],
+      ["historySequence"],
+    ) ||
+    payload.schemaVersion !== 1 ||
+    payload.workspaceId !== workspaceId ||
+    !isGitId(payload.workspaceId) ||
+    !isGitId(payload.workUnitId) ||
+    !isGitCheckpoint(payload.checkpoint) ||
+    !isGitText(payload.objective, 500) ||
+    !Array.isArray(payload.acceptance) ||
+    payload.acceptance.length < 1 ||
+    payload.acceptance.length > 20 ||
+    !payload.acceptance.every((item) => isGitText(item, 1024)) ||
+    !Array.isArray(payload.gates) ||
+    payload.gates.length !== 4 ||
+    !payload.gates.every(isGitGate) ||
+    new Set(
+      payload.gates.map((gate) =>
+        isRecord(gate) && typeof gate.gate === "string" ? gate.gate : "",
+      ),
+    ).size !== 4 ||
+    !Array.isArray(payload.manifest) ||
+    payload.manifest.length < 1 ||
+    payload.manifest.length > 500 ||
+    !payload.manifest.every(isGitManifestEntry) ||
+    !isGitDiffSummary(payload.diffSummary) ||
+    !Array.isArray(payload.verification) ||
+    payload.verification.length < 1 ||
+    payload.verification.length > 100 ||
+    !payload.verification.every(isGitVerification) ||
+    !Array.isArray(payload.decisions) ||
+    payload.decisions.length > 100 ||
+    !payload.decisions.every(isGitDecision) ||
+    !Array.isArray(payload.failedAttempts) ||
+    payload.failedAttempts.length > 100 ||
+    !payload.failedAttempts.every(isGitFailedAttempt) ||
+    !Array.isArray(payload.risks) ||
+    payload.risks.length > 100 ||
+    !payload.risks.every(isGitRisk) ||
+    !Array.isArray(payload.restoreGuidance) ||
+    payload.restoreGuidance.length < 1 ||
+    payload.restoreGuidance.length > 10 ||
+    !payload.restoreGuidance.every((item) => isGitText(item, 4096)) ||
+    payload.operationState !== "history_complete" ||
+    !isSha256(payload.packDigest) ||
+    !(payload.historySequence === undefined || payload.historySequence === null)
+  ) {
+    return false
+  }
+  return true
+}
+
+function parseGitHistoryPayload(
+  kind: unknown,
+  payload: Readonly<Record<string, unknown>>,
+  workspaceId: string,
+  sessionId: string | null,
+): Readonly<Record<string, unknown>> | null {
+  if (sessionId !== null) return null
+  if (
+    kind === "git.checkpoint.operation.changed" &&
+    isGitOperationPayload(payload, workspaceId)
+  ) {
+    return payload
+  }
+  if (
+    kind === "git.review_pack.recorded" &&
+    isGitReviewPackPayload(payload, workspaceId)
+  ) {
+    return payload
+  }
+  return null
+}
+
 function parseEventPayload(
   producer: unknown,
   kind: unknown,
   payload: unknown,
+  workspaceId: string,
+  sessionId: string | null,
 ): {
   readonly producer: PersistedTimelineEvent["producer"]
   readonly kind: PersistedTimelineEvent["kind"]
@@ -721,6 +1165,21 @@ function parseEventPayload(
         producer,
         kind: kind as PersistedTimelineEvent["kind"],
         payload: codexPayload,
+      }
+    }
+  }
+  if (producer === "git") {
+    const gitPayload = parseGitHistoryPayload(
+      kind,
+      payload,
+      workspaceId,
+      sessionId,
+    )
+    if (gitPayload !== null) {
+      return {
+        producer,
+        kind: kind as PersistedTimelineEvent["kind"],
+        payload: gitPayload,
       }
     }
   }
@@ -861,7 +1320,13 @@ export function parsePersistedTimelineEvent(
   ) {
     return violation()
   }
-  const event = parseEventPayload(value.producer, value.kind, value.payload)
+  const event = parseEventPayload(
+    value.producer,
+    value.kind,
+    value.payload,
+    value.workspaceId,
+    value.sessionId,
+  )
   return {
     schemaVersion: 1,
     eventId: value.eventId,

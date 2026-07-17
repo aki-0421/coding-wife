@@ -18,6 +18,73 @@ import {
 } from "@/lib/contracts/workspace-history"
 import fixture from "@/test/fixtures/workspace-history.v1.json"
 
+const gitFingerprint = `sha256:${"c".repeat(64)}`
+
+function gitReviewPackPayload() {
+  return {
+    schemaVersion: 1,
+    checkpoint: {
+      checkpointId: "checkpoint-fixture",
+      commitSha: "a".repeat(40),
+      parentSha: "b".repeat(40),
+      targetReference: "refs/heads/main",
+      message: "feat: add fixture\n\n- verify the bounded history shape",
+      authorName: "Fixture Author",
+      authorEmail: "fixture@example.invalid",
+      createdAt: "2026-07-18T00:00:02.000Z",
+    },
+    workspaceId: "workspace-fixture",
+    workUnitId: "work-unit-fixture",
+    objective: "Persist a bounded review pack",
+    acceptance: ["The exact review pack can be restored"],
+    gates: ["scope", "ownership", "verification", "risk"].map((gate) => ({
+      gate,
+      outcome: "pass",
+      reasonCodes: [],
+      observedRepositoryFingerprint: gitFingerprint,
+    })),
+    manifest: [
+      {
+        fileId: "file-fixture",
+        relativePath: "src/main.rs",
+        changeKind: "modified",
+        ownership: "owned",
+        beforeHash: `sha256:${"d".repeat(64)}`,
+        afterHash: `sha256:${"e".repeat(64)}`,
+        additions: 4,
+        deletions: 1,
+        reasonCode: null,
+      },
+    ],
+    diffSummary: {
+      filesChanged: 1,
+      additions: 4,
+      deletions: 1,
+      binaryFiles: 0,
+      totalBytes: 128,
+    },
+    verification: [
+      {
+        evidenceId: "evidence-fixture",
+        check: "cargo test",
+        result: "passed",
+        durationMs: 1200,
+        summary: "All focused tests passed",
+        observedRepositoryFingerprint: gitFingerprint,
+      },
+    ],
+    decisions: [],
+    failedAttempts: [],
+    risks: [],
+    restoreGuidance: [
+      "Preview the affected files before creating a revert commit.",
+    ],
+    operationState: "history_complete",
+    packDigest: `sha256:${"f".repeat(64)}`,
+    historySequence: null,
+  }
+}
+
 describe("workspace history contract", () => {
   it("parses every Rust response fixture without shape drift", () => {
     expect(fixture.schemaVersion).toBe(workspaceHistorySchemaVersion)
@@ -179,6 +246,79 @@ describe("workspace history contract", () => {
       parsePersistedTimelineEvent({
         ...event,
         payload: { ...event.payload, excerpt: "x".repeat(16 * 1024 + 1) },
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
+  })
+
+  it("parses only exact owned Git operation and raw review-pack payloads", () => {
+    const operation = {
+      ...fixture.timeline.items[0],
+      eventId: "git-operation-fixture-prepared",
+      sessionId: null,
+      producer: "git",
+      kind: "git.checkpoint.operation.changed",
+      payload: {
+        schemaVersion: 1,
+        operationId: "operation-fixture",
+        clientRequestId: "request-fixture",
+        workspaceId: "workspace-fixture",
+        workUnitId: "work-unit-fixture",
+        baselineId: "baseline-fixture",
+        state: "prepared",
+        expectedHeadSha: "b".repeat(40),
+        targetReference: "refs/heads/main",
+        commitSha: null,
+        packDigest: null,
+        errorCode: null,
+        observedAt: "2026-07-18T00:00:01.000Z",
+      },
+    }
+    const pack = {
+      ...operation,
+      eventId: "git-pack-checkpoint-fixture",
+      kind: "git.review_pack.recorded",
+      payload: gitReviewPackPayload(),
+    }
+
+    expect(parsePersistedTimelineEvent(operation)).toEqual(operation)
+    expect(parsePersistedTimelineEvent(pack)).toEqual(pack)
+    expect(() =>
+      parsePersistedTimelineEvent({
+        ...operation,
+        payload: { ...operation.payload, rawCommand: "git commit" },
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
+    expect(() =>
+      parsePersistedTimelineEvent({
+        ...pack,
+        payload: { ...pack.payload, workspaceId: "workspace-other" },
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
+    expect(() =>
+      parsePersistedTimelineEvent({
+        ...pack,
+        sessionId: "session-fixture",
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
+    expect(() =>
+      parsePersistedTimelineEvent({
+        ...pack,
+        payload: {
+          ...pack.payload,
+          checkpoint: {
+            ...pack.payload.checkpoint,
+            privatePath: "/Users/private/repository",
+          },
+        },
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
+    expect(() =>
+      parsePersistedTimelineEvent({
+        ...pack,
+        payload: {
+          ...pack.payload,
+          manifest: Array.from({ length: 501 }, () => pack.payload.manifest[0]),
+        },
       }),
     ).toThrow(WorkspaceHistoryContractError)
   })
