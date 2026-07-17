@@ -2,7 +2,7 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"],
-      "@cubism/*": ["./vendor/live2d/dist/*"]
+      "@cubism/*": ["./vendor/live2d/types/*"]
     }
   },
   "files": [],

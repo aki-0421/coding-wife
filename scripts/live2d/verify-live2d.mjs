@@ -6,6 +6,7 @@ import {
   CORE_DECLARATION_SHA256,
   CORE_SHA256,
   CORE_VERSION,
+  FRAMEWORK_DECLARATION_FILES,
   FRAMEWORK_SOURCE_FILES,
   FRAMEWORK_TAG,
   FRAMEWORK_TAG_COMMIT,
@@ -40,6 +41,38 @@ const hiyoriRoot = path.join(
   projectRoot,
   "src-tauri/resources/characters/builtin-hiyori",
 )
+const frameworkTypesRoot = path.join(projectRoot, "vendor/live2d/types")
+
+export function verifyFrameworkDeclarations(root = frameworkTypesRoot) {
+  const checksumFile = path.join(root, "checksums.sha256")
+  assertExactFiles(
+    root,
+    [...FRAMEWORK_DECLARATION_FILES, "checksums.sha256"],
+    "tracked Cubism Framework declarations",
+  )
+  const lines = readFileSync(checksumFile, "utf8").trim().split("\n")
+  if (lines.length !== FRAMEWORK_DECLARATION_FILES.length) {
+    fail(
+      `Cubism declaration checksum manifest must contain ${FRAMEWORK_DECLARATION_FILES.length} entries, found ${lines.length}`,
+    )
+  }
+  lines.forEach((line, index) => {
+    const match = /^([a-f0-9]{64})  (.+)$/u.exec(line)
+    if (!match) fail(`invalid Cubism declaration checksum line: ${line}`)
+    const [, expectedHash, relative] = match
+    const expectedRelative = FRAMEWORK_DECLARATION_FILES[index]
+    if (relative !== expectedRelative) {
+      fail(
+        `Cubism declaration checksum order mismatch: expected ${expectedRelative}, received ${relative}`,
+      )
+    }
+    assertHash(
+      path.join(root, relative),
+      expectedHash,
+      `Cubism declaration ${relative}`,
+    )
+  })
+}
 
 function verifyChecksums() {
   const checksumFile = path.join(vendorRoot, "checksums.sha256")
@@ -193,6 +226,7 @@ function verifyHiyori() {
 
 export function verifyLive2dSupplyChain() {
   verifySdk()
+  verifyFrameworkDeclarations()
   verifyHiyori()
   const releaseNotices = verifyReleaseNotices(projectRoot)
   return {

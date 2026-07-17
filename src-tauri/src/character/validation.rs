@@ -871,7 +871,8 @@ mod tests {
 
     #[test]
     fn copied_hiyori_runtime_passes_the_complete_source_gate() {
-        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tmp/hiyori_pro/runtime");
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/characters/builtin-hiyori/runtime");
         let snapshot = snapshot_character_folder(
             &source,
             format!("custom:{}", uuid::Uuid::new_v4()),

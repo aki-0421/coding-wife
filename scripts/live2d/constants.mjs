@@ -74,6 +74,10 @@ export const FRAMEWORK_SOURCE_FILES = Object.freeze([
   "utils/cubismstring.ts",
 ])
 
+export const FRAMEWORK_DECLARATION_FILES = Object.freeze(
+  FRAMEWORK_SOURCE_FILES.map((file) => file.replace(/\.ts$/u, ".d.ts")),
+)
+
 export const SHADER_FILES = Object.freeze([
   "fragshadersrcalphablend.frag",
   "fragshadersrccolorblend.frag",

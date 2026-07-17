@@ -16,7 +16,10 @@ import {
   getReleaseNoticeRoot,
   verifyReleaseNotices,
 } from "./release-notices.mjs"
-import { verifyLive2dSupplyChain } from "./verify-live2d.mjs"
+import {
+  verifyFrameworkDeclarations,
+  verifyLive2dSupplyChain,
+} from "./verify-live2d.mjs"
 import {
   live2dAssetsPlugin,
   resolveLive2dAssetRequest,
@@ -56,6 +59,29 @@ test("the release notice verifier rejects missing files and byte drift", () => {
     assert.throws(
       () => verifyReleaseNotices(projectRoot, legalRoot),
       /differs from canonical source/,
+    )
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true })
+  }
+})
+
+test("the tracked Cubism declaration boundary rejects byte drift", () => {
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), "coding-wife-live2d-types-"),
+  )
+  const typesRoot = path.join(temporaryRoot, "types")
+
+  try {
+    cpSync(path.join(projectRoot, "vendor/live2d/types"), typesRoot, {
+      recursive: true,
+    })
+    writeFileSync(
+      path.join(typesRoot, "live2dcubismframework.d.ts"),
+      "export declare const drift: true\n",
+    )
+    assert.throws(
+      () => verifyFrameworkDeclarations(typesRoot),
+      /Cubism declaration live2dcubismframework\.d\.ts SHA-256 mismatch/,
     )
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true })

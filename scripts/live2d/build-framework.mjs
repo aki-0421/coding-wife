@@ -16,7 +16,10 @@ import {
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { FRAMEWORK_SOURCE_FILES } from "./constants.mjs"
+import {
+  FRAMEWORK_DECLARATION_FILES,
+  FRAMEWORK_SOURCE_FILES,
+} from "./constants.mjs"
 import { assertExactFiles, fail, listFiles, sha256 } from "./file-utils.mjs"
 
 const defaultProjectRoot = fileURLToPath(new URL("../..", import.meta.url))
@@ -178,6 +181,26 @@ function assertFrameworkOutput(root) {
   assertExactFiles(root, frameworkOutputFiles(), "compiled Cubism Framework")
 }
 
+function assertTrackedFrameworkTypes(stage, trackedTypes) {
+  assertExactFiles(
+    trackedTypes,
+    [...FRAMEWORK_DECLARATION_FILES, "checksums.sha256"],
+    "tracked Cubism Framework declarations",
+  )
+  for (const relative of FRAMEWORK_DECLARATION_FILES) {
+    const generated = readFileSync(path.join(stage, relative), "utf8").replace(
+      /[ \t]+$/gmu,
+      "",
+    )
+    const tracked = readFileSync(path.join(trackedTypes, relative), "utf8")
+    if (generated !== tracked) {
+      fail(
+        `tracked Cubism declaration differs from fixed-compiler output: ${relative}; run pnpm live2d:sync:framework-types`,
+      )
+    }
+  }
+}
+
 function sameDirectoryContents(left, right) {
   if (!existsSync(left) || !existsSync(right)) return false
   const leftFiles = listFiles(left)
@@ -226,7 +249,10 @@ function clearAbandonedBuilds(cacheRoot) {
   }
 }
 
-export async function buildFramework(projectRoot = defaultProjectRoot) {
+export async function buildFramework(
+  projectRoot = defaultProjectRoot,
+  { verifyTrackedTypes = true } = {},
+) {
   const compilerPackage = path.join(
     projectRoot,
     "node_modules/typescript-cubism/package.json",
@@ -237,6 +263,7 @@ export async function buildFramework(projectRoot = defaultProjectRoot) {
   )
   const config = path.join(projectRoot, "vendor/live2d/tsconfig.json")
   const output = path.join(projectRoot, "vendor/live2d/dist")
+  const trackedTypes = path.join(projectRoot, "vendor/live2d/types")
   const cacheRoot = path.join(
     projectRoot,
     "node_modules/.cache/coding-wife-live2d",
@@ -275,6 +302,7 @@ export async function buildFramework(projectRoot = defaultProjectRoot) {
       }
 
       assertFrameworkOutput(stage)
+      if (verifyTrackedTypes) assertTrackedFrameworkTypes(stage, trackedTypes)
       const publication = publishStagedFramework(stage, output, backup)
       console.log(
         publication === "current"

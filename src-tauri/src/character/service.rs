@@ -854,7 +854,8 @@ mod tests {
     }
 
     fn reviewed_hiyori_source() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tmp/hiyori_pro/runtime")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/characters/builtin-hiyori/runtime")
     }
 
     fn asset_request(
