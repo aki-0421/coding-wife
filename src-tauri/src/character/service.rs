@@ -15,7 +15,7 @@ use super::manifest::{
     is_sha256, CharacterPackManifest, BUILTIN_HIYORI_PACK_ID, CHARACTER_SCHEMA_VERSION,
 };
 use super::storage::{CharacterStateFile, CharacterStorage, StoredPack};
-use super::validation::snapshot_character_folder;
+use super::validation::snapshot_character_model;
 
 const PREVIEW_TTL: Duration = Duration::from_secs(10 * 60);
 const BUILTIN_MANIFEST_FILE: &str = "pack.json";
@@ -23,18 +23,19 @@ const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 
 pub type CharacterPickerFuture<'a> = Pin<Box<dyn Future<Output = Option<PathBuf>> + Send + 'a>>;
 
-pub trait CharacterFolderPicker: Send + Sync {
-    fn pick_folder(&self) -> CharacterPickerFuture<'_>;
+pub trait CharacterModelPicker: Send + Sync {
+    fn pick_model_file(&self) -> CharacterPickerFuture<'_>;
 }
 
-pub struct NativeCharacterFolderPicker;
+pub struct NativeCharacterModelPicker;
 
-impl CharacterFolderPicker for NativeCharacterFolderPicker {
-    fn pick_folder(&self) -> CharacterPickerFuture<'_> {
+impl CharacterModelPicker for NativeCharacterModelPicker {
+    fn pick_model_file(&self) -> CharacterPickerFuture<'_> {
         Box::pin(async {
             rfd::AsyncFileDialog::new()
-                .set_title("Select a Live2D model folder")
-                .pick_folder()
+                .set_title("Select one Live2D .model3.json file")
+                .add_filter("Live2D model", &["json"])
+                .pick_file()
                 .await
                 .map(|handle| handle.path().to_path_buf())
         })
@@ -203,7 +204,7 @@ struct PendingImport {
 pub struct CharacterService {
     storage: CharacterStorage,
     builtin_directory: PathBuf,
-    picker: Arc<dyn CharacterFolderPicker>,
+    picker: Arc<dyn CharacterModelPicker>,
     pending: Arc<Mutex<HashMap<String, PendingImport>>>,
     operations: Arc<Mutex<()>>,
 }
@@ -213,14 +214,14 @@ impl CharacterService {
         Self::new(
             storage,
             builtin_directory,
-            Arc::new(NativeCharacterFolderPicker),
+            Arc::new(NativeCharacterModelPicker),
         )
     }
 
     pub fn new(
         storage: CharacterStorage,
         builtin_directory: PathBuf,
-        picker: Arc<dyn CharacterFolderPicker>,
+        picker: Arc<dyn CharacterModelPicker>,
     ) -> Self {
         Self {
             storage,
@@ -248,7 +249,7 @@ impl CharacterService {
         validate_workspace_id(&request.workspace_id, "character_import_pick")?;
         let _operation = self.operations.lock().await;
         self.cleanup_expired().await;
-        let Some(selected) = self.picker.pick_folder().await else {
+        let Some(selected) = self.picker.pick_model_file().await else {
             return Ok(CharacterImportResponse {
                 schema_version: CHARACTER_SCHEMA_VERSION,
                 outcome: CharacterImportOutcome::Canceled,
@@ -260,7 +261,7 @@ impl CharacterService {
         let preview_nonce = uuid::Uuid::new_v4().to_string();
         let generation = random_generation();
         let imported_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-        let snapshot = snapshot_character_folder(&selected, pack_id.clone(), imported_at)?;
+        let snapshot = snapshot_character_model(&selected, pack_id.clone(), imported_at)?;
         let manifest_hash = snapshot.manifest.sha256()?;
         let directory = self.storage.prepare_quarantine(&token, &snapshot)?;
         let expires_at = (Utc::now() + chrono::Duration::from_std(PREVIEW_TTL).unwrap_or_default())
@@ -825,8 +826,8 @@ mod tests {
     #[derive(Clone)]
     struct FixedPicker(Option<PathBuf>);
 
-    impl CharacterFolderPicker for FixedPicker {
-        fn pick_folder(&self) -> CharacterPickerFuture<'_> {
+    impl CharacterModelPicker for FixedPicker {
+        fn pick_model_file(&self) -> CharacterPickerFuture<'_> {
             let selected = self.0.clone();
             Box::pin(async move { selected })
         }
@@ -856,6 +857,7 @@ mod tests {
     fn reviewed_hiyori_source() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources/characters/builtin-hiyori/runtime")
+            .join("hiyori_pro_t11.model3.json")
     }
 
     fn asset_request(

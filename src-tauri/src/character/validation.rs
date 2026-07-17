@@ -1,13 +1,17 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Cursor, Read};
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-#[cfg(any(not(unix), test))]
-use std::fs::File;
+#[cfg(unix)]
+use std::ffi::CString;
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
@@ -23,7 +27,6 @@ const MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_TEXTURE_DIMENSION: u32 = 8192;
 const MAX_JSON_DEPTH: usize = 64;
-const MAX_SCAN_DEPTH: usize = 32;
 const MAX_MOC_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,51 +60,67 @@ struct AssetReference {
     motion_index: Option<usize>,
 }
 
-pub fn snapshot_character_folder(
-    selected_folder: &Path,
+struct OpenedSourceRoot {
+    path: PathBuf,
+    #[cfg(unix)]
+    directory: File,
+}
+
+impl OpenedSourceRoot {
+    fn open(path: &Path) -> CharacterResult<Self> {
+        let operation = "character_import_pick";
+        let canonical = fs::canonicalize(path)
+            .map_err(|_| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
+        let metadata = fs::symlink_metadata(&canonical)
+            .map_err(|_| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(character_error(
+                operation,
+                "CHARACTER-SOURCE-NOT-DIRECTORY",
+                true,
+            ));
+        }
+
+        #[cfg(unix)]
+        let directory = open_absolute_directory(&canonical, operation)?;
+
+        Ok(Self {
+            path: canonical,
+            #[cfg(unix)]
+            directory,
+        })
+    }
+
+    fn open_asset(&self, relative: &Path, operation: &str) -> CharacterResult<File> {
+        #[cfg(unix)]
+        {
+            open_relative_no_follow(&self.directory, relative, operation)
+        }
+        #[cfg(not(unix))]
+        {
+            ensure_no_symlink_components(&self.path, relative)?;
+            File::open(self.path.join(relative))
+                .map_err(|_| character_error(operation, "CHARACTER-ASSET-OPEN", true))
+        }
+    }
+}
+
+pub fn snapshot_character_model(
+    selected_model: &Path,
     pack_id: String,
     imported_at: String,
 ) -> CharacterResult<ValidatedCharacterSnapshot> {
     let operation = "character_import_pick";
-    let selected_metadata = fs::symlink_metadata(selected_folder)
-        .map_err(|_| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
-    if selected_metadata.file_type().is_symlink() || !selected_metadata.is_dir() {
-        return Err(character_error(
-            operation,
-            "CHARACTER-SOURCE-NOT-DIRECTORY",
-            true,
-        ));
-    }
-    let selected_root = fs::canonicalize(selected_folder)
-        .map_err(|_| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
-    let entries = discover_model_entries(&selected_root)?;
-    let model_path = match entries.as_slice() {
-        [entry] => entry.clone(),
-        [] => {
-            return Err(character_error(
-                operation,
-                "CHARACTER-MODEL3-NOT-FOUND",
-                true,
-            ))
-        }
-        _ => {
-            return Err(character_error(
-                operation,
-                "CHARACTER-MODEL3-MULTIPLE",
-                true,
-            ))
-        }
-    };
-    let source_root = model_path
-        .parent()
-        .ok_or_else(|| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
-    let source_root = fs::canonicalize(source_root)
-        .map_err(|_| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
-
-    let model_name = model_path
+    let model_name = selected_model
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| character_error(operation, "CHARACTER-ASSET-NAME", false))?;
+        .filter(|name| name.ends_with(".model3.json"))
+        .filter(|name| is_safe_asset_id(name))
+        .ok_or_else(|| character_error(operation, "CHARACTER-MODEL3-SELECTION", true))?;
+    let selected_parent = selected_model
+        .parent()
+        .ok_or_else(|| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
+    let source_root = OpenedSourceRoot::open(selected_parent)?;
     let model_reference = AssetReference {
         asset_id: model_name.to_owned(),
         role: CharacterAssetRole::Model,
@@ -176,10 +195,8 @@ pub fn snapshot_character_folder(
         .and_then(|value| u32::try_from(value).ok())
         .filter(|version| *version == 3)
         .ok_or_else(|| character_error(operation, "CHARACTER-MODEL3-VERSION", false))?;
-    let display_name = model_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .and_then(|value| value.strip_suffix(".model3.json"))
+    let display_name = model_name
+        .strip_suffix(".model3.json")
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("Imported Live2D model")
         .chars()
@@ -223,13 +240,14 @@ pub fn snapshot_character_folder(
     };
     manifest.validate(operation)?;
     Ok(ValidatedCharacterSnapshot {
-        source_root,
+        source_root: source_root.path,
         manifest,
         assets,
     })
 }
 
 pub fn verify_source_unchanged(snapshot: &ValidatedCharacterSnapshot) -> CharacterResult<()> {
+    let source_root = OpenedSourceRoot::open(&snapshot.source_root)?;
     for original in &snapshot.assets {
         let reference = AssetReference {
             asset_id: original.file.asset_id.clone(),
@@ -237,7 +255,7 @@ pub fn verify_source_unchanged(snapshot: &ValidatedCharacterSnapshot) -> Charact
             motion_group: None,
             motion_index: None,
         };
-        let current = read_snapshot_asset(&snapshot.source_root, &reference)?;
+        let current = read_snapshot_asset(&source_root, &reference)?;
         if current.fingerprint != original.fingerprint {
             return Err(character_error(
                 "character_import_pick",
@@ -247,69 +265,6 @@ pub fn verify_source_unchanged(snapshot: &ValidatedCharacterSnapshot) -> Charact
         }
     }
     Ok(())
-}
-
-fn discover_model_entries(root: &Path) -> CharacterResult<Vec<PathBuf>> {
-    let operation = "character_import_pick";
-    let mut pending = vec![(root.to_path_buf(), 0_usize)];
-    let mut entries = Vec::new();
-    while let Some((directory, depth)) = pending.pop() {
-        if depth > MAX_SCAN_DEPTH {
-            return Err(character_error(
-                operation,
-                "CHARACTER-DIRECTORY-DEPTH-LIMIT",
-                true,
-            ));
-        }
-        let iterator = fs::read_dir(&directory)
-            .map_err(|_| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
-        for item in iterator {
-            let item =
-                item.map_err(|_| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
-            let path = item.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|_| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
-            if metadata.file_type().is_symlink() {
-                return Err(character_error(
-                    operation,
-                    "CHARACTER-SYMLINK-NOT-ALLOWED",
-                    false,
-                ));
-            }
-            if metadata.is_dir() {
-                pending.push((path, depth + 1));
-                continue;
-            }
-            if !metadata.is_file() {
-                return Err(character_error(
-                    operation,
-                    "CHARACTER-NONREGULAR-ASSET",
-                    false,
-                ));
-            }
-            let name = item.file_name();
-            let name = name.to_string_lossy();
-            if name.starts_with('.') {
-                #[cfg(unix)]
-                if metadata.permissions().mode() & 0o111 != 0 {
-                    return Err(character_error(
-                        operation,
-                        "CHARACTER-HIDDEN-EXECUTABLE",
-                        false,
-                    ));
-                }
-                continue;
-            }
-            if name.ends_with(".model3.json") {
-                entries.push(path);
-                if entries.len() > 1 {
-                    return Ok(entries);
-                }
-            }
-        }
-    }
-    entries.sort();
-    Ok(entries)
 }
 
 fn collect_model_references(
@@ -467,7 +422,105 @@ fn reference_from_value(
     })
 }
 
-fn read_snapshot_asset(root: &Path, reference: &AssetReference) -> CharacterResult<SnapshotAsset> {
+#[cfg(unix)]
+fn open_absolute_directory(path: &Path, operation: &str) -> CharacterResult<File> {
+    let mut current = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY)
+        .open("/")
+        .map_err(|_| character_error(operation, "CHARACTER-SOURCE-UNREADABLE", true))?;
+    for component in path.components() {
+        match component {
+            Component::RootDir => {}
+            Component::Normal(name) => {
+                current = openat_component(
+                    &current,
+                    name,
+                    libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_DIRECTORY,
+                    operation,
+                )?;
+            }
+            _ => {
+                return Err(character_error(
+                    operation,
+                    "CHARACTER-SOURCE-UNREADABLE",
+                    true,
+                ));
+            }
+        }
+    }
+    Ok(current)
+}
+
+#[cfg(unix)]
+fn open_relative_no_follow(root: &File, relative: &Path, operation: &str) -> CharacterResult<File> {
+    let components = relative
+        .components()
+        .map(|component| match component {
+            Component::Normal(name) => Ok(name),
+            _ => Err(character_error(
+                operation,
+                "CHARACTER-ASSET-TRAVERSAL",
+                false,
+            )),
+        })
+        .collect::<CharacterResult<Vec<_>>>()?;
+    let (file_name, directories) = components
+        .split_last()
+        .ok_or_else(|| character_error(operation, "CHARACTER-ASSET-REFERENCE", false))?;
+    let mut parent = root
+        .try_clone()
+        .map_err(|_| character_error(operation, "CHARACTER-ASSET-OPEN", true))?;
+    for directory in directories {
+        parent = openat_component(
+            &parent,
+            directory,
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_DIRECTORY,
+            operation,
+        )?;
+    }
+    openat_component(
+        &parent,
+        file_name,
+        libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        operation,
+    )
+}
+
+#[cfg(unix)]
+fn openat_component(
+    parent: &File,
+    name: &std::ffi::OsStr,
+    flags: libc::c_int,
+    operation: &str,
+) -> CharacterResult<File> {
+    let name = CString::new(name.as_bytes())
+        .map_err(|_| character_error(operation, "CHARACTER-ASSET-REFERENCE", false))?;
+    // SAFETY: `parent` owns a live directory descriptor, `name` is NUL-terminated,
+    // and a successful call returns a new descriptor whose ownership moves to `File`.
+    let descriptor = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), flags) };
+    if descriptor < 0 {
+        let error = std::io::Error::last_os_error();
+        let code = match error.raw_os_error() {
+            Some(libc::ELOOP) | Some(libc::ENOTDIR) => "CHARACTER-SYMLINK-NOT-ALLOWED",
+            Some(libc::ENOENT) => "CHARACTER-ASSET-MISSING",
+            _ => "CHARACTER-ASSET-OPEN",
+        };
+        return Err(character_error(
+            operation,
+            code,
+            code != "CHARACTER-SYMLINK-NOT-ALLOWED",
+        ));
+    }
+    // SAFETY: `descriptor` is a fresh, successful `openat` result and is not
+    // owned anywhere else. `File` assumes responsibility for closing it once.
+    Ok(unsafe { File::from_raw_fd(descriptor) })
+}
+
+fn read_snapshot_asset(
+    root: &OpenedSourceRoot,
+    reference: &AssetReference,
+) -> CharacterResult<SnapshotAsset> {
     let operation = "character_import_pick";
     if !is_safe_asset_id(&reference.asset_id)
         || !reference
@@ -491,26 +544,8 @@ fn read_snapshot_asset(root: &Path, reference: &AssetReference) -> CharacterResu
             false,
         ));
     }
-    ensure_no_symlink_components(root, relative)?;
-    let path = root.join(relative);
-    let canonical = fs::canonicalize(&path)
-        .map_err(|_| character_error(operation, "CHARACTER-ASSET-MISSING", true))?;
-    if !canonical.starts_with(root) {
-        return Err(character_error(
-            operation,
-            "CHARACTER-ASSET-ESCAPED-ROOT",
-            false,
-        ));
-    }
-    #[cfg(unix)]
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&path)
-        .map_err(|_| character_error(operation, "CHARACTER-ASSET-OPEN", true))?;
-    #[cfg(not(unix))]
-    let mut file =
-        File::open(&path).map_err(|_| character_error(operation, "CHARACTER-ASSET-OPEN", true))?;
+    let path = root.path.join(relative);
+    let file = root.open_asset(relative, operation)?;
     let metadata = file
         .metadata()
         .map_err(|_| character_error(operation, "CHARACTER-ASSET-METADATA", true))?;
@@ -581,6 +616,7 @@ fn read_snapshot_asset(root: &Path, reference: &AssetReference) -> CharacterResu
     })
 }
 
+#[cfg(not(unix))]
 fn ensure_no_symlink_components(root: &Path, relative: &Path) -> CharacterResult<()> {
     let mut current = root.to_path_buf();
     for component in relative.components() {
@@ -762,12 +798,16 @@ mod tests {
         fs::write(root.join("texture.png"), png).expect("texture");
     }
 
+    fn selected_model(root: &Path) -> PathBuf {
+        root.join("test.model3.json")
+    }
+
     #[test]
-    fn valid_folder_creates_opaque_manifest_without_source_path() {
+    fn selected_model_creates_opaque_manifest_without_source_path() {
         let directory = TestDirectory::new();
         write_minimal_model(directory.path(), "test.moc3");
-        let snapshot = snapshot_character_folder(
-            directory.path(),
+        let snapshot = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -782,8 +822,8 @@ mod tests {
     fn traversal_is_rejected_before_open() {
         let directory = TestDirectory::new();
         write_minimal_model(directory.path(), "../outside.moc3");
-        let error = snapshot_character_folder(
-            directory.path(),
+        let error = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -792,7 +832,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_entrypoints_are_rejected() {
+    fn unrelated_models_beside_the_selected_entrypoint_are_ignored() {
         let directory = TestDirectory::new();
         write_minimal_model(directory.path(), "test.moc3");
         fs::copy(
@@ -800,13 +840,39 @@ mod tests {
             directory.path().join("other.model3.json"),
         )
         .expect("second model");
-        let error = snapshot_character_folder(
-            directory.path(),
+        let snapshot = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
-        .expect_err("multiple entries must fail");
-        assert_eq!(error.code, "CHARACTER-MODEL3-MULTIPLE");
+        .expect("the explicit selection is authoritative");
+        assert_eq!(snapshot.manifest.entrypoint, "test.model3.json");
+        assert_eq!(snapshot.assets.len(), 3);
+    }
+
+    #[test]
+    fn wrong_suffix_and_nonregular_model_selections_are_rejected() {
+        let directory = TestDirectory::new();
+        write_minimal_model(directory.path(), "test.moc3");
+        let wrong_suffix = directory.path().join("test.json");
+        fs::copy(selected_model(directory.path()), &wrong_suffix).expect("wrong suffix fixture");
+        let error = snapshot_character_model(
+            &wrong_suffix,
+            format!("custom:{}", uuid::Uuid::new_v4()),
+            "2026-07-18T00:00:00Z".to_owned(),
+        )
+        .expect_err("wrong suffix must fail");
+        assert_eq!(error.code, "CHARACTER-MODEL3-SELECTION");
+
+        let nonregular = directory.path().join("directory.model3.json");
+        fs::create_dir(&nonregular).expect("nonregular fixture");
+        let error = snapshot_character_model(
+            &nonregular,
+            format!("custom:{}", uuid::Uuid::new_v4()),
+            "2026-07-18T00:00:00Z".to_owned(),
+        )
+        .expect_err("nonregular selected entrypoint must fail");
+        assert_eq!(error.code, "CHARACTER-NONREGULAR-ASSET");
     }
 
     #[cfg(unix)]
@@ -821,8 +887,8 @@ mod tests {
             directory.path().join("linked.moc3"),
         )
         .expect("symlink");
-        let error = snapshot_character_folder(
-            directory.path(),
+        let error = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -835,8 +901,8 @@ mod tests {
             directory.path().join("linked.moc3"),
         )
         .expect("hardlink");
-        let error = snapshot_character_folder(
-            directory.path(),
+        let error = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -844,13 +910,45 @@ mod tests {
         assert_eq!(error.code, "CHARACTER-HARDLINK-NOT-ALLOWED");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn opened_root_descriptor_survives_parent_namespace_replacement() {
+        let container = TestDirectory::new();
+        let selected_root = container.path().join("selected");
+        let moved_root = container.path().join("selected-original");
+        fs::create_dir(&selected_root).expect("selected root");
+        write_minimal_model(&selected_root, "test.moc3");
+        let opened = OpenedSourceRoot::open(&selected_root).expect("opened root descriptor");
+
+        fs::rename(&selected_root, &moved_root).expect("replace selected root name");
+        fs::create_dir(&selected_root).expect("replacement root");
+        write_minimal_model(&selected_root, "test.moc3");
+        fs::write(
+            selected_root.join("test.moc3"),
+            b"MOC3\x03\x00\x00\x00attacker",
+        )
+        .expect("replacement bytes");
+
+        let original = read_snapshot_asset(
+            &opened,
+            &AssetReference {
+                asset_id: "test.moc3".to_owned(),
+                role: CharacterAssetRole::Moc,
+                motion_group: None,
+                motion_index: None,
+            },
+        )
+        .expect("descriptor-relative read");
+        assert_eq!(original.contents, b"MOC3\x03\x00\x00\x00payload");
+    }
+
     #[test]
     fn malformed_png_and_unsupported_moc_are_rejected() {
         let directory = TestDirectory::new();
         write_minimal_model(directory.path(), "test.moc3");
         fs::write(directory.path().join("texture.png"), b"not png").expect("bad png");
-        let error = snapshot_character_folder(
-            directory.path(),
+        let error = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -860,8 +958,8 @@ mod tests {
         write_minimal_model(directory.path(), "test.moc3");
         fs::write(directory.path().join("test.moc3"), b"MOC3\x07\0\0\0payload")
             .expect("unsupported moc");
-        let error = snapshot_character_folder(
-            directory.path(),
+        let error = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -872,8 +970,9 @@ mod tests {
     #[test]
     fn copied_hiyori_runtime_passes_the_complete_source_gate() {
         let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/characters/builtin-hiyori/runtime");
-        let snapshot = snapshot_character_folder(
+            .join("resources/characters/builtin-hiyori/runtime")
+            .join("hiyori_pro_t11.model3.json");
+        let snapshot = snapshot_character_model(
             &source,
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
@@ -891,8 +990,8 @@ mod tests {
     fn source_hash_change_is_detected_before_copy() {
         let directory = TestDirectory::new();
         write_minimal_model(directory.path(), "test.moc3");
-        let snapshot = snapshot_character_folder(
-            directory.path(),
+        let snapshot = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -926,8 +1025,8 @@ mod tests {
             ),
         )
         .expect("deep model");
-        let error = snapshot_character_folder(
-            directory.path(),
+        let error = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -939,8 +1038,8 @@ mod tests {
         oversized
             .set_len(MAX_FILE_BYTES + 1)
             .expect("sparse oversized moc");
-        let error = snapshot_character_folder(
-            directory.path(),
+        let error = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -963,8 +1062,8 @@ mod tests {
                 .expect("png data");
         }
         fs::write(directory.path().join("texture.png"), png).expect("large texture");
-        let error = snapshot_character_folder(
-            directory.path(),
+        let error = snapshot_character_model(
+            &selected_model(directory.path()),
             format!("custom:{}", uuid::Uuid::new_v4()),
             "2026-07-18T00:00:00Z".to_owned(),
         )
@@ -981,8 +1080,8 @@ mod tests {
         ] {
             let directory = TestDirectory::new();
             write_minimal_model(directory.path(), reference);
-            let error = snapshot_character_folder(
-                directory.path(),
+            let error = snapshot_character_model(
+                &selected_model(directory.path()),
                 format!("custom:{}", uuid::Uuid::new_v4()),
                 "2026-07-18T00:00:00Z".to_owned(),
             )

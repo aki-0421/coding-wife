@@ -20,6 +20,11 @@ impl CharacterCommandError {
             detail_ref: "character-library-v1".to_owned(),
         }
     }
+
+    pub fn with_operation(mut self, operation: &'static str) -> Self {
+        self.operation = operation.to_owned();
+        self
+    }
 }
 
 impl std::fmt::Display for CharacterCommandError {
