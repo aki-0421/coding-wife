@@ -35,6 +35,7 @@ import {
 import { Input } from "@/components/ui/input"
 import {
   Popover,
+  PopoverClose,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
@@ -241,15 +242,18 @@ const sectionIcons = {
 } as const
 
 function SettingsNavigation({
+  closeOnSelect = false,
   copy,
   section,
   onSectionChange,
-}: Pick<SettingsViewProps, "copy" | "section" | "onSectionChange">) {
+}: Pick<SettingsViewProps, "copy" | "section" | "onSectionChange"> & {
+  readonly closeOnSelect?: boolean
+}) {
   return (
     <nav aria-label={copy.settings} className="flex flex-col gap-xxs p-md">
       {sectionOrder.map((item) => {
         const Icon = sectionIcons[item]
-        return (
+        const navigationButton = (
           <button
             aria-current={section === item ? "page" : undefined}
             className={cn(
@@ -263,6 +267,14 @@ function SettingsNavigation({
             <Icon aria-hidden="true" className="size-3 shrink-0" />
             <span>{copy.settingsView.sections[item]}</span>
           </button>
+        )
+
+        return closeOnSelect ? (
+          <PopoverClose asChild key={item}>
+            {navigationButton}
+          </PopoverClose>
+        ) : (
+          navigationButton
         )
       })}
     </nav>
@@ -279,14 +291,14 @@ function SettingRow({
   readonly label: string
 }) {
   return (
-    <div className="flex items-start justify-between gap-xl border-b border-divider py-md">
-      <div className="flex max-w-[60ch] flex-col gap-xxs">
+    <div className="flex min-w-0 items-start justify-between gap-xl border-b border-divider py-md max-[700px]:flex-col max-[700px]:gap-sm">
+      <div className="flex min-w-0 max-w-[60ch] flex-col gap-xxs">
         <span className="text-title text-text-strong">{label}</span>
-        <span className="text-caption text-muted-foreground">
+        <span className="break-words text-caption text-muted-foreground">
           {description}
         </span>
       </div>
-      <div className="shrink-0">{action}</div>
+      <div className="max-w-full shrink-0 max-[700px]:shrink">{action}</div>
     </div>
   )
 }
@@ -321,14 +333,19 @@ function GeneralSettings({
       aria-labelledby="settings-general-title"
       className="flex flex-col gap-xl"
     >
-      <div className="flex items-center justify-between gap-md">
+      <div className="flex items-center justify-between gap-md max-[700px]:flex-col max-[700px]:items-start max-[700px]:gap-sm">
         <h2
           className="m-0 text-headline text-text-strong"
           id="settings-general-title"
         >
           {copy.settingsView.generalTitle}
         </h2>
-        <Badge variant="outline">{copy.settingsView.localPreview}</Badge>
+        <Badge
+          className="h-auto max-w-full shrink self-start break-words whitespace-normal py-xxs leading-snug"
+          variant="outline"
+        >
+          {copy.settingsView.localPreview}
+        </Badge>
       </div>
       <FieldGroup>
         <Field>
@@ -537,7 +554,12 @@ function AudioSettings({
       <h2 className="m-0 text-headline text-text-strong">
         {copy.settingsView.audioTitle}
       </h2>
-      <Badge variant="outline">{copy.settingsView.localPreview}</Badge>
+      <Badge
+        className="h-auto max-w-full shrink self-start break-words whitespace-normal py-xxs leading-snug"
+        variant="outline"
+      >
+        {copy.settingsView.localPreview}
+      </Badge>
       <SettingRow
         action={
           <Switch
@@ -864,7 +886,7 @@ export function SettingsView(props: SettingsViewProps) {
   })()
 
   return (
-    <main className="grid size-full min-h-0 grid-cols-[228px_minmax(0,1fr)] bg-app-bg max-[1279px]:grid-cols-1">
+    <main className="grid size-full min-h-0 min-w-0 grid-cols-[228px_minmax(0,1fr)] overflow-hidden bg-app-bg max-[1279px]:grid-cols-1">
       <aside className="min-h-0 border-r border-divider bg-sidebar/40 max-[1279px]:hidden">
         <ScrollArea className="size-full">
           <SettingsNavigation
@@ -875,30 +897,36 @@ export function SettingsView(props: SettingsViewProps) {
         </ScrollArea>
       </aside>
 
-      <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-        <header className="flex min-h-[58px] items-center justify-between gap-md border-b border-divider px-xl py-sm">
+      <section className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+        <header className="flex min-h-[58px] min-w-0 items-center justify-between gap-md border-b border-divider px-xl py-sm max-[700px]:items-start max-[700px]:px-md">
           <div className="flex min-w-0 flex-col gap-xxs">
             <h1 className="m-0 text-headline text-text-strong">
               {props.copy.settingsView.title}
             </h1>
-            <p className="m-0 truncate text-caption text-muted-foreground">
+            <p className="m-0 truncate text-caption text-muted-foreground max-[700px]:whitespace-normal">
               {props.copy.settingsView.description}
             </p>
           </div>
           <Popover>
             <PopoverTrigger asChild>
               <Button
-                className="min-[1280px]:hidden"
+                className="max-w-[45%] min-[1280px]:hidden"
                 size="xs"
                 type="button"
                 variant="secondary"
               >
-                {props.copy.settingsView.sections[props.section]}
-                <ChevronDownIcon data-icon="inline-end" />
+                <span className="truncate">
+                  {props.copy.settingsView.sections[props.section]}
+                </span>
+                <ChevronDownIcon className="shrink-0" data-icon="inline-end" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-64">
+            <PopoverContent
+              align="end"
+              className="w-64 max-w-[calc(100dvw-2rem)]"
+            >
               <SettingsNavigation
+                closeOnSelect
                 copy={props.copy}
                 onSectionChange={props.onSectionChange}
                 section={props.section}
@@ -906,8 +934,8 @@ export function SettingsView(props: SettingsViewProps) {
             </PopoverContent>
           </Popover>
         </header>
-        <ScrollArea className="min-h-0">
-          <div className="mx-auto w-full max-w-[780px] px-2xl py-xl">
+        <ScrollArea className="min-h-0 min-w-0">
+          <div className="mx-auto w-full min-w-0 max-w-[780px] px-2xl py-xl max-[700px]:px-md max-[700px]:py-lg">
             {sectionContent}
           </div>
         </ScrollArea>

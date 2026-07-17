@@ -401,6 +401,66 @@ describe("WorkspaceShell", () => {
     expect(localHistory.parentElement).toHaveTextContent("Persisted locally")
   })
 
+  it("closes compact settings navigation after selection, Escape, and outside click", async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    const navigationTrigger = screen
+      .getAllByRole<HTMLButtonElement>("button", { name: "General" })
+      .find((button) => button.dataset.slot === "popover-trigger")
+    expect(navigationTrigger).toBeDefined()
+
+    await user.click(navigationTrigger as HTMLButtonElement)
+    const navigation = await waitFor(() => {
+      const value = document.querySelector<HTMLElement>(
+        '[data-slot="popover-content"] nav',
+      )
+      expect(value).not.toBeNull()
+      return value as HTMLElement
+    })
+    const historyButton = within(navigation).getByRole("button", {
+      name: "History & privacy",
+    })
+    historyButton.focus()
+    await user.keyboard("{Enter}")
+
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-slot="popover-content"]'),
+      ).not.toBeInTheDocument(),
+    )
+    expect(
+      screen.getByRole("heading", { name: "History & privacy" }),
+    ).toBeVisible()
+    expect(navigationTrigger).toHaveFocus()
+
+    await user.click(navigationTrigger as HTMLButtonElement)
+    expect(
+      document.querySelector('[data-slot="popover-content"]'),
+    ).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-slot="popover-content"]'),
+      ).not.toBeInTheDocument(),
+    )
+    expect(navigationTrigger).toHaveFocus()
+
+    await user.click(navigationTrigger as HTMLButtonElement)
+    expect(
+      document.querySelector('[data-slot="popover-content"]'),
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole("heading", { name: "Settings & diagnostics" }),
+    )
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-slot="popover-content"]'),
+      ).not.toBeInTheDocument(),
+    )
+  })
+
   it("opens compact navigation from the selected workspace and restores focus", async () => {
     const user = userEvent.setup()
     renderWorkspace()
