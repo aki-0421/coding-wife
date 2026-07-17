@@ -3,6 +3,7 @@ export {
   Live2dCharacter,
   type Live2dCharacterProps,
 } from "@/features/character/components/Live2dCharacter"
+export { DefaultCharacterStageRenderer } from "@/features/character/components/DefaultCharacterStageRenderer"
 export {
   characterStates,
   CharacterError,
@@ -20,3 +21,7 @@ export {
   type CharacterControllerCallbacks,
   type CharacterControllerOptions,
 } from "@/features/character/runtime/character-controller"
+export {
+  characterStateByCompanionState,
+  mapCompanionStateToCharacterState,
+} from "@/features/character/semantic-state"

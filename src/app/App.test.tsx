@@ -177,7 +177,12 @@ describe("App workspace shell", () => {
         "Codex, Git, Live2D, and local history are not connected. Controls remain available for UI verification, but no repository operation is reported as complete.",
       ),
     ).toHaveLength(2)
-    expect(screen.getByText("Live2D renderer pending")).toBeVisible()
+    expect(
+      document.querySelector('[data-character-stage-default="bundled-hiyori"]'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText("Live2D renderer pending"),
+    ).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
   })
 

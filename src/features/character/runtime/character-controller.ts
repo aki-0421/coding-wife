@@ -341,8 +341,15 @@ export class CharacterController {
       this.#model?.resize(size.width, size.height)
     }
     this.#gl?.viewport(0, 0, size.width, size.height)
+    if (this.#cssWidth <= 0 || this.#cssHeight <= 0) {
+      this.stopFrameLoop()
+      return
+    }
+
     if (this.effectiveMotionPolicy === "reduced" && this.#model !== null) {
       this.drawFrame(null)
+    } else if (this.effectiveMotionPolicy === "animated") {
+      this.startFrameLoop()
     }
   }
 
@@ -467,7 +474,9 @@ export class CharacterController {
       this.#gl === null ||
       this.#canvas === null ||
       this.#contextLost ||
-      this.#disposed
+      this.#disposed ||
+      this.#cssWidth <= 0 ||
+      this.#cssHeight <= 0
     ) {
       return
     }

@@ -96,6 +96,19 @@ export function Live2dCharacter({
           callbackPropsRef.current.onStatusChange?.(nextStatus)
         },
         onMetrics: (metrics) => {
+          host.dataset.characterFrameCount = String(metrics.frameCount)
+          host.dataset.characterNonTransparentSamples = String(
+            metrics.nonTransparentSamples,
+          )
+          host.dataset.characterSignature = metrics.signature
+          host.dataset.characterSignatureChanges = String(
+            metrics.signatureChanges,
+          )
+          host.dataset.characterBackingWidth = String(metrics.backingWidth)
+          host.dataset.characterBackingHeight = String(metrics.backingHeight)
+          host.dataset.characterLastDeltaMilliseconds = String(
+            metrics.lastDeltaMilliseconds,
+          )
           callbackPropsRef.current.onMetricsChange?.(metrics)
         },
         onStaticPreview: setStaticPreview,
@@ -109,12 +122,15 @@ export function Live2dCharacter({
     )
     controller.setMotionPolicy(initialPresentationRef.current.motionPolicy)
 
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const mediaQuery =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)")
+        : null
     const syncReducedMotion = () => {
-      controller.setSystemPrefersReducedMotion(mediaQuery.matches)
+      controller.setSystemPrefersReducedMotion(mediaQuery?.matches ?? false)
     }
     syncReducedMotion()
-    mediaQuery.addEventListener("change", syncReducedMotion)
+    mediaQuery?.addEventListener("change", syncReducedMotion)
 
     const syncSize = () => {
       const bounds = host.getBoundingClientRect()
@@ -142,7 +158,7 @@ export function Live2dCharacter({
       loadController.abort()
       resizeObserver?.disconnect()
       window.removeEventListener("resize", syncSize)
-      mediaQuery.removeEventListener("change", syncReducedMotion)
+      mediaQuery?.removeEventListener("change", syncReducedMotion)
       controller.dispose()
       if (controllerRef.current === controller) controllerRef.current = null
       callbackPropsRef.current.onControllerChange?.(null)

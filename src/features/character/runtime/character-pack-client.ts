@@ -15,6 +15,15 @@ const assetRoles = new Set<CharacterPackFile["role"]>([
   "pose",
   "display_info",
 ])
+const assetSuffixByRole: Readonly<Record<CharacterPackFile["role"], string>> = {
+  model: ".model3.json",
+  moc: ".moc3",
+  texture: ".png",
+  motion: ".motion3.json",
+  physics: ".physics3.json",
+  pose: ".pose3.json",
+  display_info: ".cdi3.json",
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -51,6 +60,9 @@ function parsePackFile(value: unknown): CharacterPackFile {
     !isSafeCharacterAssetId(assetId) ||
     typeof role !== "string" ||
     !assetRoles.has(role as CharacterPackFile["role"]) ||
+    !assetId.endsWith(
+      assetSuffixByRole[role as CharacterPackFile["role"]] ?? "\0",
+    ) ||
     typeof bytes !== "number" ||
     !Number.isSafeInteger(bytes) ||
     bytes <= 0 ||
@@ -231,6 +243,42 @@ function expectedContentType(asset: CharacterPackFile): string {
   return "application/json"
 }
 
+function hasAcceptedContentType(
+  asset: CharacterPackFile,
+  receivedContentType: string | null,
+): boolean {
+  const receivedType =
+    receivedContentType?.split(";", 1)[0]?.trim().toLocaleLowerCase() ?? ""
+  if (asset.role === "moc" && receivedType === "") return true
+  return receivedType === expectedContentType(asset)
+}
+
+async function computeSha256(buffer: ArrayBuffer): Promise<string> {
+  if (globalThis.crypto?.subtle === undefined) {
+    throw new CharacterError(
+      "asset_fetch_failed",
+      "Character asset integrity verification is unavailable",
+      false,
+    )
+  }
+
+  let digest: ArrayBuffer
+  try {
+    digest = await globalThis.crypto.subtle.digest("SHA-256", buffer)
+  } catch (error) {
+    throw new CharacterError(
+      "asset_fetch_failed",
+      "Character asset integrity verification failed",
+      false,
+      { cause: error },
+    )
+  }
+
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("")
+}
+
 export class CharacterPackClient {
   readonly #assetBaseUrl: URL
   readonly #assets: ReadonlyMap<string, CharacterPackFile>
@@ -318,7 +366,7 @@ export class CharacterPackClient {
     return base === "" ? relativeAssetId : `${base}/${relativeAssetId}`
   }
 
-  public async fetchAsset(
+  private async fetchAssetResponse(
     assetId: string,
     signal: AbortSignal,
   ): Promise<Response> {
@@ -354,8 +402,7 @@ export class CharacterPackClient {
       )
     }
 
-    const receivedType = response.headers.get("content-type")?.split(";")[0]
-    if (receivedType !== expectedContentType(asset)) {
+    if (!hasAcceptedContentType(asset, response.headers.get("content-type"))) {
       throw new CharacterError(
         "asset_type_mismatch",
         `Character asset ${asset.role} used an unexpected media type`,
@@ -370,7 +417,7 @@ export class CharacterPackClient {
     signal: AbortSignal,
   ): Promise<ArrayBuffer> {
     const asset = this.getAsset(assetId)
-    const response = await this.fetchAsset(assetId, signal)
+    const response = await this.fetchAssetResponse(assetId, signal)
     const buffer = await response.arrayBuffer()
     if (buffer.byteLength !== asset.bytes) {
       throw new CharacterError(
@@ -379,6 +426,19 @@ export class CharacterPackClient {
         false,
       )
     }
+    if ((await computeSha256(buffer)) !== asset.sha256) {
+      throw new CharacterError(
+        "asset_fetch_failed",
+        `Character asset ${asset.role} hash did not match its manifest`,
+        false,
+      )
+    }
     return buffer
+  }
+
+  public async blob(assetId: string, signal: AbortSignal): Promise<Blob> {
+    const asset = this.getAsset(assetId)
+    const buffer = await this.arrayBuffer(assetId, signal)
+    return new Blob([buffer], { type: expectedContentType(asset) })
   }
 }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 
 import { AppProviders } from "@/app/AppProviders"
+import { DefaultCharacterStageRenderer } from "@/features/character"
 import {
   createLocalePreferenceStore,
   type LocalePreferenceStore,
@@ -27,6 +28,8 @@ export function App({
 }: AppProps) {
   const [fallbackTransport] = useState(createAppTransport)
   const activeTransport = transport ?? fallbackTransport
+  const activeCharacterRenderer =
+    characterRenderer ?? DefaultCharacterStageRenderer
   const fallbackLocaleStore = useMemo(
     () => createLocalePreferenceStore(activeTransport.kind),
     [activeTransport.kind],
@@ -39,7 +42,7 @@ export function App({
     >
       <WorkspaceShell
         adapter={workspaceAdapter}
-        characterRenderer={characterRenderer}
+        characterRenderer={activeCharacterRenderer}
       />
     </AppProviders>
   )

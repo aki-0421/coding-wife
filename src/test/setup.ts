@@ -48,6 +48,11 @@ Object.defineProperty(globalThis, "ResizeObserver", {
   value: TestResizeObserver,
 })
 
+Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+  configurable: true,
+  value: () => null,
+})
+
 afterEach(() => {
   cleanup()
   testStorage.clear()

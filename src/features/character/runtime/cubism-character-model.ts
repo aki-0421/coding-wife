@@ -316,16 +316,7 @@ export class CubismCharacterModel extends CubismUserModel {
     for (let index = 0; index < setting.getTextureCount(); index++) {
       const relative = setting.getTextureFileName(index)
       const assetId = this.#client.resolveFromEntrypoint(relative)
-      const descriptor = this.#client.getAsset(assetId)
-      const response = await this.#client.fetchAsset(assetId, signal)
-      const blob = await response.blob()
-      if (blob.size !== descriptor.bytes) {
-        throw new CharacterError(
-          "asset_fetch_failed",
-          "Character texture length did not match its manifest",
-          false,
-        )
-      }
+      const blob = await this.#client.blob(assetId, signal)
 
       let decoded: Awaited<ReturnType<typeof decodeTexture>>
       try {
