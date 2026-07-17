@@ -53,10 +53,11 @@ describe("localization foundation", () => {
 
     render(<App localeStore={localeStore} transport={new DemoTransport()} />)
 
-    await user.click(screen.getByRole("button", { name: "日本語" }))
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(screen.getByRole("radio", { name: "日本語" }))
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "アプリ基盤" }),
+      screen.getByRole("heading", { level: 1, name: "設定・診断" }),
     ).toBeInTheDocument()
     expect(document.documentElement).toHaveAttribute("lang", "ja")
   })
@@ -67,34 +68,35 @@ describe("localization foundation", () => {
 
     render(<App localeStore={localeStore} transport={new DemoTransport()} />)
 
-    const japaneseButton = screen.getByRole("button", { name: "日本語" })
-    const englishButton = screen.getByRole("button", { name: "English" })
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    const japaneseButton = screen.getByRole("radio", { name: "日本語" })
+    const englishButton = screen.getByRole("radio", { name: "English" })
 
-    expect(englishButton).toHaveAttribute("aria-pressed", "true")
+    expect(englishButton).toHaveAttribute("aria-checked", "true")
     await user.click(japaneseButton)
 
     expect(
       screen.getByRole("heading", {
         level: 1,
-        name: "Application foundation",
+        name: "Settings & diagnostics",
       }),
     ).toBeVisible()
     expect(document.documentElement).toHaveAttribute("lang", "en")
-    expect(englishButton).toHaveAttribute("aria-pressed", "true")
-    expect(japaneseButton).toHaveAttribute("aria-pressed", "false")
+    expect(englishButton).toHaveAttribute("aria-checked", "true")
+    expect(japaneseButton).toHaveAttribute("aria-checked", "false")
     expect(
       screen.getByText(
-        "The display language could not be saved. The current language is unchanged.",
+        "The language could not be saved. The previous language is unchanged.",
       ),
     ).toBeVisible()
 
     await user.click(screen.getByRole("button", { name: "Retry" }))
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "アプリ基盤" }),
+      screen.getByRole("heading", { level: 1, name: "設定・診断" }),
     ).toBeVisible()
     expect(document.documentElement).toHaveAttribute("lang", "ja")
-    expect(japaneseButton).toHaveAttribute("aria-pressed", "true")
+    expect(japaneseButton).toHaveAttribute("aria-checked", "true")
     expect(screen.queryByText(/could not be saved/i)).not.toBeInTheDocument()
   })
 })

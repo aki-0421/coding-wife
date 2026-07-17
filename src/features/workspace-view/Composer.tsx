@@ -99,7 +99,7 @@ export function Composer({
   return (
     <div className="composer-wrap pointer-events-none absolute inset-x-0 bottom-0 z-20 px-xl pb-lg">
       <div
-        className="pointer-events-auto flex h-[128.25px] w-full flex-col rounded-composer border border-divider bg-surface p-[12.75px] shadow-composer transition-colors focus-within:border-warm-active focus-within:ring-2 focus-within:ring-ring"
+        className="pointer-events-auto flex min-h-[128.25px] w-full flex-col rounded-composer border border-divider bg-surface p-[12.75px] shadow-composer transition-colors focus-within:border-warm-active focus-within:ring-2 focus-within:ring-ring"
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault()
@@ -198,7 +198,7 @@ export function Composer({
           {copy.composerHint}
         </p>
 
-        <div className="flex min-h-8 items-end gap-xs pt-sm">
+        <div className="flex min-h-8 flex-wrap items-end gap-xs pt-sm">
           <Button
             disabled={turnState === "sending" || turnState === "stopping"}
             onClick={() => fileInputRef.current?.click()}

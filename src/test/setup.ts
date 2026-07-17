@@ -31,6 +31,23 @@ Object.defineProperty(globalThis, "localStorage", {
   value: testStorage,
 })
 
+class TestResizeObserver implements ResizeObserver {
+  constructor(callback: ResizeObserverCallback) {
+    void callback
+  }
+
+  disconnect() {}
+
+  observe() {}
+
+  unobserve() {}
+}
+
+Object.defineProperty(globalThis, "ResizeObserver", {
+  configurable: true,
+  value: TestResizeObserver,
+})
+
 afterEach(() => {
   cleanup()
   testStorage.clear()

@@ -103,13 +103,20 @@ export function WorkspaceShell({
           "[data-workspace-filter-toggle]",
         )
         toggle?.click()
-        window.requestAnimationFrame(() => {
-          document
-            .querySelector<HTMLInputElement>(
-              `input[aria-label="${CSS.escape(copy.filterWorkspaces)}"]`,
-            )
-            ?.focus()
-        })
+        const focusFilter = () => {
+          const filterInput = Array.from(
+            document.querySelectorAll<HTMLInputElement>("input[aria-label]"),
+          ).find(
+            (input) =>
+              input.getAttribute("aria-label") === copy.filterWorkspaces,
+          )
+          filterInput?.focus()
+        }
+        if (typeof window.requestAnimationFrame === "function") {
+          window.requestAnimationFrame(focusFilter)
+        } else {
+          window.setTimeout(focusFilter, 0)
+        }
       }
     }
 

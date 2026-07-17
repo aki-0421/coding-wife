@@ -150,7 +150,7 @@ function DuplicateRefreshProbe() {
   )
 }
 
-describe("App foundation shell", () => {
+describe("App workspace shell", () => {
   it("keeps the localized loading state visible while runtime checks are pending", () => {
     render(
       <App
@@ -159,9 +159,8 @@ describe("App foundation shell", () => {
       />,
     )
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Checking the local runtime…",
-    )
+    expect(screen.getByText("Checking runtime")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
   })
 
   it("labels browser execution as demo mode instead of native success", async () => {
@@ -172,13 +171,14 @@ describe("App foundation shell", () => {
       />,
     )
 
-    expect(await screen.findByText(/Runtime mode: Browser demo/i)).toBeVisible()
+    expect(await screen.findByText("Preview only")).toBeVisible()
     expect(
-      screen.getByText(
-        "Demo mode does not connect to Codex, Git, Live2D, or local history.",
+      screen.getAllByText(
+        "Codex, Git, Live2D, and local history are not connected. Controls remain available for UI verification, but no repository operation is reported as complete.",
       ),
-    ).toBeVisible()
-    expect(screen.getAllByText("Not configured")).toHaveLength(4)
+    ).toHaveLength(2)
+    expect(screen.getByText("Live2D renderer pending")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
   })
 
   it("retries an initial IPC error through loading to success", async () => {
@@ -199,11 +199,11 @@ describe("App foundation shell", () => {
       />,
     )
 
-    expect(await screen.findByText("APP-IPC-UNAVAILABLE")).toBeVisible()
+    expect(
+      await screen.findByText("The local runtime could not be reached"),
+    ).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Checking the local runtime…",
-    )
+    expect(screen.getByText("Checking runtime")).toBeVisible()
 
     await act(async () => {
       healthRetry.resolve(demoHealth)
@@ -211,7 +211,7 @@ describe("App foundation shell", () => {
       await Promise.all([healthRetry.promise, metadataRetry.promise])
     })
 
-    expect(await screen.findByText(/Runtime mode: Browser demo/i)).toBeVisible()
+    expect(await screen.findByText("Preview only")).toBeVisible()
   })
 
   it("keeps the recovery operation after a retry fails again", async () => {
@@ -235,7 +235,9 @@ describe("App foundation shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Retry" }))
 
-    expect(await screen.findByText("APP-IPC-UNAVAILABLE")).toBeVisible()
+    expect(
+      await screen.findByText("The local runtime could not be reached"),
+    ).toBeVisible()
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled()
     expect(transport.requestCounts.health_check).toBe(2)
   })

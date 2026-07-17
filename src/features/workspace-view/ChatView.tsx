@@ -1,4 +1,9 @@
-import { AlertTriangleIcon, InfoIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  InfoIcon,
+  Volume2Icon,
+  VolumeXIcon,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -118,12 +123,23 @@ export function ChatView({
           </div>
         </ScrollArea>
 
-        <div className="companion-status-mobile absolute top-11 right-xl z-10 hidden items-center gap-xs rounded-control bg-surface px-xs py-xxs text-caption text-muted-foreground">
+        <div className="companion-status-mobile absolute top-11 right-xl z-10 hidden max-w-[calc(100%-36px)] items-center gap-xs rounded-control bg-surface px-xs py-xxs text-caption text-muted-foreground">
           <span
             aria-hidden="true"
             className="size-[7px] rotate-45 border border-muted-foreground"
           />
-          {copy.character.disconnected}
+          <span className="truncate">{copy.character.disconnected}</span>
+          <Button
+            aria-label={muted ? copy.character.unmute : copy.character.mute}
+            aria-pressed={muted}
+            className="-my-xxs"
+            onClick={() => onMutedChange(!muted)}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            {muted ? <VolumeXIcon /> : <Volume2Icon />}
+          </Button>
         </div>
 
         <Composer
