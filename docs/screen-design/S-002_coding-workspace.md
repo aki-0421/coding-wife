@@ -121,6 +121,8 @@ eventは受信順ではなくworkspace内のvalidated `sequence`順に表示す�
 
 timeline最下部から48px以内なら新eventで追従する。48pxを超えて離れた場合は位置を固定し、`新しい更新 N件 / 最新へ`をcomposer上へ表示する。復元時はevent anchor IDとoffsetを使い、消失時だけ最寄りsequenceへ補正する。
 
+timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted locally / ローカルに永続化済み`とする。browser demoは`Demo memory / デモ用メモリ`を表示し、preview再起動でfixtureへ戻ることをChat noticeでも明示する。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
+
 ### Composer
 
 | control | 表示・動作 | 無効条件 |
@@ -202,6 +204,7 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | 再起動復旧 | started turnにterminal eventなし | Interrupted marker、draft、last checkpoint、review/new turn/diagnostic | read-only inspect、Commit、new turn前preflight |利用者が次操作を選ぶ |
 | stale event | sequence gap、duplicate、workspace mismatch | affected pointでingestion pause、diagnostic | local history、Stop | supervisorがgap解消またはterminal error |
 | companion fallback | WebGL/model/render/audio failure | staticまたはtext-only、visible reason、Chatは継続 | Chat全操作、Settings | retryまたは別model選択 |
+| demo memory | browser previewの決定的memory adapter | Codex/Git未接続、`Demo memory` badge、再起動で戻る説明。`Persisted locally`を表示しない | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
 
 ## 操作
 
@@ -324,7 +327,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | `CODE-F-052`〜`CODE-F-076` | main session、event、composer、decision、Stop、reconnect、Sol | [codex-main-session](../requirements/codex-main-session.md) |
 | `SUP-F-051`, `SUP-F-057`〜`SUP-F-061` | main経由の委任、status、failure、interrupt、result統合 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-043`〜`GIT-F-055` | fingerprint、checkpoint、typed Git event、Commit tab導線 | [git-review-harness](../requirements/git-review-harness.md) |
-| `HIST-F-037`〜`HIST-F-048`, `HIST-F-057` | normalized timeline、sequence、scroll、restart recovery | [activity-history](../requirements/activity-history.md) |
+| `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059` | normalized timeline、sequence、scroll、restart recovery、durability表示 | [activity-history](../requirements/activity-history.md) |
 | `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-079`〜`LIVE-F-081` | canvas、state、fallback、text parity、performance | [live2d-companion](../requirements/live2d-companion.md) |
 | `NARR-F-057`〜`NARR-F-063`, `NARR-F-068`〜`NARR-F-075` | eligible speech、text parity、queue、mute、fallback | [audio-commentary](../requirements/audio-commentary.md) |
 | `APP-F-053`〜`APP-F-069` | shell、tabs、responsive、focus、native boundary、picker | [desktop-shell](../requirements/desktop-shell.md) |

@@ -108,6 +108,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-079` | bundled modelは短時間でfirst frameを表示する | Apple Silicon・release build・cold cacheでS-002表示からfirst frameまでのp95が3,000ms以下になる | Approved | 非該当 |
 | `LIVE-F-080` | animationは基準端末で操作を妨げない | 60秒のacting stateでmedian 30fps以上、main-thread long task 100ms超が0回、Chat入力latency p95 100ms以下になる | Approved | 非該当 |
 | `LIVE-F-081` | canvasは主要UIのpointerを奪わない | companion以外のChat、composer、decision、muteへpointer/keyboard操作でき、透明canvas領域がそれらをblockしない | Approved | 非該当 |
+| `LIVE-F-082` | 標準検証commandはclean checkoutからFrameworkを再現する | `pnpm install --frozen-lockfile`直後にtypecheck/buildを先行せず`pnpm lint`と`pnpm test`を実行できる。testと公式related testは固定vendorを検証してFrameworkを自動生成し、並列prepareはlockで直列化、stagingからatomic publish、同じ入力への冪等結果を保証する。生成失敗はsuite collection errorではなくprepare stepの明示errorで停止する | Approved | 非該当 |
 
 ## 入力項目要件
 

@@ -218,7 +218,7 @@ role toggleをoffにするとqueued taskをcancelし、新規invocationを作ら
 
 診断はtoken、API key、cookie、完全なhome/source path、support prompt/response、raw stderrを表示しない。各resultはcode、checked time、scope、impact、recoverable、safe detail refを持つ。`Copy diagnostics`は同じsanitized summaryだけをclipboardへ出す。
 
-DB readinessはHistory & Privacyのbadgeと同じnative履歴状態を正本にする。`ready`でない時に`Persisted locally`を表示せず、read-onlyまたはrecovery errorとsanitized codeを一致して表示する。
+DB readinessはHistory & Privacyのbadgeと同じ履歴状態を正本にする。native `ready`でない時に`Persisted locally`を表示せず、read-onlyまたはrecovery errorとsanitized codeを一致して表示する。browser demoの`ephemeral`は`Demo memory / デモ用メモリ`として別表示し、native DB readinessや復旧errorを偽装しない。
 
 ### History & Privacy
 
@@ -229,9 +229,10 @@ DB readinessはHistory & Privacyのbadgeと同じnative履歴状態を正本に�
 | Redaction | key/token/cookie/home pathのself-check status、last failure code |
 | Schema | current version、last migration、backup、writer queue/integrity |
 | Delete workspace history | running turnなしの対象だけ。app DB/artifactを削除し、Git repo/commit/branchを変更しない |
+| Reset demo workspace | `ephemeral`の対象だけ。現在のbrowser preview memoryから対象を除き、preview再起動でfixtureへ戻ることとGit/repositoryへ未接続であることを明示する |
 | Recovery | corruption時のread-only mode、backup、retry/locate support情報。自動初期化しない |
 
-history削除dialogはworkspace名、削除するapp data、残るGit data、不可逆性を表示する。Cancel時はrow/artifact数、selection、filterを変えない。削除成功後はS-001のempty/remaining workspaceへ移動し、Git refを消したと表示しない。
+history削除dialogはworkspace名、削除するapp data、残るGit data、不可逆性を表示する。Cancel時はrow/artifact数、selection、filterを変えない。削除成功後はS-001のempty/remaining workspaceへ移動し、Git refを消したと表示しない。demo resetはnative deleteの語彙を使わず、現在のpreview memoryだけが対象で再起動により戻ることを確認面と操作labelの両方で示す。
 
 ## 表示状態
 
@@ -266,6 +267,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | support enable/disable | valid role | queue/cancel policy適用、usage metadata記録 | 非該当 | offへfail closed、main継続 | `SUP-F-062`〜`SUP-F-068` |
 | 再診断 |対象check選択 | result、checked time、error code更新 |前result維持 | Blocked reason更新 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`, `APP-F-070` |
 | history削除 | running turnなし、confirm | app DB/artifactだけ削除、Git不変 | row/artifact/selection不変 |削除済みと表示せずrecovery | `HIST-F-049`, `HIST-F-050` |
+| demo workspace reset | historyが`ephemeral`、confirm | 現在のpreview memoryから対象を除き、他のdemo workspaceへ移動 | preview memory/selection不変 |reset済みと表示せず入力状態を維持 | `HIST-F-059` |
 
 ## 入力項目
 
@@ -334,6 +336,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | generated audio | memory/temporary only | playback中 |復元しない | complete/cancel/switch/quit | text保持 |
 | support usage | Rust SQLite metadata | invocation terminal | Support/Diagnostics | history削除 | raw prompt/response非保存 |
 | normalized history | append-only SQLite/artifact | writer transaction | timeline/evidence/restart | workspace history明示削除 | read-only recovery |
+| demo workspace history | browser process memory | preview操作中 | 同じpreview process内 | preview再起動またはdemo reset。再起動時はfixtureへ戻る | native persistence成功として表示しない |
 | diagnostic result | Rust SQLiteのsanitized summary | check terminal | Settings再表示 | Reset diagnostics |前result + stale label |
 
 ## OS差分
@@ -375,7 +378,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075` | Codex initialize/login/Sol/effort/attachment前提診断 | [codex-main-session](../requirements/codex-main-session.md) |
 | `SUP-F-062`〜`SUP-F-068` | concurrency、budget、usage、toggle、non-persistence、model policy | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-043`, `GIT-F-062`, `GIT-F-065` | Git baseline/error/unsupported診断 | [git-review-harness](../requirements/git-review-harness.md) |
-| `HIST-F-049`〜`HIST-F-056` | history削除、migration、corruption、writer、schema、support metadata | [activity-history](../requirements/activity-history.md) |
+| `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | history削除、migration、corruption、writer、schema、support metadata、durability表示 | [activity-history](../requirements/activity-history.md) |
 | `LIVE-F-055`〜`LIVE-F-081` | bundled Hiyori、renderer、import、mapping、delete、performance | [live2d-companion](../requirements/live2d-companion.md) |
 | `NARR-F-064`〜`NARR-F-077` | default off、secret、voice/test、mute、privacy、no microphone | [audio-commentary](../requirements/audio-commentary.md) |
 | `APP-F-055`, `APP-F-057`〜`APP-F-072` | navigation、language、a11y、lifecycle、native boundary、diagnostics、performance | [desktop-shell](../requirements/desktop-shell.md) |
