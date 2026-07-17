@@ -49,6 +49,69 @@ probe失敗後のdiagnosticを調べるとき、以前の成功時の`cliVersion
 
 public `WorkspaceRegistration`にraw pathを追加してはならない。`PendingRequestView`のapproval cardもraw command、cwd、environment ID、host、reasonを公開せず、versioned `ApprovalContext`のcategory、hashed/path alias、scope、risk、reversibility、recommendation、固定evidence codeだけを公開する。
 
+## 通常Workspaceへのcomposition契約
+
+通常起動のS-002は、履歴adapterとCodex runtimeを別々の成功表示として扱わず、`CodexWorkspaceSessionAdapter`相当のcomposition層で一つの`WorkspaceViewAdapter`へ束ねる。この層はReact UIへwire protocolを公開せず、既存の`TauriCodexTransport`、`CodexSessionClient`、workspace history transportをtyped portとして組み合わせる。
+
+### 責務と正本
+
+| 責務 | 正本 | composition層の動作 |
+|---|---|---|
+| active workspace | workspace historyのopaque workspace ID | 選択確定後だけ`codex_connect`へ同じIDを渡す。pathを要求・保持しない |
+| 接続可否 | `CodexDiagnostic` | `health=ready`、core lifecycle/model discovery supported、Sol/Fast/Max/accountが全てtrueの場合だけSend可能にする |
+| thread | Codex supervisor | workspace activationごとにconnect後、compositionが開始した所有threadを再利用し、所有handleが無い時だけ1件開始する。他clientの一覧結果を自動採用しない |
+| turn受理 | `codex_turn_start` response | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport失敗ではdraftとattachmentを保持する |
+| live state | generation別`CodexSessionStore` | workspace ID、generation、sequenceを全て照合し、旧workspaceまたは旧generation eventを現在表示へ混ぜない |
+| durable timeline | workspace history writer | CodexEventをallowlist済みsemantic eventへ投影してから追記する。deltaは表示用にcoalesceし、completed/error/decision/approval/terminalを永続正本にする |
+| pending response | `CodexSessionClient`のsingle-claim ledger | approval、native user input、fallback decisionをkind一致で1回だけ応答する。unknown/invalidは操作UIを出さずfail closedにする |
+| stop/recovery | supervisorのinterruptとterminal event | Stop操作から1秒以内にinterrupt requestを開始し、5秒でackが無ければ明示errorにする。ackだけでterminalにせず、crash/EOFはInterruptedとして保持し自動再送しない |
+
+接続状態と履歴状態は別軸である。履歴が`ready`でもCodex診断がblockedならtimeline閲覧とdraft保存だけを許可し、Sendは無効にする。逆にCodexがreadyでも履歴writerがread-only/recoveryなら新しいturnを開始しない。`connected=false`の固定値、demo successへのnative fallback、model/listを確認しないFast/Max表示は禁止する。
+
+### semantic event投影
+
+UI/HISTへ渡すCodex eventは、少なくとも次へ分類する。
+
+- thread/turn status: idle、running、waiting、completed、failed、interrupted。
+- assistant: streaming deltaはmemory上でitem単位に連結し、completed textを永続化する。
+- plan、tool、file、diff: raw command/stdout/stderr/pathを出さず、件数、sanitized excerpt、path alias、change kind、detail refだけを使う。
+- decision/approval: 検証済みquestion/optionsまたはversioned approval contextとpending handleだけを使う。
+- diagnostic/protocol/model violation: safe code、willRetry、detail refと復旧可否を使い、raw payloadへfallbackしない。
+- completion/error/interrupt: turn terminal authorityをstatus eventとして保存し、interrupt ackをcompletionへ変換しない。
+
+同じCodex event IDの再配信は同内容なら履歴writerの冪等成功とし、内容差はconflictとしてingestionを停止する。history追記失敗を無視してlive表示だけ成功扱いにせず、turn中は安全なerrorを表示し、次turn開始前にwriter readinessを再確認する。
+
+### UI操作契約
+
+- `Approve once`、`Reject`、`Hold`、`Other`、`Interrupt`はpending kindが許す時だけ表示する。Holdはwire応答を送らずcardを維持する。
+- approvalの`Other`や自由文accept、未知methodの近似許可は実装しない。
+- native user inputのOtherはschema上の明示optionとして存在する場合だけ回答し、fallback decisionはcontractどおり自由文を許可しない。
+- assistant/tool/plan/file/error/completionはsemantic rowとして表示し、120文字超のsanitized本文は展開とcopyを提供する。raw terminalとreasoningは表示しない。
+- bottomから48px超離れている間はscrollを固定し、新event件数と`最新へ`を表示する。
+
+### attachment/context境界
+
+attachmentはRustが発行するopaque handleだけをturn requestへ渡す。native picker、drop、pasteは同じvalidatorを使い、active workspace内のregular readable non-symlink、non-executable fileだけを許可する。1件25MiB、10件、合計50MiBの境界をRustで再検証し、imageは`localImage`、他fileは`mention`へRust内で変換する。directory、root外、symlink、実行可能file、権限不足、期限切れhandleは無効itemだけを拒否し、draftと他のvalid itemを保持する。
+
+Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpathをturn payloadへ組み立てない。未実装の`terminal_output`を成功表示へfallbackしない。
+
+## Workspace composition検証
+
+通常gateに加え、次をfake App Serverと`/tmp`専用Git repositoryで通す。
+
+1. native compositionを起動し、diagnostic→connect→thread/start→turn/start response→stream→terminalの順序を確認する。
+2. turn/start拒否ではdraft/attachmentが残り、受理response後だけclear通知が1回発生することを確認する。
+3. workspace切替とgeneration更新の直後に旧eventを遅延送信し、旧workspaceへだけ永続化され現在timelineへ出ないことを確認する。
+4. assistant、tool、plan、file、decision、approval、error、completionをsemantic projectionし、reload後もsequence順で復元する。
+5. approval/native input/fallbackを同時二重応答し、wire requestが1件だけであること、unknown requestが許可されないことを確認する。
+6. Stop開始が1秒以内、ack boundaryが5秒以内で、ackだけではterminalにならないことをfake clockで確認する。
+7. child crash後に受信済みevent、draft、Interruptedが残り、turn/startが自動再送されないことを確認する。
+8. Sol、low、maxのいずれかをmodel/list fixtureから欠落させ、Sendと対応表示がfail closedになることを確認する。
+9. attachmentのroot外、symlink、directory、executable、permission、size/count/total、stale handleをRust integrationで拒否し、有効なimage/fileだけがlocalImage/mentionになることを確認する。
+10. agent-browserで1470/960/480 CSS px、200% zoom、ja/en、keyboard、reduced motion、scroll lock、decision回答、Stopを実操作する。
+
+実Codexを使う通常gateは既存の読み取り専用diagnostic smokeだけに限定する。user repositoryでthread、turn、review、attachmentを作らず、実行系E2Eはfake App Serverと`/tmp` repositoryだけで行う。
+
 ## Support isolation gate
 
 | 必要条件                   | Codex 0.144.xの証拠                              | 判定                               |

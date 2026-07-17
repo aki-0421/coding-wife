@@ -28,7 +28,7 @@ read_when:
 9. contextのlabelと本文はWebViewから受け取らない。`files`はtrusted rootで`git ls-files`、`git_diff`はexternal diffとtextconvを無効化したread-only Git commandからRustが生成する。`terminal_output`は信頼できるproducerが実装されるまで構造化errorで拒否する。
 10. 履歴削除はUI確認の後にnative challenge tokenを発行し、対象workspaceのapp metadataだけをtransactionで削除する。repository file、commit、branchを変更しない。
 11. migrationはtransaction内でversion順に適用し、既存versionのSQLを書き換えない。破損またはmigration失敗時は元DBを上書きせず、basenameだけをpublicに返すrecovery backupとread-only状態を使う。
-12. 永続履歴adapterの`connected=false`は意図的である。この値はCodex送信可否を表し、履歴の利用可否は`history.mode`とタイムラインのbadgeで別に表示する。
+12. 履歴adapter単体はCodex接続を推定しない。通常起動ではCodex composition層が`CodexDiagnostic`とcapability/model/effortを正本に送信可否を導出し、固定`connected=false`を公開しない。履歴の利用可否は引き続き`history.mode`とタイムラインのbadgeで別に表示し、履歴writerが`ready`でない時は新規turnを開始しない。
 
 ## ファイル責務
 
@@ -42,6 +42,8 @@ read_when:
 | `src/lib/contracts/workspace-history.ts` | response/errorのexact-key parserとrequest/response map |
 | `src/features/workspace-persistence/transport.ts` | Tauri invoke envelopeとcontract boundary error |
 | `src/features/workspace-persistence/adapter.ts` | persisted stateのUI projection、draft queue、context、二段階削除 |
+| `src/features/codex/workspace-session-adapter.ts` | Codex diagnostic/thread/turn/eventと履歴adapterを通常S-002へcompositionし、送信可否を導出 |
+| `src/features/codex/event-projection.ts` | generationで分離されたCodexEventをsemantic timeline/HIST eventへfail-closed投影 |
 | `src/features/workspace-persistence/demo-transport.ts` | ブラウザー専用の決定的demo。native成功や再起動永続化を偽装しない |
 | `src/features/workspace-view/useWorkspaceViewModel.ts` | hydration、workspace切替race防止、250 ms draft debounce、UI notice |
 | `src/test/fixtures/workspace-history.v1.json` | RustとTypeScriptが共有するpublic contract fixture |
