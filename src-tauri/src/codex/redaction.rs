@@ -19,9 +19,9 @@ fn credential_assignment_pattern() -> &'static Regex {
         Regex::new(
             r#"(?ix)
             \b(
-                authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|
-                id[_-]?token|token|password|passwd|secret|client[_-]?secret|
-                auth[_-]?cookie|cookie|set-cookie|session[_-]?id|sessionid
+                authorization|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|
+                id[ _-]?token|token|password|passwd|secret|client[ _-]?secret|
+                auth[ _-]?cookie|cookie|set-cookie|session[ _-]?id|sessionid
             )\b
             \s*[:=]\s*
             (?:"[^"\r\n]{0,4096}"|'[^'\r\n]{0,4096}'|[^\s,;]+)
@@ -120,7 +120,7 @@ mod tests {
     fn cookies_sessions_and_quoted_credentials_are_removed() {
         let value = concat!(
             "Cookie: theme=light; sessionid = \"secret value with spaces\"\n",
-            "auth_cookie='another private value' access_token = top-secret\n",
+            "Auth Cookie : 'another private value' access token = top-secret\n",
             "Authorization: Bearer bearer-secret"
         );
         let redacted = redact_text(value, None, 1024);
@@ -130,6 +130,19 @@ mod tests {
         assert!(!redacted.contains("top-secret"));
         assert!(!redacted.contains("bearer-secret"));
         assert!(redacted.matches(REDACTED).count() >= 4);
+    }
+
+    #[test]
+    fn redaction_precedes_a_real_truncation_boundary() {
+        let redacted = redact_text(
+            "sessionid=credential-that-must-never-survive trailing diagnostic text",
+            None,
+            24,
+        );
+
+        assert!(!redacted.contains("credential-that"));
+        assert!(redacted.contains(REDACTED));
+        assert!(redacted.ends_with('…'));
     }
 
     #[test]

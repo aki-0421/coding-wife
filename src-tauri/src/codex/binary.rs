@@ -1035,16 +1035,18 @@ mod tests {
         let identity = inspect_trusted_identity(Path::new("/bin/sh"))
             .await
             .expect("system shell is trusted");
-        let result = run_bounded(
-            &identity,
-            &[
-                OsString::from("-c"),
-                OsString::from("while :; do printf '0123456789abcdef'; done"),
-            ],
-            None,
-        )
-        .await;
-        assert!(matches!(result, Err(BinaryError::ProbeFailed)));
+        for script in [
+            "while :; do printf '0123456789abcdef'; done",
+            "while :; do printf '0123456789abcdef' >&2; done",
+        ] {
+            let result = run_bounded(
+                &identity,
+                &[OsString::from("-c"), OsString::from(script)],
+                None,
+            )
+            .await;
+            assert!(matches!(result, Err(BinaryError::ProbeFailed)));
+        }
     }
 
     #[test]
@@ -1082,6 +1084,19 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&linked);
         let _ = std::fs::remove_file(&outside);
+
+        let linked = temporary_directory("directory-symlink-schema");
+        std::fs::create_dir(&linked).expect("directory symlink fixture root");
+        let outside = temporary_directory("outside-schema-directory");
+        std::fs::create_dir(&outside).expect("outside fixture directory");
+        std::fs::write(outside.join("schema.json"), b"{}").expect("outside schema file");
+        symlink(&outside, linked.join("escape")).expect("fixture directory symlink");
+        assert!(matches!(
+            load_schema_set(&linked),
+            Err(BinaryError::SchemaUnsupported)
+        ));
+        let _ = std::fs::remove_dir_all(&linked);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]
