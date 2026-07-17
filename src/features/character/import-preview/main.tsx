@@ -2,7 +2,6 @@ import { createRoot } from "react-dom/client"
 
 import { IsolatedPreviewRuntime } from "@/features/character/import-preview/IsolatedPreviewRuntime"
 import { installCharacterPreviewNetworkGuard } from "@/features/character/import-preview/network-guard"
-import "@/features/character/import-preview/import-preview.css"
 
 installCharacterPreviewNetworkGuard()
 

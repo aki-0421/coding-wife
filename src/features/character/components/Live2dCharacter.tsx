@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { getCharacterCaption } from "@/features/character/copy"
 import type {
@@ -229,10 +229,7 @@ export function Live2dCharacter({
   )
   const showStaticPreview =
     staticPreview !== null && status.fallbackLevel === "static"
-  const style = {
-    "--character-canvas-opacity":
-      status.motionPolicy === "hidden" || showStaticPreview ? 0 : 1,
-  } as CSSProperties
+  const hideCanvas = status.motionPolicy === "hidden" || showStaticPreview
 
   return (
     <div
@@ -245,7 +242,6 @@ export function Live2dCharacter({
       data-character-policy={status.motionPolicy}
       data-character-state={status.state}
       ref={hostRef}
-      style={style}
     >
       {showStaticPreview ? (
         <img
@@ -259,7 +255,10 @@ export function Live2dCharacter({
 
       <canvas
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 size-full opacity-(--character-canvas-opacity)"
+        className={cn(
+          "pointer-events-none absolute inset-0 size-full",
+          hideCanvas ? "opacity-0" : "opacity-100",
+        )}
         data-character-canvas="live2d"
         ref={canvasRef}
       />

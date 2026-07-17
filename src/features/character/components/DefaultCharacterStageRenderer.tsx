@@ -5,6 +5,10 @@ import type {
   CharacterControllerStatus,
   CharacterState,
 } from "@/features/character/model"
+import {
+  useCharacterLibrary,
+  useCharacterLibraryStore,
+} from "@/features/character/library/provider"
 import { useCharacterRuntimeStatusStore } from "@/features/character/runtime-status"
 import { mapCompanionStateToCharacterState } from "@/features/character/semantic-state"
 import type {
@@ -39,10 +43,19 @@ export function DefaultCharacterStageRenderer({
   reducedMotion,
 }: CharacterStageRenderProps) {
   const runtimeStatus = useCharacterRuntimeStatusStore()
+  const characterLibrary = useCharacterLibrary(workspaceId)
+  const characterLibraryStore = useCharacterLibraryStore()
   const [presentation, setPresentation] = useState(() =>
     createPresentation(workspaceId, state, 1),
   )
   const [reloadToken, setReloadToken] = useState(0)
+  const selectedPackRef = useMemo(
+    () =>
+      characterLibrary.snapshot === null
+        ? undefined
+        : (characterLibraryStore.selectedPackRef(workspaceId) ?? undefined),
+    [characterLibrary.snapshot, characterLibraryStore, workspaceId],
+  )
 
   if (
     presentation.workspaceId !== workspaceId ||
@@ -85,9 +98,13 @@ export function DefaultCharacterStageRenderer({
       className="size-full min-h-0"
       data-character-audio={muted ? "muted" : "unmuted"}
       data-character-generation={presentation.generation}
-      data-character-stage-default="bundled-hiyori"
+      data-character-pack={
+        characterLibrary.snapshot?.selectedPackId ?? "builtin:hiyori_pro"
+      }
+      data-character-stage-default="app-live2d"
     >
       <Live2dCharacter
+        {...(selectedPackRef === undefined ? {} : { packRef: selectedPackRef })}
         motionPolicy={reducedMotion ? "reduced" : "animated"}
         onControllerChange={handleControllerChange}
         onStatusChange={handleStatusChange}

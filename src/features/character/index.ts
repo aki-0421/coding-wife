@@ -5,6 +5,10 @@ export {
 } from "@/features/character/components/Live2dCharacter"
 export { DefaultCharacterStageRenderer } from "@/features/character/components/DefaultCharacterStageRenderer"
 export {
+  CharacterModelLibrarySettings,
+  type CharacterModelLibrarySettingsProps,
+} from "@/features/character/library/CharacterModelLibrarySettings"
+export {
   IsolatedCharacterPreview,
   type IsolatedCharacterPreviewPhase,
   type IsolatedCharacterPreviewProps,

@@ -43,6 +43,7 @@ export function CharacterStageSlot({
   onRetryCharacter,
 }: CharacterStageSlotProps) {
   const { locale } = useI18n()
+  const CharacterRenderer = renderer
   const stateLabel =
     state === "disconnected"
       ? copy.character.disconnected
@@ -71,9 +72,14 @@ export function CharacterStageSlot({
       aria-labelledby="companion-state"
       className="companion-pane relative min-h-0 overflow-hidden bg-app-bg"
     >
-      {!hidden && renderer ? (
+      {!hidden && CharacterRenderer ? (
         <div className="absolute inset-0" data-character-stage-slot="ready">
-          {renderer({ workspaceId, state, muted, reducedMotion })}
+          <CharacterRenderer
+            muted={muted}
+            reducedMotion={reducedMotion}
+            state={state}
+            workspaceId={workspaceId}
+          />
         </div>
       ) : !hidden ? (
         <div

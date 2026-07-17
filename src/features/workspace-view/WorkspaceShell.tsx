@@ -343,15 +343,10 @@ export function WorkspaceShell({
               characterRuntimeStore.retry(selectedWorkspace.id)
             }}
             onSectionChange={view.setSettingsSection}
-            onUnavailableAction={() =>
-              view.setNotice({
-                tone: "neutral",
-                message: copy.pickerUnavailable,
-              })
-            }
             reducedMotion={view.reducedMotion}
             runtimeState={runtime.state}
             section={view.settingsSection}
+            workspaceId={selectedWorkspace.id}
           />
         </TabsContent>
       </Tabs>

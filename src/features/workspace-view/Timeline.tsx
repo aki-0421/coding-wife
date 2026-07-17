@@ -112,7 +112,9 @@ export function Timeline({
   history,
   onOpenDiagnostics,
 }: TimelineProps) {
-  const historyUnavailable = history.mode !== "ready"
+  const historyEphemeral = history.mode === "ephemeral"
+  const historyUnavailable =
+    history.mode === "read_only" || history.mode === "recovery_required"
   return (
     <div className="timeline-content flex min-h-full flex-col pb-[162px] pt-lg">
       <div className="mb-sm flex items-start justify-between gap-md">
@@ -130,9 +132,13 @@ export function Timeline({
         >
           <Badge
             data-persistence-status=""
-            variant={historyUnavailable ? "outline" : "success"}
+            variant={history.mode === "ready" ? "success" : "outline"}
           >
-            {historyUnavailable ? copy.historyUnavailable : copy.persistedBadge}
+            {historyEphemeral
+              ? copy.ephemeralHistoryBadge
+              : historyUnavailable
+                ? copy.historyUnavailable
+                : copy.persistedBadge}
           </Badge>
           {compactStatus}
         </div>

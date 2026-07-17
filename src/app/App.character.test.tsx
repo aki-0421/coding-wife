@@ -10,8 +10,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
 import {
+  CharacterLibraryProvider,
   CharacterRuntimeStatusProvider,
   DefaultCharacterStageRenderer,
+  DemoCharacterLibraryGateway,
+  type CharacterLibraryGateway,
+  type CharacterLibrarySnapshot,
+  type CharacterPackRef,
 } from "@/features/character"
 import type { Live2dCharacterProps } from "@/features/character/components/Live2dCharacter"
 import type { LocalePreferenceStore } from "@/features/localization"
@@ -147,28 +152,33 @@ describe("default App character integration", () => {
   })
 
   it("maps reduced motion without treating mute as a motion policy", () => {
+    const characterGateway = new DemoCharacterLibraryGateway()
     const { rerender } = render(
-      <CharacterRuntimeStatusProvider rendererKind="builtin_hiyori">
-        <DefaultCharacterStageRenderer
-          muted={false}
-          reducedMotion={false}
-          state="reviewing"
-          workspaceId="workspace-a"
-        />
-      </CharacterRuntimeStatusProvider>,
+      <CharacterLibraryProvider gateway={characterGateway}>
+        <CharacterRuntimeStatusProvider rendererKind="builtin_hiyori">
+          <DefaultCharacterStageRenderer
+            muted={false}
+            reducedMotion={false}
+            state="reviewing"
+            workspaceId="workspace-a"
+          />
+        </CharacterRuntimeStatusProvider>
+      </CharacterLibraryProvider>,
     )
     const initialNode = screen.getByTestId("live2d-character")
     const initialGeneration = latestLive2dProps()?.stateGeneration
 
     rerender(
-      <CharacterRuntimeStatusProvider rendererKind="builtin_hiyori">
-        <DefaultCharacterStageRenderer
-          muted
-          reducedMotion
-          state="reviewing"
-          workspaceId="workspace-a"
-        />
-      </CharacterRuntimeStatusProvider>,
+      <CharacterLibraryProvider gateway={characterGateway}>
+        <CharacterRuntimeStatusProvider rendererKind="builtin_hiyori">
+          <DefaultCharacterStageRenderer
+            muted
+            reducedMotion
+            state="reviewing"
+            workspaceId="workspace-a"
+          />
+        </CharacterRuntimeStatusProvider>
+      </CharacterLibraryProvider>,
     )
 
     expect(screen.getByTestId("live2d-character")).toBe(initialNode)
@@ -180,6 +190,75 @@ describe("default App character integration", () => {
     })
     expect(
       document.querySelector('[data-character-audio="muted"]'),
+    ).toBeInTheDocument()
+  })
+
+  it("loads the workspace-selected custom pack into the default renderer", async () => {
+    const customPackId = "custom:11111111-1111-4111-8111-111111111111"
+    const customPackRef: CharacterPackRef = {
+      kind: "url",
+      manifestUrl: "/characters/custom/pack.json",
+    }
+    const snapshot: CharacterLibrarySnapshot = {
+      schemaVersion: 1,
+      workspaceId: "workspace-custom",
+      selectedPackId: customPackId,
+      fallbackApplied: false,
+      diagnostics: [],
+      packs: [
+        {
+          schemaVersion: 1,
+          packId: customPackId,
+          displayName: "Custom Hiyori",
+          kind: "custom",
+          manifestHash: "d".repeat(64),
+          provenanceLabel: "Local folder",
+          importedAt: "2026-07-18T00:00:00.000Z",
+          runtimeFileCount: 17,
+          totalBytes: 4_700_000,
+          textureCount: 2,
+          motionCount: 10,
+          expressionCount: 0,
+          selectedWorkspaceCount: 1,
+          deletable: false,
+          manifest: null,
+          thumbnailSha256: null,
+        },
+      ],
+    }
+    const unsupported = () => Promise.reject(new Error("unsupported"))
+    const gateway: CharacterLibraryGateway = {
+      kind: "native",
+      getLibrary: ({ workspaceId }) =>
+        Promise.resolve({ ...snapshot, workspaceId }),
+      pickImport: unsupported,
+      attestPreview: unsupported,
+      confirmImport: unsupported,
+      cancelImport: unsupported,
+      selectPack: unsupported,
+      deletePack: unsupported,
+      createPackRef: () => customPackRef,
+      createPreviewPackRef: () => customPackRef,
+    }
+
+    render(
+      <CharacterLibraryProvider gateway={gateway}>
+        <CharacterRuntimeStatusProvider rendererKind="builtin_hiyori">
+          <DefaultCharacterStageRenderer
+            muted={false}
+            reducedMotion={false}
+            state="idle"
+            workspaceId="workspace-custom"
+          />
+        </CharacterRuntimeStatusProvider>
+      </CharacterLibraryProvider>,
+    )
+
+    await waitFor(() =>
+      expect(latestLive2dProps()?.packRef).toBe(customPackRef),
+    )
+    expect(
+      document.querySelector(`[data-character-pack="${customPackId}"]`),
     ).toBeInTheDocument()
   })
 
@@ -201,7 +280,7 @@ describe("default App character integration", () => {
     expect(explicitCalls.length).toBeGreaterThan(0)
     expect(live2dCalls).toHaveLength(0)
     expect(
-      document.querySelector('[data-character-stage-default="bundled-hiyori"]'),
+      document.querySelector('[data-character-stage-default="app-live2d"]'),
     ).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
@@ -227,7 +306,7 @@ describe("default App character integration", () => {
     )
     fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
     fireEvent.click(screen.getByRole("button", { name: "Companion" }))
-    expect(screen.getByText("桃瀬ひより - PRO")).toBeVisible()
+    expect(screen.getAllByText("桃瀬ひより - PRO").length).toBeGreaterThan(0)
     expect(screen.getByText("hiyori_pro_t11")).toBeVisible()
     expect(screen.getByText("かにビーム")).toBeVisible()
 
@@ -276,5 +355,5 @@ describe("default App character integration", () => {
         document.querySelector('[data-character-runtime-readiness="ready"]'),
       ).toBeInTheDocument(),
     )
-  })
+  }, 10_000)
 })

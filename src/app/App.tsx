@@ -3,7 +3,9 @@ import { useMemo, useState } from "react"
 import { AppProviders } from "@/app/AppProviders"
 import {
   CharacterRuntimeStatusProvider,
+  createCharacterLibraryGateway,
   DefaultCharacterStageRenderer,
+  type CharacterLibraryGateway,
 } from "@/features/character"
 import {
   createLocalePreferenceStore,
@@ -18,6 +20,7 @@ import {
 } from "@/features/workspace-view"
 
 export interface AppProps {
+  readonly characterLibraryGateway?: CharacterLibraryGateway
   readonly characterRenderer?: CharacterStageRenderer
   readonly localeStore?: LocalePreferenceStore
   readonly transport?: AppTransport
@@ -25,6 +28,7 @@ export interface AppProps {
 }
 
 export function App({
+  characterLibraryGateway,
   characterRenderer,
   localeStore,
   transport,
@@ -44,9 +48,19 @@ export function App({
     () => createWorkspaceViewAdapter(activeTransport.kind),
     [activeTransport.kind],
   )
+  const fallbackCharacterLibraryGateway = useMemo(
+    () =>
+      createCharacterLibraryGateway(
+        activeTransport.kind === "tauri" ? "native" : "demo",
+      ),
+    [activeTransport.kind],
+  )
 
   return (
     <AppProviders
+      characterLibraryGateway={
+        characterLibraryGateway ?? fallbackCharacterLibraryGateway
+      }
       localeStore={localeStore ?? fallbackLocaleStore}
       transport={activeTransport}
     >

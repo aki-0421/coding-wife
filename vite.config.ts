@@ -31,6 +31,9 @@ export default defineConfig({
     },
   },
   server: {
+    cors: {
+      origin: "null",
+    },
     port: 1420,
     strictPort: true,
   },

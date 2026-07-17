@@ -174,11 +174,11 @@ describe("App workspace shell", () => {
     expect(await screen.findByText("Preview only")).toBeVisible()
     expect(
       screen.getAllByText(
-        "Codex, Git, and local history are not connected. The bundled Live2D companion reports its renderer state separately.",
+        "Codex and Git are not connected. Demo workspace activity is kept in memory and resets when this preview restarts.",
       ),
     ).toHaveLength(1)
     expect(
-      document.querySelector('[data-character-stage-default="bundled-hiyori"]'),
+      document.querySelector('[data-character-stage-default="app-live2d"]'),
     ).toBeInTheDocument()
     expect(
       screen.queryByText("Live2D renderer pending"),

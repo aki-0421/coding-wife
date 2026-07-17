@@ -1,0 +1,119 @@
+import { readFileSync } from "node:fs"
+
+import { describe, expect, it } from "vitest"
+
+const previewHtml = readFileSync("character-import-preview.html", "utf8")
+const previewHostSource = readFileSync(
+  "src/features/character/import-preview/IsolatedCharacterPreview.tsx",
+  "utf8",
+)
+const viteConfig = readFileSync("vite.config.ts", "utf8")
+const tauriConfig = JSON.parse(
+  readFileSync("src-tauri/tauri.conf.json", "utf8"),
+) as {
+  build: { devUrl: string }
+  app: { security: { csp: string; devCsp: string } }
+}
+
+const productionOrigin = "tauri://localhost"
+const developmentOrigin = new URL(tauriConfig.build.devUrl).origin
+
+function sourceAttribute(
+  source: string,
+  tagPattern: RegExp,
+  attribute: string,
+): string {
+  const tag = source.match(tagPattern)?.[0]
+  if (tag === undefined) throw new Error(`Missing tag matching ${tagPattern}`)
+  const value = tag.match(new RegExp(`${attribute}="([^"]*)"`, "i"))?.[1]
+  if (value === undefined) throw new Error(`Missing ${attribute} attribute`)
+  return value
+}
+
+function directives(policy: string): Map<string, readonly string[]> {
+  return new Map(
+    policy
+      .split(";")
+      .map((directive) => directive.trim().split(/\s+/))
+      .filter((tokens) => tokens[0] !== "")
+      .map(([name, ...sources]) => [name!, sources]),
+  )
+}
+
+function expectSources(
+  policy: Map<string, readonly string[]>,
+  directive: string,
+  sources: readonly string[],
+) {
+  expect(policy.get(directive)).toEqual(sources)
+}
+
+describe("isolated character preview CSP", () => {
+  const childPolicy = directives(
+    sourceAttribute(
+      previewHtml,
+      /<meta\s+http-equiv="Content-Security-Policy"[\s\S]*?\/>/i,
+      "content",
+    ),
+  )
+
+  it("allows only the fixed Tauri production and development origins", () => {
+    const appAssets = [productionOrigin, developmentOrigin]
+    expect(developmentOrigin).toBe("http://localhost:1420")
+    expectSources(childPolicy, "default-src", ["'none'"])
+    expectSources(childPolicy, "script-src", appAssets)
+    expectSources(childPolicy, "style-src", appAssets)
+    expectSources(childPolicy, "font-src", appAssets)
+    expectSources(childPolicy, "img-src", [...appAssets, "blob:", "data:"])
+    expectSources(childPolicy, "connect-src", ["'none'"])
+    expectSources(childPolicy, "form-action", ["'none'"])
+    expectSources(childPolicy, "object-src", ["'none'"])
+  })
+
+  it("keeps executable content and navigation capabilities closed", () => {
+    const serialized = [...childPolicy.values()].flat().join(" ")
+    expect(serialized).not.toMatch(
+      /\*|'self'|'unsafe-inline'|'unsafe-eval'|https?:\/\/(?!localhost:1420)/,
+    )
+
+    const sandbox = sourceAttribute(
+      previewHostSource,
+      /<iframe[\s\S]*?\/>/i,
+      "sandbox",
+    )
+    expect(sandbox).toBe("allow-scripts")
+    expect(sandbox).not.toMatch(
+      /allow-same-origin|allow-forms|allow-popups|allow-top-navigation/,
+    )
+  })
+
+  it("keeps parent and child module requests reachable in dev and production", () => {
+    const productionPolicy = directives(tauriConfig.app.security.csp)
+    const developmentPolicy = directives(tauriConfig.app.security.devCsp)
+    for (const directive of [
+      "script-src",
+      "style-src",
+      "font-src",
+      "img-src",
+    ]) {
+      expect(productionPolicy.get(directive)).toContain(productionOrigin)
+      expect(developmentPolicy.get(directive)).toContain(developmentOrigin)
+    }
+    expect(
+      sourceAttribute(
+        previewHtml,
+        /<script\s+type="module"[\s\S]*?<\/script>/i,
+        "src",
+      ),
+    ).toBe("/src/features/character/import-preview/main.tsx")
+    expect(
+      sourceAttribute(
+        previewHtml,
+        /<link\s+rel="stylesheet"[\s\S]*?\/>/i,
+        "href",
+      ),
+    ).toBe("/src/features/character/import-preview/import-preview.css")
+    expect(viteConfig).toMatch(/cors:\s*{\s*origin:\s*"null",?\s*}/)
+    expect(previewHostSource).toContain('sandbox="allow-scripts"')
+  })
+})

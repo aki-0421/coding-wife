@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import {
   ActivityIcon,
   AlertTriangleIcon,
@@ -44,6 +44,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
+  CharacterModelLibrarySettings,
   getCharacterErrorMessage,
   type CharacterRuntimeView,
 } from "@/features/character"
@@ -65,6 +66,7 @@ interface SettingsViewProps {
   readonly reducedMotion: "system" | "reduce" | "allow"
   readonly runtimeState: RuntimeState
   readonly section: SettingsSection
+  readonly workspaceId: string
   readonly onCharacterHiddenChange: (hidden: boolean) => void
   readonly onDeleteHistory: () => Promise<boolean>
   readonly onMutedChange: (muted: boolean) => void
@@ -74,7 +76,6 @@ interface SettingsViewProps {
   readonly onRetryCharacter: () => void
   readonly onSectionChange: (section: SettingsSection) => void
   readonly onReducedMotionChange: (value: "system" | "reduce" | "allow") => void
-  readonly onUnavailableAction: () => void
 }
 
 function CharacterReadinessBadge({
@@ -483,7 +484,7 @@ function CompanionSettings({
   muted,
   onCharacterHiddenChange,
   onRetryCharacter,
-  onUnavailableAction,
+  workspaceId,
 }: Pick<
   SettingsViewProps,
   | "characterHidden"
@@ -492,7 +493,7 @@ function CompanionSettings({
   | "muted"
   | "onCharacterHiddenChange"
   | "onRetryCharacter"
-  | "onUnavailableAction"
+  | "workspaceId"
 >) {
   return (
     <section className="flex flex-col gap-lg">
@@ -512,20 +513,7 @@ function CompanionSettings({
         copy={copy}
         muted={muted}
       />
-      <SettingRow
-        action={
-          <Button
-            onClick={onUnavailableAction}
-            size="xs"
-            type="button"
-            variant="secondary"
-          >
-            {copy.settingsView.importModel}
-          </Button>
-        }
-        description={copy.character.rendererDescription}
-        label={copy.settingsView.importModel}
-      />
+      <CharacterModelLibrarySettings workspaceId={workspaceId} />
       <SettingRow
         action={
           <Switch
@@ -729,9 +717,11 @@ function DiagnosticsSettings({
           >
             {history.mode === "ready"
               ? copy.persistedBadge
-              : history.mode === "read_only"
-                ? copy.settingsView.historyReadOnly
-                : copy.historyUnavailable}
+              : history.mode === "ephemeral"
+                ? copy.settingsView.historyEphemeral
+                : history.mode === "read_only"
+                  ? copy.settingsView.historyReadOnly
+                  : copy.historyUnavailable}
           </Badge>
         </div>
         <div className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption">
@@ -760,6 +750,9 @@ function HistorySettings({
 }: Pick<SettingsViewProps, "copy" | "history" | "onDeleteHistory">) {
   const [confirmationOpen, setConfirmationOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const historyActionRef = useRef<HTMLButtonElement>(null)
+  const ephemeral = history.mode === "ephemeral"
+  const canChangeHistory = history.mode === "ready" || ephemeral
 
   const confirmDelete = async () => {
     setDeleting(true)
@@ -778,10 +771,14 @@ function HistorySettings({
       <div className="flex flex-col gap-xs">
         <h3 className="m-0 flex items-center gap-xs text-title text-text-strong">
           <DatabaseIcon aria-hidden="true" className="size-3" />
-          {copy.settingsView.stored}
+          {ephemeral
+            ? copy.settingsView.storedEphemeral
+            : copy.settingsView.stored}
         </h3>
         <p className="m-0 max-w-[70ch] text-caption text-muted-foreground">
-          {copy.settingsView.storedBody}
+          {ephemeral
+            ? copy.settingsView.storedEphemeralBody
+            : copy.settingsView.storedBody}
         </p>
       </div>
       <div className="flex flex-col gap-xs">
@@ -796,21 +793,30 @@ function HistorySettings({
       <SettingRow
         action={
           <Button
-            disabled={history.mode !== "ready"}
+            disabled={!canChangeHistory}
             onClick={() => setConfirmationOpen(true)}
+            ref={historyActionRef}
             size="xs"
             type="button"
             variant="destructive"
           >
-            {copy.settingsView.deleteHistory}
+            {ephemeral
+              ? copy.settingsView.resetDemoHistory
+              : copy.settingsView.deleteHistory}
           </Button>
         }
         description={
-          history.mode === "ready"
-            ? copy.settingsView.deleteReady
+          canChangeHistory
+            ? ephemeral
+              ? copy.settingsView.resetDemoReady
+              : copy.settingsView.deleteReady
             : copy.settingsView.deleteDisabled
         }
-        label={copy.settingsView.deleteHistory}
+        label={
+          ephemeral
+            ? copy.settingsView.resetDemoHistory
+            : copy.settingsView.deleteHistory
+        }
       />
       <Dialog
         onOpenChange={(open) => {
@@ -818,11 +824,23 @@ function HistorySettings({
         }}
         open={confirmationOpen}
       >
-        <DialogContent showCloseButton={!deleting}>
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            historyActionRef.current?.focus()
+          }}
+          showCloseButton={!deleting}
+        >
           <DialogHeader>
-            <DialogTitle>{copy.settingsView.deleteConfirmTitle}</DialogTitle>
+            <DialogTitle>
+              {ephemeral
+                ? copy.settingsView.resetDemoConfirmTitle
+                : copy.settingsView.deleteConfirmTitle}
+            </DialogTitle>
             <DialogDescription>
-              {copy.settingsView.deleteConfirmBody}
+              {ephemeral
+                ? copy.settingsView.resetDemoConfirmBody
+                : copy.settingsView.deleteConfirmBody}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -841,8 +859,12 @@ function HistorySettings({
               variant="destructive"
             >
               {deleting
-                ? copy.settingsView.deleteInProgress
-                : copy.settingsView.deleteConfirm}
+                ? ephemeral
+                  ? copy.settingsView.resetDemoInProgress
+                  : copy.settingsView.deleteInProgress
+                : ephemeral
+                  ? copy.settingsView.resetDemoConfirm
+                  : copy.settingsView.deleteConfirm}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -3,7 +3,7 @@ pub mod codex;
 pub mod workspace_history;
 
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
+use tauri::{http, Manager, State};
 
 use character::commands::{
     character_attest_preview, character_cancel_import, character_confirm_import,
@@ -125,6 +125,24 @@ fn get_runtime_metadata(history: State<'_, WorkspaceHistoryService>) -> RuntimeM
     )
 }
 
+fn allow_opaque_preview_module_request<B>(
+    request: &http::Request<Vec<u8>>,
+    response: &mut http::Response<B>,
+) {
+    let is_tauri_asset = request.uri().scheme_str() == Some("tauri");
+    let has_opaque_origin = request
+        .headers()
+        .get(http::header::ORIGIN)
+        .is_some_and(|origin| origin == "null");
+    if !is_tauri_asset || !has_opaque_origin {
+        return;
+    }
+    response.headers_mut().insert(
+        http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        http::HeaderValue::from_static("null"),
+    );
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let supervisor = CodexSupervisor::new();
@@ -155,6 +173,17 @@ pub fn run() {
                 resolve_builtin_directory(&resource_directory),
             );
             app.manage(character_service);
+            let window_config = app.config().app.windows.first().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "main window configuration is required",
+                )
+            })?;
+            tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                .on_web_resource_request(|request, response| {
+                    allow_opaque_preview_module_request(&request, response);
+                })
+                .build()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -232,6 +261,52 @@ mod tests {
         assert_eq!(response.schema_version, IPC_SCHEMA_VERSION);
         assert_eq!(response.runtime, RuntimeKind::Tauri);
         assert_eq!(response.foundation_state, FoundationState::Ready);
+    }
+
+    #[test]
+    fn only_opaque_tauri_asset_requests_receive_preview_cors() {
+        fn response() -> http::Response<Vec<u8>> {
+            http::Response::builder()
+                .header(
+                    http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                    "tauri://localhost",
+                )
+                .body(Vec::new())
+                .expect("fixture response must build")
+        }
+
+        let opaque_request = http::Request::builder()
+            .uri("tauri://localhost/assets/character-import-preview.js")
+            .header(http::header::ORIGIN, "null")
+            .body(Vec::new())
+            .expect("fixture request must build");
+        let mut opaque_response = response();
+        allow_opaque_preview_module_request(&opaque_request, &mut opaque_response);
+        assert_eq!(
+            opaque_response
+                .headers()
+                .get(http::header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&http::HeaderValue::from_static("null"))
+        );
+
+        for (uri, origin) in [
+            ("tauri://localhost/assets/app.js", "https://attacker.test"),
+            ("https://localhost:1420/assets/app.js", "null"),
+        ] {
+            let request = http::Request::builder()
+                .uri(uri)
+                .header(http::header::ORIGIN, origin)
+                .body(Vec::new())
+                .expect("fixture request must build");
+            let mut rejected_response = response();
+            allow_opaque_preview_module_request(&request, &mut rejected_response);
+            assert_eq!(
+                rejected_response
+                    .headers()
+                    .get(http::header::ACCESS_CONTROL_ALLOW_ORIGIN),
+                Some(&http::HeaderValue::from_static("tauri://localhost"))
+            );
+        }
     }
 
     fn runtime_fixture_metadata() -> RuntimeMetadata {

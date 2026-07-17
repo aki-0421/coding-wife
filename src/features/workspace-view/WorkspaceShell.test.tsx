@@ -401,6 +401,99 @@ describe("WorkspaceShell", () => {
     expect(localHistory.parentElement).toHaveTextContent("Persisted locally")
   })
 
+  it("labels demo history as ephemeral and resets only preview memory", async () => {
+    const ephemeralState: WorkspaceAdapterState = {
+      ...nativeWorkspaceState(),
+      history: { mode: "ephemeral", errorCode: null, backupName: null },
+    }
+    const deleteWorkspaceHistory = vi.fn().mockResolvedValue(ephemeralState)
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "demo",
+      loadState: () => Promise.resolve(ephemeralState),
+      deleteWorkspaceHistory,
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+
+    expect(
+      await screen.findByText(
+        "Codex and Git are not connected. Demo workspace activity is kept in memory and resets when this preview restarts.",
+      ),
+    ).toBeVisible()
+    expect(screen.getByText("Demo memory")).toBeVisible()
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(screen.getByRole("button", { name: "Diagnostics" }))
+    const localHistory = await screen.findByText("Local history")
+    expect(localHistory.parentElement).toHaveTextContent("Demo memory")
+
+    await user.click(screen.getByRole("button", { name: "History & privacy" }))
+    expect(screen.getByText("Stored in demo memory")).toBeVisible()
+    expect(
+      screen.getByText(/Reloading restores the bundled demo/),
+    ).toBeVisible()
+    const reset = screen.getByRole("button", { name: "Reset demo history" })
+    expect(reset).toBeEnabled()
+    await user.click(reset)
+    const dialog = await screen.findByRole("dialog", {
+      name: "Reset this preview's demo history?",
+    })
+    expect(dialog).toHaveTextContent(
+      "No repository files, commits, or branches",
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Reset demo" }))
+    await waitFor(() => expect(deleteWorkspaceHistory).toHaveBeenCalledOnce())
+    await waitFor(() => expect(reset).toHaveFocus())
+  })
+
+  it("restores history action focus after Cancel, Escape, close, and confirm", async () => {
+    const deleteWorkspaceHistory = vi
+      .fn()
+      .mockResolvedValue(nativeWorkspaceState())
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      deleteWorkspaceHistory,
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+
+    await user.click(await screen.findByRole("tab", { name: "Settings" }))
+    await user.click(screen.getByRole("button", { name: "History & privacy" }))
+    const trigger = screen.getByRole("button", {
+      name: "Delete workspace history",
+    })
+
+    await user.click(trigger)
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Cancel",
+      }),
+    )
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    await user.click(trigger)
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    await user.click(trigger)
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Close",
+      }),
+    )
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    await user.click(trigger)
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Delete history",
+      }),
+    )
+    await waitFor(() => expect(deleteWorkspaceHistory).toHaveBeenCalledOnce())
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
   it("closes compact settings navigation after selection, Escape, and outside click", async () => {
     const user = userEvent.setup()
     renderWorkspace()

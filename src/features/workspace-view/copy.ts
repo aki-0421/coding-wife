@@ -51,6 +51,8 @@ const en = {
     "Codex, Git, and local history are not connected. The bundled Live2D companion reports its renderer state separately.",
   previewNoticeWithHistory:
     "Codex and Git are not connected. Local workspace history is persisted and available.",
+  previewNoticeWithEphemeralHistory:
+    "Codex and Git are not connected. Demo workspace activity is kept in memory and resets when this preview restarts.",
   runtimeErrorTitle: "The local runtime could not be reached",
   runtimeErrorDescription:
     "Your draft and local view state are preserved. Retry the runtime check or review Diagnostics.",
@@ -60,6 +62,7 @@ const en = {
   timelineDescription: "Structured, redacted workspace events",
   previewBadge: "Reference preview",
   persistedBadge: "Persisted locally",
+  ephemeralHistoryBadge: "Demo memory",
   historyUnavailable: "History requires recovery",
   timelineEmptyTitle: "No persisted activity yet",
   timelineEmptyBody:
@@ -115,7 +118,7 @@ const en = {
   character: {
     rendererPending: "Starting Live2D renderer",
     rendererDescription:
-      "The bundled Hiyori renderer reports verified status and safe fallback details here.",
+      "The app-owned Live2D renderer reports verified status and safe fallback details here.",
     externalRenderer: "External renderer · status unavailable",
     retryRenderer: "Retry Live2D",
     state: "Companion state",
@@ -194,12 +197,12 @@ const en = {
     resetUiDescription:
       "Resets filters and local view selections. Repository and history data are not changed.",
     companionTitle: "Companion",
-    bundledModel: "Bundled model",
+    bundledModel: "Model",
     bundledModelValue: "Hiyori",
     renderer: "Renderer",
-    builtinRenderer: "Bundled Live2D",
+    builtinRenderer: "App Live2D",
     externalRenderer: "External renderer",
-    bundledVersion: "Bundled version",
+    bundledVersion: "Model version",
     provenance: "Provenance",
     illustrationCredit: "Illustration",
     modelingCredit: "Modeling",
@@ -269,10 +272,14 @@ const en = {
     notConfigured: "Not configured",
     localHistory: "Local history",
     historyReadOnly: "Read only",
+    historyEphemeral: "Demo memory",
     historyTitle: "History & privacy",
     stored: "Stored locally",
     storedBody:
       "Workspace metadata, normalized events, drafts, context, and evidence packs.",
+    storedEphemeral: "Stored in demo memory",
+    storedEphemeralBody:
+      "Workspace metadata, activity, drafts, context, and evidence exist only for this preview. Reloading restores the bundled demo.",
     neverStored: "Never stored",
     neverStoredBody:
       "Raw reasoning, generated audio, support prompt/response, and raw secrets.",
@@ -286,6 +293,14 @@ const en = {
     deleteCancel: "Cancel",
     deleteConfirm: "Delete history",
     deleteInProgress: "Deleting…",
+    resetDemoHistory: "Reset demo history",
+    resetDemoReady:
+      "Clears only this preview's in-memory workspace activity. Reloading restores the demo. Repository files and Git are not connected or changed.",
+    resetDemoConfirmTitle: "Reset this preview's demo history?",
+    resetDemoConfirmBody:
+      "This clears only in-memory activity for the selected demo workspace. Reloading restores the bundled demo. No repository files, commits, or branches are connected or changed.",
+    resetDemoConfirm: "Reset demo",
+    resetDemoInProgress: "Resetting…",
     localPreview:
       "Preview preference · not persisted to the native settings service",
   },
@@ -353,6 +368,8 @@ const ja: typeof en = {
     "Codex、Git、ローカル履歴は未接続です。同梱Live2Dの描画状態は別に実測表示します。",
   previewNoticeWithHistory:
     "CodexとGitは未接続です。ローカルのワークスペース履歴は永続化され、利用できます。",
+  previewNoticeWithEphemeralHistory:
+    "CodexとGitは未接続です。デモ用ワークスペースのアクティビティはメモリ内だけに保持され、このプレビューを再起動するとリセットされます。",
   runtimeErrorTitle: "ローカル実行環境へ接続できませんでした",
   runtimeErrorDescription:
     "下書きとローカル表示状態は保持されています。実行環境を再確認するか、診断を確認してください。",
@@ -362,6 +379,7 @@ const ja: typeof en = {
   timelineDescription: "構造化・秘匿化されたワークスペースイベント",
   previewBadge: "参照プレビュー",
   persistedBadge: "ローカルに永続化済み",
+  ephemeralHistoryBadge: "デモ用メモリ",
   historyUnavailable: "履歴の復旧が必要です",
   timelineEmptyTitle: "永続化されたアクティビティはまだありません",
   timelineEmptyBody:
@@ -418,7 +436,7 @@ const ja: typeof en = {
   character: {
     rendererPending: "Live2D rendererを起動中",
     rendererDescription:
-      "同梱Hiyori rendererの検証済み状態と安全なfallbackを表示します。",
+      "アプリ管理Live2D rendererの検証済み状態と安全なfallbackを表示します。",
     externalRenderer: "外部renderer · 状態は取得できません",
     retryRenderer: "Live2Dを再試行",
     state: "コンパニオン状態",
@@ -495,12 +513,12 @@ const ja: typeof en = {
     resetUiDescription:
       "filterとローカル選択だけを戻します。repositoryと履歴dataは変更しません。",
     companionTitle: "コンパニオン",
-    bundledModel: "同梱モデル",
+    bundledModel: "モデル",
     bundledModelValue: "Hiyori",
     renderer: "Renderer",
-    builtinRenderer: "同梱Live2D",
+    builtinRenderer: "アプリLive2D",
     externalRenderer: "外部renderer",
-    bundledVersion: "同梱バージョン",
+    bundledVersion: "モデルバージョン",
     provenance: "来歴",
     illustrationCredit: "イラスト",
     modelingCredit: "モデリング",
@@ -570,10 +588,14 @@ const ja: typeof en = {
     notConfigured: "未構成",
     localHistory: "ローカル履歴",
     historyReadOnly: "読み取り専用",
+    historyEphemeral: "デモ用メモリ",
     historyTitle: "履歴とプライバシー",
     stored: "ローカルに保存",
     storedBody:
       "ワークスペースのメタデータ、正規化済みイベント、下書き、コンテキスト、証拠パック。",
+    storedEphemeral: "デモ用メモリに保持",
+    storedEphemeralBody:
+      "ワークスペースのメタデータ、アクティビティ、下書き、コンテキスト、証拠はこのプレビューの間だけ保持されます。再読み込みすると同梱デモに戻ります。",
     neverStored: "保存しない",
     neverStoredBody:
       "推論の生データ、生成音声、支援用の入出力、秘匿情報の生データ。",
@@ -587,6 +609,14 @@ const ja: typeof en = {
     deleteCancel: "キャンセル",
     deleteConfirm: "履歴を削除",
     deleteInProgress: "削除中…",
+    resetDemoHistory: "デモ履歴をリセット",
+    resetDemoReady:
+      "現在のプレビューにあるメモリ内アクティビティだけを消去します。再読み込みするとデモに戻ります。リポジトリとGitは未接続で、変更されません。",
+    resetDemoConfirmTitle: "このプレビューのデモ履歴をリセットしますか？",
+    resetDemoConfirmBody:
+      "選択中のデモ用ワークスペースにあるメモリ内アクティビティだけを消去します。再読み込みすると同梱デモに戻ります。リポジトリのファイル、コミット、ブランチは未接続で、変更されません。",
+    resetDemoConfirm: "デモをリセット",
+    resetDemoInProgress: "リセット中…",
     localPreview: "プレビュー設定 · native settings serviceには未保存",
   },
   createWorkspace: {
