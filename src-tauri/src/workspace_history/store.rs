@@ -176,7 +176,8 @@ impl WorkspaceHistoryStore {
     pub fn open(app_data_directory: impl AsRef<Path>) -> Result<Self, WorkspaceHistoryError> {
         let directory = app_data_directory.as_ref();
         fs::create_dir_all(directory).map_err(|_| history_error("HIST-DIRECTORY", true))?;
-        set_private_directory_permissions(directory);
+        set_private_directory_permissions(directory)
+            .map_err(|_| history_error("HIST-DIRECTORY-PERMISSION", false))?;
         let database_path = directory.join(DATABASE_FILE_NAME);
         let existed = database_path.exists();
 
@@ -1001,6 +1002,14 @@ fn open_configured_connection(
     database_path: &Path,
     existed: bool,
 ) -> Result<(Connection, HistoryStatus), OpenFailure> {
+    open_configured_connection_with_migrations(database_path, existed, &[(1, MIGRATION_1)])
+}
+
+fn open_configured_connection_with_migrations(
+    database_path: &Path,
+    existed: bool,
+    migrations: &[(i64, &str)],
+) -> Result<(Connection, HistoryStatus), OpenFailure> {
     let connection = Connection::open_with_flags(
         database_path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -1010,9 +1019,14 @@ fn open_configured_connection(
     .map_err(|_| OpenFailure {
         code: "HIST-DATABASE-OPEN".to_owned(),
     })?;
-    set_private_file_permissions(database_path);
+    set_private_file_permissions(database_path).map_err(|_| OpenFailure {
+        code: "HIST-DATABASE-PERMISSION".to_owned(),
+    })?;
     configure_connection(&connection).map_err(|_| OpenFailure {
         code: "HIST-DATABASE-CONFIGURE".to_owned(),
+    })?;
+    set_private_database_permissions(database_path).map_err(|_| OpenFailure {
+        code: "HIST-DATABASE-PERMISSION".to_owned(),
     })?;
     let integrity = connection
         .query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
@@ -1052,8 +1066,11 @@ fn open_configured_connection(
     } else {
         None
     };
-    apply_migrations(&connection, &[(1, MIGRATION_1)]).map_err(|_| OpenFailure {
+    apply_migrations(&connection, migrations).map_err(|_| OpenFailure {
         code: "HIST-MIGRATION-FAILED".to_owned(),
+    })?;
+    set_private_database_permissions(database_path).map_err(|_| OpenFailure {
+        code: "HIST-DATABASE-PERMISSION".to_owned(),
     })?;
     Ok((
         connection,
@@ -1133,26 +1150,76 @@ fn append_event_in_transaction(
     workspace_root: Option<&Path>,
 ) -> Result<AppendEventResult, WorkspaceHistoryError> {
     validate_domain_event(event)?;
-    if let Some(sequence) = transaction
-        .query_row(
-            "SELECT sequence FROM domain_events WHERE event_id = ?1",
-            params![event.event_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()
-        .map_err(|_| history_error("HIST-EVENT-LOOKUP", true))?
-    {
-        return Ok(AppendEventResult {
-            sequence: sequence as u64,
-            inserted: false,
-        });
-    }
     let sanitized = sanitize_json(&event.payload, workspace_root, 0)?;
     validate_event_shape(&event.producer, &event.kind, &sanitized)?;
     let payload_json =
         serde_json::to_string(&sanitized).map_err(|_| history_error("HIST-EVENT-ENCODE", false))?;
     if payload_json.len() > MAX_EVENT_BYTES {
         return Err(history_error("HIST-EVENT-TOO-LARGE", false));
+    }
+    if let Some(existing) = transaction
+        .query_row(
+            "SELECT workspace_id, session_id, sequence, producer, kind, occurred_at,
+                    payload_json, schema_version
+             FROM domain_events WHERE event_id = ?1",
+            params![event.event_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-EVENT-LOOKUP", true))?
+    {
+        let (
+            workspace_id,
+            session_id,
+            sequence,
+            producer,
+            kind,
+            occurred_at,
+            existing_payload_json,
+            schema_version,
+        ) = existing;
+        let is_exact_replay = workspace_id == event.workspace_id
+            && session_id == event.session_id
+            && producer == event.producer
+            && kind == event.kind
+            && occurred_at == event.occurred_at
+            && existing_payload_json == payload_json
+            && schema_version == i64::from(event.schema_version);
+        if !is_exact_replay {
+            return Err(history_error("HIST-EVENT-IDEMPOTENCY-CONFLICT", false));
+        }
+        return Ok(AppendEventResult {
+            sequence: sequence as u64,
+            inserted: false,
+        });
+    }
+    if event.schema_version != DOMAIN_EVENT_SCHEMA_VERSION {
+        return Err(history_error("HIST-EVENT-SCHEMA", false));
+    }
+    if let Some(session_id) = event.session_id.as_deref() {
+        let session_workspace_id = transaction
+            .query_row(
+                "SELECT workspace_id FROM sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-SESSION-LOOKUP", true))?
+            .ok_or_else(|| history_error("HIST-EVENT-SESSION-NOT-FOUND", false))?;
+        if session_workspace_id != event.workspace_id {
+            return Err(history_error("HIST-EVENT-SESSION-WORKSPACE", false));
+        }
     }
     let sequence = transaction
         .query_row(
@@ -1188,9 +1255,6 @@ fn append_event_in_transaction(
 }
 
 fn validate_domain_event(event: &NormalizedDomainEvent) -> Result<(), WorkspaceHistoryError> {
-    if event.schema_version != DOMAIN_EVENT_SCHEMA_VERSION {
-        return Err(history_error("HIST-EVENT-SCHEMA", false));
-    }
     validate_opaque_id(&event.event_id, "HIST-EVENT-ID")?;
     validate_workspace_id(&event.workspace_id)?;
     if let Some(session_id) = &event.session_id {
@@ -1629,39 +1693,57 @@ fn backup_database_files(database_path: &Path) -> std::io::Result<Option<String>
     if !database_path.exists() {
         return Ok(None);
     }
-    let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
-    let backup_name = format!("workspace-history.recovery-{stamp}.sqlite3");
+    let stamp = Utc::now().format("%Y%m%dT%H%M%S%9fZ");
+    let backup_name = format!(
+        "workspace-history.recovery-{stamp}-{}.sqlite3",
+        uuid::Uuid::new_v4()
+    );
     let backup_path = database_path.with_file_name(&backup_name);
     fs::copy(database_path, &backup_path)?;
-    set_private_file_permissions(&backup_path);
+    set_private_file_permissions(&backup_path)?;
     for suffix in ["-wal", "-shm"] {
         let source = PathBuf::from(format!("{}{suffix}", database_path.display()));
         if source.exists() {
             let target = PathBuf::from(format!("{}{suffix}", backup_path.display()));
             fs::copy(source, &target)?;
-            set_private_file_permissions(&target);
+            set_private_file_permissions(&target)?;
         }
     }
     Ok(Some(backup_name))
 }
 
 #[cfg(unix)]
-fn set_private_directory_permissions(path: &Path) {
+fn set_private_directory_permissions(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
 }
 
 #[cfg(not(unix))]
-fn set_private_directory_permissions(_path: &Path) {}
+fn set_private_directory_permissions(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
 
 #[cfg(unix)]
-fn set_private_file_permissions(path: &Path) {
+fn set_private_file_permissions(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
 }
 
 #[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) {}
+fn set_private_file_permissions(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+fn set_private_database_permissions(database_path: &Path) -> std::io::Result<()> {
+    set_private_file_permissions(database_path)?;
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", database_path.display()));
+        if sidecar.exists() {
+            set_private_file_permissions(&sidecar)?;
+        }
+    }
+    Ok(())
+}
 
 #[cfg(unix)]
 fn path_to_bytes(path: &Path) -> Vec<u8> {
@@ -1837,6 +1919,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn event_replay_requires_an_exact_match_and_sessions_cannot_cross_workspaces() {
+        let data = temp_directory("history-event-replay");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let first = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace;
+        let second = store
+            .create_session_workspace(
+                &first.workspace_id,
+                "Second session",
+                "",
+                "request-event-replay",
+            )
+            .expect("second workspace")
+            .workspace;
+        let first_session_id = {
+            let inner = store.lock();
+            inner
+                .connection
+                .query_row(
+                    "SELECT id FROM sessions WHERE workspace_id = ?1 ORDER BY created_at ASC LIMIT 1",
+                    params![first.workspace_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("first session")
+        };
+        let event = NormalizedDomainEvent {
+            schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+            event_id: "event-strict-replay".to_owned(),
+            workspace_id: first.workspace_id.clone(),
+            session_id: Some(first_session_id.clone()),
+            producer: "code".to_owned(),
+            kind: "code.session.status.changed".to_owned(),
+            occurred_at: "2026-07-18T00:00:00.000Z".to_owned(),
+            payload: json!({ "status": "running" }),
+        };
+        assert!(store.append_event(&event).expect("first append").inserted);
+        assert!(!store.append_event(&event).expect("exact replay").inserted);
+
+        let conflicting_events = [
+            NormalizedDomainEvent {
+                payload: json!({ "status": "completed" }),
+                ..event.clone()
+            },
+            NormalizedDomainEvent {
+                occurred_at: "2026-07-18T00:00:01.000Z".to_owned(),
+                ..event.clone()
+            },
+            NormalizedDomainEvent {
+                schema_version: DOMAIN_EVENT_SCHEMA_VERSION + 1,
+                ..event.clone()
+            },
+            NormalizedDomainEvent {
+                session_id: None,
+                ..event.clone()
+            },
+            NormalizedDomainEvent {
+                workspace_id: second.workspace_id.clone(),
+                ..event.clone()
+            },
+            NormalizedDomainEvent {
+                producer: "hist".to_owned(),
+                kind: "hist.writer.status.changed".to_owned(),
+                payload: json!({ "status": "ready" }),
+                ..event.clone()
+            },
+        ];
+        for conflict in conflicting_events {
+            assert_eq!(
+                store.append_event(&conflict).unwrap_err().code,
+                "HIST-EVENT-IDEMPOTENCY-CONFLICT"
+            );
+        }
+
+        let cross_workspace_event = NormalizedDomainEvent {
+            event_id: "event-cross-workspace-session".to_owned(),
+            workspace_id: second.workspace_id,
+            session_id: Some(first_session_id),
+            ..event
+        };
+        assert_eq!(
+            store.append_event(&cross_workspace_event).unwrap_err().code,
+            "HIST-EVENT-SESSION-WORKSPACE"
+        );
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn bounded_context_retains_only_the_latest_ten_snapshots() {
         let data = temp_directory("history-context-bound");
         let root = git_repository();
@@ -1963,5 +2137,132 @@ mod tests {
             )
             .expect("schema query");
         assert_eq!(exists, 0);
+    }
+
+    #[test]
+    fn on_disk_migration_failure_preserves_and_reopens_the_original_database() {
+        let data = temp_directory("history-migration-file");
+        let database = data.join(DATABASE_FILE_NAME);
+        {
+            let connection = Connection::open(&database).expect("fixture database");
+            connection
+                .execute_batch(
+                    "CREATE TABLE durable_marker(value TEXT NOT NULL);
+                     INSERT INTO durable_marker(value) VALUES ('preserve-me');
+                     PRAGMA user_version = 0;",
+                )
+                .expect("N-1 fixture");
+        }
+
+        let failure = open_configured_connection_with_migrations(
+            &database,
+            true,
+            &[(
+                1,
+                "CREATE TABLE partial_change(id INTEGER PRIMARY KEY);
+                 INSERT INTO missing_table VALUES (1);",
+            )],
+        )
+        .expect_err("migration must fail");
+        assert_eq!(failure.code, "HIST-MIGRATION-FAILED");
+
+        let reopened = Connection::open(&database).expect("reopen original database");
+        assert_eq!(
+            reopened
+                .query_row("SELECT value FROM durable_marker", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .expect("durable marker"),
+            "preserve-me"
+        );
+        assert_eq!(
+            reopened
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("schema version"),
+            0
+        );
+        drop(reopened);
+
+        let migrated = WorkspaceHistoryStore::open(&data).expect("migrate preserved database");
+        assert_eq!(migrated.status().mode, HistoryMode::Ready);
+        drop(migrated);
+        let reopened_after_success = Connection::open(&database).expect("reopen migrated database");
+        assert_eq!(
+            reopened_after_success
+                .query_row("SELECT value FROM durable_marker", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .expect("durable marker after success"),
+            "preserve-me"
+        );
+        let _ = fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn recovery_backups_are_unique_and_private() {
+        let data = temp_directory("history-backup-unique");
+        let database = data.join(DATABASE_FILE_NAME);
+        fs::write(&database, b"preserved bytes").expect("database fixture");
+        let first = backup_database_files(&database)
+            .expect("first backup")
+            .expect("first backup name");
+        let second = backup_database_files(&database)
+            .expect("second backup")
+            .expect("second backup name");
+        assert_ne!(first, second);
+        assert_eq!(
+            fs::read(data.join(&first)).expect("first bytes"),
+            b"preserved bytes"
+        );
+        assert_eq!(
+            fs::read(data.join(&second)).expect("second bytes"),
+            b"preserved bytes"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            for backup in [first, second] {
+                let mode = fs::metadata(data.join(backup))
+                    .expect("backup metadata")
+                    .permissions()
+                    .mode();
+                assert_eq!(mode & 0o077, 0);
+            }
+        }
+        let _ = fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn private_permission_helpers_fail_closed() {
+        let data = temp_directory("history-permission-failure");
+        let missing = data.join("missing");
+        assert!(set_private_directory_permissions(&missing).is_err());
+        assert!(set_private_file_permissions(&missing).is_err());
+
+        let store = WorkspaceHistoryStore::open(&data).expect("private store");
+        drop(store);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let directory_mode = fs::metadata(&data)
+                .expect("directory metadata")
+                .permissions()
+                .mode();
+            assert_eq!(directory_mode & 0o077, 0);
+            for entry in fs::read_dir(&data).expect("history files") {
+                let path = entry.expect("history entry").path();
+                if path.is_file() {
+                    let mode = fs::metadata(path)
+                        .expect("history file metadata")
+                        .permissions()
+                        .mode();
+                    assert_eq!(mode & 0o077, 0);
+                }
+            }
+        }
+        let _ = fs::remove_dir_all(data);
     }
 }
