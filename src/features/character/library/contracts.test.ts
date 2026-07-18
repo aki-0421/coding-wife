@@ -142,7 +142,7 @@ describe("character library contract", () => {
       textureCount: manifest.inventory.textureCount,
       motionCount: manifest.inventory.motionCount,
       expressionCount: manifest.inventory.expressionCount,
-      selectedWorkspaceCount: 0,
+      selectedProjectCount: 0,
       deletable: true,
       manifest,
       thumbnailSha256: manifest.trustedFrame.sha256,

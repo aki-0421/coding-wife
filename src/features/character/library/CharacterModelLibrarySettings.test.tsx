@@ -129,7 +129,7 @@ const customPack: CharacterPackView = {
   textureCount: 1,
   motionCount: 0,
   expressionCount: 0,
-  selectedWorkspaceCount: 0,
+  selectedProjectCount: 0,
   deletable: true,
   manifest: customManifest,
   thumbnailSha256: characterFixture.attestationRequest.thumbnailSha256,
@@ -173,6 +173,7 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
     this.snapshot = {
       schemaVersion: 1,
       workspaceId: "workspace-fixture",
+      projectId: "project-fixture",
       selectedPackId: builtinPack.packId,
       fallbackApplied: false,
       diagnostics: [],
@@ -222,8 +223,8 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
       packs: [
         ...this.snapshot.packs
           .filter((pack) => pack.packId !== published.packId)
-          .map((pack) => ({ ...pack, selectedWorkspaceCount: 0 })),
-        { ...published, selectedWorkspaceCount: 1, deletable: false },
+          .map((pack) => ({ ...pack, selectedProjectCount: 0 })),
+        { ...published, selectedProjectCount: 1, deletable: false },
       ],
     }
     return Promise.resolve(this.snapshot)
@@ -243,7 +244,7 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
       selectedPackId: request.packId,
       packs: this.snapshot.packs.map((pack) => ({
         ...pack,
-        selectedWorkspaceCount: pack.packId === request.packId ? 1 : 0,
+        selectedProjectCount: pack.packId === request.packId ? 1 : 0,
         deletable: pack.kind === "custom" && pack.packId !== request.packId,
       })),
     }

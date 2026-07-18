@@ -322,6 +322,7 @@ export class DemoCharacterLibraryGateway implements CharacterLibraryGateway {
     return {
       schemaVersion: characterLibrarySchemaVersion,
       workspaceId,
+      projectId: "project-demo",
       selectedPackId: builtinHiyoriPackId,
       fallbackApplied: false,
       diagnostics: [],
@@ -339,7 +340,7 @@ export class DemoCharacterLibraryGateway implements CharacterLibraryGateway {
           textureCount: this.#manifest.inventory.textureCount,
           motionCount: this.#manifest.inventory.motionCount,
           expressionCount: this.#manifest.inventory.expressionCount,
-          selectedWorkspaceCount: 1,
+          selectedProjectCount: 1,
           deletable: false,
           manifest: null,
           thumbnailSha256: null,

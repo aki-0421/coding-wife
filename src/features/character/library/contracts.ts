@@ -97,7 +97,7 @@ export interface CharacterPackView {
   readonly textureCount: number
   readonly motionCount: number
   readonly expressionCount: number
-  readonly selectedWorkspaceCount: number
+  readonly selectedProjectCount: number
   readonly deletable: boolean
   readonly manifest: CharacterPackManifest | null
   readonly thumbnailSha256: string | null
@@ -106,6 +106,7 @@ export interface CharacterPackView {
 export interface CharacterLibrarySnapshot {
   readonly schemaVersion: typeof characterLibrarySchemaVersion
   readonly workspaceId: string
+  readonly projectId: string
   readonly selectedPackId: string
   readonly fallbackApplied: boolean
   readonly diagnostics: readonly string[]
@@ -151,6 +152,7 @@ const customPackIdPattern = new RegExp(
   `^custom:${uuidPattern.source.slice(1, -1)}$`,
 )
 const workspacePattern = /^[A-Za-z0-9_:][A-Za-z0-9_:-]{0,159}$/
+const projectPattern = /^[A-Za-z0-9_-]{1,160}$/
 const allowedDiagnostics = new Set([
   "CHARACTER-PACK-QUARANTINED",
   "CHARACTER-SELECTION-FALLBACK",
@@ -208,6 +210,10 @@ function timestamp(value: unknown): value is string {
 
 function workspaceId(value: unknown): value is string {
   return typeof value === "string" && workspacePattern.test(value)
+}
+
+function projectId(value: unknown): value is string {
+  return typeof value === "string" && projectPattern.test(value)
 }
 
 function packId(value: unknown): value is string {
@@ -390,7 +396,7 @@ function parseCharacterPackView(value: unknown): CharacterPackView {
       "textureCount",
       "motionCount",
       "expressionCount",
-      "selectedWorkspaceCount",
+      "selectedProjectCount",
       "deletable",
       "manifest",
       "thumbnailSha256",
@@ -405,7 +411,7 @@ function parseCharacterPackView(value: unknown): CharacterPackView {
     !integer(value.textureCount, 1, 128) ||
     !integer(value.motionCount, 0, 128) ||
     !integer(value.expressionCount, 0, 128) ||
-    !integer(value.selectedWorkspaceCount, 0) ||
+    !integer(value.selectedProjectCount, 0) ||
     typeof value.deletable !== "boolean" ||
     (value.thumbnailSha256 !== null && !sha256(value.thumbnailSha256))
   ) {
@@ -456,6 +462,7 @@ export function parseCharacterLibrarySnapshot(
     !exact(value, [
       "schemaVersion",
       "workspaceId",
+      "projectId",
       "selectedPackId",
       "fallbackApplied",
       "diagnostics",
@@ -463,6 +470,7 @@ export function parseCharacterLibrarySnapshot(
     ]) ||
     value.schemaVersion !== characterLibrarySchemaVersion ||
     !workspaceId(value.workspaceId) ||
+    !projectId(value.projectId) ||
     !packId(value.selectedPackId) ||
     typeof value.fallbackApplied !== "boolean" ||
     !Array.isArray(value.diagnostics) ||
@@ -488,6 +496,7 @@ export function parseCharacterLibrarySnapshot(
   return {
     schemaVersion: characterLibrarySchemaVersion,
     workspaceId: value.workspaceId,
+    projectId: value.projectId,
     selectedPackId: value.selectedPackId,
     fallbackApplied: value.fallbackApplied,
     diagnostics: [...(value.diagnostics as string[])],

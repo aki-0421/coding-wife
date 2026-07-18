@@ -131,12 +131,7 @@ export class CharacterLibraryStore {
     const load = this.gateway
       .getLibrary({ workspaceId })
       .then((snapshot) => {
-        this.setState(workspaceId, {
-          ...this.getState(workspaceId),
-          status: "ready",
-          snapshot,
-          errorCode: null,
-        })
+        this.setReadyProjectSnapshot(workspaceId, snapshot)
         return snapshot
       })
       .catch((error: unknown) => {
@@ -201,14 +196,7 @@ export class CharacterLibraryStore {
     this.beginMutation(request.workspaceId, "confirming")
     try {
       const snapshot = await this.gateway.confirmImport(request)
-      this.setState(request.workspaceId, {
-        ...this.getState(request.workspaceId),
-        status: "ready",
-        snapshot,
-        preview: null,
-        mutation: null,
-        errorCode: null,
-      })
+      this.setReadyProjectSnapshot(request.workspaceId, snapshot, true)
       return snapshot
     } catch (error) {
       this.failMutation(request.workspaceId, error)
@@ -240,13 +228,7 @@ export class CharacterLibraryStore {
     this.beginMutation(workspaceId, "selecting")
     try {
       const snapshot = await this.gateway.selectPack({ workspaceId, packId })
-      this.setState(workspaceId, {
-        ...this.getState(workspaceId),
-        status: "ready",
-        snapshot,
-        mutation: null,
-        errorCode: null,
-      })
+      this.setReadyProjectSnapshot(workspaceId, snapshot)
       return snapshot
     } catch (error) {
       this.failMutation(workspaceId, error)
@@ -261,13 +243,7 @@ export class CharacterLibraryStore {
     this.beginMutation(workspaceId, "deleting")
     try {
       const snapshot = await this.gateway.deletePack({ workspaceId, packId })
-      this.setState(workspaceId, {
-        ...this.getState(workspaceId),
-        status: "ready",
-        snapshot,
-        mutation: null,
-        errorCode: null,
-      })
+      this.setReadyProjectSnapshot(workspaceId, snapshot)
       return snapshot
     } catch (error) {
       this.failMutation(workspaceId, error)
@@ -338,6 +314,33 @@ export class CharacterLibraryStore {
 
   private setState(workspaceId: string, state: CharacterLibraryState): void {
     this.#states.set(workspaceId, state)
+    for (const listener of this.#listeners) listener()
+  }
+
+  private setReadyProjectSnapshot(
+    workspaceId: string,
+    snapshot: CharacterLibrarySnapshot,
+    clearPreview = false,
+  ): void {
+    for (const [candidateWorkspaceId, current] of this.#states) {
+      if (
+        candidateWorkspaceId !== workspaceId &&
+        current.snapshot?.projectId !== snapshot.projectId
+      ) {
+        continue
+      }
+      this.#states.set(candidateWorkspaceId, {
+        ...current,
+        status: "ready",
+        snapshot: {
+          ...snapshot,
+          workspaceId: candidateWorkspaceId,
+        },
+        preview: clearPreview ? null : current.preview,
+        mutation: null,
+        errorCode: null,
+      })
+    }
     for (const listener of this.#listeners) listener()
   }
 

@@ -3,7 +3,7 @@ import type { SupportedLocale } from "@/features/localization"
 const en = {
   title: "Character models",
   description:
-    "Choose the Live2D model used in this workspace. Imported model assets stay inside the app's private library.",
+    "Choose the Live2D model shared by every workspace in this project. Imported model assets stay inside the app's private library.",
   importModel: "Import model",
   importUnavailable: "Model import is available in the desktop app.",
   loading: "Loading character models",
@@ -20,7 +20,7 @@ const en = {
   manifestHash: "Manifest",
   trustedFrameHash: "Trusted frame",
   thumbnailLoading: "Loading verified model thumbnail",
-  usedByWorkspaces: "Used by {count} workspace(s)",
+  usedByProjects: "Used by {count} project(s)",
   importedAt: "Imported {date}",
   delete: "Delete",
   deleteTitle: "Delete this character model?",
@@ -32,7 +32,7 @@ const en = {
   switching: "Switching model…",
   fallbackTitle: "The bundled model was restored",
   fallbackDescription:
-    "The previous model was unavailable, so this workspace safely fell back to Hiyori.",
+    "The previous model was unavailable, so this project safely fell back to Hiyori.",
   importTitle: "Review imported model",
   importDescription:
     "The selected .model3.json and its referenced local assets are copied to quarantine first. They are published only after an isolated preview renders successfully and you confirm the name.",
@@ -55,7 +55,7 @@ const en = {
 const ja: typeof en = {
   title: "キャラクターモデル",
   description:
-    "このワークスペースで使うLive2Dモデルを選びます。取り込んだモデル素材はアプリ専用ライブラリ内に保存されます。",
+    "このプロジェクトの全ワークスペースで共有するLive2Dモデルを選びます。取り込んだモデル素材はアプリ専用ライブラリ内に保存されます。",
   importModel: "モデルを取り込む",
   importUnavailable: "モデルの取り込みはデスクトップアプリで利用できます。",
   loading: "キャラクターモデルを読み込み中",
@@ -72,7 +72,7 @@ const ja: typeof en = {
   manifestHash: "マニフェスト",
   trustedFrameHash: "信頼済みフレーム",
   thumbnailLoading: "検証済みモデル画像を読み込み中",
-  usedByWorkspaces: "{count}個のワークスペースで使用中",
+  usedByProjects: "{count}個のプロジェクトで使用中",
   importedAt: "{date}に取り込み",
   delete: "削除",
   deleteTitle: "このキャラクターモデルを削除しますか？",
@@ -84,7 +84,7 @@ const ja: typeof en = {
   switching: "モデルを切り替え中…",
   fallbackTitle: "同梱モデルへ戻しました",
   fallbackDescription:
-    "以前のモデルを利用できなかったため、このワークスペースは安全にHiyoriへ戻りました。",
+    "以前のモデルを利用できなかったため、このプロジェクトは安全にHiyoriへ戻りました。",
   importTitle: "取り込むモデルを確認",
   importDescription:
     "選択した.model3.jsonと参照先のローカル素材は最初に隔離領域へコピーされます。分離プレビューで正常描画を確認し、名前を確定するまで公開しません。",

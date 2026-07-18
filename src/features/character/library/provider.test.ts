@@ -119,6 +119,36 @@ describe("CharacterLibraryStore", () => {
     releaseSession()
   })
 
+  it("publishes project-scoped mutations to every hydrated sibling workspace", async () => {
+    const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
+    const getLibrary = vi.fn((request: { readonly workspaceId: string }) =>
+      Promise.resolve({ ...snapshot, workspaceId: request.workspaceId }),
+    )
+    const changed = {
+      ...snapshot,
+      workspaceId: "workspace-primary",
+      diagnostics: ["CHARACTER-SELECTION-FALLBACK"],
+      fallbackApplied: true,
+    } satisfies CharacterLibrarySnapshot
+    const store = new CharacterLibraryStore(
+      createGateway({
+        getLibrary,
+        selectPack: () => Promise.resolve(changed),
+      }),
+    )
+    await store.load("workspace-primary")
+    await store.load("workspace-sibling")
+
+    await store.selectPack("workspace-primary", "builtin:hiyori_pro")
+
+    expect(store.getState("workspace-sibling").snapshot).toMatchObject({
+      workspaceId: "workspace-sibling",
+      projectId: snapshot.projectId,
+      fallbackApplied: true,
+      diagnostics: ["CHARACTER-SELECTION-FALLBACK"],
+    })
+  })
+
   it("serializes mutations and retains only a stable error code", async () => {
     const importing = deferred<CharacterImportResponse>()
     const gateway = createGateway({

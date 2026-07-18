@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{SecondsFormat, Utc};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
@@ -25,6 +26,40 @@ pub type CharacterPickerFuture<'a> = Pin<Box<dyn Future<Output = Option<PathBuf>
 
 pub trait CharacterModelPicker: Send + Sync {
     fn pick_model_file(&self) -> CharacterPickerFuture<'_>;
+}
+
+pub trait CharacterProjectResolver: Send + Sync {
+    fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>>;
+}
+
+struct WorkspaceIdentityProjectResolver;
+
+impl CharacterProjectResolver for WorkspaceIdentityProjectResolver {
+    fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>> {
+        Ok(Some(workspace_id.to_owned()))
+    }
+}
+
+struct WorkspaceHistoryProjectResolver {
+    database_path: PathBuf,
+}
+
+impl CharacterProjectResolver for WorkspaceHistoryProjectResolver {
+    fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>> {
+        let connection = Connection::open_with_flags(
+            &self.database_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|_| character_error("character_library_get", "CHARACTER-PROJECT-LOOKUP", true))?;
+        connection
+            .query_row(
+                "SELECT project_id FROM workspaces WHERE id = ?1",
+                [workspace_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| character_error("character_library_get", "CHARACTER-PROJECT-LOOKUP", true))
+    }
 }
 
 pub struct NativeCharacterModelPicker;
@@ -64,7 +99,7 @@ pub struct CharacterPackView {
     pub texture_count: u32,
     pub motion_count: u32,
     pub expression_count: u32,
-    pub selected_workspace_count: u32,
+    pub selected_project_count: u32,
     pub deletable: bool,
     pub manifest: Option<CharacterPackManifest>,
     pub thumbnail_sha256: Option<String>,
@@ -75,6 +110,7 @@ pub struct CharacterPackView {
 pub struct CharacterLibrarySnapshot {
     pub schema_version: u16,
     pub workspace_id: String,
+    pub project_id: String,
     pub selected_pack_id: String,
     pub fallback_applied: bool,
     pub diagnostics: Vec<String>,
@@ -206,16 +242,21 @@ pub struct CharacterService {
     storage: CharacterStorage,
     builtin_directory: PathBuf,
     picker: Arc<dyn CharacterModelPicker>,
+    project_resolver: Arc<dyn CharacterProjectResolver>,
     pending: Arc<Mutex<HashMap<String, PendingImport>>>,
     operations: Arc<Mutex<()>>,
 }
 
 impl CharacterService {
     pub fn production(storage: CharacterStorage, builtin_directory: PathBuf) -> Self {
-        Self::new(
+        let project_resolver = Arc::new(WorkspaceHistoryProjectResolver {
+            database_path: storage.workspace_history_path().to_path_buf(),
+        });
+        Self::new_with_project_resolver(
             storage,
             builtin_directory,
             Arc::new(NativeCharacterModelPicker),
+            project_resolver,
         )
     }
 
@@ -224,13 +265,51 @@ impl CharacterService {
         builtin_directory: PathBuf,
         picker: Arc<dyn CharacterModelPicker>,
     ) -> Self {
+        Self::new_with_project_resolver(
+            storage,
+            builtin_directory,
+            picker,
+            Arc::new(WorkspaceIdentityProjectResolver),
+        )
+    }
+
+    pub fn new_with_project_resolver(
+        storage: CharacterStorage,
+        builtin_directory: PathBuf,
+        picker: Arc<dyn CharacterModelPicker>,
+        project_resolver: Arc<dyn CharacterProjectResolver>,
+    ) -> Self {
         Self {
             storage,
             builtin_directory,
             picker,
+            project_resolver,
             pending: Arc::new(Mutex::new(HashMap::new())),
             operations: Arc::new(Mutex::new(())),
         }
+    }
+
+    fn resolve_project_id(&self, workspace_id: &str) -> CharacterResult<String> {
+        self.project_resolver
+            .resolve_project(workspace_id)?
+            .filter(|project_id| valid_project_id(project_id))
+            .ok_or_else(|| {
+                character_error("character_library_get", "CHARACTER-PROJECT-NOT-FOUND", true)
+            })
+    }
+
+    fn load_project_state(
+        &self,
+        custom_packs: &[StoredPack],
+    ) -> CharacterResult<CharacterStateFile> {
+        let valid_pack_ids = custom_packs
+            .iter()
+            .map(|pack| pack.manifest.pack_id.clone())
+            .collect::<HashSet<_>>();
+        self.storage
+            .load_or_migrate_state(&valid_pack_ids, |workspace_id| {
+                self.project_resolver.resolve_project(workspace_id)
+            })
     }
 
     pub async fn library(
@@ -463,6 +542,9 @@ impl CharacterService {
         }
         let _operation = self.operations.lock().await;
         self.cleanup_expired().await;
+        let project_id = self.resolve_project_id(&request.workspace_id)?;
+        let (custom_packs, _) = self.storage.load_custom_packs()?;
+        let state = self.load_project_state(&custom_packs)?;
         let mut pending = self.pending.lock().await;
         let session = pending.get_mut(&request.preview_token).ok_or_else(|| {
             character_error(
@@ -491,7 +573,9 @@ impl CharacterService {
         self.storage.publish_and_select(
             &session.directory,
             &session.manifest,
-            &request.workspace_id,
+            state,
+            &project_id,
+            current_timestamp(),
         )?;
         pending.remove(&request.preview_token);
         drop(pending);
@@ -528,8 +612,15 @@ impl CharacterService {
     ) -> CharacterResult<CharacterLibrarySnapshot> {
         validate_workspace_id(&request.workspace_id, "character_select_pack")?;
         let _operation = self.operations.lock().await;
+        let project_id = self.resolve_project_id(&request.workspace_id)?;
+        let (custom_packs, _) = self.storage.load_custom_packs()?;
         if request.pack_id != BUILTIN_HIYORI_PACK_ID {
-            let pack = self.storage.load_pack(&request.pack_id)?;
+            let pack = custom_packs
+                .iter()
+                .find(|pack| pack.manifest.pack_id == request.pack_id)
+                .ok_or_else(|| {
+                    character_error("character_select_pack", "CHARACTER-PACK-NOT-FOUND", true)
+                })?;
             if pack.manifest.compatibility.expected_drawables.is_none() {
                 return Err(character_error(
                     "character_select_pack",
@@ -538,10 +629,8 @@ impl CharacterService {
                 ));
             }
         }
-        let mut state = self.storage.load_state()?;
-        state
-            .workspace_selections
-            .insert(request.workspace_id.clone(), request.pack_id);
+        let mut state = self.load_project_state(&custom_packs)?;
+        state.select(project_id, request.pack_id, current_timestamp());
         self.storage.save_state(&state)?;
         self.snapshot(&request.workspace_id)
     }
@@ -559,11 +648,12 @@ impl CharacterService {
             ));
         }
         let _operation = self.operations.lock().await;
-        let state = self.storage.load_state()?;
+        let (custom_packs, _) = self.storage.load_custom_packs()?;
+        let state = self.load_project_state(&custom_packs)?;
         if state
-            .workspace_selections
+            .project_selections
             .values()
-            .any(|selected| selected == &request.pack_id)
+            .any(|selection| selection.pack_id == request.pack_id)
         {
             return Err(character_error(
                 "character_delete_pack",
@@ -576,21 +666,30 @@ impl CharacterService {
     }
 
     fn snapshot(&self, workspace_id: &str) -> CharacterResult<CharacterLibrarySnapshot> {
+        let project_id = self.resolve_project_id(workspace_id)?;
         let (custom_packs, mut diagnostics) = self.storage.load_custom_packs()?;
         let valid_ids = custom_packs
             .iter()
             .map(|pack| pack.manifest.pack_id.as_str())
             .collect::<Vec<_>>();
-        let mut state = self.storage.load_state()?;
-        let requested = state.selected_for(workspace_id).to_owned();
+        let mut state = self.load_project_state(&custom_packs)?;
+        let requested = state.selected_for(&project_id).to_owned();
         let fallback_applied = requested != BUILTIN_HIYORI_PACK_ID
             && !valid_ids.iter().any(|candidate| *candidate == requested);
         let selected_pack_id = if fallback_applied {
             diagnostics.push("CHARACTER-SELECTION-FALLBACK".to_owned());
-            state.workspace_selections.remove(workspace_id);
+            state.select(
+                project_id.clone(),
+                BUILTIN_HIYORI_PACK_ID.to_owned(),
+                current_timestamp(),
+            );
             self.storage.save_state(&state)?;
             BUILTIN_HIYORI_PACK_ID.to_owned()
         } else {
+            if !state.project_selections.contains_key(&project_id) {
+                state.select(project_id.clone(), requested.clone(), current_timestamp());
+                self.storage.save_state(&state)?;
+            }
             requested
         };
         let mut packs = vec![self.builtin_pack_view(&state)?];
@@ -602,6 +701,7 @@ impl CharacterService {
         Ok(CharacterLibrarySnapshot {
             schema_version: CHARACTER_SCHEMA_VERSION,
             workspace_id: workspace_id.to_owned(),
+            project_id,
             selected_pack_id,
             fallback_applied,
             diagnostics,
@@ -641,10 +741,10 @@ impl CharacterService {
             texture_count: get_u64("textureCount") as u32,
             motion_count: get_u64("motionCount") as u32,
             expression_count: get_u64("expressionCount") as u32,
-            selected_workspace_count: state
-                .workspace_selections
+            selected_project_count: state
+                .project_selections
                 .values()
-                .filter(|pack| pack.as_str() == BUILTIN_HIYORI_PACK_ID)
+                .filter(|selection| selection.pack_id == BUILTIN_HIYORI_PACK_ID)
                 .count() as u32,
             deletable: false,
             manifest: None,
@@ -753,15 +853,15 @@ fn custom_pack_view(pack: &StoredPack, state: &CharacterStateFile) -> CharacterP
         texture_count: pack.manifest.inventory.texture_count,
         motion_count: pack.manifest.inventory.motion_count,
         expression_count: pack.manifest.inventory.expression_count,
-        selected_workspace_count: state
-            .workspace_selections
+        selected_project_count: state
+            .project_selections
             .values()
-            .filter(|selected| *selected == &pack.manifest.pack_id)
+            .filter(|selection| selection.pack_id == pack.manifest.pack_id)
             .count() as u32,
         deletable: !state
-            .workspace_selections
+            .project_selections
             .values()
-            .any(|selected| selected == &pack.manifest.pack_id),
+            .any(|selection| selection.pack_id == pack.manifest.pack_id),
         manifest: Some(pack.manifest.clone()),
         thumbnail_sha256: pack
             .manifest
@@ -836,6 +936,18 @@ fn validate_workspace_id(workspace_id: &str, operation: &str) -> CharacterResult
     Ok(())
 }
 
+fn valid_project_id(project_id: &str) -> bool {
+    !project_id.is_empty()
+        && project_id.len() <= 160
+        && project_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
+}
+
+fn current_timestamp() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
 fn random_generation() -> u64 {
     let bytes = *uuid::Uuid::new_v4().as_bytes();
     (u64::from_be_bytes(bytes[0..8].try_into().unwrap_or([0; 8])) & MAX_JS_SAFE_INTEGER).max(1)
@@ -857,6 +969,7 @@ pub fn resolve_builtin_directory(resource_directory: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::fs;
 
     use serde::de::DeserializeOwned;
@@ -874,6 +987,15 @@ mod tests {
         fn pick_model_file(&self) -> CharacterPickerFuture<'_> {
             let selected = self.0.clone();
             Box::pin(async move { selected })
+        }
+    }
+
+    #[derive(Clone)]
+    struct FixedProjectResolver(BTreeMap<String, String>);
+
+    impl CharacterProjectResolver for FixedProjectResolver {
+        fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>> {
+            Ok(self.0.get(workspace_id).cloned())
         }
     }
 
@@ -1030,12 +1152,19 @@ mod tests {
     async fn import_attestation_publish_restart_and_delete_are_bound_end_to_end() {
         let app_data = TestDirectory::new();
         let storage = CharacterStorage::open(app_data.path()).expect("character storage");
-        let service = CharacterService::new(
+        let workspace_id = "workspace-e2e".to_owned();
+        let sibling_workspace_id = "workspace-e2e-sibling".to_owned();
+        let project_resolver: Arc<dyn CharacterProjectResolver> =
+            Arc::new(FixedProjectResolver(BTreeMap::from([
+                (workspace_id.clone(), "project-e2e".to_owned()),
+                (sibling_workspace_id.clone(), "project-e2e".to_owned()),
+            ])));
+        let service = CharacterService::new_with_project_resolver(
             storage.clone(),
             resolve_builtin_directory(Path::new("/missing")),
             Arc::new(FixedPicker(Some(reviewed_hiyori_source()))),
+            project_resolver.clone(),
         );
-        let workspace_id = "workspace-e2e".to_owned();
 
         let initial = service
             .library(CharacterLibraryRequest {
@@ -1044,6 +1173,7 @@ mod tests {
             .await
             .expect("initial library");
         assert_eq!(initial.selected_pack_id, BUILTIN_HIYORI_PACK_ID);
+        assert_eq!(initial.project_id, "project-e2e");
         assert_eq!(initial.packs.len(), 1);
 
         let response = service
@@ -1182,6 +1312,14 @@ mod tests {
             .expect("atomic publish");
         assert_eq!(published.selected_pack_id, preview.pack_id);
         assert_eq!(published.packs.len(), 2);
+        let sibling = service
+            .library(CharacterLibraryRequest {
+                workspace_id: sibling_workspace_id.clone(),
+            })
+            .await
+            .expect("shared project selection");
+        assert_eq!(sibling.project_id, published.project_id);
+        assert_eq!(sibling.selected_pack_id, preview.pack_id);
         let custom = published
             .packs
             .iter()
@@ -1220,10 +1358,11 @@ mod tests {
             "CHARACTER-PREVIEW-EXPIRED"
         );
 
-        let restarted = CharacterService::new(
+        let restarted = CharacterService::new_with_project_resolver(
             storage,
             resolve_builtin_directory(Path::new("/missing")),
             Arc::new(FixedPicker(None)),
+            project_resolver,
         );
         let persisted = restarted
             .library(CharacterLibraryRequest {
@@ -1327,9 +1466,19 @@ mod tests {
             })
             .await
             .expect("select builtin");
+        assert_eq!(
+            restarted
+                .library(CharacterLibraryRequest {
+                    workspace_id: sibling_workspace_id.clone(),
+                })
+                .await
+                .expect("shared builtin selection")
+                .selected_pack_id,
+            BUILTIN_HIYORI_PACK_ID
+        );
         let deleted = restarted
             .delete_pack(CharacterDeleteRequest {
-                workspace_id,
+                workspace_id: sibling_workspace_id,
                 pack_id: preview.pack_id,
             })
             .await
@@ -1555,7 +1704,7 @@ mod tests {
                 custom.thumbnail_sha256.as_deref(),
                 Some(trusted_frame.sha256.as_str())
             );
-            assert_eq!(custom.selected_workspace_count, 1);
+            assert_eq!(custom.selected_project_count, 1);
             let frame_error = restarted
                 .read_asset(
                     "main",

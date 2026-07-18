@@ -136,6 +136,7 @@
   "librarySnapshot": {
     "schemaVersion": 1,
     "workspaceId": "workspace-fixture",
+    "projectId": "project-fixture",
     "selectedPackId": "builtin:hiyori_pro",
     "fallbackApplied": false,
     "diagnostics": [],
@@ -153,7 +154,7 @@
         "textureCount": 2,
         "motionCount": 10,
         "expressionCount": 0,
-        "selectedWorkspaceCount": 1,
+        "selectedProjectCount": 1,
         "deletable": false,
         "manifest": null,
         "thumbnailSha256": null

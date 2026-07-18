@@ -331,9 +331,9 @@ function ModelCard({
               )}
             </span>
           ) : null}
-          {pack.kind === "custom" && pack.selectedWorkspaceCount > 0 ? (
+          {pack.kind === "custom" && pack.selectedProjectCount > 0 ? (
             <span className="mt-xxs block text-label text-muted-foreground">
-              {replaceCount(copy.usedByWorkspaces, pack.selectedWorkspaceCount)}
+              {replaceCount(copy.usedByProjects, pack.selectedProjectCount)}
             </span>
           ) : null}
         </span>
