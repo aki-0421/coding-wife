@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { execFileSync, spawnSync } from "node:child_process"
+import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
   chmod,
@@ -16,6 +16,7 @@ import {
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
+import { setTimeout as wait } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 
 const scriptPath = fileURLToPath(
@@ -23,12 +24,63 @@ const scriptPath = fileURLToPath(
 )
 const isMacOS = process.platform === "darwin"
 
-function runScript(args, cwd) {
+function runScript(args, cwd, extraEnv = {}) {
   return spawnSync("/bin/bash", [scriptPath, ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, LC_ALL: "C" },
+    env: { ...process.env, ...extraEnv, LC_ALL: "C" },
   })
+}
+
+async function waitForMountedWorkDirectory(outputDirectory) {
+  const deadline = Date.now() + 15_000
+  while (Date.now() < deadline) {
+    const entries = await readdir(outputDirectory).catch(() => [])
+    for (const entry of entries) {
+      if (!entry.startsWith(".coding-wife-dmg-work.")) continue
+      const hookReady = path.join(outputDirectory, entry, "test-hook-ready")
+      try {
+        if ((await lstat(hookReady)).isFile()) {
+          return path.join(outputDirectory, entry)
+        }
+      } catch {
+        // The image has not reached the mounted test hook yet.
+      }
+    }
+    await wait(25)
+  }
+  throw new Error("release script did not reach its mounted test hook")
+}
+
+async function runInterruptedScript(args, cwd, outputDirectory, signal) {
+  const child = spawn("/bin/bash", [scriptPath, ...args], {
+    cwd,
+    detached: true,
+    env: {
+      ...process.env,
+      CODING_WIFE_RELEASE_TEST_WAIT: "after-attach",
+      LC_ALL: "C",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  let stdout = ""
+  let stderr = ""
+  child.stdout.setEncoding("utf8")
+  child.stderr.setEncoding("utf8")
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk
+  })
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk
+  })
+  const workDirectory = await waitForMountedWorkDirectory(outputDirectory)
+  process.kill(-child.pid, signal)
+  const result = await new Promise((resolve) => {
+    child.once("close", (code, exitSignal) =>
+      resolve({ code, signal: exitSignal, stderr, stdout, workDirectory }),
+    )
+  })
+  return result
 }
 
 function sha256(value) {
@@ -75,6 +127,19 @@ function assertPrivatePathsAreRedacted(result, privateValues) {
   const output = `${result.stdout}${result.stderr}`
   for (const value of privateValues) {
     assert.equal(output.includes(value), false)
+  }
+}
+
+function cleanupMountedImagesUnder(root) {
+  const info = spawnSync("/usr/bin/hdiutil", ["info"], { encoding: "utf8" })
+  if (info.status !== 0) return
+  for (const line of info.stdout.split("\n")) {
+    if (!line.includes(root) || !line.startsWith("/dev/disk")) continue
+    const [device] = line.trim().split(/\s+/)
+    if (!/^\/dev\/disk[0-9]+s[0-9]+$/.test(device ?? "")) continue
+    spawnSync("/usr/bin/hdiutil", ["detach", "-quiet", "-force", device], {
+      encoding: "utf8",
+    })
   }
 }
 
@@ -125,6 +190,7 @@ test("release shell rejects incomplete and duplicate arguments without printing 
       assertPrivatePathsAreRedacted(result, [root, appPath, outputPath])
     }
   } finally {
+    cleanupMountedImagesUnder(root)
     await rm(root, { recursive: true, force: true })
   }
 })
@@ -279,6 +345,65 @@ test("release shell rejects invalid bundles and symlink outputs without replacem
     )
     assert.deepEqual(leftovers, [])
   } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("release shell removes mounts and work directories after failure, INT, and TERM", async (context) => {
+  if (!isMacOS) {
+    context.skip("macOS hdiutil fault cleanup only runs on macOS")
+    return
+  }
+
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "coding-wife-release-cleanup-"),
+  )
+  try {
+    const appPath = await createSyntheticApp(root)
+    const outputDirectory = path.join(root, "artifacts")
+    await mkdir(outputDirectory)
+
+    const failedOutput = path.join(outputDirectory, "failed.dmg")
+    const failed = runScript(releaseArgs(appPath, failedOutput), root, {
+      CODING_WIFE_RELEASE_TEST_FAULT: "after-attach",
+    })
+    assert.notEqual(failed.status, 0)
+    await assert.rejects(lstat(failedOutput))
+    assertPrivatePathsAreRedacted(failed, [root, appPath, failedOutput])
+    assert.deepEqual(
+      (await readdir(outputDirectory)).filter((entry) =>
+        entry.startsWith(".coding-wife-dmg-"),
+      ),
+      [],
+    )
+
+    for (const [signal, expectedCode] of [
+      ["SIGINT", 130],
+      ["SIGTERM", 143],
+    ]) {
+      const outputPath = path.join(outputDirectory, `${signal}.dmg`)
+      const interrupted = await runInterruptedScript(
+        releaseArgs(appPath, outputPath),
+        root,
+        outputDirectory,
+        signal,
+      )
+      assert.equal(interrupted.code, expectedCode, interrupted.stderr)
+      assert.equal(interrupted.signal, null)
+      assert.equal(interrupted.stdout.includes(root), false)
+      assert.equal(interrupted.stderr.includes(root), false)
+      await assert.rejects(lstat(outputPath))
+      await assert.rejects(lstat(interrupted.workDirectory))
+      const imageInfo = spawnSync("/usr/bin/hdiutil", ["info"], {
+        encoding: "utf8",
+      })
+      assert.equal(imageInfo.status, 0, imageInfo.stderr)
+      assert.equal(imageInfo.stdout.includes(interrupted.workDirectory), false)
+    }
+
+    assert.deepEqual(await readdir(outputDirectory), [])
+  } finally {
+    cleanupMountedImagesUnder(root)
     await rm(root, { recursive: true, force: true })
   }
 })
