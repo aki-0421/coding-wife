@@ -421,26 +421,46 @@ describe("NarrationController", () => {
     expect(statesAtCancel).toEqual(["playing"])
   })
 
-  it("cancels old presentation for a different or unavailable commit", async () => {
+  it("dismisses a different selection without canceling its prepared cache", async () => {
     const { controller, gateway } = await ready(true)
     const key = prepare(controller, ["説明です。"])
     await controller.activatePresentation(key)
     const missing = { ...key, commitSha: shaB, requestId: "support-2" }
 
     await expect(controller.activatePresentation(missing)).resolves.toBe(false)
-    expect(controller.getSnapshot().presentation).toMatchObject({
-      status: "canceled",
-    })
+    expect(controller.getSnapshot().presentation).toBeNull()
     expect(gateway.cancelReasons).toContain("explicit_cancel")
     expect(
       controller.consume(
         event("chunk", { sequence: 1, text: "キャンセル後の後着です。" }),
       ),
-    ).toBe(false)
+    ).toBe(true)
+    await expect(controller.activatePresentation(key)).resolves.toBe(true)
+    expect(controller.getSnapshot().presentation).toMatchObject({
+      status: "streaming",
+      chunks: ["説明です。", "キャンセル後の後着です。"],
+    })
+  })
+
+  it("terminalizes support cancellation and rejects late chunks or replay", async () => {
+    const { controller, gateway } = await ready(true)
+    const key = prepare(controller, ["説明です。"])
+    await controller.activatePresentation(key)
+
+    await controller.cancelPresentation()
+
     expect(controller.getSnapshot().presentation).toMatchObject({
       status: "canceled",
-      chunks: ["説明です。"],
+      errorCode: "NARRATION-PRESENTATION-CANCELED",
     })
+    expect(gateway.cancelReasons).toContain("explicit_cancel")
+    expect(
+      controller.consume(
+        event("chunk", { sequence: 1, text: "cancel後の後着です。" }),
+      ),
+    ).toBe(false)
+    await expect(controller.activatePresentation(key)).resolves.toBe(false)
+    expect(controller.getSnapshot().presentation?.status).toBe("canceled")
   })
 
   it("drops stale generation chunks and refuses scope rollback", async () => {

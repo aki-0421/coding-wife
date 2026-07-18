@@ -61,19 +61,19 @@ function presentation(
 
 function renderCaption(
   value: CommitNarrationPresentationSnapshot,
-  onCancel = vi.fn(),
+  onDismiss = vi.fn(),
   onVisible = vi.fn(),
 ) {
   render(
     <I18nProvider store={jaStore}>
       <CommitNarrationCaption
-        onCancel={onCancel}
+        onDismiss={onDismiss}
         onVisible={onVisible}
         presentation={value}
       />
     </I18nProvider>,
   )
-  return { onCancel, onVisible }
+  return { onDismiss, onVisible }
 }
 
 describe("CommitNarrationCaption", () => {
@@ -91,12 +91,12 @@ describe("CommitNarrationCaption", () => {
     expect(screen.getByText("aaaaaaaa")).toBeVisible()
   })
 
-  it("offers an explicit caption-and-speech cancel action", async () => {
+  it("offers an explicit caption-and-speech dismiss action", async () => {
     const user = userEvent.setup()
-    const { onCancel } = renderCaption(presentation())
+    const { onDismiss } = renderCaption(presentation())
 
     await user.click(screen.getByRole("button", { name: "説明を閉じる" }))
-    expect(onCancel).toHaveBeenCalledOnce()
+    expect(onDismiss).toHaveBeenCalledOnce()
   })
 
   it("acknowledges each exact sequence only after a visible paint boundary", () => {

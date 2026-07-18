@@ -13,7 +13,7 @@ import { useI18n } from "@/features/localization"
 
 export interface CommitNarrationCaptionProps {
   readonly presentation: CommitNarrationPresentationSnapshot
-  readonly onCancel: () => void
+  readonly onDismiss: () => void
   readonly onVisible: (
     acknowledgment: CaptionVisibilityAcknowledgment,
   ) => boolean | void
@@ -57,13 +57,13 @@ function presentationVariant(
 
 export function CommitNarrationCaption({
   presentation,
-  onCancel,
+  onDismiss,
   onVisible,
 }: CommitNarrationCaptionProps) {
   const rootRef = useRef<HTMLElement>(null)
   const { locale } = useI18n()
   const copy = narrationCopy[locale]
-  const canCancel =
+  const canDismiss =
     presentation.status !== "canceled" && presentation.status !== "unavailable"
   const emptyMessage =
     presentation.status === "preparing"
@@ -135,10 +135,10 @@ export function CommitNarrationCaption({
           <Volume2Icon aria-hidden="true" />
           {copy.speechStatuses[presentation.speechStatus]}
         </Badge>
-        {canCancel ? (
+        {canDismiss ? (
           <Button
             aria-label={copy.cancelPresentation}
-            onClick={onCancel}
+            onClick={onDismiss}
             size="icon-xs"
             type="button"
             variant="ghost"

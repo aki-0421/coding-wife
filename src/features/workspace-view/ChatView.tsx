@@ -395,7 +395,7 @@ export function ChatView({
         {presentation ? (
           <div className="absolute inset-x-md bottom-[154px] z-30 hidden max-[840px]:block">
             <CommitNarrationCaption
-              onCancel={() => void narrationController.cancelPresentation()}
+              onDismiss={() => void narrationController.dismissPresentation()}
               onVisible={narrationController.acknowledgeCaptionVisible}
               presentation={presentation}
             />

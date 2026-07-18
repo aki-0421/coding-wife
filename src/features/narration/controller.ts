@@ -306,7 +306,7 @@ export class NarrationController {
       this.#snapshot.scope !== null &&
       this.#snapshot.presentation?.status !== "canceled"
     ) {
-      await this.cancelPresentation("workspace_switch")
+      await this.dismissPresentation("workspace_switch")
     }
     try {
       await this.gateway.setScope({
@@ -412,13 +412,13 @@ export class NarrationController {
   ): Promise<boolean> {
     if (this.#snapshot.presentation !== null) {
       if (!sameSourceKey(this.#snapshot.presentation.key, key)) {
-        await this.cancelPresentation("explicit_cancel")
+        await this.dismissPresentation("explicit_cancel")
       } else {
         await this.cancelSpeech("explicit_cancel")
       }
     }
     const prepared = this.#prepared.get(commitNarrationSourceKey(key))
-    if (prepared === undefined) return false
+    if (prepared === undefined || prepared.status === "canceled") return false
     const scope = this.#snapshot.scope
     if (scope === null) {
       if (
@@ -511,7 +511,23 @@ export class NarrationController {
           presentationGeneration: this.#presentationGeneration,
           status: "canceled",
           speechStatus: "idle",
+          errorCode: "NARRATION-PRESENTATION-CANCELED",
         },
+      }
+      this.emit()
+    }
+    await this.cancelSpeech(reason)
+  }
+
+  public async dismissPresentation(
+    reason: NarrationCancelReason = "explicit_cancel",
+  ): Promise<void> {
+    this.clearCaptionSpeechGate()
+    if (this.#snapshot.presentation !== null) {
+      this.#presentationGeneration++
+      this.#snapshot = {
+        ...this.#snapshot,
+        presentation: null,
       }
       this.emit()
     }

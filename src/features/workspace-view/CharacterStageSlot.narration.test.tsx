@@ -110,7 +110,7 @@ function renderStage({
 }
 
 describe("CharacterStageSlot narration", () => {
-  it("keeps background chunks hidden until activation, then closes both channels", async () => {
+  it("dismisses both channels while preserving cached caption replay", async () => {
     const user = userEvent.setup()
     const gateway = new DemoNarrationGateway()
     const controller = new NarrationController(gateway)
@@ -144,7 +144,14 @@ describe("CharacterStageSlot narration", () => {
     await waitFor(() =>
       expect(screen.queryByLabelText("コミットの説明")).not.toBeInTheDocument(),
     )
-    expect(controller.getSnapshot().presentation?.status).toBe("canceled")
+    expect(controller.getSnapshot().presentation).toBeNull()
+
+    await act(() => controller.activatePresentation(key))
+    expect(await screen.findByText("コミットの要点です。")).toBeVisible()
+    expect(controller.getSnapshot().presentation).toMatchObject({
+      status: "streaming",
+      chunks: ["コミットの要点です。"],
+    })
   })
 
   it("routes the companion mute control through persisted narration settings", async () => {
