@@ -1,10 +1,11 @@
 ---
 title: "APP デスクトップシェル要件定義"
-description: "Coding Wifeの単一Tauriウィンドウ、言語、アクセシビリティ、ライフサイクル、信頼境界を定義する。"
+description: "Coding Wifeの単一Tauriウィンドウ、言語、アクセシビリティ、ライフサイクル、信頼境界、macOS配布物を定義する。"
 updated: 2026-07-18
 read_when:
   - "デスクトップシェル、共通ナビゲーション、言語、アクセシビリティを実装するとき。"
   - "TauriのCapability、CSP、終了、復旧の契約を確認するとき。"
+  - "macOSの.app・DMG配布物、release手順、diff hygieneを変更するとき。"
 ---
 
 # デスクトップシェル 要件定義
@@ -28,6 +29,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 一つの作業面を提供する | macOSで単一main windowが起動し、S-001〜S-004へ移動できる |
 | ローカル権限を限定する | 許可された目的別操作だけがRust境界を通り、任意shell・任意filesystem操作をWebViewから実行できない |
 | 作業状態を保護する | close、crash、再起動後に未完了処理を再実行せず、安全な回復概要を表示する |
+| 審査用macOS配布物を再現する | Finder自動化に依存せず、検証済み`.app`とread-only DMGを明示commandで生成できる |
 
 ## スコープ
 
@@ -40,6 +42,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 言語 | 日本語・英語の初期選択、即時切替、永続化 |
 | Accessibility | keyboard、focus、contrast、200% text zoom、reduced motion、screen reader |
 | Trust boundary | typed command、最小Capability、CSP、secret redaction |
+| macOS release | Apple Silicon用`.app`、Finder非依存DMG、artifact検証、diff hygiene |
 
 ### 含めない
 
@@ -48,6 +51,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | Windows / Linux配布 | Build Week MVPは検証済みmacOS artifactへ集中する | 将来のplatform validation |
 | 複数window | demoの単一作業面と状態一貫性を優先する | 将来検討 |
 | 自動update | 署名・配布基盤を今回のMVPに含めない | 将来のrelease要件 |
+| Developer ID署名・Apple公証 | ハッカソンMVPはローカルで再現する未署名配布物に限定し、外部配布の信頼連鎖を別gateとする | [macOS release packaging調査](../research/macos-release-packaging.md) |
 | 内蔵terminal | 任意shellをWebViewへ公開しない | [Codex main session](codex-main-session.md)のread-only tool event |
 | light theme | Figma node 8:2のdark restrained systemを正本とする | [DESIGN.md](../../DESIGN.md) |
 
@@ -58,6 +62,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | ローカル利用者 | macOSへログインしてアプリを操作する本人 | 画面移動、設定、許可されたnative操作、終了 | OS権限または入力条件を満たさない操作を実行せず、理由と回復操作を表示する |
 | React WebView | 表示と入力を担当する非信頼境界 | allowlist済みtyped commandの呼び出し | 未登録command、scope外path、無効payloadをRust側で拒否する |
 | Rust core | OS、process、Git、DB、assetの信頼境界 | 検証済み入力に対する目的別処理 | 失敗を構造化errorとして返し、secretとabsolute private pathを表示用payloadから除く |
+| Release maintainer / CI | リポジトリ所有の手順でmacOS artifactを作る実行者 | 検証済み`.app`からDMGを作る、明示指定でartifactを置換する、diff hygieneを検査する | 不正引数・不完全入力・既存出力への暗黙上書きは処理開始前に拒否する |
 
 ## 機能要件
 
@@ -102,12 +107,24 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-071` | アプリは基準端末で作業面を短時間に表示する | Apple Silicon・16GB RAM・release build・既存workspace 20件の条件で、process開始からskeletonを持つ操作可能なshell表示までのp95が3,000ms以下になる。workspace Git再検証はsetupをblockせず非同期で開始し、各processを期限内に終了する | Approved | 非該当 |
 | `APP-F-072` | UIは通常操作へ短時間に反応する | tab、workspace、settings toggleの入力からvisual state更新までのp95が100ms以下になり、測定中のsampleを100回以上記録する | Approved | 非該当 |
 
+### macOS release・差分品質
+
+| 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
+|---|---|---|---|---|
+| `APP-F-073` | Release maintainerはFinder自動化なしでmacOS DMGを作れる | macOS 14以降で`pnpm release:macos`を実行するとTauriが`.app`だけをbundleし、明示DMG commandがその`.app`と`/Applications`へのsymlinkの2entryだけを持つread-only DMGを生成する。実行中にFinder、AppleScript、`osascript`を起動しない | Approved | 非該当 |
+| `APP-F-074` | DMG生成は不完全な出力を公開しない | missing/invalid `.app`、不正なoutput・volume、明示`--overwrite`なしの既存出力、copy/create/convert/mount/verify失敗で非0になり、既存artifactを検証完了前に置換せず、partial image・mount・一時directoryを残さない。失敗出力にinput/output/tempのabsolute pathを含めない | Approved | 非該当 |
+| `APP-F-075` | Contributorはbyte-exact third-party noticeを改変せず差分品質を検査できる | `pnpm check:diff`がbaseからHEAD、staged、unstagedの`git diff --check`相当を検査し、`src-tauri/resources/characters/builtin-hiyori/NOTICE.txt`だけをbyte-exact artifactとして除外する。他pathのtrailing whitespaceは非0にし、NOTICE自体のbyteは検査前後で一致する | Approved | 非該当 |
+
 ## 入力項目要件
 
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
 |---|---|---|---|---|---|
 | 表示 | 言語 | OS localeから決定 | 必須 | `ja` / `en`の2値 | 保存に失敗した場合は現在言語を維持し、再試行を表示する |
 | 表示 | reduced motion | `system` | 必須 | `system` / `on` / `off` | 不正値は`system`へ戻し、診断へ記録する |
+| macOS release | app path | Tauri release bundleの`Coding Wife.app` | 必須 | 存在する非symlinkの`.app` directory。`Contents/Info.plist`を持つ | 出力を作らず非0で終了する |
+| macOS release | output path | `src-tauri/target/release/bundle/dmg/Coding-Wife.dmg` | 必須 | `.dmg`で終わる。symlinkとdirectoryは拒否する | 既存artifactを変更せず非0で終了する |
+| macOS release | volume name | `Coding Wife` | 必須 | 1〜63 byteのASCII alphanumeric、space、`.`、`_`、`-` | 出力を作らず非0で終了する |
+| macOS release | overwrite | `false` | 必須 | `--overwrite`の有無だけ。有効時も検証完了まで既存artifactを保持する | 明示されない場合は既存artifactを変更せず非0で終了する |
 
 ## デスクトップ固有要件
 
@@ -127,6 +144,8 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 通知 | app内statusとtoastだけ。OS通知はMVP非対象 | `APP-F-055` |
 | Capability・認可 | window、dialog、process、filesystemのscopeを目的別に最小化 | `APP-F-067`, `APP-F-068` |
 | アップデート・互換性 | 自動updateは非該当。DB migrationはforward-onlyかつ失敗時rollback | `APP-F-065` |
+| 配布物生成 | Tauriは`.app`だけをbundleし、repository scriptが`hdiutil`でread-only DMGを作成・mount検証・公開する | `APP-F-073`, `APP-F-074` |
+| 差分品質 | byte-exact Hiyori NOTICEだけをwhitespace検査から除外し、他のrepository-owned textは除外しない | `APP-F-075` |
 
 ## 画面・UI
 
@@ -137,6 +156,8 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `S-003` | セッション証拠 | `APP-F-055`, `APP-F-059`〜`APP-F-062` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
 | `S-004` | 設定・診断 | `APP-F-055`, `APP-F-057`〜`APP-F-072` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
+`APP-F-073`〜`APP-F-075`はrelease/CI境界のcommand要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
+
 ## 非機能要件
 
 | 領域 | 要件 |
@@ -145,6 +166,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 権限 | Tauri Capabilityはmain windowと目的別commandへ限定し、任意shell/fs APIを公開しない |
 | プライバシー | telemetryはMVPで送信しない。診断exportを実装する場合も利用者の明示操作前に外部送信しない |
 | 監査・ログ | app lifecycle、migration、redacted error codeを記録し、secretとraw reasoningを記録しない |
+| 配布信頼性 | DMGはFinder/AppleEventに依存せず、read-only mount検証を通ったcandidateだけをfinal pathへ置く |
 | 性能 | 起動p95 3,000ms、通常操作p95 100ms、最低window 960×640 |
 | 信頼性・復旧 | 未完了turnを自動再送せず、DB transactionは終了時commitまたはrollbackする |
 | アクセシビリティ | WCAG 2.2 AA、keyboard-only、visible focus、200% text zoom、reduced motionを満たす |
@@ -156,6 +178,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 |---|---|---|---|
 | Tauri v2 | React + TypeScript + Vite assetを単一WebViewへbundleする | 解決済み（採用決定） | 非該当 |
 | macOS 14以降 | Build Week MVPの検証対象 | 解決済み（MVP範囲） | 他OSは対応済みと表示しない |
+| macOS `hdiutil` / `ditto` | `.app`を保持したDMG作成とread-only mount検証 | 解決済み（macOS 14+標準tool） | 不在または失敗時はartifactを公開しない |
 | PRODUCT / DESIGN | product registerとFigma tokenの正本 | 解決済み | 非該当 |
 | 画面詳細仕様 | S-001〜S-004とdesktop commonを相互参照する | 解決済み（同時レビュー） | 実装は承認済み画面仕様に従う |
 
@@ -174,6 +197,8 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | [DESIGN.md](../../DESIGN.md) | Figma node 8:2のgrid、token、interaction rule |
 | [Tauriアーキテクチャ調査](../research/08-tauri-architecture.md) | WebView/Rust境界とlifecycle |
 | [セキュリティ・プライバシー調査](../research/09-security-privacy.md) | Capability、CSP、secret、recovery |
+| [macOS release packaging調査](../research/macos-release-packaging.md) | Finder非依存DMG、read-only検証、Gatekeeperと未署名配布の境界 |
+| [Testing instructions](../testing.md) | release command、synthetic smoke、install/launch検証の実行手順 |
 
 ## レビュー・合意
 
