@@ -98,7 +98,9 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     if (workspaceId === null) throw new Error("active fixture workspace")
 
     expect(adapter.codexSnapshot()).toMatchObject({
+      activeWorkspaceId: workspaceId,
       connected: true,
+      generation: fixture.thread.generation,
       phase: "ready",
       readiness: { fastAvailable: true, maxAvailable: true },
     })

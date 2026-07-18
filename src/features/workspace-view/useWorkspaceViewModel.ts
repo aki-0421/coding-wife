@@ -67,6 +67,8 @@ function fallbackContextSnapshot(
 }
 
 const disconnectedCodexState: WorkspaceCodexState = {
+  activeWorkspaceId: null,
+  generation: null,
   phase: "idle",
   connected: false,
   readiness: {

@@ -256,6 +256,54 @@ describe("EvidenceView", () => {
     })
   })
 
+  it("ignores explanation state from another locale or commit selection", async () => {
+    const staleLocale = createExplanationController({
+      schemaVersion: 1,
+      workspaceId: "workspace-demo",
+      workspaceGeneration: 1,
+      commitEvidenceId: currentCommitEvidenceId,
+      requestId: "stale-locale",
+      locale: "ja",
+      selectionVersion: 1,
+      status: "generated",
+      trigger: "auto_verified_commit",
+      retryable: false,
+      presentationAvailable: true,
+      errorCode: null,
+      updatedAt: "2026-07-18T09:00:00.000Z",
+    })
+    const localeView = renderEvidence({
+      explanationController: staleLocale.controller,
+      locale: "en",
+    })
+    expect(
+      await screen.findByRole("button", { name: "Explain this commit" }),
+    ).toBeVisible()
+    expect(screen.queryByText("Explanation ready")).not.toBeInTheDocument()
+    localeView.unmount()
+
+    const staleSelection = createExplanationController({
+      schemaVersion: 1,
+      workspaceId: "workspace-demo",
+      workspaceGeneration: 1,
+      commitEvidenceId: currentCommitEvidenceId,
+      requestId: "stale-selection",
+      locale: "en",
+      selectionVersion: 2,
+      status: "generated",
+      trigger: "auto_verified_commit",
+      retryable: false,
+      presentationAvailable: true,
+      errorCode: null,
+      updatedAt: "2026-07-18T09:00:00.000Z",
+    })
+    renderEvidence({ explanationController: staleSelection.controller })
+    expect(
+      await screen.findByRole("button", { name: "Explain this commit" }),
+    ).toBeVisible()
+    expect(screen.queryByText("Explanation ready")).not.toBeInTheDocument()
+  })
+
   it("presents a generated explanation and retries a failed one", async () => {
     const user = userEvent.setup()
     const generated = createExplanationController({

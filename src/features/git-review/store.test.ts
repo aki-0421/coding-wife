@@ -151,6 +151,49 @@ describe("GitReviewStore", () => {
     )
   })
 
+  it("rejects cancel and presentation actions from a stale selection version", async () => {
+    const cancel = vi.fn<CommitExplanationController["cancel"]>()
+    const present = vi.fn<CommitExplanationController["present"]>()
+    const controller: CommitExplanationController = {
+      request: vi.fn(),
+      cancel,
+      present,
+      getState: () => null,
+      subscribe: () => () => {},
+    }
+    const store = new GitReviewStore(
+      "workspace-demo",
+      new RecordingTransport(),
+      { commitExplanationController: controller },
+    )
+    await store.activate()
+    const commitEvidenceId = store.snapshot().selectedCommitEvidenceId
+    if (commitEvidenceId === null) throw new Error("Demo commit is missing")
+    const stale: CommitExplanationControllerStateV1 = {
+      schemaVersion: 1,
+      workspaceId: "workspace-demo",
+      workspaceGeneration: 1,
+      commitEvidenceId,
+      requestId: "stale-selection",
+      locale: "en",
+      selectionVersion: store.snapshot().selectionVersion + 1,
+      status: "running",
+      trigger: "user_request",
+      retryable: false,
+      presentationAvailable: false,
+      errorCode: null,
+      updatedAt: "2026-07-18T09:00:00.000Z",
+    }
+
+    await store.cancelExplanation(stale)
+    await store.presentExplanation(
+      { ...stale, status: "generated", presentationAvailable: true },
+      "show",
+    )
+    expect(cancel).not.toHaveBeenCalled()
+    expect(present).not.toHaveBeenCalled()
+  })
+
   it("discards a presentation failure after the commit selection changes", async () => {
     let rejectPresentation: ((error: Error) => void) | undefined
     const presentation = new Promise<void>((_resolve, reject) => {

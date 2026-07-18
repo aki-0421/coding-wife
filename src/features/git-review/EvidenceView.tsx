@@ -67,6 +67,8 @@ function useCommitExplanationControllerState(
   workspaceId: string,
   workspaceGeneration: number,
   commitEvidenceId: string | null,
+  locale: SupportedLocale,
+  selectionVersion: number,
 ): CommitExplanationControllerStateV1 | null {
   const subscribe = useCallback(
     (listener: () => void) => controller?.subscribe(listener) ?? (() => {}),
@@ -81,11 +83,26 @@ function useCommitExplanationControllerState(
     )
     if (state === null) return null
     try {
-      return parseCommitExplanationControllerState(state)
+      const parsed = parseCommitExplanationControllerState(state)
+      if (
+        (parsed.locale !== null && parsed.locale !== locale) ||
+        (parsed.selectionVersion !== null &&
+          parsed.selectionVersion !== selectionVersion)
+      ) {
+        return null
+      }
+      return parsed
     } catch {
       return null
     }
-  }, [commitEvidenceId, controller, workspaceGeneration, workspaceId])
+  }, [
+    commitEvidenceId,
+    controller,
+    locale,
+    selectionVersion,
+    workspaceGeneration,
+    workspaceId,
+  ])
 
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
@@ -164,6 +181,8 @@ export function EvidenceView({
     workspaceId,
     workspaceGeneration,
     review.selectedCommitEvidenceId,
+    locale,
+    review.selectionVersion,
   )
 
   useEffect(() => {

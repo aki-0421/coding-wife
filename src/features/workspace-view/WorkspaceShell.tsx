@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircleIcon, InfoIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -22,7 +22,12 @@ import {
   useCharacterRuntimeStatus,
   useCharacterRuntimeStatusStore,
 } from "@/features/character"
-import { EvidenceView, type GitReviewTransport } from "@/features/git-review"
+import {
+  EvidenceView,
+  type GitReviewTransport,
+  type ScopedCommitExplanationController,
+} from "@/features/git-review"
+import type { NarrationController } from "@/features/narration"
 import { ChatView } from "@/features/workspace-view/ChatView"
 import { ContextView } from "@/features/workspace-view/ContextView"
 import { getWorkspaceCopy } from "@/features/workspace-view/copy"
@@ -38,7 +43,7 @@ import type {
 } from "@/features/workspace-view/types"
 import { useEditableWorkspaceContext } from "@/features/workspace-view/useEditableWorkspaceContext"
 import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceViewModel"
-import type { CommitExplanationController } from "@/lib/contracts/git-review"
+import { gitReviewSchemaVersion } from "@/lib/contracts/git-review"
 
 const tabOrder: readonly WorkspaceTab[] = [
   "chat",
@@ -51,7 +56,9 @@ export interface WorkspaceShellProps {
   readonly adapter?: WorkspaceViewAdapter | undefined
   readonly characterRenderer?: CharacterStageRenderer | undefined
   readonly gitReviewTransport: GitReviewTransport
-  readonly commitExplanationController?: CommitExplanationController | undefined
+  readonly commitExplanationController?:
+    ScopedCommitExplanationController | undefined
+  readonly narrationController: NarrationController
 }
 
 function isWorkspaceTab(value: string): value is WorkspaceTab {
@@ -71,6 +78,7 @@ export function WorkspaceShell({
   characterRenderer,
   gitReviewTransport,
   commitExplanationController,
+  narrationController,
 }: WorkspaceShellProps) {
   const { locale } = useI18n()
   const copy = getWorkspaceCopy(locale)
@@ -114,6 +122,73 @@ export function WorkspaceShell({
     view.codex.phase === "stopping"
   const activeTab = view.activeTab
   const registerAttachmentPaths = view.registerAttachmentPaths
+  const selectedWorkspaceId = view.selectedWorkspace?.id ?? null
+  const codexGeneration = view.codex.generation
+  const workspaceGeneration =
+    selectedWorkspaceId !== null &&
+    view.codex.activeWorkspaceId === selectedWorkspaceId &&
+    Number.isSafeInteger(codexGeneration) &&
+    Number(codexGeneration) > 0
+      ? codexGeneration
+      : null
+  const previousSelectedWorkspaceId = useRef<string | null>(null)
+  const previousExplanationScope = useRef<{
+    readonly workspaceId: string
+    readonly workspaceGeneration: number
+    readonly locale: typeof locale
+  } | null>(null)
+
+  useEffect(() => {
+    const previous = previousSelectedWorkspaceId.current
+    previousSelectedWorkspaceId.current = selectedWorkspaceId
+    if (previous !== null && previous !== selectedWorkspaceId) {
+      void narrationController.dismissPresentation("workspace_switch")
+    }
+  }, [narrationController, selectedWorkspaceId])
+
+  useEffect(() => {
+    if (selectedWorkspaceId === null || workspaceGeneration === null) return
+    const scope = {
+      workspaceId: selectedWorkspaceId,
+      workspaceGeneration,
+      locale,
+    }
+    const previous = previousExplanationScope.current
+    previousExplanationScope.current = scope
+    if (
+      previous?.workspaceId === scope.workspaceId &&
+      previous.workspaceGeneration === scope.workspaceGeneration &&
+      previous.locale !== scope.locale
+    ) {
+      void narrationController.dismissPresentation("workspace_switch")
+    }
+    void narrationController.setScope({
+      workspaceId: scope.workspaceId,
+      generation: scope.workspaceGeneration,
+    })
+    void commitExplanationController
+      ?.setScope({
+        schemaVersion: gitReviewSchemaVersion,
+        workspaceId: scope.workspaceId,
+        workspaceGeneration: scope.workspaceGeneration,
+        locale: scope.locale,
+      })
+      .catch(() => undefined)
+  }, [
+    commitExplanationController,
+    locale,
+    narrationController,
+    selectedWorkspaceId,
+    workspaceGeneration,
+  ])
+
+  const stopTurn = useCallback(async () => {
+    const [mainTurn] = await Promise.allSettled([
+      view.stopTurn(),
+      narrationController.dismissPresentation("turn_stop"),
+    ])
+    return mainTurn.status === "fulfilled" ? mainTurn.value : false
+  }, [narrationController, view])
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return
@@ -406,7 +481,7 @@ export function WorkspaceShell({
               characterRuntimeStore.retry(selectedWorkspace.id)
             }}
             onSend={view.sendTurn}
-            onStop={view.stopTurn}
+            onStop={stopTurn}
             reducedMotion={reducedMotion}
             readiness={view.codex.readiness}
             renderer={characterRenderer}
@@ -426,11 +501,16 @@ export function WorkspaceShell({
           value="commit"
         >
           <EvidenceView
-            active={view.activeTab === "commit"}
+            active={
+              view.activeTab === "commit" &&
+              (gitReviewTransport.kind === "demo" ||
+                workspaceGeneration !== null)
+            }
             commitExplanationController={commitExplanationController}
             locale={locale}
             onBackToChat={() => view.setActiveTab("chat")}
             transport={gitReviewTransport}
+            workspaceGeneration={workspaceGeneration ?? 1}
             workspaceId={selectedWorkspace.id}
           />
         </TabsContent>

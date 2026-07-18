@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { AppProviders } from "@/app/AppProviders"
 import {
@@ -13,14 +13,16 @@ import {
 } from "@/features/localization"
 import {
   createNarrationGateway,
+  NarrationController,
   NarrationProvider,
   type CommitNarrationConsumerPort,
-  type NarrationController,
   type NarrationGateway,
 } from "@/features/narration"
 import {
   DemoGitReviewTransport,
+  TauriCommitExplanationAdapter,
   TauriGitReviewTransport,
+  type CommitExplanationAppRuntime,
   type GitReviewTransport,
 } from "@/features/git-review"
 import { createAppTransport, type AppTransport } from "@/features/runtime"
@@ -34,6 +36,7 @@ import {
 export interface AppProps {
   readonly characterLibraryGateway?: CharacterLibraryGateway
   readonly characterRenderer?: CharacterStageRenderer
+  readonly commitExplanationRuntime?: CommitExplanationAppRuntime | null
   readonly localeStore?: LocalePreferenceStore
   readonly narrationController?: NarrationController
   readonly narrationGateway?: NarrationGateway
@@ -54,6 +57,7 @@ function interactiveDemoEnabled(transport: AppTransport): boolean {
 export function App({
   characterLibraryGateway,
   characterRenderer,
+  commitExplanationRuntime,
   localeStore,
   narrationController,
   narrationGateway,
@@ -99,6 +103,44 @@ export function App({
       ),
     [activeTransport.kind],
   )
+  const activeNarrationGateway = narrationGateway ?? fallbackNarrationGateway
+  const fallbackNarrationController = useMemo(
+    () => new NarrationController(activeNarrationGateway),
+    [activeNarrationGateway],
+  )
+  const activeNarrationController =
+    narrationController ?? fallbackNarrationController
+  const fallbackCommitExplanationRuntime = useMemo(
+    () =>
+      activeTransport.kind === "tauri"
+        ? new TauriCommitExplanationAdapter()
+        : null,
+    [activeTransport.kind],
+  )
+  const activeCommitExplanationRuntime =
+    commitExplanationRuntime === undefined
+      ? fallbackCommitExplanationRuntime
+      : commitExplanationRuntime
+  const activeNarrationSource =
+    narrationSource === undefined
+      ? (activeCommitExplanationRuntime?.narrationSource ?? null)
+      : narrationSource
+
+  useEffect(() => {
+    if (activeCommitExplanationRuntime === null) return
+    activeCommitExplanationRuntime.setPresentationActivator((key) =>
+      activeNarrationController.activatePresentation(key),
+    )
+    return () => {
+      activeCommitExplanationRuntime.setPresentationActivator(null)
+    }
+  }, [activeCommitExplanationRuntime, activeNarrationController])
+
+  useEffect(() => {
+    if (activeCommitExplanationRuntime === null) return
+    void activeCommitExplanationRuntime.start().catch(() => undefined)
+    return () => activeCommitExplanationRuntime.dispose()
+  }, [activeCommitExplanationRuntime])
 
   return (
     <AppProviders
@@ -109,17 +151,19 @@ export function App({
       transport={activeTransport}
     >
       <NarrationProvider
-        {...(narrationController === undefined
-          ? {}
-          : { controller: narrationController })}
-        gateway={narrationGateway ?? fallbackNarrationGateway}
-        {...(narrationSource === undefined ? {} : { source: narrationSource })}
+        controller={activeNarrationController}
+        gateway={activeNarrationGateway}
+        source={activeNarrationSource}
       >
         <CharacterRuntimeStatusProvider rendererKind={characterRendererKind}>
           <WorkspaceShell
             adapter={workspaceAdapter ?? fallbackWorkspaceAdapter}
             characterRenderer={activeCharacterRenderer}
+            commitExplanationController={
+              activeCommitExplanationRuntime ?? undefined
+            }
             gitReviewTransport={gitReviewTransport}
+            narrationController={activeNarrationController}
           />
         </CharacterRuntimeStatusProvider>
       </NarrationProvider>

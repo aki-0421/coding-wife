@@ -275,6 +275,8 @@ describe("TauriCommitExplanationAdapter", () => {
 
   it("publishes exact presentation events once and drops stale selection, locale, and malformed events", async () => {
     const { adapter, events } = adapterHarness()
+    const activatePresentation = vi.fn(() => Promise.resolve(true))
+    adapter.setPresentationActivator(activatePresentation)
     await adapter.start()
     await setJapaneseScope(adapter)
     events.emit(commitExplanationEventChannels.state, state())
@@ -323,6 +325,14 @@ describe("TauriCommitExplanationAdapter", () => {
         errorCode: null,
       }),
     ])
+    expect(activatePresentation).toHaveBeenCalledOnce()
+    expect(activatePresentation).toHaveBeenCalledWith({
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      commitSha: sha,
+      requestId: "request-ja-2",
+      locale: "ja",
+    })
 
     events.emit(
       commitExplanationEventChannels.presentation,
@@ -390,6 +400,7 @@ describe("TauriCommitExplanationAdapter", () => {
       }),
       expect.objectContaining({ kind: "terminal", status: "completed" }),
     ])
+    expect(activatePresentation).toHaveBeenCalledTimes(2)
   })
 
   it("deduplicates the presentation event emitted during the matching present response", async () => {

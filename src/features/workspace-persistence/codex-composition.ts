@@ -23,6 +23,8 @@ function publicCodexState(
   snapshot: CodexWorkspaceSessionSnapshot,
 ): WorkspaceCodexState {
   return {
+    activeWorkspaceId: snapshot.activeWorkspaceId,
+    generation: snapshot.generation,
     phase: snapshot.phase,
     connected: snapshot.connected,
     readiness: snapshot.readiness,

@@ -90,6 +90,8 @@ export type WorkspaceTimelineItem =
   PersistedWorkspaceTimelineItem | CodexSemanticTimelineEvent
 
 export interface WorkspaceCodexState {
+  readonly activeWorkspaceId: string | null
+  readonly generation: number | null
   readonly phase: CodexWorkspacePhase
   readonly connected: boolean
   readonly readiness: CodexReadiness

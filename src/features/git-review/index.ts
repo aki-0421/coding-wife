@@ -2,6 +2,8 @@ export { DemoGitReviewTransport } from "@/features/git-review/demo-transport"
 export {
   CommitExplanationBoundaryError,
   TauriCommitExplanationAdapter,
+  type CommitExplanationAppRuntime,
+  type CommitExplanationPresentationActivator,
   type ScopedCommitExplanationController,
 } from "@/features/git-review/commit-explanation-adapter"
 export {

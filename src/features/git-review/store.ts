@@ -472,6 +472,7 @@ export class GitReviewStore {
       state.workspaceGeneration !== this.workspaceGeneration ||
       state.commitEvidenceId !== this.current.selectedCommitEvidenceId ||
       state.requestId === null ||
+      state.selectionVersion !== this.current.selectionVersion ||
       (state.status !== "queued" && state.status !== "running")
     ) {
       return
@@ -490,7 +491,7 @@ export class GitReviewStore {
       schemaVersion: gitReviewSchemaVersion,
       requestId: state.requestId,
       workspaceGeneration: this.workspaceGeneration,
-      selectionVersion: this.current.selectionVersion,
+      selectionVersion: state.selectionVersion,
       reason: "user",
       requestedAt: this.now().toISOString(),
     })
@@ -522,6 +523,7 @@ export class GitReviewStore {
       state.workspaceGeneration !== this.workspaceGeneration ||
       state.commitEvidenceId !== this.current.selectedCommitEvidenceId ||
       state.requestId === null ||
+      state.selectionVersion !== this.current.selectionVersion ||
       !state.presentationAvailable
     ) {
       return

@@ -5,6 +5,7 @@ import {
   parseCommitNarrationConsumerEvent,
   type CommitNarrationConsumerPort,
   type CommitNarrationConsumerEventV1,
+  type CommitNarrationSourceKey,
 } from "@/features/narration/contracts"
 import {
   commitExplanationCommands,
@@ -60,6 +61,19 @@ export interface TauriCommitExplanationAdapterDependencies {
 
 export interface ScopedCommitExplanationController extends CommitExplanationController {
   setScope(scope: CommitExplanationScopeRequestedV1): Promise<void>
+}
+
+export type CommitExplanationPresentationActivator = (
+  key: CommitNarrationSourceKey,
+) => boolean | void | Promise<boolean | void>
+
+export interface CommitExplanationAppRuntime extends ScopedCommitExplanationController {
+  readonly narrationSource: CommitNarrationConsumerPort
+  start(): Promise<void>
+  dispose(): void
+  setPresentationActivator(
+    activator: CommitExplanationPresentationActivator | null,
+  ): void
 }
 
 export class CommitExplanationBoundaryError
@@ -165,7 +179,7 @@ const maximumPresentationDedupeEntries = 64
  * App-lifetime owner of the five native commit-explanation commands and two
  * dedicated event channels. It never writes to the main Codex event stream.
  */
-export class TauriCommitExplanationAdapter implements ScopedCommitExplanationController {
+export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntime {
   readonly #invoke: CommitExplanationInvoker
   readonly #listen: CommitExplanationEventListener
   readonly #states = new Map<string, CommitExplanationControllerStateV1>()
@@ -182,6 +196,7 @@ export class TauriCommitExplanationAdapter implements ScopedCommitExplanationCon
   #nativeDisposers: Array<() => void> = []
   #startPromise: Promise<void> | null = null
   #started = false
+  #presentationActivator: CommitExplanationPresentationActivator | null = null
 
   readonly narrationSource: CommitNarrationConsumerPort = {
     subscribe: (listener) => {
@@ -198,6 +213,12 @@ export class TauriCommitExplanationAdapter implements ScopedCommitExplanationCon
   readonly subscribe = (listener: StateListener): (() => void) => {
     this.#stateListeners.add(listener)
     return () => this.#stateListeners.delete(listener)
+  }
+
+  setPresentationActivator(
+    activator: CommitExplanationPresentationActivator | null,
+  ): void {
+    this.#presentationActivator = activator
   }
 
   async start(): Promise<void> {
@@ -588,6 +609,21 @@ export class TauriCommitExplanationAdapter implements ScopedCommitExplanationCon
         } catch {
           // A narration consumer cannot duplicate or corrupt event delivery.
         }
+      }
+    }
+    const activator = this.#presentationActivator
+    if (activator !== null) {
+      const key: CommitNarrationSourceKey = {
+        workspaceId: presentation.workspaceId,
+        workspaceGeneration: presentation.workspaceGeneration,
+        commitSha: sha,
+        requestId: presentation.requestId,
+        locale: presentation.locale,
+      }
+      try {
+        void Promise.resolve(activator(key)).catch(() => undefined)
+      } catch {
+        // Presentation activation cannot corrupt the trusted event bridge.
       }
     }
   }
