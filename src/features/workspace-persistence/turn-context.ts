@@ -2,7 +2,10 @@ import {
   parseWorkspaceTurnContextSnapshot,
   type WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
-import { unicodeScalarCount } from "@/lib/public-text"
+import {
+  hasDisallowedMultilineControl,
+  unicodeScalarCount,
+} from "@/lib/public-text"
 
 export const maximumComposedTurnScalars = 80_000
 
@@ -34,6 +37,11 @@ export function composeTurnInstruction(
     "CODING_WIFE_USER_INSTRUCTION_V1",
     instruction,
   ].join("\n")
+  if (hasDisallowedMultilineControl(composed)) {
+    throw Object.assign(new Error("WORKSPACE-CONTEXT-TURN-UNSAFE-CONTROL"), {
+      code: "WORKSPACE-CONTEXT-TURN-UNSAFE-CONTROL",
+    })
+  }
   if (unicodeScalarCount(composed) > maximumComposedTurnScalars) {
     throw Object.assign(new Error("WORKSPACE-CONTEXT-TURN-TOO-LARGE"), {
       code: "WORKSPACE-CONTEXT-TURN-TOO-LARGE",

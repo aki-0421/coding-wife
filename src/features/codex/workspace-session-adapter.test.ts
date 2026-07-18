@@ -217,6 +217,81 @@ describe("CodexWorkspaceSessionAdapter", () => {
     ).resolves.toMatchObject({ accepted: true })
   })
 
+  it("keeps the composed 80,000 scalar boundary independent from public text", async () => {
+    const exact = adapterFixture()
+    await exact.adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await expect(
+      exact.adapter.sendTurn({
+        workspaceId: "workspace-fixture",
+        text: "😀".repeat(80_000),
+        publicText: "Run it.",
+        effort: "low",
+        attachmentHandles: [],
+      }),
+    ).resolves.toMatchObject({ accepted: true })
+
+    const oversized = adapterFixture()
+    await oversized.adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await expect(
+      oversized.adapter.sendTurn({
+        workspaceId: "workspace-fixture",
+        text: "😀".repeat(80_001),
+        publicText: "Run it.",
+        effort: "low",
+        attachmentHandles: [],
+      }),
+    ).rejects.toThrow("CODEX-TURN-PREFLIGHT-BLOCKED")
+  })
+
+  it("rejects unsafe controls in public and composed turn text before transport", async () => {
+    for (const [text, publicText] of [
+      ["safe composed text", "unsafe\0instruction"],
+      ["unsafe\u0007composed text", "safe instruction"],
+      ["unsafe\rcomposed text", "safe instruction"],
+      ["unsafe\u0085composed text", "safe instruction"],
+    ] as const) {
+      const fixture = adapterFixture()
+      await fixture.adapter.activateWorkspace({
+        workspaceId: "workspace-fixture",
+        historyMode: "ready",
+      })
+      await expect(
+        fixture.adapter.sendTurn({
+          workspaceId: "workspace-fixture",
+          text,
+          publicText,
+          effort: "low",
+          attachmentHandles: [],
+        }),
+      ).rejects.toThrow("CODEX-TURN-PREFLIGHT-BLOCKED")
+      expect(
+        fixture.transport.calls.some(
+          ({ command }) => command === codexCommands.turnStart,
+        ),
+      ).toBe(false)
+    }
+
+    const normalized = adapterFixture()
+    await normalized.adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await expect(
+      normalized.adapter.sendTurn({
+        workspaceId: "workspace-fixture",
+        text: "first line\n\tsecond line",
+        effort: "low",
+        attachmentHandles: [],
+      }),
+    ).resolves.toMatchObject({ accepted: true })
+  })
+
   it("emits one authoritative terminal work-unit event for a completed owned turn", async () => {
     const recordTerminal = vi.fn()
     const { adapter, transport } = adapterFixture({

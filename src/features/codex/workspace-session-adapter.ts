@@ -7,7 +7,10 @@ import {
   type CodexPendingResponseRequest,
   type ReasoningPreset,
 } from "@/lib/contracts"
-import { unicodeScalarCount } from "@/lib/public-text"
+import {
+  hasDisallowedMultilineControl,
+  unicodeScalarCount,
+} from "@/lib/public-text"
 
 import { CodexSessionClient } from "@/features/codex/client"
 import {
@@ -338,6 +341,8 @@ export class CodexWorkspaceSessionAdapter {
         request.attachmentHandles.length === 0) ||
       unicodeScalarCount(publicText) > 32_000 ||
       unicodeScalarCount(request.text) > 80_000 ||
+      hasDisallowedMultilineControl(publicText) ||
+      hasDisallowedMultilineControl(request.text) ||
       request.attachmentHandles.length > 10 ||
       new Set(request.attachmentHandles).size !==
         request.attachmentHandles.length ||

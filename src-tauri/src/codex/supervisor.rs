@@ -47,6 +47,14 @@ pub const DOMAIN_EVENT_CHANNEL: &str = "coding-wife://domain-event";
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERRUPT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CODEX_TURN_TEXT_SCALARS: usize = 80_000;
+
+fn is_valid_main_turn_text(value: &str, has_attachments: bool) -> bool {
+    value.chars().count() <= MAX_CODEX_TURN_TEXT_SCALARS
+        && (has_attachments || !value.trim().is_empty())
+        && !value
+            .chars()
+            .any(|character| character.is_control() && character != '\n' && character != '\t')
+}
 const MAX_MODEL_PAGES: usize = 20;
 const MAX_RESTARTS: usize = 3;
 const RESTART_WINDOW: Duration = Duration::from_secs(60);
@@ -936,9 +944,7 @@ impl CodexSupervisor {
         attachment_snapshot: Option<AttachmentSnapshotLease>,
         expected_generation: Option<u64>,
     ) -> Result<TurnResponse, CodexCommandError> {
-        if request.text.contains('\0')
-            || request.text.chars().count() > MAX_CODEX_TURN_TEXT_SCALARS
-            || (request.text.trim().is_empty() && attachments.is_empty())
+        if !is_valid_main_turn_text(&request.text, !attachments.is_empty())
             || request.client_user_message_id.trim().is_empty()
             || request.client_user_message_id.len() > 128
             || request.attachment_handles.len() != attachments.len()
@@ -2520,6 +2526,25 @@ mod tests {
             attachment_handles: vec![],
         };
         assert_eq!(turn.effort.as_wire(), "low");
+    }
+
+    #[test]
+    fn main_turn_text_uses_unicode_scalars_and_normalized_multiline_controls() {
+        assert!(is_valid_main_turn_text(
+            &"😀".repeat(MAX_CODEX_TURN_TEXT_SCALARS),
+            false
+        ));
+        assert!(!is_valid_main_turn_text(
+            &"😀".repeat(MAX_CODEX_TURN_TEXT_SCALARS + 1),
+            false
+        ));
+        assert!(is_valid_main_turn_text("first line\n\tsecond line", false));
+        for control in ['\0', '\u{0007}', '\r', '\u{0085}'] {
+            assert!(!is_valid_main_turn_text(
+                &format!("unsafe{control}instruction"),
+                false
+            ));
+        }
     }
 
     #[test]

@@ -48,4 +48,16 @@ describe("composeTurnInstruction", () => {
       composeTurnInstruction("x".repeat(maximumComposedTurnScalars), snapshot),
     ).toThrow("WORKSPACE-CONTEXT-TURN-TOO-LARGE")
   })
+
+  it("rejects unsafe controls while preserving normalized multiline input", () => {
+    expect(() =>
+      composeTurnInstruction("first line\n\tsecond line", snapshot),
+    ).not.toThrow()
+
+    for (const control of ["\0", "\u0007", "\r", "\u0085"]) {
+      expect(() =>
+        composeTurnInstruction(`unsafe${control}instruction`, snapshot),
+      ).toThrow("WORKSPACE-CONTEXT-TURN-UNSAFE-CONTROL")
+    }
+  })
 })

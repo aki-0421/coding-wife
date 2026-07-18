@@ -14,6 +14,15 @@ export function unicodeScalarCount(value: string): number {
   return Array.from(value).length
 }
 
+export function hasDisallowedMultilineControl(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0
+    if (code === 10 || code === 9) continue
+    if (code === 13 || code < 32 || (code >= 127 && code <= 159)) return true
+  }
+  return false
+}
+
 export function containsPrivateMaterial(value: string): boolean {
   return privateMaterialPatterns.some((pattern) => pattern.test(value))
 }
@@ -32,15 +41,9 @@ export function isPublicText(
     return false
   }
 
-  for (const character of value) {
-    const code = character.codePointAt(0) ?? 0
-    if (code === 10 || code === 9) {
-      if (options.multiline) continue
-      return false
-    }
-    if (code === 13 || code < 32 || (code >= 127 && code <= 159)) {
-      return false
-    }
+  if (hasDisallowedMultilineControl(value)) return false
+  if (!options.multiline && (value.includes("\n") || value.includes("\t"))) {
+    return false
   }
   return true
 }
