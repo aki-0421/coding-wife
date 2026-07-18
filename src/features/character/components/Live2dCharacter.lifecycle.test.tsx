@@ -256,6 +256,42 @@ describe("Live2dCharacter lifecycle policy", () => {
     expect(host).toHaveAttribute("data-character-policy", "reduced")
   })
 
+  it.each([
+    ["en", "The character is unavailable. Work can continue."],
+    ["ja", "キャラクターを表示できません。作業は継続できます。"],
+  ] as const)(
+    "uses an accessible %s text fallback while a reduced-motion static frame is unavailable",
+    async (locale, fallback) => {
+      const { container } = render(
+        <Live2dCharacter
+          locale={locale}
+          motionPolicy="reduced"
+          state="idle"
+          stateGeneration={1}
+        />,
+      )
+      const host = container.firstElementChild as HTMLDivElement
+
+      await waitFor(() =>
+        expect(host).toHaveAttribute(
+          "data-character-reduced-presentation",
+          "text_only",
+        ),
+      )
+      expect(
+        container.querySelector(
+          '[data-character-static-preview="trusted-frame"]',
+        ),
+      ).not.toBeInTheDocument()
+      expect(
+        container.querySelector('[data-character-canvas="live2d"]'),
+      ).toHaveAttribute("hidden")
+      expect(container.querySelector('[role="status"]')).toHaveTextContent(
+        fallback,
+      )
+    },
+  )
+
   it("does not clear an explicit hidden policy during lifecycle recovery", async () => {
     const { container, rerender } = renderCharacter("hidden")
     const host = container.firstElementChild as HTMLDivElement

@@ -12,15 +12,23 @@ import {
 } from "@/components/ui/native-select"
 import {
   semanticStates,
+  type CharacterLibrarySnapshot,
+  type CharacterPackView,
   type SemanticAssignmentsV1,
   type SemanticCueSelection,
+  type SemanticMappingV1,
   type SemanticState,
 } from "@/features/character/library/contracts"
 import {
+  type CharacterLibraryState,
+  type CharacterLibraryStore,
   useCharacterLibrary,
   useCharacterLibraryStore,
 } from "@/features/character/library/provider"
-import { getSemanticMappingCopy } from "@/features/character/library/semantic-mapping-copy"
+import {
+  getSemanticMappingCopy,
+  type SemanticMappingCopy,
+} from "@/features/character/library/semantic-mapping-copy"
 import { neutralSemanticAssignments } from "@/features/character/semantic-mapping"
 import { useI18n } from "@/features/localization"
 
@@ -69,15 +77,53 @@ export function SemanticMappingSettings({
   const selectedPack = snapshot?.packs.find(
     (pack) => pack.packId === snapshot.selectedPackId,
   )
-  const [draft, setDraft] = useState<SemanticAssignmentsV1>(() =>
-    neutralSemanticAssignments(),
+  if (snapshot === null || mapping === null || selectedPack === undefined) {
+    return null
+  }
+
+  return (
+    <SemanticMappingEditor
+      copy={copy}
+      initialAssignments={mapping.assignments}
+      key={`${workspaceId}:${selectedPack.packId}:${selectedPack.manifestHash}`}
+      library={library}
+      mapping={mapping}
+      reducedMotion={reducedMotion}
+      selectedPack={selectedPack}
+      snapshot={snapshot}
+      store={store}
+      workspaceId={workspaceId}
+    />
+  )
+}
+
+function SemanticMappingEditor({
+  copy,
+  initialAssignments,
+  library,
+  mapping,
+  reducedMotion,
+  selectedPack,
+  snapshot,
+  store,
+  workspaceId,
+}: {
+  readonly copy: SemanticMappingCopy
+  readonly initialAssignments: SemanticAssignmentsV1
+  readonly library: CharacterLibraryState
+  readonly mapping: SemanticMappingV1
+  readonly reducedMotion: boolean
+  readonly selectedPack: CharacterPackView
+  readonly snapshot: CharacterLibrarySnapshot
+  readonly store: CharacterLibraryStore
+  readonly workspaceId: string
+}) {
+  const [draft, setDraft] = useState<SemanticAssignmentsV1>(
+    () => initialAssignments,
   )
   const [previewState, setPreviewState] = useState<SemanticState>("neutral")
   const firstCueRef = useRef<HTMLSelectElement>(null)
 
-  useEffect(() => {
-    setDraft(mapping?.assignments ?? neutralSemanticAssignments())
-  }, [mapping])
   useEffect(
     () => () => store.setSemanticPreview(workspaceId, null),
     [store, workspaceId],
@@ -89,14 +135,11 @@ export function SemanticMappingSettings({
 
   const cueOptions = useMemo(
     () => ({
-      motions: selectedPack?.cueInventory.motions ?? [],
-      expressions: selectedPack?.cueInventory.expressions ?? [],
+      motions: selectedPack.cueInventory.motions,
+      expressions: selectedPack.cueInventory.expressions,
     }),
     [selectedPack],
   )
-  if (snapshot === null || mapping === null || selectedPack === undefined) {
-    return null
-  }
 
   const previewCue = draft[previewState]
   const busy = library.mutation !== null

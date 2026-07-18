@@ -168,6 +168,7 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
     readonly expectedMime: string
   }[] = []
   public pickerCount = 0
+  public conflictNextSemanticSave = false
   private snapshot: CharacterLibrarySnapshot
 
   public constructor(
@@ -300,6 +301,25 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
     request: CharacterSemanticMappingSaveRequest,
   ): Promise<CharacterLibrarySnapshot> {
     this.semanticMappingRequests.push(request)
+    if (this.conflictNextSemanticSave) {
+      this.conflictNextSemanticSave = false
+      this.snapshot = {
+        ...this.snapshot,
+        semanticMapping: {
+          ...this.snapshot.semanticMapping,
+          mappingVersion: request.expectedMappingVersion + 1,
+        },
+      }
+      return Promise.reject(
+        new CharacterLibraryOperationError({
+          code: "CHARACTER-MAPPING-CONFLICT",
+          operation: "character_semantic_mapping_save",
+          recoverable: true,
+          userMessageKey: "character.error.generic",
+          detailRef: "character-library-v1",
+        }),
+      )
+    }
     this.snapshot = {
       ...this.snapshot,
       semanticMapping: {
@@ -406,6 +426,33 @@ describe("CharacterModelLibrarySettings", () => {
       cueId: "FlickUp[0]",
     })
     expect(await screen.findByText("Mapping saved")).toBeVisible()
+  })
+
+  it("retains an edited draft and retries a conflict with the fresh mapping version", async () => {
+    const user = userEvent.setup()
+    const gateway = new ModelLibraryGateway([builtinPack])
+    gateway.conflictNextSemanticSave = true
+    renderLibrary(gateway)
+
+    const successCue = await screen.findByRole<HTMLSelectElement>("combobox", {
+      name: "Success cue",
+    })
+    await user.selectOptions(successCue, "motion:FlickUp[0]")
+    await user.click(screen.getByRole("button", { name: "Save mapping" }))
+
+    await waitFor(() => expect(gateway.semanticMappingRequests).toHaveLength(1))
+    expect(await screen.findByText("Version 1")).toBeVisible()
+    expect(successCue.value).toBe("motion:FlickUp[0]")
+
+    await user.click(screen.getByRole("button", { name: "Save mapping" }))
+    await waitFor(() => expect(gateway.semanticMappingRequests).toHaveLength(2))
+    expect(gateway.semanticMappingRequests[1]).toMatchObject({
+      expectedMappingVersion: 1,
+      assignments: {
+        success: { kind: "motion", cueId: "FlickUp[0]" },
+      },
+    })
+    expect(await screen.findByText("Version 2")).toBeVisible()
   })
 
   it("keeps semantic previews static when reduced motion is requested", async () => {

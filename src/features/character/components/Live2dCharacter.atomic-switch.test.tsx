@@ -283,6 +283,22 @@ describe("Live2dCharacter atomic pack switching", () => {
         expect(statuses.at(-1)?.pack?.packId).toBe("committed"),
       )
       expect(staticPreviews).toContain(committedDataUrl)
+      await waitFor(() =>
+        expect(
+          container.querySelector<HTMLImageElement>(
+            '[data-character-static-preview="trusted-frame"]',
+          )?.src,
+        ).toBe(committedDataUrl),
+      )
+      expect(
+        container.querySelector<HTMLCanvasElement>(
+          '[data-character-canvas="live2d"]',
+        ),
+      ).toHaveAttribute("hidden")
+      expect(container.firstElementChild).toHaveAttribute(
+        "data-character-reduced-presentation",
+        "static",
+      )
 
       rerender(
         <Live2dCharacter

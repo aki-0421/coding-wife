@@ -113,6 +113,15 @@ export function getCharacterCaption(
       detail: `${copy.errors[status.error.code]} ${fallback}`,
     }
   }
+  if (status.motionPolicy === "reduced") {
+    return {
+      state,
+      detail:
+        status.fallbackLevel === "static"
+          ? copy.staticFallback
+          : copy.textFallback,
+    }
+  }
   return { state, detail: null }
 }
 

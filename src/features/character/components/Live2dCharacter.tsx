@@ -297,13 +297,25 @@ export function Live2dCharacter({
     controllerRef.current?.setMotionPolicy(motionPolicy)
   }, [motionPolicy])
 
-  const caption = useMemo(
-    () => getCharacterCaption(locale, status),
-    [locale, status],
-  )
+  const reducedPresentation = status.motionPolicy === "reduced"
   const showStaticPreview =
-    staticPreview !== null && status.fallbackLevel === "static"
-  const hideCanvas = status.motionPolicy === "hidden" || showStaticPreview
+    staticPreview !== null &&
+    (reducedPresentation || status.fallbackLevel === "static")
+  const hideCanvas =
+    status.motionPolicy === "hidden" || reducedPresentation || showStaticPreview
+  const caption = useMemo(
+    () =>
+      getCharacterCaption(
+        locale,
+        reducedPresentation
+          ? {
+              ...status,
+              fallbackLevel: showStaticPreview ? "static" : "text_only",
+            }
+          : status,
+      ),
+    [locale, reducedPresentation, showStaticPreview, status],
+  )
 
   return (
     <div
@@ -314,6 +326,13 @@ export function Live2dCharacter({
       data-character-fallback={status.fallbackLevel}
       data-character-phase={status.phase}
       data-character-policy={status.motionPolicy}
+      data-character-reduced-presentation={
+        reducedPresentation
+          ? showStaticPreview
+            ? "static"
+            : "text_only"
+          : undefined
+      }
       data-character-state={status.state}
       ref={hostRef}
     >
@@ -334,6 +353,7 @@ export function Live2dCharacter({
           hideCanvas ? "opacity-0" : "opacity-100",
         )}
         data-character-canvas="live2d"
+        hidden={hideCanvas}
         ref={canvasRef}
       />
 
