@@ -14,7 +14,7 @@ read_when:
 
 Codex CLI 0.144.5 では、メインと別の App Server process、clean `CODEX_HOME`、空の実行環境、固定 permission profile、wire request の実測を組み合わせることで、support runtime を条件付きで実動できる。
 
-production と同じ `gpt-5.6-sol`、effort `low`、完全な`CommitExplanationV1` output schemaを使った実wireでは、Responses requestの`tools` field自体が存在しなかった。`tools=[]`とは区別し、`tool_choice="auto"`、`parallel_tool_calls=false`と組み合わせたexact envelopeを合格条件にする。したがって権限境界は次の三つに分ける。
+production と同じ `gpt-5.6-sol`、effort `low`、完全な`CommitExplanationV1` output schemaを使った実wireでは、Responses requestの`reasoning.effort`が`low`で、`tools` field自体が存在しなかった。`reasoning.effort`はsession側の指定だけで推定せずcaptured requestごとにexact照合し、missing、null、`medium`、その他文字列、別構造を拒否する。`tools=[]`とは区別し、`tool_choice="auto"`、`parallel_tool_calls=false`と組み合わせたexact envelopeを合格条件にする。したがって権限境界は次の三つに分ける。
 
 1. **wire-advertised tool 0**: 全Responses requestで`tools` fieldが不在である。空配列、unknown/additional tool、schema付きtoolへの変化をすべて拒否する。
 2. **external-authority tool 0**: repository、shell、file、MCP、network、browser、image generation、plugin、subagent、user interactionを行えるtoolは0件である。

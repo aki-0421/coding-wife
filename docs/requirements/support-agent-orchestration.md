@@ -95,7 +95,7 @@ read_when:
 | `SUP-F-065` | 利用者はsupportをglobalまたはrole単位で無効化できる | toggle off後にqueued taskをcancelし、新規invocationを0件にしてmainとdeterministic fallbackを維持する | Approved | 非該当 |
 | `SUP-F-066` | support raw historyをapp persistenceへ残さない | invocation完了後にapp DB、artifact、logを検索してもprompt/response本文が0件で、usage metadataだけが存在する | Approved | 非該当 |
 | `SUP-F-067` | release前にephemeral non-persistenceを監査する | test用CODEX_HOME snapshotのbefore/after差分にsupport thread history fileが0件であることをCI/manual release evidenceへ記録する。private rootは作成時directory descriptorとdevice/inode/ownerを保持し、同一identityのmode driftを0700へ戻してauth copyごとno-follow cleanupする。explicit cleanup失敗ではcleaned状態にせずDrop retryを残し、unsafe-mode stale rootも次回起動時にowner/identity/lockを再検証して回収する | Approved | 非該当 |
-| `SUP-F-068` | support model familyとeffortはrole policyで固定される | role mappingに存在するGPT-5.6 family/effortだけをsession startへ渡し、support outputからmodelを変更できない | Approved | 非該当 |
+| `SUP-F-068` | support model familyとeffortはrole policyで固定される | role mappingに存在するGPT-5.6 family/effortだけをsession startへ渡し、support outputからmodelを変更できない。release probeは全captured Responses requestの`reasoning.effort`がexact `low`である場合だけcapacityを1にし、missing、null、`medium`、その他文字列、または異なる構造ではcapacityを0にする | Approved | 非該当 |
 
 ### Commit explanation
 

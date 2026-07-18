@@ -272,6 +272,7 @@ fn production_request_envelope_is_exact(request: &Value) -> bool {
         && request.get("tool_choice").and_then(Value::as_str) == Some("auto")
         && request.get("parallel_tool_calls").and_then(Value::as_bool) == Some(false)
         && request.get("model").and_then(Value::as_str) == Some(CODEX_MODEL)
+        && request.pointer("/reasoning/effort").and_then(Value::as_str) == Some("low")
         && output_schema == Some(&commit_explanation_output_schema("ja"))
         && output_schema
             .and_then(|schema| canonical_json_hash(schema).ok())
@@ -453,9 +454,41 @@ mod tests {
         json!({
             "model": CODEX_MODEL,
             "parallel_tool_calls": false,
+            "reasoning": {"effort": "low"},
             "tool_choice": "auto",
             "text": {"format": {"schema": commit_explanation_output_schema("ja")}}
         })
+    }
+
+    #[test]
+    fn production_envelope_requires_exact_low_reasoning_effort() {
+        let request = exact_request();
+        assert!(production_request_envelope_is_exact(&request));
+
+        let mut missing = request.clone();
+        missing
+            .as_object_mut()
+            .expect("request object")
+            .remove("reasoning");
+        assert!(!production_request_envelope_is_exact(&missing));
+
+        for effort in [
+            Value::Null,
+            json!("medium"),
+            json!("high"),
+            json!("xhigh"),
+            json!("unexpected"),
+        ] {
+            let mut changed = request.clone();
+            changed["reasoning"]["effort"] = effort;
+            assert!(!production_request_envelope_is_exact(&changed));
+        }
+
+        for reasoning in [json!("low"), json!([{"effort": "low"}]), json!({})] {
+            let mut changed = request.clone();
+            changed["reasoning"] = reasoning;
+            assert!(!production_request_envelope_is_exact(&changed));
+        }
     }
 
     #[test]
