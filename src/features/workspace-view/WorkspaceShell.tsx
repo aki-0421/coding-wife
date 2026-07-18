@@ -31,6 +31,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useI18n } from "@/features/localization"
+import { useAppPreferences } from "@/features/preferences"
 import { useRuntime } from "@/features/runtime"
 import {
   projectCharacterRuntime,
@@ -126,6 +127,8 @@ export function WorkspaceShell({
   const safeQuitCopy = getSafeQuitCopy(locale)
   const runtime = useRuntime()
   const narration = useNarrationSnapshot()
+  const appPreferences = useAppPreferences().snapshot.preferences
+  const characterHidden = appPreferences.characterVisibility === "hidden"
   const view = useWorkspaceViewModel(adapter)
   const contextModel = useEditableWorkspaceContext(
     adapter,
@@ -137,7 +140,7 @@ export function WorkspaceShell({
   )
   const characterRuntime = projectCharacterRuntime(
     characterRuntimeSnapshot,
-    view.characterHidden,
+    characterHidden,
   )
   const [systemReducedMotion, setSystemReducedMotion] = useState(
     getSystemReducedMotion,
@@ -155,8 +158,7 @@ export function WorkspaceShell({
             ? "ready"
             : "offline"
   const reducedMotion =
-    view.reducedMotion === "reduce" ||
-    (view.reducedMotion === "system" && systemReducedMotion)
+    systemReducedMotion || appPreferences.reducedMotion === "on"
   const turnActive =
     view.turnState === "sending" ||
     view.turnState === "running" ||
@@ -690,7 +692,7 @@ export function WorkspaceShell({
           value="chat"
         >
           <ChatView
-            characterHidden={view.characterHidden}
+            characterHidden={characterHidden}
             characterRuntime={characterRuntime}
             connected={connected}
             copy={copy}
@@ -777,23 +779,19 @@ export function WorkspaceShell({
           value="settings"
         >
           <SettingsView
-            characterHidden={view.characterHidden}
             characterRuntime={characterRuntime}
             contextModel={contextModel}
             copy={copy}
             history={view.history}
             muted={view.muted}
-            onCharacterHiddenChange={view.setCharacterHidden}
             onMutedChange={view.setMuted}
             onDeleteHistory={view.deleteSelectedWorkspaceHistory}
-            onReducedMotionChange={view.setReducedMotion}
             onResetUi={view.resetUiState}
             onRetryRuntime={runtime.refresh}
             onRetryCharacter={() => {
               characterRuntimeStore.retry(selectedWorkspace.id)
             }}
             onSectionChange={view.setSettingsSection}
-            reducedMotion={view.reducedMotion}
             runtimeState={runtime.state}
             section={view.settingsSection}
             turnActive={turnActive}

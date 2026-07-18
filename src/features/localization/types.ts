@@ -14,3 +14,8 @@ export function detectSupportedLocale(
 
   return primaryLanguage.toLowerCase().startsWith("ja") ? "ja" : "en"
 }
+
+export function detectSystemLocale(): SupportedLocale {
+  if (typeof navigator === "undefined") return "en"
+  return detectSupportedLocale(navigator.languages, navigator.language)
+}

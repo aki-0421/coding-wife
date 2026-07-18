@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import { App } from "@/app/App"
 import {
   createLocalePreferenceStore,
+  detectSystemLocale,
   detectSupportedLocale,
   type LocalePreferenceStore,
   type SupportedLocale,
@@ -36,6 +37,9 @@ describe("localization foundation", () => {
     expect(detectSupportedLocale(["en-US", "ja-JP"], "ja-JP")).toBe("en")
     expect(detectSupportedLocale(["ja-JP", "en-US"], "en-US")).toBe("ja")
     expect(detectSupportedLocale([], "ja-JP")).toBe("ja")
+    expect(detectSystemLocale()).toBe(
+      detectSupportedLocale(navigator.languages, navigator.language),
+    )
   })
 
   it("keeps browser persistence inside the explicit demo namespace", () => {

@@ -5,7 +5,7 @@ import type { SupportedLocale } from "@/features/localization/types"
 
 export interface I18nContextValue {
   readonly locale: SupportedLocale
-  readonly setLocale: (locale: SupportedLocale) => boolean
+  readonly setLocale: (locale: SupportedLocale) => Promise<boolean>
   readonly t: (key: TranslationKey) => string
 }
 

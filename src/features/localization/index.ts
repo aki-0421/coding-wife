@@ -5,6 +5,7 @@ export {
 } from "@/features/localization/locale-store"
 export type { TranslationKey } from "@/features/localization/resources"
 export {
+  detectSystemLocale,
   detectSupportedLocale,
   isSupportedLocale,
   supportedLocales,

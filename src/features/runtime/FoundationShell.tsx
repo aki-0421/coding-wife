@@ -40,8 +40,8 @@ function LocaleSwitcher() {
   const { locale, setLocale, t } = useI18n()
   const [failedLocale, setFailedLocale] = useState<SupportedLocale | null>(null)
 
-  const persistLocale = (nextLocale: SupportedLocale) => {
-    if (setLocale(nextLocale)) {
+  const persistLocale = async (nextLocale: SupportedLocale) => {
+    if (await setLocale(nextLocale)) {
       setFailedLocale(null)
       return
     }
@@ -60,7 +60,7 @@ function LocaleSwitcher() {
           <Button
             aria-pressed={locale === option}
             key={option}
-            onClick={() => persistLocale(option)}
+            onClick={() => void persistLocale(option)}
             size="xs"
             type="button"
             variant={locale === option ? "secondary" : "ghost"}
@@ -79,7 +79,7 @@ function LocaleSwitcher() {
             {t("locale.saveError")}
           </p>
           <Button
-            onClick={() => persistLocale(failedLocale)}
+            onClick={() => void persistLocale(failedLocale)}
             size="xs"
             type="button"
             variant="secondary"

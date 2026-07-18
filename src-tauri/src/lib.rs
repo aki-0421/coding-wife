@@ -3,6 +3,7 @@ pub mod character;
 pub mod codex;
 pub mod git_review;
 pub mod narration;
+pub mod preferences;
 pub mod workspace_history;
 
 use std::sync::Arc;
@@ -46,6 +47,8 @@ use narration::commands::{
     narration_update_settings,
 };
 use narration::NarrationService;
+use preferences::commands::{app_preferences_get, app_preferences_reset, app_preferences_update};
+use preferences::AppPreferencesService;
 use workspace_history::commands::{
     history_append_domain_event, workspace_cancel, workspace_create_session, workspace_delete,
     workspace_get_turn_context_snapshot, workspace_issue_delete_challenge, workspace_list,
@@ -189,6 +192,7 @@ pub fn run() {
             setup_supervisor.attach_app_handle(app.handle().clone());
             setup_supervisor.start_signal_loop();
             let app_data_directory = app.path().app_data_dir()?;
+            app.manage(AppPreferencesService::production(&app_data_directory));
             let attachment_service = AttachmentService::production(&app_data_directory)
                 .map_err(|error| std::io::Error::other(error.code))?;
             app.manage(attachment_service);
@@ -253,6 +257,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             health_check,
             get_runtime_metadata,
+            app_preferences_get,
+            app_preferences_update,
+            app_preferences_reset,
             app_quit_cancel,
             app_quit_confirm,
             codex_pick_workspace,

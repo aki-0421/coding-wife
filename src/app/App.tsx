@@ -12,7 +12,7 @@ import {
   type CharacterLibraryGateway,
 } from "@/features/character"
 import {
-  createLocalePreferenceStore,
+  detectSystemLocale,
   type LocalePreferenceStore,
 } from "@/features/localization"
 import {
@@ -30,6 +30,10 @@ import {
   type CommitExplanationAppRuntime,
   type GitReviewTransport,
 } from "@/features/git-review"
+import {
+  AppPreferencesController,
+  createAppPreferencesGateway,
+} from "@/features/preferences"
 import { createAppTransport, type AppTransport } from "@/features/runtime"
 import { createWorkspaceViewAdapter } from "@/features/workspace-persistence"
 import {
@@ -40,6 +44,7 @@ import {
 
 export interface AppProps {
   readonly appLifecycleGateway?: AppLifecycleGateway
+  readonly appPreferencesController?: AppPreferencesController
   readonly characterLibraryGateway?: CharacterLibraryGateway
   readonly characterRenderer?: CharacterStageRenderer
   readonly commitExplanationRuntime?: CommitExplanationAppRuntime | null
@@ -62,6 +67,7 @@ function interactiveDemoEnabled(transport: AppTransport): boolean {
 
 export function App({
   appLifecycleGateway,
+  appPreferencesController,
   characterLibraryGateway,
   characterRenderer,
   commitExplanationRuntime,
@@ -79,10 +85,18 @@ export function App({
     characterRenderer === undefined ? "builtin_hiyori" : "external"
   const activeCharacterRenderer =
     characterRenderer ?? DefaultCharacterStageRenderer
-  const fallbackLocaleStore = useMemo(
-    () => createLocalePreferenceStore(activeTransport.kind),
+  const fallbackPreferencesController = useMemo(
+    () =>
+      new AppPreferencesController(
+        createAppPreferencesGateway(
+          activeTransport.kind === "tauri" ? "native" : "demo",
+        ),
+        detectSystemLocale(),
+      ),
     [activeTransport.kind],
   )
+  const activePreferencesController =
+    appPreferencesController ?? fallbackPreferencesController
   const fallbackWorkspaceAdapter = useMemo(
     () =>
       createWorkspaceViewAdapter(activeTransport.kind, {
@@ -161,7 +175,8 @@ export function App({
       characterLibraryGateway={
         characterLibraryGateway ?? fallbackCharacterLibraryGateway
       }
-      localeStore={localeStore ?? fallbackLocaleStore}
+      localeStore={localeStore}
+      preferencesController={activePreferencesController}
       transport={activeTransport}
     >
       <NarrationProvider

@@ -25,14 +25,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@/components/ui/field"
-import {
   Popover,
   PopoverClose,
   PopoverContent,
@@ -41,14 +33,18 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   CharacterModelLibrarySettings,
   getCharacterErrorMessage,
   type CharacterRuntimeView,
 } from "@/features/character"
-import { useI18n, type SupportedLocale } from "@/features/localization"
+import { useI18n } from "@/features/localization"
 import { NarrationSettings } from "@/features/narration"
+import {
+  useAppPreferences,
+  useAppPreferencesController,
+} from "@/features/preferences"
+import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
 import { EditableContextSection } from "@/features/workspace-view/EditableContextSection"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type { EditableWorkspaceContextModel } from "@/features/workspace-view/useEditableWorkspaceContext"
@@ -60,25 +56,21 @@ import type {
 import { cn } from "@/lib/utils"
 
 interface SettingsViewProps {
-  readonly characterHidden: boolean
   readonly characterRuntime: CharacterRuntimeView
   readonly copy: WorkspaceCopy
   readonly contextModel: EditableWorkspaceContextModel
   readonly history: WorkspaceAdapterState["history"]
   readonly muted: boolean
-  readonly reducedMotion: "system" | "reduce" | "allow"
   readonly runtimeState: RuntimeState
   readonly section: SettingsSection
   readonly turnActive: boolean
   readonly workspaceId: string
-  readonly onCharacterHiddenChange: (hidden: boolean) => void
   readonly onDeleteHistory: () => Promise<boolean>
   readonly onMutedChange: (muted: boolean) => void
   readonly onResetUi: () => void
   readonly onRetryRuntime: () => void
   readonly onRetryCharacter: () => void
   readonly onSectionChange: (section: SettingsSection) => void
-  readonly onReducedMotionChange: (value: "system" | "reduce" | "allow") => void
 }
 
 function CharacterReadinessBadge({
@@ -307,144 +299,6 @@ function SettingRow({
   )
 }
 
-function GeneralSettings({
-  copy,
-  reducedMotion,
-  runtimeState,
-  onResetUi,
-  onReducedMotionChange,
-}: Pick<
-  SettingsViewProps,
-  | "copy"
-  | "reducedMotion"
-  | "runtimeState"
-  | "onResetUi"
-  | "onReducedMotionChange"
->) {
-  const { locale, setLocale, t } = useI18n()
-  const [failedLocale, setFailedLocale] = useState<SupportedLocale | null>(null)
-
-  const selectLocale = (nextLocale: SupportedLocale) => {
-    if (setLocale(nextLocale)) {
-      setFailedLocale(null)
-    } else {
-      setFailedLocale(nextLocale)
-    }
-  }
-
-  return (
-    <section
-      aria-labelledby="settings-general-title"
-      className="flex flex-col gap-xl"
-    >
-      <div className="flex items-center justify-between gap-md max-[700px]:flex-col max-[700px]:items-start max-[700px]:gap-sm">
-        <h2
-          className="m-0 text-headline text-text-strong"
-          id="settings-general-title"
-        >
-          {copy.settingsView.generalTitle}
-        </h2>
-        <Badge
-          className="h-auto max-w-full shrink self-start break-words whitespace-normal py-xxs leading-snug"
-          variant="outline"
-        >
-          {copy.settingsView.localPreview}
-        </Badge>
-      </div>
-      <FieldGroup>
-        <Field>
-          <FieldLabel>{copy.settingsView.language}</FieldLabel>
-          <FieldDescription>
-            {copy.settingsView.languageDescription}
-          </FieldDescription>
-          <ToggleGroup
-            aria-label={t("locale.switchLabel")}
-            onValueChange={(value) => {
-              if (value === "ja" || value === "en") selectLocale(value)
-            }}
-            type="single"
-            value={locale}
-          >
-            <ToggleGroupItem value="ja">{t("locale.ja")}</ToggleGroupItem>
-            <ToggleGroupItem value="en">{t("locale.en")}</ToggleGroupItem>
-          </ToggleGroup>
-          {failedLocale ? (
-            <div className="flex flex-wrap items-center gap-xs" role="alert">
-              <span className="text-caption text-destructive">
-                {copy.settingsView.languageSaveError}
-              </span>
-              <Button
-                onClick={() => selectLocale(failedLocale)}
-                size="xs"
-                type="button"
-                variant="secondary"
-              >
-                {copy.retry}
-              </Button>
-            </div>
-          ) : null}
-        </Field>
-
-        <FieldSet>
-          <FieldLegend>{copy.settingsView.motion}</FieldLegend>
-          <FieldDescription>
-            {copy.settingsView.motionDescription}
-          </FieldDescription>
-          <ToggleGroup
-            aria-label={copy.settingsView.motion}
-            onValueChange={(value) => {
-              if (
-                value === "system" ||
-                value === "reduce" ||
-                value === "allow"
-              ) {
-                onReducedMotionChange(value)
-              }
-            }}
-            type="single"
-            value={reducedMotion}
-          >
-            <ToggleGroupItem value="system">
-              {copy.settingsView.system}
-            </ToggleGroupItem>
-            <ToggleGroupItem value="reduce">
-              {copy.settingsView.reduce}
-            </ToggleGroupItem>
-            <ToggleGroupItem value="allow">
-              {copy.settingsView.allow}
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </FieldSet>
-      </FieldGroup>
-      <Separator />
-      <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-lg gap-y-xs text-caption">
-        <dt className="text-muted-foreground">
-          {copy.settingsView.appVersion}
-        </dt>
-        <dd className="m-0 font-mono text-foreground">
-          {runtimeState.status === "ready"
-            ? runtimeState.metadata.appVersion
-            : "—"}
-        </dd>
-      </dl>
-      <SettingRow
-        action={
-          <Button
-            onClick={onResetUi}
-            size="xs"
-            type="button"
-            variant="secondary"
-          >
-            {copy.settingsView.resetUi}
-          </Button>
-        }
-        description={copy.settingsView.resetUiDescription}
-        label={copy.settingsView.resetUi}
-      />
-    </section>
-  )
-}
-
 function ContextSettings({
   character,
   copy,
@@ -468,23 +322,24 @@ function ContextSettings({
 }
 
 function CompanionSettings({
-  characterHidden,
   characterRuntime,
   copy,
   muted,
-  onCharacterHiddenChange,
   onRetryCharacter,
   workspaceId,
 }: Pick<
   SettingsViewProps,
-  | "characterHidden"
   | "characterRuntime"
   | "copy"
   | "muted"
-  | "onCharacterHiddenChange"
   | "onRetryCharacter"
   | "workspaceId"
 >) {
+  const preferences = useAppPreferences()
+  const controller = useAppPreferencesController()
+  const characterHidden =
+    preferences.snapshot.preferences.characterVisibility === "hidden"
+
   return (
     <section className="flex flex-col gap-lg">
       <div className="flex items-center justify-between gap-md">
@@ -509,7 +364,12 @@ function CompanionSettings({
           <Switch
             aria-label={copy.settingsView.hideCharacter}
             checked={characterHidden}
-            onCheckedChange={onCharacterHiddenChange}
+            disabled={preferences.status === "loading"}
+            onCheckedChange={(hidden) => {
+              void controller.update({
+                characterVisibility: hidden ? "hidden" : "visible",
+              })
+            }}
           />
         }
         description={copy.settingsView.hideCharacterDescription}
@@ -826,7 +686,13 @@ export function SettingsView(props: SettingsViewProps) {
   const sectionContent = (() => {
     switch (props.section) {
       case "general":
-        return <GeneralSettings {...props} />
+        return (
+          <AppPreferencesSettings
+            copy={props.copy}
+            onResetUi={props.onResetUi}
+            runtimeState={props.runtimeState}
+          />
+        )
       case "project_context":
         return (
           <ContextSettings

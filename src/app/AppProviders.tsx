@@ -6,6 +6,10 @@ import {
   type LocalePreferenceStore,
 } from "@/features/localization"
 import {
+  AppPreferencesProvider,
+  type AppPreferencesController,
+} from "@/features/preferences"
+import {
   CharacterLibraryProvider,
   type CharacterLibraryGateway,
 } from "@/features/character"
@@ -14,7 +18,8 @@ import { RuntimeProvider, type AppTransport } from "@/features/runtime"
 export interface AppProvidersProps {
   readonly children: ReactNode
   readonly characterLibraryGateway: CharacterLibraryGateway
-  readonly localeStore: LocalePreferenceStore
+  readonly localeStore?: LocalePreferenceStore
+  readonly preferencesController: AppPreferencesController
   readonly transport: AppTransport
 }
 
@@ -22,15 +27,23 @@ export function AppProviders({
   children,
   characterLibraryGateway,
   localeStore,
+  preferencesController,
   transport,
 }: AppProvidersProps) {
   return (
-    <I18nProvider store={localeStore}>
-      <CharacterLibraryProvider gateway={characterLibraryGateway}>
-        <RuntimeProvider transport={transport}>
-          <TooltipProvider>{children}</TooltipProvider>
-        </RuntimeProvider>
-      </CharacterLibraryProvider>
-    </I18nProvider>
+    <AppPreferencesProvider controller={preferencesController}>
+      <I18nProvider
+        preferencesController={
+          localeStore === undefined ? preferencesController : undefined
+        }
+        store={localeStore}
+      >
+        <CharacterLibraryProvider gateway={characterLibraryGateway}>
+          <RuntimeProvider transport={transport}>
+            <TooltipProvider>{children}</TooltipProvider>
+          </RuntimeProvider>
+        </CharacterLibraryProvider>
+      </I18nProvider>
+    </AppPreferencesProvider>
   )
 }

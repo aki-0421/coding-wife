@@ -13,40 +13,27 @@ import {
   type TranslationKey,
 } from "@/features/localization/resources"
 import {
-  detectSupportedLocale,
+  detectSystemLocale,
   type SupportedLocale,
 } from "@/features/localization/types"
-
-interface BrowserLanguagePreference {
-  readonly languageTags: readonly string[]
-  readonly fallbackLanguage: string
-}
-
-function getBrowserLanguagePreference(): BrowserLanguagePreference {
-  if (typeof navigator === "undefined") {
-    return { languageTags: [], fallbackLanguage: "en" }
-  }
-
-  return {
-    languageTags: navigator.languages,
-    fallbackLanguage: navigator.language,
-  }
-}
+import type { AppPreferencesController } from "@/features/preferences"
 
 export interface I18nProviderProps {
   readonly children: ReactNode
-  readonly store: LocalePreferenceStore
+  readonly preferencesController?: AppPreferencesController
+  readonly store?: LocalePreferenceStore
 }
 
-export function I18nProvider({ children, store }: I18nProviderProps) {
+export function I18nProvider({
+  children,
+  preferencesController,
+  store,
+}: I18nProviderProps) {
   const [locale, setLocaleState] = useState<SupportedLocale>(() => {
-    const browserLanguage = getBrowserLanguagePreference()
     return (
-      store.read() ??
-      detectSupportedLocale(
-        browserLanguage.languageTags,
-        browserLanguage.fallbackLanguage,
-      )
+      preferencesController?.getSnapshot().snapshot.preferences.locale ??
+      store?.read() ??
+      detectSystemLocale()
     )
   })
 
@@ -54,20 +41,35 @@ export function I18nProvider({ children, store }: I18nProviderProps) {
     document.documentElement.lang = locale
   }, [locale])
 
+  useEffect(() => {
+    if (preferencesController === undefined) return
+    const synchronize = () => {
+      setLocaleState(
+        preferencesController.getSnapshot().snapshot.preferences.locale,
+      )
+    }
+    synchronize()
+    return preferencesController.subscribe(synchronize)
+  }, [preferencesController])
+
   const setLocale = useCallback(
-    (nextLocale: SupportedLocale) => {
+    async (nextLocale: SupportedLocale) => {
       if (nextLocale === locale) {
         return true
       }
 
-      const didPersist = store.write(nextLocale)
+      if (preferencesController !== undefined) {
+        return preferencesController.update({ locale: nextLocale })
+      }
+
+      const didPersist = store?.write(nextLocale) ?? false
       if (didPersist) {
         setLocaleState(nextLocale)
       }
 
       return didPersist
     },
-    [locale, store],
+    [locale, preferencesController, store],
   )
 
   const t = useCallback(
