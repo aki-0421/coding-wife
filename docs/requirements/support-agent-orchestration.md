@@ -1,7 +1,7 @@
 ---
 title: "SUP 支援エージェント調停要件定義"
 description: "主セッションと分離した短命支援root、commit説明skill、redacted context、stream出力、停止・監査を定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "support session trigger、ephemeral root、schema outputを実装するとき。"
   - "repo非アクセス、非永続化、stale discard、usage透明性を検証するとき。"
@@ -15,7 +15,7 @@ read_when:
 | 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 2026-07-18 |
+| 最終レビュー日 | 2026-07-19 |
 
 ## 背景
 
@@ -67,7 +67,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `SUP-F-050` | support taskはmainと別のephemeral rootで実行される | invocationごとに新しいroot IDを作り、main thread IDをreuseしない。success、cancel、timeout、protocol/policy/output error、malformed turn startの全terminalでactive turn addressをprocess終了まで保持し、pending RPCをfailしてwhole process groupをSIGTERM→SIGKILL後のdisappearanceまで確認してからprivate rootを削除する。明示shutdownなしのDropも同期的なgroup SIGKILLとprivate root cleanupを必ず開始し、rootを再利用しない | Approved | 非該当 |
+| `SUP-F-050` | support taskはmainと別のephemeral rootで実行される | invocationごとに新しいroot IDを作り、main thread IDをreuseしない。executorはrequest IDだけでなく単調増加generationごとの`Constructing` / `Running` / `Terminal`、task handle、completionをprocess cleanup完了まで保持する。spawn直後またはruntime構築中にcancel/quitした場合も、そのgenerationへcancelを通知してconstruction taskをjoinし、生成済みprocess groupのdisappearanceを確認する。success、cancel、timeout、protocol/policy/output error、malformed turn startの全terminalでactive turn addressをprocess終了まで保持し、pending RPCをfailしてwhole process groupをSIGTERM→SIGKILL後のdisappearanceまで確認してからprivate rootを削除する。controllerのgraceful shutdownは新しいqueue admissionを閉じ、queued taskをterminal化し、active workerとsupport taskをjoinしてprocess absenceを集約する。一項目でも未確認なら失敗を返してappのforce cleanupへ移し、明示shutdownなしのDropも同期的なgroup SIGKILLとprivate root cleanupを必ず開始し、rootを再利用しない | Approved | 非該当 |
 | `SUP-F-051` | support roleはdeterministic eventで起動される | roleごとに定義したdecision requested、error、`trigger=auto_verified_commit`、`trigger=user_request`、`trigger=user_retry`以外で起動せず、同一event IDを二重処理しない。commit選択、Commit tab表示、SHA未検証のcommand resultでは起動しない | Approved | 非該当 |
 | `SUP-F-052` | 通常supportはredacted normalized snapshotだけを受け取る | payloadにgoal、phase、event summary、evidence ID、locale、generationを含み、source file本文、absolute path、secret、raw reasoningを含まない | Approved | 非該当 |
 | `SUP-F-053` | 通常supportはexternal authorityとrepositoryへアクセスできない | release constructorが専用process、clean `CODEX_HOME`、空のowner-only cwd、runtime root 0件、filesystem/shell/Git/MCP/network/dynamic/user-interaction authority 0件、exact permission profile、auth bridge、malicious canary、production model transportを証明した時だけcapacity 1にする。全Responses requestで`tools` field不在、`tool_choice=auto`、`parallel_tool_calls=false`をexact照合し、空配列を含むtool field追加またはCodex内部の`update_plan` eventを検出したtaskはterminal failureとして結果を破棄する。証明不能ならcapacity 0とdeterministic fallbackへfail closedする | Approved | 非該当 |

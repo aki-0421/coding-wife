@@ -1,7 +1,7 @@
 ---
 title: "APP デスクトップシェル要件定義"
 description: "Coding Wifeの単一Tauriウィンドウ、言語、アクセシビリティ、ライフサイクル、信頼境界、macOS配布物を定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "デスクトップシェル、共通ナビゲーション、言語、アクセシビリティを実装するとき。"
   - "TauriのCapability、CSP、終了、復旧の契約を確認するとき。"
@@ -16,7 +16,7 @@ read_when:
 | 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 2026-07-18 |
+| 最終レビュー日 | 2026-07-19 |
 
 ## 背景
 
@@ -92,7 +92,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | `APP-F-063` | 利用者はclose結果を安全に選べる | active/pending turnがないcloseは通常終了する。active/pending turnがあるcloseはnative closeを保留して「停止して終了」と「終了しない」だけを表示する。「終了しない」はdialogを閉じて元controlへfocusを戻し、window、turn、selection、draft、caption/TTSを維持する。duplicate close、Escape、window manager経由でも確認を迂回しない | Approved | 非該当 |
-| `APP-F-064` | アプリは終了時にchild processとwriterを停止する | idle closeまたは「停止して終了」受理後、Codex/App Server process group、audio process/queue、app-owned support controller/process group、pending scope writer、DB writer/transactionを順序付きで閉じ、全descendant消滅とtransaction commitまたはrollbackを5秒以内に確認してからmain processを終了する。期限超過時はprocess groupを強制終了してInterrupted recovery metadataを残し、Git stateとsupport explanation本文を永続化しない | Approved | 非該当 |
+| `APP-F-064` | アプリは終了時にchild processとwriterを停止する | idle closeまたは「停止して終了」受理後、Codex/App Server process group、audio process/queue、app-owned support controller/process group、pending scope writer、DB writer/transactionを順序付きで閉じ、全descendant消滅、writer task join、transaction commitまたはrollback、unfinished turnの`Interrupted`化、WAL checkpointがすべて完了した場合だけmain processを終了する。graceful cleanup全体の期限は5秒とし、期限超過または失敗時は各process groupを強制終了する。force後も一つ以上の必須cleanupを確認できない場合はexit-readyにせず、native stateを`CleanupFailed`へ遷移してmain windowを表示・focusし、absolute pathやservice内部情報を含まない日本語・英語のerrorと「安全な終了処理を再試行」を表示する。duplicate closeは新しいshutdownを開始せず、retryは同じrequestに対して未完了cleanupだけをboundedに再実行し、全項目の完了後だけ終了する。historyはshutdown admissionを閉じて新しいwriterを拒否し、既存writerへcancelを通知してjoinした後、blocking DB収束をasync taskから期限管理する。Git stateとsupport explanation本文は永続化しない | Approved | 非該当 |
 | `APP-F-065` | 利用者は異常終了後に安全な回復概要を確認できる | 再起動時にterminal eventのないturnを`Interrupted`として表示し、workspace固有のdraft、last summary、timeline anchor、未完了work unitを示す。Codex turn、support presentation、TTS、Git commandを自動再送・再開せず、persisted commit evidenceとapp-owned sanitized metadataだけを再構築する | Approved | 非該当 |
 | `APP-F-066` | 利用者はofflineでもlocal evidenceを確認できる | networkまたはCodex接続がない時もworkspace、timeline、Commit、Context、Settingsを開け、送信だけを理由付きで無効にする | Approved | 非該当 |
 | `APP-F-067` | WebViewは目的別native操作だけを要求できる | 任意command名、任意shell文字列、allowlist外absolute pathをIPCへ渡すtestが拒否され、OS処理が開始されない | Approved | 非該当 |
