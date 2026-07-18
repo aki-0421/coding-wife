@@ -1086,11 +1086,17 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
-    use crate::character::manifest::BUILTIN_HIYORI_PACK_ID;
+    use sha2::{Digest, Sha256};
+
+    use crate::character::manifest::{
+        CharacterDimensions, CharacterTrustedFrame, BUILTIN_HIYORI_PACK_ID,
+        CHARACTER_TRUSTED_FRAME_ASSET_ID,
+    };
     use crate::character::service::{
         resolve_builtin_directory, CharacterDeleteRequest, CharacterLibraryRequest,
         CharacterSelectRequest,
     };
+    use crate::character::validation::snapshot_character_model;
     use crate::character::CharacterStorage;
     use crate::codex::supervisor::CodexSupervisor;
     use crate::codex::workspace::{AppPrivateWorkspaceRecord, WorkspaceService};
@@ -1274,6 +1280,49 @@ mod tests {
                 |row| row.get::<_, bool>(0),
             )
             .expect("project registration")
+    }
+
+    fn publish_unused_custom_pack(
+        storage: &CharacterStorage,
+    ) -> crate::character::storage::StoredPack {
+        let pack_id = format!("custom:{}", uuid::Uuid::new_v4());
+        let model = resolve_builtin_directory(Path::new("/missing"))
+            .join("runtime/hiyori_pro_t11.model3.json");
+        let mut snapshot =
+            snapshot_character_model(&model, pack_id, "2026-07-18T00:00:00.000Z".to_owned())
+                .expect("validated custom pack snapshot");
+        let mut thumbnail = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut thumbnail, 1, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("trusted frame header");
+            writer
+                .write_image_data(&[255, 128, 64, 255])
+                .expect("trusted frame pixels");
+        }
+        let trusted_frame = CharacterTrustedFrame {
+            asset_id: CHARACTER_TRUSTED_FRAME_ASSET_ID.to_owned(),
+            bytes: thumbnail.len() as u64,
+            sha256: hex::encode(Sha256::digest(&thumbnail)),
+            dimensions: CharacterDimensions {
+                width: 1,
+                height: 1,
+            },
+        };
+        snapshot.manifest.compatibility.expected_parameters = Some(70);
+        snapshot.manifest.compatibility.expected_parts = Some(24);
+        snapshot.manifest.compatibility.expected_drawables = Some(134);
+        snapshot.manifest.trusted_frame = Some(trusted_frame.clone());
+        let quarantine = storage
+            .prepare_quarantine(&uuid::Uuid::new_v4().to_string(), &snapshot)
+            .expect("prepare custom pack quarantine");
+        storage
+            .persist_trusted_frame(&quarantine, &trusted_frame, &thumbnail)
+            .expect("persist trusted frame");
+        storage
+            .publish(&quarantine, &snapshot.manifest)
+            .expect("publish unused custom pack")
     }
 
     #[tokio::test]
@@ -1516,17 +1565,30 @@ mod tests {
         unregister_first.cleanup();
 
         let delete_race = project_lifecycle_fixture("race-delete").await;
-        let custom_pack_id = format!("custom:{}", uuid::Uuid::new_v4());
-        let mut state = delete_race.storage.load_state().expect("delete race state");
-        state.select(
-            delete_race.project_id.clone(),
-            custom_pack_id.clone(),
-            "2026-07-18T00:00:00.000Z".to_owned(),
-        );
-        delete_race
-            .storage
-            .save_state(&state)
-            .expect("persist delete race selection");
+        let observer_root = git_repository();
+        let observer = delete_race
+            .history
+            .register_validated_candidate(
+                candidate(&delete_race.history.workspace, &observer_root).await,
+                "workspace_pick_register",
+            )
+            .await
+            .expect("register observer project");
+        let observer_workspace_id = observer
+            .active_workspace_id
+            .expect("observer active workspace");
+        let published = publish_unused_custom_pack(&delete_race.storage);
+        let custom_pack_id = published.manifest.pack_id.clone();
+        let pack_directory = published.directory.clone();
+        let manifest_bytes =
+            fs::read(pack_directory.join("pack.json")).expect("published manifest bytes");
+        let library_before = delete_race
+            .character
+            .library(CharacterLibraryRequest {
+                workspace_id: observer_workspace_id.clone(),
+            })
+            .await
+            .expect("observer library before race");
         let held = delete_race.project_operations.clone().lock_owned().await;
         let history = delete_race.history.clone();
         let workspace_id = delete_race.workspace_id.clone();
@@ -1558,15 +1620,66 @@ mod tests {
             .await
             .expect("delete timeout")
             .expect("delete task")
-            .expect_err("missing pack remains missing after cleanup");
-        assert_eq!(error.code, "CHARACTER-PACK-NOT-FOUND");
-        assert_ne!(error.code, "CHARACTER-ACTIVE-DELETE-DENIED");
+            .expect_err("stale delete after unregister must fail");
+        assert_eq!(error.code, "CHARACTER-PROJECT-NOT-FOUND");
+        assert!(pack_directory.is_dir());
+        assert_eq!(
+            fs::read(pack_directory.join("pack.json")).expect("retained manifest bytes"),
+            manifest_bytes
+        );
+        let retained = delete_race
+            .storage
+            .load_pack(&custom_pack_id)
+            .expect("retained custom pack metadata");
+        assert_eq!(retained.directory, published.directory);
+        assert_eq!(retained.manifest, published.manifest);
+        assert_eq!(retained.manifest_hash, published.manifest_hash);
+        assert_eq!(
+            delete_race
+                .character
+                .library(CharacterLibraryRequest {
+                    workspace_id: observer_workspace_id.clone(),
+                })
+                .await
+                .expect("observer library after stale delete"),
+            library_before
+        );
         assert!(!delete_race
             .storage
             .load_state()
             .expect("delete race final state")
             .project_selections
             .contains_key(&delete_race.project_id));
+
+        let selected = delete_race
+            .character
+            .select_pack(CharacterSelectRequest {
+                workspace_id: observer_workspace_id.clone(),
+                pack_id: custom_pack_id.clone(),
+            })
+            .await
+            .expect("select retained custom pack");
+        assert_eq!(selected.selected_pack_id, custom_pack_id);
+        delete_race
+            .character
+            .select_pack(CharacterSelectRequest {
+                workspace_id: observer_workspace_id.clone(),
+                pack_id: BUILTIN_HIYORI_PACK_ID.to_owned(),
+            })
+            .await
+            .expect("select builtin before normal delete");
+        let deleted = delete_race
+            .character
+            .delete_pack(CharacterDeleteRequest {
+                workspace_id: observer_workspace_id,
+                pack_id: custom_pack_id,
+            })
+            .await
+            .expect("delete retained inactive pack");
+        assert_eq!(deleted.selected_pack_id, BUILTIN_HIYORI_PACK_ID);
+        assert_eq!(deleted.packs.len(), 1);
+        assert!(!pack_directory.exists());
+        let _ = fs::remove_dir_all(observer_root);
         delete_race.cleanup();
     }
 

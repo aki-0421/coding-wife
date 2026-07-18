@@ -841,6 +841,7 @@ impl CharacterService {
             ));
         }
         let _operation = self.operations.lock().await;
+        self.resolve_project_id(&request.workspace_id)?;
         let (custom_packs, _) = self.storage.load_custom_packs()?;
         let mut state = self.load_project_state(&custom_packs)?;
         if state
