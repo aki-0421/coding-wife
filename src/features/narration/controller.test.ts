@@ -83,6 +83,7 @@ class FakeNarrationGateway implements NarrationGateway {
   public readonly speech: NarrationSpeakRequestV1[] = []
   public readonly cancelReasons: NarrationCancelReason[] = []
   public onSpeak: ((request: NarrationSpeakRequestV1) => void) | null = null
+  public onCancel: ((reason: NarrationCancelReason) => void) | null = null
   #snapshot: NarrationSettingsSnapshotV1
 
   public constructor(enabled = false) {
@@ -95,6 +96,13 @@ class FakeNarrationGateway implements NarrationGateway {
 
   public getRuntime(): Promise<NarrationRuntimeSnapshotV1> {
     return Promise.resolve(structuredClone(this.#snapshot.runtime))
+  }
+
+  public setRuntime(update: Partial<NarrationRuntimeSnapshotV1>): void {
+    this.#snapshot = {
+      ...this.#snapshot,
+      runtime: { ...this.#snapshot.runtime, ...update },
+    }
   }
 
   public listVoices(): Promise<NarrationVoiceListV1> {
@@ -169,6 +177,7 @@ class FakeNarrationGateway implements NarrationGateway {
 
   public cancel(reason: NarrationCancelReason): Promise<void> {
     this.cancelReasons.push(reason)
+    this.onCancel?.(reason)
     return Promise.resolve()
   }
 }
@@ -277,6 +286,56 @@ describe("NarrationController", () => {
     await vi.waitFor(() => expect(gateway.speech).toHaveLength(2))
     expect(gateway.speech.at(-1)?.text).toBe("解除後です。")
     expect(gateway.cancelReasons).toContain("mute")
+  })
+
+  it("terminalizes immediately with the native unavailable code", async () => {
+    const { controller, gateway } = await ready(true)
+    const key = prepare(controller, ["説明です。"])
+    const runtimeSpy = vi.spyOn(gateway, "getRuntime")
+    gateway.setRuntime({
+      playbackState: "unavailable",
+      activeRequestId: null,
+      queueDepth: 0,
+      lastErrorCode: "NARRATION-SAY-EXIT",
+    })
+
+    await controller.activatePresentation(key)
+
+    await vi.waitFor(() =>
+      expect(controller.getSnapshot().presentation).toMatchObject({
+        speechStatus: "unavailable",
+        errorCode: "NARRATION-SAY-EXIT",
+      }),
+    )
+    expect(runtimeSpy).toHaveBeenCalledOnce()
+  })
+
+  it("awaits native cancellation before terminalizing a playback watchdog", async () => {
+    const { controller, gateway } = await ready(true)
+    const key = prepare(controller, ["説明です。"])
+    const statesAtCancel: string[] = []
+    gateway.setRuntime({
+      playbackState: "playing",
+      activeRequestId: "present-support-1",
+      queueDepth: 1,
+      lastErrorCode: null,
+    })
+    gateway.onCancel = () => {
+      statesAtCancel.push(
+        controller.getSnapshot().presentation?.speechStatus ?? "missing",
+      )
+    }
+
+    await controller.activatePresentation(key)
+
+    await vi.waitFor(() =>
+      expect(controller.getSnapshot().presentation).toMatchObject({
+        speechStatus: "unavailable",
+        errorCode: "NARRATION-PLAYBACK-TIMEOUT",
+      }),
+    )
+    expect(gateway.cancelReasons).toContain("explicit_cancel")
+    expect(statesAtCancel).toEqual(["playing"])
   })
 
   it("cancels old presentation for a different or unavailable commit", async () => {

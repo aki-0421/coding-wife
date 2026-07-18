@@ -588,11 +588,25 @@ export class NarrationController {
     while (elapsed < speechTimeoutMilliseconds && epoch === this.#speechEpoch) {
       const runtime = await this.gateway.getRuntime()
       this.updateRuntime(runtime)
+      if (runtime.playbackState === "unavailable") {
+        throw new NarrationBoundaryError({
+          code: runtime.lastErrorCode ?? "NARRATION-AUDIO-UNAVAILABLE",
+          operation: "narration_get_runtime",
+          recoverable: true,
+          userMessageKey: "narration.error.generic",
+          detailRef: "narration-v1",
+        })
+      }
       if (runtime.playbackState === "idle" && runtime.queueDepth === 0) return
       await this.pause(speechPollMilliseconds)
       elapsed += speechPollMilliseconds
     }
-    if (elapsed >= speechTimeoutMilliseconds) {
+    if (elapsed >= speechTimeoutMilliseconds && epoch === this.#speechEpoch) {
+      try {
+        await this.gateway.cancel("explicit_cancel")
+      } catch (error) {
+        this.update({ lastErrorCode: errorCode(error) })
+      }
       throw new NarrationBoundaryError({
         code: "NARRATION-PLAYBACK-TIMEOUT",
         operation: "narration_get_runtime",
