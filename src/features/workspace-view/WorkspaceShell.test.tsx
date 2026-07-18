@@ -25,6 +25,12 @@ const englishLocaleStore: LocalePreferenceStore = {
   write: () => true,
 }
 
+const japaneseLocaleStore: LocalePreferenceStore = {
+  persistence: "session-only",
+  read: () => "ja",
+  write: () => true,
+}
+
 function renderWorkspace(adapter?: WorkspaceViewAdapter) {
   return render(
     <App
@@ -90,7 +96,19 @@ function richCodexState(): WorkspaceCodexState {
       },
     ],
     allowedDecisions: [] as const,
-    approvalContext: null,
+    decisionContext: {
+      schemaVersion: 1 as const,
+      category: "user_decision" as const,
+      targetKind: "active_turn" as const,
+      targetAlias: "current turn",
+      effect: "continue_turn" as const,
+      scope: "turn" as const,
+      risk: "medium" as const,
+      reversibility: "unknown" as const,
+      recommendation: "bounded",
+      evidence: ["One bounded unit keeps the next change reviewable."],
+      uncertainty: "limited_context" as const,
+    },
   }
   const approval = {
     pendingId: "pending-approval",
@@ -101,16 +119,18 @@ function richCodexState(): WorkspaceCodexState {
     kind: "command_approval" as const,
     questions: [] as const,
     allowedDecisions: ["approve_once", "reject", "stop"] as const,
-    approvalContext: {
+    decisionContext: {
       schemaVersion: 1 as const,
       category: "command_execution" as const,
       targetKind: "workspace" as const,
       targetAlias: "project test command",
+      effect: "execute_command" as const,
       scope: "command" as const,
       risk: "low" as const,
       reversibility: "reversible" as const,
       recommendation: "approve_once" as const,
       evidence: ["No network or repository history operation is requested."],
+      uncertainty: "none" as const,
     },
   }
   const base = {
@@ -882,12 +902,32 @@ describe("WorkspaceShell", () => {
     expect(approval).not.toBeNull()
     expect(
       within(approval as HTMLElement).getByText("Risk").parentElement,
-    ).toHaveTextContent("low")
+    ).toHaveTextContent("Low")
     expect(
       within(approval as HTMLElement).getByText("Reversibility").parentElement,
-    ).toHaveTextContent("reversible")
+    ).toHaveTextContent("Reversible")
+    expect(
+      within(approval as HTMLElement).getByText("Effect").parentElement,
+    ).toHaveTextContent("Run the command")
+    expect(
+      within(approval as HTMLElement).getByText("Recommendation").parentElement,
+    ).toHaveTextContent("Approve once")
+    const decision = container.querySelector<HTMLElement>(
+      '[data-event-kind="decision"]',
+    )
+    expect(decision).not.toBeNull()
+    expect(
+      within(decision as HTMLElement).getByText("Effect").parentElement,
+    ).toHaveTextContent("Continue the active turn")
+    expect(
+      within(decision as HTMLElement).getByText("Recommendation").parentElement,
+    ).toHaveTextContent("One bounded unit")
 
-    await user.click(screen.getByText("One bounded unit"))
+    await user.click(
+      within(decision as HTMLElement).getByRole("radio", {
+        name: /One bounded unit/,
+      }),
+    )
     await user.click(screen.getByRole("button", { name: "Send answer" }))
     await waitFor(() =>
       expect(respondPending).toHaveBeenCalledWith({
@@ -915,6 +955,50 @@ describe("WorkspaceShell", () => {
     await waitFor(() =>
       expect(stopTurn).toHaveBeenCalledWith("workspace-native"),
     )
+  })
+
+  it("localizes the complete decision trust context in Japanese", async () => {
+    const snapshot = richCodexState()
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      codexSnapshot: () => snapshot,
+      subscribeCodex(listener) {
+        listener(snapshot)
+        return () => undefined
+      },
+    }
+    const { container } = render(
+      <App
+        localeStore={japaneseLocaleStore}
+        transport={new DemoTransport()}
+        workspaceAdapter={adapter}
+      />,
+    )
+
+    expect(await screen.findByText("判断が必要です")).toBeVisible()
+    const decision = container.querySelector<HTMLElement>(
+      '[data-event-kind="decision"]',
+    )
+    expect(decision).not.toBeNull()
+    const card = within(decision as HTMLElement)
+    expect(card.getByText("実行されること").parentElement).toHaveTextContent(
+      "進行中のターンを続行",
+    )
+    expect(card.getByText("範囲").parentElement).toHaveTextContent(
+      "このターン",
+    )
+    expect(card.getByText("リスク").parentElement).toHaveTextContent("中")
+    expect(card.getByText("可逆性").parentElement).toHaveTextContent("不明")
+    expect(card.getByText("推奨").parentElement).toHaveTextContent(
+      "One bounded unit",
+    )
+    expect(card.getByText("不確実性").parentElement).toHaveTextContent(
+      "判断材料が限定的",
+    )
+    expect(
+      card.getByText("One bounded unit keeps the next change reviewable."),
+    ).toBeVisible()
   })
 
   it("keeps a held decision pending and sends a bounded Other answer with Command+Enter", async () => {

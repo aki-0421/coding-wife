@@ -539,11 +539,14 @@ function isPersistedPendingRequestPublic(request: PendingRequestView): boolean {
       }
     }
   }
-  const context = request.approvalContext
+  const context = request.decisionContext
   return (
-    context === null ||
-    (isPublicSingleLineText(context.targetAlias, 256) &&
-      context.evidence.every((item) => isPublicSingleLineText(item, 256)))
+    isPublicSingleLineText(context.targetAlias, 256) &&
+    (context.recommendation === null ||
+      isPublicSingleLineText(context.recommendation, 256)) &&
+    context.evidence.length >= 1 &&
+    context.evidence.length <= 8 &&
+    context.evidence.every((item) => isPublicMultilineText(item, 512))
   )
 }
 

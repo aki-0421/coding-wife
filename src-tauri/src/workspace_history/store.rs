@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::codex::redaction::redact_text;
-use crate::codex::types::{PendingKind, PendingRequestView, PendingResponseKind};
+use crate::codex::types::{ApprovalDecision, PendingKind, PendingRequestView, PendingResponseKind};
 use crate::codex::workspace::{
     AppPrivateWorkspaceRecord, GitRepositoryIdentity, ValidatedWorkspaceCandidate,
 };
@@ -1662,10 +1662,49 @@ fn validate_persisted_pending_request(value: &Value, approval_expected: bool) ->
     if approval != approval_expected {
         return false;
     }
+    let context = &request.decision_context;
+    let mut evidence = HashSet::new();
+    if context.schema_version != 1
+        || !public_single_line(&context.target_alias, 256, false)
+        || context.target_alias != request.target_alias
+        || !["command", "turn"].contains(&context.scope.as_str())
+        || !["low", "medium", "high"].contains(&context.risk.as_str())
+        || ![
+            "reversible",
+            "partially_reversible",
+            "not_reversible",
+            "unknown",
+        ]
+        .contains(&context.reversibility.as_str())
+        || !["none", "limited_context", "unknown_effects"].contains(&context.uncertainty.as_str())
+        || !context
+            .recommendation
+            .as_deref()
+            .is_none_or(|recommendation| public_single_line(recommendation, 256, false))
+        || !(1..=8).contains(&context.evidence.len())
+        || context
+            .evidence
+            .iter()
+            .any(|item| !public_multiline(item, 512, false) || !evidence.insert(item.as_str()))
+    {
+        return false;
+    }
     if !approval {
-        return request.approval_context.is_none()
-            && request.allowed_decisions.is_empty()
+        let option_ids = request
+            .questions
+            .iter()
+            .flat_map(|question| question.options.iter().map(|option| option.id.as_str()))
+            .collect::<HashSet<_>>();
+        return request.allowed_decisions.is_empty()
             && (1..=3).contains(&request.questions.len())
+            && context.category == "user_decision"
+            && context.target_kind == "active_turn"
+            && context.effect == "continue_turn"
+            && context.scope == "turn"
+            && context
+                .recommendation
+                .as_deref()
+                .is_none_or(|recommendation| option_ids.contains(recommendation))
             && match request.response_kind {
                 PendingResponseKind::FallbackDecision => {
                     request.operation == "decision_fallback" && request.questions.len() == 1
@@ -1674,13 +1713,10 @@ fn validate_persisted_pending_request(value: &Value, approval_expected: bool) ->
             };
     }
 
-    let Some(context) = request.approval_context.as_ref() else {
-        return false;
-    };
-    let expected_category = match request.kind {
-        PendingKind::CommandApproval => "command_execution",
-        PendingKind::FileChangeApproval => "file_change",
-        PendingKind::PermissionsApproval => "permissions",
+    let (expected_category, expected_effect) = match request.kind {
+        PendingKind::CommandApproval => ("command_execution", "execute_command"),
+        PendingKind::FileChangeApproval => ("file_change", "apply_file_change"),
+        PendingKind::PermissionsApproval => ("permissions", "grant_permissions"),
         PendingKind::UserInput => return false,
     };
     let decisions_unique = request
@@ -1688,30 +1724,27 @@ fn validate_persisted_pending_request(value: &Value, approval_expected: bool) ->
         .iter()
         .enumerate()
         .all(|(index, decision)| !request.allowed_decisions[..index].contains(decision));
+    let recommendation_allowed = context
+        .recommendation
+        .as_deref()
+        .is_some_and(|recommended| {
+            request.allowed_decisions.iter().any(|decision| {
+                recommended
+                    == match decision {
+                        ApprovalDecision::ApproveOnce => "approve_once",
+                        ApprovalDecision::Reject => "reject",
+                        ApprovalDecision::Stop => "stop",
+                    }
+            })
+        });
     request.response_kind == PendingResponseKind::NativeServerRequest
         && request.questions.is_empty()
         && (1..=3).contains(&request.allowed_decisions.len())
         && decisions_unique
-        && context.schema_version == 1
         && context.category == expected_category
         && ["network_host", "workspace", "workspace_path"].contains(&context.target_kind.as_str())
-        && public_single_line(&context.target_alias, 256, false)
-        && context.target_alias == request.target_alias
-        && ["command", "turn"].contains(&context.scope.as_str())
-        && ["low", "medium", "high"].contains(&context.risk.as_str())
-        && [
-            "reversible",
-            "partially_reversible",
-            "not_reversible",
-            "unknown",
-        ]
-        .contains(&context.reversibility.as_str())
-        && request.allowed_decisions.contains(&context.recommendation)
-        && (1..=8).contains(&context.evidence.len())
-        && context
-            .evidence
-            .iter()
-            .all(|evidence| public_single_line(evidence, 256, false))
+        && context.effect == expected_effect
+        && recommendation_allowed
 }
 
 fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Value>) -> bool {
@@ -2652,7 +2685,19 @@ mod tests {
                         ]
                     }],
                     "allowedDecisions": [],
-                    "approvalContext": null
+                    "decisionContext": {
+                        "schemaVersion": 1,
+                        "category": "user_decision",
+                        "targetKind": "active_turn",
+                        "targetAlias": "active_turn",
+                        "effect": "continue_turn",
+                        "scope": "turn",
+                        "risk": "medium",
+                        "reversibility": "unknown",
+                        "recommendation": "continue",
+                        "evidence": ["The next step is bounded and reviewable."],
+                        "uncertainty": "limited_context"
+                    }
                 }}),
             ),
             (
@@ -2666,16 +2711,18 @@ mod tests {
                     "reason": null,
                     "questions": [],
                     "allowedDecisions": ["approve_once", "reject", "stop"],
-                    "approvalContext": {
+                    "decisionContext": {
                         "schemaVersion": 1,
                         "category": "command_execution",
                         "targetKind": "workspace",
                         "targetAlias": "project_command",
+                        "effect": "execute_command",
                         "scope": "command",
                         "risk": "medium",
                         "reversibility": "reversible",
                         "recommendation": "approve_once",
-                        "evidence": ["workspace_command"]
+                        "evidence": ["workspace_command"],
+                        "uncertainty": "none"
                     }
                 }}),
             ),

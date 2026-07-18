@@ -374,21 +374,23 @@ pub struct PendingRequestView {
     pub reason: Option<String>,
     pub questions: Vec<PendingQuestion>,
     pub allowed_decisions: Vec<ApprovalDecision>,
-    pub approval_context: Option<ApprovalContext>,
+    pub decision_context: DecisionContext,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct ApprovalContext {
+pub struct DecisionContext {
     pub schema_version: u16,
     pub category: String,
     pub target_kind: String,
     pub target_alias: String,
+    pub effect: String,
     pub scope: String,
     pub risk: String,
     pub reversibility: String,
-    pub recommendation: ApprovalDecision,
+    pub recommendation: Option<String>,
     pub evidence: Vec<String>,
+    pub uncertainty: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

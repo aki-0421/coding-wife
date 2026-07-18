@@ -3,14 +3,14 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use super::redaction::redact_text;
 use super::types::{
-    PendingKind, PendingOption, PendingQuestion, PendingRequestView, PendingResponseKind,
-    ReasoningPreset,
+    DecisionContext, PendingKind, PendingOption, PendingQuestion, PendingRequestView,
+    PendingResponseKind, ReasoningPreset,
 };
 
 pub const FALLBACK_DECISION_TIMEOUT: Duration = Duration::from_secs(300);
@@ -130,11 +130,18 @@ impl FallbackDecisionLedger {
             };
         }
         view.pending_id = decision_handle.clone();
+        let recommendation = view.decision_context.recommendation.take();
+        let mut contextual_recommendation = None;
         for question in &mut view.questions {
             for option in &mut question.options {
-                option.id = contextual_handle("option", &[&decision_handle, &option.id]);
+                let original_id = option.id.clone();
+                option.id = contextual_handle("option", &[&decision_handle, &original_id]);
+                if recommendation.as_deref() == Some(original_id.as_str()) {
+                    contextual_recommendation = Some(option.id.clone());
+                }
             }
         }
+        view.decision_context.recommendation = contextual_recommendation;
         self.entries.insert(
             decision_handle,
             FallbackDecisionEntry {
@@ -311,6 +318,7 @@ enum WireDecisionOutput {
         decision_id: String,
         question: String,
         options: Vec<WireOption>,
+        context: WireDecisionContext,
         #[serde(rename = "allowFreeform")]
         allow_freeform: bool,
     },
@@ -322,6 +330,22 @@ struct WireOption {
     id: String,
     label: String,
     description: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct WireDecisionContext {
+    schema_version: u16,
+    category: String,
+    target_kind: String,
+    target_alias: String,
+    effect: String,
+    scope: String,
+    risk: String,
+    reversibility: String,
+    recommendation: Value,
+    evidence: Vec<String>,
+    uncertainty: String,
 }
 
 pub fn parse_completed_output(
@@ -351,6 +375,7 @@ pub fn parse_completed_output(
             decision_id,
             question,
             options,
+            context,
             allow_freeform,
         } => {
             if schema_version != 1
@@ -365,6 +390,7 @@ pub fn parse_completed_output(
             let mut ids = HashSet::new();
             let mut labels = HashSet::new();
             let mut views = Vec::with_capacity(options.len());
+            let mut mapped_option_ids = HashMap::new();
             for option in options {
                 if !bounded(&option.id, 1, 128)
                     || !bounded(&option.label, 1, 256)
@@ -374,12 +400,16 @@ pub fn parse_completed_output(
                 {
                     return Err(DecisionOutputError::Invalid);
                 }
+                let mapped_id = opaque_id("option", &option.id);
+                mapped_option_ids.insert(option.id, mapped_id.clone());
                 views.push(PendingOption {
-                    id: opaque_id("option", &option.id),
+                    id: mapped_id,
                     label: redact_text(&option.label, Some(workspace_root), 256),
                     description: redact_text(&option.description, Some(workspace_root), 1_024),
                 });
             }
+            let decision_context =
+                validate_wire_decision_context(context, &mapped_option_ids, workspace_root)?;
             Ok(DecisionOutput::Request {
                 view: Box::new(PendingRequestView {
                     pending_id: opaque_id("decision", &decision_id),
@@ -395,7 +425,7 @@ pub fn parse_completed_output(
                         options: views,
                     }],
                     allowed_decisions: Vec::new(),
-                    approval_context: None,
+                    decision_context,
                 }),
             })
         }
@@ -405,6 +435,76 @@ pub fn parse_completed_output(
 fn bounded(value: &str, minimum: usize, maximum: usize) -> bool {
     let count = value.chars().count();
     (minimum..=maximum).contains(&count) && !value.contains('\0')
+}
+
+fn validate_wire_decision_context(
+    context: WireDecisionContext,
+    mapped_option_ids: &HashMap<String, String>,
+    workspace_root: &Path,
+) -> Result<DecisionContext, DecisionOutputError> {
+    let raw_recommendation = context.recommendation;
+    let recommendation = match &raw_recommendation {
+        Value::Null => None,
+        Value::String(raw) => mapped_option_ids.get(raw).cloned(),
+        _ => return Err(DecisionOutputError::Invalid),
+    };
+    if context.schema_version != 1
+        || context.category != "user_decision"
+        || context.target_kind != "active_turn"
+        || context.target_alias != "active_turn"
+        || context.effect != "continue_turn"
+        || context.scope != "turn"
+        || !["low", "medium", "high"].contains(&context.risk.as_str())
+        || ![
+            "reversible",
+            "partially_reversible",
+            "not_reversible",
+            "unknown",
+        ]
+        .contains(&context.reversibility.as_str())
+        || !["none", "limited_context", "unknown_effects"].contains(&context.uncertainty.as_str())
+        || !(1..=8).contains(&context.evidence.len())
+        || recommendation.is_none() && !raw_recommendation.is_null()
+    {
+        return Err(DecisionOutputError::Invalid);
+    }
+
+    let mut evidence = HashSet::new();
+    if context.evidence.iter().any(|item| {
+        !public_context_text(item, 1, 512, true, workspace_root) || !evidence.insert(item.as_str())
+    }) {
+        return Err(DecisionOutputError::Invalid);
+    }
+
+    Ok(DecisionContext {
+        schema_version: 1,
+        category: context.category,
+        target_kind: context.target_kind,
+        target_alias: context.target_alias,
+        effect: context.effect,
+        scope: context.scope,
+        risk: context.risk,
+        reversibility: context.reversibility,
+        recommendation,
+        evidence: context.evidence,
+        uncertainty: context.uncertainty,
+    })
+}
+
+fn public_context_text(
+    value: &str,
+    minimum: usize,
+    maximum: usize,
+    multiline: bool,
+    workspace_root: &Path,
+) -> bool {
+    let count = value.chars().count();
+    (minimum..=maximum).contains(&count)
+        && value.chars().all(|character| {
+            (multiline && matches!(character, '\n' | '\t'))
+                || (character != '\r' && !character.is_control())
+        })
+        && redact_text(value, Some(workspace_root), value.len()) == value
 }
 
 fn opaque_id(prefix: &str, raw: &str) -> String {
@@ -423,13 +523,48 @@ fn contextual_handle(prefix: &str, components: &[&str]) -> String {
 }
 
 fn validate_fallback_view(view: &PendingRequestView) -> Result<(), FallbackDecisionError> {
+    let context = &view.decision_context;
+    let option_ids = view.questions.first().map(|question| {
+        question
+            .options
+            .iter()
+            .map(|option| option.id.as_str())
+            .collect::<HashSet<_>>()
+    });
     let valid = view.kind == PendingKind::UserInput
         && view.response_kind == PendingResponseKind::FallbackDecision
         && view.questions.len() == 1
         && view.allowed_decisions.is_empty()
-        && view.approval_context.is_none()
         && view.questions[0].options.len() >= 2
-        && view.questions[0].options.len() <= 3;
+        && view.questions[0].options.len() <= 3
+        && context.schema_version == 1
+        && context.category == "user_decision"
+        && context.target_kind == "active_turn"
+        && context.target_alias == view.target_alias
+        && context.effect == "continue_turn"
+        && context.scope == "turn"
+        && ["low", "medium", "high"].contains(&context.risk.as_str())
+        && [
+            "reversible",
+            "partially_reversible",
+            "not_reversible",
+            "unknown",
+        ]
+        .contains(&context.reversibility.as_str())
+        && ["none", "limited_context", "unknown_effects"].contains(&context.uncertainty.as_str())
+        && context
+            .recommendation
+            .as_deref()
+            .is_none_or(|recommendation| {
+                option_ids
+                    .as_ref()
+                    .is_some_and(|ids| ids.contains(recommendation))
+            })
+        && (1..=8).contains(&context.evidence.len())
+        && context
+            .evidence
+            .iter()
+            .all(|evidence| public_context_text(evidence, 1, 512, true, Path::new("")));
     if valid {
         Ok(())
     } else {
@@ -441,12 +576,38 @@ fn validate_fallback_view(view: &PendingRequestView) -> Result<(), FallbackDecis
 mod tests {
     use super::*;
 
+    fn decision_json() -> String {
+        json!({
+            "schemaVersion": 1,
+            "kind": "decision_request",
+            "message": "Choose",
+            "decisionId": "d1",
+            "question": "Continue?",
+            "options": [
+                {"id": "yes", "label": "Yes", "description": "Continue"},
+                {"id": "no", "label": "No", "description": "Stop"}
+            ],
+            "context": {
+                "schemaVersion": 1,
+                "category": "user_decision",
+                "targetKind": "active_turn",
+                "targetAlias": "active_turn",
+                "effect": "continue_turn",
+                "scope": "turn",
+                "risk": "medium",
+                "reversibility": "unknown",
+                "recommendation": "yes",
+                "evidence": ["The next step is bounded and reviewable."],
+                "uncertainty": "limited_context"
+            },
+            "allowFreeform": false
+        })
+        .to_string()
+    }
+
     fn decision_view() -> PendingRequestView {
-        let decision = parse_completed_output(
-            r#"{"schemaVersion":1,"kind":"decision_request","message":"Choose","decisionId":"d1","question":"Continue?","options":[{"id":"yes","label":"Yes","description":"Continue"},{"id":"no","label":"No","description":"Stop"}],"allowFreeform":false}"#,
-            Path::new("/workspace"),
-        )
-        .expect("decision");
+        let decision =
+            parse_completed_output(&decision_json(), Path::new("/workspace")).expect("decision");
         let DecisionOutput::Request { view } = decision else {
             panic!("request")
         };
@@ -477,16 +638,70 @@ mod tests {
             }
         );
 
-        let decision = parse_completed_output(
-            r#"{"schemaVersion":1,"kind":"decision_request","message":"Choose","decisionId":"d1","question":"Continue?","options":[{"id":"yes","label":"Yes","description":"Continue"},{"id":"no","label":"No","description":"Stop"}],"allowFreeform":false}"#,
-            Path::new("/workspace"),
-        )
-        .expect("decision");
+        let decision =
+            parse_completed_output(&decision_json(), Path::new("/workspace")).expect("decision");
         let DecisionOutput::Request { view } = decision else {
             panic!("request")
         };
         assert_eq!(view.questions.len(), 1);
         assert_eq!(view.questions[0].options.len(), 2);
+        assert_eq!(
+            view.decision_context.recommendation.as_deref(),
+            Some(view.questions[0].options[0].id.as_str())
+        );
+        assert_eq!(view.decision_context.effect, "continue_turn");
+    }
+
+    #[test]
+    fn invalid_unknown_or_private_decision_context_is_rejected() {
+        let valid: Value = serde_json::from_str(&decision_json()).expect("valid json");
+        for invalid in [
+            json!({
+                "schemaVersion": 1,
+                "kind": "decision_request",
+                "message": "Choose",
+                "decisionId": "d1",
+                "question": "Continue?",
+                "options": [
+                    {"id": "yes", "label": "Yes", "description": "Continue"},
+                    {"id": "no", "label": "No", "description": "Stop"}
+                ],
+                "context": {
+                    "schemaVersion": 2,
+                    "category": "user_decision",
+                    "targetKind": "active_turn",
+                    "targetAlias": "active_turn",
+                    "effect": "continue_turn",
+                    "scope": "turn",
+                    "risk": "medium",
+                    "reversibility": "unknown",
+                    "recommendation": "yes",
+                    "evidence": ["bounded"],
+                    "uncertainty": "limited_context"
+                },
+                "allowFreeform": false
+            }),
+            {
+                let mut value = valid.clone();
+                value["context"]["recommendation"] = json!("missing-option");
+                value
+            },
+            {
+                let mut value = valid.clone();
+                value["context"]["evidence"] = json!(["Bearer private-secret-value"]);
+                value
+            },
+            {
+                let mut value = valid.clone();
+                value["context"]["unknownField"] = json!(true);
+                value
+            },
+        ] {
+            assert_eq!(
+                parse_completed_output(&invalid.to_string(), Path::new("/workspace")),
+                Err(DecisionOutputError::Invalid)
+            );
+        }
     }
 
     #[test]
@@ -515,6 +730,10 @@ mod tests {
             panic!("new")
         };
         let option = view.questions[0].options[0].id.clone();
+        assert_eq!(
+            view.decision_context.recommendation.as_deref(),
+            Some(option.as_str())
+        );
         assert_eq!(
             ledger.claim(
                 &view.pending_id,

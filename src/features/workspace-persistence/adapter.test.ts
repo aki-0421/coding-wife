@@ -84,7 +84,19 @@ describe("PersistentWorkspaceViewAdapter", () => {
         },
       ],
       allowedDecisions: [],
-      approvalContext: null,
+      decisionContext: {
+        schemaVersion: 1,
+        category: "user_decision",
+        targetKind: "active_turn",
+        targetAlias: "active_turn",
+        effect: "continue_turn",
+        scope: "turn",
+        risk: "medium",
+        reversibility: "unknown",
+        recommendation: "continue",
+        evidence: ["The next step is bounded and reviewable."],
+        uncertainty: "limited_context",
+      },
     }
     const approvalRequest = codexFixture.events[1]!.payload.request
     const state = parseWorkspaceStateSnapshot({
@@ -180,10 +192,20 @@ describe("PersistentWorkspaceViewAdapter", () => {
       kind: "decision",
       request: fallbackRequest,
     })
+    expect(
+      projected.timeline[7]?.kind === "decision"
+        ? projected.timeline[7].request.decisionContext
+        : null,
+    ).toEqual(fallbackRequest.decisionContext)
     expect(projected.timeline[8]).toMatchObject({
       kind: "approval",
       request: approvalRequest,
     })
+    expect(
+      projected.timeline[8]?.kind === "approval"
+        ? projected.timeline[8].request.decisionContext
+        : null,
+    ).toEqual(approvalRequest.decisionContext)
     expect(JSON.stringify(projected)).not.toMatch(
       /rawStderr|chain-of-thought|\/Users\//iu,
     )

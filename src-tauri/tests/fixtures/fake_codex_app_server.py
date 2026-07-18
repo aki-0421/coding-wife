@@ -416,6 +416,21 @@ def main():
                                     "description": "Stop this turn",
                                 },
                             ],
+                            "context": {
+                                "schemaVersion": 1,
+                                "category": "user_decision",
+                                "targetKind": "active_turn",
+                                "targetAlias": "active_turn",
+                                "effect": "continue_turn",
+                                "scope": "turn",
+                                "risk": "medium",
+                                "reversibility": "unknown",
+                                "recommendation": "continue",
+                                "evidence": [
+                                    "The continuation is bounded to the active turn."
+                                ],
+                                "uncertainty": "limited_context",
+                            },
                             "allowFreeform": False,
                         },
                         separators=(",", ":"),

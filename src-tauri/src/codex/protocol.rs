@@ -313,6 +313,7 @@ pub fn decision_output_schema() -> Value {
                     "decisionId",
                     "question",
                     "options",
+                    "context",
                     "allowFreeform"
                 ],
                 "properties": {
@@ -334,6 +335,56 @@ pub fn decision_output_schema() -> Value {
                                 "id": {"type": "string", "minLength": 1, "maxLength": 128},
                                 "label": {"type": "string", "minLength": 1, "maxLength": 256},
                                 "description": {"type": "string", "maxLength": 1024}
+                            }
+                        }
+                    },
+                    "context": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "schemaVersion",
+                            "category",
+                            "targetKind",
+                            "targetAlias",
+                            "effect",
+                            "scope",
+                            "risk",
+                            "reversibility",
+                            "recommendation",
+                            "evidence",
+                            "uncertainty"
+                        ],
+                        "properties": {
+                            "schemaVersion": {"const": 1},
+                            "category": {"const": "user_decision"},
+                            "targetKind": {"const": "active_turn"},
+                            "targetAlias": {"const": "active_turn"},
+                            "effect": {"const": "continue_turn"},
+                            "scope": {"const": "turn"},
+                            "risk": {"enum": ["low", "medium", "high"]},
+                            "reversibility": {
+                                "enum": [
+                                    "reversible",
+                                    "partially_reversible",
+                                    "not_reversible",
+                                    "unknown"
+                                ]
+                            },
+                            "recommendation": {
+                                "oneOf": [
+                                    {"type": "string", "minLength": 1, "maxLength": 128},
+                                    {"type": "null"}
+                                ]
+                            },
+                            "evidence": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 8,
+                                "uniqueItems": true,
+                                "items": {"type": "string", "minLength": 1, "maxLength": 512}
+                            },
+                            "uncertainty": {
+                                "enum": ["none", "limited_context", "unknown_effects"]
                             }
                         }
                     },

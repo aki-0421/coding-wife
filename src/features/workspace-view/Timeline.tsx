@@ -191,6 +191,18 @@ function PendingRequestCard({
   const isDecision = request.kind === "user_input"
   const supportsOther =
     isDecision && request.responseKind === "native_server_request"
+  const decisionContext = request.decisionContext
+  const recommendation =
+    decisionContext.recommendation === null
+      ? copy.timelineEvent.noRecommendation
+      : isDecision
+        ? (request.questions
+            .flatMap((question) => question.options)
+            .find((option) => option.id === decisionContext.recommendation)
+            ?.label ?? copy.timelineEvent.noRecommendation)
+        : copy.timelineEvent.approvalDecision[
+            decisionContext.recommendation as ApprovalDecision
+          ]
   const complete =
     isDecision &&
     request.questions.every((question) => {
@@ -280,6 +292,53 @@ function PendingRequestCard({
           {request.targetAlias}
         </dd>
       </dl>
+
+      <div className="mt-sm rounded-control bg-surface p-sm">
+        <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-sm gap-y-xxs text-caption">
+          <dt className="text-muted-foreground">{copy.timelineEvent.effect}</dt>
+          <dd className="m-0 text-text-secondary">
+            {copy.timelineEvent.decisionEffect[decisionContext.effect]}
+          </dd>
+          <dt className="text-muted-foreground">{copy.timelineEvent.scope}</dt>
+          <dd className="m-0 text-text-secondary">
+            {copy.timelineEvent.scopeValue[decisionContext.scope]}
+          </dd>
+          <dt className="text-muted-foreground">{copy.timelineEvent.risk}</dt>
+          <dd className="m-0 text-text-secondary">
+            {copy.timelineEvent.riskValue[decisionContext.risk]}
+          </dd>
+          <dt className="text-muted-foreground">
+            {copy.timelineEvent.reversibility}
+          </dt>
+          <dd className="m-0 text-text-secondary">
+            {
+              copy.timelineEvent.reversibilityValue[
+                decisionContext.reversibility
+              ]
+            }
+          </dd>
+          <dt className="text-muted-foreground">
+            {copy.timelineEvent.recommendation}
+          </dt>
+          <dd className="m-0 text-text-secondary">{recommendation}</dd>
+          <dt className="text-muted-foreground">
+            {copy.timelineEvent.uncertainty}
+          </dt>
+          <dd className="m-0 text-text-secondary">
+            {copy.timelineEvent.uncertaintyValue[decisionContext.uncertainty]}
+          </dd>
+        </dl>
+        <div className="mt-sm">
+          <span className="text-label uppercase tracking-wide text-muted-foreground">
+            {copy.timelineEvent.evidence}
+          </span>
+          <ul className="mb-0 mt-xs space-y-xxs pl-lg text-caption text-text-secondary">
+            {decisionContext.evidence.map((evidence) => (
+              <li key={evidence}>{evidence}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
 
       {isDecision ? (
         <div
@@ -401,46 +460,6 @@ function PendingRequestCard({
         </div>
       ) : (
         <div className="mt-md">
-          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-sm gap-y-xxs rounded-control bg-surface p-sm text-caption">
-            <dt className="text-muted-foreground">
-              {copy.timelineEvent.scope}
-            </dt>
-            <dd className="m-0 text-text-secondary">
-              {request.approvalContext.scope}
-            </dd>
-            <dt className="text-muted-foreground">{copy.timelineEvent.risk}</dt>
-            <dd className="m-0 text-text-secondary">
-              {request.approvalContext.risk}
-            </dd>
-            <dt className="text-muted-foreground">
-              {copy.timelineEvent.reversibility}
-            </dt>
-            <dd className="m-0 text-text-secondary">
-              {request.approvalContext.reversibility}
-            </dd>
-            <dt className="text-muted-foreground">
-              {copy.timelineEvent.recommendation}
-            </dt>
-            <dd className="m-0 text-text-secondary">
-              {
-                copy.timelineEvent.approvalDecision[
-                  request.approvalContext.recommendation
-                ]
-              }
-            </dd>
-          </dl>
-          {request.approvalContext.evidence.length > 0 ? (
-            <div className="mt-sm">
-              <span className="text-label uppercase tracking-wide text-muted-foreground">
-                {copy.timelineEvent.evidence}
-              </span>
-              <ul className="mb-0 mt-xs space-y-xxs pl-lg text-caption text-text-secondary">
-                {request.approvalContext.evidence.map((evidence) => (
-                  <li key={evidence}>{evidence}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
           <div className="mt-md flex flex-wrap gap-xs">
             {request.allowedDecisions.map((decision) => (
               <Button

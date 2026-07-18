@@ -257,19 +257,34 @@ interface PendingRequestBase {
   readonly operation: string
   readonly targetAlias: string
   readonly reason: string | null
+  readonly decisionContext: DecisionContext
 }
 
-export interface ApprovalContext {
+export interface DecisionContext {
   readonly schemaVersion: 1
-  readonly category: "command_execution" | "file_change" | "permissions"
-  readonly targetKind: "network_host" | "workspace" | "workspace_path"
+  readonly category:
+    | "command_execution"
+    | "file_change"
+    | "permissions"
+    | "user_decision"
+  readonly targetKind:
+    | "network_host"
+    | "workspace"
+    | "workspace_path"
+    | "active_turn"
   readonly targetAlias: string
+  readonly effect:
+    | "execute_command"
+    | "apply_file_change"
+    | "grant_permissions"
+    | "continue_turn"
   readonly scope: "command" | "turn"
   readonly risk: "low" | "medium" | "high"
   readonly reversibility:
     "reversible" | "partially_reversible" | "not_reversible" | "unknown"
-  readonly recommendation: ApprovalDecision
+  readonly recommendation: string | null
   readonly evidence: readonly string[]
+  readonly uncertainty: "none" | "limited_context" | "unknown_effects"
 }
 
 export interface ApprovalPendingRequest extends PendingRequestBase {
@@ -277,7 +292,6 @@ export interface ApprovalPendingRequest extends PendingRequestBase {
   readonly responseKind: "native_server_request"
   readonly questions: readonly []
   readonly allowedDecisions: readonly ApprovalDecision[]
-  readonly approvalContext: ApprovalContext
 }
 
 export interface NativeUserInputPendingRequest extends PendingRequestBase {
@@ -285,7 +299,6 @@ export interface NativeUserInputPendingRequest extends PendingRequestBase {
   readonly responseKind: "native_server_request"
   readonly questions: readonly PendingQuestion[]
   readonly allowedDecisions: readonly []
-  readonly approvalContext: null
 }
 
 export interface FallbackDecisionPendingRequest extends PendingRequestBase {
@@ -293,7 +306,6 @@ export interface FallbackDecisionPendingRequest extends PendingRequestBase {
   readonly responseKind: "fallback_decision"
   readonly questions: readonly [PendingQuestion]
   readonly allowedDecisions: readonly []
-  readonly approvalContext: null
 }
 
 export type PendingRequestView =
@@ -953,11 +965,19 @@ const approvalCategories = [
   "command_execution",
   "file_change",
   "permissions",
+  "user_decision",
 ] as const
 const approvalTargetKinds = [
   "network_host",
   "workspace",
   "workspace_path",
+  "active_turn",
+] as const
+const decisionEffects = [
+  "execute_command",
+  "apply_file_change",
+  "grant_permissions",
+  "continue_turn",
 ] as const
 const approvalScopes = ["command", "turn"] as const
 const approvalRisks = ["low", "medium", "high"] as const
@@ -967,8 +987,13 @@ const approvalReversibility = [
   "not_reversible",
   "unknown",
 ] as const
+const decisionUncertainty = [
+  "none",
+  "limited_context",
+  "unknown_effects",
+] as const
 
-function parseApprovalContext(value: unknown): ApprovalContext {
+function parseDecisionContext(value: unknown): DecisionContext {
   if (
     !isRecord(value) ||
     !exact(value, [
@@ -976,25 +1001,30 @@ function parseApprovalContext(value: unknown): ApprovalContext {
       "category",
       "targetKind",
       "targetAlias",
+      "effect",
       "scope",
       "risk",
       "reversibility",
       "recommendation",
       "evidence",
+      "uncertainty",
     ]) ||
     value.schemaVersion !== 1 ||
     !oneOf(value.category, approvalCategories) ||
     !oneOf(value.targetKind, approvalTargetKinds) ||
-    !nonEmptyString(value.targetAlias) ||
+    !isPublicSingleLineText(value.targetAlias, 256) ||
+    !oneOf(value.effect, decisionEffects) ||
     !oneOf(value.scope, approvalScopes) ||
     !oneOf(value.risk, approvalRisks) ||
     !oneOf(value.reversibility, approvalReversibility) ||
-    !oneOf(value.recommendation, approvalDecisions) ||
+    !(value.recommendation === null ||
+      isPublicSingleLineText(value.recommendation, 256)) ||
     !Array.isArray(value.evidence) ||
     value.evidence.length < 1 ||
     value.evidence.length > 8 ||
-    !value.evidence.every(nonEmptyString) ||
-    new Set(value.evidence).size !== value.evidence.length
+    !value.evidence.every((item) => isPublicMultilineText(item, 512)) ||
+    new Set(value.evidence).size !== value.evidence.length ||
+    !oneOf(value.uncertainty, decisionUncertainty)
   ) {
     return violation()
   }
@@ -1003,11 +1033,13 @@ function parseApprovalContext(value: unknown): ApprovalContext {
     category: value.category,
     targetKind: value.targetKind,
     targetAlias: value.targetAlias,
+    effect: value.effect,
     scope: value.scope,
     risk: value.risk,
     reversibility: value.reversibility,
     recommendation: value.recommendation,
     evidence: value.evidence,
+    uncertainty: value.uncertainty,
   }
 }
 
@@ -1023,7 +1055,7 @@ export function parsePendingRequest(value: unknown): PendingRequestView {
       "reason",
       "questions",
       "allowedDecisions",
-      "approvalContext",
+      "decisionContext",
     ]) ||
     !nonEmptyString(value.pendingId) ||
     !oneOf(value.kind, pendingKinds) ||
@@ -1048,13 +1080,13 @@ export function parsePendingRequest(value: unknown): PendingRequestView {
     operation: value.operation,
     targetAlias: value.targetAlias,
     reason: value.reason,
+    decisionContext: parseDecisionContext(value.decisionContext),
   }
   if (value.kind === "user_input") {
     if (
       value.questions.length < 1 ||
       value.questions.length > 3 ||
-      value.allowedDecisions.length !== 0 ||
-      value.approvalContext !== null
+      value.allowedDecisions.length !== 0
     ) {
       return violation()
     }
@@ -1064,6 +1096,23 @@ export function parsePendingRequest(value: unknown): PendingRequestView {
       questions.length
     )
       return violation()
+    const decisionContext = common.decisionContext
+    const optionIds = new Set(
+      questions.flatMap((question) =>
+        question.options.map((option) => option.id),
+      ),
+    )
+    if (
+      decisionContext.category !== "user_decision" ||
+      decisionContext.targetKind !== "active_turn" ||
+      decisionContext.targetAlias !== value.targetAlias ||
+      decisionContext.effect !== "continue_turn" ||
+      decisionContext.scope !== "turn" ||
+      (decisionContext.recommendation !== null &&
+        !optionIds.has(decisionContext.recommendation))
+    ) {
+      return violation()
+    }
     if (value.responseKind === "fallback_decision") {
       if (value.operation !== "decision_fallback" || questions.length !== 1)
         return violation()
@@ -1075,7 +1124,6 @@ export function parsePendingRequest(value: unknown): PendingRequestView {
         responseKind: "fallback_decision",
         questions: [question],
         allowedDecisions: [],
-        approvalContext: null,
       }
     }
     return {
@@ -1084,7 +1132,6 @@ export function parsePendingRequest(value: unknown): PendingRequestView {
       responseKind: "native_server_request",
       questions,
       allowedDecisions: [],
-      approvalContext: null,
     }
   }
 
@@ -1097,15 +1144,24 @@ export function parsePendingRequest(value: unknown): PendingRequestView {
   ) {
     return violation()
   }
-  const approvalContext = parseApprovalContext(value.approvalContext)
+  const decisionContext = common.decisionContext
   const expectedCategory = {
     command_approval: "command_execution",
     file_change_approval: "file_change",
     permissions_approval: "permissions",
   } as const
+  const expectedEffect = {
+    command_approval: "execute_command",
+    file_change_approval: "apply_file_change",
+    permissions_approval: "grant_permissions",
+  } as const
   if (
-    approvalContext.category !== expectedCategory[value.kind] ||
-    approvalContext.targetAlias !== value.targetAlias
+    decisionContext.category !== expectedCategory[value.kind] ||
+    decisionContext.targetAlias !== value.targetAlias ||
+    decisionContext.effect !== expectedEffect[value.kind] ||
+    decisionContext.recommendation === null ||
+    !oneOf(decisionContext.recommendation, approvalDecisions) ||
+    !value.allowedDecisions.includes(decisionContext.recommendation)
   ) {
     return violation()
   }
@@ -1115,7 +1171,6 @@ export function parsePendingRequest(value: unknown): PendingRequestView {
     responseKind: "native_server_request",
     questions: [],
     allowedDecisions: value.allowedDecisions,
-    approvalContext,
   }
 }
 
@@ -1459,3 +1514,7 @@ export function parseCodexResponse<K extends CodexCommand>(
       return parseReviewResponse(value) as CodexResponseMap[K]
   }
 }
+import {
+  isPublicMultilineText,
+  isPublicSingleLineText,
+} from "@/lib/public-text"

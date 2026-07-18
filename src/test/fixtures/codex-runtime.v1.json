@@ -100,16 +100,18 @@
           "reason": null,
           "questions": [],
           "allowedDecisions": ["approve_once", "reject", "stop"],
-          "approvalContext": {
+          "decisionContext": {
             "schemaVersion": 1,
             "category": "command_execution",
             "targetKind": "workspace_path",
             "targetAlias": "project command",
+            "effect": "execute_command",
             "scope": "command",
             "risk": "low",
             "reversibility": "reversible",
             "recommendation": "approve_once",
-            "evidence": ["read_only_action"]
+            "evidence": ["read_only_action"],
+            "uncertainty": "none"
           }
         }
       }

@@ -165,7 +165,19 @@ describe("Codex runtime contract", () => {
         },
       ],
       allowedDecisions: [],
-      approvalContext: null,
+      decisionContext: {
+        schemaVersion: 1,
+        category: "user_decision",
+        targetKind: "active_turn",
+        targetAlias: base.targetAlias,
+        effect: "continue_turn",
+        scope: "turn",
+        risk: "medium",
+        reversibility: "unknown",
+        recommendation: "a",
+        evidence: ["The selected option determines how this turn continues."],
+        uncertainty: "limited_context",
+      },
     }
     expect(
       parseCodexEvent({
@@ -237,6 +249,48 @@ describe("Codex runtime contract", () => {
         ...pending,
         payload: {
           request: { ...userInput, allowedDecisions: ["reject"] },
+        },
+      }),
+    ).toThrow(CodexContractError)
+    expect(() =>
+      parseCodexEvent({
+        ...pending,
+        payload: {
+          request: {
+            ...userInput,
+            decisionContext: {
+              ...userInput.decisionContext,
+              recommendation: "unknown-option",
+            },
+          },
+        },
+      }),
+    ).toThrow(CodexContractError)
+    expect(() =>
+      parseCodexEvent({
+        ...pending,
+        payload: {
+          request: {
+            ...userInput,
+            decisionContext: {
+              ...userInput.decisionContext,
+              evidence: ["Bearer private-secret-value"],
+            },
+          },
+        },
+      }),
+    ).toThrow(CodexContractError)
+    expect(() =>
+      parseCodexEvent({
+        ...pending,
+        payload: {
+          request: {
+            ...userInput,
+            decisionContext: {
+              ...userInput.decisionContext,
+              unknownField: "not-versioned",
+            },
+          },
         },
       }),
     ).toThrow(CodexContractError)

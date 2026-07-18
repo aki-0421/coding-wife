@@ -57,7 +57,7 @@ export {
   type AttachmentSource,
   type AttachmentView,
   type ApprovalDecision,
-  type ApprovalContext,
+  type DecisionContext,
   type ApprovalPendingRequest,
   type CapabilityState,
   type CodexBinarySource,

@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use super::protocol::{server_error, server_result, RpcId};
 use super::types::{
-    ApprovalContext, ApprovalDecision, CapabilityState, CodexCapabilities, PendingKind,
+    ApprovalDecision, CapabilityState, CodexCapabilities, DecisionContext, PendingKind,
     PendingOption, PendingQuestion, PendingRequestView, PendingResponse, PendingResponseKind,
 };
 
@@ -264,6 +264,7 @@ fn approval_record(
     let hash = params_hash(params)?;
     let id = pending_id(&rpc_id, &hash);
     let decisions = allowed_approval_decisions(object)?;
+    let decision_context = approval_decision_context(method, object, workspace_root, &decisions);
     let view = PendingRequestView {
         pending_id: id,
         kind,
@@ -275,7 +276,7 @@ fn approval_record(
         reason: None,
         questions: Vec::new(),
         allowed_decisions: decisions,
-        approval_context: Some(approval_context(method, object, workspace_root)),
+        decision_context,
     };
     Ok(PendingRecord {
         rpc_key: rpc_id.stable_key(),
@@ -384,7 +385,19 @@ fn user_input_record(
         reason: None,
         questions: views,
         allowed_decisions: Vec::new(),
-        approval_context: None,
+        decision_context: DecisionContext {
+            schema_version: 1,
+            category: "user_decision".to_owned(),
+            target_kind: "active_turn".to_owned(),
+            target_alias: "active_turn".to_owned(),
+            effect: "continue_turn".to_owned(),
+            scope: "turn".to_owned(),
+            risk: "medium".to_owned(),
+            reversibility: "unknown".to_owned(),
+            recommendation: None,
+            evidence: vec!["user_input_requested".to_owned()],
+            uncertainty: "limited_context".to_owned(),
+        },
     };
     Ok(PendingRecord {
         rpc_key: rpc_id.stable_key(),
@@ -585,88 +598,118 @@ fn build_resolution(
     }
 }
 
-fn approval_context(
+fn approval_decision_context(
     method: &str,
     params: &serde_json::Map<String, Value>,
     workspace_root: &Path,
-) -> ApprovalContext {
+    allowed_decisions: &[ApprovalDecision],
+) -> DecisionContext {
     let target_alias = approval_target_alias(method, params, workspace_root);
-    let (category, target_kind, scope, risk, reversibility, recommendation, mut evidence) =
-        match method {
-            "item/commandExecution/requestApproval" => {
-                let network = params
-                    .get("networkApprovalContext")
-                    .is_some_and(|value| !value.is_null());
-                let additional = params
-                    .get("additionalPermissions")
-                    .is_some_and(|value| !value.is_null());
-                let known_read_only = params
-                    .get("commandActions")
-                    .and_then(Value::as_array)
-                    .is_some_and(|actions| {
-                        !actions.is_empty()
-                            && actions.iter().all(|action| {
-                                action
-                                    .get("type")
-                                    .and_then(Value::as_str)
-                                    .is_some_and(|kind| {
-                                        ["read", "listFiles", "search"].contains(&kind)
-                                    })
-                            })
-                    });
-                if network || additional || !known_read_only {
-                    (
-                        "command_execution",
-                        if network { "network_host" } else { "workspace" },
-                        "command",
-                        "high",
-                        "unknown",
-                        ApprovalDecision::Reject,
-                        vec!["untrusted_command".to_owned()],
-                    )
-                } else {
-                    (
-                        "command_execution",
-                        "workspace_path",
-                        "command",
-                        "low",
-                        "reversible",
-                        ApprovalDecision::ApproveOnce,
-                        vec!["read_only_action".to_owned()],
-                    )
-                }
+    let (
+        category,
+        target_kind,
+        effect,
+        scope,
+        risk,
+        reversibility,
+        preferred_recommendation,
+        mut evidence,
+    ) = match method {
+        "item/commandExecution/requestApproval" => {
+            let network = params
+                .get("networkApprovalContext")
+                .is_some_and(|value| !value.is_null());
+            let additional = params
+                .get("additionalPermissions")
+                .is_some_and(|value| !value.is_null());
+            let known_read_only = params
+                .get("commandActions")
+                .and_then(Value::as_array)
+                .is_some_and(|actions| {
+                    !actions.is_empty()
+                        && actions.iter().all(|action| {
+                            action
+                                .get("type")
+                                .and_then(Value::as_str)
+                                .is_some_and(|kind| ["read", "listFiles", "search"].contains(&kind))
+                        })
+                });
+            if network || additional || !known_read_only {
+                (
+                    "command_execution",
+                    if network { "network_host" } else { "workspace" },
+                    "execute_command",
+                    "command",
+                    "high",
+                    "unknown",
+                    ApprovalDecision::Reject,
+                    vec!["untrusted_command".to_owned()],
+                )
+            } else {
+                (
+                    "command_execution",
+                    "workspace_path",
+                    "execute_command",
+                    "command",
+                    "low",
+                    "reversible",
+                    ApprovalDecision::ApproveOnce,
+                    vec!["read_only_action".to_owned()],
+                )
             }
-            "item/fileChange/requestApproval" => (
-                "file_change",
-                "workspace_path",
-                "turn",
-                "medium",
-                "partially_reversible",
-                ApprovalDecision::Reject,
-                vec!["repository_mutation".to_owned()],
-            ),
-            _ => (
-                "permissions",
-                "workspace",
-                "turn",
-                "high",
-                "not_reversible",
-                ApprovalDecision::Reject,
-                permission_evidence(params.get("permissions")),
-            ),
-        };
+        }
+        "item/fileChange/requestApproval" => (
+            "file_change",
+            "workspace_path",
+            "apply_file_change",
+            "turn",
+            "medium",
+            "partially_reversible",
+            ApprovalDecision::Reject,
+            vec!["repository_mutation".to_owned()],
+        ),
+        _ => (
+            "permissions",
+            "workspace",
+            "grant_permissions",
+            "turn",
+            "high",
+            "not_reversible",
+            ApprovalDecision::Reject,
+            permission_evidence(params.get("permissions")),
+        ),
+    };
     evidence.sort();
     evidence.dedup();
-    ApprovalContext {
+    let recommendation = if allowed_decisions.contains(&preferred_recommendation) {
+        preferred_recommendation
+    } else if allowed_decisions.contains(&ApprovalDecision::Reject) {
+        ApprovalDecision::Reject
+    } else if allowed_decisions.contains(&ApprovalDecision::Stop) {
+        ApprovalDecision::Stop
+    } else {
+        allowed_decisions[0]
+    };
+    DecisionContext {
         schema_version: 1,
         category: category.to_owned(),
         target_kind: target_kind.to_owned(),
         target_alias,
+        effect: effect.to_owned(),
         scope: scope.to_owned(),
         risk: risk.to_owned(),
         reversibility: reversibility.to_owned(),
-        recommendation,
+        recommendation: Some(approval_decision_name(recommendation).to_owned()),
         evidence,
+        uncertainty: "none".to_owned(),
+    }
+}
+
+fn approval_decision_name(decision: ApprovalDecision) -> &'static str {
+    match decision {
+        ApprovalDecision::ApproveOnce => "approve_once",
+        ApprovalDecision::Reject => "reject",
+        ApprovalDecision::Stop => "stop",
     }
 }
 
@@ -1010,13 +1053,7 @@ mod tests {
         let encoded = serde_json::to_string(&view).expect("serialize");
 
         assert!(view.target_alias.starts_with("host-"));
-        assert_eq!(
-            view.approval_context
-                .as_ref()
-                .expect("approval context")
-                .risk,
-            "high"
-        );
+        assert_eq!(view.decision_context.risk, "high");
         for private in [
             "curl",
             "Authorization",
