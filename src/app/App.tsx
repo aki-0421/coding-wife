@@ -19,6 +19,7 @@ import {
   type NarrationGateway,
 } from "@/features/narration"
 import {
+  DemoCommitExplanationRuntime,
   DemoGitReviewTransport,
   TauriCommitExplanationAdapter,
   TauriGitReviewTransport,
@@ -67,6 +68,7 @@ export function App({
 }: AppProps) {
   const [fallbackTransport] = useState(createAppTransport)
   const activeTransport = transport ?? fallbackTransport
+  const interactiveDemo = interactiveDemoEnabled(activeTransport)
   const characterRendererKind =
     characterRenderer === undefined ? "builtin_hiyori" : "external"
   const activeCharacterRenderer =
@@ -78,9 +80,9 @@ export function App({
   const fallbackWorkspaceAdapter = useMemo(
     () =>
       createWorkspaceViewAdapter(activeTransport.kind, {
-        interactiveDemo: interactiveDemoEnabled(activeTransport),
+        interactiveDemo,
       }),
-    [activeTransport],
+    [activeTransport.kind, interactiveDemo],
   )
   const fallbackCharacterLibraryGateway = useMemo(
     () =>
@@ -114,8 +116,10 @@ export function App({
     () =>
       activeTransport.kind === "tauri"
         ? new TauriCommitExplanationAdapter()
-        : null,
-    [activeTransport.kind],
+        : interactiveDemo
+          ? new DemoCommitExplanationRuntime()
+          : null,
+    [activeTransport.kind, interactiveDemo],
   )
   const activeCommitExplanationRuntime =
     commitExplanationRuntime === undefined

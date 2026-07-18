@@ -208,6 +208,7 @@
   }
 
   .workspace-tabs {
+    position: relative;
     display: grid;
     grid-column: 2;
     grid-row: 1;
@@ -215,6 +216,19 @@
     min-width: 0;
     min-height: 0;
     gap: 0;
+  }
+
+  .workspace-narration-overlay {
+    position: absolute;
+    right: var(--spacing-xl);
+    bottom: var(--spacing-xl);
+    z-index: 30;
+    width: min(36rem, calc(100% - var(--spacing-xl) - var(--spacing-xl)));
+    pointer-events: auto;
+  }
+
+  .workspace-narration-overlay[data-workspace-tab="chat"] {
+    bottom: 5rem;
   }
 
   .workspace-header {
@@ -284,6 +298,17 @@
 
   .companion-status-mobile {
     display: flex;
+  }
+
+  .workspace-narration-overlay {
+    right: var(--spacing-md);
+    bottom: var(--spacing-md);
+    left: var(--spacing-md);
+    width: auto;
+  }
+
+  .workspace-narration-overlay[data-workspace-tab="chat"] {
+    bottom: 154px;
   }
 
   .timeline-content {

@@ -149,6 +149,8 @@ function richCodexState(): WorkspaceCodexState {
   }
   const longMessage = `${"Verified timeline detail. ".repeat(14)}\nAll checks passed.`
   return {
+    activeWorkspaceId: "workspace-native",
+    generation: 1,
     phase: "waiting",
     connected: true,
     readiness: {

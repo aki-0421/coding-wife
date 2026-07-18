@@ -58,6 +58,7 @@ export interface EvidenceViewProps {
   readonly locale: SupportedLocale
   readonly transport: GitReviewTransport
   readonly onBackToChat: () => void
+  readonly onCommitSelectionChange?: () => void
   readonly commitExplanationController?: CommitExplanationController | undefined
   readonly store?: GitReviewStore
 }
@@ -156,6 +157,7 @@ export function EvidenceView({
   locale,
   transport,
   onBackToChat,
+  onCommitSelectionChange,
   commitExplanationController,
   store: providedStore,
 }: EvidenceViewProps) {
@@ -176,6 +178,7 @@ export function EvidenceView({
   const [drawerOpen, setDrawerOpen] = useState(false)
   const drawerTriggerRef = useRef<HTMLButtonElement | null>(null)
   const drawerCloseRef = useRef<HTMLButtonElement | null>(null)
+  const previousSelectedCommitEvidenceId = useRef<string | null>(null)
   const explanationControllerState = useCommitExplanationControllerState(
     commitExplanationController,
     workspaceId,
@@ -195,6 +198,14 @@ export function EvidenceView({
       if (active) store.deactivate()
     }
   }, [active, store])
+
+  useEffect(() => {
+    const previous = previousSelectedCommitEvidenceId.current
+    previousSelectedCommitEvidenceId.current = review.selectedCommitEvidenceId
+    if (previous !== null && previous !== review.selectedCommitEvidenceId) {
+      onCommitSelectionChange?.()
+    }
+  }, [onCommitSelectionChange, review.selectedCommitEvidenceId])
 
   const openDrawer = (event: ReactMouseEvent<HTMLButtonElement>) => {
     drawerTriggerRef.current = event.currentTarget

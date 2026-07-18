@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { CharacterRuntimeView } from "@/features/character"
 import {
-  CommitNarrationCaption,
   useNarrationController,
   useNarrationSnapshot,
 } from "@/features/narration"
@@ -391,16 +390,6 @@ export function ChatView({
             />
           </div>
         </ScrollArea>
-
-        {presentation ? (
-          <div className="absolute inset-x-md bottom-[154px] z-30 hidden max-[840px]:block">
-            <CommitNarrationCaption
-              onDismiss={() => void narrationController.dismissPresentation()}
-              onVisible={narrationController.acknowledgeCaptionVisible}
-              presentation={presentation}
-            />
-          </div>
-        ) : null}
 
         {scrollLocked || unreadCount > 0 ? (
           <Button

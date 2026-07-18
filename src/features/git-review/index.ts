@@ -1,4 +1,12 @@
-export { DemoGitReviewTransport } from "@/features/git-review/demo-transport"
+export {
+  DemoGitReviewTransport,
+  demoCurrentCommitEvidenceId,
+  demoCurrentCommitSha,
+} from "@/features/git-review/demo-transport"
+export {
+  DemoCommitExplanationRuntime,
+  type DemoCommitExplanationRuntimeOptions,
+} from "@/features/git-review/demo-commit-explanation-runtime"
 export {
   CommitExplanationBoundaryError,
   TauriCommitExplanationAdapter,

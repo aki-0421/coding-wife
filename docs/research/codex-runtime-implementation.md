@@ -59,16 +59,16 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 
 ### 責務と正本
 
-| 責務 | 正本 | composition層の動作 |
-|---|---|---|
-| active workspace | workspace historyのopaque workspace ID | 選択確定後だけ`codex_connect`へ同じIDを渡す。pathを要求・保持しない |
-| 接続可否 | `CodexDiagnostic` | `health=ready`、core lifecycle/model discovery supported、Sol/Fast/Max/accountが全てtrueの場合だけSend可能にする |
-| thread | Codex supervisor | workspace activationごとにconnect後、compositionが開始した所有threadを再利用し、所有handleが無い時だけ1件開始する。他clientの一覧結果を自動採用しない |
-| turn受理 | `codex_turn_start` response | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport失敗ではdraftとattachmentを保持する |
-| live state | generation別`CodexSessionStore` | workspace ID、generation、sequenceを全て照合し、旧workspaceまたは旧generation eventを現在表示へ混ぜない |
-| durable timeline | workspace history writer | CodexEventをallowlist済みsemantic eventへ投影してから追記する。deltaは表示用にcoalesceし、completed/error/decision/approval/terminalを永続正本にする |
-| pending response | `CodexSessionClient`のsingle-claim ledger | approval、native user input、fallback decisionをkind一致で1回だけ応答する。unknown/invalidは操作UIを出さずfail closedにする |
-| stop/recovery | supervisorのinterruptとterminal event | Stop操作から1秒以内にinterrupt requestを開始し、5秒でackが無ければ明示errorにする。ackだけでterminalにせず、crash/EOFはInterruptedとして保持し自動再送しない |
+| 責務             | 正本                                      | composition層の動作                                                                                                                                          |
+| ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| active workspace | workspace historyのopaque workspace ID    | 選択確定後だけ`codex_connect`へ同じIDを渡す。pathを要求・保持しない                                                                                          |
+| 接続可否         | `CodexDiagnostic`                         | `health=ready`、core lifecycle/model discovery supported、Sol/Fast/Max/accountが全てtrueの場合だけSend可能にする                                             |
+| thread           | Codex supervisor                          | workspace activationごとにconnect後、compositionが開始した所有threadを再利用し、所有handleが無い時だけ1件開始する。他clientの一覧結果を自動採用しない        |
+| turn受理         | `codex_turn_start` response               | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport失敗ではdraftとattachmentを保持する                                   |
+| live state       | generation別`CodexSessionStore`           | workspace ID、generation、sequenceを全て照合し、旧workspaceまたは旧generation eventを現在表示へ混ぜない                                                      |
+| durable timeline | workspace history writer                  | CodexEventをallowlist済みsemantic eventへ投影してから追記する。deltaは表示用にcoalesceし、completed/error/decision/approval/terminalを永続正本にする         |
+| pending response | `CodexSessionClient`のsingle-claim ledger | approval、native user input、fallback decisionをkind一致で1回だけ応答する。unknown/invalidは操作UIを出さずfail closedにする                                  |
+| stop/recovery    | supervisorのinterruptとterminal event     | Stop操作から1秒以内にinterrupt requestを開始し、5秒でackが無ければ明示errorにする。ackだけでterminalにせず、crash/EOFはInterruptedとして保持し自動再送しない |
 
 接続状態と履歴状態は別軸である。履歴が`ready`でもCodex診断がblockedならtimeline閲覧とdraft保存だけを許可し、Sendは無効にする。逆にCodexがreadyでも履歴writerがread-only/recoveryなら新しいturnを開始しない。`connected=false`の固定値、demo successへのnative fallback、model/listを確認しないFast/Max表示は禁止する。
 
@@ -144,11 +144,11 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | `requests.rs`                         | approval/RUI exact validation、duplicate request ledger                                 |
 | `normalizer.rs`                       | opaque handle、redaction済みCodexEventとDomainEvent                                     |
 | `supervisor.rs`                       | handshake、thread/turn/review、single active turn、restart budget                       |
-| `support.rs`                          | support公開contract、single-use explain turn、strict output/event policy、fallback       |
-| `support_isolation.rs`                | exact release/schema検証、native sandbox・mock wire・malicious canary preflight           |
-| `support_private.rs`                  | owner-only clean runtime、env allowlist、no-follow auth bridge、確実なcleanup             |
-| `support_probe.rs`                    | loopback Responses capture、tool field不在、shell拒否、internal plan event fixture       |
-| `attachment.rs`                       | opaque handle発行、workspace/file identity検証、送信直前再検証、localImage/mention変換   |
+| `support.rs`                          | support公開contract、single-use explain turn、strict output/event policy、fallback      |
+| `support_isolation.rs`                | exact release/schema検証、native sandbox・mock wire・malicious canary preflight         |
+| `support_private.rs`                  | owner-only clean runtime、env allowlist、no-follow auth bridge、確実なcleanup           |
+| `support_probe.rs`                    | loopback Responses capture、tool field不在、shell拒否、internal plan event fixture      |
+| `attachment.rs`                       | opaque handle発行、workspace/file identity検証、送信直前再検証、localImage/mention変換  |
 | `commands.rs`                         | WebViewへ公開するtyped Tauri command                                                    |
 | `types.rs`                            | adapter v1のpublic DTOとserde contract                                                  |
 | `workspace.rs`                        | native folder picker、Git/owner preflight、opaque workspace登録、app-private record復元 |
@@ -156,20 +156,20 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 
 ### TypeScript
 
-| ファイル                                    | 責務                                                                |
-| ------------------------------------------- | ------------------------------------------------------------------- |
-| `src/lib/contracts/codex.ts`                | response/eventのexact-key parserとpublic DTO                        |
-| `src/features/codex/transport.ts`           | Tauri invoke/listen境界と決定的demo transport                       |
-| `src/features/codex/session-store.ts`       | generation、sequence、duplicate、pending response state             |
-| `src/features/codex/workspace-session-adapter.ts` | workspace activation、turn受理、terminal Stop、HIST追記のcomposition |
-| `src/features/workspace-persistence/codex-composition.ts` | historyとCodex sessionをS-002用`WorkspaceViewAdapter`へ束ねる         |
-| `src/features/workspace-view/Timeline.tsx`  | semantic row、decision/approval、Other/Hold、safe detail操作         |
-| `src/features/workspace-view/ChatView.tsx`  | 48px scroll lock、未読更新、composerとLive2D stageの配置             |
-| `src/features/codex/workspace-store.ts`     | native pickerのsingle-flight、opaque registration、safe error state |
-| `src/features/codex/use-codex-workspace.ts` | workspace storeを購読するReact hook                                 |
-| `src/features/codex/client.ts`              | event購読とpending responseのsingle-claim制御                       |
-| `src/test/fixtures/codex-runtime.v1.json`   | RustとTypeScriptが共有するpublic contract fixture                   |
-| `src/test/fixtures/codex-attachments.v1.json` | absolute pathを含まないattachment public contract fixture         |
+| ファイル                                                  | 責務                                                                 |
+| --------------------------------------------------------- | -------------------------------------------------------------------- |
+| `src/lib/contracts/codex.ts`                              | response/eventのexact-key parserとpublic DTO                         |
+| `src/features/codex/transport.ts`                         | Tauri invoke/listen境界と決定的demo transport                        |
+| `src/features/codex/session-store.ts`                     | generation、sequence、duplicate、pending response state              |
+| `src/features/codex/workspace-session-adapter.ts`         | workspace activation、turn受理、terminal Stop、HIST追記のcomposition |
+| `src/features/workspace-persistence/codex-composition.ts` | historyとCodex sessionをS-002用`WorkspaceViewAdapter`へ束ねる        |
+| `src/features/workspace-view/Timeline.tsx`                | semantic row、decision/approval、Other/Hold、safe detail操作         |
+| `src/features/workspace-view/ChatView.tsx`                | 48px scroll lock、未読更新、composerとLive2D stageの配置             |
+| `src/features/codex/workspace-store.ts`                   | native pickerのsingle-flight、opaque registration、safe error state  |
+| `src/features/codex/use-codex-workspace.ts`               | workspace storeを購読するReact hook                                  |
+| `src/features/codex/client.ts`                            | event購読とpending responseのsingle-claim制御                        |
+| `src/test/fixtures/codex-runtime.v1.json`                 | RustとTypeScriptが共有するpublic contract fixture                    |
+| `src/test/fixtures/codex-attachments.v1.json`             | absolute pathを含まないattachment public contract fixture            |
 
 `CodexEvent`はbase fieldだけでなくvariant payloadもcamelCaseでserializeする。Rust round-tripとTypeScript parser testが同じfixtureを読むため、一方だけのfield名変更はgateで失敗する。
 
@@ -179,40 +179,44 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 
 Viteのdevelopment buildだけは、`?demoAppServer=1`を付けると`DemoCodexTransport`とephemeral historyをcompositionした決定論的App Server demoを起動する。queryが無い通常browser previewは従来どおりCodex未接続で、production buildではqueryを付けても有効化しない。
 
-| composer入力 | 発生する検証用event |
-|---|---|
+同じ明示queryは、Commit画面のvertical E2Eに限ってin-memoryの`CommitExplanationAppRuntime`もcompositionする。このruntimeはproductionと同じcontroller/source境界を使い、検証済みdemo commitを`queued`→`running`→`generated`へ決定論的に進めるが、自動表示や自動読み上げはしない。ユーザーがExplainまたはShowを実行した時だけ、検証済み`started`、連番chunk、terminal eventを`NarrationController`へ渡す。Git/native/historyへ書き込まず、queryなしpreviewとproduction buildでは生成しない。workspace generation、commit selection、locale、Stopのscope規則もproductionと同じにし、selection/locale/Stopは表示中captionとspeechだけをdismissする一方、生成済みsupport結果はcacheとして維持する。scope更新前のtimer/eventはepoch照合で破棄する。
+
+| composer入力    | 発生する検証用event                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `demo:workflow` | accepted user、running、plan、assistant delta、tool、file、diff、native decision。Other/Hold回答後にapprovalへ進む |
-| `demo:approval` | 既知command approval。Approve once、Reject、Stopだけを表示する |
-| `demo:unknown` | 未知approval相当を`CODEX-PROTOCOL-UNSUPPORTED`としてblockedにし、許可UIを作らずInterruptedへ進む |
-| `demo:stop` | runningを維持し、UI Stopからinterrupt terminalを確認する |
-| `demo:crash` | `CODEX-APP-SERVER-EXITED`とInterruptedを1回だけ出し、turnを再送しない |
+| `demo:approval` | 既知command approval。Approve once、Reject、Stopだけを表示する                                                     |
+| `demo:unknown`  | 未知approval相当を`CODEX-PROTOCOL-UNSUPPORTED`としてblockedにし、許可UIを作らずInterruptedへ進む                   |
+| `demo:stop`     | runningを維持し、UI Stopからinterrupt terminalを確認する                                                           |
+| `demo:crash`    | `CODEX-APP-SERVER-EXITED`とInterruptedを1回だけ出し、turnを再送しない                                              |
 
 Addはabsolute pathを持たない固定opaque attachment handleを返す。demoのsemantic eventもproductionと同じHIST validatorを通るため、private path、未知change kind、invalid approval contextを追加するとcompositionがfail closedになる。
 
 2026-07-18のagent-browser gateでは1470×956、960×900、480×900 CSS pxで横overflow 0、ja/en即時切替、Ctrl+Tab、Shift+Ctrl+Tab、⌘K compact filter、⌘↵ send/answer、OS reduced motion、stream→tool/file→Other/Hold→approval、Approve/Reject、unknown blocked、Stop、crash後1秒間のevent count不変を確認した。検証画像は`/tmp`だけに保存し、repositoryへ含めない。
 
+同日のCommit説明gateでは、通常クリックでCommit tabを維持したままcaptionを共通overlayへ表示し、main history件数が1から増えないことを確認した。1470×836では3 chunkが全てviewport内かつfrontmostで、960×700のoverlayは右端942・下端682、480×800では右端468・下端788に収まり、狭幅でも全3 chunkが完全表示かつfrontmostだった。Audio設定を保存した再読上げは`speechStatus=queued`へ進み、commit選択、locale変更、ChatのStopはいずれも表示中captionを閉じた。元commitのprepared cacheは再選択後のExplainで待ち時間なく新しいselection versionへ再bindされ、再提示できた。検証画像は`/tmp`だけに保存し、repositoryへ含めない。
+
 ### Native process fixture
 
 `src-tauri/tests/fixtures/fake_codex_app_server.py`は`--version`、schema生成、stdio app-serverを実装したtest executableである。`CODING_WIFE_CODEX_FAKE_MODE`で次を選ぶ。
 
-| mode                                     | 検証内容                                                                                |
-| ---------------------------------------- | --------------------------------------------------------------------------------------- |
-| `fragmented`                             | 分割JSONL、handshake、固定turn contract、interrupt                                      |
-| `out_of_order`                           | 応答順変更、ID相関、timeout後の非再送                                                   |
-| `malformed`                              | 正常応答と同じreadへ入る不正frame、duplicate response                                   |
-| `unknown_request`                        | 未知server requestへのerror応答とturn interrupt                                         |
-| `crash_after_ready`                      | ready後crash、bounded restart、turn非再送                                               |
-| `protocol_after_ready`                   | malformed JSONL後の3回/60秒bounded restart、turn非再送                                  |
-| `experimental_rejected`                  | 新processでstable initializeへfallbackし、experimental fieldを送らずreviewをwire前block |
-| `thread_policy_*`                        | model、cwd、approval policy、sandbox、ephemeralの各mutationをfail-stop                  |
-| `attachments`                            | attachment-only turnを`localImage`と`mention`へ安全に変換し、raw pathを公開しない       |
-| `native_rui`                             | strict 1問/2 optionのserver requestとtyped response round trip                          |
-| `decision_fallback` / `decision_invalid` | exact decision card化、structured continuation、自由文interrupt                         |
-| `decision_continuation_crash`            | fallback継続開始中のchild crashをterminal failureにし、自動再送しないこと               |
-| `schema_malformed`                       | 成功probe後のschema失敗で以前のidentity/capability証跡を消去し、fresh connectで回復      |
-| `support_invalid_output`                 | strict schemaに違反するcommit説明を結果として公開しない                                 |
+| mode                                     | 検証内容                                                                                        |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `fragmented`                             | 分割JSONL、handshake、固定turn contract、interrupt                                              |
+| `out_of_order`                           | 応答順変更、ID相関、timeout後の非再送                                                           |
+| `malformed`                              | 正常応答と同じreadへ入る不正frame、duplicate response                                           |
+| `unknown_request`                        | 未知server requestへのerror応答とturn interrupt                                                 |
+| `crash_after_ready`                      | ready後crash、bounded restart、turn非再送                                                       |
+| `protocol_after_ready`                   | malformed JSONL後の3回/60秒bounded restart、turn非再送                                          |
+| `experimental_rejected`                  | 新processでstable initializeへfallbackし、experimental fieldを送らずreviewをwire前block         |
+| `thread_policy_*`                        | model、cwd、approval policy、sandbox、ephemeralの各mutationをfail-stop                          |
+| `attachments`                            | attachment-only turnを`localImage`と`mention`へ安全に変換し、raw pathを公開しない               |
+| `native_rui`                             | strict 1問/2 optionのserver requestとtyped response round trip                                  |
+| `decision_fallback` / `decision_invalid` | exact decision card化、structured continuation、自由文interrupt                                 |
+| `decision_continuation_crash`            | fallback継続開始中のchild crashをterminal failureにし、自動再送しないこと                       |
+| `schema_malformed`                       | 成功probe後のschema失敗で以前のidentity/capability証跡を消去し、fresh connectで回復             |
+| `support_invalid_output`                 | strict schemaに違反するcommit説明を結果として公開しない                                         |
 | `support_plan_call`                      | wire非広告のinternal `update_plan` eventをpolicy違反としてinterruptし、partial resultを破棄する |
-| `support_slow`                           | 実行中support turnをcancelし、interrupt terminalだけを受理して結果を破棄する            |
+| `support_slow`                           | 実行中support turnをcancelし、interrupt terminalだけを受理して結果を破棄する                    |
 
 fixtureは秘密、実account、実path、promptを含めない。新しいprotocol edge caseはproduction parserを緩める前にfake modeまたは共有fixtureへ追加する。
 

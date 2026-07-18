@@ -12,7 +12,8 @@ import {
   type GitReviewResponseMap,
 } from "@/lib/contracts/git-review"
 
-const currentSha = "a".repeat(40)
+export const demoCurrentCommitSha = "a".repeat(40)
+export const demoCurrentCommitEvidenceId = `commit-${demoCurrentCommitSha}`
 const previousSha = "b".repeat(40)
 const baseSha = "c".repeat(40)
 const digest = `sha256:${"d".repeat(64)}`
@@ -32,11 +33,11 @@ const skillAudit = {
 
 const currentDetail: CommitEvidenceDetail = {
   schemaVersion: gitReviewSchemaVersion,
-  commitEvidenceId: `commit-${currentSha}`,
+  commitEvidenceId: demoCurrentCommitEvidenceId,
   workspaceId: "workspace-demo",
   producer: "main_codex",
   identity: {
-    commitSha: currentSha,
+    commitSha: demoCurrentCommitSha,
     subject: "feat(git): add read-only commit evidence",
     body: [
       "- observe repository state without changing the index or worktree",
@@ -329,7 +330,7 @@ function observationFor(
     workUnitId: request.workUnitId,
     sourceEventId: request.sourceEventId,
     supportState: "ready",
-    headSha: currentSha,
+    headSha: demoCurrentCommitSha,
     headReference: "refs/heads/feature/read-only-git",
     branch: "feature/read-only-git",
     detached: false,

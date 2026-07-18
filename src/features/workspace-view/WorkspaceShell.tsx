@@ -27,7 +27,11 @@ import {
   type GitReviewTransport,
   type ScopedCommitExplanationController,
 } from "@/features/git-review"
-import type { NarrationController } from "@/features/narration"
+import {
+  CommitNarrationCaption,
+  type NarrationController,
+  useNarrationSnapshot,
+} from "@/features/narration"
 import { ChatView } from "@/features/workspace-view/ChatView"
 import { ContextView } from "@/features/workspace-view/ContextView"
 import { getWorkspaceCopy } from "@/features/workspace-view/copy"
@@ -83,6 +87,7 @@ export function WorkspaceShell({
   const { locale } = useI18n()
   const copy = getWorkspaceCopy(locale)
   const runtime = useRuntime()
+  const narration = useNarrationSnapshot()
   const view = useWorkspaceViewModel(adapter)
   const contextModel = useEditableWorkspaceContext(
     adapter,
@@ -130,6 +135,13 @@ export function WorkspaceShell({
     Number.isSafeInteger(codexGeneration) &&
     Number(codexGeneration) > 0
       ? codexGeneration
+      : null
+  const commitPresentation =
+    narration.presentation?.key.workspaceId === selectedWorkspaceId &&
+    narration.presentation.key.workspaceGeneration === workspaceGeneration &&
+    narration.presentation.key.locale === locale &&
+    narration.presentation.status !== "canceled"
+      ? narration.presentation
       : null
   const previousSelectedWorkspaceId = useRef<string | null>(null)
   const previousExplanationScope = useRef<{
@@ -189,6 +201,10 @@ export function WorkspaceShell({
     ])
     return mainTurn.status === "fulfilled" ? mainTurn.value : false
   }, [narrationController, view])
+
+  const dismissCommitPresentation = useCallback(() => {
+    void narrationController.dismissPresentation("explicit_cancel")
+  }, [narrationController])
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return
@@ -509,6 +525,7 @@ export function WorkspaceShell({
             commitExplanationController={commitExplanationController}
             locale={locale}
             onBackToChat={() => view.setActiveTab("chat")}
+            onCommitSelectionChange={dismissCommitPresentation}
             transport={gitReviewTransport}
             workspaceGeneration={workspaceGeneration ?? 1}
             workspaceId={selectedWorkspace.id}
@@ -556,6 +573,22 @@ export function WorkspaceShell({
             workspaceId={selectedWorkspace.id}
           />
         </TabsContent>
+
+        {commitPresentation ? (
+          <div
+            className="workspace-narration-overlay"
+            data-narration-presentation={commitPresentation.status}
+            data-narration-speech={commitPresentation.speechStatus}
+            data-workspace-narration-overlay=""
+            data-workspace-tab={view.activeTab}
+          >
+            <CommitNarrationCaption
+              onDismiss={() => void narrationController.dismissPresentation()}
+              onVisible={narrationController.acknowledgeCaptionVisible}
+              presentation={commitPresentation}
+            />
+          </div>
+        ) : null}
       </Tabs>
 
       {view.notice ? (

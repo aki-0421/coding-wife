@@ -110,8 +110,7 @@ function renderStage({
 }
 
 describe("CharacterStageSlot narration", () => {
-  it("dismisses both channels while preserving cached caption replay", async () => {
-    const user = userEvent.setup()
+  it("projects presentation state without owning the shared caption", async () => {
     const gateway = new DemoNarrationGateway()
     const controller = new NarrationController(gateway)
     await controller.initialize()
@@ -130,7 +129,11 @@ describe("CharacterStageSlot narration", () => {
     expect(screen.getByTestId("renderer")).toHaveAttribute("data-state", "idle")
 
     await act(() => controller.activatePresentation(key))
-    expect(await screen.findByText("コミットの要点です。")).toBeVisible()
+    expect(screen.queryByText("コミットの要点です。")).not.toBeInTheDocument()
+    expect(controller.getSnapshot().presentation).toMatchObject({
+      status: "streaming",
+      chunks: ["コミットの要点です。"],
+    })
     expect(screen.getByTestId("renderer")).toHaveAttribute(
       "data-state",
       "reviewing",
@@ -140,14 +143,14 @@ describe("CharacterStageSlot narration", () => {
       "false",
     )
 
-    await user.click(screen.getByRole("button", { name: "説明を閉じる" }))
+    await act(() => controller.dismissPresentation())
     await waitFor(() =>
-      expect(screen.queryByLabelText("コミットの説明")).not.toBeInTheDocument(),
+      expect(controller.getSnapshot().presentation).toBeNull(),
     )
-    expect(controller.getSnapshot().presentation).toBeNull()
+    expect(screen.getByTestId("renderer")).toHaveAttribute("data-state", "idle")
 
     await act(() => controller.activatePresentation(key))
-    expect(await screen.findByText("コミットの要点です。")).toBeVisible()
+    expect(screen.queryByText("コミットの要点です。")).not.toBeInTheDocument()
     expect(controller.getSnapshot().presentation).toMatchObject({
       status: "streaming",
       chunks: ["コミットの要点です。"],

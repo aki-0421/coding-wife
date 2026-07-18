@@ -88,6 +88,8 @@ describe("default App character integration", () => {
       stopTurn: () => {
         for (const listener of codexListeners) {
           listener({
+            activeWorkspaceId: "build-live2d-desktop-app",
+            generation: 1,
             phase: "completed",
             connected: true,
             readiness: {

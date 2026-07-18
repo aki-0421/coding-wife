@@ -12,7 +12,6 @@ import {
 } from "@/features/character"
 import { useI18n } from "@/features/localization"
 import {
-  CommitNarrationCaption,
   useNarrationController,
   useNarrationSnapshot,
 } from "@/features/narration"
@@ -129,16 +128,6 @@ export function CharacterStageSlot({
               {copy.character.rendererDescription}
             </p>
           </div>
-        </div>
-      ) : null}
-
-      {presentation ? (
-        <div className="absolute inset-x-xl bottom-20 z-20 max-[700px]:inset-x-md">
-          <CommitNarrationCaption
-            onDismiss={() => void narrationController.dismissPresentation()}
-            onVisible={narrationController.acknowledgeCaptionVisible}
-            presentation={presentation}
-          />
         </div>
       ) : null}
 
