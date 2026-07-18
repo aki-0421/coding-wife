@@ -205,7 +205,9 @@ export function ChatView({
               : history.mode === "ready"
                 ? copy.previewNoticeWithHistory
                 : history.mode === "ephemeral"
-                  ? copy.previewNoticeWithEphemeralHistory
+                  ? connected
+                    ? copy.interactiveDemoNotice
+                    : copy.previewNoticeWithEphemeralHistory
                   : copy.previewNotice}
           </span>
           {runtimeError ? (

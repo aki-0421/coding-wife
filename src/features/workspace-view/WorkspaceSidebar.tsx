@@ -455,6 +455,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 aria-haspopup="dialog"
                 aria-label={props.copy.compactSidebar}
                 className="mt-xs"
+                data-workspace-navigation-toggle=""
                 onClick={(event) => openCompactNavigation(event.currentTarget)}
                 size="icon-sm"
                 type="button"

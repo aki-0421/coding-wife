@@ -27,6 +27,15 @@ export interface AppProps {
   readonly workspaceAdapter?: WorkspaceViewAdapter
 }
 
+function interactiveDemoEnabled(transport: AppTransport): boolean {
+  return (
+    import.meta.env.DEV &&
+    transport.kind === "demo" &&
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("demoAppServer") === "1"
+  )
+}
+
 export function App({
   characterLibraryGateway,
   characterRenderer,
@@ -45,8 +54,11 @@ export function App({
     [activeTransport.kind],
   )
   const fallbackWorkspaceAdapter = useMemo(
-    () => createWorkspaceViewAdapter(activeTransport.kind),
-    [activeTransport.kind],
+    () =>
+      createWorkspaceViewAdapter(activeTransport.kind, {
+        interactiveDemo: interactiveDemoEnabled(activeTransport),
+      }),
+    [activeTransport],
   )
   const fallbackCharacterLibraryGateway = useMemo(
     () =>

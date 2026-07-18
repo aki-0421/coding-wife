@@ -149,24 +149,79 @@ export function WorkspaceShell({
 
       if (event.metaKey && event.key.toLocaleLowerCase() === "k") {
         event.preventDefault()
-        const toggle = document.querySelector<HTMLButtonElement>(
-          "[data-workspace-filter-toggle]",
-        )
-        toggle?.click()
+        const visible = (element: HTMLElement) =>
+          element.getClientRects().length > 0
         const focusFilter = () => {
-          const filterInput = Array.from(
+          const inputs = Array.from(
             document.querySelectorAll<HTMLInputElement>("input[aria-label]"),
-          ).find(
+          ).filter(
             (input) =>
               input.getAttribute("aria-label") === copy.filterWorkspaces,
           )
+          const filterInput = inputs.find(visible) ?? inputs[0]
           filterInput?.focus()
         }
-        if (typeof window.requestAnimationFrame === "function") {
+
+        const filterToggles = Array.from(
+          document.querySelectorAll<HTMLButtonElement>(
+            "[data-workspace-filter-toggle]",
+          ),
+        )
+        const visibleFilterToggle = filterToggles.find(visible)
+        if (visibleFilterToggle !== undefined) {
+          if (visibleFilterToggle.getAttribute("aria-pressed") !== "true") {
+            visibleFilterToggle.click()
+          }
           window.requestAnimationFrame(focusFilter)
-        } else {
-          window.setTimeout(focusFilter, 0)
+          return
         }
+
+        const compactToggle = Array.from(
+          document.querySelectorAll<HTMLButtonElement>(
+            "[data-workspace-navigation-toggle]",
+          ),
+        ).find(visible)
+        if (compactToggle !== undefined) {
+          compactToggle.click()
+          const prepareCompactFilter = (attempt: number) => {
+            const dialog = document.getElementById(
+              "compact-workspace-navigation",
+            )
+            if (dialog === null) {
+              if (attempt < 4) {
+                window.setTimeout(() => prepareCompactFilter(attempt + 1), 25)
+              }
+              return
+            }
+            const dialogFilterToggle = dialog?.querySelector<HTMLButtonElement>(
+              "[data-workspace-filter-toggle]",
+            )
+            if (dialogFilterToggle?.getAttribute("aria-pressed") !== "true") {
+              dialogFilterToggle?.click()
+            }
+            window.setTimeout(() => {
+              const dialogFilter = Array.from(
+                dialog?.querySelectorAll<HTMLInputElement>(
+                  "input[aria-label]",
+                ) ?? [],
+              ).find(
+                (input) =>
+                  input.getAttribute("aria-label") === copy.filterWorkspaces,
+              )
+              if (dialogFilter !== undefined) dialogFilter.focus()
+              else if (attempt < 4) prepareCompactFilter(attempt + 1)
+              else focusFilter()
+            }, 25)
+          }
+          window.setTimeout(() => prepareCompactFilter(0), 0)
+          return
+        }
+
+        const fallbackToggle = filterToggles[0]
+        if (fallbackToggle?.getAttribute("aria-pressed") !== "true") {
+          fallbackToggle?.click()
+        }
+        window.requestAnimationFrame(focusFilter)
       }
     }
 

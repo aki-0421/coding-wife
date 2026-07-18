@@ -6,7 +6,7 @@ import {
   TauriCodexTransport,
   type CodexEventRegistrar,
 } from "@/features/codex/transport"
-import { codexCommands } from "@/lib/contracts"
+import { codexCommands, type CodexEvent } from "@/lib/contracts"
 import fixture from "@/test/fixtures/codex-runtime.v1.json"
 
 describe("TauriCodexTransport", () => {
@@ -111,5 +111,149 @@ describe("DemoCodexTransport", () => {
         }),
       ]),
     )
+  })
+
+  it("scripts rich activity, bounded decisions, and one-time approvals", async () => {
+    vi.useFakeTimers()
+    try {
+      const transport = new DemoCodexTransport()
+      const events: CodexEvent[] = []
+      await transport.subscribe({
+        onEvent: (event) => events.push(event),
+        onContractError: vi.fn(),
+      })
+
+      await transport.request(codexCommands.turnStart, {
+        workspaceId: "workspace-rich-demo",
+        threadHandle: "demo-thread-1",
+        clientUserMessageId: "message-rich",
+        text: "demo:workflow",
+        effort: "max",
+        attachmentHandles: [],
+      })
+      await vi.advanceTimersByTimeAsync(600)
+
+      expect(events.map((event) => event.kind)).toEqual([
+        "turn_status",
+        "plan_updated",
+        "agent_message_delta",
+        "agent_message_delta",
+        "item_status",
+        "tool_output",
+        "file_change",
+        "diff_updated",
+        "pending_request",
+      ])
+      expect(
+        events.every((event) => event.workspaceId === "workspace-rich-demo"),
+      ).toBe(true)
+
+      await expect(
+        transport.request(codexCommands.respondPending, {
+          workspaceId: "workspace-rich-demo",
+          pendingId: "demo-turn-1-decision",
+          response: {
+            type: "user_input",
+            answers: { scope: ["Keep the public API unchanged"] },
+          },
+        }),
+      ).resolves.toEqual({ accepted: true })
+      await Promise.resolve()
+      expect(events.at(-1)).toMatchObject({
+        kind: "pending_request",
+        payload: {
+          request: {
+            pendingId: "demo-turn-1-approval",
+            allowedDecisions: ["approve_once", "reject", "stop"],
+          },
+        },
+      })
+
+      await transport.request(codexCommands.respondPending, {
+        workspaceId: "workspace-rich-demo",
+        pendingId: "demo-turn-1-approval",
+        response: { type: "approval", decision: "approve_once" },
+      })
+      await Promise.resolve()
+      expect(events.at(-1)).toMatchObject({
+        kind: "turn_status",
+        payload: { status: "completed" },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("blocks unknown requests, interrupts crashes, and returns opaque demo attachments", async () => {
+    vi.useFakeTimers()
+    try {
+      const transport = new DemoCodexTransport()
+      const events: CodexEvent[] = []
+      await transport.subscribe({
+        onEvent: (event) => events.push(event),
+        onContractError: vi.fn(),
+      })
+
+      const attachment = await transport.request(
+        codexCommands.pickAttachments,
+        { workspaceId: "workspace-demo", existingHandles: [] },
+      )
+      expect(attachment.items[0]).toMatchObject({
+        handle: "attachment-00000000-0000-4000-8000-000000000001",
+        relativePath: "attachments/demo-evidence.md",
+      })
+      expect(JSON.stringify(attachment)).not.toMatch(/\/Users\//u)
+
+      await transport.request(codexCommands.turnStart, {
+        workspaceId: "workspace-demo",
+        threadHandle: "demo-thread-1",
+        clientUserMessageId: "message-unknown",
+        text: "demo:unknown",
+        effort: "low",
+        attachmentHandles: [],
+      })
+      await vi.advanceTimersByTimeAsync(300)
+      expect(
+        events.some((event) => event.kind === "protocol_unsupported"),
+      ).toBe(true)
+      expect(
+        events.some(
+          (event) =>
+            event.kind === "turn_status" &&
+            event.payload.status === "interrupted",
+        ),
+      ).toBe(true)
+      expect(events.some((event) => event.kind === "pending_request")).toBe(
+        false,
+      )
+
+      const beforeCrash = events.length
+      await transport.request(codexCommands.turnStart, {
+        workspaceId: "workspace-demo",
+        threadHandle: "demo-thread-1",
+        clientUserMessageId: "message-crash",
+        text: "demo:crash",
+        effort: "low",
+        attachmentHandles: [],
+      })
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(
+        events
+          .slice(beforeCrash)
+          .filter((event) => event.kind === "turn_status"),
+      ).toHaveLength(2)
+      const diagnostic = events
+        .slice(beforeCrash)
+        .find((event) => event.kind === "diagnostic")
+      expect(diagnostic).toMatchObject({
+        kind: "diagnostic",
+        payload: {
+          code: "CODEX-APP-SERVER-EXITED",
+          willRetry: false,
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

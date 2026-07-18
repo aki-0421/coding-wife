@@ -286,6 +286,32 @@ describe("WorkspaceShell", () => {
     await waitFor(() => expect(filter).toHaveFocus())
   })
 
+  it("opens the compact filter with Command+K and restores its opener", async () => {
+    renderWorkspace()
+    const opener = screen.getByRole("button", {
+      name: "Open workspace navigation",
+    })
+    Object.defineProperty(opener, "getClientRects", {
+      configurable: true,
+      value: () => ({ length: 1 }),
+    })
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true })
+    const dialog = await screen.findByRole("dialog", { name: "Workspaces" })
+    const filter = await within(dialog).findByRole("textbox", {
+      name: "Filter workspaces",
+    })
+    await waitFor(() => expect(filter).toHaveFocus())
+
+    fireEvent.keyDown(dialog, { code: "Escape", key: "Escape" })
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Workspaces" }),
+      ).not.toBeInTheDocument(),
+    )
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
   it("keeps composer drafts scoped to their workspace", () => {
     renderWorkspace()
 
@@ -866,6 +892,47 @@ describe("WorkspaceShell", () => {
     await user.click(screen.getByRole("button", { name: "Interrupt turn" }))
     await waitFor(() =>
       expect(stopTurn).toHaveBeenCalledWith("workspace-native"),
+    )
+  })
+
+  it("keeps a held decision pending and sends a bounded Other answer with Command+Enter", async () => {
+    const snapshot = richCodexState()
+    const respondPending = vi.fn().mockResolvedValue(true)
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      codexSnapshot: () => snapshot,
+      subscribeCodex(listener) {
+        listener(snapshot)
+        return () => undefined
+      },
+      respondPending,
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+
+    await user.click(await screen.findByText("Other"))
+    const other = screen.getByRole("textbox", { name: "Scope: Other answer" })
+    expect(screen.getByRole("button", { name: "Send answer" })).toBeDisabled()
+    await user.type(other, "Keep the public API unchanged")
+    await user.click(screen.getByRole("button", { name: "Hold decision" }))
+    expect(
+      screen.getByText(
+        "Held. No response was sent; this turn is still waiting.",
+      ),
+    ).toBeVisible()
+    expect(respondPending).not.toHaveBeenCalled()
+
+    await user.keyboard("{Meta>}{Enter}{/Meta}")
+    await waitFor(() =>
+      expect(respondPending).toHaveBeenCalledWith({
+        workspaceId: "workspace-native",
+        pendingId: "pending-decision",
+        response: {
+          type: "user_input",
+          answers: { scope: ["Keep the public API unchanged"] },
+        },
+      }),
     )
   })
 

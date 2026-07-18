@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import {
   codexCommands,
@@ -10,7 +10,11 @@ import {
 } from "@/lib/contracts"
 import fixture from "@/test/fixtures/codex-runtime.v1.json"
 
-import type { CodexEventCallbacks, CodexTransport } from "@/features/codex"
+import {
+  DemoCodexTransport,
+  type CodexEventCallbacks,
+  type CodexTransport,
+} from "@/features/codex"
 import { CodexComposedWorkspaceViewAdapter } from "@/features/workspace-persistence/codex-composition"
 import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
 
@@ -174,5 +178,79 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         contextSnapshots: [],
       }),
     ).rejects.toThrow("CODEX-TURN-PREFLIGHT-BLOCKED")
+  })
+
+  it("keeps the interactive App Server demo connected through rich history", async () => {
+    vi.useFakeTimers()
+    try {
+      const adapter = new CodexComposedWorkspaceViewAdapter(
+        new DemoWorkspaceHistoryTransport(),
+        new DemoCodexTransport(),
+      )
+      const state = await adapter.loadState()
+      const workspaceId = state.activeWorkspaceId
+      if (workspaceId === null) throw new Error("active demo workspace")
+
+      await adapter.sendTurn({
+        workspaceId,
+        instruction: "demo:workflow",
+        effort: "max",
+        attachments: [],
+        contextSnapshots: [],
+      })
+      await vi.advanceTimersByTimeAsync(600)
+      for (let iteration = 0; iteration < 16; iteration += 1) {
+        await Promise.resolve()
+      }
+
+      const waiting = adapter.codexSnapshot()
+      expect(waiting).toMatchObject({ connected: true, phase: "waiting" })
+      expect(waiting.timeline.map((event) => event.kind)).toEqual(
+        expect.arrayContaining([
+          "user",
+          "assistant",
+          "plan",
+          "tool",
+          "file",
+          "diff",
+          "decision",
+        ]),
+      )
+      const decision = waiting.pendingRequests.find(
+        (request) => request.kind === "user_input",
+      )
+      if (decision === undefined) throw new Error("demo decision")
+      await expect(
+        adapter.respondPending({
+          workspaceId,
+          pendingId: decision.pendingId,
+          response: {
+            type: "user_input",
+            answers: { scope: ["Keep the public API unchanged"] },
+          },
+        }),
+      ).resolves.toBe(true)
+      await Promise.resolve()
+
+      const approval = adapter
+        .codexSnapshot()
+        .pendingRequests.find((request) => request.kind !== "user_input")
+      if (approval === undefined) throw new Error("demo approval")
+      await expect(
+        adapter.respondPending({
+          workspaceId,
+          pendingId: approval.pendingId,
+          response: { type: "approval", decision: "approve_once" },
+        }),
+      ).resolves.toBe(true)
+      await Promise.resolve()
+      expect(adapter.codexSnapshot()).toMatchObject({
+        connected: true,
+        phase: "completed",
+        errorCode: null,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

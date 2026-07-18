@@ -18,16 +18,23 @@ import { PersistentWorkspaceViewAdapter } from "@/features/workspace-persistence
 import { CodexComposedWorkspaceViewAdapter } from "@/features/workspace-persistence/codex-composition"
 import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
 import { TauriWorkspaceHistoryTransport } from "@/features/workspace-persistence/transport"
-import { TauriCodexTransport } from "@/features/codex"
+import { DemoCodexTransport, TauriCodexTransport } from "@/features/codex"
 import type { WorkspaceViewAdapter } from "@/features/workspace-view/types"
 
 export function createWorkspaceViewAdapter(
   runtimeKind: "tauri" | "demo",
+  options: { readonly interactiveDemo?: boolean } = {},
 ): WorkspaceViewAdapter {
   if (runtimeKind === "tauri") {
     return new CodexComposedWorkspaceViewAdapter(
       new TauriWorkspaceHistoryTransport(),
       new TauriCodexTransport(),
+    )
+  }
+  if (options.interactiveDemo === true) {
+    return new CodexComposedWorkspaceViewAdapter(
+      new DemoWorkspaceHistoryTransport(),
+      new DemoCodexTransport(),
     )
   }
   return new PersistentWorkspaceViewAdapter(new DemoWorkspaceHistoryTransport())

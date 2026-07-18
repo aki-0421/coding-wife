@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react"
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react"
 import {
   ActivityIcon,
   AlertTriangleIcon,
@@ -22,6 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Textarea } from "@/components/ui/textarea"
 import type { CodexSemanticTimelineEvent } from "@/features/codex"
 import { useI18n } from "@/features/localization"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
@@ -56,6 +57,8 @@ type PendingTimelineEvent = Extract<
   CodexSemanticTimelineEvent,
   { readonly kind: "decision" | "approval" }
 >
+
+const otherAnswerId = "__coding_wife_other__"
 
 const lifecycleValues: readonly WorkspaceLifecycle[] = [
   "done",
@@ -180,13 +183,24 @@ function PendingRequestCard({
 }) {
   const request = event.request
   const [answers, setAnswers] = useState<Readonly<Record<string, string>>>({})
+  const [otherAnswers, setOtherAnswers] = useState<
+    Readonly<Record<string, string>>
+  >({})
+  const [held, setHeld] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const isDecision = request.kind === "user_input"
+  const supportsOther =
+    isDecision && request.responseKind === "native_server_request"
   const complete =
     isDecision &&
-    request.questions.every((question) =>
-      question.options.some((option) => option.id === answers[question.id]),
-    )
+    request.questions.every((question) => {
+      const answer = answers[question.id]
+      if (answer === otherAnswerId) {
+        const text = otherAnswers[question.id]?.trim() ?? ""
+        return supportsOther && text.length >= 1 && text.length <= 2_000
+      }
+      return question.options.some((option) => option.id === answer)
+    })
 
   const answerDecision = async () => {
     if (!isDecision || !complete || submitting || !active) return
@@ -196,10 +210,15 @@ function PendingRequestCard({
       Object.fromEntries(
         request.questions.map((question) => [
           question.id,
-          [answers[question.id] ?? ""],
+          [
+            answers[question.id] === otherAnswerId
+              ? (otherAnswers[question.id]?.trim() ?? "")
+              : (answers[question.id] ?? ""),
+          ],
         ]),
       ),
     )
+    setHeld(false)
     setSubmitting(false)
   }
 
@@ -207,7 +226,14 @@ function PendingRequestCard({
     if (isDecision || submitting || !active) return
     setSubmitting(true)
     await onAnswerApproval(request, decision)
+    setHeld(false)
     setSubmitting(false)
+  }
+
+  const onDecisionKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Enter" || !event.metaKey || !complete) return
+    event.preventDefault()
+    void answerDecision()
   }
 
   return (
@@ -256,7 +282,10 @@ function PendingRequestCard({
       </dl>
 
       {isDecision ? (
-        <div className="mt-md flex flex-col gap-md">
+        <div
+          className="mt-md flex flex-col gap-md"
+          onKeyDown={onDecisionKeyDown}
+        >
           {request.questions.map((question) => (
             <fieldset className="m-0 border-0 p-0" key={question.id}>
               <legend className="mb-xs text-title text-text-strong">
@@ -268,12 +297,13 @@ function PendingRequestCard({
               <RadioGroup
                 aria-label={question.question}
                 disabled={!active || submitting}
-                onValueChange={(optionId) =>
+                onValueChange={(optionId) => {
+                  setHeld(false)
                   setAnswers((current) => ({
                     ...current,
                     [question.id]: optionId,
                   }))
-                }
+                }}
                 value={answers[question.id] ?? null}
               >
                 {question.options.map((option) => (
@@ -292,9 +322,50 @@ function PendingRequestCard({
                     </span>
                   </label>
                 ))}
+                {supportsOther ? (
+                  <label className="grid cursor-pointer grid-cols-[16px_minmax(0,1fr)] items-start gap-sm rounded-control border border-divider bg-surface p-sm hover:border-warm-active/40 has-data-[state=checked]:border-warm-active/60 has-data-[state=checked]:bg-warm-active/5">
+                    <RadioGroupItem className="mt-xxs" value={otherAnswerId} />
+                    <span className="min-w-0">
+                      <span className="block text-title text-text-strong">
+                        {copy.timelineEvent.other}
+                      </span>
+                      <span className="mt-xxs block text-caption text-muted-foreground">
+                        {copy.timelineEvent.otherDescription}
+                      </span>
+                    </span>
+                  </label>
+                ) : null}
               </RadioGroup>
+              {supportsOther && answers[question.id] === otherAnswerId ? (
+                <div className="mt-sm">
+                  <Textarea
+                    aria-label={`${question.header}: ${copy.timelineEvent.otherAnswer}`}
+                    disabled={!active || submitting}
+                    maxLength={2_000}
+                    onChange={(changeEvent) => {
+                      const value = changeEvent.currentTarget.value
+                      setHeld(false)
+                      setOtherAnswers((current) => ({
+                        ...current,
+                        [question.id]: value,
+                      }))
+                    }}
+                    placeholder={copy.timelineEvent.otherPlaceholder}
+                    rows={3}
+                    value={otherAnswers[question.id] ?? ""}
+                  />
+                  <p className="m-0 mt-xxs text-label text-muted-foreground">
+                    {String(otherAnswers[question.id]?.length ?? 0)} / 2000
+                  </p>
+                </div>
+              ) : null}
             </fieldset>
           ))}
+          {held ? (
+            <p className="m-0 text-caption text-muted-foreground" role="status">
+              {copy.timelineEvent.held}
+            </p>
+          ) : null}
           <div className="flex flex-wrap gap-xs">
             <Button
               disabled={!active || !complete || submitting}
@@ -305,6 +376,15 @@ function PendingRequestCard({
               {submitting
                 ? copy.timelineEvent.submitting
                 : copy.timelineEvent.answer}
+            </Button>
+            <Button
+              disabled={!active || submitting}
+              onClick={() => setHeld(true)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {copy.timelineEvent.hold}
             </Button>
             {interruptAvailable ? (
               <Button

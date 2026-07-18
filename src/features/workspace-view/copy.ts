@@ -53,6 +53,8 @@ const en = {
     "Codex and Git are not connected. Local workspace history is persisted and available.",
   previewNoticeWithEphemeralHistory:
     "Codex and Git are not connected. Demo workspace activity is kept in memory and resets when this preview restarts.",
+  interactiveDemoNotice:
+    "The deterministic Codex App Server demo is connected. Git remains disconnected; activity stays in memory and resets when this preview restarts.",
   runtimeErrorTitle: "The local runtime could not be reached",
   runtimeErrorDescription:
     "Your draft and local view state are preserved. Retry the runtime check or review Diagnostics.",
@@ -104,6 +106,12 @@ const en = {
     evidence: "Evidence",
     answer: "Send answer",
     submitting: "Sending…",
+    other: "Other",
+    otherDescription: "Provide a different bounded answer.",
+    otherAnswer: "Other answer",
+    otherPlaceholder: "Enter 1–2,000 characters",
+    hold: "Hold decision",
+    held: "Held. No response was sent; this turn is still waiting.",
     interrupt: "Interrupt turn",
     approvalDecision: {
       approve_once: "Approve once",
@@ -420,6 +428,8 @@ const ja: typeof en = {
     "CodexとGitは未接続です。ローカルのワークスペース履歴は永続化され、利用できます。",
   previewNoticeWithEphemeralHistory:
     "CodexとGitは未接続です。デモ用ワークスペースのアクティビティはメモリ内だけに保持され、このプレビューを再起動するとリセットされます。",
+  interactiveDemoNotice:
+    "決定論的Codex App Serverデモへ接続中です。Gitは未接続で、アクティビティはメモリ内だけに保持され、プレビュー再起動時にリセットされます。",
   runtimeErrorTitle: "ローカル実行環境へ接続できませんでした",
   runtimeErrorDescription:
     "下書きとローカル表示状態は保持されています。実行環境を再確認するか、診断を確認してください。",
@@ -471,6 +481,12 @@ const ja: typeof en = {
     evidence: "根拠",
     answer: "回答を送信",
     submitting: "送信中…",
+    other: "その他",
+    otherDescription: "範囲を限定した別の回答を入力します。",
+    otherAnswer: "その他の回答",
+    otherPlaceholder: "1〜2,000文字で入力",
+    hold: "判断を保留",
+    held: "保留しました。回答は送信されず、このターンは待機中です。",
     interrupt: "ターンを中断",
     approvalDecision: {
       approve_once: "今回のみ承認",
