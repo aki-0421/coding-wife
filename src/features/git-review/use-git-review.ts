@@ -4,24 +4,32 @@ import {
   GitReviewStore,
   type GitReviewSnapshot,
 } from "@/features/git-review/store"
+import type {
+  CommitEvidenceFilter,
+  CommitExplanationControllerStateV1,
+  CommitExplanationPresentationMode,
+  CommitExplanationUserRequestTrigger,
+} from "@/lib/contracts/git-review"
 
 export interface GitReviewController extends GitReviewSnapshot {
+  readonly activate: () => Promise<void>
+  readonly deactivate: () => void
   readonly refresh: () => Promise<void>
+  readonly setFilter: (filter: CommitEvidenceFilter) => Promise<void>
   readonly loadMore: () => Promise<void>
-  readonly selectCheckpoint: (checkpointId: string) => Promise<void>
-  readonly selectFile: (fileId: string) => Promise<void>
-  readonly setCompareSelection: (
-    side: "from" | "to",
-    checkpointId: string,
-  ) => void
-  readonly compareCheckpoints: () => Promise<void>
-  readonly previewRestore: (
-    kind: "revert_commit" | "recovery_branch",
-    recoveryBranch: string | null,
+  readonly selectCommitEvidence: (commitEvidenceId: string) => Promise<void>
+  readonly selectFile: (fileEvidenceId: string) => Promise<void>
+  readonly requestExplanation: (
+    locale: "ja" | "en",
+    trigger: CommitExplanationUserRequestTrigger,
   ) => Promise<void>
-  readonly confirmRestore: () => Promise<void>
-  readonly cancelRestore: () => Promise<void>
-  readonly clearRestoreResult: () => void
+  readonly cancelExplanation: (
+    state: CommitExplanationControllerStateV1,
+  ) => Promise<void>
+  readonly presentExplanation: (
+    state: CommitExplanationControllerStateV1,
+    mode: CommitExplanationPresentationMode,
+  ) => Promise<void>
 }
 
 export function useGitReview(store: GitReviewStore): GitReviewController {
@@ -33,17 +41,17 @@ export function useGitReview(store: GitReviewStore): GitReviewController {
 
   return {
     ...snapshot,
+    activate: () => store.activate(),
+    deactivate: () => store.deactivate(),
     refresh: () => store.refresh(),
+    setFilter: (filter) => store.setFilter(filter),
     loadMore: () => store.loadMore(),
-    selectCheckpoint: (checkpointId) => store.selectCheckpoint(checkpointId),
-    selectFile: (fileId) => store.selectFile(fileId),
-    setCompareSelection: (side, checkpointId) =>
-      store.setCompareSelection(side, checkpointId),
-    compareCheckpoints: () => store.compareCheckpoints(),
-    previewRestore: (kind, recoveryBranch) =>
-      store.previewRestore(kind, recoveryBranch),
-    confirmRestore: () => store.confirmRestore(),
-    cancelRestore: () => store.cancelRestore(),
-    clearRestoreResult: () => store.clearRestoreResult(),
+    selectCommitEvidence: (commitEvidenceId) =>
+      store.selectCommitEvidence(commitEvidenceId),
+    selectFile: (fileEvidenceId) => store.selectFile(fileEvidenceId),
+    requestExplanation: (locale, trigger) =>
+      store.requestExplanation(locale, trigger),
+    cancelExplanation: (state) => store.cancelExplanation(state),
+    presentExplanation: (state, mode) => store.presentExplanation(state, mode),
   }
 }

@@ -1,13 +1,19 @@
 import {
+  createCommitExplanationCancelRequested,
+  createCommitExplanationPresentationRequested,
+  createCommitExplanationRequested,
   gitReviewCommands,
-  type CompareCheckpointsView,
-  type FileDiffView,
-  type GitBaseline,
-  type RestoreKind,
-  type RestorePreview,
-  type RestoreResult,
-  type ReviewPack,
-  type ReviewPackSummary,
+  gitReviewSchemaVersion,
+  type CommitDiffFile,
+  type CommitEvidenceDetail,
+  type CommitEvidenceFilter,
+  type CommitEvidenceSummary,
+  type CommitExplanationController,
+  type CommitExplanationControllerStateV1,
+  type CommitExplanationPresentationMode,
+  type CommitExplanationUserRequestTrigger,
+  type GitObservation,
+  type GitObservationReason,
 } from "@/lib/contracts/git-review"
 
 import {
@@ -15,17 +21,11 @@ import {
   type GitReviewTransport,
 } from "@/features/git-review/transport"
 
-export type ReviewCollectionStatus =
+export type GitReviewCollectionStatus =
   "idle" | "loading" | "ready" | "empty" | "error"
-export type ReviewResourceStatus = "idle" | "loading" | "ready" | "error"
-export type RestoreFlowStatus =
-  | "idle"
-  | "previewing"
-  | "ready"
-  | "blocked"
-  | "confirming"
-  | "succeeded"
-  | "error"
+export type GitReviewResourceStatus = "idle" | "loading" | "ready" | "error"
+export type CommitExplanationIntentStatus =
+  "idle" | "preparing" | "canceling" | "error"
 
 export interface GitReviewErrorState {
   readonly code: string
@@ -33,80 +33,72 @@ export interface GitReviewErrorState {
   readonly recoverable: boolean
 }
 
-export interface CompareState {
-  readonly fromCheckpointId: string | null
-  readonly toCheckpointId: string | null
-  readonly status: ReviewResourceStatus
-  readonly result: CompareCheckpointsView | null
-  readonly error: GitReviewErrorState | null
-}
-
-export interface RestoreState {
-  readonly kind: RestoreKind | null
-  readonly status: RestoreFlowStatus
-  readonly preview: RestorePreview | null
-  readonly result: RestoreResult | null
+export interface CommitExplanationState {
+  readonly status: CommitExplanationIntentStatus
+  readonly requestId: string | null
   readonly error: GitReviewErrorState | null
 }
 
 export interface GitReviewSnapshot {
-  readonly collectionStatus: ReviewCollectionStatus
-  readonly baselineStatus: ReviewResourceStatus
-  readonly baseline: GitBaseline | null
-  readonly baselineError: GitReviewErrorState | null
-  readonly items: readonly ReviewPackSummary[]
-  readonly nextBeforeSequence: number | null
+  readonly active: boolean
+  readonly observationStatus: GitReviewResourceStatus
+  readonly observation: GitObservation | null
+  readonly observationError: GitReviewErrorState | null
+  readonly collectionStatus: GitReviewCollectionStatus
+  readonly items: readonly CommitEvidenceSummary[]
+  readonly nextCursor: string | null
   readonly loadingMore: boolean
+  readonly filter: CommitEvidenceFilter
   readonly collectionError: GitReviewErrorState | null
-  readonly selectedCheckpointId: string | null
-  readonly detailStatus: ReviewResourceStatus
-  readonly detail: ReviewPack | null
+  readonly selectedCommitEvidenceId: string | null
+  readonly selectionVersion: number
+  readonly detailStatus: GitReviewResourceStatus
+  readonly detail: CommitEvidenceDetail | null
   readonly detailError: GitReviewErrorState | null
-  readonly selectedFileId: string | null
-  readonly diffStatus: ReviewResourceStatus
-  readonly diff: FileDiffView | null
+  readonly selectedFileEvidenceId: string | null
+  readonly diffStatus: GitReviewResourceStatus
+  readonly diff: CommitDiffFile | null
   readonly diffError: GitReviewErrorState | null
-  readonly compare: CompareState
-  readonly restore: RestoreState
+  readonly explanation: CommitExplanationState
+}
+
+export interface GitReviewStoreOptions {
+  readonly workspaceGeneration?: number
+  readonly commitExplanationController?: CommitExplanationController | undefined
+  readonly now?: () => Date
 }
 
 type ReviewListener = () => void
 
-const idleCompare: CompareState = {
-  fromCheckpointId: null,
-  toCheckpointId: null,
+const idleExplanation: CommitExplanationState = {
   status: "idle",
-  result: null,
+  requestId: null,
   error: null,
 }
 
-const idleRestore: RestoreState = {
-  kind: null,
-  status: "idle",
-  preview: null,
-  result: null,
-  error: null,
-}
-
-const initialSnapshot: GitReviewSnapshot = {
-  collectionStatus: "idle",
-  baselineStatus: "idle",
-  baseline: null,
-  baselineError: null,
-  items: [],
-  nextBeforeSequence: null,
-  loadingMore: false,
-  collectionError: null,
-  selectedCheckpointId: null,
-  detailStatus: "idle",
-  detail: null,
-  detailError: null,
-  selectedFileId: null,
-  diffStatus: "idle",
-  diff: null,
-  diffError: null,
-  compare: idleCompare,
-  restore: idleRestore,
+function initialSnapshot(): GitReviewSnapshot {
+  return {
+    active: false,
+    observationStatus: "idle",
+    observation: null,
+    observationError: null,
+    collectionStatus: "idle",
+    items: [],
+    nextCursor: null,
+    loadingMore: false,
+    filter: "all",
+    collectionError: null,
+    selectedCommitEvidenceId: null,
+    selectionVersion: 0,
+    detailStatus: "idle",
+    detail: null,
+    detailError: null,
+    selectedFileEvidenceId: null,
+    diffStatus: "idle",
+    diff: null,
+    diffError: null,
+    explanation: idleExplanation,
+  }
 }
 
 function errorState(error: unknown, fallback: string): GitReviewErrorState {
@@ -126,20 +118,29 @@ function errorState(error: unknown, fallback: string): GitReviewErrorState {
 }
 
 export class GitReviewStore {
-  private current: GitReviewSnapshot = initialSnapshot
+  private current = initialSnapshot()
   private readonly listeners = new Set<ReviewListener>()
-  private initialization: Promise<void> | null = null
+  private readonly workspaceGeneration: number
+  private readonly explanationController:
+    CommitExplanationController | undefined
+  private readonly now: () => Date
+  private activatedOnce = false
+  private initialSelectionEstablished = false
+  private requestSequence = 0
   private collectionGeneration = 0
-  private baselineGeneration = 0
   private detailGeneration = 0
   private diffGeneration = 0
-  private compareGeneration = 0
-  private restoreGeneration = 0
+  private explanationGeneration = 0
 
   constructor(
     readonly workspaceId: string,
     private readonly transport: GitReviewTransport,
-  ) {}
+    options: GitReviewStoreOptions = {},
+  ) {
+    this.workspaceGeneration = options.workspaceGeneration ?? 1
+    this.explanationController = options.commitExplanationController
+    this.now = options.now ?? (() => new Date())
+  }
 
   snapshot = (): GitReviewSnapshot => this.current
 
@@ -148,54 +149,106 @@ export class GitReviewStore {
     return () => this.listeners.delete(listener)
   }
 
-  initialize(): Promise<void> {
-    if (this.initialization !== null) return this.initialization
-    if (this.current.collectionStatus !== "idle") return Promise.resolve()
-
-    this.initialization = this.refresh().finally(() => {
-      this.initialization = null
-    })
-    return this.initialization
+  async activate(): Promise<void> {
+    if (this.current.active) return
+    this.setSnapshot({ ...this.current, active: true })
+    const reason: GitObservationReason = this.activatedOnce
+      ? "manual_refresh"
+      : "active_view"
+    this.activatedOnce = true
+    await this.refresh(reason)
   }
 
-  async refresh(): Promise<void> {
+  deactivate(): void {
+    if (!this.current.active) return
+    ++this.collectionGeneration
+    ++this.detailGeneration
+    ++this.diffGeneration
+    ++this.explanationGeneration
+    this.setSnapshot({
+      ...this.current,
+      active: false,
+      explanation: idleExplanation,
+    })
+  }
+
+  async refresh(
+    reason: GitObservationReason = "manual_refresh",
+  ): Promise<void> {
+    if (!this.current.active) return
+
     const hasItems = this.current.items.length > 0
     this.setSnapshot({
       ...this.current,
+      observationStatus: "loading",
+      observationError: null,
       collectionStatus: hasItems ? "ready" : "loading",
-      baselineStatus: this.current.baseline === null ? "loading" : "ready",
       collectionError: null,
-      baselineError: null,
     })
 
-    await Promise.all([this.loadBaseline(), this.loadFirstPage()])
+    try {
+      const observation = await this.transport.request(
+        gitReviewCommands.observeRepository,
+        {
+          schemaVersion: gitReviewSchemaVersion,
+          clientRequestId: this.nextRequestId("observe"),
+          workspaceId: this.workspaceId,
+          workspaceGeneration: this.workspaceGeneration,
+          reason,
+          workUnitId: null,
+          sourceEventId: null,
+        },
+      )
+      if (!this.current.active) return
+      this.setSnapshot({
+        ...this.current,
+        observationStatus: "ready",
+        observation,
+        observationError: null,
+      })
+    } catch (error) {
+      if (!this.current.active) return
+      this.setSnapshot({
+        ...this.current,
+        observationStatus: "error",
+        observationError: errorState(error, "GIT-OBSERVATION-FAILED"),
+      })
+    }
+
+    await this.loadFirstPage({ clearMissingSelection: true })
+  }
+
+  async setFilter(filter: CommitEvidenceFilter): Promise<void> {
+    if (filter === this.current.filter) return
+    this.setSnapshot({ ...this.current, filter })
+    if (this.current.active) {
+      await this.loadFirstPage({ clearMissingSelection: false })
+    }
   }
 
   async loadMore(): Promise<void> {
-    const beforeSequence = this.current.nextBeforeSequence
-    if (beforeSequence === null || this.current.loadingMore) return
+    const cursor = this.current.nextCursor
+    if (!this.current.active || cursor === null || this.current.loadingMore) {
+      return
+    }
 
     const generation = ++this.collectionGeneration
     this.setSnapshot({ ...this.current, loadingMore: true })
     try {
-      const page = await this.transport.request(
-        gitReviewCommands.listReviewPacks,
-        {
-          workspaceId: this.workspaceId,
-          beforeSequence,
-          limit: 50,
-        },
+      const page = await this.requestPage(cursor)
+      if (generation !== this.collectionGeneration || !this.current.active) {
+        return
+      }
+      const known = new Set(
+        this.current.items.map((item) => item.commitEvidenceId),
       )
-      if (generation !== this.collectionGeneration) return
-
-      const known = new Set(this.current.items.map((item) => item.checkpointId))
       const additional = page.items.filter(
-        (item) => !known.has(item.checkpointId),
+        (item) => !known.has(item.commitEvidenceId),
       )
       this.setSnapshot({
         ...this.current,
         items: [...this.current.items, ...additional],
-        nextBeforeSequence: page.nextBeforeSequence,
+        nextCursor: page.nextCursor,
         loadingMore: false,
       })
     } catch (error) {
@@ -203,45 +256,53 @@ export class GitReviewStore {
       this.setSnapshot({
         ...this.current,
         loadingMore: false,
-        collectionError: errorState(error, "GIT-REVIEW-PAGE-FAILED"),
+        collectionError: errorState(error, "GIT-EVIDENCE-PAGE-FAILED"),
       })
     }
   }
 
-  async selectCheckpoint(checkpointId: string): Promise<void> {
+  async selectCommitEvidence(commitEvidenceId: string): Promise<void> {
     if (
-      !this.current.items.some((item) => item.checkpointId === checkpointId)
+      !this.current.items.some(
+        (item) => item.commitEvidenceId === commitEvidenceId,
+      )
     ) {
       return
     }
+    if (this.current.selectedCommitEvidenceId === commitEvidenceId) return
 
     const generation = ++this.detailGeneration
     ++this.diffGeneration
-    ++this.restoreGeneration
+    ++this.explanationGeneration
+    const selectionVersion = this.current.selectionVersion + 1
+    this.initialSelectionEstablished = true
     this.setSnapshot({
       ...this.current,
-      selectedCheckpointId: checkpointId,
+      selectedCommitEvidenceId: commitEvidenceId,
+      selectionVersion,
       detailStatus: "loading",
       detail: null,
       detailError: null,
-      selectedFileId: null,
+      selectedFileEvidenceId: null,
       diffStatus: "idle",
       diff: null,
       diffError: null,
-      restore: idleRestore,
+      explanation: idleExplanation,
     })
 
     try {
       const detail = await this.transport.request(
-        gitReviewCommands.readReviewPack,
+        gitReviewCommands.readCommitEvidence,
         {
+          schemaVersion: gitReviewSchemaVersion,
           workspaceId: this.workspaceId,
-          checkpointId,
+          workspaceGeneration: this.workspaceGeneration,
+          commitEvidenceId,
         },
       )
       if (
         generation !== this.detailGeneration ||
-        this.current.selectedCheckpointId !== checkpointId
+        this.current.selectedCommitEvidenceId !== commitEvidenceId
       ) {
         return
       }
@@ -257,18 +318,16 @@ export class GitReviewStore {
         ...this.current,
         detailStatus: "error",
         detail: null,
-        detailError: errorState(error, "GIT-REVIEW-PACK-FAILED"),
+        detailError: errorState(error, "GIT-EVIDENCE-DETAIL-FAILED"),
       })
     }
   }
 
-  async selectFile(fileId: string): Promise<void> {
-    const checkpointId = this.current.selectedCheckpointId
+  async selectFile(fileEvidenceId: string): Promise<void> {
     const detail = this.current.detail
     if (
-      checkpointId === null ||
       detail === null ||
-      !detail.manifest.some((file) => file.fileId === fileId)
+      !detail.files.some((file) => file.fileEvidenceId === fileEvidenceId)
     ) {
       return
     }
@@ -276,7 +335,7 @@ export class GitReviewStore {
     const generation = ++this.diffGeneration
     this.setSnapshot({
       ...this.current,
-      selectedFileId: fileId,
+      selectedFileEvidenceId: fileEvidenceId,
       diffStatus: "loading",
       diff: null,
       diffError: null,
@@ -284,17 +343,18 @@ export class GitReviewStore {
 
     try {
       const diff = await this.transport.request(
-        gitReviewCommands.readFileDiff,
+        gitReviewCommands.readCommitDiffFile,
         {
+          schemaVersion: gitReviewSchemaVersion,
           workspaceId: this.workspaceId,
-          checkpointId,
-          fileId,
+          workspaceGeneration: this.workspaceGeneration,
+          commitEvidenceId: detail.commitEvidenceId,
+          fileEvidenceId,
         },
       )
       if (
         generation !== this.diffGeneration ||
-        this.current.selectedCheckpointId !== checkpointId ||
-        this.current.selectedFileId !== fileId
+        this.current.selectedFileEvidenceId !== fileEvidenceId
       ) {
         return
       }
@@ -310,46 +370,32 @@ export class GitReviewStore {
         ...this.current,
         diffStatus: "error",
         diff: null,
-        diffError: errorState(error, "GIT-REVIEW-DIFF-FAILED"),
+        diffError: errorState(error, "GIT-EVIDENCE-DIFF-FAILED"),
       })
     }
   }
 
-  setCompareSelection(side: "from" | "to", checkpointId: string): void {
+  async requestExplanation(
+    locale: "ja" | "en",
+    trigger: CommitExplanationUserRequestTrigger,
+  ): Promise<void> {
+    const detail = this.current.detail
     if (
-      !this.current.items.some((item) => item.checkpointId === checkpointId)
-    ) {
-      return
-    }
-    ++this.compareGeneration
-    this.setSnapshot({
-      ...this.current,
-      compare: {
-        ...this.current.compare,
-        [side === "from" ? "fromCheckpointId" : "toCheckpointId"]: checkpointId,
-        status: "idle",
-        result: null,
-        error: null,
-      },
-    })
-  }
-
-  async compareCheckpoints(): Promise<void> {
-    const { fromCheckpointId, toCheckpointId } = this.current.compare
-    if (
-      fromCheckpointId === null ||
-      toCheckpointId === null ||
-      fromCheckpointId === toCheckpointId
+      !this.current.active ||
+      detail === null ||
+      this.current.detailStatus !== "ready" ||
+      this.current.observationStatus !== "ready" ||
+      this.current.observation?.supportState !== "ready" ||
+      this.explanationController === undefined
     ) {
       this.setSnapshot({
         ...this.current,
-        compare: {
-          ...this.current.compare,
+        explanation: {
           status: "error",
-          result: null,
+          requestId: null,
           error: {
-            code: "GIT-COMPARE-SELECTION-INVALID",
-            userMessageKey: "gitReview.error.compareSelection",
+            code: "GIT-EXPLANATION-UNAVAILABLE",
+            userMessageKey: "gitReview.explanation.unavailable",
             recoverable: true,
           },
         },
@@ -357,283 +403,247 @@ export class GitReviewStore {
       return
     }
 
-    const generation = ++this.compareGeneration
+    const generation = ++this.explanationGeneration
+    const selectionVersion = this.current.selectionVersion
+    const commitEvidenceId = detail.commitEvidenceId
+    const requestId = this.nextRequestId("explain")
     this.setSnapshot({
       ...this.current,
-      compare: {
-        ...this.current.compare,
-        status: "loading",
-        result: null,
-        error: null,
-      },
+      explanation: { status: "preparing", requestId, error: null },
     })
-    try {
-      const result = await this.transport.request(
-        gitReviewCommands.compareCheckpoints,
-        {
-          workspaceId: this.workspaceId,
-          fromCheckpointId,
-          toCheckpointId,
-        },
-      )
-      if (generation !== this.compareGeneration) return
-      this.setSnapshot({
-        ...this.current,
-        compare: {
-          ...this.current.compare,
-          status: "ready",
-          result,
-          error: null,
-        },
-      })
-    } catch (error) {
-      if (generation !== this.compareGeneration) return
-      this.setSnapshot({
-        ...this.current,
-        compare: {
-          ...this.current.compare,
-          status: "error",
-          result: null,
-          error: errorState(error, "GIT-COMPARE-FAILED"),
-        },
-      })
-    }
-  }
 
-  async previewRestore(
-    kind: RestoreKind,
-    recoveryBranch: string | null,
-  ): Promise<void> {
-    const checkpointId = this.current.selectedCheckpointId
-    if (checkpointId === null || this.current.restore.status === "confirming") {
-      return
-    }
-
-    const generation = ++this.restoreGeneration
-    this.setSnapshot({
-      ...this.current,
-      restore: {
-        kind,
-        status: "previewing",
-        preview: null,
-        result: null,
-        error: null,
-      },
-    })
     try {
-      const preview = await this.transport.request(
-        gitReviewCommands.previewRestore,
+      const evidence = await this.transport.request(
+        gitReviewCommands.prepareCommitExplanationEvidence,
         {
+          schemaVersion: gitReviewSchemaVersion,
           workspaceId: this.workspaceId,
-          checkpointId,
-          kind,
-          recoveryBranch,
+          workspaceGeneration: this.workspaceGeneration,
+          commitEvidenceId,
+          locale,
+          selectionVersion,
         },
       )
       if (
-        generation !== this.restoreGeneration ||
-        this.current.selectedCheckpointId !== checkpointId
+        generation !== this.explanationGeneration ||
+        !this.current.active ||
+        this.current.selectedCommitEvidenceId !== commitEvidenceId ||
+        this.current.selectionVersion !== selectionVersion
       ) {
         return
       }
+
+      const request = createCommitExplanationRequested({
+        schemaVersion: gitReviewSchemaVersion,
+        requestId,
+        workspaceId: this.workspaceId,
+        workspaceGeneration: this.workspaceGeneration,
+        commitEvidenceId,
+        locale,
+        selectionVersion,
+        trigger,
+        requestedAt: this.now().toISOString(),
+      })
+      await this.explanationController.request({ request, evidence })
+      if (generation !== this.explanationGeneration) return
       this.setSnapshot({
         ...this.current,
-        restore: {
-          kind,
-          status: preview.status === "ready" ? "ready" : "blocked",
-          preview,
-          result: null,
-          error: null,
-        },
+        explanation: idleExplanation,
       })
     } catch (error) {
-      if (generation !== this.restoreGeneration) return
+      if (generation !== this.explanationGeneration) return
       this.setSnapshot({
         ...this.current,
-        restore: {
-          kind,
+        explanation: {
           status: "error",
-          preview: null,
-          result: null,
-          error: errorState(error, "GIT-RESTORE-PREVIEW-FAILED"),
+          requestId,
+          error: errorState(error, "GIT-EXPLANATION-PREPARE-FAILED"),
         },
       })
     }
   }
 
-  async confirmRestore(): Promise<void> {
-    const preview = this.current.restore.preview
-    const confirmationToken = preview?.confirmationToken
+  async cancelExplanation(
+    state: CommitExplanationControllerStateV1,
+  ): Promise<void> {
     if (
-      preview?.status !== "ready" ||
-      confirmationToken === null ||
-      confirmationToken === undefined
+      this.explanationController === undefined ||
+      state.workspaceId !== this.workspaceId ||
+      state.workspaceGeneration !== this.workspaceGeneration ||
+      state.commitEvidenceId !== this.current.selectedCommitEvidenceId ||
+      state.requestId === null ||
+      (state.status !== "queued" && state.status !== "running")
     ) {
       return
     }
 
-    const generation = ++this.restoreGeneration
+    const generation = ++this.explanationGeneration
     this.setSnapshot({
       ...this.current,
-      restore: { ...this.current.restore, status: "confirming", error: null },
+      explanation: {
+        status: "canceling",
+        requestId: state.requestId,
+        error: null,
+      },
     })
+    const request = createCommitExplanationCancelRequested({
+      schemaVersion: gitReviewSchemaVersion,
+      requestId: state.requestId,
+      workspaceGeneration: this.workspaceGeneration,
+      selectionVersion: this.current.selectionVersion,
+      reason: "user",
+      requestedAt: this.now().toISOString(),
+    })
+
     try {
-      const result = await this.transport.request(
-        gitReviewCommands.confirmRestore,
-        { workspaceId: this.workspaceId, confirmationToken },
-      )
-      if (generation !== this.restoreGeneration) return
-      this.setSnapshot({
-        ...this.current,
-        restore: {
-          kind: result.kind,
-          status: "succeeded",
-          preview: null,
-          result,
-          error: null,
-        },
-      })
+      await this.explanationController.cancel(request)
+      if (generation !== this.explanationGeneration) return
+      this.setSnapshot({ ...this.current, explanation: idleExplanation })
     } catch (error) {
-      if (generation !== this.restoreGeneration) return
+      if (generation !== this.explanationGeneration) return
       this.setSnapshot({
         ...this.current,
-        restore: {
-          ...this.current.restore,
+        explanation: {
           status: "error",
-          error: errorState(error, "GIT-RESTORE-CONFIRM-FAILED"),
+          requestId: state.requestId,
+          error: errorState(error, "GIT-EXPLANATION-CANCEL-FAILED"),
         },
       })
     }
   }
 
-  async cancelRestore(): Promise<void> {
-    const confirmationToken = this.current.restore.preview?.confirmationToken
-    const generation = ++this.restoreGeneration
-    if (confirmationToken === null || confirmationToken === undefined) {
-      this.setSnapshot({ ...this.current, restore: idleRestore })
+  async presentExplanation(
+    state: CommitExplanationControllerStateV1,
+    mode: CommitExplanationPresentationMode,
+  ): Promise<void> {
+    if (
+      this.explanationController === undefined ||
+      state.workspaceId !== this.workspaceId ||
+      state.workspaceGeneration !== this.workspaceGeneration ||
+      state.commitEvidenceId !== this.current.selectedCommitEvidenceId ||
+      state.requestId === null ||
+      !state.presentationAvailable
+    ) {
       return
     }
 
     try {
-      await this.transport.request(gitReviewCommands.cancelRestore, {
-        workspaceId: this.workspaceId,
-        confirmationToken,
-      })
-      if (generation !== this.restoreGeneration) return
-      this.setSnapshot({ ...this.current, restore: idleRestore })
-    } catch (error) {
-      if (generation !== this.restoreGeneration) return
-      this.setSnapshot({
-        ...this.current,
-        restore: {
-          ...this.current.restore,
-          status: "error",
-          error: errorState(error, "GIT-RESTORE-CANCEL-FAILED"),
-        },
-      })
-    }
-  }
-
-  clearRestoreResult(): void {
-    ++this.restoreGeneration
-    this.setSnapshot({ ...this.current, restore: idleRestore })
-  }
-
-  private async loadBaseline(): Promise<void> {
-    const generation = ++this.baselineGeneration
-    try {
-      const baseline = await this.transport.request(
-        gitReviewCommands.inspectBaseline,
-        { workspaceId: this.workspaceId },
-      )
-      if (generation !== this.baselineGeneration) return
-      this.setSnapshot({
-        ...this.current,
-        baselineStatus: "ready",
-        baseline,
-        baselineError: null,
-      })
-    } catch (error) {
-      if (generation !== this.baselineGeneration) return
-      this.setSnapshot({
-        ...this.current,
-        baselineStatus: "error",
-        baselineError: errorState(error, "GIT-BASELINE-FAILED"),
-      })
-    }
-  }
-
-  private async loadFirstPage(): Promise<void> {
-    const generation = ++this.collectionGeneration
-    try {
-      const page = await this.transport.request(
-        gitReviewCommands.listReviewPacks,
-        {
+      await this.explanationController.present(
+        createCommitExplanationPresentationRequested({
+          schemaVersion: gitReviewSchemaVersion,
           workspaceId: this.workspaceId,
-          beforeSequence: null,
-          limit: 50,
+          workspaceGeneration: this.workspaceGeneration,
+          commitEvidenceId: state.commitEvidenceId,
+          requestId: state.requestId,
+          mode,
+          requestedAt: this.now().toISOString(),
+        }),
+      )
+    } catch (error) {
+      this.setSnapshot({
+        ...this.current,
+        explanation: {
+          status: "error",
+          requestId: state.requestId,
+          error: errorState(error, "GIT-EXPLANATION-PRESENT-FAILED"),
         },
-      )
-      if (generation !== this.collectionGeneration) return
+      })
+    }
+  }
 
-      const retainedSelection = page.items.some(
-        (item) => item.checkpointId === this.current.selectedCheckpointId,
-      )
-        ? this.current.selectedCheckpointId
-        : null
-      const selectedCheckpointId =
-        retainedSelection ?? page.items[0]?.checkpointId ?? null
-      const compareFrom = page.items[1]?.checkpointId ?? null
-      const compareTo = page.items[0]?.checkpointId ?? null
+  private async loadFirstPage(options: {
+    readonly clearMissingSelection: boolean
+  }): Promise<void> {
+    const generation = ++this.collectionGeneration
+    const hasItems = this.current.items.length > 0
+    this.setSnapshot({
+      ...this.current,
+      collectionStatus: hasItems ? "ready" : "loading",
+      collectionError: null,
+      loadingMore: false,
+    })
 
+    try {
+      const page = await this.requestPage(null)
+      if (generation !== this.collectionGeneration || !this.current.active) {
+        return
+      }
+      const selected = this.current.selectedCommitEvidenceId
+      const selectionStillVisible =
+        selected !== null &&
+        page.items.some((item) => item.commitEvidenceId === selected)
       this.setSnapshot({
         ...this.current,
         collectionStatus: page.items.length === 0 ? "empty" : "ready",
         items: page.items,
-        nextBeforeSequence: page.nextBeforeSequence,
+        nextCursor: page.nextCursor,
         loadingMore: false,
         collectionError: null,
-        selectedCheckpointId,
-        compare: {
-          fromCheckpointId:
-            this.current.compare.fromCheckpointId ?? compareFrom,
-          toCheckpointId: this.current.compare.toCheckpointId ?? compareTo,
-          status: "idle",
-          result: null,
-          error: null,
-        },
       })
 
-      if (selectedCheckpointId !== null) {
-        await this.selectCheckpoint(selectedCheckpointId)
-      } else {
-        ++this.detailGeneration
-        ++this.diffGeneration
-        this.setSnapshot({
-          ...this.current,
-          selectedCheckpointId: null,
-          detailStatus: "idle",
-          detail: null,
-          detailError: null,
-          selectedFileId: null,
-          diffStatus: "idle",
-          diff: null,
-          diffError: null,
-        })
+      if (!this.initialSelectionEstablished && page.items[0] !== undefined) {
+        await this.selectCommitEvidence(page.items[0].commitEvidenceId)
+      } else if (
+        options.clearMissingSelection &&
+        selected !== null &&
+        !selectionStillVisible &&
+        this.current.filter === "all"
+      ) {
+        this.clearSelection()
       }
     } catch (error) {
       if (generation !== this.collectionGeneration) return
       this.setSnapshot({
         ...this.current,
-        collectionStatus: this.current.items.length > 0 ? "ready" : "error",
+        collectionStatus: hasItems ? "ready" : "error",
         loadingMore: false,
-        collectionError: errorState(error, "GIT-REVIEW-LIST-FAILED"),
+        collectionError: errorState(error, "GIT-EVIDENCE-LIST-FAILED"),
       })
     }
   }
 
-  private setSnapshot(snapshot: GitReviewSnapshot): void {
-    this.current = snapshot
-    for (const listener of this.listeners) listener()
+  private requestPage(cursor: string | null) {
+    return this.transport.request(gitReviewCommands.listCommitEvidence, {
+      schemaVersion: gitReviewSchemaVersion,
+      workspaceId: this.workspaceId,
+      workspaceGeneration: this.workspaceGeneration,
+      cursor,
+      limit: 50,
+      filter: this.current.filter,
+      workUnitId:
+        this.current.filter === "this_work_unit"
+          ? (this.current.detail?.workUnitId ?? null)
+          : null,
+    })
+  }
+
+  private clearSelection(): void {
+    ++this.detailGeneration
+    ++this.diffGeneration
+    ++this.explanationGeneration
+    this.initialSelectionEstablished = true
+    this.setSnapshot({
+      ...this.current,
+      selectedCommitEvidenceId: null,
+      selectionVersion: this.current.selectionVersion + 1,
+      detailStatus: "idle",
+      detail: null,
+      detailError: null,
+      selectedFileEvidenceId: null,
+      diffStatus: "idle",
+      diff: null,
+      diffError: null,
+      explanation: idleExplanation,
+    })
+  }
+
+  private nextRequestId(operation: "observe" | "explain"): string {
+    this.requestSequence += 1
+    return `git-${operation}-${this.workspaceGeneration}-${this.requestSequence}`
+  }
+
+  private setSnapshot(next: GitReviewSnapshot): void {
+    this.current = next
+    this.listeners.forEach((listener) => listener())
   }
 }

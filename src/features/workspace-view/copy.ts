@@ -170,14 +170,14 @@ const en = {
   assistantPreview:
     "The desktop work surface is ready for integration. This preview demonstrates the event hierarchy without claiming a live Codex session.",
   verificationPreview:
-    "Frontend checks can be presented as named evidence with a terminal result, duration, and a link to the corresponding checkpoint.",
+    "Frontend checks can be presented as named evidence with a terminal result, duration, and a link to the corresponding commit.",
   errorTitle: "Connection required",
   errorBody:
     "Sending remains blocked until the local Codex preflight succeeds. The draft is kept unchanged.",
   decisionTitle: "Review boundary preview",
   decisionQuestion: "How should the next work unit be scoped?",
   decisionWhy:
-    "A smaller unit keeps the evidence and recovery point reviewable before implementation continues.",
+    "A smaller unit keeps the evidence and main-session commit reviewable before implementation continues.",
   decisionOptionSmall: "Keep one reviewable unit",
   decisionOptionSmallImpact:
     "Complete one bounded change and verify it before continuing.",
@@ -240,23 +240,6 @@ const en = {
     unmuted: "Audio available",
     mute: "Mute companion",
     unmute: "Unmute companion",
-  },
-  commit: {
-    title: "Session evidence",
-    description:
-      "Checkpoint evidence appears here only after Scope, Ownership, Verification, and Risk have terminal results.",
-    emptyTitle: "No persisted checkpoint evidence",
-    emptyDescription:
-      "The preview transport has not created a Git object or review pack.",
-    backToChat: "Back to Chat",
-    gateSummary: "Checkpoint gates",
-    unavailable: "Unavailable",
-    gates: ["Scope", "Ownership", "Verification", "Risk"],
-    listTitle: "Checkpoints",
-    noCheckpoint: "No checkpoint",
-    detailTitle: "Evidence detail",
-    detailBody:
-      "Connect local history and Git services to inspect sanitized diffs, decisions, failed attempts, risks, and recovery actions.",
   },
   contextView: {
     title: "Workspace context",
@@ -376,7 +359,7 @@ const en = {
     supportDescription:
       "Requires a proven ephemeral, tool-free runtime. It remains off in preview mode.",
     presence: "Presence narration",
-    reviewer: "Checkpoint reviewer",
+    reviewer: "Commit explainer",
     diagnosticsTitle: "Diagnostics",
     recheck: "Recheck runtime",
     runtimeMode: "Runtime mode",
@@ -600,14 +583,14 @@ const ja: typeof en = {
   assistantPreview:
     "デスクトップ作業面は統合可能な状態です。このプレビューは実Codexセッションの成功を主張せず、イベント階層だけを示します。",
   verificationPreview:
-    "フロントエンドの検証は、名称、終了結果、所要時間、対応checkpointへの導線を持つ証拠として提示できます。",
+    "フロントエンドの検証は、名称、終了結果、所要時間、対応コミットへの導線を持つ証拠として提示できます。",
   errorTitle: "接続が必要です",
   errorBody:
     "ローカルCodexの事前診断が成功するまで送信は無効です。下書きは変更されません。",
   decisionTitle: "レビュー境界のプレビュー",
   decisionQuestion: "次の作業単位をどの範囲にしますか？",
   decisionWhy:
-    "実装を続ける前に小さく区切ると、証拠と復元地点をレビュー可能に保てます。",
+    "実装を続ける前に小さく区切ると、証拠とmain sessionのコミットをレビュー可能に保てます。",
   decisionOptionSmall: "レビュー可能な1単位にする",
   decisionOptionSmallImpact:
     "一つの限定された変更を完了・検証してから続けます。",
@@ -671,23 +654,6 @@ const ja: typeof en = {
     unmuted: "音声利用可能",
     mute: "コンパニオンをミュート",
     unmute: "コンパニオンのミュートを解除",
-  },
-  commit: {
-    title: "セッション証拠",
-    description:
-      "Scope、Ownership、Verification、Riskがterminalになった後だけcheckpoint証拠を表示します。",
-    emptyTitle: "永続化済みcheckpoint証拠はありません",
-    emptyDescription:
-      "プレビューtransportはGit objectやreview packを作成していません。",
-    backToChat: "チャットへ戻る",
-    gateSummary: "Checkpoint gate",
-    unavailable: "利用不可",
-    gates: ["Scope", "Ownership", "Verification", "Risk"],
-    listTitle: "チェックポイント",
-    noCheckpoint: "Checkpointなし",
-    detailTitle: "証拠詳細",
-    detailBody:
-      "ローカル履歴とGit serviceを接続すると、秘匿化された差分、判断、失敗、リスク、復元操作を確認できます。",
   },
   contextView: {
     title: "ワークスペースコンテキスト",
@@ -805,7 +771,7 @@ const ja: typeof en = {
     supportDescription:
       "toolなしのephemeral runtimeを証明する必要があるため、previewではoffを維持します。",
     presence: "状況実況",
-    reviewer: "Checkpoint reviewer",
+    reviewer: "コミット説明",
     diagnosticsTitle: "診断",
     recheck: "実行環境を再確認",
     runtimeMode: "実行モード",

@@ -1,213 +1,304 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  createCommitExplanationCancelRequested,
+  createCommitExplanationPresentationRequested,
+  createCommitExplanationRequested,
   GitReviewContractError,
   gitReviewCommands,
-  parseCheckpointEvaluation,
-  parseFileDiffView,
-  parseGitBaseline,
+  parseCommitEvidenceDetail,
+  parseCommitEvidenceV1,
+  parseCommitExplanationControllerState,
+  parseGitObservation,
   parseGitReviewError,
   parseGitReviewResponse,
-  parseRestorePreview,
-  parseReviewPack,
 } from "@/lib/contracts/git-review"
 
-const fingerprint = `sha256:${"c".repeat(64)}`
+const sha = "a".repeat(40)
+const parent = "b".repeat(40)
+const digest = `sha256:${"c".repeat(64)}`
 
-function reviewPack() {
+function skillAudit() {
   return {
     schemaVersion: 1,
-    checkpoint: {
-      checkpointId: "checkpoint-fixture",
-      commitSha: "a".repeat(40),
-      parentSha: "b".repeat(40),
-      targetReference: "refs/heads/main",
-      message: "feat(git): add fixture\n\n- verify the exact contract",
-      authorName: "Fixture Author",
-      authorEmail: "fixture@example.invalid",
-      createdAt: "2026-07-18T00:00:02.000Z",
+    skillId: "coding-wife-commit-work",
+    skillVersion: "1.0.0",
+    contentDigest: digest,
+    pathAuthority: "app_bundle",
+    injectionMode: "skill_input",
+    workspaceGeneration: 3,
+    workUnitId: "work-unit-one",
+    clientRequestId: "turn-one",
+    injectedAt: "2026-07-18T01:00:00.000Z",
+  }
+}
+
+function verification() {
+  return {
+    evidenceId: "verification-one",
+    sourceEventId: "event-verification-one",
+    check: "pnpm test",
+    result: "passed",
+    durationMs: 420,
+    summary: "Focused tests passed.",
+  }
+}
+
+function detail() {
+  return {
+    schemaVersion: 1,
+    commitEvidenceId: `commit-${sha}`,
+    workspaceId: "workspace-one",
+    producer: "main_codex",
+    identity: {
+      commitSha: sha,
+      subject: "feat(git): observe commit evidence",
+      body: "- keep the native boundary read only",
+      authorName: "Coding Wife",
+      authorEmail: "coding-wife@example.invalid",
+      authoredAt: "2026-07-18T01:00:00.000Z",
+      committedAt: "2026-07-18T01:00:01.000Z",
+      parents: [parent],
     },
-    workspaceId: "workspace-fixture",
-    workUnitId: "work-unit-fixture",
-    objective: "Persist a bounded review pack",
-    acceptance: ["The exact review pack is available"],
+    workUnitId: "work-unit-one",
+    objective: "Expose read-only commit evidence",
+    acceptance: ["The selected diff is loaded lazily."],
+    beforeObservationId: "observation-before",
+    afterObservationId: "observation-after",
+    sourceEventId: "event-terminal-one",
     gates: ["scope", "ownership", "verification", "risk"].map((gate) => ({
       gate,
       outcome: "pass",
-      reasonCodes: [],
-      observedRepositoryFingerprint: fingerprint,
+      reasonCodes: [`${gate}_observed`],
+      evidenceIds: gate === "verification" ? ["verification-one"] : [],
     })),
-    manifest: [
+    files: [
       {
-        fileId: "file-fixture",
-        relativePath: "src/main.rs",
+        fileEvidenceId: "file-one",
+        relativePath: "src/feature.ts",
         changeKind: "modified",
-        ownership: "owned",
-        beforeHash: `sha256:${"d".repeat(64)}`,
-        afterHash: `sha256:${"e".repeat(64)}`,
-        additions: 4,
-        deletions: 1,
-        reasonCode: null,
+        additions: 12,
+        deletions: 3,
+        binary: false,
       },
     ],
     diffSummary: {
       filesChanged: 1,
-      additions: 4,
-      deletions: 1,
+      additions: 12,
+      deletions: 3,
       binaryFiles: 0,
-      totalBytes: 128,
     },
-    verification: [
-      {
-        evidenceId: "evidence-fixture",
-        check: "cargo test",
-        result: "passed",
-        durationMs: 1200,
-        summary: "All focused tests passed",
-        observedRepositoryFingerprint: fingerprint,
-      },
-    ],
+    verification: [verification()],
     decisions: [],
     failedAttempts: [],
     risks: [],
-    restoreGuidance: ["Preview the affected files before restore."],
-    operationState: "history_complete",
-    packDigest: `sha256:${"f".repeat(64)}`,
+    commitSkillInjection: skillAudit(),
+    observedAt: "2026-07-18T01:00:02.000Z",
     historySequence: 42,
   }
 }
 
-describe("Git review contract", () => {
-  it("parses exact baseline, review pack, and review-ready evaluation shapes", () => {
-    const baseline = {
-      schemaVersion: 1,
-      baselineId: "baseline-fixture",
-      workspaceId: "workspace-fixture",
-      supportState: "ready",
-      headSha: "a".repeat(40),
-      headReference: "refs/heads/main",
-      branch: "main",
-      detached: false,
-      indexFingerprint: fingerprint,
-      statusFingerprint: fingerprint,
-      repositoryFingerprint: fingerprint,
-      preExisting: [],
-      blockedReasons: [],
-      capturedAt: "2026-07-18T00:00:00.000Z",
-    }
-    const pack = reviewPack()
-    const evaluation = {
-      schemaVersion: 1,
-      status: "review_ready",
-      gates: pack.gates,
-      manifest: pack.manifest,
-      checkpoint: pack.checkpoint,
-      reviewPack: pack,
-      errorCode: null,
-    }
+function observation() {
+  return {
+    schemaVersion: 1,
+    observationId: "observation-active",
+    workspaceId: "workspace-one",
+    workspaceGeneration: 3,
+    reason: "active_view",
+    workUnitId: null,
+    sourceEventId: null,
+    supportState: "ready",
+    headSha: sha,
+    headReference: "refs/heads/feature/read-only",
+    branch: "feature/read-only",
+    detached: false,
+    indexFingerprint: digest,
+    statusFingerprint: digest,
+    repositoryFingerprint: digest,
+    preExisting: [],
+    blockedReasons: [],
+    capturedAt: "2026-07-18T01:00:02.000Z",
+    historySequence: 40,
+  }
+}
 
-    expect(parseGitBaseline(baseline)).toEqual(baseline)
-    expect(parseReviewPack(pack)).toEqual(pack)
-    expect(parseCheckpointEvaluation(evaluation)).toEqual(evaluation)
+function explanationEvidence() {
+  return {
+    schemaVersion: 1,
+    commitId: `commit-${sha}`,
+    subject: "feat(git): observe commit evidence",
+    body: "- keep the native boundary read only",
+    changes: [
+      {
+        changeKind: "modified",
+        fileCount: 1,
+        additions: 12,
+        deletions: 3,
+        binaryFiles: 0,
+      },
+    ],
+    diffSummary: {
+      filesChanged: 1,
+      additions: 12,
+      deletions: 3,
+      binaryFiles: 0,
+    },
+    verification: [verification()],
+    decisions: [],
+    risks: [],
+    locale: "ja",
+    workspaceGeneration: 3,
+    selectionVersion: 2,
+  }
+}
+
+describe("read-only Git review contracts", () => {
+  it("parses observation, list, detail, diff, and explanation responses", () => {
+    expect(parseGitObservation(observation())).toEqual(observation())
+    expect(parseCommitEvidenceDetail(detail())).toEqual(detail())
     expect(
-      parseGitReviewResponse(gitReviewCommands.evaluateCheckpoint, evaluation),
-    ).toEqual(evaluation)
-  })
-
-  it("rejects unknown fields, future schemas, private paths, and secret text", () => {
-    const pack = reviewPack()
-    expect(() => parseReviewPack({ ...pack, rawGitArgs: ["commit"] })).toThrow(
-      GitReviewContractError,
-    )
-    expect(() => parseReviewPack({ ...pack, schemaVersion: 2 })).toThrow(
-      GitReviewContractError,
-    )
-    expect(() =>
-      parseReviewPack({
-        ...pack,
-        manifest: [{ ...pack.manifest[0], relativePath: "/Users/private/key" }],
-      }),
-    ).toThrow(GitReviewContractError)
-    expect(() =>
-      parseReviewPack({
-        ...pack,
-        objective: "Authorization: Bearer private-token",
-      }),
-    ).toThrow(GitReviewContractError)
-  })
-
-  it("requires all four terminal gates and fresh passed verification in persisted packs", () => {
-    const pack = reviewPack()
-    expect(() =>
-      parseReviewPack({ ...pack, gates: pack.gates.slice(0, 3) }),
-    ).toThrow(GitReviewContractError)
-    expect(() =>
-      parseReviewPack({
-        ...pack,
-        gates: pack.gates.map((gate) =>
-          gate.gate === "risk" ? { ...gate, outcome: "needs_review" } : gate,
-        ),
-      }),
-    ).toThrow(GitReviewContractError)
-    expect(() => parseReviewPack({ ...pack, verification: [] })).toThrow(
-      GitReviewContractError,
-    )
-  })
-
-  it("bounds lazy diff content and enforces coherent restore previews", () => {
-    const diff = {
-      schemaVersion: 1,
-      checkpointId: "checkpoint-fixture",
-      fileId: "file-fixture",
-      relativePath: "src/main.rs",
-      changeKind: "modified",
-      ownership: "owned",
-      content: "@@ -1 +1 @@\n-before\n+after\n",
-      truncated: false,
-      byteCount: 32,
-    }
-    const preview = {
-      schemaVersion: 1,
-      status: "ready",
-      kind: "revert_commit",
-      checkpointId: "checkpoint-fixture",
-      impact: {
-        targetCommitSha: "a".repeat(40),
-        currentHeadSha: "b".repeat(40),
-        affectedFiles: ["src/main.rs"],
+      parseGitReviewResponse(gitReviewCommands.listCommitEvidence, {
+        schemaVersion: 1,
+        items: [
+          {
+            commitEvidenceId: `commit-${sha}`,
+            commitSha: sha,
+            subject: "feat(git): observe commit evidence",
+            authorName: "Coding Wife",
+            authoredAt: "2026-07-18T01:00:00.000Z",
+            parentCount: 1,
+            producer: "main_codex",
+            workUnitId: "work-unit-one",
+            verificationOutcome: "pass",
+            riskOutcome: "pass",
+            diffSummary: detail().diffSummary,
+            historySequence: 42,
+          },
+        ],
+        nextCursor: null,
+      }).items,
+    ).toHaveLength(1)
+    expect(
+      parseGitReviewResponse(gitReviewCommands.readCommitDiffFile, {
+        schemaVersion: 1,
+        commitEvidenceId: `commit-${sha}`,
+        fileEvidenceId: "file-one",
+        relativePath: "src/feature.ts",
+        changeKind: "modified",
+        state: "text",
+        content: "@@ -1 +1 @@\n-old\n+new",
+        byteCount: 24,
         additions: 1,
         deletions: 1,
-        createsNewCommit: true,
-        checksOutBranch: false,
-      },
-      confirmationToken: "restore-fixture",
-      expiresAt: "2026-07-18T00:05:00.000Z",
-      blockedReasons: [],
-    }
-    expect(parseFileDiffView(diff)).toEqual(diff)
-    expect(parseRestorePreview(preview)).toEqual(preview)
+      }).state,
+    ).toBe("text")
+    expect(parseCommitEvidenceV1(explanationEvidence())).toEqual(
+      explanationEvidence(),
+    )
+  })
+
+  it("rejects mutation fields, unknown fields, and non-pathless support evidence", () => {
     expect(() =>
-      parseRestorePreview({ ...preview, confirmationToken: null }),
+      parseGitObservation({ ...observation(), gitArgs: ["commit"] }),
     ).toThrow(GitReviewContractError)
     expect(() =>
-      parseFileDiffView({ ...diff, content: "x".repeat(1024 * 1024 + 1) }),
+      parseCommitEvidenceDetail({ ...detail(), mutationAction: "write" }),
+    ).toThrow(GitReviewContractError)
+    expect(() =>
+      parseCommitEvidenceV1({
+        ...explanationEvidence(),
+        relativePath: "src/secret.ts",
+      }),
+    ).toThrow(GitReviewContractError)
+    expect(() =>
+      parseCommitEvidenceV1({
+        ...explanationEvidence(),
+        subject: "token=secret-value",
+      }),
     ).toThrow(GitReviewContractError)
   })
 
-  it("parses only bounded sanitized error envelopes and null cancel responses", () => {
+  it("creates app-owned, selection-bound explanation requests and presentation intents", () => {
+    const request = {
+      schemaVersion: 1 as const,
+      requestId: "explanation-request-one",
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      commitEvidenceId: `commit-${sha}`,
+      locale: "ja" as const,
+      selectionVersion: 2,
+      trigger: "user_request" as const,
+      requestedAt: "2026-07-18T01:00:03.000Z",
+    }
+    expect(createCommitExplanationRequested(request)).toEqual(request)
+    expect(() =>
+      createCommitExplanationRequested({ ...request, selectionVersion: 0 }),
+    ).toThrow(GitReviewContractError)
+    expect(() =>
+      createCommitExplanationRequested({
+        ...request,
+        trigger: "verified_commit" as never,
+      }),
+    ).toThrow(GitReviewContractError)
+
+    const controllerState = {
+      schemaVersion: 1,
+      workspaceId: request.workspaceId,
+      workspaceGeneration: request.workspaceGeneration,
+      commitEvidenceId: request.commitEvidenceId,
+      requestId: request.requestId,
+      status: "generated",
+      trigger: "auto_verified_commit",
+      retryable: false,
+      presentationAvailable: true,
+      errorCode: null,
+      updatedAt: "2026-07-18T01:00:04.000Z",
+    }
+    expect(parseCommitExplanationControllerState(controllerState)).toEqual(
+      controllerState,
+    )
+    expect(() =>
+      parseCommitExplanationControllerState({
+        ...controllerState,
+        presentationAvailable: false,
+      }),
+    ).toThrow(GitReviewContractError)
+
+    expect(
+      createCommitExplanationPresentationRequested({
+        schemaVersion: 1,
+        workspaceId: request.workspaceId,
+        workspaceGeneration: request.workspaceGeneration,
+        commitEvidenceId: request.commitEvidenceId,
+        requestId: request.requestId,
+        mode: "show",
+        requestedAt: "2026-07-18T01:00:05.000Z",
+      }),
+    ).toMatchObject({ mode: "show" })
+
+    expect(
+      createCommitExplanationCancelRequested({
+        schemaVersion: 1,
+        requestId: request.requestId,
+        workspaceGeneration: request.workspaceGeneration,
+        selectionVersion: request.selectionVersion,
+        reason: "selection_changed",
+        requestedAt: "2026-07-18T01:00:06.000Z",
+      }),
+    ).toMatchObject({ reason: "selection_changed" })
+  })
+
+  it("parses only bounded structured native errors", () => {
     const error = {
-      code: "GIT-REF-CAS",
-      operation: "evaluate_and_checkpoint_work_unit",
-      recoverable: true,
+      code: "GIT-COMMIT-NOT-FOUND",
+      operation: "read_git_commit_evidence",
+      recoverable: false,
       userMessageKey: "gitReview.error.generic",
-      detailRef: "orphaned-objects:3",
+      detailRef: "commit-evidence",
     }
     expect(parseGitReviewError(error)).toEqual(error)
-    expect(
-      parseGitReviewResponse(gitReviewCommands.cancelRestore, null),
-    ).toBeNull()
     expect(() =>
-      parseGitReviewError({ ...error, rawStderr: "private output" }),
+      parseGitReviewError({ ...error, rawStderr: "secret" }),
     ).toThrow(GitReviewContractError)
   })
 })

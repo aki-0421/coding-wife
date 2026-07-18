@@ -5,46 +5,54 @@ import {
   GitReviewBoundaryError,
   TauriGitReviewTransport,
 } from "@/features/git-review/transport"
-import { gitReviewCommands } from "@/lib/contracts/git-review"
+import {
+  gitReviewCommands,
+  gitReviewSchemaVersion,
+} from "@/lib/contracts/git-review"
 
 describe("TauriGitReviewTransport", () => {
   it("passes only the typed request and parses the native response", async () => {
-    const demo = new DemoGitReviewTransport(0)
-    const page = await demo.request(gitReviewCommands.listReviewPacks, {
+    const request = {
+      schemaVersion: gitReviewSchemaVersion,
       workspaceId: "workspace-demo",
-      beforeSequence: null,
+      workspaceGeneration: 1,
+      cursor: null,
       limit: 50,
-    })
-    const invoker = vi.fn((_command, request) => {
-      expect(request).toEqual({
-        workspaceId: "workspace-demo",
-        beforeSequence: null,
-        limit: 50,
-      })
+      filter: "all" as const,
+      workUnitId: null,
+    }
+    const demo = new DemoGitReviewTransport(0)
+    const page = await demo.request(
+      gitReviewCommands.listCommitEvidence,
+      request,
+    )
+    const invoker = vi.fn((_command, input) => {
+      expect(input).toEqual(request)
       return Promise.resolve(page)
     })
     const transport = new TauriGitReviewTransport(invoker)
 
     await expect(
-      transport.request(gitReviewCommands.listReviewPacks, {
-        workspaceId: "workspace-demo",
-        beforeSequence: null,
-        limit: 50,
-      }),
+      transport.request(gitReviewCommands.listCommitEvidence, request),
     ).resolves.toEqual(page)
     expect(invoker).toHaveBeenCalledOnce()
   })
 
-  it("normalizes malformed responses without leaking raw native errors", async () => {
+  it("normalizes malformed responses without exposing raw native errors", async () => {
+    const request = {
+      schemaVersion: gitReviewSchemaVersion,
+      workspaceId: "workspace-demo",
+      workspaceGeneration: 1,
+      cursor: null,
+      limit: 50,
+      filter: "all" as const,
+      workUnitId: null,
+    }
     const malformed = new TauriGitReviewTransport(() =>
       Promise.resolve({ schemaVersion: 1, items: "not-an-array" }),
     )
     await expect(
-      malformed.request(gitReviewCommands.listReviewPacks, {
-        workspaceId: "workspace-demo",
-        beforeSequence: null,
-        limit: 50,
-      }),
+      malformed.request(gitReviewCommands.listCommitEvidence, request),
     ).rejects.toMatchObject({
       code: "GIT-IPC-CONTRACT-MISMATCH",
       recoverable: false,
@@ -52,126 +60,118 @@ describe("TauriGitReviewTransport", () => {
     })
 
     const unavailable = new TauriGitReviewTransport(() =>
-      Promise.reject(new Error("/Users/private token=secret")),
+      Promise.reject(new Error("private native diagnostic")),
     )
     await expect(
-      unavailable.request(gitReviewCommands.inspectBaseline, {
-        workspaceId: "workspace-demo",
-      }),
+      unavailable.request(gitReviewCommands.listCommitEvidence, request),
     ).rejects.toEqual(
       expect.objectContaining({
         code: "GIT-IPC-UNAVAILABLE",
-        operation: gitReviewCommands.inspectBaseline,
+        operation: gitReviewCommands.listCommitEvidence,
       }),
     )
   })
 
-  it("preserves a structured Rust error envelope", async () => {
-    const nativeError = Object.assign(new Error("Structured Git failure"), {
-      code: "GIT-RESTORE-STALE-HEAD",
-      operation: gitReviewCommands.previewRestore,
+  it("preserves a structured read-only observer error envelope", async () => {
+    const nativeError = new GitReviewBoundaryError({
+      code: "GIT-OBSERVATION-STALE",
+      operation: gitReviewCommands.observeRepository,
       recoverable: true,
-      userMessageKey: "gitReview.error.staleHead",
-      detailRef: "restore-preflight",
+      userMessageKey: "gitReview.error.stale",
+      detailRef: "observation-race",
     })
     const transport = new TauriGitReviewTransport(() =>
       Promise.reject(nativeError),
     )
 
     await expect(
-      transport.request(gitReviewCommands.previewRestore, {
+      transport.request(gitReviewCommands.observeRepository, {
+        schemaVersion: gitReviewSchemaVersion,
+        clientRequestId: "observe-one",
         workspaceId: "workspace-demo",
-        checkpointId: "checkpoint-git-review-ui",
-        kind: "revert_commit",
-        recoveryBranch: null,
+        workspaceGeneration: 1,
+        reason: "manual_refresh",
+        workUnitId: null,
+        sourceEventId: null,
       }),
     ).rejects.toEqual(expect.any(GitReviewBoundaryError))
     await expect(
-      transport.request(gitReviewCommands.previewRestore, {
+      transport.request(gitReviewCommands.observeRepository, {
+        schemaVersion: gitReviewSchemaVersion,
+        clientRequestId: "observe-two",
         workspaceId: "workspace-demo",
-        checkpointId: "checkpoint-git-review-ui",
-        kind: "revert_commit",
-        recoveryBranch: null,
+        workspaceGeneration: 1,
+        reason: "manual_refresh",
+        workUnitId: null,
+        sourceEventId: null,
       }),
-    ).rejects.toMatchObject({
-      code: "GIT-RESTORE-STALE-HEAD",
-      recoverable: true,
-      detailRef: "restore-preflight",
-    })
+    ).rejects.toMatchObject(nativeError)
   })
 })
 
 describe("DemoGitReviewTransport", () => {
-  it("supports list, lazy diff, compare, cancel, and confirmed restore", async () => {
+  it("supports observation, list, detail, lazy diff, and pathless explanation", async () => {
     const transport = new DemoGitReviewTransport(0)
-    const page = await transport.request(gitReviewCommands.listReviewPacks, {
-      workspaceId: "workspace-demo",
-      beforeSequence: null,
-      limit: 50,
-    })
-    expect(page.items).toHaveLength(2)
-
-    const [current, previous] = page.items
-    if (current === undefined || previous === undefined) {
-      throw new Error("Demo checkpoints are missing")
-    }
-    const pack = await transport.request(gitReviewCommands.readReviewPack, {
-      workspaceId: "workspace-demo",
-      checkpointId: current.checkpointId,
-    })
-    const firstFile = pack.manifest[0]
-    if (firstFile === undefined) throw new Error("Demo manifest is missing")
-
-    await expect(
-      transport.request(gitReviewCommands.readFileDiff, {
-        workspaceId: "workspace-demo",
-        checkpointId: current.checkpointId,
-        fileId: firstFile.fileId,
-      }),
-    ).resolves.toMatchObject({ relativePath: firstFile.relativePath })
-    await expect(
-      transport.request(gitReviewCommands.compareCheckpoints, {
-        workspaceId: "workspace-demo",
-        fromCheckpointId: previous.checkpointId,
-        toCheckpointId: current.checkpointId,
-      }),
-    ).resolves.toMatchObject({
-      toCommitSha: current.commitSha,
-    })
-
-    const canceled = await transport.request(gitReviewCommands.previewRestore, {
-      workspaceId: "workspace-demo",
-      checkpointId: current.checkpointId,
-      kind: "revert_commit",
-      recoveryBranch: null,
-    })
-    if (canceled.confirmationToken === null) throw new Error("Token is missing")
-    await expect(
-      transport.request(gitReviewCommands.cancelRestore, {
-        workspaceId: "workspace-demo",
-        confirmationToken: canceled.confirmationToken,
-      }),
-    ).resolves.toBeNull()
-
-    const confirmed = await transport.request(
-      gitReviewCommands.previewRestore,
+    const observation = await transport.request(
+      gitReviewCommands.observeRepository,
       {
+        schemaVersion: gitReviewSchemaVersion,
+        clientRequestId: "observe-demo",
         workspaceId: "workspace-demo",
-        checkpointId: current.checkpointId,
-        kind: "recovery_branch",
-        recoveryBranch: "recovery/demo-checkpoint",
+        workspaceGeneration: 1,
+        reason: "active_view",
+        workUnitId: null,
+        sourceEventId: null,
       },
     )
-    if (confirmed.confirmationToken === null)
-      throw new Error("Token is missing")
-    await expect(
-      transport.request(gitReviewCommands.confirmRestore, {
-        workspaceId: "workspace-demo",
-        confirmationToken: confirmed.confirmationToken,
-      }),
-    ).resolves.toMatchObject({
-      kind: "recovery_branch",
-      createdReference: "refs/heads/recovery/demo-checkpoint",
+    expect(observation.supportState).toBe("ready")
+
+    const page = await transport.request(gitReviewCommands.listCommitEvidence, {
+      schemaVersion: gitReviewSchemaVersion,
+      workspaceId: "workspace-demo",
+      workspaceGeneration: 1,
+      cursor: null,
+      limit: 50,
+      filter: "all",
+      workUnitId: null,
     })
+    expect(page.items).toHaveLength(2)
+    const current = page.items[0]
+    if (current === undefined) throw new Error("Demo commit is missing")
+
+    const detail = await transport.request(
+      gitReviewCommands.readCommitEvidence,
+      {
+        schemaVersion: gitReviewSchemaVersion,
+        workspaceId: "workspace-demo",
+        workspaceGeneration: 1,
+        commitEvidenceId: current.commitEvidenceId,
+      },
+    )
+    const firstFile = detail.files[0]
+    if (firstFile === undefined) throw new Error("Demo file is missing")
+    await expect(
+      transport.request(gitReviewCommands.readCommitDiffFile, {
+        schemaVersion: gitReviewSchemaVersion,
+        workspaceId: "workspace-demo",
+        workspaceGeneration: 1,
+        commitEvidenceId: current.commitEvidenceId,
+        fileEvidenceId: firstFile.fileEvidenceId,
+      }),
+    ).resolves.toMatchObject({ relativePath: firstFile.relativePath })
+
+    const evidence = await transport.request(
+      gitReviewCommands.prepareCommitExplanationEvidence,
+      {
+        schemaVersion: gitReviewSchemaVersion,
+        workspaceId: "workspace-demo",
+        workspaceGeneration: 1,
+        commitEvidenceId: current.commitEvidenceId,
+        locale: "en",
+        selectionVersion: 1,
+      },
+    )
+    expect(JSON.stringify(evidence)).not.toContain("relativePath")
+    expect(JSON.stringify(evidence)).not.toContain('"content"')
   })
 })

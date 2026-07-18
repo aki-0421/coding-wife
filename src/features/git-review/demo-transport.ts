@@ -1,453 +1,359 @@
+import type { GitReviewTransport } from "@/features/git-review/transport"
 import {
   gitReviewCommands,
   gitReviewSchemaVersion,
   parseGitReviewResponse,
-  type CompareCheckpointsView,
-  type FileDiffView,
-  type GitBaseline,
+  type CommitDiffFile,
+  type CommitEvidenceDetail,
+  type CommitEvidenceSummary,
+  type GitObservation,
   type GitReviewCommand,
   type GitReviewRequestMap,
   type GitReviewResponseMap,
-  type RestoreKind,
-  type RestorePreview,
-  type RestoreResult,
-  type ReviewPack,
-  type ReviewPackPage,
-  type ReviewPackSummary,
 } from "@/lib/contracts/git-review"
-
-import type { GitReviewTransport } from "@/features/git-review/transport"
 
 const currentSha = "a".repeat(40)
 const previousSha = "b".repeat(40)
 const baseSha = "c".repeat(40)
-const fingerprint = `sha256:${"d".repeat(64)}`
+const digest = `sha256:${"d".repeat(64)}`
 
-const currentPack: ReviewPack = {
+const skillAudit = {
   schemaVersion: gitReviewSchemaVersion,
-  checkpoint: {
-    checkpointId: "checkpoint-git-review-ui",
+  skillId: "coding-wife-commit-work",
+  skillVersion: "1.0.0",
+  contentDigest: `sha256:${"e".repeat(64)}`,
+  pathAuthority: "app_bundle",
+  injectionMode: "skill_input",
+  workspaceGeneration: 1,
+  workUnitId: "work-unit-read-only-git",
+  clientRequestId: "turn-read-only-git",
+  injectedAt: "2026-07-18T08:32:00.000Z",
+} as const
+
+const currentDetail: CommitEvidenceDetail = {
+  schemaVersion: gitReviewSchemaVersion,
+  commitEvidenceId: `commit-${currentSha}`,
+  workspaceId: "workspace-demo",
+  producer: "main_codex",
+  identity: {
     commitSha: currentSha,
-    parentSha: previousSha,
-    targetReference: "refs/heads/feature/git-review",
-    message:
-      "feat(git): add evidence review workflow\n\n- connect typed review packs to the Commit view\n- add lazy diff, compare, and safe restore previews",
+    subject: "feat(git): add read-only commit evidence",
+    body: [
+      "- observe repository state without changing the index or worktree",
+      "- present commit metadata, lazy diffs, and correlated verification",
+      "- expose pathless evidence only through the app-owned explanation controller",
+    ].join("\n"),
     authorName: "Coding Wife",
     authorEmail: "coding-wife@example.invalid",
-    createdAt: "2026-07-18T08:42:00.000Z",
+    authoredAt: "2026-07-18T08:40:00.000Z",
+    committedAt: "2026-07-18T08:40:04.000Z",
+    parents: [previousSha],
   },
-  workspaceId: "workspace-demo",
-  workUnitId: "work-unit-git-review-ui",
+  workUnitId: "work-unit-read-only-git",
   objective:
-    "Connect automatic Git checkpoints to a reviewable evidence workflow.",
+    "Make main-session commits understandable without giving the native observer mutation authority.",
   acceptance: [
-    "Show Scope, Ownership, Verification, and Risk separately.",
-    "Load one sanitized file diff at a time.",
-    "Compare checkpoints without moving HEAD or the working tree.",
-    "Require preview and explicit confirmation before restore operations.",
+    "Show commit identity and correlation without changing Git state.",
+    "Load one sanitized file diff only after file selection.",
+    "Start isolated explanation only after the user asks for it.",
   ],
+  beforeObservationId: "observation-before-read-only-git",
+  afterObservationId: "observation-after-read-only-git",
+  sourceEventId: "event-terminal-read-only-git",
   gates: [
     {
       gate: "scope",
       outcome: "pass",
-      reasonCodes: ["objective_present", "acceptance_bounded"],
-      observedRepositoryFingerprint: fingerprint,
+      reasonCodes: ["objective_correlated", "acceptance_bounded"],
+      evidenceIds: ["decision-observer-boundary"],
     },
     {
       gate: "ownership",
       outcome: "pass",
-      reasonCodes: ["owned_manifest_only", "user_index_preserved"],
-      observedRepositoryFingerprint: fingerprint,
+      reasonCodes: ["pre_existing_changes_observed", "main_session_reported"],
+      evidenceIds: ["event-terminal-read-only-git"],
     },
     {
       gate: "verification",
       outcome: "pass",
-      reasonCodes: ["frontend_tests_passed", "rust_tests_passed"],
-      observedRepositoryFingerprint: fingerprint,
+      reasonCodes: ["typescript_passed", "focused_tests_passed"],
+      evidenceIds: ["verification-typescript", "verification-vitest"],
     },
     {
       gate: "risk",
-      outcome: "pass",
-      reasonCodes: ["local_refs_only", "restore_is_reversible"],
-      observedRepositoryFingerprint: fingerprint,
+      outcome: "needs_review",
+      reasonCodes: ["support_runtime_optional"],
+      evidenceIds: ["risk-support-unavailable"],
     },
   ],
-  manifest: [
+  files: [
     {
-      fileId: "file-store",
+      fileEvidenceId: "file-store",
       relativePath: "src/features/git-review/store.ts",
-      changeKind: "added",
-      ownership: "owned",
-      beforeHash: null,
-      afterHash: `sha256:${"1".repeat(64)}`,
-      additions: 418,
-      deletions: 0,
-      reasonCode: null,
-    },
-    {
-      fileId: "file-view",
-      relativePath: "src/features/git-review/EvidenceView.tsx",
-      changeKind: "added",
-      ownership: "owned",
-      beforeHash: null,
-      afterHash: `sha256:${"2".repeat(64)}`,
-      additions: 692,
-      deletions: 0,
-      reasonCode: null,
-    },
-    {
-      fileId: "file-transport",
-      relativePath: "src/features/git-review/transport.ts",
-      changeKind: "added",
-      ownership: "owned",
-      beforeHash: null,
-      afterHash: `sha256:${"3".repeat(64)}`,
-      additions: 96,
-      deletions: 0,
-      reasonCode: null,
-    },
-    {
-      fileId: "file-shell",
-      relativePath: "src/features/workspace-view/WorkspaceShell.tsx",
       changeKind: "modified",
-      ownership: "pre_existing",
-      beforeHash: `sha256:${"4".repeat(64)}`,
-      afterHash: `sha256:${"5".repeat(64)}`,
-      additions: 7,
-      deletions: 3,
-      reasonCode: "pre_existing_change_excluded",
+      additions: 286,
+      deletions: 451,
+      binary: false,
+    },
+    {
+      fileEvidenceId: "file-view",
+      relativePath: "src/features/git-review/EvidenceView.tsx",
+      changeKind: "modified",
+      additions: 344,
+      deletions: 302,
+      binary: false,
+    },
+    {
+      fileEvidenceId: "file-demo-image",
+      relativePath: "docs/thinking/demo.png",
+      changeKind: "modified",
+      additions: 0,
+      deletions: 0,
+      binary: true,
     },
   ],
   diffSummary: {
-    filesChanged: 4,
-    additions: 1213,
-    deletions: 3,
-    binaryFiles: 0,
-    totalBytes: 48_122,
+    filesChanged: 3,
+    additions: 630,
+    deletions: 753,
+    binaryFiles: 1,
   },
   verification: [
     {
-      evidenceId: "verify-typescript",
+      evidenceId: "verification-typescript",
+      sourceEventId: "event-verification-typescript",
       check: "pnpm exec tsc -b --pretty false",
       result: "passed",
       durationMs: 3_842,
-      summary: "TypeScript project references completed without diagnostics.",
-      observedRepositoryFingerprint: fingerprint,
+      summary: "The read-only Git contracts compiled.",
     },
     {
-      evidenceId: "verify-vitest",
+      evidenceId: "verification-vitest",
+      sourceEventId: "event-verification-vitest",
       check: "pnpm exec vitest run src/features/git-review",
       result: "passed",
       durationMs: 2_118,
-      summary: "Transport, store, and Evidence UI tests passed.",
-      observedRepositoryFingerprint: fingerprint,
-    },
-    {
-      evidenceId: "verify-browser",
-      check: "agent-browser responsive walkthrough",
-      result: "passed",
-      durationMs: 8_430,
-      summary:
-        "Desktop, compact, mobile, zoom, and restore flow were inspected.",
-      observedRepositoryFingerprint: fingerprint,
+      summary: "Transport, store, and evidence UI tests passed.",
     },
   ],
   decisions: [
     {
-      decisionId: "decision-headless-store",
-      summary: "Keep Git review state outside the workspace shell.",
-      answer: "Use an injectable external store and typed transport.",
+      decisionId: "decision-observer-boundary",
+      sourceEventId: "event-decision-observer-boundary",
+      summary: "Keep the native Git boundary read only.",
+      answer: "Let the main Codex session remain the sole commit producer.",
       rationale:
-        "The evidence UI stays testable and the shell only composes workspace-scoped services.",
-      reversible: true,
-    },
-    {
-      decisionId: "decision-lazy-diff",
-      summary: "Avoid loading every diff with the review pack.",
-      answer: "Request one file diff after explicit file selection.",
-      rationale:
-        "Large checkpoints remain responsive and failures stay isolated to one file.",
+        "One producer avoids index ownership conflicts and makes evidence attribution explicit.",
       reversible: true,
     },
   ],
   failedAttempts: [
     {
-      attemptId: "attempt-shared-shell-first",
-      approach:
-        "Replace the shared Evidence placeholder before its owner finished.",
-      outcome: "Deferred to avoid overlapping worktree changes.",
-      learning:
-        "Build the feature boundary first, then integrate through a small reviewed shell change.",
+      attemptId: "attempt-second-git-producer",
+      sourceEventId: "event-attempt-second-git-producer",
+      approach: "Create commits in a second native Git service.",
+      outcome: "Rejected because it introduced a competing Git producer.",
+      learning: "Observation and mutation need separate authorities.",
     },
   ],
   risks: [
     {
-      riskId: "risk-stale-head",
-      category: "git_state",
-      level: "medium",
-      summary: "HEAD or user changes may move after evidence is opened.",
-      mitigation:
-        "The Rust service re-fingerprints the repository and issues a one-shot confirmation token.",
-      resolved: true,
+      riskId: "risk-support-unavailable",
+      sourceEventId: "event-risk-support-unavailable",
+      category: "support_runtime",
+      level: "low",
+      summary: "Commit explanation may be unavailable while offline.",
+      mitigation: "Keep all local commit evidence readable without support.",
+      resolved: false,
     },
   ],
-  restoreGuidance: [
-    "Use a revert commit when the current branch is clean and still contains this checkpoint.",
-    "Use a recovery branch to inspect this checkpoint without checkout.",
-    "The app never performs hard reset, force push, or destructive checkout.",
-  ],
-  operationState: "history_complete",
-  packDigest: `sha256:${"6".repeat(64)}`,
+  commitSkillInjection: skillAudit,
+  observedAt: "2026-07-18T08:40:06.000Z",
   historySequence: 42,
 }
 
-const previousPack: ReviewPack = {
-  ...currentPack,
-  checkpoint: {
-    checkpointId: "checkpoint-git-runtime",
+const previousDetail: CommitEvidenceDetail = {
+  schemaVersion: gitReviewSchemaVersion,
+  commitEvidenceId: `commit-${previousSha}`,
+  workspaceId: "workspace-demo",
+  producer: "external_uncorrelated",
+  identity: {
     commitSha: previousSha,
-    parentSha: baseSha,
-    targetReference: "refs/heads/feature/git-review",
-    message:
-      "feat(git): add isolated review checkpoints\n\n- preserve user index and worktree state\n- journal checkpoint and restore operations",
-    authorName: "Coding Wife",
-    authorEmail: "coding-wife@example.invalid",
-    createdAt: "2026-07-18T07:16:00.000Z",
+    subject: "chore: update local project metadata",
+    body: "",
+    authorName: "Local Developer",
+    authorEmail: "developer@example.invalid",
+    authoredAt: "2026-07-18T07:16:00.000Z",
+    committedAt: "2026-07-18T07:16:00.000Z",
+    parents: [baseSha],
   },
-  workUnitId: "work-unit-git-runtime",
-  objective:
-    "Create local review checkpoints without staging or overwriting user changes.",
-  acceptance: [
-    "Preserve the real index and working tree.",
-    "Advance the target ref only after all four gates pass.",
-    "Journal enough state for restart diagnosis.",
-  ],
-  manifest: [
+  workUnitId: null,
+  objective: null,
+  acceptance: [],
+  beforeObservationId: null,
+  afterObservationId: null,
+  sourceEventId: null,
+  gates: ["scope", "ownership", "verification", "risk"].map((gate) => ({
+    gate: gate as "scope" | "ownership" | "verification" | "risk",
+    outcome: "unknown" as const,
+    reasonCodes: ["external_commit_uncorrelated"],
+    evidenceIds: [],
+  })),
+  files: [
     {
-      fileId: "file-rust-service",
-      relativePath: "src-tauri/src/git_review/service.rs",
-      changeKind: "added",
-      ownership: "owned",
-      beforeHash: null,
-      afterHash: `sha256:${"7".repeat(64)}`,
-      additions: 1042,
-      deletions: 0,
-      reasonCode: null,
-    },
-    {
-      fileId: "file-rust-repository",
-      relativePath: "src-tauri/src/git_review/repository.rs",
-      changeKind: "added",
-      ownership: "owned",
-      beforeHash: null,
-      afterHash: `sha256:${"8".repeat(64)}`,
-      additions: 831,
-      deletions: 0,
-      reasonCode: null,
+      fileEvidenceId: "file-project-metadata",
+      relativePath: "package.json",
+      changeKind: "modified",
+      additions: 2,
+      deletions: 2,
+      binary: false,
     },
   ],
   diffSummary: {
-    filesChanged: 2,
-    additions: 1873,
-    deletions: 0,
+    filesChanged: 1,
+    additions: 2,
+    deletions: 2,
     binaryFiles: 0,
-    totalBytes: 71_420,
   },
-  verification: [
-    {
-      evidenceId: "verify-rust-tests",
-      check: "cargo test --lib git_review::",
-      result: "passed",
-      durationMs: 12_601,
-      summary: "Disposable repository scenarios passed.",
-      observedRepositoryFingerprint: fingerprint,
-    },
-  ],
-  decisions: [
-    {
-      decisionId: "decision-temp-index",
-      summary:
-        "How should owned changes be committed without touching user staging?",
-      answer: "Use an isolated temporary index and object directory.",
-      rationale:
-        "Prepared objects can be validated before promotion and the real index remains byte-for-byte stable.",
-      reversible: false,
-    },
-  ],
+  verification: [],
+  decisions: [],
   failedAttempts: [],
-  risks: [
-    {
-      riskId: "risk-object-promotion",
-      category: "git_objects",
-      level: "low",
-      summary: "Promoted objects may become unreachable if ref CAS fails.",
-      mitigation:
-        "Report the orphan explicitly; Git garbage collection can reclaim it safely.",
-      resolved: true,
-    },
-  ],
-  packDigest: `sha256:${"9".repeat(64)}`,
+  risks: [],
+  commitSkillInjection: null,
+  observedAt: "2026-07-18T07:16:02.000Z",
   historySequence: 31,
 }
 
-const packs = [currentPack, previousPack] as const
+const details = [currentDetail, previousDetail] as const
 
-const summaries: readonly ReviewPackSummary[] = packs.map((pack) => ({
-  checkpointId: pack.checkpoint.checkpointId,
-  commitSha: pack.checkpoint.commitSha,
-  workUnitId: pack.workUnitId,
-  objective: pack.objective,
-  operationState: pack.operationState,
-  filesChanged: pack.diffSummary.filesChanged,
-  verificationFailures: pack.verification.filter(
-    (evidence) => evidence.result === "failed",
-  ).length,
-  unresolvedRisks: pack.risks.filter((risk) => !risk.resolved).length,
-  createdAt: pack.checkpoint.createdAt,
-  historySequence: pack.historySequence ?? 0,
-}))
-
-const baseline: GitBaseline = {
-  schemaVersion: gitReviewSchemaVersion,
-  baselineId: "baseline-demo",
-  workspaceId: "workspace-demo",
-  supportState: "ready",
-  headSha: currentSha,
-  headReference: "refs/heads/feature/git-review",
-  branch: "feature/git-review",
-  detached: false,
-  indexFingerprint: `sha256:${"a".repeat(64)}`,
-  statusFingerprint: `sha256:${"b".repeat(64)}`,
-  repositoryFingerprint: fingerprint,
-  preExisting: [],
-  blockedReasons: [],
-  capturedAt: "2026-07-18T08:44:00.000Z",
-}
-
-const diffs: Readonly<Record<string, string>> = {
-  "file-store": `diff --git a/src/features/git-review/store.ts b/src/features/git-review/store.ts
-new file mode 100644
-index 0000000..1111111
---- /dev/null
-+++ b/src/features/git-review/store.ts
-@@ -0,0 +1,8 @@
-+export class GitReviewStore {
-+  private current = initialSnapshot
-+
-+  async selectFile(fileId: string): Promise<void> {
-+    // Only the explicitly selected file crosses the IPC boundary.
-+    await this.transport.request("read_evidence_diff", { fileId })
-+  }
-+}`,
-  "file-view": `diff --git a/src/features/git-review/EvidenceView.tsx b/src/features/git-review/EvidenceView.tsx
-new file mode 100644
---- /dev/null
-+++ b/src/features/git-review/EvidenceView.tsx
-@@ -0,0 +1,7 @@
-+export function EvidenceView({ store, locale }: EvidenceViewProps) {
-+  const review = useGitReview(store)
-+  return (
-+    <main aria-label={copy.title}>
-+      <GateSummary gates={review.detail?.gates ?? []} />
-+    </main>
-+  )
-+}`,
-  "file-transport": `diff --git a/src/features/git-review/transport.ts b/src/features/git-review/transport.ts
-new file mode 100644
---- /dev/null
-+++ b/src/features/git-review/transport.ts
-@@ -0,0 +1,5 @@
-+export class TauriGitReviewTransport {
-+  async request(command, request) {
-+    return parseGitReviewResponse(command, await invoke(command, { request }))
-+  }
-+}`,
-  "file-shell": `diff --git a/src/features/workspace-view/WorkspaceShell.tsx b/src/features/workspace-view/WorkspaceShell.tsx
-index 4444444..5555555 100644
---- a/src/features/workspace-view/WorkspaceShell.tsx
-+++ b/src/features/workspace-view/WorkspaceShell.tsx
-@@ -280,3 +280,3 @@
--  <EvidencePlaceholder />
-+  <EvidenceView store={gitReviewStore} locale={locale} />`,
-  "file-rust-service": `diff --git a/src-tauri/src/git_review/service.rs b/src-tauri/src/git_review/service.rs
-new file mode 100644
---- /dev/null
-+++ b/src-tauri/src/git_review/service.rs
-@@ -0,0 +1,4 @@
-+pub struct GitReviewService {
-+    workspaces: Arc<WorkspaceService>,
-+    history: Arc<WorkspaceHistoryService>,
-+}`,
-  "file-rust-repository": `diff --git a/src-tauri/src/git_review/repository.rs b/src-tauri/src/git_review/repository.rs
-new file mode 100644
---- /dev/null
-+++ b/src-tauri/src/git_review/repository.rs
-@@ -0,0 +1,3 @@
-+pub fn compare_and_swap_ref(expected: Oid, next: Oid) -> Result<()> {
-+    // The target ref moves only when HEAD is still fresh.
-+}`,
-}
-
-interface PendingRestore {
-  readonly kind: RestoreKind
-  readonly checkpointId: string
-  readonly recoveryBranch: string | null
-}
-
-function reviewPack(checkpointId: string): ReviewPack {
-  return (
-    packs.find((pack) => pack.checkpoint.checkpointId === checkpointId) ??
-    currentPack
-  )
-}
-
-function diffView(checkpointId: string, fileId: string): FileDiffView {
-  const pack = reviewPack(checkpointId)
-  const file =
-    pack.manifest.find((entry) => entry.fileId === fileId) ?? pack.manifest[0]
-  if (file === undefined) throw new Error("Demo file not found")
-  const content =
-    diffs[file.fileId] ?? "[Sanitized diff is unavailable in demo mode.]"
+function summary(detail: CommitEvidenceDetail): CommitEvidenceSummary {
+  const verification = detail.gates.find((gate) => gate.gate === "verification")
+  const risk = detail.gates.find((gate) => gate.gate === "risk")
   return {
-    schemaVersion: gitReviewSchemaVersion,
-    checkpointId: pack.checkpoint.checkpointId,
-    fileId: file.fileId,
-    relativePath: file.relativePath,
-    changeKind: file.changeKind,
-    ownership: file.ownership,
-    content,
-    truncated: false,
-    byteCount: new TextEncoder().encode(content).byteLength,
+    commitEvidenceId: detail.commitEvidenceId,
+    commitSha: detail.identity.commitSha,
+    subject: detail.identity.subject,
+    authorName: detail.identity.authorName,
+    authoredAt: detail.identity.authoredAt,
+    parentCount: detail.identity.parents.length,
+    producer: detail.producer,
+    workUnitId: detail.workUnitId,
+    verificationOutcome: verification?.outcome ?? "unknown",
+    riskOutcome: risk?.outcome ?? "unknown",
+    diffSummary: detail.diffSummary,
+    historySequence: detail.historySequence,
   }
 }
 
-function comparison(
-  fromCheckpointId: string,
-  toCheckpointId: string,
-): CompareCheckpointsView {
-  const from = reviewPack(fromCheckpointId)
-  const to = reviewPack(toCheckpointId)
+const diffs: Readonly<Record<string, CommitDiffFile>> = {
+  "file-store": {
+    schemaVersion: gitReviewSchemaVersion,
+    commitEvidenceId: currentDetail.commitEvidenceId,
+    fileEvidenceId: "file-store",
+    relativePath: "src/features/git-review/store.ts",
+    changeKind: "modified",
+    state: "text",
+    content: [
+      "@@ -21,7 +21,8 @@ export class GitReviewStore {",
+      "-  async initialize(): Promise<void> {",
+      "+  async activate(): Promise<void> {",
+      "+    if (this.current.active) return",
+      "     await this.refresh()",
+      "   }",
+    ].join("\n"),
+    byteCount: 184,
+    additions: 2,
+    deletions: 1,
+  },
+  "file-view": {
+    schemaVersion: gitReviewSchemaVersion,
+    commitEvidenceId: currentDetail.commitEvidenceId,
+    fileEvidenceId: "file-view",
+    relativePath: "src/features/git-review/EvidenceView.tsx",
+    changeKind: "modified",
+    state: "text",
+    content: [
+      "@@ -80,6 +80,10 @@ export function EvidenceView() {",
+      "+  useEffect(() => {",
+      "+    if (active) void store.activate()",
+      "+    else store.deactivate()",
+      "+  }, [active, store])",
+    ].join("\n"),
+    byteCount: 166,
+    additions: 4,
+    deletions: 0,
+  },
+  "file-demo-image": {
+    schemaVersion: gitReviewSchemaVersion,
+    commitEvidenceId: currentDetail.commitEvidenceId,
+    fileEvidenceId: "file-demo-image",
+    relativePath: "docs/thinking/demo.png",
+    changeKind: "modified",
+    state: "binary",
+    content: "",
+    byteCount: 824_018,
+    additions: 0,
+    deletions: 0,
+  },
+  "file-project-metadata": {
+    schemaVersion: gitReviewSchemaVersion,
+    commitEvidenceId: previousDetail.commitEvidenceId,
+    fileEvidenceId: "file-project-metadata",
+    relativePath: "package.json",
+    changeKind: "modified",
+    state: "text",
+    content: '@@ -4 +4 @@\n-  "version": "0.1.0"\n+  "version": "0.1.1"',
+    byteCount: 74,
+    additions: 1,
+    deletions: 1,
+  },
+}
+
+function detailById(commitEvidenceId: string) {
+  const detail = details.find(
+    (candidate) => candidate.commitEvidenceId === commitEvidenceId,
+  )
+  if (detail === undefined) throw new Error("Demo commit evidence is missing")
+  return detail
+}
+
+function observationFor(
+  request: GitReviewRequestMap["observe_git_repository"],
+): GitObservation {
   return {
     schemaVersion: gitReviewSchemaVersion,
-    fromCommitSha: from.checkpoint.commitSha,
-    toCommitSha: to.checkpoint.commitSha,
-    diffSummary: to.diffSummary,
-    files: to.manifest,
-    verificationChanges: [
-      "Added TypeScript contract and browser interaction verification.",
+    observationId: `observation-${request.clientRequestId}`,
+    workspaceId: request.workspaceId,
+    workspaceGeneration: request.workspaceGeneration,
+    reason: request.reason,
+    workUnitId: request.workUnitId,
+    sourceEventId: request.sourceEventId,
+    supportState: "ready",
+    headSha: currentSha,
+    headReference: "refs/heads/feature/read-only-git",
+    branch: "feature/read-only-git",
+    detached: false,
+    indexFingerprint: digest,
+    statusFingerprint: digest,
+    repositoryFingerprint: digest,
+    preExisting: [
+      {
+        fileId: "pre-existing-local-note",
+        relativePath: "notes/local-plan.md",
+        changeKind: "modified",
+        staged: false,
+        unstaged: true,
+        untracked: false,
+      },
     ],
-    decisionChanges: [
-      "Moved UI state behind a workspace-scoped injectable store.",
-      "Kept diff loading file-scoped and lazy.",
-    ],
-    riskChanges: ["Added stale-HEAD preflight before every restore."],
+    blockedReasons: [],
+    capturedAt: "2026-07-18T08:42:00.000Z",
+    historySequence: 43,
   }
 }
 
 export class DemoGitReviewTransport implements GitReviewTransport {
   readonly kind = "demo"
-  private readonly pendingRestores = new Map<string, PendingRestore>()
-  private tokenSequence = 0
 
   constructor(private readonly latencyMs = 80) {}
 
@@ -461,95 +367,127 @@ export class DemoGitReviewTransport implements GitReviewTransport {
 
     let response: unknown
     switch (command) {
-      case gitReviewCommands.inspectBaseline:
-        response = baseline
-        break
-      case gitReviewCommands.evaluateCheckpoint:
-        response = {
-          schemaVersion: gitReviewSchemaVersion,
-          status: "review_ready",
-          gates: currentPack.gates,
-          manifest: currentPack.manifest,
-          checkpoint: currentPack.checkpoint,
-          reviewPack: currentPack,
-          errorCode: null,
-        }
-        break
-      case gitReviewCommands.listReviewPacks:
-        response = {
-          schemaVersion: gitReviewSchemaVersion,
-          items: summaries,
-          nextBeforeSequence: null,
-        } satisfies ReviewPackPage
-        break
-      case gitReviewCommands.readReviewPack:
-        response = reviewPack(
-          (request as GitReviewRequestMap["read_git_review_pack"]).checkpointId,
+      case gitReviewCommands.observeRepository:
+        response = observationFor(
+          request as GitReviewRequestMap["observe_git_repository"],
         )
         break
-      case gitReviewCommands.readFileDiff: {
-        const input = request as GitReviewRequestMap["read_evidence_diff"]
-        response = diffView(input.checkpointId, input.fileId)
-        break
-      }
-      case gitReviewCommands.compareCheckpoints: {
-        const input = request as GitReviewRequestMap["compare_checkpoints"]
-        response = comparison(input.fromCheckpointId, input.toCheckpointId)
-        break
-      }
-      case gitReviewCommands.previewRestore: {
-        const input = request as GitReviewRequestMap["preview_git_restore"]
-        const token = `demo-restore-${++this.tokenSequence}`
-        this.pendingRestores.set(token, {
-          kind: input.kind,
-          checkpointId: input.checkpointId,
-          recoveryBranch: input.recoveryBranch,
+      case gitReviewCommands.observeTerminalWorkUnit: {
+        const input =
+          request as GitReviewRequestMap["observe_terminal_work_unit"]
+        const observation = observationFor({
+          schemaVersion: gitReviewSchemaVersion,
+          clientRequestId: input.clientRequestId,
+          workspaceId: input.workspaceId,
+          workspaceGeneration: input.workspaceGeneration,
+          reason: "work_unit_terminal",
+          workUnitId: input.workUnitId,
+          sourceEventId: input.sourceEventId,
         })
-        const pack = reviewPack(input.checkpointId)
         response = {
           schemaVersion: gitReviewSchemaVersion,
-          status: "ready",
-          kind: input.kind,
-          checkpointId: input.checkpointId,
-          impact: {
-            targetCommitSha: pack.checkpoint.commitSha,
-            currentHeadSha: currentSha,
-            affectedFiles: pack.manifest.map((file) => file.relativePath),
-            additions: pack.diffSummary.additions,
-            deletions: pack.diffSummary.deletions,
-            createsNewCommit: input.kind === "revert_commit",
-            checksOutBranch: false,
+          observation,
+          workUnit: {
+            schemaVersion: gitReviewSchemaVersion,
+            workspaceId: input.workspaceId,
+            workspaceGeneration: input.workspaceGeneration,
+            workUnitId: input.workUnitId,
+            sourceEventId: input.sourceEventId,
+            terminalState: input.terminalState,
+            beforeObservationId: input.beforeObservationId,
+            afterObservationId: observation.observationId,
+            newCommitEvidenceIds: [currentDetail.commitEvidenceId],
+            commitSkillInjection: input.commitSkillInjection,
+            reportedCommitBlockReason: input.reportedCommitBlockReason,
+            observedAt: observation.capturedAt,
+            historySequence: 44,
           },
-          confirmationToken: token,
-          expiresAt: "2026-07-18T09:15:00.000Z",
-          blockedReasons: [],
-        } satisfies RestorePreview
+          newCommits: [summary(currentDetail)],
+        }
         break
       }
-      case gitReviewCommands.confirmRestore: {
-        const input = request as GitReviewRequestMap["confirm_git_restore"]
-        const pending = this.pendingRestores.get(input.confirmationToken)
-        if (pending === undefined) throw new Error("Demo restore token expired")
-        this.pendingRestores.delete(input.confirmationToken)
+      case gitReviewCommands.listCommitEvidence: {
+        const input = request as GitReviewRequestMap["list_commit_evidence"]
+        const filtered = details.filter((detail) => {
+          if (input.filter === "all") return true
+          if (input.filter === "this_work_unit") {
+            return (
+              input.workUnitId !== null &&
+              detail.workUnitId === input.workUnitId
+            )
+          }
+          return detail.gates.some((gate) => gate.outcome !== "pass")
+        })
         response = {
           schemaVersion: gitReviewSchemaVersion,
-          kind: pending.kind,
-          checkpointId: pending.checkpointId,
-          createdCommitSha:
-            pending.kind === "revert_commit" ? "e".repeat(40) : null,
-          createdReference:
-            pending.kind === "recovery_branch"
-              ? `refs/heads/${pending.recoveryBranch ?? "recovery/demo"}`
-              : null,
-          historySequence: 43,
-          completedAt: "2026-07-18T08:46:00.000Z",
-        } satisfies RestoreResult
+          items: filtered.slice(0, input.limit).map(summary),
+          nextCursor: null,
+        }
         break
       }
-      case gitReviewCommands.cancelRestore: {
-        const input = request as GitReviewRequestMap["cancel_git_restore"]
-        this.pendingRestores.delete(input.confirmationToken)
-        response = null
+      case gitReviewCommands.readCommitEvidence: {
+        const input = request as GitReviewRequestMap["read_commit_evidence"]
+        response = {
+          ...detailById(input.commitEvidenceId),
+          workspaceId: input.workspaceId,
+        }
+        break
+      }
+      case gitReviewCommands.readCommitDiffFile: {
+        const input = request as GitReviewRequestMap["read_commit_diff_file"]
+        const diff = diffs[input.fileEvidenceId]
+        if (
+          diff === undefined ||
+          diff.commitEvidenceId !== input.commitEvidenceId
+        ) {
+          throw new Error("Demo diff evidence is missing")
+        }
+        response = diff
+        break
+      }
+      case gitReviewCommands.prepareCommitExplanationEvidence: {
+        const input =
+          request as GitReviewRequestMap["prepare_commit_explanation_evidence"]
+        const detail = detailById(input.commitEvidenceId)
+        const changeKinds = [
+          "added",
+          "modified",
+          "deleted",
+          "type_changed",
+        ] as const
+        response = {
+          schemaVersion: gitReviewSchemaVersion,
+          commitId: detail.commitEvidenceId,
+          subject: detail.identity.subject,
+          body: detail.identity.body,
+          changes: changeKinds
+            .map((changeKind) => {
+              const files = detail.files.filter(
+                (file) => file.changeKind === changeKind,
+              )
+              return {
+                changeKind,
+                fileCount: files.length,
+                additions: files.reduce(
+                  (total, file) => total + file.additions,
+                  0,
+                ),
+                deletions: files.reduce(
+                  (total, file) => total + file.deletions,
+                  0,
+                ),
+                binaryFiles: files.filter((file) => file.binary).length,
+              }
+            })
+            .filter((aggregate) => aggregate.fileCount > 0),
+          diffSummary: detail.diffSummary,
+          verification: detail.verification,
+          decisions: detail.decisions,
+          risks: detail.risks,
+          locale: input.locale,
+          workspaceGeneration: input.workspaceGeneration,
+          selectionVersion: input.selectionVersion,
+        }
         break
       }
     }
@@ -558,4 +496,4 @@ export class DemoGitReviewTransport implements GitReviewTransport {
   }
 }
 
-export const demoGitReviewPacks = packs
+export const demoCommitEvidence = details

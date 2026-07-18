@@ -20,7 +20,7 @@ describe("domain event runtime contract", () => {
       DomainEvent<"app.runtime.changed">["producer"]
     >().toEqualTypeOf<"app">()
     expectTypeOf<
-      DomainEvent<"git.checkpoint.status.changed">["producer"]
+      DomainEvent<"git.observation.status.changed">["producer"]
     >().toEqualTypeOf<"git">()
   })
 
@@ -59,8 +59,8 @@ describe("domain event runtime contract", () => {
     },
     {
       producer: "git",
-      kind: "git.checkpoint.status.changed",
-      payload: { status: "review_ready", checkpointId: "checkpoint-1" },
+      kind: "git.observation.status.changed",
+      payload: { status: "fresh", observationId: "observation-1" },
     },
   ])("accepts the $kind producer contract", (event) => {
     expect(parseDomainEvent({ ...eventBase, ...event })).toMatchObject(event)

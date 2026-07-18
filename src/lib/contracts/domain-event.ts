@@ -26,9 +26,9 @@ export interface DomainEventPayloadMap {
     readonly status: "ready" | "read_only" | "blocked"
     readonly errorCode?: string
   }
-  "git.checkpoint.status.changed": {
-    readonly status: "pending" | "blocked" | "review_ready" | "failed"
-    readonly checkpointId?: string
+  "git.observation.status.changed": {
+    readonly status: "fresh" | "stale" | "unavailable"
+    readonly observationId?: string
   }
 }
 
@@ -38,7 +38,7 @@ export interface DomainEventProducerMap {
   "code.session.status.changed": "code"
   "live.renderer.status.changed": "live"
   "hist.writer.status.changed": "hist"
-  "git.checkpoint.status.changed": "git"
+  "git.observation.status.changed": "git"
 }
 
 export type DomainEventKind = keyof DomainEventPayloadMap
@@ -344,7 +344,7 @@ function parseHistoryEvent(
 function parseGitEvent(
   value: Readonly<Record<string, unknown>>,
   base: ParsedEventBase,
-): DomainEvent<"git.checkpoint.status.changed"> {
+): DomainEvent<"git.observation.status.changed"> {
   assertProducer(value.producer, "git")
 
   if (!isRecord(value.payload)) {
@@ -353,22 +353,22 @@ function parseGitEvent(
 
   const payload = value.payload
 
-  const statuses = ["pending", "blocked", "review_ready", "failed"] as const
+  const statuses = ["fresh", "stale", "unavailable"] as const
 
   if (
-    !hasExactKeys(payload, ["status"], ["checkpointId"]) ||
+    !hasExactKeys(payload, ["status"], ["observationId"]) ||
     !statuses.some((status) => status === payload.status) ||
-    (payload.checkpointId !== undefined &&
-      !isNonEmptyString(payload.checkpointId))
+    (payload.observationId !== undefined &&
+      !isNonEmptyString(payload.observationId))
   ) {
     return eventViolation()
   }
 
-  return buildEvent(base, "git", "git.checkpoint.status.changed", {
+  return buildEvent(base, "git", "git.observation.status.changed", {
     status: payload.status as (typeof statuses)[number],
-    ...(payload.checkpointId === undefined
+    ...(payload.observationId === undefined
       ? {}
-      : { checkpointId: payload.checkpointId }),
+      : { observationId: payload.observationId }),
   })
 }
 
@@ -393,7 +393,7 @@ export function parseDomainEvent(value: unknown): AnyDomainEvent {
       return parseLiveEvent(value, base)
     case "hist.writer.status.changed":
       return parseHistoryEvent(value, base)
-    case "git.checkpoint.status.changed":
+    case "git.observation.status.changed":
       return parseGitEvent(value, base)
     default:
       return eventViolation()

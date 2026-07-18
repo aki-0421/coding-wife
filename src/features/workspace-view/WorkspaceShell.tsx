@@ -37,6 +37,7 @@ import type {
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceViewModel"
+import type { CommitExplanationController } from "@/lib/contracts/git-review"
 
 const tabOrder: readonly WorkspaceTab[] = [
   "chat",
@@ -49,6 +50,7 @@ export interface WorkspaceShellProps {
   readonly adapter?: WorkspaceViewAdapter | undefined
   readonly characterRenderer?: CharacterStageRenderer | undefined
   readonly gitReviewTransport: GitReviewTransport
+  readonly commitExplanationController?: CommitExplanationController | undefined
 }
 
 function isWorkspaceTab(value: string): value is WorkspaceTab {
@@ -67,6 +69,7 @@ export function WorkspaceShell({
   adapter,
   characterRenderer,
   gitReviewTransport,
+  commitExplanationController,
 }: WorkspaceShellProps) {
   const { locale } = useI18n()
   const copy = getWorkspaceCopy(locale)
@@ -412,6 +415,8 @@ export function WorkspaceShell({
           value="commit"
         >
           <EvidenceView
+            active={view.activeTab === "commit"}
+            commitExplanationController={commitExplanationController}
             locale={locale}
             onBackToChat={() => view.setActiveTab("chat")}
             transport={gitReviewTransport}

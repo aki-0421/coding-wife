@@ -306,21 +306,30 @@ describe("WorkspaceShell", () => {
     await waitFor(() => expect(filter).toHaveFocus())
   })
 
-  it("opens stored checkpoint evidence without exposing a manual commit action", async () => {
+  it("opens read-only commit evidence without exposing a mutation action", async () => {
+    const user = userEvent.setup()
     renderWorkspace()
 
-    fireEvent.click(screen.getByRole("tab", { name: "Commit" }))
+    const commitTab = screen.getByRole("tab", { name: "Commit" })
+    await user.click(commitTab)
+    await waitFor(() =>
+      expect(commitTab).toHaveAttribute("aria-selected", "true"),
+    )
 
     expect(
       await screen.findByRole("heading", {
-        name: "Connect automatic Git checkpoints to a reviewable evidence workflow.",
+        name: "feat(git): add read-only commit evidence",
       }),
     ).toBeVisible()
+    await user.click(screen.getByRole("tab", { name: "Evidence" }))
+    await screen.findByText("Observed gates")
     for (const gate of ["Scope", "Ownership", "Verification", "Risk"]) {
       expect(screen.getAllByText(gate).length).toBeGreaterThan(0)
     }
     expect(
-      screen.queryByRole("button", { name: /^commit$/i }),
+      within(screen.getByRole("main", { name: "Commit evidence" })).queryByRole(
+        "textbox",
+      ),
     ).not.toBeInTheDocument()
   })
 

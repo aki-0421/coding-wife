@@ -1,97 +1,159 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { DemoGitReviewTransport } from "@/features/git-review/demo-transport"
 import { GitReviewStore } from "@/features/git-review/store"
 import type { GitReviewTransport } from "@/features/git-review/transport"
 import {
   gitReviewCommands,
+  type CommitEvidencePage,
+  type CommitExplanationController,
+  type CommitExplanationControllerStateV1,
   type GitReviewCommand,
   type GitReviewRequestMap,
   type GitReviewResponseMap,
+  type ListCommitEvidenceRequest,
 } from "@/lib/contracts/git-review"
+
+interface RecordedCall {
+  readonly command: GitReviewCommand
+  readonly request: unknown
+}
 
 class RecordingTransport implements GitReviewTransport {
   readonly kind = "demo"
-  readonly calls: GitReviewCommand[] = []
+  readonly calls: RecordedCall[] = []
 
-  constructor(private readonly delegate = new DemoGitReviewTransport(0)) {}
+  constructor(readonly delegate = new DemoGitReviewTransport(0)) {}
 
   request<K extends GitReviewCommand>(
     command: K,
     request: GitReviewRequestMap[K],
   ): Promise<GitReviewResponseMap[K]> {
-    this.calls.push(command)
+    this.calls.push({ command, request })
     return this.delegate.request(command, request)
   }
 }
 
 describe("GitReviewStore", () => {
-  it("loads baseline, list, and selected detail without eagerly loading diffs", async () => {
+  it("does not observe while hidden and lazily loads only the selected diff", async () => {
     const transport = new RecordingTransport()
     const store = new GitReviewStore("workspace-demo", transport)
 
-    await store.initialize()
+    expect(store.snapshot().active).toBe(false)
+    expect(transport.calls).toHaveLength(0)
+    store.deactivate()
+    expect(transport.calls).toHaveLength(0)
 
+    await store.activate()
     expect(store.snapshot()).toMatchObject({
+      active: true,
+      observationStatus: "ready",
       collectionStatus: "ready",
-      baselineStatus: "ready",
       detailStatus: "ready",
+      diffStatus: "idle",
     })
-    expect(store.snapshot().items).toHaveLength(2)
-    expect(store.snapshot().detail?.checkpoint.checkpointId).toBe(
-      store.snapshot().selectedCheckpointId,
-    )
-    expect(transport.calls).toContain(gitReviewCommands.inspectBaseline)
-    expect(transport.calls).toContain(gitReviewCommands.listReviewPacks)
-    expect(transport.calls).toContain(gitReviewCommands.readReviewPack)
-    expect(transport.calls).not.toContain(gitReviewCommands.readFileDiff)
+    expect(transport.calls.map((call) => call.command)).toEqual([
+      gitReviewCommands.observeRepository,
+      gitReviewCommands.listCommitEvidence,
+      gitReviewCommands.readCommitEvidence,
+    ])
 
-    const firstFile = store.snapshot().detail?.manifest[0]
+    const firstFile = store.snapshot().detail?.files[0]
     if (firstFile === undefined) throw new Error("Demo file is missing")
-    await store.selectFile(firstFile.fileId)
+    await store.selectFile(firstFile.fileEvidenceId)
     expect(store.snapshot()).toMatchObject({
-      selectedFileId: firstFile.fileId,
+      selectedFileEvidenceId: firstFile.fileEvidenceId,
       diffStatus: "ready",
     })
-    expect(transport.calls).toContain(gitReviewCommands.readFileDiff)
+    expect(transport.calls.at(-1)?.command).toBe(
+      gitReviewCommands.readCommitDiffFile,
+    )
   })
 
-  it("compares two checkpoints and completes both restore flows", async () => {
+  it("routes user explanation requests only to the app-owned controller", async () => {
+    const request = vi.fn<CommitExplanationController["request"]>()
+    const cancel = vi.fn<CommitExplanationController["cancel"]>()
+    const controller: CommitExplanationController = {
+      request,
+      cancel,
+      present: vi.fn(),
+      getState: () => null,
+      subscribe: () => () => {},
+    }
+    const transport = new RecordingTransport()
+    const store = new GitReviewStore("workspace-demo", transport, {
+      commitExplanationController: controller,
+      now: () => new Date("2026-07-18T09:00:00.000Z"),
+    })
+    await store.activate()
+
+    expect(request).not.toHaveBeenCalled()
+    await store.requestExplanation("ja", "user_request")
+    expect(request).toHaveBeenCalledOnce()
+    const dispatch = request.mock.calls[0]?.[0]
+    expect(dispatch?.request).toMatchObject({
+      locale: "ja",
+      selectionVersion: store.snapshot().selectionVersion,
+      trigger: "user_request",
+    })
+    const serialized = JSON.stringify(dispatch?.evidence)
+    expect(serialized).not.toContain("relativePath")
+    expect(serialized).not.toContain('"content"')
+
+    const second = store.snapshot().items[1]
+    if (second === undefined) throw new Error("Second demo commit is missing")
+    await store.selectCommitEvidence(second.commitEvidenceId)
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it("cancels a running explanation only after the user action", async () => {
+    const cancel = vi.fn<CommitExplanationController["cancel"]>()
+    const controller: CommitExplanationController = {
+      request: vi.fn(),
+      cancel,
+      present: vi.fn(),
+      getState: () => null,
+      subscribe: () => () => {},
+    }
     const store = new GitReviewStore(
       "workspace-demo",
-      new DemoGitReviewTransport(0),
+      new RecordingTransport(),
+      {
+        commitExplanationController: controller,
+        now: () => new Date("2026-07-18T09:00:00.000Z"),
+      },
     )
-    await store.initialize()
+    await store.activate()
+    const commitEvidenceId = store.snapshot().selectedCommitEvidenceId
+    if (commitEvidenceId === null) throw new Error("Demo commit is missing")
+    const state: CommitExplanationControllerStateV1 = {
+      schemaVersion: 1,
+      workspaceId: "workspace-demo",
+      workspaceGeneration: 1,
+      commitEvidenceId,
+      requestId: "auto-explanation-one",
+      status: "running",
+      trigger: "auto_verified_commit",
+      retryable: false,
+      presentationAvailable: false,
+      errorCode: null,
+      updatedAt: "2026-07-18T09:00:00.000Z",
+    }
 
-    await store.compareCheckpoints()
-    expect(store.snapshot().compare.status).toBe("ready")
-    expect(
-      Array.isArray(store.snapshot().compare.result?.verificationChanges),
-    ).toBe(true)
-
-    await store.previewRestore("revert_commit", null)
-    expect(store.snapshot().restore).toMatchObject({
-      kind: "revert_commit",
-      status: "ready",
-      preview: { status: "ready" },
-    })
-    await store.cancelRestore()
-    expect(store.snapshot().restore.status).toBe("idle")
-
-    await store.previewRestore("recovery_branch", "recovery/store-test")
-    await store.confirmRestore()
-    expect(store.snapshot().restore).toMatchObject({
-      kind: "recovery_branch",
-      status: "succeeded",
-      result: { createdReference: "refs/heads/recovery/store-test" },
-    })
+    await store.cancelExplanation(state)
+    expect(cancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "auto-explanation-one",
+        reason: "user",
+      }),
+    )
   })
 
-  it("ignores a stale detail response after the selection changes", async () => {
+  it("discards a stale detail response after a rapid selection change", async () => {
     const delegate = new DemoGitReviewTransport(0)
-    let releasePrevious: (() => void) | null = null
-    const previousGate = new Promise<void>((resolve) => {
-      releasePrevious = resolve
+    let release: (() => void) | undefined
+    const delayed = new Promise<void>((resolve) => {
+      release = resolve
     })
     const transport: GitReviewTransport = {
       kind: "demo",
@@ -100,30 +162,68 @@ describe("GitReviewStore", () => {
         request: GitReviewRequestMap[K],
       ): Promise<GitReviewResponseMap[K]> {
         if (
-          command === gitReviewCommands.readReviewPack &&
-          (request as GitReviewRequestMap["read_git_review_pack"])
-            .checkpointId === "checkpoint-git-runtime"
+          command === gitReviewCommands.readCommitEvidence &&
+          (
+            request as GitReviewRequestMap["read_commit_evidence"]
+          ).commitEvidenceId.endsWith("b".repeat(40))
         ) {
-          await previousGate
+          await delayed
         }
         return delegate.request(command, request)
       },
     }
     const store = new GitReviewStore("workspace-demo", transport)
-    await store.initialize()
+    await store.activate()
+    const [current, previous] = store.snapshot().items
+    if (current === undefined || previous === undefined) {
+      throw new Error("Demo commits are missing")
+    }
 
-    const stale = store.selectCheckpoint("checkpoint-git-runtime")
+    const stale = store.selectCommitEvidence(previous.commitEvidenceId)
     await Promise.resolve()
-    await store.selectCheckpoint("checkpoint-git-review-ui")
-    const release = releasePrevious as (() => void) | null
+    await store.selectCommitEvidence(current.commitEvidenceId)
     release?.()
     await stale
 
-    expect(store.snapshot().selectedCheckpointId).toBe(
-      "checkpoint-git-review-ui",
+    expect(store.snapshot().selectedCommitEvidenceId).toBe(
+      current.commitEvidenceId,
     )
-    expect(store.snapshot().detail?.checkpoint.checkpointId).toBe(
-      "checkpoint-git-review-ui",
+    expect(store.snapshot().detail?.commitEvidenceId).toBe(
+      current.commitEvidenceId,
     )
+  })
+
+  it("clears a missing selection on refresh without choosing a replacement", async () => {
+    const delegate = new DemoGitReviewTransport(0)
+    let omitSelected = false
+    const transport: GitReviewTransport = {
+      kind: "demo",
+      async request<K extends GitReviewCommand>(
+        command: K,
+        request: GitReviewRequestMap[K],
+      ): Promise<GitReviewResponseMap[K]> {
+        if (command === gitReviewCommands.listCommitEvidence && omitSelected) {
+          const page = await delegate.request(
+            gitReviewCommands.listCommitEvidence,
+            request as ListCommitEvidenceRequest,
+          )
+          const withoutSelected: CommitEvidencePage = {
+            ...page,
+            items: page.items.slice(1),
+          }
+          return withoutSelected as GitReviewResponseMap[K]
+        }
+        return delegate.request(command, request)
+      },
+    }
+    const store = new GitReviewStore("workspace-demo", transport)
+    await store.activate()
+    expect(store.snapshot().selectedCommitEvidenceId).not.toBeNull()
+
+    omitSelected = true
+    await store.refresh()
+    expect(store.snapshot().items).toHaveLength(1)
+    expect(store.snapshot().selectedCommitEvidenceId).toBeNull()
+    expect(store.snapshot().detail).toBeNull()
   })
 })

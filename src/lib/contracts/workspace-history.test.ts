@@ -18,42 +18,85 @@ import {
 } from "@/lib/contracts/workspace-history"
 import fixture from "@/test/fixtures/workspace-history.v1.json"
 
+const gitSha = "a".repeat(40)
+const gitParent = "b".repeat(40)
 const gitFingerprint = `sha256:${"c".repeat(64)}`
 
-function gitReviewPackPayload() {
+function gitSkillAudit() {
   return {
     schemaVersion: 1,
-    checkpoint: {
-      checkpointId: "checkpoint-fixture",
-      commitSha: "a".repeat(40),
-      parentSha: "b".repeat(40),
-      targetReference: "refs/heads/main",
-      message: "feat: add fixture\n\n- verify the bounded history shape",
+    skillId: "coding-wife-commit-work",
+    skillVersion: "1.0.0",
+    contentDigest: gitFingerprint,
+    pathAuthority: "app_bundle",
+    injectionMode: "skill_input",
+    workspaceGeneration: 1,
+    workUnitId: "work-unit-fixture",
+    clientRequestId: "turn-fixture",
+    injectedAt: "2026-07-18T00:00:00.000Z",
+  }
+}
+
+function gitObservationPayload() {
+  return {
+    schemaVersion: 1,
+    observationId: "observation-fixture",
+    workspaceId: "workspace-fixture",
+    workspaceGeneration: 1,
+    reason: "active_view",
+    workUnitId: null,
+    sourceEventId: null,
+    supportState: "ready",
+    headSha: gitSha,
+    headReference: "refs/heads/main",
+    branch: "main",
+    detached: false,
+    indexFingerprint: gitFingerprint,
+    statusFingerprint: gitFingerprint,
+    repositoryFingerprint: gitFingerprint,
+    preExisting: [],
+    blockedReasons: [],
+    capturedAt: "2026-07-18T00:00:01.000Z",
+    historySequence: null,
+  }
+}
+
+function gitCommitEvidencePayload() {
+  return {
+    schemaVersion: 1,
+    commitEvidenceId: `commit-${gitSha}`,
+    workspaceId: "workspace-fixture",
+    producer: "main_codex",
+    identity: {
+      commitSha: gitSha,
+      subject: "feat(git): record read-only evidence",
+      body: "- persist the observed commit facts",
       authorName: "Fixture Author",
       authorEmail: "fixture@example.invalid",
-      createdAt: "2026-07-18T00:00:02.000Z",
+      authoredAt: "2026-07-18T00:00:02.000Z",
+      committedAt: "2026-07-18T00:00:02.000Z",
+      parents: [gitParent],
     },
-    workspaceId: "workspace-fixture",
     workUnitId: "work-unit-fixture",
-    objective: "Persist a bounded review pack",
-    acceptance: ["The exact review pack can be restored"],
+    objective: "Persist bounded commit evidence",
+    acceptance: ["The exact evidence can be read again"],
+    beforeObservationId: "observation-before",
+    afterObservationId: "observation-after",
+    sourceEventId: "event-terminal-fixture",
     gates: ["scope", "ownership", "verification", "risk"].map((gate) => ({
       gate,
       outcome: "pass",
       reasonCodes: [],
-      observedRepositoryFingerprint: gitFingerprint,
+      evidenceIds: [],
     })),
-    manifest: [
+    files: [
       {
-        fileId: "file-fixture",
+        fileEvidenceId: "file-fixture",
         relativePath: "src/main.rs",
         changeKind: "modified",
-        ownership: "owned",
-        beforeHash: `sha256:${"d".repeat(64)}`,
-        afterHash: `sha256:${"e".repeat(64)}`,
         additions: 4,
         deletions: 1,
-        reasonCode: null,
+        binary: false,
       },
     ],
     diffSummary: {
@@ -61,26 +104,31 @@ function gitReviewPackPayload() {
       additions: 4,
       deletions: 1,
       binaryFiles: 0,
-      totalBytes: 128,
     },
-    verification: [
-      {
-        evidenceId: "evidence-fixture",
-        check: "cargo test",
-        result: "passed",
-        durationMs: 1200,
-        summary: "All focused tests passed",
-        observedRepositoryFingerprint: gitFingerprint,
-      },
-    ],
+    verification: [],
     decisions: [],
     failedAttempts: [],
     risks: [],
-    restoreGuidance: [
-      "Preview the affected files before creating a revert commit.",
-    ],
-    operationState: "history_complete",
-    packDigest: `sha256:${"f".repeat(64)}`,
+    commitSkillInjection: gitSkillAudit(),
+    observedAt: "2026-07-18T00:00:03.000Z",
+    historySequence: null,
+  }
+}
+
+function gitWorkUnitPayload() {
+  return {
+    schemaVersion: 1,
+    workspaceId: "workspace-fixture",
+    workspaceGeneration: 1,
+    workUnitId: "work-unit-fixture",
+    sourceEventId: "event-terminal-fixture",
+    terminalState: "completed",
+    beforeObservationId: "observation-before",
+    afterObservationId: "observation-after",
+    newCommitEvidenceIds: [`commit-${gitSha}`],
+    commitSkillInjection: gitSkillAudit(),
+    reportedCommitBlockReason: null,
+    observedAt: "2026-07-18T00:00:04.000Z",
     historySequence: null,
   }
 }
@@ -298,75 +346,70 @@ describe("workspace history contract", () => {
     ).toMatchObject({ kind: "code.unsupported", schemaVersion: 1 })
   })
 
-  it("parses only exact owned Git operation and raw review-pack payloads", () => {
-    const operation = {
+  it("parses only exact read-only Git observation payloads", () => {
+    const base = {
       ...fixture.timeline.items[0],
-      eventId: "git-operation-fixture-prepared",
       sessionId: null,
       producer: "git",
-      kind: "git.checkpoint.operation.changed",
-      payload: {
-        schemaVersion: 1,
-        operationId: "operation-fixture",
-        clientRequestId: "request-fixture",
-        workspaceId: "workspace-fixture",
-        workUnitId: "work-unit-fixture",
-        baselineId: "baseline-fixture",
-        state: "prepared",
-        expectedHeadSha: "b".repeat(40),
-        targetReference: "refs/heads/main",
-        commitSha: null,
-        packDigest: null,
-        errorCode: null,
-        observedAt: "2026-07-18T00:00:01.000Z",
-      },
     }
-    const pack = {
-      ...operation,
-      eventId: "git-pack-checkpoint-fixture",
-      kind: "git.review_pack.recorded",
-      payload: gitReviewPackPayload(),
+    const observation = {
+      ...base,
+      eventId: "git-observation-fixture",
+      kind: "git.observation.recorded",
+      payload: gitObservationPayload(),
+    }
+    const evidence = {
+      ...base,
+      eventId: "git-evidence-fixture",
+      kind: "git.commit_evidence.recorded",
+      payload: gitCommitEvidencePayload(),
+    }
+    const workUnit = {
+      ...base,
+      eventId: "git-work-unit-fixture",
+      kind: "git.work_unit.observed",
+      payload: gitWorkUnitPayload(),
     }
 
-    expect(parsePersistedTimelineEvent(operation)).toEqual(operation)
-    expect(parsePersistedTimelineEvent(pack)).toEqual(pack)
+    expect(parsePersistedTimelineEvent(observation)).toEqual(observation)
+    expect(parsePersistedTimelineEvent(evidence)).toEqual(evidence)
+    expect(parsePersistedTimelineEvent(workUnit)).toEqual(workUnit)
     expect(() =>
       parsePersistedTimelineEvent({
-        ...operation,
-        payload: { ...operation.payload, rawCommand: "git commit" },
+        ...observation,
+        payload: { ...observation.payload, rawCommand: "write" },
       }),
     ).toThrow(WorkspaceHistoryContractError)
     expect(() =>
       parsePersistedTimelineEvent({
-        ...pack,
-        payload: { ...pack.payload, workspaceId: "workspace-other" },
+        ...evidence,
+        payload: { ...evidence.payload, workspaceId: "workspace-other" },
       }),
     ).toThrow(WorkspaceHistoryContractError)
     expect(() =>
       parsePersistedTimelineEvent({
-        ...pack,
+        ...workUnit,
         sessionId: "session-fixture",
       }),
     ).toThrow(WorkspaceHistoryContractError)
     expect(() =>
       parsePersistedTimelineEvent({
-        ...pack,
+        ...evidence,
         payload: {
-          ...pack.payload,
-          checkpoint: {
-            ...pack.payload.checkpoint,
-            privatePath: "/Users/private/repository",
-          },
+          ...evidence.payload,
+          files: [
+            {
+              ...evidence.payload.files[0],
+              privatePath: "/private/repository",
+            },
+          ],
         },
       }),
     ).toThrow(WorkspaceHistoryContractError)
     expect(() =>
       parsePersistedTimelineEvent({
-        ...pack,
-        payload: {
-          ...pack.payload,
-          manifest: Array.from({ length: 501 }, () => pack.payload.manifest[0]),
-        },
+        ...observation,
+        payload: { ...observation.payload, historySequence: 2 },
       }),
     ).toThrow(WorkspaceHistoryContractError)
   })
