@@ -1,4 +1,10 @@
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react"
+import {
+  useId,
+  useMemo,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react"
 import {
   ActivityIcon,
   AlertTriangleIcon,
@@ -51,6 +57,7 @@ interface TimelineProps {
   readonly events: readonly WorkspaceTimelineItem[]
   readonly history: WorkspaceAdapterState["history"]
   readonly interruptAvailable: boolean
+  readonly lastSummary: WorkspaceAdapterState["lastSummary"]
   readonly pendingRequestIds: readonly string[]
   readonly onAnswerApproval: (
     request: PendingRequestView,
@@ -758,12 +765,14 @@ export function Timeline({
   events,
   history,
   interruptAvailable,
+  lastSummary,
   pendingRequestIds,
   onAnswerApproval,
   onAnswerDecision,
   onInterrupt,
   onOpenDiagnostics,
 }: TimelineProps) {
+  const summaryHeadingId = useId()
   const historyEphemeral = history.mode === "ephemeral"
   const historyUnavailable =
     history.mode === "read_only" || history.mode === "recovery_required"
@@ -799,6 +808,40 @@ export function Timeline({
           {compactStatus}
         </div>
       </div>
+
+      {lastSummary !== null &&
+      lastSummary !== undefined &&
+      lastSummary.text.trim().length > 0 ? (
+        <section
+          aria-labelledby={summaryHeadingId}
+          className="mb-md rounded-panel border border-divider bg-surface px-md py-sm shadow-sm"
+          data-last-summary=""
+        >
+          <div className="flex items-start gap-sm">
+            <MessageSquareTextIcon
+              aria-hidden="true"
+              className="mt-xxs size-4 shrink-0 text-muted-foreground"
+            />
+            <div className="min-w-0">
+              <h3
+                className="m-0 text-title text-text-strong"
+                id={summaryHeadingId}
+              >
+                {copy.lastSummaryTitle}
+              </h3>
+              <p className="m-0 mt-xxs text-caption text-muted-foreground">
+                {copy.lastSummaryDescription}
+              </p>
+              <p
+                className="m-0 mt-sm whitespace-pre-wrap break-words text-body text-foreground [overflow-wrap:anywhere]"
+                data-last-summary-text=""
+              >
+                {lastSummary.text}
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {historyUnavailable ? (
         <div

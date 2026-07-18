@@ -263,7 +263,9 @@ describe("useWorkspaceViewModel workspace transitions", () => {
       offset: -12,
     })
 
-    act(() => window.dispatchEvent(new Event("focus")))
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
     await waitFor(() =>
       expect(result.current.selectedWorkspace?.health).toBe("missing"),
     )

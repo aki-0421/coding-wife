@@ -714,6 +714,12 @@ describe("WorkspaceShell", () => {
           errorCode: "CODEX-TURN-FAILED",
         },
       ],
+      lastSummary: {
+        eventId: "event-summary",
+        sequence: 8,
+        text: "Restored summary after restart.",
+        updatedAt: "2026-07-18T00:00:40.000Z",
+      },
       history: { mode: "ready", errorCode: null, backupName: null },
     }
     const saveDraft = vi.fn().mockResolvedValue(undefined)
@@ -737,6 +743,9 @@ describe("WorkspaceShell", () => {
       "Ask Codex to plan, build, explain, or fix anything…",
     )
     await waitFor(() => expect(composer).toHaveValue("Restored after reload"))
+    expect(
+      screen.getByRole("region", { name: "Last session summary" }),
+    ).toHaveTextContent("Restored summary after restart.")
     expect(screen.getByText("code.session.status.changed")).toBeVisible()
     expect(screen.getByText("CODEX-TURN-FAILED")).toBeVisible()
 
@@ -765,6 +774,187 @@ describe("WorkspaceShell", () => {
         name: "Remove attachment: Working tree diff",
       }),
     ).toBeVisible()
+  })
+
+  it("renders a restored summary as text in an accessible English recovery region", async () => {
+    const unsafeMarkup = '<img src="x" alt="private-probe">'
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () =>
+        Promise.resolve({
+          ...nativeWorkspaceState(),
+          lastSummary: {
+            eventId: "event-safe-summary",
+            sequence: 4,
+            text: `Completed safely.\n${unsafeMarkup}`,
+            updatedAt: "2026-07-18T00:00:04.000Z",
+          },
+        }),
+    }
+
+    renderWorkspace(adapter)
+
+    const summary = await screen.findByRole("region", {
+      name: "Last session summary",
+    })
+    expect(summary).toHaveTextContent("Completed safely.")
+    expect(summary.textContent).toContain(unsafeMarkup)
+    expect(screen.queryByAltText("private-probe")).not.toBeInTheDocument()
+    expect(summary).toHaveTextContent(
+      "Restored from this workspace's redacted local history.",
+    )
+  })
+
+  it("localizes the restored summary region in Japanese", async () => {
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () =>
+        Promise.resolve({
+          ...nativeWorkspaceState(),
+          lastSummary: {
+            eventId: "event-ja-summary",
+            sequence: 3,
+            text: "再起動後も要約を復元しました。",
+            updatedAt: "2026-07-18T00:00:03.000Z",
+          },
+        }),
+    }
+
+    render(
+      <App
+        localeStore={japaneseLocaleStore}
+        readinessController={readyNativeReadinessController()}
+        transport={new DemoTransport()}
+        workspaceAdapter={adapter}
+      />,
+    )
+
+    const summary = await screen.findByRole("region", {
+      name: "前回セッションの要約",
+    })
+    expect(summary).toHaveTextContent("再起動後も要約を復元しました。")
+    expect(summary).toHaveTextContent(
+      "このワークスペースの秘匿化済みローカル履歴から復元しました。",
+    )
+  })
+
+  it.each([
+    ["missing repository", "missing", "ready"],
+    ["read-only recovery", "read_only", "read_only"],
+  ] as const)(
+    "keeps the last summary visible during %s",
+    async (_label, health, historyMode) => {
+      const adapter: WorkspaceViewAdapter = {
+        hydrationMode: "native",
+        loadState: () =>
+          Promise.resolve({
+            ...nativeWorkspaceState(),
+            workspaces: nativeWorkspaceState().workspaces.map((workspace) => ({
+              ...workspace,
+              health,
+            })),
+            lastSummary: {
+              eventId: `event-${health}-summary`,
+              sequence: 2,
+              text: "Recovery keeps this workspace summary available.",
+              updatedAt: "2026-07-18T00:00:02.000Z",
+            },
+            history: {
+              mode: historyMode,
+              errorCode: historyMode === "read_only" ? "HIST-READ-ONLY" : null,
+              backupName: null,
+            },
+          }),
+      }
+
+      renderWorkspace(adapter)
+
+      expect(
+        await screen.findByRole("region", { name: "Last session summary" }),
+      ).toHaveTextContent("Recovery keeps this workspace summary available.")
+    },
+  )
+
+  it("clears a workspace-local summary when switching to a workspace without one", async () => {
+    const stateFor = (activeWorkspaceId: string): WorkspaceAdapterState => ({
+      ...nativeWorkspaceState(),
+      workspaces: [
+        {
+          id: "workspace-native",
+          repository: "fixture",
+          name: "workspace-a",
+          branch: "main",
+          lifecycle: "in_progress",
+          health: "ready",
+        },
+        {
+          id: "workspace-b",
+          repository: "fixture",
+          name: "workspace-b",
+          branch: "main",
+          lifecycle: "backlog",
+          health: "ready",
+        },
+      ],
+      activeWorkspaceId,
+      lastSummary:
+        activeWorkspaceId === "workspace-native"
+          ? {
+              eventId: "event-workspace-a-summary",
+              sequence: 2,
+              text: "Workspace A private recovery summary.",
+              updatedAt: "2026-07-18T00:00:02.000Z",
+            }
+          : null,
+    })
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(stateFor("workspace-native")),
+      selectWorkspace: (workspaceId) => Promise.resolve(stateFor(workspaceId)),
+    }
+
+    renderWorkspace(adapter)
+    expect(
+      await screen.findByRole("region", { name: "Last session summary" }),
+    ).toHaveTextContent("Workspace A private recovery summary.")
+
+    const navigation = screen.getByRole("navigation", { name: "Workspaces" })
+    fireEvent.click(
+      within(navigation).getByRole("button", {
+        name: /fixture\/workspace-b/u,
+      }),
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "Last session summary" }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(
+      screen.queryByText("Workspace A private recovery summary."),
+    ).not.toBeInTheDocument()
+  })
+
+  it("omits the recovery region when the summary is empty", async () => {
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () =>
+        Promise.resolve({
+          ...nativeWorkspaceState(),
+          lastSummary: {
+            eventId: "event-empty-summary",
+            sequence: 1,
+            text: "   \n\t",
+            updatedAt: "2026-07-18T00:00:01.000Z",
+          },
+        }),
+    }
+
+    renderWorkspace(adapter)
+    await screen.findByRole("heading", { name: "No persisted activity yet" })
+    expect(
+      screen.queryByRole("region", { name: "Last session summary" }),
+    ).not.toBeInTheDocument()
   })
 
   it("keeps the latest ten captured context items in the UI", async () => {

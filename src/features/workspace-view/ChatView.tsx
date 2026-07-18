@@ -39,6 +39,7 @@ interface ChatViewProps {
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
   readonly history: WorkspaceAdapterState["history"]
+  readonly lastSummary: WorkspaceAdapterState["lastSummary"]
   readonly muted: boolean
   readonly reducedMotion: boolean
   readonly readiness: WorkspaceCodexState["readiness"]
@@ -175,6 +176,7 @@ export function ChatView({
   copy,
   draft,
   history,
+  lastSummary,
   muted,
   reducedMotion,
   readiness,
@@ -241,6 +243,9 @@ export function ChatView({
         identity.sequence === timelineAnchor.sequence
       )
     })
+  const timelineAnchorEventId = timelineAnchor?.eventId
+  const timelineAnchorOffset = timelineAnchor?.offset
+  const timelineAnchorSequence = timelineAnchor?.sequence
   const effectiveMuted = narration.settingsSnapshot?.settings.muted ?? muted
   const companionStateLabel =
     copy.character.semanticState[
@@ -281,13 +286,14 @@ export function ChatView({
     if (!viewport) return
     const persistedAnchor =
       !timelineAnchorAvailable ||
-      timelineAnchor === null ||
-      timelineAnchor === undefined
+      timelineAnchorEventId === undefined ||
+      timelineAnchorOffset === undefined ||
+      timelineAnchorSequence === undefined
         ? undefined
         : {
-            eventId: timelineAnchor.eventId,
-            sequence: timelineAnchor.sequence,
-            offsetFromViewportTop: timelineAnchor.offset,
+            eventId: timelineAnchorEventId,
+            sequence: timelineAnchorSequence,
+            offsetFromViewportTop: timelineAnchorOffset,
           }
     const anchor = persistedAnchor ?? timelineScrollAnchors.get(workspaceId)
     const restored =
@@ -305,9 +311,9 @@ export function ChatView({
     })
     return () => window.cancelAnimationFrame(frame)
   }, [
-    timelineAnchor?.eventId,
-    timelineAnchor?.offset,
-    timelineAnchor?.sequence,
+    timelineAnchorEventId,
+    timelineAnchorOffset,
+    timelineAnchorSequence,
     timelineAnchorAvailable,
     workspaceId,
   ])
@@ -466,6 +472,7 @@ export function ChatView({
               events={timeline}
               history={history}
               interruptAvailable={turnState === "running"}
+              lastSummary={lastSummary}
               onAnswerApproval={onAnswerApproval}
               onAnswerDecision={onAnswerDecision}
               onInterrupt={onStop}

@@ -1933,12 +1933,112 @@ fn apply_migrations(connection: &Connection, migrations: &[(i64, &str)]) -> rusq
     for (version, sql) in migrations.iter().filter(|(version, _)| *version > current) {
         let transaction = connection.unchecked_transaction()?;
         transaction.execute_batch(sql)?;
+        if *version == 5 {
+            backfill_legacy_resume_summaries(&transaction)?;
+        }
         transaction.execute(
             "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
             params![version, now()],
         )?;
         transaction.execute_batch(&format!("PRAGMA user_version = {version};"))?;
         transaction.commit()?;
+    }
+    Ok(())
+}
+
+fn backfill_legacy_resume_summaries(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    let candidates = {
+        let mut statement = transaction.prepare(
+            "SELECT e.event_id, e.workspace_id, e.session_id, e.sequence,
+                    e.occurred_at, e.payload_json, e.schema_version,
+                    s.last_summary, s.workspace_id
+             FROM domain_events e
+             LEFT JOIN sessions s ON s.id = e.session_id
+             WHERE e.producer = 'code' AND e.kind = 'code.message.completed'
+             ORDER BY e.workspace_id ASC, e.sequence DESC, e.event_id ASC",
+        )?;
+        let candidates = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        candidates
+    };
+    let mut restored_workspaces = HashSet::new();
+    for (
+        event_id,
+        workspace_id,
+        session_id,
+        sequence,
+        occurred_at,
+        payload_json,
+        schema_version,
+        legacy_session_summary,
+        session_workspace_id,
+    ) in candidates
+    {
+        if restored_workspaces.contains(&workspace_id)
+            || sequence < 1
+            || schema_version != i64::from(DOMAIN_EVENT_SCHEMA_VERSION)
+            || payload_json.len() > MAX_EVENT_BYTES
+            || (session_id.is_some() && session_workspace_id.as_deref() != Some(&workspace_id))
+        {
+            continue;
+        }
+        let Ok(payload) = serde_json::from_str::<Value>(&payload_json) else {
+            continue;
+        };
+        let event = NormalizedDomainEvent {
+            schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+            event_id: event_id.clone(),
+            workspace_id: workspace_id.clone(),
+            session_id,
+            producer: "code".to_owned(),
+            kind: "code.message.completed".to_owned(),
+            occurred_at: occurred_at.clone(),
+            payload: payload.clone(),
+        };
+        if validate_domain_event(&event).is_err() || validate_event_shape(&event, &payload).is_err()
+        {
+            continue;
+        }
+        let Some(event_text) = payload.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        let summary_text = legacy_session_summary
+            .as_deref()
+            .filter(|summary| *summary == event_text && public_multiline(summary, 64 * 1024, true))
+            .unwrap_or(event_text);
+        transaction.execute(
+            "INSERT INTO workspace_resume_states (
+               workspace_id, last_summary_event_id, last_summary_sequence,
+               last_summary_text, last_summary_updated_at, timeline_anchor_revision
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 0)
+             ON CONFLICT(workspace_id) DO UPDATE SET
+               last_summary_event_id = excluded.last_summary_event_id,
+               last_summary_sequence = excluded.last_summary_sequence,
+               last_summary_text = excluded.last_summary_text,
+               last_summary_updated_at = excluded.last_summary_updated_at
+             WHERE workspace_resume_states.last_summary_event_id IS NULL",
+            params![
+                event.workspace_id,
+                event.event_id,
+                sequence,
+                summary_text,
+                occurred_at
+            ],
+        )?;
+        restored_workspaces.insert(workspace_id);
     }
     Ok(())
 }
@@ -3599,6 +3699,16 @@ mod tests {
             "threadHandle": "thread-safe",
             "turnHandle": "turn-safe",
             "status": status,
+        })
+    }
+
+    fn codex_message_payload(item_handle: &str, text: &str, source_sequence: u64) -> Value {
+        json!({
+            "semanticVersion": 1,
+            "generation": 1,
+            "sourceSequence": source_sequence,
+            "itemHandle": item_handle,
+            "text": text,
         })
     }
 
@@ -5462,6 +5572,282 @@ mod tests {
                 .expect("resume state columns"),
             4
         );
+    }
+
+    #[test]
+    fn real_v4_fixture_backfills_twenty_safe_summaries_idempotently() {
+        let data = temp_directory("history-v4-summary-backfill");
+        let database = data.join(DATABASE_FILE_NAME);
+        let expected = {
+            let connection = Connection::open(&database).expect("open v4 fixture");
+            configure_connection(&connection).expect("configure v4 fixture");
+            apply_migrations(
+                &connection,
+                &[
+                    (1, MIGRATION_1),
+                    (2, MIGRATION_2),
+                    (3, MIGRATION_3),
+                    (4, MIGRATION_4),
+                ],
+            )
+            .expect("create real v4 schema");
+            let created_at = "2026-07-18T00:00:00.000Z";
+            connection
+                .execute(
+                    "INSERT INTO projects (
+                       id, canonical_root, alias, project_identity, root_device, root_inode,
+                       git_device, git_inode, branch, head, detached, health,
+                       created_at, updated_at, registered
+                     ) VALUES (?1, ?2, ?3, ?4, 1, 2, 3, 4, 'main', ?5, 0, 'ready', ?6, ?6, 1)",
+                    params![
+                        "project-v4-summary",
+                        b"/legacy/coding-wife".as_slice(),
+                        "legacy-coding-wife",
+                        "legacy-project-identity",
+                        "0123456789abcdef0123456789abcdef01234567",
+                        created_at,
+                    ],
+                )
+                .expect("insert legacy project");
+            let mut expected = Vec::new();
+            for index in 0..20 {
+                let workspace_id = format!("workspace-v4-{index}");
+                let session_id = format!("session-v4-{index}");
+                let base_event_id = format!("event-v4-{index}-base");
+                let base_summary = format!("Legacy summary for workspace {index}");
+                let latest_summary = if index == 2 {
+                    format!("Latest legacy summary for workspace {index}")
+                } else {
+                    base_summary.clone()
+                };
+                let occurred_at = format!("2026-07-18T00:{index:02}:01.000Z");
+                connection
+                    .execute(
+                        "INSERT INTO workspaces (
+                           id, project_id, name, goal, lifecycle, attention, health,
+                           created_at, updated_at, last_selected_at
+                         ) VALUES (?1, 'project-v4-summary', ?2, '', 'backlog', NULL,
+                                   'ready', ?3, ?3, NULL)",
+                        params![
+                            workspace_id,
+                            format!("Legacy workspace {index}"),
+                            created_at
+                        ],
+                    )
+                    .expect("insert legacy workspace");
+                connection
+                    .execute(
+                        "INSERT INTO sessions (
+                           id, workspace_id, client_request_id, status, last_summary,
+                           created_at, updated_at
+                         ) VALUES (?1, ?2, NULL, 'idle', ?3, ?4, ?4)",
+                        params![session_id, workspace_id, latest_summary, created_at],
+                    )
+                    .expect("insert legacy session summary");
+                connection
+                    .execute(
+                        "INSERT INTO workspace_preferences (
+                           workspace_id, draft_text, effort, draft_revision, updated_at
+                         ) VALUES (?1, '', 'fast', 0, ?2)",
+                        params![workspace_id, created_at],
+                    )
+                    .expect("insert legacy preferences");
+                connection
+                    .execute(
+                        "INSERT INTO domain_events (
+                           event_id, workspace_id, session_id, sequence, producer, kind,
+                           occurred_at, payload_json, schema_version, created_at
+                         ) VALUES (?1, ?2, ?3, 1, 'code', 'code.message.completed',
+                                   ?4, ?5, 1, ?4)",
+                        params![
+                            base_event_id,
+                            workspace_id,
+                            session_id,
+                            occurred_at,
+                            codex_message_payload(
+                                &format!("item-v4-{index}-base"),
+                                &base_summary,
+                                1,
+                            )
+                            .to_string(),
+                        ],
+                    )
+                    .expect("insert valid legacy message");
+
+                let (event_id, summary, sequence) = match index {
+                    0 => {
+                        connection
+                            .execute(
+                                "INSERT INTO domain_events (
+                                   event_id, workspace_id, session_id, sequence, producer, kind,
+                                   occurred_at, payload_json, schema_version, created_at
+                                 ) VALUES (?1, ?2, ?3, 2, 'code', 'code.message.completed',
+                                           ?4, 'not-json', 1, ?4)",
+                                params![
+                                    "event-v4-0-corrupt",
+                                    workspace_id,
+                                    session_id,
+                                    "2026-07-18T00:00:02.000Z",
+                                ],
+                            )
+                            .expect("insert corrupt newest message");
+                        (base_event_id, base_summary, 1)
+                    }
+                    1 => {
+                        let duplicate_event_id = "event-v4-1-duplicate".to_owned();
+                        connection
+                            .execute(
+                                "INSERT INTO domain_events (
+                                   event_id, workspace_id, session_id, sequence, producer, kind,
+                                   occurred_at, payload_json, schema_version, created_at
+                                 ) VALUES (?1, ?2, ?3, 2, 'code', 'code.message.completed',
+                                           ?4, ?5, 1, ?4)",
+                                params![
+                                    duplicate_event_id,
+                                    workspace_id,
+                                    session_id,
+                                    "2026-07-18T00:01:02.000Z",
+                                    codex_message_payload("item-v4-1-duplicate", &base_summary, 2,)
+                                        .to_string(),
+                                ],
+                            )
+                            .expect("insert duplicate safe message");
+                        (duplicate_event_id, base_summary, 2)
+                    }
+                    2 => {
+                        let latest_event_id = "event-v4-2-latest".to_owned();
+                        connection
+                            .execute(
+                                "INSERT INTO domain_events (
+                                   event_id, workspace_id, session_id, sequence, producer, kind,
+                                   occurred_at, payload_json, schema_version, created_at
+                                 ) VALUES (?1, ?2, ?3, 2, 'code', 'code.message.completed',
+                                           ?4, ?5, 1, ?4)",
+                                params![
+                                    latest_event_id,
+                                    workspace_id,
+                                    session_id,
+                                    "2026-07-18T00:02:02.000Z",
+                                    codex_message_payload("item-v4-2-latest", &latest_summary, 2,)
+                                        .to_string(),
+                                ],
+                            )
+                            .expect("insert latest safe message");
+                        (latest_event_id, latest_summary, 2)
+                    }
+                    3 => {
+                        connection
+                            .execute(
+                                "INSERT INTO domain_events (
+                                   event_id, workspace_id, session_id, sequence, producer, kind,
+                                   occurred_at, payload_json, schema_version, created_at
+                                 ) VALUES (?1, ?2, ?3, 2, 'code', 'code.message.completed',
+                                           ?4, ?5, 1, ?4)",
+                                params![
+                                    "event-v4-3-private",
+                                    workspace_id,
+                                    session_id,
+                                    "2026-07-18T00:03:02.000Z",
+                                    codex_message_payload(
+                                        "item-v4-3-private",
+                                        "chain-of-thought must never migrate",
+                                        2,
+                                    )
+                                    .to_string(),
+                                ],
+                            )
+                            .expect("insert non-public newest message");
+                        (base_event_id, base_summary, 1)
+                    }
+                    _ => (base_event_id, base_summary, 1),
+                };
+                expected.push((workspace_id, event_id, summary, sequence));
+            }
+            assert_eq!(
+                connection
+                    .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .expect("v4 fixture version"),
+                4
+            );
+            expected
+        };
+
+        let store = WorkspaceHistoryStore::open(&data).expect("migrate v4 fixture");
+        assert_eq!(store.status().mode, HistoryMode::Ready);
+        for (workspace_id, event_id, summary_text, sequence) in &expected {
+            let snapshot = store
+                .snapshot(Some(workspace_id))
+                .expect("snapshot migrated workspace");
+            let resume = snapshot.resume_state.expect("backfilled resume state");
+            let summary = resume.last_summary.expect("backfilled summary");
+            assert_eq!(summary.workspace_id, *workspace_id);
+            assert_eq!(summary.event_id, *event_id);
+            assert_eq!(summary.sequence, *sequence);
+            assert_eq!(summary.text, *summary_text);
+            assert!(resume.timeline_anchor.is_none());
+        }
+        drop(store);
+
+        let rows_after_migration = {
+            let connection = Connection::open(&database).expect("inspect migrated database");
+            assert_eq!(
+                connection
+                    .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .expect("migrated version"),
+                5
+            );
+            let mut statement = connection
+                .prepare(
+                    "SELECT workspace_id, last_summary_event_id, last_summary_sequence,
+                            last_summary_text, timeline_anchor_revision
+                     FROM workspace_resume_states ORDER BY workspace_id ASC",
+                )
+                .expect("prepare migrated summaries");
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                })
+                .expect("query migrated summaries")
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .expect("decode migrated summaries")
+        };
+        assert_eq!(rows_after_migration.len(), 20);
+        assert!(rows_after_migration
+            .iter()
+            .all(|(_, _, _, _, revision)| *revision == 0));
+
+        drop(WorkspaceHistoryStore::open(&data).expect("idempotent reopen"));
+        let rows_after_reopen = {
+            let connection = Connection::open(&database).expect("inspect reopened database");
+            let mut statement = connection
+                .prepare(
+                    "SELECT workspace_id, last_summary_event_id, last_summary_sequence,
+                            last_summary_text, timeline_anchor_revision
+                     FROM workspace_resume_states ORDER BY workspace_id ASC",
+                )
+                .expect("prepare reopened summaries");
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                })
+                .expect("query reopened summaries")
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .expect("decode reopened summaries")
+        };
+        assert_eq!(rows_after_reopen, rows_after_migration);
+        let _ = fs::remove_dir_all(data);
     }
 
     #[test]

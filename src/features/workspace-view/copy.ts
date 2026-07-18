@@ -123,6 +123,9 @@ const en = {
   diagnostics: "Diagnostics",
   timelineTitle: "Activity",
   timelineDescription: "Structured, redacted workspace events",
+  lastSummaryTitle: "Last session summary",
+  lastSummaryDescription:
+    "Restored from this workspace's redacted local history.",
   previewBadge: "Reference preview",
   persistedBadge: "Persisted locally",
   ephemeralHistoryBadge: "Demo memory",
@@ -669,6 +672,9 @@ const ja: typeof en = {
   diagnostics: "診断",
   timelineTitle: "アクティビティ",
   timelineDescription: "構造化・秘匿化されたワークスペースイベント",
+  lastSummaryTitle: "前回セッションの要約",
+  lastSummaryDescription:
+    "このワークスペースの秘匿化済みローカル履歴から復元しました。",
   previewBadge: "参照プレビュー",
   persistedBadge: "ローカルに永続化済み",
   ephemeralHistoryBadge: "デモ用メモリ",

@@ -701,6 +701,7 @@ export function WorkspaceShell({
             copy={copy}
             draft={view.selectedDraft}
             history={view.history}
+            lastSummary={view.lastSummary}
             muted={view.muted}
             onAddAttachments={view.addAttachmentFiles}
             onAnswerApproval={view.answerApproval}
