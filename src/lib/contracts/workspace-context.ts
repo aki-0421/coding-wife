@@ -110,15 +110,27 @@ const policyKeys = [
   "support_capability",
   "checkpoint_policy",
 ] as const
-const policyActions = ["override", "bypass", "disable", "ignore"] as const
-const policyDirectivePatterns = [
-  /\b(?:always\s+)?(?:grant|allow|deny|reject)\b.{0,40}\b(?:permission|permissions|permission\s+requests?|permission\s+prompts?)\b/iu,
-  /\b(?:always\s+)?approve\b.{0,40}\b(?:tool\s+calls?|permissions?|requests?)\b/iu,
-  /\b(?:skip|omit|bypass|disable|ignore|avoid)\s+(?:all\s+)?(?:the\s+)?(?:verification|checks?|safety\s+checks?|privacy\s+checks?)\b/iu,
-  /\bnever\s+(?:ask|check|request)\b.{0,40}\b(?:approval|permission)\b/iu,
-  /(?:常に|すべての|全ての)?[^。\n]{0,20}(?:権限要求|許可要求|承認要求)[^。\n]{0,20}(?:許可|承認|拒否)/u,
-  /(?:権限|許可|承認)[^。\n]{0,12}(?:確認|質問|要求)(?:しない|せず|を省略)/u,
-  /(?:検証(?:結果)?|安全確認|動作確認|コミット前の確認)[^。\n]{0,12}(?:省略|回避|無効|無視|しない)/u,
+const policyPresentationPatterns = [
+  /\b(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)(?:\s+(?:requests?|prompts?|calls?|checks?|policy|observer|skill|capability))?\s+(?:errors?|results?|outputs?|messages?|wording|language|jargon|terms?|terminology|tone|phrasing|summaries?|explanations?|descriptions?|labels?|notifications?)\b/giu,
+  /(?:プライバシー確認|チェックポイント|コミットスキル|安全確認|動作確認|権限|許可|承認|検証|確認|ツール|モデル)(?:要求|確認|呼び出し|方針|ポリシー)?(?:エラー|結果|出力|メッセージ|文言|言語|用語|専門用語|表現|口調|語調|言い回し|要約|説明|ラベル|通知)/gu,
+] as const
+const policyDomainPatterns = [
+  /\b(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)\b/iu,
+  /\b(?:permission|approval)\s+(?:requests?|prompts?|checks?)\b/iu,
+  /\b(?:tool\s+calls?|git\s+observer|commit\s+skill|support\s+capability|checkpoint\s+policy)\b/iu,
+  /(?:プライバシー確認|チェックポイント(?:方針|ポリシー)?|コミットスキル|安全確認|動作確認|権限(?:要求|確認)?|許可(?:要求|確認)?|承認(?:要求|確認)?|検証|確認|ツール(?:呼び出し)?|モデル)/u,
+] as const
+const policyDirectivePredicatePatterns = [
+  /\b(?:accept|approve|grant|allow|deny|reject|skip|omit|bypass|disable|ignore|override)\b/iu,
+  /\b(?:optional|unnecessary|mandatory|required)\b/iu,
+  /\b(?:proceed|continue|go)\s+(?:straight\s+)?(?:directly|ahead)\b/iu,
+  /\bnever\s+(?:ask|check|request)\b/iu,
+  /\bavoid\s+(?:all\s+|the\s+)?(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)\b/iu,
+  /(?:同意|拒否|省略|回避|無効|無視|上書き|迂回|スキップ|不要|任意|必須)/u,
+  /(?:権限|許可|承認)(?:要求|確認)?[^\s]{0,12}(?:許可|承認|拒否|同意)/u,
+  /(?:確認|質問|要求|求め)(?:しない|せず)/u,
+  /(?:そのまま|直接|直ちに)(?:進め|続行)/u,
+  /(?:権限|許可|承認|検証|確認)[^\s]{0,8}(?:避け|しない)/u,
 ] as const
 
 function violation(): never {
@@ -221,25 +233,18 @@ function validTechnicalReference(value: string): boolean {
 }
 
 function normalizePolicyText(value: string): string {
-  return value.toLocaleLowerCase().replaceAll(/[ -]/gu, "_")
+  let normalized = ""
+  for (const character of value.normalize("NFKC").toLowerCase()) {
+    normalized += /[\p{L}\p{N}]/u.test(character) ? character : " "
+  }
+  return normalized.replaceAll(/\s+/gu, " ").trim()
 }
 
-function containsPolicyOverride(value: string): boolean {
-  const compatibilityNormalized = value.normalize("NFKC")
-  const normalized = normalizePolicyText(compatibilityNormalized)
-  if (
-    policyDirectivePatterns.some((pattern) =>
-      pattern.test(compatibilityNormalized),
-    )
-  ) {
-    return true
-  }
-  if (
-    policyActions.some((action) => normalized.includes(action)) &&
-    policyKeys.some((key) => normalized.includes(key))
-  ) {
-    return true
-  }
+function containsPolicyAssignment(value: string): boolean {
+  const normalized = value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replaceAll(/[ -]/gu, "_")
   return normalized.split("\n").some((line) => {
     const candidate = line.replace(/^[\s{}[\]*"'-]+/u, "")
     return policyKeys.some((key) => {
@@ -247,6 +252,21 @@ function containsPolicyOverride(value: string): boolean {
       return /^["' ]*[:=]/u.test(candidate.slice(key.length))
     })
   })
+}
+
+function containsPolicyOverride(value: string): boolean {
+  if (containsPolicyAssignment(value)) return true
+  let policyScope = normalizePolicyText(value)
+  for (const pattern of policyPresentationPatterns) {
+    policyScope = policyScope.replaceAll(pattern, " ")
+  }
+  const hasPolicyDomainObject = policyDomainPatterns.some((pattern) =>
+    pattern.test(policyScope),
+  )
+  const hasDirectivePredicate = policyDirectivePredicatePatterns.some(
+    (pattern) => pattern.test(policyScope),
+  )
+  return hasPolicyDomainObject && hasDirectivePredicate
 }
 
 function validItems(

@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use unicode_normalization::UnicodeNormalization;
 
 use super::types::{
     CharacterContext, ProjectContext, WorkspaceHistoryError, WorkspaceTurnContextSnapshot,
@@ -52,22 +53,51 @@ const POLICY_KEYS: &[&str] = &[
     "checkpoint_policy",
 ];
 
-const POLICY_ACTIONS: &[&str] = &["override", "bypass", "disable", "ignore"];
-
-fn policy_directive_patterns() -> &'static [Regex] {
+fn policy_presentation_patterns() -> &'static [Regex] {
     static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
         [
-            r"(?iu)\b(?:always\s+)?(?:grant|allow|deny|reject)\b.{0,40}\b(?:permission|permissions|permission\s+requests?|permission\s+prompts?)\b",
-            r"(?iu)\b(?:always\s+)?approve\b.{0,40}\b(?:tool\s+calls?|permissions?|requests?)\b",
-            r"(?iu)\b(?:skip|omit|bypass|disable|ignore|avoid)\s+(?:all\s+)?(?:the\s+)?(?:verification|checks?|safety\s+checks?|privacy\s+checks?)\b",
-            r"(?iu)\bnever\s+(?:ask|check|request)\b.{0,40}\b(?:approval|permission)\b",
-            r"(?:常に|すべての|全ての)?[^。\n]{0,20}(?:権限要求|許可要求|承認要求)[^。\n]{0,20}(?:許可|承認|拒否)",
-            r"(?:権限|許可|承認)[^。\n]{0,12}(?:確認|質問|要求)(?:しない|せず|を省略)",
-            r"(?:検証(?:結果)?|安全確認|動作確認|コミット前の確認)[^。\n]{0,12}(?:省略|回避|無効|無視|しない)",
+            r"(?iu)\b(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)(?:\s+(?:requests?|prompts?|calls?|checks?|policy|observer|skill|capability))?\s+(?:errors?|results?|outputs?|messages?|wording|language|jargon|terms?|terminology|tone|phrasing|summaries?|explanations?|descriptions?|labels?|notifications?)\b",
+            r"(?:プライバシー確認|チェックポイント|コミットスキル|安全確認|動作確認|権限|許可|承認|検証|確認|ツール|モデル)(?:要求|確認|呼び出し|方針|ポリシー)?(?:エラー|結果|出力|メッセージ|文言|言語|用語|専門用語|表現|口調|語調|言い回し|要約|説明|ラベル|通知)",
         ]
         .into_iter()
-        .map(|pattern| Regex::new(pattern).expect("static policy directive regex"))
+        .map(|pattern| Regex::new(pattern).expect("static policy presentation regex"))
+        .collect()
+    })
+}
+
+fn policy_domain_patterns() -> &'static [Regex] {
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        [
+            r"(?iu)\b(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)\b",
+            r"(?iu)\b(?:permission|approval)\s+(?:requests?|prompts?|checks?)\b",
+            r"(?iu)\b(?:tool\s+calls?|git\s+observer|commit\s+skill|support\s+capability|checkpoint\s+policy)\b",
+            r"(?:プライバシー確認|チェックポイント(?:方針|ポリシー)?|コミットスキル|安全確認|動作確認|権限(?:要求|確認)?|許可(?:要求|確認)?|承認(?:要求|確認)?|検証|確認|ツール(?:呼び出し)?|モデル)",
+        ]
+        .into_iter()
+        .map(|pattern| Regex::new(pattern).expect("static policy domain regex"))
+        .collect()
+    })
+}
+
+fn policy_directive_predicate_patterns() -> &'static [Regex] {
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        [
+            r"(?iu)\b(?:accept|approve|grant|allow|deny|reject|skip|omit|bypass|disable|ignore|override)\b",
+            r"(?iu)\b(?:optional|unnecessary|mandatory|required)\b",
+            r"(?iu)\b(?:proceed|continue|go)\s+(?:straight\s+)?(?:directly|ahead)\b",
+            r"(?iu)\bnever\s+(?:ask|check|request)\b",
+            r"(?iu)\bavoid\s+(?:all\s+|the\s+)?(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)\b",
+            r"(?:同意|拒否|省略|回避|無効|無視|上書き|迂回|スキップ|不要|任意|必須)",
+            r"(?:権限|許可|承認)(?:要求|確認)?[^\s]{0,12}(?:許可|承認|拒否|同意)",
+            r"(?:確認|質問|要求|求め)(?:しない|せず)",
+            r"(?:そのまま|直接|直ちに)(?:進め|続行)",
+            r"(?:権限|許可|承認|検証|確認)[^\s]{0,8}(?:避け|しない)",
+        ]
+        .into_iter()
+        .map(|pattern| Regex::new(pattern).expect("static policy directive predicate regex"))
         .collect()
     })
 }
@@ -500,31 +530,31 @@ pub(super) fn validate_project_reference_manifest(
 }
 
 fn normalized_policy_text(value: &str) -> String {
-    value
-        .to_lowercase()
-        .chars()
+    let mut normalized = String::with_capacity(value.len());
+    let mut needs_separator = false;
+    for character in value.nfkc().flat_map(|character| character.to_lowercase()) {
+        if character.is_alphanumeric() {
+            if needs_separator && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            normalized.push(character);
+            needs_separator = false;
+        } else {
+            needs_separator = true;
+        }
+    }
+    normalized
+}
+
+fn contains_policy_assignment(value: &str) -> bool {
+    let normalized = value
+        .nfkc()
+        .flat_map(|character| character.to_lowercase())
         .map(|character| match character {
             '-' | ' ' => '_',
             other => other,
         })
-        .collect()
-}
-
-fn contains_policy_override(value: &str) -> bool {
-    if policy_directive_patterns()
-        .iter()
-        .any(|pattern| pattern.is_match(value))
-    {
-        return true;
-    }
-    let normalized = normalized_policy_text(value);
-    if POLICY_ACTIONS
-        .iter()
-        .any(|action| normalized.contains(action))
-        && POLICY_KEYS.iter().any(|key| normalized.contains(key))
-    {
-        return true;
-    }
+        .collect::<String>();
     normalized.lines().any(|line| {
         let line = line.trim_start_matches(|character: char| {
             character.is_whitespace() || matches!(character, '{' | '[' | '-' | '*' | '"' | '\'')
@@ -537,6 +567,23 @@ fn contains_policy_override(value: &str) -> bool {
             })
         })
     })
+}
+
+fn contains_policy_override(value: &str) -> bool {
+    if contains_policy_assignment(value) {
+        return true;
+    }
+    let mut policy_scope = normalized_policy_text(value);
+    for pattern in policy_presentation_patterns() {
+        policy_scope = pattern.replace_all(&policy_scope, " ").into_owned();
+    }
+    let has_policy_domain_object = policy_domain_patterns()
+        .iter()
+        .any(|pattern| pattern.is_match(&policy_scope));
+    let has_directive_predicate = policy_directive_predicate_patterns()
+        .iter()
+        .any(|pattern| pattern.is_match(&policy_scope));
+    has_policy_domain_object && has_directive_predicate
 }
 
 pub(super) fn normalize_character_context(
