@@ -8,7 +8,7 @@ use tokio::sync::{Mutex as AsyncMutex, Notify};
 
 use super::binary::{exact_voice_available, NarrationBinary, NarrationSpeech};
 use super::error::{narration_error, NarrationResult};
-use super::policy::{NarrationPolicy, PolicyRejection};
+use super::policy::{NarrationPolicy, PolicyRejection, ScopeRejection};
 use super::process::NarrationProcessControl;
 use super::settings::{
     rate_to_words_per_minute, remap_settings_error, validate_settings, NarrationSettingsStore,
@@ -368,7 +368,12 @@ impl NarrationService {
             .policy
             .lock()
             .map_err(|_| narration_error("narration_set_scope", "NARRATION-POLICY-STATE", true))?
-            .set_scope(request.clone());
+            .set_scope(request.clone())
+            .map_err(|rejection| match rejection {
+                ScopeRejection::Rollback => {
+                    narration_error("narration_set_scope", "NARRATION-SCOPE-ROLLBACK", false)
+                }
+            })?;
         if changed {
             self.cancel_admitted().await?;
             self.inner
@@ -377,7 +382,10 @@ impl NarrationService {
                 .map_err(|_| {
                     narration_error("narration_set_scope", "NARRATION-POLICY-STATE", true)
                 })?
-                .set_scope(request);
+                .set_scope(request)
+                .map_err(|_| {
+                    narration_error("narration_set_scope", "NARRATION-SCOPE-ROLLBACK", false)
+                })?;
         }
         Ok(())
     }

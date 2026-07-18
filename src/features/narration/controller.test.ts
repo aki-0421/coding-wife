@@ -478,6 +478,43 @@ describe("NarrationController", () => {
     })
   })
 
+  it("rejects same-workspace rollback before transport, including a pending generation", async () => {
+    const { controller, gateway } = await ready(true)
+    await expect(
+      controller.setScope({ workspaceId: "workspace-1", generation: 4 }),
+    ).resolves.toBe(true)
+    const callsBeforeRollback = gateway.scopes.length
+
+    await expect(
+      controller.setScope({ workspaceId: "workspace-1", generation: 3 }),
+    ).resolves.toBe(false)
+    expect(gateway.scopes).toHaveLength(callsBeforeRollback)
+    expect(controller.getSnapshot()).toMatchObject({
+      scope: { workspaceId: "workspace-1", generation: 4 },
+      lastErrorCode: "NARRATION-SCOPE-ROLLBACK",
+    })
+
+    let releasePending!: () => void
+    vi.spyOn(gateway, "setScope").mockImplementationOnce((request) => {
+      gateway.scopes.push(request)
+      return new Promise<void>((resolve) => {
+        releasePending = resolve
+      })
+    })
+    const pending = controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 6,
+    })
+    await Promise.resolve()
+
+    await expect(
+      controller.setScope({ workspaceId: "workspace-1", generation: 5 }),
+    ).resolves.toBe(false)
+    expect(gateway.scopes.at(-1)?.generation).toBe(6)
+    releasePending()
+    await expect(pending).resolves.toBe(true)
+  })
+
   it("terminalizes an active stream on a sequence gap and cancels speech", async () => {
     const { controller, gateway } = await ready(true)
     const key = prepare(controller, ["最初です。"])

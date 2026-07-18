@@ -20,6 +20,10 @@
     {
       "name": "github-issue-reference",
       "text": "The change resolves GitHub issue gh-123."
+    },
+    {
+      "name": "https-url-with-path",
+      "text": "See https://example.com/root/workspace/details for the public guide."
     }
   ],
   "private": [
@@ -30,6 +34,18 @@
     {
       "name": "japanese-punctuated-private-path",
       "text": "対象：/private/var/db/application/state.json"
+    },
+    {
+      "name": "arbitrary-root-path",
+      "text": "Read /root/x before continuing."
+    },
+    {
+      "name": "arbitrary-workspace-path",
+      "text": "Generated (/workspace/x/output.json)."
+    },
+    {
+      "name": "arbitrary-system-path",
+      "text": "対象：/System/x/configuration.plist"
     },
     {
       "name": "bearer-token",

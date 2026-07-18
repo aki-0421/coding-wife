@@ -144,6 +144,7 @@ function sameSourceKey(
 export class NarrationController {
   readonly #listeners = new Set<Listener>()
   readonly #prepared = new Map<string, PreparedCommitNarration>()
+  readonly #scopeGenerationHighWater = new Map<string, number>()
   #snapshot = initialSnapshot()
   #initialization: Promise<void> | null = null
   #sourceDisconnect: (() => void) | null = null
@@ -323,12 +324,23 @@ export class NarrationController {
   }
 
   public async setScope(scope: NarrationScope): Promise<boolean> {
+    const highestGeneration = this.#scopeGenerationHighWater.get(
+      scope.workspaceId,
+    )
+    if (
+      highestGeneration !== undefined &&
+      scope.generation < highestGeneration
+    ) {
+      this.update({ lastErrorCode: "NARRATION-SCOPE-ROLLBACK" })
+      return false
+    }
     if (
       this.#snapshot.scope?.workspaceId === scope.workspaceId &&
       this.#snapshot.scope.generation === scope.generation
     ) {
       return true
     }
+    this.#scopeGenerationHighWater.set(scope.workspaceId, scope.generation)
     const epoch = ++this.#scopeEpoch
     if (
       this.#snapshot.scope !== null &&

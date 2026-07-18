@@ -29,6 +29,11 @@ pub(crate) enum PolicyRejection {
     Duplicate,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ScopeRejection {
+    Rollback,
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct SequenceKey {
     workspace_id: String,
@@ -46,6 +51,7 @@ struct DedupeEntry {
 #[derive(Debug, Default)]
 pub(crate) struct NarrationPolicy {
     scope: Option<NarrationScopeRequestV1>,
+    scope_generation_high_water: HashMap<String, u64>,
     sequences: HashMap<SequenceKey, u64>,
     canceled_requests: HashSet<SequenceKey>,
     dedupe: VecDeque<DedupeEntry>,
@@ -53,7 +59,16 @@ pub(crate) struct NarrationPolicy {
 }
 
 impl NarrationPolicy {
-    pub fn set_scope(&mut self, scope: NarrationScopeRequestV1) -> bool {
+    pub fn set_scope(&mut self, scope: NarrationScopeRequestV1) -> Result<bool, ScopeRejection> {
+        if self
+            .scope_generation_high_water
+            .get(&scope.workspace_id)
+            .is_some_and(|generation| scope.generation < *generation)
+        {
+            return Err(ScopeRejection::Rollback);
+        }
+        self.scope_generation_high_water
+            .insert(scope.workspace_id.clone(), scope.generation);
         let changed = self.scope.as_ref() != Some(&scope);
         if changed {
             self.scope = Some(scope);
@@ -61,7 +76,7 @@ impl NarrationPolicy {
             self.canceled_requests.clear();
             self.dedupe.clear();
         }
-        changed
+        Ok(changed)
     }
 
     pub fn validate_and_record(
@@ -190,10 +205,8 @@ fn secret_pattern() -> &'static Regex {
 fn private_path_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(
-            r#"(?:^|[^A-Za-z0-9])/(?:Users|home|private|tmp|var|Volumes|Library|Applications|opt|etc|usr|bin|sbin|dev|proc|run)/[^\s<>"']+"#,
-        )
-        .expect("narration path pattern")
+        Regex::new(r#"(?:^|[\s(\[{"'=,:;：、，。！？])/(?:[^\s/<>"']+/)+[^\s/<>"']+"#)
+            .expect("narration path pattern")
     })
 }
 
@@ -249,11 +262,13 @@ mod tests {
 
     fn policy() -> NarrationPolicy {
         let mut policy = NarrationPolicy::default();
-        policy.set_scope(NarrationScopeRequestV1 {
-            schema_version: NARRATION_SCHEMA_VERSION,
-            workspace_id: "workspace-1".to_owned(),
-            generation: 7,
-        });
+        policy
+            .set_scope(NarrationScopeRequestV1 {
+                schema_version: NARRATION_SCHEMA_VERSION,
+                workspace_id: "workspace-1".to_owned(),
+                generation: 7,
+            })
+            .expect("initial scope");
         policy
     }
 
@@ -296,6 +311,31 @@ mod tests {
             policy().validate_and_record(&stale, now),
             Err(PolicyRejection::Stale)
         );
+    }
+
+    #[test]
+    fn preserves_the_highest_generation_when_scope_rolls_back() {
+        let now = Instant::now();
+        let mut policy = policy();
+        policy
+            .set_scope(NarrationScopeRequestV1 {
+                schema_version: NARRATION_SCHEMA_VERSION,
+                workspace_id: "workspace-1".to_owned(),
+                generation: 8,
+            })
+            .expect("advance scope");
+        assert_eq!(
+            policy.set_scope(NarrationScopeRequestV1 {
+                schema_version: NARRATION_SCHEMA_VERSION,
+                workspace_id: "workspace-1".to_owned(),
+                generation: 7,
+            }),
+            Err(ScopeRejection::Rollback)
+        );
+        let mut current = request("現在の世代です", 0);
+        current.generation = 8;
+
+        assert!(policy.validate_and_record(&current, now).is_ok());
     }
 
     #[test]

@@ -471,6 +471,33 @@ async fn mute_cancel_and_scope_switch_converge_without_stale_playback() {
 }
 
 #[tokio::test]
+async fn rejects_same_workspace_scope_rollback_with_a_stable_error() {
+    let fixture = FakeSayFixture::new();
+    let service = service_fixture(&fixture).await;
+    service
+        .set_scope(NarrationScopeRequestV1 {
+            schema_version: NARRATION_SCHEMA_VERSION,
+            workspace_id: "workspace-1".to_owned(),
+            generation: 3,
+        })
+        .await
+        .expect("advance scope");
+
+    let error = service
+        .set_scope(NarrationScopeRequestV1 {
+            schema_version: NARRATION_SCHEMA_VERSION,
+            workspace_id: "workspace-1".to_owned(),
+            generation: 2,
+        })
+        .await
+        .expect_err("scope rollback must fail closed");
+
+    assert_eq!(error.code, "NARRATION-SCOPE-ROLLBACK");
+    assert!(!error.recoverable);
+    service.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
 async fn rejects_unsafe_text_before_spawning_speech() {
     let fixture = FakeSayFixture::new();
     let service = service_fixture(&fixture).await;
