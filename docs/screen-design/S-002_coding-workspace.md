@@ -46,7 +46,7 @@ status: "Approved"
 |---|---|---|
 | raw terminal / arbitrary shell | trust boundaryと理解可能性を守る | typed tool eventだけ表示 |
 | Git mutation control | native observerをread-onlyに保ち、commit producerをmain Codexへ一本化する | [S-003](S-003_session-evidence.md)はevidence閲覧だけ |
-| support agentへの直接chat | main agentが委任と統合の責任を持つ | timelineのsupport event |
+| support agentへの直接chat | coding identityと支援runtimeを分離する | commit説明はapp-owned controllerが管理し、main conversationへrequest/resultを注入しない |
 | model picker | MVPの固定契約は`GPT-5.6 Sol` | availabilityはpreflightで診断 |
 | microphone / speech input | MVPは音声出力だけ | [S-004](S-004_settings-diagnostics.md) |
 | character asset import | quarantineとpreviewが必要 | [S-004](S-004_settings-diagnostics.md) |
@@ -58,7 +58,7 @@ status: "Approved"
 | 表示契機 | [S-001](S-001_session-dashboard.md)でworkspace選択、Chat tab、notification内のworkspace link、再起動復旧 |
 | 表示前提 | valid workspace ID。missing repoまたはCodex blocked時もread-only timelineは表示する |
 | 初期フォーカス | normal/emptyはcomposer、decision時はdecision heading、error/recovery時は最初の回復操作 |
-| 正常完了 | validated terminal work-unit eventを1回だけread-only Git observerへ渡し、before/after HEAD、new commit、verification/decision/risk相関をHISTへ追記して、必要ならCommit tabへ遷移する |
+| 正常完了 | validated terminal work-unit eventを1回だけread-only Git observerへ渡し、before/after HEAD、new commit、verification/decision/risk相関をHISTへ追記する。success commit commandと新しいSHAを検証できた時はapp-owned explanation controllerへ`verified_commit`を渡し、main conversationを変更しない |
 | キャンセル |未送信draftとtimeline位置を維持する。running turnのStopは別操作として確認する |
 | 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う |
 | 再表示 | workspace、tab、draft、timeline位置、unanswered decision、companion状態をDBから復元する |
@@ -71,7 +71,7 @@ status: "Approved"
 | React WebView | normalized event、typed action、asset handle | render、input、focus、route、typed IPC | raw shell、Git args、absolute private path、secretを保持しない |
 | Rust supervisor | workspace scope、Codex process、event sequence、DB | spawn、validate、normalize、redact、persist、cancel | invalid/stale/duplicateを構造化errorにする |
 | Codex main agent | project context、approved tool scope、decision answer | plan、delegate、implement、verify、summarize | allowlist外operationを実行せずdecisionへ戻す |
-| Support agent | bounded task context | isolated taskを実行しmainへ結果を返す | UIへ直接commandを出さずmainが統合する |
+| App-owned explanation controller / Support agent | verified commit、bounded redacted task context | mainと別のisolated taskを実行しcontroller stateとcaptionへ結果を返す | main thread/turn/subagent/event/commandを作らず、UIへGit commandを出さない |
 | TTS provider | redacted eligible transcriptだけ | enable時にspeech生成 | secret/source/path/event payloadを受け取らない |
 
 ## 画面構成
@@ -118,6 +118,8 @@ eventはworkspace内のvalidated `sequence`順に表示する。live/HISTは共�
 | Error / Interrupted | code、影響、保持data、回復操作 | safe detail、retry condition、diagnostic ref | retry、modify、stop、diagnostic |
 
 連続する同種tool eventは同一work unit内だけgroup化し、running数とterminal数を見出しへ出す。groupを閉じてもerror、decision、verification failureを隠さない。toolのstdout/stderr全文、hidden reasoning、secret、home directory、unredacted promptは表示・保存しない。
+
+commit explainerのrequest、status、delta、result、failureはChat timelineとmain conversationへ追加しない。これらはapp-owned explanation controller、S-003の状態表示、Companion captionだけで扱う。
 
 timeline最下部から48px以内なら新eventで追従する。48pxを超えて離れた場合は位置を固定し、`新しい更新 N件 / 最新へ`をcomposer上へ表示する。復元時はevent anchor IDとoffsetを使い、消失時だけ最寄りsequenceへ補正する。
 
@@ -167,7 +169,7 @@ decisionはtimeline内の強いoutline surfaceとして表示し、必要時だ�
 
 canvasはpointer eventを奪わず、decorative扱いとする。model animationはevent severityを誇張せず、error/decisionを祝福表現にしない。tabがbackground、window occluded、reduced motion、thermal pressure時はFPSを下げ、Chat入力とevent描画を優先する。
 
-Commit tabの「詳しく教えて」で説明中は、`explaining_commit`状態とsequence付きのredacted narration chunkをvisible HTML captionへ表示する。captionはTTSより先に確定し、TTS enabled時だけ同じtextを同じ順で読む。workspace/selection変更、Cancel、stale/schema invalid後のchunkは表示・再生しない。
+verified commit後にapp-owned explanation controllerが`queued` / `running`へ遷移したら、`explaining_commit`状態とsequence付きのredacted narration chunkをvisible HTML captionへ表示する。captionはTTSより先に確定し、TTS enabled時だけ同じtextを同じ順で読む。workspace/selection変更、Cancel、stale/schema invalid後のchunkは表示・再生しない。
 
 ### Context subview
 
@@ -208,7 +210,7 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | 再起動復旧 | started turnにterminal eventなし | Interrupted marker、draft、last observed commit、review/new turn/diagnostic | read-only inspect、Commit、new turn前preflight |利用者が次操作を選ぶ |
 | stale event | sequence gap、duplicate、workspace mismatch | affected pointでingestion pause、diagnostic | local history、Stop | supervisorがgap解消またはterminal error |
 | companion fallback | WebGL/model/render/audio failure | staticまたはtext-only、visible reason、Chatは継続 | Chat全操作、Settings | retryまたは別model選択 |
-| commit説明中 | S-003の明示requestがactive | `explaining_commit`、streamed HTML caption、Cancel、mute | read-only tab、Cancel、mute | completed/canceled/unavailable/selection変更 |
+| commit説明中 | app controllerがverified commitを`queued` / `running`としている | `explaining_commit`、streamed HTML caption、Cancel、mute。main timelineへmessageを追加しない | read-only tab、Cancel、mute | generated/canceled/failed/unavailable/selection変更 |
 | demo memory | browser previewの決定的memory adapter | Codex/Git未接続、`Demo memory` badge、再起動で戻る説明。`Persisted locally`を表示しない | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
 
 ## 操作
@@ -216,7 +218,7 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
 |---|---|---|---|---|---|
 | turn送信 | valid draft、online、preflight ready、active execution競合なし | main sessionへ1 turn作成、user event永続化、composerをclear |送信前ならdraft維持 | draft/context/fingerprintを維持してerror | `CODE-F-052`〜`CODE-F-061` |
-| turn停止 | running turn | child/support/TTSへbounded cancel、stopped terminal event、完了済み変更を区別 | confirmを閉じれば継続 | timeout時にsupervisor強制停止とInterrupted | `CODE-F-073`, `SUP-F-059`〜`SUP-F-061` |
+| turn停止 | running turn | main childとそのturnに属する支援/TTSだけをbounded cancelし、stopped terminal event、完了済み変更を区別する。別のapp-owned commit explainerはS-003のCancelで管理する | confirmを閉じれば継続 | timeout時にsupervisor強制停止とInterrupted | `CODE-F-073`, `SUP-F-059`〜`SUP-F-061` |
 | timeline展開 | event/groupが存在 | sanitized detailを同じpositionで表示 |元のcompact表示 | raw payloadをfallback表示しない | `CODE-F-056`, `HIST-F-037`〜`HIST-F-044` |
 | 最新へ移動 | bottomから48px超 | newest terminal/eventへscroll、unread 0 | 非該当 | anchor不明なら最終sequenceへ | `HIST-F-045`〜`HIST-F-048` |
 | decision回答 | unanswered、option valid | idempotent answer event、turn resume | Holdなら未回答維持 |重複送信せず選択を保持 | `CODE-F-062`〜`CODE-F-069` |
@@ -251,6 +253,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | Stop | Rust supervisor | `stop_main_turn` | owned process/thread/turn ID | confirmation cancelは継続 | timeout後process tree停止、Interrupted |
 | event購読 | Rust event bridge | `subscribe_workspace_events` | workspace ID、monotonic sequence、schema allowlist | route leaveでUI購読だけ解除 | gapでpauseし診断表示 |
 | terminal Git observation handoff | Codex composition → Rust Git observer | `observe_terminal_work_unit` | validated terminal authority、work unit ID、workspace ID/generation、source event ID/sequence/time。observerがbefore/after HEAD、status、new commitとverification/decision/risk evidenceをread-onlyで相関し、同一eventをexact replayだけに制限 | terminal前は開始しない | observation/HIST失敗をUnavailable/Unknownにし、main resultとGit状態を変更しない |
+| verified commit explanation handoff | App Server event bridge → Rust Git observer → app-owned explanation controller | `intercept_verified_commit_for_explanation` | normalized Git commit command success、workspace generation、before/after HEAD、新しい到達可能SHA、commit evidence ID。`CommitExplanationRequestedV1(trigger=verified_commit)`をmain session外で1件だけ作る | SHA検証前は開始しない | controllerを`failed` / `unavailable`にし、main conversationへrequest/result/failureを注入しない |
 | attachment選択 | Tauri dialog → Rust | `select_workspace_attachments` | file picker、canonical workspace root、size/type |変更なし | invalid fileをhandle化しない |
 | read-only context取得 | Rust context adapter | `capture_turn_context` | source allowlist、5秒deadline、stdout 1MiB、stderr 4KiB、process tree cleanup、timestamp、redaction、content hash | draft不変 | raw terminal/pathへfallbackせず、Terminal outputはunsupportedを返す |
 | decision / approval回答 | Rust App Server adapter | `answer_decision_or_approval` | negotiated requestUserInputまたは既知approval method、元request ID、idempotency | Hold/cancelは未回答維持 | 未知method/schemaは許可せずBlocked |
@@ -330,9 +333,9 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | 要件ID | この画面での扱い | 要件定義書 |
 |---|---|---|
 | `WORK-F-052`〜`WORK-F-065` | workspace切替、active execution、state分離、bounded context、復元、native初期化境界 | [workspace-sessions](../requirements/workspace-sessions.md) |
-| `CODE-F-052`〜`CODE-F-076` | main session、event、composer、decision、Stop、reconnect、Sol | [codex-main-session](../requirements/codex-main-session.md) |
-| `SUP-F-051`, `SUP-F-057`〜`SUP-F-061`, `SUP-F-069`〜`SUP-F-077` | main経由の委任、commit explainer status、failure、interrupt、stream統合 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
-| `GIT-F-072`〜`GIT-F-095` | read-only observation、main commit skill、typed terminal handoff、Commit tabと説明導線 | [git-review-harness](../requirements/git-review-harness.md) |
+| `CODE-F-052`〜`CODE-F-079` | main session、event、composer、decision、Stop、reconnect、Sol、commit interceptor分離 | [codex-main-session](../requirements/codex-main-session.md) |
+| `SUP-F-051`, `SUP-F-057`〜`SUP-F-061`, `SUP-F-069`〜`SUP-F-078` | app-owned commit explainer status、failure、interrupt、stream統合、main conversation分離 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
+| `GIT-F-072`〜`GIT-F-096` | read-only observation、main commit skill、typed terminal handoff、自動説明、Commit tab | [git-review-harness](../requirements/git-review-harness.md) |
 | `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059`, `HIST-F-061` | normalized timeline、sequence、scroll、restart recovery、observation/evidence appendとdurability表示 | [activity-history](../requirements/activity-history.md) |
 | `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-079`〜`LIVE-F-081` | canvas、state、fallback、text parity、performance | [live2d-companion](../requirements/live2d-companion.md) |
 | `NARR-F-057`〜`NARR-F-063`, `NARR-F-068`〜`NARR-F-081` | eligible speech、commit説明caption、text parity、queue、mute、fallback | [audio-commentary](../requirements/audio-commentary.md) |
@@ -360,5 +363,6 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 - [x] modelは`GPT-5.6 Sol`固定で、`Fast` / `Max`はreasoning effortとして定義した。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] timeline、decision、Context、Live2D、audio、native boundary、data retentionを定義した。
+- [x] verified commitからapp-owned explanation controllerへの自動handoffとmain conversation非介入を定義した。
 - [x] 関連要件IDを要件定義書のS-002対応と一致させた。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。

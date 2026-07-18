@@ -39,6 +39,7 @@ read_when:
 | Main model | `gpt-5.6-sol`固定、supported reasoning effort |
 | Composer | multiline prompt、file/image、read-only context、Command+Enter、stop |
 | Timeline | plan、assistant、tool、file、error、decision、completion event |
+| Commit interception | normalized Git commit command terminal、read-only SHA verification、app-owned explanation handoff |
 | Human input | structured decision、approval、Other、hold、interrupt、fallback |
 | Recovery | auth/model/process failure、reconnect、no automatic replay |
 
@@ -59,6 +60,7 @@ read_when:
 | ローカル利用者 | turnを開始・判断・停止する本人 | prompt、attachment、context、effort、decision、approval、interrupt | validation error時はdraftを保持し、送信しない |
 | Codex main session | active workspaceで実装する唯一のcoding identity | App Server契約内のturnと通常subagent | unavailable capabilityは呼ばずfallbackまたはblocked表示にする |
 | Rust supervisor | child processとprotocolの信頼境界 | executable検証、stdio、event normalization、interrupt、shutdown | malformed frame、crash、timeoutを構造化errorへ変換する |
+| App-side commit interceptor | normalized command terminalとread-only Git observationを相関する | success commit commandの新しいSHAを検証し、app-owned explanation controllerへ通知する | SHA未検証、duplicate、stale generationを起動条件にせず、main conversationへ通知を注入しない |
 
 ## 機能要件
 
@@ -108,6 +110,14 @@ read_when:
 | `CODE-F-075` | loginまたはSol利用不可を区別する | unauthenticated、model unavailable、protocol unsupportedを別error codeで表示し、auth fileやtoken内容を読まない | Approved | 非該当 |
 | `CODE-F-076` | workspace切替時に旧turnを混在させない | turn開始と全mutationをactivation token、workspace、thread、generationへ束縛する。切替後に遅延到着した旧workspace event/errorを旧timelineへだけ保存し、新workspace timeline、connection、Live2D stateへ表示しない。stale `turn/start`がacceptedならexact旧turnをinterruptし、そのterminalだけを旧workspaceへ保存する | Approved | 非該当 |
 
+### Commit command interception
+
+| 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
+|---|---|---|---|---|
+| `CODE-F-077` | appはmain sessionのGit commit command成功をtyped eventとして検出する | App Serverのnormalized command terminalがGit commit、exit success、active workspace generation一致の時だけcandidateを1件作り、assistant text、一般tool success、失敗command、raw文字列の部分一致では作らない | Approved | 非該当 |
+| `CODE-F-078` | candidate commitはread-only observerでSHAを検証する | command前後のHEADと到達可能commitを相関し、新しいvalid SHAと`commitEvidenceId`を確定できた時だけ`verified_commit`をapp-owned explanation controllerへ渡す。0件、複数件、detached/race、HIST失敗をtyped resultにし、Gitを変更しない | Approved | 非該当 |
+| `CODE-F-079` | commit説明runtimeをmain conversationから完全に分離する | `verified_commit`受理後のsupport root作成、status、delta、terminal、retryがmain thread/turn/subagent/event/command countを変えず、main sessionへ説明request/result/failureを1件も送らない。同じworkspace generation・commit evidence IDはidempotentに1件へ集約する | Approved | 非該当 |
+
 ## 入力項目要件
 
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
@@ -127,7 +137,7 @@ read_when:
 | ウィンドウ生成・再利用 | active workspaceのS-002を単一windowで再利用 | `CODE-F-054`, `CODE-F-076` |
 | 閉じる・アプリ終了 | childへinterrupt/shutdown後、5秒で強制終了境界 | `CODE-F-073`, `CODE-F-074` |
 | 未保存データ | turn acceptedまでdraft/attachmentsを保持 | `CODE-F-057` |
-| ローカルデータ | normalized eventだけをHISTへ渡す | `CODE-F-058`, `CODE-F-074` |
+| ローカルデータ | normalized eventとverified commit correlationだけをHISTへ渡す | `CODE-F-058`, `CODE-F-074`, `CODE-F-077`〜`CODE-F-079` |
 | オフライン | timeline閲覧可、Send無効、Reconnect表示 | `CODE-F-074`, `CODE-F-075` |
 | ファイル・OS操作 | picker/drop/pasteを同一validatorへ通す | `CODE-F-069`, `CODE-F-070` |
 | メニュー・ショートカット | Command+Enter、Escapeでnon-destructive overlay close | `CODE-F-055`, `CODE-F-072` |
@@ -141,7 +151,7 @@ read_when:
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
 | `S-001` | セッションダッシュボード | `CODE-F-051`, `CODE-F-075` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
-| `S-002` | コーディングワークスペース | `CODE-F-052`〜`CODE-F-076` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-002` | コーディングワークスペース | `CODE-F-052`〜`CODE-F-079` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
 | `S-004` | 設定・診断 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
@@ -151,7 +161,7 @@ read_when:
 | セキュリティ | Codex authへ委任し、auth file/tokenを読まない。attachment/contextはsize/type/path検証する |
 | 権限 | child processとstdioはRustだけが保持し、WebViewへprocess handleを渡さない |
 | プライバシー | raw reasoningを要求・表示・保存しない。prompt送信先をApp Serverに限定する |
-| 監査・ログ | turn ID、model、effort、decision/approval result、error codeをredacted eventとして記録する |
+| 監査・ログ | turn ID、model、effort、decision/approval result、error code、verified commit correlationをredacted eventとして記録する。commit説明本文は記録しない |
 | 性能 | event受信からtimeline表示p95 200ms、100 event burstで入力を500ms超blockしない |
 | 信頼性・復旧 | malformed JSONL 1frameでappを落とさず、sessionをErrorにしてraw frameをsecret-filter後診断へ隔離する |
 | アクセシビリティ | timelineはsemantic list、stream summaryはpolite live region、decisionはfocus trapを使わず論理順で操作する |
@@ -165,6 +175,7 @@ read_when:
 | GPT-5.6 Sol | main model固定 | 解決済み（product契約） | model/listにない場合はblocked表示 |
 | WORK | active cwdとsingle execution | 解決済み（相互参照確認済み） | preflight失敗時はSend不可 |
 | HIST | normalized event persistence | 解決済み（相互参照確認済み） | crash recovery品質を独立レビュー |
+| GIT/SUP | read-only SHA verificationとapp-owned explanation controller | 解決済み（typed handoff） | SHA未検証時は説明を起動せず、main conversationは継続 |
 
 ## 未確定事項
 
@@ -198,6 +209,7 @@ read_when:
 - [x] 全機能要件に一意な要件IDがある。
 - [x] 全機能要件に検証可能な受け入れ条件がある。
 - [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
+- [x] Git commit command検出、SHA検証、app-owned explanation handoffがmain conversationへ混入しないことを定義した。
 - [x] デスクトップ固有要件を確認し、非該当も明記した。
 - [x] 画面IDと要件IDの相互参照が一致し、承認済み画面詳細仕様を参照している。
 - [x] 非機能要件と依存関係を確認した。

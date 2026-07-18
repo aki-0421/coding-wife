@@ -264,7 +264,7 @@ Commit tab は main Codex が作成したコミットを確認する読み取り
 
 file summaryを先に表示し、sanitized diffはfile selection後に1件ずつlazy loadする。binary、oversize、invalid UTF-8は本文を表示せず、text付きtyped stateを残す。960px未満または200% text zoom時はlistをmodalでないdrawerへ移し、detailとerror reasonを隠さない。
 
-「詳しく教えて」はactive selectionとfresh observationがある時の明示操作でだけ発火する。path、raw diff、secretを除去したevidenceをisolated supportへ渡し、説明はcanvasに依存しないvisible HTML captionへstreamする。TTSを使う場合もcaptionと同じ確定文だけを読み、selection変更、Cancel、stale response後のchunkを適用しない。
+新しいcommitは、App Serverのsuccess commit commandとread-only observerのSHA検証後にapp-owned explanation controllerが`not_generated`から`queued`へ自動遷移する。起動前から存在するcommitなど本当に`not_generated`の選択には「詳しく教えて」を表示し、mainではなくapp controllerへ`user_request`を送る。`queued` / `running`はpresentation表示とCancel、`generated`はcached presentation表示と任意の同一transcript再読上げ、`failed` / `canceled`は`user_retry`、`unavailable`は理由とretryableな場合だけ`user_retry`を示す。path、raw diff、secretを除去したevidenceだけをisolated supportへ渡し、説明はcanvasに依存しないvisible HTML captionへstreamする。TTSを使う場合もcaptionと同じ確定文だけを読み、selection変更、Cancel、stale response後のchunkを適用しない。commit説明のrequest、status、result、failureをmain conversationへ入れない。
 
 ### Live2D Companion
 
@@ -287,7 +287,7 @@ file summaryを先に表示し、sanitized diffはfile selection後に1件ずつ
 
 ### Don't:
 
-- **Don't** 「汎用 AI chat の複製」にし、状態、コミット、検証証拠、明示的な説明を会話の奥へ隠す。
+- **Don't** 「汎用 AI chat の複製」にし、状態、コミット、検証証拠、app-owned commit説明を会話の奥へ隠す。
 - **Don't** 「terminal clone」にし、shell の生入出力や汎用 terminal control を主画面へ置く。
 - **Don't** 「game HUD」の常時点滅、報酬演出、過剰な gauge で作業を奪う。
 - **Don't** 「neon purple AI dashboard」の紫 gradient、発光 border、full-saturation accent を装飾として使う。

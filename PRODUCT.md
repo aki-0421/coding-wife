@@ -18,7 +18,7 @@ web
 
 長時間の Codex 作業で生じる意思決定、状況把握、最終レビューの三つの負担を減らす。利用者は一つのデスクトップ画面から、目的と現在段階、試行と失敗、判断の理由、検証結果、main Codex が作成したコミット、読み取り専用の変更差分を確認できる。
 
-成功とは、利用者が実行の途中でも作業の状態を説明でき、人間の判断を保留・変更でき、main Codex が既存変更を保護しながら適切な粒度で作ったコミットを、検証・判断・リスク証拠とともに作業単位ごとにレビューできることである。専門的なコミットは、利用者が明示的に依頼した時だけ隔離 support が説明し、Live2D companion の可視 caption が同じ内容を静かに補強する。
+成功とは、利用者が実行の途中でも作業の状態を説明でき、人間の判断を保留・変更でき、main Codex が既存変更を保護しながら適切な粒度で作ったコミットを、検証・判断・リスク証拠とともに作業単位ごとにレビューできることである。専門的なコミットは、App Server の成功した commit command と新しい SHA を app が検証した直後に、main conversation から独立した隔離 support が自動で説明する。利用者は既存コミットの説明要求、失敗時の再試行、生成済み説明の表示・再読上げを app-owned controller 経由で行い、Live2D companion の可視 caption が同じ内容を静かに補強する。
 
 ## Positioning
 
@@ -50,4 +50,4 @@ Codex の自律作業を、main Codex によるレビュー可能なコミット
 
 WCAG 2.2 AA を基準とする。通常文字は背景に対して 4.5:1 以上、大きな文字と非テキスト UI は 3:1 以上を維持し、200% text zoom と keyboard-only 操作で主要フローを完了できるようにする。すべての操作には visible focus と accessible name を与え、icon-only control には tooltip を付ける。
 
-Live2D canvas は装飾として accessibility tree から除外し、処理中、入力待ち、失敗、完了、接続切れ、明示的に依頼したコミット説明を HTML text と live region でも伝える。色、動き、音、表情を唯一の情報経路にしない。`prefers-reduced-motion` またはアプリ設定が有効な時は idle motion と装飾 transition を停止し、静止 pose と文字状態を残す。日本語と英語で同じ操作、エラー、判断、読み取り専用レビュー、caption を提供する。
+Live2D canvas は装飾として accessibility tree から除外し、処理中、入力待ち、失敗、完了、接続切れ、自動または明示fallbackで生成するコミット説明を HTML text と live region でも伝える。色、動き、音、表情を唯一の情報経路にしない。`prefers-reduced-motion` またはアプリ設定が有効な時は idle motion と装飾 transition を停止し、静止 pose と文字状態を残す。日本語と英語で同じ操作、エラー、判断、読み取り専用レビュー、caption を提供する。

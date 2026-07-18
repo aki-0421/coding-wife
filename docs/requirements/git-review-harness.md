@@ -21,7 +21,7 @@ read_when:
 
 レビュー可能なcommitは必要だが、アプリ内のnative Git serviceがindex、object、ref、worktreeを変更すると、main coding sessionとの二重producerになり、既存変更の混入、履歴競合、crash recoveryの複雑さを生む。commit producerはversioned skillを毎turn受け取るmain Codex sessionへ一本化し、native backendはGit状態と履歴を読むobserverに限定する。
 
-Commit画面は「アプリがcheckpointを作る場所」ではない。main Codexが通常作業中に作ったcommitと、work unitの検証・判断・リスクを相関して確認し、必要な時だけ隔離support agentから平易な説明を得るread-only evidence画面である。
+Commit画面は「アプリがcheckpointを作る場所」ではない。main Codexが通常作業中に作ったcommitと、work unitの検証・判断・リスクを相関して確認するread-only evidence画面である。平易なcommit説明は、App Serverのcommit command成功とread-only SHA検証をapp側interceptorが相関した直後に、main sessionとは独立したapp-owned explanation controllerが自動生成する。
 
 ## 目的
 
@@ -30,7 +30,7 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 | producerを一つにする | commitは`coding-wife-commit-work`を明示注入されたmain Codexだけが作り、native command surfaceにGit mutationが0件である |
 | 利用者変更を保護する | turn前から存在したstaged/unstaged/untrackedを観測・表示し、main skillが無関係な変更をcommitしない |
 | evidenceを確認可能にする | commit list、選択、metadata、sanitized diff、verification/decision/risk evidenceをread-only表示する |
-| 説明を安全に補う | 明示操作時だけredacted `CommitEvidenceV1`を隔離supportへ渡し、JA/EN説明をcaptionへstreamする |
+| 説明を安全に補う | verified commit後にredacted `CommitEvidenceV1`を隔離supportへ自動で渡し、JA/EN説明をcaptionへstreamする。UI retryもmainではなくapp controllerへ送る |
 
 ## スコープ
 
@@ -42,7 +42,7 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 | Correlation | work unit、turn、source event、commit SHA、verification、decision、risk、skill injection auditのHIST相関 |
 | Main commit skill | app bundle内の`coding-wife-commit-work`、version/digest、各main turnへの明示注入 |
 | Commit evidence | list/select、metadata、file summary、sanitized lazy diff、gate evidence、empty/error/stale state |
-| Commit explanation | redacted structured evidence、明示trigger、isolated support、streamed caption、optional same-transcript TTS |
+| Commit explanation | verified commit trigger、redacted structured evidence、app-owned controller、isolated support、streamed caption、optional same-transcript TTS |
 
 ### 含めない
 
@@ -60,9 +60,10 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 
 | アクター | 説明 | 許可する操作 | 禁止・失敗時 |
 |---|---|---|---|
-| ローカル利用者 | repository所有者・reviewer | evidence閲覧、commit選択、「詳しく教えて」、support cancel | Commit tabからGit mutationできない |
+| ローカル利用者 | repository所有者・reviewer | evidence閲覧、commit選択、生成済み説明の表示・再読上げ、support cancel、失敗時retry | Commit tabからGit mutationやmain sessionへの説明依頼を送れない |
 | Main Codex session | 唯一のcommit producer | app同梱skillに従う通常のstage/commit、verification、結果報告 | unsafe時はforceせず理由を報告する |
 | Rust Git observer | native Git trust boundary | validated repositoryのread-only inspectとHIST evidence append | mutation commandを公開・実行しない |
+| App-side commit interceptor / explanation controller | success command terminal、verified SHA、UI intent | verified commit後の自動enqueue、state公開、cancel、show、replay、`user_request` / `user_retry` | main thread/turn/subagent/event/commandを作らない |
 | Commit explainer support | 短命の説明生成者 | redacted structured evidenceからJA/EN schemaを生成 | repo/path/tool/raw diffへアクセスしない |
 
 ## 機能要件
@@ -100,16 +101,17 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 | `GIT-F-088` | 非active panelはnative observationを開始しない | force-mountedだがhiddenのCommit tabはGit readを0件とし、active表示、明示refresh、terminal work unitだけがobserverを起動する | Approved |
 | `GIT-F-089` | 大規模repositoryでも段階表示する | 500 filesまたは50,000 changed linesまでsummaryを5秒以内に表示し、本文は1fileずつcancel可能にloadする | Approved |
 
-### 「詳しく教えて」説明フロー
+### 自動commit説明フロー
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 |
 |---|---|---|---|
-| `GIT-F-090` | 説明は利用者の明示操作でだけ起動する | 選択commitの「詳しく教えて」で1件のrequestを発行し、selection変更、再押下、Cancelをtyped eventとして扱う。commit選択だけではsupportを起動しない | Approved |
+| `GIT-F-090` | verified commitはapp側から自動説明を起動する | App ServerのGit commit commandがsuccess terminalになり、`GIT-F-075`のobserverが新しいSHAとcommit evidence IDを検証した時だけapp controllerが`CommitExplanationRequestedV1(trigger=verified_commit)`を1件作る。commit選択、Commit tab表示、SHA未検証結果では起動せず、main conversationへrequestを送らない | Approved |
 | `GIT-F-091` | supportへはredacted `CommitEvidenceV1`だけを渡す | SHAのopaque ID、sanitized subject/body、pathなしfile summary、diff統計、verification、decision、risk、locale、generationを最大64KiBで渡し、absolute/relative path、raw diff全文、secret、raw reasoningを0件にする | Approved |
 | `GIT-F-092` | commit説明skillをisolated supportへ明示注入する | resource名`coding-wife-explain-commit`、path authority`app_bundle`、implicit invocation offのskillを説明turnにだけ1件注入し、repo/cwd/filesystem/shell/Git/MCP/tool authorityなしで起動する | Approved |
 | `GIT-F-093` | 説明はJA/ENのversioned schemaでstreamする | UI localeと一致する要約、変更点、理由、検証、影響、注意、次の見方と、同じ内容の短いnarration chunksをsequence付きで返し、character captionへ逐次表示する | Approved |
 | `GIT-F-094` | TTSは同じredacted transcriptだけを読む | TTS有効時だけcaptionと同じ確定chunkを同順で読み、追加要約やraw evidenceを音声用に再生成しない。TTS off/unavailableでもcaptionは残る | Approved |
 | `GIT-F-095` | invalid/stale/cancelはfail closedする | redaction/schema/generation検査失敗、timeout、Cancel後のchunkをcaption/TTS/HIST本文へ適用せず、決定的なunavailable/canceled textを表示する | Approved |
+| `GIT-F-096` | Commit UIはapp controllerの状態にだけ従う | `CommitExplanationControllerStateV1.status`は`not_generated` / `queued` / `running` / `generated` / `failed` / `unavailable` / `canceled`のexact unionとする。新しいverified commitは`not_generated`から`queued`へ自動遷移する。起動前から存在するcommitなど本当に`not_generated`なら「詳しく教えて」から`trigger=user_request`、`queued` / `running`はpresentation activateとCancel、`generated`はcached presentation表示と任意の同一transcript再読上げ、`failed` / `canceled`は`trigger=user_retry`、`unavailable`は理由と`retryable=true`の場合だけ`trigger=user_retry`をapp controllerへ要求する。selectionだけでrequestを作らない | Approved |
 
 ## 廃止要件
 
@@ -131,7 +133,8 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 | Commit list | selected SHA | 最新の観測済みcommit | 条件付き | repository内のvalid commit object、opaque IDとして扱う | selectionを解除しUnavailable表示 |
 | Diff | selected file evidence ID | なし | 条件付き | listが返したopaque IDだけ、raw pathをWebView入力へ戻さない | detailだけerror |
 | Explanation | locale | active UI locale | 必須 | `ja` / `en` | active localeへ正規化 |
-| Explanation | request | なし | 条件付き | active selection、generation一致、single active request | 起動せず理由表示 |
+| Explanation | controller state | `not_generated` | 必須 | exact status union、workspace generation・commit evidence ID一致 | stale stateを表示へ適用しない |
+| Explanation | request trigger | `verified_commit` | 条件付き | app interceptorは`verified_commit`、UIは`not_generated`で`user_request`、failure terminalで`user_retry`だけ。single active request | unknown triggerを起動せず理由表示 |
 
 restore SHA、branch name、restore confirmation、commit messageの入力欄は存在しない。
 
@@ -141,10 +144,10 @@ restore SHA、branch name、restore confirmation、commit messageの入力欄は
 |---|---|---|
 | 対象OS・OS差分 | macOS 14以降のuser-installed Gitをread-only診断する | `GIT-F-072`〜`GIT-F-078` |
 | ウィンドウ生成・再利用 | S-003をmain window tabとして再利用する | `GIT-F-084` |
-| 閉じる・アプリ終了 | observer readはcancelし、support/TTSはbounded cancelする。Git transaction待機はない | `GIT-F-088`, `GIT-F-095` |
+| 閉じる・アプリ終了 | observer readはcancelし、support/TTSはbounded cancelする。Git transaction待機はない | `GIT-F-088`, `GIT-F-095`, `GIT-F-096` |
 | 未保存データ | staged/unstaged/untrackedを変更・破棄しない | `GIT-F-072`, `GIT-F-076` |
 | ローカルデータ | observation/evidence/skill auditはHIST、skillsはapp bundleへ保存する | `GIT-F-079`〜`GIT-F-087` |
-| オフライン | local evidence閲覧は継続し、support explanationはUnavailable captionにする | `GIT-F-084`〜`GIT-F-095` |
+| オフライン | local evidence閲覧は継続し、support explanationはUnavailable captionにする | `GIT-F-084`〜`GIT-F-096` |
 | ファイル・OS操作 | validated repositoryのread-only Git inspectだけをRustへ許可する | `GIT-F-072`, `GIT-F-077` |
 | メニュー・ショートカット | commit/restore/branch shortcutを提供しない | `GIT-F-084` |
 | 通知 | 新規commit観測、observer error、説明cancelをtextで示す | `GIT-F-075`, `GIT-F-095` |
@@ -155,8 +158,8 @@ restore SHA、branch name、restore confirmation、commit messageの入力欄は
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-002` | コーディングワークスペース | `GIT-F-073`〜`GIT-F-083`, `GIT-F-093`〜`GIT-F-095` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
-| `S-003` | セッション証拠 | `GIT-F-072`〜`GIT-F-095` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
+| `S-002` | コーディングワークスペース | `GIT-F-073`〜`GIT-F-083`, `GIT-F-090`〜`GIT-F-096` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-003` | セッション証拠 | `GIT-F-072`〜`GIT-F-096` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
 | `S-004` | 設定・診断 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
@@ -166,7 +169,7 @@ restore SHA、branch name、restore confirmation、commit messageの入力欄は
 | セキュリティ | native Git surfaceはread-only、arbitrary args/pathなし。repo config由来processを起動しない |
 | 権限 | main Codexだけが通常作業権限の範囲でcommitし、observerとsupportはmutation authorityを持たない |
 | プライバシー | supportへpath/raw diff/secret/raw reasoningを送らず、caption/TTSは同じredacted transcriptを使う |
-| 監査・ログ | observation、new commit correlation、skill ID/version/digest/mode、explanation statusを記録する。raw support transcriptは永続化しない |
+| 監査・ログ | observation、new commit correlation、request trigger、skill ID/version/digest/mode、controller statusを記録する。raw support transcriptは永続化しない |
 | 性能 | 500 files/50,000 lines summaryを5秒、説明の最初のcaptionを起動後3秒目標で表示する |
 | 信頼性・復旧 | observer failureはmainを止めずUnavailable、skill注入failureはturn前fail closed、support failureはcaption fallback |
 | アクセシビリティ | commit/gate/statusを色だけで表現せず、captionは音声設定に関係なく表示する |
@@ -179,7 +182,7 @@ restore SHA、branch name、restore confirmation、commit messageの入力欄は
 | Codex App Server | `UserInput.type=skill`、thread developer instructions、turn lifecycle | 解決済み（version-specific schema検査） | injectionを証明できなければturn開始不可 |
 | CODE | main turn、work unit、terminal authority、skill injection runtime | 解決済み（typed contractを共有） | observerはcommitを作らずUnavailable相関 |
 | HIST | observation/evidence/skill auditのappend/replay | 解決済み（typed event） | persistence失敗はGitを変えずUnknown表示 |
-| SUP/NARR | isolated explanation、caption、optional same-transcript TTS | 解決済み（typed request/delta contract） | deterministic caption fallback |
+| CODE/SUP/NARR | success command interception、verified commit、app-owned isolated explanation、caption、optional same-transcript TTS | 解決済み（typed request/state/delta contract） | deterministic caption fallback。main conversationへfallbackしない |
 
 ## 参照資料
 
@@ -207,5 +210,5 @@ restore SHA、branch name、restore confirmation、commit messageの入力欄は
 - [x] skill名、version/digest、app bundle authority、毎turn注入を定義した。
 - [x] Commit tabからmutation/restore/recoveryを削除した。
 - [x] empty、stale、oversize、offline、cancel、schema invalidを定義した。
-- [x] 「詳しく教えて」のredaction、isolation、caption、TTS境界を定義した。
+- [x] verified commit後の自動説明、app-owned controller state、UI retry、redaction、isolation、caption、TTS境界を定義した。
 - [x] 要件IDと画面仕様の相互参照を定義した。
