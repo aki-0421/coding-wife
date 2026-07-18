@@ -261,6 +261,231 @@ describe("TauriCommitExplanationAdapter", () => {
     ])
   })
 
+  it("joins an automatic in-flight job and presents its completion without another click", async () => {
+    const running = state({
+      status: "running",
+      presentationAvailable: false,
+      updatedAt: "2026-07-18T01:00:01.000Z",
+    })
+    const { adapter, events, invoke } = adapterHarness((command) => {
+      if (command === commitExplanationCommands.request) return running
+      if (command === commitExplanationCommands.present) return presentation()
+      return null
+    })
+    await adapter.start()
+    await setJapaneseScope(adapter)
+    const narrated: unknown[] = []
+    adapter.narrationSource.subscribe((event) => narrated.push(event))
+    vi.mocked(invoke).mockClear()
+
+    await adapter.request(dispatch())
+    events.emit(commitExplanationEventChannels.state, state())
+
+    await vi.waitFor(() => {
+      expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+        commitExplanationCommands.request,
+        commitExplanationCommands.present,
+      ])
+      expect(narrated.at(-1)).toEqual(
+        expect.objectContaining({ kind: "terminal", status: "completed" }),
+      )
+    })
+  })
+
+  it.each([
+    [
+      "failed",
+      "ja",
+      "コミット説明を表示できませんでした。コミット証拠は引き続き確認できます。",
+      "failed",
+    ],
+    [
+      "unavailable",
+      "en",
+      "The commit explanation could not be shown. Commit evidence remains available.",
+      "failed",
+    ],
+    [
+      "canceled",
+      "ja",
+      "コミット説明はキャンセルされました。コミット証拠は引き続き確認できます。",
+      "canceled",
+    ],
+  ] as const)(
+    "terminalizes an exact explicit %s state through localized narration within 500 ms",
+    async (status, locale, expectedCopy, expectedTerminalStatus) => {
+      const requestId = `request-${locale}-2`
+      const running = state({
+        requestId,
+        locale,
+        status: "running",
+        presentationAvailable: false,
+        updatedAt: "2026-07-18T01:00:01.000Z",
+      })
+      const { adapter, events } = adapterHarness((command) =>
+        command === commitExplanationCommands.request ? running : null,
+      )
+      await adapter.start()
+      await adapter.setScope({
+        schemaVersion: gitReviewSchemaVersion,
+        workspaceId: "workspace-one",
+        workspaceGeneration: 3,
+        locale,
+      })
+      const narrated: unknown[] = []
+      let terminalAt = Number.POSITIVE_INFINITY
+      adapter.narrationSource.subscribe((event) => {
+        narrated.push(event)
+        if (
+          typeof event === "object" &&
+          event !== null &&
+          "kind" in event &&
+          event.kind === "terminal"
+        ) {
+          terminalAt = Date.now()
+        }
+      })
+      let activatedAt = Number.POSITIVE_INFINITY
+      const activatePresentation = vi.fn(() => {
+        activatedAt = Date.now()
+        return true
+      })
+      adapter.setPresentationActivator(activatePresentation)
+
+      await adapter.request(dispatch("user_request", 2, locale))
+      const failureStartedAt = Date.now()
+      events.emit(
+        commitExplanationEventChannels.state,
+        state({
+          requestId,
+          locale,
+          status,
+          retryable: true,
+          presentationAvailable: false,
+          errorCode: "NATIVE-PRIVATE-FAILURE-DETAIL",
+          updatedAt: "2026-07-18T01:00:04.000Z",
+        }),
+      )
+
+      expect(narrated).toEqual([
+        expect.objectContaining({ kind: "started", requestId, locale }),
+        expect.objectContaining({
+          kind: "chunk",
+          sequence: 0,
+          text: expectedCopy,
+        }),
+        expect.objectContaining({
+          kind: "terminal",
+          status: expectedTerminalStatus,
+          errorCode:
+            status === "canceled"
+              ? "CODEX-SUPPORT-PRESENTATION-CANCELED"
+              : "CODEX-SUPPORT-PRESENTATION-UNAVAILABLE",
+        }),
+      ])
+      expect(activatePresentation).toHaveBeenCalledOnce()
+      expect(Math.max(activatedAt, terminalAt) - failureStartedAt).toBeLessThan(
+        500,
+      )
+      expect(JSON.stringify(narrated)).not.toContain(
+        "NATIVE-PRIVATE-FAILURE-DETAIL",
+      )
+    },
+  )
+
+  it("keeps automatic-only terminal failures silent", async () => {
+    const { adapter, events } = adapterHarness()
+    await adapter.start()
+    await setJapaneseScope(adapter)
+    const narrated: unknown[] = []
+    adapter.narrationSource.subscribe((event) => narrated.push(event))
+    const activatePresentation = vi.fn()
+    adapter.setPresentationActivator(activatePresentation)
+
+    for (const [status, updatedAt] of [
+      ["failed", "2026-07-18T01:00:04.000Z"],
+      ["unavailable", "2026-07-18T01:00:05.000Z"],
+      ["canceled", "2026-07-18T01:00:06.000Z"],
+    ] as const) {
+      events.emit(
+        commitExplanationEventChannels.state,
+        state({
+          requestId: "request-auto-2",
+          status,
+          trigger: "auto_verified_commit",
+          retryable: true,
+          presentationAvailable: false,
+          errorCode: "CODEX-SUPPORT-AUTO-TERMINAL",
+          updatedAt,
+        }),
+      )
+    }
+
+    expect(narrated).toEqual([])
+    expect(activatePresentation).not.toHaveBeenCalled()
+  })
+
+  it("terminalizes a present IPC failure without leaking its raw error", async () => {
+    const rawError = "secret=do-not-expose-this-value"
+    const { adapter, events } = adapterHarness((command) => {
+      if (command === commitExplanationCommands.present) {
+        throw new Error(rawError)
+      }
+      return null
+    })
+    await adapter.start()
+    await setJapaneseScope(adapter)
+    events.emit(commitExplanationEventChannels.state, state())
+    const narrated: unknown[] = []
+    let terminalAt = Number.POSITIVE_INFINITY
+    adapter.narrationSource.subscribe((event) => {
+      narrated.push(event)
+      if (
+        typeof event === "object" &&
+        event !== null &&
+        "kind" in event &&
+        event.kind === "terminal"
+      ) {
+        terminalAt = Date.now()
+      }
+    })
+    let activatedAt = Number.POSITIVE_INFINITY
+    adapter.setPresentationActivator(() => {
+      activatedAt = Date.now()
+      return true
+    })
+
+    const failureStartedAt = Date.now()
+    await expect(
+      adapter.present({
+        schemaVersion: gitReviewSchemaVersion,
+        workspaceId: "workspace-one",
+        workspaceGeneration: 3,
+        commitEvidenceId,
+        requestId: "request-ja-2",
+        mode: "show",
+        requestedAt: "2026-07-18T01:00:02.000Z",
+      }),
+    ).rejects.toMatchObject({ code: "CODEX-SUPPORT-IPC-UNAVAILABLE" })
+
+    expect(narrated).toEqual([
+      expect.objectContaining({ kind: "started" }),
+      expect.objectContaining({
+        kind: "chunk",
+        text: "コミット説明を表示できませんでした。コミット証拠は引き続き確認できます。",
+      }),
+      expect.objectContaining({
+        kind: "terminal",
+        status: "failed",
+        errorCode: "CODEX-SUPPORT-PRESENTATION-UNAVAILABLE",
+      }),
+    ])
+    expect(Math.max(activatedAt, terminalAt) - failureStartedAt).toBeLessThan(
+      500,
+    )
+    expect(JSON.stringify(narrated)).not.toContain(rawError)
+  })
+
   it("keeps a completed job state but drops presentation that arrives after intent revocation", async () => {
     let resolvePresentation:
       ((value: CommitExplanationPresentationV1) => void) | undefined

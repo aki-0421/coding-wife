@@ -227,7 +227,7 @@ describe("EvidenceView", () => {
     expect(explanation.cancel).not.toHaveBeenCalled()
   })
 
-  it("shows automatic running state and cancels only from its action", async () => {
+  it("joins automatic running state from one explicit action and cancels only from its action", async () => {
     const user = userEvent.setup()
     const explanation = createExplanationController({
       schemaVersion: 1,
@@ -248,10 +248,19 @@ describe("EvidenceView", () => {
 
     expect(await screen.findByText("Generating explanation")).toBeVisible()
     expect(explanation.request).not.toHaveBeenCalled()
+    await user.click(
+      screen.getByRole("button", { name: "Explain this commit" }),
+    )
+    await waitFor(() => expect(explanation.request).toHaveBeenCalledOnce())
+    expect(explanation.request.mock.calls[0]?.[0]?.request.trigger).toBe(
+      "user_request",
+    )
+    const explicitRequestId =
+      explanation.request.mock.calls[0]?.[0]?.request.requestId
     await user.click(screen.getByRole("button", { name: "Cancel explanation" }))
     await waitFor(() => expect(explanation.cancel).toHaveBeenCalledOnce())
     expect(explanation.cancel.mock.calls[0]?.[0]).toMatchObject({
-      requestId: "auto-request-one",
+      requestId: explicitRequestId,
       reason: "user",
     })
   })

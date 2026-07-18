@@ -199,6 +199,20 @@ function sameState(
 }
 
 const maximumPresentationDedupeEntries = 64
+const terminalPresentationCopy = {
+  ja: {
+    unavailable:
+      "コミット説明を表示できませんでした。コミット証拠は引き続き確認できます。",
+    canceled:
+      "コミット説明はキャンセルされました。コミット証拠は引き続き確認できます。",
+  },
+  en: {
+    unavailable:
+      "The commit explanation could not be shown. Commit evidence remains available.",
+    canceled:
+      "The commit explanation was canceled. Commit evidence remains available.",
+  },
+} as const
 
 /**
  * App-lifetime owner of the five native commit-explanation commands and two
@@ -520,6 +534,10 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
         state.status === "unavailable" ||
         state.status === "canceled"
       ) {
+        this.publishTerminalIntent(
+          intent,
+          state.status === "canceled" ? "canceled" : "unavailable",
+        )
         this.revokePresentationIntent("close")
       }
       return null
@@ -556,6 +574,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
         this.publishPresentation(presentation)
       } catch (error) {
         if (this.isPresentationIntentCurrent(intent)) {
+          this.publishTerminalIntent(intent, "unavailable")
           this.revokePresentationIntent("close")
         }
         throw normalizeError(commitExplanationCommands.present, error)
@@ -640,6 +659,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       if (presentation !== null) await presentation
     } catch (error) {
       if (this.isPresentationIntentCurrent(intent)) {
+        this.publishTerminalIntent(intent, "unavailable")
         this.revokePresentationIntent("close")
       }
       throw normalizeError(commitExplanationCommands.request, error)
@@ -650,14 +670,28 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
     requestValue: CommitExplanationCancelRequestedV1,
   ): Promise<void> => {
     const request = createCommitExplanationCancelRequested(requestValue)
-    if (this.#presentationIntent?.requestId === request.requestId) {
-      this.revokePresentationIntent("close")
-    }
+    const intent = this.#presentationIntent
+    const matchingIntent =
+      intent !== null &&
+      intent.requestId === request.requestId &&
+      intent.workspaceGeneration === request.workspaceGeneration &&
+      intent.selectionVersion === request.selectionVersion
+        ? intent
+        : null
     try {
       const response = await this.#invoke(commitExplanationCommands.cancel, {
         request,
       })
-      if (response === null) return
+      if (response === null) {
+        if (
+          matchingIntent !== null &&
+          this.isPresentationIntentCurrent(matchingIntent)
+        ) {
+          this.publishTerminalIntent(matchingIntent, "unavailable")
+          this.revokePresentationIntent("close")
+        }
+        return
+      }
       const state = parseCommitExplanationControllerState(response)
       if (
         state.requestId !== request.requestId ||
@@ -669,6 +703,13 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       const presentation = this.applyState(state)
       void presentation?.catch(() => undefined)
     } catch (error) {
+      if (
+        matchingIntent !== null &&
+        this.isPresentationIntentCurrent(matchingIntent)
+      ) {
+        this.publishTerminalIntent(matchingIntent, "unavailable")
+        this.revokePresentationIntent("close")
+      }
       throw normalizeError(commitExplanationCommands.cancel, error)
     }
   }
@@ -891,15 +932,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       intent.epoch,
       digest,
     ])
-    if (this.#presentationDedupe.has(dedupeKey)) return
-    this.#presentationDedupe.add(dedupeKey)
-    this.#presentationDedupeOrder.push(dedupeKey)
-    while (
-      this.#presentationDedupeOrder.length > maximumPresentationDedupeEntries
-    ) {
-      const oldest = this.#presentationDedupeOrder.shift()
-      if (oldest !== undefined) this.#presentationDedupe.delete(oldest)
-    }
+    if (!this.rememberPresentation(dedupeKey)) return
 
     const base = {
       schemaVersion: gitReviewSchemaVersion,
@@ -954,5 +987,104 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
         // Presentation activation cannot corrupt the trusted event bridge.
       }
     }
+  }
+
+  private publishTerminalIntent(
+    intent: PresentationIntent,
+    status: "unavailable" | "canceled",
+  ): void {
+    if (!this.isPresentationIntentCurrent(intent)) return
+    const dedupeKey = JSON.stringify([
+      "terminal",
+      intent.epoch,
+      intent.workspaceId,
+      intent.workspaceGeneration,
+      intent.commitSha,
+      intent.requestId,
+      intent.selectionVersion,
+      intent.locale,
+      status,
+    ])
+    if (!this.rememberPresentation(dedupeKey)) return
+
+    const base = {
+      schemaVersion: gitReviewSchemaVersion,
+      source: "background_support" as const,
+      trigger: intent.trigger,
+      workspaceId: intent.workspaceId,
+      workspaceGeneration: intent.workspaceGeneration,
+      commitSha: intent.commitSha,
+      requestId: intent.requestId,
+      locale: intent.locale,
+    }
+    const preTerminalEvents: CommitNarrationConsumerEventV1[] = [
+      parseCommitNarrationConsumerEvent({ ...base, kind: "started" }),
+      parseCommitNarrationConsumerEvent({
+        ...base,
+        kind: "chunk",
+        sequence: 0,
+        text: terminalPresentationCopy[intent.locale][status],
+      }),
+    ]
+    for (const event of preTerminalEvents) {
+      this.emitNarrationEvent(intent, event)
+    }
+
+    const activator = this.#presentationActivator
+    if (activator !== null && this.isPresentationIntentCurrent(intent)) {
+      const key: CommitNarrationSourceKey = {
+        workspaceId: intent.workspaceId,
+        workspaceGeneration: intent.workspaceGeneration,
+        commitSha: intent.commitSha,
+        requestId: intent.requestId,
+        locale: intent.locale,
+      }
+      try {
+        void Promise.resolve(activator(key)).catch(() => undefined)
+      } catch {
+        // Terminal caption activation cannot corrupt the trusted event bridge.
+      }
+    }
+
+    this.emitNarrationEvent(
+      intent,
+      parseCommitNarrationConsumerEvent({
+        ...base,
+        kind: "terminal",
+        status: status === "canceled" ? "canceled" : "failed",
+        errorCode:
+          status === "canceled"
+            ? "CODEX-SUPPORT-PRESENTATION-CANCELED"
+            : "CODEX-SUPPORT-PRESENTATION-UNAVAILABLE",
+      }),
+    )
+  }
+
+  private emitNarrationEvent(
+    intent: PresentationIntent,
+    event: CommitNarrationConsumerEventV1,
+  ): void {
+    if (!this.isPresentationIntentCurrent(intent)) return
+    for (const listener of [...this.#narrationListeners]) {
+      if (!this.isPresentationIntentCurrent(intent)) return
+      try {
+        listener(event)
+      } catch {
+        // A narration consumer cannot corrupt terminal fallback delivery.
+      }
+    }
+  }
+
+  private rememberPresentation(key: string): boolean {
+    if (this.#presentationDedupe.has(key)) return false
+    this.#presentationDedupe.add(key)
+    this.#presentationDedupeOrder.push(key)
+    while (
+      this.#presentationDedupeOrder.length > maximumPresentationDedupeEntries
+    ) {
+      const oldest = this.#presentationDedupeOrder.shift()
+      if (oldest !== undefined) this.#presentationDedupe.delete(oldest)
+    }
+    return true
   }
 }

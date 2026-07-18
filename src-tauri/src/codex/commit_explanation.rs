@@ -520,6 +520,9 @@ impl CommitExplanationController {
         }
 
         if let Some(existing) = data.states.get(&key).cloned() {
+            if !can_rebind_request(&existing, &dispatch.request) {
+                return Ok(existing);
+            }
             let terminal = matches!(
                 existing.status,
                 CommitExplanationControllerStatus::Failed
@@ -1061,6 +1064,24 @@ fn lifecycle_state(
         error_code: None,
         updated_at: now(),
     }
+}
+
+fn can_rebind_request(
+    existing: &CommitExplanationControllerStateV1,
+    incoming: &CommitExplanationRequestedV1,
+) -> bool {
+    if existing
+        .selection_version
+        .is_some_and(|version| incoming.selection_version < version)
+    {
+        return false;
+    }
+    !(existing.trigger.is_some_and(|trigger| {
+        matches!(
+            trigger,
+            CommitExplanationTrigger::UserRequest | CommitExplanationTrigger::UserRetry
+        )
+    }) && incoming.trigger == CommitExplanationTrigger::AutoVerifiedCommit)
 }
 
 fn terminal_state(
@@ -1731,6 +1752,66 @@ mod tests {
         );
         assert_eq!(terminal.selection_version, Some(3));
         assert_eq!(terminal.status, CommitExplanationControllerStatus::Canceled);
+        assert_eq!(executor.calls.load(Ordering::Acquire), 1);
+    }
+
+    #[tokio::test]
+    async fn explicit_rebind_is_monotonic_and_cannot_be_downgraded_by_concurrent_auto_replays() {
+        let (controller, executor, _) = harness(FakeMode::Block, 2, 4, Duration::from_secs(2));
+        let mut automatic = dispatch('a', "request-auto", 1);
+        automatic.request.trigger = CommitExplanationTrigger::AutoVerifiedCommit;
+        controller
+            .request(automatic.clone())
+            .await
+            .expect("automatic request");
+        wait_for_status(
+            &controller,
+            &automatic,
+            CommitExplanationControllerStatus::Running,
+        )
+        .await;
+
+        let mut explicit = dispatch('a', "request-explicit-v2", 1);
+        explicit.request.selection_version = 2;
+        explicit.evidence.selection_version = 2;
+        let rebound = controller
+            .request(explicit.clone())
+            .await
+            .expect("explicit rebound");
+        assert_eq!(rebound.request_id.as_deref(), Some("request-explicit-v2"));
+        assert_eq!(rebound.selection_version, Some(2));
+        assert_eq!(rebound.trigger, Some(CommitExplanationTrigger::UserRequest));
+
+        let mut stale_auto = automatic.clone();
+        stale_auto.request.request_id = "request-auto-v1-replay".to_owned();
+        let mut newer_auto = automatic.clone();
+        newer_auto.request.request_id = "request-auto-v3-replay".to_owned();
+        newer_auto.request.selection_version = 3;
+        newer_auto.evidence.selection_version = 3;
+        let (stale, newer) = tokio::join!(
+            controller.request(stale_auto),
+            controller.request(newer_auto)
+        );
+        for state in [stale.expect("stale auto"), newer.expect("newer auto")] {
+            assert_eq!(state.request_id.as_deref(), Some("request-explicit-v2"));
+            assert_eq!(state.selection_version, Some(2));
+            assert_eq!(state.trigger, Some(CommitExplanationTrigger::UserRequest));
+        }
+        assert_eq!(executor.calls.load(Ordering::Acquire), 1);
+
+        executor.release_one();
+        let terminal = wait_for_status(
+            &controller,
+            &explicit,
+            CommitExplanationControllerStatus::Generated,
+        )
+        .await;
+        assert_eq!(terminal.request_id.as_deref(), Some("request-explicit-v2"));
+        assert_eq!(terminal.selection_version, Some(2));
+        assert_eq!(
+            terminal.trigger,
+            Some(CommitExplanationTrigger::UserRequest)
+        );
         assert_eq!(executor.calls.load(Ordering::Acquire), 1);
     }
 

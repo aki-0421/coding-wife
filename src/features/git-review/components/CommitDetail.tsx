@@ -375,6 +375,24 @@ export function CommitDetail({
 
             {(controllerStatus === "queued" ||
               controllerStatus === "running") &&
+            explanationControllerState?.trigger === "auto_verified_commit" &&
+            !explanationControllerState.presentationAvailable ? (
+              <Button
+                disabled={!explanationContextReady || intentBusy}
+                onClick={() => onRequestExplanation("user_request")}
+                type="button"
+                variant="secondary"
+              >
+                <MessageCircleMoreIcon
+                  aria-hidden="true"
+                  data-icon="inline-start"
+                />
+                {copy.explain}
+              </Button>
+            ) : null}
+
+            {(controllerStatus === "queued" ||
+              controllerStatus === "running") &&
             explanationControllerState?.presentationAvailable ? (
               <Button
                 disabled={intentBusy}
