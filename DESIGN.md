@@ -155,6 +155,28 @@ Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面
 
 **The Evidence Priority Rule.** 判断、error、review diff、test result が必要な時は companion を縮小または静止し、証拠と操作の可読領域を優先する。
 
+## Brand Mark
+
+Coding Wife のmarkは、人とagentを表す二つの穏やかな流れが、一つの検証済み作業面へ収束する抽象形である。人格や魔術性を付与せず、共同作業が読み取り可能な成果へまとまることだけを示す。
+
+- **Concept:** 左から入る上下一対の流線を独立したまま中央へ寄せ、右へ進む一枚の作業面で受け止める。流線は交差、接触、分岐せず、作業面の背後へ自然に収束する。右端は尖った矢印にせず、丸めた前進方向として開放感を残す。
+- **Geometry:** 正本は `src-tauri/icons/app-icon.svg` の 1024×1024 viewBox とする。角丸160の暗色squareの中へ、左側約22〜48%を通るround-capの二曲線と、中央約41%から右側約80%を占める非対称なround work surfaceを置く。中心円、外周ring、交差線、細い装飾、内側glyphを追加しない。二曲線の間には最小72pxのnegative spaceを保つ。
+- **No text / no letter:** mark内部へ文字、頭文字、monogram、数字、顔、目、星、sparkle、check、魔術・占星術記号を描かない。特に `H`、`W`、`Y`、目、門、檻、警告標識へ見える中心対称・縦横接続・囲い込みを禁止する。名称は隣接HTML text、tooltip、`aria-label`で伝え、図形へ埋め込まない。
+- **Colors:** 背景は App BG `#171514`、上の流線は Warm Active `#d0b1a3`、下の流線は Primary Text `#d4d4d8`、作業面は Action Fill `#d7d4d2` を使う。gradient、glow、shadow、暗い円環は使わず、既存のrestrained paletteから色を増やさない。
+- **Small-size rules:** 24pxのheader、32pxのbundle icon、128px、256pxで同じsilhouetteを保つ。24/32pxでは二流線、流線間の空間、前進する作業面の三要素が個別に読める太さを下限とし、1px未満になるdetailを持ち込まない。角丸square外はtransparentのまま、edgeへ接触させない。inline表示は共通の`BrandMark` SVG componentを使い、装飾用途以外ではaccessible nameを保持する。
+
+### Source and regeneration
+
+`src-tauri/icons/app-icon.svg` だけをvector正本とし、`32x32.png`、`128x128.png`、`128x128@2x.png`、`icon.icns`を手編集しない。変更時は一時directoryへ生成して対象assetだけを置き換える。
+
+```bash
+icon_output="$(mktemp -d)"
+pnpm tauri icon src-tauri/icons/app-icon.svg --output "$icon_output"
+cp "$icon_output/32x32.png" "$icon_output/128x128.png" "$icon_output/128x128@2x.png" "$icon_output/icon.icns" src-tauri/icons/
+```
+
+生成後は32 / 128 / 256px rasterとICNS内の最大representationを目視し、transparent corner、edge clearance、二流線の分離、文字・顔・目・星・魔術記号への誤読がないことを確認する。
+
 ## Colors
 
 暗い暖色寄り neutral を面の深さへ使い、ローズ、branch violet、semantic status を面積 10% 未満の意味ある場所にだけ使う。
