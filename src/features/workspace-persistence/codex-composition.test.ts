@@ -628,4 +628,110 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         .map(([, request]) => (isRecord(request) ? request.workspaceId : null)),
     ).toEqual([toWorkspaceId, fromWorkspaceId])
   })
+
+  it("deduplicates safe quit and flushes the exact terminal event before the draft", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const historyRequest = vi.spyOn(history, "request")
+    const codex = new CompositionCodexTransport()
+    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const state = await adapter.loadState()
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("active fixture workspace")
+    await adapter.sendTurn({
+      workspaceId,
+      instruction: "Finish before quitting.",
+      effort: "fast",
+      attachments: [],
+      contextSnapshots: [],
+      editableContextSnapshot:
+        await adapter.getTurnContextSnapshot(workspaceId),
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    codex.emit({ ...running, workspaceId })
+
+    const request = {
+      workspaceId,
+      expectedGeneration: fixture.thread.generation,
+      draftText: "Keep this exact draft",
+      draftEffort: "max" as const,
+    }
+    const first = adapter.prepareAppQuit(request)
+    const duplicate = adapter.prepareAppQuit(request)
+    expect(duplicate).toBe(first)
+    await vi.waitFor(() =>
+      expect(
+        codex.calls.filter(
+          ({ command }) => command === codexCommands.turnInterrupt,
+        ),
+      ).toHaveLength(1),
+    )
+    expect(
+      historyRequest.mock.calls.some(
+        ([command]) => command === "workspace_save_draft",
+      ),
+    ).toBe(false)
+
+    codex.emit({
+      ...running,
+      workspaceId,
+      eventId: "event-safe-quit-terminal",
+      sequence: 2,
+      payload: { ...running.payload, status: "interrupted" },
+    })
+    await expect(first).resolves.toBeUndefined()
+
+    const calls = historyRequest.mock.calls
+    const terminalIndex = calls.findIndex(
+      ([command, payload]) =>
+        command === "history_append_domain_event" &&
+        isRecord(payload) &&
+        payload.eventId === "event-safe-quit-terminal",
+    )
+    const draftIndex = calls.findIndex(
+      ([command, payload]) =>
+        command === "workspace_save_draft" &&
+        isRecord(payload) &&
+        payload.text === "Keep this exact draft",
+    )
+    expect(terminalIndex).toBeGreaterThanOrEqual(0)
+    expect(draftIndex).toBeGreaterThan(terminalIndex)
+  })
+
+  it("does not flush or mutate the draft when safe quit terminalization fails", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const historyRequest = vi.spyOn(history, "request")
+    const codex = new CompositionCodexTransport()
+    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const state = await adapter.loadState()
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("active fixture workspace")
+    await adapter.sendTurn({
+      workspaceId,
+      instruction: "Keep running on interrupt failure.",
+      effort: "fast",
+      attachments: [],
+      contextSnapshots: [],
+      editableContextSnapshot:
+        await adapter.getTurnContextSnapshot(workspaceId),
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    codex.emit({ ...running, workspaceId })
+    codex.interruptFailure = new Error("interrupt unavailable")
+
+    await expect(
+      adapter.prepareAppQuit({
+        workspaceId,
+        expectedGeneration: fixture.thread.generation,
+        draftText: "Must not persist after failure",
+        draftEffort: "fast",
+      }),
+    ).rejects.toThrow("interrupt unavailable")
+    expect(
+      historyRequest.mock.calls.some(
+        ([command]) => command === "workspace_save_draft",
+      ),
+    ).toBe(false)
+  })
 })

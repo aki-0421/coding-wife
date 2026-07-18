@@ -139,6 +139,13 @@ export interface WorkspaceTransitionRequest {
   readonly expectedGeneration: number | null
 }
 
+export interface AppQuitPreparationRequest {
+  readonly workspaceId: string
+  readonly expectedGeneration: number
+  readonly draftText: string
+  readonly draftEffort: ReasoningEffort
+}
+
 export interface SendTurnRequest {
   readonly workspaceId: string
   readonly instruction: string
@@ -158,6 +165,9 @@ export interface WorkspaceViewAdapter {
   readonly stopAndSwitchWorkspace?: (
     request: WorkspaceTransitionRequest,
   ) => Promise<WorkspaceAdapterState>
+  readonly prepareAppQuit?: (
+    request: AppQuitPreparationRequest,
+  ) => Promise<void>
   readonly cancelWorkspace?: (
     workspaceId: string,
     expectedUpdatedAt: string,

@@ -1,3 +1,4 @@
+pub mod app_lifecycle;
 pub mod character;
 pub mod codex;
 pub mod git_review;
@@ -9,6 +10,10 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tauri::{http, Manager, State};
 
+use app_lifecycle::{
+    app_quit_cancel, app_quit_confirm, raise_main_window, request_app_close,
+    AppLifecycleCoordinator,
+};
 use character::commands::{
     character_attest_preview, character_cancel_import, character_confirm_import,
     character_delete_pack, character_import_pick, character_library_get, character_read_asset,
@@ -171,10 +176,13 @@ fn allow_opaque_preview_module_request<B>(
 pub fn run() {
     let supervisor = CodexSupervisor::new();
     let setup_supervisor = supervisor.clone();
-    let shutdown_supervisor = supervisor.clone();
     let workspace_service = WorkspaceService::production(supervisor.clone());
     let setup_workspace_service = workspace_service.clone();
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            raise_main_window(app);
+        }))
+        .manage(Arc::new(AppLifecycleCoordinator::default()))
         .manage(supervisor)
         .manage(workspace_service)
         .setup(move |app| {
@@ -228,16 +236,25 @@ pub fn run() {
                     "main window configuration is required",
                 )
             })?;
-            tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+            let window = tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
                 .on_web_resource_request(|request, response| {
                     allow_opaque_preview_module_request(&request, response);
                 })
                 .build()?;
+            let close_app = app.handle().clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    request_app_close(close_app.clone());
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             health_check,
             get_runtime_metadata,
+            app_quit_cancel,
+            app_quit_confirm,
             codex_pick_workspace,
             codex_get_diagnostic,
             codex_probe,
@@ -303,15 +320,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build the Coding Wife application");
 
-    app.run(move |_app_handle, event| {
-        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
-            if let Some(controller) = _app_handle.try_state::<CommitExplanationController>() {
-                tauri::async_runtime::block_on(controller.shutdown());
+    app.run(move |app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            let can_exit = app_handle
+                .state::<Arc<AppLifecycleCoordinator>>()
+                .can_exit();
+            if !can_exit {
+                api.prevent_exit();
+                request_app_close(app_handle.clone());
             }
-            if let Some(narration_service) = _app_handle.try_state::<NarrationService>() {
-                let _ = tauri::async_runtime::block_on(narration_service.shutdown());
-            }
-            tauri::async_runtime::block_on(shutdown_supervisor.shutdown());
         }
     });
 }

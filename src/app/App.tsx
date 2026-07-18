@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from "react"
 
 import { AppProviders } from "@/app/AppProviders"
 import {
+  createAppLifecycleGateway,
+  type AppLifecycleGateway,
+} from "@/features/app-lifecycle"
+import {
   CharacterRuntimeStatusProvider,
   createCharacterLibraryGateway,
   DefaultCharacterStageRenderer,
@@ -35,6 +39,7 @@ import {
 } from "@/features/workspace-view"
 
 export interface AppProps {
+  readonly appLifecycleGateway?: AppLifecycleGateway
   readonly characterLibraryGateway?: CharacterLibraryGateway
   readonly characterRenderer?: CharacterStageRenderer
   readonly commitExplanationRuntime?: CommitExplanationAppRuntime | null
@@ -56,6 +61,7 @@ function interactiveDemoEnabled(transport: AppTransport): boolean {
 }
 
 export function App({
+  appLifecycleGateway,
   characterLibraryGateway,
   characterRenderer,
   commitExplanationRuntime,
@@ -83,6 +89,10 @@ export function App({
         interactiveDemo,
       }),
     [activeTransport.kind, interactiveDemo],
+  )
+  const fallbackAppLifecycleGateway = useMemo(
+    () => createAppLifecycleGateway(activeTransport.kind),
+    [activeTransport.kind],
   )
   const fallbackCharacterLibraryGateway = useMemo(
     () =>
@@ -162,6 +172,9 @@ export function App({
         <CharacterRuntimeStatusProvider rendererKind={characterRendererKind}>
           <WorkspaceShell
             adapter={workspaceAdapter ?? fallbackWorkspaceAdapter}
+            appLifecycleGateway={
+              appLifecycleGateway ?? fallbackAppLifecycleGateway
+            }
             characterRenderer={activeCharacterRenderer}
             commitExplanationController={
               activeCommitExplanationRuntime ?? undefined

@@ -12,6 +12,7 @@ import { PersistentWorkspaceViewAdapter } from "@/features/workspace-persistence
 import { composeTurnInstruction } from "@/features/workspace-persistence/turn-context"
 import type { WorkspaceHistoryTransport } from "@/features/workspace-persistence/transport"
 import type {
+  AppQuitPreparationRequest,
   SendTurnRequest,
   WorkspaceAdapterState,
   WorkspaceCodexState,
@@ -66,6 +67,10 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     readonly key: string
     readonly operation: Promise<WorkspaceAdapterState>
   } | null = null
+  private appQuitPreparation: {
+    readonly key: string
+    readonly operation: Promise<void>
+  } | null = null
 
   constructor(
     historyTransport: WorkspaceHistoryTransport,
@@ -118,6 +123,29 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       }
     })
     this.workspaceTransition = { key, operation }
+    return operation
+  }
+
+  prepareAppQuit(request: AppQuitPreparationRequest): Promise<void> {
+    const key = `${request.workspaceId}:${String(request.expectedGeneration)}`
+    if (this.appQuitPreparation !== null) {
+      if (this.appQuitPreparation.key === key) {
+        return this.appQuitPreparation.operation
+      }
+      return Promise.reject(new Error("APP-QUIT-PREPARATION-IN-PROGRESS"))
+    }
+    if (
+      this.workspaceTransition !== null ||
+      this.workspaceCancellation !== null
+    ) {
+      return Promise.reject(new Error("APP-QUIT-WORKSPACE-MUTATION-IN-PROGRESS"))
+    }
+    const operation = this.performAppQuitPreparation(request).finally(() => {
+      if (this.appQuitPreparation?.operation === operation) {
+        this.appQuitPreparation = null
+      }
+    })
+    this.appQuitPreparation = { key, operation }
     return operation
   }
 
@@ -365,6 +393,27 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       })
     }
     return this.history.cancelWorkspace(workspaceId, expectedUpdatedAt)
+  }
+
+  private async performAppQuitPreparation(
+    request: AppQuitPreparationRequest,
+  ): Promise<void> {
+    const before = this.codex.snapshot()
+    if (
+      before.activeWorkspaceId !== request.workspaceId ||
+      before.generation !== request.expectedGeneration
+    ) {
+      throw new Error("APP-QUIT-TURN-IDENTITY-STALE")
+    }
+    await this.codex.stopTurnAndWaitForTerminal({
+      workspaceId: request.workspaceId,
+      expectedGeneration: request.expectedGeneration,
+    })
+    await this.history.saveDraft(
+      request.workspaceId,
+      request.draftText,
+      request.draftEffort,
+    )
   }
 
   private async activateCodexStrict(

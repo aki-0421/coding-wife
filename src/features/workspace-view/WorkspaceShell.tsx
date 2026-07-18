@@ -3,6 +3,13 @@ import { AlertCircleIcon, InfoIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
+  getSafeQuitCopy,
+  SafeQuitDialog,
+  type AppCloseRequestedV1,
+  type AppLifecycleGateway,
+  type SafeQuitDialogStatus,
+} from "@/features/app-lifecycle"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -69,6 +76,7 @@ const tabOrder: readonly WorkspaceTab[] = [
 
 export interface WorkspaceShellProps {
   readonly adapter?: WorkspaceViewAdapter | undefined
+  readonly appLifecycleGateway?: AppLifecycleGateway | undefined
   readonly characterRenderer?: CharacterStageRenderer | undefined
   readonly gitReviewTransport: GitReviewTransport
   readonly commitExplanationController?:
@@ -107,6 +115,7 @@ function workspaceActionError(copy: WorkspaceCopy, code: string): string {
 
 export function WorkspaceShell({
   adapter,
+  appLifecycleGateway,
   characterRenderer,
   gitReviewTransport,
   commitExplanationController,
@@ -114,6 +123,7 @@ export function WorkspaceShell({
 }: WorkspaceShellProps) {
   const { locale } = useI18n()
   const copy = getWorkspaceCopy(locale)
+  const safeQuitCopy = getSafeQuitCopy(locale)
   const runtime = useRuntime()
   const narration = useNarrationSnapshot()
   const view = useWorkspaceViewModel(adapter)
@@ -193,6 +203,117 @@ export function WorkspaceShell({
   } | null>(null)
   const transitionOriginRef = useRef<HTMLElement | null>(null)
   const transitionSafeActionRef = useRef<HTMLButtonElement | null>(null)
+  const safeQuitRequestRef = useRef<AppCloseRequestedV1 | null>(null)
+  const safeQuitOperationRef = useRef<Promise<void> | null>(null)
+  const [safeQuitRequest, setSafeQuitRequest] =
+    useState<AppCloseRequestedV1 | null>(null)
+  const [safeQuitStatus, setSafeQuitStatus] =
+    useState<SafeQuitDialogStatus>("confirming")
+
+  useEffect(() => {
+    if (appLifecycleGateway === undefined) return
+    let disposed = false
+    let unlisten: (() => void) | null = null
+    void appLifecycleGateway
+      .listenCloseRequested((request) => {
+        const current = safeQuitRequestRef.current
+        if (current !== null) return
+        safeQuitRequestRef.current = request
+        setSafeQuitStatus("confirming")
+        setSafeQuitRequest(request)
+      })
+      .then((dispose) => {
+        if (disposed) {
+          dispose()
+          return
+        }
+        unlisten = dispose
+      })
+      .catch(() => undefined)
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [appLifecycleGateway])
+
+  const clearSafeQuitRequest = useCallback((requestId: string) => {
+    if (safeQuitRequestRef.current?.requestId !== requestId) return
+    safeQuitRequestRef.current = null
+    setSafeQuitRequest(null)
+    setSafeQuitStatus("confirming")
+  }, [])
+
+  const keepAppOpen = useCallback(() => {
+    const request = safeQuitRequestRef.current
+    if (
+      request === null ||
+      appLifecycleGateway === undefined ||
+      safeQuitOperationRef.current !== null
+    ) {
+      return
+    }
+    setSafeQuitStatus("canceling")
+    const operation = appLifecycleGateway
+      .cancelQuit(request.requestId)
+      .then(() => clearSafeQuitRequest(request.requestId))
+      .catch(() => {
+        if (safeQuitRequestRef.current?.requestId === request.requestId) {
+          setSafeQuitStatus("cancel_failed")
+        }
+      })
+      .finally(() => {
+        if (safeQuitOperationRef.current === operation) {
+          safeQuitOperationRef.current = null
+        }
+      })
+    safeQuitOperationRef.current = operation
+  }, [appLifecycleGateway, clearSafeQuitRequest])
+
+  const stopAndQuit = useCallback(() => {
+    const request = safeQuitRequestRef.current
+    if (
+      request === null ||
+      appLifecycleGateway === undefined ||
+      adapter?.prepareAppQuit === undefined ||
+      safeQuitOperationRef.current !== null
+    ) {
+      if (request !== null) setSafeQuitStatus("stop_failed")
+      return
+    }
+    const draft = view.selectedDraft
+    setSafeQuitStatus("stopping")
+    const operation = adapter
+      .prepareAppQuit({
+        workspaceId: request.workspaceId,
+        expectedGeneration: request.workspaceGeneration,
+        draftText: draft.text,
+        draftEffort: draft.effort,
+      })
+      .then(async () => {
+        commitExplanationController?.revokePresentationIntent("close")
+        await narrationController.dismissPresentation("app_close")
+        await appLifecycleGateway.confirmQuit(request.requestId)
+        clearSafeQuitRequest(request.requestId)
+      })
+      .catch(() => {
+        if (safeQuitRequestRef.current?.requestId === request.requestId) {
+          setSafeQuitStatus("stop_failed")
+        }
+      })
+      .finally(() => {
+        if (safeQuitOperationRef.current === operation) {
+          safeQuitOperationRef.current = null
+        }
+      })
+    safeQuitOperationRef.current = operation
+  }, [
+    adapter,
+    appLifecycleGateway,
+    clearSafeQuitRequest,
+    commitExplanationController,
+    narrationController,
+    view.selectedDraft,
+  ])
 
   useEffect(() => {
     const previous = previousSelectedWorkspaceId.current
@@ -780,6 +901,14 @@ export function WorkspaceShell({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SafeQuitDialog
+        copy={safeQuitCopy}
+        onDontQuit={keepAppOpen}
+        onStopAndQuit={stopAndQuit}
+        open={safeQuitRequest !== null}
+        status={safeQuitStatus}
+      />
 
       {view.notice ? (
         <div

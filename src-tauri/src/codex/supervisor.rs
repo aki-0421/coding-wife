@@ -1604,6 +1604,18 @@ impl CodexSupervisor {
         }
     }
 
+    pub async fn active_turn_identity(&self) -> Option<(String, u64)> {
+        let state = self.inner.state.lock().await;
+        if let Some(pending) = state.pending_turn_start.as_ref() {
+            return Some((pending.workspace_id.clone(), pending.generation));
+        }
+        state
+            .active_turn_id
+            .as_ref()
+            .and(state.active_workspace.as_ref())
+            .map(|workspace_id| (workspace_id.clone(), state.generation))
+    }
+
     pub async fn shutdown(&self) {
         let _lifecycle = self.inner.lifecycle.lock().await;
         let (runtime, generation) = {
@@ -1615,15 +1627,38 @@ impl CodexSupervisor {
             state.active_turn_effort = None;
             state.pending_turn_start = None;
             state.main_work_units.clear();
-            (state.runtime.take(), state.generation)
+            (state.runtime.clone(), state.generation)
         };
         self.invalidate_main_work_unit_generation(generation).await;
-        if let Some(runtime) = runtime {
+        if let Some(runtime) = runtime.as_ref() {
             runtime.shutdown().await;
         }
         let mut state = self.inner.state.lock().await;
+        if let (Some(current), Some(stopped)) = (state.runtime.as_ref(), runtime.as_ref()) {
+            if Arc::ptr_eq(current, stopped) {
+                state.runtime = None;
+            }
+        }
         state.diagnostic.child_state = ChildState::Stopped;
         state.diagnostic.health = CodexHealth::Disconnected;
+    }
+
+    pub async fn force_shutdown_now(&self) {
+        let runtime = {
+            let mut state = self.inner.state.lock().await;
+            state.requests.clear_pending();
+            state.fallback_decisions.clear();
+            state.active_turn_id = None;
+            state.active_turn_effort = None;
+            state.pending_turn_start = None;
+            state.main_work_units.clear();
+            state.diagnostic.child_state = ChildState::Stopped;
+            state.diagnostic.health = CodexHealth::Disconnected;
+            state.runtime.take()
+        };
+        if let Some(runtime) = runtime {
+            runtime.force_shutdown_now();
+        }
     }
 
     async fn run_signal_loop(&self, mut receiver: mpsc::Receiver<RuntimeSignal>) {

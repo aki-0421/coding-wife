@@ -189,6 +189,11 @@ impl WorkspaceHistoryService {
             guard.complete();
             return report;
         }
+        if self.store.recover_unfinished_turns().is_err() {
+            report.unavailable += 1;
+            guard.complete();
+            return report;
+        }
         let records = match self.store.private_workspace_records() {
             Ok(records) => records,
             Err(_) => {
@@ -231,6 +236,13 @@ impl WorkspaceHistoryService {
         }
         guard.complete();
         report
+    }
+
+    pub async fn shutdown(&self) -> Result<(), WorkspaceCommandError> {
+        let _operation = self.operation_lock.lock().await;
+        self.store
+            .checkpoint_for_shutdown()
+            .map_err(|error| history_error("history.shutdown", error))
     }
 
     pub async fn pick_register(&self) -> Result<WorkspacePickResponse, WorkspaceCommandError> {

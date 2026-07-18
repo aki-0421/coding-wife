@@ -334,10 +334,128 @@ impl WorkspaceHistoryStore {
         DATABASE_FILE_NAME
     }
 
+    pub fn recover_unfinished_turns(&self) -> Result<usize, WorkspaceHistoryError> {
+        self.ensure_writable("history.recover_unfinished_turns")?;
+        let mut inner = self.lock();
+        let persisted = {
+            let mut statement = inner
+                .connection
+                .prepare(
+                    "SELECT workspace_id, session_id, payload_json
+                     FROM domain_events
+                     WHERE producer = 'code' AND kind = 'code.session.status.changed'
+                     ORDER BY workspace_id ASC, sequence ASC",
+                )
+                .map_err(|_| history_error("HIST-RECOVERY-QUERY", true))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(|_| history_error("HIST-RECOVERY-QUERY", true))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|_| history_error("HIST-RECOVERY-DECODE", false))?
+        };
+        let mut latest = HashMap::<(String, String), UnfinishedTurnRecord>::new();
+        for (workspace_id, session_id, payload_json) in persisted {
+            let Ok(payload) = serde_json::from_str::<Value>(&payload_json) else {
+                continue;
+            };
+            let Some(object) = payload.as_object() else {
+                continue;
+            };
+            let (
+                Some(generation),
+                Some(source_sequence),
+                Some(thread_handle),
+                Some(turn_handle),
+                Some(status),
+            ) = (
+                object.get("generation").and_then(Value::as_u64),
+                object.get("sourceSequence").and_then(Value::as_u64),
+                object.get("threadHandle").and_then(Value::as_str),
+                object.get("turnHandle").and_then(Value::as_str),
+                object.get("status").and_then(Value::as_str),
+            )
+            else {
+                continue;
+            };
+            latest.insert(
+                (workspace_id.clone(), turn_handle.to_owned()),
+                UnfinishedTurnRecord {
+                    workspace_id,
+                    session_id,
+                    generation,
+                    source_sequence,
+                    thread_handle: thread_handle.to_owned(),
+                    turn_handle: turn_handle.to_owned(),
+                    status: status.to_owned(),
+                },
+            );
+        }
+
+        let transaction = inner
+            .connection
+            .transaction()
+            .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
+        let mut recovered = 0usize;
+        for record in latest
+            .values()
+            .filter(|record| matches!(record.status.as_str(), "running" | "inProgress" | "waiting"))
+        {
+            append_event_in_transaction(
+                &transaction,
+                &NormalizedDomainEvent {
+                    schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+                    event_id: format!("event-app-recovery-{}", uuid::Uuid::new_v4()),
+                    workspace_id: record.workspace_id.clone(),
+                    session_id: record.session_id.clone(),
+                    producer: "code".to_owned(),
+                    kind: "code.session.status.changed".to_owned(),
+                    occurred_at: now(),
+                    payload: json!({
+                        "semanticVersion": 1,
+                        "generation": record.generation,
+                        "sourceSequence": record.source_sequence.saturating_add(1),
+                        "threadHandle": record.thread_handle,
+                        "turnHandle": record.turn_handle,
+                        "status": "interrupted",
+                    }),
+                },
+                None,
+            )?;
+            recovered = recovered.saturating_add(1);
+        }
+        transaction
+            .commit()
+            .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
+        Ok(recovered)
+    }
+
+    pub fn checkpoint_for_shutdown(&self) -> Result<(), WorkspaceHistoryError> {
+        self.ensure_writable("history.shutdown")?;
+        let inner = self.lock();
+        let (busy, _, _) = inner
+            .connection
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(|_| history_error("HIST-SHUTDOWN-CHECKPOINT", true))?;
+        if busy != 0 {
+            return Err(history_error("HIST-SHUTDOWN-BUSY", true));
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
-    pub(crate) fn install_unregister_failure_for_test(
-        &self,
-    ) -> Result<(), WorkspaceHistoryError> {
+    pub(crate) fn install_unregister_failure_for_test(&self) -> Result<(), WorkspaceHistoryError> {
         self.lock()
             .connection
             .execute_batch(
@@ -1969,10 +2087,34 @@ fn append_event_in_transaction(
             ],
         )
         .map_err(|_| history_error("HIST-EVENT-WRITE", true))?;
+    if event.kind == "code.session.status.changed" {
+        if let (Some(session_id), Some(status)) = (
+            event.session_id.as_deref(),
+            sanitized.get("status").and_then(Value::as_str),
+        ) {
+            transaction
+                .execute(
+                    "UPDATE sessions SET status = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![status, now(), session_id],
+                )
+                .map_err(|_| history_error("HIST-SESSION-STATUS-WRITE", true))?;
+        }
+    }
     Ok(AppendEventResult {
         sequence: sequence as u64,
         inserted: true,
     })
+}
+
+#[derive(Clone, Debug)]
+struct UnfinishedTurnRecord {
+    workspace_id: String,
+    session_id: Option<String>,
+    generation: u64,
+    source_sequence: u64,
+    thread_handle: String,
+    turn_handle: String,
+    status: String,
 }
 
 fn validate_domain_event(event: &NormalizedDomainEvent) -> Result<(), WorkspaceHistoryError> {
@@ -3904,6 +4046,90 @@ mod tests {
                 .version,
             2
         );
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn restart_marks_only_unfinished_turns_interrupted_once() {
+        let data = temp_directory("unfinished-turn-recovery");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let workspace = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace;
+        let session_id = store
+            .timeline(&workspace.workspace_id, None, 10, None)
+            .expect("initial timeline")
+            .items
+            .first()
+            .and_then(|event| event.session_id.clone())
+            .expect("workspace session");
+        store
+            .save_draft(
+                &workspace.workspace_id,
+                "preserved draft",
+                ReasoningEffort::Max,
+                0,
+            )
+            .expect("save draft");
+        store
+            .append_event(&NormalizedDomainEvent {
+                schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+                event_id: "event-unfinished-turn".to_owned(),
+                workspace_id: workspace.workspace_id.clone(),
+                session_id: Some(session_id),
+                producer: "code".to_owned(),
+                kind: "code.session.status.changed".to_owned(),
+                occurred_at: "2026-07-18T00:00:01.000Z".to_owned(),
+                payload: codex_turn_payload("running", 4),
+            })
+            .expect("append running turn");
+        drop(store);
+
+        let reopened = WorkspaceHistoryStore::open(&data).expect("reopen store");
+        assert_eq!(
+            reopened
+                .recover_unfinished_turns()
+                .expect("recover unfinished turn"),
+            1
+        );
+        assert_eq!(
+            reopened
+                .recover_unfinished_turns()
+                .expect("idempotent recovery"),
+            0
+        );
+        let snapshot = reopened
+            .snapshot(Some(&workspace.workspace_id))
+            .expect("recovered snapshot");
+        assert_eq!(
+            snapshot.draft.as_ref().map(|draft| draft.text.as_str()),
+            Some("preserved draft")
+        );
+        let terminal = snapshot
+            .timeline
+            .items
+            .iter()
+            .rev()
+            .find(|event| event.kind == "code.session.status.changed")
+            .expect("terminal recovery event");
+        assert_eq!(
+            terminal.payload.get("status").and_then(Value::as_str),
+            Some("interrupted")
+        );
+        assert_eq!(
+            terminal
+                .payload
+                .get("sourceSequence")
+                .and_then(Value::as_u64),
+            Some(5)
+        );
+        reopened
+            .checkpoint_for_shutdown()
+            .expect("shutdown checkpoint");
 
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);

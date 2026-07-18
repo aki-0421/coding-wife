@@ -88,6 +88,18 @@ close、minimize、zoomのhit testingはmacOS標準結果と一致させる。cl
 
 idle closeまたは`停止して終了`受理後は、Codex/App Server process group、audio process/queue、app-owned support controller/process group、pending scope writer、DB writer/transactionの順で閉じる。全descendant消滅とtransaction commit/rollbackを5秒以内に確認してからmain processを終了する。期限超過時はprocess groupを強制終了してInterrupted recovery metadataを残し、Git stateとsupport explanation本文を永続化しない。shutdown開始前にactive commit presentation intentをrevokeし、caption/audioへの後着eventを破棄する。
 
+closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、WebViewの`beforeunload`やfrontendだけのturn stateを終了許可の根拠にしない。
+
+| handoff | 契約 |
+|---|---|
+| native close intent | RustがCodex supervisorのactive turnまたはpending turn startを再検査する。idleでも一度native closeを保留してorderly shutdownを開始し、実行中なら同じ`requestId`、workspace ID、workspace generationを持つ`app-close-requested`を1件だけ通知する |
+| duplicate close | confirmation中とshutdown中の全close、`Command+Q`、window manager要求をnativeで保留する。confirmation中の再要求は同じ`requestId`を再利用し、新しいDialogやshutdownを作らない |
+| `終了しない / Don’t Quit` | frontendはexact `requestId`をnativeへ返し、受理後だけDialogを閉じる。turn、selection、draft、anchor、presentation cache/job、caption/TTSを変更せず、Dialogを開く直前のfocusへ戻す |
+| `停止して終了 / Stop and Quit` | frontendは通知されたworkspace/generationに対してC08と同じexact terminal event待機、local cleanup、history queue flushを完了する。成功後にだけpresentation intentを`close`でrevokeし、caption/TTSを停止し、pending scope writerを閉じてexact `requestId`をnativeへ確定する |
+| shutdown failure | terminalizationまたはhistory flush失敗では確定せずDialogを維持し、保持中のwindow stateを変更しない。native cleanupの5秒超過では残るapp-owned process groupを強制終了し、同じshutdownを再入しない |
+
+再起動時は履歴restoreが`started`かつterminal eventなしのturnを一度だけ`Interrupted`へ正規化する。復元処理は同turnの送信commandを生成せず、draft、last summary、timeline anchor、未完了work unitのsanitized metadataだけを表示へ返す。
+
 ## レイアウト契約
 
 ### 実装拘束値

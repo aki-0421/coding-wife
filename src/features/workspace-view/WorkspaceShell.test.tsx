@@ -10,6 +10,11 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
+import type {
+  AppCloseRequestedV1,
+  AppLifecycleCloseListener,
+  AppLifecycleGateway,
+} from "@/features/app-lifecycle"
 import type { LocalePreferenceStore } from "@/features/localization"
 import { DemoNarrationGateway, NarrationController } from "@/features/narration"
 import { DemoTransport } from "@/features/runtime"
@@ -46,6 +51,35 @@ function deferred<T>(): Deferred<T> {
     reject = rejectPromise
   })
   return { promise, resolve, reject }
+}
+
+function appLifecycleHarness() {
+  let listener: AppLifecycleCloseListener | null = null
+  const cancelQuit = vi
+    .fn<(_: string) => Promise<void>>()
+    .mockResolvedValue(undefined)
+  const confirmQuit = vi
+    .fn<(_: string) => Promise<void>>()
+    .mockResolvedValue(undefined)
+  const gateway: AppLifecycleGateway = {
+    listenCloseRequested(nextListener) {
+      listener = nextListener
+      return Promise.resolve(() => {
+        listener = null
+      })
+    },
+    cancelQuit,
+    confirmQuit,
+  }
+  return {
+    cancelQuit,
+    confirmQuit,
+    emit(request: AppCloseRequestedV1) {
+      if (listener === null) throw new Error("Close listener is not ready")
+      listener(request)
+    },
+    gateway,
+  }
 }
 
 function renderWorkspace(adapter?: WorkspaceViewAdapter) {
@@ -239,6 +273,137 @@ function richCodexState(): WorkspaceCodexState {
 }
 
 describe("WorkspaceShell", () => {
+  it("keeps duplicate native close requests behind one safe cancellation", async () => {
+    const lifecycle = appLifecycleHarness()
+    const prepareAppQuit = vi.fn()
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      prepareAppQuit,
+    }
+    const request = {
+      schemaVersion: 1 as const,
+      requestId: "app-quit-integration-cancel",
+      workspaceId: "workspace-native",
+      workspaceGeneration: 1,
+    }
+    render(
+      <App
+        appLifecycleGateway={lifecycle.gateway}
+        localeStore={englishLocaleStore}
+        transport={new DemoTransport()}
+        workspaceAdapter={adapter}
+      />,
+    )
+    await act(async () => Promise.resolve())
+
+    act(() => {
+      lifecycle.emit(request)
+      lifecycle.emit(request)
+    })
+    const dialog = screen.getByRole("dialog", {
+      name: "Stop the active turn and quit?",
+    })
+    const safeAction = within(dialog).getByRole("button", {
+      name: "Don’t Quit",
+    })
+    expect(safeAction).toHaveFocus()
+    fireEvent.click(safeAction)
+
+    await waitFor(() =>
+      expect(lifecycle.cancelQuit).toHaveBeenCalledWith(request.requestId),
+    )
+    expect(lifecycle.cancelQuit).toHaveBeenCalledTimes(1)
+    expect(prepareAppQuit).not.toHaveBeenCalled()
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+  })
+
+  it("terminalizes and flushes the exact workspace before native quit", async () => {
+    const lifecycle = appLifecycleHarness()
+    const terminalization = deferred<void>()
+    const order: string[] = []
+    const prepareAppQuit = vi.fn(() => {
+      order.push("terminalize")
+      return terminalization.promise
+    })
+    lifecycle.confirmQuit.mockImplementation(() => {
+      order.push("native-quit")
+      return Promise.resolve()
+    })
+    const state = {
+      ...nativeWorkspaceState(),
+      draft: {
+        ...nativeWorkspaceState().draft!,
+        text: "Preserve before quit.",
+        effort: "max" as const,
+      },
+    }
+    const codex = richCodexState()
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex(listener) {
+        listener(codex)
+        return () => undefined
+      },
+      prepareAppQuit,
+    }
+    const narrationGateway = new DemoNarrationGateway()
+    const narrationController = new NarrationController(narrationGateway)
+    vi.spyOn(narrationController, "dismissPresentation").mockImplementation(
+      (reason) => {
+        if (reason === "app_close") order.push("presentation-cleanup")
+        return Promise.resolve()
+      },
+    )
+    const request = {
+      schemaVersion: 1 as const,
+      requestId: "app-quit-integration-confirm",
+      workspaceId: "workspace-native",
+      workspaceGeneration: 1,
+    }
+    render(
+      <App
+        appLifecycleGateway={lifecycle.gateway}
+        localeStore={englishLocaleStore}
+        narrationController={narrationController}
+        narrationGateway={narrationGateway}
+        transport={new DemoTransport()}
+        workspaceAdapter={adapter}
+      />,
+    )
+    await act(async () => Promise.resolve())
+    act(() => lifecycle.emit(request))
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stop and Quit" }),
+    )
+    expect(prepareAppQuit).toHaveBeenCalledWith({
+      workspaceId: "workspace-native",
+      expectedGeneration: 1,
+      draftText: "Preserve before quit.",
+      draftEffort: "max",
+    })
+    expect(lifecycle.confirmQuit).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole("button", { name: "Stopping and quitting…" }),
+    ).toBeDisabled()
+
+    await act(() => {
+      terminalization.resolve()
+      return Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(lifecycle.confirmQuit).toHaveBeenCalledWith(request.requestId),
+    )
+    expect(order).toEqual([
+      "terminalize",
+      "presentation-cleanup",
+      "native-quit",
+    ])
+  })
+
   it("shows only a non-mutating skeleton while native history is pending", async () => {
     let resolveState!: (state: WorkspaceAdapterState) => void
     const requestAddProject = vi.fn()
