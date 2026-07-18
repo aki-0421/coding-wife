@@ -54,6 +54,18 @@ interface FirstFrameWait {
   readonly onAbort: () => void
 }
 
+interface CandidateRenderer {
+  readonly generation: number
+  readonly model: CubismCharacterModel
+}
+
+interface AcceptedCandidateFrame {
+  readonly nonTransparentSamples: number
+  readonly signature: string
+  readonly webglError: number
+  readonly capturedPreview: string | null
+}
+
 export function computeCharacterBackingSize(
   cssWidth: number,
   cssHeight: number,
@@ -68,14 +80,6 @@ export function computeCharacterBackingSize(
     height: Math.max(1, Math.round(Math.max(0, cssHeight) * safeRatio)),
     devicePixelRatio: safeRatio,
   }
-}
-
-export function resolveLoadFailureStaticPreview(
-  hadCommittedPack: boolean,
-  currentPreviewAvailable: boolean,
-  candidatePreviewAvailable: boolean,
-): boolean {
-  return hadCommittedPack ? currentPreviewAvailable : candidatePreviewAvailable
 }
 
 function samplePixels(
@@ -145,6 +149,7 @@ export class CharacterController {
   #contextLossExtension: WEBGL_lose_context | null = null
   #model: CubismCharacterModel | null = null
   #client: CharacterPackClient | null = null
+  #candidateRenderer: CandidateRenderer | null = null
   #loadAbortController: AbortController | null = null
   #restoreAbortController: AbortController | null = null
   #frameRequest: number | null = null
@@ -272,6 +277,7 @@ export class CharacterController {
     }
 
     this.#loadAbortController?.abort()
+    this.#candidateRenderer = null
     this.#restoreAbortController?.abort()
     this.#restoreAbortController = null
     const loadAbortController = new AbortController()
@@ -281,9 +287,15 @@ export class CharacterController {
     if (signal.aborted) abortFromCaller()
 
     const hadCommittedPack = this.#client !== null
-    this.#phase = "loading"
-    this.#error = null
-    this.emitStatus()
+    const committedModel = this.#model
+    this.stopFrameLoop()
+    if (!hadCommittedPack) {
+      this.#phase = "loading"
+      this.#error = null
+      this.emitStatus()
+    }
+
+    let candidateModel: CubismCharacterModel | null = null
 
     try {
       await acquireCubismRuntime()
@@ -292,7 +304,7 @@ export class CharacterController {
         loadAbortController.signal,
       )
       const { CubismCharacterModel } = await import("./cubism-character-model")
-      const model = await CubismCharacterModel.create(
+      candidateModel = await CubismCharacterModel.create(
         client,
         this.#gl,
         this.#canvas.width,
@@ -300,49 +312,80 @@ export class CharacterController {
         loadAbortController.signal,
       )
       if (this.#disposed || loadAbortController.signal.aborted) {
-        model.release()
         throw new CharacterError("disposed", "Character load was canceled")
       }
 
       const rendererGeneration = this.#rendererGeneration + 1
-      this.#rendererGeneration = rendererGeneration
-      model.resize(this.#canvas.width, this.#canvas.height)
-      this.#model?.release()
-      this.#model = model
-      this.#client = client
-      this.resetFrameMetrics()
-      this.#hasStaticPreview = hasTrustedStaticPreview
-      this.#phase = "ready"
-      this.#fallbackLevel =
-        this.effectiveMotionPolicy === "animated"
-          ? "animated"
-          : this.effectiveMotionPolicy === "reduced"
-            ? "reduced"
-            : "text_only"
-      this.emitStatus()
-      this.applyMotionPolicy()
-
-      await this.waitForFirstFrame(
+      candidateModel.resize(this.#canvas.width, this.#canvas.height)
+      this.#candidateRenderer = {
+        generation: rendererGeneration,
+        model: candidateModel,
+      }
+      const acceptedFrame = await this.stageCandidateFirstFrame(
+        candidateModel,
+        committedModel,
         loadAbortController.signal,
         rendererGeneration,
+        hasTrustedStaticPreview,
       )
+      if (
+        this.#disposed ||
+        loadAbortController.signal.aborted ||
+        this.#loadAbortController !== loadAbortController
+      ) {
+        throw new CharacterError("disposed", "Character load was canceled")
+      }
+
+      const previousModel = this.#model
+      const committedCandidate = candidateModel
+      candidateModel = null
+      this.#candidateRenderer = null
+      this.#rendererGeneration = rendererGeneration
+      this.#model = committedCandidate
+      this.#client = client
+      this.resetFrameMetrics()
+      this.#frameCount = 1
+      this.#nonTransparentSamples = acceptedFrame.nonTransparentSamples
+      this.#signature = acceptedFrame.signature
+      this.#webglError = acceptedFrame.webglError
+      this.#hasStaticPreview =
+        hasTrustedStaticPreview || acceptedFrame.capturedPreview !== null
+      this.#phase = "ready"
+      this.#error = null
+      previousModel?.release()
+      this.applyMotionPolicy()
+      this.#callbacks.onMetrics?.(this.metrics)
+      if (acceptedFrame.capturedPreview !== null) {
+        this.#callbacks.onStaticPreview?.(acceptedFrame.capturedPreview)
+      }
     } catch (error) {
       if (loadAbortController.signal.aborted || this.#disposed) throw error
       const characterError = toCharacterError(error, "asset_fetch_failed")
-      this.#hasStaticPreview = resolveLoadFailureStaticPreview(
-        hadCommittedPack,
-        this.#hasStaticPreview,
-        hasTrustedStaticPreview,
-      )
-      this.#phase = "error"
-      this.#error = characterError
-      this.#fallbackLevel = this.#hasStaticPreview ? "static" : "text_only"
-      this.emitStatus()
+      if (!hadCommittedPack) {
+        this.#hasStaticPreview = hasTrustedStaticPreview
+        this.#phase = "error"
+        this.#error = characterError
+        this.#fallbackLevel = this.#hasStaticPreview ? "static" : "text_only"
+        this.emitStatus()
+      }
       throw characterError
     } finally {
+      candidateModel?.release()
+      if (this.#candidateRenderer?.model === candidateModel) {
+        this.#candidateRenderer = null
+      }
       signal.removeEventListener("abort", abortFromCaller)
       if (this.#loadAbortController === loadAbortController) {
         this.#loadAbortController = null
+        if (
+          hadCommittedPack &&
+          this.#model === committedModel &&
+          !this.#disposed &&
+          !this.#contextLost &&
+          this.effectiveMotionPolicy === "animated"
+        ) {
+          this.startFrameLoop()
+        }
       }
     }
   }
@@ -392,6 +435,7 @@ export class CharacterController {
       this.#canvas.width = size.width
       this.#canvas.height = size.height
       this.#model?.resize(size.width, size.height)
+      this.#candidateRenderer?.model.resize(size.width, size.height)
     }
     this.#gl?.viewport(0, 0, size.width, size.height)
     this.syncFirstFrameDeadline()
@@ -441,6 +485,7 @@ export class CharacterController {
     this.#loadAbortController = null
     this.#restoreAbortController?.abort()
     this.#restoreAbortController = null
+    this.#candidateRenderer = null
     this.stopFrameLoop()
     this.rejectFirstFrame(
       new CharacterError(
@@ -508,6 +553,7 @@ export class CharacterController {
     if (
       this.#frameRequest !== null ||
       this.#model === null ||
+      this.#candidateRenderer !== null ||
       this.#contextLost ||
       this.#disposed ||
       this.#cssWidth <= 0 ||
@@ -548,17 +594,11 @@ export class CharacterController {
     this.#lastDeltaMilliseconds = delta * 1_000
     this.#lastFrameTimestamp = timestamp
 
-    if (policy === "animated" && delta > 0) this.#model.update(delta)
-
     try {
-      this.#gl.disable(this.#gl.SCISSOR_TEST)
-      this.#gl.colorMask(true, true, true, true)
-      this.#gl.clearColor(0, 0, 0, 0)
-      this.#gl.clear(this.#gl.COLOR_BUFFER_BIT | this.#gl.STENCIL_BUFFER_BIT)
-      this.#gl.viewport(0, 0, this.#canvas.width, this.#canvas.height)
-      this.#model.draw(this.#canvas.width, this.#canvas.height)
-      this.#gl.flush()
-      this.#webglError = this.#gl.getError()
+      this.#webglError = this.drawModelFrame(
+        this.#model,
+        policy === "animated" ? delta : 0,
+      )
     } catch (error) {
       if (this.#gl.isContextLost()) {
         this.enterContextLostState()
@@ -618,11 +658,140 @@ export class CharacterController {
     }
   }
 
+  private drawModelFrame(
+    model: CubismCharacterModel,
+    deltaSeconds: number,
+  ): number {
+    if (this.#gl === null || this.#canvas === null) {
+      throw new CharacterError(
+        "webgl_unavailable",
+        "The character render surface is unavailable",
+        false,
+      )
+    }
+    if (deltaSeconds > 0) model.update(deltaSeconds)
+    this.#gl.disable(this.#gl.SCISSOR_TEST)
+    this.#gl.colorMask(true, true, true, true)
+    this.#gl.clearColor(0, 0, 0, 0)
+    this.#gl.clear(this.#gl.COLOR_BUFFER_BIT | this.#gl.STENCIL_BUFFER_BIT)
+    this.#gl.viewport(0, 0, this.#canvas.width, this.#canvas.height)
+    model.draw(this.#canvas.width, this.#canvas.height)
+    this.#gl.flush()
+    return this.#gl.getError()
+  }
+
+  private async stageCandidateFirstFrame(
+    candidateModel: CubismCharacterModel,
+    committedModel: CubismCharacterModel | null,
+    signal: AbortSignal,
+    generation: number,
+    hasTrustedStaticPreview: boolean,
+  ): Promise<AcceptedCandidateFrame> {
+    const firstFrame = this.waitForFirstFrame(signal, generation)
+    let frameRequest: number | null
+    let lastTimestamp: number | null = null
+    let accepted: AcceptedCandidateFrame | null = null
+
+    const restoreCommittedFrame = (): void => {
+      if (committedModel !== null) this.drawModelFrame(committedModel, 0)
+    }
+    const rejectCandidate = (error: unknown): void => {
+      let characterError = toCharacterError(error, "shader_load_failed")
+      try {
+        restoreCommittedFrame()
+      } catch (restoreError) {
+        characterError = toCharacterError(restoreError, "shader_load_failed")
+      }
+      this.rejectFirstFrame(characterError, generation)
+    }
+    const drawCandidate = (timestamp: number) => {
+      frameRequest = null
+      if (
+        signal.aborted ||
+        this.#disposed ||
+        this.#firstFrameWait?.generation !== generation
+      ) {
+        return
+      }
+      const policy = this.effectiveMotionPolicy
+      const gl = this.#gl
+      const canvas = this.#canvas
+      const renderable =
+        policy !== "hidden" &&
+        this.#documentVisible &&
+        !this.#contextLost &&
+        this.#cssWidth > 0 &&
+        this.#cssHeight > 0 &&
+        gl !== null &&
+        canvas !== null
+      if (renderable) {
+        const rawDelta =
+          lastTimestamp === null
+            ? 0
+            : Math.max(0, (timestamp - lastTimestamp) / 1_000)
+        const delta = Math.min(MAX_FRAME_DELTA_SECONDS, rawDelta)
+        lastTimestamp = timestamp
+        try {
+          const webglError = this.drawModelFrame(
+            candidateModel,
+            policy === "animated" ? delta : 0,
+          )
+          if (webglError !== 0) {
+            throw new CharacterError(
+              "shader_load_failed",
+              "The candidate renderer reported a WebGL error before its first frame",
+            )
+          }
+          const sample = samplePixels(gl, canvas.width, canvas.height)
+          if (sample.nonTransparent > 0) {
+            let capturedPreview: string | null = null
+            if (!hasTrustedStaticPreview) {
+              try {
+                const dataUrl = canvas.toDataURL("image/png")
+                if (dataUrl.startsWith("data:image/png")) {
+                  capturedPreview = dataUrl
+                }
+              } catch {
+                // The accepted renderer remains authoritative without a capture.
+              }
+            }
+            accepted = {
+              nonTransparentSamples: sample.nonTransparent,
+              signature: sample.signature,
+              webglError,
+              capturedPreview,
+            }
+            this.resolveFirstFrame(generation)
+            return
+          }
+          restoreCommittedFrame()
+        } catch (error) {
+          rejectCandidate(error)
+          return
+        }
+      }
+      frameRequest = requestAnimationFrame(drawCandidate)
+    }
+
+    frameRequest = requestAnimationFrame(drawCandidate)
+    try {
+      await firstFrame
+      if (accepted === null) {
+        throw new CharacterError(
+          "shader_load_failed",
+          "The candidate first-frame result was not retained",
+        )
+      }
+      return accepted
+    } finally {
+      if (frameRequest !== null) cancelAnimationFrame(frameRequest)
+    }
+  }
+
   private waitForFirstFrame(
     signal: AbortSignal,
     generation: number,
   ): Promise<void> {
-    if (this.#nonTransparentSamples > 0) return Promise.resolve()
     const existingWait = this.#firstFrameWait
     if (existingWait?.generation === generation) {
       this.syncFirstFrameDeadline()
@@ -699,11 +868,15 @@ export class CharacterController {
   private syncFirstFrameDeadline(): void {
     const wait = this.#firstFrameWait
     if (wait === null) return
+    const activeRendererGeneration =
+      this.#candidateRenderer?.generation === wait.generation
+        ? wait.generation
+        : this.#rendererGeneration
     this.#firstFrameDeadline.setEligible(
       wait.generation,
       canConsumeCharacterFirstFrameDeadline({
         expectedGeneration: wait.generation,
-        rendererGeneration: this.#rendererGeneration,
+        rendererGeneration: activeRendererGeneration,
         motionPolicy: this.effectiveMotionPolicy,
         documentVisible: this.#documentVisible,
         contextLost: this.#contextLost,
@@ -740,6 +913,9 @@ export class CharacterController {
   }
 
   private enterContextLostState(): void {
+    this.#loadAbortController?.abort(
+      new CharacterError("context_lost", "The Live2D WebGL context was lost"),
+    )
     this.#contextLost = true
     this.syncFirstFrameDeadline()
     this.stopFrameLoop()
