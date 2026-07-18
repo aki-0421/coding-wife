@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   I18nProvider,
   type LocalePreferenceStore,
@@ -22,10 +23,14 @@ import {
 } from "@/features/character/library/contracts"
 import { CharacterLibraryProvider } from "@/features/character/library/provider"
 import {
+  CharacterLibraryOperationError,
   DemoCharacterLibraryGateway,
   type CharacterLibraryGateway,
 } from "@/features/character/library/transport"
-import type { CharacterPackRef } from "@/features/character/model"
+import type {
+  CharacterPackManifest,
+  CharacterPackRef,
+} from "@/features/character/model"
 import characterFixture from "@/test/fixtures/character-library.v1.json"
 
 vi.mock("@/features/character/import-preview/IsolatedCharacterPreview", () => ({
@@ -92,6 +97,25 @@ const importedPreview = parseCharacterImportResponse(
 const builtinPack = parseCharacterLibrarySnapshot(
   characterFixture.librarySnapshot,
 ).packs[0]!
+const trustedFrameBytes = new Uint8Array(
+  characterFixture.attestationRequest.thumbnailPng,
+)
+const createdObjectUrls: string[] = []
+const customManifest: CharacterPackManifest = {
+  ...importedPreview.preview!.manifest,
+  compatibility: {
+    ...importedPreview.preview!.manifest.compatibility,
+    expectedParameters: characterFixture.attestationRequest.parameterCount,
+    expectedParts: characterFixture.attestationRequest.partCount,
+    expectedDrawables: characterFixture.attestationRequest.drawableCount,
+  },
+  trustedFrame: {
+    assetId: "__coding-wife/trusted-frame.png",
+    bytes: trustedFrameBytes.byteLength,
+    sha256: characterFixture.attestationRequest.thumbnailSha256,
+    dimensions: { width: 1, height: 1 },
+  },
+}
 const customPack: CharacterPackView = {
   schemaVersion: 1,
   packId: "custom:11111111-1111-4111-8111-111111111111",
@@ -107,9 +131,11 @@ const customPack: CharacterPackView = {
   expressionCount: 0,
   selectedWorkspaceCount: 0,
   deletable: true,
-  manifest: importedPreview.preview!.manifest,
-  thumbnailSha256: null,
+  manifest: customManifest,
+  thumbnailSha256: characterFixture.attestationRequest.thumbnailSha256,
 }
+
+type TrustedFrameMode = "valid" | "missing" | "tampered"
 
 class MemoryLocaleStore implements LocalePreferenceStore {
   readonly persistence = "session-only" as const
@@ -133,11 +159,16 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
   public readonly attestationRequests: CharacterPreviewAttestationRequest[] = []
   public readonly confirmationRequests: CharacterConfirmImportRequest[] = []
   public readonly cancellationRequests: CharacterCancelImportRequest[] = []
+  public readonly trustedFrameReads: {
+    readonly assetId: string
+    readonly expectedMime: string
+  }[] = []
   public pickerCount = 0
   private snapshot: CharacterLibrarySnapshot
 
   public constructor(
     packs: readonly CharacterPackView[] = [builtinPack, customPack],
+    private readonly trustedFrameMode: TrustedFrameMode = "valid",
   ) {
     this.snapshot = {
       schemaVersion: 1,
@@ -233,8 +264,35 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
   }
 
   public createPackRef(pack: CharacterPackView): CharacterPackRef {
-    void pack
-    return { kind: "url", manifestUrl: "/fixture-pack.json" }
+    if (pack.kind === "builtin") {
+      return { kind: "url", manifestUrl: "/fixture-pack.json" }
+    }
+    if (pack.manifest === null) throw new CharacterLibraryOperationError()
+    return {
+      kind: "native",
+      manifest: pack.manifest,
+      manifestHash: pack.manifestHash,
+      previewToken: null,
+      readAsset: (assetId, expectedMime, signal) => {
+        this.trustedFrameReads.push({ assetId, expectedMime })
+        if (signal.aborted) {
+          return Promise.reject(
+            signal.reason instanceof Error
+              ? signal.reason
+              : new Error("trusted frame read canceled"),
+          )
+        }
+        if (this.trustedFrameMode === "missing") {
+          return Promise.reject(new CharacterLibraryOperationError())
+        }
+        const bytes = trustedFrameBytes.slice()
+        if (this.trustedFrameMode === "tampered") {
+          const lastIndex = bytes.length - 1
+          bytes[lastIndex] = (bytes[lastIndex] ?? 0) ^ 0xff
+        }
+        return Promise.resolve(bytes.buffer)
+      },
+    }
   }
 
   public createPreviewPackRef(
@@ -251,9 +309,11 @@ function renderLibrary(
 ) {
   return render(
     <I18nProvider store={new MemoryLocaleStore(locale)}>
-      <CharacterLibraryProvider gateway={gateway}>
-        <CharacterModelLibrarySettings workspaceId="workspace-fixture" />
-      </CharacterLibraryProvider>
+      <TooltipProvider>
+        <CharacterLibraryProvider gateway={gateway}>
+          <CharacterModelLibrarySettings workspaceId="workspace-fixture" />
+        </CharacterLibraryProvider>
+      </TooltipProvider>
     </I18nProvider>,
   )
 }
@@ -264,11 +324,13 @@ function libraryTree(
 ) {
   return (
     <I18nProvider store={new MemoryLocaleStore("en")}>
-      <CharacterLibraryProvider gateway={gateway}>
-        {workspaceId === null ? null : (
-          <CharacterModelLibrarySettings workspaceId={workspaceId} />
-        )}
-      </CharacterLibraryProvider>
+      <TooltipProvider>
+        <CharacterLibraryProvider gateway={gateway}>
+          {workspaceId === null ? null : (
+            <CharacterModelLibrarySettings workspaceId={workspaceId} />
+          )}
+        </CharacterLibraryProvider>
+      </TooltipProvider>
     </I18nProvider>
   )
 }
@@ -276,7 +338,82 @@ function libraryTree(
 describe("CharacterModelLibrarySettings", () => {
   beforeEach(() => {
     document.documentElement.lang = "en"
+    createdObjectUrls.length = 0
+    let sequence = 0
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      const url = `blob:trusted-character-frame-${String(++sequence)}`
+      createdObjectUrls.push(url)
+      return url
+    })
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
   })
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it("restores the attested thumbnail and accessible hashes from restart snapshot data", async () => {
+    const firstGateway = new ModelLibraryGateway()
+    const first = renderLibrary(firstGateway)
+
+    await waitFor(() =>
+      expect(
+        first.container.querySelector(
+          `[data-character-pack="${customPack.packId}"] [data-character-thumbnail="trusted-frame"]`,
+        ),
+      ).toHaveAttribute("src", "blob:trusted-character-frame-1"),
+    )
+    expect(firstGateway.trustedFrameReads).toEqual([
+      {
+        assetId: "__coding-wife/trusted-frame.png",
+        expectedMime: "image/png",
+      },
+    ])
+    expect(
+      screen.getByLabelText(`Manifest: ${customPack.manifestHash}`),
+    ).toHaveTextContent("dddddddd…dddddddd")
+    expect(
+      screen.getByLabelText(
+        `Trusted frame: ${characterFixture.attestationRequest.thumbnailSha256}`,
+      ),
+    ).toHaveTextContent("431ced69…7f265460")
+
+    first.unmount()
+    const restartedGateway = new ModelLibraryGateway()
+    const restarted = renderLibrary(restartedGateway)
+    await waitFor(() =>
+      expect(
+        restarted.container.querySelector(
+          `[data-character-pack="${customPack.packId}"] [data-character-thumbnail="trusted-frame"]`,
+        ),
+      ).toHaveAttribute("src", "blob:trusted-character-frame-2"),
+    )
+    expect(restartedGateway.trustedFrameReads).toHaveLength(1)
+  })
+
+  it.each(["missing", "tampered"] as const)(
+    "fails closed when the persisted trusted frame is %s",
+    async (trustedFrameMode) => {
+      const gateway = new ModelLibraryGateway(
+        [builtinPack, customPack],
+        trustedFrameMode,
+      )
+      const view = renderLibrary(gateway)
+
+      await waitFor(() =>
+        expect(
+          view.container.querySelector(
+            `[data-character-pack="${customPack.packId}"] [data-character-thumbnail="unavailable"]`,
+          ),
+        ).toBeInTheDocument(),
+      )
+      expect(
+        view.container.querySelector(
+          `[data-character-pack="${customPack.packId}"] img`,
+        ),
+      ).not.toBeInTheDocument()
+      expect(createdObjectUrls).toEqual([])
+      expect(gateway.trustedFrameReads).toHaveLength(1)
+    },
+  )
 
   it("selects by keyboard and deletes an unused custom model explicitly", async () => {
     const user = userEvent.setup()

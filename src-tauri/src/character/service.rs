@@ -1242,17 +1242,15 @@ mod tests {
             .as_ref()
             .and_then(|manifest| manifest.trusted_frame.as_ref())
             .expect("persisted trusted frame");
+        let trusted_frame_request = CharacterAssetRequest {
+            pack_id: preview.pack_id.clone(),
+            asset_id: trusted_frame.asset_id.clone(),
+            manifest_hash: persisted_custom.manifest_hash.clone(),
+            expected_mime: "image/png".to_owned(),
+            preview_token: None,
+        };
         let trusted_frame_bytes = restarted
-            .read_asset(
-                "main",
-                CharacterAssetRequest {
-                    pack_id: preview.pack_id.clone(),
-                    asset_id: trusted_frame.asset_id.clone(),
-                    manifest_hash: persisted_custom.manifest_hash.clone(),
-                    expected_mime: "image/png".to_owned(),
-                    preview_token: None,
-                },
-            )
+            .read_asset("main", trusted_frame_request.clone())
             .await
             .expect("opaque trusted frame read");
         assert_eq!(
@@ -1263,7 +1261,38 @@ mod tests {
             .path()
             .join("characters/library")
             .join(preview.pack_id.strip_prefix("custom:").expect("custom id"));
-        assert!(published_directory.join(&trusted_frame.asset_id).is_file());
+        let trusted_frame_path = published_directory.join(&trusted_frame.asset_id);
+        assert!(trusted_frame_path.is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            fs::set_permissions(&trusted_frame_path, fs::Permissions::from_mode(0o600))
+                .expect("allow trusted frame failure injection");
+        }
+        let mut tampered_frame = trusted_frame_bytes.clone();
+        let last = tampered_frame.last_mut().expect("trusted frame bytes");
+        *last ^= 0xff;
+        fs::write(&trusted_frame_path, &tampered_frame).expect("tamper trusted frame");
+        assert_eq!(
+            restarted
+                .read_asset("main", trusted_frame_request.clone())
+                .await
+                .expect_err("tampered trusted frame must fail closed")
+                .code,
+            "CHARACTER-ASSET-HASH-MISMATCH"
+        );
+        fs::write(&trusted_frame_path, &trusted_frame_bytes).expect("restore trusted frame");
+        fs::remove_file(&trusted_frame_path).expect("remove trusted frame");
+        assert_eq!(
+            restarted
+                .read_asset("main", trusted_frame_request)
+                .await
+                .expect_err("missing trusted frame must fail closed")
+                .code,
+            "CHARACTER-ASSET-OPEN"
+        );
+        fs::write(&trusted_frame_path, &trusted_frame_bytes).expect("restore missing frame");
         let published_request = CharacterAssetRequest {
             pack_id: preview.pack_id.clone(),
             asset_id: moc.asset_id.clone(),

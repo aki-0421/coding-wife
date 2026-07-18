@@ -32,6 +32,11 @@ import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   IsolatedCharacterPreview,
   type IsolatedCharacterPreviewPhase,
 } from "@/features/character/import-preview/IsolatedCharacterPreview"
@@ -45,6 +50,7 @@ import {
   getCharacterModelLibraryCopy,
   type CharacterModelLibraryCopy,
 } from "@/features/character/library/model-library-copy"
+import { loadTrustedCharacterFrame } from "@/features/character/runtime/character-pack-client"
 import { useI18n, type SupportedLocale } from "@/features/localization"
 import { cn } from "@/lib/utils"
 
@@ -99,6 +105,117 @@ function replaceDate(template: string, date: string): string {
   return template.replace("{date}", date)
 }
 
+function abbreviateHash(value: string): string {
+  return `${value.slice(0, 8)}…${value.slice(-8)}`
+}
+
+function IntegrityHash({ label, value }: { label: string; value: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <code
+          aria-label={`${label}: ${value}`}
+          className="font-mono text-caption text-muted-foreground"
+        >
+          {abbreviateHash(value)}
+        </code>
+      </TooltipTrigger>
+      <TooltipContent>
+        <code className="max-w-[38ch] break-all font-mono text-caption">
+          {value}
+        </code>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+function TrustedFrameThumbnail({
+  copy,
+  pack,
+}: {
+  readonly copy: CharacterModelLibraryCopy
+  readonly pack: CharacterPackView
+}) {
+  const store = useCharacterLibraryStore()
+  const frameIdentity =
+    pack.kind === "custom" && pack.thumbnailSha256 !== null
+      ? `${pack.packId}:${pack.manifestHash}:${pack.thumbnailSha256}`
+      : null
+  const [thumbnail, setThumbnail] = useState<Readonly<{
+    identity: string
+    objectUrl: string
+  }> | null>(null)
+  const [unavailableIdentity, setUnavailableIdentity] = useState<string | null>(
+    null,
+  )
+
+  useEffect(() => {
+    if (frameIdentity === null || pack.manifest === null) return
+    const controller = new AbortController()
+    let objectUrl: string | null = null
+    void (async () => {
+      try {
+        const bytes = await loadTrustedCharacterFrame(
+          store.gateway.createPackRef(pack),
+          controller.signal,
+        )
+        if (bytes === null || controller.signal.aborted) return
+        objectUrl = URL.createObjectURL(
+          new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+        )
+        if (controller.signal.aborted) {
+          URL.revokeObjectURL(objectUrl)
+          objectUrl = null
+          return
+        }
+        setThumbnail({ identity: frameIdentity, objectUrl })
+        setUnavailableIdentity(null)
+      } catch {
+        if (!controller.signal.aborted) setUnavailableIdentity(frameIdentity)
+      }
+    })()
+    return () => {
+      controller.abort()
+      if (objectUrl !== null) URL.revokeObjectURL(objectUrl)
+    }
+  }, [frameIdentity, pack, store.gateway])
+
+  const activeThumbnail =
+    thumbnail?.identity === frameIdentity ? thumbnail.objectUrl : null
+  const unavailable =
+    frameIdentity === null || unavailableIdentity === frameIdentity
+
+  if (activeThumbnail !== null) {
+    return (
+      <img
+        alt=""
+        aria-hidden="true"
+        className="size-[54px] shrink-0 rounded-control border border-divider bg-app-bg object-contain object-bottom"
+        data-character-thumbnail="trusted-frame"
+        src={activeThumbnail}
+      />
+    )
+  }
+  if (!unavailable) {
+    return (
+      <Skeleton
+        aria-label={copy.thumbnailLoading}
+        className="size-[54px] shrink-0 rounded-control"
+        data-character-thumbnail="loading"
+      />
+    )
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-[54px] shrink-0 items-center justify-center rounded-control border border-divider bg-app-bg"
+      data-character-thumbnail="unavailable"
+    >
+      <PackageIcon className="size-5 text-muted-foreground" />
+    </span>
+  )
+}
+
 function phaseLabel(
   phase: IsolatedCharacterPreviewPhase,
   copy: CharacterModelLibraryCopy,
@@ -150,52 +267,76 @@ function ModelCard({
         id={inputId}
         value={pack.packId}
       />
-      <label className="min-w-0 cursor-pointer" htmlFor={inputId}>
-        <span className="flex min-w-0 flex-wrap items-center gap-xs">
-          <span className="truncate text-title text-text-strong">
-            {pack.displayName}
+      <label
+        className="flex min-w-0 cursor-pointer items-start gap-sm"
+        htmlFor={inputId}
+      >
+        <TrustedFrameThumbnail copy={copy} pack={pack} />
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 flex-wrap items-center gap-xs">
+            <span className="truncate text-title text-text-strong">
+              {pack.displayName}
+            </span>
+            {selected ? <Badge variant="success">{copy.selected}</Badge> : null}
+            <Badge variant="outline">
+              {pack.kind === "builtin" ? copy.bundled : copy.imported}
+            </Badge>
           </span>
-          {selected ? <Badge variant="success">{copy.selected}</Badge> : null}
-          <Badge variant="outline">
-            {pack.kind === "builtin" ? copy.bundled : copy.imported}
-          </Badge>
-        </span>
-        <span
-          className="mt-xs flex min-w-0 flex-wrap gap-x-md gap-y-xxs text-label text-muted-foreground"
-          id={detailId}
-        >
-          <span>{formatBytes(pack.totalBytes, locale)}</span>
-          <span>
-            {pack.textureCount} {copy.textures}
-          </span>
-          <span>
-            {pack.motionCount} {copy.motions}
-          </span>
-          {pack.expressionCount > 0 ? (
+          <span
+            className="mt-xs flex min-w-0 flex-wrap gap-x-md gap-y-xxs text-label text-muted-foreground"
+            id={detailId}
+          >
+            <span>{formatBytes(pack.totalBytes, locale)}</span>
             <span>
-              {pack.expressionCount} {copy.expressions}
+              {pack.textureCount} {copy.textures}
+            </span>
+            <span>
+              {pack.motionCount} {copy.motions}
+            </span>
+            {pack.expressionCount > 0 ? (
+              <span>
+                {pack.expressionCount} {copy.expressions}
+              </span>
+            ) : null}
+            <span>
+              {pack.runtimeFileCount} {copy.files}
+            </span>
+          </span>
+          <span className="mt-xs flex min-w-0 flex-wrap gap-x-md gap-y-xxs text-label text-muted-foreground">
+            <span className="inline-flex min-w-0 items-baseline gap-xxs">
+              <span>{copy.manifestHash}</span>
+              <IntegrityHash
+                label={copy.manifestHash}
+                value={pack.manifestHash}
+              />
+            </span>
+            {pack.thumbnailSha256 !== null ? (
+              <span className="inline-flex min-w-0 items-baseline gap-xxs">
+                <span>{copy.trustedFrameHash}</span>
+                <IntegrityHash
+                  label={copy.trustedFrameHash}
+                  value={pack.thumbnailSha256}
+                />
+              </span>
+            ) : null}
+          </span>
+          <span className="mt-xs block truncate text-label text-muted-foreground">
+            {pack.provenanceLabel}
+          </span>
+          {pack.importedAt !== null ? (
+            <span className="mt-xxs block text-label text-muted-foreground">
+              {replaceDate(
+                copy.importedAt,
+                formatImportedAt(pack.importedAt, locale),
+              )}
             </span>
           ) : null}
-          <span>
-            {pack.runtimeFileCount} {copy.files}
-          </span>
+          {pack.kind === "custom" && pack.selectedWorkspaceCount > 0 ? (
+            <span className="mt-xxs block text-label text-muted-foreground">
+              {replaceCount(copy.usedByWorkspaces, pack.selectedWorkspaceCount)}
+            </span>
+          ) : null}
         </span>
-        <span className="mt-xs block truncate text-label text-muted-foreground">
-          {pack.provenanceLabel}
-        </span>
-        {pack.importedAt !== null ? (
-          <span className="mt-xxs block text-label text-muted-foreground">
-            {replaceDate(
-              copy.importedAt,
-              formatImportedAt(pack.importedAt, locale),
-            )}
-          </span>
-        ) : null}
-        {pack.kind === "custom" && pack.selectedWorkspaceCount > 0 ? (
-          <span className="mt-xxs block text-label text-muted-foreground">
-            {replaceCount(copy.usedByWorkspaces, pack.selectedWorkspaceCount)}
-          </span>
-        ) : null}
       </label>
       {pack.kind === "custom" ? (
         <Button
