@@ -53,6 +53,22 @@ fn temporary_directory(label: &str) -> PathBuf {
     ))
 }
 
+fn current_support_run_directories() -> Vec<PathBuf> {
+    let process_marker = format!("-{}-", std::process::id());
+    let mut directories = std::fs::read_dir(std::env::temp_dir())
+        .expect("temporary directory")
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            (name.starts_with("coding-wife-support-") && name.contains(&process_marker))
+                .then(|| entry.path())
+        })
+        .collect::<Vec<_>>();
+    directories.sort();
+    directories
+}
+
 struct FixtureEnvironment {
     workspace: PathBuf,
     state: PathBuf,
@@ -535,18 +551,143 @@ async fn dedicated_support_runtime_proves_authority_and_injects_only_the_explain
     let state = read_state(&fixture.state).await;
     assert!(state.contains("support_sandbox_denied"));
     assert_eq!(state.matches("support_thread_contract_ok").count(), 2);
-    assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 2);
-    assert_eq!(state.matches("support_probe_wire_sent").count(), 1);
+    assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 3);
+    assert_eq!(
+        state
+            .matches("support_probe_production_envelope_ok")
+            .count(),
+        1
+    );
     assert_eq!(state.matches("support_auth_bridge_ok").count(), 1);
+    assert_eq!(state.matches("support_probe_plan_policy_event").count(), 1);
     assert!(!state.contains("support_skill_exactly_once_invalid"));
     assert!(!state.contains("commit_skill_exactly_once_ok"));
     assert!(!state.contains("coding-wife-commit-work"));
 }
 
 #[tokio::test]
+async fn support_uses_private_skill_snapshot_after_verified_source_mutation() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let resources = SkillResourceFixture::new();
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime = SupportRuntime::construct(&binary, &schema, &resources.root, Some(&auth))
+        .await
+        .expect("support runtime with private skill snapshot");
+
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(resources.explain_skill_document())
+        .and_then(|mut file| {
+            use std::io::Write;
+            file.write_all(b"\nsource mutated after construction\n")
+        })
+        .expect("mutate verified source after construction");
+
+    let result = runtime
+        .explain_commit(support_request(
+            "support-private-snapshot",
+            support_evidence("ja"),
+        ))
+        .await
+        .expect("private snapshot remains immutable");
+    assert_eq!(result.explanation.locale, "ja");
+    runtime.shutdown().await.expect("support cleanup");
+
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 3);
+    assert!(!state.contains("support_skill_exactly_once_invalid"));
+    let fake = std::fs::read_to_string(fixture_binary()).expect("fake app-server fixture");
+    assert!(!fake.contains("def update_plan_tool"));
+    assert!(!fake.contains("send_probe_wire_requests"));
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned local Codex release and a configured local account"]
+async fn real_support_release_probe_uses_the_production_turn_envelope() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let binary = discover_binary(Some(Path::new("/opt/homebrew/bin/codex")))
+        .await
+        .expect("installed Codex binary");
+    let schema = probe_schema(&binary).await.expect("installed Codex schema");
+    let repeated_schema = probe_schema(&binary)
+        .await
+        .expect("repeated installed Codex schema");
+    assert_eq!(schema.fingerprint, repeated_schema.fingerprint);
+    assert_eq!(schema.capabilities, repeated_schema.capabilities);
+    assert!(schema.generated_by_same_binary);
+    let before = current_support_run_directories();
+    let runtime = SupportRuntime::construct(
+        &binary,
+        &schema,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        None,
+    )
+    .await
+    .expect("production-equivalent release probe");
+    assert_eq!(runtime.audit().skill_name, "coding-wife-explain-commit");
+    runtime.shutdown().await.expect("real probe cleanup");
+    assert_eq!(current_support_run_directories(), before);
+}
+
+#[tokio::test]
+async fn failed_support_release_probe_leaves_no_process_or_private_directory() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("support_probe_policy_completed");
+    let before = current_support_run_directories();
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+
+    let error = match SupportRuntime::construct(
+        &binary,
+        &schema,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        None,
+    )
+    .await
+    {
+        Ok(runtime) => {
+            runtime
+                .shutdown()
+                .await
+                .expect("unexpected runtime cleanup");
+            panic!("wrong policy terminal must fail the release probe");
+        }
+        Err(error) => error,
+    };
+    assert_eq!(error, SupportRuntimeError::IsolationProbe);
+    assert_eq!(current_support_run_directories(), before);
+
+    let state = read_state(&fixture.state).await;
+    let process_id = state
+        .lines()
+        .find_map(|line| line.strip_prefix("support_process_started:"))
+        .expect("support process start audit");
+    assert!(state.contains(&format!("support_process_exited:{process_id}")));
+    assert!(state.contains("support_probe_policy_wrong_terminal"));
+    assert!(!state.contains("support_auth_bridge_ok"));
+    assert!(!state.contains("commit_skill_exactly_once_ok"));
+    let process_exists = std::process::Command::new("/bin/kill")
+        .args(["-0", process_id])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("probe process existence check")
+        .success();
+    assert!(!process_exists, "failed probe process survived cleanup");
+}
+
+#[tokio::test]
 async fn missing_or_tampered_explain_skill_blocks_support_before_wire() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
-    for case in ["missing", "skill_tampered", "manifest_tampered"] {
+    for case in [
+        "missing",
+        "skill_tampered",
+        "manifest_tampered",
+        "permissive",
+    ] {
         let fixture = FixtureEnvironment::new("default");
         let resources = SkillResourceFixture::new();
         match case {
@@ -572,6 +713,13 @@ async fn missing_or_tampered_explain_skill_blocks_support_before_wire() {
                     manifest.replace("\"schemaVersion\": 1", "\"schemaVersion\": 2"),
                 )
                 .expect("tamper skill manifest");
+            }
+            "permissive" => {
+                std::fs::set_permissions(
+                    resources.explain_skill_document(),
+                    std::fs::Permissions::from_mode(0o666),
+                )
+                .expect("make explain skill writable");
             }
             _ => unreachable!(),
         }
@@ -642,7 +790,10 @@ async fn unsafe_auth_sources_keep_support_capacity_at_zero() {
             "{case}"
         );
         let state = read_state(&fixture.state).await;
-        assert!(state.contains("support_probe_wire_sent"), "{case}: {state}");
+        assert!(
+            state.contains("support_probe_production_envelope_ok"),
+            "{case}: {state}"
+        );
         assert!(!state.contains("support_auth_bridge_ok"), "{case}: {state}");
     }
 }
@@ -721,7 +872,7 @@ async fn invalid_support_output_and_plan_events_publish_no_result() {
         assert_eq!(error, expected, "{mode}");
         runtime.shutdown().await.expect("support cleanup");
         let state = read_state(&fixture.state).await;
-        assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 2);
+        assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 3);
         if mode == "support_plan_call" {
             assert!(state.contains("interrupt_received"), "{state}");
         }
@@ -755,7 +906,7 @@ async fn support_cancellation_interrupts_the_turn_and_discards_output() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
         let state = read_state(&fixture.state).await;
-        if state.matches("support_skill_exactly_once_ok").count() == 2 {
+        if state.matches("support_skill_exactly_once_ok").count() == 3 {
             break;
         }
         assert!(

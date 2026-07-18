@@ -254,11 +254,12 @@ impl SupportRuntime {
         auth_source: Option<&Path>,
     ) -> Result<Self, SupportRuntimeError> {
         verify_release(binary, schema).await?;
-        let skill = resolve_bundled_skill(resource_directory, EXPLAIN_COMMIT_SKILL_NAME)
+        let verified_skill = resolve_bundled_skill(resource_directory, EXPLAIN_COMMIT_SKILL_NAME)
             .map_err(|_| SupportRuntimeError::Skill)?;
-        run_isolation_probe(binary, &skill).await?;
+        run_isolation_probe(binary, &verified_skill).await?;
 
         let run_directory = PrivateRunDirectory::create("runtime")?;
+        let skill = run_directory.snapshot_support_skill(&verified_skill)?;
         let auth_source = auth_source
             .map(Path::to_path_buf)
             .or_else(default_auth_source)
@@ -693,7 +694,7 @@ fn valid_full_sha(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn parse_explanation(
+pub(super) fn parse_explanation(
     text: &str,
     expected_locale: &str,
 ) -> Result<CommitExplanationV1, SupportRuntimeError> {

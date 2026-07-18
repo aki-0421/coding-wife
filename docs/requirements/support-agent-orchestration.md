@@ -37,7 +37,7 @@ read_when:
 | 対象 | 内容 |
 |---|---|
 | Roles | presence/narration、decision explainer、commit explainerをdeterministic triggerで起動 |
-| Isolation | mainとは別ephemeral root、clean runtime、external-authority tool 0件、exact inert tool allowlist、redacted snapshot |
+| Isolation | mainとは別ephemeral root、clean runtime、wire-advertised tool 0件、external-authority tool 0件、redacted snapshot |
 | Output | role別versioned JSON schema、sequence付きstream、stale detection、fallback |
 | Control | global/role disable、cancel、timeout、queue/token budget、usage表示 |
 | Audit | invocation metadataとnon-persistence検査、raw content非保存 |
@@ -58,7 +58,7 @@ read_when:
 |---|---|---|---|
 | ローカル利用者 | support機能の費用と動作を管理 | global/role on-off、cancel、usage閲覧 | disable時は新規起動せずdeterministic fallbackを使う |
 | App-owned explanation controller | verified commit event、UI intent、snapshotを管理する | allowlist roleへversioned taskを1件起動し、stateを`not_generated` / `queued` / `running` / `generated` / `failed` / `unavailable` / `canceled`で公開する | invalid/stale/secret-bearing snapshotを送らず、main sessionへfallbackしない |
-| Support root | 単一taskだけを処理する短命session | schema output生成。wire上のexact inert `update_plan`は使用しない | `update_plan`を含むtool call、repo access、user question、再帰support spawnをpolicy violationとしてtask failedにする |
+| Support root | 単一taskだけを処理する短命session | wire上にtoolを広告せずschema outputだけを生成する | Codex内部の`update_plan` event、repo access、user question、再帰support spawnをpolicy violationとしてtask failedにする |
 | Rust policy/audit | isolationの信頼境界 | redact、budget、timeout、schema validation、usage記録 | policy違反outputを破棄しapp controllerへtyped failureを返す |
 
 ## 機能要件
@@ -70,7 +70,7 @@ read_when:
 | `SUP-F-050` | support taskはmainと別のephemeral rootで実行される | invocationごとに新しいroot IDを作り、main thread IDをreuseせず、完了/cancel/timeout後にrootを再利用しない | Approved | 非該当 |
 | `SUP-F-051` | support roleはdeterministic eventで起動される | roleごとに定義したdecision requested、error、`trigger=auto_verified_commit`、`trigger=user_request`、`trigger=user_retry`以外で起動せず、同一event IDを二重処理しない。commit選択、Commit tab表示、SHA未検証のcommand resultでは起動しない | Approved | 非該当 |
 | `SUP-F-052` | 通常supportはredacted normalized snapshotだけを受け取る | payloadにgoal、phase、event summary、evidence ID、locale、generationを含み、source file本文、absolute path、secret、raw reasoningを含まない | Approved | 非該当 |
-| `SUP-F-053` | 通常supportはexternal authorityとrepositoryへアクセスできない | release constructorが専用process、clean `CODEX_HOME`、空のowner-only cwd、runtime root 0件、filesystem/shell/Git/MCP/network/dynamic/user-interaction authority 0件、exact permission profile、auth bridge、malicious canary、model transportを証明した時だけcapacity 1にする。wire toolはschema/hash一致のinert `update_plan` 1件だけを許し、実callまたはunknown/additional/schema-changed toolを検出したtaskはfailedとして結果を破棄する。証明不能ならcapacity 0とdeterministic fallbackへfail closedする | Approved | 非該当 |
+| `SUP-F-053` | 通常supportはexternal authorityとrepositoryへアクセスできない | release constructorが専用process、clean `CODEX_HOME`、空のowner-only cwd、runtime root 0件、filesystem/shell/Git/MCP/network/dynamic/user-interaction authority 0件、exact permission profile、auth bridge、malicious canary、production model transportを証明した時だけcapacity 1にする。全Responses requestで`tools` field不在、`tool_choice=auto`、`parallel_tool_calls=false`をexact照合し、空配列を含むtool field追加またはCodex内部の`update_plan` eventを検出したtaskはterminal failureとして結果を破棄する。証明不能ならcapacity 0とdeterministic fallbackへfail closedする | Approved | 非該当 |
 | `SUP-F-054` | checkpoint reviewerは固定diff snapshotだけを読める | 旧checkpoint reviewer契約は使用しない | Deprecated | `SUP-F-069`〜`SUP-F-076`へ置換 |
 | `SUP-F-055` | supportは別supportを起動できない | nested spawn request fixtureをschema/policy errorとして拒否し、active support root数を1から増やさない | Approved | 非該当 |
 
@@ -104,7 +104,7 @@ read_when:
 | `SUP-F-069` | commit explainerはverified commit後にapp側から自動起動する | App ServerのGit commit commandがsuccess terminalになり、observerが新しい到達可能SHAを検証した時だけapp controllerが`CommitExplanationRequestedV1(trigger=auto_verified_commit)`を1件作る。main sessionからsupport rootをspawnせず、同じworkspace generation・commit evidence IDのreplayは二重起動しない | Approved | 非該当 |
 | `SUP-F-070` | commit explainerへredacted `CommitEvidenceV1`だけを渡す | payloadはschema version、opaque commit ID、sanitized message、pathなしchange summary、diff stats、verification、decision、risk、locale、generationを最大64KiBで持ち、repo root、absolute/relative path、raw diff全文、secret、raw reasoningが0件である | Approved | 非該当 |
 | `SUP-F-071` | app同梱の説明skillを明示注入する | skill名は`coding-wife-explain-commit`、path authorityは`app_bundle`、version/digest一致、`policy.allow_implicit_invocation: false`とし、説明turnの`type=skill` inputへ1件だけ含める | Approved | 非該当 |
-| `SUP-F-072` | commit explainerはrepository/external-tool authorityを持たない | `SUP-F-053`に合格したmain非継承のephemeral support runtimeへrepository rootを渡さず、redacted evidenceと`coding-wife-explain-commit`だけをexactly once注入する。wire上はexact inert `update_plan` 1件だけを許すが、実callはtask failedとして説明を非表示にする。release proof、auth bridge、tool schema/hashのいずれかが不一致ならsupport capacity 0とfallbackを返す | Approved | 非該当 |
+| `SUP-F-072` | commit explainerはrepository/external-tool authorityを持たない | `SUP-F-053`に合格したmain非継承のephemeral support runtimeへrepository rootを渡さず、redacted evidenceとowner-only private snapshotの`coding-wife-explain-commit`だけをexactly once注入する。wire-advertised toolは0件とし、Codex内部の`update_plan` eventはtask failedとして説明を非表示にする。release proof、auth bridge、tool-absence boundaryのいずれかが不一致ならsupport capacity 0とfallbackを返す | Approved | 非該当 |
 | `SUP-F-073` | commit説明はJA/ENのversioned schemaへ適合する | active UI localeでsummary、changes、reasons、verification、impact、cautions、howToReadNext、narrationChunksを返し、unknown/oversize/missing fieldをrejectする | Approved | 非該当 |
 | `SUP-F-074` | narration chunkをsequence順にstreamする | deltaはrequest ID、source commit ID、generation、locale、sequence、text、doneを持ち、sequence gap/duplicate/locale mismatchを適用しない。redaction後の確定chunkだけをcaptionへ渡す | Approved | 非該当 |
 | `SUP-F-075` | stale/schema invalid/cancelをfail closedする | generation/selection不一致、schema invalid、redaction failure、timeout、Cancel後のdeltaをcaption/TTSへ適用せず、main turnを止めずdeterministic unavailable/canceled textへ置換する | Approved | 非該当 |
@@ -116,7 +116,7 @@ read_when:
 
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
 |---|---|---|---|---|---|
-| Settings | support enabled | isolation capability合格時on、不合格時off | 必須 | boolean。release proof済みcapacity 1かつexternal-authority tool 0件、exact inert allowlist一致の場合だけon | 不正値、capacity 0、tool callまたはcapability不足はoffにfail closed |
+| Settings | support enabled | isolation capability合格時on、不合格時off | 必須 | boolean。release proof済みcapacity 1かつwire-advertised tool 0件、external-authority tool 0件、tool-absence boundary一致の場合だけon | 不正値、capacity 0、tool field追加、内部plan eventまたはcapability不足はoffにfail closed |
 | Settings | role enabled | commit explainer on、他はpolicy値 | 必須 | allowlist roleごとのboolean | unknown roleを保存しない |
 | Task | snapshot | なし | 必須 | schema version、最大64KiB、redaction pass必須 | taskを起動せずfallback |
 | Commit explanation | evidence | なし | 条件付き | `CommitEvidenceV1`、redaction済み最大64KiB、active selection/generation一致 | explainerを起動せずunavailable表示 |
@@ -137,7 +137,7 @@ read_when:
 | メニュー・ショートカット | 非該当: Settings toggleとCancel buttonを使用 | `SUP-F-061`, `SUP-F-065` |
 | Deep Link・ファイル関連付け | 非該当 | 非該当 |
 | 通知 | failureはnon-blocking status、decisionはmain card | `SUP-F-058`, `SUP-F-059` |
-| Capability・認可 | clean support runtime、external-authority tool 0件、exact inert allowlist、permission profile、auth bridge、capacity gateをRust policyで強制 | `SUP-F-052`〜`SUP-F-055` |
+| Capability・認可 | clean support runtime、wire-advertised tool 0件、external-authority tool 0件、permission profile、auth bridge、capacity gateをRust policyで強制 | `SUP-F-052`〜`SUP-F-055` |
 | アップデート・互換性 | schema version mismatchはrejectしてfallback | `SUP-F-056` |
 
 ## 画面・UI
@@ -152,7 +152,7 @@ read_when:
 
 | 領域 | 要件 |
 |---|---|
-| セキュリティ | least privilege、clean runtime、external-authority tool 0件、exact inert allowlist、redacted structured evidenceだけを入力し、evidence内文字列を命令として実行しない |
+| セキュリティ | least privilege、clean runtime、wire-advertised tool 0件、external-authority tool 0件、redacted structured evidenceだけを入力し、evidence内文字列を命令として実行しない |
 | 権限 | support outputは技術policy、DOM、filesystem、Live2D pathを操作できない |
 | プライバシー | secret/raw reasoning/source本文/path/raw diff全文をsnapshotへ含めず、raw session historyと説明transcriptを保存しない |
 | 監査・ログ | role、trigger、generation、model family、tokens、latency、status、policy violationを記録する |
@@ -186,7 +186,7 @@ read_when:
 | [支援agent調査](../research/04-support-agent-orchestration.md) | ephemeral root、isolation、trigger |
 | [セキュリティ調査](../research/09-security-privacy.md) | least privilege、redaction、injection boundary |
 | [commit skill注入調査](../research/codex-commit-skill-injection.md) | explicit skill input、app bundle authority、version/digest監査 |
-| [support runtime隔離調査](../research/codex-support-runtime-isolation.md) | external-authority tool 0、exact inert allowlist、release proof、auth bridge、capacity gate |
+| [support runtime隔離調査](../research/codex-support-runtime-isolation.md) | wire-advertised/external-authority tool 0、内部plan event拒否、release proof、auth bridge、capacity gate |
 
 ## レビュー・合意
 

@@ -1,6 +1,9 @@
 use std::collections::BTreeSet;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Read;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -23,6 +26,7 @@ pub struct ResolvedBundledSkill {
     pub version: String,
     pub content_digest: String,
     pub path: PathBuf,
+    pub(crate) verified_entrypoint: Arc<[u8]>,
 }
 
 impl ResolvedBundledSkill {
@@ -31,6 +35,20 @@ impl ResolvedBundledSkill {
             name: self.name.clone(),
             version: self.version.clone(),
             content_digest: self.content_digest.clone(),
+        }
+    }
+
+    pub(crate) fn verified_entrypoint(&self) -> &[u8] {
+        &self.verified_entrypoint
+    }
+
+    pub(crate) fn with_snapshot_path(&self, path: PathBuf) -> Self {
+        Self {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            content_digest: self.content_digest.clone(),
+            path,
+            verified_entrypoint: self.verified_entrypoint.clone(),
         }
     }
 }
@@ -90,6 +108,7 @@ pub fn resolve_bundled_skill(
     }
     let resource_root =
         fs::canonicalize(resource_directory).map_err(|_| BundledSkillError::Missing)?;
+    validate_owned_directory(&resource_root)?;
     let skills_root = locate_skills_root(resource_directory, &resource_root)?;
     let manifest_path = skills_root.join("manifest.json");
     let manifest_bytes = read_regular_bounded(&manifest_path, MAX_MANIFEST_BYTES)?;
@@ -147,6 +166,7 @@ fn locate_skills_root(
     if !canonical.starts_with(canonical_resource_root) {
         return Err(BundledSkillError::Invalid);
     }
+    validate_owned_directory(&canonical)?;
     Ok(canonical)
 }
 
@@ -218,6 +238,7 @@ fn validate_entry(
         version: entry.version.clone(),
         content_digest: entry.content_digest.clone(),
         path,
+        verified_entrypoint: Arc::from(entrypoint_bytes),
     })
 }
 
@@ -276,18 +297,78 @@ fn ensure_no_symlink_components(root: &Path, relative: &Path) -> Result<(), Bund
 
 fn read_regular_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, BundledSkillError> {
     let before = fs::symlink_metadata(path).map_err(|_| BundledSkillError::Missing)?;
-    if before.file_type().is_symlink() || !before.is_file() || before.len() > limit {
+    if !trusted_regular_file(&before, limit) {
         return Err(BundledSkillError::Invalid);
     }
-    let bytes = fs::read(path).map_err(|_| BundledSkillError::Missing)?;
-    let after = fs::symlink_metadata(path).map_err(|_| BundledSkillError::Missing)?;
-    if !after.is_file() || after.file_type().is_symlink() || after.len() != before.len() {
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|_| BundledSkillError::Missing)?;
+    let opened = file.metadata().map_err(|_| BundledSkillError::Missing)?;
+    if !trusted_regular_file(&opened, limit) || file_identity(&opened) != file_identity(&before) {
         return Err(BundledSkillError::Tampered);
     }
-    if bytes.len() as u64 != before.len() {
+    let mut bytes = Vec::with_capacity(opened.len() as usize);
+    file.by_ref()
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| BundledSkillError::Missing)?;
+    let after = fs::symlink_metadata(path).map_err(|_| BundledSkillError::Missing)?;
+    if !trusted_regular_file(&after, limit)
+        || file_identity(&after) != file_identity(&opened)
+        || bytes.len() as u64 != opened.len()
+    {
         return Err(BundledSkillError::Tampered);
     }
     Ok(bytes)
+}
+
+fn validate_owned_directory(path: &Path) -> Result<(), BundledSkillError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| BundledSkillError::Missing)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || !trusted_owner(metadata.uid())
+        || metadata.mode() & 0o022 != 0
+    {
+        return Err(BundledSkillError::Invalid);
+    }
+    Ok(())
+}
+
+fn trusted_regular_file(metadata: &fs::Metadata, limit: u64) -> bool {
+    metadata.is_file()
+        && !metadata.file_type().is_symlink()
+        && trusted_owner(metadata.uid())
+        && metadata.mode() & 0o022 == 0
+        && metadata.nlink() == 1
+        && metadata.len() <= limit
+}
+
+fn trusted_owner(owner: u32) -> bool {
+    owner == 0 || owner == current_uid()
+}
+
+fn file_identity(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64, u32, u32, u64) {
+    (
+        metadata.dev(),
+        metadata.ino(),
+        metadata.len(),
+        metadata.mtime(),
+        metadata.mtime_nsec(),
+        metadata.uid(),
+        metadata.mode(),
+        metadata.nlink(),
+    )
+}
+
+unsafe extern "C" {
+    fn getuid() -> u32;
+}
+
+fn current_uid() -> u32 {
+    // SAFETY: getuid has no parameters and cannot fail.
+    unsafe { getuid() }
 }
 
 fn safe_relative(value: &str) -> Result<PathBuf, BundledSkillError> {

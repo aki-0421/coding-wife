@@ -24,7 +24,7 @@ read_when:
 
 ただし、Codex App Server 自体が実験機能であり、サーバーは交渉済み capability を initialize 応答へ列挙しない。したがって、CLI の版文字列だけを信用せず、その CLI 自身が生成した実験 API スキーマの fingerprint、initialize の成否、model/list の結果を組み合わせた feature detection が必要である。
 
-サポートエージェントは追加調査により Conditional Go とする。専用 process、clean `CODEX_HOME`、`shell_tool=false`、environment / runtime root / MCP / dynamic tool / orchestrator capability 0、permission profile、mock Responses wire capture を組み合わせると、external-authority tool を 0 件にできる。wire 上には無条件登録の inert `update_plan` が 1 件だけ残るため、exact schema/hash allowlist と「呼び出されたら task failed」の runtime policy を必須にする。詳細と 0.144.5 の canary 実測は [Codex support runtime の実効権限ゼロ隔離調査](codex-support-runtime-isolation.md)を正本とする。証明に一つでも失敗した場合はサポートセッション数 0、決定的なローカル集約へ fail closed する。
+サポートエージェントは追加調査により Conditional Go とする。専用process、clean `CODEX_HOME`、`shell_tool=false`、environment / runtime root / MCP / dynamic tool / orchestrator capability 0、permission profile、production-equivalent mock Responses wire captureを組み合わせると、wire-advertised/external-authority toolを0件にできる。0.144.5の`gpt-5.6-sol`実wireでは`tools` fieldが不在で、`tools=[]`、tool追加、`tool_choice=auto`または`parallel_tool_calls=false`からの変化をfail closedにする。一方、Codex内部の`update_plan` eventは発火可能なため、「受けたらtask failed・結果非公開」のruntime policyも必須にする。詳細と0.144.5のcanary実測は[Codex support runtime の実効権限ゼロ隔離調査](codex-support-runtime-isolation.md)を正本とする。証明に一つでも失敗した場合はサポートセッション数0、決定的なローカル集約へfail closedする。
 
 ## 上位仕様と適用順
 
@@ -91,11 +91,14 @@ codex app-server generate-ts --experimental --out <temp>/ts-experimental
 | 生成物 | SHA-256 |
 | --- | --- |
 | experimental JSON Schema v2 bundle | 3fee65961a60bfe1fbbd5e36131ca9390f6b740d178e58e9ee155b4fa6ce5e62 |
+| release canonical JSON schema tree | efea5c6649ccbae7e26af47874bca302e0803d6db80571d57cd55841890dddbc |
 | experimental ClientRequest.ts | ba1f52da673f4a64b730dcdf5c89a87ea45a82b4dc7c8686bde530a677ddb6a7 |
 | experimental ServerRequest.ts | 1c5837adbfbdd005f387478ba87840808d1353b47b82dcf63739a78bb1c8d3be |
 | experimental ServerNotification.ts | 9ed1f223e22f54dff50a57ba15a2e4046b516401dfdd14c0deac8ac3363c37b8 |
 | experimental ThreadStartParams.ts | e0e0945689a416da27140bd466276a79e33d61539af1ad7ccaeb0dc792fb59a4 |
 | experimental TurnStartParams.ts | b876212f33e15754db8242ce9367318c6ee3a96686216663a37869c40a8b3d7f |
+
+release canonical tree fingerprintはrelative pathとsemantic JSONをhashし、object keyだけを再帰sortする。array順序、`required`順序、値型は保持する。bundle/file単体のhashとは用途が異なり、release constructorは0.144.5 exact binaryから反復生成したこの値をallowlistする。
 
 stable と experimental の生成差分も確認した。dynamicTools、environments、runtimeWorkspaceRoots、allowProviderModelFallback 等の ThreadStartParams field は experimental 出力にのみ現れる。一方、ServerRequest の union には requestUserInput と item/tool/call が stable 出力にも含まれるが、requestUserInput の型コメント自体は EXPERIMENTAL である。ファイルの存在だけを capability の証明にしてはいけない。
 
@@ -535,7 +538,7 @@ restart loop は指数 backoff と jitter を使い、短時間の連続 crash 3
 - 添付 path は Rust で workspace containment を確認する。
 - App Server の stdout をブラウザ console へ出さない。
 - review diff は 1 MiB 上限、一般ログへ出さない。
-- support audit は専用 run directory、ephemeral thread、session DB / rollout、cleanup、wire tool fingerprint を検証する。external-authority tool 0、exact inert tool allowlist、profile、auth bridge、malicious canary の全証明が揃わなければ capability を supported にしない。
+- support auditは専用run directory、ephemeral thread、session DB / rollout、cleanup、tool-absence fingerprintを検証する。wire-advertised/external-authority tool 0、`tools` field不在、internal plan event拒否、profile、auth bridge、malicious canaryの全証明が揃わなければcapabilityをsupportedにしない。
 
 ## 実装とsupport gate
 
@@ -548,7 +551,7 @@ restart loop は指数 backoff と jitter を使い、短時間の連続 crash 3
 - native requestUserInput: Conditional Go。experimentalApi、schema、厳密 validator、fail-closed が条件。
 - dynamic tools: Mechanism only。汎用 tool は登録せず、具体的な意味 API ごとに追加審査する。
 - detached review: Go。main thread と reviewThreadId を分離して追跡する。
-- ephemeral support / fixed reviewer support: Conditional Go。external-authority tool 0、exact inert `update_plan` allowlist、空の owner-only cwd、runtime root 0、permission profile、auth bridge、malicious canary、model transport の release proof が条件。
+- ephemeral support / fixed reviewer support: Conditional Go。wire-advertised/external-authority tool 0、tool field不在、internal `update_plan` event拒否、空のowner-only cwd、runtime root 0、permission profile、auth bridge、malicious canary、production model transportのrelease proofが条件。
 - transport 自動再送: No-Go。切断後の user turn は自動 replay しない。
 
 次回再検証は Codex binary の canonical path、version、hash、experimental schema fingerprint のいずれかが変わった時、またはリリース候補作成時に行う。

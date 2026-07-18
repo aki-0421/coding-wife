@@ -118,7 +118,7 @@ MCP自体の脅威と防御については[SEC-04](#sec-04)も参照する。
 - Permission profile が local sandboxed command の filesystem / network を制約し、macOS では Seatbelt で強制されること。
 - 強制できない policy を unsandboxed で続行せず、command を拒否すること。
 - 0.144.5 では shell tool と environment-dependent tool を明示的に除去できること。
-- `update_plan` が通常 thread の core utility として残るため、tool 配列 0 ではなく external-authority tool 0 を検証すべきこと。
+- `update_plan`のinternal handlerは通常threadに残る一方、production modelの実Responses wireでは`tools` field不在になり得ること。したがってsource上のhandler登録とwire-advertised tool 0を分離し、internal plan eventもapp policyで拒否する必要があること。
 - environment、MCP、dynamic tool、orchestrator skill、request user input の未指定既定に依存せず、clean config と実 wire capture で確認する必要があること。
 
 公式 source は moving `main` ではなく `rust-v0.144.5` の peeled commit `87db9bc18ba5bc82c1cb4e4381b44f693ee35623` に固定した。Codex 更新時は同じ source path だけでなく、generated schema と mock Responses wire probe も再実行する。

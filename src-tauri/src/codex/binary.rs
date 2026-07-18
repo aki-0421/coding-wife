@@ -25,6 +25,8 @@ const MAX_SCHEMA_DEPTH: usize = 16;
 const MAX_SCHEMA_FILES: usize = 2_048;
 const MAX_SCHEMA_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_SCHEMA_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_VERIFIED_BINARY_BYTES: u64 = 512 * 1024 * 1024;
+const BINARY_HASH_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedBinaryIdentity {
@@ -175,19 +177,49 @@ fn validate_parent_chain(canonical_path: &Path, user_uid: u32) -> Result<(), Bin
 }
 
 async fn sha256_file(path: &Path) -> Result<String, BinaryError> {
-    let mut file = tokio::fs::File::open(path)
+    let metadata = tokio::fs::symlink_metadata(path)
         .await
         .map_err(|_| BinaryError::Io)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; 64 * 1024];
-    loop {
-        let count = file.read(&mut buffer).await.map_err(|_| BinaryError::Io)?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_VERIFIED_BINARY_BYTES {
+        return Err(BinaryError::Untrusted);
     }
-    Ok(hex::encode(hasher.finalize()))
+    let expected = FileIdentity::from_metadata(&metadata);
+    let mut options = tokio::fs::OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let mut file = options.open(path).await.map_err(|_| BinaryError::Io)?;
+    let opened = file.metadata().await.map_err(|_| BinaryError::Io)?;
+    if !opened.is_file() || FileIdentity::from_metadata(&opened) != expected {
+        return Err(BinaryError::Untrusted);
+    }
+    tokio::time::timeout(BINARY_HASH_TIMEOUT, async move {
+        let mut hasher = Sha256::new();
+        let mut total = 0_u64;
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        loop {
+            let count = file.read(&mut buffer).await.map_err(|_| BinaryError::Io)?;
+            if count == 0 {
+                break;
+            }
+            total = total.saturating_add(count as u64);
+            if total > metadata.len() || total > MAX_VERIFIED_BINARY_BYTES {
+                return Err(BinaryError::Untrusted);
+            }
+            hasher.update(&buffer[..count]);
+            tokio::task::yield_now().await;
+        }
+        if total != metadata.len() {
+            return Err(BinaryError::Untrusted);
+        }
+        let after = file.metadata().await.map_err(|_| BinaryError::Io)?;
+        if FileIdentity::from_metadata(&after) != expected {
+            return Err(BinaryError::Untrusted);
+        }
+        Ok(hex::encode(hasher.finalize()))
+    })
+    .await
+    .map_err(|_| BinaryError::Timeout)?
 }
 
 async fn inspect_trusted_identity(path: &Path) -> Result<VerifiedBinaryIdentity, BinaryError> {
@@ -478,16 +510,14 @@ pub async fn discover_binary(explicit_path: Option<&Path>) -> Result<BinaryInfo,
     Err(BinaryError::Missing)
 }
 
-struct DigestReader<'a, R> {
+struct CountingReader<R> {
     inner: R,
-    digest: &'a mut Sha256,
     bytes_read: u64,
 }
 
-impl<R: Read> Read for DigestReader<'_, R> {
+impl<R: Read> Read for CountingReader<R> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         let count = self.inner.read(buffer)?;
-        self.digest.update(&buffer[..count]);
         self.bytes_read = self.bytes_read.saturating_add(count as u64);
         Ok(count)
     }
@@ -497,6 +527,43 @@ impl<R: Read> Read for DigestReader<'_, R> {
 struct SchemaSet {
     fingerprint: String,
     documents: BTreeMap<String, Value>,
+}
+
+fn write_canonical_json(value: &Value, output: &mut Vec<u8>) -> Result<(), BinaryError> {
+    match value {
+        Value::Null => output.extend_from_slice(b"null"),
+        Value::Bool(value) => output.extend_from_slice(if *value { b"true" } else { b"false" }),
+        Value::Number(value) => output.extend_from_slice(value.to_string().as_bytes()),
+        Value::String(value) => {
+            serde_json::to_writer(output, value).map_err(|_| BinaryError::SchemaUnsupported)?;
+        }
+        Value::Array(values) => {
+            output.push(b'[');
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    output.push(b',');
+                }
+                write_canonical_json(value, output)?;
+            }
+            output.push(b']');
+        }
+        Value::Object(values) => {
+            output.push(b'{');
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+            for (index, (key, value)) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(b',');
+                }
+                serde_json::to_writer(&mut *output, key)
+                    .map_err(|_| BinaryError::SchemaUnsupported)?;
+                output.push(b':');
+                write_canonical_json(value, output)?;
+            }
+            output.push(b'}');
+        }
+    }
+    Ok(())
 }
 
 fn collect_schema_files(root: &Path) -> Result<Vec<PathBuf>, BinaryError> {
@@ -557,27 +624,22 @@ fn load_schema_set(root: &Path) -> Result<SchemaSet, BinaryError> {
             return Err(BinaryError::SchemaUnsupported);
         }
 
-        hasher.update(relative.as_bytes());
-        hasher.update([0]);
         let file = File::open(&path).map_err(|_| BinaryError::Io)?;
         let opened = file.metadata().map_err(|_| BinaryError::Io)?;
         if FileIdentity::from_metadata(&opened) != before {
             return Err(BinaryError::SchemaUnsupported);
         }
-        let mut digest_reader = DigestReader {
+        let mut reader = CountingReader {
             inner: BufReader::new(file).take(MAX_SCHEMA_FILE_BYTES + 1),
-            digest: &mut hasher,
             bytes_read: 0,
         };
-        let mut deserializer = serde_json::Deserializer::from_reader(&mut digest_reader);
+        let mut deserializer = serde_json::Deserializer::from_reader(&mut reader);
         let value =
             Value::deserialize(&mut deserializer).map_err(|_| BinaryError::SchemaUnsupported)?;
         deserializer
             .end()
             .map_err(|_| BinaryError::SchemaUnsupported)?;
-        if digest_reader.bytes_read != before.size
-            || digest_reader.bytes_read > MAX_SCHEMA_FILE_BYTES
-        {
+        if reader.bytes_read != before.size || reader.bytes_read > MAX_SCHEMA_FILE_BYTES {
             return Err(BinaryError::SchemaUnsupported);
         }
         let after = std::fs::symlink_metadata(&path).map_err(|_| BinaryError::Io)?;
@@ -587,6 +649,11 @@ fn load_schema_set(root: &Path) -> Result<SchemaSet, BinaryError> {
         {
             return Err(BinaryError::SchemaUnsupported);
         }
+        let mut canonical = Vec::with_capacity(before.size as usize);
+        write_canonical_json(&value, &mut canonical)?;
+        hasher.update(relative.as_bytes());
+        hasher.update([0]);
+        hasher.update(canonical);
         hasher.update([0]);
         if documents.insert(relative, value).is_some() {
             return Err(BinaryError::SchemaUnsupported);
@@ -1053,6 +1120,17 @@ mod tests {
         .expect("valid actual-schema subset fixture")
     }
 
+    fn schema_fingerprint(label: &str, document: &str) -> String {
+        let directory = temporary_directory(label);
+        std::fs::create_dir(&directory).expect("schema fixture directory");
+        std::fs::write(directory.join("schema.json"), document).expect("schema fixture document");
+        let fingerprint = load_schema_set(&directory)
+            .expect("supported schema fixture")
+            .fingerprint;
+        std::fs::remove_dir_all(directory).expect("schema fixture cleanup");
+        fingerprint
+    }
+
     #[test]
     fn explicit_path_is_the_only_candidate() {
         let candidates = candidate_paths(Some(Path::new("/fixture/codex")));
@@ -1113,6 +1191,39 @@ mod tests {
             Err(BinaryError::Untrusted)
         ));
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn executable_hash_is_exact_and_rejects_unbounded_files_before_reading() {
+        let directory = temporary_directory("bounded-hash");
+        std::fs::create_dir(&directory).expect("hash fixture directory");
+
+        let valid = directory.join("valid");
+        std::fs::write(&valid, b"abc").expect("valid hash fixture");
+        assert_eq!(
+            sha256_file(&valid).await.expect("bounded hash"),
+            hex::encode(Sha256::digest(b"abc"))
+        );
+
+        let empty = directory.join("empty");
+        std::fs::write(&empty, b"").expect("empty hash fixture");
+        assert!(matches!(
+            sha256_file(&empty).await,
+            Err(BinaryError::Untrusted)
+        ));
+
+        let oversized = directory.join("oversized");
+        let file = File::create(&oversized).expect("oversized hash fixture");
+        file.set_len(MAX_VERIFIED_BINARY_BYTES + 1)
+            .expect("sparse oversized hash fixture");
+        let started = std::time::Instant::now();
+        assert!(matches!(
+            sha256_file(&oversized).await,
+            Err(BinaryError::Untrusted)
+        ));
+        assert!(started.elapsed() < Duration::from_secs(1));
+
+        std::fs::remove_dir_all(directory).expect("hash fixture cleanup");
     }
 
     #[tokio::test]
@@ -1182,6 +1293,30 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&linked);
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn schema_fingerprint_canonicalizes_only_recursive_object_key_order() {
+        let original = schema_fingerprint(
+            "canonical-original",
+            r#"{"z":{"b":2,"a":1},"required":["b","a"],"value":true}"#,
+        );
+        let reordered_objects = schema_fingerprint(
+            "canonical-reordered",
+            r#"{"value":true,"required":["b","a"],"z":{"a":1,"b":2}}"#,
+        );
+        let reordered_array = schema_fingerprint(
+            "canonical-array",
+            r#"{"z":{"b":2,"a":1},"required":["a","b"],"value":true}"#,
+        );
+        let changed_value_type = schema_fingerprint(
+            "canonical-type",
+            r#"{"z":{"b":2,"a":1},"required":["b","a"],"value":"true"}"#,
+        );
+
+        assert_eq!(original, reordered_objects);
+        assert_ne!(original, reordered_array);
+        assert_ne!(original, changed_value_type);
     }
 
     #[test]

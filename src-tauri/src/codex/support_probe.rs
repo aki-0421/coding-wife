@@ -10,51 +10,16 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 pub(crate) const EXPECTED_SUPPORT_TOOL_HASH: &str =
-    "bf40955dc6fcaf0b8dde5d9aa5be79683772350a9faa71d4701c655a96a87620";
+    "d80288c65b8499fb7955ab8447dbcf86d925420f50a01570d26d28e776d8a393";
 const MAX_HTTP_HEADER_BYTES: usize = 32 * 1024;
 const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
 
-pub(crate) fn expected_support_tools() -> Value {
-    json!([{
-        "type": "function",
-        "name": "update_plan",
-        "description": "Updates the task plan.\nProvide an optional explanation and a list of plan items, each with a step and status.\nAt most one step can be in_progress at a time.\n",
-        "strict": false,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "explanation": {
-                    "type": "string",
-                    "description": "Optional explanation for this plan update."
-                },
-                "plan": {
-                    "type": "array",
-                    "description": "The list of steps",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "status": {
-                                "type": "string",
-                                "description": "Step status.",
-                                "enum": ["pending", "in_progress", "completed"]
-                            },
-                            "step": {
-                                "type": "string",
-                                "description": "Task step text."
-                            }
-                        },
-                        "required": ["step", "status"],
-                        "additionalProperties": false
-                    }
-                }
-            },
-            "required": ["plan"],
-            "additionalProperties": false
-        }
-    }])
+#[cfg(test)]
+fn support_tool_boundary() -> Value {
+    json!({"toolsField": "absent"})
 }
 
-pub(crate) fn canonical_tool_hash(value: &Value) -> Result<String, serde_json::Error> {
+pub(crate) fn canonical_json_hash(value: &Value) -> Result<String, serde_json::Error> {
     serde_json::to_vec(value).map(|bytes| hex::encode(Sha256::digest(bytes)))
 }
 
@@ -146,8 +111,8 @@ impl ProbeCaptureServer {
                     captured.len()
                 };
                 let response_id = format!("resp-{ordinal}");
-                let output = if ordinal == 1 {
-                    json!({
+                let output = match ordinal {
+                    1 => json!({
                         "type": "response.output_item.done",
                         "item": {
                             "type": "function_call",
@@ -155,17 +120,36 @@ impl ProbeCaptureServer {
                             "name": "shell_command",
                             "arguments": serde_json::to_string(&json!({"command": thread_command})).unwrap_or_default()
                         }
-                    })
-                } else {
-                    json!({
+                    }),
+                    2 => json!({
                         "type": "response.output_item.done",
                         "item": {
                             "type": "message",
                             "role": "assistant",
                             "id": format!("msg-{ordinal}"),
-                            "content": [{"type": "output_text", "text": "{\"ok\":true}"}]
+                            "content": [{"type": "output_text", "text": probe_explanation()}]
                         }
-                    })
+                    }),
+                    3 => json!({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "function_call",
+                            "call_id": "forbidden-plan-call",
+                            "name": "update_plan",
+                            "arguments": serde_json::to_string(&json!({
+                                "plan": [{"step": "must remain unsupported", "status": "in_progress"}]
+                            })).unwrap_or_default()
+                        }
+                    }),
+                    _ => json!({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "message",
+                            "role": "assistant",
+                            "id": format!("msg-{ordinal}"),
+                            "content": [{"type": "output_text", "text": probe_explanation()}]
+                        }
+                    }),
                 };
                 let events = [
                     json!({"type": "response.created", "response": {"id": response_id}}),
@@ -237,6 +221,26 @@ impl ProbeCaptureServer {
             let _ = thread.join();
         }
     }
+}
+
+fn probe_explanation() -> String {
+    serde_json::to_string(&json!({
+        "schemaVersion": 1,
+        "locale": "ja",
+        "summary": "隔離された説明実行のリリース境界を確認しました。",
+        "changes": ["本番と同一の出力契約を検証しました。"],
+        "reasons": ["support runtime の権限を固定するためです。"],
+        "verification": ["本番モデル、低 effort、完全な schema を確認しました。"],
+        "impact": ["外部ツール権限は追加されません。"],
+        "cautions": ["実リポジトリの内容は使用していません。"],
+        "howToReadNext": ["検証済み evidence を確認してください。"],
+        "narrationChunks": [{
+            "sequence": 1,
+            "section": "summary",
+            "text": "隔離された説明実行のリリース境界を確認しました。"
+        }]
+    }))
+    .expect("static probe explanation")
 }
 
 fn shell_quote(value: impl AsRef<std::ffi::OsStr>) -> String {
@@ -333,13 +337,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pinned_update_plan_schema_has_the_researched_hash() {
-        let tools = expected_support_tools();
+    fn pinned_absent_tools_boundary_has_the_researched_hash() {
         assert_eq!(
-            canonical_tool_hash(&tools).expect("canonical hash"),
+            canonical_json_hash(&support_tool_boundary()).expect("canonical hash"),
             EXPECTED_SUPPORT_TOOL_HASH
         );
-        assert_eq!(tools.as_array().expect("tools").len(), 1);
-        assert_eq!(tools[0]["name"], "update_plan");
+        assert_eq!(support_tool_boundary(), json!({"toolsField": "absent"}));
     }
 }

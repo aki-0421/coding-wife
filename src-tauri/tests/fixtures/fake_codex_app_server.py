@@ -9,7 +9,6 @@ import stat
 import sys
 import threading
 import time
-import urllib.request
 
 
 MODE = os.environ.get("CODING_WIFE_CODEX_FAKE_MODE", "default")
@@ -104,6 +103,18 @@ def validate_skill(inputs, expected_name):
             return False, None
         if skill_path.parent.name != expected_name:
             return False, None
+        if expected_name == "coding-wife-explain-commit":
+            private_shape = (
+                skill_path.parent.parent.name == "skills"
+                and skill_path.parent.parent.parent.name.startswith(
+                    "coding-wife-support-"
+                )
+                and stat.S_IMODE(skill_path.stat().st_mode) == 0o600
+                and stat.S_IMODE(skill_path.parent.stat().st_mode) == 0o700
+                and stat.S_IMODE(skill_path.parent.parent.stat().st_mode) == 0o700
+            )
+            digest = "sha256:" + hashlib.sha256(skill_path.read_bytes()).hexdigest()
+            return private_shape, (skill.get("name"), "1.1.0", digest)
         manifest_path = skill_path.parents[1] / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         entries = [
@@ -130,96 +141,6 @@ def validate_skill(inputs, expected_name):
         )
     except (IndexError, json.JSONDecodeError, OSError, TypeError, ValueError):
         return False, None
-
-
-def update_plan_tool():
-    return {
-        "type": "function",
-        "name": "update_plan",
-        "description": "Updates the task plan.\nProvide an optional explanation and a list of plan items, each with a step and status.\nAt most one step can be in_progress at a time.\n",
-        "strict": False,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "explanation": {
-                    "type": "string",
-                    "description": "Optional explanation for this plan update.",
-                },
-                "plan": {
-                    "type": "array",
-                    "description": "The list of steps",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "status": {
-                                "type": "string",
-                                "description": "Step status.",
-                                "enum": ["pending", "in_progress", "completed"],
-                            },
-                            "step": {
-                                "type": "string",
-                                "description": "Task step text.",
-                            },
-                        },
-                        "required": ["step", "status"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            "required": ["plan"],
-            "additionalProperties": False,
-        },
-    }
-
-
-def probe_base_url():
-    config = pathlib.Path(os.environ.get("CODEX_HOME", "")) / "config.toml"
-    try:
-        for line in config.read_text(encoding="utf-8").splitlines():
-            if line.startswith("base_url = "):
-                return json.loads(line.split("=", 1)[1].strip())
-    except (OSError, json.JSONDecodeError):
-        return None
-    return None
-
-
-def send_probe_wire_requests():
-    base_url = probe_base_url()
-    if not base_url:
-        return False
-    first = {
-        "model": "mock-model",
-        "parallel_tool_calls": False,
-        "tools": [update_plan_tool()],
-        "input": [],
-    }
-    second = {
-        "model": "mock-model",
-        "parallel_tool_calls": False,
-        "tools": [update_plan_tool()],
-        "input": [
-            {
-                "type": "function_call_output",
-                "call_id": "malicious-shell-call",
-                "output": "unsupported call: shell_command",
-            }
-        ],
-    }
-    try:
-        for payload in (first, second):
-            request = urllib.request.Request(
-                base_url + "/responses",
-                data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(request, timeout=5) as response:
-                response.read()
-        record("support_probe_wire_sent")
-        return True
-    except (OSError, ValueError):
-        record("support_probe_wire_failed")
-        return False
 
 
 def support_explanation(locale):
@@ -290,6 +211,8 @@ def main():
     if not args or args[0] != "app-server":
         return 2
 
+    if EXECUTION_CLASS == "support":
+        record(f"support_process_started:{os.getpid()}")
     pending_fixture = []
     for raw_line in sys.stdin.buffer:
         try:
@@ -408,7 +331,7 @@ def main():
                 cwd = pathlib.Path(params.get("cwd", ""))
                 support_valid = (
                     method == "thread/start"
-                    and params.get("model") in ("mock-model", "gpt-5.6-sol")
+                    and params.get("model") == "gpt-5.6-sol"
                     and params.get("approvalPolicy") == "never"
                     and params.get("permissions") == "coding-wife-support-zero"
                     and params.get("ephemeral") is True
@@ -541,14 +464,31 @@ def main():
             except (json.JSONDecodeError, TypeError):
                 continuation = None
             if EXECUTION_CLASS == "support":
+                required_output = params.get("outputSchema", {}).get("required")
                 valid = (
                     params.get("threadId") == "support-thread-fixture"
+                    and params.get("model") == "gpt-5.6-sol"
+                    and params.get("effort") == "low"
+                    and isinstance(params.get("clientUserMessageId"), str)
                     and params.get("approvalPolicy") == "never"
                     and params.get("permissions") == "coding-wife-support-zero"
                     and params.get("environments") == []
                     and params.get("runtimeWorkspaceRoots") == []
                     and isinstance(params.get("outputSchema"), dict)
                     and params["outputSchema"].get("additionalProperties") is False
+                    and required_output
+                    == [
+                        "schemaVersion",
+                        "locale",
+                        "summary",
+                        "changes",
+                        "reasons",
+                        "verification",
+                        "impact",
+                        "cautions",
+                        "howToReadNext",
+                        "narrationChunks",
+                    ]
                     and "serviceTier" not in params
                     and "collaborationMode" not in params
                     and "multiAgentMode" not in params
@@ -609,23 +549,21 @@ def main():
                 send({"id": message_id, "error": {"code": -32602, "message": "Invalid params"}})
                 continue
             if EXECUTION_CLASS == "support":
-                output_schema = params["outputSchema"]
-                probe_turn = output_schema.get("required") == ["ok"]
+                try:
+                    envelope = json.loads(input_text)
+                except (json.JSONDecodeError, TypeError):
+                    envelope = {}
+                probe_turn = envelope.get("requestId") == "support-release-probe"
+                policy_probe_turn = (
+                    envelope.get("requestId") == "support-release-policy-probe"
+                )
                 if probe_turn:
-                    if not send_probe_wire_requests():
-                        send(
-                            {
-                                "id": message_id,
-                                "error": {"code": -32603, "message": "Probe failed"},
-                            }
-                        )
-                        continue
-                    output = '{"ok":true}'
+                    record("support_probe_production_envelope_ok")
+                    output = support_explanation("ja")
+                elif policy_probe_turn:
+                    record("support_probe_plan_policy_event")
+                    output = support_explanation("ja")
                 else:
-                    try:
-                        envelope = json.loads(input_text)
-                    except (json.JSONDecodeError, TypeError):
-                        envelope = {}
                     locale = envelope.get("evidence", {}).get("locale", "ja")
                     output = support_explanation(locale)
                     if MODE == "support_invalid_output":
@@ -643,7 +581,34 @@ def main():
                         },
                     }
                 )
-                if MODE == "support_slow" and not probe_turn:
+                if MODE == "support_slow" and not probe_turn and not policy_probe_turn:
+                    continue
+                if policy_probe_turn:
+                    if MODE == "support_probe_policy_completed":
+                        record("support_probe_policy_wrong_terminal")
+                        send(
+                            {
+                                "method": "turn/completed",
+                                "params": {
+                                    "threadId": "support-thread-fixture",
+                                    "turn": {
+                                        "id": "support-turn-fixture",
+                                        "status": "completed",
+                                    },
+                                },
+                            }
+                        )
+                    else:
+                        send(
+                            {
+                                "method": "turn/plan/updated",
+                                "params": {
+                                    "threadId": "support-thread-fixture",
+                                    "turnId": "support-turn-fixture",
+                                    "plan": [],
+                                },
+                            }
+                        )
                     continue
                 if MODE == "support_plan_call" and not probe_turn:
                     send(
@@ -922,6 +887,8 @@ def main():
             continue
         if message_id is not None:
             result(message_id, {})
+    if EXECUTION_CLASS == "support":
+        record(f"support_process_exited:{os.getpid()}")
     return 0
 
 

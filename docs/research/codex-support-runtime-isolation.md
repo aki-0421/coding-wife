@@ -5,7 +5,7 @@ updated: 2026-07-18
 last_verified: 2026-07-18
 read_when:
   - "コミット解説などの support session を実装、再検証、または診断するとき。"
-  - "Codex CLI、permission profile、support 用認証 bridge、wire tool allowlist を変更するとき。"
+  - "Codex CLI、permission profile、support 用認証 bridge、wire tool-absence boundary を変更するとき。"
 ---
 
 # Codex support runtime の実効権限ゼロ隔離調査
@@ -14,12 +14,13 @@ read_when:
 
 Codex CLI 0.144.5 では、メインと別の App Server process、clean `CODEX_HOME`、空の実行環境、固定 permission profile、wire request の実測を組み合わせることで、support runtime を条件付きで実動できる。
 
-合格する wire tool は `update_plan` 1 件だけである。0.144.5 の通常 thread ではこの tool が無条件登録されるため、tool 配列そのものを 0 件にはできない。一方、`update_plan` は ephemeral thread 内の task plan を更新するだけで、process、filesystem、network、MCP、user interaction、別 thread への権限を持たない。したがって製品契約は「tool 表示 0」ではなく、次の二つに分ける。
+production と同じ `gpt-5.6-sol`、effort `low`、完全な`CommitExplanationV1` output schemaを使った実wireでは、Responses requestの`tools` field自体が存在しなかった。`tools=[]`とは区別し、`tool_choice="auto"`、`parallel_tool_calls=false`と組み合わせたexact envelopeを合格条件にする。したがって権限境界は次の三つに分ける。
 
-1. **external-authority tool 0**: repository、shell、file、MCP、network、browser、image generation、plugin、subagent、user interaction を行える tool は 0 件。
-2. **inert tool allowlist**: wire 上は exact `update_plan` だけを許す。ただし support turn が実際に呼び出した場合は policy violation とし、その task を cancel / failed、生成結果を非表示にする。メイン session は継続する。
+1. **wire-advertised tool 0**: 全Responses requestで`tools` fieldが不在である。空配列、unknown/additional tool、schema付きtoolへの変化をすべて拒否する。
+2. **external-authority tool 0**: repository、shell、file、MCP、network、browser、image generation、plugin、subagent、user interactionを行えるtoolは0件である。
+3. **Codex internal event policy**: wireへ広告されていなくても、modelが`update_plan`を返すと0.144.5 App Serverは`turn/plan/updated`を発火できる。このeventはexternal authorityを持たないが、app policyが即terminal failureとして結果を破棄し、main sessionは継続する。
 
-release constructor は後述の native preflight をすべて通った時だけ support capacity を 1 にする。一つでも検証できない、または tool 名・schema・hash が変わった場合は capacity を 0 にし、決定的な unavailable を返す。開発版、release 版、実機 smoke でこの fail-closed 条件を変えない。
+release constructor は後述の native preflight をすべて通った時だけ support capacity を 1 にする。一つでも検証できない、またはtool field、tool choice、parallel flag、model、effort、output schemaが変わった場合はcapacityを0にし、決定的なunavailableを返す。開発版、release版、実機smokeでこのfail-closed条件を変えない。
 
 本書は [Codex App Server 接続契約](codex-app-server-integration.md)にあった 0.144.x support isolation の No-Go 結論を、0.144.5 exact binary/source と追加 probe に基づいて更新する。
 
@@ -45,7 +46,7 @@ Permission profile は beta である。文書だけを永続的な互換性保�
 | `features.shell_tool` | stable、既定 true | clean config で explicit false |
 | shell tool type | `shell_tool=false` なら `Disabled` | shell handler を登録しない |
 | environment-dependent tools | environment 0 件なら shell、apply_patch、view_image を登録しない | thread / turn の双方で `environments=[]` |
-| core utility | `PlanHandler` は無条件登録 | exact `update_plan` だけ inert allowlist |
+| core utility | `PlanHandler` は内部handlerとして残る | production wireではtoolを広告しない。`turn/plan/updated`が発火したらapp policyでterminal rejection |
 | request user input | config 未指定は enabled | explicit disabled |
 | MCP resource / runtime tools | MCP context がある時だけ登録 | clean `CODEX_HOME` に MCP 定義を置かず、orchestrator MCP も off |
 | dynamic tools | request の列挙分だけ登録 | `dynamicTools=[]` |
@@ -64,7 +65,10 @@ Permission profile は beta である。文書だけを永続的な互換性保�
 | canonical binary | `/opt/homebrew/Caskroom/codex/0.144.5/codex-aarch64-apple-darwin` |
 | version | `codex-cli 0.144.5` |
 | binary SHA-256 | `5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2` |
+| canonical generated-schema fingerprint | `efea5c6649ccbae7e26af47874bca302e0803d6db80571d57cd55841890dddbc` |
 | exact official source | `rust-v0.144.5` / `87db9bc18ba5bc82c1cb4e4381b44f693ee35623` |
+
+schema fingerprintはrelative file pathとsemantic JSONから計算する。object keyだけを再帰的にsortし、array順序、`required`順序、値型は保持する。0.144.5のschema generatorが同じ意味のobjectを異なるkey順で出力してもfingerprintが揺れず、意味が変われば不一致になる。binaryは512MiB、hash phaseは20秒、schema file/treeと生成commandも個別上限を持ち、EOF・identityを再検証する。
 
 ## clean support configuration
 
@@ -144,9 +148,9 @@ App Server は `cwd` を必須の absolute path として返すため「cwd 文�
 
 ## mock Responses wire probe
 
-### 正常 probe
+### production-equivalent正常probe
 
-clean `CODEX_HOME` の App Server を、loopback の mock Responses provider へ接続した。mock transport は request body を捕捉し、固定 JSON assistant message を SSE で返した。実 auth や repository 内容は使用していない。
+clean `CODEX_HOME` の App Server をloopbackのmock Responses providerへ接続した。model IDはproductionと同じ`gpt-5.6-sol`、effortは`low`、skillは検証済みbytesをprivate run directoryへ`0600`で複製したsnapshot、output formatは完全な`CommitExplanationV1` schemaである。mock transportはrequest bodyを捕捉し、schema-validな日本語assistant messageをSSEで返した。実authやrepository内容は使用していない。
 
 結果:
 
@@ -156,44 +160,52 @@ clean `CODEX_HOME` の App Server を、loopback の mock Responses provider へ
 | thread active permission profile | `{id: coding-wife-support-zero, extends: null}` |
 | thread approval policy | `never` |
 | thread runtime workspace roots | `[]` |
-| Responses transport | 1 request、turn `completed` |
+| Responses transport | shell拒否後を含む2 request、schema-valid explanationでturn `completed` |
+| wire model / effort | `gpt-5.6-sol` / `low` |
 | wire `parallel_tool_calls` | `false` |
-| wire tools | exact 1 件、`update_plan` |
-| canonical tool array SHA-256 | `bf40955dc6fcaf0b8dde5d9aa5be79683772350a9faa71d4701c655a96a87620` |
+| wire `tool_choice` | `auto` |
+| wire `tools` | field不在、advertised tool 0件 |
+| tool-absence audit fingerprint | `d80288c65b8499fb7955ab8447dbcf86d925420f50a01570d26d28e776d8a393` |
+| full output schema SHA-256 | `c01cb830b87c827b22842342f0410657b259ccbd113e3db05bd988ff48e4f3c9` |
 
-canonical hash は tool array を object key sort、余分な空白なしの JSON にして SHA-256 を計算した値である。name だけでなく type、description、strict、parameters、required、enum、additionalProperties を含む。release preflight は同じ canonicalization で exact 一致を要求する。
+tool-absence fingerprintは監査用sentinel `{"toolsField":"absent"}` のSHA-256であり、wireにこのobjectを送るものではない。release preflightは実requestで`tools` keyが存在しないことを直接検査するため、`tools=[]`も不一致である。全captured requestでmodel、tool choice、parallel flag、完全なoutput schemaもexact一致させる。
 
 ### malicious model fixture
 
-同じ wire tool array のまま、mock model が未広告の `shell_command` function call を返し、次を一つの command で試みる fixture を実行した。
+advertised tool 0件の同じproduction envelopeで、mock modelが未広告の`shell_command` function callを返し、次を一つのcommandで試みるfixtureを実行した。
 
 - repository canary file の読取。
 - support `CODEX_HOME` 内 auth canary file の読取。
 - loopback HTTP canary への接続。
 - support workspace への marker 作成。
 
-App Server は command を実行せず、次の model request へ `unsupported call: shell_command` を返した。canary marker の model request への混入、HTTP request、filesystem marker はすべて 0 件だった。
+App Server はcommandを実行せず、次のmodel requestへ`unsupported call: shell_command`を返した。その後にschema-valid explanationが完了した。canary markerのmodel requestへの混入、HTTP request、filesystem markerはすべて0件だった。
+
+### internal update_plan policy probe
+
+正常probeと別turnでmock modelが`update_plan` function callを返した。`tools` fieldは引き続き不在だったが、0.144.5 App Serverは`unsupported call`ではなく`turn/plan/updated`を発火した。これはsource上のinternal `PlanHandler`と一致する。app policyはこのeventをexpected rejectionとして検出し、assistant resultを公開せずsupport processを停止した。main history、main turn、public explanation、repository/auth/network/write canaryはいずれも0件だった。
 
 ### permission profile の OS enforcement probe
 
 同じ profile を `codex sandbox -P coding-wife-support-zero` へ直接適用し、上記 command を実行した。shell process 自体は起動したが、repository/auth canary の本文、HTTP canary、write marker はいずれも得られず、exit code 1 だった。これは tool 非登録とは独立した defense-in-depth である。
 
-この probe は「一度偶然 tool call が無かった」という消極的証拠ではない。実 wire schema の allowlist、未広告 call の拒否、Seatbelt policy の拒否を別々に確認している。
+このprobeは「一度偶然tool callが無かった」という消極的証拠ではない。実wireのtool field不在、未広告shell callの拒否、internal plan eventのapp側terminal rejection、Seatbelt policyの拒否を別turnで確認している。
 
 ## release constructor の証明順
 
 support runtime の release constructor は次を順番に実行する。途中失敗時は support process を残さず capacity 0 を返す。
 
-1. Codex binary を no-follow / canonical path / owner / write mode / executable / version / SHA-256 / generated schema で再検証する。
-2. binary SHA-256、generated schema fingerprint、OS build を key に native isolation preflight を実行する。未検証 cache を成功扱いしない。
+1. Codex binary をno-follow / canonical path / owner / write mode / executable / version / SHA-256 / generated schemaで再検証する。binary hashは512MiB・20秒、schema生成と読取はfile/tree/command上限でfail closedする。
+2. binary SHA-256、canonical generated-schema fingerprint `efea5c66…dddbc`、OS buildをkeyにnative isolation preflightを実行する。未検証cacheを成功扱いしない。
 3. `0700` probe run directory と clean `CODEX_HOME` を作り、`0600` config と loopback mock providerを使う。auth は probe に渡さない。
-4. exact thread / turn を開始し、`activePermissionProfile`、approval、runtime roots、ephemeral、model、provider を照合する。
-5. captured Responses request の tool array が exact `{update_plan}` かつ hash `bf40955d…`、`parallel_tool_calls=false` であることを照合する。unknown / additional / missing / schema-changed tool は拒否する。
-6. malicious unadvertised call と canary probe を実行し、unsupported result、read 0、write 0、network 0 を確認する。
-7. probe process と全 temporary file を破棄する。
-8. production 用の別 `0700` run directory、clean `CODEX_HOME`、空 workspace を新規作成する。
-9. auth bridge、production config、verified explain skill、実 model transport を準備する。
-10. production thread response を再び exact 照合した時だけ capacity 1 とする。
+4. 検証済みexplain skill bytesをprobe rootへprivate snapshotし、productionと同じmodel、effort、skill、full output schemaのexact thread / turnを開始する。`activePermissionProfile`、approval、runtime roots、ephemeral、model、providerを照合する。
+5. 全captured Responses requestで`tools` field不在、`tool_choice=auto`、`parallel_tool_calls=false`、`model=gpt-5.6-sol`、full output schema hash `c01cb830…f3c9`を照合する。空配列を含むtool field追加を拒否する。
+6. 正常turnでmalicious shell callがunsupportedになり、schema-valid explanationが完了し、read 0、write 0、network 0であることを確認する。
+7. 別turnでinternal `update_plan` eventを発火させ、app policyがterminal rejectionし、main history/public result/canaryを変更しないことを確認する。
+8. probe process groupの消滅を確認して全temporary fileを破棄する。
+9. production用の別`0700` run directory、clean `CODEX_HOME`、空workspaceを新規作成する。
+10. auth bridge、production config、同じ検証済みbytesから作るowner-only explain skill snapshot、実model transportを準備する。
+11. production thread responseを再びexact照合した時だけcapacity 1とする。
 
 preflight を test-only にしない。release constructor の native integration test は、成功、binary/schema/tool/profile mismatch、unsafe directory、unsafe auth、transport failure、cleanup failureを含める。
 
@@ -215,7 +227,7 @@ source が存在しない、keychain 等で file bridge が不要な認証方式
 
 ## explain skill と入力境界
 
-support turn へ渡す skill は app bundle 内の `coding-wife-explain-commit` だけである。bundle path、manifest version、digest、regular file、owner / write mode を native が検証してから `UserInput::Skill` として exactly once 注入する。
+support turnへ渡すskillはapp bundle内の`coding-wife-explain-commit`だけである。bundle/resource directoryとskill fileについてcanonical containment、trusted owner、group/world非writable、regular file、link count、device/inode/mtime/sizeを検査し、no-follow descriptorから最大量を読んでdigestを照合する。検証済みbytesは各owner-only private run directoryへexclusive create・`0600`・fsyncでsnapshotし、そのimmutable private pathだけを`UserInput::Skill`としてexactly once注入する。bundle sourceが検証後に変化しても進行中runtimeのskill bytesは変わらない。
 
 clean `CODEX_HOME` の skill catalog と bundled skills は無効であるため、model が列挙・検索・読取できる skill tool はない。main 用 `coding-wife-commit-work` は support input に入れず、support skill は main input に入れない。app-owned skill file の host-side読取は、repository/tool filesystem authority とは別の検証済み application authority とする。
 
@@ -240,8 +252,8 @@ support task の失敗は main turn、main process、Git state、commit evidence
 **Conditional Go** とする。0.144.5 のこの host では release-capable な隔離構成を実測できた。ただし次のいずれかで直ちに capacity 0 へ戻す。
 
 - Codex binary、version、hash、generated schema、OS sandbox behavior が変わった。
-- exact wire tool allowlist / hash が変わった。
-- `update_plan` が呼び出された。
+- wireの`tools` field不在、`tool_choice=auto`、`parallel_tool_calls=false`、model、effort、full output schemaのいずれかが変わった。
+- `turn/plan/updated`などinternal `update_plan` eventが発火した。
 - profile、approval、root、environment、ephemeral の応答を exact 照合できない。
 - clean `CODEX_HOME`、auth bridge、run-directory cleanup を安全に作れない。
 - malicious fixture で repository/auth/network/write のいずれかが観測された。

@@ -627,34 +627,6 @@ pub(crate) fn support_turn_start_params(
     }))
 }
 
-pub(crate) fn support_probe_turn_start_params(
-    thread_id: &str,
-    cwd: &Path,
-    support_skill: &ResolvedBundledSkill,
-) -> Result<Value, TurnContractError> {
-    if !execution_skill_matches(TurnExecutionClass::Support, support_skill) {
-        return Err(TurnContractError::SkillClass);
-    }
-    Ok(json!({
-        "threadId": thread_id,
-        "input": [
-            {"type": "text", "text": "Return {\"ok\":true}. Do not call tools.", "text_elements": []},
-            {"type": "skill", "name": support_skill.name, "path": support_skill.path}
-        ],
-        "cwd": cwd.to_string_lossy(),
-        "approvalPolicy": "never",
-        "permissions": "coding-wife-support-zero",
-        "environments": [],
-        "runtimeWorkspaceRoots": [],
-        "outputSchema": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["ok"],
-            "properties": {"ok": {"type": "boolean", "const": true}}
-        }
-    }))
-}
-
 pub(crate) fn turn_start_params(
     thread_id: &str,
     client_user_message_id: &str,
@@ -806,6 +778,7 @@ mod tests {
             version: "1.0.0".to_owned(),
             content_digest: format!("sha256:{}", "a".repeat(64)),
             path: PathBuf::from("/app-bundle/resources/skills/coding-wife-commit-work/SKILL.md"),
+            verified_entrypoint: std::sync::Arc::from([]),
         }
     }
 
@@ -815,6 +788,7 @@ mod tests {
             version: "1.0.0".to_owned(),
             content_digest: format!("sha256:{}", "b".repeat(64)),
             path: PathBuf::from("/app-bundle/resources/skills/coding-wife-explain-commit/SKILL.md"),
+            verified_entrypoint: std::sync::Arc::from([]),
         }
     }
 

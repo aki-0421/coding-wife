@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
+use super::bundled_skill::{ResolvedBundledSkill, EXPLAIN_COMMIT_SKILL_NAME};
 use super::support::{SupportRuntimeError, SUPPORT_PERMISSION_PROFILE};
 use super::types::CODEX_MODEL;
 
@@ -52,6 +54,43 @@ impl PrivateRunDirectory {
 
     pub(super) fn write_config(&self, contents: &str) -> Result<(), SupportRuntimeError> {
         write_private_file(&self.codex_home.join("config.toml"), contents.as_bytes())
+    }
+
+    pub(super) fn snapshot_support_skill(
+        &self,
+        skill: &ResolvedBundledSkill,
+    ) -> Result<ResolvedBundledSkill, SupportRuntimeError> {
+        if skill.name != EXPLAIN_COMMIT_SKILL_NAME
+            || skill.content_digest
+                != format!(
+                    "sha256:{}",
+                    hex::encode(Sha256::digest(skill.verified_entrypoint()))
+                )
+        {
+            return Err(SupportRuntimeError::Skill);
+        }
+        let skills = self.root.join("skills");
+        let skill_directory = skills.join(&skill.name);
+        create_private_directory(&skills)?;
+        create_private_directory(&skill_directory)?;
+        let snapshot = skill_directory.join("SKILL.md");
+        write_private_file(&snapshot, skill.verified_entrypoint())?;
+        File::open(&skill_directory)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        let metadata = std::fs::symlink_metadata(&snapshot)
+            .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        let bytes = std::fs::read(&snapshot).map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_file()
+            || metadata.uid() != current_uid()
+            || metadata.mode() & 0o777 != 0o600
+            || metadata.nlink() != 1
+            || bytes.as_slice() != skill.verified_entrypoint()
+        {
+            return Err(SupportRuntimeError::PrivateRuntime);
+        }
+        Ok(skill.with_snapshot_path(snapshot))
     }
 
     pub(super) fn environment(&self, include_test_fixture: bool) -> Vec<(OsString, OsString)> {
@@ -367,11 +406,7 @@ pub(super) fn support_config(mock_base_url: Option<&str>) -> String {
             "\n[model_providers.mock_provider]\nname = \"Support probe\"\nbase_url = \"{base_url}\"\nwire_api = \"responses\"\nrequest_max_retries = 0\nstream_max_retries = 0\nsupports_websockets = false\n"
         )
     });
-    let model = if mock_base_url.is_some() {
-        "mock-model"
-    } else {
-        CODEX_MODEL
-    };
+    let model = CODEX_MODEL;
     let model_provider = if mock_base_url.is_some() {
         "model_provider = \"mock_provider\"\n"
     } else {

@@ -121,11 +121,11 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 
 ## Support isolation gate
 
-Codex CLI 0.144.5 exact releaseでは、[Codex support runtime の実効権限ゼロ隔離調査](codex-support-runtime-isolation.md)のrelease constructorをすべて通過した時だけcommit explainer capacityを1にする。それ以外のrelease、schema、tool hash、permission profile、auth bridge、thread response、canaryのいずれかを検証できなければcapacity 0と決定的fallbackに戻す。
+Codex CLI 0.144.5 exact releaseでは、[Codex support runtime の実効権限ゼロ隔離調査](codex-support-runtime-isolation.md)のrelease constructorをすべて通過した時だけcommit explainer capacityを1にする。それ以外のrelease、canonical schema fingerprint、tool-absence boundary、permission profile、auth bridge、thread response、canaryのいずれかを検証できなければcapacity 0と決定的fallbackに戻す。
 
-supportはmainと別process、clean `CODEX_HOME`、repositoryと無関係な空のowner-only cwd、runtime root 0、environment 0で動く。wire toolはexternal-authority 0、exact inert `update_plan` 1件だけである。`update_plan`の実行を示すevent、server request、allowlist外item、unknown event、schema不一致を受けたtaskはinterruptし、partial outputを公開・保存しない。
+supportはmainと別process、clean `CODEX_HOME`、repositoryと無関係な空のowner-only cwd、runtime root 0、environment 0で動く。全Responses requestで`tools` field不在、wire-advertised/external-authority tool 0、`tool_choice=auto`、`parallel_tool_calls=false`を要求する。wireへ広告されていなくてもCodex内部で`update_plan` eventは発火可能なため、`turn/plan/updated`、server request、authority-bearing item、unknown event、schema不一致を受けたtaskはterminal rejectionし、partial outputを公開・保存しない。
 
-support turnへはapp bundleでdigest検証した`coding-wife-explain-commit`をexactly once注入し、main用`coding-wife-commit-work`と相互に混在させない。入力する`CommitEvidenceV1`の全文字列はnativeで再帰走査し、secret、絶対path、相対repository pathを検出したら`turn/start`前に拒否する。
+support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wife-explain-commit`のexact bytesをowner-only private run directoryへsnapshotし、そのprivate pathだけをexactly once注入する。main用`coding-wife-commit-work`と相互に混在させない。入力する`CommitEvidenceV1`の全文字列はnativeで再帰走査し、secret、絶対path、相対repository pathを検出したら`turn/start`前に拒否する。
 
 ## ファイル責務
 
@@ -145,7 +145,7 @@ support turnへはapp bundleでdigest検証した`coding-wife-explain-commit`を
 | `support.rs`                          | support公開contract、single-use explain turn、strict output/event policy、fallback       |
 | `support_isolation.rs`                | exact release/schema検証、native sandbox・mock wire・malicious canary preflight           |
 | `support_private.rs`                  | owner-only clean runtime、env allowlist、no-follow auth bridge、確実なcleanup             |
-| `support_probe.rs`                    | loopback Responses captureとexact inert tool schema/hash                                 |
+| `support_probe.rs`                    | loopback Responses capture、tool field不在、shell拒否、internal plan event fixture       |
 | `attachment.rs`                       | opaque handle発行、workspace/file identity検証、送信直前再検証、localImage/mention変換   |
 | `commands.rs`                         | WebViewへ公開するtyped Tauri command                                                    |
 | `types.rs`                            | adapter v1のpublic DTOとserde contract                                                  |
@@ -209,7 +209,7 @@ Addはabsolute pathを持たない固定opaque attachment handleを返す。demo
 | `decision_continuation_crash`            | fallback継続開始中のchild crashをterminal failureにし、自動再送しないこと               |
 | `schema_malformed`                       | 成功probe後のschema失敗で以前のidentity/capability証跡を消去し、fresh connectで回復      |
 | `support_invalid_output`                 | strict schemaに違反するcommit説明を結果として公開しない                                 |
-| `support_plan_call`                      | inert `update_plan`実行eventをpolicy違反としてinterruptし、partial resultを破棄する     |
+| `support_plan_call`                      | wire非広告のinternal `update_plan` eventをpolicy違反としてinterruptし、partial resultを破棄する |
 | `support_slow`                           | 実行中support turnをcancelし、interrupt terminalだけを受理して結果を破棄する            |
 
 fixtureは秘密、実account、実path、promptを含めない。新しいprotocol edge caseはproduction parserを緩める前にfake modeまたは共有fixtureへ追加する。
@@ -257,4 +257,4 @@ CODEX_LIVE_SMOKE=1 cargo test \
 - probe失敗時はbinary/schemaだけでなく、diagnosticに残る以前のversion/hash/fingerprint/capability/account証跡も消去する。
 - redaction fixtureはBearer/API keyだけでなくauth cookie、session ID、quoted/spaced credential key、`/Volumes`、`/Library`、`/Applications`を含める。
 - stable initialize fallbackではexperimental-only fieldを送らず、unsupported operationをwire call前にblockする。
-- Codex release、generated schema、wire tool schema/hash、permission profileのいずれかを変える場合は、support capacityを先に0へ戻し、native preflightとmalicious canaryのrelease evidenceを再取得する。
+- Codex release、canonical generated schema、wire tool-absence boundary、permission profileのいずれかを変える場合は、support capacityを先に0へ戻し、native preflightとmalicious canaryのrelease evidenceを再取得する。
