@@ -128,6 +128,8 @@ row全体をsingle selection controlとし、内部へmutation actionを置か�
 
 actionはactive selection、Freshなworkspace generation、valid redaction、同じcommit evidence IDのcontroller stateへ束縛する。`not_generated`なら「詳しく教えて」からapp controllerへ`trigger=user_request`、`queued` / `running`ならpresentation activateとCancel、`generated`ならcached presentation表示と任意の同一transcript再読上げ、`failed` / `canceled`なら`trigger=user_retry`、`unavailable`なら理由と`retryable=true`の場合だけ`trigger=user_retry`を表示する。disabled時は理由をbutton近傍のtextで示し、どのactionもmain sessionへ送らない。
 
+App rootはnative explanation adapterとNarrationControllerを各1個だけ所有する。WorkspaceShellはselected workspace ID、同workspaceへ接続した実Codex generation、UI localeが揃った時だけ両controllerへscopeを設定し、EvidenceViewへ同じgenerationを渡す。固定値generation、別workspaceの直前snapshot、tab visibilityをscope根拠にしない。
+
 ### Detail tabs
 
 | tab | 内容 |
@@ -173,6 +175,8 @@ success commit commandと新しいSHAの検証後、app-owned controllerは`not_
 - 最大64KiB、secret scan pass、raw diff全文/absolute・relative path/raw reasoningなし。
 
 isolated support turnには`coding-wife-explain-commit`をexplicit skill inputで1件注入する。deltaはrequest ID、source commit ID、generation、locale、sequence、text、doneを検証後、characterのvisible HTML captionへ逐次適用する。request、status、delta、result、failureをmain conversationへ注入しない。
+
+native presentation eventは最新controller stateとworkspace ID、workspace generation、commit evidence ID、request ID、trigger、localeがexact一致し、commit evidence IDからfull SHAを一意に復元できる場合だけNarration sourceへ変換する。`started`、1-origin連続chunk、`terminal`の順を守り、duplicate、stale、scope mismatch、schema mismatchはpresentation generationを増やさず破棄する。NarrationControllerのpresentation generationはactivate単位のlocal counterであり、native workspace generationとは別物である。
 
 構造化説明の順序は次とする。
 
@@ -238,12 +242,14 @@ native command surfaceにcheckpoint、commit、stage、restore、revert、branch
 | event | producer | consumer | 必須field |
 |---|---|---|---|
 | `commit_explanation_requested` | app-owned explanation controller | support runtime | schema version、request ID、workspace generation、commit evidence ID、locale、trigger=`auto_verified_commit` / `user_request` / `user_retry` |
-| `commit_explanation_controller_state` | app-owned explanation controller | EvidenceView/caption | commit evidence ID、generation、request ID、exact status、trigger、retryable、presentation available、updatedAt、error code |
+| `commit_explanation_controller_state` | app-owned explanation controller | EvidenceView/caption | commit evidence ID、generation、request ID、selection version、exact status、trigger、retryable、presentation available、updatedAt、error code |
 | `commit_explanation_presentation_requested` | EvidenceView | app-owned explanation controller | commit evidence ID、generation、mode=`show` / `replay_narration` |
 | `commit_explanation_started` | support runtime | app-owned explanation controller/caption | request ID、skill audit、startedAt |
 | `commit_explanation_delta` | support runtime | app-owned explanation controller/caption/TTS policy | request ID、commit ID、generation、locale、sequence、text、done |
 | `commit_explanation_terminal` | support runtime | app-owned explanation controller/HIST metadata | request ID、status、usage、latency、error code |
 | `commit_explanation_cancel_requested` | EvidenceView | app-owned explanation controller | request ID、generation、reason |
+
+公開`commit_explanation_request`が受理するtriggerは`user_request` / `user_retry`だけである。`auto_verified_commit`はsuccess commit commandとexact SHA proofを相関したRust内部handoffだけが作れ、WebViewから同triggerを渡した場合はinvoke前とnative commandの両方で拒否する。requestを持つcontroller stateはcancel照合用selection versionも返す。
 
 ## 保存と復元
 

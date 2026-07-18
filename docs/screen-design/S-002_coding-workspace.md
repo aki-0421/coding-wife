@@ -218,7 +218,7 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
 |---|---|---|---|---|---|
 | turn送信 | valid draft、online、preflight ready、active execution競合なし | main sessionへ1 turn作成、user event永続化、composerをclear |送信前ならdraft維持 | draft/context/fingerprintを維持してerror | `CODE-F-052`〜`CODE-F-061` |
-| turn停止 | running turn | main childとそのturnに属する支援/TTSだけをbounded cancelし、stopped terminal event、完了済み変更を区別する。別のapp-owned commit explainerはS-003のCancelで管理する | confirmを閉じれば継続 | timeout時にsupervisor強制停止とInterrupted | `CODE-F-073`, `SUP-F-059`〜`SUP-F-061` |
+| turn停止 | running turn | main interruptと`turn_stop` narration dismissを同時に開始し、stopped terminal event、完了済み変更を区別する。visible caption/TTSは閉じるが、別のapp-owned commit explainer生成自体は継続しS-003のCancelで管理する | confirmを閉じれば継続 | timeout時にsupervisor強制停止とInterrupted | `CODE-F-073`, `SUP-F-059`〜`SUP-F-061` |
 | timeline展開 | event/groupが存在 | sanitized detailを同じpositionで表示 |元のcompact表示 | raw payloadをfallback表示しない | `CODE-F-056`, `HIST-F-037`〜`HIST-F-044` |
 | 最新へ移動 | bottomから48px超 | newest terminal/eventへscroll、unread 0 | 非該当 | anchor不明なら最終sequenceへ | `HIST-F-045`〜`HIST-F-048` |
 | decision回答 | unanswered、option valid | idempotent answer event、turn resume | Holdなら未回答維持 |重複送信せず選択を保持 | `CODE-F-062`〜`CODE-F-069` |
@@ -251,7 +251,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | ユーザー操作 | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
 |---|---|---|---|---|---|
 | session開始/turn送信 | Rust → Codex stdio | `start_or_send_main_turn` | active workspace、Codex executable、typed payload、1 active execution。public instruction 32,000 scalarとcomposed text 80,000 scalarを別々に検証し、imageは`localImage`、fileは`mention`へRust内で変換し、`coding-wife-commit-work`を各turnのexplicit skill inputへ1件注入する | spawn前ならdraft維持 | 上限/NUL/control違反またはskill version/digest/注入を証明できなければturnを開始せず、thread自動重複作成なし |
-| Stop | Rust supervisor | `stop_main_turn` | owned process/thread/turn ID | confirmation cancelは継続 | timeout後process tree停止、Interrupted |
+| Stop | WorkspaceShell → Rust supervisor / NarrationController | `codex_turn_interrupt` + narration `turn_stop` dismiss | owned process/thread/turn ID、active narration presentation generation。support explanation controller cancelへは転送しない | confirmation cancelは継続 | timeout後process tree停止、Interrupted。caption/TTS失敗でもmain interruptを妨げない |
 | event購読 | Rust event bridge | `subscribe_workspace_events` | workspace ID、monotonic sequence、schema allowlist | route leaveでUI購読だけ解除 | gapでpauseし診断表示 |
 | terminal Git observation handoff | Codex composition → Rust Git observer | `observe_terminal_work_unit` | validated terminal authority、work unit ID、workspace ID/generation、source event ID/sequence/time。observerがbefore/after HEAD、status、new commitとverification/decision/risk evidenceをread-onlyで相関し、同一eventをexact replayだけに制限 | terminal前は開始しない | observation/HIST失敗をUnavailable/Unknownにし、main resultとGit状態を変更しない |
 | verified commit explanation handoff | App Server event bridge → Rust Git observer → app-owned explanation controller | `intercept_auto_verified_commit_for_explanation` | normalized Git commit command success、workspace generation、before/after HEAD、新しい到達可能SHA、commit evidence ID。`CommitExplanationRequestedV1(trigger=auto_verified_commit)`をmain session外で1件だけ作る | SHA検証前は開始しない | controllerを`failed` / `unavailable`にし、main conversationへrequest/result/failureを注入しない |

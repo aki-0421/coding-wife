@@ -34,6 +34,36 @@ controllerのstate / presentation eventはcommit explanation専用channelだけ�
 
 support入力はnative Git serviceが作成し、path / secret scannerと64 KiB上限を通過した`CommitEvidenceV1`だけである。repository root、raw diff、relative / absolute path、Git authority、shell、filesystem、MCP、network、main thread handleはsupport runtimeへ渡さない。
 
+## production composition
+
+### Rust ownership
+
+1. Tauri setupは`GitReviewService`と`CommitExplanationController`を作り、両方を所有するnative-only main work-unit runtimeを`CodexSupervisor`へ1回だけattachする。
+2. runtimeはmain turn wire送信前にbefore observationを取り、同じleaseにcommand candidate / proof / terminalを束縛する。terminal observerが返した`TrustedVerifiedCommit`ごとにredacted `CommitEvidenceV1`を作り、active scopeのlocaleでinternal enqueueする。
+3. `CommitExplanationController::enqueue_verified_commit`だけが`trigger=auto_verified_commit`を受理する。公開`commit_explanation_request`は`user_request` / `user_retry`以外を`CODEX-SUPPORT-AUTO-TRIGGER-FORBIDDEN`で拒否する。
+4. controllerのactive scopeはworkspace ID、workspace generation、localeである。scope変更は別workspaceを含む旧queued / running taskをterminal cancelし、late completionをcache / eventへ適用しない。
+
+### WebView adapterとApp lifetime
+
+1. native adapterは5 commandと`coding-wife://commit-explanation-state` / `coding-wife://commit-explanation-presentation`を購読し、stateをworkspace generation + commit evidence IDでmemory cacheする。購読完了前の`get_state`でnative snapshotを取得し、event到着後は同期`getState`を更新してからsubscriberへ通知する。
+2. adapterはstate / presentationのschema、request ID、selection version、trigger、locale、full commit SHAをexactに検証する。public `request()`へ`auto_verified_commit`が渡された場合はinvoke前に拒否する。
+3. App rootはadapterと`NarrationController`を各1個だけ生成し、同じadapterをCommit UI controllerと`CommitNarrationConsumerPort` sourceへ渡す。React再render、tab切替、force-mounted panelでinstanceやnative listenerを増やさない。
+4. `WorkspaceShell`はselected workspaceと、そのworkspaceに一致する実Codex generationが揃った時だけadapter / narrationへ`setScope`する。workspace switch、generation rollback、scope request raceは古いscopeを再適用しない。
+
+### presentationとStop
+
+native presentationの`commitEvidenceId=commit-<full SHA>`からfull SHAを取り出し、workspace ID、generation、request ID、locale、triggerが最新controller stateと一致した時だけNarration sourceへ次を同期順で発行する。
+
+1. `started`
+2. schema済み`narrationChunks`を1-origin連続`chunk`
+3. `terminal(status=completed)`
+
+NarrationController側のpresentation generationはこのsource keyのactivateごとに増やす。native workspace generationをpresentation generationとして再利用しない。duplicate presentation eventは同一source key + mode + payload digestで1回に集約し、mismatch、stale、cancel後のeventは捨てる。
+
+S-002の実Stopはmain `turn/interrupt`と`NarrationController.dismissPresentation("turn_stop")`を同時に開始する。これはvisible caption / TTSを閉じるだけで、app-owned support generationへcancelを送らない。producer cancelはS-003の明示Cancel、workspace/generation scope変更、timeout、App closeだけに限定する。
+
+adapter/controller/cache/narration chunkはmemory-onlyである。App restart後にsupport taskを再開せず、main historyとsupport text persistenceは常に0件にする。
+
 ## 検証マトリクス
 
 - 正常系: started candidate → successful completed → exact new reachable SHA → terminal evidenceの順で、`auto_verified_commit`を1件だけenqueueする。
@@ -42,6 +72,9 @@ support入力はnative Git serviceが作成し、path / secret scannerと64 KiB�
 - stale workspace generation、wrong thread / turn / item、terminal重複、App Server restart後のlate eventはstateを変更しない。
 - queueはsingle active、上限超過はsafe unavailable、cancel / timeoutはsupport interruptを実行し、late resultを適用しない。
 - controller eventを購読しない状態でもmain turnは完了でき、main session history / eventにsupport内容が0件である。
+- native public requestで`auto_verified_commit`を送ってもpre-wire / native両方で拒否され、trusted terminal successだけがauto stateを`queued` / `running` / `generated`へ進める。
+- workspace switch / generation変更 / restart後のlate state・presentationは適用せず、同一presentation eventのduplicateでcaption chunkやTTSを二重再生しない。
+- main Stopは`turn_stop`でcaption / TTSを閉じるがsupport generationは継続し、後から同じgenerated stateをS-003で明示表示できる。
 
 主要command:
 
