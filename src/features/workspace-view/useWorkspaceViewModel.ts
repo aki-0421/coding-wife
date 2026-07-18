@@ -7,7 +7,7 @@ import type {
 } from "@/lib/contracts"
 import type { WorkspaceTurnContextSnapshot } from "@/lib/contracts/workspace-context"
 
-import { initialWorkspaces } from "@/features/workspace-view/demo-data"
+import { initialWorkspaces } from "#workspace-seed"
 import { projectWorkspaceNavigation } from "@/features/workspace-view/workspace-navigation"
 import type {
   AttachmentItem,

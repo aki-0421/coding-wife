@@ -34,6 +34,16 @@ export default defineConfig(({ command }) => ({
   ],
   resolve: {
     alias: {
+      "#app-entry": path.resolve(
+        projectRoot,
+        command === "build" ? "src/app/ProductionApp.tsx" : "src/app/App.tsx",
+      ),
+      "#workspace-seed": path.resolve(
+        projectRoot,
+        command === "build"
+          ? "src/features/workspace-view/empty-workspace-seed.ts"
+          : "src/features/workspace-view/demo-data.ts",
+      ),
       "@": path.resolve(projectRoot, "src"),
       "@cubism": path.resolve(projectRoot, "vendor/live2d/dist"),
     },

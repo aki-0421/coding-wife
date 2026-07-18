@@ -1,7 +1,7 @@
 ---
 title: "Coding Wife 提出準備完了までの作業計画"
 description: "現行実装から全デモ機能、macOS配布物、審査導線、Devpost提出証跡までを依存順に完了させる実行計画。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "残存するアプリ機能の実装順、コミット単位、完了条件を確認するとき。"
   - "OpenAI Build Week提出前のGo/No-Go判断、配布物、審査導線、外部依存を確認するとき。"
@@ -39,7 +39,7 @@ read_when:
 | Support runtime | App Server streamとtrusted Git commit terminal proofをinterceptする、アプリ所有の隔離support runtimeがある。main sessionのsubagentではなく、main session履歴へsupport本文を保存しない。 | scope single-writerとexplicit presentation intentを完成させる必要がある。 |
 | Caption/TTS | 「詳しく教えて」からcharacter captionを表示し、設定時だけ同一文を任意TTSで読む経路がある。caption visible/frontmost acknowledgementがspeechより先に来る。 | 一度目の操作、cache、late event、Stop/Close、demo/production parityを固定する必要がある。 |
 | Context | Project/Character Contextの編集sliceが画面にある。 | versioned native保存、conflict、technical-policy rejection、next-turn snapshot合成が必要。 |
-| 配布 | release `.app`を生成する基盤とdeterministic DMG scriptsがある。 | 最終HEADからの`.dmg`生成、実mount/launch、署名方針、fresh-profile smokeが必要。 |
+| 配布 | release `.app`を生成する基盤とFinder非依存DMG scriptsがある。 | production demo分離、全resourceのad-hoc seal、正規化inventory検証、最終HEADからの`.dmg`生成、実mount/launch、fresh-profile smokeが必要。 |
 
 ## 利用者が固定したSupport挙動
 
@@ -259,10 +259,12 @@ read_when:
 
 ### Phase 3 — 実配布物を完成させる
 
-- [ ] **C16 `fix(release): build deterministic macos distribution artifacts`**
+- [ ] **C16 `fix(release): seal and verify macos distribution artifacts`**
   - Depends on: C14, C15
   - Parallel: 英語README/動画台本の草案と可。
-  - Done: clean final HEADから実際の`.app`を生成し、それだけを入力にdeterministic `.dmg`を生成する。Finder timeoutや既存mountに依存せず、checksumとresource inventoryが再現する。
+  - Commit 1: `fix(app): exclude demo runtime from production bundles`。Vite development serverの明示`?demoAppServer=1`だけがdemo runtimeをloadし、queryless/native productionはnative adapterを維持する。production `dist`と`.app`で承認済みdemo markerを各0件にする。
+  - Commit 2: `fix(release): seal and verify macos artifacts`。nested codeからapp順にtimestampなしad-hoc署名し、全resource sealのstrict検証後だけDMGへ進む。Developer ID署名・Apple公証済みとは分類しない。
+  - Done: clean final HEADからsealed `.app`を生成し、それだけをDMG入力にする。別々の2回のread-only mountでroot 2entry、Applications link、sorted app inventoryがsourceと一致する。DMG byte同一性は要求せず、公開するfinal candidateのsizeとSHA-256だけを凍結する。失敗・INT・TERM後のmount、staging、一時directoryが0件で、`pnpm release:macos:verify`が正本検証となる。
 
 - [ ] **C17 `docs(hackathon): record installed artifact acceptance`**
   - Depends on: C16
@@ -309,11 +311,12 @@ pnpm tauri build
 
 ## Release受け入れ
 
-- [ ] final candidateのclean checkoutから、Hiyori、support skill/runtime、noticeを含み、開発用・quarantine・private dataを含まない`.app`を作る。
-- [ ] 同じ`.app`から、stale mount、Finder UI state、既存buildへ依存しないdeterministic `.dmg`を再生成し、inventoryとchecksumを記録する。
+- [ ] final candidateのclean checkoutから、Hiyori、support skill/runtime、noticeを含み、development demo runtime、source map、quarantine、private dataを含まない`.app`を作る。
+- [ ] nested codeからapp順にtimestampなしad-hoc署名し、全resourceをsealした`.app`で`codesign --verify --deep --strict`を通す。TeamIdentifierとDeveloper ID identityがなく、notarization済みでない状態を正確に記録する。
+- [ ] 同じsealed `.app`から、stale mount、Finder UI state、既存buildへ依存しない`.dmg`を生成する。別々の2回のread-only mountで正規化inventory一致を確認し、DMG byte同一性を要求せずfinal candidateのsizeとSHA-256を記録する。
 - [ ] DMGを実mountし、Applications相当へcopyしたappから起動する。build directory内binaryで代替しない。
 - [ ] fresh macOS 14+ profile、別Mac、または同等の隔離環境でprimary path、single-instance、running close、5秒以内cleanup、Interrupted recoveryを確認する。
-- [ ] 署名・notarizationを実施するか、unsigned/unnotarized、Gatekeeper手順、security trade-offを英語testing guideへ明記する。
+- [ ] Developer ID署名・notarizationを実施するか、ad-hoc integrity sealのみでDeveloper ID未署名・unnotarizedであること、Gatekeeper手順、security trade-offを英語testing guideへ明記する。
 - [ ] build前後のfree diskを記録し、mountと中間artifactを削除してfinal app、DMG、checksum、最小限のlogだけを残す。
 
 ## 提出package
@@ -357,7 +360,7 @@ GitHub invitation、YouTube upload/publication、`/feedback`実行、Devpost dra
 - [ ] C01〜C20が完了し、demo-visible controlに無反応、local-only、fake readiness、暗黙presentationがない。
 - [ ] Commit read-only、support isolation、Stopのjob/cache維持、ja/en、accessibility、TTS、privacy/security、offline/error、performanceがgreenである。
 - [ ] desktop/tablet/幅480の`agent-browser`、native QA、全品質gate、real app/DMGのmount/launch/fresh-profile smokeがgreenである。
-- [ ] signing/notarization済み、または検証済みunsigned guideがある。
+- [ ] Developer ID signing/notarization済み、または検証済みad-hoc sealとDeveloper ID未署名・unnotarized guideがある。
 - [ ] English README、public `< 3:00` video、Devpost、testing、Session ID、evidenceがfinal commitと一致する。
 - [ ] private repoの2審査先accessとsubmission confirmationを第三者相当sessionで確認し、締切前かつ十分なdiskがある。
 

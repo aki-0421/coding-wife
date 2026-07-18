@@ -11,7 +11,7 @@ read_when:
 
 ## Supported release target
 
-The verified MVP target is macOS 14 or later on Apple Silicon. Windows, Linux, and Intel Mac artifacts are not claimed as supported. The current hackathon artifact is unsigned and not notarized; build it from the reviewed source whenever possible.
+The verified MVP target is macOS 14 or later on Apple Silicon. Windows, Linux, and Intel Mac artifacts are not claimed as supported. The current hackathon artifact uses an ad-hoc signature to seal its complete app resources, but it is not Developer ID signed or Apple-notarized; build it from the reviewed source whenever possible.
 
 ## Install dependencies
 
@@ -66,9 +66,14 @@ The commands are intentionally split for diagnosis:
 ```bash
 pnpm release:macos:app
 pnpm release:macos:dmg
+pnpm release:macos:verify
 ```
 
-Tauri produces only `Coding Wife.app`. The second command stages that bundle with an `/Applications` symlink, creates a compressed read-only DMG with `hdiutil`, mounts it without Finder or AppleScript, verifies its contents and write rejection, detaches it, and only then replaces the final artifact.
+Tauri produces only `Coding Wife.app`. The app command excludes the development-only demo runtime, signs nested executable code first, seals the complete app with a timestamp-free ad-hoc signature, and requires `codesign --verify --deep --strict` to pass. This integrity seal does not provide a Developer ID identity and does not prove notarization.
+
+The DMG command stages only that sealed app with an `/Applications` symlink, creates a compressed read-only image with `hdiutil`, mounts it without Finder or AppleScript, verifies its contents and write rejection, detaches it, and only then replaces the final artifact. The canonical verification command checks the source app and a second independent read-only DMG mount against the same sorted inventory. The inventory includes relative path, type, mode, symlink target, regular-file size, and SHA-256; it also checks architecture, minimum macOS version, bundle metadata, required Hiyori/legal/skill resources, and forbidden demo/source-map/private/quarantine/credential content.
+
+Compressed DMG filesystem metadata is not required to be byte-identical across separate builds. Reproducibility means both mounted images reproduce the sealed app inventory. Freeze and publish only the final candidate's recorded byte size and SHA-256.
 
 The final artifact is:
 
@@ -91,10 +96,10 @@ This creates a synthetic tiny `.app`, builds a real DMG, mounts it read-only, ch
 3. Launch Coding Wife from Applications.
 4. Confirm the bundled Hiyori model renders, add or create a Git project, pass the Codex preflight, complete one primary turn, inspect its commit, and quit the app.
 
-The hackathon artifact is not signed or notarized. Apple warns that running unsigned and unnotarized software can expose the computer and personal information to malware. Proceed only after verifying the repository source, commit, and artifact provenance.
+The hackathon artifact is ad-hoc signed for resource integrity, but it is not Developer ID signed or notarized. The ad-hoc signature does not identify a trusted distributor. Apple warns that running software without a trusted signature and notarization can expose the computer and personal information to malware. Proceed only after verifying the repository source, commit, frozen artifact SHA-256, and artifact provenance.
 
 If Gatekeeper blocks this reviewed local build, first try to open the app once. Then open **System Settings > Privacy & Security**, scroll down, choose **Open Anyway**, and confirm **Open** in the warning. This creates an exception for that app. Do not disable Gatekeeper or remove quarantine attributes globally. See Apple's [current safety guidance](https://support.apple.com/en-us/102445).
 
 ## Release evidence still required
 
-Before external judging, record a fresh-profile or second-Mac install and first-launch smoke. Signing, notarization, stapling, Intel/universal packaging, and automatic updates are outside the current MVP artifact and must not be claimed as complete.
+Before external judging, record a fresh-profile or second-Mac install and first-launch smoke. Developer ID signing, notarization, stapling, Intel/universal packaging, and automatic updates are outside the current MVP artifact and must not be claimed as complete.

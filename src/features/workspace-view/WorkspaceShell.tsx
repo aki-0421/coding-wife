@@ -39,11 +39,9 @@ import {
   useCharacterRuntimeStatus,
   useCharacterRuntimeStatusStore,
 } from "@/features/character"
-import {
-  EvidenceView,
-  type GitReviewTransport,
-  type ScopedCommitExplanationController,
-} from "@/features/git-review"
+import type { ScopedCommitExplanationController } from "@/features/git-review/commit-explanation-adapter"
+import { EvidenceView } from "@/features/git-review/EvidenceView"
+import type { GitReviewTransport } from "@/features/git-review/transport"
 import {
   CommitNarrationCaption,
   type NarrationController,

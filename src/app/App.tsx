@@ -1,14 +1,12 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 
-import { AppProviders } from "@/app/AppProviders"
+import { AppFrame } from "@/app/AppFrame"
 import {
   createAppLifecycleGateway,
   type AppLifecycleGateway,
 } from "@/features/app-lifecycle"
 import {
-  CharacterRuntimeStatusProvider,
   createCharacterLibraryGateway,
-  DefaultCharacterStageRenderer,
   type CharacterLibraryGateway,
 } from "@/features/character"
 import {
@@ -18,7 +16,6 @@ import {
 import {
   createNarrationGateway,
   NarrationController,
-  NarrationProvider,
   type CommitNarrationConsumerPort,
   type NarrationGateway,
 } from "@/features/narration"
@@ -41,7 +38,6 @@ import {
 } from "@/features/readiness"
 import { createWorkspaceViewAdapter } from "@/features/workspace-persistence"
 import {
-  WorkspaceShell,
   type CharacterStageRenderer,
   type WorkspaceViewAdapter,
 } from "@/features/workspace-view"
@@ -87,10 +83,6 @@ export function App({
   const [fallbackTransport] = useState(createAppTransport)
   const activeTransport = transport ?? fallbackTransport
   const interactiveDemo = interactiveDemoEnabled(activeTransport)
-  const characterRendererKind =
-    characterRenderer === undefined ? "builtin_hiyori" : "external"
-  const activeCharacterRenderer =
-    characterRenderer ?? DefaultCharacterStageRenderer
   const fallbackPreferencesController = useMemo(
     () =>
       new AppPreferencesController(
@@ -166,57 +158,23 @@ export function App({
     commitExplanationRuntime === undefined
       ? fallbackCommitExplanationRuntime
       : commitExplanationRuntime
-  const activeNarrationSource =
-    narrationSource === undefined
-      ? (activeCommitExplanationRuntime?.narrationSource ?? null)
-      : narrationSource
-
-  useEffect(() => {
-    if (activeCommitExplanationRuntime === null) return
-    activeCommitExplanationRuntime.setPresentationActivator((key) =>
-      activeNarrationController.activatePresentation(key),
-    )
-    return () => {
-      activeCommitExplanationRuntime.setPresentationActivator(null)
-    }
-  }, [activeCommitExplanationRuntime, activeNarrationController])
-
-  useEffect(() => {
-    if (activeCommitExplanationRuntime === null) return
-    void activeCommitExplanationRuntime.start().catch(() => undefined)
-    return () => activeCommitExplanationRuntime.dispose()
-  }, [activeCommitExplanationRuntime])
-
   return (
-    <AppProviders
+    <AppFrame
+      appLifecycleGateway={appLifecycleGateway ?? fallbackAppLifecycleGateway}
+      appPreferencesController={activePreferencesController}
       characterLibraryGateway={
         characterLibraryGateway ?? fallbackCharacterLibraryGateway
       }
+      characterRenderer={characterRenderer}
+      commitExplanationRuntime={activeCommitExplanationRuntime}
+      gitReviewTransport={gitReviewTransport}
       localeStore={localeStore}
-      preferencesController={activePreferencesController}
+      narrationController={activeNarrationController}
+      narrationGateway={activeNarrationGateway}
+      narrationSource={narrationSource}
       readinessController={activeReadinessController}
       transport={activeTransport}
-    >
-      <NarrationProvider
-        controller={activeNarrationController}
-        gateway={activeNarrationGateway}
-        source={activeNarrationSource}
-      >
-        <CharacterRuntimeStatusProvider rendererKind={characterRendererKind}>
-          <WorkspaceShell
-            adapter={workspaceAdapter ?? fallbackWorkspaceAdapter}
-            appLifecycleGateway={
-              appLifecycleGateway ?? fallbackAppLifecycleGateway
-            }
-            characterRenderer={activeCharacterRenderer}
-            commitExplanationController={
-              activeCommitExplanationRuntime ?? undefined
-            }
-            gitReviewTransport={gitReviewTransport}
-            narrationController={activeNarrationController}
-          />
-        </CharacterRuntimeStatusProvider>
-      </NarrationProvider>
-    </AppProviders>
+      workspaceAdapter={workspaceAdapter ?? fallbackWorkspaceAdapter}
+    />
   )
 }

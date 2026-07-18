@@ -42,7 +42,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 言語 | 日本語・英語の初期選択、即時切替、永続化 |
 | Accessibility | keyboard、focus、contrast、200% text zoom、reduced motion、screen reader |
 | Trust boundary | typed command、最小Capability、CSP、secret redaction |
-| macOS release | Apple Silicon用`.app`、Finder非依存DMG、artifact検証、diff hygiene |
+| macOS release | Apple Silicon用`.app`、development demo分離、ad-hoc resource seal、Finder非依存DMG、artifact検証、diff hygiene |
 
 ### 含めない
 
@@ -51,7 +51,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | Windows / Linux配布 | Build Week MVPは検証済みmacOS artifactへ集中する | 将来のplatform validation |
 | 複数window | demoの単一作業面と状態一貫性を優先する | 将来検討 |
 | 自動update | 署名・配布基盤を今回のMVPに含めない | 将来のrelease要件 |
-| Developer ID署名・Apple公証 | ハッカソンMVPはローカルで再現する未署名配布物に限定し、外部配布の信頼連鎖を別gateとする | [macOS release packaging調査](../research/macos-release-packaging.md) |
+| Developer ID署名・Apple公証 | ハッカソンMVPは全resourceをsealするad-hoc署名までを必須とするが、配布者identityを証明するDeveloper ID署名とApple公証は行わず、外部配布の信頼連鎖を別gateとする | [macOS release packaging調査](../research/macos-release-packaging.md) |
 | 内蔵terminal | 任意shellをWebViewへ公開しない | [Codex main session](codex-main-session.md)のread-only tool event |
 | light theme | Figma node 8:2のdark restrained systemを正本とする | [DESIGN.md](../../DESIGN.md) |
 
@@ -115,9 +115,11 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-074` | DMG生成は不完全な出力を公開しない | missing/invalid `.app`、不正なoutput・volume、明示`--overwrite`なしの既存出力、copy/create/convert/mount/verify失敗で非0になり、既存artifactを検証完了前に置換せず、partial image・mount・一時directoryを残さない。失敗出力にinput/output/tempのabsolute pathを含めない | Approved | 非該当 |
 | `APP-F-075` | Contributorはbyte-exact third-party noticeを改変せず差分品質を検査できる | `pnpm check:diff`が既定の`origin/develop...HEAD`または明示baseからのcommitted差分と、staged、unstaged、untracked fileを検査する。`src-tauri/resources/characters/builtin-hiyori/NOTICE.txt`のみをwhitespace検査から除外する一方、worktreeでそのpathがregular file・固定SHA-256であることを毎回検証する。HEADまたは選択したbaseにNOTICEがある場合はindexにexact pathのstage 0 entryが1件あることを必須とし、mode `100644`・regular blob・固定SHA-256を検証する。tracked baselineにNOTICEがない場合のcanonical untracked addは許可するが、index entryがあれば同じmode・blob検証を適用する。NOTICEの改変・削除・rename・mode変更・symlink置換、または他pathのadd・rename・untracked whitespace errorは非0にし、consoleにabsolute path、差分行、secretを表示しない | Approved | 非該当 |
 | `APP-F-076` | app preferenceはversioned native storeを正本にする | `AppPreferencesV1`は`locale=ja|en`、`reducedMotion=system|on|off`、`characterVisibility=visible|hidden`をowner-only app-private native storeへatomic保存し、Settingsとruntimeは同じsnapshot/versionだけを使う。再起動後にexact復元し、localeは保存成功後ただちに全app-owned copyへ反映する。Reset PreferencesはこのrecordだけをOS由来locale、`system`、`visible`へ戻し、workspace、history、Context、character model library、Git stateを変更しない。missing/corrupt/unknown-version recordはraw値をUIへ出さずsafe defaultとsanitized diagnosticへfail closedする | Approved | 非該当 |
-| `APP-F-077` | final candidateはclean HEADから必要resourceだけを含む | clean final HEADから生成した`.app`にbundled Hiyori runtime 17fileとNOTICE、main commit skill、commit explanation skill、app-owned support runtime、schema/migrationを含め、development fixture、quarantine、absolute private path、credential、user dataを含めない。同じ検証済み`.app`だけを入力にFinder非依存DMGを2回生成し、resource inventoryが一致し、各artifactのSHA-256を記録する。build前後のfree diskとcleanup結果を記録し、stale mountと中間artifactを残さない | Approved | 非該当 |
+| `APP-F-077` | final candidateはclean HEADから必要resourceだけを含む | clean final HEADから生成した`.app`にbundled Hiyori runtime 17fileとNOTICE、main commit skill、commit explanation skill、app-owned support runtime、schema/migrationを含め、development fixture、source map、quarantine、absolute private path、credential、user dataを含めない。同じ検証済み`.app`だけを入力にFinder非依存DMGを作り、別々の2回のread-only mountでroot 2entry、`/Applications` link、正規化app inventoryがsource `.app`と一致することを確認する。DMG filesystem metadataによるbyte同一性は要求せず、公開する最終DMGだけのsizeとSHA-256を凍結して記録する。build前後のfree diskとcleanup結果を記録し、stale mountと中間artifactを残さない | Approved | 非該当 |
 | `APP-F-078` | installed artifactでprimary pathとlifecycleを再現できる | final DMGを実mountし、Applications相当へcopyした`.app`をbuild directory外からmacOS 14以降のfresh profile、別Mac、または同等の隔離環境でlaunchする。Hiyori、project picker、Codex preflight、main turn、trusted read-only commit evidence、「詳しく教えて」のcaptionとoptional TTS、Context restart、single-instance、running close、5秒以内cleanup、Interrupted recoveryを完走する。署名・notarization済みでない場合は英語testing guideにunsigned/unnotarized状態、Gatekeeper手順、security trade-offを明記してその手順も検証する | Approved | 非該当 |
 | `APP-F-079` | release artifactは横断受け入れ条件を満たす | installed `.app`のja/enで主要happy pathとmajor error/recovery pathを完走し、locale即時切替とrestart復元、keyboard-only、dialog focus containment/return、visible focus、role/name/state、caption live region、200% text zoom、reduced motionを検証する。offline、Codex unavailable、TTS unavailable、repository health error、DB recovery、invalid Live2D packでlocal historyとrecoveryを維持し、secret、token、absolute private path、raw stderr、support本文をUI/log/evidenceへ出さない。1470×836、960×640、実効幅480で到達不能control・clipping・caption overflowを0件にし、起動/操作/Live2D/履歴/cleanupの各既定p95と長時間listener/process/cache非増殖をrelease buildで測定する | Approved | 非該当 |
+| `APP-F-080` | production frontend bundleはdevelopment demo runtimeを含まない | Vite development serverで明示した`?demoAppServer=1`だけがdevelopment demo runtimeとfixtureを遅延取得できる。queryなしのdevelopment画面とTauri production画面はnative adapterを維持する。production `dist`と`.app`のregular file contentをscanし、`demoAppServer`、`Demo commit evidence is missing`、`Demo diff evidence is missing`、`workspace-demo-selected-project`、`demo-decision-turn-1`、`file-demo-image`、`demo-auto-`の一致を各0件にする | Approved | 非該当 |
+| `APP-F-081` | Release maintainerは一つの正本commandでappとDMGを検証できる | `pnpm release:macos:verify`はnested codeを先に、最後に`.app`全体をtimestampなしのad-hoc署名でsealしたcandidateだけを受理し、`codesign --verify --deep --strict`成功、TeamIdentifierなし、Developer ID署名なし、Apple公証なしを区別して報告する。sorted inventoryはrelative path、file type、permission mode、symlink target、regular file size、SHA-256を含み、app inventory digest、arm64、minimum macOS 14.0、bundle ID、version、Hiyori runtime 17file、legal notice、2 bundled skills、schema/migration、source map/demo/private path/quarantine/credential不在を検証する。DMGは別々の2回のread-only mountで同じapp inventoryを再現し、final DMGのsizeとSHA-256を出力する。失敗・INT・TERMではfinal artifactを置換せず、mount、staging、一時directoryを0件へ収束する | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -150,10 +152,10 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 通知 | app内statusとtoastだけ。OS通知はMVP非対象 | `APP-F-055` |
 | Capability・認可 | window、dialog、process、filesystemのscopeを目的別に最小化 | `APP-F-067`, `APP-F-068` |
 | アップデート・互換性 | 自動updateは非該当。DB migrationはforward-onlyかつ失敗時rollback | `APP-F-065` |
-| 配布物生成 | Tauriは`.app`だけをbundleし、repository scriptが`hdiutil`でread-only DMGを作成・mount検証・公開する | `APP-F-073`, `APP-F-074` |
+| 配布物生成 | Tauriは`.app`だけをbundleし、repository scriptがdevelopment demo不在を検証してnested codeからapp順にad-hoc sealし、`hdiutil`でread-only DMGを作成・mount検証・公開する | `APP-F-073`, `APP-F-074`, `APP-F-080`, `APP-F-081` |
 | 差分品質 | byte-exact Hiyori NOTICEだけをwhitespace検査から除外し、他のrepository-owned textは除外しない | `APP-F-075` |
 | 設定・診断 | app preferenceとreadinessはversioned native sourceを正本にし、WebView/demo値を永続・readyとして扱わない | `APP-F-070`, `APP-F-076` |
-| 配布物受け入れ | clean final HEADのresource inventory、実DMG mount/copy/launch、fresh-profile相当、ja/en/a11y/privacy/offline/performanceをinstalled artifactで検証する | `APP-F-077`〜`APP-F-079` |
+| 配布物受け入れ | clean final HEADのsealed resource inventory、実DMG mount/copy/launch、fresh-profile相当、ja/en/a11y/privacy/offline/performanceをinstalled artifactで検証する | `APP-F-077`〜`APP-F-081` |
 
 ## 画面・UI
 
@@ -164,7 +166,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `S-003` | セッション証拠 | `APP-F-055`, `APP-F-059`〜`APP-F-062` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
 | `S-004` | 設定・診断 | `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
-`APP-F-073`〜`APP-F-075`と`APP-F-077`〜`APP-F-079`はrelease/CI/installed artifact境界の要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
+`APP-F-073`〜`APP-F-075`と`APP-F-077`〜`APP-F-081`はrelease/CI/installed artifact境界の要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
 
 ## 非機能要件
 
@@ -174,7 +176,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 権限 | Tauri Capabilityはmain windowと目的別commandへ限定し、任意shell/fs APIを公開しない |
 | プライバシー | telemetryはMVPで送信しない。診断exportを実装する場合も利用者の明示操作前に外部送信しない |
 | 監査・ログ | app lifecycle、migration、redacted error codeを記録し、secretとraw reasoningを記録しない |
-| 配布信頼性 | DMGはFinder/AppleEventに依存せず、read-only mount検証を通ったcandidateだけをfinal pathへ置く |
+| 配布信頼性 | appは全resourceをad-hoc sealしてstrict検証し、DMGはFinder/AppleEventに依存せず、2回のread-only mountで正規化inventoryが一致したcandidateだけをfinal pathへ置く。DMG byte同一性は要求せず、final artifactのsizeとSHA-256を凍結する |
 | 性能 | 起動p95 3,000ms、通常操作p95 100ms、最低window 960×640 |
 | 信頼性・復旧 | 未完了turnを自動再送せず、DB transactionは終了時commitまたはrollbackする |
 | アクセシビリティ | WCAG 2.2 AA、keyboard-only、visible focus、200% text zoom、reduced motionを満たす |
