@@ -215,7 +215,13 @@ export function EvidenceView({
                   type="button"
                   variant="ghost"
                 >
-                  <RefreshCwIcon className={refreshing ? "animate-spin" : ""} />
+                  <RefreshCwIcon
+                    className={
+                      refreshing
+                        ? "animate-spin motion-reduce:animate-none"
+                        : ""
+                    }
+                  />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{copy.refresh}</TooltipContent>

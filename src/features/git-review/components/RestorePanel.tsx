@@ -163,7 +163,10 @@ function RestoreConfirmation({
             variant={isRevert ? "destructive" : "default"}
           >
             {confirming ? (
-              <LoaderCircleIcon aria-hidden="true" className="animate-spin" />
+              <LoaderCircleIcon
+                aria-hidden="true"
+                className="animate-spin motion-reduce:animate-none"
+              />
             ) : isRevert ? (
               <RotateCcwIcon aria-hidden="true" />
             ) : (
@@ -286,7 +289,10 @@ export function RestorePanel({
             variant="destructive"
           >
             {status === "previewing" && kind === "revert_commit" ? (
-              <LoaderCircleIcon aria-hidden="true" className="animate-spin" />
+              <LoaderCircleIcon
+                aria-hidden="true"
+                className="animate-spin motion-reduce:animate-none"
+              />
             ) : (
               <RotateCcwIcon aria-hidden="true" />
             )}
@@ -333,7 +339,10 @@ export function RestorePanel({
             variant="secondary"
           >
             {status === "previewing" && kind === "recovery_branch" ? (
-              <LoaderCircleIcon aria-hidden="true" className="animate-spin" />
+              <LoaderCircleIcon
+                aria-hidden="true"
+                className="animate-spin motion-reduce:animate-none"
+              />
             ) : (
               <GitBranchIcon aria-hidden="true" />
             )}

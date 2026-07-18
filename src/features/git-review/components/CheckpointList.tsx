@@ -232,7 +232,7 @@ export function CheckpointList({
                 {loadingMore ? (
                   <LoaderCircleIcon
                     aria-hidden="true"
-                    className="animate-spin"
+                    className="animate-spin motion-reduce:animate-none"
                   />
                 ) : null}
                 {copy.loadMore}

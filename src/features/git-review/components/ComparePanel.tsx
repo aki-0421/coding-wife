@@ -264,7 +264,10 @@ export function ComparePanel({
             type="button"
           >
             {status === "loading" ? (
-              <LoaderCircleIcon aria-hidden="true" className="animate-spin" />
+              <LoaderCircleIcon
+                aria-hidden="true"
+                className="animate-spin motion-reduce:animate-none"
+              />
             ) : (
               <GitCompareArrowsIcon aria-hidden="true" />
             )}

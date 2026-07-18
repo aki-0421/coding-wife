@@ -228,7 +228,7 @@ export function FilesPanel({
             <div className="flex items-center gap-xs text-caption text-muted-foreground">
               <LoaderCircleIcon
                 aria-hidden="true"
-                className="size-3 animate-spin"
+                className="size-3 animate-spin motion-reduce:animate-none"
               />
               {copy.diffLoading}
             </div>
