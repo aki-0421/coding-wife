@@ -141,9 +141,9 @@ build時の入力はrepositoryの`tmp/hiyori_pro`とし、release resourceには
 | 項目 | 表示・操作 |
 |---|---|
 | Bundled | Hiyori preview、selected project数、provenance。Delete不可 |
-| Custom | pack name、thumbnail、motion/expression count、size、hash、selected project数 |
+| Custom | pack name、attested thumbnail、motion/expression count、size、manifest/trusted-frame hash、selected project数。thumbnailは再読込・再起動後もpack IDとtrusted-frame asset IDだけのopaque binary IPCで取得し、manifest記載のbyte数とSHA-256へ一致したPNGだけを表示する。hashは省略表示し、完全値をaccessible nameで提供する。missing/tampered frameではuntrusted bytesを表示しない |
 | Hide character | canvas/GPU animationを停止し、Chat幅とHTML text stateを残す。再起動後も復元 |
-| Select | preview first frameとstate test成功後だけproject単位で有効 |
+| Select | preview first frameとstate test成功後だけproject単位で有効。切替時はcandidate client/model/trusted frameをfirst accepted frameまでstageし、成功時だけrenderer、React committed pack、metrics、status、frameを一括で置換する。失敗またはabortではcandidateだけをreleaseし、現在表示を全項目そのまま維持する |
 | Delete | active projectで未選択のcustom packだけ。確認後にapp-private copyを削除 |
 
 #### custom model import
@@ -293,7 +293,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 |---|---|---|---|---|---|
 | settings/context保存 | Rust DB | `save_settings_section` | allowlist section/key/schema、expected version | transaction前なら不変 |前値維持、field/error code |
 | model選択/import | Tauri dialog → Rust importer | `select_and_import_model3` | regular file 1件、canonical root、quarantine、resource limit | library/DB/quarantine不変 | current model継続 |
-| model preview/select/delete | Rust asset service | `preview/select/delete_character_pack` | verified pack UUID、project scope、usage check | current state維持 | bundled/selected delete拒否 |
+| model preview/select/delete | Rust asset service | `character_read_asset` / `preview/select/delete_character_pack` | verified pack UUID、manifest hash、relative asset ID、project scope、usage check。trusted frameはbinary responseをmanifestのbyte数/SHA-256へ再照合 | current state維持 | missing/tampered frameは表示せず、bundled/selected delete拒否 |
 | API key | OS secret store | `set/delete_tts_secret` | service-scoped secret、raw値return禁止 | saved handle不変 | TTS off相当 |
 | TTS test/mute | Rust network/audio | `test/cancel_tts` / `set_mute` | allowlist endpoint、redacted fixed sample、no microphone | abort/stop、settings維持 | text fallback |
 | support control | Rust supervisor | `configure/cancel_support` | role allowlist、budget固定、main分離 |前config維持 | fail closed + fallback |
@@ -330,7 +330,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | locale/motion/settings | Rust SQLite | valid section transaction | startup/route | Reset対象に応じる |前version維持 |
 | project/character context | versioned Rust SQLite | expected-version save | workspace/Context | project/history契約 | conflict、入力保持 |
 | bundled Hiyori | release resource + manifest | build/package | startup/selection |削除不可 | static/text fallback |
-| custom pack | app-private library + manifest | quarantineからatomic promotion | library/selection |未使用pack明示削除 | orphan quarantine cleanup |
+| custom pack | app-private library + manifest + manifest拘束trusted PNG | quarantineからatomic promotion | library/selection/card再読込/再起動 |未使用pack明示削除 | orphan quarantine cleanup。trusted PNGがmissing/tamperedならpack metadataは保持しthumbnailだけをfail closed |
 | source absolute path |保存しない | 非該当 |復元しない | picker/import終了 | pack UUIDだけ使用 |
 | TTS key | OS secret store |明示save | set/unset query |明示delete/reset | off相当、raw値非表示 |
 | generated audio | memory/temporary only | playback中 |復元しない | complete/cancel/switch/quit | text保持 |

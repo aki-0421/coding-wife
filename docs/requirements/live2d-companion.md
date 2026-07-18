@@ -96,8 +96,8 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-072` | importerはresource境界を適用する | file数128以下、合計100MiB以下、1file 32MiB以下、texture各8192×8192以下、JSON depth 64以下だけを受理する | Approved | 非該当 |
 | `LIVE-F-073` | importerはquarantineからatomicに昇格する | 全fileをquarantineへcopyして再hash・再検証し、manifest作成後のatomic rename成功時だけlibraryへpack IDを追加する | Approved | 非該当 |
 | `LIVE-F-074` | WebViewはimport元absolute pathを受け取らない | import完了payloadとrenderer requestにpack UUIDとrelative asset IDだけが含まれ、source path/home pathがない | Approved | 非該当 |
-| `LIVE-F-075` | 利用者はimport packをpreview後に選択できる | previewのfirst frameとstate testが成功した後だけSelectを有効にし、projectごとのpack IDを保存する | Approved | 非該当 |
-| `LIVE-F-076` | import失敗は現在modelを壊さない | malformed、missing、unsupported MOC、I/O失敗の各fixtureで現在pack選択とrenderingが継続し、失敗packがlibraryに残らない | Approved | 非該当 |
+| `LIVE-F-075` | 利用者はimport packをpreview後に選択できる | previewのfirst frameとstate testが成功した後だけSelectを有効にしてprojectごとのpack IDを保存する。library cardは再起動後もmanifestへ拘束されたtrusted PNGをpack IDとasset IDだけのopaque binary IPCで読み、thumbnailと省略hashを表示し、完全hashをaccessibility treeから取得できる。missingまたはhash不一致のframeは表示しない | Approved | 非該当 |
+| `LIVE-F-076` | import失敗は現在modelを壊さない | malformed、missing、unsupported MOC、I/O、first-frame失敗、abortの各fixtureで現在pack選択とrenderingが継続し、失敗packがlibraryに残らない。model switchはcandidate client/model/trusted frameをfirst accepted frameまで分離し、その時点だけrenderer、committed pack、metrics、status、frameを一括更新する。失敗またはabortではcandidateだけをreleaseする | Approved | 非該当 |
 | `LIVE-F-077` | 利用者はpackごとのsemantic mappingを設定できる | inventoryに存在するmotion/expression/parameterだけをstateへ割り当て、未割当stateをneutralとして保存できる | Approved | 非該当 |
 | `LIVE-F-078` | 利用者は未使用custom packを削除できる | active projectで未選択のcustom packだけを確認後削除し、bundled Hiyoriと選択中packのDeleteを無効にする | Approved | 非該当 |
 
