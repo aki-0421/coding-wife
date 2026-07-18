@@ -70,7 +70,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-052` | 利用者はmacOS 14以降で単一main windowを起動できる | cold startでmain windowが1枚だけ表示され、二重起動要求は既存windowを前面へ出す | Approved | 非該当 |
+| `APP-F-052` | 利用者はmacOS 14以降で単一main windowを起動できる | cold startでmain windowが1枚だけ表示される。app-private single-instance lockを保持中の二重起動要求は新しいWebView、Codex/App Server、support runtime、audio controller、DB writerを作らず、既存windowをunminimizeしてfocus/raiseしてから新processを終了する。stale lockはowner/process identityを検証した場合だけ回収する | Approved | 非該当 |
 | `APP-F-053` | 利用者はFigma基準の三領域を表示できる | 1470×836 CSS pxでsidebar 255.04px、header 81px、Chat 607.11px、Companion 607.84pxとなり、主要境界が各基準値の±2px以内になる | Approved | 非該当 |
 | `APP-F-054` | 利用者はminimum window sizeでも主要操作を継続できる | windowは960×640 CSS px未満へ縮小できず、960×640でtab、timeline、composer、Send、停止操作が欠落しない | Approved | 非該当 |
 | `APP-F-055` | 利用者はS-001〜S-004の目的へ同じwindow内で移動できる | sidebar、Chat/Commit/Context/Settings tab、settings gearから対象viewへ移動し、戻った時にworkspace選択とcomposer draftが保たれる | Approved | 非該当 |
@@ -82,7 +82,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 |---|---|---|---|---|
 | `APP-F-057` | アプリは初回言語を決定する | OS localeが`ja`で始まる場合は日本語、それ以外は英語で初回表示する | Approved | 非該当 |
 | `APP-F-058` | 利用者は日本語と英語を即時切り替えられる | Settingsで言語を変更すると再起動なしでsidebar、tabs、errors、decision、settings、notificationsが切り替わり、再起動後も選択が戻る | Approved | 非該当 |
-| `APP-F-059` | 利用者はkeyboardだけで主要フローを操作できる | workspace選択、tab移動、添付、context、effort、送信、判断回答、停止、mute、review、restoreへTab/Shift+Tab/矢印/Enter/Escapeで到達できる | Approved | 非該当 |
+| `APP-F-059` | 利用者はkeyboardだけで主要フローを操作できる | workspace選択、tab移動、添付、context、effort、送信、判断回答、停止、mute、read-only commit review、workspace repairへTab/Shift+Tab/矢印/Enter/Escapeで到達できる。Commit画面にcommit/revert/undo/restore/checkout/resetの操作またはshortcutを置かない | Approved | 非該当 |
 | `APP-F-060` | 利用者は現在focusを視認できる | 全interactive controlの`:focus-visible`が背景に対して3:1以上の2px outlineを表示し、focus順が視覚順と一致する | Approved | 非該当 |
 | `APP-F-061` | 利用者は動きを抑制できる | OSまたはアプリのreduced motionが有効な時、idle/decorative motionと位置・scale transitionを停止し、状態変化は即時または80ms以下のcrossfadeになる | Approved | 非該当 |
 | `APP-F-062` | 利用者は200% text zoomで操作できる | 960×640で200% text zoomを適用した実効480px幅でも主要label、History & Privacyの保存説明、履歴削除actionが横方向に切れず、tabとsection navigationはscroll/overflow、composer controlはwrapしてSendを残す | Approved | 非該当 |
@@ -91,9 +91,9 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-063` | 利用者は実行中turnがある状態でclose結果を選べる | close時に実行中turnがあれば「停止して終了」「終了しない」を表示し、終了しない場合はwindowとturnを維持する | Approved | 非該当 |
-| `APP-F-064` | アプリは終了時にchild processとwriterを停止する | 「停止して終了」後5秒以内にCodex childとaudio playbackを停止し、SQLite transactionを完了またはrollbackしてprocessが残らない | Approved | 非該当 |
-| `APP-F-065` | 利用者は異常終了後に安全な回復概要を確認できる | 再起動時に未完了turnを`Interrupted`として表示し、draft、最後のcheckpoint、未完了work unitを示し、turnを自動再送しない | Approved | 非該当 |
+| `APP-F-063` | 利用者はclose結果を安全に選べる | active/pending turnがないcloseは通常終了する。active/pending turnがあるcloseはnative closeを保留して「停止して終了」と「終了しない」だけを表示する。「終了しない」はdialogを閉じて元controlへfocusを戻し、window、turn、selection、draft、caption/TTSを維持する。duplicate close、Escape、window manager経由でも確認を迂回しない | Approved | 非該当 |
+| `APP-F-064` | アプリは終了時にchild processとwriterを停止する | idle closeまたは「停止して終了」受理後、Codex/App Server process group、audio process/queue、app-owned support controller/process group、pending scope writer、DB writer/transactionを順序付きで閉じ、全descendant消滅とtransaction commitまたはrollbackを5秒以内に確認してからmain processを終了する。期限超過時はprocess groupを強制終了してInterrupted recovery metadataを残し、Git stateとsupport explanation本文を永続化しない | Approved | 非該当 |
+| `APP-F-065` | 利用者は異常終了後に安全な回復概要を確認できる | 再起動時にterminal eventのないturnを`Interrupted`として表示し、workspace固有のdraft、last summary、timeline anchor、未完了work unitを示す。Codex turn、support presentation、TTS、Git commandを自動再送・再開せず、persisted commit evidenceとapp-owned sanitized metadataだけを再構築する | Approved | 非該当 |
 | `APP-F-066` | 利用者はofflineでもlocal evidenceを確認できる | networkまたはCodex接続がない時もworkspace、timeline、Commit、Context、Settingsを開け、送信だけを理由付きで無効にする | Approved | 非該当 |
 | `APP-F-067` | WebViewは目的別native操作だけを要求できる | 任意command名、任意shell文字列、allowlist外absolute pathをIPCへ渡すtestが拒否され、OS処理が開始されない | Approved | 非該当 |
 | `APP-F-068` | release版はlocal bundleだけからscriptを実行する | CSP violation testで外部`http:`, `https:`, inline未許可scriptが拒否され、許可されたapp assetと限定character assetだけがloadされる | Approved | 非該当 |
@@ -103,7 +103,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-070` | 利用者は起動前提の診断結果を確認できる | SettingsにOS、app version、Codex/Git/DB/Live2Dの利用可否とerror codeを表示し、History badgeとDB診断は同じreadiness sourceから一致する値を示し、token、API key、完全なhome pathを表示しない | Approved | 非該当 |
+| `APP-F-070` | 利用者は実際のnative readinessを診断できる | SettingsにOS、app/build/schema version、Codex binary/auth/model/protocol schema、Git、DB、Live2Dのnative checkを`ready` / `warning` / `blocked` / `unavailable`、UTC `checkedAt`、sanitized error code、localized recovery actionとして表示する。Recheckは同じnative readiness serviceを再評価し、History badgeとDB診断は同じsnapshot IDの値を使う。demo/fixture値をnative readyとして表示せず、absolute/private path、token、credential、raw stderrを表示・copy・logしない | Approved | 非該当 |
 | `APP-F-071` | アプリは基準端末で作業面を短時間に表示する | Apple Silicon・16GB RAM・release build・既存workspace 20件の条件で、process開始からskeletonを持つ操作可能なshell表示までのp95が3,000ms以下になる。workspace Git再検証はsetupをblockせず非同期で開始し、各processを期限内に終了する | Approved | 非該当 |
 | `APP-F-072` | UIは通常操作へ短時間に反応する | tab、workspace、settings toggleの入力からvisual state更新までのp95が100ms以下になり、測定中のsampleを100回以上記録する | Approved | 非該当 |
 
@@ -114,6 +114,10 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-073` | Release maintainerはFinder自動化なしでmacOS DMGを作れる | macOS 14以降で`pnpm release:macos`を実行するとTauriが`.app`だけをbundleし、明示DMG commandがその`.app`と`/Applications`へのsymlinkの2entryだけを持つread-only DMGを生成する。実行中にFinder、AppleScript、`osascript`を起動しない | Approved | 非該当 |
 | `APP-F-074` | DMG生成は不完全な出力を公開しない | missing/invalid `.app`、不正なoutput・volume、明示`--overwrite`なしの既存出力、copy/create/convert/mount/verify失敗で非0になり、既存artifactを検証完了前に置換せず、partial image・mount・一時directoryを残さない。失敗出力にinput/output/tempのabsolute pathを含めない | Approved | 非該当 |
 | `APP-F-075` | Contributorはbyte-exact third-party noticeを改変せず差分品質を検査できる | `pnpm check:diff`が既定の`origin/develop...HEAD`または明示baseからのcommitted差分と、staged、unstaged、untracked fileを検査する。`src-tauri/resources/characters/builtin-hiyori/NOTICE.txt`のみをwhitespace検査から除外する一方、worktreeでそのpathがregular file・固定SHA-256であることを毎回検証する。HEADまたは選択したbaseにNOTICEがある場合はindexにexact pathのstage 0 entryが1件あることを必須とし、mode `100644`・regular blob・固定SHA-256を検証する。tracked baselineにNOTICEがない場合のcanonical untracked addは許可するが、index entryがあれば同じmode・blob検証を適用する。NOTICEの改変・削除・rename・mode変更・symlink置換、または他pathのadd・rename・untracked whitespace errorは非0にし、consoleにabsolute path、差分行、secretを表示しない | Approved | 非該当 |
+| `APP-F-076` | app preferenceはversioned native storeを正本にする | `AppPreferencesV1`は`locale=ja|en`、`reducedMotion=system|on|off`、`characterVisibility=visible|hidden`をowner-only app-private native storeへatomic保存し、Settingsとruntimeは同じsnapshot/versionだけを使う。再起動後にexact復元し、localeは保存成功後ただちに全app-owned copyへ反映する。Reset PreferencesはこのrecordだけをOS由来locale、`system`、`visible`へ戻し、workspace、history、Context、character model library、Git stateを変更しない。missing/corrupt/unknown-version recordはraw値をUIへ出さずsafe defaultとsanitized diagnosticへfail closedする | Approved | 非該当 |
+| `APP-F-077` | final candidateはclean HEADから必要resourceだけを含む | clean final HEADから生成した`.app`にbundled Hiyori runtime 17fileとNOTICE、main commit skill、commit explanation skill、app-owned support runtime、schema/migrationを含め、development fixture、quarantine、absolute private path、credential、user dataを含めない。同じ検証済み`.app`だけを入力にFinder非依存DMGを2回生成し、resource inventoryが一致し、各artifactのSHA-256を記録する。build前後のfree diskとcleanup結果を記録し、stale mountと中間artifactを残さない | Approved | 非該当 |
+| `APP-F-078` | installed artifactでprimary pathとlifecycleを再現できる | final DMGを実mountし、Applications相当へcopyした`.app`をbuild directory外からmacOS 14以降のfresh profile、別Mac、または同等の隔離環境でlaunchする。Hiyori、project picker、Codex preflight、main turn、trusted read-only commit evidence、「詳しく教えて」のcaptionとoptional TTS、Context restart、single-instance、running close、5秒以内cleanup、Interrupted recoveryを完走する。署名・notarization済みでない場合は英語testing guideにunsigned/unnotarized状態、Gatekeeper手順、security trade-offを明記してその手順も検証する | Approved | 非該当 |
+| `APP-F-079` | release artifactは横断受け入れ条件を満たす | installed `.app`のja/enで主要happy pathとmajor error/recovery pathを完走し、locale即時切替とrestart復元、keyboard-only、dialog focus containment/return、visible focus、role/name/state、caption live region、200% text zoom、reduced motionを検証する。offline、Codex unavailable、TTS unavailable、repository health error、DB recovery、invalid Live2D packでlocal historyとrecoveryを維持し、secret、token、absolute private path、raw stderr、support本文をUI/log/evidenceへ出さない。1470×836、960×640、実効幅480で到達不能control・clipping・caption overflowを0件にし、起動/操作/Live2D/履歴/cleanupの各既定p95と長時間listener/process/cache非増殖をrelease buildで測定する | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -121,6 +125,8 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 |---|---|---|---|---|---|
 | 表示 | 言語 | OS localeから決定 | 必須 | `ja` / `en`の2値 | 保存に失敗した場合は現在言語を維持し、再試行を表示する |
 | 表示 | reduced motion | `system` | 必須 | `system` / `on` / `off` | 不正値は`system`へ戻し、診断へ記録する |
+| 表示 | character visibility | `visible` | 必須 | `visible` / `hidden` | 不正値は`visible`へ戻し、診断へ記録する |
+| 表示 | preference reset | 未確認 | 条件付き | `AppPreferencesV1`だけを対象にする明示確認 | preferenceを変更せずdialogを維持する |
 | macOS release | app path | Tauri release bundleの`Coding Wife.app` | 必須 | 存在する非symlinkの`.app` directory。`Contents/Info.plist`を持つ | 出力を作らず非0で終了する |
 | macOS release | output path | `src-tauri/target/release/bundle/dmg/Coding-Wife.dmg` | 必須 | `.dmg`で終わる。symlinkとdirectoryは拒否する | 既存artifactを変更せず非0で終了する |
 | macOS release | volume name | `Coding Wife` | 必須 | 1〜63 byteのASCII alphanumeric、space、`.`、`_`、`-` | 出力を作らず非0で終了する |
@@ -134,7 +140,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 |---|---|---|
 | 対象OS・OS差分 | MVP対象はmacOS 14以降。Windows/Linuxは非対応表示とする | `APP-F-052` |
 | ウィンドウ生成・再利用 | 単一main windowを再利用し、二重起動で増やさない | `APP-F-052`, `APP-F-056` |
-| 閉じる・アプリ終了 | 実行中turnを停止するか終了を取り消す | `APP-F-063`, `APP-F-064` |
+| 閉じる・アプリ終了 | idleは通常終了し、実行中turnは停止して終了するか終了を取り消す。Codex/audio/support/DBをbounded cleanupする | `APP-F-063`〜`APP-F-065` |
 | 未保存データ | composer draftはworkspace単位で保存し、送信成功まで消去しない | `APP-F-055`, `APP-F-065` |
 | ローカルデータ | Rust管理DBを正本とし、WebView storageを永続正本にしない | `APP-F-065` |
 | オフライン | local evidenceを閲覧可能、online送信は無効 | `APP-F-066` |
@@ -146,6 +152,8 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | アップデート・互換性 | 自動updateは非該当。DB migrationはforward-onlyかつ失敗時rollback | `APP-F-065` |
 | 配布物生成 | Tauriは`.app`だけをbundleし、repository scriptが`hdiutil`でread-only DMGを作成・mount検証・公開する | `APP-F-073`, `APP-F-074` |
 | 差分品質 | byte-exact Hiyori NOTICEだけをwhitespace検査から除外し、他のrepository-owned textは除外しない | `APP-F-075` |
+| 設定・診断 | app preferenceとreadinessはversioned native sourceを正本にし、WebView/demo値を永続・readyとして扱わない | `APP-F-070`, `APP-F-076` |
+| 配布物受け入れ | clean final HEADのresource inventory、実DMG mount/copy/launch、fresh-profile相当、ja/en/a11y/privacy/offline/performanceをinstalled artifactで検証する | `APP-F-077`〜`APP-F-079` |
 
 ## 画面・UI
 
@@ -154,9 +162,9 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `S-001` | セッションダッシュボード | `APP-F-052`〜`APP-F-062` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | `APP-F-053`〜`APP-F-069` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証拠 | `APP-F-055`, `APP-F-059`〜`APP-F-062` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
-| `S-004` | 設定・診断 | `APP-F-055`, `APP-F-057`〜`APP-F-072` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-004` | 設定・診断 | `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
-`APP-F-073`〜`APP-F-075`はrelease/CI境界のcommand要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
+`APP-F-073`〜`APP-F-075`と`APP-F-077`〜`APP-F-079`はrelease/CI/installed artifact境界の要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
 
 ## 非機能要件
 

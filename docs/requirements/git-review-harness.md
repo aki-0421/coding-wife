@@ -30,7 +30,7 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 | producerを一つにする | commitは`coding-wife-commit-work`を明示注入されたmain Codexだけが作り、native command surfaceにGit mutationが0件である |
 | 利用者変更を保護する | turn前から存在したstaged/unstaged/untrackedを観測・表示し、main skillが無関係な変更をcommitしない |
 | evidenceを確認可能にする | commit list、選択、metadata、sanitized diff、verification/decision/risk evidenceをread-only表示する |
-| 説明を安全に補う | verified commit後にredacted `CommitEvidenceV1`を隔離supportへ自動で渡し、JA/EN説明をcaptionへstreamする。UI retryもmainではなくapp controllerへ送る |
+| 説明を安全に補う | verified commit後にredacted `CommitEvidenceV1`を隔離supportへ自動で渡してJA/EN説明を生成・cacheし、対象commitの「詳しく教えて」後だけcaptionへstreamする。UI request/retryもmainではなくapp controllerへ送る |
 
 ## スコープ
 
@@ -108,10 +108,10 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 | `GIT-F-090` | verified commitはapp側から自動説明を起動する | App ServerのGit commit commandがsuccess terminalになり、`GIT-F-075`のobserverが新しいSHAとcommit evidence IDを検証した時だけnative trusted runtimeが`CommitExplanationRequestedV1(trigger=auto_verified_commit)`を1件作る。`auto_verified_commit`はRust内部APIだけが作成でき、公開`commit_explanation_request`は同triggerをfail closedで拒否する。commit選択、Commit tab表示、SHA未検証結果では起動せず、main conversationへrequestを送らない | Approved |
 | `GIT-F-091` | supportへはredacted `CommitEvidenceV1`だけを渡す | SHAのopaque ID、sanitized subject/body、pathなしfile summary、diff統計、verification、decision、risk、locale、generationを最大64KiBで渡し、absolute/relative path、raw diff全文、secret、raw reasoningを0件にする | Approved |
 | `GIT-F-092` | commit説明skillをisolated supportへ明示注入する | resource名`coding-wife-explain-commit`、path authority`app_bundle`、implicit invocation offの検証済みbytesをowner-only private snapshotへ複製し、説明turnにだけ1件注入する。`SUP-F-053`のclean runtimeとcapacity gateを必須にし、wire-advertised/external-authority toolは0件とする。tool field追加またはCodex内部の`update_plan` eventではtaskをfailedにし説明を適用しない | Approved |
-| `GIT-F-093` | 説明はJA/ENのversioned schemaでstreamする | UI localeと一致する要約、変更点、理由、検証、影響、注意、次の見方と、同じ内容の短いnarration chunksをsequence付きで返し、character captionへ逐次表示する | Approved |
-| `GIT-F-094` | TTSは同じredacted transcriptだけを読む | TTS有効時だけcaptionと同じ確定chunkを同順で読み、追加要約やraw evidenceを音声用に再生成しない。TTS off/unavailableでもcaptionは残る | Approved |
-| `GIT-F-095` | invalid/stale/cancelはfail closedする | redaction/schema/workspace generation/selection version検査失敗、timeout、Cancel後のchunkをcaption/TTS/HIST本文へ適用せず、決定的なunavailable/canceled textを表示する。workspaceまたはgenerationのscope変更は旧support requestと旧presentationをcancelし、late eventを適用しない | Approved |
-| `GIT-F-096` | Commit UIはapp controllerの状態と明示presentation intentだけに従う | `CommitExplanationControllerStateV1.status`は`not_generated` / `queued` / `running` / `generated` / `failed` / `unavailable` / `canceled`のexact unionとし、requestを持つstateはrequest ID、workspace generation、commit evidence ID、selection version、triggerを保持する。新しいverified commitはbackgroundで`queued`へ自動遷移するがpresentationは作らない。`user_request` / `user_retry`の1回の操作は、未生成、既存queued/runningへのdedupe合流、generated cache hitのすべてで同じpresent-on-complete intentへ束縛し、追加clickなしで表示する。selection / locale / workspace / Stop / Closeはintent epochを失効させ、event/response適用前にexact identityとepochを再検査する。Stop / Closeはsupport job/cacheをcancelしない。生成cancelだけは別の明示操作にする | Approved |
+| `GIT-F-093` | 説明はJA/ENのversioned schemaで生成し明示intent後にstreamする | UI localeと一致する要約、変更点、理由、検証、影響、注意、次の見方と、同じ内容の短いnarration chunksをsequence付きでapp-owned memoryへ返す。`auto_verified_commit`では生成済みchunkをcacheするだけとし、対象commitの「詳しく教えて」または明示再表示でexact presentation intentがactiveになった後だけcharacter captionへ逐次表示する | Approved |
+| `GIT-F-094` | TTSは同じredacted transcriptだけを読む | 明示presentation intentがactiveかつTTS有効な時だけcaptionと同じ確定chunkを同順で読み、追加要約やraw evidenceを音声用に再生成しない。TTS off/unavailableでも明示操作後のcaptionは残り、明示操作前はcaption/live region/TTSを開始しない | Approved |
+| `GIT-F-095` | invalid/stale/cancelはfail closedする | redaction/schema/workspace generation/selection version検査失敗、timeout、明示した生成Cancel後のchunkをcaption/TTS/HIST本文へ適用しない。explicit presentation intentがactiveなら決定的なunavailable/canceled textへterminal化し、`auto_verified_commit`だけならcontroller state/cacheだけを更新してcaption/live region/TTSを0件にする。workspaceまたはgenerationのscope変更は旧presentation intentだけをrevokeし、旧support jobとgenerated/prepared cacheを維持したままlate eventを現在のcaption/TTSへ適用しない | Approved |
+| `GIT-F-096` | Commit UIはapp controllerの状態と明示presentation intentだけに従う | `CommitExplanationControllerStateV1.status`は`not_generated` / `queued` / `running` / `generated` / `failed` / `unavailable` / `canceled`のexact unionとし、requestを持つstateはrequest ID、workspace generation、commit evidence ID、selection version、triggerを保持する。新しいverified commitはbackgroundで`queued`へ自動遷移するがpresentationは作らない。`user_request` / `user_retry`の1回の操作は、未生成、既存queued/runningへのdedupe合流、generated cache hitのすべてで同じpresent-on-complete intentへ束縛し、追加clickなしで表示する。selection / locale / workspace / main Stop / `Close explanation`はintent epochだけを失効させ、event/response適用前にexact identityとepochを再検査する。これらのrevokeはsupport job/cacheをcancel・削除せず、生成Cancelだけは別の明示操作にする | Approved |
 
 ### Production composition契約
 
@@ -121,7 +121,7 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 | Native adapter | WebView adapterは`commit_explanation_request` / `cancel` / `present` / `get_state` / `set_scope`と、専用state / presentation channelだけを使用する。全response/eventをexact parserへ通し、unknown field・version・status・triggerはstateやcaptionへ適用しない |
 | App lifetimeとscope | App rootがnative explanation adapterと`NarrationController`を各1個所有し、selected workspace ID、実際のCodex workspace generation、UI localeが揃った時だけ両方へscopeを設定する。adapterはnative `set_scope`をApp-lifetimeの単一writerで直列化し、中間desired scopeをcoalesceする。latest desired scopeの適用完了まではevent/response gateを閉じ、workspace切替、generation更新、locale変更は前scopeとpresentation intentをstale化する。App closeではpending writerを同じlifecycleで終端しsupportとTTSをbounded cancelする |
 | Presentation | `auto_verified_commit`完了はstate/cacheだけを更新する。`user_request` / `user_retry`または明示Showで作ったintent epochが、workspace ID、workspace generation、commit evidence IDから得たfull SHA、request ID、selection version、locale、triggerとexact一致する時だけnative presentationをNarration sourceへ変換する。event/response publishとactivationの各直前に再検査し、各presentationを`started`、1-origin連続chunk、`terminal`へ変換する。duplicate/stale/mismatch/revoked intentをcaption/TTSへ流さない |
-| Main Stop | S-002の実際のStopはmain turn interruptと同時にactive narration presentation / speechを`turn_stop`で閉じる。ただしapp-owned commit support generationは継続し、support controllerのcancel APIへ`turn_stop`を転送しない。support生成の停止はS-003の明示Cancel、scope変更、timeout、App closeだけが行う |
+| Presentation revokeと生成停止 | S-002の実際のStopはmain turn interruptと同時にactive narration presentation / speechを`turn_stop`で閉じる。ただしapp-owned commit support generationは継続し、support controllerのcancel APIへ`turn_stop`を転送しない。commit selection、locale、workspace、generation、`Close explanation`もpresentation intentだけをrevokeし、keyed job/cacheを維持する。support生成の停止はS-003の明示Cancel、timeout、またはapp process終了時のruntime cleanupだけが行う |
 | 永続化・restart | explanation本文、narration chunk、support request/outputをmain conversationまたはworkspace history本文へ保存しない。restart後はnative memory cacheとWebView presentationを破棄し、persisted commit evidenceだけを表示して自動再生成しない |
 
 ## 廃止要件
@@ -193,7 +193,7 @@ restore SHA、branch name、restore confirmation、commit messageの入力欄は
 | Codex App Server | `UserInput.type=skill`、thread developer instructions、turn lifecycle | 解決済み（version-specific schema検査） | injectionを証明できなければturn開始不可 |
 | CODE | main turn、work unit、terminal authority、skill injection runtime | 解決済み（typed contractを共有） | observerはcommitを作らずUnavailable相関 |
 | HIST | observation/evidence/skill auditのappend/replay | 解決済み（typed event） | persistence失敗はGitを変えずUnknown表示 |
-| CODE/SUP/NARR | success command interception、verified commit、app-owned isolated explanation、caption、optional same-transcript TTS | 解決済み（typed request/state/delta contract） | deterministic caption fallback。main conversationへfallbackしない |
+| CODE/SUP/NARR | success command interception、verified commit、app-owned isolated explanation、explicit caption、optional same-transcript TTS | 解決済み（typed request/state/delta contract） | 明示presentation intentがある時だけdeterministic caption fallback。main conversationへfallbackしない |
 
 ## 参照資料
 
@@ -221,5 +221,5 @@ restore SHA、branch name、restore confirmation、commit messageの入力欄は
 - [x] skill名、version/digest、app bundle authority、毎turn注入を定義した。
 - [x] Commit tabからmutation/restore/recoveryを削除した。
 - [x] empty、stale、oversize、offline、cancel、schema invalidを定義した。
-- [x] verified commit後の自動説明、app-owned controller state、UI retry、redaction、isolation、caption、TTS境界を定義した。
+- [x] verified commit後の自動生成・cache、明示操作後だけのcaption/TTS、app-owned controller state、UI request/retry、redaction、isolation境界を定義した。
 - [x] 要件IDと画面仕様の相互参照を定義した。

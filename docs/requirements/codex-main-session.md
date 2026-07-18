@@ -105,7 +105,7 @@ read_when:
 | `CODE-F-070` | アプリは許可外attachmentを拒否する | directory、symlink、実行可能file、25MiB超、読取権限なしを送信せず、他の有効attachmentを維持する | Approved | 非該当 |
 | `CODE-F-071` | 利用者はread-only contextをturnへ付与できる | Files & folders、Git diff、Terminal output snapshotを選択し、capture時刻、source、byte数を送信前に確認できる | Approved | 非該当 |
 | `CODE-F-072` | context menuはcomposerでclipされない | Dropdown/Popoverがportalで表示され、1470×836と960×640で全項目がviewport内またはscrollで操作できる | Approved | 非該当 |
-| `CODE-F-073` | 利用者は実行中turnを停止できる | Stop後1秒以内にinterrupt requestを送信し、ackまたは5秒timeoutでStopped/Errorを表示して新規turnを二重開始しない | Approved | 非該当 |
+| `CODE-F-073` | 利用者は実行中turnを停止できる | Stop後1秒以内にexact workspace/thread/turn/generationへinterrupt requestを1件送信し、terminal ackとstream drain後にだけ`TurnTerminalizedV1(stopped)`を発行する。5秒timeout、reject、connection lossは`interrupt_failed`として元workspaceをactiveのまま保持し、新規turnまたはworkspace activationを開始しない。terminal後のlate eventは旧workspaceへだけ保存する。main Stopはcaption/TTS presentation intentだけをrevokeし、app-owned commit support jobまたはgenerated/prepared cacheをcancel・削除しない | Approved | 非該当 |
 | `CODE-F-074` | process crash後にturnを自動再送しない | child終了時にturnをInterruptedとし、draftと受信済みeventを維持してReconnect/New turnを表示する | Approved | 非該当 |
 | `CODE-F-075` | loginまたはSol利用不可を区別する | unauthenticated、model unavailable、protocol unsupportedを別error codeで表示し、auth fileやtoken内容を読まない | Approved | 非該当 |
 | `CODE-F-076` | workspace切替時に旧turnを混在させない | turn開始と全mutationをactivation token、workspace、thread、generationへ束縛する。切替後に遅延到着した旧workspace event/errorを旧timelineへだけ保存し、新workspace timeline、connection、Live2D stateへ表示しない。stale `turn/start`がacceptedならexact旧turnをinterruptし、そのterminalだけを旧workspaceへ保存する | Approved | 非該当 |

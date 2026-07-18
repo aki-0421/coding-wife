@@ -65,7 +65,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `WORK-F-044` | 利用者はfolder pickerからlocal projectを追加できる | regular directory内のGit worktreeを選ぶとcanonical path、repo名、branchを表示し、workspace一覧へ1件追加する | Approved | 非該当 |
+| `WORK-F-044` | 利用者はfolder pickerからlocal projectを追加できる | regular directory内のGit worktreeを選ぶとopaqueでstableなProject ID、canonical path、repository identity、repo名、branchをnative storeへ保存し、workspace一覧へ1件追加する。Project IDとcanonical pathは通常UI、support payload、logへ表示しない | Approved | 非該当 |
 | `WORK-F-045` | 利用者はfolder選択をcancelできる | pickerをcancelすると既存一覧とactive selectionを維持し、errorを表示しない | Approved | 非該当 |
 | `WORK-F-046` | アプリは無効repositoryを拒否する | non-Git directory、bare repository、存在しないpathを選ぶと登録せず、原因と再選択を表示する | Approved | 非該当 |
 | `WORK-F-047` | アプリは読取権限不足を拒否する | repositoryまたは`.git` metadataを読めない場合は登録せず、権限不足をI/O errorと区別して表示する | Approved | 非該当 |
@@ -82,21 +82,24 @@ read_when:
 | `WORK-F-053` | アプリはlifecycleとattentionを別に表示する | lifecycleを変えずにNeeds answer、Approval required、Test failed、High riskをbadgeとaccessible labelで併記できる | Approved | 非該当 |
 | `WORK-F-054` | アプリは現在のrepoとbranchを表示する | selected itemとheaderに実Gitのrepo名とbranchまたはdetached HEAD短縮SHAを表示し、長い値はellipsisと全文tooltipを持つ | Approved | 非該当 |
 | `WORK-F-055` | 利用者は空一覧から最初のprojectを追加できる | workspaceが0件の時、説明、FolderPlus、keyboard shortcutを表示し、decorative card gridを表示しない | Approved | 非該当 |
-| `WORK-F-056` | 利用者はworkspaceをCanceledへ移せる | cancel確認後にactive turnを停止し、source fileとGit branchを削除せず、workspaceをCanceled groupへ移す | Approved | 非該当 |
-| `WORK-F-057` | 利用者はproject登録を外せる | 対象に実行中turnがなく確認を完了するとapp metadataだけを削除し、repository内のfileとGit refを変更しない | Approved | 非該当 |
+| `WORK-F-056` | 利用者はworkspaceをCanceledへ移せる | idle workspaceは確認後にCanceled groupへ移す。active/pending turnがある場合は「停止してキャンセル」と「戻る」を表示し、terminal interruptとworkspace cleanupが完了した後だけlifecycleをCanceledへ変更する。「戻る」またはinterrupt失敗ではselection、turn、lifecycle、draft、caption/TTSを変更しない。いずれの場合もsource、working tree、Git index/object/ref、履歴本文を変更しない | Approved | 非該当 |
+| `WORK-F-057` | 利用者はproject登録を外せる | 対象project配下にactive/pending turnがない時だけ、action選択と対象project名を示す最終確認の二段階を完了してproject/workspaceのapp registration metadataを削除する。実行中turnがある場合は操作を拒否し、履歴本文の変更・削除は`HIST-F-049`の別操作に限定する。repository内のfile、working tree、Git index/object/ref、共有model libraryを変更しない | Approved | 非該当 |
 
 ### 継続性と境界
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `WORK-F-058` | アプリは一度に一つのactive executionだけを許可する | 別workspaceでSendした時に既存turnが実行中なら「既存を停止して切替」「戻る」を表示し、同時に二つのCodex turnを開始しない | Approved | 非該当 |
-| `WORK-F-059` | workspace切替はview stateとaudioを分離する | 切替時に旧workspaceの音声を停止し、新workspace固有のdraftとtimeline anchor ID/sequence/offsetを復元し、anchor消失時だけ最寄りsequenceへ補正する。旧workspaceのevent/error/音声を新workspaceで表示・再生しない | Approved | 非該当 |
-| `WORK-F-060` | アプリはworkspace stateを再起動後に復元する | 20件のworkspace、group、active selection、draft、last summaryがapp再起動後に一致する | Approved | 非該当 |
-| `WORK-F-061` | アプリは外部branch変更を検出する | active repositoryのHEADが外部で変わった場合、次のSendまたはwindow focus後1秒以内にstale warningを表示し、再preflightまでturnを開始しない | Approved | 非該当 |
-| `WORK-F-062` | 消失repositoryは復旧可能なerrorになる | 登録後にfolderが移動・削除された場合、workspace履歴を残してMissing表示にし、再選択または登録解除を提示する | Approved | 非該当 |
+| `WORK-F-058` | アプリは一度に一つのactive executionだけを許可する | active/pending turnを持つworkspaceから別workspaceを選択または別workspaceでSendすると、selectionを保留して「停止して切替」と「戻る」だけを表示する。「戻る」はselection、turn、draft、timeline anchor、caption/TTSを完全に維持する。「停止して切替」はexact old turnのterminal interruptとcleanup完了後だけ新workspaceをactivateし、失敗時はold workspaceをactiveのままerrorと再試行を示す。rapid selection、duplicate response、stale terminalでも同時turnと誤workspace activationを0件にする | Approved | 非該当 |
+| `WORK-F-059` | workspace切替はview stateとaudioを分離する | 成功した切替時に旧workspaceのactive presentationと音声を停止し、新workspace固有のdraftとtimeline anchor ID/sequence/offsetを復元し、anchor消失時だけ最寄りvalid sequenceへ補正する。旧workspaceのevent/error/音声を新workspaceで表示・再生しない。commit説明のworkspace切替はpresentation intentだけをrevokeし、app-owned support jobとgenerated/prepared cacheをcancel・削除しない | Approved | 非該当 |
+| `WORK-F-060` | アプリはworkspace stateを再起動後に復元する | 20件のworkspaceについてProject ID、group、active selection、draft、last summary、timeline anchor ID/sequence/offsetをnative storeから再起動後に一致させる。保存anchorが削除・retention・correctionで存在しない場合だけ同workspaceの最寄りvalid sequenceへ補正し、別workspaceのsummary/anchorを再利用しない | Approved | 非該当 |
+| `WORK-F-061` | アプリは外部branch変更を検出する | window focusとSend直前にrepository identity、HEAD、branch、readability、writeabilityをread-onlyで再検査する。登録時または前回確認時から変化した場合は1秒以内にstale warningと安全なrecovery actionを表示し、再preflightまでturnを開始せず、Git状態を自動で戻さない | Approved | 非該当 |
+| `WORK-F-062` | 消失repositoryは復旧可能なerrorになる | 登録後にfolderが移動・削除された場合、workspace履歴、Context、draft、summary、anchorを残してMissing表示にし、repository再選択/repairまたは登録解除を提示する。他workspaceは継続利用でき、消失projectのturnを自動再送しない | Approved | 非該当 |
 | `WORK-F-063` | 利用者はproject contextとcharacter contextを分離して編集できる | Context tabで二つのsectionを別々に保存し、character contextからtechnical rule、permission、checkpoint policyを変更できない | Approved | 非該当 |
 | `WORK-F-064` | 利用者はboundedなread-only workspace contextを取得できる | FilesとGit diffはtrusted root内のnative Git processから5秒以内、stdout 1MiB・stderr 4KiB以内で取得し、超過・停止時はprocess treeを終了して保存しない。workspaceごとにcapture順で最新10件だけをUIとDBへ一致して残し、信頼できるproducerがないTerminal outputはdemoを含め成功表示しない | Approved | 非該当 |
 | `WORK-F-065` | native workspace読込はdemo状態と分離する | native初期化中はworkspace skeletonと読込状態だけを表示し、add/create/select/draft/context/deleteを開始しない。読込失敗時もdemo workspaceへfallbackせず、回復errorと再試行可能性だけを表示する | Approved | 非該当 |
+| `WORK-F-066` | repository healthとrepairを状態付きで扱う | 各projectを`healthy` / `missing` / `changed` / `unreadable` / `read_only` / `stale_branch`へ分類し、workspace rowとheaderへ色だけでなくlocalized textとiconで表示する。Repair pickerは新しいcanonical Git worktreeのrepository identityが対象Project IDの保存identityと一致する時だけlinkageをatomic更新し、workspace ID、history、Context、draft、summary、anchorを維持する。identity不一致、picker cancel、権限不足、I/O失敗ではlinkageとselectionを変更せず、新規project追加を案内する。repairはsource、working tree、Git index/object/refを変更しない | Approved | 非該当 |
+
+`RepositoryIdentityV1`は、symlinkをたどらず検証したGit common directoryのfilesystem device/inodeとGit object formatをnativeだけで保持する。通常のpath renameでは同一identityを維持し、copy、別volumeへの移動、Git directory置換、object format変更はidentity不一致としてrepairせず新規project追加を要求する。Project IDはappが一度だけ発行するopaque UUIDであり、path、workspace、branch、character selectionのいずれからも再生成しない。
 
 ## 入力項目要件
 
@@ -106,6 +109,7 @@ read_when:
 | Workspace | name | repo名 + timestamp | 必須 | trim後1〜80 Unicode scalar、改行不可 | 入力保持、該当fieldへerror |
 | Workspace | goal | 空 | 任意 | 0〜4,000 Unicode scalar | 入力保持、超過数を表示 |
 | Filter | query | 空 | 任意 | 0〜200 Unicode scalar | 200超を受け付けず一覧を維持 |
+| Repair | repository folder | 現在のlinkage | 条件付き | canonical regular Git worktree、保存repository identityとのexact一致 | linkageを変更せず、再選択・cancel・新規project追加を残す |
 | Context | project context | 空 | 任意 | goal / constraints / user notesは各0〜8,000、Definition of doneは最大20項目・各1〜500、technical referencesは最大20項目・各1〜500、全field・全項目の総量32,000 Unicode scalar | 保存せず入力保持 |
 | Context | character context | Display nameは`Sol`、他は既定値 | 任意 | display name 1〜40、tone補足0〜1,000、behavior 0〜4,000、prohibited expressions最大20項目・各1〜200、全field・全項目の総量12,000 Unicode scalar、technical policy key禁止 | 禁止内容を除いて再編集を求める |
 
@@ -160,9 +164,9 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-001` | セッションダッシュボード | `WORK-F-044`〜`WORK-F-062`, `WORK-F-065` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
-| `S-002` | コーディングワークスペース | `WORK-F-052`〜`WORK-F-065` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
-| `S-004` | 設定・診断 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-001` | セッションダッシュボード | `WORK-F-044`〜`WORK-F-062`, `WORK-F-065`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
+| `S-002` | コーディングワークスペース | `WORK-F-052`〜`WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-004` | 設定・診断 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
 

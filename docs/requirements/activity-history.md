@@ -68,7 +68,7 @@ read_when:
 | `HIST-F-037` | appはnormalized domain eventを追記保存する | valid eventを新しいrowとして保存する。同じevent IDの再送はworkspace、session、producer、kind、schema version、timestamp、redaction後payloadがすべて一致する場合だけ元sequenceを返し、一項目でも異なる再送または別workspace所属sessionの参照は保存せずconflictにする | Approved | 非該当 |
 | `HIST-F-038` | appは重要event typeを区別する | goal、plan、tool、file、error、decision、approval、verification、git_observation、commit_observed、skill_injection、support_statusをtype filterで識別できる | Approved | 非該当 |
 | `HIST-F-039` | appはevent順序を安定させる | UTC timestampが同一でもworkspace単調増加sequenceで順序が一意になり、再起動前後で表示順が変わらない | Approved | 非該当 |
-| `HIST-F-040` | appはworkspace再開に必要な正本を保存する | project、workspace、turn、work unit、decision、last Git observation、commit evidence、skill injection audit、selected character、locale、draftをRust DBから復元できる | Approved | 非該当 |
+| `HIST-F-040` | appはworkspace再開に必要な正本を保存する | stable Project ID、workspace、turn、work unit、decision、last Git observation、commit evidence、skill injection audit、project-scoped selected character、locale、draft、last summary、timeline anchor ID/sequence/offset、repository identity/health snapshotをRust DBから復元できる。support explanation本文、caption chunk、TTS transcriptはこの正本へ含めない | Approved | 非該当 |
 | `HIST-F-041` | appは秘密を永続化前にredactする | API key、Bearer token、auth cookie、home path fixtureがnormalized event writerへ入る時、目的限定のproject linkage recordを除くDB/WAL/log/artifactの検索でraw値が0件になる。linkageからevent、diagnostic、support payloadへ派生するpathは必ずredactする | Approved | 非該当 |
 | `HIST-F-042` | appはraw reasoningを保存しない | reasoning fixtureを受け取ってもsummary、decision rationale、evidenceだけを保存し、chain-of-thought fieldをschemaが受理しない | Approved | 非該当 |
 | `HIST-F-043` | appはaudioとsupport raw historyを保存しない | generated audio byte、support prompt/response、commit explanation transcriptをDBへ渡すtestが拒否され、opaque request/commit IDとusage/latency/error metadataだけが残る | Approved | 非該当 |
@@ -78,7 +78,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `HIST-F-045` | appは起動時にactive workspaceを再構築する | native読込中はdemo rowを表示せずskeletonだけを表示しmutation actionを提供しない。20 workspace・各1,000 eventのfixtureはshell表示後に非同期復元し、成功時だけactive selection、last summary、draft、last observed commitとversioned CODE semantic event（assistant/tool/file/diff/plan/completion/error/decision/approval）をstable ID・sequence順でexactに再構築する。pending actionはsupervisorが同じworkspace/thread/generationのownershipを確認した時だけactionableにし、invalid/unknown payloadはUnsupportedとしてfail closedにする | Approved | 非該当 |
+| `HIST-F-045` | appは起動時にactive workspaceを再構築する | native読込中はdemo rowを表示せずskeletonだけを表示しmutation actionを提供しない。20 workspace・各1,000 eventのfixtureはshell表示後に非同期復元し、成功時だけactive selection、last summary、draft、last observed commit、timeline anchor ID/sequence/offsetとversioned CODE semantic event（assistant/tool/file/diff/plan/completion/error/decision/approval）をstable ID・sequence順でexactに再構築する。保存anchorが同workspaceに存在しない時だけ最寄りvalid sequenceへ補正し、別workspaceのsummary/anchor/eventを再利用しない。pending actionはsupervisorが同じworkspace/thread/generationのownershipを確認した時だけactionableにし、invalid/unknown payloadはUnsupportedとしてfail closedにする | Approved | 非該当 |
 | `HIST-F-046` | crash中のturnをInterruptedにする | startedでterminal eventのないturnを再起動時にInterruptedとして表示し、自動再送・自動commitを行わない | Approved | 非該当 |
 | `HIST-F-047` | 利用者はtimelineを種類と期間でfilterできる | All/Decisions/Errors/Verification/CommitsとUTC期間を選び、0件時にfilter解除とempty説明を表示する | Approved | 非該当 |
 | `HIST-F-048` | timelineはpage単位で読み込む | 1page最大200 eventを取得し、100,000 eventのworkspaceで初回query p95 200ms以下、次page p95 200ms以下になる | Approved | 非該当 |
