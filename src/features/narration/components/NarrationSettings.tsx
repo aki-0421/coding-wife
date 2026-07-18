@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   CircleAlertIcon,
   ShieldCheckIcon,
@@ -26,6 +26,10 @@ import {
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
+import {
+  isCaptionTargetFullyVisible,
+  scheduleAfterCaptionPaint,
+} from "@/features/narration/components/caption-visibility"
 import type {
   NarrationSettingsV1,
   NarrationVoiceSelectionV1,
@@ -85,6 +89,7 @@ function NarrationSettingsForm({
   const snapshot = useNarrationSnapshot()
   const [draft, setDraft] = useState(() => draftFromSettings(settings))
   const [resetOpen, setResetOpen] = useState(false)
+  const testCaptionRef = useRef<HTMLDivElement>(null)
   const voices = controller.voicesForLocale(locale)
   const selectedVoice = draft.voices[locale]
   const dirty = !sameDraft(draft, settings)
@@ -104,12 +109,24 @@ function NarrationSettingsForm({
     !settings.muted &&
     currentVoiceIsValid &&
     !voiceUnavailable &&
+    snapshot.test.status !== "preparing" &&
     snapshot.test.status !== "playing"
   const presentation = snapshot.presentation
 
   useEffect(() => {
     if (settings.muted !== muted) onMutedChange(settings.muted)
   }, [muted, onMutedChange, settings.muted])
+
+  useLayoutEffect(() => {
+    const caption = testCaptionRef.current
+    if (caption === null || snapshot.test.status !== "preparing") return
+    return scheduleAfterCaptionPaint(() => {
+      if (!isCaptionTargetFullyVisible(caption)) return
+      controller.acknowledgeTestCaptionVisible({
+        testGeneration: snapshot.test.generation,
+      })
+    })
+  }, [controller, snapshot.test.generation, snapshot.test.status])
 
   const statusLabel = useMemo(() => {
     if (snapshot.settingsStatus === "saving") return copy.unsaved
@@ -332,7 +349,10 @@ function NarrationSettingsForm({
             {copy.test}
           </Button>
           <Button
-            disabled={snapshot.test.status !== "playing"}
+            disabled={
+              snapshot.test.status !== "preparing" &&
+              snapshot.test.status !== "playing"
+            }
             onClick={() => void controller.cancelTest()}
             type="button"
             variant="outline"
@@ -353,6 +373,7 @@ function NarrationSettingsForm({
             aria-live="polite"
             className="rounded-control border border-divider bg-app-bg px-md py-sm"
             data-narration-test-status={snapshot.test.status}
+            ref={testCaptionRef}
             role={snapshot.test.status === "unavailable" ? "alert" : "status"}
           >
             <p className="m-0 text-label text-muted-foreground">

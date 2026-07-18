@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   I18nProvider,
@@ -33,6 +33,72 @@ const enStore: LocalePreferenceStore = {
   read: () => "en",
   write: () => true,
 }
+
+const originalElementFromPoint = Object.getOwnPropertyDescriptor(
+  document,
+  "elementFromPoint",
+)
+
+function installAnimationFrames() {
+  let nextId = 0
+  const callbacks = new Map<number, FrameRequestCallback>()
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    const id = ++nextId
+    callbacks.set(id, callback)
+    return id
+  })
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+    callbacks.delete(id)
+  })
+  return {
+    flush() {
+      const pending = [...callbacks.values()]
+      callbacks.clear()
+      for (const callback of pending) callback(performance.now())
+    },
+  }
+}
+
+function mockVisibleTestCaption(caption: HTMLElement): void {
+  const rect = {
+    x: 120,
+    y: 140,
+    top: 140,
+    right: 620,
+    bottom: 220,
+    left: 120,
+    width: 500,
+    height: 80,
+    toJSON: () => ({}),
+  } satisfies DOMRect
+  Object.defineProperties(caption, {
+    getBoundingClientRect: {
+      configurable: true,
+      value: () => rect,
+    },
+    getClientRects: {
+      configurable: true,
+      value: () => ({ length: 1 }),
+    },
+  })
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => caption,
+  })
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  if (originalElementFromPoint === undefined) {
+    Reflect.deleteProperty(document, "elementFromPoint")
+  } else {
+    Object.defineProperty(
+      document,
+      "elementFromPoint",
+      originalElementFromPoint,
+    )
+  }
+})
 
 function Harness({
   controller,
@@ -183,8 +249,16 @@ describe("NarrationSettings", () => {
   })
 
   it("persists a verified voice and rate before showing the test caption", async () => {
+    const frames = installAnimationFrames()
     const user = userEvent.setup()
-    const { controller } = setup()
+    const { controller, gateway } = setup()
+    const nativeSpeak = gateway.speak.bind(gateway)
+    const captionAtSpeak: Element[] = []
+    const speak = vi.spyOn(gateway, "speak").mockImplementation((request) => {
+      const caption = document.querySelector("[data-narration-test-status]")
+      if (caption !== null) captionAtSpeak.push(caption)
+      return nativeSpeak(request)
+    })
     await screen.findByRole("heading", { name: "音声" })
 
     await user.click(screen.getByRole("switch", { name: "TTSを有効にする" }))
@@ -202,7 +276,17 @@ describe("NarrationSettings", () => {
       ),
     )
     await user.click(screen.getByRole("button", { name: "音声をテスト" }))
-    expect(await screen.findByText("テスト字幕")).toBeVisible()
+    const testCaption = (await screen.findByText("テスト字幕")).parentElement
+    if (!(testCaption instanceof HTMLElement)) {
+      throw new Error("test caption is missing")
+    }
+    expect(speak).not.toHaveBeenCalled()
+    mockVisibleTestCaption(testCaption)
+    act(() => frames.flush())
+    expect(speak).not.toHaveBeenCalled()
+    act(() => frames.flush())
+    await waitFor(() => expect(speak).toHaveBeenCalledOnce())
+    expect(captionAtSpeak).toEqual([testCaption])
     expect(
       screen.getByText(
         "これはローカル音声のテストです。字幕は音声より先に表示されます。",
@@ -212,6 +296,29 @@ describe("NarrationSettings", () => {
     await waitFor(() =>
       expect(controller.getSnapshot().test.status).toBe("idle"),
     )
+  })
+
+  it("does not start test speech while its own caption is hidden", async () => {
+    const frames = installAnimationFrames()
+    const user = userEvent.setup()
+    const { controller, gateway } = setup()
+    const speak = vi.spyOn(gateway, "speak")
+    await screen.findByRole("heading", { name: "音声" })
+    await user.click(screen.getByRole("switch", { name: "TTSを有効にする" }))
+    await user.click(screen.getByRole("button", { name: "音声設定を保存" }))
+    await waitFor(() =>
+      expect(controller.getSnapshot().settingsSnapshot?.settings.enabled).toBe(
+        true,
+      ),
+    )
+
+    await user.click(screen.getByRole("button", { name: "音声をテスト" }))
+    expect(await screen.findByText("テスト字幕")).toBeVisible()
+    act(() => frames.flush())
+    act(() => frames.flush())
+
+    expect(speak).not.toHaveBeenCalled()
+    await controller.cancelTest()
   })
 
   it("mutes immediately and resets to safe defaults after confirmation", async () => {

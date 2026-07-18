@@ -1,6 +1,15 @@
 const scrollViewportSelector =
   '[data-slot="scroll-area-viewport"], [data-radix-scroll-area-viewport]'
 
+function scheduleFrame(callback: FrameRequestCallback): () => void {
+  if (typeof window.requestAnimationFrame === "function") {
+    const id = window.requestAnimationFrame(callback)
+    return () => window.cancelAnimationFrame(id)
+  }
+  const id = window.setTimeout(() => callback(performance.now()), 16)
+  return () => window.clearTimeout(id)
+}
+
 function completelyContains(outer: DOMRect, inner: DOMRect): boolean {
   return (
     inner.left >= outer.left &&
@@ -59,6 +68,17 @@ export function isCaptionTargetFullyVisible(element: HTMLElement): boolean {
     bounds.top + bounds.height / 2,
   )
   return hit !== null && element.contains(hit)
+}
+
+export function scheduleAfterCaptionPaint(callback: () => void): () => void {
+  let cancelAfterPaint: () => void = () => undefined
+  const cancelBeforePaint = scheduleFrame(() => {
+    cancelAfterPaint = scheduleFrame(callback)
+  })
+  return () => {
+    cancelBeforePaint()
+    cancelAfterPaint()
+  }
 }
 
 export { scrollViewportSelector }

@@ -637,6 +637,117 @@ describe("NarrationController", () => {
     })
   })
 
+  it("waits for an exact visible test caption and the speech lead", async () => {
+    const gateway = new FakeNarrationGateway(true)
+    const pendingPauses: Array<{
+      readonly milliseconds: number
+      readonly resolve: () => void
+    }> = []
+    const controller = new NarrationController(
+      gateway,
+      (milliseconds) =>
+        new Promise<void>((resolve) => {
+          pendingPauses.push({ milliseconds, resolve })
+        }),
+    )
+    await controller.initialize()
+
+    const playback = controller.playTest(
+      { workspaceId: "workspace-1", generation: 3 },
+      "ja",
+      "字幕が先に表示されます。",
+    )
+    await vi.waitFor(() =>
+      expect(controller.getSnapshot().test.status).toBe("preparing"),
+    )
+    expect(gateway.speech).toHaveLength(0)
+    const testGeneration = controller.getSnapshot().test.generation
+    expect(
+      controller.acknowledgeTestCaptionVisible({
+        testGeneration: testGeneration + 1,
+      }),
+    ).toBe(false)
+    expect(controller.acknowledgeTestCaptionVisible({ testGeneration })).toBe(
+      true,
+    )
+    await Promise.resolve()
+    expect(pendingPauses.map(({ milliseconds }) => milliseconds)).toEqual([100])
+    expect(gateway.speech).toHaveLength(0)
+
+    pendingPauses[0]?.resolve()
+    await expect(playback).resolves.toBe(true)
+    expect(gateway.speech).toHaveLength(1)
+    expect(controller.getSnapshot().test.status).toBe("idle")
+  })
+
+  it("fails closed when the test caption never becomes visible", async () => {
+    vi.useFakeTimers()
+    try {
+      const gateway = new FakeNarrationGateway(true)
+      const controller = new NarrationController(gateway)
+      await controller.initialize()
+      const playback = controller.playTest(
+        { workspaceId: "workspace-1", generation: 3 },
+        "ja",
+        "非表示の字幕です。",
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(controller.getSnapshot().test.status).toBe("preparing")
+
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      await expect(playback).resolves.toBe(false)
+      expect(gateway.speech).toHaveLength(0)
+      expect(controller.getSnapshot().test).toMatchObject({
+        status: "unavailable",
+        errorCode: "NARRATION-TEST-CAPTION-NOT-VISIBLE",
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("cancels test playback at the dedicated five-second watchdog", async () => {
+    vi.useFakeTimers()
+    try {
+      const gateway = new FakeNarrationGateway(true)
+      gateway.setRuntime({
+        playbackState: "playing",
+        activeRequestId: "narration-test-1",
+        queueDepth: 1,
+      })
+      const controller = new NarrationController(gateway)
+      await controller.initialize()
+      const playback = controller.playTest(
+        { workspaceId: "workspace-1", generation: 3 },
+        "ja",
+        "5秒で停止します。",
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(controller.getSnapshot().test.status).toBe("preparing")
+      expect(
+        controller.acknowledgeTestCaptionVisible({
+          testGeneration: controller.getSnapshot().test.generation,
+        }),
+      ).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(100)
+      expect(gateway.speech).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(gateway.cancelReasons).not.toContain("explicit_cancel")
+      await vi.advanceTimersByTimeAsync(1)
+
+      await expect(playback).resolves.toBe(false)
+      expect(gateway.cancelReasons).toContain("explicit_cancel")
+      expect(controller.getSnapshot().test).toMatchObject({
+        status: "unavailable",
+        errorCode: "NARRATION-PLAYBACK-TIMEOUT",
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("validates settings before crossing the gateway", async () => {
     const { controller, gateway } = await ready(false)
     const updateSpy = vi.spyOn(gateway, "updateSettings")

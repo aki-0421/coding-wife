@@ -43,6 +43,10 @@ export interface CaptionVisibilityAcknowledgment {
   readonly sequence: number
 }
 
+export interface TestCaptionVisibilityAcknowledgment {
+  readonly testGeneration: number
+}
+
 export interface CommitNarrationPresentationSnapshot {
   readonly key: CommitNarrationSourceKey
   readonly trigger: NarrationCommitJobTrigger
@@ -55,7 +59,8 @@ export interface CommitNarrationPresentationSnapshot {
 }
 
 export interface NarrationTestSnapshot {
-  readonly status: "idle" | "playing" | "unavailable"
+  readonly status: "idle" | "preparing" | "playing" | "unavailable"
+  readonly generation: number
   readonly text: string | null
   readonly errorCode: string | null
 }
@@ -94,9 +99,16 @@ interface CaptionSpeechGate {
   readonly acknowledgmentTimers: Map<number, ReturnType<typeof setTimeout>>
 }
 
+interface TestCaptionGate {
+  readonly generation: number
+  readonly resolve: (visible: boolean) => void
+  timer: ReturnType<typeof setTimeout> | null
+}
+
 const maximumPreparedPresentations = 12
 const speechPollMilliseconds = 125
 const speechTimeoutMilliseconds = 30_000
+const testSpeechTimeoutMilliseconds = 5_000
 const captionAcknowledgmentTimeoutMilliseconds = 1_000
 const captionSpeechLeadMilliseconds = 100
 
@@ -108,7 +120,7 @@ function initialSnapshot(): NarrationControllerSnapshot {
     voices: [],
     scope: null,
     presentation: null,
-    test: { status: "idle", text: null, errorCode: null },
+    test: { status: "idle", generation: 0, text: null, errorCode: null },
     lastErrorCode: null,
   }
 }
@@ -153,6 +165,7 @@ export class NarrationController {
   #speechEpoch = 0
   #speechChain: Promise<void> = Promise.resolve()
   #captionSpeechGate: CaptionSpeechGate | null = null
+  #testCaptionGate: TestCaptionGate | null = null
   #testSequence = 0
 
   public constructor(
@@ -582,10 +595,55 @@ export class NarrationController {
     if (!(await this.setScope(scope))) return false
     const settings = this.#snapshot.settingsSnapshot?.settings
     if (settings === undefined) return false
+    this.settleTestCaptionGate(false)
     const testEpoch = ++this.#speechEpoch
-    const requestId = `narration-test-${++this.#testSequence}`
+    const testGeneration = ++this.#testSequence
+    const requestId = `narration-test-${testGeneration}`
+    let resolveVisibility!: (visible: boolean) => void
+    const visibility = new Promise<boolean>((resolve) => {
+      resolveVisibility = resolve
+    })
+    const gate: TestCaptionGate = {
+      generation: testGeneration,
+      resolve: resolveVisibility,
+      timer: null,
+    }
+    gate.timer = setTimeout(() => {
+      if (this.#testCaptionGate !== gate) return
+      this.#testCaptionGate = null
+      gate.timer = null
+      this.update({
+        test: {
+          status: "unavailable",
+          generation: testGeneration,
+          text,
+          errorCode: "NARRATION-TEST-CAPTION-NOT-VISIBLE",
+        },
+      })
+      gate.resolve(false)
+    }, captionAcknowledgmentTimeoutMilliseconds)
+    this.#testCaptionGate = gate
     this.update({
-      test: { status: "playing", text, errorCode: null },
+      test: {
+        status: "preparing",
+        generation: testGeneration,
+        text,
+        errorCode: null,
+      },
+    })
+    const visible = await visibility
+    if (!visible || !this.testStillCurrent(testEpoch, testGeneration)) {
+      return false
+    }
+    await this.pause(captionSpeechLeadMilliseconds)
+    if (!this.testStillCurrent(testEpoch, testGeneration)) return false
+    this.update({
+      test: {
+        status: "playing",
+        generation: testGeneration,
+        text,
+        errorCode: null,
+      },
     })
     try {
       const response = await this.gateway.speak({
@@ -600,30 +658,66 @@ export class NarrationController {
         priority: "high",
         text,
       })
+      if (!this.testStillCurrent(testEpoch, testGeneration)) return false
       if (response.disposition !== "queued") {
         this.update({
           test: {
             status: "unavailable",
+            generation: testGeneration,
             text,
             errorCode: response.code ?? `NARRATION-${response.disposition}`,
           },
         })
         return false
       }
-      await this.waitForPlaybackEnd(testEpoch)
-      if (testEpoch !== this.#speechEpoch) return false
-      this.update({ test: { status: "idle", text, errorCode: null } })
+      await this.waitForPlaybackEnd(testEpoch, testSpeechTimeoutMilliseconds)
+      if (!this.testStillCurrent(testEpoch, testGeneration)) return false
+      this.update({
+        test: {
+          status: "idle",
+          generation: testGeneration,
+          text,
+          errorCode: null,
+        },
+      })
       return true
     } catch (error) {
+      if (!this.testStillCurrent(testEpoch, testGeneration)) return false
+      const code = errorCode(error)
+      if (code !== "NARRATION-PLAYBACK-TIMEOUT") {
+        await this.cancelTerminalSpeech()
+      }
       this.update({
-        test: { status: "unavailable", text, errorCode: errorCode(error) },
+        test: {
+          status: "unavailable",
+          generation: testGeneration,
+          text,
+          errorCode: code,
+        },
       })
       return false
     }
   }
 
+  public readonly acknowledgeTestCaptionVisible = (
+    acknowledgment: TestCaptionVisibilityAcknowledgment,
+  ): boolean => {
+    const gate = this.#testCaptionGate
+    if (
+      gate === null ||
+      this.#snapshot.test.status !== "preparing" ||
+      acknowledgment.testGeneration !== gate.generation ||
+      acknowledgment.testGeneration !== this.#snapshot.test.generation
+    ) {
+      return false
+    }
+    this.settleTestCaptionGate(true)
+    return true
+  }
+
   public async cancelTest(): Promise<void> {
     this.#speechEpoch++
+    this.settleTestCaptionGate(false)
     await this.gateway.cancel("explicit_cancel")
     this.update({ test: { ...this.#snapshot.test, status: "idle" } })
   }
@@ -886,9 +980,12 @@ export class NarrationController {
       })
   }
 
-  private async waitForPlaybackEnd(epoch: number): Promise<void> {
+  private async waitForPlaybackEnd(
+    epoch: number,
+    timeoutMilliseconds = speechTimeoutMilliseconds,
+  ): Promise<void> {
     let elapsed = 0
-    while (elapsed < speechTimeoutMilliseconds && epoch === this.#speechEpoch) {
+    while (elapsed < timeoutMilliseconds && epoch === this.#speechEpoch) {
       const runtime = await this.gateway.getRuntime()
       this.updateRuntime(runtime)
       if (runtime.playbackState === "unavailable") {
@@ -904,7 +1001,7 @@ export class NarrationController {
       await this.pause(speechPollMilliseconds)
       elapsed += speechPollMilliseconds
     }
-    if (elapsed >= speechTimeoutMilliseconds && epoch === this.#speechEpoch) {
+    if (elapsed >= timeoutMilliseconds && epoch === this.#speechEpoch) {
       try {
         await this.gateway.cancel("explicit_cancel")
       } catch (error) {
@@ -947,6 +1044,26 @@ export class NarrationController {
       active.speechStatus !== "unavailable" &&
       sameSourceKey(gate.key, key) &&
       sameSourceKey(active.key, key)
+    )
+  }
+
+  private settleTestCaptionGate(visible: boolean): void {
+    const gate = this.#testCaptionGate
+    if (gate === null) return
+    this.#testCaptionGate = null
+    if (gate.timer !== null) {
+      clearTimeout(gate.timer)
+      gate.timer = null
+    }
+    gate.resolve(visible)
+  }
+
+  private testStillCurrent(epoch: number, generation: number): boolean {
+    return (
+      epoch === this.#speechEpoch &&
+      this.#snapshot.test.generation === generation &&
+      (this.#snapshot.test.status === "preparing" ||
+        this.#snapshot.test.status === "playing")
     )
   }
 
