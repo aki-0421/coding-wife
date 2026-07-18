@@ -3,6 +3,7 @@ use serde_json::Value;
 
 pub const WORKSPACE_HISTORY_SCHEMA_VERSION: u16 = 1;
 pub const DOMAIN_EVENT_SCHEMA_VERSION: u16 = 1;
+pub const WORKSPACE_CONTEXT_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -240,6 +241,170 @@ pub struct ContextSnapshotView {
     pub captured_at: String,
     pub byte_count: u64,
     pub content_hash: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CharacterTone {
+    Concise,
+    Warm,
+    Neutral,
+}
+
+impl CharacterTone {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Concise => "concise",
+            Self::Warm => "warm",
+            Self::Neutral => "neutral",
+        }
+    }
+}
+
+impl TryFrom<&str> for CharacterTone {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "concise" => Ok(Self::Concise),
+            "warm" => Ok(Self::Warm),
+            "neutral" => Ok(Self::Neutral),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechDensity {
+    Quiet,
+    KeyEvents,
+    Detailed,
+}
+
+impl SpeechDensity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Quiet => "quiet",
+            Self::KeyEvents => "key_events",
+            Self::Detailed => "detailed",
+        }
+    }
+}
+
+impl TryFrom<&str> for SpeechDensity {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "quiet" => Ok(Self::Quiet),
+            "key_events" => Ok(Self::KeyEvents),
+            "detailed" => Ok(Self::Detailed),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProjectContext {
+    pub goal: String,
+    pub constraints: String,
+    pub definition_of_done: Vec<String>,
+    pub technical_references: Vec<String>,
+    pub user_notes: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CharacterContext {
+    pub display_name: String,
+    pub tone: CharacterTone,
+    pub tone_notes: String,
+    pub speech_density: SpeechDensity,
+    pub behavior: String,
+    pub prohibited_expressions: Vec<String>,
+}
+
+impl Default for CharacterContext {
+    fn default() -> Self {
+        Self {
+            display_name: "Sol".to_owned(),
+            tone: CharacterTone::Neutral,
+            tone_notes: String::new(),
+            speech_density: SpeechDensity::KeyEvents,
+            behavior: String::new(),
+            prohibited_expressions: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct VersionedProjectContext {
+    pub schema_version: u16,
+    pub workspace_id: String,
+    pub version: u64,
+    pub content_hash: String,
+    pub updated_at: String,
+    pub context: ProjectContext,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct VersionedCharacterContext {
+    pub schema_version: u16,
+    pub workspace_id: String,
+    pub version: u64,
+    pub content_hash: String,
+    pub updated_at: String,
+    pub context: CharacterContext,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceEditableContext {
+    pub schema_version: u16,
+    pub workspace_id: String,
+    pub project: VersionedProjectContext,
+    pub character: VersionedCharacterContext,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceLoadEditableContextRequest {
+    pub workspace_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceSaveProjectContextRequest {
+    pub workspace_id: String,
+    pub expected_version: u64,
+    pub context: ProjectContext,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceSaveCharacterContextRequest {
+    pub workspace_id: String,
+    pub expected_version: u64,
+    pub context: CharacterContext,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceTurnContextSnapshot {
+    pub schema_version: u16,
+    pub workspace_id: String,
+    pub project_version: u64,
+    pub project_hash: String,
+    pub character_version: u64,
+    pub character_hash: String,
+    pub snapshot_hash: String,
+    pub captured_at: String,
+    pub project: ProjectContext,
+    pub character: CharacterContext,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

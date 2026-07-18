@@ -9,15 +9,19 @@ use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
 use crate::codex::workspace::{ValidatedWorkspaceCandidate, WorkspaceService};
 
+use super::editable_context::{normalize_character_context, normalize_project_context};
 use super::store::WorkspaceHistoryStore;
 use super::types::{
     AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, ContextSource,
-    HistoryMode, NormalizedDomainEvent, TimelinePage, WorkspaceCommandError,
-    WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
-    WorkspaceDraftView, WorkspaceHealth, WorkspacePickOutcome, WorkspacePickResponse,
-    WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest, WorkspaceSelectRequest,
-    WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineRequest,
-    WorkspaceUpdateLifecycleRequest, WORKSPACE_HISTORY_SCHEMA_VERSION,
+    HistoryMode, NormalizedDomainEvent, TimelinePage, VersionedCharacterContext,
+    VersionedProjectContext, WorkspaceCommandError, WorkspaceCreateSessionRequest,
+    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView,
+    WorkspaceEditableContext, WorkspaceHealth, WorkspaceLoadEditableContextRequest,
+    WorkspacePickOutcome, WorkspacePickResponse, WorkspaceSaveCharacterContextRequest,
+    WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest, WorkspaceSaveProjectContextRequest,
+    WorkspaceSelectRequest, WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineRequest,
+    WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
+    WORKSPACE_HISTORY_SCHEMA_VERSION,
 };
 
 const PICK_CANCELED_CODE: &str = "CODEX-WORKSPACE-PICK-CANCELED";
@@ -408,6 +412,64 @@ impl WorkspaceHistoryService {
         self.store
             .save_context_snapshot(&request.workspace_id, request.source, label, &content)
             .map_err(|error| history_error("workspace_save_context_snapshot", error))
+    }
+
+    pub fn load_editable_context(
+        &self,
+        request: WorkspaceLoadEditableContextRequest,
+    ) -> Result<WorkspaceEditableContext, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_load_editable_context")?;
+        self.store
+            .load_editable_context(&request.workspace_id)
+            .map_err(|error| history_error("workspace_load_editable_context", error))
+    }
+
+    pub async fn save_project_context(
+        &self,
+        request: WorkspaceSaveProjectContextRequest,
+    ) -> Result<VersionedProjectContext, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_save_project_context")?;
+        let _operation = self.operation_lock.lock().await;
+        let root = self
+            .workspace
+            .trusted_root(&request.workspace_id)
+            .await
+            .ok_or_else(|| {
+                WorkspaceCommandError::new(
+                    "WORKSPACE-CONTEXT-PREFLIGHT",
+                    "workspace_save_project_context",
+                    true,
+                )
+            })?;
+        let context = normalize_project_context(request.context, Some(&root))
+            .map_err(|error| history_error("workspace_save_project_context", error))?;
+        self.store
+            .save_project_context(&request.workspace_id, request.expected_version, context)
+            .map_err(|error| history_error("workspace_save_project_context", error))
+    }
+
+    pub async fn save_character_context(
+        &self,
+        request: WorkspaceSaveCharacterContextRequest,
+    ) -> Result<VersionedCharacterContext, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_save_character_context")?;
+        let _operation = self.operation_lock.lock().await;
+        let context = normalize_character_context(request.context)
+            .map_err(|error| history_error("workspace_save_character_context", error))?;
+        self.store
+            .save_character_context(&request.workspace_id, request.expected_version, context)
+            .map_err(|error| history_error("workspace_save_character_context", error))
+    }
+
+    pub async fn turn_context_snapshot(
+        &self,
+        request: WorkspaceLoadEditableContextRequest,
+    ) -> Result<WorkspaceTurnContextSnapshot, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_get_turn_context_snapshot")?;
+        let _operation = self.operation_lock.lock().await;
+        self.store
+            .turn_context_snapshot(&request.workspace_id)
+            .map_err(|error| history_error("workspace_get_turn_context_snapshot", error))
     }
 
     pub fn timeline(

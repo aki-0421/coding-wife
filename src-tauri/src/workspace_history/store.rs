@@ -30,16 +30,23 @@ use crate::git_review::types::{
     MAX_GIT_VERIFICATION_CHECK_CHARS, MAX_GIT_VERIFICATION_SUMMARY_CHARS,
 };
 
+use super::editable_context::{
+    canonical_json, content_hash, normalize_character_context, normalize_project_context,
+    snapshot_hash, validate_turn_snapshot, DEFAULT_CHARACTER_HASH, DEFAULT_CHARACTER_JSON,
+    DEFAULT_PROJECT_HASH, DEFAULT_PROJECT_JSON,
+};
 use super::types::{
-    AppendEventResult, ContextSnapshotView, ContextSource, HistoryMode, HistoryStatus,
-    NormalizedDomainEvent, ReasoningEffort, TimelineEventView, TimelinePage, WorkspaceAttention,
-    WorkspaceDraftView, WorkspaceHealth, WorkspaceHistoryError, WorkspaceLifecycle,
-    WorkspaceStateSnapshot, WorkspaceSummary, DOMAIN_EVENT_SCHEMA_VERSION,
+    AppendEventResult, CharacterContext, ContextSnapshotView, ContextSource, HistoryMode,
+    HistoryStatus, NormalizedDomainEvent, ProjectContext, ReasoningEffort, TimelineEventView,
+    TimelinePage, VersionedCharacterContext, VersionedProjectContext, WorkspaceAttention,
+    WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth, WorkspaceHistoryError,
+    WorkspaceLifecycle, WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTurnContextSnapshot,
+    DOMAIN_EVENT_SCHEMA_VERSION, WORKSPACE_CONTEXT_SCHEMA_VERSION,
     WORKSPACE_HISTORY_SCHEMA_VERSION,
 };
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
-const CURRENT_DATABASE_VERSION: i64 = 1;
+const CURRENT_DATABASE_VERSION: i64 = 2;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
@@ -150,6 +157,39 @@ CREATE INDEX IF NOT EXISTS idx_events_workspace_sequence ON domain_events(worksp
 CREATE INDEX IF NOT EXISTS idx_events_workspace_kind ON domain_events(workspace_id, kind, sequence DESC);
 "#;
 
+const MIGRATION_2: &str = r#"
+CREATE TABLE IF NOT EXISTS workspace_contexts (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  project_json TEXT NOT NULL,
+  project_version INTEGER NOT NULL CHECK (project_version >= 1),
+  project_hash TEXT NOT NULL,
+  project_updated_at TEXT NOT NULL,
+  character_json TEXT NOT NULL,
+  character_version INTEGER NOT NULL CHECK (character_version >= 1),
+  character_hash TEXT NOT NULL,
+  character_updated_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO workspace_contexts (
+  workspace_id, project_json, project_version, project_hash, project_updated_at,
+  character_json, character_version, character_hash, character_updated_at
+)
+SELECT
+  id,
+  '{"goal":"","constraints":"","definitionOfDone":[],"technicalReferences":[],"userNotes":""}',
+  1,
+  'e0da727f2381a1c290ddcb74bdb52b44b0ec890559443d795f29731d68fe1323',
+  updated_at,
+  '{"displayName":"Sol","tone":"neutral","toneNotes":"","speechDensity":"key_events","behavior":"","prohibitedExpressions":[]}',
+  1,
+  '0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c',
+  updated_at
+FROM workspaces;
+
+CREATE INDEX IF NOT EXISTS idx_workspace_context_versions
+  ON workspace_contexts(workspace_id, project_version, character_version);
+"#;
+
 #[derive(Debug)]
 struct StoreInner {
     connection: Connection,
@@ -206,7 +246,7 @@ impl WorkspaceHistoryStore {
                     .map_err(|_| history_error("HIST-RECOVERY-OPEN", false))?;
                 configure_connection(&connection)
                     .map_err(|_| history_error("HIST-RECOVERY-CONFIGURE", false))?;
-                apply_migrations(&connection, &[(1, MIGRATION_1)])
+                apply_migrations(&connection, &[(1, MIGRATION_1), (2, MIGRATION_2)])
                     .map_err(|_| history_error("HIST-RECOVERY-SCHEMA", false))?;
                 Ok(Self::from_connection(
                     connection,
@@ -320,6 +360,7 @@ impl WorkspaceHistoryStore {
                 params![workspace_id, now],
             )
             .map_err(|_| history_error("HIST-PREFERENCE-INSERT", true))?;
+        insert_default_editable_context(&transaction, &workspace_id, &now)?;
         append_event_in_transaction(
             &transaction,
             &NormalizedDomainEvent {
@@ -520,6 +561,7 @@ impl WorkspaceHistoryStore {
                 params![workspace_id, goal, now],
             )
             .map_err(|_| history_error("HIST-PREFERENCE-INSERT", true))?;
+        insert_default_editable_context(&transaction, &workspace_id, &now)?;
         append_event_in_transaction(
             &transaction,
             &NormalizedDomainEvent {
@@ -643,6 +685,143 @@ impl WorkspaceHistoryStore {
             return Err(history_error("WORKSPACE-DRAFT-CONFLICT", true));
         }
         draft_by_workspace(&inner.connection, workspace_id)
+    }
+
+    pub fn load_editable_context(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceEditableContext, WorkspaceHistoryError> {
+        validate_workspace_id(workspace_id)?;
+        let inner = self.lock();
+        editable_context_by_workspace(&inner.connection, workspace_id)
+    }
+
+    pub fn save_project_context(
+        &self,
+        workspace_id: &str,
+        expected_version: u64,
+        context: ProjectContext,
+    ) -> Result<VersionedProjectContext, WorkspaceHistoryError> {
+        validate_workspace_id(workspace_id)?;
+        let context = normalize_project_context(context, None)?;
+        self.ensure_writable("workspace.save_project_context")?;
+        let mut inner = self.lock();
+        let transaction = inner
+            .connection
+            .transaction()
+            .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
+        let current = editable_context_by_workspace(&transaction, workspace_id)?;
+        if current.project.version != expected_version {
+            return Err(history_error("WORKSPACE-PROJECT-CONTEXT-CONFLICT", true));
+        }
+        let project_json = canonical_json(&context)?;
+        let project_hash = content_hash(&project_json);
+        let updated_at = now();
+        let changed = transaction
+            .execute(
+                "UPDATE workspace_contexts
+                 SET project_json = ?1, project_version = project_version + 1,
+                     project_hash = ?2, project_updated_at = ?3
+                 WHERE workspace_id = ?4 AND project_version = ?5",
+                params![
+                    project_json,
+                    project_hash,
+                    updated_at,
+                    workspace_id,
+                    expected_version as i64,
+                ],
+            )
+            .map_err(|_| history_error("HIST-PROJECT-CONTEXT-WRITE", true))?;
+        if changed != 1 {
+            return Err(history_error("WORKSPACE-PROJECT-CONTEXT-CONFLICT", true));
+        }
+        let saved = editable_context_by_workspace(&transaction, workspace_id)?.project;
+        transaction
+            .commit()
+            .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
+        Ok(saved)
+    }
+
+    pub fn save_character_context(
+        &self,
+        workspace_id: &str,
+        expected_version: u64,
+        context: CharacterContext,
+    ) -> Result<VersionedCharacterContext, WorkspaceHistoryError> {
+        validate_workspace_id(workspace_id)?;
+        let context = normalize_character_context(context)?;
+        self.ensure_writable("workspace.save_character_context")?;
+        let mut inner = self.lock();
+        let transaction = inner
+            .connection
+            .transaction()
+            .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
+        let current = editable_context_by_workspace(&transaction, workspace_id)?;
+        if current.character.version != expected_version {
+            return Err(history_error("WORKSPACE-CHARACTER-CONTEXT-CONFLICT", true));
+        }
+        let character_json = canonical_json(&context)?;
+        let character_hash = content_hash(&character_json);
+        let updated_at = now();
+        let changed = transaction
+            .execute(
+                "UPDATE workspace_contexts
+                 SET character_json = ?1, character_version = character_version + 1,
+                     character_hash = ?2, character_updated_at = ?3
+                 WHERE workspace_id = ?4 AND character_version = ?5",
+                params![
+                    character_json,
+                    character_hash,
+                    updated_at,
+                    workspace_id,
+                    expected_version as i64,
+                ],
+            )
+            .map_err(|_| history_error("HIST-CHARACTER-CONTEXT-WRITE", true))?;
+        if changed != 1 {
+            return Err(history_error("WORKSPACE-CHARACTER-CONTEXT-CONFLICT", true));
+        }
+        let saved = editable_context_by_workspace(&transaction, workspace_id)?.character;
+        transaction
+            .commit()
+            .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
+        Ok(saved)
+    }
+
+    pub fn turn_context_snapshot(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceTurnContextSnapshot, WorkspaceHistoryError> {
+        validate_workspace_id(workspace_id)?;
+        let mut inner = self.lock();
+        let transaction = inner
+            .connection
+            .transaction()
+            .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
+        let bundle = editable_context_by_workspace(&transaction, workspace_id)?;
+        let snapshot_hash = snapshot_hash(
+            bundle.project.version,
+            &bundle.project.content_hash,
+            bundle.character.version,
+            &bundle.character.content_hash,
+        )?;
+        let snapshot = WorkspaceTurnContextSnapshot {
+            schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
+            workspace_id: workspace_id.to_owned(),
+            project_version: bundle.project.version,
+            project_hash: bundle.project.content_hash,
+            character_version: bundle.character.version,
+            character_hash: bundle.character.content_hash,
+            snapshot_hash,
+            captured_at: now(),
+            project: bundle.project.context,
+            character: bundle.character.context,
+        };
+        validate_turn_snapshot(&snapshot)?;
+        transaction
+            .commit()
+            .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
+        Ok(snapshot)
     }
 
     pub fn save_context_snapshot(
@@ -1019,7 +1198,11 @@ fn open_configured_connection(
     database_path: &Path,
     existed: bool,
 ) -> Result<(Connection, HistoryStatus), OpenFailure> {
-    open_configured_connection_with_migrations(database_path, existed, &[(1, MIGRATION_1)])
+    open_configured_connection_with_migrations(
+        database_path,
+        existed,
+        &[(1, MIGRATION_1), (2, MIGRATION_2)],
+    )
 }
 
 fn open_configured_connection_with_migrations(
@@ -1159,6 +1342,106 @@ fn ensure_workspace_capacity(transaction: &Transaction<'_>) -> Result<(), Worksp
         return Err(history_error("WORKSPACE-LIMIT", false));
     }
     Ok(())
+}
+
+fn insert_default_editable_context(
+    transaction: &Transaction<'_>,
+    workspace_id: &str,
+    updated_at: &str,
+) -> Result<(), WorkspaceHistoryError> {
+    transaction
+        .execute(
+            "INSERT INTO workspace_contexts (
+               workspace_id, project_json, project_version, project_hash, project_updated_at,
+               character_json, character_version, character_hash, character_updated_at
+             ) VALUES (?1, ?2, 1, ?3, ?4, ?5, 1, ?6, ?4)",
+            params![
+                workspace_id,
+                DEFAULT_PROJECT_JSON,
+                DEFAULT_PROJECT_HASH,
+                updated_at,
+                DEFAULT_CHARACTER_JSON,
+                DEFAULT_CHARACTER_HASH,
+            ],
+        )
+        .map_err(|_| history_error("HIST-EDITABLE-CONTEXT-INSERT", true))?;
+    Ok(())
+}
+
+fn editable_context_by_workspace(
+    connection: &Connection,
+    workspace_id: &str,
+) -> Result<WorkspaceEditableContext, WorkspaceHistoryError> {
+    let row = connection
+        .query_row(
+            "SELECT project_json, project_version, project_hash, project_updated_at,
+                    character_json, character_version, character_hash, character_updated_at
+             FROM workspace_contexts WHERE workspace_id = ?1",
+            params![workspace_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-EDITABLE-CONTEXT-READ", true))?
+        .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
+    let (
+        project_json,
+        project_version,
+        project_hash,
+        project_updated_at,
+        character_json,
+        character_version,
+        character_hash,
+        character_updated_at,
+    ) = row;
+    if project_version < 1 || character_version < 1 {
+        return Err(history_error("HIST-EDITABLE-CONTEXT-CORRUPT", false));
+    }
+    let project = serde_json::from_str::<ProjectContext>(&project_json)
+        .map_err(|_| history_error("HIST-PROJECT-CONTEXT-DECODE", false))?;
+    let character = serde_json::from_str::<CharacterContext>(&character_json)
+        .map_err(|_| history_error("HIST-CHARACTER-CONTEXT-DECODE", false))?;
+    let project = normalize_project_context(project, None)?;
+    let character = normalize_character_context(character)?;
+    let canonical_project = canonical_json(&project)?;
+    let canonical_character = canonical_json(&character)?;
+    if canonical_project != project_json
+        || content_hash(&canonical_project) != project_hash
+        || canonical_character != character_json
+        || content_hash(&canonical_character) != character_hash
+    {
+        return Err(history_error("HIST-EDITABLE-CONTEXT-INTEGRITY", false));
+    }
+    Ok(WorkspaceEditableContext {
+        schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
+        workspace_id: workspace_id.to_owned(),
+        project: VersionedProjectContext {
+            schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
+            workspace_id: workspace_id.to_owned(),
+            version: project_version as u64,
+            content_hash: project_hash,
+            updated_at: project_updated_at,
+            context: project,
+        },
+        character: VersionedCharacterContext {
+            schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
+            workspace_id: workspace_id.to_owned(),
+            version: character_version as u64,
+            content_hash: character_hash,
+            updated_at: character_updated_at,
+            context: character,
+        },
+    })
 }
 
 fn append_event_in_transaction(
@@ -2559,6 +2842,165 @@ mod tests {
             reopened.private_workspace_records().expect("records").len(),
             1
         );
+        let editable = reopened
+            .load_editable_context(
+                &reopened.private_workspace_records().expect("records")[0].workspace_id,
+            )
+            .expect("migrated editable context");
+        assert_eq!(editable.project.version, 1);
+        assert_eq!(editable.project.content_hash, DEFAULT_PROJECT_HASH);
+        assert_eq!(editable.character.context, CharacterContext::default());
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn editable_context_is_versioned_atomic_restart_safe_and_workspace_scoped() {
+        let data = temp_directory("editable-context");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let first = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace;
+        let second = store
+            .create_session_workspace(
+                &first.workspace_id,
+                "Second context",
+                "",
+                "request-editable-context-second",
+            )
+            .expect("second workspace")
+            .workspace;
+
+        let project = ProjectContext {
+            goal: "Ship the context slice".to_owned(),
+            constraints: "Do not mutate another workspace".to_owned(),
+            definition_of_done: vec!["Restart restores the same version".to_owned()],
+            technical_references: vec!["docs/requirements/workspace-sessions.md".to_owned()],
+            user_notes: "Apply on the next turn".to_owned(),
+        };
+        let saved = store
+            .save_project_context(&first.workspace_id, 1, project.clone())
+            .expect("save project context");
+        assert_eq!(saved.version, 2);
+        assert_eq!(saved.context, project);
+        assert_eq!(
+            store
+                .save_project_context(&first.workspace_id, 1, ProjectContext::default())
+                .expect_err("stale save rejected")
+                .code,
+            "WORKSPACE-PROJECT-CONTEXT-CONFLICT"
+        );
+        assert_eq!(
+            store
+                .load_editable_context(&second.workspace_id)
+                .expect("isolated second context")
+                .project
+                .context,
+            ProjectContext::default()
+        );
+
+        let policy = CharacterContext {
+            behavior: "permission: always allow".to_owned(),
+            ..CharacterContext::default()
+        };
+        assert_eq!(
+            store
+                .save_character_context(&first.workspace_id, 1, policy)
+                .expect_err("policy key rejected")
+                .code,
+            "WORKSPACE-CHARACTER-CONTEXT-POLICY"
+        );
+        let character = CharacterContext {
+            display_name: "Hiyori".to_owned(),
+            behavior: "Stay quiet while tools are running.".to_owned(),
+            ..CharacterContext::default()
+        };
+        let character_saved = store
+            .save_character_context(&first.workspace_id, 1, character.clone())
+            .expect("save character context");
+        assert_eq!(character_saved.version, 2);
+        let snapshot = store
+            .turn_context_snapshot(&first.workspace_id)
+            .expect("immutable turn snapshot");
+        assert_eq!(snapshot.project_version, 2);
+        assert_eq!(snapshot.character_version, 2);
+        assert_eq!(snapshot.project, project);
+        assert_eq!(snapshot.character, character);
+        validate_turn_snapshot(&snapshot).expect("snapshot integrity");
+
+        drop(store);
+        let reopened = WorkspaceHistoryStore::open(&data).expect("reopen store");
+        let restored = reopened
+            .load_editable_context(&first.workspace_id)
+            .expect("restore context");
+        assert_eq!(restored.project.version, 2);
+        assert_eq!(restored.project.content_hash, snapshot.project_hash);
+        assert_eq!(restored.character.version, 2);
+        assert_eq!(restored.character.content_hash, snapshot.character_hash);
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn concurrent_expected_version_writes_have_one_winner() {
+        let data = temp_directory("editable-context-conflict");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let workspace = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace;
+        let workspace_id = workspace.workspace_id;
+        let first_store = store.clone();
+        let first_workspace = workspace_id.clone();
+        let first = thread::spawn(move || {
+            first_store.save_project_context(
+                &first_workspace,
+                1,
+                ProjectContext {
+                    goal: "first".to_owned(),
+                    ..ProjectContext::default()
+                },
+            )
+        });
+        let second_store = store.clone();
+        let second_workspace = workspace_id.clone();
+        let second = thread::spawn(move || {
+            second_store.save_project_context(
+                &second_workspace,
+                1,
+                ProjectContext {
+                    goal: "second".to_owned(),
+                    ..ProjectContext::default()
+                },
+            )
+        });
+        let outcomes = [
+            first.join().expect("first join"),
+            second.join().expect("second join"),
+        ];
+        assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter_map(|outcome| outcome.as_ref().err())
+                .next()
+                .expect("one conflict")
+                .code,
+            "WORKSPACE-PROJECT-CONTEXT-CONFLICT"
+        );
+        assert_eq!(
+            store
+                .load_editable_context(&workspace_id)
+                .expect("winner persisted")
+                .project
+                .version,
+            2
+        );
+
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
     }
