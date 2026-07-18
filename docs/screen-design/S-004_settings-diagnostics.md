@@ -111,7 +111,7 @@ active project/workspaceを明示し、[S-002 Context subview](S-002_coding-work
 | Technical references | managed doc ID / repo-relative path | 0〜20項目、各1〜500。canonical project root内、absolute path・`..`非保存 | mainのみ。supportへ本文を渡さない |
 | User notes           | current version                     | 0〜8,000                                      | next turnから適用                 |
 
-全field・全配列itemの合計は32,000 Unicode scalarを上限とする。保存時にexpected versionを検証し、競合時はremote/currentの差と再読み込みを示す。running turnへ途中適用せず、`次のturnから適用`と表示する。project登録解除はsource、Git object、branchを削除せず、[S-001](S-001_session-dashboard.md)の確認契約を使う。
+全field・全配列itemの合計は32,000 Unicode scalarを上限とする。3つの配列editorはraw textarea draftを別に保持し、typing / paste / IME composition中の空白、空行、caretを変更しない。blurまたはSave時にだけtrim、空item除去、canonical path正規化を行い、保存成功後にcanonical valueを表示する。保存時にexpected versionを検証し、競合時はremote/currentの差と再読み込みを示す。running turnへ途中適用せず、`次のturnから適用`と表示する。project登録解除はsource、Git object、branchを削除せず、[S-001](S-001_session-dashboard.md)の確認契約を使う。
 
 ### Character context
 
@@ -123,7 +123,7 @@ active project/workspaceを明示し、[S-002 Context subview](S-002_coding-work
 | Companion behavior     | 0〜4,000文字のpresentation希望                           | technical policyを変更せず、inventory外cueはneutral | Live2D presentation          |
 | Prohibited expressions | 0〜20項目、各1〜200                                      | safety/error/decisionの事実表示は抑止できない | output presentation          |
 
-全field・全配列itemの合計は12,000 Unicode scalarを上限とする。Character contextはpermission、model、tool、Git observer、commit skill、verification、approval、privacy、support capability、checkpoint policyを上書きできない。行頭・JSON key位置のtechnical policy key、またはoverride / bypass / disable / ignoreとtechnical policy名を組み合わせた指示は保存前にrecord単位で拒否し、Project contextへ自動コピーしない。running turnには次turnから適用する。
+全field・全配列itemの合計は12,000 Unicode scalarを上限とする。Character contextはpermission、model、tool、Git observer、commit skill、verification、approval、privacy、support capability、checkpoint policyを上書きできない。行頭・JSON key位置のtechnical policy key、override / bypass / disable / ignore、またはgrant / deny / allow / skip / avoid / never askとtechnical policy名を組み合わせた意味的な変更指示を保存前にrecord単位で拒否する。ja/en fixtureを同じ結果へ固定し、単なるpresentation説明はfalse positiveにしない。拒否内容はProject contextへ自動コピーしない。running turnには次turnから適用する。
 
 #### Context editor stateと競合復旧
 
@@ -140,7 +140,9 @@ Context tabとSettings内のProject context / Character contextは、同じworks
 | version conflict | `手元 Version N / 保存済み Version M`、内容が異なるfield名、手元draft保持 | `保存済みを再読み込み`で当該sectionだけ置換。Cancel/Escapeでdraft維持し編集へ戻る |
 | load/save unavailable | safe error code、Retry | 他workspaceと他sectionを壊さない |
 
-workspace切替時は旧workspaceのpending load/save responseをgenerationで無効化し、新workspaceのfieldへ適用しない。再起動後はSQLiteの保存済みrecordだけを復元し、未保存draftを保存済みと表示しない。Sendはclick/shortcut受付時にProject / Characterのversionとhashを一つのimmutable request snapshotへ固定し、実行中のturnへ後から注入しない。
+field error stateは`field + safe reason key + native code`を保持する。field直下のlocalized reasonへ安定したIDを付け、help textがある場合はhelp IDとerror IDの両方を`aria-describedby`へ設定する。native reference boundary / missing / changed errorもTechnical referencesへ関連付ける。field不明のrecord errorはfallback fieldを選ばずsection Alert / headingへfocusし、conflictの再読込後は対応section headingへfocusする。
+
+workspace切替時は旧workspaceのpending load/save responseをgenerationで無効化し、新workspaceのfieldへ適用しない。再起動後はSQLiteの保存済みrecordだけを復元し、未保存draftを保存済みと表示しない。Sendはclick/shortcut受付時にProject / Characterのversionとhashを一つのimmutable request snapshotへ固定し、実行中のturnへ後から注入しない。snapshot失敗時は該当field errorまたはpreflight errorを表示し、root/referenceを再Saveせずに暗黙採用しない。demoでもnativeと同じcanonical content digestを短縮表示する。
 
 ### Companion
 

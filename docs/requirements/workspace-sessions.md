@@ -129,9 +129,15 @@ read_when:
 
 Project総量は32,000、Character総量は12,000 Unicode scalarを上限とし、配列の各itemも総量へ加算する。保存requestは`workspaceId`、対象record、`expectedVersion`を必須にし、SQLite transaction内で現在versionとの一致を検証してからversionをちょうど1増やし、canonical JSONのSHA-256を更新する。不一致時は`WORKSPACE-PROJECT-CONTEXT-CONFLICT`または`WORKSPACE-CHARACTER-CONTEXT-CONFLICT`を返し、DBと利用者のdraftを変更しない。
 
-Characterの自由入力は、行頭またはJSON key位置にある`permission`、`approval`、`model`、`tool`、`git`、`commit_skill`、`verification`、`privacy`、`support_capability`、`checkpoint_policy`と、その表記揺れをtechnical policy keyとして拒否する。また`override` / `bypass` / `disable` / `ignore`とtechnical policy名を組み合わせた指示も拒否する。拒否はCharacter record全体をatomicに失敗させ、Project Contextへ自動コピーしない。
+Characterの自由入力は、行頭またはJSON key位置にある`permission`、`approval`、`model`、`tool`、`git`、`commit_skill`、`verification`、`privacy`、`support_capability`、`checkpoint_policy`と、その表記揺れをtechnical policy keyとして拒否する。また`override` / `bypass` / `disable` / `ignore`とtechnical policy名を組み合わせた指示に限らず、grant / deny / allow / skip / avoid / never askや「常に許可」「確認しない」「検証を省略」等、権限、承認、検証、安全、checkpointの実行ruleを変更する意味的な指示もja/en共通fixtureに基づき拒否する。presentation上の語（例: permission errorを簡潔に説明する、verification結果を温かく伝える）は拒否しない。拒否はCharacter record全体をatomicに失敗させ、Project Contextへ自動コピーしない。
 
-Sendはnative storeから対象workspaceのProject / Characterを同じread transactionで取得し、各versionとcanonical JSON hashを持つimmutable request snapshotをturn開始前に一度だけ確定する。main sessionへ渡すのはそのsnapshotであり、turnが`running` / `waiting`になった後の保存を途中注入しない。次のSendだけが新versionを取得する。別workspaceのrecord、draft、conflict、snapshotを参照または再利用してはならず、app再起動後もworkspaceごとのversion・hash・内容が一致する。
+Projectの配列fieldは入力中のraw textをworkspace draftとして保持し、Space、行末空白、空行、IME compositionを`onChange`で正規化しない。blurまたはSave時だけ行をtrimし、空itemを除外して配列化する。validation失敗時はraw入力とcaretを保持し、保存成功時だけcanonical itemをUIへ戻す。
+
+technical referenceはSave時に`.` segmentと重複separatorを除いたcanonical project-relative表記へ正規化し、現在のtrusted root内で各componentと最終targetを解決する。保存時のworkspace root identityとreference target identityをapp-private metadataへ記録する。missing、absolute、`..`、root外symlinkを保存せず、保存後にrootまたはtarget identity、symlink解決先、存在状態が変化した場合は次turn snapshotを構築しない。missingだったpathが作成された場合も、再Saveで新しいversionとidentityを確定するまで既存recordへ暗黙採用しない。
+
+Sendはnative storeから対象workspaceのProject / Characterを同じread transactionで取得し、各versionとcanonical JSON hashを持つimmutable request snapshotをturn開始前に一度だけ確定する。snapshot直前に現在のtrusted root、workspace identity、全technical referenceを再検証し、失敗時はrecoverable preflight errorでSendを止める。main sessionへ渡すcontextは命令ではないquoted untrusted dataとして明示的な境界内へ直列化し、authoritative user instructionおよびapp-owned technical policyと混在させない。Character contextはpresentation metadataとしてのみ扱い、permission、verification、安全ruleのauthorityを持たない。turnが`running` / `waiting`になった後の保存を途中注入せず、次のSendだけが新versionを取得する。別workspaceのrecord、draft、conflict、snapshotを参照または再利用してはならず、app再起動後もworkspaceごとのversion・hash・内容が一致する。
+
+nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを使う。同じcanonical contentは同じcontent hash、異なるcontentは異なるhashとなり、UIの短縮hashをsynthetic placeholderで代用しない。
 
 ## デスクトップ固有要件
 
