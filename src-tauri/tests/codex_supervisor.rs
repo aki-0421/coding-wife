@@ -1,3 +1,4 @@
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -5,14 +6,18 @@ use std::time::Duration;
 use coding_wife_lib::codex::attachment::{
     AttachmentService, AttachmentSource, AttachmentWorkspaceContext, ResolvedAttachmentSet,
 };
-use coding_wife_lib::codex::binary::{discover_binary, probe_schema};
+use coding_wife_lib::codex::binary::{discover_binary, probe_schema, BinaryInfo};
 use coding_wife_lib::codex::process::spawn_process;
 use coding_wife_lib::codex::protocol::{client_notification, initialize_params};
 use coding_wife_lib::codex::rpc::{RpcRequestError, RuntimeSignal};
 use coding_wife_lib::codex::supervisor::CodexSupervisor;
+use coding_wife_lib::codex::support::{
+    CommitExplanationTrigger, SupportExplainRequest, SupportRuntime, SupportRuntimeError,
+    SUPPORT_MAX_SESSION_CAPACITY,
+};
 use coding_wife_lib::codex::types::{
-    CapabilityState, ChildState, CodexConnectRequest, CodexFallbackDecisionRequest, CodexHealth,
-    CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadStartRequest,
+    BinarySource, CapabilityState, ChildState, CodexConnectRequest, CodexFallbackDecisionRequest,
+    CodexHealth, CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadStartRequest,
     CodexTurnInterruptRequest, CodexTurnStartRequest, PendingResponse, ReasoningPreset,
     ReviewTarget,
 };
@@ -26,6 +31,14 @@ static ENVIRONMENT_LOCK: Mutex<()> = Mutex::const_new(());
 
 fn fixture_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_codex_app_server.py")
+}
+
+async fn support_fixture_binary() -> BinaryInfo {
+    let mut binary = discover_binary(Some(&fixture_binary()))
+        .await
+        .expect("fixture binary");
+    binary.source = BinarySource::TestFixture;
+    binary
 }
 
 fn test_supervisor() -> CodexSupervisor {
@@ -57,7 +70,11 @@ impl FixtureEnvironment {
             .expect("initialize fixture repository");
         assert!(git_init.success(), "fixture repository must be valid Git");
         let state = temporary_directory("state");
-        let app_data = temporary_directory("app-data");
+        let app_data = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root")
+            .join(".context")
+            .join(format!("test-app-data-{}", uuid::Uuid::new_v4()));
         std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", mode);
         std::env::set_var("CODING_WIFE_CODEX_FAKE_STATE", &state);
         Self {
@@ -65,6 +82,17 @@ impl FixtureEnvironment {
             state,
             app_data,
         }
+    }
+
+    fn auth_source(&self) -> PathBuf {
+        std::fs::create_dir_all(&self.app_data).expect("auth fixture directory");
+        std::fs::set_permissions(&self.app_data, std::fs::Permissions::from_mode(0o700))
+            .expect("auth fixture directory mode");
+        let auth = self.app_data.join("auth.json");
+        std::fs::write(&auth, br#"{"fixture":"support-auth"}"#).expect("auth fixture");
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600))
+            .expect("auth fixture mode");
+        auth
     }
 }
 
@@ -94,6 +122,11 @@ impl SkillResourceFixture {
     fn skill_document(&self) -> PathBuf {
         self.root
             .join("resources/skills/coding-wife-commit-work/SKILL.md")
+    }
+
+    fn explain_skill_document(&self) -> PathBuf {
+        self.root
+            .join("resources/skills/coding-wife-explain-commit/SKILL.md")
     }
 
     fn manifest(&self) -> PathBuf {
@@ -201,6 +234,56 @@ async fn initialize_direct(
 
 async fn read_state(path: &Path) -> String {
     tokio::fs::read_to_string(path).await.unwrap_or_default()
+}
+
+fn support_evidence(locale: &str) -> coding_wife_lib::git_review::types::CommitEvidenceV1 {
+    serde_json::from_value(serde_json::json!({
+        "schemaVersion": 1,
+        "commitId": "commit-opaque-fixture",
+        "subject": "feat: add a bounded fixture",
+        "body": "Record the verified support boundary.",
+        "changes": [{
+            "changeKind": "modified",
+            "fileCount": 1,
+            "additions": 2,
+            "deletions": 1,
+            "binaryFiles": 0
+        }],
+        "diffSummary": {
+            "filesChanged": 1,
+            "additions": 2,
+            "deletions": 1,
+            "binaryFiles": 0
+        },
+        "verification": [{
+            "evidenceId": "verification-fixture",
+            "sourceEventId": "event-fixture",
+            "check": "cargo test",
+            "result": "passed",
+            "durationMs": 12,
+            "summary": "The bounded fixture passed."
+        }],
+        "decisions": [],
+        "risks": [],
+        "locale": locale,
+        "workspaceGeneration": 1,
+        "selectionVersion": 1
+    }))
+    .expect("support evidence fixture")
+}
+
+fn support_request(
+    request_id: &str,
+    evidence: coding_wife_lib::git_review::types::CommitEvidenceV1,
+) -> SupportExplainRequest {
+    SupportExplainRequest {
+        schema_version: 1,
+        request_id: request_id.to_owned(),
+        workspace_id: "workspace".to_owned(),
+        full_commit_sha: "a".repeat(40),
+        trigger: CommitExplanationTrigger::AutoVerifiedCommit,
+        evidence,
+    }
 }
 
 fn attachment_snapshot_root(fixture: &FixtureEnvironment) -> PathBuf {
@@ -409,6 +492,291 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
     assert!(!state.contains("SKILL.md"));
     assert!(state.contains("interrupt_received"));
     supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn dedicated_support_runtime_proves_authority_and_injects_only_the_explain_skill() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime_result = SupportRuntime::construct(
+        &binary,
+        &schema,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        Some(&auth),
+    )
+    .await;
+    let runtime = match runtime_result {
+        Ok(runtime) => runtime,
+        Err(error) => panic!(
+            "isolated support runtime: {error:?}; state={}",
+            read_state(&fixture.state).await
+        ),
+    };
+
+    assert_eq!(runtime.audit().capacity, SUPPORT_MAX_SESSION_CAPACITY);
+    assert_eq!(runtime.audit().skill_name, "coding-wife-explain-commit");
+    assert_eq!(
+        runtime.audit().execution_class,
+        coding_wife_lib::codex::types::TurnExecutionClass::Support
+    );
+    assert!(runtime.audit().malicious_canary_passed);
+    let result = runtime
+        .explain_commit(support_request("support-request-1", support_evidence("ja")))
+        .await
+        .expect("strict support result");
+    assert_eq!(result.explanation.locale, "ja");
+    assert_eq!(result.usage.total_tokens, 30);
+    runtime.shutdown().await.expect("support cleanup");
+
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("support_sandbox_denied"));
+    assert_eq!(state.matches("support_thread_contract_ok").count(), 2);
+    assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 2);
+    assert_eq!(state.matches("support_probe_wire_sent").count(), 1);
+    assert_eq!(state.matches("support_auth_bridge_ok").count(), 1);
+    assert!(!state.contains("support_skill_exactly_once_invalid"));
+    assert!(!state.contains("commit_skill_exactly_once_ok"));
+    assert!(!state.contains("coding-wife-commit-work"));
+}
+
+#[tokio::test]
+async fn missing_or_tampered_explain_skill_blocks_support_before_wire() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for case in ["missing", "skill_tampered", "manifest_tampered"] {
+        let fixture = FixtureEnvironment::new("default");
+        let resources = SkillResourceFixture::new();
+        match case {
+            "missing" => {
+                std::fs::remove_file(resources.explain_skill_document())
+                    .expect("remove explain skill fixture");
+            }
+            "skill_tampered" => {
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(resources.explain_skill_document())
+                    .and_then(|mut file| {
+                        use std::io::Write;
+                        file.write_all(b"\ntampered\n")
+                    })
+                    .expect("tamper explain skill fixture");
+            }
+            "manifest_tampered" => {
+                let manifest =
+                    std::fs::read_to_string(resources.manifest()).expect("read skill manifest");
+                std::fs::write(
+                    resources.manifest(),
+                    manifest.replace("\"schemaVersion\": 1", "\"schemaVersion\": 2"),
+                )
+                .expect("tamper skill manifest");
+            }
+            _ => unreachable!(),
+        }
+
+        let binary = support_fixture_binary().await;
+        let schema = probe_schema(&binary).await.expect("fixture schema");
+        let auth = fixture.auth_source();
+        let error =
+            match SupportRuntime::construct(&binary, &schema, &resources.root, Some(&auth)).await {
+                Ok(runtime) => {
+                    runtime
+                        .shutdown()
+                        .await
+                        .expect("unexpected runtime cleanup");
+                    panic!("{case} explain skill must not construct a support runtime");
+                }
+                Err(error) => error,
+            };
+        assert_eq!(error, SupportRuntimeError::Skill, "{case}");
+        assert_eq!(error.code(), "CODEX-SUPPORT-SKILL-INVALID", "{case}");
+        let state = read_state(&fixture.state).await;
+        assert!(!state.contains("support_"), "{case}: {state}");
+    }
+}
+
+#[tokio::test]
+async fn unsafe_auth_sources_keep_support_capacity_at_zero() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for case in ["permissive", "symlink"] {
+        let fixture = FixtureEnvironment::new("default");
+        let binary = support_fixture_binary().await;
+        let schema = probe_schema(&binary).await.expect("fixture schema");
+        let auth = fixture.auth_source();
+        match case {
+            "permissive" => {
+                std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o644))
+                    .expect("make auth source permissive");
+            }
+            "symlink" => {
+                let target = fixture.app_data.join("auth-target.json");
+                std::fs::rename(&auth, &target).expect("move auth target");
+                std::os::unix::fs::symlink(&target, &auth).expect("symlink auth source");
+            }
+            _ => unreachable!(),
+        }
+
+        let error = match SupportRuntime::construct(
+            &binary,
+            &schema,
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            Some(&auth),
+        )
+        .await
+        {
+            Ok(runtime) => {
+                runtime
+                    .shutdown()
+                    .await
+                    .expect("unexpected runtime cleanup");
+                panic!("{case} auth source must not construct a support runtime");
+            }
+            Err(error) => error,
+        };
+        assert_eq!(error, SupportRuntimeError::AuthBridge, "{case}");
+        assert_eq!(
+            error.code(),
+            "CODEX-SUPPORT-AUTH-BRIDGE-UNAVAILABLE",
+            "{case}"
+        );
+        let state = read_state(&fixture.state).await;
+        assert!(state.contains("support_probe_wire_sent"), "{case}: {state}");
+        assert!(!state.contains("support_auth_bridge_ok"), "{case}: {state}");
+    }
+}
+
+#[tokio::test]
+async fn private_evidence_is_rejected_before_the_explanation_wire() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for case in ["relative_path", "absolute_path", "secret"] {
+        let fixture = FixtureEnvironment::new("default");
+        let binary = support_fixture_binary().await;
+        let schema = probe_schema(&binary).await.expect("fixture schema");
+        let auth = fixture.auth_source();
+        let runtime = SupportRuntime::construct(
+            &binary,
+            &schema,
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            Some(&auth),
+        )
+        .await
+        .expect("isolated support runtime");
+        let before = read_state(&fixture.state).await;
+        let mut evidence = support_evidence("ja");
+        match case {
+            "relative_path" => evidence.subject = "src/private.rs".to_owned(),
+            "absolute_path" => evidence.body = "/Users/example/private/repository".to_owned(),
+            "secret" => {
+                evidence.verification[0].summary =
+                    "ghp_abcdefghijklmnopqrstuvwxyz1234567890abcd".to_owned();
+            }
+            _ => unreachable!(),
+        }
+        let error = runtime
+            .explain_commit(support_request(&format!("support-{case}"), evidence))
+            .await
+            .expect_err("private evidence must be rejected");
+        assert_eq!(error, SupportRuntimeError::EvidenceRedaction, "{case}");
+        assert_eq!(error.code(), "CODEX-SUPPORT-EVIDENCE-REDACTION", "{case}");
+        let after = read_state(&fixture.state).await;
+        assert_eq!(
+            before.matches("support_skill_exactly_once_ok").count(),
+            after.matches("support_skill_exactly_once_ok").count(),
+            "{case}: evidence reached turn/start"
+        );
+        assert_eq!(
+            before.matches("turn_contract_ok").count(),
+            after.matches("turn_contract_ok").count(),
+            "{case}: evidence reached the wire"
+        );
+        runtime.shutdown().await.expect("support cleanup");
+    }
+}
+
+#[tokio::test]
+async fn invalid_support_output_and_plan_events_publish_no_result() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for (mode, expected) in [
+        ("support_invalid_output", SupportRuntimeError::Output),
+        ("support_plan_call", SupportRuntimeError::Policy),
+    ] {
+        let fixture = FixtureEnvironment::new(mode);
+        let binary = support_fixture_binary().await;
+        let schema = probe_schema(&binary).await.expect("fixture schema");
+        let auth = fixture.auth_source();
+        let runtime = SupportRuntime::construct(
+            &binary,
+            &schema,
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            Some(&auth),
+        )
+        .await
+        .expect("isolated support runtime");
+        let error = runtime
+            .explain_commit(support_request(mode, support_evidence("ja")))
+            .await
+            .expect_err("invalid support response must not publish a result");
+        assert_eq!(error, expected, "{mode}");
+        runtime.shutdown().await.expect("support cleanup");
+        let state = read_state(&fixture.state).await;
+        assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 2);
+        if mode == "support_plan_call" {
+            assert!(state.contains("interrupt_received"), "{state}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn support_cancellation_interrupts_the_turn_and_discards_output() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("support_slow");
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime = Arc::new(
+        SupportRuntime::construct(
+            &binary,
+            &schema,
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            Some(&auth),
+        )
+        .await
+        .expect("isolated support runtime"),
+    );
+    let task_runtime = runtime.clone();
+    let explanation = tokio::spawn(async move {
+        task_runtime
+            .explain_commit(support_request("support-cancel", support_evidence("ja")))
+            .await
+    });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let state = read_state(&fixture.state).await;
+        if state.matches("support_skill_exactly_once_ok").count() == 2 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "support turn did not start: {state}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(runtime.cancel().await.expect("cancel support turn"));
+    let error = explanation
+        .await
+        .expect("support explanation join")
+        .expect_err("canceled support turn must publish no result");
+    assert_eq!(error, SupportRuntimeError::Canceled);
+
+    let runtime = match Arc::try_unwrap(runtime) {
+        Ok(runtime) => runtime,
+        Err(_) => panic!("support runtime still has an unexpected owner"),
+    };
+    runtime.shutdown().await.expect("support cleanup");
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("interrupt_received"), "{state}");
 }
 
 #[tokio::test]

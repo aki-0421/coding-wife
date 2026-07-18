@@ -8,6 +8,13 @@ pub const CODEX_MODEL: &str = "gpt-5.6-sol";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum TurnExecutionClass {
+    Main,
+    Support,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CapabilityState {
     Supported,
     Unavailable,
@@ -37,7 +44,7 @@ impl Default for CodexCapabilities {
             permissions_approval: CapabilityState::Unverified,
             detached_review: CapabilityState::Unverified,
             ephemeral_thread: CapabilityState::Unverified,
-            // The 0.144.x contract cannot prove tool=0 and cwd=null.
+            // Main diagnostics never grant support; its constructor reports capacity separately.
             support_isolation: CapabilityState::Unavailable,
         }
     }

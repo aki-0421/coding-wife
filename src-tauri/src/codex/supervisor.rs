@@ -34,7 +34,8 @@ use super::types::{
     CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadListRequest,
     CodexThreadResumeRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
     CodexTurnStartRequest, MainSkillInjectionAudit, PendingResolutionStatus, ReasoningPreset,
-    ReviewResponse, ThreadListResponse, ThreadResponse, ThreadSummary, TurnResponse,
+    ReviewResponse, ThreadListResponse, ThreadResponse, ThreadSummary, TurnExecutionClass,
+    TurnResponse,
 };
 
 pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
@@ -932,7 +933,9 @@ impl CodexSupervisor {
                     request.effort,
                     &attachments,
                     &commit_skill,
-                ),
+                    TurnExecutionClass::Main,
+                )
+                .map_err(|_| command_error("CODEX-TURN-SKILL-CLASS", "turn/start", false))?,
             )
             .await
         {
@@ -1216,7 +1219,11 @@ impl CodexSupervisor {
                     claim.effort,
                     &[],
                     &commit_skill,
-                ),
+                    TurnExecutionClass::Main,
+                )
+                .map_err(|_| {
+                    command_error("CODEX-TURN-SKILL-CLASS", "codex.decision.answer", false)
+                })?,
             )
             .await
         {

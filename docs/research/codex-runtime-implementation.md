@@ -121,19 +121,11 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 
 ## Support isolation gate
 
-| 必要条件                   | Codex 0.144.xの証拠                              | 判定                               |
-| -------------------------- | ------------------------------------------------ | ---------------------------------- |
-| `ephemeral=true`           | responseで確認                                   | 対応                               |
-| `thread/list`へ残らない    | 同じ接続で非列挙                                 | 対応。ただし全永続先は別監査が必要 |
-| cwdなし                    | responseはAbsolutePathBufで、実測もworkspace cwd | 非対応                             |
-| runtime workspace rootなし | 実測1件                                          | 非対応                             |
-| dynamic tool 0             | `dynamicTools=[]`はclient-defined toolだけ       | 未証明                             |
-| shell/file/MCP 0           | thread単位の完全allowlistがschemaにない          | 未証明                             |
-| raw prompt/response非永続  | アプリ側では実装可能                             | 対応可能                           |
+Codex CLI 0.144.5 exact releaseでは、[Codex support runtime の実効権限ゼロ隔離調査](codex-support-runtime-isolation.md)のrelease constructorをすべて通過した時だけcommit explainer capacityを1にする。それ以外のrelease、schema、tool hash、permission profile、auth bridge、thread response、canaryのいずれかを検証できなければcapacity 0と決定的fallbackに戻す。
 
-このため通常support sessionと固定reviewer support sessionはともに0件である。main event、Git/test/checkpoint metadata、既知error codeから固定summary keyを選ぶだけにし、AIの提案や自動判断を生成しない。
+supportはmainと別process、clean `CODEX_HOME`、repositoryと無関係な空のowner-only cwd、runtime root 0、environment 0で動く。wire toolはexternal-authority 0、exact inert `update_plan` 1件だけである。`update_plan`の実行を示すevent、server request、allowlist外item、unknown event、schema不一致を受けたtaskはinterruptし、partial outputを公開・保存しない。
 
-再評価にはbuilt-in tool deny-all、null cwd、null workspace rootをgenerated schemaとruntime probeの双方で確認する必要がある。モデルの自己申告は隔離証明にしない。
+support turnへはapp bundleでdigest検証した`coding-wife-explain-commit`をexactly once注入し、main用`coding-wife-commit-work`と相互に混在させない。入力する`CommitEvidenceV1`の全文字列はnativeで再帰走査し、secret、絶対path、相対repository pathを検出したら`turn/start`前に拒否する。
 
 ## ファイル責務
 
@@ -150,7 +142,10 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 | `requests.rs`                         | approval/RUI exact validation、duplicate request ledger                                 |
 | `normalizer.rs`                       | opaque handle、redaction済みCodexEventとDomainEvent                                     |
 | `supervisor.rs`                       | handshake、thread/turn/review、single active turn、restart budget                       |
-| `support.rs`                          | isolation unavailable時のcapacity 0と決定的fallback                                     |
+| `support.rs`                          | support公開contract、single-use explain turn、strict output/event policy、fallback       |
+| `support_isolation.rs`                | exact release/schema検証、native sandbox・mock wire・malicious canary preflight           |
+| `support_private.rs`                  | owner-only clean runtime、env allowlist、no-follow auth bridge、確実なcleanup             |
+| `support_probe.rs`                    | loopback Responses captureとexact inert tool schema/hash                                 |
 | `attachment.rs`                       | opaque handle発行、workspace/file identity検証、送信直前再検証、localImage/mention変換   |
 | `commands.rs`                         | WebViewへ公開するtyped Tauri command                                                    |
 | `types.rs`                            | adapter v1のpublic DTOとserde contract                                                  |
@@ -213,6 +208,9 @@ Addはabsolute pathを持たない固定opaque attachment handleを返す。demo
 | `decision_fallback` / `decision_invalid` | exact decision card化、structured continuation、自由文interrupt                         |
 | `decision_continuation_crash`            | fallback継続開始中のchild crashをterminal failureにし、自動再送しないこと               |
 | `schema_malformed`                       | 成功probe後のschema失敗で以前のidentity/capability証跡を消去し、fresh connectで回復      |
+| `support_invalid_output`                 | strict schemaに違反するcommit説明を結果として公開しない                                 |
+| `support_plan_call`                      | inert `update_plan`実行eventをpolicy違反としてinterruptし、partial resultを破棄する     |
+| `support_slow`                           | 実行中support turnをcancelし、interrupt terminalだけを受理して結果を破棄する            |
 
 fixtureは秘密、実account、実path、promptを含めない。新しいprotocol edge caseはproduction parserを緩める前にfake modeまたは共有fixtureへ追加する。
 
@@ -259,4 +257,4 @@ CODEX_LIVE_SMOKE=1 cargo test \
 - probe失敗時はbinary/schemaだけでなく、diagnosticに残る以前のversion/hash/fingerprint/capability/account証跡も消去する。
 - redaction fixtureはBearer/API keyだけでなくauth cookie、session ID、quoted/spaced credential key、`/Volumes`、`/Library`、`/Applications`を含める。
 - stable initialize fallbackではexperimental-only fieldを送らず、unsupported operationをwire call前にblockする。
-- support isolationを`supported`へ変える場合はdeny-all capabilityと`CODEX_HOME`差分のrelease evidenceを先に追加する。
+- Codex release、generated schema、wire tool schema/hash、permission profileのいずれかを変える場合は、support capacityを先に0へ戻し、native preflightとmalicious canaryのrelease evidenceを再取得する。

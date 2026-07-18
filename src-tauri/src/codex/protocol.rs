@@ -4,8 +4,8 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 
 use super::attachment::ResolvedAttachment;
-use super::bundled_skill::ResolvedBundledSkill;
-use super::types::{ReasoningPreset, ReviewTarget, CODEX_MODEL};
+use super::bundled_skill::{ResolvedBundledSkill, COMMIT_SKILL_NAME, EXPLAIN_COMMIT_SKILL_NAME};
+use super::types::{ReasoningPreset, ReviewTarget, TurnExecutionClass, CODEX_MODEL};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutboundProfile {
@@ -18,6 +18,21 @@ pub struct ThreadPolicyResponse {
     pub thread_id: String,
     pub response_cwd: PathBuf,
     pub thread_cwd: PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SupportThreadPolicyResponse {
+    pub thread_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
+pub enum SupportThreadPolicyError {
+    #[error("the support thread response was missing a required field")]
+    MissingField,
+    #[error("the support thread response did not preserve its isolated policy")]
+    Policy,
+    #[error("the support thread response contained an invalid path")]
+    Path,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
@@ -34,6 +49,12 @@ pub enum ThreadPolicyError {
     Ephemeral,
     #[error("the thread response contained an invalid path")]
     Path,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
+pub enum TurnContractError {
+    #[error("the turn skill did not match its execution class")]
+    SkillClass,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -291,6 +312,110 @@ pub fn thread_resume_params(cwd: &Path, thread_id: &str, profile: OutboundProfil
     params
 }
 
+pub(crate) fn support_thread_start_params(
+    cwd: &Path,
+    model: &str,
+    model_provider: Option<&str>,
+) -> Value {
+    let mut params = json!({
+        "model": model,
+        "cwd": cwd.to_string_lossy(),
+        "approvalPolicy": "never",
+        "permissions": "coding-wife-support-zero",
+        "ephemeral": true,
+        "historyMode": "legacy",
+        "allowProviderModelFallback": false,
+        "experimentalRawEvents": false,
+        "runtimeWorkspaceRoots": [],
+        "dynamicTools": [],
+        "environments": [],
+        "selectedCapabilityRoots": [],
+    });
+    if let Some(model_provider) = model_provider {
+        params
+            .as_object_mut()
+            .expect("support thread params object")
+            .insert(
+                "modelProvider".to_owned(),
+                Value::String(model_provider.to_owned()),
+            );
+    }
+    params
+}
+
+pub(crate) fn parse_support_thread_policy_response(
+    result: &Value,
+    cwd: &Path,
+    model: &str,
+    model_provider: Option<&str>,
+) -> Result<SupportThreadPolicyResponse, SupportThreadPolicyError> {
+    let object = result
+        .as_object()
+        .ok_or(SupportThreadPolicyError::MissingField)?;
+    if object.get("model").and_then(Value::as_str) != Some(model)
+        || object.get("approvalPolicy").and_then(Value::as_str) != Some("never")
+        || result
+            .pointer("/activePermissionProfile/id")
+            .and_then(Value::as_str)
+            != Some("coding-wife-support-zero")
+        || !result
+            .pointer("/activePermissionProfile/extends")
+            .is_some_and(Value::is_null)
+        || result.pointer("/sandbox/type").and_then(Value::as_str) != Some("readOnly")
+        || result
+            .pointer("/sandbox/networkAccess")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || !object
+            .get("runtimeWorkspaceRoots")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        || !object
+            .get("instructionSources")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        || model_provider.is_some_and(|expected| {
+            object.get("modelProvider").and_then(Value::as_str) != Some(expected)
+        })
+    {
+        return Err(SupportThreadPolicyError::Policy);
+    }
+    let expected_cwd = std::fs::canonicalize(cwd).map_err(|_| SupportThreadPolicyError::Path)?;
+    let response_cwd = object
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|value| Path::new(value).is_absolute())
+        .and_then(|value| std::fs::canonicalize(value).ok())
+        .ok_or(SupportThreadPolicyError::Path)?;
+    let thread = object
+        .get("thread")
+        .and_then(Value::as_object)
+        .ok_or(SupportThreadPolicyError::MissingField)?;
+    let thread_cwd = thread
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|value| Path::new(value).is_absolute())
+        .and_then(|value| std::fs::canonicalize(value).ok())
+        .ok_or(SupportThreadPolicyError::Path)?;
+    if response_cwd != expected_cwd
+        || thread_cwd != expected_cwd
+        || thread.get("ephemeral").and_then(Value::as_bool) != Some(true)
+        || !thread.get("path").is_some_and(Value::is_null)
+        || model_provider.is_some_and(|expected| {
+            thread.get("modelProvider").and_then(Value::as_str) != Some(expected)
+        })
+    {
+        return Err(SupportThreadPolicyError::Policy);
+    }
+    let thread_id = thread
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .map(str::to_owned)
+        .ok_or(SupportThreadPolicyError::MissingField)?;
+    Ok(SupportThreadPolicyResponse { thread_id })
+}
+
 pub fn decision_output_schema() -> Value {
     json!({
         "oneOf": [
@@ -396,6 +521,140 @@ pub fn decision_output_schema() -> Value {
     })
 }
 
+fn execution_skill_matches(
+    execution_class: TurnExecutionClass,
+    skill: &ResolvedBundledSkill,
+) -> bool {
+    let expected_skill = match execution_class {
+        TurnExecutionClass::Main => COMMIT_SKILL_NAME,
+        TurnExecutionClass::Support => EXPLAIN_COMMIT_SKILL_NAME,
+    };
+    skill.name == expected_skill
+}
+
+pub(crate) fn commit_explanation_output_schema(locale: &str) -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "schemaVersion",
+            "locale",
+            "summary",
+            "changes",
+            "reasons",
+            "verification",
+            "impact",
+            "cautions",
+            "howToReadNext",
+            "narrationChunks"
+        ],
+        "properties": {
+            "schemaVersion": {"type": "integer", "const": 1},
+            "locale": {"type": "string", "const": locale},
+            "summary": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "changes": bounded_string_array_schema(),
+            "reasons": bounded_string_array_schema(),
+            "verification": bounded_string_array_schema(),
+            "impact": bounded_string_array_schema(),
+            "cautions": bounded_string_array_schema(),
+            "howToReadNext": bounded_string_array_schema(),
+            "narrationChunks": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 32,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["sequence", "section", "text"],
+                    "properties": {
+                        "sequence": {"type": "integer", "minimum": 1, "maximum": 32},
+                        "section": {
+                            "type": "string",
+                            "enum": [
+                                "summary",
+                                "changes",
+                                "reasons",
+                                "verification",
+                                "impact",
+                                "cautions",
+                                "howToReadNext"
+                            ]
+                        },
+                        "text": {"type": "string", "minLength": 1, "maxLength": 240}
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn bounded_string_array_schema() -> Value {
+    json!({
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 16,
+        "items": {"type": "string", "minLength": 1, "maxLength": 2048}
+    })
+}
+
+pub(crate) fn support_turn_start_params(
+    thread_id: &str,
+    cwd: &Path,
+    client_user_message_id: &str,
+    input_text: &str,
+    locale: &str,
+    model: &str,
+    support_skill: &ResolvedBundledSkill,
+) -> Result<Value, TurnContractError> {
+    if !execution_skill_matches(TurnExecutionClass::Support, support_skill) {
+        return Err(TurnContractError::SkillClass);
+    }
+    Ok(json!({
+        "threadId": thread_id,
+        "clientUserMessageId": client_user_message_id,
+        "input": [
+            {"type": "text", "text": input_text, "text_elements": []},
+            {"type": "skill", "name": support_skill.name, "path": support_skill.path}
+        ],
+        "model": model,
+        "effort": "low",
+        "cwd": cwd.to_string_lossy(),
+        "approvalPolicy": "never",
+        "permissions": "coding-wife-support-zero",
+        "environments": [],
+        "runtimeWorkspaceRoots": [],
+        "outputSchema": commit_explanation_output_schema(locale),
+    }))
+}
+
+pub(crate) fn support_probe_turn_start_params(
+    thread_id: &str,
+    cwd: &Path,
+    support_skill: &ResolvedBundledSkill,
+) -> Result<Value, TurnContractError> {
+    if !execution_skill_matches(TurnExecutionClass::Support, support_skill) {
+        return Err(TurnContractError::SkillClass);
+    }
+    Ok(json!({
+        "threadId": thread_id,
+        "input": [
+            {"type": "text", "text": "Return {\"ok\":true}. Do not call tools.", "text_elements": []},
+            {"type": "skill", "name": support_skill.name, "path": support_skill.path}
+        ],
+        "cwd": cwd.to_string_lossy(),
+        "approvalPolicy": "never",
+        "permissions": "coding-wife-support-zero",
+        "environments": [],
+        "runtimeWorkspaceRoots": [],
+        "outputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ok"],
+            "properties": {"ok": {"type": "boolean", "const": true}}
+        }
+    }))
+}
+
 pub(crate) fn turn_start_params(
     thread_id: &str,
     client_user_message_id: &str,
@@ -403,7 +662,13 @@ pub(crate) fn turn_start_params(
     effort: ReasoningPreset,
     attachments: &[ResolvedAttachment],
     commit_skill: &ResolvedBundledSkill,
-) -> Value {
+    execution_class: TurnExecutionClass,
+) -> Result<Value, TurnContractError> {
+    if !execution_skill_matches(execution_class, commit_skill)
+        || (execution_class == TurnExecutionClass::Support && !attachments.is_empty())
+    {
+        return Err(TurnContractError::SkillClass);
+    }
     let mut input = Vec::with_capacity(attachments.len() + 2);
     if !text.trim().is_empty() {
         input.push(json!({"type": "text", "text": text, "text_elements": []}));
@@ -421,14 +686,14 @@ pub(crate) fn turn_start_params(
         "name": commit_skill.name,
         "path": commit_skill.path,
     }));
-    json!({
+    Ok(json!({
         "threadId": thread_id,
         "clientUserMessageId": client_user_message_id,
         "input": input,
         "model": CODEX_MODEL,
         "effort": effort.as_wire(),
         "outputSchema": decision_output_schema(),
-    })
+    }))
 }
 
 pub fn turn_interrupt_params(thread_id: &str, turn_id: &str) -> Value {
@@ -544,6 +809,15 @@ mod tests {
         }
     }
 
+    fn explain_skill() -> ResolvedBundledSkill {
+        ResolvedBundledSkill {
+            name: "coding-wife-explain-commit".to_owned(),
+            version: "1.0.0".to_owned(),
+            content_digest: format!("sha256:{}", "b".repeat(64)),
+            path: PathBuf::from("/app-bundle/resources/skills/coding-wife-explain-commit/SKILL.md"),
+        }
+    }
+
     #[test]
     fn classifies_out_of_order_responses_by_id() {
         let second = classify_message(json!({"id": 2, "result": {"ok": true}}), 20)
@@ -589,7 +863,9 @@ mod tests {
             ReasoningPreset::Low,
             &[],
             &skill,
-        );
+            TurnExecutionClass::Main,
+        )
+        .expect("main turn contract");
         let max = turn_start_params(
             "thread",
             "message",
@@ -597,7 +873,9 @@ mod tests {
             ReasoningPreset::Max,
             &[],
             &skill,
-        );
+            TurnExecutionClass::Main,
+        )
+        .expect("main turn contract");
 
         assert_eq!(fast["model"], CODEX_MODEL);
         assert_eq!(fast["effort"], "low");
@@ -613,6 +891,61 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0]["name"], "coding-wife-commit-work");
+    }
+
+    #[test]
+    fn main_and_support_turns_reject_each_others_skill() {
+        assert_eq!(
+            turn_start_params(
+                "thread",
+                "message",
+                "hello",
+                ReasoningPreset::Low,
+                &[],
+                &explain_skill(),
+                TurnExecutionClass::Main,
+            ),
+            Err(TurnContractError::SkillClass)
+        );
+        assert_eq!(
+            support_turn_start_params(
+                "thread",
+                Path::new("/private/support"),
+                "message",
+                "{}",
+                "ja",
+                CODEX_MODEL,
+                &commit_skill(),
+            ),
+            Err(TurnContractError::SkillClass)
+        );
+    }
+
+    #[test]
+    fn support_turn_injects_exactly_one_explain_skill_and_no_commit_skill() {
+        let params = support_turn_start_params(
+            "thread",
+            Path::new("/private/support"),
+            "message",
+            "{}",
+            "ja",
+            CODEX_MODEL,
+            &explain_skill(),
+        )
+        .expect("support turn contract");
+        let input = params["input"].as_array().expect("support input");
+        let skills = input
+            .iter()
+            .filter(|item| item["type"] == "skill")
+            .collect::<Vec<_>>();
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0]["name"], EXPLAIN_COMMIT_SKILL_NAME);
+        assert!(input.iter().all(|item| item["name"] != COMMIT_SKILL_NAME));
+        assert_eq!(params["approvalPolicy"], "never");
+        assert_eq!(params["permissions"], "coding-wife-support-zero");
+        assert_eq!(params["environments"], json!([]));
+        assert_eq!(params["runtimeWorkspaceRoots"], json!([]));
     }
 
     #[test]
@@ -633,7 +966,9 @@ mod tests {
             ReasoningPreset::Low,
             &attachments,
             &commit_skill(),
-        );
+            TurnExecutionClass::Main,
+        )
+        .expect("main turn contract");
 
         assert_eq!(
             params["input"],
@@ -696,6 +1031,74 @@ mod tests {
             parse_thread_policy_response(&ephemeral),
             Err(ThreadPolicyError::Ephemeral)
         );
+    }
+
+    #[test]
+    fn support_thread_response_requires_every_isolation_claim() {
+        let cwd = std::fs::canonicalize(env!("CARGO_MANIFEST_DIR")).expect("fixture cwd");
+        let cwd_text = cwd.to_string_lossy().to_string();
+        let response = json!({
+            "thread": {
+                "id": "support-thread",
+                "cwd": cwd_text,
+                "path": null,
+                "ephemeral": true,
+                "modelProvider": "openai"
+            },
+            "model": CODEX_MODEL,
+            "modelProvider": "openai",
+            "cwd": cwd_text,
+            "runtimeWorkspaceRoots": [],
+            "instructionSources": [],
+            "approvalPolicy": "never",
+            "sandbox": {"type": "readOnly", "networkAccess": false},
+            "activePermissionProfile": {
+                "id": "coding-wife-support-zero",
+                "extends": null
+            }
+        });
+        assert_eq!(
+            parse_support_thread_policy_response(&response, &cwd, CODEX_MODEL, Some("openai")),
+            Ok(SupportThreadPolicyResponse {
+                thread_id: "support-thread".to_owned()
+            })
+        );
+
+        for pointer in [
+            "/model",
+            "/modelProvider",
+            "/approvalPolicy",
+            "/activePermissionProfile/id",
+            "/activePermissionProfile/extends",
+            "/sandbox/type",
+            "/sandbox/networkAccess",
+            "/runtimeWorkspaceRoots",
+            "/instructionSources",
+            "/cwd",
+            "/thread/cwd",
+            "/thread/path",
+            "/thread/ephemeral",
+            "/thread/modelProvider",
+            "/thread/id",
+        ] {
+            let mut mutated = response.clone();
+            *mutated
+                .pointer_mut(pointer)
+                .expect("support response field") = match pointer {
+                "/activePermissionProfile/extends" | "/thread/path" => json!("unexpected"),
+                "/sandbox/networkAccess" => json!(true),
+                "/thread/ephemeral" => json!(false),
+                "/runtimeWorkspaceRoots" | "/instructionSources" => json!(["unexpected"]),
+                "/cwd" | "/thread/cwd" => json!("relative/path"),
+                "/thread/id" => json!(""),
+                _ => json!("unexpected"),
+            };
+            assert!(
+                parse_support_thread_policy_response(&mutated, &cwd, CODEX_MODEL, Some("openai"))
+                    .is_err(),
+                "{pointer}"
+            );
+        }
     }
 
     #[test]

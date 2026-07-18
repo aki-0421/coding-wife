@@ -15,6 +15,7 @@ use tokio::sync::{mpsc, Mutex};
 use super::binary::BinaryInfo;
 use super::redaction::redact_text;
 use super::rpc::{RpcConnection, RuntimeSignal};
+use super::types::TurnExecutionClass;
 
 const STDERR_RING_BYTES: usize = 64 * 1024;
 const GRACEFUL_STDIN_WAIT: Duration = Duration::from_secs(2);
@@ -182,6 +183,7 @@ pub enum ProcessError {
 
 pub struct ProcessRuntime {
     pub connection: RpcConnection,
+    execution_class: TurnExecutionClass,
     child: Arc<Mutex<Child>>,
     stderr_ring: Arc<Mutex<VecDeque<String>>>,
     expected_shutdown: Arc<AtomicBool>,
@@ -227,18 +229,64 @@ pub async fn spawn_process(
     generation: u64,
     signals: mpsc::Sender<RuntimeSignal>,
 ) -> Result<ProcessRuntime, ProcessError> {
+    spawn_process_with_environment(
+        binary,
+        workspace_root,
+        workspace_root,
+        generation,
+        signals,
+        TurnExecutionClass::Main,
+        false,
+        allowed_environment(),
+    )
+    .await
+}
+
+pub(crate) async fn spawn_support_process(
+    binary: &BinaryInfo,
+    workspace_root: &Path,
+    redaction_root: &Path,
+    generation: u64,
+    signals: mpsc::Sender<RuntimeSignal>,
+    environment: Vec<(OsString, OsString)>,
+) -> Result<ProcessRuntime, ProcessError> {
+    spawn_process_with_environment(
+        binary,
+        workspace_root,
+        redaction_root,
+        generation,
+        signals,
+        TurnExecutionClass::Support,
+        true,
+        environment,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn spawn_process_with_environment(
+    binary: &BinaryInfo,
+    workspace_root: &Path,
+    redaction_root: &Path,
+    generation: u64,
+    signals: mpsc::Sender<RuntimeSignal>,
+    execution_class: TurnExecutionClass,
+    strict_config: bool,
+    environment: Vec<(OsString, OsString)>,
+) -> Result<ProcessRuntime, ProcessError> {
     binary
         .revalidate()
         .await
         .map_err(|_| ProcessError::IdentityChanged)?;
     let mut command = Command::new(&binary.canonical_path);
+    command.arg("app-server").arg("--listen").arg("stdio://");
+    if strict_config {
+        command.arg("--strict-config");
+    }
     command
-        .arg("app-server")
-        .arg("--listen")
-        .arg("stdio://")
         .current_dir(workspace_root)
         .env_clear()
-        .envs(allowed_environment())
+        .envs(environment)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -259,11 +307,12 @@ pub async fn spawn_process(
     tokio::spawn(read_stderr(
         stderr,
         stderr_ring.clone(),
-        workspace_root.to_path_buf(),
+        redaction_root.to_path_buf(),
     ));
 
     Ok(ProcessRuntime {
         connection,
+        execution_class,
         child: Arc::new(Mutex::new(child)),
         stderr_ring,
         expected_shutdown: Arc::new(AtomicBool::new(false)),
@@ -298,6 +347,10 @@ async fn read_stderr(
 }
 
 impl ProcessRuntime {
+    pub fn execution_class(&self) -> TurnExecutionClass {
+        self.execution_class
+    }
+
     pub async fn shutdown(&self) {
         self.expected_shutdown.store(true, Ordering::Release);
         self.connection.close();

@@ -9,6 +9,7 @@ use thiserror::Error;
 use super::types::MainSkillInjectionAudit;
 
 pub const COMMIT_SKILL_NAME: &str = "coding-wife-commit-work";
+pub const EXPLAIN_COMMIT_SKILL_NAME: &str = "coding-wife-explain-commit";
 const EXPECTED_MANIFEST_SHA256: &str =
     "23c21f06951ce9086d8522034ca5a2067b2e22e9b699b85f25621a1b122b364e";
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024;
@@ -84,7 +85,7 @@ pub fn resolve_bundled_skill(
     resource_directory: &Path,
     expected_name: &str,
 ) -> Result<ResolvedBundledSkill, BundledSkillError> {
-    if expected_name != COMMIT_SKILL_NAME {
+    if !matches!(expected_name, COMMIT_SKILL_NAME | EXPLAIN_COMMIT_SKILL_NAME) {
         return Err(BundledSkillError::Invalid);
     }
     let resource_root =
@@ -390,5 +391,22 @@ mod tests {
         assert!(audit.get("contentDigest").is_some());
         assert!(!audit.to_string().contains("SKILL.md"));
         assert!(!audit.to_string().contains("resources"));
+    }
+
+    #[test]
+    fn resolves_exactly_the_two_execution_class_skills() {
+        let resource_directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let main = resolve_bundled_skill(&resource_directory, COMMIT_SKILL_NAME)
+            .expect("resolve main skill");
+        let support = resolve_bundled_skill(&resource_directory, EXPLAIN_COMMIT_SKILL_NAME)
+            .expect("resolve support skill");
+
+        assert_eq!(main.name, COMMIT_SKILL_NAME);
+        assert_eq!(support.name, EXPLAIN_COMMIT_SKILL_NAME);
+        assert_ne!(main.path, support.path);
+        assert!(matches!(
+            resolve_bundled_skill(&resource_directory, "unknown-skill"),
+            Err(BundledSkillError::Invalid)
+        ));
     }
 }
