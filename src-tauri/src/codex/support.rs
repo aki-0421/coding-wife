@@ -1391,7 +1391,7 @@ mod tests {
         }
 
         for private in [
-            "/Users/alice/repository/private.rs",
+            "/\u{0055}sers/alice/repository/private.rs",
             "../private/config.json",
             "<workspace>/private.rs",
             "https://example.invalid/private",

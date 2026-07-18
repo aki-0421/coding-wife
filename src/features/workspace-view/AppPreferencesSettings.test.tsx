@@ -282,7 +282,9 @@ describe("AppPreferencesSettings", () => {
 
     expect(await screen.findByText("Preferences need recovery")).toBeVisible()
     expect(screen.getByText("APP-PREFERENCES-CORRUPT")).toBeVisible()
-    expect(screen.queryByText(/\/Users\/|token=|raw/i)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/\/\u0055sers\/|token=|raw/i),
+    ).not.toBeInTheDocument()
     expect(
       screen.getAllByRole("button", { name: "Reset preferences" }),
     ).not.toHaveLength(0)

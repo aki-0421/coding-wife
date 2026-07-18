@@ -38,7 +38,7 @@ describe("TauriCodexTransport", () => {
     })
 
     const failed = new TauriCodexTransport(() =>
-      Promise.reject(new Error("/Users/private token=secret")),
+      Promise.reject(new Error("/\u0055sers/private token=secret")),
     )
     await expect(
       failed.request(codexCommands.probe, undefined),

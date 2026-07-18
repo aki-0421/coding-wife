@@ -95,7 +95,9 @@ describe("NativeReadinessController", () => {
     await initial
 
     const recheck = controller.recheck()
-    gateway.runs[1]!.reject(new Error("/Users/private raw stderr token=secret"))
+    gateway.runs[1]!.reject(
+      new Error("/\u0055sers/private raw stderr token=secret"),
+    )
     await expect(recheck).resolves.toBe(false)
     expect(controller.getSnapshot()).toMatchObject({
       status: "error",

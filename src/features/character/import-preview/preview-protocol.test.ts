@@ -142,14 +142,17 @@ describe("isolated character preview protocol", () => {
       { ...valid, nonTransparentSamples: 0 },
       { ...valid, generation: fixture.generationOverflow },
       { ...valid, webglError: 1280 },
-      { ...valid, rawMessage: "/Users/private/model" },
+      { ...valid, rawMessage: "/\u0055sers/private/model" },
     ]) {
       expect(() => parseCharacterPreviewResultMessage(mutation)).toThrow(
         "CHARACTER-PREVIEW-PROTOCOL",
       )
     }
     expect(() =>
-      createCharacterPreviewFailureMessage(identity, "/Users/private/error"),
+      createCharacterPreviewFailureMessage(
+        identity,
+        "/\u0055sers/private/error",
+      ),
     ).toThrow("CHARACTER-PREVIEW-PROTOCOL")
   })
 

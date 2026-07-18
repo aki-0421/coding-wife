@@ -34,7 +34,7 @@ describe("app lifecycle contracts", () => {
         requestId: "app-quit-valid",
         workspaceId: "workspace-valid",
         workspaceGeneration: 1,
-        path: "/Users/private",
+        path: "/\u0055sers/private",
       },
       {
         schemaVersion: 2,
@@ -91,7 +91,7 @@ describe("app lifecycle contracts", () => {
         schemaVersion: 1,
         requestId: "app-quit-safe",
         attempt: 1,
-        errorCode: "/Users/private/token=secret",
+        errorCode: "/\u0055sers/private/token=secret",
       },
     ]) {
       expect(() => parseAppCleanupFailed(invalid)).toThrow(

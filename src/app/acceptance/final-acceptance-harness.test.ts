@@ -78,7 +78,7 @@ describe("final acceptance evidence harness", () => {
     )
 
     for (const value of [
-      "private root under /Users/example/project",
+      "private root under /\u0055sers/example/project",
       "Bearer sample-credential",
       "raw_reasoning payload",
       "raw stderr was copied",

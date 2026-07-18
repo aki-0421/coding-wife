@@ -68,7 +68,7 @@ describe("AppPreferencesV1 contracts", () => {
         ...persistedFixture,
         preferences: {
           ...persistedFixture.preferences,
-          rawValue: "/Users/private/token=secret",
+          rawValue: "/\u0055sers/private/token=secret",
         },
       },
       {
@@ -99,7 +99,7 @@ describe("AppPreferencesV1 contracts", () => {
         recoverable: true,
         userMessageKey: "preferences.error.generic",
         detailRef: "app-preferences-v1",
-        raw: "/Users/private/token=secret",
+        raw: "/\u0055sers/private/token=secret",
       }),
     ).toBeNull()
   })

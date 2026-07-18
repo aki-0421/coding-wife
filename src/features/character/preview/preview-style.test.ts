@@ -59,7 +59,9 @@ describe("Live2D preview typography", () => {
     expect(previewCss.match(/font-size:\s*var\(--text-label\);/g)).toHaveLength(
       7,
     )
-    const appIconRules = previewCss.match(/\.preview-app-icon\s*{([^}]*)}/s)?.[1]
+    const appIconRules = previewCss.match(
+      /\.preview-app-icon\s*{([^}]*)}/s,
+    )?.[1]
     expect(appIconRules).not.toContain("font-size")
   })
 

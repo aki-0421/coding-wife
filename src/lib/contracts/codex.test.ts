@@ -91,7 +91,7 @@ describe("Codex runtime contract", () => {
         items: [
           {
             ...attachmentFixture.registration.items[0],
-            relativePath: "/Users/private/demo.png",
+            relativePath: "/\u0055sers/private/demo.png",
           },
         ],
       }),
@@ -122,7 +122,7 @@ describe("Codex runtime contract", () => {
         ...completed,
         payload: {
           itemHandle: "item_handle_fixture",
-          text: "Read /Users/private/project/secret.txt",
+          text: "Read /\u0055sers/private/project/secret.txt",
         },
       }),
     ).toThrow(CodexContractError)

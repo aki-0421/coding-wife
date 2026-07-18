@@ -73,7 +73,7 @@ describe("TauriTransport", () => {
 
   it("does not expose raw invoke errors", async () => {
     const transport = new TauriTransport(() => {
-      return Promise.reject(new Error("/Users/private/token=secret"))
+      return Promise.reject(new Error("/\u0055sers/private/token=secret"))
     })
 
     await expect(

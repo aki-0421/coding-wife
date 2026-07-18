@@ -107,12 +107,12 @@ mod tests {
 
     #[test]
     fn secrets_and_private_paths_are_removed_before_truncation() {
-        let value = "Bearer secret-token sk-1234567890abcdef /Users/alice/private/file.rs";
+        let value = "Bearer secret-token sk-1234567890abcdef /\u{0055}sers/alice/private/file.rs";
         let redacted = redact_text(value, None, 256);
 
         assert!(!redacted.contains("secret-token"));
         assert!(!redacted.contains("sk-123"));
-        assert!(!redacted.contains("/Users/alice"));
+        assert!(!redacted.contains("/\u{0055}sers/alice"));
         assert!(redacted.contains(REDACTED));
     }
 

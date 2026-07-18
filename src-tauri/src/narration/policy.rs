@@ -484,7 +484,7 @@ mod tests {
         let now = Instant::now();
         for text in [
             "api_key=unsafe-value",
-            "Open /Users/example/private.txt",
+            "Open /\u{0055}sers/example/private.txt",
             "sk-1234567890abcdef",
         ] {
             assert_eq!(

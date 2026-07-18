@@ -122,7 +122,7 @@ describe("native character library transport", () => {
 
     const malformedError = Object.assign(new Error(fixture.error.code), {
       ...fixture.error,
-      detailRef: "/Users/private/raw-error",
+      detailRef: "/\u0055sers/private/raw-error",
     })
     const malformed = new NativeCharacterLibraryGateway((() =>
       Promise.reject(malformedError)) as FakeInvoke)

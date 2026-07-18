@@ -34,7 +34,7 @@ describe("native readiness contract", () => {
   })
 
   it("rejects unknown fields, missing checks, and mixed timestamps", () => {
-    const unknown = { ...snapshot(), privatePath: "/Users/private" }
+    const unknown = { ...snapshot(), privatePath: "/\u0055sers/private" }
     expect(() => parseNativeReadinessSnapshot(unknown)).toThrow(
       NativeReadinessContractError,
     )
@@ -89,7 +89,7 @@ describe("native readiness contract", () => {
     }
     expect(parseSanitizedDiagnosticsSummary(base, snapshotId)).toEqual(base)
     for (const unsafe of [
-      "/Users/private/repository",
+      "/\u0055sers/private/repository",
       "token=secret",
       "raw stderr",
     ]) {

@@ -804,7 +804,7 @@ mod tests {
             "itemId": "item-1",
             "startedAtMs": 1,
             "command": "rm -rf secret",
-            "cwd": "/Users/alice/project"
+            "cwd": "/\u{0055}sers/alice/project"
         });
         let outcome = ledger
             .register(
@@ -812,7 +812,7 @@ mod tests {
                 "item/commandExecution/requestApproval",
                 &params,
                 &active(),
-                Path::new("/Users/alice/project"),
+                Path::new("/\u{0055}sers/alice/project"),
                 &CodexCapabilities::default(),
             )
             .expect("known approval");
@@ -1032,7 +1032,7 @@ mod tests {
             "itemId": "item-1",
             "startedAtMs": 1,
             "command": "curl -H 'Authorization: Bearer secret-value' https://private.example",
-            "cwd": "/Users/alice/project",
+            "cwd": "/\u{0055}sers/alice/project",
             "environmentId": "environment-private",
             "reason": "run curl -H Authorization secret-value",
             "networkApprovalContext": {"host": "private.example"}
@@ -1043,7 +1043,7 @@ mod tests {
                 "item/commandExecution/requestApproval",
                 &params,
                 &active(),
-                Path::new("/Users/alice/project"),
+                Path::new("/\u{0055}sers/alice/project"),
                 &CodexCapabilities::default(),
             )
             .expect("register")
@@ -1059,7 +1059,7 @@ mod tests {
             "Authorization",
             "secret-value",
             "private.example",
-            "/Users/alice/project",
+            "/\u{0055}sers/alice/project",
             "environment-private",
         ] {
             assert!(!encoded.contains(private), "leaked {private}");

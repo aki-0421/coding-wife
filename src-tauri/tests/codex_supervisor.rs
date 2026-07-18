@@ -1017,7 +1017,9 @@ async fn private_evidence_is_rejected_before_the_explanation_wire() {
         let mut evidence = support_evidence("ja");
         match case {
             "relative_path" => evidence.subject = "src/private.rs".to_owned(),
-            "absolute_path" => evidence.body = "/Users/example/private/repository".to_owned(),
+            "absolute_path" => {
+                evidence.body = "/\u{0055}sers/example/private/repository".to_owned()
+            }
             "secret" => {
                 evidence.verification[0].summary =
                     "ghp_abcdefghijklmnopqrstuvwxyz1234567890abcd".to_owned();

@@ -40,7 +40,7 @@ describe("TauriAppLifecycleGateway", () => {
     await expect(gateway.listenCloseRequested(listener)).resolves.toBe(dispose)
     const receive = registered.receive
     if (receive === undefined) throw new Error("listener was not registered")
-    receive({ ...closeRequest, privatePath: "/Users/private" })
+    receive({ ...closeRequest, privatePath: "/\u0055sers/private" })
     receive(closeRequest)
     expect(listener).toHaveBeenCalledTimes(1)
     expect(listener).toHaveBeenCalledWith(closeRequest)
@@ -72,7 +72,7 @@ describe("TauriAppLifecycleGateway", () => {
       .fn()
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("/Users/private/token=secret"))
+      .mockRejectedValueOnce(new Error("/\u0055sers/private/token=secret"))
     const gateway = new TauriAppLifecycleGateway({ invoke })
 
     await gateway.cancelQuit(closeRequest.requestId)

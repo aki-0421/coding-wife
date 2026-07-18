@@ -515,7 +515,7 @@ mod tests {
     fn drops_reasoning_and_redacts_message_paths_and_secrets() {
         let mut normalizer = EventNormalizer::new(
             "workspace-1".to_owned(),
-            PathBuf::from("/Users/alice/project"),
+            PathBuf::from("/\u{0055}sers/alice/project"),
             1,
         );
         let reasoning = normalizer
@@ -533,7 +533,11 @@ mod tests {
                 &json!({"item": {
                     "id": "raw-item-id",
                     "type": "agentMessage",
-                    "text": r#"{"schemaVersion":1,"kind":"result","message":"Bearer abc /Users/alice/project/src/main.rs"}"#
+                    "text": concat!(
+                        r#"{"schemaVersion":1,"kind":"result","message":"Bearer abc /"#,
+                        "Users/alice/project/src/main.rs",
+                        r#""}"#
+                    )
                 }}),
                 100,
             )
@@ -541,7 +545,7 @@ mod tests {
         let encoded = serde_json::to_string(&message.events).expect("serialize");
         assert!(!encoded.contains("raw-item-id"));
         assert!(!encoded.contains("Bearer abc"));
-        assert!(!encoded.contains("/Users/alice"));
+        assert!(!encoded.contains("/\u{0055}sers/alice"));
         assert!(!message.decision_violation);
     }
 

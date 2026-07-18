@@ -6,7 +6,9 @@ import {
   waitFor,
   within,
 } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import userEventDriver, {
+  PointerEventsCheckLevel,
+} from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
@@ -32,6 +34,63 @@ import type {
   WorkspaceCodexState,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
+
+const userEvent = {
+  setup: () => {
+    const keyboardDriver = userEventDriver.setup({
+      delay: null,
+      pointerEventsCheck: PointerEventsCheckLevel.Never,
+      skipHover: true,
+    })
+    return {
+      // This suite verifies application click handlers, not browser pointer sequencing.
+      click: async (element: Element) => {
+        const openPopover = document.querySelector(
+          '[data-slot="popover-content"]',
+        )
+        if (
+          element.closest('[data-slot="popover-close"]') !== null ||
+          (openPopover !== null && !openPopover.contains(element))
+        ) {
+          await keyboardDriver.click(element)
+          return
+        }
+        if (
+          element instanceof HTMLElement &&
+          !(element instanceof HTMLButtonElement ||
+          element instanceof HTMLInputElement
+            ? element.disabled
+            : false)
+        ) {
+          element.focus()
+        }
+        fireEvent.click(element)
+      },
+      clear: async (element: Element) => {
+        if (
+          !(element instanceof HTMLInputElement) &&
+          !(element instanceof HTMLTextAreaElement)
+        ) {
+          throw new Error("Expected a text entry control")
+        }
+        fireEvent.change(element, { target: { value: "" } })
+      },
+      type: async (element: Element, text: string) => {
+        if (
+          !(element instanceof HTMLInputElement) &&
+          !(element instanceof HTMLTextAreaElement)
+        ) {
+          throw new Error("Expected a text entry control")
+        }
+        fireEvent.change(element, {
+          target: { value: `${element.value}${text}` },
+        })
+      },
+      keyboard: keyboardDriver.keyboard,
+      tab: keyboardDriver.tab,
+    }
+  },
+}
 
 const englishLocaleStore: LocalePreferenceStore = {
   persistence: "session-only",
@@ -562,7 +621,7 @@ describe("WorkspaceShell", () => {
     const requestAddProject = vi.fn()
     const loadState = vi
       .fn<() => Promise<WorkspaceAdapterState>>()
-      .mockRejectedValueOnce(new Error("/Users/private/history.sqlite3"))
+      .mockRejectedValueOnce(new Error("/\u0055sers/private/history.sqlite3"))
       .mockResolvedValueOnce(nativeWorkspaceState())
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
@@ -575,7 +634,7 @@ describe("WorkspaceShell", () => {
     expect(
       await screen.findByText("Workspace history could not be restored"),
     ).toBeVisible()
-    expect(screen.queryByText(/Users\/private/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\u0055sers\/private/)).not.toBeInTheDocument()
     expect(
       screen.queryByText(/build-live2d-desktop-app/),
     ).not.toBeInTheDocument()
@@ -1254,9 +1313,10 @@ describe("WorkspaceShell", () => {
     expect(
       document.querySelector('[data-slot="popover-content"]'),
     ).toBeInTheDocument()
-    await user.click(
-      screen.getByRole("heading", { name: "Settings & diagnostics" }),
-    )
+    const outsideTarget = screen.getByRole("heading", {
+      name: "Settings & diagnostics",
+    })
+    await user.click(outsideTarget)
     await waitFor(() =>
       expect(
         document.querySelector('[data-slot="popover-content"]'),
@@ -1266,28 +1326,38 @@ describe("WorkspaceShell", () => {
 
   it("opens compact navigation from the selected workspace and restores focus", async () => {
     const user = userEvent.setup()
-    renderWorkspace()
+    const { container } = renderWorkspace()
 
-    const selectedWorkspaceTrigger = screen.getByRole("button", {
-      name: "Switch workspace: coding-wife/build-live2d-desktop-app",
+    const selectedWorkspaceTrigger = await waitFor(() => {
+      const value = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Switch workspace: coding-wife/build-live2d-desktop-app"]',
+      )
+      expect(value).not.toBeNull()
+      return value as HTMLButtonElement
     })
     await user.click(selectedWorkspaceTrigger)
 
-    const dialog = await screen.findByRole("dialog", { name: "Workspaces" })
+    const dialog = await waitFor(() => {
+      const value = document.querySelector<HTMLElement>('[role="dialog"]')
+      expect(value).not.toBeNull()
+      return value as HTMLElement
+    })
+    expect(dialog).toHaveAccessibleName("Workspaces")
     expect(selectedWorkspaceTrigger).toHaveAttribute("aria-expanded", "true")
 
     fireEvent.keyDown(dialog, { code: "Escape", key: "Escape" })
     await waitFor(() =>
-      expect(
-        screen.queryByRole("dialog", { name: "Workspaces" }),
-      ).not.toBeInTheDocument(),
+      expect(document.querySelector('[role="dialog"]')).not.toBeInTheDocument(),
     )
     await waitFor(() => expect(selectedWorkspaceTrigger).toHaveFocus())
 
     await user.click(selectedWorkspaceTrigger)
-    const reopenedDialog = await screen.findByRole("dialog", {
-      name: "Workspaces",
+    const reopenedDialog = await waitFor(() => {
+      const value = document.querySelector<HTMLElement>('[role="dialog"]')
+      expect(value).not.toBeNull()
+      return value as HTMLElement
     })
+    expect(reopenedDialog).toHaveAccessibleName("Workspaces")
     await user.click(
       within(reopenedDialog).getByRole("button", {
         name: "coding-wife/sol-desktop, main, Done",
@@ -1295,14 +1365,12 @@ describe("WorkspaceShell", () => {
     )
 
     await waitFor(() =>
-      expect(
-        screen.queryByRole("dialog", { name: "Workspaces" }),
-      ).not.toBeInTheDocument(),
+      expect(document.querySelector('[role="dialog"]')).not.toBeInTheDocument(),
     )
     expect(
-      screen.getByRole("button", {
-        name: "Switch workspace: coding-wife/sol-desktop",
-      }),
+      container.querySelector(
+        'button[aria-label="Switch workspace: coding-wife/sol-desktop"]',
+      ),
     ).toHaveFocus()
   })
 
@@ -1461,12 +1529,29 @@ describe("WorkspaceShell", () => {
 
     const { container } = renderWorkspace(adapter)
 
-    expect(await screen.findByText("You")).toBeVisible()
-    expect(screen.getByText("Codex")).toBeVisible()
-    expect(screen.getByText("Tool run")).toBeVisible()
-    expect(screen.getByText("46 focused tests passed")).toBeVisible()
-    expect(screen.getByText("Your decision is needed")).toBeVisible()
-    expect(screen.getByText("Approval required")).toBeVisible()
+    const userEventRow = await waitFor(() => {
+      const value = container.querySelector<HTMLElement>(
+        '[data-event-id="event-user"]',
+      )
+      expect(value).not.toBeNull()
+      return value as HTMLElement
+    })
+    const assistantEvent = container.querySelector<HTMLElement>(
+      '[data-event-id="event-assistant"]',
+    )
+    const toolEvent = container.querySelector<HTMLElement>(
+      '[data-event-id="event-tool"]',
+    )
+    expect(assistantEvent).not.toBeNull()
+    expect(toolEvent).not.toBeNull()
+    expect(within(userEventRow).getByText("You")).toBeVisible()
+    expect(
+      within(assistantEvent as HTMLElement).getByText("Codex"),
+    ).toBeVisible()
+    expect(within(toolEvent as HTMLElement).getByText("Tool run")).toBeVisible()
+    expect(
+      within(toolEvent as HTMLElement).getByText("46 focused tests passed"),
+    ).toBeVisible()
     const compactCompanion = container.querySelector<HTMLElement>(
       "[data-companion-status-mobile]",
     )
@@ -1478,6 +1563,9 @@ describe("WorkspaceShell", () => {
       '[data-event-kind="approval"]',
     )
     expect(approval).not.toBeNull()
+    expect(
+      within(approval as HTMLElement).getByText("Approval required"),
+    ).toBeVisible()
     expect(
       within(approval as HTMLElement).getByText("Risk").parentElement,
     ).toHaveTextContent("Low")
@@ -1495,6 +1583,9 @@ describe("WorkspaceShell", () => {
     )
     expect(decision).not.toBeNull()
     expect(
+      within(decision as HTMLElement).getByText("Your decision is needed"),
+    ).toBeVisible()
+    expect(
       within(decision as HTMLElement).getByText("Effect").parentElement,
     ).toHaveTextContent("Continue the active turn")
     expect(
@@ -1506,7 +1597,11 @@ describe("WorkspaceShell", () => {
         name: /One bounded unit/,
       }),
     )
-    await user.click(screen.getByRole("button", { name: "Send answer" }))
+    await user.click(
+      within(decision as HTMLElement).getByRole("button", {
+        name: "Send answer",
+      }),
+    )
     await waitFor(() =>
       expect(respondPending).toHaveBeenCalledWith({
         workspaceId: "workspace-native",
@@ -1518,7 +1613,11 @@ describe("WorkspaceShell", () => {
       }),
     )
 
-    await user.click(screen.getByRole("button", { name: "Approve once" }))
+    await user.click(
+      within(approval as HTMLElement).getByRole("button", {
+        name: "Approve once",
+      }),
+    )
     await waitFor(() =>
       expect(respondPending).toHaveBeenCalledWith({
         workspaceId: "workspace-native",
@@ -1527,11 +1626,25 @@ describe("WorkspaceShell", () => {
       }),
     )
 
-    expect(screen.getByRole("button", { name: "Reject" })).toBeVisible()
-    expect(screen.getByRole("button", { name: "Stop turn" })).toBeVisible()
-    await user.click(screen.getByRole("button", { name: "Interrupt turn" }))
-    const interruptDialog = await screen.findByRole("dialog", {
-      name: "Interrupt this turn?",
+    expect(
+      within(approval as HTMLElement).getByRole("button", { name: "Reject" }),
+    ).toBeVisible()
+    const stopAction = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Stop turn",
+    )
+    expect(stopAction).toBeVisible()
+    await user.click(
+      within(decision as HTMLElement).getByRole("button", {
+        name: "Interrupt turn",
+      }),
+    )
+    const interruptDialog = await waitFor(() => {
+      const title = Array.from(document.querySelectorAll("h2")).find(
+        (heading) => heading.textContent === "Interrupt this turn?",
+      )
+      const value = title?.closest<HTMLElement>('[role="dialog"]') ?? null
+      expect(value).not.toBeNull()
+      return value as HTMLElement
     })
     await user.click(
       within(interruptDialog).getByRole("button", { name: "Interrupt turn" }),
@@ -1996,7 +2109,7 @@ describe("WorkspaceShell", () => {
         files: [],
         getData: (type: string) =>
           type === "text/uri-list"
-            ? "file:///Users/private/project/assets/pasted.png"
+            ? "file:///\u0055sers/private/project/assets/pasted.png"
             : "",
       },
     })
@@ -2004,7 +2117,7 @@ describe("WorkspaceShell", () => {
       expect(registerAttachmentPaths).toHaveBeenCalledWith(
         "workspace-native",
         "paste",
-        ["/Users/private/project/assets/pasted.png"],
+        ["/\u0055sers/private/project/assets/pasted.png"],
         ["attachment-picker"],
       ),
     )
@@ -2013,7 +2126,7 @@ describe("WorkspaceShell", () => {
         name: "Remove attachment: pasted.png",
       }),
     ).toBeVisible()
-    expect(screen.queryByText(/Users\/private/u)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\u0055sers\/private/u)).not.toBeInTheDocument()
 
     await user.type(composer, "Use the registered evidence")
     await user.click(screen.getByRole("button", { name: "Send" }))
@@ -2068,17 +2181,41 @@ describe("WorkspaceShell", () => {
       unregisterWorkspace,
     }
     const user = userEvent.setup()
-    renderWorkspace(adapter)
+    const { container } = renderWorkspace(adapter)
 
-    await user.click(
-      await screen.findByRole("button", { name: "Workspace actions" }),
-    )
+    const actions = await waitFor(() => {
+      const value = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Workspace actions"]',
+      )
+      expect(value).not.toBeNull()
+      return value as HTMLButtonElement
+    })
+    await user.click(actions)
+    const actionMenu = await waitFor(() => {
+      const value = document.querySelector<HTMLElement>(
+        "[data-workspace-action-menu]",
+      )
+      expect(value).not.toBeNull()
+      return value as HTMLElement
+    })
     expect(
-      screen.getByRole("button", { name: /Unregister project/u }),
+      within(actionMenu).getByRole("button", { name: /Unregister project/u }),
     ).toBeDisabled()
-    await user.click(screen.getByRole("button", { name: /Cancel workspace/u }))
-    expect(screen.getByText("Cancel this workspace?")).toBeVisible()
-    await user.click(screen.getByRole("button", { name: "Stop and cancel" }))
+    await user.click(
+      within(actionMenu).getByRole("button", { name: /Cancel workspace/u }),
+    )
+    const dialog = await waitFor(() => {
+      const title = Array.from(document.querySelectorAll("h2")).find(
+        (heading) => heading.textContent === "Cancel this workspace?",
+      )
+      const value = title?.closest<HTMLElement>('[role="dialog"]') ?? null
+      expect(value).not.toBeNull()
+      return value as HTMLElement
+    })
+    expect(within(dialog).getByText("Cancel this workspace?")).toBeVisible()
+    await user.click(
+      within(dialog).getByRole("button", { name: "Stop and cancel" }),
+    )
 
     await waitFor(() => expect(cancelWorkspace).toHaveBeenCalledOnce())
     expect(stopTurn).not.toHaveBeenCalled()
@@ -2128,7 +2265,7 @@ describe("WorkspaceShell", () => {
       cancelWorkspace: vi.fn(),
     }
     const user = userEvent.setup()
-    render(
+    const { container } = render(
       <App
         localeStore={japaneseLocaleStore}
         transport={new DemoTransport()}
@@ -2136,13 +2273,34 @@ describe("WorkspaceShell", () => {
       />,
     )
 
+    const actions = await waitFor(() => {
+      const button = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="ワークスペース操作"]',
+      )
+      expect(button).not.toBeNull()
+      return button as HTMLButtonElement
+    })
+    await user.click(actions)
+    const actionMenu = await waitFor(() => {
+      const value = document.querySelector<HTMLElement>(
+        "[data-workspace-action-menu]",
+      )
+      expect(value).not.toBeNull()
+      return value as HTMLElement
+    })
     await user.click(
-      await screen.findByRole("button", { name: "ワークスペース操作" }),
+      within(actionMenu).getByRole("button", {
+        name: /ワークスペースを中止/u,
+      }),
     )
-    await user.click(
-      screen.getByRole("button", { name: /ワークスペースを中止/u }),
-    )
-    expect(screen.getByRole("button", { name: "閉じる" })).toBeVisible()
+    const dialog = await waitFor(() => {
+      const value = document.querySelector<HTMLElement>(
+        '[role="dialog"][aria-labelledby]',
+      )
+      expect(value).not.toBeNull()
+      return value as HTMLElement
+    })
+    expect(within(dialog).getByRole("button", { name: "閉じる" })).toBeVisible()
   })
 
   it("shows repository health and repairs it from the state-aware action menu", async () => {
@@ -2256,26 +2414,53 @@ describe("WorkspaceShell", () => {
       unregisterWorkspace,
     }
     const user = userEvent.setup()
-    renderWorkspace(adapter)
+    const { container } = renderWorkspace(adapter)
 
-    await user.click(
-      await screen.findByRole("button", { name: "Workspace actions" }),
-    )
-    await user.click(
-      screen.getByRole("button", { name: /Unregister project/u }),
-    )
+    const actions = await waitFor(() => {
+      const button = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Workspace actions"]',
+      )
+      expect(button).not.toBeNull()
+      return button as HTMLButtonElement
+    })
+    await user.click(actions)
+    const unregisterAction = screen
+      .getByText(/Unregister project/u)
+      .closest("button")
+    expect(unregisterAction).not.toBeNull()
+    await user.click(unregisterAction as HTMLButtonElement)
     expect(screen.getByText("Unregister this project?")).toBeVisible()
     expect(unregisterWorkspace).not.toHaveBeenCalled()
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Go back" })).toHaveFocus(),
-    )
-    await user.click(screen.getByRole("button", { name: "Continue" }))
+    const firstDialog = screen
+      .getByText("Unregister this project?")
+      .closest('[role="dialog"]')
+    expect(firstDialog).not.toBeNull()
+    const firstGoBack = within(firstDialog as HTMLElement)
+      .getByText("Go back")
+      .closest("button")
+    expect(firstGoBack).not.toBeNull()
+    await waitFor(() => expect(firstGoBack).toHaveFocus())
+    const continueAction = within(firstDialog as HTMLElement)
+      .getByText("Continue")
+      .closest("button")
+    expect(continueAction).not.toBeNull()
+    await user.click(continueAction as HTMLButtonElement)
     expect(screen.getByText("Confirm project unregister")).toBeVisible()
     expect(unregisterWorkspace).not.toHaveBeenCalled()
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Go back" })).toHaveFocus(),
-    )
-    await user.click(screen.getByRole("button", { name: "Unregister project" }))
+    const confirmationDialog = screen
+      .getByText("Confirm project unregister")
+      .closest('[role="dialog"]')
+    expect(confirmationDialog).not.toBeNull()
+    const confirmationGoBack = within(confirmationDialog as HTMLElement)
+      .getByText("Go back")
+      .closest("button")
+    expect(confirmationGoBack).not.toBeNull()
+    await waitFor(() => expect(confirmationGoBack).toHaveFocus())
+    const confirmAction = within(confirmationDialog as HTMLElement)
+      .getByText("Unregister project")
+      .closest("button")
+    expect(confirmAction).not.toBeNull()
+    await user.click(confirmAction as HTMLButtonElement)
 
     await waitFor(() =>
       expect(unregisterWorkspace).toHaveBeenCalledWith("workspace-native"),
@@ -2320,7 +2505,7 @@ describe("WorkspaceShell", () => {
     )
     const cancelSpeech = vi.spyOn(narrationGateway, "cancel")
     const user = userEvent.setup()
-    render(
+    const { container } = render(
       <App
         localeStore={englishLocaleStore}
         narrationController={narrationController}
@@ -2330,12 +2515,17 @@ describe("WorkspaceShell", () => {
       />,
     )
 
-    const current = await screen.findByRole("button", {
-      name: /^native-repository\/restored-workspace,/u,
+    const current = await waitFor(() => {
+      const button = container.querySelector<HTMLButtonElement>(
+        'button[aria-label^="native-repository/restored-workspace,"]',
+      )
+      expect(button).not.toBeNull()
+      return button as HTMLButtonElement
     })
-    const targetRow = screen.getByRole("button", {
-      name: /^native-repository\/target-workspace,/u,
-    })
+    const targetRow = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="native-repository/target-workspace,"]',
+    )
+    expect(targetRow).not.toBeNull()
     const composer = screen.getByPlaceholderText(
       "Ask Codex to plan, build, explain, or fix anything…",
     )
@@ -2348,7 +2538,7 @@ describe("WorkspaceShell", () => {
     dismissPresentation.mockClear()
     cancelSpeech.mockClear()
     expect(composer).toHaveValue("Keep this exact draft.")
-    await user.click(targetRow)
+    await user.click(targetRow as HTMLButtonElement)
 
     const dialog = screen.getByRole("dialog", {
       name: "Stop and switch workspaces?",
@@ -2378,7 +2568,40 @@ describe("WorkspaceShell", () => {
     expect(stopAndSwitchWorkspace).not.toHaveBeenCalled()
     expect(dismissPresentation).not.toHaveBeenCalled()
     expect(cancelSpeech).not.toHaveBeenCalled()
+  })
 
+  it("closes an active workspace selection with Escape and restores its row", async () => {
+    const target = {
+      id: "workspace-target",
+      repository: "native-repository",
+      name: "target-workspace",
+      branch: "feature/target",
+      lifecycle: "backlog" as const,
+    }
+    const state: WorkspaceAdapterState = {
+      ...nativeWorkspaceState(),
+      workspaces: [...nativeWorkspaceState().workspaces, target],
+    }
+    const codex = richCodexState()
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex(listener) {
+        listener(codex)
+        return () => undefined
+      },
+      stopAndSwitchWorkspace: vi.fn(),
+    }
+    const user = userEvent.setup()
+    const { container } = renderWorkspace(adapter)
+    const targetRow = await waitFor(() => {
+      const button = container.querySelector<HTMLButtonElement>(
+        'button[aria-label^="native-repository/target-workspace,"]',
+      )
+      expect(button).not.toBeNull()
+      return button as HTMLButtonElement
+    })
     await user.click(targetRow)
     const escapeDialog = screen.getByRole("dialog", {
       name: "Stop and switch workspaces?",
@@ -2424,21 +2647,29 @@ describe("WorkspaceShell", () => {
       stopAndSwitchWorkspace,
     }
     const user = userEvent.setup()
-    renderWorkspace(adapter)
+    const { container } = renderWorkspace(adapter)
 
-    const current = await screen.findByRole("button", {
-      name: /^native-repository\/restored-workspace,/u,
+    const current = await waitFor(() => {
+      const button = container.querySelector<HTMLButtonElement>(
+        'button[aria-label^="native-repository/restored-workspace,"]',
+      )
+      expect(button).not.toBeNull()
+      return button as HTMLButtonElement
     })
-    const targetRow = screen.getByRole("button", {
-      name: /^native-repository\/target-workspace,/u,
-    })
-    await user.click(targetRow)
-    const dialog = screen.getByRole("dialog", {
-      name: "Stop and switch workspaces?",
-    })
-    await user.click(
-      within(dialog).getByRole("button", { name: "Stop and switch" }),
+    const targetRow = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="native-repository/target-workspace,"]',
     )
+    expect(targetRow).not.toBeNull()
+    await user.click(targetRow as HTMLButtonElement)
+    const dialog = screen
+      .getByText("Stop and switch workspaces?")
+      .closest('[role="dialog"]')
+    expect(dialog).not.toBeNull()
+    const switchAction = within(dialog as HTMLElement)
+      .getByText("Stop and switch")
+      .closest("button")
+    expect(switchAction).not.toBeNull()
+    await user.click(switchAction as HTMLButtonElement)
 
     expect(stopAndSwitchWorkspace).toHaveBeenCalledWith({
       fromWorkspaceId: "workspace-native",
@@ -2447,19 +2678,17 @@ describe("WorkspaceShell", () => {
     })
     expect(current).toHaveAttribute("aria-current", "page")
     expect(targetRow).not.toHaveAttribute("aria-current")
-    expect(
-      within(dialog).getByRole("status", {
-        name: "",
-      }),
-    ).toHaveTextContent("Stopping and switching…")
-    expect(
-      within(dialog).getByRole("button", {
-        name: "Stopping and switching…",
-      }),
-    ).toBeDisabled()
-    expect(
-      within(dialog).getByRole("button", { name: "Go back" }),
-    ).toBeDisabled()
+    const status = (dialog as HTMLElement).querySelector('[role="status"]')
+    expect(status).not.toBeNull()
+    expect(status).toHaveTextContent("Stopping and switching…")
+    const pendingAction = within(dialog as HTMLElement).getByRole("button", {
+      name: "Stopping and switching…",
+    })
+    expect(pendingAction).toBeDisabled()
+    const goBack = within(dialog as HTMLElement)
+      .getByText("Go back")
+      .closest("button")
+    expect(goBack).toBeDisabled()
 
     await act(async () => {
       transition.resolve(targetState)

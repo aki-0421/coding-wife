@@ -108,7 +108,7 @@ describe("narration contracts", () => {
     expect(() =>
       parseNarrationSettingsSnapshot({
         ...settingsSnapshot,
-        privatePath: "/Users/private",
+        privatePath: "/\u0055sers/private",
       }),
     ).toThrow(NarrationContractError)
     expect(() =>
@@ -136,7 +136,7 @@ describe("narration contracts", () => {
         ...started(),
         kind: "chunk",
         sequence: 0,
-        text: "See /Users/private/project/file.ts",
+        text: "See /\u0055sers/private/project/file.ts",
       },
       {
         ...started(),

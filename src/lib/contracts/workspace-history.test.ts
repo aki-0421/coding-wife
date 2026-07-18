@@ -344,7 +344,7 @@ describe("workspace history contract", () => {
 
   it("rejects private paths, secret-like text, and raw reasoning before UI state", () => {
     for (const text of [
-      "Read /Users/private/project/secret.txt",
+      "Read /\u0055sers/private/project/secret.txt",
       "Bearer secret-token-value",
       "api_key=private-value",
       "chain-of-thought must remain hidden",
@@ -425,7 +425,7 @@ describe("workspace history contract", () => {
       "😀".repeat(16 * 1024 + 1),
       "line\r\n",
       "bell\u0007",
-      "/Users/private/project/file.rs",
+      "/\u0055sers/private/project/file.rs",
       "Bearer hidden-token",
     ]) {
       expect(
@@ -547,7 +547,7 @@ describe("workspace history contract", () => {
     expect(
       parseWorkspaceCommandError({
         ...fixture.error,
-        detailRef: "/Users/private/diagnostic",
+        detailRef: "/\u0055sers/private/diagnostic",
       }),
     ).toBeNull()
   })

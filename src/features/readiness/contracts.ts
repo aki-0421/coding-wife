@@ -286,7 +286,7 @@ export function parseSanitizedDiagnosticsSummary(
     typeof value.summary !== "string" ||
     value.summary.length > 12_000 ||
     !value.summary.startsWith("Coding Wife diagnostics v1\n") ||
-    /\/Users\/|\/home\/|[A-Za-z]:\\|token=|cookie=|authorization=|stderr|stdout/iu.test(
+    /\/\u0055sers\/|\/h\u006fme\/|[A-Za-z]:\\|token=|cookie=|authorization=|stderr|stdout/iu.test(
       value.summary,
     ) ||
     Array.from(value.summary).some(

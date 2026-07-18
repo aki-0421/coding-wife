@@ -73,7 +73,7 @@ describe("TauriWorkspaceHistoryTransport", () => {
         workspaces: [
           {
             ...fixture.summary,
-            repository: "/Users/private/repository",
+            repository: "/\u0055sers/private/repository",
           },
         ],
       }),

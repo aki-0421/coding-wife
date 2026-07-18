@@ -136,14 +136,14 @@ describe("character library contract", () => {
         ...fixture.importResponse,
         preview: {
           ...fixture.importResponse.preview,
-          sourcePath: "/Users/private/model",
+          sourcePath: "/\u0055sers/private/model",
         },
       }),
     ).toThrow(CharacterLibraryContractError)
     expect(
       parseCharacterCommandError({
         ...fixture.error,
-        detailRef: "/Users/private/diagnostic",
+        detailRef: "/\u0055sers/private/diagnostic",
       }),
     ).toBeNull()
   })

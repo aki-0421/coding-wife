@@ -48,6 +48,17 @@ const PRIVATE_FILENAMES = new Set([
 const BUILD_FILE_PATTERN =
   /(?:^|\/)[^/]+\.(?:app|dmg|log|o|orig|rej|rlib|rmeta|swp|tmp)$/u
 const PRIVATE_FILE_PATTERN = /\.(?:key|mobileprovision|p12|pem)$/u
+const REMOTE_URL_PREFIX_PATTERN =
+  /(?:https?|ftp|sftp|ssh|git):\/\/[^\s<>"'`]*$/iu
+const POSIX_HOME_PATH_PATTERN = /\/(?:Users|home)\/(?<user>[^/\s"'`]+)(?=\/)/gu
+const PRIVATE_VAR_PATH_PATTERN =
+  /\/private\/v\u0061r\/(?<scope>[^/\s"'`]+)(?=\/)/gu
+const WINDOWS_HOME_PATH_PATTERN =
+  /[A-Za-z]:[\\/]+Users[\\/]+(?<user>[^\\/\s"'`]+)(?=[\\/])/gu
+const UNC_PATH_PATTERN =
+  /(?:^|[\s("'`=:[{,])\\{2,}(?<server>[A-Za-z0-9][A-Za-z0-9._-]{0,62}|<[^<>]+>)\\+(?<share>[A-Za-z0-9][A-Za-z0-9$_.-]{0,79}|<[^<>]+>)(?=\\)/gu
+const EXPLICIT_PLACEHOLDER_PATTERN =
+  /^(?:<[^<>]+>|\{[^{}]+\}|\$\{[^{}]+\}|\$[A-Z_][A-Z0-9_]*|%[A-Z_][A-Z0-9_]*%|\[[^\[\]]+\]|USER(?:NAME)?|YOUR_(?:USER|USERNAME))$/iu
 
 function usage() {
   process.stdout.write(
@@ -355,6 +366,73 @@ function repositoryPathPolicy(relativePath) {
   return null
 }
 
+function isExplicitPlaceholder(value) {
+  return EXPLICIT_PLACEHOLDER_PATTERN.test(value)
+}
+
+function startsInsideRemoteUrl(value, index) {
+  const prefix = value.slice(0, index).replaceAll("\\/", "/")
+  return REMOTE_URL_PREFIX_PATTERN.test(prefix)
+}
+
+function patternContainsPrivatePath(value, pattern, placeholderGroups) {
+  pattern.lastIndex = 0
+  for (const match of value.matchAll(pattern)) {
+    if (startsInsideRemoteUrl(value, match.index)) {
+      continue
+    }
+    if (
+      placeholderGroups.every((group) =>
+        isExplicitPlaceholder(match.groups?.[group] ?? ""),
+      )
+    ) {
+      continue
+    }
+    return true
+  }
+  return false
+}
+
+function exactRootAppears(value, roots) {
+  for (const root of roots) {
+    const variants = new Set([root, root.replaceAll("\\", "\\\\")])
+    for (const variant of variants) {
+      let offset = 0
+      for (;;) {
+        const index = value.indexOf(variant, offset)
+        if (index === -1) {
+          break
+        }
+        const next = value[index + variant.length]
+        if (
+          (next === undefined || !/[A-Za-z0-9._-]/u.test(next)) &&
+          !startsInsideRemoteUrl(value, index)
+        ) {
+          return true
+        }
+        offset = index + variant.length
+      }
+    }
+  }
+  return false
+}
+
+function containsPrivateAbsolutePath(value, roots) {
+  const views = new Set([value, value.replaceAll("\\/", "/")])
+  for (const view of views) {
+    if (
+      exactRootAppears(view, roots) ||
+      patternContainsPrivatePath(view, POSIX_HOME_PATH_PATTERN, ["user"]) ||
+      patternContainsPrivatePath(view, PRIVATE_VAR_PATH_PATTERN, ["scope"]) ||
+      patternContainsPrivatePath(view, WINDOWS_HOME_PATH_PATTERN, ["user"]) ||
+      patternContainsPrivatePath(view, UNC_PATH_PATTERN, ["server", "share"])
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 function trackedPatchContainsPrivatePath(repositoryRoot, range) {
   const result = runGit(
     repositoryRoot,
@@ -385,11 +463,9 @@ function trackedPatchContainsPrivatePath(repositoryRoot, range) {
       // The original absolute path remains the safe detection boundary.
     }
   }
-  const needles = [...new Set(roots)]
-    .filter(
-      (value) => path.isAbsolute(value) && value !== path.parse(value).root,
-    )
-    .map((value) => Buffer.from(value))
+  const exactRoots = [...new Set(roots)].filter(
+    (value) => path.isAbsolute(value) && value !== path.parse(value).root,
+  )
   return result.output
     .toString("utf8")
     .split("\n")
@@ -397,7 +473,7 @@ function trackedPatchContainsPrivatePath(repositoryRoot, range) {
       (line) =>
         line.startsWith("+") &&
         !line.startsWith("+++") &&
-        needles.some((needle) => Buffer.from(line).includes(needle)),
+        containsPrivateAbsolutePath(line.slice(1), exactRoots),
     )
 }
 

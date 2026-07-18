@@ -133,11 +133,11 @@
   "private": [
     {
       "name": "punctuated-users-path",
-      "text": "Updated (/Users/alice/private-project/src/main.ts)."
+      "text": "Updated (/\u0055sers/alice/private-project/src/main.ts)."
     },
     {
       "name": "japanese-punctuated-private-path",
-      "text": "対象：/private/var/db/application/state.json"
+      "text": "対象：/\u0070rivate/var/db/application/state.json"
     },
     {
       "name": "arbitrary-root-path",
@@ -185,7 +185,7 @@
     },
     {
       "name": "inline-code-private-home-path",
-      "text": "Read `/Users/alice/private.ts`."
+      "text": "Read `/\u0055sers/alice/private.ts`."
     },
     {
       "name": "same-line-fenced-code-path",
@@ -257,87 +257,87 @@
     },
     {
       "name": "invalid-https-ipv6-authority",
-      "text": "Read https://[:]/Users/alice/private.ts."
+      "text": "Read https://[:]/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-ipv6-characters",
-      "text": "Read https://[gg::1]/Users/alice/private.ts."
+      "text": "Read https://[gg::1]/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-unclosed-ipv6-bracket",
-      "text": "Read https://[2001:db8::1/Users/alice/private.ts."
+      "text": "Read https://[2001:db8::1/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-port-overflow",
-      "text": "Read https://example.com:65536/Users/alice/private.ts."
+      "text": "Read https://example.com:65536/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-nonnumeric-port",
-      "text": "Read https://example.com:abc/Users/alice/private.ts."
+      "text": "Read https://example.com:abc/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-ipv4-authority",
-      "text": "Read https://999.999.999.999/Users/alice/private.ts."
+      "text": "Read https://999.999.999.999/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-leading-hyphen-dns-label",
-      "text": "Read https://-example.com/Users/alice/private.ts."
+      "text": "Read https://-example.com/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-trailing-hyphen-dns-label",
-      "text": "Read https://example-.com/Users/alice/private.ts."
+      "text": "Read https://example-.com/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-underscore-dns-label",
-      "text": "Read https://invalid_host.example/Users/alice/private.ts."
+      "text": "Read https://invalid_host.example/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-empty-dns-label",
-      "text": "Read https://example..com/Users/alice/private.ts."
+      "text": "Read https://example..com/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-punctuation-in-host",
-      "text": "Read https://example.com;/Users/alice/private.ts."
+      "text": "Read https://example.com;/\u0055sers/alice/private.ts."
     },
     {
       "name": "invalid-https-apostrophe-in-host",
-      "text": "Read https://example.com'/Users/alice/private.ts."
+      "text": "Read https://example.com'/\u0055sers/alice/private.ts."
     },
     {
       "name": "private-https-username-only-userinfo",
-      "text": "Read https://user@example.com/Users/alice/private.ts."
+      "text": "Read https://user@example.com/\u0055sers/alice/private.ts."
     },
     {
       "name": "private-https-numeric-password-userinfo",
-      "text": "Read https://user:123@example.com/Users/alice/private.ts."
+      "text": "Read https://user:123@example.com/\u0055sers/alice/private.ts."
     },
     {
       "name": "private-https-alphabetic-password-userinfo",
-      "text": "Read https://user:private@example.com/Users/alice/private.ts."
+      "text": "Read https://user:private@example.com/\u0055sers/alice/private.ts."
     },
     {
       "name": "private-https-empty-userinfo-separator",
-      "text": "Read https://@example.com/Users/alice/private.ts."
+      "text": "Read https://@example.com/\u0055sers/alice/private.ts."
     },
     {
       "name": "private-https-empty-password-userinfo",
-      "text": "Read https://user:@example.com/Users/alice/private.ts."
+      "text": "Read https://user:@example.com/\u0055sers/alice/private.ts."
     },
     {
       "name": "private-https-empty-username-userinfo",
-      "text": "Read https://:123@example.com/Users/alice/private.ts."
+      "text": "Read https://:123@example.com/\u0055sers/alice/private.ts."
     },
     {
       "name": "private-markdown-https-userinfo",
-      "text": "Read [docs](https://user@example.com/Users/alice/private.ts)."
+      "text": "Read [docs](https://user@example.com/\u0055sers/alice/private.ts)."
     },
     {
       "name": "private-unicode-quoted-invalid-authority",
-      "text": "対象：「https://[:]/Users/alice/private.ts」。"
+      "text": "対象：「https://[:]/\u0055sers/alice/private.ts」。"
     },
     {
       "name": "unsupported-ftp-url-path",
-      "text": "Read ftp://example.com/Users/alice/private.ts."
+      "text": "Read ftp://example.com/\u0055sers/alice/private.ts."
     },
     {
       "name": "markdown-url-followed-by-private-path",

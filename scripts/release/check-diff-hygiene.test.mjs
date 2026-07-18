@@ -203,10 +203,11 @@ test("committed repository policy rejects build, private, and binary artifacts",
     await writeRelative(root, "dist/app.js", "generated\n")
     git(root, ["add", "--all"])
     git(root, ["commit", "-q", "-m", "test: add generated output"])
-    assertSafeFailure(runChecker(root), "REPOSITORY_POLICY_FAILED", [
-      root,
-      "dist/app.js",
-    ])
+    assertSafeFailure(
+      runChecker(root),
+      "REPOSITORY_POLICY_FAILED \\(build-output\\)",
+      [root, "dist/app.js"],
+    )
   })
 
   await context.test("private path", async (child) => {
@@ -214,10 +215,11 @@ test("committed repository policy rejects build, private, and binary artifacts",
     await writeRelative(root, ".context/auth.json", "{}\n")
     git(root, ["add", "--all"])
     git(root, ["commit", "-q", "-m", "test: add private state"])
-    assertSafeFailure(runChecker(root), "REPOSITORY_POLICY_FAILED", [
-      root,
-      ".context/auth.json",
-    ])
+    assertSafeFailure(
+      runChecker(root),
+      "REPOSITORY_POLICY_FAILED \\(private-path\\)",
+      [root, ".context/auth.json"],
+    )
   })
 
   await context.test("private content", async (child) => {
@@ -226,11 +228,11 @@ test("committed repository policy rejects build, private, and binary artifacts",
     await writeRelative(root, "leaked-path.txt", `${privateHome}/secret\n`)
     git(root, ["add", "--all"])
     git(root, ["commit", "-q", "-m", "test: add private path"])
-    assertSafeFailure(runChecker(root), "REPOSITORY_POLICY_FAILED", [
-      root,
-      privateHome,
-      "leaked-path.txt",
-    ])
+    assertSafeFailure(
+      runChecker(root),
+      "REPOSITORY_POLICY_FAILED \\(private-content\\)",
+      [root, privateHome, "leaked-path.txt"],
+    )
   })
 
   await context.test("binary artifact", async (child) => {
@@ -238,11 +240,95 @@ test("committed repository policy rejects build, private, and binary artifacts",
     await writeRelative(root, "artifact.bin", Buffer.from([0, 1, 2, 3]))
     git(root, ["add", "--all"])
     git(root, ["commit", "-q", "-m", "test: add binary artifact"])
-    assertSafeFailure(runChecker(root), "REPOSITORY_POLICY_FAILED", [
-      root,
-      "artifact.bin",
-    ])
+    assertSafeFailure(
+      runChecker(root),
+      "REPOSITORY_POLICY_FAILED \\(binary\\)",
+      [root, "artifact.bin"],
+    )
   })
+})
+
+test("committed private-content policy rejects foreign-host absolute paths", async (context) => {
+  const cases = [
+    {
+      name: "macOS user home",
+      value: ["", "Users", "foreign-reviewer", "work", "private.txt"].join("/"),
+    },
+    {
+      name: "Linux user home",
+      value: ["", "home", "foreign-builder", "work", "private.txt"].join("/"),
+    },
+    {
+      name: "macOS private var",
+      value: [
+        "",
+        "private",
+        "var",
+        "folders",
+        "foreign-host",
+        "T",
+        "private.txt",
+      ].join("/"),
+    },
+    {
+      name: "Windows user home",
+      value: ["D:", "Users", "foreign-reviewer", "source", "private.txt"].join(
+        "\\",
+      ),
+    },
+    {
+      name: "Windows slash user home",
+      value: ["E:", "Users", "foreign-builder", "source", "private.txt"].join(
+        "/",
+      ),
+    },
+    {
+      name: "Windows UNC share",
+      value: [
+        "",
+        "",
+        "foreign-builder",
+        "private-share",
+        "source",
+        "private.txt",
+      ].join("\\"),
+    },
+  ]
+
+  for (const fixture of cases) {
+    await context.test(fixture.name, async (child) => {
+      const root = await createFixture(child)
+      await writeRelative(root, "foreign-path.txt", `${fixture.value}\n`)
+      git(root, ["add", "--all"])
+      git(root, ["commit", "-q", "-m", "test: add foreign private path"])
+      assertSafeFailure(
+        runChecker(root),
+        "REPOSITORY_POLICY_FAILED \\(private-content\\)",
+        [root, fixture.value, "foreign-path.txt"],
+      )
+    })
+  }
+})
+
+test("URLs, Markdown roots, POSIX documentation, and explicit placeholders stay safe", async (context) => {
+  const root = await createFixture(context)
+  const examples = [
+    "https://docs.example.invalid/Users/docs-reader/project",
+    "https://docs.example.invalid/private/var/folders/example/path",
+    "https://docs.example.invalid/C:/Users/docs-reader/project",
+    "[Testing guide](/docs/testing.md)",
+    "Install into /usr/local/bin or /opt/coding-wife and inspect /var/log.",
+    "/Users/<username>/projects/coding-wife",
+    "/home/${USER}/projects/coding-wife",
+    String.raw`C:\Users\<username>\source\coding-wife`,
+    String.raw`\\<server>\<share>\source\coding-wife`,
+  ]
+  await writeRelative(root, "documented-paths.md", `${examples.join("\n")}\n`)
+  git(root, ["add", "--all"])
+  git(root, ["commit", "-q", "-m", "docs: add portable path examples"])
+
+  const result = runChecker(root)
+  assert.equal(result.status, 0, result.stderr)
 })
 
 test("only explicit application binary assets and env examples pass policy", async (context) => {

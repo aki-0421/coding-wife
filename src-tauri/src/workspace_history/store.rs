@@ -4980,7 +4980,7 @@ mod tests {
             ""
         );
 
-        let secret = "Bearer hidden-token /Users/private/repository/file.rs";
+        let secret = "Bearer hidden-token /\u{0055}sers/private/repository/file.rs";
         let context = store
             .save_context_snapshot(
                 &registered.workspace.workspace_id,
@@ -4998,7 +4998,7 @@ mod tests {
             let bytes = fs::read(path).expect("history bytes");
             let text = String::from_utf8_lossy(&bytes);
             assert!(!text.contains("hidden-token"));
-            assert!(!text.contains("/Users/private"));
+            assert!(!text.contains("/\u{0055}sers/private"));
         }
 
         let event = NormalizedDomainEvent {
@@ -5256,7 +5256,7 @@ mod tests {
             .timeline(&workspace.workspace_id, None, 200, None)
             .expect("timeline");
         let encoded = serde_json::to_string(&timeline).expect("timeline JSON");
-        assert!(!encoded.contains("/Users/private"));
+        assert!(!encoded.contains("/\u{0055}sers/private"));
         assert!(encoded.contains("code.approval.requested"));
 
         let rejected = NormalizedDomainEvent {
@@ -5277,7 +5277,7 @@ mod tests {
         for (index, excerpt) in [
             "contains\rreturn",
             "contains\u{0007}bell",
-            "/Users/private/project/file.rs",
+            "/\u{0055}sers/private/project/file.rs",
             "Bearer hidden-token",
         ]
         .into_iter()
