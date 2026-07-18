@@ -111,6 +111,15 @@ const policyKeys = [
   "checkpoint_policy",
 ] as const
 const policyActions = ["override", "bypass", "disable", "ignore"] as const
+const policyDirectivePatterns = [
+  /\b(?:always\s+)?(?:grant|allow|deny|reject)\b.{0,40}\b(?:permission|permissions|permission\s+requests?|permission\s+prompts?)\b/iu,
+  /\b(?:always\s+)?approve\b.{0,40}\b(?:tool\s+calls?|permissions?|requests?)\b/iu,
+  /\b(?:skip|omit|bypass|disable|ignore|avoid)\s+(?:all\s+)?(?:the\s+)?(?:verification|checks?|safety\s+checks?|privacy\s+checks?)\b/iu,
+  /\bnever\s+(?:ask|check|request)\b.{0,40}\b(?:approval|permission)\b/iu,
+  /(?:常に|すべての|全ての)?[^。\n]{0,20}(?:権限要求|許可要求|承認要求)[^。\n]{0,20}(?:許可|承認|拒否)/u,
+  /(?:権限|許可|承認)[^。\n]{0,12}(?:確認|質問|要求)(?:しない|せず|を省略)/u,
+  /(?:検証(?:結果)?|安全確認|動作確認|コミット前の確認)[^。\n]{0,12}(?:省略|回避|無効|無視|しない)/u,
+] as const
 
 function violation(): never {
   throw new WorkspaceContextContractError()
@@ -208,7 +217,15 @@ function normalizePolicyText(value: string): string {
 }
 
 function containsPolicyOverride(value: string): boolean {
-  const normalized = normalizePolicyText(value)
+  const compatibilityNormalized = value.normalize("NFKC")
+  const normalized = normalizePolicyText(compatibilityNormalized)
+  if (
+    policyDirectivePatterns.some((pattern) =>
+      pattern.test(compatibilityNormalized),
+    )
+  ) {
+    return true
+  }
   if (
     policyActions.some((action) => normalized.includes(action)) &&
     policyKeys.some((key) => normalized.includes(key))

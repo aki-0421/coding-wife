@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 
+import policyFixture from "@/test/fixtures/workspace-context-policy.v1.json"
+
 import {
   WorkspaceContextContractError,
   firstInvalidCharacterContextField,
@@ -74,6 +76,28 @@ describe("workspace context contract", () => {
     ).toBe("behavior")
     expect(firstInvalidProjectContextField(project)).toBeNull()
     expect(firstInvalidCharacterContextField(character)).toBeNull()
+  })
+
+  it("enforces the shared character policy corpus without presentation false positives", () => {
+    for (const testCase of policyFixture.rejected) {
+      expect(
+        () =>
+          parseCharacterContext({
+            ...character,
+            behavior: testCase.text,
+          }),
+        testCase.id,
+      ).toThrow(WorkspaceContextContractError)
+    }
+    for (const testCase of policyFixture.accepted) {
+      expect(
+        parseCharacterContext({
+          ...character,
+          behavior: testCase.text,
+        }),
+        testCase.id,
+      ).toMatchObject({ behavior: testCase.text })
+    }
   })
 
   it("binds both versioned records and snapshots to one workspace", () => {

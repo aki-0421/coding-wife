@@ -1,5 +1,7 @@
 use std::path::{Component, Path};
+use std::sync::OnceLock;
 
+use regex::Regex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -48,6 +50,24 @@ const POLICY_KEYS: &[&str] = &[
 ];
 
 const POLICY_ACTIONS: &[&str] = &["override", "bypass", "disable", "ignore"];
+
+fn policy_directive_patterns() -> &'static [Regex] {
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        [
+            r"(?iu)\b(?:always\s+)?(?:grant|allow|deny|reject)\b.{0,40}\b(?:permission|permissions|permission\s+requests?|permission\s+prompts?)\b",
+            r"(?iu)\b(?:always\s+)?approve\b.{0,40}\b(?:tool\s+calls?|permissions?|requests?)\b",
+            r"(?iu)\b(?:skip|omit|bypass|disable|ignore|avoid)\s+(?:all\s+)?(?:the\s+)?(?:verification|checks?|safety\s+checks?|privacy\s+checks?)\b",
+            r"(?iu)\bnever\s+(?:ask|check|request)\b.{0,40}\b(?:approval|permission)\b",
+            r"(?:常に|すべての|全ての)?[^。\n]{0,20}(?:権限要求|許可要求|承認要求)[^。\n]{0,20}(?:許可|承認|拒否)",
+            r"(?:権限|許可|承認)[^。\n]{0,12}(?:確認|質問|要求)(?:しない|せず|を省略)",
+            r"(?:検証(?:結果)?|安全確認|動作確認|コミット前の確認)[^。\n]{0,12}(?:省略|回避|無効|無視|しない)",
+        ]
+        .into_iter()
+        .map(|pattern| Regex::new(pattern).expect("static policy directive regex"))
+        .collect()
+    })
+}
 
 fn context_error(code: &str, operation: &str) -> WorkspaceHistoryError {
     WorkspaceHistoryError::new(code, operation, false)
@@ -227,6 +247,12 @@ fn normalized_policy_text(value: &str) -> String {
 }
 
 fn contains_policy_override(value: &str) -> bool {
+    if policy_directive_patterns()
+        .iter()
+        .any(|pattern| pattern.is_match(value))
+    {
+        return true;
+    }
     let normalized = normalized_policy_text(value);
     if POLICY_ACTIONS
         .iter()
@@ -375,6 +401,21 @@ pub(super) fn validate_turn_snapshot(
 mod tests {
     use super::*;
     use crate::workspace_history::types::{CharacterTone, SpeechDensity};
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PolicyFixture {
+        schema_version: u32,
+        rejected: Vec<PolicyCase>,
+        accepted: Vec<PolicyCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct PolicyCase {
+        id: String,
+        text: String,
+    }
 
     #[test]
     fn default_json_hashes_are_stable() {
@@ -432,6 +473,35 @@ mod tests {
                     .code,
                 "WORKSPACE-CHARACTER-CONTEXT-POLICY"
             );
+        }
+    }
+
+    #[test]
+    fn character_context_matches_shared_policy_corpus() {
+        let fixture: PolicyFixture = serde_json::from_str(include_str!(
+            "../../../src/test/fixtures/workspace-context-policy.v1.json"
+        ))
+        .expect("policy fixture");
+        assert_eq!(fixture.schema_version, 1);
+        for test_case in fixture.rejected {
+            let context = CharacterContext {
+                behavior: test_case.text,
+                ..CharacterContext::default()
+            };
+            let error = match normalize_character_context(context) {
+                Ok(_) => panic!("{} must be rejected", test_case.id),
+                Err(error) => error,
+            };
+            assert_eq!(error.code, "WORKSPACE-CHARACTER-CONTEXT-POLICY");
+        }
+        for test_case in fixture.accepted {
+            let context = CharacterContext {
+                behavior: test_case.text.clone(),
+                ..CharacterContext::default()
+            };
+            let normalized = normalize_character_context(context)
+                .unwrap_or_else(|error| panic!("{} must be accepted: {error:?}", test_case.id));
+            assert_eq!(normalized.behavior, test_case.text);
         }
     }
 }

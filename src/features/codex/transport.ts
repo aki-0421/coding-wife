@@ -390,7 +390,8 @@ export class DemoCodexTransport implements CodexTransport {
     workspaceId: string,
     turnHandle: string,
   ): void {
-    const publicInstructionMarker = "\nCODING_WIFE_USER_INSTRUCTION_V1\n"
+    const publicInstructionMarker =
+      "\nCODING_WIFE_AUTHORITATIVE_USER_INSTRUCTION_V1\n"
     const markerIndex = instruction.indexOf(publicInstructionMarker)
     const publicInstruction =
       markerIndex === -1

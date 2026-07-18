@@ -130,7 +130,10 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     }
     expect(turnStartRequest.effort).toBe("low")
     expect(turnStartRequest.attachmentHandles).toEqual([])
-    expect(turnStartRequest.text).toContain("CODING_WIFE_CONTEXT_SNAPSHOT_V1")
+    expect(turnStartRequest.text).toContain("CODING_WIFE_UNTRUSTED_CONTEXT_V1")
+    expect(turnStartRequest.text).toContain(
+      "CODING_WIFE_AUTHORITATIVE_USER_INSTRUCTION_V1",
+    )
 
     codex.emit({
       schemaVersion: 1,
