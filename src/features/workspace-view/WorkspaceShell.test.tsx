@@ -66,7 +66,7 @@ const userEvent = {
         }
         fireEvent.click(element)
       },
-      clear: async (element: Element) => {
+      clear: (element: Element) => {
         if (
           !(element instanceof HTMLInputElement) &&
           !(element instanceof HTMLTextAreaElement)
@@ -74,8 +74,9 @@ const userEvent = {
           throw new Error("Expected a text entry control")
         }
         fireEvent.change(element, { target: { value: "" } })
+        return Promise.resolve()
       },
-      type: async (element: Element, text: string) => {
+      type: (element: Element, text: string) => {
         if (
           !(element instanceof HTMLInputElement) &&
           !(element instanceof HTMLTextAreaElement)
@@ -85,6 +86,7 @@ const userEvent = {
         fireEvent.change(element, {
           target: { value: `${element.value}${text}` },
         })
+        return Promise.resolve()
       },
       keyboard: keyboardDriver.keyboard,
       tab: keyboardDriver.tab,
