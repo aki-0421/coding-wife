@@ -223,14 +223,10 @@
 }
 
 .preview-app-icon {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  border-radius: 4px;
-  background: #efb7cf;
-  color: #8d4568;
-  font-size: var(--text-label);
+  display: block;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
 }
 
 .preview-header nav {

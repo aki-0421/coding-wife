@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
+import { BrandMark } from "@/components/brand-mark"
 import { Live2dCharacter } from "@/features/character/components/Live2dCharacter"
 import type {
   CharacterControllerStatus,
@@ -195,7 +196,7 @@ export function Live2dPreviewHarness() {
       <section className="preview-workspace">
         <header className="preview-header">
           <div className="preview-breadcrumb">
-            <span className="preview-app-icon">✦</span>
+            <BrandMark className="preview-app-icon" label="Coding Wife" />
             <span>coding-wife</span>
             <span aria-hidden="true">›</span>
             <strong>live2d-runtime</strong>

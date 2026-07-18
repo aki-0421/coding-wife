@@ -7,11 +7,11 @@ import {
   FolderSearchIcon,
   GitBranchIcon,
   LoaderCircleIcon,
-  SparklesIcon,
   TriangleAlertIcon,
   WifiOffIcon,
 } from "lucide-react"
 
+import { BrandMark } from "@/components/brand-mark"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -356,10 +356,10 @@ export function WorkspaceHeader({
           <TooltipTrigger asChild>
             <span
               aria-label={copy.appMark}
-              className="flex size-6 shrink-0 items-center justify-center rounded-control border border-warm-active/40 bg-warm-active text-app-bg"
+              className="flex size-6 shrink-0 items-center justify-center"
               role="img"
             >
-              <SparklesIcon aria-hidden="true" className="size-3" />
+              <BrandMark className="size-6" />
             </span>
           </TooltipTrigger>
           <TooltipContent>{copy.appMark}</TooltipContent>

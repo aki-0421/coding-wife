@@ -57,8 +57,10 @@ describe("Live2D preview typography", () => {
       .filter((size) => size < 11)
     expect(literalFontSizes).toEqual([])
     expect(previewCss.match(/font-size:\s*var\(--text-label\);/g)).toHaveLength(
-      8,
+      7,
     )
+    const appIconRules = previewCss.match(/\.preview-app-icon\s*{([^}]*)}/s)?.[1]
+    expect(appIconRules).not.toContain("font-size")
   })
 
   it("uses semantic text colors that pass AA on preview surfaces", () => {
