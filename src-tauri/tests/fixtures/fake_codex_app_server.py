@@ -117,7 +117,7 @@ def validate_skill(inputs, expected_name):
         digest = "sha256:" + hashlib.sha256(skill_path.read_bytes()).hexdigest()
         valid = (
             manifest.get("authority") == "app_bundle"
-            and entry.get("version") == "1.0.0"
+            and entry.get("version") == "1.1.0"
             and entry.get("entrypoint")
             == f"{expected_name}/SKILL.md"
             and entry.get("contentDigest") == digest

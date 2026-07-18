@@ -11,7 +11,7 @@ use super::types::MainSkillInjectionAudit;
 pub const COMMIT_SKILL_NAME: &str = "coding-wife-commit-work";
 pub const EXPLAIN_COMMIT_SKILL_NAME: &str = "coding-wife-explain-commit";
 const EXPECTED_MANIFEST_SHA256: &str =
-    "23c21f06951ce9086d8522034ca5a2067b2e22e9b699b85f25621a1b122b364e";
+    "680aa60c1d5e6e774c8cbbcfbecbf2f45c743b44e1ffa7a463ec26bee9210f0f";
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024;
 const MAX_SKILL_FILE_BYTES: u64 = 128 * 1024;
 const MAX_SKILLS: usize = 16;
@@ -383,7 +383,7 @@ mod tests {
         let audit = serde_json::to_value(skill.audit()).expect("serialize audit");
 
         assert_eq!(skill.name, COMMIT_SKILL_NAME);
-        assert_eq!(skill.version, "1.0.0");
+        assert_eq!(skill.version, "1.1.0");
         assert!(skill.path.is_absolute());
         assert_eq!(audit.as_object().expect("audit object").len(), 3);
         assert!(audit.get("name").is_some());
@@ -408,5 +408,43 @@ mod tests {
             resolve_bundled_skill(&resource_directory, "unknown-skill"),
             Err(BundledSkillError::Invalid)
         ));
+    }
+
+    #[test]
+    fn committed_skill_documents_preserve_the_forward_operational_contracts() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/skills");
+        let commit = fs::read_to_string(root.join("coding-wife-commit-work/SKILL.md"))
+            .expect("commit skill document");
+        for required in [
+            "physical LF newline bytes",
+            "two literal characters `\\n`",
+            "temporary message file",
+            "multiple `git commit -m` arguments",
+            "git log -1 --format=%B",
+            "subject, blank separator, and body bullets occupy distinct physical lines",
+        ] {
+            assert!(
+                commit.contains(required),
+                "missing commit contract: {required}"
+            );
+        }
+
+        let explain = fs::read_to_string(root.join("coding-wife-explain-commit/SKILL.md"))
+            .expect("explain skill document");
+        for required in [
+            "65,536 bytes or fewer",
+            "1 to 4,096 Unicode scalar values",
+            "1 to 16 items",
+            "1 to 2,048 Unicode scalar values",
+            "1 to 32 items",
+            "1 to 240 Unicode scalar values",
+            "Number chunks contiguously from 1",
+            "never move backward in the section order",
+        ] {
+            assert!(
+                explain.contains(required),
+                "missing explanation contract: {required}"
+            );
+        }
     }
 }

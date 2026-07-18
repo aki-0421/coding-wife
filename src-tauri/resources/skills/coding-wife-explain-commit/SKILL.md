@@ -36,6 +36,14 @@ Return only one JSON object without Markdown fences or surrounding prose:
 }
 ```
 
-Use only these keys. Keep every array bounded and evidence-based. Preserve this section order: `summary`, `changes`, `reasons`, `verification`, `impact`, `cautions`, `howToReadNext`.
+Use only these keys and keep the UTF-8 serialized JSON at 65,536 bytes or fewer. Apply these exact bounds:
 
-Build `narrationChunks` from the same explanation without adding facts. Number chunks contiguously from 1, keep each text at 240 Unicode scalar values or fewer, and use only these section names. Make the concatenated chunks a concise spoken rendering of the structured fields in the same order.
+- `summary`: 1 to 4,096 Unicode scalar values.
+- Each of `changes`, `reasons`, `verification`, `impact`, `cautions`, and `howToReadNext`: 1 to 16 items.
+- Every item in those six arrays: 1 to 2,048 Unicode scalar values.
+- `narrationChunks`: 1 to 32 items.
+- Every narration chunk `text`: 1 to 240 Unicode scalar values.
+
+Keep every array evidence-based. Preserve this section order: `summary`, `changes`, `reasons`, `verification`, `impact`, `cautions`, `howToReadNext`.
+
+Build `narrationChunks` from the same explanation without adding facts. Number chunks contiguously from 1, never move backward in the section order, and use only these section names. Make the concatenated chunks a concise spoken rendering of the structured fields in the same order.

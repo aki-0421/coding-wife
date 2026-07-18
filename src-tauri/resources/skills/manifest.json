@@ -4,14 +4,14 @@
   "skills": [
     {
       "name": "coding-wife-commit-work",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "entrypoint": "coding-wife-commit-work/SKILL.md",
-      "contentDigest": "sha256:dcddcff3f295004bbcbebbc1f00fab92e3ecdbd96e880ddbe5f240989544af99",
+      "contentDigest": "sha256:4f44290b34228f17d204bd09c7869c8c4976444437e1dd5f18e7613c8484aea8",
       "implicitInvocation": false,
       "files": [
         {
           "path": "coding-wife-commit-work/SKILL.md",
-          "sha256": "dcddcff3f295004bbcbebbc1f00fab92e3ecdbd96e880ddbe5f240989544af99"
+          "sha256": "4f44290b34228f17d204bd09c7869c8c4976444437e1dd5f18e7613c8484aea8"
         },
         {
           "path": "coding-wife-commit-work/agents/openai.yaml",
@@ -21,14 +21,14 @@
     },
     {
       "name": "coding-wife-explain-commit",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "entrypoint": "coding-wife-explain-commit/SKILL.md",
-      "contentDigest": "sha256:641977edb80b17e973b796f00273f6e92286a1eb248951399809f06b1320e19f",
+      "contentDigest": "sha256:a11cfddff346e37be4431add626535175931cd2212f76e088a7c3f9305d0207f",
       "implicitInvocation": false,
       "files": [
         {
           "path": "coding-wife-explain-commit/SKILL.md",
-          "sha256": "641977edb80b17e973b796f00273f6e92286a1eb248951399809f06b1320e19f"
+          "sha256": "a11cfddff346e37be4431add626535175931cd2212f76e088a7c3f9305d0207f"
         },
         {
           "path": "coding-wife-explain-commit/agents/openai.yaml",

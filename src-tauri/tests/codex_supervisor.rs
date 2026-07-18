@@ -471,7 +471,7 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
         .expect("main skill audit");
     let encoded_audit = serde_json::to_string(&audit).expect("serialize skill audit");
     assert_eq!(audit.name, "coding-wife-commit-work");
-    assert_eq!(audit.version, "1.0.0");
+    assert_eq!(audit.version, "1.1.0");
     assert!(audit.content_digest.starts_with("sha256:"));
     assert!(!encoded_audit.contains("SKILL.md"));
     assert!(!encoded_audit.contains("resources"));
@@ -518,6 +518,7 @@ async fn dedicated_support_runtime_proves_authority_and_injects_only_the_explain
 
     assert_eq!(runtime.audit().capacity, SUPPORT_MAX_SESSION_CAPACITY);
     assert_eq!(runtime.audit().skill_name, "coding-wife-explain-commit");
+    assert_eq!(runtime.audit().skill_version, "1.1.0");
     assert_eq!(
         runtime.audit().execution_class,
         coding_wife_lib::codex::types::TurnExecutionClass::Support

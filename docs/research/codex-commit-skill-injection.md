@@ -65,6 +65,8 @@ skill は main Codex に次を要求する。
 - 作業のまとまりごとに、レビュー可能な適切な粒度で commit する。
 - summary は英語の Conventional Commits 形式にする。
 - body は変更内容と意図を英語 bullet で記録する。
+- subject、body、各bulletは物理改行で分離し、2文字のliteral `\n`をcommit messageへ保存しない。message fileまたは複数の`-m`引数でmessageを構築し、commit前後に実bytesを検査する。
+- commit後は`git log -1 --format=%B`でmessageを読み戻し、subject、空行、body bulletが別lineであること、およびliteral `\n`が存在しないことを確認できた時だけ成功として報告する。
 - session 開始前から存在する利用者変更を保護し、無関係な変更を stage / commit しない。
 - 実行した verification と結果を報告する。
 - 安全に commit できない場合は理由を報告し、force、履歴書き換え、native service への代行要求を行わない。
@@ -75,7 +77,7 @@ native Git backend はこの方針の実行者ではない。HEAD、status、com
 
 `coding-wife-explain-commit` はCommit画面の「詳しく教えて」を利用者が押した時だけ、mainとは別のisolated support turnへ明示注入する。入力はpathを除去しsecret scanを通過した構造化 `CommitEvidenceV1` だけとし、repository root、absolute/relative file path、raw diff全文、secret、raw reasoningを含めない。support runtimeへfilesystem、shell、Git、MCPその他tool authorityを与えない。
 
-出力はUI localeに一致する日本語または英語のversioned schemaとし、要約、変更点、理由、検証、影響、注意、次の見方、および同じ内容を短く分割したnarration chunksを持つ。schema invalid、stale generation、cancel、redaction failureではchunkを表示・読み上げせず、決定的なunavailable captionへfail closedする。
+出力はUI localeに一致する日本語または英語のversioned schemaとし、要約、変更点、理由、検証、影響、注意、次の見方、および同じ内容を短く分割したnarration chunksを持つ。`summary`は1〜4,096 Unicode scalar、6つの説明arrayは各1〜16件かつ各item 1〜2,048 scalar、`narrationChunks`は1〜32件かつ各text 1〜240 scalar、連番、section非逆行、serialized JSON全体64 KiB以下を要求する。schema invalid、stale generation、cancel、redaction failureではchunkを表示・読み上げせず、決定的なunavailable captionへfail closedする。
 
 ## 実装への影響
 

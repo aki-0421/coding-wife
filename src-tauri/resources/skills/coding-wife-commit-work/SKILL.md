@@ -26,9 +26,12 @@ Create at most one commit for the cohesive work completed in the current turn.
 
 1. Use an English Conventional Commits subject such as `feat(scope): summary`.
 2. Add English body bullets labeled `Changes`, `Intent`, and `Verification` that state what changed, why it changed, and which checks ran with their results.
-3. Run hooks normally. Never use `--no-verify`, force, amend, history rewriting, or destructive Git recovery.
-4. Create no empty commit. If there is no owned staged diff, report that there is nothing to commit.
-5. Create no repeated commit. If the intended work is already committed, report the existing commit instead of committing or amending again.
+3. Separate the subject, body, and every bullet with physical LF newline bytes. Never store the two literal characters `\n` as a substitute for a newline.
+4. Construct the message with an owner-only temporary message file or multiple `git commit -m` arguments. Inspect the message bytes and lines before committing, and reject any literal `\n` sequence.
+5. Run hooks normally. Never use `--no-verify`, force, amend, history rewriting, or destructive Git recovery.
+6. Create no empty commit. If there is no owned staged diff, report that there is nothing to commit.
+7. Create no repeated commit. If the intended work is already committed, report the existing commit instead of committing or amending again.
+8. After committing, read the stored message with `git log -1 --format=%B`. Verify the subject, blank separator, and body bullets occupy distinct physical lines, inspect the resulting bytes, and reject any literal `\n` sequence before reporting success.
 
 ## Report the Result
 

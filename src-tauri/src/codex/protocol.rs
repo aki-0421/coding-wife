@@ -949,6 +949,34 @@ mod tests {
     }
 
     #[test]
+    fn commit_explanation_schema_keeps_every_documented_bound() {
+        let schema = commit_explanation_output_schema("ja");
+        assert_eq!(schema["properties"]["summary"]["minLength"], 1);
+        assert_eq!(schema["properties"]["summary"]["maxLength"], 4096);
+        for name in [
+            "changes",
+            "reasons",
+            "verification",
+            "impact",
+            "cautions",
+            "howToReadNext",
+        ] {
+            let array = &schema["properties"][name];
+            assert_eq!(array["minItems"], 1, "{name}");
+            assert_eq!(array["maxItems"], 16, "{name}");
+            assert_eq!(array["items"]["minLength"], 1, "{name}");
+            assert_eq!(array["items"]["maxLength"], 2048, "{name}");
+        }
+        let chunks = &schema["properties"]["narrationChunks"];
+        assert_eq!(chunks["minItems"], 1);
+        assert_eq!(chunks["maxItems"], 32);
+        assert_eq!(chunks["items"]["properties"]["sequence"]["minimum"], 1);
+        assert_eq!(chunks["items"]["properties"]["sequence"]["maximum"], 32);
+        assert_eq!(chunks["items"]["properties"]["text"]["minLength"], 1);
+        assert_eq!(chunks["items"]["properties"]["text"]["maxLength"], 240);
+    }
+
+    #[test]
     fn turn_projects_validated_images_and_files_without_an_empty_text_item() {
         let attachments = [
             ResolvedAttachment::LocalImage {

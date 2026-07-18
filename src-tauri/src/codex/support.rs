@@ -812,6 +812,28 @@ mod tests {
             parse_explanation(&invalid, "ja"),
             Err(SupportRuntimeError::Output)
         );
+
+        let items = vec!["x".repeat(1024); 16];
+        let oversized = serde_json::to_string(&json!({
+            "schemaVersion": 1,
+            "locale": "ja",
+            "summary": "Summary",
+            "changes": items.clone(),
+            "reasons": items.clone(),
+            "verification": items.clone(),
+            "impact": items.clone(),
+            "cautions": items.clone(),
+            "howToReadNext": items,
+            "narrationChunks": [
+                {"sequence": 1, "section": "summary", "text": "Summary"}
+            ]
+        }))
+        .expect("oversized explanation");
+        assert!(oversized.len() > MAX_SUPPORT_OUTPUT_BYTES);
+        assert_eq!(
+            parse_explanation(&oversized, "ja"),
+            Err(SupportRuntimeError::Output)
+        );
     }
 
     #[test]
