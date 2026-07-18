@@ -1,10 +1,11 @@
 ---
 title: "macOS release packagingとFinder非依存DMG調査"
-description: "Tauriの.app生成とhdiutilのread-only DMG生成を分離し、Finder AppleEventに依存しないハッカソン配布物の契約を整理する。"
+description: "Tauriの.app生成とhdiutilのread-only DMG生成を分離し、Finder非依存配布とbyte-exact notice対応diff hygieneの契約を整理する。"
 updated: 2026-07-18
 read_when:
   - "macOSの.app・DMG生成、Tauri bundle target、release commandを変更するとき。"
   - "Finder AppleScript timeout、Gatekeeper、未署名・未公証artifactの検証手順を確認するとき。"
+  - "Hiyori NOTICEを保持したdiff hygiene、Pull Requestの差分検査、safe failureを変更するとき。"
 last_verified: 2026-07-18 JST
 ---
 
@@ -32,6 +33,10 @@ macOS 14+のlocal `hdiutil(1)`は、`create -srcfolder`がsource directoryのcon
 
 Apple公式の[Safely open apps on your Mac](https://support.apple.com/en-us/102445)（Published May 27, 2026）は、署名・公証されていないsoftwareがcomputerとpersonal informationを危険にさらす可能性を明記する。信頼でき改変されていないと判断したappだけを、一度openを試した後にSystem SettingsのPrivacy & SecurityからOpen Anywayで一時例外にできる。
 
+### GitHub Actions
+
+2026-07-18 JSTにGitHub公式repositoryの latest releaseを確認し、[actions/checkout v7.0.0](https://github.com/actions/checkout/releases/tag/v7.0.0)と[actions/setup-node v7.0.0](https://github.com/actions/setup-node/releases/tag/v7.0.0)をdiff hygiene workflowの現行majorとする。Pull Requestのbase commitからの差分を検査できるようcheckoutはfull historyを取得し、Nodeはrepositoryの最低要件に合わせて22.12.0を明示する。
+
 ## 実装契約
 
 1. `tauri.conf.json` のdefault bundle targetは`app`だけにする。
@@ -42,6 +47,16 @@ Apple公式の[Safely open apps on your Mac](https://support.apple.com/en-us/102
 6. `--overwrite`は既存artifactの即時削除を意味しない。candidate検証後の置換だけを許可する。
 7. raw command stderr、input/output/tempのabsolute pathはconsoleへ返さない。失敗はstep単位のsafe codeと非0 exitで表す。
 8. trapはattached volumeを先にdetachし、一時directoryを後に削除する。cleanup失敗時もfinal artifactを公開しない。
+
+## Diff hygieneの実装・変更手順
+
+`scripts/release/check-diff-hygiene.mjs`が正本である。既定は`origin/develop...HEAD`のcommitted差分、staged、unstaged、ignoreされていないuntracked fileの4 scopeを検査する。base refを利用できないlocal作業は`--working-tree`、Pull Request CIは`--base <base-sha>`を使う。
+
+tracked diffはexternal diffとtextconvを無効にした`git diff --check`、untracked fileはNUL区切りの`git ls-files --others --exclude-standard`とfileごとの`git diff --no-index --check`で検査する。Gitのraw stdout/stderrは利用者へ渡さず、failureはscopeとsafe codeだけを返す。
+
+whitespace検査の除外は`src-tauri/resources/characters/builtin-hiyori/NOTICE.txt`のexact pathだけである。その除外と独立して、正本がregular fileであることと`scripts/live2d/constants.mjs` の`HIYORI_NOTICE_SHA256`へ一致することを検査前後に確認する。このためNOTICEの改変、削除、rename、symlink置換は`PROTECTED_NOTICE_INVALID`になり、同じbyteを他pathへ置いても通常のwhitespace検査対象になる。
+
+変更時は`pnpm test:diff-hygiene`を実行する。`scripts/release/check-diff-hygiene.test.mjs`は隔離Git repositoryを作り、committed / staged / unstaged / untracked、base不在、canonical noticeの後日add、他path copy、modify / delete / rename / symlink、secret・absolute path非表示を検査する。`.github/workflows/diff-hygiene.yml`はPull Requestのbase SHAで同じ`pnpm check:diff`を実行する。
 
 ## 配布境界
 

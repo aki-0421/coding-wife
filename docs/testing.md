@@ -50,7 +50,9 @@ agent-docs lint
 pnpm check:diff
 ```
 
-`pnpm check:diff` checks committed changes from `origin/develop`, the index, and the working tree. It excludes only `src-tauri/resources/characters/builtin-hiyori/NOTICE.txt` because that third-party notice must remain byte-for-byte identical to its approved source. It does not modify the notice.
+`pnpm check:diff` checks committed changes from `origin/develop...HEAD`, staged changes, unstaged changes, and untracked files. CI passes the Pull Request base commit to the same command. Use `pnpm check:diff -- --working-tree` for local work when the base ref is intentionally unavailable.
+
+The command excludes only `src-tauri/resources/characters/builtin-hiyori/NOTICE.txt` from whitespace diagnostics because that third-party notice must retain its approved bytes. It independently verifies the pinned SHA-256 and requires the path to remain a regular file, so modifying, deleting, renaming, or replacing the notice fails. Files at every other path remain checked. Failure output contains safe scope codes rather than diff lines, secrets, or absolute paths. The command never modifies the notice or the Git worktree.
 
 ## Build the macOS artifact
 

@@ -44,10 +44,20 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml
 pnpm tauri build --debug --no-bundle
 agent-docs lint
-git diff --check
+pnpm check:diff
 ```
 
 The frontend checks cover strict TypeScript, linting, the localized workspace, preview-mode honesty, the Codex contracts and state stores, the Live2D renderer and supply chain, and the production Vite bundle. The Rust checks cover the runtime metadata boundary and the constrained Codex App Server supervisor and command surface.
+
+`pnpm check:diff` checks `origin/develop...HEAD`, staged changes, unstaged changes, and untracked files without printing diff contents or absolute paths. Use `pnpm check:diff -- --working-tree` when the base ref is intentionally unavailable. The command excludes only the canonical Hiyori `NOTICE.txt` from whitespace checks and separately requires its pinned byte-exact SHA-256, so modifying, deleting, renaming, or replacing the notice still fails.
+
+## Build the macOS artifact
+
+```bash
+pnpm release:macos
+```
+
+Tauri creates `Coding Wife.app`; the repository release script then creates and mounts a read-only DMG without Finder automation before publishing it. See [the full testing instructions](docs/testing.md) for the artifact path, synthetic packaging smoke, installation steps, and the unsigned/unnotarized MVP boundary.
 
 ## Architecture boundaries
 
