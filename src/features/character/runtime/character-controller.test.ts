@@ -298,6 +298,23 @@ describe("character canvas backing size", () => {
 })
 
 describe("atomic character pack switching", () => {
+  it("keeps the WebGL canvas hidden and stops after one reduced neutral frame", async () => {
+    runtimeHarness.renderBehaviors.set("committed", "visible")
+    const { canvas, controller } = await createMountedController()
+    const initialLoad = controller.loadPack(
+      pack("committed"),
+      new AbortController().signal,
+      true,
+    )
+    await flushCandidateFrame()
+    await initialLoad
+
+    expect(canvas.hidden).toBe(true)
+    expect(animationFrames.count).toBeGreaterThan(0)
+    animationFrames.flush()
+    expect(animationFrames.count).toBe(0)
+  })
+
   it("commits the candidate only after its first non-transparent frame", async () => {
     runtimeHarness.renderBehaviors.set("committed", "visible")
     const { controller, metrics, statuses } = await createMountedController()

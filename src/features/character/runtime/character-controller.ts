@@ -580,7 +580,7 @@ export class CharacterController {
       this.stopFrameLoop()
       this.#fallbackLevel = "text_only"
     } else if (policy === "reduced") {
-      this.#canvas.hidden = false
+      this.#canvas.hidden = true
       this.stopFrameLoop()
       this.#lastFrameTimestamp = null
       this.#model?.resetToNeutral()
