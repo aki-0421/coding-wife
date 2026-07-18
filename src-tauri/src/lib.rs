@@ -186,9 +186,19 @@ pub fn run() {
             app.manage(attachment_service);
             app.manage(NarrationService::production(&app_data_directory));
             let history_store = WorkspaceHistoryStore::open(&app_data_directory)?;
-            let history_service = WorkspaceHistoryService::new_pending_restore(
+            let resource_directory = app.path().resource_dir()?;
+            let character_storage = CharacterStorage::open(&app_data_directory)?;
+            let project_operations = Arc::new(tokio::sync::Mutex::new(()));
+            let character_service = CharacterService::production_with_operations(
+                character_storage,
+                resolve_builtin_directory(&resource_directory),
+                project_operations.clone(),
+            );
+            let history_service = WorkspaceHistoryService::new_pending_restore_with_character(
                 history_store,
                 setup_workspace_service.clone(),
+                character_service.clone(),
+                project_operations,
             );
             let git_review_service = GitReviewService::production(
                 setup_workspace_service.clone(),
@@ -211,12 +221,6 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 history_service.restore_startup().await;
             });
-            let resource_directory = app.path().resource_dir()?;
-            let character_storage = CharacterStorage::open(&app_data_directory)?;
-            let character_service = CharacterService::production(
-                character_storage,
-                resolve_builtin_directory(&resource_directory),
-            );
             app.manage(character_service);
             let window_config = app.config().app.windows.first().ok_or_else(|| {
                 std::io::Error::new(

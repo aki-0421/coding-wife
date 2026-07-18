@@ -334,6 +334,23 @@ impl WorkspaceHistoryStore {
         DATABASE_FILE_NAME
     }
 
+    #[cfg(test)]
+    pub(crate) fn install_unregister_failure_for_test(
+        &self,
+    ) -> Result<(), WorkspaceHistoryError> {
+        self.lock()
+            .connection
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_unregister_project
+                 BEFORE UPDATE OF registered ON projects
+                 WHEN NEW.registered = 0
+                 BEGIN
+                   SELECT RAISE(ABORT, 'test unregister failure');
+                 END;",
+            )
+            .map_err(|_| history_error("HIST-TEST-UNREGISTER-FAILURE", false))
+    }
+
     pub fn register_candidate(
         &self,
         candidate: &ValidatedWorkspaceCandidate,

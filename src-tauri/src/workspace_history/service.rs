@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use tokio::sync::{Mutex, Notify};
 
+use crate::character::CharacterService;
 use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
 use crate::codex::workspace::{
@@ -94,6 +95,8 @@ pub struct WorkspaceHistoryService {
     store: WorkspaceHistoryStore,
     workspace: WorkspaceService,
     operation_lock: Arc<Mutex<()>>,
+    project_operations: Arc<Mutex<()>>,
+    character: Option<CharacterService>,
     startup: Arc<StartupReadiness>,
 }
 
@@ -106,15 +109,46 @@ impl WorkspaceHistoryService {
         Self::with_startup_state(store, workspace, false)
     }
 
+    pub(crate) fn new_pending_restore_with_character(
+        store: WorkspaceHistoryStore,
+        workspace: WorkspaceService,
+        character: CharacterService,
+        project_operations: Arc<Mutex<()>>,
+    ) -> Self {
+        Self::with_character_state(store, workspace, false, Some(character), project_operations)
+    }
+
+    #[cfg(test)]
+    fn new_with_character(
+        store: WorkspaceHistoryStore,
+        workspace: WorkspaceService,
+        character: CharacterService,
+        project_operations: Arc<Mutex<()>>,
+    ) -> Self {
+        Self::with_character_state(store, workspace, true, Some(character), project_operations)
+    }
+
     fn with_startup_state(
         store: WorkspaceHistoryStore,
         workspace: WorkspaceService,
         ready: bool,
     ) -> Self {
+        Self::with_character_state(store, workspace, ready, None, Arc::new(Mutex::new(())))
+    }
+
+    fn with_character_state(
+        store: WorkspaceHistoryStore,
+        workspace: WorkspaceService,
+        ready: bool,
+        character: Option<CharacterService>,
+        project_operations: Arc<Mutex<()>>,
+    ) -> Self {
         Self {
             store,
             workspace,
             operation_lock: Arc::new(Mutex::new(())),
+            project_operations,
+            character,
             startup: Arc::new(StartupReadiness::new(ready)),
         }
     }
@@ -468,6 +502,11 @@ impl WorkspaceHistoryService {
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
         self.ensure_startup_ready("workspace_unregister")?;
         let _operation = self.operation_lock.lock().await;
+        let _project_operation = if self.character.is_some() {
+            Some(self.project_operations.lock().await)
+        } else {
+            None
+        };
         let records = self
             .store
             .private_project_workspace_records(&request.workspace_id)
@@ -484,11 +523,40 @@ impl WorkspaceHistoryService {
             }
             deactivated.push(record.clone());
         }
+        let character_rollback = if let Some(character) = &self.character {
+            match character.prepare_project_unregistration(&request.workspace_id) {
+                Ok(rollback) => rollback,
+                Err(_) => {
+                    self.restore_private_records(&records).await;
+                    return Err(WorkspaceCommandError::new(
+                        "WORKSPACE-CHARACTER-SELECTION-CLEANUP",
+                        "workspace_unregister",
+                        true,
+                    ));
+                }
+            }
+        } else {
+            None
+        };
         match self.store.unregister_project(&request.workspace_id) {
             Ok(state) => Ok(state),
             Err(error) => {
+                let character_rollback_failed = match (&self.character, character_rollback) {
+                    (Some(character), Some(rollback)) => {
+                        character.rollback_project_unregistration(rollback).is_err()
+                    }
+                    _ => false,
+                };
                 self.restore_private_records(&records).await;
-                Err(history_error("workspace_unregister", error))
+                if character_rollback_failed {
+                    Err(WorkspaceCommandError::new(
+                        "WORKSPACE-CHARACTER-SELECTION-ROLLBACK",
+                        "workspace_unregister",
+                        false,
+                    ))
+                } else {
+                    Err(history_error("workspace_unregister", error))
+                }
             }
         }
     }
@@ -1006,6 +1074,12 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
+    use crate::character::manifest::BUILTIN_HIYORI_PACK_ID;
+    use crate::character::service::{
+        resolve_builtin_directory, CharacterDeleteRequest, CharacterLibraryRequest,
+        CharacterSelectRequest,
+    };
+    use crate::character::CharacterStorage;
     use crate::codex::supervisor::CodexSupervisor;
     use crate::codex::workspace::{AppPrivateWorkspaceRecord, WorkspaceService};
     use crate::workspace_history::types::ProjectContext;
@@ -1060,6 +1134,428 @@ mod tests {
             .expect("register context workspace");
         let workspace_id = state.active_workspace_id.expect("active workspace");
         (service, root, data, workspace_id)
+    }
+
+    struct ProjectLifecycleFixture {
+        history: WorkspaceHistoryService,
+        character: CharacterService,
+        storage: CharacterStorage,
+        store: WorkspaceHistoryStore,
+        project_operations: Arc<Mutex<()>>,
+        root: PathBuf,
+        data: PathBuf,
+        workspace_id: String,
+        project_id: String,
+    }
+
+    impl ProjectLifecycleFixture {
+        fn cleanup(self) {
+            let _ = fs::remove_dir_all(self.data);
+            let _ = fs::remove_dir_all(self.root);
+        }
+    }
+
+    fn run_git(root: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .expect("git command");
+        assert!(
+            output.status.success(),
+            "git command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("git stdout")
+            .trim()
+            .to_owned()
+    }
+
+    async fn project_lifecycle_fixture(label: &str) -> ProjectLifecycleFixture {
+        let data = temp_directory(&format!("history-character-{label}"));
+        let root = git_repository();
+        fs::write(root.join("README.md"), "project source remains unchanged\n")
+            .expect("fixture source");
+        run_git(&root, &["add", "README.md"]);
+        run_git(
+            &root,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.com",
+                "commit",
+                "-qm",
+                "fixture",
+            ],
+        );
+
+        let workspace = WorkspaceService::production(CodexSupervisor::new());
+        let store = WorkspaceHistoryStore::open(&data).expect("history store");
+        let storage = CharacterStorage::open(&data).expect("character storage");
+        let project_operations = Arc::new(Mutex::new(()));
+        let character = CharacterService::production_with_operations(
+            storage.clone(),
+            resolve_builtin_directory(Path::new("/missing")),
+            project_operations.clone(),
+        );
+        let history = WorkspaceHistoryService::new_with_character(
+            store.clone(),
+            workspace.clone(),
+            character.clone(),
+            project_operations.clone(),
+        );
+        let state = history
+            .register_validated_candidate(
+                candidate(&workspace, &root).await,
+                "workspace_pick_register",
+            )
+            .await
+            .expect("register project lifecycle workspace");
+        let workspace_id = state.active_workspace_id.expect("active workspace");
+        let project_id = state
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .expect("registered workspace")
+            .project_id
+            .clone();
+
+        ProjectLifecycleFixture {
+            history,
+            character,
+            storage,
+            store,
+            project_operations,
+            root,
+            data,
+            workspace_id,
+            project_id,
+        }
+    }
+
+    fn persisted_context(
+        storage: &CharacterStorage,
+        snapshot_id: &str,
+    ) -> (String, String, String, String) {
+        let connection = rusqlite::Connection::open(storage.workspace_history_path())
+            .expect("open history database");
+        connection
+            .query_row(
+                "SELECT source, label, content_redacted, content_hash
+                 FROM context_snapshots WHERE id = ?1",
+                [snapshot_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("persisted context")
+    }
+
+    fn project_is_registered(storage: &CharacterStorage, project_id: &str) -> bool {
+        let connection = rusqlite::Connection::open(storage.workspace_history_path())
+            .expect("open history database");
+        connection
+            .query_row(
+                "SELECT registered FROM projects WHERE id = ?1",
+                [project_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .expect("project registration")
+    }
+
+    #[tokio::test]
+    async fn unregister_cleans_character_selection_without_mutating_history_source_or_git() {
+        let fixture = project_lifecycle_fixture("unregister-cleanup").await;
+        fixture
+            .character
+            .library(CharacterLibraryRequest {
+                workspace_id: fixture.workspace_id.clone(),
+            })
+            .await
+            .expect("initialize project selection");
+        assert!(fixture
+            .storage
+            .load_state()
+            .expect("selected state")
+            .project_selections
+            .contains_key(&fixture.project_id));
+
+        let context = fixture
+            .store
+            .save_context_snapshot(
+                &fixture.workspace_id,
+                ContextSource::Files,
+                "Release evidence",
+                "durable history body",
+            )
+            .expect("context snapshot");
+        let context_before = persisted_context(&fixture.storage, &context.snapshot_id);
+        let timeline_request = WorkspaceTimelineRequest {
+            workspace_id: fixture.workspace_id.clone(),
+            before_sequence: None,
+            limit: 200,
+            search: None,
+        };
+        let timeline_before = fixture
+            .history
+            .timeline(timeline_request.clone())
+            .expect("timeline before unregister");
+        let source_before = fs::read(fixture.root.join("README.md")).expect("source before");
+        let head_before = run_git(&fixture.root, &["rev-parse", "HEAD"]);
+        let status_before = run_git(&fixture.root, &["status", "--porcelain=v1"]);
+
+        fixture
+            .history
+            .unregister(WorkspaceSelectRequest {
+                workspace_id: fixture.workspace_id.clone(),
+            })
+            .await
+            .expect("unregister project");
+
+        assert!(!project_is_registered(
+            &fixture.storage,
+            &fixture.project_id
+        ));
+        assert!(!fixture
+            .storage
+            .load_state()
+            .expect("cleaned state")
+            .project_selections
+            .contains_key(&fixture.project_id));
+        assert_eq!(
+            persisted_context(&fixture.storage, &context.snapshot_id),
+            context_before
+        );
+        assert_eq!(
+            fixture
+                .history
+                .timeline(timeline_request)
+                .expect("timeline after unregister"),
+            timeline_before
+        );
+        assert_eq!(
+            fs::read(fixture.root.join("README.md")).expect("source after"),
+            source_before
+        );
+        assert_eq!(run_git(&fixture.root, &["rev-parse", "HEAD"]), head_before);
+        assert_eq!(
+            run_git(&fixture.root, &["status", "--porcelain=v1"]),
+            status_before
+        );
+
+        let restarted = CharacterService::production(
+            fixture.storage.clone(),
+            resolve_builtin_directory(Path::new("/missing")),
+        );
+        assert_eq!(
+            restarted
+                .library(CharacterLibraryRequest {
+                    workspace_id: fixture.workspace_id.clone(),
+                })
+                .await
+                .expect_err("unregistered project must not resolve after restart")
+                .code,
+            "CHARACTER-PROJECT-NOT-FOUND"
+        );
+        assert!(!fixture
+            .storage
+            .load_state()
+            .expect("restart state")
+            .project_selections
+            .contains_key(&fixture.project_id));
+
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn unregister_rolls_back_character_selection_when_history_commit_fails() {
+        let fixture = project_lifecycle_fixture("unregister-rollback").await;
+        fixture
+            .character
+            .library(CharacterLibraryRequest {
+                workspace_id: fixture.workspace_id.clone(),
+            })
+            .await
+            .expect("initialize project selection");
+        let state_before = fixture.storage.load_state().expect("state before failure");
+        fixture
+            .store
+            .install_unregister_failure_for_test()
+            .expect("install unregister failure");
+
+        let error = fixture
+            .history
+            .unregister(WorkspaceSelectRequest {
+                workspace_id: fixture.workspace_id.clone(),
+            })
+            .await
+            .expect_err("history failure must reject unregister");
+
+        assert_eq!(error.code, "HIST-PROJECT-UPDATE");
+        assert!(error.recoverable);
+        assert!(project_is_registered(&fixture.storage, &fixture.project_id));
+        assert_eq!(
+            fixture.storage.load_state().expect("rolled back state"),
+            state_before
+        );
+        assert!(fixture
+            .history
+            .workspace
+            .trusted_root(&fixture.workspace_id)
+            .await
+            .is_some());
+        fixture
+            .character
+            .library(CharacterLibraryRequest {
+                workspace_id: fixture.workspace_id.clone(),
+            })
+            .await
+            .expect("selection remains usable after rollback");
+
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn project_operations_serialize_select_unregister_and_delete_races() {
+        let select_first = project_lifecycle_fixture("race-select-first").await;
+        let held = select_first.project_operations.clone().lock_owned().await;
+        let character = select_first.character.clone();
+        let workspace_id = select_first.workspace_id.clone();
+        let select = tokio::spawn(async move {
+            character
+                .select_pack(CharacterSelectRequest {
+                    workspace_id,
+                    pack_id: BUILTIN_HIYORI_PACK_ID.to_owned(),
+                })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let history = select_first.history.clone();
+        let workspace_id = select_first.workspace_id.clone();
+        let unregister = tokio::spawn(async move {
+            history
+                .unregister(WorkspaceSelectRequest { workspace_id })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(held);
+        tokio::time::timeout(Duration::from_secs(5), select)
+            .await
+            .expect("select timeout")
+            .expect("select task")
+            .expect("select before unregister");
+        tokio::time::timeout(Duration::from_secs(5), unregister)
+            .await
+            .expect("unregister timeout")
+            .expect("unregister task")
+            .expect("unregister after select");
+        assert!(!select_first
+            .storage
+            .load_state()
+            .expect("select-first final state")
+            .project_selections
+            .contains_key(&select_first.project_id));
+        select_first.cleanup();
+
+        let unregister_first = project_lifecycle_fixture("race-unregister-first").await;
+        let held = unregister_first
+            .project_operations
+            .clone()
+            .lock_owned()
+            .await;
+        let history = unregister_first.history.clone();
+        let workspace_id = unregister_first.workspace_id.clone();
+        let unregister = tokio::spawn(async move {
+            history
+                .unregister(WorkspaceSelectRequest { workspace_id })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let character = unregister_first.character.clone();
+        let workspace_id = unregister_first.workspace_id.clone();
+        let select = tokio::spawn(async move {
+            character
+                .select_pack(CharacterSelectRequest {
+                    workspace_id,
+                    pack_id: BUILTIN_HIYORI_PACK_ID.to_owned(),
+                })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(held);
+        tokio::time::timeout(Duration::from_secs(5), unregister)
+            .await
+            .expect("unregister timeout")
+            .expect("unregister task")
+            .expect("unregister before select");
+        let error = tokio::time::timeout(Duration::from_secs(5), select)
+            .await
+            .expect("select timeout")
+            .expect("select task")
+            .expect_err("select after unregister must fail");
+        assert_eq!(error.code, "CHARACTER-PROJECT-NOT-FOUND");
+        assert!(!unregister_first
+            .storage
+            .load_state()
+            .expect("unregister-first final state")
+            .project_selections
+            .contains_key(&unregister_first.project_id));
+        unregister_first.cleanup();
+
+        let delete_race = project_lifecycle_fixture("race-delete").await;
+        let custom_pack_id = format!("custom:{}", uuid::Uuid::new_v4());
+        let mut state = delete_race.storage.load_state().expect("delete race state");
+        state.select(
+            delete_race.project_id.clone(),
+            custom_pack_id.clone(),
+            "2026-07-18T00:00:00.000Z".to_owned(),
+        );
+        delete_race
+            .storage
+            .save_state(&state)
+            .expect("persist delete race selection");
+        let held = delete_race.project_operations.clone().lock_owned().await;
+        let history = delete_race.history.clone();
+        let workspace_id = delete_race.workspace_id.clone();
+        let unregister = tokio::spawn(async move {
+            history
+                .unregister(WorkspaceSelectRequest { workspace_id })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let character = delete_race.character.clone();
+        let workspace_id = delete_race.workspace_id.clone();
+        let pack_id = custom_pack_id.clone();
+        let delete = tokio::spawn(async move {
+            character
+                .delete_pack(CharacterDeleteRequest {
+                    workspace_id,
+                    pack_id,
+                })
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(held);
+        tokio::time::timeout(Duration::from_secs(5), unregister)
+            .await
+            .expect("unregister timeout")
+            .expect("unregister task")
+            .expect("unregister before delete");
+        let error = tokio::time::timeout(Duration::from_secs(5), delete)
+            .await
+            .expect("delete timeout")
+            .expect("delete task")
+            .expect_err("missing pack remains missing after cleanup");
+        assert_eq!(error.code, "CHARACTER-PACK-NOT-FOUND");
+        assert_ne!(error.code, "CHARACTER-ACTIVE-DELETE-DENIED");
+        assert!(!delete_race
+            .storage
+            .load_state()
+            .expect("delete race final state")
+            .project_selections
+            .contains_key(&delete_race.project_id));
+        delete_race.cleanup();
     }
 
     #[tokio::test]

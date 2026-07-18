@@ -34,6 +34,7 @@ pub trait CharacterModelPicker: Send + Sync {
 
 pub trait CharacterProjectResolver: Send + Sync {
     fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>>;
+    fn is_registered_project(&self, project_id: &str) -> CharacterResult<bool>;
 }
 
 struct WorkspaceIdentityProjectResolver;
@@ -41,6 +42,10 @@ struct WorkspaceIdentityProjectResolver;
 impl CharacterProjectResolver for WorkspaceIdentityProjectResolver {
     fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>> {
         Ok(Some(workspace_id.to_owned()))
+    }
+
+    fn is_registered_project(&self, project_id: &str) -> CharacterResult<bool> {
+        Ok(valid_project_id(project_id))
     }
 }
 
@@ -57,11 +62,29 @@ impl CharacterProjectResolver for WorkspaceHistoryProjectResolver {
         .map_err(|_| character_error("character_library_get", "CHARACTER-PROJECT-LOOKUP", true))?;
         connection
             .query_row(
-                "SELECT project_id FROM workspaces WHERE id = ?1",
+                "SELECT w.project_id FROM workspaces w
+                 JOIN projects p ON p.id = w.project_id
+                 WHERE w.id = ?1 AND p.registered = 1",
                 [workspace_id],
                 |row| row.get::<_, String>(0),
             )
             .optional()
+            .map_err(|_| character_error("character_library_get", "CHARACTER-PROJECT-LOOKUP", true))
+    }
+
+    fn is_registered_project(&self, project_id: &str) -> CharacterResult<bool> {
+        let connection = Connection::open_with_flags(
+            &self.database_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|_| character_error("character_library_get", "CHARACTER-PROJECT-LOOKUP", true))?;
+        connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND registered = 1)",
+                [project_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|registered| registered != 0)
             .map_err(|_| character_error("character_library_get", "CHARACTER-PROJECT-LOOKUP", true))
     }
 }
@@ -264,16 +287,30 @@ pub struct CharacterService {
     operations: Arc<Mutex<()>>,
 }
 
+#[derive(Clone)]
+pub(crate) struct CharacterProjectSelectionRollback {
+    state: CharacterStateFile,
+}
+
 impl CharacterService {
     pub fn production(storage: CharacterStorage, builtin_directory: PathBuf) -> Self {
+        Self::production_with_operations(storage, builtin_directory, Arc::new(Mutex::new(())))
+    }
+
+    pub(crate) fn production_with_operations(
+        storage: CharacterStorage,
+        builtin_directory: PathBuf,
+        operations: Arc<Mutex<()>>,
+    ) -> Self {
         let project_resolver = Arc::new(WorkspaceHistoryProjectResolver {
             database_path: storage.workspace_history_path().to_path_buf(),
         });
-        Self::new_with_project_resolver(
+        Self::new_with_project_resolver_and_operations(
             storage,
             builtin_directory,
             Arc::new(NativeCharacterModelPicker),
             project_resolver,
+            operations,
         )
     }
 
@@ -296,13 +333,29 @@ impl CharacterService {
         picker: Arc<dyn CharacterModelPicker>,
         project_resolver: Arc<dyn CharacterProjectResolver>,
     ) -> Self {
+        Self::new_with_project_resolver_and_operations(
+            storage,
+            builtin_directory,
+            picker,
+            project_resolver,
+            Arc::new(Mutex::new(())),
+        )
+    }
+
+    pub(crate) fn new_with_project_resolver_and_operations(
+        storage: CharacterStorage,
+        builtin_directory: PathBuf,
+        picker: Arc<dyn CharacterModelPicker>,
+        project_resolver: Arc<dyn CharacterProjectResolver>,
+        operations: Arc<Mutex<()>>,
+    ) -> Self {
         Self {
             storage,
             builtin_directory,
             picker,
             project_resolver,
             pending: Arc::new(Mutex::new(HashMap::new())),
-            operations: Arc::new(Mutex::new(())),
+            operations,
         }
     }
 
@@ -323,10 +376,44 @@ impl CharacterService {
             .iter()
             .map(|pack| pack.manifest.pack_id.clone())
             .collect::<HashSet<_>>();
-        self.storage
+        let mut state = self
+            .storage
             .load_or_migrate_state(&valid_pack_ids, |workspace_id| {
                 self.project_resolver.resolve_project(workspace_id)
-            })
+            })?;
+        let projects = state.project_selections.keys().cloned().collect::<Vec<_>>();
+        let mut changed = false;
+        for project_id in projects {
+            if !self.project_resolver.is_registered_project(&project_id)? {
+                changed |= state.remove_project(&project_id);
+            }
+        }
+        if changed {
+            self.storage.save_state(&state)?;
+        }
+        Ok(state)
+    }
+
+    pub(crate) fn prepare_project_unregistration(
+        &self,
+        workspace_id: &str,
+    ) -> CharacterResult<Option<CharacterProjectSelectionRollback>> {
+        let project_id = self.resolve_project_id(workspace_id)?;
+        let (custom_packs, _) = self.storage.load_custom_packs()?;
+        let state = self.load_project_state(&custom_packs)?;
+        let mut updated = state.clone();
+        if !updated.remove_project(&project_id) {
+            return Ok(None);
+        }
+        self.storage.save_state(&updated)?;
+        Ok(Some(CharacterProjectSelectionRollback { state }))
+    }
+
+    pub(crate) fn rollback_project_unregistration(
+        &self,
+        rollback: CharacterProjectSelectionRollback,
+    ) -> CharacterResult<()> {
+        self.storage.save_state(&rollback.state)
     }
 
     pub async fn library(
@@ -1197,6 +1284,10 @@ mod tests {
         fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>> {
             Ok(self.0.get(workspace_id).cloned())
         }
+
+        fn is_registered_project(&self, project_id: &str) -> CharacterResult<bool> {
+            Ok(self.0.values().any(|candidate| candidate == project_id))
+        }
     }
 
     struct TestDirectory(PathBuf);
@@ -1303,6 +1394,101 @@ mod tests {
     fn builtin_directory_resolves_source_tree_for_tests() {
         let resolved = resolve_builtin_directory(Path::new("/missing"));
         assert!(resolved.join(BUILTIN_MANIFEST_FILE).is_file());
+    }
+
+    #[test]
+    fn workspace_history_resolver_prunes_unregistered_project_selections() {
+        let app_data = TestDirectory::new();
+        let storage = CharacterStorage::open(app_data.path()).expect("character storage");
+        let connection = Connection::open(storage.workspace_history_path()).expect("history db");
+        connection
+            .execute_batch(
+                "CREATE TABLE projects (id TEXT PRIMARY KEY, registered INTEGER NOT NULL);
+                 CREATE TABLE workspaces (id TEXT PRIMARY KEY, project_id TEXT NOT NULL);
+                 INSERT INTO projects (id, registered) VALUES
+                   ('project-active', 1), ('project-inactive', 0);
+                 INSERT INTO workspaces (id, project_id) VALUES
+                   ('workspace-active', 'project-active'),
+                   ('workspace-inactive', 'project-inactive');",
+            )
+            .expect("resolver fixture");
+        let custom_pack_id = format!("custom:{}", uuid::Uuid::new_v4());
+        let mut state = storage.load_state().expect("initial state");
+        state.select(
+            "project-active".to_owned(),
+            custom_pack_id.clone(),
+            current_timestamp(),
+        );
+        state.select(
+            "project-inactive".to_owned(),
+            custom_pack_id.clone(),
+            current_timestamp(),
+        );
+        storage.save_state(&state).expect("selected state");
+        let mut manifest = snapshot_character_model(
+            &reviewed_hiyori_source(),
+            custom_pack_id.clone(),
+            current_timestamp(),
+        )
+        .expect("custom manifest")
+        .manifest;
+        manifest.compatibility.expected_drawables = Some(134);
+        let pack = StoredPack {
+            manifest,
+            manifest_hash: "a".repeat(64),
+            directory: app_data.path().join("unused-pack"),
+        };
+        let service = CharacterService::production(
+            storage.clone(),
+            resolve_builtin_directory(Path::new("/missing")),
+        );
+
+        assert_eq!(
+            service
+                .resolve_project_id("workspace-active")
+                .expect("active project"),
+            "project-active"
+        );
+        assert_eq!(
+            service
+                .resolve_project_id("workspace-inactive")
+                .expect_err("inactive project must not resolve")
+                .code,
+            "CHARACTER-PROJECT-NOT-FOUND"
+        );
+        let active_state = service
+            .load_project_state(std::slice::from_ref(&pack))
+            .expect("pruned active state");
+        assert_eq!(active_state.project_selections.len(), 1);
+        assert!(active_state
+            .project_selections
+            .contains_key("project-active"));
+        let active_view = custom_pack_view(&pack, &active_state);
+        assert_eq!(active_view.selected_project_count, 1);
+        assert!(!active_view.deletable);
+
+        connection
+            .execute(
+                "UPDATE projects SET registered = 0 WHERE id = 'project-active'",
+                [],
+            )
+            .expect("unregister active project");
+        let restarted = CharacterService::production(
+            storage.clone(),
+            resolve_builtin_directory(Path::new("/missing")),
+        );
+        let restarted_state = restarted
+            .load_project_state(std::slice::from_ref(&pack))
+            .expect("restart prunes orphan selection");
+        assert!(restarted_state.project_selections.is_empty());
+        let inactive_view = custom_pack_view(&pack, &restarted_state);
+        assert_eq!(inactive_view.selected_project_count, 0);
+        assert!(inactive_view.deletable);
+        assert!(storage
+            .load_state()
+            .expect("persisted pruned state")
+            .project_selections
+            .is_empty());
     }
 
     #[test]

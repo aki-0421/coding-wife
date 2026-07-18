@@ -62,13 +62,17 @@ impl CharacterStateFile {
             },
         );
     }
+
+    pub fn remove_project(&mut self, project_id: &str) -> bool {
+        self.project_selections.remove(project_id).is_some()
+    }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct LegacyCharacterStateFile {
     schema_version: u16,
-    workspace_selections: BTreeMap<String, LegacyCharacterSelection>,
+    workspace_selections: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,27 +228,18 @@ impl CharacterStorage {
             ));
         }
 
-        let mut candidates: BTreeMap<String, Vec<(i64, String, String, String)>> = BTreeMap::new();
+        let mut candidates: BTreeMap<
+            String,
+            Vec<(
+                chrono::DateTime<chrono::FixedOffset>,
+                String,
+                String,
+                String,
+            )>,
+        > = BTreeMap::new();
         for (workspace_id, legacy_selection) in legacy.workspace_selections {
             if !is_workspace_id(&workspace_id) {
-                return Err(character_error(
-                    "character_library_get",
-                    "CHARACTER-STATE-INVALID",
-                    false,
-                ));
-            }
-            let (pack_id, selection_updated_at) = legacy_selection.parts();
-            let updated_at = chrono::DateTime::parse_from_rfc3339(&selection_updated_at)
-                .map_err(|_| {
-                    character_error("character_library_get", "CHARACTER-STATE-INVALID", false)
-                })?
-                .timestamp_millis();
-            if !is_opaque_pack_id(&pack_id) {
-                return Err(character_error(
-                    "character_library_get",
-                    "CHARACTER-STATE-INVALID",
-                    false,
-                ));
+                continue;
             }
             let Some(project_id) = resolve_project(&workspace_id)? else {
                 continue;
@@ -256,12 +251,20 @@ impl CharacterStorage {
                     false,
                 ));
             }
-            candidates.entry(project_id).or_default().push((
-                updated_at,
-                workspace_id,
-                pack_id,
-                selection_updated_at,
-            ));
+            let project_candidates = candidates.entry(project_id).or_default();
+            let Ok(legacy_selection) =
+                serde_json::from_value::<LegacyCharacterSelection>(legacy_selection)
+            else {
+                continue;
+            };
+            let (pack_id, selection_updated_at) = legacy_selection.parts();
+            let Ok(updated_at) = chrono::DateTime::parse_from_rfc3339(&selection_updated_at) else {
+                continue;
+            };
+            if !is_opaque_pack_id(&pack_id) {
+                continue;
+            }
+            project_candidates.push((updated_at, workspace_id, pack_id, selection_updated_at));
         }
 
         let mut migrated = CharacterStateFile::empty();
@@ -1011,6 +1014,152 @@ mod tests {
         let state_text =
             fs::read_to_string(app_data.0.join("characters/state.json")).expect("persisted state");
         assert!(!state_text.contains("workspaceSelections"));
+    }
+
+    #[test]
+    fn legacy_migration_salvages_mixed_candidates_and_falls_back_per_project() {
+        let app_data = TestDirectory::new();
+        let storage = CharacterStorage::open(&app_data.0).expect("storage");
+        let valid_pack = format!("custom:{}", uuid::Uuid::new_v4());
+        let missing_pack = format!("custom:{}", uuid::Uuid::new_v4());
+        let legacy = serde_json::json!({
+            "schemaVersion": 1,
+            "workspaceSelections": {
+                "../invalid-workspace": valid_pack,
+                "workspace-a-invalid-time": {
+                    "packId": valid_pack,
+                    "selectionUpdatedAt": "not-a-timestamp"
+                },
+                "workspace-a-valid": {
+                    "packId": valid_pack,
+                    "selectionUpdatedAt": "2026-07-18T02:00:00.000Z"
+                },
+                "workspace-b-invalid-pack": {
+                    "packId": "../unsafe-pack",
+                    "selectionUpdatedAt": "2026-07-18T03:00:00.000Z"
+                },
+                "workspace-b-invalid-shape": {
+                    "packId": valid_pack
+                },
+                "workspace-c-missing-pack": {
+                    "packId": missing_pack,
+                    "selectionUpdatedAt": "2026-07-18T04:00:00.000Z"
+                },
+                "workspace-d-invalid-value": 42,
+                "workspace-unregistered": valid_pack
+            }
+        });
+        fs::write(
+            &storage.state_path,
+            serde_json::to_vec_pretty(&legacy).expect("legacy bytes"),
+        )
+        .expect("legacy state");
+
+        let migrated = storage
+            .load_or_migrate_state(&HashSet::from([valid_pack.clone()]), |workspace_id| {
+                assert!(is_workspace_id(workspace_id));
+                Ok(match workspace_id {
+                    value if value.starts_with("workspace-a-") => Some("project-a".to_owned()),
+                    value if value.starts_with("workspace-b-") => Some("project-b".to_owned()),
+                    "workspace-c-missing-pack" => Some("project-c".to_owned()),
+                    "workspace-d-invalid-value" => Some("project-d".to_owned()),
+                    "workspace-unregistered" => None,
+                    _ => panic!("unexpected workspace {workspace_id}"),
+                })
+            })
+            .expect("mixed migration");
+
+        assert_eq!(migrated.selected_for("project-a"), valid_pack);
+        for project_id in ["project-b", "project-c", "project-d"] {
+            assert_eq!(
+                migrated.selected_for(project_id),
+                BUILTIN_HIYORI_PACK_ID,
+                "{project_id} must receive the deterministic fallback"
+            );
+            assert_eq!(
+                migrated.project_selections[project_id].selection_updated_at,
+                LEGACY_SELECTION_TIMESTAMP
+            );
+        }
+        assert_eq!(migrated.project_selections.len(), 4);
+    }
+
+    #[test]
+    fn legacy_migration_keeps_schema_and_top_level_structure_failures_typed() {
+        let app_data = TestDirectory::new();
+        let storage = CharacterStorage::open(&app_data.0).expect("storage");
+        let invalid_files = [
+            serde_json::json!({"schemaVersion": 99, "workspaceSelections": {}}),
+            serde_json::json!({"schemaVersion": 1}),
+            serde_json::json!({"schemaVersion": 1, "workspaceSelections": []}),
+            serde_json::json!({
+                "schemaVersion": 1,
+                "workspaceSelections": {},
+                "unexpected": true
+            }),
+        ];
+
+        for invalid in invalid_files {
+            fs::write(
+                &storage.state_path,
+                serde_json::to_vec(&invalid).expect("invalid fixture"),
+            )
+            .expect("invalid state");
+            let error = storage
+                .load_or_migrate_state(&HashSet::new(), |_| {
+                    panic!("structurally invalid state must not resolve workspaces")
+                })
+                .expect_err("top-level corruption remains a typed failure");
+            assert_eq!(error.code, "CHARACTER-STATE-INVALID");
+            assert_eq!(error.operation, "character_library_get");
+            assert!(!error.recoverable);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_migration_atomic_write_failure_retries_idempotently() {
+        let app_data = TestDirectory::new();
+        let storage = CharacterStorage::open(&app_data.0).expect("storage");
+        let valid_pack = format!("custom:{}", uuid::Uuid::new_v4());
+        let legacy = serde_json::json!({
+            "schemaVersion": 1,
+            "workspaceSelections": {
+                "workspace-retry": valid_pack
+            }
+        });
+        fs::write(
+            &storage.state_path,
+            serde_json::to_vec_pretty(&legacy).expect("legacy bytes"),
+        )
+        .expect("legacy state");
+        fs::set_permissions(&storage.root, fs::Permissions::from_mode(0o500))
+            .expect("read-only character root");
+
+        let first = storage.load_or_migrate_state(&HashSet::from([valid_pack.clone()]), |_| {
+            Ok(Some("project-retry".to_owned()))
+        });
+        fs::set_permissions(&storage.root, fs::Permissions::from_mode(0o700))
+            .expect("restore writable character root");
+        let error = first.expect_err("migration write must fail atomically");
+        assert_eq!(error.code, "CHARACTER-ATOMIC-WRITE");
+        let preserved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&storage.state_path).expect("preserved legacy state"))
+                .expect("preserved legacy json");
+        assert_eq!(preserved["schemaVersion"], 1);
+
+        let migrated = storage
+            .load_or_migrate_state(&HashSet::from([valid_pack.clone()]), |_| {
+                Ok(Some("project-retry".to_owned()))
+            })
+            .expect("retry migration");
+        assert_eq!(migrated.selected_for("project-retry"), valid_pack);
+        let reopened = storage
+            .load_or_migrate_state(&HashSet::new(), |_| {
+                panic!("completed migration must not resolve legacy workspaces")
+            })
+            .expect("idempotent restart");
+        assert_eq!(reopened, migrated);
     }
 
     #[cfg(unix)]
