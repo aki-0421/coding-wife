@@ -28,7 +28,7 @@ raw command classifierは自動説明の権限根拠ではない。候補抽出�
 
 Commit explanation controllerの状態は`not_generated` / `queued` / `running` / `generated` / `failed` / `unavailable` / `canceled`の7種に限定する。triggerは`auto_verified_commit` / `user_request` / `user_retry`だけである。
 
-controller は workspace generation と commit evidence ID の組を cache / dedupe key にする。単一の isolated support taskだけを`running`にし、残りはbounded queueへ置く。同じkeyの`queued` / `running` / `generated` replayは新規taskを作らず、生成済みpresentationを再利用する。active taskのcancelは実際のsupport `turn/interrupt`を待ち、timeout時もinterruptしてからterminal化する。workspace generationの変更、stale completion、process restart後の古いtaskを現在状態へ適用しない。
+controller は workspace generation と commit evidence ID の組を cache / dedupe key にする。単一の isolated support taskだけを`running`にし、残りはbounded queueへ置く。同じkeyの`queued` / `running` / `generated` replayは新規taskを作らず、生成済みpresentationを再利用する。後のcommit選択から同じkeyを要求した場合は、state、queued task、active taskまたはcached presentationの公開identityを最新request ID、selection version、triggerへ再束縛する。すでに実行中のsupport request IDはnative内部だけで保持し、最新公開identityからのCancelをその実taskへ対応付ける。active taskのcancelは実際のsupport `turn/interrupt`を待ち、timeout時もinterruptしてからterminal化する。workspace generationの変更、stale completion、process restart後の古いtaskを現在状態へ適用しない。
 
 controllerのstate / presentation eventはcommit explanation専用channelだけへ流す。main Codex conversation、main `CodexEvent`、workspace conversation historyへsupport request、delta、outputを追加しない。永続cacheは持たず、restart後は安全な`not_generated`から再開する。
 

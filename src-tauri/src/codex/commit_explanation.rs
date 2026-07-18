@@ -218,6 +218,7 @@ struct ExplanationTask {
 #[derive(Clone)]
 struct ActiveTask {
     task: ExplanationTask,
+    executor_request_id: String,
     canceled: Arc<AtomicBool>,
 }
 
@@ -525,8 +526,60 @@ impl CommitExplanationController {
                     | CommitExplanationControllerStatus::Unavailable
                     | CommitExplanationControllerStatus::Canceled
             );
-            if !terminal || dispatch.request.trigger != CommitExplanationTrigger::UserRetry {
-                return Ok(existing);
+            if !terminal {
+                let rebound = CommitExplanationControllerStateV1 {
+                    status: existing.status,
+                    retryable: existing.retryable,
+                    presentation_available: existing.presentation_available,
+                    error_code: existing.error_code,
+                    updated_at: now(),
+                    ..lifecycle_state(&dispatch.request, existing.status)
+                };
+                let rebound_applied = match existing.status {
+                    CommitExplanationControllerStatus::Queued => data
+                        .queue
+                        .iter_mut()
+                        .find(|task| task.key == key)
+                        .map(|task| task.dispatch = dispatch.clone())
+                        .is_some(),
+                    CommitExplanationControllerStatus::Running => data
+                        .active
+                        .as_mut()
+                        .filter(|active| active.task.key == key)
+                        .map(|active| active.task.dispatch = dispatch.clone())
+                        .is_some(),
+                    CommitExplanationControllerStatus::Generated => data
+                        .cache
+                        .get_mut(&key)
+                        .map(|cached| cached.request = dispatch.request.clone())
+                        .is_some(),
+                    _ => false,
+                };
+                if !rebound_applied {
+                    return Err(controller_error(
+                        "CODEX-SUPPORT-STATE-MISSING",
+                        OPERATION_REQUEST,
+                        false,
+                    ));
+                }
+                data.states.insert(key, rebound.clone());
+                drop(data);
+                self.inner.events.emit_state(&rebound);
+                return Ok(rebound);
+            }
+            if dispatch.request.trigger != CommitExplanationTrigger::UserRetry {
+                let rebound = CommitExplanationControllerStateV1 {
+                    status: existing.status,
+                    retryable: existing.retryable,
+                    presentation_available: existing.presentation_available,
+                    error_code: existing.error_code,
+                    updated_at: now(),
+                    ..lifecycle_state(&dispatch.request, existing.status)
+                };
+                data.states.insert(key, rebound.clone());
+                drop(data);
+                self.inner.events.emit_state(&rebound);
+                return Ok(rebound);
             }
         } else if dispatch.request.trigger == CommitExplanationTrigger::UserRetry {
             return Err(controller_error(
@@ -620,12 +673,12 @@ impl CommitExplanationController {
                 && active.task.dispatch.request.selection_version == request.selection_version)
                 .then(|| active.task.key.clone())
         });
-        let mut cancel_active = false;
+        let mut active_executor_request_id = None;
         let key = if let Some(key) = active_key {
             if let Some(active) = data.active.as_ref() {
                 active.canceled.store(true, Ordering::Release);
+                active_executor_request_id = Some(active.executor_request_id.clone());
             }
-            cancel_active = true;
             Some(key)
         } else {
             let position = data.queue.iter().position(|task| {
@@ -656,8 +709,8 @@ impl CommitExplanationController {
         data.states.insert(key, state.clone());
         drop(data);
         self.inner.events.emit_state(&state);
-        if cancel_active {
-            let _ = self.inner.executor.cancel(&request.request_id).await;
+        if let Some(executor_request_id) = active_executor_request_id {
+            let _ = self.inner.executor.cancel(&executor_request_id).await;
         }
         Ok(Some(state))
     }
@@ -782,7 +835,7 @@ impl CommitExplanationController {
         let active_request = data.active.as_ref().and_then(|active| {
             (!scope_matches_task(&request, &active.task)).then(|| {
                 active.canceled.store(true, Ordering::Release);
-                active.task.dispatch.request.request_id.clone()
+                active.executor_request_id.clone()
             })
         });
         if let Some(active) = data.active.as_ref() {
@@ -822,10 +875,7 @@ impl CommitExplanationController {
         }
         let active = data.active.as_ref().map(|active| {
             active.canceled.store(true, Ordering::Release);
-            (
-                active.task.key.clone(),
-                active.task.dispatch.request.request_id.clone(),
-            )
+            (active.task.key.clone(), active.executor_request_id.clone())
         });
         if let Some((key, _)) = active.as_ref() {
             if let Some(previous) = data.states.get(key).cloned() {
@@ -873,6 +923,7 @@ impl CommitExplanationController {
                 data.states.insert(task.key.clone(), running.clone());
                 data.active = Some(ActiveTask {
                     task: task.clone(),
+                    executor_request_id: task.dispatch.request.request_id.clone(),
                     canceled: canceled.clone(),
                 });
                 (task, canceled, running)
@@ -910,14 +961,15 @@ impl CommitExplanationController {
 
             let (state, presentation) = {
                 let mut data = self.inner.data.lock().await;
-                let active_matches = data.active.as_ref().is_some_and(|active| {
-                    active.task.dispatch.request.request_id == task.dispatch.request.request_id
+                let rebound_request = data.active.as_ref().and_then(|active| {
+                    (active.executor_request_id == task.dispatch.request.request_id)
+                        .then(|| active.task.dispatch.request.clone())
                 });
-                if active_matches {
+                if rebound_request.is_some() {
                     data.active = None;
                 }
                 let previous = data.states.get(&task.key).cloned();
-                if !active_matches
+                if rebound_request.is_none()
                     || !data
                         .active_scope
                         .as_ref()
@@ -928,13 +980,16 @@ impl CommitExplanationController {
                 {
                     (None, None)
                 } else {
+                    let output_request = rebound_request
+                        .as_ref()
+                        .expect("active request checked above");
                     match outcome {
                         Ok(result)
                             if result.request_id == task.dispatch.request.request_id
                                 && result.explanation.locale == task.dispatch.request.locale =>
                         {
                             let cached = CachedExplanation {
-                                request: task.dispatch.request.clone(),
+                                request: output_request.clone(),
                                 result,
                             };
                             insert_cache(
@@ -950,7 +1005,7 @@ impl CommitExplanationController {
                                 error_code: None,
                                 updated_at: now(),
                                 ..lifecycle_state(
-                                    &task.dispatch.request,
+                                    output_request,
                                     CommitExplanationControllerStatus::Generated,
                                 )
                             };
@@ -965,7 +1020,7 @@ impl CommitExplanationController {
                         }
                         Ok(_) => {
                             let state = terminal_state(
-                                &task.dispatch.request,
+                                output_request,
                                 CommitExplanationControllerStatus::Failed,
                                 true,
                                 Some("CODEX-SUPPORT-RESULT-STALE"),
@@ -976,7 +1031,7 @@ impl CommitExplanationController {
                         Err(error) => {
                             let (status, retryable) = error_state(error);
                             let state = terminal_state(
-                                &task.dispatch.request,
+                                output_request,
                                 status,
                                 retryable,
                                 Some(error.code()),
@@ -1681,9 +1736,19 @@ mod tests {
         )
         .await;
 
-        let duplicate = dispatch('a', "request-duplicate", 1);
-        let duplicate_state = controller.request(duplicate).await.expect("duplicate");
-        assert_eq!(duplicate_state, generated);
+        let mut duplicate = dispatch('a', "request-duplicate", 1);
+        duplicate.request.selection_version = 2;
+        duplicate.evidence.selection_version = 2;
+        let duplicate_state = controller
+            .request(duplicate.clone())
+            .await
+            .expect("duplicate");
+        assert_eq!(
+            duplicate_state.request_id.as_deref(),
+            Some("request-duplicate")
+        );
+        assert_eq!(duplicate_state.selection_version, Some(2));
+        assert_eq!(duplicate_state.status, generated.status);
         assert_eq!(executor.calls.load(Ordering::Acquire), 1);
 
         let replay = controller
@@ -1692,7 +1757,7 @@ mod tests {
                 workspace_id: first.request.workspace_id.clone(),
                 workspace_generation: 1,
                 commit_evidence_id: first.request.commit_evidence_id.clone(),
-                request_id: first.request.request_id.clone(),
+                request_id: duplicate.request.request_id.clone(),
                 mode: CommitExplanationPresentationMode::ReplayNarration,
                 requested_at: now(),
             })
@@ -1703,6 +1768,58 @@ mod tests {
             CommitExplanationPresentationMode::ReplayNarration
         );
         assert_eq!(events.presentations.lock().expect("events").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn active_dedupe_rebinds_the_latest_selection_and_cancels_the_underlying_task() {
+        let (controller, executor, _) = harness(FakeMode::Block, 2, 4, Duration::from_secs(2));
+        let first = dispatch('a', "request-first", 1);
+        controller.request(first.clone()).await.expect("first");
+        wait_for_status(
+            &controller,
+            &first,
+            CommitExplanationControllerStatus::Running,
+        )
+        .await;
+
+        let mut rebound = dispatch('a', "request-rebound", 1);
+        rebound.request.selection_version = 2;
+        rebound.evidence.selection_version = 2;
+        let state = controller.request(rebound.clone()).await.expect("rebound");
+        assert_eq!(state.request_id.as_deref(), Some("request-rebound"));
+        assert_eq!(state.selection_version, Some(2));
+        assert_eq!(state.status, CommitExplanationControllerStatus::Running);
+        assert_eq!(executor.calls.load(Ordering::Acquire), 1);
+
+        let canceled = controller
+            .cancel(CommitExplanationCancelRequestedV1 {
+                schema_version: 1,
+                request_id: "request-rebound".to_owned(),
+                workspace_generation: 1,
+                selection_version: 2,
+                reason: CommitExplanationCancelReason::User,
+                requested_at: now(),
+            })
+            .await
+            .expect("cancel")
+            .expect("canceled state");
+        assert_eq!(canceled.request_id.as_deref(), Some("request-rebound"));
+        assert_eq!(executor.cancels.load(Ordering::Acquire), 1);
+
+        let mut terminal_rebound = dispatch('a', "request-terminal-rebound", 1);
+        terminal_rebound.request.selection_version = 3;
+        terminal_rebound.evidence.selection_version = 3;
+        let terminal = controller
+            .request(terminal_rebound)
+            .await
+            .expect("terminal rebound");
+        assert_eq!(
+            terminal.request_id.as_deref(),
+            Some("request-terminal-rebound")
+        );
+        assert_eq!(terminal.selection_version, Some(3));
+        assert_eq!(terminal.status, CommitExplanationControllerStatus::Canceled);
+        assert_eq!(executor.calls.load(Ordering::Acquire), 1);
     }
 
     #[tokio::test]
