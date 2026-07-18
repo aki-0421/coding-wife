@@ -54,12 +54,12 @@ export function I18nProvider({
 
   const setLocale = useCallback(
     async (nextLocale: SupportedLocale) => {
-      if (nextLocale === locale) {
-        return true
-      }
-
       if (preferencesController !== undefined) {
         return preferencesController.update({ locale: nextLocale })
+      }
+
+      if (nextLocale === locale) {
+        return true
       }
 
       const didPersist = store?.write(nextLocale) ?? false

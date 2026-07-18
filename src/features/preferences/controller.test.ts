@@ -97,9 +97,15 @@ describe("AppPreferencesController", () => {
     })
 
     const first = controller.update({ locale: "ja" })
-    const second = controller.update({ locale: "en" })
     await flushMicrotasks()
     expect(gateway.updates).toHaveLength(1)
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "saving",
+      snapshot: { preferences: { locale: "en" } },
+      pendingPreferences: { locale: "ja" },
+    })
+
+    const second = controller.update({ locale: "en" })
     gateway.updateResults[0]?.resolve(snapshot(1, "ja"))
     await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
 
@@ -126,17 +132,14 @@ describe("AppPreferencesController", () => {
     const motion = controller.update({ reducedMotion: "on" })
     const visibility = controller.update({ characterVisibility: "hidden" })
     await flushMicrotasks()
-    gateway.updateResults[0]?.resolve(
-      snapshot(1, "en", { reducedMotion: "on" }),
-    )
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
-    expect(gateway.updates[1]).toMatchObject({
-      expectedVersion: 1,
+    expect(gateway.updates).toHaveLength(1)
+    expect(gateway.updates[0]).toMatchObject({
+      expectedVersion: 0,
       reducedMotion: "on",
       characterVisibility: "hidden",
     })
-    gateway.updateResults[1]?.resolve(
-      snapshot(2, "en", {
+    gateway.updateResults[0]?.resolve(
+      snapshot(1, "en", {
         reducedMotion: "on",
         characterVisibility: "hidden",
       }),
@@ -148,6 +151,89 @@ describe("AppPreferencesController", () => {
     expect(controller.getSnapshot().snapshot.preferences).toMatchObject({
       reducedMotion: "on",
       characterVisibility: "hidden",
+    })
+  })
+
+  it("writes only the latest follow-up after an in-flight A to B to A change", async () => {
+    const gateway = new ControlledGateway()
+    gateway.initial = snapshot(0, "ja")
+    const controller = new AppPreferencesController(gateway, "ja")
+    await controller.initialize()
+
+    const toEnglish = controller.update({ locale: "en" })
+    await flushMicrotasks()
+    expect(gateway.updates).toHaveLength(1)
+
+    const backToJapanese = controller.update({ locale: "ja" })
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "saving",
+      snapshot: { preferences: { locale: "ja", version: 0 } },
+      pendingPreferences: { locale: "ja" },
+    })
+
+    gateway.updateResults[0]?.resolve(snapshot(1, "en"))
+    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
+    expect(controller.getSnapshot().snapshot.preferences).toMatchObject({
+      locale: "ja",
+      version: 0,
+    })
+    expect(gateway.updates[1]).toMatchObject({
+      expectedVersion: 1,
+      locale: "ja",
+    })
+
+    gateway.updateResults[1]?.resolve(snapshot(2, "ja"))
+    await expect(Promise.all([toEnglish, backToJapanese])).resolves.toEqual([
+      true,
+      true,
+    ])
+    expect(gateway.updates).toHaveLength(2)
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "ready",
+      snapshot: { preferences: { locale: "ja", version: 2 } },
+      pendingPreferences: null,
+    })
+  })
+
+  it("keeps the newest intent when an older in-flight write fails", async () => {
+    const gateway = new ControlledGateway()
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+
+    const stale = controller.update({ locale: "ja" })
+    await flushMicrotasks()
+    const latest = controller.update({ locale: "en", reducedMotion: "on" })
+    gateway.updateResults[0]?.reject(
+      new AppPreferencesBoundaryError({
+        code: "APP-PREFERENCES-WRITE",
+        operation: "app_preferences_update",
+        recoverable: true,
+        userMessageKey: "preferences.error.generic",
+        detailRef: "app-preferences-v1",
+      }),
+    )
+
+    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "saving",
+      snapshot: { preferences: { locale: "en", reducedMotion: "system" } },
+      pendingPreferences: { locale: "en", reducedMotion: "on" },
+      errorCode: null,
+    })
+    expect(gateway.updates[1]).toMatchObject({
+      expectedVersion: 0,
+      locale: "en",
+      reducedMotion: "on",
+    })
+
+    gateway.updateResults[1]?.resolve(
+      snapshot(1, "en", { reducedMotion: "on" }),
+    )
+    await expect(Promise.all([stale, latest])).resolves.toEqual([true, true])
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "ready",
+      snapshot: { preferences: { locale: "en", reducedMotion: "on" } },
+      pendingPreferences: null,
     })
   })
 
@@ -172,6 +258,7 @@ describe("AppPreferencesController", () => {
       status: "error",
       errorCode: "APP-PREFERENCES-WRITE",
       snapshot: { preferences: { locale: "en", version: 0 } },
+      pendingPreferences: null,
     })
   })
 

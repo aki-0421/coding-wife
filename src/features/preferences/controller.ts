@@ -19,6 +19,7 @@ export type AppPreferencesControllerStatus =
 export interface AppPreferencesControllerState {
   readonly status: AppPreferencesControllerStatus
   readonly snapshot: AppPreferencesSnapshotV1
+  readonly pendingPreferences: AppPreferencesV1 | null
   readonly errorCode: string | null
 }
 
@@ -54,6 +55,17 @@ function safeErrorCode(error: unknown): string {
     : "APP-PREFERENCES-IPC-UNAVAILABLE"
 }
 
+function samePreferences(
+  left: AppPreferencesV1,
+  right: AppPreferencesV1,
+): boolean {
+  return (
+    left.locale === right.locale &&
+    left.reducedMotion === right.reducedMotion &&
+    left.characterVisibility === right.characterVisibility
+  )
+}
+
 export class AppPreferencesController {
   readonly #gateway: AppPreferencesGateway
   readonly #defaultLocale: AppLocale
@@ -62,6 +74,7 @@ export class AppPreferencesController {
   #authoritative: AppPreferencesSnapshotV1
   #initializePromise: Promise<boolean> | null = null
   #operation: Promise<void> = Promise.resolve()
+  #updateDrain: Promise<boolean> | null = null
   #latestMutation = 0
   #desired: AppPreferencesV1 | null = null
   #disposed = false
@@ -74,7 +87,12 @@ export class AppPreferencesController {
       gateway.kind === "native" ? "native" : "demo_memory",
     )
     this.#authoritative = snapshot
-    this.#state = { status: "loading", snapshot, errorCode: null }
+    this.#state = {
+      status: "loading",
+      snapshot,
+      pendingPreferences: null,
+      errorCode: null,
+    }
   }
 
   public readonly subscribe = (listener: Listener): (() => void) => {
@@ -91,17 +109,20 @@ export class AppPreferencesController {
         if (this.#disposed) return false
         this.#authoritative = snapshot
         this.publish({
-          status: statusFor(snapshot),
+          status: this.#desired === null ? statusFor(snapshot) : "saving",
           snapshot,
+          pendingPreferences: this.#desired,
           errorCode: null,
         })
         return true
       },
       (error: unknown) => {
         if (this.#disposed) return false
+        this.#desired = null
         this.publish({
           status: "error",
           snapshot: this.#authoritative,
+          pendingPreferences: null,
           errorCode: safeErrorCode(error),
         })
         return false
@@ -116,82 +137,68 @@ export class AppPreferencesController {
       ...currentDesired,
       ...patch,
     }
+
+    if (
+      this.#desired === null &&
+      samePreferences(desired, this.#authoritative.preferences)
+    ) {
+      return Promise.resolve(true)
+    }
+
     this.#desired = desired
-    return this.enqueueMutation(async (mutation) => {
-      const current = this.#authoritative.preferences
-      const snapshot = await this.#gateway.update({
-        schemaVersion: appPreferencesSchemaVersion,
-        expectedVersion: current.version,
-        locale: desired.locale,
-        reducedMotion: desired.reducedMotion,
-        characterVisibility: desired.characterVisibility,
-      })
-      this.#authoritative = snapshot
-      if (mutation === this.#latestMutation) {
-        this.#desired = null
-        this.publish({
-          status: statusFor(snapshot),
-          snapshot,
-          errorCode: null,
-        })
-      }
+    this.#latestMutation += 1
+    this.publish({
+      ...this.#state,
+      status: "saving",
+      pendingPreferences: desired,
+      errorCode: null,
     })
+    return this.ensureUpdateDrain()
   }
 
   public reset(): Promise<boolean> {
-    this.#desired = {
+    const desired: AppPreferencesV1 = {
       ...createSafeDefaultPreferences(this.#defaultLocale),
       version: this.#authoritative.preferences.version,
       snapshotId: this.#authoritative.preferences.snapshotId,
     }
-    return this.enqueueMutation(async (mutation) => {
-      const snapshot = await this.#gateway.reset({
-        schemaVersion: appPreferencesSchemaVersion,
-        expectedVersion: this.#authoritative.preferences.version,
-        defaultLocale: this.#defaultLocale,
-      })
-      this.#authoritative = snapshot
-      if (mutation === this.#latestMutation) {
-        this.#desired = null
-        this.publish({
-          status: statusFor(snapshot),
-          snapshot,
-          errorCode: null,
-        })
-      }
+    this.#desired = desired
+    const mutation = ++this.#latestMutation
+    this.publish({
+      ...this.#state,
+      status: "saving",
+      pendingPreferences: desired,
+      errorCode: null,
     })
-  }
 
-  public retry(): Promise<boolean> {
-    if (this.#state.status !== "error") return Promise.resolve(true)
-    this.#initializePromise = null
-    this.publish({ ...this.#state, status: "loading", errorCode: null })
-    return this.initialize()
-  }
-
-  public dispose(): void {
-    this.#disposed = true
-    this.#listeners.clear()
-  }
-
-  private enqueueMutation(
-    operation: (mutation: number) => Promise<void>,
-  ): Promise<boolean> {
-    const mutation = this.#latestMutation + 1
-    this.#latestMutation = mutation
-    this.publish({ ...this.#state, status: "saving", errorCode: null })
     let succeeded = false
     const run = this.#operation.then(async () => {
       if (!(await this.initialize()) || this.#disposed) return
       try {
-        await operation(mutation)
+        const snapshot = await this.#gateway.reset({
+          schemaVersion: appPreferencesSchemaVersion,
+          expectedVersion: this.#authoritative.preferences.version,
+          defaultLocale: this.#defaultLocale,
+        })
+        this.#authoritative = snapshot
         succeeded = true
+
+        if (mutation === this.#latestMutation) {
+          this.#desired = null
+          this.publish({
+            status: statusFor(snapshot),
+            snapshot,
+            pendingPreferences: null,
+            errorCode: null,
+          })
+        }
       } catch (error) {
         if (mutation === this.#latestMutation && !this.#disposed) {
           this.#desired = null
           this.publish({
             status: "error",
             snapshot: this.#authoritative,
+            pendingPreferences: null,
             errorCode: safeErrorCode(error),
           })
         }
@@ -202,6 +209,108 @@ export class AppPreferencesController {
       () => undefined,
     )
     return run.then(() => succeeded)
+  }
+
+  public retry(): Promise<boolean> {
+    if (this.#state.status !== "error") return Promise.resolve(true)
+    this.#initializePromise = null
+    this.publish({
+      ...this.#state,
+      status: "loading",
+      pendingPreferences: null,
+      errorCode: null,
+    })
+    return this.initialize()
+  }
+
+  public dispose(): void {
+    this.#disposed = true
+    this.#desired = null
+    this.#listeners.clear()
+  }
+
+  private ensureUpdateDrain(): Promise<boolean> {
+    if (this.#updateDrain !== null) return this.#updateDrain
+
+    const drain = this.#operation.then(() => this.drainUpdates())
+    this.#updateDrain = drain
+    this.#operation = drain.then(
+      () => undefined,
+      () => undefined,
+    )
+    void drain.finally(() => {
+      if (this.#updateDrain === drain) this.#updateDrain = null
+    })
+    return drain
+  }
+
+  private async drainUpdates(): Promise<boolean> {
+    if (!(await this.initialize()) || this.#disposed) {
+      this.#desired = null
+      return false
+    }
+
+    while (this.#desired !== null && !this.#disposed) {
+      const candidate = this.#desired
+
+      if (samePreferences(candidate, this.#authoritative.preferences)) {
+        this.#desired = null
+        break
+      }
+
+      try {
+        const snapshot = await this.#gateway.update({
+          schemaVersion: appPreferencesSchemaVersion,
+          expectedVersion: this.#authoritative.preferences.version,
+          locale: candidate.locale,
+          reducedMotion: candidate.reducedMotion,
+          characterVisibility: candidate.characterVisibility,
+        })
+        this.#authoritative = snapshot
+
+        if (
+          this.#desired !== null &&
+          samePreferences(this.#desired, this.#authoritative.preferences)
+        ) {
+          this.#desired = null
+        }
+      } catch (error) {
+        if (
+          this.#desired !== null &&
+          !samePreferences(this.#desired, candidate)
+        ) {
+          continue
+        }
+
+        this.#desired = null
+        this.publish({
+          status: "error",
+          snapshot: this.#authoritative,
+          pendingPreferences: null,
+          errorCode: safeErrorCode(error),
+        })
+        return false
+      }
+
+      if (this.#desired !== null) {
+        this.publish({
+          ...this.#state,
+          status: "saving",
+          pendingPreferences: this.#desired,
+          errorCode: null,
+        })
+      }
+    }
+
+    if (this.#disposed) return false
+
+    this.publish({
+      status: statusFor(this.#authoritative),
+      snapshot: this.#authoritative,
+      pendingPreferences: null,
+      errorCode: null,
+    })
+    return true
   }
 
   private publish(state: AppPreferencesControllerState): void {

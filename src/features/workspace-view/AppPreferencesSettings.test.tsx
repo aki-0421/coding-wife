@@ -4,11 +4,13 @@ import { describe, expect, it, vi } from "vitest"
 
 import { I18nProvider, useI18n } from "@/features/localization"
 import {
+  AppPreferencesBoundaryError,
   AppPreferencesController,
   AppPreferencesProvider,
   DemoAppPreferencesGateway,
   type AppPreferencesGateway,
   type AppPreferencesSnapshotV1,
+  type AppPreferencesUpdateRequestV1,
 } from "@/features/preferences"
 import type { RuntimeState } from "@/features/runtime"
 import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
@@ -55,6 +57,64 @@ function renderSettings(controller: AppPreferencesController) {
       </I18nProvider>
     </AppPreferencesProvider>,
   )
+}
+
+interface Deferred<T> {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T) => void
+  readonly reject: (reason: unknown) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((accept, deny) => {
+    resolve = accept
+    reject = deny
+  })
+  return { promise, resolve, reject }
+}
+
+function nativeSnapshot(
+  version: number,
+  locale: "ja" | "en",
+): AppPreferencesSnapshotV1 {
+  return {
+    schemaVersion: 1,
+    preferences: {
+      schemaVersion: 1,
+      version,
+      snapshotId: `123e4567-e89b-42d3-a456-${String(version + 1).padStart(12, "0")}`,
+      locale,
+      reducedMotion: "system",
+      characterVisibility: "visible",
+    },
+    persistence: "native",
+    recoveryCode: null,
+  }
+}
+
+class DeferredNativePreferencesGateway implements AppPreferencesGateway {
+  readonly kind = "native" as const
+  readonly updates: AppPreferencesUpdateRequestV1[] = []
+  readonly updateResults: Deferred<AppPreferencesSnapshotV1>[] = []
+
+  get(): Promise<AppPreferencesSnapshotV1> {
+    return Promise.resolve(nativeSnapshot(0, "en"))
+  }
+
+  update(
+    request: AppPreferencesUpdateRequestV1,
+  ): Promise<AppPreferencesSnapshotV1> {
+    this.updates.push(request)
+    const result = deferred<AppPreferencesSnapshotV1>()
+    this.updateResults.push(result)
+    return result.promise
+  }
+
+  reset(): Promise<AppPreferencesSnapshotV1> {
+    return Promise.resolve(nativeSnapshot(1, "en"))
+  }
 }
 
 describe("AppPreferencesSettings", () => {
@@ -176,5 +236,125 @@ describe("AppPreferencesSettings", () => {
     expect(
       screen.getAllByRole("button", { name: "Reset preferences" }),
     ).not.toHaveLength(0)
+  })
+
+  it("shows the pending native locale but applies app copy only after save succeeds", async () => {
+    const user = userEvent.setup()
+    const gateway = new DeferredNativePreferencesGateway()
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+    renderSettings(controller)
+
+    const japanese = screen.getByRole("radio", { name: "日本語" })
+    await user.click(japanese)
+
+    expect(japanese).toHaveAttribute("aria-checked", "true")
+    expect(japanese).not.toBeDisabled()
+    expect(japanese).toHaveFocus()
+    expect(screen.getByText("Saving preferences…")).toBeVisible()
+    expect(
+      screen.getByRole("heading", { level: 2, name: "General" }),
+    ).toBeVisible()
+    expect(document.documentElement).toHaveAttribute("lang", "en")
+
+    gateway.updateResults[0]?.resolve(nativeSnapshot(1, "ja"))
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "一般" }),
+    ).toBeVisible()
+    expect(document.documentElement).toHaveAttribute("lang", "ja")
+  })
+
+  it("rolls back a failed native locale and retries the latest intent", async () => {
+    const user = userEvent.setup()
+    const gateway = new DeferredNativePreferencesGateway()
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+    renderSettings(controller)
+
+    await user.click(screen.getByRole("radio", { name: "日本語" }))
+    gateway.updateResults[0]?.reject(
+      new AppPreferencesBoundaryError({
+        code: "APP-PREFERENCES-WRITE",
+        operation: "app_preferences_update",
+        recoverable: true,
+        userMessageKey: "preferences.error.generic",
+        detailRef: "app-preferences-v1",
+      }),
+    )
+
+    const errorMessage = await screen.findByText(
+      "The language could not be saved. The previous language is unchanged.",
+    )
+    const error = errorMessage.parentElement
+    expect(error).not.toBeNull()
+    if (error === null) throw new Error("Expected an assertive locale error")
+    expect(error).toHaveAttribute("role", "alert")
+    expect(error).toBeVisible()
+    expect(screen.getByRole("radio", { name: "English" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    expect(document.documentElement).toHaveAttribute("lang", "en")
+
+    await user.click(within(error).getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(gateway.updates).toHaveLength(2))
+    gateway.updateResults[1]?.resolve(nativeSnapshot(1, "ja"))
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "一般" }),
+    ).toBeVisible()
+  })
+
+  it("coalesces rapid Japanese to English to Japanese intent without snapping back", async () => {
+    const user = userEvent.setup()
+    const gateway = new DeferredNativePreferencesGateway()
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+    renderSettings(controller)
+
+    await user.click(screen.getByRole("radio", { name: "日本語" }))
+    await user.click(screen.getByRole("radio", { name: "English" }))
+    const japanese = screen.getByRole("radio", { name: "日本語" })
+    await user.click(japanese)
+
+    expect(japanese).toHaveAttribute("aria-checked", "true")
+    expect(japanese).toHaveFocus()
+    expect(gateway.updates).toHaveLength(1)
+    expect(
+      screen.getByRole("heading", { level: 2, name: "General" }),
+    ).toBeVisible()
+
+    gateway.updateResults[0]?.resolve(nativeSnapshot(1, "ja"))
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "一般" }),
+    ).toBeVisible()
+    expect(gateway.updates).toHaveLength(1)
+  })
+
+  it("never applies a late locale response and settles safely after unmount", async () => {
+    const user = userEvent.setup()
+    const gateway = new DeferredNativePreferencesGateway()
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+    const view = renderSettings(controller)
+
+    await user.click(screen.getByRole("radio", { name: "日本語" }))
+    await user.click(screen.getByRole("radio", { name: "English" }))
+    gateway.updateResults[0]?.resolve(nativeSnapshot(1, "ja"))
+    await waitFor(() => expect(gateway.updates).toHaveLength(2))
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "General" }),
+    ).toBeVisible()
+    expect(document.documentElement).toHaveAttribute("lang", "en")
+    expect(screen.queryByRole("heading", { level: 2, name: "一般" })).toBeNull()
+
+    view.unmount()
+    gateway.updateResults[1]?.resolve(nativeSnapshot(2, "en"))
+    await waitFor(() =>
+      expect(controller.getSnapshot()).toMatchObject({
+        status: "ready",
+        snapshot: { preferences: { locale: "en", version: 2 } },
+      }),
+    )
   })
 })

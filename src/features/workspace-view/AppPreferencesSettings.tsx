@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AlertTriangleIcon, DatabaseIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -110,31 +110,42 @@ export function AppPreferencesSettings({
   const controller = useAppPreferencesController()
   const state = useAppPreferences()
   const preferences = state.snapshot.preferences
+  const controlPreferences = state.pendingPreferences ?? preferences
   const [failedLocale, setFailedLocale] = useState<SupportedLocale | null>(null)
   const [resetOpen, setResetOpen] = useState(false)
   const [resetting, setResetting] = useState(false)
   const resetTriggerRef = useRef<HTMLButtonElement>(null)
   const resetCancelRef = useRef<HTMLButtonElement>(null)
+  const localeIntentRef = useRef(0)
+  const mountedRef = useRef(true)
   const loading = state.status === "loading"
   const invalid = state.status === "error" || state.status === "recovery"
 
-  const selectLocale = async (nextLocale: SupportedLocale) => {
-    if (await setLocale(nextLocale)) {
-      setFailedLocale(null)
-    } else {
-      setFailedLocale(nextLocale)
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
     }
+  }, [])
+
+  const selectLocale = async (nextLocale: SupportedLocale) => {
+    const intent = localeIntentRef.current + 1
+    localeIntentRef.current = intent
+    setFailedLocale(null)
+    const succeeded = await setLocale(nextLocale)
+    if (!mountedRef.current || intent !== localeIntentRef.current) return
+    setFailedLocale(succeeded ? null : nextLocale)
   }
 
   const resetPreferences = async () => {
     setResetting(true)
     try {
       if (await controller.reset()) {
+        if (!mountedRef.current) return
         setFailedLocale(null)
         setResetOpen(false)
       }
     } finally {
-      setResetting(false)
+      if (mountedRef.current) setResetting(false)
     }
   }
 
@@ -168,7 +179,7 @@ export function AppPreferencesSettings({
               if (value === "ja" || value === "en") void selectLocale(value)
             }}
             type="single"
-            value={locale}
+            value={state.pendingPreferences?.locale ?? locale}
           >
             <ToggleGroupItem value="ja">{t("locale.ja")}</ToggleGroupItem>
             <ToggleGroupItem value="en">{t("locale.en")}</ToggleGroupItem>
@@ -208,7 +219,7 @@ export function AppPreferencesSettings({
                 void controller.update({ reducedMotion: value })
               }
             }}
-            value={preferences.reducedMotion}
+            value={controlPreferences.reducedMotion}
           >
             <NativeSelectOption value="system">
               {copy.settingsView.system}
@@ -238,7 +249,7 @@ export function AppPreferencesSettings({
             aria-describedby="app-character-visible-description"
             aria-invalid={invalid || undefined}
             aria-label={copy.settingsView.characterVisible}
-            checked={preferences.characterVisibility === "visible"}
+            checked={controlPreferences.characterVisibility === "visible"}
             disabled={loading}
             id="app-character-visible"
             onCheckedChange={(visible) => {
