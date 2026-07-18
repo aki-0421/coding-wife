@@ -13,8 +13,8 @@ pub(crate) use super::git_layout::is_object_id;
 use super::git_layout::{GitLayoutError, GitRepositoryLayout};
 use super::runner::{GitRunner, GitRunnerError};
 use super::types::{
-    GitBaseline, GitSupportState, ProtectedChangeSummary, GIT_REVIEW_SCHEMA_VERSION,
-    MAX_CHANGED_BYTES, MAX_CHANGED_FILES,
+    ChangeKind, GitObservation, GitSupportState, ObserveGitRepositoryRequest,
+    ProtectedChangeSummary, GIT_REVIEW_SCHEMA_VERSION, MAX_CHANGED_BYTES, MAX_CHANGED_FILES,
 };
 
 const OPERATION_INSPECT: &str = "inspect_git_baseline";
@@ -97,13 +97,6 @@ pub(crate) struct RepositorySnapshot {
     pub blocked_reasons: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct BaselineRecord {
-    pub public: GitBaseline,
-    pub repository: RepositoryIdentity,
-    pub pre_existing: BTreeMap<String, FileSnapshot>,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct StatusEntry {
     path: String,
@@ -113,12 +106,12 @@ struct StatusEntry {
     conflicted: bool,
 }
 
-pub(crate) async fn capture_baseline(
+pub(crate) async fn capture_observation(
     runner: &GitRunner,
-    workspace_id: &str,
+    request: &ObserveGitRepositoryRequest,
     root: &Path,
-) -> Result<BaselineRecord, GitReviewError> {
-    validate_workspace_id(workspace_id)?;
+) -> Result<GitObservation, GitReviewError> {
+    validate_workspace_id(&request.workspace_id)?;
     let snapshot = inspect_repository(runner, root).await?;
     let support_state = if snapshot.blocked_reasons.is_empty() {
         GitSupportState::Ready
@@ -131,16 +124,26 @@ pub(crate) async fn capture_baseline(
         .map(|entry| ProtectedChangeSummary {
             file_id: file_id(&entry.relative_path),
             relative_path: entry.relative_path.clone(),
+            change_kind: if entry.untracked {
+                ChangeKind::Added
+            } else if matches!(entry.material, FileMaterial::Missing) {
+                ChangeKind::Deleted
+            } else {
+                ChangeKind::Modified
+            },
             staged: entry.staged,
             unstaged: entry.unstaged,
             untracked: entry.untracked,
-            content_hash: entry.material.content_hash(),
         })
         .collect();
-    let public = GitBaseline {
+    let public = GitObservation {
         schema_version: GIT_REVIEW_SCHEMA_VERSION,
-        baseline_id: format!("baseline-{}", uuid::Uuid::new_v4()),
-        workspace_id: workspace_id.to_owned(),
+        observation_id: observation_id(request),
+        workspace_id: request.workspace_id.clone(),
+        workspace_generation: request.workspace_generation,
+        reason: request.reason,
+        work_unit_id: request.work_unit_id.clone(),
+        source_event_id: request.source_event_id.clone(),
         support_state,
         head_sha: snapshot.identity.head_sha.clone(),
         head_reference: snapshot.identity.head_reference.clone(),
@@ -152,12 +155,24 @@ pub(crate) async fn capture_baseline(
         pre_existing,
         blocked_reasons: snapshot.blocked_reasons.clone(),
         captured_at: Utc::now().to_rfc3339(),
+        history_sequence: None,
     };
-    Ok(BaselineRecord {
-        public,
-        repository: snapshot.identity,
-        pre_existing: snapshot.changes,
-    })
+    Ok(public)
+}
+
+pub(crate) fn observation_id(request: &ObserveGitRepositoryRequest) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(request.workspace_id.as_bytes());
+    hasher.update(request.workspace_generation.to_le_bytes());
+    hasher.update(request.client_request_id.as_bytes());
+    hasher.update([request.reason as u8]);
+    if let Some(work_unit_id) = &request.work_unit_id {
+        hasher.update(work_unit_id.as_bytes());
+    }
+    if let Some(source_event_id) = &request.source_event_id {
+        hasher.update(source_event_id.as_bytes());
+    }
+    format!("observation-{}", &hex::encode(hasher.finalize())[..24])
 }
 
 pub(crate) async fn inspect_repository(

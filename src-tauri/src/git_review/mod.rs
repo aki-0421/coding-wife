@@ -1,12 +1,9 @@
-pub mod checkpoint;
 pub mod commands;
 pub mod error;
+pub(crate) mod evidence;
 pub(crate) mod git_layout;
 pub mod history;
-pub mod ownership;
 pub mod repository;
-pub mod restore;
-pub mod review_pack;
 pub mod runner;
 pub mod service;
 pub mod types;

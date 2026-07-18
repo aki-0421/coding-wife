@@ -23,9 +23,8 @@ use codex::commands::{
 use codex::supervisor::CodexSupervisor;
 use codex::workspace::WorkspaceService;
 use git_review::commands::{
-    cancel_git_restore, compare_checkpoints, confirm_git_restore,
-    evaluate_and_checkpoint_work_unit, inspect_git_baseline, list_git_review_packs,
-    preview_git_restore, read_evidence_diff, read_git_review_pack,
+    list_commit_evidence, observe_git_repository, observe_terminal_work_unit,
+    prepare_commit_explanation_evidence, read_commit_diff_file, read_commit_evidence,
 };
 use git_review::GitReviewService;
 use workspace_history::commands::{
@@ -232,15 +231,12 @@ pub fn run() {
             workspace_issue_delete_challenge,
             workspace_delete,
             history_append_domain_event,
-            inspect_git_baseline,
-            evaluate_and_checkpoint_work_unit,
-            list_git_review_packs,
-            read_git_review_pack,
-            read_evidence_diff,
-            compare_checkpoints,
-            preview_git_restore,
-            confirm_git_restore,
-            cancel_git_restore,
+            observe_git_repository,
+            observe_terminal_work_unit,
+            list_commit_evidence,
+            read_commit_evidence,
+            read_commit_diff_file,
+            prepare_commit_explanation_evidence,
             character_library_get,
             character_import_pick,
             character_read_asset,

@@ -14,14 +14,14 @@ use crate::codex::types::{ApprovalDecision, PendingKind, PendingRequestView, Pen
 use crate::codex::workspace::{
     AppPrivateWorkspaceRecord, GitRepositoryIdentity, ValidatedWorkspaceCandidate,
 };
-use crate::git_review::history::OperationJournalEvent;
 use crate::git_review::repository::{
     is_object_id, validate_opaque_id as validate_git_opaque_id, validate_relative_path,
 };
 use crate::git_review::types::{
-    CheckpointOperationState, DecisionEvidence, FailedAttemptEvidence, GateKind, GateOutcome,
-    GateResult, KnownRisk, ManifestEntry, ReviewPack, VerificationEvidence, VerificationResult,
-    GIT_REVIEW_SCHEMA_VERSION, MAX_CHANGED_BYTES, MAX_CHANGED_FILES, MAX_CHANGED_LINES,
+    CommitEvidenceDetail, CommitProducer, DecisionEvidence, FailedAttemptEvidence, GateKind,
+    GateResult, GitObservation, GitSupportState, KnownRisk, SkillInjectionMode, SkillPathAuthority,
+    VerificationEvidence, WorkUnitGitObservation, GIT_REVIEW_SCHEMA_VERSION, MAX_CHANGED_FILES,
+    MAX_CHANGED_LINES, MAX_EVIDENCE_ITEMS,
 };
 
 use super::types::{
@@ -34,7 +34,7 @@ use super::types::{
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
 const CURRENT_DATABASE_VERSION: i64 = 1;
-const MAX_EVENT_BYTES: usize = 1024 * 1024;
+const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
 const MAX_TIMELINE_PAGE: u32 = 200;
@@ -1354,18 +1354,10 @@ fn validate_event_shape(
                 return Err(history_error("HIST-EVENT-PAYLOAD", false));
             }
         }
-        ("git", "git.checkpoint.status.changed") => {
-            if !exact(&["status"], &["checkpointId"])
-                || !matches!(
-                    object.get("status").and_then(Value::as_str),
-                    Some("pending" | "blocked" | "review_ready" | "failed")
-                )
-                || !optional_public_string("checkpointId")
-            {
-                return Err(history_error("HIST-EVENT-PAYLOAD", false));
-            }
-        }
-        ("git", "git.checkpoint.operation.changed" | "git.review_pack.recorded") => {
+        (
+            "git",
+            "git.observation.recorded" | "git.work_unit.observed" | "git.commit_evidence.recorded",
+        ) => {
             if !validate_git_history_event(event, object) {
                 return Err(history_error("HIST-EVENT-PAYLOAD", false));
             }
@@ -1384,110 +1376,193 @@ fn validate_git_history_event(
     }
     let payload = Value::Object(object.clone());
     match event.kind.as_str() {
-        "git.checkpoint.operation.changed" => {
-            serde_json::from_value::<OperationJournalEvent>(payload)
-                .is_ok_and(|journal| validate_git_operation(&journal, &event.workspace_id))
-        }
-        "git.review_pack.recorded" => serde_json::from_value::<ReviewPack>(payload)
-            .is_ok_and(|pack| validate_git_review_pack(&pack, &event.workspace_id)),
+        "git.observation.recorded" => serde_json::from_value::<GitObservation>(payload)
+            .is_ok_and(|observation| validate_git_observation(&observation, &event.workspace_id)),
+        "git.work_unit.observed" => serde_json::from_value::<WorkUnitGitObservation>(payload)
+            .is_ok_and(|observation| validate_git_work_unit(&observation, &event.workspace_id)),
+        "git.commit_evidence.recorded" => serde_json::from_value::<CommitEvidenceDetail>(payload)
+            .is_ok_and(|evidence| validate_git_commit_evidence(&evidence, &event.workspace_id)),
         _ => false,
     }
 }
 
-fn validate_git_operation(journal: &OperationJournalEvent, workspace_id: &str) -> bool {
-    if journal.schema_version != GIT_REVIEW_SCHEMA_VERSION
-        || journal.workspace_id != workspace_id
-        || !valid_git_id(&journal.operation_id)
-        || !valid_git_id(&journal.client_request_id)
-        || !valid_git_id(&journal.workspace_id)
-        || !valid_git_id(&journal.work_unit_id)
-        || !valid_git_id(&journal.baseline_id)
-        || !is_object_id(&journal.expected_head_sha)
-        || !valid_git_target_reference(&journal.target_reference)
-        || !journal.commit_sha.as_deref().is_none_or(is_object_id)
-        || !journal.pack_digest.as_deref().is_none_or(valid_sha256)
-        || !journal
-            .error_code
+fn validate_git_observation(observation: &GitObservation, workspace_id: &str) -> bool {
+    observation.schema_version == GIT_REVIEW_SCHEMA_VERSION
+        && observation.workspace_id == workspace_id
+        && valid_git_id(&observation.observation_id)
+        && valid_git_id(&observation.workspace_id)
+        && observation.work_unit_id.as_deref().is_none_or(valid_git_id)
+        && observation
+            .source_event_id
             .as_deref()
-            .is_none_or(|value| valid_git_text(value, 160, false))
-        || validate_timestamp(&journal.observed_at).is_err()
-    {
-        return false;
-    }
-    if journal.pack_digest.is_some() && journal.commit_sha.is_none() {
-        return false;
-    }
-    match journal.state {
-        CheckpointOperationState::HistoryComplete => {
-            journal.commit_sha.is_some()
-                && journal.pack_digest.is_some()
-                && journal.error_code.is_none()
-        }
-        CheckpointOperationState::Failed => journal.error_code.is_some(),
-        _ => journal.error_code.is_none(),
-    }
+            .is_none_or(valid_git_id)
+        && (observation.head_sha == "unborn" || is_object_id(&observation.head_sha))
+        && observation
+            .head_reference
+            .as_deref()
+            .is_none_or(|value| valid_git_text(value, 512, false))
+        && valid_git_text(&observation.branch, 512, false)
+        && valid_sha256(&observation.index_fingerprint)
+        && valid_sha256(&observation.status_fingerprint)
+        && valid_sha256(&observation.repository_fingerprint)
+        && observation.pre_existing.len() <= MAX_CHANGED_FILES
+        && observation.pre_existing.iter().all(|change| {
+            valid_git_id(&change.file_id)
+                && validate_relative_path(&change.relative_path).is_ok()
+                && (change.staged || change.unstaged || change.untracked)
+        })
+        && observation.blocked_reasons.len() <= 20
+        && observation
+            .blocked_reasons
+            .iter()
+            .all(|reason| valid_git_text(reason, 256, false))
+        && (observation.support_state == GitSupportState::Blocked
+            || observation.blocked_reasons.is_empty())
+        && validate_timestamp(&observation.captured_at).is_ok()
+        && observation.history_sequence.is_none()
 }
 
-fn validate_git_review_pack(pack: &ReviewPack, workspace_id: &str) -> bool {
-    if pack.schema_version != GIT_REVIEW_SCHEMA_VERSION
-        || pack.workspace_id != workspace_id
-        || !valid_git_id(&pack.workspace_id)
-        || !valid_git_id(&pack.work_unit_id)
-        || !valid_git_id(&pack.checkpoint.checkpoint_id)
-        || !is_object_id(&pack.checkpoint.commit_sha)
-        || !is_object_id(&pack.checkpoint.parent_sha)
-        || pack.checkpoint.commit_sha == pack.checkpoint.parent_sha
-        || !valid_git_target_reference(&pack.checkpoint.target_reference)
-        || !valid_git_text(&pack.checkpoint.message, 8 * 1024, false)
-        || !valid_git_text(&pack.checkpoint.author_name, 256, false)
-        || !valid_git_text(&pack.checkpoint.author_email, 512, false)
-        || validate_timestamp(&pack.checkpoint.created_at).is_err()
-        || !valid_git_text(&pack.objective, 500, false)
-        || !(1..=20).contains(&pack.acceptance.len())
-        || !pack
+fn validate_git_work_unit(observation: &WorkUnitGitObservation, workspace_id: &str) -> bool {
+    observation.schema_version == GIT_REVIEW_SCHEMA_VERSION
+        && observation.workspace_id == workspace_id
+        && valid_git_id(&observation.workspace_id)
+        && valid_git_id(&observation.work_unit_id)
+        && valid_git_id(&observation.source_event_id)
+        && valid_git_id(&observation.before_observation_id)
+        && valid_git_id(&observation.after_observation_id)
+        && observation.new_commit_evidence_ids.len() <= MAX_EVIDENCE_ITEMS
+        && observation
+            .new_commit_evidence_ids
+            .iter()
+            .all(|value| valid_git_id(value))
+        && validate_commit_skill_audit(
+            &observation.commit_skill_injection,
+            observation.workspace_generation,
+            &observation.work_unit_id,
+        )
+        && observation
+            .reported_commit_block_reason
+            .as_deref()
+            .is_none_or(|value| valid_git_text(value, 2048, false))
+        && validate_timestamp(&observation.observed_at).is_ok()
+        && observation.history_sequence.is_none()
+}
+
+fn validate_git_commit_evidence(evidence: &CommitEvidenceDetail, workspace_id: &str) -> bool {
+    if evidence.schema_version != GIT_REVIEW_SCHEMA_VERSION
+        || evidence.workspace_id != workspace_id
+        || !valid_git_id(&evidence.commit_evidence_id)
+        || !valid_git_id(&evidence.workspace_id)
+        || !is_object_id(&evidence.identity.commit_sha)
+        || !valid_git_text(&evidence.identity.subject, 1024, false)
+        || !valid_git_text(&evidence.identity.body, 16 * 1024, true)
+        || !valid_git_text(&evidence.identity.author_name, 256, false)
+        || !valid_git_text(&evidence.identity.author_email, 512, false)
+        || validate_timestamp(&evidence.identity.authored_at).is_err()
+        || validate_timestamp(&evidence.identity.committed_at).is_err()
+        || evidence.identity.parents.len() > 32
+        || !evidence
+            .identity
+            .parents
+            .iter()
+            .all(|sha| is_object_id(sha))
+        || !evidence.work_unit_id.as_deref().is_none_or(valid_git_id)
+        || !evidence
+            .objective
+            .as_deref()
+            .is_none_or(|value| valid_git_text(value, 500, false))
+        || evidence.acceptance.len() > 20
+        || !evidence
             .acceptance
             .iter()
             .all(|item| valid_git_text(item, 1024, false))
-        || !validate_git_gates(&pack.gates)
-        || pack.manifest.is_empty()
-        || pack.manifest.len() > MAX_CHANGED_FILES
-        || !pack.manifest.iter().all(validate_git_manifest_entry)
-        || pack.diff_summary.files_changed > MAX_CHANGED_FILES as u64
-        || pack.diff_summary.binary_files > pack.diff_summary.files_changed
-        || pack.diff_summary.total_bytes > MAX_CHANGED_BYTES
-        || pack
+        || !evidence
+            .before_observation_id
+            .as_deref()
+            .is_none_or(valid_git_id)
+        || !evidence
+            .after_observation_id
+            .as_deref()
+            .is_none_or(valid_git_id)
+        || !evidence.source_event_id.as_deref().is_none_or(valid_git_id)
+        || !validate_git_gates(&evidence.gates)
+        || evidence.files.len() > MAX_CHANGED_FILES
+        || !evidence.files.iter().all(|file| {
+            valid_git_id(&file.file_evidence_id)
+                && validate_relative_path(&file.relative_path).is_ok()
+                && file.additions <= MAX_CHANGED_LINES
+                && file.deletions <= MAX_CHANGED_LINES
+        })
+        || evidence.diff_summary.files_changed != evidence.files.len() as u64
+        || evidence.diff_summary.files_changed > MAX_CHANGED_FILES as u64
+        || evidence.diff_summary.binary_files > evidence.diff_summary.files_changed
+        || evidence
             .diff_summary
             .additions
-            .saturating_add(pack.diff_summary.deletions)
+            .saturating_add(evidence.diff_summary.deletions)
             > MAX_CHANGED_LINES
-        || pack.verification.is_empty()
-        || pack.verification.len() > 100
-        || !pack.verification.iter().all(validate_git_verification)
-        || pack.decisions.len() > 100
-        || !pack.decisions.iter().all(validate_git_decision)
-        || pack.failed_attempts.len() > 100
-        || !pack.failed_attempts.iter().all(validate_git_failed_attempt)
-        || pack.risks.len() > 100
-        || !pack.risks.iter().all(validate_git_risk)
-        || pack.restore_guidance.is_empty()
-        || pack.restore_guidance.len() > 10
-        || !pack
-            .restore_guidance
+        || evidence.verification.len() > MAX_EVIDENCE_ITEMS
+        || !evidence.verification.iter().all(validate_git_verification)
+        || evidence.decisions.len() > MAX_EVIDENCE_ITEMS
+        || !evidence.decisions.iter().all(validate_git_decision)
+        || evidence.failed_attempts.len() > MAX_EVIDENCE_ITEMS
+        || !evidence
+            .failed_attempts
             .iter()
-            .all(|item| valid_git_text(item, 4096, false))
-        || pack.operation_state != CheckpointOperationState::HistoryComplete
-        || !valid_sha256(&pack.pack_digest)
-        || pack.history_sequence.is_some()
+            .all(validate_git_failed_attempt)
+        || evidence.risks.len() > MAX_EVIDENCE_ITEMS
+        || !evidence.risks.iter().all(validate_git_risk)
+        || evidence
+            .commit_skill_injection
+            .as_ref()
+            .is_some_and(|audit| {
+                !evidence
+                    .work_unit_id
+                    .as_deref()
+                    .is_some_and(|work_unit_id| {
+                        validate_commit_skill_audit(audit, audit.workspace_generation, work_unit_id)
+                    })
+            })
+        || validate_timestamp(&evidence.observed_at).is_err()
+        || evidence.history_sequence.is_some()
     {
         return false;
     }
 
-    let mut digest_source = pack.clone();
-    digest_source.pack_digest.clear();
-    digest_source.history_sequence = None;
-    serde_json::to_vec(&digest_source).is_ok_and(|encoded| {
-        pack.pack_digest == format!("sha256:{}", hex::encode(Sha256::digest(encoded)))
-    })
+    let correlated = evidence.work_unit_id.is_some()
+        && evidence.before_observation_id.is_some()
+        && evidence.after_observation_id.is_some()
+        && evidence.source_event_id.is_some()
+        && evidence.commit_skill_injection.is_some();
+    match evidence.producer {
+        CommitProducer::MainCodex => correlated,
+        CommitProducer::ExternalUncorrelated => {
+            !correlated
+                && evidence.work_unit_id.is_none()
+                && evidence.before_observation_id.is_none()
+                && evidence.after_observation_id.is_none()
+                && evidence.source_event_id.is_none()
+                && evidence.commit_skill_injection.is_none()
+        }
+    }
+}
+
+fn validate_commit_skill_audit(
+    audit: &crate::git_review::types::CommitSkillInjectionAudit,
+    workspace_generation: u64,
+    work_unit_id: &str,
+) -> bool {
+    audit.schema_version == GIT_REVIEW_SCHEMA_VERSION
+        && audit.skill_id == "coding-wife-commit-work"
+        && valid_git_text(&audit.skill_version, 64, false)
+        && valid_sha256(&audit.content_digest)
+        && audit.path_authority == SkillPathAuthority::AppBundle
+        && audit.injection_mode == SkillInjectionMode::SkillInput
+        && audit.workspace_generation == workspace_generation
+        && audit.work_unit_id == work_unit_id
+        && valid_git_id(&audit.work_unit_id)
+        && valid_git_id(&audit.client_request_id)
+        && validate_timestamp(&audit.injected_at).is_ok()
 }
 
 fn validate_git_gates(gates: &[GateResult]) -> bool {
@@ -1503,13 +1578,13 @@ fn validate_git_gates(gates: &[GateResult]) -> bool {
             GateKind::Risk => 3,
         };
         if seen[index]
-            || gate.outcome != GateOutcome::Pass
             || gate.reason_codes.len() > 20
             || !gate
                 .reason_codes
                 .iter()
                 .all(|code| valid_git_text(code, 256, false))
-            || !valid_sha256(&gate.observed_repository_fingerprint)
+            || gate.evidence_ids.len() > MAX_EVIDENCE_ITEMS
+            || !gate.evidence_ids.iter().all(|value| valid_git_id(value))
         {
             return false;
         }
@@ -1518,30 +1593,17 @@ fn validate_git_gates(gates: &[GateResult]) -> bool {
     seen.into_iter().all(|value| value)
 }
 
-fn validate_git_manifest_entry(entry: &ManifestEntry) -> bool {
-    valid_git_id(&entry.file_id)
-        && validate_relative_path(&entry.relative_path).is_ok()
-        && entry.before_hash.as_deref().is_none_or(valid_sha256)
-        && entry.after_hash.as_deref().is_none_or(valid_sha256)
-        && entry.additions <= MAX_CHANGED_LINES
-        && entry.deletions <= MAX_CHANGED_LINES
-        && entry
-            .reason_code
-            .as_deref()
-            .is_none_or(|value| valid_git_text(value, 256, false))
-}
-
 fn validate_git_verification(evidence: &VerificationEvidence) -> bool {
     valid_git_id(&evidence.evidence_id)
+        && valid_git_id(&evidence.source_event_id)
         && valid_git_text(&evidence.check, 512, false)
-        && evidence.result == VerificationResult::Passed
         && evidence.duration_ms <= 24 * 60 * 60 * 1_000
         && valid_git_text(&evidence.summary, 4096, true)
-        && valid_sha256(&evidence.observed_repository_fingerprint)
 }
 
 fn validate_git_decision(decision: &DecisionEvidence) -> bool {
     valid_git_id(&decision.decision_id)
+        && valid_git_id(&decision.source_event_id)
         && valid_git_text(&decision.summary, 2048, false)
         && valid_git_text(&decision.answer, 2048, false)
         && valid_git_text(&decision.rationale, 4096, true)
@@ -1549,6 +1611,7 @@ fn validate_git_decision(decision: &DecisionEvidence) -> bool {
 
 fn validate_git_failed_attempt(attempt: &FailedAttemptEvidence) -> bool {
     valid_git_id(&attempt.attempt_id)
+        && valid_git_id(&attempt.source_event_id)
         && valid_git_text(&attempt.approach, 2048, false)
         && valid_git_text(&attempt.outcome, 1024, false)
         && valid_git_text(&attempt.learning, 2048, true)
@@ -1556,6 +1619,7 @@ fn validate_git_failed_attempt(attempt: &FailedAttemptEvidence) -> bool {
 
 fn validate_git_risk(risk: &KnownRisk) -> bool {
     valid_git_id(&risk.risk_id)
+        && valid_git_id(&risk.source_event_id)
         && valid_git_text(&risk.category, 256, false)
         && valid_git_text(&risk.summary, 2048, false)
         && valid_git_text(&risk.mitigation, 2048, true)
@@ -1577,22 +1641,6 @@ fn valid_sha256(value: &str) -> bool {
     value.len() == 71
         && value.starts_with("sha256:")
         && value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn valid_git_target_reference(value: &str) -> bool {
-    value == "HEAD"
-        || (value.starts_with("refs/heads/")
-            && value.len() <= 251
-            && !value.contains("..")
-            && !value.contains("@{")
-            && !value.ends_with('.')
-            && !value.ends_with('/')
-            && !value
-                .chars()
-                .any(|character| character.is_control() || " ~^:?*[\\".contains(character))
-            && value.split('/').all(|component| {
-                !component.is_empty() && component != "." && !component.ends_with(".lock")
-            }))
 }
 
 fn public_text(value: &str, maximum: usize, allow_empty: bool, multiline: bool) -> bool {
@@ -2352,68 +2400,121 @@ mod tests {
             .expect("validated candidate")
     }
 
-    fn git_review_pack_payload(workspace_id: &str) -> Value {
+    fn git_observation_payload(workspace_id: &str) -> Value {
         let fingerprint = format!("sha256:{}", "c".repeat(64));
-        let payload = json!({
+        json!({
             "schemaVersion": 1,
-            "checkpoint": {
-                "checkpointId": "checkpoint-fixture",
+            "observationId": "observation-fixture",
+            "workspaceId": workspace_id,
+            "workspaceGeneration": 1,
+            "reason": "work_unit_started",
+            "workUnitId": "work-unit-fixture",
+            "sourceEventId": null,
+            "supportState": "ready",
+            "headSha": "a".repeat(40),
+            "headReference": "refs/heads/main",
+            "branch": "main",
+            "detached": false,
+            "indexFingerprint": fingerprint,
+            "statusFingerprint": format!("sha256:{}", "d".repeat(64)),
+            "repositoryFingerprint": format!("sha256:{}", "e".repeat(64)),
+            "preExisting": [],
+            "blockedReasons": [],
+            "capturedAt": "2026-07-18T00:00:01.000Z",
+            "historySequence": null
+        })
+    }
+
+    fn commit_skill_audit_payload() -> Value {
+        json!({
+            "schemaVersion": 1,
+            "skillId": "coding-wife-commit-work",
+            "skillVersion": "1.0.0",
+            "contentDigest": format!("sha256:{}", "f".repeat(64)),
+            "pathAuthority": "app_bundle",
+            "injectionMode": "skill_input",
+            "workspaceGeneration": 1,
+            "workUnitId": "work-unit-fixture",
+            "clientRequestId": "request-fixture",
+            "injectedAt": "2026-07-18T00:00:00.000Z"
+        })
+    }
+
+    fn git_commit_evidence_payload(workspace_id: &str) -> Value {
+        json!({
+            "schemaVersion": 1,
+            "commitEvidenceId": "commit-evidence-fixture",
+            "workspaceId": workspace_id,
+            "producer": "main_codex",
+            "identity": {
                 "commitSha": "a".repeat(40),
-                "parentSha": "b".repeat(40),
-                "targetReference": "refs/heads/main",
-                "message": "feat: add fixture\n\n- verify the bounded history shape",
+                "subject": "feat: add fixture",
+                "body": "- verify the bounded history shape",
                 "authorName": "Fixture Author",
                 "authorEmail": "fixture@example.invalid",
-                "createdAt": "2026-07-18T00:00:02.000Z"
+                "authoredAt": "2026-07-18T00:00:02.000Z",
+                "committedAt": "2026-07-18T00:00:02.000Z",
+                "parents": ["b".repeat(40)]
             },
-            "workspaceId": workspace_id,
             "workUnitId": "work-unit-fixture",
-            "objective": "Persist a bounded review pack",
-            "acceptance": ["The exact review pack can be restored"],
+            "objective": "Persist bounded commit evidence",
+            "acceptance": ["The exact evidence can be replayed"],
+            "beforeObservationId": "observation-fixture",
+            "afterObservationId": "observation-terminal-fixture",
+            "sourceEventId": "source-fixture",
             "gates": [
-                {"gate": "scope", "outcome": "pass", "reasonCodes": [], "observedRepositoryFingerprint": fingerprint},
-                {"gate": "ownership", "outcome": "pass", "reasonCodes": [], "observedRepositoryFingerprint": fingerprint},
-                {"gate": "verification", "outcome": "pass", "reasonCodes": [], "observedRepositoryFingerprint": fingerprint},
-                {"gate": "risk", "outcome": "pass", "reasonCodes": [], "observedRepositoryFingerprint": fingerprint}
+                {"gate": "scope", "outcome": "pass", "reasonCodes": [], "evidenceIds": []},
+                {"gate": "ownership", "outcome": "pass", "reasonCodes": [], "evidenceIds": []},
+                {"gate": "verification", "outcome": "pass", "reasonCodes": [], "evidenceIds": ["verification-fixture"]},
+                {"gate": "risk", "outcome": "pass", "reasonCodes": [], "evidenceIds": []}
             ],
-            "manifest": [{
-                "fileId": "file-fixture",
+            "files": [{
+                "fileEvidenceId": "file-fixture",
                 "relativePath": "src/main.rs",
                 "changeKind": "modified",
-                "ownership": "owned",
-                "beforeHash": format!("sha256:{}", "d".repeat(64)),
-                "afterHash": format!("sha256:{}", "e".repeat(64)),
                 "additions": 4,
                 "deletions": 1,
-                "reasonCode": null
+                "binary": false
             }],
             "diffSummary": {
                 "filesChanged": 1,
                 "additions": 4,
                 "deletions": 1,
-                "binaryFiles": 0,
-                "totalBytes": 128
+                "binaryFiles": 0
             },
             "verification": [{
-                "evidenceId": "evidence-fixture",
+                "evidenceId": "verification-fixture",
+                "sourceEventId": "source-fixture",
                 "check": "cargo test",
                 "result": "passed",
                 "durationMs": 1200,
-                "summary": "All focused tests passed",
-                "observedRepositoryFingerprint": fingerprint
+                "summary": "All focused tests passed"
             }],
             "decisions": [],
             "failedAttempts": [],
             "risks": [],
-            "restoreGuidance": ["Preview the affected files before creating a revert commit."],
-            "operationState": "history_complete",
-            "packDigest": "",
+            "commitSkillInjection": commit_skill_audit_payload(),
+            "observedAt": "2026-07-18T00:00:03.000Z",
             "historySequence": null
-        });
-        let mut pack = serde_json::from_value::<ReviewPack>(payload).expect("review pack fixture");
-        let encoded = serde_json::to_vec(&pack).expect("digest source");
-        pack.pack_digest = format!("sha256:{}", hex::encode(Sha256::digest(encoded)));
-        serde_json::to_value(pack).expect("review pack payload")
+        })
+    }
+
+    fn git_work_unit_payload(workspace_id: &str) -> Value {
+        json!({
+            "schemaVersion": 1,
+            "workspaceId": workspace_id,
+            "workspaceGeneration": 1,
+            "workUnitId": "work-unit-fixture",
+            "sourceEventId": "source-fixture",
+            "terminalState": "completed",
+            "beforeObservationId": "observation-fixture",
+            "afterObservationId": "observation-terminal-fixture",
+            "newCommitEvidenceIds": ["commit-evidence-fixture"],
+            "commitSkillInjection": commit_skill_audit_payload(),
+            "reportedCommitBlockReason": null,
+            "observedAt": "2026-07-18T00:00:04.000Z",
+            "historySequence": null
+        })
     }
 
     #[tokio::test]
@@ -2857,68 +2958,78 @@ mod tests {
             .register_candidate(&candidate(&root).await)
             .expect("registration")
             .workspace;
-        let pack_payload = git_review_pack_payload(&workspace.workspace_id);
-        let operation_payload = json!({
-            "schemaVersion": 1,
-            "operationId": "operation-fixture",
-            "clientRequestId": "request-fixture",
-            "workspaceId": workspace.workspace_id,
-            "workUnitId": "work-unit-fixture",
-            "baselineId": "baseline-fixture",
-            "state": "prepared",
-            "expectedHeadSha": "b".repeat(40),
-            "targetReference": "refs/heads/main",
-            "commitSha": null,
-            "packDigest": null,
-            "errorCode": null,
-            "observedAt": "2026-07-18T00:00:01.000Z"
-        });
-        let operation = NormalizedDomainEvent {
+        let observation_payload = git_observation_payload(&workspace.workspace_id);
+        let evidence_payload = git_commit_evidence_payload(&workspace.workspace_id);
+        let work_unit_payload = git_work_unit_payload(&workspace.workspace_id);
+        let parsed_evidence =
+            serde_json::from_value::<CommitEvidenceDetail>(evidence_payload.clone())
+                .expect("typed commit evidence fixture");
+        assert!(validate_git_commit_evidence(
+            &parsed_evidence,
+            &workspace.workspace_id
+        ));
+        let observation = NormalizedDomainEvent {
             schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
-            event_id: "git-operation-fixture-prepared".to_owned(),
+            event_id: "git-observation-fixture".to_owned(),
             workspace_id: workspace.workspace_id.clone(),
             session_id: None,
             producer: "git".to_owned(),
-            kind: "git.checkpoint.operation.changed".to_owned(),
+            kind: "git.observation.recorded".to_owned(),
             occurred_at: "2026-07-18T00:00:01.000Z".to_owned(),
-            payload: operation_payload.clone(),
+            payload: observation_payload.clone(),
         };
-        let pack = NormalizedDomainEvent {
+        let evidence = NormalizedDomainEvent {
             schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
-            event_id: "git-pack-checkpoint-fixture".to_owned(),
+            event_id: "git-evidence-fixture".to_owned(),
             workspace_id: workspace.workspace_id.clone(),
             session_id: None,
             producer: "git".to_owned(),
-            kind: "git.review_pack.recorded".to_owned(),
+            kind: "git.commit_evidence.recorded".to_owned(),
             occurred_at: "2026-07-18T00:00:03.000Z".to_owned(),
-            payload: pack_payload.clone(),
+            payload: evidence_payload.clone(),
+        };
+        let work_unit = NormalizedDomainEvent {
+            schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+            event_id: "git-work-unit-fixture".to_owned(),
+            workspace_id: workspace.workspace_id.clone(),
+            session_id: None,
+            producer: "git".to_owned(),
+            kind: "git.work_unit.observed".to_owned(),
+            occurred_at: "2026-07-18T00:00:04.000Z".to_owned(),
+            payload: work_unit_payload,
         };
 
         assert!(
             store
-                .append_event(&operation)
-                .expect("operation event")
+                .append_event(&observation)
+                .expect("observation event")
                 .inserted
         );
-        assert!(store.append_event(&pack).expect("review pack").inserted);
+        assert!(
+            store
+                .append_event(&evidence)
+                .expect("commit evidence")
+                .inserted
+        );
+        assert!(store.append_event(&work_unit).expect("work unit").inserted);
         assert!(
             !store
-                .append_event(&pack)
-                .expect("exact review pack replay")
+                .append_event(&evidence)
+                .expect("exact evidence replay")
                 .inserted
         );
 
         let extra_field = NormalizedDomainEvent {
-            event_id: "git-operation-extra-field".to_owned(),
+            event_id: "git-observation-extra-field".to_owned(),
             payload: {
-                let mut payload = operation_payload.clone();
+                let mut payload = observation_payload;
                 payload
                     .as_object_mut()
-                    .expect("operation object")
+                    .expect("observation object")
                     .insert("rawCommand".to_owned(), json!("git commit"));
                 payload
             },
-            ..operation.clone()
+            ..observation.clone()
         };
         assert_eq!(
             store.append_event(&extra_field).unwrap_err().code,
@@ -2926,36 +3037,33 @@ mod tests {
         );
 
         let wrong_workspace = NormalizedDomainEvent {
-            event_id: "git-pack-wrong-workspace".to_owned(),
+            event_id: "git-evidence-wrong-workspace".to_owned(),
             payload: {
-                let mut payload = pack_payload.clone();
+                let mut payload = evidence_payload.clone();
                 payload
                     .as_object_mut()
-                    .expect("pack object")
+                    .expect("evidence object")
                     .insert("workspaceId".to_owned(), json!("workspace-other"));
                 payload
             },
-            ..pack.clone()
+            ..evidence.clone()
         };
         assert_eq!(
             store.append_event(&wrong_workspace).unwrap_err().code,
             "HIST-EVENT-PAYLOAD"
         );
 
-        let invalid_digest = NormalizedDomainEvent {
-            event_id: "git-pack-invalid-digest".to_owned(),
+        let invalid_skill = NormalizedDomainEvent {
+            event_id: "git-evidence-invalid-skill".to_owned(),
             payload: {
-                let mut payload = pack_payload;
-                payload.as_object_mut().expect("pack object").insert(
-                    "packDigest".to_owned(),
-                    json!(format!("sha256:{}", "f".repeat(64))),
-                );
+                let mut payload = evidence_payload;
+                payload["commitSkillInjection"]["skillId"] = json!("untrusted-skill");
                 payload
             },
-            ..pack
+            ..evidence
         };
         assert_eq!(
-            store.append_event(&invalid_digest).unwrap_err().code,
+            store.append_event(&invalid_skill).unwrap_err().code,
             "HIST-EVENT-PAYLOAD"
         );
 
@@ -2965,11 +3073,15 @@ mod tests {
         assert!(timeline
             .items
             .iter()
-            .any(|event| event.kind == "git.checkpoint.operation.changed"));
+            .any(|event| event.kind == "git.observation.recorded"));
         assert!(timeline
             .items
             .iter()
-            .any(|event| event.kind == "git.review_pack.recorded"));
+            .any(|event| event.kind == "git.commit_evidence.recorded"));
+        assert!(timeline
+            .items
+            .iter()
+            .any(|event| event.kind == "git.work_unit.observed"));
 
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);

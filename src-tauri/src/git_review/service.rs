@@ -1,6 +1,6 @@
-//! Git review operation coordinator and fail-closed gate policy.
+//! Coordinator for read-only Git observation and commit evidence.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -12,41 +12,32 @@ use tokio::sync::Mutex;
 use crate::codex::workspace::WorkspaceService;
 use crate::workspace_history::WorkspaceHistoryService;
 
-use super::checkpoint::{
-    prepare_checkpoint, promote_checkpoint_objects, update_checkpoint_reference,
-    validate_commit_message,
-};
 use super::error::{git_error, GitReviewError};
-use super::history::{
-    GitReviewHistory, OperationJournalContext, OperationJournalEvent,
-    WorkspaceHistoryGitReviewStore,
+use super::evidence::{
+    build_commit_evidence, build_explanation_evidence, commit_sha_from_evidence_id,
+    list_commit_identities, new_commit_shas, parse_cursor, read_commit_diff, read_commit_identity,
+    summarize,
 };
-use super::ownership::{evaluate_ownership, OwnershipEvaluation};
+use super::git_layout::GitRepositoryLayout;
+use super::history::{GitReviewHistory, WorkspaceHistoryGitReviewStore};
 use super::repository::{
-    capture_baseline, inspect_repository, validate_opaque_id, validate_workspace_id,
-    BaselineRecord, RepositorySnapshot,
-};
-use super::restore::{
-    confirm_restore as execute_restore, preview_restore as build_restore_preview, RestoreIntent,
-};
-use super::review_pack::{
-    build_review_pack, compare_checkpoints, contains_redactable_secret, read_file_diff,
+    capture_observation, observation_id, validate_opaque_id, validate_workspace_id,
 };
 use super::runner::{GitRunner, GitRunnerError};
 use super::types::{
-    CancelRestoreRequest, CheckpointEvaluation, CheckpointOperationState, CheckpointStatus,
-    CompareCheckpointsRequest, CompareCheckpointsView, ConfirmRestoreRequest,
-    EvaluateCheckpointRequest, FileDiffView, GateKind, GateOutcome, GateResult, GitBaseline,
-    GitSupportState, InspectGitBaselineRequest, ListReviewPacksRequest, PreviewRestoreRequest,
-    ReadFileDiffRequest, RestorePreview, RestoreResult, ReviewPack, ReviewPackDetailRequest,
-    ReviewPackPage, RiskLevel, VerificationResult, GIT_REVIEW_SCHEMA_VERSION, MAX_CHANGED_FILES,
+    CommitDiffFile, CommitEvidenceDetail, CommitEvidenceDetailRequest, CommitEvidenceFilter,
+    CommitEvidencePage, CommitEvidenceV1, GitObservation, GitObservationReason,
+    ListCommitEvidenceRequest, ObserveGitRepositoryRequest, ObserveTerminalWorkUnitRequest,
+    PrepareCommitExplanationEvidenceRequest, ReadCommitDiffRequest, SkillInjectionMode,
+    SkillPathAuthority, TerminalWorkUnitObservationResult, WorkUnitGitObservation,
+    GIT_REVIEW_SCHEMA_VERSION, MAX_EVIDENCE_ITEMS,
 };
 
-const OPERATION_INSPECT: &str = "inspect_git_baseline";
-const OPERATION_CHECKPOINT: &str = "evaluate_and_checkpoint_work_unit";
-const OPERATION_READ: &str = "read_git_review_evidence";
-const MAX_FILE_EVENTS: usize = MAX_CHANGED_FILES * 8;
-const MAX_EVIDENCE_ITEMS: usize = 100;
+const OPERATION_OBSERVE: &str = "observe_git_repository";
+const OPERATION_TERMINAL: &str = "observe_terminal_work_unit";
+const OPERATION_READ: &str = "read_git_commit_evidence";
+const MAX_TEXT: usize = 8 * 1024;
+const MAX_LIST_LIMIT: u32 = 50;
 
 type ResolverFuture<'a> =
     Pin<Box<dyn Future<Output = Result<PathBuf, GitReviewError>> + Send + 'a>>;
@@ -68,43 +59,27 @@ impl GitWorkspaceResolver for RegisteredWorkspaceResolver {
                 .trusted_identity(workspace_id)
                 .await
                 .map(|identity| identity.canonical_root)
-                .ok_or_else(|| git_error("GIT-WORKSPACE-NOT-TRUSTED", OPERATION_INSPECT, false))
+                .ok_or_else(|| git_error("GIT-WORKSPACE-NOT-TRUSTED", OPERATION_OBSERVE, false))
         })
     }
 }
 
 #[derive(Clone)]
-struct PendingHistory {
-    pack: ReviewPack,
-    ref_updated: OperationJournalEvent,
-    history_complete: OperationJournalEvent,
-    evaluation: CheckpointEvaluation,
+struct CachedResponse<T> {
+    digest: String,
+    response: T,
 }
 
-#[derive(Clone)]
-enum RequestOutcome {
-    Complete(Box<CheckpointEvaluation>),
-    PendingHistory(Box<PendingHistory>),
-    Failed(GitReviewError),
-}
-
-#[derive(Clone)]
-struct RequestRecord {
-    request_digest: String,
-    outcome: RequestOutcome,
-}
-
-/// Coordinates typed Git operations. All mutations share one lock so a second
-/// request cannot observe or alter a partially promoted checkpoint.
 #[derive(Clone)]
 pub struct GitReviewService {
     runner: GitRunner,
     resolver: Arc<dyn GitWorkspaceResolver>,
     history: Arc<dyn GitReviewHistory>,
-    baselines: Arc<Mutex<BTreeMap<String, BaselineRecord>>>,
-    requests: Arc<Mutex<BTreeMap<(String, String), RequestRecord>>>,
-    restore_tokens: Arc<Mutex<BTreeMap<String, RestoreIntent>>>,
-    mutation_lock: Arc<Mutex<()>>,
+    observations: Arc<Mutex<BTreeMap<(String, String), GitObservation>>>,
+    observation_requests: Arc<Mutex<BTreeMap<(String, String), CachedResponse<GitObservation>>>>,
+    terminal_requests:
+        Arc<Mutex<BTreeMap<(String, String), CachedResponse<TerminalWorkUnitObservationResult>>>>,
+    terminal_lock: Arc<Mutex<()>>,
 }
 
 impl GitReviewService {
@@ -129,788 +104,590 @@ impl GitReviewService {
             runner,
             resolver,
             history,
-            baselines: Arc::new(Mutex::new(BTreeMap::new())),
-            requests: Arc::new(Mutex::new(BTreeMap::new())),
-            restore_tokens: Arc::new(Mutex::new(BTreeMap::new())),
-            mutation_lock: Arc::new(Mutex::new(())),
+            observations: Arc::new(Mutex::new(BTreeMap::new())),
+            observation_requests: Arc::new(Mutex::new(BTreeMap::new())),
+            terminal_requests: Arc::new(Mutex::new(BTreeMap::new())),
+            terminal_lock: Arc::new(Mutex::new(())),
         }
     }
 
-    pub async fn inspect_baseline(
+    pub async fn observe_repository(
         &self,
-        request: InspectGitBaselineRequest,
-    ) -> Result<GitBaseline, GitReviewError> {
-        validate_workspace_id(&request.workspace_id)?;
-        let root = self.resolver.resolve(&request.workspace_id).await?;
-        let baseline = capture_baseline(&self.runner, &request.workspace_id, &root).await?;
-        let public = baseline.public.clone();
-        self.baselines
-            .lock()
-            .await
-            .insert(public.baseline_id.clone(), baseline);
-        Ok(public)
-    }
-
-    pub async fn evaluate_checkpoint(
-        &self,
-        request: EvaluateCheckpointRequest,
-    ) -> Result<CheckpointEvaluation, GitReviewError> {
-        let scope_reasons = validate_checkpoint_request(&request)?;
-        let request_digest = request_digest(&request)?;
-        let request_key = (
+        request: ObserveGitRepositoryRequest,
+    ) -> Result<GitObservation, GitReviewError> {
+        validate_observation_request(&request)?;
+        let digest = request_digest(&request, OPERATION_OBSERVE)?;
+        let key = (
             request.workspace_id.clone(),
             request.client_request_id.clone(),
         );
-        let _mutation_guard = self.mutation_lock.lock().await;
+        if let Some(cached) = self.observation_requests.lock().await.get(&key).cloned() {
+            if cached.digest == digest {
+                return Ok(cached.response);
+            }
+            return Err(git_error(
+                "GIT-REQUEST-IDEMPOTENCY-CONFLICT",
+                OPERATION_OBSERVE,
+                false,
+            ));
+        }
+        let observation = self.capture_and_persist(&request).await?;
+        self.observation_requests.lock().await.insert(
+            key,
+            CachedResponse {
+                digest,
+                response: observation.clone(),
+            },
+        );
+        Ok(observation)
+    }
 
-        if let Some(record) = self.requests.lock().await.get(&request_key).cloned() {
-            if record.request_digest != request_digest {
+    pub async fn observe_terminal_work_unit(
+        &self,
+        request: ObserveTerminalWorkUnitRequest,
+    ) -> Result<TerminalWorkUnitObservationResult, GitReviewError> {
+        validate_terminal_request(&request)?;
+        let digest = request_digest(&request, OPERATION_TERMINAL)?;
+        let key = (
+            request.workspace_id.clone(),
+            request.client_request_id.clone(),
+        );
+        let _guard = self.terminal_lock.lock().await;
+        if let Some(cached) = self.terminal_requests.lock().await.get(&key).cloned() {
+            if cached.digest == digest {
+                return Ok(cached.response);
+            }
+            return Err(git_error(
+                "GIT-REQUEST-IDEMPOTENCY-CONFLICT",
+                OPERATION_TERMINAL,
+                false,
+            ));
+        }
+
+        let before = self
+            .load_observation(&request.workspace_id, &request.before_observation_id)
+            .await?
+            .ok_or_else(|| {
+                git_error(
+                    "GIT-BEFORE-OBSERVATION-NOT-FOUND",
+                    OPERATION_TERMINAL,
+                    false,
+                )
+            })?;
+        if before.workspace_generation != request.workspace_generation
+            || before.work_unit_id.as_deref() != Some(request.work_unit_id.as_str())
+            || before.reason != GitObservationReason::WorkUnitStarted
+        {
+            return Err(git_error(
+                "GIT-BEFORE-OBSERVATION-MISMATCH",
+                OPERATION_TERMINAL,
+                false,
+            ));
+        }
+
+        let after_request = ObserveGitRepositoryRequest {
+            schema_version: GIT_REVIEW_SCHEMA_VERSION,
+            client_request_id: format!("terminal-{}", request.client_request_id),
+            workspace_id: request.workspace_id.clone(),
+            workspace_generation: request.workspace_generation,
+            reason: GitObservationReason::WorkUnitTerminal,
+            work_unit_id: Some(request.work_unit_id.clone()),
+            source_event_id: Some(request.source_event_id.clone()),
+        };
+        let after = self.capture_and_persist(&after_request).await?;
+        let root = self.resolver.resolve(&request.workspace_id).await?;
+        let commit_shas = if after.head_sha == "unborn" {
+            Vec::new()
+        } else if before.head_sha == "unborn" {
+            let mut identities = list_commit_identities(&self.runner, &root, 0, 101).await?;
+            if identities.len() > 100 {
                 return Err(git_error(
-                    "GIT-REQUEST-IDEMPOTENCY-CONFLICT",
-                    OPERATION_CHECKPOINT,
+                    "GIT-COMMIT-RANGE-LIMIT",
+                    OPERATION_TERMINAL,
                     false,
                 ));
             }
-            return match record.outcome {
-                RequestOutcome::Complete(evaluation) => Ok(*evaluation),
-                RequestOutcome::Failed(error) => Err(error),
-                RequestOutcome::PendingHistory(pending) => {
-                    self.complete_pending_history(request_key, request_digest, *pending)
-                        .await
+            identities.reverse();
+            identities
+                .into_iter()
+                .map(|identity| identity.commit_sha)
+                .collect()
+        } else {
+            new_commit_shas(&self.runner, &root, &before.head_sha, &after.head_sha).await?
+        };
+
+        let mut new_commits = Vec::with_capacity(commit_shas.len());
+        let mut new_commit_evidence_ids = Vec::with_capacity(commit_shas.len());
+        for commit_sha in commit_shas {
+            let evidence_id = super::evidence::commit_evidence_id(&commit_sha)?;
+            let evidence = if let Some(existing) = self
+                .history
+                .get_commit_evidence(&request.workspace_id, &evidence_id)
+                .await?
+            {
+                if existing.work_unit_id.as_deref() != Some(request.work_unit_id.as_str())
+                    || existing.source_event_id.as_deref() != Some(request.source_event_id.as_str())
+                {
+                    return Err(git_error(
+                        "GIT-COMMIT-EVIDENCE-CONFLICT",
+                        OPERATION_TERMINAL,
+                        false,
+                    ));
                 }
-            };
-        }
-
-        let root = self.resolver.resolve(&request.workspace_id).await?;
-        let baseline = self
-            .baselines
-            .lock()
-            .await
-            .get(&request.baseline_id)
-            .cloned()
-            .ok_or_else(|| git_error("GIT-BASELINE-NOT-FOUND", OPERATION_CHECKPOINT, false))?;
-        if baseline.public.workspace_id != request.workspace_id
-            || baseline.repository.canonical_root != root
-        {
-            return Err(git_error(
-                "GIT-BASELINE-WORKSPACE-MISMATCH",
-                OPERATION_CHECKPOINT,
-                false,
-            ));
-        }
-
-        let current = inspect_repository(&self.runner, &root).await?;
-        let ownership =
-            evaluate_ownership(&self.runner, &baseline, &current, &request.file_events).await?;
-        let gates = evaluate_gates(&request, &baseline, &current, &ownership, scope_reasons);
-        if gates.iter().any(|gate| gate.outcome != GateOutcome::Pass) {
-            let error_code = gates
-                .iter()
-                .find(|gate| gate.outcome != GateOutcome::Pass)
-                .and_then(|gate| gate.reason_codes.first())
-                .cloned();
-            let evaluation = CheckpointEvaluation {
-                schema_version: GIT_REVIEW_SCHEMA_VERSION,
-                status: CheckpointStatus::Blocked,
-                gates,
-                manifest: ownership.manifest,
-                checkpoint: None,
-                review_pack: None,
-                error_code,
-            };
-            self.remember_request(
-                request_key,
-                request_digest,
-                RequestOutcome::Complete(Box::new(evaluation.clone())),
-            )
-            .await;
-            return Ok(evaluation);
-        }
-
-        let operation_id = operation_id(&request, &request_digest);
-        let target_reference = baseline
-            .public
-            .head_reference
-            .clone()
-            .unwrap_or_else(|| "HEAD".to_owned());
-        let prepared_event = journal_event(
-            &operation_id,
-            &request,
-            &baseline,
-            CheckpointOperationState::Prepared,
-            &target_reference,
-        );
-        if let Err(error) = self.history.append_operation(&prepared_event).await {
-            self.remember_request(
-                request_key,
-                request_digest,
-                RequestOutcome::Failed(error.clone()),
-            )
-            .await;
-            return Err(error);
-        }
-
-        let prepared = match prepare_checkpoint(
-            &self.runner,
-            &baseline,
-            &current,
-            &ownership,
-            &request.commit_message,
-        )
-        .await
-        {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                self.record_failure(&prepared_event, &error).await;
-                self.remember_request(
-                    request_key,
-                    request_digest,
-                    RequestOutcome::Failed(error.clone()),
+                existing
+            } else {
+                let identity = read_commit_identity(&self.runner, &root, &commit_sha).await?;
+                let mut evidence = build_commit_evidence(
+                    &self.runner,
+                    &root,
+                    &request.workspace_id,
+                    identity,
+                    Some((
+                        &request,
+                        &before.observation_id,
+                        &after.observation_id,
+                        &after.captured_at,
+                    )),
                 )
-                .await;
-                return Err(error);
-            }
-        };
-        debug_assert!(!prepared.object_ids().is_empty());
-        let mut objects_ready = journal_event(
-            &operation_id,
-            &request,
-            &baseline,
-            CheckpointOperationState::ObjectsReady,
-            &target_reference,
-        );
-        objects_ready.commit_sha = Some(prepared.identity().commit_sha.clone());
-        if let Err(error) = self.history.append_operation(&objects_ready).await {
-            self.record_failure(&prepared_event, &error).await;
-            self.remember_request(
-                request_key,
-                request_digest,
-                RequestOutcome::Failed(error.clone()),
-            )
-            .await;
-            return Err(error);
-        }
-
-        let promoted = match promote_checkpoint_objects(&self.runner, prepared).await {
-            Ok(promoted) => promoted,
-            Err(error) => {
-                self.record_failure(&prepared_event, &error).await;
-                self.remember_request(
-                    request_key,
-                    request_digest,
-                    RequestOutcome::Failed(error.clone()),
-                )
-                .await;
-                return Err(error);
-            }
-        };
-        debug_assert!(
-            promoted.promoted_object_ids().len() <= promoted.identity().commit_sha.len() * 32
-        );
-        let pack = match build_review_pack(
-            &self.runner,
-            &baseline.repository,
-            &request,
-            gates.clone(),
-            &ownership,
-            promoted.identity(),
-        )
-        .await
-        {
-            Ok(pack) => pack,
-            Err(error) => {
-                self.record_failure(&prepared_event, &error).await;
-                self.remember_request(
-                    request_key,
-                    request_digest,
-                    RequestOutcome::Failed(error.clone()),
-                )
-                .await;
-                return Err(error);
-            }
-        };
-
-        let committed = match update_checkpoint_reference(&self.runner, promoted).await {
-            Ok(committed) => committed,
-            Err(error) => {
-                self.record_failure(&prepared_event, &error).await;
-                self.remember_request(
-                    request_key,
-                    request_digest,
-                    RequestOutcome::Failed(error.clone()),
-                )
-                .await;
-                return Err(error);
-            }
-        };
-        debug_assert_eq!(
-            committed.index_fingerprint_before,
-            committed.index_fingerprint_after
-        );
-        debug_assert!(!committed.object_ids.is_empty());
-
-        let mut ref_updated = journal_event(
-            &operation_id,
-            &request,
-            &baseline,
-            CheckpointOperationState::RefUpdated,
-            &target_reference,
-        );
-        ref_updated.commit_sha = Some(committed.identity.commit_sha.clone());
-        ref_updated.pack_digest = Some(pack.pack_digest.clone());
-        let mut history_complete = ref_updated.clone();
-        history_complete.state = CheckpointOperationState::HistoryComplete;
-        let evaluation = CheckpointEvaluation {
-            schema_version: GIT_REVIEW_SCHEMA_VERSION,
-            status: CheckpointStatus::ReviewReady,
-            gates,
-            manifest: ownership.manifest,
-            checkpoint: Some(committed.identity),
-            review_pack: Some(pack.clone()),
-            error_code: None,
-        };
-        let pending = PendingHistory {
-            pack,
-            ref_updated,
-            history_complete,
-            evaluation,
-        };
-        self.complete_pending_history(request_key, request_digest, pending)
-            .await
-    }
-
-    pub async fn list_review_packs(
-        &self,
-        request: ListReviewPacksRequest,
-    ) -> Result<ReviewPackPage, GitReviewError> {
-        validate_workspace_id(&request.workspace_id)?;
-        if request.limit == 0 || request.limit > 200 {
-            return Err(git_error("GIT-PAGE-LIMIT", OPERATION_READ, false));
-        }
-        let _ = self.resolver.resolve(&request.workspace_id).await?;
-        self.history
-            .list_review_packs(
-                &request.workspace_id,
-                request.before_sequence,
-                request.limit,
-            )
-            .await
-    }
-
-    pub async fn review_pack_detail(
-        &self,
-        request: ReviewPackDetailRequest,
-    ) -> Result<ReviewPack, GitReviewError> {
-        validate_workspace_id(&request.workspace_id)?;
-        validate_opaque_id(&request.checkpoint_id, "GIT-CHECKPOINT-ID")?;
-        let _ = self.resolver.resolve(&request.workspace_id).await?;
-        self.history
-            .get_review_pack(&request.workspace_id, &request.checkpoint_id)
-            .await?
-            .ok_or_else(|| git_error("GIT-REVIEW-PACK-NOT-FOUND", OPERATION_READ, false))
-    }
-
-    pub async fn read_file_diff(
-        &self,
-        request: ReadFileDiffRequest,
-    ) -> Result<FileDiffView, GitReviewError> {
-        validate_opaque_id(&request.file_id, "GIT-FILE-ID")?;
-        let root = self.resolver.resolve(&request.workspace_id).await?;
-        let pack = self
-            .review_pack_detail(ReviewPackDetailRequest {
-                workspace_id: request.workspace_id,
-                checkpoint_id: request.checkpoint_id,
-            })
-            .await?;
-        let repository = inspect_repository(&self.runner, &root).await?.identity;
-        read_file_diff(&self.runner, &repository, &pack, &request.file_id).await
-    }
-
-    pub async fn compare_checkpoints(
-        &self,
-        request: CompareCheckpointsRequest,
-    ) -> Result<CompareCheckpointsView, GitReviewError> {
-        let root = self.resolver.resolve(&request.workspace_id).await?;
-        let from = self
-            .review_pack_detail(ReviewPackDetailRequest {
-                workspace_id: request.workspace_id.clone(),
-                checkpoint_id: request.from_checkpoint_id,
-            })
-            .await?;
-        let to = self
-            .review_pack_detail(ReviewPackDetailRequest {
-                workspace_id: request.workspace_id,
-                checkpoint_id: request.to_checkpoint_id,
-            })
-            .await?;
-        let repository = inspect_repository(&self.runner, &root).await?.identity;
-        compare_checkpoints(&self.runner, &repository, &from, &to).await
-    }
-
-    pub async fn preview_restore(
-        &self,
-        request: PreviewRestoreRequest,
-    ) -> Result<RestorePreview, GitReviewError> {
-        validate_workspace_id(&request.workspace_id)?;
-        validate_opaque_id(&request.checkpoint_id, "GIT-CHECKPOINT-ID")?;
-        let root = self.resolver.resolve(&request.workspace_id).await?;
-        let pack = self
-            .history
-            .get_review_pack(&request.workspace_id, &request.checkpoint_id)
-            .await?
-            .ok_or_else(|| git_error("GIT-REVIEW-PACK-NOT-FOUND", OPERATION_READ, false))?;
-        let repository = inspect_repository(&self.runner, &root).await?.identity;
-        let (preview, intent) = build_restore_preview(
-            &self.runner,
-            &request.workspace_id,
-            &repository,
-            &pack,
-            request.kind,
-            request.recovery_branch.as_deref(),
-        )
-        .await?;
-        if let Some(intent) = intent {
-            self.restore_tokens
-                .lock()
-                .await
-                .insert(intent.token.clone(), intent);
-        }
-        Ok(preview)
-    }
-
-    pub async fn confirm_restore(
-        &self,
-        request: ConfirmRestoreRequest,
-    ) -> Result<RestoreResult, GitReviewError> {
-        validate_workspace_id(&request.workspace_id)?;
-        validate_opaque_id(&request.confirmation_token, "GIT-RESTORE-TOKEN")?;
-        let _mutation_guard = self.mutation_lock.lock().await;
-        let intent = self
-            .restore_tokens
-            .lock()
-            .await
-            .remove(&request.confirmation_token)
-            .ok_or_else(|| git_error("GIT-RESTORE-TOKEN-INVALID", "confirm_git_restore", false))?;
-        if intent.workspace_id != request.workspace_id || intent.token != request.confirmation_token
-        {
-            return Err(git_error(
-                "GIT-RESTORE-TOKEN-WORKSPACE",
-                "confirm_git_restore",
-                false,
-            ));
-        }
-        let root = self.resolver.resolve(&request.workspace_id).await?;
-        let repository = inspect_repository(&self.runner, &root).await?.identity;
-        execute_restore(&self.runner, &repository, intent).await
-    }
-
-    pub async fn cancel_restore(
-        &self,
-        request: CancelRestoreRequest,
-    ) -> Result<(), GitReviewError> {
-        validate_workspace_id(&request.workspace_id)?;
-        validate_opaque_id(&request.confirmation_token, "GIT-RESTORE-TOKEN")?;
-        let mut tokens = self.restore_tokens.lock().await;
-        let belongs_to_workspace = tokens
-            .get(&request.confirmation_token)
-            .is_some_and(|intent| intent.workspace_id == request.workspace_id);
-        if !belongs_to_workspace {
-            return Err(git_error(
-                "GIT-RESTORE-TOKEN-INVALID",
-                "cancel_git_restore",
-                false,
-            ));
-        }
-        tokens.remove(&request.confirmation_token);
-        Ok(())
-    }
-
-    async fn complete_pending_history(
-        &self,
-        request_key: (String, String),
-        request_digest: String,
-        pending: PendingHistory,
-    ) -> Result<CheckpointEvaluation, GitReviewError> {
-        let result = async {
-            self.history.append_operation(&pending.ref_updated).await?;
-            let sequence = self.history.append_review_pack(&pending.pack).await?;
-            self.history
-                .append_operation(&pending.history_complete)
                 .await?;
-            let mut evaluation = pending.evaluation.clone();
-            if let Some(pack) = &mut evaluation.review_pack {
-                pack.history_sequence = Some(sequence);
-            }
-            Ok::<_, GitReviewError>(evaluation)
+                let sequence = self.history.append_commit_evidence(&evidence).await?;
+                evidence.history_sequence = Some(sequence);
+                evidence
+            };
+            new_commit_evidence_ids.push(evidence.commit_evidence_id.clone());
+            new_commits.push(summarize(&evidence));
         }
-        .await;
-        match result {
-            Ok(evaluation) => {
-                self.remember_request(
-                    request_key,
-                    request_digest,
-                    RequestOutcome::Complete(Box::new(evaluation.clone())),
-                )
-                .await;
-                Ok(evaluation)
-            }
-            Err(error) => {
-                self.remember_request(
-                    request_key,
-                    request_digest,
-                    RequestOutcome::PendingHistory(Box::new(pending)),
-                )
-                .await;
-                Err(error)
-            }
-        }
-    }
 
-    async fn remember_request(
-        &self,
-        key: (String, String),
-        request_digest: String,
-        outcome: RequestOutcome,
-    ) {
-        self.requests.lock().await.insert(
+        let mut work_unit = WorkUnitGitObservation {
+            schema_version: GIT_REVIEW_SCHEMA_VERSION,
+            workspace_id: request.workspace_id.clone(),
+            workspace_generation: request.workspace_generation,
+            work_unit_id: request.work_unit_id.clone(),
+            source_event_id: request.source_event_id.clone(),
+            terminal_state: request.terminal_state,
+            before_observation_id: before.observation_id,
+            after_observation_id: after.observation_id.clone(),
+            new_commit_evidence_ids,
+            commit_skill_injection: request.commit_skill_injection.clone(),
+            reported_commit_block_reason: request.reported_commit_block_reason.clone(),
+            observed_at: after.captured_at.clone(),
+            history_sequence: None,
+        };
+        let sequence = self.history.append_work_unit(&work_unit).await?;
+        work_unit.history_sequence = Some(sequence);
+        let response = TerminalWorkUnitObservationResult {
+            schema_version: GIT_REVIEW_SCHEMA_VERSION,
+            observation: after,
+            work_unit,
+            new_commits,
+        };
+        self.terminal_requests.lock().await.insert(
             key,
-            RequestRecord {
-                request_digest,
-                outcome,
+            CachedResponse {
+                digest,
+                response: response.clone(),
             },
         );
+        Ok(response)
     }
 
-    async fn record_failure(&self, prepared: &OperationJournalEvent, error: &GitReviewError) {
-        let mut failed = prepared.clone();
-        failed.state = CheckpointOperationState::Failed;
-        failed.error_code = Some(error.code.clone());
-        let _ = self.history.append_operation(&failed).await;
+    pub async fn list_commit_evidence(
+        &self,
+        request: ListCommitEvidenceRequest,
+    ) -> Result<CommitEvidencePage, GitReviewError> {
+        validate_schema(request.schema_version, OPERATION_READ)?;
+        validate_workspace_id(&request.workspace_id)?;
+        if request.workspace_generation == 0 || request.limit == 0 || request.limit > MAX_LIST_LIMIT
+        {
+            return Err(git_error("GIT-COMMIT-LIST-INPUT", OPERATION_READ, false));
+        }
+        if request.filter == CommitEvidenceFilter::ThisWorkUnit && request.work_unit_id.is_none() {
+            return Err(git_error("GIT-WORK-UNIT-ID", OPERATION_READ, false));
+        }
+        if let Some(work_unit_id) = &request.work_unit_id {
+            validate_opaque_id(work_unit_id, "GIT-WORK-UNIT-ID")?;
+        }
+        let offset = parse_cursor(request.cursor.as_deref())?;
+        let root = self.resolver.resolve(&request.workspace_id).await?;
+        let layout = GitRepositoryLayout::inspect(&root)
+            .map_err(|_| git_error("GIT-REPOSITORY-READ", OPERATION_READ, true))?;
+        if layout.head_sha == "unborn" {
+            return Ok(CommitEvidencePage {
+                schema_version: GIT_REVIEW_SCHEMA_VERSION,
+                items: Vec::new(),
+                next_cursor: None,
+            });
+        }
+        let requested = request.limit as usize;
+        let identities = list_commit_identities(&self.runner, &root, offset, requested + 1).await?;
+        let has_more = identities.len() > requested;
+        let correlated = self
+            .history
+            .list_commit_evidence(&request.workspace_id, 200)
+            .await?
+            .into_iter()
+            .map(|evidence| (evidence.identity.commit_sha.clone(), evidence))
+            .collect::<BTreeMap<_, _>>();
+        let mut items = Vec::new();
+        for identity in identities.into_iter().take(requested) {
+            let detail = if let Some(evidence) = correlated.get(&identity.commit_sha) {
+                evidence.clone()
+            } else {
+                build_commit_evidence(&self.runner, &root, &request.workspace_id, identity, None)
+                    .await?
+            };
+            let include = match request.filter {
+                CommitEvidenceFilter::All => true,
+                CommitEvidenceFilter::ThisWorkUnit => {
+                    detail.work_unit_id.as_deref() == request.work_unit_id.as_deref()
+                }
+                CommitEvidenceFilter::NeedsAttention => detail
+                    .gates
+                    .iter()
+                    .any(|gate| !matches!(gate.outcome, super::types::GateOutcome::Pass)),
+            };
+            if include {
+                items.push(summarize(&detail));
+            }
+        }
+        Ok(CommitEvidencePage {
+            schema_version: GIT_REVIEW_SCHEMA_VERSION,
+            items,
+            next_cursor: has_more.then(|| format!("offset-{}", offset + requested)),
+        })
+    }
+
+    pub async fn read_commit_evidence(
+        &self,
+        request: CommitEvidenceDetailRequest,
+    ) -> Result<CommitEvidenceDetail, GitReviewError> {
+        validate_detail_request(&request)?;
+        if let Some(evidence) = self
+            .history
+            .get_commit_evidence(&request.workspace_id, &request.commit_evidence_id)
+            .await?
+        {
+            return Ok(evidence);
+        }
+        let root = self.resolver.resolve(&request.workspace_id).await?;
+        let commit_sha = commit_sha_from_evidence_id(&request.commit_evidence_id)?;
+        ensure_reachable(&self.runner, &root, &commit_sha).await?;
+        let identity = read_commit_identity(&self.runner, &root, &commit_sha).await?;
+        build_commit_evidence(&self.runner, &root, &request.workspace_id, identity, None).await
+    }
+
+    pub async fn read_commit_diff(
+        &self,
+        request: ReadCommitDiffRequest,
+    ) -> Result<CommitDiffFile, GitReviewError> {
+        validate_schema(request.schema_version, OPERATION_READ)?;
+        validate_workspace_id(&request.workspace_id)?;
+        if request.workspace_generation == 0 {
+            return Err(git_error("GIT-WORKSPACE-GENERATION", OPERATION_READ, false));
+        }
+        validate_opaque_id(&request.file_evidence_id, "GIT-FILE-EVIDENCE-ID")?;
+        let detail = self
+            .read_commit_evidence(CommitEvidenceDetailRequest {
+                schema_version: request.schema_version,
+                workspace_id: request.workspace_id.clone(),
+                workspace_generation: request.workspace_generation,
+                commit_evidence_id: request.commit_evidence_id,
+            })
+            .await?;
+        let root = self.resolver.resolve(&request.workspace_id).await?;
+        read_commit_diff(&self.runner, &root, &detail, &request.file_evidence_id).await
+    }
+
+    pub async fn prepare_explanation_evidence(
+        &self,
+        request: PrepareCommitExplanationEvidenceRequest,
+    ) -> Result<CommitEvidenceV1, GitReviewError> {
+        validate_schema(request.schema_version, OPERATION_READ)?;
+        validate_workspace_id(&request.workspace_id)?;
+        if request.workspace_generation == 0 || request.selection_version == 0 {
+            return Err(git_error("GIT-EXPLANATION-INPUT", OPERATION_READ, false));
+        }
+        if !matches!(request.locale.as_str(), "ja" | "en") {
+            return Err(git_error("GIT-EXPLANATION-LOCALE", OPERATION_READ, false));
+        }
+        let detail = self
+            .read_commit_evidence(CommitEvidenceDetailRequest {
+                schema_version: request.schema_version,
+                workspace_id: request.workspace_id.clone(),
+                workspace_generation: request.workspace_generation,
+                commit_evidence_id: request.commit_evidence_id,
+            })
+            .await?;
+        let root = self.resolver.resolve(&request.workspace_id).await?;
+        build_explanation_evidence(
+            &detail,
+            &root,
+            &request.locale,
+            request.workspace_generation,
+            request.selection_version,
+        )
+    }
+
+    async fn capture_and_persist(
+        &self,
+        request: &ObserveGitRepositoryRequest,
+    ) -> Result<GitObservation, GitReviewError> {
+        let id = observation_id(request);
+        if let Some(observation) = self
+            .observations
+            .lock()
+            .await
+            .get(&(request.workspace_id.clone(), id.clone()))
+            .cloned()
+        {
+            return Ok(observation);
+        }
+        if let Some(observation) = self
+            .history
+            .get_observation(&request.workspace_id, &id)
+            .await?
+        {
+            self.observations
+                .lock()
+                .await
+                .insert((request.workspace_id.clone(), id), observation.clone());
+            return Ok(observation);
+        }
+        let root = self.resolver.resolve(&request.workspace_id).await?;
+        let mut observation = capture_observation(&self.runner, request, &root).await?;
+        let sequence = self.history.append_observation(&observation).await?;
+        observation.history_sequence = Some(sequence);
+        self.observations.lock().await.insert(
+            (
+                request.workspace_id.clone(),
+                observation.observation_id.clone(),
+            ),
+            observation.clone(),
+        );
+        Ok(observation)
+    }
+
+    async fn load_observation(
+        &self,
+        workspace_id: &str,
+        observation_id: &str,
+    ) -> Result<Option<GitObservation>, GitReviewError> {
+        validate_opaque_id(observation_id, "GIT-OBSERVATION-ID")?;
+        if let Some(observation) = self
+            .observations
+            .lock()
+            .await
+            .get(&(workspace_id.to_owned(), observation_id.to_owned()))
+            .cloned()
+        {
+            return Ok(Some(observation));
+        }
+        self.history
+            .get_observation(workspace_id, observation_id)
+            .await
     }
 }
 
-fn validate_checkpoint_request(
-    request: &EvaluateCheckpointRequest,
-) -> Result<Vec<String>, GitReviewError> {
-    if request.schema_version != GIT_REVIEW_SCHEMA_VERSION {
-        return Err(git_error("GIT-SCHEMA-VERSION", OPERATION_CHECKPOINT, false));
+fn validate_observation_request(
+    request: &ObserveGitRepositoryRequest,
+) -> Result<(), GitReviewError> {
+    validate_schema(request.schema_version, OPERATION_OBSERVE)?;
+    validate_workspace_id(&request.workspace_id)?;
+    validate_opaque_id(&request.client_request_id, "GIT-CLIENT-REQUEST-ID")?;
+    if request.workspace_generation == 0 {
+        return Err(git_error(
+            "GIT-WORKSPACE-GENERATION",
+            OPERATION_OBSERVE,
+            false,
+        ));
     }
+    match request.reason {
+        GitObservationReason::WorkUnitStarted | GitObservationReason::WorkUnitTerminal => {
+            let work_unit_id = request
+                .work_unit_id
+                .as_deref()
+                .ok_or_else(|| git_error("GIT-WORK-UNIT-ID", OPERATION_OBSERVE, false))?;
+            validate_opaque_id(work_unit_id, "GIT-WORK-UNIT-ID")?;
+        }
+        GitObservationReason::ActiveView | GitObservationReason::ManualRefresh => {
+            if request.work_unit_id.is_some() || request.source_event_id.is_some() {
+                return Err(git_error(
+                    "GIT-OBSERVATION-CONTEXT",
+                    OPERATION_OBSERVE,
+                    false,
+                ));
+            }
+        }
+    }
+    if let Some(source_event_id) = &request.source_event_id {
+        validate_opaque_id(source_event_id, "GIT-SOURCE-EVENT-ID")?;
+    }
+    Ok(())
+}
+
+fn validate_terminal_request(
+    request: &ObserveTerminalWorkUnitRequest,
+) -> Result<(), GitReviewError> {
+    validate_schema(request.schema_version, OPERATION_TERMINAL)?;
     validate_workspace_id(&request.workspace_id)?;
     for (value, code) in [
         (&request.client_request_id, "GIT-CLIENT-REQUEST-ID"),
-        (&request.baseline_id, "GIT-BASELINE-ID"),
+        (&request.before_observation_id, "GIT-OBSERVATION-ID"),
         (&request.work_unit_id, "GIT-WORK-UNIT-ID"),
+        (&request.source_event_id, "GIT-SOURCE-EVENT-ID"),
     ] {
         validate_opaque_id(value, code)?;
     }
-    if request.file_events.len() > MAX_FILE_EVENTS
+    if request.workspace_generation == 0
+        || request.objective.trim().is_empty()
+        || request.objective.len() > MAX_TEXT
+        || request.acceptance.len() > 20
         || request.verification.len() > MAX_EVIDENCE_ITEMS
         || request.decisions.len() > MAX_EVIDENCE_ITEMS
         || request.failed_attempts.len() > MAX_EVIDENCE_ITEMS
         || request.risks.len() > MAX_EVIDENCE_ITEMS
     {
-        return Err(git_error("GIT-EVIDENCE-LIMIT", OPERATION_CHECKPOINT, false));
+        return Err(git_error("GIT-TERMINAL-INPUT", OPERATION_TERMINAL, false));
     }
-    for (value, code) in request
-        .file_events
-        .iter()
-        .map(|item| (&item.event_id, "GIT-EVENT-ID"))
-        .chain(
-            request
-                .verification
-                .iter()
-                .map(|item| (&item.evidence_id, "GIT-EVIDENCE-ID")),
-        )
-        .chain(
-            request
-                .decisions
-                .iter()
-                .map(|item| (&item.decision_id, "GIT-DECISION-ID")),
-        )
-        .chain(
-            request
-                .failed_attempts
-                .iter()
-                .map(|item| (&item.attempt_id, "GIT-ATTEMPT-ID")),
-        )
-        .chain(
-            request
-                .risks
-                .iter()
-                .map(|item| (&item.risk_id, "GIT-RISK-ID")),
-        )
-    {
-        validate_opaque_id(value, code)?;
-    }
-    if let Some(approval) = &request.risk_approval {
-        validate_opaque_id(&approval.approval_id, "GIT-APPROVAL-ID")?;
-        if approval.approved_categories.len() > 100
-            || !bounded_text(&approval.approved_at, 128, false)
-        {
-            return Err(git_error("GIT-APPROVAL-SHAPE", OPERATION_CHECKPOINT, false));
+    for value in request_texts(request) {
+        if value.contains('\0') || value.len() > MAX_TEXT {
+            return Err(git_error("GIT-EVIDENCE-TEXT", OPERATION_TERMINAL, false));
         }
     }
-
-    let mut reasons = Vec::new();
-    if !bounded_text(&request.objective, 500, false) {
-        reasons.push("GIT-SCOPE-OBJECTIVE".to_owned());
-    }
-    if request.acceptance.is_empty()
-        || request.acceptance.len() > 20
-        || request
-            .acceptance
-            .iter()
-            .any(|item| !bounded_text(item, 500, false))
+    let skill = &request.commit_skill_injection;
+    if skill.schema_version != GIT_REVIEW_SCHEMA_VERSION
+        || skill.skill_id != "coding-wife-commit-work"
+        || skill.workspace_generation != request.workspace_generation
+        || skill.work_unit_id != request.work_unit_id
+        || skill.skill_version.is_empty()
+        || skill.skill_version.len() > 64
+        || !valid_sha256(&skill.content_digest)
+        || skill.path_authority != SkillPathAuthority::AppBundle
+        || skill.injection_mode != SkillInjectionMode::SkillInput
+        || chrono::DateTime::parse_from_rfc3339(&skill.injected_at).is_err()
     {
-        reasons.push("GIT-SCOPE-ACCEPTANCE".to_owned());
+        return Err(git_error(
+            "GIT-COMMIT-SKILL-AUDIT",
+            OPERATION_TERMINAL,
+            false,
+        ));
     }
-    if request.file_events.is_empty() {
-        reasons.push("GIT-SCOPE-NO-FILE-EVENTS".to_owned());
-    }
-    if validate_commit_message(&request.commit_message).is_err() {
-        reasons.push("GIT-COMMIT-MESSAGE".to_owned());
-    }
-    if request_texts(request).any(|value| !bounded_text(value.0, value.1, value.2)) {
-        reasons.push("GIT-EVIDENCE-SHAPE".to_owned());
-    }
-    Ok(reasons)
+    validate_opaque_id(&skill.client_request_id, "GIT-SKILL-CLIENT-REQUEST-ID")?;
+    Ok(())
 }
 
-fn request_texts(request: &EvaluateCheckpointRequest) -> impl Iterator<Item = (&str, usize, bool)> {
-    request
-        .verification
-        .iter()
-        .flat_map(|item| [(&*item.check, 512, false), (&*item.summary, 4_096, true)])
+fn validate_detail_request(request: &CommitEvidenceDetailRequest) -> Result<(), GitReviewError> {
+    validate_schema(request.schema_version, OPERATION_READ)?;
+    validate_workspace_id(&request.workspace_id)?;
+    if request.workspace_generation == 0 {
+        return Err(git_error("GIT-WORKSPACE-GENERATION", OPERATION_READ, false));
+    }
+    commit_sha_from_evidence_id(&request.commit_evidence_id).map(|_| ())
+}
+
+fn validate_schema(schema_version: u16, operation: &'static str) -> Result<(), GitReviewError> {
+    if schema_version == GIT_REVIEW_SCHEMA_VERSION {
+        Ok(())
+    } else {
+        Err(git_error("GIT-SCHEMA-VERSION", operation, false))
+    }
+}
+
+fn request_texts(request: &ObserveTerminalWorkUnitRequest) -> impl Iterator<Item = &str> {
+    std::iter::once(request.objective.as_str())
+        .chain(request.acceptance.iter().map(String::as_str))
+        .chain(request.verification.iter().flat_map(|item| {
+            [
+                item.evidence_id.as_str(),
+                item.source_event_id.as_str(),
+                item.check.as_str(),
+                item.summary.as_str(),
+            ]
+        }))
         .chain(request.decisions.iter().flat_map(|item| {
             [
-                (&*item.summary, 2_048, false),
-                (&*item.answer, 2_048, false),
-                (&*item.rationale, 4_096, false),
+                item.decision_id.as_str(),
+                item.source_event_id.as_str(),
+                item.summary.as_str(),
+                item.answer.as_str(),
+                item.rationale.as_str(),
             ]
         }))
         .chain(request.failed_attempts.iter().flat_map(|item| {
             [
-                (&*item.approach, 2_048, false),
-                (&*item.outcome, 1_024, false),
-                (&*item.learning, 2_048, false),
+                item.attempt_id.as_str(),
+                item.source_event_id.as_str(),
+                item.approach.as_str(),
+                item.outcome.as_str(),
+                item.learning.as_str(),
             ]
         }))
         .chain(request.risks.iter().flat_map(|item| {
             [
-                (&*item.category, 256, false),
-                (&*item.summary, 2_048, false),
-                (&*item.mitigation, 2_048, false),
+                item.risk_id.as_str(),
+                item.source_event_id.as_str(),
+                item.category.as_str(),
+                item.summary.as_str(),
+                item.mitigation.as_str(),
             ]
         }))
-}
-
-fn bounded_text(value: &str, maximum: usize, allow_empty: bool) -> bool {
-    (allow_empty || !value.trim().is_empty())
-        && value.chars().count() <= maximum
-        && !value.chars().any(|character| character == '\0')
-}
-
-fn evaluate_gates(
-    request: &EvaluateCheckpointRequest,
-    baseline: &BaselineRecord,
-    current: &RepositorySnapshot,
-    ownership: &OwnershipEvaluation,
-    mut scope_reasons: Vec<String>,
-) -> Vec<GateResult> {
-    if baseline.public.support_state != GitSupportState::Ready {
-        scope_reasons.extend(baseline.public.blocked_reasons.iter().cloned());
-    }
-    scope_reasons.extend(
-        ownership
-            .reason_codes
-            .iter()
-            .filter(|reason| reason.starts_with("GIT-LIMIT-"))
-            .cloned(),
-    );
-    if checkpoint_texts(request)
-        .any(|value| contains_redactable_secret(value, &current.identity.canonical_root))
-    {
-        scope_reasons.push("GIT-SECRET-DETECTED".to_owned());
-    }
-    scope_reasons.sort();
-    scope_reasons.dedup();
-
-    let mut verification_reasons = Vec::new();
-    if request.verification.is_empty() {
-        verification_reasons.push("GIT-VERIFICATION-MISSING".to_owned());
-    }
-    if request
-        .verification
-        .iter()
-        .any(|item| item.result != VerificationResult::Passed)
-    {
-        verification_reasons.push("GIT-VERIFICATION-NOT-PASSED".to_owned());
-    }
-    if request
-        .verification
-        .iter()
-        .any(|item| item.observed_repository_fingerprint != current.repository_fingerprint)
-    {
-        verification_reasons.push("GIT-VERIFICATION-STALE".to_owned());
-    }
-
-    let (risk_outcome, risk_reasons) = evaluate_risk_gate(request, current, ownership);
-    vec![
-        gate(
-            GateKind::Scope,
-            outcome_for_reasons(&scope_reasons),
-            scope_reasons,
-            current,
-        ),
-        gate(
-            GateKind::Ownership,
-            outcome_for_reasons(&ownership.reason_codes),
-            ownership.reason_codes.clone(),
-            current,
-        ),
-        gate(
-            GateKind::Verification,
-            outcome_for_reasons(&verification_reasons),
-            verification_reasons,
-            current,
-        ),
-        gate(GateKind::Risk, risk_outcome, risk_reasons, current),
-    ]
-}
-
-fn checkpoint_texts(request: &EvaluateCheckpointRequest) -> impl Iterator<Item = &str> {
-    std::iter::once(request.objective.as_str())
-        .chain(request.acceptance.iter().map(String::as_str))
-        .chain(std::iter::once(request.commit_message.as_str()))
-        .chain(request_texts(request).map(|value| value.0))
-}
-
-fn evaluate_risk_gate(
-    request: &EvaluateCheckpointRequest,
-    current: &RepositorySnapshot,
-    ownership: &OwnershipEvaluation,
-) -> (GateOutcome, Vec<String>) {
-    let mut categories = BTreeSet::new();
-    for risk in &request.risks {
-        if !risk.resolved || matches!(risk.level, RiskLevel::High | RiskLevel::Critical) {
-            categories.insert(risk.category.to_ascii_lowercase());
-        }
-    }
-    for change in &ownership.owned_changes {
-        let path = change.relative_path.to_ascii_lowercase();
-        for (needle, category) in [
-            ("auth", "auth"),
-            ("permission", "permission"),
-            ("secret", "secret"),
-            ("credential", "secret"),
-            ("migration", "migration"),
-            ("database", "data"),
-            ("schema", "data"),
-            (".github/workflows", "git-history"),
-        ] {
-            if path.contains(needle) {
-                categories.insert(category.to_owned());
-            }
-        }
-    }
-    if categories.is_empty() {
-        return (GateOutcome::Pass, Vec::new());
-    }
-    let approved = request.risk_approval.as_ref().is_some_and(|approval| {
-        approval.observed_repository_fingerprint == current.repository_fingerprint
-            && categories.iter().all(|category| {
-                approval
-                    .approved_categories
-                    .iter()
-                    .any(|approved| approved.eq_ignore_ascii_case(category))
-            })
-    });
-    if approved {
-        (GateOutcome::Pass, Vec::new())
-    } else {
-        (
-            GateOutcome::NeedsReview,
-            categories
-                .into_iter()
-                .map(|category| format!("GIT-RISK-APPROVAL-REQUIRED:{category}"))
-                .collect(),
+        .chain(
+            request
+                .reported_commit_block_reason
+                .iter()
+                .map(String::as_str),
         )
-    }
 }
 
-fn gate(
-    kind: GateKind,
-    outcome: GateOutcome,
-    reason_codes: Vec<String>,
-    current: &RepositorySnapshot,
-) -> GateResult {
-    GateResult {
-        gate: kind,
-        outcome,
-        reason_codes,
-        observed_repository_fingerprint: current.repository_fingerprint.clone(),
-    }
+fn valid_sha256(value: &str) -> bool {
+    let value = value.strip_prefix("sha256:").unwrap_or(value);
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn outcome_for_reasons(reasons: &[String]) -> GateOutcome {
-    if reasons.is_empty() {
-        GateOutcome::Pass
-    } else {
-        GateOutcome::Fail
-    }
-}
-
-fn journal_event(
-    operation_id: &str,
-    request: &EvaluateCheckpointRequest,
-    baseline: &BaselineRecord,
-    state: CheckpointOperationState,
-    target_reference: &str,
-) -> OperationJournalEvent {
-    OperationJournalEvent::now(
-        OperationJournalContext {
-            operation_id,
-            client_request_id: &request.client_request_id,
-            workspace_id: &request.workspace_id,
-            work_unit_id: &request.work_unit_id,
-            baseline_id: &request.baseline_id,
-            expected_head_sha: &baseline.public.head_sha,
-            target_reference,
-        },
-        state,
-    )
-}
-
-fn operation_id(request: &EvaluateCheckpointRequest, digest: &str) -> String {
-    format!(
-        "operation-{}-{}",
-        request.work_unit_id,
-        digest
-            .trim_start_matches("sha256:")
-            .chars()
-            .take(16)
-            .collect::<String>()
-    )
-}
-
-fn request_digest(request: &EvaluateCheckpointRequest) -> Result<String, GitReviewError> {
+fn request_digest<T: serde::Serialize>(
+    request: &T,
+    operation: &'static str,
+) -> Result<String, GitReviewError> {
     let bytes = serde_json::to_vec(request)
-        .map_err(|_| git_error("GIT-REQUEST-ENCODE", OPERATION_CHECKPOINT, false))?;
+        .map_err(|_| git_error("GIT-REQUEST-ENCODE", operation, false))?;
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
+}
+
+async fn ensure_reachable(
+    runner: &GitRunner,
+    root: &std::path::Path,
+    commit_sha: &str,
+) -> Result<(), GitReviewError> {
+    let layout = GitRepositoryLayout::inspect(root)
+        .map_err(|_| git_error("GIT-REPOSITORY-READ", OPERATION_READ, true))?;
+    if layout.head_sha == "unborn" {
+        return Err(git_error("GIT-COMMIT-NOT-FOUND", OPERATION_READ, false));
+    }
+    if layout.head_sha == commit_sha {
+        return Ok(());
+    }
+    let output = runner
+        .is_ancestor(root, commit_sha, &layout.head_sha)
+        .await
+        .map_err(service_runner_error)?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(git_error("GIT-COMMIT-NOT-REACHABLE", OPERATION_READ, false))
+    }
 }
 
 fn service_runner_error(error: GitRunnerError) -> GitReviewError {
     let (code, recoverable) = match error {
-        GitRunnerError::BinaryUnavailable | GitRunnerError::Spawn => {
-            ("GIT-BINARY-UNAVAILABLE", true)
-        }
-        GitRunnerError::BinaryIdentityChanged => ("GIT-BINARY-IDENTITY-CHANGED", false),
+        GitRunnerError::BinaryUnavailable => ("GIT-BINARY-UNAVAILABLE", true),
+        GitRunnerError::BinaryIdentityChanged => ("GIT-BINARY-IDENTITY", false),
+        GitRunnerError::Spawn => ("GIT-PROCESS-SPAWN", true),
         GitRunnerError::Timeout => ("GIT-PROCESS-TIMEOUT", true),
         GitRunnerError::OutputLimit => ("GIT-PROCESS-OUTPUT-LIMIT", false),
         GitRunnerError::ProcessTree => ("GIT-PROCESS-TREE", false),
         GitRunnerError::Io => ("GIT-PROCESS-IO", true),
     };
-    git_error(code, OPERATION_INSPECT, recoverable)
+    git_error(code, OPERATION_READ, recoverable)
 }
 
 #[cfg(test)]
@@ -918,9 +695,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bounded_text_does_not_accept_missing_required_evidence() {
-        assert!(bounded_text("test passed", 20, false));
-        assert!(!bounded_text("", 20, false));
-        assert!(!bounded_text("too long", 3, false));
+    fn terminal_skill_audit_rejects_the_wrong_bundled_skill() {
+        let value = serde_json::json!({
+            "schemaVersion": 1,
+            "clientRequestId": "terminal-one",
+            "workspaceId": "workspace-one",
+            "workspaceGeneration": 1,
+            "beforeObservationId": "observation-one",
+            "workUnitId": "work-unit-one",
+            "sourceEventId": "event-one",
+            "terminalState": "completed",
+            "objective": "Observe commits",
+            "acceptance": ["Evidence is read only"],
+            "verification": [],
+            "decisions": [],
+            "failedAttempts": [],
+            "risks": [],
+            "commitSkillInjection": {
+                "schemaVersion": 1,
+                "skillId": "wrong-skill",
+                "skillVersion": "1.0.0",
+                "contentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "pathAuthority": "app_bundle",
+                "injectionMode": "skill_input",
+                "workspaceGeneration": 1,
+                "workUnitId": "work-unit-one",
+                "clientRequestId": "turn-one",
+                "injectedAt": "2026-07-18T00:00:00Z"
+            },
+            "reportedCommitBlockReason": null
+        });
+        let request =
+            serde_json::from_value::<ObserveTerminalWorkUnitRequest>(value).expect("typed request");
+        assert_eq!(
+            validate_terminal_request(&request)
+                .expect_err("wrong skill")
+                .code,
+            "GIT-COMMIT-SKILL-AUDIT"
+        );
+    }
+
+    #[test]
+    fn read_requests_reject_raw_paths_and_git_arguments() {
+        let request = serde_json::json!({
+            "schemaVersion": 1,
+            "workspaceId": "workspace-one",
+            "workspaceGeneration": 1,
+            "commitEvidenceId": format!("commit-{}", "a".repeat(40)),
+            "repositoryPath": "/private/repository",
+            "gitArgs": ["update-ref", "refs/heads/main"]
+        });
+        assert!(serde_json::from_value::<CommitEvidenceDetailRequest>(request).is_err());
     }
 }
