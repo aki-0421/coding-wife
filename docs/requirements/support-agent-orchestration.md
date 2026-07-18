@@ -107,7 +107,7 @@ read_when:
 | `SUP-F-073` | commit説明はJA/ENのversioned schemaへ適合する | active UI localeでsummary、changes、reasons、verification、impact、cautions、howToReadNext、narrationChunksを返し、unknown/oversize/missing fieldをrejectする | Approved | 非該当 |
 | `SUP-F-074` | narration chunkをsequence順にstreamする | deltaはrequest ID、source commit ID、generation、locale、sequence、text、doneを持ち、sequence gap/duplicate/locale mismatchを適用しない。redaction後の確定chunkだけをcaptionへ渡す | Approved | 非該当 |
 | `SUP-F-075` | stale/schema invalid/cancelをfail closedする | generation/selection不一致、schema invalid、redaction failure、timeout、Cancel後のdeltaをcaption/TTSへ適用せず、main turnを止めずdeterministic unavailable/canceled textへ置換する | Approved | 非該当 |
-| `SUP-F-076` | captionとTTSは同じtranscriptを使う | captionへ確定したredacted chunk列だけをTTSへ渡し、音声用の再要約を行わない。TTS off/unavailableでも全captionを表示する | Approved | 非該当 |
+| `SUP-F-076` | captionとTTSは同じtranscriptを使う | captionへ確定したredacted chunk列だけを同じsequenceでlocal TTS adapterへ渡し、音声用の再要約を行わない。supportからaudio/network requestを作らず、TTS off/unavailableでも全captionを表示する | Approved | 非該当 |
 | `SUP-F-077` | commit explanation本文を永続化しない | app DB、artifact、logにinput evidence本文・output transcriptが0件で、skill ID/version/digest、request/commit opaque ID、locale、status、usage、latency、error codeだけが存在する | Approved | 非該当 |
 
 ## 入力項目要件
@@ -166,7 +166,7 @@ read_when:
 | CODE | main eventとsingle user-question channel | 解決済み（相互参照確認済み） | mainはsupport failureでも継続 |
 | HIST | usage metadata、raw history非保存 | 解決済み（相互参照確認済み） | persistence testで監査 |
 | GIT | redacted `CommitEvidenceV1`、selection/generation | 解決済み（typed contract） | evidence invalidならexplainerを起動しない |
-| NARR/LIVE | validated narration chunksだけを表現へ使用 | 解決済み（相互参照確認済み） | stale outputは適用しない |
+| NARR/LIVE | validated narration chunksだけをcaptionへ適用し、任意のmacOS local TTSとsemantic speaking stateへ同じsequenceを渡す | 解決済み（相互参照確認済み） | stale outputは適用せず、TTS unavailableでもcaptionを維持する |
 
 ## 未確定事項
 

@@ -21,7 +21,7 @@ read_when:
 
 利用者が、main Codexの作業を「完了したという主張」だけで判断せず、commit単位のmetadata、変更量、sanitized diff、verification、decision、riskから確認できるようにする。commit producerは`coding-wife-commit-work`を毎turn受け取るmain Codexであり、本画面とnative Git backendはGit状態を変更しない。
 
-専門的なcommitを読み解きにくい場合は、選択commitに対して「詳しく教えて」を押せる。明示操作後だけ、path/raw diff/secretを除去した`CommitEvidenceV1`をisolated supportへ送り、`coding-wife-explain-commit`から返る日本語/英語の説明をcharacter captionへstreamする。TTSは任意で、captionと同じ文だけを読む。
+専門的なcommitを読み解きにくい場合は、選択commitに対して「詳しく教えて」を押せる。明示操作後だけ、path/raw diff/secretを除去した`CommitEvidenceV1`をisolated supportへ送り、`coding-wife-explain-commit`から返る日本語/英語の説明をcharacter captionへstreamする。TTSは任意で、captionと同じ文だけを検証済みmacOS local `/usr/bin/say` adapterで読む。外部TTS provider、API key、network送信は使用しない。
 
 ## スコープ
 
@@ -183,7 +183,7 @@ isolated support turnには`coding-wife-explain-commit`をexplicit skill input�
 6. 注意 / Cautions。
 7. 次の見方 / What to inspect next。
 
-TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceで読む。TTS off/mute/unavailableでもcaptionを省略しない。selection変更、workspace切替、Cancel、stale/schema invalid後のdeltaは適用しない。
+TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでlocal adapterのstdinへ渡す。TTS off/mute/binary・voice・audio device unavailableでもcaptionを省略しない。selection変更、workspace切替、Cancel、stale/schema invalid後のdeltaはcaption/TTS queueへ適用せず、active process groupも100ms以内に停止する。
 
 説明本文はHISTへ保存しない。status、skill ID/version/digest、opaque commit/request ID、locale、usage、latency、error codeだけを保存する。
 
@@ -255,7 +255,7 @@ native command surfaceにcheckpoint、commit、stage、restore、revert、branch
 | 生成・再利用 | 同じmain windowとworkspace selectionを維持してCommit tabへ切替える |
 | 非active | hidden force-mounted panelはobserver/supportを起動しない |
 | リサイズ | detail優先、list drawer化。captionはdetail actionを覆わない |
-| close | observer read、support、TTSをbounded cancel。Git transaction待機なし |
+| close | observer read、support、local TTS process group/queueをbounded cancel。Git transaction待機なし |
 | restart | persisted evidenceとInterrupted explanation metadataを表示し、自動support再開しない |
 | offline | local evidenceを表示し、explanationはUnavailable caption |
 
