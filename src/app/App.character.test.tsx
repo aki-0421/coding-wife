@@ -346,11 +346,12 @@ describe("default App character integration", () => {
     expect(
       document.querySelector('[data-character-stage-default="app-live2d"]'),
     ).not.toBeInTheDocument()
+    expect(
+      screen.getByText("External renderer · status unavailable"),
+    ).toBeVisible()
 
     fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "Diagnostics" }).at(-1)!,
-    )
+    fireEvent.click(screen.getByRole("button", { name: "Companion" }))
     expect(screen.getByText("External renderer")).toBeVisible()
     expect(
       screen.getByText("Unknown", { selector: "[data-slot=badge]" }),
@@ -375,17 +376,25 @@ describe("default App character integration", () => {
     expect(screen.getByText("かにビーム")).toBeVisible()
 
     fireEvent.click(screen.getByRole("button", { name: "General" }))
-    fireEvent.click(screen.getByRole("radio", { name: "Reduce" }))
+    fireEvent.change(screen.getByRole("combobox", { name: "Reduced motion" }), {
+      target: { value: "on" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Companion" }))
     await waitFor(() =>
       expect(screen.getAllByText("Reduced").length).toBeGreaterThan(0),
     )
 
     fireEvent.click(screen.getByRole("switch", { name: "Hide character" }))
-    expect(
-      screen.getByText("Hidden", { selector: "[data-slot=badge]" }),
-    ).toBeVisible()
+    await waitFor(() =>
+      expect(
+        screen.getByText("Hidden", { selector: "[data-slot=badge]" }),
+      ).toBeVisible(),
+    )
+    const presentationsBeforeShow = live2dCalls.length
     fireEvent.click(screen.getByRole("switch", { name: "Hide character" }))
+    await waitFor(() =>
+      expect(live2dCalls.length).toBeGreaterThan(presentationsBeforeShow),
+    )
 
     const failedStatus = {
       phase: "error",
