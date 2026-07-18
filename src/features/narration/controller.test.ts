@@ -420,6 +420,67 @@ describe("NarrationController", () => {
     expect(runtimeSpy).toHaveBeenCalledOnce()
   })
 
+  it("cancels the released speech chain after a terminal speak response", async () => {
+    const { controller, gateway } = await ready(true)
+    const key = prepare(controller)
+    vi.spyOn(gateway, "speak").mockImplementation((request) => {
+      gateway.speech.push(request)
+      return Promise.resolve({
+        schemaVersion: narrationSchemaVersion,
+        disposition: request.sequence === 0 ? "unavailable" : "queued",
+        queueDepth: 0,
+        code: request.sequence === 0 ? "NARRATION-VOICE-UNAVAILABLE" : null,
+      })
+    })
+
+    await controller.activatePresentation(key)
+    expect(acknowledge(controller, key, 0)).toBe(true)
+    expect(acknowledge(controller, key, 1)).toBe(true)
+
+    await vi.waitFor(() =>
+      expect(controller.getSnapshot().presentation).toMatchObject({
+        speechStatus: "unavailable",
+        errorCode: "NARRATION-VOICE-UNAVAILABLE",
+      }),
+    )
+    await vi.waitFor(() =>
+      expect(gateway.cancelReasons).toContain("explicit_cancel"),
+    )
+    expect(gateway.speech.map(({ sequence }) => sequence)).toEqual([0])
+    expect(controller.getSnapshot().presentation?.speechStatus).toBe(
+      "unavailable",
+    )
+  })
+
+  it("cancels the released speech chain after runtime becomes unavailable", async () => {
+    const { controller, gateway } = await ready(true)
+    const key = prepare(controller)
+    let runtimeCalls = 0
+    vi.spyOn(gateway, "getRuntime").mockImplementation(() => {
+      runtimeCalls++
+      return Promise.resolve({
+        schemaVersion: narrationSchemaVersion,
+        playbackState: runtimeCalls === 1 ? "unavailable" : "idle",
+        activeRequestId: null,
+        queueDepth: 0,
+        lastErrorCode: runtimeCalls === 1 ? "NARRATION-SAY-EXIT" : null,
+      })
+    })
+
+    await controller.activatePresentation(key)
+    expect(acknowledge(controller, key, 0)).toBe(true)
+    expect(acknowledge(controller, key, 1)).toBe(true)
+
+    await vi.waitFor(() =>
+      expect(gateway.cancelReasons).toContain("explicit_cancel"),
+    )
+    expect(gateway.speech.map(({ sequence }) => sequence)).toEqual([0])
+    expect(controller.getSnapshot().presentation).toMatchObject({
+      speechStatus: "unavailable",
+      errorCode: "NARRATION-SAY-EXIT",
+    })
+  })
+
   it("awaits native cancellation before terminalizing a playback watchdog", async () => {
     const { controller, gateway } = await ready(true)
     const key = prepare(controller, ["説明です。"])

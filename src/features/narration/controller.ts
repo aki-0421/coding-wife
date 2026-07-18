@@ -440,7 +440,7 @@ export class NarrationController {
     if (this.activeMatches(existing.key)) {
       this.publishActive(existing)
       if (existing.status !== "ready") {
-        this.terminalizeCaptionSpeech()
+        void this.terminalizeCaptionSpeech()
         void this.cancelSpeech("explicit_cancel")
       }
     }
@@ -711,7 +711,7 @@ export class NarrationController {
       if (this.#captionSpeechGate !== gate || gate.terminal) return
       gate.acknowledgmentTimers.delete(sequence)
       if (gate.sequences.get(sequence) !== "waiting") return
-      this.terminalizeCaptionSpeech("NARRATION-CAPTION-NOT-VISIBLE")
+      void this.terminalizeCaptionSpeech("NARRATION-CAPTION-NOT-VISIBLE")
     }, captionAcknowledgmentTimeoutMilliseconds)
     gate.acknowledgmentTimers.set(sequence, timer)
   }
@@ -773,7 +773,7 @@ export class NarrationController {
         this.scheduleSpeech(sequence, text)
       }
     } catch {
-      this.terminalizeCaptionSpeech("NARRATION-CAPTION-VISIBILITY")
+      void this.terminalizeCaptionSpeech("NARRATION-CAPTION-VISIBILITY")
     } finally {
       gate.draining = false
     }
@@ -789,17 +789,31 @@ export class NarrationController {
     }
   }
 
-  private terminalizeCaptionSpeech(code?: string): void {
+  private terminalizeCaptionSpeech(
+    code?: string,
+    cancelNative = false,
+  ): Promise<void> {
     const gate = this.#captionSpeechGate
     if (gate !== null) {
       gate.terminal = true
       this.clearCaptionAcknowledgmentTimers(gate)
     }
+    this.#speechEpoch++
+    this.#speechChain = Promise.resolve()
     if (code !== undefined) {
       this.updatePresentation({
         speechStatus: "unavailable",
         errorCode: code,
       })
+    }
+    return cancelNative ? this.cancelTerminalSpeech() : Promise.resolve()
+  }
+
+  private async cancelTerminalSpeech(): Promise<void> {
+    try {
+      await this.gateway.cancel("explicit_cancel")
+    } catch (error) {
+      this.update({ lastErrorCode: errorCode(error) })
     }
   }
 
@@ -848,8 +862,9 @@ export class NarrationController {
           } else if (response.disposition === "disabled") {
             this.updatePresentation({ speechStatus: "off" })
           } else {
-            this.terminalizeCaptionSpeech(
+            await this.terminalizeCaptionSpeech(
               response.code ?? `NARRATION-${response.disposition}`,
+              true,
             )
           }
           return
@@ -860,9 +875,13 @@ export class NarrationController {
           this.updatePresentation({ speechStatus: "idle" })
         }
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (this.speechStillActive(epoch, generation, key)) {
-          this.terminalizeCaptionSpeech(errorCode(error))
+          const code = errorCode(error)
+          await this.terminalizeCaptionSpeech(
+            code,
+            code !== "NARRATION-PLAYBACK-TIMEOUT",
+          )
         }
       })
   }
@@ -915,12 +934,18 @@ export class NarrationController {
     key: CommitNarrationSourceKey,
   ): boolean {
     const active = this.#snapshot.presentation
+    const gate = this.#captionSpeechGate
     return (
       epoch === this.#speechEpoch &&
       active !== null &&
+      gate !== null &&
+      !gate.terminal &&
+      gate.presentationGeneration === generation &&
       active.presentationGeneration === generation &&
       active.status !== "canceled" &&
       active.status !== "unavailable" &&
+      active.speechStatus !== "unavailable" &&
+      sameSourceKey(gate.key, key) &&
       sameSourceKey(active.key, key)
     )
   }
