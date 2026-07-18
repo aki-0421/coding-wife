@@ -164,7 +164,7 @@ file rowはopaque `fileEvidenceId`、表示用redacted path、change kind、adde
 
 ### Commit explanation
 
-success commit commandと新しいSHAの検証後、app-owned controllerは`not_generated`から`queued`へ遷移し、`CommitExplanationRequestedV1(trigger=verified_commit)`を発行する。既存commitのmanual fallbackは`trigger=user_request`、terminal failure後のretryは`trigger=user_retry`とし、UIはapp controllerへintentを送るだけでsupport runtimeを直接開始しない。いずれも次を満たす`CommitEvidenceV1`だけを渡す。
+success commit commandと新しいSHAの検証後、app-owned controllerは`not_generated`から`queued`へ遷移し、`CommitExplanationRequestedV1(trigger=auto_verified_commit)`を発行する。既存commitのmanual fallbackは`trigger=user_request`、terminal failure後のretryは`trigger=user_retry`とし、UIはapp controllerへintentを送るだけでsupport runtimeを直接開始しない。いずれも次を満たす`CommitEvidenceV1`だけを渡す。
 
 - opaque commit IDとsanitized commit message。
 - pathなしのchange kind/countとdiff stats。
@@ -199,7 +199,7 @@ TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでloca
 | Observer unavailable | repo/Git/policy/error | 保存済みevidence、typed reason | Retry、Settings、Chat | fresh/error |
 | Diff loading | fileを明示選択 | row skeleton、Cancel | Cancel、別file | loaded/error |
 | Explanation not_generated | 起動前から存在したcommit、または自動enqueue前 | `詳しく教えて`と自動生成対象か否かのtext | `user_request`、inspect | queued/unavailable |
-| Explanation queued/running | `verified_commit` / `user_request` / `user_retry`受理後 | status、presentation activate、caption portal、Cancel | presentation、Cancel、read-only inspect | generated/failed/canceled/unavailable |
+| Explanation queued/running | `auto_verified_commit` / `user_request` / `user_retry`受理後 | status、presentation activate、caption portal、Cancel | presentation、Cancel、read-only inspect | generated/failed/canceled/unavailable |
 | Explanation generated | done受理、current runtimeにcached presentationあり | explanation表示、同一transcriptの任意再読上げ | presentation、inspect | selection/new request |
 | Explanation failed/canceled | model/schema/timeout、またはCancel terminal | deterministic reason、Retry | `user_retry`、inspect | queued/unavailable |
 | Explanation unavailable | support off/offline/redaction/capability error | deterministic reason。`retryable=true`の場合だけRetry | inspect、Settings、条件付き`user_retry` | queued/unavailable |
@@ -237,7 +237,7 @@ native command surfaceにcheckpoint、commit、stage、restore、revert、branch
 
 | event | producer | consumer | 必須field |
 |---|---|---|---|
-| `commit_explanation_requested` | app-owned explanation controller | support runtime | schema version、request ID、workspace generation、commit evidence ID、locale、trigger=`verified_commit` / `user_request` / `user_retry` |
+| `commit_explanation_requested` | app-owned explanation controller | support runtime | schema version、request ID、workspace generation、commit evidence ID、locale、trigger=`auto_verified_commit` / `user_request` / `user_retry` |
 | `commit_explanation_controller_state` | app-owned explanation controller | EvidenceView/caption | commit evidence ID、generation、request ID、exact status、trigger、retryable、presentation available、updatedAt、error code |
 | `commit_explanation_presentation_requested` | EvidenceView | app-owned explanation controller | commit evidence ID、generation、mode=`show` / `replay_narration` |
 | `commit_explanation_started` | support runtime | app-owned explanation controller/caption | request ID、skill audit、startedAt |

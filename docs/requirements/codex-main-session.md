@@ -115,8 +115,8 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | `CODE-F-077` | appはmain sessionのGit commit command成功をtyped eventとして検出する | App Serverのnormalized command terminalがGit commit、exit success、active workspace generation一致の時だけcandidateを1件作り、assistant text、一般tool success、失敗command、raw文字列の部分一致では作らない | Approved | 非該当 |
-| `CODE-F-078` | candidate commitはread-only observerでSHAを検証する | command前後のHEADと到達可能commitを相関し、新しいvalid SHAと`commitEvidenceId`を確定できた時だけ`verified_commit`をapp-owned explanation controllerへ渡す。0件、複数件、detached/race、HIST失敗をtyped resultにし、Gitを変更しない | Approved | 非該当 |
-| `CODE-F-079` | commit説明runtimeをmain conversationから完全に分離する | `verified_commit`受理後のsupport root作成、status、delta、terminal、retryがmain thread/turn/subagent/event/command countを変えず、main sessionへ説明request/result/failureを1件も送らない。同じworkspace generation・commit evidence IDはidempotentに1件へ集約する | Approved | 非該当 |
+| `CODE-F-078` | candidate commitはread-only observerでSHAを検証する | command前後のHEADと到達可能commitを相関し、新しいvalid SHAと`commitEvidenceId`を確定できた時だけ`auto_verified_commit`をapp-owned explanation controllerへ渡す。0件、複数件、detached/race、HIST失敗をtyped resultにし、Gitを変更しない | Approved | 非該当 |
+| `CODE-F-079` | commit説明runtimeをmain conversationから完全に分離する | `auto_verified_commit`受理後のsupport root作成、status、delta、terminal、retryがmain thread/turn/subagent/event/command countを変えず、main sessionへ説明request/result/failureを1件も送らない。同じworkspace generation・commit evidence IDはidempotentに1件へ集約する | Approved | 非該当 |
 
 ## 入力項目要件
 

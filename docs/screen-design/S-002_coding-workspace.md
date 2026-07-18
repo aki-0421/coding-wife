@@ -58,7 +58,7 @@ status: "Approved"
 | 表示契機 | [S-001](S-001_session-dashboard.md)でworkspace選択、Chat tab、notification内のworkspace link、再起動復旧 |
 | 表示前提 | valid workspace ID。missing repoまたはCodex blocked時もread-only timelineは表示する |
 | 初期フォーカス | normal/emptyはcomposer、decision時はdecision heading、error/recovery時は最初の回復操作 |
-| 正常完了 | validated terminal work-unit eventを1回だけread-only Git observerへ渡し、before/after HEAD、new commit、verification/decision/risk相関をHISTへ追記する。success commit commandと新しいSHAを検証できた時はapp-owned explanation controllerへ`verified_commit`を渡し、main conversationを変更しない |
+| 正常完了 | validated terminal work-unit eventを1回だけread-only Git observerへ渡し、before/after HEAD、new commit、verification/decision/risk相関をHISTへ追記する。success commit commandと新しいSHAを検証できた時はapp-owned explanation controllerへ`auto_verified_commit`を渡し、main conversationを変更しない |
 | キャンセル |未送信draftとtimeline位置を維持する。running turnのStopは別操作として確認する |
 | 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う |
 | 再表示 | workspace、tab、draft、timeline位置、unanswered decision、companion状態をDBから復元する |
@@ -253,7 +253,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | Stop | Rust supervisor | `stop_main_turn` | owned process/thread/turn ID | confirmation cancelは継続 | timeout後process tree停止、Interrupted |
 | event購読 | Rust event bridge | `subscribe_workspace_events` | workspace ID、monotonic sequence、schema allowlist | route leaveでUI購読だけ解除 | gapでpauseし診断表示 |
 | terminal Git observation handoff | Codex composition → Rust Git observer | `observe_terminal_work_unit` | validated terminal authority、work unit ID、workspace ID/generation、source event ID/sequence/time。observerがbefore/after HEAD、status、new commitとverification/decision/risk evidenceをread-onlyで相関し、同一eventをexact replayだけに制限 | terminal前は開始しない | observation/HIST失敗をUnavailable/Unknownにし、main resultとGit状態を変更しない |
-| verified commit explanation handoff | App Server event bridge → Rust Git observer → app-owned explanation controller | `intercept_verified_commit_for_explanation` | normalized Git commit command success、workspace generation、before/after HEAD、新しい到達可能SHA、commit evidence ID。`CommitExplanationRequestedV1(trigger=verified_commit)`をmain session外で1件だけ作る | SHA検証前は開始しない | controllerを`failed` / `unavailable`にし、main conversationへrequest/result/failureを注入しない |
+| verified commit explanation handoff | App Server event bridge → Rust Git observer → app-owned explanation controller | `intercept_auto_verified_commit_for_explanation` | normalized Git commit command success、workspace generation、before/after HEAD、新しい到達可能SHA、commit evidence ID。`CommitExplanationRequestedV1(trigger=auto_verified_commit)`をmain session外で1件だけ作る | SHA検証前は開始しない | controllerを`failed` / `unavailable`にし、main conversationへrequest/result/failureを注入しない |
 | attachment選択 | Tauri dialog → Rust | `select_workspace_attachments` | file picker、canonical workspace root、size/type |変更なし | invalid fileをhandle化しない |
 | read-only context取得 | Rust context adapter | `capture_turn_context` | source allowlist、5秒deadline、stdout 1MiB、stderr 4KiB、process tree cleanup、timestamp、redaction、content hash | draft不変 | raw terminal/pathへfallbackせず、Terminal outputはunsupportedを返す |
 | decision / approval回答 | Rust App Server adapter | `answer_decision_or_approval` | negotiated requestUserInputまたは既知approval method、元request ID、idempotency | Hold/cancelは未回答維持 | 未知method/schemaは許可せずBlocked |

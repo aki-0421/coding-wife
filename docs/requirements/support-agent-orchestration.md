@@ -68,7 +68,7 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | `SUP-F-050` | support taskはmainと別のephemeral rootで実行される | invocationごとに新しいroot IDを作り、main thread IDをreuseせず、完了/cancel/timeout後にrootを再利用しない | Approved | 非該当 |
-| `SUP-F-051` | support roleはdeterministic eventで起動される | roleごとに定義したdecision requested、error、`trigger=verified_commit`、`trigger=user_request`、`trigger=user_retry`以外で起動せず、同一event IDを二重処理しない。commit選択、Commit tab表示、SHA未検証のcommand resultでは起動しない | Approved | 非該当 |
+| `SUP-F-051` | support roleはdeterministic eventで起動される | roleごとに定義したdecision requested、error、`trigger=auto_verified_commit`、`trigger=user_request`、`trigger=user_retry`以外で起動せず、同一event IDを二重処理しない。commit選択、Commit tab表示、SHA未検証のcommand resultでは起動しない | Approved | 非該当 |
 | `SUP-F-052` | 通常supportはredacted normalized snapshotだけを受け取る | payloadにgoal、phase、event summary、evidence ID、locale、generationを含み、source file本文、absolute path、secret、raw reasoningを含まない | Approved | 非該当 |
 | `SUP-F-053` | 通常supportはtoolとrepositoryへアクセスできない | 起動前probeでtool 0件、cwdなし、filesystem/shell/MCPなしを強制できる時だけsessionを開始し、access attemptがpolicy errorになる。強制capabilityがないruntimeではsupport threadを0件にしてdeterministic fallbackを使う | Approved | 非該当 |
 | `SUP-F-054` | checkpoint reviewerは固定diff snapshotだけを読める | 旧checkpoint reviewer契約は使用しない | Deprecated | `SUP-F-069`〜`SUP-F-076`へ置換 |
@@ -101,7 +101,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `SUP-F-069` | commit explainerはverified commit後にapp側から自動起動する | App ServerのGit commit commandがsuccess terminalになり、observerが新しい到達可能SHAを検証した時だけapp controllerが`CommitExplanationRequestedV1(trigger=verified_commit)`を1件作る。main sessionからsupport rootをspawnせず、同じworkspace generation・commit evidence IDのreplayは二重起動しない | Approved | 非該当 |
+| `SUP-F-069` | commit explainerはverified commit後にapp側から自動起動する | App ServerのGit commit commandがsuccess terminalになり、observerが新しい到達可能SHAを検証した時だけapp controllerが`CommitExplanationRequestedV1(trigger=auto_verified_commit)`を1件作る。main sessionからsupport rootをspawnせず、同じworkspace generation・commit evidence IDのreplayは二重起動しない | Approved | 非該当 |
 | `SUP-F-070` | commit explainerへredacted `CommitEvidenceV1`だけを渡す | payloadはschema version、opaque commit ID、sanitized message、pathなしchange summary、diff stats、verification、decision、risk、locale、generationを最大64KiBで持ち、repo root、absolute/relative path、raw diff全文、secret、raw reasoningが0件である | Approved | 非該当 |
 | `SUP-F-071` | app同梱の説明skillを明示注入する | skill名は`coding-wife-explain-commit`、path authorityは`app_bundle`、version/digest一致、`policy.allow_implicit_invocation: false`とし、説明turnの`type=skill` inputへ1件だけ含める | Approved | 非該当 |
 | `SUP-F-072` | commit explainerはrepository/tool authorityを持たない | mainとは別のephemeral rootでcwd/repository rootを渡さず、filesystem、shell、Git、MCP、dynamic toolを0件に強制できる時だけ起動する。強制不能ならsupportを0件にしてfallbackを返す | Approved | 非該当 |
@@ -121,7 +121,7 @@ read_when:
 | Task | snapshot | なし | 必須 | schema version、最大64KiB、redaction pass必須 | taskを起動せずfallback |
 | Commit explanation | evidence | なし | 条件付き | `CommitEvidenceV1`、redaction済み最大64KiB、active selection/generation一致 | explainerを起動せずunavailable表示 |
 | Commit explanation | locale | active UI locale | 必須 | `ja` / `en` | active localeへ正規化 |
-| Commit explanation | request trigger | `verified_commit` | 必須 | `verified_commit` / `user_request` / `user_retry`。UIは`not_generated`で`user_request`、failure terminalで`user_retry`だけをapp controllerへ要求できる | unknown triggerは起動せず監査error |
+| Commit explanation | request trigger | `auto_verified_commit` | 必須 | `auto_verified_commit` / `user_request` / `user_retry`。UIは`not_generated`で`user_request`、failure terminalで`user_retry`だけをapp controllerへ要求できる | unknown triggerは起動せず監査error |
 
 ## デスクトップ固有要件
 
