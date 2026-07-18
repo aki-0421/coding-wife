@@ -32,7 +32,7 @@ Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍sca
 | Platform | macOS 14以降、Apple Silicon、単一利用者、単一`main` window |
 | Frontend | React + TypeScript + ViteをTauri v2 WebViewへbundleする |
 | Navigation | persistent workspace sidebar、二段header、Chat/Commit/Context/Settings、settings gear |
-| State | loading、empty、processing、offline、error、permission、cancel、restart recovery |
+| State | loading、empty、processing、offline、error、permission、disabled、cancel、repository repair、restart recovery |
 | Trust boundary | WebViewは表示と入力、Rustはprocess、Git、DB、filesystem、asset、secretの認可 |
 | Inclusion | ja/en、keyboard-only、WCAG 2.2 AA、200% text zoom、reduced motion |
 
@@ -75,16 +75,18 @@ Context tabはS-002内の`/workspace/:workspaceId/context` subviewであり、�
 | 項目 | 契約 |
 |---|---|
 | window label | `main` |
-| 生成数 | process内に1枚。二重起動は既存windowを前面化する |
+| 生成数 | system全体で`main` 1枚。app-private single-instance lock保持中の二重起動は新しいWebView、Codex/App Server、support runtime、audio controller、DB writerを作らず、既存windowをunminimizeしてfocus/raiseしてから新processを終了する。stale lockはowner/process identityを検証した場合だけ回収する |
 | default geometry | 1470×836 CSS px |
 | minimum geometry | 960×640 CSS px。これ未満へのresizeをOSへ許可しない |
 | maximum / fullscreen | macOS標準zoomとfullscreenを許可し、終了時geometryを保存する |
 | titlebar | custom overlay。traffic lightsは12×12、左15px、上14.25px、間隔9px |
 | drag region | traffic lights、button、tab、input、scrollbarを除くbreadcrumb rowだけ |
 | radius | window 7.5px、compact control 4.5px、composer/decision 9px |
-| close | idle時はorderly shutdown。running turnまたはGit mutation中は停止して終了/終了しないを選ぶ |
+| close | active/pending turn 0件ならorderly shutdown。1件以上ならnative closeを保留し、`停止して終了 / Stop and Quit`と`終了しない / Don’t Quit`だけを表示する |
 
-close、minimize、zoomのhit testingはmacOS標準結果と一致させる。close確認で「終了しない」を選ぶとwindow、turn、draft、focusを維持する。「停止して終了」ではCodex、support、TTSを停止し、DB transactionをcommitまたはrollbackして5秒以内にprocessを終了する。
+close、minimize、zoomのhit testingはmacOS標準結果と一致させる。close確認は`終了しない`を初期focusとしてdialog内にtrapし、Escape、duplicate close、`Command+Q`、window manager経由でも確認を迂回しない。`終了しない`はdialogを閉じてexact triggerへfocusを戻し、window、turn、selection、draft、timeline anchor、caption/TTSを完全に維持する。
+
+idle closeまたは`停止して終了`受理後は、Codex/App Server process group、audio process/queue、app-owned support controller/process group、pending scope writer、DB writer/transactionの順で閉じる。全descendant消滅とtransaction commit/rollbackを5秒以内に確認してからmain processを終了する。期限超過時はprocess groupを強制終了してInterrupted recovery metadataを残し、Git stateとsupport explanation本文を永続化しない。shutdown開始前にactive commit presentation intentをrevokeし、caption/audioへの後着eventを破棄する。
 
 ## レイアウト契約
 
@@ -163,7 +165,9 @@ wheel/trackpad eventを親へ二重伝播させない。timelineがbottomから4
 4. composerまたは画面固有action。
 5. Companionのmute/hide、visible caption。
 
-route遷移後は画面h1または最初の回復操作へfocusを置く。workspace切替後は直前の領域を保ち、消失した要素へfocusがあった場合だけactive view headingへ移す。popover/dialogを閉じるとtriggerへ戻す。blocking decisionはdialog focus trapを使わず、decision headingから操作までをDOM上で連続させ、背景のSendをdisabledにする。
+route遷移後は画面h1または最初の回復操作へfocusを置く。通常のworkspace切替後は直前の領域を保ち、消失した要素へfocusがあった場合だけactive view headingへ移す。active/pending turn中の切替はnew selectionを保留し、`戻る / Back`を初期focusとするtrap dialogを使う。成功後はnew workspaceのactive view heading、Cancel/失敗後はold workspaceの起点itemまたはSendへfocusを返す。popover/dialogを閉じるとexact triggerへ戻す。blocking decisionはdialog focus trapを使わず、decision headingから操作までをDOM上で連続させ、背景のSendをdisabledにする。
+
+destructive/interrupt confirmationの共通DOM順はheading、対象、影響、保持されるdata、safe recovery、Cancel/Back、実行actionとする。safe actionを初期focusにし、`Escape`はCancel/Backと同じ、処理中は重複実行だけをdisabledにする。成功はpolite、blocking failureはassertive live regionへ1回だけ通知する。
 
 ### shortcut
 
@@ -179,6 +183,25 @@ route遷移後は画面h1または最初の回復操作へfocusを置く。works
 
 macOS予約shortcutを上書きしない。icon-only操作にはaccessible nameとtooltipを付ける。
 
+### final flowのlocalized action copy
+
+次のkeyは全画面で同じ意味、ja/en label、danger/safe順を使う。製品copyはkeyを直接表示せず、missing translationでは別言語を混在させずsafe Englishへfallbackする。
+
+| key | 日本語 | English |
+|---|---|---|
+| `workspace.switch.stop` | 停止して切替 | Stop and Switch |
+| `workspace.cancel.stop` | 停止してキャンセル | Stop and Cancel |
+| `common.back` | 戻る | Back |
+| `repository.repair` | 再選択して修復 | Repair Location |
+| `project.unregister` | プロジェクトの登録を解除 | Unregister Project |
+| `app.quit.stop` | 停止して終了 | Stop and Quit |
+| `app.quit.keep_open` | 終了しない | Don’t Quit |
+| `commit.explain` | 詳しく教えて | Explain This Commit |
+| `commit.explanation.close` | 説明を閉じる | Close Explanation |
+| `commit.generation.cancel` | 説明生成をキャンセル | Cancel Explanation Generation |
+| `preferences.reset` | 設定をリセット | Reset Preferences |
+| `diagnostics.recheck` | 再診断 | Recheck |
+
 ## 共通表示状態
 
 | 状態 | 共通表示 | 許可する操作 | 終了条件 |
@@ -192,6 +215,11 @@ macOS予約shortcutを上書きしない。icon-only操作にはaccessible name�
 | 権限不足 | 拒否したoperation、必要なOS権限、再選択/再診断 | read-only閲覧、Settings、Quit | 権限変更後の明示再試行 |
 | キャンセル後 | errorを表示せず開始前の入力、選択、fingerprintを維持 | 元操作または別操作 | 次の明示操作 |
 | 再起動復旧 | Interrupted turn、draft、last checkpoint、未完了work unit | review、new turn、diagnostic | 利用者が次操作を選択 |
+| 無効 | precondition、repository health、version、permission、active executionが不成立。control近傍へja/en reasonと回復actionを表示し、tooltipだけにしない | reason解消、read-only閲覧 | fresh validation成功 |
+| repository health | `missing` / `changed` / `unreadable` / `read_only` / `stale_branch`をrow/headerへlocalized text、iconで表示し、履歴/summary/anchorを保持してSend不可にする | Repair、Recheck、登録解除、影響外workspace | `healthy`のfresh snapshot |
+| workspace切替保留 | old workspaceにactive/pending turnがある時、old selectionをactive表示し、Stop and Switch / Backだけを示す | 明示2操作だけ | exact old terminal interrupt + cleanup、またはBack |
+| Diagnostics再確認 | native readinessのRecheck中は前snapshotをStale表示し、UTC checkedAtと`aria-busy`を示す | Cancel、影響外Settings | 同じsnapshot IDのterminal結果 |
+| background説明生成 | verified commit jobがqueued/runningかつpresentation intentなしでは、Commit detailのbackground statusだけを示しcaption/live region/TTSは0件 | `詳しく教えて`、生成Cancel、read-only閲覧 | explicit intentまたはterminal generation |
 
 loading中に最終dataがある場合は前回dataを薄く残し、全画面spinnerへ置換しない。errorを成功toastへ変換せず、blocking errorは該当領域に残す。
 
@@ -199,15 +227,18 @@ loading中に最終dataがある場合は前回dataを薄く残し、全画面sp
 
 | data | 正本 | 保存契機 | restart | 破棄 |
 |---|---|---|---|---|
-| window geometry / locale / reduced motion | Rust管理SQLite | valid変更時 | bounds補正後に復元 | Reset settings |
-| project/workspace/context/draft/selection | Rust管理SQLite | field commit、route/workspace切替 | active workspaceと一緒に復元 | project登録解除または履歴削除の契約 |
+| window geometry / route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | Reset UI state |
+| `AppPreferencesV1` (`locale` / `reducedMotion` / `characterVisibility`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | Reset Preferencesでrecordだけsafe defaultへ |
+| project/workspace/context/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
+| repository identity/health snapshot | Rust管理SQLite + read-only Git再検査 | 登録、window focus、selection、Send直前 | row/headerへ復元後にfreshness再検査 | project登録解除 |
 | normalized event / review pack | append-only SQLite + hash artifact | redaction/schema合格後 | sequence順に再構築 | workspace history明示削除 |
-| Git object / source | repository | Rust Git transaction成功時 | Gitを正本として再診断 | appから自動削除しない |
-| custom character pack | app-private character library | quarantine検証とatomic昇格 | pack IDから復元 | 未使用packの明示削除 |
+| Git object / source | repository | appはread-only観測だけを保存 | Gitを正本として再診断 | appから変更・自動削除しない |
+| project-scoped selected character | stable Project ID → verified pack ID | preview/state test後のatomic選択 | 同Project全workspaceへ即時同期しrestart後に復元 | pack delete前の全Project usage再検査 |
+| custom character pack / `SemanticMappingV1` | app-private character library + pack ID/manifest hash/version | quarantine昇格、inventory検証付きatomic mapping save | pack ID/hash/versionから復元 | 全Project未選択packの明示削除 |
 | TTS key | OS secret store |明示保存 | set/unsetだけ表示 |明示削除 |
 | audio byte / support raw history / raw reasoning | 保存しない | 非該当 | 復元しない | playback/task終了時 |
 
-Web Storageを永続正本にしない。schema migrationはbackup付きtransactionで行い、失敗時は元DBを上書きせずread-only recoveryを表示する。startedでterminal eventがないturnはInterruptedとし、自動再送、自動commit、自動restoreを行わない。
+Web Storageを永続正本にしない。preferenceのmissing/corrupt/unknown versionはraw値を出さずsafe default + sanitized diagnosticへfail closedする。schema migrationはbackup付きtransactionで行い、失敗時は元DBを上書きせずread-only recoveryを表示する。startedでterminal eventがないturnはInterruptedとし、workspace固有のdraft、last summary、anchor、未完了work unitを示すが、Codex turn、support presentation、TTS、Git commandを自動再送・再開しない。
 
 ## CSP、Capability、privacy
 
@@ -225,6 +256,8 @@ Web Storageを永続正本にしない。schema migrationはbackup付きtransact
 - statusはtext、icon、fill/outline/dashのうち最低三つを併用する。
 - Live2D canvasは`aria-hidden`かpresentation扱いとし、state、uncertainty、waiting、verificationをHTML textでも表示する。
 - polite live regionは完了と通常status、assertiveはblocking decision、error、disconnectに限定する。tool streamを逐次読み上げない。
+- background commit explanationはpresentation intentがない限りlive regionへ流さない。明示presentation後のvisible captionを正本とし、通常chunk/completionはpolite、terminal errorはassertiveへ1回だけ通知する。
+- loading regionは`aria-busy`とheading/statusを関連付け、empty/error/disabled/recoveryは理由、保持data、次actionをvisible textで示す。
 - ja/enを同じ機能範囲で提供する。初回はOS localeが`ja`で始まればja、それ以外はen。user content、path、branch、SHA、model名は翻訳しない。
 - 200% text zoomでは文字を縮小せず、rail/drawer、wrap、horizontal scroll、overflow menuで主要操作を残す。
 - high contrast/forced colorsではsemantic borderとsystem colorを優先し、背景画像やLive2Dなしでも操作できる。
@@ -255,12 +288,12 @@ agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced moti
 
 | 要件ID | 共通契約 | 要件定義書 |
 |---|---|---|
-| `APP-F-052`〜`APP-F-072` | window、layout、navigation、language、a11y、lifecycle、CSP、performance | [desktop-shell](../requirements/desktop-shell.md) |
-| `WORK-F-059`〜`WORK-F-062` | workspace state分離と復元 | [workspace-sessions](../requirements/workspace-sessions.md) |
+| `APP-F-052`〜`APP-F-072`, `APP-F-076` | single-instance、running close、preferences、layout、navigation、a11y、lifecycle、native diagnostics | [desktop-shell](../requirements/desktop-shell.md) |
+| `WORK-F-056`〜`WORK-F-066` | cancel/unregister/switch、workspace continuity、repository health/repair | [workspace-sessions](../requirements/workspace-sessions.md) |
 | `CODE-F-073`〜`CODE-F-076` | stop、crash、auth、stale event | [codex-main-session](../requirements/codex-main-session.md) |
 | `HIST-F-037`〜`HIST-F-057` | local persistence、redaction、migration、recovery | [activity-history](../requirements/activity-history.md) |
-| `LIVE-F-058`〜`LIVE-F-067` | resize、single canvas、text/reduced/static fallback | [live2d-companion](../requirements/live2d-companion.md) |
-| `NARR-F-064`〜`NARR-F-076` | default off、secret、mute、fallback、microphone禁止 | [audio-commentary](../requirements/audio-commentary.md) |
+| `LIVE-F-058`〜`LIVE-F-067`, `LIVE-F-075`, `LIVE-F-077`, `LIVE-F-078` | Project-scoped selection、semantic mapping、single canvas、text/reduced/static fallback | [live2d-companion](../requirements/live2d-companion.md) |
+| `NARR-F-064`〜`NARR-F-089` | default off、secret、mute、explicit presentation、dismiss/cancel分離、fallback、microphone禁止 | [audio-commentary](../requirements/audio-commentary.md) |
 
 ## 未確定事項
 
@@ -278,8 +311,10 @@ agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced moti
 | レビュー日 | 2026-07-18 |
 
 - [x] single main window、default/minimum geometry、titlebarを定義した。
+- [x] single-instance raise、active/pending turnのclose確認、順序付き5秒cleanup、focus returnを定義した。
 - [x] breakpoint、scroll owner、focus、keyboard、ja/enを定義した。
 - [x] loading、empty、processing、offline、error、permission、cancel、restartを定義した。
+- [x] disabled、repository repair、workspace切替保留、native preferences/Diagnostics、background説明と明示presentationの共通状態を定義した。
 - [x] CSP、Capability、native boundary、persistence、recoveryを定義した。
 - [x] WCAG 2.2 AA、200% text zoom、reduced motionを定義した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。

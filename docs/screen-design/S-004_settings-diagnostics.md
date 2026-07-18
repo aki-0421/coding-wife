@@ -31,7 +31,7 @@ status: "Approved"
 
 | section           | 内容                                                                                                      |
 | ----------------- | --------------------------------------------------------------------------------------------------------- |
-| General           | ja/en、reduced motion、version、reset UI state                                                            |
+| General           | native `AppPreferencesV1`のja/en、reduced motion、character visibility、version、Reset Preferences、reset UI state |
 | Project context   | active project/workspaceのgoal、constraints、definition of done、technical references                     |
 | Character context | name、tone、speech density、表現上の禁止事項。technical policyから分離                                    |
 | Companion         | bundled Hiyori、custom model import、inventory、preview、semantic mapping、hide、provenance、delete       |
@@ -92,12 +92,14 @@ section navは表の順にし、同型card gridではなく一つのform flowを
 
 | setting        | 契約                                                          | 即時反映                                              | 永続化                                                         |
 | -------------- | ------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------- |
-| Language       | `日本語` / `English`。初回はOS localeが`ja`開始ならja、他はen | sidebar、tab、error、decision、Settings、notification | Rust SQLite                                                    |
-| Reduced motion | OS preferenceを初期値にapp override `System / Reduce / Allow` | transition、Live2D、decorative motion                 | Rust SQLite                                                    |
+| Language       | `日本語` / `English`。初回はOS localeが`ja`開始ならja、他はen。wire値`ja` / `en` | sidebar、tab、error、decision、Settings、notification | owner-only native `AppPreferencesV1` |
+| Reduced motion | OS preferenceを初期値にapp override `System / Reduce / Allow`。wire値`system` / `on` / `off` | transition、Live2D、decorative motion | owner-only native `AppPreferencesV1` |
+| Character visibility | `表示 / Visible`、`非表示 / Hidden`。wire値`visible` / `hidden` | canvas/GPU animation、Chat幅、HTML state text | owner-only native `AppPreferencesV1` |
 | App version    | semantic version、build、schema versionをread-only表示        | 非該当                                                | bundle/DB metadata                                             |
+| Reset Preferences | confirmation後にOS由来locale、`system`、`visible`へ戻す | 保存成功後に全app-owned copyへ即時反映 | `AppPreferencesV1`だけ。workspace、history、Context、model library、Git、Narration settingは不変 |
 | Reset UI state | geometry、active section、filter、scrollをsafe defaultへ      | confirmation後                                        | domain history、context、Git、model、narration設定は削除しない |
 
-language変更中もuser content、path、branch、SHA、model名、commit messageを翻訳しない。切替は100ms以内にvisual feedbackを出し、再起動を要求しない。
+Settingsとruntimeはowner-only app-private native storeの同じ`AppPreferencesV1` snapshot ID/versionだけを使い、temporary fileのfsyncとatomic renameで更新する。language変更中もuser content、path、branch、SHA、model名、commit messageを翻訳しない。保存成功後100ms以内に全app-owned copyへ反映し、再起動を要求しない。missing/corrupt/unknown-version recordはraw値を表示せず、OS由来locale、`system`、`visible`へfail closedし、sanitized diagnosticと`Reset Preferences / 設定をリセット`を表示する。WebView/localStorage/demo fixtureを永続正本にしない。
 
 ### Project context
 
@@ -161,9 +163,11 @@ build時の入力はrepositoryの`tmp/hiyori_pro`とし、release resourceには
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bundled        | Hiyori preview、selected project数、provenance。Delete不可                                                                                                                                                                                                                                                                                                                       |
 | Custom         | pack name、attested thumbnail、motion/expression count、size、manifest/trusted-frame hash、selected project数。thumbnailは再読込・再起動後もpack IDとtrusted-frame asset IDだけのopaque binary IPCで取得し、manifest記載のbyte数とSHA-256へ一致したPNGだけを表示する。hashは省略表示し、完全値をaccessible nameで提供する。missing/tampered frameではuntrusted bytesを表示しない |
-| Hide character | canvas/GPU animationを停止し、Chat幅とHTML text stateを残す。再起動後も復元                                                                                                                                                                                                                                                                                                      |
-| Select         | preview first frameとstate test成功後だけproject単位で有効。切替時はcandidate client/model/trusted frameをfirst accepted frameまでstageし、成功時だけrenderer、React committed pack、metrics、status、frameを一括で置換する。失敗またはabortではcandidateだけをreleaseし、現在表示を全項目そのまま維持する                                                                       |
-| Delete         | active projectで未選択のcustom packだけ。確認後にapp-private copyを削除                                                                                                                                                                                                                                                                                                          |
+| Hide character | `AppPreferencesV1.characterVisibility`を更新し、canvas/GPU animationを停止してChat幅とHTML text stateを残す。全workspaceへ即時反映し再起動後もexact復元                                                                                                                                                                                                                           |
+| Select         | preview first frameとstate test成功後だけstable Project ID単位で有効。atomic保存成功時に同じProject IDの全workspaceへ即時反映する。切替時はcandidate client/model/trusted frameをfirst accepted frameまでstageし、成功時だけrenderer、React committed pack、metrics、status、frameを一括で置換する。失敗またはabortではcandidateだけをreleaseし、現在表示を全項目そのまま維持する |
+| Delete         | どのProject IDからも選択されていないcustom packだけ。bundled Hiyoriまたは1件以上のProjectが選択中ならdisabled理由を表示し、確認後にselectionとusageを同じnative transactionで再検査してapp-private copyを削除                                                                                                                                                                         |
+
+legacy workspace-scoped selectionはProjectごとに`selectionUpdatedAt DESC, workspaceId ASC`で最初のvalid packを一度だけ移行する。valid値がなければbundled Hiyoriへ戻し、stale workspace responseから選択やDeleteを開始しない。
 
 #### custom model import
 
@@ -178,19 +182,28 @@ build時の入力はrepositoryの`tmp/hiyori_pro`とし、release resourceには
 
 #### semantic mapping
 
-| operational state | 選択可能なcue                          | fallback                             |
-| ----------------- | -------------------------------------- | ------------------------------------ |
-| idle              | inventory内motion/expression/parameter | neutral pose + text                  |
-| thinking          | inventory内cue                         | neutral + `考えています`             |
-| acting            | inventory内cue                         | neutral + `作業中`                   |
-| waiting_for_user  | inventory内cue                         | neutral + `回答待ち`                 |
-| reviewing         | inventory内cue                         | neutral + `検証中`                   |
-| explaining_commit | inventory内cue                         | neutral + `コミットを説明しています` |
-| error             | inventory内cue                         | neutral + error text                 |
-| completed         | inventory内cue                         | neutral + completion text            |
-| disconnected      | inventory内cue                         | neutral + offline text               |
+`SemanticMappingV1`はpack ID、manifest hash、mapping versionと次の7 stateを一つのtransactionで保存する。選択候補は検証済みmanifest inventory内のmotion cue、expression cue、または`neutral`だけで、parameter式、path、URL、任意file名を保存・実行しない。
 
-Hiyoriのdefault mappingは実在する`Idle`、`Flick`、`FlickDown`、`FlickUp`、`Tap`、`Tap@Body`、`Flick@Body`のmotionだけを参照する。expressionが0件でも保存でき、未割当stateはneutralへ戻す。mapping previewは同じstate列で決定的に再生し、reduced motion時はanimationせずstatic pose/icon/textを確認する。
+| semantic state | operational source | ja/en fallback text |
+|---|---|---|
+| `neutral` | idle、unknown/unsupported | `待機中 / Idle` |
+| `thinking` | thinking | `考えています / Thinking` |
+| `working` | acting、reviewing、explicit commit presentation | `作業中 / Working` |
+| `asking` | waiting_for_user | `回答待ち / Waiting for your answer` |
+| `success` | completed | `完了 / Completed` |
+| `warning` | disconnected | `接続を確認してください / Check connection` |
+| `error` | error | `エラー / Error` |
+
+| mapping state | 表示 | 操作・focus |
+|---|---|---|
+| loading | state row skeleton、pack名/hash | Save disabled、terminal後mapping headingへfocus |
+| empty/default | 7 stateすべてneutral、理由 | inventory cue選択、state preview |
+| editing | dirty、stateごとのja/en label、cue種別 | keyboard-onlyでrow→cue→Preview→次rowの順 |
+| saving/saved | 対象mappingだけprocessing、version更新 | 二重Save disabled。成功はpolite statusでfocusを奪わない |
+| invalid | unknown version、manifest hash不一致、invalid/deleted cue | mapping全体を実行せずneutralへfallbackし、最初のinvalid rowへfocus |
+| recovery | current pack/manifest、safe code、Reset to neutral | 前mapping/raw値を実行せず、再保存またはpack再選択 |
+
+Hiyoriのdefault mappingは実在する`Idle`、`Flick`、`FlickDown`、`FlickUp`、`Tap`、`Tap@Body`、`Flick@Body`のmotionだけを参照する。expressionが0件でも保存でき、未割当stateはneutralへ戻す。mapping previewは同じsemantic state列で決定的に再生し、reduced motion時はanimationせずtrusted static frame、icon、textを確認する。
 
 ### Audio
 
@@ -210,7 +223,7 @@ fresh profileと`Reset Audio Settings`後はTTSをoffにし、`say` process、ne
 | Close explanation   | caption/live regionをdismissし、speechを100ms以内に停止する。prepared cacheとbackground jobは維持し、再open時にsequence順で再提示 | support jobをCanceledにしない                                        |
 | Cancel generation   | queued/running support jobの時だけ表示し、jobとspeechをcancelして同requestの後着chunk/cache replayを無効化する                | terminal後は明示Retryで新requestを作るまで再提示しない               |
 
-app-owned presentation controllerは`workspaceId + workspaceGeneration + full commit SHA + support request ID + presentation generation + locale`を一つのactive keyとして所有する。background streamはkey、schema、redaction、連続sequenceを満たす時だけvolatile bufferへ入り、activeでなければcaption/live region/TTSへ適用しない。生成中のcommitをactivateした時は既着chunkから後続をstreamし、生成済みなら全chunkを順番に再提示する。TTS enabledかつunmutedの場合だけ、captionへ確定した同じchunkを同じsequenceで読む。
+app-owned presentation controllerは`workspaceId + workspaceGeneration + full commit SHA + support request ID + selection version + presentation intent epoch + presentation generation + locale`を一つのactive keyとして所有する。background streamはkey、schema、redaction、連続sequenceを満たす時だけvolatile bufferへ入り、activeでなければcaption/live region/TTSへ適用しない。生成中のcommitをactivateした時は既着chunkから後続をstreamし、生成済みなら全chunkを順番に再提示する。TTS enabledかつunmutedの場合だけ、captionへ確定した同じchunkを同じsequenceで読む。
 
 `Close explanation`、別commit選択、workspace切替、stale workspace generationではpresentation generationを進め、captionをdismissしspeechを同じkeyで停止する。prepared cache/background jobは維持し、同じcommitを再openするとcacheをsequence順に再提示する。queued/running中の`Cancel explanation generation`だけがsupport jobをCanceledへterminal化し、同requestの後着chunkとcache replayを無効化する。background support input/output、caption chunk、TTS transcriptをmain conversation、assistant message、main session historyへappendしない。
 
@@ -240,21 +253,23 @@ commit explainer jobの起動とpresentation開始は別状態である。backgr
 
 ### Diagnostics
 
+Diagnosticsはdemo/fixtureでなく同じnative readiness serviceのversioned snapshotだけを表示する。各checkは`ready` / `warning` / `blocked` / `unavailable`、UTC `checkedAt`、snapshot ID、sanitized error code、ja/en recovery actionを持つ。Recheck中は前snapshotをstale表示で残して`aria-busy=true`とし、terminal時に全checkとHistory DB badgeを同じ新snapshotへatomic置換する。
+
 | check         | Ready表示                                                                                                                                                                                   | Warning / Blocked                                                                                       | 回復操作                                            |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | OS / App      | macOS version、Apple Silicon、app/build/schema                                                                                                                                              | unsupported OS/arch、migration pending                                                                  | release note / recovery                             |
 | Codex         | executable、protocol initialize、login、`GPT-5.6 Sol`、Fast/Max capability                                                                                                                  | missing、unauthenticated、model/effort unavailable、disconnect                                          | Recheck、login案内                                  |
 | Commit policy | `coding-wife-commit-work`のversion、digest prefix、`app_bundle`、explicit injection mode、last verified turn                                                                                | resource missing、digest mismatch、skill input/developer instruction unavailable、last injection failed | Recheck。failure中はdraftを保持してturnを開始しない |
-| Git observer  | executable capability、repo/HEAD/status、read-only policy version、last observation                                                                                                         | missing、bare、unsupported repo、stale、read permission、mutation command exposed                       | project再選択、read-only Refresh                    |
+| Git observer  | executable capability、repository identity、repo/HEAD/status、health=`healthy`、read-only policy version、last observation                                                                  | health=`missing` / `changed` / `unreadable` / `read_only` / `stale_branch`、bare、unsupported repo、mutation command exposed | Repair、project再選択、read-only Refresh/Recheck |
 | DB            | integrity、writer、schema、backup                                                                                                                                                           | migration rollback、corruption、read-only                                                               | backup pathをbasename化してrecovery案内             |
 | Live2D        | bundled manifest/hash、WebGL、selected pack、first frame                                                                                                                                    | asset/context loss、unsupported MOC、fallback level                                                     | Retry、Hiyori選択、text-only                        |
 | Audio         | toggle、binary metadata status、installed voice count、selected voice/rate、device、source、active commit prefix/presentation generation、caption sequence、speech/queue、last adapter code | binary/permission/voice/source/key/schema/sequence/spawn/stdin/exit/timeout/device error                | Recheck、Test、Mute、Cancel presentation            |
 | Support       | enable、capacity 1、wire-advertised/external-authority tool 0件、tool-absence fingerprint、permission profile、clean runtime/auth bridge/canary、`coding-wife-explain-commit` version/digest、last usage | capacity 0、isolation/auth/tool-field mismatch、internal plan event、timeout、output schema、policy、non-persistence未検証 | Cancel、Disable、Recheck                            |
 | Security      | CSP/capability version、redaction self-check                                                                                                                                                | policy mismatch、future schema event                                                                    | safe mode、release guidance                         |
 
-診断はtoken、cookie、完全なhome/source path、transcript本文、support prompt/response、raw process stdout/stderrを表示しない。各resultはcode、checked time、scope、impact、recoverable、safe detail refを持つ。`Copy diagnostics`は同じsanitized summaryだけをclipboardへ出す。
+診断はtoken、cookie、credential、absolute/private path、transcript本文、support prompt/response、raw process stdout/stderrを表示・copy・logしない。各resultはcode、UTC checkedAt、snapshot ID、scope、impact、recoverable、safe detail refを持つ。`Copy diagnostics`は同じsanitized summaryだけをclipboardへ出す。native結果がないcheckは`unavailable`であり、demo/fixture値を`ready`として表示しない。
 
-DB readinessはHistory & Privacyのbadgeと同じ履歴状態を正本にする。native `ready`でない時に`Persisted locally`を表示せず、read-onlyまたはrecovery errorとsanitized codeを一致して表示する。browser demoの`ephemeral`は`Demo memory / デモ用メモリ`として別表示し、native DB readinessや復旧errorを偽装しない。
+DB readinessはHistory & Privacyのbadgeと同じsnapshot IDの履歴状態を正本にする。native `ready`でない時に`Persisted locally`を表示せず、read-onlyまたはrecovery errorとsanitized codeを一致して表示する。browser demoの`ephemeral`は`Demo memory / デモ用メモリ`として別表示し、native DB readinessや復旧errorを偽装しない。
 
 ### History & Privacy
 
@@ -286,25 +301,29 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | read-only recovery    | DB corruption/migration rollback                         | Diagnostics/History、backup、error code、Gitは不変                       | copy sanitized diagnostic、Quit                            | explicit successful recovery |
 | local TTS unavailable | binary metadata/voice/audio device検証失敗               | native typed reasonとcaptionを即時terminal表示しTTS off相当。voice list、保存値、未保存voice/rate draftを維持 | Recheck/Retry voices/Test/Mute                             | 全preflight成功              |
 | companion fallback    | pack/render failure                                      | current fallback level、Hiyori/text-only、Chat継続                       | Retry/Select/Hide                                          | first frame/state test成功   |
+| preference recovery   | `AppPreferencesV1` missing/corrupt/unknown version       | safe default、sanitized code、`Reset Preferences`。raw値を表示しない     | Reset、Diagnostics、影響外section                          | atomic save成功              |
+| diagnostics rechecking | Recheck中                                                | 前snapshot + Stale、check progress、UTC checkedAt、`aria-busy`            | Cancel、影響外section、copyは前snapshot                    | 同一snapshotのterminal結果   |
+| diagnostics unavailable | native service/checkが結果を返せない                    | `Unavailable`、safe code、localized recovery。demo Readyを表示しない      | Recheck、Settings内回復                                    | native terminal result       |
+| mapping invalid/recovery | version/hash/cue不一致                                  | 全state neutral、invalid row、保持pack、Reset to neutral                  | previewなしのedit/reset、pack再選択                        | valid atomic mapping save    |
 
 ## 操作
 
 | 操作                   | 事前条件                           | 正常結果                                                               | キャンセル時                             | 失敗時                              | 関連要件ID                                            |
 | ---------------------- | ---------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------- | ----------------------------------- | ----------------------------------------------------- |
-| language変更           | supported locale                   | 全shellを即時切替、設定保存                                            | 非該当                                   | 前locale維持                        | `APP-F-057`, `APP-F-058`                              |
-| reduced motion変更     | valid option                       | UI/Live2Dへ即時適用                                                    | 非該当                                   | OS preferenceへfallback             | `APP-F-061`, `LIVE-F-066`                             |
+| app preference変更     | `AppPreferencesV1`のlocale/reducedMotion/characterVisibilityがvalid | owner-only native recordをatomic保存し、同じsnapshot/versionを全runtimeへ即時適用 | transaction前なら前snapshot維持 | 前snapshotを維持しsanitized code | `APP-F-057`, `APP-F-058`, `APP-F-061`, `APP-F-076` |
+| Reset Preferences      | confirmation、current snapshot     | recordだけをOS由来locale/`system`/`visible`へatomic置換                  | preferenceを含む全state、workspace/history/Context/model/Git不変 | 前snapshot維持、Retry | `APP-F-076` |
 | Context保存            | valid section、expected version    | version更新、next turn適用                                             | 開始前version維持                        | 入力保持、field/conflict表示        | `WORK-F-063`                                          |
 | model3.json import     | picker利用可能                     | 検証、quarantine、preview後にlibraryへatomic登録                       | library/DB/quarantine/current model不変  | current model継続、失敗pack非登録   | `LIVE-F-068`〜`LIVE-F-076`                            |
-| model選択              | first frame/state test成功         | active projectのpack IDを保存、single canvasへ切替                     | current selection維持                    | current renderer継続                | `LIVE-F-059`, `LIVE-F-075`                            |
-| semantic mapping保存   | inventory内cueまたはneutral        | pack mapping version更新                                               | 前mapping維持                            | invalid cueを保存しない             | `LIVE-F-061`〜`LIVE-F-064`, `LIVE-F-077`              |
-| custom pack削除        | 未選択custom、confirm              | library copyとmetadataをatomic削除                                     | pack/library/DB不変                      | packを残しretry                     | `LIVE-F-078`                                          |
+| model選択              | first frame/state test成功、stable Project ID | Project IDのpack IDをatomic保存し同Project全workspaceへ即時反映、single canvasへ切替 | current selection維持 | current renderer継続 | `LIVE-F-059`, `LIVE-F-075` |
+| semantic mapping保存   | 7 stateすべてinventory内motion/expression cueまたはneutral、manifest hash一致 | pack ID/hash/versionとmapping全体をatomic更新 | 前mapping維持 | mapping全体をneutral fallback、invalid cueを保存しない | `LIVE-F-061`, `LIVE-F-062`, `LIVE-F-077` |
+| custom pack削除        | 全Project IDで未選択のcustom、confirm、transaction再検査 | library copyとmetadataをatomic削除 | pack/library/DB不変 | selected/race時disabledまたはpackを残しretry | `LIVE-F-078` |
 | Audio設定保存/reset    | schema/voice/rate valid            | owner-only temporary fileをfsync後atomic rename、default off/reset反映 | 保存状態不変                             | 前version維持、TTS offへfail closed | `NARR-F-064`〜`NARR-F-066`                            |
 | TTS test               | enable、verified binary/voice/rate | 固定sampleを表示後stdinでlocal再生、audio非永続                        | 100ms以内process group停止、設定入力維持 | text fallback、main不変             | `NARR-F-066`, `NARR-F-067`, `NARR-F-077`              |
 | narrationを閉じる      | active presentation                | captionをdismiss、speech停止、prepared cache維持                        | 非該当                                   | caption維持、speech停止              | `NARR-F-083`, `NARR-F-085`, `NARR-F-088`              |
 | narrationを再度開く    | prepared cacheあり                 | 同じchunkをsequence順に再提示し、paint ack後100ms以上で未読だけ発話     | presentation不変                         | caption-only terminal                | `NARR-F-058`, `NARR-F-083`, `NARR-F-088`              |
 | explanation生成cancel | queued/running support job         | jobをCanceledへterminal化し、後着chunk/cache replayを無効化             | job/presentation不変                     | main継続、sanitized code表示         | `NARR-F-087`, `NARR-F-088`                             |
 | support enable/disable | valid role                         | queue/cancel policy適用、usage metadata記録                            | 非該当                                   | offへfail closed、main継続          | `SUP-F-062`〜`SUP-F-068`                              |
-| 再診断                 | 対象check選択                      | result、checked time、error code更新                                   | 前result維持                             | Blocked reason更新                  | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`, `APP-F-070` |
+| 再診断                 | 対象check選択                      | native serviceが全check、UTC checkedAt、sanitized code、History DB badgeを同じsnapshot IDへ更新 | 前snapshotをstale表示で維持 | checkをUnavailable/Blockedにしlocalized recovery | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`, `APP-F-070` |
 | history削除            | running turnなし、confirm          | app DB/artifactだけ削除、Git不変                                       | row/artifact/selection不変               | 削除済みと表示せずrecovery          | `HIST-F-049`, `HIST-F-050`                            |
 | demo workspace reset   | historyが`ephemeral`、confirm      | 現在のpreview memoryから対象を除き、他のdemo workspaceへ移動           | preview memory/selection不変             | reset済みと表示せず入力状態を維持   | `HIST-F-059`                                          |
 
@@ -312,16 +331,17 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 
 | 項目                | 初期値             | 必須          | 制約・境界                                                                                           | エラー表示                 | 保存契機                     |
 | ------------------- | ------------------ | ------------- | ---------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------------- |
-| locale              | OS由来または前回値 | 必須          | `ja` / `en`                                                                                          | 前値維持                   | valid変更時                  |
-| reduced motion      | `System`           | 必須          | System / Reduce / Allow                                                                              | Systemへfallback           | valid変更時                  |
+| locale              | OS由来または前回値 | 必須          | `ja` / `en`                                                                                          | 前値維持                   | `AppPreferencesV1` atomic save |
+| reduced motion      | `System`           | 必須          | UIはSystem / Reduce / Allow、wire値は`system` / `on` / `off`                                         | Systemへfallback           | `AppPreferencesV1` atomic save |
+| character visibility | `Visible`         | 必須          | UIはVisible / Hidden、wire値は`visible` / `hidden`                                                    | Visibleへfallback          | `AppPreferencesV1` atomic save |
 | project context     | current version    | 任意          | 総量32,000 Unicode scalar、secret warning                                                            | section内、入力保持        | expected-version transaction |
 | character context   | current version    | 任意          | 総量12,000、technical policy key禁止                                                                 | section内、入力保持        | expected-version transaction |
 | model3.json         | なし               | import時必須  | regular file 1件、closure/resource/security上限                                                      | import step内、library不変 | atomic promotion成功         |
-| mapping             | neutral/default    | stateごと任意 | inventoryに存在するcueだけ                                                                           | row内、前mapping維持       | mapping transaction          |
+| mapping             | neutral/default    | 7 state必須   | `neutral/thinking/working/asking/success/warning/error`へinventory内motion/expression cueまたはneutralだけ | row内、全mapping neutral fallback | pack ID/hash/version付きmapping transaction |
 | voice               | locale候補         | enable時必須  | allowlist voice ID                                                                                   | field直下                  | testまたはsave成功           |
 | rate                | 1.0                | 必須          | 0.75〜1.25、0.05刻みのselect option。native WPMは135〜225                                            | field直下                  | valid atomic save時          |
 | mute                | false              | 必須          | boolean、global。invalid/missing settingはmutedではなくTTS offへfail closed                          | section status             | valid atomic save時          |
-| active presentation | なし               | 非該当        | volatile read-only key。workspace/generation/full SHA/request/presentation generation/locale完全一致 | Audio status               | 「詳しく教えて」activate時   |
+| active presentation | なし               | 非該当        | volatile read-only key。workspace/generation/full SHA/request/selection version/intent epoch/presentation generation/locale完全一致 | Audio status | 「詳しく教えて」activate時 |
 | support toggles     | policy default     | 必須          | allowlist role boolean                                                                               | unknown role非保存         | valid変更時                  |
 | history target      | active workspace   | 削除時必須    | existing workspace ID、running 0                                                                     | dialog内                   | 削除transaction成功          |
 
@@ -332,13 +352,15 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | ユーザー操作                | 実行境界                                                     | Tauri plugin / Command                                                              | 必要なCapability・認可                                                                                                                                                                      | キャンセル時                                              | 拒否・失敗時                                                  |
 | --------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
 | settings/context保存        | Rust DB                                                      | `save_settings_section`                                                             | allowlist section/key/schema、expected version                                                                                                                                              | transaction前なら不変                                     | 前値維持、field/error code                                    |
+| app preference読込/保存/reset | Rust owner-only atomic store                               | `app_preferences_get` / `app_preferences_update` / `app_preferences_reset`          | exact `AppPreferencesV1` schema/version、snapshot ID、expected version、fsync + atomic rename                                                                                              | 前snapshot不変                                            | safe default + sanitized diagnostic                            |
 | model選択/import            | Tauri dialog → Rust importer                                 | `select_and_import_model3`                                                          | regular file 1件、canonical root、quarantine、resource limit                                                                                                                                | library/DB/quarantine不変                                 | current model継続                                             |
-| model preview/select/delete | Rust asset service                                           | `character_read_asset` / `preview/select/delete_character_pack`                     | verified pack UUID、manifest hash、relative asset ID、project scope、usage check。trusted frameはbinary responseをmanifestのbyte数/SHA-256へ再照合                                          | current state維持                                         | missing/tampered frameは表示せず、bundled/selected delete拒否 |
+| model preview/select/delete | Rust asset service                                           | `character_read_asset` / `preview/select/delete_character_pack`                     | verified pack UUID、manifest hash、relative asset ID、stable Project ID、全Project usage transaction。trusted frameはbinary responseをmanifestのbyte数/SHA-256へ再照合                     | current state維持                                         | missing/tampered frameは表示せず、bundled/selected delete拒否 |
+| semantic mapping            | Rust asset/settings service                                 | `save_semantic_mapping`                                                              | `SemanticMappingV1`、pack ID、manifest hash、expected mapping version、inventory cue allowlist、atomic transaction                                                                         | 前mapping維持                                             | mapping全体neutral fallback                                   |
 | Audio設定                   | Rust owner-only atomic store                                 | `narration_get_settings` / `narration_update_settings` / `narration_reset_settings` | `NarrationSettingsV1`、directory owner-only、file `0600`、fsync + atomic rename                                                                                                             | saved version不変                                         | TTS offへfail closed                                          |
 | Voice列挙                   | Rust local process                                           | `narration_list_voices`                                                             | fixed `/usr/bin/say` metadata再検証、shellなし、bounded `-v '?'` output、ja/en only                                                                                                         | 前list維持                                                | TTS unavailable + caption維持                                 |
 | TTS test/playback/mute      | app-owned presentation controller → Rust local process/audio | `narration_speak` / `narration_cancel`                                              | active commit/presentation generationと一致するcaption確定chunkだけ。bounded redacted stdin、exact voice allowlist、rate 0.75〜1.25、新規process group、queue 3、no network/microphone/file | 同じgeneration keyのprocess group/queue停止、settings維持 | caption維持。main session outputへfallbackしない              |
 | support control             | Rust supervisor                                              | `configure/cancel_support`                                                          | role allowlist、budget固定、main分離                                                                                                                                                        | 前config維持                                              | fail closed + fallback                                        |
-| diagnostic                  | Rust diagnostics                                             | `run_diagnostic_check`                                                              | 目的別read-only process/fs/db check                                                                                                                                                         | 前result維持                                              | check単位Blocked                                              |
+| diagnostic                  | Rust native readiness service                               | `run_diagnostic_check`                                                              | OS/app/build/schema、Codex binary/auth/model/protocol、Git、DB、Live2Dのread-only check、shared snapshot ID、UTC checkedAt、sanitized code                                                  | 前snapshotをstale表示で維持                               | check単位Blocked/Unavailable                                  |
 | history削除                 | Rust DB/artifact service                                     | `delete_workspace_history`                                                          | running 0、workspace ID、Git path mutation禁止                                                                                                                                              | row/artifact不変                                          | partialを成功表示せずrecovery                                 |
 | copy diagnostic             | Tauri clipboard                                              | `copy_sanitized_diagnostics`                                                        | redaction済みsummaryだけ                                                                                                                                                                    | 非該当                                                    | raw detailへfallbackしない                                    |
 
@@ -368,7 +390,9 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 
 | データ                    | 正本・保存先                                             | 保存契機                                    | 復元契機                            | 破棄条件                                               | 失敗時                                                                                                      |
 | ------------------------- | -------------------------------------------------------- | ------------------------------------------- | ----------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| locale/motion/settings    | Rust SQLite                                              | valid section transaction                   | startup/route                       | Reset対象に応じる                                      | 前version維持                                                                                               |
+| AppPreferencesV1          | owner-only app-private native store                      | valid expected-version transaction、fsync + atomic rename | startup/route、全runtime snapshot | Reset Preferencesでrecordだけsafe defaultへ | missing/corrupt/unknownはraw値非表示、safe default + diagnostic |
+| selected character       | stable Project ID → verified pack ID                     | preview/state test後のatomic selection      | 同Project全workspace/restart        | project解除契約。選択中packは削除不可                  | invalid legacy値はbundled Hiyori fallback                                                                 |
+| SemanticMappingV1        | pack ID + manifest hash + mapping versionのnative store | inventory検証後のatomic save                | pack load/preview/restart           | pack明示削除                                           | mapping全体neutral fallback                                                                                |
 | project/character context | versioned Rust SQLite                                    | expected-version save                       | workspace/Context                   | project/history契約                                    | conflict、入力保持                                                                                          |
 | bundled Hiyori            | release resource + manifest                              | build/package                               | startup/selection                   | 削除不可                                               | static/text fallback                                                                                        |
 | custom pack               | app-private library + manifest + manifest拘束trusted PNG | quarantineからatomic promotion              | library/selection/card再読込/再起動 | 未使用pack明示削除                                     | orphan quarantine cleanup。trusted PNGがmissing/tamperedならpack metadataは保持しthumbnailだけをfail closed |
@@ -399,6 +423,10 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 - audio test sampleは再生前にvisible textとして表示し、mute/off/deviceなしでも同じ意味を取得できる。
 - progressはstep名とcount/sizeをtextで出し、頻繁なhash updateをlive regionへ逐次流さない。
 - destructive confirmationは削除対象と残るGit dataを読み上げ、Cancelを最初の安全な選択にする。
+- App Preferences、mapping、Diagnosticsはloading/empty/error/disabled/recoveryをja/enで同機能にし、status/errorをstable IDでcontrolへ関連付ける。
+- Recheckは起点buttonへfocusを維持して`aria-busy`を設定し、完了をpolite、blocked/unavailableをassertive live regionへ1回通知する。Copy後もfocusを奪わない。
+- mappingは7 state rowのkeyboard順を固定し、Preview/Save/Reset後は起点row、invalid時は最初のinvalid rowへfocusを戻す。reduced motionでも同じtext結果を得られる。
+- Reset Preferencesとpack deleteは`Cancel / キャンセル`を初期focusにしてfocus trapし、Escape=Cancel、close後はexact triggerへfocusを戻す。
 - 200% text zoomではsection navをdrawerへ移し、Save/Cancel、import cancel、history cancelを欠落させない。
 
 ## 性能と境界
@@ -415,14 +443,14 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 
 | 要件ID                                                          | この画面での扱い                                                                          | 要件定義書                                                                    |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `WORK-F-048`, `WORK-F-057`, `WORK-F-063`                        | preflight、project登録解除、project/character context                                     | [workspace-sessions](../requirements/workspace-sessions.md)                   |
+| `WORK-F-048`, `WORK-F-057`, `WORK-F-063`, `WORK-F-066`          | preflight、project登録解除、project/character context、repository health/repair             | [workspace-sessions](../requirements/workspace-sessions.md)                   |
 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`                        | Codex initialize/login/Sol/effort/attachment前提診断                                      | [codex-main-session](../requirements/codex-main-session.md)                   |
-| `SUP-F-062`〜`SUP-F-077`                                        | concurrency、budget、usage、commit explainer skill、toggle、non-persistence、model policy | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
-| `GIT-F-072`, `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092` | read-only Git observer、main/explainer skill version・digest・注入診断                    | [git-review-harness](../requirements/git-review-harness.md)                   |
+| `SUP-F-062`〜`SUP-F-078`                                        | concurrency、budget、usage、commit explainer skill、controller、toggle、non-persistence、model policy | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
+| `GIT-F-072`, `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-090`〜`GIT-F-096` | read-only Git observer、main/explainer skill診断、background生成と明示presentation | [git-review-harness](../requirements/git-review-harness.md) |
 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059`          | history削除、migration、corruption、writer、schema、support metadata、durability表示      | [activity-history](../requirements/activity-history.md)                       |
 | `LIVE-F-055`〜`LIVE-F-081`                                      | bundled Hiyori、renderer、import、mapping、delete、performance                            | [live2d-companion](../requirements/live2d-companion.md)                       |
-| `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089` | caption-first、default off、local binary/voice/test、mute、dismiss/cancel、privacy、recovery、no network/microphone/audio file | [audio-commentary](../requirements/audio-commentary.md) |
-| `APP-F-055`, `APP-F-057`〜`APP-F-072`                           | navigation、language、a11y、lifecycle、native boundary、diagnostics、performance          | [desktop-shell](../requirements/desktop-shell.md)                             |
+| `NARR-F-058`, `NARR-F-064`〜`NARR-F-089` | caption-first、default off、local binary/voice/test、explicit presentation、mute、dismiss/cancel、privacy、recovery、no network/microphone/audio file | [audio-commentary](../requirements/audio-commentary.md) |
+| `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076`              | navigation、versioned native preference、a11y、lifecycle、native readiness、performance   | [desktop-shell](../requirements/desktop-shell.md)                             |
 
 ## 未確定事項
 
@@ -445,6 +473,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 - [x] 8 section、project/character context分離、diagnostics、history/privacyを定義した。
 - [x] `tmp/hiyori_pro`をbuild入力とし、runtime 17 fileだけを同梱する契約を定義した。
 - [x] custom model importのpicker、closure、resource limit、quarantine、preview、mapping、deleteを定義した。
+- [x] `AppPreferencesV1`、native readiness snapshot、Project-scoped selection、`SemanticMappingV1`の正常・loading・empty・error・disabled・recoveryを定義した。
 - [x] TTS default off、local binary/voice/test/mute、text parity、dismiss/cancel分離、voice retry、dirty draft保持、network/microphone/audio file禁止を定義した。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] 関連要件IDを要件定義書のS-004対応と一致させた。

@@ -35,7 +35,7 @@ status: "Approved"
 | Preflight | Git、Codex executable、login、GPT-5.6 Sol、character packのready/warning/blocked |
 | Workspace作成 | name、goal、Backlog登録 |
 | Sidebar | lifecycle group、attention、repo、branch、filter、active selection |
-| Continuity | active workspace、filter、draft、scroll、summaryの復元 |
+| Continuity | Project ID、group、active workspace、filter、draft、last summary、timeline anchor ID/sequence/offset、repository healthの復元 |
 | Safe removal | workspace cancel、project metadata登録解除。sourceとGit refは削除しない |
 
 ### 含めない
@@ -58,7 +58,7 @@ status: "Approved"
 | 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |
 | キャンセル | picker/dialog開始前の一覧、active selection、filter、入力を維持する |
 | 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う |
-| 再表示 | group、active selection、filter、sidebar scroll、preflight結果をRust DBから復元する |
+| 再表示 | group、active selection、filter、sidebar scroll、last summary、timeline anchor ID/sequence/offset、repository identity/health snapshot、preflight結果をRust DBから復元する |
 
 ## 利用者と権限
 
@@ -108,6 +108,23 @@ attentionはlifecycleを変更せず、`Needs answer / Approval required / Test 
 
 Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効にする。CharacterだけのBlockedはChatを止めずtext-onlyへ縮退する。
 
+### repository healthとlifecycle action
+
+repository healthはpreflightの集約結果とは別のversioned stateとして、workspace rowとheaderの両方へlocalized text、icon、shapeで表示する。色だけで区別しない。
+
+| state | 日本語 / English | Sendと選択 | 回復 |
+|---|---|---|---|
+| `healthy` | `正常 / Healthy` | Send可 | 非該当 |
+| `missing` | `リポジトリが見つかりません / Repository missing` | 履歴はread-only、Send不可 | `再選択して修復 / Repair location`、登録解除 |
+| `changed` | `別のリポジトリです / Repository changed` | 現selectionを維持しSend不可 | 保存identityと一致するworktreeを再選択、新規project追加 |
+| `unreadable` | `読み取れません / Repository unreadable` | 履歴はread-only、Send不可 | 権限案内、再診断、再選択 |
+| `read_only` | `書き込みできません / Repository read-only` | 閲覧のみ、Send不可 | 権限案内、再診断 |
+| `stale_branch` | `ブランチの再確認が必要です / Branch changed` | 再preflightまでSend不可 | read-only再診断。Git状態を自動で戻さない |
+
+window focus、workspace選択確定、Send直前にrepository identity、HEAD、branch、readability、writeabilityをread-onlyで再検査する。前snapshotとの差があれば1秒以内にheaderとrowを更新し、明示preflightが成功するまでturnを開始しない。
+
+workspace cancel、project登録解除、active-turn切替の確認dialogは安全な`戻る / Back`を初期focusとし、focusをdialog内にtrapする。`Escape`は`戻る`と同じで、selection、turn、lifecycle、draft、timeline anchor、caption/TTS、Git fingerprintを変更せず、閉じた後は起点controlへfocusを戻す。成功後は次のvalid workspace item、存在しなければempty CTAへfocusする。processingはpolite、失敗はassertive live regionへ1回だけ通知する。
+
 ## 表示状態
 
 | 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
@@ -120,10 +137,11 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 | エラー | Git I/O、DB write、Codex診断失敗 | code、対象、保持data、retry/reselect/details | 影響外workspaceを開ける | 明示回復または登録解除 |
 | 権限不足 | selected rootまたは`.git` read不可 | 拒否pathはbasenameだけ、OS権限案内、再選択 | 再選択、Settings、Quit | permission変更後の再診断 |
 | キャンセル後 | picker/create/remove確認をcancel | 開始前の一覧、selection、input、fingerprint | 元操作または別操作 | 次の明示操作 |
-| 再起動復旧 | crash、missing repo、migration rollback | active selection、Interrupted badge、last summary、Missing/Recovery | reselect、open read-only、diagnostic、remove | linkage/preflight成功 |
+| 再起動復旧 | crash、missing repo、migration rollback | active selection、Interrupted badge、last summary、timeline anchor、repository health、Missing/Recovery | reselect、open read-only、diagnostic、remove | linkage/preflight成功 |
 | native読込失敗 | DB open、contract、復元taskがterminal error | demo dataを使わないempty recovery surface、sanitized error code、再試行案内 | Retry、Settings、Quitだけ | native queryが成功する |
 | filter 0件 | queryに一致するworkspaceなし | queryと`Filterを解除` | query変更、clear | 1件以上一致 |
-| active execution競合 | 別workspaceを開始しようとした | 現在workspace、`既存を停止して切替`、`戻る` | 二つの明示操作だけ | stop完了またはcancel |
+| active execution競合 | active/pending turnを持つworkspaceから別workspaceを選択または別workspaceでSend | 新selectionを保留し、old workspaceをactive表示したまま`停止して切替 / Stop and Switch`、`戻る / Back`だけを表示 | 二つの明示操作だけ | exact old turnのterminal interruptとcleanup完了、またはBack |
+| repository repair | healthが`missing` / `changed` / `unreadable` | picker、identity照合、atomic updateのstepとCancel | Cancel、影響外workspace選択 | exact identity一致またはtyped error |
 
 ## 操作
 
@@ -133,11 +151,12 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 | preflight再診断 | project rootが存在 | Git/Codex/login/Sol/characterを更新 | 非該当 | check単位でBlocked、既存履歴維持 | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
 | Workspace作成 | registered project、name valid | Backlogへ1件追加し選択する | dialog入力を破棄し一覧維持 | 入力保持、field error | `WORK-F-050` |
 | filter | query 0〜200文字 | repo/branch/nameの部分一致を100ms以内に表示 | Escapeで直前query維持 | 一覧維持、境界表示 | `WORK-F-051` |
-| workspace選択 | itemがMissing以外 | header、Chat、Commit、Context、Companionを同一IDへ100ms以内に切替 | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
-| running workspaceから切替 | active turnあり | viewだけ切替。新規Send時に競合判断を出す | 元選択へ戻る | eventをworkspace間で混在させない | `WORK-F-058`, `WORK-F-059` |
-| workspaceをCanceledへ移動 | confirm、active turn停止可能 | source/refを残しCanceled groupへ移動 | lifecycle、Git fingerprint不変 | 元group維持、理由表示 | `WORK-F-056` |
-| project登録解除 | running turnなし、confirm | app metadataだけ削除 | DB/repo/file不変 | 完了表示せずretry | `WORK-F-057` |
-| missing repository再選択 | Missing item | canonical rootが同一repoならlinkage復旧 | Missing維持 | 候補を保存せず理由表示 | `WORK-F-062` |
+| workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Context、Companionを同一IDへ100ms以内にatomic切替 | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
+| active turn中のworkspace切替 | active/pending turnを持つold workspaceから別workspaceを選択または別workspaceでSend | selectionを保留し確認。`停止して切替`後、exact old turnのterminal interruptとcleanup完了時だけnew workspaceをactivateし、固有draft/summary/anchorを復元 | `戻る`でold selection、turn、draft、anchor、caption/TTSを完全維持 | old workspaceをactiveのままerrorとRetryを表示。rapid/duplicate/stale responseでnew workspaceをactivateしない | `WORK-F-058`, `WORK-F-059` |
+| workspaceをCanceledへ移動 | idle、またはactive/pending turnを停止可能 | idleは確認後、activeは`停止してキャンセル / Stop and Cancel`後のterminal interruptとcleanup完了時だけCanceled groupへ移動 | `戻る`でselection、turn、lifecycle、draft、caption/TTS、Git fingerprint不変 | 元groupとturnを維持しretry。source、working tree、Git index/object/ref、履歴本文を変更しない | `WORK-F-056` |
+| project登録解除 | 対象project配下のactive/pending turn 0件 | action選択とproject名を示す最終確認の二段階後、project/workspaceのapp registration metadataだけ削除 | DB/repo/file/library/history本文不変 | 完了表示せずretry。running時は拒否 | `WORK-F-057` |
+| repository再選択・Repair | `missing` / `changed` / `unreadable`、保存済み`RepositoryIdentityV1`あり | pickerのcanonical Git worktree identityが対象Project IDの保存identityとexact一致した時だけlinkageをatomic更新し、workspace ID、history、Context、draft、summary、anchorを維持 | linkage、selection、health維持 | identity不一致、権限、I/Oは候補を保存せず新規project追加を案内。source、working tree、Git index/object/refを変更しない | `WORK-F-062`, `WORK-F-066` |
+| repository再確認 | window focus、workspace選択確定、Send直前 | identity、HEAD、branch、readability、writeabilityをread-only照合しsnapshot更新 | 非該当 | stale warningと回復操作を表示しSendを開始しない | `WORK-F-061`, `WORK-F-066` |
 
 ## 入力項目
 
@@ -157,8 +176,10 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 | project folder選択 | Tauri dialog → Rust | `select_project_root`（設計名） | directory picker 1件、選択rootのread診断 | 変更なし | path非表示のerror code |
 | Git preflight | Rust child process | `diagnose_project` | canonical root、read-only allowlist Git command | running checkをsafe abort | check別Blocked |
 | Codex preflight | Rust supervisor | `diagnose_codex` | executable/stdio capability、auth内容非読取 | 前回結果維持 | failure stageを表示 |
-| create/select/cancel | Rust DB | `create/select/cancel_workspace` | typed workspace/project ID、transaction | transaction前なら変更なし | 元state維持 |
-| project登録解除 | Rust DB | `unregister_project` | running 0件、metadata scope | 変更なし | source/Gitを変更しない |
+| create/select/cancel | Rust DB + Codex supervisor | `create/select/cancel_workspace` | typed workspace/project ID、expected generation。active cancelはexact turn terminalとcleanup proof | transaction前なら変更なし | 元selection/turn/lifecycle維持 |
+| active workspace切替 | Rust supervisor + DB | `interrupt_and_switch_workspace` | old workspace/thread/turn/generation、pending selection、terminal cleanup proof | old workspaceの全state維持 | old workspaceをactiveのままerror |
+| repository repair | Tauri dialog → Rust project service | `repair_project_linkage` | target Project ID、saved `RepositoryIdentityV1`、canonical worktree exact identity、atomic transaction | linkage/selection不変 | source/Gitを変更せずtyped reason |
+| project登録解除 | Rust DB | `unregister_project` | active/pending turn 0件、二段階confirmation token、metadata scope | 変更なし | source/Git/library/history本文を変更しない |
 
 ## ウィンドウ固有動作
 
@@ -188,7 +209,8 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 | project canonical path/metadata | Rust SQLiteの目的限定project linkage | registration transaction | cold start |明示登録解除 | 前回transaction維持 |
 | workspace/lifecycle/attention | Rust SQLite + normalized event | valid state transition | cold start/route return | history削除契約 | stale表示 |
 | active selection/filter/scroll | Rust SQLite | valid selection/query/scroll settle | route return/restart | Reset UI state | safe default + notice |
-| repo/branch | Gitを正本、DBはlast observed | focus/Send前preflight | query時再照合 | project登録解除 | stale/Missing |
+| summary/timeline anchor | Rust SQLite | terminal summary、scroll settle | route return/restart | history削除契約 | 同workspaceの最寄りvalid sequenceだけへ補正 |
+| repository identity/health、HEAD/branch | Gitを観測正本、Rust DBはversioned last snapshot | 登録、window focus、selection、Send直前 | route return/restart後に再照合 | project登録解除 | `missing` / `changed` / `unreadable` / `read_only` / `stale_branch` |
 | create input | React transient state | 保存しない | dialog中だけ | success/cancel/route leave | input保持できる範囲で保持 |
 
 ## OS差分
@@ -207,6 +229,8 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 - lifecycle/attentionは色、label、icon、fill/outline/dashを併用する。
 - 12px visual iconは24×24px以上のhit areaとtooltipを持つ。
 - repo/branch ellipsisはfocus/hover tooltipとaccessible full valueを持つ。
+- repository health、切替保留、Cancel/Repair/登録解除の状態はja/en textとiconで示し、rowとheaderを同じaccessible statusへ関連付ける。
+- destructive/interrupt dialogはDOM順を説明、対象、保持data、`戻る`、実行actionとし、`戻る`へ初期focus、close後はtriggerへfocusを返す。
 - processing updateはpolite、blocked/errorはassertive live regionへ1回だけ通知する。
 - 200% text zoomではdrawer内itemを2行のまま保ち、primary actionを欠落させない。
 
@@ -214,7 +238,7 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 
 | 要件ID | この画面での扱い | 要件定義書 |
 |---|---|---|
-| `WORK-F-044`〜`WORK-F-062`, `WORK-F-065` | project追加、preflight、workspace lifecycle、filter、selection、persistence、native初期化境界 | [workspace-sessions](../requirements/workspace-sessions.md) |
+| `WORK-F-044`〜`WORK-F-066` | project追加、preflight、workspace lifecycle、active-turn confirmation、repository health/repair、persistence、native初期化境界 | [workspace-sessions](../requirements/workspace-sessions.md) |
 | `CODE-F-051`, `CODE-F-075` | Codex/login/Sol preflightとblocked reason | [codex-main-session](../requirements/codex-main-session.md) |
 | `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | rehydrateとempty history導線 | [activity-history](../requirements/activity-history.md) |
 | `APP-F-052`〜`APP-F-062` | single window、layout、navigation、language、a11y | [desktop-shell](../requirements/desktop-shell.md) |
@@ -236,7 +260,8 @@ Blocked checkが1件以上ならS-002はread-onlyで開けるがSendを無効に
 
 - [x] front matter、title、filenameの`S-001`が一致する。
 - [x] `status: Approved`である。
-- [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
+- [x] normal、empty、loading、processing、offline、error、permission、disabled、cancel、repair、restartを定義した。
+- [x] active-turn切替、workspace cancel、project登録解除、repository health/repairのja/en copy、focus、live regionを定義した。
 - [x] native operation、cancel、permission、data retention、OS差分を定義した。
 - [x] 関連要件IDを要件定義書のS-001対応と一致させた。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。

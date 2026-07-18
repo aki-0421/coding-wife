@@ -5,6 +5,8 @@ updated: 2026-07-18
 read_when:
   - "Commit tab、Git observer、commit evidence list/detail/diffを実装するとき。"
   - "『詳しく教えて』、説明caption、説明cancel/fallbackを実装するとき。"
+screen_id: "S-003"
+status: "Approved"
 ---
 
 # S-003 セッション証拠 画面詳細仕様
@@ -21,7 +23,7 @@ read_when:
 
 利用者が、main Codexの作業を「完了したという主張」だけで判断せず、commit単位のmetadata、変更量、sanitized diff、verification、decision、riskから確認できるようにする。commit producerは`coding-wife-commit-work`を毎turn受け取るmain Codexであり、本画面とnative Git backendはGit状態を変更しない。
 
-専門的なcommitは、App ServerのGit commit command成功とread-only SHA検証をapp側interceptorが相関した直後に、app-owned explanation controllerが自動で説明生成へenqueueする。main sessionのsubagent、turn、event、commandとしては起動しない。起動前から存在したcommitなど本当に`not_generated`の選択には「詳しく教えて」を表示し、app controllerへ`user_request`を送る。生成済み説明はcached presentationを表示・任意で再読上げし、失敗時だけapp controllerへ`user_retry`する。path/raw diff/secretを除去した`CommitEvidenceV1`だけをisolated supportへ送り、`coding-wife-explain-commit`から返る日本語/英語の説明をcharacter captionへstreamする。TTSは任意で、captionと同じ文だけを検証済みmacOS local `/usr/bin/say` adapterで読む。外部TTS provider、API key、network送信は使用しない。
+専門的なcommitは、App ServerのGit commit command成功とread-only SHA検証をapp側interceptorが相関した直後に、app-owned explanation controllerがbackground説明生成へenqueueする。background生成だけではpresentation intent、caption、live region、TTSを一切開始しない。main sessionのsubagent、turn、event、commandとしても起動しない。起動前から存在したcommitなど本当に`not_generated`の選択には「詳しく教えて」を表示し、app controllerへ`user_request`と同じselectionに束縛したpresentation intentを送る。生成済み説明は同じ1操作でcacheからpresentationし、失敗時だけ`user_retry`する。path/raw diff/secretを除去した`CommitEvidenceV1`だけをisolated supportへ送り、`coding-wife-explain-commit`から返る日本語/英語の説明は明示intentがcurrentの時だけcharacter captionへstreamする。TTSは任意で、visible captionと同じ文だけを検証済みmacOS local `/usr/bin/say` adapterで読む。外部TTS provider、API key、network送信は使用しない。
 
 ## スコープ
 
@@ -32,7 +34,7 @@ read_when:
 | Commit list | SHA prefix、subject、time、author、parents、work unit相関、観測状態 |
 | Commit detail | message、metadata、file summary、lazy diff、verification、decision、risk、skill audit |
 | Read-only refresh | active表示、terminal work unit、明示refreshでnative observerを起動 |
-| Explanation | verified commit自動trigger、app-owned controller state、manual fallback/retry、cached presentation、Cancel、streamed caption、deterministic fallback |
+| Explanation | verified commitのbackground生成trigger、app-owned controller state、明示presentation intent、manual fallback/retry、cached presentation、生成Cancel、streamed caption、deterministic fallback |
 | Empty/error states | no commits、unavailable repo、stale snapshot、binary/oversize diff、offline support |
 
 ### 含めない
@@ -55,16 +57,16 @@ read_when:
 | active前提 | workspace IDとworkspace generationが存在すること。repository unavailableでも保存済みevidenceは表示する |
 | native read開始 | tabがvisibleになった時、明示Refresh、terminal work unit受理時だけ。hidden force-mounted panelは0回 |
 | 正常終了 | selection/filter/scrollを保存してChatへ戻る。Git状態は不変 |
-| explanation終了 | completed/canceled/unavailableをcaptionとbutton statusへ反映。Git状態とmain turnは不変 |
+| explanation終了 | background生成のcompleted/canceled/unavailableはbutton statusへ反映し、明示presentationがcurrentの時だけcaption/live regionへ反映する。Git状態とmain turnは不変 |
 
 ## アクター
 
 | アクター | 入力 | 操作 | 権限境界 |
 |---|---|---|---|
-| 利用者 | selection、filter、app controller state | inspect、Refresh、presentation表示、詳しく教えて、retry、Cancel、Chatへ戻る | Git mutationなし。説明intentをmain sessionへ送らない |
+| 利用者 | selection、filter、app controller state | inspect、Refresh、presentation表示/Close、詳しく教えて、retry、生成Cancel、Chatへ戻る | Git mutationなし。説明intentをmain sessionへ送らない |
 | Main Codex | commit、verification、decision、risk、commit不能理由 | 通常work turn中にcommitしterminal reportを返す | UIからnative代行commitを要求しない |
 | Rust Git observer | validated repository ID、generation、opaque evidence ID | HEAD/status/history/diffをread-only観測しHISTへ追記 | arbitrary args/path、index/object/ref/worktree writeなし |
-| App-side interceptor / explanation controller | success commit command、verified SHA、UI intent | 自動enqueue、state公開、presentation、cancel、`user_request` / `user_retry` | main thread/turn/subagent/event/commandを作らない |
+| App-side interceptor / explanation controller | success commit command、verified SHA、UI intent | background enqueue、state公開、intent-scoped presentation、生成cancel、`user_request` / `user_retry` | main thread/turn/subagent/event/commandを作らない |
 | Commit explainer | redacted `CommitEvidenceV1` | JA/EN schemaとnarration chunksを返す | repo/cwd/path/tool/raw diff/raw reasoningなし |
 
 ## 情報優先順位
@@ -124,9 +126,9 @@ row全体をsingle selection controlとし、内部へmutation actionを置か�
 | Identity | full SHAはcopy可能なread-only text、author、authored/committed time、parents |
 | Correlation | work unit ID、turn ID、source terminal event、observation before/after |
 | Producer | `Main Codex`または`External/Uncorrelated`。`App checkpoint`とは表示しない |
-| Actions | controller stateに応じた`詳しく教えて`、presentation表示・再読上げ、`Retry`、`Cancel`。Commit/Restore/Branchは存在しない |
+| Actions | controller stateに応じた`詳しく教えて`、presentation表示・再読上げ、`Retry`、`Cancel explanation generation`。Commit/Restore/Branchは存在しない |
 
-actionはactive selection、Freshなworkspace generation、valid redaction、同じcommit evidence IDのcontroller stateへ束縛する。`not_generated`なら「詳しく教えて」からapp controllerへ`trigger=user_request`、`queued` / `running`なら同じ「詳しく教えて」をpresent-on-complete intentとしてrebindしてCancelも表示し、`generated`なら同じ1回でcached presentationを表示して任意の同一transcript再読上げを提供する。`failed` / `canceled`なら`trigger=user_retry`、`unavailable`なら理由と`retryable=true`の場合だけ`trigger=user_retry`を表示する。selection / locale / workspace / Stop / Closeはintent epochを先に失効させ、後着event/responseを再表示しない。disabled時は理由をbutton近傍のtextで示し、どのactionもmain sessionへ送らない。
+actionはactive selection、Freshなworkspace generation、valid redaction、同じcommit evidence IDのcontroller stateへ束縛する。`not_generated`なら「詳しく教えて」からapp controllerへ`trigger=user_request`とpresentation intentを同時送信し、`queued` / `running`なら同じ「詳しく教えて」をpresent-on-complete intentとしてrebindして`Cancel explanation generation`も表示し、`generated`なら同じ1回でcached presentationを表示して任意の同一transcript再読上げを提供する。`failed` / `canceled`なら`trigger=user_retry`、`unavailable`なら理由と`retryable=true`の場合だけ`trigger=user_retry`を表示する。selection / locale / workspace / main Stop / `Close explanation`はintent epochを先に失効させ、後着event/responseを再表示しないが、background jobとruntime cacheは維持する。queued/running jobと同request cacheを無効化するのは確認済み`Cancel explanation generation`だけである。disabled時は理由をbutton近傍のja/en textで示し、どのactionもmain sessionへ送らない。
 
 App rootはnative explanation adapterとNarrationControllerを各1個だけ所有する。WorkspaceShellはselected workspace ID、同workspaceへ接続した実Codex generation、UI localeが揃った時だけ両controllerへscopeを設定し、EvidenceViewへ同じgenerationを渡す。adapterはscope invokeを単一writerで直列化し、latest desired scopeへcoalesceして適用完了まではevent/responseを閉じる。固定値generation、別workspaceの直前snapshot、tab visibility、並列invokeの完了順をscope根拠にしない。
 
@@ -166,7 +168,7 @@ file rowはopaque `fileEvidenceId`、表示用redacted path、change kind、adde
 
 ### Commit explanation
 
-success commit commandと新しいSHAの検証後、app-owned controllerは`not_generated`から`queued`へ遷移し、`CommitExplanationRequestedV1(trigger=auto_verified_commit)`を発行する。既存commitのmanual fallbackは`trigger=user_request`、terminal failure後のretryは`trigger=user_retry`とし、UIはapp controllerへintentを送るだけでsupport runtimeを直接開始しない。いずれも次を満たす`CommitEvidenceV1`だけを渡す。
+success commit commandと新しいSHAの検証後、app-owned controllerは`not_generated`から`queued`へ遷移し、`CommitExplanationRequestedV1(trigger=auto_verified_commit)`をbackground生成として発行する。既存commitのmanual fallbackは`trigger=user_request`、terminal failure後のretryは`trigger=user_retry`とし、UIはapp controllerへintentを送るだけでsupport runtimeを直接開始しない。いずれも次を満たす`CommitEvidenceV1`だけを渡す。
 
 - opaque commit IDとsanitized commit message。
 - pathなしのchange kind/countとdiff stats。
@@ -176,7 +178,23 @@ success commit commandと新しいSHAの検証後、app-owned controllerは`not_
 
 isolated support turnには`coding-wife-explain-commit`をexplicit skill inputで1件注入する。deltaはrequest ID、source commit ID、generation、locale、sequence、text、doneを検証後、characterのvisible HTML captionへ逐次適用する。request、status、delta、result、failureをmain conversationへ注入しない。
 
-native presentation eventは最新controller stateとworkspace ID、workspace generation、commit evidence ID、request ID、trigger、localeがexact一致し、commit evidence IDからfull SHAを一意に復元できる場合だけNarration sourceへ変換する。`started`、1-origin連続chunk、`terminal`の順を守り、duplicate、stale、scope mismatch、schema mismatchはpresentation generationを増やさず破棄する。NarrationControllerのpresentation generationはactivate単位のlocal counterであり、native workspace generationとは別物である。
+native presentation eventは最新controller stateとworkspace ID、workspace generation、commit evidence ID、request ID、selection version、presentation intent epoch、trigger、localeがexact一致し、commit evidence IDからfull SHAを一意に復元できる場合だけNarration sourceへ変換する。`started`、1-origin連続chunk、`terminal`の順を守り、duplicate、stale、scope mismatch、schema mismatchはpresentation generationを増やさず破棄する。NarrationControllerのpresentation generationはactivate単位のlocal counterであり、native workspace generationとは別物である。
+
+#### background生成とpresentation intent
+
+`PresentationIntentV1`はintent ID/epoch、workspace ID/generation、commit evidence ID/full SHA、request ID、selection version、trigger、localeを一つのkeyとして所有する。controllerの生成stateとpresentation stateを混同しない。
+
+| state | 画面契約 | action / recovery |
+|---|---|---|
+| `not_generated` | empty helperと`詳しく教えて / Explain this commit`。caption/live region/TTS 0件 | 1回の操作で`user_request`とintentを作る。redaction不成立時はdisabled理由を表示 |
+| background `queued` / `running`、intentなし | `準備中 / Preparing in background`をCommit detailだけへ表示。caption/live region/TTS 0件 | `詳しく教えて`でpresent-on-complete。`生成をキャンセル / Cancel generation`は確認後だけjobを止める |
+| background `queued` / `running`、intentあり | 対象commitのloading captionを表示し、検証済みchunkからstream | `説明を閉じる / Close explanation`でintentだけrevoke。job/cacheは継続 |
+| `generated`、intentなし | `説明の準備ができました / Explanation ready`。caption/live region/TTS 0件 | `詳しく教えて`1回でcacheをsequence順にpresentation |
+| active presentation | visible HTML captionが正本。TTSはcaption paint ack後の同一chunkだけ | Close、selection/locale/workspace/main Stopでintent revoke。再表示は新epoch |
+| `failed` / `canceled` / `unavailable` | localized code、保持evidence、retry可否。Git/main state不変 | retryable時だけ`再試行 / Retry`。生成cancel後は新requestまで旧cache replay不可 |
+| stale / scope mismatch | 旧caption/TTSを即時停止し、後着chunkを破棄 | current selectionのactionへ戻る。自動reopenしない |
+
+background statusは`aria-live`へ流さない。明示intent後の通常chunk/completionだけをpolite、blocking errorだけをassertiveに1回通知する。
 
 構造化説明の順序は次とする。
 
@@ -188,7 +206,7 @@ native presentation eventは最新controller stateとworkspace ID、workspace ge
 6. 注意 / Cautions。
 7. 次の見方 / What to inspect next。
 
-TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでlocal adapterのstdinへ渡す。TTS off/mute/binary・voice・audio device unavailableでもcaptionを省略しない。selection変更、workspace切替、Cancel、stale/schema invalid後のdeltaはcaption/TTS queueへ適用せず、active process groupも100ms以内に停止する。
+TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでlocal adapterのstdinへ渡す。TTS off/mute/binary・voice・audio device unavailableでもcaptionを省略しない。selection/locale/workspace変更、main Stop、`Close explanation`、stale/schema invalid後のdeltaはcaption/TTS queueへ適用せず、active process groupも100ms以内に停止するがbackground job/cacheは維持する。`Cancel explanation generation`だけはjobをterminal化し、同requestの後着delta/cache replayも破棄する。
 
 説明本文はHISTへ保存しない。status、skill ID/version/digest、opaque commit/request ID、locale、usage、latency、error codeだけを保存する。
 
@@ -202,10 +220,10 @@ TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでloca
 | Stale | raceまたはgeneration変更 | stale banner、last evidence | Refresh、Chat | fresh/error |
 | Observer unavailable | repo/Git/policy/error | 保存済みevidence、typed reason | Retry、Settings、Chat | fresh/error |
 | Diff loading | fileを明示選択 | row skeleton、Cancel | Cancel、別file | loaded/error |
-| Explanation not_generated | 起動前から存在したcommit、または自動enqueue前 | `詳しく教えて`と自動生成対象か否かのtext | `user_request`、inspect | queued/unavailable |
-| Explanation queued/running | `auto_verified_commit` / `user_request` / `user_retry`受理後 | background status、「詳しく教えて」、Cancel。明示intent前はcaption/TTS 0件 | present-on-complete intent、Cancel、read-only inspect | generated/failed/canceled/unavailable |
+| Explanation not_generated | 起動前から存在したcommit、またはbackground enqueue前 | `詳しく教えて`とbackground生成対象か否かのtext | `user_request` + presentation intent、inspect | queued/unavailable |
+| Explanation queued/running | `auto_verified_commit` / `user_request` / `user_retry`受理後 | background status、「詳しく教えて」、`Cancel explanation generation`。明示intent前はcaption/live region/TTS 0件 | present-on-complete intent、生成Cancel、read-only inspect | generated/failed/canceled/unavailable |
 | Explanation generated | done受理、current runtimeにcached presentationあり | 「詳しく教えて」1回でexplanation表示、同一transcriptの任意再読上げ | presentation、inspect | selection/new request |
-| Explanation failed/canceled | model/schema/timeout、またはCancel terminal | deterministic reason、Retry | `user_retry`、inspect | queued/unavailable |
+| Explanation failed/canceled | model/schema/timeout、または生成Cancel terminal | deterministic reason、Retry | `user_retry`、inspect | queued/unavailable |
 | Explanation unavailable | support off/offline/redaction/capability error | deterministic reason。`retryable=true`の場合だけRetry | inspect、Settings、条件付き`user_retry` | queued/unavailable |
 
 support unavailableはcommit evidenceを隠さず、main turnのstatusを変えない。
@@ -218,11 +236,11 @@ support unavailableはcommit evidenceを隠さず、main turnのstatusを変え�
 | Refresh | active、observer idle | new observationとlist projection | in-flight read cancel | Stale/Unavailable、Git不変 | `GIT-F-074`, `GIT-F-078` |
 | commit選択 | valid evidence ID | detail表示 | 非該当 | selection解除、list維持 | `GIT-F-084` |
 | file diff表示 | valid file evidence ID | lazy diff表示 | requestだけ停止 | typed row error | `GIT-F-085` |
-| verified commit自動説明 | success commit command、新しいSHAとevidence検証済み | app controllerが`not_generated`→`queued`、background explanation開始。presentation event/caption/TTSは0件 | controller Cancelでterminal化 | failed/unavailable status、main不変 | `CODE-F-077`〜`CODE-F-079`, `GIT-F-090`〜`GIT-F-096` |
-| 詳しく教えて | `not_generated` / `queued` / `running` / `generated`、active selection、redaction pass | `user_request` / `user_retry`または既存requestへのpresent-on-complete intentをexact selectionへ束縛し、cache hitを含め1回で表示 | 生成Cancelでterminal化。Close/Stopはintentだけ失効 | unavailable caption、main不変 | `GIT-F-090`〜`GIT-F-096` |
+| verified commit background説明生成 | success commit command、新しいSHAとevidence検証済み | app controllerが`not_generated`→`queued`、background job開始。presentation event/caption/live region/TTSは0件 | `Cancel explanation generation`確認後だけterminal化 | failed/unavailable status、main不変 | `CODE-F-077`〜`CODE-F-079`, `GIT-F-090`〜`GIT-F-096` |
+| 詳しく教えて | `not_generated` / `queued` / `running` / `generated`、active selection、redaction pass | `user_request` / `user_retry`または既存requestへのpresent-on-complete intentをexact selectionへ束縛し、cache hitを含め1回で表示 | `Close explanation`はintentだけ失効、background job/cache維持 | unavailable caption、main不変 | `GIT-F-090`〜`GIT-F-096` |
 | 説明表示・再読上げ | current intentと`queued` / `running` / `generated` stateがexact一致 | cached/streaming presentationをactivateし、任意で同じtranscriptを再読上げ | presentationを閉じても生成とcacheは継続し、late eventで再openしない | captionを維持しTTSだけunavailable | `GIT-F-093`, `GIT-F-094`, `GIT-F-096` |
 | 説明Retry | `failed` / `canceled`、または`unavailable`かつ`retryable=true` | app controllerへ`trigger=user_retry` | request前ならstate不変 | reasonを更新しmain不変 | `GIT-F-095`, `GIT-F-096`, `SUP-F-078` |
-| 説明Cancel | active request | 1秒以内interrupt、以後delta破棄 | 非該当 | 5秒後timeout terminal | `SUP-F-075`, `NARR-F-081` |
+| 説明生成Cancel | queued/running request、確認済み | 1秒以内interrupt、同requestをterminal化し以後delta/cache replay破棄 | `戻る / Back`でjob、intent、selection不変 | 5秒後timeout terminal、main不変 | `SUP-F-075`, `NARR-F-081` |
 
 ## Typed command / event境界
 
@@ -242,8 +260,8 @@ native command surfaceにcheckpoint、commit、stage、restore、revert、branch
 | event | producer | consumer | 必須field |
 |---|---|---|---|
 | `commit_explanation_requested` | app-owned explanation controller | support runtime | schema version、request ID、workspace generation、commit evidence ID、locale、trigger=`auto_verified_commit` / `user_request` / `user_retry` |
-| `commit_explanation_controller_state` | app-owned explanation controller | EvidenceView/caption | commit evidence ID、generation、request ID、selection version、exact status、trigger、retryable、presentation available、updatedAt、error code |
-| `commit_explanation_presentation_requested` | EvidenceView | app-owned explanation controller | commit evidence ID、generation、mode=`show` / `replay_narration` |
+| `commit_explanation_controller_state` | app-owned explanation controller | EvidenceView/caption | commit evidence ID、generation、request ID、selection version、exact status、trigger、retryable、presentation available、active時のintent ID/epoch、updatedAt、error code |
+| `commit_explanation_presentation_requested` | EvidenceView | app-owned explanation controller | commit evidence ID、generation、request ID、selection version、locale、intent ID/epoch、mode=`show` / `replay_narration` |
 | `commit_explanation_started` | support runtime | app-owned explanation controller/caption | request ID、skill audit、startedAt |
 | `commit_explanation_delta` | support runtime | app-owned explanation controller/caption/TTS policy | request ID、commit ID、generation、locale、sequence、text、done |
 | `commit_explanation_terminal` | support runtime | app-owned explanation controller/HIST metadata | request ID、status、usage、latency、error code |
@@ -266,19 +284,21 @@ native command surfaceにcheckpoint、commit、stage、restore、revert、branch
 | 項目 | 仕様 |
 |---|---|
 | 生成・再利用 | 同じmain windowとworkspace selectionを維持してCommit tabへ切替える |
-| 非active | hidden force-mounted panelはobserverやUI由来requestを起動しない。ただしapp-side interceptorがverified commitを受けた自動説明は画面visibilityと独立して継続する |
+| 非active | hidden force-mounted panelはobserverやUI由来requestを起動しない。ただしapp-side interceptorがverified commitを受けたbackground説明生成は画面visibilityと独立して継続する |
 | リサイズ | detail優先、list drawer化。captionはdetail actionを覆わない |
-| close | observer read、support、local TTS process group/queueをbounded cancel。Git transaction待機なし |
+| close | UI intent/caption/TTSを先にrevokeし、共通shutdown契約でobserver、support controller/process group、audio queue、writerを順序付きbounded cleanupする。Git状態を変更しない |
 | restart | persisted evidenceとInterrupted explanation metadataを表示し、自動support再開しない |
 | offline | local evidenceを表示し、explanationはUnavailable caption |
 
 ## アクセシビリティ
 
-- focus順はobserver bar、commit list、detail header、tabs、file list、diff、state別説明action、caption Cancelとする。
-- listはsingle-select semantics、detail headingはselection変更時にprogrammatic focusを奪わない。
+- focus順はobserver bar、commit list、detail header、tabs、file list、diff、`詳しく教えて` / Retry / 生成Cancel、caption Close / replay / muteとする。
+- listはsingle-select semanticsとし、通常のselection変更ではdetail headingへprogrammatic focusを移さない。focusがrevokeされたcaption内にあった場合だけnew detail headingへ移す。
 - status、gate、change kind、riskを色だけで伝えない。
 - diffのaddition/deletionはtext labelとscreen reader向け説明を持つ。
-- explanation captionはvisible HTMLで、polite live regionを基本とし、error/cancelだけassertiveにする。
+- `詳しく教えて`後はtriggerへfocusを維持し、caption portalをstatusとして関連付ける。`Close explanation`後はそのexact triggerへ戻し、selection/locale/workspace変更でfocused captionが消失した場合だけnew detail headingへfocusを置く。
+- 生成Cancel確認は`戻る / Back`を初期focusにしてfocus trapし、EscapeはBackと同じにする。Back後は生成Cancel trigger、成功後はRetryまたはdetail headingへfocusを返す。
+- explanation captionはvisible HTMLで、明示intent後だけpolite live regionを使い、error/cancelはassertiveに1回だけ通知する。background生成statusは読み上げない。
 - TTS off/mute/audio deviceなしでも同じ説明を読める。
 - 200% text zoomでaction、blocking reason、captionを欠落させない。
 
@@ -301,19 +321,19 @@ native command surfaceにcheckpoint、commit、stage、restore、revert、branch
 | `GIT-F-079`〜`GIT-F-083` | main skill auditとproducer表示 | [Git observer要件](../requirements/git-review-harness.md) |
 | `GIT-F-084`〜`GIT-F-089` | list/detail/diff/gates/performance | [Git observer要件](../requirements/git-review-harness.md) |
 | `CODE-F-077`〜`CODE-F-079` | success commit command検出、SHA検証、main conversation分離 | [Codex main要件](../requirements/codex-main-session.md) |
-| `GIT-F-090`〜`GIT-F-096` | 自動説明、manual fallback/retry、controller state、redaction、caption、TTS、fail closed | [Git observer要件](../requirements/git-review-harness.md) |
+| `GIT-F-090`〜`GIT-F-096` | background説明生成、明示presentation、manual fallback/retry、controller state、redaction、caption、TTS、fail closed | [Git observer要件](../requirements/git-review-harness.md) |
 | `SUP-F-069`〜`SUP-F-078` | app-owned isolated commit explainer、state、stream schema | [Support要件](../requirements/support-agent-orchestration.md) |
-| `NARR-F-078`〜`NARR-F-081` | same-transcript caption/TTS | [Audio要件](../requirements/audio-commentary.md) |
+| `NARR-F-078`〜`NARR-F-089` | explicit intent、same-transcript caption/TTS、dismiss/cancel分離、exact key、focus-safe presentation | [Audio要件](../requirements/audio-commentary.md) |
 
 ## レビュー・着手判定
 
 - [x] Commit tabをread-only evidence画面として定義した。
 - [x] native commit/checkpoint/restore/recovery/branchを削除した。
 - [x] list、selection、metadata、diff、gateの正常・空・error・stale・oversizeを定義した。
-- [x] verified commit後の自動説明、`not_generated`のmanual fallback、failure retry、cached presentationを定義した。
+- [x] verified commit後のbackground説明生成と明示presentationを分離し、`not_generated`のmanual fallback、failure retry、cached presentationを定義した。
 - [x] commit説明をmain conversationから分離し、app-owned controllerへ限定した。
 - [x] supportへ渡すredacted evidenceと禁止data/authorityを定義した。
-- [x] streamed caption、same-transcript TTS、cancel/stale/schema invalidを定義した。
+- [x] happy/loading/empty/error/disabled/recovery、ja/en、keyboard順、focus return、live region、same-transcript TTS、生成cancel/stale/schema invalidを定義した。
 - [x] hidden panel、restart、offline、responsive、accessibilityを定義した。
 
 実装着手可。
