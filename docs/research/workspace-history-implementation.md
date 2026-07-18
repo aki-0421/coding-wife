@@ -37,6 +37,7 @@ read_when:
 17. Characterの自由入力は技術・安全policyを変更できない。NFKC、case、句読点を正規化し、表示文言・結果・error・実行中の発話状態などpresentation clauseとして明示的に分類できる部分を除いた後、permission、approval、verification、tool等のpolicy-domain objectが残れば、命令・同義語・説明文の別を問わずRustとTypeScriptの両境界でfail-closed拒否する。共通corpus `src/test/fixtures/workspace-context-policy.v1.json`のja / en accepted・rejectedケースを両実装で通す。
 18. 技術参照は`doc:`を除きtrusted repository rootからの相対pathだけを受理し、`.`や重複separatorを保存前にcanonicalizeする。native保存時は参照の存在、各symlink componentのroot内解決、rootとtargetのdevice / inodeを検証し、migration version 3のprivate `project_reference_manifest_json`へidentityを保存する。Send snapshotは同じtransaction内で再検証し、参照の消失・置換、symlink retarget、repository root交換を検知したらturnを開始しない。旧recordは自動で信頼せず、技術参照がある場合は利用者の明示再保存でmanifestを作る。
 19. UIのvalidation errorはsection alertだけで終えず、fieldとreasonの構造化情報を保持する。対象fieldに`aria-invalid`と`aria-describedby`を設定してfocusを戻し、fieldを特定できないerrorはsection headingへ戻す。競合後の「保存済みバージョンを再読込」もsection headingへfocusを移し、更新されたversionを読み上げ可能にする。
+20. Project登録解除はworkspace-history operation lockの後にCharacter select/deleteと共有するproject operation lockを取得する。active Projectのselectionを履歴DB更新前に削除し、DB失敗時はselectionとCodex workspace activationをrollbackする。登録解除済みProjectはCharacter resolverで解決せず、再起動時にもorphan selectionを削除する。登録解除は履歴本文、context source、repository file、commit、branchを変更しない。
 
 ## ファイル責務
 
