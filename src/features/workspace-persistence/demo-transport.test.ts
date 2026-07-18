@@ -125,6 +125,8 @@ describe("DemoWorkspaceHistoryTransport", () => {
     expect(state.contextSnapshots[0]).toMatchObject({
       snapshotId: "context-demo-3",
       label: "Working tree diff",
+      contentHash:
+        "934aadecee30255e357b415c0ee74ea27cf91af64a9b5ba7d0636dcb02273755",
     })
   })
 
@@ -215,5 +217,60 @@ describe("DemoWorkspaceHistoryTransport", () => {
       projectVersion: 3,
       characterVersion: 1,
     })
+  })
+
+  it("uses native-compatible canonical content and snapshot SHA-256 values", async () => {
+    const transport = new DemoWorkspaceHistoryTransport()
+    const state = await transport.request(
+      workspaceHistoryCommands.list,
+      undefined,
+    )
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("demo fixture")
+    const initial = await transport.request(
+      workspaceHistoryCommands.loadEditableContext,
+      { workspaceId },
+    )
+    const context = { ...initial.project.context, goal: "Ship it" }
+
+    const saved = await transport.request(
+      workspaceHistoryCommands.saveProjectContext,
+      {
+        workspaceId,
+        expectedVersion: initial.project.version,
+        context,
+      },
+    )
+    expect(saved.contentHash).toBe(
+      "d896fd57cecd520a3f6c0c4cf11885484d21ca0096b155fd127f493552280dbc",
+    )
+    const snapshot = await transport.request(
+      workspaceHistoryCommands.getTurnContextSnapshot,
+      { workspaceId },
+    )
+    expect(snapshot.snapshotHash).toBe(
+      "b795b4a4c6c7f5791b0c175c8a5f304b0c0b83a7ab127019a8546748632bf35a",
+    )
+
+    const sameContent = await transport.request(
+      workspaceHistoryCommands.saveProjectContext,
+      {
+        workspaceId,
+        expectedVersion: saved.version,
+        context,
+      },
+    )
+    expect(sameContent.contentHash).toBe(saved.contentHash)
+    const differentContent = await transport.request(
+      workspaceHistoryCommands.saveProjectContext,
+      {
+        workspaceId,
+        expectedVersion: sameContent.version,
+        context: { ...context, goal: "Ship something else" },
+      },
+    )
+    expect(differentContent.contentHash).toBe(
+      "b7075b4a0979d60a764a8be795d06b3be3343d57a199f0b73c9ce03172743a9c",
+    )
   })
 })

@@ -131,6 +131,7 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
   private workspaceCounter = 0
   private contextCounter = 0
   private eventCounter = 0
+  private requestQueue: Promise<void> = Promise.resolve()
 
   constructor() {
     for (const workspace of this.workspaces) {
@@ -155,22 +156,27 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     command: K,
     request: WorkspaceHistoryRequestMap[K],
   ): Promise<WorkspaceHistoryResponseMap[K]> {
-    try {
-      const response = this.handle(command, request)
-      return Promise.resolve(parseWorkspaceHistoryResponse(command, response))
-    } catch (error) {
-      return Promise.reject(
-        error instanceof Error
+    const response = this.requestQueue.then(async () => {
+      try {
+        const value = await this.handle(command, request)
+        return parseWorkspaceHistoryResponse(command, value)
+      } catch (error) {
+        throw error instanceof Error
           ? error
-          : new Error("Demo history request failed"),
-      )
-    }
+          : new Error("Demo history request failed")
+      }
+    })
+    this.requestQueue = response.then(
+      () => undefined,
+      () => undefined,
+    )
+    return response
   }
 
-  private handle<K extends WorkspaceHistoryCommand>(
+  private async handle<K extends WorkspaceHistoryCommand>(
     command: K,
     request: WorkspaceHistoryRequestMap[K],
-  ): unknown {
+  ): Promise<unknown> {
     switch (command) {
       case workspaceHistoryCommands.list:
         return this.state()
@@ -425,9 +431,9 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     return draft
   }
 
-  private saveContext(
+  private async saveContext(
     request: WorkspaceHistoryRequestMap["workspace_save_context_snapshot"],
-  ): PersistedContextSnapshot {
+  ): Promise<PersistedContextSnapshot> {
     this.workspace(
       request.workspaceId,
       workspaceHistoryCommands.saveContextSnapshot,
@@ -440,7 +446,7 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       )
     }
     this.contextCounter += 1
-    const digit = (this.contextCounter % 16).toString(16)
+    const content = `demo ${request.source}`
     const label = {
       files: "Repository files",
       git_diff: "Working tree diff",
@@ -452,8 +458,11 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       source: request.source,
       label,
       capturedAt: this.timestamp(),
-      byteCount: new TextEncoder().encode(`demo ${request.source}`).byteLength,
-      contentHash: digit.repeat(64),
+      byteCount: new TextEncoder().encode(content).byteLength,
+      contentHash: await this.sha256Text(
+        content,
+        workspaceHistoryCommands.saveContextSnapshot,
+      ),
     }
     const contexts = [
       ...(this.contexts.get(request.workspaceId) ?? []),
@@ -463,9 +472,9 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     return snapshot
   }
 
-  private saveProjectContext(
+  private async saveProjectContext(
     request: WorkspaceHistoryRequestMap["workspace_save_project_context"],
-  ): WorkspaceHistoryResponseMap["workspace_save_project_context"] {
+  ): Promise<WorkspaceHistoryResponseMap["workspace_save_project_context"]> {
     const current = this.editableContext(
       request.workspaceId,
       workspaceHistoryCommands.saveProjectContext,
@@ -485,7 +494,10 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
         schemaVersion: 1,
         workspaceId: request.workspaceId,
         version,
-        contentHash: this.demoHash(version, "a"),
+        contentHash: await this.canonicalJsonHash(
+          context,
+          workspaceHistoryCommands.saveProjectContext,
+        ),
         updatedAt: this.timestamp(),
         context,
       },
@@ -494,9 +506,9 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     return updated.project
   }
 
-  private saveCharacterContext(
+  private async saveCharacterContext(
     request: WorkspaceHistoryRequestMap["workspace_save_character_context"],
-  ): WorkspaceHistoryResponseMap["workspace_save_character_context"] {
+  ): Promise<WorkspaceHistoryResponseMap["workspace_save_character_context"]> {
     const current = this.editableContext(
       request.workspaceId,
       workspaceHistoryCommands.saveCharacterContext,
@@ -516,7 +528,10 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
         schemaVersion: 1,
         workspaceId: request.workspaceId,
         version,
-        contentHash: this.demoHash(version, "b"),
+        contentHash: await this.canonicalJsonHash(
+          context,
+          workspaceHistoryCommands.saveCharacterContext,
+        ),
         updatedAt: this.timestamp(),
         context,
       },
@@ -525,9 +540,9 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     return updated.character
   }
 
-  private turnContextSnapshot(
+  private async turnContextSnapshot(
     workspaceId: string,
-  ): WorkspaceTurnContextSnapshot {
+  ): Promise<WorkspaceTurnContextSnapshot> {
     const current = this.editableContext(
       workspaceId,
       workspaceHistoryCommands.getTurnContextSnapshot,
@@ -539,9 +554,14 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       projectHash: current.project.contentHash,
       characterVersion: current.character.version,
       characterHash: current.character.contentHash,
-      snapshotHash: this.demoHash(
-        current.project.version + current.character.version,
-        "c",
+      snapshotHash: await this.canonicalJsonHash(
+        {
+          projectVersion: current.project.version,
+          projectHash: current.project.contentHash,
+          characterVersion: current.character.version,
+          characterHash: current.character.contentHash,
+        },
+        workspaceHistoryCommands.getTurnContextSnapshot,
       ),
       capturedAt: this.timestamp(),
       project: current.project.context,
@@ -723,9 +743,31 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     }
   }
 
-  private demoHash(version: number, prefix: string): string {
-    const suffix = Math.max(0, version).toString(16).slice(-8).padStart(8, "0")
-    return `${prefix.repeat(56)}${suffix}`
+  private canonicalJsonHash(
+    value: unknown,
+    operation: WorkspaceHistoryCommand,
+  ): Promise<string> {
+    return this.sha256Text(JSON.stringify(value), operation)
+  }
+
+  private async sha256Text(
+    value: string,
+    operation: WorkspaceHistoryCommand,
+  ): Promise<string> {
+    if (globalThis.crypto?.subtle === undefined) {
+      throw this.error("WORKSPACE-CONTEXT-HASH-UNAVAILABLE", operation, true)
+    }
+    try {
+      const digest = await globalThis.crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(value),
+      )
+      return Array.from(new Uint8Array(digest), (byte) =>
+        byte.toString(16).padStart(2, "0"),
+      ).join("")
+    } catch {
+      throw this.error("WORKSPACE-CONTEXT-HASH-UNAVAILABLE", operation, true)
+    }
   }
 
   private replaceWorkspace(workspace: PersistedWorkspaceSummary): void {

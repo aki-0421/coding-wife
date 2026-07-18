@@ -693,6 +693,16 @@ mod tests {
             DEFAULT_CHARACTER_JSON
         );
         assert_eq!(content_hash(DEFAULT_CHARACTER_JSON), DEFAULT_CHARACTER_HASH);
+        assert_eq!(
+            snapshot_hash(
+                2,
+                "d896fd57cecd520a3f6c0c4cf11885484d21ca0096b155fd127f493552280dbc",
+                1,
+                DEFAULT_CHARACTER_HASH,
+            )
+            .expect("snapshot hash"),
+            "b795b4a4c6c7f5791b0c175c8a5f304b0c0b83a7ab127019a8546748632bf35a"
+        );
     }
 
     #[test]
