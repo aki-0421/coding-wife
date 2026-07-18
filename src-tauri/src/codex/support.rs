@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -198,6 +199,172 @@ impl SupportRuntimeError {
     }
 }
 
+#[derive(Clone)]
+pub struct SupportRuntimeConstructionError {
+    reason: SupportRuntimeError,
+    pending_cleanup: Option<SupportRuntimeCleanup>,
+}
+
+impl SupportRuntimeConstructionError {
+    fn clean(reason: SupportRuntimeError) -> Self {
+        Self {
+            reason,
+            pending_cleanup: None,
+        }
+    }
+
+    fn unconverged(reason: SupportRuntimeError, cleanup: SupportRuntimeCleanup) -> Self {
+        Self {
+            reason,
+            pending_cleanup: Some(cleanup),
+        }
+    }
+
+    pub fn reason(&self) -> SupportRuntimeError {
+        self.reason
+    }
+
+    pub fn code(&self) -> &'static str {
+        self.reason.code()
+    }
+
+    pub fn cleanup_converged(&self) -> bool {
+        self.pending_cleanup
+            .as_ref()
+            .is_none_or(SupportRuntimeCleanup::cleanup_converged)
+    }
+
+    pub(crate) fn take_pending_cleanup(&mut self) -> Option<SupportRuntimeCleanup> {
+        self.pending_cleanup.take()
+    }
+
+    pub async fn force_shutdown_now(&self) -> bool {
+        match self.pending_cleanup.as_ref() {
+            Some(cleanup) => cleanup.force_shutdown_now().await,
+            None => true,
+        }
+    }
+}
+
+impl From<SupportRuntimeError> for SupportRuntimeConstructionError {
+    fn from(reason: SupportRuntimeError) -> Self {
+        Self::clean(reason)
+    }
+}
+
+impl fmt::Debug for SupportRuntimeConstructionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SupportRuntimeConstructionError")
+            .field("reason", &self.reason)
+            .field("cleanup_converged", &self.cleanup_converged())
+            .finish()
+    }
+}
+
+impl fmt::Display for SupportRuntimeConstructionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.reason.fmt(formatter)
+    }
+}
+
+impl std::error::Error for SupportRuntimeConstructionError {}
+
+impl PartialEq<SupportRuntimeError> for SupportRuntimeConstructionError {
+    fn eq(&self, other: &SupportRuntimeError) -> bool {
+        self.reason == *other
+    }
+}
+
+struct SupportRuntimeCleanupInner {
+    runtime: Arc<ProcessRuntime>,
+    run_directory: Arc<PrivateRunDirectory>,
+    converged: AtomicBool,
+    defer_graceful_once: AtomicBool,
+}
+
+#[derive(Clone)]
+pub(crate) struct SupportRuntimeCleanup {
+    inner: Arc<SupportRuntimeCleanupInner>,
+}
+
+impl SupportRuntimeCleanup {
+    fn new(
+        runtime: Arc<ProcessRuntime>,
+        run_directory: Arc<PrivateRunDirectory>,
+        defer_graceful_once: bool,
+    ) -> Self {
+        Self {
+            inner: Arc::new(SupportRuntimeCleanupInner {
+                runtime,
+                run_directory,
+                converged: AtomicBool::new(false),
+                defer_graceful_once: AtomicBool::new(defer_graceful_once),
+            }),
+        }
+    }
+
+    pub(crate) fn cleanup_converged(&self) -> bool {
+        self.inner.converged.load(Ordering::Acquire)
+    }
+
+    pub(crate) async fn shutdown(&self) -> Result<(), SupportRuntimeError> {
+        if self.cleanup_converged() {
+            return Ok(());
+        }
+        if self.inner.defer_graceful_once.swap(false, Ordering::AcqRel) {
+            return Err(SupportRuntimeError::Process);
+        }
+        let process = self
+            .inner
+            .runtime
+            .shutdown_checked()
+            .await
+            .map_err(|_| SupportRuntimeError::Process);
+        let directory = self.inner.run_directory.cleanup();
+        self.finish_cleanup(process, directory)
+    }
+
+    pub(crate) async fn force_shutdown_now(&self) -> bool {
+        if self.cleanup_converged() {
+            return true;
+        }
+        let process = self
+            .inner
+            .runtime
+            .force_shutdown_and_wait(Duration::from_millis(400))
+            .await;
+        let directory = self.inner.run_directory.cleanup().is_ok();
+        let converged = process && directory;
+        if converged {
+            self.inner.converged.store(true, Ordering::Release);
+        }
+        converged
+    }
+
+    fn finish_cleanup(
+        &self,
+        process: Result<(), SupportRuntimeError>,
+        directory: Result<(), SupportRuntimeError>,
+    ) -> Result<(), SupportRuntimeError> {
+        match (process, directory) {
+            (Ok(()), Ok(())) => {
+                self.inner.converged.store(true, Ordering::Release);
+                Ok(())
+            }
+            (Err(error), _) | (_, Err(error)) => Err(error),
+        }
+    }
+
+    fn runtime(&self) -> &Arc<ProcessRuntime> {
+        &self.inner.runtime
+    }
+
+    fn run_directory(&self) -> &PrivateRunDirectory {
+        &self.inner.run_directory
+    }
+}
+
 pub fn deterministic_fallback(
     role: SupportFallbackRole,
     source_event_id: impl Into<String>,
@@ -236,9 +403,8 @@ pub fn default_auth_source() -> Option<PathBuf> {
 }
 
 pub struct SupportRuntime {
-    runtime: Arc<ProcessRuntime>,
+    cleanup: SupportRuntimeCleanup,
     signals: Mutex<mpsc::Receiver<RuntimeSignal>>,
-    run_directory: PrivateRunDirectory,
     thread_id: String,
     skill: ResolvedBundledSkill,
     audit: SupportIsolationAudit,
@@ -260,7 +426,50 @@ impl SupportRuntime {
         schema: &SchemaProbe,
         resource_directory: &Path,
         auth_source: Option<&Path>,
-    ) -> Result<Self, SupportRuntimeError> {
+    ) -> Result<Self, SupportRuntimeConstructionError> {
+        Self::construct_inner(
+            binary,
+            schema,
+            resource_directory,
+            auth_source,
+            false,
+            false,
+        )
+        .await
+    }
+
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub async fn construct_with_test_faults(
+        binary: &BinaryInfo,
+        schema: &SchemaProbe,
+        resource_directory: &Path,
+        auth_source: Option<&Path>,
+        inject_initialization_failure: bool,
+        defer_graceful_cleanup_once: bool,
+    ) -> Result<Self, SupportRuntimeConstructionError> {
+        if binary.source != super::types::BinarySource::TestFixture {
+            return Err(SupportRuntimeError::UnsupportedRelease.into());
+        }
+        Self::construct_inner(
+            binary,
+            schema,
+            resource_directory,
+            auth_source,
+            inject_initialization_failure,
+            defer_graceful_cleanup_once,
+        )
+        .await
+    }
+
+    async fn construct_inner(
+        binary: &BinaryInfo,
+        schema: &SchemaProbe,
+        resource_directory: &Path,
+        auth_source: Option<&Path>,
+        inject_initialization_failure: bool,
+        defer_graceful_cleanup_once: bool,
+    ) -> Result<Self, SupportRuntimeConstructionError> {
         verify_release(binary, schema).await?;
         let verified_skill = resolve_bundled_skill(resource_directory, EXPLAIN_COMMIT_SKILL_NAME)
             .map_err(|_| SupportRuntimeError::Skill)?;
@@ -274,6 +483,7 @@ impl SupportRuntime {
             .ok_or(SupportRuntimeError::AuthBridge)?;
         bridge_auth(&auth_source, &run_directory.codex_home)?;
         run_directory.write_config(&support_config(None))?;
+        let run_directory = Arc::new(run_directory);
 
         let (signals, receiver) = mpsc::channel(SUPPORT_SIGNAL_QUEUE_CAPACITY);
         let runtime = Arc::new(
@@ -288,7 +498,15 @@ impl SupportRuntime {
             .await
             .map_err(|_| SupportRuntimeError::Process)?,
         );
+        let cleanup = SupportRuntimeCleanup::new(
+            runtime.clone(),
+            run_directory.clone(),
+            defer_graceful_cleanup_once,
+        );
         let thread = async {
+            if inject_initialization_failure {
+                return Err(SupportRuntimeError::Protocol);
+            }
             initialize_support_process(&runtime).await?;
             let account = runtime
                 .connection
@@ -331,15 +549,16 @@ impl SupportRuntime {
         let thread = match thread {
             Ok(thread) => thread,
             Err(error) => {
-                runtime.shutdown().await;
-                return Err(error);
+                return match cleanup.shutdown().await {
+                    Ok(()) => Err(SupportRuntimeConstructionError::clean(error)),
+                    Err(_) => Err(SupportRuntimeConstructionError::unconverged(error, cleanup)),
+                };
             }
         };
 
         Ok(Self {
-            runtime,
+            cleanup,
             signals: Mutex::new(receiver),
-            run_directory,
             thread_id: thread.thread_id,
             audit: SupportIsolationAudit {
                 capacity: SUPPORT_MAX_SESSION_CAPACITY,
@@ -391,7 +610,7 @@ impl SupportRuntime {
         let input = String::from_utf8(input).map_err(|_| SupportRuntimeError::Output)?;
         let params = match support_turn_start_params(
             &self.thread_id,
-            &self.run_directory.workspace,
+            &self.cleanup.run_directory().workspace,
             &request.request_id,
             &input,
             &request.evidence.locale,
@@ -423,7 +642,8 @@ impl SupportRuntime {
             });
         }
         let turn = match self
-            .runtime
+            .cleanup
+            .runtime()
             .connection
             .request("turn/start", params, SUPPORT_TASK_TIMEOUT)
             .await
@@ -527,23 +747,21 @@ impl SupportRuntime {
     }
 
     async fn terminate_and_cleanup(&self) -> Result<(), SupportRuntimeError> {
-        self.runtime
+        self.cleanup
+            .runtime()
             .terminate_checked()
             .await
             .map_err(|_| SupportRuntimeError::Process)?;
-        self.run_directory.cleanup()
+        self.cleanup.run_directory().cleanup()
     }
 
     async fn shutdown_and_cleanup(&self) -> Result<(), SupportRuntimeError> {
-        self.runtime
-            .shutdown_checked()
-            .await
-            .map_err(|_| SupportRuntimeError::Process)?;
-        self.run_directory.cleanup()
+        self.cleanup.shutdown().await
     }
 
     async fn interrupt(&self, thread_id: &str, turn_id: &str) -> Result<(), SupportRuntimeError> {
-        self.runtime
+        self.cleanup
+            .runtime()
             .connection
             .request(
                 "turn/interrupt",
@@ -577,7 +795,7 @@ impl SupportRuntime {
                 }
                 RuntimeSignal::Inbound { message, .. } => match message {
                     InboundMessage::ServerRequest { id, .. } => {
-                        let _ = self.runtime.connection.send(server_error(
+                        let _ = self.cleanup.runtime().connection.send(server_error(
                             &id,
                             -32601,
                             "Support runtime rejects server requests",
@@ -699,21 +917,17 @@ impl SupportRuntime {
                 active.canceled.store(true, Ordering::Release);
             }
         }
-        let exited = self
-            .runtime
-            .force_shutdown_and_wait(Duration::from_millis(400))
-            .await;
-        let cleanup = self.run_directory.cleanup();
-        if !exited {
-            return Err(SupportRuntimeError::Process);
-        }
-        cleanup
+        self.cleanup
+            .force_shutdown_now()
+            .await
+            .then_some(())
+            .ok_or(SupportRuntimeError::Process)
     }
 }
 
 impl Drop for SupportRuntime {
     fn drop(&mut self) {
-        self.runtime.force_shutdown_now();
+        self.cleanup.runtime().force_shutdown_now();
     }
 }
 

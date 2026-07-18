@@ -20,7 +20,7 @@ use crate::git_review::types::CommitEvidenceV1;
 use super::supervisor::CodexSupervisor;
 use super::support::{
     CommitExplanationTrigger, CommitExplanationV1, SupportExplainRequest, SupportExplainResult,
-    SupportRuntime, SupportRuntimeError, SupportUsage, SUPPORT_TASK_TIMEOUT,
+    SupportRuntime, SupportRuntimeCleanup, SupportRuntimeError, SupportUsage, SUPPORT_TASK_TIMEOUT,
 };
 
 pub const COMMIT_EXPLANATION_STATE_EVENT_CHANNEL: &str = "coding-wife://commit-explanation-state";
@@ -302,6 +302,7 @@ struct SupportExecution {
 enum SupportExecutionPhase {
     Constructing,
     Running(Arc<SupportRuntime>),
+    Unconverged(Arc<dyn SupportExecutionCleanup>),
     Terminal,
 }
 
@@ -309,6 +310,32 @@ enum SupportExecutionPhase {
 struct SupportExecutionOutcome {
     result: Result<SupportExplainResult, SupportRuntimeError>,
     cleanup_converged: bool,
+    pending_cleanup: Option<Arc<dyn SupportExecutionCleanup>>,
+}
+
+trait SupportExecutionCleanup: Send + Sync {
+    fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool>;
+    fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool>;
+}
+
+impl SupportExecutionCleanup for SupportRuntime {
+    fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+        Box::pin(async move { SupportRuntime::shutdown(self).await.is_ok() })
+    }
+
+    fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+        Box::pin(async move { SupportRuntime::force_shutdown_now(self).await.is_ok() })
+    }
+}
+
+impl SupportExecutionCleanup for SupportRuntimeCleanup {
+    fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+        Box::pin(async move { SupportRuntimeCleanup::shutdown(self).await.is_ok() })
+    }
+
+    fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+        Box::pin(async move { SupportRuntimeCleanup::force_shutdown_now(self).await })
+    }
 }
 
 #[derive(Default)]
@@ -392,21 +419,28 @@ impl IsolatedSupportExecutor {
             return SupportExecutionOutcome {
                 result: Err(SupportRuntimeError::UnsupportedRelease),
                 cleanup_converged: true,
+                pending_cleanup: None,
             };
         };
         if canceled.load(Ordering::Acquire) {
             return SupportExecutionOutcome {
                 result: Err(SupportRuntimeError::Canceled),
                 cleanup_converged: true,
+                pending_cleanup: None,
             };
         }
         let runtime =
             match SupportRuntime::construct(&context.0, &context.1, &context.2, None).await {
                 Ok(runtime) => Arc::new(runtime),
-                Err(error) => {
+                Err(mut error) => {
+                    let cleanup_converged = error.cleanup_converged();
+                    let pending_cleanup = error
+                        .take_pending_cleanup()
+                        .map(|cleanup| Arc::new(cleanup) as Arc<dyn SupportExecutionCleanup>);
                     return SupportExecutionOutcome {
-                        result: Err(error),
-                        cleanup_converged: true,
+                        result: Err(error.reason()),
+                        cleanup_converged,
+                        pending_cleanup,
                     };
                 }
             };
@@ -422,6 +456,8 @@ impl IsolatedSupportExecutor {
             return SupportExecutionOutcome {
                 result: Err(SupportRuntimeError::Canceled),
                 cleanup_converged,
+                pending_cleanup: (!cleanup_converged)
+                    .then(|| runtime as Arc<dyn SupportExecutionCleanup>),
             };
         }
         let result = if canceled.load(Ordering::Acquire) {
@@ -435,13 +471,16 @@ impl IsolatedSupportExecutor {
             runtime.explain_commit(request).await
         };
         let cleanup = runtime.shutdown().await;
+        let cleanup_converged = cleanup.is_ok();
         SupportExecutionOutcome {
             result: match (result, cleanup.as_ref()) {
                 (Ok(result), Ok(())) => Ok(result),
                 (Err(error), Ok(())) => Err(error),
                 (_, Err(error)) => Err(*error),
             },
-            cleanup_converged: cleanup.is_ok(),
+            cleanup_converged,
+            pending_cleanup: (!cleanup_converged)
+                .then(|| runtime as Arc<dyn SupportExecutionCleanup>),
         }
     }
 
@@ -454,40 +493,82 @@ impl IsolatedSupportExecutor {
             .iter()
             .map(|(key, execution)| (key.clone(), execution.clone()))
             .collect::<Vec<_>>();
+        self.stop_selected(executions, force).await
+    }
+
+    async fn stop_selected(
+        &self,
+        executions: Vec<((String, u64), SupportExecution)>,
+        force: bool,
+    ) -> bool {
         let mut converged = true;
         for (_, execution) in &executions {
             execution.canceled.store(true, Ordering::Release);
             if force {
                 execution.force_requested.store(true, Ordering::Release);
             }
-            if let SupportExecutionPhase::Running(runtime) = &execution.phase {
-                let stopped = if force {
-                    runtime.force_shutdown_now().await.is_ok()
-                } else {
-                    let canceled = runtime.cancel().await.is_ok();
-                    let shutdown = runtime.shutdown().await.is_ok();
-                    canceled && shutdown
-                };
-                converged &= stopped;
-            }
         }
         for (key, execution) in executions {
+            let immediate = Self::stop_phase(execution.phase.clone(), force).await;
             let outcome = execution.completion.wait().await;
-            converged &= outcome.cleanup_converged;
             if let Some(task) = execution.task.lock().await.clone() {
                 while !task.is_finished() {
                     tokio::task::yield_now().await;
                 }
             }
-            let mut active = self.active.lock().await;
-            if active
+            let current_phase = self
+                .active
+                .lock()
+                .await
                 .get(&key)
-                .is_some_and(|current| current.generation == execution.generation)
+                .filter(|current| current.generation == execution.generation)
+                .map(|current| current.phase.clone());
+            let late = if immediate.is_none() {
+                match current_phase {
+                    Some(phase @ SupportExecutionPhase::Unconverged(_))
+                    | Some(phase @ SupportExecutionPhase::Running(_)) => {
+                        Self::stop_phase(phase, force).await
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let execution_converged =
+                outcome.cleanup_converged || immediate == Some(true) || late == Some(true);
+            converged &= execution_converged;
+            let mut active = self.active.lock().await;
+            if execution_converged
+                && active
+                    .get(&key)
+                    .is_some_and(|current| current.generation == execution.generation)
             {
                 active.remove(&key);
             }
         }
         converged
+    }
+
+    async fn stop_phase(phase: SupportExecutionPhase, force: bool) -> Option<bool> {
+        match phase {
+            SupportExecutionPhase::Running(runtime) => {
+                if force {
+                    Some(runtime.force_shutdown_now().await.is_ok())
+                } else {
+                    let canceled = runtime.cancel().await.is_ok();
+                    let shutdown = runtime.shutdown().await.is_ok();
+                    Some(canceled && shutdown)
+                }
+            }
+            SupportExecutionPhase::Unconverged(cleanup) => {
+                if force {
+                    Some(cleanup.force_shutdown_now().await)
+                } else {
+                    Some(cleanup.shutdown().await)
+                }
+            }
+            SupportExecutionPhase::Constructing | SupportExecutionPhase::Terminal => None,
+        }
     }
 }
 
@@ -532,7 +613,10 @@ impl CommitExplanationExecutor for IsolatedSupportExecutor {
                     .await;
                 if let Some(execution) = executor.active.lock().await.get_mut(&task_key) {
                     if execution.generation == generation {
-                        execution.phase = SupportExecutionPhase::Terminal;
+                        execution.phase = match outcome.pending_cleanup.clone() {
+                            Some(cleanup) => SupportExecutionPhase::Unconverged(cleanup),
+                            None => SupportExecutionPhase::Terminal,
+                        };
                     }
                 }
                 task_completion.finish(outcome).await;
@@ -554,8 +638,8 @@ impl CommitExplanationExecutor for IsolatedSupportExecutor {
             while !task_handle.is_finished() {
                 tokio::task::yield_now().await;
             }
-            self.active.lock().await.remove(&key);
             if outcome.cleanup_converged {
+                self.active.lock().await.remove(&key);
                 outcome.result
             } else {
                 Err(SupportRuntimeError::Process)
@@ -576,25 +660,7 @@ impl CommitExplanationExecutor for IsolatedSupportExecutor {
             if executions.is_empty() {
                 return false;
             }
-            let mut converged = true;
-            for (_, execution) in &executions {
-                execution.canceled.store(true, Ordering::Release);
-                if let SupportExecutionPhase::Running(runtime) = &execution.phase {
-                    converged &= runtime.cancel().await.is_ok();
-                    converged &= runtime.shutdown().await.is_ok();
-                }
-            }
-            for (key, execution) in executions {
-                let outcome = execution.completion.wait().await;
-                converged &= outcome.cleanup_converged;
-                if let Some(task) = execution.task.lock().await.clone() {
-                    while !task.is_finished() {
-                        tokio::task::yield_now().await;
-                    }
-                }
-                self.active.lock().await.remove(&key);
-            }
-            converged
+            self.stop_selected(executions, false).await
         })
     }
 
@@ -1098,11 +1164,13 @@ impl CommitExplanationController {
         for state in changed {
             self.inner.events.emit_state(&state);
         }
-        if !force {
-            if let Some(request_id) = active_request_id {
-                let _ = self.inner.executor.cancel(&request_id).await;
-            }
-        }
+        let cancel_converged = if force {
+            true
+        } else if let Some(request_id) = active_request_id {
+            self.inner.executor.cancel(&request_id).await
+        } else {
+            true
+        };
         let executor_converged = if force {
             self.inner.executor.force_shutdown_now().await
         } else {
@@ -1112,7 +1180,11 @@ impl CommitExplanationController {
             completion.wait().await;
         }
         let data = self.inner.data.lock().await;
-        executor_converged && data.queue.is_empty() && data.active.is_none() && !data.worker_running
+        cancel_converged
+            && executor_converged
+            && data.queue.is_empty()
+            && data.active.is_none()
+            && !data.worker_running
     }
 
     pub async fn shutdown(&self) -> Result<(), CommitExplanationControllerError> {
@@ -1649,6 +1721,7 @@ mod tests {
         mode: FakeMode,
         calls: AtomicUsize,
         cancels: AtomicUsize,
+        cancel_converges: AtomicBool,
         shutdowns: AtomicUsize,
         shutdown_converges: AtomicBool,
         forces: AtomicUsize,
@@ -1663,6 +1736,7 @@ mod tests {
                 mode,
                 calls: AtomicUsize::new(0),
                 cancels: AtomicUsize::new(0),
+                cancel_converges: AtomicBool::new(true),
                 shutdowns: AtomicUsize::new(0),
                 shutdown_converges: AtomicBool::new(true),
                 forces: AtomicUsize::new(0),
@@ -1714,7 +1788,7 @@ mod tests {
                 if matches!(self.mode, FakeMode::Block) {
                     self.release_one();
                 }
-                true
+                self.cancel_converges.load(Ordering::Acquire)
             })
         }
 
@@ -1735,6 +1809,36 @@ mod tests {
                     self.release_one();
                 }
                 true
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct RetryCleanupFixture {
+        converges: AtomicBool,
+        force_calls: AtomicUsize,
+        audit: StdMutex<Vec<&'static str>>,
+    }
+
+    impl SupportExecutionCleanup for RetryCleanupFixture {
+        fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+            Box::pin(async move {
+                self.audit
+                    .lock()
+                    .expect("cleanup audit")
+                    .push("construction-cleanup-graceful");
+                self.converges.load(Ordering::Acquire)
+            })
+        }
+
+        fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+            Box::pin(async move {
+                self.force_calls.fetch_add(1, Ordering::AcqRel);
+                self.audit
+                    .lock()
+                    .expect("cleanup audit")
+                    .push("construction-cleanup-force");
+                self.converges.load(Ordering::Acquire)
             })
         }
     }
@@ -1776,6 +1880,7 @@ mod tests {
                 .finish(SupportExecutionOutcome {
                     result: Err(SupportRuntimeError::Canceled),
                     cleanup_converged: true,
+                    pending_cleanup: None,
                 })
                 .await;
         });
@@ -1791,6 +1896,48 @@ mod tests {
         assert!(task_handle.is_finished());
         assert!(executor.active.lock().await.is_empty());
         assert!(executor.stop_executions(true).await);
+    }
+
+    #[tokio::test]
+    async fn construction_cleanup_failure_is_retained_until_force_retry_converges() {
+        let executor = IsolatedSupportExecutor::new(CodexSupervisor::new());
+        let key = ("request-construction-failure".to_owned(), 11);
+        let cleanup = Arc::new(RetryCleanupFixture::default());
+        let cleanup_target = cleanup.clone() as Arc<dyn SupportExecutionCleanup>;
+        let completion = Arc::new(SupportExecutionCompletion::default());
+        completion
+            .finish(SupportExecutionOutcome {
+                result: Err(SupportRuntimeError::Protocol),
+                cleanup_converged: false,
+                pending_cleanup: Some(cleanup_target.clone()),
+            })
+            .await;
+        executor.active.lock().await.insert(
+            key.clone(),
+            SupportExecution {
+                generation: 11,
+                canceled: Arc::new(AtomicBool::new(false)),
+                force_requested: Arc::new(AtomicBool::new(false)),
+                phase: SupportExecutionPhase::Unconverged(cleanup_target),
+                task: Arc::new(Mutex::new(None)),
+                completion,
+            },
+        );
+
+        assert!(!executor.cancel("request-construction-failure").await);
+        assert!(executor.active.lock().await.contains_key(&key));
+        assert!(!executor.stop_executions(true).await);
+        assert!(executor.active.lock().await.contains_key(&key));
+        assert_eq!(cleanup.force_calls.load(Ordering::Acquire), 1);
+
+        cleanup.converges.store(true, Ordering::Release);
+        assert!(executor.stop_executions(true).await);
+        assert!(executor.active.lock().await.is_empty());
+        assert!(executor.stop_executions(true).await);
+        assert_eq!(cleanup.force_calls.load(Ordering::Acquire), 2);
+        let audit = cleanup.audit.lock().expect("cleanup audit").join(" ");
+        assert!(!audit.contains("/Users/"));
+        assert!(!audit.contains("token="));
     }
 
     #[tokio::test]
@@ -1816,6 +1963,35 @@ mod tests {
             Some("CODEX-SUPPORT-SHUTDOWN")
         );
         assert!(!rejected.retryable);
+    }
+
+    #[tokio::test]
+    async fn cancel_failure_cannot_be_hidden_by_an_empty_executor_shutdown() {
+        let (controller, executor, _) = harness(FakeMode::Block, 1, 2, Duration::from_secs(1));
+        let request = dispatch('f', "request-cancel-failure", 1);
+        controller
+            .request(request.clone())
+            .await
+            .expect("queued request");
+        wait_for_status(
+            &controller,
+            &request,
+            CommitExplanationControllerStatus::Running,
+        )
+        .await;
+        executor.cancel_converges.store(false, Ordering::Release);
+
+        let error = controller
+            .shutdown()
+            .await
+            .expect_err("cancel failure must fail graceful shutdown");
+        assert_eq!(error.code, "CODEX-SUPPORT-SHUTDOWN-INCOMPLETE");
+        assert_eq!(executor.cancels.load(Ordering::Acquire), 1);
+        assert_eq!(executor.shutdowns.load(Ordering::Acquire), 1);
+        assert_eq!(executor.inflight.load(Ordering::Acquire), 0);
+
+        assert!(controller.force_shutdown_now().await);
+        assert_eq!(executor.forces.load(Ordering::Acquire), 1);
     }
 
     #[derive(Default)]
