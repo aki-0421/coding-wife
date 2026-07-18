@@ -18,6 +18,10 @@ import {
 import { CodexComposedWorkspaceViewAdapter } from "@/features/workspace-persistence/codex-composition"
 import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 class CompositionCodexTransport implements CodexTransport {
   readonly kind = "demo"
   readonly calls: {
@@ -115,15 +119,18 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         editableContextSnapshot,
       }),
     ).resolves.toEqual({ accepted: true })
-    expect(
-      codex.calls.find((call) => call.command === codexCommands.turnStart),
-    ).toMatchObject({
-      request: {
-        effort: "low",
-        attachmentHandles: [],
-        text: expect.stringContaining("CODING_WIFE_CONTEXT_SNAPSHOT_V1"),
-      },
-    })
+    const turnStartRequest = codex.calls.find(
+      (call) => call.command === codexCommands.turnStart,
+    )?.request
+    if (
+      !isRecord(turnStartRequest) ||
+      typeof turnStartRequest.text !== "string"
+    ) {
+      throw new Error("Expected a typed turn start request")
+    }
+    expect(turnStartRequest.effort).toBe("low")
+    expect(turnStartRequest.attachmentHandles).toEqual([])
+    expect(turnStartRequest.text).toContain("CODING_WIFE_CONTEXT_SNAPSHOT_V1")
 
     codex.emit({
       schemaVersion: 1,
