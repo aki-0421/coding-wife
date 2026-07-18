@@ -1910,6 +1910,47 @@ describe("WorkspaceShell", () => {
     expect(screen.queryByText("Repository missing")).not.toBeInTheDocument()
   })
 
+  it("labels stale HEAD recovery as an explicit read-only recheck", async () => {
+    const staleState: WorkspaceAdapterState = {
+      ...nativeWorkspaceState(),
+      workspaces: [
+        {
+          ...nativeWorkspaceState().workspaces[0]!,
+          health: "stale_branch",
+        },
+      ],
+    }
+    const recheckWorkspace = vi.fn().mockResolvedValue({
+      ...staleState,
+      workspaces: staleState.workspaces.map((workspace) => ({
+        ...workspace,
+        health: "ready" as const,
+      })),
+    })
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(staleState),
+      recheckWorkspace,
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+
+    expect(
+      (await screen.findAllByText("Branch changed outside the app")).length,
+    ).toBe(2)
+    await user.click(screen.getByRole("button", { name: "Workspace actions" }))
+    await user.click(
+      screen.getByRole("button", { name: /^Recheck repository/u }),
+    )
+
+    await waitFor(() =>
+      expect(recheckWorkspace).toHaveBeenCalledWith("workspace-native", true),
+    )
+    expect(
+      screen.queryByText("Branch changed outside the app"),
+    ).not.toBeInTheDocument()
+  })
+
   it("requires two confirmations before unregistering app metadata", async () => {
     const selected = {
       ...nativeWorkspaceState().workspaces[0]!,

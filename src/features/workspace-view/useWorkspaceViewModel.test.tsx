@@ -173,6 +173,204 @@ describe("useWorkspaceViewModel workspace transitions", () => {
     expect(fixture.stopAndSwitchWorkspace).not.toHaveBeenCalled()
   })
 
+  it("rechecks repository health immediately before Send and preserves a blocked draft", async () => {
+    const ready = {
+      ...state(),
+      workspaces: state().workspaces.map((workspace) => ({
+        ...workspace,
+        health: "ready" as const,
+      })),
+    }
+    const blocked: WorkspaceAdapterState = {
+      ...ready,
+      workspaces: ready.workspaces.map((workspace) =>
+        workspace.id === "workspace-a"
+          ? { ...workspace, health: "stale_branch" }
+          : workspace,
+      ),
+    }
+    const recheckWorkspace = vi.fn(() => Promise.resolve(blocked))
+    const sendTurn = vi.fn(() => Promise.resolve({ accepted: true }))
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(ready),
+      codexSnapshot: () => codexState("ready"),
+      subscribeCodex: (listener) => {
+        listener(codexState("ready"))
+        return () => undefined
+      },
+      getTurnContextSnapshot: () => Promise.resolve(contextSnapshot()),
+      recheckWorkspace,
+      sendTurn,
+    }
+    const { result } = renderHook(() => useWorkspaceViewModel(adapter))
+    await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
+
+    await act(async () => {
+      await expect(result.current.sendTurn()).resolves.toBe(false)
+    })
+
+    expect(recheckWorkspace).toHaveBeenCalledWith("workspace-a")
+    expect(sendTurn).not.toHaveBeenCalled()
+    expect(result.current.selectedDraft.text).toBe("Preserve this draft.")
+    expect(result.current.selectedWorkspace?.health).toBe("stale_branch")
+    expect(result.current.notice?.message).toBe(
+      "WORKSPACE-REPOSITORY-stale_branch",
+    )
+  })
+
+  it("rechecks the active repository on window focus and restores native anchor state", async () => {
+    const initial: WorkspaceAdapterState = {
+      ...state(),
+      lastSummary: {
+        eventId: "event-summary",
+        sequence: 8,
+        text: "Workspace summary",
+        updatedAt: "2026-07-18T00:01:00.000Z",
+      },
+      timelineAnchor: {
+        eventId: "event-anchor",
+        sequence: 7,
+        offset: -12,
+        revision: 2,
+        wasClamped: false,
+      },
+    }
+    const missing: WorkspaceAdapterState = {
+      ...initial,
+      workspaces: initial.workspaces.map((workspace) =>
+        workspace.id === "workspace-a"
+          ? { ...workspace, health: "missing" }
+          : workspace,
+      ),
+    }
+    const recheckWorkspace = vi.fn(() => Promise.resolve(missing))
+    const saveTimelineAnchor = vi.fn(() => Promise.resolve())
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(initial),
+      codexSnapshot: () => codexState("ready"),
+      subscribeCodex: () => () => undefined,
+      recheckWorkspace,
+      saveTimelineAnchor,
+    }
+    const { result } = renderHook(() => useWorkspaceViewModel(adapter))
+    await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
+    expect(result.current.lastSummary?.text).toBe("Workspace summary")
+    expect(result.current.timelineAnchor).toMatchObject({
+      eventId: "event-anchor",
+      sequence: 7,
+      offset: -12,
+    })
+
+    act(() => window.dispatchEvent(new Event("focus")))
+    await waitFor(() =>
+      expect(result.current.selectedWorkspace?.health).toBe("missing"),
+    )
+    expect(recheckWorkspace).toHaveBeenCalledWith("workspace-a")
+    act(() => result.current.saveTimelineAnchor("event-anchor", 7, -4))
+    expect(saveTimelineAnchor).toHaveBeenCalledWith(
+      "workspace-a",
+      "event-anchor",
+      7,
+      -4,
+    )
+  })
+
+  it("loads bounded older pages until the persisted anchor is available", async () => {
+    const latestEvent = {
+      id: "event-latest",
+      sequence: 250,
+      producer: "code" as const,
+      kind: "history" as const,
+      domainKind: "code.tool.output",
+      occurredAt: "2026-07-18T00:04:00.000Z",
+      status: "completed",
+    }
+    const anchorEvent = {
+      id: "event-anchor",
+      sequence: 7,
+      producer: "code" as const,
+      kind: "history" as const,
+      domainKind: "code.message.completed",
+      occurredAt: "2026-07-18T00:00:07.000Z",
+      status: "completed",
+    }
+    const initial: WorkspaceAdapterState = {
+      ...state(),
+      timeline: [latestEvent],
+      timelineAnchor: {
+        eventId: anchorEvent.id,
+        sequence: anchorEvent.sequence,
+        offset: 8,
+        revision: 1,
+        wasClamped: false,
+      },
+      nextBeforeSequence: 51,
+    }
+    const loadTimelinePage = vi.fn(() =>
+      Promise.resolve({
+        timeline: [anchorEvent],
+        nextBeforeSequence: null,
+      }),
+    )
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(initial),
+      codexSnapshot: () => codexState("ready"),
+      subscribeCodex: () => () => undefined,
+      loadTimelinePage,
+    }
+    const { result } = renderHook(() => useWorkspaceViewModel(adapter))
+
+    await waitFor(() =>
+      expect(result.current.timeline.map((event) => event.kind)).toHaveLength(
+        2,
+      ),
+    )
+    expect(loadTimelinePage).toHaveBeenCalledWith("workspace-a", 51)
+    expect(
+      result.current.timeline.some(
+        (event) => event.kind === "history" && event.id === "event-anchor",
+      ),
+    ).toBe(true)
+  })
+
+  it("accepts an observed external HEAD only through the stale repository recovery action", async () => {
+    const stale: WorkspaceAdapterState = {
+      ...state(),
+      workspaces: state().workspaces.map((workspace) => ({
+        ...workspace,
+        health: workspace.id === "workspace-a" ? "stale_branch" : "ready",
+      })),
+    }
+    const ready: WorkspaceAdapterState = {
+      ...stale,
+      workspaces: stale.workspaces.map((workspace) => ({
+        ...workspace,
+        health: "ready",
+      })),
+    }
+    const recheckWorkspace = vi.fn(() => Promise.resolve(ready))
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(stale),
+      codexSnapshot: () => codexState("ready"),
+      subscribeCodex: () => () => undefined,
+      recheckWorkspace,
+    }
+    const { result } = renderHook(() => useWorkspaceViewModel(adapter))
+    await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
+
+    await act(async () => {
+      await expect(result.current.repairSelectedWorkspace()).resolves.toEqual({
+        ok: true,
+      })
+    })
+    expect(recheckWorkspace).toHaveBeenCalledWith("workspace-a", true)
+    expect(result.current.selectedWorkspace?.health).toBe("ready")
+  })
+
   it("uses the latest rapid target and deduplicates confirm while the old workspace stays selected", async () => {
     const transition = deferred<WorkspaceAdapterState>()
     const fixture = adapterFixture({ transition: transition.promise })

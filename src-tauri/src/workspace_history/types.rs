@@ -4,6 +4,7 @@ use serde_json::Value;
 pub const WORKSPACE_HISTORY_SCHEMA_VERSION: u16 = 1;
 pub const DOMAIN_EVENT_SCHEMA_VERSION: u16 = 1;
 pub const WORKSPACE_CONTEXT_SCHEMA_VERSION: u16 = 1;
+pub const WORKSPACE_RESUME_STATE_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -432,6 +433,39 @@ pub struct TimelinePage {
     pub next_before_sequence: Option<u64>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceLastSummaryView {
+    pub schema_version: u16,
+    pub workspace_id: String,
+    pub event_id: String,
+    pub sequence: u64,
+    pub text: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceTimelineAnchorView {
+    pub schema_version: u16,
+    pub workspace_id: String,
+    pub event_id: String,
+    pub sequence: u64,
+    pub offset: i64,
+    pub revision: u64,
+    pub updated_at: String,
+    pub was_clamped: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceResumeStateView {
+    pub schema_version: u16,
+    pub workspace_id: String,
+    pub last_summary: Option<WorkspaceLastSummaryView>,
+    pub timeline_anchor: Option<WorkspaceTimelineAnchorView>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkspaceStateSnapshot {
@@ -442,6 +476,7 @@ pub struct WorkspaceStateSnapshot {
     pub draft: Option<WorkspaceDraftView>,
     pub context_snapshots: Vec<ContextSnapshotView>,
     pub timeline: TimelinePage,
+    pub resume_state: Option<WorkspaceResumeStateView>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -476,6 +511,13 @@ pub struct WorkspaceSelectRequest {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceRecheckRequest {
+    pub workspace_id: String,
+    pub accept_observed_head: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkspaceUpdateLifecycleRequest {
     pub workspace_id: String,
     pub lifecycle: WorkspaceLifecycle,
@@ -496,6 +538,15 @@ pub struct WorkspaceSaveDraftRequest {
     pub text: String,
     pub effort: ReasoningEffort,
     pub expected_revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceSaveTimelineAnchorRequest {
+    pub workspace_id: String,
+    pub event_id: String,
+    pub sequence: u64,
+    pub offset: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -725,6 +776,7 @@ mod tests {
             draft: Some(draft()),
             context_snapshots: vec![context()],
             timeline: timeline(),
+            resume_state: None,
         }
     }
 
@@ -791,5 +843,25 @@ mod tests {
             "workspace_id": "workspace-fixture"
         }))
         .is_err());
+        assert!(serde_json::from_value::<WorkspaceRecheckRequest>(json!({
+            "workspaceId": "workspace-fixture",
+            "acceptObservedHead": false
+        }))
+        .is_ok());
+        assert!(serde_json::from_value::<WorkspaceRecheckRequest>(json!({
+            "workspaceId": "workspace-fixture",
+            "acceptObservedHead": false,
+            "unexpected": true
+        }))
+        .is_err());
+        assert!(
+            serde_json::from_value::<WorkspaceSaveTimelineAnchorRequest>(json!({
+                "workspaceId": "workspace-fixture",
+                "eventId": "event-fixture",
+                "sequence": 7,
+                "offset": -12
+            }))
+            .is_ok()
+        );
     }
 }

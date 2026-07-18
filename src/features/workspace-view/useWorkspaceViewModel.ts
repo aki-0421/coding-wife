@@ -128,6 +128,25 @@ function draftFor(
   return drafts[workspaceId] ?? emptyDraft
 }
 
+function timelineItemKey(event: WorkspaceTimelineItem): string {
+  return event.kind === "history"
+    ? `history:${event.id}`
+    : `semantic:${event.stableId}`
+}
+
+function durableTimelineIdentity(
+  event: WorkspaceTimelineItem,
+): { readonly eventId: string; readonly sequence: number } | null {
+  if (event.kind === "history") {
+    return { eventId: event.id, sequence: event.sequence }
+  }
+  if (!event.durable) return null
+  return {
+    eventId: event.sourceEventId,
+    sequence: event.sourceSequence,
+  }
+}
+
 export type TurnUiState = "idle" | "sending" | "running" | "stopping"
 export type WorkspaceAdapterStatus = "loading" | "ready" | "error"
 export type WorkspaceAction = "cancel" | "repair" | "unregister"
@@ -178,6 +197,15 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   const [pendingWorkspaceTransition, setPendingWorkspaceTransition] =
     useState<PendingWorkspaceTransition | null>(null)
   const [timeline, setTimeline] = useState<readonly WorkspaceTimelineItem[]>([])
+  const [lastSummary, setLastSummary] = useState<NonNullable<
+    WorkspaceAdapterState["lastSummary"]
+  > | null>(null)
+  const [timelineAnchor, setTimelineAnchor] = useState<NonNullable<
+    WorkspaceAdapterState["timelineAnchor"]
+  > | null>(null)
+  const [nextBeforeSequence, setNextBeforeSequence] = useState<number | null>(
+    null,
+  )
   const [history, setHistory] = useState<WorkspaceAdapterState["history"]>({
     mode: "ready",
     errorCode: null,
@@ -192,6 +220,8 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   const transitionVersion = useRef(0)
   const transitionOperation = useRef<Promise<boolean> | null>(null)
   const sendVersion = useRef(0)
+  const repositoryCheckVersion = useRef(0)
+  const timelineRestoreVersion = useRef(0)
   const pendingDraftSaves = useRef(new Map<string, PendingDraftSave>())
   const draftSaveTimers = useRef(new Map<string, number>())
   const deletingWorkspaceIds = useRef(new Set<string>())
@@ -213,6 +243,9 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   const applyAdapterState = useCallback((state: WorkspaceAdapterState) => {
     setWorkspaces(state.workspaces)
     setTimeline(state.timeline)
+    setLastSummary(state.lastSummary ?? null)
+    setTimelineAnchor(state.timelineAnchor ?? null)
+    setNextBeforeSequence(state.nextBeforeSequence ?? null)
     setHistory(state.history)
     if (state.activeWorkspaceId === null) {
       setSelectedWorkspaceId("")
@@ -249,6 +282,9 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         setSelectedWorkspaceId("")
         setDrafts({})
         setTimeline([])
+        setLastSummary(null)
+        setTimelineAnchor(null)
+        setNextBeforeSequence(null)
         setNotice(null)
       })
     }
@@ -303,14 +339,12 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   }, [filter, workspaces])
 
   const combinedTimeline = useMemo(() => {
-    const timelineKey = (event: WorkspaceTimelineItem) =>
-      event.kind === "history"
-        ? `history:${event.id}`
-        : `semantic:${event.stableId}`
     const events = new Map(
-      timeline.map((event) => [timelineKey(event), event] as const),
+      timeline.map((event) => [timelineItemKey(event), event] as const),
     )
-    for (const event of codex.timeline) events.set(timelineKey(event), event)
+    for (const event of codex.timeline) {
+      events.set(timelineItemKey(event), event)
+    }
     return [...events.values()].sort((left, right) => {
       const timestamp =
         Date.parse(left.occurredAt) - Date.parse(right.occurredAt)
@@ -322,6 +356,74 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
       return leftSequence - rightSequence
     })
   }, [codex.timeline, timeline])
+
+  const timelineAnchorLoaded = useMemo(() => {
+    if (timelineAnchor === null) return true
+    return timeline.some((event) => {
+      const identity = durableTimelineIdentity(event)
+      return (
+        identity?.eventId === timelineAnchor.eventId &&
+        identity.sequence === timelineAnchor.sequence
+      )
+    })
+  }, [timeline, timelineAnchor])
+
+  useEffect(() => {
+    if (
+      !adapterReady ||
+      selectedWorkspace === undefined ||
+      timelineAnchor === null ||
+      timelineAnchorLoaded ||
+      nextBeforeSequence === null ||
+      adapter?.loadTimelinePage === undefined
+    ) {
+      return
+    }
+    timelineRestoreVersion.current += 1
+    const version = timelineRestoreVersion.current
+    const workspaceId = selectedWorkspace.id
+    void adapter
+      .loadTimelinePage(workspaceId, nextBeforeSequence)
+      .then((page) => {
+        if (
+          timelineRestoreVersion.current !== version ||
+          selectedWorkspaceId !== workspaceId
+        ) {
+          return
+        }
+        setTimeline((current) => {
+          const merged = new Map(
+            current.map((event) => [timelineItemKey(event), event] as const),
+          )
+          for (const event of page.timeline) {
+            merged.set(timelineItemKey(event), event)
+          }
+          return [...merged.values()]
+        })
+        setNextBeforeSequence((current) =>
+          page.nextBeforeSequence === current ? null : page.nextBeforeSequence,
+        )
+      })
+      .catch(() => {
+        if (timelineRestoreVersion.current !== version) return
+        setNextBeforeSequence(null)
+        setNotice({
+          tone: "error",
+          message: "HIST-TIMELINE-RESTORE-FAILED",
+        })
+      })
+    return () => {
+      timelineRestoreVersion.current += 1
+    }
+  }, [
+    adapter,
+    adapterReady,
+    nextBeforeSequence,
+    selectedWorkspace,
+    selectedWorkspaceId,
+    timelineAnchor,
+    timelineAnchorLoaded,
+  ])
 
   const updateDraft = useCallback(
     (
@@ -594,6 +696,28 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         setTurnState("idle")
         return false
       }
+      if (adapter.recheckWorkspace !== undefined) {
+        const checked = await adapter.recheckWorkspace(selectedWorkspace.id)
+        if (sendVersion.current !== version) return false
+        applyAdapterState(checked)
+        const checkedWorkspace = checked.workspaces.find(
+          (workspace) => workspace.id === selectedWorkspace.id,
+        )
+        if (checkedWorkspace?.health !== "ready") {
+          setTurnState("idle")
+          setNotice({
+            tone: "error",
+            message: `WORKSPACE-REPOSITORY-${checkedWorkspace?.health ?? "unreadable"}`,
+          })
+          return false
+        }
+      } else if (
+        selectedWorkspace.health !== undefined &&
+        selectedWorkspace.health !== "ready"
+      ) {
+        setTurnState("idle")
+        return false
+      }
       const request: SendTurnRequest = {
         workspaceId: selectedWorkspace.id,
         instruction: draft.text,
@@ -626,11 +750,66 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   }, [
     adapter,
     adapterReady,
+    applyAdapterState,
     drafts,
     scheduleDraftSave,
     selectedWorkspace,
     updateDraft,
   ])
+
+  useEffect(() => {
+    if (
+      !adapterReady ||
+      selectedWorkspace === undefined ||
+      adapter?.recheckWorkspace === undefined
+    ) {
+      return
+    }
+    const workspaceId = selectedWorkspace.id
+    const recheck = () => {
+      repositoryCheckVersion.current += 1
+      const version = repositoryCheckVersion.current
+      void adapter
+        .recheckWorkspace?.(workspaceId)
+        .then((state) => {
+          if (
+            repositoryCheckVersion.current === version &&
+            state.activeWorkspaceId === workspaceId
+          ) {
+            applyAdapterState(state)
+          }
+        })
+        .catch(() => {
+          if (repositoryCheckVersion.current !== version) return
+          setNotice({
+            tone: "error",
+            message: "WORKSPACE-REPOSITORY-unreadable",
+          })
+        })
+    }
+    window.addEventListener("focus", recheck)
+    return () => {
+      repositoryCheckVersion.current += 1
+      window.removeEventListener("focus", recheck)
+    }
+  }, [adapter, adapterReady, applyAdapterState, selectedWorkspace])
+
+  const saveTimelineAnchor = useCallback(
+    (eventId: string, sequence: number, offset: number) => {
+      if (
+        !adapterReady ||
+        selectedWorkspace === undefined ||
+        adapter?.saveTimelineAnchor === undefined
+      ) {
+        return
+      }
+      const workspaceId = selectedWorkspace.id
+      void adapter
+        .saveTimelineAnchor(workspaceId, eventId, sequence, offset)
+        .catch(() => undefined)
+    },
+    [adapter, adapterReady, selectedWorkspace],
+  )
 
   const stopTurn = useCallback(async () => {
     if (
@@ -947,12 +1126,31 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
 
   const repairSelectedWorkspace =
     useCallback(async (): Promise<WorkspaceActionResult> => {
-      if (!adapterReady || !selectedWorkspace || !adapter?.repairWorkspace) {
+      const recheckObservedHead =
+        selectedWorkspace?.health === "stale_branch" &&
+        adapter?.recheckWorkspace !== undefined
+      if (
+        !adapterReady ||
+        !selectedWorkspace ||
+        (!recheckObservedHead && adapter?.repairWorkspace === undefined)
+      ) {
         return { ok: false, errorCode: "WORKSPACE-REPAIR-UNAVAILABLE" }
       }
       setWorkspaceAction("repair")
       try {
-        applyAdapterState(await adapter.repairWorkspace(selectedWorkspace.id))
+        const state = recheckObservedHead
+          ? await adapter.recheckWorkspace(selectedWorkspace.id, true)
+          : await adapter.repairWorkspace!(selectedWorkspace.id)
+        applyAdapterState(state)
+        const repaired = state.workspaces.find(
+          (workspace) => workspace.id === selectedWorkspace.id,
+        )
+        if (repaired?.health !== "ready") {
+          return {
+            ok: false,
+            errorCode: `WORKSPACE-REPOSITORY-${repaired?.health ?? "unreadable"}`,
+          }
+        }
         setNotice(null)
         return { ok: true }
       } catch (error) {
@@ -1076,6 +1274,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     pendingWorkspaceTransition,
     pickAttachments,
     history,
+    lastSummary,
     reducedMotion,
     repairSelectedWorkspace,
     confirmWorkspaceTransition,
@@ -1088,6 +1287,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     selectedDraft,
     selectedWorkspace,
     selectedWorkspaceId,
+    saveTimelineAnchor,
     sendTurn,
     setActiveTab,
     setCharacterHidden,
@@ -1102,6 +1302,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     settingsSection,
     stopTurn,
     timeline: combinedTimeline,
+    timelineAnchor,
     turnState,
     workspaces,
     workspaceAction,

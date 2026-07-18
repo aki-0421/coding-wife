@@ -11,7 +11,9 @@ import {
   type WorkspaceHistoryCommand,
   type WorkspaceHistoryRequestMap,
   type WorkspaceHistoryResponseMap,
+  type WorkspaceLastSummary,
   type WorkspaceStateSnapshot,
+  type WorkspaceTimelineAnchor,
 } from "@/lib/contracts/workspace-history"
 import {
   parseCharacterContext,
@@ -126,6 +128,8 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     WorkspaceEditableContext
   >()
   private readonly events = new Map<string, PersistedTimelineEvent[]>()
+  private readonly lastSummaries = new Map<string, WorkspaceLastSummary>()
+  private readonly timelineAnchors = new Map<string, WorkspaceTimelineAnchor>()
   private readonly requestWorkspaces = new Map<string, string>()
   private readonly deleteTokens = new Map<string, string>()
   private clock = 180
@@ -193,6 +197,13 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
             .workspaceId,
           command,
         )
+      case workspaceHistoryCommands.recheck:
+        this.workspace(
+          (request as WorkspaceHistoryRequestMap["workspace_recheck"])
+            .workspaceId,
+          command,
+        )
+        return this.state()
       case workspaceHistoryCommands.repair:
         return this.repair(
           (request as WorkspaceHistoryRequestMap["workspace_repair"])
@@ -214,6 +225,10 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       case workspaceHistoryCommands.saveDraft:
         return this.saveDraft(
           request as WorkspaceHistoryRequestMap["workspace_save_draft"],
+        )
+      case workspaceHistoryCommands.saveTimelineAnchor:
+        return this.saveTimelineAnchor(
+          request as WorkspaceHistoryRequestMap["workspace_save_timeline_anchor"],
         )
       case workspaceHistoryCommands.saveContextSnapshot:
         return this.saveContext(
@@ -294,6 +309,18 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
               limit: 200,
               search: null,
             }),
+      resumeState:
+        active === undefined ||
+        (!this.lastSummaries.has(active.workspaceId) &&
+          !this.timelineAnchors.has(active.workspaceId))
+          ? null
+          : {
+              schemaVersion: 1,
+              workspaceId: active.workspaceId,
+              lastSummary: this.lastSummaries.get(active.workspaceId) ?? null,
+              timelineAnchor:
+                this.timelineAnchors.get(active.workspaceId) ?? null,
+            },
     }
   }
 
@@ -517,6 +544,40 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     return draft
   }
 
+  private saveTimelineAnchor(
+    request: WorkspaceHistoryRequestMap["workspace_save_timeline_anchor"],
+  ): WorkspaceTimelineAnchor {
+    this.workspace(
+      request.workspaceId,
+      workspaceHistoryCommands.saveTimelineAnchor,
+    )
+    const exact = (this.events.get(request.workspaceId) ?? []).some(
+      (event) =>
+        event.eventId === request.eventId &&
+        event.sequence === request.sequence,
+    )
+    if (!exact) {
+      throw this.error(
+        "WORKSPACE-TIMELINE-ANCHOR-STALE",
+        workspaceHistoryCommands.saveTimelineAnchor,
+        true,
+      )
+    }
+    const current = this.timelineAnchors.get(request.workspaceId)
+    const anchor: WorkspaceTimelineAnchor = {
+      schemaVersion: 1,
+      workspaceId: request.workspaceId,
+      eventId: request.eventId,
+      sequence: request.sequence,
+      offset: request.offset,
+      revision: (current?.revision ?? 0) + 1,
+      updatedAt: this.timestamp(),
+      wasClamped: false,
+    }
+    this.timelineAnchors.set(request.workspaceId, anchor)
+    return anchor
+  }
+
   private async saveContext(
     request: WorkspaceHistoryRequestMap["workspace_save_context_snapshot"],
   ): Promise<PersistedContextSnapshot> {
@@ -720,6 +781,8 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     this.contexts.delete(request.workspaceId)
     this.editableContexts.delete(request.workspaceId)
     this.events.delete(request.workspaceId)
+    this.lastSummaries.delete(request.workspaceId)
+    this.timelineAnchors.delete(request.workspaceId)
     this.activeWorkspaceId =
       this.activeWorkspaceId === request.workspaceId
         ? (this.workspaces[0]?.workspaceId ?? "")
@@ -746,6 +809,20 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       request.occurredAt,
     )
     this.pushEvent(parsePersistedTimelineEvent(event))
+    if (
+      event.producer === "code" &&
+      event.kind === "code.message.completed" &&
+      typeof event.payload.text === "string"
+    ) {
+      this.lastSummaries.set(request.workspaceId, {
+        schemaVersion: 1,
+        workspaceId: request.workspaceId,
+        eventId: event.eventId,
+        sequence: event.sequence,
+        text: event.payload.text,
+        updatedAt: event.occurredAt,
+      })
+    }
     return { schemaVersion: 1, sequence: event.sequence, inserted: true }
   }
 

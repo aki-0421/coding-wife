@@ -7,6 +7,7 @@ import {
   FolderSearchIcon,
   GitBranchIcon,
   LoaderCircleIcon,
+  RefreshCwIcon,
   TriangleAlertIcon,
   WifiOffIcon,
 } from "lucide-react"
@@ -142,6 +143,7 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
     props.workspace.lifecycle === "done"
   const repairDisabled = busy || !props.canRepair || props.turnActive
   const unregisterDisabled = busy || !props.canUnregister || props.turnActive
+  const recheckRepository = props.workspace.health === "stale_branch"
 
   const closeConfirmation = () => setConfirmation(null)
   const completeCancel = async () => {
@@ -208,13 +210,23 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
               type="button"
               variant="ghost"
             >
-              <FolderSearchIcon className="size-3 shrink-0" />
+              {recheckRepository ? (
+                <RefreshCwIcon className="size-3 shrink-0" />
+              ) : (
+                <FolderSearchIcon className="size-3 shrink-0" />
+              )}
               <span className="flex min-w-0 flex-col items-start">
-                <span>{props.copy.workspaceMenu.repair}</span>
+                <span>
+                  {recheckRepository
+                    ? props.copy.workspaceMenu.recheckRepository
+                    : props.copy.workspaceMenu.repair}
+                </span>
                 <span className="whitespace-normal text-caption font-normal text-muted-foreground">
                   {props.turnActive
                     ? props.copy.workspaceMenu.runningBlocked
-                    : props.copy.workspaceMenu.repairDescription}
+                    : recheckRepository
+                      ? props.copy.workspaceMenu.recheckDescription
+                      : props.copy.workspaceMenu.repairDescription}
                 </span>
               </span>
             </Button>

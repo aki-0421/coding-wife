@@ -7,10 +7,11 @@ use super::types::{
     WorkspaceCommandError, WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeRequest,
     WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView,
     WorkspaceEditableContext, WorkspaceLoadEditableContextRequest, WorkspacePickResponse,
-    WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
-    WorkspaceSaveProjectContextRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
-    WorkspaceSummary, WorkspaceTimelineRequest, WorkspaceTurnContextSnapshot,
-    WorkspaceUpdateLifecycleRequest,
+    WorkspaceRecheckRequest, WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest,
+    WorkspaceSaveDraftRequest, WorkspaceSaveProjectContextRequest,
+    WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
+    WorkspaceSummary, WorkspaceTimelineAnchorView, WorkspaceTimelineRequest,
+    WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
 };
 
 #[tauri::command]
@@ -41,6 +42,14 @@ pub async fn workspace_select(
     service: State<'_, WorkspaceHistoryService>,
 ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
     service.select(request).await
+}
+
+#[tauri::command]
+pub async fn workspace_recheck(
+    request: WorkspaceRecheckRequest,
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+    service.recheck(request).await
 }
 
 #[tauri::command]
@@ -81,6 +90,14 @@ pub async fn workspace_save_draft(
     service: State<'_, WorkspaceHistoryService>,
 ) -> Result<WorkspaceDraftView, WorkspaceCommandError> {
     service.save_draft(request).await
+}
+
+#[tauri::command]
+pub async fn workspace_save_timeline_anchor(
+    request: WorkspaceSaveTimelineAnchorRequest,
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspaceTimelineAnchorView, WorkspaceCommandError> {
+    service.save_timeline_anchor(request).await
 }
 
 #[tauri::command]

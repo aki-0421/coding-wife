@@ -42,18 +42,20 @@ use super::types::{
     HistoryStatus, NormalizedDomainEvent, ProjectContext, ReasoningEffort, TimelineEventView,
     TimelinePage, VersionedCharacterContext, VersionedProjectContext, WorkspaceAttention,
     WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth, WorkspaceHistoryError,
-    WorkspaceLifecycle, WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTurnContextSnapshot,
+    WorkspaceLastSummaryView, WorkspaceLifecycle, WorkspaceResumeStateView, WorkspaceStateSnapshot,
+    WorkspaceSummary, WorkspaceTimelineAnchorView, WorkspaceTurnContextSnapshot,
     DOMAIN_EVENT_SCHEMA_VERSION, WORKSPACE_CONTEXT_SCHEMA_VERSION,
-    WORKSPACE_HISTORY_SCHEMA_VERSION,
+    WORKSPACE_HISTORY_SCHEMA_VERSION, WORKSPACE_RESUME_STATE_SCHEMA_VERSION,
 };
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
-const CURRENT_DATABASE_VERSION: i64 = 4;
+const CURRENT_DATABASE_VERSION: i64 = 5;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
 const MAX_TIMELINE_PAGE: u32 = 200;
 const MAX_WORKSPACES: i64 = 200;
+const MAX_TIMELINE_ANCHOR_OFFSET: i64 = 1_000_000;
 const DELETE_TOKEN_TTL: Duration = Duration::from_secs(60);
 
 const WORKSPACE_SELECT: &str = r#"
@@ -205,6 +207,38 @@ CREATE INDEX IF NOT EXISTS idx_projects_registered
   ON projects(registered, updated_at DESC);
 "#;
 
+const MIGRATION_5: &str = r#"
+CREATE TABLE IF NOT EXISTS workspace_resume_states (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  last_summary_event_id TEXT,
+  last_summary_sequence INTEGER CHECK (last_summary_sequence >= 1),
+  last_summary_text TEXT,
+  last_summary_updated_at TEXT,
+  timeline_anchor_event_id TEXT,
+  timeline_anchor_sequence INTEGER CHECK (timeline_anchor_sequence >= 1),
+  timeline_anchor_offset INTEGER,
+  timeline_anchor_revision INTEGER NOT NULL DEFAULT 0 CHECK (timeline_anchor_revision >= 0),
+  timeline_anchor_updated_at TEXT,
+  CHECK (
+    (last_summary_event_id IS NULL AND last_summary_sequence IS NULL AND
+      last_summary_text IS NULL AND last_summary_updated_at IS NULL) OR
+    (last_summary_event_id IS NOT NULL AND last_summary_sequence IS NOT NULL AND
+      last_summary_text IS NOT NULL AND last_summary_updated_at IS NOT NULL)
+  ),
+  CHECK (
+    (timeline_anchor_event_id IS NULL AND timeline_anchor_sequence IS NULL AND
+      timeline_anchor_offset IS NULL AND timeline_anchor_updated_at IS NULL) OR
+    (timeline_anchor_event_id IS NOT NULL AND timeline_anchor_sequence IS NOT NULL AND
+      timeline_anchor_offset IS NOT NULL AND timeline_anchor_updated_at IS NOT NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_resume_summary_sequence
+  ON workspace_resume_states(workspace_id, last_summary_sequence);
+CREATE INDEX IF NOT EXISTS idx_resume_anchor_sequence
+  ON workspace_resume_states(workspace_id, timeline_anchor_sequence);
+"#;
+
 #[derive(Debug)]
 struct StoreInner {
     connection: Connection,
@@ -303,6 +337,7 @@ impl WorkspaceHistoryStore {
                         (2, MIGRATION_2),
                         (3, MIGRATION_3),
                         (4, MIGRATION_4),
+                        (5, MIGRATION_5),
                     ],
                 )
                 .map_err(|_| history_error("HIST-RECOVERY-SCHEMA", false))?;
@@ -1143,6 +1178,65 @@ impl WorkspaceHistoryStore {
         draft_by_workspace(&inner.connection, workspace_id)
     }
 
+    pub fn save_timeline_anchor(
+        &self,
+        workspace_id: &str,
+        event_id: &str,
+        sequence: u64,
+        offset: i64,
+    ) -> Result<WorkspaceTimelineAnchorView, WorkspaceHistoryError> {
+        validate_workspace_id(workspace_id)?;
+        validate_opaque_id(event_id, "HIST-EVENT-ID")?;
+        if sequence == 0
+            || sequence > i64::MAX as u64
+            || offset.unsigned_abs() > MAX_TIMELINE_ANCHOR_OFFSET as u64
+        {
+            return Err(history_error("WORKSPACE-TIMELINE-ANCHOR-INVALID", false));
+        }
+        self.ensure_writable("workspace.save_timeline_anchor")?;
+        let mut inner = self.lock();
+        let transaction = inner
+            .connection
+            .transaction()
+            .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
+        let event_exists = transaction
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM domain_events
+                   WHERE workspace_id = ?1 AND event_id = ?2 AND sequence = ?3
+                 )",
+                params![workspace_id, event_id, sequence as i64],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|_| history_error("HIST-EVENT-LOOKUP", true))?
+            != 0;
+        if !event_exists {
+            return Err(history_error("WORKSPACE-TIMELINE-ANCHOR-STALE", true));
+        }
+        let updated_at = now();
+        transaction
+            .execute(
+                "INSERT INTO workspace_resume_states (
+                   workspace_id, timeline_anchor_event_id, timeline_anchor_sequence,
+                   timeline_anchor_offset, timeline_anchor_revision, timeline_anchor_updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                 ON CONFLICT(workspace_id) DO UPDATE SET
+                   timeline_anchor_event_id = excluded.timeline_anchor_event_id,
+                   timeline_anchor_sequence = excluded.timeline_anchor_sequence,
+                   timeline_anchor_offset = excluded.timeline_anchor_offset,
+                   timeline_anchor_revision = workspace_resume_states.timeline_anchor_revision + 1,
+                   timeline_anchor_updated_at = excluded.timeline_anchor_updated_at",
+                params![workspace_id, event_id, sequence as i64, offset, updated_at],
+            )
+            .map_err(|_| history_error("HIST-TIMELINE-ANCHOR-WRITE", true))?;
+        let anchor = timeline_anchor_by_workspace(&transaction, workspace_id)?
+            .ok_or_else(|| history_error("HIST-TIMELINE-ANCHOR-READ", true))?;
+        transaction
+            .commit()
+            .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
+        Ok(anchor)
+    }
+
     pub fn load_editable_context(
         &self,
         workspace_id: &str,
@@ -1481,10 +1575,15 @@ impl WorkspaceHistoryStore {
             .map(|id| contexts_by_workspace(&inner.connection, id))
             .transpose()?
             .unwrap_or_default();
+        let resume_state = active_workspace_id
+            .as_deref()
+            .map(|id| resume_state_by_workspace(&inner.connection, id))
+            .transpose()?
+            .flatten();
         drop(inner);
         let timeline = active_workspace_id
             .as_deref()
-            .map(|id| self.timeline(id, None, 200, None))
+            .map(|id| self.timeline(id, None, MAX_TIMELINE_PAGE, None))
             .transpose()?
             .unwrap_or(TimelinePage {
                 schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
@@ -1499,6 +1598,7 @@ impl WorkspaceHistoryStore {
             draft,
             context_snapshots,
             timeline,
+            resume_state,
         })
     }
 
@@ -1506,6 +1606,23 @@ impl WorkspaceHistoryStore {
         &self,
         workspace_id: &str,
         result: Result<&GitRepositoryIdentity, WorkspaceHealth>,
+    ) -> Result<WorkspaceHealth, WorkspaceHistoryError> {
+        self.update_preflight_observation(workspace_id, result, false)
+    }
+
+    pub fn accept_preflight(
+        &self,
+        workspace_id: &str,
+        git: &GitRepositoryIdentity,
+    ) -> Result<WorkspaceHealth, WorkspaceHistoryError> {
+        self.update_preflight_observation(workspace_id, Ok(git), true)
+    }
+
+    fn update_preflight_observation(
+        &self,
+        workspace_id: &str,
+        result: Result<&GitRepositoryIdentity, WorkspaceHealth>,
+        accept_observed_head: bool,
     ) -> Result<WorkspaceHealth, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
         self.ensure_writable("workspace.restore_preflight")?;
@@ -1526,16 +1643,47 @@ impl WorkspaceHistoryStore {
         let now = now();
         let health = match result {
             Ok(git) => {
-                let (prior_identity, prior_branch) = transaction
+                let (
+                    prior_identity,
+                    prior_root_device,
+                    prior_root_inode,
+                    prior_git_device,
+                    prior_git_inode,
+                    prior_branch,
+                    prior_head,
+                    prior_detached,
+                ) = transaction
                     .query_row(
-                        "SELECT project_identity, branch FROM projects WHERE id = ?1",
+                        "SELECT project_identity, root_device, root_inode,
+                                git_device, git_inode, branch, head, detached
+                         FROM projects WHERE id = ?1",
                         params![project_id],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, i64>(1)? as u64,
+                                row.get::<_, i64>(2)? as u64,
+                                row.get::<_, i64>(3)? as u64,
+                                row.get::<_, i64>(4)? as u64,
+                                row.get::<_, String>(5)?,
+                                row.get::<_, String>(6)?,
+                                row.get::<_, i64>(7)? != 0,
+                            ))
+                        },
                     )
                     .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))?;
-                let health = if prior_identity != git.project_identity {
+                let health = if prior_identity != git.project_identity
+                    || prior_root_device != git.root_device
+                    || prior_root_inode != git.root_inode
+                    || prior_git_device != git.git_device
+                    || prior_git_inode != git.git_inode
+                {
                     WorkspaceHealth::Changed
-                } else if prior_branch != git.branch {
+                } else if !accept_observed_head
+                    && (prior_branch != git.branch
+                        || prior_head != git.head
+                        || prior_detached != git.detached)
+                {
                     WorkspaceHealth::StaleBranch
                 } else {
                     WorkspaceHealth::Ready
@@ -1677,6 +1825,7 @@ fn open_configured_connection(
             (2, MIGRATION_2),
             (3, MIGRATION_3),
             (4, MIGRATION_4),
+            (5, MIGRATION_5),
         ],
     )?;
     if status.mode == HistoryMode::Ready {
@@ -2098,6 +2247,40 @@ fn append_event_in_transaction(
                     params![status, now(), session_id],
                 )
                 .map_err(|_| history_error("HIST-SESSION-STATUS-WRITE", true))?;
+        }
+    }
+    if event.producer == "code" && event.kind == "code.message.completed" {
+        let text = sanitized
+            .get("text")
+            .and_then(Value::as_str)
+            .ok_or_else(|| history_error("HIST-EVENT-PAYLOAD", false))?;
+        transaction
+            .execute(
+                "INSERT INTO workspace_resume_states (
+                   workspace_id, last_summary_event_id, last_summary_sequence,
+                   last_summary_text, last_summary_updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(workspace_id) DO UPDATE SET
+                   last_summary_event_id = excluded.last_summary_event_id,
+                   last_summary_sequence = excluded.last_summary_sequence,
+                   last_summary_text = excluded.last_summary_text,
+                   last_summary_updated_at = excluded.last_summary_updated_at",
+                params![
+                    event.workspace_id,
+                    event.event_id,
+                    sequence,
+                    text,
+                    event.occurred_at,
+                ],
+            )
+            .map_err(|_| history_error("HIST-LAST-SUMMARY-WRITE", true))?;
+        if let Some(session_id) = event.session_id.as_deref() {
+            transaction
+                .execute(
+                    "UPDATE sessions SET last_summary = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![text, event.occurred_at, session_id],
+                )
+                .map_err(|_| history_error("HIST-LAST-SUMMARY-WRITE", true))?;
         }
     }
     Ok(AppendEventResult {
@@ -3042,6 +3225,123 @@ fn draft_by_workspace(
         .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))
 }
 
+fn timeline_anchor_by_workspace(
+    connection: &Connection,
+    workspace_id: &str,
+) -> Result<Option<WorkspaceTimelineAnchorView>, WorkspaceHistoryError> {
+    let stored = connection
+        .query_row(
+            "SELECT timeline_anchor_event_id, timeline_anchor_sequence,
+                    timeline_anchor_offset, timeline_anchor_revision,
+                    timeline_anchor_updated_at
+             FROM workspace_resume_states WHERE workspace_id = ?1",
+            params![workspace_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-TIMELINE-ANCHOR-READ", true))?;
+    let Some((Some(event_id), Some(sequence), Some(offset), revision, Some(updated_at))) = stored
+    else {
+        return Ok(None);
+    };
+    if sequence < 1 || revision < 0 || offset.unsigned_abs() > MAX_TIMELINE_ANCHOR_OFFSET as u64 {
+        return Err(history_error("HIST-TIMELINE-ANCHOR-DECODE", false));
+    }
+    let exact = connection
+        .query_row(
+            "SELECT event_id, sequence FROM domain_events
+             WHERE workspace_id = ?1 AND event_id = ?2 AND sequence = ?3",
+            params![workspace_id, event_id, sequence],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-EVENT-LOOKUP", true))?;
+    let (event_id, sequence, was_clamped) = if let Some((event_id, sequence)) = exact {
+        (event_id, sequence, false)
+    } else {
+        let nearest = connection
+            .query_row(
+                "SELECT event_id, sequence FROM domain_events
+                 WHERE workspace_id = ?1
+                 ORDER BY ABS(sequence - ?2) ASC, sequence ASC, event_id ASC LIMIT 1",
+                params![workspace_id, sequence],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-EVENT-LOOKUP", true))?;
+        let Some((event_id, sequence)) = nearest else {
+            return Ok(None);
+        };
+        (event_id, sequence, true)
+    };
+    Ok(Some(WorkspaceTimelineAnchorView {
+        schema_version: WORKSPACE_RESUME_STATE_SCHEMA_VERSION,
+        workspace_id: workspace_id.to_owned(),
+        event_id,
+        sequence: sequence as u64,
+        offset,
+        revision: revision as u64,
+        updated_at,
+        was_clamped,
+    }))
+}
+
+fn resume_state_by_workspace(
+    connection: &Connection,
+    workspace_id: &str,
+) -> Result<Option<WorkspaceResumeStateView>, WorkspaceHistoryError> {
+    let summary = connection
+        .query_row(
+            "SELECT last_summary_event_id, last_summary_sequence,
+                    last_summary_text, last_summary_updated_at
+             FROM workspace_resume_states WHERE workspace_id = ?1",
+            params![workspace_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-RESUME-STATE-READ", true))?
+        .and_then(|(event_id, sequence, text, updated_at)| {
+            match (event_id, sequence, text, updated_at) {
+                (Some(event_id), Some(sequence), Some(text), Some(updated_at)) if sequence >= 1 => {
+                    Some(WorkspaceLastSummaryView {
+                        schema_version: WORKSPACE_RESUME_STATE_SCHEMA_VERSION,
+                        workspace_id: workspace_id.to_owned(),
+                        event_id,
+                        sequence: sequence as u64,
+                        text,
+                        updated_at,
+                    })
+                }
+                _ => None,
+            }
+        });
+    let timeline_anchor = timeline_anchor_by_workspace(connection, workspace_id)?;
+    if summary.is_none() && timeline_anchor.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(WorkspaceResumeStateView {
+        schema_version: WORKSPACE_RESUME_STATE_SCHEMA_VERSION,
+        workspace_id: workspace_id.to_owned(),
+        last_summary: summary,
+        timeline_anchor,
+    }))
+}
+
 fn context_by_id(
     connection: &Connection,
     snapshot_id: &str,
@@ -3822,6 +4122,275 @@ mod tests {
                 .health,
             WorkspaceHealth::StaleBranch
         );
+        assert_eq!(
+            store
+                .accept_preflight(&workspace_id, &changed.git)
+                .expect("acknowledge observed branch"),
+            WorkspaceHealth::Ready
+        );
+        let accepted = store
+            .snapshot(Some(&workspace_id))
+            .expect("accepted branch");
+        assert_eq!(accepted.workspaces[0].branch, "outside-app");
+        assert_eq!(accepted.workspaces[0].health, WorkspaceHealth::Ready);
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn preflight_reports_a_head_change_on_the_same_branch_without_mutating_git() {
+        let data = temp_directory("history-stale-head");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let workspace_id = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace
+            .workspace_id;
+        fs::write(root.join("README.md"), "external commit\n").expect("source fixture");
+        for arguments in [
+            vec!["-C", root.to_str().expect("root"), "add", "README.md"],
+            vec![
+                "-C",
+                root.to_str().expect("root"),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "external commit",
+            ],
+        ] {
+            assert!(std::process::Command::new("/usr/bin/git")
+                .args(arguments)
+                .status()
+                .expect("git fixture command")
+                .success());
+        }
+        let changed = candidate(&root).await;
+        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before observation");
+        let status_before = git_status(&root);
+
+        assert_eq!(
+            store
+                .update_preflight(&workspace_id, Ok(&changed.git))
+                .expect("head preflight"),
+            WorkspaceHealth::StaleBranch
+        );
+        let stale = store.snapshot(Some(&workspace_id)).expect("stale snapshot");
+        assert_eq!(stale.workspaces[0].head, "unborn");
+        assert_eq!(stale.workspaces[0].health, WorkspaceHealth::StaleBranch);
+        assert_eq!(
+            store
+                .accept_preflight(&workspace_id, &changed.git)
+                .expect("accept observed HEAD"),
+            WorkspaceHealth::Ready
+        );
+        assert_eq!(
+            store
+                .snapshot(Some(&workspace_id))
+                .expect("ready snapshot")
+                .workspaces[0]
+                .head,
+            changed.git.head
+        );
+        assert_eq!(
+            fs::read(root.join(".git/HEAD")).expect("HEAD after observation"),
+            head_before
+        );
+        assert_eq!(git_status(&root), status_before);
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn summaries_and_anchors_restart_for_twenty_workspaces_without_cross_contamination() {
+        let data = temp_directory("history-resume-state");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let first = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace;
+        let mut workspace_ids = vec![first.workspace_id.clone()];
+        for index in 1..20 {
+            workspace_ids.push(
+                store
+                    .create_session_workspace(
+                        &first.workspace_id,
+                        &format!("Workspace {index}"),
+                        "",
+                        &format!("request-resume-{index}"),
+                    )
+                    .expect("create workspace")
+                    .workspace
+                    .workspace_id,
+            );
+        }
+        for (index, workspace_id) in workspace_ids.iter().enumerate() {
+            let event_id = format!("event-summary-{index}");
+            let summary = format!("Summary for workspace {index}");
+            let result = store
+                .append_event(&NormalizedDomainEvent {
+                    schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+                    event_id: event_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                    session_id: None,
+                    producer: "code".to_owned(),
+                    kind: "code.message.completed".to_owned(),
+                    occurred_at: format!("2026-07-18T00:{index:02}:00.000Z"),
+                    payload: json!({
+                        "semanticVersion": 1,
+                        "generation": 1,
+                        "sourceSequence": index as u64 + 1,
+                        "itemHandle": format!("item-{index}"),
+                        "text": summary,
+                    }),
+                })
+                .expect("append summary");
+            let anchor = store
+                .save_timeline_anchor(workspace_id, &event_id, result.sequence, index as i64 - 10)
+                .expect("save anchor");
+            assert_eq!(anchor.workspace_id, *workspace_id);
+            assert_eq!(anchor.revision, 1);
+            assert!(!anchor.was_clamped);
+        }
+        drop(store);
+
+        let reopened = WorkspaceHistoryStore::open(&data).expect("reopen store");
+        for (index, workspace_id) in workspace_ids.iter().enumerate() {
+            let snapshot = reopened
+                .snapshot(Some(workspace_id))
+                .expect("workspace resume snapshot");
+            let resume = snapshot.resume_state.expect("resume state");
+            assert_eq!(resume.workspace_id, *workspace_id);
+            let summary = resume.last_summary.expect("last summary");
+            assert_eq!(summary.workspace_id, *workspace_id);
+            assert_eq!(summary.event_id, format!("event-summary-{index}"));
+            assert_eq!(summary.text, format!("Summary for workspace {index}"));
+            let anchor = resume.timeline_anchor.expect("timeline anchor");
+            assert_eq!(anchor.workspace_id, *workspace_id);
+            assert_eq!(anchor.event_id, format!("event-summary-{index}"));
+            assert_eq!(anchor.offset, index as i64 - 10);
+            assert!(!anchor.was_clamped);
+            assert!(snapshot
+                .timeline
+                .items
+                .iter()
+                .all(|event| event.workspace_id == *workspace_id));
+        }
+
+        let clamped_workspace = &workspace_ids[0];
+        {
+            let inner = reopened.lock();
+            inner
+                .connection
+                .execute(
+                    "DELETE FROM domain_events WHERE workspace_id = ?1 AND event_id = ?2",
+                    params![clamped_workspace, "event-summary-0"],
+                )
+                .expect("simulate retention");
+        }
+        let clamped = reopened
+            .snapshot(Some(clamped_workspace))
+            .expect("clamped snapshot")
+            .resume_state
+            .expect("resume state")
+            .timeline_anchor
+            .expect("clamped anchor");
+        assert!(clamped.was_clamped);
+        assert_eq!(clamped.sequence, 1);
+        assert_ne!(clamped.event_id, "event-summary-0");
+        assert_eq!(
+            reopened
+                .snapshot(Some(&workspace_ids[1]))
+                .expect("unaffected workspace")
+                .resume_state
+                .expect("unaffected resume")
+                .timeline_anchor
+                .expect("unaffected anchor")
+                .event_id,
+            "event-summary-1"
+        );
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn restart_keeps_an_anchor_outside_the_latest_page_for_bounded_pagination() {
+        let data = temp_directory("history-anchor-pagination");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let workspace_id = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace
+            .workspace_id;
+        let mut anchor_sequence = 0;
+        for index in 0..225 {
+            let event_id = format!("event-page-{index}");
+            let appended = store
+                .append_event(&NormalizedDomainEvent {
+                    schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+                    event_id: event_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                    session_id: None,
+                    producer: "code".to_owned(),
+                    kind: "code.message.completed".to_owned(),
+                    occurred_at: "2026-07-18T00:00:00.000Z".to_owned(),
+                    payload: json!({
+                        "semanticVersion": 1,
+                        "generation": 1,
+                        "sourceSequence": index + 1,
+                        "itemHandle": format!("item-page-{index}"),
+                        "text": format!("Page summary {index}"),
+                    }),
+                })
+                .expect("append paged event");
+            if index == 0 {
+                anchor_sequence = appended.sequence;
+                store
+                    .save_timeline_anchor(&workspace_id, &event_id, appended.sequence, 17)
+                    .expect("save old anchor");
+            }
+        }
+
+        let snapshot = store.snapshot(Some(&workspace_id)).expect("snapshot");
+        assert_eq!(snapshot.timeline.items.len(), MAX_TIMELINE_PAGE as usize);
+        assert!(!snapshot
+            .timeline
+            .items
+            .iter()
+            .any(|event| event.event_id == "event-page-0"));
+        let cursor = snapshot
+            .timeline
+            .next_before_sequence
+            .expect("older page cursor");
+        let anchor = snapshot
+            .resume_state
+            .expect("resume state")
+            .timeline_anchor
+            .expect("timeline anchor");
+        assert_eq!(anchor.event_id, "event-page-0");
+        assert_eq!(anchor.sequence, anchor_sequence);
+        assert!(!anchor.was_clamped);
+
+        let older = store
+            .timeline(&workspace_id, Some(cursor), MAX_TIMELINE_PAGE, None)
+            .expect("older page");
+        assert!(older
+            .items
+            .iter()
+            .any(|event| event.event_id == "event-page-0"));
+        assert!(older
+            .items
+            .iter()
+            .all(|event| event.workspace_id == workspace_id));
 
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
@@ -4799,7 +5368,7 @@ mod tests {
     }
 
     #[test]
-    fn version_two_migrates_private_reference_manifest_and_registration_columns() {
+    fn legacy_versions_migrate_resume_state_and_registration_columns() {
         let connection = Connection::open_in_memory().expect("memory database");
         configure_connection(&connection).expect("configure");
         apply_migrations(&connection, &[(1, MIGRATION_1), (2, MIGRATION_2)])
@@ -4860,6 +5429,36 @@ mod tests {
                 )
                 .expect("registered column"),
             1
+        );
+
+        apply_migrations(
+            &connection,
+            &[
+                (1, MIGRATION_1),
+                (2, MIGRATION_2),
+                (3, MIGRATION_3),
+                (4, MIGRATION_4),
+                (5, MIGRATION_5),
+            ],
+        )
+        .expect("version five schema");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version five"),
+            5
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('workspace_resume_states')
+                     WHERE name IN ('last_summary_event_id', 'timeline_anchor_event_id',
+                                    'timeline_anchor_sequence', 'timeline_anchor_offset')",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("resume state columns"),
+            4
         );
     }
 

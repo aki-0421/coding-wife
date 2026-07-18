@@ -26,6 +26,7 @@ import type {
   WorkspaceAdapterState,
   WorkspaceCodexState,
   WorkspaceDraft,
+  WorkspaceRecord,
   WorkspaceTimelineItem,
 } from "@/features/workspace-view/types"
 import type { ApprovalDecision, PendingRequestView } from "@/lib/contracts"
@@ -41,10 +42,16 @@ interface ChatViewProps {
   readonly muted: boolean
   readonly reducedMotion: boolean
   readonly readiness: WorkspaceCodexState["readiness"]
+  readonly repositoryHealth?: WorkspaceRecord["health"]
   readonly renderer?: CharacterStageRenderer | undefined
   readonly runtimeError: boolean
   readonly turnState: TurnUiState
   readonly timeline: readonly WorkspaceTimelineItem[]
+  readonly timelineAnchor?: {
+    readonly eventId: string
+    readonly sequence: number
+    readonly offset: number
+  } | null
   readonly pendingRequestIds: readonly string[]
   readonly workspaceId: string
   readonly onAddAttachments: (files: readonly File[]) => void
@@ -76,14 +83,33 @@ interface ChatViewProps {
   readonly onRetryCharacter: () => void
   readonly onSend: () => Promise<boolean>
   readonly onStop: () => boolean | void | Promise<boolean | void>
+  readonly onTimelineAnchorChange?: (
+    eventId: string,
+    sequence: number,
+    offset: number,
+  ) => void
 }
 
 interface TimelineScrollAnchor {
+  readonly eventId: string
   readonly sequence: number
   readonly offsetFromViewportTop: number
 }
 
 const timelineScrollAnchors = new Map<string, TimelineScrollAnchor>()
+
+function durableTimelineIdentity(
+  event: WorkspaceTimelineItem,
+): { readonly eventId: string; readonly sequence: number } | null {
+  if (event.kind === "history") {
+    return { eventId: event.id, sequence: event.sequence }
+  }
+  if (!event.durable) return null
+  return {
+    eventId: event.sourceEventId,
+    sequence: event.sourceSequence,
+  }
+}
 
 function timelineRows(viewport: HTMLElement): readonly HTMLElement[] {
   return Array.from(
@@ -103,8 +129,17 @@ function captureTimelineAnchor(
       : nearest,
   )
   const sequence = Number(row.dataset.eventSequence)
-  if (!Number.isSafeInteger(sequence) || sequence < 0) return null
+  const eventId = row.dataset.eventId
+  if (
+    eventId === undefined ||
+    eventId.length === 0 ||
+    !Number.isSafeInteger(sequence) ||
+    sequence < 1
+  ) {
+    return null
+  }
   return {
+    eventId,
     sequence,
     offsetFromViewportTop: row.offsetTop - viewport.scrollTop,
   }
@@ -117,7 +152,9 @@ function restoreTimelineAnchor(
   const rows = timelineRows(viewport)
   if (rows.length === 0) return false
   const exact = rows.find(
-    (row) => Number(row.dataset.eventSequence) === anchor.sequence,
+    (row) =>
+      row.dataset.eventId === anchor.eventId &&
+      Number(row.dataset.eventSequence) === anchor.sequence,
   )
   const row =
     exact ??
@@ -141,10 +178,12 @@ export function ChatView({
   muted,
   reducedMotion,
   readiness,
+  repositoryHealth,
   renderer,
   runtimeError,
   turnState,
   timeline,
+  timelineAnchor,
   pendingRequestIds,
   workspaceId,
   onAddAttachments,
@@ -163,6 +202,7 @@ export function ChatView({
   onRetryCharacter,
   onSend,
   onStop,
+  onTimelineAnchorChange,
 }: ChatViewProps) {
   const narrationController = useNarrationController()
   const narration = useNarrationSnapshot()
@@ -170,6 +210,7 @@ export function ChatView({
   const previousTimelineLength = useRef(timeline.length)
   const previousTimelineWorkspace = useRef(workspaceId)
   const restoredAnchor = useRef(false)
+  const anchorSaveTimer = useRef<number | null>(null)
   const [scrollLocked, setScrollLocked] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const companionState = !connected
@@ -190,6 +231,16 @@ export function ChatView({
     presentation?.status === "preparing" ||
     presentation?.status === "streaming" ||
     presentation?.status === "ready"
+  const timelineAnchorAvailable =
+    timelineAnchor !== null &&
+    timelineAnchor !== undefined &&
+    timeline.some((event) => {
+      const identity = durableTimelineIdentity(event)
+      return (
+        identity?.eventId === timelineAnchor.eventId &&
+        identity.sequence === timelineAnchor.sequence
+      )
+    })
   const effectiveMuted = narration.settingsSnapshot?.settings.muted ?? muted
   const companionStateLabel =
     copy.character.semanticState[
@@ -228,7 +279,17 @@ export function ChatView({
       '[data-slot="scroll-area-viewport"]',
     )
     if (!viewport) return
-    const anchor = timelineScrollAnchors.get(workspaceId)
+    const persistedAnchor =
+      !timelineAnchorAvailable ||
+      timelineAnchor === null ||
+      timelineAnchor === undefined
+        ? undefined
+        : {
+            eventId: timelineAnchor.eventId,
+            sequence: timelineAnchor.sequence,
+            offsetFromViewportTop: timelineAnchor.offset,
+          }
+    const anchor = persistedAnchor ?? timelineScrollAnchors.get(workspaceId)
     const restored =
       anchor !== undefined && restoreTimelineAnchor(viewport, anchor)
     restoredAnchor.current = restored
@@ -243,7 +304,13 @@ export function ChatView({
       restoreTimelineAnchor(viewport, anchor)
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [workspaceId])
+  }, [
+    timelineAnchor?.eventId,
+    timelineAnchor?.offset,
+    timelineAnchor?.sequence,
+    timelineAnchorAvailable,
+    workspaceId,
+  ])
 
   useEffect(() => {
     const viewport = scrollRootRef.current?.querySelector<HTMLElement>(
@@ -252,7 +319,20 @@ export function ChatView({
     if (!viewport) return
     const updateLock = () => {
       const anchor = captureTimelineAnchor(viewport)
-      if (anchor !== null) timelineScrollAnchors.set(workspaceId, anchor)
+      if (anchor !== null) {
+        timelineScrollAnchors.set(workspaceId, anchor)
+        if (anchorSaveTimer.current !== null) {
+          window.clearTimeout(anchorSaveTimer.current)
+        }
+        anchorSaveTimer.current = window.setTimeout(() => {
+          anchorSaveTimer.current = null
+          onTimelineAnchorChange?.(
+            anchor.eventId,
+            anchor.sequence,
+            Math.round(anchor.offsetFromViewportTop),
+          )
+        }, 150)
+      }
       const distance =
         viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
       const locked = distance > 48
@@ -263,8 +343,12 @@ export function ChatView({
     updateLock()
     return () => {
       viewport.removeEventListener("scroll", updateLock)
+      if (anchorSaveTimer.current !== null) {
+        window.clearTimeout(anchorSaveTimer.current)
+        anchorSaveTimer.current = null
+      }
     }
-  }, [workspaceId])
+  }, [onTimelineAnchorChange, workspaceId])
 
   useEffect(() => {
     const viewport = scrollRootRef.current?.querySelector<HTMLElement>(
@@ -421,6 +505,7 @@ export function ChatView({
           onSend={onSend}
           onStop={onStop}
           readiness={readiness}
+          repositoryHealth={repositoryHealth}
           turnState={turnState}
         />
       </section>

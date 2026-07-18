@@ -69,7 +69,8 @@
         }
       ],
       "nextBeforeSequence": null
-    }
+    },
+    "resumeState": null
   },
   "summary": {
     "schemaVersion": 1,

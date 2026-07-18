@@ -21,6 +21,9 @@ const en = {
     cancelDescription: "Stop work and keep its history for review.",
     repair: "Reselect repository…",
     repairDescription: "Choose the repository again to repair local access.",
+    recheckRepository: "Recheck repository",
+    recheckDescription:
+      "Verify and use the branch and HEAD currently present on disk.",
     unregister: "Unregister project…",
     unregisterDescription: "Hide this project without deleting its history.",
     runningBlocked: "Unavailable while a turn is running.",
@@ -564,6 +567,9 @@ const ja: typeof en = {
     cancelDescription: "作業を止め、レビュー用の履歴は保持します。",
     repair: "リポジトリを再選択…",
     repairDescription: "リポジトリを選び直し、ローカルアクセスを修復します。",
+    recheckRepository: "リポジトリを再確認",
+    recheckDescription:
+      "現在のブランチとHEADを読み取り専用で確認し、明示的に使用します。",
     unregister: "プロジェクトの登録を解除…",
     unregisterDescription: "履歴を削除せず、プロジェクトを非表示にします。",
     runningBlocked: "ターンの実行中は操作できません。",

@@ -29,11 +29,13 @@ export const workspaceHistoryCommands = {
   pickRegister: "workspace_pick_register",
   createSession: "workspace_create_session",
   select: "workspace_select",
+  recheck: "workspace_recheck",
   repair: "workspace_repair",
   unregister: "workspace_unregister",
   updateLifecycle: "workspace_update_lifecycle",
   cancel: "workspace_cancel",
   saveDraft: "workspace_save_draft",
+  saveTimelineAnchor: "workspace_save_timeline_anchor",
   saveContextSnapshot: "workspace_save_context_snapshot",
   loadEditableContext: "workspace_load_editable_context",
   saveProjectContext: "workspace_save_project_context",
@@ -141,6 +143,33 @@ export interface PersistedTimelinePage {
   readonly nextBeforeSequence: number | null
 }
 
+export interface WorkspaceLastSummary {
+  readonly schemaVersion: 1
+  readonly workspaceId: string
+  readonly eventId: string
+  readonly sequence: number
+  readonly text: string
+  readonly updatedAt: string
+}
+
+export interface WorkspaceTimelineAnchor {
+  readonly schemaVersion: 1
+  readonly workspaceId: string
+  readonly eventId: string
+  readonly sequence: number
+  readonly offset: number
+  readonly revision: number
+  readonly updatedAt: string
+  readonly wasClamped: boolean
+}
+
+export interface WorkspaceResumeState {
+  readonly schemaVersion: 1
+  readonly workspaceId: string
+  readonly lastSummary: WorkspaceLastSummary | null
+  readonly timelineAnchor: WorkspaceTimelineAnchor | null
+}
+
 export interface WorkspaceStateSnapshot {
   readonly schemaVersion: typeof workspaceHistorySchemaVersion
   readonly history: WorkspaceHistoryStatus
@@ -149,6 +178,7 @@ export interface WorkspaceStateSnapshot {
   readonly draft: PersistedWorkspaceDraft | null
   readonly contextSnapshots: readonly PersistedContextSnapshot[]
   readonly timeline: PersistedTimelinePage
+  readonly resumeState: WorkspaceResumeState | null
 }
 
 export interface WorkspacePickResponse {
@@ -166,6 +196,10 @@ export interface WorkspaceCreateSessionRequest {
 
 export interface WorkspaceSelectRequest {
   readonly workspaceId: string
+}
+
+export interface WorkspaceRecheckRequest extends WorkspaceSelectRequest {
+  readonly acceptObservedHead: boolean
 }
 
 export type WorkspaceRepairRequest = WorkspaceSelectRequest
@@ -187,6 +221,13 @@ export interface WorkspaceSaveDraftRequest {
   readonly text: string
   readonly effort: WorkspaceReasoningEffort
   readonly expectedRevision: number
+}
+
+export interface WorkspaceSaveTimelineAnchorRequest {
+  readonly workspaceId: string
+  readonly eventId: string
+  readonly sequence: number
+  readonly offset: number
 }
 
 export interface WorkspaceSaveContextRequest {
@@ -247,11 +288,13 @@ export interface WorkspaceHistoryRequestMap {
   workspace_pick_register: undefined
   workspace_create_session: WorkspaceCreateSessionRequest
   workspace_select: WorkspaceSelectRequest
+  workspace_recheck: WorkspaceRecheckRequest
   workspace_repair: WorkspaceRepairRequest
   workspace_unregister: WorkspaceUnregisterRequest
   workspace_update_lifecycle: WorkspaceUpdateLifecycleRequest
   workspace_cancel: WorkspaceCancelRequest
   workspace_save_draft: WorkspaceSaveDraftRequest
+  workspace_save_timeline_anchor: WorkspaceSaveTimelineAnchorRequest
   workspace_save_context_snapshot: WorkspaceSaveContextRequest
   workspace_load_editable_context: WorkspaceLoadEditableContextRequest
   workspace_save_project_context: WorkspaceSaveProjectContextRequest
@@ -268,11 +311,13 @@ export interface WorkspaceHistoryResponseMap {
   workspace_pick_register: WorkspacePickResponse
   workspace_create_session: WorkspaceStateSnapshot
   workspace_select: WorkspaceStateSnapshot
+  workspace_recheck: WorkspaceStateSnapshot
   workspace_repair: WorkspaceStateSnapshot
   workspace_unregister: WorkspaceStateSnapshot
   workspace_update_lifecycle: PersistedWorkspaceSummary
   workspace_cancel: PersistedWorkspaceSummary
   workspace_save_draft: PersistedWorkspaceDraft
+  workspace_save_timeline_anchor: WorkspaceTimelineAnchor
   workspace_save_context_snapshot: PersistedContextSnapshot
   workspace_load_editable_context: WorkspaceEditableContext
   workspace_save_project_context: VersionedProjectContext
@@ -1025,6 +1070,124 @@ export function parsePersistedTimelinePage(
   }
 }
 
+export function parseWorkspaceLastSummary(
+  value: unknown,
+): WorkspaceLastSummary {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "schemaVersion",
+      "workspaceId",
+      "eventId",
+      "sequence",
+      "text",
+      "updatedAt",
+    ]) ||
+    value.schemaVersion !== 1 ||
+    !validatePublicString(value.workspaceId, 128) ||
+    !validatePublicString(value.eventId, 160) ||
+    !isSafeUnsignedInteger(value.sequence) ||
+    value.sequence === 0 ||
+    !isPublicMultilineText(value.text, 64 * 1024, true) ||
+    !isTimestamp(value.updatedAt)
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: 1,
+    workspaceId: value.workspaceId,
+    eventId: value.eventId,
+    sequence: value.sequence,
+    text: value.text,
+    updatedAt: value.updatedAt,
+  }
+}
+
+export function parseWorkspaceTimelineAnchor(
+  value: unknown,
+): WorkspaceTimelineAnchor {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "schemaVersion",
+      "workspaceId",
+      "eventId",
+      "sequence",
+      "offset",
+      "revision",
+      "updatedAt",
+      "wasClamped",
+    ]) ||
+    value.schemaVersion !== 1 ||
+    !validatePublicString(value.workspaceId, 128) ||
+    !validatePublicString(value.eventId, 160) ||
+    !isSafeUnsignedInteger(value.sequence) ||
+    value.sequence === 0 ||
+    typeof value.offset !== "number" ||
+    !Number.isSafeInteger(value.offset) ||
+    Math.abs(value.offset) > 1_000_000 ||
+    !isSafeUnsignedInteger(value.revision) ||
+    !isTimestamp(value.updatedAt) ||
+    typeof value.wasClamped !== "boolean"
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: 1,
+    workspaceId: value.workspaceId,
+    eventId: value.eventId,
+    sequence: value.sequence,
+    offset: value.offset,
+    revision: value.revision,
+    updatedAt: value.updatedAt,
+    wasClamped: value.wasClamped,
+  }
+}
+
+export function parseWorkspaceResumeState(
+  value: unknown,
+): WorkspaceResumeState {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "schemaVersion",
+      "workspaceId",
+      "lastSummary",
+      "timelineAnchor",
+    ]) ||
+    value.schemaVersion !== 1 ||
+    !validatePublicString(value.workspaceId, 128)
+  ) {
+    return violation()
+  }
+  const lastSummary =
+    value.lastSummary === null
+      ? null
+      : parseWorkspaceLastSummary(value.lastSummary)
+  const timelineAnchor =
+    value.timelineAnchor === null
+      ? null
+      : parseWorkspaceTimelineAnchor(value.timelineAnchor)
+  if (
+    lastSummary?.workspaceId !== undefined &&
+    lastSummary.workspaceId !== value.workspaceId
+  ) {
+    return violation()
+  }
+  if (
+    timelineAnchor?.workspaceId !== undefined &&
+    timelineAnchor.workspaceId !== value.workspaceId
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: 1,
+    workspaceId: value.workspaceId,
+    lastSummary,
+    timelineAnchor,
+  }
+}
+
 export function parseWorkspaceStateSnapshot(
   value: unknown,
 ): WorkspaceStateSnapshot {
@@ -1038,6 +1201,7 @@ export function parseWorkspaceStateSnapshot(
       "draft",
       "contextSnapshots",
       "timeline",
+      "resumeState",
     ]) ||
     value.schemaVersion !== workspaceHistorySchemaVersion ||
     !Array.isArray(value.workspaces) ||
@@ -1075,6 +1239,13 @@ export function parseWorkspaceStateSnapshot(
   if (timeline.items.some((event) => event.workspaceId !== activeWorkspaceId)) {
     return violation()
   }
+  const resumeState =
+    value.resumeState === null
+      ? null
+      : parseWorkspaceResumeState(value.resumeState)
+  if (resumeState !== null && resumeState.workspaceId !== activeWorkspaceId) {
+    return violation()
+  }
   return {
     schemaVersion: 1,
     history: parseHistoryStatus(value.history),
@@ -1083,6 +1254,7 @@ export function parseWorkspaceStateSnapshot(
     draft,
     contextSnapshots,
     timeline,
+    resumeState,
   }
 }
 
@@ -1184,6 +1356,7 @@ export function parseWorkspaceHistoryResponse<
     case workspaceHistoryCommands.list:
     case workspaceHistoryCommands.createSession:
     case workspaceHistoryCommands.select:
+    case workspaceHistoryCommands.recheck:
     case workspaceHistoryCommands.repair:
     case workspaceHistoryCommands.unregister:
     case workspaceHistoryCommands.delete:
@@ -1199,6 +1372,10 @@ export function parseWorkspaceHistoryResponse<
       ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.saveDraft:
       return parsePersistedWorkspaceDraft(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
+    case workspaceHistoryCommands.saveTimelineAnchor:
+      return parseWorkspaceTimelineAnchor(
         value,
       ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.saveContextSnapshot:

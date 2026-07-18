@@ -675,7 +675,10 @@ export function WorkspaceShell({
           activeTab={view.activeTab}
           actionPending={view.workspaceAction}
           canCancel={adapter?.cancelWorkspace !== undefined}
-          canRepair={adapter?.repairWorkspace !== undefined}
+          canRepair={
+            adapter?.repairWorkspace !== undefined ||
+            adapter?.recheckWorkspace !== undefined
+          }
           canUnregister={adapter?.unregisterWorkspace !== undefined}
           connection={connection}
           copy={copy}
@@ -727,11 +730,14 @@ export function WorkspaceShell({
             }}
             onSend={view.sendTurn}
             onStop={stopTurn}
+            onTimelineAnchorChange={view.saveTimelineAnchor}
             reducedMotion={reducedMotion}
             readiness={view.codex.readiness}
+            repositoryHealth={selectedWorkspace.health}
             renderer={characterRenderer}
             runtimeError={runtime.state.status === "error"}
             timeline={view.timeline}
+            timelineAnchor={view.timelineAnchor}
             pendingRequestIds={view.codex.pendingRequests.map(
               (request) => request.pendingId,
             )}

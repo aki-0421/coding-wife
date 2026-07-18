@@ -53,6 +53,55 @@ describe("DemoWorkspaceHistoryTransport", () => {
     })
   })
 
+  it("keeps versioned summaries and timeline anchors workspace-local", async () => {
+    const transport = new DemoWorkspaceHistoryTransport()
+    const initial = await transport.request(
+      workspaceHistoryCommands.list,
+      undefined,
+    )
+    const workspaceId = initial.activeWorkspaceId
+    const anchored = initial.timeline.items[0]
+    if (workspaceId === null || anchored === undefined) {
+      throw new Error("demo fixture")
+    }
+    await transport.request(workspaceHistoryCommands.saveTimelineAnchor, {
+      workspaceId,
+      eventId: anchored.eventId,
+      sequence: anchored.sequence,
+      offset: -8,
+    })
+    await transport.request(workspaceHistoryCommands.appendDomainEvent, {
+      schemaVersion: 1,
+      eventId: "event-demo-summary",
+      workspaceId,
+      sessionId: null,
+      producer: "code",
+      kind: "code.message.completed",
+      occurredAt: "2026-07-18T00:10:00.000Z",
+      payload: {
+        semanticVersion: 1,
+        generation: 1,
+        sourceSequence: 2,
+        itemHandle: "item-demo-summary",
+        text: "Demo summary",
+      },
+    })
+    const restored = await transport.request(workspaceHistoryCommands.recheck, {
+      workspaceId,
+      acceptObservedHead: false,
+    })
+    expect(restored.resumeState).toMatchObject({
+      workspaceId,
+      lastSummary: { eventId: "event-demo-summary", text: "Demo summary" },
+      timelineAnchor: {
+        eventId: anchored.eventId,
+        sequence: anchored.sequence,
+        offset: -8,
+        revision: 1,
+      },
+    })
+  })
+
   it("unregisters a project as metadata without deleting its preserved state", async () => {
     const transport = new DemoWorkspaceHistoryTransport()
     const selectedProject = await transport.request(

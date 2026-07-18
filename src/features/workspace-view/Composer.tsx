@@ -31,6 +31,7 @@ import type {
   ReasoningEffort,
   WorkspaceCodexState,
   WorkspaceDraft,
+  WorkspaceRecord,
 } from "@/features/workspace-view/types"
 
 interface ComposerProps {
@@ -38,6 +39,7 @@ interface ComposerProps {
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
   readonly readiness: WorkspaceCodexState["readiness"]
+  readonly repositoryHealth?: WorkspaceRecord["health"]
   readonly turnState: TurnUiState
   readonly onAddAttachments: (files: readonly File[]) => void
   readonly onCaptureContext: (
@@ -97,6 +99,7 @@ export function Composer({
   copy,
   draft,
   readiness,
+  repositoryHealth,
   turnState,
   onAddAttachments,
   onCaptureContext,
@@ -117,14 +120,19 @@ export function Composer({
     validAttachments.length > 0 ||
     draft.contextSnapshots.length > 0
   const isBusy = turnState !== "idle"
-  const canSend = connected && hasContent && turnState === "idle"
+  const repositoryReady =
+    repositoryHealth === undefined || repositoryHealth === "ready"
+  const canSend =
+    connected && repositoryReady && hasContent && turnState === "idle"
   const disabledReason = !connected
     ? copy.sendUnavailable
-    : isBusy
-      ? copy.sendBusy
-      : !hasContent
-        ? copy.sendEmpty
-        : ""
+    : repositoryHealth !== undefined && repositoryHealth !== "ready"
+      ? copy.workspaceHealth[repositoryHealth]
+      : isBusy
+        ? copy.sendBusy
+        : !hasContent
+          ? copy.sendEmpty
+          : ""
   const unavailableEffort =
     !readiness.fastAvailable && !readiness.maxAvailable
       ? copy.effortAvailability.none

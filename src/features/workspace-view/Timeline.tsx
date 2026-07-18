@@ -104,6 +104,11 @@ function eventSequence(event: WorkspaceTimelineItem): number {
   return event.kind === "history" ? event.sequence : event.sourceSequence
 }
 
+function eventId(event: WorkspaceTimelineItem): string | null {
+  if (event.kind === "history") return event.id
+  return event.durable ? event.sourceEventId : null
+}
+
 function eventCode(event: WorkspaceTimelineItem): string | undefined {
   if (event.kind === "history") return event.errorCode
   return event.kind === "error" ? event.errorCode : undefined
@@ -632,6 +637,7 @@ function TimelineEventRow({
         pending && "border border-divider bg-surface shadow-sm",
       )}
       data-event-kind={event.kind}
+      data-event-id={eventId(event) ?? undefined}
       data-event-sequence={eventSequence(event)}
     >
       <span

@@ -118,11 +118,30 @@ export interface WorkspaceAdapterState {
   readonly activeWorkspaceId: string | null
   readonly draft: WorkspaceAdapterDraft | null
   readonly timeline: readonly WorkspaceTimelineItem[]
+  readonly lastSummary?: {
+    readonly eventId: string
+    readonly sequence: number
+    readonly text: string
+    readonly updatedAt: string
+  } | null
+  readonly timelineAnchor?: {
+    readonly eventId: string
+    readonly sequence: number
+    readonly offset: number
+    readonly revision: number
+    readonly wasClamped: boolean
+  } | null
+  readonly nextBeforeSequence?: number | null
   readonly history: {
     readonly mode: "ready" | "ephemeral" | "read_only" | "recovery_required"
     readonly errorCode: string | null
     readonly backupName: string | null
   }
+}
+
+export interface WorkspaceAdapterTimelinePage {
+  readonly timeline: readonly WorkspaceTimelineItem[]
+  readonly nextBeforeSequence: number | null
 }
 
 export interface WorkspaceCreateRequest {
@@ -162,6 +181,10 @@ export interface WorkspaceViewAdapter {
   readonly selectWorkspace?: (
     workspaceId: string,
   ) => Promise<WorkspaceAdapterState>
+  readonly recheckWorkspace?: (
+    workspaceId: string,
+    acceptObservedHead?: boolean,
+  ) => Promise<WorkspaceAdapterState>
   readonly stopAndSwitchWorkspace?: (
     request: WorkspaceTransitionRequest,
   ) => Promise<WorkspaceAdapterState>
@@ -184,6 +207,16 @@ export interface WorkspaceViewAdapter {
     text: string,
     effort: ReasoningEffort,
   ) => Promise<void>
+  readonly saveTimelineAnchor?: (
+    workspaceId: string,
+    eventId: string,
+    sequence: number,
+    offset: number,
+  ) => Promise<void>
+  readonly loadTimelinePage?: (
+    workspaceId: string,
+    beforeSequence: number,
+  ) => Promise<WorkspaceAdapterTimelinePage>
   readonly requestAddProject?: () =>
     void | WorkspaceAdapterState | Promise<void | WorkspaceAdapterState>
   readonly requestAddWorkspace?: (

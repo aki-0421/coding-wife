@@ -15,6 +15,7 @@ import type {
   AppQuitPreparationRequest,
   SendTurnRequest,
   WorkspaceAdapterState,
+  WorkspaceAdapterTimelinePage,
   WorkspaceCodexState,
   WorkspaceCreateRequest,
   WorkspaceTransitionRequest,
@@ -104,6 +105,21 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return state
   }
 
+  async recheckWorkspace(
+    workspaceId: string,
+    acceptObservedHead = false,
+  ): Promise<WorkspaceAdapterState> {
+    const state = await this.history.recheckWorkspace(
+      workspaceId,
+      acceptObservedHead,
+    )
+    const workspace = state.workspaces.find(
+      (candidate) => candidate.id === workspaceId,
+    )
+    if (workspace?.health === "ready") await this.activateCodex(state)
+    return state
+  }
+
   stopAndSwitchWorkspace(
     request: WorkspaceTransitionRequest,
   ): Promise<WorkspaceAdapterState> {
@@ -138,7 +154,9 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       this.workspaceTransition !== null ||
       this.workspaceCancellation !== null
     ) {
-      return Promise.reject(new Error("APP-QUIT-WORKSPACE-MUTATION-IN-PROGRESS"))
+      return Promise.reject(
+        new Error("APP-QUIT-WORKSPACE-MUTATION-IN-PROGRESS"),
+      )
     }
     const operation = this.performAppQuitPreparation(request).finally(() => {
       if (this.appQuitPreparation?.operation === operation) {
@@ -197,6 +215,27 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     effort: "fast" | "max",
   ): Promise<void> {
     return this.history.saveDraft(workspaceId, text, effort)
+  }
+
+  saveTimelineAnchor(
+    workspaceId: string,
+    eventId: string,
+    sequence: number,
+    offset: number,
+  ): Promise<void> {
+    return this.history.saveTimelineAnchor(
+      workspaceId,
+      eventId,
+      sequence,
+      offset,
+    )
+  }
+
+  loadTimelinePage(
+    workspaceId: string,
+    beforeSequence: number,
+  ): Promise<WorkspaceAdapterTimelinePage> {
+    return this.history.loadTimelinePage(workspaceId, beforeSequence)
   }
 
   async requestAddProject(): Promise<WorkspaceAdapterState> {

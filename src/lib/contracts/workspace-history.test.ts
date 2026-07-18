@@ -11,6 +11,7 @@ import {
   parseWorkspaceCommandError,
   parseWorkspaceDeleteChallenge,
   parseWorkspaceHistoryResponse,
+  parseWorkspaceResumeState,
   parseWorkspacePickResponse,
   parseWorkspaceStateSnapshot,
   workspaceHistoryCommands,
@@ -178,6 +179,12 @@ describe("workspace history contract", () => {
     ).toEqual(fixture.state)
     expect(
       parseWorkspaceHistoryResponse(
+        workspaceHistoryCommands.recheck,
+        fixture.state,
+      ),
+    ).toEqual(fixture.state)
+    expect(
+      parseWorkspaceHistoryResponse(
         workspaceHistoryCommands.repair,
         fixture.state,
       ),
@@ -206,12 +213,75 @@ describe("workspace history contract", () => {
         fixture.draft,
       ),
     ).toEqual(fixture.draft)
+    const anchor = {
+      schemaVersion: 1,
+      workspaceId: "workspace-fixture",
+      eventId: "event-fixture",
+      sequence: 7,
+      offset: -12,
+      revision: 3,
+      updatedAt: "2026-07-18T00:01:00.000Z",
+      wasClamped: false,
+    }
+    expect(
+      parseWorkspaceHistoryResponse(
+        workspaceHistoryCommands.saveTimelineAnchor,
+        anchor,
+      ),
+    ).toEqual(anchor)
     expect(
       parseWorkspaceHistoryResponse(
         workspaceHistoryCommands.listTimeline,
         fixture.timeline,
       ),
     ).toEqual(fixture.timeline)
+  })
+
+  it("accepts only workspace-scoped versioned summary and anchor state", () => {
+    const resumeState = {
+      schemaVersion: 1,
+      workspaceId: "workspace-fixture",
+      lastSummary: {
+        schemaVersion: 1,
+        workspaceId: "workspace-fixture",
+        eventId: "event-fixture",
+        sequence: 7,
+        text: "First line\nSecond 😀",
+        updatedAt: "2026-07-18T00:00:45.000Z",
+      },
+      timelineAnchor: {
+        schemaVersion: 1,
+        workspaceId: "workspace-fixture",
+        eventId: "event-fixture",
+        sequence: 7,
+        offset: -12,
+        revision: 3,
+        updatedAt: "2026-07-18T00:01:00.000Z",
+        wasClamped: false,
+      },
+    }
+    expect(parseWorkspaceResumeState(resumeState)).toEqual(resumeState)
+    expect(
+      parseWorkspaceStateSnapshot({ ...fixture.state, resumeState }),
+    ).toMatchObject({ resumeState })
+    expect(() =>
+      parseWorkspaceResumeState({
+        ...resumeState,
+        timelineAnchor: {
+          ...resumeState.timelineAnchor,
+          workspaceId: "workspace-other",
+        },
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
+    expect(() =>
+      parseWorkspaceResumeState({
+        ...resumeState,
+        timelineAnchor: {
+          ...resumeState.timelineAnchor,
+          offset: 1_000_001,
+        },
+      }),
+    ).toThrow(WorkspaceHistoryContractError)
   })
 
   it("accepts stale branch health as a bounded repair state", () => {

@@ -25,16 +25,19 @@ use super::types::{
     WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
     WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth,
     WorkspaceLoadEditableContextRequest, WorkspacePickOutcome, WorkspacePickResponse,
-    WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
-    WorkspaceSaveProjectContextRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
-    WorkspaceSummary, WorkspaceTimelineRequest, WorkspaceTurnContextSnapshot,
-    WorkspaceUpdateLifecycleRequest, WORKSPACE_HISTORY_SCHEMA_VERSION,
+    WorkspaceRecheckRequest, WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest,
+    WorkspaceSaveDraftRequest, WorkspaceSaveProjectContextRequest,
+    WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
+    WorkspaceSummary, WorkspaceTimelineAnchorView, WorkspaceTimelineRequest,
+    WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
+    WORKSPACE_HISTORY_SCHEMA_VERSION,
 };
 
 const PICK_CANCELED_CODE: &str = "CODEX-WORKSPACE-PICK-CANCELED";
 const CONTEXT_CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTEXT_STDOUT_LIMIT: usize = 1024 * 1024;
 const CONTEXT_STDERR_LIMIT: usize = 4 * 1024;
+const REPOSITORY_RECHECK_TIMEOUT: Duration = Duration::from_secs(1);
 const STARTUP_PENDING: u8 = 0;
 const STARTUP_READY: u8 = 1;
 const STARTUP_FAILED: u8 = 2;
@@ -382,21 +385,32 @@ impl WorkspaceHistoryService {
             .store
             .private_workspace_record(&request.workspace_id)
             .map_err(|error| history_error("workspace_select", error))?;
-        let candidate = self
+        let candidate = match self
             .workspace
             .validate_private_candidate(&private_record)
             .await
-            .map_err(|error| codex_error("workspace_select", error))?;
+        {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                let health = health_for_preflight_error(&error);
+                self.store
+                    .update_preflight(&request.workspace_id, Err(health))
+                    .map_err(|error| history_error("workspace_select", error))?;
+                return self
+                    .store
+                    .select_workspace(&request.workspace_id)
+                    .map_err(|error| history_error("workspace_select", error));
+            }
+        };
         let health = self
             .store
             .update_preflight(&request.workspace_id, Ok(&candidate.git))
             .map_err(|error| history_error("workspace_select", error))?;
         if health != WorkspaceHealth::Ready {
-            return Err(WorkspaceCommandError::new(
-                "WORKSPACE-PREFLIGHT-CHANGED",
-                "workspace_select",
-                true,
-            ));
+            return self
+                .store
+                .select_workspace(&request.workspace_id)
+                .map_err(|error| history_error("workspace_select", error));
         }
         self.workspace
             .activate_candidate(candidate)
@@ -414,6 +428,77 @@ impl WorkspaceHistoryService {
                 Err(history_error("workspace_select", error))
             }
         }
+    }
+
+    pub async fn recheck(
+        &self,
+        request: WorkspaceRecheckRequest,
+    ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_recheck")?;
+        let _operation = self.operation_lock.lock().await;
+        let private_record = self
+            .store
+            .private_workspace_record(&request.workspace_id)
+            .map_err(|error| history_error("workspace_recheck", error))?;
+        let validation = tokio::time::timeout(
+            REPOSITORY_RECHECK_TIMEOUT,
+            self.workspace.validate_private_candidate(&private_record),
+        )
+        .await;
+        let candidate = match validation {
+            Ok(Ok(candidate)) => candidate,
+            Ok(Err(error)) => {
+                let health = health_for_preflight_error(&error);
+                self.store
+                    .update_preflight(&request.workspace_id, Err(health))
+                    .map_err(|error| history_error("workspace_recheck", error))?;
+                return self
+                    .store
+                    .snapshot(Some(&request.workspace_id))
+                    .map_err(|error| history_error("workspace_recheck", error));
+            }
+            Err(_) => {
+                self.store
+                    .update_preflight(&request.workspace_id, Err(WorkspaceHealth::Unreadable))
+                    .map_err(|error| history_error("workspace_recheck", error))?;
+                return self
+                    .store
+                    .snapshot(Some(&request.workspace_id))
+                    .map_err(|error| history_error("workspace_recheck", error));
+            }
+        };
+        let health = if request.accept_observed_head {
+            self.store
+                .accept_preflight(&request.workspace_id, &candidate.git)
+        } else {
+            self.store
+                .update_preflight(&request.workspace_id, Ok(&candidate.git))
+        }
+        .map_err(|error| history_error("workspace_recheck", error))?;
+        if health == WorkspaceHealth::Ready {
+            match tokio::time::timeout(
+                REPOSITORY_RECHECK_TIMEOUT,
+                self.workspace.activate_candidate(candidate),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => {
+                    let health = health_for_preflight_error(&error);
+                    self.store
+                        .update_preflight(&request.workspace_id, Err(health))
+                        .map_err(|error| history_error("workspace_recheck", error))?;
+                }
+                Err(_) => {
+                    self.store
+                        .update_preflight(&request.workspace_id, Err(WorkspaceHealth::Unreadable))
+                        .map_err(|error| history_error("workspace_recheck", error))?;
+                }
+            }
+        }
+        self.store
+            .snapshot(Some(&request.workspace_id))
+            .map_err(|error| history_error("workspace_recheck", error))
     }
 
     pub async fn repair(
@@ -633,6 +718,22 @@ impl WorkspaceHistoryService {
                 request.expected_revision,
             )
             .map_err(|error| history_error("workspace_save_draft", error))
+    }
+
+    pub async fn save_timeline_anchor(
+        &self,
+        request: WorkspaceSaveTimelineAnchorRequest,
+    ) -> Result<WorkspaceTimelineAnchorView, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_save_timeline_anchor")?;
+        let _operation = self.operation_lock.lock().await;
+        self.store
+            .save_timeline_anchor(
+                &request.workspace_id,
+                &request.event_id,
+                request.sequence,
+                request.offset,
+            )
+            .map_err(|error| history_error("workspace_save_timeline_anchor", error))
     }
 
     pub async fn save_context(
@@ -1054,6 +1155,12 @@ fn health_for_preflight_error(error: &CodexCommandError) -> WorkspaceHealth {
         "CODEX-WORKSPACE-READ-ONLY" | "CODEX-WORKSPACE-WRITABLE-POLICY" => {
             WorkspaceHealth::ReadOnly
         }
+        "CODEX-WORKSPACE-IDENTITY-CHANGED"
+        | "CODEX-WORKSPACE-NOT-DIRECTORY"
+        | "CODEX-WORKSPACE-NOT-GIT"
+        | "CODEX-WORKSPACE-GIT-SYMLINK"
+        | "CODEX-WORKSPACE-GIT-INVALID"
+        | "CODEX-WORKSPACE-OWNER-MISMATCH" => WorkspaceHealth::Changed,
         _ => WorkspaceHealth::Unreadable,
     }
 }
@@ -1964,6 +2071,208 @@ mod tests {
         assert_eq!(state.workspaces.len(), 1);
         assert_eq!(state.workspaces[0].workspace_id, workspace_id);
         assert_eq!(state.workspaces[0].health, WorkspaceHealth::Missing);
+    }
+
+    #[tokio::test]
+    async fn recheck_keeps_missing_workspace_resume_state_and_other_projects_available() {
+        let (service, root, data, workspace_id) =
+            registered_context_service("missing-recheck").await;
+        let other_root = git_repository();
+        let other_workspace_id = service
+            .register_validated_candidate(
+                candidate(&service.workspace, &other_root).await,
+                "workspace_pick_register",
+            )
+            .await
+            .expect("register other project")
+            .active_workspace_id
+            .expect("other workspace active");
+        service
+            .select(WorkspaceSelectRequest {
+                workspace_id: workspace_id.clone(),
+            })
+            .await
+            .expect("reselect first workspace");
+        service
+            .save_draft(WorkspaceSaveDraftRequest {
+                workspace_id: workspace_id.clone(),
+                text: "Draft survives a missing repository.".to_owned(),
+                effort: super::super::types::ReasoningEffort::Max,
+                expected_revision: 0,
+            })
+            .await
+            .expect("save draft");
+        let event_id = "event-missing-summary".to_owned();
+        let appended = service
+            .append_domain_event(AppendDomainEventRequest {
+                schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
+                event_id: event_id.clone(),
+                workspace_id: workspace_id.clone(),
+                session_id: None,
+                producer: "code".to_owned(),
+                kind: "code.message.completed".to_owned(),
+                occurred_at: "2026-07-18T00:00:00.000Z".to_owned(),
+                payload: serde_json::json!({
+                    "semanticVersion": 1,
+                    "generation": 1,
+                    "sourceSequence": 1,
+                    "itemHandle": "item-missing-summary",
+                    "text": "Summary survives a missing repository.",
+                }),
+            })
+            .await
+            .expect("append summary");
+        service
+            .save_timeline_anchor(WorkspaceSaveTimelineAnchorRequest {
+                workspace_id: workspace_id.clone(),
+                event_id: event_id.clone(),
+                sequence: appended.sequence,
+                offset: -9,
+            })
+            .await
+            .expect("save anchor");
+        fs::remove_dir_all(&root).expect("remove repository");
+
+        let missing = service
+            .recheck(WorkspaceRecheckRequest {
+                workspace_id: workspace_id.clone(),
+                accept_observed_head: false,
+            })
+            .await
+            .expect("missing snapshot");
+        assert_eq!(
+            missing.active_workspace_id.as_deref(),
+            Some(workspace_id.as_str())
+        );
+        assert_eq!(missing.workspaces.len(), 2);
+        assert_eq!(
+            missing
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == workspace_id)
+                .expect("missing workspace")
+                .health,
+            WorkspaceHealth::Missing
+        );
+        assert_eq!(
+            missing.draft.expect("preserved draft").text,
+            "Draft survives a missing repository."
+        );
+        let resume = missing.resume_state.expect("preserved resume state");
+        assert_eq!(
+            resume.last_summary.expect("preserved summary").text,
+            "Summary survives a missing repository."
+        );
+        assert_eq!(
+            resume.timeline_anchor.expect("preserved anchor").event_id,
+            event_id
+        );
+
+        let other = service
+            .select(WorkspaceSelectRequest {
+                workspace_id: other_workspace_id.clone(),
+            })
+            .await
+            .expect("other project remains available");
+        assert_eq!(
+            other.active_workspace_id.as_deref(),
+            Some(other_workspace_id.as_str())
+        );
+        assert_eq!(
+            other
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == other_workspace_id)
+                .expect("other workspace")
+                .health,
+            WorkspaceHealth::Ready
+        );
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(other_root);
+    }
+
+    #[tokio::test]
+    async fn recheck_requires_explicit_acceptance_for_external_head_without_mutating_git() {
+        let (service, root, data, workspace_id) =
+            registered_context_service("external-head-recheck").await;
+        fs::write(root.join("README.md"), "external change\n").expect("source fixture");
+        for arguments in [
+            vec!["-C", root.to_str().expect("root"), "add", "README.md"],
+            vec![
+                "-C",
+                root.to_str().expect("root"),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "external commit",
+            ],
+        ] {
+            assert!(std::process::Command::new("/usr/bin/git")
+                .args(arguments)
+                .status()
+                .expect("git fixture command")
+                .success());
+        }
+        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before recheck");
+        let status_before = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args(["status", "--porcelain=v1", "--untracked-files=all"])
+            .output()
+            .expect("status before recheck")
+            .stdout;
+
+        let stale = service
+            .recheck(WorkspaceRecheckRequest {
+                workspace_id: workspace_id.clone(),
+                accept_observed_head: false,
+            })
+            .await
+            .expect("stale snapshot");
+        let stale_workspace = stale
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .expect("stale workspace");
+        assert_eq!(stale_workspace.health, WorkspaceHealth::StaleBranch);
+        assert_eq!(stale_workspace.head, "unborn");
+
+        let ready = service
+            .recheck(WorkspaceRecheckRequest {
+                workspace_id: workspace_id.clone(),
+                accept_observed_head: true,
+            })
+            .await
+            .expect("accepted snapshot");
+        let ready_workspace = ready
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .expect("ready workspace");
+        assert_eq!(ready_workspace.health, WorkspaceHealth::Ready);
+        assert_ne!(ready_workspace.head, "unborn");
+        assert_eq!(
+            fs::read(root.join(".git/HEAD")).expect("HEAD after recheck"),
+            head_before
+        );
+        assert_eq!(
+            std::process::Command::new("/usr/bin/git")
+                .arg("-C")
+                .arg(&root)
+                .args(["status", "--porcelain=v1", "--untracked-files=all"])
+                .output()
+                .expect("status after recheck")
+                .stdout,
+            status_before
+        );
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]
