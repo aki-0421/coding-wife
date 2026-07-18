@@ -3,6 +3,7 @@ import type {
   CodexEvent,
   PendingRequestView,
 } from "@/lib/contracts"
+import { unicodeScalarCount } from "@/lib/public-text"
 
 const maxStreamingText = 64 * 1024
 const maxToolText = 16 * 1024
@@ -151,9 +152,9 @@ function appendBounded(
   maximum: number,
 ): string {
   const combined = previous + next
-  return combined.length <= maximum
+  return unicodeScalarCount(combined) <= maximum
     ? combined
-    : combined.slice(combined.length - maximum)
+    : Array.from(combined).slice(-maximum).join("")
 }
 
 function stableId(event: CodexEvent, scope: string, handle = "active"): string {
@@ -195,6 +196,7 @@ function history(
     kind,
     occurredAt: event.occurredAt,
     payload: {
+      semanticVersion: 1,
       generation: event.generation,
       sourceSequence: event.sequence,
       ...payload,
@@ -417,16 +419,7 @@ export class CodexEventProjector {
           history: history(
             event,
             approval ? "code.approval.requested" : "code.decision.requested",
-            {
-              pendingId: request.pendingId,
-              responseKind: request.responseKind,
-              requestKind: request.kind,
-              operation: request.operation,
-              targetAlias: request.targetAlias,
-              questionCount: request.questions.length,
-              risk: request.approvalContext?.risk ?? null,
-              reversibility: request.approvalContext?.reversibility ?? null,
-            },
+            { request },
           ),
         }
       }
@@ -526,6 +519,7 @@ export function projectAcceptedUserTurn(
       kind: "code.user.instruction.accepted",
       occurredAt: accepted.occurredAt,
       payload: {
+        semanticVersion: 1,
         generation: accepted.generation,
         sourceSequence: accepted.sourceSequence,
         text: accepted.text,

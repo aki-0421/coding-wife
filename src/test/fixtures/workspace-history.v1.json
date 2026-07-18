@@ -54,13 +54,17 @@
           "schemaVersion": 1,
           "eventId": "event-fixture",
           "workspaceId": "workspace-fixture",
-          "sessionId": "session-fixture",
+          "sessionId": null,
           "sequence": 7,
           "producer": "code",
-          "kind": "code.session.status.changed",
+          "kind": "code.message.completed",
           "occurredAt": "2026-07-18T00:00:45.000Z",
           "payload": {
-            "status": "failed"
+            "semanticVersion": 1,
+            "generation": 7,
+            "sourceSequence": 7,
+            "itemHandle": "item-assistant-fixture",
+            "text": "First line\nSecond 😀"
           }
         }
       ],
@@ -108,13 +112,17 @@
         "schemaVersion": 1,
         "eventId": "event-fixture",
         "workspaceId": "workspace-fixture",
-        "sessionId": "session-fixture",
+        "sessionId": null,
         "sequence": 7,
         "producer": "code",
-        "kind": "code.session.status.changed",
+        "kind": "code.message.completed",
         "occurredAt": "2026-07-18T00:00:45.000Z",
         "payload": {
-          "status": "failed"
+          "semanticVersion": 1,
+          "generation": 7,
+          "sourceSequence": 7,
+          "itemHandle": "item-assistant-fixture",
+          "text": "First line\nSecond 😀"
         }
       }
     ],

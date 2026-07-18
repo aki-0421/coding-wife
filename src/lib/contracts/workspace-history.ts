@@ -1,3 +1,10 @@
+import {
+  containsPrivateMaterial,
+  isPublicMultilineText,
+  isPublicSingleLineText,
+} from "@/lib/public-text"
+import { parsePendingRequest, type PendingRequestView } from "./codex"
+
 export const workspaceHistorySchemaVersion = 1 as const
 
 export const workspaceHistoryCommands = {
@@ -94,6 +101,7 @@ export interface PersistedTimelineEvent {
     | "code.session.diagnostic"
     | "code.model.violation"
     | "code.protocol.unsupported"
+    | "code.unsupported"
     | "live.renderer.status.changed"
     | "hist.writer.status.changed"
     | "git.checkpoint.status.changed"
@@ -312,19 +320,8 @@ function oneOf<T extends string>(
   return typeof value === "string" && allowed.some((item) => item === value)
 }
 
-function containsPrivateMaterial(value: string): boolean {
-  const lower = value.toLocaleLowerCase()
-  return (
-    /(?:^|[\s"'])\/(?:users|volumes|library|applications)\//i.test(value) ||
-    /(?:bearer\s+[a-z0-9._~+/=-]{6,}|(?:api[_-]?key|auth[_-]?cookie|sessionid|set-cookie)\s*[:=])/i.test(
-      value,
-    ) ||
-    lower.includes("chain-of-thought")
-  )
-}
-
 function validatePublicString(value: unknown, maximum = 512): value is string {
-  return isString(value, maximum) && !containsPrivateMaterial(value)
+  return isPublicSingleLineText(value, maximum)
 }
 
 function parseHistoryStatus(value: unknown): WorkspaceHistoryStatus {
@@ -435,10 +432,7 @@ export function parsePersistedWorkspaceDraft(
     ]) ||
     value.schemaVersion !== workspaceHistorySchemaVersion ||
     !validatePublicString(value.workspaceId, 128) ||
-    typeof value.text !== "string" ||
-    value.text.length > 128_000 ||
-    value.text.includes("\0") ||
-    containsPrivateMaterial(value.text) ||
+    !isPublicMultilineText(value.text, 128_000, true) ||
     !oneOf(value.effort, ["fast", "max"] as const) ||
     !isSafeUnsignedInteger(value.revision) ||
     !isTimestamp(value.updatedAt)
@@ -494,15 +488,14 @@ export function parsePersistedContextSnapshot(
   }
 }
 
-const codexHistoryBaseKeys = ["generation", "sourceSequence"] as const
+const codexHistoryBaseKeys = [
+  "semanticVersion",
+  "generation",
+  "sourceSequence",
+] as const
 
 function isPublicText(value: unknown, maximum: number): value is string {
-  return (
-    typeof value === "string" &&
-    value.length <= maximum &&
-    !value.includes("\0") &&
-    !containsPrivateMaterial(value)
-  )
+  return isPublicMultilineText(value, maximum, true)
 }
 
 function hasCodexHistoryShape(
@@ -511,9 +504,46 @@ function hasCodexHistoryShape(
 ): boolean {
   return (
     hasExactKeys(payload, [...codexHistoryBaseKeys, ...required]) &&
+    payload.semanticVersion === 1 &&
     isSafeUnsignedInteger(payload.generation) &&
     payload.generation > 0 &&
     isSafeUnsignedInteger(payload.sourceSequence)
+  )
+}
+
+function isPersistedPendingRequestPublic(request: PendingRequestView): boolean {
+  if (
+    !isPublicSingleLineText(request.pendingId, 128) ||
+    !isPublicSingleLineText(request.operation, 128) ||
+    !isPublicSingleLineText(request.targetAlias, 256) ||
+    (request.reason !== null &&
+      !isPublicMultilineText(request.reason, 4_096, true))
+  ) {
+    return false
+  }
+  for (const question of request.questions) {
+    if (
+      !isPublicSingleLineText(question.id, 128) ||
+      !isPublicSingleLineText(question.header, 256) ||
+      !isPublicMultilineText(question.question, 4_096)
+    ) {
+      return false
+    }
+    for (const option of question.options) {
+      if (
+        !isPublicSingleLineText(option.id, 128) ||
+        !isPublicSingleLineText(option.label, 256) ||
+        !isPublicMultilineText(option.description, 1_024, true)
+      ) {
+        return false
+      }
+    }
+  }
+  const context = request.approvalContext
+  return (
+    context === null ||
+    (isPublicSingleLineText(context.targetAlias, 256) &&
+      context.evidence.every((item) => isPublicSingleLineText(item, 256)))
   )
 }
 
@@ -631,42 +661,23 @@ function parseCodexHistoryPayload(
   if (
     (kind === "code.decision.requested" ||
       kind === "code.approval.requested") &&
-    hasCodexHistoryShape(payload, [
-      "pendingId",
-      "responseKind",
-      "requestKind",
-      "operation",
-      "targetAlias",
-      "questionCount",
-      "risk",
-      "reversibility",
-    ]) &&
-    validatePublicString(payload.pendingId, 128) &&
-    oneOf(payload.responseKind, [
-      "native_server_request",
-      "fallback_decision",
-    ] as const) &&
-    oneOf(payload.requestKind, [
-      "command_approval",
-      "file_change_approval",
-      "permissions_approval",
-      "user_input",
-    ] as const) &&
-    validatePublicString(payload.operation, 128) &&
-    validatePublicString(payload.targetAlias, 256) &&
-    isSafeUnsignedInteger(payload.questionCount) &&
-    payload.questionCount <= 3 &&
-    (payload.risk === null ||
-      oneOf(payload.risk, ["low", "medium", "high"] as const)) &&
-    (payload.reversibility === null ||
-      oneOf(payload.reversibility, [
-        "reversible",
-        "partially_reversible",
-        "not_reversible",
-        "unknown",
-      ] as const))
+    hasCodexHistoryShape(payload, ["request"])
   ) {
-    return { ...payload }
+    let request: PendingRequestView
+    try {
+      request = parsePendingRequest(payload.request)
+    } catch {
+      return null
+    }
+    if (!isPersistedPendingRequestPublic(request)) return null
+    const approval = request.kind !== "user_input"
+    if (
+      (kind === "code.approval.requested" && !approval) ||
+      (kind === "code.decision.requested" && approval)
+    ) {
+      return null
+    }
+    return { ...payload, request }
   }
   if (
     kind === "code.pending.resolved" &&
@@ -1167,6 +1178,14 @@ function parseEventPayload(
         payload: codexPayload,
       }
     }
+    return {
+      producer,
+      kind: "code.unsupported",
+      payload: {
+        status: "blocked",
+        errorCode: "CODEX-HISTORY-UNSUPPORTED",
+      },
+    }
   }
   if (producer === "git") {
     const gitPayload = parseGitHistoryPayload(
@@ -1209,21 +1228,6 @@ function parseEventPayload(
     ] as const)
   ) {
     return { producer, kind, payload: { lifecycle: payload.lifecycle } }
-  }
-  if (
-    producer === "code" &&
-    kind === "code.session.status.changed" &&
-    hasExactKeys(payload, ["status"]) &&
-    oneOf(payload.status, [
-      "idle",
-      "running",
-      "waiting",
-      "interrupted",
-      "failed",
-      "completed",
-    ] as const)
-  ) {
-    return { producer, kind, payload: { status: payload.status } }
   }
   if (
     producer === "live" &&
@@ -1311,7 +1315,6 @@ export function parsePersistedTimelineEvent(
       "occurredAt",
       "payload",
     ]) ||
-    value.schemaVersion !== workspaceHistorySchemaVersion ||
     !validatePublicString(value.eventId, 128) ||
     !validatePublicString(value.workspaceId, 128) ||
     !(value.sessionId === null || validatePublicString(value.sessionId, 128)) ||
@@ -1319,6 +1322,29 @@ export function parsePersistedTimelineEvent(
     !isTimestamp(value.occurredAt)
   ) {
     return violation()
+  }
+  if (value.schemaVersion !== workspaceHistorySchemaVersion) {
+    if (
+      value.producer !== "code" ||
+      !isSafeUnsignedInteger(value.schemaVersion) ||
+      value.schemaVersion <= workspaceHistorySchemaVersion
+    ) {
+      return violation()
+    }
+    return {
+      schemaVersion: 1,
+      eventId: value.eventId,
+      workspaceId: value.workspaceId,
+      sessionId: value.sessionId,
+      sequence: value.sequence,
+      producer: "code",
+      kind: "code.unsupported",
+      occurredAt: value.occurredAt,
+      payload: {
+        status: "blocked",
+        errorCode: "CODEX-HISTORY-UNSUPPORTED",
+      },
+    }
   }
   const event = parseEventPayload(
     value.producer,

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
 
 import {
+  parseWorkspaceStateSnapshot,
   workspaceHistoryCommands,
   type WorkspaceStateSnapshot,
 } from "@/lib/contracts/workspace-history"
+import codexFixture from "@/test/fixtures/codex-runtime.v1.json"
 import fixture from "@/test/fixtures/workspace-history.v1.json"
 
 import {
@@ -30,10 +32,161 @@ describe("PersistentWorkspaceViewAdapter", () => {
       updatedAt: "2026-07-18T00:01:00.000Z",
     })
     expect(projected.timeline[0]).toMatchObject({
-      producer: "code",
-      status: "failed",
+      kind: "assistant",
+      status: "completed",
+      text: "First line\nSecond 😀",
     })
     expect(JSON.stringify(projected)).not.toMatch(/canonical|gitdir|\/Users\//i)
+  })
+
+  it("reconstructs exact versioned Codex semantics and coalesces stable IDs after restart", () => {
+    const codeEvent = (
+      sequence: number,
+      kind: string,
+      payload: Readonly<Record<string, unknown>>,
+    ) => ({
+      ...fixture.timeline.items[0],
+      eventId: `event-restart-${String(sequence)}`,
+      sequence,
+      kind,
+      occurredAt: `2026-07-18T00:00:${String(sequence).padStart(2, "0")}.000Z`,
+      payload: {
+        semanticVersion: 1,
+        generation: 7,
+        sourceSequence: sequence,
+        ...payload,
+      },
+    })
+    const fallbackRequest = {
+      pendingId: "pending-decision-restart",
+      kind: "user_input",
+      responseKind: "fallback_decision",
+      operation: "decision_fallback",
+      targetAlias: "active_turn",
+      reason: "Choose the next safe step.",
+      questions: [
+        {
+          id: "decision",
+          header: "Decision",
+          question: "Continue?\nReview the evidence.",
+          options: [
+            {
+              id: "continue",
+              label: "Continue",
+              description: "Apply the bounded change.",
+            },
+            {
+              id: "stop",
+              label: "Stop",
+              description: "Keep the current state.",
+            },
+          ],
+        },
+      ],
+      allowedDecisions: [],
+      approvalContext: null,
+    }
+    const approvalRequest = codexFixture.events[1]!.payload.request
+    const state = parseWorkspaceStateSnapshot({
+      ...fixture.state,
+      timeline: {
+        schemaVersion: 1,
+        nextBeforeSequence: null,
+        items: [
+          codeEvent(1, "code.item.status.changed", {
+            itemHandle: "item-tool",
+            itemType: "mcpToolCall",
+            status: "running",
+          }),
+          codeEvent(2, "code.tool.output", {
+            itemHandle: "item-tool",
+            excerpt: "first line\n",
+          }),
+          codeEvent(3, "code.tool.output", {
+            itemHandle: "item-tool",
+            excerpt: "second 😀",
+          }),
+          codeEvent(4, "code.item.status.changed", {
+            itemHandle: "item-tool",
+            itemType: "mcpToolCall",
+            status: "completed",
+          }),
+          codeEvent(5, "code.file_change.updated", {
+            itemHandle: "item-file",
+            pathAlias: "project/src/app.tsx",
+            changeKind: "update",
+          }),
+          codeEvent(6, "code.item.status.changed", {
+            itemHandle: "item-file",
+            itemType: "fileChange",
+            status: "completed",
+          }),
+          codeEvent(7, "code.message.completed", {
+            itemHandle: "item-assistant",
+            text: "Implemented.\nVerified 😀",
+          }),
+          codeEvent(8, "code.plan.updated", { stepCount: 4 }),
+          codeEvent(9, "code.diff.updated", {
+            byteCount: 120,
+            detailRef: "detail-diff-restart",
+          }),
+          codeEvent(10, "code.session.status.changed", {
+            threadHandle: "thread-restart",
+            turnHandle: "turn-restart",
+            status: "completed",
+          }),
+          codeEvent(11, "code.session.diagnostic", {
+            code: "CODEX-RESTART-DIAGNOSTIC",
+            willRetry: false,
+            detailRef: "detail-restart",
+          }),
+          codeEvent(12, "code.decision.requested", {
+            request: fallbackRequest,
+          }),
+          codeEvent(13, "code.approval.requested", {
+            request: approvalRequest,
+          }),
+        ],
+      },
+    })
+
+    const projected = projectWorkspaceState(state)
+
+    expect(projected.timeline.map((event) => event.kind)).toEqual([
+      "tool",
+      "file",
+      "assistant",
+      "plan",
+      "diff",
+      "completion",
+      "error",
+      "decision",
+      "approval",
+    ])
+    expect(projected.timeline[0]).toMatchObject({
+      kind: "tool",
+      status: "completed",
+      toolKind: "mcpToolCall",
+      excerpt: "first line\nsecond 😀",
+      sourceSequence: 4,
+    })
+    expect(projected.timeline[1]).toMatchObject({
+      kind: "file",
+      status: "completed",
+      pathAlias: "project/src/app.tsx",
+      changeKind: "update",
+    })
+    expect(projected.timeline[7]).toMatchObject({
+      kind: "decision",
+      request: fallbackRequest,
+    })
+    expect(projected.timeline[8]).toMatchObject({
+      kind: "approval",
+      request: approvalRequest,
+    })
+    expect(JSON.stringify(projected)).not.toMatch(
+      /rawStderr|chain-of-thought|\/Users\//iu,
+    )
   })
 
   it("serializes rapid draft writes and restores the latest workspace-local value", async () => {

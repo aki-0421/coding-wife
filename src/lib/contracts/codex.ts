@@ -1011,7 +1011,7 @@ function parseApprovalContext(value: unknown): ApprovalContext {
   }
 }
 
-function parsePendingRequest(value: unknown): PendingRequestView {
+export function parsePendingRequest(value: unknown): PendingRequestView {
   if (
     !isRecord(value) ||
     !exact(value, [

@@ -5,6 +5,7 @@ import {
   type WorkspaceStateSnapshot,
 } from "@/lib/contracts/workspace-history"
 import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
+import { PersistedCodexEventProjector } from "@/features/workspace-persistence/codex-event-projector"
 import {
   TauriWorkspaceHistoryTransport,
   WorkspaceHistoryBoundaryError,
@@ -47,6 +48,26 @@ function timelineStatus(payload: Readonly<Record<string, unknown>>): {
 export function projectWorkspaceState(
   state: WorkspaceStateSnapshot,
 ): WorkspaceAdapterState {
+  const codexProjector = new PersistedCodexEventProjector()
+  const projectedTimeline = new Map<string, WorkspaceTimelineItem>()
+  for (const event of [...state.timeline.items].sort(
+    (left, right) => left.sequence - right.sequence,
+  )) {
+    const semantic = codexProjector.project(event)
+    if (semantic !== null) {
+      projectedTimeline.set(`semantic:${semantic.stableId}`, semantic)
+      continue
+    }
+    projectedTimeline.set(`history:${event.eventId}`, {
+      id: event.eventId,
+      sequence: event.sequence,
+      producer: event.producer,
+      kind: "history",
+      domainKind: event.kind,
+      occurredAt: event.occurredAt,
+      ...timelineStatus(event.payload),
+    })
+  }
   return {
     workspaces: state.workspaces.map((workspace) => ({
       id: workspace.workspaceId,
@@ -70,15 +91,7 @@ export function projectWorkspaceState(
             revision: state.draft.revision,
             contextSnapshots: state.contextSnapshots.map(contextItem),
           },
-    timeline: state.timeline.items.map<WorkspaceTimelineItem>((event) => ({
-      id: event.eventId,
-      sequence: event.sequence,
-      producer: event.producer,
-      kind: "history",
-      domainKind: event.kind,
-      occurredAt: event.occurredAt,
-      ...timelineStatus(event.payload),
-    })),
+    timeline: [...projectedTimeline.values()],
     history: {
       mode: state.history.mode,
       errorCode: state.history.errorCode,

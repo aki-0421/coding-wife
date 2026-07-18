@@ -208,7 +208,7 @@ describe("workspace history contract", () => {
         parsePersistedWorkspaceDraft({ ...fixture.draft, text }),
       ).toThrow(WorkspaceHistoryContractError)
     }
-    expect(() =>
+    expect(
       parsePersistedTimelinePage({
         ...fixture.timeline,
         items: [
@@ -217,8 +217,11 @@ describe("workspace history contract", () => {
             payload: { status: "failed", reasoning: "hidden" },
           },
         ],
-      }),
-    ).toThrow(WorkspaceHistoryContractError)
+      }).items[0],
+    ).toMatchObject({
+      kind: "code.unsupported",
+      payload: { errorCode: "CODEX-HISTORY-UNSUPPORTED" },
+    })
   })
 
   it("parses only the exact rich Codex history allowlist", () => {
@@ -228,6 +231,7 @@ describe("workspace history contract", () => {
       producer: "code",
       kind: "code.tool.output",
       payload: {
+        semanticVersion: 1,
         generation: 7,
         sourceSequence: 12,
         itemHandle: "item-safe",
@@ -236,18 +240,62 @@ describe("workspace history contract", () => {
     }
 
     expect(parsePersistedTimelineEvent(event)).toEqual(event)
-    expect(() =>
+    expect(
       parsePersistedTimelineEvent({
         ...event,
         payload: { ...event.payload, rawStderr: "not allowed" },
       }),
-    ).toThrow(WorkspaceHistoryContractError)
-    expect(() =>
+    ).toMatchObject({ kind: "code.unsupported" })
+    expect(
       parsePersistedTimelineEvent({
         ...event,
         payload: { ...event.payload, excerpt: "x".repeat(16 * 1024 + 1) },
       }),
-    ).toThrow(WorkspaceHistoryContractError)
+    ).toMatchObject({ kind: "code.unsupported" })
+  })
+
+  it("uses Unicode scalar limits and normalized multiline public text", () => {
+    const event = {
+      ...fixture.timeline.items[0],
+      eventId: "event-codex-multiline",
+      producer: "code",
+      kind: "code.tool.output",
+      payload: {
+        semanticVersion: 1,
+        generation: 7,
+        sourceSequence: 12,
+        itemHandle: "item-safe",
+        excerpt: "first line\n\tsecond 😀",
+      },
+    }
+
+    expect(parsePersistedTimelineEvent(event)).toEqual(event)
+    expect(
+      parsePersistedTimelineEvent({
+        ...event,
+        payload: { ...event.payload, excerpt: "😀".repeat(16 * 1024) },
+      }).kind,
+    ).toBe("code.tool.output")
+    for (const excerpt of [
+      "😀".repeat(16 * 1024 + 1),
+      "line\r\n",
+      "bell\u0007",
+      "/Users/private/project/file.rs",
+      "Bearer hidden-token",
+    ]) {
+      expect(
+        parsePersistedTimelineEvent({
+          ...event,
+          payload: { ...event.payload, excerpt },
+        }),
+      ).toMatchObject({
+        kind: "code.unsupported",
+        payload: { errorCode: "CODEX-HISTORY-UNSUPPORTED" },
+      })
+    }
+    expect(
+      parsePersistedTimelineEvent({ ...event, schemaVersion: 2 }),
+    ).toMatchObject({ kind: "code.unsupported", schemaVersion: 1 })
   })
 
   it("parses only exact owned Git operation and raw review-pack payloads", () => {

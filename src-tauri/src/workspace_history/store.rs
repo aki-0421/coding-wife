@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::codex::redaction::redact_text;
+use crate::codex::types::{PendingKind, PendingRequestView, PendingResponseKind};
 use crate::codex::workspace::{
     AppPrivateWorkspaceRecord, GitRepositoryIdentity, ValidatedWorkspaceCandidate,
 };
@@ -1160,6 +1161,12 @@ fn append_event_in_transaction(
     workspace_root: Option<&Path>,
 ) -> Result<AppendEventResult, WorkspaceHistoryError> {
     validate_domain_event(event)?;
+    if event.producer == "code" {
+        // CODE payloads are already a public semantic boundary. Validate the
+        // original value so private/control material cannot be hidden by the
+        // generic history sanitizer.
+        validate_event_shape(event, &event.payload)?;
+    }
     let sanitized = sanitize_json(&event.payload, workspace_root, 0)?;
     validate_event_shape(event, &sanitized)?;
     let payload_json =
@@ -1317,16 +1324,6 @@ fn validate_event_shape(
                     Some("backlog" | "in_progress" | "in_review" | "done" | "canceled")
                 )
             {
-                return Err(history_error("HIST-EVENT-PAYLOAD", false));
-            }
-        }
-        ("code", "code.session.status.changed") => {
-            let legacy = exact(&["status"], &[])
-                && matches!(
-                    object.get("status").and_then(Value::as_str),
-                    Some("idle" | "running" | "waiting" | "interrupted" | "failed" | "completed")
-                );
-            if !legacy && !validate_codex_history_event(&event.kind, object) {
                 return Err(history_error("HIST-EVENT-PAYLOAD", false));
             }
         }
@@ -1598,24 +1595,145 @@ fn valid_git_target_reference(value: &str) -> bool {
             }))
 }
 
+fn public_text(value: &str, maximum: usize, allow_empty: bool, multiline: bool) -> bool {
+    if (!allow_empty && value.trim().is_empty())
+        || value.chars().count() > maximum
+        || redact_text(value, None, MAX_EVENT_BYTES) != value
+        || value.to_ascii_lowercase().contains("chain-of-thought")
+    {
+        return false;
+    }
+    value.chars().all(|character| {
+        if matches!(character, '\n' | '\t') {
+            return multiline;
+        }
+        character != '\r' && !character.is_control()
+    })
+}
+
+fn public_single_line(value: &str, maximum: usize, allow_empty: bool) -> bool {
+    public_text(value, maximum, allow_empty, false)
+}
+
+fn public_multiline(value: &str, maximum: usize, allow_empty: bool) -> bool {
+    public_text(value, maximum, allow_empty, true)
+}
+
+fn validate_persisted_pending_request(value: &Value, approval_expected: bool) -> bool {
+    let Ok(request) = serde_json::from_value::<PendingRequestView>(value.clone()) else {
+        return false;
+    };
+    if !public_single_line(&request.pending_id, 128, false)
+        || !public_single_line(&request.operation, 128, false)
+        || !public_single_line(&request.target_alias, 256, false)
+        || !request
+            .reason
+            .as_deref()
+            .is_none_or(|reason| public_multiline(reason, 4_096, true))
+    {
+        return false;
+    }
+
+    let mut question_ids = HashSet::new();
+    for question in &request.questions {
+        if !public_single_line(&question.id, 128, false)
+            || !question_ids.insert(question.id.as_str())
+            || !public_single_line(&question.header, 256, false)
+            || !public_multiline(&question.question, 4_096, false)
+            || !(2..=3).contains(&question.options.len())
+        {
+            return false;
+        }
+        let mut option_ids = HashSet::new();
+        let mut option_labels = HashSet::new();
+        for option in &question.options {
+            if !public_single_line(&option.id, 128, false)
+                || !option_ids.insert(option.id.as_str())
+                || !public_single_line(&option.label, 256, false)
+                || !option_labels.insert(option.label.as_str())
+                || !public_multiline(&option.description, 1_024, true)
+            {
+                return false;
+            }
+        }
+    }
+
+    let approval = request.kind != PendingKind::UserInput;
+    if approval != approval_expected {
+        return false;
+    }
+    if !approval {
+        return request.approval_context.is_none()
+            && request.allowed_decisions.is_empty()
+            && (1..=3).contains(&request.questions.len())
+            && match request.response_kind {
+                PendingResponseKind::FallbackDecision => {
+                    request.operation == "decision_fallback" && request.questions.len() == 1
+                }
+                PendingResponseKind::NativeServerRequest => true,
+            };
+    }
+
+    let Some(context) = request.approval_context.as_ref() else {
+        return false;
+    };
+    let expected_category = match request.kind {
+        PendingKind::CommandApproval => "command_execution",
+        PendingKind::FileChangeApproval => "file_change",
+        PendingKind::PermissionsApproval => "permissions",
+        PendingKind::UserInput => return false,
+    };
+    let decisions_unique = request
+        .allowed_decisions
+        .iter()
+        .enumerate()
+        .all(|(index, decision)| !request.allowed_decisions[..index].contains(decision));
+    request.response_kind == PendingResponseKind::NativeServerRequest
+        && request.questions.is_empty()
+        && (1..=3).contains(&request.allowed_decisions.len())
+        && decisions_unique
+        && context.schema_version == 1
+        && context.category == expected_category
+        && ["network_host", "workspace", "workspace_path"].contains(&context.target_kind.as_str())
+        && public_single_line(&context.target_alias, 256, false)
+        && context.target_alias == request.target_alias
+        && ["command", "turn"].contains(&context.scope.as_str())
+        && ["low", "medium", "high"].contains(&context.risk.as_str())
+        && [
+            "reversible",
+            "partially_reversible",
+            "not_reversible",
+            "unknown",
+        ]
+        .contains(&context.reversibility.as_str())
+        && request.allowed_decisions.contains(&context.recommendation)
+        && (1..=8).contains(&context.evidence.len())
+        && context
+            .evidence
+            .iter()
+            .all(|evidence| public_single_line(evidence, 256, false))
+}
+
 fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Value>) -> bool {
     let exact = |fields: &[&str]| {
-        let required = ["generation", "sourceSequence"]
+        let required = ["semanticVersion", "generation", "sourceSequence"]
             .into_iter()
             .chain(fields.iter().copied())
             .collect::<Vec<_>>();
         required.iter().all(|key| object.contains_key(*key))
             && object.keys().all(|key| required.contains(&key.as_str()))
     };
-    let bounded_string = |key: &str, maximum: usize, allow_empty: bool| {
+    let bounded_single_line = |key: &str, maximum: usize, allow_empty: bool| {
         object
             .get(key)
             .and_then(Value::as_str)
-            .is_some_and(|value| {
-                (allow_empty || !value.trim().is_empty())
-                    && value.chars().count() <= maximum
-                    && !value.chars().any(char::is_control)
-            })
+            .is_some_and(|value| public_single_line(value, maximum, allow_empty))
+    };
+    let bounded_multiline = |key: &str, maximum: usize, allow_empty: bool| {
+        object
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| public_multiline(value, maximum, allow_empty))
     };
     let unsigned = |key: &str, maximum: u64| {
         object
@@ -1629,7 +1747,8 @@ fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Val
             .and_then(Value::as_str)
             .is_some_and(|value| values.contains(&value))
     };
-    let base = unsigned("generation", u64::MAX)
+    let base = object.get("semanticVersion").and_then(Value::as_u64) == Some(1)
+        && unsigned("generation", u64::MAX)
         && object
             .get("generation")
             .and_then(Value::as_u64)
@@ -1642,13 +1761,13 @@ fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Val
     match kind {
         "code.thread.status.changed" => {
             exact(&["threadHandle", "status"])
-                && bounded_string("threadHandle", 128, false)
+                && bounded_single_line("threadHandle", 128, false)
                 && one_of("status", &["active", "idle", "systemError", "notLoaded"])
         }
         "code.session.status.changed" => {
             exact(&["threadHandle", "turnHandle", "status"])
-                && bounded_string("threadHandle", 128, false)
-                && bounded_string("turnHandle", 128, false)
+                && bounded_single_line("threadHandle", 128, false)
+                && bounded_single_line("turnHandle", 128, false)
                 && one_of(
                     "status",
                     &[
@@ -1664,13 +1783,13 @@ fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Val
         }
         "code.user.instruction.accepted" => {
             exact(&["text", "effort", "attachmentCount"])
-                && bounded_string("text", 64 * 1024, true)
+                && bounded_multiline("text", 64 * 1024, true)
                 && one_of("effort", &["low", "max"])
                 && unsigned("attachmentCount", 10)
         }
         "code.item.status.changed" => {
             exact(&["itemHandle", "itemType", "status"])
-                && bounded_string("itemHandle", 128, false)
+                && bounded_single_line("itemHandle", 128, false)
                 && one_of(
                     "itemType",
                     &[
@@ -1690,93 +1809,53 @@ fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Val
         }
         "code.message.completed" => {
             exact(&["itemHandle", "text"])
-                && bounded_string("itemHandle", 128, false)
-                && bounded_string("text", 64 * 1024, true)
+                && bounded_single_line("itemHandle", 128, false)
+                && bounded_multiline("text", 64 * 1024, true)
         }
         "code.plan.updated" => exact(&["stepCount"]) && unsigned("stepCount", 1_000),
         "code.diff.updated" => {
             exact(&["byteCount", "detailRef"])
                 && unsigned("byteCount", 1024 * 1024)
-                && bounded_string("detailRef", 128, false)
+                && bounded_single_line("detailRef", 128, false)
         }
         "code.tool.output" => {
             exact(&["itemHandle", "excerpt"])
-                && bounded_string("itemHandle", 128, false)
-                && bounded_string("excerpt", 16 * 1024, true)
+                && bounded_single_line("itemHandle", 128, false)
+                && bounded_multiline("excerpt", 16 * 1024, true)
         }
         "code.file_change.updated" => {
             exact(&["itemHandle", "pathAlias", "changeKind"])
-                && bounded_string("itemHandle", 128, false)
-                && bounded_string("pathAlias", 512, false)
+                && bounded_single_line("itemHandle", 128, false)
+                && bounded_single_line("pathAlias", 512, false)
                 && one_of("changeKind", &["create", "update", "delete", "unknown"])
         }
         "code.decision.requested" | "code.approval.requested" => {
-            exact(&[
-                "pendingId",
-                "responseKind",
-                "requestKind",
-                "operation",
-                "targetAlias",
-                "questionCount",
-                "risk",
-                "reversibility",
-            ]) && bounded_string("pendingId", 128, false)
-                && one_of(
-                    "responseKind",
-                    &["native_server_request", "fallback_decision"],
-                )
-                && one_of(
-                    "requestKind",
-                    &[
-                        "command_approval",
-                        "file_change_approval",
-                        "permissions_approval",
-                        "user_input",
-                    ],
-                )
-                && bounded_string("operation", 128, false)
-                && bounded_string("targetAlias", 256, false)
-                && unsigned("questionCount", 3)
-                && object.get("risk").is_some_and(|value| {
-                    value.is_null()
-                        || value
-                            .as_str()
-                            .is_some_and(|value| ["low", "medium", "high"].contains(&value))
-                })
-                && object.get("reversibility").is_some_and(|value| {
-                    value.is_null()
-                        || value.as_str().is_some_and(|value| {
-                            [
-                                "reversible",
-                                "partially_reversible",
-                                "not_reversible",
-                                "unknown",
-                            ]
-                            .contains(&value)
-                        })
+            exact(&["request"])
+                && object.get("request").is_some_and(|request| {
+                    validate_persisted_pending_request(request, kind == "code.approval.requested")
                 })
         }
         "code.pending.resolved" => {
             exact(&["pendingId", "status"])
-                && bounded_string("pendingId", 128, false)
+                && bounded_single_line("pendingId", 128, false)
                 && one_of("status", &["accepted", "expired", "failed"])
         }
         "code.session.diagnostic" => {
             exact(&["code", "willRetry", "detailRef"])
-                && bounded_string("code", 128, false)
+                && bounded_single_line("code", 128, false)
                 && object.get("willRetry").is_some_and(Value::is_boolean)
-                && bounded_string("detailRef", 128, false)
+                && bounded_single_line("detailRef", 128, false)
         }
         "code.model.violation" => {
             exact(&["fromModel", "toModel"])
-                && bounded_string("fromModel", 128, false)
-                && bounded_string("toModel", 128, false)
+                && bounded_single_line("fromModel", 128, false)
+                && bounded_single_line("toModel", 128, false)
         }
         "code.protocol.unsupported" => {
             exact(&["methodHash", "byteCount", "detailRef"])
-                && bounded_string("methodHash", 128, false)
+                && bounded_single_line("methodHash", 128, false)
                 && unsigned("byteCount", 1024 * 1024)
-                && bounded_string("detailRef", 128, false)
+                && bounded_single_line("detailRef", 128, false)
         }
         _ => false,
     }
@@ -2199,6 +2278,17 @@ mod tests {
 
     use super::*;
 
+    fn codex_turn_payload(status: &str, source_sequence: u64) -> Value {
+        json!({
+            "semanticVersion": 1,
+            "generation": 1,
+            "sourceSequence": source_sequence,
+            "threadHandle": "thread-safe",
+            "turnHandle": "turn-safe",
+            "status": status,
+        })
+    }
+
     fn temp_directory(label: &str) -> PathBuf {
         let path =
             std::env::temp_dir().join(format!("coding-wife-{label}-{}", uuid::Uuid::new_v4()));
@@ -2393,7 +2483,7 @@ mod tests {
             producer: "code".to_owned(),
             kind: "code.session.status.changed".to_owned(),
             occurred_at: now(),
-            payload: json!({ "status": "running" }),
+            payload: codex_turn_payload("running", 1),
         };
         let inserted = store.append_event(&event).expect("append event");
         let duplicate = store.append_event(&event).expect("duplicate event");
@@ -2442,14 +2532,14 @@ mod tests {
             producer: "code".to_owned(),
             kind: "code.session.status.changed".to_owned(),
             occurred_at: "2026-07-18T00:00:00.000Z".to_owned(),
-            payload: json!({ "status": "running" }),
+            payload: codex_turn_payload("running", 1),
         };
         assert!(store.append_event(&event).expect("first append").inserted);
         assert!(!store.append_event(&event).expect("exact replay").inserted);
 
         let conflicting_events = [
             NormalizedDomainEvent {
-                payload: json!({ "status": "completed" }),
+                payload: codex_turn_payload("completed", 1),
                 ..event.clone()
             },
             NormalizedDomainEvent {
@@ -2509,63 +2599,101 @@ mod tests {
         let events = [
             (
                 "code.thread.status.changed",
-                json!({"generation": 1, "sourceSequence": 1, "threadHandle": "thread-safe", "status": "active"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 1, "threadHandle": "thread-safe", "status": "active"}),
             ),
             (
                 "code.session.status.changed",
-                json!({"generation": 1, "sourceSequence": 2, "threadHandle": "thread-safe", "turnHandle": "turn-safe", "status": "running"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 2, "threadHandle": "thread-safe", "turnHandle": "turn-safe", "status": "running"}),
             ),
             (
                 "code.user.instruction.accepted",
-                json!({"generation": 1, "sourceSequence": 3, "text": "Inspect /Users/private/secret.txt", "effort": "low", "attachmentCount": 1}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 3, "text": "Inspect the project.\n\tKeep notes 😀", "effort": "low", "attachmentCount": 1}),
             ),
             (
                 "code.item.status.changed",
-                json!({"generation": 1, "sourceSequence": 4, "itemHandle": "item-safe", "itemType": "commandExecution", "status": "running"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 4, "itemHandle": "item-safe", "itemType": "commandExecution", "status": "running"}),
             ),
             (
                 "code.message.completed",
-                json!({"generation": 1, "sourceSequence": 5, "itemHandle": "item-message", "text": "Done"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 5, "itemHandle": "item-message", "text": "Done\nVerified 😀"}),
             ),
             (
                 "code.plan.updated",
-                json!({"generation": 1, "sourceSequence": 6, "stepCount": 3}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 6, "stepCount": 3}),
             ),
             (
                 "code.diff.updated",
-                json!({"generation": 1, "sourceSequence": 7, "byteCount": 42, "detailRef": "detail-diff"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 7, "byteCount": 42, "detailRef": "detail-diff"}),
             ),
             (
                 "code.tool.output",
-                json!({"generation": 1, "sourceSequence": 8, "itemHandle": "item-tool", "excerpt": "checks passed"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 8, "itemHandle": "item-tool", "excerpt": "checks passed\n\t32 total 😀"}),
             ),
             (
                 "code.file_change.updated",
-                json!({"generation": 1, "sourceSequence": 9, "itemHandle": "item-file", "pathAlias": "project/src/main.rs", "changeKind": "update"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 9, "itemHandle": "item-file", "pathAlias": "project/src/main.rs", "changeKind": "update"}),
             ),
             (
                 "code.decision.requested",
-                json!({"generation": 1, "sourceSequence": 10, "pendingId": "pending-decision", "responseKind": "fallback_decision", "requestKind": "user_input", "operation": "decision/fallback", "targetAlias": "current turn", "questionCount": 1, "risk": null, "reversibility": null}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 10, "request": {
+                    "pendingId": "pending-decision",
+                    "kind": "user_input",
+                    "responseKind": "fallback_decision",
+                    "operation": "decision_fallback",
+                    "targetAlias": "active_turn",
+                    "reason": "Choose the safe next step.",
+                    "questions": [{
+                        "id": "decision",
+                        "header": "Decision",
+                        "question": "Continue?\nReview the evidence.",
+                        "options": [
+                            {"id": "continue", "label": "Continue", "description": "Apply the bounded change."},
+                            {"id": "stop", "label": "Stop", "description": "Keep the current state."}
+                        ]
+                    }],
+                    "allowedDecisions": [],
+                    "approvalContext": null
+                }}),
             ),
             (
                 "code.approval.requested",
-                json!({"generation": 1, "sourceSequence": 11, "pendingId": "pending-approval", "responseKind": "native_server_request", "requestKind": "command_approval", "operation": "item/commandExecution/requestApproval", "targetAlias": "project command", "questionCount": 0, "risk": "medium", "reversibility": "reversible"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 11, "request": {
+                    "pendingId": "pending-approval",
+                    "kind": "command_approval",
+                    "responseKind": "native_server_request",
+                    "operation": "item/commandExecution/requestApproval",
+                    "targetAlias": "project_command",
+                    "reason": null,
+                    "questions": [],
+                    "allowedDecisions": ["approve_once", "reject", "stop"],
+                    "approvalContext": {
+                        "schemaVersion": 1,
+                        "category": "command_execution",
+                        "targetKind": "workspace",
+                        "targetAlias": "project_command",
+                        "scope": "command",
+                        "risk": "medium",
+                        "reversibility": "reversible",
+                        "recommendation": "approve_once",
+                        "evidence": ["workspace_command"]
+                    }
+                }}),
             ),
             (
                 "code.pending.resolved",
-                json!({"generation": 1, "sourceSequence": 12, "pendingId": "pending-approval", "status": "accepted"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 12, "pendingId": "pending-approval", "status": "accepted"}),
             ),
             (
                 "code.session.diagnostic",
-                json!({"generation": 1, "sourceSequence": 13, "code": "CODEX-WARNING", "willRetry": true, "detailRef": "detail-warning"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 13, "code": "CODEX-WARNING", "willRetry": true, "detailRef": "detail-warning"}),
             ),
             (
                 "code.model.violation",
-                json!({"generation": 1, "sourceSequence": 14, "fromModel": "unexpected", "toModel": "gpt-5.6-sol"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 14, "fromModel": "unexpected", "toModel": "gpt-5.6-sol"}),
             ),
             (
                 "code.protocol.unsupported",
-                json!({"generation": 1, "sourceSequence": 15, "methodHash": "method-deadbeef", "byteCount": 24, "detailRef": "detail-protocol"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 15, "methodHash": "method-deadbeef", "byteCount": 24, "detailRef": "detail-protocol"}),
             ),
         ];
 
@@ -2594,20 +2722,83 @@ mod tests {
         let rejected = NormalizedDomainEvent {
             schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
             event_id: "event-codex-invalid".to_owned(),
-            workspace_id: workspace.workspace_id,
+            workspace_id: workspace.workspace_id.clone(),
             session_id: None,
             producer: "code".to_owned(),
             kind: "code.tool.output".to_owned(),
             occurred_at: "2026-07-18T00:01:00.000Z".to_owned(),
-            payload: json!({"generation": 1, "sourceSequence": 16, "itemHandle": "item-tool", "excerpt": "ok", "rawStderr": "forbidden"}),
+            payload: json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 16, "itemHandle": "item-tool", "excerpt": "ok", "rawStderr": "forbidden"}),
         };
         assert_eq!(
             store.append_event(&rejected).unwrap_err().code,
-            "HIST-EVENT-FORBIDDEN-FIELD"
+            "HIST-EVENT-PAYLOAD"
+        );
+
+        for (index, excerpt) in [
+            "contains\rreturn",
+            "contains\u{0007}bell",
+            "/Users/private/project/file.rs",
+            "Bearer hidden-token",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let invalid_public_text = NormalizedDomainEvent {
+                schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+                event_id: format!("event-codex-private-{index}"),
+                workspace_id: workspace.workspace_id.clone(),
+                session_id: None,
+                producer: "code".to_owned(),
+                kind: "code.tool.output".to_owned(),
+                occurred_at: format!("2026-07-18T00:02:{index:02}.000Z"),
+                payload: json!({
+                    "semanticVersion": 1,
+                    "generation": 1,
+                    "sourceSequence": 20 + index,
+                    "itemHandle": "item-tool",
+                    "excerpt": excerpt,
+                }),
+            };
+            assert_eq!(
+                store.append_event(&invalid_public_text).unwrap_err().code,
+                "HIST-EVENT-PAYLOAD"
+            );
+        }
+
+        let unknown_semantic_version = NormalizedDomainEvent {
+            schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+            event_id: "event-codex-future-semantic".to_owned(),
+            workspace_id: workspace.workspace_id.clone(),
+            session_id: None,
+            producer: "code".to_owned(),
+            kind: "code.plan.updated".to_owned(),
+            occurred_at: "2026-07-18T00:03:00.000Z".to_owned(),
+            payload: json!({
+                "semanticVersion": 2,
+                "generation": 1,
+                "sourceSequence": 30,
+                "stepCount": 1,
+            }),
+        };
+        assert_eq!(
+            store
+                .append_event(&unknown_semantic_version)
+                .unwrap_err()
+                .code,
+            "HIST-EVENT-PAYLOAD"
         );
 
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn codex_public_text_counts_unicode_scalars_and_allows_only_normalized_multiline_controls() {
+        assert!(public_multiline("first line\n\tsecond 😀", 20, false));
+        assert!(public_multiline(&"😀".repeat(4), 4, false));
+        assert!(!public_multiline(&"😀".repeat(5), 4, false));
+        assert!(!public_multiline("line\r\n", 20, false));
+        assert!(!public_single_line("line\n", 20, false));
     }
 
     #[tokio::test]
@@ -2791,7 +2982,7 @@ mod tests {
                     producer: "code".to_owned(),
                     kind: "code.session.status.changed".to_owned(),
                     occurred_at: now(),
-                    payload: json!({ "status": "running" }),
+                    payload: codex_turn_payload("running", index + 1),
                 })
             }));
         }

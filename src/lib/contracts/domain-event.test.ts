@@ -38,7 +38,14 @@ describe("domain event runtime contract", () => {
     {
       producer: "code",
       kind: "code.session.status.changed",
-      payload: { status: "running" },
+      payload: {
+        semanticVersion: 1,
+        generation: 1,
+        sourceSequence: 1,
+        threadHandle: "thread-safe",
+        turnHandle: "turn-safe",
+        status: "running",
+      },
     },
     {
       producer: "live",
@@ -80,12 +87,23 @@ describe("domain event runtime contract", () => {
       ...eventBase,
       producer: "code",
       kind: "code.session.status.changed",
-      payload: { status: "unknown" },
+      payload: {
+        semanticVersion: 1,
+        generation: 1,
+        sourceSequence: 1,
+        threadHandle: "thread-safe",
+        turnHandle: "turn-safe",
+        status: "unknown",
+      },
     }
 
     expect(() => parseDomainEvent(event)).toThrow("domain event contract")
     expect(() =>
-      parseDomainEvent({ ...event, payload: { status: "running" }, raw: true }),
+      parseDomainEvent({
+        ...event,
+        payload: { ...event.payload, status: "running" },
+        raw: true,
+      }),
     ).toThrow("domain event contract")
   })
 })

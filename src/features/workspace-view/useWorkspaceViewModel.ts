@@ -245,8 +245,14 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   }, [filter, workspaces])
 
   const combinedTimeline = useMemo(() => {
-    const events = new Map(timeline.map((event) => [event.id, event] as const))
-    for (const event of codex.timeline) events.set(event.id, event)
+    const timelineKey = (event: WorkspaceTimelineItem) =>
+      event.kind === "history"
+        ? `history:${event.id}`
+        : `semantic:${event.stableId}`
+    const events = new Map(
+      timeline.map((event) => [timelineKey(event), event] as const),
+    )
+    for (const event of codex.timeline) events.set(timelineKey(event), event)
     return [...events.values()].sort((left, right) => {
       const timestamp =
         Date.parse(left.occurredAt) - Date.parse(right.occurredAt)

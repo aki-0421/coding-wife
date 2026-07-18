@@ -10,6 +10,11 @@ export interface DomainEventPayloadMap {
       "backlog" | "in_progress" | "in_review" | "done" | "canceled"
   }
   "code.session.status.changed": {
+    readonly semanticVersion: 1
+    readonly generation: number
+    readonly sourceSequence: number
+    readonly threadHandle: string
+    readonly turnHandle: string
     readonly status:
       "idle" | "running" | "waiting" | "interrupted" | "failed" | "completed"
   }
@@ -244,13 +249,34 @@ function parseCodeEvent(
   ] as const
 
   if (
-    !hasExactKeys(payload, ["status"]) ||
+    !hasExactKeys(payload, [
+      "semanticVersion",
+      "generation",
+      "sourceSequence",
+      "threadHandle",
+      "turnHandle",
+      "status",
+    ]) ||
+    payload.semanticVersion !== 1 ||
+    typeof payload.generation !== "number" ||
+    !Number.isSafeInteger(payload.generation) ||
+    payload.generation < 1 ||
+    typeof payload.sourceSequence !== "number" ||
+    !Number.isSafeInteger(payload.sourceSequence) ||
+    payload.sourceSequence < 0 ||
+    !isNonEmptyString(payload.threadHandle) ||
+    !isNonEmptyString(payload.turnHandle) ||
     !statuses.some((status) => status === payload.status)
   ) {
     return eventViolation()
   }
 
   return buildEvent(base, "code", "code.session.status.changed", {
+    semanticVersion: 1,
+    generation: payload.generation,
+    sourceSequence: payload.sourceSequence,
+    threadHandle: payload.threadHandle,
+    turnHandle: payload.turnHandle,
     status: payload.status as (typeof statuses)[number],
   })
 }

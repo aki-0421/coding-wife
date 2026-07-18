@@ -69,6 +69,7 @@ describe("CodexEventProjector", () => {
   it("projects tool, file, plan, diff, approval, error, and completion semantics", () => {
     const projector = new CodexEventProjector()
     const approval = parseCodexEvent(fixture.events[1])
+    if (approval.kind !== "pending_request") throw new Error("approval fixture")
     const projections = [
       projector.project(
         event(1, {
@@ -148,6 +149,12 @@ describe("CodexEventProjector", () => {
       "code.session.diagnostic",
       "code.session.status.changed",
     ])
+    expect(projections[5]?.history?.payload).toEqual({
+      semanticVersion: 1,
+      generation: approval.generation,
+      sourceSequence: approval.sequence,
+      request: approval.payload.request,
+    })
     expect(JSON.stringify(projections)).not.toMatch(
       /chain[-_ ]?of[-_ ]?thought|rawReasoning|\/Users\//iu,
     )
