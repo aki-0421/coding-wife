@@ -22,13 +22,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
-import type { EditableWorkspaceContextModel } from "@/features/workspace-view/useEditableWorkspaceContext"
 import {
-  firstInvalidCharacterContextField,
-  firstInvalidProjectContextField,
-  type CharacterContext,
-  type ProjectContext,
-} from "@/lib/contracts/workspace-context"
+  normalizeContextListDraft,
+  type EditableContextField,
+  type EditableWorkspaceContextModel,
+} from "@/features/workspace-view/useEditableWorkspaceContext"
 import { unicodeScalarCount } from "@/lib/public-text"
 
 interface EditableContextSectionProps {
@@ -39,23 +37,14 @@ interface EditableContextSectionProps {
   readonly turnActive: boolean
 }
 
-type ContextField = keyof ProjectContext | keyof CharacterContext
-
-function lines(value: string): readonly string[] {
-  return value
-    .split("\n")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-}
-
 function projectTotal(model: EditableWorkspaceContextModel): number {
   const context = model.project.draft
   return [
     context.goal,
     context.constraints,
     context.userNotes,
-    ...context.definitionOfDone,
-    ...context.technicalReferences,
+    ...normalizeContextListDraft(model.project.listDrafts.definitionOfDone),
+    ...normalizeContextListDraft(model.project.listDrafts.technicalReferences),
   ].reduce((total, value) => total + unicodeScalarCount(value), 0)
 }
 
@@ -67,15 +56,20 @@ function characterTotal(model: EditableWorkspaceContextModel): number {
     context.toneNotes,
     context.speechDensity,
     context.behavior,
-    ...context.prohibitedExpressions,
+    ...normalizeContextListDraft(
+      model.character.listDrafts.prohibitedExpressions,
+    ),
   ].reduce((total, value) => total + unicodeScalarCount(value), 0)
 }
 
 function SectionStatus({
   copy,
   model,
+  onReload,
   section,
-}: Pick<EditableContextSectionProps, "copy" | "model" | "section">) {
+}: Pick<EditableContextSectionProps, "copy" | "model" | "section"> & {
+  readonly onReload: () => void
+}) {
   const state = section === "project" ? model.project : model.character
   if (state.status === "conflict" && state.conflict !== null) {
     return (
@@ -97,11 +91,7 @@ function SectionStatus({
             </span>
           ) : null}
           <Button
-            onClick={
-              section === "project"
-                ? model.reloadProject
-                : model.reloadCharacter
-            }
+            onClick={onReload}
             size="xs"
             type="button"
             variant="secondary"
@@ -177,25 +167,59 @@ export function EditableContextSection({
   const project = section === "project"
   const state = project ? model.project : model.character
   const fieldRefs = useRef<
-    Partial<Record<ContextField, HTMLInputElement | HTMLTextAreaElement | null>>
+    Partial<
+      Record<
+        EditableContextField,
+        HTMLInputElement | HTMLTextAreaElement | null
+      >
+    >
   >({})
+  const titleRef = useRef<HTMLHeadingElement | null>(null)
   const titleId = `${instanceId}-${section}-context-title`
-  const invalid = state.status === "error" && state.persisted !== null
-  const invalidField = invalid
-    ? project
-      ? (firstInvalidProjectContextField(model.project.draft) ?? "goal")
-      : (firstInvalidCharacterContextField(model.character.draft) ??
-        "displayName")
-    : null
+  const invalidField =
+    state.status === "error" && state.persisted !== null
+      ? (state.fieldError?.field ?? null)
+      : null
   const total = project ? projectTotal(model) : characterTotal(model)
   const maximum = project ? 32_000 : 12_000
-  const definitionCount = model.project.draft.definitionOfDone.length
-  const referenceCount = model.project.draft.technicalReferences.length
-  const prohibitedCount = model.character.draft.prohibitedExpressions.length
+  const definitionCount = normalizeContextListDraft(
+    model.project.listDrafts.definitionOfDone,
+  ).length
+  const referenceCount = normalizeContextListDraft(
+    model.project.listDrafts.technicalReferences,
+  ).length
+  const prohibitedCount = normalizeContextListDraft(
+    model.character.listDrafts.prohibitedExpressions,
+  ).length
+
+  const fieldErrorId = (field: EditableContextField) =>
+    `${instanceId}-${section}-${field}-error`
+  const describedBy = (field: EditableContextField, descriptionId?: string) => {
+    const ids = [
+      descriptionId,
+      invalidField === field ? fieldErrorId(field) : undefined,
+    ].filter((value): value is string => value !== undefined)
+    return ids.length === 0 ? undefined : ids.join(" ")
+  }
+  const renderFieldError = (field: EditableContextField) => {
+    if (invalidField !== field || state.fieldError === null) return null
+    return (
+      <FieldDescription className="text-destructive" id={fieldErrorId(field)}>
+        {copy.contextView.errors[state.fieldError.reason]}
+      </FieldDescription>
+    )
+  }
+  const reload = () => {
+    if (project) model.reloadProject()
+    else model.reloadCharacter()
+    queueMicrotask(() => titleRef.current?.focus())
+  }
 
   useEffect(() => {
+    if (state.status !== "error" || state.persisted === null) return
     if (invalidField !== null) fieldRefs.current[invalidField]?.focus()
-  }, [invalidField, state.errorCode])
+    else titleRef.current?.focus()
+  }, [invalidField, state.errorCode, state.persisted, state.status])
 
   const metadata = useMemo(() => {
     if (state.persisted === null) return null
@@ -224,7 +248,12 @@ export function EditableContextSection({
             className="mt-xxs size-4 shrink-0 text-muted-foreground"
           />
           <div className="flex min-w-0 flex-col gap-xxs">
-            <h2 className="m-0 text-title text-text-strong" id={titleId}>
+            <h2
+              className="m-0 text-title text-text-strong"
+              id={titleId}
+              ref={titleRef}
+              tabIndex={-1}
+            >
               {project
                 ? copy.contextView.projectTitle
                 : copy.contextView.characterTitle}
@@ -249,7 +278,12 @@ export function EditableContextSection({
         </div>
       </div>
 
-      <SectionStatus copy={copy} model={model} section={section} />
+      <SectionStatus
+        copy={copy}
+        model={model}
+        onReload={reload}
+        section={section}
+      />
 
       {project ? (
         <FieldGroup>
@@ -258,6 +292,7 @@ export function EditableContextSection({
               {copy.contextView.goal}
             </FieldLabel>
             <Textarea
+              aria-describedby={describedBy("goal")}
               aria-invalid={invalidField === "goal" || undefined}
               disabled={busy}
               id={`${instanceId}-project-goal`}
@@ -271,12 +306,14 @@ export function EditableContextSection({
               rows={3}
               value={model.project.draft.goal}
             />
+            {renderFieldError("goal")}
           </Field>
           <Field data-invalid={invalidField === "constraints" || undefined}>
             <FieldLabel htmlFor={`${instanceId}-project-constraints`}>
               {copy.contextView.constraints}
             </FieldLabel>
             <Textarea
+              aria-describedby={describedBy("constraints")}
               aria-invalid={invalidField === "constraints" || undefined}
               disabled={busy}
               id={`${instanceId}-project-constraints`}
@@ -290,6 +327,7 @@ export function EditableContextSection({
               rows={3}
               value={model.project.draft.constraints}
             />
+            {renderFieldError("constraints")}
           </Field>
           <Field
             data-invalid={invalidField === "definitionOfDone" || undefined}
@@ -298,24 +336,33 @@ export function EditableContextSection({
               {copy.contextView.definition}
             </FieldLabel>
             <Textarea
+              aria-describedby={describedBy(
+                "definitionOfDone",
+                `${instanceId}-project-definition-description`,
+              )}
               aria-invalid={invalidField === "definitionOfDone" || undefined}
               disabled={busy}
               id={`${instanceId}-project-definition`}
               maxLength={10019}
+              onBlur={() => model.normalizeProjectList("definitionOfDone")}
               onChange={(event) =>
-                model.updateProject({
-                  definitionOfDone: lines(event.currentTarget.value),
-                })
+                model.updateProjectList(
+                  "definitionOfDone",
+                  event.currentTarget.value,
+                )
               }
               ref={(element) => {
                 fieldRefs.current.definitionOfDone = element
               }}
               rows={4}
-              value={model.project.draft.definitionOfDone.join("\n")}
+              value={model.project.listDrafts.definitionOfDone}
             />
-            <FieldDescription>
+            <FieldDescription
+              id={`${instanceId}-project-definition-description`}
+            >
               {copy.contextView.onePerLine} · {definitionCount}/20
             </FieldDescription>
+            {renderFieldError("definitionOfDone")}
           </Field>
           <Field
             data-invalid={invalidField === "technicalReferences" || undefined}
@@ -324,30 +371,40 @@ export function EditableContextSection({
               {copy.contextView.technicalReferences}
             </FieldLabel>
             <Textarea
+              aria-describedby={describedBy(
+                "technicalReferences",
+                `${instanceId}-project-references-description`,
+              )}
               aria-invalid={invalidField === "technicalReferences" || undefined}
               disabled={busy}
               id={`${instanceId}-project-references`}
               maxLength={10019}
+              onBlur={() => model.normalizeProjectList("technicalReferences")}
               onChange={(event) =>
-                model.updateProject({
-                  technicalReferences: lines(event.currentTarget.value),
-                })
+                model.updateProjectList(
+                  "technicalReferences",
+                  event.currentTarget.value,
+                )
               }
               ref={(element) => {
                 fieldRefs.current.technicalReferences = element
               }}
               rows={3}
-              value={model.project.draft.technicalReferences.join("\n")}
+              value={model.project.listDrafts.technicalReferences}
             />
-            <FieldDescription>
+            <FieldDescription
+              id={`${instanceId}-project-references-description`}
+            >
               {copy.contextView.referencesDescription} · {referenceCount}/20
             </FieldDescription>
+            {renderFieldError("technicalReferences")}
           </Field>
           <Field data-invalid={invalidField === "userNotes" || undefined}>
             <FieldLabel htmlFor={`${instanceId}-project-notes`}>
               {copy.contextView.userNotes}
             </FieldLabel>
             <Textarea
+              aria-describedby={describedBy("userNotes")}
               aria-invalid={invalidField === "userNotes" || undefined}
               disabled={busy}
               id={`${instanceId}-project-notes`}
@@ -361,6 +418,7 @@ export function EditableContextSection({
               rows={3}
               value={model.project.draft.userNotes}
             />
+            {renderFieldError("userNotes")}
           </Field>
         </FieldGroup>
       ) : (
@@ -370,6 +428,7 @@ export function EditableContextSection({
               {copy.contextView.displayName}
             </FieldLabel>
             <Input
+              aria-describedby={describedBy("displayName")}
               aria-invalid={invalidField === "displayName" || undefined}
               disabled={busy}
               id={`${instanceId}-character-name`}
@@ -384,6 +443,7 @@ export function EditableContextSection({
               }}
               value={model.character.draft.displayName}
             />
+            {renderFieldError("displayName")}
           </Field>
           <FieldSet>
             <FieldLegend>{copy.contextView.tone}</FieldLegend>
@@ -418,6 +478,7 @@ export function EditableContextSection({
               {copy.contextView.toneNotes}
             </FieldLabel>
             <Textarea
+              aria-describedby={describedBy("toneNotes")}
               aria-invalid={invalidField === "toneNotes" || undefined}
               disabled={busy}
               id={`${instanceId}-character-tone-notes`}
@@ -431,6 +492,7 @@ export function EditableContextSection({
               rows={2}
               value={model.character.draft.toneNotes}
             />
+            {renderFieldError("toneNotes")}
           </Field>
           <FieldSet>
             <FieldLegend>{copy.contextView.speechDensity}</FieldLegend>
@@ -465,6 +527,7 @@ export function EditableContextSection({
               {copy.contextView.behavior}
             </FieldLabel>
             <Textarea
+              aria-describedby={describedBy("behavior")}
               aria-invalid={invalidField === "behavior" || undefined}
               disabled={busy}
               id={`${instanceId}-character-behavior`}
@@ -478,6 +541,7 @@ export function EditableContextSection({
               rows={3}
               value={model.character.draft.behavior}
             />
+            {renderFieldError("behavior")}
           </Field>
           <Field
             data-invalid={invalidField === "prohibitedExpressions" || undefined}
@@ -486,27 +550,33 @@ export function EditableContextSection({
               {copy.contextView.prohibited}
             </FieldLabel>
             <Textarea
+              aria-describedby={describedBy(
+                "prohibitedExpressions",
+                `${instanceId}-character-prohibited-description`,
+              )}
               aria-invalid={
                 invalidField === "prohibitedExpressions" || undefined
               }
               disabled={busy}
               id={`${instanceId}-character-prohibited`}
               maxLength={4019}
+              onBlur={model.normalizeCharacterList}
               onChange={(event) =>
-                model.updateCharacter({
-                  prohibitedExpressions: lines(event.currentTarget.value),
-                })
+                model.updateCharacterList(event.currentTarget.value)
               }
               ref={(element) => {
                 fieldRefs.current.prohibitedExpressions = element
               }}
               rows={3}
-              value={model.character.draft.prohibitedExpressions.join("\n")}
+              value={model.character.listDrafts.prohibitedExpressions}
             />
-            <FieldDescription>
+            <FieldDescription
+              id={`${instanceId}-character-prohibited-description`}
+            >
               {copy.contextView.policyBoundary} · {copy.contextView.onePerLine}{" "}
               · {prohibitedCount}/20
             </FieldDescription>
+            {renderFieldError("prohibitedExpressions")}
           </Field>
         </FieldGroup>
       )}

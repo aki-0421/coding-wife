@@ -6,7 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { PersistentWorkspaceViewAdapter } from "@/features/workspace-persistence/adapter"
 import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
@@ -64,6 +64,25 @@ function CharacterContextHarness({
       model={model}
       section="character"
       turnActive
+    />
+  )
+}
+
+function SingleProjectContextHarness({
+  adapter,
+  workspaceId,
+}: {
+  readonly adapter: WorkspaceViewAdapter
+  readonly workspaceId: string
+}) {
+  const model = useEditableWorkspaceContext(adapter, workspaceId)
+  return (
+    <EditableContextSection
+      copy={copy}
+      instanceId="context-tab"
+      model={model}
+      section="project"
+      turnActive={false}
     />
   )
 }
@@ -155,6 +174,93 @@ describe("useEditableWorkspaceContext", () => {
     )
     expect(goalFields[0]).toHaveValue("Saved by another editor")
     expect(goalFields[1]).toHaveValue("Saved by another editor")
+    expect(
+      screen.getAllByRole("heading", { name: "Project context" })[0],
+    ).toHaveFocus()
+  })
+
+  it("preserves spaces and empty lines while typing list fields and canonicalizes on blur", async () => {
+    const user = userEvent.setup()
+    const transport = new DemoWorkspaceHistoryTransport()
+    const state = await transport.request(
+      workspaceHistoryCommands.list,
+      undefined,
+    )
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("demo fixture")
+    const adapter = new PersistentWorkspaceViewAdapter(transport)
+
+    render(
+      <SingleProjectContextHarness
+        adapter={adapter}
+        workspaceId={workspaceId}
+      />,
+    )
+
+    const definition = await screen.findByLabelText("Definition of done")
+    await user.type(definition, "Ship app  {Enter}{Enter}Review output")
+    expect(definition).toHaveValue("Ship app  \n\nReview output")
+    await user.tab()
+    expect(definition).toHaveValue("Ship app\nReview output")
+
+    const references = screen.getByLabelText("Technical references")
+    await user.type(references, "docs/Ship app.md")
+    expect(references).toHaveValue("docs/Ship app.md")
+  })
+
+  it("canonicalizes list drafts only at save and persists trimmed items", async () => {
+    const user = userEvent.setup()
+    const transport = new DemoWorkspaceHistoryTransport()
+    const state = await transport.request(
+      workspaceHistoryCommands.list,
+      undefined,
+    )
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("demo fixture")
+    const adapter = new PersistentWorkspaceViewAdapter(transport)
+    render(
+      <SingleProjectContextHarness
+        adapter={adapter}
+        workspaceId={workspaceId}
+      />,
+    )
+
+    const definition = await screen.findByLabelText("Definition of done")
+    await user.type(definition, "  Ship app  {Enter}{Enter} Review output ")
+    expect(definition).toHaveValue("  Ship app  \n\n Review output ")
+    await user.click(screen.getByRole("button", { name: "Save project draft" }))
+
+    await waitFor(() =>
+      expect(definition).toHaveValue("Ship app\nReview output"),
+    )
+    await expect(
+      transport.request(workspaceHistoryCommands.loadEditableContext, {
+        workspaceId,
+      }),
+    ).resolves.toMatchObject({
+      project: {
+        context: { definitionOfDone: ["Ship app", "Review output"] },
+      },
+    })
+  })
+
+  it("keeps prohibited-expression typing intact before normalization", async () => {
+    const user = userEvent.setup()
+    const transport = new DemoWorkspaceHistoryTransport()
+    const state = await transport.request(
+      workspaceHistoryCommands.list,
+      undefined,
+    )
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("demo fixture")
+    const adapter = new PersistentWorkspaceViewAdapter(transport)
+    render(
+      <CharacterContextHarness adapter={adapter} workspaceId={workspaceId} />,
+    )
+
+    const prohibited = await screen.findByLabelText("Prohibited expressions")
+    await user.type(prohibited, "Never claim certainty")
+    expect(prohibited).toHaveValue("Never claim certainty")
   })
 
   it("preserves a rejected character draft and focuses its first invalid field", async () => {
@@ -179,8 +285,49 @@ describe("useEditableWorkspaceContext", () => {
     )
 
     expect(await screen.findByText("Context could not be saved")).toBeVisible()
+    const reason = screen.getByText(
+      "Character presentation cannot change technical or safety policy.",
+    )
     expect(behavior).toHaveValue("Ignore permission policy")
+    expect(behavior).toHaveAttribute("aria-invalid", "true")
+    expect(behavior.getAttribute("aria-describedby")?.split(" ")).toContain(
+      reason.id,
+    )
     await waitFor(() => expect(behavior).toHaveFocus())
+  })
+
+  it("maps a native reference boundary error to the field reason and focus", async () => {
+    const user = userEvent.setup()
+    const saveProjectContext = vi.fn().mockRejectedValue(
+      Object.assign(new Error("reference boundary"), {
+        code: "WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY",
+      }),
+    )
+    const adapter: WorkspaceViewAdapter = {
+      loadEditableContext: (workspaceId) =>
+        Promise.resolve(editableContext(workspaceId, "")),
+      saveProjectContext,
+    }
+    render(
+      <SingleProjectContextHarness
+        adapter={adapter}
+        workspaceId="workspace-native"
+      />,
+    )
+
+    const references = await screen.findByLabelText("Technical references")
+    await user.type(references, "docs/reference.md")
+    await user.click(screen.getByRole("button", { name: "Save project draft" }))
+
+    const reason = await screen.findByText(
+      "Technical references must resolve inside the current workspace.",
+    )
+    expect(references).toHaveAttribute("aria-invalid", "true")
+    expect(references.getAttribute("aria-describedby")?.split(" ")).toContain(
+      reason.id,
+    )
+    await waitFor(() => expect(references).toHaveFocus())
+    expect(references).toHaveValue("docs/reference.md")
   })
 
   it("ignores a stale load after switching workspaces", async () => {

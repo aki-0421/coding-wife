@@ -76,6 +76,14 @@ export interface WorkspaceTurnContextSnapshot {
   readonly character: CharacterContext
 }
 
+export type WorkspaceContextValidationReason =
+  "required" | "text" | "items" | "technicalReference" | "policy" | "total"
+
+export interface WorkspaceContextValidationIssue<Field extends string> {
+  readonly field: Field
+  readonly reason: WorkspaceContextValidationReason
+}
+
 export class WorkspaceContextContractError extends Error {
   constructor() {
     super("The value did not match the workspace context contract.")
@@ -232,18 +240,30 @@ function validItems(
 export function firstInvalidProjectContextField(
   value: ProjectContext,
 ): keyof ProjectContext | null {
-  if (!isContextText(value.goal, 8_000)) return "goal"
-  if (!isContextText(value.constraints, 8_000)) return "constraints"
+  return projectContextValidationIssue(value)?.field ?? null
+}
+
+export function projectContextValidationIssue(
+  value: ProjectContext,
+): WorkspaceContextValidationIssue<keyof ProjectContext> | null {
+  if (!isContextText(value.goal, 8_000)) {
+    return { field: "goal", reason: "text" }
+  }
+  if (!isContextText(value.constraints, 8_000)) {
+    return { field: "constraints", reason: "text" }
+  }
   if (!validItems(value.definitionOfDone, 20, 500)) {
-    return "definitionOfDone"
+    return { field: "definitionOfDone", reason: "items" }
   }
-  if (
-    !validItems(value.technicalReferences, 20, 500) ||
-    !value.technicalReferences.every(validTechnicalReference)
-  ) {
-    return "technicalReferences"
+  if (!validItems(value.technicalReferences, 20, 500)) {
+    return { field: "technicalReferences", reason: "items" }
   }
-  if (!isContextText(value.userNotes, 8_000)) return "userNotes"
+  if (!value.technicalReferences.every(validTechnicalReference)) {
+    return { field: "technicalReferences", reason: "technicalReference" }
+  }
+  if (!isContextText(value.userNotes, 8_000)) {
+    return { field: "userNotes", reason: "text" }
+  }
   const total =
     unicodeScalarCount(value.goal) +
     unicodeScalarCount(value.constraints) +
@@ -256,28 +276,47 @@ export function firstInvalidProjectContextField(
       (sum, item) => sum + unicodeScalarCount(item),
       0,
     )
-  return total > 32_000 ? "userNotes" : null
+  return total > 32_000 ? { field: "userNotes", reason: "total" } : null
 }
 
 export function firstInvalidCharacterContextField(
   value: CharacterContext,
 ): keyof CharacterContext | null {
+  return characterContextValidationIssue(value)?.field ?? null
+}
+
+export function characterContextValidationIssue(
+  value: CharacterContext,
+): WorkspaceContextValidationIssue<keyof CharacterContext> | null {
   if (
     !isContextText(value.displayName, 40, false) ||
-    value.displayName !== value.displayName.trim() ||
-    containsPolicyOverride(value.displayName)
+    value.displayName !== value.displayName.trim()
   ) {
-    return "displayName"
+    return {
+      field: "displayName",
+      reason: value.displayName.trim().length === 0 ? "required" : "text",
+    }
   }
-  if (!isContextText(value.toneNotes, 1_000)) return "toneNotes"
-  if (containsPolicyOverride(value.toneNotes)) return "toneNotes"
-  if (!isContextText(value.behavior, 4_000)) return "behavior"
-  if (containsPolicyOverride(value.behavior)) return "behavior"
+  if (containsPolicyOverride(value.displayName)) {
+    return { field: "displayName", reason: "policy" }
+  }
+  if (!isContextText(value.toneNotes, 1_000)) {
+    return { field: "toneNotes", reason: "text" }
+  }
+  if (containsPolicyOverride(value.toneNotes)) {
+    return { field: "toneNotes", reason: "policy" }
+  }
+  if (!isContextText(value.behavior, 4_000)) {
+    return { field: "behavior", reason: "text" }
+  }
+  if (containsPolicyOverride(value.behavior)) {
+    return { field: "behavior", reason: "policy" }
+  }
   if (!validItems(value.prohibitedExpressions, 20, 200)) {
-    return "prohibitedExpressions"
+    return { field: "prohibitedExpressions", reason: "items" }
   }
   if (value.prohibitedExpressions.some(containsPolicyOverride)) {
-    return "prohibitedExpressions"
+    return { field: "prohibitedExpressions", reason: "policy" }
   }
   const policyValues = [
     value.displayName,
@@ -289,7 +328,7 @@ export function firstInvalidCharacterContextField(
     policyValues.reduce((sum, item) => sum + unicodeScalarCount(item), 0) +
     unicodeScalarCount(value.tone) +
     unicodeScalarCount(value.speechDensity)
-  return total > 12_000 ? "behavior" : null
+  return total > 12_000 ? { field: "behavior", reason: "total" } : null
 }
 
 export function parseProjectContext(value: unknown): ProjectContext {

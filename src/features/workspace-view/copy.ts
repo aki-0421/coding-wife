@@ -269,6 +269,22 @@ const en = {
     saveError: "Context could not be saved",
     saveErrorDescription:
       "Your draft is still here. Review the details and try again.",
+    errors: {
+      required: "Enter a value before saving.",
+      text: "This value exceeds its limit or contains unsupported control characters.",
+      items: "Review the item count and per-item character limits.",
+      technicalReference:
+        "Use a normalized workspace-relative path or supported document reference.",
+      policy:
+        "Character presentation cannot change technical or safety policy.",
+      total: "This context exceeds the total character limit.",
+      referenceBoundary:
+        "Technical references must resolve inside the current workspace.",
+      referenceMissing:
+        "A saved technical reference is no longer available. Review and save it again.",
+      referenceChanged:
+        "A saved technical reference now resolves to a different target. Review and save it again.",
+    },
     savedNextTurn: "Saved. This version will be used from the next turn.",
     loading: "Loading workspace context",
     unsaved: "Unsaved",
@@ -715,6 +731,21 @@ const ja: typeof en = {
     saveError: "コンテキストを保存できませんでした",
     saveErrorDescription:
       "下書きは保持されています。詳細を確認して再試行してください。",
+    errors: {
+      required: "保存する前に値を入力してください。",
+      text: "文字数上限を超えているか、使用できない制御文字が含まれています。",
+      items: "項目数と各項目の文字数上限を確認してください。",
+      technicalReference:
+        "正規化されたワークスペース相対パスか、対応する文書参照を指定してください。",
+      policy: "キャラクター表現から技術policyや安全policyは変更できません。",
+      total: "コンテキスト全体の文字数上限を超えています。",
+      referenceBoundary:
+        "技術参照は現在のワークスペース内で解決できる必要があります。",
+      referenceMissing:
+        "保存済みの技術参照を利用できません。確認してから保存し直してください。",
+      referenceChanged:
+        "保存済みの技術参照が別の対象を指しています。確認してから保存し直してください。",
+    },
     savedNextTurn: "保存しました。次のturnからこのバージョンを使います。",
     loading: "ワークスペースコンテキストを読込中",
     unsaved: "未保存",
