@@ -16,7 +16,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
-use super::process::{process_group_exists, terminate_child_process_group};
+use super::process::{process_group_exists, terminate_child_process_group, ProcessGroupDropGuard};
 use super::types::{BinarySource, CapabilityState, CodexCapabilities};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -377,6 +377,7 @@ async fn run_bounded(
 
     let mut child = command.spawn().map_err(|_| BinaryError::ProbeFailed)?;
     let pid = child.id().ok_or(BinaryError::ProbeFailed)?;
+    let mut process_group_guard = ProcessGroupDropGuard::new(pid);
     let deadline = tokio::time::Instant::now() + PROBE_TIMEOUT;
     let stdout = child.stdout.take().ok_or(BinaryError::ProbeFailed)?;
     let stderr = child.stderr.take().ok_or(BinaryError::ProbeFailed)?;
@@ -467,6 +468,7 @@ async fn run_bounded(
         terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
         return Err(BinaryError::ProbeFailed);
     }
+    process_group_guard.disarm();
     identity.revalidate().await?;
     if !status.success() {
         return Err(BinaryError::ProbeFailed);

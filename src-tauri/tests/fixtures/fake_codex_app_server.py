@@ -236,6 +236,8 @@ def main():
     if not args or args[0] != "app-server":
         return 2
 
+    if MODE.startswith("readiness_"):
+        record(f"readiness_process_started:{os.getpid()}")
     if EXECUTION_CLASS == "support":
         record(f"support_process_started:{os.getpid()}")
         if MODE == "support_drop_grandchild":
@@ -286,6 +288,9 @@ def main():
         if method == "initialized":
             continue
         if method == "account/read":
+            if MODE == "readiness_handshake_timeout":
+                record("readiness_account_read_ignored")
+                continue
             if EXECUTION_CLASS == "support":
                 auth = pathlib.Path(os.environ.get("CODEX_HOME", "")) / "auth.json"
                 try:
@@ -312,24 +317,36 @@ def main():
                 continue
             result(
                 message_id,
-                {"account": {"type": "chatgpt"}, "requiresOpenaiAuth": True},
+                {
+                    "account": None
+                    if MODE == "readiness_unauthenticated"
+                    else {"type": "chatgpt"},
+                    "requiresOpenaiAuth": True,
+                },
             )
             continue
         if method == "config/read":
             result(message_id, {"config": {"model": "gpt-5.6-sol"}, "origins": {}})
             continue
         if method == "model/list":
+            efforts = (
+                [{"reasoningEffort": "low"}]
+                if MODE == "readiness_effort_unavailable"
+                else [
+                    {"reasoningEffort": "low"},
+                    {"reasoningEffort": "max"},
+                ]
+            )
             result(
                 message_id,
                 {
-                    "data": [
+                    "data": []
+                    if MODE == "readiness_model_unavailable"
+                    else [
                         {
                             "id": "gpt-5.6-sol",
                             "model": "gpt-5.6-sol",
-                            "supportedReasoningEfforts": [
-                                {"reasoningEffort": "low"},
-                                {"reasoningEffort": "max"},
-                            ],
+                            "supportedReasoningEfforts": efforts,
                         }
                     ],
                     "nextCursor": None,

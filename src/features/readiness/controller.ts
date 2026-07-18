@@ -7,12 +7,16 @@ import {
 export type NativeReadinessControllerStatus =
   "loading" | "ready" | "rechecking" | "error"
 export type NativeReadinessCopyStatus = "idle" | "copying" | "copied" | "error"
+export type NativeReadinessRecheckOutcome =
+  "idle" | "complete" | "attention" | "failed"
 
 export interface NativeReadinessControllerState {
   readonly status: NativeReadinessControllerStatus
   readonly snapshot: NativeReadinessSnapshotV1 | null
   readonly errorCode: string | null
   readonly copyStatus: NativeReadinessCopyStatus
+  readonly recheckSequence: number
+  readonly recheckOutcome: NativeReadinessRecheckOutcome
 }
 
 export interface DiagnosticsClipboard {
@@ -45,6 +49,8 @@ export class NativeReadinessController {
     snapshot: null,
     errorCode: null,
     copyStatus: "idle",
+    recheckSequence: 0,
+    recheckOutcome: "idle",
   }
   #initializePromise: Promise<boolean> | null = null
   #runSequence = 0
@@ -115,6 +121,7 @@ export class NativeReadinessController {
         rechecking && this.#state.snapshot !== null ? "rechecking" : "loading",
       errorCode: null,
       copyStatus: "idle",
+      recheckOutcome: rechecking ? "idle" : this.#state.recheckOutcome,
     })
     try {
       const snapshot = await this.#gateway.run()
@@ -124,6 +131,15 @@ export class NativeReadinessController {
         snapshot,
         errorCode: null,
         copyStatus: "idle",
+        recheckSequence: this.#state.recheckSequence + (rechecking ? 1 : 0),
+        recheckOutcome: rechecking
+          ? snapshot.checks.some(
+              (check) =>
+                check.status === "blocked" || check.status === "unavailable",
+            )
+            ? "attention"
+            : "complete"
+          : this.#state.recheckOutcome,
       })
       return true
     } catch (error) {
@@ -133,6 +149,8 @@ export class NativeReadinessController {
           status: "error",
           errorCode: safeErrorCode(error),
           copyStatus: "idle",
+          recheckSequence: this.#state.recheckSequence + (rechecking ? 1 : 0),
+          recheckOutcome: rechecking ? "failed" : this.#state.recheckOutcome,
         })
       }
       return false

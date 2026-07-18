@@ -41,6 +41,32 @@ pub(crate) struct BoundedCommandOutput {
     pub stderr: Vec<u8>,
 }
 
+/// Makes process-group cleanup cancellation-safe while an async constructor or
+/// bounded command still owns a newly spawned child. Tokio's `kill_on_drop`
+/// covers only the direct child; this guard also removes descendants.
+pub(crate) struct ProcessGroupDropGuard {
+    pid: u32,
+    armed: bool,
+}
+
+impl ProcessGroupDropGuard {
+    pub(crate) fn new(pid: u32) -> Self {
+        Self { pid, armed: true }
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ProcessGroupDropGuard {
+    fn drop(&mut self) {
+        if self.armed && process_group_exists(self.pid) {
+            let _ = signal_process_group(self.pid, SIGKILL);
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum CaptureStream {
     Stdout,
@@ -93,6 +119,7 @@ pub(crate) async fn run_bounded_command(
 
     let mut child = command.spawn().map_err(|_| BoundedCommandError::Spawn)?;
     let pid = child.id().ok_or(BoundedCommandError::Spawn)?;
+    let mut process_group_guard = ProcessGroupDropGuard::new(pid);
     let stdout = match child.stdout.take() {
         Some(stdout) => stdout,
         None => {
@@ -165,6 +192,7 @@ pub(crate) async fn run_bounded_command(
         terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
         return Err(BoundedCommandError::ProcessTree);
     }
+    process_group_guard.disarm();
     Ok(BoundedCommandOutput {
         status,
         stdout,
@@ -303,6 +331,7 @@ async fn spawn_process_with_environment(
 
     let mut child = command.spawn().map_err(|_| ProcessError::Spawn)?;
     let pid = child.id().ok_or(ProcessError::Spawn)?;
+    let mut process_group_guard = ProcessGroupDropGuard::new(pid);
     if binary.revalidate().await.is_err() {
         terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
         return Err(ProcessError::IdentityChanged);
@@ -327,7 +356,7 @@ async fn spawn_process_with_environment(
         redaction_root.to_path_buf(),
     ));
 
-    Ok(ProcessRuntime {
+    let runtime = ProcessRuntime {
         connection,
         execution_class,
         child: Arc::new(Mutex::new(child)),
@@ -336,7 +365,9 @@ async fn spawn_process_with_environment(
         shutdown_complete: AtomicBool::new(false),
         shutdown_lock: Mutex::new(()),
         pid,
-    })
+    };
+    process_group_guard.disarm();
+    Ok(runtime)
 }
 
 async fn read_stderr(
@@ -675,6 +706,47 @@ mod tests {
         assert!(
             !process_group_exists(pid),
             "timed-out process group survived"
+        );
+        let _ = std::fs::remove_file(state);
+        let _ = std::fs::remove_file(parent_state);
+    }
+
+    #[tokio::test]
+    async fn canceled_bounded_command_removes_the_process_tree() {
+        let state = temporary_state_file();
+        let parent_state = temporary_state_file();
+        let mut command = Command::new(process_tree_fixture());
+        command
+            .env("CODING_WIFE_PROCESS_TREE_STATE", &state)
+            .env("CODING_WIFE_PROCESS_TREE_PARENT_STATE", &parent_state);
+        let task = tokio::spawn(run_bounded_command(
+            command,
+            Duration::from_secs(30),
+            4096,
+            4096,
+        ));
+        let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while !parent_state.exists() {
+            assert!(
+                tokio::time::Instant::now() < ready_deadline,
+                "bounded command did not publish its process-group identity",
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let pid = std::fs::read_to_string(&parent_state)
+            .expect("parent pid")
+            .parse::<u32>()
+            .expect("numeric pid");
+
+        task.abort();
+        assert!(task.await.expect_err("task canceled").is_cancelled());
+        let gone_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while process_group_exists(pid) && tokio::time::Instant::now() < gone_deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !process_group_exists(pid),
+            "canceled process group survived",
         );
         let _ = std::fs::remove_file(state);
         let _ = std::fs::remove_file(parent_state);

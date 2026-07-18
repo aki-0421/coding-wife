@@ -33,6 +33,10 @@ const diagnosticsCopy = {
     copying: "Copying…",
     copied: "Safe summary copied.",
     copyFailed: "The safe summary could not be copied.",
+    recheckComplete: "Diagnostics updated.",
+    recheckAttention:
+      "Diagnostics updated. One or more capabilities are blocked or unavailable.",
+    recheckFailed: "Diagnostics could not be updated.",
     retained:
       "Recheck failed. The previous snapshot remains visible and is marked stale.",
     unavailable: "Native readiness could not be loaded.",
@@ -55,11 +59,9 @@ const diagnosticsCopy = {
     },
     statuses: {
       ready: "Ready",
-      degraded: "Degraded",
+      warning: "Warning",
       blocked: "Blocked",
-      not_configured: "Not configured",
       unavailable: "Unavailable",
-      error: "Error",
     },
     facts: {
       platform: "Platform",
@@ -68,13 +70,23 @@ const diagnosticsCopy = {
       app_version: "App version",
       build_profile: "Build",
       readiness_schema: "Readiness schema",
+      codex_binary: "Trusted Codex binary",
       codex_model: "Fixed model",
       codex_auth: "Authentication",
       codex_schema: "Protocol schema",
+      codex_efforts: "Reasoning efforts",
       git_executable: "Git executable",
       repository_health: "Active repository",
+      repository_identity: "Repository identity",
+      repository_head: "Observed HEAD",
+      repository_branch: "Observed branch",
       history_schema: "History schema",
       history_mode: "Database mode",
+      history_integrity: "Integrity",
+      history_writability: "Writability",
+      history_writer: "Writer",
+      history_migration: "Migration",
+      history_backup: "Recovery backup",
       live2d_core: "Cubism Core",
       builtin_resources: "Built-in Hiyori",
       character_library: "Model library",
@@ -106,6 +118,10 @@ const diagnosticsCopy = {
     copying: "コピー中…",
     copied: "安全な概要をコピーしました。",
     copyFailed: "安全な概要をコピーできませんでした。",
+    recheckComplete: "診断を更新しました。",
+    recheckAttention:
+      "診断を更新しました。停止中または利用不可の機能があります。",
+    recheckFailed: "診断を更新できませんでした。",
     retained:
       "再確認に失敗しました。直前のスナップショットを古い結果として表示しています。",
     unavailable: "ネイティブ準備状況を取得できませんでした。",
@@ -128,11 +144,9 @@ const diagnosticsCopy = {
     },
     statuses: {
       ready: "準備完了",
-      degraded: "縮退中",
+      warning: "注意",
       blocked: "停止中",
-      not_configured: "未構成",
       unavailable: "利用不可",
-      error: "エラー",
     },
     facts: {
       platform: "プラットフォーム",
@@ -141,13 +155,23 @@ const diagnosticsCopy = {
       app_version: "アプリバージョン",
       build_profile: "ビルド",
       readiness_schema: "診断スキーマ",
+      codex_binary: "信頼済みCodexバイナリ",
       codex_model: "固定モデル",
       codex_auth: "認証",
       codex_schema: "プロトコルスキーマ",
+      codex_efforts: "推論強度",
       git_executable: "Git実行環境",
       repository_health: "選択中リポジトリ",
+      repository_identity: "リポジトリ識別情報",
+      repository_head: "確認済みHEAD",
+      repository_branch: "確認済みブランチ",
       history_schema: "履歴スキーマ",
       history_mode: "データベースモード",
+      history_integrity: "整合性",
+      history_writability: "書き込み可否",
+      history_writer: "ライター",
+      history_migration: "マイグレーション",
+      history_backup: "復旧バックアップ",
       live2d_core: "Cubism Core",
       builtin_resources: "内蔵Hiyori",
       character_library: "モデルライブラリ",
@@ -200,9 +224,9 @@ export function ReadinessStatusBadge({
   const variant =
     status === "ready"
       ? "success"
-      : status === "degraded"
+      : status === "warning"
         ? "running"
-        : status === "blocked" || status === "error"
+        : status === "blocked"
           ? "destructive"
           : "outline"
   return (
@@ -249,16 +273,22 @@ export function NativeReadinessDiagnostics() {
   const stale = state.status === "rechecking" || state.status === "error"
   const critical =
     snapshot?.checks.some(
-      (check) => check.status === "blocked" || check.status === "error",
+      (check) => check.status === "blocked" || check.status === "unavailable",
     ) ?? false
-  const announcement =
+  const copyAnnouncement =
     state.copyStatus === "copied"
       ? ui.copied
       : state.copyStatus === "error"
         ? ui.copyFailed
-        : state.status === "rechecking"
-          ? ui.checking
-          : ""
+        : ""
+  const recheckAnnouncement =
+    state.recheckOutcome === "complete" || state.recheckOutcome === "attention"
+      ? ui.recheckComplete
+      : state.recheckOutcome === "failed"
+        ? ui.recheckFailed
+        : ""
+  const attentionAnnouncement =
+    state.recheckOutcome === "attention" ? ui.recheckAttention : ""
 
   return (
     <section
@@ -309,7 +339,14 @@ export function NativeReadinessDiagnostics() {
       </div>
 
       <p aria-live="polite" className="sr-only" data-diagnostics-announcement>
-        {announcement}
+        {copyAnnouncement || recheckAnnouncement}
+      </p>
+      <p
+        aria-live="assertive"
+        className="sr-only"
+        data-diagnostics-attention-announcement
+      >
+        {attentionAnnouncement}
       </p>
 
       {state.status === "error" ? (

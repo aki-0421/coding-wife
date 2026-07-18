@@ -244,6 +244,7 @@ CREATE INDEX IF NOT EXISTS idx_resume_anchor_sequence
 struct StoreInner {
     connection: Connection,
     status: HistoryStatus,
+    database_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -315,6 +316,16 @@ pub struct WorkspaceHistoryStore {
     accepting_writes: Arc<AtomicBool>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct StoreReadinessProbe {
+    pub mode: HistoryMode,
+    pub integrity_ok: bool,
+    pub writable: bool,
+    pub writer_ready: bool,
+    pub migration_current: bool,
+    pub backup_valid: bool,
+}
+
 impl WorkspaceHistoryStore {
     pub fn open(app_data_directory: impl AsRef<Path>) -> Result<Self, WorkspaceHistoryError> {
         let directory = app_data_directory.as_ref();
@@ -325,7 +336,11 @@ impl WorkspaceHistoryStore {
         let existed = database_path.exists();
 
         match open_configured_connection(&database_path, existed) {
-            Ok((connection, status)) => Ok(Self::from_connection(connection, status)),
+            Ok((connection, status)) => Ok(Self::from_connection(
+                connection,
+                status,
+                Some(database_path),
+            )),
             Err(failure) => {
                 let backup_name = backup_database_files(&database_path).ok().flatten();
                 let connection = Connection::open_in_memory()
@@ -351,14 +366,23 @@ impl WorkspaceHistoryStore {
                         error_code: Some(failure.code),
                         backup_name,
                     },
+                    Some(database_path),
                 ))
             }
         }
     }
 
-    fn from_connection(connection: Connection, status: HistoryStatus) -> Self {
+    fn from_connection(
+        connection: Connection,
+        status: HistoryStatus,
+        database_path: Option<PathBuf>,
+    ) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(StoreInner { connection, status })),
+            inner: Arc::new(Mutex::new(StoreInner {
+                connection,
+                status,
+                database_path,
+            })),
             delete_challenges: Arc::new(Mutex::new(HashMap::new())),
             accepting_writes: Arc::new(AtomicBool::new(true)),
         }
@@ -366,6 +390,43 @@ impl WorkspaceHistoryStore {
 
     pub fn status(&self) -> HistoryStatus {
         self.lock().status.clone()
+    }
+
+    pub(crate) fn readiness_probe(&self) -> StoreReadinessProbe {
+        let accepting_writes = self.accepting_writes.load(Ordering::Acquire);
+        let inner = self.lock();
+        let integrity_ok = inner
+            .connection
+            .query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
+            .is_ok_and(|value| value == "ok");
+        let query_only = inner
+            .connection
+            .query_row("PRAGMA query_only", [], |row| row.get::<_, i64>(0))
+            .unwrap_or(1);
+        let migration_current = inner
+            .connection
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(version), 0) FROM schema_migrations",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .is_ok_and(|(count, maximum)| {
+                count == CURRENT_DATABASE_VERSION && maximum == CURRENT_DATABASE_VERSION
+            });
+        let writable = inner.status.mode == HistoryMode::Ready
+            && query_only == 0
+            && integrity_ok
+            && migration_current;
+        let writer_ready = writable && accepting_writes && inner.connection.is_autocommit();
+        let backup_valid = validate_readiness_backup(inner.database_path.as_deref(), &inner.status);
+        StoreReadinessProbe {
+            mode: inner.status.mode,
+            integrity_ok,
+            writable,
+            writer_ready,
+            migration_current,
+            backup_valid,
+        }
     }
 
     pub fn database_file_name(&self) -> &'static str {
@@ -3653,6 +3714,40 @@ fn backup_database_files(database_path: &Path) -> std::io::Result<Option<String>
     Ok(Some(backup_name))
 }
 
+fn validate_readiness_backup(database_path: Option<&Path>, status: &HistoryStatus) -> bool {
+    let Some(backup_name) = status.backup_name.as_deref() else {
+        return status.mode != HistoryMode::RecoveryRequired;
+    };
+    if !backup_name.starts_with("workspace-history.recovery-")
+        || !backup_name.ends_with(".sqlite3")
+        || backup_name.len() > 160
+        || Path::new(backup_name)
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some(backup_name)
+    {
+        return false;
+    }
+    let Some(parent) = database_path.and_then(Path::parent) else {
+        return false;
+    };
+    let backup_path = parent.join(backup_name);
+    let Ok(metadata) = fs::symlink_metadata(backup_path) else {
+        return false;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(unix)]
 fn set_private_directory_permissions(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -6008,6 +6103,67 @@ mod tests {
                 }
             }
         }
+        let _ = fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn readiness_probe_fails_closed_for_writer_writability_and_migration_faults() {
+        let data = temp_directory("history-readiness-faults");
+        let store = WorkspaceHistoryStore::open(&data).expect("history store");
+        let ready = store.readiness_probe();
+        assert!(ready.integrity_ok);
+        assert!(ready.writable);
+        assert!(ready.writer_ready);
+        assert!(ready.migration_current);
+        assert!(ready.backup_valid);
+
+        {
+            let inner = store.lock();
+            inner
+                .connection
+                .execute_batch("PRAGMA query_only = ON")
+                .expect("inject read-only connection");
+        }
+        let read_only = store.readiness_probe();
+        assert!(!read_only.writable);
+        assert!(!read_only.writer_ready);
+        {
+            let inner = store.lock();
+            inner
+                .connection
+                .execute_batch("PRAGMA query_only = OFF; DROP TABLE schema_migrations")
+                .expect("inject migration fault");
+        }
+        let migration_fault = store.readiness_probe();
+        assert!(!migration_fault.migration_current);
+        assert!(!migration_fault.writable);
+
+        store.accepting_writes.store(false, Ordering::Release);
+        assert!(!store.readiness_probe().writer_ready);
+        let _ = fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn readiness_backup_validation_never_accepts_missing_or_public_files() {
+        let data = temp_directory("history-readiness-backup");
+        let database = data.join(DATABASE_FILE_NAME);
+        fs::write(&database, b"database").expect("database fixture");
+        let backup_name = "workspace-history.recovery-fixture.sqlite3";
+        let status = HistoryStatus {
+            schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
+            mode: HistoryMode::RecoveryRequired,
+            error_code: Some("HIST-INTEGRITY".to_owned()),
+            backup_name: Some(backup_name.to_owned()),
+        };
+        assert!(!validate_readiness_backup(Some(&database), &status));
+        let backup = data.join(backup_name);
+        fs::write(&backup, b"backup").expect("backup fixture");
+        #[cfg(unix)]
+        fs::set_permissions(&backup, std::os::unix::fs::PermissionsExt::from_mode(0o644))
+            .expect("public backup mode");
+        assert!(!validate_readiness_backup(Some(&database), &status));
+        set_private_file_permissions(&backup).expect("private backup mode");
+        assert!(validate_readiness_backup(Some(&database), &status));
         let _ = fs::remove_dir_all(data);
     }
 }

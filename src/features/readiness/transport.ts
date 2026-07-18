@@ -115,11 +115,9 @@ function demoCheck(
   id: (typeof readinessCheckIds)[number],
   checkedAt: string,
 ): ReadinessCheckV1 {
-  const status =
-    id === "codex" || id === "git" ? "not_configured" : "unavailable"
   return {
     id,
-    status,
+    status: "unavailable",
     checkedAt,
     code: `READINESS-DEMO-${id.toUpperCase().replace("_", "-")}-UNAVAILABLE`,
     recoverable: false,

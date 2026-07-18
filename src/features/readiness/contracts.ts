@@ -16,11 +16,9 @@ export const readinessCheckIds = [
 
 export const readinessStatuses = [
   "ready",
-  "degraded",
+  "warning",
   "blocked",
-  "not_configured",
   "unavailable",
-  "error",
 ] as const
 
 export const readinessRecoveryActions = [
@@ -44,13 +42,23 @@ export const readinessFactKeys = [
   "app_version",
   "build_profile",
   "readiness_schema",
+  "codex_binary",
   "codex_model",
   "codex_auth",
   "codex_schema",
+  "codex_efforts",
   "git_executable",
   "repository_health",
+  "repository_identity",
+  "repository_head",
+  "repository_branch",
   "history_schema",
   "history_mode",
+  "history_integrity",
+  "history_writability",
+  "history_writer",
+  "history_migration",
+  "history_backup",
   "live2d_core",
   "builtin_resources",
   "character_library",

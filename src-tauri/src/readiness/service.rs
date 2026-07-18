@@ -12,9 +12,10 @@ use crate::codex::supervisor::CodexSupervisor;
 use crate::codex::types::{CodexDiagnostic, CodexHealth, CODEX_MODEL};
 use crate::git_review::runner::GitRunner;
 use crate::preferences::AppPreferencesService;
-use crate::workspace_history::types::{
-    HistoryMode, WorkspaceHealth, WorkspaceStateSnapshot, WORKSPACE_HISTORY_SCHEMA_VERSION,
+use crate::workspace_history::service::{
+    HistoryReadinessProbe, RepositoryReadinessProbe, RepositoryReadinessState,
 };
+use crate::workspace_history::types::{HistoryMode, WORKSPACE_HISTORY_SCHEMA_VERSION};
 use crate::workspace_history::WorkspaceHistoryService;
 
 use super::types::{
@@ -55,14 +56,18 @@ impl NativeReadinessService {
 
     pub async fn run(&self) -> NativeReadinessSnapshotV1 {
         let _operation = self.operation.lock().await;
+        let (os_version, codex, repository, history) = tokio::join!(
+            read_macos_version(),
+            self.codex.readiness_probe(),
+            self.history.repository_readiness(),
+            self.history.history_readiness(),
+        );
         let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
-        let history_snapshot = self.history.list();
-        let codex = self.codex.diagnostic().await;
         let checks = vec![
-            os_app_check(&checked_at, read_macos_version().await),
+            os_app_check(&checked_at, os_version),
             codex_check(&checked_at, &codex),
-            git_check(&checked_at, history_snapshot.as_ref().ok()),
-            history_check(&checked_at, &self.history, history_snapshot.as_ref().ok()),
+            git_check(&checked_at, repository),
+            history_check(&checked_at, history),
             live2d_check(&checked_at, &self.character),
             preferences_check(&checked_at, &self.preferences),
         ];
@@ -166,10 +171,23 @@ async fn read_macos_version() -> Option<String> {
 }
 
 fn os_app_check(checked_at: &str, os_version: Option<String>) -> ReadinessCheckV1 {
-    let supported = std::env::consts::OS == "macos" && std::env::consts::ARCH == "aarch64";
+    os_app_check_for(
+        checked_at,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        os_version,
+    )
+}
+
+fn os_app_check_for(
+    checked_at: &str,
+    platform: &str,
+    architecture: &str,
+    os_version: Option<String>,
+) -> ReadinessCheckV1 {
     let mut facts = vec![
-        fact(ReadinessFactKey::Platform, std::env::consts::OS),
-        fact(ReadinessFactKey::Architecture, std::env::consts::ARCH),
+        fact(ReadinessFactKey::Platform, platform),
+        fact(ReadinessFactKey::Architecture, architecture),
         fact(ReadinessFactKey::AppVersion, env!("CARGO_PKG_VERSION")),
         fact(
             ReadinessFactKey::BuildProfile,
@@ -190,7 +208,7 @@ fn os_app_check(checked_at: &str, os_version: Option<String>) -> ReadinessCheckV
             .clone()
             .unwrap_or_else(|| "unavailable".to_owned()),
     ));
-    if !supported {
+    if platform != "macos" || architecture != "aarch64" {
         return check(
             ReadinessCheckId::OsApp,
             ReadinessStatus::Blocked,
@@ -201,14 +219,25 @@ fn os_app_check(checked_at: &str, os_version: Option<String>) -> ReadinessCheckV
             facts,
         );
     }
-    if os_version.is_none() {
+    let Some(major) = os_version.as_deref().and_then(macos_major) else {
         return check(
             ReadinessCheckId::OsApp,
-            ReadinessStatus::Degraded,
+            ReadinessStatus::Unavailable,
             checked_at,
             "READINESS-OS-VERSION-UNAVAILABLE",
             true,
             ReadinessRecoveryAction::Recheck,
+            facts,
+        );
+    };
+    if major < 14 {
+        return check(
+            ReadinessCheckId::OsApp,
+            ReadinessStatus::Blocked,
+            checked_at,
+            "READINESS-OS-VERSION-UNSUPPORTED",
+            false,
+            ReadinessRecoveryAction::None,
             facts,
         );
     }
@@ -223,6 +252,18 @@ fn os_app_check(checked_at: &str, os_version: Option<String>) -> ReadinessCheckV
     )
 }
 
+fn macos_major(value: &str) -> Option<u64> {
+    if value.is_empty()
+        || value.len() > 24
+        || !value
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return None;
+    }
+    value.split('.').next()?.parse().ok()
+}
+
 fn codex_check(checked_at: &str, diagnostic: &CodexDiagnostic) -> ReadinessCheckV1 {
     let auth = if diagnostic.account_present {
         "authenticated"
@@ -231,20 +272,35 @@ fn codex_check(checked_at: &str, diagnostic: &CodexDiagnostic) -> ReadinessCheck
     } else {
         "unverified"
     };
+    let binary = match diagnostic.health {
+        CodexHealth::BinaryMissing => "missing",
+        CodexHealth::BinaryUntrusted => "untrusted",
+        _ if diagnostic.binary_hash_prefix.is_some() => "trusted",
+        _ => "unavailable",
+    };
     let schema = if matches!(
         diagnostic.health,
         CodexHealth::SchemaUnsupported | CodexHealth::ProtocolMismatch
     ) {
         "incompatible"
-    } else if diagnostic.generated_by_same_binary && diagnostic.experimental_api_accepted {
+    } else if diagnostic.generated_by_same_binary {
         "compatible"
     } else {
         "unverified"
     };
     let facts = vec![
+        fact(ReadinessFactKey::CodexBinary, binary),
         fact(ReadinessFactKey::CodexModel, CODEX_MODEL),
         fact(ReadinessFactKey::CodexAuth, auth),
         fact(ReadinessFactKey::CodexSchema, schema),
+        fact(
+            ReadinessFactKey::CodexEfforts,
+            if diagnostic.fast_available && diagnostic.max_available {
+                "fast_max"
+            } else {
+                "unavailable"
+            },
+        ),
     ];
     let (status, code, recoverable, action) = match diagnostic.health {
         CodexHealth::Ready
@@ -262,7 +318,7 @@ fn codex_check(checked_at: &str, diagnostic: &CodexDiagnostic) -> ReadinessCheck
             )
         }
         CodexHealth::BinaryMissing => (
-            ReadinessStatus::NotConfigured,
+            ReadinessStatus::Unavailable,
             "READINESS-CODEX-BINARY-MISSING",
             true,
             ReadinessRecoveryAction::InstallCodex,
@@ -286,19 +342,19 @@ fn codex_check(checked_at: &str, diagnostic: &CodexDiagnostic) -> ReadinessCheck
             ReadinessRecoveryAction::UpdateCodex,
         ),
         CodexHealth::SchemaUnsupported | CodexHealth::ProtocolMismatch => (
-            ReadinessStatus::Error,
+            ReadinessStatus::Blocked,
             "READINESS-CODEX-SCHEMA-INCOMPATIBLE",
             true,
             ReadinessRecoveryAction::UpdateCodex,
         ),
         CodexHealth::BinaryUntrusted => (
-            ReadinessStatus::Error,
+            ReadinessStatus::Blocked,
             "READINESS-CODEX-BINARY-UNTRUSTED",
             true,
             ReadinessRecoveryAction::InstallCodex,
         ),
         CodexHealth::Initializing => (
-            ReadinessStatus::Degraded,
+            ReadinessStatus::Warning,
             "READINESS-CODEX-INITIALIZING",
             true,
             ReadinessRecoveryAction::Recheck,
@@ -321,21 +377,22 @@ fn codex_check(checked_at: &str, diagnostic: &CodexDiagnostic) -> ReadinessCheck
     )
 }
 
-fn active_workspace_health(snapshot: &WorkspaceStateSnapshot) -> Option<WorkspaceHealth> {
-    let active = snapshot.active_workspace_id.as_deref()?;
-    snapshot
-        .workspaces
-        .iter()
-        .find(|workspace| workspace.workspace_id == active)
-        .map(|workspace| workspace.health)
+fn repository_state_wire(state: RepositoryReadinessState) -> &'static str {
+    match state {
+        RepositoryReadinessState::Ready => "ready",
+        RepositoryReadinessState::NotSelected => "not_selected",
+        RepositoryReadinessState::Missing => "missing",
+        RepositoryReadinessState::Moved => "moved",
+        RepositoryReadinessState::Changed => "changed",
+        RepositoryReadinessState::Unreadable => "unreadable",
+        RepositoryReadinessState::ReadOnly => "read_only",
+        RepositoryReadinessState::StaleBranch => "stale_branch",
+        RepositoryReadinessState::Unavailable => "unavailable",
+    }
 }
 
-fn git_check(
-    checked_at: &str,
-    history_snapshot: Option<&WorkspaceStateSnapshot>,
-) -> ReadinessCheckV1 {
+fn git_check(checked_at: &str, probe: RepositoryReadinessProbe) -> ReadinessCheckV1 {
     let binary_available = GitRunner::production().is_ok();
-    let health = history_snapshot.and_then(active_workspace_health);
     let facts = vec![
         fact(
             ReadinessFactKey::GitExecutable,
@@ -347,45 +404,91 @@ fn git_check(
         ),
         fact(
             ReadinessFactKey::RepositoryHealth,
-            health
-                .map(WorkspaceHealth::as_str)
-                .unwrap_or("not_selected"),
+            repository_state_wire(probe.state),
+        ),
+        fact(
+            ReadinessFactKey::RepositoryIdentity,
+            if probe.identity_matches {
+                "matching"
+            } else {
+                "unverified"
+            },
+        ),
+        fact(
+            ReadinessFactKey::RepositoryHead,
+            if probe.head_matches {
+                "current"
+            } else {
+                "stale"
+            },
+        ),
+        fact(
+            ReadinessFactKey::RepositoryBranch,
+            if probe.branch_matches {
+                "current"
+            } else {
+                "stale"
+            },
         ),
     ];
     let (status, code, recoverable, action) = if !binary_available {
         (
-            ReadinessStatus::Error,
+            ReadinessStatus::Unavailable,
             "READINESS-GIT-BINARY-MISSING",
             false,
             ReadinessRecoveryAction::None,
         )
     } else {
-        match health {
-            Some(WorkspaceHealth::Ready) => (
+        match probe.state {
+            RepositoryReadinessState::Ready => (
                 ReadinessStatus::Ready,
                 "READINESS-GIT-READY",
                 false,
                 ReadinessRecoveryAction::None,
             ),
-            Some(WorkspaceHealth::ReadOnly) => (
-                ReadinessStatus::Degraded,
-                "READINESS-GIT-READ-ONLY",
-                true,
-                ReadinessRecoveryAction::RepairWorkspace,
-            ),
-            Some(_) => (
-                ReadinessStatus::Blocked,
-                "READINESS-GIT-WORKSPACE-UNHEALTHY",
-                true,
-                ReadinessRecoveryAction::RepairWorkspace,
-            ),
-            None if history_snapshot.is_some() => (
-                ReadinessStatus::NotConfigured,
+            RepositoryReadinessState::NotSelected => (
+                ReadinessStatus::Warning,
                 "READINESS-GIT-WORKSPACE-NOT-SELECTED",
                 true,
                 ReadinessRecoveryAction::SelectWorkspace,
             ),
-            None => (
+            RepositoryReadinessState::ReadOnly => (
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-READ-ONLY",
+                true,
+                ReadinessRecoveryAction::RepairWorkspace,
+            ),
+            RepositoryReadinessState::Missing => (
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-REPOSITORY-MISSING",
+                true,
+                ReadinessRecoveryAction::RepairWorkspace,
+            ),
+            RepositoryReadinessState::Moved => (
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-REPOSITORY-MOVED",
+                true,
+                ReadinessRecoveryAction::RepairWorkspace,
+            ),
+            RepositoryReadinessState::Changed => (
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-IDENTITY-CHANGED",
+                true,
+                ReadinessRecoveryAction::RepairWorkspace,
+            ),
+            RepositoryReadinessState::Unreadable => (
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-REPOSITORY-UNREADABLE",
+                true,
+                ReadinessRecoveryAction::RepairWorkspace,
+            ),
+            RepositoryReadinessState::StaleBranch => (
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-STALE-BRANCH",
+                true,
+                ReadinessRecoveryAction::RepairWorkspace,
+            ),
+            RepositoryReadinessState::Unavailable => (
                 ReadinessStatus::Unavailable,
                 "READINESS-GIT-REPOSITORY-UNAVAILABLE",
                 true,
@@ -404,12 +507,7 @@ fn git_check(
     )
 }
 
-fn history_check(
-    checked_at: &str,
-    service: &WorkspaceHistoryService,
-    snapshot: Option<&WorkspaceStateSnapshot>,
-) -> ReadinessCheckV1 {
-    let status = service.history_status();
+fn history_check(checked_at: &str, probe: HistoryReadinessProbe) -> ReadinessCheckV1 {
     let facts = vec![
         fact(
             ReadinessFactKey::HistorySchema,
@@ -417,38 +515,113 @@ fn history_check(
         ),
         fact(
             ReadinessFactKey::HistoryMode,
-            match status.mode {
+            match probe.mode {
                 HistoryMode::Ready => "ready",
                 HistoryMode::ReadOnly => "read_only",
                 HistoryMode::RecoveryRequired => "recovery_required",
             },
         ),
+        fact(
+            ReadinessFactKey::HistoryIntegrity,
+            if !probe.available {
+                "unavailable"
+            } else if probe.integrity_ok {
+                "verified"
+            } else {
+                "failed"
+            },
+        ),
+        fact(
+            ReadinessFactKey::HistoryWritability,
+            if probe.writable {
+                "writable"
+            } else {
+                "unavailable"
+            },
+        ),
+        fact(
+            ReadinessFactKey::HistoryWriter,
+            if probe.writer_ready {
+                "ready"
+            } else {
+                "stopped"
+            },
+        ),
+        fact(
+            ReadinessFactKey::HistoryMigration,
+            if !probe.available {
+                "unavailable"
+            } else if probe.migration_current {
+                "current"
+            } else {
+                "incomplete"
+            },
+        ),
+        fact(
+            ReadinessFactKey::HistoryBackup,
+            if probe.backup_valid {
+                "verified"
+            } else {
+                "unavailable"
+            },
+        ),
     ];
-    let (readiness, code, recoverable, action) = match (status.mode, snapshot.is_some()) {
-        (HistoryMode::Ready, true) => (
+    let (readiness, code, recoverable, action) = if !probe.available {
+        (
+            ReadinessStatus::Unavailable,
+            "READINESS-HISTORY-CHECK-UNAVAILABLE",
+            true,
+            ReadinessRecoveryAction::Recheck,
+        )
+    } else if probe.mode == HistoryMode::RecoveryRequired {
+        (
+            ReadinessStatus::Blocked,
+            "READINESS-HISTORY-RECOVERY-REQUIRED",
+            true,
+            ReadinessRecoveryAction::RepairHistory,
+        )
+    } else if probe.mode == HistoryMode::ReadOnly {
+        (
+            ReadinessStatus::Warning,
+            "READINESS-HISTORY-READ-ONLY",
+            true,
+            ReadinessRecoveryAction::RepairHistory,
+        )
+    } else if !probe.integrity_ok {
+        (
+            ReadinessStatus::Blocked,
+            "READINESS-HISTORY-INTEGRITY-FAILED",
+            true,
+            ReadinessRecoveryAction::RepairHistory,
+        )
+    } else if !probe.migration_current {
+        (
+            ReadinessStatus::Blocked,
+            "READINESS-HISTORY-MIGRATION-INCOMPLETE",
+            true,
+            ReadinessRecoveryAction::RepairHistory,
+        )
+    } else if !probe.backup_valid {
+        (
+            ReadinessStatus::Blocked,
+            "READINESS-HISTORY-BACKUP-INVALID",
+            true,
+            ReadinessRecoveryAction::RepairHistory,
+        )
+    } else if !probe.writable || !probe.writer_ready {
+        (
+            ReadinessStatus::Blocked,
+            "READINESS-HISTORY-WRITER-UNAVAILABLE",
+            true,
+            ReadinessRecoveryAction::RepairHistory,
+        )
+    } else {
+        (
             ReadinessStatus::Ready,
             "READINESS-HISTORY-READY",
             false,
             ReadinessRecoveryAction::None,
-        ),
-        (HistoryMode::Ready, false) => (
-            ReadinessStatus::Error,
-            "READINESS-HISTORY-QUERY-FAILED",
-            true,
-            ReadinessRecoveryAction::Recheck,
-        ),
-        (HistoryMode::ReadOnly, _) => (
-            ReadinessStatus::Degraded,
-            "READINESS-HISTORY-READ-ONLY",
-            true,
-            ReadinessRecoveryAction::RepairHistory,
-        ),
-        (HistoryMode::RecoveryRequired, _) => (
-            ReadinessStatus::Error,
-            "READINESS-HISTORY-RECOVERY-REQUIRED",
-            true,
-            ReadinessRecoveryAction::RepairHistory,
-        ),
+        )
     };
     check(
         ReadinessCheckId::History,
@@ -495,21 +668,21 @@ fn live2d_check(checked_at: &str, service: &CharacterService) -> ReadinessCheckV
     ];
     let (status, code, recoverable, action) = if !probe.core_available {
         (
-            ReadinessStatus::Error,
+            ReadinessStatus::Blocked,
             "READINESS-LIVE2D-CORE-MISSING",
             false,
             ReadinessRecoveryAction::RestoreLive2d,
         )
     } else if !probe.builtin_resources_available {
         (
-            ReadinessStatus::Error,
+            ReadinessStatus::Blocked,
             "READINESS-LIVE2D-BUILTIN-MISSING",
             false,
             ReadinessRecoveryAction::RestoreLive2d,
         )
     } else if !probe.library_available {
         (
-            ReadinessStatus::Degraded,
+            ReadinessStatus::Warning,
             "READINESS-LIVE2D-LIBRARY-UNAVAILABLE",
             true,
             ReadinessRecoveryAction::Recheck,
@@ -547,19 +720,19 @@ fn preferences_check(checked_at: &str, service: &AppPreferencesService) -> Readi
             ReadinessRecoveryAction::None,
         ),
         Some("APP-PREFERENCES-MISSING") if probe.store_available => (
-            ReadinessStatus::Degraded,
+            ReadinessStatus::Warning,
             "READINESS-PREFERENCES-NOT-SAVED",
             true,
             ReadinessRecoveryAction::SavePreferences,
         ),
         Some("APP-PREFERENCES-UNKNOWN-VERSION") => (
-            ReadinessStatus::Error,
+            ReadinessStatus::Blocked,
             "READINESS-PREFERENCES-SCHEMA-INCOMPATIBLE",
             true,
             ReadinessRecoveryAction::ResetPreferences,
         ),
         Some(_) if probe.store_available => (
-            ReadinessStatus::Error,
+            ReadinessStatus::Blocked,
             "READINESS-PREFERENCES-RECOVERY-REQUIRED",
             true,
             ReadinessRecoveryAction::ResetPreferences,
@@ -650,7 +823,7 @@ mod tests {
         for (health, status, code, action) in [
             (
                 CodexHealth::BinaryMissing,
-                ReadinessStatus::NotConfigured,
+                ReadinessStatus::Unavailable,
                 "READINESS-CODEX-BINARY-MISSING",
                 ReadinessRecoveryAction::InstallCodex,
             ),
@@ -662,7 +835,7 @@ mod tests {
             ),
             (
                 CodexHealth::SchemaUnsupported,
-                ReadinessStatus::Error,
+                ReadinessStatus::Blocked,
                 "READINESS-CODEX-SCHEMA-INCOMPATIBLE",
                 ReadinessRecoveryAction::UpdateCodex,
             ),
@@ -671,6 +844,127 @@ mod tests {
             assert_eq!(
                 (check.status, check.code.as_str(), check.recovery_action),
                 (status, code, action)
+            );
+        }
+    }
+
+    #[test]
+    fn repository_recheck_states_have_distinct_safe_codes() {
+        let checked_at = "2026-07-18T00:00:00.000Z";
+        for (state, status, code) in [
+            (
+                RepositoryReadinessState::Missing,
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-REPOSITORY-MISSING",
+            ),
+            (
+                RepositoryReadinessState::Moved,
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-REPOSITORY-MOVED",
+            ),
+            (
+                RepositoryReadinessState::Changed,
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-IDENTITY-CHANGED",
+            ),
+            (
+                RepositoryReadinessState::Unreadable,
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-REPOSITORY-UNREADABLE",
+            ),
+            (
+                RepositoryReadinessState::ReadOnly,
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-READ-ONLY",
+            ),
+            (
+                RepositoryReadinessState::StaleBranch,
+                ReadinessStatus::Blocked,
+                "READINESS-GIT-STALE-BRANCH",
+            ),
+        ] {
+            let check = git_check(
+                checked_at,
+                RepositoryReadinessProbe {
+                    state,
+                    identity_matches: false,
+                    head_matches: false,
+                    branch_matches: false,
+                },
+            );
+            assert_eq!((check.status, check.code.as_str()), (status, code));
+        }
+    }
+
+    #[test]
+    fn history_recheck_failures_identify_the_failed_invariant() {
+        let checked_at = "2026-07-18T00:00:00.000Z";
+        let ready = HistoryReadinessProbe {
+            available: true,
+            mode: HistoryMode::Ready,
+            integrity_ok: true,
+            writable: true,
+            writer_ready: true,
+            migration_current: true,
+            backup_valid: true,
+        };
+        assert_eq!(
+            history_check(checked_at, ready).status,
+            ReadinessStatus::Ready
+        );
+        for (probe, code) in [
+            (
+                HistoryReadinessProbe {
+                    integrity_ok: false,
+                    ..ready
+                },
+                "READINESS-HISTORY-INTEGRITY-FAILED",
+            ),
+            (
+                HistoryReadinessProbe {
+                    migration_current: false,
+                    ..ready
+                },
+                "READINESS-HISTORY-MIGRATION-INCOMPLETE",
+            ),
+            (
+                HistoryReadinessProbe {
+                    backup_valid: false,
+                    ..ready
+                },
+                "READINESS-HISTORY-BACKUP-INVALID",
+            ),
+            (
+                HistoryReadinessProbe {
+                    writer_ready: false,
+                    ..ready
+                },
+                "READINESS-HISTORY-WRITER-UNAVAILABLE",
+            ),
+        ] {
+            let check = history_check(checked_at, probe);
+            assert_eq!(check.status, ReadinessStatus::Blocked);
+            assert_eq!(check.code, code);
+        }
+    }
+
+    #[test]
+    fn macos_support_uses_numeric_major_and_fails_closed() {
+        let checked_at = "2026-07-18T00:00:00.000Z";
+        for version in ["14", "14.0", "15.5"] {
+            assert_eq!(
+                os_app_check_for(checked_at, "macos", "aarch64", Some(version.to_owned()),).status,
+                ReadinessStatus::Ready,
+            );
+        }
+        assert_eq!(
+            os_app_check_for(checked_at, "macos", "aarch64", Some("13.6".to_owned()),).status,
+            ReadinessStatus::Blocked,
+        );
+        for version in [None, Some("14.beta".to_owned()), Some("".to_owned())] {
+            assert_eq!(
+                os_app_check_for(checked_at, "macos", "aarch64", version).status,
+                ReadinessStatus::Unavailable,
             );
         }
     }
@@ -714,6 +1008,6 @@ mod tests {
         let value = serde_json::to_value(&snapshot).expect("serialize snapshot");
         assert_eq!(value["schemaVersion"], 1);
         assert_eq!(value["checks"][0]["id"], "codex");
-        assert_eq!(value["checks"][0]["status"], "not_configured");
+        assert_eq!(value["checks"][0]["status"], "unavailable");
     }
 }

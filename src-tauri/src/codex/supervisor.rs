@@ -45,6 +45,8 @@ use super::types::{
 pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
 pub const DOMAIN_EVENT_CHANNEL: &str = "coding-wife://domain-event";
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(5);
+const READINESS_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+const READINESS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERRUPT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CODEX_TURN_TEXT_SCALARS: usize = 80_000;
 
@@ -194,6 +196,13 @@ struct HandshakeResult {
     fast_available: bool,
     max_available: bool,
     config_model_present: bool,
+}
+
+struct ReadinessProbeContext {
+    configured_binary: Option<PathBuf>,
+    expected_binary: Option<BinaryInfo>,
+    expected_schema: Option<SchemaProbe>,
+    workspace_root: Option<PathBuf>,
 }
 
 impl Default for CodexSupervisor {
@@ -451,6 +460,42 @@ impl CodexSupervisor {
         self.inner.state.lock().await.diagnostic.clone()
     }
 
+    /// Re-observes the configured Codex executable and protocol without touching
+    /// the app-owned runtime. Diagnostics must never stop or replace an active
+    /// turn, so this probe uses an isolated short-lived app-server process.
+    pub async fn readiness_probe(&self) -> CodexDiagnostic {
+        let context = {
+            let state = self.inner.state.lock().await;
+            let workspace_root = state
+                .active_workspace
+                .as_ref()
+                .and_then(|workspace_id| state.workspaces.get(workspace_id))
+                .or_else(|| state.workspaces.values().next())
+                .cloned()
+                .or_else(|| std::env::current_dir().ok());
+            ReadinessProbeContext {
+                configured_binary: state.explicit_binary.clone().or_else(|| {
+                    state
+                        .binary
+                        .as_ref()
+                        .map(|binary| binary.canonical_path.clone())
+                }),
+                expected_binary: state.binary.clone(),
+                expected_schema: state.schema.clone(),
+                workspace_root,
+            }
+        };
+
+        match tokio::time::timeout(READINESS_PROBE_TIMEOUT, run_readiness_probe(context)).await {
+            Ok(diagnostic) => diagnostic,
+            Err(_) => readiness_failure_diagnostic(
+                CodexHealth::Disconnected,
+                "CODEX-READINESS-TIMEOUT",
+                true,
+            ),
+        }
+    }
+
     pub async fn probe(&self) -> Result<CodexDiagnostic, CodexCommandError> {
         let _lifecycle = self.inner.lifecycle.lock().await;
         let (explicit, runtime, previous_generation) = {
@@ -662,58 +707,14 @@ impl CodexSupervisor {
         handshake: HandshakeResult,
         experimental_requested: bool,
     ) -> CodexDiagnostic {
-        let mut capabilities = schema.capabilities.clone();
-        if !handshake.experimental_api_accepted {
-            capabilities.native_request_user_input = CapabilityState::Unavailable;
-            capabilities.dynamic_tools = CapabilityState::Unavailable;
-            capabilities.permissions_approval = CapabilityState::Unavailable;
-            capabilities.detached_review = CapabilityState::Unavailable;
-            capabilities.ephemeral_thread = CapabilityState::Unavailable;
-        }
-        // This remains a deterministic local fallback until an explicit deny-all
-        // built-in-tool and null-cwd contract is proven.
-        capabilities.support_isolation = CapabilityState::Unavailable;
-        let health = if handshake.requires_openai_auth && !handshake.account_present {
-            CodexHealth::AuthRequired
-        } else if !handshake.model_available {
-            CodexHealth::ModelUnavailable
-        } else if !handshake.fast_available || !handshake.max_available {
-            CodexHealth::EffortUnavailable
-        } else {
-            CodexHealth::Ready
-        };
-        let now = chrono::Utc::now().to_rfc3339();
-        let diagnostic = CodexDiagnostic {
-            adapter_version: super::types::CODEX_ADAPTER_VERSION,
-            health,
-            checked_at: now.clone(),
-            operation: "codex.initialize".to_owned(),
-            recoverable: health != CodexHealth::Ready,
-            cli_version: Some(binary.cli_version.clone()),
-            binary_source: Some(binary.source),
-            binary_hash_prefix: Some(binary.executable_sha256[..16].to_owned()),
-            schema_fingerprint_prefix: Some(schema.fingerprint[..16].to_owned()),
-            generated_by_same_binary: schema.generated_by_same_binary,
-            experimental_api_requested: experimental_requested,
-            experimental_api_accepted: handshake.experimental_api_accepted,
-            account_present: handshake.account_present,
-            auth_kind: handshake.auth_kind,
-            requires_openai_auth: handshake.requires_openai_auth,
-            model_available: handshake.model_available,
-            fast_available: handshake.fast_available,
-            max_available: handshake.max_available,
-            config_model_present: handshake.config_model_present,
-            child_state: ChildState::Ready,
-            last_successful_handshake_at: Some(now),
-            capabilities,
-            error_code: match health {
-                CodexHealth::AuthRequired => Some("CODEX-AUTH-REQUIRED".to_owned()),
-                CodexHealth::ModelUnavailable => Some("CODEX-SOL-UNAVAILABLE".to_owned()),
-                CodexHealth::EffortUnavailable => Some("CODEX-EFFORT-UNAVAILABLE".to_owned()),
-                _ => None,
-            },
-            detail_ref: None,
-        };
+        let diagnostic = diagnostic_from_handshake(
+            binary,
+            schema,
+            handshake,
+            experimental_requested,
+            ChildState::Ready,
+            "codex.initialize",
+        );
         self.inner.state.lock().await.diagnostic = diagnostic.clone();
         diagnostic
     }
@@ -2380,6 +2381,246 @@ async fn handshake(
         max_available,
         config_model_present,
     })
+}
+
+async fn run_readiness_probe(context: ReadinessProbeContext) -> CodexDiagnostic {
+    let Some(workspace_root) = context.workspace_root else {
+        return readiness_failure_diagnostic(
+            CodexHealth::Disconnected,
+            "CODEX-READINESS-WORKSPACE-UNAVAILABLE",
+            true,
+        );
+    };
+    let binary = match discover_binary(context.configured_binary.as_deref()).await {
+        Ok(binary) => binary,
+        Err(error) => return readiness_binary_failure_diagnostic(error),
+    };
+    if context.expected_binary.as_ref().is_some_and(|expected| {
+        expected.identity != binary.identity
+            || expected.canonical_path_hash != binary.canonical_path_hash
+    }) {
+        return readiness_failure_diagnostic(
+            CodexHealth::BinaryUntrusted,
+            "CODEX-BINARY-IDENTITY-CHANGED",
+            false,
+        );
+    }
+    let schema = match probe_schema(&binary).await {
+        Ok(schema) => schema,
+        Err(error) => return readiness_binary_failure_diagnostic(error),
+    };
+    if !schema.generated_by_same_binary
+        || context.expected_schema.as_ref().is_some_and(|expected| {
+            expected.fingerprint != schema.fingerprint
+                || expected.capabilities != schema.capabilities
+                || !expected.generated_by_same_binary
+        })
+    {
+        return readiness_failure_diagnostic(
+            CodexHealth::ProtocolMismatch,
+            "CODEX-SCHEMA-IDENTITY-CHANGED",
+            false,
+        );
+    }
+
+    let mut experimental = true;
+    let mut last_error = None;
+    for _ in 0..2 {
+        let (signals, _receiver) = mpsc::channel(16);
+        let runtime = match spawn_process(&binary, &workspace_root, 0, signals).await {
+            Ok(runtime) => Arc::new(runtime),
+            Err(ProcessError::IdentityChanged) => {
+                return readiness_failure_diagnostic(
+                    CodexHealth::BinaryUntrusted,
+                    "CODEX-BINARY-IDENTITY-CHANGED",
+                    false,
+                );
+            }
+            Err(ProcessError::Spawn | ProcessError::MissingStdio) => {
+                return readiness_failure_diagnostic(
+                    CodexHealth::Disconnected,
+                    "CODEX-READINESS-SPAWN-FAILED",
+                    true,
+                );
+            }
+        };
+        let mut runtime_guard = ReadinessRuntimeGuard(Some(runtime.clone()));
+        let observed = tokio::time::timeout(
+            READINESS_HANDSHAKE_TIMEOUT,
+            handshake(&runtime.connection, &workspace_root, experimental),
+        )
+        .await;
+        runtime.shutdown().await;
+        runtime_guard.disarm();
+        match observed {
+            Ok(Ok(handshake)) => {
+                if binary.revalidate().await.is_err() {
+                    return readiness_failure_diagnostic(
+                        CodexHealth::BinaryUntrusted,
+                        "CODEX-BINARY-IDENTITY-CHANGED",
+                        false,
+                    );
+                }
+                return diagnostic_from_handshake(
+                    &binary,
+                    &schema,
+                    handshake,
+                    experimental,
+                    ChildState::Stopped,
+                    "codex.readiness",
+                );
+            }
+            Ok(Err(error))
+                if experimental
+                    && matches!(
+                        error,
+                        RpcRequestError::Server {
+                            category: "experimental_rejected",
+                            ..
+                        }
+                    ) =>
+            {
+                experimental = false;
+                last_error = Some(error);
+            }
+            Ok(Err(error)) => {
+                last_error = Some(error);
+                break;
+            }
+            Err(_) => {
+                return readiness_failure_diagnostic(
+                    CodexHealth::Disconnected,
+                    "CODEX-READINESS-HANDSHAKE-TIMEOUT",
+                    true,
+                );
+            }
+        }
+    }
+
+    let error = last_error.unwrap_or(RpcRequestError::Protocol);
+    readiness_failure_diagnostic(
+        if matches!(error, RpcRequestError::Protocol) {
+            CodexHealth::ProtocolMismatch
+        } else {
+            CodexHealth::Disconnected
+        },
+        rpc_error_code(&error),
+        !matches!(error, RpcRequestError::Protocol),
+    )
+}
+
+struct ReadinessRuntimeGuard(Option<Arc<ProcessRuntime>>);
+
+impl ReadinessRuntimeGuard {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for ReadinessRuntimeGuard {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.0.take() {
+            runtime.force_shutdown_now();
+        }
+    }
+}
+
+fn diagnostic_from_handshake(
+    binary: &BinaryInfo,
+    schema: &SchemaProbe,
+    handshake: HandshakeResult,
+    experimental_requested: bool,
+    child_state: ChildState,
+    operation: &str,
+) -> CodexDiagnostic {
+    let mut capabilities = schema.capabilities.clone();
+    if !handshake.experimental_api_accepted {
+        capabilities.native_request_user_input = CapabilityState::Unavailable;
+        capabilities.dynamic_tools = CapabilityState::Unavailable;
+        capabilities.permissions_approval = CapabilityState::Unavailable;
+        capabilities.detached_review = CapabilityState::Unavailable;
+        capabilities.ephemeral_thread = CapabilityState::Unavailable;
+    }
+    // Main diagnostics never grant support authority.
+    capabilities.support_isolation = CapabilityState::Unavailable;
+    let health = if handshake.requires_openai_auth && !handshake.account_present {
+        CodexHealth::AuthRequired
+    } else if !handshake.model_available {
+        CodexHealth::ModelUnavailable
+    } else if !handshake.fast_available || !handshake.max_available {
+        CodexHealth::EffortUnavailable
+    } else {
+        CodexHealth::Ready
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+    CodexDiagnostic {
+        adapter_version: super::types::CODEX_ADAPTER_VERSION,
+        health,
+        checked_at: now.clone(),
+        operation: operation.to_owned(),
+        recoverable: health != CodexHealth::Ready,
+        cli_version: Some(binary.cli_version.clone()),
+        binary_source: Some(binary.source),
+        binary_hash_prefix: Some(binary.executable_sha256[..16].to_owned()),
+        schema_fingerprint_prefix: Some(schema.fingerprint[..16].to_owned()),
+        generated_by_same_binary: schema.generated_by_same_binary,
+        experimental_api_requested: experimental_requested,
+        experimental_api_accepted: handshake.experimental_api_accepted,
+        account_present: handshake.account_present,
+        auth_kind: handshake.auth_kind,
+        requires_openai_auth: handshake.requires_openai_auth,
+        model_available: handshake.model_available,
+        fast_available: handshake.fast_available,
+        max_available: handshake.max_available,
+        config_model_present: handshake.config_model_present,
+        child_state,
+        last_successful_handshake_at: Some(now),
+        capabilities,
+        error_code: match health {
+            CodexHealth::AuthRequired => Some("CODEX-AUTH-REQUIRED".to_owned()),
+            CodexHealth::ModelUnavailable => Some("CODEX-SOL-UNAVAILABLE".to_owned()),
+            CodexHealth::EffortUnavailable => Some("CODEX-EFFORT-UNAVAILABLE".to_owned()),
+            _ => None,
+        },
+        detail_ref: None,
+    }
+}
+
+fn readiness_binary_failure_diagnostic(error: BinaryError) -> CodexDiagnostic {
+    let (health, code, recoverable) = match error {
+        BinaryError::Missing => (CodexHealth::BinaryMissing, "CODEX-BINARY-MISSING", true),
+        BinaryError::Untrusted => (
+            CodexHealth::BinaryUntrusted,
+            "CODEX-BINARY-UNTRUSTED",
+            false,
+        ),
+        BinaryError::SchemaUnsupported => (
+            CodexHealth::SchemaUnsupported,
+            "CODEX-SCHEMA-UNSUPPORTED",
+            false,
+        ),
+        BinaryError::Timeout => (CodexHealth::Disconnected, "CODEX-PROBE-TIMEOUT", true),
+        BinaryError::ProbeFailed | BinaryError::Io => {
+            (CodexHealth::Disconnected, "CODEX-PROBE-FAILED", true)
+        }
+    };
+    readiness_failure_diagnostic(health, code, recoverable)
+}
+
+fn readiness_failure_diagnostic(
+    health: CodexHealth,
+    code: &str,
+    recoverable: bool,
+) -> CodexDiagnostic {
+    CodexDiagnostic {
+        health,
+        checked_at: chrono::Utc::now().to_rfc3339(),
+        operation: "codex.readiness".to_owned(),
+        recoverable,
+        child_state: ChildState::Stopped,
+        error_code: Some(code.to_owned()),
+        ..CodexDiagnostic::default()
+    }
 }
 
 fn diagnostic_from_probe(binary: &BinaryInfo, schema: &SchemaProbe) -> CodexDiagnostic {

@@ -82,6 +82,8 @@ describe("NativeReadinessController", () => {
     expect(controller.getSnapshot()).toMatchObject({
       status: "ready",
       snapshot: { snapshotId: snapshot(2).snapshotId },
+      recheckSequence: 1,
+      recheckOutcome: "complete",
     })
   })
 
@@ -99,6 +101,8 @@ describe("NativeReadinessController", () => {
       status: "error",
       errorCode: "READINESS-IPC-UNAVAILABLE",
       snapshot: { snapshotId: snapshot(1).snapshotId },
+      recheckSequence: 1,
+      recheckOutcome: "failed",
     })
   })
 

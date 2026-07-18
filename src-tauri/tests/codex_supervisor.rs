@@ -296,6 +296,64 @@ async fn read_state(path: &Path) -> String {
     tokio::fs::read_to_string(path).await.unwrap_or_default()
 }
 
+async fn start_active_turn(
+    supervisor: &CodexSupervisor,
+    workspace: &Path,
+    binary: &Path,
+) -> (String, String) {
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", workspace)
+        .await
+        .expect("register readiness workspace");
+    supervisor
+        .set_explicit_binary(Some(binary.to_owned()))
+        .await;
+    assert_eq!(
+        supervisor
+            .connect(CodexConnectRequest {
+                workspace_id: "workspace".to_owned(),
+            })
+            .await
+            .expect("connect readiness fixture")
+            .health,
+        CodexHealth::Ready,
+    );
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("start readiness thread");
+    let turn = supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle.clone(),
+            client_user_message_id: "readiness-message".to_owned(),
+            text: "Keep this turn active during diagnostics.".to_owned(),
+            effort: ReasoningPreset::Low,
+            attachment_handles: vec![],
+        })
+        .await
+        .expect("start readiness turn");
+    (thread.thread_handle, turn.turn_handle)
+}
+
+async fn interrupt_active_turn(
+    supervisor: &CodexSupervisor,
+    thread_handle: String,
+    turn_handle: String,
+) {
+    supervisor
+        .turn_interrupt(CodexTurnInterruptRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle,
+            turn_handle,
+        })
+        .await
+        .expect("readiness probe must preserve the active turn");
+}
+
 fn support_evidence(locale: &str) -> coding_wife_lib::git_review::types::CommitEvidenceV1 {
     serde_json::from_value(serde_json::json!({
         "schemaVersion": 1,
@@ -2123,6 +2181,109 @@ async fn failed_reprobe_clears_previous_identity_evidence_and_recovers_fresh() {
     assert_eq!(recovered.health, CodexHealth::Ready);
     assert!(recovered.binary_hash_prefix.is_some());
     supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn readiness_probe_observes_auth_change_without_stopping_the_active_turn() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let supervisor = test_supervisor();
+    let (thread_handle, turn_handle) =
+        start_active_turn(&supervisor, &fixture.workspace, &fixture_binary()).await;
+    let runtime_before = supervisor.diagnostic().await;
+
+    std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", "readiness_unauthenticated");
+    let readiness = supervisor.readiness_probe().await;
+    assert_eq!(readiness.health, CodexHealth::AuthRequired);
+    assert!(!readiness.account_present);
+    assert!(readiness.model_available);
+    assert!(readiness.fast_available);
+    assert!(readiness.max_available);
+    assert!(readiness.generated_by_same_binary);
+    assert_eq!(supervisor.diagnostic().await, runtime_before);
+
+    let state = read_state(&fixture.state).await;
+    let probe_pid = last_recorded_pid(&state, "readiness_process_started:");
+    wait_for_fixture_process_group_exit(probe_pid).await;
+
+    std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", "readiness_handshake_timeout");
+    let timeout_started = tokio::time::Instant::now();
+    let timed_out = supervisor.readiness_probe().await;
+    assert_eq!(timed_out.health, CodexHealth::Disconnected);
+    assert_eq!(
+        timed_out.error_code.as_deref(),
+        Some("CODEX-READINESS-HANDSHAKE-TIMEOUT"),
+    );
+    assert!(
+        timeout_started.elapsed() < Duration::from_secs(8),
+        "readiness handshake exceeded its bounded timeout",
+    );
+    assert_eq!(supervisor.diagnostic().await, runtime_before);
+    let state = read_state(&fixture.state).await;
+    let timed_out_probe_pid = last_recorded_pid(&state, "readiness_process_started:");
+    assert_ne!(timed_out_probe_pid, probe_pid);
+    wait_for_fixture_process_group_exit(timed_out_probe_pid).await;
+
+    interrupt_active_turn(&supervisor, thread_handle, turn_handle).await;
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn readiness_probe_observes_schema_change_without_replacing_the_active_runtime() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let supervisor = test_supervisor();
+    let (thread_handle, turn_handle) =
+        start_active_turn(&supervisor, &fixture.workspace, &fixture_binary()).await;
+    let runtime_before = supervisor.diagnostic().await;
+
+    std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", "schema_malformed");
+    let readiness = supervisor.readiness_probe().await;
+    assert_eq!(readiness.health, CodexHealth::SchemaUnsupported);
+    assert_eq!(supervisor.diagnostic().await, runtime_before);
+
+    interrupt_active_turn(&supervisor, thread_handle, turn_handle).await;
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn readiness_probe_blocks_a_changed_configured_binary_without_turn_mutation() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let binary_directory = temporary_directory("readiness-binary");
+    std::fs::create_dir_all(&binary_directory).expect("create private binary directory");
+    std::fs::set_permissions(&binary_directory, std::fs::Permissions::from_mode(0o700))
+        .expect("private binary directory");
+    let binary = binary_directory.join("codex");
+    std::fs::copy(fixture_binary(), &binary).expect("copy fixture binary");
+    std::fs::copy(
+        fixture_binary().with_file_name("codex_schema_subset_v0_144_5.json"),
+        binary_directory.join("codex_schema_subset_v0_144_5.json"),
+    )
+    .expect("copy fixture schema");
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))
+        .expect("fixture binary mode");
+    let supervisor = test_supervisor();
+    let (thread_handle, turn_handle) =
+        start_active_turn(&supervisor, &fixture.workspace, &binary).await;
+    let runtime_before = supervisor.diagnostic().await;
+
+    let mut changed = std::fs::read(&binary).expect("fixture binary bytes");
+    changed.extend_from_slice(b"\n# readiness identity changed\n");
+    std::fs::write(&binary, changed).expect("replace configured binary");
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))
+        .expect("replacement binary mode");
+    let readiness = supervisor.readiness_probe().await;
+    assert_eq!(readiness.health, CodexHealth::BinaryUntrusted);
+    assert_eq!(
+        readiness.error_code.as_deref(),
+        Some("CODEX-BINARY-IDENTITY-CHANGED"),
+    );
+    assert_eq!(supervisor.diagnostic().await, runtime_before);
+
+    interrupt_active_turn(&supervisor, thread_handle, turn_handle).await;
+    supervisor.shutdown().await;
+    let _ = std::fs::remove_dir_all(binary_directory);
 }
 
 #[tokio::test]

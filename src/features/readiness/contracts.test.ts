@@ -63,6 +63,24 @@ describe("native readiness contract", () => {
     )
   })
 
+  it("accepts only the four canonical diagnostic outcomes", () => {
+    for (const legacyStatus of ["degraded", "not_configured", "error"]) {
+      const legacy = snapshot()
+      legacy.checks[0] = { ...legacy.checks[0]!, status: legacyStatus }
+      expect(() => parseNativeReadinessSnapshot(legacy)).toThrow(
+        NativeReadinessContractError,
+      )
+    }
+
+    for (const status of ["ready", "warning", "blocked", "unavailable"]) {
+      const current = snapshot()
+      current.checks[0] = { ...current.checks[0]!, status }
+      expect(parseNativeReadinessSnapshot(current).checks[0]?.status).toBe(
+        status,
+      )
+    }
+  })
+
   it("rejects copied text containing private paths or raw process fields", () => {
     const base = {
       schemaVersion: 1,

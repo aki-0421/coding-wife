@@ -100,6 +100,41 @@ describe("NativeReadinessDiagnostics", () => {
     gateway.resolvers[1]!(snapshot(2))
     await screen.findByText(snapshot(2).snapshotId)
     expect(trigger).toHaveFocus()
+    expect(
+      document.querySelector("[data-diagnostics-announcement]"),
+    ).toHaveTextContent("Diagnostics updated.")
+    expect(
+      document.querySelector("[data-diagnostics-attention-announcement]"),
+    ).toHaveTextContent(
+      "Diagnostics updated. One or more capabilities are blocked or unavailable.",
+    )
+  })
+
+  it("announces a successful all-ready recheck politely without an assertive alert", async () => {
+    const gateway = new DeferredGateway()
+    const controller = new NativeReadinessController(gateway)
+    renderDiagnostics(controller, "ja")
+    const allReady = (sequence: number): NativeReadinessSnapshotV1 => ({
+      ...snapshot(sequence),
+      checks: snapshot(sequence).checks.map((check) => ({
+        ...check,
+        status: "ready",
+        code: `READINESS-${check.id.toUpperCase().replace("_", "-")}-READY`,
+        recoverable: false,
+        recoveryAction: "none",
+      })),
+    })
+    gateway.resolvers[0]!(allReady(1))
+    await screen.findByText(allReady(1).snapshotId)
+    await userEvent.click(screen.getByRole("button", { name: "再確認" }))
+    gateway.resolvers[1]!(allReady(2))
+    await screen.findByText(allReady(2).snapshotId)
+    expect(
+      document.querySelector("[data-diagnostics-announcement]"),
+    ).toHaveTextContent("診断を更新しました。")
+    expect(
+      document.querySelector("[data-diagnostics-attention-announcement]"),
+    ).toHaveTextContent("")
   })
 
   it("copies the sanitized summary without moving focus", async () => {

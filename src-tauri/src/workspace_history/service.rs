@@ -129,6 +129,38 @@ pub struct StartupRestoreReport {
     pub skipped_read_only: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RepositoryReadinessState {
+    Ready,
+    NotSelected,
+    Missing,
+    Moved,
+    Changed,
+    Unreadable,
+    ReadOnly,
+    StaleBranch,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RepositoryReadinessProbe {
+    pub state: RepositoryReadinessState,
+    pub identity_matches: bool,
+    pub head_matches: bool,
+    pub branch_matches: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct HistoryReadinessProbe {
+    pub available: bool,
+    pub mode: HistoryMode,
+    pub integrity_ok: bool,
+    pub writable: bool,
+    pub writer_ready: bool,
+    pub migration_current: bool,
+    pub backup_valid: bool,
+}
+
 #[derive(Clone)]
 pub struct WorkspaceHistoryService {
     store: WorkspaceHistoryStore,
@@ -208,6 +240,101 @@ impl WorkspaceHistoryService {
 
     pub fn history_status(&self) -> HistoryStatus {
         self.store.status()
+    }
+
+    pub(crate) async fn repository_readiness(&self) -> RepositoryReadinessProbe {
+        let snapshot = match self.store.snapshot(None) {
+            Ok(snapshot) => snapshot,
+            Err(_) => return repository_probe(RepositoryReadinessState::Unavailable),
+        };
+        let Some(active_workspace_id) = snapshot.active_workspace_id.as_deref() else {
+            return repository_probe(RepositoryReadinessState::NotSelected);
+        };
+        let Some(public) = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == active_workspace_id)
+        else {
+            return repository_probe(RepositoryReadinessState::Unavailable);
+        };
+        let private_record = match self.store.private_workspace_record(active_workspace_id) {
+            Ok(record) => record,
+            Err(_) => return repository_probe(RepositoryReadinessState::Unavailable),
+        };
+        let saved_identity = match self.store.private_project_identity(active_workspace_id) {
+            Ok(identity) => identity,
+            Err(_) => return repository_probe(RepositoryReadinessState::Unavailable),
+        };
+        let candidate = match tokio::time::timeout(
+            REPOSITORY_RECHECK_TIMEOUT,
+            self.workspace.validate_private_candidate(&private_record),
+        )
+        .await
+        {
+            Ok(Ok(candidate)) => candidate,
+            Ok(Err(error)) => {
+                let state = match health_for_preflight_error(&error) {
+                    WorkspaceHealth::Missing => RepositoryReadinessState::Missing,
+                    WorkspaceHealth::ReadOnly => RepositoryReadinessState::ReadOnly,
+                    WorkspaceHealth::Changed => RepositoryReadinessState::Changed,
+                    WorkspaceHealth::Unreadable
+                    | WorkspaceHealth::Ready
+                    | WorkspaceHealth::StaleBranch => RepositoryReadinessState::Unreadable,
+                };
+                return repository_probe(state);
+            }
+            Err(_) => return repository_probe(RepositoryReadinessState::Unavailable),
+        };
+
+        let identity_matches = matches_saved_repository_identity(&candidate.git, &saved_identity);
+        let head_matches = public.head == candidate.git.head;
+        let branch_matches =
+            public.branch == candidate.git.branch && public.detached == candidate.git.detached;
+        let state = if !identity_matches {
+            RepositoryReadinessState::Changed
+        } else if candidate.git.canonical_root != private_record.canonical_root {
+            RepositoryReadinessState::Moved
+        } else if !head_matches || !branch_matches {
+            RepositoryReadinessState::StaleBranch
+        } else {
+            RepositoryReadinessState::Ready
+        };
+        RepositoryReadinessProbe {
+            state,
+            identity_matches,
+            head_matches,
+            branch_matches,
+        }
+    }
+
+    pub(crate) async fn history_readiness(&self) -> HistoryReadinessProbe {
+        let accepting_writers = self.accepting_writers.load(Ordering::Acquire);
+        let store = self.store.clone();
+        match tokio::time::timeout(
+            Duration::from_secs(2),
+            tokio::task::spawn_blocking(move || store.readiness_probe()),
+        )
+        .await
+        {
+            Ok(Ok(probe)) => HistoryReadinessProbe {
+                available: true,
+                mode: probe.mode,
+                integrity_ok: probe.integrity_ok,
+                writable: probe.writable,
+                writer_ready: accepting_writers && probe.writer_ready,
+                migration_current: probe.migration_current,
+                backup_valid: probe.backup_valid,
+            },
+            _ => HistoryReadinessProbe {
+                available: false,
+                mode: self.store.status().mode,
+                integrity_ok: false,
+                writable: false,
+                writer_ready: false,
+                migration_current: false,
+                backup_valid: false,
+            },
+        }
     }
 
     pub async fn list_after_startup(
@@ -1250,6 +1377,15 @@ fn health_for_preflight_error(error: &CodexCommandError) -> WorkspaceHealth {
     }
 }
 
+fn repository_probe(state: RepositoryReadinessState) -> RepositoryReadinessProbe {
+    RepositoryReadinessProbe {
+        state,
+        identity_matches: false,
+        head_matches: false,
+        branch_matches: false,
+    }
+}
+
 fn ensure_repair_identity(
     candidate: &ValidatedWorkspaceCandidate,
     saved: &AppPrivateProjectIdentity,
@@ -2156,6 +2292,102 @@ mod tests {
         assert_eq!(state.workspaces.len(), 1);
         assert_eq!(state.workspaces[0].workspace_id, workspace_id);
         assert_eq!(state.workspaces[0].health, WorkspaceHealth::Missing);
+    }
+
+    #[tokio::test]
+    async fn readiness_revalidates_the_active_private_repository_without_git_mutation() {
+        let (service, root, data, _) = registered_context_service("readiness-repository").await;
+        fs::write(root.join("untracked.txt"), "preserve\n").expect("untracked fixture");
+        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before readiness");
+        let index_before = fs::read(root.join(".git/index")).ok();
+        let status_before = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args(["status", "--porcelain=v1", "--untracked-files=all"])
+            .output()
+            .expect("status before readiness")
+            .stdout;
+
+        let ready = service.repository_readiness().await;
+        assert_eq!(ready.state, RepositoryReadinessState::Ready);
+        assert!(ready.identity_matches);
+        assert!(ready.head_matches);
+        assert!(ready.branch_matches);
+        assert_eq!(
+            fs::read(root.join(".git/HEAD")).expect("HEAD after readiness"),
+            head_before,
+        );
+        assert_eq!(fs::read(root.join(".git/index")).ok(), index_before);
+        assert_eq!(
+            std::process::Command::new("/usr/bin/git")
+                .arg("-C")
+                .arg(&root)
+                .args(["status", "--porcelain=v1", "--untracked-files=all"])
+                .output()
+                .expect("status after readiness")
+                .stdout,
+            status_before,
+        );
+
+        let symbolic_ref = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args(["symbolic-ref", "HEAD", "refs/heads/readiness-stale"])
+            .status()
+            .expect("change fixture branch");
+        assert!(symbolic_ref.success());
+        let stale = service.repository_readiness().await;
+        assert_eq!(stale.state, RepositoryReadinessState::StaleBranch);
+        assert!(stale.identity_matches);
+        assert!(stale.head_matches);
+        assert!(!stale.branch_matches);
+        fs::write(root.join(".git/HEAD"), &head_before).expect("restore fixture HEAD");
+
+        let moved_root = root.with_file_name(format!(
+            "{}-moved",
+            root.file_name()
+                .and_then(|name| name.to_str())
+                .expect("fixture root name"),
+        ));
+        fs::rename(&root, &moved_root).expect("move selected repository");
+        std::os::unix::fs::symlink(&moved_root, &root).expect("retain moved repository link");
+        let moved = service.repository_readiness().await;
+        assert_eq!(moved.state, RepositoryReadinessState::Moved);
+        assert!(moved.identity_matches);
+        assert!(moved.head_matches);
+        assert!(moved.branch_matches);
+
+        fs::remove_file(&root).expect("remove moved repository link");
+        assert_eq!(
+            service.repository_readiness().await.state,
+            RepositoryReadinessState::Missing,
+        );
+        let _ = fs::remove_dir_all(moved_root);
+        let _ = fs::remove_dir_all(data);
+    }
+
+    #[tokio::test]
+    async fn readiness_blocks_a_changed_saved_repository_identity() {
+        let data = temp_directory("history-service-readiness-identity");
+        let root = git_repository();
+        let workspace = WorkspaceService::production(CodexSupervisor::new());
+        let store = WorkspaceHistoryStore::open(&data).expect("store");
+        let mut original = candidate(&workspace, &root).await;
+        original.git.project_identity = "changed-saved-identity".to_owned();
+        let registration = store
+            .register_candidate(&original)
+            .expect("register changed identity");
+        store
+            .select_workspace(&registration.workspace.workspace_id)
+            .expect("select changed identity fixture");
+        let service = WorkspaceHistoryService::new(store, workspace);
+
+        assert_eq!(
+            service.repository_readiness().await.state,
+            RepositoryReadinessState::Changed,
+        );
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]
