@@ -13,10 +13,8 @@ import type {
   WorkspaceEditableContext,
   WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
-import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
 import { PersistedCodexEventProjector } from "@/features/workspace-persistence/codex-event-projector"
 import {
-  TauriWorkspaceHistoryTransport,
   WorkspaceHistoryBoundaryError,
   type WorkspaceHistoryTransport,
 } from "@/features/workspace-persistence/transport"
@@ -429,14 +427,4 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
       revision: draft.revision,
     })
   }
-}
-
-export function createPersistentWorkspaceViewAdapter(
-  runtimeKind: "tauri" | "demo",
-): WorkspaceViewAdapter {
-  const transport =
-    runtimeKind === "tauri"
-      ? new TauriWorkspaceHistoryTransport()
-      : new DemoWorkspaceHistoryTransport()
-  return new PersistentWorkspaceViewAdapter(transport)
 }

@@ -22,8 +22,7 @@
     "useUnknownInCatchVariables": true,
     "noImplicitOverride": true,
     "paths": {
-      "#app-entry": ["./src/app/App.tsx"],
-      "#workspace-seed": ["./src/features/workspace-view/demo-data.ts"],
+      "#app-loader": ["./src/app/development-app-loader.ts"],
       "@/*": ["./src/*"],
       "@cubism/*": ["./vendor/live2d/types/*"]
     }

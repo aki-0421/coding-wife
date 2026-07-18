@@ -60,6 +60,7 @@ import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
 import type {
   CharacterStageRenderer,
   SettingsSection,
+  WorkspaceRecord,
   WorkspaceTab,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
@@ -80,6 +81,7 @@ export interface WorkspaceShellProps {
   readonly appLifecycleGateway?: AppLifecycleGateway | undefined
   readonly characterRenderer?: CharacterStageRenderer | undefined
   readonly gitReviewTransport: GitReviewTransport
+  readonly initialWorkspaces?: readonly WorkspaceRecord[] | undefined
   readonly commitExplanationController?:
     ScopedCommitExplanationController | undefined
   readonly narrationController: NarrationController
@@ -119,6 +121,7 @@ export function WorkspaceShell({
   appLifecycleGateway,
   characterRenderer,
   gitReviewTransport,
+  initialWorkspaces,
   commitExplanationController,
   narrationController,
 }: WorkspaceShellProps) {
@@ -130,7 +133,7 @@ export function WorkspaceShell({
   const narration = useNarrationSnapshot()
   const appPreferences = useAppPreferences().snapshot.preferences
   const characterHidden = appPreferences.characterVisibility === "hidden"
-  const view = useWorkspaceViewModel(adapter)
+  const view = useWorkspaceViewModel(adapter, initialWorkspaces)
   const contextModel = useEditableWorkspaceContext(
     adapter,
     view.selectedWorkspace?.id ?? "__no_workspace__",

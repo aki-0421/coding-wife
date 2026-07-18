@@ -1,13 +1,9 @@
 import { workspaceHistoryCommands } from "@/lib/contracts"
 
-import {
-  CodexWorkspaceSessionAdapter,
-  DemoCodexTransport,
-  TauriCodexTransport,
-  type CodexHistoryEvent,
-  type CodexTransport,
-  type CodexWorkspaceSessionSnapshot,
-} from "@/features/codex"
+import type { CodexHistoryEvent } from "@/features/codex/event-projection"
+import type { CodexTransport } from "@/features/codex/transport"
+import { CodexWorkspaceSessionAdapter } from "@/features/codex/workspace-session-adapter"
+import type { CodexWorkspaceSessionSnapshot } from "@/features/codex/workspace-session-store"
 import { PersistentWorkspaceViewAdapter } from "@/features/workspace-persistence/adapter"
 import { composeTurnInstruction } from "@/features/workspace-persistence/turn-context"
 import type { WorkspaceHistoryTransport } from "@/features/workspace-persistence/transport"
@@ -473,13 +469,4 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       historyMode,
     })
   }
-}
-
-export function createCodexComposedWorkspaceViewAdapter(
-  historyTransport: WorkspaceHistoryTransport,
-  codexTransport: CodexTransport = historyTransport.kind === "tauri"
-    ? new TauriCodexTransport()
-    : new DemoCodexTransport(),
-): WorkspaceViewAdapter {
-  return new CodexComposedWorkspaceViewAdapter(historyTransport, codexTransport)
 }

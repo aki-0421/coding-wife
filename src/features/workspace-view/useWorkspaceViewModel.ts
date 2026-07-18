@@ -7,7 +7,6 @@ import type {
 } from "@/lib/contracts"
 import type { WorkspaceTurnContextSnapshot } from "@/lib/contracts/workspace-context"
 
-import { initialWorkspaces } from "#workspace-seed"
 import { projectWorkspaceNavigation } from "@/features/workspace-view/workspace-navigation"
 import type {
   AttachmentItem,
@@ -168,15 +167,25 @@ export interface WorkspaceViewNotice {
   readonly message: string
 }
 
-export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
+export function useWorkspaceViewModel(
+  adapter?: WorkspaceViewAdapter,
+  initialWorkspaces: readonly WorkspaceRecord[] = [],
+) {
   const nativeHydration =
     adapter?.loadState !== undefined && adapter.hydrationMode !== "demo"
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceRecord[]>(
     () => (nativeHydration ? [] : initialWorkspaces),
   )
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(() =>
-    nativeHydration ? "" : "build-live2d-desktop-app",
-  )
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(() => {
+    if (nativeHydration) return ""
+    return (
+      initialWorkspaces.find(
+        (workspace) => workspace.id === "build-live2d-desktop-app",
+      )?.id ??
+      initialWorkspaces[0]?.id ??
+      ""
+    )
+  })
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat")
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("general")

@@ -10,10 +10,9 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "#app-entry": path.resolve(projectRoot, "src/app/App.tsx"),
-      "#workspace-seed": path.resolve(
+      "#app-loader": path.resolve(
         projectRoot,
-        "src/features/workspace-view/demo-data.ts",
+        "src/app/development-app-loader.ts",
       ),
       "@": path.resolve(projectRoot, "src"),
       "@cubism": path.resolve(projectRoot, "vendor/live2d/dist"),

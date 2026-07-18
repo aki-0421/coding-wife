@@ -41,6 +41,7 @@ import {
   type CharacterStageRenderer,
   type WorkspaceViewAdapter,
 } from "@/features/workspace-view"
+import { initialWorkspaces } from "@/features/workspace-view/demo-data"
 
 export interface AppProps {
   readonly appLifecycleGateway?: AppLifecycleGateway
@@ -168,6 +169,7 @@ export function App({
       characterRenderer={characterRenderer}
       commitExplanationRuntime={activeCommitExplanationRuntime}
       gitReviewTransport={gitReviewTransport}
+      initialWorkspaces={initialWorkspaces}
       localeStore={localeStore}
       narrationController={activeNarrationController}
       narrationGateway={activeNarrationGateway}

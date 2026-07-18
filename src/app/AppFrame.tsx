@@ -18,6 +18,7 @@ import type { AppTransport } from "@/features/runtime/transport"
 import { WorkspaceShell } from "@/features/workspace-view/WorkspaceShell"
 import type {
   CharacterStageRenderer,
+  WorkspaceRecord,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 
@@ -28,6 +29,7 @@ export interface AppFrameProps {
   readonly characterRenderer?: CharacterStageRenderer | undefined
   readonly commitExplanationRuntime: CommitExplanationAppRuntime | null
   readonly gitReviewTransport: GitReviewTransport
+  readonly initialWorkspaces?: readonly WorkspaceRecord[] | undefined
   readonly localeStore?: LocalePreferenceStore | undefined
   readonly narrationController: NarrationController
   readonly narrationGateway: NarrationGateway
@@ -44,6 +46,7 @@ export function AppFrame({
   characterRenderer,
   commitExplanationRuntime,
   gitReviewTransport,
+  initialWorkspaces,
   localeStore,
   narrationController,
   narrationGateway,
@@ -97,6 +100,7 @@ export function AppFrame({
             characterRenderer={activeCharacterRenderer}
             commitExplanationController={commitExplanationRuntime ?? undefined}
             gitReviewTransport={gitReviewTransport}
+            initialWorkspaces={initialWorkspaces}
             narrationController={narrationController}
           />
         </CharacterRuntimeStatusProvider>
