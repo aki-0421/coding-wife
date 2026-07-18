@@ -32,7 +32,6 @@ import {
   FieldLegend,
   FieldSet,
 } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import {
   Popover,
   PopoverClose,
@@ -49,6 +48,7 @@ import {
   type CharacterRuntimeView,
 } from "@/features/character"
 import { useI18n, type SupportedLocale } from "@/features/localization"
+import { NarrationSettings } from "@/features/narration"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type { RuntimeState } from "@/features/runtime"
 import type {
@@ -532,60 +532,19 @@ function CompanionSettings({
 function AudioSettings({
   copy,
   muted,
+  workspaceId,
   onMutedChange,
-}: Pick<SettingsViewProps, "copy" | "muted" | "onMutedChange">) {
-  const [ttsEnabled, setTtsEnabled] = useState(false)
-  const [rate, setRate] = useState("1")
-
+}: Pick<
+  SettingsViewProps,
+  "copy" | "muted" | "workspaceId" | "onMutedChange"
+>) {
   return (
-    <section className="flex flex-col gap-lg">
-      <h2 className="m-0 text-headline text-text-strong">
-        {copy.settingsView.audioTitle}
-      </h2>
-      <Badge
-        className="h-auto max-w-full shrink self-start break-words whitespace-normal py-xxs leading-snug"
-        variant="outline"
-      >
-        {copy.settingsView.localPreview}
-      </Badge>
-      <SettingRow
-        action={
-          <Switch
-            aria-label={copy.settingsView.tts}
-            checked={ttsEnabled}
-            onCheckedChange={setTtsEnabled}
-          />
-        }
-        description={copy.settingsView.ttsDescription}
-        label={copy.settingsView.tts}
-      />
-      <SettingRow
-        action={
-          <Switch
-            aria-label={copy.settingsView.mute}
-            checked={muted}
-            onCheckedChange={onMutedChange}
-          />
-        }
-        description={copy.character.muted}
-        label={copy.settingsView.mute}
-      />
-      <Field>
-        <FieldLabel htmlFor="speech-rate">{copy.settingsView.rate}</FieldLabel>
-        <Input
-          className="max-w-64"
-          disabled={!ttsEnabled}
-          id="speech-rate"
-          max="1.25"
-          min="0.75"
-          onChange={(event) => setRate(event.currentTarget.value)}
-          step="0.05"
-          type="range"
-          value={rate}
-        />
-        <FieldDescription>{Number(rate).toFixed(2)}×</FieldDescription>
-      </Field>
-    </section>
+    <NarrationSettings
+      heading={copy.settingsView.audioTitle}
+      muted={muted}
+      onMutedChange={onMutedChange}
+      workspaceId={workspaceId}
+    />
   )
 }
 

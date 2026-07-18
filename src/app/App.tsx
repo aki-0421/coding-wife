@@ -12,6 +12,13 @@ import {
   type LocalePreferenceStore,
 } from "@/features/localization"
 import {
+  createNarrationGateway,
+  NarrationProvider,
+  type CommitNarrationConsumerPort,
+  type NarrationController,
+  type NarrationGateway,
+} from "@/features/narration"
+import {
   DemoGitReviewTransport,
   TauriGitReviewTransport,
   type GitReviewTransport,
@@ -28,6 +35,9 @@ export interface AppProps {
   readonly characterLibraryGateway?: CharacterLibraryGateway
   readonly characterRenderer?: CharacterStageRenderer
   readonly localeStore?: LocalePreferenceStore
+  readonly narrationController?: NarrationController
+  readonly narrationGateway?: NarrationGateway
+  readonly narrationSource?: CommitNarrationConsumerPort | null
   readonly transport?: AppTransport
   readonly workspaceAdapter?: WorkspaceViewAdapter
 }
@@ -45,6 +55,9 @@ export function App({
   characterLibraryGateway,
   characterRenderer,
   localeStore,
+  narrationController,
+  narrationGateway,
+  narrationSource,
   transport,
   workspaceAdapter,
 }: AppProps) {
@@ -79,6 +92,13 @@ export function App({
         : new DemoGitReviewTransport(0),
     [activeTransport.kind],
   )
+  const fallbackNarrationGateway = useMemo(
+    () =>
+      createNarrationGateway(
+        activeTransport.kind === "tauri" ? "native" : "demo",
+      ),
+    [activeTransport.kind],
+  )
 
   return (
     <AppProviders
@@ -88,13 +108,19 @@ export function App({
       localeStore={localeStore ?? fallbackLocaleStore}
       transport={activeTransport}
     >
-      <CharacterRuntimeStatusProvider rendererKind={characterRendererKind}>
-        <WorkspaceShell
-          adapter={workspaceAdapter ?? fallbackWorkspaceAdapter}
-          characterRenderer={activeCharacterRenderer}
-          gitReviewTransport={gitReviewTransport}
-        />
-      </CharacterRuntimeStatusProvider>
+      <NarrationProvider
+        controller={narrationController}
+        gateway={narrationGateway ?? fallbackNarrationGateway}
+        source={narrationSource}
+      >
+        <CharacterRuntimeStatusProvider rendererKind={characterRendererKind}>
+          <WorkspaceShell
+            adapter={workspaceAdapter ?? fallbackWorkspaceAdapter}
+            characterRenderer={activeCharacterRenderer}
+            gitReviewTransport={gitReviewTransport}
+          />
+        </CharacterRuntimeStatusProvider>
+      </NarrationProvider>
     </AppProviders>
   )
 }

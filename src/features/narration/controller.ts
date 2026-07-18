@@ -1,0 +1,767 @@
+import {
+  NarrationContractError,
+  commitNarrationSourceKey,
+  narrationSchemaVersion,
+  parseCommitNarrationConsumerEvent,
+  parseNarrationSettings,
+  sourceKeyFromCommitNarrationEvent,
+  type CommitNarrationConsumerEventV1,
+  type CommitNarrationConsumerPort,
+  type CommitNarrationSourceKey,
+  type NarrationCancelReason,
+  type NarrationCommitJobTrigger,
+  type NarrationLocale,
+  type NarrationRuntimeSnapshotV1,
+  type NarrationSettingsSnapshotV1,
+  type NarrationSettingsUpdateV1,
+  type NarrationVoiceV1,
+} from "@/features/narration/contracts"
+import {
+  NarrationBoundaryError,
+  type NarrationGateway,
+} from "@/features/narration/transport"
+
+type Listener = () => void
+type Wait = (milliseconds: number) => Promise<void>
+
+export type NarrationLoadStatus =
+  "idle" | "loading" | "ready" | "saving" | "error"
+export type NarrationVoiceStatus = "idle" | "loading" | "ready" | "error"
+export type CommitNarrationPresentationStatus =
+  "preparing" | "streaming" | "ready" | "canceled" | "unavailable"
+export type NarrationSpeechStatus =
+  "off" | "muted" | "idle" | "queued" | "playing" | "unavailable"
+
+export interface NarrationScope {
+  readonly workspaceId: string
+  readonly generation: number
+}
+
+export interface CommitNarrationPresentationSnapshot {
+  readonly key: CommitNarrationSourceKey
+  readonly trigger: NarrationCommitJobTrigger
+  readonly presentationGeneration: number
+  readonly status: CommitNarrationPresentationStatus
+  readonly chunks: readonly string[]
+  readonly lastSequence: number | null
+  readonly speechStatus: NarrationSpeechStatus
+  readonly errorCode: string | null
+}
+
+export interface NarrationTestSnapshot {
+  readonly status: "idle" | "playing" | "unavailable"
+  readonly text: string | null
+  readonly errorCode: string | null
+}
+
+export interface NarrationControllerSnapshot {
+  readonly settingsStatus: NarrationLoadStatus
+  readonly voiceStatus: NarrationVoiceStatus
+  readonly settingsSnapshot: NarrationSettingsSnapshotV1 | null
+  readonly voices: readonly NarrationVoiceV1[]
+  readonly scope: NarrationScope | null
+  readonly presentation: CommitNarrationPresentationSnapshot | null
+  readonly test: NarrationTestSnapshot
+  readonly lastErrorCode: string | null
+}
+
+interface PreparedCommitNarration {
+  readonly key: CommitNarrationSourceKey
+  readonly trigger: NarrationCommitJobTrigger
+  status: "preparing" | "streaming" | "ready" | "failed" | "canceled"
+  chunks: string[]
+  errorCode: string | null
+  touchedAt: number
+}
+
+const maximumPreparedPresentations = 12
+const speechPollMilliseconds = 125
+const speechTimeoutMilliseconds = 30_000
+
+function initialSnapshot(): NarrationControllerSnapshot {
+  return {
+    settingsStatus: "idle",
+    voiceStatus: "idle",
+    settingsSnapshot: null,
+    voices: [],
+    scope: null,
+    presentation: null,
+    test: { status: "idle", text: null, errorCode: null },
+    lastErrorCode: null,
+  }
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+function errorCode(error: unknown): string {
+  if (
+    error instanceof NarrationBoundaryError ||
+    error instanceof NarrationContractError
+  ) {
+    return error.code
+  }
+  return "NARRATION-UNAVAILABLE"
+}
+
+function presentationStatus(
+  status: PreparedCommitNarration["status"],
+): CommitNarrationPresentationStatus {
+  if (status === "failed") return "unavailable"
+  return status
+}
+
+function sameSourceKey(
+  left: CommitNarrationSourceKey,
+  right: CommitNarrationSourceKey,
+): boolean {
+  return commitNarrationSourceKey(left) === commitNarrationSourceKey(right)
+}
+
+export class NarrationController {
+  readonly #listeners = new Set<Listener>()
+  readonly #prepared = new Map<string, PreparedCommitNarration>()
+  #snapshot = initialSnapshot()
+  #initialization: Promise<void> | null = null
+  #sourceDisconnect: (() => void) | null = null
+  #scopeEpoch = 0
+  #presentationGeneration = 0
+  #speechEpoch = 0
+  #speechChain: Promise<void> = Promise.resolve()
+  #testSequence = 0
+
+  public constructor(
+    public readonly gateway: NarrationGateway,
+    private readonly pause: Wait = wait,
+  ) {}
+
+  public readonly subscribe = (listener: Listener): (() => void) => {
+    this.#listeners.add(listener)
+    return () => this.#listeners.delete(listener)
+  }
+
+  public getSnapshot = (): NarrationControllerSnapshot => this.#snapshot
+
+  public connect(source: CommitNarrationConsumerPort | null): () => void {
+    this.#sourceDisconnect?.()
+    this.#sourceDisconnect =
+      source?.subscribe((event) => this.consume(event)) ?? null
+    return () => {
+      this.#sourceDisconnect?.()
+      this.#sourceDisconnect = null
+    }
+  }
+
+  public initialize(): Promise<void> {
+    if (this.#initialization !== null) return this.#initialization
+    this.update({
+      settingsStatus: "loading",
+      voiceStatus: "loading",
+      lastErrorCode: null,
+    })
+    this.#initialization = Promise.allSettled([
+      this.gateway.getSettings(),
+      this.gateway.listVoices(),
+    ]).then(([settings, voices]) => {
+      const settingsSnapshot =
+        settings.status === "fulfilled" ? settings.value : null
+      const availableVoices =
+        voices.status === "fulfilled" ? voices.value.voices : []
+      const failure =
+        settings.status === "rejected"
+          ? errorCode(settings.reason)
+          : voices.status === "rejected"
+            ? errorCode(voices.reason)
+            : null
+      this.update({
+        settingsStatus: settingsSnapshot === null ? "error" : "ready",
+        voiceStatus: voices.status === "fulfilled" ? "ready" : "error",
+        settingsSnapshot,
+        voices: availableVoices,
+        lastErrorCode: failure ?? settingsSnapshot?.loadWarningCode ?? null,
+      })
+    })
+    return this.#initialization
+  }
+
+  public async refresh(): Promise<void> {
+    this.#initialization = null
+    await this.initialize()
+  }
+
+  public async saveSettings(
+    input: Omit<NarrationSettingsUpdateV1, "schemaVersion" | "expectedVersion">,
+  ): Promise<boolean> {
+    const current = this.#snapshot.settingsSnapshot
+    if (current === null) return false
+    const validationError = this.validateSettingsInput(
+      input,
+      current.settings.version,
+    )
+    if (validationError !== null) {
+      this.update({ settingsStatus: "error", lastErrorCode: validationError })
+      return false
+    }
+    this.update({ settingsStatus: "saving", lastErrorCode: null })
+    try {
+      const settingsSnapshot = await this.gateway.updateSettings({
+        schemaVersion: narrationSchemaVersion,
+        expectedVersion: current.settings.version,
+        ...input,
+      })
+      this.update({ settingsStatus: "ready", settingsSnapshot })
+      if (
+        !settingsSnapshot.settings.enabled ||
+        settingsSnapshot.settings.muted
+      ) {
+        await this.cancelSpeech(
+          settingsSnapshot.settings.muted ? "mute" : "explicit_cancel",
+        )
+      }
+      return true
+    } catch (error) {
+      this.update({
+        settingsStatus: "error",
+        lastErrorCode: errorCode(error),
+      })
+      return false
+    }
+  }
+
+  public async setMuted(muted: boolean): Promise<boolean> {
+    const current = this.#snapshot.settingsSnapshot
+    if (current === null) return false
+    this.update({ settingsStatus: "saving", lastErrorCode: null })
+    try {
+      const settingsSnapshot = await this.gateway.setMuted({
+        schemaVersion: narrationSchemaVersion,
+        expectedVersion: current.settings.version,
+        muted,
+      })
+      this.update({ settingsStatus: "ready", settingsSnapshot })
+      if (muted) await this.cancelSpeech("mute")
+      return true
+    } catch (error) {
+      this.update({
+        settingsStatus: "error",
+        lastErrorCode: errorCode(error),
+      })
+      return false
+    }
+  }
+
+  public async resetSettings(): Promise<boolean> {
+    const current = this.#snapshot.settingsSnapshot
+    if (current === null) return false
+    this.update({ settingsStatus: "saving", lastErrorCode: null })
+    try {
+      const settingsSnapshot = await this.gateway.resetSettings(
+        current.settings.version,
+      )
+      await this.cancelSpeech("reset")
+      this.update({ settingsStatus: "ready", settingsSnapshot })
+      return true
+    } catch (error) {
+      this.update({
+        settingsStatus: "error",
+        lastErrorCode: errorCode(error),
+      })
+      return false
+    }
+  }
+
+  public async setScope(scope: NarrationScope): Promise<boolean> {
+    if (
+      this.#snapshot.scope?.workspaceId === scope.workspaceId &&
+      this.#snapshot.scope.generation === scope.generation
+    ) {
+      return true
+    }
+    const epoch = ++this.#scopeEpoch
+    if (
+      this.#snapshot.scope !== null &&
+      this.#snapshot.presentation?.status !== "canceled"
+    ) {
+      await this.cancelPresentation("workspace_switch")
+    }
+    try {
+      await this.gateway.setScope({
+        schemaVersion: narrationSchemaVersion,
+        workspaceId: scope.workspaceId,
+        generation: scope.generation,
+      })
+      if (epoch !== this.#scopeEpoch) return false
+      this.dropStalePrepared(scope)
+      this.update({ scope, lastErrorCode: null })
+      return true
+    } catch (error) {
+      if (epoch === this.#scopeEpoch) {
+        this.update({ lastErrorCode: errorCode(error) })
+      }
+      return false
+    }
+  }
+
+  public consume(value: unknown): boolean {
+    let event: CommitNarrationConsumerEventV1
+    try {
+      event = parseCommitNarrationConsumerEvent(value)
+    } catch (error) {
+      this.failActivePresentation(errorCode(error))
+      return false
+    }
+    const key = sourceKeyFromCommitNarrationEvent(event)
+    const scope = this.#snapshot.scope
+    if (
+      scope !== null &&
+      event.workspaceId === scope.workspaceId &&
+      event.workspaceGeneration < scope.generation
+    ) {
+      return false
+    }
+    const id = commitNarrationSourceKey(key)
+    const existing = this.#prepared.get(id)
+    if (event.kind === "started") {
+      if (existing !== undefined) {
+        if (existing.trigger !== event.trigger || existing.chunks.length > 0) {
+          this.failPrepared(existing, "NARRATION-PRESENTATION-SEQUENCE")
+          return false
+        }
+        return true
+      }
+      this.#prepared.set(id, {
+        key,
+        trigger: event.trigger,
+        status: "preparing",
+        chunks: [],
+        errorCode: null,
+        touchedAt: Date.now(),
+      })
+      this.trimPrepared()
+      return true
+    }
+    if (existing === undefined || existing.trigger !== event.trigger) {
+      this.failActivePresentation("NARRATION-PRESENTATION-SEQUENCE")
+      return false
+    }
+    existing.touchedAt = Date.now()
+    if (event.kind === "chunk") {
+      if (
+        existing.status === "ready" ||
+        existing.status === "failed" ||
+        existing.status === "canceled" ||
+        event.sequence !== existing.chunks.length
+      ) {
+        this.failPrepared(existing, "NARRATION-PRESENTATION-SEQUENCE")
+        return false
+      }
+      existing.chunks = [...existing.chunks, event.text]
+      existing.status = "streaming"
+      if (this.activeMatches(existing.key)) {
+        this.publishActive(existing)
+        this.scheduleSpeech(event.sequence, event.text)
+      }
+      return true
+    }
+    existing.status =
+      event.status === "completed"
+        ? existing.chunks.length > 0
+          ? "ready"
+          : "failed"
+        : event.status
+    existing.errorCode =
+      event.status === "completed" && existing.chunks.length === 0
+        ? "NARRATION-PRESENTATION-EMPTY"
+        : event.errorCode
+    if (this.activeMatches(existing.key)) {
+      this.publishActive(existing)
+      if (existing.status !== "ready") {
+        void this.cancelSpeech("explicit_cancel")
+      }
+    }
+    return true
+  }
+
+  public async activatePresentation(
+    key: CommitNarrationSourceKey,
+  ): Promise<boolean> {
+    if (this.#snapshot.presentation !== null) {
+      if (!sameSourceKey(this.#snapshot.presentation.key, key)) {
+        await this.cancelPresentation("explicit_cancel")
+      } else {
+        await this.cancelSpeech("explicit_cancel")
+      }
+    }
+    const prepared = this.#prepared.get(commitNarrationSourceKey(key))
+    if (prepared === undefined) return false
+    const scope = this.#snapshot.scope
+    if (scope === null) {
+      if (
+        !(await this.setScope({
+          workspaceId: key.workspaceId,
+          generation: key.workspaceGeneration,
+        }))
+      ) {
+        return false
+      }
+    } else if (
+      scope.workspaceId !== key.workspaceId ||
+      scope.generation !== key.workspaceGeneration
+    ) {
+      return false
+    }
+    const generation = ++this.#presentationGeneration
+    this.#speechEpoch++
+    this.#snapshot = {
+      ...this.#snapshot,
+      presentation: {
+        key: prepared.key,
+        trigger: prepared.trigger,
+        presentationGeneration: generation,
+        status: presentationStatus(prepared.status),
+        chunks: [...prepared.chunks],
+        lastSequence:
+          prepared.chunks.length === 0 ? null : prepared.chunks.length - 1,
+        speechStatus: this.resolveInactiveSpeechStatus(),
+        errorCode: prepared.errorCode,
+      },
+    }
+    this.emit()
+    if (prepared.status === "streaming" || prepared.status === "ready") {
+      prepared.chunks.forEach((text, sequence) => {
+        this.scheduleSpeech(sequence, text)
+      })
+    }
+    return true
+  }
+
+  public async cancelPresentation(
+    reason: NarrationCancelReason = "explicit_cancel",
+  ): Promise<void> {
+    if (this.#snapshot.presentation !== null) {
+      this.#presentationGeneration++
+      this.#snapshot = {
+        ...this.#snapshot,
+        presentation: {
+          ...this.#snapshot.presentation,
+          presentationGeneration: this.#presentationGeneration,
+          status: "canceled",
+          speechStatus: "idle",
+        },
+      }
+      this.emit()
+    }
+    await this.cancelSpeech(reason)
+  }
+
+  public async playTest(
+    scope: NarrationScope,
+    locale: NarrationLocale,
+    text: string,
+  ): Promise<boolean> {
+    if (!(await this.setScope(scope))) return false
+    const settings = this.#snapshot.settingsSnapshot?.settings
+    if (settings === undefined) return false
+    const testEpoch = ++this.#speechEpoch
+    const requestId = `narration-test-${++this.#testSequence}`
+    this.update({
+      test: { status: "playing", text, errorCode: null },
+    })
+    try {
+      const response = await this.gateway.speak({
+        schemaVersion: narrationSchemaVersion,
+        requestId,
+        workspaceId: scope.workspaceId,
+        generation: scope.generation,
+        sequence: 0,
+        locale,
+        kind: "test",
+        semanticType: "test",
+        priority: "high",
+        text,
+      })
+      if (response.disposition !== "queued") {
+        this.update({
+          test: {
+            status: "unavailable",
+            text,
+            errorCode: response.code ?? `NARRATION-${response.disposition}`,
+          },
+        })
+        return false
+      }
+      await this.waitForPlaybackEnd(testEpoch)
+      if (testEpoch !== this.#speechEpoch) return false
+      this.update({ test: { status: "idle", text, errorCode: null } })
+      return true
+    } catch (error) {
+      this.update({
+        test: { status: "unavailable", text, errorCode: errorCode(error) },
+      })
+      return false
+    }
+  }
+
+  public async cancelTest(): Promise<void> {
+    this.#speechEpoch++
+    await this.gateway.cancel("explicit_cancel")
+    this.update({ test: { ...this.#snapshot.test, status: "idle" } })
+  }
+
+  public voicesForLocale(locale: NarrationLocale): readonly NarrationVoiceV1[] {
+    return this.#snapshot.voices.filter((voice) =>
+      locale === "ja"
+        ? voice.locale === "ja_JP"
+        : voice.locale.startsWith("en_"),
+    )
+  }
+
+  private scheduleSpeech(sequence: number, text: string): void {
+    const presentation = this.#snapshot.presentation
+    const settings = this.#snapshot.settingsSnapshot?.settings
+    if (presentation === null || settings === undefined) return
+    if (!settings.enabled || settings.muted) {
+      this.updatePresentation({
+        speechStatus: settings.muted ? "muted" : "off",
+      })
+      return
+    }
+    const epoch = this.#speechEpoch
+    const generation = presentation.presentationGeneration
+    const key = presentation.key
+    this.updatePresentation({ speechStatus: "queued" })
+    this.#speechChain = this.#speechChain
+      .then(async () => {
+        if (!this.speechStillActive(epoch, generation, key)) return
+        const response = await this.gateway.speak({
+          schemaVersion: narrationSchemaVersion,
+          requestId: `present-${key.requestId.slice(0, 96)}-${generation}`,
+          workspaceId: key.workspaceId,
+          generation: key.workspaceGeneration,
+          sequence,
+          locale: key.locale,
+          kind: "commit_explanation",
+          semanticType: "commit_explanation",
+          priority: "normal",
+          text,
+        })
+        if (!this.speechStillActive(epoch, generation, key)) return
+        if (response.disposition !== "queued") {
+          this.updatePresentation({
+            speechStatus:
+              response.disposition === "muted"
+                ? "muted"
+                : response.disposition === "disabled"
+                  ? "off"
+                  : "unavailable",
+            errorCode: response.code,
+          })
+          return
+        }
+        this.updatePresentation({ speechStatus: "playing" })
+        await this.waitForPlaybackEnd(epoch)
+        if (this.speechStillActive(epoch, generation, key)) {
+          this.updatePresentation({ speechStatus: "idle" })
+        }
+      })
+      .catch((error: unknown) => {
+        if (this.speechStillActive(epoch, generation, key)) {
+          this.updatePresentation({
+            speechStatus: "unavailable",
+            errorCode: errorCode(error),
+          })
+        }
+      })
+  }
+
+  private async waitForPlaybackEnd(epoch: number): Promise<void> {
+    let elapsed = 0
+    while (elapsed < speechTimeoutMilliseconds && epoch === this.#speechEpoch) {
+      const runtime = await this.gateway.getRuntime()
+      this.updateRuntime(runtime)
+      if (runtime.playbackState === "idle" && runtime.queueDepth === 0) return
+      await this.pause(speechPollMilliseconds)
+      elapsed += speechPollMilliseconds
+    }
+    if (elapsed >= speechTimeoutMilliseconds) {
+      throw new NarrationBoundaryError({
+        code: "NARRATION-PLAYBACK-TIMEOUT",
+        operation: "narration_get_runtime",
+        recoverable: true,
+        userMessageKey: "narration.error.generic",
+        detailRef: "narration-v1",
+      })
+    }
+  }
+
+  private updateRuntime(runtime: NarrationRuntimeSnapshotV1): void {
+    const settingsSnapshot = this.#snapshot.settingsSnapshot
+    if (settingsSnapshot === null) return
+    this.update({
+      settingsSnapshot: { ...settingsSnapshot, runtime },
+    })
+  }
+
+  private speechStillActive(
+    epoch: number,
+    generation: number,
+    key: CommitNarrationSourceKey,
+  ): boolean {
+    const active = this.#snapshot.presentation
+    return (
+      epoch === this.#speechEpoch &&
+      active !== null &&
+      active.presentationGeneration === generation &&
+      active.status !== "canceled" &&
+      active.status !== "unavailable" &&
+      sameSourceKey(active.key, key)
+    )
+  }
+
+  private async cancelSpeech(reason: NarrationCancelReason): Promise<void> {
+    this.#speechEpoch++
+    this.#speechChain = Promise.resolve()
+    try {
+      await this.gateway.cancel(reason)
+    } catch (error) {
+      this.update({ lastErrorCode: errorCode(error) })
+    }
+    const settings = this.#snapshot.settingsSnapshot?.settings
+    if (this.#snapshot.presentation !== null) {
+      this.updatePresentation({
+        speechStatus: settings?.muted
+          ? "muted"
+          : settings?.enabled
+            ? "idle"
+            : "off",
+      })
+    }
+  }
+
+  private activeMatches(key: CommitNarrationSourceKey): boolean {
+    return (
+      this.#snapshot.presentation !== null &&
+      this.#snapshot.presentation.status !== "canceled" &&
+      sameSourceKey(this.#snapshot.presentation.key, key)
+    )
+  }
+
+  private publishActive(prepared: PreparedCommitNarration): void {
+    const active = this.#snapshot.presentation
+    if (active === null || !sameSourceKey(active.key, prepared.key)) return
+    this.#snapshot = {
+      ...this.#snapshot,
+      presentation: {
+        ...active,
+        status: presentationStatus(prepared.status),
+        chunks: [...prepared.chunks],
+        lastSequence:
+          prepared.chunks.length === 0 ? null : prepared.chunks.length - 1,
+        errorCode: prepared.errorCode,
+      },
+    }
+    this.emit()
+  }
+
+  private failPrepared(prepared: PreparedCommitNarration, code: string): void {
+    prepared.status = "failed"
+    prepared.errorCode = code
+    if (this.activeMatches(prepared.key)) {
+      this.publishActive(prepared)
+      void this.cancelSpeech("explicit_cancel")
+    }
+  }
+
+  private failActivePresentation(code: string): void {
+    if (this.#snapshot.presentation === null) {
+      this.update({ lastErrorCode: code })
+      return
+    }
+    this.updatePresentation({
+      status: "unavailable",
+      speechStatus: "unavailable",
+      errorCode: code,
+    })
+    void this.cancelSpeech("explicit_cancel")
+  }
+
+  private resolveInactiveSpeechStatus(): NarrationSpeechStatus {
+    const settings = this.#snapshot.settingsSnapshot?.settings
+    if (settings === undefined || !settings.enabled) return "off"
+    return settings.muted ? "muted" : "idle"
+  }
+
+  private updatePresentation(
+    update: Partial<CommitNarrationPresentationSnapshot>,
+  ): void {
+    if (this.#snapshot.presentation === null) return
+    this.#snapshot = {
+      ...this.#snapshot,
+      presentation: { ...this.#snapshot.presentation, ...update },
+    }
+    this.emit()
+  }
+
+  private trimPrepared(): void {
+    if (this.#prepared.size <= maximumPreparedPresentations) return
+    const activeKey = this.#snapshot.presentation
+      ? commitNarrationSourceKey(this.#snapshot.presentation.key)
+      : null
+    const oldest = [...this.#prepared.entries()]
+      .filter(([key]) => key !== activeKey)
+      .sort((left, right) => left[1].touchedAt - right[1].touchedAt)[0]
+    if (oldest !== undefined) this.#prepared.delete(oldest[0])
+  }
+
+  private dropStalePrepared(scope: NarrationScope): void {
+    for (const [id, prepared] of this.#prepared) {
+      if (
+        prepared.key.workspaceId === scope.workspaceId &&
+        prepared.key.workspaceGeneration < scope.generation
+      ) {
+        this.#prepared.delete(id)
+      }
+    }
+  }
+
+  private validateSettingsInput(
+    input: Omit<NarrationSettingsUpdateV1, "schemaVersion" | "expectedVersion">,
+    version: number,
+  ): string | null {
+    try {
+      parseNarrationSettings({
+        schemaVersion: narrationSchemaVersion,
+        version,
+        ...input,
+      })
+    } catch (error) {
+      return errorCode(error)
+    }
+    if (input.enabled && input.voices.ja === null && input.voices.en === null) {
+      return "NARRATION-VOICE-REQUIRED"
+    }
+    if (!input.enabled) return null
+    for (const [locale, voiceName] of Object.entries(input.voices) as [
+      NarrationLocale,
+      string | null,
+    ][]) {
+      if (
+        voiceName !== null &&
+        !this.voicesForLocale(locale).some((voice) => voice.name === voiceName)
+      ) {
+        return "NARRATION-VOICE-UNAVAILABLE"
+      }
+    }
+    return null
+  }
+
+  private update(update: Partial<NarrationControllerSnapshot>): void {
+    this.#snapshot = { ...this.#snapshot, ...update }
+    this.emit()
+  }
+
+  private emit(): void {
+    for (const listener of this.#listeners) listener()
+  }
+}
