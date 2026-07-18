@@ -44,6 +44,7 @@ function createGateway(
     cancelImport: () => Promise.resolve(),
     selectPack: () => Promise.resolve(snapshot),
     deletePack: () => Promise.resolve(snapshot),
+    saveSemanticMapping: () => Promise.resolve(snapshot),
     createPackRef: () => ({
       kind: "url",
       manifestUrl: "/characters/builtin-hiyori/pack.json",

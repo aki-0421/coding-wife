@@ -17,6 +17,9 @@ import type {
   CharacterPreviewAttestationRequest,
   CharacterPreviewAttestationResponse,
   CharacterPreviewSession,
+  CharacterSemanticMappingSaveRequest,
+  SemanticCueSelection,
+  SemanticState,
 } from "@/features/character/library/contracts"
 import {
   CharacterLibraryOperationError,
@@ -30,6 +33,7 @@ export type CharacterLibraryMutation =
   | "canceling"
   | "selecting"
   | "deleting"
+  | "saving_mapping"
 
 export interface CharacterLibraryState {
   readonly status: "idle" | "loading" | "ready" | "error"
@@ -38,6 +42,10 @@ export interface CharacterLibraryState {
   readonly preview: CharacterPreviewSession | null
   readonly mutation: CharacterLibraryMutation | null
   readonly errorCode: string | null
+  readonly semanticPreview: Readonly<{
+    state: SemanticState
+    cue: SemanticCueSelection
+  }> | null
 }
 
 type Listener = () => void
@@ -50,6 +58,7 @@ function initialState(workspaceId: string): CharacterLibraryState {
     preview: null,
     mutation: null,
     errorCode: null,
+    semanticPreview: null,
   }
 }
 
@@ -251,12 +260,34 @@ export class CharacterLibraryStore {
     }
   }
 
+  public async saveSemanticMapping(
+    request: CharacterSemanticMappingSaveRequest,
+  ): Promise<CharacterLibrarySnapshot> {
+    this.beginMutation(request.workspaceId, "saving_mapping")
+    try {
+      const snapshot = await this.gateway.saveSemanticMapping(request)
+      this.setReadyProjectSnapshot(request.workspaceId, snapshot)
+      return snapshot
+    } catch (error) {
+      this.failMutation(request.workspaceId, error)
+      throw error
+    }
+  }
+
   public selectedPack(workspaceId: string): CharacterPackView | null {
     const snapshot = this.getState(workspaceId).snapshot
     return (
       snapshot?.packs.find((pack) => pack.packId === snapshot.selectedPackId) ??
       null
     )
+  }
+
+  public setSemanticPreview(
+    workspaceId: string,
+    semanticPreview: CharacterLibraryState["semanticPreview"],
+  ): void {
+    const current = this.getState(workspaceId)
+    this.setState(workspaceId, { ...current, semanticPreview })
   }
 
   public selectedPackRef(workspaceId: string): CharacterPackRef | null {

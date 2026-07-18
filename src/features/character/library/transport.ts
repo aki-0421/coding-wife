@@ -25,6 +25,8 @@ import {
   type CharacterPreviewAttestationRequest,
   type CharacterPreviewAttestationResponse,
   type CharacterPreviewSession,
+  type CharacterSemanticMappingSaveRequest,
+  type SemanticMappingV1,
 } from "@/features/character/library/contracts"
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
@@ -61,6 +63,9 @@ export interface CharacterLibraryGateway {
   ): Promise<CharacterLibrarySnapshot>
   deletePack(
     request: CharacterLibraryRequest & { readonly packId: string },
+  ): Promise<CharacterLibrarySnapshot>
+  saveSemanticMapping(
+    request: CharacterSemanticMappingSaveRequest,
   ): Promise<CharacterLibrarySnapshot>
   createPackRef(pack: CharacterPackView): CharacterPackRef
   createPreviewPackRef(preview: CharacterPreviewSession): CharacterPackRef
@@ -162,6 +167,16 @@ export class NativeCharacterLibraryGateway implements CharacterLibraryGateway {
     )
   }
 
+  public async saveSemanticMapping(
+    request: CharacterSemanticMappingSaveRequest,
+  ): Promise<CharacterLibrarySnapshot> {
+    return this.invokeParsed(
+      characterLibraryCommands.saveSemanticMapping,
+      request,
+      parseCharacterLibrarySnapshot,
+    )
+  }
+
   public createPackRef(pack: CharacterPackView): CharacterPackRef {
     if (pack.kind === "builtin") {
       return {
@@ -246,6 +261,21 @@ export class NativeCharacterLibraryGateway implements CharacterLibraryGateway {
 export class DemoCharacterLibraryGateway implements CharacterLibraryGateway {
   public readonly kind = "demo" as const
   readonly #manifest = parseCharacterPackManifest(structuredClone(hiyoriPack))
+  #semanticMapping: SemanticMappingV1 = {
+    schemaVersion: 1,
+    packId: builtinHiyoriPackId,
+    manifestHash: "0".repeat(64),
+    mappingVersion: 0,
+    assignments: {
+      neutral: { kind: "neutral" },
+      thinking: { kind: "neutral" },
+      working: { kind: "neutral" },
+      asking: { kind: "neutral" },
+      success: { kind: "neutral" },
+      warning: { kind: "neutral" },
+      error: { kind: "neutral" },
+    },
+  }
 
   public getLibrary(
     request: CharacterLibraryRequest,
@@ -298,6 +328,27 @@ export class DemoCharacterLibraryGateway implements CharacterLibraryGateway {
     return Promise.reject(new CharacterLibraryOperationError())
   }
 
+  public saveSemanticMapping(
+    request: CharacterSemanticMappingSaveRequest,
+  ): Promise<CharacterLibrarySnapshot> {
+    const snapshot = this.snapshot(request.workspaceId)
+    if (
+      request.packId !== snapshot.selectedPackId ||
+      request.manifestHash !== snapshot.semanticMapping.manifestHash ||
+      request.expectedMappingVersion !== snapshot.semanticMapping.mappingVersion
+    ) {
+      return Promise.reject(new CharacterLibraryOperationError())
+    }
+    this.#semanticMapping = {
+      schemaVersion: 1,
+      packId: request.packId,
+      manifestHash: request.manifestHash,
+      mappingVersion: request.expectedMappingVersion + 1,
+      assignments: request.assignments,
+    }
+    return Promise.resolve(this.snapshot(request.workspaceId))
+  }
+
   public createPackRef(pack: CharacterPackView): CharacterPackRef {
     void pack
     return {
@@ -344,8 +395,19 @@ export class DemoCharacterLibraryGateway implements CharacterLibraryGateway {
           deletable: false,
           manifest: null,
           thumbnailSha256: null,
+          cueInventory: {
+            motions: Object.values(this.#manifest.inventory.motionGroups)
+              .flat()
+              .map((cue) => cue.cueId),
+            expressions: (this.#manifest.inventory.expressionCues ?? []).map(
+              (cue) => cue.cueId,
+            ),
+          },
         },
       ],
+      semanticMapping: this.#semanticMapping,
+      semanticMappingStatus:
+        this.#semanticMapping.mappingVersion === 0 ? "default" : "saved",
     }
   }
 }

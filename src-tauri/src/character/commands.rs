@@ -5,7 +5,8 @@ use super::service::{
     CharacterAssetRequest, CharacterCancelImportRequest, CharacterConfirmImportRequest,
     CharacterDeleteRequest, CharacterImportResponse, CharacterLibraryRequest,
     CharacterLibrarySnapshot, CharacterPreviewAttestationRequest,
-    CharacterPreviewAttestationResponse, CharacterSelectRequest, CharacterService,
+    CharacterPreviewAttestationResponse, CharacterSelectRequest,
+    CharacterSemanticMappingSaveRequest, CharacterService,
 };
 
 #[tauri::command]
@@ -84,6 +85,17 @@ pub async fn character_delete_pack(
     service: State<'_, CharacterService>,
 ) -> Result<CharacterLibrarySnapshot, CharacterCommandError> {
     public_operation(service.delete_pack(request).await, "character_delete_pack")
+}
+
+#[tauri::command]
+pub async fn character_semantic_mapping_save(
+    request: CharacterSemanticMappingSaveRequest,
+    service: State<'_, CharacterService>,
+) -> Result<CharacterLibrarySnapshot, CharacterCommandError> {
+    public_operation(
+        service.save_semantic_mapping(request).await,
+        "character_semantic_mapping_save",
+    )
 }
 
 fn public_operation<T>(result: CharacterResult<T>, operation: &'static str) -> CharacterResult<T> {

@@ -15,6 +15,10 @@ use super::error::{character_error, CharacterResult};
 use super::manifest::{
     is_sha256, CharacterPackManifest, BUILTIN_HIYORI_PACK_ID, CHARACTER_SCHEMA_VERSION,
 };
+use super::semantic_mapping::{
+    SemanticAssignmentsV1, SemanticCueInventory, SemanticMappingStatus, SemanticMappingV1,
+    MAX_MAPPING_VERSION, SEMANTIC_MAPPING_SCHEMA_VERSION,
+};
 use super::storage::{CharacterStateFile, CharacterStorage, StoredPack};
 use super::validation::{snapshot_character_model, validate_trusted_frame_png};
 
@@ -103,6 +107,7 @@ pub struct CharacterPackView {
     pub deletable: bool,
     pub manifest: Option<CharacterPackManifest>,
     pub thumbnail_sha256: Option<String>,
+    pub cue_inventory: SemanticCueInventory,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -115,6 +120,8 @@ pub struct CharacterLibrarySnapshot {
     pub fallback_applied: bool,
     pub diagnostics: Vec<String>,
     pub packs: Vec<CharacterPackView>,
+    pub semantic_mapping: SemanticMappingV1,
+    pub semantic_mapping_status: SemanticMappingStatus,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -222,6 +229,16 @@ pub struct CharacterSelectRequest {
 pub struct CharacterDeleteRequest {
     pub workspace_id: String,
     pub pack_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CharacterSemanticMappingSaveRequest {
+    pub workspace_id: String,
+    pub pack_id: String,
+    pub manifest_hash: String,
+    pub expected_mapping_version: u64,
+    pub assignments: SemanticAssignmentsV1,
 }
 
 #[derive(Clone, Debug)]
@@ -635,6 +652,95 @@ impl CharacterService {
         self.snapshot(&request.workspace_id)
     }
 
+    pub async fn save_semantic_mapping(
+        &self,
+        request: CharacterSemanticMappingSaveRequest,
+    ) -> CharacterResult<CharacterLibrarySnapshot> {
+        validate_workspace_id(&request.workspace_id, "character_semantic_mapping_save")?;
+        if request.expected_mapping_version > MAX_MAPPING_VERSION.saturating_sub(1) {
+            return Err(character_error(
+                "character_semantic_mapping_save",
+                "CHARACTER-MAPPING-VERSION",
+                false,
+            ));
+        }
+        let _operation = self.operations.lock().await;
+        let project_id = self.resolve_project_id(&request.workspace_id)?;
+        let (custom_packs, _) = self.storage.load_custom_packs()?;
+        let mut state = self.load_project_state(&custom_packs)?;
+        if state.selected_for(&project_id) != request.pack_id {
+            return Err(character_error(
+                "character_semantic_mapping_save",
+                "CHARACTER-MAPPING-STALE-PACK",
+                true,
+            ));
+        }
+        let pack = if request.pack_id == BUILTIN_HIYORI_PACK_ID {
+            self.builtin_pack_view(&state)?
+        } else {
+            custom_packs
+                .iter()
+                .find(|pack| pack.manifest.pack_id == request.pack_id)
+                .map(|pack| custom_pack_view(pack, &state))
+                .ok_or_else(|| {
+                    character_error(
+                        "character_semantic_mapping_save",
+                        "CHARACTER-PACK-NOT-FOUND",
+                        true,
+                    )
+                })?
+        };
+        if pack.manifest_hash != request.manifest_hash {
+            return Err(character_error(
+                "character_semantic_mapping_save",
+                "CHARACTER-MANIFEST-HASH-MISMATCH",
+                false,
+            ));
+        }
+        let current_version = state
+            .semantic_mappings
+            .get(&request.pack_id)
+            .and_then(|value| serde_json::from_value::<SemanticMappingV1>(value.clone()).ok())
+            .filter(|mapping| {
+                mapping.pack_id == pack.pack_id
+                    && mapping.manifest_hash == pack.manifest_hash
+                    && mapping.valid_for(&pack.cue_inventory)
+            })
+            .map(|mapping| mapping.mapping_version)
+            .unwrap_or(0);
+        if current_version != request.expected_mapping_version {
+            return Err(character_error(
+                "character_semantic_mapping_save",
+                "CHARACTER-MAPPING-CONFLICT",
+                true,
+            ));
+        }
+        let mapping = SemanticMappingV1 {
+            schema_version: SEMANTIC_MAPPING_SCHEMA_VERSION,
+            pack_id: request.pack_id.clone(),
+            manifest_hash: request.manifest_hash,
+            mapping_version: current_version + 1,
+            assignments: request.assignments,
+        };
+        if !mapping.valid_for(&pack.cue_inventory) {
+            return Err(character_error(
+                "character_semantic_mapping_save",
+                "CHARACTER-MAPPING-CUE",
+                false,
+            ));
+        }
+        let value = serde_json::to_value(mapping).map_err(|_| {
+            character_error(
+                "character_semantic_mapping_save",
+                "CHARACTER-MAPPING-SERIALIZE",
+                false,
+            )
+        })?;
+        state.semantic_mappings.insert(request.pack_id, value);
+        self.storage.save_state(&state)?;
+        self.snapshot(&request.workspace_id)
+    }
+
     pub async fn delete_pack(
         &self,
         request: CharacterDeleteRequest,
@@ -649,7 +755,7 @@ impl CharacterService {
         }
         let _operation = self.operations.lock().await;
         let (custom_packs, _) = self.storage.load_custom_packs()?;
-        let state = self.load_project_state(&custom_packs)?;
+        let mut state = self.load_project_state(&custom_packs)?;
         if state
             .project_selections
             .values()
@@ -662,6 +768,9 @@ impl CharacterService {
             ));
         }
         self.storage.delete_pack(&request.pack_id)?;
+        if state.semantic_mappings.remove(&request.pack_id).is_some() {
+            self.storage.save_state(&state)?;
+        }
         self.snapshot(&request.workspace_id)
     }
 
@@ -698,6 +807,18 @@ impl CharacterService {
                 .iter()
                 .map(|pack| custom_pack_view(pack, &state)),
         );
+        let selected_pack = packs
+            .iter()
+            .find(|pack| pack.pack_id == selected_pack_id)
+            .ok_or_else(|| {
+                character_error(
+                    "character_library_get",
+                    "CHARACTER-SELECTION-FALLBACK",
+                    true,
+                )
+            })?;
+        let (semantic_mapping, semantic_mapping_status) =
+            semantic_mapping_view(&state, selected_pack);
         Ok(CharacterLibrarySnapshot {
             schema_version: CHARACTER_SCHEMA_VERSION,
             workspace_id: workspace_id.to_owned(),
@@ -706,6 +827,8 @@ impl CharacterService {
             fallback_applied,
             diagnostics,
             packs,
+            semantic_mapping,
+            semantic_mapping_status,
         })
     }
 
@@ -724,6 +847,7 @@ impl CharacterService {
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or_default()
         };
+        let cue_inventory = builtin_cue_inventory(&value);
         Ok(CharacterPackView {
             schema_version: CHARACTER_SCHEMA_VERSION,
             pack_id: BUILTIN_HIYORI_PACK_ID.to_owned(),
@@ -749,6 +873,7 @@ impl CharacterService {
             deletable: false,
             manifest: None,
             thumbnail_sha256: None,
+            cue_inventory,
         })
     }
 
@@ -868,7 +993,82 @@ fn custom_pack_view(pack: &StoredPack, state: &CharacterStateFile) -> CharacterP
             .trusted_frame
             .as_ref()
             .map(|frame| frame.sha256.clone()),
+        cue_inventory: SemanticCueInventory {
+            motions: pack
+                .manifest
+                .inventory
+                .motion_groups
+                .values()
+                .flatten()
+                .map(|cue| cue.cue_id.clone())
+                .collect(),
+            expressions: pack
+                .manifest
+                .inventory
+                .expression_cues
+                .iter()
+                .map(|cue| cue.cue_id.clone())
+                .collect(),
+        },
     }
+}
+
+fn semantic_mapping_view(
+    state: &CharacterStateFile,
+    pack: &CharacterPackView,
+) -> (SemanticMappingV1, SemanticMappingStatus) {
+    let fallback = || SemanticMappingV1::neutral(pack.pack_id.clone(), pack.manifest_hash.clone());
+    let Some(value) = state.semantic_mappings.get(&pack.pack_id) else {
+        return (fallback(), SemanticMappingStatus::Default);
+    };
+    let Ok(mapping) = serde_json::from_value::<SemanticMappingV1>(value.clone()) else {
+        return (fallback(), SemanticMappingStatus::Invalid);
+    };
+    if mapping.pack_id != pack.pack_id
+        || mapping.manifest_hash != pack.manifest_hash
+        || !mapping.valid_for(&pack.cue_inventory)
+    {
+        return (fallback(), SemanticMappingStatus::Invalid);
+    }
+    (mapping, SemanticMappingStatus::Saved)
+}
+
+fn builtin_cue_inventory(value: &serde_json::Value) -> SemanticCueInventory {
+    let inventory = value
+        .get("inventory")
+        .and_then(serde_json::Value::as_object);
+    let motions = inventory
+        .and_then(|inventory| inventory.get("motionGroups"))
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flat_map(|groups| groups.values())
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .filter_map(|cue| cue.get("cueId").and_then(serde_json::Value::as_str))
+        .filter(|cue_id| valid_cue_id(cue_id))
+        .map(str::to_owned)
+        .collect();
+    let expressions = inventory
+        .and_then(|inventory| inventory.get("expressionCues"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|cue| cue.get("cueId").and_then(serde_json::Value::as_str))
+        .filter(|cue_id| valid_cue_id(cue_id))
+        .map(str::to_owned)
+        .collect();
+    SemanticCueInventory {
+        motions,
+        expressions,
+    }
+}
+
+fn valid_cue_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().count() <= 80
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_[]@".contains(&byte))
 }
 
 fn expected_manifest_asset_mime<'a>(
@@ -1134,6 +1334,10 @@ mod tests {
         assert_fixture_contract::<CharacterCancelImportRequest>(&fixture, "cancelRequest");
         assert_fixture_contract::<CharacterSelectRequest>(&fixture, "selectRequest");
         assert_fixture_contract::<CharacterDeleteRequest>(&fixture, "deleteRequest");
+        assert_fixture_contract::<CharacterSemanticMappingSaveRequest>(
+            &fixture,
+            "semanticMappingSaveRequest",
+        );
         assert_fixture_contract::<CharacterImportResponse>(&fixture, "importResponse");
         assert_fixture_contract::<CharacterImportResponse>(&fixture, "canceledImportResponse");
         assert_fixture_contract::<CharacterLibrarySnapshot>(&fixture, "librarySnapshot");
@@ -1486,6 +1690,128 @@ mod tests {
         assert_eq!(deleted.packs.len(), 1);
         assert_eq!(deleted.selected_pack_id, BUILTIN_HIYORI_PACK_ID);
         assert!(!published_directory.exists());
+    }
+
+    #[tokio::test]
+    async fn semantic_mapping_persists_verified_cues_and_invalid_data_falls_back_whole() {
+        use super::super::semantic_mapping::SemanticCueSelection;
+
+        let app_data = TestDirectory::new();
+        let storage = CharacterStorage::open(app_data.path()).expect("character storage");
+        let service = CharacterService::new(
+            storage.clone(),
+            resolve_builtin_directory(Path::new("/missing")),
+            Arc::new(FixedPicker(None)),
+        );
+        let workspace_id = "workspace-mapping".to_owned();
+        let initial = service
+            .library(CharacterLibraryRequest {
+                workspace_id: workspace_id.clone(),
+            })
+            .await
+            .expect("initial mapping");
+        assert_eq!(
+            initial.semantic_mapping_status,
+            SemanticMappingStatus::Default
+        );
+        assert_eq!(initial.semantic_mapping.mapping_version, 0);
+        assert_eq!(initial.packs[0].expression_count, 0);
+        let assignments = SemanticAssignmentsV1 {
+            neutral: SemanticCueSelection::Motion {
+                cue_id: "Idle[0]".to_owned(),
+            },
+            thinking: SemanticCueSelection::Motion {
+                cue_id: "Flick[0]".to_owned(),
+            },
+            working: SemanticCueSelection::Motion {
+                cue_id: "FlickDown[0]".to_owned(),
+            },
+            asking: SemanticCueSelection::Motion {
+                cue_id: "Tap[0]".to_owned(),
+            },
+            success: SemanticCueSelection::Motion {
+                cue_id: "FlickUp[0]".to_owned(),
+            },
+            warning: SemanticCueSelection::Motion {
+                cue_id: "Flick@Body[0]".to_owned(),
+            },
+            error: SemanticCueSelection::Motion {
+                cue_id: "Tap@Body[0]".to_owned(),
+            },
+        };
+        let saved = service
+            .save_semantic_mapping(CharacterSemanticMappingSaveRequest {
+                workspace_id: workspace_id.clone(),
+                pack_id: initial.selected_pack_id,
+                manifest_hash: initial.packs[0].manifest_hash.clone(),
+                expected_mapping_version: 0,
+                assignments: assignments.clone(),
+            })
+            .await
+            .expect("saved mapping");
+        assert_eq!(saved.semantic_mapping_status, SemanticMappingStatus::Saved);
+        assert_eq!(saved.semantic_mapping.mapping_version, 1);
+        assert_eq!(saved.semantic_mapping.assignments, assignments);
+        let mut invalid_assignments = assignments.clone();
+        invalid_assignments.error = SemanticCueSelection::Motion {
+            cue_id: "Arbitrary[0]".to_owned(),
+        };
+        assert_eq!(
+            service
+                .save_semantic_mapping(CharacterSemanticMappingSaveRequest {
+                    workspace_id: workspace_id.clone(),
+                    pack_id: saved.selected_pack_id.clone(),
+                    manifest_hash: saved.semantic_mapping.manifest_hash.clone(),
+                    expected_mapping_version: 1,
+                    assignments: invalid_assignments,
+                })
+                .await
+                .expect_err("inventory-external cue")
+                .code,
+            "CHARACTER-MAPPING-CUE"
+        );
+
+        let restarted = CharacterService::new(
+            storage.clone(),
+            resolve_builtin_directory(Path::new("/missing")),
+            Arc::new(FixedPicker(None)),
+        );
+        assert_eq!(
+            restarted
+                .library(CharacterLibraryRequest {
+                    workspace_id: workspace_id.clone(),
+                })
+                .await
+                .expect("restart mapping")
+                .semantic_mapping,
+            saved.semantic_mapping
+        );
+
+        let mut state = storage.load_state().expect("mapping state");
+        state.semantic_mappings.insert(
+            BUILTIN_HIYORI_PACK_ID.to_owned(),
+            serde_json::json!({
+                "schemaVersion": 99,
+                "packId": BUILTIN_HIYORI_PACK_ID,
+                "manifestHash": saved.semantic_mapping.manifest_hash,
+                "mappingVersion": 2,
+                "assignments": {}
+            }),
+        );
+        storage.save_state(&state).expect("invalid mapping fixture");
+        let invalid = restarted
+            .library(CharacterLibraryRequest { workspace_id })
+            .await
+            .expect("invalid mapping recovery");
+        assert_eq!(
+            invalid.semantic_mapping_status,
+            SemanticMappingStatus::Invalid
+        );
+        assert_eq!(invalid.semantic_mapping.mapping_version, 0);
+        assert_eq!(
+            invalid.semantic_mapping.assignments,
+            SemanticAssignmentsV1::neutral()
+        );
     }
 
     #[tokio::test]

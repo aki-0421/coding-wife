@@ -50,6 +50,7 @@ import {
   getCharacterModelLibraryCopy,
   type CharacterModelLibraryCopy,
 } from "@/features/character/library/model-library-copy"
+import { SemanticMappingSettings } from "@/features/character/library/SemanticMappingSettings"
 import { loadTrustedCharacterFrame } from "@/features/character/runtime/character-pack-client"
 import { useI18n, type SupportedLocale } from "@/features/localization"
 import { cn } from "@/lib/utils"
@@ -648,6 +649,10 @@ function CharacterModelLibrarySession({
         >
           {copy.switching}
         </p>
+      ) : null}
+
+      {snapshot !== null ? (
+        <SemanticMappingSettings workspaceId={workspaceId} />
       ) : null}
 
       <Dialog

@@ -94,6 +94,13 @@ pub struct CharacterMotionCue {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CharacterExpressionCue {
+    pub cue_id: String,
+    pub asset_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CharacterInventory {
     pub runtime_file_count: u32,
     pub total_bytes: u64,
@@ -101,6 +108,8 @@ pub struct CharacterInventory {
     pub motion_count: u32,
     pub expression_count: u32,
     pub motion_groups: BTreeMap<String, Vec<CharacterMotionCue>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expression_cues: Vec<CharacterExpressionCue>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -245,6 +254,7 @@ impl CharacterPackManifest {
             || motions != self.inventory.motion_count
             || expressions != self.inventory.expression_count
             || !valid_motion_inventory(self)
+            || !valid_expression_inventory(self)
         {
             return Err(character_error(
                 operation,
@@ -298,6 +308,31 @@ fn valid_motion_inventory(manifest: &CharacterPackManifest) -> bool {
         }
     }
     cues.len() == motion_assets.len()
+}
+
+fn valid_expression_inventory(manifest: &CharacterPackManifest) -> bool {
+    if manifest.inventory.expression_cues.is_empty() {
+        return true;
+    }
+    let expression_assets = manifest
+        .files
+        .iter()
+        .filter(|asset| asset.role == CharacterAssetRole::Expression)
+        .map(|asset| asset.asset_id.as_str())
+        .collect::<HashSet<_>>();
+    let mut cue_ids = HashSet::new();
+    let mut asset_ids = HashSet::new();
+    manifest.inventory.expression_cues.iter().all(|cue| {
+        !cue.cue_id.trim().is_empty()
+            && cue.cue_id.chars().count() <= 80
+            && cue
+                .cue_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_[]".contains(&byte))
+            && expression_assets.contains(cue.asset_id.as_str())
+            && cue_ids.insert(cue.cue_id.as_str())
+            && asset_ids.insert(cue.asset_id.as_str())
+    }) && asset_ids.len() == expression_assets.len()
 }
 
 pub fn is_safe_asset_id(asset_id: &str) -> bool {

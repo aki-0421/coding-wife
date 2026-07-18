@@ -4,6 +4,7 @@ import fixture from "@/test/fixtures/character-library.v1.json"
 import {
   characterLibraryCommands,
   parseCharacterImportResponse,
+  parseCharacterSemanticMappingSaveRequest,
 } from "@/features/character/library/contracts"
 import {
   CharacterLibraryOperationError,
@@ -25,6 +26,9 @@ describe("native character library transport", () => {
       if (command === characterLibraryCommands.pickImport) {
         return Promise.resolve(fixture.importResponse)
       }
+      if (command === characterLibraryCommands.saveSemanticMapping) {
+        return Promise.resolve(fixture.librarySnapshot)
+      }
       throw new Error("unexpected command")
     }) as unknown as FakeInvoke
     const gateway = new NativeCharacterLibraryGateway(invoke)
@@ -35,6 +39,13 @@ describe("native character library transport", () => {
     await expect(gateway.pickImport(fixture.libraryRequest)).resolves.toEqual(
       fixture.importResponse,
     )
+    await expect(
+      gateway.saveSemanticMapping(
+        parseCharacterSemanticMappingSaveRequest(
+          fixture.semanticMappingSaveRequest,
+        ),
+      ),
+    ).resolves.toEqual(fixture.librarySnapshot)
     expect(invoke).toHaveBeenNthCalledWith(1, characterLibraryCommands.get, {
       request: fixture.libraryRequest,
     })
@@ -42,6 +53,11 @@ describe("native character library transport", () => {
       2,
       characterLibraryCommands.pickImport,
       { request: fixture.libraryRequest },
+    )
+    expect(invoke).toHaveBeenNthCalledWith(
+      3,
+      characterLibraryCommands.saveSemanticMapping,
+      { request: fixture.semanticMappingSaveRequest },
     )
   })
 

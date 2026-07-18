@@ -20,6 +20,7 @@ import {
   type CharacterPreviewAttestationRequest,
   type CharacterPreviewAttestationResponse,
   type CharacterPreviewSession,
+  type CharacterSemanticMappingSaveRequest,
 } from "@/features/character/library/contracts"
 import { CharacterLibraryProvider } from "@/features/character/library/provider"
 import {
@@ -133,6 +134,7 @@ const customPack: CharacterPackView = {
   deletable: true,
   manifest: customManifest,
   thumbnailSha256: characterFixture.attestationRequest.thumbnailSha256,
+  cueInventory: { motions: [], expressions: [] },
 }
 
 type TrustedFrameMode = "valid" | "missing" | "tampered"
@@ -159,6 +161,8 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
   public readonly attestationRequests: CharacterPreviewAttestationRequest[] = []
   public readonly confirmationRequests: CharacterConfirmImportRequest[] = []
   public readonly cancellationRequests: CharacterCancelImportRequest[] = []
+  public readonly semanticMappingRequests: CharacterSemanticMappingSaveRequest[] =
+    []
   public readonly trustedFrameReads: {
     readonly assetId: string
     readonly expectedMime: string
@@ -178,6 +182,22 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
       fallbackApplied: false,
       diagnostics: [],
       packs,
+      semanticMapping: {
+        schemaVersion: 1,
+        packId: builtinPack.packId,
+        manifestHash: builtinPack.manifestHash,
+        mappingVersion: 0,
+        assignments: {
+          neutral: { kind: "neutral" },
+          thinking: { kind: "neutral" },
+          working: { kind: "neutral" },
+          asking: { kind: "neutral" },
+          success: { kind: "neutral" },
+          warning: { kind: "neutral" },
+          error: { kind: "neutral" },
+        },
+      },
+      semanticMappingStatus: "default",
     }
   }
 
@@ -220,6 +240,11 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
     this.snapshot = {
       ...this.snapshot,
       selectedPackId: published.packId,
+      semanticMapping: {
+        ...this.snapshot.semanticMapping,
+        packId: published.packId,
+        manifestHash: published.manifestHash,
+      },
       packs: [
         ...this.snapshot.packs
           .filter((pack) => pack.packId !== published.packId)
@@ -242,6 +267,13 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
     this.snapshot = {
       ...this.snapshot,
       selectedPackId: request.packId,
+      semanticMapping: {
+        ...this.snapshot.semanticMapping,
+        packId: request.packId,
+        manifestHash: this.snapshot.packs.find(
+          (pack) => pack.packId === request.packId,
+        )!.manifestHash,
+      },
       packs: this.snapshot.packs.map((pack) => ({
         ...pack,
         selectedProjectCount: pack.packId === request.packId ? 1 : 0,
@@ -260,6 +292,24 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
       packs: this.snapshot.packs.filter(
         (pack) => pack.packId !== request.packId,
       ),
+    }
+    return Promise.resolve(this.snapshot)
+  }
+
+  public saveSemanticMapping(
+    request: CharacterSemanticMappingSaveRequest,
+  ): Promise<CharacterLibrarySnapshot> {
+    this.semanticMappingRequests.push(request)
+    this.snapshot = {
+      ...this.snapshot,
+      semanticMapping: {
+        schemaVersion: 1,
+        packId: request.packId,
+        manifestHash: request.manifestHash,
+        mappingVersion: request.expectedMappingVersion + 1,
+        assignments: request.assignments,
+      },
+      semanticMappingStatus: "saved",
     }
     return Promise.resolve(this.snapshot)
   }
@@ -337,6 +387,46 @@ function libraryTree(
 }
 
 describe("CharacterModelLibrarySettings", () => {
+  it("edits, previews, and saves all semantic states from verified cue options", async () => {
+    const user = userEvent.setup()
+    const gateway = new ModelLibraryGateway([builtinPack])
+    renderLibrary(gateway)
+
+    const successCue = await screen.findByRole("combobox", {
+      name: "Success cue",
+    })
+    await user.selectOptions(successCue, "motion:FlickUp[0]")
+    await user.click(screen.getAllByRole("button", { name: "Preview" })[4]!)
+    expect(screen.getByText(/Success · motion:FlickUp\[0\]/)).toBeVisible()
+
+    await user.click(screen.getByRole("button", { name: "Save mapping" }))
+    await waitFor(() => expect(gateway.semanticMappingRequests).toHaveLength(1))
+    expect(gateway.semanticMappingRequests[0]?.assignments.success).toEqual({
+      kind: "motion",
+      cueId: "FlickUp[0]",
+    })
+    expect(await screen.findByText("Mapping saved")).toBeVisible()
+  })
+
+  it("keeps semantic previews static when reduced motion is requested", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    )
+    renderLibrary(new ModelLibraryGateway([builtinPack]))
+
+    expect(
+      await screen.findByText(/Static preview — motion is reduced/),
+    ).toBeVisible()
+    expect(
+      document.querySelector('[data-semantic-preview="static"]'),
+    ).toBeInTheDocument()
+  })
+
   beforeEach(() => {
     document.documentElement.lang = "en"
     createdObjectUrls.length = 0
@@ -349,7 +439,10 @@ describe("CharacterModelLibrarySettings", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
   })
 
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
 
   it("restores the attested thumbnail and accessible hashes from restart snapshot data", async () => {
     const firstGateway = new ModelLibraryGateway()

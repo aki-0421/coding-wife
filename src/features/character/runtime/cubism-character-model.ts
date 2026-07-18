@@ -16,13 +16,13 @@ import {
   CharacterError,
   type CharacterModelInventory,
 } from "@/features/character/model"
+import type { SemanticCueSelection } from "@/features/character/library/contracts"
 import type { CharacterPackClient } from "@/features/character/runtime/character-pack-client"
 import { verifyCubismShaderSources } from "@/features/character/runtime/shader-source-preflight"
 
 const SHADER_PATH = "/vendor/live2d/shaders/webgl/"
-const IDLE_GROUP = "Idle"
-const IDLE_INDEX = 0
 const IDLE_PRIORITY = 1
+const SEMANTIC_CUE_PRIORITY = 3
 
 export function resetCubismWebGlResources(
   gl: WebGLRenderingContext | WebGL2RenderingContext,
@@ -34,6 +34,12 @@ export function resetCubismWebGlResources(
 interface TextureResource {
   readonly texture: WebGLTexture
   readonly close: () => void
+}
+
+interface MotionDefinition {
+  readonly assetId: string
+  readonly group: string
+  readonly index: number
 }
 
 function signalAbortError(signal: AbortSignal): Error {
@@ -130,6 +136,13 @@ export class CubismCharacterModel extends CubismUserModel {
   readonly #textures: TextureResource[] = []
   readonly #eyeBlinkIds: CubismIdHandle[] = []
   readonly #lipSyncIds: CubismIdHandle[] = []
+  readonly #motions = new Map<string, CubismMotion>()
+  readonly #expressions = new Map<string, ACubismMotion>()
+  readonly #motionDefinitions = new Map<string, MotionDefinition>()
+  readonly #expressionDefinitions = new Map<string, string>()
+  readonly #cueLoadAbortController = new AbortController()
+  #setting: CubismModelSettingJson | null = null
+  #cueGeneration = 0
   #idleMotion: CubismMotion | null = null
   #released = false
 
@@ -170,6 +183,7 @@ export class CubismCharacterModel extends CubismUserModel {
       settingBytes,
       settingBytes.byteLength,
     )
+    this.#setting = setting
 
     const mocAsset = this.#client.resolveFromEntrypoint(
       setting.getModelFileName(),
@@ -289,31 +303,35 @@ export class CubismCharacterModel extends CubismUserModel {
     this._modelMatrix.setupFromLayout(layout)
     this._modelMatrix.setHeight(2)
 
-    const idleFile = setting.getMotionFileName(IDLE_GROUP, IDLE_INDEX)
-    if (idleFile !== "") {
-      const idleBytes = await this.#client.arrayBuffer(
-        this.#client.resolveFromEntrypoint(idleFile),
-        signal,
-      )
-      this.#idleMotion = this.loadMotion(
-        idleBytes,
-        idleBytes.byteLength,
-        "Idle[0]",
-        undefined,
-        undefined,
-        setting,
-        IDLE_GROUP,
-        IDLE_INDEX,
-        true,
-      )
-      if (this.#idleMotion === null) {
-        throw new CharacterError(
-          "manifest_invalid",
-          "Cubism rejected the selected Idle[0] motion",
-          false,
-        )
+    for (const [group, cues] of Object.entries(
+      this.#client.manifest.inventory.motionGroups,
+    )) {
+      for (const [index, cue] of cues.entries()) {
+        const motionFile = setting.getMotionFileName(group, index)
+        if (
+          motionFile === "" ||
+          this.#client.resolveFromEntrypoint(motionFile) !== cue.assetId
+        ) {
+          throw new CharacterError(
+            "model_inventory_mismatch",
+            "The model motion references differ from its manifest",
+            false,
+          )
+        }
+        this.#motionDefinitions.set(cue.cueId, {
+          assetId: cue.assetId,
+          group,
+          index,
+        })
       }
-      this.#idleMotion.setEffectIds(this.#eyeBlinkIds, this.#lipSyncIds)
+    }
+    const idleDefinition = this.#motionDefinitions.get("Idle[0]")
+    if (idleDefinition !== undefined) {
+      await this.loadMotionCue("Idle[0]", idleDefinition, signal)
+    }
+    this.#idleMotion = this.#motions.get("Idle[0]") ?? null
+    for (const cue of this.#client.manifest.inventory.expressionCues ?? []) {
+      this.#expressionDefinitions.set(cue.cueId, cue.assetId)
     }
 
     await verifyCubismShaderSources(SHADER_PATH, signal)
@@ -386,6 +404,7 @@ export class CubismCharacterModel extends CubismUserModel {
 
   public resetToNeutral(): void {
     this._motionManager.stopAllMotions()
+    this._expressionManager.stopAllMotions()
     for (let index = 0; index < this._model.getParameterCount(); index++) {
       this._model.setParameterValueByIndex(
         index,
@@ -395,6 +414,96 @@ export class CubismCharacterModel extends CubismUserModel {
     this._pose?.updateParameters(this._model, 0)
     this._model.saveParameters()
     this._model.update()
+  }
+
+  public playSemanticCue(cue: SemanticCueSelection): void {
+    const generation = ++this.#cueGeneration
+    if (cue.kind === "neutral") {
+      this.resetToNeutral()
+      return
+    }
+    const selected =
+      cue.kind === "motion"
+        ? this.#motions.get(cue.cueId)
+        : this.#expressions.get(cue.cueId)
+    if (selected === undefined) {
+      void this.loadAndPlaySemanticCue(cue, generation)
+      return
+    }
+    if (cue.kind === "motion") {
+      this._motionManager.startMotionPriority(
+        selected,
+        false,
+        SEMANTIC_CUE_PRIORITY,
+      )
+    } else {
+      this._expressionManager.startMotion(selected, false)
+    }
+  }
+
+  private async loadAndPlaySemanticCue(
+    cue: Exclude<SemanticCueSelection, { kind: "neutral" }>,
+    generation: number,
+  ): Promise<void> {
+    try {
+      if (cue.kind === "motion") {
+        const definition = this.#motionDefinitions.get(cue.cueId)
+        if (definition === undefined) throw new Error("unknown motion cue")
+        await this.loadMotionCue(
+          cue.cueId,
+          definition,
+          this.#cueLoadAbortController.signal,
+        )
+      } else {
+        const assetId = this.#expressionDefinitions.get(cue.cueId)
+        if (assetId === undefined) throw new Error("unknown expression cue")
+        const bytes = await this.#client.arrayBuffer(
+          assetId,
+          this.#cueLoadAbortController.signal,
+        )
+        if (!this.#expressions.has(cue.cueId)) {
+          const expression = this.loadExpression(
+            bytes,
+            bytes.byteLength,
+            cue.cueId,
+          )
+          if (expression === null) throw new Error("invalid expression cue")
+          this.#expressions.set(cue.cueId, expression)
+        }
+      }
+      if (this.#released || generation !== this.#cueGeneration) return
+      this.playSemanticCue(cue)
+    } catch {
+      if (!this.#released && generation === this.#cueGeneration) {
+        this.resetToNeutral()
+      }
+    }
+  }
+
+  private async loadMotionCue(
+    cueId: string,
+    definition: MotionDefinition,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (this.#motions.has(cueId)) return
+    const setting = this.#setting
+    if (setting === null) throw new Error("model setting unavailable")
+    const bytes = await this.#client.arrayBuffer(definition.assetId, signal)
+    if (this.#motions.has(cueId)) return
+    const motion = this.loadMotion(
+      bytes,
+      bytes.byteLength,
+      cueId,
+      undefined,
+      undefined,
+      setting,
+      definition.group,
+      definition.index,
+      true,
+    )
+    if (motion === null) throw new Error("invalid motion cue")
+    motion.setEffectIds(this.#eyeBlinkIds, this.#lipSyncIds)
+    this.#motions.set(cueId, motion)
   }
 
   public startIdleMotion(): void {
@@ -413,6 +522,7 @@ export class CubismCharacterModel extends CubismUserModel {
       this._model,
       deltaSeconds,
     )
+    this._expressionManager.updateMotion(this._model, deltaSeconds)
     this._model.saveParameters()
 
     if (!motionUpdated) {
@@ -448,11 +558,15 @@ export class CubismCharacterModel extends CubismUserModel {
   public override release(): void {
     if (this.#released) return
     this.#released = true
+    this.#cueLoadAbortController.abort()
     this._motionManager?.stopAllMotions()
-    if (this.#idleMotion !== null) {
-      ACubismMotion.delete(this.#idleMotion)
-      this.#idleMotion = null
+    for (const motion of this.#motions.values()) ACubismMotion.delete(motion)
+    this.#motions.clear()
+    this.#idleMotion = null
+    for (const expression of this.#expressions.values()) {
+      ACubismMotion.delete(expression)
     }
+    this.#expressions.clear()
     for (const resource of this.#textures) {
       this.#gl.deleteTexture(resource.texture)
       resource.close()

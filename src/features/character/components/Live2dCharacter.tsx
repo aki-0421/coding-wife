@@ -8,6 +8,7 @@ import type {
   CharacterPackRef,
   CharacterState,
 } from "@/features/character/model"
+import type { SemanticCueSelection } from "@/features/character/library/contracts"
 import { CharacterController } from "@/features/character/runtime/character-controller"
 import { loadTrustedCharacterFrame } from "@/features/character/runtime/character-pack-client"
 import type { SupportedLocale } from "@/features/localization"
@@ -29,6 +30,7 @@ export interface Live2dCharacterProps {
   readonly className?: string
   readonly state: CharacterState
   readonly stateGeneration: number
+  readonly semanticCue?: SemanticCueSelection
   readonly motionPolicy?: CharacterMotionPolicy
   readonly locale?: SupportedLocale
   readonly manifestUrl?: string
@@ -62,6 +64,7 @@ export function Live2dCharacter({
   className,
   state,
   stateGeneration,
+  semanticCue = { kind: "neutral" },
   motionPolicy = "animated",
   locale = "ja",
   manifestUrl = BUILTIN_HIYORI_MANIFEST_URL,
@@ -87,6 +90,7 @@ export function Live2dCharacter({
     state,
     stateGeneration,
     motionPolicy,
+    semanticCue,
   })
   const [status, setStatus] = useState<CharacterControllerStatus>(() => ({
     ...initialStatus,
@@ -181,6 +185,7 @@ export function Live2dCharacter({
       initialPresentationRef.current.stateGeneration,
     )
     controller.setMotionPolicy(initialPresentationRef.current.motionPolicy)
+    controller.setSemanticCue(initialPresentationRef.current.semanticCue)
 
     const mediaQuery =
       typeof window.matchMedia === "function"
@@ -236,6 +241,10 @@ export function Live2dCharacter({
       callbackPropsRef.current.onControllerChange?.(null)
     }
   }, [preserveDrawingBuffer, updateStaticPreview])
+
+  useEffect(() => {
+    controllerRef.current?.setSemanticCue(semanticCue)
+  }, [semanticCue])
 
   useEffect(() => {
     if (mountedController === null) return

@@ -15,6 +15,7 @@ export const characterLibraryCommands = {
   confirmImport: "character_confirm_import",
   cancelImport: "character_cancel_import",
   selectPack: "character_select_pack",
+  saveSemanticMapping: "character_semantic_mapping_save",
   deletePack: "character_delete_pack",
 } as const
 
@@ -84,6 +85,43 @@ export interface CharacterDeleteRequest {
   readonly packId: string
 }
 
+export const semanticStates = [
+  "neutral",
+  "thinking",
+  "working",
+  "asking",
+  "success",
+  "warning",
+  "error",
+] as const
+
+export type SemanticState = (typeof semanticStates)[number]
+
+export type SemanticCueSelection =
+  | Readonly<{ kind: "neutral" }>
+  | Readonly<{ kind: "motion"; cueId: string }>
+  | Readonly<{ kind: "expression"; cueId: string }>
+
+export type SemanticAssignmentsV1 = Readonly<
+  Record<SemanticState, SemanticCueSelection>
+>
+
+export interface SemanticMappingV1 {
+  readonly schemaVersion: 1
+  readonly packId: string
+  readonly manifestHash: string
+  readonly mappingVersion: number
+  readonly assignments: SemanticAssignmentsV1
+}
+
+export interface CharacterSemanticMappingSaveRequest {
+  readonly workspaceId: string
+  readonly packId: string
+  readonly manifestHash: string
+  readonly expectedMappingVersion: number
+  readonly assignments: SemanticAssignmentsV1
+}
+
 export interface CharacterPackView {
   readonly schemaVersion: typeof characterLibrarySchemaVersion
   readonly packId: string
@@ -101,6 +139,10 @@ export interface CharacterPackView {
   readonly deletable: boolean
   readonly manifest: CharacterPackManifest | null
   readonly thumbnailSha256: string | null
+  readonly cueInventory: Readonly<{
+    motions: readonly string[]
+    expressions: readonly string[]
+  }>
 }
 
 export interface CharacterLibrarySnapshot {
@@ -111,6 +153,8 @@ export interface CharacterLibrarySnapshot {
   readonly fallbackApplied: boolean
   readonly diagnostics: readonly string[]
   readonly packs: readonly CharacterPackView[]
+  readonly semanticMapping: SemanticMappingV1
+  readonly semanticMappingStatus: "default" | "saved" | "invalid"
 }
 
 export interface CharacterPreviewSession {
@@ -153,6 +197,7 @@ const customPackIdPattern = new RegExp(
 )
 const workspacePattern = /^[A-Za-z0-9_:][A-Za-z0-9_:-]{0,159}$/
 const projectPattern = /^[A-Za-z0-9_-]{1,160}$/
+const cueIdPattern = /^[A-Za-z0-9_@[\]-]{1,80}$/
 const allowedDiagnostics = new Set([
   "CHARACTER-PACK-QUARANTINED",
   "CHARACTER-SELECTION-FALLBACK",
@@ -225,6 +270,55 @@ function packId(value: unknown): value is string {
 
 function uuid(value: unknown): value is string {
   return typeof value === "string" && uuidPattern.test(value)
+}
+
+function parseCueSelection(value: unknown): SemanticCueSelection {
+  if (!isRecord(value) || typeof value.kind !== "string") return violation()
+  if (value.kind === "neutral" && exact(value, ["kind"])) {
+    return { kind: "neutral" }
+  }
+  if (
+    (value.kind === "motion" || value.kind === "expression") &&
+    exact(value, ["kind", "cueId"]) &&
+    typeof value.cueId === "string" &&
+    cueIdPattern.test(value.cueId)
+  ) {
+    return { kind: value.kind, cueId: value.cueId }
+  }
+  return violation()
+}
+
+function parseSemanticAssignments(value: unknown): SemanticAssignmentsV1 {
+  if (!isRecord(value) || !exact(value, semanticStates)) return violation()
+  return Object.fromEntries(
+    semanticStates.map((state) => [state, parseCueSelection(value[state])]),
+  ) as unknown as SemanticAssignmentsV1
+}
+
+export function parseSemanticMapping(value: unknown): SemanticMappingV1 {
+  if (
+    !isRecord(value) ||
+    !exact(value, [
+      "schemaVersion",
+      "packId",
+      "manifestHash",
+      "mappingVersion",
+      "assignments",
+    ]) ||
+    value.schemaVersion !== 1 ||
+    !packId(value.packId) ||
+    !sha256(value.manifestHash) ||
+    !integer(value.mappingVersion, 0)
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: 1,
+    packId: value.packId,
+    manifestHash: value.manifestHash,
+    mappingVersion: value.mappingVersion,
+    assignments: parseSemanticAssignments(value.assignments),
+  }
 }
 
 function sha256(value: unknown): value is string {
@@ -380,6 +474,34 @@ export const parseCharacterSelectRequest = (value: unknown) =>
 export const parseCharacterDeleteRequest = (value: unknown) =>
   parsePackMutationRequest<CharacterDeleteRequest>(value)
 
+export function parseCharacterSemanticMappingSaveRequest(
+  value: unknown,
+): CharacterSemanticMappingSaveRequest {
+  if (
+    !isRecord(value) ||
+    !exact(value, [
+      "workspaceId",
+      "packId",
+      "manifestHash",
+      "expectedMappingVersion",
+      "assignments",
+    ]) ||
+    !workspaceId(value.workspaceId) ||
+    !packId(value.packId) ||
+    !sha256(value.manifestHash) ||
+    !integer(value.expectedMappingVersion, 0)
+  ) {
+    return violation()
+  }
+  return {
+    workspaceId: value.workspaceId,
+    packId: value.packId,
+    manifestHash: value.manifestHash,
+    expectedMappingVersion: value.expectedMappingVersion,
+    assignments: parseSemanticAssignments(value.assignments),
+  }
+}
+
 function parseCharacterPackView(value: unknown): CharacterPackView {
   if (
     !isRecord(value) ||
@@ -400,6 +522,7 @@ function parseCharacterPackView(value: unknown): CharacterPackView {
       "deletable",
       "manifest",
       "thumbnailSha256",
+      "cueInventory",
     ]) ||
     value.schemaVersion !== characterLibrarySchemaVersion ||
     !packId(value.packId) ||
@@ -414,6 +537,26 @@ function parseCharacterPackView(value: unknown): CharacterPackView {
     !integer(value.selectedProjectCount, 0) ||
     typeof value.deletable !== "boolean" ||
     (value.thumbnailSha256 !== null && !sha256(value.thumbnailSha256))
+  ) {
+    return violation()
+  }
+  if (
+    !isRecord(value.cueInventory) ||
+    !exact(value.cueInventory, ["motions", "expressions"]) ||
+    !Array.isArray(value.cueInventory.motions) ||
+    !Array.isArray(value.cueInventory.expressions) ||
+    !value.cueInventory.motions.every(
+      (cue) => typeof cue === "string" && cueIdPattern.test(cue),
+    ) ||
+    !value.cueInventory.expressions.every(
+      (cue) => typeof cue === "string" && cueIdPattern.test(cue),
+    ) ||
+    new Set(value.cueInventory.motions).size !==
+      value.cueInventory.motions.length ||
+    new Set(value.cueInventory.expressions).size !==
+      value.cueInventory.expressions.length ||
+    value.cueInventory.motions.length !== value.motionCount ||
+    value.cueInventory.expressions.length > value.expressionCount
   ) {
     return violation()
   }
@@ -467,6 +610,8 @@ export function parseCharacterLibrarySnapshot(
       "fallbackApplied",
       "diagnostics",
       "packs",
+      "semanticMapping",
+      "semanticMappingStatus",
     ]) ||
     value.schemaVersion !== characterLibrarySchemaVersion ||
     !workspaceId(value.workspaceId) ||
@@ -485,11 +630,34 @@ export function parseCharacterLibrarySnapshot(
     return violation()
   }
   const packs = value.packs.map(parseCharacterPackView)
+  const semanticMapping = parseSemanticMapping(value.semanticMapping)
   const ids = packs.map((pack) => pack.packId)
   if (
     new Set(ids).size !== ids.length ||
     ids.filter((id) => id === builtinHiyoriPackId).length !== 1 ||
     !ids.includes(value.selectedPackId)
+  ) {
+    return violation()
+  }
+  const selectedPack = packs.find(
+    (pack) => pack.packId === value.selectedPackId,
+  )!
+  const mappingCuesValid = Object.values(semanticMapping.assignments).every(
+    (cue) =>
+      cue.kind === "neutral" ||
+      (cue.kind === "motion"
+        ? selectedPack.cueInventory.motions.includes(cue.cueId)
+        : selectedPack.cueInventory.expressions.includes(cue.cueId)),
+  )
+  if (
+    semanticMapping.packId !== selectedPack.packId ||
+    semanticMapping.manifestHash !== selectedPack.manifestHash ||
+    !["default", "saved", "invalid"].includes(
+      value.semanticMappingStatus as string,
+    ) ||
+    (value.semanticMappingStatus !== "saved" &&
+      semanticMapping.mappingVersion !== 0) ||
+    !mappingCuesValid
   ) {
     return violation()
   }
@@ -501,6 +669,9 @@ export function parseCharacterLibrarySnapshot(
     fallbackApplied: value.fallbackApplied,
     diagnostics: [...(value.diagnostics as string[])],
     packs,
+    semanticMapping,
+    semanticMappingStatus: value.semanticMappingStatus as
+      "default" | "saved" | "invalid",
   }
 }
 

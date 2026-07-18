@@ -18,9 +18,10 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use super::error::{character_error, CharacterResult};
 use super::manifest::{
     is_safe_asset_id, CharacterAssetRole, CharacterCompatibility, CharacterDimensions,
-    CharacterInventory, CharacterMotionCue, CharacterPackFile, CharacterPackManifest,
-    CharacterProvenance, CharacterProvenanceKind, CharacterTrustedFrame, CHARACTER_SCHEMA_VERSION,
-    CHARACTER_TRUSTED_FRAME_ASSET_ID, MAX_TRUSTED_FRAME_BYTES, MAX_TRUSTED_FRAME_DIMENSION,
+    CharacterExpressionCue, CharacterInventory, CharacterMotionCue, CharacterPackFile,
+    CharacterPackManifest, CharacterProvenance, CharacterProvenanceKind, CharacterTrustedFrame,
+    CHARACTER_SCHEMA_VERSION, CHARACTER_TRUSTED_FRAME_ASSET_ID, MAX_TRUSTED_FRAME_BYTES,
+    MAX_TRUSTED_FRAME_DIMENSION,
 };
 
 const MAX_FILES: usize = 128;
@@ -59,6 +60,7 @@ struct AssetReference {
     role: CharacterAssetRole,
     motion_group: Option<String>,
     motion_index: Option<usize>,
+    expression_cue: Option<String>,
 }
 
 struct OpenedSourceRoot {
@@ -127,6 +129,7 @@ pub fn snapshot_character_model(
         role: CharacterAssetRole::Model,
         motion_group: None,
         motion_index: None,
+        expression_cue: None,
     };
     let model_asset = read_snapshot_asset(&source_root, &model_reference)?;
     let model_json = parse_json(&model_asset.contents, operation)?;
@@ -143,6 +146,7 @@ pub fn snapshot_character_model(
     let mut assets = Vec::with_capacity(references.len());
     let mut total_bytes = 0_u64;
     let mut motion_groups: BTreeMap<String, Vec<CharacterMotionCue>> = BTreeMap::new();
+    let mut expression_cues = Vec::new();
     let mut texture_count = 0_u32;
     let mut motion_count = 0_u32;
     let mut expression_count = 0_u32;
@@ -184,7 +188,15 @@ pub fn snapshot_character_model(
                         asset_id: reference.asset_id,
                     });
             }
-            CharacterAssetRole::Expression => expression_count += 1,
+            CharacterAssetRole::Expression => {
+                expression_count += 1;
+                expression_cues.push(CharacterExpressionCue {
+                    cue_id: reference.expression_cue.ok_or_else(|| {
+                        character_error(operation, "CHARACTER-EXPRESSION-SCHEMA", false)
+                    })?,
+                    asset_id: reference.asset_id,
+                });
+            }
             _ => {}
         }
         assets.push(asset);
@@ -226,6 +238,7 @@ pub fn snapshot_character_model(
             motion_count,
             expression_count,
             motion_groups,
+            expression_cues,
         },
         compatibility: CharacterCompatibility {
             model_schema_version,
@@ -255,6 +268,7 @@ pub fn verify_source_unchanged(snapshot: &ValidatedCharacterSnapshot) -> Charact
             role: original.file.role,
             motion_group: None,
             motion_index: None,
+            expression_cue: None,
         };
         let current = read_snapshot_asset(&source_root, &reference)?;
         if current.fingerprint != original.fingerprint {
@@ -313,6 +327,7 @@ fn collect_model_references(
         role: CharacterAssetRole::Model,
         motion_group: None,
         motion_index: None,
+        expression_cue: None,
     }];
     push_string_reference(
         &mut result,
@@ -344,19 +359,20 @@ fn collect_model_references(
     }
 
     if let Some(expressions) = references.get("Expressions") {
-        for expression in expressions
+        for (index, expression) in expressions
             .as_array()
             .ok_or_else(|| character_error(operation, "CHARACTER-EXPRESSION-SCHEMA", false))?
+            .iter()
+            .enumerate()
         {
             let file = expression
                 .as_object()
                 .and_then(|item| item.get("File"))
                 .ok_or_else(|| character_error(operation, "CHARACTER-EXPRESSION-SCHEMA", false))?;
-            result.push(reference_from_value(
-                file,
-                CharacterAssetRole::Expression,
-                operation,
-            )?);
+            let mut reference =
+                reference_from_value(file, CharacterAssetRole::Expression, operation)?;
+            reference.expression_cue = Some(format!("Expression[{index}]"));
+            result.push(reference);
         }
     }
 
@@ -420,6 +436,7 @@ fn reference_from_value(
         role,
         motion_group: None,
         motion_index: None,
+        expression_cue: None,
     })
 }
 
@@ -971,6 +988,7 @@ mod tests {
                 role: CharacterAssetRole::Moc,
                 motion_group: None,
                 motion_index: None,
+                expression_cue: None,
             },
         )
         .expect("descriptor-relative read");

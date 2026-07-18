@@ -83,6 +83,10 @@ const inventoryKeys = [
   "expressionCount",
   "motionGroups",
 ] as const
+const inventoryWithExpressionCuesKeys = [
+  ...inventoryKeys,
+  "expressionCues",
+] as const
 
 const compatibilityKeys = [
   "modelSchemaVersion",
@@ -303,6 +307,40 @@ function parseMotionGroups(
   return parsed
 }
 
+function parseExpressionCues(
+  value: unknown,
+  filesByAssetId: ReadonlyMap<string, CharacterPackFile>,
+  expressionCount: number,
+): readonly Readonly<{ cueId: string; assetId: string }>[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    return violation("Pack expression cues are invalid")
+  }
+  const cueIds = new Set<string>()
+  const assetIds = new Set<string>()
+  const parsed = value.map((rawCue) => {
+    if (
+      !isRecord(rawCue) ||
+      !hasExactKeys(rawCue, ["cueId", "assetId"]) ||
+      !isNonEmptyString(rawCue.cueId, 80) ||
+      !/^[A-Za-z0-9_[\]-]+$/.test(rawCue.cueId) ||
+      typeof rawCue.assetId !== "string" ||
+      filesByAssetId.get(rawCue.assetId)?.role !== "expression" ||
+      cueIds.has(rawCue.cueId) ||
+      assetIds.has(rawCue.assetId)
+    ) {
+      return violation("Pack expression cue is outside the reviewed schema")
+    }
+    cueIds.add(rawCue.cueId)
+    assetIds.add(rawCue.assetId)
+    return { cueId: rawCue.cueId, assetId: rawCue.assetId }
+  })
+  if (parsed.length > 0 && assetIds.size !== expressionCount) {
+    return violation("Pack expression inventory does not match its files")
+  }
+  return parsed
+}
+
 interface ParsedInventory {
   readonly runtimeFileCount: number
   readonly totalBytes: number
@@ -312,13 +350,21 @@ interface ParsedInventory {
   readonly motionGroups: Readonly<
     Record<string, readonly Readonly<{ cueId: string; assetId: string }>[]>
   >
+  readonly expressionCues?: readonly Readonly<{
+    cueId: string
+    assetId: string
+  }>[]
 }
 
 function parseInventory(
   value: unknown,
   files: readonly CharacterPackFile[],
 ): ParsedInventory {
-  if (!isRecord(value) || !hasExactKeys(value, inventoryKeys)) {
+  if (
+    !isRecord(value) ||
+    (!hasExactKeys(value, inventoryKeys) &&
+      !hasExactKeys(value, inventoryWithExpressionCuesKeys))
+  ) {
     return violation("Pack inventory is invalid")
   }
   const totalBytes = files.reduce((total, file) => total + file.bytes, 0)
@@ -338,17 +384,27 @@ function parseInventory(
     return violation("Pack inventory does not match its files")
   }
   const filesByAssetId = new Map(files.map((file) => [file.assetId, file]))
+  const motionGroups = parseMotionGroups(
+    value.motionGroups,
+    filesByAssetId,
+    value.motionCount,
+  )
   return {
     runtimeFileCount: files.length,
     totalBytes,
     textureCount: value.textureCount,
     motionCount: value.motionCount,
     expressionCount: value.expressionCount,
-    motionGroups: parseMotionGroups(
-      value.motionGroups,
-      filesByAssetId,
-      value.motionCount,
-    ),
+    motionGroups,
+    ...(value.expressionCues === undefined
+      ? {}
+      : {
+          expressionCues: parseExpressionCues(
+            value.expressionCues,
+            filesByAssetId,
+            value.expressionCount,
+          ),
+        }),
   }
 }
 

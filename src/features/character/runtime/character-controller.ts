@@ -9,6 +9,7 @@ import {
   type CharacterState,
   toCharacterError,
 } from "@/features/character/model"
+import type { SemanticCueSelection } from "@/features/character/library/contracts"
 import { CharacterPackClient } from "@/features/character/runtime/character-pack-client"
 import { acquireCubismRuntime } from "@/features/character/runtime/cubism-runtime"
 import {
@@ -165,6 +166,7 @@ export class CharacterController {
   #rendererGeneration = 0
   #phase: CharacterControllerStatus["phase"] = "idle"
   #stateCursor: CharacterStateCursor = { state: "idle", generation: 0 }
+  #semanticCue: SemanticCueSelection = { kind: "neutral" }
   #requestedPolicy: CharacterMotionPolicy = "animated"
   #systemPrefersReducedMotion = false
   #documentVisible = true
@@ -424,6 +426,21 @@ export class CharacterController {
     this.emitStatus()
   }
 
+  public setSemanticCue(cue: SemanticCueSelection): void {
+    if (
+      this.#semanticCue.kind === cue.kind &&
+      (cue.kind === "neutral" ||
+        (this.#semanticCue.kind !== "neutral" &&
+          this.#semanticCue.cueId === cue.cueId))
+    ) {
+      return
+    }
+    this.#semanticCue = cue
+    if (this.effectiveMotionPolicy === "animated") {
+      this.#model?.playSemanticCue(cue)
+    }
+  }
+
   public setMotionPolicy(policy: CharacterMotionPolicy): void {
     this.#requestedPolicy = policy
     this.applyMotionPolicy()
@@ -572,6 +589,7 @@ export class CharacterController {
     } else {
       this.#canvas.hidden = false
       this.#fallbackLevel = "animated"
+      this.#model?.playSemanticCue(this.#semanticCue)
       this.startFrameLoop()
     }
     this.syncFirstFrameDeadline()

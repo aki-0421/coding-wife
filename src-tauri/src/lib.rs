@@ -12,7 +12,7 @@ use tauri::{http, Manager, State};
 use character::commands::{
     character_attest_preview, character_cancel_import, character_confirm_import,
     character_delete_pack, character_import_pick, character_library_get, character_read_asset,
-    character_select_pack,
+    character_select_pack, character_semantic_mapping_save,
 };
 use character::service::resolve_builtin_directory;
 use character::{CharacterService, CharacterStorage};
@@ -283,6 +283,7 @@ pub fn run() {
             character_confirm_import,
             character_cancel_import,
             character_select_pack,
+            character_semantic_mapping_save,
             character_delete_pack,
             narration_get_settings,
             narration_get_runtime,

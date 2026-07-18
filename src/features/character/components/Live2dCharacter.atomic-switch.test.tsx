@@ -78,6 +78,7 @@ vi.mock("@/features/character/runtime/character-controller", () => {
     public readonly setMotionPolicy = vi.fn((policy: CharacterMotionPolicy) => {
       this.motionPolicy = policy
     })
+    public readonly setSemanticCue = vi.fn()
     public readonly setSystemPrefersReducedMotion = vi.fn()
 
     public readonly loadPack = vi.fn(

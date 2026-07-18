@@ -11,6 +11,10 @@ import {
 } from "@/features/character/library/provider"
 import { useCharacterRuntimeStatusStore } from "@/features/character/runtime-status"
 import { mapCompanionStateToCharacterState } from "@/features/character/semantic-state"
+import {
+  mapCharacterStateToSemanticState,
+  resolveSemanticCue,
+} from "@/features/character/semantic-mapping"
 import type {
   CharacterStageRenderProps,
   CompanionSemanticState,
@@ -57,6 +61,24 @@ export function DefaultCharacterStageRenderer({
         : (characterLibraryStore.selectedPackRef(workspaceId) ?? undefined),
     [characterLibrary.snapshot, characterLibraryStore, workspaceId],
   )
+  const semanticCue = useMemo(() => {
+    const snapshot = characterLibrary.snapshot
+    if (characterLibrary.semanticPreview !== null) {
+      return characterLibrary.semanticPreview.cue
+    }
+    const semanticState = mapCharacterStateToSemanticState(
+      presentation.characterState,
+    )
+    return resolveSemanticCue(
+      snapshot?.semanticMapping ?? null,
+      snapshot?.semanticMappingStatus ?? null,
+      semanticState,
+    )
+  }, [
+    characterLibrary.semanticPreview,
+    characterLibrary.snapshot,
+    presentation.characterState,
+  ])
 
   if (
     presentation.workspaceId !== workspaceId ||
@@ -111,6 +133,7 @@ export function DefaultCharacterStageRenderer({
         onControllerChange={handleControllerChange}
         onStatusChange={handleStatusChange}
         reloadToken={reloadToken}
+        semanticCue={semanticCue}
         showCaption={false}
         state={presentation.characterState}
         stateGeneration={presentation.generation}

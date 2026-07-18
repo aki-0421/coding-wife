@@ -15,6 +15,7 @@ import {
   parseCharacterPreviewAttestationRequest,
   parseCharacterPreviewAttestationResponse,
   parseCharacterSelectRequest,
+  parseCharacterSemanticMappingSaveRequest,
 } from "@/features/character/library/contracts"
 import { parseCharacterPackManifest } from "@/features/character/runtime/character-pack-client"
 
@@ -45,6 +46,11 @@ describe("character library contract", () => {
     expect(parseCharacterDeleteRequest(fixture.deleteRequest)).toEqual(
       fixture.deleteRequest,
     )
+    expect(
+      parseCharacterSemanticMappingSaveRequest(
+        fixture.semanticMappingSaveRequest,
+      ),
+    ).toEqual(fixture.semanticMappingSaveRequest)
     expect(parseCharacterImportResponse(fixture.importResponse)).toEqual(
       fixture.importResponse,
     )
@@ -146,6 +152,7 @@ describe("character library contract", () => {
       deletable: true,
       manifest,
       thumbnailSha256: manifest.trustedFrame.sha256,
+      cueInventory: { motions: [], expressions: [] },
     }
     expect(
       parseCharacterLibrarySnapshot({

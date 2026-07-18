@@ -233,6 +233,7 @@ describe("default App character integration", () => {
     const snapshot: CharacterLibrarySnapshot = {
       schemaVersion: 1,
       workspaceId: "workspace-custom",
+      projectId: "project-custom",
       selectedPackId: customPackId,
       fallbackApplied: false,
       diagnostics: [],
@@ -250,12 +251,43 @@ describe("default App character integration", () => {
           textureCount: 2,
           motionCount: 10,
           expressionCount: 0,
-          selectedWorkspaceCount: 1,
+          selectedProjectCount: 1,
           deletable: false,
           manifest: null,
           thumbnailSha256: null,
+          cueInventory: {
+            motions: [
+              "Idle[0]",
+              "Idle[1]",
+              "Idle[2]",
+              "Flick[0]",
+              "FlickDown[0]",
+              "FlickUp[0]",
+              "Tap[0]",
+              "Tap[1]",
+              "Tap@Body[0]",
+              "Flick@Body[0]",
+            ],
+            expressions: [],
+          },
         },
       ],
+      semanticMapping: {
+        schemaVersion: 1,
+        packId: customPackId,
+        manifestHash: "d".repeat(64),
+        mappingVersion: 0,
+        assignments: {
+          neutral: { kind: "neutral" },
+          thinking: { kind: "neutral" },
+          working: { kind: "neutral" },
+          asking: { kind: "neutral" },
+          success: { kind: "neutral" },
+          warning: { kind: "neutral" },
+          error: { kind: "neutral" },
+        },
+      },
+      semanticMappingStatus: "default",
     }
     const unsupported = () => Promise.reject(new Error("unsupported"))
     const gateway: CharacterLibraryGateway = {
@@ -268,6 +300,7 @@ describe("default App character integration", () => {
       cancelImport: unsupported,
       selectPack: unsupported,
       deletePack: unsupported,
+      saveSemanticMapping: unsupported,
       createPackRef: () => customPackRef,
       createPreviewPackRef: () => customPackRef,
     }

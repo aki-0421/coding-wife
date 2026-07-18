@@ -110,6 +110,10 @@ export interface CharacterPackManifest {
         }>[]
       >
     >
+    expressionCues?: readonly Readonly<{
+      cueId: string
+      assetId: string
+    }>[]
   }>
   readonly compatibility: Readonly<{
     modelSchemaVersion: number

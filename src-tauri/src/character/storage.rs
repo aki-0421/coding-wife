@@ -33,6 +33,8 @@ pub struct ProjectCharacterSelection {
 pub struct CharacterStateFile {
     pub schema_version: u16,
     pub project_selections: BTreeMap<String, ProjectCharacterSelection>,
+    #[serde(default)]
+    pub semantic_mappings: BTreeMap<String, serde_json::Value>,
 }
 
 impl CharacterStateFile {
@@ -40,6 +42,7 @@ impl CharacterStateFile {
         Self {
             schema_version: CHARACTER_STATE_SCHEMA_VERSION,
             project_selections: BTreeMap::new(),
+            semantic_mappings: BTreeMap::new(),
         }
     }
 
@@ -161,6 +164,10 @@ impl CharacterStorage {
                     || chrono::DateTime::parse_from_rfc3339(&selection.selection_updated_at)
                         .is_err()
             })
+            || state
+                .semantic_mappings
+                .keys()
+                .any(|pack_id| !is_opaque_pack_id(pack_id))
         {
             return Err(character_error(
                 "character_library_get",
