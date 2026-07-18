@@ -9,8 +9,8 @@ import {
 
 import {
   characterContextValidationIssue,
+  normalizeProjectContextForSave,
   parseCharacterContext,
-  parseProjectContext,
   projectContextValidationIssue,
   type CharacterContext,
   type ProjectContext,
@@ -505,7 +505,7 @@ export function useEditableWorkspaceContext(
     const candidate = projectContextWithLists(current.draft, current.listDrafts)
     let context: ProjectContext
     try {
-      context = parseProjectContext(candidate)
+      context = normalizeProjectContextForSave(candidate)
     } catch {
       const issue = projectContextValidationIssue(candidate)
       replaceWorkspace(workspaceId, (state) => ({

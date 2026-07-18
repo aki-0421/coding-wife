@@ -193,23 +193,31 @@ function parseItems(
   })
 }
 
-function validTechnicalReference(value: string): boolean {
-  if (value.startsWith("doc:")) {
-    const documentId = value.slice(4)
-    return (
-      documentId.length > 0 &&
-      !documentId.startsWith("/") &&
-      documentId.split("/").every((part) => part.length > 0 && part !== "..") &&
-      /^[A-Za-z0-9._/-]+$/u.test(documentId)
-    )
+export function normalizeTechnicalReference(value: string): string | null {
+  const managedDocument = value.startsWith("doc:")
+  const candidate = managedDocument ? value.slice(4) : value
+  if (
+    candidate.length === 0 ||
+    candidate.startsWith("/") ||
+    candidate.includes("\\") ||
+    (!managedDocument && candidate.includes(":")) ||
+    (managedDocument && !/^[A-Za-z0-9._/-]+$/u.test(candidate))
+  ) {
+    return null
   }
-  return (
-    value.length > 0 &&
-    !value.startsWith("/") &&
-    !value.includes("\\") &&
-    !value.includes(":") &&
-    value.split("/").every((part) => part.length > 0 && part !== "..")
-  )
+  const parts: string[] = []
+  for (const part of candidate.split("/")) {
+    if (part.length === 0 || part === ".") continue
+    if (part === "..") return null
+    parts.push(part)
+  }
+  if (parts.length === 0) return null
+  const normalized = parts.join("/")
+  return managedDocument ? `doc:${normalized}` : normalized
+}
+
+function validTechnicalReference(value: string): boolean {
+  return normalizeTechnicalReference(value) === value
 }
 
 function normalizePolicyText(value: string): string {
@@ -381,6 +389,17 @@ export function parseProjectContext(value: unknown): ProjectContext {
     technicalReferences,
     userNotes: value.userNotes,
   }
+}
+
+export function normalizeProjectContextForSave(
+  value: ProjectContext,
+): ProjectContext {
+  const technicalReferences = value.technicalReferences.map((reference) => {
+    const normalized = normalizeTechnicalReference(reference)
+    if (normalized === null) return violation()
+    return normalized
+  })
+  return parseProjectContext({ ...value, technicalReferences })
 }
 
 export function parseCharacterContext(value: unknown): CharacterContext {

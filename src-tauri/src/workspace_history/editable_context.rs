@@ -1,8 +1,10 @@
-use std::path::{Component, Path};
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::types::{
@@ -30,6 +32,7 @@ const MAX_TONE_NOTES: usize = 1_000;
 const MAX_BEHAVIOR: usize = 4_000;
 const MAX_PROHIBITED_ITEMS: usize = 20;
 const MAX_PROHIBITED_ITEM: usize = 200;
+const PROJECT_REFERENCE_MANIFEST_SCHEMA_VERSION: u16 = 1;
 
 const POLICY_KEYS: &[&str] = &[
     "permission",
@@ -67,6 +70,51 @@ fn policy_directive_patterns() -> &'static [Regex] {
         .map(|pattern| Regex::new(pattern).expect("static policy directive regex"))
         .collect()
     })
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ProjectReferenceValidation {
+    root: PathBuf,
+    root_device: u64,
+    root_inode: u64,
+}
+
+impl ProjectReferenceValidation {
+    pub(super) fn new(root: PathBuf, root_device: u64, root_inode: u64) -> Self {
+        Self {
+            root,
+            root_device,
+            root_inode,
+        }
+    }
+
+    pub(super) fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(super) struct ProjectReferenceManifest {
+    schema_version: u16,
+    root_device: u64,
+    root_inode: u64,
+    references: Vec<ProjectReferenceManifestEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ProjectReferenceManifestEntry {
+    reference: String,
+    target: Option<ProjectReferenceTargetIdentity>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ProjectReferenceTargetIdentity {
+    resolved_relative: String,
+    device: u64,
+    inode: u64,
 }
 
 fn context_error(code: &str, operation: &str) -> WorkspaceHistoryError {
@@ -121,49 +169,163 @@ fn normalize_items(
     Ok(normalized)
 }
 
-fn validate_reference(reference: &str, root: Option<&Path>) -> bool {
-    if let Some(document_id) = reference.strip_prefix("doc:") {
-        return !document_id.is_empty()
-            && !document_id.starts_with('/')
-            && !document_id
-                .split('/')
-                .any(|part| part.is_empty() || part == "..")
-            && document_id
+fn reference_error(code: &str, operation: &str) -> WorkspaceHistoryError {
+    WorkspaceHistoryError::new(code, operation, true)
+}
+
+fn normalize_reference(
+    reference: &str,
+    root: Option<&Path>,
+    operation: &str,
+) -> Result<String, WorkspaceHistoryError> {
+    let (managed_document, candidate) = reference
+        .strip_prefix("doc:")
+        .map_or((false, reference), |document_id| (true, document_id));
+    if candidate.is_empty()
+        || candidate.starts_with('/')
+        || candidate.contains('\\')
+        || (!managed_document && candidate.contains(':'))
+        || (managed_document
+            && !candidate
                 .chars()
-                .all(|character| character.is_ascii_alphanumeric() || "-_./".contains(character));
-    }
-    if reference.contains(['\\', ':']) {
-        return false;
-    }
-    let path = Path::new(reference);
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || !path
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
+                .all(|character| character.is_ascii_alphanumeric() || "-_./".contains(character)))
     {
-        return false;
+        return Err(reference_error(
+            "WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY",
+            operation,
+        ));
     }
-    let Some(root) = root else {
-        return true;
+    let mut parts = Vec::new();
+    for part in candidate.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            return Err(reference_error(
+                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY",
+                operation,
+            ));
+        }
+        parts.push(part);
+    }
+    if parts.is_empty() {
+        return Err(reference_error(
+            "WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY",
+            operation,
+        ));
+    }
+    let normalized = parts.join("/");
+    let normalized = if managed_document {
+        format!("doc:{normalized}")
+    } else {
+        normalized
     };
-    let mut candidate = root.to_path_buf();
-    for component in path.components() {
-        let Component::Normal(component) = component else {
-            return false;
-        };
-        candidate.push(component);
-        if candidate.exists() {
-            let Ok(canonical) = candidate.canonicalize() else {
-                return false;
-            };
-            if !canonical.starts_with(root) {
-                return false;
-            }
-            candidate = canonical;
+    if let Some(root) = root {
+        resolve_reference_target(&normalized, root, operation)?;
+    }
+    Ok(normalized)
+}
+
+fn metadata_identity(metadata: &fs::Metadata) -> (u64, u64) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (metadata.dev(), metadata.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_nanos() as u64);
+        (metadata.len(), modified)
+    }
+}
+
+fn validate_reference_root(
+    validation: &ProjectReferenceValidation,
+    operation: &str,
+) -> Result<(), WorkspaceHistoryError> {
+    let canonical = fs::canonicalize(&validation.root).map_err(|error| {
+        reference_error(
+            if error.kind() == ErrorKind::NotFound {
+                "WORKSPACE-PROJECT-CONTEXT-ROOT-MISSING"
+            } else {
+                "WORKSPACE-PROJECT-CONTEXT-ROOT-CHANGED"
+            },
+            operation,
+        )
+    })?;
+    let metadata = fs::metadata(&canonical)
+        .map_err(|_| reference_error("WORKSPACE-PROJECT-CONTEXT-ROOT-MISSING", operation))?;
+    let (device, inode) = metadata_identity(&metadata);
+    if !metadata.is_dir()
+        || canonical != validation.root
+        || device != validation.root_device
+        || inode != validation.root_inode
+    {
+        return Err(reference_error(
+            "WORKSPACE-PROJECT-CONTEXT-ROOT-CHANGED",
+            operation,
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_reference_target(
+    reference: &str,
+    root: &Path,
+    operation: &str,
+) -> Result<Option<ProjectReferenceTargetIdentity>, WorkspaceHistoryError> {
+    if reference.starts_with("doc:") {
+        return Ok(None);
+    }
+    let mut canonical = root.to_path_buf();
+    for component in reference.split('/') {
+        canonical.push(component);
+        canonical = fs::canonicalize(&canonical).map_err(|error| {
+            reference_error(
+                if error.kind() == ErrorKind::NotFound {
+                    "WORKSPACE-PROJECT-CONTEXT-REFERENCE-MISSING"
+                } else {
+                    "WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY"
+                },
+                operation,
+            )
+        })?;
+        if !canonical.starts_with(root) {
+            return Err(reference_error(
+                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY",
+                operation,
+            ));
         }
     }
-    true
+    let relative = canonical
+        .strip_prefix(root)
+        .map_err(|_| reference_error("WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY", operation))?;
+    let resolved_relative = relative
+        .to_str()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            reference_error("WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY", operation)
+        })?;
+    let metadata = fs::metadata(&canonical).map_err(|error| {
+        reference_error(
+            if error.kind() == ErrorKind::NotFound {
+                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-MISSING"
+            } else {
+                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY"
+            },
+            operation,
+        )
+    })?;
+    let (device, inode) = metadata_identity(&metadata);
+    Ok(Some(ProjectReferenceTargetIdentity {
+        resolved_relative: resolved_relative.to_owned(),
+        device,
+        inode,
+    }))
 }
 
 pub(super) fn normalize_project_context(
@@ -199,23 +361,17 @@ pub(super) fn normalize_project_context(
         "WORKSPACE-PROJECT-CONTEXT-DEFINITION",
         OPERATION,
     )?;
-    context.technical_references = normalize_items(
+    let technical_references = normalize_items(
         context.technical_references,
         MAX_REFERENCE_ITEMS,
         MAX_REFERENCE_ITEM,
         "WORKSPACE-PROJECT-CONTEXT-REFERENCES",
         OPERATION,
     )?;
-    if context
-        .technical_references
-        .iter()
-        .any(|reference| !validate_reference(reference, root))
-    {
-        return Err(context_error(
-            "WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY",
-            OPERATION,
-        ));
-    }
+    context.technical_references = technical_references
+        .into_iter()
+        .map(|reference| normalize_reference(&reference, root, OPERATION))
+        .collect::<Result<Vec<_>, _>>()?;
     let total = scalar_count(&context.goal)
         + scalar_count(&context.constraints)
         + scalar_count(&context.user_notes)
@@ -233,6 +389,114 @@ pub(super) fn normalize_project_context(
         return Err(context_error("WORKSPACE-PROJECT-CONTEXT-TOTAL", OPERATION));
     }
     Ok(context)
+}
+
+pub(super) fn capture_project_reference_manifest(
+    context: &ProjectContext,
+    validation: &ProjectReferenceValidation,
+) -> Result<ProjectReferenceManifest, WorkspaceHistoryError> {
+    const OPERATION: &str = "workspace.save_project_context";
+    validate_reference_root(validation, OPERATION)?;
+    let mut references = Vec::with_capacity(context.technical_references.len());
+    for reference in &context.technical_references {
+        let normalized = normalize_reference(reference, None, OPERATION)?;
+        if normalized != *reference {
+            return Err(reference_error(
+                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED",
+                OPERATION,
+            ));
+        }
+        references.push(ProjectReferenceManifestEntry {
+            reference: reference.clone(),
+            target: resolve_reference_target(reference, validation.root(), OPERATION)?,
+        });
+    }
+    Ok(ProjectReferenceManifest {
+        schema_version: PROJECT_REFERENCE_MANIFEST_SCHEMA_VERSION,
+        root_device: validation.root_device,
+        root_inode: validation.root_inode,
+        references,
+    })
+}
+
+pub(super) fn encode_project_reference_manifest(
+    context: &ProjectContext,
+    manifest: Option<&ProjectReferenceManifest>,
+) -> Result<Option<String>, WorkspaceHistoryError> {
+    let Some(manifest) = manifest else {
+        if context.technical_references.is_empty() {
+            return Ok(None);
+        }
+        return Err(reference_error(
+            "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED",
+            "workspace.save_project_context",
+        ));
+    };
+    if manifest.schema_version != PROJECT_REFERENCE_MANIFEST_SCHEMA_VERSION
+        || manifest.references.len() != context.technical_references.len()
+        || manifest
+            .references
+            .iter()
+            .zip(&context.technical_references)
+            .any(|(entry, reference)| entry.reference != *reference)
+    {
+        return Err(reference_error(
+            "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED",
+            "workspace.save_project_context",
+        ));
+    }
+    canonical_json(manifest).map(Some)
+}
+
+pub(super) fn validate_project_reference_manifest(
+    context: &ProjectContext,
+    manifest_json: Option<&str>,
+    validation: &ProjectReferenceValidation,
+) -> Result<(), WorkspaceHistoryError> {
+    const OPERATION: &str = "workspace.context_snapshot";
+    validate_reference_root(validation, OPERATION)?;
+    let Some(manifest_json) = manifest_json else {
+        return if context.technical_references.is_empty() {
+            Ok(())
+        } else {
+            Err(reference_error(
+                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED",
+                OPERATION,
+            ))
+        };
+    };
+    let manifest = serde_json::from_str::<ProjectReferenceManifest>(manifest_json)
+        .map_err(|_| reference_error("WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED", OPERATION))?;
+    if manifest.schema_version != PROJECT_REFERENCE_MANIFEST_SCHEMA_VERSION
+        || manifest.root_device != validation.root_device
+        || manifest.root_inode != validation.root_inode
+        || manifest.references.len() != context.technical_references.len()
+    {
+        return Err(reference_error(
+            "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED",
+            OPERATION,
+        ));
+    }
+    for (entry, reference) in manifest
+        .references
+        .iter()
+        .zip(&context.technical_references)
+    {
+        if entry.reference != *reference {
+            return Err(reference_error(
+                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED",
+                OPERATION,
+            ));
+        }
+        let current = resolve_reference_target(reference, validation.root(), OPERATION)?;
+        if current != entry.target {
+            return Err(reference_error(
+                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED",
+                OPERATION,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn normalized_policy_text(value: &str) -> String {
@@ -450,6 +714,41 @@ mod tests {
             ..ProjectContext::default()
         };
         assert!(normalize_project_context(oversized, None).is_err());
+
+        let normalized = normalize_project_context(
+            ProjectContext {
+                technical_references: vec![
+                    "./docs//requirements/./workspace-sessions.md".to_owned(),
+                    "doc:design//context/./v1".to_owned(),
+                ],
+                ..ProjectContext::default()
+            },
+            None,
+        )
+        .expect("reference normalization");
+        assert_eq!(
+            normalized.technical_references,
+            [
+                "docs/requirements/workspace-sessions.md",
+                "doc:design/context/v1"
+            ]
+        );
+
+        let root = std::env::temp_dir().join(format!(
+            "coding-wife-context-reference-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("reference root");
+        let missing = normalize_project_context(
+            ProjectContext {
+                technical_references: vec!["docs/missing.md".to_owned()],
+                ..ProjectContext::default()
+            },
+            Some(&root),
+        )
+        .expect_err("missing reference rejected");
+        assert_eq!(missing.code, "WORKSPACE-PROJECT-CONTEXT-REFERENCE-MISSING");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -177,6 +177,21 @@ describe("DemoWorkspaceHistoryTransport", () => {
       },
     )
     expect(saved).toMatchObject({ version: 2 })
+    const normalized = await transport.request(
+      workspaceHistoryCommands.saveProjectContext,
+      {
+        workspaceId,
+        expectedVersion: saved.version,
+        context: {
+          ...saved.context,
+          technicalReferences: ["./docs//guide.md"],
+        },
+      },
+    )
+    expect(normalized).toMatchObject({
+      version: 3,
+      context: { technicalReferences: ["docs/guide.md"] },
+    })
     await expect(
       transport.request(workspaceHistoryCommands.saveProjectContext, {
         workspaceId,
@@ -197,7 +212,7 @@ describe("DemoWorkspaceHistoryTransport", () => {
       }),
     ).resolves.toMatchObject({
       workspaceId,
-      projectVersion: 2,
+      projectVersion: 3,
       characterVersion: 1,
     })
   })

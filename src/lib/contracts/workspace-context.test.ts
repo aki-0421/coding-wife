@@ -8,6 +8,7 @@ import {
   firstInvalidProjectContextField,
   parseCharacterContext,
   parseProjectContext,
+  normalizeProjectContextForSave,
   parseWorkspaceEditableContext,
   parseWorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
@@ -59,6 +60,25 @@ describe("workspace context contract", () => {
     expect(() =>
       parseCharacterContext({ ...character, tool: "enabled" }),
     ).toThrow(WorkspaceContextContractError)
+  })
+
+  it("normalizes technical references only at the save boundary", () => {
+    const candidate = {
+      ...project,
+      technicalReferences: [
+        "./docs//requirements/./workspace-sessions.md",
+        "doc:design//context/./v1",
+      ],
+    }
+    expect(normalizeProjectContextForSave(candidate)).toMatchObject({
+      technicalReferences: [
+        "docs/requirements/workspace-sessions.md",
+        "doc:design/context/v1",
+      ],
+    })
+    expect(() => parseProjectContext(candidate)).toThrow(
+      WorkspaceContextContractError,
+    )
   })
 
   it("identifies the first editable field that needs correction", () => {

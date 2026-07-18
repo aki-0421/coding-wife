@@ -31,9 +31,10 @@ use crate::git_review::types::{
 };
 
 use super::editable_context::{
-    canonical_json, content_hash, normalize_character_context, normalize_project_context,
-    snapshot_hash, validate_turn_snapshot, DEFAULT_CHARACTER_HASH, DEFAULT_CHARACTER_JSON,
-    DEFAULT_PROJECT_HASH, DEFAULT_PROJECT_JSON,
+    canonical_json, content_hash, encode_project_reference_manifest, normalize_character_context,
+    normalize_project_context, snapshot_hash, validate_project_reference_manifest,
+    validate_turn_snapshot, ProjectReferenceManifest, ProjectReferenceValidation,
+    DEFAULT_CHARACTER_HASH, DEFAULT_CHARACTER_JSON, DEFAULT_PROJECT_HASH, DEFAULT_PROJECT_JSON,
 };
 use super::types::{
     AppendEventResult, CharacterContext, ContextSnapshotView, ContextSource, HistoryMode,
@@ -46,7 +47,7 @@ use super::types::{
 };
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
-const CURRENT_DATABASE_VERSION: i64 = 2;
+const CURRENT_DATABASE_VERSION: i64 = 3;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
@@ -190,6 +191,11 @@ CREATE INDEX IF NOT EXISTS idx_workspace_context_versions
   ON workspace_contexts(workspace_id, project_version, character_version);
 "#;
 
+const MIGRATION_3: &str = r#"
+ALTER TABLE workspace_contexts
+  ADD COLUMN project_reference_manifest_json TEXT;
+"#;
+
 #[derive(Debug)]
 struct StoreInner {
     connection: Connection,
@@ -246,8 +252,11 @@ impl WorkspaceHistoryStore {
                     .map_err(|_| history_error("HIST-RECOVERY-OPEN", false))?;
                 configure_connection(&connection)
                     .map_err(|_| history_error("HIST-RECOVERY-CONFIGURE", false))?;
-                apply_migrations(&connection, &[(1, MIGRATION_1), (2, MIGRATION_2)])
-                    .map_err(|_| history_error("HIST-RECOVERY-SCHEMA", false))?;
+                apply_migrations(
+                    &connection,
+                    &[(1, MIGRATION_1), (2, MIGRATION_2), (3, MIGRATION_3)],
+                )
+                .map_err(|_| history_error("HIST-RECOVERY-SCHEMA", false))?;
                 Ok(Self::from_connection(
                     connection,
                     HistoryStatus {
@@ -696,14 +705,17 @@ impl WorkspaceHistoryStore {
         editable_context_by_workspace(&inner.connection, workspace_id)
     }
 
-    pub fn save_project_context(
+    pub(super) fn save_project_context(
         &self,
         workspace_id: &str,
         expected_version: u64,
         context: ProjectContext,
+        reference_manifest: Option<ProjectReferenceManifest>,
     ) -> Result<VersionedProjectContext, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
         let context = normalize_project_context(context, None)?;
+        let reference_manifest_json =
+            encode_project_reference_manifest(&context, reference_manifest.as_ref())?;
         self.ensure_writable("workspace.save_project_context")?;
         let mut inner = self.lock();
         let transaction = inner
@@ -721,12 +733,14 @@ impl WorkspaceHistoryStore {
             .execute(
                 "UPDATE workspace_contexts
                  SET project_json = ?1, project_version = project_version + 1,
-                     project_hash = ?2, project_updated_at = ?3
-                 WHERE workspace_id = ?4 AND project_version = ?5",
+                     project_hash = ?2, project_updated_at = ?3,
+                     project_reference_manifest_json = ?4
+                 WHERE workspace_id = ?5 AND project_version = ?6",
                 params![
                     project_json,
                     project_hash,
                     updated_at,
+                    reference_manifest_json,
                     workspace_id,
                     expected_version as i64,
                 ],
@@ -788,9 +802,10 @@ impl WorkspaceHistoryStore {
         Ok(saved)
     }
 
-    pub fn turn_context_snapshot(
+    pub(super) fn turn_context_snapshot(
         &self,
         workspace_id: &str,
+        reference_validation: &ProjectReferenceValidation,
     ) -> Result<WorkspaceTurnContextSnapshot, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
         let mut inner = self.lock();
@@ -799,6 +814,13 @@ impl WorkspaceHistoryStore {
             .transaction()
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
         let bundle = editable_context_by_workspace(&transaction, workspace_id)?;
+        let reference_manifest_json =
+            project_reference_manifest_by_workspace(&transaction, workspace_id)?;
+        validate_project_reference_manifest(
+            &bundle.project.context,
+            reference_manifest_json.as_deref(),
+            reference_validation,
+        )?;
         let snapshot_hash = snapshot_hash(
             bundle.project.version,
             &bundle.project.content_hash,
@@ -1198,11 +1220,17 @@ fn open_configured_connection(
     database_path: &Path,
     existed: bool,
 ) -> Result<(Connection, HistoryStatus), OpenFailure> {
-    open_configured_connection_with_migrations(
+    let (connection, status) = open_configured_connection_with_migrations(
         database_path,
         existed,
-        &[(1, MIGRATION_1), (2, MIGRATION_2)],
-    )
+        &[(1, MIGRATION_1), (2, MIGRATION_2), (3, MIGRATION_3)],
+    )?;
+    if status.mode == HistoryMode::Ready {
+        normalize_legacy_project_references(&connection).map_err(|_| OpenFailure {
+            code: "HIST-MIGRATION-FAILED".to_owned(),
+        })?;
+    }
+    Ok((connection, status))
 }
 
 fn open_configured_connection_with_migrations(
@@ -1304,6 +1332,41 @@ fn apply_migrations(connection: &Connection, migrations: &[(i64, &str)]) -> rusq
         transaction.commit()?;
     }
     Ok(())
+}
+
+fn normalize_legacy_project_references(connection: &Connection) -> rusqlite::Result<()> {
+    let transaction = connection.unchecked_transaction()?;
+    let records = {
+        let mut statement = transaction.prepare(
+            "SELECT workspace_id, project_json
+             FROM workspace_contexts
+             WHERE project_reference_manifest_json IS NULL",
+        )?;
+        let records = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        records
+    };
+    for (workspace_id, project_json) in records {
+        let project = serde_json::from_str::<ProjectContext>(&project_json)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let project =
+            normalize_project_context(project, None).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let canonical = canonical_json(&project).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        if canonical == project_json {
+            continue;
+        }
+        let hash = content_hash(&canonical);
+        transaction.execute(
+            "UPDATE workspace_contexts
+             SET project_json = ?1, project_hash = ?2
+             WHERE workspace_id = ?3 AND project_reference_manifest_json IS NULL",
+            params![canonical, hash, workspace_id],
+        )?;
+    }
+    transaction.commit()
 }
 
 fn set_active_workspace(
@@ -1442,6 +1505,22 @@ fn editable_context_by_workspace(
             context: character,
         },
     })
+}
+
+fn project_reference_manifest_by_workspace(
+    connection: &Connection,
+    workspace_id: &str,
+) -> Result<Option<String>, WorkspaceHistoryError> {
+    connection
+        .query_row(
+            "SELECT project_reference_manifest_json
+             FROM workspace_contexts WHERE workspace_id = ?1",
+            params![workspace_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-PROJECT-REFERENCE-MANIFEST-READ", true))?
+        .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))
 }
 
 fn append_event_in_transaction(
@@ -2649,6 +2728,7 @@ mod tests {
 
     use crate::codex::supervisor::CodexSupervisor;
     use crate::codex::workspace::WorkspaceService;
+    use crate::workspace_history::editable_context::capture_project_reference_manifest;
 
     use super::*;
 
@@ -2679,6 +2759,19 @@ mod tests {
             .expect("git init");
         assert!(status.success());
         root
+    }
+
+    fn reference_validation(root: &Path) -> ProjectReferenceValidation {
+        let root = fs::canonicalize(root).expect("canonical reference root");
+        let metadata = fs::metadata(&root).expect("reference root metadata");
+        #[cfg(unix)]
+        let (device, inode) = {
+            use std::os::unix::fs::MetadataExt;
+            (metadata.dev(), metadata.ino())
+        };
+        #[cfg(not(unix))]
+        let (device, inode) = (metadata.len(), 0);
+        ProjectReferenceValidation::new(root, device, inode)
     }
 
     async fn candidate(root: &Path) -> ValidatedWorkspaceCandidate {
@@ -2855,6 +2948,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_reference_paths_are_canonicalized_but_require_resave() {
+        let data = temp_directory("legacy-reference-migration");
+        let root = git_repository();
+        fs::create_dir_all(root.join("docs")).expect("docs directory");
+        fs::write(root.join("docs/guide.md"), "guide").expect("guide");
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let workspace_id = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration")
+            .workspace
+            .workspace_id;
+        let legacy = ProjectContext {
+            technical_references: vec!["./docs//guide.md".to_owned()],
+            ..ProjectContext::default()
+        };
+        let legacy_json = serde_json::to_string(&legacy).expect("legacy json");
+        let legacy_hash = content_hash(&legacy_json);
+        {
+            let inner = store.lock();
+            inner
+                .connection
+                .execute(
+                    "UPDATE workspace_contexts
+                     SET project_json = ?1, project_hash = ?2,
+                         project_reference_manifest_json = NULL
+                     WHERE workspace_id = ?3",
+                    params![legacy_json, legacy_hash, workspace_id],
+                )
+                .expect("legacy record");
+        }
+        drop(store);
+
+        let reopened = WorkspaceHistoryStore::open(&data).expect("migrated store");
+        let restored = reopened
+            .load_editable_context(&workspace_id)
+            .expect("canonical legacy context");
+        assert_eq!(
+            restored.project.context.technical_references,
+            ["docs/guide.md"]
+        );
+        let validation = reference_validation(&root);
+        assert_eq!(
+            reopened
+                .turn_context_snapshot(&workspace_id, &validation)
+                .expect_err("unverified legacy identity blocked")
+                .code,
+            "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED"
+        );
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn editable_context_is_versioned_atomic_restart_safe_and_workspace_scoped() {
         let data = temp_directory("editable-context");
         let root = git_repository();
@@ -2880,14 +3026,29 @@ mod tests {
             technical_references: vec!["docs/requirements/workspace-sessions.md".to_owned()],
             user_notes: "Apply on the next turn".to_owned(),
         };
+        fs::create_dir_all(root.join("docs/requirements")).expect("reference directory");
+        fs::write(
+            root.join("docs/requirements/workspace-sessions.md"),
+            "reference",
+        )
+        .expect("reference file");
+        let reference_validation = reference_validation(&root);
+        let reference_manifest =
+            capture_project_reference_manifest(&project, &reference_validation)
+                .expect("reference manifest");
         let saved = store
-            .save_project_context(&first.workspace_id, 1, project.clone())
+            .save_project_context(
+                &first.workspace_id,
+                1,
+                project.clone(),
+                Some(reference_manifest),
+            )
             .expect("save project context");
         assert_eq!(saved.version, 2);
         assert_eq!(saved.context, project);
         assert_eq!(
             store
-                .save_project_context(&first.workspace_id, 1, ProjectContext::default())
+                .save_project_context(&first.workspace_id, 1, ProjectContext::default(), None,)
                 .expect_err("stale save rejected")
                 .code,
             "WORKSPACE-PROJECT-CONTEXT-CONFLICT"
@@ -2922,7 +3083,7 @@ mod tests {
             .expect("save character context");
         assert_eq!(character_saved.version, 2);
         let snapshot = store
-            .turn_context_snapshot(&first.workspace_id)
+            .turn_context_snapshot(&first.workspace_id, &reference_validation)
             .expect("immutable turn snapshot");
         assert_eq!(snapshot.project_version, 2);
         assert_eq!(snapshot.character_version, 2);
@@ -2939,6 +3100,9 @@ mod tests {
         assert_eq!(restored.project.content_hash, snapshot.project_hash);
         assert_eq!(restored.character.version, 2);
         assert_eq!(restored.character.content_hash, snapshot.character_hash);
+        reopened
+            .turn_context_snapshot(&first.workspace_id, &reference_validation)
+            .expect("restored private reference identity");
 
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
@@ -2964,6 +3128,7 @@ mod tests {
                     goal: "first".to_owned(),
                     ..ProjectContext::default()
                 },
+                None,
             )
         });
         let second_store = store.clone();
@@ -2976,6 +3141,7 @@ mod tests {
                     goal: "second".to_owned(),
                     ..ProjectContext::default()
                 },
+                None,
             )
         });
         let outcomes = [
@@ -3666,6 +3832,43 @@ mod tests {
             )
             .expect("schema query");
         assert_eq!(exists, 0);
+    }
+
+    #[test]
+    fn version_two_migrates_private_reference_manifest_column() {
+        let connection = Connection::open_in_memory().expect("memory database");
+        configure_connection(&connection).expect("configure");
+        apply_migrations(&connection, &[(1, MIGRATION_1), (2, MIGRATION_2)])
+            .expect("version two schema");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version two"),
+            2
+        );
+
+        apply_migrations(
+            &connection,
+            &[(1, MIGRATION_1), (2, MIGRATION_2), (3, MIGRATION_3)],
+        )
+        .expect("version three schema");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version three"),
+            3
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('workspace_contexts')
+                     WHERE name = 'project_reference_manifest_json'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("manifest column"),
+            1
+        );
     }
 
     #[test]

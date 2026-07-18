@@ -9,7 +9,10 @@ use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
 use crate::codex::workspace::{ValidatedWorkspaceCandidate, WorkspaceService};
 
-use super::editable_context::{normalize_character_context, normalize_project_context};
+use super::editable_context::{
+    capture_project_reference_manifest, normalize_character_context, normalize_project_context,
+    ProjectReferenceValidation,
+};
 use super::store::WorkspaceHistoryStore;
 use super::types::{
     AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, ContextSource,
@@ -430,9 +433,9 @@ impl WorkspaceHistoryService {
     ) -> Result<VersionedProjectContext, WorkspaceCommandError> {
         self.ensure_startup_ready("workspace_save_project_context")?;
         let _operation = self.operation_lock.lock().await;
-        let root = self
+        let identity = self
             .workspace
-            .trusted_root(&request.workspace_id)
+            .trusted_identity(&request.workspace_id)
             .await
             .ok_or_else(|| {
                 WorkspaceCommandError::new(
@@ -441,10 +444,22 @@ impl WorkspaceHistoryService {
                     true,
                 )
             })?;
-        let context = normalize_project_context(request.context, Some(&root))
+        let validation = ProjectReferenceValidation::new(
+            identity.canonical_root,
+            identity.root_device,
+            identity.root_inode,
+        );
+        let context = normalize_project_context(request.context, Some(validation.root()))
+            .map_err(|error| history_error("workspace_save_project_context", error))?;
+        let reference_manifest = capture_project_reference_manifest(&context, &validation)
             .map_err(|error| history_error("workspace_save_project_context", error))?;
         self.store
-            .save_project_context(&request.workspace_id, request.expected_version, context)
+            .save_project_context(
+                &request.workspace_id,
+                request.expected_version,
+                context,
+                Some(reference_manifest),
+            )
             .map_err(|error| history_error("workspace_save_project_context", error))
     }
 
@@ -467,8 +482,24 @@ impl WorkspaceHistoryService {
     ) -> Result<WorkspaceTurnContextSnapshot, WorkspaceCommandError> {
         self.ensure_startup_ready("workspace_get_turn_context_snapshot")?;
         let _operation = self.operation_lock.lock().await;
+        let identity = self
+            .workspace
+            .trusted_identity(&request.workspace_id)
+            .await
+            .ok_or_else(|| {
+                WorkspaceCommandError::new(
+                    "WORKSPACE-CONTEXT-PREFLIGHT",
+                    "workspace_get_turn_context_snapshot",
+                    true,
+                )
+            })?;
+        let validation = ProjectReferenceValidation::new(
+            identity.canonical_root,
+            identity.root_device,
+            identity.root_inode,
+        );
         self.store
-            .turn_context_snapshot(&request.workspace_id)
+            .turn_context_snapshot(&request.workspace_id, &validation)
             .map_err(|error| history_error("workspace_get_turn_context_snapshot", error))
     }
 
@@ -782,6 +813,7 @@ mod tests {
 
     use crate::codex::supervisor::CodexSupervisor;
     use crate::codex::workspace::{AppPrivateWorkspaceRecord, WorkspaceService};
+    use crate::workspace_history::types::ProjectContext;
 
     use super::*;
 
@@ -812,6 +844,212 @@ mod tests {
             })
             .await
             .expect("candidate")
+    }
+
+    async fn registered_context_service(
+        label: &str,
+    ) -> (WorkspaceHistoryService, PathBuf, PathBuf, String) {
+        let data = temp_directory(&format!("history-service-context-{label}"));
+        let root = git_repository();
+        let workspace = WorkspaceService::production(CodexSupervisor::new());
+        let service = WorkspaceHistoryService::new(
+            WorkspaceHistoryStore::open(&data).expect("store"),
+            workspace.clone(),
+        );
+        let state = service
+            .register_validated_candidate(
+                candidate(&workspace, &root).await,
+                "workspace_pick_register",
+            )
+            .await
+            .expect("register context workspace");
+        let workspace_id = state.active_workspace_id.expect("active workspace");
+        (service, root, data, workspace_id)
+    }
+
+    #[tokio::test]
+    async fn project_context_normalizes_existing_references_and_rejects_missing_paths() {
+        let (service, root, data, workspace_id) =
+            registered_context_service("reference-save").await;
+        fs::create_dir_all(root.join("docs")).expect("docs directory");
+        fs::write(root.join("docs/guide.md"), "guide").expect("guide");
+
+        let saved = service
+            .save_project_context(WorkspaceSaveProjectContextRequest {
+                workspace_id: workspace_id.clone(),
+                expected_version: 1,
+                context: ProjectContext {
+                    technical_references: vec!["./docs//guide.md".to_owned()],
+                    ..ProjectContext::default()
+                },
+            })
+            .await
+            .expect("save canonical reference");
+        assert_eq!(saved.context.technical_references, ["docs/guide.md"]);
+
+        let error = service
+            .save_project_context(WorkspaceSaveProjectContextRequest {
+                workspace_id,
+                expected_version: saved.version,
+                context: ProjectContext {
+                    technical_references: vec!["docs/missing.md".to_owned()],
+                    ..ProjectContext::default()
+                },
+            })
+            .await
+            .expect_err("missing reference rejected");
+        assert_eq!(error.code, "WORKSPACE-PROJECT-CONTEXT-REFERENCE-MISSING");
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn turn_snapshot_revalidates_symlink_resolution_and_target_identity() {
+        use std::os::unix::fs::symlink;
+
+        let (service, root, data, workspace_id) =
+            registered_context_service("reference-retarget").await;
+        fs::create_dir_all(root.join("docs")).expect("docs directory");
+        fs::write(root.join("docs/target-a.md"), "a").expect("target a");
+        fs::write(root.join("docs/target-b.md"), "b").expect("target b");
+        symlink("target-a.md", root.join("docs/current.md")).expect("symlink a");
+
+        let saved = service
+            .save_project_context(WorkspaceSaveProjectContextRequest {
+                workspace_id: workspace_id.clone(),
+                expected_version: 1,
+                context: ProjectContext {
+                    technical_references: vec!["docs/current.md".to_owned()],
+                    ..ProjectContext::default()
+                },
+            })
+            .await
+            .expect("save symlink reference");
+        service
+            .turn_context_snapshot(WorkspaceLoadEditableContextRequest {
+                workspace_id: workspace_id.clone(),
+            })
+            .await
+            .expect("unchanged target snapshots");
+
+        fs::remove_file(root.join("docs/current.md")).expect("remove symlink a");
+        symlink("target-b.md", root.join("docs/current.md")).expect("symlink b");
+        let error = service
+            .turn_context_snapshot(WorkspaceLoadEditableContextRequest {
+                workspace_id: workspace_id.clone(),
+            })
+            .await
+            .expect_err("retargeted symlink blocked");
+        assert_eq!(error.code, "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED");
+
+        let resaved = service
+            .save_project_context(WorkspaceSaveProjectContextRequest {
+                workspace_id: workspace_id.clone(),
+                expected_version: saved.version,
+                context: saved.context,
+            })
+            .await
+            .expect("explicit resave accepts current target");
+        assert_eq!(resaved.version, 3);
+        service
+            .turn_context_snapshot(WorkspaceLoadEditableContextRequest {
+                workspace_id: workspace_id.clone(),
+            })
+            .await
+            .expect("resaved target snapshots");
+
+        let outside = temp_directory("reference-outside");
+        fs::write(outside.join("outside.md"), "outside").expect("outside target");
+        fs::remove_file(root.join("docs/current.md")).expect("remove symlink b");
+        symlink(outside.join("outside.md"), root.join("docs/current.md")).expect("outside symlink");
+        let error = service
+            .turn_context_snapshot(WorkspaceLoadEditableContextRequest { workspace_id })
+            .await
+            .expect_err("outside retarget blocked");
+        assert_eq!(error.code, "WORKSPACE-PROJECT-CONTEXT-REFERENCE-BOUNDARY");
+        let _ = fs::remove_dir_all(outside);
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn missing_then_available_reference_requires_explicit_resave() {
+        let (service, root, data, workspace_id) =
+            registered_context_service("reference-recreate").await;
+        fs::create_dir_all(root.join("docs")).expect("docs directory");
+        fs::write(root.join("docs/current.md"), "first").expect("current target");
+        fs::write(root.join("docs/replacement.md"), "replacement").expect("replacement target");
+        let saved = service
+            .save_project_context(WorkspaceSaveProjectContextRequest {
+                workspace_id: workspace_id.clone(),
+                expected_version: 1,
+                context: ProjectContext {
+                    technical_references: vec!["docs/current.md".to_owned()],
+                    ..ProjectContext::default()
+                },
+            })
+            .await
+            .expect("save current target");
+
+        fs::remove_file(root.join("docs/current.md")).expect("remove current target");
+        let missing = service
+            .turn_context_snapshot(WorkspaceLoadEditableContextRequest {
+                workspace_id: workspace_id.clone(),
+            })
+            .await
+            .expect_err("missing target blocked");
+        assert_eq!(missing.code, "WORKSPACE-PROJECT-CONTEXT-REFERENCE-MISSING");
+        fs::rename(
+            root.join("docs/replacement.md"),
+            root.join("docs/current.md"),
+        )
+        .expect("make replacement available");
+        let changed = service
+            .turn_context_snapshot(WorkspaceLoadEditableContextRequest {
+                workspace_id: workspace_id.clone(),
+            })
+            .await
+            .expect_err("replacement is not adopted implicitly");
+        assert_eq!(changed.code, "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED");
+
+        service
+            .save_project_context(WorkspaceSaveProjectContextRequest {
+                workspace_id: workspace_id.clone(),
+                expected_version: saved.version,
+                context: saved.context,
+            })
+            .await
+            .expect("resave replacement identity");
+        service
+            .turn_context_snapshot(WorkspaceLoadEditableContextRequest { workspace_id })
+            .await
+            .expect("replacement accepted after resave");
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn turn_snapshot_rejects_replaced_workspace_root() {
+        let (service, root, data, workspace_id) =
+            registered_context_service("reference-root").await;
+        let moved = root.with_extension("original");
+        fs::rename(&root, &moved).expect("move original root");
+        let status = std::process::Command::new("/usr/bin/git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(&root)
+            .status()
+            .expect("replacement git init");
+        assert!(status.success());
+
+        let error = service
+            .turn_context_snapshot(WorkspaceLoadEditableContextRequest { workspace_id })
+            .await
+            .expect_err("changed root blocked");
+        assert_eq!(error.code, "WORKSPACE-PROJECT-CONTEXT-ROOT-CHANGED");
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(moved);
     }
 
     #[tokio::test]

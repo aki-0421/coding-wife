@@ -15,7 +15,7 @@ import {
 } from "@/lib/contracts/workspace-history"
 import {
   parseCharacterContext,
-  parseProjectContext,
+  normalizeProjectContextForSave,
   type CharacterContext,
   type ProjectContext,
   type WorkspaceEditableContext,
@@ -477,7 +477,7 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
         true,
       )
     }
-    const context = parseProjectContext(request.context)
+    const context = normalizeProjectContextForSave(request.context)
     const version = current.project.version + 1
     const updated: WorkspaceEditableContext = {
       ...current,
