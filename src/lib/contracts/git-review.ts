@@ -9,6 +9,19 @@ export const gitReviewCommands = {
   prepareCommitExplanationEvidence: "prepare_commit_explanation_evidence",
 } as const
 
+export const commitExplanationCommands = {
+  request: "commit_explanation_request",
+  cancel: "commit_explanation_cancel",
+  present: "commit_explanation_present",
+  getState: "commit_explanation_get_state",
+  setScope: "commit_explanation_set_scope",
+} as const
+
+export const commitExplanationEventChannels = {
+  state: "coding-wife://commit-explanation-state",
+  presentation: "coding-wife://commit-explanation-presentation",
+} as const
+
 export type GitSupportState = "ready" | "blocked"
 export type GitObservationReason =
   "active_view" | "work_unit_started" | "work_unit_terminal" | "manual_refresh"
@@ -40,6 +53,19 @@ export type CommitExplanationControllerStatus =
   | "unavailable"
   | "canceled"
 export type CommitExplanationPresentationMode = "show" | "replay_narration"
+export type CommitExplanationLocale = "ja" | "en"
+export type CommitExplanationCommand =
+  (typeof commitExplanationCommands)[keyof typeof commitExplanationCommands]
+export type CommitExplanationEventChannel =
+  (typeof commitExplanationEventChannels)[keyof typeof commitExplanationEventChannels]
+export type CommitExplanationNarrationSection =
+  | "summary"
+  | "changes"
+  | "reasons"
+  | "verification"
+  | "impact"
+  | "cautions"
+  | "howToReadNext"
 
 export interface ProtectedChangeSummary {
   readonly fileId: string
@@ -375,12 +401,76 @@ export interface CommitExplanationControllerStateV1 {
   readonly workspaceGeneration: number
   readonly commitEvidenceId: string
   readonly requestId: string | null
+  readonly locale: CommitExplanationLocale | null
+  readonly selectionVersion: number | null
   readonly status: CommitExplanationControllerStatus
   readonly trigger: CommitExplanationRequestTrigger | null
   readonly retryable: boolean
   readonly presentationAvailable: boolean
   readonly errorCode: string | null
   readonly updatedAt: string
+}
+
+export interface CommitExplanationStateRequestedV1 {
+  readonly schemaVersion: typeof gitReviewSchemaVersion
+  readonly workspaceId: string
+  readonly workspaceGeneration: number
+  readonly commitEvidenceId: string
+}
+
+export interface CommitExplanationScopeRequestedV1 {
+  readonly schemaVersion: typeof gitReviewSchemaVersion
+  readonly workspaceId: string
+  readonly workspaceGeneration: number
+  readonly locale: CommitExplanationLocale
+}
+
+export interface ExplanationNarrationChunkV1 {
+  readonly sequence: number
+  readonly section: CommitExplanationNarrationSection
+  readonly text: string
+}
+
+export interface CommitExplanationV1 {
+  readonly schemaVersion: typeof gitReviewSchemaVersion
+  readonly locale: CommitExplanationLocale
+  readonly summary: string
+  readonly changes: readonly string[]
+  readonly reasons: readonly string[]
+  readonly verification: readonly string[]
+  readonly impact: readonly string[]
+  readonly cautions: readonly string[]
+  readonly howToReadNext: readonly string[]
+  readonly narrationChunks: readonly ExplanationNarrationChunkV1[]
+}
+
+export interface CommitExplanationSupportUsageV1 {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly totalTokens: number
+}
+
+export interface CommitExplanationPresentationV1 {
+  readonly schemaVersion: typeof gitReviewSchemaVersion
+  readonly workspaceId: string
+  readonly workspaceGeneration: number
+  readonly commitEvidenceId: string
+  readonly requestId: string
+  readonly selectionVersion: number
+  readonly trigger: CommitExplanationRequestTrigger
+  readonly locale: CommitExplanationLocale
+  readonly mode: CommitExplanationPresentationMode
+  readonly explanation: CommitExplanationV1
+  readonly usage: CommitExplanationSupportUsageV1
+  readonly latencyMs: number
+  readonly presentedAt: string
+}
+
+export interface CommitExplanationControllerErrorEnvelope {
+  readonly code: string
+  readonly operation: string
+  readonly recoverable: boolean
+  readonly userMessageKey: string
 }
 
 export interface CommitExplanationPresentationRequestedV1 {
@@ -653,6 +743,21 @@ function publicText(
   return text(value, maximum, allowEmpty) && !containsPrivateMaterial(value)
 }
 
+function publicExplanationText(
+  value: unknown,
+  maximumScalars: number,
+): value is string {
+  return (
+    publicText(value, maximumScalars * 2) &&
+    Array.from(value).length <= maximumScalars &&
+    !Array.from(value).some((character) => /\p{Cc}/u.test(character)) &&
+    !containsCommitEvidencePrivateMaterial(value) &&
+    !value.toLocaleLowerCase().includes("file:") &&
+    !value.includes("://") &&
+    !value.includes("\\")
+  )
+}
+
 function id(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_.-]{1,160}$/.test(value)
 }
@@ -664,6 +769,31 @@ function sha(value: unknown): value is string {
   )
 }
 
+function commitEvidenceId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^(?:commit-)[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(value)
+  )
+}
+
+function commitExplanationId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    Array.from(value).every((character) => {
+      const codePoint = character.codePointAt(0)
+      return (
+        codePoint !== undefined &&
+        codePoint >= 0x21 &&
+        codePoint <= 0x7e &&
+        character !== "/" &&
+        character !== "\\"
+      )
+    })
+  )
+}
+
 function hash(value: unknown): value is string {
   return typeof value === "string" && /^sha256:[a-fA-F0-9]{64}$/.test(value)
 }
@@ -672,6 +802,17 @@ function timestamp(value: unknown): value is string {
   return (
     text(value, 128) &&
     value.includes("T") &&
+    Number.isFinite(Date.parse(value))
+  )
+}
+
+function commitExplanationTimestamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 64 &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(
+      value,
+    ) &&
     Number.isFinite(Date.parse(value))
   )
 }
@@ -1367,10 +1508,10 @@ export function createCommitExplanationRequested(
       "requestedAt",
     ]) ||
     value.schemaVersion !== gitReviewSchemaVersion ||
-    !id(value.requestId) ||
-    !id(value.workspaceId) ||
+    !commitExplanationId(value.requestId) ||
+    !commitExplanationId(value.workspaceId) ||
     !positive(value.workspaceGeneration) ||
-    !id(value.commitEvidenceId) ||
+    !commitEvidenceId(value.commitEvidenceId) ||
     !oneOf(value.locale, ["ja", "en"] as const) ||
     !positive(value.selectionVersion) ||
     !oneOf(value.trigger, [
@@ -1378,7 +1519,66 @@ export function createCommitExplanationRequested(
       "user_request",
       "user_retry",
     ] as const) ||
-    !timestamp(value.requestedAt)
+    !commitExplanationTimestamp(value.requestedAt)
+  ) {
+    return violation()
+  }
+  return value
+}
+
+export function createCommitExplanationDispatch(
+  value: CommitExplanationDispatchV1,
+): CommitExplanationDispatchV1 {
+  if (!record(value) || !exact(value, ["request", "evidence"])) {
+    return violation()
+  }
+  const request = createCommitExplanationRequested(value.request)
+  const evidence = parseCommitEvidenceV1(value.evidence)
+  if (
+    evidence.commitId !== request.commitEvidenceId ||
+    evidence.workspaceGeneration !== request.workspaceGeneration ||
+    evidence.locale !== request.locale ||
+    evidence.selectionVersion !== request.selectionVersion
+  ) {
+    return violation()
+  }
+  return { request, evidence }
+}
+
+export function createCommitExplanationStateRequested(
+  value: CommitExplanationStateRequestedV1,
+): CommitExplanationStateRequestedV1 {
+  if (
+    !exact(value as unknown as JsonRecord, [
+      "schemaVersion",
+      "workspaceId",
+      "workspaceGeneration",
+      "commitEvidenceId",
+    ]) ||
+    value.schemaVersion !== gitReviewSchemaVersion ||
+    !commitExplanationId(value.workspaceId) ||
+    !positive(value.workspaceGeneration) ||
+    !commitEvidenceId(value.commitEvidenceId)
+  ) {
+    return violation()
+  }
+  return value
+}
+
+export function createCommitExplanationScopeRequested(
+  value: CommitExplanationScopeRequestedV1,
+): CommitExplanationScopeRequestedV1 {
+  if (
+    !exact(value as unknown as JsonRecord, [
+      "schemaVersion",
+      "workspaceId",
+      "workspaceGeneration",
+      "locale",
+    ]) ||
+    value.schemaVersion !== gitReviewSchemaVersion ||
+    !commitExplanationId(value.workspaceId) ||
+    !positive(value.workspaceGeneration) ||
+    !oneOf(value.locale, ["ja", "en"] as const)
   ) {
     return violation()
   }
@@ -1396,6 +1596,8 @@ export function parseCommitExplanationControllerState(
       "workspaceGeneration",
       "commitEvidenceId",
       "requestId",
+      "locale",
+      "selectionVersion",
       "status",
       "trigger",
       "retryable",
@@ -1404,10 +1606,14 @@ export function parseCommitExplanationControllerState(
       "updatedAt",
     ]) ||
     value.schemaVersion !== gitReviewSchemaVersion ||
-    !id(value.workspaceId) ||
+    !commitExplanationId(value.workspaceId) ||
     !positive(value.workspaceGeneration) ||
-    !id(value.commitEvidenceId) ||
-    !nullable(value.requestId, id) ||
+    !commitEvidenceId(value.commitEvidenceId) ||
+    !nullable(value.requestId, commitExplanationId) ||
+    !nullable(value.locale, (item): item is CommitExplanationLocale =>
+      oneOf(item, ["ja", "en"] as const),
+    ) ||
+    !nullable(value.selectionVersion, positive) ||
     !oneOf(value.status, [
       "not_generated",
       "queued",
@@ -1427,33 +1633,235 @@ export function parseCommitExplanationControllerState(
     typeof value.retryable !== "boolean" ||
     typeof value.presentationAvailable !== "boolean" ||
     !nullable(value.errorCode, id) ||
-    !timestamp(value.updatedAt)
+    !commitExplanationTimestamp(value.updatedAt)
   ) {
     return violation()
   }
 
-  const hasRequest = value.requestId !== null && value.trigger !== null
-  const noRequest = value.requestId === null && value.trigger === null
+  const hasRequest =
+    value.requestId !== null &&
+    value.locale !== null &&
+    value.selectionVersion !== null &&
+    value.trigger !== null
+  const noRequest =
+    value.requestId === null &&
+    value.locale === null &&
+    value.selectionVersion === null &&
+    value.trigger === null
   const validLifecycle =
     (value.status === "not_generated" &&
       noRequest &&
       !value.retryable &&
-      !value.presentationAvailable) ||
+      !value.presentationAvailable &&
+      value.errorCode === null) ||
     ((value.status === "queued" || value.status === "running") &&
       hasRequest &&
-      !value.retryable) ||
+      !value.retryable &&
+      !value.presentationAvailable &&
+      value.errorCode === null) ||
     (value.status === "generated" &&
       hasRequest &&
       !value.retryable &&
-      value.presentationAvailable) ||
-    ((value.status === "failed" || value.status === "canceled") &&
+      value.presentationAvailable &&
+      value.errorCode === null) ||
+    ((value.status === "failed" ||
+      value.status === "unavailable" ||
+      value.status === "canceled") &&
       hasRequest &&
       value.retryable &&
-      !value.presentationAvailable) ||
-    (value.status === "unavailable" && !value.presentationAvailable)
+      !value.presentationAvailable &&
+      value.errorCode !== null)
   if (!validLifecycle) return violation()
 
   return value as unknown as CommitExplanationControllerStateV1
+}
+
+const explanationNarrationSections = [
+  "summary",
+  "changes",
+  "reasons",
+  "verification",
+  "impact",
+  "cautions",
+  "howToReadNext",
+] as const
+
+function parseCommitExplanationTextArray(value: unknown): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > 16 ||
+    !value.every((item) => publicExplanationText(item, 2048))
+  ) {
+    return violation()
+  }
+  return [...value] as string[]
+}
+
+function parseCommitExplanation(value: unknown): CommitExplanationV1 {
+  if (
+    !record(value) ||
+    !exact(value, [
+      "schemaVersion",
+      "locale",
+      "summary",
+      "changes",
+      "reasons",
+      "verification",
+      "impact",
+      "cautions",
+      "howToReadNext",
+      "narrationChunks",
+    ]) ||
+    value.schemaVersion !== gitReviewSchemaVersion ||
+    !oneOf(value.locale, ["ja", "en"] as const) ||
+    !publicExplanationText(value.summary, 4096) ||
+    !Array.isArray(value.narrationChunks) ||
+    value.narrationChunks.length < 1 ||
+    value.narrationChunks.length > 32
+  ) {
+    return violation()
+  }
+
+  const narrationChunks: ExplanationNarrationChunkV1[] = []
+  let previousSection = 0
+  for (const [index, chunk] of value.narrationChunks.entries()) {
+    if (
+      !record(chunk) ||
+      !exact(chunk, ["sequence", "section", "text"]) ||
+      chunk.sequence !== index + 1 ||
+      !oneOf(chunk.section, explanationNarrationSections) ||
+      !publicExplanationText(chunk.text, 240)
+    ) {
+      return violation()
+    }
+    const section = explanationNarrationSections.indexOf(chunk.section)
+    if (section < previousSection) return violation()
+    previousSection = section
+    narrationChunks.push({
+      sequence: chunk.sequence,
+      section: chunk.section,
+      text: chunk.text,
+    })
+  }
+
+  const explanation: CommitExplanationV1 = {
+    schemaVersion: gitReviewSchemaVersion,
+    locale: value.locale,
+    summary: value.summary,
+    changes: parseCommitExplanationTextArray(value.changes),
+    reasons: parseCommitExplanationTextArray(value.reasons),
+    verification: parseCommitExplanationTextArray(value.verification),
+    impact: parseCommitExplanationTextArray(value.impact),
+    cautions: parseCommitExplanationTextArray(value.cautions),
+    howToReadNext: parseCommitExplanationTextArray(value.howToReadNext),
+    narrationChunks,
+  }
+  if (
+    new TextEncoder().encode(JSON.stringify(explanation)).byteLength >
+    64 * 1024
+  ) {
+    return violation()
+  }
+  return explanation
+}
+
+function parseCommitExplanationUsage(
+  value: unknown,
+): CommitExplanationSupportUsageV1 {
+  if (
+    !record(value) ||
+    !exact(value, ["inputTokens", "outputTokens", "totalTokens"]) ||
+    !uint(value.inputTokens) ||
+    !uint(value.outputTokens) ||
+    !uint(value.totalTokens)
+  ) {
+    return violation()
+  }
+  return {
+    inputTokens: value.inputTokens,
+    outputTokens: value.outputTokens,
+    totalTokens: value.totalTokens,
+  }
+}
+
+export function parseCommitExplanationPresentation(
+  value: unknown,
+): CommitExplanationPresentationV1 {
+  if (!record(value)) return violation()
+  const explanation = parseCommitExplanation(value.explanation)
+  const usage = parseCommitExplanationUsage(value.usage)
+  if (
+    !exact(value, [
+      "schemaVersion",
+      "workspaceId",
+      "workspaceGeneration",
+      "commitEvidenceId",
+      "requestId",
+      "selectionVersion",
+      "trigger",
+      "locale",
+      "mode",
+      "explanation",
+      "usage",
+      "latencyMs",
+      "presentedAt",
+    ]) ||
+    value.schemaVersion !== gitReviewSchemaVersion ||
+    !commitExplanationId(value.workspaceId) ||
+    !positive(value.workspaceGeneration) ||
+    !commitEvidenceId(value.commitEvidenceId) ||
+    !commitExplanationId(value.requestId) ||
+    !positive(value.selectionVersion) ||
+    !oneOf(value.trigger, [
+      "auto_verified_commit",
+      "user_request",
+      "user_retry",
+    ] as const) ||
+    !oneOf(value.locale, ["ja", "en"] as const) ||
+    !oneOf(value.mode, ["show", "replay_narration"] as const) ||
+    explanation.locale !== value.locale ||
+    !uint(value.latencyMs) ||
+    !commitExplanationTimestamp(value.presentedAt)
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: gitReviewSchemaVersion,
+    workspaceId: value.workspaceId,
+    workspaceGeneration: value.workspaceGeneration,
+    commitEvidenceId: value.commitEvidenceId,
+    requestId: value.requestId,
+    selectionVersion: value.selectionVersion,
+    trigger: value.trigger,
+    locale: value.locale,
+    mode: value.mode,
+    explanation,
+    usage,
+    latencyMs: value.latencyMs,
+    presentedAt: value.presentedAt,
+  }
+}
+
+export function parseCommitExplanationControllerError(
+  value: unknown,
+): CommitExplanationControllerErrorEnvelope {
+  if (
+    !record(value) ||
+    !exact(value, ["code", "operation", "recoverable", "userMessageKey"]) ||
+    !id(value.code) ||
+    !publicText(value.operation, 128) ||
+    typeof value.recoverable !== "boolean" ||
+    !publicText(value.userMessageKey, 160)
+  ) {
+    return violation()
+  }
+  return {
+    code: value.code,
+    operation: value.operation,
+    recoverable: value.recoverable,
+    userMessageKey: value.userMessageKey,
+  }
 }
 
 export function createCommitExplanationPresentationRequested(
@@ -1470,12 +1878,12 @@ export function createCommitExplanationPresentationRequested(
       "requestedAt",
     ]) ||
     value.schemaVersion !== gitReviewSchemaVersion ||
-    !id(value.workspaceId) ||
+    !commitExplanationId(value.workspaceId) ||
     !positive(value.workspaceGeneration) ||
-    !id(value.commitEvidenceId) ||
-    !id(value.requestId) ||
+    !commitEvidenceId(value.commitEvidenceId) ||
+    !commitExplanationId(value.requestId) ||
     !oneOf(value.mode, ["show", "replay_narration"] as const) ||
-    !timestamp(value.requestedAt)
+    !commitExplanationTimestamp(value.requestedAt)
   ) {
     return violation()
   }
@@ -1495,7 +1903,7 @@ export function createCommitExplanationCancelRequested(
       "requestedAt",
     ]) ||
     value.schemaVersion !== gitReviewSchemaVersion ||
-    !id(value.requestId) ||
+    !commitExplanationId(value.requestId) ||
     !positive(value.workspaceGeneration) ||
     !positive(value.selectionVersion) ||
     !oneOf(value.reason, [
@@ -1505,7 +1913,7 @@ export function createCommitExplanationCancelRequested(
       "route_changed",
       "superseded",
     ] as const) ||
-    !timestamp(value.requestedAt)
+    !commitExplanationTimestamp(value.requestedAt)
   ) {
     return violation()
   }

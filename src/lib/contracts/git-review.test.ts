@@ -9,6 +9,7 @@ import {
   parseCommitEvidenceDetail,
   parseCommitEvidenceV1,
   parseCommitExplanationControllerState,
+  parseCommitExplanationPresentation,
   parseGitObservation,
   parseGitReviewError,
   parseGitReviewResponse,
@@ -407,6 +408,8 @@ describe("read-only Git review contracts", () => {
       workspaceGeneration: request.workspaceGeneration,
       commitEvidenceId: request.commitEvidenceId,
       requestId: request.requestId,
+      locale: request.locale,
+      selectionVersion: request.selectionVersion,
       status: "generated",
       trigger: "auto_verified_commit",
       retryable: false,
@@ -423,6 +426,26 @@ describe("read-only Git review contracts", () => {
         presentationAvailable: false,
       }),
     ).toThrow(GitReviewContractError)
+    expect(() =>
+      parseCommitExplanationControllerState({
+        ...controllerState,
+        selectionVersion: request.selectionVersion + 1,
+        locale: null,
+      }),
+    ).toThrow(GitReviewContractError)
+
+    const notGenerated = {
+      ...controllerState,
+      requestId: null,
+      locale: null,
+      selectionVersion: null,
+      status: "not_generated",
+      trigger: null,
+      presentationAvailable: false,
+    }
+    expect(parseCommitExplanationControllerState(notGenerated)).toEqual(
+      notGenerated,
+    )
 
     expect(
       createCommitExplanationPresentationRequested({
@@ -446,6 +469,86 @@ describe("read-only Git review contracts", () => {
         requestedAt: "2026-07-18T01:00:06.000Z",
       }),
     ).toMatchObject({ reason: "selection_changed" })
+  })
+
+  it("parses only exact, bounded, redacted commit explanation presentations", () => {
+    const presentation = {
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      commitEvidenceId: `commit-${sha}`,
+      requestId: "explanation-request-one",
+      selectionVersion: 2,
+      trigger: "auto_verified_commit",
+      locale: "ja",
+      mode: "show",
+      explanation: {
+        schemaVersion: 1,
+        locale: "ja",
+        summary: "変更内容を安全に説明します。",
+        changes: ["読み取り専用の証跡を追加しました。"],
+        reasons: ["変更の根拠を確認できるようにするためです。"],
+        verification: ["テストが成功しました。"],
+        impact: ["コミット画面から確認できます。"],
+        cautions: ["既知の注意事項はありません。"],
+        howToReadNext: ["検証結果を確認してください。"],
+        narrationChunks: [
+          { sequence: 1, section: "summary", text: "安全な説明です。" },
+          { sequence: 2, section: "changes", text: "証跡を追加しました。" },
+        ],
+      },
+      usage: { inputTokens: 120, outputTokens: 48, totalTokens: 168 },
+      latencyMs: 420,
+      presentedAt: "2026-07-18T01:00:07.000Z",
+    }
+
+    expect(parseCommitExplanationPresentation(presentation)).toEqual(
+      presentation,
+    )
+    for (const invalid of [
+      { ...presentation, privatePath: "src/private.ts" },
+      {
+        ...presentation,
+        explanation: {
+          ...presentation.explanation,
+          narrationChunks: [
+            {
+              sequence: 0,
+              section: "summary",
+              text: "zero-based native chunk",
+            },
+          ],
+        },
+      },
+      {
+        ...presentation,
+        explanation: {
+          ...presentation.explanation,
+          narrationChunks: [
+            { sequence: 1, section: "changes", text: "change" },
+            { sequence: 2, section: "summary", text: "summary" },
+          ],
+        },
+      },
+      {
+        ...presentation,
+        explanation: {
+          ...presentation.explanation,
+          summary: "https://private.example.invalid/repository",
+        },
+      },
+      {
+        ...presentation,
+        explanation: {
+          ...presentation.explanation,
+          summary: "unsafe\u0000control",
+        },
+      },
+    ]) {
+      expect(() => parseCommitExplanationPresentation(invalid)).toThrow(
+        GitReviewContractError,
+      )
+    }
   })
 
   it("parses only bounded structured native errors", () => {

@@ -1,0 +1,437 @@
+import { describe, expect, it, vi } from "vitest"
+
+import {
+  TauriCommitExplanationAdapter,
+  type CommitExplanationEventListener,
+  type CommitExplanationInvoker,
+} from "@/features/git-review/commit-explanation-adapter"
+import {
+  commitExplanationCommands,
+  commitExplanationEventChannels,
+  gitReviewSchemaVersion,
+  type CommitExplanationControllerStateV1,
+  type CommitExplanationDispatchV1,
+  type CommitExplanationPresentationV1,
+} from "@/lib/contracts/git-review"
+
+const sha = "a".repeat(40)
+const commitEvidenceId = `commit-${sha}`
+
+function dispatch(
+  trigger:
+    "auto_verified_commit" | "user_request" | "user_retry" = "user_request",
+  selectionVersion = 2,
+  locale: "ja" | "en" = "ja",
+): CommitExplanationDispatchV1 {
+  return {
+    request: {
+      schemaVersion: gitReviewSchemaVersion,
+      requestId: `request-${locale}-${selectionVersion}`,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      commitEvidenceId,
+      locale,
+      selectionVersion,
+      trigger,
+      requestedAt: "2026-07-18T01:00:00.000Z",
+    },
+    evidence: {
+      schemaVersion: gitReviewSchemaVersion,
+      commitId: commitEvidenceId,
+      subject: "feat: explain a verified commit",
+      body: "Keep the support boundary isolated.",
+      changes: [
+        {
+          changeKind: "modified",
+          fileCount: 1,
+          additions: 8,
+          deletions: 2,
+          binaryFiles: 0,
+        },
+      ],
+      diffSummary: {
+        filesChanged: 1,
+        additions: 8,
+        deletions: 2,
+        binaryFiles: 0,
+      },
+      verification: [],
+      decisions: [],
+      risks: [],
+      locale,
+      workspaceGeneration: 3,
+      selectionVersion,
+    },
+  }
+}
+
+function state(
+  overrides: Partial<CommitExplanationControllerStateV1> = {},
+): CommitExplanationControllerStateV1 {
+  return {
+    schemaVersion: gitReviewSchemaVersion,
+    workspaceId: "workspace-one",
+    workspaceGeneration: 3,
+    commitEvidenceId,
+    requestId: "request-ja-2",
+    locale: "ja",
+    selectionVersion: 2,
+    status: "generated",
+    trigger: "user_request",
+    retryable: false,
+    presentationAvailable: true,
+    errorCode: null,
+    updatedAt: "2026-07-18T01:00:02.000Z",
+    ...overrides,
+  }
+}
+
+function presentation(
+  overrides: Partial<CommitExplanationPresentationV1> = {},
+): CommitExplanationPresentationV1 {
+  return {
+    schemaVersion: gitReviewSchemaVersion,
+    workspaceId: "workspace-one",
+    workspaceGeneration: 3,
+    commitEvidenceId,
+    requestId: "request-ja-2",
+    selectionVersion: 2,
+    trigger: "user_request",
+    locale: "ja",
+    mode: "show",
+    explanation: {
+      schemaVersion: gitReviewSchemaVersion,
+      locale: "ja",
+      summary: "検証済みコミットの説明です。",
+      changes: ["読み取り専用の証跡を追加しました。"],
+      reasons: ["変更の根拠を確認できるようにするためです。"],
+      verification: ["テストが成功しました。"],
+      impact: ["コミット画面から確認できます。"],
+      cautions: ["既知の注意事項はありません。"],
+      howToReadNext: ["検証結果を確認してください。"],
+      narrationChunks: [
+        { sequence: 1, section: "summary", text: "検証済みです。" },
+        { sequence: 2, section: "changes", text: "証跡を追加しました。" },
+      ],
+    },
+    usage: { inputTokens: 80, outputTokens: 30, totalTokens: 110 },
+    latencyMs: 240,
+    presentedAt: "2026-07-18T01:00:03.000Z",
+    ...overrides,
+  }
+}
+
+class FakeNativeEvents {
+  readonly listeners = new Map<string, Set<(payload: unknown) => void>>()
+  readonly disposers: Array<ReturnType<typeof vi.fn>> = []
+
+  readonly listen: CommitExplanationEventListener = (channel, listener) => {
+    const listeners = this.listeners.get(channel) ?? new Set()
+    listeners.add(listener)
+    this.listeners.set(channel, listeners)
+    const dispose = vi.fn(() => listeners.delete(listener))
+    this.disposers.push(dispose)
+    return Promise.resolve(dispose)
+  }
+
+  emit(channel: string, payload: unknown): void {
+    for (const listener of this.listeners.get(channel) ?? []) listener(payload)
+  }
+}
+
+function adapterHarness(
+  response: (
+    command: Parameters<CommitExplanationInvoker>[0],
+    argument: Parameters<CommitExplanationInvoker>[1],
+  ) => unknown = () => null,
+) {
+  const events = new FakeNativeEvents()
+  const invoke = vi.fn<CommitExplanationInvoker>((command, argument) =>
+    Promise.resolve(response(command, argument)),
+  )
+  const adapter = new TauriCommitExplanationAdapter({
+    invoke,
+    listen: events.listen,
+  })
+  return { adapter, events, invoke }
+}
+
+async function setJapaneseScope(
+  adapter: TauriCommitExplanationAdapter,
+): Promise<void> {
+  await adapter.setScope({
+    schemaVersion: gitReviewSchemaVersion,
+    workspaceId: "workspace-one",
+    workspaceGeneration: 3,
+    locale: "ja",
+  })
+}
+
+describe("TauriCommitExplanationAdapter", () => {
+  it("owns exactly two reconnectable native listeners and disposes a pending start", async () => {
+    let releaseFirst: (() => void) | undefined
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const events = new FakeNativeEvents()
+    let registrations = 0
+    const listen = vi.fn<CommitExplanationEventListener>(
+      async (channel, listener) => {
+        registrations += 1
+        if (registrations <= 2) await firstGate
+        return events.listen(channel, listener)
+      },
+    )
+    const adapter = new TauriCommitExplanationAdapter({
+      invoke: vi.fn<CommitExplanationInvoker>(() => Promise.resolve(null)),
+      listen,
+    })
+
+    const pending = adapter.start()
+    adapter.dispose()
+    releaseFirst?.()
+    await pending
+    expect(events.disposers.slice(0, 2)).toHaveLength(2)
+    expect(
+      events.disposers
+        .slice(0, 2)
+        .every((dispose) => dispose.mock.calls.length === 1),
+    ).toBe(true)
+
+    await adapter.start()
+    expect(listen).toHaveBeenCalledTimes(4)
+    adapter.dispose()
+    expect(
+      events.disposers.every((dispose) => dispose.mock.calls.length === 1),
+    ).toBe(true)
+  })
+
+  it("rejects the trusted-only auto trigger before invoke and caches user state before resolving", async () => {
+    const queued = state({
+      status: "queued",
+      presentationAvailable: false,
+      updatedAt: "2026-07-18T01:00:01.000Z",
+    })
+    const { adapter, invoke } = adapterHarness((command) =>
+      command === commitExplanationCommands.request ? queued : null,
+    )
+    await setJapaneseScope(adapter)
+    vi.mocked(invoke).mockClear()
+
+    await expect(
+      adapter.request(dispatch("auto_verified_commit")),
+    ).rejects.toMatchObject({
+      code: "CODEX-SUPPORT-AUTO-TRIGGER-FORBIDDEN",
+    })
+    expect(invoke).not.toHaveBeenCalled()
+
+    let observed: CommitExplanationControllerStateV1 | null = null
+    adapter.subscribe(() => {
+      observed = adapter.getState("workspace-one", 3, commitEvidenceId)
+    })
+    await adapter.request(dispatch())
+    expect(invoke).toHaveBeenCalledWith(commitExplanationCommands.request, {
+      dispatch: dispatch(),
+    })
+    expect(observed).toEqual(queued)
+  })
+
+  it("hydrates getState before subscription and never lets its late snapshot overwrite an event", async () => {
+    let resolveSnapshot: ((value: unknown) => void) | undefined
+    const snapshot = new Promise<unknown>((resolve) => {
+      resolveSnapshot = resolve
+    })
+    const { adapter, events, invoke } = adapterHarness((command) =>
+      command === commitExplanationCommands.getState ? snapshot : null,
+    )
+    await adapter.start()
+    await setJapaneseScope(adapter)
+
+    expect(adapter.getState("workspace-one", 3, commitEvidenceId)).toBeNull()
+    expect(invoke).toHaveBeenCalledWith(commitExplanationCommands.getState, {
+      request: {
+        schemaVersion: gitReviewSchemaVersion,
+        workspaceId: "workspace-one",
+        workspaceGeneration: 3,
+        commitEvidenceId,
+      },
+    })
+
+    const generated = state()
+    events.emit(commitExplanationEventChannels.state, generated)
+    resolveSnapshot?.(
+      state({
+        status: "queued",
+        presentationAvailable: false,
+        updatedAt: "2026-07-18T01:00:01.000Z",
+      }),
+    )
+    await snapshot
+    await Promise.resolve()
+    expect(adapter.getState("workspace-one", 3, commitEvidenceId)).toEqual(
+      generated,
+    )
+  })
+
+  it("publishes exact presentation events once and drops stale selection, locale, and malformed events", async () => {
+    const { adapter, events } = adapterHarness()
+    await adapter.start()
+    await setJapaneseScope(adapter)
+    events.emit(commitExplanationEventChannels.state, state())
+    events.emit(
+      commitExplanationEventChannels.state,
+      state({
+        requestId: "late-selection-one",
+        selectionVersion: 1,
+        updatedAt: "2026-07-18T01:00:09.000Z",
+      }),
+    )
+    expect(adapter.getState("workspace-one", 3, commitEvidenceId)).toEqual(
+      state(),
+    )
+    const narrated: unknown[] = []
+    adapter.narrationSource.subscribe((event) => narrated.push(event))
+
+    const valid = presentation()
+    events.emit(commitExplanationEventChannels.presentation, valid)
+    events.emit(commitExplanationEventChannels.presentation, valid)
+    expect(narrated).toEqual([
+      {
+        schemaVersion: 1,
+        source: "background_support",
+        trigger: "user_request",
+        kind: "started",
+        workspaceId: "workspace-one",
+        workspaceGeneration: 3,
+        commitSha: sha,
+        requestId: "request-ja-2",
+        locale: "ja",
+      },
+      expect.objectContaining({
+        kind: "chunk",
+        sequence: 0,
+        text: "検証済みです。",
+      }),
+      expect.objectContaining({
+        kind: "chunk",
+        sequence: 1,
+        text: "証跡を追加しました。",
+      }),
+      expect.objectContaining({
+        kind: "terminal",
+        status: "completed",
+        errorCode: null,
+      }),
+    ])
+
+    events.emit(
+      commitExplanationEventChannels.presentation,
+      presentation({
+        selectionVersion: 1,
+        presentedAt: "2026-07-18T01:00:04.000Z",
+      }),
+    )
+    events.emit(commitExplanationEventChannels.presentation, {
+      ...presentation({ presentedAt: "2026-07-18T01:00:05.000Z" }),
+      unknown: true,
+    })
+    expect(narrated).toHaveLength(4)
+
+    await adapter.setScope({
+      schemaVersion: gitReviewSchemaVersion,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      locale: "en",
+    })
+    events.emit(
+      commitExplanationEventChannels.presentation,
+      presentation({ presentedAt: "2026-07-18T01:00:06.000Z" }),
+    )
+    expect(narrated).toHaveLength(4)
+
+    events.emit(
+      commitExplanationEventChannels.state,
+      state({
+        requestId: "request-en-3",
+        locale: "en",
+        selectionVersion: 3,
+        updatedAt: "2026-07-18T01:00:07.000Z",
+      }),
+    )
+    events.emit(
+      commitExplanationEventChannels.presentation,
+      presentation({
+        requestId: "request-en-3",
+        locale: "en",
+        selectionVersion: 3,
+        explanation: {
+          ...presentation().explanation,
+          locale: "en",
+          summary: "Verified commit explanation.",
+          changes: ["Added read-only evidence."],
+          reasons: ["To keep the change auditable."],
+          verification: ["Tests passed."],
+          impact: ["Available from the commit view."],
+          cautions: ["No known caution."],
+          howToReadNext: ["Review verification evidence."],
+          narrationChunks: [
+            { sequence: 1, section: "summary", text: "Verified commit." },
+          ],
+        },
+        presentedAt: "2026-07-18T01:00:08.000Z",
+      }),
+    )
+    expect(narrated.slice(4)).toEqual([
+      expect.objectContaining({ kind: "started", locale: "en" }),
+      expect.objectContaining({
+        kind: "chunk",
+        sequence: 0,
+        text: "Verified commit.",
+      }),
+      expect.objectContaining({ kind: "terminal", status: "completed" }),
+    ])
+  })
+
+  it("deduplicates the presentation event emitted during the matching present response", async () => {
+    const events = new FakeNativeEvents()
+    const valid = presentation({ mode: "replay_narration" })
+    const invoke = vi.fn<CommitExplanationInvoker>((command) => {
+      if (command === commitExplanationCommands.present) {
+        events.emit(commitExplanationEventChannels.presentation, valid)
+        return Promise.resolve(valid)
+      }
+      return Promise.resolve(null)
+    })
+    const adapter = new TauriCommitExplanationAdapter({
+      invoke,
+      listen: events.listen,
+    })
+    await adapter.start()
+    await setJapaneseScope(adapter)
+    events.emit(commitExplanationEventChannels.state, state())
+    const narrated: unknown[] = []
+    adapter.narrationSource.subscribe((event) => narrated.push(event))
+
+    await adapter.present({
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      commitEvidenceId,
+      requestId: "request-ja-2",
+      mode: "replay_narration",
+      requestedAt: "2026-07-18T01:00:09.000Z",
+    })
+    expect(narrated).toHaveLength(4)
+    expect(vi.mocked(invoke).mock.calls.at(-1)?.[1]).toEqual({
+      request: {
+        schemaVersion: 1,
+        workspaceId: "workspace-one",
+        workspaceGeneration: 3,
+        commitEvidenceId,
+        requestId: "request-ja-2",
+        mode: "replay_narration",
+        requestedAt: "2026-07-18T01:00:09.000Z",
+      },
+    })
+  })
+})

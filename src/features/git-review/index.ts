@@ -1,5 +1,10 @@
 export { DemoGitReviewTransport } from "@/features/git-review/demo-transport"
 export {
+  CommitExplanationBoundaryError,
+  TauriCommitExplanationAdapter,
+  type ScopedCommitExplanationController,
+} from "@/features/git-review/commit-explanation-adapter"
+export {
   EvidenceView,
   type EvidenceViewProps,
 } from "@/features/git-review/EvidenceView"
