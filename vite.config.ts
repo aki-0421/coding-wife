@@ -3,14 +3,35 @@ import { fileURLToPath } from "node:url"
 
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
-import { defineConfig } from "vite"
+import { defineConfig, type Plugin } from "vite"
 
+import { renderCharacterPreviewHtml } from "./scripts/character-preview-csp"
 import { live2dAssetsPlugin } from "./scripts/live2d/vite-plugin-live2d-assets.mjs"
 
 const projectRoot = fileURLToPath(new URL(".", import.meta.url))
 
-export default defineConfig({
-  plugins: [live2dAssetsPlugin(projectRoot), react(), tailwindcss()],
+function characterPreviewCspPlugin(command: "build" | "serve"): Plugin {
+  return {
+    name: "character-preview-mode-csp",
+    enforce: "pre",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html, context) {
+        return context.path.endsWith("/character-import-preview.html")
+          ? renderCharacterPreviewHtml(html, command)
+          : html
+      },
+    },
+  }
+}
+
+export default defineConfig(({ command }) => ({
+  plugins: [
+    characterPreviewCspPlugin(command),
+    live2dAssetsPlugin(projectRoot),
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(projectRoot, "src"),
@@ -37,4 +58,4 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
   },
-})
+}))

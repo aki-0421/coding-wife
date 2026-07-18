@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs"
 
 import { describe, expect, it } from "vitest"
 
+import { renderCharacterPreviewHtml } from "../../../../scripts/character-preview-csp"
+
 const previewHtml = readFileSync("character-import-preview.html", "utf8")
 const previewHostSource = readFileSync(
   "src/features/character/import-preview/IsolatedCharacterPreview.tsx",
@@ -49,32 +51,47 @@ function expectSources(
 }
 
 describe("isolated character preview CSP", () => {
-  const childPolicy = directives(
-    sourceAttribute(
-      previewHtml,
-      /<meta\s+http-equiv="Content-Security-Policy"[\s\S]*?\/>/i,
-      "content",
-    ),
-  )
+  const policyFor = (command: "build" | "serve") =>
+    directives(
+      sourceAttribute(
+        renderCharacterPreviewHtml(previewHtml, command),
+        /<meta\s+http-equiv="Content-Security-Policy"[\s\S]*?\/>/i,
+        "content",
+      ),
+    )
+  const productionPolicy = policyFor("build")
+  const developmentPolicy = policyFor("serve")
 
-  it("allows only the fixed Tauri production and development origins", () => {
-    const appAssets = [productionOrigin, developmentOrigin]
+  it("allows exactly one mode-specific application origin", () => {
     expect(developmentOrigin).toBe("http://localhost:1420")
-    expectSources(childPolicy, "default-src", ["'none'"])
-    expectSources(childPolicy, "script-src", appAssets)
-    expectSources(childPolicy, "style-src", appAssets)
-    expectSources(childPolicy, "font-src", appAssets)
-    expectSources(childPolicy, "img-src", [...appAssets, "blob:", "data:"])
-    expectSources(childPolicy, "connect-src", ["'none'"])
-    expectSources(childPolicy, "form-action", ["'none'"])
-    expectSources(childPolicy, "object-src", ["'none'"])
+    for (const [policy, origin] of [
+      [productionPolicy, productionOrigin],
+      [developmentPolicy, developmentOrigin],
+    ] as const) {
+      expectSources(policy, "default-src", ["'none'"])
+      expectSources(policy, "script-src", [origin])
+      expectSources(policy, "style-src", [origin])
+      expectSources(policy, "font-src", [origin])
+      expectSources(policy, "img-src", [origin, "blob:", "data:"])
+      expectSources(policy, "connect-src", ["'none'"])
+      expectSources(policy, "form-action", ["'none'"])
+      expectSources(policy, "object-src", ["'none'"])
+    }
+    const productionHtml = renderCharacterPreviewHtml(previewHtml, "build")
+    const developmentHtml = renderCharacterPreviewHtml(previewHtml, "serve")
+    expect(productionHtml).not.toContain(developmentOrigin)
+    expect(developmentHtml).not.toContain(productionOrigin)
+    expect(productionHtml).not.toContain("__CHARACTER_PREVIEW_ASSET_ORIGIN__")
+    expect(developmentHtml).not.toContain("__CHARACTER_PREVIEW_ASSET_ORIGIN__")
   })
 
   it("keeps executable content and navigation capabilities closed", () => {
-    const serialized = [...childPolicy.values()].flat().join(" ")
-    expect(serialized).not.toMatch(
-      /\*|'self'|'unsafe-inline'|'unsafe-eval'|https?:\/\/(?!localhost:1420)/,
-    )
+    for (const policy of [productionPolicy, developmentPolicy]) {
+      const serialized = [...policy.values()].flat().join(" ")
+      expect(serialized).not.toMatch(
+        /\*|'self'|'unsafe-inline'|'unsafe-eval'|https?:\/\/(?!localhost:1420)/,
+      )
+    }
 
     const sandbox = sourceAttribute(
       previewHostSource,
@@ -88,16 +105,18 @@ describe("isolated character preview CSP", () => {
   })
 
   it("keeps parent and child module requests reachable in dev and production", () => {
-    const productionPolicy = directives(tauriConfig.app.security.csp)
-    const developmentPolicy = directives(tauriConfig.app.security.devCsp)
+    const parentProductionPolicy = directives(tauriConfig.app.security.csp)
+    const parentDevelopmentPolicy = directives(tauriConfig.app.security.devCsp)
     for (const directive of [
       "script-src",
       "style-src",
       "font-src",
       "img-src",
     ]) {
-      expect(productionPolicy.get(directive)).toContain(productionOrigin)
-      expect(developmentPolicy.get(directive)).toContain(developmentOrigin)
+      expect(parentProductionPolicy.get(directive)).toContain(productionOrigin)
+      expect(parentDevelopmentPolicy.get(directive)).toContain(
+        developmentOrigin,
+      )
     }
     expect(
       sourceAttribute(

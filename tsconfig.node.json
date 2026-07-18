@@ -18,5 +18,10 @@
     "exactOptionalPropertyTypes": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "vitest.config.ts", "eslint.config.js"]
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "eslint.config.js",
+    "scripts/character-preview-csp.ts"
+  ]
 }
