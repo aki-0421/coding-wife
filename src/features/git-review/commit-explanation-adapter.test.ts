@@ -730,6 +730,82 @@ describe("TauriCommitExplanationAdapter", () => {
     expect(scopes).toEqual(["ja"])
   })
 
+  it("starts a fresh scope writer after disposal while the abandoned invoke is still pending", async () => {
+    const events = new FakeNativeEvents()
+    const scopes: Array<{ workspaceId: string; locale: "ja" | "en" }> = []
+    let resolveAbandoned: ((value: null) => void) | undefined
+    const invoke = vi.fn<CommitExplanationInvoker>((command, argument) => {
+      if (
+        command !== commitExplanationCommands.setScope ||
+        !("request" in argument) ||
+        !("locale" in argument.request)
+      ) {
+        return Promise.resolve(null)
+      }
+      scopes.push({
+        workspaceId: argument.request.workspaceId,
+        locale: argument.request.locale,
+      })
+      if (scopes.length === 1) {
+        return new Promise<null>((resolve) => {
+          resolveAbandoned = resolve
+        })
+      }
+      return Promise.resolve(null)
+    })
+    const adapter = new TauriCommitExplanationAdapter({
+      invoke,
+      listen: events.listen,
+    })
+    await adapter.start()
+    const abandoned = adapter.setScope({
+      schemaVersion: gitReviewSchemaVersion,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      locale: "ja",
+    })
+    const abandonedRejection = expect(abandoned).rejects.toMatchObject({
+      code: "CODEX-SUPPORT-SCOPE-DISPOSED",
+    })
+    expect(scopes).toEqual([{ workspaceId: "workspace-one", locale: "ja" }])
+
+    adapter.dispose()
+    await abandonedRejection
+    await adapter.start()
+    await adapter.setScope({
+      schemaVersion: gitReviewSchemaVersion,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      locale: "en",
+    })
+    expect(scopes).toEqual([
+      { workspaceId: "workspace-one", locale: "ja" },
+      { workspaceId: "workspace-one", locale: "en" },
+    ])
+
+    const englishState = state({
+      requestId: "request-en-2",
+      locale: "en",
+      updatedAt: "2026-07-18T01:00:07.000Z",
+    })
+    events.emit(commitExplanationEventChannels.state, englishState)
+    expect(adapter.getState("workspace-one", 3, commitEvidenceId)).toEqual(
+      englishState,
+    )
+
+    resolveAbandoned?.(null)
+    await Promise.resolve()
+    await Promise.resolve()
+    events.emit(
+      commitExplanationEventChannels.state,
+      state({ updatedAt: "2026-07-18T01:00:08.000Z" }),
+    )
+    expect(adapter.getState("workspace-one", 3, commitEvidenceId)).toEqual(
+      englishState,
+    )
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
   it("hydrates getState before subscription and never lets its late snapshot overwrite an event", async () => {
     let resolveSnapshot: ((value: unknown) => void) | undefined
     const snapshot = new Promise<unknown>((resolve) => {

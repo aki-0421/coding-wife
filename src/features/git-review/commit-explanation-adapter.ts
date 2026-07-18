@@ -39,6 +39,16 @@ type ScopeWaiter = {
   readonly resolve: () => void
   readonly reject: (error: CommitExplanationBoundaryError) => void
 }
+type ScopeWriter = {
+  readonly identity: number
+  readonly lifecycleEpoch: number
+  readonly operation: Promise<void>
+  readonly cancel: () => void
+}
+type ScopeWriteOutcome =
+  | { readonly kind: "response"; readonly value: unknown }
+  | { readonly kind: "failure"; readonly error: unknown }
+  | { readonly kind: "canceled" }
 type PresentationIntent = {
   readonly epoch: number
   readonly workspaceId: string
@@ -236,7 +246,8 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   #appliedScopeRevision = 0
   #failedScopeRevision = 0
   #scopeLifecycleEpoch = 0
-  #scopeWriter: Promise<void> | null = null
+  #scopeWriterIdentity = 0
+  #scopeWriter: ScopeWriter | null = null
   #lifecycleEpoch = 0
   #nativeDisposers: Array<() => void> = []
   #startPromise: Promise<void> | null = null
@@ -311,6 +322,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
     this.revokePresentationIntent("dispose")
     ++this.#lifecycleEpoch
     ++this.#scopeLifecycleEpoch
+    this.cancelScopeWriter()
     ++this.#desiredScopeRevision
     this.#started = false
     this.#startPromise = null
@@ -388,8 +400,17 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   private ensureScopeWriter(): void {
     if (this.#scopeWriter !== null) return
     const lifecycleEpoch = this.#scopeLifecycleEpoch
-    const tracked = this.drainScopeWrites(lifecycleEpoch).finally(() => {
-      if (this.#scopeWriter !== tracked) return
+    const identity = ++this.#scopeWriterIdentity
+    let cancelWrite: (() => void) | undefined
+    const cancellation = new Promise<void>((resolve) => {
+      cancelWrite = resolve
+    })
+    const tracked = this.drainScopeWrites(
+      lifecycleEpoch,
+      identity,
+      cancellation,
+    ).finally(() => {
+      if (this.#scopeWriter?.identity !== identity) return
       this.#scopeWriter = null
       if (
         this.#desiredScope !== null &&
@@ -399,11 +420,38 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
         this.ensureScopeWriter()
       }
     })
-    this.#scopeWriter = tracked
+    this.#scopeWriter = {
+      identity,
+      lifecycleEpoch,
+      operation: tracked,
+      cancel: () => cancelWrite?.(),
+    }
   }
 
-  private async drainScopeWrites(lifecycleEpoch: number): Promise<void> {
-    while (lifecycleEpoch === this.#scopeLifecycleEpoch) {
+  private cancelScopeWriter(): void {
+    const writer = this.#scopeWriter
+    if (writer === null) return
+    this.#scopeWriter = null
+    ++this.#scopeWriterIdentity
+    writer.cancel()
+  }
+
+  private isScopeWriterCurrent(
+    lifecycleEpoch: number,
+    identity: number,
+  ): boolean {
+    return (
+      lifecycleEpoch === this.#scopeLifecycleEpoch &&
+      identity === this.#scopeWriterIdentity
+    )
+  }
+
+  private async drainScopeWrites(
+    lifecycleEpoch: number,
+    identity: number,
+    cancellation: Promise<void>,
+  ): Promise<void> {
+    while (this.isScopeWriterCurrent(lifecycleEpoch, identity)) {
       const target = this.#desiredScope
       const revision = this.#desiredScopeRevision
       if (target === null) return
@@ -416,17 +464,38 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       }
       if (this.#failedScopeRevision === revision) return
 
+      let invocation: Promise<ScopeWriteOutcome>
       try {
-        const response = await this.#invoke(
-          commitExplanationCommands.setScope,
-          { request: target },
+        invocation = this.#invoke(commitExplanationCommands.setScope, {
+          request: target,
+        }).then<ScopeWriteOutcome>(
+          (value) => ({ kind: "response", value }),
+          (error: unknown) => ({ kind: "failure", error }),
         )
-        if (response !== null) throw new GitReviewContractError()
       } catch (error) {
-        if (lifecycleEpoch !== this.#scopeLifecycleEpoch) return
+        invocation = Promise.resolve({ kind: "failure", error })
+      }
+      const outcome = await Promise.race<ScopeWriteOutcome>([
+        invocation,
+        cancellation.then<ScopeWriteOutcome>(() => ({ kind: "canceled" })),
+      ])
+      if (
+        outcome.kind === "canceled" ||
+        !this.isScopeWriterCurrent(lifecycleEpoch, identity)
+      ) {
+        return
+      }
+
+      const writeError =
+        outcome.kind === "failure"
+          ? outcome.error
+          : outcome.value === null
+            ? null
+            : new GitReviewContractError()
+      if (writeError !== null) {
         const normalized = normalizeError(
           commitExplanationCommands.setScope,
-          error,
+          writeError,
         )
         this.rejectScopeWaiters(normalized, revision)
         this.#failedScopeRevision = revision
@@ -434,7 +503,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
         continue
       }
 
-      if (lifecycleEpoch !== this.#scopeLifecycleEpoch) return
+      if (!this.isScopeWriterCurrent(lifecycleEpoch, identity)) return
       this.#scope = target
       this.#appliedScopeRevision = revision
       this.resolveScopeWaiters(revision)
