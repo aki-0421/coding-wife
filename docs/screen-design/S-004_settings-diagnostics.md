@@ -11,15 +11,15 @@ status: "Approved"
 
 # S-004 設定・診断
 
-| 項目 | 内容 |
-|---|---|
-| window label | `main` |
-| React route / view key | `/settings/:section?` / `settings-diagnostics` |
-| 対象OS | macOS 14以降、Apple Silicon |
-| デザイン | [DESIGN.md](../../DESIGN.md)、Figma Desktop node `8:2`のshell、[demo.png](../thinking/demo.png) |
-| 共通仕様 | [デスクトップ共通仕様](desktop-common-specification.md) |
-| 廃止理由 | 非該当 |
-| 後継画面ID | 非該当 |
+| 項目                   | 内容                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| window label           | `main`                                                                                          |
+| React route / view key | `/settings/:section?` / `settings-diagnostics`                                                  |
+| 対象OS                 | macOS 14以降、Apple Silicon                                                                     |
+| デザイン               | [DESIGN.md](../../DESIGN.md)、Figma Desktop node `8:2`のshell、[demo.png](../thinking/demo.png) |
+| 共通仕様               | [デスクトップ共通仕様](desktop-common-specification.md)                                         |
+| 廃止理由               | 非該当                                                                                          |
+| 後継画面ID             | 非該当                                                                                          |
 
 ## 目的
 
@@ -29,60 +29,60 @@ status: "Approved"
 
 ### 含める
 
-| section | 内容 |
-|---|---|
-| General | ja/en、reduced motion、version、reset UI state |
-| Project context | active project/workspaceのgoal、constraints、definition of done、technical references |
-| Character context | name、tone、speech density、表現上の禁止事項。technical policyから分離 |
-| Companion | bundled Hiyori、custom model import、inventory、preview、semantic mapping、hide、provenance、delete |
-| Audio | default off、macOS local `/usr/bin/say`、voice、rate、test、mute、text fallback |
-| Support | global/role enable、commit explainer skill、active/queue/budget、usage、last error、policy固定値 |
-| Diagnostics | OS/app、Codex、commit skill注入、read-only Git、DB、Live2D、audio、support、capability、error code、retry |
-| History & Privacy | persistence内容、redaction、workspace history削除、migration/recovery、non-persistence |
+| section           | 内容                                                                                                      |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| General           | ja/en、reduced motion、version、reset UI state                                                            |
+| Project context   | active project/workspaceのgoal、constraints、definition of done、technical references                     |
+| Character context | name、tone、speech density、表現上の禁止事項。technical policyから分離                                    |
+| Companion         | bundled Hiyori、custom model import、inventory、preview、semantic mapping、hide、provenance、delete       |
+| Audio             | default off、macOS local `/usr/bin/say`、voice、rate、test、mute、text fallback                           |
+| Support           | global/role enable、commit explainer skill、active/queue/budget、usage、last error、policy固定値          |
+| Diagnostics       | OS/app、Codex、commit skill注入、read-only Git、DB、Live2D、audio、support、capability、error code、retry |
+| History & Privacy | persistence内容、redaction、workspace history削除、migration/recovery、non-persistence                    |
 
 ### 含めない
 
-| 非対象 | 理由 | 代替 |
-|---|---|---|
-| account/login credential本文の表示 | secret boundaryを守る | CodexはAuthenticated/Blocked statusだけ |
-| arbitrary executable/path設定 | allowlist外process/filesystemを公開しない |目的別pickerとpreflight |
-| model picker for Codex | main modelは`GPT-5.6 Sol`固定 | availability/capability診断だけ |
-| microphone / speech input | output-only audio契約 | text composer |
-| support prompt/response閲覧 | ephemeral/non-persistence契約 | usage metadataとdeterministic fallback |
+| 非対象                             | 理由                                      | 代替                                    |
+| ---------------------------------- | ----------------------------------------- | --------------------------------------- |
+| account/login credential本文の表示 | secret boundaryを守る                     | CodexはAuthenticated/Blocked statusだけ |
+| arbitrary executable/path設定      | allowlist外process/filesystemを公開しない | 目的別pickerとpreflight                 |
+| model picker for Codex             | main modelは`GPT-5.6 Sol`固定             | availability/capability診断だけ         |
+| microphone / speech input          | output-only audio契約                     | text composer                           |
+| support prompt/response閲覧        | ephemeral/non-persistence契約             | usage metadataとdeterministic fallback  |
 
 ## 表示契機と終了
 
-| 項目 | 内容 |
-|---|---|
-| 表示契機 | Settings tab、sidebar gear、preflight/permission/errorの診断link、model/audio/support fallback link |
-| 表示前提 | app DBがread可能。破損時はread-only Diagnostics/History recoveryだけを表示する |
-| 初期フォーカス | routeのsection heading。unknown sectionはGeneral headingへreplace遷移する |
-| 正常完了 | section単位の保存成功をinline表示し、元routeへ戻って設定を即時反映する |
-| キャンセル | picker、preview、test、confirm開始前の保存済み設定と入力を維持し、errorを出さない |
-| 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う。import/test/supportを停止する |
-| 再表示 | selected section、section scroll、保存済み値、診断結果を復元する。secret値は復元表示しない |
+| 項目           | 内容                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------ |
+| 表示契機       | Settings tab、sidebar gear、preflight/permission/errorの診断link、model/audio/support fallback link    |
+| 表示前提       | app DBがread可能。破損時はread-only Diagnostics/History recoveryだけを表示する                         |
+| 初期フォーカス | routeのsection heading。unknown sectionはGeneral headingへreplace遷移する                              |
+| 正常完了       | section単位の保存成功をinline表示し、元routeへ戻って設定を即時反映する                                 |
+| キャンセル     | picker、preview、test、confirm開始前の保存済み設定と入力を維持し、errorを出さない                      |
+| 閉じる操作     | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う。import/test/supportを停止する |
+| 再表示         | selected section、section scroll、保存済み値、診断結果を復元する。secret値は復元表示しない             |
 
 ## 利用者と権限
 
-| 利用者・ロール | 表示 | 操作 | 拒否時の動作 |
-|---|---|---|---|
-| ローカル利用者 | non-secret setting、status、inventory、usage、sanitized diagnostic | edit、import、preview、select、test、delete、retry、history削除 | invalid/unsafe operationを開始せず理由を表示 |
-| React WebView | typed setting、pack ID、diagnostic summary | render、input、typed IPC | source absolute path、process path/argument、arbitrary commandを保持しない |
-| Rust settings service | SQLite、owner-only narration setting、filesystem quarantine、process/Git diagnostics | validate、transaction、import、persist、diagnose、cleanup | scope外path/schema/process requestを拒否 |
-| Live2D preview worker | verified quarantine/library pack | first frameとstate test | WebView DOM、network、script、root外assetへaccessしない |
-| TTS adapter | bounded redacted transcript、exact installed voice、rate | fixed `/usr/bin/say`の再検証、stdin playback、process-group cancel | shell、external provider、API key、network、source/event payload、repo/path、microphone、audio fileを使用しない |
-| Support policy | role config、usage metadata | queue/budget/disable/cancel | outputによるpolicy/model/DOM変更を許可しない |
+| 利用者・ロール        | 表示                                                                                 | 操作                                                               | 拒否時の動作                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| ローカル利用者        | non-secret setting、status、inventory、usage、sanitized diagnostic                   | edit、import、preview、select、test、delete、retry、history削除    | invalid/unsafe operationを開始せず理由を表示                                                                    |
+| React WebView         | typed setting、pack ID、diagnostic summary                                           | render、input、typed IPC                                           | source absolute path、process path/argument、arbitrary commandを保持しない                                      |
+| Rust settings service | SQLite、owner-only narration setting、filesystem quarantine、process/Git diagnostics | validate、transaction、import、persist、diagnose、cleanup          | scope外path/schema/process requestを拒否                                                                        |
+| Live2D preview worker | verified quarantine/library pack                                                     | first frameとstate test                                            | WebView DOM、network、script、root外assetへaccessしない                                                         |
+| TTS adapter           | bounded redacted transcript、exact installed voice、rate                             | fixed `/usr/bin/say`の再検証、stdin playback、process-group cancel | shell、external provider、API key、network、source/event payload、repo/path、microphone、audio fileを使用しない |
+| Support policy        | role config、usage metadata                                                          | queue/budget/disable/cancel                                        | outputによるpolicy/model/DOM変更を許可しない                                                                    |
 
 ## 画面構成
 
 sidebarと81px headerは他画面と同じ位置を維持し、Settings tabまたはgearをactiveにする。bodyは設定専用のsection navigationとform/detailに再構成する。
 
-| 領域 | 標準1470×836 | 表示内容 | scroll owner |
-|---|---:|---|---|
-| workspace sidebar | 255.04px | workspace selection、gear | workspace list |
-| settings section nav | body内228px | 8 section、attention/error badge | nav単独 |
-| settings main | 残幅、content max 780px | section heading、status、field、preview、danger zone | main単独 |
-| sticky action row | main下部、必要sectionだけ | Save / Cancel / Test cancel / Import cancel |固定 |
+| 領域                 |              標準1470×836 | 表示内容                                             | scroll owner   |
+| -------------------- | ------------------------: | ---------------------------------------------------- | -------------- |
+| workspace sidebar    |                  255.04px | workspace selection、gear                            | workspace list |
+| settings section nav |               body内228px | 8 section、attention/error badge                     | nav単独        |
+| settings main        |   残幅、content max 780px | section heading、status、field、preview、danger zone | main単独       |
+| sticky action row    | main下部、必要sectionだけ | Save / Cancel / Test cancel / Import cancel          | 固定           |
 
 section navは表の順にし、同型card gridではなく一つのform flowを使う。960〜1279pxではnavをportal drawerへ移してmainを最低640px確保する。960×640の200% text zoomでは実効480px幅の単一columnへ切り替え、section navとmainを別々に縦scroll可能にする。説明文とdanger actionを横方向にclipせず、actionをwrapし、danger actionをprimary actionと隣接させない。
 
@@ -90,12 +90,12 @@ section navは表の順にし、同型card gridではなく一つのform flowを
 
 ### General
 
-| setting | 契約 | 即時反映 | 永続化 |
-|---|---|---|---|
-| Language | `日本語` / `English`。初回はOS localeが`ja`開始ならja、他はen | sidebar、tab、error、decision、Settings、notification | Rust SQLite |
-| Reduced motion | OS preferenceを初期値にapp override `System / Reduce / Allow` | transition、Live2D、decorative motion | Rust SQLite |
-| App version | semantic version、build、schema versionをread-only表示 | 非該当 | bundle/DB metadata |
-| Reset UI state | geometry、active section、filter、scrollをsafe defaultへ | confirmation後 | domain history、context、Git、model、narration設定は削除しない |
+| setting        | 契約                                                          | 即時反映                                              | 永続化                                                         |
+| -------------- | ------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------- |
+| Language       | `日本語` / `English`。初回はOS localeが`ja`開始ならja、他はen | sidebar、tab、error、decision、Settings、notification | Rust SQLite                                                    |
+| Reduced motion | OS preferenceを初期値にapp override `System / Reduce / Allow` | transition、Live2D、decorative motion                 | Rust SQLite                                                    |
+| App version    | semantic version、build、schema versionをread-only表示        | 非該当                                                | bundle/DB metadata                                             |
+| Reset UI state | geometry、active section、filter、scrollをsafe defaultへ      | confirmation後                                        | domain history、context、Git、model、narration設定は削除しない |
 
 language変更中もuser content、path、branch、SHA、model名、commit messageを翻訳しない。切替は100ms以内にvisual feedbackを出し、再起動を要求しない。
 
@@ -103,25 +103,25 @@ language変更中もuser content、path、branch、SHA、model名、commit messa
 
 active project/workspaceを明示し、[S-002 Context subview](S-002_coding-workspace.md#context-subview)と同じversioned storeを編集する。
 
-| field | 初期値 | 制約 | 適用 |
-|---|---|---|---|
-| Goal | current version | 0〜8,000 Unicode scalar | main/support snapshotのgoal |
-| Constraints | current version | 0〜8,000、secret警告 | technical decision boundary |
-| Definition of done | current version | 0〜20項目、各1〜500 | work unit acceptance補助 |
+| field                | 初期値                              | 制約                                          | 適用                              |
+| -------------------- | ----------------------------------- | --------------------------------------------- | --------------------------------- |
+| Goal                 | current version                     | 0〜8,000 Unicode scalar                       | main/support snapshotのgoal       |
+| Constraints          | current version                     | 0〜8,000、secret警告                          | technical decision boundary       |
+| Definition of done   | current version                     | 0〜20項目、各1〜500                           | work unit acceptance補助          |
 | Technical references | managed doc ID / repo-relative path | canonical project root内、absolute path非保存 | mainのみ。supportへ本文を渡さない |
-| User notes | current version | 0〜8,000 | next turnから適用 |
+| User notes           | current version                     | 0〜8,000                                      | next turnから適用                 |
 
 保存時にexpected versionを検証し、競合時はremote/currentの差と再読み込みを示す。running turnへ途中適用せず、`次のturnから適用`と表示する。project登録解除はsource、Git object、branchを削除せず、[S-001](S-001_session-dashboard.md)の確認契約を使う。
 
 ### Character context
 
-| field | 初期値 | 制約 | 適用 |
-|---|---|---|---|
-| Display name | `Sol` | 1〜40文字 | visible companion identity |
-| Tone | concise / warm / neutral等のallowlist + 0〜1,000文字補足 |感情的強制や虚偽確信を要求できない | assistant presentation |
-| Speech density | quiet / key events / detailed | audio eligibility上限を越えない | visible transcript/audio候補 |
-| Companion behavior | cue preference | inventory内cueだけ | Live2D presentation |
-| Prohibited expressions | 0〜20項目、各1〜200 | safety/error/decisionの事実表示は抑止できない | output presentation |
+| field                  | 初期値                                                   | 制約                                          | 適用                         |
+| ---------------------- | -------------------------------------------------------- | --------------------------------------------- | ---------------------------- |
+| Display name           | `Sol`                                                    | 1〜40文字                                     | visible companion identity   |
+| Tone                   | concise / warm / neutral等のallowlist + 0〜1,000文字補足 | 感情的強制や虚偽確信を要求できない            | assistant presentation       |
+| Speech density         | quiet / key events / detailed                            | audio eligibility上限を越えない               | visible transcript/audio候補 |
+| Companion behavior     | cue preference                                           | inventory内cueだけ                            | Live2D presentation          |
+| Prohibited expressions | 0〜20項目、各1〜200                                      | safety/error/decisionの事実表示は抑止できない | output presentation          |
 
 Character contextはpermission、model、tool、Git observer、commit skill、verification、approval、privacy、support capabilityを上書きできない。technical policy keyを含む入力は保存前に拒否し、Project contextへ自動コピーしない。running turnには次turnから適用する。
 
@@ -138,13 +138,13 @@ build時の入力はrepositoryの`tmp/hiyori_pro`とし、release resourceには
 
 #### library
 
-| 項目 | 表示・操作 |
-|---|---|
-| Bundled | Hiyori preview、selected project数、provenance。Delete不可 |
-| Custom | pack name、attested thumbnail、motion/expression count、size、manifest/trusted-frame hash、selected project数。thumbnailは再読込・再起動後もpack IDとtrusted-frame asset IDだけのopaque binary IPCで取得し、manifest記載のbyte数とSHA-256へ一致したPNGだけを表示する。hashは省略表示し、完全値をaccessible nameで提供する。missing/tampered frameではuntrusted bytesを表示しない |
-| Hide character | canvas/GPU animationを停止し、Chat幅とHTML text stateを残す。再起動後も復元 |
-| Select | preview first frameとstate test成功後だけproject単位で有効。切替時はcandidate client/model/trusted frameをfirst accepted frameまでstageし、成功時だけrenderer、React committed pack、metrics、status、frameを一括で置換する。失敗またはabortではcandidateだけをreleaseし、現在表示を全項目そのまま維持する |
-| Delete | active projectで未選択のcustom packだけ。確認後にapp-private copyを削除 |
+| 項目           | 表示・操作                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bundled        | Hiyori preview、selected project数、provenance。Delete不可                                                                                                                                                                                                                                                                                                                       |
+| Custom         | pack name、attested thumbnail、motion/expression count、size、manifest/trusted-frame hash、selected project数。thumbnailは再読込・再起動後もpack IDとtrusted-frame asset IDだけのopaque binary IPCで取得し、manifest記載のbyte数とSHA-256へ一致したPNGだけを表示する。hashは省略表示し、完全値をaccessible nameで提供する。missing/tampered frameではuntrusted bytesを表示しない |
+| Hide character | canvas/GPU animationを停止し、Chat幅とHTML text stateを残す。再起動後も復元                                                                                                                                                                                                                                                                                                      |
+| Select         | preview first frameとstate test成功後だけproject単位で有効。切替時はcandidate client/model/trusted frameをfirst accepted frameまでstageし、成功時だけrenderer、React committed pack、metrics、status、frameを一括で置換する。失敗またはabortではcandidateだけをreleaseし、現在表示を全項目そのまま維持する                                                                       |
+| Delete         | active projectで未選択のcustom packだけ。確認後にapp-private copyを削除                                                                                                                                                                                                                                                                                                          |
 
 #### custom model import
 
@@ -159,17 +159,17 @@ build時の入力はrepositoryの`tmp/hiyori_pro`とし、release resourceには
 
 #### semantic mapping
 
-| operational state |選択可能なcue | fallback |
-|---|---|---|
-| idle | inventory内motion/expression/parameter | neutral pose + text |
-| thinking | inventory内cue | neutral + `考えています` |
-| acting | inventory内cue | neutral + `作業中` |
-| waiting_for_user | inventory内cue | neutral + `回答待ち` |
-| reviewing | inventory内cue | neutral + `検証中` |
-| explaining_commit | inventory内cue | neutral + `コミットを説明しています` |
-| error | inventory内cue | neutral + error text |
-| completed | inventory内cue | neutral + completion text |
-| disconnected | inventory内cue | neutral + offline text |
+| operational state | 選択可能なcue                          | fallback                             |
+| ----------------- | -------------------------------------- | ------------------------------------ |
+| idle              | inventory内motion/expression/parameter | neutral pose + text                  |
+| thinking          | inventory内cue                         | neutral + `考えています`             |
+| acting            | inventory内cue                         | neutral + `作業中`                   |
+| waiting_for_user  | inventory内cue                         | neutral + `回答待ち`                 |
+| reviewing         | inventory内cue                         | neutral + `検証中`                   |
+| explaining_commit | inventory内cue                         | neutral + `コミットを説明しています` |
+| error             | inventory内cue                         | neutral + error text                 |
+| completed         | inventory内cue                         | neutral + completion text            |
+| disconnected      | inventory内cue                         | neutral + offline text               |
 
 Hiyoriのdefault mappingは実在する`Idle`、`Flick`、`FlickDown`、`FlickUp`、`Tap`、`Tap@Body`、`Flick@Body`のmotionだけを参照する。expressionが0件でも保存でき、未割当stateはneutralへ戻す。mapping previewは同じstate列で決定的に再生し、reduced motion時はanimationせずstatic pose/icon/textを確認する。
 
@@ -177,15 +177,15 @@ Hiyoriのdefault mappingは実在する`Idle`、`Flick`、`FlickDown`、`FlickUp
 
 fresh profileと`Reset Audio Settings`後はTTSをoffにし、`say` process、network request、audio fileを0件にする。captionは音声設定に関係なく正本として表示する。
 
-| setting / control | 契約 | 失敗・cancel |
-|---|---|---|
-| Enable TTS | default off。明示enable時だけ検証済みlocal adapterを起動可能にする | binary/voice unavailableでもcaptionを維持し、networkへfallbackしない |
-| Adapter | exact `/usr/bin/say`をread-only表示。voice列挙・test・発話の直前にregular file、UID 0、group/other writeなしをnativeで再検証 | 不一致時はTTS disabled、process未起動、typed reason |
-| Voice | 検証済み`-v '?'`出力のうちactive UI localeに対応するinstalled exact allowlistだけ | 0件または保存値不一致ならTTS disabled |
-| Rate | 0.75〜1.25、0.05刻み、初期1.0。nativeで基準180 words/minuteの135〜225へ変換 | invalid値を保存・起動しない |
-| Test |固定ja/en sampleを先にvisible caption表示し、その後local playback | 5秒timeout。Cancel後100ms以内にprocess groupを停止し設定入力維持 |
-| Mute |現在process groupを100ms以内に停止しqueue clear、caption維持 | unmute後に過去eventを再生しない |
-| Reset | toggle off、locale既定voice、rate 1.0、mute falseへowner-only atomic保存 |確認cancelで全設定不変 |
+| setting / control | 契約                                                                                                                         | 失敗・cancel                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Enable TTS        | default off。明示enable時だけ検証済みlocal adapterを起動可能にする                                                           | binary/voice unavailableでもcaptionを維持し、networkへfallbackしない |
+| Adapter           | exact `/usr/bin/say`をread-only表示。voice列挙・test・発話の直前にregular file、UID 0、group/other writeなしをnativeで再検証 | 不一致時はTTS disabled、process未起動、typed reason                  |
+| Voice             | 検証済み`-v '?'`出力のうちactive UI localeに対応するinstalled exact allowlistだけ                                            | 0件または保存値不一致ならTTS disabled                                |
+| Rate              | 0.75〜1.25、0.05刻み、初期1.0。nativeで基準180 words/minuteの135〜225へ変換                                                  | invalid値を保存・起動しない                                          |
+| Test              | 固定ja/en sampleを先にvisible caption表示し、その後local playback                                                            | 5秒timeout。Cancel後100ms以内にprocess groupを停止し設定入力維持     |
+| Mute              | 現在process groupを100ms以内に停止しqueue clear、caption維持                                                                 | unmute後に過去eventを再生しない                                      |
+| Reset             | toggle off、locale既定voice、rate 1.0、mute falseへowner-only atomic保存                                                     | 確認cancelで全設定不変                                               |
 
 native adapterは240 Unicode scalar以下、NULなし、redaction済みtranscriptをstdinだけへ書く。processはshellなしでexact `/usr/bin/say`を新しいprocess groupとして起動し、引数を`-v <exact allowlist voice> -r <validated integer>`へ固定する。`-f`、`-o`、`-n`、`-a`、command-line text、inherited secret environmentを使わない。audioはsystem outputへ直接再生し、memory/fileへ保存しない。microphone/network capability、permission request、入力UIを一切持たない。
 
@@ -193,33 +193,33 @@ native adapterは240 Unicode scalar以下、NULなし、redaction済みtranscrip
 
 ### Support
 
-| setting / status | 初期値・制約 | 動作 |
-|---|---|---|
-| Global enable | isolation capability合格時default on、不合格時off。tool 0件/cwdなし/repo・fs・shell・Git・MCPなしを強制できる時だけon可能 | capability不足またはoffでthreadを起動せず、queued/activeをcancelしdeterministic fallbackを維持 |
-| Presence / narration | on | deterministic eventだけで起動 |
-| Decision explainer | role policy値 | main decisionを補助し、直接質問しない |
-| Commit explainer | on | S-003の「詳しく教えて」だけで起動し、redacted `CommitEvidenceV1`最大64KiBだけを読む |
-| Explainer skill | `coding-wife-explain-commit`、`app_bundle`、implicit invocation off | version、digest、last injected request、schema statusをread-only表示 |
-| Concurrency / queue | active 1、queue最大10 | 11件目はlow priorityをdropしmetadata記録 |
-| Task budget | 15秒、input+output 16,000 token |超過でcancel、fallback |
-| Model / effort | GPT-5.6 familyのrole policy固定、read-only | support output/UIから変更不可 |
-| Usage | role、status、model family、tokens、latency、queue、last error | prompt/response本文を表示・保存しない |
+| setting / status     | 初期値・制約                                                                                                              | 動作                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Global enable        | isolation capability合格時default on、不合格時off。tool 0件/cwdなし/repo・fs・shell・Git・MCPなしを強制できる時だけon可能 | capability不足またはoffでthreadを起動せず、queued/activeをcancelしdeterministic fallbackを維持 |
+| Presence / narration | on                                                                                                                        | deterministic eventだけで起動                                                                  |
+| Decision explainer   | role policy値                                                                                                             | main decisionを補助し、直接質問しない                                                          |
+| Commit explainer     | on                                                                                                                        | S-003の「詳しく教えて」だけで起動し、redacted `CommitEvidenceV1`最大64KiBだけを読む            |
+| Explainer skill      | `coding-wife-explain-commit`、`app_bundle`、implicit invocation off                                                       | version、digest、last injected request、schema statusをread-only表示                           |
+| Concurrency / queue  | active 1、queue最大10                                                                                                     | 11件目はlow priorityをdropしmetadata記録                                                       |
+| Task budget          | 15秒、input+output 16,000 token                                                                                           | 超過でcancel、fallback                                                                         |
+| Model / effort       | GPT-5.6 familyのrole policy固定、read-only                                                                                | support output/UIから変更不可                                                                  |
+| Usage                | role、status、model family、tokens、latency、queue、last error                                                            | prompt/response本文を表示・保存しない                                                          |
 
 role toggleをoffにするとqueued taskをcancelし、新規invocationを作らない。active taskは5秒以内にCanceled/Timeoutへ遷移させ、main turnを継続する。non-persistence release auditの最終resultと実施日時へDiagnosticsから到達できる。
 
 ### Diagnostics
 
-| check | Ready表示 | Warning / Blocked | 回復操作 |
-|---|---|---|---|
-| OS / App | macOS version、Apple Silicon、app/build/schema | unsupported OS/arch、migration pending | release note / recovery |
-| Codex | executable、protocol initialize、login、`GPT-5.6 Sol`、Fast/Max capability | missing、unauthenticated、model/effort unavailable、disconnect | Recheck、login案内 |
-| Commit policy | `coding-wife-commit-work`のversion、digest prefix、`app_bundle`、explicit injection mode、last verified turn | resource missing、digest mismatch、skill input/developer instruction unavailable、last injection failed | Recheck。failure中はdraftを保持してturnを開始しない |
-| Git observer | executable capability、repo/HEAD/status、read-only policy version、last observation | missing、bare、unsupported repo、stale、read permission、mutation command exposed | project再選択、read-only Refresh |
-| DB | integrity、writer、schema、backup | migration rollback、corruption、read-only | backup pathをbasename化してrecovery案内 |
-| Live2D | bundled manifest/hash、WebGL、selected pack、first frame | asset/context loss、unsupported MOC、fallback level | Retry、Hiyori選択、text-only |
-| Audio | toggle、binary metadata status、installed voice count、selected voice/rate、device、active/queue、last adapter code | binary/permission/voice/spawn/stdin/exit/timeout/device error | Recheck、Test、Mute |
-| Support | enable、role、queue、budget、`coding-wife-explain-commit` version/digest、audit、last usage | isolation unavailable、timeout、schema、policy、non-persistence未検証 | Cancel、Disable、Recheck |
-| Security | CSP/capability version、redaction self-check | policy mismatch、future schema event | safe mode、release guidance |
+| check         | Ready表示                                                                                                           | Warning / Blocked                                                                                       | 回復操作                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| OS / App      | macOS version、Apple Silicon、app/build/schema                                                                      | unsupported OS/arch、migration pending                                                                  | release note / recovery                             |
+| Codex         | executable、protocol initialize、login、`GPT-5.6 Sol`、Fast/Max capability                                          | missing、unauthenticated、model/effort unavailable、disconnect                                          | Recheck、login案内                                  |
+| Commit policy | `coding-wife-commit-work`のversion、digest prefix、`app_bundle`、explicit injection mode、last verified turn        | resource missing、digest mismatch、skill input/developer instruction unavailable、last injection failed | Recheck。failure中はdraftを保持してturnを開始しない |
+| Git observer  | executable capability、repo/HEAD/status、read-only policy version、last observation                                 | missing、bare、unsupported repo、stale、read permission、mutation command exposed                       | project再選択、read-only Refresh                    |
+| DB            | integrity、writer、schema、backup                                                                                   | migration rollback、corruption、read-only                                                               | backup pathをbasename化してrecovery案内             |
+| Live2D        | bundled manifest/hash、WebGL、selected pack、first frame                                                            | asset/context loss、unsupported MOC、fallback level                                                     | Retry、Hiyori選択、text-only                        |
+| Audio         | toggle、binary metadata status、installed voice count、selected voice/rate、device、active/queue、last adapter code | binary/permission/voice/spawn/stdin/exit/timeout/device error                                           | Recheck、Test、Mute                                 |
+| Support       | enable、role、queue、budget、`coding-wife-explain-commit` version/digest、audit、last usage                         | isolation unavailable、timeout、schema、policy、non-persistence未検証                                   | Cancel、Disable、Recheck                            |
+| Security      | CSP/capability version、redaction self-check                                                                        | policy mismatch、future schema event                                                                    | safe mode、release guidance                         |
 
 診断はtoken、cookie、完全なhome/source path、transcript本文、support prompt/response、raw process stdout/stderrを表示しない。各resultはcode、checked time、scope、impact、recoverable、safe detail refを持つ。`Copy diagnostics`は同じsanitized summaryだけをclipboardへ出す。
 
@@ -227,133 +227,133 @@ DB readinessはHistory & Privacyのbadgeと同じ履歴状態を正本にする�
 
 ### History & Privacy
 
-| 項目 | 表示・操作 |
-|---|---|
-| Stored locally | project/workspace、normalized event、draft、context、Git observation、commit evidence、skill injection audit、selected character、settings |
-| Never stored | raw reasoning、audio byte/file、support prompt/response、commit explanation transcript、raw secret |
-| Redaction | key/token/cookie/home pathのself-check status、last failure code |
-| Schema | current version、last migration、backup、writer queue/integrity |
-| Delete workspace history | running turnなしの対象だけ。app DB/artifactを削除し、Git repo/commit/branchを変更しない |
-| Reset demo workspace | `ephemeral`の対象だけ。現在のbrowser preview memoryから対象を除き、preview再起動でfixtureへ戻ることとGit/repositoryへ未接続であることを明示する |
-| Recovery | corruption時のread-only mode、backup、retry/locate support情報。自動初期化しない |
+| 項目                     | 表示・操作                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stored locally           | project/workspace、normalized event、draft、context、Git observation、commit evidence、skill injection audit、selected character、settings      |
+| Never stored             | raw reasoning、audio byte/file、support prompt/response、commit explanation transcript、raw secret                                              |
+| Redaction                | key/token/cookie/home pathのself-check status、last failure code                                                                                |
+| Schema                   | current version、last migration、backup、writer queue/integrity                                                                                 |
+| Delete workspace history | running turnなしの対象だけ。app DB/artifactを削除し、Git repo/commit/branchを変更しない                                                         |
+| Reset demo workspace     | `ephemeral`の対象だけ。現在のbrowser preview memoryから対象を除き、preview再起動でfixtureへ戻ることとGit/repositoryへ未接続であることを明示する |
+| Recovery                 | corruption時のread-only mode、backup、retry/locate support情報。自動初期化しない                                                                |
 
 history削除dialogはworkspace名、削除するapp data、残るGit data、不可逆性を表示する。Cancel時はrow/artifact数、selection、filterを変えない。削除成功後はS-001のempty/remaining workspaceへ移動し、Git refを消したと表示しない。demo resetはnative deleteの語彙を使わず、現在のpreview memoryだけが対象で再起動により戻ることを確認面と操作labelの両方で示す。
 
 ## 表示状態
 
-| 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
-|---|---|---|---|---|
-| 初期化中 | settings、diagnostics、libraryを読込中 | shell、section nav、field shape skeleton。demo履歴を表示しない | section移動、Quit。保存、context取得、履歴削除は開始しない | query/migration terminal |
-| 通常 | DB read/write、section ready | current values、status、section action | edit、save、test、import、diagnose | operation開始/error |
-| データなし | custom pack、usage、history対象が0件 |理由と一つの次操作。空table/card gridなし | Import、Support enable、Chatへ戻る |対象data作成 |
-| 処理中 | save、diagnose、import/hash、preview、test、delete |対象step、progress、Cancel可能性、他section status |安全なCancel、影響外section | success/cancel/error |
-| オフライン | network/Codex/support unavailable | local setting/library/history/TTS、persistent reason | local edit、Live2D、local TTS test、Git/DB診断 |明示Recheck成功 |
-| エラー | validation、I/O、local TTS process、DB、renderer failure | code、operation、impact、保持値、retry/modify/details |影響外設定 | terminal recovery |
-| 権限不足 | picker/library/process/Git拒否 |拒否scope、OS案内、再選択/再診断。private path非表示 | Cancel、read-only diagnostics | permission変更後のretry |
-| キャンセル後 | picker/import/preview/test/delete confirmをcancel |保存済み値、現在model、入力、library/DBを維持。errorなし |元操作または別操作 |次の明示操作 |
-| 再起動復旧 | save/import/delete/migrationが中断 | last durable settings、quarantine cleanup、Interrupted operation、backup | diagnose、retry、discard quarantine | integrity/fingerprint確定 |
-| read-only recovery | DB corruption/migration rollback | Diagnostics/History、backup、error code、Gitは不変 | copy sanitized diagnostic、Quit | explicit successful recovery |
-| local TTS unavailable | binary metadata/voice/audio device検証失敗 | typed reasonとcaptionを表示しTTS off相当 | Recheck/Test/Mute | 全preflight成功 |
-| companion fallback | pack/render failure | current fallback level、Hiyori/text-only、Chat継続 | Retry/Select/Hide | first frame/state test成功 |
+| 状態                  | 進入条件                                                 | 表示                                                                     | 操作可否                                                   | 状態から抜ける条件           |
+| --------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------- | ---------------------------- |
+| 初期化中              | settings、diagnostics、libraryを読込中                   | shell、section nav、field shape skeleton。demo履歴を表示しない           | section移動、Quit。保存、context取得、履歴削除は開始しない | query/migration terminal     |
+| 通常                  | DB read/write、section ready                             | current values、status、section action                                   | edit、save、test、import、diagnose                         | operation開始/error          |
+| データなし            | custom pack、usage、history対象が0件                     | 理由と一つの次操作。空table/card gridなし                                | Import、Support enable、Chatへ戻る                         | 対象data作成                 |
+| 処理中                | save、diagnose、import/hash、preview、test、delete       | 対象step、progress、Cancel可能性、他section status                       | 安全なCancel、影響外section                                | success/cancel/error         |
+| オフライン            | network/Codex/support unavailable                        | local setting/library/history/TTS、persistent reason                     | local edit、Live2D、local TTS test、Git/DB診断             | 明示Recheck成功              |
+| エラー                | validation、I/O、local TTS process、DB、renderer failure | code、operation、impact、保持値、retry/modify/details                    | 影響外設定                                                 | terminal recovery            |
+| 権限不足              | picker/library/process/Git拒否                           | 拒否scope、OS案内、再選択/再診断。private path非表示                     | Cancel、read-only diagnostics                              | permission変更後のretry      |
+| キャンセル後          | picker/import/preview/test/delete confirmをcancel        | 保存済み値、現在model、入力、library/DBを維持。errorなし                 | 元操作または別操作                                         | 次の明示操作                 |
+| 再起動復旧            | save/import/delete/migrationが中断                       | last durable settings、quarantine cleanup、Interrupted operation、backup | diagnose、retry、discard quarantine                        | integrity/fingerprint確定    |
+| read-only recovery    | DB corruption/migration rollback                         | Diagnostics/History、backup、error code、Gitは不変                       | copy sanitized diagnostic、Quit                            | explicit successful recovery |
+| local TTS unavailable | binary metadata/voice/audio device検証失敗               | typed reasonとcaptionを表示しTTS off相当                                 | Recheck/Test/Mute                                          | 全preflight成功              |
+| companion fallback    | pack/render failure                                      | current fallback level、Hiyori/text-only、Chat継続                       | Retry/Select/Hide                                          | first frame/state test成功   |
 
 ## 操作
 
-| 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
-|---|---|---|---|---|---|
-| language変更 | supported locale |全shellを即時切替、設定保存 | 非該当 |前locale維持 | `APP-F-057`, `APP-F-058` |
-| reduced motion変更 | valid option | UI/Live2Dへ即時適用 | 非該当 | OS preferenceへfallback | `APP-F-061`, `LIVE-F-066` |
-| Context保存 | valid section、expected version | version更新、next turn適用 |開始前version維持 |入力保持、field/conflict表示 | `WORK-F-063` |
-| model3.json import | picker利用可能 |検証、quarantine、preview後にlibraryへatomic登録 | library/DB/quarantine/current model不変 | current model継続、失敗pack非登録 | `LIVE-F-068`〜`LIVE-F-076` |
-| model選択 | first frame/state test成功 | active projectのpack IDを保存、single canvasへ切替 | current selection維持 | current renderer継続 | `LIVE-F-059`, `LIVE-F-075` |
-| semantic mapping保存 | inventory内cueまたはneutral | pack mapping version更新 |前mapping維持 | invalid cueを保存しない | `LIVE-F-061`〜`LIVE-F-064`, `LIVE-F-077` |
-| custom pack削除 |未選択custom、confirm | library copyとmetadataをatomic削除 | pack/library/DB不変 | packを残しretry | `LIVE-F-078` |
-| Audio設定保存/reset | schema/voice/rate valid | owner-only temporary fileをfsync後atomic rename、default off/reset反映 |保存状態不変 |前version維持、TTS offへfail closed | `NARR-F-064`〜`NARR-F-066` |
-| TTS test | enable、verified binary/voice/rate |固定sampleを表示後stdinでlocal再生、audio非永続 | 100ms以内process group停止、設定入力維持 | text fallback、main不変 | `NARR-F-066`, `NARR-F-067`, `NARR-F-077` |
-| support enable/disable | valid role | queue/cancel policy適用、usage metadata記録 | 非該当 | offへfail closed、main継続 | `SUP-F-062`〜`SUP-F-068` |
-| 再診断 |対象check選択 | result、checked time、error code更新 |前result維持 | Blocked reason更新 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`, `APP-F-070` |
-| history削除 | running turnなし、confirm | app DB/artifactだけ削除、Git不変 | row/artifact/selection不変 |削除済みと表示せずrecovery | `HIST-F-049`, `HIST-F-050` |
-| demo workspace reset | historyが`ephemeral`、confirm | 現在のpreview memoryから対象を除き、他のdemo workspaceへ移動 | preview memory/selection不変 |reset済みと表示せず入力状態を維持 | `HIST-F-059` |
+| 操作                   | 事前条件                           | 正常結果                                                               | キャンセル時                             | 失敗時                              | 関連要件ID                                            |
+| ---------------------- | ---------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------- | ----------------------------------- | ----------------------------------------------------- |
+| language変更           | supported locale                   | 全shellを即時切替、設定保存                                            | 非該当                                   | 前locale維持                        | `APP-F-057`, `APP-F-058`                              |
+| reduced motion変更     | valid option                       | UI/Live2Dへ即時適用                                                    | 非該当                                   | OS preferenceへfallback             | `APP-F-061`, `LIVE-F-066`                             |
+| Context保存            | valid section、expected version    | version更新、next turn適用                                             | 開始前version維持                        | 入力保持、field/conflict表示        | `WORK-F-063`                                          |
+| model3.json import     | picker利用可能                     | 検証、quarantine、preview後にlibraryへatomic登録                       | library/DB/quarantine/current model不変  | current model継続、失敗pack非登録   | `LIVE-F-068`〜`LIVE-F-076`                            |
+| model選択              | first frame/state test成功         | active projectのpack IDを保存、single canvasへ切替                     | current selection維持                    | current renderer継続                | `LIVE-F-059`, `LIVE-F-075`                            |
+| semantic mapping保存   | inventory内cueまたはneutral        | pack mapping version更新                                               | 前mapping維持                            | invalid cueを保存しない             | `LIVE-F-061`〜`LIVE-F-064`, `LIVE-F-077`              |
+| custom pack削除        | 未選択custom、confirm              | library copyとmetadataをatomic削除                                     | pack/library/DB不変                      | packを残しretry                     | `LIVE-F-078`                                          |
+| Audio設定保存/reset    | schema/voice/rate valid            | owner-only temporary fileをfsync後atomic rename、default off/reset反映 | 保存状態不変                             | 前version維持、TTS offへfail closed | `NARR-F-064`〜`NARR-F-066`                            |
+| TTS test               | enable、verified binary/voice/rate | 固定sampleを表示後stdinでlocal再生、audio非永続                        | 100ms以内process group停止、設定入力維持 | text fallback、main不変             | `NARR-F-066`, `NARR-F-067`, `NARR-F-077`              |
+| support enable/disable | valid role                         | queue/cancel policy適用、usage metadata記録                            | 非該当                                   | offへfail closed、main継続          | `SUP-F-062`〜`SUP-F-068`                              |
+| 再診断                 | 対象check選択                      | result、checked time、error code更新                                   | 前result維持                             | Blocked reason更新                  | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`, `APP-F-070` |
+| history削除            | running turnなし、confirm          | app DB/artifactだけ削除、Git不変                                       | row/artifact/selection不変               | 削除済みと表示せずrecovery          | `HIST-F-049`, `HIST-F-050`                            |
+| demo workspace reset   | historyが`ephemeral`、confirm      | 現在のpreview memoryから対象を除き、他のdemo workspaceへ移動           | preview memory/selection不変             | reset済みと表示せず入力状態を維持   | `HIST-F-059`                                          |
 
 ## 入力項目
 
-| 項目 | 初期値 | 必須 | 制約・境界 | エラー表示 | 保存契機 |
-|---|---|---|---|---|---|
-| locale | OS由来または前回値 | 必須 | `ja` / `en` |前値維持 | valid変更時 |
-| reduced motion | `System` | 必須 | System / Reduce / Allow | Systemへfallback | valid変更時 |
-| project context | current version | 任意 |総量32,000 Unicode scalar、secret warning | section内、入力保持 | expected-version transaction |
-| character context | current version | 任意 |総量12,000、technical policy key禁止 | section内、入力保持 | expected-version transaction |
-| model3.json | なし | import時必須 | regular file 1件、closure/resource/security上限 | import step内、library不変 | atomic promotion成功 |
-| mapping | neutral/default | stateごと任意 | inventoryに存在するcueだけ | row内、前mapping維持 | mapping transaction |
-| voice | locale候補 | enable時必須 | allowlist voice ID | field直下 | testまたはsave成功 |
-| rate | 1.0 | 必須 | 0.75〜1.25、0.05刻みのselect option。native WPMは135〜225 | field直下 | valid atomic save時 |
-| mute | false | 必須 | boolean、global。invalid/missing settingはmutedではなくTTS offへfail closed | section status | valid atomic save時 |
-| support toggles | policy default | 必須 | allowlist role boolean | unknown role非保存 | valid変更時 |
-| history target | active workspace |削除時必須 | existing workspace ID、running 0 | dialog内 |削除transaction成功 |
+| 項目              | 初期値             | 必須          | 制約・境界                                                                  | エラー表示                 | 保存契機                     |
+| ----------------- | ------------------ | ------------- | --------------------------------------------------------------------------- | -------------------------- | ---------------------------- |
+| locale            | OS由来または前回値 | 必須          | `ja` / `en`                                                                 | 前値維持                   | valid変更時                  |
+| reduced motion    | `System`           | 必須          | System / Reduce / Allow                                                     | Systemへfallback           | valid変更時                  |
+| project context   | current version    | 任意          | 総量32,000 Unicode scalar、secret warning                                   | section内、入力保持        | expected-version transaction |
+| character context | current version    | 任意          | 総量12,000、technical policy key禁止                                        | section内、入力保持        | expected-version transaction |
+| model3.json       | なし               | import時必須  | regular file 1件、closure/resource/security上限                             | import step内、library不変 | atomic promotion成功         |
+| mapping           | neutral/default    | stateごと任意 | inventoryに存在するcueだけ                                                  | row内、前mapping維持       | mapping transaction          |
+| voice             | locale候補         | enable時必須  | allowlist voice ID                                                          | field直下                  | testまたはsave成功           |
+| rate              | 1.0                | 必須          | 0.75〜1.25、0.05刻みのselect option。native WPMは135〜225                   | field直下                  | valid atomic save時          |
+| mute              | false              | 必須          | boolean、global。invalid/missing settingはmutedではなくTTS offへfail closed | section status             | valid atomic save時          |
+| support toggles   | policy default     | 必須          | allowlist role boolean                                                      | unknown role非保存         | valid変更時                  |
+| history target    | active workspace   | 削除時必須    | existing workspace ID、running 0                                            | dialog内                   | 削除transaction成功          |
 
 ## ネイティブ連携
 
 実際のCapability設定は`src-tauri/capabilities/`を正本とし、以下は目的別commandである。
 
-| ユーザー操作 | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
-|---|---|---|---|---|---|
-| settings/context保存 | Rust DB | `save_settings_section` | allowlist section/key/schema、expected version | transaction前なら不変 |前値維持、field/error code |
-| model選択/import | Tauri dialog → Rust importer | `select_and_import_model3` | regular file 1件、canonical root、quarantine、resource limit | library/DB/quarantine不変 | current model継続 |
-| model preview/select/delete | Rust asset service | `character_read_asset` / `preview/select/delete_character_pack` | verified pack UUID、manifest hash、relative asset ID、project scope、usage check。trusted frameはbinary responseをmanifestのbyte数/SHA-256へ再照合 | current state維持 | missing/tampered frameは表示せず、bundled/selected delete拒否 |
-| Audio設定 | Rust owner-only atomic store | `narration_get_settings` / `narration_update_settings` / `narration_reset_settings` | `NarrationSettingsV1`、directory owner-only、file `0600`、fsync + atomic rename | saved version不変 | TTS offへfail closed |
-| Voice列挙 | Rust local process | `narration_list_voices` | fixed `/usr/bin/say` metadata再検証、shellなし、bounded `-v '?'` output、ja/en only |前list維持 | TTS unavailable + caption維持 |
-| TTS test/playback/mute | Rust local process/audio | `narration_speak` / `narration_cancel` | bounded redacted stdin、exact voice allowlist、rate 0.75〜1.25、新規process group、queue 3、no network/microphone/file | process group/queue停止、settings維持 | text fallback |
-| support control | Rust supervisor | `configure/cancel_support` | role allowlist、budget固定、main分離 |前config維持 | fail closed + fallback |
-| diagnostic | Rust diagnostics | `run_diagnostic_check` |目的別read-only process/fs/db check |前result維持 | check単位Blocked |
-| history削除 | Rust DB/artifact service | `delete_workspace_history` | running 0、workspace ID、Git path mutation禁止 | row/artifact不変 | partialを成功表示せずrecovery |
-| copy diagnostic | Tauri clipboard | `copy_sanitized_diagnostics` | redaction済みsummaryだけ | 非該当 | raw detailへfallbackしない |
+| ユーザー操作                | 実行境界                     | Tauri plugin / Command                                                              | 必要なCapability・認可                                                                                                                             | キャンセル時                          | 拒否・失敗時                                                  |
+| --------------------------- | ---------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| settings/context保存        | Rust DB                      | `save_settings_section`                                                             | allowlist section/key/schema、expected version                                                                                                     | transaction前なら不変                 | 前値維持、field/error code                                    |
+| model選択/import            | Tauri dialog → Rust importer | `select_and_import_model3`                                                          | regular file 1件、canonical root、quarantine、resource limit                                                                                       | library/DB/quarantine不変             | current model継続                                             |
+| model preview/select/delete | Rust asset service           | `character_read_asset` / `preview/select/delete_character_pack`                     | verified pack UUID、manifest hash、relative asset ID、project scope、usage check。trusted frameはbinary responseをmanifestのbyte数/SHA-256へ再照合 | current state維持                     | missing/tampered frameは表示せず、bundled/selected delete拒否 |
+| Audio設定                   | Rust owner-only atomic store | `narration_get_settings` / `narration_update_settings` / `narration_reset_settings` | `NarrationSettingsV1`、directory owner-only、file `0600`、fsync + atomic rename                                                                    | saved version不変                     | TTS offへfail closed                                          |
+| Voice列挙                   | Rust local process           | `narration_list_voices`                                                             | fixed `/usr/bin/say` metadata再検証、shellなし、bounded `-v '?'` output、ja/en only                                                                | 前list維持                            | TTS unavailable + caption維持                                 |
+| TTS test/playback/mute      | Rust local process/audio     | `narration_speak` / `narration_cancel`                                              | bounded redacted stdin、exact voice allowlist、rate 0.75〜1.25、新規process group、queue 3、no network/microphone/file                             | process group/queue停止、settings維持 | text fallback                                                 |
+| support control             | Rust supervisor              | `configure/cancel_support`                                                          | role allowlist、budget固定、main分離                                                                                                               | 前config維持                          | fail closed + fallback                                        |
+| diagnostic                  | Rust diagnostics             | `run_diagnostic_check`                                                              | 目的別read-only process/fs/db check                                                                                                                | 前result維持                          | check単位Blocked                                              |
+| history削除                 | Rust DB/artifact service     | `delete_workspace_history`                                                          | running 0、workspace ID、Git path mutation禁止                                                                                                     | row/artifact不変                      | partialを成功表示せずrecovery                                 |
+| copy diagnostic             | Tauri clipboard              | `copy_sanitized_diagnostics`                                                        | redaction済みsummaryだけ                                                                                                                           | 非該当                                | raw detailへfallbackしない                                    |
 
 ## ウィンドウ固有動作
 
-| 項目 | 動作 |
-|---|---|
-| 生成・再利用 |同じ`main` windowを再利用し、元workspaceとreturn routeを保持する |
-| 初期サイズ・最小サイズ |共通の1470×836 / 960×640 |
-| リサイズ | section navをdrawer化し、main formとCancel/Saveを優先する |
-| 最大化・全画面 | formは最大780px、preview areaへ残幅を与える |
-| 常に手前へ表示 | 不可 |
-| 閉じる操作 | import/test/support taskをcancelし、DB transactionをcommit/rollback後に終了 |
-| 未保存変更がある場合 | section内にSave/Discard/Cancelを表示。未保存voice/rateはroute離脱時に破棄 |
+| 項目                   | 動作                                                                        |
+| ---------------------- | --------------------------------------------------------------------------- |
+| 生成・再利用           | 同じ`main` windowを再利用し、元workspaceとreturn routeを保持する            |
+| 初期サイズ・最小サイズ | 共通の1470×836 / 960×640                                                    |
+| リサイズ               | section navをdrawer化し、main formとCancel/Saveを優先する                   |
+| 最大化・全画面         | formは最大780px、preview areaへ残幅を与える                                 |
+| 常に手前へ表示         | 不可                                                                        |
+| 閉じる操作             | import/test/support taskをcancelし、DB transactionをcommit/rollback後に終了 |
+| 未保存変更がある場合   | section内にSave/Discard/Cancelを表示。未保存voice/rateはroute離脱時に破棄   |
 
 ## メニュー・ショートカット
 
-| 操作 | macOS | Windows / Linux | 有効条件 | 実行結果 |
-|---|---|---|---|---|
-| tab移動 | `Control+Tab` / `Control+Shift+Tab` | 非対応 | destructive confirmなし | main tabs循環 |
-| section検索 | `Command+K` | 非対応 | Settings active | section/field searchへfocus |
-| picker/preview/dialogを閉じる | `Escape` | 非対応 | non-destructive overlay |入力維持、triggerへfocus |
-| Save |明示button | 非対応 | dirty + valid | section transaction |
-| destructive action | shortcutなし | 非対応 | safety preflight + confirm | Delete/Reset/history action |
+| 操作                          | macOS                               | Windows / Linux | 有効条件                   | 実行結果                    |
+| ----------------------------- | ----------------------------------- | --------------- | -------------------------- | --------------------------- |
+| tab移動                       | `Control+Tab` / `Control+Shift+Tab` | 非対応          | destructive confirmなし    | main tabs循環               |
+| section検索                   | `Command+K`                         | 非対応          | Settings active            | section/field searchへfocus |
+| picker/preview/dialogを閉じる | `Escape`                            | 非対応          | non-destructive overlay    | 入力維持、triggerへfocus    |
+| Save                          | 明示button                          | 非対応          | dirty + valid              | section transaction         |
+| destructive action            | shortcutなし                        | 非対応          | safety preflight + confirm | Delete/Reset/history action |
 
 ## データ保持
 
-| データ | 正本・保存先 | 保存契機 | 復元契機 | 破棄条件 | 失敗時 |
-|---|---|---|---|---|---|
-| locale/motion/settings | Rust SQLite | valid section transaction | startup/route | Reset対象に応じる |前version維持 |
-| project/character context | versioned Rust SQLite | expected-version save | workspace/Context | project/history契約 | conflict、入力保持 |
-| bundled Hiyori | release resource + manifest | build/package | startup/selection |削除不可 | static/text fallback |
-| custom pack | app-private library + manifest + manifest拘束trusted PNG | quarantineからatomic promotion | library/selection/card再読込/再起動 |未使用pack明示削除 | orphan quarantine cleanup。trusted PNGがmissing/tamperedならpack metadataは保持しthumbnailだけをfail closed |
-| source absolute path |保存しない | 非該当 |復元しない | picker/import終了 | pack UUIDだけ使用 |
-| Narration setting | app-private owner-only `NarrationSettingsV1` | valid temporary fileのfsync + atomic rename | startup/Audio section | Resetでdefault offへ置換 | invalid/missingはoffへfail closed |
-| generated audio | 保存先なし。system audio outputだけ | playback中 |復元しない | complete/cancel/switch/quit | caption保持 |
-| support usage | Rust SQLite metadata | invocation terminal | Support/Diagnostics | history削除 | raw prompt/response非保存 |
-| normalized history | append-only SQLite/artifact | writer transaction | timeline/evidence/restart | workspace history明示削除 | read-only recovery |
-| demo workspace history | browser process memory | preview操作中 | 同じpreview process内 | preview再起動またはdemo reset。再起動時はfixtureへ戻る | native persistence成功として表示しない |
-| diagnostic result | Rust SQLiteのsanitized summary | check terminal | Settings再表示 | Reset diagnostics |前result + stale label |
+| データ                    | 正本・保存先                                             | 保存契機                                    | 復元契機                            | 破棄条件                                               | 失敗時                                                                                                      |
+| ------------------------- | -------------------------------------------------------- | ------------------------------------------- | ----------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| locale/motion/settings    | Rust SQLite                                              | valid section transaction                   | startup/route                       | Reset対象に応じる                                      | 前version維持                                                                                               |
+| project/character context | versioned Rust SQLite                                    | expected-version save                       | workspace/Context                   | project/history契約                                    | conflict、入力保持                                                                                          |
+| bundled Hiyori            | release resource + manifest                              | build/package                               | startup/selection                   | 削除不可                                               | static/text fallback                                                                                        |
+| custom pack               | app-private library + manifest + manifest拘束trusted PNG | quarantineからatomic promotion              | library/selection/card再読込/再起動 | 未使用pack明示削除                                     | orphan quarantine cleanup。trusted PNGがmissing/tamperedならpack metadataは保持しthumbnailだけをfail closed |
+| source absolute path      | 保存しない                                               | 非該当                                      | 復元しない                          | picker/import終了                                      | pack UUIDだけ使用                                                                                           |
+| Narration setting         | app-private owner-only `NarrationSettingsV1`             | valid temporary fileのfsync + atomic rename | startup/Audio section               | Resetでdefault offへ置換                               | invalid/missingはoffへfail closed                                                                           |
+| generated audio           | 保存先なし。system audio outputだけ                      | playback中                                  | 復元しない                          | complete/cancel/switch/quit                            | caption保持                                                                                                 |
+| support usage             | Rust SQLite metadata                                     | invocation terminal                         | Support/Diagnostics                 | history削除                                            | raw prompt/response非保存                                                                                   |
+| normalized history        | append-only SQLite/artifact                              | writer transaction                          | timeline/evidence/restart           | workspace history明示削除                              | read-only recovery                                                                                          |
+| demo workspace history    | browser process memory                                   | preview操作中                               | 同じpreview process内               | preview再起動またはdemo reset。再起動時はfixtureへ戻る | native persistence成功として表示しない                                                                      |
+| diagnostic result         | Rust SQLiteのsanitized summary                           | check terminal                              | Settings再表示                      | Reset diagnostics                                      | 前result + stale label                                                                                      |
 
 ## OS差分
 
-| 項目 | macOS | Windows | Linux |
-|---|---|---|---|
-| support | macOS 14+ Apple Silicon | MVP非対応 | MVP非対応 |
-| picker / local speech | native file picker / `/usr/bin/say` | 非該当 | 非該当 |
-| motion preference | `prefers-reduced-motion` + app override | 非該当 | 非該当 |
-| microphone | capability/request 0件 | 非該当 | 非該当 |
-| unsupported platform | 非該当 |対応済みと表示しない |対応済みと表示しない |
+| 項目                  | macOS                                   | Windows              | Linux                |
+| --------------------- | --------------------------------------- | -------------------- | -------------------- |
+| support               | macOS 14+ Apple Silicon                 | MVP非対応            | MVP非対応            |
+| picker / local speech | native file picker / `/usr/bin/say`     | 非該当               | 非該当               |
+| motion preference     | `prefers-reduced-motion` + app override | 非該当               | 非該当               |
+| microphone            | capability/request 0件                  | 非該当               | 非該当               |
+| unsupported platform  | 非該当                                  | 対応済みと表示しない | 対応済みと表示しない |
 
 ## アクセシビリティ
 
@@ -368,42 +368,42 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 
 ## 性能と境界
 
-| 指標 | 合格条件 |
-|---|---:|
-| settings toggle feedback | p95 100ms以下 |
-| bundled Hiyori first frame | S-002表示からp95 3,000ms以下 |
-| import resource | 128 files / 100MiB / 1 file 32MiB / texture 8192² / JSON depth 64を超える前にreject |
-| TTS test timeout/cancel | timeout 5秒、Cancel/Stop 100ms以内 |
-| support | active 1、queue 10、task 15秒、16,000 token |
+| 指標                       |                                                                            合格条件 |
+| -------------------------- | ----------------------------------------------------------------------------------: |
+| settings toggle feedback   |                                                                       p95 100ms以下 |
+| bundled Hiyori first frame |                                                        S-002表示からp95 3,000ms以下 |
+| import resource            | 128 files / 100MiB / 1 file 32MiB / texture 8192² / JSON depth 64を超える前にreject |
+| TTS test timeout/cancel    |                                                  timeout 5秒、Cancel/Stop 100ms以内 |
+| support                    |                                         active 1、queue 10、task 15秒、16,000 token |
 
 ## 関連要件
 
-| 要件ID | この画面での扱い | 要件定義書 |
-|---|---|---|
-| `WORK-F-048`, `WORK-F-057`, `WORK-F-063` | preflight、project登録解除、project/character context | [workspace-sessions](../requirements/workspace-sessions.md) |
-| `CODE-F-051`〜`CODE-F-053`, `CODE-F-075` | Codex initialize/login/Sol/effort/attachment前提診断 | [codex-main-session](../requirements/codex-main-session.md) |
-| `SUP-F-062`〜`SUP-F-077` | concurrency、budget、usage、commit explainer skill、toggle、non-persistence、model policy | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
-| `GIT-F-072`, `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092` | read-only Git observer、main/explainer skill version・digest・注入診断 | [git-review-harness](../requirements/git-review-harness.md) |
-| `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | history削除、migration、corruption、writer、schema、support metadata、durability表示 | [activity-history](../requirements/activity-history.md) |
-| `LIVE-F-055`〜`LIVE-F-081` | bundled Hiyori、renderer、import、mapping、delete、performance | [live2d-companion](../requirements/live2d-companion.md) |
-| `NARR-F-064`〜`NARR-F-077` | default off、local binary/voice/test、mute、privacy、no network/microphone/audio file | [audio-commentary](../requirements/audio-commentary.md) |
-| `APP-F-055`, `APP-F-057`〜`APP-F-072` | navigation、language、a11y、lifecycle、native boundary、diagnostics、performance | [desktop-shell](../requirements/desktop-shell.md) |
+| 要件ID                                                          | この画面での扱い                                                                          | 要件定義書                                                                    |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `WORK-F-048`, `WORK-F-057`, `WORK-F-063`                        | preflight、project登録解除、project/character context                                     | [workspace-sessions](../requirements/workspace-sessions.md)                   |
+| `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`                        | Codex initialize/login/Sol/effort/attachment前提診断                                      | [codex-main-session](../requirements/codex-main-session.md)                   |
+| `SUP-F-062`〜`SUP-F-077`                                        | concurrency、budget、usage、commit explainer skill、toggle、non-persistence、model policy | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
+| `GIT-F-072`, `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092` | read-only Git observer、main/explainer skill version・digest・注入診断                    | [git-review-harness](../requirements/git-review-harness.md)                   |
+| `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059`          | history削除、migration、corruption、writer、schema、support metadata、durability表示      | [activity-history](../requirements/activity-history.md)                       |
+| `LIVE-F-055`〜`LIVE-F-081`                                      | bundled Hiyori、renderer、import、mapping、delete、performance                            | [live2d-companion](../requirements/live2d-companion.md)                       |
+| `NARR-F-064`〜`NARR-F-077`                                      | default off、local binary/voice/test、mute、privacy、no network/microphone/audio file     | [audio-commentary](../requirements/audio-commentary.md)                       |
+| `APP-F-055`, `APP-F-057`〜`APP-F-072`                           | navigation、language、a11y、lifecycle、native boundary、diagnostics、performance          | [desktop-shell](../requirements/desktop-shell.md)                             |
 
 ## 未確定事項
 
-| 論点 | 初期判断 | 確認事項 | 着手ブロック |
-|---|---|---|---|
-| custom pack名の編集 | manifest由来名を表示し、MVPではrenameしない | user testで識別困難ならaliasを追加する | いいえ |
-| installed voice差分 | verified `say -v '?'`からja/en exact allowlistを毎回作り、保存voiceを再照合する | release hostでlatency/qualityを再確認する | いいえ |
-| `Allow motion`とOS Reduceの競合 | OS Reduceを優先し、appから解除しない | accessibility reviewでcopyを確認する | いいえ |
-| history artifact partial delete | transaction journalで再起動時に完了/rollbackを分類する | failure injection testで方式を確定する | いいえ |
+| 論点                            | 初期判断                                                                        | 確認事項                                  | 着手ブロック |
+| ------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------- | ------------ |
+| custom pack名の編集             | manifest由来名を表示し、MVPではrenameしない                                     | user testで識別困難ならaliasを追加する    | いいえ       |
+| installed voice差分             | verified `say -v '?'`からja/en exact allowlistを毎回作り、保存voiceを再照合する | release hostでlatency/qualityを再確認する | いいえ       |
+| `Allow motion`とOS Reduceの競合 | OS Reduceを優先し、appから解除しない                                            | accessibility reviewでcopyを確認する      | いいえ       |
+| history artifact partial delete | transaction journalで再起動時に完了/rollbackを分類する                          | failure injection testで方式を確定する    | いいえ       |
 
 ## レビュー確認
 
-| 項目 | 内容 |
-|---|---|
-| レビュー結果 | Approved |
-| レビュー日 | 2026-07-18 |
+| 項目         | 内容       |
+| ------------ | ---------- |
+| レビュー結果 | Approved   |
+| レビュー日   | 2026-07-18 |
 
 - [x] front matter、title、filenameの`S-004`が一致する。
 - [x] `status: Approved`である。
