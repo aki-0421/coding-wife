@@ -22,7 +22,7 @@ read_when:
 
 `reducedMotion` は`reduced` motion policyへだけ写像する。muteは将来のTTS/audio境界であり、motion、generation、canvasを停止しない。character hideは既存のstage unmountを使いGPU resourceを解放する。通常stageがHTML captionを所有するため、内側の`Live2dCharacter`は`showCaption={false}`とする。
 
-inactive tabではstageをremountせず、`ResizeObserver`が報告する0×0でRAFを停止する。activeへ戻ってpositive sizeを受けたら同じcanvasとpackでRAFを再開する。compact layoutの0×0はmotion policyを`hidden`へ変更しない。document visibilityは`visibilitychange`に加えてwindowの`resize`、`focus`、`pageshow`で現在値を再同期し、初期化直後の復帰通知を取りこぼしてもdesktop復帰時にanimated/reducedへ戻す。ユーザー指定の`hidden`はrequested policyとして別に保持し、この再同期では解除しない。
+inactive tabではstageをremountせず、`ResizeObserver`が報告する0×0でRAFを停止する。activeへ戻ってpositive sizeを受けたら同じcanvasとpackでRAFを再開する。compact layoutの0×0はmotion policyを`hidden`へ変更しない。document visibilityは`visibilitychange`に加えてwindowの`resize`、`focus`、`pageshow`で現在値を再同期し、初期化直後の復帰通知を取りこぼしてもdesktop復帰時にanimated/reducedへ戻す。ユーザー指定の`hidden`はrequested policyとして別に保持し、この再同期では解除しない。first-frameの3秒deadlineは同じrenderer generationでanimated、document visible、positive size、context正常の間だけ進み、compact、hidden、reduced、context loss中は残り時間を消費しない。context restoreでは残り時間を新generationへ引き継ぎ、旧timer callbackを無効化する。
 
 ## 任意モデル取り込みの信頼境界
 

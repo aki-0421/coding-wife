@@ -12,6 +12,10 @@ import {
 import { CharacterPackClient } from "@/features/character/runtime/character-pack-client"
 import { acquireCubismRuntime } from "@/features/character/runtime/cubism-runtime"
 import {
+  canConsumeCharacterFirstFrameDeadline,
+  CharacterFirstFrameDeadline,
+} from "@/features/character/runtime/first-frame-deadline"
+import {
   resolveMotionPolicy,
   selectCharacterState,
   type CharacterStateCursor,
@@ -39,6 +43,15 @@ export interface CharacterBackingSize {
   readonly width: number
   readonly height: number
   readonly devicePixelRatio: number
+}
+
+interface FirstFrameWait {
+  generation: number
+  readonly promise: Promise<void>
+  readonly resolve: () => void
+  readonly reject: (error: CharacterError) => void
+  readonly signal: AbortSignal
+  readonly onAbort: () => void
 }
 
 export function computeCharacterBackingSize(
@@ -136,9 +149,9 @@ export class CharacterController {
   #restoreAbortController: AbortController | null = null
   #frameRequest: number | null = null
   #lastFrameTimestamp: number | null = null
-  #firstFrameResolve: (() => void) | null = null
-  #firstFrameReject: ((error: CharacterError) => void) | null = null
-  #firstFrameTimer: ReturnType<typeof setTimeout> | null = null
+  readonly #firstFrameDeadline: CharacterFirstFrameDeadline
+  #firstFrameWait: FirstFrameWait | null = null
+  #rendererGeneration = 0
   #phase: CharacterControllerStatus["phase"] = "idle"
   #stateCursor: CharacterStateCursor = { state: "idle", generation: 0 }
   #requestedPolicy: CharacterMotionPolicy = "animated"
@@ -179,6 +192,18 @@ export class CharacterController {
   public constructor(options: CharacterControllerOptions = {}) {
     this.#callbacks = options.callbacks ?? {}
     this.#preserveDrawingBuffer = options.preserveDrawingBuffer ?? false
+    this.#firstFrameDeadline = new CharacterFirstFrameDeadline({
+      timeoutMilliseconds: FIRST_FRAME_TIMEOUT_MILLISECONDS,
+      onExpire: (generation) => {
+        this.rejectFirstFrame(
+          new CharacterError(
+            "shader_load_failed",
+            "Live2D did not produce a visible frame within 3 seconds of renderable desktop time",
+          ),
+          generation,
+        )
+      },
+    })
   }
 
   public async mount(canvas: HTMLCanvasElement): Promise<void> {
@@ -247,6 +272,8 @@ export class CharacterController {
     }
 
     this.#loadAbortController?.abort()
+    this.#restoreAbortController?.abort()
+    this.#restoreAbortController = null
     const loadAbortController = new AbortController()
     this.#loadAbortController = loadAbortController
     const abortFromCaller = () => loadAbortController.abort(signal.reason)
@@ -277,6 +304,9 @@ export class CharacterController {
         throw new CharacterError("disposed", "Character load was canceled")
       }
 
+      const rendererGeneration = this.#rendererGeneration + 1
+      this.#rendererGeneration = rendererGeneration
+      model.resize(this.#canvas.width, this.#canvas.height)
       this.#model?.release()
       this.#model = model
       this.#client = client
@@ -292,9 +322,10 @@ export class CharacterController {
       this.emitStatus()
       this.applyMotionPolicy()
 
-      if (this.effectiveMotionPolicy !== "hidden") {
-        await this.waitForFirstFrame(loadAbortController.signal)
-      }
+      await this.waitForFirstFrame(
+        loadAbortController.signal,
+        rendererGeneration,
+      )
     } catch (error) {
       if (loadAbortController.signal.aborted || this.#disposed) throw error
       const characterError = toCharacterError(error, "asset_fetch_failed")
@@ -363,6 +394,7 @@ export class CharacterController {
       this.#model?.resize(size.width, size.height)
     }
     this.#gl?.viewport(0, 0, size.width, size.height)
+    this.syncFirstFrameDeadline()
     if (this.#cssWidth <= 0 || this.#cssHeight <= 0) {
       this.stopFrameLoop()
       return
@@ -416,6 +448,7 @@ export class CharacterController {
         "Character controller was disposed",
         false,
       ),
+      this.#firstFrameWait?.generation,
     )
     document.removeEventListener(
       "visibilitychange",
@@ -467,6 +500,7 @@ export class CharacterController {
       this.#fallbackLevel = "animated"
       this.startFrameLoop()
     }
+    this.syncFirstFrameDeadline()
     this.emitStatus()
   }
 
@@ -535,7 +569,7 @@ export class CharacterController {
       this.#error = characterError
       this.#phase = "error"
       this.#fallbackLevel = this.#hasStaticPreview ? "static" : "text_only"
-      this.rejectFirstFrame(characterError)
+      this.rejectFirstFrame(characterError, this.#rendererGeneration)
       this.emitStatus()
       return
     }
@@ -562,7 +596,7 @@ export class CharacterController {
       this.#callbacks.onMetrics?.(this.metrics)
 
       if (sample.nonTransparent > 0) {
-        this.resolveFirstFrame()
+        this.resolveFirstFrame(this.#rendererGeneration)
         if (!this.#hasStaticPreview) {
           try {
             const dataUrl = this.#canvas.toDataURL("image/png")
@@ -584,62 +618,116 @@ export class CharacterController {
     }
   }
 
-  private waitForFirstFrame(signal: AbortSignal): Promise<void> {
+  private waitForFirstFrame(
+    signal: AbortSignal,
+    generation: number,
+  ): Promise<void> {
     if (this.#nonTransparentSamples > 0) return Promise.resolve()
+    const existingWait = this.#firstFrameWait
+    if (existingWait?.generation === generation) {
+      this.syncFirstFrameDeadline()
+      return existingWait.promise
+    }
     this.rejectFirstFrame(
       new CharacterError(
         "shader_load_failed",
         "A newer character load replaced the first-frame wait",
       ),
+      existingWait?.generation,
     )
 
-    return new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
+    let resolvePromise: () => void = () => undefined
+    let rejectPromise: (error: CharacterError) => void = () => undefined
+    const promise = new Promise<void>((resolve, reject) => {
+      resolvePromise = resolve
+      rejectPromise = reject
+    })
+    const onAbort = () => {
+      const activeWait = this.#firstFrameWait
+      if (activeWait?.promise === promise) {
         this.rejectFirstFrame(
           new CharacterError(
             "disposed",
             "Character first-frame wait was canceled",
           ),
+          activeWait.generation,
         )
       }
-      signal.addEventListener("abort", onAbort, { once: true })
-      this.#firstFrameResolve = () => {
-        signal.removeEventListener("abort", onAbort)
-        resolve()
-      }
-      this.#firstFrameReject = (error) => {
-        signal.removeEventListener("abort", onAbort)
-        reject(error)
-      }
-      this.#firstFrameTimer = setTimeout(() => {
-        this.rejectFirstFrame(
-          new CharacterError(
-            "shader_load_failed",
-            "Live2D did not produce a visible frame within 3 seconds",
-          ),
-        )
-      }, FIRST_FRAME_TIMEOUT_MILLISECONDS)
-    })
+    }
+    this.#firstFrameWait = {
+      generation,
+      promise,
+      resolve: resolvePromise,
+      reject: rejectPromise,
+      signal,
+      onAbort,
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+    this.#firstFrameDeadline.begin(generation)
+    if (signal.aborted) onAbort()
+    else this.syncFirstFrameDeadline()
+    return promise
   }
 
-  private resolveFirstFrame(): void {
-    if (this.#firstFrameResolve === null) return
-    if (this.#firstFrameTimer !== null) clearTimeout(this.#firstFrameTimer)
-    const resolve = this.#firstFrameResolve
-    this.#firstFrameResolve = null
-    this.#firstFrameReject = null
-    this.#firstFrameTimer = null
-    resolve()
+  private resolveFirstFrame(generation: number): void {
+    const wait = this.#firstFrameWait
+    if (wait === null || wait.generation !== generation) return
+    this.#firstFrameWait = null
+    wait.signal.removeEventListener("abort", wait.onAbort)
+    this.#firstFrameDeadline.complete(generation)
+    wait.resolve()
   }
 
-  private rejectFirstFrame(error: CharacterError): void {
-    if (this.#firstFrameReject === null) return
-    if (this.#firstFrameTimer !== null) clearTimeout(this.#firstFrameTimer)
-    const reject = this.#firstFrameReject
-    this.#firstFrameResolve = null
-    this.#firstFrameReject = null
-    this.#firstFrameTimer = null
-    reject(error)
+  private rejectFirstFrame(
+    error: CharacterError,
+    generation: number | undefined,
+  ): void {
+    const wait = this.#firstFrameWait
+    if (
+      wait === null ||
+      generation === undefined ||
+      wait.generation !== generation
+    ) {
+      return
+    }
+    this.#firstFrameWait = null
+    wait.signal.removeEventListener("abort", wait.onAbort)
+    this.#firstFrameDeadline.cancel(generation)
+    wait.reject(error)
+  }
+
+  private syncFirstFrameDeadline(): void {
+    const wait = this.#firstFrameWait
+    if (wait === null) return
+    this.#firstFrameDeadline.setEligible(
+      wait.generation,
+      canConsumeCharacterFirstFrameDeadline({
+        expectedGeneration: wait.generation,
+        rendererGeneration: this.#rendererGeneration,
+        motionPolicy: this.effectiveMotionPolicy,
+        documentVisible: this.#documentVisible,
+        contextLost: this.#contextLost,
+        cssWidth: this.#cssWidth,
+        cssHeight: this.#cssHeight,
+      }),
+    )
+  }
+
+  private advanceRendererGenerationForRestore(): number {
+    const previousGeneration = this.#rendererGeneration
+    const nextGeneration = previousGeneration + 1
+    this.#rendererGeneration = nextGeneration
+    const wait = this.#firstFrameWait
+    if (
+      wait?.generation === previousGeneration &&
+      this.#firstFrameDeadline.replaceGeneration(
+        previousGeneration,
+        nextGeneration,
+      )
+    ) {
+      wait.generation = nextGeneration
+    }
+    return nextGeneration
   }
 
   private resetFrameMetrics(): void {
@@ -653,6 +741,7 @@ export class CharacterController {
 
   private enterContextLostState(): void {
     this.#contextLost = true
+    this.syncFirstFrameDeadline()
     this.stopFrameLoop()
     const error = new CharacterError(
       "context_lost",
@@ -706,15 +795,15 @@ export class CharacterController {
         model.release()
         return
       }
+      const rendererGeneration = this.advanceRendererGenerationForRestore()
+      model.resize(this.#canvas.width, this.#canvas.height)
       this.#model = model
       this.#contextLost = false
       this.#error = null
       this.#phase = "ready"
       this.resetFrameMetrics()
       this.applyMotionPolicy()
-      if (this.effectiveMotionPolicy !== "hidden") {
-        await this.waitForFirstFrame(controller.signal)
-      }
+      await this.waitForFirstFrame(controller.signal, rendererGeneration)
       this.emitStatus()
     } catch (error) {
       if (this.#disposed || controller.signal.aborted) return
