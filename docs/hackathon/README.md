@@ -6,7 +6,7 @@ read_when:
   - "OpenAI Build Weekの要件や提出準備の全体像を確認するとき。"
   - "ハッカソン関連文書の参照先を選ぶとき。"
   - "agent-browserで公式情報を再確認するとき。"
-last_verified: 2026-07-15 JST
+last_verified: 2026-07-18 JST
 source_of_truth: https://openai.devpost.com/rules
 ---
 
@@ -27,7 +27,7 @@ source_of_truth: https://openai.devpost.com/rules
 ## 最重要事項
 
 - **提出期限:** 2026-07-21 17:00 PDT = **2026-07-22 09:00 JST**
-- **Codex credits 申請期限:** 2026-07-17 12:00 PDT = **2026-07-18 04:00 JST**
+- **Codex credits:** 申請は終了し、2026-07-18 時点で全 credits 配布済み。配布済み credits の使用期限は **2026-07-22 09:00 JST**
 - **必須技術:** Codex と GPT-5.6 を、どちらも実質的に使う
 - **提出物:** 動くプロジェクト、1つのトラック、説明文、公開 YouTube デモ、コードリポジトリ、主要 Codex スレッドの `/feedback` Session ID
 - **動画:** Official Rules に合わせて **3分未満**。音声で「何を作ったか」「Codex をどう使ったか」「GPT-5.6 をどう使ったか」を説明する
@@ -38,7 +38,7 @@ source_of_truth: https://openai.devpost.com/rules
 
 ## 今すぐ行うこと
 
-1. Codex credits をまだ申請していなければ、Devpost の Resources から申請する。
+1. 配布済み Codex credits がある場合は残高を確認し、使用期限までの Build Week 作業に割り当てる。申請受付は終了している。
 2. トラックを1つ決め、対象ユーザーと解決する問題を1文で固定する。
 3. Codex の主要開発スレッドを1本作り、そのスレッドで中核機能を継続して実装する。
 4. GPT-5.6 が製品の中核価値に必要になる設計にする。単なる飾りや付随機能にしない。

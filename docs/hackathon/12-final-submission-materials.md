@@ -20,7 +20,7 @@ Use the following authority order when a value conflicts:
 3. the root [README](../../README.md) and [testing guide](../testing.md);
 4. this document.
 
-Published-rule requirements were reverified on 2026-07-18 JST and are summarized in [Submission Requirements](./03-submission-requirements.md). Every logged-in form value or external artifact that has not been independently verified remains `PENDING`.
+Published rules were reverified on 2026-07-18 JST; see [Submission Requirements](./03-submission-requirements.md). Unverified logged-in fields and external artifacts remain `PENDING`.
 
 ## 1. Submission control panel
 
@@ -34,7 +34,7 @@ Published-rule requirements were reverified on 2026-07-18 JST and are summarized
 | Public demo video | `PENDING` | Must be a public YouTube video shorter than 3:00 |
 | Public demo or downloadable artifact URL | `PENDING` | No public binary or hosted production demo is currently recorded |
 | Primary Codex `/feedback` Session ID | `PENDING` | Must come from the actual primary build thread |
-| Team and representative | `PENDING` | Eligibility and representative sign-off are required; if entering as a team, every invitation must be accepted before the deadline |
+| Team and representative | `PENDING` | Team entries require eligibility, representative sign-off, and accepted invitations before the deadline |
 | Submission deadline | 2026-07-22 09:00 JST | Reverify against the Official Rules before submission |
 
 ### Project title candidates
