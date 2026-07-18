@@ -37,6 +37,7 @@ interface SupportCopy {
   readonly fallbackBody: string
   readonly disabledBody: string
   readonly errorTitle: string
+  readonly lastErrorTitle: string
   readonly retry: string
   readonly refresh: string
   readonly loading: string
@@ -105,6 +106,7 @@ const copy: Readonly<Record<SupportedLocale, SupportCopy>> = {
     disabledBody:
       "Support is disabled by your saved preference. New jobs are not invoked; the main turn is unchanged.",
     errorTitle: "Support settings were not updated",
+    lastErrorTitle: "Last support error",
     retry: "Retry",
     refresh: "Refresh status",
     loading: "Loading support controls",
@@ -180,6 +182,7 @@ const copy: Readonly<Record<SupportedLocale, SupportCopy>> = {
     disabledBody:
       "保存済み設定で支援を無効化しています。新しいjobは起動せず、main turnには影響しません。",
     errorTitle: "支援設定を更新できませんでした",
+    lastErrorTitle: "直近の支援エラー",
     retry: "再試行",
     refresh: "状態を更新",
     loading: "支援設定を読込中",
@@ -486,6 +489,8 @@ export function SupportControlsSettings({
 
   const snapshot = state.snapshot
   const disabled = state.status === "loading" || state.status === "saving"
+  const visibleErrorCode = state.errorCode ?? snapshot?.lastErrorCode ?? null
+  const currentOperationFailed = state.status === "error"
   return (
     <section
       aria-labelledby="settings-support-title"
@@ -509,13 +514,17 @@ export function SupportControlsSettings({
         )}
       </div>
 
-      {state.status === "error" ? (
-        <Alert data-support-error="true">
+      {visibleErrorCode === null ? null : (
+        <Alert
+          data-support-error={currentOperationFailed ? "current" : "persisted"}
+        >
           <AlertTriangleIcon aria-hidden="true" className="text-destructive" />
-          <AlertTitle>{text.errorTitle}</AlertTitle>
+          <AlertTitle>
+            {currentOperationFailed ? text.errorTitle : text.lastErrorTitle}
+          </AlertTitle>
           <AlertDescription className="flex flex-col items-start gap-xs">
             <code className="break-all font-mono text-label text-destructive">
-              {state.errorCode}
+              {visibleErrorCode}
             </code>
             <Button
               onClick={() => void controller.refresh()}
@@ -523,11 +532,11 @@ export function SupportControlsSettings({
               type="button"
               variant="secondary"
             >
-              {text.retry}
+              {currentOperationFailed ? text.retry : text.refresh}
             </Button>
           </AlertDescription>
         </Alert>
-      ) : null}
+      )}
 
       {snapshot === null && state.status !== "error" ? (
         <LoadingState text={text.loading} />

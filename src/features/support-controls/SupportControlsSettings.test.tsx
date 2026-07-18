@@ -125,6 +125,31 @@ describe("SupportControlsSettings", () => {
     ).toBeVisible()
   })
 
+  it("shows a safe persisted error after a successful restart load", async () => {
+    const demo = new DemoSupportControlsGateway()
+    const restarted = await demo.get()
+    const gateway: SupportControlsGateway = {
+      kind: "demo",
+      get: () =>
+        Promise.resolve({
+          ...restarted,
+          lastErrorCode: "CODEX-SUPPORT-DISABLE-INCOMPLETE",
+        }),
+      update: (request) => demo.update(request),
+    }
+    render(
+      <I18nProvider store={new MemoryLocaleStore("en")}>
+        <SupportControlsSettings gateway={gateway} gatewayKind="demo" />
+      </I18nProvider>,
+    )
+
+    expect(await screen.findByText("Last support error")).toBeVisible()
+    expect(screen.getByText("CODEX-SUPPORT-DISABLE-INCOMPLETE")).toBeVisible()
+    expect(
+      screen.getByText("Last support error").closest("[data-support-error]"),
+    ).toHaveAttribute("data-support-error", "persisted")
+  })
+
   it("shows the persisted off state and new version when disable cleanup fails", async () => {
     const user = userEvent.setup()
     const demo = new DemoSupportControlsGateway()

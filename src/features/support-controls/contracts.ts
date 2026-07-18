@@ -273,6 +273,8 @@ function parseReadiness(value: unknown): SupportReleaseReadinessV1 {
     !isTimestamp(value.checkedAt) ||
     (value.status === "approved" &&
       (value.reasonCode !== null ||
+        value.skillVersion === null ||
+        value.skillDigestPrefix === null ||
         value.observedCliVersion !== value.approvedCliVersion ||
         value.observedBinaryHashPrefix !== value.approvedBinaryHashPrefix ||
         value.observedSchemaFingerprintPrefix !==

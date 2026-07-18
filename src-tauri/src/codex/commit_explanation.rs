@@ -288,6 +288,8 @@ trait CommitExplanationExecutor: Send + Sync {
 
     fn cancel<'a>(&'a self, request_id: &'a str) -> ExplanationFuture<'a, bool>;
 
+    fn force_cleanup_now<'a>(&'a self) -> ExplanationFuture<'a, bool>;
+
     fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool>;
 
     fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool>;
@@ -632,6 +634,10 @@ impl IsolatedSupportExecutor {
 
     async fn stop_executions(&self, force: bool) -> bool {
         self.shutting_down.store(true, Ordering::Release);
+        self.cleanup_executions(force).await
+    }
+
+    async fn cleanup_executions(&self, force: bool) -> bool {
         let executions = self
             .active
             .lock()
@@ -808,6 +814,10 @@ impl CommitExplanationExecutor for IsolatedSupportExecutor {
             }
             self.stop_selected(executions, false).await
         })
+    }
+
+    fn force_cleanup_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+        Box::pin(async move { self.cleanup_executions(true).await })
     }
 
     fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool> {
@@ -1561,29 +1571,63 @@ impl CommitExplanationController {
         for state in changed {
             self.inner.events.emit_state(&state);
         }
-        if let Some(request_id) = active_executor_request_id {
-            let _ = self.inner.executor.cancel(&request_id).await;
-        }
-        if let Some(completion) = worker_completion {
-            if tokio::time::timeout(SUPPORT_DISABLE_GRACE_TIMEOUT, completion.wait())
+        if disabling {
+            let cancel_converged = if let Some(request_id) = active_executor_request_id {
+                tokio::time::timeout(
+                    SUPPORT_DISABLE_GRACE_TIMEOUT,
+                    self.inner.executor.cancel(&request_id),
+                )
                 .await
-                .is_err()
-            {
-                let forced = self.inner.executor.force_shutdown_now().await;
-                if !forced
-                    || tokio::time::timeout(SUPPORT_DISABLE_FORCE_TIMEOUT, completion.wait())
+                .unwrap_or(false)
+            } else {
+                true
+            };
+            let grace_converged = if cancel_converged {
+                if let Some(completion) = worker_completion.as_ref() {
+                    tokio::time::timeout(SUPPORT_DISABLE_GRACE_TIMEOUT, completion.wait())
                         .await
-                        .is_err()
-                {
-                    let mut data = self.inner.data.lock().await;
-                    data.last_error_code = Some("CODEX-SUPPORT-DISABLE-INCOMPLETE".to_owned());
-                    let _ = self.persist_audit(&mut data, OPERATION_SUPPORT_UPDATE);
-                    return Err(SupportControlCommandError::new(
-                        "CODEX-SUPPORT-DISABLE-INCOMPLETE",
-                        OPERATION_SUPPORT_UPDATE,
-                        true,
-                    ));
+                        .is_ok()
+                } else {
+                    true
                 }
+            } else {
+                false
+            };
+            let force_required = !cancel_converged || !grace_converged;
+            let force_converged = if force_required {
+                tokio::time::timeout(
+                    SUPPORT_DISABLE_FORCE_TIMEOUT,
+                    self.inner.executor.force_cleanup_now(),
+                )
+                .await
+                .unwrap_or(false)
+            } else {
+                true
+            };
+            let worker_converged = if force_required {
+                if let Some(completion) = worker_completion.as_ref() {
+                    tokio::time::timeout(SUPPORT_DISABLE_FORCE_TIMEOUT, completion.wait())
+                        .await
+                        .is_ok()
+                } else {
+                    true
+                }
+            } else {
+                grace_converged
+            };
+            let ownership_released = {
+                let data = self.inner.data.lock().await;
+                data.queue.is_empty() && data.active.is_none() && !data.worker_running
+            };
+            if !force_converged || !worker_converged || !ownership_released {
+                let mut data = self.inner.data.lock().await;
+                data.last_error_code = Some("CODEX-SUPPORT-DISABLE-INCOMPLETE".to_owned());
+                let _ = self.persist_audit(&mut data, OPERATION_SUPPORT_UPDATE);
+                return Err(SupportControlCommandError::new(
+                    "CODEX-SUPPORT-DISABLE-INCOMPLETE",
+                    OPERATION_SUPPORT_UPDATE,
+                    true,
+                ));
             }
         }
         if let Some(error) = audit_error {
@@ -2514,6 +2558,8 @@ mod tests {
         calls: AtomicUsize,
         cancels: AtomicUsize,
         cancel_converges: AtomicBool,
+        cleanup_forces: AtomicUsize,
+        cleanup_force_converges: AtomicBool,
         shutdowns: AtomicUsize,
         shutdown_converges: AtomicBool,
         forces: AtomicUsize,
@@ -2529,6 +2575,8 @@ mod tests {
                 calls: AtomicUsize::new(0),
                 cancels: AtomicUsize::new(0),
                 cancel_converges: AtomicBool::new(true),
+                cleanup_forces: AtomicUsize::new(0),
+                cleanup_force_converges: AtomicBool::new(true),
                 shutdowns: AtomicUsize::new(0),
                 shutdown_converges: AtomicBool::new(true),
                 forces: AtomicUsize::new(0),
@@ -2591,6 +2639,16 @@ mod tests {
                     self.release_one();
                 }
                 self.shutdown_converges.load(Ordering::Acquire)
+            })
+        }
+
+        fn force_cleanup_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+            Box::pin(async move {
+                self.cleanup_forces.fetch_add(1, Ordering::AcqRel);
+                if matches!(self.mode, FakeMode::Block) {
+                    self.release_one();
+                }
+                self.cleanup_force_converges.load(Ordering::Acquire)
             })
         }
 
@@ -2730,6 +2788,16 @@ mod tests {
         let audit = cleanup.audit.lock().expect("cleanup audit").join(" ");
         assert!(!audit.contains("/Users/"));
         assert!(!audit.contains("token="));
+    }
+
+    #[tokio::test]
+    async fn recovery_cleanup_does_not_arm_the_permanent_shutdown_latch() {
+        let executor = IsolatedSupportExecutor::new(CodexSupervisor::new());
+        assert!(executor.force_cleanup_now().await);
+        assert!(!executor.shutting_down.load(Ordering::Acquire));
+
+        assert!(executor.force_shutdown_now().await);
+        assert!(executor.shutting_down.load(Ordering::Acquire));
     }
 
     #[tokio::test]
@@ -3704,8 +3772,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancel_false_forces_recovery_then_reenable_starts_the_next_executor() {
+        let (controller, executor, _, root) = policy_harness(FakeMode::Block, approved_readiness());
+        let active = dispatch('a', "request-cancel-false-disable", 1);
+        controller.request(active.clone()).await.expect("active");
+        wait_for_status(
+            &controller,
+            &active,
+            CommitExplanationControllerStatus::Running,
+        )
+        .await;
+        executor.cancel_converges.store(false, Ordering::Release);
+
+        let disabled = controller
+            .update_support_settings(update_support_request(1, false, false))
+            .await
+            .expect("forced recovery converges");
+        assert!(!disabled.effective_enabled);
+        assert_eq!(executor.cancels.load(Ordering::Acquire), 1);
+        assert_eq!(executor.cleanup_forces.load(Ordering::Acquire), 1);
+        assert_eq!(executor.forces.load(Ordering::Acquire), 0);
+
+        let enabled = controller
+            .update_support_settings(update_support_request(2, true, true))
+            .await
+            .expect("re-enable after recovery cleanup");
+        assert!(enabled.effective_enabled);
+        let next = dispatch('b', "request-after-reenable", 1);
+        controller
+            .request(next.clone())
+            .await
+            .expect("next request");
+        wait_for_status(
+            &controller,
+            &next,
+            CommitExplanationControllerStatus::Generated,
+        )
+        .await;
+        assert_eq!(executor.calls.load(Ordering::Acquire), 2);
+        assert_eq!(executor.forces.load(Ordering::Acquire), 0);
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[tokio::test]
     async fn disable_cleanup_failure_keeps_persisted_off_snapshot_and_new_version() {
         let (controller, executor, _, root) = policy_harness(FakeMode::Never, approved_readiness());
+        executor
+            .cleanup_force_converges
+            .store(false, Ordering::Release);
         let request = dispatch('c', "request-disable-never-converges", 1);
         controller.request(request.clone()).await.expect("queued");
         wait_for_status(
@@ -3734,6 +3848,8 @@ mod tests {
         );
         assert_eq!(snapshot.usage.succeeded_tasks, 0);
         assert_eq!(executor.calls.load(Ordering::Acquire), 1);
+        assert_eq!(executor.cleanup_forces.load(Ordering::Acquire), 1);
+        assert_eq!(executor.forces.load(Ordering::Acquire), 0);
 
         let persisted = SupportSettingsStore::open(&root);
         assert_eq!(persisted.settings.version, 2);

@@ -101,6 +101,34 @@ describe("SupportControlSnapshotV1 contracts", () => {
     })
   })
 
+  it("requires versioned skill evidence for every approved snapshot", () => {
+    for (const readiness of [
+      {
+        ...approvedSupportSnapshotFixture.readiness,
+        skillVersion: null,
+      },
+      {
+        ...approvedSupportSnapshotFixture.readiness,
+        skillDigestPrefix: null,
+      },
+      {
+        ...approvedSupportSnapshotFixture.readiness,
+        skillVersion: " untrimmed",
+      },
+      {
+        ...approvedSupportSnapshotFixture.readiness,
+        skillDigestPrefix: "not-a-digest",
+      },
+    ]) {
+      expect(() =>
+        parseSupportControlSnapshot({
+          ...approvedSupportSnapshotFixture,
+          readiness,
+        }),
+      ).toThrow(SupportControlContractError)
+    }
+  })
+
   it("rejects role drift, inconsistent state, unbounded counters, and raw material", () => {
     for (const fixture of [
       {

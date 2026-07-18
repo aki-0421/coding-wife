@@ -3,8 +3,10 @@
 //! Only desired booleans and bounded audit metadata cross this boundary. Support
 //! prompts, responses, paths, credentials, and transcripts are deliberately absent.
 
+use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -286,7 +288,9 @@ pub(crate) type SupportControlResult<T> = Result<T, SupportControlCommandError>;
 #[derive(Clone, Debug)]
 pub(crate) struct SupportSettingsStore {
     root: PathBuf,
+    #[cfg(test)]
     path: PathBuf,
+    root_directory: Arc<File>,
 }
 
 pub(crate) struct SupportSettingsStoreOpen {
@@ -297,8 +301,30 @@ pub(crate) struct SupportSettingsStoreOpen {
 
 #[derive(Clone, Debug)]
 pub(crate) struct SupportAuditStore {
+    root: PathBuf,
+    #[cfg(test)]
     path: PathBuf,
-    gate: Arc<StdMutex<()>>,
+    root_directory: Arc<File>,
+    state: Arc<StdMutex<SupportAuditStoreState>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PrivateEntryMetadata {
+    identity: FileIdentity,
+    mode: u32,
+    uid: u32,
+    size: u64,
+}
+
+#[derive(Debug)]
+struct SupportAuditStoreState {
+    entry_identity: Option<FileIdentity>,
 }
 
 pub(crate) struct SupportAuditStoreOpen {
@@ -327,32 +353,34 @@ impl SupportAuditStore {
         expected_policy_version: Option<u64>,
     ) -> Result<SupportAuditStoreOpen, &'static str> {
         let root = app_data_directory.join(SUPPORT_DIRECTORY);
-        ensure_private_directory(&root)?;
-        let path = root.join(AUDIT_FILE);
-        let fresh = match fs::symlink_metadata(&path) {
-            Ok(metadata) => {
-                verify_private_regular_file_metadata(&metadata, MAX_AUDIT_DATABASE_BYTES)
-                    .map_err(|_| SUPPORT_AUDIT_UNSAFE)?;
-                false
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let mut options = OpenOptions::new();
-                options.create_new(true).write(true).mode(0o600);
-                options
-                    .open(&path)
-                    .and_then(|file| file.sync_all())
-                    .map_err(|_| SUPPORT_AUDIT_UNAVAILABLE)?;
-                true
-            }
-            Err(_) => return Err(SUPPORT_AUDIT_UNAVAILABLE),
-        };
+        let root_directory =
+            Arc::new(ensure_private_directory(&root).map_err(map_audit_directory_error)?);
+        let existing = entry_metadata_at(&root_directory, AUDIT_FILE)
+            .map_err(|_| SUPPORT_AUDIT_UNAVAILABLE)?;
+        if let Some(metadata) = existing.as_ref() {
+            validate_private_regular_entry(metadata, MAX_AUDIT_DATABASE_BYTES)
+                .map_err(|_| SUPPORT_AUDIT_UNSAFE)?;
+        }
         let store = Self {
-            path,
-            gate: Arc::new(StdMutex::new(())),
+            root,
+            #[cfg(test)]
+            path: app_data_directory.join(SUPPORT_DIRECTORY).join(AUDIT_FILE),
+            root_directory,
+            state: Arc::new(StdMutex::new(SupportAuditStoreState {
+                entry_identity: existing.map(|metadata| metadata.identity),
+            })),
         };
-        if fresh {
+        if existing.is_none() {
             let state = SupportDurableAuditV1::fresh(expected_policy_version.unwrap_or(0));
-            store.initialize(&state)?;
+            store
+                .save(&state, "support_audit_startup")
+                .map_err(|error| {
+                    if error.code == SUPPORT_AUDIT_UNSAFE {
+                        SUPPORT_AUDIT_UNSAFE
+                    } else {
+                        SUPPORT_AUDIT_UNAVAILABLE
+                    }
+                })?;
             return Ok(SupportAuditStoreOpen {
                 store: Some(store),
                 state,
@@ -374,26 +402,20 @@ impl SupportAuditStore {
         })
     }
 
-    fn initialize(&self, state: &SupportDurableAuditV1) -> Result<(), &'static str> {
-        let connection =
-            open_audit_connection(&self.path).map_err(|_| SUPPORT_AUDIT_UNAVAILABLE)?;
-        connection
-            .execute_batch(
-                "CREATE TABLE support_audit_state (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    payload_json TEXT NOT NULL CHECK (length(payload_json) <= 32768)
-                );
-                PRAGMA user_version = 1;",
-            )
-            .map_err(|_| SUPPORT_AUDIT_UNAVAILABLE)?;
-        drop(connection);
-        self.save(state, "support_audit_startup")
-            .map_err(|_| SUPPORT_AUDIT_UNAVAILABLE)
-    }
-
     fn load(&self) -> Result<SupportDurableAuditV1, &'static str> {
-        let _guard = self.gate.lock().map_err(|_| SUPPORT_AUDIT_UNAVAILABLE)?;
-        let connection = open_audit_connection(&self.path).map_err(|_| SUPPORT_AUDIT_CORRUPT)?;
+        let state = self.state.lock().map_err(|_| SUPPORT_AUDIT_UNAVAILABLE)?;
+        let expected = state.entry_identity.ok_or(SUPPORT_AUDIT_CORRUPT)?;
+        verify_directory_identity(&self.root, &self.root_directory)
+            .map_err(map_audit_directory_error)?;
+        let file = open_verified_regular_at(
+            &self.root_directory,
+            AUDIT_FILE,
+            expected,
+            MAX_AUDIT_DATABASE_BYTES,
+        )
+        .map_err(|_| SUPPORT_AUDIT_UNSAFE)?;
+        let connection =
+            open_audit_connection_from_file(&file, true).map_err(|_| SUPPORT_AUDIT_CORRUPT)?;
         let integrity: String = connection
             .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
             .map_err(|_| SUPPORT_AUDIT_CORRUPT)?;
@@ -436,6 +458,15 @@ impl SupportAuditStore {
         let state: SupportDurableAuditV1 =
             serde_json::from_str(&payload).map_err(|_| SUPPORT_AUDIT_CORRUPT)?;
         validate_durable_audit(&state).map_err(|_| SUPPORT_AUDIT_CORRUPT)?;
+        verify_directory_identity(&self.root, &self.root_directory)
+            .map_err(map_audit_directory_error)?;
+        verify_entry_identity_at(
+            &self.root_directory,
+            AUDIT_FILE,
+            expected,
+            MAX_AUDIT_DATABASE_BYTES,
+        )
+        .map_err(|_| SUPPORT_AUDIT_UNSAFE)?;
         Ok(state)
     }
 
@@ -456,35 +487,139 @@ impl SupportAuditStore {
                 false,
             ));
         }
-        let _guard = self.gate.lock().map_err(|_| {
+        self.replace_database_with_hook(&payload, operation, || {})
+    }
+
+    fn replace_database_with_hook<F>(
+        &self,
+        payload: &str,
+        operation: &'static str,
+        before_namespace_commit: F,
+    ) -> SupportControlResult<()>
+    where
+        F: FnOnce(),
+    {
+        let mut store_state = self.state.lock().map_err(|_| {
             SupportControlCommandError::new(SUPPORT_AUDIT_UNAVAILABLE, operation, true)
         })?;
-        let mut connection = open_audit_connection(&self.path).map_err(|_| {
-            SupportControlCommandError::new(SUPPORT_AUDIT_UNAVAILABLE, operation, true)
-        })?;
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|_| {
-                SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-WRITE", operation, true)
-            })?;
-        transaction
-            .execute(
-                "INSERT INTO support_audit_state (id, payload_json) VALUES (1, ?1)
-                 ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json",
-                [payload],
-            )
-            .map_err(|_| {
-                SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-WRITE", operation, true)
-            })?;
-        transaction.commit().map_err(|_| {
-            SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-SYNC", operation, true)
-        })?;
-        let metadata = fs::symlink_metadata(&self.path).map_err(|_| {
-            SupportControlCommandError::new(SUPPORT_AUDIT_UNAVAILABLE, operation, true)
-        })?;
-        verify_private_regular_file_metadata(&metadata, MAX_AUDIT_DATABASE_BYTES)
+        verify_directory_identity(&self.root, &self.root_directory)
             .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
-        Ok(())
+        verify_optional_entry_identity_at(
+            &self.root_directory,
+            AUDIT_FILE,
+            store_state.entry_identity,
+            MAX_AUDIT_DATABASE_BYTES,
+        )
+        .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
+
+        let temporary_name = format!(".audit-v1.{}.tmp", uuid::Uuid::new_v4());
+        let temporary =
+            open_private_temporary(&self.root_directory, &temporary_name).map_err(|_| {
+                SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-WRITE", operation, true)
+            })?;
+        let temporary_identity = match private_file_metadata(&temporary, MAX_AUDIT_DATABASE_BYTES) {
+            Ok(metadata) => metadata.identity,
+            Err(_) => {
+                let _ = unlink_entry_at(&self.root_directory, &temporary_name);
+                return Err(SupportControlCommandError::new(
+                    SUPPORT_AUDIT_UNSAFE,
+                    operation,
+                    false,
+                ));
+            }
+        };
+        let result = (|| {
+            let mut connection =
+                open_audit_connection_from_file(&temporary, false).map_err(|_| {
+                    SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-WRITE", operation, true)
+                })?;
+            verify_directory_identity(&self.root, &self.root_directory).map_err(|_| {
+                SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false)
+            })?;
+            verify_optional_entry_identity_at(
+                &self.root_directory,
+                AUDIT_FILE,
+                store_state.entry_identity,
+                MAX_AUDIT_DATABASE_BYTES,
+            )
+            .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
+            verify_entry_identity_at(
+                &self.root_directory,
+                &temporary_name,
+                temporary_identity,
+                MAX_AUDIT_DATABASE_BYTES,
+            )
+            .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| {
+                    SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-WRITE", operation, true)
+                })?;
+            transaction
+                .execute_batch(
+                    "CREATE TABLE support_audit_state (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        payload_json TEXT NOT NULL CHECK (length(payload_json) <= 32768)
+                    );
+                    PRAGMA user_version = 1;",
+                )
+                .map_err(|_| {
+                    SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-WRITE", operation, true)
+                })?;
+            transaction
+                .execute(
+                    "INSERT INTO support_audit_state (id, payload_json) VALUES (1, ?1)",
+                    [payload],
+                )
+                .map_err(|_| {
+                    SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-WRITE", operation, true)
+                })?;
+            transaction.commit().map_err(|_| {
+                SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-SYNC", operation, true)
+            })?;
+            drop(connection);
+            temporary.sync_all().map_err(|_| {
+                SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-SYNC", operation, true)
+            })?;
+
+            before_namespace_commit();
+            verify_directory_identity(&self.root, &self.root_directory).map_err(|_| {
+                SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false)
+            })?;
+            verify_optional_entry_identity_at(
+                &self.root_directory,
+                AUDIT_FILE,
+                store_state.entry_identity,
+                MAX_AUDIT_DATABASE_BYTES,
+            )
+            .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
+            verify_entry_identity_at(
+                &self.root_directory,
+                &temporary_name,
+                temporary_identity,
+                MAX_AUDIT_DATABASE_BYTES,
+            )
+            .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
+            rename_entry_at(&self.root_directory, &temporary_name, AUDIT_FILE).map_err(|_| {
+                SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-RENAME", operation, true)
+            })?;
+            self.root_directory.sync_all().map_err(|_| {
+                SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-SYNC", operation, true)
+            })?;
+            verify_entry_identity_at(
+                &self.root_directory,
+                AUDIT_FILE,
+                temporary_identity,
+                MAX_AUDIT_DATABASE_BYTES,
+            )
+            .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
+            store_state.entry_identity = Some(temporary_identity);
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = unlink_entry_at(&self.root_directory, &temporary_name);
+        }
+        result
     }
 }
 
@@ -502,16 +637,28 @@ impl SupportSettingsStore {
 
     fn open_inner(app_data_directory: &Path) -> Result<SupportSettingsStoreOpen, &'static str> {
         let root = app_data_directory.join(SUPPORT_DIRECTORY);
-        ensure_private_directory(&root)?;
+        let root_directory = Arc::new(ensure_private_directory(&root)?);
         let store = Self {
+            #[cfg(test)]
             path: root.join(SETTINGS_FILE),
             root,
+            root_directory,
         };
-        if !store.path.exists() {
+        let existing = entry_metadata_at(&store.root_directory, SETTINGS_FILE)
+            .map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
+        if let Some(metadata) = existing.as_ref() {
+            validate_private_regular_entry(metadata, MAX_SETTINGS_BYTES)?;
+        } else {
             let settings = SupportSettingsV1::default();
             store
                 .save(&settings, "support_settings_startup")
-                .map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
+                .map_err(|error| {
+                    if error.code == SUPPORT_SETTINGS_UNSAFE {
+                        SUPPORT_SETTINGS_UNSAFE
+                    } else {
+                        SUPPORT_SETTINGS_UNAVAILABLE
+                    }
+                })?;
             return Ok(SupportSettingsStoreOpen {
                 store: Some(store),
                 settings,
@@ -535,8 +682,17 @@ impl SupportSettingsStore {
     }
 
     fn load(&self) -> Result<SupportSettingsV1, &'static str> {
-        verify_settings_file(&self.path)?;
-        let mut file = File::open(&self.path).map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
+        verify_directory_identity(&self.root, &self.root_directory)?;
+        let expected = entry_metadata_at(&self.root_directory, SETTINGS_FILE)
+            .map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?
+            .ok_or(SUPPORT_SETTINGS_UNAVAILABLE)?;
+        validate_private_regular_entry(&expected, MAX_SETTINGS_BYTES)?;
+        let mut file = open_verified_regular_at(
+            &self.root_directory,
+            SETTINGS_FILE,
+            expected.identity,
+            MAX_SETTINGS_BYTES,
+        )?;
         let size = file
             .metadata()
             .map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?
@@ -559,6 +715,13 @@ impl SupportSettingsStore {
         let settings: SupportSettingsV1 =
             serde_json::from_value(value).map_err(|_| SUPPORT_SETTINGS_CORRUPT)?;
         validate_settings(&settings).map_err(|_| SUPPORT_SETTINGS_CORRUPT)?;
+        verify_directory_identity(&self.root, &self.root_directory)?;
+        verify_entry_identity_at(
+            &self.root_directory,
+            SETTINGS_FILE,
+            expected.identity,
+            MAX_SETTINGS_BYTES,
+        )?;
         Ok(settings)
     }
 
@@ -569,10 +732,8 @@ impl SupportSettingsStore {
     ) -> SupportControlResult<()> {
         validate_settings(settings)
             .map_err(|code| SupportControlCommandError::new(code, operation, false))?;
-        if self.path.exists() {
-            verify_settings_file(&self.path)
-                .map_err(|code| SupportControlCommandError::new(code, operation, false))?;
-        }
+        verify_directory_identity(&self.root, &self.root_directory)
+            .map_err(|code| SupportControlCommandError::new(code, operation, false))?;
         let bytes = serde_json::to_vec_pretty(settings).map_err(|_| {
             SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-SERIALIZE", operation, false)
         })?;
@@ -583,7 +744,13 @@ impl SupportSettingsStore {
                 false,
             ));
         }
-        atomic_write(&self.root, &self.path, &bytes, operation)
+        atomic_write(
+            &self.root,
+            &self.root_directory,
+            SETTINGS_FILE,
+            &bytes,
+            operation,
+        )
     }
 }
 
@@ -597,6 +764,7 @@ fn validate_settings(settings: &SupportSettingsV1) -> Result<(), &'static str> {
     Ok(())
 }
 
+#[cfg(test)]
 fn open_audit_connection(path: &Path) -> rusqlite::Result<Connection> {
     let connection = Connection::open_with_flags(
         path,
@@ -610,6 +778,36 @@ fn open_audit_connection(path: &Path) -> rusqlite::Result<Connection> {
          PRAGMA trusted_schema = OFF;
          PRAGMA max_page_count = 1024;",
     )?;
+    Ok(connection)
+}
+
+fn open_audit_connection_from_file(file: &File, read_only: bool) -> rusqlite::Result<Connection> {
+    let descriptor_path = format!("/dev/fd/{}", file.as_raw_fd());
+    let access = if read_only {
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+    } else {
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+    };
+    let connection =
+        Connection::open_with_flags(descriptor_path, access | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    connection.busy_timeout(std::time::Duration::from_secs(1))?;
+    if read_only {
+        connection.execute_batch(
+            "PRAGMA query_only = ON;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA trusted_schema = OFF;",
+        )?;
+    } else {
+        // This connection targets a brand-new private inode. The complete database
+        // is synced and atomically installed only after the transaction commits.
+        connection.execute_batch(
+            "PRAGMA journal_mode = OFF;
+             PRAGMA synchronous = FULL;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA trusted_schema = OFF;
+             PRAGMA max_page_count = 1024;",
+        )?;
+    }
     Ok(connection)
 }
 
@@ -684,7 +882,8 @@ fn valid_safe_code(value: &str) -> bool {
             .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-fn ensure_private_directory(path: &Path) -> Result<(), &'static str> {
+fn ensure_private_directory(path: &Path) -> Result<File, &'static str> {
+    let mut created = false;
     match fs::symlink_metadata(path) {
         Ok(metadata) => validate_private_directory_metadata(&metadata, effective_uid())?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -696,15 +895,25 @@ fn ensure_private_directory(path: &Path) -> Result<(), &'static str> {
             builder
                 .create(path)
                 .map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
+            created = true;
             let metadata = fs::symlink_metadata(path).map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
             validate_private_directory_metadata(&metadata, effective_uid())?;
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-                .map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
         }
         Err(_) => return Err(SUPPORT_SETTINGS_UNAVAILABLE),
     }
-    sync_directory(path.parent().unwrap_or(path), "support_settings_startup")
-        .map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)
+
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let directory = options.open(path).map_err(|_| SUPPORT_SETTINGS_UNSAFE)?;
+    verify_directory_identity(path, &directory)?;
+    if created {
+        File::open(path.parent().unwrap_or(path))
+            .and_then(|parent| parent.sync_all())
+            .map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
+    }
+    Ok(directory)
 }
 
 fn validate_private_directory_metadata(
@@ -713,76 +922,327 @@ fn validate_private_directory_metadata(
 ) -> Result<(), &'static str> {
     if !metadata.file_type().is_dir()
         || metadata.uid() != expected_uid
-        || metadata.mode() & 0o077 != 0
+        || metadata.mode() & 0o777 != 0o700
     {
         return Err(SUPPORT_SETTINGS_UNSAFE);
     }
     Ok(())
 }
 
-fn verify_settings_file(path: &Path) -> Result<(), &'static str> {
-    let metadata = fs::symlink_metadata(path).map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
-    verify_private_regular_file_metadata(&metadata, MAX_SETTINGS_BYTES)
+fn map_audit_directory_error(code: &'static str) -> &'static str {
+    if code == SUPPORT_SETTINGS_UNSAFE {
+        SUPPORT_AUDIT_UNSAFE
+    } else {
+        SUPPORT_AUDIT_UNAVAILABLE
+    }
 }
 
-fn verify_private_regular_file_metadata(
-    metadata: &fs::Metadata,
+fn verify_directory_identity(path: &Path, directory: &File) -> Result<(), &'static str> {
+    let path_metadata = fs::symlink_metadata(path).map_err(|_| SUPPORT_SETTINGS_UNSAFE)?;
+    validate_private_directory_metadata(&path_metadata, effective_uid())?;
+    let opened_metadata = directory
+        .metadata()
+        .map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
+    validate_private_directory_metadata(&opened_metadata, effective_uid())?;
+    if file_identity(&path_metadata) != file_identity(&opened_metadata) {
+        return Err(SUPPORT_SETTINGS_UNSAFE);
+    }
+    Ok(())
+}
+
+fn file_identity(metadata: &fs::Metadata) -> FileIdentity {
+    FileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    }
+}
+
+fn private_file_metadata(
+    file: &File,
+    maximum_bytes: u64,
+) -> Result<PrivateEntryMetadata, &'static str> {
+    let metadata = file.metadata().map_err(|_| SUPPORT_SETTINGS_UNAVAILABLE)?;
+    let entry = PrivateEntryMetadata {
+        identity: file_identity(&metadata),
+        mode: metadata.mode(),
+        uid: metadata.uid(),
+        size: metadata.len(),
+    };
+    validate_private_regular_entry(&entry, maximum_bytes)?;
+    Ok(entry)
+}
+
+fn validate_private_regular_entry(
+    metadata: &PrivateEntryMetadata,
     maximum_bytes: u64,
 ) -> Result<(), &'static str> {
-    if !metadata.file_type().is_file()
-        || metadata.uid() != effective_uid()
-        || metadata.mode() & 0o077 != 0
-        || metadata.len() > maximum_bytes
+    if metadata.mode & libc::S_IFMT as u32 != libc::S_IFREG as u32
+        || metadata.uid != effective_uid()
+        || metadata.mode & 0o777 != 0o600
+        || metadata.size > maximum_bytes
     {
         return Err(SUPPORT_SETTINGS_UNSAFE);
     }
     Ok(())
+}
+
+fn entry_metadata_at(
+    directory: &File,
+    name: &str,
+) -> std::io::Result<Option<PrivateEntryMetadata>> {
+    let name =
+        CString::new(name).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: directory is an open directory descriptor, name is NUL-terminated,
+    // and metadata points to writable storage for one libc::stat value.
+    let result = unsafe {
+        libc::fstatat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            metadata.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::NotFound {
+            return Ok(None);
+        }
+        return Err(error);
+    }
+    // SAFETY: fstatat succeeded and initialized metadata.
+    let metadata = unsafe { metadata.assume_init() };
+    Ok(Some(PrivateEntryMetadata {
+        identity: FileIdentity {
+            device: metadata.st_dev as u64,
+            inode: metadata.st_ino,
+        },
+        mode: metadata.st_mode as u32,
+        uid: metadata.st_uid,
+        size: u64::try_from(metadata.st_size).unwrap_or(u64::MAX),
+    }))
+}
+
+fn open_verified_regular_at(
+    directory: &File,
+    name: &str,
+    expected_identity: FileIdentity,
+    maximum_bytes: u64,
+) -> Result<File, &'static str> {
+    let name = CString::new(name).map_err(|_| SUPPORT_SETTINGS_UNSAFE)?;
+    // SAFETY: directory and name are valid; the returned descriptor is checked
+    // before ownership is transferred to File.
+    let descriptor = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if descriptor < 0 {
+        return Err(SUPPORT_SETTINGS_UNSAFE);
+    }
+    // SAFETY: openat returned a new owned descriptor.
+    let file = unsafe { File::from_raw_fd(descriptor) };
+    let opened = private_file_metadata(&file, maximum_bytes)?;
+    if opened.identity != expected_identity {
+        return Err(SUPPORT_SETTINGS_UNSAFE);
+    }
+    verify_entry_identity_at(
+        directory,
+        name.to_str().map_err(|_| SUPPORT_SETTINGS_UNSAFE)?,
+        expected_identity,
+        maximum_bytes,
+    )?;
+    Ok(file)
+}
+
+fn verify_entry_identity_at(
+    directory: &File,
+    name: &str,
+    expected_identity: FileIdentity,
+    maximum_bytes: u64,
+) -> Result<(), &'static str> {
+    let metadata = entry_metadata_at(directory, name)
+        .map_err(|_| SUPPORT_SETTINGS_UNSAFE)?
+        .ok_or(SUPPORT_SETTINGS_UNSAFE)?;
+    validate_private_regular_entry(&metadata, maximum_bytes)?;
+    if metadata.identity != expected_identity {
+        return Err(SUPPORT_SETTINGS_UNSAFE);
+    }
+    Ok(())
+}
+
+fn verify_optional_entry_identity_at(
+    directory: &File,
+    name: &str,
+    expected_identity: Option<FileIdentity>,
+    maximum_bytes: u64,
+) -> Result<(), &'static str> {
+    match (
+        entry_metadata_at(directory, name).map_err(|_| SUPPORT_SETTINGS_UNSAFE)?,
+        expected_identity,
+    ) {
+        (None, None) => Ok(()),
+        (Some(metadata), Some(expected)) => {
+            validate_private_regular_entry(&metadata, maximum_bytes)?;
+            if metadata.identity == expected {
+                Ok(())
+            } else {
+                Err(SUPPORT_SETTINGS_UNSAFE)
+            }
+        }
+        _ => Err(SUPPORT_SETTINGS_UNSAFE),
+    }
+}
+
+fn open_private_temporary(directory: &File, name: &str) -> std::io::Result<File> {
+    let entry_name = name;
+    let name = CString::new(entry_name)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: directory and name are valid. O_EXCL and O_NOFOLLOW ensure this
+    // creates a new regular entry inside the pinned private directory.
+    let descriptor = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600,
+        )
+    };
+    if descriptor < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: openat returned a new owned descriptor.
+    let file = unsafe { File::from_raw_fd(descriptor) };
+    if let Err(error) = file.set_permissions(fs::Permissions::from_mode(0o600)) {
+        drop(file);
+        let _ = unlink_entry_at(directory, entry_name);
+        return Err(error);
+    }
+    Ok(file)
+}
+
+fn rename_entry_at(directory: &File, source: &str, destination: &str) -> std::io::Result<()> {
+    let source =
+        CString::new(source).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let destination = CString::new(destination)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: both names are valid and relative to the same open directory.
+    if unsafe {
+        libc::renameat(
+            directory.as_raw_fd(),
+            source.as_ptr(),
+            directory.as_raw_fd(),
+            destination.as_ptr(),
+        )
+    } == 0
+    {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+fn unlink_entry_at(directory: &File, name: &str) -> std::io::Result<()> {
+    let name =
+        CString::new(name).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: name is valid and unlinkat removes the directory entry itself.
+    if unsafe { libc::unlinkat(directory.as_raw_fd(), name.as_ptr(), 0) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 fn atomic_write(
     root: &Path,
-    path: &Path,
+    root_directory: &File,
+    name: &str,
     bytes: &[u8],
     operation: &'static str,
 ) -> SupportControlResult<()> {
-    let temporary = root.join(format!(".settings-v1.{}.tmp", uuid::Uuid::new_v4()));
-    let result = (|| {
-        let mut options = OpenOptions::new();
-        options.create_new(true).write(true).mode(0o600);
-        let mut file = options.open(&temporary).map_err(|_| {
-            SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-WRITE", operation, true)
-        })?;
-        file.set_permissions(fs::Permissions::from_mode(0o600))
-            .map_err(|_| {
-                SupportControlCommandError::new(
-                    "CODEX-SUPPORT-SETTINGS-PERMISSIONS",
-                    operation,
-                    false,
-                )
-            })?;
-        file.write_all(bytes).map_err(|_| {
-            SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-WRITE", operation, true)
-        })?;
-        file.sync_all().map_err(|_| {
-            SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-SYNC", operation, true)
-        })?;
-        fs::rename(&temporary, path).map_err(|_| {
-            SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-RENAME", operation, true)
-        })?;
-        sync_directory(root, operation)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
+    atomic_write_with_hook(root, root_directory, name, bytes, operation, || {})
 }
 
-fn sync_directory(path: &Path, operation: &'static str) -> SupportControlResult<()> {
-    File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|_| {
+fn atomic_write_with_hook<F>(
+    root: &Path,
+    root_directory: &File,
+    name: &str,
+    bytes: &[u8],
+    operation: &'static str,
+    before_namespace_commit: F,
+) -> SupportControlResult<()>
+where
+    F: FnOnce(),
+{
+    verify_directory_identity(root, root_directory)
+        .map_err(|_| SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false))?;
+    let existing = entry_metadata_at(root_directory, name).map_err(|_| {
+        SupportControlCommandError::new(SUPPORT_SETTINGS_UNAVAILABLE, operation, true)
+    })?;
+    if let Some(metadata) = existing.as_ref() {
+        validate_private_regular_entry(metadata, MAX_SETTINGS_BYTES).map_err(|_| {
+            SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false)
+        })?;
+    }
+    let expected_identity = existing.map(|metadata| metadata.identity);
+    let temporary_name = format!(".settings-v1.{}.tmp", uuid::Uuid::new_v4());
+    let mut temporary = open_private_temporary(root_directory, &temporary_name).map_err(|_| {
+        SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-WRITE", operation, true)
+    })?;
+    let temporary_identity = match private_file_metadata(&temporary, MAX_SETTINGS_BYTES) {
+        Ok(metadata) => metadata.identity,
+        Err(_) => {
+            let _ = unlink_entry_at(root_directory, &temporary_name);
+            return Err(SupportControlCommandError::new(
+                SUPPORT_SETTINGS_UNSAFE,
+                operation,
+                false,
+            ));
+        }
+    };
+    let result = (|| {
+        temporary.write_all(bytes).map_err(|_| {
+            SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-WRITE", operation, true)
+        })?;
+        temporary.sync_all().map_err(|_| {
             SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-SYNC", operation, true)
-        })
+        })?;
+        before_namespace_commit();
+        verify_directory_identity(root, root_directory).map_err(|_| {
+            SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false)
+        })?;
+        verify_optional_entry_identity_at(
+            root_directory,
+            name,
+            expected_identity,
+            MAX_SETTINGS_BYTES,
+        )
+        .map_err(|_| SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false))?;
+        verify_entry_identity_at(
+            root_directory,
+            &temporary_name,
+            temporary_identity,
+            MAX_SETTINGS_BYTES,
+        )
+        .map_err(|_| SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false))?;
+        rename_entry_at(root_directory, &temporary_name, name).map_err(|_| {
+            SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-RENAME", operation, true)
+        })?;
+        root_directory.sync_all().map_err(|_| {
+            SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-SYNC", operation, true)
+        })?;
+        verify_directory_identity(root, root_directory).map_err(|_| {
+            SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false)
+        })?;
+        verify_entry_identity_at(root_directory, name, temporary_identity, MAX_SETTINGS_BYTES)
+            .map_err(|_| SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false))
+    })();
+    if result.is_err() {
+        let _ = unlink_entry_at(root_directory, &temporary_name);
+    }
+    result
 }
 
 fn effective_uid() -> u32 {
@@ -943,6 +1403,117 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 
+    #[test]
+    fn unsafe_settings_entries_fail_closed_without_repair_or_following_links() {
+        for (label, fixture) in [
+            ("dangling", "dangling"),
+            ("directory", "directory"),
+            ("public-mode", "public-mode"),
+        ] {
+            let root = temporary_directory(&format!("support-settings-{label}"));
+            let support = root.join(SUPPORT_DIRECTORY);
+            fs::create_dir_all(&support).expect("support fixture");
+            fs::set_permissions(&support, fs::Permissions::from_mode(0o700)).expect("support mode");
+            let path = support.join(SETTINGS_FILE);
+            match fixture {
+                "dangling" => {
+                    symlink(root.join("missing-target"), &path).expect("dangling symlink")
+                }
+                "directory" => fs::create_dir(&path).expect("directory entry"),
+                "public-mode" => {
+                    fs::write(&path, b"sentinel").expect("public file");
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o644))
+                        .expect("public mode");
+                }
+                _ => unreachable!(),
+            }
+
+            let opened = SupportSettingsStore::open(&root);
+            assert!(opened.store.is_none(), "fixture {fixture}");
+            assert_eq!(
+                opened.recovery_code.as_deref(),
+                Some(SUPPORT_SETTINGS_UNSAFE),
+                "fixture {fixture}"
+            );
+            let metadata = fs::symlink_metadata(&path).expect("entry remains");
+            match fixture {
+                "dangling" => assert!(metadata.file_type().is_symlink()),
+                "directory" => assert!(metadata.is_dir()),
+                "public-mode" => {
+                    assert_eq!(metadata.permissions().mode() & 0o777, 0o644);
+                    assert_eq!(fs::read(&path).expect("sentinel"), b"sentinel");
+                }
+                _ => unreachable!(),
+            }
+            fs::remove_dir_all(root).expect("cleanup");
+        }
+
+        let owner_mismatch = PrivateEntryMetadata {
+            identity: FileIdentity {
+                device: 1,
+                inode: 1,
+            },
+            mode: libc::S_IFREG as u32 | 0o600,
+            uid: effective_uid().wrapping_add(1),
+            size: 1,
+        };
+        assert_eq!(
+            validate_private_regular_entry(&owner_mismatch, MAX_SETTINGS_BYTES),
+            Err(SUPPORT_SETTINGS_UNSAFE)
+        );
+    }
+
+    #[test]
+    fn settings_namespace_swap_is_rejected_without_writing_public_target() {
+        let root = temporary_directory("support-settings-swap");
+        let store = SupportSettingsStore::open(&root).store.expect("store");
+        let original = fs::read(&store.path).expect("original settings");
+        let backup = store.root.join("settings-backup.json");
+        let public_target = root.join("public-target.txt");
+        fs::write(&public_target, b"public-sentinel").expect("public target");
+        fs::set_permissions(&public_target, fs::Permissions::from_mode(0o600))
+            .expect("public target mode");
+        let next = SupportSettingsV1 {
+            version: 2,
+            global_enabled: false,
+            ..SupportSettingsV1::default()
+        };
+        let bytes = serde_json::to_vec_pretty(&next).expect("settings payload");
+
+        let error = atomic_write_with_hook(
+            &store.root,
+            &store.root_directory,
+            SETTINGS_FILE,
+            &bytes,
+            "test",
+            || {
+                fs::rename(&store.path, &backup).expect("pin original entry");
+                symlink(&public_target, &store.path).expect("swap target to symlink");
+            },
+        )
+        .expect_err("namespace swap must fail");
+        assert_eq!(error.code, SUPPORT_SETTINGS_UNSAFE);
+        assert_eq!(
+            fs::read(&public_target).expect("public sentinel"),
+            b"public-sentinel"
+        );
+        assert!(fs::symlink_metadata(&store.path)
+            .expect("swapped entry")
+            .file_type()
+            .is_symlink());
+        fs::remove_file(&store.path).expect("remove swapped link");
+        fs::rename(&backup, &store.path).expect("restore original");
+        assert_eq!(fs::read(&store.path).expect("restored settings"), original);
+        assert!(fs::read_dir(&store.root)
+            .expect("support entries")
+            .all(|entry| !entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
     fn populated_audit(policy_version: u64, attempted_tasks: u64) -> SupportDurableAuditV1 {
         SupportDurableAuditV1 {
             schema_version: AUDIT_SCHEMA_VERSION,
@@ -1094,7 +1665,7 @@ mod tests {
         );
         assert_eq!(SupportAuditStore::open(&root, Some(1)).state, previous);
 
-        fs::set_permissions(&store.path, fs::Permissions::from_mode(0o666))
+        fs::set_permissions(&store.path, fs::Permissions::from_mode(0o644))
             .expect("unsafe audit mode");
         let unsafe_open = SupportAuditStore::open(&root, Some(1));
         assert!(unsafe_open.store.is_none());
@@ -1108,8 +1679,83 @@ mod tests {
                 .permissions()
                 .mode()
                 & 0o777,
-            0o666
+            0o644
         );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn audit_parent_and_entry_symlinks_fail_closed_without_following_targets() {
+        let unsafe_parent_root = temporary_directory("support-audit-unsafe-parent");
+        let unsafe_support = unsafe_parent_root.join(SUPPORT_DIRECTORY);
+        fs::create_dir_all(&unsafe_support).expect("unsafe parent");
+        fs::set_permissions(&unsafe_support, fs::Permissions::from_mode(0o755))
+            .expect("unsafe parent mode");
+        let unsafe_parent = SupportAuditStore::open(&unsafe_parent_root, Some(1));
+        assert!(unsafe_parent.store.is_none());
+        assert_eq!(
+            unsafe_parent.recovery_code.as_deref(),
+            Some(SUPPORT_AUDIT_UNSAFE)
+        );
+
+        let root = temporary_directory("support-audit-symlink-entry");
+        let store = SupportAuditStore::open(&root, Some(1))
+            .store
+            .expect("store");
+        let backup = store.root.join("audit-backup.sqlite3");
+        let public_target = root.join("public-audit-target.txt");
+        fs::write(&public_target, b"public-audit-sentinel").expect("public target");
+        fs::rename(&store.path, &backup).expect("backup audit");
+        symlink(&public_target, &store.path).expect("audit symlink");
+
+        let opened = SupportAuditStore::open(&root, Some(1));
+        assert!(opened.store.is_none());
+        assert_eq!(opened.recovery_code.as_deref(), Some(SUPPORT_AUDIT_UNSAFE));
+        assert_eq!(
+            fs::read(&public_target).expect("public sentinel"),
+            b"public-audit-sentinel"
+        );
+        fs::remove_file(&store.path).expect("remove symlink");
+        fs::rename(&backup, &store.path).expect("restore audit");
+        fs::remove_dir_all(unsafe_parent_root).expect("unsafe parent cleanup");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn audit_namespace_swap_is_rejected_without_writing_public_target() {
+        let root = temporary_directory("support-audit-swap");
+        let store = SupportAuditStore::open(&root, Some(1))
+            .store
+            .expect("store");
+        let next = populated_audit(1, 3);
+        let payload = serde_json::to_string(&next).expect("audit payload");
+        let backup = store.root.join("audit-swap-backup.sqlite3");
+        let public_target = root.join("public-audit-target.txt");
+        fs::write(&public_target, b"public-audit-sentinel").expect("public target");
+
+        let error = store
+            .replace_database_with_hook(&payload, "test", || {
+                fs::rename(&store.path, &backup).expect("pin original entry");
+                symlink(&public_target, &store.path).expect("swap audit target");
+            })
+            .expect_err("namespace swap must fail");
+        assert_eq!(error.code, SUPPORT_AUDIT_UNSAFE);
+        assert_eq!(
+            fs::read(&public_target).expect("public sentinel"),
+            b"public-audit-sentinel"
+        );
+        fs::remove_file(&store.path).expect("remove swapped link");
+        fs::rename(&backup, &store.path).expect("restore original");
+        assert!(fs::read_dir(&store.root)
+            .expect("support entries")
+            .all(|entry| !entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")));
+        assert!(SupportAuditStore::open(&root, Some(1))
+            .recovery_code
+            .is_none());
         fs::remove_dir_all(root).expect("cleanup");
     }
 

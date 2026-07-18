@@ -1,7 +1,7 @@
 ---
 title: "S-004 設定・診断"
 description: "言語、Context、Live2D model、音声、support、履歴・privacy、起動前提と復旧状態を安全に管理する画面仕様。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "Settings tab、診断、Live2D import、TTS、support、history/privacy設定を実装するとき。"
   - "S-004とWORK、CODE、SUP、GIT、HIST、LIVE、NARR、APP要件の対応を確認するとき。"
@@ -246,7 +246,7 @@ native adapterは240 Unicode scalar以下、NULなしで、括弧・引用符・
 | Effective state      | enabled / user disabled / role disabled / release blocked / settings recovery。希望値とは別のbadgeとfallback reasonを表示 | non-approved binaryとschema不一致はmodel利用0のrelease blockedとし、approved/observed CLI version・binary hash prefixを併記する                                                   |
 | Usage / audit        | active/queued/max capacity、attempted/started/succeeded/failed/canceled/unavailable、input/output/total token、total latency、latest outcome、last error、fallback count、固定model/effort/permission/skill/non-persistence。bounded owner-only SQLiteからrestart復元 | policy version不整合、DB schema/corrupt/unsafe permissionはoff/offへfail closedする。prompt/response本文、private path、credentialを表示・保存しない                                                                                                                 |
 
-Support sectionは実装済みのglobalとcommit explainerだけを表示し、未実装のpresence/narrationとdecision explainerをdisabled controlやcoming-soon rowとしても表示しない。toggle保存中は二重操作を無効にする。保存・停止失敗ではnative snapshotを再取得し、保存済みoff、更新後version、safe codeを同時表示して、次の操作でstale versionを送らない。Strict Mode effect replayは新mount leaseとして再読込し、unmount済みgenerationのpending IPC resultを描画しない。role toggleをoffにするとqueued taskをcancelし、新規invocationを作らない。active taskは5秒以内にCanceled/Timeoutへ遷移させ、main turnを継続する。non-persistence release auditの最終resultと実施日時へDiagnosticsから到達できる。
+Support sectionは実装済みのglobalとcommit explainerだけを表示し、未実装のpresence/narrationとdecision explainerをdisabled controlやcoming-soon rowとしても表示しない。toggle保存中は二重操作を無効にする。保存・停止失敗ではnative snapshotを再取得し、保存済みoff、更新後version、safe codeを同時表示して、次の操作でstale versionを送らない。restart後もdurable auditから復元したlast safe errorを表示する。approved badgeにはskill versionと16文字digest prefixを必須とする。Strict Mode effect replayは新mount leaseとして再読込し、unmount済みgenerationのpending IPC resultを描画しない。role toggleをoffにするとqueued taskをcancelし、cancel=falseまたはownership残存をcleanup不収束としてforce retryする。disable recoveryのforceはterminal shutdown latchと分離し、再enable後は次jobを新しく起動できる。active taskは5秒以内にCanceled/Timeoutへ遷移させ、main turnを継続する。non-persistence release auditの最終resultと実施日時へDiagnosticsから到達できる。
 
 commit explainer jobの起動とpresentation開始は別状態である。background jobが自動でstarted/streaming/completedになってもcaption/TTSは開始せず、「詳しく教えて」で対象commitをactive presentationにした後だけ表示・任意読み上げへ進む。
 
