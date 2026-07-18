@@ -25,19 +25,25 @@ use super::repository::{
 };
 use super::runner::{GitRunner, GitRunnerError};
 use super::types::{
-    CommitDiffFile, CommitEvidenceDetail, CommitEvidenceDetailRequest, CommitEvidenceFilter,
-    CommitEvidencePage, CommitEvidenceV1, GitObservation, GitObservationReason,
-    ListCommitEvidenceRequest, ObserveGitRepositoryRequest, ObserveTerminalWorkUnitRequest,
-    PrepareCommitExplanationEvidenceRequest, ReadCommitDiffRequest, SkillInjectionMode,
-    SkillPathAuthority, TerminalWorkUnitObservationResult, WorkUnitGitObservation,
-    GIT_REVIEW_SCHEMA_VERSION, MAX_EVIDENCE_ITEMS,
+    valid_git_text, CommitDiffFile, CommitEvidenceDetail, CommitEvidenceDetailRequest,
+    CommitEvidenceFilter, CommitEvidencePage, CommitEvidenceV1, GitObservation,
+    GitObservationReason, ListCommitEvidenceRequest, ObserveGitRepositoryRequest,
+    ObserveTerminalWorkUnitRequest, PrepareCommitExplanationEvidenceRequest, ReadCommitDiffRequest,
+    SkillInjectionMode, SkillPathAuthority, TerminalWorkUnitObservationResult,
+    WorkUnitGitObservation, GIT_REVIEW_SCHEMA_VERSION, MAX_EVIDENCE_ITEMS,
+    MAX_GIT_ACCEPTANCE_CHARS, MAX_GIT_ATTEMPT_APPROACH_CHARS, MAX_GIT_ATTEMPT_LEARNING_CHARS,
+    MAX_GIT_ATTEMPT_OUTCOME_CHARS, MAX_GIT_BLOCK_REASON_CHARS, MAX_GIT_DECISION_ANSWER_CHARS,
+    MAX_GIT_DECISION_RATIONALE_CHARS, MAX_GIT_DECISION_SUMMARY_CHARS, MAX_GIT_OBJECTIVE_CHARS,
+    MAX_GIT_RISK_CATEGORY_CHARS, MAX_GIT_RISK_MITIGATION_CHARS, MAX_GIT_RISK_SUMMARY_CHARS,
+    MAX_GIT_VERIFICATION_CHECK_CHARS, MAX_GIT_VERIFICATION_SUMMARY_CHARS,
 };
 
 const OPERATION_OBSERVE: &str = "observe_git_repository";
 const OPERATION_TERMINAL: &str = "observe_terminal_work_unit";
 const OPERATION_READ: &str = "read_git_commit_evidence";
-const MAX_TEXT: usize = 8 * 1024;
 const MAX_LIST_LIMIT: u32 = 50;
+const MAX_FILTER_SCAN_COMMITS: usize = 1_000;
+const FILTER_SCAN_BATCH: usize = 50;
 
 type ResolverFuture<'a> =
     Pin<Box<dyn Future<Output = Result<PathBuf, GitReviewError>> + Send + 'a>>;
@@ -319,41 +325,80 @@ impl GitReviewService {
             });
         }
         let requested = request.limit as usize;
-        let identities = list_commit_identities(&self.runner, &root, offset, requested + 1).await?;
-        let has_more = identities.len() > requested;
         let correlated = self
             .history
-            .list_commit_evidence(&request.workspace_id, 200)
+            .list_commit_evidence(&request.workspace_id, MAX_FILTER_SCAN_COMMITS as u32)
             .await?
             .into_iter()
             .map(|evidence| (evidence.identity.commit_sha.clone(), evidence))
             .collect::<BTreeMap<_, _>>();
         let mut items = Vec::new();
-        for identity in identities.into_iter().take(requested) {
-            let detail = if let Some(evidence) = correlated.get(&identity.commit_sha) {
-                evidence.clone()
-            } else {
-                build_commit_evidence(&self.runner, &root, &request.workspace_id, identity, None)
+        let mut scanned = 0_usize;
+        let mut scan_offset = offset;
+        let mut next_offset = None;
+
+        'scan: while scanned < MAX_FILTER_SCAN_COMMITS {
+            let batch_capacity = FILTER_SCAN_BATCH.min(MAX_FILTER_SCAN_COMMITS - scanned);
+            let identities =
+                list_commit_identities(&self.runner, &root, scan_offset, batch_capacity + 1)
+                    .await?;
+            let has_unprocessed_identity = identities.len() > batch_capacity;
+            let process_count = identities.len().min(batch_capacity);
+            if process_count == 0 {
+                break;
+            }
+
+            for (index, identity) in identities.into_iter().take(process_count).enumerate() {
+                let identity_offset = scan_offset + index;
+                let detail = if let Some(evidence) = correlated.get(&identity.commit_sha) {
+                    evidence.clone()
+                } else if request.filter == CommitEvidenceFilter::ThisWorkUnit {
+                    continue;
+                } else {
+                    build_commit_evidence(
+                        &self.runner,
+                        &root,
+                        &request.workspace_id,
+                        identity,
+                        None,
+                    )
                     .await?
-            };
-            let include = match request.filter {
-                CommitEvidenceFilter::All => true,
-                CommitEvidenceFilter::ThisWorkUnit => {
-                    detail.work_unit_id.as_deref() == request.work_unit_id.as_deref()
+                };
+                let include = match request.filter {
+                    CommitEvidenceFilter::All => true,
+                    CommitEvidenceFilter::ThisWorkUnit => {
+                        detail.work_unit_id.as_deref() == request.work_unit_id.as_deref()
+                    }
+                    CommitEvidenceFilter::NeedsAttention => detail
+                        .gates
+                        .iter()
+                        .any(|gate| !matches!(gate.outcome, super::types::GateOutcome::Pass)),
+                };
+                if include {
+                    if items.len() == requested {
+                        next_offset = Some(identity_offset);
+                        break 'scan;
+                    }
+                    items.push(summarize(&detail));
                 }
-                CommitEvidenceFilter::NeedsAttention => detail
-                    .gates
-                    .iter()
-                    .any(|gate| !matches!(gate.outcome, super::types::GateOutcome::Pass)),
-            };
-            if include {
-                items.push(summarize(&detail));
+            }
+
+            scan_offset += process_count;
+            scanned += process_count;
+            if process_count < batch_capacity {
+                break;
+            }
+            if scanned == MAX_FILTER_SCAN_COMMITS && has_unprocessed_identity {
+                next_offset = Some(scan_offset);
+            }
+            if !has_unprocessed_identity {
+                break;
             }
         }
         Ok(CommitEvidencePage {
             schema_version: GIT_REVIEW_SCHEMA_VERSION,
             items,
-            next_cursor: has_more.then(|| format!("offset-{}", offset + requested)),
+            next_cursor: next_offset.map(|offset| format!("offset-{offset}")),
         })
     }
 
@@ -539,8 +584,6 @@ fn validate_terminal_request(
         validate_opaque_id(value, code)?;
     }
     if request.workspace_generation == 0
-        || request.objective.trim().is_empty()
-        || request.objective.len() > MAX_TEXT
         || request.acceptance.len() > 20
         || request.verification.len() > MAX_EVIDENCE_ITEMS
         || request.decisions.len() > MAX_EVIDENCE_ITEMS
@@ -549,10 +592,21 @@ fn validate_terminal_request(
     {
         return Err(git_error("GIT-TERMINAL-INPUT", OPERATION_TERMINAL, false));
     }
-    for value in request_texts(request) {
-        if value.contains('\0') || value.len() > MAX_TEXT {
-            return Err(git_error("GIT-EVIDENCE-TEXT", OPERATION_TERMINAL, false));
-        }
+    if !valid_git_text(&request.objective, MAX_GIT_OBJECTIVE_CHARS, false)
+        || !request
+            .acceptance
+            .iter()
+            .all(|value| valid_git_text(value, MAX_GIT_ACCEPTANCE_CHARS, false))
+        || !request.verification.iter().all(valid_terminal_verification)
+        || !request.decisions.iter().all(valid_terminal_decision)
+        || !request.failed_attempts.iter().all(valid_terminal_attempt)
+        || !request.risks.iter().all(valid_terminal_risk)
+        || !request
+            .reported_commit_block_reason
+            .as_deref()
+            .is_none_or(|value| valid_git_text(value, MAX_GIT_BLOCK_REASON_CHARS, false))
+    {
+        return Err(git_error("GIT-EVIDENCE-TEXT", OPERATION_TERMINAL, false));
     }
     let skill = &request.commit_skill_injection;
     if skill.schema_version != GIT_REVIEW_SCHEMA_VERSION
@@ -593,50 +647,36 @@ fn validate_schema(schema_version: u16, operation: &'static str) -> Result<(), G
     }
 }
 
-fn request_texts(request: &ObserveTerminalWorkUnitRequest) -> impl Iterator<Item = &str> {
-    std::iter::once(request.objective.as_str())
-        .chain(request.acceptance.iter().map(String::as_str))
-        .chain(request.verification.iter().flat_map(|item| {
-            [
-                item.evidence_id.as_str(),
-                item.source_event_id.as_str(),
-                item.check.as_str(),
-                item.summary.as_str(),
-            ]
-        }))
-        .chain(request.decisions.iter().flat_map(|item| {
-            [
-                item.decision_id.as_str(),
-                item.source_event_id.as_str(),
-                item.summary.as_str(),
-                item.answer.as_str(),
-                item.rationale.as_str(),
-            ]
-        }))
-        .chain(request.failed_attempts.iter().flat_map(|item| {
-            [
-                item.attempt_id.as_str(),
-                item.source_event_id.as_str(),
-                item.approach.as_str(),
-                item.outcome.as_str(),
-                item.learning.as_str(),
-            ]
-        }))
-        .chain(request.risks.iter().flat_map(|item| {
-            [
-                item.risk_id.as_str(),
-                item.source_event_id.as_str(),
-                item.category.as_str(),
-                item.summary.as_str(),
-                item.mitigation.as_str(),
-            ]
-        }))
-        .chain(
-            request
-                .reported_commit_block_reason
-                .iter()
-                .map(String::as_str),
-        )
+fn valid_terminal_verification(value: &super::types::VerificationEvidence) -> bool {
+    validate_opaque_id(&value.evidence_id, "GIT-EVIDENCE-ID").is_ok()
+        && validate_opaque_id(&value.source_event_id, "GIT-SOURCE-EVENT-ID").is_ok()
+        && valid_git_text(&value.check, MAX_GIT_VERIFICATION_CHECK_CHARS, false)
+        && value.duration_ms <= 24 * 60 * 60 * 1_000
+        && valid_git_text(&value.summary, MAX_GIT_VERIFICATION_SUMMARY_CHARS, true)
+}
+
+fn valid_terminal_decision(value: &super::types::DecisionEvidence) -> bool {
+    validate_opaque_id(&value.decision_id, "GIT-DECISION-ID").is_ok()
+        && validate_opaque_id(&value.source_event_id, "GIT-SOURCE-EVENT-ID").is_ok()
+        && valid_git_text(&value.summary, MAX_GIT_DECISION_SUMMARY_CHARS, false)
+        && valid_git_text(&value.answer, MAX_GIT_DECISION_ANSWER_CHARS, false)
+        && valid_git_text(&value.rationale, MAX_GIT_DECISION_RATIONALE_CHARS, true)
+}
+
+fn valid_terminal_attempt(value: &super::types::FailedAttemptEvidence) -> bool {
+    validate_opaque_id(&value.attempt_id, "GIT-ATTEMPT-ID").is_ok()
+        && validate_opaque_id(&value.source_event_id, "GIT-SOURCE-EVENT-ID").is_ok()
+        && valid_git_text(&value.approach, MAX_GIT_ATTEMPT_APPROACH_CHARS, false)
+        && valid_git_text(&value.outcome, MAX_GIT_ATTEMPT_OUTCOME_CHARS, false)
+        && valid_git_text(&value.learning, MAX_GIT_ATTEMPT_LEARNING_CHARS, true)
+}
+
+fn valid_terminal_risk(value: &super::types::KnownRisk) -> bool {
+    validate_opaque_id(&value.risk_id, "GIT-RISK-ID").is_ok()
+        && validate_opaque_id(&value.source_event_id, "GIT-SOURCE-EVENT-ID").is_ok()
+        && valid_git_text(&value.category, MAX_GIT_RISK_CATEGORY_CHARS, false)
+        && valid_git_text(&value.summary, MAX_GIT_RISK_SUMMARY_CHARS, false)
+        && valid_git_text(&value.mitigation, MAX_GIT_RISK_MITIGATION_CHARS, true)
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -693,6 +733,130 @@ fn service_runner_error(error: GitRunnerError) -> GitReviewError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn terminal_request_fixture() -> ObserveTerminalWorkUnitRequest {
+        ObserveTerminalWorkUnitRequest {
+            schema_version: GIT_REVIEW_SCHEMA_VERSION,
+            client_request_id: "terminal-one".to_owned(),
+            workspace_id: "workspace-one".to_owned(),
+            workspace_generation: 1,
+            before_observation_id: "observation-one".to_owned(),
+            work_unit_id: "work-unit-one".to_owned(),
+            source_event_id: "event-one".to_owned(),
+            terminal_state: super::super::types::WorkUnitTerminalState::Completed,
+            objective: "Observe commits".to_owned(),
+            acceptance: vec!["Evidence is read only".to_owned()],
+            verification: vec![super::super::types::VerificationEvidence {
+                evidence_id: "verification-one".to_owned(),
+                source_event_id: "verification-event-one".to_owned(),
+                check: "cargo test git_review".to_owned(),
+                result: super::super::types::VerificationResult::Passed,
+                duration_ms: 1,
+                summary: String::new(),
+            }],
+            decisions: vec![super::super::types::DecisionEvidence {
+                decision_id: "decision-one".to_owned(),
+                source_event_id: "decision-event-one".to_owned(),
+                summary: "Keep reads isolated".to_owned(),
+                answer: "Use the shadow repository".to_owned(),
+                rationale: String::new(),
+                reversible: true,
+            }],
+            failed_attempts: vec![super::super::types::FailedAttemptEvidence {
+                attempt_id: "attempt-one".to_owned(),
+                source_event_id: "attempt-event-one".to_owned(),
+                approach: "Read the repository directly".to_owned(),
+                outcome: "Rejected".to_owned(),
+                learning: String::new(),
+            }],
+            risks: vec![super::super::types::KnownRisk {
+                risk_id: "risk-one".to_owned(),
+                source_event_id: "risk-event-one".to_owned(),
+                category: "repository integrity".to_owned(),
+                level: super::super::types::RiskLevel::Low,
+                summary: "Reads must remain isolated".to_owned(),
+                mitigation: String::new(),
+                resolved: true,
+            }],
+            commit_skill_injection: super::super::types::CommitSkillInjectionAudit {
+                schema_version: GIT_REVIEW_SCHEMA_VERSION,
+                skill_id: "coding-wife-commit-work".to_owned(),
+                skill_version: "1.0.0".to_owned(),
+                content_digest: "a".repeat(64),
+                path_authority: SkillPathAuthority::AppBundle,
+                injection_mode: SkillInjectionMode::SkillInput,
+                workspace_generation: 1,
+                work_unit_id: "work-unit-one".to_owned(),
+                client_request_id: "turn-one".to_owned(),
+                injected_at: "2026-07-18T00:00:00Z".to_owned(),
+            },
+            reported_commit_block_reason: Some("No commit was produced".to_owned()),
+        }
+    }
+
+    fn assert_terminal_text_boundary(
+        maximum: usize,
+        set: impl Fn(&mut ObserveTerminalWorkUnitRequest, String),
+    ) {
+        let mut exact = terminal_request_fixture();
+        set(&mut exact, "x".repeat(maximum));
+        validate_terminal_request(&exact).expect("exact shared history boundary");
+
+        let mut over = terminal_request_fixture();
+        set(&mut over, "x".repeat(maximum + 1));
+        assert_eq!(
+            validate_terminal_request(&over)
+                .expect_err("over shared history boundary")
+                .code,
+            "GIT-EVIDENCE-TEXT"
+        );
+    }
+
+    #[test]
+    fn terminal_text_bounds_match_the_persisted_git_schema() {
+        assert_terminal_text_boundary(MAX_GIT_OBJECTIVE_CHARS, |request, value| {
+            request.objective = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_ACCEPTANCE_CHARS, |request, value| {
+            request.acceptance[0] = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_VERIFICATION_CHECK_CHARS, |request, value| {
+            request.verification[0].check = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_VERIFICATION_SUMMARY_CHARS, |request, value| {
+            request.verification[0].summary = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_DECISION_SUMMARY_CHARS, |request, value| {
+            request.decisions[0].summary = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_DECISION_ANSWER_CHARS, |request, value| {
+            request.decisions[0].answer = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_DECISION_RATIONALE_CHARS, |request, value| {
+            request.decisions[0].rationale = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_ATTEMPT_APPROACH_CHARS, |request, value| {
+            request.failed_attempts[0].approach = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_ATTEMPT_OUTCOME_CHARS, |request, value| {
+            request.failed_attempts[0].outcome = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_ATTEMPT_LEARNING_CHARS, |request, value| {
+            request.failed_attempts[0].learning = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_RISK_CATEGORY_CHARS, |request, value| {
+            request.risks[0].category = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_RISK_SUMMARY_CHARS, |request, value| {
+            request.risks[0].summary = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_RISK_MITIGATION_CHARS, |request, value| {
+            request.risks[0].mitigation = value
+        });
+        assert_terminal_text_boundary(MAX_GIT_BLOCK_REASON_CHARS, |request, value| {
+            request.reported_commit_block_reason = Some(value)
+        });
+    }
 
     #[test]
     fn terminal_skill_audit_rejects_the_wrong_bundled_skill() {

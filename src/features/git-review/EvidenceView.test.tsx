@@ -14,6 +14,7 @@ import type {
   GitReviewCommand,
   GitReviewRequestMap,
   GitReviewResponseMap,
+  ListCommitEvidenceRequest,
 } from "@/lib/contracts/git-review"
 
 const currentCommitEvidenceId = `commit-${"a".repeat(40)}`
@@ -133,6 +134,40 @@ describe("EvidenceView", () => {
       }),
     )
     expect(await screen.findByText(/async activate/)).toBeVisible()
+  })
+
+  it("offers earlier commits when a filtered page is empty but pageable", async () => {
+    const user = userEvent.setup()
+    const delegate = new DemoGitReviewTransport(0)
+    const transport: GitReviewTransport = {
+      kind: "demo",
+      async request<K extends GitReviewCommand>(
+        command: K,
+        request: GitReviewRequestMap[K],
+      ): Promise<GitReviewResponseMap[K]> {
+        if (command === "list_commit_evidence") {
+          const listRequest = request as ListCommitEvidenceRequest
+          if (listRequest.cursor === null) {
+            return {
+              schemaVersion: 1,
+              items: [],
+              nextCursor: "offset-50",
+            } as GitReviewResponseMap[K]
+          }
+        }
+        return delegate.request(command, request)
+      },
+    }
+    renderEvidence({ transport })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Load earlier commits" }),
+    )
+    expect(
+      await screen.findByRole("option", {
+        name: /feat\(git\): add read-only commit evidence/,
+      }),
+    ).toBeVisible()
   })
 
   it("routes a not-generated explanation through app-owned user_request", async () => {

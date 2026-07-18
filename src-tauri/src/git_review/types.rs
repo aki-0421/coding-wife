@@ -6,6 +6,33 @@ pub const MAX_CHANGED_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_CHANGED_LINES: u64 = 50_000;
 pub const MAX_FILE_DIFF_BYTES: usize = 1024 * 1024;
 pub const MAX_EVIDENCE_ITEMS: usize = 100;
+pub const MAX_COMMIT_EVIDENCE_PAYLOAD_BYTES: usize = 64 * 1024;
+pub const MAX_GIT_COMMIT_SUBJECT_CHARS: usize = 1024;
+pub const MAX_GIT_COMMIT_BODY_CHARS: usize = 16 * 1024;
+pub const MAX_GIT_AUTHOR_NAME_CHARS: usize = 256;
+pub const MAX_GIT_AUTHOR_EMAIL_CHARS: usize = 512;
+pub const MAX_GIT_OBJECTIVE_CHARS: usize = 500;
+pub const MAX_GIT_ACCEPTANCE_CHARS: usize = 1024;
+pub const MAX_GIT_VERIFICATION_CHECK_CHARS: usize = 512;
+pub const MAX_GIT_VERIFICATION_SUMMARY_CHARS: usize = 4096;
+pub const MAX_GIT_DECISION_SUMMARY_CHARS: usize = 2048;
+pub const MAX_GIT_DECISION_ANSWER_CHARS: usize = 2048;
+pub const MAX_GIT_DECISION_RATIONALE_CHARS: usize = 4096;
+pub const MAX_GIT_ATTEMPT_APPROACH_CHARS: usize = 2048;
+pub const MAX_GIT_ATTEMPT_OUTCOME_CHARS: usize = 1024;
+pub const MAX_GIT_ATTEMPT_LEARNING_CHARS: usize = 2048;
+pub const MAX_GIT_RISK_CATEGORY_CHARS: usize = 256;
+pub const MAX_GIT_RISK_SUMMARY_CHARS: usize = 2048;
+pub const MAX_GIT_RISK_MITIGATION_CHARS: usize = 2048;
+pub const MAX_GIT_BLOCK_REASON_CHARS: usize = 2048;
+
+pub fn valid_git_text(value: &str, maximum: usize, allow_empty: bool) -> bool {
+    (allow_empty || !value.trim().is_empty())
+        && value.chars().count() <= maximum
+        && value
+            .chars()
+            .all(|character| !character.is_control() || matches!(character, '\n' | '\r' | '\t'))
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

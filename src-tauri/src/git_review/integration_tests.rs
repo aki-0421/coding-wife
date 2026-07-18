@@ -136,6 +136,54 @@ async fn exact_terminal_replay_survives_service_restart_without_duplicate_eviden
 }
 
 #[tokio::test]
+async fn filtered_page_scans_past_fifty_non_matching_commits() {
+    let fixture = RepositoryFixture::new("observer-filter-page");
+    let initial_sha = fixture.git_text(&["rev-parse", "HEAD"]);
+    let history = Arc::new(MemoryGitReviewHistory::new());
+    let service = service(&fixture.root, history);
+    let before = service
+        .observe_repository(start_request("observe-filter-page"))
+        .await
+        .expect("before observation");
+
+    for index in 0..50 {
+        std::fs::write(
+            fixture.root.join("series.txt"),
+            format!("verified change {index}\n"),
+        )
+        .expect("write filtered fixture");
+        fixture.git(&["add", "series.txt"]);
+        fixture.git(&[
+            "commit",
+            "-q",
+            "-m",
+            &format!("feat: verified filtered commit {index}"),
+        ]);
+    }
+    service
+        .observe_terminal_work_unit(terminal_request(&before.observation_id))
+        .await
+        .expect("terminal observation");
+
+    let page = service
+        .list_commit_evidence(ListCommitEvidenceRequest {
+            schema_version: GIT_REVIEW_SCHEMA_VERSION,
+            workspace_id: "workspace-fixture".to_owned(),
+            workspace_generation: 1,
+            cursor: None,
+            limit: 50,
+            filter: CommitEvidenceFilter::NeedsAttention,
+            work_unit_id: None,
+        })
+        .await
+        .expect("filtered page");
+
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].commit_sha, initial_sha);
+    assert_eq!(page.next_cursor, None);
+}
+
+#[tokio::test]
 async fn explanation_evidence_removes_paths_and_raw_diff_content() {
     let fixture = RepositoryFixture::new("observer-explanation");
     let history = Arc::new(MemoryGitReviewHistory::new());
@@ -167,6 +215,46 @@ async fn explanation_evidence_removes_paths_and_raw_diff_content() {
     assert!(!encoded.contains("README.md"));
     assert!(!encoded.contains("diff --git"));
     assert_eq!(evidence.locale, "ja");
+}
+
+#[tokio::test]
+async fn explanation_evidence_fails_closed_for_paths_and_credentials() {
+    let fixture = RepositoryFixture::new("observer-private-explanation");
+    std::fs::write(fixture.root.join("private.txt"), "private fixture\n")
+        .expect("write private fixture");
+    fixture.git(&["add", "private.txt"]);
+    fixture.git(&[
+        "commit",
+        "-q",
+        "-m",
+        "fix src/private.ts with ghp_abcdefghijklmnopqrstuvwxyz123456",
+    ]);
+    let service = service(&fixture.root, Arc::new(MemoryGitReviewHistory::new()));
+    let page = service
+        .list_commit_evidence(ListCommitEvidenceRequest {
+            schema_version: 1,
+            workspace_id: "workspace-fixture".to_owned(),
+            workspace_generation: 1,
+            cursor: None,
+            limit: 10,
+            filter: CommitEvidenceFilter::All,
+            work_unit_id: None,
+        })
+        .await
+        .expect("list");
+    let error = service
+        .prepare_explanation_evidence(PrepareCommitExplanationEvidenceRequest {
+            schema_version: 1,
+            workspace_id: "workspace-fixture".to_owned(),
+            workspace_generation: 1,
+            commit_evidence_id: page.items[0].commit_evidence_id.clone(),
+            locale: "en".to_owned(),
+            selection_version: 1,
+        })
+        .await
+        .expect_err("private evidence must fail closed");
+
+    assert_eq!(error.code, "GIT-EXPLANATION-PRIVATE-MATERIAL");
 }
 
 #[test]

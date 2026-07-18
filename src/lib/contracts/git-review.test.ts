@@ -152,6 +152,33 @@ function explanationEvidence() {
   }
 }
 
+function explanationEvidenceWithEncodedBytes(target: number) {
+  const decisions = Array.from({ length: 20 }, (_, index) => ({
+    decisionId: `decision-${index}`,
+    sourceEventId: `decision-event-${index}`,
+    summary: `Decision ${index}`,
+    answer: "Keep the boundary read only",
+    rationale: "",
+    reversible: true,
+  }))
+  const evidence = {
+    ...explanationEvidence(),
+    body: "",
+    verification: [],
+    decisions,
+  }
+  let remaining =
+    target - new TextEncoder().encode(JSON.stringify(evidence)).byteLength
+  for (const decision of decisions) {
+    if (remaining <= 0) break
+    const length = Math.min(4096, remaining)
+    decision.rationale = "x".repeat(length)
+    remaining -= length
+  }
+  if (remaining !== 0) throw new Error("Unable to create payload boundary")
+  return evidence
+}
+
 describe("read-only Git review contracts", () => {
   it("parses observation, list, detail, diff, and explanation responses", () => {
     expect(parseGitObservation(observation())).toEqual(observation())
@@ -215,6 +242,139 @@ describe("read-only Git review contracts", () => {
         ...explanationEvidence(),
         subject: "token=secret-value",
       }),
+    ).toThrow(GitReviewContractError)
+  })
+
+  it("rejects every public string slot when it contains a repository path", () => {
+    const privatePath = "src/private.ts"
+    const mutations = [
+      { subject: privatePath },
+      { body: privatePath },
+      {
+        verification: [{ ...verification(), check: privatePath }],
+      },
+      {
+        verification: [{ ...verification(), summary: privatePath }],
+      },
+      {
+        decisions: [
+          {
+            decisionId: "decision-one",
+            sourceEventId: "decision-event-one",
+            summary: privatePath,
+            answer: "Keep the boundary read only",
+            rationale: "No private material",
+            reversible: true,
+          },
+        ],
+      },
+      {
+        decisions: [
+          {
+            decisionId: "decision-one",
+            sourceEventId: "decision-event-one",
+            summary: "Keep the boundary read only",
+            answer: privatePath,
+            rationale: "No private material",
+            reversible: true,
+          },
+        ],
+      },
+      {
+        decisions: [
+          {
+            decisionId: "decision-one",
+            sourceEventId: "decision-event-one",
+            summary: "Keep the boundary read only",
+            answer: "No private material",
+            rationale: privatePath,
+            reversible: true,
+          },
+        ],
+      },
+      {
+        risks: [
+          {
+            riskId: "risk-one",
+            sourceEventId: "risk-event-one",
+            category: privatePath,
+            level: "low",
+            summary: "No private material",
+            mitigation: "Keep the boundary read only",
+            resolved: false,
+          },
+        ],
+      },
+      {
+        risks: [
+          {
+            riskId: "risk-one",
+            sourceEventId: "risk-event-one",
+            category: "privacy",
+            level: "low",
+            summary: privatePath,
+            mitigation: "Keep the boundary read only",
+            resolved: false,
+          },
+        ],
+      },
+      {
+        risks: [
+          {
+            riskId: "risk-one",
+            sourceEventId: "risk-event-one",
+            category: "privacy",
+            level: "low",
+            summary: "No private material",
+            mitigation: privatePath,
+            resolved: false,
+          },
+        ],
+      },
+    ]
+
+    for (const mutation of mutations) {
+      expect(() =>
+        parseCommitEvidenceV1({ ...explanationEvidence(), ...mutation }),
+      ).toThrow(GitReviewContractError)
+    }
+  })
+
+  it("rejects path variants and common credential formats", () => {
+    for (const privateMaterial of [
+      "src/private.ts",
+      "./src/private.ts",
+      "../private/config.json",
+      "/Users/alice/repository/private.ts",
+      String.raw`C:\Users\alice\private.ts`,
+      "<workspace>/src/private.ts",
+      "~/private/config.json",
+      "Bearer abcdefghijklmnop",
+      "token=credential-value",
+      "ghp_abcdefghijklmnopqrstuvwxyz123456",
+      "github_pat_abcdefghijklmnopqrstuvwxyz",
+      "AKIAABCDEFGHIJKLMNOP",
+      "xoxb-1234567890-abcdefghijkl",
+      "-----BEGIN PRIVATE KEY-----",
+    ]) {
+      expect(() =>
+        parseCommitEvidenceV1({
+          ...explanationEvidence(),
+          subject: privateMaterial,
+        }),
+      ).toThrow(GitReviewContractError)
+    }
+  })
+
+  it("accepts exactly 64 KiB and rejects the next serialized byte", () => {
+    const exact = explanationEvidenceWithEncodedBytes(64 * 1024)
+    expect(new TextEncoder().encode(JSON.stringify(exact))).toHaveLength(
+      64 * 1024,
+    )
+    expect(parseCommitEvidenceV1(exact)).toEqual(exact)
+
+    expect(() =>
+      parseCommitEvidenceV1(explanationEvidenceWithEncodedBytes(64 * 1024 + 1)),
     ).toThrow(GitReviewContractError)
   })
 

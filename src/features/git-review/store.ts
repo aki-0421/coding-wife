@@ -574,7 +574,10 @@ export class GitReviewStore {
         page.items.some((item) => item.commitEvidenceId === selected)
       this.setSnapshot({
         ...this.current,
-        collectionStatus: page.items.length === 0 ? "empty" : "ready",
+        collectionStatus:
+          page.items.length === 0 && page.nextCursor === null
+            ? "empty"
+            : "ready",
         items: page.items,
         nextCursor: page.nextCursor,
         loadingMore: false,

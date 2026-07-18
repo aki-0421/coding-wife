@@ -226,4 +226,39 @@ describe("GitReviewStore", () => {
     expect(store.snapshot().selectedCommitEvidenceId).toBeNull()
     expect(store.snapshot().detail).toBeNull()
   })
+
+  it("keeps an empty filtered page reachable when an earlier cursor exists", async () => {
+    const delegate = new DemoGitReviewTransport(0)
+    const transport: GitReviewTransport = {
+      kind: "demo",
+      async request<K extends GitReviewCommand>(
+        command: K,
+        request: GitReviewRequestMap[K],
+      ): Promise<GitReviewResponseMap[K]> {
+        if (command === gitReviewCommands.listCommitEvidence) {
+          const listRequest = request as ListCommitEvidenceRequest
+          if (listRequest.cursor === null) {
+            return {
+              schemaVersion: 1,
+              items: [],
+              nextCursor: "offset-50",
+            } as GitReviewResponseMap[K]
+          }
+        }
+        return delegate.request(command, request)
+      },
+    }
+    const store = new GitReviewStore("workspace-demo", transport)
+
+    await store.activate()
+    expect(store.snapshot()).toMatchObject({
+      collectionStatus: "ready",
+      items: [],
+      nextCursor: "offset-50",
+    })
+
+    await store.loadMore()
+    expect(store.snapshot().collectionStatus).toBe("ready")
+    expect(store.snapshot().items.length).toBeGreaterThan(0)
+  })
 })

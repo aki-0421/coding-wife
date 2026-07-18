@@ -18,10 +18,16 @@ use crate::git_review::repository::{
     is_object_id, validate_opaque_id as validate_git_opaque_id, validate_relative_path,
 };
 use crate::git_review::types::{
-    CommitEvidenceDetail, CommitProducer, DecisionEvidence, FailedAttemptEvidence, GateKind,
-    GateResult, GitObservation, GitSupportState, KnownRisk, SkillInjectionMode, SkillPathAuthority,
-    VerificationEvidence, WorkUnitGitObservation, GIT_REVIEW_SCHEMA_VERSION, MAX_CHANGED_FILES,
-    MAX_CHANGED_LINES, MAX_EVIDENCE_ITEMS,
+    valid_git_text, CommitEvidenceDetail, CommitProducer, DecisionEvidence, FailedAttemptEvidence,
+    GateKind, GateResult, GitObservation, GitSupportState, KnownRisk, SkillInjectionMode,
+    SkillPathAuthority, VerificationEvidence, WorkUnitGitObservation, GIT_REVIEW_SCHEMA_VERSION,
+    MAX_CHANGED_FILES, MAX_CHANGED_LINES, MAX_EVIDENCE_ITEMS, MAX_GIT_ACCEPTANCE_CHARS,
+    MAX_GIT_ATTEMPT_APPROACH_CHARS, MAX_GIT_ATTEMPT_LEARNING_CHARS, MAX_GIT_ATTEMPT_OUTCOME_CHARS,
+    MAX_GIT_AUTHOR_EMAIL_CHARS, MAX_GIT_AUTHOR_NAME_CHARS, MAX_GIT_BLOCK_REASON_CHARS,
+    MAX_GIT_COMMIT_BODY_CHARS, MAX_GIT_COMMIT_SUBJECT_CHARS, MAX_GIT_DECISION_ANSWER_CHARS,
+    MAX_GIT_DECISION_RATIONALE_CHARS, MAX_GIT_DECISION_SUMMARY_CHARS, MAX_GIT_OBJECTIVE_CHARS,
+    MAX_GIT_RISK_CATEGORY_CHARS, MAX_GIT_RISK_MITIGATION_CHARS, MAX_GIT_RISK_SUMMARY_CHARS,
+    MAX_GIT_VERIFICATION_CHECK_CHARS, MAX_GIT_VERIFICATION_SUMMARY_CHARS,
 };
 
 use super::types::{
@@ -1443,7 +1449,7 @@ fn validate_git_work_unit(observation: &WorkUnitGitObservation, workspace_id: &s
         && observation
             .reported_commit_block_reason
             .as_deref()
-            .is_none_or(|value| valid_git_text(value, 2048, false))
+            .is_none_or(|value| valid_git_text(value, MAX_GIT_BLOCK_REASON_CHARS, false))
         && validate_timestamp(&observation.observed_at).is_ok()
         && observation.history_sequence.is_none()
 }
@@ -1454,10 +1460,22 @@ fn validate_git_commit_evidence(evidence: &CommitEvidenceDetail, workspace_id: &
         || !valid_git_id(&evidence.commit_evidence_id)
         || !valid_git_id(&evidence.workspace_id)
         || !is_object_id(&evidence.identity.commit_sha)
-        || !valid_git_text(&evidence.identity.subject, 1024, false)
-        || !valid_git_text(&evidence.identity.body, 16 * 1024, true)
-        || !valid_git_text(&evidence.identity.author_name, 256, false)
-        || !valid_git_text(&evidence.identity.author_email, 512, false)
+        || !valid_git_text(
+            &evidence.identity.subject,
+            MAX_GIT_COMMIT_SUBJECT_CHARS,
+            false,
+        )
+        || !valid_git_text(&evidence.identity.body, MAX_GIT_COMMIT_BODY_CHARS, true)
+        || !valid_git_text(
+            &evidence.identity.author_name,
+            MAX_GIT_AUTHOR_NAME_CHARS,
+            false,
+        )
+        || !valid_git_text(
+            &evidence.identity.author_email,
+            MAX_GIT_AUTHOR_EMAIL_CHARS,
+            false,
+        )
         || validate_timestamp(&evidence.identity.authored_at).is_err()
         || validate_timestamp(&evidence.identity.committed_at).is_err()
         || evidence.identity.parents.len() > 32
@@ -1470,12 +1488,12 @@ fn validate_git_commit_evidence(evidence: &CommitEvidenceDetail, workspace_id: &
         || !evidence
             .objective
             .as_deref()
-            .is_none_or(|value| valid_git_text(value, 500, false))
+            .is_none_or(|value| valid_git_text(value, MAX_GIT_OBJECTIVE_CHARS, false))
         || evidence.acceptance.len() > 20
         || !evidence
             .acceptance
             .iter()
-            .all(|item| valid_git_text(item, 1024, false))
+            .all(|item| valid_git_text(item, MAX_GIT_ACCEPTANCE_CHARS, false))
         || !evidence
             .before_observation_id
             .as_deref()
@@ -1596,45 +1614,37 @@ fn validate_git_gates(gates: &[GateResult]) -> bool {
 fn validate_git_verification(evidence: &VerificationEvidence) -> bool {
     valid_git_id(&evidence.evidence_id)
         && valid_git_id(&evidence.source_event_id)
-        && valid_git_text(&evidence.check, 512, false)
+        && valid_git_text(&evidence.check, MAX_GIT_VERIFICATION_CHECK_CHARS, false)
         && evidence.duration_ms <= 24 * 60 * 60 * 1_000
-        && valid_git_text(&evidence.summary, 4096, true)
+        && valid_git_text(&evidence.summary, MAX_GIT_VERIFICATION_SUMMARY_CHARS, true)
 }
 
 fn validate_git_decision(decision: &DecisionEvidence) -> bool {
     valid_git_id(&decision.decision_id)
         && valid_git_id(&decision.source_event_id)
-        && valid_git_text(&decision.summary, 2048, false)
-        && valid_git_text(&decision.answer, 2048, false)
-        && valid_git_text(&decision.rationale, 4096, true)
+        && valid_git_text(&decision.summary, MAX_GIT_DECISION_SUMMARY_CHARS, false)
+        && valid_git_text(&decision.answer, MAX_GIT_DECISION_ANSWER_CHARS, false)
+        && valid_git_text(&decision.rationale, MAX_GIT_DECISION_RATIONALE_CHARS, true)
 }
 
 fn validate_git_failed_attempt(attempt: &FailedAttemptEvidence) -> bool {
     valid_git_id(&attempt.attempt_id)
         && valid_git_id(&attempt.source_event_id)
-        && valid_git_text(&attempt.approach, 2048, false)
-        && valid_git_text(&attempt.outcome, 1024, false)
-        && valid_git_text(&attempt.learning, 2048, true)
+        && valid_git_text(&attempt.approach, MAX_GIT_ATTEMPT_APPROACH_CHARS, false)
+        && valid_git_text(&attempt.outcome, MAX_GIT_ATTEMPT_OUTCOME_CHARS, false)
+        && valid_git_text(&attempt.learning, MAX_GIT_ATTEMPT_LEARNING_CHARS, true)
 }
 
 fn validate_git_risk(risk: &KnownRisk) -> bool {
     valid_git_id(&risk.risk_id)
         && valid_git_id(&risk.source_event_id)
-        && valid_git_text(&risk.category, 256, false)
-        && valid_git_text(&risk.summary, 2048, false)
-        && valid_git_text(&risk.mitigation, 2048, true)
+        && valid_git_text(&risk.category, MAX_GIT_RISK_CATEGORY_CHARS, false)
+        && valid_git_text(&risk.summary, MAX_GIT_RISK_SUMMARY_CHARS, false)
+        && valid_git_text(&risk.mitigation, MAX_GIT_RISK_MITIGATION_CHARS, true)
 }
 
 fn valid_git_id(value: &str) -> bool {
     validate_git_opaque_id(value, "GIT-HISTORY-ID").is_ok()
-}
-
-fn valid_git_text(value: &str, maximum: usize, allow_empty: bool) -> bool {
-    (allow_empty || !value.trim().is_empty())
-        && value.chars().count() <= maximum
-        && value
-            .chars()
-            .all(|character| !character.is_control() || matches!(character, '\n' | '\r' | '\t'))
 }
 
 fn valid_sha256(value: &str) -> bool {

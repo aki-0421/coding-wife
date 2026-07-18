@@ -7,6 +7,7 @@ use crate::codex::redaction::redact_text;
 
 use super::error::{git_error, GitReviewError};
 use super::git_layout::is_object_id;
+use super::public_evidence::validate_commit_evidence_payload;
 use super::repository::{file_id, validate_opaque_id, validate_relative_path};
 use super::runner::{GitRunner, GitRunnerError};
 use super::types::{
@@ -14,6 +15,12 @@ use super::types::{
     CommitEvidenceV1, CommitFileSummary, CommitIdentity, CommitProducer, DiffContentState,
     DiffSummary, GateKind, GateOutcome, GateResult, ObserveTerminalWorkUnitRequest, RiskLevel,
     VerificationResult, GIT_REVIEW_SCHEMA_VERSION, MAX_CHANGED_FILES, MAX_FILE_DIFF_BYTES,
+    MAX_GIT_ACCEPTANCE_CHARS, MAX_GIT_ATTEMPT_APPROACH_CHARS, MAX_GIT_ATTEMPT_LEARNING_CHARS,
+    MAX_GIT_ATTEMPT_OUTCOME_CHARS, MAX_GIT_AUTHOR_EMAIL_CHARS, MAX_GIT_AUTHOR_NAME_CHARS,
+    MAX_GIT_COMMIT_BODY_CHARS, MAX_GIT_COMMIT_SUBJECT_CHARS, MAX_GIT_DECISION_ANSWER_CHARS,
+    MAX_GIT_DECISION_RATIONALE_CHARS, MAX_GIT_DECISION_SUMMARY_CHARS, MAX_GIT_OBJECTIVE_CHARS,
+    MAX_GIT_RISK_CATEGORY_CHARS, MAX_GIT_RISK_MITIGATION_CHARS, MAX_GIT_RISK_SUMMARY_CHARS,
+    MAX_GIT_VERIFICATION_CHECK_CHARS, MAX_GIT_VERIFICATION_SUMMARY_CHARS,
 };
 
 const OPERATION: &str = "read_git_commit_evidence";
@@ -161,11 +168,15 @@ pub(crate) async fn build_commit_evidence(
         (
             CommitProducer::MainCodex,
             Some(request.work_unit_id.clone()),
-            Some(sanitize_text(&request.objective, root, 8 * 1024)),
+            Some(sanitize_bounded_text(
+                &request.objective,
+                root,
+                MAX_GIT_OBJECTIVE_CHARS,
+            )),
             request
                 .acceptance
                 .iter()
-                .map(|value| sanitize_text(value, root, 4 * 1024))
+                .map(|value| sanitize_bounded_text(value, root, MAX_GIT_ACCEPTANCE_CHARS))
                 .collect(),
             Some(before_id.to_owned()),
             Some(after_id.to_owned()),
@@ -345,11 +356,15 @@ pub(crate) fn build_explanation_evidence(
         aggregate.deletions = aggregate.deletions.saturating_add(file.deletions);
         aggregate.binary_files += u64::from(file.binary);
     }
-    Ok(CommitEvidenceV1 {
+    let evidence = CommitEvidenceV1 {
         schema_version: GIT_REVIEW_SCHEMA_VERSION,
         commit_id: detail.commit_evidence_id.clone(),
-        subject: sanitize_text(&detail.identity.subject, root, 8 * 1024),
-        body: sanitize_text(&detail.identity.body, root, 32 * 1024),
+        subject: sanitize_bounded_text(
+            &detail.identity.subject,
+            root,
+            MAX_GIT_COMMIT_SUBJECT_CHARS,
+        ),
+        body: sanitize_bounded_text(&detail.identity.body, root, MAX_GIT_COMMIT_BODY_CHARS),
         changes: aggregates.into_values().collect(),
         diff_summary: detail.diff_summary.clone(),
         verification: sanitize_verification(detail.verification.clone(), root),
@@ -358,7 +373,9 @@ pub(crate) fn build_explanation_evidence(
         locale: locale.to_owned(),
         workspace_generation,
         selection_version,
-    })
+    };
+    validate_commit_evidence_payload(&evidence)?;
+    Ok(evidence)
 }
 
 fn parse_commit_records(bytes: &[u8], root: &Path) -> Result<Vec<CommitIdentity>, GitReviewError> {
@@ -394,13 +411,21 @@ fn parse_commit_records(bytes: &[u8], root: &Path) -> Result<Vec<CommitIdentity>
             let message = decode_field(record[6])?;
             let message = sanitize_text(message, root, MAX_COMMIT_MESSAGE_BYTES);
             let mut lines = message.lines();
-            let subject = lines.next().unwrap_or_default().trim().to_owned();
-            let body = lines
-                .collect::<Vec<_>>()
-                .join("\n")
-                .trim_start_matches(['\r', '\n'])
-                .trim_end()
-                .to_owned();
+            let subject = sanitize_bounded_text(
+                lines.next().unwrap_or_default().trim(),
+                root,
+                MAX_GIT_COMMIT_SUBJECT_CHARS,
+            );
+            let body = sanitize_bounded_text(
+                &lines
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .trim_start_matches(['\r', '\n'])
+                    .trim_end()
+                    .to_owned(),
+                root,
+                MAX_GIT_COMMIT_BODY_CHARS,
+            );
             if subject.is_empty() {
                 return Err(git_error("GIT-COMMIT-MESSAGE", OPERATION, false));
             }
@@ -408,8 +433,16 @@ fn parse_commit_records(bytes: &[u8], root: &Path) -> Result<Vec<CommitIdentity>
                 commit_sha,
                 subject,
                 body,
-                author_name: sanitize_text(decode_field(record[2])?, root, 512),
-                author_email: sanitize_text(decode_field(record[3])?, root, 1024),
+                author_name: sanitize_bounded_text(
+                    decode_field(record[2])?,
+                    root,
+                    MAX_GIT_AUTHOR_NAME_CHARS,
+                ),
+                author_email: sanitize_bounded_text(
+                    decode_field(record[3])?,
+                    root,
+                    MAX_GIT_AUTHOR_EMAIL_CHARS,
+                ),
                 authored_at: decode_field(record[4])?.to_owned(),
                 committed_at: decode_field(record[5])?.to_owned(),
                 parents,
@@ -712,13 +745,23 @@ fn sanitize_text(value: &str, root: &Path, maximum: usize) -> String {
     redact_text(value, Some(root), maximum)
 }
 
+fn sanitize_bounded_text(value: &str, root: &Path, maximum_chars: usize) -> String {
+    let redacted = redact_text(value, Some(root), maximum_chars.saturating_mul(4));
+    if redacted.chars().count() <= maximum_chars {
+        redacted
+    } else {
+        redacted.chars().take(maximum_chars).collect()
+    }
+}
+
 fn sanitize_verification(
     mut values: Vec<super::types::VerificationEvidence>,
     root: &Path,
 ) -> Vec<super::types::VerificationEvidence> {
     for value in &mut values {
-        value.check = sanitize_text(&value.check, root, 1024);
-        value.summary = sanitize_text(&value.summary, root, 4 * 1024);
+        value.check = sanitize_bounded_text(&value.check, root, MAX_GIT_VERIFICATION_CHECK_CHARS);
+        value.summary =
+            sanitize_bounded_text(&value.summary, root, MAX_GIT_VERIFICATION_SUMMARY_CHARS);
     }
     values
 }
@@ -728,9 +771,10 @@ fn sanitize_decisions(
     root: &Path,
 ) -> Vec<super::types::DecisionEvidence> {
     for value in &mut values {
-        value.summary = sanitize_text(&value.summary, root, 4 * 1024);
-        value.answer = sanitize_text(&value.answer, root, 4 * 1024);
-        value.rationale = sanitize_text(&value.rationale, root, 4 * 1024);
+        value.summary = sanitize_bounded_text(&value.summary, root, MAX_GIT_DECISION_SUMMARY_CHARS);
+        value.answer = sanitize_bounded_text(&value.answer, root, MAX_GIT_DECISION_ANSWER_CHARS);
+        value.rationale =
+            sanitize_bounded_text(&value.rationale, root, MAX_GIT_DECISION_RATIONALE_CHARS);
     }
     values
 }
@@ -740,9 +784,11 @@ fn sanitize_failed_attempts(
     root: &Path,
 ) -> Vec<super::types::FailedAttemptEvidence> {
     for value in &mut values {
-        value.approach = sanitize_text(&value.approach, root, 4 * 1024);
-        value.outcome = sanitize_text(&value.outcome, root, 4 * 1024);
-        value.learning = sanitize_text(&value.learning, root, 4 * 1024);
+        value.approach =
+            sanitize_bounded_text(&value.approach, root, MAX_GIT_ATTEMPT_APPROACH_CHARS);
+        value.outcome = sanitize_bounded_text(&value.outcome, root, MAX_GIT_ATTEMPT_OUTCOME_CHARS);
+        value.learning =
+            sanitize_bounded_text(&value.learning, root, MAX_GIT_ATTEMPT_LEARNING_CHARS);
     }
     values
 }
@@ -752,9 +798,10 @@ fn sanitize_risks(
     root: &Path,
 ) -> Vec<super::types::KnownRisk> {
     for value in &mut values {
-        value.category = sanitize_text(&value.category, root, 256);
-        value.summary = sanitize_text(&value.summary, root, 4 * 1024);
-        value.mitigation = sanitize_text(&value.mitigation, root, 4 * 1024);
+        value.category = sanitize_bounded_text(&value.category, root, MAX_GIT_RISK_CATEGORY_CHARS);
+        value.summary = sanitize_bounded_text(&value.summary, root, MAX_GIT_RISK_SUMMARY_CHARS);
+        value.mitigation =
+            sanitize_bounded_text(&value.mitigation, root, MAX_GIT_RISK_MITIGATION_CHARS);
     }
     values
 }
@@ -798,6 +845,34 @@ mod tests {
         assert_eq!(records[0].subject, "feat: observe commits");
         assert_eq!(records[0].body, "- explain intent");
         assert_eq!(records[1].commit_sha, parent);
+    }
+
+    #[test]
+    fn commit_identity_is_clamped_to_the_shared_history_bounds() {
+        let sha = "a".repeat(40);
+        let subject = "s".repeat(MAX_GIT_COMMIT_SUBJECT_CHARS + 1);
+        let body = "b".repeat(MAX_GIT_COMMIT_BODY_CHARS + 1);
+        let author = "a".repeat(MAX_GIT_AUTHOR_NAME_CHARS + 1);
+        let email = format!("{}@example.invalid", "e".repeat(MAX_GIT_AUTHOR_EMAIL_CHARS));
+        let bytes = format!(
+            "{sha}\0\0{author}\0{email}\02026-07-18T00:00:00Z\02026-07-18T00:00:00Z\0{subject}\n{body}\0"
+        );
+
+        let records =
+            parse_commit_records(bytes.as_bytes(), Path::new("/safe/repository")).expect("record");
+        assert_eq!(
+            records[0].subject.chars().count(),
+            MAX_GIT_COMMIT_SUBJECT_CHARS
+        );
+        assert_eq!(records[0].body.chars().count(), MAX_GIT_COMMIT_BODY_CHARS);
+        assert_eq!(
+            records[0].author_name.chars().count(),
+            MAX_GIT_AUTHOR_NAME_CHARS
+        );
+        assert_eq!(
+            records[0].author_email.chars().count(),
+            MAX_GIT_AUTHOR_EMAIL_CHARS
+        );
     }
 
     #[test]

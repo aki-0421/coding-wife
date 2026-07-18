@@ -130,7 +130,7 @@ const currentDetail: CommitEvidenceDetail = {
     {
       evidenceId: "verification-vitest",
       sourceEventId: "event-verification-vitest",
-      check: "pnpm exec vitest run src/features/git-review",
+      check: "Git review Vitest suite",
       result: "passed",
       durationMs: 2_118,
       summary: "Transport, store, and evidence UI tests passed.",

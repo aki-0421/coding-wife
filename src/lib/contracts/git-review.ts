@@ -566,16 +566,83 @@ function text(
   )
 }
 
+const maxCommitEvidencePayloadBytes = 64 * 1024
+const maxGitCommitSubjectLength = 1024
+const maxGitCommitBodyLength = 16 * 1024
+const maxGitAuthorNameLength = 256
+const maxGitAuthorEmailLength = 512
+const maxGitVerificationCheckLength = 512
+const maxGitRiskMitigationLength = 2048
+
 function containsPrivateMaterial(value: string): boolean {
   return (
-    /(?:^|[\s"'])\/(?:users|volumes|library|applications|private|tmp)\//i.test(
+    /(?:^|[\s=:'"(,[<{])(?:\/(?:[A-Za-z0-9_~.+@%{}$-]+)){2,}/i.test(value) ||
+    /(?:^|[\s=:'"(,[<{])[A-Za-z]:\\(?:[^\\\s]+\\)+[^\\\s]+/i.test(value) ||
+    /(?:bearer\s+[a-z0-9._~+/=-]{6,}|(?:authorization|api[ _-]?key|access[ _-]?(?:key|token)|refresh[ _-]?token|id[ _-]?token|token|password|passwd|secret|client[ _-]?secret|private[ _-]?key|auth[ _-]?cookie|cookie|set-cookie|session[ _-]?id|sessionid)\s*[:=]\s*[^\s,;]{3,})/i.test(
       value,
     ) ||
-    /(?:bearer\s+[a-z0-9._~+/=-]{6,}|(?:api[_-]?key|auth[_-]?cookie|sessionid|set-cookie|token)\s*[:=])/i.test(
+    /\b(?:gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|(?:akia|asia)[a-z0-9]{16}|xox[baprs]-[a-z0-9-]{10,}|(?:sk|sess|rk|pk)-[a-z0-9_-]{12,})\b/i.test(
       value,
     ) ||
+    /-----begin(?: [a-z0-9]+)* private key-----/i.test(value) ||
     value.toLocaleLowerCase().includes("chain-of-thought")
   )
+}
+
+function containsCommitEvidencePrivateMaterial(value: string): boolean {
+  return (
+    containsPrivateMaterial(value) ||
+    /(?:<workspace>|<path>|\[redacted\])/i.test(value) ||
+    /(?:~|\$home|\$\{home\}|%userprofile%)[\\/]/i.test(value) ||
+    /(?:^|[\s=:'"(,[<{])(?:(?:\.\.?)[\\/][^\s,'")\]>}]+|(?:src(?:-tauri)?|docs|tests?|packages?|apps?|scripts?|public|assets?|config|crates?|\.github|node_modules|target)[\\/][^\s,'")\]>}]+|(?:[a-z0-9_.@+-]+[\\/])+(?:[a-z0-9_.@+-]+\.[a-z0-9]{1,16}))/i.test(
+      value,
+    )
+  )
+}
+
+function isPublicCommitEvidencePayload(value: unknown): boolean {
+  try {
+    const encoded = JSON.stringify(value)
+    if (
+      new TextEncoder().encode(encoded).byteLength >
+      maxCommitEvidencePayloadBytes
+    ) {
+      return false
+    }
+
+    const pending: unknown[] = [value]
+    const seen = new Set<object>()
+    while (pending.length > 0) {
+      const current = pending.pop()
+      if (typeof current === "string") {
+        if (containsCommitEvidencePrivateMaterial(current)) return false
+      } else if (Array.isArray(current)) {
+        if (seen.has(current)) return false
+        seen.add(current)
+        pending.push(...(current as unknown[]))
+      } else if (record(current)) {
+        if (seen.has(current)) return false
+        seen.add(current)
+        if (
+          Object.keys(current).some((key) =>
+            [
+              "relativePath",
+              "fileEvidenceId",
+              "content",
+              "rawDiff",
+              "repositoryPath",
+            ].includes(key),
+          )
+        ) {
+          return false
+        }
+        pending.push(...Object.values(current))
+      }
+    }
+    return true
+  } catch {
+    return false
+  }
 }
 
 function publicText(
@@ -683,7 +750,7 @@ function parseVerification(value: unknown): VerificationEvidence {
     ]) ||
     !id(value.evidenceId) ||
     !id(value.sourceEventId) ||
-    !publicText(value.check, 1024) ||
+    !publicText(value.check, maxGitVerificationCheckLength) ||
     !oneOf(value.result, verificationResults) ||
     !uint(value.durationMs, 86_400_000) ||
     !publicText(value.summary, 4096, true)
@@ -754,7 +821,7 @@ function parseRisk(value: unknown): KnownRisk {
     !publicText(value.category, 256) ||
     !oneOf(value.level, ["low", "medium", "high", "critical"] as const) ||
     !publicText(value.summary, 2048) ||
-    !publicText(value.mitigation, 4096, true) ||
+    !publicText(value.mitigation, maxGitRiskMitigationLength, true) ||
     typeof value.resolved !== "boolean"
   ) {
     return violation()
@@ -906,10 +973,10 @@ function parseCommitIdentity(value: unknown): CommitIdentity {
       "parents",
     ]) ||
     !sha(value.commitSha) ||
-    !publicText(value.subject, 1024) ||
-    !publicText(value.body, 64 * 1024, true) ||
-    !publicText(value.authorName, 512) ||
-    !publicText(value.authorEmail, 1024) ||
+    !publicText(value.subject, maxGitCommitSubjectLength) ||
+    !publicText(value.body, maxGitCommitBodyLength, true) ||
+    !publicText(value.authorName, maxGitAuthorNameLength) ||
+    !publicText(value.authorEmail, maxGitAuthorEmailLength) ||
     !timestamp(value.authoredAt) ||
     !timestamp(value.committedAt) ||
     !Array.isArray(value.parents) ||
@@ -1216,8 +1283,8 @@ export function parseCommitEvidenceV1(value: unknown): CommitEvidenceV1 {
     ]) ||
     value.schemaVersion !== gitReviewSchemaVersion ||
     !id(value.commitId) ||
-    !publicText(value.subject, 8192) ||
-    !publicText(value.body, 32 * 1024, true) ||
+    !publicText(value.subject, maxGitCommitSubjectLength) ||
+    !publicText(value.body, maxGitCommitBodyLength, true) ||
     !arrayOf(value.changes, 4, parseChangeAggregate) ||
     !parseDiffSummary(value.diffSummary) ||
     !arrayOf(value.verification, 100, parseVerification) ||
@@ -1229,14 +1296,7 @@ export function parseCommitEvidenceV1(value: unknown): CommitEvidenceV1 {
   ) {
     return violation()
   }
-  const encoded = JSON.stringify(value)
-  if (
-    new TextEncoder().encode(encoded).byteLength > 64 * 1024 ||
-    containsPrivateMaterial(encoded) ||
-    /"(?:relativePath|fileEvidenceId|content|rawDiff|repositoryPath)"\s*:/.test(
-      encoded,
-    )
-  ) {
+  if (!isPublicCommitEvidencePayload(value)) {
     return violation()
   }
   return value as unknown as CommitEvidenceV1

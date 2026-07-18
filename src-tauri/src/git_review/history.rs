@@ -25,6 +25,7 @@ pub(crate) const OBSERVATION_KIND: &str = "git.observation.recorded";
 pub(crate) const WORK_UNIT_KIND: &str = "git.work_unit.observed";
 pub(crate) const COMMIT_EVIDENCE_KIND: &str = "git.commit_evidence.recorded";
 const MAX_GIT_HISTORY_EVENT_BYTES: usize = 256 * 1024;
+const MAX_GIT_HISTORY_LOOKUP: u32 = 1_000;
 
 pub(crate) type HistoryFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, GitReviewError>> + Send + 'a>>;
@@ -115,21 +116,41 @@ impl WorkspaceHistoryGitReviewStore {
         kind: &'static str,
         limit: u32,
     ) -> Result<Vec<(u64, serde_json::Value)>, GitReviewError> {
-        let page = self
-            .service
-            .timeline(WorkspaceTimelineRequest {
-                workspace_id: workspace_id.to_owned(),
-                before_sequence: None,
-                limit: limit.clamp(1, 200),
-                search: Some(kind.to_owned()),
-            })
-            .map_err(|error| GitReviewError::new(error.code, OPERATION, error.recoverable))?;
-        Ok(page
-            .items
-            .into_iter()
-            .filter(|event| event.producer == "git" && event.kind == kind)
-            .map(|event| (event.sequence, event.payload))
-            .collect())
+        let target = limit.clamp(1, MAX_GIT_HISTORY_LOOKUP) as usize;
+        let mut before_sequence = None;
+        let mut scanned = 0_u32;
+        let mut values = Vec::new();
+
+        while values.len() < target && scanned < MAX_GIT_HISTORY_LOOKUP {
+            let page_limit = 200.min(MAX_GIT_HISTORY_LOOKUP - scanned);
+            let page = self
+                .service
+                .timeline(WorkspaceTimelineRequest {
+                    workspace_id: workspace_id.to_owned(),
+                    before_sequence,
+                    limit: page_limit,
+                    search: Some(kind.to_owned()),
+                })
+                .map_err(|error| GitReviewError::new(error.code, OPERATION, error.recoverable))?;
+            scanned = scanned.saturating_add(page.items.len() as u32);
+            values.extend(
+                page.items
+                    .into_iter()
+                    .filter(|event| event.producer == "git" && event.kind == kind)
+                    .map(|event| (event.sequence, event.payload)),
+            );
+            let Some(next) = page.next_before_sequence else {
+                break;
+            };
+            if before_sequence == Some(next) {
+                return Err(git_error("GIT-HISTORY-CURSOR", OPERATION, false));
+            }
+            before_sequence = Some(next);
+        }
+
+        values.sort_by_key(|(sequence, _)| std::cmp::Reverse(*sequence));
+        values.truncate(target);
+        Ok(values)
     }
 }
 
@@ -206,7 +227,9 @@ impl GitReviewHistory for WorkspaceHistoryGitReviewStore {
         commit_evidence_id: &'a str,
     ) -> HistoryFuture<'a, Option<CommitEvidenceDetail>> {
         Box::pin(async move {
-            for (sequence, payload) in self.query(workspace_id, COMMIT_EVIDENCE_KIND, 200)? {
+            for (sequence, payload) in
+                self.query(workspace_id, COMMIT_EVIDENCE_KIND, MAX_GIT_HISTORY_LOOKUP)?
+            {
                 let mut evidence = serde_json::from_value::<CommitEvidenceDetail>(payload)
                     .map_err(|_| git_error("GIT-HISTORY-EVIDENCE-DECODE", OPERATION, false))?;
                 if evidence.commit_evidence_id == commit_evidence_id {
@@ -401,5 +424,144 @@ impl GitReviewHistory for MemoryGitReviewHistory {
             values.truncate(limit as usize);
             Ok(values)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    use crate::codex::supervisor::CodexSupervisor;
+    use crate::codex::workspace::{AppPrivateWorkspaceRecord, WorkspaceService};
+    use crate::workspace_history::store::WorkspaceHistoryStore;
+
+    use super::*;
+    use crate::git_review::types::{
+        CommitIdentity, CommitProducer, DiffSummary, GateKind, GateOutcome, GateResult,
+        GIT_REVIEW_SCHEMA_VERSION,
+    };
+
+    fn temp_directory(label: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "coding-wife-git-history-{label}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&path).expect("temporary directory");
+        path
+    }
+
+    fn git_repository() -> PathBuf {
+        let root = temp_directory("repository");
+        let status = Command::new("/usr/bin/git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(&root)
+            .status()
+            .expect("git init");
+        assert!(status.success());
+        root
+    }
+
+    fn external_evidence(workspace_id: &str, index: usize) -> CommitEvidenceDetail {
+        let sha = format!("{:040x}", index + 1);
+        CommitEvidenceDetail {
+            schema_version: GIT_REVIEW_SCHEMA_VERSION,
+            commit_evidence_id: format!("commit-{sha}"),
+            workspace_id: workspace_id.to_owned(),
+            producer: CommitProducer::ExternalUncorrelated,
+            identity: CommitIdentity {
+                commit_sha: sha,
+                subject: format!("chore: history fixture {index}"),
+                body: String::new(),
+                author_name: "Fixture".to_owned(),
+                author_email: "fixture@example.invalid".to_owned(),
+                authored_at: "2026-07-18T00:00:00Z".to_owned(),
+                committed_at: "2026-07-18T00:00:00Z".to_owned(),
+                parents: Vec::new(),
+            },
+            work_unit_id: None,
+            objective: None,
+            acceptance: Vec::new(),
+            before_observation_id: None,
+            after_observation_id: None,
+            source_event_id: None,
+            gates: [
+                GateKind::Scope,
+                GateKind::Ownership,
+                GateKind::Verification,
+                GateKind::Risk,
+            ]
+            .into_iter()
+            .map(|gate| GateResult {
+                gate,
+                outcome: GateOutcome::Unknown,
+                reason_codes: vec!["not_correlated".to_owned()],
+                evidence_ids: Vec::new(),
+            })
+            .collect(),
+            files: Vec::new(),
+            diff_summary: DiffSummary {
+                files_changed: 0,
+                additions: 0,
+                deletions: 0,
+                binary_files: 0,
+            },
+            verification: Vec::new(),
+            decisions: Vec::new(),
+            failed_attempts: Vec::new(),
+            risks: Vec::new(),
+            commit_skill_injection: None,
+            observed_at: "2026-07-18T00:00:00Z".to_owned(),
+            history_sequence: None,
+        }
+    }
+
+    async fn register_workspace(store: &WorkspaceHistoryStore, root: &Path) -> String {
+        let workspace = WorkspaceService::production(CodexSupervisor::new());
+        let candidate = workspace
+            .validate_private_candidate(&AppPrivateWorkspaceRecord {
+                workspace_id: format!("workspace-{}", uuid::Uuid::new_v4()),
+                alias: "Git history fixture".to_owned(),
+                canonical_root: root.to_owned(),
+            })
+            .await
+            .expect("validated workspace");
+        store
+            .register_candidate(&candidate)
+            .expect("registered workspace")
+            .workspace
+            .workspace_id
+    }
+
+    #[tokio::test]
+    async fn exact_commit_lookup_traverses_one_thousand_history_events() {
+        let data = temp_directory("data");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("history store");
+        let workspace_id = register_workspace(&store, &root).await;
+        let service = WorkspaceHistoryService::new(
+            store,
+            WorkspaceService::production(CodexSupervisor::new()),
+        );
+        let history = WorkspaceHistoryGitReviewStore::new(service);
+        let oldest = external_evidence(&workspace_id, 0);
+
+        for index in 0..1_000 {
+            history
+                .append_commit_evidence(&external_evidence(&workspace_id, index))
+                .await
+                .expect("append commit evidence");
+        }
+
+        let found = history
+            .get_commit_evidence(&workspace_id, &oldest.commit_evidence_id)
+            .await
+            .expect("history lookup")
+            .expect("oldest evidence");
+        assert_eq!(found.identity.commit_sha, oldest.identity.commit_sha);
+
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(data);
     }
 }
