@@ -163,6 +163,10 @@ function NarrationSettingsForm({
 
   const reset = async () => {
     if (await controller.resetSettings()) {
+      const resetSettings = controller.getSnapshot().settingsSnapshot?.settings
+      if (resetSettings !== undefined) {
+        setDraft(draftFromSettings(resetSettings))
+      }
       onMutedChange(false)
       setResetOpen(false)
     }
@@ -186,17 +190,26 @@ function NarrationSettingsForm({
         </Badge>
       </div>
 
-      {snapshot.settingsStatus === "error" ||
-      snapshot.voiceStatus === "error" ? (
+      {snapshot.settingsStatus === "error" || voiceUnavailable ? (
         <Alert>
           <CircleAlertIcon aria-hidden="true" />
           <AlertTitle>{copy.errorTitle}</AlertTitle>
           <AlertDescription>
             {copy.unavailableDescription}
-            {snapshot.lastErrorCode ? (
-              <span className="mt-xxs block font-mono text-label">
-                {snapshot.lastErrorCode}
-              </span>
+            <span className="mt-xxs block font-mono text-label">
+              {snapshot.lastErrorCode ?? "NARRATION-VOICE-UNAVAILABLE"}
+            </span>
+            {voiceUnavailable ? (
+              <Button
+                className="mt-sm"
+                disabled={snapshot.voiceStatus === "loading"}
+                onClick={() => void controller.refreshVoices()}
+                size="xs"
+                type="button"
+                variant="secondary"
+              >
+                {copy.retryVoices}
+              </Button>
             ) : null}
           </AlertDescription>
         </Alert>
@@ -370,9 +383,13 @@ function NarrationSettingsForm({
               {presentation.key.commitSha.slice(0, 8)}
             </dd>
             <dt className="text-muted-foreground">{copy.status}</dt>
-            <dd className="m-0">{presentation.status}</dd>
+            <dd className="m-0">
+              {copy.presentationStatuses[presentation.status]}
+            </dd>
             <dt className="text-muted-foreground">{copy.speech}</dt>
-            <dd className="m-0">{presentation.speechStatus}</dd>
+            <dd className="m-0">
+              {copy.speechStatuses[presentation.speechStatus]}
+            </dd>
           </dl>
         ) : (
           <p className="m-0 mt-xxs text-muted-foreground">
@@ -465,11 +482,5 @@ export function NarrationSettings(props: NarrationSettingsProps) {
     )
   }
 
-  return (
-    <NarrationSettingsForm
-      key={settings.version}
-      {...props}
-      settings={settings}
-    />
-  )
+  return <NarrationSettingsForm {...props} settings={settings} />
 }

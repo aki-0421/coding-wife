@@ -34,6 +34,7 @@ export interface NarrationCopy {
   readonly unavailable: string
   readonly unavailableDescription: string
   readonly retry: string
+  readonly retryVoices: string
   readonly errorTitle: string
   readonly activePresentation: string
   readonly noPresentation: string
@@ -88,6 +89,7 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
     unavailableDescription:
       "字幕は引き続き利用できます。再読み込み後も失敗する場合は診断を確認してください。",
     retry: "再読み込み",
+    retryVoices: "音声を再取得",
     errorTitle: "音声設定を更新できませんでした",
     activePresentation: "表示中のコミット説明",
     noPresentation: "表示中のコミット説明はありません",
@@ -152,6 +154,7 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
     unavailableDescription:
       "Captions remain available. If retrying still fails, check Diagnostics.",
     retry: "Retry",
+    retryVoices: "Retry voices",
     errorTitle: "Audio settings could not be updated",
     activePresentation: "Active commit explanation",
     noPresentation: "No commit explanation is being presented",

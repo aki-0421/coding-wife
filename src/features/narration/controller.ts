@@ -190,7 +190,9 @@ export class NarrationController {
       const settingsSnapshot =
         settings.status === "fulfilled" ? settings.value : null
       const availableVoices =
-        voices.status === "fulfilled" ? voices.value.voices : []
+        voices.status === "fulfilled"
+          ? voices.value.voices
+          : this.#snapshot.voices
       const failure =
         settings.status === "rejected"
           ? errorCode(settings.reason)
@@ -211,6 +213,32 @@ export class NarrationController {
   public async refresh(): Promise<void> {
     this.#initialization = null
     await this.initialize()
+  }
+
+  public async refreshVoices(): Promise<boolean> {
+    const settingsError =
+      this.#snapshot.settingsStatus === "error"
+        ? this.#snapshot.lastErrorCode
+        : null
+    this.update({ voiceStatus: "loading", lastErrorCode: settingsError })
+    try {
+      const voices = await this.gateway.listVoices()
+      this.update({
+        voiceStatus: "ready",
+        voices: voices.voices,
+        lastErrorCode:
+          settingsError ??
+          this.#snapshot.settingsSnapshot?.loadWarningCode ??
+          null,
+      })
+      return true
+    } catch (error) {
+      this.update({
+        voiceStatus: "error",
+        lastErrorCode: errorCode(error),
+      })
+      return false
+    }
   }
 
   public async saveSettings(
