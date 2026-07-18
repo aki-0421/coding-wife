@@ -339,6 +339,7 @@ export function AppPreferencesSettings({
         open={resetOpen}
       >
         <DialogContent
+          closeLabel={copy.dismiss}
           onCloseAutoFocus={(event) => {
             event.preventDefault()
             resetTriggerRef.current?.focus()

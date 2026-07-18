@@ -229,6 +229,7 @@ describe("AppPreferencesSettings", () => {
     })
     const cancel = within(dialog).getByRole("button", { name: "キャンセル" })
     expect(cancel).toHaveFocus()
+    expect(within(dialog).getByRole("button", { name: "閉じる" })).toBeVisible()
     expect(dialog).toHaveTextContent("AppPreferencesV1だけを置き換えます")
 
     await user.click(
