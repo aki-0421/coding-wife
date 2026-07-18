@@ -1,4 +1,8 @@
 import type { NarrationLocale } from "@/features/narration/contracts"
+import type {
+  CommitNarrationPresentationStatus,
+  NarrationSpeechStatus,
+} from "@/features/narration/controller"
 
 export interface NarrationCopy {
   readonly description: string
@@ -37,6 +41,14 @@ export interface NarrationCopy {
   readonly speech: string
   readonly unsaved: string
   readonly saved: string
+  readonly captionTitle: string
+  readonly captionPreparing: string
+  readonly captionEmpty: string
+  readonly cancelPresentation: string
+  readonly presentationStatuses: Readonly<
+    Record<CommitNarrationPresentationStatus, string>
+  >
+  readonly speechStatuses: Readonly<Record<NarrationSpeechStatus, string>>
 }
 
 export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
@@ -83,6 +95,25 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
     speech: "音声",
     unsaved: "未保存の変更",
     saved: "保存済み",
+    captionTitle: "コミットの説明",
+    captionPreparing: "説明を準備しています…",
+    captionEmpty: "表示できる説明はまだありません。",
+    cancelPresentation: "説明を閉じる",
+    presentationStatuses: {
+      preparing: "準備中",
+      streaming: "説明中",
+      ready: "完了",
+      canceled: "停止",
+      unavailable: "利用不可",
+    },
+    speechStatuses: {
+      off: "音声オフ",
+      muted: "ミュート",
+      idle: "待機中",
+      queued: "音声待機中",
+      playing: "読み上げ中",
+      unavailable: "音声利用不可",
+    },
   },
   en: {
     description:
@@ -128,5 +159,24 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
     speech: "Speech",
     unsaved: "Unsaved changes",
     saved: "Saved",
+    captionTitle: "Commit explanation",
+    captionPreparing: "Preparing the explanation…",
+    captionEmpty: "There is no explanation to show yet.",
+    cancelPresentation: "Close explanation",
+    presentationStatuses: {
+      preparing: "Preparing",
+      streaming: "Explaining",
+      ready: "Complete",
+      canceled: "Stopped",
+      unavailable: "Unavailable",
+    },
+    speechStatuses: {
+      off: "Speech off",
+      muted: "Muted",
+      idle: "Idle",
+      queued: "Speech queued",
+      playing: "Speaking",
+      unavailable: "Speech unavailable",
+    },
   },
 }

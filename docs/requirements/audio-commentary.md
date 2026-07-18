@@ -181,6 +181,19 @@ read_when:
 | installed voice差分 | `ja_JP` / `en_*`を実行時列挙しexact allowlist化、default off                    | release hostでvoice availabilityを再検証する | いいえ       |
 | lip-sync精度        | MVPはprocess playing中のsemantic speaking stateだけを連動し、失敗/停止時neutral | Hiyori実機QAで開始・停止遅延を確認する       | いいえ       |
 
+## 実装・検証の入口
+
+| 関心事                       | 実装場所                                                                                                  | 変更時に守ること                                                                                                           |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| native local speech          | `src-tauri/src/narration/`                                                                                | `/usr/bin/say`検証、stdinだけの本文、owner-only設定、process group cancelをWebViewへ移さない                               |
+| WebView contract・controller | `src/features/narration/contracts.ts`、`controller.ts`、`transport.ts`                                    | `background_support`以外を受理せず、未activate jobはcaption/TTSへ出さず、Cancel・unsafe stream後のlate chunkを復活させない |
+| Audio設定                    | `src/features/narration/components/NarrationSettings.tsx`、`src/features/workspace-view/SettingsView.tsx` | default off、明示Save、visible test caption、native設定を正本にし、失敗時もtext fallbackを残す                             |
+| character caption・mute      | `src/features/narration/components/CommitNarrationCaption.tsx`、`CharacterStageSlot.tsx`、`ChatView.tsx`  | accepted chunkを順番どおりvisible HTML/live regionへ出し、840px以下でもmobile captionを残し、muteをnative設定へ同期する    |
+
+`pnpm exec vitest run src/features/narration/**/*.test.ts src/features/narration/**/*.test.tsx src/features/workspace-view/CharacterStageSlot.narration.test.tsx --testTimeout=20000 --fileParallelism=false`を実行すると、strict envelope、IPC payload、default off、明示presentation、caption-first、same-text speech、mute/cancel、stale generation、responsive側のcomponent境界を検証できる。続けて`pnpm exec tsc --noEmit --pretty false`と対象pathのESLintを実行する。実ブラウザでは1470px、960px、480pxと200%相当幅で、captionの実幅、mobile fallback、ja/en、reduced motion、TTS off/on、mute、Cancel、settings errorを確認する。
+
+Commit画面から接続するときは、任意textをReact componentへ直接渡さず、`CommitNarrationConsumerPort`へversioned eventを流してから、current workspace scopeと完全一致する`CommitNarrationSourceKey`だけを`NarrationController.activatePresentation`へ渡す。generationを巻き戻してactivateしてはならない。
+
 ## 参照資料
 
 | 資料                                                                      | 参照理由                                         |

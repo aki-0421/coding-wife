@@ -180,6 +180,7 @@ export interface CharacterStageRenderProps {
   readonly state: CompanionSemanticState
   readonly muted: boolean
   readonly reducedMotion: boolean
+  readonly speaking?: boolean
 }
 
 export type CharacterStageRenderer = (

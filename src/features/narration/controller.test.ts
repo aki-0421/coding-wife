@@ -290,6 +290,15 @@ describe("NarrationController", () => {
       status: "canceled",
     })
     expect(gateway.cancelReasons).toContain("explicit_cancel")
+    expect(
+      controller.consume(
+        event("chunk", { sequence: 1, text: "キャンセル後の後着です。" }),
+      ),
+    ).toBe(false)
+    expect(controller.getSnapshot().presentation).toMatchObject({
+      status: "canceled",
+      chunks: ["説明です。"],
+    })
   })
 
   it("drops stale generation chunks and refuses scope rollback", async () => {
@@ -322,6 +331,22 @@ describe("NarrationController", () => {
     await vi.waitFor(() =>
       expect(gateway.cancelReasons).toContain("explicit_cancel"),
     )
+  })
+
+  it("does not recover an unsafe active stream from later valid chunks", async () => {
+    const { controller } = await ready(true)
+    const key = prepare(controller, ["最初です。"])
+    await controller.activatePresentation(key)
+
+    expect(controller.consume({ privateText: "untrusted" })).toBe(false)
+    expect(controller.getSnapshot().presentation?.status).toBe("unavailable")
+    expect(
+      controller.consume(event("chunk", { sequence: 1, text: "後着です。" })),
+    ).toBe(false)
+    expect(controller.getSnapshot().presentation).toMatchObject({
+      status: "unavailable",
+      chunks: ["最初です。"],
+    })
   })
 
   it("validates settings before crossing the gateway", async () => {

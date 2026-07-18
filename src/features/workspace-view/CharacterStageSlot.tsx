@@ -11,6 +11,11 @@ import {
   type CharacterRuntimeView,
 } from "@/features/character"
 import { useI18n } from "@/features/localization"
+import {
+  CommitNarrationCaption,
+  useNarrationController,
+  useNarrationSnapshot,
+} from "@/features/narration"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type {
   CharacterStageRenderer,
@@ -43,8 +48,24 @@ export function CharacterStageSlot({
   onRetryCharacter,
 }: CharacterStageSlotProps) {
   const { locale } = useI18n()
+  const narrationController = useNarrationController()
+  const narration = useNarrationSnapshot()
   const CharacterRenderer = renderer
-  const stateLabel = copy.character.semanticState[state]
+  const presentation =
+    narration.presentation?.key.workspaceId === workspaceId &&
+    narration.presentation.status !== "canceled"
+      ? narration.presentation
+      : null
+  const presentationActive =
+    presentation?.status === "preparing" ||
+    presentation?.status === "streaming" ||
+    presentation?.status === "ready"
+  const speaking =
+    presentation?.speechStatus === "queued" ||
+    presentation?.speechStatus === "playing"
+  const effectiveMuted = narration.settingsSnapshot?.settings.muted ?? muted
+  const semanticState = presentationActive ? "reviewing" : state
+  const stateLabel = copy.character.semanticState[semanticState]
   const runtimeDetail = (() => {
     if (characterRuntime.rendererKind === "external") {
       return copy.character.externalRenderer
@@ -63,18 +84,31 @@ export function CharacterStageSlot({
     }
     return null
   })()
+  const toggleMuted = async () => {
+    const nextMuted = !effectiveMuted
+    if (narration.settingsSnapshot === null) {
+      onMutedChange(nextMuted)
+      return
+    }
+    if (await narrationController.setMuted(nextMuted)) {
+      onMutedChange(nextMuted)
+    }
+  }
 
   return (
     <aside
       aria-labelledby="companion-state"
       className="companion-pane relative min-h-0 overflow-hidden bg-app-bg"
+      data-narration-presentation={presentation?.status ?? "inactive"}
+      data-narration-speech={presentation?.speechStatus ?? "idle"}
     >
       {!hidden && CharacterRenderer ? (
         <div className="absolute inset-0" data-character-stage-slot="ready">
           <CharacterRenderer
-            muted={muted}
+            muted={effectiveMuted}
             reducedMotion={reducedMotion}
-            state={state}
+            speaking={speaking}
+            state={semanticState}
             workspaceId={workspaceId}
           />
         </div>
@@ -98,6 +132,15 @@ export function CharacterStageSlot({
         </div>
       ) : null}
 
+      {presentation ? (
+        <div className="absolute inset-x-xl bottom-20 z-20 max-[700px]:inset-x-md">
+          <CommitNarrationCaption
+            onCancel={() => void narrationController.cancelPresentation()}
+            presentation={presentation}
+          />
+        </div>
+      ) : null}
+
       <div className="absolute inset-x-xl bottom-lg flex items-end justify-between gap-md">
         <div
           aria-live="polite"
@@ -113,7 +156,7 @@ export function CharacterStageSlot({
             id="companion-state"
           >
             {stateLabel} ·{" "}
-            {muted ? copy.character.muted : copy.character.unmuted}
+            {effectiveMuted ? copy.character.muted : copy.character.unmuted}
           </p>
           {runtimeDetail ? (
             <p className="m-0 text-caption text-muted-foreground">
@@ -136,19 +179,22 @@ export function CharacterStageSlot({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              aria-label={muted ? copy.character.unmute : copy.character.mute}
-              aria-pressed={muted}
+              aria-label={
+                effectiveMuted ? copy.character.unmute : copy.character.mute
+              }
+              aria-pressed={effectiveMuted}
               className="shrink-0 rounded-circle border-white/10 bg-selected-row/80"
-              onClick={() => onMutedChange(!muted)}
+              disabled={narration.settingsStatus === "saving"}
+              onClick={() => void toggleMuted()}
               size="icon-sm"
               type="button"
               variant="secondary"
             >
-              {muted ? <VolumeXIcon /> : <Volume2Icon />}
+              {effectiveMuted ? <VolumeXIcon /> : <Volume2Icon />}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="left">
-            {muted ? copy.character.unmute : copy.character.mute}
+            {effectiveMuted ? copy.character.unmute : copy.character.mute}
           </TooltipContent>
         </Tooltip>
       </div>

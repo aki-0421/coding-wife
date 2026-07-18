@@ -41,6 +41,7 @@ export function DefaultCharacterStageRenderer({
   state,
   muted,
   reducedMotion,
+  speaking = false,
 }: CharacterStageRenderProps) {
   const runtimeStatus = useCharacterRuntimeStatusStore()
   const characterLibrary = useCharacterLibrary(workspaceId)
@@ -101,6 +102,7 @@ export function DefaultCharacterStageRenderer({
       data-character-pack={
         characterLibrary.snapshot?.selectedPackId ?? "builtin:hiyori_pro"
       }
+      data-character-speaking={speaking ? "true" : "false"}
       data-character-stage-default="app-live2d"
     >
       <Live2dCharacter

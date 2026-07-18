@@ -345,6 +345,7 @@ export class NarrationController {
       this.failActivePresentation("NARRATION-PRESENTATION-SEQUENCE")
       return false
     }
+    if (existing.status === "canceled") return false
     existing.touchedAt = Date.now()
     if (event.kind === "chunk") {
       if (
@@ -440,6 +441,14 @@ export class NarrationController {
     reason: NarrationCancelReason = "explicit_cancel",
   ): Promise<void> {
     if (this.#snapshot.presentation !== null) {
+      const prepared = this.#prepared.get(
+        commitNarrationSourceKey(this.#snapshot.presentation.key),
+      )
+      if (prepared !== undefined) {
+        prepared.status = "canceled"
+        prepared.errorCode = "NARRATION-PRESENTATION-CANCELED"
+        prepared.touchedAt = Date.now()
+      }
       this.#presentationGeneration++
       this.#snapshot = {
         ...this.#snapshot,
@@ -643,6 +652,7 @@ export class NarrationController {
     return (
       this.#snapshot.presentation !== null &&
       this.#snapshot.presentation.status !== "canceled" &&
+      this.#snapshot.presentation.status !== "unavailable" &&
       sameSourceKey(this.#snapshot.presentation.key, key)
     )
   }
@@ -677,6 +687,14 @@ export class NarrationController {
     if (this.#snapshot.presentation === null) {
       this.update({ lastErrorCode: code })
       return
+    }
+    const prepared = this.#prepared.get(
+      commitNarrationSourceKey(this.#snapshot.presentation.key),
+    )
+    if (prepared !== undefined) {
+      prepared.status = "failed"
+      prepared.errorCode = code
+      prepared.touchedAt = Date.now()
     }
     this.updatePresentation({
       status: "unavailable",

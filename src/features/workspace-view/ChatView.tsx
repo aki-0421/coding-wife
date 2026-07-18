@@ -10,6 +10,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { CharacterRuntimeView } from "@/features/character"
+import {
+  CommitNarrationCaption,
+  useNarrationController,
+  useNarrationSnapshot,
+} from "@/features/narration"
 import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { Composer } from "@/features/workspace-view/Composer"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
@@ -160,6 +165,8 @@ export function ChatView({
   onSend,
   onStop,
 }: ChatViewProps) {
+  const narrationController = useNarrationController()
+  const narration = useNarrationSnapshot()
   const scrollRootRef = useRef<HTMLDivElement>(null)
   const previousTimelineLength = useRef(timeline.length)
   const previousTimelineWorkspace = useRef(workspaceId)
@@ -175,7 +182,30 @@ export function ChatView({
         : turnState === "running" || turnState === "stopping"
           ? "acting"
           : "idle"
-  const companionStateLabel = copy.character.semanticState[companionState]
+  const presentation =
+    narration.presentation?.key.workspaceId === workspaceId &&
+    narration.presentation.status !== "canceled"
+      ? narration.presentation
+      : null
+  const presentationActive =
+    presentation?.status === "preparing" ||
+    presentation?.status === "streaming" ||
+    presentation?.status === "ready"
+  const effectiveMuted = narration.settingsSnapshot?.settings.muted ?? muted
+  const companionStateLabel =
+    copy.character.semanticState[
+      presentationActive ? "reviewing" : companionState
+    ]
+  const toggleMuted = async () => {
+    const nextMuted = !effectiveMuted
+    if (narration.settingsSnapshot === null) {
+      onMutedChange(nextMuted)
+      return
+    }
+    if (await narrationController.setMuted(nextMuted)) {
+      onMutedChange(nextMuted)
+    }
+  }
 
   const scrollToLatest = () => {
     const viewport = scrollRootRef.current?.querySelector<HTMLElement>(
@@ -333,16 +363,19 @@ export function ChatView({
                   <span className="truncate">{companionStateLabel}</span>
                   <Button
                     aria-label={
-                      muted ? copy.character.unmute : copy.character.mute
+                      effectiveMuted
+                        ? copy.character.unmute
+                        : copy.character.mute
                     }
-                    aria-pressed={muted}
+                    aria-pressed={effectiveMuted}
                     className="-my-xxs"
-                    onClick={() => onMutedChange(!muted)}
+                    disabled={narration.settingsStatus === "saving"}
+                    onClick={() => void toggleMuted()}
                     size="icon-xs"
                     type="button"
                     variant="ghost"
                   >
-                    {muted ? <VolumeXIcon /> : <Volume2Icon />}
+                    {effectiveMuted ? <VolumeXIcon /> : <Volume2Icon />}
                   </Button>
                 </div>
               }
@@ -358,6 +391,15 @@ export function ChatView({
             />
           </div>
         </ScrollArea>
+
+        {presentation ? (
+          <div className="absolute inset-x-md bottom-[154px] z-30 hidden max-[840px]:block">
+            <CommitNarrationCaption
+              onCancel={() => void narrationController.cancelPresentation()}
+              presentation={presentation}
+            />
+          </div>
+        ) : null}
 
         {scrollLocked || unreadCount > 0 ? (
           <Button
