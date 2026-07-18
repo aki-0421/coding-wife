@@ -236,6 +236,205 @@ describe("TauriCommitExplanationAdapter", () => {
     expect(observed).toEqual(queued)
   })
 
+  it("serializes scope writes, coalesces intermediate desires, and closes the stale event gate", async () => {
+    const events = new FakeNativeEvents()
+    const scopes: Array<{
+      workspaceId: string
+      workspaceGeneration: number
+      locale: "ja" | "en"
+    }> = []
+    const releases: Array<(value: null) => void> = []
+    const invoke = vi.fn<CommitExplanationInvoker>((command, argument) => {
+      if (command !== commitExplanationCommands.setScope) {
+        return Promise.resolve(null)
+      }
+      if (!("request" in argument)) return Promise.resolve(null)
+      const request = argument.request
+      if (!("locale" in request)) return Promise.resolve(null)
+      scopes.push(request)
+      return new Promise<null>((resolve) => releases.push(resolve))
+    })
+    const adapter = new TauriCommitExplanationAdapter({
+      invoke,
+      listen: events.listen,
+    })
+    await adapter.start()
+    const narrated: unknown[] = []
+    adapter.narrationSource.subscribe((event) => narrated.push(event))
+
+    const first = adapter.setScope({
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      locale: "ja",
+    })
+    const intermediate = adapter.setScope({
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      locale: "en",
+    })
+    const latest = adapter.setScope({
+      schemaVersion: 1,
+      workspaceId: "workspace-two",
+      workspaceGeneration: 1,
+      locale: "ja",
+    })
+
+    expect(scopes).toEqual([
+      expect.objectContaining({ workspaceId: "workspace-one", locale: "ja" }),
+    ])
+    const stateChanges = vi.fn()
+    adapter.subscribe(stateChanges)
+    events.emit(commitExplanationEventChannels.state, state())
+    events.emit(commitExplanationEventChannels.presentation, presentation())
+    expect(stateChanges).not.toHaveBeenCalled()
+    expect(narrated).toEqual([])
+
+    releases[0]?.(null)
+    await first
+    await vi.waitFor(() => expect(scopes).toHaveLength(2))
+    expect(scopes[1]).toEqual(
+      expect.objectContaining({ workspaceId: "workspace-two", locale: "ja" }),
+    )
+    expect(scopes).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          workspaceId: "workspace-one",
+          locale: "en",
+        }),
+      ]),
+    )
+
+    releases[1]?.(null)
+    await expect(Promise.all([intermediate, latest])).resolves.toEqual([
+      undefined,
+      undefined,
+    ])
+    stateChanges.mockClear()
+    events.emit(commitExplanationEventChannels.state, state())
+    expect(stateChanges).not.toHaveBeenCalled()
+    events.emit(
+      commitExplanationEventChannels.state,
+      state({
+        workspaceId: "workspace-two",
+        workspaceGeneration: 1,
+      }),
+    )
+    expect(stateChanges).toHaveBeenCalledOnce()
+  })
+
+  it("rejects generation rollback before native invoke and retries a failed latest scope without reopening the old gate", async () => {
+    let rejectEnglish = true
+    const { adapter, events, invoke } = adapterHarness((command, argument) => {
+      if (
+        command === commitExplanationCommands.setScope &&
+        "request" in argument &&
+        "locale" in argument.request &&
+        argument.request.locale === "en" &&
+        rejectEnglish
+      ) {
+        throw new Error("scope unavailable")
+      }
+      return null
+    })
+    await adapter.start()
+    await adapter.setScope({
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 4,
+      locale: "ja",
+    })
+    const callsBeforeRollback = vi.mocked(invoke).mock.calls.length
+    await expect(
+      adapter.setScope({
+        schemaVersion: 1,
+        workspaceId: "workspace-one",
+        workspaceGeneration: 3,
+        locale: "ja",
+      }),
+    ).rejects.toMatchObject({ code: "CODEX-SUPPORT-WORKSPACE-STALE" })
+    expect(invoke).toHaveBeenCalledTimes(callsBeforeRollback)
+
+    await expect(
+      adapter.setScope({
+        schemaVersion: 1,
+        workspaceId: "workspace-one",
+        workspaceGeneration: 4,
+        locale: "en",
+      }),
+    ).rejects.toMatchObject({ code: "CODEX-SUPPORT-IPC-UNAVAILABLE" })
+    const stateChanges = vi.fn()
+    adapter.subscribe(stateChanges)
+    events.emit(
+      commitExplanationEventChannels.state,
+      state({ workspaceGeneration: 4 }),
+    )
+    expect(stateChanges).not.toHaveBeenCalled()
+
+    rejectEnglish = false
+    await adapter.setScope({
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 4,
+      locale: "en",
+    })
+    stateChanges.mockClear()
+    events.emit(
+      commitExplanationEventChannels.state,
+      state({
+        workspaceGeneration: 4,
+        locale: "en",
+      }),
+    )
+    expect(stateChanges).toHaveBeenCalledOnce()
+  })
+
+  it("terminates pending scope waiters on dispose and never starts a coalesced native write afterward", async () => {
+    let releaseFirst: ((value: null) => void) | undefined
+    const scopes: string[] = []
+    const invoke = vi.fn<CommitExplanationInvoker>((command, argument) => {
+      if (
+        command !== commitExplanationCommands.setScope ||
+        !("request" in argument) ||
+        !("locale" in argument.request)
+      ) {
+        return Promise.resolve(null)
+      }
+      scopes.push(argument.request.locale)
+      return new Promise<null>((resolve) => {
+        releaseFirst = resolve
+      })
+    })
+    const adapter = new TauriCommitExplanationAdapter({ invoke })
+    const first = adapter.setScope({
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      locale: "ja",
+    })
+    const latest = adapter.setScope({
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      locale: "en",
+    })
+    const firstRejection = expect(first).rejects.toMatchObject({
+      code: "CODEX-SUPPORT-SCOPE-DISPOSED",
+    })
+    const latestRejection = expect(latest).rejects.toMatchObject({
+      code: "CODEX-SUPPORT-SCOPE-DISPOSED",
+    })
+
+    adapter.dispose()
+    await firstRejection
+    await latestRejection
+    releaseFirst?.(null)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(scopes).toEqual(["ja"])
+  })
+
   it("hydrates getState before subscription and never lets its late snapshot overwrite an event", async () => {
     let resolveSnapshot: ((value: unknown) => void) | undefined
     const snapshot = new Promise<unknown>((resolve) => {

@@ -34,6 +34,11 @@ import {
 
 type StateListener = () => void
 type NarrationListener = (event: unknown) => void
+type ScopeWaiter = {
+  readonly revision: number
+  readonly resolve: () => void
+  readonly reject: (error: CommitExplanationBoundaryError) => void
+}
 type NativeArgument =
   | { readonly dispatch: CommitExplanationDispatchV1 }
   | {
@@ -152,10 +157,10 @@ function stateMatchesScope(
   scope: CommitExplanationScopeRequestedV1 | null,
 ): boolean {
   return (
-    scope === null ||
-    (state.workspaceId === scope.workspaceId &&
-      state.workspaceGeneration === scope.workspaceGeneration &&
-      (state.locale === null || state.locale === scope.locale))
+    scope !== null &&
+    state.workspaceId === scope.workspaceId &&
+    state.workspaceGeneration === scope.workspaceGeneration &&
+    (state.locale === null || state.locale === scope.locale)
   )
 }
 
@@ -190,8 +195,14 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   readonly #generationHighWater = new Map<string, number>()
   readonly #presentationDedupe = new Set<string>()
   readonly #presentationDedupeOrder: string[] = []
+  readonly #scopeWaiters = new Set<ScopeWaiter>()
   #scope: CommitExplanationScopeRequestedV1 | null = null
-  #scopeEpoch = 0
+  #desiredScope: CommitExplanationScopeRequestedV1 | null = null
+  #desiredScopeRevision = 0
+  #appliedScopeRevision = 0
+  #failedScopeRevision = 0
+  #scopeLifecycleEpoch = 0
+  #scopeWriter: Promise<void> | null = null
   #lifecycleEpoch = 0
   #nativeDisposers: Array<() => void> = []
   #startPromise: Promise<void> | null = null
@@ -262,42 +273,146 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
 
   dispose(): void {
     ++this.#lifecycleEpoch
+    ++this.#scopeLifecycleEpoch
+    ++this.#desiredScopeRevision
     this.#started = false
     this.#startPromise = null
+    this.#scope = null
+    this.#desiredScope = null
+    this.#appliedScopeRevision = 0
+    this.#failedScopeRevision = 0
+    this.rejectScopeWaiters(
+      boundaryError(
+        "CODEX-SUPPORT-SCOPE-DISPOSED",
+        commitExplanationCommands.setScope,
+        true,
+      ),
+    )
     const disposers = this.#nativeDisposers
     this.#nativeDisposers = []
     for (const dispose of disposers) dispose()
+    this.emitStateChange()
   }
 
   async setScope(scopeValue: CommitExplanationScopeRequestedV1): Promise<void> {
     const scope = createCommitExplanationScopeRequested(scopeValue)
     const highest = this.#generationHighWater.get(scope.workspaceId)
     if (highest !== undefined && scope.workspaceGeneration < highest) {
-      throw boundaryError(
-        "CODEX-SUPPORT-WORKSPACE-STALE",
-        commitExplanationCommands.setScope,
-        false,
+      return Promise.reject(
+        boundaryError(
+          "CODEX-SUPPORT-WORKSPACE-STALE",
+          commitExplanationCommands.setScope,
+          false,
+        ),
       )
     }
-    if (sameScope(this.#scope, scope)) return
+    if (sameScope(this.currentScope(), scope)) return Promise.resolve()
     this.#generationHighWater.set(scope.workspaceId, scope.workspaceGeneration)
-    const previous = this.#scope
-    const epoch = ++this.#scopeEpoch
-    this.#scope = scope
-    this.emitStateChange()
-    try {
-      const response = await this.#invoke(commitExplanationCommands.setScope, {
-        request: scope,
-      })
-      if (response !== null) {
-        throw new GitReviewContractError()
+
+    if (
+      !sameScope(this.#desiredScope, scope) ||
+      this.#failedScopeRevision === this.#desiredScopeRevision
+    ) {
+      this.#desiredScope = scope
+      ++this.#desiredScopeRevision
+      this.#failedScopeRevision = 0
+      this.emitStateChange()
+    }
+
+    const revision = this.#desiredScopeRevision
+    const pending = new Promise<void>((resolve, reject) => {
+      this.#scopeWaiters.add({ revision, resolve, reject })
+    })
+    this.ensureScopeWriter()
+    return pending
+  }
+
+  private currentScope(): CommitExplanationScopeRequestedV1 | null {
+    if (
+      this.#scope === null ||
+      this.#desiredScope === null ||
+      this.#appliedScopeRevision !== this.#desiredScopeRevision ||
+      !sameScope(this.#scope, this.#desiredScope)
+    ) {
+      return null
+    }
+    return this.#scope
+  }
+
+  private ensureScopeWriter(): void {
+    if (this.#scopeWriter !== null) return
+    const lifecycleEpoch = this.#scopeLifecycleEpoch
+    const tracked = this.drainScopeWrites(lifecycleEpoch).finally(() => {
+      if (this.#scopeWriter !== tracked) return
+      this.#scopeWriter = null
+      if (
+        this.#desiredScope !== null &&
+        this.#scopeWaiters.size > 0 &&
+        this.#failedScopeRevision !== this.#desiredScopeRevision
+      ) {
+        this.ensureScopeWriter()
       }
-    } catch (error) {
-      if (epoch === this.#scopeEpoch) {
-        this.#scope = previous
-        this.emitStateChange()
+    })
+    this.#scopeWriter = tracked
+  }
+
+  private async drainScopeWrites(lifecycleEpoch: number): Promise<void> {
+    while (lifecycleEpoch === this.#scopeLifecycleEpoch) {
+      const target = this.#desiredScope
+      const revision = this.#desiredScopeRevision
+      if (target === null) return
+      if (
+        this.#appliedScopeRevision === revision &&
+        sameScope(this.#scope, target)
+      ) {
+        this.resolveScopeWaiters(revision)
+        return
       }
-      throw normalizeError(commitExplanationCommands.setScope, error)
+      if (this.#failedScopeRevision === revision) return
+
+      try {
+        const response = await this.#invoke(
+          commitExplanationCommands.setScope,
+          { request: target },
+        )
+        if (response !== null) throw new GitReviewContractError()
+      } catch (error) {
+        if (lifecycleEpoch !== this.#scopeLifecycleEpoch) return
+        const normalized = normalizeError(
+          commitExplanationCommands.setScope,
+          error,
+        )
+        this.rejectScopeWaiters(normalized, revision)
+        this.#failedScopeRevision = revision
+        if (revision === this.#desiredScopeRevision) return
+        continue
+      }
+
+      if (lifecycleEpoch !== this.#scopeLifecycleEpoch) return
+      this.#scope = target
+      this.#appliedScopeRevision = revision
+      this.resolveScopeWaiters(revision)
+      this.emitStateChange()
+      if (revision === this.#desiredScopeRevision) return
+    }
+  }
+
+  private resolveScopeWaiters(revision: number): void {
+    for (const waiter of [...this.#scopeWaiters]) {
+      if (waiter.revision > revision) continue
+      this.#scopeWaiters.delete(waiter)
+      waiter.resolve()
+    }
+  }
+
+  private rejectScopeWaiters(
+    error: CommitExplanationBoundaryError,
+    throughRevision = Number.POSITIVE_INFINITY,
+  ): void {
+    for (const waiter of [...this.#scopeWaiters]) {
+      if (waiter.revision > throughRevision) continue
+      this.#scopeWaiters.delete(waiter)
+      waiter.reject(error)
     }
   }
 
@@ -312,12 +427,12 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
         false,
       )
     }
+    const scope = this.currentScope()
     if (
-      this.#scope === null ||
-      this.#scope.workspaceId !== dispatch.request.workspaceId ||
-      this.#scope.workspaceGeneration !==
-        dispatch.request.workspaceGeneration ||
-      this.#scope.locale !== dispatch.request.locale
+      scope === null ||
+      scope.workspaceId !== dispatch.request.workspaceId ||
+      scope.workspaceGeneration !== dispatch.request.workspaceGeneration ||
+      scope.locale !== dispatch.request.locale
     ) {
       throw boundaryError(
         "CODEX-SUPPORT-WORKSPACE-STALE",
@@ -382,7 +497,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
     )
     if (
       state === undefined ||
-      !stateMatchesScope(state, this.#scope) ||
+      !stateMatchesScope(state, this.currentScope()) ||
       state.status !== "generated" ||
       !state.presentationAvailable ||
       state.requestId !== request.requestId
@@ -434,7 +549,10 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       commitEvidenceIdValue,
     )
     const cached = this.#states.get(key)
-    if (cached !== undefined && stateMatchesScope(cached, this.#scope)) {
+    if (
+      cached !== undefined &&
+      stateMatchesScope(cached, this.currentScope())
+    ) {
       return cached
     }
     this.hydrateState(key, request)
@@ -447,6 +565,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   ): void {
     if (this.#pendingHydration.has(key)) return
     const revision = this.#stateRevisions.get(key) ?? 0
+    const scopeRevision = this.#desiredScopeRevision
     const hydration = this.#invoke(commitExplanationCommands.getState, {
       request,
     })
@@ -457,7 +576,8 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
           state.workspaceId !== request.workspaceId ||
           state.workspaceGeneration !== request.workspaceGeneration ||
           state.commitEvidenceId !== request.commitEvidenceId ||
-          !stateMatchesScope(state, this.#scope)
+          scopeRevision !== this.#desiredScopeRevision ||
+          !stateMatchesScope(state, this.currentScope())
         ) {
           return
         }
@@ -475,7 +595,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   private consumeState(payload: unknown): void {
     try {
       const state = parseCommitExplanationControllerState(payload)
-      if (this.#scope === null || !stateMatchesScope(state, this.#scope)) return
+      if (!stateMatchesScope(state, this.currentScope())) return
       this.applyState(state)
     } catch {
       // Dedicated native events are untrusted until their exact schema passes.
@@ -483,7 +603,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   }
 
   private applyState(state: CommitExplanationControllerStateV1): void {
-    if (!stateMatchesScope(state, this.#scope)) return
+    if (!stateMatchesScope(state, this.currentScope())) return
     const key = stateKey(
       state.workspaceId,
       state.workspaceGeneration,
@@ -525,7 +645,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   private publishPresentation(
     presentation: CommitExplanationPresentationV1,
   ): void {
-    const scope = this.#scope
+    const scope = this.currentScope()
     const sha = fullCommitSha(presentation.commitEvidenceId)
     if (
       scope === null ||
