@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{http, Manager, State};
 
 use app_lifecycle::{
-    app_quit_cancel, app_quit_confirm, raise_main_window, request_app_close,
-    AppLifecycleCoordinator,
+    app_quit_cancel, app_quit_confirm, app_quit_retry_cleanup, raise_main_window,
+    request_app_close, AppLifecycleCoordinator,
 };
 use character::commands::{
     character_attest_preview, character_cancel_import, character_confirm_import,
@@ -276,6 +276,7 @@ pub fn run() {
             copy_sanitized_diagnostics,
             app_quit_cancel,
             app_quit_confirm,
+            app_quit_retry_cleanup,
             codex_pick_workspace,
             codex_get_diagnostic,
             codex_probe,

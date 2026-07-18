@@ -6,21 +6,29 @@ import {
   appLifecycleDemoEvents,
   appLifecycleEventChannels,
   createAppQuitRequest,
+  parseAppCleanupFailed,
   parseAppCloseRequested,
+  type AppCleanupFailedV1,
   type AppCloseRequestedV1,
   type AppQuitAction,
   type AppQuitRequestV1,
 } from "@/features/app-lifecycle/contracts"
 import type { RuntimeKind } from "@/lib/contracts"
 
-export type AppLifecycleCloseListener = (
-  request: AppCloseRequestedV1,
+export type AppLifecycleCloseListener = (request: AppCloseRequestedV1) => void
+
+export type AppLifecycleCleanupFailedListener = (
+  failure: AppCleanupFailedV1,
 ) => void
 
 export interface AppLifecycleGateway {
   listenCloseRequested(listener: AppLifecycleCloseListener): Promise<() => void>
+  listenCleanupFailed(
+    listener: AppLifecycleCleanupFailedListener,
+  ): Promise<() => void>
   cancelQuit(requestId: string): Promise<void>
   confirmQuit(requestId: string): Promise<void>
+  retryCleanup(requestId: string): Promise<void>
 }
 
 export interface AppLifecycleGatewayDependencies {
@@ -88,12 +96,35 @@ export class TauriAppLifecycleGateway implements AppLifecycleGateway {
     }
   }
 
+  async listenCleanupFailed(
+    listener: AppLifecycleCleanupFailedListener,
+  ): Promise<() => void> {
+    try {
+      return await this.#listen(
+        appLifecycleEventChannels.cleanupFailed,
+        (payload) => {
+          try {
+            listener(parseAppCleanupFailed(payload))
+          } catch {
+            // Native lifecycle payloads fail closed and never expose process details.
+          }
+        },
+      )
+    } catch {
+      throw boundaryFailure()
+    }
+  }
+
   cancelQuit(requestId: string): Promise<void> {
     return this.request(appLifecycleCommands.cancelQuit, requestId)
   }
 
   confirmQuit(requestId: string): Promise<void> {
     return this.request(appLifecycleCommands.confirmQuit, requestId)
+  }
+
+  retryCleanup(requestId: string): Promise<void> {
+    return this.request(appLifecycleCommands.retryCleanup, requestId)
   }
 
   private async request(command: string, requestId: string): Promise<void> {
@@ -126,12 +157,33 @@ export class DemoAppLifecycleGateway implements AppLifecycleGateway {
     )
   }
 
+  listenCleanupFailed(
+    listener: AppLifecycleCleanupFailedListener,
+  ): Promise<() => void> {
+    const receive = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return
+      try {
+        listener(parseAppCleanupFailed(event.detail))
+      } catch {
+        // Browser verification uses the same strict contract as native events.
+      }
+    }
+    window.addEventListener(appLifecycleDemoEvents.cleanupFailed, receive)
+    return Promise.resolve(() =>
+      window.removeEventListener(appLifecycleDemoEvents.cleanupFailed, receive),
+    )
+  }
+
   cancelQuit(requestId: string): Promise<void> {
     return this.emitAction("dont_quit", requestId)
   }
 
   confirmQuit(requestId: string): Promise<void> {
     return this.emitAction("stop_and_quit", requestId)
+  }
+
+  retryCleanup(requestId: string): Promise<void> {
+    return this.emitAction("retry_cleanup", requestId)
   }
 
   private emitAction(action: AppQuitAction, requestId: string): Promise<void> {

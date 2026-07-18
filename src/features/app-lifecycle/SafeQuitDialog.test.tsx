@@ -13,11 +13,13 @@ function Harness({
   status = "confirming",
   onDontQuit = vi.fn(),
   onStopAndQuit = vi.fn(),
+  onRetryCleanup = vi.fn(),
 }: {
   readonly locale: "ja" | "en"
   readonly status?: SafeQuitDialogStatus
   readonly onDontQuit?: () => void
   readonly onStopAndQuit?: () => void
+  readonly onRetryCleanup?: () => void
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -31,6 +33,7 @@ function Harness({
           onDontQuit()
           setOpen(false)
         }}
+        onRetryCleanup={onRetryCleanup}
         onStopAndQuit={onStopAndQuit}
         open={open}
         status={status}
@@ -42,7 +45,12 @@ function Harness({
 describe("SafeQuitDialog", () => {
   it.each([
     ["en", "Stop the active turn and quit?", "Don’t Quit", "Stop and Quit"],
-    ["ja", "実行中のターンを停止して終了しますか？", "終了しない", "停止して終了"],
+    [
+      "ja",
+      "実行中のターンを停止して終了しますか？",
+      "終了しない",
+      "停止して終了",
+    ],
   ] as const)(
     "renders the %s choices and gives initial focus to the safe action",
     (locale, title, safeLabel, destructiveLabel) => {
@@ -50,9 +58,7 @@ describe("SafeQuitDialog", () => {
       fireEvent.click(screen.getByRole("button", { name: "origin" }))
 
       expect(screen.getByRole("dialog")).toHaveAccessibleName(title)
-      expect(
-        screen.getByRole("button", { name: safeLabel }),
-      ).toHaveFocus()
+      expect(screen.getByRole("button", { name: safeLabel })).toHaveFocus()
       expect(
         screen.getByRole("button", { name: destructiveLabel }),
       ).toBeEnabled()
@@ -76,13 +82,7 @@ describe("SafeQuitDialog", () => {
 
   it("does not let Escape bypass an in-progress terminalization", () => {
     const onDontQuit = vi.fn()
-    render(
-      <Harness
-        locale="en"
-        onDontQuit={onDontQuit}
-        status="stopping"
-      />,
-    )
+    render(<Harness locale="en" onDontQuit={onDontQuit} status="stopping" />)
     fireEvent.click(screen.getByRole("button", { name: "origin" }))
     fireEvent.keyDown(screen.getByRole("dialog"), {
       key: "Escape",
@@ -93,4 +93,34 @@ describe("SafeQuitDialog", () => {
       "Stopping and quitting…",
     )
   })
+
+  it.each([
+    ["en", "Coding Wife is still open", "Retry Safe Cleanup"],
+    ["ja", "Coding Wife は開いたままです", "安全な終了処理を再試行"],
+  ] as const)(
+    "keeps the %s cleanup recovery open and focuses its only action",
+    async (locale, title, actionLabel) => {
+      const onDontQuit = vi.fn()
+      const onRetryCleanup = vi.fn()
+      render(
+        <Harness
+          locale={locale}
+          onDontQuit={onDontQuit}
+          onRetryCleanup={onRetryCleanup}
+          status="cleanup_failed"
+        />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: "origin" }))
+
+      const dialog = screen.getByRole("dialog", { name: title })
+      const retry = screen.getByRole("button", { name: actionLabel })
+      await waitFor(() => expect(retry).toHaveFocus())
+      expect(screen.getByRole("alert")).toBeInTheDocument()
+      fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" })
+      expect(onDontQuit).not.toHaveBeenCalled()
+      expect(dialog).toBeInTheDocument()
+      fireEvent.click(retry)
+      expect(onRetryCleanup).toHaveBeenCalledTimes(1)
+    },
+  )
 })

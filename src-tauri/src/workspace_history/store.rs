@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
@@ -311,6 +312,7 @@ pub struct PersistedSessionWorkspace {
 pub struct WorkspaceHistoryStore {
     inner: Arc<Mutex<StoreInner>>,
     delete_challenges: Arc<Mutex<HashMap<String, DeleteChallengeRecord>>>,
+    accepting_writes: Arc<AtomicBool>,
 }
 
 impl WorkspaceHistoryStore {
@@ -358,6 +360,7 @@ impl WorkspaceHistoryStore {
         Self {
             inner: Arc::new(Mutex::new(StoreInner { connection, status })),
             delete_challenges: Arc::new(Mutex::new(HashMap::new())),
+            accepting_writes: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -371,6 +374,10 @@ impl WorkspaceHistoryStore {
 
     pub fn recover_unfinished_turns(&self) -> Result<usize, WorkspaceHistoryError> {
         self.ensure_writable("history.recover_unfinished_turns")?;
+        self.recover_unfinished_turns_for_shutdown()
+    }
+
+    fn recover_unfinished_turns_for_shutdown(&self) -> Result<usize, WorkspaceHistoryError> {
         let mut inner = self.lock();
         let persisted = {
             let mut statement = inner
@@ -472,6 +479,10 @@ impl WorkspaceHistoryStore {
 
     pub fn checkpoint_for_shutdown(&self) -> Result<(), WorkspaceHistoryError> {
         self.ensure_writable("history.shutdown")?;
+        self.checkpoint_after_admission_closed()
+    }
+
+    fn checkpoint_after_admission_closed(&self) -> Result<(), WorkspaceHistoryError> {
         let inner = self.lock();
         let (busy, _, _) = inner
             .connection
@@ -490,9 +501,18 @@ impl WorkspaceHistoryStore {
     }
 
     pub fn force_shutdown_now(&self) -> Result<usize, WorkspaceHistoryError> {
-        let interrupted = self.recover_unfinished_turns()?;
-        self.checkpoint_for_shutdown()?;
+        self.begin_shutdown();
+        let interrupted = self.recover_unfinished_turns_for_shutdown()?;
+        self.checkpoint_after_admission_closed()?;
         Ok(interrupted)
+    }
+
+    pub fn begin_shutdown(&self) {
+        self.accepting_writes.store(false, Ordering::Release);
+        self.delete_challenges
+            .lock()
+            .expect("delete challenges lock poisoned")
+            .clear();
     }
 
     #[cfg(test)]
@@ -1798,14 +1818,21 @@ impl WorkspaceHistoryStore {
     }
 
     fn ensure_writable(&self, operation: &str) -> Result<(), WorkspaceHistoryError> {
-        if self.status().mode == HistoryMode::Ready {
-            Ok(())
-        } else {
+        if !self.accepting_writes.load(Ordering::Acquire) {
+            return Err(WorkspaceHistoryError::new(
+                "HIST-SHUTTING-DOWN",
+                operation,
+                false,
+            ));
+        }
+        if self.status().mode != HistoryMode::Ready {
             Err(WorkspaceHistoryError::new(
                 "HIST-READ-ONLY",
                 operation,
                 true,
             ))
+        } else {
+            Ok(())
         }
     }
 
@@ -4786,6 +4813,13 @@ mod tests {
                 .force_shutdown_now()
                 .expect("idempotent force shutdown"),
             0
+        );
+        assert_eq!(
+            reopened
+                .issue_delete_challenge(&workspace.workspace_id)
+                .expect_err("shutdown admission gate rejects late writes")
+                .code,
+            "HIST-SHUTTING-DOWN"
         );
         let snapshot = reopened
             .snapshot(Some(&workspace.workspace_id))

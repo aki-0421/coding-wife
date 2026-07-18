@@ -14,6 +14,7 @@ use crate::workspace_history::WorkspaceHistoryService;
 
 pub const APP_LIFECYCLE_SCHEMA_VERSION: u16 = 1;
 pub const APP_CLOSE_REQUESTED_EVENT_CHANNEL: &str = "coding-wife://app-close-requested";
+pub const APP_CLEANUP_FAILED_EVENT_CHANNEL: &str = "coding-wife://app-cleanup-failed";
 pub const APP_SHUTDOWN_DEADLINE: Duration = Duration::from_secs(5);
 const APP_FORCE_SHUTDOWN_STEP_DEADLINE: Duration = Duration::from_millis(500);
 
@@ -39,17 +40,39 @@ pub struct AppQuitRequestV1 {
     pub request_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AppCleanupFailedV1 {
+    pub schema_version: u16,
+    pub request_id: String,
+    pub attempt: u16,
+    pub error_code: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppShutdownAttempt {
+    request_id: String,
+    attempt: u16,
+    previous_report: Option<AppShutdownReport>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum AppLifecycleState {
     Open,
     Confirming(AppCloseRequestedV1),
-    ShuttingDown,
+    ShuttingDown(AppShutdownAttempt),
+    CleanupFailed {
+        failure: AppCleanupFailedV1,
+        report: AppShutdownReport,
+    },
+    ExitReady,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeCloseDecision {
     Prompt(AppCloseRequestedV1),
-    BeginShutdown,
+    BeginShutdown(AppShutdownAttempt),
+    CleanupFailed(AppCleanupFailedV1),
     AlreadyShuttingDown,
 }
 
@@ -77,6 +100,15 @@ struct AppShutdownReport {
     history: ForceCleanupOutcome,
 }
 
+impl AppShutdownReport {
+    fn completed(self) -> bool {
+        self.graceful == ShutdownOutcome::Completed
+            || [self.codex, self.narration, self.explanation, self.history]
+                .into_iter()
+                .all(|outcome| outcome == ForceCleanupOutcome::Completed)
+    }
+}
+
 type ShutdownFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 trait AppShutdownPlan: Send + Sync {
@@ -102,7 +134,7 @@ impl AppShutdownPlan for NativeAppShutdownPlan {
                 converged &= narration.shutdown().await.is_ok();
             }
             if let Some(explanation) = self.explanation.as_ref() {
-                explanation.shutdown().await;
+                converged &= explanation.shutdown().await.is_ok();
             }
             if let Some(history) = self.history.as_ref() {
                 converged &= history.shutdown().await.is_ok();
@@ -135,9 +167,10 @@ impl AppShutdownPlan for NativeAppShutdownPlan {
 
     fn force_history(&self) -> ShutdownFuture<'_, bool> {
         Box::pin(async move {
-            self.history
-                .as_ref()
-                .is_none_or(|history| history.force_shutdown_now().is_ok())
+            match self.history.as_ref() {
+                Some(history) => history.force_shutdown_now().await.is_ok(),
+                None => true,
+            }
         })
     }
 }
@@ -164,14 +197,23 @@ impl AppLifecycleCoordinator {
             AppLifecycleState::Confirming(request) => {
                 return NativeCloseDecision::Prompt(request.clone());
             }
-            AppLifecycleState::ShuttingDown => {
+            AppLifecycleState::ShuttingDown(_) => {
                 return NativeCloseDecision::AlreadyShuttingDown;
             }
+            AppLifecycleState::CleanupFailed { failure, .. } => {
+                return NativeCloseDecision::CleanupFailed(failure.clone());
+            }
+            AppLifecycleState::ExitReady => return NativeCloseDecision::AlreadyShuttingDown,
             AppLifecycleState::Open => {}
         }
         let Some(active) = active else {
-            *state = AppLifecycleState::ShuttingDown;
-            return NativeCloseDecision::BeginShutdown;
+            let attempt = AppShutdownAttempt {
+                request_id: format!("app-quit-{}", uuid::Uuid::new_v4()),
+                attempt: 1,
+                previous_report: None,
+            };
+            *state = AppLifecycleState::ShuttingDown(attempt.clone());
+            return NativeCloseDecision::BeginShutdown(attempt);
         };
         let request = AppCloseRequestedV1 {
             schema_version: APP_LIFECYCLE_SCHEMA_VERSION,
@@ -195,27 +237,85 @@ impl AppLifecycleCoordinator {
         }
     }
 
-    pub fn confirm_quit(&self, request: &AppQuitRequestV1) -> Result<(), AppLifecycleError> {
+    pub fn confirm_quit(
+        &self,
+        request: &AppQuitRequestV1,
+    ) -> Result<AppShutdownAttempt, AppLifecycleError> {
         validate_quit_request(request, "app_quit_confirm")?;
         let mut state = self.state.lock().expect("app lifecycle lock poisoned");
         match &*state {
             AppLifecycleState::Confirming(current) if current.request_id == request.request_id => {
-                *state = AppLifecycleState::ShuttingDown;
-                Ok(())
+                let attempt = AppShutdownAttempt {
+                    request_id: request.request_id.clone(),
+                    attempt: 1,
+                    previous_report: None,
+                };
+                *state = AppLifecycleState::ShuttingDown(attempt.clone());
+                Ok(attempt)
             }
             _ => Err(AppLifecycleError::stale("app_quit_confirm")),
         }
     }
 
+    pub fn retry_cleanup(
+        &self,
+        request: &AppQuitRequestV1,
+    ) -> Result<AppShutdownAttempt, AppLifecycleError> {
+        validate_quit_request(request, "app_quit_retry_cleanup")?;
+        let mut state = self.state.lock().expect("app lifecycle lock poisoned");
+        match &*state {
+            AppLifecycleState::CleanupFailed { failure, report }
+                if failure.request_id == request.request_id =>
+            {
+                let attempt = AppShutdownAttempt {
+                    request_id: request.request_id.clone(),
+                    attempt: failure.attempt.saturating_add(1),
+                    previous_report: Some(*report),
+                };
+                *state = AppLifecycleState::ShuttingDown(attempt.clone());
+                Ok(attempt)
+            }
+            _ => Err(AppLifecycleError::stale("app_quit_retry_cleanup")),
+        }
+    }
+
+    fn finish_shutdown_attempt(
+        &self,
+        attempt: &AppShutdownAttempt,
+        report: AppShutdownReport,
+    ) -> Result<Option<AppCleanupFailedV1>, AppLifecycleError> {
+        let mut state = self.state.lock().expect("app lifecycle lock poisoned");
+        let AppLifecycleState::ShuttingDown(current) = &*state else {
+            return Err(AppLifecycleError::stale("app_quit_finish"));
+        };
+        if current.request_id != attempt.request_id || current.attempt != attempt.attempt {
+            return Err(AppLifecycleError::stale("app_quit_finish"));
+        }
+        if report.completed() {
+            *state = AppLifecycleState::ExitReady;
+            self.exit_ready.store(true, Ordering::Release);
+            return Ok(None);
+        }
+        let failure = AppCleanupFailedV1 {
+            schema_version: APP_LIFECYCLE_SCHEMA_VERSION,
+            request_id: attempt.request_id.clone(),
+            attempt: attempt.attempt,
+            error_code: "APP-QUIT-CLEANUP-INCOMPLETE".to_owned(),
+        };
+        *state = AppLifecycleState::CleanupFailed {
+            failure: failure.clone(),
+            report,
+        };
+        Ok(Some(failure))
+    }
+
     pub fn is_shutting_down(&self) -> bool {
         matches!(
             *self.state.lock().expect("app lifecycle lock poisoned"),
-            AppLifecycleState::ShuttingDown
+            AppLifecycleState::ShuttingDown(_)
+                | AppLifecycleState::CleanupFailed { .. }
+                | AppLifecycleState::ExitReady
         )
-    }
-
-    pub fn mark_exit_ready(&self) {
-        self.exit_ready.store(true, Ordering::Release);
     }
 
     pub fn can_exit(&self) -> bool {
@@ -293,35 +393,48 @@ async fn run_force_cleanup(
     }
 }
 
-async fn execute_shutdown_plan<P, E>(
+async fn execute_shutdown_plan<P>(
     plan: &P,
+    previous_report: Option<AppShutdownReport>,
     graceful_deadline: Duration,
     force_step_deadline: Duration,
-    exit: E,
 ) -> AppShutdownReport
 where
     P: AppShutdownPlan,
-    E: FnOnce(),
 {
-    let graceful = match tokio::time::timeout(graceful_deadline, plan.graceful_shutdown()).await {
-        Ok(true) => ShutdownOutcome::Completed,
-        Ok(false) => ShutdownOutcome::Failed,
-        Err(_) => ShutdownOutcome::TimedOut,
+    let mut report = match previous_report {
+        Some(report) => report,
+        None => {
+            let graceful =
+                match tokio::time::timeout(graceful_deadline, plan.graceful_shutdown()).await {
+                    Ok(true) => ShutdownOutcome::Completed,
+                    Ok(false) => ShutdownOutcome::Failed,
+                    Err(_) => ShutdownOutcome::TimedOut,
+                };
+            AppShutdownReport {
+                graceful,
+                codex: ForceCleanupOutcome::NotRequired,
+                narration: ForceCleanupOutcome::NotRequired,
+                explanation: ForceCleanupOutcome::NotRequired,
+                history: ForceCleanupOutcome::NotRequired,
+            }
+        }
     };
-    let mut report = AppShutdownReport {
-        graceful,
-        codex: ForceCleanupOutcome::NotRequired,
-        narration: ForceCleanupOutcome::NotRequired,
-        explanation: ForceCleanupOutcome::NotRequired,
-        history: ForceCleanupOutcome::NotRequired,
-    };
-    if graceful != ShutdownOutcome::Completed {
+    if report.graceful == ShutdownOutcome::Completed {
+        return report;
+    }
+    if report.codex != ForceCleanupOutcome::Completed {
         report.codex = run_force_cleanup(plan.force_codex(), force_step_deadline).await;
+    }
+    if report.narration != ForceCleanupOutcome::Completed {
         report.narration = run_force_cleanup(plan.force_narration(), force_step_deadline).await;
+    }
+    if report.explanation != ForceCleanupOutcome::Completed {
         report.explanation = run_force_cleanup(plan.force_explanation(), force_step_deadline).await;
+    }
+    if report.history != ForceCleanupOutcome::Completed {
         report.history = run_force_cleanup(plan.force_history(), force_step_deadline).await;
     }
-    exit();
     report
 }
 
@@ -339,8 +452,19 @@ pub fn app_quit_confirm(
     lifecycle: State<'_, Arc<AppLifecycleCoordinator>>,
     app: AppHandle,
 ) -> Result<(), AppLifecycleError> {
-    lifecycle.confirm_quit(&request)?;
-    spawn_app_shutdown(app);
+    let attempt = lifecycle.confirm_quit(&request)?;
+    spawn_app_shutdown(app, attempt);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn app_quit_retry_cleanup(
+    request: AppQuitRequestV1,
+    lifecycle: State<'_, Arc<AppLifecycleCoordinator>>,
+    app: AppHandle,
+) -> Result<(), AppLifecycleError> {
+    let attempt = lifecycle.retry_cleanup(&request)?;
+    spawn_app_shutdown(app, attempt);
     Ok(())
 }
 
@@ -370,13 +494,17 @@ pub fn request_app_close(app: AppHandle) {
                 raise_main_window(&app);
                 let _ = app.emit(APP_CLOSE_REQUESTED_EVENT_CHANNEL, request);
             }
-            NativeCloseDecision::BeginShutdown => spawn_app_shutdown(app),
+            NativeCloseDecision::BeginShutdown(attempt) => spawn_app_shutdown(app, attempt),
+            NativeCloseDecision::CleanupFailed(failure) => {
+                raise_main_window(&app);
+                let _ = app.emit(APP_CLEANUP_FAILED_EVENT_CHANNEL, failure);
+            }
             NativeCloseDecision::AlreadyShuttingDown => {}
         }
     });
 }
 
-fn spawn_app_shutdown(app: AppHandle) {
+fn spawn_app_shutdown(app: AppHandle, attempt: AppShutdownAttempt) {
     tauri::async_runtime::spawn(async move {
         let plan = NativeAppShutdownPlan {
             supervisor: app.state::<CodexSupervisor>().inner().clone(),
@@ -391,17 +519,21 @@ fn spawn_app_shutdown(app: AppHandle) {
                 .map(|state| state.inner().clone()),
         };
         let lifecycle = app.state::<Arc<AppLifecycleCoordinator>>().inner().clone();
-        let exit_app = app.clone();
-        let _ = execute_shutdown_plan(
+        let report = execute_shutdown_plan(
             &plan,
+            attempt.previous_report,
             APP_SHUTDOWN_DEADLINE,
             APP_FORCE_SHUTDOWN_STEP_DEADLINE,
-            move || {
-                lifecycle.mark_exit_ready();
-                exit_app.exit(0);
-            },
         )
         .await;
+        match lifecycle.finish_shutdown_attempt(&attempt, report) {
+            Ok(None) => app.exit(0),
+            Ok(Some(failure)) => {
+                raise_main_window(&app);
+                let _ = app.emit(APP_CLEANUP_FAILED_EVENT_CHANNEL, failure);
+            }
+            Err(_) => {}
+        }
     });
 }
 
@@ -489,20 +621,34 @@ mod tests {
         }
     }
 
+    fn graceful_report() -> AppShutdownReport {
+        AppShutdownReport {
+            graceful: ShutdownOutcome::Completed,
+            codex: ForceCleanupOutcome::NotRequired,
+            narration: ForceCleanupOutcome::NotRequired,
+            explanation: ForceCleanupOutcome::NotRequired,
+            history: ForceCleanupOutcome::NotRequired,
+        }
+    }
+
     #[test]
     fn idle_close_begins_shutdown_only_once() {
         let coordinator = AppLifecycleCoordinator::default();
-        assert_eq!(
-            coordinator.request_close(None),
-            NativeCloseDecision::BeginShutdown
-        );
+        let NativeCloseDecision::BeginShutdown(attempt) = coordinator.request_close(None) else {
+            panic!("idle close must begin shutdown");
+        };
         assert_eq!(
             coordinator.request_close(None),
             NativeCloseDecision::AlreadyShuttingDown
         );
         assert!(coordinator.is_shutting_down());
         assert!(!coordinator.can_exit());
-        coordinator.mark_exit_ready();
+        assert_eq!(
+            coordinator
+                .finish_shutdown_attempt(&attempt, graceful_report())
+                .expect("complete shutdown"),
+            None
+        );
         assert!(coordinator.can_exit());
     }
 
@@ -570,33 +716,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn graceful_shutdown_exits_without_invoking_force_cleanup() {
+    async fn graceful_shutdown_completes_without_invoking_force_cleanup() {
         let log = Arc::new(Mutex::new(Vec::new()));
         let plan = RecordingShutdownPlan::new(log.clone(), TestCleanupBehavior::Complete);
-        let exit_log = log.clone();
         let report = execute_shutdown_plan(
             &plan,
+            None,
             Duration::from_millis(20),
             Duration::from_millis(20),
-            move || exit_log.lock().expect("exit log").push("exit"),
         )
         .await;
 
         assert_eq!(report.graceful, ShutdownOutcome::Completed);
         assert_eq!(report.codex, ForceCleanupOutcome::NotRequired);
-        assert_eq!(*log.lock().expect("shutdown log"), ["graceful", "exit"]);
+        assert!(report.completed());
+        assert_eq!(*log.lock().expect("shutdown log"), ["graceful"]);
     }
 
     #[tokio::test]
-    async fn timeout_forces_every_service_before_exit_in_privacy_safe_order() {
+    async fn timeout_forces_every_service_in_privacy_safe_order() {
         let log = Arc::new(Mutex::new(Vec::new()));
         let plan = RecordingShutdownPlan::new(log.clone(), TestCleanupBehavior::Pending);
-        let exit_log = log.clone();
         let report = execute_shutdown_plan(
             &plan,
+            None,
             Duration::from_millis(5),
             Duration::from_millis(20),
-            move || exit_log.lock().expect("exit log").push("exit"),
         )
         .await;
 
@@ -619,7 +764,6 @@ mod tests {
                 "force-narration-descendants-absent",
                 "force-explanation-descendants-absent",
                 "force-history-interrupted-checkpoint",
-                "exit",
             ]
         );
         assert!(!events.join(" ").contains("/Users/"));
@@ -627,17 +771,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn force_failure_and_timeout_do_not_skip_history_convergence_or_exit() {
+    async fn force_failure_stays_open_and_retry_runs_only_unfinished_cleanup() {
         let log = Arc::new(Mutex::new(Vec::new()));
         let mut plan = RecordingShutdownPlan::new(log.clone(), TestCleanupBehavior::Fail);
         plan.narration = TestCleanupBehavior::Fail;
         plan.explanation = TestCleanupBehavior::Pending;
-        let exit_log = log.clone();
         let report = execute_shutdown_plan(
             &plan,
+            None,
             Duration::from_millis(20),
             Duration::from_millis(5),
-            move || exit_log.lock().expect("exit log").push("exit"),
         )
         .await;
 
@@ -645,6 +788,60 @@ mod tests {
         assert_eq!(report.narration, ForceCleanupOutcome::Failed);
         assert_eq!(report.explanation, ForceCleanupOutcome::TimedOut);
         assert_eq!(report.history, ForceCleanupOutcome::Completed);
-        assert_eq!(log.lock().expect("shutdown log").last(), Some(&"exit"));
+        assert!(!report.completed());
+
+        let coordinator = AppLifecycleCoordinator::default();
+        let NativeCloseDecision::BeginShutdown(first_attempt) = coordinator.request_close(None)
+        else {
+            panic!("idle close begins shutdown");
+        };
+        let failure = coordinator
+            .finish_shutdown_attempt(&first_attempt, report)
+            .expect("failed cleanup remains recoverable")
+            .expect("cleanup failure event");
+        assert_eq!(failure.error_code, "APP-QUIT-CLEANUP-INCOMPLETE");
+        assert!(!coordinator.can_exit());
+        assert_eq!(
+            coordinator.request_close(None),
+            NativeCloseDecision::CleanupFailed(failure.clone())
+        );
+
+        let retry = coordinator
+            .retry_cleanup(&AppQuitRequestV1 {
+                schema_version: APP_LIFECYCLE_SCHEMA_VERSION,
+                request_id: failure.request_id.clone(),
+            })
+            .expect("retry cleanup");
+        assert!(coordinator
+            .retry_cleanup(&AppQuitRequestV1 {
+                schema_version: APP_LIFECYCLE_SCHEMA_VERSION,
+                request_id: failure.request_id,
+            })
+            .is_err());
+        let retry_log = Arc::new(Mutex::new(Vec::new()));
+        let retry_plan =
+            RecordingShutdownPlan::new(retry_log.clone(), TestCleanupBehavior::Complete);
+        let retry_report = execute_shutdown_plan(
+            &retry_plan,
+            retry.previous_report,
+            Duration::from_millis(20),
+            Duration::from_millis(20),
+        )
+        .await;
+        assert_eq!(
+            *retry_log.lock().expect("retry log"),
+            [
+                "force-narration-descendants-absent",
+                "force-explanation-descendants-absent",
+            ]
+        );
+        assert!(retry_report.completed());
+        assert_eq!(
+            coordinator
+                .finish_shutdown_attempt(&retry, retry_report)
+                .expect("retry completes"),
+            None
+        );
+        assert!(coordinator.can_exit());
     }
 }

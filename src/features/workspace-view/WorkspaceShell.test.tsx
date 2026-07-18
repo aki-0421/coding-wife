@@ -11,7 +11,9 @@ import { describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
 import type {
+  AppCleanupFailedV1,
   AppCloseRequestedV1,
+  AppLifecycleCleanupFailedListener,
   AppLifecycleCloseListener,
   AppLifecycleGateway,
 } from "@/features/app-lifecycle"
@@ -61,10 +63,14 @@ function deferred<T>(): Deferred<T> {
 
 function appLifecycleHarness() {
   let listener: AppLifecycleCloseListener | null = null
+  let cleanupListener: AppLifecycleCleanupFailedListener | null = null
   const cancelQuit = vi
     .fn<(_: string) => Promise<void>>()
     .mockResolvedValue(undefined)
   const confirmQuit = vi
+    .fn<(_: string) => Promise<void>>()
+    .mockResolvedValue(undefined)
+  const retryCleanup = vi
     .fn<(_: string) => Promise<void>>()
     .mockResolvedValue(undefined)
   const gateway: AppLifecycleGateway = {
@@ -74,15 +80,29 @@ function appLifecycleHarness() {
         listener = null
       })
     },
+    listenCleanupFailed(nextListener) {
+      cleanupListener = nextListener
+      return Promise.resolve(() => {
+        cleanupListener = null
+      })
+    },
     cancelQuit,
     confirmQuit,
+    retryCleanup,
   }
   return {
     cancelQuit,
     confirmQuit,
+    retryCleanup,
     emit(request: AppCloseRequestedV1) {
       if (listener === null) throw new Error("Close listener is not ready")
       listener(request)
+    },
+    emitCleanupFailure(failure: AppCleanupFailedV1) {
+      if (cleanupListener === null) {
+        throw new Error("Cleanup listener is not ready")
+      }
+      cleanupListener(failure)
     },
     gateway,
   }
@@ -439,6 +459,69 @@ describe("WorkspaceShell", () => {
       "presentation-cleanup",
       "native-quit",
     ])
+  })
+
+  it("keeps the app open after cleanup failure and retries the same request", async () => {
+    const lifecycle = appLifecycleHarness()
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+    }
+    render(
+      <App
+        appLifecycleGateway={lifecycle.gateway}
+        localeStore={englishLocaleStore}
+        transport={new DemoTransport()}
+        workspaceAdapter={adapter}
+      />,
+    )
+    await act(async () => Promise.resolve())
+
+    act(() =>
+      lifecycle.emitCleanupFailure({
+        schemaVersion: 1,
+        requestId: "app-quit-cleanup-retry",
+        attempt: 1,
+        errorCode: "APP-QUIT-CLEANUP-INCOMPLETE",
+      }),
+    )
+    const dialog = screen.getByRole("dialog", {
+      name: "Coding Wife is still open",
+    })
+    const retry = within(dialog).getByRole("button", {
+      name: "Retry Safe Cleanup",
+    })
+    await waitFor(() => expect(retry).toHaveFocus())
+    expect(
+      within(dialog).queryByRole("button", { name: "Don’t Quit" }),
+    ).not.toBeInTheDocument()
+
+    fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" })
+    expect(dialog).toBeInTheDocument()
+    fireEvent.click(retry)
+    await waitFor(() =>
+      expect(lifecycle.retryCleanup).toHaveBeenCalledWith(
+        "app-quit-cleanup-retry",
+      ),
+    )
+    expect(lifecycle.retryCleanup).toHaveBeenCalledTimes(1)
+    expect(
+      within(dialog).getByRole("button", {
+        name: "Retrying safe cleanup…",
+      }),
+    ).toBeDisabled()
+
+    act(() =>
+      lifecycle.emitCleanupFailure({
+        schemaVersion: 1,
+        requestId: "app-quit-cleanup-retry",
+        attempt: 2,
+        errorCode: "APP-QUIT-CLEANUP-INCOMPLETE",
+      }),
+    )
+    expect(
+      within(dialog).getByRole("button", { name: "Retry Safe Cleanup" }),
+    ).toBeEnabled()
   })
 
   it("shows only a non-mutating skeleton while native history is pending", async () => {

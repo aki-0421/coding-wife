@@ -3,14 +3,17 @@ export const appLifecycleSchemaVersion = 1 as const
 export const appLifecycleCommands = {
   cancelQuit: "app_quit_cancel",
   confirmQuit: "app_quit_confirm",
+  retryCleanup: "app_quit_retry_cleanup",
 } as const
 
 export const appLifecycleEventChannels = {
   closeRequested: "coding-wife://app-close-requested",
+  cleanupFailed: "coding-wife://app-cleanup-failed",
 } as const
 
 export const appLifecycleDemoEvents = {
   closeRequested: "coding-wife:demo-app-close-requested",
+  cleanupFailed: "coding-wife:demo-app-cleanup-failed",
   action: "coding-wife:demo-app-quit-action",
 } as const
 
@@ -26,7 +29,14 @@ export interface AppQuitRequestV1 {
   readonly requestId: string
 }
 
-export type AppQuitAction = "dont_quit" | "stop_and_quit"
+export interface AppCleanupFailedV1 {
+  readonly schemaVersion: typeof appLifecycleSchemaVersion
+  readonly requestId: string
+  readonly attempt: number
+  readonly errorCode: "APP-QUIT-CLEANUP-INCOMPLETE"
+}
+
+export type AppQuitAction = "dont_quit" | "stop_and_quit" | "retry_cleanup"
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -76,6 +86,32 @@ export function parseAppCloseRequested(value: unknown): AppCloseRequestedV1 {
     requestId: value.requestId,
     workspaceId: value.workspaceId,
     workspaceGeneration: Number(value.workspaceGeneration),
+  }
+}
+
+export function parseAppCleanupFailed(value: unknown): AppCleanupFailedV1 {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "schemaVersion",
+      "requestId",
+      "attempt",
+      "errorCode",
+    ]) ||
+    value.schemaVersion !== appLifecycleSchemaVersion ||
+    !validOpaqueId(value.requestId, "app-quit-") ||
+    !Number.isSafeInteger(value.attempt) ||
+    Number(value.attempt) < 1 ||
+    Number(value.attempt) > 65_535 ||
+    value.errorCode !== "APP-QUIT-CLEANUP-INCOMPLETE"
+  ) {
+    throw new Error("APP-LIFECYCLE-CONTRACT-MISMATCH")
+  }
+  return {
+    schemaVersion: appLifecycleSchemaVersion,
+    requestId: value.requestId,
+    attempt: Number(value.attempt),
+    errorCode: "APP-QUIT-CLEANUP-INCOMPLETE",
   }
 }
 

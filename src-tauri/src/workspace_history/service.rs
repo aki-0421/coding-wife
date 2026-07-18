@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -70,6 +70,42 @@ struct StartupRestoreGuard {
     finished: bool,
 }
 
+#[derive(Default)]
+struct HistoryShutdownCompletion {
+    outcome: Mutex<Option<Result<usize, WorkspaceCommandError>>>,
+    notify: Notify,
+}
+
+impl HistoryShutdownCompletion {
+    async fn finish(&self, outcome: Result<usize, WorkspaceCommandError>) {
+        *self.outcome.lock().await = Some(outcome);
+        self.notify.notify_waiters();
+    }
+
+    async fn outcome(&self) -> Option<Result<usize, WorkspaceCommandError>> {
+        self.outcome.lock().await.clone()
+    }
+
+    async fn wait(&self) -> Result<usize, WorkspaceCommandError> {
+        loop {
+            let notified = self.notify.notified();
+            if let Some(outcome) = self.outcome().await {
+                return outcome;
+            }
+            notified.await;
+        }
+    }
+}
+
+struct HistoryShutdownExecution {
+    completion: Arc<HistoryShutdownCompletion>,
+}
+
+#[derive(Default)]
+struct HistoryShutdownState {
+    current: Option<HistoryShutdownExecution>,
+}
+
 impl StartupRestoreGuard {
     fn complete(mut self) {
         self.readiness.finish(STARTUP_READY);
@@ -98,6 +134,8 @@ pub struct WorkspaceHistoryService {
     store: WorkspaceHistoryStore,
     workspace: WorkspaceService,
     operation_lock: Arc<Mutex<()>>,
+    accepting_writers: Arc<AtomicBool>,
+    shutdown_state: Arc<Mutex<HistoryShutdownState>>,
     project_operations: Arc<Mutex<()>>,
     character: Option<CharacterService>,
     startup: Arc<StartupReadiness>,
@@ -150,6 +188,8 @@ impl WorkspaceHistoryService {
             store,
             workspace,
             operation_lock: Arc::new(Mutex::new(())),
+            accepting_writers: Arc::new(AtomicBool::new(true)),
+            shutdown_state: Arc::new(Mutex::new(HistoryShutdownState::default())),
             project_operations,
             character,
             startup: Arc::new(StartupReadiness::new(ready)),
@@ -189,8 +229,13 @@ impl WorkspaceHistoryService {
             readiness: self.startup.clone(),
             finished: false,
         };
-        let _operation = self.operation_lock.lock().await;
         let mut report = StartupRestoreReport::default();
+        if !self.accepting_writers.load(Ordering::Acquire) {
+            report.unavailable += 1;
+            guard.complete();
+            return report;
+        }
+        let _operation = self.operation_lock.lock().await;
         if self.store.status().mode != HistoryMode::Ready {
             report.skipped_read_only = true;
             guard.complete();
@@ -245,18 +290,44 @@ impl WorkspaceHistoryService {
         report
     }
 
-    pub async fn shutdown(&self) -> Result<(), WorkspaceCommandError> {
-        let _operation = self.operation_lock.lock().await;
-        self.store
-            .force_shutdown_now()
-            .map(|_| ())
-            .map_err(|error| history_error("history.shutdown", error))
+    async fn shutdown_completion(&self) -> Arc<HistoryShutdownCompletion> {
+        self.accepting_writers.store(false, Ordering::Release);
+        self.store.begin_shutdown();
+        let mut state = self.shutdown_state.lock().await;
+        if let Some(current) = state.current.as_ref() {
+            match current.completion.outcome().await {
+                None | Some(Ok(_)) => return current.completion.clone(),
+                Some(Err(_)) => {}
+            }
+        }
+        let completion = Arc::new(HistoryShutdownCompletion::default());
+        let task_completion = completion.clone();
+        let operation_lock = self.operation_lock.clone();
+        let store = self.store.clone();
+        tauri::async_runtime::spawn(async move {
+            let _operation = operation_lock.lock().await;
+            let outcome = tokio::task::spawn_blocking(move || store.force_shutdown_now())
+                .await
+                .map_err(|_| {
+                    WorkspaceCommandError::new("HIST-SHUTDOWN-TASK", "history.shutdown", true)
+                })
+                .and_then(|result| {
+                    result.map_err(|error| history_error("history.shutdown", error))
+                });
+            task_completion.finish(outcome).await;
+        });
+        state.current = Some(HistoryShutdownExecution {
+            completion: completion.clone(),
+        });
+        completion
     }
 
-    pub fn force_shutdown_now(&self) -> Result<usize, WorkspaceCommandError> {
-        self.store
-            .force_shutdown_now()
-            .map_err(|error| history_error("history.force_shutdown", error))
+    pub async fn shutdown(&self) -> Result<(), WorkspaceCommandError> {
+        self.shutdown_completion().await.wait().await.map(|_| ())
+    }
+
+    pub async fn force_shutdown_now(&self) -> Result<usize, WorkspaceCommandError> {
+        self.shutdown_completion().await.wait().await
     }
 
     pub async fn pick_register(&self) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
@@ -1045,6 +1116,13 @@ impl WorkspaceHistoryService {
     }
 
     fn ensure_startup_ready(&self, operation: &str) -> Result<(), WorkspaceCommandError> {
+        if !self.accepting_writers.load(Ordering::Acquire) {
+            return Err(WorkspaceCommandError::new(
+                "HIST-SHUTTING-DOWN",
+                operation,
+                false,
+            ));
+        }
         match self.startup.state.load(Ordering::Acquire) {
             STARTUP_READY => Ok(()),
             STARTUP_PENDING => Err(WorkspaceCommandError::new(
@@ -2397,6 +2475,56 @@ mod tests {
             .expect("state")
             .workspaces
             .is_empty());
+        let _ = fs::remove_dir_all(data);
+    }
+
+    #[tokio::test]
+    async fn shutdown_rejects_late_writers_and_joins_the_pending_database_task() {
+        let data = temp_directory("history-service-shutdown-gate");
+        let workspace = WorkspaceService::production(CodexSupervisor::new());
+        let service = WorkspaceHistoryService::new(
+            WorkspaceHistoryStore::open(&data).expect("store"),
+            workspace,
+        );
+        let operation_guard = service.operation_lock.lock().await;
+
+        let first = service.shutdown_completion().await;
+        let duplicate = service.shutdown_completion().await;
+        assert!(Arc::ptr_eq(&first, &duplicate));
+        assert!(tokio::time::timeout(Duration::from_millis(5), first.wait())
+            .await
+            .is_err());
+        assert_eq!(
+            service
+                .issue_delete_challenge("workspace-late")
+                .expect_err("shutdown admission gate rejects late writers")
+                .code,
+            "HIST-SHUTTING-DOWN"
+        );
+        assert!(service
+            .list()
+            .expect("reads remain available")
+            .workspaces
+            .is_empty());
+
+        drop(operation_guard);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), duplicate.wait())
+                .await
+                .expect("database shutdown converges after the writer releases")
+                .expect("database shutdown succeeds"),
+            0
+        );
+        let completed = service.shutdown_completion().await;
+        assert!(Arc::ptr_eq(&duplicate, &completed));
+        assert_eq!(
+            service
+                .force_shutdown_now()
+                .await
+                .expect("duplicate force reuses completed shutdown"),
+            0
+        );
+
         let _ = fs::remove_dir_all(data);
     }
 }

@@ -7,7 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -34,6 +34,7 @@ const OPERATION_CANCEL: &str = "commit_explanation.cancel";
 const OPERATION_PRESENT: &str = "commit_explanation.present";
 const OPERATION_STATE: &str = "commit_explanation.state";
 const OPERATION_SCOPE: &str = "commit_explanation.scope";
+const OPERATION_SHUTDOWN: &str = "commit_explanation.shutdown";
 
 type ExplanationFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -236,6 +237,8 @@ struct ControllerData {
     queue: VecDeque<ExplanationTask>,
     active: Option<ActiveTask>,
     worker_running: bool,
+    worker_completion: Option<Arc<WorkerCompletion>>,
+    shutting_down: bool,
     cache: HashMap<ExplanationKey, CachedExplanation>,
     cache_order: VecDeque<ExplanationKey>,
 }
@@ -248,6 +251,8 @@ trait CommitExplanationExecutor: Send + Sync {
     ) -> ExplanationFuture<'a, Result<SupportExplainResult, SupportRuntimeError>>;
 
     fn cancel<'a>(&'a self, request_id: &'a str) -> ExplanationFuture<'a, bool>;
+
+    fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool>;
 
     fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool>;
 }
@@ -278,23 +283,64 @@ impl CommitExplanationEventSink for TauriCommitExplanationEventSink {
 #[derive(Clone)]
 struct IsolatedSupportExecutor {
     supervisor: CodexSupervisor,
-    active: Arc<Mutex<HashMap<String, SupportExecution>>>,
+    active: Arc<Mutex<HashMap<(String, u64), SupportExecution>>>,
+    next_generation: Arc<AtomicU64>,
+    shutting_down: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
 struct SupportExecution {
+    generation: u64,
     canceled: Arc<AtomicBool>,
-    runtime: Option<Arc<SupportRuntime>>,
+    force_requested: Arc<AtomicBool>,
+    phase: SupportExecutionPhase,
+    task: Arc<Mutex<Option<tokio::task::AbortHandle>>>,
     completion: Arc<SupportExecutionCompletion>,
+}
+
+#[derive(Clone)]
+enum SupportExecutionPhase {
+    Constructing,
+    Running(Arc<SupportRuntime>),
+    Terminal,
+}
+
+#[derive(Clone)]
+struct SupportExecutionOutcome {
+    result: Result<SupportExplainResult, SupportRuntimeError>,
+    cleanup_converged: bool,
 }
 
 #[derive(Default)]
 struct SupportExecutionCompletion {
-    done: AtomicBool,
+    outcome: Mutex<Option<SupportExecutionOutcome>>,
     notify: Notify,
 }
 
 impl SupportExecutionCompletion {
+    async fn finish(&self, outcome: SupportExecutionOutcome) {
+        *self.outcome.lock().await = Some(outcome);
+        self.notify.notify_waiters();
+    }
+
+    async fn wait(&self) -> SupportExecutionOutcome {
+        loop {
+            let notified = self.notify.notified();
+            if let Some(outcome) = self.outcome.lock().await.clone() {
+                return outcome;
+            }
+            notified.await;
+        }
+    }
+}
+
+#[derive(Default)]
+struct WorkerCompletion {
+    done: AtomicBool,
+    notify: Notify,
+}
+
+impl WorkerCompletion {
     fn finish(&self) {
         self.done.store(true, Ordering::Release);
         self.notify.notify_waiters();
@@ -311,11 +357,21 @@ impl SupportExecutionCompletion {
     }
 }
 
+struct WorkerCompletionGuard(Arc<WorkerCompletion>);
+
+impl Drop for WorkerCompletionGuard {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
+}
+
 impl IsolatedSupportExecutor {
     fn new(supervisor: CodexSupervisor) -> Self {
         Self {
             supervisor,
             active: Arc::new(Mutex::new(HashMap::new())),
+            next_generation: Arc::new(AtomicU64::new(1)),
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -323,36 +379,115 @@ impl IsolatedSupportExecutor {
         self,
         request: SupportExplainRequest,
         canceled: Arc<AtomicBool>,
-    ) -> Result<SupportExplainResult, SupportRuntimeError> {
+        force_requested: Arc<AtomicBool>,
+        generation: u64,
+    ) -> SupportExecutionOutcome {
         let request_id = request.request_id.clone();
-        let context = self
+        let key = (request_id.clone(), generation);
+        let Some(context) = self
             .supervisor
             .support_runtime_context(&request.workspace_id, request.evidence.workspace_generation)
             .await
-            .ok_or(SupportRuntimeError::UnsupportedRelease)?;
-        let runtime =
-            Arc::new(SupportRuntime::construct(&context.0, &context.1, &context.2, None).await?);
-        {
-            let mut active = self.active.lock().await;
-            let Some(execution) = active.get_mut(&request_id) else {
-                runtime.shutdown().await?;
-                return Err(SupportRuntimeError::Canceled);
+        else {
+            return SupportExecutionOutcome {
+                result: Err(SupportRuntimeError::UnsupportedRelease),
+                cleanup_converged: true,
             };
-            execution.runtime = Some(runtime.clone());
+        };
+        if canceled.load(Ordering::Acquire) {
+            return SupportExecutionOutcome {
+                result: Err(SupportRuntimeError::Canceled),
+                cleanup_converged: true,
+            };
+        }
+        let runtime =
+            match SupportRuntime::construct(&context.0, &context.1, &context.2, None).await {
+                Ok(runtime) => Arc::new(runtime),
+                Err(error) => {
+                    return SupportExecutionOutcome {
+                        result: Err(error),
+                        cleanup_converged: true,
+                    };
+                }
+            };
+        let registered = {
+            let mut active = self.active.lock().await;
+            active.get_mut(&key).is_some_and(|execution| {
+                execution.phase = SupportExecutionPhase::Running(runtime.clone());
+                true
+            })
+        };
+        if !registered {
+            let cleanup_converged = runtime.force_shutdown_now().await.is_ok();
+            return SupportExecutionOutcome {
+                result: Err(SupportRuntimeError::Canceled),
+                cleanup_converged,
+            };
         }
         let result = if canceled.load(Ordering::Acquire) {
-            let _ = runtime.cancel().await;
+            if force_requested.load(Ordering::Acquire) {
+                let _ = runtime.force_shutdown_now().await;
+            } else {
+                let _ = runtime.cancel().await;
+            }
             Err(SupportRuntimeError::Canceled)
         } else {
             runtime.explain_commit(request).await
         };
         let cleanup = runtime.shutdown().await;
-        self.active.lock().await.remove(&request_id);
-        match (result, cleanup) {
-            (Ok(result), Ok(())) => Ok(result),
-            (Err(error), _) => Err(error),
-            (Ok(_), Err(error)) => Err(error),
+        SupportExecutionOutcome {
+            result: match (result, cleanup.as_ref()) {
+                (Ok(result), Ok(())) => Ok(result),
+                (Err(error), Ok(())) => Err(error),
+                (_, Err(error)) => Err(*error),
+            },
+            cleanup_converged: cleanup.is_ok(),
         }
+    }
+
+    async fn stop_executions(&self, force: bool) -> bool {
+        self.shutting_down.store(true, Ordering::Release);
+        let executions = self
+            .active
+            .lock()
+            .await
+            .iter()
+            .map(|(key, execution)| (key.clone(), execution.clone()))
+            .collect::<Vec<_>>();
+        let mut converged = true;
+        for (_, execution) in &executions {
+            execution.canceled.store(true, Ordering::Release);
+            if force {
+                execution.force_requested.store(true, Ordering::Release);
+            }
+            if let SupportExecutionPhase::Running(runtime) = &execution.phase {
+                let stopped = if force {
+                    runtime.force_shutdown_now().await.is_ok()
+                } else {
+                    let canceled = runtime.cancel().await.is_ok();
+                    let shutdown = runtime.shutdown().await.is_ok();
+                    canceled && shutdown
+                };
+                converged &= stopped;
+            }
+        }
+        for (key, execution) in executions {
+            let outcome = execution.completion.wait().await;
+            converged &= outcome.cleanup_converged;
+            if let Some(task) = execution.task.lock().await.clone() {
+                while !task.is_finished() {
+                    tokio::task::yield_now().await;
+                }
+            }
+            let mut active = self.active.lock().await;
+            if active
+                .get(&key)
+                .is_some_and(|current| current.generation == execution.generation)
+            {
+                active.remove(&key);
+            }
+        }
+        converged
     }
 }
 
@@ -364,64 +499,111 @@ impl CommitExplanationExecutor for IsolatedSupportExecutor {
     ) -> ExplanationFuture<'a, Result<SupportExplainResult, SupportRuntimeError>> {
         Box::pin(async move {
             let request_id = request.request_id.clone();
+            let generation = self.next_generation.fetch_add(1, Ordering::AcqRel);
+            let key = (request_id, generation);
             let completion = Arc::new(SupportExecutionCompletion::default());
-            self.active.lock().await.insert(
-                request_id,
+            let force_requested = Arc::new(AtomicBool::new(false));
+            let mut active = self.active.lock().await;
+            if self.shutting_down.load(Ordering::Acquire) {
+                return Err(SupportRuntimeError::Canceled);
+            }
+            active.insert(
+                key.clone(),
                 SupportExecution {
+                    generation,
                     canceled: canceled.clone(),
-                    runtime: None,
+                    force_requested: force_requested.clone(),
+                    phase: SupportExecutionPhase::Constructing,
+                    task: Arc::new(Mutex::new(None)),
                     completion: completion.clone(),
                 },
             );
+            drop(active);
             let executor = self.clone();
-            let cleanup = self.clone();
-            let cleanup_request_id = request.request_id.clone();
-            tokio::spawn(async move {
-                let result = executor.run_owned(request, canceled).await;
-                completion.finish();
-                cleanup.active.lock().await.remove(&cleanup_request_id);
-                result
-            })
-            .await
-            .unwrap_or(Err(SupportRuntimeError::Process))
+            let task_completion = completion.clone();
+            let task_key = key.clone();
+            let task_start = Arc::new(Notify::new());
+            let child_start = task_start.clone();
+            let task = tokio::spawn(async move {
+                child_start.notified().await;
+                let outcome = executor
+                    .clone()
+                    .run_owned(request, canceled, force_requested, generation)
+                    .await;
+                if let Some(execution) = executor.active.lock().await.get_mut(&task_key) {
+                    if execution.generation == generation {
+                        execution.phase = SupportExecutionPhase::Terminal;
+                    }
+                }
+                task_completion.finish(outcome).await;
+            });
+            let task_handle = task.abort_handle();
+            drop(task);
+            let task_slot = self
+                .active
+                .lock()
+                .await
+                .get(&key)
+                .filter(|execution| execution.generation == generation)
+                .map(|execution| execution.task.clone());
+            if let Some(task_slot) = task_slot {
+                *task_slot.lock().await = Some(task_handle.clone());
+            }
+            task_start.notify_one();
+            let outcome = completion.wait().await;
+            while !task_handle.is_finished() {
+                tokio::task::yield_now().await;
+            }
+            self.active.lock().await.remove(&key);
+            if outcome.cleanup_converged {
+                outcome.result
+            } else {
+                Err(SupportRuntimeError::Process)
+            }
         })
     }
 
     fn cancel<'a>(&'a self, request_id: &'a str) -> ExplanationFuture<'a, bool> {
         Box::pin(async move {
-            let execution = self.active.lock().await.get(request_id).cloned();
-            let Some(execution) = execution else {
-                return false;
-            };
-            execution.canceled.store(true, Ordering::Release);
-            if let Some(runtime) = execution.runtime {
-                let _ = runtime.cancel().await;
-                let _ = runtime.shutdown().await;
-            }
-            execution.completion.wait().await;
-            true
-        })
-    }
-
-    fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
-        Box::pin(async move {
             let executions = self
                 .active
                 .lock()
                 .await
-                .values()
-                .cloned()
+                .iter()
+                .filter(|((active_request_id, _), _)| active_request_id == request_id)
+                .map(|(key, execution)| (key.clone(), execution.clone()))
                 .collect::<Vec<_>>();
+            if executions.is_empty() {
+                return false;
+            }
             let mut converged = true;
-            for execution in executions {
+            for (_, execution) in &executions {
                 execution.canceled.store(true, Ordering::Release);
-                if let Some(runtime) = execution.runtime {
-                    converged &= runtime.force_shutdown_now().await.is_ok();
+                if let SupportExecutionPhase::Running(runtime) = &execution.phase {
+                    converged &= runtime.cancel().await.is_ok();
+                    converged &= runtime.shutdown().await.is_ok();
                 }
             }
-            self.active.lock().await.clear();
+            for (key, execution) in executions {
+                let outcome = execution.completion.wait().await;
+                converged &= outcome.cleanup_converged;
+                if let Some(task) = execution.task.lock().await.clone() {
+                    while !task.is_finished() {
+                        tokio::task::yield_now().await;
+                    }
+                }
+                self.active.lock().await.remove(&key);
+            }
             converged
         })
+    }
+
+    fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+        Box::pin(async move { self.stop_executions(false).await })
+    }
+
+    fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+        Box::pin(async move { self.stop_executions(true).await })
     }
 }
 
@@ -487,6 +669,18 @@ impl CommitExplanationController {
         validate_dispatch(&dispatch)?;
         let key = ExplanationKey::from_request(&dispatch.request);
         let mut data = self.inner.data.lock().await;
+        if data.shutting_down {
+            let state = terminal_state(
+                &dispatch.request,
+                CommitExplanationControllerStatus::Unavailable,
+                false,
+                Some("CODEX-SUPPORT-SHUTDOWN"),
+            );
+            data.states.insert(key, state.clone());
+            drop(data);
+            self.inner.events.emit_state(&state);
+            return Ok(state);
+        }
         match data.generations.get(&key.workspace_id).copied() {
             Some(generation) if generation > key.workspace_generation => {
                 let state = terminal_state(
@@ -516,6 +710,19 @@ impl CommitExplanationController {
                     .insert(key.workspace_id.clone(), key.workspace_generation);
             }
             _ => {}
+        }
+
+        if data.shutting_down {
+            let state = terminal_state(
+                &dispatch.request,
+                CommitExplanationControllerStatus::Unavailable,
+                false,
+                Some("CODEX-SUPPORT-SHUTDOWN"),
+            );
+            data.states.insert(key, state.clone());
+            drop(data);
+            self.inner.events.emit_state(&state);
+            return Ok(state);
         }
 
         match data.active_scope.as_ref() {
@@ -633,14 +840,22 @@ impl CommitExplanationController {
         data.states.insert(key.clone(), state.clone());
         data.queue.push_back(ExplanationTask { key, dispatch });
         let start_worker = !data.worker_running;
+        let worker_completion = if start_worker {
+            let completion = Arc::new(WorkerCompletion::default());
+            data.worker_completion = Some(completion.clone());
+            Some(completion)
+        } else {
+            None
+        };
         if start_worker {
             data.worker_running = true;
         }
         drop(data);
         self.inner.events.emit_state(&state);
-        if start_worker {
+        if let Some(completion) = worker_completion {
             let controller = self.clone();
             tauri::async_runtime::spawn(async move {
+                let _guard = WorkerCompletionGuard(completion);
                 controller.run_worker().await;
             });
         }
@@ -838,8 +1053,15 @@ impl CommitExplanationController {
         Ok(())
     }
 
-    pub async fn shutdown(&self) {
+    async fn begin_shutdown(
+        &self,
+    ) -> (
+        Vec<CommitExplanationControllerStateV1>,
+        Option<String>,
+        Option<Arc<WorkerCompletion>>,
+    ) {
         let mut data = self.inner.data.lock().await;
+        data.shutting_down = true;
         let queued = data
             .queue
             .drain(..)
@@ -864,46 +1086,49 @@ impl CommitExplanationController {
                 changed.push(state);
             }
         }
-        drop(data);
+        (
+            changed,
+            active.map(|(_, request_id)| request_id),
+            data.worker_completion.clone(),
+        )
+    }
+
+    async fn shutdown_converged(&self, force: bool) -> bool {
+        let (changed, active_request_id, worker_completion) = self.begin_shutdown().await;
         for state in changed {
             self.inner.events.emit_state(&state);
         }
-        if let Some((_, request_id)) = active {
-            let _ = self.inner.executor.cancel(&request_id).await;
+        if !force {
+            if let Some(request_id) = active_request_id {
+                let _ = self.inner.executor.cancel(&request_id).await;
+            }
+        }
+        let executor_converged = if force {
+            self.inner.executor.force_shutdown_now().await
+        } else {
+            self.inner.executor.shutdown().await
+        };
+        if let Some(completion) = worker_completion {
+            completion.wait().await;
+        }
+        let data = self.inner.data.lock().await;
+        executor_converged && data.queue.is_empty() && data.active.is_none() && !data.worker_running
+    }
+
+    pub async fn shutdown(&self) -> Result<(), CommitExplanationControllerError> {
+        if self.shutdown_converged(false).await {
+            Ok(())
+        } else {
+            Err(controller_error(
+                "CODEX-SUPPORT-SHUTDOWN-INCOMPLETE",
+                OPERATION_SHUTDOWN,
+                true,
+            ))
         }
     }
 
     pub async fn force_shutdown_now(&self) -> bool {
-        let mut data = self.inner.data.lock().await;
-        let queued = data
-            .queue
-            .drain(..)
-            .map(|task| task.key)
-            .collect::<Vec<_>>();
-        let mut changed = Vec::new();
-        for key in queued {
-            if let Some(previous) = data.states.get(&key).cloned() {
-                let state = canceled_for_shutdown(previous);
-                data.states.insert(key, state.clone());
-                changed.push(state);
-            }
-        }
-        let active_key = data.active.as_ref().map(|active| {
-            active.canceled.store(true, Ordering::Release);
-            active.task.key.clone()
-        });
-        if let Some(active_key) = active_key {
-            if let Some(previous) = data.states.get(&active_key).cloned() {
-                let state = canceled_for_shutdown(previous);
-                data.states.insert(active_key, state.clone());
-                changed.push(state);
-            }
-        }
-        drop(data);
-        for state in changed {
-            self.inner.events.emit_state(&state);
-        }
-        self.inner.executor.force_shutdown_now().await
+        self.shutdown_converged(true).await
     }
 
     async fn run_worker(&self) {
@@ -1424,6 +1649,8 @@ mod tests {
         mode: FakeMode,
         calls: AtomicUsize,
         cancels: AtomicUsize,
+        shutdowns: AtomicUsize,
+        shutdown_converges: AtomicBool,
         forces: AtomicUsize,
         inflight: AtomicUsize,
         maximum_inflight: AtomicUsize,
@@ -1436,6 +1663,8 @@ mod tests {
                 mode,
                 calls: AtomicUsize::new(0),
                 cancels: AtomicUsize::new(0),
+                shutdowns: AtomicUsize::new(0),
+                shutdown_converges: AtomicBool::new(true),
                 forces: AtomicUsize::new(0),
                 inflight: AtomicUsize::new(0),
                 maximum_inflight: AtomicUsize::new(0),
@@ -1489,6 +1718,16 @@ mod tests {
             })
         }
 
+        fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+            Box::pin(async move {
+                self.shutdowns.fetch_add(1, Ordering::AcqRel);
+                if matches!(self.mode, FakeMode::Block) {
+                    self.release_one();
+                }
+                self.shutdown_converges.load(Ordering::Acquire)
+            })
+        }
+
         fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
             Box::pin(async move {
                 self.forces.fetch_add(1, Ordering::AcqRel);
@@ -1498,6 +1737,85 @@ mod tests {
                 true
             })
         }
+    }
+
+    #[tokio::test]
+    async fn force_shutdown_joins_the_exact_constructing_generation_twice() {
+        let executor = IsolatedSupportExecutor::new(CodexSupervisor::new());
+        let key = ("request-constructing".to_owned(), 7);
+        let canceled = Arc::new(AtomicBool::new(false));
+        let force_requested = Arc::new(AtomicBool::new(false));
+        let completion = Arc::new(SupportExecutionCompletion::default());
+        let task_slot = Arc::new(Mutex::new(None));
+        executor.active.lock().await.insert(
+            key.clone(),
+            SupportExecution {
+                generation: 7,
+                canceled: canceled.clone(),
+                force_requested: force_requested.clone(),
+                phase: SupportExecutionPhase::Constructing,
+                task: task_slot.clone(),
+                completion: completion.clone(),
+            },
+        );
+        let active = executor.active.clone();
+        let task_key = key.clone();
+        let task_canceled = canceled.clone();
+        let task_force = force_requested.clone();
+        let task_completion = completion.clone();
+        let task = tokio::spawn(async move {
+            while !task_canceled.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+            assert!(task_force.load(Ordering::Acquire));
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            if let Some(execution) = active.lock().await.get_mut(&task_key) {
+                execution.phase = SupportExecutionPhase::Terminal;
+            }
+            task_completion
+                .finish(SupportExecutionOutcome {
+                    result: Err(SupportRuntimeError::Canceled),
+                    cleanup_converged: true,
+                })
+                .await;
+        });
+        let task_handle = task.abort_handle();
+        *task_slot.lock().await = Some(task_handle.clone());
+        drop(task);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), executor.stop_executions(true),)
+                .await
+                .expect("constructing cleanup deadline")
+        );
+        assert!(task_handle.is_finished());
+        assert!(executor.active.lock().await.is_empty());
+        assert!(executor.stop_executions(true).await);
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_reports_executor_failure_then_force_converges() {
+        let (controller, executor, _) = harness(FakeMode::Immediate, 1, 2, Duration::from_secs(1));
+        executor.shutdown_converges.store(false, Ordering::Release);
+
+        let error = controller
+            .shutdown()
+            .await
+            .expect_err("graceful executor failure");
+        assert_eq!(error.code, "CODEX-SUPPORT-SHUTDOWN-INCOMPLETE");
+        assert_eq!(executor.shutdowns.load(Ordering::Acquire), 1);
+        assert!(controller.force_shutdown_now().await);
+        assert_eq!(executor.forces.load(Ordering::Acquire), 1);
+
+        let rejected = controller
+            .request(dispatch('e', "request-after-shutdown", 1))
+            .await
+            .expect("typed shutdown state");
+        assert_eq!(
+            rejected.error_code.as_deref(),
+            Some("CODEX-SUPPORT-SHUTDOWN")
+        );
+        assert!(!rejected.retryable);
     }
 
     #[derive(Default)]
@@ -2041,7 +2359,7 @@ mod tests {
             CommitExplanationControllerStatus::Running,
         )
         .await;
-        controller.shutdown().await;
+        controller.shutdown().await.expect("controller shutdown");
         assert_eq!(
             wait_for_status(
                 &controller,

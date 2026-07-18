@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import {
   getSafeQuitCopy,
   SafeQuitDialog,
+  type AppCleanupFailedV1,
   type AppCloseRequestedV1,
   type AppLifecycleGateway,
   type SafeQuitDialogStatus,
@@ -206,35 +207,59 @@ export function WorkspaceShell({
   const transitionOriginRef = useRef<HTMLElement | null>(null)
   const transitionSafeActionRef = useRef<HTMLButtonElement | null>(null)
   const safeQuitRequestRef = useRef<AppCloseRequestedV1 | null>(null)
+  const cleanupFailureRef = useRef<AppCleanupFailedV1 | null>(null)
   const safeQuitOperationRef = useRef<Promise<void> | null>(null)
   const [safeQuitRequest, setSafeQuitRequest] =
     useState<AppCloseRequestedV1 | null>(null)
   const [safeQuitStatus, setSafeQuitStatus] =
     useState<SafeQuitDialogStatus>("confirming")
+  const [cleanupFailure, setCleanupFailure] =
+    useState<AppCleanupFailedV1 | null>(null)
 
   useEffect(() => {
     if (appLifecycleGateway === undefined) return
     let disposed = false
-    let unlisten: (() => void) | null = null
-    void appLifecycleGateway
-      .listenCloseRequested((request) => {
+    const unlisten: Array<() => void> = []
+    const register = (subscription: Promise<() => void>) => {
+      void subscription
+        .then((dispose) => {
+          if (disposed) {
+            dispose()
+            return
+          }
+          unlisten.push(dispose)
+        })
+        .catch(() => undefined)
+    }
+    register(
+      appLifecycleGateway.listenCloseRequested((request) => {
         const current = safeQuitRequestRef.current
-        if (current !== null) return
+        if (current !== null || cleanupFailureRef.current !== null) return
         safeQuitRequestRef.current = request
         setSafeQuitStatus("confirming")
         setSafeQuitRequest(request)
-      })
-      .then((dispose) => {
-        if (disposed) {
-          dispose()
+      }),
+    )
+    register(
+      appLifecycleGateway.listenCleanupFailed((failure) => {
+        const current = cleanupFailureRef.current
+        if (
+          current !== null &&
+          (current.requestId !== failure.requestId ||
+            current.attempt > failure.attempt)
+        ) {
           return
         }
-        unlisten = dispose
-      })
-      .catch(() => undefined)
+        safeQuitRequestRef.current = null
+        cleanupFailureRef.current = failure
+        setSafeQuitRequest(null)
+        setCleanupFailure(failure)
+        setSafeQuitStatus("cleanup_failed")
+      }),
+    )
     return () => {
       disposed = true
-      unlisten?.()
+      unlisten.forEach((dispose) => dispose())
     }
   }, [appLifecycleGateway])
 
@@ -295,7 +320,6 @@ export function WorkspaceShell({
         commitExplanationController?.revokePresentationIntent("close")
         await narrationController.dismissPresentation("app_close")
         await appLifecycleGateway.confirmQuit(request.requestId)
-        clearSafeQuitRequest(request.requestId)
       })
       .catch(() => {
         if (safeQuitRequestRef.current?.requestId === request.requestId) {
@@ -311,11 +335,35 @@ export function WorkspaceShell({
   }, [
     adapter,
     appLifecycleGateway,
-    clearSafeQuitRequest,
     commitExplanationController,
     narrationController,
     view.selectedDraft,
   ])
+
+  const retryCleanup = useCallback(() => {
+    const failure = cleanupFailureRef.current
+    if (
+      failure === null ||
+      appLifecycleGateway === undefined ||
+      safeQuitOperationRef.current !== null
+    ) {
+      return
+    }
+    setSafeQuitStatus("retrying_cleanup")
+    const operation = appLifecycleGateway
+      .retryCleanup(failure.requestId)
+      .catch(() => {
+        if (cleanupFailureRef.current?.requestId === failure.requestId) {
+          setSafeQuitStatus("cleanup_failed")
+        }
+      })
+      .finally(() => {
+        if (safeQuitOperationRef.current === operation) {
+          safeQuitOperationRef.current = null
+        }
+      })
+    safeQuitOperationRef.current = operation
+  }, [appLifecycleGateway])
 
   useEffect(() => {
     const previous = previousSelectedWorkspaceId.current
@@ -910,8 +958,9 @@ export function WorkspaceShell({
       <SafeQuitDialog
         copy={safeQuitCopy}
         onDontQuit={keepAppOpen}
+        onRetryCleanup={retryCleanup}
         onStopAndQuit={stopAndQuit}
-        open={safeQuitRequest !== null}
+        open={safeQuitRequest !== null || cleanupFailure !== null}
         status={safeQuitStatus}
       />
 

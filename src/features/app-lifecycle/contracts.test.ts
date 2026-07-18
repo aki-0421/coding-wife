@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   createAppQuitRequest,
+  parseAppCleanupFailed,
   parseAppCloseRequested,
 } from "@/features/app-lifecycle/contracts"
 
@@ -56,5 +57,46 @@ describe("app lifecycle contracts", () => {
     expect(() => createAppQuitRequest("unsafe/request")).toThrow(
       "APP-LIFECYCLE-REQUEST-ID",
     )
+  })
+
+  it("accepts only a sanitized cleanup failure contract", () => {
+    expect(
+      parseAppCleanupFailed({
+        schemaVersion: 1,
+        requestId: "app-quit-safe",
+        attempt: 2,
+        errorCode: "APP-QUIT-CLEANUP-INCOMPLETE",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      requestId: "app-quit-safe",
+      attempt: 2,
+      errorCode: "APP-QUIT-CLEANUP-INCOMPLETE",
+    })
+    for (const invalid of [
+      {
+        schemaVersion: 1,
+        requestId: "app-quit-safe",
+        attempt: 0,
+        errorCode: "APP-QUIT-CLEANUP-INCOMPLETE",
+      },
+      {
+        schemaVersion: 1,
+        requestId: "app-quit-safe",
+        attempt: 1,
+        errorCode: "APP-QUIT-CLEANUP-INCOMPLETE",
+        service: "history",
+      },
+      {
+        schemaVersion: 1,
+        requestId: "app-quit-safe",
+        attempt: 1,
+        errorCode: "/Users/private/token=secret",
+      },
+    ]) {
+      expect(() => parseAppCleanupFailed(invalid)).toThrow(
+        "APP-LIFECYCLE-CONTRACT-MISMATCH",
+      )
+    }
   })
 })

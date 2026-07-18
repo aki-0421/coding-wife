@@ -1,4 +1,4 @@
-import { useRef } from "react"
+import { useEffect, useRef } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -17,6 +17,8 @@ export type SafeQuitDialogStatus =
   | "stopping"
   | "stop_failed"
   | "cancel_failed"
+  | "cleanup_failed"
+  | "retrying_cleanup"
 
 export interface SafeQuitDialogProps {
   readonly copy: SafeQuitCopy
@@ -24,6 +26,7 @@ export interface SafeQuitDialogProps {
   readonly status: SafeQuitDialogStatus
   readonly onDontQuit: () => void
   readonly onStopAndQuit: () => void
+  readonly onRetryCleanup: () => void
 }
 
 export function SafeQuitDialog({
@@ -32,15 +35,30 @@ export function SafeQuitDialog({
   status,
   onDontQuit,
   onStopAndQuit,
+  onRetryCleanup,
 }: SafeQuitDialogProps) {
   const originRef = useRef<HTMLElement | null>(null)
   const safeActionRef = useRef<HTMLButtonElement | null>(null)
-  const processing = status === "canceling" || status === "stopping"
+  const cleanupRecovery =
+    status === "cleanup_failed" || status === "retrying_cleanup"
+  const processing =
+    status === "canceling" ||
+    status === "stopping" ||
+    status === "retrying_cleanup"
+  const canDismiss = !processing && !cleanupRecovery
+
+  useEffect(() => {
+    if (!open || status !== "cleanup_failed") return
+    const frame = window.requestAnimationFrame(() =>
+      safeActionRef.current?.focus(),
+    )
+    return () => window.cancelAnimationFrame(frame)
+  }, [open, status])
 
   return (
     <Dialog
       onOpenChange={(nextOpen) => {
-        if (!nextOpen && !processing) onDontQuit()
+        if (!nextOpen && canDismiss) onDontQuit()
       }}
       open={open}
     >
@@ -53,7 +71,7 @@ export function SafeQuitDialog({
         }}
         onEscapeKeyDown={(event) => {
           event.preventDefault()
-          if (!processing) onDontQuit()
+          if (canDismiss) onDontQuit()
         }}
         onInteractOutside={(event) => event.preventDefault()}
         onOpenAutoFocus={(event) => {
@@ -66,14 +84,19 @@ export function SafeQuitDialog({
         showCloseButton={false}
       >
         <DialogHeader>
-          <DialogTitle>{copy.title}</DialogTitle>
-          <DialogDescription>{copy.description}</DialogDescription>
+          <DialogTitle>
+            {cleanupRecovery ? copy.cleanupTitle : copy.title}
+          </DialogTitle>
+          <DialogDescription>
+            {cleanupRecovery ? copy.cleanupDescription : copy.description}
+          </DialogDescription>
         </DialogHeader>
-        {status === "stop_failed" || status === "cancel_failed" ? (
-          <p
-            className="m-0 text-caption text-destructive"
-            role="alert"
-          >
+        {status === "cleanup_failed" ? (
+          <p className="m-0 text-caption text-destructive" role="alert">
+            {copy.cleanupFailed}
+          </p>
+        ) : status === "stop_failed" || status === "cancel_failed" ? (
+          <p className="m-0 text-caption text-destructive" role="alert">
             {status === "stop_failed" ? copy.stopFailed : copy.cancelFailed}
           </p>
         ) : processing ? (
@@ -82,26 +105,45 @@ export function SafeQuitDialog({
             className="m-0 text-caption text-muted-foreground"
             role="status"
           >
-            {status === "stopping" ? copy.stopping : copy.canceling}
+            {status === "stopping"
+              ? copy.stopping
+              : status === "retrying_cleanup"
+                ? copy.retryingCleanup
+                : copy.canceling}
           </p>
         ) : null}
         <DialogFooter>
-          <Button
-            disabled={processing}
-            onClick={onDontQuit}
-            ref={safeActionRef}
-            type="button"
-            variant="ghost"
-          >
-            {copy.dontQuit}
-          </Button>
-          <Button
-            disabled={processing}
-            onClick={onStopAndQuit}
-            type="button"
-          >
-            {status === "stopping" ? copy.stopping : copy.stopAndQuit}
-          </Button>
+          {cleanupRecovery ? (
+            <Button
+              disabled={processing}
+              onClick={onRetryCleanup}
+              ref={safeActionRef}
+              type="button"
+            >
+              {status === "retrying_cleanup"
+                ? copy.retryingCleanup
+                : copy.retryCleanup}
+            </Button>
+          ) : (
+            <>
+              <Button
+                disabled={processing}
+                onClick={onDontQuit}
+                ref={safeActionRef}
+                type="button"
+                variant="ghost"
+              >
+                {copy.dontQuit}
+              </Button>
+              <Button
+                disabled={processing}
+                onClick={onStopAndQuit}
+                type="button"
+              >
+                {status === "stopping" ? copy.stopping : copy.stopAndQuit}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
