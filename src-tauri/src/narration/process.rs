@@ -75,6 +75,40 @@ impl NarrationProcessControl {
         self.terminate_active().await
     }
 
+    pub async fn force_cancel_all(&self) -> bool {
+        self.invalidate();
+        let deadline = tokio::time::Instant::now() + TOTAL_CANCEL_BUDGET;
+        loop {
+            let pid = match self.active_pid_if_spawn_idle() {
+                Ok(pid) => pid,
+                Err(_) => {
+                    if tokio::time::Instant::now() >= deadline {
+                        return false;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    continue;
+                }
+            };
+            let Some(pid) = pid else {
+                return true;
+            };
+            let _ = signal_process_group(pid, libc::SIGKILL);
+            if !process_group_exists(pid) {
+                self.clear(pid);
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    fn active_pid_if_spawn_idle(&self) -> Result<Option<u32>, ()> {
+        let _gate = self.spawn_gate.try_lock().map_err(|_| ())?;
+        Ok(self.active_pid())
+    }
+
     pub async fn interrupt_active(&self) -> bool {
         self.terminate_active().await
     }

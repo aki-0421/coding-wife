@@ -248,6 +248,8 @@ trait CommitExplanationExecutor: Send + Sync {
     ) -> ExplanationFuture<'a, Result<SupportExplainResult, SupportRuntimeError>>;
 
     fn cancel<'a>(&'a self, request_id: &'a str) -> ExplanationFuture<'a, bool>;
+
+    fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool>;
 }
 
 trait CommitExplanationEventSink: Send + Sync {
@@ -398,6 +400,27 @@ impl CommitExplanationExecutor for IsolatedSupportExecutor {
             }
             execution.completion.wait().await;
             true
+        })
+    }
+
+    fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+        Box::pin(async move {
+            let executions = self
+                .active
+                .lock()
+                .await
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut converged = true;
+            for execution in executions {
+                execution.canceled.store(true, Ordering::Release);
+                if let Some(runtime) = execution.runtime {
+                    converged &= runtime.force_shutdown_now().await.is_ok();
+                }
+            }
+            self.active.lock().await.clear();
+            converged
         })
     }
 }
@@ -848,6 +871,39 @@ impl CommitExplanationController {
         if let Some((_, request_id)) = active {
             let _ = self.inner.executor.cancel(&request_id).await;
         }
+    }
+
+    pub async fn force_shutdown_now(&self) -> bool {
+        let mut data = self.inner.data.lock().await;
+        let queued = data
+            .queue
+            .drain(..)
+            .map(|task| task.key)
+            .collect::<Vec<_>>();
+        let mut changed = Vec::new();
+        for key in queued {
+            if let Some(previous) = data.states.get(&key).cloned() {
+                let state = canceled_for_shutdown(previous);
+                data.states.insert(key, state.clone());
+                changed.push(state);
+            }
+        }
+        let active_key = data.active.as_ref().map(|active| {
+            active.canceled.store(true, Ordering::Release);
+            active.task.key.clone()
+        });
+        if let Some(active_key) = active_key {
+            if let Some(previous) = data.states.get(&active_key).cloned() {
+                let state = canceled_for_shutdown(previous);
+                data.states.insert(active_key, state.clone());
+                changed.push(state);
+            }
+        }
+        drop(data);
+        for state in changed {
+            self.inner.events.emit_state(&state);
+        }
+        self.inner.executor.force_shutdown_now().await
     }
 
     async fn run_worker(&self) {
@@ -1368,6 +1424,7 @@ mod tests {
         mode: FakeMode,
         calls: AtomicUsize,
         cancels: AtomicUsize,
+        forces: AtomicUsize,
         inflight: AtomicUsize,
         maximum_inflight: AtomicUsize,
         release: Semaphore,
@@ -1379,6 +1436,7 @@ mod tests {
                 mode,
                 calls: AtomicUsize::new(0),
                 cancels: AtomicUsize::new(0),
+                forces: AtomicUsize::new(0),
                 inflight: AtomicUsize::new(0),
                 maximum_inflight: AtomicUsize::new(0),
                 release: Semaphore::new(0),
@@ -1424,6 +1482,16 @@ mod tests {
         fn cancel<'a>(&'a self, _request_id: &'a str) -> ExplanationFuture<'a, bool> {
             Box::pin(async move {
                 self.cancels.fetch_add(1, Ordering::AcqRel);
+                if matches!(self.mode, FakeMode::Block) {
+                    self.release_one();
+                }
+                true
+            })
+        }
+
+        fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+            Box::pin(async move {
+                self.forces.fetch_add(1, Ordering::AcqRel);
                 if matches!(self.mode, FakeMode::Block) {
                     self.release_one();
                 }

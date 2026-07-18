@@ -691,6 +691,24 @@ impl SupportRuntime {
     pub async fn shutdown(&self) -> Result<(), SupportRuntimeError> {
         self.shutdown_and_cleanup().await
     }
+
+    pub async fn force_shutdown_now(&self) -> Result<(), SupportRuntimeError> {
+        self.cancel_requested.store(true, Ordering::Release);
+        if let Ok(active) = self.active.try_lock() {
+            if let Some(active) = active.as_ref() {
+                active.canceled.store(true, Ordering::Release);
+            }
+        }
+        let exited = self
+            .runtime
+            .force_shutdown_and_wait(Duration::from_millis(400))
+            .await;
+        let cleanup = self.run_directory.cleanup();
+        if !exited {
+            return Err(SupportRuntimeError::Process);
+        }
+        cleanup
+    }
 }
 
 impl Drop for SupportRuntime {

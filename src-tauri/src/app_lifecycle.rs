@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,6 +15,7 @@ use crate::workspace_history::WorkspaceHistoryService;
 pub const APP_LIFECYCLE_SCHEMA_VERSION: u16 = 1;
 pub const APP_CLOSE_REQUESTED_EVENT_CHANNEL: &str = "coding-wife://app-close-requested";
 pub const APP_SHUTDOWN_DEADLINE: Duration = Duration::from_secs(5);
+const APP_FORCE_SHUTDOWN_STEP_DEADLINE: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActiveTurnIdentity {
@@ -54,7 +56,90 @@ pub enum NativeCloseDecision {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShutdownOutcome {
     Completed,
+    Failed,
     TimedOut,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ForceCleanupOutcome {
+    NotRequired,
+    Completed,
+    Failed,
+    TimedOut,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AppShutdownReport {
+    graceful: ShutdownOutcome,
+    codex: ForceCleanupOutcome,
+    narration: ForceCleanupOutcome,
+    explanation: ForceCleanupOutcome,
+    history: ForceCleanupOutcome,
+}
+
+type ShutdownFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+trait AppShutdownPlan: Send + Sync {
+    fn graceful_shutdown(&self) -> ShutdownFuture<'_, bool>;
+    fn force_codex(&self) -> ShutdownFuture<'_, bool>;
+    fn force_narration(&self) -> ShutdownFuture<'_, bool>;
+    fn force_explanation(&self) -> ShutdownFuture<'_, bool>;
+    fn force_history(&self) -> ShutdownFuture<'_, bool>;
+}
+
+struct NativeAppShutdownPlan {
+    supervisor: CodexSupervisor,
+    narration: Option<NarrationService>,
+    explanation: Option<CommitExplanationController>,
+    history: Option<WorkspaceHistoryService>,
+}
+
+impl AppShutdownPlan for NativeAppShutdownPlan {
+    fn graceful_shutdown(&self) -> ShutdownFuture<'_, bool> {
+        Box::pin(async move {
+            let mut converged = self.supervisor.shutdown().await;
+            if let Some(narration) = self.narration.as_ref() {
+                converged &= narration.shutdown().await.is_ok();
+            }
+            if let Some(explanation) = self.explanation.as_ref() {
+                explanation.shutdown().await;
+            }
+            if let Some(history) = self.history.as_ref() {
+                converged &= history.shutdown().await.is_ok();
+            }
+            converged
+        })
+    }
+
+    fn force_codex(&self) -> ShutdownFuture<'_, bool> {
+        Box::pin(async move { self.supervisor.force_shutdown_now().await })
+    }
+
+    fn force_narration(&self) -> ShutdownFuture<'_, bool> {
+        Box::pin(async move {
+            match self.narration.as_ref() {
+                Some(narration) => narration.force_shutdown_now().await,
+                None => true,
+            }
+        })
+    }
+
+    fn force_explanation(&self) -> ShutdownFuture<'_, bool> {
+        Box::pin(async move {
+            match self.explanation.as_ref() {
+                Some(explanation) => explanation.force_shutdown_now().await,
+                None => true,
+            }
+        })
+    }
+
+    fn force_history(&self) -> ShutdownFuture<'_, bool> {
+        Box::pin(async move {
+            self.history
+                .as_ref()
+                .is_none_or(|history| history.force_shutdown_now().is_ok())
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -197,6 +282,49 @@ where
     }
 }
 
+async fn run_force_cleanup(
+    cleanup: ShutdownFuture<'_, bool>,
+    deadline: Duration,
+) -> ForceCleanupOutcome {
+    match tokio::time::timeout(deadline, cleanup).await {
+        Ok(true) => ForceCleanupOutcome::Completed,
+        Ok(false) => ForceCleanupOutcome::Failed,
+        Err(_) => ForceCleanupOutcome::TimedOut,
+    }
+}
+
+async fn execute_shutdown_plan<P, E>(
+    plan: &P,
+    graceful_deadline: Duration,
+    force_step_deadline: Duration,
+    exit: E,
+) -> AppShutdownReport
+where
+    P: AppShutdownPlan,
+    E: FnOnce(),
+{
+    let graceful = match tokio::time::timeout(graceful_deadline, plan.graceful_shutdown()).await {
+        Ok(true) => ShutdownOutcome::Completed,
+        Ok(false) => ShutdownOutcome::Failed,
+        Err(_) => ShutdownOutcome::TimedOut,
+    };
+    let mut report = AppShutdownReport {
+        graceful,
+        codex: ForceCleanupOutcome::NotRequired,
+        narration: ForceCleanupOutcome::NotRequired,
+        explanation: ForceCleanupOutcome::NotRequired,
+        history: ForceCleanupOutcome::NotRequired,
+    };
+    if graceful != ShutdownOutcome::Completed {
+        report.codex = run_force_cleanup(plan.force_codex(), force_step_deadline).await;
+        report.narration = run_force_cleanup(plan.force_narration(), force_step_deadline).await;
+        report.explanation = run_force_cleanup(plan.force_explanation(), force_step_deadline).await;
+        report.history = run_force_cleanup(plan.force_history(), force_step_deadline).await;
+    }
+    exit();
+    report
+}
+
 #[tauri::command]
 pub fn app_quit_cancel(
     request: AppQuitRequestV1,
@@ -250,46 +378,102 @@ pub fn request_app_close(app: AppHandle) {
 
 fn spawn_app_shutdown(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        let supervisor = app.state::<CodexSupervisor>().inner().clone();
-        let narration = app
-            .try_state::<NarrationService>()
-            .map(|state| state.inner().clone());
-        let explanation = app
-            .try_state::<CommitExplanationController>()
-            .map(|state| state.inner().clone());
-        let history = app
-            .try_state::<WorkspaceHistoryService>()
-            .map(|state| state.inner().clone());
-        let outcome = run_with_shutdown_deadline(
-            async {
-                supervisor.shutdown().await;
-                if let Some(narration) = narration {
-                    let _ = narration.shutdown().await;
-                }
-                if let Some(explanation) = explanation {
-                    explanation.shutdown().await;
-                }
-                if let Some(history) = history {
-                    let _ = history.shutdown().await;
-                }
-            },
+        let plan = NativeAppShutdownPlan {
+            supervisor: app.state::<CodexSupervisor>().inner().clone(),
+            narration: app
+                .try_state::<NarrationService>()
+                .map(|state| state.inner().clone()),
+            explanation: app
+                .try_state::<CommitExplanationController>()
+                .map(|state| state.inner().clone()),
+            history: app
+                .try_state::<WorkspaceHistoryService>()
+                .map(|state| state.inner().clone()),
+        };
+        let lifecycle = app.state::<Arc<AppLifecycleCoordinator>>().inner().clone();
+        let exit_app = app.clone();
+        let _ = execute_shutdown_plan(
+            &plan,
             APP_SHUTDOWN_DEADLINE,
+            APP_FORCE_SHUTDOWN_STEP_DEADLINE,
+            move || {
+                lifecycle.mark_exit_ready();
+                exit_app.exit(0);
+            },
         )
         .await;
-        if outcome == ShutdownOutcome::TimedOut {
-            let _ =
-                tokio::time::timeout(Duration::from_millis(250), supervisor.force_shutdown_now())
-                    .await;
-        }
-        app.state::<Arc<AppLifecycleCoordinator>>()
-            .mark_exit_ready();
-        app.exit(0);
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Copy)]
+    enum TestCleanupBehavior {
+        Complete,
+        Fail,
+        Pending,
+    }
+
+    struct RecordingShutdownPlan {
+        log: Arc<Mutex<Vec<&'static str>>>,
+        graceful: TestCleanupBehavior,
+        codex: TestCleanupBehavior,
+        narration: TestCleanupBehavior,
+        explanation: TestCleanupBehavior,
+        history: TestCleanupBehavior,
+    }
+
+    impl RecordingShutdownPlan {
+        fn new(log: Arc<Mutex<Vec<&'static str>>>, graceful: TestCleanupBehavior) -> Self {
+            Self {
+                log,
+                graceful,
+                codex: TestCleanupBehavior::Complete,
+                narration: TestCleanupBehavior::Complete,
+                explanation: TestCleanupBehavior::Complete,
+                history: TestCleanupBehavior::Complete,
+            }
+        }
+
+        fn cleanup(
+            &self,
+            label: &'static str,
+            behavior: TestCleanupBehavior,
+        ) -> ShutdownFuture<'_, bool> {
+            Box::pin(async move {
+                self.log.lock().expect("shutdown log").push(label);
+                match behavior {
+                    TestCleanupBehavior::Complete => true,
+                    TestCleanupBehavior::Fail => false,
+                    TestCleanupBehavior::Pending => std::future::pending::<bool>().await,
+                }
+            })
+        }
+    }
+
+    impl AppShutdownPlan for RecordingShutdownPlan {
+        fn graceful_shutdown(&self) -> ShutdownFuture<'_, bool> {
+            self.cleanup("graceful", self.graceful)
+        }
+
+        fn force_codex(&self) -> ShutdownFuture<'_, bool> {
+            self.cleanup("force-codex-descendants-absent", self.codex)
+        }
+
+        fn force_narration(&self) -> ShutdownFuture<'_, bool> {
+            self.cleanup("force-narration-descendants-absent", self.narration)
+        }
+
+        fn force_explanation(&self) -> ShutdownFuture<'_, bool> {
+            self.cleanup("force-explanation-descendants-absent", self.explanation)
+        }
+
+        fn force_history(&self) -> ShutdownFuture<'_, bool> {
+            self.cleanup("force-history-interrupted-checkpoint", self.history)
+        }
+    }
 
     fn active(generation: u64) -> ActiveTurnIdentity {
         ActiveTurnIdentity {
@@ -383,5 +567,84 @@ mod tests {
                 .await,
             ShutdownOutcome::TimedOut
         );
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_exits_without_invoking_force_cleanup() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let plan = RecordingShutdownPlan::new(log.clone(), TestCleanupBehavior::Complete);
+        let exit_log = log.clone();
+        let report = execute_shutdown_plan(
+            &plan,
+            Duration::from_millis(20),
+            Duration::from_millis(20),
+            move || exit_log.lock().expect("exit log").push("exit"),
+        )
+        .await;
+
+        assert_eq!(report.graceful, ShutdownOutcome::Completed);
+        assert_eq!(report.codex, ForceCleanupOutcome::NotRequired);
+        assert_eq!(*log.lock().expect("shutdown log"), ["graceful", "exit"]);
+    }
+
+    #[tokio::test]
+    async fn timeout_forces_every_service_before_exit_in_privacy_safe_order() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let plan = RecordingShutdownPlan::new(log.clone(), TestCleanupBehavior::Pending);
+        let exit_log = log.clone();
+        let report = execute_shutdown_plan(
+            &plan,
+            Duration::from_millis(5),
+            Duration::from_millis(20),
+            move || exit_log.lock().expect("exit log").push("exit"),
+        )
+        .await;
+
+        assert_eq!(
+            report,
+            AppShutdownReport {
+                graceful: ShutdownOutcome::TimedOut,
+                codex: ForceCleanupOutcome::Completed,
+                narration: ForceCleanupOutcome::Completed,
+                explanation: ForceCleanupOutcome::Completed,
+                history: ForceCleanupOutcome::Completed,
+            }
+        );
+        let events = log.lock().expect("shutdown log").clone();
+        assert_eq!(
+            events,
+            [
+                "graceful",
+                "force-codex-descendants-absent",
+                "force-narration-descendants-absent",
+                "force-explanation-descendants-absent",
+                "force-history-interrupted-checkpoint",
+                "exit",
+            ]
+        );
+        assert!(!events.join(" ").contains("/Users/"));
+        assert!(!events.join(" ").contains("token="));
+    }
+
+    #[tokio::test]
+    async fn force_failure_and_timeout_do_not_skip_history_convergence_or_exit() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut plan = RecordingShutdownPlan::new(log.clone(), TestCleanupBehavior::Fail);
+        plan.narration = TestCleanupBehavior::Fail;
+        plan.explanation = TestCleanupBehavior::Pending;
+        let exit_log = log.clone();
+        let report = execute_shutdown_plan(
+            &plan,
+            Duration::from_millis(20),
+            Duration::from_millis(5),
+            move || exit_log.lock().expect("exit log").push("exit"),
+        )
+        .await;
+
+        assert_eq!(report.graceful, ShutdownOutcome::Failed);
+        assert_eq!(report.narration, ForceCleanupOutcome::Failed);
+        assert_eq!(report.explanation, ForceCleanupOutcome::TimedOut);
+        assert_eq!(report.history, ForceCleanupOutcome::Completed);
+        assert_eq!(log.lock().expect("shutdown log").last(), Some(&"exit"));
     }
 }

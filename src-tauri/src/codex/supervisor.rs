@@ -1616,7 +1616,7 @@ impl CodexSupervisor {
             .map(|workspace_id| (workspace_id.clone(), state.generation))
     }
 
-    pub async fn shutdown(&self) {
+    pub async fn shutdown(&self) -> bool {
         let _lifecycle = self.inner.lifecycle.lock().await;
         let (runtime, generation) = {
             let mut state = self.inner.state.lock().await;
@@ -1630,9 +1630,11 @@ impl CodexSupervisor {
             (state.runtime.clone(), state.generation)
         };
         self.invalidate_main_work_unit_generation(generation).await;
-        if let Some(runtime) = runtime.as_ref() {
-            runtime.shutdown().await;
-        }
+        let converged = if let Some(runtime) = runtime.as_ref() {
+            runtime.shutdown_checked().await.is_ok()
+        } else {
+            true
+        };
         let mut state = self.inner.state.lock().await;
         if let (Some(current), Some(stopped)) = (state.runtime.as_ref(), runtime.as_ref()) {
             if Arc::ptr_eq(current, stopped) {
@@ -1641,9 +1643,10 @@ impl CodexSupervisor {
         }
         state.diagnostic.child_state = ChildState::Stopped;
         state.diagnostic.health = CodexHealth::Disconnected;
+        converged
     }
 
-    pub async fn force_shutdown_now(&self) {
+    pub async fn force_shutdown_now(&self) -> bool {
         let runtime = {
             let mut state = self.inner.state.lock().await;
             state.requests.clear_pending();
@@ -1657,7 +1660,11 @@ impl CodexSupervisor {
             state.runtime.take()
         };
         if let Some(runtime) = runtime {
-            runtime.force_shutdown_now();
+            runtime
+                .force_shutdown_and_wait(Duration::from_millis(400))
+                .await
+        } else {
+            true
         }
     }
 

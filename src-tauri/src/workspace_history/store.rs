@@ -489,6 +489,12 @@ impl WorkspaceHistoryStore {
         Ok(())
     }
 
+    pub fn force_shutdown_now(&self) -> Result<usize, WorkspaceHistoryError> {
+        let interrupted = self.recover_unfinished_turns()?;
+        self.checkpoint_for_shutdown()?;
+        Ok(interrupted)
+    }
+
     #[cfg(test)]
     pub(crate) fn install_unregister_failure_for_test(&self) -> Result<(), WorkspaceHistoryError> {
         self.lock()
@@ -4661,14 +4667,14 @@ mod tests {
         let reopened = WorkspaceHistoryStore::open(&data).expect("reopen store");
         assert_eq!(
             reopened
-                .recover_unfinished_turns()
-                .expect("recover unfinished turn"),
+                .force_shutdown_now()
+                .expect("force shutdown recovers and checkpoints"),
             1
         );
         assert_eq!(
             reopened
-                .recover_unfinished_turns()
-                .expect("idempotent recovery"),
+                .force_shutdown_now()
+                .expect("idempotent force shutdown"),
             0
         );
         let snapshot = reopened
@@ -4696,10 +4702,6 @@ mod tests {
                 .and_then(Value::as_u64),
             Some(5)
         );
-        reopened
-            .checkpoint_for_shutdown()
-            .expect("shutdown checkpoint");
-
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
     }

@@ -534,6 +534,21 @@ impl NarrationService {
         self.cancel_admitted().await
     }
 
+    pub async fn force_shutdown_now(&self) -> bool {
+        self.inner.shutdown.store(true, Ordering::Release);
+        self.inner.notify.notify_waiters();
+        if let Ok(mut queue) = self.inner.queue.lock() {
+            queue.clear();
+        }
+        let converged = self.inner.process.force_cancel_all().await;
+        if let Ok(mut runtime) = self.inner.runtime.lock() {
+            runtime.playback_state = NarrationPlaybackState::Idle;
+            runtime.active_key = None;
+            runtime.active_priority = None;
+        }
+        converged
+    }
+
     fn ensure_worker(&self) {
         if self
             .inner

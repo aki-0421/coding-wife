@@ -433,6 +433,22 @@ impl ProcessRuntime {
         let _ = signal_process_group(self.pid, SIGKILL);
     }
 
+    pub(crate) async fn force_shutdown_and_wait(&self, timeout: Duration) -> bool {
+        self.force_shutdown_now();
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if self.has_exited().await {
+                self.connection.fail_pending().await;
+                self.shutdown_complete.store(true, Ordering::Release);
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
     pub async fn has_exited(&self) -> bool {
         process_tree_exited(&self.child, self.pid)
             .await

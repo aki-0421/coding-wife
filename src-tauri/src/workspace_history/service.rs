@@ -248,8 +248,15 @@ impl WorkspaceHistoryService {
     pub async fn shutdown(&self) -> Result<(), WorkspaceCommandError> {
         let _operation = self.operation_lock.lock().await;
         self.store
-            .checkpoint_for_shutdown()
+            .force_shutdown_now()
+            .map(|_| ())
             .map_err(|error| history_error("history.shutdown", error))
+    }
+
+    pub fn force_shutdown_now(&self) -> Result<usize, WorkspaceCommandError> {
+        self.store
+            .force_shutdown_now()
+            .map_err(|error| history_error("history.force_shutdown", error))
     }
 
     pub async fn pick_register(&self) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
