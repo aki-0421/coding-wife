@@ -93,24 +93,10 @@ export class WorkspaceContextContractError extends Error {
 
 const workspaceIdPattern = /^[A-Za-z0-9-]{1,128}$/u
 const hashPattern = /^[0-9a-f]{64}$/u
-const policyKeys = [
-  "permission",
-  "permissions",
-  "approval",
-  "approvals",
-  "model",
-  "models",
-  "tool",
-  "tools",
-  "git",
-  "git_observer",
-  "commit_skill",
-  "verification",
-  "privacy",
-  "support_capability",
-  "checkpoint_policy",
-] as const
 const policyPresentationPatterns = [
+  /\b(?:while|when)\s+(?:the\s+)?tools?\s+(?:(?:are|remain)\s+)?(?:run|runs|running|active|working|executing)\b/giu,
+  /\b(?:say|quote|mention)\s+(?:the\s+)?(?:phrase\s+|words?\s+)?(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)(?:\s+(?:denied|granted|allowed|required|optional))?\b/giu,
+  /\buse\s+(?:the\s+)?(?:phrase|wording|words?)\s+(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)(?:\s+(?:denied|granted|allowed|required|optional))?\b/giu,
   /\b(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)(?:\s+(?:requests?|prompts?|calls?|checks?|policy|observer|skill|capability))?\s+(?:errors?|results?|outputs?|messages?|wording|language|jargon|terms?|terminology|tone|phrasing|summaries?|explanations?|descriptions?|labels?|notifications?)\b/giu,
   /(?:プライバシー確認|チェックポイント|コミットスキル|安全確認|動作確認|権限|許可|承認|検証|確認|ツール|モデル)(?:要求|確認|呼び出し|方針|ポリシー)?(?:エラー|結果|出力|メッセージ|文言|言語|用語|専門用語|表現|口調|語調|言い回し|要約|説明|ラベル|通知)/gu,
 ] as const
@@ -119,18 +105,6 @@ const policyDomainPatterns = [
   /\b(?:permission|approval)\s+(?:requests?|prompts?|checks?)\b/iu,
   /\b(?:tool\s+calls?|git\s+observer|commit\s+skill|support\s+capability|checkpoint\s+policy)\b/iu,
   /(?:プライバシー確認|チェックポイント(?:方針|ポリシー)?|コミットスキル|安全確認|動作確認|権限(?:要求|確認)?|許可(?:要求|確認)?|承認(?:要求|確認)?|検証|確認|ツール(?:呼び出し)?|モデル)/u,
-] as const
-const policyDirectivePredicatePatterns = [
-  /\b(?:accept|approve|grant|allow|deny|reject|skip|omit|bypass|disable|ignore|override)\b/iu,
-  /\b(?:optional|unnecessary|mandatory|required)\b/iu,
-  /\b(?:proceed|continue|go)\s+(?:straight\s+)?(?:directly|ahead)\b/iu,
-  /\bnever\s+(?:ask|check|request)\b/iu,
-  /\bavoid\s+(?:all\s+|the\s+)?(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)\b/iu,
-  /(?:同意|拒否|省略|回避|無効|無視|上書き|迂回|スキップ|不要|任意|必須)/u,
-  /(?:権限|許可|承認)(?:要求|確認)?[^\s]{0,12}(?:許可|承認|拒否|同意)/u,
-  /(?:確認|質問|要求|求め)(?:しない|せず)/u,
-  /(?:そのまま|直接|直ちに)(?:進め|続行)/u,
-  /(?:権限|許可|承認|検証|確認)[^\s]{0,8}(?:避け|しない)/u,
 ] as const
 
 function violation(): never {
@@ -240,33 +214,12 @@ function normalizePolicyText(value: string): string {
   return normalized.replaceAll(/\s+/gu, " ").trim()
 }
 
-function containsPolicyAssignment(value: string): boolean {
-  const normalized = value
-    .normalize("NFKC")
-    .toLowerCase()
-    .replaceAll(/[ -]/gu, "_")
-  return normalized.split("\n").some((line) => {
-    const candidate = line.replace(/^[\s{}[\]*"'-]+/u, "")
-    return policyKeys.some((key) => {
-      if (!candidate.startsWith(key)) return false
-      return /^["' ]*[:=]/u.test(candidate.slice(key.length))
-    })
-  })
-}
-
-function containsPolicyOverride(value: string): boolean {
-  if (containsPolicyAssignment(value)) return true
+function containsNonPresentationPolicyDomain(value: string): boolean {
   let policyScope = normalizePolicyText(value)
   for (const pattern of policyPresentationPatterns) {
     policyScope = policyScope.replaceAll(pattern, " ")
   }
-  const hasPolicyDomainObject = policyDomainPatterns.some((pattern) =>
-    pattern.test(policyScope),
-  )
-  const hasDirectivePredicate = policyDirectivePredicatePatterns.some(
-    (pattern) => pattern.test(policyScope),
-  )
-  return hasPolicyDomainObject && hasDirectivePredicate
+  return policyDomainPatterns.some((pattern) => pattern.test(policyScope))
 }
 
 function validItems(
@@ -342,25 +295,25 @@ export function characterContextValidationIssue(
       reason: value.displayName.trim().length === 0 ? "required" : "text",
     }
   }
-  if (containsPolicyOverride(value.displayName)) {
+  if (containsNonPresentationPolicyDomain(value.displayName)) {
     return { field: "displayName", reason: "policy" }
   }
   if (!isContextText(value.toneNotes, 1_000)) {
     return { field: "toneNotes", reason: "text" }
   }
-  if (containsPolicyOverride(value.toneNotes)) {
+  if (containsNonPresentationPolicyDomain(value.toneNotes)) {
     return { field: "toneNotes", reason: "policy" }
   }
   if (!isContextText(value.behavior, 4_000)) {
     return { field: "behavior", reason: "text" }
   }
-  if (containsPolicyOverride(value.behavior)) {
+  if (containsNonPresentationPolicyDomain(value.behavior)) {
     return { field: "behavior", reason: "policy" }
   }
   if (!validItems(value.prohibitedExpressions, 20, 200)) {
     return { field: "prohibitedExpressions", reason: "items" }
   }
-  if (value.prohibitedExpressions.some(containsPolicyOverride)) {
+  if (value.prohibitedExpressions.some(containsNonPresentationPolicyDomain)) {
     return { field: "prohibitedExpressions", reason: "policy" }
   }
   const policyValues = [
@@ -451,7 +404,7 @@ export function parseCharacterContext(value: unknown): CharacterContext {
     value.behavior,
     ...prohibitedExpressions,
   ]
-  if (policyValues.some(containsPolicyOverride)) return violation()
+  if (policyValues.some(containsNonPresentationPolicyDomain)) return violation()
   const total =
     policyValues.reduce((sum, item) => sum + unicodeScalarCount(item), 0) +
     unicodeScalarCount(String(value.tone)) +

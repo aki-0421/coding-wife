@@ -35,28 +35,13 @@ const MAX_PROHIBITED_ITEMS: usize = 20;
 const MAX_PROHIBITED_ITEM: usize = 200;
 const PROJECT_REFERENCE_MANIFEST_SCHEMA_VERSION: u16 = 1;
 
-const POLICY_KEYS: &[&str] = &[
-    "permission",
-    "permissions",
-    "approval",
-    "approvals",
-    "model",
-    "models",
-    "tool",
-    "tools",
-    "git",
-    "git_observer",
-    "commit_skill",
-    "verification",
-    "privacy",
-    "support_capability",
-    "checkpoint_policy",
-];
-
 fn policy_presentation_patterns() -> &'static [Regex] {
     static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
         [
+            r"(?iu)\b(?:while|when)\s+(?:the\s+)?tools?\s+(?:(?:are|remain)\s+)?(?:run|runs|running|active|working|executing)\b",
+            r"(?iu)\b(?:say|quote|mention)\s+(?:the\s+)?(?:phrase\s+|words?\s+)?(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)(?:\s+(?:denied|granted|allowed|required|optional))?\b",
+            r"(?iu)\buse\s+(?:the\s+)?(?:phrase|wording|words?)\s+(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)(?:\s+(?:denied|granted|allowed|required|optional))?\b",
             r"(?iu)\b(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)(?:\s+(?:requests?|prompts?|calls?|checks?|policy|observer|skill|capability))?\s+(?:errors?|results?|outputs?|messages?|wording|language|jargon|terms?|terminology|tone|phrasing|summaries?|explanations?|descriptions?|labels?|notifications?)\b",
             r"(?:プライバシー確認|チェックポイント|コミットスキル|安全確認|動作確認|権限|許可|承認|検証|確認|ツール|モデル)(?:要求|確認|呼び出し|方針|ポリシー)?(?:エラー|結果|出力|メッセージ|文言|言語|用語|専門用語|表現|口調|語調|言い回し|要約|説明|ラベル|通知)",
         ]
@@ -77,27 +62,6 @@ fn policy_domain_patterns() -> &'static [Regex] {
         ]
         .into_iter()
         .map(|pattern| Regex::new(pattern).expect("static policy domain regex"))
-        .collect()
-    })
-}
-
-fn policy_directive_predicate_patterns() -> &'static [Regex] {
-    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
-    PATTERNS.get_or_init(|| {
-        [
-            r"(?iu)\b(?:accept|approve|grant|allow|deny|reject|skip|omit|bypass|disable|ignore|override)\b",
-            r"(?iu)\b(?:optional|unnecessary|mandatory|required)\b",
-            r"(?iu)\b(?:proceed|continue|go)\s+(?:straight\s+)?(?:directly|ahead)\b",
-            r"(?iu)\bnever\s+(?:ask|check|request)\b",
-            r"(?iu)\bavoid\s+(?:all\s+|the\s+)?(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)\b",
-            r"(?:同意|拒否|省略|回避|無効|無視|上書き|迂回|スキップ|不要|任意|必須)",
-            r"(?:権限|許可|承認)(?:要求|確認)?[^\s]{0,12}(?:許可|承認|拒否|同意)",
-            r"(?:確認|質問|要求|求め)(?:しない|せず)",
-            r"(?:そのまま|直接|直ちに)(?:進め|続行)",
-            r"(?:権限|許可|承認|検証|確認)[^\s]{0,8}(?:避け|しない)",
-        ]
-        .into_iter()
-        .map(|pattern| Regex::new(pattern).expect("static policy directive predicate regex"))
         .collect()
     })
 }
@@ -546,44 +510,14 @@ fn normalized_policy_text(value: &str) -> String {
     normalized
 }
 
-fn contains_policy_assignment(value: &str) -> bool {
-    let normalized = value
-        .nfkc()
-        .flat_map(|character| character.to_lowercase())
-        .map(|character| match character {
-            '-' | ' ' => '_',
-            other => other,
-        })
-        .collect::<String>();
-    normalized.lines().any(|line| {
-        let line = line.trim_start_matches(|character: char| {
-            character.is_whitespace() || matches!(character, '{' | '[' | '-' | '*' | '"' | '\'')
-        });
-        POLICY_KEYS.iter().any(|key| {
-            line.strip_prefix(key).is_some_and(|remainder| {
-                remainder
-                    .trim_start_matches(['"', '\'', ' '])
-                    .starts_with([':', '='])
-            })
-        })
-    })
-}
-
-fn contains_policy_override(value: &str) -> bool {
-    if contains_policy_assignment(value) {
-        return true;
-    }
+fn contains_non_presentation_policy_domain(value: &str) -> bool {
     let mut policy_scope = normalized_policy_text(value);
     for pattern in policy_presentation_patterns() {
         policy_scope = pattern.replace_all(&policy_scope, " ").into_owned();
     }
-    let has_policy_domain_object = policy_domain_patterns()
+    policy_domain_patterns()
         .iter()
-        .any(|pattern| pattern.is_match(&policy_scope));
-    let has_directive_predicate = policy_directive_predicate_patterns()
-        .iter()
-        .any(|pattern| pattern.is_match(&policy_scope));
-    has_policy_domain_object && has_directive_predicate
+        .any(|pattern| pattern.is_match(&policy_scope))
 }
 
 pub(super) fn normalize_character_context(
@@ -641,7 +575,7 @@ pub(super) fn normalize_character_context(
         .chain(std::iter::once(context.tone_notes.as_str()))
         .chain(std::iter::once(context.behavior.as_str()))
         .chain(context.prohibited_expressions.iter().map(String::as_str))
-        .any(contains_policy_override)
+        .any(contains_non_presentation_policy_domain)
     {
         return Err(context_error(
             "WORKSPACE-CHARACTER-CONTEXT-POLICY",
