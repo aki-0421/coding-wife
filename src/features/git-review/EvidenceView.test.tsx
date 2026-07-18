@@ -91,6 +91,9 @@ function renderEvidence(
     readonly locale?: "ja" | "en"
     readonly transport?: GitReviewTransport
     readonly explanationController?: CommitExplanationController
+    readonly onExplanationPresentationTrigger?: (
+      trigger: HTMLButtonElement,
+    ) => void
   } = {},
 ) {
   const onBackToChat = vi.fn()
@@ -100,6 +103,12 @@ function renderEvidence(
       commitExplanationController={options.explanationController}
       locale={options.locale ?? "en"}
       onBackToChat={onBackToChat}
+      {...(options.onExplanationPresentationTrigger === undefined
+        ? {}
+        : {
+            onExplanationPresentationTrigger:
+              options.onExplanationPresentationTrigger,
+          })}
       transport={options.transport ?? new DemoGitReviewTransport(0)}
       workspaceId="workspace-demo"
     />,
@@ -201,16 +210,25 @@ describe("EvidenceView", () => {
   it("routes a not-generated explanation through app-owned user_request", async () => {
     const user = userEvent.setup()
     const explanation = createExplanationController()
-    renderEvidence({ explanationController: explanation.controller })
+    const onExplanationPresentationTrigger = vi.fn()
+    renderEvidence({
+      explanationController: explanation.controller,
+      onExplanationPresentationTrigger,
+    })
     await screen.findByRole("heading", {
       name: "feat(git): add read-only commit evidence",
     })
 
     expect(explanation.request).not.toHaveBeenCalled()
-    await user.click(
-      screen.getByRole("button", { name: "Explain this commit" }),
-    )
+    const initialTrigger = screen.getByRole("button", {
+      name: "Explain this commit",
+    })
+    initialTrigger.focus()
+    await user.keyboard("{Enter}")
     await waitFor(() => expect(explanation.request).toHaveBeenCalledOnce())
+    expect(onExplanationPresentationTrigger).toHaveBeenCalledWith(
+      initialTrigger,
+    )
     expect(explanation.request.mock.calls[0]?.[0]?.request.trigger).toBe(
       "user_request",
     )
@@ -424,19 +442,25 @@ describe("EvidenceView", () => {
       errorCode: "SUPPORT_TIMEOUT",
       updatedAt: "2026-07-18T09:01:00.000Z",
     })
+    const onRetryPresentationTrigger = vi.fn()
     view.rerender(
       <EvidenceView
         active
         commitExplanationController={failed.controller}
         locale="en"
         onBackToChat={vi.fn()}
+        onExplanationPresentationTrigger={onRetryPresentationTrigger}
         transport={new DemoGitReviewTransport(0)}
         workspaceId="workspace-demo"
       />,
     )
     await screen.findByText("Explanation failed")
-    await user.click(screen.getByRole("button", { name: "Retry explanation" }))
+    const retryTrigger = screen.getByRole("button", {
+      name: "Retry explanation",
+    })
+    await user.click(retryTrigger)
     await waitFor(() => expect(failed.request).toHaveBeenCalledOnce())
+    expect(onRetryPresentationTrigger).toHaveBeenCalledWith(retryTrigger)
     expect(failed.request.mock.calls[0]?.[0]?.request.trigger).toBe(
       "user_retry",
     )

@@ -41,6 +41,7 @@ export interface CommitDetailProps {
   readonly onSelectFile: (fileEvidenceId: string) => void
   readonly onRequestExplanation: (
     trigger: CommitExplanationUserRequestTrigger,
+    presentationTrigger: HTMLButtonElement,
   ) => void
   readonly onCancelExplanation: (
     state: CommitExplanationControllerStateV1,
@@ -333,7 +334,9 @@ export function CommitDetail({
             />
             <h1
               className="m-0 truncate text-headline text-text-strong"
+              data-commit-detail-heading=""
               id="selected-commit-subject"
+              tabIndex={-1}
             >
               {detail.identity.subject}
             </h1>
@@ -362,7 +365,9 @@ export function CommitDetail({
             {controllerStatus === "not_generated" ? (
               <Button
                 disabled={!explanationContextReady || intentBusy}
-                onClick={() => onRequestExplanation("user_request")}
+                onClick={(event) =>
+                  onRequestExplanation("user_request", event.currentTarget)
+                }
                 type="button"
                 variant="secondary"
               >
@@ -380,7 +385,9 @@ export function CommitDetail({
             !explanationControllerState.presentationAvailable ? (
               <Button
                 disabled={!explanationContextReady || intentBusy}
-                onClick={() => onRequestExplanation("user_request")}
+                onClick={(event) =>
+                  onRequestExplanation("user_request", event.currentTarget)
+                }
                 type="button"
                 variant="secondary"
               >
@@ -468,7 +475,9 @@ export function CommitDetail({
               explanationControllerState?.retryable) ? (
               <Button
                 disabled={!explanationContextReady || intentBusy}
-                onClick={() => onRequestExplanation("user_retry")}
+                onClick={(event) =>
+                  onRequestExplanation("user_retry", event.currentTarget)
+                }
                 type="button"
                 variant="secondary"
               >

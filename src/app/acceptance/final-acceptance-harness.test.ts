@@ -12,9 +12,10 @@ import {
   measureAcceptanceBudget,
   percentile95,
 } from "@/app/acceptance/final-acceptance-harness"
+import { projectWorkspaceNavigation } from "@/features/workspace-view/workspace-navigation"
 
 describe("final acceptance evidence harness", () => {
-  it("enumerates both locales, every required width, and happy/error journeys", () => {
+  it("keeps matrix definitions unique for the production render suite", () => {
     const matrix = buildFinalAcceptanceMatrix()
 
     expect(matrix).toHaveLength(
@@ -130,24 +131,18 @@ describe("final acceptance evidence harness", () => {
   it("keeps 200-workspace filter and selection probes below the 100ms p95 budget", () => {
     const workspaces = createAcceptanceWorkspaces()
     let selectedId = ""
+    let filteredCount = 0
     const evidence = measureAcceptanceBudget(100, 100, (sample) => {
       const query = `workspace-${String((sample % 20) + 1).padStart(3, "0")}`
-      const filtered = workspaces.filter((workspace) =>
-        `${workspace.repository}/${workspace.name}/${workspace.branch}`.includes(
-          query,
-        ),
-      )
-      selectedId =
-        workspaces.find(
-          (workspace) =>
-            workspace.id === `acceptance-workspace-${query.slice(-3)}`,
-        )?.id ??
-        filtered[0]?.id ??
-        ""
+      const targetId = `acceptance-workspace-${query.slice(-3)}`
+      const projection = projectWorkspaceNavigation(workspaces, targetId, query)
+      selectedId = projection.selectedWorkspace?.id ?? ""
+      filteredCount = projection.filteredWorkspaces.length
     })
 
     expect(workspaces).toHaveLength(200)
     expect(selectedId).toMatch(/^acceptance-workspace-/u)
+    expect(filteredCount).toBeGreaterThan(0)
     expect(evidence.sampleCount).toBe(100)
     expect(evidence.passed).toBe(true)
     expect(evidence.p95Ms).toBeLessThanOrEqual(100)

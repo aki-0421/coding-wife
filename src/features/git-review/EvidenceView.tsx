@@ -573,9 +573,10 @@ export function EvidenceView({
                     onExplanationPresentationTrigger?.(trigger)
                     void review.presentExplanation(state, mode)
                   }}
-                  onRequestExplanation={(trigger) =>
+                  onRequestExplanation={(trigger, presentationTrigger) => {
+                    onExplanationPresentationTrigger?.(presentationTrigger)
                     void review.requestExplanation(locale, trigger)
-                  }
+                  }}
                   onSelectFile={(fileEvidenceId) =>
                     void review.selectFile(fileEvidenceId)
                   }

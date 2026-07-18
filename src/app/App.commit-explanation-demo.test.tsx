@@ -245,7 +245,11 @@ describe("App interactive commit explanation demo", () => {
     expect(
       screen.getByRole("button", { name: "Explain this commit" }),
     ).toBeVisible()
-    fireEvent.click(screen.getByRole("button", { name: "Explain this commit" }))
+    const initialExplanationTrigger = screen.getByRole("button", {
+      name: "Explain this commit",
+    })
+    initialExplanationTrigger.focus()
+    await user.keyboard("{Enter}")
     await waitFor(
       () =>
         expect(
@@ -264,9 +268,17 @@ describe("App interactive commit explanation demo", () => {
     expect(
       screen.getByRole("button", { name: "Show explanation" }),
     ).toBeVisible()
+    expect(initialExplanationTrigger.isConnected).toBe(false)
     fireEvent.click(screen.getByRole("button", { name: "Close explanation" }))
     await waitFor(() =>
       expect(controller.getSnapshot().presentation).toBeNull(),
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", {
+          name: "chore: update local project metadata",
+        }),
+      ).toHaveFocus(),
     )
     expect(
       runtime.getState(workspaceId, 1, `commit-${"b".repeat(40)}`),

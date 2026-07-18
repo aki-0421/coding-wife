@@ -67,6 +67,7 @@ import type {
 } from "@/features/workspace-view/types"
 import { useEditableWorkspaceContext } from "@/features/workspace-view/useEditableWorkspaceContext"
 import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceViewModel"
+import { useWorkspaceViewportLayout } from "@/features/workspace-view/workspace-viewport"
 import { gitReviewSchemaVersion } from "@/lib/contracts/git-review"
 
 const tabOrder: readonly WorkspaceTab[] = [
@@ -124,6 +125,7 @@ export function WorkspaceShell({
   narrationController,
 }: WorkspaceShellProps) {
   const { locale } = useI18n()
+  const viewportLayout = useWorkspaceViewportLayout()
   const copy = getWorkspaceCopy(locale)
   const safeQuitCopy = getSafeQuitCopy(locale)
   const runtime = useRuntime()
@@ -483,12 +485,14 @@ export function WorkspaceShell({
     commitExplanationController?.revokePresentationIntent("close")
     void narrationController.dismissPresentation("explicit_cancel")
     window.requestAnimationFrame(() => {
-      if (
-        explanationFocusRestoreVersionRef.current === restoreVersion &&
-        trigger?.isConnected
-      ) {
+      if (explanationFocusRestoreVersionRef.current !== restoreVersion) return
+      if (trigger?.isConnected) {
         trigger.focus()
+        return
       }
+      document
+        .querySelector<HTMLElement>("[data-commit-detail-heading]")
+        ?.focus()
     })
   }, [commitExplanationController, narrationController])
 
@@ -642,6 +646,7 @@ export function WorkspaceShell({
         aria-busy="true"
         className="flex min-h-dvh w-full items-center justify-center bg-background p-xl"
         data-workspace-hydration="loading"
+        data-workspace-viewport={viewportLayout}
       >
         <div
           className="flex w-full max-w-lg flex-col gap-lg rounded-panel border border-divider bg-surface p-xl shadow-panel"
@@ -668,6 +673,7 @@ export function WorkspaceShell({
       <main
         className="flex min-h-dvh w-full items-center justify-center bg-background p-xl"
         data-workspace-hydration="error"
+        data-workspace-viewport={viewportLayout}
       >
         <div
           className="flex w-full max-w-lg flex-col items-start gap-md rounded-panel border border-destructive/40 bg-surface p-xl shadow-panel"
@@ -696,7 +702,10 @@ export function WorkspaceShell({
 
   if (!view.selectedWorkspace) {
     return (
-      <main className="flex min-h-dvh min-w-[960px] items-center justify-center bg-background p-xl">
+      <main
+        className="flex min-h-dvh min-w-[960px] items-center justify-center bg-background p-xl"
+        data-workspace-viewport={viewportLayout}
+      >
         <Empty>
           <EmptyHeader className="max-w-[24rem]">
             <EmptyTitle>{copy.workspaces}</EmptyTitle>
@@ -721,6 +730,7 @@ export function WorkspaceShell({
       className="workspace-shell"
       data-reduced-motion={reducedMotion || undefined}
       data-runtime={connection}
+      data-workspace-viewport={viewportLayout}
     >
       <WorkspaceSidebar
         copy={copy}

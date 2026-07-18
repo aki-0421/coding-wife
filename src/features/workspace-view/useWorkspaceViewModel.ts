@@ -5,8 +5,10 @@ import type {
   AttachmentRegistrationResponse,
   PendingRequestView,
 } from "@/lib/contracts"
+import type { WorkspaceTurnContextSnapshot } from "@/lib/contracts/workspace-context"
 
 import { initialWorkspaces } from "@/features/workspace-view/demo-data"
+import { projectWorkspaceNavigation } from "@/features/workspace-view/workspace-navigation"
 import type {
   AttachmentItem,
   ContextSnapshotItem,
@@ -21,7 +23,6 @@ import type {
   WorkspaceTimelineItem,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
-import type { WorkspaceTurnContextSnapshot } from "@/lib/contracts/workspace-context"
 
 const emptyDraft: WorkspaceDraft = {
   text: "",
@@ -318,25 +319,13 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
 
   const adapterReady = adapterStatus === "ready"
 
-  const selectedWorkspace =
-    workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ??
-    workspaces[0]
+  const { filteredWorkspaces, selectedWorkspace } = useMemo(
+    () => projectWorkspaceNavigation(workspaces, selectedWorkspaceId, filter),
+    [filter, selectedWorkspaceId, workspaces],
+  )
   const selectedDraft = selectedWorkspace
     ? draftFor(drafts, selectedWorkspace.id)
     : emptyDraft
-
-  const filteredWorkspaces = useMemo(() => {
-    const query = filter.trim().toLocaleLowerCase()
-    if (query.length === 0) {
-      return workspaces
-    }
-
-    return workspaces.filter((workspace) =>
-      [workspace.repository, workspace.name, workspace.branch].some((value) =>
-        value.toLocaleLowerCase().includes(query),
-      ),
-    )
-  }, [filter, workspaces])
 
   const combinedTimeline = useMemo(() => {
     const events = new Map(
