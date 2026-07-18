@@ -267,7 +267,7 @@ support runtimeはsingle-useであるため、successだけでなくtimeout、ca
 
 `ProcessRuntime`と`SupportRuntime`のDropはasync waitを行えないため、未収束なら同期的にstdin close、direct child kill、group SIGKILLを開始する。fixtureでは明示shutdownを呼ばずにdropしても、別processのgrandchildを含むgroupが2秒以内に消えることを確認する。await可能な全product terminal pathはDropへ依存せず、group disappearance、pending RPC failure、private cleanupを完了してから結果を返す。
 
-private run directoryは作成時からroot directory descriptor、device、inode、ownerとexclusive lockを保持する。cleanup時はpathが同じidentityを指すことをno-followで照合し、group/worldへ広がったmodeはdescriptor経由の`fchmod(0700)`相当で戻してからauth copyを含むtreeを削除する。`cleaned=true`はpath disappearance確認後だけに設定するため、identity mismatchやremove failureを返したexplicit cleanupの後もDropがretryできる。次回起動のstale recoveryもowner、descriptor identity、lock非保持を確認し、unsafe-modeへdriftしたrootを同じ手順で回収する。
+private run directoryは作成時からroot directory descriptor、device、inode、ownerとexclusive lockを保持する。cleanup時はpathが同じidentityを指すことをno-followで照合し、group/worldへ広がったmodeはdescriptor経由の`fchmod(0700)`相当で戻してからauth copyを含むtreeを削除する。元pathがNotFoundでも保持descriptorの`device + inode + nlink`がlinked状態ならcleanup済みとは判定しない。macOSでは`F_GETPATH`が示す現在pathとそのowner-only parent descriptorを照合し、fallbackでは信頼済みtemp parent直下を走査して、同一identityのdisplaced rootだけを削除する。元pathに別inodeが置かれた場合はそれを削除せず、displaced auth-bearing treeの削除、descriptorのterminal link state、current pathとtemp parentからの同一inode消滅を確認した後だけ`cleaned=true`にする。identity、mode repair、探索、remove、消滅確認の失敗ではcleaned状態にせずDrop retryを残し、次回起動のstale recoveryもowner、descriptor identity、lock非保持を確認してunsafe-modeまたはdisplaced rootを回収する。
 
 ## 実装判定
 

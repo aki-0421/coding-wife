@@ -1,7 +1,11 @@
 use std::ffi::OsString;
+#[cfg(target_os = "macos")]
+use std::ffi::{CStr, OsStr};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
+#[cfg(target_os = "macos")]
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,10 +27,14 @@ pub(super) struct PrivateRunDirectory {
     pub(super) codex_home: PathBuf,
     pub(super) workspace: PathBuf,
     temp: PathBuf,
+    root_parent: PathBuf,
+    root_parent_descriptor: File,
+    root_parent_identity: DirectoryIdentity,
     root_descriptor: File,
     root_identity: DirectoryIdentity,
     _lock: File,
     cleanup_lock: StdMutex<()>,
+    displaced_root: StdMutex<Option<PathBuf>>,
     cleaned: AtomicBool,
 }
 
@@ -53,7 +61,14 @@ impl Drop for PendingRunRoot {
 impl PrivateRunDirectory {
     pub(super) fn create(label: &str) -> Result<Self, SupportRuntimeError> {
         cleanup_stale_run_directories()?;
-        let root = std::env::temp_dir().join(format!(
+        let root_parent = std::env::temp_dir();
+        let root_parent_descriptor = open_directory_descriptor(&root_parent)?;
+        let root_parent_identity = directory_identity(
+            &root_parent_descriptor
+                .metadata()
+                .map_err(|_| SupportRuntimeError::PrivateRuntime)?,
+        );
+        let root = root_parent.join(format!(
             "{RUN_DIRECTORY_PREFIX}{label}-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()
@@ -78,10 +93,14 @@ impl PrivateRunDirectory {
             codex_home,
             workspace,
             temp,
+            root_parent,
+            root_parent_descriptor,
+            root_parent_identity,
             root_descriptor,
             root_identity,
             _lock: lock,
             cleanup_lock: StdMutex::new(()),
+            displaced_root: StdMutex::new(None),
             cleaned: AtomicBool::new(false),
         };
         for directory in [&run.codex_home, &run.workspace, &run.temp] {
@@ -196,40 +215,215 @@ impl PrivateRunDirectory {
         {
             return Err(SupportRuntimeError::PrivateRuntime);
         }
-        let path_metadata = match std::fs::symlink_metadata(&self.root) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                self.cleaned.store(true, Ordering::Release);
-                return Ok(());
-            }
-            Err(_) => return Err(SupportRuntimeError::PrivateRuntime),
-        };
-        if path_metadata.file_type().is_symlink()
-            || !path_metadata.is_dir()
-            || directory_identity(&path_metadata) != self.root_identity
-        {
-            return Err(SupportRuntimeError::PrivateRuntime);
+        if descriptor_metadata.nlink() == 0 {
+            self.cleaned.store(true, Ordering::Release);
+            return Ok(());
         }
+        let cleanup_root = self.locate_linked_root()?;
+        let path_metadata = exact_directory_metadata(&cleanup_root, self.root_identity)?
+            .ok_or(SupportRuntimeError::PrivateRuntime)?;
         if path_metadata.mode() & 0o777 != 0o700 {
             self.root_descriptor
                 .set_permissions(std::fs::Permissions::from_mode(0o700))
                 .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
-            let repaired = std::fs::symlink_metadata(&self.root)
-                .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
-            if repaired.file_type().is_symlink()
-                || !repaired.is_dir()
-                || directory_identity(&repaired) != self.root_identity
-                || repaired.mode() & 0o777 != 0o700
-            {
+            let repaired = exact_directory_metadata(&cleanup_root, self.root_identity)?
+                .ok_or(SupportRuntimeError::PrivateRuntime)?;
+            if repaired.mode() & 0o777 != 0o700 {
                 return Err(SupportRuntimeError::PrivateRuntime);
             }
         }
-        std::fs::remove_dir_all(&self.root).map_err(|_| SupportRuntimeError::PrivateRuntime)?;
-        if self.root.exists() {
+        std::fs::remove_dir_all(&cleanup_root).map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        let unlinked = self
+            .root_descriptor
+            .metadata()
+            .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        if directory_identity(&unlinked) != self.root_identity
+            || !unlinked.is_dir()
+            || !directory_descriptor_is_unlinked(&unlinked)
+            || exact_directory_metadata(&cleanup_root, self.root_identity)?.is_some()
+            || self.descriptor_linked_path()?.is_some()
+            || self.scan_root_parent()?.is_some()
+        {
             return Err(SupportRuntimeError::PrivateRuntime);
         }
+        *self
+            .displaced_root
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.cleaned.store(true, Ordering::Release);
         Ok(())
+    }
+
+    fn locate_linked_root(&self) -> Result<PathBuf, SupportRuntimeError> {
+        if exact_directory_metadata(&self.root, self.root_identity)?.is_some() {
+            return Ok(self.root.clone());
+        }
+        if let Some(displaced) = self
+            .displaced_root
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        {
+            if exact_directory_metadata(&displaced, self.root_identity)?.is_some() {
+                validate_candidate_parent(&displaced)?;
+                return Ok(displaced);
+            }
+        }
+
+        if let Some(displaced) = self.descriptor_linked_path()? {
+            *self
+                .displaced_root
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(displaced.clone());
+            return Ok(displaced);
+        }
+
+        let displaced = self
+            .scan_root_parent()?
+            .ok_or(SupportRuntimeError::PrivateRuntime)?;
+        *self
+            .displaced_root
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(displaced.clone());
+        Ok(displaced)
+    }
+
+    fn descriptor_linked_path(&self) -> Result<Option<PathBuf>, SupportRuntimeError> {
+        let Some(path) = descriptor_current_path(&self.root_descriptor)? else {
+            return Ok(None);
+        };
+        if exact_directory_metadata(&path, self.root_identity)?.is_none() {
+            return Ok(None);
+        }
+        validate_candidate_parent(&path)?;
+        Ok(Some(path))
+    }
+
+    fn scan_root_parent(&self) -> Result<Option<PathBuf>, SupportRuntimeError> {
+        self.validate_root_parent()?;
+        let mut matched = None;
+        for entry in
+            std::fs::read_dir(&self.root_parent).map_err(|_| SupportRuntimeError::PrivateRuntime)?
+        {
+            let path = entry
+                .map_err(|_| SupportRuntimeError::PrivateRuntime)?
+                .path();
+            if exact_directory_metadata(&path, self.root_identity)?.is_none() {
+                continue;
+            }
+            let descriptor = open_directory_descriptor(&path)?;
+            let opened = descriptor
+                .metadata()
+                .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+            if directory_identity(&opened) != self.root_identity || opened.nlink() == 0 {
+                return Err(SupportRuntimeError::PrivateRuntime);
+            }
+            if matched.replace(path).is_some() {
+                return Err(SupportRuntimeError::PrivateRuntime);
+            }
+        }
+        self.validate_root_parent()?;
+        Ok(matched)
+    }
+
+    fn validate_root_parent(&self) -> Result<(), SupportRuntimeError> {
+        let descriptor_metadata = self
+            .root_parent_descriptor
+            .metadata()
+            .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        let path_metadata = std::fs::symlink_metadata(&self.root_parent)
+            .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        if !descriptor_metadata.is_dir()
+            || directory_identity(&descriptor_metadata) != self.root_parent_identity
+            || path_metadata.file_type().is_symlink()
+            || !path_metadata.is_dir()
+            || directory_identity(&path_metadata) != self.root_parent_identity
+        {
+            return Err(SupportRuntimeError::PrivateRuntime);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn descriptor_current_path(file: &File) -> Result<Option<PathBuf>, SupportRuntimeError> {
+    let mut buffer = [0 as libc::c_char; libc::PATH_MAX as usize];
+    // SAFETY: `file` owns a valid descriptor and `buffer` is writable for PATH_MAX bytes.
+    let result = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETPATH, buffer.as_mut_ptr()) };
+    if result == -1 {
+        let error = std::io::Error::last_os_error();
+        return if error.kind() == std::io::ErrorKind::NotFound {
+            Ok(None)
+        } else {
+            Err(SupportRuntimeError::PrivateRuntime)
+        };
+    }
+    // SAFETY: a successful F_GETPATH writes a NUL-terminated path into `buffer`.
+    let bytes = unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes();
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PathBuf::from(OsStr::from_bytes(bytes))))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn descriptor_current_path(_file: &File) -> Result<Option<PathBuf>, SupportRuntimeError> {
+    Ok(None)
+}
+
+fn validate_candidate_parent(path: &Path) -> Result<(), SupportRuntimeError> {
+    let parent = path.parent().ok_or(SupportRuntimeError::PrivateRuntime)?;
+    let before =
+        std::fs::symlink_metadata(parent).map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+    if before.file_type().is_symlink()
+        || !before.is_dir()
+        || before.uid() != current_uid()
+        || before.mode() & 0o022 != 0
+    {
+        return Err(SupportRuntimeError::PrivateRuntime);
+    }
+    let descriptor = open_directory_descriptor(parent)?;
+    let opened = descriptor
+        .metadata()
+        .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+    let after =
+        std::fs::symlink_metadata(parent).map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+    if directory_identity(&opened) != directory_identity(&before)
+        || directory_identity(&after) != directory_identity(&before)
+        || after.file_type().is_symlink()
+        || !after.is_dir()
+    {
+        return Err(SupportRuntimeError::PrivateRuntime);
+    }
+    Ok(())
+}
+
+fn directory_descriptor_is_unlinked(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        metadata.nlink() == 2
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        metadata.nlink() == 0
+    }
+}
+
+fn exact_directory_metadata(
+    path: &Path,
+    identity: DirectoryIdentity,
+) -> Result<Option<std::fs::Metadata>, SupportRuntimeError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata)
+            if !metadata.file_type().is_symlink()
+                && metadata.is_dir()
+                && directory_identity(&metadata) == identity =>
+        {
+            Ok(Some(metadata))
+        }
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(SupportRuntimeError::PrivateRuntime),
     }
 }
 
@@ -573,27 +767,181 @@ mod tests {
     }
 
     #[test]
-    fn explicit_identity_failure_leaves_drop_retry_enabled() {
-        let run = PrivateRunDirectory::create("cleanup-retry").expect("support runtime");
+    fn rename_only_cleanup_removes_the_displaced_auth_inode() {
+        let run = PrivateRunDirectory::create("rename-only-cleanup").expect("support runtime");
         let root = run.root.clone();
         let displaced = root.with_extension("displaced");
-        let auth_relative = Path::new("codex-home/auth.json");
+        let auth = write_auth_copy(&run);
+        std::fs::rename(&root, &displaced).expect("displace original root");
+
+        let result = run.cleanup();
+        let auth_survived = displaced.join("codex-home/auth.json").exists() || auth.exists();
+        let displaced_survived = displaced.exists();
+        let descriptor_unlinked = directory_descriptor_is_unlinked(
+            &run.root_descriptor
+                .metadata()
+                .expect("root descriptor metadata"),
+        );
+        let cleaned = run.cleaned.load(Ordering::Acquire);
+        let _ = std::fs::remove_dir_all(&displaced);
+        drop(run);
+
+        assert_eq!(result, Ok(()));
+        assert!(!auth_survived, "copied auth survived rename-only cleanup");
+        assert!(
+            !displaced_survived,
+            "displaced private root survived cleanup"
+        );
+        assert!(descriptor_unlinked, "auth-bearing inode remained linked");
+        assert!(
+            cleaned,
+            "verified disappearance did not mark cleanup complete"
+        );
+    }
+
+    #[test]
+    fn rename_with_replacement_removes_only_the_displaced_auth_inode() {
+        let run =
+            PrivateRunDirectory::create("rename-replacement-cleanup").expect("support runtime");
+        let root = run.root.clone();
+        let displaced = root.with_extension("displaced");
         write_auth_copy(&run);
         std::fs::rename(&root, &displaced).expect("displace original root");
         create_private_directory(&root).expect("replacement root");
+        let replacement_marker = root.join("replacement-marker");
+        write_private_file(&replacement_marker, b"keep").expect("replacement marker");
+        let replacement_identity =
+            directory_identity(&std::fs::symlink_metadata(&root).expect("replacement metadata"));
 
-        assert_eq!(run.cleanup(), Err(SupportRuntimeError::PrivateRuntime));
-        assert!(
-            displaced.join(auth_relative).exists(),
-            "failed cleanup removed or lost auth ownership"
+        let result = run.cleanup();
+        let displaced_auth_survived = displaced.join("codex-home/auth.json").exists();
+        let displaced_survived = displaced.exists();
+        let replacement_untouched = replacement_marker.exists()
+            && std::fs::symlink_metadata(&root)
+                .ok()
+                .is_some_and(|metadata| directory_identity(&metadata) == replacement_identity);
+        let descriptor_unlinked = directory_descriptor_is_unlinked(
+            &run.root_descriptor
+                .metadata()
+                .expect("root descriptor metadata"),
         );
-
-        std::fs::remove_dir_all(&root).expect("remove replacement root");
-        std::fs::rename(&displaced, &root).expect("restore original root identity");
+        let _ = std::fs::remove_dir_all(&displaced);
+        let _ = std::fs::remove_dir_all(&root);
         drop(run);
 
-        assert!(!root.exists(), "Drop did not retry the failed cleanup");
-        assert!(!displaced.exists(), "displaced private root survived");
+        assert_eq!(result, Ok(()));
+        assert!(!displaced_auth_survived, "displaced auth survived cleanup");
+        assert!(
+            !displaced_survived,
+            "displaced private root survived cleanup"
+        );
+        assert!(
+            replacement_untouched,
+            "cleanup changed the replacement inode"
+        );
+        assert!(descriptor_unlinked, "auth-bearing inode remained linked");
+    }
+
+    #[test]
+    fn renamed_mode_drift_is_repaired_before_cleanup() {
+        let run = PrivateRunDirectory::create("renamed-mode-cleanup").expect("support runtime");
+        let root = run.root.clone();
+        let displaced = root.with_extension("displaced");
+        write_auth_copy(&run);
+        std::fs::rename(&root, &displaced).expect("displace original root");
+        std::fs::set_permissions(&displaced, std::fs::Permissions::from_mode(0o711))
+            .expect("drift displaced root mode");
+
+        let result = run.cleanup();
+        let displaced_survived = displaced.exists();
+        let descriptor_unlinked = directory_descriptor_is_unlinked(
+            &run.root_descriptor
+                .metadata()
+                .expect("root descriptor metadata"),
+        );
+        let _ = std::fs::set_permissions(&displaced, std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::remove_dir_all(&displaced);
+        drop(run);
+
+        assert_eq!(result, Ok(()));
+        assert!(!displaced_survived, "mode-drifted displaced root survived");
+        assert!(descriptor_unlinked, "mode-drifted inode remained linked");
+    }
+
+    #[test]
+    fn failed_displaced_removal_keeps_drop_retry_enabled() {
+        let run = PrivateRunDirectory::create("cleanup-retry").expect("support runtime");
+        let root = run.root.clone();
+        let container = std::env::temp_dir().join(format!(
+            ".coding-wife-support-container-{}",
+            uuid::Uuid::new_v4()
+        ));
+        create_private_directory(&container).expect("displacement container");
+        let nested_displaced = container.join("private-root");
+        write_auth_copy(&run);
+        std::fs::rename(&root, &nested_displaced).expect("hide original root from parent scan");
+        std::fs::set_permissions(&container, std::fs::Permissions::from_mode(0o500))
+            .expect("block removal from displacement container");
+
+        let result = run.cleanup();
+        let cleaned_after_failure = run.cleaned.load(Ordering::Acquire);
+        let inode_remained_for_retry = nested_displaced.exists();
+        std::fs::set_permissions(&container, std::fs::Permissions::from_mode(0o700))
+            .expect("restore displacement container mode");
+        std::fs::rename(&nested_displaced, &root).expect("restore original root identity");
+        drop(run);
+        let root_survived_drop = root.exists();
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&container);
+
+        assert_eq!(result, Err(SupportRuntimeError::PrivateRuntime));
+        assert!(!cleaned_after_failure, "failed cleanup disabled Drop retry");
+        assert!(
+            inode_remained_for_retry,
+            "failed cleanup lost the auth-bearing inode before retry"
+        );
+        assert!(!root_survived_drop, "Drop did not retry the failed cleanup");
+    }
+
+    #[test]
+    fn next_runtime_recovers_a_displaced_stale_auth_without_touching_replacement() {
+        let stale = std::env::temp_dir().join(format!(
+            "{RUN_DIRECTORY_PREFIX}stale-0-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let displaced = stale.with_extension("displaced");
+        create_private_directory(&stale).expect("stale support directory");
+        let lock = create_lock_file(&stale.join(RUN_LOCK_FILE)).expect("stale support lock");
+        let stale_home = stale.join("codex-home");
+        create_private_directory(&stale_home).expect("stale Codex home");
+        write_private_file(&stale_home.join("auth.json"), br#"{"token":"stale"}"#)
+            .expect("stale auth copy");
+        std::fs::rename(&stale, &displaced).expect("displace stale private root");
+        create_private_directory(&stale).expect("replacement root");
+        let replacement_marker = stale.join("replacement-marker");
+        write_private_file(&replacement_marker, b"keep").expect("replacement marker");
+        let replacement_identity =
+            directory_identity(&std::fs::symlink_metadata(&stale).expect("replacement metadata"));
+        drop(lock);
+
+        let active =
+            PrivateRunDirectory::create("displaced-stale-recovery").expect("next support runtime");
+
+        assert!(
+            !displaced.exists(),
+            "next start left displaced auth on disk"
+        );
+        assert!(
+            replacement_marker.exists(),
+            "next start removed replacement content"
+        );
+        assert_eq!(
+            directory_identity(&std::fs::symlink_metadata(&stale).expect("replacement metadata")),
+            replacement_identity,
+            "next start replaced the replacement inode"
+        );
+        active.cleanup().expect("active support cleanup");
+        std::fs::remove_dir_all(&stale).expect("remove replacement root");
     }
 
     #[test]
