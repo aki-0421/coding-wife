@@ -31,9 +31,12 @@ read_when:
 11. migrationはtransaction内でversion順に適用し、既存versionのSQLを書き換えない。破損またはmigration失敗時は元DBを上書きせず、basenameだけをpublicに返すrecovery backupとread-only状態を使う。
 12. 履歴adapter単体はCodex接続を推定しない。通常起動ではCodex composition層が`CodexDiagnostic`とcapability/model/effortを正本に送信可否を導出し、固定`connected=false`を公開しない。履歴の利用可否は引き続き`history.mode`とタイムラインのbadgeで別に表示し、履歴writerが`ready`でない時は新規turnを開始しない。
 13. editableなProject / Character contextは、native producerが作るread-only Files / Git diff snapshotとは別recordである。SQLite migration version 2の`workspace_contexts`へworkspace IDをpartition keyとして保存し、ProjectとCharacterのversionを独立して増やす。片方の保存で他方のversionまたは未保存draftを変更しない。
-14. editable context保存は`expectedVersion`の一致をSQLite transaction内で検証し、成功時だけversionを1増やしてcanonical JSONのSHA-256を更新する。競合時はremote versionを読み直すがlocal draftを維持し、利用者が「保存済みバージョンを再読込」を選ぶまで上書きしない。Characterの自由入力からtechnical policy keyやoverride指示を受理しない。
+14. editable context保存は`expectedVersion`の一致をSQLite transaction内で検証し、成功時だけversionを1増やしてcanonical JSONのSHA-256を更新する。競合時はremote versionを読み直すがlocal draftを維持し、利用者が「保存済みバージョンを再読込」を選ぶまで上書きしない。Definition of done、技術参照、禁止表現は入力中のraw multiline draftを保持し、blurまたは保存時だけtrim、空行除去、改行正規化を行う。
 15. Sendは入力確定後かつCodex turn開始前に、同じread transactionでProject / Characterのversion、hash、内容を一度だけ取得する。`running` / `waiting`中の保存を既存requestへ途中注入せず、次のSendだけが新versionを使う。snapshotのworkspace IDがactive workspaceと一致しない場合はturnを開始しない。
-16. Codexへ渡すprivate request textと、timeline / objectiveへ残すpublic instructionを分離する。private textはversion/hash付きJSON envelopeを含む完全な直列化後の値で80,000 Unicode scalarを上限とし、public instructionとdraftは32,000を維持する。上限はProject 32,000 + Character 12,000の単純加算ではなく、JSON escape、metadata、marker、public instructionを含む最終envelopeへ適用する。
+16. Codexへ渡すprivate request textと、timeline / objectiveへ残すpublic instructionを分離する。private textはversion/hash付きJSON envelopeを含む完全な直列化後の値で80,000 Unicode scalarを上限とし、public instructionとdraftは32,000を維持する。context JSONは`CODING_WIFE_UNTRUSTED_CONTEXT_V1`と明示したquoted data境界へ置き、permission、approval、safety、verification、tool、model、Git policyの権限を持たせない。その後に`CODING_WIFE_AUTHORITATIVE_USER_INSTRUCTION_V1`として利用者の指示を置く。上限はProject 32,000 + Character 12,000の単純加算ではなく、JSON escape、metadata、marker、public instructionを含む最終envelopeへ適用する。
+17. Characterの自由入力は技術・安全policyを変更できない。単語の存在だけでなく、権限の一律許可・拒否、承認省略、検証や安全確認の回避などの命令表現をRustとTypeScriptの両境界で拒否する。表示例や説明文は許可し、共通corpus `src/test/fixtures/workspace-context-policy.v1.json`のja / en accepted・rejectedケースを両実装で通す。
+18. 技術参照は`doc:`を除きtrusted repository rootからの相対pathだけを受理し、`.`や重複separatorを保存前にcanonicalizeする。native保存時は参照の存在、各symlink componentのroot内解決、rootとtargetのdevice / inodeを検証し、migration version 3のprivate `project_reference_manifest_json`へidentityを保存する。Send snapshotは同じtransaction内で再検証し、参照の消失・置換、symlink retarget、repository root交換を検知したらturnを開始しない。旧recordは自動で信頼せず、技術参照がある場合は利用者の明示再保存でmanifestを作る。
+19. UIのvalidation errorはsection alertだけで終えず、fieldとreasonの構造化情報を保持する。対象fieldに`aria-invalid`と`aria-describedby`を設定してfocusを戻し、fieldを特定できないerrorはsection headingへ戻す。競合後の「保存済みバージョンを再読込」もsection headingへfocusを移し、更新されたversionを読み上げ可能にする。
 
 ## ファイル責務
 
@@ -57,6 +60,7 @@ read_when:
 | `src/features/workspace-view/useWorkspaceViewModel.ts` | hydration、workspace切替race防止、250 ms draft debounce、UI notice |
 | `src/features/workspace-view/useEditableWorkspaceContext.ts` | Context / Settings共通draft、workspace partition、save、競合保持、明示reload |
 | `src/features/workspace-view/EditableContextSection.tsx` | Project / Character editor、field境界、version/hash、次turn表示、error focus |
+| `src/test/fixtures/workspace-context-policy.v1.json` | RustとTypeScriptで共有するCharacter policyのja / en accepted・rejected corpus |
 | `src/test/fixtures/workspace-history.v1.json` | RustとTypeScriptが共有するpublic contract fixture |
 
 ## 通常gate
@@ -74,7 +78,7 @@ pnpm test
 pnpm build
 ```
 
-Rust testはmigration rollback、破損backup、concurrent sequence、redaction、context上限、起動復元、linked worktreeに加え、editable contextの再起動復元、workspace分離、expected-version競合、policy拒否を検証する。TypeScript testはexact contract、draft直列化、project追加、session作成、context、削除、fresh adapterでの再hydration、次turn snapshot、競合時のdraft保持を検証する。UIを変更した場合は`agent-browser`でContext / Settingsの同一draft、保存後version、workspace切替、ja / en、keyboard focus、1470 / 960 / 480 pxを操作し、screenshotは`/tmp`またはignore済み`tmp/`へ保存する。
+Rust testはmigration rollback、破損backup、concurrent sequence、redaction、context上限、起動復元、linked worktreeに加え、editable contextの再起動復元、workspace分離、expected-version競合、shared policy corpus、参照の消失・置換、symlink retarget、root交換、旧recordの再保存要求を検証する。TypeScript testはexact contract、raw list draft、blur / save正規化、field error focus、project追加、session作成、context、削除、fresh adapterでの再hydration、次turnの信頼境界付きenvelope、競合時のdraft保持を検証する。Demo transportのhash testはRustと同じcanonical JSONの既知SHA-256を比較し、表示用の疑似hashへ戻らないことを保証する。UIを変更した場合は`agent-browser`でContext / Settingsの同一draft、入力中とblur後のlist値、保存後version / hash、workspace切替、ja / en、validation・競合時focus、1470 / 960 / 480 pxを操作し、screenshotは`/tmp`またはignore済み`tmp/`へ保存する。
 
 ## 変更時チェックリスト
 
@@ -85,6 +89,9 @@ Rust testはmigration rollback、破損backup、concurrent sequence、redaction�
 - context sourceを追加するときは利用者入力の本文を保存せず、native producer、サイズ上限、secret fixture、失敗時の構造化errorを用意する。
 - draft保存失敗やworkspace切替失敗で別workspaceのdraft、timeline、selectionを上書きしない。
 - editable context commandを変えるときはProject / Characterの別version、exact expected-version transaction、workspace-bound snapshotを同じ変更で検証する。
+- list fieldを変えるときはraw draftを配列へ即時変換せず、blur / save境界でだけ正規化する。validation codeを増やす場合はfield / reason mapping、ja / en copy、`aria-describedby`、focus testを同時に更新する。
+- Character policy検出を変えるときはTypeScriptとRustの実装を別々に推測で直さず、先に共有corpusへaccepted / rejectedケースを追加して両方を実行する。presentation例を誤拒否しない回帰caseも残す。
+- 技術参照またはtrusted rootのidentity規則を変えるときはmigrationを追記し、save時captureとsnapshot時revalidationを同時に更新する。public DTO、content hash、snapshot hashへprivate device / inodeを含めない。
 - private turn envelopeをtimeline、objective、draft、support evidenceへ保存しない。80,000 scalar上限を変える場合はfrontend composerとnative Codex supervisorの境界testを同時に更新する。
 - recovery modeでwrite commandを成功扱いせず、backupの絶対pathをWebViewへ返さない。
 - Demo transportへnative filesystem、Codex成功、永続化成功を示す挙動を追加しない。
