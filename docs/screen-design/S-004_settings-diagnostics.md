@@ -181,19 +181,23 @@ fresh profileと`Reset Audio Settings`後はTTSをoffにし、`say` process、ne
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | Enable TTS          | default off。明示enable時だけ検証済みlocal adapterを起動可能にする                                                           | binary/voice unavailableでもcaptionを維持し、networkへfallbackしない |
 | Adapter             | exact `/usr/bin/say`をread-only表示。voice列挙・test・発話の直前にregular file、UID 0、group/other writeなしをnativeで再検証 | 不一致時はTTS disabled、process未起動、typed reason                  |
-| Voice               | 検証済み`-v '?'`出力のうちactive UI localeに対応するinstalled exact allowlistだけ                                            | 0件または保存値不一致ならTTS disabled                                |
+| Voice               | 検証済み`-v '?'`出力のうちactive UI localeに対応するinstalled exact allowlistだけ。再列挙失敗時も直前listと未保存draftを維持する | inline codeと`Retry voices`を常時表示し、0件または保存値不一致ならTTS disabled |
 | Rate                | 0.75〜1.25、0.05刻み、初期1.0。nativeで基準180 words/minuteの135〜225へ変換                                                  | invalid値を保存・起動しない                                          |
 | Test                | 固定ja/en sampleを先にvisible caption表示し、その後local playback                                                            | 5秒timeout。Cancel後100ms以内にprocess groupを停止し設定入力維持     |
-| Mute                | 現在process groupを100ms以内に停止しqueue clear、caption維持                                                                 | unmute後に過去eventを再生しない                                      |
+| Mute                | 現在process groupを100ms以内に停止しqueue clear、caption維持。保存version更新で未保存voice/rate draftを初期化しない           | unmute後に過去eventを再生しない                                      |
 | Reset               | toggle off、locale既定voice、rate 1.0、mute falseへowner-only atomic保存                                                     | 確認cancelで全設定不変                                               |
 | Commit source       | `App-owned · background support`をread-only表示。main session assistant/sub-agent outputは選択肢にせず、sourceを変更できない | source unavailable時はcaption/TTSを開始せずtyped statusを表示        |
-| Active presentation | short SHA、preparing/streaming/ready/canceled/unavailable、caption sequence、speech状態をread-only表示                       | transcript本文・support input/output・full private pathを表示しない  |
+| Active presentation | short SHA、ja/en管理文言へ変換したpreparing/streaming/ready/canceled/unavailable、caption sequence、speech状態をread-only表示 | transcript本文・support input/output・full private pathを表示しない  |
+| Close explanation   | caption/live regionをdismissし、speechを100ms以内に停止する。prepared cacheとbackground jobは維持し、再open時にsequence順で再提示 | support jobをCanceledにしない                                        |
+| Cancel generation   | queued/running support jobの時だけ表示し、jobとspeechをcancelして同requestの後着chunk/cache replayを無効化する                | terminal後は明示Retryで新requestを作るまで再提示しない               |
 
 app-owned presentation controllerは`workspaceId + workspaceGeneration + full commit SHA + support request ID + presentation generation + locale`を一つのactive keyとして所有する。background streamはkey、schema、redaction、連続sequenceを満たす時だけvolatile bufferへ入り、activeでなければcaption/live region/TTSへ適用しない。生成中のcommitをactivateした時は既着chunkから後続をstreamし、生成済みなら全chunkを順番に再提示する。TTS enabledかつunmutedの場合だけ、captionへ確定した同じchunkを同じsequenceで読む。
 
-Cancel、別commit選択、workspace切替、stale workspace generationではpresentation generationを進め、captionとspeechを同じkeyで停止する。旧generationの後着chunkは破棄する。background support input/output、caption chunk、TTS transcriptをmain conversation、assistant message、main session historyへappendしない。
+`Close explanation`、別commit選択、workspace切替、stale workspace generationではpresentation generationを進め、captionをdismissしspeechを同じkeyで停止する。prepared cache/background jobは維持し、同じcommitを再openするとcacheをsequence順に再提示する。queued/running中の`Cancel explanation generation`だけがsupport jobをCanceledへterminal化し、同requestの後着chunkとcache replayを無効化する。background support input/output、caption chunk、TTS transcriptをmain conversation、assistant message、main session historyへappendしない。
 
-native adapterは240 Unicode scalar以下、NULなし、redaction済みtranscriptをstdinだけへ書く。processはshellなしでexact `/usr/bin/say`を新しいprocess groupとして起動し、引数を`-v <exact allowlist voice> -r <validated integer>`へ固定する。`-f`、`-o`、`-n`、`-a`、command-line text、inherited secret environmentを使わない。audioはsystem outputへ直接再生し、memory/fileへ保存しない。microphone/network capability、permission request、入力UIを一切持たない。
+caption componentはactive viewportのHTMLへchunkをcommitした後、layoutとpaint境界を通過してvisibleであることをcontrollerへackする。controllerはack後100ms以上captionを表示してからだけnative発話を許可し、unmount/hidden/ack timeoutではcaption-onlyへterminal化する。native runtimeの`unavailable`はfrontend timeoutを待たずsanitized native codeのまま即時terminal化し、frontend watchdog時はnative cancel完了後にterminal表示する。
+
+native adapterは240 Unicode scalar以下、NULなしで、括弧・引用符・`=`・`:`直後を含むPOSIX absolute path、Bearer/GitHub/AWS/Slack/PEM、cookie/session/password/token/key assignmentをfrontendとnativeの共通fixture集合でrejectしたtranscriptだけをstdinへ書く。processはshellなしでexact `/usr/bin/say`を新しいprocess groupとして起動し、引数を`-v <exact allowlist voice> -r <validated integer>`へ固定する。`-f`、`-o`、`-n`、`-a`、command-line text、inherited secret environmentを使わない。audioはsystem outputへ直接再生し、memory/fileへ保存しない。microphone/network capability、permission request、入力UIを一切持たない。
 
 設定正本はnative `NarrationSettingsV1`とし、app-private narration directoryをowner-only、fileを`0600`で作り、schema検証済みtemporary fileのfsyncとatomic renameで置換する。WebView/localStorageを正本にせず、fresh/missing/invalid schemaはTTS offへfail closedする。
 
@@ -261,7 +265,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | キャンセル後          | picker/import/preview/test/delete confirmをcancel        | 保存済み値、現在model、入力、library/DBを維持。errorなし                 | 元操作または別操作                                         | 次の明示操作                 |
 | 再起動復旧            | save/import/delete/migrationが中断                       | last durable settings、quarantine cleanup、Interrupted operation、backup | diagnose、retry、discard quarantine                        | integrity/fingerprint確定    |
 | read-only recovery    | DB corruption/migration rollback                         | Diagnostics/History、backup、error code、Gitは不変                       | copy sanitized diagnostic、Quit                            | explicit successful recovery |
-| local TTS unavailable | binary metadata/voice/audio device検証失敗               | typed reasonとcaptionを表示しTTS off相当                                 | Recheck/Test/Mute                                          | 全preflight成功              |
+| local TTS unavailable | binary metadata/voice/audio device検証失敗               | native typed reasonとcaptionを即時terminal表示しTTS off相当。voice list、保存値、未保存voice/rate draftを維持 | Recheck/Retry voices/Test/Mute                             | 全preflight成功              |
 | companion fallback    | pack/render failure                                      | current fallback level、Hiyori/text-only、Chat継続                       | Retry/Select/Hide                                          | first frame/state test成功   |
 
 ## 操作
@@ -277,6 +281,9 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | custom pack削除        | 未選択custom、confirm              | library copyとmetadataをatomic削除                                     | pack/library/DB不変                      | packを残しretry                     | `LIVE-F-078`                                          |
 | Audio設定保存/reset    | schema/voice/rate valid            | owner-only temporary fileをfsync後atomic rename、default off/reset反映 | 保存状態不変                             | 前version維持、TTS offへfail closed | `NARR-F-064`〜`NARR-F-066`                            |
 | TTS test               | enable、verified binary/voice/rate | 固定sampleを表示後stdinでlocal再生、audio非永続                        | 100ms以内process group停止、設定入力維持 | text fallback、main不変             | `NARR-F-066`, `NARR-F-067`, `NARR-F-077`              |
+| narrationを閉じる      | active presentation                | captionをdismiss、speech停止、prepared cache維持                        | 非該当                                   | caption維持、speech停止              | `NARR-F-083`, `NARR-F-085`, `NARR-F-088`              |
+| narrationを再度開く    | prepared cacheあり                 | 同じchunkをsequence順に再提示し、paint ack後100ms以上で未読だけ発話     | presentation不変                         | caption-only terminal                | `NARR-F-058`, `NARR-F-083`, `NARR-F-088`              |
+| explanation生成cancel | queued/running support job         | jobをCanceledへterminal化し、後着chunk/cache replayを無効化             | job/presentation不変                     | main継続、sanitized code表示         | `NARR-F-087`, `NARR-F-088`                             |
 | support enable/disable | valid role                         | queue/cancel policy適用、usage metadata記録                            | 非該当                                   | offへfail closed、main継続          | `SUP-F-062`〜`SUP-F-068`                              |
 | 再診断                 | 対象check選択                      | result、checked time、error code更新                                   | 前result維持                             | Blocked reason更新                  | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`, `APP-F-070` |
 | history削除            | running turnなし、confirm          | app DB/artifactだけ削除、Git不変                                       | row/artifact/selection不変               | 削除済みと表示せずrecovery          | `HIST-F-049`, `HIST-F-050`                            |
@@ -395,7 +402,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | `GIT-F-072`, `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092` | read-only Git observer、main/explainer skill version・digest・注入診断                    | [git-review-harness](../requirements/git-review-harness.md)                   |
 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059`          | history削除、migration、corruption、writer、schema、support metadata、durability表示      | [activity-history](../requirements/activity-history.md)                       |
 | `LIVE-F-055`〜`LIVE-F-081`                                      | bundled Hiyori、renderer、import、mapping、delete、performance                            | [live2d-companion](../requirements/live2d-companion.md)                       |
-| `NARR-F-064`〜`NARR-F-077`                                      | default off、local binary/voice/test、mute、privacy、no network/microphone/audio file     | [audio-commentary](../requirements/audio-commentary.md)                       |
+| `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089` | caption-first、default off、local binary/voice/test、mute、dismiss/cancel、privacy、recovery、no network/microphone/audio file | [audio-commentary](../requirements/audio-commentary.md) |
 | `APP-F-055`, `APP-F-057`〜`APP-F-072`                           | navigation、language、a11y、lifecycle、native boundary、diagnostics、performance          | [desktop-shell](../requirements/desktop-shell.md)                             |
 
 ## 未確定事項
@@ -419,7 +426,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 - [x] 8 section、project/character context分離、diagnostics、history/privacyを定義した。
 - [x] `tmp/hiyori_pro`をbuild入力とし、runtime 17 fileだけを同梱する契約を定義した。
 - [x] custom model importのpicker、closure、resource limit、quarantine、preview、mapping、deleteを定義した。
-- [x] TTS default off、local binary/voice/test/mute、text parity、network/microphone/audio file禁止を定義した。
+- [x] TTS default off、local binary/voice/test/mute、text parity、dismiss/cancel分離、voice retry、dirty draft保持、network/microphone/audio file禁止を定義した。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] 関連要件IDを要件定義書のS-004対応と一致させた。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。
