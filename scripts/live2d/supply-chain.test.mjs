@@ -32,7 +32,7 @@ test("the committed Cubism and Hiyori supply chain is exact", () => {
     frameworkSources: 59,
     shaders: 13,
     hiyoriRuntimeFiles: 17,
-    releaseNoticeFiles: 8,
+    releaseNoticeFiles: 10,
   })
 })
 
@@ -100,7 +100,17 @@ test("the production build emits the complete verified release notice set", () =
   const releaseAssets = emitted.filter((asset) =>
     asset.fileName.startsWith("legal/"),
   )
-  assert.equal(releaseAssets.length, 7)
+  assert.equal(releaseAssets.length, 9)
+  assert.deepEqual(
+    releaseAssets
+      .map(({ fileName }) => fileName)
+      .filter((fileName) => fileName.includes("THIRD-PARTY-DEPENDENCIES"))
+      .sort(),
+    [
+      "legal/THIRD-PARTY-DEPENDENCIES.json",
+      "legal/THIRD-PARTY-DEPENDENCIES.md",
+    ],
+  )
   for (const asset of releaseAssets) {
     assert.deepEqual(
       asset.source,

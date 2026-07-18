@@ -255,7 +255,7 @@ read_when:
 - [ ] **C15 `fix(quality): close deterministic repository gates`**
   - Depends on: Phase 1 Done
   - Parallel: C14と可。
-  - Done: format、Rust warnings、process-tree flake、repository-owned diff hygieneを修正し、byte-exact third-party noticeを改変せず全品質commandを連続再実行できる。
+  - Done: format、Rust warnings、process-tree flake、repository-owned diff hygieneを修正し、byte-exact Live2D/Hiyori noticeを改変しない。pnpm production closureとApple Silicon用Cargo runtime closureのversion/source/integrity/license/attributionをoffline生成し、unknown・forbidden・missing・staleをfail closedにして全品質commandを連続再実行できる。
 
 ### Phase 3 — 実配布物を完成させる
 
@@ -290,28 +290,21 @@ read_when:
 
 ## Repository品質ゲート
 
-C15以降の候補HEADでは、少なくとも次をclean worktreeから通す。1つでもfailまたはflakeしたらreleaseへ進まない。
+C15以降の候補HEADでは、次の正本手順だけをclean worktreeから通す。`pnpm quality:check`はdirtyな開始・終了を拒否し、個別commandはpartial validationにだけ使う。1つでもfailまたはflakeしたらreleaseへ進まない。
 
 ```bash
-pnpm format:check
-pnpm test:clean-checkout
-pnpm typecheck
-pnpm build
-pnpm live2d:verify
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-agent-docs lint
-pnpm tauri build
+git status --short
+pnpm quality:check
+git status --short
 ```
 
-加えて、repository-owned diff hygiene commandを用意し、target branchとの差分にtrailing whitespace、conflict marker、意図しないbinary/build outputがないことを確認する。byte-exactで保持すべきvendor noticeは明示的に除外し、ファイル自体を整形しない。
+正本sequenceには、offline dependency-license gateとrepository-owned diff hygieneを含める。diff hygieneはtarget branchとの差分にtrailing whitespace、conflict marker、意図しないbinary/build outputがないことを確認する。byte-exactで保持すべきvendor noticeは明示的に除外し、ファイル自体を整形しない。
 
 検証後は`git status --short`でcleanを確認し、final artifact、checksum、必要なevidence以外のbuild copy、DMG staging、screenshot、mountを片付ける。
 
 ## Release受け入れ
 
-- [ ] final candidateのclean checkoutから、Hiyori、support skill/runtime、noticeを含み、development demo runtime、source map、quarantine、private dataを含まない`.app`を作る。
+- [ ] final candidateのclean checkoutから、Hiyori、support skill/runtime、生成済みnpm/Cargo inventory/notice、Live2D/Hiyori termsを含み、development demo runtime、source map、quarantine、private dataを含まない`.app`を作る。
 - [ ] nested codeからapp順にtimestampなしad-hoc署名し、全resourceをsealした`.app`で`codesign --verify --deep --strict`を通す。TeamIdentifierとDeveloper ID identityがなく、notarization済みでない状態を正確に記録する。
 - [ ] 同じsealed `.app`から、stale mount、Finder UI state、既存buildへ依存しない`.dmg`を生成する。別々の2回のread-only mountで正規化inventory一致を確認し、DMG byte同一性を要求せずfinal candidateのsizeとSHA-256を記録する。
 - [ ] DMGを実mountし、Applications相当へcopyしたappから起動する。build directory内binaryで代替しない。

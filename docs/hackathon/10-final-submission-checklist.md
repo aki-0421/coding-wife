@@ -1,7 +1,7 @@
 ---
 title: Final Submission Checklist
 description: "参加資格からDevpost送信、デモ、リポジトリ、締切までを確認する最終チェックリスト。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "提出前の最終確認を行うとき。"
   - "Devpost、動画、リポジトリ、審査アクセスをスモークテストするとき。"
@@ -77,10 +77,10 @@ last_verified: 2026-07-18 JST
 - [ ] architecture と GPT-5.6 integration がある
 - [ ] Codex collaboration がある
 - [ ] prior / new work の境界がある
-- [ ] third-party notices がある
+- [x] lockから再生成・検証できるnpm/Cargoのthird-party inventory/noticeとLive2D/Hiyori termsがある
 - [ ] `.env.example` がある
 - [ ] `.env`、secret、credential、private data が Git history にない
-- [ ] lint / typecheck / tests / build が通る
+- [ ] clean worktreeの`pnpm quality:check`でlint / typecheck / tests / build / license / docs / diff gateが連続して通る
 
 ## F. Demo video
 

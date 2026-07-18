@@ -5,6 +5,7 @@ import { executeGateSequence, QUALITY_GATES } from "./run-quality-gates.mjs"
 
 const expectedGateOrder = [
   "format",
+  "dependency-licenses",
   "clean-checkout",
   "typecheck",
   "frontend-build",
@@ -41,7 +42,10 @@ test("the first failed gate stops every later command", () => {
       }),
     /QUALITY_GATE_FAILED:rust-clippy/u,
   )
-  assert.deepEqual(executed, expectedGateOrder.slice(0, 7))
+  assert.deepEqual(
+    executed,
+    expectedGateOrder.slice(0, expectedGateOrder.indexOf("rust-clippy") + 1),
+  )
 })
 
 test("frontend and Rust workloads never share one gate slot", () => {
@@ -67,6 +71,12 @@ test("dependency-resolving Cargo gates require the committed lockfile", () => {
     assert.ok(gate)
     assert.equal(gate.args.includes("--locked"), true)
   }
+})
+
+test("dependency licenses use the repository-owned offline check", () => {
+  const gate = QUALITY_GATES.find(({ id }) => id === "dependency-licenses")
+  assert.ok(gate)
+  assert.deepEqual(gate.args, ["licenses:check"])
 })
 
 test("Rust integration budgets are isolated from cross-test contention", () => {

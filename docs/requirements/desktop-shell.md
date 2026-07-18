@@ -42,7 +42,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 言語 | 日本語・英語の初期選択、即時切替、永続化 |
 | Accessibility | keyboard、focus、contrast、200% text zoom、reduced motion、screen reader |
 | Trust boundary | typed command、最小Capability、CSP、secret redaction |
-| macOS release | Apple Silicon用`.app`、development demo分離、ad-hoc resource seal、Finder非依存DMG、artifact検証、diff hygiene |
+| macOS release | Apple Silicon用`.app`、development demo分離、ad-hoc resource seal、Finder非依存DMG、artifact検証、固定依存ライセンス台帳、diff hygiene |
 
 ### 含めない
 
@@ -120,6 +120,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-079` | release artifactは横断受け入れ条件を満たす | installed `.app`のja/enで主要happy pathとmajor error/recovery pathを完走し、locale即時切替とrestart復元、keyboard-only、dialog focus containment/return、visible focus、role/name/state、caption live region、200% text zoom、reduced motionを検証する。offline、Codex unavailable、TTS unavailable、repository health error、DB recovery、invalid Live2D packでlocal historyとrecoveryを維持し、secret、token、absolute private path、raw stderr、support本文をUI/log/evidenceへ出さない。1470×836、960×640、実効幅480で到達不能control・clipping・caption overflowを0件にし、起動/操作/Live2D/履歴/cleanupの各既定p95と長時間listener/process/cache非増殖をrelease buildで測定する | Approved | 非該当 |
 | `APP-F-080` | production frontend bundleはdevelopment demo runtimeを含まない | Vite development serverで明示した`?demoAppServer=1`だけがdevelopment demo runtimeとfixtureを遅延取得できる。queryなしのdevelopment画面とTauri production画面はnative adapterを維持する。production `dist`と`.app`のregular file contentをscanし、`demoAppServer`、`Demo commit evidence is missing`、`Demo diff evidence is missing`、`workspace-demo-selected-project`、`demo-decision-turn-1`、`file-demo-image`、`demo-auto-`の一致を各0件にする | Approved | 非該当 |
 | `APP-F-081` | Release maintainerは一つの正本commandでappとDMGを検証できる | `pnpm release:macos:verify`はnested codeを先に、最後に`.app`全体をtimestampなしのad-hoc署名でsealしたcandidateだけを受理し、`codesign --verify --deep --strict`成功、TeamIdentifierなし、Developer ID署名なし、Apple公証なしを区別して報告する。sorted inventoryはrelative path、file type、permission mode、symlink target、regular file size、SHA-256を含み、app inventory digest、arm64、minimum macOS 14.0、bundle ID、version、Hiyori runtime 17file、legal notice、2 bundled skills、schema/migration、source map/demo/private path/quarantine/credential不在を検証する。DMGは別々の2回のread-only mountで同じapp inventoryを再現し、final DMGのsizeとSHA-256を出力する。失敗・INT・TERMではfinal artifactを置換せず、mount、staging、一時directoryを0件へ収束する | Approved | 非該当 |
+| `APP-F-082` | Release maintainerは配布対象の第三者依存とライセンス帰属を再現できる | `pnpm-lock.yaml`のproduction closureと`src-tauri/Cargo.lock`からApple Silicon macOSにlinkされるnormal dependency closureを、networkを使わずlockfile・installed package metadata・Cargo registry source metadataと照合する。すべての依存にecosystem、name、固定version、source、integrity/checksum、license expression、attributionを持つsorted JSON inventoryと可読NOTICEを決定論的に生成し、lockまたはmetadataが生成物と一致しない場合とlicense/source/integrityのunknown・forbidden・missingを非0にする。`.app`は生成済みJSONとNOTICE、既存Live2D/Hiyoriの原文notice・termsをすべてresourcesに含む | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -152,10 +153,10 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 通知 | app内statusとtoastだけ。OS通知はMVP非対象 | `APP-F-055` |
 | Capability・認可 | window、dialog、process、filesystemのscopeを目的別に最小化 | `APP-F-067`, `APP-F-068` |
 | アップデート・互換性 | 自動updateは非該当。DB migrationはforward-onlyかつ失敗時rollback | `APP-F-065` |
-| 配布物生成 | Tauriは`.app`だけをbundleし、repository scriptがdevelopment demo不在を検証してnested codeからapp順にad-hoc sealし、`hdiutil`でread-only DMGを作成・mount検証・公開する | `APP-F-073`, `APP-F-074`, `APP-F-080`, `APP-F-081` |
+| 配布物生成 | Tauriは`.app`だけをbundleし、repository scriptがdevelopment demo不在と固定依存NOTICEの一致を検証してnested codeからapp順にad-hoc sealし、`hdiutil`でread-only DMGを作成・mount検証・公開する | `APP-F-073`, `APP-F-074`, `APP-F-080`〜`APP-F-082` |
 | 差分品質 | byte-exact Hiyori NOTICEだけをwhitespace検査から除外し、他のrepository-owned textは除外しない | `APP-F-075` |
 | 設定・診断 | app preferenceとreadinessはversioned native sourceを正本にし、WebView/demo値を永続・readyとして扱わない | `APP-F-070`, `APP-F-076` |
-| 配布物受け入れ | clean final HEADのsealed resource inventory、実DMG mount/copy/launch、fresh-profile相当、ja/en/a11y/privacy/offline/performanceをinstalled artifactで検証する | `APP-F-077`〜`APP-F-081` |
+| 配布物受け入れ | clean final HEADのsealed resource inventory、固定依存NOTICE、実DMG mount/copy/launch、fresh-profile相当、ja/en/a11y/privacy/offline/performanceをinstalled artifactで検証する | `APP-F-077`〜`APP-F-082` |
 
 ## 画面・UI
 
@@ -166,7 +167,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `S-003` | セッション証拠 | `APP-F-055`, `APP-F-059`〜`APP-F-062` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
 | `S-004` | 設定・診断 | `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
-`APP-F-073`〜`APP-F-075`と`APP-F-077`〜`APP-F-081`はrelease/CI/installed artifact境界の要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
+`APP-F-073`〜`APP-F-075`と`APP-F-077`〜`APP-F-082`はrelease/CI/installed artifact境界の要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
 
 ## 非機能要件
 
@@ -198,6 +199,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 |---|---|---|---|
 | Intel Mac artifact | MVPはApple Silicon release buildを審査artifactとし、Intelは未検証と明記する | release工程でuniversal build時間を計測する | いいえ |
 | OS notification | MVPはapp内通知に限定する | demo後の利用試験でOS通知需要を評価する | いいえ |
+| Repository-level project license | 選択を行わず、所有者の法的判断までroot `LICENSE`を作成しない | 所有者が権利関係と公開条件を確認し、ライセンスを明示選択する | いいえ（依存NOTICE実装は進めるが、public submissionとredistributionはblock） |
 
 ## 参照資料
 

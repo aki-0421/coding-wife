@@ -125,6 +125,12 @@ The local Codex App Server returns a tool-using event stream. Coding Wife publis
 - Technical and safety policy cannot be supplied by character context; the bundled commit-work skill is resolved from reviewed application resources.
 - Commit explanation uses a separate zero-tool support runtime, redacted evidence, structured output, sequence checks, and an explicit presentation gate before captioning or optional speech.
 
+### Verified Codex compatibility
+
+The release-approved support runtime identity is `codex-cli 0.144.5` for Apple Silicon, executable SHA-256 `5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2`, with canonical generated-schema fingerprint `efea5c6649ccbae7e26af47874bca302e0803d6db80571d57cd55841890dddbc`. The native support gate compares that exact identity and the isolation capability without exposing the executable path.
+
+Any other support binary, version, executable hash, schema fingerprint, or failed isolation proof is unapproved. In that state Coding Wife does not enqueue a support job, start a support process, or invoke the support model; it reports support as unavailable and retains the deterministic local commit-evidence fallback. This support gate is separate from main-session readiness, which still fails closed when its own authenticated App Server or model contract is unavailable.
+
 ## How we used Codex to build Coding Wife
 
 Codex coding agents were used throughout the repository workflow to turn written product contracts into the React/Tauri implementation, connect the TypeScript and Rust boundaries, add focused and regression tests, diagnose race and recovery failures, and harden release, privacy, accessibility, and supply-chain behavior. The commit history preserves these implementation and review units.
@@ -219,7 +225,13 @@ pnpm dev
 
 `pnpm dev` serves the browser UI. The normal browser URL is a non-interactive reference preview; add `?demoAppServer=1` only for the explicit development demo described above.
 
-Run the production native composition with:
+Before native development or `pnpm quality:check` on a fresh machine, install the locked Apple Silicon Cargo metadata used by the offline dependency-license gate and native build. Path A does not need this step.
+
+```bash
+cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin
+```
+
+Then run the production native composition with:
 
 ```bash
 pnpm tauri dev
@@ -233,23 +245,15 @@ pnpm tauri dev
 
 ## Testing
 
-Run the same repository gates used for the release candidate:
+The canonical release-candidate validation starts and ends with a clean repository and runs every gate in the reviewed sequence:
 
 ```bash
-pnpm format:check
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml
-pnpm tauri build --debug --no-bundle
-agent-docs lint
-pnpm check:diff
+git status --short
+pnpm quality:check
+git status --short
 ```
 
-The suites cover frontend behavior and accessibility contracts, typed transport and model-event projection, SQLite history and recovery, Codex process/protocol/redaction boundaries, Git evidence, commit explanations, narration, character security, Live2D supply-chain integrity, and release/diff hygiene. They do not replace the pending fresh-profile or second-Mac install smoke.
+Both `git status --short` commands must print nothing. `pnpm quality:check` refuses a dirty worktree and verifies formatting, the offline locked-dependency license inventory, clean-checkout reproducibility, frontend and Rust quality, documentation, the Tauri bundle, and diff hygiene in a fixed sequence. Individual commands in the testing guide are focused, partial validation only; they do not replace this canonical gate or the pending fresh-profile/second-Mac install smoke.
 
 See [Testing Coding Wife](docs/testing.md) for command behavior, focused packaging tests, installation, and safe Gatekeeper guidance.
 
@@ -265,7 +269,7 @@ The verified output path is:
 src-tauri/target/release/bundle/dmg/Coding-Wife.dmg
 ```
 
-The current application and DMG are **unsigned and not notarized**. Build from reviewed source whenever possible. If Gatekeeper blocks a verified local build, follow the bounded System Settings procedure in [the testing guide](docs/testing.md); do not disable Gatekeeper or remove quarantine globally. Signing, notarization, stapling, Intel/universal packaging, auto-update, a public checksum, and a public artifact URL are not complete and must not be claimed.
+The release workflow applies an ad-hoc integrity seal and verifies every resource, but the application has no Developer ID identity and is not notarized. Build from reviewed source whenever possible. If Gatekeeper blocks a verified local build, follow the bounded System Settings procedure in [the testing guide](docs/testing.md); do not disable Gatekeeper or remove quarantine globally. Developer ID signing, notarization, stapling, Intel/universal packaging, auto-update, a public checksum, and a public artifact URL are not complete and must not be claimed.
 
 ## Privacy and security
 
@@ -279,19 +283,22 @@ The current application and DMG are **unsigned and not notarized**. Build from r
 
 ## Third-party services and notices
 
-| Component                       | Purpose                                          | Current notice or terms boundary                                                               |
-| ------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| OpenAI Codex / `gpt-5.6-sol`    | Production coding and bounded commit explanation | Uses the judge's compatible authenticated local Codex configuration; no app API key is bundled |
-| Live2D Cubism SDK for Web 5-r.5 | Character rendering                              | [Packaged Live2D third-party notice index](src-tauri/resources/legal/THIRD-PARTY-NOTICES.md)   |
-| Bundled Hiyori model            | Default companion                                | [Byte-preserved model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)        |
+| Component                         | Purpose                                          | Current notice or terms boundary                                                                    |
+| --------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| OpenAI Codex / `gpt-5.6-sol`      | Production coding and bounded commit explanation | Uses the judge's compatible authenticated local Codex configuration; no app API key is bundled      |
+| Locked npm and Cargo dependencies | Conservative declared production/native closure  | [Generated inventory and attribution notice](src-tauri/resources/legal/THIRD-PARTY-DEPENDENCIES.md) |
+| Live2D Cubism SDK for Web 5-r.5   | Character rendering                              | [Packaged Live2D third-party notice index](src-tauri/resources/legal/THIRD-PARTY-NOTICES.md)        |
+| Bundled Hiyori model              | Default companion                                | [Byte-preserved model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)             |
 
-The current packaged notice index is Live2D-specific. A repository-level project `LICENSE` does **not** exist yet; this is an explicit submission blocker, not permission to copy or redistribute the project. The project license and any final aggregated distribution notices must be reviewed before public submission.
+The generated inventory conservatively covers all 395 packages in the pnpm declared production closure and 245 Cargo normal dependencies for `aarch64-apple-darwin`; it is not a claim that every npm package contributed bytes to the final Vite bundle. Generation is offline and fails when either lock changes, a committed notice is stale, or required source, integrity/checksum, license, or attribution metadata is missing, unknown, or forbidden. The existing Live2D and Hiyori terms remain byte-verified and linked from the same packaged index.
+
+A repository-level project `LICENSE` does **not** exist yet. Selecting one is an explicit owner decision and submission blocker, not permission to copy or redistribute the project; the dependency inventory does not license Coding Wife itself.
 
 ## Honest limitations
 
 - Only macOS 14+ on Apple Silicon is supported and tested for this release; Windows, Linux, and Intel Mac are not claimed.
 - A compatible authenticated local Codex installation is required for real GPT work. The browser demo is deliberately synthetic.
-- The current artifact is unsigned and unnotarized, and no public binary URL or checksum is recorded.
+- The current artifact has only an ad-hoc integrity seal, no Developer ID signature or notarization, and no public binary URL or checksum is recorded.
 - Workspace history is local; there is no account, cloud sync, remote collaboration, or automatic backup service.
 - Locale UI supports English and Japanese, but this README does not claim native preference persistence beyond the behavior verified in the app.
 - The project license, external submission URLs, primary Codex Session ID, and independent install evidence remain pending.
@@ -300,6 +307,7 @@ The current packaged notice index is Live2D-specific. A repository-level project
 
 - [x] English judge path, exact model ID, call path, input/output validation, architecture, testing, and Build Week boundary documented.
 - [x] Reproducible macOS source build and honest deterministic UI demo documented.
+- [x] Locked dependency inventory, attribution notice, and Live2D/Hiyori terms are generated and packaged.
 - [ ] Confirm **Developer Tools** as the final Devpost track selection.
 - [ ] Add and review a repository-level project license.
 - [ ] Record a public, under-three-minute YouTube demo and replace the pending status above.

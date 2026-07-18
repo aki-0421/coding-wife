@@ -1,7 +1,7 @@
 ---
 title: Coding Wife Final Submission Materials
 description: Paste-ready English copy, judging instructions, video script, field map, evidence ledger, and final smoke checklist for the Coding Wife OpenAI Build Week submission.
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - Preparing, reviewing, or entering the final Coding Wife submission in Devpost.
   - Recording the public demo video or capturing final submission screenshots.
@@ -197,7 +197,7 @@ Expected result: preflight confirms the exact model and supported capabilities; 
 
 ### Repository quality gates
 
-Run every command in [Testing Coding Wife](../testing.md) against the frozen commit. Final pass/fail output and the tested commit are `PENDING`; the same guide defines release packaging and bounded Gatekeeper handling.
+Start from a clean frozen commit, confirm `git status --short` has no output, run the single canonical `pnpm quality:check` sequence, and confirm `git status --short` is still empty. Commands listed separately in [Testing Coding Wife](../testing.md) are partial validation only. Final pass/fail output and the tested commit are `PENDING`; the same guide defines release packaging and bounded Gatekeeper handling.
 
 ## 4. Public demo video package
 
@@ -282,6 +282,9 @@ The public pages do not expose every logged-in form label or character limit. Cr
 |---|---|---|---|---|
 | Source submission snapshot | Final repository `HEAD` | `PENDING` — final Git commit SHA | `PENDING_FINAL_REPOSITORY_URL` | `PENDING` |
 | Audit boundary | `fbd7be97fe3805f916bb2cbe6f78f842caee3630` | Git commit identity | Repository history | Recorded; not a claim about the official period start |
+| Locked dependency inventory | `third-party/THIRD-PARTY-DEPENDENCIES.json` (444,888 bytes) | `82c4d979429f513b4cac69549d444fce432bb97ea06a28ff43ad845adc27b984`; pnpm lock `9b1a5f60b855c508dbda15a2066bc1123484d6a067706d5ec3927946fb929ae4`; Cargo lock `6e9f0afbd74299b9f6f11f4f23661536ff25ef16f675f06b2f3eb95ec29d28de` | Repository and packaged app resources | Generated and verified: npm production closure 395, Cargo runtime 245, unknown/forbidden/missing 0 |
+| Locked dependency notice | `third-party/THIRD-PARTY-DEPENDENCIES.md` (974,982 bytes) | `c614e7002aaa99aecc92372a6c42856a2846d4690390cad0098428067950a525` | Repository and packaged app resources | Generated and verified; npm closure is conservative package-manager classification, not bundle attribution |
+| Coding Wife project license | Root `LICENSE` | `PENDING` owner legal decision | Repository root | `PENDING`; blocks public submission and redistribution |
 | macOS DMG | `src-tauri/target/release/bundle/dmg/Coding-Wife.dmg` | `PENDING` | `PENDING_PUBLIC_DEMO_OR_ARTIFACT_URL` | Build/publication/install smoke `PENDING` |
 | Video master | `PENDING` | `PENDING` | Local controlled storage | `PENDING` |
 | Public video | Same approved bytes as the final master where platform processing permits comparison | Local master SHA-256 `PENDING` | `PENDING_PUBLIC_VIDEO_URL` | `PENDING` |
@@ -315,6 +318,7 @@ Do not paste a checksum copied from a different build, renamed draft, transcoded
 | Commit explanation is isolated and explicitly presented | `src-tauri/src/codex/commit_explanation.rs`; `src-tauri/src/codex/support_isolation.rs`; `src/features/git-review/commit-explanation-adapter.ts`; narration policy | Support isolation, commit explanation, intent-race, narration, and demo composition tests | Video 1:45–2:01; S04 | Final gate and S04 `PENDING` |
 | Production history is local SQLite; browser demo is deterministic | `src-tauri/src/workspace_history/store.rs`; explicit demo transport/runtime selection in `src/app/` and `src/features/git-review/demo-transport.ts` | Workspace history tests and App demo tests | Path A preview label plus native Path B | Final smoke `PENDING` |
 | Release target is macOS 14+ Apple Silicon | `src-tauri/tauri.conf.json`; release scripts; `docs/testing.md` | Release-script tests, debug native build, final DMG/install smoke | Closing card | Final DMG/install smoke `PENDING` |
+| Locked third-party dependencies are attributable and packaged | `scripts/licenses/dependency-notices.mjs`; `third-party/THIRD-PARTY-DEPENDENCIES.*`; `src-tauri/resources/legal/`; both lockfiles | Offline license gate; stale/unknown/forbidden/missing fixtures; Live2D supply-chain verification | Repository/testing evidence only | Dependency notice Ready; project license remains `PENDING` |
 | Live2D is presentation-only and optional speech is local | Character runtime and context contracts; `src-tauri/src/narration/`; `/usr/bin/say` policy | Character security, supply-chain, narration policy, caption, and settings tests | Main workspace and optional caption shot | Final gate `PENDING` |
 | Build Week work is separable from the audit boundary | Root README; Git history after `fbd7be97fe3805f916bb2cbe6f78f842caee3630` | `git diff --stat` and `git log` for the frozen range | Codex/test montage 2:19–2:33 | Final submission commit `PENDING` |
 
@@ -331,6 +335,7 @@ Run this after the source commit, README, DMG, video, screenshots, and Devpost d
 - [ ] Open the repository URL without a maintainer session.
 - [ ] Confirm the repository resolves to the frozen submission commit.
 - [ ] Confirm a repository-level license is present and approved.
+- [x] Confirm the locked npm/Cargo inventory and packaged dependency notice reproduce from the committed lockfiles with zero unknown, forbidden, or missing metadata.
 - [ ] Play the YouTube video while logged out.
 - [ ] Confirm YouTube visibility is **Public**.
 - [ ] Confirm the duration is less than 3:00, English voiceover is audible, and no placeholder or private data appears.

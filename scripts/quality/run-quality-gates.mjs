@@ -9,6 +9,11 @@ const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm"
 
 export const QUALITY_GATES = Object.freeze([
   { id: "format", command: pnpm, args: ["format:check"] },
+  {
+    id: "dependency-licenses",
+    command: pnpm,
+    args: ["licenses:check"],
+  },
   { id: "clean-checkout", command: pnpm, args: ["test:clean-checkout"] },
   { id: "typecheck", command: pnpm, args: ["typecheck"] },
   { id: "frontend-build", command: pnpm, args: ["build"] },

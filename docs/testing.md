@@ -18,9 +18,10 @@ The verified MVP target is macOS 14 or later on Apple Silicon. Windows, Linux, a
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
+cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin
 ```
 
-No application API key is required. A compatible, authenticated local Codex installation is required for the production conversation path.
+The explicit Cargo fetch installs the locked Apple Silicon registry metadata before the quality sequence switches its license generator to offline mode. No application API key is required. A compatible, authenticated local Codex installation is required for the production conversation path.
 
 ## Run the development build
 
@@ -41,9 +42,12 @@ Start from a clean committed checkout, then run the repository-owned sequence:
 ```bash
 git status --short
 pnpm quality:check
+git status --short
 ```
 
-`pnpm quality:check` refuses a dirty checkout and runs every expensive gate synchronously in this order: `format:check`, `test:clean-checkout`, `typecheck`, `build`, `live2d:verify`, Rust format, Clippy with warnings denied, Rust tests, deterministic `agent-docs` lint, the production Tauri build, and the final repository diff check. Frontend and Cargo workloads never overlap. The command checks the worktree again after the build and stops at the first failed gate.
+Both status commands must print nothing. `pnpm quality:check` refuses a dirty checkout and runs every expensive gate synchronously in this order: `format:check`, the offline locked-dependency license check, `test:clean-checkout`, `typecheck`, `build`, `live2d:verify`, Rust format, Clippy with warnings denied, Rust tests, deterministic `agent-docs` lint, the production Tauri build, and the final repository diff check. Frontend and Cargo workloads never overlap. The command checks the worktree again after the build and stops at the first failed gate. Running an individual command is partial validation only and is not release-candidate evidence.
+
+The dependency-license gate compares committed and packaged JSON/Markdown notices byte-for-byte with the complete pnpm declared `dependencies` closure and the Cargo normal dependency closure for `aarch64-apple-darwin`. It uses only the lockfiles, installed package metadata, and local Cargo registry sources. It fails closed on stale output or missing, unknown, forbidden, or unapproved license/source/integrity metadata. The npm closure is intentionally conservative package-manager classification and is not presented as a Vite bundle module inventory.
 
 The Rust gate uses the committed lockfile and libtest `--test-threads=1`. Several native integration tests deliberately enforce real wall-clock budgets while running Git, SQLite, and local process fixtures; serial suite scheduling prevents unrelated fixtures from consuming one another's product budgets. Concurrency behavior remains covered inside the individual tests with controlled tasks and peak counters. The gate does not extend, retry, ignore, or remove any timeout or performance assertion.
 
