@@ -1,11 +1,11 @@
 ---
 title: Final Submission Checklist
 description: "参加資格からDevpost送信、デモ、リポジトリ、締切までを確認する最終チェックリスト。"
-updated: 2026-07-15
+updated: 2026-07-18
 read_when:
   - "提出前の最終確認を行うとき。"
   - "Devpost、動画、リポジトリ、審査アクセスをスモークテストするとき。"
-last_verified: 2026-07-15 JST
+last_verified: 2026-07-18 JST
 ---
 
 # 最終提出チェックリスト
@@ -66,6 +66,7 @@ last_verified: 2026-07-15 JST
 - [ ] private repo の場合、次の両方へ共有済み
   - [ ] `testing@devpost.com`
   - [ ] `build-week-event@openai.com`
+- [ ] private repo の共有を公式締切前に完了した
 - [ ] private invite が pending / expired でない
 - [ ] README 冒頭に problem、solution、track、demo がある
 - [ ] setup instructions がある
@@ -84,7 +85,7 @@ last_verified: 2026-07-15 JST
 ## F. Demo video
 
 - [ ] 長さが3分未満
-- [ ] public YouTube
+- [ ] public YouTube（visibility は **Public**。Unlisted / Private にしない）
 - [ ] ログアウト状態で再生できる
 - [ ] voiceover が聞き取れる
 - [ ] 何を作ったか説明する
@@ -106,6 +107,7 @@ last_verified: 2026-07-15 JST
 - [ ] live demo URL
 - [ ] `/feedback` Session ID
 - [ ] team members
+- [ ] 全 team member が公式締切前に invitation を accept 済み
 - [ ] testing instructions / credentials
 - [ ] technology tags（フォームに表示された場合）
 - [ ] screenshots / images（フォームに表示された場合）

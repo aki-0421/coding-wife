@@ -1,11 +1,11 @@
 ---
 title: Submission Requirements
 description: "Devpost提出物、デモ動画、リポジトリ、審査アクセスの必須要件を整理する。"
-updated: 2026-07-15
+updated: 2026-07-18
 read_when:
   - "提出物やDevpost入力項目を準備するとき。"
   - "動画、リポジトリ、審査アクセスの条件を確認するとき。"
-last_verified: 2026-07-15 JST
+last_verified: 2026-07-18 JST
 ---
 
 # 提出要件
@@ -54,6 +54,7 @@ last_verified: 2026-07-15 JST
 
 - 長さは **2分40秒〜2分50秒**を目標にする。
 - 日本語話者でも、AI-assisted の英語 voiceover が許可されているため、英語音声で作ると翻訳要件の曖昧さを減らせる。
+- 2026-07-18 の Update は Unlisted でもよいとしているが、Official Rules は publicly visible、Overview と FAQ は public としている。情報源の優先順位に従い、**YouTube の visibility は Public** にする。
 - 音楽は使わないか、権利を明確に確認できるものだけにする。
 - Codex 画面の表示は必須ではないが、短く見せると Technological Implementation の証拠になる。
 - product demo を最優先し、スライド説明だけで終わらせない。
@@ -76,7 +77,7 @@ last_verified: 2026-07-15 JST
 - `testing@devpost.com`
 - `build-week-event@openai.com`
 
-共有後、招待が pending のままになっていないか確認してください。
+締切前に共有を完了し、招待が pending のままになっていないか確認してください。
 
 ### README の最低要件
 
@@ -172,6 +173,7 @@ last_verified: 2026-07-15 JST
 - demo URL
 - `/feedback` Session ID 欄
 - team member invitation
+- team member invitation の受諾状態（全員が締切前に accept 済みか）
 - built with / technology tags
 - screenshots / image requirements
 - private testing instructions の入力場所

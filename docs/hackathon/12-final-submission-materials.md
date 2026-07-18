@@ -6,6 +6,7 @@ read_when:
   - Preparing, reviewing, or entering the final Coding Wife submission in Devpost.
   - Recording the public demo video or capturing final submission screenshots.
   - Running the anonymous judge-path smoke test and freezing submission artifacts.
+last_verified: 2026-07-18 JST
 ---
 
 # Coding Wife Final Submission Materials
@@ -19,7 +20,7 @@ Use the following authority order when a value conflicts:
 3. the root [README](../../README.md) and [testing guide](../testing.md);
 4. this document.
 
-Published-rule requirements are summarized in [Submission Requirements](./03-submission-requirements.md). Every external value that has not been independently verified remains `PENDING`.
+Published-rule requirements were reverified on 2026-07-18 JST and are summarized in [Submission Requirements](./03-submission-requirements.md). Every logged-in form value or external artifact that has not been independently verified remains `PENDING`.
 
 ## 1. Submission control panel
 
@@ -33,7 +34,7 @@ Published-rule requirements are summarized in [Submission Requirements](./03-sub
 | Public demo video | `PENDING` | Must be a public YouTube video shorter than 3:00 |
 | Public demo or downloadable artifact URL | `PENDING` | No public binary or hosted production demo is currently recorded |
 | Primary Codex `/feedback` Session ID | `PENDING` | Must come from the actual primary build thread |
-| Team and representative | `PENDING` | Eligibility and representative sign-off are required |
+| Team and representative | `PENDING` | Eligibility and representative sign-off are required; if entering as a team, every invitation must be accepted before the deadline |
 | Submission deadline | 2026-07-22 09:00 JST | Reverify against the Official Rules before submission |
 
 ### Project title candidates
@@ -264,14 +265,14 @@ The public pages do not expose every logged-in form label or character limit. Cr
 | Installation prerequisites | Required for developer tools | Section 3 | Ready |
 | Judge credentials | Required only if the chosen access path needs them | No account needed for documented local paths | `PENDING_FORM_CONFIRMATION` |
 | Primary Codex `/feedback` Session ID | Required | Actual primary Codex build thread only | `PENDING` |
-| Team members | Required ownership record | Final team roster | `PENDING` |
+| Team members | Required for a team entry; invitations must be accepted before the deadline | Final team roster and accepted invitation evidence | `PENDING` |
 | Team representative | Required by rules | Owner confirmation | `PENDING` |
 | Built with / technology tags | If shown | Codex, `gpt-5.6-sol`, React, TypeScript, Tauri, Rust, SQLite, Live2D | `PENDING_FORM_CONFIRMATION` |
 | Screenshots / gallery | If shown | Screenshot ledger in section 6 | `PENDING_FORM_CONFIRMATION` |
 | Cover image / thumbnail | If shown | Final approved screenshot or composed cover | `PENDING_FORM_CONFIRMATION` |
 | Project license | Required before a public repository submission | Repository-level license review | `PENDING` |
 | Prior work / Build Week boundary | Required for an existing project | README Build Week section and audit boundary | Ready; final commit range is `PENDING` |
-| Private repository invitations | Required only if repository remains private | `testing@devpost.com` and `build-week-event@openai.com` | `PENDING_FORM_CONFIRMATION` |
+| Private repository invitations | Required before the deadline only if repository remains private | `testing@devpost.com` and `build-week-event@openai.com` | `PENDING` if the final repository is private; otherwise not applicable |
 | Submission/project URL | Generated externally | Save after draft creation and after submit | `PENDING` |
 | Submission confirmation/export | Operational evidence | Screenshot or PDF after final submit | `PENDING` |
 
@@ -379,7 +380,7 @@ Run this after the source commit, README, DMG, video, screenshots, and Devpost d
 - [ ] Confirm no `.env`, key, token, credential, personal path, private URL, or private prompt is committed or visible in media.
 - [ ] Execute `/feedback` in the actual primary build thread and copy the returned Session ID exactly once.
 - [ ] Confirm the Session ID in Devpost matches the controlled evidence record.
-- [ ] Confirm all team members and the representative are correct.
+- [ ] For a team entry, confirm all team members and the representative are correct, and every team invitation was accepted before the deadline.
 - [ ] Save the final confirmation page and submission URL.
 
 ### Smoke sign-off record

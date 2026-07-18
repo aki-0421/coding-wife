@@ -1,11 +1,11 @@
 ---
 title: Codebase Setup for OpenAI Build Week
 description: "Build Week向けのGit、Codex証跡、再現可能性、秘密情報管理の初期設定を定義する。"
-updated: 2026-07-15
+updated: 2026-07-18
 read_when:
   - "ハッカソン実装を始める前にコードベースを整備するとき。"
   - "Codex利用証跡、再現手順、APIキー管理を設計するとき。"
-last_verified: 2026-07-15 JST
+last_verified: 2026-07-18 JST
 ---
 
 # コードベース初期設定
@@ -114,7 +114,7 @@ Codex 内で実行します。
 
 公式 model docs では次の model ID が公開されています。
 
-| Tier | Model ID | 用途の目安 | 2026-07-15 時点の API price / 1M tokens |
+| Tier | Model ID | 用途の目安 | 2026-07-18 時点の API price / 1M tokens |
 |---|---|---|---|
 | Sol | `gpt-5.6-sol` / alias `gpt-5.6` | 最も複雑な coding、reasoning、polish | input $5 / output $30 |
 | Terra | `gpt-5.6-terra` | intelligence と cost のバランス | input $2.50 / output $15 |
@@ -131,17 +131,17 @@ codex exec -m gpt-5.6 "Review the current changes"
 
 - primary build thread では GPT-5.6 を明示的に選び、`/status` の内容を記録する。
 - `gpt-5.6` は公式 model catalog 上で `gpt-5.6-sol` の alias であり、要件名と一致するため証跡上は分かりやすい。ただし、これが唯一の許容 tier だと規約に明記されているわけではない。
-- Terra / Luna を使う場合も、正確な model ID、役割、GPT-5.6 family である根拠を README に書く。
-- ハッカソン規約は GPT-5.6 tier を明示的に限定していない。tier の選択が eligibility に影響し得る設計なら、Official Rules と公式回答を確認する。
+- Terra / Luna を使う場合も、正確な model ID、役割、GPT-5.6 family である根拠を README に書く。現行 FAQ は Free plan の Codex で Terra を利用できると明記している。
+- ハッカソン規約は GPT-5.6 tier を明示的に限定していない。実際に使った GPT-5.6 family の model ID と実質的な役割を提出資料に残す。
 
 ## 5. Codex credits と API credits を分ける
 
 ### Codex credits
 
-- 登録済み参加者は、在庫・承認条件付きで $100 の Codex credits を申請できる。
-- 締切は **2026-07-18 04:00 JST**。
+- 登録済み参加者向けの $100 Codex credits 申請は終了し、2026-07-18 時点で全 credits 配布済みと案内されている。
+- request deadline は **2026-07-18 04:00 JST** だった。
 - FAQ では one code per Entrant。
-- credits は 2026-07-31 までに使用する。
+- 現行 Official Rules 上、配布済み credits は **2026-07-22 09:00 JST** までに使用する。
 - Settings → Usage で残量を確認する。
 - FAQ 上、prepaid credits を使い切ると Codex は停止し、Auto top-up を有効にしていなければ自動課金されない。
 
@@ -269,6 +269,7 @@ Keep GPT-5.6 central to the product's primary user workflow.
 
 ## Sources
 
+- https://openai.devpost.com/rules
 - https://learn.chatgpt.com/docs/quickstart
 - https://learn.chatgpt.com/docs/codex/cli
 - https://learn.chatgpt.com/docs/models?surface=app
