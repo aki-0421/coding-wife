@@ -107,7 +107,7 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 |---|---|---|---|
 | `GIT-F-090` | verified commitはapp側から自動説明を起動する | App ServerのGit commit commandがsuccess terminalになり、`GIT-F-075`のobserverが新しいSHAとcommit evidence IDを検証した時だけapp controllerが`CommitExplanationRequestedV1(trigger=auto_verified_commit)`を1件作る。commit選択、Commit tab表示、SHA未検証結果では起動せず、main conversationへrequestを送らない | Approved |
 | `GIT-F-091` | supportへはredacted `CommitEvidenceV1`だけを渡す | SHAのopaque ID、sanitized subject/body、pathなしfile summary、diff統計、verification、decision、risk、locale、generationを最大64KiBで渡し、absolute/relative path、raw diff全文、secret、raw reasoningを0件にする | Approved |
-| `GIT-F-092` | commit説明skillをisolated supportへ明示注入する | resource名`coding-wife-explain-commit`、path authority`app_bundle`、implicit invocation offのskillを説明turnにだけ1件注入し、repo/cwd/filesystem/shell/Git/MCP/tool authorityなしで起動する | Approved |
+| `GIT-F-092` | commit説明skillをisolated supportへ明示注入する | resource名`coding-wife-explain-commit`、path authority`app_bundle`、implicit invocation offのskillを説明turnにだけ1件注入する。`SUP-F-053`のclean runtimeとcapacity gateを必須にし、external-authority toolは0件、wireはexact inert `update_plan` 1件だけを許す。実callまたはtool schema/hash不一致ではtaskをfailedにし説明を適用しない | Approved |
 | `GIT-F-093` | 説明はJA/ENのversioned schemaでstreamする | UI localeと一致する要約、変更点、理由、検証、影響、注意、次の見方と、同じ内容の短いnarration chunksをsequence付きで返し、character captionへ逐次表示する | Approved |
 | `GIT-F-094` | TTSは同じredacted transcriptだけを読む | TTS有効時だけcaptionと同じ確定chunkを同順で読み、追加要約やraw evidenceを音声用に再生成しない。TTS off/unavailableでもcaptionは残る | Approved |
 | `GIT-F-095` | invalid/stale/cancelはfail closedする | redaction/schema/generation検査失敗、timeout、Cancel後のchunkをcaption/TTS/HIST本文へ適用せず、決定的なunavailable/canceled textを表示する | Approved |

@@ -18,7 +18,7 @@ web
 
 長時間の Codex 作業で生じる意思決定、状況把握、最終レビューの三つの負担を減らす。利用者は一つのデスクトップ画面から、目的と現在段階、試行と失敗、判断の理由、検証結果、main Codex が作成したコミット、読み取り専用の変更差分を確認できる。
 
-成功とは、利用者が実行の途中でも作業の状態を説明でき、人間の判断を保留・変更でき、main Codex が既存変更を保護しながら適切な粒度で作ったコミットを、検証・判断・リスク証拠とともに作業単位ごとにレビューできることである。専門的なコミットは、App Server の成功した commit command と新しい SHA を app が検証した直後に、main conversation から独立した隔離 support が自動で説明する。利用者は既存コミットの説明要求、失敗時の再試行、生成済み説明の表示・再読上げを app-owned controller 経由で行い、Live2D companion の可視 caption が同じ内容を静かに補強する。
+成功とは、利用者が実行の途中でも作業の状態を説明でき、人間の判断を保留・変更でき、main Codex が既存変更を保護しながら適切な粒度で作ったコミットを、検証・判断・リスク証拠とともに作業単位ごとにレビューできることである。専門的なコミットは、App Server の成功した commit command と新しい SHA を app が検証した直後に、main conversation から独立した隔離 support が自動で説明する。この support は専用の clean runtime と release proof がexternal authority 0を証明できた時だけ動き、証明不能時は main を止めず決定的な unavailable へ縮退する。利用者は既存コミットの説明要求、失敗時の再試行、生成済み説明の表示・再読上げを app-owned controller 経由で行い、Live2D companion の可視 caption が同じ内容を静かに補強する。
 
 ## Positioning
 
