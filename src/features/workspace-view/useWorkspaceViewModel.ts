@@ -563,15 +563,17 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
       !adapter?.stopTurn ||
       turnState !== "running"
     ) {
-      return
+      return false
     }
 
     setTurnState("stopping")
     try {
       await adapter.stopTurn(selectedWorkspace.id)
+      return true
     } catch {
       setTurnState("idle")
       setNotice({ tone: "error", message: "CODEX-INTERRUPT-FAILED" })
+      return false
     }
   }, [adapter, adapterReady, selectedWorkspace, turnState])
 

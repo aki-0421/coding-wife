@@ -184,6 +184,36 @@ describe("CodexWorkspaceSessionAdapter", () => {
     })
   })
 
+  it("bounds turn text by Unicode scalar values", async () => {
+    const oversized = adapterFixture()
+    await oversized.adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await expect(
+      oversized.adapter.sendTurn({
+        workspaceId: "workspace-fixture",
+        text: "😀".repeat(32_001),
+        effort: "low",
+        attachmentHandles: [],
+      }),
+    ).rejects.toThrow("CODEX-TURN-PREFLIGHT-BLOCKED")
+
+    const exact = adapterFixture()
+    await exact.adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await expect(
+      exact.adapter.sendTurn({
+        workspaceId: "workspace-fixture",
+        text: "😀".repeat(32_000),
+        effort: "low",
+        attachmentHandles: [],
+      }),
+    ).resolves.toMatchObject({ accepted: true })
+  })
+
   it("emits one authoritative terminal work-unit event for a completed owned turn", async () => {
     const recordTerminal = vi.fn()
     const { adapter, transport } = adapterFixture({

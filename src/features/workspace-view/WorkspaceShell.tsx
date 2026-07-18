@@ -394,6 +394,7 @@ export function WorkspaceShell({
             onSend={view.sendTurn}
             onStop={view.stopTurn}
             reducedMotion={reducedMotion}
+            readiness={view.codex.readiness}
             renderer={characterRenderer}
             runtimeError={runtime.state.status === "error"}
             timeline={view.timeline}

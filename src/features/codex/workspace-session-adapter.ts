@@ -7,6 +7,7 @@ import {
   type CodexPendingResponseRequest,
   type ReasoningPreset,
 } from "@/lib/contracts"
+import { unicodeScalarCount } from "@/lib/public-text"
 
 import { CodexSessionClient } from "@/features/codex/client"
 import {
@@ -333,7 +334,7 @@ export class CodexWorkspaceSessionAdapter {
       snapshot.phase === "stopping" ||
       (request.text.trim().length === 0 &&
         request.attachmentHandles.length === 0) ||
-      request.text.length > 32_000 ||
+      unicodeScalarCount(request.text) > 32_000 ||
       request.attachmentHandles.length > 10 ||
       new Set(request.attachmentHandles).size !==
         request.attachmentHandles.length ||

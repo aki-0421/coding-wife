@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ArrowUpIcon,
   AtSignIcon,
@@ -29,6 +29,7 @@ import type { TurnUiState } from "@/features/workspace-view/useWorkspaceViewMode
 import type {
   ContextSnapshotItem,
   ReasoningEffort,
+  WorkspaceCodexState,
   WorkspaceDraft,
 } from "@/features/workspace-view/types"
 
@@ -36,6 +37,7 @@ interface ComposerProps {
   readonly connected: boolean
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
+  readonly readiness: WorkspaceCodexState["readiness"]
   readonly turnState: TurnUiState
   readonly onAddAttachments: (files: readonly File[]) => void
   readonly onCaptureContext: (
@@ -53,7 +55,7 @@ interface ComposerProps {
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onRemoveContext: (snapshotId: string) => void
   readonly onSend: () => Promise<boolean>
-  readonly onStop: () => void | Promise<void>
+  readonly onStop: () => boolean | void | Promise<boolean | void>
 }
 
 const contextSources: readonly ContextSnapshotItem["source"][] = [
@@ -94,6 +96,7 @@ export function Composer({
   connected,
   copy,
   draft,
+  readiness,
   turnState,
   onAddAttachments,
   onCaptureContext,
@@ -122,6 +125,37 @@ export function Composer({
       : !hasContent
         ? copy.sendEmpty
         : ""
+  const unavailableEffort =
+    !readiness.fastAvailable && !readiness.maxAvailable
+      ? copy.effortAvailability.none
+      : !readiness.fastAvailable
+        ? copy.effortAvailability.fast
+        : !readiness.maxAvailable
+          ? copy.effortAvailability.max
+          : null
+
+  useEffect(() => {
+    if (isBusy) return
+    if (
+      draft.effort === "fast" &&
+      !readiness.fastAvailable &&
+      readiness.maxAvailable
+    ) {
+      onEffortChange("max")
+    } else if (
+      draft.effort === "max" &&
+      !readiness.maxAvailable &&
+      readiness.fastAvailable
+    ) {
+      onEffortChange("fast")
+    }
+  }, [
+    draft.effort,
+    isBusy,
+    onEffortChange,
+    readiness.fastAvailable,
+    readiness.maxAvailable,
+  ])
 
   const addDroppedFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -159,7 +193,7 @@ export function Composer({
           {draft.attachments.length > 0 || draft.contextSnapshots.length > 0 ? (
             <div
               className="mb-xxs flex min-h-5 gap-xxs overflow-x-auto"
-              aria-label="Draft items"
+              aria-label={copy.draftItems}
             >
               {draft.attachments.map((attachment) => (
                 <span
@@ -209,8 +243,11 @@ export function Composer({
           <Textarea
             aria-describedby="composer-help composer-disabled-reason"
             className="max-h-12 min-h-8 flex-1 border-0 p-0 shadow-none focus-visible:ring-0"
-            maxLength={32000}
-            onChange={(event) => onDraftChange(event.currentTarget.value)}
+            onChange={(event) =>
+              onDraftChange(
+                Array.from(event.currentTarget.value).slice(0, 32_000).join(""),
+              )
+            }
             onKeyDown={(event) => {
               if (event.key === "Enter" && event.metaKey) {
                 event.preventDefault()
@@ -301,7 +338,7 @@ export function Composer({
           </Popover>
 
           <span
-            aria-label={`${copy.model}, fixed model`}
+            aria-label={`${copy.model}, ${copy.fixedModel}`}
             className="hidden h-6 shrink-0 items-center gap-xxs px-xs text-label text-foreground min-[1080px]:flex"
           >
             <BotIcon aria-hidden="true" className="size-3" />
@@ -309,7 +346,7 @@ export function Composer({
           </span>
 
           <ToggleGroup
-            aria-label="Reasoning effort"
+            aria-label={copy.reasoningEffort}
             disabled={isBusy}
             onValueChange={(value) => {
               if (value === "fast" || value === "max") onEffortChange(value)
@@ -320,16 +357,31 @@ export function Composer({
             <ToggleGroupItem
               aria-label={copy.fast}
               className="data-[state=on]:bg-warm-active/15 data-[state=on]:text-warm-active"
+              disabled={isBusy || !readiness.fastAvailable}
               value="fast"
             >
               <ZapIcon aria-hidden="true" className="size-3" />
               <span className="hidden min-[1080px]:inline">{copy.fast}</span>
             </ToggleGroupItem>
-            <ToggleGroupItem aria-label={copy.max} value="max">
+            <ToggleGroupItem
+              aria-label={copy.max}
+              disabled={isBusy || !readiness.maxAvailable}
+              value="max"
+            >
               <GaugeIcon aria-hidden="true" className="size-3" />
               <span className="hidden min-[1080px]:inline">{copy.max}</span>
             </ToggleGroupItem>
           </ToggleGroup>
+
+          {unavailableEffort !== null ? (
+            <span
+              className="max-w-40 text-label text-muted-foreground"
+              data-effort-availability=""
+              role="status"
+            >
+              {unavailableEffort}
+            </span>
+          ) : null}
 
           <span
             className="ml-auto hidden shrink-0 font-mono text-caption text-muted-foreground min-[1120px]:inline"

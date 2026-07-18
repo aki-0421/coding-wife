@@ -21,6 +21,16 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
 import type { CodexSemanticTimelineEvent } from "@/features/codex"
@@ -32,6 +42,7 @@ import type {
   WorkspaceTimelineItem,
 } from "@/features/workspace-view/types"
 import type { ApprovalDecision, PendingRequestView } from "@/lib/contracts"
+import { unicodeScalarCount } from "@/lib/public-text"
 import { cn } from "@/lib/utils"
 
 interface TimelineProps {
@@ -49,7 +60,7 @@ interface TimelineProps {
     request: PendingRequestView,
     answers: Readonly<Record<string, readonly string[]>>,
   ) => Promise<boolean>
-  readonly onInterrupt: () => void | Promise<void>
+  readonly onInterrupt: () => boolean | void | Promise<boolean | void>
   readonly onOpenDiagnostics: () => void
 }
 
@@ -188,6 +199,9 @@ function PendingRequestCard({
   >({})
   const [held, setHeld] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [interruptOpen, setInterruptOpen] = useState(false)
+  const [interrupting, setInterrupting] = useState(false)
+  const [interruptFailed, setInterruptFailed] = useState(false)
   const isDecision = request.kind === "user_input"
   const supportsOther =
     isDecision && request.responseKind === "native_server_request"
@@ -209,7 +223,8 @@ function PendingRequestCard({
       const answer = answers[question.id]
       if (answer === otherAnswerId) {
         const text = otherAnswers[question.id]?.trim() ?? ""
-        return supportsOther && text.length >= 1 && text.length <= 2_000
+        const length = unicodeScalarCount(text)
+        return supportsOther && length >= 1 && length <= 2_000
       }
       return question.options.some((option) => option.id === answer)
     })
@@ -240,6 +255,24 @@ function PendingRequestCard({
     await onAnswerApproval(request, decision)
     setHeld(false)
     setSubmitting(false)
+  }
+
+  const interruptTurn = async () => {
+    if (interrupting) return
+    setInterruptFailed(false)
+    setInterrupting(true)
+    try {
+      const interrupted = await onInterrupt()
+      if (interrupted === false) {
+        setInterruptFailed(true)
+        return
+      }
+      setInterruptOpen(false)
+    } catch {
+      setInterruptFailed(true)
+    } finally {
+      setInterrupting(false)
+    }
   }
 
   const onDecisionKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -400,9 +433,10 @@ function PendingRequestCard({
                   <Textarea
                     aria-label={`${question.header}: ${copy.timelineEvent.otherAnswer}`}
                     disabled={!active || submitting}
-                    maxLength={2_000}
                     onChange={(changeEvent) => {
-                      const value = changeEvent.currentTarget.value
+                      const value = Array.from(changeEvent.currentTarget.value)
+                        .slice(0, 2_000)
+                        .join("")
                       setHeld(false)
                       setOtherAnswers((current) => ({
                         ...current,
@@ -414,7 +448,10 @@ function PendingRequestCard({
                     value={otherAnswers[question.id] ?? ""}
                   />
                   <p className="m-0 mt-xxs text-label text-muted-foreground">
-                    {String(otherAnswers[question.id]?.length ?? 0)} / 2000
+                    {String(
+                      unicodeScalarCount(otherAnswers[question.id] ?? ""),
+                    )}{" "}
+                    / 2000
                   </p>
                 </div>
               ) : null}
@@ -445,16 +482,65 @@ function PendingRequestCard({
             >
               {copy.timelineEvent.hold}
             </Button>
-            {interruptAvailable ? (
-              <Button
-                disabled={submitting}
-                onClick={() => void onInterrupt()}
-                size="sm"
-                type="button"
-                variant="outline"
+            {interruptAvailable || interruptOpen ? (
+              <Dialog
+                onOpenChange={(open) => {
+                  if (interrupting) return
+                  setInterruptFailed(false)
+                  setInterruptOpen(open)
+                }}
+                open={interruptOpen}
               >
-                {copy.timelineEvent.interrupt}
-              </Button>
+                <DialogTrigger asChild>
+                  <Button
+                    disabled={submitting}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {copy.timelineEvent.interrupt}
+                  </Button>
+                </DialogTrigger>
+                <DialogContent showCloseButton={false}>
+                  <DialogHeader>
+                    <DialogTitle>
+                      {copy.timelineEvent.interruptDialogTitle}
+                    </DialogTitle>
+                    <DialogDescription>
+                      {copy.timelineEvent.interruptDialogDescription}
+                    </DialogDescription>
+                  </DialogHeader>
+                  {interruptFailed ? (
+                    <p
+                      className="m-0 text-caption text-destructive"
+                      role="alert"
+                    >
+                      {copy.timelineEvent.interruptFailed}
+                    </p>
+                  ) : null}
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button
+                        disabled={interrupting}
+                        type="button"
+                        variant="outline"
+                      >
+                        {copy.timelineEvent.interruptDialogCancel}
+                      </Button>
+                    </DialogClose>
+                    <Button
+                      disabled={interrupting}
+                      onClick={() => void interruptTurn()}
+                      type="button"
+                      variant="destructive"
+                    >
+                      {interrupting
+                        ? copy.timelineEvent.interrupting
+                        : copy.timelineEvent.interruptDialogConfirm}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             ) : null}
           </div>
         </div>
@@ -546,6 +632,7 @@ function TimelineEventRow({
         pending && "border border-divider bg-surface shadow-sm",
       )}
       data-event-kind={event.kind}
+      data-event-sequence={eventSequence(event)}
     >
       <span
         className={cn(

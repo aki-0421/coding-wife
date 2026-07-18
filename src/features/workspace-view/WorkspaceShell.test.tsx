@@ -822,6 +822,58 @@ describe("WorkspaceShell", () => {
     ).toBeInTheDocument()
   })
 
+  it("disables unavailable effort choices and falls back from a persisted choice", async () => {
+    const state = nativeWorkspaceState()
+    const persistedMax: WorkspaceAdapterState = {
+      ...state,
+      draft: { ...state.draft!, effort: "max" },
+    }
+    const snapshot: WorkspaceCodexState = {
+      ...richCodexState(),
+      phase: "blocked",
+      connected: false,
+      readiness: {
+        ready: false,
+        fastAvailable: true,
+        maxAvailable: false,
+        reasonCode: "CODEX-EFFORT-UNAVAILABLE",
+      },
+      pendingRequests: [],
+      timeline: [],
+      errorCode: "CODEX-EFFORT-UNAVAILABLE",
+    }
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(persistedMax),
+      codexSnapshot: () => snapshot,
+      subscribeCodex(listener) {
+        listener(snapshot)
+        return () => undefined
+      },
+    }
+    renderWorkspace(adapter)
+
+    const maximum = await screen.findByRole("radio", { name: "Max" })
+    const fast = screen.getByRole("radio", { name: "Fast" })
+    expect(maximum).toBeDisabled()
+    expect(fast).toBeEnabled()
+    await waitFor(() => expect(fast).toHaveAttribute("aria-checked", "true"))
+    expect(
+      screen.getByText("Maximum reasoning is not available in this runtime."),
+    ).toBeVisible()
+  })
+
+  it("bounds composer input by Unicode scalar values", () => {
+    renderWorkspace()
+    const composer = screen.getByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    fireEvent.change(composer, { target: { value: "😀".repeat(32_001) } })
+    expect(Array.from((composer as HTMLTextAreaElement).value)).toHaveLength(
+      32_000,
+    )
+  })
+
   it("clears only accepted turns and exposes a stop action", async () => {
     const requests: SendTurnRequest[] = []
     const stoppedWorkspaceIds: string[] = []
@@ -896,6 +948,13 @@ describe("WorkspaceShell", () => {
     expect(screen.getByText("46 focused tests passed")).toBeVisible()
     expect(screen.getByText("Your decision is needed")).toBeVisible()
     expect(screen.getByText("Approval required")).toBeVisible()
+    const compactCompanion = container.querySelector<HTMLElement>(
+      "[data-companion-status-mobile]",
+    )
+    expect(compactCompanion).not.toBeNull()
+    expect(
+      within(compactCompanion as HTMLElement).getByText("Waiting for you"),
+    ).toBeVisible()
     const approval = container.querySelector<HTMLElement>(
       '[data-event-kind="approval"]',
     )
@@ -952,16 +1011,78 @@ describe("WorkspaceShell", () => {
     expect(screen.getByRole("button", { name: "Reject" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Stop turn" })).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Interrupt turn" }))
+    const interruptDialog = await screen.findByRole("dialog", {
+      name: "Interrupt this turn?",
+    })
+    await user.click(
+      within(interruptDialog).getByRole("button", { name: "Interrupt turn" }),
+    )
     await waitFor(() =>
       expect(stopTurn).toHaveBeenCalledWith("workspace-native"),
     )
+  })
+
+  it("confirms interruption with trapped focus and keeps failures actionable", async () => {
+    const snapshot = richCodexState()
+    const stopTurn = vi.fn().mockRejectedValue(new Error("interrupt failed"))
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      codexSnapshot: () => snapshot,
+      subscribeCodex(listener) {
+        listener(snapshot)
+        return () => undefined
+      },
+      stopTurn,
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+
+    const trigger = await screen.findByRole("button", {
+      name: "Interrupt turn",
+    })
+    trigger.focus()
+    await user.keyboard("{Enter}")
+    const dialog = await screen.findByRole("dialog", {
+      name: "Interrupt this turn?",
+    })
+    expect(dialog).toContainElement(document.activeElement)
+    await user.tab()
+    expect(dialog).toContainElement(document.activeElement)
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+
+    await user.click(trigger)
+    const reopened = await screen.findByRole("dialog", {
+      name: "Interrupt this turn?",
+    })
+    await user.click(
+      within(reopened).getByRole("button", { name: "Interrupt turn" }),
+    )
+    expect(await within(reopened).findByRole("alert")).toHaveTextContent(
+      "The turn could not be interrupted",
+    )
+    expect(reopened).toBeVisible()
+    expect(stopTurn).toHaveBeenCalledWith("workspace-native")
   })
 
   it("localizes the complete decision trust context in Japanese", async () => {
     const snapshot = richCodexState()
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
-      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      loadState: () =>
+        Promise.resolve(
+          nativeWorkspaceState([
+            {
+              id: "context-ja",
+              source: "git_diff",
+              label: "Git差分",
+              capturedAt: "2026-07-18T00:00:00.000Z",
+              byteCount: 42,
+            },
+          ]),
+        ),
       codexSnapshot: () => snapshot,
       subscribeCodex(listener) {
         listener(snapshot)
@@ -985,9 +1106,7 @@ describe("WorkspaceShell", () => {
     expect(card.getByText("実行されること").parentElement).toHaveTextContent(
       "進行中のターンを続行",
     )
-    expect(card.getByText("範囲").parentElement).toHaveTextContent(
-      "このターン",
-    )
+    expect(card.getByText("範囲").parentElement).toHaveTextContent("このターン")
     expect(card.getByText("リスク").parentElement).toHaveTextContent("中")
     expect(card.getByText("可逆性").parentElement).toHaveTextContent("不明")
     expect(card.getByText("推奨").parentElement).toHaveTextContent(
@@ -998,6 +1117,16 @@ describe("WorkspaceShell", () => {
     )
     expect(
       card.getByText("One bounded unit keeps the next change reviewable."),
+    ).toBeVisible()
+    expect(screen.getByLabelText("推論強度")).toBeVisible()
+    expect(screen.getByLabelText("GPT-5.6 Sol, 固定モデル")).toBeVisible()
+    expect(screen.getByLabelText("下書き項目")).toBeVisible()
+    const compactCompanion = container.querySelector<HTMLElement>(
+      "[data-companion-status-mobile]",
+    )
+    expect(compactCompanion).not.toBeNull()
+    expect(
+      within(compactCompanion as HTMLElement).getByText("回答待ち"),
     ).toBeVisible()
   })
 
@@ -1020,6 +1149,10 @@ describe("WorkspaceShell", () => {
     await user.click(await screen.findByText("Other"))
     const other = screen.getByRole("textbox", { name: "Scope: Other answer" })
     expect(screen.getByRole("button", { name: "Send answer" })).toBeDisabled()
+    fireEvent.change(other, { target: { value: "😀".repeat(2_001) } })
+    expect(Array.from((other as HTMLTextAreaElement).value)).toHaveLength(2_000)
+    expect(screen.getByText("2000 / 2000")).toBeVisible()
+    await user.clear(other)
     await user.type(other, "Keep the public API unchanged")
     await user.click(screen.getByRole("button", { name: "Hold decision" }))
     expect(
@@ -1144,6 +1277,107 @@ describe("WorkspaceShell", () => {
     expect(
       screen.queryByRole("button", { name: /New updates/u }),
     ).not.toBeInTheDocument()
+  })
+
+  it("restores the nearest timeline anchor for each workspace", async () => {
+    const workspaces: WorkspaceAdapterState["workspaces"] = [
+      {
+        id: "workspace-a",
+        repository: "fixture",
+        name: "workspace-a",
+        branch: "main",
+        lifecycle: "in_progress",
+      },
+      {
+        id: "workspace-b",
+        repository: "fixture",
+        name: "workspace-b",
+        branch: "main",
+        lifecycle: "backlog",
+      },
+    ]
+    const stateFor = (
+      workspaceId: string,
+      sequences: readonly number[],
+    ): WorkspaceAdapterState => ({
+      workspaces,
+      activeWorkspaceId: workspaceId,
+      draft: {
+        text: "",
+        effort: "fast",
+        revision: 0,
+        contextSnapshots: [],
+      },
+      timeline: sequences.map((sequence) => ({
+        id: `event-${workspaceId}-${String(sequence)}`,
+        sequence,
+        producer: "code" as const,
+        kind: "history" as const,
+        domainKind: `code.fixture.${String(sequence)}`,
+        occurredAt: "2026-07-18T00:00:00.000Z",
+        status: "completed",
+      })),
+      history: { mode: "ready", errorCode: null, backupName: null },
+    })
+    const selectWorkspace = vi.fn((workspaceId: string) =>
+      Promise.resolve(
+        workspaceId === "workspace-a"
+          ? stateFor(workspaceId, [1, 2, 3, 4])
+          : stateFor(workspaceId, [10, 11]),
+      ),
+    )
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(stateFor("workspace-a", [1, 2, 3, 4])),
+      selectWorkspace,
+    }
+    const offsetTop = vi
+      .spyOn(HTMLElement.prototype, "offsetTop", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return Number(this.dataset.eventSequence ?? 0) * 200
+      })
+
+    try {
+      const { container } = renderWorkspace(adapter)
+      expect(await screen.findByText("code.fixture.4")).toBeVisible()
+      const viewport = container.querySelector<HTMLElement>(
+        '.chat-pane [data-slot="scroll-area-viewport"]',
+      )
+      expect(viewport).not.toBeNull()
+      Object.defineProperties(viewport as HTMLElement, {
+        clientHeight: { configurable: true, value: 400 },
+        scrollHeight: { configurable: true, value: 1200 },
+        scrollTop: { configurable: true, value: 450, writable: true },
+      })
+      fireEvent.scroll(viewport as HTMLElement)
+      const navigation = screen.getByRole("navigation", { name: "Workspaces" })
+
+      fireEvent.click(
+        within(navigation).getByRole("button", {
+          name: /fixture\/workspace-b/u,
+        }),
+      )
+      expect(await screen.findByText("code.fixture.11")).toBeVisible()
+      fireEvent.click(
+        within(navigation).getByRole("button", {
+          name: /fixture\/workspace-a/u,
+        }),
+      )
+      expect(await screen.findByText("code.fixture.4")).toBeVisible()
+      const restoredViewport = container.querySelector<HTMLElement>(
+        '.chat-pane [data-slot="scroll-area-viewport"]',
+      )
+      expect(restoredViewport).not.toBeNull()
+      expect(restoredViewport).toHaveAttribute(
+        "data-scroll-restoration",
+        "anchor",
+      )
+      await waitFor(() =>
+        expect((restoredViewport as HTMLElement).scrollTop).toBe(450),
+      )
+    } finally {
+      offsetTop.mockRestore()
+    }
   })
 
   it("keeps native picker and pasted paths behind opaque attachment handles", async () => {

@@ -44,10 +44,7 @@ export function CharacterStageSlot({
 }: CharacterStageSlotProps) {
   const { locale } = useI18n()
   const CharacterRenderer = renderer
-  const stateLabel =
-    state === "disconnected"
-      ? copy.character.disconnected
-      : state.replaceAll("_", " ")
+  const stateLabel = copy.character.semanticState[state]
   const runtimeDetail = (() => {
     if (characterRuntime.rendererKind === "external") {
       return copy.character.externalRenderer
