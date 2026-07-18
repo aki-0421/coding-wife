@@ -1,5 +1,6 @@
 pub mod attachment;
 pub mod binary;
+pub mod bundled_skill;
 pub mod commands;
 pub mod decision;
 pub mod dynamic_tools;

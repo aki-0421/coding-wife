@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic Codex app-server fixture; stdout is JSONL protocol only."""
 
+import hashlib
 import json
 import os
 import pathlib
@@ -52,10 +53,13 @@ def result(message_id, value):
 
 def validate_attachment_inputs(inputs, expected_image, expected_notes):
     try:
-        if not isinstance(inputs, list) or len(inputs) != 2:
+        if not isinstance(inputs, list):
             return False, []
-        image = inputs[0]
-        notes = inputs[1]
+        attachments = [item for item in inputs if item.get("type") != "skill"]
+        if len(attachments) != 2:
+            return False, []
+        image = attachments[0]
+        notes = attachments[1]
         image_path = pathlib.Path(image.get("path", ""))
         notes_path = pathlib.Path(notes.get("path", ""))
         paths = [image_path, notes_path]
@@ -77,6 +81,53 @@ def validate_attachment_inputs(inputs, expected_image, expected_notes):
         return valid, paths
     except (OSError, TypeError, ValueError):
         return False, []
+
+
+def validate_commit_skill(inputs):
+    try:
+        skills = [
+            item
+            for item in inputs
+            if isinstance(item, dict) and item.get("type") == "skill"
+        ]
+        if len(skills) != 1:
+            return False, None
+        skill = skills[0]
+        if set(skill) != {"type", "name", "path"}:
+            return False, None
+        if skill.get("name") != "coding-wife-commit-work":
+            return False, None
+        skill_path = pathlib.Path(skill.get("path", ""))
+        if not skill_path.is_absolute() or skill_path.name != "SKILL.md":
+            return False, None
+        if skill_path.parent.name != "coding-wife-commit-work":
+            return False, None
+        manifest_path = skill_path.parents[1] / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entries = [
+            entry
+            for entry in manifest.get("skills", [])
+            if entry.get("name") == "coding-wife-commit-work"
+        ]
+        if len(entries) != 1:
+            return False, None
+        entry = entries[0]
+        digest = "sha256:" + hashlib.sha256(skill_path.read_bytes()).hexdigest()
+        valid = (
+            manifest.get("authority") == "app_bundle"
+            and entry.get("version") == "1.0.0"
+            and entry.get("entrypoint")
+            == "coding-wife-commit-work/SKILL.md"
+            and entry.get("contentDigest") == digest
+            and entry.get("implicitInvocation") is False
+        )
+        return valid, (
+            skill.get("name"),
+            entry.get("version"),
+            digest,
+        )
+    except (IndexError, json.JSONDecodeError, OSError, TypeError, ValueError):
+        return False, None
 
 
 def main():
@@ -237,8 +288,16 @@ def main():
             continue
         if method == "turn/start":
             input_text = ""
-            if isinstance(params.get("input"), list) and params["input"]:
-                input_text = params["input"][0].get("text", "")
+            inputs = params.get("input")
+            if isinstance(inputs, list):
+                input_text = next(
+                    (
+                        item.get("text", "")
+                        for item in inputs
+                        if isinstance(item, dict) and item.get("type") == "text"
+                    ),
+                    "",
+                )
             try:
                 continuation = json.loads(input_text)
             except (json.JSONDecodeError, TypeError):
@@ -250,6 +309,15 @@ def main():
                 and "collaborationMode" not in params
                 and "multiAgentMode" not in params
             )
+            skill_valid, skill_audit = validate_commit_skill(inputs)
+            record(
+                "commit_skill_exactly_once_ok"
+                if skill_valid
+                else "commit_skill_exactly_once_invalid"
+            )
+            if skill_audit is not None:
+                record("commit_skill_audit:" + ":".join(skill_audit))
+            valid = valid and skill_valid
             attachment_paths = []
             attachment_modes = {
                 "attachments",
@@ -259,7 +327,6 @@ def main():
                 "attachments_crash",
             }
             if MODE in attachment_modes:
-                inputs = params.get("input")
                 expected_image = (
                     b"\x89PNG\r\n\x1a\nvalidated-image"
                     if MODE == "attachments_race"

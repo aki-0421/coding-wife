@@ -5,11 +5,12 @@ use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 
 use super::attachment::{AttachmentSnapshotLease, ResolvedAttachment, ResolvedAttachmentSet};
 use super::binary::{discover_binary, probe_schema, BinaryError, BinaryInfo, SchemaProbe};
+use super::bundled_skill::{resolve_bundled_skill, ResolvedBundledSkill, COMMIT_SKILL_NAME};
 use super::decision::{
     fallback_continuation_input, FallbackDecisionClaim, FallbackDecisionContext,
     FallbackDecisionError, FallbackDecisionLedger, FallbackRegisterOutcome,
@@ -32,8 +33,8 @@ use super::types::{
     CodexDiagnostic, CodexEvent, CodexFallbackDecisionRequest, CodexHealth,
     CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadListRequest,
     CodexThreadResumeRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
-    CodexTurnStartRequest, PendingResolutionStatus, ReasoningPreset, ReviewResponse,
-    ThreadListResponse, ThreadResponse, ThreadSummary, TurnResponse,
+    CodexTurnStartRequest, MainSkillInjectionAudit, PendingResolutionStatus, ReasoningPreset,
+    ReviewResponse, ThreadListResponse, ThreadResponse, ThreadSummary, TurnResponse,
 };
 
 pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
@@ -64,6 +65,7 @@ struct PendingTurnStart {
     terminal: bool,
     purpose: PendingTurnStartPurpose,
     attachment_snapshot: Option<AttachmentSnapshotLease>,
+    skill_injection: MainSkillInjectionAudit,
 }
 
 #[derive(Default)]
@@ -83,6 +85,7 @@ struct SupervisorState {
     active_turn_id: Option<String>,
     active_turn_effort: Option<ReasoningPreset>,
     pending_turn_start: Option<PendingTurnStart>,
+    skill_injection_audits: HashMap<String, MainSkillInjectionAudit>,
     next_turn_start_token: u64,
     requests: ServerRequestLedger,
     fallback_decisions: FallbackDecisionLedger,
@@ -96,6 +99,7 @@ struct SupervisorInner {
     signal_receiver: StdMutex<Option<mpsc::Receiver<RuntimeSignal>>>,
     signal_loop_started: AtomicBool,
     app_handle: RwLock<Option<AppHandle>>,
+    resource_directory: RwLock<Option<PathBuf>>,
     dynamic_tools: DynamicToolRegistry,
 }
 
@@ -161,17 +165,64 @@ impl CodexSupervisor {
                 signal_receiver: StdMutex::new(Some(receiver)),
                 signal_loop_started: AtomicBool::new(false),
                 app_handle: RwLock::new(None),
+                resource_directory: RwLock::new(None),
                 dynamic_tools: DynamicToolRegistry,
             }),
         }
     }
 
     pub fn attach_app_handle(&self, app_handle: AppHandle) {
+        if let Ok(resource_directory) = app_handle.path().resource_dir() {
+            *self
+                .inner
+                .resource_directory
+                .write()
+                .expect("resource directory lock poisoned") = Some(resource_directory);
+        }
         *self
             .inner
             .app_handle
             .write()
             .expect("app handle lock poisoned") = Some(app_handle);
+    }
+
+    #[doc(hidden)]
+    pub fn with_resource_directory(resource_directory: impl Into<PathBuf>) -> Self {
+        let supervisor = Self::new();
+        *supervisor
+            .inner
+            .resource_directory
+            .write()
+            .expect("resource directory lock poisoned") = Some(resource_directory.into());
+        supervisor
+    }
+
+    pub async fn main_skill_injection_audit(
+        &self,
+        turn_handle: &str,
+    ) -> Option<MainSkillInjectionAudit> {
+        self.inner
+            .state
+            .lock()
+            .await
+            .skill_injection_audits
+            .get(turn_handle)
+            .cloned()
+    }
+
+    fn resolve_main_skill(
+        &self,
+        operation: &'static str,
+    ) -> Result<ResolvedBundledSkill, CodexCommandError> {
+        let resource_directory = self
+            .inner
+            .resource_directory
+            .read()
+            .expect("resource directory lock poisoned")
+            .clone()
+            .ok_or_else(|| command_error("CODEX-COMMIT-SKILL-MISSING", operation, false))?;
+        resolve_bundled_skill(&resource_directory, COMMIT_SKILL_NAME)
+            .map_err(|error| command_error(error.code(), operation, false))
     }
 
     pub fn start_signal_loop(&self) {
@@ -441,6 +492,7 @@ impl CodexSupervisor {
         state.active_turn_id = None;
         state.active_turn_effort = None;
         state.pending_turn_start = None;
+        state.skill_injection_audits.clear();
         state.requests.clear_pending();
         state.fallback_decisions.clear();
         state.diagnostic.child_state = ChildState::Initializing;
@@ -825,6 +877,8 @@ impl CodexSupervisor {
         {
             return Err(command_error("CODEX-TURN-INVALID", "turn/start", false));
         }
+        let commit_skill = self.resolve_main_skill("turn/start")?;
+        let skill_injection = commit_skill.audit();
         let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
         if expected_generation.is_some_and(|expected| expected != generation) {
             return Err(command_error(
@@ -858,6 +912,7 @@ impl CodexSupervisor {
                 terminal: false,
                 purpose: PendingTurnStartPurpose::User,
                 attachment_snapshot,
+                skill_injection,
             });
             (raw_thread, token)
         };
@@ -876,6 +931,7 @@ impl CodexSupervisor {
                     &request.text,
                     request.effort,
                     &attachments,
+                    &commit_skill,
                 ),
             )
             .await
@@ -927,6 +983,17 @@ impl CodexSupervisor {
                             false,
                         ));
                     }
+                    let skill_injection = state
+                        .pending_turn_start
+                        .as_ref()
+                        .filter(|pending| pending.token == token)
+                        .map(|pending| pending.skill_injection.clone())
+                        .ok_or_else(|| {
+                            command_error("CODEX-TURN-START-MISMATCH", "turn/start", false)
+                        })?;
+                    state
+                        .skill_injection_audits
+                        .insert(turn_handle.clone(), skill_injection);
                     state.pending_turn_start = None;
                     turn_handle
                 }
@@ -1078,6 +1145,8 @@ impl CodexSupervisor {
         &self,
         request: CodexFallbackDecisionRequest,
     ) -> Result<TurnResponse, CodexCommandError> {
+        let commit_skill = self.resolve_main_skill("codex.decision.answer")?;
+        let skill_injection = commit_skill.audit();
         let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
         let client_message_id = format!("decision-continuation-{}", uuid::Uuid::new_v4());
         let (claim, token) = {
@@ -1126,6 +1195,7 @@ impl CodexSupervisor {
                 terminal: false,
                 purpose: PendingTurnStartPurpose::Fallback(claim.clone()),
                 attachment_snapshot: None,
+                skill_injection,
             });
             (claim, token)
         };
@@ -1145,6 +1215,7 @@ impl CodexSupervisor {
                     &input,
                     claim.effort,
                     &[],
+                    &commit_skill,
                 ),
             )
             .await
@@ -1221,6 +1292,17 @@ impl CodexSupervisor {
                     false,
                 ));
             }
+            let skill_injection = state
+                .pending_turn_start
+                .as_ref()
+                .filter(|pending| pending.token == token)
+                .map(|pending| pending.skill_injection.clone())
+                .ok_or_else(|| {
+                    command_error("CODEX-TURN-START-MISMATCH", "codex.decision.answer", false)
+                })?;
+            state
+                .skill_injection_audits
+                .insert(turn_handle.clone(), skill_injection);
             state.pending_turn_start = None;
             let event = state.normalizer.as_mut().and_then(|normalizer| {
                 normalizer
@@ -2113,6 +2195,7 @@ fn clear_probe_evidence(state: &mut SupervisorState, operation: &str) {
     state.active_turn_id = None;
     state.active_turn_effort = None;
     state.pending_turn_start = None;
+    state.skill_injection_audits.clear();
     state.requests.clear_pending();
     state.fallback_decisions.clear();
     state.diagnostic = CodexDiagnostic {
@@ -2199,6 +2282,14 @@ mod tests {
     use super::super::types::{ReasoningPreset, ReviewTarget};
     use super::*;
 
+    fn skill_audit() -> MainSkillInjectionAudit {
+        MainSkillInjectionAudit {
+            name: COMMIT_SKILL_NAME.to_owned(),
+            version: "1.0.0".to_owned(),
+            content_digest: format!("sha256:{}", "a".repeat(64)),
+        }
+    }
+
     #[test]
     fn custom_review_is_bounded_and_model_is_not_a_user_input() {
         let request = CodexReviewStartRequest {
@@ -2244,6 +2335,7 @@ mod tests {
                 terminal: false,
                 purpose: PendingTurnStartPurpose::User,
                 attachment_snapshot: None,
+                skill_injection: skill_audit(),
             }),
             ..SupervisorState::default()
         };
@@ -2316,6 +2408,7 @@ mod tests {
                     root.clone(),
                     directory.clone(),
                 )),
+                skill_injection: skill_audit(),
             });
         }
 

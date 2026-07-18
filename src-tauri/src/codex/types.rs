@@ -228,6 +228,14 @@ pub struct CodexTurnStartRequest {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct MainSkillInjectionAudit {
+    pub name: String,
+    pub version: String,
+    pub content_digest: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CodexTurnInterruptRequest {
     pub workspace_id: String,
     pub thread_handle: String,

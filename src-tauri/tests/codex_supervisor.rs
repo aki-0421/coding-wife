@@ -28,6 +28,10 @@ fn fixture_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_codex_app_server.py")
 }
 
+fn test_supervisor() -> CodexSupervisor {
+    CodexSupervisor::with_resource_directory(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
 fn temporary_directory(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "coding-wife-{label}-{}-{}",
@@ -61,6 +65,45 @@ impl FixtureEnvironment {
             state,
             app_data,
         }
+    }
+}
+
+struct SkillResourceFixture {
+    root: PathBuf,
+}
+
+impl SkillResourceFixture {
+    fn new() -> Self {
+        let root = temporary_directory("skill-resources");
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/skills");
+        for relative in [
+            "manifest.json",
+            "coding-wife-commit-work/SKILL.md",
+            "coding-wife-commit-work/agents/openai.yaml",
+            "coding-wife-explain-commit/SKILL.md",
+            "coding-wife-explain-commit/agents/openai.yaml",
+        ] {
+            let destination = root.join("resources/skills").join(relative);
+            std::fs::create_dir_all(destination.parent().expect("skill resource parent"))
+                .expect("create skill resource parent");
+            std::fs::copy(source.join(relative), destination).expect("copy skill resource");
+        }
+        Self { root }
+    }
+
+    fn skill_document(&self) -> PathBuf {
+        self.root
+            .join("resources/skills/coding-wife-commit-work/SKILL.md")
+    }
+
+    fn manifest(&self) -> PathBuf {
+        self.root.join("resources/skills/manifest.json")
+    }
+}
+
+impl Drop for SkillResourceFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 
@@ -200,7 +243,7 @@ async fn prepare_attachment_fixture(
     std::fs::create_dir_all(notes.parent().expect("notes parent")).expect("notes parent");
     std::fs::write(&notes, notes_bytes).expect("notes fixture");
 
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     let workspace_service = WorkspaceService::new(
         supervisor.clone(),
@@ -301,7 +344,7 @@ async fn expect_protocol_violation(signals: &mut mpsc::Receiver<RuntimeSignal>) 
 async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("fragmented");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -339,6 +382,16 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
         })
         .await
         .expect("turn start");
+    let audit = supervisor
+        .main_skill_injection_audit(&turn.turn_handle)
+        .await
+        .expect("main skill audit");
+    let encoded_audit = serde_json::to_string(&audit).expect("serialize skill audit");
+    assert_eq!(audit.name, "coding-wife-commit-work");
+    assert_eq!(audit.version, "1.0.0");
+    assert!(audit.content_digest.starts_with("sha256:"));
+    assert!(!encoded_audit.contains("SKILL.md"));
+    assert!(!encoded_audit.contains("resources"));
     supervisor
         .turn_interrupt(CodexTurnInterruptRequest {
             workspace_id: "workspace".to_owned(),
@@ -350,15 +403,99 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     let state = read_state(&fixture.state).await;
     assert!(state.contains("turn_contract_ok"));
+    assert_eq!(state.matches("commit_skill_exactly_once_ok").count(), 1);
+    assert_eq!(state.matches("commit_skill_audit:").count(), 1);
+    assert!(!state.contains("commit_skill_exactly_once_invalid"));
+    assert!(!state.contains("SKILL.md"));
     assert!(state.contains("interrupt_received"));
     supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn missing_or_tampered_main_skill_blocks_turn_before_wire() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for case in ["missing", "skill_tampered", "manifest_tampered"] {
+        let fixture = FixtureEnvironment::new("default");
+        let resources = SkillResourceFixture::new();
+        match case {
+            "missing" => {
+                std::fs::remove_file(resources.skill_document()).expect("remove skill fixture");
+            }
+            "skill_tampered" => {
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(resources.skill_document())
+                    .and_then(|mut file| {
+                        use std::io::Write;
+                        file.write_all(b"\ntampered\n")
+                    })
+                    .expect("tamper skill fixture");
+            }
+            "manifest_tampered" => {
+                let manifest =
+                    std::fs::read_to_string(resources.manifest()).expect("read manifest fixture");
+                std::fs::write(
+                    resources.manifest(),
+                    manifest.replace("\"schemaVersion\": 1", "\"schemaVersion\": 2"),
+                )
+                .expect("tamper manifest fixture");
+            }
+            _ => unreachable!(),
+        }
+
+        let supervisor = CodexSupervisor::with_resource_directory(resources.root.clone());
+        supervisor.start_signal_loop();
+        supervisor
+            .register_workspace_root("workspace", &fixture.workspace)
+            .await
+            .expect("register workspace");
+        supervisor.set_explicit_binary(Some(fixture_binary())).await;
+        supervisor
+            .connect(CodexConnectRequest {
+                workspace_id: "workspace".to_owned(),
+            })
+            .await
+            .expect("connect fixture");
+        let thread = supervisor
+            .thread_start(CodexThreadStartRequest {
+                workspace_id: "workspace".to_owned(),
+            })
+            .await
+            .expect("thread start");
+        let error = supervisor
+            .turn_start(CodexTurnStartRequest {
+                workspace_id: "workspace".to_owned(),
+                thread_handle: thread.thread_handle,
+                client_user_message_id: format!("message-{case}"),
+                text: "Do not send this turn.".to_owned(),
+                effort: ReasoningPreset::Low,
+                attachment_handles: vec![],
+            })
+            .await
+            .expect_err("invalid skill must block the turn");
+        let expected = if case == "missing" {
+            "CODEX-COMMIT-SKILL-MISSING"
+        } else {
+            "CODEX-COMMIT-SKILL-TAMPERED"
+        };
+        assert_eq!(error.code, expected, "{case}");
+        let encoded_error = serde_json::to_string(&error).expect("serialize safe skill error");
+        assert!(!encoded_error.contains("SKILL.md"), "{case}");
+        assert!(!encoded_error.contains(&resources.root.to_string_lossy().to_string()));
+        let state = read_state(&fixture.state).await;
+        assert!(!state.contains("turn_contract_"), "{case}");
+        assert!(!state.contains("commit_skill_"), "{case}");
+        supervisor.shutdown().await;
+        drop(resources);
+        drop(fixture);
+    }
 }
 
 #[tokio::test]
 async fn native_picker_registers_private_paths_before_connect_and_thread_start() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("default");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     let service = WorkspaceService::new(
         supervisor.clone(),
@@ -404,7 +541,7 @@ async fn validated_opaque_attachments_reach_the_fake_server_as_local_image_and_m
     let notes = fixture.workspace.join("notes.txt");
     std::fs::write(&notes, b"bounded notes").expect("notes fixture");
 
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     let workspace_service = WorkspaceService::new(
         supervisor.clone(),
@@ -634,7 +771,7 @@ async fn snapshot_cleanup_covers_rejection_terminal_before_response_and_child_cr
 async fn stable_initialize_fallback_omits_experimental_fields_and_blocks_review() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("experimental_rejected");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -686,7 +823,7 @@ async fn each_thread_policy_mismatch_stops_without_storing_a_handle() {
         "thread_policy_ephemeral",
     ] {
         let fixture = FixtureEnvironment::new(mode);
-        let supervisor = CodexSupervisor::new();
+        let supervisor = test_supervisor();
         supervisor.start_signal_loop();
         supervisor
             .register_workspace_root("workspace", &fixture.workspace)
@@ -718,7 +855,7 @@ async fn each_thread_policy_mismatch_stops_without_storing_a_handle() {
 async fn native_rui_round_trips_one_strict_answer() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("native_rui");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -808,7 +945,7 @@ async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     for (mode, interrupted) in [("decision_fallback", false), ("decision_invalid", true)] {
         let fixture = FixtureEnvironment::new(mode);
-        let supervisor = CodexSupervisor::new();
+        let supervisor = test_supervisor();
         supervisor.start_signal_loop();
         supervisor
             .register_workspace_root("workspace", &fixture.workspace)
@@ -855,7 +992,7 @@ async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
 async fn fallback_decision_validates_then_starts_exactly_one_structured_continuation() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("decision_fallback");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -909,6 +1046,9 @@ async fn fallback_decision_validates_then_starts_exactly_one_structured_continua
     assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
     let state = read_state(&fixture.state).await;
     assert_eq!(state.matches("decision_continuation_ok").count(), 1);
+    assert_eq!(state.matches("commit_skill_exactly_once_ok").count(), 2);
+    assert_eq!(state.matches("commit_skill_audit:").count(), 2);
+    assert!(!state.contains("commit_skill_exactly_once_invalid"));
     assert!(!state.contains("decision_continuation_invalid"));
     supervisor.shutdown().await;
 }
@@ -917,7 +1057,7 @@ async fn fallback_decision_validates_then_starts_exactly_one_structured_continua
 async fn notification_first_turn_start_preserves_fallback_display_and_answer() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("decision_notification_first");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -973,7 +1113,7 @@ async fn notification_first_turn_start_preserves_fallback_display_and_answer() {
 async fn failed_fallback_continuation_is_terminal_and_never_replayed() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("decision_continuation_crash");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -1041,7 +1181,7 @@ async fn failed_fallback_continuation_is_terminal_and_never_replayed() {
 async fn failed_reprobe_clears_previous_identity_evidence_and_recovers_fresh() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("default");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -1086,7 +1226,7 @@ async fn failed_reprobe_clears_previous_identity_evidence_and_recovers_fresh() {
 async fn protocol_violations_use_the_bounded_restart_budget_without_turn_replay() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("protocol_after_ready");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -1194,7 +1334,7 @@ async fn malformed_and_duplicate_frames_are_protocol_violations() {
 async fn unknown_server_request_is_rejected_and_turn_is_interrupted() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("unknown_request");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -1229,6 +1369,8 @@ async fn unknown_server_request_is_rejected_and_turn_is_interrupted() {
     loop {
         let state = read_state(&fixture.state).await;
         if state.contains("unknown_request_rejected") && state.contains("interrupt_received") {
+            assert_eq!(state.matches("commit_skill_exactly_once_ok").count(), 1);
+            assert!(!state.contains("commit_skill_exactly_once_invalid"));
             break;
         }
         assert!(
@@ -1247,7 +1389,7 @@ async fn crash_after_ready_restarts_once_without_replaying_a_turn() {
     tokio::fs::write(&fixture.state, "0")
         .await
         .expect("initialize crash counter");
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("workspace", &fixture.workspace)
@@ -1282,6 +1424,31 @@ async fn crash_after_ready_restarts_once_without_replaying_a_turn() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("thread after restart");
+    let turn = supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            client_user_message_id: "message-after-restart".to_owned(),
+            text: "Verify skill injection after restart.".to_owned(),
+            effort: ReasoningPreset::Low,
+            attachment_handles: vec![],
+        })
+        .await
+        .expect("turn after restart");
+    let audit = supervisor
+        .main_skill_injection_audit(&turn.turn_handle)
+        .await
+        .expect("skill audit after restart");
+    assert_eq!(audit.name, "coding-wife-commit-work");
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("commit_skill_exactly_once_ok").count(), 1);
+    assert!(!state.contains("commit_skill_exactly_once_invalid"));
     supervisor.shutdown().await;
 }
 
@@ -1298,7 +1465,7 @@ async fn live_installed_codex_completes_read_only_handshake() {
         .parent()
         .expect("repository root")
         .to_path_buf();
-    let supervisor = CodexSupervisor::new();
+    let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
         .register_workspace_root("live-smoke", workspace)

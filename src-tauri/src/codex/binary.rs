@@ -685,6 +685,61 @@ fn exact_union_variant(
             == Some(params_ref)
 }
 
+fn supports_explicit_skill_input(document: Option<&Value>) -> bool {
+    let Some(document) = document else {
+        return false;
+    };
+    if !object_shape(
+        Some(document),
+        "TurnStartParams",
+        &["input", "threadId"],
+        &["input", "threadId"],
+    ) || document
+        .pointer("/properties/input/items/$ref")
+        .and_then(Value::as_str)
+        != Some("#/definitions/UserInput")
+    {
+        return false;
+    }
+    let Some(variants) = document
+        .pointer("/definitions/UserInput/oneOf")
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    let matches = variants
+        .iter()
+        .filter(|variant| {
+            variant.get("title").and_then(Value::as_str) == Some("SkillUserInput")
+                && variant
+                    .pointer("/properties/type/enum")
+                    .and_then(Value::as_array)
+                    .is_some_and(|values| {
+                        values.len() == 1 && values.first().and_then(Value::as_str) == Some("skill")
+                    })
+        })
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return false;
+    }
+    let skill = matches[0];
+    skill.get("type").and_then(Value::as_str) == Some("object")
+        && required_is(skill, &["name", "path", "type"])
+        && has_properties(skill, &["name", "path", "type"])
+        && skill
+            .pointer("/properties/name/type")
+            .and_then(Value::as_str)
+            == Some("string")
+        && skill
+            .pointer("/properties/path/type")
+            .and_then(Value::as_str)
+            == Some("string")
+        && skill
+            .pointer("/properties/type/type")
+            .and_then(Value::as_str)
+            == Some("string")
+}
+
 fn structural_capabilities(documents: &BTreeMap<String, Value>) -> Option<CodexCapabilities> {
     let document = |name: &str| documents.get(name);
     let client = document("ClientRequest.json");
@@ -783,7 +838,10 @@ fn structural_capabilities(documents: &BTreeMap<String, Value>) -> Option<CodexC
         &["config", "origins"],
         &["config", "origins"],
     );
-    if !core_unions || !core_responses {
+    if !core_unions
+        || !core_responses
+        || !supports_explicit_skill_input(document("v2/TurnStartParams.json"))
+    {
         return None;
     }
 
@@ -1224,6 +1282,17 @@ mod tests {
         documents
             .get_mut("v2/ThreadStartResponse.json")
             .expect("thread start response")["required"] = serde_json::json!(["thread"]);
+        assert!(structural_capabilities(&documents).is_none());
+
+        let mut documents = fixture_documents();
+        let variants = documents
+            .get_mut("v2/TurnStartParams.json")
+            .and_then(|document| document.pointer_mut("/definitions/UserInput/oneOf"))
+            .and_then(Value::as_array_mut)
+            .expect("user input variants");
+        variants.retain(|variant| {
+            variant.get("title").and_then(Value::as_str) != Some("SkillUserInput")
+        });
         assert!(structural_capabilities(&documents).is_none());
     }
 

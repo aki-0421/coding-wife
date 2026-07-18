@@ -4,6 +4,7 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 
 use super::attachment::ResolvedAttachment;
+use super::bundled_skill::ResolvedBundledSkill;
 use super::types::{ReasoningPreset, ReviewTarget, CODEX_MODEL};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -401,8 +402,9 @@ pub(crate) fn turn_start_params(
     text: &str,
     effort: ReasoningPreset,
     attachments: &[ResolvedAttachment],
+    commit_skill: &ResolvedBundledSkill,
 ) -> Value {
-    let mut input = Vec::with_capacity(attachments.len() + 1);
+    let mut input = Vec::with_capacity(attachments.len() + 2);
     if !text.trim().is_empty() {
         input.push(json!({"type": "text", "text": text, "text_elements": []}));
     }
@@ -413,6 +415,11 @@ pub(crate) fn turn_start_params(
         ResolvedAttachment::Mention { name, path } => {
             json!({"type": "mention", "name": name, "path": path})
         }
+    }));
+    input.push(json!({
+        "type": "skill",
+        "name": commit_skill.name,
+        "path": commit_skill.path,
     }));
     json!({
         "threadId": thread_id,
@@ -528,6 +535,15 @@ pub fn validate_model_page(result: &Value) -> (bool, bool, bool, Option<String>)
 mod tests {
     use super::*;
 
+    fn commit_skill() -> ResolvedBundledSkill {
+        ResolvedBundledSkill {
+            name: "coding-wife-commit-work".to_owned(),
+            version: "1.0.0".to_owned(),
+            content_digest: format!("sha256:{}", "a".repeat(64)),
+            path: PathBuf::from("/app-bundle/resources/skills/coding-wife-commit-work/SKILL.md"),
+        }
+    }
+
     #[test]
     fn classifies_out_of_order_responses_by_id() {
         let second = classify_message(json!({"id": 2, "result": {"ok": true}}), 20)
@@ -565,8 +581,23 @@ mod tests {
 
     #[test]
     fn turn_always_sets_exact_model_effort_and_omits_service_tier() {
-        let fast = turn_start_params("thread", "message", "hello", ReasoningPreset::Low, &[]);
-        let max = turn_start_params("thread", "message", "hello", ReasoningPreset::Max, &[]);
+        let skill = commit_skill();
+        let fast = turn_start_params(
+            "thread",
+            "message",
+            "hello",
+            ReasoningPreset::Low,
+            &[],
+            &skill,
+        );
+        let max = turn_start_params(
+            "thread",
+            "message",
+            "hello",
+            ReasoningPreset::Max,
+            &[],
+            &skill,
+        );
 
         assert_eq!(fast["model"], CODEX_MODEL);
         assert_eq!(fast["effort"], "low");
@@ -574,6 +605,14 @@ mod tests {
         assert!(fast.get("serviceTier").is_none());
         assert!(fast.get("collaborationMode").is_none());
         assert!(fast.get("multiAgentMode").is_none());
+        let skills = fast["input"]
+            .as_array()
+            .expect("input")
+            .iter()
+            .filter(|item| item["type"] == "skill")
+            .collect::<Vec<_>>();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0]["name"], "coding-wife-commit-work");
     }
 
     #[test]
@@ -593,13 +632,15 @@ mod tests {
             "  ",
             ReasoningPreset::Low,
             &attachments,
+            &commit_skill(),
         );
 
         assert_eq!(
             params["input"],
             json!([
                 {"type": "localImage", "path": "/app-private/attachment-snapshots/lease/00.snapshot"},
-                {"type": "mention", "name": "notes.txt", "path": "/app-private/attachment-snapshots/lease/01.snapshot"}
+                {"type": "mention", "name": "notes.txt", "path": "/app-private/attachment-snapshots/lease/01.snapshot"},
+                {"type": "skill", "name": "coding-wife-commit-work", "path": "/app-bundle/resources/skills/coding-wife-commit-work/SKILL.md"}
             ])
         );
     }

@@ -350,6 +350,51 @@
       "ephemeral": { "type": ["boolean", "null"] }
     }
   },
+  "v2/TurnStartParams.json": {
+    "title": "TurnStartParams",
+    "type": "object",
+    "required": ["input", "threadId"],
+    "properties": {
+      "input": {
+        "type": "array",
+        "items": { "$ref": "#/definitions/UserInput" }
+      },
+      "threadId": { "type": "string" }
+    },
+    "definitions": {
+      "UserInput": {
+        "oneOf": [
+          {
+            "title": "TextUserInput",
+            "type": "object",
+            "required": ["text", "type"],
+            "properties": {
+              "text": { "type": "string" },
+              "type": {
+                "title": "TextUserInputType",
+                "type": "string",
+                "enum": ["text"]
+              }
+            }
+          },
+          {
+            "title": "SkillUserInput",
+            "type": "object",
+            "required": ["name", "path", "type"],
+            "properties": {
+              "name": { "type": "string" },
+              "path": { "type": "string" },
+              "type": {
+                "title": "SkillUserInputType",
+                "type": "string",
+                "enum": ["skill"]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
   "v2/ReviewStartParams.json": {
     "title": "ReviewStartParams",
     "type": "object",
