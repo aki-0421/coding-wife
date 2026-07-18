@@ -103,6 +103,7 @@ describe("CharacterLibraryStore", () => {
     })
     const store = new CharacterLibraryStore(gateway)
     const workspaceId = fixture.libraryRequest.workspaceId
+    const releaseSession = store.acquireSession(workspaceId)
 
     await store.beginImport(workspaceId)
     expect(store.getState(workspaceId).preview?.previewToken).toBe(
@@ -115,6 +116,7 @@ describe("CharacterLibraryStore", () => {
     await store.deletePack(workspaceId, fixture.importResponse.preview.packId)
     expect(attestPreview).toHaveBeenCalledWith(fixture.attestationRequest)
     expect(confirmImport).toHaveBeenCalledWith(fixture.confirmRequest)
+    releaseSession()
   })
 
   it("serializes mutations and retains only a stable error code", async () => {
@@ -141,5 +143,85 @@ describe("CharacterLibraryStore", () => {
       mutation: null,
       errorCode: fixture.error.code,
     })
+  })
+
+  it("ignores a Strict Mode release when the same section immediately reacquires its lease", async () => {
+    const cancelImport = vi.fn(() => Promise.resolve())
+    const store = new CharacterLibraryStore(createGateway({ cancelImport }))
+    const workspaceId = fixture.libraryRequest.workspaceId
+    const firstRelease = store.acquireSession(workspaceId)
+    await store.beginImport(workspaceId)
+
+    firstRelease()
+    const secondRelease = store.acquireSession(workspaceId)
+    await Promise.resolve()
+    expect(cancelImport).not.toHaveBeenCalled()
+    expect(store.getState(workspaceId).preview).not.toBeNull()
+
+    secondRelease()
+    await vi.waitFor(() => expect(cancelImport).toHaveBeenCalledOnce())
+    await vi.waitFor(() =>
+      expect(store.getState(workspaceId).preview).toBeNull(),
+    )
+  })
+
+  it("cancels the exact preview when a main-tab or section departure happens during picker loading", async () => {
+    const importing = deferred<CharacterImportResponse>()
+    const cancelImport = vi.fn(() => Promise.resolve())
+    const store = new CharacterLibraryStore(
+      createGateway({
+        pickImport: () => importing.promise,
+        cancelImport,
+      }),
+    )
+    const workspaceId = fixture.libraryRequest.workspaceId
+    const releaseSession = store.acquireSession(workspaceId)
+    const importPromise = store.beginImport(workspaceId)
+    releaseSession()
+    importing.resolve(parseCharacterImportResponse(fixture.importResponse))
+    await importPromise
+
+    await vi.waitFor(() => expect(cancelImport).toHaveBeenCalledOnce())
+    expect(cancelImport).toHaveBeenCalledWith({
+      previewToken: fixture.importResponse.preview.previewToken,
+      previewNonce: fixture.importResponse.preview.previewNonce,
+      generation: fixture.importResponse.preview.generation,
+    })
+    await vi.waitFor(() =>
+      expect(store.getState(workspaceId).preview).toBeNull(),
+    )
+  })
+
+  it("deduplicates workspace departure cleanup while attestation is in flight", async () => {
+    const attesting = deferred<CharacterPreviewAttestationResponse>()
+    const cancelImport = vi.fn(() => Promise.resolve())
+    const store = new CharacterLibraryStore(
+      createGateway({
+        attestPreview: () => attesting.promise,
+        cancelImport,
+      }),
+    )
+    const workspaceId = fixture.libraryRequest.workspaceId
+    const releaseSession = store.acquireSession(workspaceId)
+    await store.beginImport(workspaceId)
+    const attestationPromise = store.attestPreview(
+      workspaceId,
+      fixture.attestationRequest,
+    )
+    releaseSession()
+    releaseSession()
+
+    await vi.waitFor(() => expect(cancelImport).toHaveBeenCalledOnce())
+    attesting.resolve({
+      schemaVersion: 1,
+      attested: true,
+      rendererNonce: fixture.attestationRequest.rendererNonce,
+    })
+    await attestationPromise
+    await vi.waitFor(() =>
+      expect(store.getState(workspaceId).preview).toBeNull(),
+    )
+    expect(store.consumeRestoreFocus(workspaceId)).toBe(true)
+    expect(store.consumeRestoreFocus(workspaceId)).toBe(false)
   })
 })

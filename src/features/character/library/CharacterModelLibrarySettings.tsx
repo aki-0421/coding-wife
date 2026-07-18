@@ -1,7 +1,9 @@
 import {
   useCallback,
+  useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
 } from "react"
@@ -227,14 +229,17 @@ function CharacterModelLibrarySession({
   const library = useCharacterLibrary(workspaceId)
   const store = useCharacterLibraryStore()
   const displayNameId = useId()
-  const [importOpen, setImportOpen] = useState(false)
+  const importTriggerRef = useRef<HTMLButtonElement>(null)
+  const [importOpen, setImportOpen] = useState(() => library.preview !== null)
   const [previewAttempt, setPreviewAttempt] = useState(0)
   const [previewProgress, setPreviewProgress] = useState(initialPreviewProgress)
   const [previewFailure, setPreviewFailure] = useState<string | null>(null)
   const [attestedRendererNonce, setAttestedRendererNonce] = useState<
     string | null
   >(null)
-  const [displayName, setDisplayName] = useState("")
+  const [displayName, setDisplayName] = useState(
+    () => library.preview?.manifest.displayName ?? "",
+  )
   const [deleteTarget, setDeleteTarget] = useState<CharacterPackView | null>(
     null,
   )
@@ -265,6 +270,13 @@ function CharacterModelLibrarySession({
   const progressStyle = {
     "--character-preview-progress": `${String(previewPercent)}%`,
   } as CSSProperties
+
+  useEffect(() => store.acquireSession(workspaceId), [store, workspaceId])
+
+  useEffect(() => {
+    if (!store.consumeRestoreFocus(workspaceId)) return
+    queueMicrotask(() => importTriggerRef.current?.focus())
+  }, [store, workspaceId])
 
   const beginImport = async () => {
     setPreviewFailure(null)
@@ -407,6 +419,7 @@ function CharacterModelLibrarySession({
             store.gateway.kind !== "native"
           }
           onClick={() => void beginImport()}
+          ref={importTriggerRef}
           size="xs"
           type="button"
           variant="secondary"
@@ -508,6 +521,10 @@ function CharacterModelLibrarySession({
       >
         <DialogContent
           className="w-[min(52rem,calc(100dvw-36px))]"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            importTriggerRef.current?.focus()
+          }}
           showCloseButton={!importBusy}
         >
           <DialogHeader>

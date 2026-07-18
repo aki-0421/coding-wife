@@ -64,6 +64,9 @@ export class CharacterLibraryStore {
   readonly #states = new Map<string, CharacterLibraryState>()
   readonly #listeners = new Set<Listener>()
   readonly #loads = new Map<string, Promise<CharacterLibrarySnapshot>>()
+  readonly #sessionCounts = new Map<string, number>()
+  readonly #previewCancellations = new Map<string, Promise<void>>()
+  readonly #restoreFocus = new Set<string>()
 
   public constructor(gateway: CharacterLibraryGateway) {
     this.gateway = gateway
@@ -80,6 +83,40 @@ export class CharacterLibraryStore {
     const state = initialState(workspaceId)
     this.#states.set(workspaceId, state)
     return state
+  }
+
+  public acquireSession(workspaceId: string): () => void {
+    this.#sessionCounts.set(
+      workspaceId,
+      (this.#sessionCounts.get(workspaceId) ?? 0) + 1,
+    )
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const remaining = Math.max(
+        0,
+        (this.#sessionCounts.get(workspaceId) ?? 1) - 1,
+      )
+      if (remaining === 0) {
+        this.#sessionCounts.delete(workspaceId)
+        const state = this.getState(workspaceId)
+        if (
+          state.preview !== null ||
+          state.mutation === "importing" ||
+          state.mutation === "attesting"
+        ) {
+          this.#restoreFocus.add(workspaceId)
+        }
+        this.scheduleUnownedPreviewCancellation(workspaceId)
+      } else {
+        this.#sessionCounts.set(workspaceId, remaining)
+      }
+    }
+  }
+
+  public consumeRestoreFocus(workspaceId: string): boolean {
+    return this.#restoreFocus.delete(workspaceId)
   }
 
   public load(workspaceId: string): Promise<CharacterLibrarySnapshot> {
@@ -131,6 +168,9 @@ export class CharacterLibraryStore {
         mutation: null,
         errorCode: null,
       })
+      if ((this.#sessionCounts.get(workspaceId) ?? 0) === 0) {
+        this.scheduleUnownedPreviewCancellation(workspaceId)
+      }
       return response
     } catch (error) {
       this.failMutation(workspaceId, error)
@@ -180,11 +220,7 @@ export class CharacterLibraryStore {
     const preview = this.requirePreview(workspaceId)
     this.beginMutation(workspaceId, "canceling")
     try {
-      await this.gateway.cancelImport({
-        previewToken: preview.previewToken,
-        previewNonce: preview.previewNonce,
-        generation: preview.generation,
-      })
+      await this.cancelPreviewRequest(preview)
       this.setState(workspaceId, {
         ...this.getState(workspaceId),
         preview: null,
@@ -303,6 +339,57 @@ export class CharacterLibraryStore {
   private setState(workspaceId: string, state: CharacterLibraryState): void {
     this.#states.set(workspaceId, state)
     for (const listener of this.#listeners) listener()
+  }
+
+  private scheduleUnownedPreviewCancellation(workspaceId: string): void {
+    queueMicrotask(() => {
+      if ((this.#sessionCounts.get(workspaceId) ?? 0) !== 0) return
+      const preview = this.getState(workspaceId).preview
+      if (preview === null) return
+      void this.cancelPreviewRequest(preview).then(
+        () => {
+          const current = this.getState(workspaceId)
+          if (current.preview?.previewToken !== preview.previewToken) return
+          this.setState(workspaceId, {
+            ...current,
+            preview: null,
+            mutation:
+              current.mutation === "canceling" ? null : current.mutation,
+            errorCode: null,
+          })
+        },
+        (error: unknown) => {
+          const current = this.getState(workspaceId)
+          if (current.preview?.previewToken !== preview.previewToken) return
+          this.setState(workspaceId, {
+            ...current,
+            errorCode: safeErrorCode(error),
+          })
+        },
+      )
+    })
+  }
+
+  private cancelPreviewRequest(
+    preview: CharacterPreviewSession,
+  ): Promise<void> {
+    const existing = this.#previewCancellations.get(preview.previewToken)
+    if (existing !== undefined) return existing
+    const cancellation = this.gateway
+      .cancelImport({
+        previewToken: preview.previewToken,
+        previewNonce: preview.previewNonce,
+        generation: preview.generation,
+      })
+      .finally(() => {
+        if (
+          this.#previewCancellations.get(preview.previewToken) === cancellation
+        ) {
+          this.#previewCancellations.delete(preview.previewToken)
+        }
+      })
+    this.#previewCancellations.set(preview.previewToken, cancellation)
+    return cancellation
   }
 }
 

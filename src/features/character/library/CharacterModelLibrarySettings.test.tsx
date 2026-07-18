@@ -258,6 +258,21 @@ function renderLibrary(
   )
 }
 
+function libraryTree(
+  gateway: CharacterLibraryGateway,
+  workspaceId: string | null,
+) {
+  return (
+    <I18nProvider store={new MemoryLocaleStore("en")}>
+      <CharacterLibraryProvider gateway={gateway}>
+        {workspaceId === null ? null : (
+          <CharacterModelLibrarySettings workspaceId={workspaceId} />
+        )}
+      </CharacterLibraryProvider>
+    </I18nProvider>
+  )
+}
+
 describe("CharacterModelLibrarySettings", () => {
   beforeEach(() => {
     document.documentElement.lang = "en"
@@ -350,6 +365,41 @@ describe("CharacterModelLibrarySettings", () => {
     expect(
       screen.queryByRole("heading", { name: "Review imported model" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("cancels on section or main-tab departure and restores the import trigger on return", async () => {
+    const user = userEvent.setup()
+    const gateway = new ModelLibraryGateway([builtinPack])
+    const view = render(libraryTree(gateway, "workspace-fixture"))
+    await user.click(
+      await screen.findByRole("button", { name: "Import model" }),
+    )
+    expect(
+      await screen.findByRole("heading", { name: "Review imported model" }),
+    ).toBeVisible()
+
+    view.rerender(libraryTree(gateway, null))
+    await waitFor(() => expect(gateway.cancellationRequests).toHaveLength(1))
+    view.rerender(libraryTree(gateway, "workspace-fixture"))
+    const trigger = await screen.findByRole("button", { name: "Import model" })
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it("cancels the prior workspace preview before mounting another workspace session", async () => {
+    const user = userEvent.setup()
+    const gateway = new ModelLibraryGateway([builtinPack])
+    const view = render(libraryTree(gateway, "workspace-fixture"))
+    await user.click(
+      await screen.findByRole("button", { name: "Import model" }),
+    )
+
+    view.rerender(libraryTree(gateway, "workspace-next"))
+    await waitFor(() => expect(gateway.cancellationRequests).toHaveLength(1))
+    expect(gateway.cancellationRequests[0]).toMatchObject({
+      previewToken: importedPreview.preview?.previewToken,
+      previewNonce: importedPreview.preview?.previewNonce,
+      generation: importedPreview.preview?.generation,
+    })
   })
 
   it("shows Japanese copy and disables native import in browser mode", async () => {
