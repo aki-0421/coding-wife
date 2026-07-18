@@ -20,13 +20,39 @@ import {
   CodexWorkspaceSessionAdapter,
   type CodexHistorySink,
   type CodexSessionClock,
+  type CodexTurnLifecycleSink,
 } from "@/features/codex/workspace-session-adapter"
+
+interface Deferred<T> {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T) => void
+  readonly reject: (error: Error) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
 
 class FakeCodexTransport implements CodexTransport {
   readonly kind = "demo"
   readonly calls: { command: CodexCommand; request: unknown }[] = []
   diagnostic = parseCodexDiagnostic(fixture.diagnostic)
   interrupt = Promise.resolve({ accepted: true })
+  turnResponse: Promise<CodexResponseMap["codex_turn_start"]> | null = null
+  readonly connectResponses = new Map<
+    string,
+    Promise<CodexResponseMap["codex_connect"]>
+  >()
+  readonly threadResponses = new Map<
+    string,
+    Promise<CodexResponseMap["codex_thread_start"]>
+  >()
   turnFailure: Error | null = null
   private callbacks: CodexEventCallbacks | null = null
 
@@ -37,10 +63,18 @@ class FakeCodexTransport implements CodexTransport {
     this.calls.push({ command, request })
     switch (command) {
       case codexCommands.connect:
-        return Promise.resolve(this.diagnostic as CodexResponseMap[K])
+        return (this.connectResponses.get(
+          (request as CodexRequestMap["codex_connect"]).workspaceId,
+        ) ?? Promise.resolve(this.diagnostic)) as Promise<CodexResponseMap[K]>
       case codexCommands.threadStart:
       case codexCommands.threadResume:
-        return Promise.resolve(fixture.thread as CodexResponseMap[K])
+        return (this.threadResponses.get(
+          (
+            request as
+              | CodexRequestMap["codex_thread_start"]
+              | CodexRequestMap["codex_thread_resume"]
+          ).workspaceId,
+        ) ?? Promise.resolve(fixture.thread)) as Promise<CodexResponseMap[K]>
       case codexCommands.pickAttachments:
       case codexCommands.registerAttachmentPaths:
         return Promise.resolve({
@@ -49,6 +83,9 @@ class FakeCodexTransport implements CodexTransport {
         } as unknown as CodexResponseMap[K])
       case codexCommands.turnStart:
         if (this.turnFailure !== null) return Promise.reject(this.turnFailure)
+        if (this.turnResponse !== null) {
+          return this.turnResponse as Promise<CodexResponseMap[K]>
+        }
         return Promise.resolve(fixture.turn as CodexResponseMap[K])
       case codexCommands.turnInterrupt:
         return this.interrupt as Promise<CodexResponseMap[K]>
@@ -85,6 +122,7 @@ class MemoryHistorySink implements CodexHistorySink {
 function adapterFixture(
   options: {
     readonly clock?: CodexSessionClock
+    readonly turnLifecycleSink?: CodexTurnLifecycleSink
   } = {},
 ) {
   const transport = new FakeCodexTransport()
@@ -143,6 +181,50 @@ describe("CodexWorkspaceSessionAdapter", () => {
       eventId: "message-fixture-id",
       kind: "code.user.instruction.accepted",
       payload: { generation: 7 },
+    })
+  })
+
+  it("emits one authoritative terminal work-unit event for a completed owned turn", async () => {
+    const recordTerminal = vi.fn()
+    const { adapter, transport } = adapterFixture({
+      turnLifecycleSink: { recordTerminal },
+    })
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await adapter.sendTurn({
+      workspaceId: "workspace-fixture",
+      text: "Create the reviewable change.",
+      effort: "max",
+      attachmentHandles: [],
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    const completed: CodexEvent = {
+      ...running,
+      eventId: "event-owned-completed",
+      payload: { ...running.payload, status: "completed" },
+    }
+
+    transport.emit(completed)
+    transport.emit(completed)
+
+    expect(recordTerminal).toHaveBeenCalledTimes(1)
+    expect(recordTerminal).toHaveBeenCalledWith({
+      schemaVersion: 1,
+      workUnitId: "message-fixture-id",
+      workspaceId: "workspace-fixture",
+      generation: 7,
+      threadHandle: fixture.thread.threadHandle,
+      turnHandle: fixture.turn.turnHandle,
+      terminalStatus: "completed",
+      sourceEventId: "event-owned-completed",
+      sourceSequence: 1,
+      occurredAt: running.occurredAt,
+      objective: "Create the reviewable change.",
+      effort: "max",
+      attachmentCount: 0,
     })
   })
 
@@ -293,34 +375,250 @@ describe("CodexWorkspaceSessionAdapter", () => {
     ])
   })
 
+  it("interrupts an accepted stale turn without mutating the newly active workspace", async () => {
+    const recordTerminal = vi.fn()
+    const { adapter, history, transport } = adapterFixture({
+      turnLifecycleSink: { recordTerminal },
+    })
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-a",
+      historyMode: "ready",
+    })
+    const pendingTurn = deferred<CodexResponseMap["codex_turn_start"]>()
+    transport.turnResponse = pendingTurn.promise
+
+    const sending = adapter.sendTurn({
+      workspaceId: "workspace-a",
+      text: "Run the old workspace task.",
+      effort: "low",
+      attachmentHandles: [],
+    })
+    await vi.waitFor(() =>
+      expect(transport.calls.at(-1)?.command).toBe(codexCommands.turnStart),
+    )
+    transport.threadResponses.set(
+      "workspace-b",
+      Promise.resolve({
+        ...fixture.thread,
+        threadHandle: "thread-handle-b",
+        generation: 8,
+      }),
+    )
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-b",
+      historyMode: "ready",
+    })
+
+    pendingTurn.resolve(fixture.turn)
+    await expect(sending).rejects.toMatchObject({
+      code: "CODEX-WORKSPACE-SWITCHED",
+    })
+    await adapter.flushHistory("workspace-a")
+
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-b",
+      phase: "ready",
+      connected: true,
+      threadHandle: "thread-handle-b",
+      generation: 8,
+      errorCode: null,
+      timeline: [],
+    })
+    expect(transport.calls.at(-1)).toEqual({
+      command: codexCommands.turnInterrupt,
+      request: {
+        workspaceId: "workspace-a",
+        threadHandle: fixture.thread.threadHandle,
+        turnHandle: fixture.turn.turnHandle,
+      },
+    })
+    expect(history.events).toEqual([
+      expect.objectContaining({
+        workspaceId: "workspace-a",
+        kind: "code.user.instruction.accepted",
+      }),
+    ])
+    await expect(
+      adapter.sendTurn({
+        workspaceId: "workspace-b",
+        text: "Must wait for the old terminal event.",
+        effort: "low",
+        attachmentHandles: [],
+      }),
+    ).rejects.toThrow("CODEX-TURN-PREFLIGHT-BLOCKED")
+
+    const oldRunning = parseCodexEvent(fixture.events[0])
+    if (oldRunning.kind !== "turn_status") throw new Error("turn fixture")
+    transport.emit({
+      ...oldRunning,
+      eventId: "event-old-turn-terminal",
+      workspaceId: "workspace-a",
+      sequence: 2,
+      payload: { ...oldRunning.payload, status: "interrupted" },
+    })
+    expect(recordTerminal).toHaveBeenCalledTimes(1)
+    expect(recordTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaVersion: 1,
+        workUnitId: "message-fixture-id",
+        workspaceId: "workspace-a",
+        generation: 7,
+        threadHandle: fixture.thread.threadHandle,
+        turnHandle: fixture.turn.turnHandle,
+        terminalStatus: "interrupted",
+        sourceEventId: "event-old-turn-terminal",
+        objective: "Run the old workspace task.",
+        effort: "low",
+        attachmentCount: 0,
+      }),
+    )
+    transport.turnResponse = null
+
+    await expect(
+      adapter.sendTurn({
+        workspaceId: "workspace-b",
+        text: "Start only after terminal ownership is recorded.",
+        effort: "low",
+        attachmentHandles: [],
+      }),
+    ).resolves.toMatchObject({ accepted: true })
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-b",
+      phase: "running",
+      errorCode: null,
+    })
+  })
+
+  it("ignores a stale turn/start error after switching workspaces", async () => {
+    const { adapter, history, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-a",
+      historyMode: "ready",
+    })
+    const pendingTurn = deferred<CodexResponseMap["codex_turn_start"]>()
+    transport.turnResponse = pendingTurn.promise
+    const sending = adapter.sendTurn({
+      workspaceId: "workspace-a",
+      text: "This request will fail late.",
+      effort: "max",
+      attachmentHandles: [],
+    })
+    await vi.waitFor(() =>
+      expect(transport.calls.at(-1)?.command).toBe(codexCommands.turnStart),
+    )
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-b",
+      historyMode: "ready",
+    })
+
+    pendingTurn.reject(
+      Object.assign(new Error("late failure"), {
+        code: "CODEX-OLD-TURN-REJECTED",
+      }),
+    )
+    await expect(sending).rejects.toMatchObject({
+      code: "CODEX-OLD-TURN-REJECTED",
+    })
+
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-b",
+      phase: "ready",
+      connected: true,
+      errorCode: null,
+    })
+    expect(history.events).toEqual([])
+    expect(
+      transport.calls.filter(
+        ({ command }) => command === codexCommands.turnInterrupt,
+      ),
+    ).toEqual([])
+  })
+
+  it("keeps the last of two rapid workspace switches authoritative", async () => {
+    const { adapter, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-a",
+      historyMode: "ready",
+    })
+    const delayedConnect = deferred<CodexResponseMap["codex_connect"]>()
+    transport.connectResponses.set("workspace-b", delayedConnect.promise)
+    const switchingToB = adapter.activateWorkspace({
+      workspaceId: "workspace-b",
+      historyMode: "ready",
+    })
+    await vi.waitFor(() =>
+      expect(transport.calls).toContainEqual({
+        command: codexCommands.connect,
+        request: { workspaceId: "workspace-b" },
+      }),
+    )
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-c",
+      historyMode: "ready",
+    })
+    transport.threadResponses.set(
+      "workspace-d",
+      Promise.resolve({
+        ...fixture.thread,
+        threadHandle: "thread-handle-d",
+        generation: 10,
+      }),
+    )
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-d",
+      historyMode: "ready",
+    })
+    delayedConnect.resolve(transport.diagnostic)
+    await switchingToB
+
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-d",
+      phase: "ready",
+      connected: true,
+      threadHandle: "thread-handle-d",
+      generation: 10,
+      errorCode: null,
+    })
+  })
+
   it("persists delayed old-workspace events without mixing them into the active view", async () => {
     const { adapter, history, transport } = adapterFixture()
     await adapter.activateWorkspace({
-      workspaceId: "workspace-fixture",
+      workspaceId: "workspace-a",
       historyMode: "ready",
     })
     const current = parseCodexEvent(fixture.events[0])
-    transport.emit(current)
+    transport.emit({ ...current, workspaceId: "workspace-a" })
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-b",
+      historyMode: "ready",
+    })
     transport.emit(
       parseCodexEvent({
         ...fixture.events[2],
         eventId: "event-old-workspace",
-        workspaceId: "workspace-old",
-        generation: 6,
+        workspaceId: "workspace-a",
       }),
     )
     await Promise.all([
-      adapter.flushHistory("workspace-fixture"),
-      adapter.flushHistory("workspace-old"),
+      adapter.flushHistory("workspace-a"),
+      adapter.flushHistory("workspace-b"),
     ])
 
     expect(history.events.map(({ workspaceId }) => workspaceId)).toEqual([
-      "workspace-fixture",
-      "workspace-old",
+      "workspace-a",
+      "workspace-a",
     ])
-    expect(adapter.snapshot().timeline).toEqual([
-      expect.objectContaining({ workspaceId: "workspace-fixture" }),
-    ])
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-b",
+      phase: "ready",
+      timeline: [],
+      errorCode: null,
+    })
+    expect(adapter.sessionStore.snapshot()).toMatchObject({
+      workspaceId: "workspace-b",
+      events: [],
+    })
   })
 
   it("does not accept or persist a user instruction when turn/start fails", async () => {

@@ -38,6 +38,8 @@ export {
   type ActivateCodexWorkspaceRequest,
   type CodexHistorySink,
   type CodexSessionClock,
+  type CodexTerminalWorkUnitEvent,
+  type CodexTurnLifecycleSink,
   type StartCodexTurnRequest,
   type StartCodexTurnResult,
 } from "@/features/codex/workspace-session-adapter"

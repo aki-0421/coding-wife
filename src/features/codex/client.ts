@@ -22,10 +22,15 @@ export class CodexSessionClient {
   async start(
     onContractError: (error: Error) => void,
     onEvent?: (event: CodexEvent, result: CodexEventApplyResult) => void,
+    shouldApplyEvent?: (event: CodexEvent) => boolean,
   ): Promise<void> {
     if (this.unsubscribe !== null) return
     this.unsubscribe = await this.transport.subscribe({
       onEvent: (event) => {
+        if (shouldApplyEvent !== undefined && !shouldApplyEvent(event)) {
+          onEvent?.(event, "workspace_mismatch")
+          return
+        }
         const result = this.store.apply(event)
         onEvent?.(event, result)
       },

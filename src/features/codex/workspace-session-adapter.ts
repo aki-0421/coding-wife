@@ -45,6 +45,26 @@ export interface StartCodexTurnResult {
   readonly turnHandle: string
 }
 
+export interface CodexTerminalWorkUnitEvent {
+  readonly schemaVersion: 1
+  readonly workUnitId: string
+  readonly workspaceId: string
+  readonly generation: number
+  readonly threadHandle: string
+  readonly turnHandle: string
+  readonly terminalStatus: "completed" | "failed" | "interrupted" | "canceled"
+  readonly sourceEventId: string
+  readonly sourceSequence: number
+  readonly occurredAt: string
+  readonly objective: string
+  readonly effort: ReasoningPreset
+  readonly attachmentCount: number
+}
+
+export interface CodexTurnLifecycleSink {
+  recordTerminal(event: CodexTerminalWorkUnitEvent): void | Promise<void>
+}
+
 export interface CodexSessionClock {
   readonly now: () => string
   readonly setTimeout: (callback: () => void, milliseconds: number) => unknown
@@ -61,6 +81,41 @@ const systemClock: CodexSessionClock = {
 
 const attachmentHandlePattern =
   /^attachment-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+
+const terminalTurnStatuses = new Set([
+  "completed",
+  "failed",
+  "interrupted",
+  "canceled",
+])
+
+interface ActivationIdentity {
+  readonly token: number
+  readonly workspaceId: string
+  readonly threadHandle: string
+  readonly generation: number
+}
+
+interface AcceptedWorkUnit {
+  readonly workUnitId: string
+  readonly objective: string
+  readonly effort: ReasoningPreset
+  readonly attachmentCount: number
+}
+
+type TerminalTurnEvent = Extract<CodexEvent, { readonly kind: "turn_status" }>
+
+function codedError(code: string): Error & { readonly code: string } {
+  return Object.assign(new Error(code), { code })
+}
+
+function executionKey(
+  workspaceId: string,
+  generation: number,
+  turnHandle: string,
+): string {
+  return `${workspaceId}:${String(generation)}:${turnHandle}`
+}
 
 function safeErrorCode(error: unknown, fallback: string): string {
   if (
@@ -122,6 +177,10 @@ export class CodexWorkspaceSessionAdapter {
   private startPromise: Promise<void> | null = null
   private activation = 0
   private turnStart: Promise<StartCodexTurnResult> | null = null
+  private readonly staleExecutions = new Set<string>()
+  private readonly acceptedWorkUnits = new Map<string, AcceptedWorkUnit>()
+  private readonly observedTerminalEvents = new Map<string, TerminalTurnEvent>()
+  private readonly notifiedTerminalEventIds = new Set<string>()
 
   constructor(
     readonly transport: CodexTransport,
@@ -131,17 +190,20 @@ export class CodexWorkspaceSessionAdapter {
       readonly store?: CodexWorkspaceSessionStore
       readonly clock?: CodexSessionClock
       readonly createId?: () => string
+      readonly turnLifecycleSink?: CodexTurnLifecycleSink
     } = {},
   ) {
     this.sessionStore = options.sessionStore ?? new CodexSessionStore()
     this.store = options.store ?? new CodexWorkspaceSessionStore()
     this.clock = options.clock ?? systemClock
     this.createId = options.createId ?? (() => globalThis.crypto.randomUUID())
+    this.turnLifecycleSink = options.turnLifecycleSink
     this.client = new CodexSessionClient(transport, this.sessionStore)
   }
 
   private readonly clock: CodexSessionClock
   private readonly createId: () => string
+  private readonly turnLifecycleSink: CodexTurnLifecycleSink | undefined
 
   snapshot = (): CodexWorkspaceSessionSnapshot => this.store.snapshot()
 
@@ -160,6 +222,7 @@ export class CodexWorkspaceSessionAdapter {
           )
         },
         (event, result) => this.receiveEvent(event, result),
+        (event) => this.canApplyEvent(event),
       )
       .then(() => {
         this.started = true
@@ -175,6 +238,10 @@ export class CodexWorkspaceSessionAdapter {
     this.activation += 1
     this.client.stop()
     this.started = false
+    this.staleExecutions.clear()
+    this.acceptedWorkUnits.clear()
+    this.observedTerminalEvents.clear()
+    this.notifiedTerminalEventIds.clear()
   }
 
   async activateWorkspace(
@@ -258,6 +325,7 @@ export class CodexWorkspaceSessionAdapter {
     const snapshot = this.store.snapshot()
     if (
       snapshot.activeWorkspaceId !== request.workspaceId ||
+      this.staleExecutions.size > 0 ||
       !snapshot.connected ||
       snapshot.threadHandle === null ||
       snapshot.phase === "running" ||
@@ -281,6 +349,12 @@ export class CodexWorkspaceSessionAdapter {
     const clientUserMessageId = `message-${this.createId()}`
     const generation = snapshot.generation
     if (generation === null) throw new Error("CODEX-GENERATION-UNAVAILABLE")
+    const identity: ActivationIdentity = {
+      token: this.activation,
+      workspaceId: request.workspaceId,
+      threadHandle,
+      generation,
+    }
     const sourceSequence = snapshot.lastSequence + 1
     const operation = this.transport
       .request(codexCommands.turnStart, {
@@ -291,12 +365,23 @@ export class CodexWorkspaceSessionAdapter {
         effort: request.effort,
         attachmentHandles: request.attachmentHandles,
       })
-      .then((turn) => {
-        const latest = this.store.snapshot()
-        if (latest.activeWorkspaceId !== request.workspaceId) {
-          throw new Error("CODEX-WORKSPACE-SWITCHED")
+      .then(async (turn) => {
+        const key = executionKey(
+          identity.workspaceId,
+          identity.generation,
+          turn.turnHandle,
+        )
+        this.acceptedWorkUnits.set(key, {
+          workUnitId: clientUserMessageId,
+          objective: request.text,
+          effort: request.effort,
+          attachmentCount: request.attachmentHandles.length,
+        })
+        const observedTerminal = this.observedTerminalEvents.get(key)
+        const alreadyTerminal = observedTerminal !== undefined
+        if (observedTerminal !== undefined) {
+          this.emitTerminalWorkUnit(key, observedTerminal)
         }
-        this.store.markTurnAccepted(turn.turnHandle)
         const accepted = projectAcceptedUserTurn({
           eventId: clientUserMessageId,
           workspaceId: request.workspaceId,
@@ -307,9 +392,33 @@ export class CodexWorkspaceSessionAdapter {
           effort: request.effort,
           attachmentCount: request.attachmentHandles.length,
         })
+        if (accepted.history !== null) this.enqueueHistory(accepted.history)
+        if (!this.isCurrent(identity)) {
+          if (!alreadyTerminal) {
+            this.staleExecutions.add(key)
+          }
+          try {
+            const interrupted = await this.transport.request(
+              codexCommands.turnInterrupt,
+              {
+                workspaceId: identity.workspaceId,
+                threadHandle: identity.threadHandle,
+                turnHandle: turn.turnHandle,
+              },
+            )
+            if (!interrupted.accepted) {
+              throw codedError("CODEX-STALE-TURN-INTERRUPT-REJECTED")
+            }
+          } catch (error) {
+            throw codedError(
+              safeErrorCode(error, "CODEX-STALE-TURN-INTERRUPT-FAILED"),
+            )
+          }
+          throw codedError("CODEX-WORKSPACE-SWITCHED")
+        }
+        this.store.markTurnAccepted(turn.turnHandle)
         if (accepted.timeline !== null)
           this.store.applyTimeline(accepted.timeline)
-        if (accepted.history !== null) this.enqueueHistory(accepted.history)
         return {
           accepted: true,
           clientUserMessageId,
@@ -317,10 +426,12 @@ export class CodexWorkspaceSessionAdapter {
         } as const
       })
       .catch((error: unknown) => {
-        this.store.markOperationError(
-          safeErrorCode(error, "CODEX-TURN-START-FAILED"),
-          true,
-        )
+        if (this.isCurrent(identity)) {
+          this.store.markOperationError(
+            safeErrorCode(error, "CODEX-TURN-START-FAILED"),
+            true,
+          )
+        }
         throw error
       })
       .finally(() => {
@@ -376,6 +487,14 @@ export class CodexWorkspaceSessionAdapter {
       throw new Error("CODEX-TURN-NOT-ACTIVE")
     }
     this.store.markStopping()
+    const generation = snapshot.generation
+    if (generation === null) throw new Error("CODEX-GENERATION-UNAVAILABLE")
+    const identity: ActivationIdentity = {
+      token: this.activation,
+      workspaceId,
+      threadHandle: snapshot.threadHandle,
+      generation,
+    }
     const request = this.transport.request(codexCommands.turnInterrupt, {
       workspaceId,
       threadHandle: snapshot.threadHandle,
@@ -390,10 +509,12 @@ export class CodexWorkspaceSessionAdapter {
       )
       if (!response.accepted) throw new Error("CODEX-INTERRUPT-REJECTED")
     } catch (error) {
-      this.store.markOperationError(
-        safeErrorCode(error, "CODEX-INTERRUPT-FAILED"),
-        true,
-      )
+      if (this.isCurrent(identity)) {
+        this.store.markOperationError(
+          safeErrorCode(error, "CODEX-INTERRUPT-FAILED"),
+          true,
+        )
+      }
       throw error
     }
   }
@@ -436,6 +557,24 @@ export class CodexWorkspaceSessionAdapter {
       | "out_of_order"
       | "workspace_mismatch",
   ): void {
+    if (
+      event.kind === "turn_status" &&
+      terminalTurnStatuses.has(event.payload.status)
+    ) {
+      const key = executionKey(
+        event.workspaceId,
+        event.generation,
+        event.payload.turnHandle,
+      )
+      this.observedTerminalEvents.set(key, event)
+      if (this.observedTerminalEvents.size > 500) {
+        const oldest = this.observedTerminalEvents.keys().next().value
+        if (typeof oldest === "string")
+          this.observedTerminalEvents.delete(oldest)
+      }
+      this.staleExecutions.delete(key)
+      this.emitTerminalWorkUnit(key, event)
+    }
     if (result === "duplicate" || result === "out_of_order") return
     const projection = this.projector.project(event)
     if (projection.history !== null) this.enqueueHistory(projection.history)
@@ -444,6 +583,73 @@ export class CodexWorkspaceSessionAdapter {
       if (projection.timeline !== null) {
         this.store.applyTimeline(projection.timeline)
       }
+    }
+  }
+
+  private isCurrent(identity: ActivationIdentity): boolean {
+    const current = this.store.snapshot()
+    return (
+      identity.token === this.activation &&
+      current.activeWorkspaceId === identity.workspaceId &&
+      current.threadHandle === identity.threadHandle &&
+      current.generation === identity.generation
+    )
+  }
+
+  private canApplyEvent(event: CodexEvent): boolean {
+    const current = this.store.snapshot()
+    if (
+      current.activeWorkspaceId !== event.workspaceId ||
+      current.generation === null ||
+      current.generation !== event.generation ||
+      current.threadHandle === null
+    ) {
+      return false
+    }
+    if (event.kind === "thread_status" || event.kind === "turn_status") {
+      return event.payload.threadHandle === current.threadHandle
+    }
+    return true
+  }
+
+  private emitTerminalWorkUnit(key: string, event: TerminalTurnEvent): void {
+    if (this.notifiedTerminalEventIds.has(event.eventId)) {
+      this.observedTerminalEvents.delete(key)
+      return
+    }
+    const accepted = this.acceptedWorkUnits.get(key)
+    if (accepted === undefined) return
+    this.notifiedTerminalEventIds.add(event.eventId)
+    this.acceptedWorkUnits.delete(key)
+    this.observedTerminalEvents.delete(key)
+    if (this.notifiedTerminalEventIds.size > 500) {
+      const oldest = this.notifiedTerminalEventIds.values().next().value
+      if (typeof oldest === "string")
+        this.notifiedTerminalEventIds.delete(oldest)
+    }
+    if (this.turnLifecycleSink === undefined) return
+    const terminalEvent: CodexTerminalWorkUnitEvent = {
+      schemaVersion: 1,
+      workUnitId: accepted.workUnitId,
+      workspaceId: event.workspaceId,
+      generation: event.generation,
+      threadHandle: event.payload.threadHandle,
+      turnHandle: event.payload.turnHandle,
+      terminalStatus: event.payload
+        .status as CodexTerminalWorkUnitEvent["terminalStatus"],
+      sourceEventId: event.eventId,
+      sourceSequence: event.sequence,
+      occurredAt: event.occurredAt,
+      objective: accepted.objective,
+      effort: accepted.effort,
+      attachmentCount: accepted.attachmentCount,
+    }
+    try {
+      void Promise.resolve(
+        this.turnLifecycleSink.recordTerminal(terminalEvent),
+      ).catch(() => undefined)
+    } catch {
+      // Git/checkpoint lifecycle failures are owned and surfaced by that sink.
     }
   }
 
