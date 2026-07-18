@@ -45,6 +45,8 @@ pnpm quality:check
 
 `pnpm quality:check` refuses a dirty checkout and runs every expensive gate synchronously in this order: `format:check`, `test:clean-checkout`, `typecheck`, `build`, `live2d:verify`, Rust format, Clippy with warnings denied, Rust tests, deterministic `agent-docs` lint, the production Tauri build, and the final repository diff check. Frontend and Cargo workloads never overlap. The command checks the worktree again after the build and stops at the first failed gate.
 
+The Rust gate uses the committed lockfile and libtest `--test-threads=1`. Several native integration tests deliberately enforce real wall-clock budgets while running Git, SQLite, and local process fixtures; serial suite scheduling prevents unrelated fixtures from consuming one another's product budgets. Concurrency behavior remains covered inside the individual tests with controlled tasks and peak counters. The gate does not extend, retry, ignore, or remove any timeout or performance assertion.
+
 `pnpm test:clean-checkout` creates a detached temporary worktree from `HEAD`, installs the pinned lockfile, and proves lint, tests, type checking, and Live2D preparation do not depend on ignored Framework output.
 
 `pnpm check:diff` checks committed changes from `origin/develop...HEAD`, staged changes, unstaged changes, and untracked files for whitespace errors and unresolved conflict markers. Its committed-diff policy also rejects generated/build paths, private-state paths, newly added machine-local checkout or home paths, and binary files outside the explicit application asset allowlist. CI passes the Pull Request base commit to the same command. Use `pnpm check:diff -- --working-tree` for local whitespace checks when the base ref is intentionally unavailable.

@@ -35,7 +35,14 @@ export const QUALITY_GATES = Object.freeze([
   {
     id: "rust-test",
     command: "cargo",
-    args: ["test", "--locked", "--manifest-path", "src-tauri/Cargo.toml"],
+    args: [
+      "test",
+      "--locked",
+      "--manifest-path",
+      "src-tauri/Cargo.toml",
+      "--",
+      "--test-threads=1",
+    ],
   },
   {
     id: "agent-docs",

@@ -68,3 +68,16 @@ test("dependency-resolving Cargo gates require the committed lockfile", () => {
     assert.equal(gate.args.includes("--locked"), true)
   }
 })
+
+test("Rust integration budgets are isolated from cross-test contention", () => {
+  const gate = QUALITY_GATES.find(({ id }) => id === "rust-test")
+  assert.ok(gate)
+  assert.deepEqual(gate.args, [
+    "test",
+    "--locked",
+    "--manifest-path",
+    "src-tauri/Cargo.toml",
+    "--",
+    "--test-threads=1",
+  ])
+})
