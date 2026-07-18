@@ -3,7 +3,7 @@ import type { SupportedLocale } from "@/features/localization"
 const en = {
   title: "Character models",
   description:
-    "Choose the Live2D model used in this workspace. Imported folders stay inside the app's private library.",
+    "Choose the Live2D model used in this workspace. Imported model assets stay inside the app's private library.",
   importModel: "Import model",
   importUnavailable: "Model import is available in the desktop app.",
   loading: "Loading character models",
@@ -22,7 +22,7 @@ const en = {
   delete: "Delete",
   deleteTitle: "Delete this character model?",
   deleteDescription:
-    "The model will be removed from the private app library. Source files in the original folder are not changed.",
+    "The model will be removed from the private app library. Source files beside the selected .model3.json are not changed.",
   cancel: "Cancel",
   deleteConfirm: "Delete model",
   deleting: "Deleting…",
@@ -32,7 +32,7 @@ const en = {
     "The previous model was unavailable, so this workspace safely fell back to Hiyori.",
   importTitle: "Review imported model",
   importDescription:
-    "The folder is copied to quarantine first. It is published only after an isolated preview renders successfully and you confirm its name.",
+    "The selected .model3.json and its referenced local assets are copied to quarantine first. They are published only after an isolated preview renders successfully and you confirm the name.",
   previewLabel: "Isolated Live2D preview",
   preparing: "Checking model files…",
   starting: "Starting isolated renderer…",
@@ -52,7 +52,7 @@ const en = {
 const ja: typeof en = {
   title: "キャラクターモデル",
   description:
-    "このワークスペースで使うLive2Dモデルを選びます。取り込んだフォルダーはアプリ専用ライブラリ内に保存されます。",
+    "このワークスペースで使うLive2Dモデルを選びます。取り込んだモデル素材はアプリ専用ライブラリ内に保存されます。",
   importModel: "モデルを取り込む",
   importUnavailable: "モデルの取り込みはデスクトップアプリで利用できます。",
   loading: "キャラクターモデルを読み込み中",
@@ -71,7 +71,7 @@ const ja: typeof en = {
   delete: "削除",
   deleteTitle: "このキャラクターモデルを削除しますか？",
   deleteDescription:
-    "アプリ専用ライブラリからモデルを削除します。取り込み元フォルダーのファイルは変更しません。",
+    "アプリ専用ライブラリからモデルを削除します。選択した.model3.jsonと同じ場所にある取り込み元ファイルは変更しません。",
   cancel: "キャンセル",
   deleteConfirm: "モデルを削除",
   deleting: "削除中…",
@@ -81,7 +81,7 @@ const ja: typeof en = {
     "以前のモデルを利用できなかったため、このワークスペースは安全にHiyoriへ戻りました。",
   importTitle: "取り込むモデルを確認",
   importDescription:
-    "フォルダーは最初に隔離領域へコピーされます。分離プレビューで正常描画を確認し、名前を確定するまで公開しません。",
+    "選択した.model3.jsonと参照先のローカル素材は最初に隔離領域へコピーされます。分離プレビューで正常描画を確認し、名前を確定するまで公開しません。",
   previewLabel: "分離Live2Dプレビュー",
   preparing: "モデルファイルを確認中…",
   starting: "分離レンダラーを起動中…",
