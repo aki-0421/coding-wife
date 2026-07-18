@@ -19,13 +19,13 @@ read_when:
 
 ## 背景
 
-利用者が別作業をしている間も、入力待ち、失敗、checkpoint完了を短い音声で知れると状況把握負担が下がる。ただし、頻繁な発話、古いworkspaceの音声、secret送信、音声だけの通知は集中とprivacyを損なう。
+利用者が別作業をしている間も、入力待ち、失敗、新規commit観測を短い音声で知れると状況把握負担が下がる。また「詳しく教えて」で生成したcommit説明をcharacter captionへstreamし、希望時だけ同じ文を読み上げれば、視覚・聴覚のどちらでも追える。ただし、頻繁な発話、古いworkspaceの音声、secret送信、音声だけの通知は集中とprivacyを損なう。
 
 ## 目的
 
 | 目的 | 達成したと判断できる状態 |
 |---|---|
-| 意味ある状態だけを伝える | active workspaceの入力待ち、失敗、checkpointを短い字幕として表示する |
+| 意味ある状態だけを伝える | active workspaceの入力待ち、失敗、新規commit、明示要求したcommit説明を字幕として表示する |
 | 音声を完全に任意にする | TTSはdefault offで、mute・offline・provider failureでも字幕と操作が残る |
 | privacyと鮮度を守る | redacted transcriptだけをproviderへ送り、stale/old workspace audioを再生しない |
 
@@ -66,7 +66,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `NARR-F-057` | appは意味あるeventから短いtranscriptを作る | waiting_for_user、error、checkpoint_completed、disconnectedで1〜240文字のja/en transcriptを生成し、通常tool rowごとには生成しない | Approved | 非該当 |
+| `NARR-F-057` | appは意味あるeventから短いtranscriptを作る | waiting_for_user、error、commit_observed、disconnectedで1〜240文字のja/en transcriptを生成し、通常tool rowごとには生成しない。commit説明は`NARR-F-078`の確定chunkを使う | Approved | 非該当 |
 | `NARR-F-058` | transcriptはaudioより先に表示される | narration event受理から300ms以内にvisible caption/timeline textを表示し、その後にだけTTS requestを開始する | Approved | 非該当 |
 | `NARR-F-059` | narrationはactive workspaceだけへ適用される | workspace B選択中にAのeventが届いてもBのcaption/Live2D/audioへ表示・再生せず、Aのtimeline metadataへ記録する | Approved | 非該当 |
 | `NARR-F-060` | stale narrationを破棄する | transcript generationがactive workspace generationと一致しない場合、TTS requestとplaybackを開始しない | Approved | 非該当 |
@@ -97,6 +97,15 @@ read_when:
 | `NARR-F-075` | appはja/enに対応するvoiceを選ぶ | UI localeに合うvoiceだけを候補表示し、対応voiceが0件ならTTSをdisabledにしてtext fallbackを使う | Approved | 非該当 |
 | `NARR-F-076` | appはmicrophoneへアクセスしない | permission manifestとruntime testでmicrophone capability/requestが0件になる | Approved | 非該当 |
 | `NARR-F-077` | 利用者はTTS testをcancelできる | test playbackまたはrequest中にCancelすると100ms以内に再生停止/abortし、保存済み設定を変更しない | Approved | 非該当 |
+
+### Commit explanation caption
+
+| 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
+|---|---|---|---|---|
+| `NARR-F-078` | commit説明の確定chunkをcharacter captionへstreamする | redaction/schema検査済みdeltaをsequence順に1chunkずつvisible captionへ表示し、summary、changes、reasons、verification、impact、cautions、howToReadNextをja/enで追える。Live2D canvasだけへ描画しない | Approved | 非該当 |
+| `NARR-F-079` | TTSはcaptionと同じchunkだけを読む | TTS enabledかつunmutedの時だけ、captionへ確定した同一text・同一sequenceをproviderへ送り、音声用の追加要約・言い換え・evidence再送を0件にする | Approved | 非該当 |
+| `NARR-F-080` | TTS無効・失敗時もcaptionを維持する | TTS off、mute、keyなし、provider error、audio deviceなしの各状態で説明captionを全件表示し、説明request自体を失敗扱いにしない | Approved | 非該当 |
+| `NARR-F-081` | stale/cancel後の説明を適用しない | workspace generation、selected commit、request IDの不一致、Cancel後のdeltaをcaption/live region/TTSへ適用せず、current captionをcanceled/unavailable textでterminal化する | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -130,6 +139,7 @@ read_when:
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
 | `S-002` | コーディングワークスペース | `NARR-F-057`〜`NARR-F-063`, `NARR-F-068`〜`NARR-F-075` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-003` | セッション証拠 | `NARR-F-078`〜`NARR-F-081` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
 | `S-004` | 設定・診断 | `NARR-F-064`〜`NARR-F-077` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
@@ -150,6 +160,7 @@ read_when:
 | 依存・前提 | 内容 | 状態 | 未解決時の影響 |
 |---|---|---|---|
 | SUP | validated narration summary | 解決済み（相互参照確認済み） | unavailable時はdeterministic transcript |
+| GIT | selected commit、explanation request、redacted evidence | 解決済み（typed contract） | invalid/stale時はcaptionをfail closed |
 | LIVE | lip-sync/operational state | 解決済み（相互参照確認済み） | renderer failureでもcaption/audio継続可能 |
 | HIST | transcript/usage metadata、audio非保存 | 解決済み（相互参照確認済み） | persistence failureでもplayback後audio削除 |
 | External TTS | user key、voice list、5秒timeout | 解決済み（optional境界） | unavailable時text fallback |

@@ -36,8 +36,8 @@ status: "Approved"
 | Character context | name、tone、speech density、表現上の禁止事項。technical policyから分離 |
 | Companion | bundled Hiyori、custom model import、inventory、preview、semantic mapping、hide、provenance、delete |
 | Audio | default off、separate API key、voice、rate、test、mute、text fallback |
-| Support | global/role enable、active/queue/budget、usage、last error、policy固定値 |
-| Diagnostics | OS/app、Codex、Git、DB、Live2D、audio、support、capability、error code、retry |
+| Support | global/role enable、commit explainer skill、active/queue/budget、usage、last error、policy固定値 |
+| Diagnostics | OS/app、Codex、commit skill注入、read-only Git、DB、Live2D、audio、support、capability、error code、retry |
 | History & Privacy | persistence内容、redaction、workspace history削除、migration/recovery、non-persistence |
 
 ### 含めない
@@ -123,7 +123,7 @@ active project/workspaceを明示し、[S-002 Context subview](S-002_coding-work
 | Companion behavior | cue preference | inventory内cueだけ | Live2D presentation |
 | Prohibited expressions | 0〜20項目、各1〜200 | safety/error/decisionの事実表示は抑止できない | output presentation |
 
-Character contextはpermission、model、tool、Git gate、checkpoint、verification、approval、privacy、support capabilityを上書きできない。technical policy keyを含む入力は保存前に拒否し、Project contextへ自動コピーしない。running turnには次turnから適用する。
+Character contextはpermission、model、tool、Git observer、commit skill、verification、approval、privacy、support capabilityを上書きできない。technical policy keyを含む入力は保存前に拒否し、Project contextへ自動コピーしない。running turnには次turnから適用する。
 
 ### Companion
 
@@ -166,6 +166,7 @@ build時の入力はrepositoryの`tmp/hiyori_pro`とし、release resourceには
 | acting | inventory内cue | neutral + `作業中` |
 | waiting_for_user | inventory内cue | neutral + `回答待ち` |
 | reviewing | inventory内cue | neutral + `検証中` |
+| explaining_commit | inventory内cue | neutral + `コミットを説明しています` |
 | error | inventory内cue | neutral + error text |
 | completed | inventory内cue | neutral + completion text |
 | disconnected | inventory内cue | neutral + offline text |
@@ -192,10 +193,11 @@ provider requestは240文字以下のredacted transcript、voice、formatだけ�
 
 | setting / status | 初期値・制約 | 動作 |
 |---|---|---|
-| Global enable | default off。tool 0件/cwdなし/fs・shell・MCPなしを強制できるcapability合格時だけon可能 | capability不足またはoffでthreadを起動せず、queued/activeをcancelしdeterministic fallbackを維持 |
+| Global enable | isolation capability合格時default on、不合格時off。tool 0件/cwdなし/repo・fs・shell・Git・MCPなしを強制できる時だけon可能 | capability不足またはoffでthreadを起動せず、queued/activeをcancelしdeterministic fallbackを維持 |
 | Presence / narration | on | deterministic eventだけで起動 |
 | Decision explainer | role policy値 | main decisionを補助し、直接質問しない |
-| Checkpoint reviewer | role policy値 | explicit triggerのfixed diff最大1MiBだけ |
+| Commit explainer | on | S-003の「詳しく教えて」だけで起動し、redacted `CommitEvidenceV1`最大64KiBだけを読む |
+| Explainer skill | `coding-wife-explain-commit`、`app_bundle`、implicit invocation off | version、digest、last injected request、schema statusをread-only表示 |
 | Concurrency / queue | active 1、queue最大10 | 11件目はlow priorityをdropしmetadata記録 |
 | Task budget | 15秒、input+output 16,000 token |超過でcancel、fallback |
 | Model / effort | GPT-5.6 familyのrole policy固定、read-only | support output/UIから変更不可 |
@@ -209,11 +211,12 @@ role toggleをoffにするとqueued taskをcancelし、新規invocationを作ら
 |---|---|---|---|
 | OS / App | macOS version、Apple Silicon、app/build/schema | unsupported OS/arch、migration pending | release note / recovery |
 | Codex | executable、protocol initialize、login、`GPT-5.6 Sol`、Fast/Max capability | missing、unauthenticated、model/effort unavailable、disconnect | Recheck、login案内 |
-| Git | executable capability、repo/HEAD/identity、read/write条件 | missing、bare、submodule root、LFS mutation、lock、permission | project再選択、refresh |
+| Commit policy | `coding-wife-commit-work`のversion、digest prefix、`app_bundle`、explicit injection mode、last verified turn | resource missing、digest mismatch、skill input/developer instruction unavailable、last injection failed | Recheck。failure中はdraftを保持してturnを開始しない |
+| Git observer | executable capability、repo/HEAD/status、read-only policy version、last observation | missing、bare、unsupported repo、stale、read permission、mutation command exposed | project再選択、read-only Refresh |
 | DB | integrity、writer、schema、backup | migration rollback、corruption、read-only | backup pathをbasename化してrecovery案内 |
 | Live2D | bundled manifest/hash、WebGL、selected pack、first frame | asset/context loss、unsupported MOC、fallback level | Retry、Hiyori選択、text-only |
 | Audio | toggle、key set/unset、voice、device、last provider code | offline、invalid key、timeout、deviceなし | Replace key、Test、Mute |
-| Support | enable、role、queue、budget、audit、last usage | timeout、schema、policy、non-persistence未検証 | Cancel、Disable、Recheck |
+| Support | enable、role、queue、budget、`coding-wife-explain-commit` version/digest、audit、last usage | isolation unavailable、timeout、schema、policy、non-persistence未検証 | Cancel、Disable、Recheck |
 | Security | CSP/capability version、redaction self-check | policy mismatch、future schema event | safe mode、release guidance |
 
 診断はtoken、API key、cookie、完全なhome/source path、support prompt/response、raw stderrを表示しない。各resultはcode、checked time、scope、impact、recoverable、safe detail refを持つ。`Copy diagnostics`は同じsanitized summaryだけをclipboardへ出す。
@@ -224,8 +227,8 @@ DB readinessはHistory & Privacyのbadgeと同じ履歴状態を正本にする�
 
 | 項目 | 表示・操作 |
 |---|---|
-| Stored locally | project/workspace、normalized event、draft、context、checkpoint pack、selected character、settings |
-| Never stored | raw reasoning、audio byte、support prompt/response、raw secret |
+| Stored locally | project/workspace、normalized event、draft、context、Git observation、commit evidence、skill injection audit、selected character、settings |
+| Never stored | raw reasoning、audio byte、support prompt/response、commit explanation transcript、raw secret |
 | Redaction | key/token/cookie/home pathのself-check status、last failure code |
 | Schema | current version、last migration、backup、writer queue/integrity |
 | Delete workspace history | running turnなしの対象だけ。app DB/artifactを削除し、Git repo/commit/branchを変更しない |
@@ -376,8 +379,8 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 |---|---|---|
 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063` | preflight、project登録解除、project/character context | [workspace-sessions](../requirements/workspace-sessions.md) |
 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075` | Codex initialize/login/Sol/effort/attachment前提診断 | [codex-main-session](../requirements/codex-main-session.md) |
-| `SUP-F-062`〜`SUP-F-068` | concurrency、budget、usage、toggle、non-persistence、model policy | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
-| `GIT-F-043`, `GIT-F-062`, `GIT-F-065` | Git baseline/error/unsupported診断 | [git-review-harness](../requirements/git-review-harness.md) |
+| `SUP-F-062`〜`SUP-F-077` | concurrency、budget、usage、commit explainer skill、toggle、non-persistence、model policy | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
+| `GIT-F-072`, `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092` | read-only Git observer、main/explainer skill version・digest・注入診断 | [git-review-harness](../requirements/git-review-harness.md) |
 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | history削除、migration、corruption、writer、schema、support metadata、durability表示 | [activity-history](../requirements/activity-history.md) |
 | `LIVE-F-055`〜`LIVE-F-081` | bundled Hiyori、renderer、import、mapping、delete、performance | [live2d-companion](../requirements/live2d-companion.md) |
 | `NARR-F-064`〜`NARR-F-077` | default off、secret、voice/test、mute、privacy、no microphone | [audio-commentary](../requirements/audio-commentary.md) |

@@ -1,13 +1,13 @@
 ---
-title: "GIT Gitレビュー・チェックポイント要件定義"
-description: "既存変更を保護する所有権判定、自動checkpoint、review pack、比較・復元を定義する。"
+title: "GIT Gitレビュー観測要件定義"
+description: "main Codexが作るcommitをnative backendがread-only観測し、commit evidence、skill監査、説明導線を提供する。"
 updated: 2026-07-18
 read_when:
-  - "Git baseline、owned staging、automatic checkpointを実装するとき。"
-  - "Commit tabのevidence、review、restoreを検証するとき。"
+  - "Git observer、commit evidence、Commit tabを実装するとき。"
+  - "commit skill注入、work unitとcommitの相関、native Git権限を検証するとき。"
 ---
 
-# Gitレビュー・チェックポイント 要件定義
+# Gitレビュー観測 要件定義
 
 | 項目 | 内容 |
 |---|---|
@@ -19,15 +19,18 @@ read_when:
 
 ## 背景
 
-大きな最終diffはレビュー負担を増やし、既存の利用者変更をAI変更へ混入させる危険がある。作業単位のscope、ownership、verification、riskを満たした時だけcheckpointを作り、証拠と安全な復元を提供する必要がある。
+レビュー可能なcommitは必要だが、アプリ内のnative Git serviceがindex、object、ref、worktreeを変更すると、main coding sessionとの二重producerになり、既存変更の混入、履歴競合、crash recoveryの複雑さを生む。commit producerはversioned skillを毎turn受け取るmain Codex sessionへ一本化し、native backendはGit状態と履歴を読むobserverに限定する。
+
+Commit画面は「アプリがcheckpointを作る場所」ではない。main Codexが通常作業中に作ったcommitと、work unitの検証・判断・リスクを相関して確認し、必要な時だけ隔離support agentから平易な説明を得るread-only evidence画面である。
 
 ## 目的
 
 | 目的 | 達成したと判断できる状態 |
 |---|---|
-| 既存変更を保護する | session開始前のdirty changeを特定し、自動stage/commitへ一切含めない |
-| 小さなreview単位を作る | gate通過後だけautomatic commitとreview packを作成する |
-| 安全に比較・復元する | Commit tabからdiff、test、decision、risk、restore方法を確認できる |
+| producerを一つにする | commitは`coding-wife-commit-work`を明示注入されたmain Codexだけが作り、native command surfaceにGit mutationが0件である |
+| 利用者変更を保護する | turn前から存在したstaged/unstaged/untrackedを観測・表示し、main skillが無関係な変更をcommitしない |
+| evidenceを確認可能にする | commit list、選択、metadata、sanitized diff、verification/decision/risk evidenceをread-only表示する |
+| 説明を安全に補う | 明示操作時だけredacted `CommitEvidenceV1`を隔離supportへ渡し、JA/EN説明をcaptionへstreamする |
 
 ## スコープ
 
@@ -35,157 +38,158 @@ read_when:
 
 | 対象 | 内容 |
 |---|---|
-| Baseline | HEAD、real index bytes・entry・flags、working tree、untrackedのcontent fingerprint |
-| Ownership | work unitごとのowned path/hunk、pre-existing change除外 |
-| Checkpoint | Scope/Ownership/Verification/Risk gate後のautomatic local commit |
-| Review pack | SHA、diff、tests、decisions、failed attempts、risks、restore |
-| Recovery | compare、revert commit、recovery branch、stale/dirty blocking |
-| Operation journal | checkpoint/restoreのmutation前intent、ref CAS、HIST完了、起動時reconciliation |
+| Read-only observation | HEAD、branch/detached、status、pre-existing change、commit list/metadata、diff、new commit detection |
+| Correlation | work unit、turn、source event、commit SHA、verification、decision、risk、skill injection auditのHIST相関 |
+| Main commit skill | app bundle内の`coding-wife-commit-work`、version/digest、各main turnへの明示注入 |
+| Commit evidence | list/select、metadata、file summary、sanitized lazy diff、gate evidence、empty/error/stale state |
+| Commit explanation | redacted structured evidence、明示trigger、isolated support、streamed caption、optional same-transcript TTS |
 
 ### 含めない
 
-| 非対象 | 理由 | 扱う機能・文書 |
+| 非対象 | 理由 | 扱い |
 |---|---|---|
-| auto push / merge / force | remoteと共有履歴を無断変更しない | 外部Git workflow |
-| manual commit button | work unit gateを迂回させない | automatic checkpoint |
-| hard reset / checkout discard | user changeを破壊し得る | revert commit / recovery branch |
-| interactive rebase | 履歴書換えをMVPに含めない | 外部Git client |
-| submodule/LFS mutation | ownership境界が異なる | MVP非対象としてblocked表示 |
+| native commit / checkpoint | main Codexとproducerが競合する | `coding-wife-commit-work`を受けたmain Codexが通常作業中に実行 |
+| stage / index write | 利用者のstagingを変更し得る | observerはstatusだけ読む |
+| commit-tree / ref update / branch作成 | repository履歴mutationになる | native commandとして実装しない |
+| revert / restore / recovery branch | Git状態を変えるUIをMVPに含めない | 外部Git clientまたは利用者がmain Codexへ明示依頼 |
+| push / merge / force / rebase | remoteまたは共有履歴を変える | 外部Git workflow |
+| manual commit button | producer方針を迂回する | Commit tabはread-only |
+| raw repository contentのsupport送信 | least privilegeとsecret保護 | redacted `CommitEvidenceV1`だけを送る |
 
 ## アクターと権限
 
-| アクター | 説明 | 許可する操作 | 拒否時の動作 |
+| アクター | 説明 | 許可する操作 | 禁止・失敗時 |
 |---|---|---|---|
-| ローカル利用者 | repository所有者・reviewer | evidence閲覧、compare、safe restore、recovery branch | unsafe dirty/stale状態ではmutationを実行せず理由を表示する |
-| Codex main session | work unitの変更作成者 | scope、変更候補、verification resultを提出 | 自身でstage/commit/pushを直接実行するUI契約を持たない |
-| Rust Git service | repository mutationの信頼境界 | baseline、diff、owned stage、local commit、revert/branch | ownership不明、HEAD stale、権限不足、conflictで停止する |
+| ローカル利用者 | repository所有者・reviewer | evidence閲覧、commit選択、「詳しく教えて」、support cancel | Commit tabからGit mutationできない |
+| Main Codex session | 唯一のcommit producer | app同梱skillに従う通常のstage/commit、verification、結果報告 | unsafe時はforceせず理由を報告する |
+| Rust Git observer | native Git trust boundary | validated repositoryのread-only inspectとHIST evidence append | mutation commandを公開・実行しない |
+| Commit explainer support | 短命の説明生成者 | redacted structured evidenceからJA/EN schemaを生成 | repo/path/tool/raw diffへアクセスしない |
 
 ## 機能要件
 
-### Baseline・ownership・gate
+### Read-only observer
 
-| 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
-|---|---|---|---|---|
-| `GIT-F-043` | appはsession開始時のGit baselineを記録する | accepted work unitごとにterminal eventより前、遅くとも最初のfile eventを受理する前に、HEAD SHA、branch/detached、real index bytes・entry・flags、tracked diff、全changed/untracked pathのtype・mode・content fingerprintを保存する。baseline取得に失敗したwork unitは自動checkpointしない | Approved | 非該当 |
-| `GIT-F-044` | appはpre-existing changeを明示する | baseline時に存在するstaged/unstaged/untrackedをCommit tabへ「ユーザー既存変更」として表示し、AI owned扱いにしない | Approved | 非該当 |
-| `GIT-F-045` | work unitは変更所有権を記録する | file path、baseline blob/hash、追加・変更hunk、作成eventをmanifestへ紐付け、所有不明hunkをUnownedにする | Approved | 非該当 |
-| `GIT-F-046` | appはunowned changeをstageしない | pre-existing、外部変更、ownership不明を含むfixtureでisolated temporary indexへ入るのがowned hunkだけになり、実indexのtree fingerprintと他diffが成功・失敗後も開始前と一致する | Approved | 非該当 |
-| `GIT-F-047` | checkpointは4 gate通過後だけ作られる | Scope、Ownership、Verification、Riskの全resultがPassの時だけcommitし、1件でもFail/Unknownなら理由付きBlockedにする | Approved | 非該当 |
-| `GIT-F-048` | verification evidenceがないwork unitを完了扱いにしない | acceptanceに必要なtest/checkが0件またはfailedならcheckpointを作らず、未実施/失敗をCommit tabへ表示する | Approved | 非該当 |
-| `GIT-F-049` | high-risk changeは人間reviewを要求する | auth、permission、secret、migration、destructive data、Git historyに触れるowned diffはRisk gateをNeeds reviewにし、明示approvalまでcommitしない | Approved | 非該当 |
+| 要件ID | 要件 | 受け入れ条件 | 状態 |
+|---|---|---|---|
+| `GIT-F-072` | native Git backendは完全なread-only observerである | command/API一覧と実行traceにindex/object/ref/worktreeを変更する操作が0件で、`commit-tree`、`update-ref`、`checkout`、`reset`、`revert`、`branch`、`add`、`commit`、`push`をWebView入力から実行できない | Approved |
+| `GIT-F-073` | observerはwork unit開始時の状態を記録する | main turn開始前にHEAD SHA、branch/detached、staged/unstaged/untracked summary、status fingerprint、observedAtを`GitObservationV1`としてHISTへ追記する。取得失敗はturnを止めず観測Unavailableを記録する | Approved |
+| `GIT-F-074` | observerはterminal work unit後にread-only refreshする | completed/failed/interrupted/canceledの全terminal eventで状態を再取得し、before/after observationを同じworkspace generation・work unit・source eventへ相関する。refreshはGit状態を変更しない | Approved |
+| `GIT-F-075` | observerはmain Codexが作った新規commitを検出する | before HEADからafter HEADへ到達可能な新規commitをdeterministic orderで列挙し、0件、1件、複数件、HEAD移動/分岐を区別する。検出結果を「appが作成した」と表示しない | Approved |
+| `GIT-F-076` | observerはpre-existing changeを明示する | turn前から存在したstaged/unstaged/untracked/deleted/type-changedを分類し、after statusでも追跡する。path表示はUI内に限定し、support payloadではpathを除去する | Approved |
+| `GIT-F-077` | repository設定をprocess authorityとして信頼しない | observerのfixtureでfsmonitor、hooks、pager、editor、diff/filter driver、credential/network helperを設定してもmarker processが0件である。固定環境とowner-controlled private configでread-only plumbingを実行する | Approved |
+| `GIT-F-078` | freshnessとraceを検出する | observation前後のHEAD/status fingerprintが一致した時だけsnapshotをFreshにし、読み取り中の変更はStaleとして返す。Staleでもretry以外のGit操作を行わない | Approved |
 
-### Automatic checkpointとreview pack
+### Commit skillとproducer契約
 
-| 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
-|---|---|---|---|---|
-| `GIT-F-050` | appはgate通過後にlocal checkpointを自動作成する | production Codexのvalidated terminal work-unit eventを1回だけ受理し、completedかつ4 gateがPassなら同一payload digestのclient request IDでowned stageと1件のlocal commitを自動作成してSHAとmessageをtimelineへ記録する。failed/interrupted/canceled、evidence不足、HIST pendingは成功表示しない | Approved | 非該当 |
-| `GIT-F-051` | checkpoint messageは追跡可能な形式になる | 1行目がConventional Commits英語summary、2行目以降が変更と意図の英語bulletで、secret/path credentialを含まない | Approved | 非該当 |
-| `GIT-F-052` | appはcheckpoint後にreview packを作る | SHA、objective、acceptance、owned files、diff stats、test results、decisions、failed attempts、known risks、restore actionを1packで表示する | Approved | 非該当 |
-| `GIT-F-053` | Commit tabはmanual commit操作を提供しない | S-003に「Commit」または同義のmutation buttonがなく、checkpoint statusとreview/restore actionだけを表示する | Approved | 非該当 |
-| `GIT-F-054` | appはremoteへ自動送信しない | checkpoint、review、restoreとCodex main commandの各testでpush、merge、force、remote ref updateが0回となり、main由来のGit metadata/ref/remote mutation要求をRust policyが拒否する | Approved | 非該当 |
-| `GIT-F-055` | checkpoint失敗はworking treeを保持する | hook failure、identity不足、write権限不足でcommitが失敗した時、実index fingerprintとowned/unowned file内容を変更せず、retry条件を表示する | Approved | 非該当 |
+| 要件ID | 要件 | 受け入れ条件 | 状態 |
+|---|---|---|---|
+| `GIT-F-079` | appはversioned main commit skillを同梱する | resource名は`coding-wife-commit-work`、path authorityは`app_bundle`、`SKILL.md`と`agents/openai.yaml`を含み、`policy.allow_implicit_invocation: false`である。repositoryとuser Codex homeへfileを作らない | Approved |
+| `GIT-F-080` | main skillを各main turnへ明示注入する | `turn/start.input`へ`type=skill`、name、bundle pathを1件含める。runtimeにskill inputが無い場合だけ同一version本文をthread developer instructionsへ注入し、二重注入しない。証明できないturnはdraftを保持して開始しない | Approved |
+| `GIT-F-081` | skill注入はidempotentかつ監査可能である | `CommitSkillInjectionV1`にskill ID/version/content digest/path authority/injection mode/workspace generation/work unit/client request IDを持ち、同じturn retryは同一digestのexact replayとなる | Approved |
+| `GIT-F-082` | main skillはcommit品質と安全境界を規定する | 適切なreview粒度、英語Conventional Commits summary、変更と意図の英語body bullets、pre-existing変更保護、verification結果報告を指示し、安全にcommitできない場合はforceせず理由を報告する | Approved |
+| `GIT-F-083` | terminal work unitはcommitの有無を正確に扱う | commit 0件でもwork unit terminalを成功/失敗状態に従って記録し、未commitをapp failureと断定しない。mainの「commit不能」報告があれば理由をevidenceへ相関する | Approved |
 
-### Compare・restore・競合
+### Commit evidence画面
 
-| 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
-|---|---|---|---|---|
-| `GIT-F-056` | 利用者はcheckpoint間を比較できる | 任意の2 SHAを選ぶとfile list、add/delete、decision、test差分をread-only表示する | Approved | 非該当 |
-| `GIT-F-057` | 利用者はcheckpointをrevert commitで取り消せる | HEADとworking treeが安全条件を満たす時、確認後に対象commitのrevert commitを作成し、元commitを削除しない | Approved | 非該当 |
-| `GIT-F-058` | unsafe restoreは実行しない | uncommitted user change、HEAD stale、conflict予測のいずれかがある時、revertを開始せず対象pathと解決手順を表示する | Approved | 非該当 |
-| `GIT-F-059` | 利用者はrecovery branchを作成できる | valid branch nameとcheckpoint SHAを指定するとlocal branchを作り、checkoutせず結果refを表示する | Approved | 非該当 |
-| `GIT-F-060` | restore/branch dialogはcancelできる | cancel時にHEAD、refs、index、working treeが開始前fingerprintと一致する | Approved | 非該当 |
-| `GIT-F-061` | 外部HEAD変更はstale状態になる | baseline後にHEAD/refが外部変更された場合、次mutation前に検出してgateをBlockedにし、refresh reviewを要求する | Approved | 非該当 |
-| `GIT-F-062` | Git conflict/errorを成功表示しない | conflict、lock、disk full、permissionのfixtureでerror codeとaffected operationを表示し、checkpoint/revert SHAを生成済みと表示しない | Approved | 非該当 |
+| 要件ID | 要件 | 受け入れ条件 | 状態 |
+|---|---|---|---|
+| `GIT-F-084` | Commit tabはcommit listとselectionをread-only表示する | current repositoryの観測済みcommitを新しい順で表示し、選択SHA、subject、author、authored time、parents、work unit相関を表示する。mutation button/shortcutが0件である | Approved |
+| `GIT-F-085` | 選択commitのdiffを安全に表示する | file change kindとline countを先に表示し、file diffをlazy loadする。binary/oversize/invalid UTF-8は本文を返さずtyped stateを表示し、repository外pathを開かない | Approved |
+| `GIT-F-086` | gateは観測evidenceとして表示する | Scope、Ownership、Verification、RiskをPass/Fail/Unknown/Needs reviewで表示し、source event ID、実行test、decision、known riskを参照できる。gateはnative commit可否を制御せず、main commitを後から評価する | Approved |
+| `GIT-F-087` | evidenceはHISTの確定状態だけを表示する | commit observation、skill audit、verification/decision/risk相関をappendして再読できた時だけPersisted表示にし、pending/invalid/oversizeはUnknownまたはUnavailableとする | Approved |
+| `GIT-F-088` | 非active panelはnative observationを開始しない | force-mountedだがhiddenのCommit tabはGit readを0件とし、active表示、明示refresh、terminal work unitだけがobserverを起動する | Approved |
+| `GIT-F-089` | 大規模repositoryでも段階表示する | 500 filesまたは50,000 changed linesまでsummaryを5秒以内に表示し、本文は1fileずつcancel可能にloadする | Approved |
 
-### 境界と性能
+### 「詳しく教えて」説明フロー
 
-| 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
-|---|---|---|---|---|
-| `GIT-F-063` | 大きなdiffを段階表示する | 500 fileまたは50,000 changed lineまでsummaryを5秒以内に表示し、file diffを1件ずつlazy loadする | Approved | 非該当 |
-| `GIT-F-064` | checkpointはgate完了後に短時間で結果を返す | 500 owned file・合計50MiB以下のreference repoでstage+local commitのp95が5秒以下になる | Approved | 非該当 |
-| `GIT-F-065` | unsupported repository形態をmutation前にblockする | bare、submodule root、Git LFS pointer mutationを検出した場合、read-only evidenceは表示し、checkpoint/restoreを無効にする | Approved | 非該当 |
+| 要件ID | 要件 | 受け入れ条件 | 状態 |
+|---|---|---|---|
+| `GIT-F-090` | 説明は利用者の明示操作でだけ起動する | 選択commitの「詳しく教えて」で1件のrequestを発行し、selection変更、再押下、Cancelをtyped eventとして扱う。commit選択だけではsupportを起動しない | Approved |
+| `GIT-F-091` | supportへはredacted `CommitEvidenceV1`だけを渡す | SHAのopaque ID、sanitized subject/body、pathなしfile summary、diff統計、verification、decision、risk、locale、generationを最大64KiBで渡し、absolute/relative path、raw diff全文、secret、raw reasoningを0件にする | Approved |
+| `GIT-F-092` | commit説明skillをisolated supportへ明示注入する | resource名`coding-wife-explain-commit`、path authority`app_bundle`、implicit invocation offのskillを説明turnにだけ1件注入し、repo/cwd/filesystem/shell/Git/MCP/tool authorityなしで起動する | Approved |
+| `GIT-F-093` | 説明はJA/ENのversioned schemaでstreamする | UI localeと一致する要約、変更点、理由、検証、影響、注意、次の見方と、同じ内容の短いnarration chunksをsequence付きで返し、character captionへ逐次表示する | Approved |
+| `GIT-F-094` | TTSは同じredacted transcriptだけを読む | TTS有効時だけcaptionと同じ確定chunkを同順で読み、追加要約やraw evidenceを音声用に再生成しない。TTS off/unavailableでもcaptionは残る | Approved |
+| `GIT-F-095` | invalid/stale/cancelはfail closedする | redaction/schema/generation検査失敗、timeout、Cancel後のchunkをcaption/TTS/HIST本文へ適用せず、決定的なunavailable/canceled textを表示する | Approved |
 
-### Isolation・integrity・crash recovery
+## 廃止要件
 
-| 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
-|---|---|---|---|---|
-| `GIT-F-066` | repository設定を実行境界として信頼しない | baseline、ownership、diff、checkpoint、restoreのfixtureでrepository/system/global configにfsmonitor、hook、attributes、filter、merge、diff、pager、editor、credential、network commandを設定してもmarker実行が0件になる。read/object処理はowner-only private shadow Git directoryと固定configだけを使い、real ref mutationは検証済みref名・old/new SHAのCASだけに限定する | Approved | 非該当 |
-| `GIT-F-067` | freshness fingerprintはindexと全変更内容を束ねる | real index fileのbytes、symlink/owner/mode/lock state、stage entryとskip-worktree/assume-unchanged flags、全changed/untracked pathのpath/type/mode/contentをdeterministic orderで束ね、読み取り前後の再観測が一致した時だけfreshとする。dirty/untracked内容A→B、flags変更、観測中raceでverification/risk/checkpoint/restoreがfail closedになる | Approved | 非該当 |
-| `GIT-F-068` | checkpointはdurable journalから復旧できる | ref/object mutation前にfsync済みintentを保存し、objects ready、ref updated、history complete、compensated/failedを各directory fsync付きで進める。再起動時にexpected old/new/refとexact pack digestを照合し、HIST追記再開またはapp commitだけを指すrefのCAS compensationを行い、persisted pack再読一致後だけ成功を返す | Approved | 非該当 |
-| `GIT-F-069` | review packはHIST上限をmutation前に満たす | redaction後のexact eventをCAS前にserializeし、256 KiB以下、canonical digest、workspace/work-unit/checkpoint/ref/SHA一致を検証する。oversize、DB unavailable、disk/permission failureではrefを更新せず、同一payload retryで同一terminal resultを返す | Approved | 非該当 |
-| `GIT-F-070` | restoreはreal index/worktreeを直接実行系へ渡さない | revert impact/tree/commitをprivate index/object storeで構築しconflictをmutation前に確定する。preparedからhistory completeまでfsync journal化し、target ref CASとimmutable restore eventを完了してhistory sequenceを再読できた場合だけ成功表示する。cancel/expiry/replay/dirty/stale/conflict/crash/I/O/ref raceでは開始前のHEAD、全refs、real index bytes/entry、worktree内容を保持する | Approved | 非該当 |
-| `GIT-F-071` | manifestはpre-existing change kindを正確に示す | HEAD materialとbaseline worktree material/modeを比較し、staged-only、unstaged-only、staged+unstaged、untracked、tracked delete、mode changeをAdded/Modified/Deleted/TypeChangedへ正しく分類する。ownershipはPreExistingのままcheckpoint treeへ混入しない | Approved | 非該当 |
+以前のnative checkpoint/restore設計は本仕様で明示的に廃止する。
+
+| 旧要件ID | 状態 | 廃止理由・後継 |
+|---|---|---|
+| `GIT-F-043`〜`GIT-F-049` | Deprecated | native ownership/staging gateを廃止。観測は`GIT-F-073`〜`GIT-F-078`、evidence gateは`GIT-F-086` |
+| `GIT-F-050`〜`GIT-F-055` | Deprecated | automatic checkpoint/native commitを廃止。producerは`GIT-F-079`〜`GIT-F-083` |
+| `GIT-F-056`〜`GIT-F-062` | Deprecated | compare/revert/recovery branch/native mutationをMVPから削除。read-only detailは`GIT-F-084`〜`GIT-F-089` |
+| `GIT-F-063`〜`GIT-F-067` | Deprecated | 旧mutation前提の性能/isolation/fingerprintを置換。後継は`GIT-F-077`〜`GIT-F-089` |
+| `GIT-F-068`〜`GIT-F-070` | Deprecated | mutation journal、ref compensation、restore transactionを削除。後継なし |
+| `GIT-F-071` | Deprecated | 旧manifest分類を`GIT-F-076`へ統合 |
 
 ## 入力項目要件
 
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
 |---|---|---|---|---|---|
-| Work unit | objective | current goal | 必須 | 1〜500文字 | gateをBlocked、入力保持 |
-| Work unit | acceptance | なし | 必須 | 1〜20項目、各1〜500文字 | gateをBlocked |
-| Restore | checkpoint SHA | 選択pack | 必須 | repository内の40桁commit object | mutationせずerror |
-| Recovery branch | branch name | `recovery/<short-sha>` | 必須 | Git check-ref-format、1〜200 byte、既存ref不可 | 入力保持、作成無効 |
+| Commit list | selected SHA | 最新の観測済みcommit | 条件付き | repository内のvalid commit object、opaque IDとして扱う | selectionを解除しUnavailable表示 |
+| Diff | selected file evidence ID | なし | 条件付き | listが返したopaque IDだけ、raw pathをWebView入力へ戻さない | detailだけerror |
+| Explanation | locale | active UI locale | 必須 | `ja` / `en` | active localeへ正規化 |
+| Explanation | request | なし | 条件付き | active selection、generation一致、single active request | 起動せず理由表示 |
+
+restore SHA、branch name、restore confirmation、commit messageの入力欄は存在しない。
 
 ## デスクトップ固有要件
 
 | 領域 | 要件 | 対象要件ID |
 |---|---|---|
-| 対象OS・OS差分 | macOS 14以降のuser-installed Gitを診断 | `GIT-F-043`, `GIT-F-062` |
-| ウィンドウ生成・再利用 | S-003をmain window tabとして再利用 | `GIT-F-052`, `GIT-F-053` |
-| 閉じる・アプリ終了 | Git mutation transaction中は完了またはsafe abort後に終了 | `GIT-F-050`, `GIT-F-057` |
-| 未保存データ | baselineのuser changeを変更・破棄しない | `GIT-F-043`〜`GIT-F-046` |
-| ローカルデータ | baseline/manifest/review packはHISTへ、mutation intent journalはapp-private owner-only領域へ、Git objectはrepoへ保存 | `GIT-F-043`, `GIT-F-052`, `GIT-F-068`〜`GIT-F-070` |
-| オフライン | local Git機能は利用可能、remote操作は非対象 | `GIT-F-050`〜`GIT-F-060` |
-| ファイル・OS操作 | owned stage、commit、journaled revert、branchだけをRustへ許可し、repository config由来processを起動しない | `GIT-F-046`, `GIT-F-050`, `GIT-F-057`, `GIT-F-059`, `GIT-F-066`〜`GIT-F-070` |
-| メニュー・ショートカット | manual commit shortcutは提供しない | `GIT-F-053` |
-| Deep Link・ファイル関連付け | 非該当 | 非該当 |
-| 通知 | checkpoint完了/blockedをapp内timelineとCommit tabへ表示 | `GIT-F-047`, `GIT-F-052` |
-| Capability・認可 | repository root内のGit操作へ限定し、任意git argsをWebViewから受けない | `GIT-F-046`, `GIT-F-050` |
-| アップデート・互換性 | minimum Git versionをhard pinせず必要commandのcapabilityで診断 | `GIT-F-043` |
+| 対象OS・OS差分 | macOS 14以降のuser-installed Gitをread-only診断する | `GIT-F-072`〜`GIT-F-078` |
+| ウィンドウ生成・再利用 | S-003をmain window tabとして再利用する | `GIT-F-084` |
+| 閉じる・アプリ終了 | observer readはcancelし、support/TTSはbounded cancelする。Git transaction待機はない | `GIT-F-088`, `GIT-F-095` |
+| 未保存データ | staged/unstaged/untrackedを変更・破棄しない | `GIT-F-072`, `GIT-F-076` |
+| ローカルデータ | observation/evidence/skill auditはHIST、skillsはapp bundleへ保存する | `GIT-F-079`〜`GIT-F-087` |
+| オフライン | local evidence閲覧は継続し、support explanationはUnavailable captionにする | `GIT-F-084`〜`GIT-F-095` |
+| ファイル・OS操作 | validated repositoryのread-only Git inspectだけをRustへ許可する | `GIT-F-072`, `GIT-F-077` |
+| メニュー・ショートカット | commit/restore/branch shortcutを提供しない | `GIT-F-084` |
+| 通知 | 新規commit観測、observer error、説明cancelをtextで示す | `GIT-F-075`, `GIT-F-095` |
+| Capability・認可 | arbitrary Git argsとpathをWebViewから受けない | `GIT-F-072`, `GIT-F-085` |
+| アップデート・互換性 | Codex schema変更時にskill injection capabilityを再検証する | `GIT-F-080`, `GIT-F-081` |
 
 ## 画面・UI
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-002` | コーディングワークスペース | `GIT-F-043`〜`GIT-F-055`, `GIT-F-066`〜`GIT-F-069` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
-| `S-003` | セッション証拠 | `GIT-F-043`〜`GIT-F-071` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
-| `S-004` | 設定・診断 | `GIT-F-043`, `GIT-F-062`, `GIT-F-065` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-002` | コーディングワークスペース | `GIT-F-073`〜`GIT-F-083`, `GIT-F-093`〜`GIT-F-095` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-003` | セッション証拠 | `GIT-F-072`〜`GIT-F-095` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
+| `S-004` | 設定・診断 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
 
 | 領域 | 要件 |
 |---|---|
-| セキュリティ | arbitrary Git argsを受けず、repo rootとobject/refをRustで検証し、private shadow Git directoryと固定configでrepository/system/global config由来processを無効化する |
-| 権限 | read evidenceとRust Git serviceのowned mutationを分け、Codex mainへ`.git` metadata/ref/remote mutationを許可せず、push/merge/force/hard resetを実装しない |
-| プライバシー | diffをsupport/externalへ送る場合は明示されたfixed snapshotだけ。secret scan結果をpackへ残す |
-| 監査・ログ | baseline、gate result、staged paths、commit/revert/branch SHA、fsync journal state、HIST sequence、compensation、failureを記録する |
-| 性能 | 500 files/50,000 lines summary 5秒、500 files/50MiB checkpoint p95 5秒 |
-| 信頼性・復旧 | stale/dirty/conflictでfail closed、元commitを削除せず、user changeを破棄せず、起動時にjournalとref/HISTを照合して一意にterminal化する |
-| アクセシビリティ | diff statusを色だけで伝えず、file/status/line countをtextで表示する |
-| 多言語・地域 | app copy ja/en、commit message/path/refは翻訳しない |
+| セキュリティ | native Git surfaceはread-only、arbitrary args/pathなし。repo config由来processを起動しない |
+| 権限 | main Codexだけが通常作業権限の範囲でcommitし、observerとsupportはmutation authorityを持たない |
+| プライバシー | supportへpath/raw diff/secret/raw reasoningを送らず、caption/TTSは同じredacted transcriptを使う |
+| 監査・ログ | observation、new commit correlation、skill ID/version/digest/mode、explanation statusを記録する。raw support transcriptは永続化しない |
+| 性能 | 500 files/50,000 lines summaryを5秒、説明の最初のcaptionを起動後3秒目標で表示する |
+| 信頼性・復旧 | observer failureはmainを止めずUnavailable、skill注入failureはturn前fail closed、support failureはcaption fallback |
+| アクセシビリティ | commit/gate/statusを色だけで表現せず、captionは音声設定に関係なく表示する |
+| 多言語・地域 | UI/captionはja/en、commit messageとtechnical IDは原文表示する |
 
 ## 依存関係・前提
 
 | 依存・前提 | 内容 | 状態 | 未解決時の影響 |
 |---|---|---|---|
-| Local Git | worktreeとcommit identity | 解決済み（preflight契約） | identity不足時checkpoint Blocked |
-| WORK | canonical repo、single active execution | 解決済み（相互参照確認済み） | stale時refresh必要 |
-| HIST | baseline、gate、packの永続化 | 解決済み（相互参照確認済み） | DB失敗時mutation前にBlock |
-| CODE | work unit、verification、decision evidence | 解決済み（相互参照確認済み） | evidence不足時checkpoint Blocked |
-
-## 未確定事項
-
-| 論点 | 初期判断 | 確認事項 | 着手ブロック |
-|---|---|---|---|
-| hunk単位stageの実装方式 | patch適用またはtemporary indexのうち、user indexを変更しない方式を採用する | spikeで両方式をcontract testする | いいえ |
-| signed commit | MVPは既存Git設定に従い、署名必須repoで失敗を明示する | release後に専用UXを評価する | いいえ |
+| Codex App Server | `UserInput.type=skill`、thread developer instructions、turn lifecycle | 解決済み（version-specific schema検査） | injectionを証明できなければturn開始不可 |
+| CODE | main turn、work unit、terminal authority、skill injection runtime | 解決済み（typed contractを共有） | observerはcommitを作らずUnavailable相関 |
+| HIST | observation/evidence/skill auditのappend/replay | 解決済み（typed event） | persistence失敗はGitを変えずUnknown表示 |
+| SUP/NARR | isolated explanation、caption、optional same-transcript TTS | 解決済み（typed request/delta contract） | deterministic caption fallback |
 
 ## 参照資料
 
 | 資料 | 参照理由 |
 |---|---|
-| [PRODUCT.md](../../PRODUCT.md) | evidence、checkpoint、reversibility |
-| [Git・review調査](../research/07-review-harness-and-git.md) | ownership gateとreview pack |
-| [品質評価](../research/10-quality-evaluation.md) | Scope/Ownership/Verification/Risk gate |
+| [PRODUCT.md](../../PRODUCT.md) | evidence、reviewability、one coding identity |
+| [commit skill注入調査](../research/codex-commit-skill-injection.md) | version-specific App Server skill inputとfallback |
+| [Git・review調査](../research/07-review-harness-and-git.md) | commit粒度とreview evidence |
+| [支援agent要件](support-agent-orchestration.md) | isolated explanationとredaction |
+| [音声・caption要件](audio-commentary.md) | caption優先とsame-transcript TTS |
 
 ## レビュー・合意
 
@@ -194,17 +198,14 @@ read_when:
 | レビュー結果 | Ready |
 | 仕様責任者 | プロダクトオーナー |
 | 合意日 | 2026-07-18 |
-| 残る非ブロック論点 | hunk stage方式、signed commit専用UX |
+| 残る非ブロック論点 | 大規模merge commitの表示順はfixtureで調整する |
 
 ## 着手可チェック
 
-- [x] 背景と目的が説明できる。
-- [x] スコープ内・外と理由が明確である。
-- [x] 全機能要件に一意な要件IDがある。
-- [x] 全機能要件に検証可能な受け入れ条件がある。
-- [x] 正常系、異常系、キャンセル、権限差分、空状態、境界値を確認した。
-- [x] デスクトップ固有要件を確認し、非該当も明記した。
-- [x] 画面IDと要件IDの相互参照が一致し、承認済み画面詳細仕様を参照している。
-- [x] 非機能要件と依存関係を確認した。
-- [x] 着手ブロックが「はい」または「不明」の未確定事項がない。
-- [x] 仕様責任者がレビューし、合意した。
+- [x] native Gitを完全read-onlyと定義した。
+- [x] main Codexを唯一のcommit producerと定義した。
+- [x] skill名、version/digest、app bundle authority、毎turn注入を定義した。
+- [x] Commit tabからmutation/restore/recoveryを削除した。
+- [x] empty、stale、oversize、offline、cancel、schema invalidを定義した。
+- [x] 「詳しく教えて」のredaction、isolation、caption、TTS境界を定義した。
+- [x] 要件IDと画面仕様の相互参照を定義した。

@@ -79,6 +79,7 @@ TauriはWindows、macOS、Linuxを同一コードベースで扱えるが、各O
 | [09-security-privacy.md](09-security-privacy.md) | 脅威モデル、権限、プロンプトインジェクション、秘密、保持 |
 | [10-quality-evaluation.md](10-quality-evaluation.md) | 品質モデル、評価指標、観測、実験計画 |
 | [11-mvp-and-open-questions.md](11-mvp-and-open-questions.md) | MVP境界、実装順序、Go/No-Goゲート、未決事項 |
+| [codex-commit-skill-injection.md](codex-commit-skill-injection.md) | app同梱commit skill、turn単位注入、version/digest監査、互換fallback |
 | [SOURCES.md](SOURCES.md) | 一次資料・標準・研究文献一覧 |
 
 ## エビデンス表記
@@ -95,7 +96,7 @@ TauriはWindows、macOS、Linuxを同一コードベースで扱えるが、各O
 1. Live2D SDKとユーザーモデル追加機能の公開ライセンス確認。
 2. 対応するCodex CLI最小バージョンと、実験的App Server機能のフォールバック検証。
 3. `ephemeral`サポートセッションが通常の履歴ファイルを生成しないことの自動監査。
-4. 既存の未コミット変更を一切取り込まない、変更所有権・自動コミットの安全性検証。
+4. main Codex のcommit skill注入と既存の未コミット変更を保護する運用、およびnative Git observerがread-onlyであることの検証。
 5. Windows、macOS、LinuxそれぞれのWebGL、入力、GPU負荷、プロセス終了、署名済み配布検証。
 6. キャラクター表現がリスクを矮小化したり、ユーザーを急かしたりしないことのUX評価。
 
