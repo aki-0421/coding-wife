@@ -1844,16 +1844,25 @@ async fn fallback_decision_validates_then_starts_exactly_one_structured_continua
         })
         .await
         .expect("turn");
-    tokio::time::sleep(Duration::from_millis(100)).await;
     let (decision_handle, option_id) = fallback_handles();
-    let invalid = supervisor
-        .answer_fallback_decision(CodexFallbackDecisionRequest {
-            workspace_id: "workspace".to_owned(),
-            decision_handle: decision_handle.clone(),
-            option_id: "option-invalid".to_owned(),
-        })
-        .await
-        .expect_err("invalid option");
+    let invalid = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let error = supervisor
+                .answer_fallback_decision(CodexFallbackDecisionRequest {
+                    workspace_id: "workspace".to_owned(),
+                    decision_handle: decision_handle.clone(),
+                    option_id: "option-invalid".to_owned(),
+                })
+                .await
+                .expect_err("invalid option");
+            if error.code != "CODEX-TURN-ACTIVE" {
+                break error;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("fallback decision becomes available");
     assert_eq!(invalid.code, "CODEX-DECISION-OPTION-INVALID");
 
     let request = CodexFallbackDecisionRequest {
