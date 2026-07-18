@@ -128,6 +128,7 @@ function mockSequenceLayout(
   options: {
     readonly clipped?: readonly number[]
     readonly hidden?: readonly number[]
+    readonly mostlyObstructed?: readonly number[]
     readonly obstructed?: readonly number[]
   } = {},
 ) {
@@ -183,6 +184,15 @@ function mockSequenceLayout(
     value: (x: number, y: number) => {
       const sequence = itemRects.findIndex((rect) => containsPoint(rect, x, y))
       if (sequence >= 0) {
+        if (options.mostlyObstructed?.includes(sequence)) {
+          const rect = itemRects[sequence]
+          if (rect === undefined) return obstruction
+          const centerX = rect.left + rect.width / 2
+          const centerY = rect.top + rect.height / 2
+          return Math.abs(x - centerX) <= 5 && Math.abs(y - centerY) <= 5
+            ? items[sequence]
+            : obstruction
+        }
         return options.obstructed?.includes(sequence)
           ? obstruction
           : items[sequence]
@@ -313,6 +323,21 @@ describe("CommitNarrationCaption", () => {
     const onVisible = vi.fn()
     renderCaption(presentation(), vi.fn(), onVisible)
     mockSequenceLayout({ obstructed: [1] })
+
+    act(() => frames.flush())
+    act(() => frames.flush())
+
+    expect(onVisible).toHaveBeenCalledOnce()
+    expect(onVisible).toHaveBeenCalledWith(
+      expect.objectContaining({ sequence: 0 }),
+    )
+  })
+
+  it("does not acknowledge a mostly covered sequence whose center remains exposed", () => {
+    const frames = installAnimationFrames()
+    const onVisible = vi.fn()
+    renderCaption(presentation(), vi.fn(), onVisible)
+    mockSequenceLayout({ mostlyObstructed: [1] })
 
     act(() => frames.flush())
     act(() => frames.flush())
