@@ -181,7 +181,7 @@ fn secret_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
         Regex::new(
-            r"(?i)(?:sk-[a-z0-9_-]{8,}|(?:api[_-]?key|access[_-]?token|password|secret)\s*[:=]\s*\S+)",
+            r#"(?i)(?:sk-[a-z0-9_-]{8,}|\bbearer\s+[a-z0-9._~+/-]{12,}=*|\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,})|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|\bxox[baprs]-[a-z0-9-]{10,}|-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----|(?:^|[^a-z0-9])(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|aws[_-]?session[_-]?token|cookie|session(?:[_-]?id)?)\s*[:=]\s*["']?\S+)"#,
         )
         .expect("narration secret pattern")
     })
@@ -190,8 +190,10 @@ fn secret_pattern() -> &'static Regex {
 fn private_path_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r"(?:^|\s)/(?:Users|home|private|tmp|var|Volumes)/\S+")
-            .expect("narration path pattern")
+        Regex::new(
+            r#"(?:^|[^A-Za-z0-9])/(?:Users|home|private|tmp|var|Volumes|Library|Applications|opt|etc|usr|bin|sbin|dev|proc|run)/[^\s<>"']+"#,
+        )
+        .expect("narration path pattern")
     })
 }
 
@@ -213,6 +215,22 @@ fn is_opaque_identifier(value: &str) -> bool {
 mod tests {
     use super::*;
     use crate::narration::types::{NarrationKind, NarrationLocale};
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields, rename_all = "camelCase")]
+    struct RedactionFixture {
+        schema_version: u16,
+        safe: Vec<RedactionCase>,
+        private: Vec<RedactionCase>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct RedactionCase {
+        name: String,
+        text: String,
+    }
 
     fn request(text: &str, sequence: u64) -> NarrationSpeakRequestV1 {
         NarrationSpeakRequestV1 {
@@ -278,6 +296,30 @@ mod tests {
             policy().validate_and_record(&stale, now),
             Err(PolicyRejection::Stale)
         );
+    }
+
+    #[test]
+    fn matches_shared_redaction_parity_fixture() {
+        let fixture: RedactionFixture = serde_json::from_str(include_str!(
+            "../../../src/test/fixtures/narration-redaction.v1.json"
+        ))
+        .expect("narration redaction fixture");
+        assert_eq!(fixture.schema_version, NARRATION_SCHEMA_VERSION);
+        for case in fixture.safe {
+            assert!(
+                validate_redacted_text(&case.text).is_ok(),
+                "safe fixture rejected: {}",
+                case.name
+            );
+        }
+        for case in fixture.private {
+            assert_eq!(
+                validate_redacted_text(&case.text),
+                Err(PolicyRejection::UnsafeText),
+                "private fixture accepted: {}",
+                case.name
+            );
+        }
     }
 
     #[test]

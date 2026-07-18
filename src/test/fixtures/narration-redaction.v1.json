@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "safe": [
+    {
+      "name": "ordinary-ja-caption",
+      "text": "検証済みの変更とテスト結果を説明します。"
+    },
+    {
+      "name": "relative-source-path",
+      "text": "Updated src/features/narration/controller.ts."
+    },
+    {
+      "name": "credential-policy-prose",
+      "text": "Password and token handling now fail closed."
+    },
+    {
+      "name": "bearer-challenge-prose",
+      "text": "The bearer challenge path now returns a typed error."
+    },
+    {
+      "name": "github-issue-reference",
+      "text": "The change resolves GitHub issue gh-123."
+    }
+  ],
+  "private": [
+    {
+      "name": "punctuated-users-path",
+      "text": "Updated (/Users/alice/private-project/src/main.ts)."
+    },
+    {
+      "name": "japanese-punctuated-private-path",
+      "text": "対象：/private/var/db/application/state.json"
+    },
+    {
+      "name": "bearer-token",
+      "text": "Authorization: Bearer abcdefghijklmnop1234567890"
+    },
+    {
+      "name": "github-classic-token",
+      "text": "ghp_abcdefghijklmnopqrstuvwxyz1234567890"
+    },
+    {
+      "name": "github-fine-grained-token",
+      "text": "github_pat_11AA00abcdefghijklmnopqrstuvwxyz1234"
+    },
+    {
+      "name": "aws-access-key",
+      "text": "AKIAABCDEFGHIJKLMNOP"
+    },
+    {
+      "name": "aws-secret-assignment",
+      "text": "AWS_SECRET_ACCESS_KEY=fabricated-secret-value"
+    },
+    {
+      "name": "slack-bot-token",
+      "text": "xoxb-123456789012-abcdefghijklmnopqrstuvwx"
+    },
+    {
+      "name": "pem-private-key",
+      "text": "-----BEGIN OPENSSH PRIVATE KEY-----"
+    },
+    {
+      "name": "prefixed-password-assignment",
+      "text": "DATABASE_PASSWORD=private-value"
+    },
+    {
+      "name": "session-assignment",
+      "text": "session_id: abcdefghijklmnop"
+    },
+    {
+      "name": "openai-style-token",
+      "text": "sk-proj_abcdefghijklmnopqrstuvwxyz"
+    }
+  ]
+}

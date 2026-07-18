@@ -273,6 +273,17 @@ function isFullCommitSha(value: unknown): value is string {
   )
 }
 
+const privateTextPatterns = [
+  /sk-[a-z0-9_-]{8,}/iu,
+  /\bbearer\s+[a-z0-9._~+/-]{12,}=*/iu,
+  /\b(?:gh[pousr]_[a-z0-9]{16,}|github_pat_[a-z0-9_]{16,})/iu,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/u,
+  /\bxox[baprs]-[a-z0-9-]{10,}/iu,
+  /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----/iu,
+  /(?:^|[^a-z0-9])(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|aws[_-]?session[_-]?token|cookie|session(?:[_-]?id)?)\s*[:=]\s*["']?\S+/iu,
+  /(?:^|[^A-Za-z0-9])\/(?:Users|home|private|tmp|var|Volumes|Library|Applications|opt|etc|usr|bin|sbin|dev|proc|run)\/[^\s<>"']+/u,
+] as const
+
 function isRedactedText(value: unknown): value is string {
   if (typeof value !== "string") return false
   const scalarCount = [...value].length
@@ -285,10 +296,7 @@ function isRedactedText(value: unknown): value is string {
         character === "\0" ||
         (/\p{Cc}/u.test(character) && character !== "\n" && character !== "\t"),
     ) &&
-    !/(?:sk-[a-z0-9_-]{8,}|(?:api[_-]?key|access[_-]?token|password|secret)\s*[:=]\s*\S+)/iu.test(
-      value,
-    ) &&
-    !/(?:^|\s)\/(?:Users|home|private|tmp|var|Volumes)\/\S+/u.test(value)
+    !privateTextPatterns.some((pattern) => pattern.test(value))
   )
 }
 

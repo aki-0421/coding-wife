@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 
+import redactionFixture from "@/test/fixtures/narration-redaction.v1.json"
+
 import {
   NarrationContractError,
   commitNarrationSourceKey,
@@ -146,6 +148,30 @@ describe("narration contracts", () => {
       expect(() => parseCommitNarrationConsumerEvent(event)).toThrowError(
         "NARRATION-PRESENTATION-ENVELOPE",
       )
+    }
+  })
+
+  it("matches the shared redaction parity fixture", () => {
+    expect(redactionFixture.schemaVersion).toBe(narrationSchemaVersion)
+    for (const fixture of redactionFixture.safe) {
+      expect(() =>
+        parseCommitNarrationConsumerEvent({
+          ...started(),
+          kind: "chunk",
+          sequence: 0,
+          text: fixture.text,
+        }),
+      ).not.toThrow()
+    }
+    for (const fixture of redactionFixture.private) {
+      expect(() =>
+        parseCommitNarrationConsumerEvent({
+          ...started(),
+          kind: "chunk",
+          sequence: 0,
+          text: fixture.text,
+        }),
+      ).toThrowError("NARRATION-PRESENTATION-ENVELOPE")
     }
   })
 
