@@ -106,8 +106,32 @@ read_when:
 | Workspace | name | repo名 + timestamp | 必須 | trim後1〜80 Unicode scalar、改行不可 | 入力保持、該当fieldへerror |
 | Workspace | goal | 空 | 任意 | 0〜4,000 Unicode scalar | 入力保持、超過数を表示 |
 | Filter | query | 空 | 任意 | 0〜200 Unicode scalar | 200超を受け付けず一覧を維持 |
-| Context | project context | 空 | 任意 | 各field 0〜8,000、総量32,000 Unicode scalar | 保存せず入力保持 |
-| Context | character context | 空 | 任意 | 各field 0〜4,000、総量12,000 Unicode scalar、technical policy key禁止 | 禁止内容を除いて再編集を求める |
+| Context | project context | 空 | 任意 | goal / constraints / user notesは各0〜8,000、Definition of doneは最大20項目・各1〜500、technical referencesは最大20項目・各1〜500、全field・全項目の総量32,000 Unicode scalar | 保存せず入力保持 |
+| Context | character context | Display nameは`Sol`、他は既定値 | 任意 | display name 1〜40、tone補足0〜1,000、behavior 0〜4,000、prohibited expressions最大20項目・各1〜200、全field・全項目の総量12,000 Unicode scalar、technical policy key禁止 | 禁止内容を除いて再編集を求める |
+
+### Versioned editable Context contract
+
+`ProjectContext`と`CharacterContext`はcapture済みFiles / Git diffとは別のeditable contextであり、workspace IDをpartition keyとして一つのversioned storeへ保存する。ProjectとCharacterは別versionを持ち、片方の保存が他方の未保存draftまたはversionを変更してはならない。
+
+| record | field | 型・保存境界 |
+|---|---|---|
+| `ProjectContext` | `goal` | string、0〜8,000 Unicode scalar |
+| `ProjectContext` | `constraints` | string、0〜8,000 Unicode scalar |
+| `ProjectContext` | `definitionOfDone` | string配列、0〜20項目、各trim後1〜500 Unicode scalar |
+| `ProjectContext` | `technicalReferences` | string配列、0〜20項目。`doc:`で始まるmanaged document IDまたはproject rootからの正規化済みrelative pathだけを保存し、absolute path、`..`、root外symlinkを拒否する |
+| `ProjectContext` | `userNotes` | string、0〜8,000 Unicode scalar |
+| `CharacterContext` | `displayName` | string、trim後1〜40 Unicode scalar。fresh workspaceは`Sol` |
+| `CharacterContext` | `tone` | `concise` / `warm` / `neutral`のallowlist |
+| `CharacterContext` | `toneNotes` | string、0〜1,000 Unicode scalar |
+| `CharacterContext` | `speechDensity` | `quiet` / `key_events` / `detailed`のallowlist |
+| `CharacterContext` | `behavior` | string、0〜4,000 Unicode scalar。presentation上の希望だけを扱う |
+| `CharacterContext` | `prohibitedExpressions` | string配列、0〜20項目、各trim後1〜200 Unicode scalar |
+
+Project総量は32,000、Character総量は12,000 Unicode scalarを上限とし、配列の各itemも総量へ加算する。保存requestは`workspaceId`、対象record、`expectedVersion`を必須にし、SQLite transaction内で現在versionとの一致を検証してからversionをちょうど1増やし、canonical JSONのSHA-256を更新する。不一致時は`WORKSPACE-PROJECT-CONTEXT-CONFLICT`または`WORKSPACE-CHARACTER-CONTEXT-CONFLICT`を返し、DBと利用者のdraftを変更しない。
+
+Characterの自由入力は、行頭またはJSON key位置にある`permission`、`approval`、`model`、`tool`、`git`、`commit_skill`、`verification`、`privacy`、`support_capability`、`checkpoint_policy`と、その表記揺れをtechnical policy keyとして拒否する。また`override` / `bypass` / `disable` / `ignore`とtechnical policy名を組み合わせた指示も拒否する。拒否はCharacter record全体をatomicに失敗させ、Project Contextへ自動コピーしない。
+
+Sendはnative storeから対象workspaceのProject / Characterを同じread transactionで取得し、各versionとcanonical JSON hashを持つimmutable request snapshotをturn開始前に一度だけ確定する。main sessionへ渡すのはそのsnapshotであり、turnが`running` / `waiting`になった後の保存を途中注入しない。次のSendだけが新versionを取得する。別workspaceのrecord、draft、conflict、snapshotを参照または再利用してはならず、app再起動後もworkspaceごとのversion・hash・内容が一致する。
 
 ## デスクトップ固有要件
 

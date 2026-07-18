@@ -107,23 +107,40 @@ active project/workspaceを明示し、[S-002 Context subview](S-002_coding-work
 | -------------------- | ----------------------------------- | --------------------------------------------- | --------------------------------- |
 | Goal                 | current version                     | 0〜8,000 Unicode scalar                       | main/support snapshotのgoal       |
 | Constraints          | current version                     | 0〜8,000、secret警告                          | technical decision boundary       |
-| Definition of done   | current version                     | 0〜20項目、各1〜500                           | work unit acceptance補助          |
-| Technical references | managed doc ID / repo-relative path | canonical project root内、absolute path非保存 | mainのみ。supportへ本文を渡さない |
+| Definition of done   | current version                     | 0〜20項目、各trim後1〜500                     | work unit acceptance補助          |
+| Technical references | managed doc ID / repo-relative path | 0〜20項目、各1〜500。canonical project root内、absolute path・`..`非保存 | mainのみ。supportへ本文を渡さない |
 | User notes           | current version                     | 0〜8,000                                      | next turnから適用                 |
 
-保存時にexpected versionを検証し、競合時はremote/currentの差と再読み込みを示す。running turnへ途中適用せず、`次のturnから適用`と表示する。project登録解除はsource、Git object、branchを削除せず、[S-001](S-001_session-dashboard.md)の確認契約を使う。
+全field・全配列itemの合計は32,000 Unicode scalarを上限とする。保存時にexpected versionを検証し、競合時はremote/currentの差と再読み込みを示す。running turnへ途中適用せず、`次のturnから適用`と表示する。project登録解除はsource、Git object、branchを削除せず、[S-001](S-001_session-dashboard.md)の確認契約を使う。
 
 ### Character context
 
 | field                  | 初期値                                                   | 制約                                          | 適用                         |
 | ---------------------- | -------------------------------------------------------- | --------------------------------------------- | ---------------------------- |
 | Display name           | `Sol`                                                    | 1〜40文字                                     | visible companion identity   |
-| Tone                   | concise / warm / neutral等のallowlist + 0〜1,000文字補足 | 感情的強制や虚偽確信を要求できない            | assistant presentation       |
+| Tone                   | concise / warm / neutralのallowlist + 0〜1,000文字補足   | 感情的強制や虚偽確信を要求できない            | assistant presentation       |
 | Speech density         | quiet / key events / detailed                            | audio eligibility上限を越えない               | visible transcript/audio候補 |
-| Companion behavior     | cue preference                                           | inventory内cueだけ                            | Live2D presentation          |
+| Companion behavior     | 0〜4,000文字のpresentation希望                           | technical policyを変更せず、inventory外cueはneutral | Live2D presentation          |
 | Prohibited expressions | 0〜20項目、各1〜200                                      | safety/error/decisionの事実表示は抑止できない | output presentation          |
 
-Character contextはpermission、model、tool、Git observer、commit skill、verification、approval、privacy、support capabilityを上書きできない。technical policy keyを含む入力は保存前に拒否し、Project contextへ自動コピーしない。running turnには次turnから適用する。
+全field・全配列itemの合計は12,000 Unicode scalarを上限とする。Character contextはpermission、model、tool、Git observer、commit skill、verification、approval、privacy、support capability、checkpoint policyを上書きできない。行頭・JSON key位置のtechnical policy key、またはoverride / bypass / disable / ignoreとtechnical policy名を組み合わせた指示は保存前にrecord単位で拒否し、Project contextへ自動コピーしない。running turnには次turnから適用する。
+
+#### Context editor stateと競合復旧
+
+Context tabとSettings内のProject context / Character contextは、同じworkspace-scoped native storeと同じ画面内draft stateを編集する。SettingsからContextへ遷移した時、section focusは対応するheadingへ移り、保存済みversion、未保存入力、validation errorを維持する。
+
+| 状態 | 表示 | 操作・focus |
+|---|---|---|
+| loading | field shape skeletonとworkspace名。旧workspace内容を表示しない | Save不可。load terminal後に最初のinvalid fieldまたはsection headingへfocus |
+| clean | `Version N`、content hash短縮、`次のturnから適用` | field編集可能 |
+| dirty | `未保存`と文字数・項目数。running turn中は`実行中のturnには反映されません` | Save / 変更を破棄 |
+| saving | 保存対象sectionだけprocessing、入力はread-only | 二重Save不可。別sectionの未保存draftは維持 |
+| saved | `Version N+1`と`次のturnから適用`をstatus regionへ通知 | Saveへfocusを固定しない |
+| validation error | field直下の理由と安全境界。technical-policy拒否はprivate入力を復唱しない | 最初のinvalid fieldへfocus。入力保持 |
+| version conflict | `手元 Version N / 保存済み Version M`、内容が異なるfield名、手元draft保持 | `保存済みを再読み込み`で当該sectionだけ置換。Cancel/Escapeでdraft維持し編集へ戻る |
+| load/save unavailable | safe error code、Retry | 他workspaceと他sectionを壊さない |
+
+workspace切替時は旧workspaceのpending load/save responseをgenerationで無効化し、新workspaceのfieldへ適用しない。再起動後はSQLiteの保存済みrecordだけを復元し、未保存draftを保存済みと表示しない。Sendはclick/shortcut受付時にProject / Characterのversionとhashを一つのimmutable request snapshotへ固定し、実行中のturnへ後から注入しない。
 
 ### Companion
 
