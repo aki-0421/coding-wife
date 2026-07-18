@@ -893,6 +893,114 @@ describe("CodexWorkspaceSessionAdapter", () => {
     })
   })
 
+  it("keeps a completed source fallback available until an explicit transition", async () => {
+    const { adapter, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await adapter.sendTurn({
+      workspaceId: "workspace-fixture",
+      text: "Offer a bounded continuation.",
+      effort: "low",
+      attachmentHandles: [],
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    const pending = parseCodexEvent(fixture.events[1])
+    if (running.kind !== "turn_status" || pending.kind !== "pending_request") {
+      throw new Error("turn fixtures")
+    }
+    const fallback = parseCodexEvent({
+      ...pending,
+      eventId: "event-transition-fallback",
+      payload: {
+        request: {
+          pendingId: "decision-transition",
+          kind: "user_input",
+          responseKind: "fallback_decision",
+          operation: "decision_fallback",
+          targetAlias: "active_turn",
+          reason: "Choose a bounded continuation.",
+          questions: [
+            {
+              id: "decision",
+              header: "Decision",
+              question: "Continue?",
+              options: [
+                { id: "option-yes", label: "Yes", description: "Continue" },
+                { id: "option-no", label: "No", description: "Stop" },
+              ],
+            },
+          ],
+          allowedDecisions: [],
+          decisionContext: {
+            schemaVersion: 1,
+            category: "user_decision",
+            targetKind: "active_turn",
+            targetAlias: "active_turn",
+            effect: "continue_turn",
+            scope: "turn",
+            risk: "medium",
+            reversibility: "unknown",
+            recommendation: "option-yes",
+            evidence: ["Choose the bounded continuation for this turn."],
+            uncertainty: "limited_context",
+          },
+        },
+      },
+    })
+    transport.emit(running)
+    transport.emit(fallback)
+    transport.emit({
+      ...running,
+      eventId: "event-transition-source-completed",
+      sequence: fallback.sequence + 1,
+      payload: { ...running.payload, status: "completed" },
+    })
+
+    expect(adapter.sessionStore.snapshot()).toMatchObject({
+      turnStatus: "completed",
+      pendingRequests: [
+        expect.objectContaining({ pendingId: "decision-transition" }),
+      ],
+    })
+    const interruptsBefore = transport.calls.filter(
+      ({ command }) => command === codexCommands.turnInterrupt,
+    ).length
+    await expect(
+      adapter.stopTurnAndWaitForTerminal({
+        workspaceId: "workspace-fixture",
+        expectedGeneration: 7,
+      }),
+    ).resolves.toBeUndefined()
+    expect(
+      transport.calls.filter(
+        ({ command }) => command === codexCommands.turnInterrupt,
+      ),
+    ).toHaveLength(interruptsBefore)
+
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-other",
+      historyMode: "ready",
+    })
+    expect(adapter.sessionStore.snapshot()).toMatchObject({
+      workspaceId: "workspace-other",
+      pendingRequests: [],
+    })
+    await expect(
+      adapter.answerFallbackDecision({
+        workspaceId: "workspace-fixture",
+        decisionHandle: "decision-transition",
+        optionId: "option-yes",
+      }),
+    ).resolves.toBe(false)
+    expect(
+      transport.calls.filter(
+        ({ command }) => command === codexCommands.answerFallbackDecision,
+      ),
+    ).toHaveLength(0)
+  })
+
   it("waits for an in-flight turn start before interrupting its accepted identity", async () => {
     const { adapter, transport } = adapterFixture()
     await adapter.activateWorkspace({

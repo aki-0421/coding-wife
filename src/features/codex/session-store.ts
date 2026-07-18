@@ -27,6 +27,13 @@ export interface CodexSessionSnapshot {
 
 type StoreListener = (snapshot: CodexSessionSnapshot) => void
 
+interface PendingResponseClaim {
+  readonly pendingId: string
+  readonly workspaceId: string
+  readonly generation: number
+  readonly pending: PendingRequestView
+}
+
 const terminalTurnStatuses = new Set([
   "completed",
   "failed",
@@ -45,7 +52,10 @@ export class CodexSessionStore {
   private events: CodexEvent[] = []
   private readonly seenEventIds = new Set<string>()
   private readonly pendingRequests = new Map<string, PendingRequestView>()
-  private readonly claimedPendingResponses = new Set<string>()
+  private readonly claimedPendingResponses = new Map<
+    string,
+    PendingResponseClaim
+  >()
   private readonly completedMessages = new Map<string, string>()
   private readonly listeners = new Set<StoreListener>()
 
@@ -120,45 +130,72 @@ export class CodexSessionStore {
     return result
   }
 
-  claimPendingResponse(request: CodexPendingResponseRequest): boolean {
+  claimPendingResponse(
+    request: CodexPendingResponseRequest,
+  ): PendingResponseClaim | null {
     const pending = this.pendingRequests.get(request.pendingId)
+    const generation = this.generation
     if (
       request.workspaceId !== this.workspaceId ||
+      generation === null ||
       pending === undefined ||
       pending.responseKind !== "native_server_request" ||
       (pending.kind === "user_input") !==
         (request.response.type === "user_input") ||
       this.claimedPendingResponses.has(request.pendingId)
     ) {
-      return false
+      return null
     }
-    this.claimedPendingResponses.add(request.pendingId)
-    return true
+    return this.claimPending(
+      request.pendingId,
+      request.workspaceId,
+      generation,
+      pending,
+    )
   }
 
-  claimFallbackDecision(request: CodexFallbackDecisionRequest): boolean {
+  claimFallbackDecision(
+    request: CodexFallbackDecisionRequest,
+  ): PendingResponseClaim | null {
     const pending = this.pendingRequests.get(request.decisionHandle)
+    const generation = this.generation
     if (
       request.workspaceId !== this.workspaceId ||
+      generation === null ||
+      this.turnStatus !== "completed" ||
       pending?.responseKind !== "fallback_decision" ||
       !pending.questions[0].options.some(
         (option) => option.id === request.optionId,
       ) ||
       this.claimedPendingResponses.has(request.decisionHandle)
     ) {
-      return false
+      return null
     }
-    this.claimedPendingResponses.add(request.decisionHandle)
-    return true
+    return this.claimPending(
+      request.decisionHandle,
+      request.workspaceId,
+      generation,
+      pending,
+    )
   }
 
-  releasePendingResponse(pendingId: string): void {
-    this.claimedPendingResponses.delete(pendingId)
+  releasePendingResponse(claim: PendingResponseClaim): void {
+    if (this.claimedPendingResponses.get(claim.pendingId) === claim) {
+      this.claimedPendingResponses.delete(claim.pendingId)
+    }
   }
 
-  completePendingResponse(pendingId: string): void {
-    this.claimedPendingResponses.delete(pendingId)
-    if (this.pendingRequests.delete(pendingId)) this.notify()
+  completePendingResponse(claim: PendingResponseClaim): void {
+    if (this.claimedPendingResponses.get(claim.pendingId) !== claim) return
+    this.claimedPendingResponses.delete(claim.pendingId)
+    if (
+      this.workspaceId === claim.workspaceId &&
+      this.generation === claim.generation &&
+      this.pendingRequests.get(claim.pendingId) === claim.pending
+    ) {
+      this.pendingRequests.delete(claim.pendingId)
+      this.notify()
+    }
   }
 
   private resetForGeneration(workspaceId: string, generation: number): void {
@@ -199,8 +236,15 @@ export class CodexSessionStore {
         this.activeTurnHandle = event.payload.turnHandle
         this.turnStatus = event.payload.status
         if (terminalTurnStatuses.has(event.payload.status)) {
-          this.pendingRequests.clear()
-          this.claimedPendingResponses.clear()
+          for (const [pendingId, pending] of this.pendingRequests) {
+            if (
+              event.payload.status !== "completed" ||
+              pending.responseKind === "native_server_request"
+            ) {
+              this.pendingRequests.delete(pendingId)
+              this.claimedPendingResponses.delete(pendingId)
+            }
+          }
         }
         break
       case "agent_message_completed":
@@ -224,5 +268,21 @@ export class CodexSessionStore {
   private notify(): void {
     const snapshot = this.snapshot()
     for (const listener of this.listeners) listener(snapshot)
+  }
+
+  private claimPending(
+    pendingId: string,
+    workspaceId: string,
+    generation: number,
+    pending: PendingRequestView,
+  ): PendingResponseClaim {
+    const claim = {
+      pendingId,
+      workspaceId,
+      generation,
+      pending,
+    }
+    this.claimedPendingResponses.set(pendingId, claim)
+    return claim
   }
 }

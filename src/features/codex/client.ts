@@ -44,7 +44,8 @@ export class CodexSessionClient {
   }
 
   async respondPending(request: CodexPendingResponseRequest): Promise<boolean> {
-    if (!this.store.claimPendingResponse(request)) {
+    const claim = this.store.claimPendingResponse(request)
+    if (claim === null) {
       return false
     }
     try {
@@ -53,13 +54,13 @@ export class CodexSessionClient {
         request,
       )
       if (!result.accepted) {
-        this.store.releasePendingResponse(request.pendingId)
+        this.store.releasePendingResponse(claim)
         return false
       }
-      this.store.completePendingResponse(request.pendingId)
+      this.store.completePendingResponse(claim)
       return true
     } catch (error) {
-      this.store.releasePendingResponse(request.pendingId)
+      this.store.releasePendingResponse(claim)
       throw error
     }
   }
@@ -67,16 +68,17 @@ export class CodexSessionClient {
   async answerFallbackDecision(
     request: CodexFallbackDecisionRequest,
   ): Promise<boolean> {
-    if (!this.store.claimFallbackDecision(request)) return false
+    const claim = this.store.claimFallbackDecision(request)
+    if (claim === null) return false
     try {
       await this.transport.request(
         codexCommands.answerFallbackDecision,
         request,
       )
-      this.store.completePendingResponse(request.decisionHandle)
+      this.store.completePendingResponse(claim)
       return true
     } catch (error) {
-      this.store.releasePendingResponse(request.decisionHandle)
+      this.store.releasePendingResponse(claim)
       throw error
     }
   }

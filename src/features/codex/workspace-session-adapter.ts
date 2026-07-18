@@ -664,7 +664,11 @@ export class CodexWorkspaceSessionAdapter {
       snapshot.activeThreadHandle !== identity.threadHandle ||
       snapshot.activeTurnHandle !== identity.turnHandle ||
       !terminalTurnStatuses.has(snapshot.turnStatus) ||
-      snapshot.pendingRequests.length !== 0
+      (snapshot.turnStatus !== "completed" &&
+        snapshot.pendingRequests.length !== 0) ||
+      snapshot.pendingRequests.some(
+        (pending) => pending.responseKind === "native_server_request",
+      )
     ) {
       throw codedError("CODEX-TURN-TERMINAL-CLEANUP-INCOMPLETE")
     }

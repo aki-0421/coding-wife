@@ -12,6 +12,17 @@ import fixture from "@/test/fixtures/codex-runtime.v1.json"
 
 const fixtureEvents = fixture.events.map(parseCodexEvent)
 
+function deferred<T>(): {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T) => void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 describe("CodexSessionStore", () => {
   it("rejects a future-generation event from a non-active workspace", () => {
     const store = new CodexSessionStore()
@@ -106,6 +117,61 @@ describe("CodexSessionStore", () => {
     expect(requestMock).toHaveBeenCalledOnce()
   })
 
+  it("does not let a late response settle a reused handle in another workspace", async () => {
+    const pending = fixtureEvents[1]
+    if (pending?.kind !== "pending_request") throw new Error("fixture")
+    const firstResponse = deferred<{ accepted: true }>()
+    const requestMock = vi
+      .fn()
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockResolvedValueOnce({ accepted: true })
+    const store = new CodexSessionStore()
+    const client = new CodexSessionClient(
+      {
+        kind: "demo",
+        request: requestMock,
+        subscribe: () => Promise.resolve(() => undefined),
+      } as CodexTransport,
+      store,
+    )
+    store.apply(pending)
+    const firstRequest = {
+      workspaceId: pending.workspaceId,
+      pendingId: pending.payload.request.pendingId,
+      response: { type: "approval", decision: "reject" },
+    } satisfies CodexPendingResponseRequest
+
+    const first = client.respondPending(firstRequest)
+    await vi.waitFor(() => expect(requestMock).toHaveBeenCalledOnce())
+    store.activateWorkspace("workspace-other")
+    store.apply({
+      ...pending,
+      eventId: "event-reused-pending-handle",
+      workspaceId: "workspace-other",
+      generation: pending.generation + 1,
+      sequence: 1,
+    })
+    firstResponse.resolve({ accepted: true })
+
+    await expect(first).resolves.toBe(true)
+    expect(store.snapshot()).toMatchObject({
+      workspaceId: "workspace-other",
+      pendingRequests: [
+        expect.objectContaining({
+          pendingId: pending.payload.request.pendingId,
+        }),
+      ],
+    })
+    await expect(
+      client.respondPending({
+        ...firstRequest,
+        workspaceId: "workspace-other",
+      }),
+    ).resolves.toBe(true)
+    expect(requestMock).toHaveBeenCalledTimes(2)
+    expect(store.snapshot().pendingRequests).toHaveLength(0)
+  })
+
   it("keeps fallback decisions after the source turn and claims one continuation", async () => {
     const pending = fixtureEvents[1]
     const running = fixtureEvents[0]
@@ -157,14 +223,6 @@ describe("CodexSessionStore", () => {
     })
     const store = new CodexSessionStore()
     store.apply(fallback)
-    store.apply({
-      ...running,
-      eventId: "event-source-completed",
-      sequence: 2,
-      payload: { ...running.payload, status: "completed" },
-    })
-    expect(store.snapshot().pendingRequests).toHaveLength(1)
-
     const requestMock = vi.fn().mockResolvedValue({
       threadHandle: "thread_handle_fixture",
       turnHandle: "turn_decision_fixture",
@@ -182,6 +240,16 @@ describe("CodexSessionStore", () => {
       decisionHandle: "decision-fixture",
       optionId: "option-yes",
     } satisfies CodexFallbackDecisionRequest
+
+    await expect(client.answerFallbackDecision(request)).resolves.toBe(false)
+    expect(requestMock).not.toHaveBeenCalled()
+    store.apply({
+      ...running,
+      eventId: "event-source-completed",
+      sequence: 2,
+      payload: { ...running.payload, status: "completed" },
+    })
+    expect(store.snapshot().pendingRequests).toHaveLength(1)
 
     await expect(
       client.answerFallbackDecision({ ...request, optionId: "unknown" }),
@@ -211,48 +279,47 @@ describe("CodexSessionStore", () => {
       throw new Error("fixture")
     }
     const store = new CodexSessionStore()
-    store.apply(
-      parseCodexEvent({
-        ...pending,
-        eventId: "event-fallback",
-        sequence: 1,
-        payload: {
-          request: {
-            pendingId: "decision-fixture",
-            kind: "user_input",
-            responseKind: "fallback_decision",
-            operation: "decision_fallback",
-            targetAlias: "active_turn",
-            reason: null,
-            questions: [
-              {
-                id: "decision",
-                header: "Decision",
-                question: "Continue?",
-                options: [
-                  { id: "option-a", label: "A", description: "First" },
-                  { id: "option-b", label: "B", description: "Second" },
-                ],
-              },
-            ],
-            allowedDecisions: [],
-            decisionContext: {
-              schemaVersion: 1,
-              category: "user_decision",
-              targetKind: "active_turn",
-              targetAlias: "active_turn",
-              effect: "continue_turn",
-              scope: "turn",
-              risk: "medium",
-              reversibility: "unknown",
-              recommendation: null,
-              evidence: ["No recommendation was supplied by the source."],
-              uncertainty: "limited_context",
+    const fallback = parseCodexEvent({
+      ...pending,
+      eventId: "event-fallback",
+      sequence: 1,
+      payload: {
+        request: {
+          pendingId: "decision-fixture",
+          kind: "user_input",
+          responseKind: "fallback_decision",
+          operation: "decision_fallback",
+          targetAlias: "active_turn",
+          reason: null,
+          questions: [
+            {
+              id: "decision",
+              header: "Decision",
+              question: "Continue?",
+              options: [
+                { id: "option-a", label: "A", description: "First" },
+                { id: "option-b", label: "B", description: "Second" },
+              ],
             },
+          ],
+          allowedDecisions: [],
+          decisionContext: {
+            schemaVersion: 1,
+            category: "user_decision",
+            targetKind: "active_turn",
+            targetAlias: "active_turn",
+            effect: "continue_turn",
+            scope: "turn",
+            risk: "medium",
+            reversibility: "unknown",
+            recommendation: null,
+            evidence: ["No recommendation was supplied by the source."],
+            uncertainty: "limited_context",
           },
         },
-      }),
-    )
+      },
+    })
+    store.apply(fallback)
     store.apply({
       ...running,
       eventId: "event-source-completed",
@@ -267,5 +334,15 @@ describe("CodexSessionStore", () => {
       payload: { pendingId: "decision-fixture", status: "expired" },
     })
     expect(store.snapshot().pendingRequests).toHaveLength(0)
+
+    const interruptedStore = new CodexSessionStore()
+    interruptedStore.apply(fallback)
+    interruptedStore.apply({
+      ...running,
+      eventId: "event-source-interrupted",
+      sequence: 2,
+      payload: { ...running.payload, status: "interrupted" },
+    })
+    expect(interruptedStore.snapshot().pendingRequests).toHaveLength(0)
   })
 })
