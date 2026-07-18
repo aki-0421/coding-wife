@@ -96,6 +96,8 @@ read_when:
 | `SUP-F-066` | support raw historyをapp persistenceへ残さない | invocation完了後にapp DB、artifact、logを検索してもprompt/response本文が0件で、usage metadataだけが存在する | Approved | 非該当 |
 | `SUP-F-067` | release前にephemeral non-persistenceを監査する | test用CODEX_HOME snapshotのbefore/after差分にsupport thread history fileが0件であることをCI/manual release evidenceへ記録する。private rootは作成時directory descriptorとdevice/inode/ownerを保持し、同一identityのmode driftを0700へ戻してauth copyごとno-follow cleanupする。元pathのNotFoundだけをcleanup成功とせず、保持descriptorのdevice/inode/link数と安全に発見したdisplaced inodeを照合し、auth-bearing inodeのtree削除と消滅確認後だけcleanedにする。explicit cleanup失敗ではcleaned状態にせずDrop retryを残し、unsafe-modeまたはdisplaced stale rootも次回起動時にowner/identity/lockを再検証して回収する | Approved | 非該当 |
 | `SUP-F-068` | support model familyとeffortはrole policyで固定される | role mappingに存在するGPT-5.6 family/effortだけをsession startへ渡し、support outputからmodelを変更できない。release probeは全captured Responses requestの`reasoning.effort`がexact `low`である場合だけcapacityを1にし、missing、null、`medium`、その他文字列、または異なる構造ではcapacityを0にする | Approved | 非該当 |
+| `SUP-F-079` | support希望設定をnativeへ永続化し、実効状態を安全に導出する | owner-only app-private `SupportSettingsV1`へglobal enabledとcommit explainer enabledだけをatomic保存する。fresh/missing recordは既存のverified commit自動説明を維持するため希望値`on / on`、corrupt/unknown/unsafe/unavailable storeは`off / off`へfail closedする。実効onは両希望値に加え、approved CLI version・binary hash・schema fingerprintが一致した時だけ成立し、再起動後も保存済み希望値を復元する。presence/narrationとdecision explainerは実装されるまで設定schemaとUIへ出さない | Approved | 非該当 |
+| `SUP-F-080` | policy gateと透明性snapshotをcontroller admission境界で一意に扱う | globalまたはcommit explainerをoffにする更新とenqueueを同じadmission lockで直列化し、保存成功後にqueued全件を`canceled`、active 1件をcancel/停止してから応答する。off後のenqueue、非承認binary、schema不一致、readiness不足はsupport process/model invocationを0件のままdeterministic `unavailable`へterminal化し、main turn、main event、main processへ影響しない。typed IPC snapshotは希望設定version、effective state、approved/observed CLI version・binary hash prefix・readiness reason、active/queued/max capacity、task/token/latency usage counters、固定model/effort/permission/skill/non-persistence audit、latest outcome、last safe error、recovery codeを返し、prompt/response/path/credentialを含まない | Approved | 非該当 |
 
 ### Commit explanation
 
@@ -116,8 +118,8 @@ read_when:
 
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
 |---|---|---|---|---|---|
-| Settings | support enabled | isolation capability合格時on、不合格時off | 必須 | boolean。release proof済みcapacity 1かつwire-advertised tool 0件、external-authority tool 0件、tool-absence boundary一致の場合だけon | 不正値、capacity 0、tool field追加、内部plan eventまたはcapability不足はoffにfail closed |
-| Settings | role enabled | commit explainer on、他はpolicy値 | 必須 | allowlist roleごとのboolean | unknown roleを保存しない |
+| Settings | support enabled | fresh/missing recordの希望値on。実効値はapproved identityとisolation capability合格時だけon | 必須 | `SupportSettingsV1.globalEnabled` boolean。保存済み希望値と実効値を分離し、global off更新はcommit support queue/activeを停止する | 不正・corrupt・unknown schema・unsafe/unavailable storeは希望値off、実効値offへfail closed |
+| Settings | role enabled | fresh/missing recordのcommit explainer希望値on | 必須 | 今回は`SupportSettingsV1.commitExplainerEnabled`だけ。presence/narrationとdecision explainer keyを受理・保存・表示しない | unknown field/roleをschema errorとして保存せず、実効値offを維持 |
 | Task | snapshot | なし | 必須 | schema version、最大64KiB、redaction pass必須 | taskを起動せずfallback |
 | Commit explanation | evidence | なし | 条件付き | `CommitEvidenceV1`、redaction済み最大64KiB、active selection/generation一致 | explainerを起動せずunavailable表示 |
 | Commit explanation | locale | active UI locale | 必須 | `ja` / `en` | active localeへ正規化 |

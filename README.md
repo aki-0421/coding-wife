@@ -131,6 +131,8 @@ The release-approved support runtime identity is `codex-cli 0.144.5` for Apple S
 
 Any other support binary, version, executable hash, schema fingerprint, or failed isolation proof is unapproved. In that state Coding Wife does not enqueue a support job, start a support process, or invoke the support model; it reports support as unavailable and retains the deterministic local commit-evidence fallback. This support gate is separate from main-session readiness, which still fails closed when its own authenticated App Server or model contract is unavailable.
 
+Settings exposes exactly two implemented desired-state controls: **Enable isolated support** and **Commit explainer**. Native mode reads and updates the owner-only, versioned setting through `support_settings_get` and `support_settings_update`; an enabled preference records intent but never overrides release readiness. A disable update is persisted before it blocks new admission, cancels queued and active explanation work, and returns only after support capacity converges to zero. The browser demo keeps this setting in ephemeral memory and never starts a support model.
+
 ## How we used Codex to build Coding Wife
 
 Codex coding agents were used throughout the repository workflow to turn written product contracts into the React/Tauri implementation, connect the TypeScript and Rust boundaries, add focused and regression tests, diagnose race and recovery failures, and harden release, privacy, accessibility, and supply-chain behavior. The commit history preserves these implementation and review units.

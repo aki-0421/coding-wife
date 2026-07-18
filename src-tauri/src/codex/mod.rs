@@ -15,6 +15,7 @@ pub mod requests;
 pub mod rpc;
 pub mod supervisor;
 pub mod support;
+pub mod support_control;
 mod support_isolation;
 mod support_private;
 mod support_probe;

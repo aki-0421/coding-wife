@@ -22,10 +22,10 @@ use super::support_private::{support_config, write_private_file, PrivateRunDirec
 use super::support_probe::{canonical_json_hash, ProbeCaptureServer};
 use super::types::{BinarySource, CapabilityState, CODEX_MODEL};
 
-const SUPPORTED_CLI_VERSION: &str = "0.144.5";
-const SUPPORTED_ARM64_BINARY_SHA256: &str =
+pub(crate) const SUPPORTED_CLI_VERSION: &str = "0.144.5";
+pub(crate) const SUPPORTED_ARM64_BINARY_SHA256: &str =
     "5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2";
-const SUPPORTED_SCHEMA_FINGERPRINT: &str =
+pub(crate) const SUPPORTED_SCHEMA_FINGERPRINT: &str =
     "efea5c6649ccbae7e26af47874bca302e0803d6db80571d57cd55841890dddbc";
 const EXPECTED_SUPPORT_OUTPUT_SCHEMA_HASH: &str =
     "c01cb830b87c827b22842342f0410657b259ccbd113e3db05bd988ff48e4f3c9";

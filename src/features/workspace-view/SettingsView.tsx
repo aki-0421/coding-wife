@@ -50,6 +50,7 @@ import {
   useAppPreferences,
   useAppPreferencesController,
 } from "@/features/preferences"
+import { SupportControlsSettings } from "@/features/support-controls"
 import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
 import { EditableContextSection } from "@/features/workspace-view/EditableContextSection"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
@@ -400,46 +401,14 @@ function AudioSettings({
   )
 }
 
-function SupportSettings({ copy }: { readonly copy: WorkspaceCopy }) {
+function SupportSettings() {
+  const preferences = useAppPreferences()
   return (
-    <section className="flex flex-col gap-lg">
-      <h2 className="m-0 text-headline text-text-strong">
-        {copy.settingsView.supportTitle}
-      </h2>
-      <SettingRow
-        action={
-          <Switch
-            aria-label={copy.settingsView.supportGlobal}
-            checked={false}
-            disabled
-          />
-        }
-        description={copy.settingsView.supportDescription}
-        label={copy.settingsView.supportGlobal}
-      />
-      <SettingRow
-        action={
-          <Switch
-            aria-label={copy.settingsView.presence}
-            checked={false}
-            disabled
-          />
-        }
-        description={copy.settingsView.supportDescription}
-        label={copy.settingsView.presence}
-      />
-      <SettingRow
-        action={
-          <Switch
-            aria-label={copy.settingsView.reviewer}
-            checked={false}
-            disabled
-          />
-        }
-        description={copy.settingsView.supportDescription}
-        label={copy.settingsView.reviewer}
-      />
-    </section>
+    <SupportControlsSettings
+      gatewayKind={
+        preferences.snapshot.persistence === "native" ? "native" : "demo"
+      }
+    />
   )
 }
 
@@ -673,7 +642,7 @@ export function SettingsView(props: SettingsViewProps) {
       case "audio":
         return <AudioSettings {...props} />
       case "support":
-        return <SupportSettings copy={props.copy} />
+        return <SupportSettings />
       case "diagnostics":
         return <DiagnosticsSettings {...props} />
       case "history":
