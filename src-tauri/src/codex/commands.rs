@@ -108,12 +108,11 @@ pub async fn codex_turn_start(
     let attachments = attachment_service
         .resolve_for_turn(context.clone(), &request.attachment_handles)
         .await?;
+    let handles = attachments.handles().to_vec();
     let response = supervisor
-        .turn_start_resolved(request, attachments.inputs, context.generation)
+        .turn_start_resolved(request, attachments, context.generation)
         .await?;
-    attachment_service
-        .consume(&context, &attachments.handles)
-        .await;
+    attachment_service.consume(&context, &handles).await;
     Ok(response)
 }
 

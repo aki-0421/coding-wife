@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use coding_wife_lib::codex::attachment::{
-    AttachmentService, AttachmentSource, AttachmentWorkspaceContext,
+    AttachmentService, AttachmentSource, AttachmentWorkspaceContext, ResolvedAttachmentSet,
 };
 use coding_wife_lib::codex::binary::{discover_binary, probe_schema};
 use coding_wife_lib::codex::process::spawn_process;
@@ -39,6 +39,7 @@ fn temporary_directory(label: &str) -> PathBuf {
 struct FixtureEnvironment {
     workspace: PathBuf,
     state: PathBuf,
+    app_data: PathBuf,
 }
 
 impl FixtureEnvironment {
@@ -52,9 +53,14 @@ impl FixtureEnvironment {
             .expect("initialize fixture repository");
         assert!(git_init.success(), "fixture repository must be valid Git");
         let state = temporary_directory("state");
+        let app_data = temporary_directory("app-data");
         std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", mode);
         std::env::set_var("CODING_WIFE_CODEX_FAKE_STATE", &state);
-        Self { workspace, state }
+        Self {
+            workspace,
+            state,
+            app_data,
+        }
     }
 }
 
@@ -110,6 +116,7 @@ impl Drop for FixtureEnvironment {
         std::env::remove_var("CODING_WIFE_CODEX_FAKE_STATE");
         let _ = std::fs::remove_dir_all(&self.workspace);
         let _ = std::fs::remove_file(&self.state);
+        let _ = std::fs::remove_dir_all(&self.app_data);
     }
 }
 
@@ -151,6 +158,129 @@ async fn initialize_direct(
 
 async fn read_state(path: &Path) -> String {
     tokio::fs::read_to_string(path).await.unwrap_or_default()
+}
+
+fn attachment_snapshot_root(fixture: &FixtureEnvironment) -> PathBuf {
+    fixture.app_data.join("codex").join("attachment-snapshots")
+}
+
+fn assert_attachment_snapshots_empty(fixture: &FixtureEnvironment) {
+    assert_eq!(
+        std::fs::read_dir(attachment_snapshot_root(fixture))
+            .expect("attachment snapshot root")
+            .count(),
+        0,
+        "private attachment snapshots must be cleaned"
+    );
+}
+
+struct PreparedAttachmentFixture {
+    fixture: FixtureEnvironment,
+    supervisor: CodexSupervisor,
+    attachments: AttachmentService,
+    context: AttachmentWorkspaceContext,
+    workspace_id: String,
+    thread_handle: String,
+    handles: Vec<String>,
+    resolved: ResolvedAttachmentSet,
+    image: PathBuf,
+    notes: PathBuf,
+}
+
+async fn prepare_attachment_fixture(
+    mode: &str,
+    image_bytes: &[u8],
+    notes_bytes: &[u8],
+) -> PreparedAttachmentFixture {
+    let fixture = FixtureEnvironment::new(mode);
+    let image = fixture.workspace.join("images/demo.png");
+    std::fs::create_dir_all(image.parent().expect("image parent")).expect("image parent");
+    std::fs::write(&image, image_bytes).expect("image fixture");
+    let notes = fixture.workspace.join("nested/notes.txt");
+    std::fs::create_dir_all(notes.parent().expect("notes parent")).expect("notes parent");
+    std::fs::write(&notes, notes_bytes).expect("notes fixture");
+
+    let supervisor = CodexSupervisor::new();
+    supervisor.start_signal_loop();
+    let workspace_service = WorkspaceService::new(
+        supervisor.clone(),
+        Arc::new(FixedPicker(fixture.workspace.clone())),
+    );
+    workspace_service
+        .apply_private_binary(AppPrivateBinaryRecord {
+            canonical_path: fixture_binary(),
+        })
+        .await
+        .expect("private binary");
+    let registration = workspace_service
+        .pick_and_register()
+        .await
+        .expect("workspace registration");
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: registration.workspace_id.clone(),
+        })
+        .await
+        .expect("connect");
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: registration.workspace_id.clone(),
+        })
+        .await
+        .expect("thread");
+    let identity = workspace_service
+        .trusted_identity(&registration.workspace_id)
+        .await
+        .expect("trusted identity");
+    let context = AttachmentWorkspaceContext {
+        workspace_id: registration.workspace_id.clone(),
+        generation: thread.generation,
+        canonical_root: identity.canonical_root,
+        root_device: identity.root_device,
+        root_inode: identity.root_inode,
+    };
+    let attachments = AttachmentService::production(&fixture.app_data).expect("attachment service");
+    let registered = attachments
+        .register_paths(
+            context.clone(),
+            AttachmentSource::Drop,
+            vec![
+                std::fs::canonicalize(&image)
+                    .expect("canonical image")
+                    .to_string_lossy()
+                    .into_owned(),
+                std::fs::canonicalize(&notes)
+                    .expect("canonical notes")
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+            vec![],
+        )
+        .await
+        .expect("attachment registration");
+    assert_eq!(registered.items.len(), 2, "{:?}", registered.rejections);
+    let handles = registered
+        .items
+        .iter()
+        .map(|item| item.handle.clone())
+        .collect::<Vec<_>>();
+    let resolved = attachments
+        .resolve_for_turn(context.clone(), &handles)
+        .await
+        .expect("resolve attachments");
+
+    PreparedAttachmentFixture {
+        fixture,
+        supervisor,
+        attachments,
+        context,
+        workspace_id: registration.workspace_id,
+        thread_handle: thread.thread_handle,
+        handles,
+        resolved,
+        image,
+        notes,
+    }
 }
 
 async fn expect_protocol_violation(signals: &mut mpsc::Receiver<RuntimeSignal>) {
@@ -313,7 +443,7 @@ async fn validated_opaque_attachments_reach_the_fake_server_as_local_image_and_m
         root_device: identity.root_device,
         root_inode: identity.root_inode,
     };
-    let attachments = AttachmentService::production();
+    let attachments = AttachmentService::production(&fixture.app_data).expect("attachment service");
     let registered = attachments
         .register_paths(
             context.clone(),
@@ -345,27 +475,159 @@ async fn validated_opaque_attachments_reach_the_fake_server_as_local_image_and_m
         .resolve_for_turn(context.clone(), &handles)
         .await
         .expect("resolve attachments");
-    supervisor
+    let turn = supervisor
         .turn_start_resolved(
             CodexTurnStartRequest {
-                workspace_id: registration.workspace_id,
-                thread_handle: thread.thread_handle,
+                workspace_id: registration.workspace_id.clone(),
+                thread_handle: thread.thread_handle.clone(),
                 client_user_message_id: "message-attachments".to_owned(),
                 text: String::new(),
                 effort: ReasoningPreset::Low,
                 attachment_handles: handles.clone(),
             },
-            resolved.inputs,
+            resolved,
             context.generation,
         )
         .await
         .expect("attachment turn");
+    assert_attachment_snapshots_empty(&fixture);
     attachments.consume(&context, &handles).await;
+    supervisor
+        .turn_interrupt(CodexTurnInterruptRequest {
+            workspace_id: registration.workspace_id,
+            thread_handle: thread.thread_handle,
+            turn_handle: turn.turn_handle,
+        })
+        .await
+        .expect("attachment turn interrupt");
+    assert_attachment_snapshots_empty(&fixture);
 
     let state = read_state(&fixture.state).await;
-    assert!(state.contains("attachment_contract_ok"));
-    assert!(!state.contains("attachment_contract_invalid"));
+    assert!(state.contains("attachment_exact_bytes_ok"));
+    assert!(!state.contains("attachment_exact_bytes_invalid"));
+    assert!(!state.contains(&fixture.workspace.to_string_lossy().to_string()));
+    assert!(!state.contains(&fixture.app_data.to_string_lossy().to_string()));
     supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_bytes_survive_leaf_and_ancestor_namespace_replacement() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let PreparedAttachmentFixture {
+        fixture,
+        supervisor,
+        attachments,
+        context,
+        workspace_id,
+        thread_handle,
+        handles,
+        resolved,
+        image,
+        notes,
+    } = prepare_attachment_fixture(
+        "attachments_race",
+        b"\x89PNG\r\n\x1a\nvalidated-image",
+        b"validated-notes",
+    )
+    .await;
+
+    let validated_image = image.with_extension("validated");
+    std::fs::rename(&image, &validated_image).expect("replace image leaf namespace");
+    std::fs::write(&image, b"\x89PNG\r\n\x1a\nunvalidated-image").expect("replacement image");
+    let notes_parent = notes.parent().expect("notes parent").to_path_buf();
+    let validated_parent = notes_parent.with_extension("validated");
+    std::fs::rename(&notes_parent, &validated_parent).expect("replace notes ancestor namespace");
+    std::fs::create_dir(&notes_parent).expect("replacement notes ancestor");
+    std::fs::write(notes_parent.join("notes.txt"), b"unvalidated-notes")
+        .expect("replacement notes");
+
+    supervisor
+        .turn_start_resolved(
+            CodexTurnStartRequest {
+                workspace_id,
+                thread_handle,
+                client_user_message_id: "message-attachment-race".to_owned(),
+                text: String::new(),
+                effort: ReasoningPreset::Low,
+                attachment_handles: handles.clone(),
+            },
+            resolved,
+            context.generation,
+        )
+        .await
+        .expect("snapshot-backed attachment turn");
+    attachments.consume(&context, &handles).await;
+    assert_attachment_snapshots_empty(&fixture);
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("attachment_exact_bytes_ok"));
+    assert!(!state.contains("attachment_exact_bytes_invalid"));
+    assert!(!state.contains("unvalidated"));
+    assert!(!state.contains(&fixture.workspace.to_string_lossy().to_string()));
+    assert!(!state.contains(&fixture.app_data.to_string_lossy().to_string()));
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_cleanup_covers_rejection_terminal_before_response_and_child_crash() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for mode in [
+        "attachments_rejected",
+        "attachments_terminal_first",
+        "attachments_crash",
+    ] {
+        let PreparedAttachmentFixture {
+            fixture,
+            supervisor,
+            attachments,
+            context,
+            workspace_id,
+            thread_handle,
+            handles,
+            resolved,
+            ..
+        } = prepare_attachment_fixture(mode, b"\x89PNG\r\n\x1a\nfixture", b"bounded notes").await;
+        let result = supervisor
+            .turn_start_resolved(
+                CodexTurnStartRequest {
+                    workspace_id,
+                    thread_handle,
+                    client_user_message_id: format!("message-{mode}"),
+                    text: String::new(),
+                    effort: ReasoningPreset::Low,
+                    attachment_handles: handles.clone(),
+                },
+                resolved,
+                context.generation,
+            )
+            .await;
+        assert_attachment_snapshots_empty(&fixture);
+        let state = read_state(&fixture.state).await;
+        assert!(state.contains("attachment_exact_bytes_ok"), "{mode}");
+        assert!(!state.contains("attachment_exact_bytes_invalid"), "{mode}");
+        assert!(!state.contains(&fixture.workspace.to_string_lossy().to_string()));
+        assert!(!state.contains(&fixture.app_data.to_string_lossy().to_string()));
+
+        if mode == "attachments_terminal_first" {
+            result.expect("terminal-first turn was accepted");
+            assert!(state.contains("attachment_terminal_cleanup_ok"));
+            assert!(!state.contains("attachment_terminal_cleanup_invalid"));
+            attachments.consume(&context, &handles).await;
+            let consumed = attachments
+                .resolve_for_turn(context.clone(), &handles)
+                .await
+                .expect_err("accepted turn consumes handles");
+            assert_eq!(consumed.code, "CODEX-ATTACHMENT-HANDLE-INVALID");
+        } else {
+            result.expect_err("rejection or crash must fail turn start");
+            let retry = attachments
+                .resolve_for_turn(context.clone(), &handles)
+                .await
+                .expect("failed turn keeps handles reusable");
+            drop(retry);
+            assert_attachment_snapshots_empty(&fixture);
+        }
+        supervisor.shutdown().await;
+    }
 }
 
 #[tokio::test]

@@ -344,7 +344,7 @@ pub fn decision_output_schema() -> Value {
     })
 }
 
-pub fn turn_start_params(
+pub(crate) fn turn_start_params(
     thread_id: &str,
     client_user_message_id: &str,
     text: &str,
@@ -529,11 +529,11 @@ mod tests {
     fn turn_projects_validated_images_and_files_without_an_empty_text_item() {
         let attachments = [
             ResolvedAttachment::LocalImage {
-                path: "/workspace/demo.png".to_owned(),
+                path: "/app-private/attachment-snapshots/lease/00.snapshot".to_owned(),
             },
             ResolvedAttachment::Mention {
                 name: "notes.txt".to_owned(),
-                path: "/workspace/notes.txt".to_owned(),
+                path: "/app-private/attachment-snapshots/lease/01.snapshot".to_owned(),
             },
         ];
         let params = turn_start_params(
@@ -547,8 +547,8 @@ mod tests {
         assert_eq!(
             params["input"],
             json!([
-                {"type": "localImage", "path": "/workspace/demo.png"},
-                {"type": "mention", "name": "notes.txt", "path": "/workspace/notes.txt"}
+                {"type": "localImage", "path": "/app-private/attachment-snapshots/lease/00.snapshot"},
+                {"type": "mention", "name": "notes.txt", "path": "/app-private/attachment-snapshots/lease/01.snapshot"}
             ])
         );
     }

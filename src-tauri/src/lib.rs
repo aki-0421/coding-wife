@@ -158,16 +158,17 @@ pub fn run() {
     let setup_supervisor = supervisor.clone();
     let shutdown_supervisor = supervisor.clone();
     let workspace_service = WorkspaceService::production(supervisor.clone());
-    let attachment_service = AttachmentService::production();
     let setup_workspace_service = workspace_service.clone();
     let app = tauri::Builder::default()
         .manage(supervisor)
         .manage(workspace_service)
-        .manage(attachment_service)
         .setup(move |app| {
             setup_supervisor.attach_app_handle(app.handle().clone());
             setup_supervisor.start_signal_loop();
             let app_data_directory = app.path().app_data_dir()?;
+            let attachment_service = AttachmentService::production(&app_data_directory)
+                .map_err(|error| std::io::Error::other(error.code))?;
+            app.manage(attachment_service);
             let history_store = WorkspaceHistoryStore::open(&app_data_directory)?;
             let history_service = WorkspaceHistoryService::new_pending_restore(
                 history_store,

@@ -8,7 +8,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 
-use super::attachment::ResolvedAttachment;
+use super::attachment::{AttachmentSnapshotLease, ResolvedAttachment, ResolvedAttachmentSet};
 use super::binary::{discover_binary, probe_schema, BinaryError, BinaryInfo, SchemaProbe};
 use super::decision::{
     fallback_continuation_input, FallbackDecisionClaim, FallbackDecisionContext,
@@ -63,6 +63,7 @@ struct PendingTurnStart {
     turn_handle: Option<String>,
     terminal: bool,
     purpose: PendingTurnStartPurpose,
+    attachment_snapshot: Option<AttachmentSnapshotLease>,
 }
 
 #[derive(Default)]
@@ -790,17 +791,21 @@ impl CodexSupervisor {
                 false,
             ));
         }
-        self.turn_start_with_resolved(request, Vec::new(), None)
+        self.turn_start_with_resolved(request, Vec::new(), None, None)
             .await
     }
 
     pub async fn turn_start_resolved(
         &self,
         request: CodexTurnStartRequest,
-        attachments: Vec<ResolvedAttachment>,
+        resolved: ResolvedAttachmentSet,
         expected_generation: u64,
     ) -> Result<TurnResponse, CodexCommandError> {
-        self.turn_start_with_resolved(request, attachments, Some(expected_generation))
+        let (handles, attachments, snapshot) = resolved.into_parts();
+        if handles != request.attachment_handles {
+            return Err(command_error("CODEX-TURN-INVALID", "turn/start", false));
+        }
+        self.turn_start_with_resolved(request, attachments, snapshot, Some(expected_generation))
             .await
     }
 
@@ -808,6 +813,7 @@ impl CodexSupervisor {
         &self,
         request: CodexTurnStartRequest,
         attachments: Vec<ResolvedAttachment>,
+        attachment_snapshot: Option<AttachmentSnapshotLease>,
         expected_generation: Option<u64>,
     ) -> Result<TurnResponse, CodexCommandError> {
         if request.text.contains('\0')
@@ -851,6 +857,7 @@ impl CodexSupervisor {
                 turn_handle: None,
                 terminal: false,
                 purpose: PendingTurnStartPurpose::User,
+                attachment_snapshot,
             });
             (raw_thread, token)
         };
@@ -1118,6 +1125,7 @@ impl CodexSupervisor {
                 turn_handle: None,
                 terminal: false,
                 purpose: PendingTurnStartPurpose::Fallback(claim.clone()),
+                attachment_snapshot: None,
             });
             (claim, token)
         };
@@ -1654,6 +1662,9 @@ impl CodexSupervisor {
                         pending.raw_thread_id == thread_id
                             && pending.raw_turn_id.as_deref() == Some(turn_id)
                     }) {
+                        if let Some(snapshot) = &pending.attachment_snapshot {
+                            snapshot.cleanup();
+                        }
                         if completed {
                             pending.terminal = true;
                         } else {
@@ -2182,6 +2193,9 @@ fn fallback_command_error(error: FallbackDecisionError) -> CodexCommandError {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use super::super::attachment::attachment_snapshot_lease_for_test;
     use super::super::types::{ReasoningPreset, ReviewTarget};
     use super::*;
 
@@ -2229,6 +2243,7 @@ mod tests {
                 turn_handle: None,
                 terminal: false,
                 purpose: PendingTurnStartPurpose::User,
+                attachment_snapshot: None,
             }),
             ..SupervisorState::default()
         };
@@ -2270,5 +2285,43 @@ mod tests {
             .expect("late response remains idempotent");
         assert!(state.active_turn_id.is_none());
         assert!(state.active_turn_effort.is_none());
+    }
+
+    #[tokio::test]
+    async fn interrupt_rollback_removes_the_pending_attachment_snapshot() {
+        let root = std::env::temp_dir().join(format!(
+            "coding-wife-attachment-interrupt-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let directory = root.join("lease-test");
+        fs::create_dir_all(&directory).expect("snapshot staging directory");
+        fs::write(directory.join("00.snapshot"), b"snapshot").expect("snapshot fixture");
+        let supervisor = CodexSupervisor::new();
+        {
+            let mut state = supervisor.inner.state.lock().await;
+            state.generation = 7;
+            state.pending_turn_start = Some(PendingTurnStart {
+                token: 11,
+                generation: 7,
+                workspace_id: "workspace".to_owned(),
+                raw_thread_id: "thread-raw".to_owned(),
+                thread_handle: "thread-handle".to_owned(),
+                effort: ReasoningPreset::Low,
+                client_message_id: "message".to_owned(),
+                raw_turn_id: Some("turn-raw".to_owned()),
+                turn_handle: Some("turn-handle".to_owned()),
+                terminal: false,
+                purpose: PendingTurnStartPurpose::User,
+                attachment_snapshot: Some(attachment_snapshot_lease_for_test(
+                    root.clone(),
+                    directory.clone(),
+                )),
+            });
+        }
+
+        supervisor.rollback_pending_turn_start(7, 11, false).await;
+
+        assert!(!directory.exists());
+        let _ = fs::remove_dir_all(root);
     }
 }

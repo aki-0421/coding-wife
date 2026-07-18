@@ -1,12 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::future::Future;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom, Write};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +28,8 @@ pub const ATTACHMENT_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_CANDIDATE_COUNT: usize = 64;
 const MAX_PATH_BYTES: usize = 4_096;
 const ATTACHMENT_OPERATION: &str = "codex.attachment";
+const SNAPSHOT_DIRECTORY_NAME: &str = "attachment-snapshots";
+const SNAPSHOT_BUFFER_BYTES: usize = 64 * 1024;
 
 pub type AttachmentPickerFuture<'a> = Pin<Box<dyn Future<Output = Vec<PathBuf>> + Send + 'a>>;
 
@@ -127,16 +134,59 @@ pub struct AttachmentWorkspaceContext {
     pub root_inode: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ResolvedAttachment {
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) enum ResolvedAttachment {
     LocalImage { path: String },
     Mention { name: String, path: String },
 }
 
-#[derive(Clone, Debug)]
+impl std::fmt::Debug for ResolvedAttachment {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LocalImage { .. } => formatter
+                .debug_struct("LocalImage")
+                .field("path", &"<private-snapshot>")
+                .finish(),
+            Self::Mention { name, .. } => formatter
+                .debug_struct("Mention")
+                .field("name", name)
+                .field("path", &"<private-snapshot>")
+                .finish(),
+        }
+    }
+}
+
 pub struct ResolvedAttachmentSet {
-    pub handles: Vec<String>,
-    pub inputs: Vec<ResolvedAttachment>,
+    handles: Vec<String>,
+    inputs: Vec<ResolvedAttachment>,
+    snapshot_lease: Option<AttachmentSnapshotLease>,
+}
+
+impl ResolvedAttachmentSet {
+    pub(crate) fn handles(&self) -> &[String] {
+        &self.handles
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        Vec<String>,
+        Vec<ResolvedAttachment>,
+        Option<AttachmentSnapshotLease>,
+    ) {
+        (self.handles, self.inputs, self.snapshot_lease)
+    }
+}
+
+impl std::fmt::Debug for ResolvedAttachmentSet {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ResolvedAttachmentSet")
+            .field("handle_count", &self.handles.len())
+            .field("input_count", &self.inputs.len())
+            .field("snapshot", &"<private>")
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -159,6 +209,32 @@ struct CandidateSnapshot {
     fingerprint: SourceFingerprint,
 }
 
+struct PreparedSnapshotSet {
+    directory: PathBuf,
+    inputs: Vec<ResolvedAttachment>,
+}
+
+struct UncommittedSnapshotDirectory {
+    root: PathBuf,
+    directory: PathBuf,
+    committed: bool,
+}
+
+impl UncommittedSnapshotDirectory {
+    fn commit(mut self) -> PathBuf {
+        self.committed = true;
+        self.directory.clone()
+    }
+}
+
+impl Drop for UncommittedSnapshotDirectory {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = remove_snapshot_directory(&self.root, &self.directory);
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct AttachmentRecord {
     handle: String,
@@ -169,6 +245,60 @@ struct AttachmentRecord {
     source: AttachmentSource,
     expires_at: SystemTime,
     snapshot: CandidateSnapshot,
+}
+
+struct SnapshotLeaseInner {
+    root: PathBuf,
+    directory: PathBuf,
+    expires_at: SystemTime,
+    cleaned: AtomicBool,
+}
+
+impl SnapshotLeaseInner {
+    fn cleanup(&self) {
+        if self.cleaned.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let _ = remove_snapshot_directory(&self.root, &self.directory);
+    }
+}
+
+impl Drop for SnapshotLeaseInner {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct AttachmentSnapshotLease(Arc<SnapshotLeaseInner>);
+
+impl std::fmt::Debug for AttachmentSnapshotLease {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("AttachmentSnapshotLease(<private>)")
+    }
+}
+
+impl AttachmentSnapshotLease {
+    pub(crate) fn cleanup(&self) {
+        self.0.cleanup();
+    }
+
+    fn is_expired(&self, now: SystemTime) -> bool {
+        self.0.expires_at < now
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn attachment_snapshot_lease_for_test(
+    root: PathBuf,
+    directory: PathBuf,
+) -> AttachmentSnapshotLease {
+    AttachmentSnapshotLease(Arc::new(SnapshotLeaseInner {
+        root,
+        directory,
+        expires_at: SystemTime::now() + ATTACHMENT_TTL,
+        cleaned: AtomicBool::new(false),
+    }))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,22 +318,51 @@ pub struct AttachmentService {
     picker: Arc<dyn AttachmentFilePicker>,
     clock: Arc<dyn AttachmentClock>,
     records: Arc<Mutex<HashMap<String, AttachmentRecord>>>,
+    snapshot_root: Arc<PathBuf>,
+    snapshot_leases: Arc<StdMutex<Vec<Weak<SnapshotLeaseInner>>>>,
 }
 
 impl AttachmentService {
-    pub fn production() -> Self {
+    pub fn production(app_data_directory: impl AsRef<Path>) -> Result<Self, CodexCommandError> {
         Self::new(
             Arc::new(NativeAttachmentFilePicker),
             Arc::new(SystemAttachmentClock),
+            app_data_directory,
         )
     }
 
-    pub fn new(picker: Arc<dyn AttachmentFilePicker>, clock: Arc<dyn AttachmentClock>) -> Self {
-        Self {
+    pub fn new(
+        picker: Arc<dyn AttachmentFilePicker>,
+        clock: Arc<dyn AttachmentClock>,
+        app_data_directory: impl AsRef<Path>,
+    ) -> Result<Self, CodexCommandError> {
+        let snapshot_root =
+            prepare_snapshot_root(app_data_directory.as_ref()).map_err(candidate_command_error)?;
+        Ok(Self {
             picker,
             clock,
             records: Arc::new(Mutex::new(HashMap::new())),
-        }
+            snapshot_root: Arc::new(snapshot_root),
+            snapshot_leases: Arc::new(StdMutex::new(Vec::new())),
+        })
+    }
+
+    fn cleanup_expired_snapshots(&self) {
+        let now = self.clock.now();
+        let mut leases = self
+            .snapshot_leases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        leases.retain(|weak| {
+            let Some(inner) = weak.upgrade() else {
+                return false;
+            };
+            let lease = AttachmentSnapshotLease(inner);
+            if lease.is_expired(now) {
+                lease.cleanup();
+            }
+            !lease.0.cleaned.load(Ordering::Acquire)
+        });
     }
 
     pub async fn pick_and_register(
@@ -241,8 +400,16 @@ impl AttachmentService {
         context: AttachmentWorkspaceContext,
         handles: &[String],
     ) -> Result<ResolvedAttachmentSet, CodexCommandError> {
+        self.cleanup_expired_snapshots();
         validate_context_shape(&context)?;
         validate_handle_list(handles)?;
+        if handles.is_empty() {
+            return Ok(ResolvedAttachmentSet {
+                handles: Vec::new(),
+                inputs: Vec::new(),
+                snapshot_lease: None,
+            });
+        }
         let now = self.clock.now();
         let records = {
             let records = self.records.lock().await;
@@ -274,50 +441,35 @@ impl AttachmentService {
         };
 
         let validation_context = context.clone();
-        let validated = tokio::task::spawn_blocking(move || {
-            validate_root_identity(&validation_context)?;
-            records
-                .into_iter()
-                .map(|record| {
-                    let snapshot =
-                        snapshot_candidate(&validation_context, &record.snapshot.canonical_path)?;
-                    if snapshot.fingerprint != record.snapshot.fingerprint
-                        || snapshot.canonical_path != record.snapshot.canonical_path
-                        || snapshot.kind != record.snapshot.kind
-                        || snapshot.relative_path != record.snapshot.relative_path
-                        || snapshot.name != record.snapshot.name
-                    {
-                        return Err(CandidateError::new("CODEX-ATTACHMENT-SOURCE-CHANGED", true));
-                    }
-                    Ok(record)
-                })
-                .collect::<Result<Vec<_>, CandidateError>>()
+        let snapshot_root = self.snapshot_root.as_ref().clone();
+        let snapshot_expires_at = records
+            .iter()
+            .map(|record| record.expires_at)
+            .min()
+            .expect("non-empty attachment records");
+        let prepared = tokio::task::spawn_blocking(move || {
+            prepare_attachment_snapshots(&validation_context, &snapshot_root, &records)
         })
         .await
         .map_err(|_| attachment_error("CODEX-ATTACHMENT-VALIDATOR-FAILED", true))?
         .map_err(candidate_command_error)?;
 
-        let inputs = validated
-            .iter()
-            .map(|record| {
-                let path = record
-                    .snapshot
-                    .canonical_path
-                    .to_str()
-                    .ok_or_else(|| attachment_error("CODEX-ATTACHMENT-PATH-INVALID", false))?
-                    .to_owned();
-                Ok(match record.snapshot.kind {
-                    AttachmentKind::Image => ResolvedAttachment::LocalImage { path },
-                    AttachmentKind::File => ResolvedAttachment::Mention {
-                        name: record.snapshot.name.clone(),
-                        path,
-                    },
-                })
-            })
-            .collect::<Result<Vec<_>, CodexCommandError>>()?;
+        let lease_inner = Arc::new(SnapshotLeaseInner {
+            root: self.snapshot_root.as_ref().clone(),
+            directory: prepared.directory,
+            expires_at: snapshot_expires_at,
+            cleaned: AtomicBool::new(false),
+        });
+        self.snapshot_leases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(Arc::downgrade(&lease_inner));
+        let lease = AttachmentSnapshotLease(lease_inner);
+        schedule_snapshot_expiry(&lease, snapshot_expires_at, now);
         Ok(ResolvedAttachmentSet {
             handles: handles.to_vec(),
-            inputs,
+            inputs: prepared.inputs,
+            snapshot_lease: Some(lease),
         })
     }
 
@@ -340,6 +492,7 @@ impl AttachmentService {
         candidates: Vec<PathBuf>,
         existing_handles: Vec<String>,
     ) -> Result<AttachmentRegistrationResponse, CodexCommandError> {
+        self.cleanup_expired_snapshots();
         validate_context_shape(&context)?;
         validate_handle_list(&existing_handles)?;
         if candidates.len() > MAX_CANDIDATE_COUNT {
@@ -348,11 +501,11 @@ impl AttachmentService {
 
         let validation_context = context.clone();
         let snapshots = tokio::task::spawn_blocking(move || {
-            validate_root_identity(&validation_context)?;
+            let root = OpenedSourceRoot::open(&validation_context)?;
             Ok::<_, CandidateError>(
                 candidates
                     .into_iter()
-                    .map(|candidate| snapshot_candidate(&validation_context, &candidate))
+                    .map(|candidate| snapshot_candidate(&root, &validation_context, &candidate))
                     .collect::<Vec<_>>(),
             )
         })
@@ -479,54 +632,147 @@ fn record_matches_context(record: &AttachmentRecord, context: &AttachmentWorkspa
         && record.root_inode == context.root_inode
 }
 
-fn validate_root_identity(context: &AttachmentWorkspaceContext) -> Result<(), CandidateError> {
-    let metadata = fs::symlink_metadata(&context.canonical_root)
-        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-ROOT-MISSING", true))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(CandidateError::new("CODEX-ATTACHMENT-ROOT-CHANGED", false));
-    }
-    let (device, inode) = metadata_identity(&metadata);
-    if device != context.root_device || inode != context.root_inode {
-        return Err(CandidateError::new("CODEX-ATTACHMENT-ROOT-CHANGED", false));
-    }
-    Ok(())
+struct OpenedSourceRoot {
+    directory: File,
+    canonical_root: PathBuf,
 }
 
-fn snapshot_candidate(
+impl OpenedSourceRoot {
+    fn open(context: &AttachmentWorkspaceContext) -> Result<Self, CandidateError> {
+        #[cfg(unix)]
+        let directory = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&context.canonical_root)
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-ROOT-MISSING", true))?;
+        #[cfg(not(unix))]
+        let directory = File::open(&context.canonical_root)
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-ROOT-MISSING", true))?;
+        let metadata = directory
+            .metadata()
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-ROOT-MISSING", true))?;
+        if !metadata.is_dir() {
+            return Err(CandidateError::new("CODEX-ATTACHMENT-ROOT-CHANGED", false));
+        }
+        let (device, inode) = metadata_identity(&metadata);
+        if device != context.root_device || inode != context.root_inode {
+            return Err(CandidateError::new("CODEX-ATTACHMENT-ROOT-CHANGED", false));
+        }
+        Ok(Self {
+            directory,
+            canonical_root: context.canonical_root.clone(),
+        })
+    }
+
+    #[cfg(unix)]
+    fn open_relative(&self, relative: &Path) -> Result<File, CandidateError> {
+        let components = relative
+            .components()
+            .map(|component| match component {
+                Component::Normal(value) => Ok(value),
+                _ => Err(CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false)),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if components.is_empty() {
+            return Err(CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false));
+        }
+        let mut directory = self
+            .directory
+            .try_clone()
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-ROOT-MISSING", true))?;
+        for (index, component) in components.iter().enumerate() {
+            let component = std::ffi::CString::new(component.as_bytes())
+                .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false))?;
+            let is_leaf = index + 1 == components.len();
+            let flags = libc::O_RDONLY
+                | libc::O_NOFOLLOW
+                | libc::O_CLOEXEC
+                | if is_leaf { 0 } else { libc::O_DIRECTORY };
+            let descriptor =
+                unsafe { libc::openat(directory.as_raw_fd(), component.as_ptr(), flags) };
+            if descriptor < 0 {
+                return Err(openat_candidate_error(
+                    &directory,
+                    component.as_c_str(),
+                    std::io::Error::last_os_error(),
+                ));
+            }
+            let opened = unsafe { File::from_raw_fd(descriptor) };
+            if is_leaf {
+                return Ok(opened);
+            }
+            directory = opened;
+        }
+        Err(CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false))
+    }
+
+    #[cfg(not(unix))]
+    fn open_relative(&self, relative: &Path) -> Result<File, CandidateError> {
+        let path = self.canonical_root.join(relative);
+        let canonical = fs::canonicalize(&path)
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-MISSING", true))?;
+        if canonical != path || !canonical.starts_with(&self.canonical_root) {
+            return Err(CandidateError::new("CODEX-ATTACHMENT-SYMLINK", false));
+        }
+        File::open(canonical).map_err(|_| CandidateError::new("CODEX-ATTACHMENT-UNREADABLE", true))
+    }
+}
+
+#[cfg(unix)]
+fn openat_candidate_error(
+    directory: &File,
+    component: &std::ffi::CStr,
+    error: std::io::Error,
+) -> CandidateError {
+    let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+    let metadata_result = unsafe {
+        libc::fstatat(
+            directory.as_raw_fd(),
+            component.as_ptr(),
+            metadata.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if metadata_result == 0 {
+        let metadata = unsafe { metadata.assume_init() };
+        if metadata.st_mode & libc::S_IFMT == libc::S_IFLNK {
+            return CandidateError::new("CODEX-ATTACHMENT-SYMLINK", false);
+        }
+    }
+    match error.raw_os_error() {
+        Some(libc::ENOENT) => CandidateError::new("CODEX-ATTACHMENT-MISSING", true),
+        Some(libc::EACCES) | Some(libc::EPERM) => {
+            CandidateError::new("CODEX-ATTACHMENT-UNREADABLE", true)
+        }
+        Some(libc::ELOOP) => CandidateError::new("CODEX-ATTACHMENT-SYMLINK", false),
+        _ => CandidateError::new("CODEX-ATTACHMENT-UNREADABLE", true),
+    }
+}
+
+fn candidate_relative_path(
     context: &AttachmentWorkspaceContext,
     candidate: &Path,
-) -> Result<CandidateSnapshot, CandidateError> {
+) -> Result<PathBuf, CandidateError> {
     if !candidate.is_absolute()
         || candidate.as_os_str().len() > MAX_PATH_BYTES
         || candidate.as_os_str().is_empty()
     {
         return Err(CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false));
     }
-    validate_root_identity(context)?;
-    reject_original_symlink_components(&context.canonical_root, candidate)?;
-    let canonical_path = fs::canonicalize(candidate)
-        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-MISSING", true))?;
-    if !canonical_path.starts_with(&context.canonical_root)
-        || canonical_path == context.canonical_root
-        || canonical_path.to_str().is_none()
-    {
-        return Err(CandidateError::new(
-            "CODEX-ATTACHMENT-OUTSIDE-WORKSPACE",
-            false,
-        ));
-    }
-    let relative = canonical_path
+    let relative = candidate
         .strip_prefix(&context.canonical_root)
         .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-OUTSIDE-WORKSPACE", false))?;
-    if relative
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
     {
         return Err(CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false));
     }
-    reject_canonical_symlink_components(&context.canonical_root, relative)?;
+    Ok(relative.to_path_buf())
+}
 
-    let mut file = open_read_no_follow(&canonical_path)?;
+fn inspect_source(mut file: File) -> Result<(SourceFingerprint, AttachmentKind), CandidateError> {
     let before = file
         .metadata()
         .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-METADATA", true))?;
@@ -537,108 +783,398 @@ fn snapshot_candidate(
             true,
         ));
     }
-
-    let capacity = usize::try_from(before.len())
-        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-FILE-SIZE-LIMIT", true))?;
-    let mut contents = Vec::with_capacity(capacity);
-    file.by_ref()
-        .take(MAX_ATTACHMENT_BYTES + 1)
-        .read_to_end(&mut contents)
-        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-READ", true))?;
-    if contents.len() as u64 != before.len() {
+    let mut hasher = Sha256::new();
+    let mut prefix = Vec::with_capacity(12);
+    let mut bytes = 0_u64;
+    let mut buffer = [0_u8; SNAPSHOT_BUFFER_BYTES];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-READ", true))?;
+        if read == 0 {
+            break;
+        }
+        bytes = bytes
+            .checked_add(read as u64)
+            .ok_or_else(|| CandidateError::new("CODEX-ATTACHMENT-FILE-SIZE-LIMIT", true))?;
+        if bytes > MAX_ATTACHMENT_BYTES {
+            return Err(CandidateError::new(
+                "CODEX-ATTACHMENT-FILE-SIZE-LIMIT",
+                true,
+            ));
+        }
+        let prefix_bytes = read.min(12_usize.saturating_sub(prefix.len()));
+        prefix.extend_from_slice(&buffer[..prefix_bytes]);
+        hasher.update(&buffer[..read]);
+    }
+    if bytes != before.len() {
         return Err(CandidateError::new("CODEX-ATTACHMENT-SOURCE-CHANGED", true));
     }
     let after = file
         .metadata()
         .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-METADATA", true))?;
+    validate_regular_file(&after)?;
     if metadata_source_identity(&before) != metadata_source_identity(&after) {
         return Err(CandidateError::new("CODEX-ATTACHMENT-SOURCE-CHANGED", true));
     }
-    if fs::canonicalize(candidate).ok().as_ref() != Some(&canonical_path) {
-        return Err(CandidateError::new("CODEX-ATTACHMENT-SOURCE-CHANGED", true));
-    }
-    validate_root_identity(context)?;
-
-    let relative_path = relative.to_str().filter(|value| {
-        !value.is_empty() && value.len() <= MAX_PATH_BYTES && !value.chars().any(char::is_control)
-    });
-    let relative_path = relative_path
-        .ok_or_else(|| CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false))?
-        .replace(std::path::MAIN_SEPARATOR, "/");
-    let name = canonical_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .filter(|value| {
-            !value.is_empty() && value.len() <= 255 && !value.chars().any(char::is_control)
-        })
-        .ok_or_else(|| CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false))?
-        .to_owned();
     let mut fingerprint = metadata_source_identity(&after);
-    fingerprint.sha256 = hex::encode(Sha256::digest(&contents));
-    let kind = if is_supported_raster_image(&contents) {
+    fingerprint.sha256 = hex::encode(hasher.finalize());
+    let kind = if is_supported_raster_image(&prefix) {
         AttachmentKind::Image
     } else {
         AttachmentKind::File
     };
+    Ok((fingerprint, kind))
+}
+
+fn public_relative_path(relative: &Path) -> Result<String, CandidateError> {
+    let relative = relative
+        .to_str()
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= MAX_PATH_BYTES
+                && !value.chars().any(char::is_control)
+        })
+        .ok_or_else(|| CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false))?;
+    Ok(relative.replace(std::path::MAIN_SEPARATOR, "/"))
+}
+
+fn validated_file_name(path: &Path) -> Result<String, CandidateError> {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| {
+            !value.is_empty() && value.len() <= 255 && !value.chars().any(char::is_control)
+        })
+        .map(str::to_owned)
+        .ok_or_else(|| CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false))
+}
+
+fn snapshot_candidate(
+    root: &OpenedSourceRoot,
+    context: &AttachmentWorkspaceContext,
+    candidate: &Path,
+) -> Result<CandidateSnapshot, CandidateError> {
+    let relative = candidate_relative_path(context, candidate)?;
+    let canonical_path = context.canonical_root.join(&relative);
+    let name = validated_file_name(&canonical_path)?;
+    let file = root.open_relative(&relative)?;
+    let (fingerprint, kind) = inspect_source(file)?;
+    let relative_path = public_relative_path(&relative)?;
 
     Ok(CandidateSnapshot {
         canonical_path,
         name,
         relative_path,
-        bytes: after.len(),
+        bytes: fingerprint.bytes,
         kind,
         fingerprint,
     })
 }
 
-fn reject_original_symlink_components(root: &Path, candidate: &Path) -> Result<(), CandidateError> {
-    let relative = candidate
-        .strip_prefix(root)
-        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-OUTSIDE-WORKSPACE", false))?;
-    let mut current = root.to_path_buf();
-    for component in relative.components() {
-        let Component::Normal(component) = component else {
-            return Err(CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false));
-        };
-        current.push(component);
-        let metadata = fs::symlink_metadata(&current)
-            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-MISSING", true))?;
-        if metadata.file_type().is_symlink() {
-            return Err(CandidateError::new("CODEX-ATTACHMENT-SYMLINK", false));
+fn prepare_attachment_snapshots(
+    context: &AttachmentWorkspaceContext,
+    snapshot_root: &Path,
+    records: &[AttachmentRecord],
+) -> Result<PreparedSnapshotSet, CandidateError> {
+    let source_root = OpenedSourceRoot::open(context)?;
+    let directory = create_snapshot_directory(snapshot_root)?;
+    let pending = UncommittedSnapshotDirectory {
+        root: snapshot_root.to_path_buf(),
+        directory: directory.clone(),
+        committed: false,
+    };
+    let mut inputs = Vec::with_capacity(records.len());
+    for (index, record) in records.iter().enumerate() {
+        let relative = record
+            .snapshot
+            .canonical_path
+            .strip_prefix(&source_root.canonical_root)
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SOURCE-CHANGED", true))?;
+        if public_relative_path(relative)? != record.snapshot.relative_path
+            || validated_file_name(&record.snapshot.canonical_path)? != record.snapshot.name
+        {
+            return Err(CandidateError::new("CODEX-ATTACHMENT-SOURCE-CHANGED", true));
         }
+        let source = source_root.open_relative(relative)?;
+        let destination = directory.join(format!("{index:02}.snapshot"));
+        let (fingerprint, kind) = copy_source_to_snapshot(source, &destination)?;
+        if fingerprint != record.snapshot.fingerprint || kind != record.snapshot.kind {
+            return Err(CandidateError::new("CODEX-ATTACHMENT-SOURCE-CHANGED", true));
+        }
+        let path = destination
+            .to_str()
+            .ok_or_else(|| CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false))?
+            .to_owned();
+        inputs.push(match record.snapshot.kind {
+            AttachmentKind::Image => ResolvedAttachment::LocalImage { path },
+            AttachmentKind::File => ResolvedAttachment::Mention {
+                name: record.snapshot.name.clone(),
+                path,
+            },
+        });
     }
-    Ok(())
+    sync_directory(&directory)?;
+    sync_directory(snapshot_root)?;
+    Ok(PreparedSnapshotSet {
+        directory: pending.commit(),
+        inputs,
+    })
 }
 
-fn reject_canonical_symlink_components(root: &Path, relative: &Path) -> Result<(), CandidateError> {
-    let mut current = root.to_path_buf();
-    for component in relative.components() {
-        let Component::Normal(component) = component else {
-            return Err(CandidateError::new("CODEX-ATTACHMENT-PATH-INVALID", false));
-        };
-        current.push(component);
-        let metadata = fs::symlink_metadata(&current)
-            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-MISSING", true))?;
-        if metadata.file_type().is_symlink() {
-            return Err(CandidateError::new("CODEX-ATTACHMENT-SYMLINK", false));
-        }
+fn copy_source_to_snapshot(
+    mut source: File,
+    destination: &Path,
+) -> Result<(SourceFingerprint, AttachmentKind), CandidateError> {
+    let source_before = source
+        .metadata()
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-METADATA", true))?;
+    validate_regular_file(&source_before)?;
+    if source_before.len() > MAX_ATTACHMENT_BYTES {
+        return Err(CandidateError::new(
+            "CODEX-ATTACHMENT-FILE-SIZE-LIMIT",
+            true,
+        ));
     }
-    Ok(())
-}
-
-fn open_read_no_follow(path: &Path) -> Result<File, CandidateError> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
     #[cfg(unix)]
-    {
-        OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(path)
-            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-UNREADABLE", true))
+    options.mode(0o600);
+    let mut snapshot = options
+        .open(destination)
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-CREATE", true))?;
+    #[cfg(unix)]
+    snapshot
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-PERMISSIONS", true))?;
+
+    let mut source_hasher = Sha256::new();
+    let mut prefix = Vec::with_capacity(12);
+    let mut bytes = 0_u64;
+    let mut buffer = [0_u8; SNAPSHOT_BUFFER_BYTES];
+    loop {
+        let read = source
+            .read(&mut buffer)
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-READ", true))?;
+        if read == 0 {
+            break;
+        }
+        bytes = bytes
+            .checked_add(read as u64)
+            .ok_or_else(|| CandidateError::new("CODEX-ATTACHMENT-FILE-SIZE-LIMIT", true))?;
+        if bytes > MAX_ATTACHMENT_BYTES {
+            return Err(CandidateError::new(
+                "CODEX-ATTACHMENT-FILE-SIZE-LIMIT",
+                true,
+            ));
+        }
+        let prefix_bytes = read.min(12_usize.saturating_sub(prefix.len()));
+        prefix.extend_from_slice(&buffer[..prefix_bytes]);
+        source_hasher.update(&buffer[..read]);
+        snapshot
+            .write_all(&buffer[..read])
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-WRITE", true))?;
     }
-    #[cfg(not(unix))]
+    snapshot
+        .flush()
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-WRITE", true))?;
+    snapshot
+        .sync_all()
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-SYNC", true))?;
+
+    let source_after = source
+        .metadata()
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-METADATA", true))?;
+    validate_regular_file(&source_after)?;
+    if bytes != source_before.len()
+        || metadata_source_identity(&source_before) != metadata_source_identity(&source_after)
     {
-        File::open(path).map_err(|_| CandidateError::new("CODEX-ATTACHMENT-UNREADABLE", true))
+        return Err(CandidateError::new("CODEX-ATTACHMENT-SOURCE-CHANGED", true));
     }
+    let source_hash = hex::encode(source_hasher.finalize());
+    let mut source_fingerprint = metadata_source_identity(&source_after);
+    source_fingerprint.sha256.clone_from(&source_hash);
+
+    let snapshot_before = snapshot
+        .metadata()
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-METADATA", true))?;
+    validate_private_snapshot(&snapshot_before, bytes)?;
+    snapshot
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-READ", true))?;
+    let mut snapshot_hasher = Sha256::new();
+    let mut snapshot_bytes = 0_u64;
+    loop {
+        let read = snapshot
+            .read(&mut buffer)
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-READ", true))?;
+        if read == 0 {
+            break;
+        }
+        snapshot_bytes = snapshot_bytes
+            .checked_add(read as u64)
+            .ok_or_else(|| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-READ", true))?;
+        snapshot_hasher.update(&buffer[..read]);
+    }
+    let snapshot_after = snapshot
+        .metadata()
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-METADATA", true))?;
+    validate_private_snapshot(&snapshot_after, bytes)?;
+    if metadata_source_identity(&snapshot_before) != metadata_source_identity(&snapshot_after)
+        || snapshot_bytes != bytes
+        || hex::encode(snapshot_hasher.finalize()) != source_hash
+    {
+        return Err(CandidateError::new(
+            "CODEX-ATTACHMENT-SNAPSHOT-CHANGED",
+            true,
+        ));
+    }
+
+    let kind = if is_supported_raster_image(&prefix) {
+        AttachmentKind::Image
+    } else {
+        AttachmentKind::File
+    };
+    Ok((source_fingerprint, kind))
+}
+
+fn validate_private_snapshot(metadata: &fs::Metadata, bytes: u64) -> Result<(), CandidateError> {
+    if !metadata.is_file() || metadata.len() != bytes {
+        return Err(CandidateError::new(
+            "CODEX-ATTACHMENT-SNAPSHOT-CHANGED",
+            true,
+        ));
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o777 != 0o600
+        || metadata.nlink() != 1
+        || metadata.uid() != unsafe { libc::geteuid() }
+    {
+        return Err(CandidateError::new(
+            "CODEX-ATTACHMENT-SNAPSHOT-PERMISSIONS",
+            true,
+        ));
+    }
+    Ok(())
+}
+
+fn prepare_snapshot_root(app_data_directory: &Path) -> Result<PathBuf, CandidateError> {
+    let codex_directory = app_data_directory.join("codex");
+    fs::create_dir_all(&codex_directory)
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false))?;
+    let codex_metadata = fs::symlink_metadata(&codex_directory)
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false))?;
+    if codex_metadata.file_type().is_symlink() || !codex_metadata.is_dir() {
+        return Err(CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false));
+    }
+    #[cfg(unix)]
+    fs::set_permissions(&codex_directory, fs::Permissions::from_mode(0o700))
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-PERMISSIONS", false))?;
+    let root = codex_directory.join(SNAPSHOT_DIRECTORY_NAME);
+    if root.exists() {
+        let metadata = fs::symlink_metadata(&root)
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false));
+        }
+    } else {
+        fs::create_dir(&root)
+            .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false))?;
+    }
+    #[cfg(unix)]
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-PERMISSIONS", false))?;
+    #[cfg(unix)]
+    if fs::metadata(&root)
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false))?
+        .uid()
+        != unsafe { libc::geteuid() }
+    {
+        return Err(CandidateError::new(
+            "CODEX-ATTACHMENT-SNAPSHOT-PERMISSIONS",
+            false,
+        ));
+    }
+    for entry in fs::read_dir(&root)
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false))?
+    {
+        let entry =
+            entry.map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false))?;
+        remove_snapshot_entry(&entry.path())?;
+    }
+    sync_directory(&root)?;
+    sync_directory(&codex_directory)?;
+    Ok(root)
+}
+
+fn create_snapshot_directory(root: &Path) -> Result<PathBuf, CandidateError> {
+    let metadata = fs::symlink_metadata(root)
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-ROOT", false));
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o777 != 0o700
+        || metadata.uid() != unsafe { libc::geteuid() }
+    {
+        return Err(CandidateError::new(
+            "CODEX-ATTACHMENT-SNAPSHOT-PERMISSIONS",
+            false,
+        ));
+    }
+    let directory = root.join(format!("lease-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&directory)
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-CREATE", true))?;
+    #[cfg(unix)]
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-PERMISSIONS", true))?;
+    sync_directory(root)?;
+    Ok(directory)
+}
+
+fn remove_snapshot_entry(path: &Path) -> Result<(), CandidateError> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-CLEANUP", true))?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+    .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-CLEANUP", true))
+}
+
+fn remove_snapshot_directory(root: &Path, directory: &Path) -> Result<(), CandidateError> {
+    if directory.parent() != Some(root) || directory.file_name().is_none() {
+        return Err(CandidateError::new(
+            "CODEX-ATTACHMENT-SNAPSHOT-CLEANUP",
+            false,
+        ));
+    }
+    if directory.exists() {
+        remove_snapshot_entry(directory)?;
+        sync_directory(root)?;
+    }
+    Ok(())
+}
+
+fn sync_directory(path: &Path) -> Result<(), CandidateError> {
+    File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_| CandidateError::new("CODEX-ATTACHMENT-SNAPSHOT-SYNC", true))
+}
+
+fn schedule_snapshot_expiry(
+    lease: &AttachmentSnapshotLease,
+    expires_at: SystemTime,
+    now: SystemTime,
+) {
+    let delay = expires_at.duration_since(now).unwrap_or_default();
+    let lease = Arc::downgrade(&lease.0);
+    tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        if let Some(lease) = lease.upgrade() {
+            lease.cleanup();
+        }
+    });
 }
 
 fn validate_regular_file(metadata: &fs::Metadata) -> Result<(), CandidateError> {
@@ -786,18 +1322,28 @@ mod tests {
         }
     }
 
-    struct TestRoot(PathBuf);
+    struct TestRoot {
+        workspace: PathBuf,
+        app_data: PathBuf,
+    }
 
     impl TestRoot {
         fn new() -> Self {
             let path = std::env::temp_dir()
                 .join(format!("coding-wife-attachments-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&path).expect("attachment root");
-            Self(fs::canonicalize(path).expect("canonical root"))
+            let app_data = std::env::temp_dir().join(format!(
+                "coding-wife-attachment-private-{}",
+                uuid::Uuid::new_v4()
+            ));
+            Self {
+                workspace: fs::canonicalize(path).expect("canonical root"),
+                app_data,
+            }
         }
 
         fn file(&self, relative: &str, contents: &[u8]) -> PathBuf {
-            let path = self.0.join(relative);
+            let path = self.workspace.join(relative);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).expect("attachment parent");
             }
@@ -817,12 +1363,12 @@ mod tests {
         }
 
         fn context(&self) -> AttachmentWorkspaceContext {
-            let metadata = fs::symlink_metadata(&self.0).expect("root metadata");
+            let metadata = fs::symlink_metadata(&self.workspace).expect("root metadata");
             let (root_device, root_inode) = metadata_identity(&metadata);
             AttachmentWorkspaceContext {
                 workspace_id: "workspace-attachment-fixture".to_owned(),
                 generation: 7,
-                canonical_root: self.0.clone(),
+                canonical_root: self.workspace.clone(),
                 root_device,
                 root_inode,
             }
@@ -831,12 +1377,14 @@ mod tests {
 
     impl Drop for TestRoot {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            let _ = fs::remove_dir_all(&self.workspace);
+            let _ = fs::remove_dir_all(&self.app_data);
         }
     }
 
-    fn service(picker: Vec<PathBuf>, clock: Arc<TestClock>) -> AttachmentService {
-        AttachmentService::new(Arc::new(FixedPicker(picker)), clock)
+    fn service(root: &TestRoot, picker: Vec<PathBuf>, clock: Arc<TestClock>) -> AttachmentService {
+        AttachmentService::new(Arc::new(FixedPicker(picker)), clock, &root.app_data)
+            .expect("attachment service")
     }
 
     #[test]
@@ -864,7 +1412,7 @@ mod tests {
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
             .expect("executable mode");
         let clock = Arc::new(TestClock::new());
-        let service = service(vec![png, executable], clock);
+        let service = service(&root, vec![png, executable], clock);
         let context = root.context();
 
         let picked = service
@@ -904,7 +1452,8 @@ mod tests {
         assert_eq!(pasted.items[0].source, AttachmentSource::Paste);
         let public = serde_json::to_string(&[&picked, &dropped, &pasted])
             .expect("public response serialization");
-        assert!(!public.contains(&root.0.to_string_lossy().to_string()));
+        assert!(!public.contains(&root.workspace.to_string_lossy().to_string()));
+        assert!(!public.contains(&root.app_data.to_string_lossy().to_string()));
 
         let handles = vec![
             picked.items[0].handle.clone(),
@@ -917,16 +1466,22 @@ mod tests {
             .expect("resolve attachments");
         assert!(matches!(
             &resolved.inputs[0],
-            ResolvedAttachment::LocalImage { path } if path.ends_with("images/demo.png")
+            ResolvedAttachment::LocalImage { path }
+                if Path::new(path).starts_with(service.snapshot_root.as_ref())
+                    && !path.ends_with("images/demo.png")
         ));
         assert!(matches!(
             &resolved.inputs[1],
             ResolvedAttachment::Mention { name, path }
-                if name == "notes.txt" && path.ends_with("notes.txt")
+                if name == "notes.txt"
+                    && Path::new(path).starts_with(service.snapshot_root.as_ref())
+                    && !path.ends_with("notes.txt")
         ));
         assert!(matches!(
             &resolved.inputs[2],
-            ResolvedAttachment::LocalImage { path } if path.ends_with("images/demo.webp")
+            ResolvedAttachment::LocalImage { path }
+                if Path::new(path).starts_with(service.snapshot_root.as_ref())
+                    && !path.ends_with("images/demo.webp")
         ));
     }
 
@@ -934,7 +1489,7 @@ mod tests {
     async fn rejects_each_unsafe_candidate_without_dropping_the_valid_file() {
         let root = TestRoot::new();
         let valid = root.file("valid.txt", b"valid");
-        let directory = root.0.join("directory");
+        let directory = root.workspace.join("directory");
         fs::create_dir(&directory).expect("directory fixture");
         let executable = root.file("executable", b"exec");
         let unreadable = root.file("unreadable", b"private");
@@ -951,7 +1506,7 @@ mod tests {
         }
         #[cfg(unix)]
         let symlink_path = {
-            let path = root.0.join("symlink.txt");
+            let path = root.workspace.join("symlink.txt");
             symlink(&valid, &path).expect("symlink fixture");
             path
         };
@@ -967,7 +1522,7 @@ mod tests {
         candidates.push(symlink_path);
         candidates.push(valid);
         let clock = Arc::new(TestClock::new());
-        let service = service(vec![], clock);
+        let service = service(&root, vec![], clock);
         let response = service
             .register_paths(
                 root.context(),
@@ -1010,7 +1565,7 @@ mod tests {
             .map(|path| path.to_string_lossy().into_owned())
             .collect();
         let clock = Arc::new(TestClock::new());
-        let count_service = service(vec![], clock.clone());
+        let count_service = service(&root, vec![], clock.clone());
         let count = count_service
             .register_paths(root.context(), AttachmentSource::Drop, count_files, vec![])
             .await
@@ -1022,7 +1577,7 @@ mod tests {
         let exact_a = root.sparse_file("exact-a.bin", MAX_ATTACHMENT_BYTES);
         let exact_b = root.sparse_file("exact-b.bin", MAX_ATTACHMENT_BYTES);
         let extra = root.file("extra.bin", b"x");
-        let total_service = service(vec![], clock);
+        let total_service = service(&root, vec![], clock);
         let total = total_service
             .register_paths(
                 root.context(),
@@ -1049,7 +1604,7 @@ mod tests {
         let root = TestRoot::new();
         let source = root.file("source.txt", b"first");
         let clock = Arc::new(TestClock::new());
-        let service = service(vec![], clock.clone());
+        let service = service(&root, vec![], clock.clone());
         let context = root.context();
         let registered = service
             .register_paths(
@@ -1113,11 +1668,158 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn private_snapshot_is_exact_owner_only_and_removed_on_expiry() {
+        let root = TestRoot::new();
+        let contents = b"validated attachment bytes";
+        let source = root.file("nested/source.txt", contents);
+        let clock = Arc::new(TestClock::new());
+        let service = service(&root, vec![], clock.clone());
+        let context = root.context();
+        let registered = service
+            .register_paths(
+                context.clone(),
+                AttachmentSource::Drop,
+                vec![source.to_string_lossy().into_owned()],
+                vec![],
+            )
+            .await
+            .expect("register source");
+        let handles = vec![registered.items[0].handle.clone()];
+        let resolved = service
+            .resolve_for_turn(context, &handles)
+            .await
+            .expect("resolve private snapshot");
+        let ResolvedAttachment::Mention { path, .. } = &resolved.inputs[0] else {
+            panic!("text attachment must be a mention")
+        };
+        let snapshot = PathBuf::from(path);
+        let staging = snapshot.parent().expect("snapshot staging directory");
+        assert_eq!(fs::read(&snapshot).expect("snapshot bytes"), contents);
+        assert!(!snapshot.starts_with(&root.workspace));
+        assert!(!format!("{resolved:?}").contains(path));
+        assert!(!format!("{:?}", resolved.inputs[0]).contains(path));
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                fs::metadata(service.snapshot_root.as_ref())
+                    .expect("snapshot root metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(staging)
+                    .expect("staging metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&snapshot)
+                    .expect("snapshot metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+
+        fs::write(&source, b"replacement bytes").expect("replace source after snapshot");
+        assert_eq!(
+            fs::read(&snapshot).expect("stable snapshot bytes"),
+            contents
+        );
+        clock.advance(ATTACHMENT_TTL + Duration::from_secs(1));
+        service.cleanup_expired_snapshots();
+        assert!(!snapshot.exists());
+        assert!(!staging.exists());
+    }
+
+    #[tokio::test]
+    async fn failed_snapshot_set_removes_every_partial_private_copy() {
+        let root = TestRoot::new();
+        let first = root.file("first.txt", b"first");
+        let second = root.file("second.txt", b"second");
+        let clock = Arc::new(TestClock::new());
+        let service = service(&root, vec![], clock);
+        let context = root.context();
+        let registered = service
+            .register_paths(
+                context.clone(),
+                AttachmentSource::Drop,
+                vec![
+                    first.to_string_lossy().into_owned(),
+                    second.to_string_lossy().into_owned(),
+                ],
+                vec![],
+            )
+            .await
+            .expect("register sources");
+        fs::write(&second, b"changed").expect("change second source");
+        let error = service
+            .resolve_for_turn(
+                context,
+                &registered
+                    .items
+                    .iter()
+                    .map(|item| item.handle.clone())
+                    .collect::<Vec<_>>(),
+            )
+            .await
+            .expect_err("changed source must reject the entire snapshot set");
+        assert_eq!(error.code, "CODEX-ATTACHMENT-SOURCE-CHANGED");
+        assert_eq!(
+            fs::read_dir(service.snapshot_root.as_ref())
+                .expect("snapshot root")
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn startup_cleanup_removes_stale_entries_without_following_symlinks() {
+        let root = TestRoot::new();
+        let snapshot_root = root.app_data.join("codex").join(SNAPSHOT_DIRECTORY_NAME);
+        let stale = snapshot_root.join("lease-stale");
+        fs::create_dir_all(&stale).expect("stale staging directory");
+        fs::write(stale.join("00.snapshot"), b"stale").expect("stale snapshot");
+        #[cfg(unix)]
+        let external = {
+            let external = std::env::temp_dir().join(format!(
+                "coding-wife-attachment-external-{}",
+                uuid::Uuid::new_v4()
+            ));
+            fs::create_dir(&external).expect("external directory");
+            fs::write(external.join("keep"), b"keep").expect("external file");
+            symlink(&external, snapshot_root.join("lease-link")).expect("stale symlink");
+            external
+        };
+
+        let service = service(&root, vec![], Arc::new(TestClock::new()));
+        assert_eq!(
+            fs::read_dir(service.snapshot_root.as_ref())
+                .expect("clean snapshot root")
+                .count(),
+            0
+        );
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                fs::read(external.join("keep")).expect("external bytes"),
+                b"keep"
+            );
+            let _ = fs::remove_dir_all(external);
+        }
+    }
+
+    #[tokio::test]
     async fn consume_invalidates_only_after_an_explicit_acceptance_boundary() {
         let root = TestRoot::new();
         let source = root.file("source.txt", b"source");
         let clock = Arc::new(TestClock::new());
-        let service = service(vec![], clock);
+        let service = service(&root, vec![], clock);
         let context = root.context();
         let registered = service
             .register_paths(

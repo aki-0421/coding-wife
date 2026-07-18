@@ -4,6 +4,7 @@
 import json
 import os
 import pathlib
+import stat
 import sys
 import threading
 import time
@@ -47,6 +48,35 @@ def generate_schema(output):
 
 def result(message_id, value):
     send({"id": message_id, "result": value})
+
+
+def validate_attachment_inputs(inputs, expected_image, expected_notes):
+    try:
+        if not isinstance(inputs, list) or len(inputs) != 2:
+            return False, []
+        image = inputs[0]
+        notes = inputs[1]
+        image_path = pathlib.Path(image.get("path", ""))
+        notes_path = pathlib.Path(notes.get("path", ""))
+        paths = [image_path, notes_path]
+        private_shape = all(
+            "attachment-snapshots" in path.parts
+            and path.name.endswith(".snapshot")
+            and stat.S_IMODE(path.stat().st_mode) == 0o600
+            and stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+            for path in paths
+        )
+        valid = (
+            image.get("type") == "localImage"
+            and image_path.read_bytes() == expected_image
+            and notes.get("type") == "mention"
+            and notes.get("name") == "notes.txt"
+            and notes_path.read_bytes() == expected_notes
+            and private_shape
+        )
+        return valid, paths
+    except (OSError, TypeError, ValueError):
+        return False, []
 
 
 def main():
@@ -220,27 +250,44 @@ def main():
                 and "collaborationMode" not in params
                 and "multiAgentMode" not in params
             )
-            if MODE == "attachments":
+            attachment_paths = []
+            attachment_modes = {
+                "attachments",
+                "attachments_race",
+                "attachments_rejected",
+                "attachments_terminal_first",
+                "attachments_crash",
+            }
+            if MODE in attachment_modes:
                 inputs = params.get("input")
-                attachment_valid = (
-                    isinstance(inputs, list)
-                    and len(inputs) == 2
-                    and inputs[0].get("type") == "localImage"
-                    and str(inputs[0].get("path", "")).endswith("/images/demo.png")
-                    and inputs[1].get("type") == "mention"
-                    and inputs[1].get("name") == "notes.txt"
-                    and str(inputs[1].get("path", "")).endswith("/notes.txt")
+                expected_image = (
+                    b"\x89PNG\r\n\x1a\nvalidated-image"
+                    if MODE == "attachments_race"
+                    else b"\x89PNG\r\n\x1a\nfixture"
+                )
+                expected_notes = (
+                    b"validated-notes"
+                    if MODE == "attachments_race"
+                    else b"bounded notes"
+                )
+                attachment_valid, attachment_paths = validate_attachment_inputs(
+                    inputs, expected_image, expected_notes
                 )
                 record(
-                    "attachment_contract_ok"
+                    "attachment_exact_bytes_ok"
                     if attachment_valid
-                    else "attachment_contract_invalid"
+                    else "attachment_exact_bytes_invalid"
                 )
                 valid = valid and attachment_valid
             record("turn_contract_ok" if valid else "turn_contract_invalid")
             if not valid:
                 send({"id": message_id, "error": {"code": -32602, "message": "Invalid params"}})
                 continue
+            if MODE == "attachments_rejected":
+                send({"id": message_id, "error": {"code": -32603, "message": "Rejected fixture"}})
+                continue
+            if MODE == "attachments_crash":
+                os._exit(29)
             if isinstance(continuation, dict) and continuation.get("kind") == "decision_result":
                 structured = (
                     continuation.get("schemaVersion") == 1
@@ -270,7 +317,10 @@ def main():
                     }
                 )
                 continue
-            notification_first = MODE == "decision_notification_first"
+            notification_first = MODE in (
+                "decision_notification_first",
+                "attachments_terminal_first",
+            )
             if not notification_first:
                 result(message_id, {"turn": {"id": "turn-fixture", "status": "inProgress"}})
             send(
@@ -282,6 +332,29 @@ def main():
                     },
                 }
             )
+            if MODE == "attachments_terminal_first":
+                send(
+                    {
+                        "method": "turn/completed",
+                        "params": {
+                            "threadId": params["threadId"],
+                            "turn": {"id": "turn-fixture", "status": "completed"},
+                        },
+                    }
+                )
+                deadline = time.monotonic() + 2.0
+                while any(path.exists() for path in attachment_paths) and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                record(
+                    "attachment_terminal_cleanup_ok"
+                    if not any(path.exists() for path in attachment_paths)
+                    else "attachment_terminal_cleanup_invalid"
+                )
+                result(
+                    message_id,
+                    {"turn": {"id": "turn-fixture", "status": "inProgress"}},
+                )
+                continue
             if MODE == "unknown_request":
                 send(
                     {
