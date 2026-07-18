@@ -98,6 +98,7 @@ read_when:
 | `HIST-F-057` | event表示時刻はlocaleへ適応する | 保存UTC値をja/en localeで表示し、timezone変更後も同一instantとsequenceを維持する | Approved | 非該当 |
 | `HIST-F-058` | app-private履歴のpermissionをfail closedにする | DB directory、DB/WAL/SHM、migration/recovery backupのowner-only permission適用に失敗するとwrite-readyで起動せず、既存dataを保持して構造化errorまたはread-only recoveryへ移行する | Approved | 非該当 |
 | `HIST-F-059` | appは履歴のdurabilityを実態どおり表示する | native SQLiteの`ready`、`read_only`、`recovery_required`と、browser demoの`ephemeral`を別状態として契約する。`ephemeral`を`Persisted locally`または再起動後も残る履歴として表示せず、Chat、timeline、Diagnostics、History & Privacyで同じdemo memory表示を使う。demo resetは現在のpreview memoryだけを変更し、再起動でfixtureへ戻ることを明示する | Approved | 非該当 |
+| `HIST-F-060` | 外部mutation producerはexact eventを事前検証する | Git refのような外部状態を変更するproducerは、redaction後のexact eventが256 KiB以下でschema-valid、canonical digest確定済み、writerがwrite-readyであることをmutation前に確認する。予約後の同一event replayだけを受理し、失敗または再起動時はdurable intentから追記再開または安全なcompensationを行う | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -130,8 +131,8 @@ read_when:
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
 | `S-001` | セッションダッシュボード | `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
-| `S-002` | コーディングワークスペース | `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
-| `S-003` | セッション証拠 | `HIST-F-038`, `HIST-F-044`〜`HIST-F-051`, `HIST-F-057` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
+| `S-002` | コーディングワークスペース | `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059`, `HIST-F-060` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-003` | セッション証拠 | `HIST-F-038`, `HIST-F-044`〜`HIST-F-051`, `HIST-F-057`, `HIST-F-060` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
 | `S-004` | 設定・診断 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 
 ## 非機能要件
@@ -143,7 +144,7 @@ read_when:
 | プライバシー | local-only、raw reasoning/secret/audio/support本文非保存、canonical project rootは目的限定linkageだけに保存し、workspace単位削除を提供する |
 | 監査・ログ | event sequence、schema version、migration、deletion、corruption、support usage metadataを記録する |
 | 性能 | 100,000 eventでpage query p95 200ms、20,000 event rehydrate 3秒以下、1event 256KiB以下 |
-| 信頼性・復旧 | append-only、single writer、transaction migration、read-only recovery、no auto replay |
+| 信頼性・復旧 | append-only、single writer、transaction migration、read-only recovery、exact replay only、外部mutation前のevent preflight |
 | アクセシビリティ | semantic list/table、filter label、empty/error heading、keyboard paginationを提供する |
 | 多言語・地域 | app copy ja/en、UTC保存、locale表示、user/agent本文は翻訳しない |
 

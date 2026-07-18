@@ -58,7 +58,7 @@ status: "Approved"
 | 表示契機 | [S-001](S-001_session-dashboard.md)でworkspace選択、Chat tab、notification内のworkspace link、再起動復旧 |
 | 表示前提 | valid workspace ID。missing repoまたはCodex blocked時もread-only timelineは表示する |
 | 初期フォーカス | normal/emptyはcomposer、decision時はdecision heading、error/recovery時は最初の回復操作 |
-| 正常完了 | turn terminal eventとreview-ready summaryを表示し、必要ならCommit tabへ遷移する |
+| 正常完了 | validated terminal work-unit eventを1回だけGit review producerへ渡し、checkpoint completed / blocked / history pendingのsummaryを表示して、必要ならCommit tabへ遷移する |
 | キャンセル |未送信draftとtimeline位置を維持する。running turnのStopは別操作として確認する |
 | 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う |
 | 再表示 | workspace、tab、draft、timeline位置、unanswered decision、companion状態をDBから復元する |
@@ -221,7 +221,7 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | attachment追加 | picker起動可能 | validated handleをdraftへ追加 | draft不変、errorなし | chipを追加せずreason表示 | `CODE-F-053`, `APP-F-066`〜`APP-F-069` |
 | Context保存 | section validation成功 | versionを1増やし次turn適用 | edit開始前version維持 |入力保持、section field error | `WORK-F-060`, `WORK-F-063` |
 | mute切替 | audio/companion利用可能 |即時再生停止または次eligible textから再開、設定保存 | 非該当 | text表示は継続 | `NARR-F-068`〜`NARR-F-075` |
-| Commit tabを開く | workspace valid | same workspaceの[S-003](S-003_session-evidence.md)を表示 | 非該当 | Chatを維持してerror | `GIT-F-043`〜`GIT-F-055` |
+| Commit tabを開く | workspace valid | same workspaceの[S-003](S-003_session-evidence.md)を表示し、初回active表示時だけread-only baselineを取得 | 非該当 | Chatを維持してerror | `GIT-F-043`〜`GIT-F-055`, `GIT-F-066`〜`GIT-F-069` |
 
 ## 入力項目
 
@@ -247,6 +247,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | session開始/turn送信 | Rust → Codex stdio | `start_or_send_main_turn` | active workspace、Codex executable、typed payload、1 active execution。imageは`localImage`、fileは`mention`へRust内で変換 | spawn前ならdraft維持 | stage別error、thread自動重複作成なし |
 | Stop | Rust supervisor | `stop_main_turn` | owned process/thread/turn ID | confirmation cancelは継続 | timeout後process tree停止、Interrupted |
 | event購読 | Rust event bridge | `subscribe_workspace_events` | workspace ID、monotonic sequence、schema allowlist | route leaveでUI購読だけ解除 | gapでpauseし診断表示 |
+| terminal checkpoint handoff | Codex composition → Rust Git service | `evaluate_and_checkpoint_work_unit` | validated terminal authority、work unit ID、workspace ID、objective、effort、source event ID/sequence/time。Git bridgeがbaselineとfile/verification/decision/risk evidenceを照合し、同一eventをexact replayだけに制限 | terminal前は開始しない | failed/interrupted/canceled/evidence不足/HIST pendingを成功表示しない |
 | attachment選択 | Tauri dialog → Rust | `select_workspace_attachments` | file picker、canonical workspace root、size/type |変更なし | invalid fileをhandle化しない |
 | read-only context取得 | Rust context adapter | `capture_turn_context` | source allowlist、5秒deadline、stdout 1MiB、stderr 4KiB、process tree cleanup、timestamp、redaction、content hash | draft不変 | raw terminal/pathへfallbackせず、Terminal outputはunsupportedを返す |
 | decision / approval回答 | Rust App Server adapter | `answer_decision_or_approval` | negotiated requestUserInputまたは既知approval method、元request ID、idempotency | Hold/cancelは未回答維持 | 未知method/schemaは許可せずBlocked |
@@ -328,8 +329,8 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | `WORK-F-052`〜`WORK-F-065` | workspace切替、active execution、state分離、bounded context、復元、native初期化境界 | [workspace-sessions](../requirements/workspace-sessions.md) |
 | `CODE-F-052`〜`CODE-F-076` | main session、event、composer、decision、Stop、reconnect、Sol | [codex-main-session](../requirements/codex-main-session.md) |
 | `SUP-F-051`, `SUP-F-057`〜`SUP-F-061` | main経由の委任、status、failure、interrupt、result統合 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
-| `GIT-F-043`〜`GIT-F-055` | fingerprint、checkpoint、typed Git event、Commit tab導線 | [git-review-harness](../requirements/git-review-harness.md) |
-| `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059` | normalized timeline、sequence、scroll、restart recovery、durability表示 | [activity-history](../requirements/activity-history.md) |
+| `GIT-F-043`〜`GIT-F-055`, `GIT-F-066`〜`GIT-F-069` | fingerprint、automatic checkpoint、typed terminal handoff、config isolation、journal、Commit tab導線 | [git-review-harness](../requirements/git-review-harness.md) |
+| `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059`, `HIST-F-060` | normalized timeline、sequence、scroll、restart recovery、durability表示、mutation前event preflight | [activity-history](../requirements/activity-history.md) |
 | `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-079`〜`LIVE-F-081` | canvas、state、fallback、text parity、performance | [live2d-companion](../requirements/live2d-companion.md) |
 | `NARR-F-057`〜`NARR-F-063`, `NARR-F-068`〜`NARR-F-075` | eligible speech、text parity、queue、mute、fallback | [audio-commentary](../requirements/audio-commentary.md) |
 | `APP-F-053`〜`APP-F-069` | shell、tabs、responsive、focus、native boundary、picker | [desktop-shell](../requirements/desktop-shell.md) |

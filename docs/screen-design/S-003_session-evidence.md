@@ -57,7 +57,7 @@ status: "Approved"
 
 | 項目 | 内容 |
 |---|---|
-| 表示契機 | S-002のCommit tab、checkpoint completed/blocked event、review-ready link、restart recovery |
+| 表示契機 | S-002のCommit tab、checkpoint completed/blocked event、review-ready link、restart recovery。非activeのforce-mounted panelはnative baseline inspectを開始しない |
 | 表示前提 | workspace IDが存在すること。missing repo、unsupported repo、offlineでも保存済みevidenceをread-only表示する |
 | 初期フォーカス | selected review pack heading。blocked/error時は最初の回復操作、0件時はChatへ戻る |
 | 正常完了 | evidenceを確認してChatへ戻る、またはsafe restore/recovery branchのterminal resultを確認する |
@@ -86,7 +86,7 @@ status: "Approved"
 5. diff、decision、checkpoint metadata、reviewer summary。
 6. success statusとcompanion。
 
-successは4 gate、checkpoint commit、review pack persistenceのすべてが成功した時だけ表示する。test failureやUnknownを折りたたんだまま`Done`にしない。
+successは4 gate、checkpoint commit、review pack persistenceの再読、history sequenceの確定がすべて成功した時だけ表示する。test failure、Unknown、`ref_updated_history_pending`を折りたたんだまま`Done`にしない。
 
 ## 画面構成
 
@@ -168,8 +168,9 @@ Conventional Commits messageは英語summaryと英語bulletを原文表示し、
 1. 対象checkpoint、現在HEAD、branch、index、working tree、user changeをRustで再fingerprintする。
 2. uncommitted user change、HEAD stale、conflict予測、unsupported repoがあれば開始前にBlockedにする。
 3. 対象file、予想影響、元commitを削除しないこと、新しいrevert commitを作ることを確認画面に示す。
-4. 明示確認後にrevert commitを作り、元commit、revert SHA、terminal resultをreview packへ追記する。
-5. conflict、hook、identity、disk、permission failureは成功表示せず、working treeとrefsの状態を再診断する。
+4. 明示確認後、private index/object storeで逆変更treeとrevert commitを作り、real index/worktreeをGit実行系へ渡さずtarget refをCAS更新する。
+5. 元commit、revert SHA、terminal result、必須history sequenceをimmutable packへ追記し、再読一致後だけ成功表示する。
+6. conflict、hook、identity、disk、permission failureは成功表示せず、journal、working tree、index、refsの状態を再診断する。
 
 #### Recovery branch
 
@@ -185,14 +186,14 @@ dialogをcancelした場合、HEAD、refs、index、working treeが開始前fing
 | 通常 | 1件以上のpersisted pack | list、gate、detail、read-only action | inspect、filter、compare、条件付きrestore | selection/action/error |
 | データなし | work unit/checkpoint 0件 | `まだ証拠はありません`、Chatへ戻る。空tableは出さない | Chat、Settings、Quit | first work unit event |
 | gate処理中 | scope/ownership/verification/risk評価中 | gate単位progress、observed fingerprint | inspect、StopはChatへ |全gate terminal |
-| checkpoint処理中 | all Pass、owned stage/commit/pack中 | step、elapsed、close待機理由 | read-only inspect、Cancel可能stepだけ | success/failure/safe abort |
+| checkpoint処理中 | all Pass、owned stage/commit/pack中 | prepared / objects ready / ref updated / history pendingのdurable step、elapsed、close待機理由 | read-only inspect、Cancel可能stepだけ | persisted pack再読success / failure / safe compensation |
 | Needs review | Riskまたはreviewerが確認要求 |対象、影響、可逆性、根拠 | inspect、Chat decision。automatic mutationなし | valid approval/scope変更 |
 | Blocked | gate Fail/Unknown、stale、dirty、unsupported | blocking gate、affected path、保持data、回復手順 | refresh、Chat、read-only evidence | precondition再評価 |
 | オフライン | Codex/support/network unavailable | local Git/evidence available、reviewer unavailable | local inspect/compare/restore条件付き |明示再診断 |
 | エラー | Git/DB/diff/reviewer failure | code、operation、影響、作成されていないobject、retry |影響外閲覧、retry/diagnostic | terminal recovery |
 | 権限不足 | repo/object/index write不可 |拒否operation、scope、再診断。private path非表示 | read-only evidence、Settings | permission変更後のretry |
 | キャンセル後 | compare/restore/branch dialog cancel | selection、fingerprint、scrollを維持 |元操作または別操作 |次の明示操作 |
-| 再起動復旧 | gate/checkpoint/restoreにterminal eventなし | Interrupted operation、before/after fingerprint、last durable pack | diagnose、read-only、safe retry | state分類完了 |
+| 再起動復旧 | gate/checkpoint/restoreにterminal eventなし | journal state、expected old/new ref、pack digest、before/after fingerprint、last durable pack | diagnose、read-only、exact history retryまたはsafe compensation | state分類完了 |
 | stale | external HEAD/ref/working tree変更 | observed/current fingerprint差、refresh required | read-only、refresh | fresh baseline確立 |
 | large diff | threshold到達 | summary first、file/chunk lazy placeholder | filter、1 file load、cancel load | selected chunk terminal |
 | reviewer fallback | timeout/schema/stale/support disabled | deterministic review unavailable text、gateは不変 | main evidenceの閲覧 |次の明示review trigger |
@@ -228,9 +229,9 @@ dialogをcancelした場合、HEAD、refs、index、working treeが開始前fing
 | ユーザー操作・system event | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
 |---|---|---|---|---|---|
 | baseline/refresh | Rust Git service | `inspect_git_baseline` | canonical registered root、read-only allowlist |前snapshot維持 | stale/blocked |
-| gate/checkpoint | Rust Git service | `evaluate_and_checkpoint_work_unit` | owned manifest、4 gate Pass、isolated temporary index、local commitだけ。実index fingerprint不変 | safe abort可能stepだけ | source/index/user change保持 |
+| gate/checkpoint | Rust Git service | `evaluate_and_checkpoint_work_unit` | validated Codex terminal work-unit event、owned manifest、4 gate Pass、isolated temporary index、fsync journal、HIST exact event preflight。実index fingerprint不変 | safe abort可能stepだけ | source/index/user change保持、ref更新済みならhistory pendingまたはsafe compensation |
 | diff/compare | Rust Git service | `read_evidence_diff` / `compare_checkpoints` | validated object ID、repo ID、size limit | loadだけ停止 |該当file/error envelope |
-| revert | Rust Git service | `create_revert_checkpoint` | fresh HEAD、clean safety check、validated SHA、confirm token |開始前なら全状態不変 | conflict/lock/disk/permissionをerror |
+| revert | Rust Git service | `create_revert_checkpoint` | fresh HEAD、clean safety check、validated SHA、confirm token、private tree/object construction、journaled ref CAS、immutable restore event |開始前なら全状態不変 | conflict/lock/disk/permissionをerror、terminal未確定は再起動診断 |
 | recovery branch | Rust Git service | `create_recovery_branch` | validated SHA/ref、local ref作成だけ、checkout禁止 | refs不変 | ref作成済みと表示しない |
 | reviewer | Rust support policy | `review_fixed_diff_snapshot` |明示trigger、hash、UTF-8最大1MiB、tool/cwdなし | task cancel | fallback、gate不変 |
 | sanitized copy | Tauri clipboard | `copy_evidence_summary` | rendered redacted textだけ | 非該当 | raw diffへfallbackしない |
@@ -303,8 +304,8 @@ dialogをcancelした場合、HEAD、refs、index、working treeが開始前fing
 | 要件ID | この画面での扱い | 要件定義書 |
 |---|---|---|
 | `SUP-F-054`, `SUP-F-056`〜`SUP-F-058` | fixed diff reviewer、schema、stale/failure fallback | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
-| `GIT-F-043`〜`GIT-F-065` | baseline、ownership、gate、checkpoint、pack、compare、restore、境界 | [git-review-harness](../requirements/git-review-harness.md) |
-| `HIST-F-038`, `HIST-F-044`〜`HIST-F-051`, `HIST-F-057` | evidence永続化、filter/anchor、failure/restart recovery | [activity-history](../requirements/activity-history.md) |
+| `GIT-F-043`〜`GIT-F-071` | baseline、ownership、gate、checkpoint、pack、compare、restore、config isolation、fingerprint、journal | [git-review-harness](../requirements/git-review-harness.md) |
+| `HIST-F-038`, `HIST-F-044`〜`HIST-F-051`, `HIST-F-057`, `HIST-F-060` | evidence永続化、filter/anchor、failure/restart recovery、mutation前preflight | [activity-history](../requirements/activity-history.md) |
 | `APP-F-055`, `APP-F-059`〜`APP-F-062` | Commit tab、responsive、focus、text zoom、state | [desktop-shell](../requirements/desktop-shell.md) |
 
 ## 未確定事項
