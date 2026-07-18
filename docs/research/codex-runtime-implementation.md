@@ -33,6 +33,7 @@ read_when:
 14. public textはfield別に検証する。identifier/aliasはsingle-line、prompt/assistant/tool excerpt/effect/evidenceは正規化済み`\n`と`\t`だけをcontrol例外として許可し、NUL、その他control、secret、private pathを拒否する。RustとTypeScriptはUnicode scalarで同じ上限を数える。
 15. HISTのversioned CODE payloadはlive semantic eventと同じexact projectorで復元する。pending decision/approvalはsupervisor ownership照合成功時だけactionableにし、unknown/invalid payloadはraw/generic行へfallbackしない。
 16. `DecisionContext`はnative RUI、fallback、normalizer、HIST、WebViewを通じてversion、effect、scope、risk、reversibility、recommendation、evidence、uncertaintyを保持する。不正contextを回答可能cardへ近似しない。
+17. main turnのpublic instruction上限32,000 Unicode scalarと、contextを含む合成text上限80,000 Unicode scalarを分離する。Rust supervisorは後者をApp Server送信前に再検証し、exact 80,000を受理、80,001、NUL、空textかつattachmentなしを拒否する。multibyte文字もUTF-8 byte数ではなく1 scalarとして数える。この変更はsupport専用input/outputの64KiB byte上限を変更しない。
 
 ## Binary trustとprobe境界
 
@@ -100,7 +101,7 @@ handleは発行時のworkspace ID、Codex generation、canonical rootのdevice/i
 
 turn送信直前にroot identity、active generation、TTL、件数、合計size、source metadata/hashをstable descriptorで全件再照合する。検証済みdescriptorからowner-only app-private staging directory（0700）のimmutable snapshot file（0600）へcopyし、fileとdirectoryをfsyncしてsnapshot descriptorのmetadata/hashを再検証する。App Serverにはsnapshot pathだけを渡し、source pathを再openさせない。1件でもsnapshot化に失敗すればApp Server requestを開始せずdraftと全attachment chipを保持する。accepted response、開始失敗、terminal、interrupt/crash、TTL expiryの各境界でsnapshotを削除し、WebView/public event/logへsource/snapshot pathを出さない。
 
-Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpathをturn payloadへ組み立てない。未実装の`terminal_output`を成功表示へfallbackしない。
+Contextの編集・保存は既存のnative snapshotを正本とし、turn開始時に取得したimmutable version/hash付きsnapshotだけを固定markerとpublic instructionへ合成する。合成後のtext全体はJSON escapingとmetadataを含め80,000 Unicode scalar以下とし、WebViewとRust supervisorの双方で同じ単位を検証する。persisted public draftは32,000 scalar以下のままにしてprivate composed envelopeを保存しない。未実装の`terminal_output`を成功表示へfallbackしない。
 
 ## Workspace composition検証
 
@@ -115,7 +116,8 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 7. child crash後に受信済みevent、draft、Interruptedが残り、turn/startが自動再送されないことを確認する。
 8. Sol、low、maxのいずれかをmodel/list fixtureから欠落させ、Sendと対応表示がfail closedになることを確認する。
 9. attachmentのroot外、symlink、directory、executable、permission、size/count/total、stale handleをRust integrationで拒否し、有効なimage/fileだけがapp-private snapshotのlocalImage/mentionになることを確認する。検証後にleafとancestorを差し替えるfake App Server raceでexact validated bytesだけを観測し、accepted/failed/terminal/expiry cleanupと0700/0600を確認する。
-10. agent-browserで1470/960/480 CSS px、200% zoom、ja/en、keyboard、reduced motion、scroll lock、decision回答、Stopを実操作する。
+10. main turn textの80,000/80,001 Unicode scalar、multibyte scalar、NUL、empty-without-attachmentをnative境界で検証し、public draft/instructionの32,000 scalarとsupportの64KiB byte上限が変わらないことを確認する。
+11. agent-browserで1470/960/480 CSS px、200% zoom、ja/en、keyboard、reduced motion、scroll lock、decision回答、Stopを実操作する。
 
 実Codexを使う通常gateは既存の読み取り専用diagnostic smokeだけに限定する。user repositoryでthread、turn、review、attachmentを作らず、実行系E2Eはfake App Serverと`/tmp` repositoryだけで行う。
 

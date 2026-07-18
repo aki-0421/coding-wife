@@ -46,6 +46,7 @@ pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
 pub const DOMAIN_EVENT_CHANNEL: &str = "coding-wife://domain-event";
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERRUPT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CODEX_TURN_TEXT_SCALARS: usize = 80_000;
 const MAX_MODEL_PAGES: usize = 20;
 const MAX_RESTARTS: usize = 3;
 const RESTART_WINDOW: Duration = Duration::from_secs(60);
@@ -936,7 +937,7 @@ impl CodexSupervisor {
         expected_generation: Option<u64>,
     ) -> Result<TurnResponse, CodexCommandError> {
         if request.text.contains('\0')
-            || request.text.chars().count() > 32_000
+            || request.text.chars().count() > MAX_CODEX_TURN_TEXT_SCALARS
             || (request.text.trim().is_empty() && attachments.is_empty())
             || request.client_user_message_id.trim().is_empty()
             || request.client_user_message_id.len() > 128

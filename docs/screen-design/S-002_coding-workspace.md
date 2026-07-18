@@ -139,7 +139,7 @@ timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted 
 
 attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、Context tabのproject/character編集とは別の送信時参照として扱う。
 
-送信時はworkspace、draft hash、context version、Git fingerprint、effort、attachmentをRustで再検証する。sourceはstable root dirfdからno-followで開き、descriptorから0700/0600のapp-private snapshotへcopy、fsync、hash再検証する。App Serverへはsnapshotだけを渡し、accepted/failed/terminal/expiryで削除する。二重操作は同じidempotency keyへ集約する。
+送信時はworkspace、draft hash、context version、Git fingerprint、effort、attachmentをRustで再検証する。public instructionは32,000 Unicode scalar以下を維持し、開始時に固定したProject/Character context、version/hash metadata、JSON escaping、固定markerとの合成text全体を80,000 Unicode scalar以下にする。WebViewとRustはUTF-8 byte数ではなくUnicode scalar数で同じexact boundaryを検査し、80,001 scalar、NUL、その他controlをApp Server送信前に拒否してdraftとcontext versionを保持する。sourceはstable root dirfdからno-followで開き、descriptorから0700/0600のapp-private snapshotへcopy、fsync、hash再検証する。App Serverへはsnapshotだけを渡し、accepted/failed/terminal/expiryで削除する。二重操作は同じidempotency keyへ集約する。
 
 ### 構造化decision
 
@@ -233,6 +233,7 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | 項目 | 初期値 | 必須 | 制約・境界 | エラー表示 | 保存契機 |
 |---|---|---|---|---|---|
 | instruction | workspace draft | 条件付き | 0〜32,000 Unicode scalar、NUL不可。attachment/contextがなければtrim後1文字以上 | composer内、draft保持 | redaction合格後のdebounceとroute leave。secret-bearing raw値はReact transientだけに保持しDBへ保存しない |
+| composed turn text | instructionと開始時context snapshotから生成 | 条件付き | 固定marker、Project最大32,000 scalar、Character最大12,000 scalar、version/hash metadata、JSON escapingを含む全体で0〜80,000 Unicode scalar。multibyte文字も1 scalarとして数える | composer上の送信error、instruction/contextを保持 | 保存しない。App Serverへの当該turn inputだけに使用 |
 | attachment | なし | 任意 | 10件、各25MiB、合計50MiB、workspace root内のregular readable file。directory/symlink/executable不可 | chip単位、無効handleは除外 | draftにはhandle metadataだけ |
 | read-only context | なし | 任意 | Files & folders / Git diffを各1MiB、workspaceごとにcapture順の最新10件。sourceとcapture時刻必須。Terminal outputはtrusted producer実装までunavailable | 無効snapshotを追加せず理由表示 | redacted snapshot metadataとcontent hash |
 | effort |前回valid値、初回`Fast` | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | Send不可理由 | valid変更時workspace preference |
@@ -249,7 +250,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 | ユーザー操作 | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
 |---|---|---|---|---|---|
-| session開始/turn送信 | Rust → Codex stdio | `start_or_send_main_turn` | active workspace、Codex executable、typed payload、1 active execution。imageは`localImage`、fileは`mention`へRust内で変換し、`coding-wife-commit-work`を各turnのexplicit skill inputへ1件注入する | spawn前ならdraft維持 | skill version/digest/注入を証明できなければturnを開始せず、thread自動重複作成なし |
+| session開始/turn送信 | Rust → Codex stdio | `start_or_send_main_turn` | active workspace、Codex executable、typed payload、1 active execution。public instruction 32,000 scalarとcomposed text 80,000 scalarを別々に検証し、imageは`localImage`、fileは`mention`へRust内で変換し、`coding-wife-commit-work`を各turnのexplicit skill inputへ1件注入する | spawn前ならdraft維持 | 上限/NUL/control違反またはskill version/digest/注入を証明できなければturnを開始せず、thread自動重複作成なし |
 | Stop | Rust supervisor | `stop_main_turn` | owned process/thread/turn ID | confirmation cancelは継続 | timeout後process tree停止、Interrupted |
 | event購読 | Rust event bridge | `subscribe_workspace_events` | workspace ID、monotonic sequence、schema allowlist | route leaveでUI購読だけ解除 | gapでpauseし診断表示 |
 | terminal Git observation handoff | Codex composition → Rust Git observer | `observe_terminal_work_unit` | validated terminal authority、work unit ID、workspace ID/generation、source event ID/sequence/time。observerがbefore/after HEAD、status、new commitとverification/decision/risk evidenceをread-onlyで相関し、同一eventをexact replayだけに制限 | terminal前は開始しない | observation/HIST失敗をUnavailable/Unknownにし、main resultとGit状態を変更しない |

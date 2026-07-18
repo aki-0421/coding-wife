@@ -72,7 +72,7 @@ read_when:
 | `CODE-F-052` | main sessionは`gpt-5.6-sol`だけを使用する | thread/start payloadとheader表示が`gpt-5.6-sol`になり、UIまたは保存設定から別modelへ変更できない | Approved | 非該当 |
 | `CODE-F-053` | 利用者は利用可能なreasoning effortを選べる | `gpt-5.6-sol`のmodel/listで`low`と`max`がsupportedReasoningEffortsにある時だけFast=`low`、Max=`max`として表示・送信し、model、service tier、`ultra`をこの操作で変更しない | Approved | 非該当 |
 | `CODE-F-054` | appはactive workspaceのcwdでmain threadを開始する | canonical project rootとselected effortを使ってthreadを1件開始し、別workspace pathを使用しない | Approved | 非該当 |
-| `CODE-F-055` | 利用者は有効なcomposer内容をturnとして送信できる | text、attachment、contextのいずれか1件以上が有効な時、Command+EnterまたはSendで1turnだけ開始する | Approved | 非該当 |
+| `CODE-F-055` | 利用者は有効なcomposer内容をturnとして送信できる | text、attachment、contextのいずれか1件以上が有効な時、Command+EnterまたはSendで1turnだけ開始する。public instructionは32,000 Unicode scalar以下を維持し、Project/Character context、version/hash metadata、JSON escaping、固定markerを合成したApp Server向けtext全体は80,000 Unicode scalar以下とする。WebViewとRust supervisorの双方が同じscalar単位でexact 80,000を受理し、80,001、NUL、その他controlをtransport前に拒否する | Approved | 非該当 |
 | `CODE-F-056` | 空composerは送信できない | trim後textが空かつattachmentとcontextが0件ならSendをdisabledにし、Command+Enterでturnを開始しない。attachmentまたはcontextがvalidならtext 0文字でも送信できる | Approved | 非該当 |
 | `CODE-F-057` | 送信成功時だけcomposerをclearする | App Serverがturn startedを受理した後にtextをclearし、validation/transport failureではtextとattachmentを保持する | Approved | 非該当 |
 
@@ -123,6 +123,7 @@ read_when:
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
 |---|---|---|---|---|---|
 | Composer | prompt | workspace draft | 条件付き | 正規化済み改行・tabを含む0〜32,000 Unicode scalar、NUL/その他control不可。attachment/contextがなければtrim後1文字以上 | draft保持、共通scalar countで超過数表示 |
+| Turn transport | composed text envelope | promptと開始時context snapshotから生成 | 条件付き | 固定marker、Project Context最大32,000 scalar、Character Context最大12,000 scalar、version/hash metadata、JSON escaping、public instructionを含む全体で0〜80,000 Unicode scalar。UTF-8 byte数では数えず、NUL/その他control不可 | draft、context version、attachmentを保持し、WebViewは`WORKSPACE-CONTEXT-TURN-TOO-LARGE`、Rustは`CODEX-TURN-INVALID`でApp Server送信前に拒否 |
 | Composer | attachment | なし | 任意 | 10件、各25MiB、合計50MiB、regular readable file | 無効itemだけ拒否し他を保持 |
 | Composer | context | なし | 任意 | 10件、各1MiB text snapshot、sourceとtimestamp必須 | 無効snapshotを送信しない |
 | Composer | effort | Fast（`low`） | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | 対応値がなければSendを無効にし診断理由を表示 |

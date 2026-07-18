@@ -555,6 +555,78 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
 }
 
 #[tokio::test]
+async fn main_turn_text_accepts_exact_scalar_boundary_and_rejects_invalid_input_before_wire() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("fragmented");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("connect fixture");
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("thread start");
+
+    let turn_request = |client_user_message_id: &str, text: String| CodexTurnStartRequest {
+        workspace_id: "workspace".to_owned(),
+        thread_handle: thread.thread_handle.clone(),
+        client_user_message_id: client_user_message_id.to_owned(),
+        text,
+        effort: ReasoningPreset::Low,
+        attachment_handles: vec![],
+    };
+    let oversized = format!("{}😀", "x".repeat(80_000));
+    assert_eq!(oversized.chars().count(), 80_001);
+    assert!(oversized.len() > oversized.chars().count());
+    for (message_id, text) in [
+        ("message-oversized", oversized),
+        ("message-nul", "valid\0text".to_owned()),
+        ("message-empty", String::new()),
+    ] {
+        let error = supervisor
+            .turn_start(turn_request(message_id, text))
+            .await
+            .expect_err("invalid text must fail before transport");
+        assert_eq!(error.code, "CODEX-TURN-INVALID", "{message_id}");
+    }
+    let before_exact = read_state(&fixture.state).await;
+    assert!(!before_exact.contains("turn_contract_"));
+    assert!(!before_exact.contains("commit_skill_"));
+
+    let exact = format!("{}😀", "x".repeat(79_999));
+    assert_eq!(exact.chars().count(), 80_000);
+    assert!(exact.len() > exact.chars().count());
+    let turn = supervisor
+        .turn_start(turn_request("message-exact", exact))
+        .await
+        .expect("exact scalar boundary reaches the App Server");
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("turn_contract_ok").count(), 1);
+    assert_eq!(state.matches("commit_skill_exactly_once_ok").count(), 1);
+
+    supervisor
+        .turn_interrupt(CodexTurnInterruptRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            turn_handle: turn.turn_handle,
+        })
+        .await
+        .expect("interrupt exact-boundary turn");
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
 async fn dedicated_support_runtime_proves_authority_and_injects_only_the_explain_skill() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("default");
