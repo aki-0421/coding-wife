@@ -6,6 +6,7 @@ import {
   parseCharacterLibrarySnapshot,
   type CharacterImportResponse,
   type CharacterLibrarySnapshot,
+  type CharacterPackView,
   type CharacterPreviewAttestationRequest,
   type CharacterPreviewAttestationResponse,
   type SemanticMappingV1,
@@ -186,8 +187,10 @@ describe("CharacterLibraryStore", () => {
 
   it("publishes a global pack deletion atomically while preserving each project selection", async () => {
     const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
-    const customPack = {
-      ...snapshot.packs[0],
+    const builtinPack = snapshot.packs[0]
+    if (builtinPack === undefined) throw new Error("builtin pack fixture")
+    const customPack: CharacterPackView = {
+      ...builtinPack,
       packId: "custom:11111111-1111-4111-8111-111111111111",
       displayName: "Project A pack",
       kind: "custom" as const,
