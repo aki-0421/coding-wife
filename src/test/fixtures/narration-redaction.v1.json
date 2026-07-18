@@ -36,6 +36,30 @@
     {
       "name": "numeric-division",
       "text": "Compute 10/2 and 10 / 2 before reporting the result."
+    },
+    {
+      "name": "markdown-https-link",
+      "text": "Read [the public guide](https://example.com/x)."
+    },
+    {
+      "name": "https-url-with-query-path",
+      "text": "See https://example.com/root/x?next=/x&mode=public."
+    },
+    {
+      "name": "https-url-with-double-slash-path",
+      "text": "See https://example.com//public/x."
+    },
+    {
+      "name": "inline-code-relative-path",
+      "text": "Read `src/x`."
+    },
+    {
+      "name": "inline-code-division",
+      "text": "Compute `10/2` and 10 / 2."
+    },
+    {
+      "name": "uppercase-http-url-with-port",
+      "text": "See HTTP://example.com:8080/x for the public guide."
     }
   ],
   "private": [
@@ -86,6 +110,86 @@
     {
       "name": "japanese-quoted-single-component-path",
       "text": "対象：「/x」。"
+    },
+    {
+      "name": "inline-code-single-component-path",
+      "text": "Read `/x`."
+    },
+    {
+      "name": "inline-code-private-home-path",
+      "text": "Read `/Users/alice/private.ts`."
+    },
+    {
+      "name": "same-line-fenced-code-path",
+      "text": "Read ```/x``` now."
+    },
+    {
+      "name": "multiline-fenced-code-path",
+      "text": "Read:\n```\n/x\n```"
+    },
+    {
+      "name": "double-slash-path",
+      "text": "Read //private/x."
+    },
+    {
+      "name": "markdown-link-label-path",
+      "text": "Read [/x](https://example.com/docs)."
+    },
+    {
+      "name": "markdown-relative-link-target",
+      "text": "Read [docs](/x)."
+    },
+    {
+      "name": "em-dash-boundary-path",
+      "text": "Read—/x"
+    },
+    {
+      "name": "middle-dot-boundary-path",
+      "text": "Read・/x"
+    },
+    {
+      "name": "fullwidth-parenthesis-boundary-path",
+      "text": "Read（/x）"
+    },
+    {
+      "name": "corner-bracket-boundary-path",
+      "text": "Read【/x】"
+    },
+    {
+      "name": "ellipsis-boundary-path",
+      "text": "Read…/x"
+    },
+    {
+      "name": "bullet-boundary-path",
+      "text": "Read•/x"
+    },
+    {
+      "name": "angle-bracket-boundary-path",
+      "text": "Read〈/x〉"
+    },
+    {
+      "name": "double-angle-bracket-boundary-path",
+      "text": "Read《/x》"
+    },
+    {
+      "name": "curly-quote-boundary-path",
+      "text": "Read“/x”"
+    },
+    {
+      "name": "guillemet-boundary-path",
+      "text": "Read«/x»"
+    },
+    {
+      "name": "fullwidth-semicolon-boundary-path",
+      "text": "Read；/x"
+    },
+    {
+      "name": "invalid-https-empty-authority-path",
+      "text": "Read https:///x."
+    },
+    {
+      "name": "markdown-url-followed-by-private-path",
+      "text": "Read [docs](https://example.com/x)/private."
     },
     {
       "name": "bearer-token",

@@ -178,14 +178,19 @@ impl NarrationPolicy {
 }
 
 fn validate_redacted_text(text: &str) -> Result<(), PolicyRejection> {
-    let scalar_count = text.chars().count();
+    let characters = text
+        .chars()
+        .take(NARRATION_MAX_TEXT_SCALARS + 1)
+        .collect::<Vec<_>>();
+    let scalar_count = characters.len();
     if !(1..=NARRATION_MAX_TEXT_SCALARS).contains(&scalar_count)
         || text.trim() != text
-        || text.chars().any(|character| {
-            character == '\0' || (character.is_control() && character != '\n' && character != '\t')
+        || characters.iter().any(|character| {
+            *character == '\0'
+                || (character.is_control() && *character != '\n' && *character != '\t')
         })
         || secret_pattern().is_match(text)
-        || private_path_pattern().is_match(text)
+        || contains_private_absolute_path(&characters)
     {
         return Err(PolicyRejection::UnsafeText);
     }
@@ -202,11 +207,162 @@ fn secret_pattern() -> &'static Regex {
     })
 }
 
-fn private_path_pattern() -> &'static Regex {
+fn unicode_whitespace_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    PATTERN.get_or_init(|| Regex::new(r"^\p{White_Space}$").expect("Unicode whitespace pattern"))
+}
+
+fn unicode_path_boundary_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r#"(?:^|[\s(\[{"'「『=,:;：、，。！？])\/[^\s/<>"']+"#)
-            .expect("narration path pattern")
+        Regex::new(r"^(?:\p{White_Space}|\p{P}|\p{S})$").expect("Unicode path boundary pattern")
+    })
+}
+
+fn matches_character(pattern: &Regex, character: char) -> bool {
+    let mut buffer = [0_u8; 4];
+    pattern.is_match(character.encode_utf8(&mut buffer))
+}
+
+fn is_unicode_whitespace(character: char) -> bool {
+    matches_character(unicode_whitespace_pattern(), character)
+}
+
+fn is_unicode_path_boundary(character: char) -> bool {
+    matches_character(unicode_path_boundary_pattern(), character)
+}
+
+fn matches_ascii_case_insensitive(characters: &[char], start: usize, expected: &str) -> bool {
+    expected.chars().enumerate().all(|(offset, expected)| {
+        characters
+            .get(start + offset)
+            .is_some_and(|actual| actual.eq_ignore_ascii_case(&expected))
+    })
+}
+
+fn consume_public_url_host(characters: &[char], start: usize) -> Option<usize> {
+    if characters.get(start) == Some(&'[') {
+        let mut cursor = start + 1;
+        let address_start = cursor;
+        while characters.get(cursor).is_some_and(|character| {
+            character.is_ascii_hexdigit() || matches!(*character, ':' | '.')
+        }) {
+            cursor += 1;
+        }
+        return (cursor > address_start && characters.get(cursor) == Some(&']'))
+            .then_some(cursor + 1);
+    }
+
+    let mut cursor = start;
+    if !characters
+        .get(cursor)
+        .is_some_and(char::is_ascii_alphanumeric)
+    {
+        return None;
+    }
+    cursor += 1;
+    while characters
+        .get(cursor)
+        .is_some_and(|character| character.is_ascii_alphanumeric() || *character == '-')
+    {
+        cursor += 1;
+    }
+    if characters.get(cursor.wrapping_sub(1)) == Some(&'-') {
+        return None;
+    }
+
+    while characters.get(cursor) == Some(&'.')
+        && characters
+            .get(cursor + 1)
+            .is_some_and(char::is_ascii_alphanumeric)
+    {
+        cursor += 2;
+        while characters
+            .get(cursor)
+            .is_some_and(|character| character.is_ascii_alphanumeric() || *character == '-')
+        {
+            cursor += 1;
+        }
+        if characters.get(cursor.wrapping_sub(1)) == Some(&'-') {
+            return None;
+        }
+    }
+    Some(cursor)
+}
+
+fn is_public_url_tail_character(character: char) -> bool {
+    character.is_ascii_alphanumeric() || "-._~:/?#@!$&*+,;=%".contains(character)
+}
+
+fn public_url_end(characters: &[char], start: usize) -> Option<usize> {
+    if start != 0
+        && !characters
+            .get(start.wrapping_sub(1))
+            .is_some_and(|character| is_unicode_path_boundary(*character))
+    {
+        return None;
+    }
+
+    let scheme_length = if matches_ascii_case_insensitive(characters, start, "https://") {
+        8
+    } else if matches_ascii_case_insensitive(characters, start, "http://") {
+        7
+    } else {
+        return None;
+    };
+
+    let mut cursor = consume_public_url_host(characters, start + scheme_length)?;
+    if characters.get(cursor) == Some(&':') {
+        cursor += 1;
+        let port_start = cursor;
+        while characters.get(cursor).is_some_and(char::is_ascii_digit) {
+            cursor += 1;
+        }
+        if cursor == port_start {
+            return None;
+        }
+    }
+    if characters
+        .get(cursor)
+        .is_some_and(|character| matches!(*character, '/' | '?' | '#'))
+    {
+        while characters
+            .get(cursor)
+            .is_some_and(|character| is_public_url_tail_character(*character))
+        {
+            cursor += 1;
+        }
+    }
+    Some(cursor)
+}
+
+fn find_public_url_mask(characters: &[char]) -> Vec<bool> {
+    let mut mask = vec![false; characters.len()];
+    let mut cursor = 0;
+    while cursor < characters.len() {
+        let Some(end) = public_url_end(characters, cursor) else {
+            cursor += 1;
+            continue;
+        };
+        mask[cursor..end].fill(true);
+        cursor = end;
+    }
+    mask
+}
+
+fn contains_private_absolute_path(characters: &[char]) -> bool {
+    let public_url_mask = find_public_url_mask(characters);
+    characters.iter().enumerate().any(|(index, character)| {
+        if *character != '/' || public_url_mask[index] {
+            return false;
+        }
+        let Some(next) = characters.get(index + 1) else {
+            return false;
+        };
+        if is_unicode_whitespace(*next) {
+            return false;
+        }
+        index == 0 || is_unicode_path_boundary(characters[index - 1])
     })
 }
 
@@ -358,6 +514,31 @@ mod tests {
                 Err(PolicyRejection::UnsafeText),
                 "private fixture accepted: {}",
                 case.name
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_redaction_scanning_inside_the_scalar_size_boundary() {
+        let safe_at_limit = "a".repeat(NARRATION_MAX_TEXT_SCALARS);
+        let multibyte_at_limit = "🦀".repeat(NARRATION_MAX_TEXT_SCALARS);
+        let private_at_limit = format!("{} /x", "a".repeat(NARRATION_MAX_TEXT_SCALARS - 3));
+        let over_limit = "a".repeat(NARRATION_MAX_TEXT_SCALARS + 1);
+        let far_over_limit = "a".repeat(NARRATION_MAX_TEXT_SCALARS * 1_000);
+
+        assert_eq!(safe_at_limit.chars().count(), NARRATION_MAX_TEXT_SCALARS);
+        assert_eq!(
+            multibyte_at_limit.chars().count(),
+            NARRATION_MAX_TEXT_SCALARS
+        );
+        assert_eq!(private_at_limit.chars().count(), NARRATION_MAX_TEXT_SCALARS);
+        for text in [safe_at_limit, multibyte_at_limit] {
+            assert_eq!(validate_redacted_text(&text), Ok(()));
+        }
+        for text in [private_at_limit, over_limit, far_over_limit] {
+            assert_eq!(
+                validate_redacted_text(&text),
+                Err(PolicyRejection::UnsafeText)
             );
         }
     }

@@ -281,22 +281,199 @@ const privateTextPatterns = [
   /\bxox[baprs]-[a-z0-9-]{10,}/iu,
   /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----/iu,
   /(?:^|[^a-z0-9])(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|aws[_-]?session[_-]?token|cookie|session(?:[_-]?id)?)\s*[:=]\s*["']?\S+/iu,
-  /(?:^|[\s([{"'「『=,:;：、，。！？])\/[^\s/<>"']+/u,
 ] as const
+
+const unicodeWhitespacePattern = /^\p{White_Space}$/u
+const unicodePathBoundaryPattern = /^(?:\p{White_Space}|\p{P}|\p{S})$/u
+const publicUrlTailCharacters = "-._~:/?#@!$&*+,;=%"
+
+function isAsciiAlphanumeric(character: string | undefined): boolean {
+  if (character === undefined) return false
+  const codePoint = character.codePointAt(0)
+  return (
+    codePoint !== undefined &&
+    ((codePoint >= 0x30 && codePoint <= 0x39) ||
+      (codePoint >= 0x41 && codePoint <= 0x5a) ||
+      (codePoint >= 0x61 && codePoint <= 0x7a))
+  )
+}
+
+function isAsciiDigit(character: string | undefined): boolean {
+  if (character === undefined) return false
+  const codePoint = character.codePointAt(0)
+  return codePoint !== undefined && codePoint >= 0x30 && codePoint <= 0x39
+}
+
+function isAsciiIpLiteralCharacter(character: string | undefined): boolean {
+  if (character === undefined) return false
+  const codePoint = character.codePointAt(0)
+  return (
+    codePoint !== undefined &&
+    ((codePoint >= 0x30 && codePoint <= 0x39) ||
+      (codePoint >= 0x41 && codePoint <= 0x46) ||
+      (codePoint >= 0x61 && codePoint <= 0x66) ||
+      character === ":" ||
+      character === ".")
+  )
+}
+
+function matchesAsciiCaseInsensitive(
+  characters: readonly string[],
+  start: number,
+  expected: string,
+): boolean {
+  for (let offset = 0; offset < expected.length; offset += 1) {
+    const character = characters[start + offset]
+    if (
+      character === undefined ||
+      character.length !== 1 ||
+      character.toLowerCase() !== expected[offset]
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function consumePublicUrlHost(
+  characters: readonly string[],
+  start: number,
+): number | null {
+  if (characters[start] === "[") {
+    let cursor = start + 1
+    const addressStart = cursor
+    while (isAsciiIpLiteralCharacter(characters[cursor])) {
+      cursor += 1
+    }
+    return cursor > addressStart && characters[cursor] === "]"
+      ? cursor + 1
+      : null
+  }
+
+  let cursor = start
+  if (!isAsciiAlphanumeric(characters[cursor])) return null
+  cursor += 1
+  while (
+    isAsciiAlphanumeric(characters[cursor]) ||
+    characters[cursor] === "-"
+  ) {
+    cursor += 1
+  }
+  if (characters[cursor - 1] === "-") return null
+
+  while (
+    characters[cursor] === "." &&
+    isAsciiAlphanumeric(characters[cursor + 1])
+  ) {
+    cursor += 2
+    while (
+      isAsciiAlphanumeric(characters[cursor]) ||
+      characters[cursor] === "-"
+    ) {
+      cursor += 1
+    }
+    if (characters[cursor - 1] === "-") return null
+  }
+  return cursor
+}
+
+function isPublicUrlTailCharacter(character: string | undefined): boolean {
+  return (
+    character !== undefined &&
+    (isAsciiAlphanumeric(character) ||
+      publicUrlTailCharacters.includes(character))
+  )
+}
+
+function publicUrlEnd(
+  characters: readonly string[],
+  start: number,
+): number | null {
+  const previous = characters[start - 1]
+  if (
+    start !== 0 &&
+    (previous === undefined || !unicodePathBoundaryPattern.test(previous))
+  ) {
+    return null
+  }
+
+  const schemeLength = matchesAsciiCaseInsensitive(
+    characters,
+    start,
+    "https://",
+  )
+    ? 8
+    : matchesAsciiCaseInsensitive(characters, start, "http://")
+      ? 7
+      : null
+  if (schemeLength === null) return null
+
+  let cursor = consumePublicUrlHost(characters, start + schemeLength)
+  if (cursor === null) return null
+  if (characters[cursor] === ":") {
+    cursor += 1
+    const portStart = cursor
+    while (isAsciiDigit(characters[cursor])) cursor += 1
+    if (cursor === portStart) return null
+  }
+  if (
+    characters[cursor] === "/" ||
+    characters[cursor] === "?" ||
+    characters[cursor] === "#"
+  ) {
+    while (isPublicUrlTailCharacter(characters[cursor])) cursor += 1
+  }
+  return cursor
+}
+
+function findPublicUrlMask(characters: readonly string[]): readonly boolean[] {
+  const mask = Array<boolean>(characters.length).fill(false)
+  let cursor = 0
+  while (cursor < characters.length) {
+    const end = publicUrlEnd(characters, cursor)
+    if (end === null) {
+      cursor += 1
+      continue
+    }
+    for (let index = cursor; index < end; index += 1) mask[index] = true
+    cursor = end
+  }
+  return mask
+}
+
+function containsPrivateAbsolutePath(characters: readonly string[]): boolean {
+  const publicUrlMask = findPublicUrlMask(characters)
+  return characters.some((character, index) => {
+    if (character !== "/" || publicUrlMask[index]) return false
+    const next = characters[index + 1]
+    if (next === undefined || unicodeWhitespacePattern.test(next)) return false
+    const previous = characters[index - 1]
+    return (
+      index === 0 ||
+      (previous !== undefined && unicodePathBoundaryPattern.test(previous))
+    )
+  })
+}
 
 function isRedactedText(value: unknown): value is string {
   if (typeof value !== "string") return false
-  const scalarCount = [...value].length
+  const characters: string[] = []
+  for (const character of value) {
+    characters.push(character)
+    if (characters.length > narrationMaxTextScalars) return false
+  }
+  const scalarCount = characters.length
   return (
     scalarCount >= 1 &&
     scalarCount <= narrationMaxTextScalars &&
     value.trim() === value &&
-    ![...value].some(
+    !characters.some(
       (character) =>
         character === "\0" ||
         (/\p{Cc}/u.test(character) && character !== "\n" && character !== "\t"),
     ) &&
-    !privateTextPatterns.some((pattern) => pattern.test(value))
+    !privateTextPatterns.some((pattern) => pattern.test(value)) &&
+    !containsPrivateAbsolutePath(characters)
   )
 }
 

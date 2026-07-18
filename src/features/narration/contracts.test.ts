@@ -5,6 +5,7 @@ import redactionFixture from "@/test/fixtures/narration-redaction.v1.json"
 import {
   NarrationContractError,
   commitNarrationSourceKey,
+  narrationMaxTextScalars,
   narrationSchemaVersion,
   parseCommitNarrationConsumerEvent,
   parseNarrationSettingsSnapshot,
@@ -170,6 +171,38 @@ describe("narration contracts", () => {
           kind: "chunk",
           sequence: 0,
           text: fixture.text,
+        }),
+      ).toThrowError("NARRATION-PRESENTATION-ENVELOPE")
+    }
+  })
+
+  it("keeps redaction scanning inside the scalar-size boundary", () => {
+    const safeAtLimit = "a".repeat(narrationMaxTextScalars)
+    const multibyteAtLimit = "🦀".repeat(narrationMaxTextScalars)
+    const privateAtLimit = `${"a".repeat(narrationMaxTextScalars - 3)} /x`
+    const overLimit = "a".repeat(narrationMaxTextScalars + 1)
+    const farOverLimit = "a".repeat(narrationMaxTextScalars * 1_000)
+
+    expect([...safeAtLimit]).toHaveLength(narrationMaxTextScalars)
+    expect([...multibyteAtLimit]).toHaveLength(narrationMaxTextScalars)
+    expect([...privateAtLimit]).toHaveLength(narrationMaxTextScalars)
+    for (const text of [safeAtLimit, multibyteAtLimit]) {
+      expect(() =>
+        parseCommitNarrationConsumerEvent({
+          ...started(),
+          kind: "chunk",
+          sequence: 0,
+          text,
+        }),
+      ).not.toThrow()
+    }
+    for (const text of [privateAtLimit, overLimit, farOverLimit]) {
+      expect(() =>
+        parseCommitNarrationConsumerEvent({
+          ...started(),
+          kind: "chunk",
+          sequence: 0,
+          text,
         }),
       ).toThrowError("NARRATION-PRESENTATION-ENVELOPE")
     }

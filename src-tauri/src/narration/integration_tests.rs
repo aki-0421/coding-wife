@@ -3,6 +3,8 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use serde::Deserialize;
+
 use super::binary::{NarrationBinary, NarrationSpeech};
 use super::process::{process_group_exists, NarrationProcessControl};
 use super::service::NarrationService;
@@ -18,6 +20,21 @@ use super::types::{
 struct FakeSayFixture {
     root: PathBuf,
     binary: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct RedactionFixture {
+    schema_version: u16,
+    safe: Vec<RedactionCase>,
+    private: Vec<RedactionCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RedactionCase {
+    name: String,
+    text: String,
 }
 
 impl FakeSayFixture {
@@ -502,17 +519,23 @@ async fn rejects_unsafe_text_before_spawning_speech() {
     let fixture = FakeSayFixture::new();
     let service = service_fixture(&fixture).await;
     enable(&service).await;
-    for (id, text) in [
-        ("unsafe-secret", "api_key=unsafe-value"),
-        ("unsafe-path", "Open /Users/example/private.txt"),
-        ("unsafe-single-component-path", "Open /x"),
-        ("unsafe-token", "sk-1234567890abcdef"),
-    ] {
+    let redaction: RedactionFixture = serde_json::from_str(include_str!(
+        "../../../src/test/fixtures/narration-redaction.v1.json"
+    ))
+    .expect("narration redaction fixture");
+    assert_eq!(redaction.schema_version, NARRATION_SCHEMA_VERSION);
+    assert!(!redaction.safe.is_empty());
+    for (index, case) in redaction.private.into_iter().enumerate() {
+        let id = format!("unsafe-fixture-{index}");
         let error = service
-            .speak(request(id, text, NarrationPriority::High))
+            .speak(request(&id, &case.text, NarrationPriority::High))
             .await
-            .expect_err("unsafe text must fail");
-        assert_eq!(error.code, "NARRATION-TEXT-UNSAFE");
+            .expect_err("private fixture must fail before spawning speech");
+        assert_eq!(
+            error.code, "NARRATION-TEXT-UNSAFE",
+            "unexpected error for private fixture: {}",
+            case.name
+        );
     }
     assert!(!fixture.sidecar("playing").exists());
     service.shutdown().await.expect("shutdown");
