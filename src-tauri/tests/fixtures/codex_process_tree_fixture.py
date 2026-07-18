@@ -12,14 +12,20 @@ def hold_stdio():
         signal.pause()
 
 
+def publish_state(path_value, value):
+    path = pathlib.Path(path_value)
+    pending = path.with_name(f"{path.name}.pending")
+    pending.write_text(value, encoding="utf-8")
+    os.replace(pending, path)
+
+
 def main():
     state = os.environ.get("CODING_WIFE_PROCESS_TREE_STATE")
     if not state:
         return 2
 
     parent_state = os.environ.get("CODING_WIFE_PROCESS_TREE_PARENT_STATE")
-    if parent_state:
-        pathlib.Path(parent_state).write_text(str(os.getpid()), encoding="utf-8")
+    ready_state = os.environ.get("CODING_WIFE_PROCESS_TREE_READY_STATE")
 
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     grandchild = os.fork()
@@ -27,7 +33,13 @@ def main():
         hold_stdio()
         return 0
 
-    pathlib.Path(state).write_text(str(grandchild), encoding="utf-8")
+    parent = os.getpid()
+    process_group = os.getpgrp()
+    publish_state(state, str(grandchild))
+    if parent_state:
+        publish_state(parent_state, str(parent))
+    if ready_state:
+        publish_state(ready_state, f"{parent}:{process_group}:{grandchild}")
     if os.environ.get("CODING_WIFE_PROCESS_TREE_PARENT_EXIT") == "1":
         return 0
     hold_stdio()
