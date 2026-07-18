@@ -2,8 +2,17 @@
 
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { createReadStream } from "node:fs"
-import { lstat, readFile, readdir, readlink, writeFile } from "node:fs/promises"
+import { constants as fsConstants, createReadStream } from "node:fs"
+import {
+  lstat,
+  open,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises"
 import { isDeepStrictEqual } from "node:util"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -12,12 +21,26 @@ import {
   assertProductionBundleClean,
   ProductionBundleError,
 } from "./production-bundle.mjs"
+import {
+  containsPrivateAbsolutePath,
+  privatePathRoots,
+} from "./private-path-hygiene.mjs"
 
 const projectRoot = fileURLToPath(new URL("../..", import.meta.url))
 const tauriConfigPath = path.join(projectRoot, "src-tauri", "tauri.conf.json")
-const inventorySchemaVersion = 1
+const inventorySchemaVersion = 2
 const maximumInventoryBytes = 16 * 1024 * 1024
-const scanOverlapBytes = 256
+const scanOverlapBytes = 2048
+const releaseManifestSchemaVersion = 1
+const releaseRunIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+const privateRoots = privatePathRoots(projectRoot)
+const canonicalLegalRoot = path.join(
+  projectRoot,
+  "src-tauri",
+  "resources",
+  "legal",
+)
 
 const requiredResourceFiles = Object.freeze([
   "Contents/Resources/resources/characters/builtin-hiyori/NOTICE.txt",
@@ -30,13 +53,6 @@ const requiredResourceFiles = Object.freeze([
   "Contents/Resources/resources/skills/coding-wife-commit-work/SKILL.md",
   "Contents/Resources/resources/skills/coding-wife-explain-commit/SKILL.md",
   "Contents/_CodeSignature/CodeResources",
-])
-
-const privatePathMarkers = Object.freeze([
-  "/Users/",
-  "/home/",
-  "C:\\Users\\",
-  "file:///Users/",
 ])
 
 const credentialPatterns = Object.freeze([
@@ -72,8 +88,24 @@ async function sha256File(file) {
   return hash.digest("hex")
 }
 
-function digestEntries(entries) {
-  return createHash("sha256").update(JSON.stringify(entries)).digest("hex")
+function digestInventory(rootMode, entries) {
+  return createHash("sha256")
+    .update(JSON.stringify({ entries, rootMode }))
+    .digest("hex")
+}
+
+function isInside(root, candidate) {
+  const relative = path.relative(root, candidate)
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== ".." &&
+      !path.isAbsolute(relative))
+  )
+}
+
+function assertPathHygiene(value, code) {
+  if (containsPrivateAbsolutePath(value, privateRoots)) fail(code)
 }
 
 export async function collectAppInventory(appPath) {
@@ -86,16 +118,41 @@ export async function collectAppInventory(appPath) {
   if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
     fail("APP_INVENTORY_ROOT_INVALID")
   }
+  const canonicalRoot = await realpath(appPath).catch(() =>
+    fail("APP_INVENTORY_ROOT_INVALID"),
+  )
+  const rootMode = normalizedMode(rootMetadata)
 
   const entries = []
   async function visit(absolutePath, relativePath) {
     const metadata = await lstat(absolutePath)
     const base = { path: relativePath, mode: normalizedMode(metadata) }
+    assertPathHygiene(relativePath, "APP_PRIVATE_PATH_ENTRY")
     if (metadata.isSymbolicLink()) {
+      const target = await readlink(absolutePath)
+      assertPathHygiene(target, "APP_PRIVATE_PATH_SYMLINK")
+      if (
+        path.isAbsolute(target) ||
+        path.win32.isAbsolute(target) ||
+        target.startsWith("\\\\")
+      ) {
+        fail("APP_SYMLINK_ABSOLUTE")
+      }
+      const lexicalTarget = path.resolve(path.dirname(absolutePath), target)
+      if (!isInside(path.resolve(appPath), lexicalTarget)) {
+        fail("APP_SYMLINK_ESCAPE")
+      }
+      let resolvedTarget
+      try {
+        resolvedTarget = await realpath(absolutePath)
+      } catch {
+        fail("APP_SYMLINK_BROKEN")
+      }
+      if (!isInside(canonicalRoot, resolvedTarget)) fail("APP_SYMLINK_ESCAPE")
       entries.push({
         ...base,
         type: "symlink",
-        target: await readlink(absolutePath),
+        target,
       })
       return
     }
@@ -126,7 +183,8 @@ export async function collectAppInventory(appPath) {
   entries.sort((left, right) => compareNames(left.path, right.path))
   return {
     schemaVersion: inventorySchemaVersion,
-    digest: digestEntries(entries),
+    rootMode,
+    digest: digestInventory(rootMode, entries),
     entries,
   }
 }
@@ -136,9 +194,10 @@ function validateInventory(value) {
     typeof value !== "object" ||
     value === null ||
     value.schemaVersion !== inventorySchemaVersion ||
+    !/^[0-7]{4}$/u.test(value.rootMode) ||
     typeof value.digest !== "string" ||
     !Array.isArray(value.entries) ||
-    value.digest !== digestEntries(value.entries)
+    value.digest !== digestInventory(value.rootMode, value.entries)
   ) {
     fail("APP_INVENTORY_EXPECTED_INVALID")
   }
@@ -255,6 +314,21 @@ async function containsCredential(file) {
   return false
 }
 
+async function containsPrivatePath(file) {
+  let carry = ""
+  for await (const chunkValue of createReadStream(file, {
+    highWaterMark: 64 * 1024,
+  })) {
+    const chunk = Buffer.isBuffer(chunkValue)
+      ? chunkValue
+      : Buffer.from(chunkValue)
+    const content = `${carry}${chunk.toString("latin1")}`
+    if (containsPrivateAbsolutePath(content, privateRoots)) return true
+    carry = content.slice(-scanOverlapBytes)
+  }
+  return false
+}
+
 function forbiddenPath(relativePath) {
   const lower = relativePath.toLowerCase()
   const segments = lower.split("/")
@@ -278,12 +352,69 @@ function forbiddenPath(relativePath) {
 async function verifyForbiddenContent(appPath, inventory) {
   for (const entry of inventory.entries) {
     if (forbiddenPath(entry.path)) fail("APP_FORBIDDEN_PATH")
+    assertPathHygiene(entry.path, "APP_PRIVATE_PATH_ENTRY")
+    if (entry.type === "symlink") {
+      assertPathHygiene(entry.target, "APP_PRIVATE_PATH_SYMLINK")
+    }
     if (entry.type !== "file") continue
     const file = path.join(appPath, ...entry.path.split("/"))
-    if (await containsAnyMarker(file, privatePathMarkers)) {
-      fail("APP_PRIVATE_PATH_CONTENT")
-    }
+    if (await containsPrivatePath(file)) fail("APP_PRIVATE_PATH_CONTENT")
     if (await containsCredential(file)) fail("APP_CREDENTIAL_CONTENT")
+  }
+}
+
+async function collectLegalTree(root) {
+  const entries = []
+
+  async function visit(absolutePath, relativePath) {
+    const metadata = await lstat(absolutePath)
+    if (
+      metadata.isSymbolicLink() ||
+      (!metadata.isDirectory() && !metadata.isFile())
+    ) {
+      fail("APP_LEGAL_RESOURCES_INVALID")
+    }
+    if (metadata.isDirectory()) {
+      const children = await readdir(absolutePath)
+      children.sort(compareNames)
+      for (const child of children) {
+        await visit(
+          path.join(absolutePath, child),
+          relativePath === "" ? child : `${relativePath}/${child}`,
+        )
+      }
+      return
+    }
+    entries.push({
+      path: relativePath,
+      size: metadata.size,
+      sha256: await sha256File(absolutePath),
+    })
+  }
+
+  try {
+    await visit(root, "")
+  } catch (error) {
+    if (error instanceof MacOSReleaseError) throw error
+    fail("APP_LEGAL_RESOURCES_INVALID")
+  }
+  return entries
+}
+
+export async function verifyPackagedLegalResources(appPath) {
+  const packagedRoot = path.join(
+    appPath,
+    "Contents",
+    "Resources",
+    "resources",
+    "legal",
+  )
+  const [canonical, packaged] = await Promise.all([
+    collectLegalTree(canonicalLegalRoot),
+    collectLegalTree(packagedRoot),
+  ])
+  if (!isDeepStrictEqual(canonical, packaged)) {
+    fail("APP_LEGAL_RESOURCES_MISMATCH")
   }
 }
 
@@ -382,12 +513,14 @@ export async function verifyReleaseApp(appPath, expectedInventoryPath) {
     expectedInventoryPath === undefined
       ? await collectAppInventory(appPath)
       : await compareAppInventory(appPath, expectedInventoryPath)
+  if (inventory.rootMode !== "0755") fail("APP_ROOT_MODE_INVALID")
   const infoPath = path.join(appPath, "Contents", "Info.plist")
   const plist = parsePlist(infoPath)
   if (
     plist.CFBundleIdentifier !== expectations.bundleId ||
     plist.CFBundleDisplayName !== expectations.productName ||
     plist.CFBundleExecutable !== expectations.executable ||
+    plist.CFBundlePackageType !== "APPL" ||
     plist.CFBundleShortVersionString !== expectations.version ||
     plist.CFBundleVersion !== expectations.version ||
     plist.LSMinimumSystemVersion !== expectations.minimumSystemVersion
@@ -412,11 +545,15 @@ export async function verifyReleaseApp(appPath, expectedInventoryPath) {
   )
   if (
     !loadCommands.includes("LC_BUILD_VERSION") ||
-    !minimumPattern.test(loadCommands)
+    !/\n\s*platform (?:1|MACOS)\n/u.test(loadCommands)
   ) {
+    fail("APP_BUILD_PLATFORM_INVALID")
+  }
+  if (!minimumPattern.test(loadCommands)) {
     fail("APP_MINIMUM_SYSTEM_VERSION_INVALID")
   }
 
+  await verifyPackagedLegalResources(appPath)
   verifySignature(appPath)
   await verifyQuarantineAbsent(appPath)
   await verifyEmbeddedRuntime(executablePath)
@@ -441,6 +578,348 @@ export async function summarizeArtifact(artifactPath) {
     fail("DMG_ARTIFACT_INVALID")
   }
   return { size: metadata.size, sha256: await sha256File(artifactPath) }
+}
+
+async function hashFileHandle(handle, size, destination) {
+  const hash = createHash("sha256")
+  const buffer = Buffer.allocUnsafe(128 * 1024)
+  let position = 0
+  while (position < size) {
+    const length = Math.min(buffer.length, size - position)
+    const { bytesRead } = await handle.read(buffer, 0, length, position)
+    if (bytesRead !== length) fail("DMG_SNAPSHOT_SOURCE_CHANGED")
+    const chunk = buffer.subarray(0, bytesRead)
+    hash.update(chunk)
+    if (destination !== undefined) {
+      let written = 0
+      while (written < bytesRead) {
+        const result = await destination.write(
+          chunk,
+          written,
+          bytesRead - written,
+          position + written,
+        )
+        if (result.bytesWritten < 1) fail("DMG_SNAPSHOT_WRITE_FAILED")
+        written += result.bytesWritten
+      }
+    }
+    position += bytesRead
+  }
+  return hash.digest("hex")
+}
+
+function sameArtifactIdentity(metadata, expected) {
+  return (
+    metadata.isFile() &&
+    !metadata.isSymbolicLink() &&
+    String(metadata.dev) === expected.dev &&
+    String(metadata.ino) === expected.ino &&
+    String(metadata.size) === expected.size
+  )
+}
+
+function artifactIdentity(metadata, sha256) {
+  return {
+    dev: String(metadata.dev),
+    ino: String(metadata.ino),
+    size: String(metadata.size),
+    sha256,
+  }
+}
+
+async function openRegularArtifact(artifactPath) {
+  let before
+  try {
+    before = await lstat(artifactPath)
+  } catch {
+    fail("DMG_SNAPSHOT_SOURCE_INVALID")
+  }
+  if (!before.isFile() || before.isSymbolicLink() || before.size < 1) {
+    fail("DMG_SNAPSHOT_SOURCE_INVALID")
+  }
+  let handle
+  try {
+    handle = await open(
+      artifactPath,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+    )
+  } catch {
+    fail("DMG_SNAPSHOT_SOURCE_INVALID")
+  }
+  const opened = await handle.stat()
+  const expected = artifactIdentity(before, "")
+  if (!sameArtifactIdentity(opened, expected)) {
+    await handle.close()
+    fail("DMG_SNAPSHOT_SOURCE_CHANGED")
+  }
+  return { before, expected, handle }
+}
+
+export async function createArtifactSnapshot(
+  sourcePath,
+  snapshotPath,
+  metadataPath,
+) {
+  const { before, expected, handle } = await openRegularArtifact(sourcePath)
+  let destination
+  try {
+    const preHash = await hashFileHandle(handle, before.size)
+    destination = await open(
+      snapshotPath,
+      fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        (fsConstants.O_NOFOLLOW ?? 0),
+      0o600,
+    )
+    const copyHash = await hashFileHandle(handle, before.size, destination)
+    await destination.sync()
+    await destination.close()
+    destination = undefined
+
+    const postHash = await hashFileHandle(handle, before.size)
+    const [openedAfter, pathAfter] = await Promise.all([
+      handle.stat(),
+      lstat(sourcePath),
+    ])
+    if (
+      preHash !== copyHash ||
+      preHash !== postHash ||
+      !sameArtifactIdentity(openedAfter, expected) ||
+      !sameArtifactIdentity(pathAfter, expected)
+    ) {
+      fail("DMG_SNAPSHOT_SOURCE_CHANGED")
+    }
+
+    const metadata = {
+      schemaVersion: releaseManifestSchemaVersion,
+      ...artifactIdentity(before, preHash),
+    }
+    await writeFile(metadataPath, `${JSON.stringify(metadata)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    })
+    return { size: before.size, sha256: preHash }
+  } catch (error) {
+    await rm(snapshotPath, { force: true }).catch(() => {})
+    await rm(metadataPath, { force: true }).catch(() => {})
+    if (error instanceof MacOSReleaseError) throw error
+    fail("DMG_SNAPSHOT_FAILED")
+  } finally {
+    await destination?.close().catch(() => {})
+    await handle.close().catch(() => {})
+  }
+}
+
+async function readSnapshotMetadata(metadataPath) {
+  try {
+    const metadataFile = await lstat(metadataPath)
+    if (
+      !metadataFile.isFile() ||
+      metadataFile.isSymbolicLink() ||
+      metadataFile.size > 4096
+    ) {
+      fail("DMG_SNAPSHOT_METADATA_INVALID")
+    }
+    const value = JSON.parse(await readFile(metadataPath, "utf8"))
+    if (
+      value?.schemaVersion !== releaseManifestSchemaVersion ||
+      !/^[0-9]+$/u.test(value.dev) ||
+      !/^[0-9]+$/u.test(value.ino) ||
+      !/^[1-9][0-9]*$/u.test(value.size) ||
+      !/^[a-f0-9]{64}$/u.test(value.sha256)
+    ) {
+      fail("DMG_SNAPSHOT_METADATA_INVALID")
+    }
+    return value
+  } catch (error) {
+    if (error instanceof MacOSReleaseError) throw error
+    fail("DMG_SNAPSHOT_METADATA_INVALID")
+  }
+}
+
+export async function assertArtifactSnapshot(
+  sourcePath,
+  snapshotPath,
+  metadataPath,
+) {
+  const metadata = await readSnapshotMetadata(metadataPath)
+  const { before, expected, handle } = await openRegularArtifact(sourcePath)
+  try {
+    const sourceHash = await hashFileHandle(handle, before.size)
+    const [openedAfter, pathAfter, snapshot] = await Promise.all([
+      handle.stat(),
+      lstat(sourcePath),
+      summarizeArtifact(snapshotPath),
+    ])
+    if (
+      !sameArtifactIdentity(before, metadata) ||
+      !sameArtifactIdentity(openedAfter, expected) ||
+      !sameArtifactIdentity(pathAfter, expected) ||
+      sourceHash !== metadata.sha256 ||
+      snapshot.size !== Number(metadata.size) ||
+      snapshot.sha256 !== metadata.sha256
+    ) {
+      fail("DMG_SNAPSHOT_SOURCE_CHANGED")
+    }
+    return snapshot
+  } finally {
+    await handle.close().catch(() => {})
+  }
+}
+
+async function readInventoryDigest(inventoryPath) {
+  return (await readExpectedInventory(inventoryPath)).digest
+}
+
+function validateReleaseManifest(value) {
+  if (
+    value?.schemaVersion !== releaseManifestSchemaVersion ||
+    !["app", "dmg"].includes(value.kind) ||
+    !releaseRunIdPattern.test(value.runId) ||
+    typeof value.artifactName !== "string" ||
+    value.artifactName.length < 1 ||
+    value.artifactName.length > 127 ||
+    !/^[a-f0-9]{64}$/u.test(value.inventoryDigest) ||
+    (value.kind === "dmg" &&
+      (!Number.isSafeInteger(value.size) ||
+        value.size < 1 ||
+        !/^[a-f0-9]{64}$/u.test(value.sha256))) ||
+    (value.kind === "app" &&
+      (value.size !== undefined || value.sha256 !== undefined))
+  ) {
+    fail("RELEASE_MANIFEST_INVALID")
+  }
+  return value
+}
+
+async function readReleaseManifest(manifestPath) {
+  try {
+    const metadata = await lstat(manifestPath)
+    if (
+      !metadata.isFile() ||
+      metadata.isSymbolicLink() ||
+      metadata.size > 16 * 1024
+    ) {
+      fail("RELEASE_MANIFEST_INVALID")
+    }
+    return validateReleaseManifest(
+      JSON.parse(await readFile(manifestPath, "utf8")),
+    )
+  } catch (error) {
+    if (error instanceof MacOSReleaseError) throw error
+    fail("RELEASE_MANIFEST_INVALID")
+  }
+}
+
+export async function createReleaseManifest({
+  artifactPath,
+  inventoryPath,
+  kind,
+  manifestPath,
+  runId,
+}) {
+  if (!["app", "dmg"].includes(kind) || !releaseRunIdPattern.test(runId)) {
+    fail("RELEASE_MANIFEST_ARGUMENT_INVALID")
+  }
+  const manifest = {
+    schemaVersion: releaseManifestSchemaVersion,
+    kind,
+    runId,
+    artifactName: path.basename(artifactPath),
+    inventoryDigest: await readInventoryDigest(inventoryPath),
+  }
+  if (kind === "dmg")
+    Object.assign(manifest, await summarizeArtifact(artifactPath))
+  try {
+    await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    })
+  } catch {
+    fail("RELEASE_MANIFEST_WRITE_FAILED")
+  }
+  return manifest
+}
+
+export async function verifyReleaseManifest({
+  artifactPath,
+  inventoryPath,
+  kind,
+  manifestPath,
+  runId,
+}) {
+  const manifest = await readReleaseManifest(manifestPath)
+  if (
+    manifest.kind !== kind ||
+    manifest.artifactName !== path.basename(artifactPath) ||
+    manifest.inventoryDigest !== (await readInventoryDigest(inventoryPath)) ||
+    (runId !== undefined && manifest.runId !== runId)
+  ) {
+    fail("RELEASE_MANIFEST_MISMATCH")
+  }
+  if (kind === "dmg") {
+    const summary = await summarizeArtifact(artifactPath)
+    if (manifest.size !== summary.size || manifest.sha256 !== summary.sha256) {
+      fail("RELEASE_MANIFEST_MISMATCH")
+    }
+  }
+  return manifest
+}
+
+function plistEntities(value) {
+  const attached = value?.["system-entities"]
+  if (Array.isArray(attached)) return attached
+  const images = value?.images
+  if (!Array.isArray(images)) fail("DMG_ATTACH_PLIST_INVALID")
+  const entities = []
+  for (const image of images) {
+    if (!Array.isArray(image?.["system-entities"])) {
+      fail("DMG_ATTACH_PLIST_INVALID")
+    }
+    entities.push(...image["system-entities"])
+  }
+  return entities
+}
+
+function parsePlistFile(plistPath) {
+  return plistEntities(parsePlist(plistPath))
+}
+
+function deviceForMount(entities, mountPath) {
+  const matches = entities.filter(
+    (entity) => entity?.["mount-point"] === mountPath,
+  )
+  if (matches.length !== 1) fail("DMG_MOUNT_IDENTITY_INVALID")
+  const device = matches[0]?.["dev-entry"]
+  if (!/^\/dev\/disk[0-9]+s[0-9]+$/u.test(device)) {
+    fail("DMG_MOUNT_IDENTITY_INVALID")
+  }
+  return device
+}
+
+export function attachedDeviceFromPlist(plistPath, mountPath) {
+  return deviceForMount(parsePlistFile(plistPath), mountPath)
+}
+
+export function assertMountAbsentFromPlist(plistPath, mountPath, device) {
+  if (!/^\/dev\/disk[0-9]+s[0-9]+$/u.test(device)) {
+    fail("DMG_MOUNT_IDENTITY_INVALID")
+  }
+  const present = parsePlistFile(plistPath).some(
+    (entity) =>
+      entity?.["mount-point"] === mountPath || entity?.["dev-entry"] === device,
+  )
+  if (present) fail("DMG_MOUNT_STILL_PRESENT")
+}
+
+export function assertMountPathAbsentFromPlist(plistPath, mountPath) {
+  const present = parsePlistFile(plistPath).some(
+    (entity) => entity?.["mount-point"] === mountPath,
+  )
+  if (present) fail("DMG_MOUNT_STILL_PRESENT")
 }
 
 function parsePairs(args, allowed) {
@@ -508,6 +987,114 @@ async function main(argv) {
     process.stdout.write(
       `[release] final DMG size=${String(summary.size)} sha256=${summary.sha256}\n`,
     )
+    return
+  }
+  if (command === "snapshot-create") {
+    const values = parsePairs(args, ["--source", "--snapshot", "--metadata"])
+    if (values.size !== 3) fail("APP_RELEASE_ARGUMENT_INVALID")
+    const summary = await createArtifactSnapshot(
+      values.get("--source"),
+      values.get("--snapshot"),
+      values.get("--metadata"),
+    )
+    process.stdout.write(
+      `[release] DMG snapshot captured size=${String(summary.size)} sha256=${summary.sha256}\n`,
+    )
+    return
+  }
+  if (command === "snapshot-assert") {
+    const values = parsePairs(args, ["--source", "--snapshot", "--metadata"])
+    if (values.size !== 3) fail("APP_RELEASE_ARGUMENT_INVALID")
+    const summary = await assertArtifactSnapshot(
+      values.get("--source"),
+      values.get("--snapshot"),
+      values.get("--metadata"),
+    )
+    process.stdout.write(
+      `[release] DMG snapshot unchanged size=${String(summary.size)} sha256=${summary.sha256}\n`,
+    )
+    return
+  }
+  if (command === "manifest-create") {
+    const values = parsePairs(args, [
+      "--kind",
+      "--run-id",
+      "--artifact",
+      "--inventory",
+      "--output",
+    ])
+    if (values.size !== 5) fail("APP_RELEASE_ARGUMENT_INVALID")
+    const manifest = await createReleaseManifest({
+      artifactPath: values.get("--artifact"),
+      inventoryPath: values.get("--inventory"),
+      kind: values.get("--kind"),
+      manifestPath: values.get("--output"),
+      runId: values.get("--run-id"),
+    })
+    process.stdout.write(
+      `[release] ${manifest.kind} manifest created run=${manifest.runId}\n`,
+    )
+    return
+  }
+  if (command === "manifest-verify") {
+    const values = parsePairs(args, [
+      "--kind",
+      "--run-id",
+      "--artifact",
+      "--inventory",
+      "--manifest",
+    ])
+    if (
+      !values.has("--kind") ||
+      !values.has("--artifact") ||
+      !values.has("--inventory") ||
+      !values.has("--manifest") ||
+      values.size < 4
+    ) {
+      fail("APP_RELEASE_ARGUMENT_INVALID")
+    }
+    const manifest = await verifyReleaseManifest({
+      artifactPath: values.get("--artifact"),
+      inventoryPath: values.get("--inventory"),
+      kind: values.get("--kind"),
+      manifestPath: values.get("--manifest"),
+      runId: values.get("--run-id"),
+    })
+    process.stdout.write(
+      `[release] ${manifest.kind} manifest verified run=${manifest.runId}\n`,
+    )
+    return
+  }
+  if (command === "manifest-run-id") {
+    const values = parsePairs(args, ["--manifest"])
+    if (values.size !== 1) fail("APP_RELEASE_ARGUMENT_INVALID")
+    process.stdout.write(
+      `${(await readReleaseManifest(values.get("--manifest"))).runId}\n`,
+    )
+    return
+  }
+  if (command === "attached-device") {
+    const values = parsePairs(args, ["--plist", "--mount"])
+    if (values.size !== 2) fail("APP_RELEASE_ARGUMENT_INVALID")
+    process.stdout.write(
+      `${attachedDeviceFromPlist(values.get("--plist"), values.get("--mount"))}\n`,
+    )
+    return
+  }
+  if (command === "assert-mount-absent") {
+    const values = parsePairs(args, ["--plist", "--mount", "--device"])
+    if (values.size !== 3) fail("APP_RELEASE_ARGUMENT_INVALID")
+    assertMountAbsentFromPlist(
+      values.get("--plist"),
+      values.get("--mount"),
+      values.get("--device"),
+    )
+    return
+  }
+  if (command === "assert-mount-path-absent") {
+    const values = parsePairs(args, ["--plist", "--mount"])
+    if (values.size !== 2) fail("APP_RELEASE_ARGUMENT_INVALID")
+    assertMountPathAbsentFromPlist(values.get("--plist"), values.get("--mount"))
     return
   }
   fail("APP_RELEASE_ARGUMENT_INVALID")

@@ -2,13 +2,13 @@ import assert from "node:assert/strict"
 import { execFileSync, spawn, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
-  chmod,
+  appendFile,
   lstat,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
-  readlink,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -19,96 +19,38 @@ import test from "node:test"
 import { setTimeout as wait } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 
-const scriptPath = fileURLToPath(
+import { createProductFixture } from "./macos-release-fixture.mjs"
+
+const buildDmgScript = fileURLToPath(
   new URL("./build-macos-dmg.sh", import.meta.url),
 )
+const verifyScript = fileURLToPath(
+  new URL("./verify-macos-release.sh", import.meta.url),
+)
+const buildAppScript = fileURLToPath(
+  new URL("./build-macos-app.sh", import.meta.url),
+)
+const runReleaseScript = fileURLToPath(
+  new URL("./run-macos-release.sh", import.meta.url),
+)
+const commonScript = fileURLToPath(
+  new URL("./macos-release-common.sh", import.meta.url),
+)
 const isMacOS = process.platform === "darwin"
+const lockPath = "/private/tmp/coding-wife-macos-release.lock"
+const workPrefixes = [
+  ".coding-wife-app-build.",
+  ".coding-wife-dmg-work.",
+  ".coding-wife-release-verify.",
+  ".coding-wife-sign-work.",
+]
 
-function runScript(args, cwd, extraEnv = {}) {
-  return spawnSync("/bin/bash", [scriptPath, ...args], {
+function runScript(script, args, cwd, extraEnv = {}) {
+  return spawnSync("/bin/bash", [script, ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, ...extraEnv, LC_ALL: "C" },
   })
-}
-
-async function waitForMountedWorkDirectory(outputDirectory) {
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline) {
-    const entries = await readdir(outputDirectory).catch(() => [])
-    for (const entry of entries) {
-      if (!entry.startsWith(".coding-wife-dmg-work.")) continue
-      const hookReady = path.join(outputDirectory, entry, "test-hook-ready")
-      try {
-        if ((await lstat(hookReady)).isFile()) {
-          return path.join(outputDirectory, entry)
-        }
-      } catch {
-        // The image has not reached the mounted test hook yet.
-      }
-    }
-    await wait(25)
-  }
-  throw new Error("release script did not reach its mounted test hook")
-}
-
-async function runInterruptedScript(args, cwd, outputDirectory, signal) {
-  const child = spawn("/bin/bash", [scriptPath, ...args], {
-    cwd,
-    detached: true,
-    env: {
-      ...process.env,
-      CODING_WIFE_RELEASE_TEST_WAIT: "after-attach",
-      LC_ALL: "C",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  })
-  let stdout = ""
-  let stderr = ""
-  child.stdout.setEncoding("utf8")
-  child.stderr.setEncoding("utf8")
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk
-  })
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk
-  })
-  const workDirectory = await waitForMountedWorkDirectory(outputDirectory)
-  process.kill(-child.pid, signal)
-  const result = await new Promise((resolve) => {
-    child.once("close", (code, exitSignal) =>
-      resolve({ code, signal: exitSignal, stderr, stdout, workDirectory }),
-    )
-  })
-  return result
-}
-
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex")
-}
-
-async function createSyntheticApp(root, name = "Tiny App.app") {
-  const appPath = path.join(root, name)
-  const executablePath = path.join(appPath, "Contents", "MacOS", "tiny-app")
-  await mkdir(path.dirname(executablePath), { recursive: true })
-  await writeFile(
-    path.join(appPath, "Contents", "Info.plist"),
-    [
-      '<?xml version="1.0" encoding="UTF-8"?>',
-      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
-      '<plist version="1.0"><dict>',
-      "<key>CFBundleExecutable</key><string>tiny-app</string>",
-      "<key>CFBundleIdentifier</key><string>app.codingwife.release-test</string>",
-      "<key>CFBundleName</key><string>Tiny App</string>",
-      "<key>CFBundlePackageType</key><string>APPL</string>",
-      "<key>CFBundleVersion</key><string>1</string>",
-      "</dict></plist>",
-      "",
-    ].join("\n"),
-  )
-  await writeFile(executablePath, "#!/bin/sh\nexit 0\n")
-  await chmod(executablePath, 0o755)
-  return appPath
 }
 
 function releaseArgs(appPath, outputPath, extra = []) {
@@ -123,287 +65,564 @@ function releaseArgs(appPath, outputPath, extra = []) {
   ]
 }
 
+function verifyArgs(appPath, outputPath) {
+  return ["--app", appPath, "--dmg", outputPath]
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex")
+}
+
 function assertPrivatePathsAreRedacted(result, privateValues) {
   const output = `${result.stdout}${result.stderr}`
-  for (const value of privateValues) {
-    assert.equal(output.includes(value), false)
-  }
+  for (const value of privateValues) assert.equal(output.includes(value), false)
 }
 
-function cleanupMountedImagesUnder(root) {
+async function temporaryDirectory(t, prefix) {
+  const root = await mkdtemp(path.join(os.tmpdir(), prefix))
+  t.after(async () => {
+    cleanupReleaseMounts()
+    await rm(root, { force: true, recursive: true })
+  })
+  return root
+}
+
+function cleanupReleaseMounts() {
   const info = spawnSync("/usr/bin/hdiutil", ["info"], { encoding: "utf8" })
   if (info.status !== 0) return
+  let currentDevice = ""
   for (const line of info.stdout.split("\n")) {
-    if (!line.includes(root) || !line.startsWith("/dev/disk")) continue
-    const [device] = line.trim().split(/\s+/)
-    if (!/^\/dev\/disk[0-9]+s[0-9]+$/.test(device ?? "")) continue
-    spawnSync("/usr/bin/hdiutil", ["detach", "-quiet", "-force", device], {
-      encoding: "utf8",
-    })
+    const device = line.match(/^\/dev\/disk[0-9]+s[0-9]+/u)?.[0]
+    if (device !== undefined) currentDevice = device
+    if (!line.includes(".coding-wife-") || currentDevice === "") continue
+    spawnSync(
+      "/usr/bin/hdiutil",
+      ["detach", "-quiet", "-force", currentDevice],
+      { encoding: "utf8" },
+    )
   }
 }
 
-test("release shell passes bash syntax validation and does not invoke GUI automation", async () => {
-  execFileSync("/bin/bash", ["-n", scriptPath])
-  const source = await readFile(scriptPath, "utf8")
-  assert.equal(source.includes("osascript"), false)
-  assert.equal(source.includes("Finder"), false)
-  assert.equal(source.includes("open -a"), false)
-  assert.match(source, /set -euo pipefail/)
-  assert.match(source, /hdiutil attach/)
-  assert.match(source, /-readonly/)
-  assert.match(source, /-format UDZO/)
-  assert.match(source, /hdiutil verify/)
-})
-
-test("release shell rejects incomplete and duplicate arguments without printing private paths", async (context) => {
-  if (!isMacOS) {
-    context.skip("macOS hdiutil smoke only runs on macOS")
-    return
-  }
-
-  const root = await mkdtemp(
-    path.join(os.tmpdir(), "coding-wife-release-secret-"),
+async function releaseWorkEntries() {
+  const entries = await readdir("/private/tmp")
+  return entries.filter(
+    (entry) =>
+      entry === path.basename(lockPath) ||
+      workPrefixes.some((prefix) => entry.startsWith(prefix)),
   )
-  try {
-    const appPath = await createSyntheticApp(root)
-    const outputPath = path.join(root, "private-output.dmg")
-    const cases = [
-      [],
-      ["--unknown"],
-      [
-        "--app",
-        appPath,
-        "--app",
-        appPath,
-        "--output",
-        outputPath,
-        "--volume-name",
-        "Test",
-      ],
-      ["--app", appPath, "--output", outputPath, "--volume-name", "bad/name"],
-    ]
+}
 
-    for (const args of cases) {
-      const result = runScript(args, root)
-      assert.notEqual(result.status, 0)
-      assertPrivatePathsAreRedacted(result, [root, appPath, outputPath])
-    }
-  } finally {
-    cleanupMountedImagesUnder(root)
-    await rm(root, { recursive: true, force: true })
-  }
-})
-
-test("release shell creates, validates, overwrites, and cleans a real read-only DMG", async (context) => {
-  if (!isMacOS) {
-    context.skip("macOS hdiutil smoke only runs on macOS")
-    return
-  }
-
-  const root = await mkdtemp(
-    path.join(os.tmpdir(), "coding-wife-release-smoke-"),
-  )
-  const mountPath = path.join(root, "external-mount")
-  let mounted = false
-
-  try {
-    const appPath = await createSyntheticApp(root)
-    const outputDir = path.join(root, "artifacts")
-    const outputPath = path.join(outputDir, "Coding-Wife-Test.dmg")
-
-    const created = runScript(releaseArgs(appPath, outputPath), root)
-    assert.equal(created.status, 0, created.stderr)
-    assert.equal(created.stdout.trim(), "macOS DMG created and verified.")
-    assertPrivatePathsAreRedacted(created, [root, appPath, outputPath])
-
-    const firstBytes = await readFile(outputPath)
-    const firstHash = sha256(firstBytes)
-    assert.ok(firstBytes.byteLength > 0)
-
-    const refused = runScript(releaseArgs(appPath, outputPath), root)
-    assert.notEqual(refused.status, 0)
-    assert.equal(sha256(await readFile(outputPath)), firstHash)
-    assertPrivatePathsAreRedacted(refused, [root, appPath, outputPath])
-
-    const overwritten = runScript(
-      releaseArgs(appPath, outputPath, ["--overwrite"]),
-      root,
-    )
-    assert.equal(overwritten.status, 0, overwritten.stderr)
-    assert.ok((await readFile(outputPath)).byteLength > 0)
-
-    await mkdir(mountPath)
-    const attached = spawnSync(
-      "/usr/bin/hdiutil",
-      [
-        "attach",
-        "-quiet",
-        "-readonly",
-        "-nobrowse",
-        "-noautoopen",
-        "-mountpoint",
-        mountPath,
-        outputPath,
-      ],
-      { encoding: "utf8" },
-    )
-    assert.equal(attached.status, 0, attached.stderr)
-    mounted = true
-
-    assert.deepEqual((await readdir(mountPath)).sort(), [
-      "Applications",
-      "Tiny App.app",
-    ])
-    assert.equal(
-      (await lstat(path.join(mountPath, "Applications"))).isSymbolicLink(),
-      true,
-    )
-    assert.equal(
-      await readlink(path.join(mountPath, "Applications")),
-      "/Applications",
-    )
-    assert.equal(
-      (
-        await lstat(
-          path.join(mountPath, "Tiny App.app", "Contents", "Info.plist"),
-        )
-      ).isFile(),
-      true,
-    )
-    await assert.rejects(
-      writeFile(path.join(mountPath, ".write-probe"), "blocked"),
-    )
-
-    const detached = spawnSync(
-      "/usr/bin/hdiutil",
-      ["detach", "-quiet", mountPath],
-      {
-        encoding: "utf8",
-      },
-    )
-    assert.equal(detached.status, 0, detached.stderr)
-    mounted = false
-
-    const leftovers = (await readdir(outputDir)).filter(
+async function assertReleaseCleanup(root) {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    const info = spawnSync("/usr/bin/hdiutil", ["info"], { encoding: "utf8" })
+    const work = await releaseWorkEntries()
+    const local = (await readdir(root).catch(() => [])).filter(
       (entry) =>
-        entry.startsWith(".coding-wife-dmg-") ||
-        entry !== "Coding-Wife-Test.dmg",
+        entry.startsWith(".coding-wife-dmg-ready.") ||
+        entry.startsWith(".coding-wife-dmg-backup.") ||
+        entry.startsWith(".coding-wife-app-ready.") ||
+        entry.startsWith(".coding-wife-app-backup."),
     )
-    assert.deepEqual(leftovers, [])
-  } finally {
-    if (mounted) {
-      spawnSync("/usr/bin/hdiutil", ["detach", "-quiet", "-force", mountPath], {
-        encoding: "utf8",
-      })
+    if (
+      info.status === 0 &&
+      !info.stdout.includes(".coding-wife-") &&
+      work.length === 0 &&
+      local.length === 0
+    ) {
+      return
     }
-    await rm(root, { recursive: true, force: true })
+    await wait(50)
   }
+  assert.deepEqual(await releaseWorkEntries(), [])
+  assert.equal(
+    spawnSync("/usr/bin/hdiutil", ["info"], {
+      encoding: "utf8",
+    }).stdout.includes(".coding-wife-"),
+    false,
+  )
+}
+
+async function waitForWorkHook(prefix) {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    const entries = await readdir("/private/tmp")
+    for (const entry of entries) {
+      if (!entry.startsWith(prefix)) continue
+      const work = path.join("/private/tmp", entry)
+      try {
+        if ((await lstat(path.join(work, "test-hook-ready"))).isFile()) {
+          return work
+        }
+      } catch {
+        // The release process has not reached the requested hook.
+      }
+    }
+    await wait(25)
+  }
+  throw new Error("RELEASE_TEST_HOOK_TIMEOUT")
+}
+
+function spawnCaptured(script, args, cwd, extraEnv = {}) {
+  const child = spawn("/bin/bash", [script, ...args], {
+    cwd,
+    detached: true,
+    env: { ...process.env, ...extraEnv, LC_ALL: "C" },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  let stdout = ""
+  let stderr = ""
+  child.stdout.setEncoding("utf8")
+  child.stderr.setEncoding("utf8")
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk
+  })
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk
+  })
+  const closed = new Promise((resolve) => {
+    child.once("close", (code, signal) =>
+      resolve({ code, signal, stderr, stdout }),
+    )
+  })
+  return { child, closed }
+}
+
+async function interruptAtHook({ args, cwd, env, prefix, script, signal }) {
+  const { child, closed } = spawnCaptured(script, args, cwd, env)
+  const work = await waitForWorkHook(prefix)
+  process.kill(-child.pid, signal)
+  return { ...(await closed), work }
+}
+
+async function continueAfterMutation({ args, cwd, mutate }) {
+  const { child, closed } = spawnCaptured(verifyScript, args, cwd, {
+    CODING_WIFE_RELEASE_TEST_WAIT: "verify-after-snapshot",
+  })
+  const work = await waitForWorkHook(".coding-wife-release-verify.")
+  try {
+    await mutate(work)
+    await writeFile(path.join(work, "test-hook-continue"), "continue\n")
+  } catch (error) {
+    process.kill(-child.pid, "SIGTERM")
+    await closed
+    throw error
+  }
+  return closed
+}
+
+test("release shell entry points use one plist-based lock and avoid GUI or pipe probes", async () => {
+  for (const script of [
+    buildDmgScript,
+    verifyScript,
+    buildAppScript,
+    runReleaseScript,
+    commonScript,
+  ]) {
+    execFileSync("/bin/bash", ["-n", script])
+  }
+  const sources = await Promise.all(
+    [
+      buildDmgScript,
+      verifyScript,
+      buildAppScript,
+      runReleaseScript,
+      commonScript,
+    ].map((script) => readFile(script, "utf8")),
+  )
+  const combined = sources.join("\n")
+  assert.equal(combined.includes("osascript"), false)
+  assert.equal(combined.includes("open -a"), false)
+  assert.equal(combined.includes("df -P"), false)
+  assert.equal(combined.includes("grep -Fq"), false)
+  assert.match(combined, /hdiutil attach -plist/u)
+  assert.match(combined, /assert-mount-absent/u)
+  assert.match(combined, /coding-wife-macos-release\.lock/u)
+  assert.match(sources[0], /verify_candidate_mount 1/u)
+  assert.match(sources[0], /verify_candidate_mount 2/u)
+  assert.match(sources[1], /snapshot-create/u)
+  assert.match(sources[1], /snapshot-assert/u)
+  assert.match(sources[2], /CARGO_TARGET_DIR/u)
+  assert.match(sources[2], /dependency-notices\.mjs --check/u)
+  assert.match(sources[2], /APP_BUILD_READY_VERIFY_FAILED/u)
+  assert.match(sources[2], /manifest-create/u)
+  assert.match(sources[2], /APP_BUILD_PUBLISH_FAILED/u)
 })
 
-test("release shell rejects invalid bundles and symlink outputs without replacement", async (context) => {
+test("DMG builder rejects invalid, incomplete, unsigned, and symlink inputs without publishing", async (t) => {
   if (!isMacOS) {
-    context.skip("macOS hdiutil smoke only runs on macOS")
+    t.skip("macOS release integration only runs on macOS")
     return
   }
+  const root = await temporaryDirectory(t, "coding-wife-release-invalid-")
+  await assertReleaseCleanup(root)
 
-  const root = await mkdtemp(
-    path.join(os.tmpdir(), "coding-wife-release-failure-"),
-  )
-  try {
-    const brokenApp = path.join(root, "Broken App.app")
-    await mkdir(path.join(brokenApp, "Contents"), { recursive: true })
-    const outputPath = path.join(root, "broken.dmg")
-
-    const broken = runScript(releaseArgs(brokenApp, outputPath), root)
-    assert.notEqual(broken.status, 0)
-    await assert.rejects(lstat(outputPath))
-    assertPrivatePathsAreRedacted(broken, [root, brokenApp, outputPath])
-
-    const validApp = await createSyntheticApp(root, "Valid App.app")
-    const protectedTarget = path.join(root, "protected-target")
-    const linkedOutput = path.join(root, "linked.dmg")
-    await writeFile(protectedTarget, "preserve-me")
-    await symlink(protectedTarget, linkedOutput)
-
-    const linked = runScript(
-      releaseArgs(validApp, linkedOutput, ["--overwrite"]),
-      root,
-    )
-    assert.notEqual(linked.status, 0)
-    assert.equal(await readFile(protectedTarget, "utf8"), "preserve-me")
-    assert.equal((await lstat(linkedOutput)).isSymbolicLink(), true)
-    assertPrivatePathsAreRedacted(linked, [
-      root,
-      validApp,
-      linkedOutput,
-      protectedTarget,
-    ])
-
-    const leftovers = (await readdir(root)).filter((entry) =>
-      entry.startsWith(".coding-wife-dmg-"),
-    )
-    assert.deepEqual(leftovers, [])
-  } finally {
-    await rm(root, { recursive: true, force: true })
+  const secretOutput = path.join(root, "secret.dmg")
+  const invalidCases = [
+    [],
+    ["--unknown"],
+    [
+      "--app",
+      path.join(root, "missing.app"),
+      "--app",
+      path.join(root, "missing.app"),
+      "--output",
+      secretOutput,
+      "--volume-name",
+      "Test",
+    ],
+  ]
+  for (const args of invalidCases) {
+    const result = runScript(buildDmgScript, args, root)
+    assert.notEqual(result.status, 0)
+    assertPrivatePathsAreRedacted(result, [root, secretOutput])
   }
+
+  const incomplete = path.join(root, "Incomplete.app")
+  await mkdir(path.join(incomplete, "Contents"), { recursive: true })
+  const incompleteResult = runScript(
+    buildDmgScript,
+    releaseArgs(incomplete, secretOutput),
+    root,
+  )
+  assert.notEqual(incompleteResult.status, 0)
+  await assert.rejects(lstat(secretOutput))
+
+  const fixture = await createProductFixture(root)
+  execFileSync("/usr/bin/codesign", ["--remove-signature", fixture.appPath])
+  const unsignedOutput = path.join(root, "unsigned.dmg")
+  const unsigned = runScript(
+    buildDmgScript,
+    releaseArgs(fixture.appPath, unsignedOutput),
+    root,
+  )
+  assert.notEqual(unsigned.status, 0)
+  await assert.rejects(lstat(unsignedOutput))
+  await assert.rejects(lstat(`${unsignedOutput}.release.json`))
+  assertPrivatePathsAreRedacted(unsigned, [
+    root,
+    fixture.appPath,
+    unsignedOutput,
+  ])
+
+  const linkedOutput = path.join(root, "linked.dmg")
+  const protectedTarget = path.join(root, "protected")
+  await writeFile(protectedTarget, "preserve")
+  await symlink(protectedTarget, linkedOutput)
+  const linked = runScript(
+    buildDmgScript,
+    releaseArgs(fixture.appPath, linkedOutput, ["--overwrite"]),
+    root,
+  )
+  assert.notEqual(linked.status, 0)
+  assert.equal(await readFile(protectedTarget, "utf8"), "preserve")
+  assert.equal((await lstat(linkedOutput)).isSymbolicLink(), true)
+  await assertReleaseCleanup(root)
 })
 
-test("release shell removes mounts and work directories after failure, INT, and TERM", async (context) => {
+test("DMG builder and canonical verifier publish matching run manifests after real mounts", async (t) => {
   if (!isMacOS) {
-    context.skip("macOS hdiutil fault cleanup only runs on macOS")
+    t.skip("macOS release integration only runs on macOS")
     return
   }
+  const root = await temporaryDirectory(t, "coding-wife-release-smoke-")
+  await assertReleaseCleanup(root)
+  const fixture = await createProductFixture(root)
+  const output = path.join(root, "Coding-Wife.dmg")
 
-  const root = await mkdtemp(
-    path.join(os.tmpdir(), "coding-wife-release-cleanup-"),
+  const built = runScript(
+    buildDmgScript,
+    releaseArgs(fixture.appPath, output),
+    root,
   )
-  try {
-    const appPath = await createSyntheticApp(root)
-    const outputDirectory = path.join(root, "artifacts")
-    await mkdir(outputDirectory)
+  assert.equal(built.status, 0, built.stderr)
+  assert.match(
+    built.stdout,
+    /^\[release\] macOS DMG created and verified run=[0-9a-f-]{36}\.\n$/iu,
+  )
+  assertPrivatePathsAreRedacted(built, [root, fixture.appPath, output])
 
-    const failedOutput = path.join(outputDirectory, "failed.dmg")
-    const failed = runScript(releaseArgs(appPath, failedOutput), root, {
-      CODING_WIFE_RELEASE_TEST_FAULT: "after-attach",
-    })
+  const appManifest = JSON.parse(await readFile(fixture.manifestPath, "utf8"))
+  const dmgManifest = JSON.parse(
+    await readFile(`${output}.release.json`, "utf8"),
+  )
+  assert.equal(dmgManifest.runId, appManifest.runId)
+  assert.equal(dmgManifest.sha256, sha256(await readFile(output)))
+  assert.equal(
+    spawnSync("/usr/bin/hdiutil", ["verify", "-quiet", output]).status,
+    0,
+  )
+
+  const verified = runScript(
+    verifyScript,
+    verifyArgs(fixture.appPath, output),
+    root,
+  )
+  assert.equal(verified.status, 0, verified.stderr)
+  assert.match(
+    verified.stdout,
+    /^\[release\] final DMG size=[1-9][0-9]* sha256=[a-f0-9]{64}\n\[release\] macOS app and independent read-only DMG snapshot verified run=[0-9a-f-]{36}\.\n$/iu,
+  )
+  assertPrivatePathsAreRedacted(verified, [root, fixture.appPath, output])
+
+  const originalDmgManifest = await readFile(`${output}.release.json`, "utf8")
+  const mismatchedManifest = {
+    ...JSON.parse(originalDmgManifest),
+    runId: "11111111-1111-4111-8111-111111111111",
+  }
+  await writeFile(
+    `${output}.release.json`,
+    `${JSON.stringify(mismatchedManifest)}\n`,
+  )
+  const mismatched = runScript(
+    verifyScript,
+    verifyArgs(fixture.appPath, output),
+    root,
+  )
+  assert.notEqual(mismatched.status, 0)
+  assert.equal(mismatched.stdout.includes("final DMG size="), false)
+  await writeFile(`${output}.release.json`, originalDmgManifest)
+
+  const overwritten = runScript(
+    buildDmgScript,
+    releaseArgs(fixture.appPath, output, ["--overwrite"]),
+    root,
+  )
+  assert.equal(overwritten.status, 0, overwritten.stderr)
+  await assertReleaseCleanup(root)
+})
+
+test("DMG publish failures leave no new artifact and preserve an older run exactly", async (t) => {
+  if (!isMacOS) {
+    t.skip("macOS release integration only runs on macOS")
+    return
+  }
+  const root = await temporaryDirectory(t, "coding-wife-release-atomic-")
+  await assertReleaseCleanup(root)
+  const fixture = await createProductFixture(root)
+  const output = path.join(root, "Coding-Wife.dmg")
+  assert.equal(
+    runScript(buildDmgScript, releaseArgs(fixture.appPath, output), root)
+      .status,
+    0,
+  )
+  const oldBytes = await readFile(output)
+  const oldManifest = await readFile(`${output}.release.json`)
+
+  const failedOverwrite = runScript(
+    buildDmgScript,
+    releaseArgs(fixture.appPath, output, ["--overwrite"]),
+    root,
+    { CODING_WIFE_RELEASE_TEST_FAULT: "dmg-after-verified" },
+  )
+  assert.notEqual(failedOverwrite.status, 0)
+  assert.equal(sha256(await readFile(output)), sha256(oldBytes))
+  assert.deepEqual(await readFile(`${output}.release.json`), oldManifest)
+
+  const newOutput = path.join(root, "never-published.dmg")
+  const failedNew = runScript(
+    buildDmgScript,
+    releaseArgs(fixture.appPath, newOutput),
+    root,
+    { CODING_WIFE_RELEASE_TEST_FAULT: "dmg-after-verified" },
+  )
+  assert.notEqual(failedNew.status, 0)
+  await assert.rejects(lstat(newOutput))
+  await assert.rejects(lstat(`${newOutput}.release.json`))
+  await assertReleaseCleanup(root)
+})
+
+test("DMG builder repeatedly cleans failure, INT, and TERM after exact-device attach", async (t) => {
+  if (!isMacOS) {
+    t.skip("macOS signal integration only runs on macOS")
+    return
+  }
+  const root = await temporaryDirectory(t, "coding-wife-release-build-signals-")
+  await assertReleaseCleanup(root)
+  const fixture = await createProductFixture(root)
+
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    const failedOutput = path.join(root, `failed-${String(cycle)}.dmg`)
+    const failed = runScript(
+      buildDmgScript,
+      releaseArgs(fixture.appPath, failedOutput),
+      root,
+      { CODING_WIFE_RELEASE_TEST_FAULT: "dmg-after-attach" },
+    )
     assert.notEqual(failed.status, 0)
     await assert.rejects(lstat(failedOutput))
-    assertPrivatePathsAreRedacted(failed, [root, appPath, failedOutput])
-    assert.deepEqual(
-      (await readdir(outputDirectory)).filter((entry) =>
-        entry.startsWith(".coding-wife-dmg-"),
-      ),
-      [],
-    )
+    await assert.rejects(lstat(`${failedOutput}.release.json`))
+    await assertReleaseCleanup(root)
 
     for (const [signal, expectedCode] of [
       ["SIGINT", 130],
       ["SIGTERM", 143],
     ]) {
-      const outputPath = path.join(outputDirectory, `${signal}.dmg`)
-      const interrupted = await runInterruptedScript(
-        releaseArgs(appPath, outputPath),
-        root,
-        outputDirectory,
+      const output = path.join(root, `${signal}-${String(cycle)}.dmg`)
+      const interrupted = await interruptAtHook({
+        args: releaseArgs(fixture.appPath, output),
+        cwd: root,
+        env: { CODING_WIFE_RELEASE_TEST_WAIT: "dmg-after-attach" },
+        prefix: ".coding-wife-dmg-work.",
+        script: buildDmgScript,
         signal,
-      )
+      })
       assert.equal(interrupted.code, expectedCode, interrupted.stderr)
       assert.equal(interrupted.signal, null)
-      assert.equal(interrupted.stdout.includes(root), false)
-      assert.equal(interrupted.stderr.includes(root), false)
-      await assert.rejects(lstat(outputPath))
-      await assert.rejects(lstat(interrupted.workDirectory))
-      const imageInfo = spawnSync("/usr/bin/hdiutil", ["info"], {
-        encoding: "utf8",
-      })
-      assert.equal(imageInfo.status, 0, imageInfo.stderr)
-      assert.equal(imageInfo.stdout.includes(interrupted.workDirectory), false)
+      assertPrivatePathsAreRedacted(interrupted, [
+        root,
+        fixture.appPath,
+        output,
+      ])
+      await assert.rejects(lstat(output))
+      await assert.rejects(lstat(`${output}.release.json`))
+      await assert.rejects(lstat(interrupted.work))
+      await assertReleaseCleanup(root)
     }
-
-    assert.deepEqual(await readdir(outputDirectory), [])
-  } finally {
-    cleanupMountedImagesUnder(root)
-    await rm(root, { recursive: true, force: true })
   }
+})
+
+test("host-global lock returns bounded owner diagnostics and serializes hdiutil", async (t) => {
+  if (!isMacOS) {
+    t.skip("macOS lock integration only runs on macOS")
+    return
+  }
+  const root = await temporaryDirectory(t, "coding-wife-release-lock-")
+  await assertReleaseCleanup(root)
+  const fixture = await createProductFixture(root)
+  const heldOutput = path.join(root, "held.dmg")
+  const holder = spawnCaptured(
+    buildDmgScript,
+    releaseArgs(fixture.appPath, heldOutput),
+    root,
+    { CODING_WIFE_RELEASE_TEST_WAIT: "dmg-after-attach" },
+  )
+  await waitForWorkHook(".coding-wife-dmg-work.")
+
+  const contenderOutput = path.join(root, "contender.dmg")
+  const contender = runScript(
+    buildDmgScript,
+    releaseArgs(fixture.appPath, contenderOutput),
+    root,
+    { CODING_WIFE_RELEASE_TEST_LOCK_ATTEMPTS: "3" },
+  )
+  assert.notEqual(contender.status, 0)
+  assert.match(
+    contender.stderr,
+    /RELEASE_LOCK_BUSY owner_pid=[0-9]+ run=[0-9A-Fa-f-]{36}/u,
+  )
+  assertPrivatePathsAreRedacted(contender, [
+    root,
+    fixture.appPath,
+    contenderOutput,
+  ])
+  await assert.rejects(lstat(contenderOutput))
+
+  process.kill(-holder.child.pid, "SIGTERM")
+  const stopped = await holder.closed
+  assert.equal(stopped.code, 143, stopped.stderr)
+  await assert.rejects(lstat(heldOutput))
+  await assertReleaseCleanup(root)
+})
+
+test("canonical verifier repeatedly cleans failure, INT, and TERM after exact-device attach", async (t) => {
+  if (!isMacOS) {
+    t.skip("macOS verify signal integration only runs on macOS")
+    return
+  }
+  const root = await temporaryDirectory(
+    t,
+    "coding-wife-release-verify-signals-",
+  )
+  await assertReleaseCleanup(root)
+  const fixture = await createProductFixture(root)
+  const output = path.join(root, "Coding-Wife.dmg")
+  assert.equal(
+    runScript(buildDmgScript, releaseArgs(fixture.appPath, output), root)
+      .status,
+    0,
+  )
+
+  for (let cycle = 0; cycle < 2; cycle += 1) {
+    const failed = runScript(
+      verifyScript,
+      verifyArgs(fixture.appPath, output),
+      root,
+      { CODING_WIFE_RELEASE_TEST_FAULT: "verify-after-attach" },
+    )
+    assert.notEqual(failed.status, 0)
+    await assertReleaseCleanup(root)
+
+    for (const [signal, expectedCode] of [
+      ["SIGINT", 130],
+      ["SIGTERM", 143],
+    ]) {
+      const interrupted = await interruptAtHook({
+        args: verifyArgs(fixture.appPath, output),
+        cwd: root,
+        env: { CODING_WIFE_RELEASE_TEST_WAIT: "verify-after-attach" },
+        prefix: ".coding-wife-release-verify.",
+        script: verifyScript,
+        signal,
+      })
+      assert.equal(interrupted.code, expectedCode, interrupted.stderr)
+      assert.equal(interrupted.signal, null)
+      assertPrivatePathsAreRedacted(interrupted, [
+        root,
+        fixture.appPath,
+        output,
+      ])
+      await assert.rejects(lstat(interrupted.work))
+      await assertReleaseCleanup(root)
+    }
+  }
+})
+
+test("canonical verifier rejects same-byte inode swaps and in-place tampering without reporting a SHA", async (t) => {
+  if (!isMacOS) {
+    t.skip("macOS TOCTOU integration only runs on macOS")
+    return
+  }
+  const root = await temporaryDirectory(t, "coding-wife-release-swap-")
+  await assertReleaseCleanup(root)
+  const fixture = await createProductFixture(root)
+  const output = path.join(root, "Coding-Wife.dmg")
+  assert.equal(
+    runScript(buildDmgScript, releaseArgs(fixture.appPath, output), root)
+      .status,
+    0,
+  )
+  const validBytes = await readFile(output)
+
+  const swapped = await continueAfterMutation({
+    args: verifyArgs(fixture.appPath, output),
+    cwd: root,
+    mutate: async () => {
+      const replacement = path.join(root, "replacement.dmg")
+      await writeFile(replacement, validBytes)
+      await rename(replacement, output)
+    },
+  })
+  assert.notEqual(swapped.code, 0)
+  assert.match(swapped.stderr, /RELEASE_VERIFY_DMG_CHANGED/u)
+  assert.equal(swapped.stdout.includes("final DMG size="), false)
+  await assertReleaseCleanup(root)
+
+  const tampered = await continueAfterMutation({
+    args: verifyArgs(fixture.appPath, output),
+    cwd: root,
+    mutate: async () => appendFile(output, "tamper"),
+  })
+  assert.notEqual(tampered.code, 0)
+  assert.match(tampered.stderr, /RELEASE_VERIFY_DMG_CHANGED/u)
+  assert.equal(tampered.stdout.includes("final DMG size="), false)
+  await writeFile(output, validBytes)
+
+  const recovered = runScript(
+    verifyScript,
+    verifyArgs(fixture.appPath, output),
+    root,
+  )
+  assert.equal(recovered.status, 0, recovered.stderr)
+  await assertReleaseCleanup(root)
 })

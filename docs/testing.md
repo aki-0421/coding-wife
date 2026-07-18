@@ -47,7 +47,7 @@ git status --short
 
 Both status commands must print nothing. `pnpm quality:check` refuses a dirty checkout and runs every expensive gate synchronously in this order: `format:check`, the offline locked-dependency license check, `test:clean-checkout`, `typecheck`, `build`, `live2d:verify`, Rust format, Clippy with warnings denied, Rust tests, deterministic `agent-docs` lint, the production Tauri build, and the final repository diff check. Frontend and Cargo workloads never overlap. The command checks the worktree again after the build and stops at the first failed gate. Running an individual command is partial validation only and is not release-candidate evidence.
 
-The dependency-license gate compares committed and packaged JSON/Markdown notices byte-for-byte with the complete pnpm declared `dependencies` closure and the Cargo normal dependency closure for `aarch64-apple-darwin`. It uses only the lockfiles, installed package metadata, and local Cargo registry sources. It fails closed on stale output or missing, unknown, forbidden, or unapproved license/source/integrity metadata. The npm closure is intentionally conservative package-manager classification and is not presented as a Vite bundle module inventory.
+The dependency-license gate compares committed and packaged JSON/Markdown notices byte-for-byte with the complete pnpm declared `dependencies` closure and the effective Cargo runtime graph. The Cargo graph comes from color-disabled `LC_ALL=C cargo tree --locked --offline --target aarch64-apple-darwin --edges normal`; every displayed package is resolved to one exact metadata package ID, and ambiguous output, malformed SPDX expressions, stale output, or missing, unknown, forbidden, or unapproved license/source/integrity metadata fails closed. It uses only the lockfiles, installed package metadata, and local Cargo registry sources. The npm closure is intentionally conservative package-manager classification and is not presented as a Vite bundle module inventory.
 
 The Rust gate uses the committed lockfile and libtest `--test-threads=1`. Several native integration tests deliberately enforce real wall-clock budgets while running Git, SQLite, and local process fixtures; serial suite scheduling prevents unrelated fixtures from consuming one another's product budgets. Concurrency behavior remains covered inside the individual tests with controlled tasks and peak counters. The gate does not extend, retry, ignore, or remove any timeout or performance assertion.
 
@@ -73,16 +73,23 @@ pnpm release:macos:dmg
 pnpm release:macos:verify
 ```
 
-Tauri produces only `Coding Wife.app`. The app command excludes the development-only demo runtime, signs nested executable code first, seals the complete app with a timestamp-free ad-hoc signature, and requires `codesign --verify --deep --strict` to pass. This integrity seal does not provide a Developer ID identity and does not prove notarization.
+Tauri produces only `Coding Wife.app`. The app command builds in a fresh private target, keeps raw tool output in a mode-`0700` work directory, checks that locked dependency notices are current and packaged legal files are byte-identical, excludes the development-only demo runtime, signs nested executable code first, and seals the complete app with a timestamp-free ad-hoc signature. It full-verifies the private and same-filesystem ready copies before atomically publishing the app and its run manifest. This integrity seal does not provide a Developer ID identity and does not prove notarization.
 
-The DMG command stages only that sealed app with an `/Applications` symlink, creates a compressed read-only image with `hdiutil`, mounts it without Finder or AppleScript, verifies its contents and write rejection, detaches it, and only then replaces the final artifact. The canonical verification command checks the source app and a second independent read-only DMG mount against the same sorted inventory. The inventory includes relative path, type, mode, symlink target, regular-file size, and SHA-256; it also checks architecture, minimum macOS version, bundle metadata, required Hiyori/legal/skill resources, and forbidden demo/source-map/private/quarantine/credential content.
+The DMG command stages only that sealed app with an `/Applications` symlink, creates a compressed read-only image with `hdiutil`, and performs full product verification in two independent read-only mounts without Finder or AppleScript. Each mount checks its exact plist-reported device, two-entry root, write rejection, app root mode, architecture, Mach-O macOS platform and minimum version, bundle metadata, byte-exact legal resources, required Hiyori/skill resources, signature and no-ticket classification, runtime markers, sorted inventory, and forbidden demo/source-map/private/quarantine/credential content. Absolute, escaping, or broken app symlinks and private POSIX, Windows-drive, or UNC paths in entry names, link targets, or file bytes are rejected.
+
+App build, DMG build, canonical verification, and the combined command share one finite-wait host-global release lock. Candidate artifacts remain private until every check passes. Atomic publish writes a UUID run manifest next to each artifact; verification rejects an app, DMG, or manifest left from a different run. On handled failure, INT, or TERM, the current run leaves no mount, candidate, ready, backup, new final artifact, or lock; a prior artifact is restored with its prior identity.
+
+Canonical verification snapshots the final DMG into private storage while holding the lock, checks the final path's device/inode/size/SHA-256 before and after the copy and again after verification, and runs `hdiutil` only against the snapshot. The reported byte size and SHA-256 therefore describe the exact bytes that passed the independent mount verification; a path swap or in-place modification fails closed.
 
 Compressed DMG filesystem metadata is not required to be byte-identical across separate builds. Reproducibility means both mounted images reproduce the sealed app inventory. Freeze and publish only the final candidate's recorded byte size and SHA-256.
 
-The final artifact is:
+The final artifacts and their run identities are:
 
 ```text
+src-tauri/target/release/bundle/macos/Coding Wife.app
+src-tauri/target/release/bundle/macos/Coding Wife.app.release.json
 src-tauri/target/release/bundle/dmg/Coding-Wife.dmg
+src-tauri/target/release/bundle/dmg/Coding-Wife.dmg.release.json
 ```
 
 Run the packaging test without compiling the real application:
@@ -91,7 +98,7 @@ Run the packaging test without compiling the real application:
 pnpm test:release
 ```
 
-This creates a synthetic tiny `.app`, builds a real DMG, mounts it read-only, checks the app and Applications link, unmounts it, and verifies cleanup and fail-closed argument behavior.
+This creates a minimal real arm64 Mach-O product fixture, applies the ad-hoc seal, exercises the real app verifier and CLI, builds and independently mounts a real DMG twice, injects failures and signals, attempts path swaps and private-path fixtures, and verifies lock, mount, temporary-prefix, and atomic-publish cleanup.
 
 ## Install and launch
 

@@ -41,14 +41,16 @@ Apple公式の[Safely open apps on your Mac](https://support.apple.com/en-us/102
 
 1. `tauri.conf.json` のdefault bundle targetは`app`だけにする。
 2. `pnpm release:macos:app` はworkspace、Cargo home、Rustup homeをstable prefixへremapし、production Vite bundleと`.app`からdevelopment demo marker、absolute private path、credentialを除外する。
-3. `seal-macos-app.sh`は各Mach-Oとnested bundleを先に、root appを最後に`--timestamp=none --sign -`で署名する。root署名に`--deep`を使わず、検証だけを`--deep --strict`にする。
-4. `macos-release.mjs verify-app`はarm64、minimum macOS 14.0、bundle ID/version、Hiyori runtime 17file、legal notice、2 bundled skills、support runtime、DB migration、demo/source map/quarantine/private path/credential不在を検証する。`Signature=adhoc`、`TeamIdentifier=not set`、Authority不在、stapled ticket不在を別々に判定する。
-5. inventoryはrelative path、type、4桁permission mode、symlink target、regular file size、SHA-256をbyte順にsortし、全entryのSHA-256 digestを持つ。DMGへcopyする前、staging後、作成時mount、canonical verify mountで同一inventoryを要求する。
-6. `pnpm release:macos:dmg` は検証済み`.app`だけからDMGを作る。scriptは入力、出力、volume name、overwrite意図を引数で確定し、shell文字列連結を使わない。
-7. candidateはread-only mount後にroot 2entry、Applications symlink target、inventory、write rejectionを検証する。`--overwrite`はcandidate検証後の置換だけを許可する。
-8. `pnpm release:macos:verify`はsource appを再検証し、final DMGを独立してread-only mountして同じapp inventoryを要求した後、final DMGのbyte sizeとSHA-256を出力する。圧縮filesystem metadataを含むDMG byte同一性は要求しない。
-9. raw command stderr、input/output/tempのabsolute pathはconsoleへ返さない。失敗はstep単位のsafe codeと非0 exitで表す。
-10. trapはmountpointからexact `/dev/diskNsM`を解決し、device detach後に`hdiutil info`からmountpointが消えるまで有限回確認してから一時directoryを削除する。失敗、INT、TERMでもfinal artifactを公開せず、消滅しない場合はdeviceとsanitized mount labelを示してfail closedする。
+3. `pnpm release:macos:app`は毎回`/private/tmp`のmode `0700` private targetとlogからbuildする。raw stdout/stderrをconsoleへ返さず、dependency licenseの非stale判定、repositoryとpackaged legal treeのbyte一致、nested-first seal、full product verifyを通したcandidateだけをcanonical pathへatomic publishする。既存appとmanifestはtransaction中の失敗・INT・TERMで復元する。
+4. `seal-macos-app.sh`は各Mach-Oとnested bundleを先に、root appを最後に`--timestamp=none --sign -`で署名する。root署名に`--deep`を使わず、検証だけを`--deep --strict`にする。
+5. `macos-release.mjs verify-app`はapp root mode `0755`、arm64、Mach-O build platform macOS、minimum macOS 14.0、bundle ID/version、Hiyori runtime 17file、repositoryとbyte一致するlegal tree、2 bundled skills、support runtime、DB migration、demo/source map/quarantine/private path/credential不在を検証する。`Signature=adhoc`、`TeamIdentifier=not set`、Authority不在、stapled ticket不在を別々に判定する。
+6. inventoryはroot modeと、relative path、type、4桁permission mode、symlink target、regular file size、SHA-256をbyte順にsortし、全entryのSHA-256 digestを持つ。absolute、app外へescapeする、またはbrokenなsymlinkを拒否する。entry path、symlink target、regular file bytesにはdiff hygieneと共有するprivate-path規則を適用し、`/Users`、`/home`、`/private/var`、任意drive letterのWindows user path、UNC pathを拒否する。
+7. `pnpm release:macos:dmg` はfull product verify済み`.app`だけからDMGを作る。source、private staging app、2回の独立read-only candidate mountで、毎回metadata、architecture、platform、minimum OS、resource、marker、seal、公証分類を含むfull product verifyと同一inventoryを要求する。rootはappと`/Applications` symlinkの2entryだけで、write probeは失敗しなければならない。
+8. app、DMG、sidecar manifestはUUID run identityを持つ。DMG publishは全candidate検証成功後だけ行い、既存artifactとmanifestをtransactionとして退避・復元する。失敗・INT・TERMでは今回runのcandidate、ready、final、manifestを0件にし、既存runを今回の成功として扱わない。
+9. app build、DMG build、canonical verify、3工程をまとめた`pnpm release:macos`は、全てhost-globalな`/private/tmp/coding-wife-macos-release.lock`で直列化する。lock取得は有限時間で、owner PIDとrun identityだけをsafe diagnosticsとして返す。子工程は同じidentityでreentrantにlockを共有する。
+10. `hdiutil attach -plist`の結果からexact `/dev/diskNsM`とmountpointの組を解決する。attach開始前からcleanup対象として登録し、detachは有限回retryした後に`hdiutil info -plist`でexact deviceとmountpointの両方が消えたことを確認する。shell pipelineへmount情報を流さず、`pipefail`のSIGPIPEをcleanup判定に混入させない。
+11. `pnpm release:macos:verify`はlock内でfinal DMGをprivate regular-file snapshotへcopyする。copy前後と検証終了時にfinal pathのdevice/inode/size/SHA-256が一致し、snapshot hashも一致することを要求する。`hdiutil verify`と独立read-only mountはsnapshotだけを入力にし、consoleへ報告するsize/SHA-256も検証済みsnapshot bytesだけから得る。path swap、in-place tamper、symlink置換は失敗する。
+12. raw command stderr、input/output/tempのabsolute pathはconsoleへ返さない。失敗はstep単位のsafe codeと非0 exitで表す。trapはmountを先に確実にdetachし、今回runのprivate work、ready、backupを安全なprefix確認後に削除・復元してからlockを解放する。
 
 ## Diff hygieneの実装・変更手順
 
@@ -70,8 +72,9 @@ whitespace検査の除外は`src-tauri/resources/characters/builtin-hiyori/NOTIC
 
 ## 検証
 
-- Synthetic Mach-O `.app`でnested-first ad-hoc sealとstrict検証を自動testする。
-- Synthetic tiny `.app`でinventoryのpath/type/mode/link/size/hash、DMG生成、read-only attach、2 root entries、Applications symlink、write rejection、detach、cleanupを自動testする。
-- missing/invalid app、invalid argument、existing output、explicit overwrite、redacted errorを自動testする。attach後のinjected failure、SIGINT、SIGTERMでmount、work、ready artifactが0件になることをhost-globalなdisk image testを直列実行して確認する。
-- real `.app`ではremapped production build、ad-hoc署名分類、architecture/minOS/bundle/resource/forbidden contentを検証し、同じappからDMGを作って作成時mountとcanonical verify mountのinventory一致を確認する。
+- Minimal arm64 Mach-O product fixtureでbundle metadata、macOS platform/minOS、root mode、required resource、runtime marker、nested-first ad-hoc seal、公証なし分類を含むreal `verifyReleaseApp`とCLIを自動testする。
+- Inventoryはpath/type/root・entry mode/link/size/hashに加え、absolute・escape・broken symlink、entry/link/file bytesのPOSIX・Windows・UNC private pathをfixtureで拒否する。
+- DMG生成はreal product fixtureからsource、stage、2独立read-only mountのfull verify、2 root entries、Applications symlink、write rejection、detach、atomic publish、run manifestを検査する。
+- buildとcanonical verifyのfailure、INT、TERMを反復し、host-global lock、mount、work、ready、backup prefixが0件になることを確認する。final pathのin-place tamper、inode swap、symlink replacementではsnapshot検証とSHA報告を拒否する。
+- missing/invalid app、invalid argument、existing output、explicit overwrite、redacted error、stale license、packaged legal driftを自動testする。
 - Developer ID署名、公証、別MacのGatekeeper、初回起動はlocal release scriptの対象外とし、installed artifact acceptanceで別に確認する。
