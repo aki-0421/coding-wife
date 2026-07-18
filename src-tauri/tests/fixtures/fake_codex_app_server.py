@@ -37,6 +37,19 @@ def send(value):
     sys.stdout.buffer.flush()
 
 
+def send_sized_notification(method, params, line_bytes):
+    value = {"method": method, "params": {**params, "padding": ""}}
+    base = json.dumps(value, separators=(",", ":")).encode("utf-8")
+    padding_bytes = line_bytes - len(base)
+    if padding_bytes < 0:
+        raise ValueError("sized notification is smaller than its JSON envelope")
+    value["params"]["padding"] = "x" * padding_bytes
+    encoded = json.dumps(value, separators=(",", ":")).encode("utf-8")
+    if len(encoded) != line_bytes:
+        raise AssertionError("sized notification did not reach the exact boundary")
+    send(value)
+
+
 def generate_schema(output):
     fixture = pathlib.Path(__file__).with_name(
         "codex_schema_subset_v0_144_5.json"
@@ -622,6 +635,37 @@ def main():
                         }
                     )
                     continue
+                if not probe_turn:
+                    context = {
+                        "threadId": "support-thread-fixture",
+                        "turnId": "support-turn-fixture",
+                    }
+                    if MODE == "support_frame_exact":
+                        send_sized_notification("warning", context, 96 * 1024)
+                    elif MODE == "support_frame_over":
+                        send_sized_notification("warning", context, 96 * 1024 + 1)
+                    elif MODE == "support_delta_exact":
+                        send(
+                            {
+                                "method": "item/agentMessage/delta",
+                                "params": {**context, "delta": "x" * (64 * 1024)},
+                            }
+                        )
+                    elif MODE == "support_delta_over_then_valid":
+                        send(
+                            {
+                                "method": "item/agentMessage/delta",
+                                "params": {**context, "delta": "x" * (64 * 1024 + 1)},
+                            }
+                        )
+                    elif MODE in ("support_reasoning_exact", "support_reasoning_over"):
+                        for index in range(4):
+                            frame_bytes = 16 * 1024
+                            if MODE == "support_reasoning_over" and index == 3:
+                                frame_bytes += 1
+                            send_sized_notification(
+                                "item/reasoning/textDelta", context, frame_bytes
+                            )
                 send_support_item("userMessage", input_text)
                 send_support_item("agentMessage", output)
                 send(

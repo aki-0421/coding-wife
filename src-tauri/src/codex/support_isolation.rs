@@ -14,7 +14,10 @@ use super::protocol::{
     support_turn_start_params, InboundMessage,
 };
 use super::rpc::{RpcRequestError, RuntimeSignal};
-use super::support::{parse_explanation, SupportRuntimeError, SUPPORT_PERMISSION_PROFILE};
+use super::support::{
+    parse_explanation, SupportRuntimeError, SUPPORT_PERMISSION_PROFILE,
+    SUPPORT_SIGNAL_QUEUE_CAPACITY,
+};
 use super::support_private::{support_config, write_private_file, PrivateRunDirectory};
 use super::support_probe::{canonical_json_hash, ProbeCaptureServer};
 use super::types::{BinarySource, CapabilityState, CODEX_MODEL};
@@ -85,7 +88,7 @@ pub(super) async fn run_isolation_probe(
         return Err(SupportRuntimeError::IsolationProbe);
     }
 
-    let (signals, mut receiver) = mpsc::channel(256);
+    let (signals, mut receiver) = mpsc::channel(SUPPORT_SIGNAL_QUEUE_CAPACITY);
     let runtime = Arc::new(
         spawn_support_process(
             binary,

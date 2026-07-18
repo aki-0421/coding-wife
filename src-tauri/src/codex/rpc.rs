@@ -16,6 +16,30 @@ const OUTBOUND_QUEUE: usize = 128;
 const MAX_PENDING_REQUESTS: usize = 128;
 const RESOLVED_ID_WINDOW: usize = 256;
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const SUPPORT_MAX_FRAME_BYTES: usize = 96 * 1024;
+pub(crate) const SUPPORT_MAX_JSONL_BUFFER_BYTES: usize = 128 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RpcReadLimits {
+    max_frame_bytes: usize,
+    max_buffer_bytes: usize,
+}
+
+impl Default for RpcReadLimits {
+    fn default() -> Self {
+        Self {
+            max_frame_bytes: super::jsonl::MAX_JSONL_LINE_BYTES,
+            max_buffer_bytes: super::jsonl::MAX_JSONL_BUFFER_BYTES,
+        }
+    }
+}
+
+impl RpcReadLimits {
+    pub(crate) const SUPPORT: Self = Self {
+        max_frame_bytes: SUPPORT_MAX_FRAME_BYTES,
+        max_buffer_bytes: SUPPORT_MAX_JSONL_BUFFER_BYTES,
+    };
+}
 
 #[derive(Clone, Debug)]
 pub enum RuntimeSignal {
@@ -74,6 +98,16 @@ impl RpcConnection {
         stdout: ChildStdout,
         signals: mpsc::Sender<RuntimeSignal>,
     ) -> Self {
+        Self::start_with_read_limits(generation, stdin, stdout, signals, RpcReadLimits::default())
+    }
+
+    pub(crate) fn start_with_read_limits(
+        generation: u64,
+        stdin: ChildStdin,
+        stdout: ChildStdout,
+        signals: mpsc::Sender<RuntimeSignal>,
+        read_limits: RpcReadLimits,
+    ) -> Self {
         let (writer, writer_rx) = mpsc::channel(OUTBOUND_QUEUE);
         let connection = Self {
             generation,
@@ -96,6 +130,7 @@ impl RpcConnection {
             connection.pending.clone(),
             connection.resolved.clone(),
             connection.signals.clone(),
+            read_limits,
         ));
         connection
     }
@@ -215,8 +250,10 @@ async fn reader_task(
     pending: Arc<Mutex<HashMap<u64, PendingRequest>>>,
     resolved: Arc<Mutex<VecDeque<u64>>>,
     signals: mpsc::Sender<RuntimeSignal>,
+    read_limits: RpcReadLimits,
 ) {
-    let mut framer = JsonlFramer::default();
+    let mut framer =
+        JsonlFramer::with_limits(read_limits.max_frame_bytes, read_limits.max_buffer_bytes);
     let mut buffer = vec![0_u8; 16 * 1024];
     loop {
         let count = match stdout.read(&mut buffer).await {
@@ -266,7 +303,28 @@ async fn reader_task(
         };
 
         for frame in frames {
-            let byte_count = serde_json::to_vec(&frame).map_or(0, |encoded| encoded.len());
+            let byte_count = match serde_json::to_vec(&frame) {
+                Ok(encoded) => encoded.len(),
+                Err(_) => {
+                    let _ = signals
+                        .send(RuntimeSignal::ProtocolViolation {
+                            generation,
+                            category: "inbound_serialization",
+                        })
+                        .await;
+                    return;
+                }
+            };
+            if byte_count > read_limits.max_frame_bytes {
+                fail_all_pending(&pending).await;
+                let _ = signals
+                    .send(RuntimeSignal::ProtocolViolation {
+                        generation,
+                        category: "inbound_frame_too_large",
+                    })
+                    .await;
+                return;
+            }
             match classify_message(frame, byte_count) {
                 Ok(InboundMessage::Response { id, result }) => {
                     let RpcId::Unsigned(id) = id else {

@@ -59,7 +59,7 @@ fn credential_pattern() -> &'static Regex {
     })
 }
 
-fn contains_private_string(value: &str) -> bool {
+pub(crate) fn contains_private_public_string(value: &str) -> bool {
     absolute_path_pattern().is_match(value)
         || tokenized_path_pattern().is_match(value)
         || relative_path_pattern().is_match(value)
@@ -67,11 +67,11 @@ fn contains_private_string(value: &str) -> bool {
         || value.to_ascii_lowercase().contains("chain-of-thought")
 }
 
-fn contains_private_value(value: &Value) -> bool {
+pub(crate) fn contains_private_public_material(value: &Value) -> bool {
     match value {
-        Value::String(value) => contains_private_string(value),
-        Value::Array(values) => values.iter().any(contains_private_value),
-        Value::Object(values) => values.values().any(contains_private_value),
+        Value::String(value) => contains_private_public_string(value),
+        Value::Array(values) => values.iter().any(contains_private_public_material),
+        Value::Object(values) => values.values().any(contains_private_public_material),
         Value::Null | Value::Bool(_) | Value::Number(_) => false,
     }
 }
@@ -88,7 +88,7 @@ fn validate_serialized_public_payload<T: Serialize>(value: &T) -> Result<(), Git
             false,
         ));
     }
-    if contains_private_value(&value) {
+    if contains_private_public_material(&value) {
         return Err(git_error(
             "GIT-EXPLANATION-PRIVATE-MATERIAL",
             OPERATION,

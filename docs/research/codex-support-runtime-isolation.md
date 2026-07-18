@@ -247,6 +247,20 @@ support task の失敗は main turn、main process、Git state、commit evidence
 
 保存できる監査情報は、binary / schema / tool / skill の短縮 fingerprint、profile ID、task role、commit key、開始・終了時刻、terminal class、canary pass/fail である。raw config、auth、prompt、response、stderr、absolute path は保存しない。
 
+## stream resource boundary と公開前検査
+
+最終`CommitExplanationV1`はraw JSONとcompact serialized JSONをともに64KiB以下とする。一方、App Serverの`item/completed` notificationは、このJSONを`item.text` stringとして包み、JSON内の引用符を再escapeする。通常の64KiB上限出力にnotification envelopeとescape増分を加えても受理できるheadroomとして、support専用JSONL frameを96KiB、未完了bufferを128KiBに固定した。main coding sessionの16MiB/32MiB reader境界は変更しない。
+
+readerはraw line境界に加え、parse後のcompact `byte_count`も96KiB以下かsignal enqueue前に再検査する。signal queueは8件なので、queue内frameは最大768KiBである。turn consumerは各notificationを取り出した直後、methodを適用する前に次のaggregate budgetを加算する。
+
+- notificationは最大256件、compact serialized bytes合計512KiB。
+- `item/agentMessage/delta`のtext bytes合計64KiB。
+- `item/reasoning/*`のframe bytes合計64KiB。
+
+各境界はexact値を受理し、1byteまたは1件の超過時点でfail closedする。後続にschema-validな`item/completed`と`turn/completed`があっても公開しない。これにより、JSON parse前、signal待機中、turn集約中の三段階でresident dataを有限にする。
+
+schema validation後は`CommitEvidenceV1`と共有するpublic-material scannerを全stringへ再帰適用し、support input固有のURL、backslash、redaction検査も再適用する。absolute/relative/tokenized path、credential、raw reasoning marker、URL、redaction marker、NULを含むcontrol characterのいずれかがsummary、各配列要素、narration textを含む任意のslotにあればwhole outputを破棄する。partial redactionしたmodel textは公開しない。
+
 ## 実装判定
 
 **Conditional Go** とする。0.144.5 のこの host では release-capable な隔離構成を実測できた。ただし次のいずれかで直ちに capacity 0 へ戻す。

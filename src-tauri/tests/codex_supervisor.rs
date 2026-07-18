@@ -880,6 +880,64 @@ async fn invalid_support_output_and_plan_events_publish_no_result() {
 }
 
 #[tokio::test]
+async fn support_stream_budget_accepts_exact_frame_delta_and_reasoning_boundaries() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for mode in [
+        "support_frame_exact",
+        "support_delta_exact",
+        "support_reasoning_exact",
+    ] {
+        let fixture = FixtureEnvironment::new(mode);
+        let binary = support_fixture_binary().await;
+        let schema = probe_schema(&binary).await.expect("fixture schema");
+        let auth = fixture.auth_source();
+        let runtime = SupportRuntime::construct(
+            &binary,
+            &schema,
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            Some(&auth),
+        )
+        .await
+        .expect("isolated support runtime");
+        let result = runtime
+            .explain_commit(support_request(mode, support_evidence("ja")))
+            .await
+            .unwrap_or_else(|error| panic!("{mode} exact boundary failed: {error:?}"));
+        assert_eq!(result.explanation.locale, "ja", "{mode}");
+        runtime.shutdown().await.expect("support cleanup");
+    }
+}
+
+#[tokio::test]
+async fn support_stream_budget_rejects_one_over_before_a_valid_terminal_can_publish() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    for (mode, expected) in [
+        ("support_frame_over", SupportRuntimeError::Protocol),
+        ("support_delta_over_then_valid", SupportRuntimeError::Output),
+        ("support_reasoning_over", SupportRuntimeError::Output),
+    ] {
+        let fixture = FixtureEnvironment::new(mode);
+        let binary = support_fixture_binary().await;
+        let schema = probe_schema(&binary).await.expect("fixture schema");
+        let auth = fixture.auth_source();
+        let runtime = SupportRuntime::construct(
+            &binary,
+            &schema,
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            Some(&auth),
+        )
+        .await
+        .expect("isolated support runtime");
+        let error = runtime
+            .explain_commit(support_request(mode, support_evidence("ja")))
+            .await
+            .expect_err("over-boundary stream must publish no result");
+        assert_eq!(error, expected, "{mode}");
+        runtime.shutdown().await.expect("support cleanup");
+    }
+}
+
+#[tokio::test]
 async fn support_cancellation_interrupts_the_turn_and_discards_output() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("support_slow");

@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, Mutex};
 
 use super::binary::BinaryInfo;
 use super::redaction::redact_text;
-use super::rpc::{RpcConnection, RuntimeSignal};
+use super::rpc::{RpcConnection, RpcReadLimits, RuntimeSignal};
 use super::types::TurnExecutionClass;
 
 const STDERR_RING_BYTES: usize = 64 * 1024;
@@ -302,7 +302,16 @@ async fn spawn_process_with_environment(
     let stdin = child.stdin.take().ok_or(ProcessError::MissingStdio)?;
     let stdout = child.stdout.take().ok_or(ProcessError::MissingStdio)?;
     let stderr = child.stderr.take().ok_or(ProcessError::MissingStdio)?;
-    let connection = RpcConnection::start(generation, stdin, stdout, signals);
+    let connection = match execution_class {
+        TurnExecutionClass::Main => RpcConnection::start(generation, stdin, stdout, signals),
+        TurnExecutionClass::Support => RpcConnection::start_with_read_limits(
+            generation,
+            stdin,
+            stdout,
+            signals,
+            RpcReadLimits::SUPPORT,
+        ),
+    };
     let stderr_ring = Arc::new(Mutex::new(VecDeque::new()));
     tokio::spawn(read_stderr(
         stderr,

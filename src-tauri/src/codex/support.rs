@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::sync::{mpsc, Mutex};
 
+use crate::git_review::public_evidence::contains_private_public_material;
 use crate::git_review::types::CommitEvidenceV1;
 
 use super::binary::{BinaryInfo, SchemaProbe};
@@ -21,7 +22,9 @@ use super::protocol::{
     support_thread_start_params, support_turn_start_params, turn_interrupt_params, InboundMessage,
 };
 use super::redaction::redact_text;
-use super::rpc::RuntimeSignal;
+#[cfg(test)]
+use super::rpc::SUPPORT_MAX_JSONL_BUFFER_BYTES;
+use super::rpc::{RuntimeSignal, SUPPORT_MAX_FRAME_BYTES};
 use super::support_isolation::{
     initialize_support_process, map_rpc_error, run_isolation_probe, verify_release,
 };
@@ -33,6 +36,11 @@ pub const SUPPORT_MAX_SESSION_CAPACITY: usize = 1;
 pub const SUPPORT_PERMISSION_PROFILE: &str = "coding-wife-support-zero";
 const MAX_SUPPORT_INPUT_BYTES: usize = 64 * 1024;
 const MAX_SUPPORT_OUTPUT_BYTES: usize = 64 * 1024;
+const MAX_SUPPORT_NOTIFICATION_EVENTS: usize = 256;
+const MAX_SUPPORT_NOTIFICATION_BYTES: usize = 512 * 1024;
+const MAX_SUPPORT_AGENT_DELTA_BYTES: usize = 64 * 1024;
+const MAX_SUPPORT_REASONING_BYTES: usize = 64 * 1024;
+pub(super) const SUPPORT_SIGNAL_QUEUE_CAPACITY: usize = 8;
 pub(crate) const SUPPORT_TASK_TIMEOUT: Duration = Duration::from_secs(15);
 const SUPPORT_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -267,7 +275,7 @@ impl SupportRuntime {
         bridge_auth(&auth_source, &run_directory.codex_home)?;
         run_directory.write_config(&support_config(None))?;
 
-        let (signals, receiver) = mpsc::channel(256);
+        let (signals, receiver) = mpsc::channel(SUPPORT_SIGNAL_QUEUE_CAPACITY);
         let runtime = Arc::new(
             spawn_support_process(
                 binary,
@@ -502,6 +510,7 @@ impl SupportRuntime {
         let mut signals = self.signals.lock().await;
         let mut agent_message = None;
         let mut usage = SupportUsage::default();
+        let mut output_budget = SupportOutputBudget::default();
         loop {
             let signal = tokio::time::timeout_at(deadline, signals.recv())
                 .await
@@ -520,7 +529,12 @@ impl SupportRuntime {
                         ));
                         return Err(SupportRuntimeError::Policy);
                     }
-                    InboundMessage::Notification { method, params, .. } => {
+                    InboundMessage::Notification {
+                        method,
+                        params,
+                        byte_count,
+                    } => {
+                        output_budget.observe_notification(&method, &params, byte_count)?;
                         if method == "turn/plan/updated"
                             || method.contains("requestApproval")
                             || method.contains("requestUserInput")
@@ -631,6 +645,72 @@ struct TerminalTurn {
     usage: SupportUsage,
 }
 
+#[derive(Default)]
+struct SupportOutputBudget {
+    notification_events: usize,
+    notification_bytes: usize,
+    agent_delta_bytes: usize,
+    reasoning_bytes: usize,
+}
+
+impl SupportOutputBudget {
+    fn observe_notification(
+        &mut self,
+        method: &str,
+        params: &Value,
+        byte_count: usize,
+    ) -> Result<(), SupportRuntimeError> {
+        if byte_count > SUPPORT_MAX_FRAME_BYTES {
+            return Err(SupportRuntimeError::Output);
+        }
+        let notification_events =
+            bounded_sum(self.notification_events, 1, MAX_SUPPORT_NOTIFICATION_EVENTS)?;
+        let notification_bytes = bounded_sum(
+            self.notification_bytes,
+            byte_count,
+            MAX_SUPPORT_NOTIFICATION_BYTES,
+        )?;
+        let delta_bytes = if method == "item/agentMessage/delta" {
+            params
+                .get("delta")
+                .and_then(Value::as_str)
+                .map_or(0, |delta| delta.len())
+        } else {
+            0
+        };
+        let agent_delta_bytes = bounded_sum(
+            self.agent_delta_bytes,
+            delta_bytes,
+            MAX_SUPPORT_AGENT_DELTA_BYTES,
+        )?;
+        let reasoning_frame_bytes = usize::from(method.starts_with("item/reasoning/"))
+            .checked_mul(byte_count)
+            .ok_or(SupportRuntimeError::Output)?;
+        let reasoning_bytes = bounded_sum(
+            self.reasoning_bytes,
+            reasoning_frame_bytes,
+            MAX_SUPPORT_REASONING_BYTES,
+        )?;
+
+        self.notification_events = notification_events;
+        self.notification_bytes = notification_bytes;
+        self.agent_delta_bytes = agent_delta_bytes;
+        self.reasoning_bytes = reasoning_bytes;
+        Ok(())
+    }
+}
+
+fn bounded_sum(
+    current: usize,
+    addition: usize,
+    maximum: usize,
+) -> Result<usize, SupportRuntimeError> {
+    current
+        .checked_add(addition)
+        .filter(|total| *total <= maximum)
+        .ok_or(SupportRuntimeError::Output)
+}
+
 fn validate_explain_request(request: &SupportExplainRequest) -> Result<(), SupportRuntimeError> {
     if request.schema_version != 1
         || request.request_id.is_empty()
@@ -652,6 +732,9 @@ fn validate_explain_request(request: &SupportExplainRequest) -> Result<(), Suppo
 }
 
 fn value_contains_private_string(value: &Value) -> bool {
+    if contains_private_public_material(value) {
+        return true;
+    }
     match value {
         Value::String(value) => private_evidence_string(value),
         Value::Array(values) => values.iter().any(value_contains_private_string),
@@ -687,6 +770,15 @@ fn private_evidence_string(value: &str) -> bool {
     redacted != value
 }
 
+fn value_contains_control_character(value: &Value) -> bool {
+    match value {
+        Value::String(value) => value.chars().any(char::is_control),
+        Value::Array(values) => values.iter().any(value_contains_control_character),
+        Value::Object(values) => values.values().any(value_contains_control_character),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    }
+}
+
 fn valid_full_sha(value: &str) -> bool {
     matches!(value.len(), 40 | 64)
         && value
@@ -703,6 +795,15 @@ pub(super) fn parse_explanation(
     }
     let explanation: CommitExplanationV1 =
         serde_json::from_str(text).map_err(|_| SupportRuntimeError::Output)?;
+    let serialized = serde_json::to_vec(&explanation).map_err(|_| SupportRuntimeError::Output)?;
+    let public_value =
+        serde_json::to_value(&explanation).map_err(|_| SupportRuntimeError::Output)?;
+    if serialized.len() > MAX_SUPPORT_OUTPUT_BYTES
+        || value_contains_private_string(&public_value)
+        || value_contains_control_character(&public_value)
+    {
+        return Err(SupportRuntimeError::Output);
+    }
     if explanation.schema_version != 1
         || explanation.locale != expected_locale
         || explanation.summary.is_empty()
@@ -801,6 +902,132 @@ mod tests {
         .expect("explanation")
     }
 
+    fn explanation_at_serialized_size(target: usize) -> String {
+        let mut value: Value = serde_json::from_str(&explanation("ja")).expect("base explanation");
+        for field in [
+            "changes",
+            "reasons",
+            "verification",
+            "impact",
+            "cautions",
+            "howToReadNext",
+        ] {
+            value[field] = Value::Array((0..16).map(|_| Value::String("x".to_owned())).collect());
+        }
+        let current = serde_json::to_vec(&value)
+            .expect("base serialized explanation")
+            .len();
+        assert!(current <= target, "target must fit the base explanation");
+        let mut remaining = target - current;
+        for field in [
+            "changes",
+            "reasons",
+            "verification",
+            "impact",
+            "cautions",
+            "howToReadNext",
+        ] {
+            for index in 0..16 {
+                let additional = remaining.min(2047);
+                let text = value[field][index].as_str().expect("explanation text slot");
+                value[field][index] = Value::String(format!("{text}{}", "x".repeat(additional)));
+                remaining -= additional;
+                if remaining == 0 {
+                    break;
+                }
+            }
+            if remaining == 0 {
+                break;
+            }
+        }
+        assert_eq!(remaining, 0, "target must fit the bounded text slots");
+        let encoded = serde_json::to_string(&value).expect("sized explanation");
+        assert_eq!(encoded.len(), target);
+        encoded
+    }
+
+    #[test]
+    fn support_output_budget_accepts_exact_boundaries_and_rejects_one_beyond() {
+        let mut frame = SupportOutputBudget::default();
+        assert_eq!(
+            frame.observe_notification("warning", &json!({}), SUPPORT_MAX_FRAME_BYTES),
+            Ok(())
+        );
+        let mut oversized_frame = SupportOutputBudget::default();
+        assert_eq!(
+            oversized_frame.observe_notification(
+                "warning",
+                &json!({}),
+                SUPPORT_MAX_FRAME_BYTES + 1,
+            ),
+            Err(SupportRuntimeError::Output)
+        );
+
+        let mut events = SupportOutputBudget::default();
+        for _ in 0..MAX_SUPPORT_NOTIFICATION_EVENTS {
+            events
+                .observe_notification("warning", &json!({}), 0)
+                .expect("exact event boundary");
+        }
+        assert_eq!(
+            events.observe_notification("warning", &json!({}), 0),
+            Err(SupportRuntimeError::Output)
+        );
+
+        let mut notifications = SupportOutputBudget::default();
+        let mut remaining = MAX_SUPPORT_NOTIFICATION_BYTES;
+        while remaining > 0 {
+            let frame_bytes = remaining.min(SUPPORT_MAX_FRAME_BYTES);
+            notifications
+                .observe_notification("warning", &json!({}), frame_bytes)
+                .expect("exact notification byte boundary");
+            remaining -= frame_bytes;
+        }
+        assert_eq!(
+            notifications.observe_notification("warning", &json!({}), 1),
+            Err(SupportRuntimeError::Output)
+        );
+
+        let mut deltas = SupportOutputBudget::default();
+        for _ in 0..64 {
+            deltas
+                .observe_notification(
+                    "item/agentMessage/delta",
+                    &json!({"delta": "x".repeat(1024)}),
+                    1024,
+                )
+                .expect("exact aggregate delta boundary");
+        }
+        assert_eq!(
+            deltas.observe_notification("item/agentMessage/delta", &json!({"delta": "x"}), 1,),
+            Err(SupportRuntimeError::Output)
+        );
+
+        let mut reasoning = SupportOutputBudget::default();
+        for _ in 0..64 {
+            reasoning
+                .observe_notification("item/reasoning/textDelta", &json!({}), 1024)
+                .expect("exact aggregate reasoning boundary");
+        }
+        assert_eq!(
+            reasoning.observe_notification("item/reasoning/textDelta", &json!({}), 1),
+            Err(SupportRuntimeError::Output)
+        );
+    }
+
+    #[test]
+    fn support_reader_and_queue_leave_bounded_json_envelope_headroom() {
+        assert_eq!(MAX_SUPPORT_OUTPUT_BYTES, 64 * 1024);
+        assert_eq!(SUPPORT_MAX_FRAME_BYTES, 96 * 1024);
+        assert_eq!(SUPPORT_MAX_JSONL_BUFFER_BYTES, 128 * 1024);
+        assert_eq!(SUPPORT_SIGNAL_QUEUE_CAPACITY, 8);
+        assert_eq!(
+            SUPPORT_MAX_FRAME_BYTES * SUPPORT_SIGNAL_QUEUE_CAPACITY,
+            768 * 1024
+        );
+        assert!(SUPPORT_MAX_FRAME_BYTES > MAX_SUPPORT_OUTPUT_BYTES);
+    }
+
     #[test]
     fn strict_explanation_rejects_locale_sequence_and_unknown_fields() {
         assert!(parse_explanation(&explanation("ja"), "ja").is_ok());
@@ -841,6 +1068,77 @@ mod tests {
         assert!(oversized.len() > MAX_SUPPORT_OUTPUT_BYTES);
         assert_eq!(
             parse_explanation(&oversized, "ja"),
+            Err(SupportRuntimeError::Output)
+        );
+    }
+
+    #[test]
+    fn strict_explanation_checks_private_material_and_controls_in_every_text_slot() {
+        for pointer in [
+            "/summary",
+            "/changes/0",
+            "/reasons/0",
+            "/verification/0",
+            "/impact/0",
+            "/cautions/0",
+            "/howToReadNext/0",
+            "/narrationChunks/0/text",
+        ] {
+            for rejected in ["src/private.rs", "contains\0control"] {
+                let mut value: Value =
+                    serde_json::from_str(&explanation("ja")).expect("base explanation");
+                *value
+                    .pointer_mut(pointer)
+                    .expect("terminal explanation text slot") = Value::String(rejected.to_owned());
+                let encoded = serde_json::to_string(&value).expect("rejected explanation");
+                assert_eq!(
+                    parse_explanation(&encoded, "ja"),
+                    Err(SupportRuntimeError::Output),
+                    "accepted {rejected:?} at {pointer}"
+                );
+            }
+        }
+
+        for private in [
+            "/Users/alice/repository/private.rs",
+            "../private/config.json",
+            "<workspace>/private.rs",
+            "https://example.invalid/private",
+            r"private\config.json",
+            "Bearer abcdefghijklmnop",
+            "[REDACTED]",
+            "chain-of-thought",
+        ] {
+            let mut value: Value =
+                serde_json::from_str(&explanation("ja")).expect("base explanation");
+            value["summary"] = Value::String(private.to_owned());
+            let encoded = serde_json::to_string(&value).expect("private explanation");
+            assert_eq!(
+                parse_explanation(&encoded, "ja"),
+                Err(SupportRuntimeError::Output),
+                "accepted {private:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_explanation_accepts_only_the_exact_64_kib_serialized_boundary() {
+        let exact = explanation_at_serialized_size(MAX_SUPPORT_OUTPUT_BYTES);
+        assert_eq!(
+            serde_json::to_vec(
+                &serde_json::from_str::<CommitExplanationV1>(&exact)
+                    .expect("exact explanation shape")
+            )
+            .expect("exact compact explanation")
+            .len(),
+            MAX_SUPPORT_OUTPUT_BYTES
+        );
+        parse_explanation(&exact, "ja").expect("exact serialized boundary");
+
+        let over = format!("{exact} ");
+        assert_eq!(over.len(), MAX_SUPPORT_OUTPUT_BYTES + 1);
+        assert_eq!(
+            parse_explanation(&over, "ja"),
             Err(SupportRuntimeError::Output)
         );
     }
