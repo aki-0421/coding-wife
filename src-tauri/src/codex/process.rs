@@ -51,6 +51,13 @@ pub(crate) struct ProcessGroupDropGuard {
     armed: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use = "cleanup convergence decides whether fallback process-group ownership remains armed"]
+enum ProcessGroupCleanupOutcome {
+    Converged,
+    Unconverged,
+}
+
 impl ProcessGroupDropGuard {
     pub(crate) fn new(pid: u32) -> Self {
         Self { pid, armed: true }
@@ -59,13 +66,34 @@ impl ProcessGroupDropGuard {
     pub(crate) fn disarm(&mut self) {
         self.armed = false;
     }
+
+    pub(crate) async fn terminate_child(&mut self, child: &mut Child, term_grace: Duration) {
+        let outcome = terminate_child_process_group(child, self.pid, term_grace).await;
+        self.apply_cleanup_outcome(outcome);
+    }
+
+    fn apply_cleanup_outcome(&mut self, outcome: ProcessGroupCleanupOutcome) {
+        if outcome == ProcessGroupCleanupOutcome::Converged {
+            self.disarm();
+        }
+    }
+
+    fn cleanup_on_drop_with<Exists, Cleanup>(&self, mut exists: Exists, mut cleanup: Cleanup)
+    where
+        Exists: FnMut(u32) -> bool,
+        Cleanup: FnMut(u32),
+    {
+        if self.armed && exists(self.pid) {
+            cleanup(self.pid);
+        }
+    }
 }
 
 impl Drop for ProcessGroupDropGuard {
     fn drop(&mut self) {
-        if self.armed && process_group_exists(self.pid) {
-            let _ = force_kill_process_group_until_gone(self.pid, PROCESS_GROUP_KILL_WAIT);
-        }
+        self.cleanup_on_drop_with(process_group_exists, |pid| {
+            let _ = force_kill_process_group_until_gone(pid, PROCESS_GROUP_KILL_WAIT);
+        });
     }
 }
 
@@ -164,14 +192,18 @@ pub(crate) async fn run_bounded_command(
     let stdout = match child.stdout.take() {
         Some(stdout) => stdout,
         None => {
-            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            process_group_guard
+                .terminate_child(&mut child, Duration::from_millis(200))
+                .await;
             return Err(BoundedCommandError::MissingStdio);
         }
     };
     let stderr = match child.stderr.take() {
         Some(stderr) => stderr,
         None => {
-            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            process_group_guard
+                .terminate_child(&mut child, Duration::from_millis(200))
+                .await;
             return Err(BoundedCommandError::MissingStdio);
         }
     };
@@ -199,7 +231,9 @@ pub(crate) async fn run_bounded_command(
     let status = match status {
         Ok(status) => status,
         Err(error) => {
-            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            process_group_guard
+                .terminate_child(&mut child, Duration::from_millis(200))
+                .await;
             stdout_task.abort();
             stderr_task.abort();
             return Err(error);
@@ -222,7 +256,9 @@ pub(crate) async fn run_bounded_command(
     let (stdout, stderr) = match captures {
         Ok(captures) => captures,
         Err(error) => {
-            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            process_group_guard
+                .terminate_child(&mut child, Duration::from_millis(200))
+                .await;
             stdout_task.abort();
             stderr_task.abort();
             return Err(error);
@@ -230,7 +266,9 @@ pub(crate) async fn run_bounded_command(
     };
     drop(abort_guard);
     if process_group_exists(pid) {
-        terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+        process_group_guard
+            .terminate_child(&mut child, Duration::from_millis(200))
+            .await;
         return Err(BoundedCommandError::ProcessTree);
     }
     process_group_guard.disarm();
@@ -374,7 +412,9 @@ async fn spawn_process_with_environment(
     let pid = child.id().ok_or(ProcessError::Spawn)?;
     let mut process_group_guard = ProcessGroupDropGuard::new(pid);
     if binary.revalidate().await.is_err() {
-        terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+        process_group_guard
+            .terminate_child(&mut child, Duration::from_millis(200))
+            .await;
         return Err(ProcessError::IdentityChanged);
     }
     let stdin = child.stdin.take().ok_or(ProcessError::MissingStdio)?;
@@ -477,12 +517,12 @@ impl ProcessRuntime {
             }
         }
 
-        let terminated = {
+        let cleanup = {
             let mut child = self.child.lock().await;
             terminate_child_process_group(&mut child, self.pid, Duration::from_millis(200)).await
         };
         self.connection.fail_pending().await;
-        if !terminated {
+        if cleanup == ProcessGroupCleanupOutcome::Unconverged {
             return Err(ProcessShutdownError::ProcessTree);
         }
         self.shutdown_complete.store(true, Ordering::Release);
@@ -569,17 +609,17 @@ pub(crate) fn process_group_exists(pid: u32) -> bool {
     signal_process_group(pid, 0).is_ok()
 }
 
-pub(crate) async fn terminate_child_process_group(
+async fn terminate_child_process_group(
     child: &mut Child,
     pid: u32,
     term_grace: Duration,
-) -> bool {
+) -> ProcessGroupCleanupOutcome {
     let _ = signal_process_group(pid, SIGTERM);
     let deadline = tokio::time::Instant::now() + term_grace;
     loop {
         let child_exited = matches!(child.try_wait(), Ok(Some(_)));
         if child_exited && !process_group_exists(pid) {
-            return true;
+            return ProcessGroupCleanupOutcome::Converged;
         }
         if tokio::time::Instant::now() >= deadline {
             break;
@@ -592,14 +632,14 @@ pub(crate) async fn terminate_child_process_group(
         let child_exited = matches!(child.try_wait(), Ok(Some(_)));
         let group_exists = process_group_exists(pid);
         if child_exited && !group_exists {
-            return true;
+            return ProcessGroupCleanupOutcome::Converged;
         }
         if group_exists {
             let _ = signal_process_group(pid, SIGKILL);
         }
         let now = tokio::time::Instant::now();
         if now >= kill_deadline {
-            return false;
+            return ProcessGroupCleanupOutcome::Unconverged;
         }
         tokio::time::sleep(PROCESS_GROUP_POLL_INTERVAL.min(kill_deadline - now)).await;
     }
@@ -931,6 +971,42 @@ mod tests {
         assert_eq!(signal_count.get(), 1);
     }
 
+    #[test]
+    fn converged_cleanup_disarms_before_the_numeric_process_group_is_reused() {
+        let unrelated_signal_count = Cell::new(0_u8);
+        let mut guard = ProcessGroupDropGuard::new(43);
+        guard.apply_cleanup_outcome(ProcessGroupCleanupOutcome::Converged);
+
+        guard.cleanup_on_drop_with(
+            |pid| {
+                assert_eq!(pid, 43);
+                true
+            },
+            |_| unrelated_signal_count.set(unrelated_signal_count.get() + 1),
+        );
+
+        assert_eq!(
+            unrelated_signal_count.get(),
+            0,
+            "a reused process-group identifier must not receive fallback cleanup"
+        );
+    }
+
+    #[test]
+    fn unconverged_cleanup_keeps_the_drop_fallback_armed() {
+        let fallback_signal_count = Cell::new(0_u8);
+        let mut guard = ProcessGroupDropGuard::new(44);
+        guard.apply_cleanup_outcome(ProcessGroupCleanupOutcome::Unconverged);
+
+        guard.cleanup_on_drop_with(
+            |_| true,
+            |_| fallback_signal_count.set(fallback_signal_count.get() + 1),
+        );
+
+        assert_eq!(fallback_signal_count.get(), 1);
+        guard.disarm();
+    }
+
     #[tokio::test]
     async fn direct_group_shutdown_kills_a_grandchild_holding_stdio() {
         let paths = ProcessTreeFixturePaths::new();
@@ -944,20 +1020,30 @@ mod tests {
         command.as_std_mut().process_group(0);
         let mut child = command.spawn().expect("spawn process-tree fixture");
         let pid = child.id().expect("fixture pid");
+        let mut process_group_guard = ProcessGroupDropGuard::new(pid);
         fixture_guard.remember_parent_pid(pid);
         let identity = wait_for_fixture_ready(&paths).await;
         fixture_guard.remember_identity(identity);
         assert_eq!(identity.parent_pid, pid);
 
         let started = Instant::now();
-        assert!(
-            terminate_child_process_group(&mut child, pid, Duration::from_millis(100)).await,
-            "process group did not converge after SIGKILL"
-        );
+        process_group_guard
+            .terminate_child(&mut child, Duration::from_millis(100))
+            .await;
         assert!(started.elapsed() < TOTAL_SHUTDOWN_WAIT);
         assert!(
             wait_for_fixture_exit(identity).await,
             "process tree survived direct shutdown"
+        );
+        let unrelated_signal_count = Cell::new(0_u8);
+        process_group_guard.cleanup_on_drop_with(
+            |_| true,
+            |_| unrelated_signal_count.set(unrelated_signal_count.get() + 1),
+        );
+        assert_eq!(
+            unrelated_signal_count.get(),
+            0,
+            "converged cleanup must disarm before the numeric group is reused"
         );
         fixture_guard.disarm_process_cleanup();
     }
@@ -983,9 +1069,10 @@ mod tests {
         child.wait().await.expect("parent exits");
         assert!(process_group_exists(pid), "grandchild fixture is alive");
 
-        assert!(
+        assert_eq!(
             terminate_child_process_group(&mut child, pid, Duration::from_millis(100)).await,
-            "grandchild process group did not converge after SIGKILL"
+            ProcessGroupCleanupOutcome::Converged,
+            "grandchild process group did not converge after SIGKILL",
         );
         assert!(
             wait_for_fixture_exit(identity).await,

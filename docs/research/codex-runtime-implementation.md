@@ -43,7 +43,7 @@ probeの上限はstdout/stderr各1 MiB、絶対deadline 10秒、schema depth 16�
 
 schema正本fixtureは`src-tauri/tests/fixtures/codex_schema_subset_v0_144_5.json`、process tree fixtureは`src-tauri/tests/fixtures/codex_process_tree_fixture.py`である。Codex CLI versionまたは利用fieldを変えるときはactual generated schemaから前者を更新し、required field削除、params ref差し替え、method重複、descriptionへの文字列移動をmutationしてfail closedを確認する。単なるmethod一覧fixtureへ戻してはならない。
 
-probeとApp Serverの終了はPATH上の`kill` commandを使わず、process groupへ直接TERM、期限後にKILLを送る。親processの`try_wait`成功だけを終了条件にせず、stdioを保持するgrandchildとPGIDの生存も期限内に消滅させる。TERM 200ms、KILL 500msの既存上限内でgroupが残る間はKILLを再送し、signalと同時に進行したforkが一度目の対象から外れてもgroup disappearanceへ収束させる。async futureのcancelまたはpanicでDropだけが実行できる場合も、同じ500ms以内で同期的にKILLとgroup probeを反復する。stderrはcredential・cookie・session ID・absolute pathをredactしてからtruncateし、順序を逆転させない。
+probeとApp Serverの終了はPATH上の`kill` commandを使わず、process groupへ直接TERM、期限後にKILLを送る。親processの`try_wait`成功だけを終了条件にせず、stdioを保持するgrandchildとPGIDの生存も期限内に消滅させる。TERM 200ms、KILL 500msの既存上限内でgroupが残る間はKILLを再送し、signalと同時に進行したforkが一度目の対象から外れてもgroup disappearanceへ収束させる。async futureのcancelまたはpanicでDropだけが実行できる場合も、同じ500ms以内で同期的にKILLとgroup probeを反復する。cleanup helperがdirect childのreapとgroup disappearanceを`Converged`として確定した時点で、同じownership境界がDrop guardを必ずdisarmしてからcallerへ戻る。`Unconverged`の場合だけguardをarmedのまま保つ。収束後もarmedにすると、数値PID/PGIDが別process groupへ再利用された後のreturn/dropで無関係なprocessへSIGKILLを送るため禁止する。stderrはcredential・cookie・session ID・absolute pathをredactしてからtruncateし、順序を逆転させない。
 
 `codex_process_tree_fixture.py`は、全descendantのfork、process group継承、parent/grandchild PID fileのatomic publishが完了した後にだけready markerをatomic publishする。cancel試験はこのmarkerとparse済みPIDを確認するまでfutureをabortしない。試験はproduction cleanupの結果を2秒以内のPGID消滅で先に判定し、判定前にfallback cleanupを実行して成功を偽装してはならない。一方でtask abort handle、既知PGID/PID、state fileを所有するpanic-safe guardを保持し、setup、read、cancel結果、cleanup assertionのどこで失敗してもTERM、短いpoll、反復KILL、group disappearance確認、state file削除を行う。
 
@@ -222,7 +222,7 @@ Addはabsolute pathを持たない固定opaque attachment handleを返す。demo
 
 fixtureは秘密、実account、実path、promptを含めない。新しいprotocol edge caseはproduction parserを緩める前にfake modeまたは共有fixtureへ追加する。
 
-`src-tauri/src/codex/process.rs`のprocess-tree unit testは`--test-threads=1`で実行する。fixtureまたはgroup cleanupを変更した時はcancel試験を最低10回連続で通し、各回のproduction cleanup assertion後と全実行終了後に`codex_process_tree_fixture.py` process、process group、`coding-wife-process-tree-*` state fileが0件であることを確認する。panic-safe guardは失敗時のhost cleanup専用であり、production cleanupのdeadline、error、assertionを緩和する理由にしない。
+`src-tauri/src/codex/process.rs`のprocess-tree unit testは`--test-threads=1`で実行する。fixtureまたはgroup cleanupを変更した時はcancel試験を最低10回連続で通し、各回のproduction cleanup assertion後と全実行終了後に`codex_process_tree_fixture.py` process、process group、`coding-wife-process-tree-*` state fileが0件であることを確認する。さらに、収束直後に同じ数値PGIDが無関係groupへ再利用されたmodelで、guard Dropがsignalを0回にすることを確認する。panic-safe guardは失敗時のhost cleanup専用であり、production cleanupのdeadline、error、assertionを緩和する理由にしない。
 
 ## 通常gate
 

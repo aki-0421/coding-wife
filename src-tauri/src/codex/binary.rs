@@ -16,7 +16,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
-use super::process::{process_group_exists, terminate_child_process_group, ProcessGroupDropGuard};
+use super::process::{process_group_exists, ProcessGroupDropGuard};
 use super::types::{BinarySource, CapabilityState, CodexCapabilities};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -388,7 +388,9 @@ async fn run_bounded(
         .map(|root| tokio::spawn(monitor_schema_tree(root.to_path_buf(), abort_tx.clone())));
 
     if let Err(error) = identity.revalidate().await {
-        terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+        process_group_guard
+            .terminate_child(&mut child, Duration::from_millis(200))
+            .await;
         stdout_task.abort();
         stderr_task.abort();
         if let Some(monitor) = schema_monitor {
@@ -406,7 +408,9 @@ async fn run_bounded(
                     if let Some(monitor) = schema_monitor.as_ref() {
                         monitor.abort();
                     }
-                    terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+                    process_group_guard
+                        .terminate_child(&mut child, Duration::from_millis(200))
+                        .await;
                     stdout_task.abort();
                     stderr_task.abort();
                     return Err(BinaryError::SchemaUnsupported);
@@ -419,7 +423,9 @@ async fn run_bounded(
     let status = match outcome {
         Ok(Some(status)) => status,
         Ok(None) => {
-            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            process_group_guard
+                .terminate_child(&mut child, Duration::from_millis(200))
+                .await;
             stdout_task.abort();
             stderr_task.abort();
             if let Some(monitor) = schema_monitor {
@@ -428,7 +434,9 @@ async fn run_bounded(
             return Err(BinaryError::ProbeFailed);
         }
         Err(error) => {
-            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            process_group_guard
+                .terminate_child(&mut child, Duration::from_millis(200))
+                .await;
             stdout_task.abort();
             stderr_task.abort();
             if let Some(monitor) = schema_monitor {
@@ -455,7 +463,9 @@ async fn run_bounded(
             if let Some(monitor) = schema_monitor {
                 monitor.abort();
             }
-            terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+            process_group_guard
+                .terminate_child(&mut child, Duration::from_millis(200))
+                .await;
             stdout_task.abort();
             stderr_task.abort();
             return Err(error);
@@ -465,7 +475,9 @@ async fn run_bounded(
         monitor.abort();
     }
     if process_group_exists(pid) {
-        terminate_child_process_group(&mut child, pid, Duration::from_millis(200)).await;
+        process_group_guard
+            .terminate_child(&mut child, Duration::from_millis(200))
+            .await;
         return Err(BinaryError::ProbeFailed);
     }
     process_group_guard.disarm();
