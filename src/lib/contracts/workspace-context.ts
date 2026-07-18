@@ -169,7 +169,11 @@ function parseItems(
   ) {
     return violation()
   }
-  return [...value]
+  const items: unknown[] = value
+  return items.map((item) => {
+    if (typeof item !== "string") return violation()
+    return item
+  })
 }
 
 function validTechnicalReference(value: string): boolean {
@@ -204,12 +208,88 @@ function containsPolicyOverride(value: string): boolean {
     return true
   }
   return normalized.split("\n").some((line) => {
-    const candidate = line.replace(/^[\s{}\[\]*"'-]+/u, "")
+    const candidate = line.replace(/^[\s{}[\]*"'-]+/u, "")
     return policyKeys.some((key) => {
       if (!candidate.startsWith(key)) return false
       return /^["' ]*[:=]/u.test(candidate.slice(key.length))
     })
   })
+}
+
+function validItems(
+  value: readonly string[],
+  maximumItems: number,
+  maximumItem: number,
+): boolean {
+  return (
+    value.length <= maximumItems &&
+    value.every(
+      (item) => isContextText(item, maximumItem, false) && item === item.trim(),
+    )
+  )
+}
+
+export function firstInvalidProjectContextField(
+  value: ProjectContext,
+): keyof ProjectContext | null {
+  if (!isContextText(value.goal, 8_000)) return "goal"
+  if (!isContextText(value.constraints, 8_000)) return "constraints"
+  if (!validItems(value.definitionOfDone, 20, 500)) {
+    return "definitionOfDone"
+  }
+  if (
+    !validItems(value.technicalReferences, 20, 500) ||
+    !value.technicalReferences.every(validTechnicalReference)
+  ) {
+    return "technicalReferences"
+  }
+  if (!isContextText(value.userNotes, 8_000)) return "userNotes"
+  const total =
+    unicodeScalarCount(value.goal) +
+    unicodeScalarCount(value.constraints) +
+    unicodeScalarCount(value.userNotes) +
+    value.definitionOfDone.reduce(
+      (sum, item) => sum + unicodeScalarCount(item),
+      0,
+    ) +
+    value.technicalReferences.reduce(
+      (sum, item) => sum + unicodeScalarCount(item),
+      0,
+    )
+  return total > 32_000 ? "userNotes" : null
+}
+
+export function firstInvalidCharacterContextField(
+  value: CharacterContext,
+): keyof CharacterContext | null {
+  if (
+    !isContextText(value.displayName, 40, false) ||
+    value.displayName !== value.displayName.trim() ||
+    containsPolicyOverride(value.displayName)
+  ) {
+    return "displayName"
+  }
+  if (!isContextText(value.toneNotes, 1_000)) return "toneNotes"
+  if (containsPolicyOverride(value.toneNotes)) return "toneNotes"
+  if (!isContextText(value.behavior, 4_000)) return "behavior"
+  if (containsPolicyOverride(value.behavior)) return "behavior"
+  if (!validItems(value.prohibitedExpressions, 20, 200)) {
+    return "prohibitedExpressions"
+  }
+  if (value.prohibitedExpressions.some(containsPolicyOverride)) {
+    return "prohibitedExpressions"
+  }
+  const policyValues = [
+    value.displayName,
+    value.toneNotes,
+    value.behavior,
+    ...value.prohibitedExpressions,
+  ]
+  const total =
+    policyValues.reduce((sum, item) => sum + unicodeScalarCount(item), 0) +
+    unicodeScalarCount(value.tone) +
+    unicodeScalarCount(value.speechDensity)
+  return total > 12_000 ? "behavior" : null
 }
 
 export function parseProjectContext(value: unknown): ProjectContext {

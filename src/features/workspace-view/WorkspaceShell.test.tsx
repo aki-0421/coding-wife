@@ -923,15 +923,19 @@ describe("WorkspaceShell", () => {
     expect(send).toBeEnabled()
     fireEvent.click(send)
 
-    expect(requests).toEqual([
-      {
-        attachments: [],
-        contextSnapshots: [],
-        effort: "fast",
-        instruction: "Run the bounded implementation",
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      attachments: [],
+      contextSnapshots: [],
+      effort: "fast",
+      instruction: "Run the bounded implementation",
+      workspaceId: "build-live2d-desktop-app",
+      editableContextSnapshot: {
         workspaceId: "build-live2d-desktop-app",
+        projectVersion: 1,
+        characterVersion: 1,
       },
-    ])
+    })
     await waitFor(() => expect(composer).toHaveValue(""))
 
     const stop = await screen.findByRole("button", { name: "Stop" })
@@ -1445,6 +1449,32 @@ describe("WorkspaceShell", () => {
       },
       pickAttachments,
       registerAttachmentPaths,
+      getTurnContextSnapshot: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          workspaceId: "workspace-native",
+          projectVersion: 1,
+          projectHash: "a".repeat(64),
+          characterVersion: 1,
+          characterHash: "b".repeat(64),
+          snapshotHash: "c".repeat(64),
+          capturedAt: "2026-07-18T00:00:00.000Z",
+          project: {
+            goal: "",
+            constraints: "",
+            definitionOfDone: [],
+            technicalReferences: [],
+            userNotes: "",
+          },
+          character: {
+            displayName: "Sol",
+            tone: "neutral",
+            toneNotes: "",
+            speechDensity: "key_events",
+            behavior: "",
+            prohibitedExpressions: [],
+          },
+        }),
       sendTurn,
     }
     const user = userEvent.setup()

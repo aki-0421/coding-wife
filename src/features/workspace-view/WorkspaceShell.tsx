@@ -36,6 +36,7 @@ import type {
   WorkspaceTab,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
+import { useEditableWorkspaceContext } from "@/features/workspace-view/useEditableWorkspaceContext"
 import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceViewModel"
 import type { CommitExplanationController } from "@/lib/contracts/git-review"
 
@@ -75,6 +76,10 @@ export function WorkspaceShell({
   const copy = getWorkspaceCopy(locale)
   const runtime = useRuntime()
   const view = useWorkspaceViewModel(adapter)
+  const contextModel = useEditableWorkspaceContext(
+    adapter,
+    view.selectedWorkspace?.id ?? "__no_workspace__",
+  )
   const characterRuntimeStore = useCharacterRuntimeStatusStore()
   const characterRuntimeSnapshot = useCharacterRuntimeStatus(
     view.selectedWorkspace?.id ?? "__no_workspace__",
@@ -101,6 +106,12 @@ export function WorkspaceShell({
   const reducedMotion =
     view.reducedMotion === "reduce" ||
     (view.reducedMotion === "system" && systemReducedMotion)
+  const turnActive =
+    view.turnState === "sending" ||
+    view.turnState === "running" ||
+    view.turnState === "stopping" ||
+    view.codex.phase === "running" ||
+    view.codex.phase === "stopping"
   const activeTab = view.activeTab
   const registerAttachmentPaths = view.registerAttachmentPaths
 
@@ -429,7 +440,11 @@ export function WorkspaceShell({
           forceMount
           value="context"
         >
-          <ContextView copy={copy} workspaceId={selectedWorkspace.id} />
+          <ContextView
+            copy={copy}
+            model={contextModel}
+            turnActive={turnActive}
+          />
         </TabsContent>
 
         <TabsContent
@@ -440,13 +455,13 @@ export function WorkspaceShell({
           <SettingsView
             characterHidden={view.characterHidden}
             characterRuntime={characterRuntime}
+            contextModel={contextModel}
             copy={copy}
             history={view.history}
             muted={view.muted}
             onCharacterHiddenChange={view.setCharacterHidden}
             onMutedChange={view.setMuted}
             onDeleteHistory={view.deleteSelectedWorkspaceHistory}
-            onOpenContext={() => view.setActiveTab("context")}
             onReducedMotionChange={view.setReducedMotion}
             onResetUi={view.resetUiState}
             onRetryRuntime={runtime.refresh}
@@ -457,6 +472,7 @@ export function WorkspaceShell({
             reducedMotion={view.reducedMotion}
             runtimeState={runtime.state}
             section={view.settingsSection}
+            turnActive={turnActive}
             workspaceId={selectedWorkspace.id}
           />
         </TabsContent>

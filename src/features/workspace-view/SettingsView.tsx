@@ -49,7 +49,9 @@ import {
 } from "@/features/character"
 import { useI18n, type SupportedLocale } from "@/features/localization"
 import { NarrationSettings } from "@/features/narration"
+import { EditableContextSection } from "@/features/workspace-view/EditableContextSection"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import type { EditableWorkspaceContextModel } from "@/features/workspace-view/useEditableWorkspaceContext"
 import type { RuntimeState } from "@/features/runtime"
 import type {
   SettingsSection,
@@ -61,16 +63,17 @@ interface SettingsViewProps {
   readonly characterHidden: boolean
   readonly characterRuntime: CharacterRuntimeView
   readonly copy: WorkspaceCopy
+  readonly contextModel: EditableWorkspaceContextModel
   readonly history: WorkspaceAdapterState["history"]
   readonly muted: boolean
   readonly reducedMotion: "system" | "reduce" | "allow"
   readonly runtimeState: RuntimeState
   readonly section: SettingsSection
+  readonly turnActive: boolean
   readonly workspaceId: string
   readonly onCharacterHiddenChange: (hidden: boolean) => void
   readonly onDeleteHistory: () => Promise<boolean>
   readonly onMutedChange: (muted: boolean) => void
-  readonly onOpenContext: (section: "project" | "character") => void
   readonly onResetUi: () => void
   readonly onRetryRuntime: () => void
   readonly onRetryCharacter: () => void
@@ -445,35 +448,22 @@ function GeneralSettings({
 function ContextSettings({
   character,
   copy,
-  onOpenContext,
+  contextModel,
+  turnActive,
 }: {
   readonly character: boolean
   readonly copy: WorkspaceCopy
-  readonly onOpenContext: SettingsViewProps["onOpenContext"]
+  readonly contextModel: EditableWorkspaceContextModel
+  readonly turnActive: boolean
 }) {
-  const view = copy.contextView
   return (
-    <section className="flex flex-col gap-lg">
-      <h2 className="m-0 text-headline text-text-strong">
-        {character ? view.characterTitle : view.projectTitle}
-      </h2>
-      <p className="m-0 max-w-[70ch] text-body text-foreground">
-        {character ? view.characterDescription : view.projectDescription}
-      </p>
-      <p className="m-0 max-w-[70ch] text-caption text-muted-foreground">
-        {copy.contextView.description}
-      </p>
-      <div>
-        <Button
-          onClick={() => onOpenContext(character ? "character" : "project")}
-          size="xs"
-          type="button"
-          variant="secondary"
-        >
-          {copy.tabs.context}
-        </Button>
-      </div>
-    </section>
+    <EditableContextSection
+      copy={copy}
+      instanceId={`settings-${character ? "character" : "project"}`}
+      model={contextModel}
+      section={character ? "character" : "project"}
+      turnActive={turnActive}
+    />
   )
 }
 
@@ -842,7 +832,8 @@ export function SettingsView(props: SettingsViewProps) {
           <ContextSettings
             character={false}
             copy={props.copy}
-            onOpenContext={props.onOpenContext}
+            contextModel={props.contextModel}
+            turnActive={props.turnActive}
           />
         )
       case "character_context":
@@ -850,7 +841,8 @@ export function SettingsView(props: SettingsViewProps) {
           <ContextSettings
             character
             copy={props.copy}
-            onOpenContext={props.onOpenContext}
+            contextModel={props.contextModel}
+            turnActive={props.turnActive}
           />
         )
       case "companion":
