@@ -211,6 +211,32 @@ impl CodexSupervisor {
             .clone()
     }
 
+    pub(crate) async fn support_runtime_context(
+        &self,
+        workspace_id: &str,
+        workspace_generation: u64,
+    ) -> Option<(BinaryInfo, SchemaProbe, PathBuf)> {
+        let resource_directory = self
+            .inner
+            .resource_directory
+            .read()
+            .expect("resource directory lock poisoned")
+            .clone()?;
+        let state = self.inner.state.lock().await;
+        if state.active_workspace.as_deref() != Some(workspace_id)
+            || state.generation != workspace_generation
+            || state.diagnostic.health != CodexHealth::Ready
+            || state.runtime.is_none()
+        {
+            return None;
+        }
+        Some((
+            state.binary.clone()?,
+            state.schema.clone()?,
+            resource_directory,
+        ))
+    }
+
     async fn invalidate_main_work_unit_generation(&self, generation: u64) {
         if let Some(runtime) = self.main_work_unit_runtime() {
             runtime.invalidate_generation(generation).await;

@@ -2,6 +2,7 @@ pub mod attachment;
 pub mod binary;
 pub mod bundled_skill;
 pub mod commands;
+pub mod commit_explanation;
 pub mod decision;
 pub mod dynamic_tools;
 pub mod jsonl;

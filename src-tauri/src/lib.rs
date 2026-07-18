@@ -21,6 +21,10 @@ use codex::commands::{
     codex_review_start, codex_thread_list, codex_thread_resume, codex_thread_start,
     codex_turn_interrupt, codex_turn_start,
 };
+use codex::commit_explanation::{
+    commit_explanation_cancel, commit_explanation_get_state, commit_explanation_present,
+    commit_explanation_request, commit_explanation_set_scope, CommitExplanationController,
+};
 use codex::supervisor::CodexSupervisor;
 use codex::workspace::WorkspaceService;
 use git_review::commands::{
@@ -188,6 +192,10 @@ pub fn run() {
             .map_err(|error| std::io::Error::other(error.code))?;
             app.manage(history_service.clone());
             app.manage(git_review_service);
+            app.manage(CommitExplanationController::production(
+                setup_supervisor.clone(),
+                app.handle().clone(),
+            ));
             tauri::async_runtime::spawn(async move {
                 history_service.restore_startup().await;
             });
@@ -245,6 +253,11 @@ pub fn run() {
             read_commit_evidence,
             read_commit_diff_file,
             prepare_commit_explanation_evidence,
+            commit_explanation_request,
+            commit_explanation_cancel,
+            commit_explanation_present,
+            commit_explanation_get_state,
+            commit_explanation_set_scope,
             character_library_get,
             character_import_pick,
             character_read_asset,
@@ -268,6 +281,9 @@ pub fn run() {
 
     app.run(move |_app_handle, event| {
         if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            if let Some(controller) = _app_handle.try_state::<CommitExplanationController>() {
+                tauri::async_runtime::block_on(controller.shutdown());
+            }
             if let Some(narration_service) = _app_handle.try_state::<NarrationService>() {
                 let _ = tauri::async_runtime::block_on(narration_service.shutdown());
             }

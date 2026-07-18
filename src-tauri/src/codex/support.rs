@@ -33,7 +33,7 @@ pub const SUPPORT_MAX_SESSION_CAPACITY: usize = 1;
 pub const SUPPORT_PERMISSION_PROFILE: &str = "coding-wife-support-zero";
 const MAX_SUPPORT_INPUT_BYTES: usize = 64 * 1024;
 const MAX_SUPPORT_OUTPUT_BYTES: usize = 64 * 1024;
-const SUPPORT_TASK_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const SUPPORT_TASK_TIMEOUT: Duration = Duration::from_secs(15);
 const SUPPORT_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -235,6 +235,7 @@ pub struct SupportRuntime {
     skill: ResolvedBundledSkill,
     audit: SupportIsolationAudit,
     used: AtomicBool,
+    cancel_requested: AtomicBool,
     active: Mutex<Option<ActiveSupportTurn>>,
 }
 
@@ -351,6 +352,7 @@ impl SupportRuntime {
             },
             skill,
             used: AtomicBool::new(false),
+            cancel_requested: AtomicBool::new(false),
             active: Mutex::new(None),
         })
     }
@@ -366,6 +368,9 @@ impl SupportRuntime {
         if self.used.swap(true, Ordering::AcqRel) {
             return Err(SupportRuntimeError::AlreadyUsed);
         }
+        if self.cancel_requested.load(Ordering::Acquire) {
+            return Err(SupportRuntimeError::Canceled);
+        }
         validate_explain_request(&request)?;
         let input = serde_json::to_vec(&json!({
             "schemaVersion": 1,
@@ -379,7 +384,9 @@ impl SupportRuntime {
         }
         let input = String::from_utf8(input).map_err(|_| SupportRuntimeError::Output)?;
         let started = Instant::now();
-        let canceled = Arc::new(AtomicBool::new(false));
+        let canceled = Arc::new(AtomicBool::new(
+            self.cancel_requested.load(Ordering::Acquire),
+        ));
         {
             let mut active = self.active.lock().await;
             if active.is_some() {
@@ -459,9 +466,10 @@ impl SupportRuntime {
     }
 
     pub async fn cancel(&self) -> Result<bool, SupportRuntimeError> {
+        self.cancel_requested.store(true, Ordering::Release);
         let active = self.active.lock().await.clone();
         let Some(active) = active else {
-            return Ok(false);
+            return Ok(self.used.load(Ordering::Acquire));
         };
         active.canceled.store(true, Ordering::Release);
         if let Some(turn_id) = active.turn_id {
@@ -610,7 +618,7 @@ impl SupportRuntime {
         }
     }
 
-    pub async fn shutdown(self) -> Result<(), SupportRuntimeError> {
+    pub async fn shutdown(&self) -> Result<(), SupportRuntimeError> {
         self.runtime.shutdown().await;
         self.run_directory.cleanup()
     }
