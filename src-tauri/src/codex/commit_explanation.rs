@@ -457,7 +457,7 @@ impl IsolatedSupportExecutor {
                 result: Err(SupportRuntimeError::Canceled),
                 cleanup_converged,
                 pending_cleanup: (!cleanup_converged)
-                    .then(|| runtime as Arc<dyn SupportExecutionCleanup>),
+                    .then_some(runtime as Arc<dyn SupportExecutionCleanup>),
             };
         }
         let result = if canceled.load(Ordering::Acquire) {
@@ -480,7 +480,7 @@ impl IsolatedSupportExecutor {
             },
             cleanup_converged,
             pending_cleanup: (!cleanup_converged)
-                .then(|| runtime as Arc<dyn SupportExecutionCleanup>),
+                .then_some(runtime as Arc<dyn SupportExecutionCleanup>),
         }
     }
 

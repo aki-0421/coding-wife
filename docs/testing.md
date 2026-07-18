@@ -1,7 +1,7 @@
 ---
 title: "Testing Coding Wife"
 description: "Judge-facing setup, verification, macOS release packaging, installation, and Gatekeeper instructions for Coding Wife."
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "Reproducing the hackathon build or verifying Coding Wife on macOS."
   - "Changing release commands, the DMG layout, or repository quality gates."
@@ -36,21 +36,18 @@ pnpm tauri dev
 
 ## Run the quality gates
 
+Start from a clean committed checkout, then run the repository-owned sequence:
+
 ```bash
-pnpm format:check
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml
-pnpm tauri build --debug --no-bundle
-agent-docs lint
-pnpm check:diff
+git status --short
+pnpm quality:check
 ```
 
-`pnpm check:diff` checks committed changes from `origin/develop...HEAD`, staged changes, unstaged changes, and untracked files. CI passes the Pull Request base commit to the same command. Use `pnpm check:diff -- --working-tree` for local work when the base ref is intentionally unavailable.
+`pnpm quality:check` refuses a dirty checkout and runs every expensive gate synchronously in this order: `format:check`, `test:clean-checkout`, `typecheck`, `build`, `live2d:verify`, Rust format, Clippy with warnings denied, Rust tests, deterministic `agent-docs` lint, the production Tauri build, and the final repository diff check. Frontend and Cargo workloads never overlap. The command checks the worktree again after the build and stops at the first failed gate.
+
+`pnpm test:clean-checkout` creates a detached temporary worktree from `HEAD`, installs the pinned lockfile, and proves lint, tests, type checking, and Live2D preparation do not depend on ignored Framework output.
+
+`pnpm check:diff` checks committed changes from `origin/develop...HEAD`, staged changes, unstaged changes, and untracked files for whitespace errors and unresolved conflict markers. Its committed-diff policy also rejects generated/build paths, private-state paths, newly added machine-local checkout or home paths, and binary files outside the explicit application asset allowlist. CI passes the Pull Request base commit to the same command. Use `pnpm check:diff -- --working-tree` for local whitespace checks when the base ref is intentionally unavailable.
 
 The command excludes only `src-tauri/resources/characters/builtin-hiyori/NOTICE.txt` from whitespace diagnostics because that third-party notice must retain its approved bytes. It independently verifies that the worktree path is a regular file with the pinned SHA-256. If `HEAD` or the selected base contains the notice, the Git index must also contain exactly one stage-zero entry at that path with mode `100644` and the same byte-exact regular blob. This rejects cached deletion, staged content drift, mode changes, renames, and symlink replacement even when the worktree file still looks canonical. A canonical untracked or staged addition remains valid when the selected tracked baselines do not contain the notice. Files at every other path remain checked. Failure output contains safe scope codes rather than diff lines, secrets, or absolute paths. The command never modifies the notice, index, or worktree.
 

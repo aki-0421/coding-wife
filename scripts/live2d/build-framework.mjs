@@ -62,9 +62,9 @@ function processIsAlive(pid) {
   }
 }
 
-function staleLock(lockFile, staleAfterMs) {
+function staleLock(lockFile, staleAfterMs, now) {
   try {
-    const age = Date.now() - statSync(lockFile).mtimeMs
+    const age = now() - statSync(lockFile).mtimeMs
     if (age <= staleAfterMs) return false
     const owner = lockOwner(lockFile)
     return owner === null || !processIsAlive(owner.pid)
@@ -77,14 +77,16 @@ export async function withBuildLock(
   lockFile,
   operation,
   {
+    now = Date.now,
     retryIntervalMs = 50,
     staleAfterMs = 10 * 60_000,
     timeoutMs = 2 * 60_000,
+    wait = delay,
   } = {},
 ) {
   mkdirSync(path.dirname(lockFile), { recursive: true })
   const token = randomUUID()
-  const deadline = Date.now() + timeoutMs
+  const deadline = now() + timeoutMs
 
   for (;;) {
     let descriptor
@@ -127,7 +129,7 @@ export async function withBuildLock(
       )) {
         throw error
       }
-      if (staleLock(lockFile, staleAfterMs)) {
+      if (staleLock(lockFile, staleAfterMs, now)) {
         try {
           unlinkSync(lockFile)
         } catch (unlinkError) {
@@ -142,10 +144,10 @@ export async function withBuildLock(
         }
         continue
       }
-      if (Date.now() >= deadline) {
+      if (now() >= deadline) {
         fail(`timed out waiting for Framework build lock: ${lockFile}`)
       }
-      await delay(retryIntervalMs)
+      await wait(retryIntervalMs)
     }
   }
 

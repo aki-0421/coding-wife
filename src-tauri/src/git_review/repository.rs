@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use chrono::Utc;
 use sha2::{Digest, Sha256};
@@ -35,20 +35,6 @@ pub(crate) enum FileMaterial {
 }
 
 impl FileMaterial {
-    pub fn content_hash(&self) -> Option<String> {
-        match self {
-            Self::Missing => None,
-            Self::Regular(bytes) | Self::Symlink(bytes) => Some(content_hash(bytes)),
-        }
-    }
-
-    pub fn bytes(&self) -> Option<&[u8]> {
-        match self {
-            Self::Regular(bytes) => Some(bytes),
-            Self::Missing | Self::Symlink(_) => None,
-        }
-    }
-
     pub fn byte_count(&self) -> u64 {
         match self {
             Self::Missing => 0,
@@ -73,10 +59,6 @@ pub(crate) struct FileSnapshot {
 
 #[derive(Clone, Debug)]
 pub(crate) struct RepositoryIdentity {
-    pub canonical_root: PathBuf,
-    pub canonical_git_dir: PathBuf,
-    pub canonical_common_dir: PathBuf,
-    pub object_directory: PathBuf,
     pub root_device: u64,
     pub root_inode: u64,
     pub git_device: u64,
@@ -193,7 +175,6 @@ pub(crate) async fn inspect_repository(
         ));
     }
     let canonical_common_dir = layout.canonical_common_dir.clone();
-    let object_directory = layout.object_directory.clone();
     let mut blocked_reasons = Vec::new();
     let head_sha = layout.head_sha.clone();
     if head_sha == "unborn" {
@@ -313,10 +294,6 @@ pub(crate) async fn inspect_repository(
     blocked_reasons.dedup();
 
     let identity = RepositoryIdentity {
-        canonical_root,
-        canonical_git_dir,
-        canonical_common_dir,
-        object_directory,
         root_device: validated.root_device,
         root_inode: validated.root_inode,
         git_device: validated.git_device,
@@ -337,19 +314,6 @@ pub(crate) async fn inspect_repository(
         changes,
         blocked_reasons,
     })
-}
-
-pub(crate) fn same_repository_identity(
-    expected: &RepositoryIdentity,
-    actual: &RepositoryIdentity,
-) -> bool {
-    expected.canonical_root == actual.canonical_root
-        && expected.canonical_git_dir == actual.canonical_git_dir
-        && expected.canonical_common_dir == actual.canonical_common_dir
-        && expected.root_device == actual.root_device
-        && expected.root_inode == actual.root_inode
-        && expected.git_device == actual.git_device
-        && expected.git_inode == actual.git_inode
 }
 
 pub(crate) async fn read_worktree_material(
@@ -409,83 +373,6 @@ pub(crate) async fn worktree_mode(
     Ok(Some("100644".to_owned()))
 }
 
-pub(crate) async fn head_material(
-    runner: &GitRunner,
-    repository: &RepositoryIdentity,
-    relative_path: &str,
-) -> Result<(FileMaterial, Option<String>), GitReviewError> {
-    validate_relative_path(relative_path)?;
-    if repository.head_sha == "unborn" {
-        return Ok((FileMaterial::Missing, None));
-    }
-    let output = runner
-        .ls_tree_entry(
-            &repository.canonical_root,
-            &repository.head_sha,
-            relative_path,
-        )
-        .await
-        .map_err(runner_inspect_error)?;
-    if !output.status.success() {
-        return Err(git_error("GIT-TREE-READ", OPERATION_INSPECT, true));
-    }
-    if output.stdout.is_empty() {
-        return Ok((FileMaterial::Missing, None));
-    }
-    let record = output
-        .stdout
-        .strip_suffix(&[0])
-        .ok_or_else(|| git_error("GIT-TREE-DECODE", OPERATION_INSPECT, false))?;
-    let separator = record
-        .iter()
-        .position(|byte| *byte == b'\t')
-        .ok_or_else(|| git_error("GIT-TREE-DECODE", OPERATION_INSPECT, false))?;
-    let (metadata, path_with_separator) = record.split_at(separator);
-    let path = &path_with_separator[1..];
-    let path = std::str::from_utf8(path)
-        .map_err(|_| git_error("GIT-PATH-ENCODING", OPERATION_INSPECT, false))?;
-    if path != relative_path {
-        return Err(git_error("GIT-TREE-PATH", OPERATION_INSPECT, false));
-    }
-    let metadata = std::str::from_utf8(metadata)
-        .map_err(|_| git_error("GIT-TREE-DECODE", OPERATION_INSPECT, false))?;
-    let mut fields = metadata.split_ascii_whitespace();
-    let mode = fields.next().unwrap_or_default();
-    let kind = fields.next().unwrap_or_default();
-    let object_id = fields.next().unwrap_or_default();
-    if fields.next().is_some() || !is_object_id(object_id) {
-        return Err(git_error("GIT-TREE-DECODE", OPERATION_INSPECT, false));
-    }
-    if mode == "160000" || kind == "commit" {
-        return Err(git_error(
-            "GIT-SUBMODULE-UNSUPPORTED",
-            OPERATION_INSPECT,
-            false,
-        ));
-    }
-    if mode == "120000" {
-        return Err(git_error(
-            "GIT-SYMLINK-UNSUPPORTED",
-            OPERATION_INSPECT,
-            false,
-        ));
-    }
-    if kind != "blob" || !matches!(mode, "100644" | "100755") {
-        return Err(git_error("GIT-TREE-TYPE", OPERATION_INSPECT, false));
-    }
-    let blob = runner
-        .cat_blob(&repository.canonical_root, object_id)
-        .await
-        .map_err(runner_inspect_error)?;
-    if !blob.status.success() {
-        return Err(git_error("GIT-BLOB-READ", OPERATION_INSPECT, true));
-    }
-    if blob.stdout.len() as u64 > MAX_CHANGED_BYTES {
-        return Err(git_error("GIT-LIMIT-BYTES", OPERATION_INSPECT, false));
-    }
-    Ok((FileMaterial::Regular(blob.stdout), Some(mode.to_owned())))
-}
-
 pub(crate) fn repository_fingerprint(
     identity: &RepositoryIdentity,
     index_fingerprint: &str,
@@ -505,10 +392,6 @@ pub(crate) fn repository_fingerprint(
     hasher.update(status_fingerprint.as_bytes());
     hash_changes(&mut hasher, changes);
     format!("sha256:{}", hex::encode(hasher.finalize()))
-}
-
-pub(crate) fn content_hash(bytes: &[u8]) -> String {
-    bytes_hash(bytes)
 }
 
 pub(crate) fn file_id(relative_path: &str) -> String {

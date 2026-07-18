@@ -223,20 +223,6 @@ impl GitRunner {
         .await
     }
 
-    pub async fn rev_parse_tree(
-        &self,
-        root: &Path,
-        commit: &str,
-    ) -> Result<BoundedCommandOutput, GitRunnerError> {
-        let treeish = format!("{commit}^{{tree}}");
-        let args = vec![
-            OsString::from("rev-parse"),
-            OsString::from("--verify"),
-            OsString::from(treeish),
-        ];
-        self.run(root, args, GIT_TIMEOUT, 256).await
-    }
-
     pub async fn status_porcelain(
         &self,
         root: &Path,
@@ -262,64 +248,6 @@ impl GitRunner {
             GIT_LARGE_STDOUT_LIMIT,
         )
         .await
-    }
-
-    pub async fn ls_tree_entry(
-        &self,
-        root: &Path,
-        commit: &str,
-        relative_path: &str,
-    ) -> Result<BoundedCommandOutput, GitRunnerError> {
-        let args = vec![
-            OsString::from("ls-tree"),
-            OsString::from("-z"),
-            OsString::from(commit),
-            OsString::from("--"),
-            OsString::from(relative_path),
-        ];
-        self.run(root, args, GIT_TIMEOUT, 16 * 1024).await
-    }
-
-    pub async fn cat_blob(
-        &self,
-        root: &Path,
-        object_id: &str,
-    ) -> Result<BoundedCommandOutput, GitRunnerError> {
-        let args = vec![
-            OsString::from("cat-file"),
-            OsString::from("blob"),
-            OsString::from(object_id),
-        ];
-        self.run(root, args, GIT_TIMEOUT, GIT_LARGE_STDOUT_LIMIT)
-            .await
-    }
-
-    pub async fn cat_object_type(
-        &self,
-        root: &Path,
-        object_id: &str,
-    ) -> Result<BoundedCommandOutput, GitRunnerError> {
-        let args = vec![
-            OsString::from("cat-file"),
-            OsString::from("-t"),
-            OsString::from(object_id),
-        ];
-        self.run(root, args, GIT_TIMEOUT, 128).await
-    }
-
-    pub async fn rev_list_parent(
-        &self,
-        root: &Path,
-        commit: &str,
-    ) -> Result<BoundedCommandOutput, GitRunnerError> {
-        let args = vec![
-            OsString::from("rev-list"),
-            OsString::from("--parents"),
-            OsString::from("-n"),
-            OsString::from("1"),
-            OsString::from(commit),
-        ];
-        self.run(root, args, GIT_TIMEOUT, 512).await
     }
 
     pub async fn is_ancestor(
@@ -607,12 +535,4 @@ fn map_bounded_error(error: BoundedCommandError) -> GitRunnerError {
         BoundedCommandError::ProcessTree => GitRunnerError::ProcessTree,
         BoundedCommandError::Read => GitRunnerError::Io,
     }
-}
-
-pub(crate) fn stdout_text(output: &BoundedCommandOutput) -> Result<String, GitRunnerError> {
-    String::from_utf8(output.stdout.clone()).map_err(|_| GitRunnerError::Io)
-}
-
-pub(crate) fn trimmed_stdout(output: &BoundedCommandOutput) -> Result<String, GitRunnerError> {
-    Ok(stdout_text(output)?.trim().to_owned())
 }

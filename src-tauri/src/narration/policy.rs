@@ -305,9 +305,7 @@ fn public_url_candidate_end(characters: &[char], start: usize) -> usize {
 
 fn raw_url_authority(candidate: &str, scheme_length: usize) -> &str {
     let authority = &candidate[scheme_length..];
-    let authority_end = authority
-        .find(|character| matches!(character, '/' | '?' | '#'))
-        .unwrap_or(authority.len());
+    let authority_end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
     &authority[..authority_end]
 }
 

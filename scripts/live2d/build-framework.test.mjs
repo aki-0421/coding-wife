@@ -18,25 +18,52 @@ function temporaryDirectory() {
   return mkdtempSync(path.join(tmpdir(), "coding-wife-framework-build-"))
 }
 
+function nextTurn() {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+async function waitForCondition(predicate) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return
+    await nextTurn()
+  }
+  assert.fail("deterministic lock condition was not reached")
+}
+
 test("the Framework build lock serializes parallel preparation", async () => {
   const root = temporaryDirectory()
   const lock = path.join(root, "framework.lock")
   let active = 0
   let maximumActive = 0
+  const releases = []
   const operation = () =>
     withBuildLock(
       lock,
       async () => {
         active += 1
         maximumActive = Math.max(maximumActive, active)
-        await new Promise((resolve) => setTimeout(resolve, 30))
-        active -= 1
+        try {
+          await new Promise((resolve) => releases.push(resolve))
+        } finally {
+          active -= 1
+        }
       },
-      { retryIntervalMs: 5, timeoutMs: 1_000 },
+      {
+        now: () => 0,
+        retryIntervalMs: 0,
+        timeoutMs: 1,
+        wait: nextTurn,
+      },
     )
 
   try {
-    await Promise.all([operation(), operation(), operation()])
+    const operations = [operation(), operation(), operation()]
+    for (let completed = 0; completed < operations.length; completed += 1) {
+      await waitForCondition(() => releases.length === 1)
+      releases.shift()()
+      await nextTurn()
+    }
+    await Promise.all(operations)
     assert.equal(maximumActive, 1)
     assert.equal(existsSync(lock), false)
   } finally {
@@ -85,13 +112,18 @@ test("an old lock is not reclaimed while its owner is alive", async () => {
   )
   const stale = new Date("2000-01-01T00:00:00.000Z")
   utimesSync(lock, stale, stale)
+  let now = Date.parse("2030-01-01T00:00:00.000Z")
 
   try {
     await assert.rejects(
       withBuildLock(lock, () => "must-not-run", {
-        retryIntervalMs: 5,
+        now: () => now,
+        retryIntervalMs: 1,
         staleAfterMs: 1,
-        timeoutMs: 20,
+        timeoutMs: 3,
+        wait: async (milliseconds) => {
+          now += milliseconds
+        },
       }),
       /timed out waiting for Framework build lock/,
     )

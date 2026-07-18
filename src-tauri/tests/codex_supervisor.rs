@@ -296,6 +296,31 @@ async fn read_state(path: &Path) -> String {
     tokio::fs::read_to_string(path).await.unwrap_or_default()
 }
 
+#[test]
+fn fixture_state_records_are_append_only_under_concurrency() {
+    let state = temporary_directory("concurrent-state");
+    let status = std::process::Command::new(fixture_binary())
+        .arg("fixture-record-concurrency")
+        .env("CODING_WIFE_CODEX_FAKE_STATE", &state)
+        .status()
+        .expect("run concurrent fixture records");
+    assert!(status.success(), "concurrent fixture record process");
+
+    let contents = std::fs::read_to_string(&state).expect("concurrent fixture state");
+    let records = contents
+        .lines()
+        .filter(|line| line.starts_with("concurrent_record:"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(records.len(), 32, "every append-only record is preserved");
+    for index in 0..32 {
+        assert!(
+            records.contains(format!("concurrent_record:{index}").as_str()),
+            "missing concurrent fixture record {index}"
+        );
+    }
+    let _ = std::fs::remove_file(state);
+}
+
 async fn start_active_turn(
     supervisor: &CodexSupervisor,
     workspace: &Path,

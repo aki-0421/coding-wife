@@ -115,20 +115,6 @@ impl GitRepositoryLayout {
             head_reference,
         })
     }
-
-    pub fn reference_value(&self, reference: &str) -> Result<Option<String>, GitLayoutError> {
-        if reference == "HEAD" {
-            return Ok((self.head_sha != "unborn").then(|| self.head_sha.clone()));
-        }
-        if !is_safe_head_reference(reference) {
-            return Err(GitLayoutError::Invalid);
-        }
-        read_reference(
-            &self.canonical_git_dir,
-            &self.canonical_common_dir,
-            reference,
-        )
-    }
 }
 
 pub(crate) fn is_object_id(value: &str) -> bool {

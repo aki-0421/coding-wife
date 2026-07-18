@@ -416,13 +416,9 @@ fn parse_commit_records(bytes: &[u8], root: &Path) -> Result<Vec<CommitIdentity>
                 root,
                 MAX_GIT_COMMIT_SUBJECT_CHARS,
             );
+            let joined_body = lines.collect::<Vec<_>>().join("\n");
             let body = sanitize_bounded_text(
-                &lines
-                    .collect::<Vec<_>>()
-                    .join("\n")
-                    .trim_start_matches(['\r', '\n'])
-                    .trim_end()
-                    .to_owned(),
+                joined_body.trim_start_matches(['\r', '\n']).trim_end(),
                 root,
                 MAX_GIT_COMMIT_BODY_CHARS,
             );

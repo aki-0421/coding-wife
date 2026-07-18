@@ -87,6 +87,14 @@ enum LegacyCharacterSelection {
     },
 }
 
+type LegacySelectionCandidate = (
+    chrono::DateTime<chrono::FixedOffset>,
+    String,
+    String,
+    String,
+);
+type LegacyProjectCandidates = BTreeMap<String, Vec<LegacySelectionCandidate>>;
+
 impl LegacyCharacterSelection {
     fn parts(self) -> (String, String) {
         match self {
@@ -228,15 +236,7 @@ impl CharacterStorage {
             ));
         }
 
-        let mut candidates: BTreeMap<
-            String,
-            Vec<(
-                chrono::DateTime<chrono::FixedOffset>,
-                String,
-                String,
-                String,
-            )>,
-        > = BTreeMap::new();
+        let mut candidates = LegacyProjectCandidates::new();
         for (workspace_id, legacy_selection) in legacy.workspace_selections {
             if !is_workspace_id(&workspace_id) {
                 continue;

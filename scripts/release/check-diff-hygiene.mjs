@@ -2,6 +2,7 @@
 
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
+import { realpathSync } from "node:fs"
 import { lstat, readFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -16,6 +17,37 @@ const MAX_CAPTURE_BYTES = 16 * 1024 * 1024
 const GIT_TIMEOUT_MS = 30_000
 const CORE_WHITESPACE = "blank-at-eol,blank-at-eof,space-before-tab"
 const SAFE_BASE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9./_-]{0,199}$/u
+const ALLOWED_BINARY_PATHS = new Set([
+  "src-tauri/icons/32x32.png",
+  "src-tauri/icons/128x128.png",
+  "src-tauri/icons/128x128@2x.png",
+  "src-tauri/icons/icon.icns",
+  "src-tauri/resources/characters/builtin-hiyori/runtime/hiyori_pro_t11.moc3",
+  "src-tauri/resources/characters/builtin-hiyori/runtime/hiyori_pro_t11.2048/texture_00.png",
+  "src-tauri/resources/characters/builtin-hiyori/runtime/hiyori_pro_t11.2048/texture_01.png",
+])
+const BUILD_COMPONENTS = new Set([
+  ".cache",
+  ".nyc_output",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+  "tmp",
+])
+const PRIVATE_COMPONENTS = new Set([".codex", ".context", ".ssh"])
+const PRIVATE_FILENAMES = new Set([
+  "auth.json",
+  "credentials.json",
+  "id_ed25519",
+  "id_rsa",
+  "secrets.json",
+])
+const BUILD_FILE_PATTERN =
+  /(?:^|\/)[^/]+\.(?:app|dmg|log|o|orig|rej|rlib|rmeta|swp|tmp)$/u
+const PRIVATE_FILE_PATTERN = /\.(?:key|mobileprovision|p12|pem)$/u
 
 function usage() {
   process.stdout.write(
@@ -248,6 +280,190 @@ function trackedDiffFailed(repositoryRoot, args) {
   return result.status !== 0
 }
 
+function parseNameStatus(buffer) {
+  const records = parseNullTerminatedPaths(buffer)
+  if (records === null || records.length % 2 !== 0) {
+    return null
+  }
+  const statuses = new Map()
+  for (let index = 0; index < records.length; index += 2) {
+    const status = records[index]
+    const relativePath = records[index + 1]
+    if (!/^[ACDMTUXB]$/u.test(status) || relativePath.length === 0) {
+      return null
+    }
+    statuses.set(relativePath, status)
+  }
+  return statuses
+}
+
+function parseBinaryNumstatPaths(buffer) {
+  const records = parseNullTerminatedPaths(buffer)
+  if (records === null) {
+    return null
+  }
+  const binaries = []
+  for (const record of records) {
+    const firstTab = record.indexOf("\t")
+    const secondTab = record.indexOf("\t", firstTab + 1)
+    if (firstTab <= 0 || secondTab <= firstTab + 1) {
+      return null
+    }
+    const added = record.slice(0, firstTab)
+    const deleted = record.slice(firstTab + 1, secondTab)
+    const relativePath = record.slice(secondTab + 1)
+    if (relativePath.length === 0) {
+      return null
+    }
+    if (added === "-" && deleted === "-") {
+      binaries.push(relativePath)
+    }
+  }
+  return binaries
+}
+
+function repositoryPathPolicy(relativePath) {
+  if (
+    relativePath.length === 0 ||
+    path.isAbsolute(relativePath) ||
+    relativePath.split("/").includes("..")
+  ) {
+    return "invalid-path"
+  }
+  if (relativePath === NOTICE_PATH) {
+    return null
+  }
+
+  const components = relativePath.split("/")
+  if (
+    components.some((component) => BUILD_COMPONENTS.has(component)) ||
+    components.some((component) => component.endsWith(".app")) ||
+    BUILD_FILE_PATTERN.test(relativePath)
+  ) {
+    return "build-output"
+  }
+  const basename = components.at(-1) ?? ""
+  if (
+    components.some((component) => PRIVATE_COMPONENTS.has(component)) ||
+    (basename !== ".env.example" &&
+      (basename === ".env" || basename.startsWith(".env."))) ||
+    PRIVATE_FILENAMES.has(basename) ||
+    PRIVATE_FILE_PATTERN.test(basename)
+  ) {
+    return "private-path"
+  }
+  return null
+}
+
+function trackedPatchContainsPrivatePath(repositoryRoot, range) {
+  const result = runGit(
+    repositoryRoot,
+    [
+      "-c",
+      "diff.external=",
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--no-color",
+      "--unified=0",
+      range,
+      "--",
+      INCLUDE_ALL_PATHSPEC,
+      NOTICE_EXCLUDE_PATHSPEC,
+    ],
+    { capture: true },
+  )
+  if (result.status !== 0) {
+    return null
+  }
+
+  const roots = [repositoryRoot, os.homedir()]
+  for (const candidate of [...roots]) {
+    try {
+      roots.push(realpathSync(candidate))
+    } catch {
+      // The original absolute path remains the safe detection boundary.
+    }
+  }
+  const needles = [...new Set(roots)]
+    .filter(
+      (value) => path.isAbsolute(value) && value !== path.parse(value).root,
+    )
+    .map((value) => Buffer.from(value))
+  return result.output
+    .toString("utf8")
+    .split("\n")
+    .some(
+      (line) =>
+        line.startsWith("+") &&
+        !line.startsWith("+++") &&
+        needles.some((needle) => Buffer.from(line).includes(needle)),
+    )
+}
+
+function trackedRepositoryPolicyFailures(repositoryRoot, range) {
+  const names = runGit(
+    repositoryRoot,
+    [
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--name-status",
+      "--no-renames",
+      "-z",
+      range,
+    ],
+    { capture: true },
+  )
+  const numstat = runGit(
+    repositoryRoot,
+    [
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--numstat",
+      "--no-renames",
+      "-z",
+      range,
+    ],
+    { capture: true },
+  )
+  if (names.status !== 0 || numstat.status !== 0) {
+    return null
+  }
+
+  const statuses = parseNameStatus(names.output)
+  const binaryPaths = parseBinaryNumstatPaths(numstat.output)
+  const privateContent = trackedPatchContainsPrivatePath(repositoryRoot, range)
+  if (statuses === null || binaryPaths === null || privateContent === null) {
+    return null
+  }
+
+  const failures = new Set()
+  for (const [relativePath, status] of statuses) {
+    if (status === "D") {
+      continue
+    }
+    const failure = repositoryPathPolicy(relativePath)
+    if (failure !== null) {
+      failures.add(failure)
+    }
+  }
+  for (const relativePath of binaryPaths) {
+    if (
+      statuses.get(relativePath) !== "D" &&
+      relativePath !== NOTICE_PATH &&
+      !ALLOWED_BINARY_PATHS.has(relativePath)
+    ) {
+      failures.add("binary")
+    }
+  }
+  if (privateContent) {
+    failures.add("private-content")
+  }
+  return [...failures].sort()
+}
+
 function parseNullTerminatedPaths(buffer) {
   if (buffer.byteLength === 0) {
     return []
@@ -388,6 +604,21 @@ async function main() {
   }
   if (untrackedDiffFailed(repositoryRoot)) {
     failedScopes.push("untracked")
+  }
+
+  if (baseCommit !== null) {
+    const policyFailures = trackedRepositoryPolicyFailures(
+      repositoryRoot,
+      `${baseCommit}...${headCommit}`,
+    )
+    if (policyFailures === null) {
+      fail("REPOSITORY_POLICY_UNAVAILABLE")
+      return
+    }
+    if (policyFailures.length > 0) {
+      fail(`REPOSITORY_POLICY_FAILED (${policyFailures.join(", ")})`)
+      return
+    }
   }
 
   if (!(await noticeIsCanonical(repositoryRoot))) {

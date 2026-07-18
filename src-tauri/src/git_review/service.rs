@@ -86,6 +86,10 @@ struct TerminalProcessingResult {
     verified_commits: Vec<TrustedVerifiedCommit>,
 }
 
+type RequestKey = (String, String);
+type SharedObservationStore = Arc<Mutex<BTreeMap<RequestKey, GitObservation>>>;
+type SharedRequestCache<T> = Arc<Mutex<BTreeMap<RequestKey, CachedResponse<T>>>>;
+
 pub(crate) struct TrustedTerminalWorkUnitObservationResult {
     pub response: TerminalWorkUnitObservationResult,
     pub verified_commits: Vec<TrustedVerifiedCommit>,
@@ -96,10 +100,9 @@ pub struct GitReviewService {
     runner: GitRunner,
     resolver: Arc<dyn GitWorkspaceResolver>,
     history: Arc<dyn GitReviewHistory>,
-    observations: Arc<Mutex<BTreeMap<(String, String), GitObservation>>>,
-    observation_requests: Arc<Mutex<BTreeMap<(String, String), CachedResponse<GitObservation>>>>,
-    terminal_requests:
-        Arc<Mutex<BTreeMap<(String, String), CachedResponse<TerminalProcessingResult>>>>,
+    observations: SharedObservationStore,
+    observation_requests: SharedRequestCache<GitObservation>,
+    terminal_requests: SharedRequestCache<TerminalProcessingResult>,
     terminal_lock: Arc<Mutex<()>>,
 }
 

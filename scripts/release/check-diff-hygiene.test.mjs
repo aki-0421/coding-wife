@@ -181,6 +181,85 @@ test("committed, staged, unstaged, and untracked whitespace fail independently",
   })
 })
 
+test("committed conflict markers fail without exposing the affected path", async (context) => {
+  const root = await createFixture(context)
+  await writeRelative(
+    root,
+    "conflicted-secret.txt",
+    "<<<<<<< HEAD\nleft\n=======\nright\n>>>>>>> feature\n",
+  )
+  git(root, ["add", "--all"])
+  git(root, ["commit", "-q", "-m", "test: add unresolved conflict"])
+
+  assertSafeFailure(runChecker(root), "DIFF_HYGIENE_FAILED", [
+    root,
+    "conflicted-secret.txt",
+  ])
+})
+
+test("committed repository policy rejects build, private, and binary artifacts", async (context) => {
+  await context.test("build output", async (child) => {
+    const root = await createFixture(child)
+    await writeRelative(root, "dist/app.js", "generated\n")
+    git(root, ["add", "--all"])
+    git(root, ["commit", "-q", "-m", "test: add generated output"])
+    assertSafeFailure(runChecker(root), "REPOSITORY_POLICY_FAILED", [
+      root,
+      "dist/app.js",
+    ])
+  })
+
+  await context.test("private path", async (child) => {
+    const root = await createFixture(child)
+    await writeRelative(root, ".context/auth.json", "{}\n")
+    git(root, ["add", "--all"])
+    git(root, ["commit", "-q", "-m", "test: add private state"])
+    assertSafeFailure(runChecker(root), "REPOSITORY_POLICY_FAILED", [
+      root,
+      ".context/auth.json",
+    ])
+  })
+
+  await context.test("private content", async (child) => {
+    const root = await createFixture(child)
+    const privateHome = os.homedir()
+    await writeRelative(root, "leaked-path.txt", `${privateHome}/secret\n`)
+    git(root, ["add", "--all"])
+    git(root, ["commit", "-q", "-m", "test: add private path"])
+    assertSafeFailure(runChecker(root), "REPOSITORY_POLICY_FAILED", [
+      root,
+      privateHome,
+      "leaked-path.txt",
+    ])
+  })
+
+  await context.test("binary artifact", async (child) => {
+    const root = await createFixture(child)
+    await writeRelative(root, "artifact.bin", Buffer.from([0, 1, 2, 3]))
+    git(root, ["add", "--all"])
+    git(root, ["commit", "-q", "-m", "test: add binary artifact"])
+    assertSafeFailure(runChecker(root), "REPOSITORY_POLICY_FAILED", [
+      root,
+      "artifact.bin",
+    ])
+  })
+})
+
+test("only explicit application binary assets and env examples pass policy", async (context) => {
+  const root = await createFixture(context)
+  await writeRelative(
+    root,
+    "src-tauri/icons/32x32.png",
+    Buffer.from([0, 1, 2, 3]),
+  )
+  await writeRelative(root, ".env.example", "SAFE_EXAMPLE=value\n")
+  git(root, ["add", "--all"])
+  git(root, ["commit", "-q", "-m", "test: add explicit assets"])
+
+  const result = runChecker(root)
+  assert.equal(result.status, 0, result.stderr)
+})
+
 test("a canonical notice added after the base is the only whitespace exclusion", async (context) => {
   const root = await createFixture(context, { noticeInBase: false })
   const rawGitCheck = run(root, "git", [
@@ -200,6 +279,23 @@ test("a canonical notice added after the base is the only whitespace exclusion",
     "DIFF_HYGIENE_FAILED",
     [root, "copied-notice.txt"],
   )
+})
+
+test("passing and failing checks never rewrite the byte-exact notice", async (context) => {
+  const root = await createFixture(context)
+  const noticePath = path.join(root, noticeRelativePath)
+  const canonicalBytes = await readFile(noticePath)
+
+  assert.equal(runChecker(root).status, 0)
+  assert.deepEqual(await readFile(noticePath), canonicalBytes)
+
+  await writeRelative(root, "bad-whitespace.txt", "bad \n")
+  assertSafeFailure(
+    runChecker(root, ["--working-tree"]),
+    "DIFF_HYGIENE_FAILED",
+    [root, "bad-whitespace.txt"],
+  )
+  assert.deepEqual(await readFile(noticePath), canonicalBytes)
 })
 
 test("notice modification, deletion, rename, and symlink replacement fail closed", async (context) => {
@@ -386,14 +482,23 @@ test("CLI rejects unsafe or contradictory options without echoing them", async (
   assert.equal(help.stdout.includes(root), false)
 })
 
-test("README, testing instructions, package command, and CI use the repository checker", async () => {
-  const [packageText, readme, testingInstructions, workflow] =
+test("README, testing instructions, package commands, and CI use repository gates", async () => {
+  const [packageText, readme, testingInstructions, workflow, qualityRunner] =
     await Promise.all([
       readFile(path.join(repositoryRoot, "package.json"), "utf8"),
       readFile(path.join(repositoryRoot, "README.md"), "utf8"),
       readFile(path.join(repositoryRoot, "docs", "testing.md"), "utf8"),
       readFile(
         path.join(repositoryRoot, ".github", "workflows", "diff-hygiene.yml"),
+        "utf8",
+      ),
+      readFile(
+        path.join(
+          repositoryRoot,
+          "scripts",
+          "quality",
+          "run-quality-gates.mjs",
+        ),
         "utf8",
       ),
     ])
@@ -403,10 +508,17 @@ test("README, testing instructions, package command, and CI use the repository c
     packageJson.scripts["check:diff"],
     "node scripts/release/check-diff-hygiene.mjs",
   )
+  assert.equal(
+    packageJson.scripts["quality:check"],
+    "node scripts/quality/run-quality-gates.mjs",
+  )
   assert.match(readme, /pnpm check:diff/u)
   assert.equal(readme.includes("git diff --check"), false)
   assert.match(testingInstructions, /pnpm check:diff/u)
+  assert.match(testingInstructions, /pnpm quality:check/u)
   assert.match(workflow, /pnpm check:diff/u)
   assert.match(workflow, /actions\/checkout@v7/u)
   assert.match(workflow, /actions\/setup-node@v7/u)
+  assert.match(qualityRunner, /--all-targets/u)
+  assert.match(qualityRunner, /pnpm.*tauri/u)
 })

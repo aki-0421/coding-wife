@@ -28,6 +28,7 @@ const BUILTIN_MANIFEST_FILE: &str = "pack.json";
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 const LIVE2D_CORE_BYTES: &[u8] =
     include_bytes!("../../../public/vendor/live2d/core/live2dcubismcore.min.js");
+const LIVE2D_CORE_SHA256: &str = "8741f739779b5d5210872bd3d7d99f0f1e56e6c87409e7d26d6bb4b80aa1ef47";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CharacterReadinessProbe {
@@ -440,7 +441,7 @@ impl CharacterService {
     pub(crate) fn readiness(&self) -> CharacterReadinessProbe {
         CharacterReadinessProbe {
             schema_version: CHARACTER_SCHEMA_VERSION,
-            core_available: !LIVE2D_CORE_BYTES.is_empty(),
+            core_available: live2d_core_available(),
             builtin_resources_available: self.verify_builtin_resources().is_ok(),
             library_available: self.storage.verify_library_readiness().is_ok(),
         }
@@ -1147,6 +1148,10 @@ impl CharacterService {
             pending.remove(&token);
         }
     }
+}
+
+fn live2d_core_available() -> bool {
+    hex::encode(Sha256::digest(LIVE2D_CORE_BYTES)) == LIVE2D_CORE_SHA256
 }
 
 fn custom_pack_view(pack: &StoredPack, state: &CharacterStateFile) -> CharacterPackView {

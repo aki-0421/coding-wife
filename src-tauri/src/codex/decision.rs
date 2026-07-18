@@ -318,7 +318,7 @@ enum WireDecisionOutput {
         decision_id: String,
         question: String,
         options: Vec<WireOption>,
-        context: WireDecisionContext,
+        context: Box<WireDecisionContext>,
         #[serde(rename = "allowFreeform")]
         allow_freeform: bool,
     },
@@ -409,7 +409,7 @@ pub fn parse_completed_output(
                 });
             }
             let decision_context =
-                validate_wire_decision_context(context, &mapped_option_ids, workspace_root)?;
+                validate_wire_decision_context(*context, &mapped_option_ids, workspace_root)?;
             Ok(DecisionOutput::Request {
                 view: Box::new(PendingRequestView {
                     pending_id: opaque_id("decision", &decision_id),

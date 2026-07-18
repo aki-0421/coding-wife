@@ -2,6 +2,7 @@
 """Deterministic Codex app-server fixture; stdout is JSONL protocol only."""
 
 import hashlib
+import fcntl
 import json
 import os
 import pathlib
@@ -21,8 +22,13 @@ def record(value):
     if not STATE_PATH:
         return
     path = pathlib.Path(STATE_PATH)
-    previous = path.read_text(encoding="utf-8") if path.exists() else ""
-    path.write_text(previous + value + "\n", encoding="utf-8")
+    with path.open("a", encoding="utf-8") as stream:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            stream.write(value + "\n")
+            stream.flush()
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def send(value):
@@ -221,6 +227,22 @@ def main():
     args = sys.argv[1:]
     if args == ["--version"]:
         sys.stdout.write("codex-cli 0.144.5\n")
+        return 0
+    if args == ["fixture-record-concurrency"]:
+        barrier = threading.Barrier(32)
+
+        def write_record(index):
+            barrier.wait()
+            record(f"concurrent_record:{index}")
+
+        threads = [
+            threading.Thread(target=write_record, args=(index,))
+            for index in range(barrier.parties)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
         return 0
     if len(args) >= 5 and args[:2] == ["app-server", "generate-json-schema"]:
         output = pathlib.Path(args[args.index("--out") + 1])

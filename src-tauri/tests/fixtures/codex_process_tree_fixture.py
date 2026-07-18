@@ -4,13 +4,12 @@
 import os
 import pathlib
 import signal
-import time
 
 
 def hold_stdio():
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     while True:
-        time.sleep(1)
+        signal.pause()
 
 
 def main():
