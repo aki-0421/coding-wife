@@ -314,6 +314,34 @@ describe("NarrationController", () => {
     }
   })
 
+  it("keeps each streamed chunk on its original visibility deadline", async () => {
+    vi.useFakeTimers()
+    try {
+      const gateway = new FakeNarrationGateway(true)
+      const controller = new NarrationController(gateway)
+      await controller.initialize()
+      const key = prepare(controller, ["最初の説明です。"])
+      await controller.activatePresentation(key)
+
+      await vi.advanceTimersByTimeAsync(900)
+      expect(
+        controller.consume(
+          event("chunk", { sequence: 1, text: "後から届いた説明です。" }),
+        ),
+      ).toBe(true)
+      await vi.advanceTimersByTimeAsync(100)
+
+      expect(controller.getSnapshot().presentation).toMatchObject({
+        chunks: ["最初の説明です。", "後から届いた説明です。"],
+        speechStatus: "unavailable",
+        errorCode: "NARRATION-CAPTION-NOT-VISIBLE",
+      })
+      expect(gateway.speech).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("streams later chunks only after explicit activation", async () => {
     const { controller, gateway } = await ready(true)
     const key = prepare(controller, ["受理済みです。"])

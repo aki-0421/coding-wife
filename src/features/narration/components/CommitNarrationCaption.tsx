@@ -4,6 +4,10 @@ import { MessageCircleMoreIcon, Volume2Icon, XIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  isCaptionTargetFullyVisible,
+  scrollViewportSelector,
+} from "@/features/narration/components/caption-visibility"
 import { narrationCopy } from "@/features/narration/copy"
 import type {
   CaptionVisibilityAcknowledgment,
@@ -28,39 +32,6 @@ function scheduleFrame(callback: FrameRequestCallback): () => void {
   return () => window.clearTimeout(id)
 }
 
-function isVisible(element: HTMLElement): boolean {
-  if (!element.isConnected || element.getClientRects().length === 0) {
-    return false
-  }
-  const style = window.getComputedStyle(element)
-  if (
-    style.display === "none" ||
-    style.visibility === "hidden" ||
-    style.visibility === "collapse" ||
-    document.visibilityState === "hidden"
-  ) {
-    return false
-  }
-  const bounds = element.getBoundingClientRect()
-  const centerX = bounds.left + bounds.width / 2
-  const centerY = bounds.top + bounds.height / 2
-  if (
-    bounds.width <= 0 ||
-    bounds.height <= 0 ||
-    centerX < 0 ||
-    centerY < 0 ||
-    centerX > window.innerWidth ||
-    centerY > window.innerHeight
-  ) {
-    return false
-  }
-  if (typeof document.elementFromPoint === "function") {
-    const hit = document.elementFromPoint(centerX, centerY)
-    if (hit === null || !element.contains(hit)) return false
-  }
-  return true
-}
-
 function presentationVariant(
   presentation: CommitNarrationPresentationSnapshot,
 ): "destructive" | "outline" | "running" | "success" {
@@ -81,6 +52,10 @@ export function CommitNarrationCaption({
   onVisible,
 }: CommitNarrationCaptionProps) {
   const rootRef = useRef<HTMLElement>(null)
+  const acknowledgedRef = useRef({
+    presentationGeneration: -1,
+    sequences: new Set<number>(),
+  })
   const { locale } = useI18n()
   const copy = narrationCopy[locale]
   const canDismiss =
@@ -102,20 +77,61 @@ export function CommitNarrationCaption({
       return
     }
 
+    if (
+      acknowledgedRef.current.presentationGeneration !==
+      presentation.presentationGeneration
+    ) {
+      acknowledgedRef.current = {
+        presentationGeneration: presentation.presentationGeneration,
+        sequences: new Set(),
+      }
+    }
+    const acknowledged = acknowledgedRef.current.sequences
+    let canceled = false
+    let cancelBeforePaint: () => void = () => undefined
     let cancelAfterPaint: () => void = () => undefined
-    const cancelBeforePaint = scheduleFrame(() => {
-      cancelAfterPaint = scheduleFrame(() => {
-        if (!isVisible(root)) return
-        for (let sequence = 0; sequence <= lastSequence; sequence++) {
-          onVisible({
-            key: presentation.key,
-            presentationGeneration: presentation.presentationGeneration,
-            sequence,
-          })
+    const scan = () => {
+      for (const target of root.querySelectorAll<HTMLElement>(
+        "[data-narration-sequence]",
+      )) {
+        const sequence = Number(target.dataset.narrationSequence)
+        if (
+          !Number.isSafeInteger(sequence) ||
+          sequence < 0 ||
+          sequence > lastSequence ||
+          acknowledged.has(sequence) ||
+          !isCaptionTargetFullyVisible(target)
+        ) {
+          continue
         }
+        const accepted = onVisible({
+          key: presentation.key,
+          presentationGeneration: presentation.presentationGeneration,
+          sequence,
+        })
+        if (accepted !== false) acknowledged.add(sequence)
+      }
+    }
+    const scheduleScan = () => {
+      cancelBeforePaint()
+      cancelAfterPaint()
+      cancelAfterPaint = () => undefined
+      cancelBeforePaint = scheduleFrame(() => {
+        cancelAfterPaint = scheduleFrame(() => {
+          if (!canceled) scan()
+        })
       })
-    })
+    }
+    const viewport = root.querySelector<HTMLElement>(scrollViewportSelector)
+    viewport?.addEventListener("scroll", scheduleScan, { passive: true })
+    window.addEventListener("resize", scheduleScan)
+    document.addEventListener("visibilitychange", scheduleScan)
+    scheduleScan()
     return () => {
+      canceled = true
+      viewport?.removeEventListener("scroll", scheduleScan)
+      window.removeEventListener("resize", scheduleScan)
+      document.removeEventListener("visibilitychange", scheduleScan)
       cancelBeforePaint()
       cancelAfterPaint()
     }

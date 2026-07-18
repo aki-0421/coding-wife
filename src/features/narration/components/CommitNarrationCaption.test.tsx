@@ -15,6 +15,11 @@ const jaStore: LocalePreferenceStore = {
   write: () => true,
 }
 
+const originalElementFromPoint = Object.getOwnPropertyDescriptor(
+  document,
+  "elementFromPoint",
+)
+
 function installAnimationFrames() {
   let nextId = 0
   const callbacks = new Map<number, FrameRequestCallback>()
@@ -35,7 +40,18 @@ function installAnimationFrames() {
   }
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  if (originalElementFromPoint === undefined) {
+    Reflect.deleteProperty(document, "elementFromPoint")
+  } else {
+    Object.defineProperty(
+      document,
+      "elementFromPoint",
+      originalElementFromPoint,
+    )
+  }
+})
 
 function presentation(
   overrides: Partial<CommitNarrationPresentationSnapshot> = {},
@@ -104,6 +120,96 @@ function mockCaptionLayout(
   })
 }
 
+function containsPoint(rect: DOMRect, x: number, y: number): boolean {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+}
+
+function mockSequenceLayout(
+  options: {
+    readonly clipped?: readonly number[]
+    readonly hidden?: readonly number[]
+    readonly obstructed?: readonly number[]
+  } = {},
+) {
+  const caption = screen.getByRole("region", { name: "コミットの説明" })
+  const log = screen.getByRole("log", { name: "コミットの説明" })
+  const viewport = log.closest('[data-slot="scroll-area-viewport"]')
+  if (!(viewport instanceof HTMLElement)) {
+    throw new Error("scroll viewport is missing")
+  }
+  const items = within(log).getAllByRole("listitem")
+  mockCaptionLayout(caption, {
+    y: 50,
+    top: 50,
+    right: 700,
+    bottom: 250,
+    height: 200,
+  })
+  mockCaptionLayout(viewport, {
+    y: 160,
+    top: 160,
+    right: 680,
+    bottom: 235,
+    left: 120,
+    width: 560,
+    height: 75,
+  })
+  const itemRects = items.map((item, sequence) => {
+    const top = sequence === 0 ? 170 : 205
+    const bottom = options.clipped?.includes(sequence) ? 245 : top + 20
+    const rect = {
+      x: 130,
+      y: top,
+      top,
+      right: 650,
+      bottom,
+      left: 130,
+      width: 520,
+      height: bottom - top,
+      toJSON: () => ({}),
+    } satisfies DOMRect
+    mockCaptionLayout(item, rect)
+    if (options.hidden?.includes(sequence)) {
+      Object.defineProperty(item, "getClientRects", {
+        configurable: true,
+        value: () => ({ length: 0 }),
+      })
+    }
+    return rect
+  })
+  const obstruction = document.createElement("div")
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: (x: number, y: number) => {
+      const sequence = itemRects.findIndex((rect) => containsPoint(rect, x, y))
+      if (sequence >= 0) {
+        return options.obstructed?.includes(sequence)
+          ? obstruction
+          : items[sequence]
+      }
+      return containsPoint(caption.getBoundingClientRect(), x, y)
+        ? caption
+        : null
+    },
+  })
+  return {
+    items,
+    viewport,
+    reveal(sequence: number) {
+      const previous = itemRects[sequence]
+      const item = items[sequence]
+      if (previous === undefined || item === undefined) return
+      const next = {
+        ...previous,
+        bottom: previous.top + 20,
+        height: 20,
+      } satisfies DOMRect
+      itemRects[sequence] = next
+      mockCaptionLayout(item, next)
+    },
+  }
+}
+
 describe("CommitNarrationCaption", () => {
   it("renders every accepted chunk in a polite visible log", () => {
     renderCaption(presentation())
@@ -131,8 +237,7 @@ describe("CommitNarrationCaption", () => {
     const frames = installAnimationFrames()
     const onVisible = vi.fn()
     renderCaption(presentation(), vi.fn(), onVisible)
-    const caption = screen.getByRole("region", { name: "コミットの説明" })
-    mockCaptionLayout(caption)
+    mockSequenceLayout()
 
     act(() => frames.flush())
     expect(onVisible).not.toHaveBeenCalled()
@@ -148,6 +253,74 @@ describe("CommitNarrationCaption", () => {
       presentationGeneration: 3,
       sequence: 1,
     })
+  })
+
+  it("does not acknowledge a hidden sequence inside a visible caption", () => {
+    const frames = installAnimationFrames()
+    const onVisible = vi.fn()
+    renderCaption(presentation(), vi.fn(), onVisible)
+    mockSequenceLayout({ hidden: [1] })
+
+    act(() => frames.flush())
+    act(() => frames.flush())
+
+    expect(onVisible).toHaveBeenCalledOnce()
+    expect(onVisible).toHaveBeenCalledWith(
+      expect.objectContaining({ sequence: 0 }),
+    )
+  })
+
+  it("does not acknowledge a sequence partially clipped by the inner viewport", () => {
+    const frames = installAnimationFrames()
+    const onVisible = vi.fn()
+    renderCaption(presentation(), vi.fn(), onVisible)
+    mockSequenceLayout({ clipped: [1] })
+
+    act(() => frames.flush())
+    act(() => frames.flush())
+
+    expect(onVisible).toHaveBeenCalledOnce()
+    expect(onVisible).toHaveBeenCalledWith(
+      expect.objectContaining({ sequence: 0 }),
+    )
+  })
+
+  it("acknowledges a clipped sequence only after it scrolls fully into view", () => {
+    const frames = installAnimationFrames()
+    const onVisible = vi.fn()
+    renderCaption(presentation(), vi.fn(), onVisible)
+    const layout = mockSequenceLayout({ clipped: [1] })
+
+    act(() => frames.flush())
+    act(() => frames.flush())
+    expect(onVisible).toHaveBeenCalledOnce()
+
+    layout.reveal(1)
+    act(() => {
+      layout.viewport.dispatchEvent(new Event("scroll"))
+    })
+    act(() => frames.flush())
+    act(() => frames.flush())
+
+    expect(onVisible).toHaveBeenCalledTimes(2)
+    expect(onVisible).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sequence: 1 }),
+    )
+  })
+
+  it("does not acknowledge a sequence behind another hit target", () => {
+    const frames = installAnimationFrames()
+    const onVisible = vi.fn()
+    renderCaption(presentation(), vi.fn(), onVisible)
+    mockSequenceLayout({ obstructed: [1] })
+
+    act(() => frames.flush())
+    act(() => frames.flush())
+
+    expect(onVisible).toHaveBeenCalledOnce()
+    expect(onVisible).toHaveBeenCalledWith(
+      expect.objectContaining({ sequence: 0 }),
+    )
   })
 
   it("does not acknowledge a hidden caption", () => {

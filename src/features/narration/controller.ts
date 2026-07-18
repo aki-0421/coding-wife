@@ -91,7 +91,7 @@ interface CaptionSpeechGate {
   nextReleaseSequence: number
   draining: boolean
   terminal: boolean
-  acknowledgmentTimer: ReturnType<typeof setTimeout> | null
+  readonly acknowledgmentTimers: Map<number, ReturnType<typeof setTimeout>>
 }
 
 const maximumPreparedPresentations = 12
@@ -521,11 +521,11 @@ export class NarrationController {
     }
 
     gate.sequences.set(acknowledgment.sequence, "leading")
+    this.clearCaptionAcknowledgmentTimer(gate, acknowledgment.sequence)
     gate.leads.set(
       acknowledgment.sequence,
       this.pause(captionSpeechLeadMilliseconds),
     )
-    this.armCaptionAcknowledgmentTimeout(gate)
     void this.drainCaptionSpeech(gate)
     return true
   }
@@ -664,14 +664,16 @@ export class NarrationController {
         nextReleaseSequence: 0,
         draining: false,
         terminal: false,
-        acknowledgmentTimer: null,
+        acknowledgmentTimers: new Map(),
       }
       this.#captionSpeechGate = gate
     }
 
+    const addedSequences: number[] = []
     for (let sequence = 0; sequence <= presentation.lastSequence; sequence++) {
       if (!gate.sequences.has(sequence)) {
         gate.sequences.set(sequence, "waiting")
+        addedSequences.push(sequence)
       }
     }
 
@@ -688,26 +690,47 @@ export class NarrationController {
       if (presentation.speechStatus !== "playing") {
         this.updatePresentation({ speechStatus: "queued" })
       }
-      this.armCaptionAcknowledgmentTimeout(gate)
+      for (const sequence of addedSequences) {
+        this.armCaptionAcknowledgmentTimeout(gate, sequence)
+      }
     }
   }
 
-  private armCaptionAcknowledgmentTimeout(gate: CaptionSpeechGate): void {
-    if (gate.acknowledgmentTimer !== null) {
-      clearTimeout(gate.acknowledgmentTimer)
-      gate.acknowledgmentTimer = null
-    }
+  private armCaptionAcknowledgmentTimeout(
+    gate: CaptionSpeechGate,
+    sequence: number,
+  ): void {
     if (
       gate.terminal ||
-      ![...gate.sequences.values()].some((state) => state === "waiting")
+      gate.sequences.get(sequence) !== "waiting" ||
+      gate.acknowledgmentTimers.has(sequence)
     ) {
       return
     }
-    gate.acknowledgmentTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
       if (this.#captionSpeechGate !== gate || gate.terminal) return
-      gate.acknowledgmentTimer = null
+      gate.acknowledgmentTimers.delete(sequence)
+      if (gate.sequences.get(sequence) !== "waiting") return
       this.terminalizeCaptionSpeech("NARRATION-CAPTION-NOT-VISIBLE")
     }, captionAcknowledgmentTimeoutMilliseconds)
+    gate.acknowledgmentTimers.set(sequence, timer)
+  }
+
+  private clearCaptionAcknowledgmentTimer(
+    gate: CaptionSpeechGate,
+    sequence: number,
+  ): void {
+    const timer = gate.acknowledgmentTimers.get(sequence)
+    if (timer === undefined) return
+    clearTimeout(timer)
+    gate.acknowledgmentTimers.delete(sequence)
+  }
+
+  private clearCaptionAcknowledgmentTimers(gate: CaptionSpeechGate): void {
+    for (const timer of gate.acknowledgmentTimers.values()) {
+      clearTimeout(timer)
+    }
+    gate.acknowledgmentTimers.clear()
   }
 
   private async drainCaptionSpeech(gate: CaptionSpeechGate): Promise<void> {
@@ -757,12 +780,9 @@ export class NarrationController {
   }
 
   private skipPendingCaptionSpeech(gate: CaptionSpeechGate): void {
-    if (gate.acknowledgmentTimer !== null) {
-      clearTimeout(gate.acknowledgmentTimer)
-      gate.acknowledgmentTimer = null
-    }
     for (const [sequence, state] of gate.sequences) {
       if (state === "waiting" || state === "leading") {
+        this.clearCaptionAcknowledgmentTimer(gate, sequence)
         gate.sequences.set(sequence, "skipped")
         gate.leads.delete(sequence)
       }
@@ -773,10 +793,7 @@ export class NarrationController {
     const gate = this.#captionSpeechGate
     if (gate !== null) {
       gate.terminal = true
-      if (gate.acknowledgmentTimer !== null) {
-        clearTimeout(gate.acknowledgmentTimer)
-        gate.acknowledgmentTimer = null
-      }
+      this.clearCaptionAcknowledgmentTimers(gate)
     }
     if (code !== undefined) {
       this.updatePresentation({
@@ -788,10 +805,10 @@ export class NarrationController {
 
   private clearCaptionSpeechGate(): void {
     const gate = this.#captionSpeechGate
-    if (gate !== null && gate.acknowledgmentTimer !== null) {
-      clearTimeout(gate.acknowledgmentTimer)
+    if (gate !== null) {
+      gate.terminal = true
+      this.clearCaptionAcknowledgmentTimers(gate)
     }
-    if (gate !== null) gate.terminal = true
     this.#captionSpeechGate = null
   }
 
