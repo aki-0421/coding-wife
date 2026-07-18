@@ -54,6 +54,11 @@ interface FirstFrameWait {
   readonly onAbort: () => void
 }
 
+interface ContextRecoveryWait {
+  readonly promise: Promise<void>
+  readonly resolve: () => void
+}
+
 interface CandidateRenderer {
   readonly generation: number
   readonly model: CubismCharacterModel
@@ -152,6 +157,7 @@ export class CharacterController {
   #candidateRenderer: CandidateRenderer | null = null
   #loadAbortController: AbortController | null = null
   #restoreAbortController: AbortController | null = null
+  #contextRecoveryWait: ContextRecoveryWait | null = null
   #frameRequest: number | null = null
   #lastFrameTimestamp: number | null = null
   readonly #firstFrameDeadline: CharacterFirstFrameDeadline
@@ -167,6 +173,7 @@ export class CharacterController {
   #disposed = false
   #contextLost = false
   #restoreInFlight = false
+  #restoreRequested = false
   #hasStaticPreview = false
   #frameCount = 0
   #nonTransparentSamples = 0
@@ -174,6 +181,7 @@ export class CharacterController {
   #signatureChanges = 0
   #lastDeltaMilliseconds = 0
   #webglError = 0
+  #modelInventory: CharacterFrameMetrics["modelInventory"] = null
   #cssWidth = 1
   #cssHeight = 1
 
@@ -187,10 +195,21 @@ export class CharacterController {
   }
 
   readonly #handleContextRestored = () => {
-    if (!this.#contextLost || this.#restoreInFlight || this.#disposed) return
+    if (!this.#contextLost || this.#disposed) return
+    if (this.#restoreInFlight) {
+      this.#restoreRequested = true
+      return
+    }
+    this.#restoreRequested = false
     this.#restoreInFlight = true
     void this.rebuildAfterContextRestore().finally(() => {
       this.#restoreInFlight = false
+      if (!this.#contextLost) {
+        this.#restoreRequested = false
+        this.completeContextRecovery()
+      } else if (this.#restoreRequested) {
+        this.#handleContextRestored()
+      }
     })
   }
 
@@ -277,9 +296,6 @@ export class CharacterController {
     }
 
     this.#loadAbortController?.abort()
-    this.#candidateRenderer = null
-    this.#restoreAbortController?.abort()
-    this.#restoreAbortController = null
     const loadAbortController = new AbortController()
     this.#loadAbortController = loadAbortController
     const abortFromCaller = () => loadAbortController.abort(signal.reason)
@@ -287,17 +303,26 @@ export class CharacterController {
     if (signal.aborted) abortFromCaller()
 
     const hadCommittedPack = this.#client !== null
-    const committedModel = this.#model
-    this.stopFrameLoop()
-    if (!hadCommittedPack) {
-      this.#phase = "loading"
-      this.#error = null
-      this.emitStatus()
-    }
+    let committedModel: CubismCharacterModel | null = null
 
     let candidateModel: CubismCharacterModel | null = null
 
     try {
+      await this.waitForContextRecovery(loadAbortController.signal)
+      if (this.#contextLost) {
+        throw new CharacterError(
+          "context_restore_failed",
+          "The Live2D WebGL context is not renderable",
+          true,
+        )
+      }
+      committedModel = this.#model
+      this.stopFrameLoop()
+      if (!hadCommittedPack) {
+        this.#phase = "loading"
+        this.#error = null
+        this.emitStatus()
+      }
       await acquireCubismRuntime()
       const client = await CharacterPackClient.load(
         pack,
@@ -343,6 +368,7 @@ export class CharacterController {
       this.#rendererGeneration = rendererGeneration
       this.#model = committedCandidate
       this.#client = client
+      this.#modelInventory = committedCandidate.inventory
       this.resetFrameMetrics()
       this.#frameCount = 1
       this.#nonTransparentSamples = acceptedFrame.nonTransparentSamples
@@ -461,7 +487,7 @@ export class CharacterController {
       backingHeight: this.#canvas?.height ?? 0,
       lastDeltaMilliseconds: this.#lastDeltaMilliseconds,
       webglError: this.#webglError,
-      modelInventory: this.#model?.inventory ?? null,
+      modelInventory: this.#modelInventory,
     }
   }
 
@@ -485,6 +511,8 @@ export class CharacterController {
     this.#loadAbortController = null
     this.#restoreAbortController?.abort()
     this.#restoreAbortController = null
+    this.#restoreRequested = false
+    this.completeContextRecovery()
     this.#candidateRenderer = null
     this.stopFrameLoop()
     this.rejectFirstFrame(
@@ -511,6 +539,7 @@ export class CharacterController {
     }
     this.#model?.release()
     this.#model = null
+    this.#modelInventory = null
     this.#client = null
     this.emitStatus()
     this.#canvas = null
@@ -886,23 +915,6 @@ export class CharacterController {
     )
   }
 
-  private advanceRendererGenerationForRestore(): number {
-    const previousGeneration = this.#rendererGeneration
-    const nextGeneration = previousGeneration + 1
-    this.#rendererGeneration = nextGeneration
-    const wait = this.#firstFrameWait
-    if (
-      wait?.generation === previousGeneration &&
-      this.#firstFrameDeadline.replaceGeneration(
-        previousGeneration,
-        nextGeneration,
-      )
-    ) {
-      wait.generation = nextGeneration
-    }
-    return nextGeneration
-  }
-
   private resetFrameMetrics(): void {
     this.#frameCount = 0
     this.#nonTransparentSamples = 0
@@ -913,16 +925,16 @@ export class CharacterController {
   }
 
   private enterContextLostState(): void {
-    this.#loadAbortController?.abort(
-      new CharacterError("context_lost", "The Live2D WebGL context was lost"),
-    )
-    this.#contextLost = true
-    this.syncFirstFrameDeadline()
-    this.stopFrameLoop()
     const error = new CharacterError(
       "context_lost",
       "The Live2D WebGL context was lost",
     )
+    this.#loadAbortController?.abort(error)
+    this.#restoreAbortController?.abort(error)
+    this.#contextLost = true
+    this.beginContextRecovery()
+    this.syncFirstFrameDeadline()
+    this.stopFrameLoop()
     this.#error = error
     this.#phase = "recovering"
     this.#fallbackLevel = this.#hasStaticPreview ? "static" : "text_only"
@@ -941,12 +953,17 @@ export class CharacterController {
   }
 
   private async rebuildAfterContextRestore(): Promise<void> {
-    if (
-      this.#client === null ||
-      this.#gl === null ||
-      this.#canvas === null ||
-      this.#disposed
-    ) {
+    if (this.#gl === null || this.#canvas === null || this.#disposed) {
+      return
+    }
+    if (this.#client === null) {
+      this.#contextLost = this.#gl.isContextLost()
+      if (!this.#contextLost) {
+        this.#phase = "idle"
+        this.#error = null
+        this.#fallbackLevel = "text_only"
+        this.emitStatus()
+      }
       return
     }
 
@@ -954,35 +971,71 @@ export class CharacterController {
     this.emitStatus()
     const controller = new AbortController()
     this.#restoreAbortController = controller
+    const client = this.#client
+    const previousModel = this.#model
+    let restoredModel: CubismCharacterModel | null = null
     try {
-      this.#model?.release()
+      previousModel?.release()
       this.#model = null
       const { CubismCharacterModel, resetCubismWebGlResources } =
         await import("./cubism-character-model")
       resetCubismWebGlResources(this.#gl)
-      const model = await CubismCharacterModel.create(
-        this.#client,
+      this.#contextLost = false
+      restoredModel = await CubismCharacterModel.create(
+        client,
         this.#gl,
         this.#canvas.width,
         this.#canvas.height,
         controller.signal,
       )
       if (this.#disposed || controller.signal.aborted) {
-        model.release()
         return
       }
-      const rendererGeneration = this.advanceRendererGenerationForRestore()
-      model.resize(this.#canvas.width, this.#canvas.height)
-      this.#model = model
-      this.#contextLost = false
+      const rendererGeneration = this.#rendererGeneration + 1
+      restoredModel.resize(this.#canvas.width, this.#canvas.height)
+      this.#candidateRenderer = {
+        generation: rendererGeneration,
+        model: restoredModel,
+      }
+      const acceptedFrame = await this.stageCandidateFirstFrame(
+        restoredModel,
+        null,
+        controller.signal,
+        rendererGeneration,
+        this.#hasStaticPreview,
+      )
+      if (
+        this.#disposed ||
+        controller.signal.aborted ||
+        this.#restoreAbortController !== controller ||
+        this.#client !== client
+      ) {
+        return
+      }
+
+      const committedRestore = restoredModel
+      restoredModel = null
+      this.#candidateRenderer = null
+      this.#rendererGeneration = rendererGeneration
+      this.#model = committedRestore
+      this.#modelInventory = committedRestore.inventory
+      this.resetFrameMetrics()
+      this.#frameCount = 1
+      this.#nonTransparentSamples = acceptedFrame.nonTransparentSamples
+      this.#signature = acceptedFrame.signature
+      this.#webglError = acceptedFrame.webglError
+      this.#hasStaticPreview =
+        this.#hasStaticPreview || acceptedFrame.capturedPreview !== null
       this.#error = null
       this.#phase = "ready"
-      this.resetFrameMetrics()
       this.applyMotionPolicy()
-      await this.waitForFirstFrame(controller.signal, rendererGeneration)
-      this.emitStatus()
+      this.#callbacks.onMetrics?.(this.metrics)
+      if (acceptedFrame.capturedPreview !== null) {
+        this.#callbacks.onStaticPreview?.(acceptedFrame.capturedPreview)
+      }
     } catch (error) {
       if (this.#disposed || controller.signal.aborted) return
+      this.#contextLost = this.#gl.isContextLost()
       const characterError = toCharacterError(error, "context_restore_failed")
       this.#error = new CharacterError(
         "context_restore_failed",
@@ -994,9 +1047,50 @@ export class CharacterController {
       this.#fallbackLevel = this.#hasStaticPreview ? "static" : "text_only"
       this.emitStatus()
     } finally {
+      restoredModel?.release()
+      if (this.#candidateRenderer?.model === restoredModel) {
+        this.#candidateRenderer = null
+      }
       if (this.#restoreAbortController === controller) {
         this.#restoreAbortController = null
       }
     }
+  }
+
+  private beginContextRecovery(): ContextRecoveryWait {
+    if (this.#contextRecoveryWait !== null) return this.#contextRecoveryWait
+    let resolvePromise: () => void = () => undefined
+    const promise = new Promise<void>((resolve) => {
+      resolvePromise = resolve
+    })
+    this.#contextRecoveryWait = { promise, resolve: resolvePromise }
+    return this.#contextRecoveryWait
+  }
+
+  private completeContextRecovery(): void {
+    const wait = this.#contextRecoveryWait
+    if (wait === null) return
+    this.#contextRecoveryWait = null
+    wait.resolve()
+  }
+
+  private async waitForContextRecovery(signal: AbortSignal): Promise<void> {
+    const wait = this.#contextRecoveryWait
+    if (wait === null && !this.#contextLost && !this.#restoreInFlight) return
+    const recovery = wait ?? this.beginContextRecovery()
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        signal.removeEventListener("abort", onAbort)
+        reject(
+          new CharacterError("disposed", "Character load was canceled", false),
+        )
+      }
+      void recovery.promise.then(() => {
+        signal.removeEventListener("abort", onAbort)
+        resolve()
+      })
+      signal.addEventListener("abort", onAbort, { once: true })
+      if (signal.aborted) onAbort()
+    })
   }
 }

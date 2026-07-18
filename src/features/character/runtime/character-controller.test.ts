@@ -186,6 +186,7 @@ const controllers: CharacterController[] = []
 let animationFrames: AnimationFrameHarness
 
 async function createMountedController(): Promise<{
+  canvas: HTMLCanvasElement
   controller: CharacterController
   metrics: CharacterFrameMetrics[]
   statuses: CharacterControllerStatus[]
@@ -207,7 +208,7 @@ async function createMountedController(): Promise<{
     "data:image/png;base64,Y2FuZGlkYXRl",
   )
   await controller.mount(canvas)
-  return { controller, metrics, statuses }
+  return { canvas, controller, metrics, statuses }
 }
 
 async function flushCandidateFrame(): Promise<void> {
@@ -404,5 +405,279 @@ describe("atomic character pack switching", () => {
     expect(metrics).toHaveLength(metricsCount)
     expect(committedModel.release).not.toHaveBeenCalled()
     expect(candidateModel.release).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["reduced", false],
+    ["reduced", true],
+    ["hidden", false],
+    ["hidden", true],
+  ] as const)(
+    "serializes %s context restoration before a trusted-frame=%s switch",
+    async (policyDuringRestore, candidateHasTrustedFrame) => {
+      runtimeHarness.renderBehaviors.set("committed", "visible")
+      runtimeHarness.renderBehaviors.set("candidate", "visible")
+      const { canvas, controller, metrics, statuses } =
+        await createMountedController()
+      const initialLoad = controller.loadPack(
+        pack("committed"),
+        new AbortController().signal,
+        true,
+      )
+      await flushCandidateFrame()
+      await initialLoad
+
+      const originalModel = runtimeHarness.models.get("committed")!
+      const committedMetrics = controller.metrics
+      if (policyDuringRestore === "hidden") {
+        controller.setMotionPolicy("hidden")
+      }
+      const statusesBeforeLoss = statuses.length
+      const metricsBeforeLoss = metrics.length
+      let restoredModel: FakeCharacterModel | null = null
+      let resolveRestore: ((model: FakeCharacterModel) => void) | null = null
+      runtimeHarness.createModel.mockImplementationOnce(
+        (client: { manifest: CharacterPackManifest }) =>
+          new Promise<FakeCharacterModel>((resolve) => {
+            restoredModel = new FakeCharacterModel(client.manifest.packId)
+            runtimeHarness.models.set("committed:restored", restoredModel)
+            resolveRestore = resolve
+          }),
+      )
+
+      canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }))
+      canvas.dispatchEvent(new Event("webglcontextrestored"))
+      await waitFor(() =>
+        expect(originalModel.release).toHaveBeenCalledTimes(1),
+      )
+      expect(statuses.at(-1)?.phase).toBe("recovering")
+      expect(controller.metrics).toEqual(committedMetrics)
+      expect(metrics).toHaveLength(metricsBeforeLoss)
+
+      const candidateLoad = controller.loadPack(
+        pack("candidate"),
+        new AbortController().signal,
+        candidateHasTrustedFrame,
+      )
+      await Promise.resolve()
+      expect(
+        runtimeHarness.loadClient.mock.calls.some(
+          ([packRef]) =>
+            (packRef as CharacterPackRef).kind !== "url" &&
+            (packRef as Exclude<CharacterPackRef, { kind: "url" }>).manifest
+              .packId === "candidate",
+        ),
+      ).toBe(false)
+
+      if (resolveRestore === null || restoredModel === null) {
+        throw new Error("Deferred restoration was not observed")
+      }
+      resolveRestore(restoredModel)
+      await Promise.resolve()
+      if (policyDuringRestore === "hidden") {
+        await flushCandidateFrame()
+        expect(statuses.slice(statusesBeforeLoss)).not.toContainEqual(
+          expect.objectContaining({ phase: "ready" }),
+        )
+        expect(controller.metrics).toEqual(committedMetrics)
+        controller.setMotionPolicy("reduced")
+      }
+
+      await flushCandidateFrame()
+      await waitFor(() =>
+        expect(runtimeHarness.models.has("candidate")).toBe(true),
+      )
+      expect(statuses.at(-1)?.pack?.packId).toBe("committed")
+      await flushCandidateFrame()
+      await candidateLoad
+
+      const candidateModel = runtimeHarness.models.get("candidate")!
+      expect(runtimeHarness.drawnPackId).toBe("candidate")
+      expect(statuses.at(-1)).toMatchObject({
+        phase: "ready",
+        pack: { packId: "candidate" },
+      })
+      expect(controller.metrics.nonTransparentSamples).toBeGreaterThan(0)
+      expect(controller.metrics.webglError).toBe(0)
+      expect(
+        statuses
+          .slice(statusesBeforeLoss)
+          .filter((status) => status.phase === "ready")
+          .map((status) => status.pack?.packId),
+      ).toEqual(["committed", "candidate"])
+      expect(metrics).toHaveLength(metricsBeforeLoss + 2)
+      expect(originalModel.release).toHaveBeenCalledTimes(1)
+      expect(restoredModel.release).toHaveBeenCalledTimes(1)
+      expect(candidateModel.release).not.toHaveBeenCalled()
+    },
+  )
+
+  it("keeps the recovered renderer when a serialized candidate first frame fails", async () => {
+    runtimeHarness.renderBehaviors.set("committed", "visible")
+    runtimeHarness.renderBehaviors.set("candidate", "throw")
+    const { canvas, controller, metrics, statuses } =
+      await createMountedController()
+    const initialLoad = controller.loadPack(
+      pack("committed"),
+      new AbortController().signal,
+      true,
+    )
+    await flushCandidateFrame()
+    await initialLoad
+
+    const originalModel = runtimeHarness.models.get("committed")!
+    let restoredModel: FakeCharacterModel | null = null
+    let resolveRestore: ((model: FakeCharacterModel) => void) | null = null
+    runtimeHarness.createModel.mockImplementationOnce(
+      (client: { manifest: CharacterPackManifest }) =>
+        new Promise<FakeCharacterModel>((resolve) => {
+          restoredModel = new FakeCharacterModel(client.manifest.packId)
+          runtimeHarness.models.set("committed:restored", restoredModel)
+          resolveRestore = resolve
+        }),
+    )
+    canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }))
+    canvas.dispatchEvent(new Event("webglcontextrestored"))
+    await waitFor(() => expect(originalModel.release).toHaveBeenCalledTimes(1))
+
+    const failedSwitch = controller.loadPack(
+      pack("candidate"),
+      new AbortController().signal,
+      false,
+    )
+    if (resolveRestore === null || restoredModel === null) {
+      throw new Error("Deferred restoration was not observed")
+    }
+    resolveRestore(restoredModel)
+    await flushCandidateFrame()
+    await waitFor(() =>
+      expect(runtimeHarness.models.has("candidate")).toBe(true),
+    )
+
+    const recoveredMetrics = controller.metrics
+    const recoveredStatus = statuses.at(-1)
+    const metricsAfterRecovery = metrics.length
+    await flushCandidateFrame()
+    await expect(failedSwitch).rejects.toMatchObject({
+      code: "shader_load_failed",
+    })
+
+    const candidateModel = runtimeHarness.models.get("candidate")!
+    expect(runtimeHarness.drawnPackId).toBe("committed")
+    expect(controller.metrics).toEqual(recoveredMetrics)
+    expect(statuses.at(-1)).toEqual(recoveredStatus)
+    expect(statuses.at(-1)).toMatchObject({
+      phase: "ready",
+      pack: { packId: "committed" },
+    })
+    expect(metrics).toHaveLength(metricsAfterRecovery)
+    expect(originalModel.release).toHaveBeenCalledTimes(1)
+    expect(restoredModel.release).not.toHaveBeenCalled()
+    expect(candidateModel.release).toHaveBeenCalledTimes(1)
+  })
+
+  it("restarts restoration when another restore event arrives during an aborted attempt", async () => {
+    runtimeHarness.renderBehaviors.set("committed", "visible")
+    const { canvas, controller, metrics, statuses } =
+      await createMountedController()
+    const initialLoad = controller.loadPack(
+      pack("committed"),
+      new AbortController().signal,
+      true,
+    )
+    await flushCandidateFrame()
+    await initialLoad
+
+    const originalModel = runtimeHarness.models.get("committed")!
+    const firstRestoredModel = new FakeCharacterModel("committed")
+    const winningRestoredModel = new FakeCharacterModel("committed")
+    runtimeHarness.createModel
+      .mockImplementationOnce(() => {
+        runtimeHarness.models.set("committed:restore-1", firstRestoredModel)
+        return Promise.resolve(firstRestoredModel)
+      })
+      .mockImplementationOnce(() => {
+        runtimeHarness.models.set("committed:restore-2", winningRestoredModel)
+        return Promise.resolve(winningRestoredModel)
+      })
+
+    const metricsBeforeLoss = metrics.length
+    canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }))
+    canvas.dispatchEvent(new Event("webglcontextrestored"))
+    await waitFor(() =>
+      expect(runtimeHarness.models.has("committed:restore-1")).toBe(true),
+    )
+    await waitFor(() => expect(animationFrames.count).toBeGreaterThan(0))
+
+    canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }))
+    canvas.dispatchEvent(new Event("webglcontextrestored"))
+    await waitFor(() =>
+      expect(runtimeHarness.models.has("committed:restore-2")).toBe(true),
+    )
+    await flushCandidateFrame()
+    await waitFor(() =>
+      expect(statuses.at(-1)).toMatchObject({
+        phase: "ready",
+        pack: { packId: "committed" },
+      }),
+    )
+
+    expect(controller.metrics.nonTransparentSamples).toBeGreaterThan(0)
+    expect(controller.metrics.webglError).toBe(0)
+    expect(metrics).toHaveLength(metricsBeforeLoss + 1)
+    expect(originalModel.release).toHaveBeenCalledTimes(1)
+    expect(firstRestoredModel.release).toHaveBeenCalledTimes(1)
+    expect(winningRestoredModel.release).not.toHaveBeenCalled()
+  })
+
+  it("terminates an aborted switch without canceling the winning restoration", async () => {
+    runtimeHarness.renderBehaviors.set("committed", "visible")
+    const { canvas, controller, statuses } = await createMountedController()
+    const initialLoad = controller.loadPack(
+      pack("committed"),
+      new AbortController().signal,
+      true,
+    )
+    await flushCandidateFrame()
+    await initialLoad
+
+    const originalModel = runtimeHarness.models.get("committed")!
+    let restoredModel: FakeCharacterModel | null = null
+    let resolveRestore: ((model: FakeCharacterModel) => void) | null = null
+    runtimeHarness.createModel.mockImplementationOnce(
+      (client: { manifest: CharacterPackManifest }) =>
+        new Promise<FakeCharacterModel>((resolve) => {
+          restoredModel = new FakeCharacterModel(client.manifest.packId)
+          runtimeHarness.models.set("committed:restored", restoredModel)
+          resolveRestore = resolve
+        }),
+    )
+    canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }))
+    canvas.dispatchEvent(new Event("webglcontextrestored"))
+    await waitFor(() => expect(originalModel.release).toHaveBeenCalledTimes(1))
+
+    const abortController = new AbortController()
+    const abortedSwitch = controller.loadPack(
+      pack("candidate"),
+      abortController.signal,
+      false,
+    )
+    abortController.abort()
+    await expect(abortedSwitch).rejects.toMatchObject({ code: "disposed" })
+    expect(runtimeHarness.models.has("candidate")).toBe(false)
+
+    if (resolveRestore === null || restoredModel === null) {
+      throw new Error("Deferred restoration was not observed")
+    }
+    resolveRestore(restoredModel)
+    await flushCandidateFrame()
+    await waitFor(() =>
+      expect(statuses.at(-1)).toMatchObject({
+        phase: "ready",
+        pack: { packId: "committed" },
+      }),
+    )
+    expect(originalModel.release).toHaveBeenCalledTimes(1)
+    expect(restoredModel.release).not.toHaveBeenCalled()
   })
 })

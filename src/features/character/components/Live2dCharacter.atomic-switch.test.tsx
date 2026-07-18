@@ -20,10 +20,21 @@ interface ControllerCallbacks {
 
 interface MockControllerInstance {
   emitCommittedStaticFallback(): void
+  emitRecovering(): void
   readonly loadPack: ReturnType<typeof vi.fn>
+  resolveCandidate(): void
+}
+
+interface DeferredCandidateLoad {
+  readonly hasTrustedStaticPreview: boolean
+  readonly manifest: CharacterPackManifest
+  readonly onAbort: () => void
+  readonly resolve: () => void
+  readonly signal: AbortSignal
 }
 
 const controllerHarness = vi.hoisted(() => ({
+  candidateMode: "reject",
   instances: [] as MockControllerInstance[],
   loadCalls: [] as Readonly<{
     packId: string
@@ -48,6 +59,7 @@ vi.mock("@/features/character/runtime/character-controller", () => {
     public readonly syncDocumentVisibility = vi.fn()
     private readonly callbacks: ControllerCallbacks
     private committedManifest: CharacterPackManifest | null = null
+    private deferredCandidate: DeferredCandidateLoad | null = null
     private motionPolicy: CharacterMotionPolicy = "animated"
     private state: CharacterState = "idle"
 
@@ -71,7 +83,7 @@ vi.mock("@/features/character/runtime/character-controller", () => {
     public readonly loadPack = vi.fn(
       (
         pack: CharacterPackRef,
-        _signal: AbortSignal,
+        signal: AbortSignal,
         hasTrustedStaticPreview: boolean,
       ): Promise<void> => {
         if (pack.kind === "url") throw new Error("Unexpected URL test pack")
@@ -80,6 +92,26 @@ vi.mock("@/features/character/runtime/character-controller", () => {
           hasTrustedStaticPreview,
         })
         if (pack.manifest.packId === "candidate") {
+          if (controllerHarness.candidateMode === "defer") {
+            return new Promise<void>((resolve, reject) => {
+              const onAbort = () => {
+                signal.removeEventListener("abort", onAbort)
+                if (this.deferredCandidate?.onAbort === onAbort) {
+                  this.deferredCandidate = null
+                }
+                reject(new Error("Candidate load was canceled"))
+              }
+              this.deferredCandidate = {
+                hasTrustedStaticPreview,
+                manifest: pack.manifest,
+                onAbort,
+                resolve,
+                signal,
+              }
+              signal.addEventListener("abort", onAbort, { once: true })
+              if (signal.aborted) onAbort()
+            })
+          }
           return Promise.reject(new Error("Candidate first frame failed"))
         }
         this.committedManifest = pack.manifest
@@ -90,6 +122,28 @@ vi.mock("@/features/character/runtime/character-controller", () => {
 
     public emitCommittedStaticFallback(): void {
       this.callbacks.onStatus?.(this.status("static"))
+    }
+
+    public emitRecovering(): void {
+      this.callbacks.onStatus?.({
+        ...this.status("static"),
+        phase: "recovering",
+      })
+    }
+
+    public resolveCandidate(): void {
+      const deferred = this.deferredCandidate
+      if (deferred === null || deferred.signal.aborted) return
+      deferred.signal.removeEventListener("abort", deferred.onAbort)
+      this.deferredCandidate = null
+      this.committedManifest = deferred.manifest
+      this.callbacks.onStatus?.(this.status("animated"))
+      if (!deferred.hasTrustedStaticPreview) {
+        this.callbacks.onStaticPreview?.(
+          "data:image/png;base64,cmVuZGVyZWQtY2FuZGlkYXRl",
+        )
+      }
+      deferred.resolve()
     }
 
     private status(
@@ -169,6 +223,7 @@ function nativePack(packId: string): CharacterNativePackRef {
 }
 
 beforeEach(() => {
+  controllerHarness.candidateMode = "reject"
   controllerHarness.instances.length = 0
   controllerHarness.loadCalls.length = 0
   trustedFrameHarness.frames.clear()
@@ -261,4 +316,166 @@ describe("Live2dCharacter atomic pack switching", () => {
       expect(staticPreviews).not.toContain(candidateDataUrl)
     },
   )
+
+  it.each([false, true])(
+    "commits a deferred candidate preview only after controller acceptance when trusted-frame=%s",
+    async (candidateHasTrustedFrame) => {
+      controllerHarness.candidateMode = "defer"
+      const committedPack = nativePack("committed")
+      const candidatePack = nativePack("candidate")
+      const committedDataUrl = "data:image/png;base64,AQID"
+      const candidateDataUrl = "data:image/png;base64,BAUG"
+      const renderedCandidateDataUrl =
+        "data:image/png;base64,cmVuZGVyZWQtY2FuZGlkYXRl"
+      trustedFrameHarness.frames.set(
+        "committed",
+        new Uint8Array([1, 2, 3]).buffer,
+      )
+      trustedFrameHarness.frames.set(
+        "candidate",
+        candidateHasTrustedFrame ? new Uint8Array([4, 5, 6]).buffer : null,
+      )
+      const statuses: CharacterControllerStatus[] = []
+      const staticPreviews: string[] = []
+      const { container, rerender } = render(
+        <Live2dCharacter
+          motionPolicy="reduced"
+          onStaticPreviewChange={(preview) => staticPreviews.push(preview)}
+          onStatusChange={(status) => statuses.push(status)}
+          packRef={committedPack}
+          showCaption={false}
+          state="idle"
+          stateGeneration={1}
+        />,
+      )
+
+      await waitFor(() =>
+        expect(statuses.at(-1)?.pack?.packId).toBe("committed"),
+      )
+      act(() => controllerHarness.instances[0]?.emitRecovering())
+      rerender(
+        <Live2dCharacter
+          motionPolicy="reduced"
+          onStaticPreviewChange={(preview) => staticPreviews.push(preview)}
+          onStatusChange={(status) => statuses.push(status)}
+          packRef={candidatePack}
+          showCaption={false}
+          state="idle"
+          stateGeneration={1}
+        />,
+      )
+
+      await waitFor(() =>
+        expect(controllerHarness.loadCalls).toContainEqual({
+          packId: "candidate",
+          hasTrustedStaticPreview: candidateHasTrustedFrame,
+        }),
+      )
+      expect(statuses.at(-1)).toMatchObject({
+        phase: "recovering",
+        pack: { packId: "committed" },
+      })
+      expect(staticPreviews.length).toBeGreaterThan(0)
+      expect(new Set(staticPreviews)).toEqual(new Set([committedDataUrl]))
+      expect(staticPreviews).not.toContain(candidateDataUrl)
+      expect(staticPreviews).not.toContain(renderedCandidateDataUrl)
+
+      act(() => controllerHarness.instances[0]?.resolveCandidate())
+      await waitFor(() =>
+        expect(statuses.at(-1)).toMatchObject({
+          phase: "ready",
+          pack: { packId: "candidate" },
+        }),
+      )
+      const acceptedPreview = candidateHasTrustedFrame
+        ? candidateDataUrl
+        : renderedCandidateDataUrl
+      expect(staticPreviews.at(-1)).toBe(acceptedPreview)
+
+      act(() => controllerHarness.instances[0]?.emitCommittedStaticFallback())
+      expect(
+        container.querySelector<HTMLImageElement>(
+          '[data-character-static-preview="trusted-frame"]',
+        )?.src,
+      ).toBe(acceptedPreview)
+    },
+  )
+
+  it("drops an aborted deferred trusted preview without changing the committed pack", async () => {
+    controllerHarness.candidateMode = "defer"
+    const committedPack = nativePack("committed")
+    const candidatePack = nativePack("candidate")
+    const committedDataUrl = "data:image/png;base64,AQID"
+    const candidateDataUrl = "data:image/png;base64,BAUG"
+    trustedFrameHarness.frames.set(
+      "committed",
+      new Uint8Array([1, 2, 3]).buffer,
+    )
+    trustedFrameHarness.frames.set(
+      "candidate",
+      new Uint8Array([4, 5, 6]).buffer,
+    )
+    const statuses: CharacterControllerStatus[] = []
+    const staticPreviews: string[] = []
+    const { container, rerender } = render(
+      <Live2dCharacter
+        motionPolicy="reduced"
+        onStaticPreviewChange={(preview) => staticPreviews.push(preview)}
+        onStatusChange={(status) => statuses.push(status)}
+        packRef={committedPack}
+        showCaption={false}
+        state="idle"
+        stateGeneration={1}
+      />,
+    )
+    await waitFor(() => expect(statuses.at(-1)?.pack?.packId).toBe("committed"))
+
+    rerender(
+      <Live2dCharacter
+        motionPolicy="reduced"
+        onStaticPreviewChange={(preview) => staticPreviews.push(preview)}
+        onStatusChange={(status) => statuses.push(status)}
+        packRef={candidatePack}
+        showCaption={false}
+        state="idle"
+        stateGeneration={1}
+      />,
+    )
+    await waitFor(() =>
+      expect(controllerHarness.loadCalls).toContainEqual({
+        packId: "candidate",
+        hasTrustedStaticPreview: true,
+      }),
+    )
+
+    rerender(
+      <Live2dCharacter
+        motionPolicy="reduced"
+        onStaticPreviewChange={(preview) => staticPreviews.push(preview)}
+        onStatusChange={(status) => statuses.push(status)}
+        packRef={committedPack}
+        reloadToken={1}
+        showCaption={false}
+        state="idle"
+        stateGeneration={1}
+      />,
+    )
+    await waitFor(() =>
+      expect(
+        controllerHarness.loadCalls.filter(
+          ({ packId }) => packId === "committed",
+        ),
+      ).toHaveLength(2),
+    )
+    act(() => controllerHarness.instances[0]?.resolveCandidate())
+    act(() => controllerHarness.instances[0]?.emitCommittedStaticFallback())
+
+    expect(statuses.at(-1)?.pack?.packId).toBe("committed")
+    expect(staticPreviews).not.toContain(candidateDataUrl)
+    expect(
+      container.querySelector<HTMLImageElement>(
+        '[data-character-static-preview="trusted-frame"]',
+      )?.src,
+    ).toBe(committedDataUrl)
+  })
 })
