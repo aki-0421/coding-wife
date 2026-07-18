@@ -199,19 +199,21 @@ native adapterは240 Unicode scalar以下、NULなし、redaction済みtranscrip
 
 ### Support
 
-| setting / status     | 初期値・制約                                                                                                              | 動作                                                                                           |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Global enable        | isolation capability合格時default on、不合格時off。tool 0件/cwdなし/repo・fs・shell・Git・MCPなしを強制できる時だけon可能 | capability不足またはoffでthreadを起動せず、queued/activeをcancelしdeterministic fallbackを維持 |
-| Presence / narration | on                                                                                                                        | deterministic eventだけで起動                                                                  |
-| Decision explainer   | role policy値                                                                                                             | main decisionを補助し、直接質問しない                                                          |
-| Commit explainer     | on                                                                                                                        | S-003の「詳しく教えて」だけで起動し、redacted `CommitEvidenceV1`最大64KiBだけを読む            |
-| Explainer skill      | `coding-wife-explain-commit`、`app_bundle`、implicit invocation off                                                       | version、digest、last injected request、schema statusをread-only表示                           |
-| Concurrency / queue  | active 1、queue最大10                                                                                                     | 11件目はlow priorityをdropしmetadata記録                                                       |
-| Task budget          | 15秒、input+output 16,000 token                                                                                           | 超過でcancel、fallback                                                                         |
-| Model / effort       | GPT-5.6 familyのrole policy固定、read-only                                                                                | support output/UIから変更不可                                                                  |
-| Usage                | role、status、model family、tokens、latency、queue、last error                                                            | prompt/response本文を表示・保存しない                                                          |
+| setting / status     | 初期値・制約                                                                                                              | 動作                                                                                                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Global enable        | isolation capability合格時default on、不合格時off。tool 0件/cwdなし/repo・fs・shell・Git・MCPなしを強制できる時だけon可能 | capability不足またはoffでthreadを起動せず、queued/activeをcancelしdeterministic fallbackを維持                                                                                  |
+| Presence / narration | on                                                                                                                        | deterministic eventだけで起動                                                                                                                                                   |
+| Decision explainer   | role policy値                                                                                                             | main decisionを補助し、直接質問しない                                                                                                                                           |
+| Commit explainer     | on                                                                                                                        | verified new commitは`auto_verified_commit`で自動job、未生成の既存commitは`user_request`、failed/canceledは`user_retry`で起動し、redacted `CommitEvidenceV1`最大64KiBだけを読む |
+| Explainer skill      | `coding-wife-explain-commit`、`app_bundle`、implicit invocation off                                                       | version、digest、last injected request、schema statusをread-only表示                                                                                                            |
+| Concurrency / queue  | active 1、queue最大10                                                                                                     | 11件目はlow priorityをdropしmetadata記録                                                                                                                                        |
+| Task budget          | 15秒、input+output 16,000 token                                                                                           | 超過でcancel、fallback                                                                                                                                                          |
+| Model / effort       | GPT-5.6 familyのrole policy固定、read-only                                                                                | support output/UIから変更不可                                                                                                                                                   |
+| Usage                | role、status、model family、tokens、latency、queue、last error                                                            | prompt/response本文を表示・保存しない                                                                                                                                           |
 
 role toggleをoffにするとqueued taskをcancelし、新規invocationを作らない。active taskは5秒以内にCanceled/Timeoutへ遷移させ、main turnを継続する。non-persistence release auditの最終resultと実施日時へDiagnosticsから到達できる。
+
+commit explainer jobの起動とpresentation開始は別状態である。background jobが自動でstarted/streaming/completedになってもcaption/TTSは開始せず、「詳しく教えて」で対象commitをactive presentationにした後だけ表示・任意読み上げへ進む。
 
 ### Diagnostics
 
