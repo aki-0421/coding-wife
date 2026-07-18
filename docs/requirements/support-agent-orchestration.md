@@ -67,7 +67,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `SUP-F-050` | support taskはmainと別のephemeral rootで実行される | invocationごとに新しいroot IDを作り、main thread IDをreuseせず、完了/cancel/timeout後にrootを再利用しない | Approved | 非該当 |
+| `SUP-F-050` | support taskはmainと別のephemeral rootで実行される | invocationごとに新しいroot IDを作り、main thread IDをreuseしない。success、cancel、timeout、protocol/policy/output error、malformed turn startの全terminalでactive turn addressをprocess終了まで保持し、pending RPCをfailしてwhole process groupをSIGTERM→SIGKILL後のdisappearanceまで確認してからprivate rootを削除する。明示shutdownなしのDropも同期的なgroup SIGKILLとprivate root cleanupを必ず開始し、rootを再利用しない | Approved | 非該当 |
 | `SUP-F-051` | support roleはdeterministic eventで起動される | roleごとに定義したdecision requested、error、`trigger=auto_verified_commit`、`trigger=user_request`、`trigger=user_retry`以外で起動せず、同一event IDを二重処理しない。commit選択、Commit tab表示、SHA未検証のcommand resultでは起動しない | Approved | 非該当 |
 | `SUP-F-052` | 通常supportはredacted normalized snapshotだけを受け取る | payloadにgoal、phase、event summary、evidence ID、locale、generationを含み、source file本文、absolute path、secret、raw reasoningを含まない | Approved | 非該当 |
 | `SUP-F-053` | 通常supportはexternal authorityとrepositoryへアクセスできない | release constructorが専用process、clean `CODEX_HOME`、空のowner-only cwd、runtime root 0件、filesystem/shell/Git/MCP/network/dynamic/user-interaction authority 0件、exact permission profile、auth bridge、malicious canary、production model transportを証明した時だけcapacity 1にする。全Responses requestで`tools` field不在、`tool_choice=auto`、`parallel_tool_calls=false`をexact照合し、空配列を含むtool field追加またはCodex内部の`update_plan` eventを検出したtaskはterminal failureとして結果を破棄する。証明不能ならcapacity 0とdeterministic fallbackへfail closedする | Approved | 非該当 |
@@ -83,7 +83,7 @@ read_when:
 | `SUP-F-058` | support failureはmain turnを停止しない | timeout、model error、schema errorの各fixtureでmain turn statusとconversation event数が変わらず、app controllerを`failed`または`unavailable`へ遷移してdeterministic text fallbackを500ms以内に表示する | Approved | 非該当 |
 | `SUP-F-059` | supportは利用者へ直接質問しない | question/tool-request outputをrejectし、main sessionへ新規decision、message、commandを捏造せずapp controllerへtyped failureを返す | Approved | 非該当 |
 | `SUP-F-060` | support outputはtechnical policyを変更できない | permission、model、commit evidence gate、Live2D path、DOM actionを含むoutputを表示用提案としても実行せずpolicy violationを記録する | Approved | 非該当 |
-| `SUP-F-061` | 利用者は進行中supportをcancelできる | Cancel後1秒以内にinterrupt requestを送り、5秒以内にCanceledまたはTimeoutへ遷移し、mainを継続する | Approved | 非該当 |
+| `SUP-F-061` | 利用者は進行中supportをcancelできる | Cancel後1秒以内にinterrupt requestを送り、ack、ignore、timeout、connection lossのいずれでも5秒以内にsingle-use support process groupを強制終了して`Canceled`へ遷移し、mainを継続する。interrupt failure前にactive turn addressを消さず、descendantとpending RPCを残さない | Approved | 非該当 |
 
 ### Budget・透明性・非永続化
 
@@ -94,7 +94,7 @@ read_when:
 | `SUP-F-064` | 利用者はsupport利用状況を確認できる | Settings/diagnosticsにrole、status、model family、token usage、latency、queue、last errorを表示し、prompt/response本文は表示しない | Approved | 非該当 |
 | `SUP-F-065` | 利用者はsupportをglobalまたはrole単位で無効化できる | toggle off後にqueued taskをcancelし、新規invocationを0件にしてmainとdeterministic fallbackを維持する | Approved | 非該当 |
 | `SUP-F-066` | support raw historyをapp persistenceへ残さない | invocation完了後にapp DB、artifact、logを検索してもprompt/response本文が0件で、usage metadataだけが存在する | Approved | 非該当 |
-| `SUP-F-067` | release前にephemeral non-persistenceを監査する | test用CODEX_HOME snapshotのbefore/after差分にsupport thread history fileが0件であることをCI/manual release evidenceへ記録する | Approved | 非該当 |
+| `SUP-F-067` | release前にephemeral non-persistenceを監査する | test用CODEX_HOME snapshotのbefore/after差分にsupport thread history fileが0件であることをCI/manual release evidenceへ記録する。private rootは作成時directory descriptorとdevice/inode/ownerを保持し、同一identityのmode driftを0700へ戻してauth copyごとno-follow cleanupする。explicit cleanup失敗ではcleaned状態にせずDrop retryを残し、unsafe-mode stale rootも次回起動時にowner/identity/lockを再検証して回収する | Approved | 非該当 |
 | `SUP-F-068` | support model familyとeffortはrole policyで固定される | role mappingに存在するGPT-5.6 family/effortだけをsession startへ渡し、support outputからmodelを変更できない | Approved | 非該当 |
 
 ### Commit explanation

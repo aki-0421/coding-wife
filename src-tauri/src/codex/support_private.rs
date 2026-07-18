@@ -5,6 +5,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex as StdMutex;
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -22,8 +23,31 @@ pub(super) struct PrivateRunDirectory {
     pub(super) codex_home: PathBuf,
     pub(super) workspace: PathBuf,
     temp: PathBuf,
+    root_descriptor: File,
+    root_identity: DirectoryIdentity,
     _lock: File,
+    cleanup_lock: StdMutex<()>,
     cleaned: AtomicBool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DirectoryIdentity {
+    device: u64,
+    inode: u64,
+    owner: u32,
+}
+
+struct PendingRunRoot {
+    path: PathBuf,
+    committed: bool,
+}
+
+impl Drop for PendingRunRoot {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 }
 
 impl PrivateRunDirectory {
@@ -35,21 +59,36 @@ impl PrivateRunDirectory {
             uuid::Uuid::new_v4()
         ));
         create_private_directory(&root)?;
-        let lock = create_lock_file(&root.join(RUN_LOCK_FILE))?;
+        let mut pending_root = PendingRunRoot {
+            path: root.clone(),
+            committed: false,
+        };
         let codex_home = root.join("codex-home");
         let workspace = root.join("workspace");
         let temp = root.join("tmp");
-        for directory in [&codex_home, &workspace, &temp] {
-            create_private_directory(directory)?;
-        }
-        Ok(Self {
+        let root_descriptor = open_directory_descriptor(&root)?;
+        let root_identity = directory_identity(
+            &root_descriptor
+                .metadata()
+                .map_err(|_| SupportRuntimeError::PrivateRuntime)?,
+        );
+        let lock = create_lock_file(&root.join(RUN_LOCK_FILE))?;
+        let run = Self {
             root,
             codex_home,
             workspace,
             temp,
+            root_descriptor,
+            root_identity,
             _lock: lock,
+            cleanup_lock: StdMutex::new(()),
             cleaned: AtomicBool::new(false),
-        })
+        };
+        for directory in [&run.codex_home, &run.workspace, &run.temp] {
+            create_private_directory(directory)?;
+        }
+        pending_root.committed = true;
+        Ok(run)
     }
 
     pub(super) fn write_config(&self, contents: &str) -> Result<(), SupportRuntimeError> {
@@ -141,14 +180,55 @@ impl PrivateRunDirectory {
     }
 
     pub(super) fn cleanup(&self) -> Result<(), SupportRuntimeError> {
-        if self.cleaned.swap(true, Ordering::AcqRel) {
+        let _cleanup = self
+            .cleanup_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.cleaned.load(Ordering::Acquire) {
             return Ok(());
         }
-        validate_private_directory(&self.root)?;
+        let descriptor_metadata = self
+            .root_descriptor
+            .metadata()
+            .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        if directory_identity(&descriptor_metadata) != self.root_identity
+            || !descriptor_metadata.is_dir()
+        {
+            return Err(SupportRuntimeError::PrivateRuntime);
+        }
+        let path_metadata = match std::fs::symlink_metadata(&self.root) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.cleaned.store(true, Ordering::Release);
+                return Ok(());
+            }
+            Err(_) => return Err(SupportRuntimeError::PrivateRuntime),
+        };
+        if path_metadata.file_type().is_symlink()
+            || !path_metadata.is_dir()
+            || directory_identity(&path_metadata) != self.root_identity
+        {
+            return Err(SupportRuntimeError::PrivateRuntime);
+        }
+        if path_metadata.mode() & 0o777 != 0o700 {
+            self.root_descriptor
+                .set_permissions(std::fs::Permissions::from_mode(0o700))
+                .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+            let repaired = std::fs::symlink_metadata(&self.root)
+                .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+            if repaired.file_type().is_symlink()
+                || !repaired.is_dir()
+                || directory_identity(&repaired) != self.root_identity
+                || repaired.mode() & 0o777 != 0o700
+            {
+                return Err(SupportRuntimeError::PrivateRuntime);
+            }
+        }
         std::fs::remove_dir_all(&self.root).map_err(|_| SupportRuntimeError::PrivateRuntime)?;
         if self.root.exists() {
             return Err(SupportRuntimeError::PrivateRuntime);
         }
+        self.cleaned.store(true, Ordering::Release);
         Ok(())
     }
 }
@@ -168,13 +248,25 @@ fn cleanup_stale_run_directories() -> Result<(), SupportRuntimeError> {
             Ok(metadata)
                 if !metadata.file_type().is_symlink()
                     && metadata.is_dir()
-                    && metadata.uid() == current_uid()
-                    && metadata.mode() & 0o777 == 0o700 =>
+                    && metadata.uid() == current_uid() =>
             {
                 metadata
             }
             _ => continue,
         };
+        let identity = directory_identity(&before);
+        let descriptor = open_directory_descriptor(&path)?;
+        let opened = descriptor
+            .metadata()
+            .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        if directory_identity(&opened) != identity || !opened.is_dir() {
+            return Err(SupportRuntimeError::PrivateRuntime);
+        }
+        if opened.mode() & 0o777 != 0o700 {
+            descriptor
+                .set_permissions(std::fs::Permissions::from_mode(0o700))
+                .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        }
         let lock = match open_existing_lock_file(&path.join(RUN_LOCK_FILE)) {
             Ok(lock) => lock,
             Err(_) => continue,
@@ -184,16 +276,17 @@ fn cleanup_stale_run_directories() -> Result<(), SupportRuntimeError> {
         }
         let after =
             std::fs::symlink_metadata(&path).map_err(|_| SupportRuntimeError::PrivateRuntime)?;
-        if before.dev() != after.dev()
-            || before.ino() != after.ino()
-            || after.file_type().is_symlink()
+        if after.file_type().is_symlink()
             || !after.is_dir()
-            || after.uid() != current_uid()
+            || directory_identity(&after) != identity
             || after.mode() & 0o777 != 0o700
         {
             return Err(SupportRuntimeError::PrivateRuntime);
         }
         std::fs::remove_dir_all(&path).map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+        if path.exists() {
+            return Err(SupportRuntimeError::PrivateRuntime);
+        }
     }
     Ok(())
 }
@@ -257,9 +350,30 @@ fn try_lock_file(file: &File) -> Result<bool, SupportRuntimeError> {
 
 impl Drop for PrivateRunDirectory {
     fn drop(&mut self) {
-        if !self.cleaned.swap(true, Ordering::AcqRel) {
-            let _ = std::fs::remove_dir_all(&self.root);
-        }
+        let _ = self.cleanup();
+    }
+}
+
+fn open_directory_descriptor(path: &Path) -> Result<File, SupportRuntimeError> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
+    if !metadata.is_dir() || metadata.uid() != current_uid() {
+        return Err(SupportRuntimeError::PrivateRuntime);
+    }
+    Ok(file)
+}
+
+fn directory_identity(metadata: &std::fs::Metadata) -> DirectoryIdentity {
+    DirectoryIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        owner: metadata.uid(),
     }
 }
 
@@ -421,6 +535,12 @@ pub(super) fn support_config(mock_base_url: Option<&str>) -> String {
 mod tests {
     use super::*;
 
+    fn write_auth_copy(run: &PrivateRunDirectory) -> PathBuf {
+        let auth = run.codex_home.join("auth.json");
+        write_private_file(&auth, br#"{"token":"fixture"}"#).expect("private auth copy");
+        auth
+    }
+
     #[test]
     fn next_runtime_removes_only_an_unlocked_stale_private_directory() {
         let stale = std::env::temp_dir().join(format!(
@@ -435,6 +555,66 @@ mod tests {
         let active = PrivateRunDirectory::create("cleanup-test").expect("active support runtime");
         assert!(!stale.exists());
         assert!(active.root.exists());
+        active.cleanup().expect("active support cleanup");
+    }
+
+    #[test]
+    fn cleanup_repairs_same_identity_mode_drift_and_removes_auth() {
+        let run = PrivateRunDirectory::create("unsafe-mode-cleanup").expect("support runtime");
+        let root = run.root.clone();
+        let auth = write_auth_copy(&run);
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o711))
+            .expect("drift root mode");
+
+        run.cleanup().expect("identity-safe cleanup");
+
+        assert!(!auth.exists(), "copied auth survived cleanup");
+        assert!(!root.exists(), "private root survived cleanup");
+    }
+
+    #[test]
+    fn explicit_identity_failure_leaves_drop_retry_enabled() {
+        let run = PrivateRunDirectory::create("cleanup-retry").expect("support runtime");
+        let root = run.root.clone();
+        let displaced = root.with_extension("displaced");
+        let auth_relative = Path::new("codex-home/auth.json");
+        write_auth_copy(&run);
+        std::fs::rename(&root, &displaced).expect("displace original root");
+        create_private_directory(&root).expect("replacement root");
+
+        assert_eq!(run.cleanup(), Err(SupportRuntimeError::PrivateRuntime));
+        assert!(
+            displaced.join(auth_relative).exists(),
+            "failed cleanup removed or lost auth ownership"
+        );
+
+        std::fs::remove_dir_all(&root).expect("remove replacement root");
+        std::fs::rename(&displaced, &root).expect("restore original root identity");
+        drop(run);
+
+        assert!(!root.exists(), "Drop did not retry the failed cleanup");
+        assert!(!displaced.exists(), "displaced private root survived");
+    }
+
+    #[test]
+    fn next_runtime_recovers_unlocked_stale_auth_after_mode_drift() {
+        let stale = std::env::temp_dir().join(format!(
+            "{RUN_DIRECTORY_PREFIX}stale-0-{}",
+            uuid::Uuid::new_v4()
+        ));
+        create_private_directory(&stale).expect("stale support directory");
+        let lock = create_lock_file(&stale.join(RUN_LOCK_FILE)).expect("stale support lock");
+        let stale_home = stale.join("codex-home");
+        create_private_directory(&stale_home).expect("stale Codex home");
+        write_private_file(&stale_home.join("auth.json"), br#"{"token":"stale"}"#)
+            .expect("stale auth copy");
+        std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o711))
+            .expect("drift stale mode");
+        drop(lock);
+
+        let active = PrivateRunDirectory::create("stale-recovery").expect("next runtime");
+
+        assert!(!stale.exists(), "next start left stale auth on disk");
         active.cleanup().expect("active support cleanup");
     }
 }

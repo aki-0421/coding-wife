@@ -69,6 +69,50 @@ fn current_support_run_directories() -> Vec<PathBuf> {
     directories
 }
 
+fn last_recorded_pid(state: &str, prefix: &str) -> u32 {
+    state
+        .lines()
+        .rev()
+        .find_map(|line| {
+            line.strip_prefix(prefix)?
+                .split(':')
+                .next()?
+                .parse::<u32>()
+                .ok()
+        })
+        .unwrap_or_else(|| panic!("missing {prefix:?} in state: {state}"))
+}
+
+fn fixture_process_group_exists(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal zero only probes the process group identified by the fixture pid.
+    unsafe { libc::kill(-pid, 0) == 0 }
+}
+
+struct FixtureProcessGroupGuard(u32);
+
+impl Drop for FixtureProcessGroupGuard {
+    fn drop(&mut self) {
+        if let Ok(pid) = i32::try_from(self.0) {
+            // SAFETY: the test fixture creates its own process group and the guard owns its pid.
+            let _ = unsafe { libc::kill(-pid, libc::SIGKILL) };
+        }
+    }
+}
+
+async fn wait_for_fixture_process_group_exit(pid: u32) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while fixture_process_group_exists(pid) && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        !fixture_process_group_exists(pid),
+        "support process group {pid} survived terminal cleanup"
+    );
+}
+
 struct FixtureEnvironment {
     workspace: PathBuf,
     state: PathBuf,
@@ -847,6 +891,47 @@ async fn private_evidence_is_rejected_before_the_explanation_wire() {
 }
 
 #[tokio::test]
+async fn invalid_support_input_does_not_consume_the_single_use_runtime() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime = SupportRuntime::construct(
+        &binary,
+        &schema,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        Some(&auth),
+    )
+    .await
+    .expect("isolated support runtime");
+    let mut invalid = support_evidence("ja");
+    invalid.subject = "src/private.rs".to_owned();
+
+    assert_eq!(
+        runtime
+            .explain_commit(support_request("support-invalid-first", invalid))
+            .await,
+        Err(SupportRuntimeError::EvidenceRedaction)
+    );
+    let result = runtime
+        .explain_commit(support_request(
+            "support-valid-second",
+            support_evidence("ja"),
+        ))
+        .await
+        .expect("valid request may claim the single use");
+
+    assert_eq!(result.explanation.locale, "ja");
+    runtime
+        .shutdown()
+        .await
+        .expect("idempotent support cleanup");
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 3);
+}
+
+#[tokio::test]
 async fn invalid_support_output_and_plan_events_publish_no_result() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     for (mode, expected) in [
@@ -935,6 +1020,165 @@ async fn support_stream_budget_rejects_one_over_before_a_valid_terminal_can_publ
         assert_eq!(error, expected, "{mode}");
         runtime.shutdown().await.expect("support cleanup");
     }
+}
+
+#[tokio::test]
+async fn malformed_support_turn_start_terminates_process_and_private_root_before_return() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let before = current_support_run_directories();
+    let fixture = FixtureEnvironment::new("support_missing_turn_id");
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime = SupportRuntime::construct(
+        &binary,
+        &schema,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        Some(&auth),
+    )
+    .await
+    .expect("isolated support runtime");
+    let state = read_state(&fixture.state).await;
+    let pid = last_recorded_pid(&state, "support_process_started:");
+    let _process_guard = FixtureProcessGroupGuard(pid);
+
+    let error = runtime
+        .explain_commit(support_request(
+            "support-missing-turn-id",
+            support_evidence("ja"),
+        ))
+        .await
+        .expect_err("missing turn id must be terminal");
+
+    assert_eq!(error, SupportRuntimeError::Protocol);
+    wait_for_fixture_process_group_exit(pid).await;
+    assert_eq!(current_support_run_directories(), before);
+    runtime
+        .shutdown()
+        .await
+        .expect("idempotent support cleanup");
+}
+
+#[tokio::test]
+async fn ignored_interrupt_forces_grandchild_group_exit_before_canceled_result() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let before = current_support_run_directories();
+    let fixture = FixtureEnvironment::new("support_ignore_interrupt_grandchild");
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime = Arc::new(
+        SupportRuntime::construct(
+            &binary,
+            &schema,
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            Some(&auth),
+        )
+        .await
+        .expect("isolated support runtime"),
+    );
+    let task_runtime = runtime.clone();
+    let explanation = tokio::spawn(async move {
+        task_runtime
+            .explain_commit(support_request(
+                "support-ignore-interrupt",
+                support_evidence("ja"),
+            ))
+            .await
+    });
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let pid = loop {
+        let state = read_state(&fixture.state).await;
+        if state.contains("support_grandchild_started:")
+            && state.matches("support_skill_exactly_once_ok").count() == 3
+        {
+            break last_recorded_pid(&state, "support_process_started:");
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "support grandchild did not start: {state}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let _process_guard = FixtureProcessGroupGuard(pid);
+    let canceled_at = tokio::time::Instant::now();
+
+    assert!(runtime.cancel().await.expect("forced support cancellation"));
+    let error = explanation
+        .await
+        .expect("support explanation join")
+        .expect_err("canceled support turn must publish no result");
+
+    assert_eq!(error, SupportRuntimeError::Canceled);
+    assert!(canceled_at.elapsed() < Duration::from_secs(5));
+    wait_for_fixture_process_group_exit(pid).await;
+    assert_eq!(current_support_run_directories(), before);
+    let runtime = Arc::try_unwrap(runtime).unwrap_or_else(|_| panic!("unexpected runtime owner"));
+    runtime
+        .shutdown()
+        .await
+        .expect("idempotent support cleanup");
+}
+
+#[tokio::test]
+async fn support_timeout_terminates_process_and_private_root_before_return() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let before = current_support_run_directories();
+    let fixture = FixtureEnvironment::new("support_timeout");
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime = SupportRuntime::construct(
+        &binary,
+        &schema,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        Some(&auth),
+    )
+    .await
+    .expect("isolated support runtime");
+    let state = read_state(&fixture.state).await;
+    let pid = last_recorded_pid(&state, "support_process_started:");
+    let _process_guard = FixtureProcessGroupGuard(pid);
+
+    let error = runtime
+        .explain_commit(support_request("support-timeout", support_evidence("ja")))
+        .await
+        .expect_err("timed out support turn must publish no result");
+
+    assert_eq!(error, SupportRuntimeError::Timeout);
+    wait_for_fixture_process_group_exit(pid).await;
+    assert_eq!(current_support_run_directories(), before);
+    runtime
+        .shutdown()
+        .await
+        .expect("idempotent support cleanup");
+}
+
+#[tokio::test]
+async fn dropping_support_runtime_kills_grandchild_and_removes_private_root() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let before = current_support_run_directories();
+    let fixture = FixtureEnvironment::new("support_drop_grandchild");
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime = SupportRuntime::construct(
+        &binary,
+        &schema,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        Some(&auth),
+    )
+    .await
+    .expect("isolated support runtime");
+    let state = read_state(&fixture.state).await;
+    let pid = last_recorded_pid(&state, "support_process_started:");
+    let _process_guard = FixtureProcessGroupGuard(pid);
+    assert!(fixture_process_group_exists(pid));
+
+    drop(runtime);
+
+    wait_for_fixture_process_group_exit(pid).await;
+    assert_eq!(current_support_run_directories(), before);
 }
 
 #[tokio::test]

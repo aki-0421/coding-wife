@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -48,6 +49,17 @@ def send_sized_notification(method, params, line_bytes):
     if len(encoded) != line_bytes:
         raise AssertionError("sized notification did not reach the exact boundary")
     send(value)
+
+
+def spawn_support_grandchild():
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    record(f"support_grandchild_started:{os.getpid()}:{child.pid}")
+    return child
 
 
 def generate_schema(output):
@@ -226,6 +238,8 @@ def main():
 
     if EXECUTION_CLASS == "support":
         record(f"support_process_started:{os.getpid()}")
+        if MODE == "support_drop_grandchild":
+            spawn_support_grandchild()
     pending_fixture = []
     for raw_line in sys.stdin.buffer:
         try:
@@ -581,10 +595,10 @@ def main():
                     output = support_explanation(locale)
                     if MODE == "support_invalid_output":
                         output = '{"schemaVersion":1,"locale":"ja"}'
-                result(
-                    message_id,
-                    {"turn": {"id": "support-turn-fixture", "status": "inProgress"}},
-                )
+                turn_result = {"turn": {"id": "support-turn-fixture", "status": "inProgress"}}
+                if MODE == "support_missing_turn_id" and not probe_turn and not policy_probe_turn:
+                    turn_result = {"turn": {"status": "inProgress"}}
+                result(message_id, turn_result)
                 send(
                     {
                         "method": "turn/started",
@@ -594,7 +608,17 @@ def main():
                         },
                     }
                 )
-                if MODE == "support_slow" and not probe_turn and not policy_probe_turn:
+                if (
+                    MODE == "support_ignore_interrupt_grandchild"
+                    and not probe_turn
+                    and not policy_probe_turn
+                ):
+                    spawn_support_grandchild()
+                if MODE in (
+                    "support_slow",
+                    "support_timeout",
+                    "support_ignore_interrupt_grandchild",
+                ) and not probe_turn and not policy_probe_turn:
                     continue
                 if policy_probe_turn:
                     if MODE == "support_probe_policy_completed":
@@ -890,6 +914,9 @@ def main():
             continue
         if method == "turn/interrupt":
             record("interrupt_received")
+            if MODE == "support_ignore_interrupt_grandchild":
+                record("interrupt_ignored")
+                continue
             result(message_id, {})
             send(
                 {

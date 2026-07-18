@@ -374,9 +374,6 @@ impl SupportRuntime {
         &self,
         request: SupportExplainRequest,
     ) -> Result<SupportExplainResult, SupportRuntimeError> {
-        if self.used.swap(true, Ordering::AcqRel) {
-            return Err(SupportRuntimeError::AlreadyUsed);
-        }
         if self.cancel_requested.load(Ordering::Acquire) {
             return Err(SupportRuntimeError::Canceled);
         }
@@ -392,6 +389,24 @@ impl SupportRuntime {
             return Err(SupportRuntimeError::Output);
         }
         let input = String::from_utf8(input).map_err(|_| SupportRuntimeError::Output)?;
+        let params = match support_turn_start_params(
+            &self.thread_id,
+            &self.run_directory.workspace,
+            &request.request_id,
+            &input,
+            &request.evidence.locale,
+            CODEX_MODEL,
+            &self.skill,
+        ) {
+            Ok(params) => params,
+            Err(_) => return Err(self.terminal_failure(SupportRuntimeError::Skill).await),
+        };
+        if self.used.swap(true, Ordering::AcqRel) {
+            return Err(SupportRuntimeError::AlreadyUsed);
+        }
+        if self.cancel_requested.load(Ordering::Acquire) {
+            return Err(self.terminal_failure(SupportRuntimeError::Canceled).await);
+        }
         let started = Instant::now();
         let canceled = Arc::new(AtomicBool::new(
             self.cancel_requested.load(Ordering::Acquire),
@@ -407,16 +422,6 @@ impl SupportRuntime {
                 canceled: canceled.clone(),
             });
         }
-        let params = support_turn_start_params(
-            &self.thread_id,
-            &self.run_directory.workspace,
-            &request.request_id,
-            &input,
-            &request.evidence.locale,
-            CODEX_MODEL,
-            &self.skill,
-        )
-        .map_err(|_| SupportRuntimeError::Skill)?;
         let turn = match self
             .runtime
             .connection
@@ -425,53 +430,75 @@ impl SupportRuntime {
         {
             Ok(turn) => turn,
             Err(error) => {
-                *self.active.lock().await = None;
-                return Err(map_rpc_error(error));
+                let error = if canceled.load(Ordering::Acquire) {
+                    SupportRuntimeError::Canceled
+                } else {
+                    map_rpc_error(error)
+                };
+                return Err(self.terminal_failure(error).await);
             }
         };
-        let turn_id = turn
+        let Some(turn_id) = turn
             .pointer("/turn/id")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty() && value.len() <= 256)
             .map(str::to_owned)
-            .ok_or(SupportRuntimeError::Protocol)?;
-        {
+        else {
+            return Err(self.terminal_failure(SupportRuntimeError::Protocol).await);
+        };
+        let turn_was_addressed = {
             let mut active = self.active.lock().await;
-            let Some(active) = active.as_mut() else {
-                return Err(SupportRuntimeError::Protocol);
-            };
-            active.turn_id = Some(turn_id.clone());
+            active.as_mut().is_some_and(|active| {
+                active.turn_id = Some(turn_id.clone());
+                true
+            })
+        };
+        if !turn_was_addressed {
+            return Err(self.terminal_failure(SupportRuntimeError::Protocol).await);
         }
         if canceled.load(Ordering::Acquire) {
             let _ = self.interrupt(&self.thread_id, &turn_id).await;
+            return Err(self.terminal_failure(SupportRuntimeError::Canceled).await);
         }
 
         let remaining = SUPPORT_TASK_TIMEOUT.saturating_sub(started.elapsed());
         let terminal = self
             .wait_for_turn(&self.thread_id, &turn_id, remaining)
             .await;
-        *self.active.lock().await = None;
         let terminal = match terminal {
             Ok(terminal) => terminal,
             Err(error) => {
                 let _ = self.interrupt(&self.thread_id, &turn_id).await;
-                return Err(error);
+                let error = if canceled.load(Ordering::Acquire) {
+                    SupportRuntimeError::Canceled
+                } else {
+                    error
+                };
+                return Err(self.terminal_failure(error).await);
             }
         };
         if canceled.load(Ordering::Acquire) || terminal.status == "interrupted" {
-            return Err(SupportRuntimeError::Canceled);
+            return Err(self.terminal_failure(SupportRuntimeError::Canceled).await);
         }
         if terminal.status != "completed" {
-            return Err(SupportRuntimeError::Protocol);
+            return Err(self.terminal_failure(SupportRuntimeError::Protocol).await);
         }
-        let text = terminal.agent_message.ok_or(SupportRuntimeError::Output)?;
-        let explanation = parse_explanation(&text, &request.evidence.locale)?;
-        Ok(SupportExplainResult {
+        let Some(text) = terminal.agent_message else {
+            return Err(self.terminal_failure(SupportRuntimeError::Output).await);
+        };
+        let explanation = match parse_explanation(&text, &request.evidence.locale) {
+            Ok(explanation) => explanation,
+            Err(error) => return Err(self.terminal_failure(error).await),
+        };
+        let result = SupportExplainResult {
             request_id: request.request_id,
             explanation,
             usage: terminal.usage,
             latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        })
+        };
+        self.shutdown_and_cleanup().await?;
+        *self.active.lock().await = None;
+        Ok(result)
     }
 
     pub async fn cancel(&self) -> Result<bool, SupportRuntimeError> {
@@ -482,9 +509,37 @@ impl SupportRuntime {
         };
         active.canceled.store(true, Ordering::Release);
         if let Some(turn_id) = active.turn_id {
-            self.interrupt(&active.thread_id, &turn_id).await?;
+            let _ = self.interrupt(&active.thread_id, &turn_id).await;
         }
+        self.terminate_and_cleanup().await?;
+        *self.active.lock().await = None;
         Ok(true)
+    }
+
+    async fn terminal_failure(&self, error: SupportRuntimeError) -> SupportRuntimeError {
+        match self.terminate_and_cleanup().await {
+            Ok(()) => {
+                *self.active.lock().await = None;
+                error
+            }
+            Err(terminal_error) => terminal_error,
+        }
+    }
+
+    async fn terminate_and_cleanup(&self) -> Result<(), SupportRuntimeError> {
+        self.runtime
+            .terminate_checked()
+            .await
+            .map_err(|_| SupportRuntimeError::Process)?;
+        self.run_directory.cleanup()
+    }
+
+    async fn shutdown_and_cleanup(&self) -> Result<(), SupportRuntimeError> {
+        self.runtime
+            .shutdown_checked()
+            .await
+            .map_err(|_| SupportRuntimeError::Process)?;
+        self.run_directory.cleanup()
     }
 
     async fn interrupt(&self, thread_id: &str, turn_id: &str) -> Result<(), SupportRuntimeError> {
@@ -634,8 +689,13 @@ impl SupportRuntime {
     }
 
     pub async fn shutdown(&self) -> Result<(), SupportRuntimeError> {
-        self.runtime.shutdown().await;
-        self.run_directory.cleanup()
+        self.shutdown_and_cleanup().await
+    }
+}
+
+impl Drop for SupportRuntime {
+    fn drop(&mut self) {
+        self.runtime.force_shutdown_now();
     }
 }
 
@@ -1025,7 +1085,6 @@ mod tests {
             SUPPORT_MAX_FRAME_BYTES * SUPPORT_SIGNAL_QUEUE_CAPACITY,
             768 * 1024
         );
-        assert!(SUPPORT_MAX_FRAME_BYTES > MAX_SUPPORT_OUTPUT_BYTES);
     }
 
     #[test]

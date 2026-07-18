@@ -19,6 +19,7 @@ use super::types::TurnExecutionClass;
 
 const STDERR_RING_BYTES: usize = 64 * 1024;
 const GRACEFUL_STDIN_WAIT: Duration = Duration::from_secs(2);
+#[cfg(test)]
 const TOTAL_SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -187,7 +188,14 @@ pub struct ProcessRuntime {
     child: Arc<Mutex<Child>>,
     stderr_ring: Arc<Mutex<VecDeque<String>>>,
     expected_shutdown: Arc<AtomicBool>,
+    shutdown_complete: AtomicBool,
+    shutdown_lock: Mutex<()>,
     pid: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProcessShutdownError {
+    ProcessTree,
 }
 
 fn is_allowed_environment(name: &OsStr) -> bool {
@@ -325,6 +333,8 @@ async fn spawn_process_with_environment(
         child: Arc::new(Mutex::new(child)),
         stderr_ring,
         expected_shutdown: Arc::new(AtomicBool::new(false)),
+        shutdown_complete: AtomicBool::new(false),
+        shutdown_lock: Mutex::new(()),
         pid,
     })
 }
@@ -361,36 +371,66 @@ impl ProcessRuntime {
     }
 
     pub async fn shutdown(&self) {
+        let _ = self.shutdown_checked().await;
+    }
+
+    pub(crate) async fn shutdown_checked(&self) -> Result<(), ProcessShutdownError> {
+        self.stop_process_tree(true).await
+    }
+
+    pub(crate) async fn terminate_checked(&self) -> Result<(), ProcessShutdownError> {
+        self.stop_process_tree(false).await
+    }
+
+    async fn stop_process_tree(&self, graceful: bool) -> Result<(), ProcessShutdownError> {
+        let _shutdown = self.shutdown_lock.lock().await;
+        if self.shutdown_complete.load(Ordering::Acquire) {
+            return Ok(());
+        }
         self.expected_shutdown.store(true, Ordering::Release);
         self.connection.close();
-        let started = tokio::time::Instant::now();
 
-        while started.elapsed() < GRACEFUL_STDIN_WAIT {
-            if process_tree_exited(&self.child, self.pid)
-                .await
-                .unwrap_or(false)
-            {
-                self.connection.fail_pending().await;
-                return;
+        if graceful {
+            let deadline = tokio::time::Instant::now() + GRACEFUL_STDIN_WAIT;
+            while tokio::time::Instant::now() < deadline {
+                if process_tree_exited(&self.child, self.pid)
+                    .await
+                    .unwrap_or(false)
+                {
+                    self.connection.fail_pending().await;
+                    self.shutdown_complete.store(true, Ordering::Release);
+                    return Ok(());
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
-        let _ = signal_process_group(self.pid, SIGTERM);
-        while started.elapsed() < TOTAL_SHUTDOWN_WAIT {
-            if process_tree_exited(&self.child, self.pid)
-                .await
-                .unwrap_or(false)
-            {
-                self.connection.fail_pending().await;
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-
-        let _ = signal_process_group(self.pid, SIGKILL);
-        let _ = self.child.lock().await.kill().await;
+        let terminated = {
+            let mut child = self.child.lock().await;
+            terminate_child_process_group(&mut child, self.pid, Duration::from_millis(200)).await
+        };
         self.connection.fail_pending().await;
+        if !terminated {
+            return Err(ProcessShutdownError::ProcessTree);
+        }
+        self.shutdown_complete.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    pub(crate) fn force_shutdown_now(&self) {
+        if self.shutdown_complete.load(Ordering::Acquire) {
+            return;
+        }
+        self.expected_shutdown.store(true, Ordering::Release);
+        self.connection.close();
+        if let Ok(mut child) = self.child.try_lock() {
+            if child.try_wait().ok().flatten().is_some() && !process_group_exists(self.pid) {
+                self.shutdown_complete.store(true, Ordering::Release);
+                return;
+            }
+            let _ = child.start_kill();
+        }
+        let _ = signal_process_group(self.pid, SIGKILL);
     }
 
     pub async fn has_exited(&self) -> bool {
@@ -405,6 +445,12 @@ impl ProcessRuntime {
 
     pub async fn redacted_stderr_size(&self) -> usize {
         self.stderr_ring.lock().await.iter().map(String::len).sum()
+    }
+}
+
+impl Drop for ProcessRuntime {
+    fn drop(&mut self) {
+        self.force_shutdown_now();
     }
 }
 
@@ -439,13 +485,13 @@ pub(crate) async fn terminate_child_process_group(
     child: &mut Child,
     pid: u32,
     term_grace: Duration,
-) {
+) -> bool {
     let _ = signal_process_group(pid, SIGTERM);
     let deadline = tokio::time::Instant::now() + term_grace;
     loop {
         let _ = child.try_wait();
         if !process_group_exists(pid) {
-            return;
+            return true;
         }
         if tokio::time::Instant::now() >= deadline {
             break;
@@ -461,6 +507,7 @@ pub(crate) async fn terminate_child_process_group(
     while process_group_exists(pid) && tokio::time::Instant::now() < kill_deadline {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    !process_group_exists(pid)
 }
 
 #[cfg(test)]
@@ -513,7 +560,10 @@ mod tests {
         }
 
         let started = Instant::now();
-        terminate_child_process_group(&mut child, pid, Duration::from_millis(100)).await;
+        assert!(
+            terminate_child_process_group(&mut child, pid, Duration::from_millis(100)).await,
+            "process group did not converge after SIGKILL"
+        );
         assert!(started.elapsed() < TOTAL_SHUTDOWN_WAIT);
         let gone_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
         while process_group_exists(pid) && tokio::time::Instant::now() < gone_deadline {
@@ -548,7 +598,10 @@ mod tests {
         child.wait().await.expect("parent exits");
         assert!(process_group_exists(pid), "grandchild fixture is alive");
 
-        terminate_child_process_group(&mut child, pid, Duration::from_millis(100)).await;
+        assert!(
+            terminate_child_process_group(&mut child, pid, Duration::from_millis(100)).await,
+            "grandchild process group did not converge after SIGKILL"
+        );
         assert!(
             !process_group_exists(pid),
             "grandchild process group survived"

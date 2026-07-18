@@ -261,6 +261,14 @@ readerはraw line境界に加え、parse後のcompact `byte_count`も96KiB以下
 
 schema validation後は`CommitEvidenceV1`と共有するpublic-material scannerを全stringへ再帰適用し、support input固有のURL、backslash、redaction検査も再適用する。absolute/relative/tokenized path、credential、raw reasoning marker、URL、redaction marker、NULを含むcontrol characterのいずれかがsummary、各配列要素、narration textを含む任意のslotにあればwhole outputを破棄する。partial redactionしたmodel textは公開しない。
 
+## terminal process とprivate rootの収束
+
+support runtimeはsingle-useであるため、successだけでなくtimeout、cancel、policy/protocol/output error、turn ID欠落をすべてprocess terminalとして扱う。turn addressはinterruptを試行している間とwhole process groupの停止中に保持し、停止完了後にだけactive stateを消す。error/cancelはstdin closeとpending RPC failureに加えてprocess groupへSIGTERMを送り、200ms後も残る場合はSIGKILL、child waitとgroup signal probeを最大500msずつ行ってgroup disappearanceを確認する。successと明示shutdownは最大2秒のstdin graceful exitを先に許し、残存groupへ同じ強制停止を適用する。
+
+`ProcessRuntime`と`SupportRuntime`のDropはasync waitを行えないため、未収束なら同期的にstdin close、direct child kill、group SIGKILLを開始する。fixtureでは明示shutdownを呼ばずにdropしても、別processのgrandchildを含むgroupが2秒以内に消えることを確認する。await可能な全product terminal pathはDropへ依存せず、group disappearance、pending RPC failure、private cleanupを完了してから結果を返す。
+
+private run directoryは作成時からroot directory descriptor、device、inode、ownerとexclusive lockを保持する。cleanup時はpathが同じidentityを指すことをno-followで照合し、group/worldへ広がったmodeはdescriptor経由の`fchmod(0700)`相当で戻してからauth copyを含むtreeを削除する。`cleaned=true`はpath disappearance確認後だけに設定するため、identity mismatchやremove failureを返したexplicit cleanupの後もDropがretryできる。次回起動のstale recoveryもowner、descriptor identity、lock非保持を確認し、unsafe-modeへdriftしたrootを同じ手順で回収する。
+
 ## 実装判定
 
 **Conditional Go** とする。0.144.5 のこの host では release-capable な隔離構成を実測できた。ただし次のいずれかで直ちに capacity 0 へ戻す。
