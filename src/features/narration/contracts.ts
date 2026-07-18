@@ -281,7 +281,7 @@ const privateTextPatterns = [
   /\bxox[baprs]-[a-z0-9-]{10,}/iu,
   /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----/iu,
   /(?:^|[^a-z0-9])(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|aws[_-]?session[_-]?token|cookie|session(?:[_-]?id)?)\s*[:=]\s*["']?\S+/iu,
-  /(?:^|[\s([{"'=,:;：、，。！？])\/(?:[^\s/<>"']+\/)+[^\s/<>"']+/u,
+  /(?:^|[\s([{"'「『=,:;：、，。！？])\/[^\s/<>"']+/u,
 ] as const
 
 function isRedactedText(value: unknown): value is string {

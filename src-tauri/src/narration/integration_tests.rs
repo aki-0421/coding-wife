@@ -505,6 +505,7 @@ async fn rejects_unsafe_text_before_spawning_speech() {
     for (id, text) in [
         ("unsafe-secret", "api_key=unsafe-value"),
         ("unsafe-path", "Open /Users/example/private.txt"),
+        ("unsafe-single-component-path", "Open /x"),
         ("unsafe-token", "sk-1234567890abcdef"),
     ] {
         let error = service

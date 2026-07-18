@@ -205,7 +205,7 @@ fn secret_pattern() -> &'static Regex {
 fn private_path_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r#"(?:^|[\s(\[{"'=,:;：、，。！？])/(?:[^\s/<>"']+/)+[^\s/<>"']+"#)
+        Regex::new(r#"(?:^|[\s(\[{"'「『=,:;：、，。！？])\/[^\s/<>"']+"#)
             .expect("narration path pattern")
     })
 }

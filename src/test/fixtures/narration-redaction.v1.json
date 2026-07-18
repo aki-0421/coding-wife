@@ -24,6 +24,18 @@
     {
       "name": "https-url-with-path",
       "text": "See https://example.com/root/workspace/details for the public guide."
+    },
+    {
+      "name": "https-url-with-single-component-path",
+      "text": "See https://example.com/x for the public guide."
+    },
+    {
+      "name": "short-relative-source-path",
+      "text": "Updated src/x."
+    },
+    {
+      "name": "numeric-division",
+      "text": "Compute 10/2 and 10 / 2 before reporting the result."
     }
   ],
   "private": [
@@ -46,6 +58,34 @@
     {
       "name": "arbitrary-system-path",
       "text": "対象：/System/x/configuration.plist"
+    },
+    {
+      "name": "single-component-root-path",
+      "text": "Read /x before continuing."
+    },
+    {
+      "name": "parenthesized-single-component-path",
+      "text": "Read (/x)."
+    },
+    {
+      "name": "colon-single-component-path",
+      "text": "Read path:/x."
+    },
+    {
+      "name": "double-quoted-assignment-path",
+      "text": "target=\"/x\"."
+    },
+    {
+      "name": "single-quoted-assignment-path",
+      "text": "source='/x', then continue."
+    },
+    {
+      "name": "punctuated-single-component-path",
+      "text": "Read,/x,then continue."
+    },
+    {
+      "name": "japanese-quoted-single-component-path",
+      "text": "対象：「/x」。"
     },
     {
       "name": "bearer-token",
