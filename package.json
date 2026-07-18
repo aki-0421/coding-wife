@@ -17,7 +17,7 @@
     "lint": "eslint . --max-warnings 0",
     "typecheck": "pnpm live2d:prepare && tsc -b --pretty false",
     "pretest": "pnpm live2d:prepare",
-    "test": "pnpm live2d:test:supply-chain && vitest run --testTimeout=20000 --fileParallelism=false",
+    "test": "pnpm skills:test:supply-chain && pnpm live2d:test:supply-chain && vitest run --testTimeout=20000 --fileParallelism=false",
     "pretest:watch": "pnpm live2d:prepare",
     "test:watch": "vitest",
     "pretest:workspace-history": "pnpm live2d:prepare",
@@ -30,8 +30,9 @@
     "live2d:prepare": "pnpm live2d:verify && pnpm live2d:build:framework",
     "live2d:build:framework": "node scripts/live2d/build-framework.mjs",
     "live2d:test:supply-chain": "node --test scripts/live2d/*.test.mjs",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/live2d/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/live2d/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
+    "skills:test:supply-chain": "node --test scripts/skills/*.test.mjs",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/{live2d,skills}/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/{live2d,skills}/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
     "tauri": "tauri"
   },
   "dependencies": {

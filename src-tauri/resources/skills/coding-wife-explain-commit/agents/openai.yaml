@@ -1,0 +1,6 @@
+interface:
+  display_name: "Explain Commit Evidence"
+  short_description: "Explain redacted commit evidence in the selected locale"
+  default_prompt: "Use $coding-wife-explain-commit to explain this commit evidence clearly."
+policy:
+  allow_implicit_invocation: false
