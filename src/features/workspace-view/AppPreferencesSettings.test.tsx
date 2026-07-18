@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
@@ -9,6 +10,7 @@ import {
   AppPreferencesProvider,
   DemoAppPreferencesGateway,
   type AppPreferencesGateway,
+  type AppPreferencesResetRequestV1,
   type AppPreferencesSnapshotV1,
   type AppPreferencesUpdateRequestV1,
 } from "@/features/preferences"
@@ -49,14 +51,18 @@ function SettingsHarness() {
   )
 }
 
-function renderSettings(controller: AppPreferencesController) {
-  return render(
+function renderSettings(
+  controller: AppPreferencesController,
+  { strictMode = false }: { readonly strictMode?: boolean } = {},
+) {
+  const settings = (
     <AppPreferencesProvider controller={controller}>
       <I18nProvider preferencesController={controller}>
         <SettingsHarness />
       </I18nProvider>
-    </AppPreferencesProvider>,
+    </AppPreferencesProvider>
   )
+  return render(strictMode ? <StrictMode>{settings}</StrictMode> : settings)
 }
 
 interface Deferred<T> {
@@ -78,6 +84,7 @@ function deferred<T>(): Deferred<T> {
 function nativeSnapshot(
   version: number,
   locale: "ja" | "en",
+  overrides: Partial<AppPreferencesSnapshotV1["preferences"]> = {},
 ): AppPreferencesSnapshotV1 {
   return {
     schemaVersion: 1,
@@ -88,6 +95,7 @@ function nativeSnapshot(
       locale,
       reducedMotion: "system",
       characterVisibility: "visible",
+      ...overrides,
     },
     persistence: "native",
     recoveryCode: null,
@@ -98,9 +106,15 @@ class DeferredNativePreferencesGateway implements AppPreferencesGateway {
   readonly kind = "native" as const
   readonly updates: AppPreferencesUpdateRequestV1[] = []
   readonly updateResults: Deferred<AppPreferencesSnapshotV1>[] = []
+  readonly resets: AppPreferencesResetRequestV1[] = []
+  readonly resetResults: Deferred<AppPreferencesSnapshotV1>[] = []
+  getCalls = 0
+  durable = nativeSnapshot(0, "en")
+  deferResets = false
 
   get(): Promise<AppPreferencesSnapshotV1> {
-    return Promise.resolve(nativeSnapshot(0, "en"))
+    this.getCalls += 1
+    return Promise.resolve(this.durable)
   }
 
   update(
@@ -112,9 +126,44 @@ class DeferredNativePreferencesGateway implements AppPreferencesGateway {
     return result.promise
   }
 
-  reset(): Promise<AppPreferencesSnapshotV1> {
-    return Promise.resolve(nativeSnapshot(1, "en"))
+  reset(
+    request: AppPreferencesResetRequestV1,
+  ): Promise<AppPreferencesSnapshotV1> {
+    this.resets.push(request)
+    if (!this.deferResets) {
+      return Promise.resolve(
+        nativeSnapshot(request.expectedVersion + 1, request.defaultLocale),
+      )
+    }
+    const result = deferred<AppPreferencesSnapshotV1>()
+    this.resetResults.push(result)
+    return result.promise
   }
+}
+
+function boundaryError(code = "APP-PREFERENCES-WRITE") {
+  return new AppPreferencesBoundaryError({
+    code,
+    operation: "app_preferences_update",
+    recoverable: true,
+    userMessageKey: "preferences.error.generic",
+    detailRef: "app-preferences-v1",
+  })
+}
+
+async function rejectBoundedUpdates(
+  gateway: DeferredNativePreferencesGateway,
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await waitFor(() => expect(gateway.updates).toHaveLength(attempt + 1))
+    gateway.updateResults[attempt]?.reject(boundaryError())
+  }
+}
+
+function alertContaining(text: string): HTMLElement {
+  const alert = screen.getByText(text).closest('[role="alert"]')
+  if (!(alert instanceof HTMLElement)) throw new Error("Expected alert")
+  return alert
 }
 
 describe("AppPreferencesSettings", () => {
@@ -272,15 +321,7 @@ describe("AppPreferencesSettings", () => {
     renderSettings(controller)
 
     await user.click(screen.getByRole("radio", { name: "日本語" }))
-    gateway.updateResults[0]?.reject(
-      new AppPreferencesBoundaryError({
-        code: "APP-PREFERENCES-WRITE",
-        operation: "app_preferences_update",
-        recoverable: true,
-        userMessageKey: "preferences.error.generic",
-        detailRef: "app-preferences-v1",
-      }),
-    )
+    await rejectBoundedUpdates(gateway)
 
     const errorMessage = await screen.findByText(
       "The language could not be saved. The previous language is unchanged.",
@@ -297,11 +338,76 @@ describe("AppPreferencesSettings", () => {
     expect(document.documentElement).toHaveAttribute("lang", "en")
 
     await user.click(within(error).getByRole("button", { name: "Retry" }))
-    await waitFor(() => expect(gateway.updates).toHaveLength(2))
-    gateway.updateResults[1]?.resolve(nativeSnapshot(1, "ja"))
+    await waitFor(() => expect(gateway.updates).toHaveLength(4))
+    gateway.updateResults[3]?.resolve(nativeSnapshot(1, "ja"))
     expect(
       await screen.findByRole("heading", { level: 2, name: "一般" }),
     ).toBeVisible()
+  })
+
+  it("restores mounted intent tracking under StrictMode and exposes locale retry", async () => {
+    const user = userEvent.setup()
+    const gateway = new DeferredNativePreferencesGateway()
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+    renderSettings(controller, { strictMode: true })
+
+    await user.click(screen.getByRole("radio", { name: "日本語" }))
+    await rejectBoundedUpdates(gateway)
+
+    const languageError = await screen.findByText(
+      "The language could not be saved. The previous language is unchanged.",
+    )
+    const localeAlert = languageError.parentElement
+    expect(localeAlert).not.toBeNull()
+    if (localeAlert === null) throw new Error("Expected locale retry alert")
+    expect(localeAlert).toHaveAttribute("role", "alert")
+    expect(screen.getByText("Preferences were not saved")).toBeVisible()
+
+    await user.click(within(localeAlert).getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(gateway.updates).toHaveLength(4))
+    gateway.updateResults[3]?.resolve(nativeSnapshot(1, "ja"))
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "一般" }),
+    ).toBeVisible()
+  })
+
+  it("retries the latest non-locale preference from the safe error alert", async () => {
+    const user = userEvent.setup()
+    const gateway = new DeferredNativePreferencesGateway()
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+    renderSettings(controller)
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Reduced motion" }),
+      "on",
+    )
+    await rejectBoundedUpdates(gateway)
+
+    await screen.findByText("Preferences were not saved")
+    const alert = alertContaining("Preferences were not saved")
+    expect(within(alert).getByText("APP-PREFERENCES-WRITE")).toBeVisible()
+    expect(
+      within(alert).getByRole("button", { name: "Reset preferences" }),
+    ).toBeVisible()
+    const retry = within(alert).getByRole("button", { name: "Retry" })
+    retry.focus()
+    expect(retry).toHaveFocus()
+    await user.click(retry)
+
+    await waitFor(() => expect(gateway.updates).toHaveLength(4))
+    expect(gateway.updates[3]).toMatchObject({
+      expectedVersion: 0,
+      reducedMotion: "on",
+    })
+    gateway.updateResults[3]?.resolve(
+      nativeSnapshot(1, "en", { reducedMotion: "on" }),
+    )
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+    expect(
+      screen.getByRole("combobox", { name: "Reduced motion" }),
+    ).toHaveValue("on")
   })
 
   it("coalesces rapid Japanese to English to Japanese intent without snapping back", async () => {
@@ -356,5 +462,87 @@ describe("AppPreferencesSettings", () => {
         snapshot: { preferences: { locale: "en", version: 2 } },
       }),
     )
+  })
+
+  it("locks reset dismissal while saving, then closes and restores focus", async () => {
+    const user = userEvent.setup()
+    const gateway = new DeferredNativePreferencesGateway()
+    gateway.deferResets = true
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+    renderSettings(controller)
+
+    const trigger = screen.getByRole("button", { name: "Reset preferences" })
+    await user.click(trigger)
+    const dialog = screen.getByRole("dialog", {
+      name: "Reset app preferences?",
+    })
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus()
+    await user.click(
+      within(dialog).getByRole("button", { name: "Reset preferences" }),
+    )
+
+    const progress = within(dialog).getByRole("button", {
+      name: "Resetting…",
+    })
+    expect(progress).toBeDisabled()
+    expect(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    ).toBeDisabled()
+    expect(within(dialog).queryByRole("button", { name: "Close" })).toBeNull()
+    await user.keyboard("{Escape}")
+    expect(dialog).toBeVisible()
+
+    gateway.resetResults[0]?.resolve(nativeSnapshot(1, "en"))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(trigger).toHaveFocus()
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "ready",
+      snapshot: { preferences: { version: 1 } },
+    })
+  })
+
+  it("keeps a failed reset dialog open, clears resetting, and allows retry", async () => {
+    const user = userEvent.setup()
+    const gateway = new DeferredNativePreferencesGateway()
+    gateway.deferResets = true
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+    renderSettings(controller)
+
+    const trigger = screen.getByRole("button", { name: "Reset preferences" })
+    await user.click(trigger)
+    const dialog = screen.getByRole("dialog", {
+      name: "Reset app preferences?",
+    })
+    await user.click(
+      within(dialog).getByRole("button", { name: "Reset preferences" }),
+    )
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await waitFor(() =>
+        expect(gateway.resetResults).toHaveLength(attempt + 1),
+      )
+      gateway.resetResults[attempt]?.reject(boundaryError())
+    }
+
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "Reset preferences" }),
+      ).toBeEnabled(),
+    )
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled()
+    expect(dialog).toBeVisible()
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "error",
+      snapshot: { preferences: { version: 0 } },
+      errorCode: "APP-PREFERENCES-WRITE",
+    })
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    expect(trigger).toHaveFocus()
+    const alert = alertContaining("Preferences were not saved")
+    await user.click(within(alert).getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+    expect(controller.getSnapshot().status).toBe("ready")
   })
 })

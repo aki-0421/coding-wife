@@ -66,8 +66,10 @@ function PreferencesStatus({
 function PreferenceAlert({
   copy,
   onReset,
+  onRetry,
 }: Pick<AppPreferencesSettingsProps, "copy"> & {
   readonly onReset: () => void
+  readonly onRetry: () => void
 }) {
   const state = useAppPreferences()
   const recovery = state.snapshot.recoveryCode
@@ -93,9 +95,21 @@ function PreferenceAlert({
           <span>{copy.settingsView.preferenceSafeCode}</span>
           <code className="font-mono text-label text-destructive">{code}</code>
         </span>
-        <Button onClick={onReset} size="xs" type="button" variant="secondary">
-          {copy.settingsView.resetPreferences}
-        </Button>
+        <span className="flex flex-wrap gap-xs">
+          {!recovering ? (
+            <Button
+              onClick={onRetry}
+              size="xs"
+              type="button"
+              variant="secondary"
+            >
+              {copy.retry}
+            </Button>
+          ) : null}
+          <Button onClick={onReset} size="xs" type="button" variant="secondary">
+            {copy.settingsView.resetPreferences}
+          </Button>
+        </span>
       </AlertDescription>
     </Alert>
   )
@@ -122,6 +136,7 @@ export function AppPreferencesSettings({
   const invalid = state.status === "error" || state.status === "recovery"
 
   useEffect(() => {
+    mountedRef.current = true
     return () => {
       mountedRef.current = false
     }
@@ -131,21 +146,19 @@ export function AppPreferencesSettings({
     const intent = localeIntentRef.current + 1
     localeIntentRef.current = intent
     setFailedLocale(null)
-    const succeeded = await setLocale(nextLocale)
+    const succeeded = await setLocale(nextLocale).catch(() => false)
     if (!mountedRef.current || intent !== localeIntentRef.current) return
     setFailedLocale(succeeded ? null : nextLocale)
   }
 
   const resetPreferences = async () => {
     setResetting(true)
-    try {
-      if (await controller.reset()) {
-        if (!mountedRef.current) return
-        setFailedLocale(null)
-        setResetOpen(false)
-      }
-    } finally {
-      if (mountedRef.current) setResetting(false)
+    const succeeded = await controller.reset().catch(() => false)
+    if (!mountedRef.current) return
+    setResetting(false)
+    if (succeeded) {
+      setFailedLocale(null)
+      setResetOpen(false)
     }
   }
 
@@ -164,7 +177,11 @@ export function AppPreferencesSettings({
         <PreferencesStatus copy={copy} />
       </div>
 
-      <PreferenceAlert copy={copy} onReset={() => setResetOpen(true)} />
+      <PreferenceAlert
+        copy={copy}
+        onReset={() => setResetOpen(true)}
+        onRetry={() => void controller.retry()}
+      />
 
       <FieldGroup>
         <Field data-invalid={failedLocale !== null || invalid || undefined}>
