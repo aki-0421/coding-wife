@@ -7,6 +7,7 @@ pub(crate) mod public_evidence;
 pub mod repository;
 pub mod runner;
 pub mod service;
+pub(crate) mod trusted;
 pub mod types;
 
 pub use error::GitReviewError;

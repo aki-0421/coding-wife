@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -7,6 +8,7 @@ use std::sync::Arc;
 use super::history::MemoryGitReviewHistory;
 use super::runner::GitRunner;
 use super::service::{GitReviewService, GitWorkspaceResolver};
+use super::trusted::TrustedCommitCandidateInput;
 use super::types::{
     CommitEvidenceDetailRequest, CommitEvidenceFilter, CommitSkillInjectionAudit,
     GitObservationReason, KnownRisk, ListCommitEvidenceRequest, ObserveGitRepositoryRequest,
@@ -43,6 +45,10 @@ async fn terminal_observation_detects_main_commit_without_mutating_git_state() {
     std::fs::write(fixture.root.join("feature.txt"), "read-only evidence\n")
         .expect("write feature");
     fixture.git(&["add", "feature.txt"]);
+    let candidate = service
+        .begin_trusted_commit_candidate(candidate_input("item-terminal"))
+        .await
+        .expect("trusted candidate");
     fixture.git(&[
         "commit",
         "-m",
@@ -52,11 +58,23 @@ async fn terminal_observation_detects_main_commit_without_mutating_git_state() {
     ]);
     let head_before_read = fixture.git_text(&["rev-parse", "HEAD"]);
     let status_before_read = fixture.git_text(&["status", "--porcelain=v2"]);
+    let proof = service
+        .complete_trusted_commit_candidate(
+            candidate,
+            1,
+            "thread-fixture",
+            "turn-fixture",
+            "item-terminal",
+        )
+        .await
+        .expect("trusted completion")
+        .expect("changed HEAD proof");
 
     let terminal = service
-        .observe_terminal_work_unit(terminal_request(&before.observation_id))
+        .observe_trusted_terminal_work_unit(terminal_request(&before.observation_id), vec![proof])
         .await
-        .expect("terminal observation");
+        .expect("terminal observation")
+        .response;
     assert_eq!(terminal.new_commits.len(), 1);
     assert_eq!(terminal.new_commits[0].commit_sha, head_before_read);
     assert_eq!(history.commit_count(), 1);
@@ -109,6 +127,125 @@ async fn terminal_observation_detects_main_commit_without_mutating_git_state() {
 }
 
 #[tokio::test]
+async fn public_terminal_without_native_proof_never_claims_main_codex_producer() {
+    let fixture = RepositoryFixture::new("observer-unproven");
+    let history = Arc::new(MemoryGitReviewHistory::new());
+    let service = service(&fixture.root, history.clone());
+    let before = service
+        .observe_repository(start_request("observe-unproven"))
+        .await
+        .expect("before observation");
+    std::fs::write(fixture.root.join("unproven.txt"), "external\n")
+        .expect("write external fixture");
+    fixture.git(&["add", "unproven.txt"]);
+    fixture.git(&["commit", "-q", "-m", "chore: external commit"]);
+
+    let terminal = service
+        .observe_terminal_work_unit(terminal_request(&before.observation_id))
+        .await
+        .expect("public terminal");
+
+    assert_eq!(terminal.new_commits.len(), 1);
+    assert_eq!(
+        terminal.new_commits[0].producer,
+        super::types::CommitProducer::ExternalUncorrelated
+    );
+    assert!(terminal.work_unit.new_commit_evidence_ids.is_empty());
+    assert_eq!(history.commit_count(), 0);
+}
+
+#[tokio::test]
+async fn trusted_terminal_correlates_only_the_exact_proof_sha() {
+    let fixture = RepositoryFixture::new("observer-exact-proof");
+    let history = Arc::new(MemoryGitReviewHistory::new());
+    let service = service(&fixture.root, history.clone());
+    let before = service
+        .observe_repository(start_request("observe-exact-proof"))
+        .await
+        .expect("before observation");
+
+    std::fs::write(fixture.root.join("main.txt"), "main\n").expect("write main fixture");
+    fixture.git(&["add", "main.txt"]);
+    let candidate = service
+        .begin_trusted_commit_candidate(candidate_input("item-exact"))
+        .await
+        .expect("trusted candidate");
+    fixture.git(&["commit", "-q", "-m", "feat: main exact commit"]);
+    let main_sha = fixture.git_text(&["rev-parse", "HEAD"]);
+    let proof = service
+        .complete_trusted_commit_candidate(
+            candidate,
+            1,
+            "thread-fixture",
+            "turn-fixture",
+            "item-exact",
+        )
+        .await
+        .expect("trusted completion")
+        .expect("changed HEAD proof");
+
+    std::fs::write(fixture.root.join("external.txt"), "external\n")
+        .expect("write external fixture");
+    fixture.git(&["add", "external.txt"]);
+    fixture.git(&["commit", "-q", "-m", "chore: unrelated external commit"]);
+    let external_sha = fixture.git_text(&["rev-parse", "HEAD"]);
+
+    let terminal = service
+        .observe_trusted_terminal_work_unit(terminal_request(&before.observation_id), vec![proof])
+        .await
+        .expect("trusted terminal");
+
+    assert_eq!(terminal.verified_commits.len(), 1);
+    assert_eq!(terminal.verified_commits[0].commit_sha, main_sha);
+    let producers = terminal
+        .response
+        .new_commits
+        .iter()
+        .map(|commit| (commit.commit_sha.as_str(), commit.producer))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        producers.get(main_sha.as_str()),
+        Some(&super::types::CommitProducer::MainCodex)
+    );
+    assert_eq!(
+        producers.get(external_sha.as_str()),
+        Some(&super::types::CommitProducer::ExternalUncorrelated)
+    );
+    assert_eq!(history.commit_count(), 1);
+}
+
+#[tokio::test]
+async fn unchanged_head_and_wrong_completion_context_produce_no_proof() {
+    let fixture = RepositoryFixture::new("observer-proof-negative");
+    let service = service(&fixture.root, Arc::new(MemoryGitReviewHistory::new()));
+    let unchanged = service
+        .begin_trusted_commit_candidate(candidate_input("item-unchanged"))
+        .await
+        .expect("unchanged candidate");
+    assert!(service
+        .complete_trusted_commit_candidate(
+            unchanged,
+            1,
+            "thread-fixture",
+            "turn-fixture",
+            "item-unchanged",
+        )
+        .await
+        .expect("unchanged completion")
+        .is_none());
+
+    let wrong = service
+        .begin_trusted_commit_candidate(candidate_input("item-wrong"))
+        .await
+        .expect("wrong-context candidate");
+    let error = service
+        .complete_trusted_commit_candidate(wrong, 1, "thread-fixture", "turn-other", "item-wrong")
+        .await
+        .expect_err("wrong context must fail closed");
+    assert_eq!(error.code, "GIT-COMMIT-PROOF-CONTEXT");
+}
+
+#[tokio::test]
 async fn exact_terminal_replay_survives_service_restart_without_duplicate_evidence() {
     let fixture = RepositoryFixture::new("observer-replay");
     let history = Arc::new(MemoryGitReviewHistory::new());
@@ -119,12 +256,28 @@ async fn exact_terminal_replay_survives_service_restart_without_duplicate_eviden
         .expect("before observation");
     std::fs::write(fixture.root.join("replay.txt"), "same commit\n").expect("write replay");
     fixture.git(&["add", "replay.txt"]);
+    let candidate = first
+        .begin_trusted_commit_candidate(candidate_input("item-replay"))
+        .await
+        .expect("trusted candidate");
     fixture.git(&["commit", "-m", "fix: make replay exact"]);
+    let proof = first
+        .complete_trusted_commit_candidate(
+            candidate,
+            1,
+            "thread-fixture",
+            "turn-fixture",
+            "item-replay",
+        )
+        .await
+        .expect("trusted completion")
+        .expect("changed HEAD proof");
     let request = terminal_request(&before.observation_id);
     let expected = first
-        .observe_terminal_work_unit(request.clone())
+        .observe_trusted_terminal_work_unit(request.clone(), vec![proof])
         .await
-        .expect("first terminal");
+        .expect("first terminal")
+        .response;
 
     let restarted = service(&fixture.root, history.clone());
     let replay = restarted
@@ -146,6 +299,7 @@ async fn filtered_page_scans_past_fifty_non_matching_commits() {
         .await
         .expect("before observation");
 
+    let mut proofs = Vec::new();
     for index in 0..50 {
         std::fs::write(
             fixture.root.join("series.txt"),
@@ -153,15 +307,33 @@ async fn filtered_page_scans_past_fifty_non_matching_commits() {
         )
         .expect("write filtered fixture");
         fixture.git(&["add", "series.txt"]);
+        let item_id = format!("item-filter-{index}");
+        let candidate = service
+            .begin_trusted_commit_candidate(candidate_input(&item_id))
+            .await
+            .expect("trusted candidate");
         fixture.git(&[
             "commit",
             "-q",
             "-m",
             &format!("feat: verified filtered commit {index}"),
         ]);
+        proofs.push(
+            service
+                .complete_trusted_commit_candidate(
+                    candidate,
+                    1,
+                    "thread-fixture",
+                    "turn-fixture",
+                    &item_id,
+                )
+                .await
+                .expect("trusted completion")
+                .expect("changed HEAD proof"),
+        );
     }
     service
-        .observe_terminal_work_unit(terminal_request(&before.observation_id))
+        .observe_trusted_terminal_work_unit(terminal_request(&before.observation_id), proofs)
         .await
         .expect("terminal observation");
 
@@ -346,6 +518,17 @@ fn terminal_request(before_observation_id: &str) -> ObserveTerminalWorkUnitReque
             injected_at: "2026-07-18T00:00:00Z".to_owned(),
         },
         reported_commit_block_reason: None,
+    }
+}
+
+fn candidate_input(item_id: &str) -> TrustedCommitCandidateInput {
+    TrustedCommitCandidateInput {
+        workspace_id: "workspace-fixture".to_owned(),
+        workspace_generation: 1,
+        work_unit_id: "work-unit-fixture".to_owned(),
+        raw_thread_id: "thread-fixture".to_owned(),
+        raw_turn_id: "turn-fixture".to_owned(),
+        item_id: item_id.to_owned(),
     }
 }
 

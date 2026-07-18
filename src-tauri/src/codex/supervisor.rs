@@ -16,6 +16,10 @@ use super::decision::{
     FallbackDecisionError, FallbackDecisionLedger, FallbackRegisterOutcome,
 };
 use super::dynamic_tools::DynamicToolRegistry;
+use super::main_work_unit::{
+    parse_main_command_notification, terminal_state, MainCommandNotification, MainWorkUnitLease,
+    MainWorkUnitRuntime, MainWorkUnitStart, MainWorkUnitTerminal, MainWorkUnitTerminalState,
+};
 use super::normalizer::EventNormalizer;
 use super::process::{spawn_process, ProcessError, ProcessRuntime};
 use super::protocol::{
@@ -67,6 +71,7 @@ struct PendingTurnStart {
     purpose: PendingTurnStartPurpose,
     attachment_snapshot: Option<AttachmentSnapshotLease>,
     skill_injection: MainSkillInjectionAudit,
+    main_work_unit: Option<MainWorkUnitLease>,
 }
 
 #[derive(Default)]
@@ -86,6 +91,7 @@ struct SupervisorState {
     active_turn_id: Option<String>,
     active_turn_effort: Option<ReasoningPreset>,
     pending_turn_start: Option<PendingTurnStart>,
+    main_work_units: HashMap<(String, String), MainWorkUnitLease>,
     skill_injection_audits: HashMap<String, MainSkillInjectionAudit>,
     next_turn_start_token: u64,
     requests: ServerRequestLedger,
@@ -101,6 +107,7 @@ struct SupervisorInner {
     signal_loop_started: AtomicBool,
     app_handle: RwLock<Option<AppHandle>>,
     resource_directory: RwLock<Option<PathBuf>>,
+    main_work_unit_runtime: RwLock<Option<Arc<dyn MainWorkUnitRuntime>>>,
     dynamic_tools: DynamicToolRegistry,
 }
 
@@ -167,6 +174,7 @@ impl CodexSupervisor {
                 signal_loop_started: AtomicBool::new(false),
                 app_handle: RwLock::new(None),
                 resource_directory: RwLock::new(None),
+                main_work_unit_runtime: RwLock::new(None),
                 dynamic_tools: DynamicToolRegistry,
             }),
         }
@@ -185,6 +193,28 @@ impl CodexSupervisor {
             .app_handle
             .write()
             .expect("app handle lock poisoned") = Some(app_handle);
+    }
+
+    pub(crate) fn attach_main_work_unit_runtime(&self, runtime: Arc<dyn MainWorkUnitRuntime>) {
+        *self
+            .inner
+            .main_work_unit_runtime
+            .write()
+            .expect("main work unit runtime lock poisoned") = Some(runtime);
+    }
+
+    fn main_work_unit_runtime(&self) -> Option<Arc<dyn MainWorkUnitRuntime>> {
+        self.inner
+            .main_work_unit_runtime
+            .read()
+            .expect("main work unit runtime lock poisoned")
+            .clone()
+    }
+
+    async fn invalidate_main_work_unit_generation(&self, generation: u64) {
+        if let Some(runtime) = self.main_work_unit_runtime() {
+            runtime.invalidate_generation(generation).await;
+        }
     }
 
     #[doc(hidden)]
@@ -306,13 +336,16 @@ impl CodexSupervisor {
 
     pub async fn probe(&self) -> Result<CodexDiagnostic, CodexCommandError> {
         let _lifecycle = self.inner.lifecycle.lock().await;
-        let (explicit, runtime) = {
+        let (explicit, runtime, previous_generation) = {
             let mut state = self.inner.state.lock().await;
             let explicit = state.explicit_binary.clone();
             let runtime = state.runtime.take();
+            let previous_generation = state.generation;
             clear_probe_evidence(&mut state, "codex.probe");
-            (explicit, runtime)
+            (explicit, runtime, previous_generation)
         };
+        self.invalidate_main_work_unit_generation(previous_generation)
+            .await;
         if let Some(runtime) = runtime {
             runtime.shutdown().await;
         }
@@ -351,7 +384,7 @@ impl CodexSupervisor {
         reset_restart_budget: bool,
     ) -> Result<CodexDiagnostic, CodexCommandError> {
         let _lifecycle = self.inner.lifecycle.lock().await;
-        let (workspace_root, explicit, previous_runtime) = {
+        let (workspace_root, explicit, previous_runtime, previous_generation) = {
             let mut state = self.inner.state.lock().await;
             let workspace_root = state
                 .workspaces
@@ -363,13 +396,17 @@ impl CodexSupervisor {
             if reset_restart_budget {
                 state.restart_times.clear();
             }
+            let previous_generation = state.generation;
             clear_probe_evidence(&mut state, "codex.connect");
             (
                 workspace_root,
                 state.explicit_binary.clone(),
                 state.runtime.take(),
+                previous_generation,
             )
         };
+        self.invalidate_main_work_unit_generation(previous_generation)
+            .await;
         if let Some(runtime) = previous_runtime {
             runtime.shutdown().await;
         }
@@ -493,6 +530,7 @@ impl CodexSupervisor {
         state.active_turn_id = None;
         state.active_turn_effort = None;
         state.pending_turn_start = None;
+        state.main_work_units.clear();
         state.skill_injection_audits.clear();
         state.requests.clear_pending();
         state.fallback_decisions.clear();
@@ -818,6 +856,7 @@ impl CodexSupervisor {
             state.active_turn_id = None;
             state.active_turn_effort = None;
             state.pending_turn_start = None;
+            state.main_work_units.clear();
             state.thread_handles.clear();
             state.turn_handles.clear();
             state.requests.clear_pending();
@@ -826,6 +865,7 @@ impl CodexSupervisor {
         if let Some(runtime) = runtime {
             runtime.shutdown().await;
         }
+        self.invalidate_main_work_unit_generation(generation).await;
         let mut state = self.inner.state.lock().await;
         if state.generation == generation {
             state.diagnostic.child_state = ChildState::Stopped;
@@ -913,10 +953,39 @@ impl CodexSupervisor {
                 terminal: false,
                 purpose: PendingTurnStartPurpose::User,
                 attachment_snapshot,
-                skill_injection,
+                skill_injection: skill_injection.clone(),
+                main_work_unit: None,
             });
             (raw_thread, token)
         };
+        if let Some(runtime) = self.main_work_unit_runtime() {
+            if let Some(lease) = runtime
+                .begin(MainWorkUnitStart {
+                    workspace_id: request.workspace_id.clone(),
+                    workspace_generation: generation,
+                    raw_thread_id: raw_thread.clone(),
+                    client_message_id: request.client_user_message_id.clone(),
+                    skill_injection,
+                })
+                .await
+            {
+                let accepted = {
+                    let mut state = self.inner.state.lock().await;
+                    (state.generation == generation)
+                        && state
+                            .pending_turn_start
+                            .as_mut()
+                            .filter(|pending| pending.token == token)
+                            .is_some_and(|pending| {
+                                pending.main_work_unit = Some(lease.clone());
+                                true
+                            })
+                };
+                if !accepted {
+                    runtime.abandon(lease).await;
+                }
+            }
+        }
         let mut guard = PendingTurnStartGuard {
             supervisor: self.clone(),
             generation,
@@ -969,6 +1038,7 @@ impl CodexSupervisor {
                 "turn/start",
             ) {
                 Ok((_, turn_handle)) => {
+                    bind_pending_main_work_unit(&mut state, token, &raw_thread, &raw_turn);
                     if !matches!(
                         state
                             .pending_turn_start
@@ -1199,6 +1269,7 @@ impl CodexSupervisor {
                 purpose: PendingTurnStartPurpose::Fallback(claim.clone()),
                 attachment_snapshot: None,
                 skill_injection,
+                main_work_unit: None,
             });
             (claim, token)
         };
@@ -1340,7 +1411,7 @@ impl CodexSupervisor {
         token: u64,
         interrupt_committed: bool,
     ) {
-        let (connection, interrupt, event) = {
+        let (connection, interrupt, event, abandoned) = {
             let mut state = self.inner.state.lock().await;
             if state.generation != generation
                 || state
@@ -1354,12 +1425,18 @@ impl CodexSupervisor {
                 .pending_turn_start
                 .take()
                 .expect("checked pending start");
+            let abandoned = pending.main_work_unit.clone();
             let committed = pending.raw_turn_id.as_ref().and_then(|turn_id| {
                 (state.active_thread_id.as_deref() == Some(&pending.raw_thread_id)
                     && state.active_turn_id.as_deref() == Some(turn_id))
                 .then(|| (pending.raw_thread_id.clone(), turn_id.clone()))
             });
             if committed.is_some() {
+                if let Some(turn_id) = pending.raw_turn_id.as_ref() {
+                    state
+                        .main_work_units
+                        .remove(&(pending.raw_thread_id.clone(), turn_id.clone()));
+                }
                 state.active_turn_id = None;
                 state.active_turn_effort = None;
                 state.requests.clear_pending();
@@ -1386,8 +1463,12 @@ impl CodexSupervisor {
                 connection,
                 interrupt_committed.then_some(committed).flatten(),
                 event,
+                abandoned,
             )
         };
+        if let (Some(runtime), Some(lease)) = (self.main_work_unit_runtime(), abandoned) {
+            runtime.abandon(lease).await;
+        }
         if let Some(event) = event {
             self.emit_event(&event);
         }
@@ -1404,7 +1485,7 @@ impl CodexSupervisor {
 
     pub async fn shutdown(&self) {
         let _lifecycle = self.inner.lifecycle.lock().await;
-        let runtime = {
+        let (runtime, generation) = {
             let mut state = self.inner.state.lock().await;
             state.diagnostic.child_state = ChildState::Stopping;
             state.requests.clear_pending();
@@ -1412,8 +1493,10 @@ impl CodexSupervisor {
             state.active_turn_id = None;
             state.active_turn_effort = None;
             state.pending_turn_start = None;
-            state.runtime.take()
+            state.main_work_units.clear();
+            (state.runtime.take(), state.generation)
         };
+        self.invalidate_main_work_unit_generation(generation).await;
         if let Some(runtime) = runtime {
             runtime.shutdown().await;
         }
@@ -1610,6 +1693,8 @@ impl CodexSupervisor {
         let mut interrupt = None;
         let mut protocol_violation = false;
         let mut terminal_rollback = None;
+        let mut main_command = None;
+        let mut main_terminal = None;
         let connection;
         {
             let mut state = self.inner.state.lock().await;
@@ -1631,15 +1716,22 @@ impl CodexSupervisor {
                             .as_ref()
                             .map(|pending| pending.token)
                         {
-                            confirm_pending_turn_start(
+                            match confirm_pending_turn_start(
                                 &mut state,
                                 generation,
                                 token,
                                 thread_id,
                                 turn_id,
                                 "turn/started",
-                            )
-                            .is_err()
+                            ) {
+                                Ok(_) => {
+                                    bind_pending_main_work_unit(
+                                        &mut state, token, thread_id, turn_id,
+                                    );
+                                    false
+                                }
+                                Err(_) => true,
+                            }
                         } else {
                             state.active_thread_id.as_deref() != Some(thread_id)
                                 || state.active_turn_id.as_deref() != Some(turn_id)
@@ -1729,6 +1821,26 @@ impl CodexSupervisor {
                 Some(None) | None => {}
             }
 
+            if !protocol_violation {
+                if let Some((thread_id, turn_id)) = state
+                    .active_thread_id
+                    .as_deref()
+                    .zip(state.active_turn_id.as_deref())
+                {
+                    if let Some(notification) = parse_main_command_notification(
+                        &method, &params, generation, thread_id, turn_id,
+                    ) {
+                        if let Some(lease) = state
+                            .main_work_units
+                            .get(&(thread_id.to_owned(), turn_id.to_owned()))
+                            .cloned()
+                        {
+                            main_command = Some((lease, notification));
+                        }
+                    }
+                }
+            }
+
             if !protocol_violation && method == "turn/completed" {
                 let thread_id = params.get("threadId").and_then(Value::as_str);
                 let turn_id = params.pointer("/turn/id").and_then(Value::as_str);
@@ -1763,6 +1875,29 @@ impl CodexSupervisor {
                     let matches_active = state.active_thread_id.as_deref() == Some(thread_id)
                         && state.active_turn_id.as_deref() == Some(turn_id);
                     if matches_active {
+                        if let Some(lease) = state
+                            .main_work_units
+                            .remove(&(thread_id.to_owned(), turn_id.to_owned()))
+                        {
+                            main_terminal = Some((
+                                lease,
+                                MainWorkUnitTerminal {
+                                    workspace_generation: generation,
+                                    raw_thread_id: thread_id.to_owned(),
+                                    raw_turn_id: turn_id.to_owned(),
+                                    state: terminal_state(&params)
+                                        .unwrap_or(MainWorkUnitTerminalState::Failed),
+                                },
+                            ));
+                            if let Some(pending) =
+                                state.pending_turn_start.as_mut().filter(|pending| {
+                                    pending.raw_thread_id == thread_id
+                                        && pending.raw_turn_id.as_deref() == Some(turn_id)
+                                })
+                            {
+                                pending.main_work_unit = None;
+                            }
+                        }
                         state.active_turn_id = None;
                         state.active_turn_effort = None;
                         state.requests.clear_pending();
@@ -1773,6 +1908,23 @@ impl CodexSupervisor {
         if protocol_violation {
             self.handle_protocol_violation(generation).await;
             return;
+        }
+        if let (Some(runtime), Some((lease, notification))) =
+            (self.main_work_unit_runtime(), main_command)
+        {
+            match notification {
+                MainCommandNotification::Started(event) => {
+                    runtime.command_started(lease, event).await;
+                }
+                MainCommandNotification::Completed(event) => {
+                    runtime.command_completed(lease, event).await;
+                }
+            }
+        }
+        if let (Some(runtime), Some((lease, terminal))) =
+            (self.main_work_unit_runtime(), main_terminal)
+        {
+            runtime.terminal(lease, terminal).await;
         }
         if let Some(token) = terminal_rollback {
             self.rollback_pending_turn_start(generation, token, false)
@@ -1809,6 +1961,7 @@ impl CodexSupervisor {
             state.active_turn_id = None;
             state.active_turn_effort = None;
             state.pending_turn_start = None;
+            state.main_work_units.clear();
             let restart_attempt = reserve_restart(&mut state);
             state.diagnostic.child_state = if restart_attempt.is_some() {
                 ChildState::Restarting
@@ -1829,6 +1982,7 @@ impl CodexSupervisor {
                 restart_attempt,
             )
         };
+        self.invalidate_main_work_unit_generation(generation).await;
         for event in events {
             self.emit_event(&event);
         }
@@ -1880,6 +2034,7 @@ impl CodexSupervisor {
             state.active_turn_id = None;
             state.active_turn_effort = None;
             state.pending_turn_start = None;
+            state.main_work_units.clear();
             let restart_attempt = reserve_restart(&mut state);
             (
                 state.active_workspace.clone(),
@@ -1892,6 +2047,7 @@ impl CodexSupervisor {
                 },
             )
         };
+        self.invalidate_main_work_unit_generation(generation).await;
         for event in events {
             self.emit_event(&event);
         }
@@ -2192,6 +2348,25 @@ fn confirm_pending_turn_start(
     Ok((pending.thread_handle.clone(), turn_handle))
 }
 
+fn bind_pending_main_work_unit(
+    state: &mut SupervisorState,
+    token: u64,
+    raw_thread_id: &str,
+    raw_turn_id: &str,
+) {
+    let lease = state
+        .pending_turn_start
+        .as_ref()
+        .filter(|pending| pending.token == token && !pending.terminal)
+        .and_then(|pending| pending.main_work_unit.clone());
+    if let Some(lease) = lease {
+        state
+            .main_work_units
+            .entry((raw_thread_id.to_owned(), raw_turn_id.to_owned()))
+            .or_insert(lease);
+    }
+}
+
 fn clear_probe_evidence(state: &mut SupervisorState, operation: &str) {
     state.binary = None;
     state.schema = None;
@@ -2202,6 +2377,7 @@ fn clear_probe_evidence(state: &mut SupervisorState, operation: &str) {
     state.active_turn_id = None;
     state.active_turn_effort = None;
     state.pending_turn_start = None;
+    state.main_work_units.clear();
     state.skill_injection_audits.clear();
     state.requests.clear_pending();
     state.fallback_decisions.clear();
@@ -2343,6 +2519,7 @@ mod tests {
                 purpose: PendingTurnStartPurpose::User,
                 attachment_snapshot: None,
                 skill_injection: skill_audit(),
+                main_work_unit: None,
             }),
             ..SupervisorState::default()
         };
@@ -2416,6 +2593,7 @@ mod tests {
                     directory.clone(),
                 )),
                 skill_injection: skill_audit(),
+                main_work_unit: None,
             });
         }
 

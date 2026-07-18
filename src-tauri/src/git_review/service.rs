@@ -1,6 +1,6 @@
 //! Coordinator for read-only Git observation and commit evidence.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -24,9 +24,12 @@ use super::repository::{
     capture_observation, observation_id, validate_opaque_id, validate_workspace_id,
 };
 use super::runner::{GitRunner, GitRunnerError};
+use super::trusted::{
+    TrustedCommitCandidate, TrustedCommitCandidateInput, TrustedCommitProof, TrustedVerifiedCommit,
+};
 use super::types::{
     valid_git_text, CommitDiffFile, CommitEvidenceDetail, CommitEvidenceDetailRequest,
-    CommitEvidenceFilter, CommitEvidencePage, CommitEvidenceV1, GitObservation,
+    CommitEvidenceFilter, CommitEvidencePage, CommitEvidenceV1, CommitProducer, GitObservation,
     GitObservationReason, ListCommitEvidenceRequest, ObserveGitRepositoryRequest,
     ObserveTerminalWorkUnitRequest, PrepareCommitExplanationEvidenceRequest, ReadCommitDiffRequest,
     SkillInjectionMode, SkillPathAuthority, TerminalWorkUnitObservationResult,
@@ -41,6 +44,7 @@ use super::types::{
 const OPERATION_OBSERVE: &str = "observe_git_repository";
 const OPERATION_TERMINAL: &str = "observe_terminal_work_unit";
 const OPERATION_READ: &str = "read_git_commit_evidence";
+const OPERATION_TRUSTED: &str = "observe_trusted_commit";
 const MAX_LIST_LIMIT: u32 = 50;
 const MAX_FILTER_SCAN_COMMITS: usize = 1_000;
 const FILTER_SCAN_BATCH: usize = 50;
@@ -77,6 +81,17 @@ struct CachedResponse<T> {
 }
 
 #[derive(Clone)]
+struct TerminalProcessingResult {
+    response: TerminalWorkUnitObservationResult,
+    verified_commits: Vec<TrustedVerifiedCommit>,
+}
+
+pub(crate) struct TrustedTerminalWorkUnitObservationResult {
+    pub response: TerminalWorkUnitObservationResult,
+    pub verified_commits: Vec<TrustedVerifiedCommit>,
+}
+
+#[derive(Clone)]
 pub struct GitReviewService {
     runner: GitRunner,
     resolver: Arc<dyn GitWorkspaceResolver>,
@@ -84,7 +99,7 @@ pub struct GitReviewService {
     observations: Arc<Mutex<BTreeMap<(String, String), GitObservation>>>,
     observation_requests: Arc<Mutex<BTreeMap<(String, String), CachedResponse<GitObservation>>>>,
     terminal_requests:
-        Arc<Mutex<BTreeMap<(String, String), CachedResponse<TerminalWorkUnitObservationResult>>>>,
+        Arc<Mutex<BTreeMap<(String, String), CachedResponse<TerminalProcessingResult>>>>,
     terminal_lock: Arc<Mutex<()>>,
 }
 
@@ -148,12 +163,104 @@ impl GitReviewService {
         Ok(observation)
     }
 
+    pub(crate) async fn begin_trusted_commit_candidate(
+        &self,
+        input: TrustedCommitCandidateInput,
+    ) -> Result<TrustedCommitCandidate, GitReviewError> {
+        validate_workspace_id(&input.workspace_id)?;
+        validate_opaque_id(&input.work_unit_id, "GIT-WORK-UNIT-ID")?;
+        if !input.valid() {
+            return Err(git_error(
+                "GIT-COMMIT-PROOF-CONTEXT",
+                OPERATION_TRUSTED,
+                false,
+            ));
+        }
+        let root = self.resolver.resolve(&input.workspace_id).await?;
+        let layout = GitRepositoryLayout::inspect(&root)
+            .map_err(|_| git_error("GIT-REPOSITORY-READ", OPERATION_TRUSTED, true))?;
+        Ok(TrustedCommitCandidate::from_layout(input, layout))
+    }
+
+    pub(crate) async fn complete_trusted_commit_candidate(
+        &self,
+        candidate: TrustedCommitCandidate,
+        workspace_generation: u64,
+        raw_thread_id: &str,
+        raw_turn_id: &str,
+        item_id: &str,
+    ) -> Result<Option<TrustedCommitProof>, GitReviewError> {
+        if !candidate.matches_completion(workspace_generation, raw_thread_id, raw_turn_id, item_id)
+        {
+            return Err(git_error(
+                "GIT-COMMIT-PROOF-CONTEXT",
+                OPERATION_TRUSTED,
+                false,
+            ));
+        }
+        let root = self.resolver.resolve(candidate.workspace_id()).await?;
+        let layout = GitRepositoryLayout::inspect(&root)
+            .map_err(|_| git_error("GIT-REPOSITORY-READ", OPERATION_TRUSTED, true))?;
+        if !candidate.same_repository(&layout) {
+            return Err(git_error(
+                "GIT-COMMIT-PROOF-REPOSITORY",
+                OPERATION_TRUSTED,
+                false,
+            ));
+        }
+        if layout.head_sha == "unborn" || layout.head_sha == candidate.before_sha() {
+            return Ok(None);
+        }
+        ensure_reachable(&self.runner, &root, &layout.head_sha).await?;
+        if candidate.before_sha() != "unborn" {
+            let range = new_commit_shas(
+                &self.runner,
+                &root,
+                candidate.before_sha(),
+                &layout.head_sha,
+            )
+            .await?;
+            if !range.iter().any(|sha| sha == &layout.head_sha) {
+                return Err(git_error(
+                    "GIT-COMMIT-PROOF-RANGE",
+                    OPERATION_TRUSTED,
+                    false,
+                ));
+            }
+        }
+        Ok(Some(candidate.into_proof(layout.head_sha)))
+    }
+
     pub async fn observe_terminal_work_unit(
         &self,
         request: ObserveTerminalWorkUnitRequest,
     ) -> Result<TerminalWorkUnitObservationResult, GitReviewError> {
+        self.observe_terminal_work_unit_with_proofs(request, Vec::new())
+            .await
+            .map(|result| result.response)
+    }
+
+    pub(crate) async fn observe_trusted_terminal_work_unit(
+        &self,
+        request: ObserveTerminalWorkUnitRequest,
+        proofs: Vec<TrustedCommitProof>,
+    ) -> Result<TrustedTerminalWorkUnitObservationResult, GitReviewError> {
+        let result = self
+            .observe_terminal_work_unit_with_proofs(request, proofs)
+            .await?;
+        Ok(TrustedTerminalWorkUnitObservationResult {
+            response: result.response,
+            verified_commits: result.verified_commits,
+        })
+    }
+
+    async fn observe_terminal_work_unit_with_proofs(
+        &self,
+        request: ObserveTerminalWorkUnitRequest,
+        proofs: Vec<TrustedCommitProof>,
+    ) -> Result<TerminalProcessingResult, GitReviewError> {
         validate_terminal_request(&request)?;
-        let digest = request_digest(&request, OPERATION_TERMINAL)?;
+        let digest = terminal_request_digest(&request, &proofs)?;
         let key = (
             request.workspace_id.clone(),
             request.client_request_id.clone(),
@@ -168,6 +275,23 @@ impl GitReviewService {
                 OPERATION_TERMINAL,
                 false,
             ));
+        }
+        let mut verified_shas = BTreeSet::new();
+        let mut proof_nonces = BTreeSet::new();
+        for proof in &proofs {
+            if !proof.matches_terminal(
+                &request.workspace_id,
+                request.workspace_generation,
+                &request.work_unit_id,
+            ) || !proof_nonces.insert(proof.nonce().to_owned())
+                || !verified_shas.insert(proof.expected_sha().to_owned())
+            {
+                return Err(git_error(
+                    "GIT-COMMIT-PROOF-CONTEXT",
+                    OPERATION_TERMINAL,
+                    false,
+                ));
+            }
         }
 
         let before = self
@@ -221,46 +345,94 @@ impl GitReviewService {
         } else {
             new_commit_shas(&self.runner, &root, &before.head_sha, &after.head_sha).await?
         };
+        let observed_shas = commit_shas.iter().cloned().collect::<BTreeSet<_>>();
+        if !verified_shas.is_subset(&observed_shas) {
+            return Err(git_error(
+                "GIT-COMMIT-PROOF-MISMATCH",
+                OPERATION_TERMINAL,
+                false,
+            ));
+        }
 
         let mut new_commits = Vec::with_capacity(commit_shas.len());
-        let mut new_commit_evidence_ids = Vec::with_capacity(commit_shas.len());
+        let mut new_commit_evidence_ids = Vec::with_capacity(verified_shas.len());
+        let mut verified_commits = Vec::with_capacity(verified_shas.len());
         for commit_sha in commit_shas {
             let evidence_id = super::evidence::commit_evidence_id(&commit_sha)?;
-            let evidence = if let Some(existing) = self
-                .history
-                .get_commit_evidence(&request.workspace_id, &evidence_id)
-                .await?
-            {
-                if existing.work_unit_id.as_deref() != Some(request.work_unit_id.as_str())
-                    || existing.source_event_id.as_deref() != Some(request.source_event_id.as_str())
+            let verified = verified_shas.contains(&commit_sha);
+            let evidence = if verified {
+                if let Some(existing) = self
+                    .history
+                    .get_commit_evidence(&request.workspace_id, &evidence_id)
+                    .await?
                 {
-                    return Err(git_error(
-                        "GIT-COMMIT-EVIDENCE-CONFLICT",
-                        OPERATION_TERMINAL,
-                        false,
-                    ));
+                    if existing.work_unit_id.as_deref() != Some(request.work_unit_id.as_str())
+                        || existing.source_event_id.as_deref()
+                            != Some(request.source_event_id.as_str())
+                    {
+                        return Err(git_error(
+                            "GIT-COMMIT-EVIDENCE-CONFLICT",
+                            OPERATION_TERMINAL,
+                            false,
+                        ));
+                    }
+                    existing
+                } else {
+                    let identity = read_commit_identity(&self.runner, &root, &commit_sha).await?;
+                    let mut evidence = build_commit_evidence(
+                        &self.runner,
+                        &root,
+                        &request.workspace_id,
+                        identity,
+                        Some((
+                            &request,
+                            &before.observation_id,
+                            &after.observation_id,
+                            &after.captured_at,
+                        )),
+                    )
+                    .await?;
+                    let sequence = self.history.append_commit_evidence(&evidence).await?;
+                    evidence.history_sequence = Some(sequence);
+                    evidence
                 }
-                existing
             } else {
-                let identity = read_commit_identity(&self.runner, &root, &commit_sha).await?;
-                let mut evidence = build_commit_evidence(
-                    &self.runner,
-                    &root,
-                    &request.workspace_id,
-                    identity,
-                    Some((
-                        &request,
-                        &before.observation_id,
-                        &after.observation_id,
-                        &after.captured_at,
-                    )),
-                )
-                .await?;
-                let sequence = self.history.append_commit_evidence(&evidence).await?;
-                evidence.history_sequence = Some(sequence);
-                evidence
+                match self
+                    .history
+                    .get_commit_evidence(&request.workspace_id, &evidence_id)
+                    .await?
+                    .filter(|existing| {
+                        existing.work_unit_id.as_deref() == Some(request.work_unit_id.as_str())
+                            && existing.source_event_id.as_deref()
+                                == Some(request.source_event_id.as_str())
+                    }) {
+                    Some(existing) => existing,
+                    None => {
+                        let identity =
+                            read_commit_identity(&self.runner, &root, &commit_sha).await?;
+                        build_commit_evidence(
+                            &self.runner,
+                            &root,
+                            &request.workspace_id,
+                            identity,
+                            None,
+                        )
+                        .await?
+                    }
+                }
             };
-            new_commit_evidence_ids.push(evidence.commit_evidence_id.clone());
+            let correlated = evidence.producer == CommitProducer::MainCodex
+                && evidence.work_unit_id.as_deref() == Some(request.work_unit_id.as_str())
+                && evidence.source_event_id.as_deref() == Some(request.source_event_id.as_str());
+            if correlated {
+                new_commit_evidence_ids.push(evidence.commit_evidence_id.clone());
+            }
+            if verified {
+                verified_commits.push(TrustedVerifiedCommit {
+                    commit_evidence_id: evidence.commit_evidence_id.clone(),
+                    commit_sha: commit_sha.clone(),
+                });
+            }
             new_commits.push(summarize(&evidence));
         }
 
@@ -287,14 +459,18 @@ impl GitReviewService {
             work_unit,
             new_commits,
         };
+        let result = TerminalProcessingResult {
+            response,
+            verified_commits,
+        };
         self.terminal_requests.lock().await.insert(
             key,
             CachedResponse {
                 digest,
-                response: response.clone(),
+                response: result.clone(),
             },
         );
-        Ok(response)
+        Ok(result)
     }
 
     pub async fn list_commit_evidence(
@@ -691,6 +867,18 @@ fn request_digest<T: serde::Serialize>(
     let bytes = serde_json::to_vec(request)
         .map_err(|_| git_error("GIT-REQUEST-ENCODE", operation, false))?;
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
+}
+
+fn terminal_request_digest(
+    request: &ObserveTerminalWorkUnitRequest,
+    proofs: &[TrustedCommitProof],
+) -> Result<String, GitReviewError> {
+    let mut proof_material = proofs
+        .iter()
+        .map(|proof| format!("{}:{}", proof.nonce(), proof.expected_sha()))
+        .collect::<Vec<_>>();
+    proof_material.sort();
+    request_digest(&(request, proof_material), OPERATION_TERMINAL)
 }
 
 async fn ensure_reachable(
