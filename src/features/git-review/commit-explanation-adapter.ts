@@ -468,7 +468,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       try {
         invocation = this.#invoke(commitExplanationCommands.setScope, {
           request: target,
-        }).then<ScopeWriteOutcome>(
+        }).then<ScopeWriteOutcome, ScopeWriteOutcome>(
           (value) => ({ kind: "response", value }),
           (error: unknown) => ({ kind: "failure", error }),
         )

@@ -478,10 +478,7 @@ export function CommitDetail({
               </Button>
             ) : null}
           </div>
-          <span
-            className="flex max-w-full items-center gap-xs text-right text-label text-muted-foreground"
-            role="status"
-          >
+          <span className="flex max-w-full items-center gap-xs text-right text-label text-muted-foreground">
             {intentBusy ? (
               <LoaderCircleIcon
                 aria-hidden="true"
@@ -492,7 +489,21 @@ export function CommitDetail({
                 {copy.explanationStatuses[controllerStatus]}
               </Badge>
             )}
-            {explanationText !== null ? <span>{explanationText}</span> : null}
+            {explanationText !== null ? (
+              <span
+                aria-atomic={
+                  explanationIntent.status === "error" ? "true" : undefined
+                }
+                aria-live={
+                  explanationIntent.status === "error" ? "polite" : undefined
+                }
+                role={
+                  explanationIntent.status === "error" ? "status" : undefined
+                }
+              >
+                {explanationText}
+              </span>
+            ) : null}
             {explanationControllerState?.errorCode !== null &&
             explanationControllerState?.errorCode !== undefined ? (
               <code className="font-mono">

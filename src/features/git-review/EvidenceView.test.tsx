@@ -21,6 +21,7 @@ const currentCommitEvidenceId = `commit-${"a".repeat(40)}`
 
 function createExplanationController(
   initialState: CommitExplanationControllerStateV1 | null = null,
+  presentOperation: () => Promise<void> = () => Promise.resolve(),
 ) {
   let state = initialState
   const listeners = new Set<() => void>()
@@ -67,7 +68,7 @@ function createExplanationController(
     },
     present(event) {
       present(event)
-      return Promise.resolve()
+      return presentOperation()
     },
     getState(workspaceId, workspaceGeneration, commitEvidenceId) {
       return state?.workspaceId === workspaceId &&
@@ -263,6 +264,75 @@ describe("EvidenceView", () => {
       requestId: explicitRequestId,
       reason: "user",
     })
+  })
+
+  it.each([
+    ["queued", false, "Explanation queued"],
+    ["running", false, "Generating explanation"],
+    ["generated", true, "Explanation ready"],
+  ] as const)(
+    "keeps automatic %s state visible without creating a live region",
+    async (status, presentationAvailable, statusText) => {
+      const explanation = createExplanationController({
+        schemaVersion: 1,
+        workspaceId: "workspace-demo",
+        workspaceGeneration: 1,
+        commitEvidenceId: currentCommitEvidenceId,
+        requestId: `auto-${status}`,
+        locale: "en",
+        selectionVersion: 1,
+        status,
+        trigger: "auto_verified_commit",
+        retryable: false,
+        presentationAvailable,
+        errorCode: null,
+        updatedAt: "2026-07-18T09:00:00.000Z",
+      })
+      const { container } = renderEvidence({
+        explanationController: explanation.controller,
+      })
+
+      expect(await screen.findByText(statusText)).toBeVisible()
+      expect(screen.queryAllByRole("status")).toHaveLength(0)
+      expect(container.querySelectorAll("[aria-live]")).toHaveLength(0)
+    },
+  )
+
+  it("creates a live terminal fallback only after an explicit presentation fails", async () => {
+    const user = userEvent.setup()
+    const explanation = createExplanationController(
+      {
+        schemaVersion: 1,
+        workspaceId: "workspace-demo",
+        workspaceGeneration: 1,
+        commitEvidenceId: currentCommitEvidenceId,
+        requestId: "generated-request-one",
+        locale: "en",
+        selectionVersion: 1,
+        status: "generated",
+        trigger: "auto_verified_commit",
+        retryable: false,
+        presentationAvailable: true,
+        errorCode: null,
+        updatedAt: "2026-07-18T09:00:00.000Z",
+      },
+      () => Promise.reject(new Error("presentation unavailable")),
+    )
+    const { container } = renderEvidence({
+      explanationController: explanation.controller,
+    })
+
+    await screen.findByText("Explanation ready")
+    expect(screen.queryAllByRole("status")).toHaveLength(0)
+
+    await user.click(screen.getByRole("button", { name: "Show explanation" }))
+
+    const terminalFallback = await screen.findByRole("status")
+    expect(terminalFallback).toHaveAttribute("aria-live", "polite")
+    expect(terminalFallback).toHaveTextContent(
+      "The app-owned isolated explainer is unavailable",
+    )
+    expect(container.querySelectorAll("[aria-live]")).toHaveLength(1)
   })
 
   it("ignores explanation state from another locale or commit selection", async () => {
