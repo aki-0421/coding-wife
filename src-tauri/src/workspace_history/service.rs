@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{Mutex, Notify};
+use tokio::task::JoinSet;
 
 use crate::character::CharacterService;
 use crate::codex::process::{run_bounded_command, BoundedCommandError};
@@ -38,6 +39,7 @@ const CONTEXT_CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTEXT_STDOUT_LIMIT: usize = 1024 * 1024;
 const CONTEXT_STDERR_LIMIT: usize = 4 * 1024;
 const REPOSITORY_RECHECK_TIMEOUT: Duration = Duration::from_secs(1);
+const STARTUP_REPOSITORY_VALIDATION_CONCURRENCY: usize = 2;
 const STARTUP_PENDING: u8 = 0;
 const STARTUP_READY: u8 = 1;
 const STARTUP_FAILED: u8 = 2;
@@ -382,8 +384,38 @@ impl WorkspaceHistoryService {
             }
         };
 
-        for record in records {
-            match self.workspace.validate_private_candidate(&record).await {
+        let record_count = records.len();
+        let mut records = records.into_iter().enumerate();
+        let mut validations = JoinSet::new();
+        for (index, record) in records
+            .by_ref()
+            .take(STARTUP_REPOSITORY_VALIDATION_CONCURRENCY)
+        {
+            let workspace = self.workspace.clone();
+            validations.spawn(async move {
+                let result = workspace.validate_private_candidate(&record).await;
+                (index, record, result)
+            });
+        }
+        let mut results = (0..record_count).map(|_| None).collect::<Vec<_>>();
+        while let Some(validation) = validations.join_next().await {
+            match validation {
+                Ok((index, record, validation)) => {
+                    results[index] = Some((record, validation));
+                }
+                Err(_) => report.unavailable += 1,
+            }
+            if let Some((index, record)) = records.next() {
+                let workspace = self.workspace.clone();
+                validations.spawn(async move {
+                    let result = workspace.validate_private_candidate(&record).await;
+                    (index, record, result)
+                });
+            }
+        }
+
+        for (record, validation) in results.into_iter().flatten() {
+            match validation {
                 Ok(candidate) => {
                     match self
                         .store
@@ -1414,8 +1446,11 @@ fn codex_error(operation: &str, error: CodexCommandError) -> WorkspaceCommandErr
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::Mutex as StdMutex;
     use std::time::{Duration, Instant};
 
     use sha2::{Digest, Sha256};
@@ -1431,7 +1466,10 @@ mod tests {
     use crate::character::validation::snapshot_character_model;
     use crate::character::CharacterStorage;
     use crate::codex::supervisor::CodexSupervisor;
-    use crate::codex::workspace::{AppPrivateWorkspaceRecord, WorkspaceService};
+    use crate::codex::workspace::{
+        AppPrivateWorkspaceRecord, GitRepositoryIdentity, NativeFolderPicker,
+        RepositoryValidationFuture, RepositoryValidator, WorkspaceService,
+    };
     use crate::workspace_history::types::ProjectContext;
 
     use super::*;
@@ -1452,6 +1490,116 @@ mod tests {
             .expect("git init");
         assert!(status.success());
         root
+    }
+
+    #[derive(Clone)]
+    struct InstrumentedRepositoryValidator {
+        delay: Duration,
+        armed: Arc<AtomicBool>,
+        active: Arc<AtomicUsize>,
+        peak: Arc<AtomicUsize>,
+        calls: Arc<StdMutex<HashMap<PathBuf, usize>>>,
+        activation_order: Arc<StdMutex<Vec<PathBuf>>>,
+        fail_root: Arc<StdMutex<Option<PathBuf>>>,
+    }
+
+    impl InstrumentedRepositoryValidator {
+        fn new(delay: Duration) -> Self {
+            Self {
+                delay,
+                armed: Arc::new(AtomicBool::new(false)),
+                active: Arc::new(AtomicUsize::new(0)),
+                peak: Arc::new(AtomicUsize::new(0)),
+                calls: Arc::new(StdMutex::new(HashMap::new())),
+                activation_order: Arc::new(StdMutex::new(Vec::new())),
+                fail_root: Arc::new(StdMutex::new(None)),
+            }
+        }
+
+        fn arm(&self, fail_root: PathBuf) {
+            self.active.store(0, Ordering::SeqCst);
+            self.peak.store(0, Ordering::SeqCst);
+            self.calls.lock().expect("calls lock").clear();
+            self.activation_order
+                .lock()
+                .expect("activation order lock")
+                .clear();
+            *self.fail_root.lock().expect("fail root lock") = Some(fail_root);
+            self.armed.store(true, Ordering::SeqCst);
+        }
+
+        fn peak(&self) -> usize {
+            self.peak.load(Ordering::SeqCst)
+        }
+
+        fn activation_order(&self) -> Vec<PathBuf> {
+            self.activation_order
+                .lock()
+                .expect("activation order lock")
+                .clone()
+        }
+    }
+
+    impl RepositoryValidator for InstrumentedRepositoryValidator {
+        fn validate<'a>(&'a self, selected: &'a Path) -> RepositoryValidationFuture<'a> {
+            let validator = self.clone();
+            let selected = selected.to_owned();
+            Box::pin(async move {
+                let canonical_root = tokio::fs::canonicalize(selected).await.map_err(|_| {
+                    CodexCommandError::new("CODEX-WORKSPACE-MISSING", "codex.workspace.pick", true)
+                })?;
+                if !validator.armed.load(Ordering::SeqCst) {
+                    return Ok(fake_repository_identity(canonical_root));
+                }
+
+                let call = {
+                    let mut calls = validator.calls.lock().expect("calls lock");
+                    let call = calls.entry(canonical_root.clone()).or_default();
+                    *call += 1;
+                    *call
+                };
+                if call == 1 {
+                    let active = validator.active.fetch_add(1, Ordering::SeqCst) + 1;
+                    validator.peak.fetch_max(active, Ordering::SeqCst);
+                    tokio::time::sleep(validator.delay).await;
+                    validator.active.fetch_sub(1, Ordering::SeqCst);
+                    if validator.fail_root.lock().expect("fail root lock").as_ref()
+                        == Some(&canonical_root)
+                    {
+                        return Err(CodexCommandError::new(
+                            "CODEX-WORKSPACE-MISSING",
+                            "codex.workspace.pick",
+                            true,
+                        ));
+                    }
+                } else {
+                    validator
+                        .activation_order
+                        .lock()
+                        .expect("activation order lock")
+                        .push(canonical_root.clone());
+                }
+                Ok(fake_repository_identity(canonical_root))
+            })
+        }
+    }
+
+    fn fake_repository_identity(canonical_root: PathBuf) -> GitRepositoryIdentity {
+        let digest = Sha256::digest(canonical_root.to_string_lossy().as_bytes());
+        let root_inode = u64::from_le_bytes(digest[..8].try_into().expect("root identity bytes"));
+        let git_inode = u64::from_le_bytes(digest[8..16].try_into().expect("git identity bytes"));
+        GitRepositoryIdentity {
+            canonical_git_dir: canonical_root.join(".git"),
+            canonical_root,
+            root_device: 1,
+            root_inode,
+            git_device: 1,
+            git_inode,
+            project_identity: hex::encode(digest),
+            branch: "main".to_owned(),
+            head: "unborn".to_owned(),
+            detached: false,
+        }
     }
 
     async fn candidate(workspace: &WorkspaceService, root: &Path) -> ValidatedWorkspaceCandidate {
@@ -2667,11 +2815,72 @@ mod tests {
 
         let started = Instant::now();
         let report = service.restore_startup().await;
+        let elapsed = started.elapsed();
 
         assert_eq!(report.ready, 20);
         assert_eq!(report.changed, 0);
         assert_eq!(report.unavailable, 0);
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "real startup restore exceeded its five-second budget: {elapsed:?}"
+        );
+        let _ = fs::remove_dir_all(data);
+        for root in roots {
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_restore_bounds_validation_and_applies_results_in_input_order() {
+        let data = temp_directory("history-service-restore-concurrency");
+        let validator = InstrumentedRepositoryValidator::new(Duration::from_millis(25));
+        let workspace = WorkspaceService::new_with_repository_validator(
+            CodexSupervisor::new(),
+            Arc::new(NativeFolderPicker),
+            Arc::new(validator.clone()),
+        );
+        let store = WorkspaceHistoryStore::open(&data).expect("store");
+        let mut roots = Vec::new();
+        for index in 0..20 {
+            let root = temp_directory(&format!("history-service-bounded-{index:02}"));
+            store
+                .register_candidate(&candidate(&workspace, &root).await)
+                .expect("register fixture");
+            roots.push(root);
+        }
+        let records = store.private_workspace_records().expect("restore records");
+        let initial_selection = store
+            .snapshot(None)
+            .expect("initial state")
+            .active_workspace_id;
+        let failed_root = records[7].canonical_root.clone();
+        validator.arm(failed_root.clone());
+        let service = WorkspaceHistoryService::new(store.clone(), workspace);
+
+        let report = service.restore_startup().await;
+
+        assert_eq!(report.ready, 19);
+        assert_eq!(report.changed, 0);
+        assert_eq!(report.unavailable, 1);
+        assert_eq!(
+            store
+                .snapshot(None)
+                .expect("restored state")
+                .active_workspace_id,
+            initial_selection
+        );
+        assert_eq!(validator.peak(), STARTUP_REPOSITORY_VALIDATION_CONCURRENCY);
+        assert!(validator.peak() > 1);
+        assert!(validator.peak() <= STARTUP_REPOSITORY_VALIDATION_CONCURRENCY);
+        assert_eq!(
+            validator.activation_order(),
+            records
+                .iter()
+                .map(|record| record.canonical_root.clone())
+                .filter(|root| root != &failed_root)
+                .collect::<Vec<_>>()
+        );
+
         let _ = fs::remove_dir_all(data);
         for root in roots {
             let _ = fs::remove_dir_all(root);

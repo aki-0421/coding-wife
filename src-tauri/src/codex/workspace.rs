@@ -18,9 +18,23 @@ const WORKSPACE_GIT_TIMEOUT: Duration = Duration::from_secs(5);
 const WORKSPACE_GIT_STDERR_LIMIT: usize = 4 * 1024;
 
 pub type PickerFuture<'a> = Pin<Box<dyn Future<Output = Option<PathBuf>> + Send + 'a>>;
+pub(crate) type RepositoryValidationFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<GitRepositoryIdentity, CodexCommandError>> + Send + 'a>>;
 
 pub trait FolderPicker: Send + Sync {
     fn pick_folder(&self) -> PickerFuture<'_>;
+}
+
+pub(crate) trait RepositoryValidator: Send + Sync {
+    fn validate<'a>(&'a self, selected: &'a Path) -> RepositoryValidationFuture<'a>;
+}
+
+struct NativeRepositoryValidator;
+
+impl RepositoryValidator for NativeRepositoryValidator {
+    fn validate<'a>(&'a self, selected: &'a Path) -> RepositoryValidationFuture<'a> {
+        Box::pin(validate_git_repository(selected))
+    }
 }
 
 pub struct NativeFolderPicker;
@@ -122,6 +136,7 @@ pub struct TrustedWorkspaceIdentity {
 pub struct WorkspaceService {
     supervisor: CodexSupervisor,
     picker: Arc<dyn FolderPicker>,
+    validator: Arc<dyn RepositoryValidator>,
     trusted: Arc<Mutex<HashMap<String, TrustedWorkspace>>>,
 }
 
@@ -131,9 +146,27 @@ impl WorkspaceService {
     }
 
     pub fn new(supervisor: CodexSupervisor, picker: Arc<dyn FolderPicker>) -> Self {
+        Self::with_validator(supervisor, picker, Arc::new(NativeRepositoryValidator))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_repository_validator(
+        supervisor: CodexSupervisor,
+        picker: Arc<dyn FolderPicker>,
+        validator: Arc<dyn RepositoryValidator>,
+    ) -> Self {
+        Self::with_validator(supervisor, picker, validator)
+    }
+
+    fn with_validator(
+        supervisor: CodexSupervisor,
+        picker: Arc<dyn FolderPicker>,
+        validator: Arc<dyn RepositoryValidator>,
+    ) -> Self {
         Self {
             supervisor,
             picker,
+            validator,
             trusted: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -259,7 +292,10 @@ impl WorkspaceService {
         &self,
         candidate: &ValidatedWorkspaceCandidate,
     ) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
-        let live = validate_git_repository(&candidate.git.canonical_root).await?;
+        let live = self
+            .validator
+            .validate(&candidate.git.canonical_root)
+            .await?;
         if candidate.git.canonical_root != live.canonical_root
             || candidate.git.canonical_git_dir != live.canonical_git_dir
             || !same_repository_identity(&candidate.git, &live)
@@ -301,7 +337,7 @@ impl WorkspaceService {
         workspace_id: String,
         alias: Option<String>,
     ) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
-        let git = validate_git_repository(&selected).await?;
+        let git = self.validator.validate(&selected).await?;
         validate_workspace_id(&workspace_id)?;
         let alias = alias.unwrap_or_else(|| repository_alias(&git.canonical_root));
         let registration = WorkspaceRegistration {
