@@ -213,6 +213,7 @@ export class DemoSupportControlsGateway implements SupportControlsGateway {
         rawTranscriptPersisted: false,
         taskTimeoutMs: 15_000,
         tokenBudget: 16_000,
+        fallbackTasks: 0,
         latestOutcome: null,
       },
       lastErrorCode: null,

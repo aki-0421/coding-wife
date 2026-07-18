@@ -65,6 +65,7 @@ interface SupportCopy {
   readonly limits: string
   readonly rawHistory: string
   readonly never: string
+  readonly fallbacks: string
   readonly latest: string
   readonly none: string
   readonly outcomes: Readonly<Record<SupportOutcomeStatus, string>>
@@ -132,6 +133,7 @@ const copy: Readonly<Record<SupportedLocale, SupportCopy>> = {
     limits: "Limits",
     rawHistory: "Raw support transcript",
     never: "Never persisted",
+    fallbacks: "Deterministic fallbacks",
     latest: "Latest outcome",
     none: "No invocation recorded",
     outcomes: {
@@ -206,6 +208,7 @@ const copy: Readonly<Record<SupportedLocale, SupportCopy>> = {
     limits: "上限",
     rawHistory: "支援の入出力本文",
     never: "永続化しない",
+    fallbacks: "決定的fallback",
     latest: "直近の結果",
     none: "実行記録はありません",
     outcomes: {
@@ -439,6 +442,10 @@ function SnapshotDetails({
           </dd>
           <dt>{text.rawHistory}</dt>
           <dd className="text-foreground">{text.never}</dd>
+          <dt>{text.fallbacks}</dt>
+          <dd className="text-foreground tabular-nums">
+            {number.format(snapshot.audit.fallbackTasks)}
+          </dd>
           <dt>{text.latest}</dt>
           <dd className="text-pretty text-foreground">
             {outcome === null
@@ -472,7 +479,9 @@ export function SupportControlsSettings({
   )
 
   useEffect(() => {
+    const lease = controller.activate()
     void controller.initialize()
+    return () => controller.deactivate(lease)
   }, [controller])
 
   const snapshot = state.snapshot

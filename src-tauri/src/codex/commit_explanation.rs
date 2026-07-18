@@ -18,22 +18,26 @@ use tokio::sync::{Mutex, Notify};
 
 use crate::git_review::types::CommitEvidenceV1;
 
-use super::bundled_skill::{resolve_bundled_skill, EXPLAIN_COMMIT_SKILL_NAME};
-use super::supervisor::CodexSupervisor;
+use super::bundled_skill::{
+    resolve_bundled_skill, ResolvedBundledSkill, EXPLAIN_COMMIT_SKILL_NAME,
+};
+use super::supervisor::{CodexSupervisor, SupportReleaseIdentityEvidence};
 use super::support::{
     CommitExplanationTrigger, CommitExplanationV1, SupportExplainRequest, SupportExplainResult,
     SupportRuntime, SupportRuntimeCleanup, SupportRuntimeError, SupportUsage, SUPPORT_TASK_TIMEOUT,
 };
 use super::support_control::{
-    SupportAuditV1, SupportCapacityV1, SupportControlCommandError, SupportControlResult,
-    SupportControlSnapshotV1, SupportEffectiveState, SupportLatestOutcomeV1, SupportOutcomeStatus,
-    SupportPersistence, SupportReadinessStatus, SupportReleaseReadinessV1,
-    SupportSettingsGetRequestV1, SupportSettingsStore, SupportSettingsUpdateRequestV1,
-    SupportSettingsV1, SupportUsageCountersV1, SUPPORT_CONTROL_SCHEMA_VERSION,
-    SUPPORT_MAX_QUEUE_CAPACITY, SUPPORT_SETTINGS_UNAVAILABLE,
+    SupportAuditStore, SupportAuditV1, SupportCapacityV1, SupportControlCommandError,
+    SupportControlResult, SupportControlSnapshotV1, SupportDurableAuditV1, SupportEffectiveState,
+    SupportLatestOutcomeV1, SupportOutcomeStatus, SupportPersistence, SupportReadinessStatus,
+    SupportReleaseReadinessV1, SupportSettingsGetRequestV1, SupportSettingsStore,
+    SupportSettingsUpdateRequestV1, SupportSettingsV1, SupportUsageCountersV1,
+    SUPPORT_CONTROL_SCHEMA_VERSION, SUPPORT_MAX_QUEUE_CAPACITY, SUPPORT_MAX_SAFE_COUNTER,
+    SUPPORT_SETTINGS_UNAVAILABLE,
 };
 use super::support_isolation::{
-    SUPPORTED_ARM64_BINARY_SHA256, SUPPORTED_CLI_VERSION, SUPPORTED_SCHEMA_FINGERPRINT,
+    SUPPORTED_ARM64_BINARY_SHA256, SUPPORTED_CLI_VERSION, SUPPORTED_EXPLAIN_SKILL_SHA256,
+    SUPPORTED_EXPLAIN_SKILL_VERSION, SUPPORTED_SCHEMA_FINGERPRINT,
 };
 use super::types::CodexHealth;
 
@@ -51,6 +55,15 @@ const OPERATION_SCOPE: &str = "commit_explanation.scope";
 const OPERATION_SHUTDOWN: &str = "commit_explanation.shutdown";
 const OPERATION_SUPPORT_GET: &str = "support_settings_get";
 const OPERATION_SUPPORT_UPDATE: &str = "support_settings_update";
+
+#[cfg(not(test))]
+const SUPPORT_DISABLE_GRACE_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const SUPPORT_DISABLE_GRACE_TIMEOUT: Duration = Duration::from_millis(50);
+#[cfg(not(test))]
+const SUPPORT_DISABLE_FORCE_TIMEOUT: Duration = Duration::from_secs(1);
+#[cfg(test)]
+const SUPPORT_DISABLE_FORCE_TIMEOUT: Duration = Duration::from_millis(25);
 
 type ExplanationFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -260,6 +273,7 @@ struct ControllerData {
     settings: SupportSettingsV1,
     settings_recovery_code: Option<String>,
     usage: SupportUsageCountersV1,
+    fallback_tasks: u64,
     latest_outcome: Option<SupportLatestOutcomeV1>,
     last_error_code: Option<String>,
     last_readiness: Option<SupportReleaseReadinessV1>,
@@ -297,67 +311,74 @@ struct SupervisorSupportReadinessProvider {
 impl SupportReadinessProvider for SupervisorSupportReadinessProvider {
     fn snapshot<'a>(&'a self) -> ExplanationFuture<'a, SupportReleaseReadinessV1> {
         Box::pin(async move {
-            let diagnostic = self.supervisor.diagnostic().await;
-            let approved_binary_hash_prefix = prefix16(SUPPORTED_ARM64_BINARY_SHA256);
-            let approved_schema_fingerprint_prefix = prefix16(SUPPORTED_SCHEMA_FINGERPRINT);
+            let evidence = self.supervisor.support_release_identity_evidence().await;
             let skill =
                 resolve_bundled_skill(&self.resource_directory, EXPLAIN_COMMIT_SKILL_NAME).ok();
-            let identity_matches = diagnostic.cli_version.as_deref() == Some(SUPPORTED_CLI_VERSION)
-                && diagnostic.binary_hash_prefix.as_deref()
-                    == Some(approved_binary_hash_prefix.as_str());
-            let schema_matches = diagnostic.generated_by_same_binary
-                && diagnostic.schema_fingerprint_prefix.as_deref()
-                    == Some(approved_schema_fingerprint_prefix.as_str());
-            let status = if diagnostic.health == CodexHealth::Ready
-                && identity_matches
-                && schema_matches
-                && skill.is_some()
-            {
-                SupportReadinessStatus::Approved
-            } else if diagnostic.cli_version.is_none()
-                && diagnostic.binary_hash_prefix.is_none()
-                && diagnostic.schema_fingerprint_prefix.is_none()
-            {
-                SupportReadinessStatus::Unavailable
-            } else {
-                SupportReadinessStatus::Blocked
-            };
-            let reason_code = match status {
-                SupportReadinessStatus::Approved => None,
-                SupportReadinessStatus::Unavailable => Some("CODEX-SUPPORT-NOT-READY".to_owned()),
-                SupportReadinessStatus::Blocked if skill.is_none() => {
-                    Some("CODEX-SUPPORT-SKILL-INVALID".to_owned())
-                }
-                SupportReadinessStatus::Blocked if !identity_matches => {
-                    Some("CODEX-SUPPORT-RELEASE-UNSUPPORTED".to_owned())
-                }
-                SupportReadinessStatus::Blocked if !schema_matches => {
-                    Some("CODEX-SUPPORT-SCHEMA-UNVERIFIED".to_owned())
-                }
-                SupportReadinessStatus::Blocked => Some("CODEX-SUPPORT-NOT-READY".to_owned()),
-            };
-            SupportReleaseReadinessV1 {
-                status,
-                approved_cli_version: SUPPORTED_CLI_VERSION.to_owned(),
-                approved_binary_hash_prefix,
-                approved_schema_fingerprint_prefix,
-                observed_cli_version: diagnostic.cli_version,
-                observed_binary_hash_prefix: diagnostic.binary_hash_prefix,
-                observed_schema_fingerprint_prefix: diagnostic.schema_fingerprint_prefix,
-                skill_name: EXPLAIN_COMMIT_SKILL_NAME.to_owned(),
-                skill_version: skill.as_ref().map(|value| value.version.clone()),
-                skill_digest_prefix: skill.as_ref().map(|value| {
-                    prefix16(
-                        value
-                            .content_digest
-                            .strip_prefix("sha256:")
-                            .unwrap_or(&value.content_digest),
-                    )
-                }),
-                reason_code,
-                checked_at: now(),
-            }
+            evaluate_support_readiness(&evidence, skill.as_ref())
         })
+    }
+}
+
+fn evaluate_support_readiness(
+    evidence: &SupportReleaseIdentityEvidence,
+    skill: Option<&ResolvedBundledSkill>,
+) -> SupportReleaseReadinessV1 {
+    let identity_matches = evidence.cli_version.as_deref() == Some(SUPPORTED_CLI_VERSION)
+        && evidence.executable_sha256.as_deref() == Some(SUPPORTED_ARM64_BINARY_SHA256);
+    let schema_matches = evidence.generated_by_same_binary
+        && evidence.schema_fingerprint.as_deref() == Some(SUPPORTED_SCHEMA_FINGERPRINT);
+    let skill_matches = skill.is_some_and(|value| {
+        value.name == EXPLAIN_COMMIT_SKILL_NAME
+            && value.version == SUPPORTED_EXPLAIN_SKILL_VERSION
+            && value.content_digest == format!("sha256:{SUPPORTED_EXPLAIN_SKILL_SHA256}")
+    });
+    let has_observed_identity = evidence.cli_version.is_some()
+        || evidence.executable_sha256.is_some()
+        || evidence.schema_fingerprint.is_some();
+    let status = if evidence.diagnostic.health == CodexHealth::Ready
+        && identity_matches
+        && schema_matches
+        && skill_matches
+    {
+        SupportReadinessStatus::Approved
+    } else if !has_observed_identity {
+        SupportReadinessStatus::Unavailable
+    } else {
+        SupportReadinessStatus::Blocked
+    };
+    let reason_code = match status {
+        SupportReadinessStatus::Approved => None,
+        SupportReadinessStatus::Unavailable => Some("CODEX-SUPPORT-NOT-READY".to_owned()),
+        SupportReadinessStatus::Blocked if !identity_matches => {
+            Some("CODEX-SUPPORT-RELEASE-UNSUPPORTED".to_owned())
+        }
+        SupportReadinessStatus::Blocked if !schema_matches => {
+            Some("CODEX-SUPPORT-SCHEMA-UNVERIFIED".to_owned())
+        }
+        SupportReadinessStatus::Blocked if !skill_matches => {
+            Some("CODEX-SUPPORT-SKILL-INVALID".to_owned())
+        }
+        SupportReadinessStatus::Blocked => Some("CODEX-SUPPORT-NOT-READY".to_owned()),
+    };
+    let skill_digest = skill.map(|value| {
+        value
+            .content_digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&value.content_digest)
+    });
+    SupportReleaseReadinessV1 {
+        status,
+        approved_cli_version: SUPPORTED_CLI_VERSION.to_owned(),
+        approved_binary_hash_prefix: prefix16(SUPPORTED_ARM64_BINARY_SHA256),
+        approved_schema_fingerprint_prefix: prefix16(SUPPORTED_SCHEMA_FINGERPRINT),
+        observed_cli_version: evidence.cli_version.clone(),
+        observed_binary_hash_prefix: evidence.executable_sha256.as_deref().map(prefix16),
+        observed_schema_fingerprint_prefix: evidence.schema_fingerprint.as_deref().map(prefix16),
+        skill_name: EXPLAIN_COMMIT_SKILL_NAME.to_owned(),
+        skill_version: skill.map(|value| value.version.clone()),
+        skill_digest_prefix: skill_digest.map(prefix16),
+        reason_code,
+        checked_at: now(),
     }
 }
 
@@ -805,6 +826,7 @@ struct CommitExplanationControllerInner {
     events: Arc<dyn CommitExplanationEventSink>,
     readiness: Arc<dyn SupportReadinessProvider>,
     settings_store: Option<SupportSettingsStore>,
+    audit_store: Option<SupportAuditStore>,
     queue_limit: usize,
     cache_limit: usize,
     task_timeout: Duration,
@@ -828,6 +850,19 @@ impl CommitExplanationController {
         resource_directory: &Path,
     ) -> Self {
         let opened = SupportSettingsStore::open(app_data_directory);
+        let audit = SupportAuditStore::open(
+            app_data_directory,
+            opened
+                .recovery_code
+                .is_none()
+                .then_some(opened.settings.version),
+        );
+        let recovery_code = opened.recovery_code.or(audit.recovery_code);
+        let settings = if recovery_code.is_some() {
+            SupportSettingsV1::fail_closed()
+        } else {
+            opened.settings
+        };
         Self::with_control_dependencies(
             Arc::new(IsolatedSupportExecutor::new(supervisor.clone())),
             Arc::new(TauriCommitExplanationEventSink { app_handle }),
@@ -836,8 +871,10 @@ impl CommitExplanationController {
                 resource_directory: resource_directory.to_path_buf(),
             }),
             opened.store,
-            opened.settings,
-            opened.recovery_code,
+            audit.store,
+            settings,
+            audit.state,
+            recovery_code,
             COMMIT_EXPLANATION_QUEUE_LIMIT,
             COMMIT_EXPLANATION_CACHE_LIMIT,
             SUPPORT_TASK_TIMEOUT,
@@ -857,7 +894,9 @@ impl CommitExplanationController {
             events,
             Arc::new(ApprovedFixtureReadinessProvider),
             None,
+            None,
             SupportSettingsV1::default(),
+            SupportDurableAuditV1::fresh(1),
             None,
             queue_limit,
             cache_limit,
@@ -871,7 +910,9 @@ impl CommitExplanationController {
         events: Arc<dyn CommitExplanationEventSink>,
         readiness: Arc<dyn SupportReadinessProvider>,
         settings_store: Option<SupportSettingsStore>,
+        audit_store: Option<SupportAuditStore>,
         settings: SupportSettingsV1,
+        audit: SupportDurableAuditV1,
         settings_recovery_code: Option<String>,
         queue_limit: usize,
         cache_limit: usize,
@@ -880,6 +921,10 @@ impl CommitExplanationController {
         let data = ControllerData {
             settings,
             settings_recovery_code,
+            usage: audit.usage,
+            fallback_tasks: audit.fallback_tasks,
+            latest_outcome: audit.latest_outcome,
+            last_error_code: audit.last_error_code,
             ..ControllerData::default()
         };
         Self {
@@ -890,6 +935,7 @@ impl CommitExplanationController {
                 events,
                 readiness,
                 settings_store,
+                audit_store,
                 queue_limit,
                 cache_limit: cache_limit.max(1),
                 task_timeout,
@@ -903,6 +949,61 @@ impl CommitExplanationController {
         }
     }
 
+    fn persist_audit(
+        &self,
+        data: &mut ControllerData,
+        operation: &'static str,
+    ) -> SupportControlResult<()> {
+        let Some(store) = self.inner.audit_store.as_ref() else {
+            return if self.inner.settings_store.is_some() {
+                let code = data
+                    .settings_recovery_code
+                    .clone()
+                    .unwrap_or_else(|| "CODEX-SUPPORT-AUDIT-UNAVAILABLE".to_owned());
+                data.settings.global_enabled = false;
+                data.settings.commit_explainer_enabled = false;
+                data.settings_recovery_code = Some(code.clone());
+                data.last_error_code = Some(code.clone());
+                Err(SupportControlCommandError::new(code, operation, true))
+            } else {
+                // Unit harnesses without a filesystem store deliberately remain in-memory.
+                Ok(())
+            };
+        };
+        if let Err(error) = store.save(&durable_audit(data), operation) {
+            let code = error.code.clone();
+            data.settings.global_enabled = false;
+            data.settings.commit_explainer_enabled = false;
+            data.settings_recovery_code = Some(code.clone());
+            data.last_error_code = Some(code);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn record_blocked_state(
+        &self,
+        data: &mut ControllerData,
+        key: ExplanationKey,
+        request: &CommitExplanationRequestedV1,
+        reason_code: &str,
+        retryable: bool,
+    ) -> CommitExplanationControllerStateV1 {
+        record_blocked_outcome(data, request, reason_code);
+        let persisted_reason = self
+            .persist_audit(data, OPERATION_REQUEST)
+            .err()
+            .map_or_else(|| reason_code.to_owned(), |error| error.code);
+        let state = terminal_state(
+            request,
+            CommitExplanationControllerStatus::Unavailable,
+            retryable,
+            Some(&persisted_reason),
+        );
+        data.states.insert(key, state.clone());
+        state
+    }
+
     pub async fn request(
         &self,
         dispatch: CommitExplanationDispatchV1,
@@ -913,46 +1014,41 @@ impl CommitExplanationController {
         let key = ExplanationKey::from_request(&dispatch.request);
         let mut data = self.inner.data.lock().await;
         data.last_readiness = Some(readiness.clone());
-        data.usage.attempted_tasks = data.usage.attempted_tasks.saturating_add(1);
+        bounded_add(&mut data.usage.attempted_tasks, 1);
+        if let Err(error) = self.persist_audit(&mut data, OPERATION_REQUEST) {
+            let state =
+                self.record_blocked_state(&mut data, key, &dispatch.request, &error.code, true);
+            drop(data);
+            self.inner.events.emit_state(&state);
+            return Ok(state);
+        }
         if let Some(reason_code) = support_gate_reason(&data, &readiness) {
-            let state = terminal_state(
-                &dispatch.request,
-                CommitExplanationControllerStatus::Unavailable,
-                true,
-                Some(&reason_code),
-            );
-            data.states.insert(key, state.clone());
-            record_blocked_outcome(&mut data, &dispatch.request, &reason_code);
+            let state =
+                self.record_blocked_state(&mut data, key, &dispatch.request, &reason_code, true);
             drop(data);
             self.inner.events.emit_state(&state);
             return Ok(state);
         }
         if data.shutting_down {
-            let state = terminal_state(
+            let state = self.record_blocked_state(
+                &mut data,
+                key,
                 &dispatch.request,
-                CommitExplanationControllerStatus::Unavailable,
+                "CODEX-SUPPORT-SHUTDOWN",
                 false,
-                Some("CODEX-SUPPORT-SHUTDOWN"),
             );
-            data.states.insert(key, state.clone());
-            record_blocked_outcome(&mut data, &dispatch.request, "CODEX-SUPPORT-SHUTDOWN");
             drop(data);
             self.inner.events.emit_state(&state);
             return Ok(state);
         }
         match data.generations.get(&key.workspace_id).copied() {
             Some(generation) if generation > key.workspace_generation => {
-                let state = terminal_state(
-                    &dispatch.request,
-                    CommitExplanationControllerStatus::Unavailable,
-                    true,
-                    Some("CODEX-SUPPORT-WORKSPACE-STALE"),
-                );
-                data.states.insert(key, state.clone());
-                record_blocked_outcome(
+                let state = self.record_blocked_state(
                     &mut data,
+                    key,
                     &dispatch.request,
                     "CODEX-SUPPORT-WORKSPACE-STALE",
+                    true,
                 );
                 drop(data);
                 self.inner.events.emit_state(&state);
@@ -977,14 +1073,13 @@ impl CommitExplanationController {
         }
 
         if data.shutting_down {
-            let state = terminal_state(
+            let state = self.record_blocked_state(
+                &mut data,
+                key,
                 &dispatch.request,
-                CommitExplanationControllerStatus::Unavailable,
+                "CODEX-SUPPORT-SHUTDOWN",
                 false,
-                Some("CODEX-SUPPORT-SHUTDOWN"),
             );
-            data.states.insert(key, state.clone());
-            record_blocked_outcome(&mut data, &dispatch.request, "CODEX-SUPPORT-SHUTDOWN");
             drop(data);
             self.inner.events.emit_state(&state);
             return Ok(state);
@@ -1001,17 +1096,12 @@ impl CommitExplanationController {
             }
             Some(scope) if scope_matches_request(scope, &dispatch.request) => {}
             Some(_) => {
-                let state = terminal_state(
-                    &dispatch.request,
-                    CommitExplanationControllerStatus::Unavailable,
-                    true,
-                    Some("CODEX-SUPPORT-WORKSPACE-STALE"),
-                );
-                data.states.insert(key, state.clone());
-                record_blocked_outcome(
+                let state = self.record_blocked_state(
                     &mut data,
+                    key,
                     &dispatch.request,
                     "CODEX-SUPPORT-WORKSPACE-STALE",
+                    true,
                 );
                 drop(data);
                 self.inner.events.emit_state(&state);
@@ -1094,14 +1184,13 @@ impl CommitExplanationController {
 
         let outstanding = data.queue.len() + usize::from(data.active.is_some());
         if outstanding >= self.inner.queue_limit.saturating_add(1) {
-            let state = terminal_state(
+            let state = self.record_blocked_state(
+                &mut data,
+                key,
                 &dispatch.request,
-                CommitExplanationControllerStatus::Unavailable,
+                "CODEX-SUPPORT-QUEUE-FULL",
                 true,
-                Some("CODEX-SUPPORT-QUEUE-FULL"),
             );
-            data.states.insert(key, state.clone());
-            record_blocked_outcome(&mut data, &dispatch.request, "CODEX-SUPPORT-QUEUE-FULL");
             drop(data);
             self.inner.events.emit_state(&state);
             return Ok(state);
@@ -1219,7 +1308,7 @@ impl CommitExplanationController {
             ..previous
         };
         data.states.insert(key, state.clone());
-        data.usage.canceled_tasks = data.usage.canceled_tasks.saturating_add(1);
+        bounded_add(&mut data.usage.canceled_tasks, 1);
         data.latest_outcome = Some(SupportLatestOutcomeV1 {
             status: SupportOutcomeStatus::Canceled,
             trigger: state
@@ -1235,10 +1324,18 @@ impl CommitExplanationController {
             error_code: Some("CODEX-SUPPORT-CANCELED".to_owned()),
         });
         data.last_error_code = Some("CODEX-SUPPORT-CANCELED".to_owned());
+        let audit_error = self.persist_audit(&mut data, OPERATION_CANCEL).err();
         drop(data);
         self.inner.events.emit_state(&state);
         if let Some(executor_request_id) = active_executor_request_id {
             let _ = self.inner.executor.cancel(&executor_request_id).await;
+        }
+        if let Some(error) = audit_error {
+            return Err(CommitExplanationControllerError::new(
+                error.code,
+                OPERATION_CANCEL,
+                error.recoverable,
+            ));
         }
         Ok(Some(state))
     }
@@ -1366,6 +1463,19 @@ impl CommitExplanationController {
                 true,
             ));
         }
+        let enabling = request.global_enabled
+            && request.commit_explainer_enabled
+            && (!data.settings.global_enabled || !data.settings.commit_explainer_enabled);
+        if enabling
+            && data.last_error_code.as_deref() == Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
+            && (data.active.is_some() || data.worker_running)
+        {
+            return Err(SupportControlCommandError::new(
+                "CODEX-SUPPORT-DISABLE-INCOMPLETE",
+                OPERATION_SUPPORT_UPDATE,
+                true,
+            ));
+        }
         let version = request.expected_version.checked_add(1).ok_or_else(|| {
             SupportControlCommandError::new(
                 "CODEX-SUPPORT-SETTINGS-VERSION",
@@ -1389,6 +1499,9 @@ impl CommitExplanationController {
         store.save(&next, OPERATION_SUPPORT_UPDATE)?;
         data.settings = next;
         data.settings_recovery_code = None;
+        if data.last_error_code.as_deref() == Some("CODEX-SUPPORT-DISABLE-INCOMPLETE") {
+            data.last_error_code = None;
+        }
 
         let disabling = !request.global_enabled || !request.commit_explainer_enabled;
         let mut changed = Vec::new();
@@ -1420,7 +1533,7 @@ impl CommitExplanationController {
             }
             if !changed.is_empty() {
                 let canceled = u64::try_from(changed.len()).unwrap_or(u64::MAX);
-                data.usage.canceled_tasks = data.usage.canceled_tasks.saturating_add(canceled);
+                bounded_add(&mut data.usage.canceled_tasks, canceled);
                 data.latest_outcome = changed.last().map(|state| SupportLatestOutcomeV1 {
                     status: SupportOutcomeStatus::Canceled,
                     trigger: state
@@ -1440,6 +1553,9 @@ impl CommitExplanationController {
         } else {
             None
         };
+        let audit_error = self
+            .persist_audit(&mut data, OPERATION_SUPPORT_UPDATE)
+            .err();
         drop(data);
 
         for state in changed {
@@ -1449,18 +1565,19 @@ impl CommitExplanationController {
             let _ = self.inner.executor.cancel(&request_id).await;
         }
         if let Some(completion) = worker_completion {
-            if tokio::time::timeout(Duration::from_secs(5), completion.wait())
+            if tokio::time::timeout(SUPPORT_DISABLE_GRACE_TIMEOUT, completion.wait())
                 .await
                 .is_err()
             {
                 let forced = self.inner.executor.force_shutdown_now().await;
                 if !forced
-                    || tokio::time::timeout(Duration::from_secs(1), completion.wait())
+                    || tokio::time::timeout(SUPPORT_DISABLE_FORCE_TIMEOUT, completion.wait())
                         .await
                         .is_err()
                 {
-                    self.inner.data.lock().await.last_error_code =
-                        Some("CODEX-SUPPORT-DISABLE-INCOMPLETE".to_owned());
+                    let mut data = self.inner.data.lock().await;
+                    data.last_error_code = Some("CODEX-SUPPORT-DISABLE-INCOMPLETE".to_owned());
+                    let _ = self.persist_audit(&mut data, OPERATION_SUPPORT_UPDATE);
                     return Err(SupportControlCommandError::new(
                         "CODEX-SUPPORT-DISABLE-INCOMPLETE",
                         OPERATION_SUPPORT_UPDATE,
@@ -1468,6 +1585,9 @@ impl CommitExplanationController {
                     ));
                 }
             }
+        }
+        if let Some(error) = audit_error {
+            return Err(error);
         }
 
         let readiness = self.inner.readiness.snapshot().await;
@@ -1482,6 +1602,7 @@ impl CommitExplanationController {
         Vec<CommitExplanationControllerStateV1>,
         Option<String>,
         Option<Arc<WorkerCompletion>>,
+        bool,
     ) {
         let mut data = self.inner.data.lock().await;
         data.shutting_down = true;
@@ -1509,15 +1630,39 @@ impl CommitExplanationController {
                 changed.push(state);
             }
         }
+        if !changed.is_empty() {
+            bounded_add(
+                &mut data.usage.canceled_tasks,
+                u64::try_from(changed.len()).unwrap_or(u64::MAX),
+            );
+            data.latest_outcome = changed.last().map(|state| SupportLatestOutcomeV1 {
+                status: SupportOutcomeStatus::Canceled,
+                trigger: state
+                    .trigger
+                    .map(trigger_name)
+                    .unwrap_or("unknown")
+                    .to_owned(),
+                completed_at: state.updated_at.clone(),
+                latency_ms: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                error_code: Some("CODEX-SUPPORT-SHUTDOWN".to_owned()),
+            });
+            data.last_error_code = Some("CODEX-SUPPORT-SHUTDOWN".to_owned());
+        }
+        let audit_persisted = self.persist_audit(&mut data, OPERATION_SHUTDOWN).is_ok();
         (
             changed,
             active.map(|(_, request_id)| request_id),
             data.worker_completion.clone(),
+            audit_persisted,
         )
     }
 
     async fn shutdown_converged(&self, force: bool) -> bool {
-        let (changed, active_request_id, worker_completion) = self.begin_shutdown().await;
+        let (changed, active_request_id, worker_completion, audit_persisted) =
+            self.begin_shutdown().await;
         for state in changed {
             self.inner.events.emit_state(&state);
         }
@@ -1537,7 +1682,8 @@ impl CommitExplanationController {
             completion.wait().await;
         }
         let data = self.inner.data.lock().await;
-        cancel_converged
+        audit_persisted
+            && cancel_converged
             && executor_converged
             && data.queue.is_empty()
             && data.active.is_none()
@@ -1562,7 +1708,7 @@ impl CommitExplanationController {
 
     async fn run_worker(&self) {
         loop {
-            let (task, canceled, running) = {
+            let (task, canceled, running, audit_failure) = {
                 let mut data = self.inner.data.lock().await;
                 let Some(task) = data.queue.pop_front() else {
                     data.worker_running = false;
@@ -1574,14 +1720,33 @@ impl CommitExplanationController {
                     CommitExplanationControllerStatus::Running,
                 );
                 data.states.insert(task.key.clone(), running.clone());
-                data.usage.started_tasks = data.usage.started_tasks.saturating_add(1);
+                bounded_add(&mut data.usage.started_tasks, 1);
                 data.active = Some(ActiveTask {
                     task: task.clone(),
                     executor_request_id: task.dispatch.request.request_id.clone(),
                     canceled: canceled.clone(),
                 });
-                (task, canceled, running)
+                let audit_failure =
+                    self.persist_audit(&mut data, OPERATION_REQUEST)
+                        .err()
+                        .map(|error| {
+                            data.active = None;
+                            record_blocked_outcome(&mut data, &task.dispatch.request, &error.code);
+                            let state = terminal_state(
+                                &task.dispatch.request,
+                                CommitExplanationControllerStatus::Unavailable,
+                                true,
+                                Some(&error.code),
+                            );
+                            data.states.insert(task.key.clone(), state.clone());
+                            state
+                        });
+                (task, canceled, running, audit_failure)
             };
+            if let Some(state) = audit_failure {
+                self.inner.events.emit_state(&state);
+                continue;
+            }
             self.inner.events.emit_state(&running);
             let support_request = SupportExplainRequest {
                 schema_version: 1,
@@ -1633,7 +1798,7 @@ impl CommitExplanationController {
                     let output_request = rebound_request
                         .as_ref()
                         .expect("active request checked above");
-                    match outcome {
+                    let mut state = match outcome {
                         Ok(result)
                             if result.request_id == task.dispatch.request.request_id
                                 && result.explanation.locale == task.dispatch.request.locale =>
@@ -1690,7 +1855,23 @@ impl CommitExplanationController {
                             data.states.insert(task.key.clone(), state.clone());
                             Some(state)
                         }
+                    };
+                    if state.is_some() {
+                        if let Err(error) = self.persist_audit(&mut data, OPERATION_REQUEST) {
+                            data.cache.remove(&task.key);
+                            data.cache_order.retain(|key| key != &task.key);
+                            record_blocked_outcome(&mut data, output_request, &error.code);
+                            let unavailable = terminal_state(
+                                output_request,
+                                CommitExplanationControllerStatus::Unavailable,
+                                true,
+                                Some(&error.code),
+                            );
+                            data.states.insert(task.key.clone(), unavailable.clone());
+                            state = Some(unavailable);
+                        }
                     }
+                    state
                 }
             };
             if let Some(state) = state {
@@ -1899,9 +2080,26 @@ fn support_snapshot(
             queued: data.queue.len(),
         },
         usage: data.usage.clone(),
-        audit: SupportAuditV1::new(data.latest_outcome.clone()),
+        audit: SupportAuditV1::new(data.latest_outcome.clone(), data.fallback_tasks),
         last_error_code: data.last_error_code.clone(),
     }
+}
+
+fn durable_audit(data: &ControllerData) -> SupportDurableAuditV1 {
+    SupportDurableAuditV1 {
+        schema_version: 1,
+        policy_version: data.settings.version,
+        usage: data.usage.clone(),
+        fallback_tasks: data.fallback_tasks,
+        latest_outcome: data.latest_outcome.clone(),
+        last_error_code: data.last_error_code.clone(),
+        raw_transcript_persisted: false,
+        updated_at: now(),
+    }
+}
+
+fn bounded_add(counter: &mut u64, amount: u64) {
+    *counter = counter.saturating_add(amount).min(SUPPORT_MAX_SAFE_COUNTER);
 }
 
 fn record_blocked_outcome(
@@ -1909,7 +2107,8 @@ fn record_blocked_outcome(
     request: &CommitExplanationRequestedV1,
     reason_code: &str,
 ) {
-    data.usage.unavailable_tasks = data.usage.unavailable_tasks.saturating_add(1);
+    bounded_add(&mut data.usage.unavailable_tasks, 1);
+    bounded_add(&mut data.fallback_tasks, 1);
     data.latest_outcome = Some(SupportLatestOutcomeV1 {
         status: SupportOutcomeStatus::Unavailable,
         trigger: trigger_name(request.trigger).to_owned(),
@@ -1928,7 +2127,7 @@ fn record_success_outcome(
     result: &SupportExplainResult,
     trigger: CommitExplanationTrigger,
 ) {
-    data.usage.succeeded_tasks = data.usage.succeeded_tasks.saturating_add(1);
+    bounded_add(&mut data.usage.succeeded_tasks, 1);
     add_usage(data, result);
     data.latest_outcome = Some(SupportLatestOutcomeV1 {
         status: SupportOutcomeStatus::Generated,
@@ -1948,7 +2147,7 @@ fn record_invalid_result_outcome(
     result: &SupportExplainResult,
     trigger: CommitExplanationTrigger,
 ) {
-    data.usage.failed_tasks = data.usage.failed_tasks.saturating_add(1);
+    bounded_add(&mut data.usage.failed_tasks, 1);
     add_usage(data, result);
     data.latest_outcome = Some(SupportLatestOutcomeV1 {
         status: SupportOutcomeStatus::Failed,
@@ -1971,15 +2170,16 @@ fn record_runtime_error_outcome(
     let (controller_status, _) = error_state(error);
     let status = match controller_status {
         CommitExplanationControllerStatus::Canceled => {
-            data.usage.canceled_tasks = data.usage.canceled_tasks.saturating_add(1);
+            bounded_add(&mut data.usage.canceled_tasks, 1);
             SupportOutcomeStatus::Canceled
         }
         CommitExplanationControllerStatus::Unavailable => {
-            data.usage.unavailable_tasks = data.usage.unavailable_tasks.saturating_add(1);
+            bounded_add(&mut data.usage.unavailable_tasks, 1);
+            bounded_add(&mut data.fallback_tasks, 1);
             SupportOutcomeStatus::Unavailable
         }
         _ => {
-            data.usage.failed_tasks = data.usage.failed_tasks.saturating_add(1);
+            bounded_add(&mut data.usage.failed_tasks, 1);
             SupportOutcomeStatus::Failed
         }
     };
@@ -1997,22 +2197,21 @@ fn record_runtime_error_outcome(
 }
 
 fn add_usage(data: &mut ControllerData, result: &SupportExplainResult) {
-    data.usage.input_tokens = data
-        .usage
-        .input_tokens
-        .saturating_add(result.usage.input_tokens);
-    data.usage.output_tokens = data
-        .usage
-        .output_tokens
-        .saturating_add(result.usage.output_tokens);
+    let remaining = SUPPORT_MAX_SAFE_COUNTER.saturating_sub(data.usage.total_tokens);
+    let input = result.usage.input_tokens.min(remaining);
+    bounded_add(&mut data.usage.input_tokens, input);
+    let remaining = SUPPORT_MAX_SAFE_COUNTER.saturating_sub(
+        data.usage
+            .input_tokens
+            .saturating_add(data.usage.output_tokens),
+    );
+    let output = result.usage.output_tokens.min(remaining);
+    bounded_add(&mut data.usage.output_tokens, output);
     data.usage.total_tokens = data
         .usage
-        .total_tokens
-        .saturating_add(result.usage.total_tokens);
-    data.usage.total_latency_ms = data
-        .usage
-        .total_latency_ms
-        .saturating_add(result.latency_ms);
+        .input_tokens
+        .saturating_add(data.usage.output_tokens);
+    bounded_add(&mut data.usage.total_latency_ms, result.latency_ms);
 }
 
 fn trigger_name(trigger: CommitExplanationTrigger) -> &'static str {
@@ -2654,6 +2853,7 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let opened = SupportSettingsStore::open(&root);
+        let audit = SupportAuditStore::open(&root, Some(opened.settings.version));
         let executor = Arc::new(FakeExecutor::new(mode));
         let events = Arc::new(RecordingEvents::default());
         let controller = CommitExplanationController::with_control_dependencies(
@@ -2661,7 +2861,9 @@ mod tests {
             events.clone(),
             Arc::new(FixedReadinessProvider(readiness)),
             opened.store,
+            audit.store,
             opened.settings,
+            audit.state,
             opened.recovery_code,
             SUPPORT_MAX_QUEUE_CAPACITY,
             4,
@@ -2685,6 +2887,36 @@ mod tests {
             reason_code: None,
             checked_at: now(),
         }
+    }
+
+    fn approved_release_evidence() -> SupportReleaseIdentityEvidence {
+        SupportReleaseIdentityEvidence {
+            diagnostic: super::super::types::CodexDiagnostic {
+                health: CodexHealth::Ready,
+                ..super::super::types::CodexDiagnostic::default()
+            },
+            cli_version: Some(SUPPORTED_CLI_VERSION.to_owned()),
+            executable_sha256: Some(SUPPORTED_ARM64_BINARY_SHA256.to_owned()),
+            schema_fingerprint: Some(SUPPORTED_SCHEMA_FINGERPRINT.to_owned()),
+            generated_by_same_binary: true,
+        }
+    }
+
+    fn approved_release_skill() -> ResolvedBundledSkill {
+        ResolvedBundledSkill {
+            name: EXPLAIN_COMMIT_SKILL_NAME.to_owned(),
+            version: SUPPORTED_EXPLAIN_SKILL_VERSION.to_owned(),
+            content_digest: format!("sha256:{SUPPORTED_EXPLAIN_SKILL_SHA256}"),
+            path: PathBuf::from("verified-fixture/SKILL.md"),
+            verified_entrypoint: Arc::from(&b"verified fixture"[..]),
+        }
+    }
+
+    fn same_prefix_tail_mismatch(value: &str) -> String {
+        let mut bytes = value.as_bytes().to_vec();
+        let last = bytes.last_mut().expect("nonempty identity");
+        *last = if *last == b'0' { b'1' } else { b'0' };
+        String::from_utf8(bytes).expect("ascii identity")
     }
 
     fn get_support_request() -> SupportSettingsGetRequestV1 {
@@ -3363,6 +3595,14 @@ mod tests {
         assert_eq!(measured.usage.output_tokens, 5);
         assert_eq!(measured.usage.total_tokens, 15);
         assert_eq!(measured.usage.total_latency_ms, 12);
+        let restarted_audit = SupportAuditStore::open(&root, Some(1));
+        assert!(restarted_audit.recovery_code.is_none());
+        assert_eq!(restarted_audit.state.usage, measured.usage);
+        assert_eq!(
+            restarted_audit.state.latest_outcome,
+            measured.audit.latest_outcome
+        );
+        assert_eq!(restarted_audit.state.fallback_tasks, 0);
         assert_eq!(
             measured
                 .audit
@@ -3464,6 +3704,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disable_cleanup_failure_keeps_persisted_off_snapshot_and_new_version() {
+        let (controller, executor, _, root) = policy_harness(FakeMode::Never, approved_readiness());
+        let request = dispatch('c', "request-disable-never-converges", 1);
+        controller.request(request.clone()).await.expect("queued");
+        wait_for_status(
+            &controller,
+            &request,
+            CommitExplanationControllerStatus::Running,
+        )
+        .await;
+
+        let error = controller
+            .update_support_settings(update_support_request(1, false, false))
+            .await
+            .expect_err("disable must report incomplete cleanup");
+        assert_eq!(error.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
+        let snapshot = controller
+            .support_snapshot(get_support_request())
+            .await
+            .expect("authoritative off snapshot");
+        assert_eq!(snapshot.settings.version, 2);
+        assert!(!snapshot.settings.global_enabled);
+        assert!(!snapshot.settings.commit_explainer_enabled);
+        assert!(!snapshot.effective_enabled);
+        assert_eq!(
+            snapshot.last_error_code.as_deref(),
+            Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
+        );
+        assert_eq!(snapshot.usage.succeeded_tasks, 0);
+        assert_eq!(executor.calls.load(Ordering::Acquire), 1);
+
+        let persisted = SupportSettingsStore::open(&root);
+        assert_eq!(persisted.settings.version, 2);
+        assert!(!persisted.settings.global_enabled);
+        assert!(!persisted.settings.commit_explainer_enabled);
+        let audit = SupportAuditStore::open(&root, Some(2));
+        assert!(audit.recovery_code.is_none());
+        assert_eq!(
+            audit.state.last_error_code.as_deref(),
+            Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
+        );
+
+        let retry = controller
+            .update_support_settings(update_support_request(2, false, false))
+            .await
+            .expect_err("retry reaches cleanup rather than version conflict");
+        assert_eq!(retry.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
+        assert_ne!(retry.code, "CODEX-SUPPORT-SETTINGS-CONFLICT");
+        assert_eq!(SupportSettingsStore::open(&root).settings.version, 3);
+
+        let reenable = controller
+            .update_support_settings(update_support_request(3, true, true))
+            .await
+            .expect_err("unconverged worker cannot be re-enabled");
+        assert_eq!(reenable.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
+        assert_eq!(SupportSettingsStore::open(&root).settings.version, 3);
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[tokio::test]
     async fn disable_wins_the_admission_race_and_never_starts_a_late_job() {
         let (controller, executor, _, root) =
             policy_harness(FakeMode::Immediate, approved_readiness());
@@ -3530,6 +3830,84 @@ mod tests {
             snapshot.fallback_reason_code.as_deref(),
             Some("CODEX-SUPPORT-RELEASE-UNSUPPORTED")
         );
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn release_admission_uses_full_exact_identities_not_display_prefixes() {
+        let evidence = approved_release_evidence();
+        let skill = approved_release_skill();
+        assert_eq!(
+            evaluate_support_readiness(&evidence, Some(&skill)).status,
+            SupportReadinessStatus::Approved
+        );
+
+        let mut binary_tail = evidence.clone();
+        binary_tail.executable_sha256 = Some(same_prefix_tail_mismatch(
+            binary_tail
+                .executable_sha256
+                .as_deref()
+                .expect("binary identity"),
+        ));
+        let binary_blocked = evaluate_support_readiness(&binary_tail, Some(&skill));
+        assert_eq!(binary_blocked.status, SupportReadinessStatus::Blocked);
+        assert_eq!(
+            binary_blocked.reason_code.as_deref(),
+            Some("CODEX-SUPPORT-RELEASE-UNSUPPORTED")
+        );
+        assert_eq!(
+            binary_blocked.observed_binary_hash_prefix,
+            Some(prefix16(SUPPORTED_ARM64_BINARY_SHA256))
+        );
+
+        let mut schema_tail = evidence.clone();
+        schema_tail.schema_fingerprint = Some(same_prefix_tail_mismatch(
+            schema_tail
+                .schema_fingerprint
+                .as_deref()
+                .expect("schema identity"),
+        ));
+        let schema_blocked = evaluate_support_readiness(&schema_tail, Some(&skill));
+        assert_eq!(schema_blocked.status, SupportReadinessStatus::Blocked);
+        assert_eq!(
+            schema_blocked.reason_code.as_deref(),
+            Some("CODEX-SUPPORT-SCHEMA-UNVERIFIED")
+        );
+        assert_eq!(
+            schema_blocked.observed_schema_fingerprint_prefix,
+            Some(prefix16(SUPPORTED_SCHEMA_FINGERPRINT))
+        );
+
+        let mut skill_tail = skill.clone();
+        skill_tail.content_digest = format!(
+            "sha256:{}",
+            same_prefix_tail_mismatch(SUPPORTED_EXPLAIN_SKILL_SHA256)
+        );
+        let skill_blocked = evaluate_support_readiness(&evidence, Some(&skill_tail));
+        assert_eq!(skill_blocked.status, SupportReadinessStatus::Blocked);
+        assert_eq!(
+            skill_blocked.reason_code.as_deref(),
+            Some("CODEX-SUPPORT-SKILL-INVALID")
+        );
+        assert_eq!(
+            skill_blocked.skill_digest_prefix,
+            Some(prefix16(SUPPORTED_EXPLAIN_SKILL_SHA256))
+        );
+
+        let (controller, executor, _, root) = policy_harness(FakeMode::Immediate, binary_blocked);
+        let state = controller
+            .request(dispatch('f', "request-full-identity-tail", 1))
+            .await
+            .expect("deterministic fallback");
+        assert_eq!(state.status, CommitExplanationControllerStatus::Unavailable);
+        let snapshot = controller
+            .support_snapshot(get_support_request())
+            .await
+            .expect("blocked snapshot");
+        assert_eq!(executor.calls.load(Ordering::Acquire), 0);
+        assert_eq!(snapshot.usage.started_tasks, 0);
+        assert_eq!(snapshot.usage.succeeded_tasks, 0);
+        assert_eq!(snapshot.audit.fallback_tasks, 1);
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 

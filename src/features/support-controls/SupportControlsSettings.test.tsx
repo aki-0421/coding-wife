@@ -124,4 +124,49 @@ describe("SupportControlsSettings", () => {
       await screen.findByRole("switch", { name: "Enable isolated support" }),
     ).toBeVisible()
   })
+
+  it("shows the persisted off state and new version when disable cleanup fails", async () => {
+    const user = userEvent.setup()
+    const demo = new DemoSupportControlsGateway()
+    let failAfterPersist = true
+    const gateway: SupportControlsGateway = {
+      kind: "demo",
+      get: () => demo.get(),
+      update: async (request) => {
+        const snapshot = await demo.update(request)
+        if (failAfterPersist) {
+          failAfterPersist = false
+          throw new SupportControlsBoundaryError({
+            code: "CODEX-SUPPORT-DISABLE-INCOMPLETE",
+            operation: "support_settings_update",
+            recoverable: true,
+            userMessageKey: "support.error.generic",
+          })
+        }
+        return snapshot
+      },
+    }
+    render(
+      <I18nProvider store={new MemoryLocaleStore("en")}>
+        <SupportControlsSettings gateway={gateway} gatewayKind="demo" />
+      </I18nProvider>,
+    )
+    const global = await screen.findByRole("switch", {
+      name: "Enable isolated support",
+    })
+    await user.click(global)
+
+    expect(
+      await screen.findByText("Support settings were not updated"),
+    ).toBeVisible()
+    expect(screen.getByText("CODEX-SUPPORT-DISABLE-INCOMPLETE")).toBeVisible()
+    expect(global).not.toBeChecked()
+    expect(screen.getAllByText("Disabled globally").length).toBeGreaterThan(0)
+    expect(screen.getByRole("status")).toHaveTextContent("Demo memory · v2")
+
+    await user.click(screen.getByRole("switch", { name: "Commit explainer" }))
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Demo memory · v3"),
+    )
+  })
 })

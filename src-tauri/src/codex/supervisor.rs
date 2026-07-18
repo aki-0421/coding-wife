@@ -123,6 +123,15 @@ struct SupervisorInner {
     dynamic_tools: DynamicToolRegistry,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct SupportReleaseIdentityEvidence {
+    pub diagnostic: CodexDiagnostic,
+    pub cli_version: Option<String>,
+    pub executable_sha256: Option<String>,
+    pub schema_fingerprint: Option<String>,
+    pub generated_by_same_binary: bool,
+}
+
 #[derive(Clone)]
 pub struct CodexSupervisor {
     inner: Arc<SupervisorInner>,
@@ -458,6 +467,29 @@ impl CodexSupervisor {
 
     pub async fn diagnostic(&self) -> CodexDiagnostic {
         self.inner.state.lock().await.diagnostic.clone()
+    }
+
+    pub(crate) async fn support_release_identity_evidence(&self) -> SupportReleaseIdentityEvidence {
+        let state = self.inner.state.lock().await;
+        SupportReleaseIdentityEvidence {
+            diagnostic: state.diagnostic.clone(),
+            cli_version: state
+                .binary
+                .as_ref()
+                .map(|binary| binary.cli_version.clone()),
+            executable_sha256: state
+                .binary
+                .as_ref()
+                .map(|binary| binary.executable_sha256.clone()),
+            schema_fingerprint: state
+                .schema
+                .as_ref()
+                .map(|schema| schema.fingerprint.clone()),
+            generated_by_same_binary: state
+                .schema
+                .as_ref()
+                .is_some_and(|schema| schema.generated_by_same_binary),
+        }
     }
 
     /// Re-observes the configured Codex executable and protocol without touching

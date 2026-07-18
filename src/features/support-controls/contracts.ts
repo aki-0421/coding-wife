@@ -83,6 +83,7 @@ export interface SupportAuditV1 {
   readonly rawTranscriptPersisted: false
   readonly taskTimeoutMs: 15_000
   readonly tokenBudget: 16_000
+  readonly fallbackTasks: number
   readonly latestOutcome: SupportLatestOutcomeV1 | null
 }
 
@@ -371,6 +372,7 @@ function parseAudit(value: unknown): SupportAuditV1 {
       "rawTranscriptPersisted",
       "taskTimeoutMs",
       "tokenBudget",
+      "fallbackTasks",
       "latestOutcome",
     ]) ||
     value.role !== "commit_explainer" ||
@@ -379,7 +381,8 @@ function parseAudit(value: unknown): SupportAuditV1 {
     value.permissionProfile !== "coding-wife-support-zero" ||
     value.rawTranscriptPersisted !== false ||
     value.taskTimeoutMs !== 15_000 ||
-    value.tokenBudget !== 16_000
+    value.tokenBudget !== 16_000 ||
+    !isSafeInteger(value.fallbackTasks)
   ) {
     return contractError()
   }
@@ -391,6 +394,7 @@ function parseAudit(value: unknown): SupportAuditV1 {
     rawTranscriptPersisted: false,
     taskTimeoutMs: 15_000,
     tokenBudget: 16_000,
+    fallbackTasks: value.fallbackTasks,
     latestOutcome:
       value.latestOutcome === null
         ? null
@@ -471,6 +475,8 @@ export function parseSupportControlSnapshot(
   }
   const settings = parseSettings(value.settings)
   const readiness = parseReadiness(value.readiness)
+  const usage = parseUsage(value.usage)
+  const audit = parseAudit(value.audit)
   if (
     !validEffectiveState(
       settings,
@@ -479,7 +485,8 @@ export function parseSupportControlSnapshot(
       value.effectiveState,
       value.effectiveEnabled,
       value.fallbackReasonCode,
-    )
+    ) ||
+    audit.fallbackTasks > usage.unavailableTasks
   ) {
     return contractError()
   }
@@ -493,8 +500,8 @@ export function parseSupportControlSnapshot(
     effectiveEnabled: value.effectiveEnabled,
     fallbackReasonCode: value.fallbackReasonCode,
     capacity: parseCapacity(value.capacity),
-    usage: parseUsage(value.usage),
-    audit: parseAudit(value.audit),
+    usage,
+    audit,
     lastErrorCode: value.lastErrorCode,
   }
 }

@@ -59,6 +59,7 @@ export const approvedSupportSnapshotFixture = {
     rawTranscriptPersisted: false,
     taskTimeoutMs: 15_000,
     tokenBudget: 16_000,
+    fallbackTasks: 1,
     latestOutcome: {
       status: "generated",
       trigger: "auto_verified_commit",
@@ -129,6 +130,13 @@ describe("SupportControlSnapshotV1 contracts", () => {
         audit: {
           ...approvedSupportSnapshotFixture.audit,
           prompt: "raw support input",
+        },
+      },
+      {
+        ...approvedSupportSnapshotFixture,
+        audit: {
+          ...approvedSupportSnapshotFixture.audit,
+          fallbackTasks: 2,
         },
       },
     ]) {

@@ -38,13 +38,16 @@ export class SupportControlsController {
   }
   #initialize: Promise<boolean> | null = null
   #operation: Promise<void> = Promise.resolve()
-  #disposed = false
+  #generation = 0
+  #active = true
+  #retired = false
 
   public constructor(gateway: SupportControlsGateway) {
     this.#gateway = gateway
   }
 
   public readonly subscribe = (listener: Listener): (() => void) => {
+    if (this.#retired) return () => undefined
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)
   }
@@ -52,15 +55,35 @@ export class SupportControlsController {
   public readonly getSnapshot = (): SupportControlsControllerState =>
     this.#state
 
+  public activate(): number {
+    if (this.#retired) return this.#generation
+    this.#active = true
+    this.#generation += 1
+    this.#initialize = null
+    this.#operation = Promise.resolve()
+    return this.#generation
+  }
+
+  public deactivate(lease: number): void {
+    if (lease !== this.#generation) return
+    this.#active = false
+    this.#generation += 1
+    this.#initialize = null
+    this.#operation = Promise.resolve()
+    this.#listeners.clear()
+  }
+
   public initialize(): Promise<boolean> {
     if (this.#initialize !== null) return this.#initialize
+    const generation = this.#generation
+    if (!this.isCurrent(generation)) return Promise.resolve(false)
     const load = this.#gateway.get().then(
       (snapshot) => {
-        if (this.#disposed) return false
+        if (!this.isCurrent(generation)) return false
         this.publish({ status: "ready", snapshot, errorCode: null })
         return true
       },
-      (error: unknown) => this.fail(error),
+      (error: unknown) => this.fail(error, generation),
     )
     this.#initialize = load
     void load.finally(() => {
@@ -70,7 +93,8 @@ export class SupportControlsController {
   }
 
   public refresh(): Promise<boolean> {
-    if (this.#disposed || this.#state.status === "saving") {
+    const generation = this.#generation
+    if (!this.isCurrent(generation) || this.#state.status === "saving") {
       return Promise.resolve(false)
     }
     this.#initialize = null
@@ -79,13 +103,15 @@ export class SupportControlsController {
   }
 
   public update(patch: SupportControlsPatch): Promise<boolean> {
-    if (this.#disposed) return Promise.resolve(false)
+    const generation = this.#generation
+    if (!this.isCurrent(generation)) return Promise.resolve(false)
     const run = this.#operation.then(async () => {
+      if (!this.isCurrent(generation)) return false
       if (this.#state.snapshot === null && !(await this.initialize())) {
         return false
       }
       const current = this.#state.snapshot
-      if (current === null || this.#disposed) return false
+      if (current === null || !this.isCurrent(generation)) return false
       const globalEnabled =
         patch.globalEnabled ?? current.settings.globalEnabled
       const commitExplainerEnabled =
@@ -104,11 +130,21 @@ export class SupportControlsController {
           globalEnabled,
           commitExplainerEnabled,
         })
-        if (this.#disposed) return false
+        if (!this.isCurrent(generation)) return false
         this.publish({ status: "ready", snapshot, errorCode: null })
         return true
       } catch (error) {
-        return this.fail(error)
+        if (!this.isCurrent(generation)) return false
+        const updateErrorCode = errorCode(error)
+        let snapshot = this.#state.snapshot
+        try {
+          snapshot = await this.#gateway.get()
+        } catch {
+          // Preserve the authoritative update error when a recovery read also fails.
+        }
+        if (!this.isCurrent(generation)) return false
+        this.publish({ status: "error", snapshot, errorCode: updateErrorCode })
+        return false
       }
     })
     this.#operation = run.then(
@@ -119,12 +155,16 @@ export class SupportControlsController {
   }
 
   public dispose(): void {
-    this.#disposed = true
+    this.#retired = true
+    this.#active = false
+    this.#generation += 1
+    this.#initialize = null
+    this.#operation = Promise.resolve()
     this.#listeners.clear()
   }
 
-  private fail(error: unknown): false {
-    if (!this.#disposed) {
+  private fail(error: unknown, generation: number): false {
+    if (this.isCurrent(generation)) {
       this.publish({
         ...this.#state,
         status: "error",
@@ -132,6 +172,10 @@ export class SupportControlsController {
       })
     }
     return false
+  }
+
+  private isCurrent(generation: number): boolean {
+    return this.#active && !this.#retired && generation === this.#generation
   }
 
   private publish(state: SupportControlsControllerState): void {
