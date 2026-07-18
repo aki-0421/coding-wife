@@ -1450,97 +1450,158 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn broken_active_pack_is_quarantined_and_selection_falls_back_after_restart() {
+    async fn unavailable_trusted_frame_keeps_pack_attestation_selection_and_runtime_assets() {
         use std::os::unix::fs::PermissionsExt;
 
-        let app_data = TestDirectory::new();
-        let storage = CharacterStorage::open(app_data.path()).expect("character storage");
-        let workspace_id = "workspace-broken".to_owned();
-        let service = CharacterService::new(
-            storage.clone(),
-            resolve_builtin_directory(Path::new("/missing")),
-            Arc::new(FixedPicker(Some(reviewed_hiyori_source()))),
-        );
-        let preview = service
-            .pick_import(CharacterLibraryRequest {
-                workspace_id: workspace_id.clone(),
-            })
-            .await
-            .expect("import pick")
-            .preview
-            .expect("preview session");
-        let renderer_nonce = uuid::Uuid::new_v4().to_string();
-        service
-            .attest_preview(attestation(&preview, &renderer_nonce))
-            .await
-            .expect("attestation");
-        service
-            .confirm_import(CharacterConfirmImportRequest {
-                workspace_id: workspace_id.clone(),
-                preview_token: preview.preview_token,
-                preview_nonce: preview.preview_nonce,
-                renderer_nonce,
-                generation: preview.generation,
-                manifest_hash: preview.manifest_hash,
-                display_name: "Broken after restart".to_owned(),
-            })
-            .await
-            .expect("publish");
-        service
-            .select_pack(CharacterSelectRequest {
-                workspace_id: workspace_id.clone(),
-                pack_id: preview.pack_id.clone(),
-            })
-            .await
-            .expect("active custom selection");
+        for remove_frame in [false, true] {
+            let app_data = TestDirectory::new();
+            let storage = CharacterStorage::open(app_data.path()).expect("character storage");
+            let workspace_id = format!(
+                "workspace-frame-{}",
+                if remove_frame { "missing" } else { "tampered" }
+            );
+            let service = CharacterService::new(
+                storage.clone(),
+                resolve_builtin_directory(Path::new("/missing")),
+                Arc::new(FixedPicker(Some(reviewed_hiyori_source()))),
+            );
+            let preview = service
+                .pick_import(CharacterLibraryRequest {
+                    workspace_id: workspace_id.clone(),
+                })
+                .await
+                .expect("import pick")
+                .preview
+                .expect("preview session");
+            let renderer_nonce = uuid::Uuid::new_v4().to_string();
+            service
+                .attest_preview(attestation(&preview, &renderer_nonce))
+                .await
+                .expect("attestation");
+            service
+                .confirm_import(CharacterConfirmImportRequest {
+                    workspace_id: workspace_id.clone(),
+                    preview_token: preview.preview_token,
+                    preview_nonce: preview.preview_nonce,
+                    renderer_nonce,
+                    generation: preview.generation,
+                    manifest_hash: preview.manifest_hash,
+                    display_name: "Frame unavailable after restart".to_owned(),
+                })
+                .await
+                .expect("publish");
+            service
+                .select_pack(CharacterSelectRequest {
+                    workspace_id: workspace_id.clone(),
+                    pack_id: preview.pack_id.clone(),
+                })
+                .await
+                .expect("active custom selection");
 
-        let pack_directory = app_data
-            .path()
-            .join("characters/library")
-            .join(preview.pack_id.strip_prefix("custom:").expect("custom id"));
-        let trusted_frame_path =
-            pack_directory.join(super::super::manifest::CHARACTER_TRUSTED_FRAME_ASSET_ID);
-        fs::set_permissions(&trusted_frame_path, fs::Permissions::from_mode(0o600))
-            .expect("allow test corruption");
-        let mut bytes = fs::read(&trusted_frame_path).expect("published trusted frame");
-        let last = bytes.last_mut().expect("trusted frame contents");
-        *last ^= 0xff;
-        fs::write(&trusted_frame_path, bytes).expect("corrupt published trusted frame");
+            let pack_directory = app_data
+                .path()
+                .join("characters/library")
+                .join(preview.pack_id.strip_prefix("custom:").expect("custom id"));
+            let trusted_frame_path =
+                pack_directory.join(super::super::manifest::CHARACTER_TRUSTED_FRAME_ASSET_ID);
+            if remove_frame {
+                fs::remove_file(&trusted_frame_path).expect("remove published trusted frame");
+            } else {
+                fs::set_permissions(&trusted_frame_path, fs::Permissions::from_mode(0o600))
+                    .expect("allow test corruption");
+                let mut bytes = fs::read(&trusted_frame_path).expect("published trusted frame");
+                let last = bytes.last_mut().expect("trusted frame contents");
+                *last ^= 0xff;
+                fs::write(&trusted_frame_path, bytes).expect("corrupt published trusted frame");
+            }
 
-        let restarted = CharacterService::new(
-            storage,
-            resolve_builtin_directory(Path::new("/missing")),
-            Arc::new(FixedPicker(None)),
-        );
-        let fallback = restarted
-            .library(CharacterLibraryRequest {
-                workspace_id: workspace_id.clone(),
-            })
-            .await
-            .expect("fallback library");
-        assert!(fallback.fallback_applied);
-        assert_eq!(fallback.selected_pack_id, BUILTIN_HIYORI_PACK_ID);
-        assert_eq!(fallback.packs.len(), 1);
-        assert!(fallback
-            .diagnostics
-            .iter()
-            .any(|code| code == "CHARACTER-PACK-QUARANTINED"));
-        assert!(fallback
-            .diagnostics
-            .iter()
-            .any(|code| code == "CHARACTER-SELECTION-FALLBACK"));
-        assert_eq!(
-            fs::read_dir(app_data.path().join("characters/broken"))
-                .expect("broken quarantine")
-                .count(),
-            1
-        );
+            let restarted = CharacterService::new(
+                storage,
+                resolve_builtin_directory(Path::new("/missing")),
+                Arc::new(FixedPicker(None)),
+            );
+            let retained = restarted
+                .library(CharacterLibraryRequest {
+                    workspace_id: workspace_id.clone(),
+                })
+                .await
+                .expect("retained library");
+            assert!(!retained.fallback_applied);
+            assert_eq!(retained.selected_pack_id, preview.pack_id);
+            assert_eq!(retained.packs.len(), 2);
+            assert!(retained
+                .diagnostics
+                .iter()
+                .any(|code| code == "CHARACTER-TRUSTED-FRAME-UNAVAILABLE"));
+            assert!(!retained
+                .diagnostics
+                .iter()
+                .any(|code| code == "CHARACTER-PACK-QUARANTINED"));
+            assert_eq!(
+                fs::read_dir(app_data.path().join("characters/broken"))
+                    .expect("broken quarantine")
+                    .count(),
+                0
+            );
 
-        let persisted = restarted
-            .library(CharacterLibraryRequest { workspace_id })
-            .await
-            .expect("persisted fallback");
-        assert!(!persisted.fallback_applied);
-        assert_eq!(persisted.selected_pack_id, BUILTIN_HIYORI_PACK_ID);
+            let custom = retained
+                .packs
+                .iter()
+                .find(|pack| pack.pack_id == preview.pack_id)
+                .expect("retained custom metadata");
+            let manifest = custom.manifest.as_ref().expect("custom manifest");
+            let trusted_frame = manifest.trusted_frame.as_ref().expect("attested frame");
+            assert_eq!(
+                custom.thumbnail_sha256.as_deref(),
+                Some(trusted_frame.sha256.as_str())
+            );
+            assert_eq!(custom.selected_workspace_count, 1);
+            let frame_error = restarted
+                .read_asset(
+                    "main",
+                    CharacterAssetRequest {
+                        pack_id: custom.pack_id.clone(),
+                        asset_id: trusted_frame.asset_id.clone(),
+                        manifest_hash: custom.manifest_hash.clone(),
+                        expected_mime: "image/png".to_owned(),
+                        preview_token: None,
+                    },
+                )
+                .await
+                .expect_err("unavailable frame must fail closed");
+            assert_eq!(
+                frame_error.code,
+                if remove_frame {
+                    "CHARACTER-ASSET-OPEN"
+                } else {
+                    "CHARACTER-ASSET-HASH-MISMATCH"
+                }
+            );
+
+            let entrypoint = manifest
+                .asset(&manifest.entrypoint)
+                .expect("runtime entrypoint");
+            let runtime_bytes = restarted
+                .read_asset(
+                    "main",
+                    CharacterAssetRequest {
+                        pack_id: custom.pack_id.clone(),
+                        asset_id: entrypoint.asset_id.clone(),
+                        manifest_hash: custom.manifest_hash.clone(),
+                        expected_mime: entrypoint.role.mime().to_owned(),
+                        preview_token: None,
+                    },
+                )
+                .await
+                .expect("runtime asset remains readable");
+            assert_eq!(runtime_bytes.len() as u64, entrypoint.bytes);
+
+            let persisted = restarted
+                .library(CharacterLibraryRequest { workspace_id })
+                .await
+                .expect("persisted selection");
+            assert!(!persisted.fallback_applied);
+            assert_eq!(persisted.selected_pack_id, preview.pack_id);
+        }
     }
 }

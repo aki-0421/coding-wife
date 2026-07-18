@@ -322,7 +322,15 @@ impl CharacterStorage {
                 continue;
             }
             match self.load_pack_directory(&directory) {
-                Ok(pack) => packs.push(pack),
+                Ok(pack) => {
+                    if self
+                        .verify_trusted_frame(&directory, &pack.manifest, "character_library_get")
+                        .is_err()
+                    {
+                        diagnostics.push("CHARACTER-TRUSTED-FRAME-UNAVAILABLE".to_owned());
+                    }
+                    packs.push(pack);
+                }
                 Err(_) => {
                     diagnostics.push("CHARACTER-PACK-QUARANTINED".to_owned());
                     let _ = self.quarantine_broken(&directory);
@@ -431,7 +439,7 @@ impl CharacterStorage {
                 false,
             ));
         }
-        self.verify_manifest_assets(directory, &manifest, "character_library_get")?;
+        self.verify_runtime_assets(directory, &manifest, "character_library_get")?;
         Ok(StoredPack {
             manifest_hash: manifest.sha256()?,
             manifest,
@@ -445,10 +453,29 @@ impl CharacterStorage {
         manifest: &CharacterPackManifest,
         operation: &str,
     ) -> CharacterResult<()> {
+        self.verify_runtime_assets(directory, manifest, operation)?;
+        self.verify_trusted_frame(directory, manifest, operation)
+    }
+
+    fn verify_runtime_assets(
+        &self,
+        directory: &Path,
+        manifest: &CharacterPackManifest,
+        operation: &str,
+    ) -> CharacterResult<()> {
         for asset in &manifest.files {
             let path = checked_asset_path(directory, &asset.asset_id)?;
             verify_file(&path, asset.bytes, &asset.sha256, operation)?;
         }
+        Ok(())
+    }
+
+    fn verify_trusted_frame(
+        &self,
+        directory: &Path,
+        manifest: &CharacterPackManifest,
+        operation: &str,
+    ) -> CharacterResult<()> {
         if let Some(frame) = &manifest.trusted_frame {
             let path = checked_asset_path(directory, &frame.asset_id)?;
             verify_file(&path, frame.bytes, &frame.sha256, operation)?;
