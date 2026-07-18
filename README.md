@@ -255,6 +255,8 @@ git status --short
 
 Both `git status --short` commands must print nothing. `pnpm quality:check` refuses a dirty worktree and verifies formatting, the offline locked-dependency license inventory, clean-checkout reproducibility, frontend and Rust quality, documentation, the Tauri bundle, and diff hygiene in a fixed sequence. Individual commands in the testing guide are focused, partial validation only; they do not replace this canonical gate or the pending fresh-profile/second-Mac install smoke.
 
+For a focused diff-hygiene diagnosis, run `pnpm check:diff`; it is only one component of the canonical quality gate above.
+
 See [Testing Coding Wife](docs/testing.md) for command behavior, focused packaging tests, installation, and safe Gatekeeper guidance.
 
 ## Build the macOS artifact
