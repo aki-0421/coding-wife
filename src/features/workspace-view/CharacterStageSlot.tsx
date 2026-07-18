@@ -136,6 +136,7 @@ export function CharacterStageSlot({
         <div className="absolute inset-x-xl bottom-20 z-20 max-[700px]:inset-x-md">
           <CommitNarrationCaption
             onCancel={() => void narrationController.cancelPresentation()}
+            onVisible={narrationController.acknowledgeCaptionVisible}
             presentation={presentation}
           />
         </div>

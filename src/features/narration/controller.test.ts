@@ -4,6 +4,7 @@ import {
   narrationSchemaVersion,
   sourceKeyFromCommitNarrationEvent,
   type CommitNarrationConsumerEventV1,
+  type CommitNarrationSourceKey,
   type NarrationCancelReason,
   type NarrationMuteRequestV1,
   type NarrationRuntimeSnapshotV1,
@@ -201,6 +202,23 @@ function prepare(
   return sourceKeyFromCommitNarrationEvent(started)
 }
 
+function acknowledge(
+  controller: NarrationController,
+  key: CommitNarrationSourceKey,
+  sequence: number,
+): boolean {
+  const presentationGeneration =
+    controller.getSnapshot().presentation?.presentationGeneration
+  if (presentationGeneration === undefined) {
+    throw new Error("presentation is not active")
+  }
+  return controller.acknowledgeCaptionVisible({
+    key,
+    presentationGeneration,
+    sequence,
+  })
+}
+
 describe("NarrationController", () => {
   it("buffers automatic generation without exposing caption or speech", async () => {
     const { controller, gateway } = await ready(true)
@@ -212,7 +230,14 @@ describe("NarrationController", () => {
   })
 
   it("publishes accepted chunks before optional speech and replays in exact order", async () => {
-    const { controller, gateway } = await ready(true)
+    const leads: Array<() => void> = []
+    const pauseDurations: number[] = []
+    const gateway = new FakeNarrationGateway(true)
+    const controller = new NarrationController(gateway, (milliseconds) => {
+      pauseDurations.push(milliseconds)
+      return new Promise<void>((resolve) => leads.push(resolve))
+    })
+    await controller.initialize()
     const key = prepare(controller)
     controller.consume(event("terminal"))
     const order: string[] = []
@@ -227,6 +252,34 @@ describe("NarrationController", () => {
       status: "ready",
       chunks: ["最初の説明です。", "次の説明です。"],
     })
+    expect(gateway.speech).toHaveLength(0)
+    expect(acknowledge(controller, key, 1)).toBe(true)
+    expect(acknowledge(controller, key, 1)).toBe(false)
+    expect(
+      controller.acknowledgeCaptionVisible({
+        key: { ...key, requestId: "other-request" },
+        presentationGeneration:
+          controller.getSnapshot().presentation?.presentationGeneration ?? 0,
+        sequence: 0,
+      }),
+    ).toBe(false)
+    expect(
+      controller.acknowledgeCaptionVisible({
+        key,
+        presentationGeneration:
+          (controller.getSnapshot().presentation?.presentationGeneration ?? 0) +
+          1,
+        sequence: 0,
+      }),
+    ).toBe(false)
+    expect(acknowledge(controller, key, 2)).toBe(false)
+    expect(acknowledge(controller, key, 0)).toBe(true)
+    expect(pauseDurations).toEqual([100, 100])
+
+    leads[0]?.()
+    await Promise.resolve()
+    expect(gateway.speech).toHaveLength(0)
+    leads[1]?.()
     await vi.waitFor(() => expect(gateway.speech).toHaveLength(2))
     expect(
       gateway.speech.map(({ sequence, text }) => ({ sequence, text })),
@@ -237,10 +290,35 @@ describe("NarrationController", () => {
     expect(order.indexOf("caption:2")).toBeLessThan(order.indexOf("speech"))
   })
 
+  it("never revives speech from a late acknowledgment after timeout", async () => {
+    vi.useFakeTimers()
+    try {
+      const gateway = new FakeNarrationGateway(true)
+      const controller = new NarrationController(gateway)
+      await controller.initialize()
+      const key = prepare(controller, ["説明です。"])
+      await controller.activatePresentation(key)
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(controller.getSnapshot().presentation).toMatchObject({
+        chunks: ["説明です。"],
+        speechStatus: "unavailable",
+        errorCode: "NARRATION-CAPTION-NOT-VISIBLE",
+      })
+      expect(acknowledge(controller, key, 0)).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(gateway.speech).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("streams later chunks only after explicit activation", async () => {
     const { controller, gateway } = await ready(true)
     const key = prepare(controller, ["受理済みです。"])
     await controller.activatePresentation(key)
+    expect(acknowledge(controller, key, 0)).toBe(true)
     await vi.waitFor(() => expect(gateway.speech).toHaveLength(1))
 
     expect(
@@ -252,6 +330,7 @@ describe("NarrationController", () => {
       "受理済みです。",
       "後から届いた説明です。",
     ])
+    expect(acknowledge(controller, key, 1)).toBe(true)
     await vi.waitFor(() => expect(gateway.speech).toHaveLength(2))
   })
 
@@ -271,6 +350,7 @@ describe("NarrationController", () => {
     const { controller, gateway } = await ready(true)
     const key = prepare(controller, ["最初の説明です。"])
     await controller.activatePresentation(key)
+    expect(acknowledge(controller, key, 0)).toBe(true)
     await vi.waitFor(() => expect(gateway.speech).toHaveLength(1))
     await controller.setMuted(true)
 
@@ -283,6 +363,7 @@ describe("NarrationController", () => {
     expect(gateway.speech).toHaveLength(1)
 
     controller.consume(event("chunk", { sequence: 2, text: "解除後です。" }))
+    expect(acknowledge(controller, key, 2)).toBe(true)
     await vi.waitFor(() => expect(gateway.speech).toHaveLength(2))
     expect(gateway.speech.at(-1)?.text).toBe("解除後です。")
     expect(gateway.cancelReasons).toContain("mute")
@@ -300,6 +381,7 @@ describe("NarrationController", () => {
     })
 
     await controller.activatePresentation(key)
+    expect(acknowledge(controller, key, 0)).toBe(true)
 
     await vi.waitFor(() =>
       expect(controller.getSnapshot().presentation).toMatchObject({
@@ -327,6 +409,7 @@ describe("NarrationController", () => {
     }
 
     await controller.activatePresentation(key)
+    expect(acknowledge(controller, key, 0)).toBe(true)
 
     await vi.waitFor(() =>
       expect(controller.getSnapshot().presentation).toMatchObject({

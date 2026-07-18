@@ -1,6 +1,6 @@
-import { render, screen, within } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   I18nProvider,
@@ -14,6 +14,28 @@ const jaStore: LocalePreferenceStore = {
   read: () => "ja",
   write: () => true,
 }
+
+function installAnimationFrames() {
+  let nextId = 0
+  const callbacks = new Map<number, FrameRequestCallback>()
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    const id = ++nextId
+    callbacks.set(id, callback)
+    return id
+  })
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+    callbacks.delete(id)
+  })
+  return {
+    flush() {
+      const pending = [...callbacks.values()]
+      callbacks.clear()
+      for (const callback of pending) callback(performance.now())
+    },
+  }
+}
+
+afterEach(() => vi.unstubAllGlobals())
 
 function presentation(
   overrides: Partial<CommitNarrationPresentationSnapshot> = {},
@@ -40,13 +62,18 @@ function presentation(
 function renderCaption(
   value: CommitNarrationPresentationSnapshot,
   onCancel = vi.fn(),
+  onVisible = vi.fn(),
 ) {
   render(
     <I18nProvider store={jaStore}>
-      <CommitNarrationCaption onCancel={onCancel} presentation={value} />
+      <CommitNarrationCaption
+        onCancel={onCancel}
+        onVisible={onVisible}
+        presentation={value}
+      />
     </I18nProvider>,
   )
-  return onCancel
+  return { onCancel, onVisible }
 }
 
 describe("CommitNarrationCaption", () => {
@@ -66,10 +93,47 @@ describe("CommitNarrationCaption", () => {
 
   it("offers an explicit caption-and-speech cancel action", async () => {
     const user = userEvent.setup()
-    const onCancel = renderCaption(presentation())
+    const { onCancel } = renderCaption(presentation())
 
     await user.click(screen.getByRole("button", { name: "説明を閉じる" }))
     expect(onCancel).toHaveBeenCalledOnce()
+  })
+
+  it("acknowledges each exact sequence only after a visible paint boundary", () => {
+    const frames = installAnimationFrames()
+    const onVisible = vi.fn()
+    renderCaption(presentation(), vi.fn(), onVisible)
+    const caption = screen.getByRole("region", { name: "コミットの説明" })
+    Object.defineProperty(caption, "getClientRects", {
+      configurable: true,
+      value: () => ({ length: 1 }),
+    })
+
+    act(() => frames.flush())
+    expect(onVisible).not.toHaveBeenCalled()
+    act(() => frames.flush())
+
+    expect(onVisible).toHaveBeenNthCalledWith(1, {
+      key: presentation().key,
+      presentationGeneration: 3,
+      sequence: 0,
+    })
+    expect(onVisible).toHaveBeenNthCalledWith(2, {
+      key: presentation().key,
+      presentationGeneration: 3,
+      sequence: 1,
+    })
+  })
+
+  it("does not acknowledge a hidden caption", () => {
+    const frames = installAnimationFrames()
+    const onVisible = vi.fn()
+    renderCaption(presentation(), vi.fn(), onVisible)
+
+    act(() => frames.flush())
+    act(() => frames.flush())
+
+    expect(onVisible).not.toHaveBeenCalled()
   })
 
   it("keeps accepted captions visible when presentation becomes unavailable", () => {

@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { CharacterRuntimeView } from "@/features/character"
@@ -25,6 +25,21 @@ const jaStore: LocalePreferenceStore = {
   read: () => "ja",
   write: () => true,
 }
+
+function installVisibleAnimationFrames(): void {
+  let nextFrame = 0
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue({
+    length: 1,
+  } as DOMRectList)
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    const frame = ++nextFrame
+    queueMicrotask(() => callback(performance.now()))
+    return frame
+  })
+  vi.stubGlobal("cancelAnimationFrame", () => undefined)
+}
+
+afterEach(() => vi.unstubAllGlobals())
 
 const runtime: CharacterRuntimeView = {
   rendererKind: "external",
@@ -156,6 +171,7 @@ describe("CharacterStageSlot narration", () => {
   })
 
   it("exposes semantic speaking state only while matching speech is active", async () => {
+    installVisibleAnimationFrames()
     const gateway = new DemoNarrationGateway()
     await gateway.updateSettings({
       schemaVersion: narrationSchemaVersion,

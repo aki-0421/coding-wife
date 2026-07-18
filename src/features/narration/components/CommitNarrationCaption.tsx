@@ -1,15 +1,44 @@
+import { useLayoutEffect, useRef } from "react"
 import { MessageCircleMoreIcon, Volume2Icon, XIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { narrationCopy } from "@/features/narration/copy"
-import type { CommitNarrationPresentationSnapshot } from "@/features/narration/controller"
+import type {
+  CaptionVisibilityAcknowledgment,
+  CommitNarrationPresentationSnapshot,
+} from "@/features/narration/controller"
 import { useI18n } from "@/features/localization"
 
 export interface CommitNarrationCaptionProps {
   readonly presentation: CommitNarrationPresentationSnapshot
   readonly onCancel: () => void
+  readonly onVisible: (
+    acknowledgment: CaptionVisibilityAcknowledgment,
+  ) => boolean | void
+}
+
+function scheduleFrame(callback: FrameRequestCallback): () => void {
+  if (typeof window.requestAnimationFrame === "function") {
+    const id = window.requestAnimationFrame(callback)
+    return () => window.cancelAnimationFrame(id)
+  }
+  const id = window.setTimeout(() => callback(performance.now()), 16)
+  return () => window.clearTimeout(id)
+}
+
+function isVisible(element: HTMLElement): boolean {
+  if (!element.isConnected || element.getClientRects().length === 0) {
+    return false
+  }
+  const style = window.getComputedStyle(element)
+  return (
+    style.display !== "none" &&
+    style.visibility !== "hidden" &&
+    style.visibility !== "collapse" &&
+    document.visibilityState !== "hidden"
+  )
 }
 
 function presentationVariant(
@@ -29,7 +58,9 @@ function presentationVariant(
 export function CommitNarrationCaption({
   presentation,
   onCancel,
+  onVisible,
 }: CommitNarrationCaptionProps) {
+  const rootRef = useRef<HTMLElement>(null)
   const { locale } = useI18n()
   const copy = narrationCopy[locale]
   const canCancel =
@@ -39,12 +70,50 @@ export function CommitNarrationCaption({
       ? copy.captionPreparing
       : copy.captionEmpty
 
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    const lastSequence = presentation.lastSequence
+    if (
+      root === null ||
+      lastSequence === null ||
+      presentation.status === "canceled" ||
+      presentation.status === "unavailable"
+    ) {
+      return
+    }
+
+    let cancelAfterPaint: () => void = () => undefined
+    const cancelBeforePaint = scheduleFrame(() => {
+      cancelAfterPaint = scheduleFrame(() => {
+        if (!isVisible(root)) return
+        for (let sequence = 0; sequence <= lastSequence; sequence++) {
+          onVisible({
+            key: presentation.key,
+            presentationGeneration: presentation.presentationGeneration,
+            sequence,
+          })
+        }
+      })
+    })
+    return () => {
+      cancelBeforePaint()
+      cancelAfterPaint()
+    }
+  }, [
+    onVisible,
+    presentation.key,
+    presentation.lastSequence,
+    presentation.presentationGeneration,
+    presentation.status,
+  ])
+
   return (
     <section
       aria-label={copy.captionTitle}
       className="overflow-hidden rounded-panel border border-divider bg-app-bg/95 shadow-overlay backdrop-blur-sm"
       data-commit-narration-status={presentation.status}
       data-narration-speech={presentation.speechStatus}
+      ref={rootRef}
     >
       <header className="flex min-h-9 items-center gap-sm border-b border-divider px-md py-xs">
         <MessageCircleMoreIcon

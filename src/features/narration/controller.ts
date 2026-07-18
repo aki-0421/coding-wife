@@ -37,6 +37,12 @@ export interface NarrationScope {
   readonly generation: number
 }
 
+export interface CaptionVisibilityAcknowledgment {
+  readonly key: CommitNarrationSourceKey
+  readonly presentationGeneration: number
+  readonly sequence: number
+}
+
 export interface CommitNarrationPresentationSnapshot {
   readonly key: CommitNarrationSourceKey
   readonly trigger: NarrationCommitJobTrigger
@@ -74,9 +80,25 @@ interface PreparedCommitNarration {
   touchedAt: number
 }
 
+type CaptionSpeechSequenceState =
+  "waiting" | "leading" | "scheduled" | "skipped"
+
+interface CaptionSpeechGate {
+  readonly key: CommitNarrationSourceKey
+  readonly presentationGeneration: number
+  readonly sequences: Map<number, CaptionSpeechSequenceState>
+  readonly leads: Map<number, Promise<void>>
+  nextReleaseSequence: number
+  draining: boolean
+  terminal: boolean
+  acknowledgmentTimer: ReturnType<typeof setTimeout> | null
+}
+
 const maximumPreparedPresentations = 12
 const speechPollMilliseconds = 125
 const speechTimeoutMilliseconds = 30_000
+const captionAcknowledgmentTimeoutMilliseconds = 1_000
+const captionSpeechLeadMilliseconds = 100
 
 function initialSnapshot(): NarrationControllerSnapshot {
   return {
@@ -129,6 +151,7 @@ export class NarrationController {
   #presentationGeneration = 0
   #speechEpoch = 0
   #speechChain: Promise<void> = Promise.resolve()
+  #captionSpeechGate: CaptionSpeechGate | null = null
   #testSequence = 0
 
   public constructor(
@@ -360,7 +383,7 @@ export class NarrationController {
       existing.status = "streaming"
       if (this.activeMatches(existing.key)) {
         this.publishActive(existing)
-        this.scheduleSpeech(event.sequence, event.text)
+        this.prepareCaptionSpeech()
       }
       return true
     }
@@ -377,6 +400,7 @@ export class NarrationController {
     if (this.activeMatches(existing.key)) {
       this.publishActive(existing)
       if (existing.status !== "ready") {
+        this.terminalizeCaptionSpeech()
         void this.cancelSpeech("explicit_cancel")
       }
     }
@@ -413,6 +437,7 @@ export class NarrationController {
     }
     const generation = ++this.#presentationGeneration
     this.#speechEpoch++
+    this.clearCaptionSpeechGate()
     this.#snapshot = {
       ...this.#snapshot,
       presentation: {
@@ -429,16 +454,46 @@ export class NarrationController {
     }
     this.emit()
     if (prepared.status === "streaming" || prepared.status === "ready") {
-      prepared.chunks.forEach((text, sequence) => {
-        this.scheduleSpeech(sequence, text)
-      })
+      this.prepareCaptionSpeech()
     }
+    return true
+  }
+
+  public readonly acknowledgeCaptionVisible = (
+    acknowledgment: CaptionVisibilityAcknowledgment,
+  ): boolean => {
+    const presentation = this.#snapshot.presentation
+    const gate = this.#captionSpeechGate
+    if (
+      presentation === null ||
+      gate === null ||
+      gate.terminal ||
+      acknowledgment.presentationGeneration !==
+        presentation.presentationGeneration ||
+      acknowledgment.presentationGeneration !== gate.presentationGeneration ||
+      !sameSourceKey(acknowledgment.key, presentation.key) ||
+      !sameSourceKey(acknowledgment.key, gate.key) ||
+      acknowledgment.sequence < 0 ||
+      acknowledgment.sequence > (presentation.lastSequence ?? -1) ||
+      gate.sequences.get(acknowledgment.sequence) !== "waiting"
+    ) {
+      return false
+    }
+
+    gate.sequences.set(acknowledgment.sequence, "leading")
+    gate.leads.set(
+      acknowledgment.sequence,
+      this.pause(captionSpeechLeadMilliseconds),
+    )
+    this.armCaptionAcknowledgmentTimeout(gate)
+    void this.drainCaptionSpeech(gate)
     return true
   }
 
   public async cancelPresentation(
     reason: NarrationCancelReason = "explicit_cancel",
   ): Promise<void> {
+    this.clearCaptionSpeechGate()
     if (this.#snapshot.presentation !== null) {
       const prepared = this.#prepared.get(
         commitNarrationSourceKey(this.#snapshot.presentation.key),
@@ -525,6 +580,165 @@ export class NarrationController {
     )
   }
 
+  private prepareCaptionSpeech(): void {
+    const presentation = this.#snapshot.presentation
+    const settings = this.#snapshot.settingsSnapshot?.settings
+    if (
+      presentation === null ||
+      settings === undefined ||
+      presentation.lastSequence === null ||
+      presentation.status === "canceled" ||
+      presentation.status === "unavailable"
+    ) {
+      return
+    }
+
+    let gate = this.#captionSpeechGate
+    if (
+      gate === null ||
+      gate.presentationGeneration !== presentation.presentationGeneration ||
+      !sameSourceKey(gate.key, presentation.key)
+    ) {
+      this.clearCaptionSpeechGate()
+      gate = {
+        key: presentation.key,
+        presentationGeneration: presentation.presentationGeneration,
+        sequences: new Map(),
+        leads: new Map(),
+        nextReleaseSequence: 0,
+        draining: false,
+        terminal: false,
+        acknowledgmentTimer: null,
+      }
+      this.#captionSpeechGate = gate
+    }
+
+    for (let sequence = 0; sequence <= presentation.lastSequence; sequence++) {
+      if (!gate.sequences.has(sequence)) {
+        gate.sequences.set(sequence, "waiting")
+      }
+    }
+
+    if (!settings.enabled || settings.muted) {
+      this.skipPendingCaptionSpeech(gate)
+      this.updatePresentation({
+        speechStatus: settings.muted ? "muted" : "off",
+      })
+      return
+    }
+    if (gate.terminal) return
+
+    if ([...gate.sequences.values()].some((state) => state === "waiting")) {
+      if (presentation.speechStatus !== "playing") {
+        this.updatePresentation({ speechStatus: "queued" })
+      }
+      this.armCaptionAcknowledgmentTimeout(gate)
+    }
+  }
+
+  private armCaptionAcknowledgmentTimeout(gate: CaptionSpeechGate): void {
+    if (gate.acknowledgmentTimer !== null) {
+      clearTimeout(gate.acknowledgmentTimer)
+      gate.acknowledgmentTimer = null
+    }
+    if (
+      gate.terminal ||
+      ![...gate.sequences.values()].some((state) => state === "waiting")
+    ) {
+      return
+    }
+    gate.acknowledgmentTimer = setTimeout(() => {
+      if (this.#captionSpeechGate !== gate || gate.terminal) return
+      gate.acknowledgmentTimer = null
+      this.terminalizeCaptionSpeech("NARRATION-CAPTION-NOT-VISIBLE")
+    }, captionAcknowledgmentTimeoutMilliseconds)
+  }
+
+  private async drainCaptionSpeech(gate: CaptionSpeechGate): Promise<void> {
+    if (gate.draining || gate.terminal) return
+    gate.draining = true
+    try {
+      while (this.#captionSpeechGate === gate && !gate.terminal) {
+        const sequence = gate.nextReleaseSequence
+        const state = gate.sequences.get(sequence)
+        if (state === undefined || state === "waiting") break
+        if (state === "skipped" || state === "scheduled") {
+          gate.nextReleaseSequence++
+          continue
+        }
+        const lead = gate.leads.get(sequence)
+        if (lead === undefined) break
+        await lead
+        if (this.#captionSpeechGate !== gate || gate.terminal) return
+        if (gate.sequences.get(sequence) !== "leading") continue
+
+        const presentation = this.#snapshot.presentation
+        const settings = this.#snapshot.settingsSnapshot?.settings
+        const text = presentation?.chunks[sequence]
+        if (
+          presentation === null ||
+          settings === undefined ||
+          text === undefined ||
+          presentation.presentationGeneration !== gate.presentationGeneration ||
+          !sameSourceKey(presentation.key, gate.key)
+        ) {
+          return
+        }
+        gate.leads.delete(sequence)
+        if (!settings.enabled || settings.muted) {
+          gate.sequences.set(sequence, "skipped")
+          continue
+        }
+        gate.sequences.set(sequence, "scheduled")
+        gate.nextReleaseSequence++
+        this.scheduleSpeech(sequence, text)
+      }
+    } catch {
+      this.terminalizeCaptionSpeech("NARRATION-CAPTION-VISIBILITY")
+    } finally {
+      gate.draining = false
+    }
+  }
+
+  private skipPendingCaptionSpeech(gate: CaptionSpeechGate): void {
+    if (gate.acknowledgmentTimer !== null) {
+      clearTimeout(gate.acknowledgmentTimer)
+      gate.acknowledgmentTimer = null
+    }
+    for (const [sequence, state] of gate.sequences) {
+      if (state === "waiting" || state === "leading") {
+        gate.sequences.set(sequence, "skipped")
+        gate.leads.delete(sequence)
+      }
+    }
+  }
+
+  private terminalizeCaptionSpeech(code?: string): void {
+    const gate = this.#captionSpeechGate
+    if (gate !== null) {
+      gate.terminal = true
+      if (gate.acknowledgmentTimer !== null) {
+        clearTimeout(gate.acknowledgmentTimer)
+        gate.acknowledgmentTimer = null
+      }
+    }
+    if (code !== undefined) {
+      this.updatePresentation({
+        speechStatus: "unavailable",
+        errorCode: code,
+      })
+    }
+  }
+
+  private clearCaptionSpeechGate(): void {
+    const gate = this.#captionSpeechGate
+    if (gate !== null && gate.acknowledgmentTimer !== null) {
+      clearTimeout(gate.acknowledgmentTimer)
+    }
+    if (gate !== null) gate.terminal = true
+    this.#captionSpeechGate = null
+  }
+
   private scheduleSpeech(sequence: number, text: string): void {
     const presentation = this.#snapshot.presentation
     const settings = this.#snapshot.settingsSnapshot?.settings
@@ -556,15 +770,15 @@ export class NarrationController {
         })
         if (!this.speechStillActive(epoch, generation, key)) return
         if (response.disposition !== "queued") {
-          this.updatePresentation({
-            speechStatus:
-              response.disposition === "muted"
-                ? "muted"
-                : response.disposition === "disabled"
-                  ? "off"
-                  : "unavailable",
-            errorCode: response.code,
-          })
+          if (response.disposition === "muted") {
+            this.updatePresentation({ speechStatus: "muted" })
+          } else if (response.disposition === "disabled") {
+            this.updatePresentation({ speechStatus: "off" })
+          } else {
+            this.terminalizeCaptionSpeech(
+              response.code ?? `NARRATION-${response.disposition}`,
+            )
+          }
           return
         }
         this.updatePresentation({ speechStatus: "playing" })
@@ -575,10 +789,7 @@ export class NarrationController {
       })
       .catch((error: unknown) => {
         if (this.speechStillActive(epoch, generation, key)) {
-          this.updatePresentation({
-            speechStatus: "unavailable",
-            errorCode: errorCode(error),
-          })
+          this.terminalizeCaptionSpeech(errorCode(error))
         }
       })
   }
@@ -642,6 +853,9 @@ export class NarrationController {
   }
 
   private async cancelSpeech(reason: NarrationCancelReason): Promise<void> {
+    if (this.#captionSpeechGate !== null) {
+      this.skipPendingCaptionSpeech(this.#captionSpeechGate)
+    }
     this.#speechEpoch++
     this.#speechChain = Promise.resolve()
     try {
@@ -650,7 +864,11 @@ export class NarrationController {
       this.update({ lastErrorCode: errorCode(error) })
     }
     const settings = this.#snapshot.settingsSnapshot?.settings
-    if (this.#snapshot.presentation !== null) {
+    if (
+      this.#snapshot.presentation !== null &&
+      this.#snapshot.presentation.status !== "unavailable" &&
+      this.#captionSpeechGate?.terminal !== true
+    ) {
       this.updatePresentation({
         speechStatus: settings?.muted
           ? "muted"
