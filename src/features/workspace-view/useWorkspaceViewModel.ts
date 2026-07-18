@@ -135,6 +135,14 @@ export type WorkspaceAction = "cancel" | "repair" | "unregister"
 export type WorkspaceActionResult =
   { readonly ok: true } | { readonly ok: false; readonly errorCode: string }
 
+export interface PendingWorkspaceTransition {
+  readonly id: number
+  readonly fromWorkspaceId: string
+  readonly toWorkspaceId: string
+  readonly expectedGeneration: number | null
+  readonly status: "confirming" | "stopping"
+}
+
 export interface WorkspaceViewNotice {
   readonly tone: "neutral" | "error"
   readonly message: string
@@ -167,6 +175,8 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   const [adapterLoadAttempt, setAdapterLoadAttempt] = useState(0)
   const [workspaceAction, setWorkspaceAction] =
     useState<WorkspaceAction | null>(null)
+  const [pendingWorkspaceTransition, setPendingWorkspaceTransition] =
+    useState<PendingWorkspaceTransition | null>(null)
   const [timeline, setTimeline] = useState<readonly WorkspaceTimelineItem[]>([])
   const [history, setHistory] = useState<WorkspaceAdapterState["history"]>({
     mode: "ready",
@@ -179,6 +189,9 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     "system" | "reduce" | "allow"
   >("system")
   const selectionVersion = useRef(0)
+  const transitionVersion = useRef(0)
+  const transitionOperation = useRef<Promise<boolean> | null>(null)
+  const sendVersion = useRef(0)
   const pendingDraftSaves = useRef(new Map<string, PendingDraftSave>())
   const draftSaveTimers = useRef(new Map<string, number>())
   const deletingWorkspaceIds = useRef(new Set<string>())
@@ -561,6 +574,8 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
 
   const sendTurn = useCallback(async () => {
     if (!adapterReady || !selectedWorkspace || !adapter?.sendTurn) return false
+    sendVersion.current += 1
+    const version = sendVersion.current
     const draft = draftFor(drafts, selectedWorkspace.id)
 
     setTurnState("sending")
@@ -571,6 +586,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
             ? null
             : fallbackContextSnapshot(selectedWorkspace.id)
           : await adapter.getTurnContextSnapshot(selectedWorkspace.id)
+      if (sendVersion.current !== version) return false
       if (
         editableContextSnapshot === null ||
         editableContextSnapshot.workspaceId !== selectedWorkspace.id
@@ -587,6 +603,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
         editableContextSnapshot,
       }
       const result = await adapter.sendTurn(request)
+      if (sendVersion.current !== version) return false
       if (!result.accepted) {
         setTurnState("idle")
         return false
@@ -603,7 +620,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
       setNotice(null)
       return true
     } catch {
-      setTurnState("idle")
+      if (sendVersion.current === version) setTurnState("idle")
       return false
     }
   }, [
@@ -770,7 +787,34 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
 
   const selectWorkspace = useCallback(
     (workspaceId: string) => {
-      if (!adapterReady) return
+      if (
+        !adapterReady ||
+        workspaceId === selectedWorkspaceId ||
+        transitionOperation.current !== null
+      ) {
+        return
+      }
+      const activeOrPendingTurn =
+        turnState === "sending" ||
+        turnState === "running" ||
+        turnState === "stopping" ||
+        (codex.activeWorkspaceId === selectedWorkspaceId &&
+          ["running", "waiting", "stopping"].includes(codex.phase)) ||
+        codex.pendingRequests.length > 0
+      if (activeOrPendingTurn) {
+        transitionVersion.current += 1
+        setPendingWorkspaceTransition({
+          id: transitionVersion.current,
+          fromWorkspaceId: selectedWorkspaceId,
+          toWorkspaceId: workspaceId,
+          expectedGeneration:
+            codex.activeWorkspaceId === selectedWorkspaceId
+              ? codex.generation
+              : null,
+          status: "confirming",
+        })
+        return
+      }
       selectionVersion.current += 1
       const version = selectionVersion.current
       const previousWorkspaceId = selectedWorkspaceId
@@ -794,7 +838,76 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
           }
         })
     },
-    [adapter, adapterReady, applyAdapterState, selectedWorkspaceId],
+    [
+      adapter,
+      adapterReady,
+      applyAdapterState,
+      codex.activeWorkspaceId,
+      codex.generation,
+      codex.pendingRequests.length,
+      codex.phase,
+      selectedWorkspaceId,
+      turnState,
+    ],
+  )
+
+  const cancelWorkspaceTransition = useCallback(() => {
+    if (transitionOperation.current !== null) return
+    transitionVersion.current += 1
+    setPendingWorkspaceTransition(null)
+  }, [])
+
+  const confirmWorkspaceTransition = useCallback(
+    (failureMessage: string): Promise<boolean> => {
+      if (transitionOperation.current !== null) {
+        return transitionOperation.current
+      }
+      const transition = pendingWorkspaceTransition
+      if (
+        transition === null ||
+        transition.status !== "confirming" ||
+        !adapter?.stopAndSwitchWorkspace
+      ) {
+        return Promise.resolve(false)
+      }
+      const version = transition.id
+      sendVersion.current += 1
+      setPendingWorkspaceTransition({ ...transition, status: "stopping" })
+      const operation = adapter
+        .stopAndSwitchWorkspace({
+          fromWorkspaceId: transition.fromWorkspaceId,
+          toWorkspaceId: transition.toWorkspaceId,
+          expectedGeneration: transition.expectedGeneration,
+        })
+        .then((state) => {
+          if (transitionVersion.current !== version) return false
+          applyAdapterState(state)
+          setPendingWorkspaceTransition(null)
+          setNotice(null)
+          return true
+        })
+        .catch(() => {
+          if (transitionVersion.current === version) {
+            setPendingWorkspaceTransition({
+              ...transition,
+              status: "confirming",
+            })
+            setNotice({
+              tone: "error",
+              message: failureMessage,
+            })
+          }
+          return false
+        })
+        .finally(() => {
+          if (transitionOperation.current === operation) {
+            transitionOperation.current = null
+          }
+        })
+      transitionOperation.current = operation
+      return operation
+    },
+    [adapter, applyAdapterState, pendingWorkspaceTransition],
   )
 
   const cancelSelectedWorkspace =
@@ -947,6 +1060,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     answerDecision,
     captureContext,
     cancelSelectedWorkspace,
+    cancelWorkspaceTransition,
     characterHidden,
     codex,
     deleteSelectedWorkspaceHistory,
@@ -954,10 +1068,12 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     filter,
     muted,
     notice,
+    pendingWorkspaceTransition,
     pickAttachments,
     history,
     reducedMotion,
     repairSelectedWorkspace,
+    confirmWorkspaceTransition,
     registerAttachmentPaths,
     removeAttachment,
     removeContext,

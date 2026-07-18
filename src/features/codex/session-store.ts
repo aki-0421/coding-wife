@@ -199,12 +199,8 @@ export class CodexSessionStore {
         this.activeTurnHandle = event.payload.turnHandle
         this.turnStatus = event.payload.status
         if (terminalTurnStatuses.has(event.payload.status)) {
-          for (const [pendingId, pending] of this.pendingRequests) {
-            if (pending.responseKind === "native_server_request") {
-              this.pendingRequests.delete(pendingId)
-              this.claimedPendingResponses.delete(pendingId)
-            }
-          }
+          this.pendingRequests.clear()
+          this.claimedPendingResponses.clear()
         }
         break
       case "agent_message_completed":

@@ -16,6 +16,7 @@ import type {
   WorkspaceAdapterState,
   WorkspaceCodexState,
   WorkspaceCreateRequest,
+  WorkspaceTransitionRequest,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 
@@ -57,6 +58,10 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
 
   private readonly history: PersistentWorkspaceViewAdapter
   private readonly codex: CodexWorkspaceSessionAdapter
+  private workspaceTransition: {
+    readonly key: string
+    readonly operation: Promise<WorkspaceAdapterState>
+  } | null = null
 
   constructor(
     historyTransport: WorkspaceHistoryTransport,
@@ -88,6 +93,25 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     const state = await this.history.selectWorkspace(workspaceId)
     await this.activateCodex(state)
     return state
+  }
+
+  stopAndSwitchWorkspace(
+    request: WorkspaceTransitionRequest,
+  ): Promise<WorkspaceAdapterState> {
+    const key = `${request.fromWorkspaceId}:${request.toWorkspaceId}:${String(request.expectedGeneration)}`
+    if (this.workspaceTransition !== null) {
+      if (this.workspaceTransition.key === key) {
+        return this.workspaceTransition.operation
+      }
+      return Promise.reject(new Error("WORKSPACE-TRANSITION-IN-PROGRESS"))
+    }
+    const operation = this.performWorkspaceTransition(request).finally(() => {
+      if (this.workspaceTransition?.operation === operation) {
+        this.workspaceTransition = null
+      }
+    })
+    this.workspaceTransition = { key, operation }
+    return operation
   }
 
   cancelWorkspace(workspaceId: string, expectedUpdatedAt: string) {
@@ -252,6 +276,62 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     } catch {
       // The Codex store already exposes a safe error code through subscribeCodex.
     }
+  }
+
+  private async performWorkspaceTransition(
+    request: WorkspaceTransitionRequest,
+  ): Promise<WorkspaceAdapterState> {
+    const before = this.codex.snapshot()
+    if (
+      before.activeWorkspaceId !== request.fromWorkspaceId ||
+      before.generation !== request.expectedGeneration ||
+      request.fromWorkspaceId === request.toWorkspaceId
+    ) {
+      throw new Error("WORKSPACE-TRANSITION-STALE")
+    }
+    await this.codex.stopTurnAndWaitForTerminal({
+      workspaceId: request.fromWorkspaceId,
+      expectedGeneration: request.expectedGeneration,
+    })
+
+    let targetSelected = false
+    try {
+      const target = await this.history.selectWorkspace(request.toWorkspaceId)
+      targetSelected = true
+      await this.activateCodexStrict(target)
+      return target
+    } catch (error) {
+      if (targetSelected) {
+        try {
+          const restored = await this.history.selectWorkspace(
+            request.fromWorkspaceId,
+          )
+          await this.activateCodexStrict(restored)
+        } catch {
+          // Preserve the original transition failure; the next hydration retries restoration.
+        }
+      }
+      throw error
+    }
+  }
+
+  private async activateCodexStrict(
+    state: WorkspaceAdapterState,
+  ): Promise<void> {
+    if (state.activeWorkspaceId === null) {
+      throw new Error("WORKSPACE-ACTIVATION-MISSING")
+    }
+    const historyMode =
+      state.history.mode === "ready" ||
+      (this.hydrationMode === "demo" && state.history.mode === "ephemeral")
+        ? "ready"
+        : state.history.mode === "recovery_required"
+          ? "recovery_required"
+          : "read_only"
+    await this.codex.activateWorkspace({
+      workspaceId: state.activeWorkspaceId,
+      historyMode,
+    })
   }
 }
 

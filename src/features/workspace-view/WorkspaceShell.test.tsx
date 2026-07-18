@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
 import type { LocalePreferenceStore } from "@/features/localization"
+import { DemoNarrationGateway, NarrationController } from "@/features/narration"
 import { DemoTransport } from "@/features/runtime"
 import type {
   SendTurnRequest,
@@ -29,6 +30,22 @@ const japaneseLocaleStore: LocalePreferenceStore = {
   persistence: "session-only",
   read: () => "ja",
   write: () => true,
+}
+
+interface Deferred<T> {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T) => void
+  readonly reject: (error: Error) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 function renderWorkspace(adapter?: WorkspaceViewAdapter) {
@@ -1683,5 +1700,182 @@ describe("WorkspaceShell", () => {
     )
     expect(await screen.findByText("preserved-workspace")).toBeVisible()
     expect(screen.queryByText("restored-workspace")).not.toBeInTheDocument()
+  })
+
+  it("holds an active workspace selection and Go back preserves draft and narration", async () => {
+    const target = {
+      id: "workspace-target",
+      repository: "native-repository",
+      name: "target-workspace",
+      branch: "feature/target",
+      lifecycle: "backlog" as const,
+    }
+    const state: WorkspaceAdapterState = {
+      ...nativeWorkspaceState(),
+      workspaces: [...nativeWorkspaceState().workspaces, target],
+      draft: {
+        ...nativeWorkspaceState().draft!,
+        text: "Keep this exact draft.",
+      },
+    }
+    const codex = richCodexState()
+    const stopAndSwitchWorkspace = vi.fn()
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex(listener) {
+        listener(codex)
+        return () => undefined
+      },
+      stopAndSwitchWorkspace,
+    }
+    const narrationGateway = new DemoNarrationGateway()
+    const narrationController = new NarrationController(narrationGateway)
+    const dismissPresentation = vi.spyOn(
+      narrationController,
+      "dismissPresentation",
+    )
+    const cancelSpeech = vi.spyOn(narrationGateway, "cancel")
+    const user = userEvent.setup()
+    render(
+      <App
+        localeStore={englishLocaleStore}
+        narrationController={narrationController}
+        narrationGateway={narrationGateway}
+        transport={new DemoTransport()}
+        workspaceAdapter={adapter}
+      />,
+    )
+
+    const current = await screen.findByRole("button", {
+      name: /^native-repository\/restored-workspace,/u,
+    })
+    const targetRow = screen.getByRole("button", {
+      name: /^native-repository\/target-workspace,/u,
+    })
+    const composer = screen.getByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    await waitFor(() =>
+      expect(narrationController.getSnapshot().scope).toMatchObject({
+        workspaceId: "workspace-native",
+        generation: 1,
+      }),
+    )
+    dismissPresentation.mockClear()
+    cancelSpeech.mockClear()
+    expect(composer).toHaveValue("Keep this exact draft.")
+    await user.click(targetRow)
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Stop and switch workspaces?",
+    })
+    expect(within(dialog).getByText("Current workspace")).toBeVisible()
+    expect(
+      within(dialog).getByText("native-repository/restored-workspace"),
+    ).toBeVisible()
+    expect(within(dialog).getByText("Switch to")).toBeVisible()
+    expect(
+      within(dialog).getByText("native-repository/target-workspace"),
+    ).toBeVisible()
+    expect(current).toHaveAttribute("aria-current", "page")
+    expect(targetRow).not.toHaveAttribute("aria-current")
+
+    await user.click(within(dialog).getByRole("button", { name: "Go back" }))
+    expect(
+      screen.queryByRole("dialog", { name: "Stop and switch workspaces?" }),
+    ).not.toBeInTheDocument()
+    expect(current).toHaveAttribute("aria-current", "page")
+    expect(composer).toHaveValue("Keep this exact draft.")
+    expect(stopAndSwitchWorkspace).not.toHaveBeenCalled()
+    expect(dismissPresentation).not.toHaveBeenCalled()
+    expect(cancelSpeech).not.toHaveBeenCalled()
+  })
+
+  it("keeps the old workspace selected until Stop and switch finishes", async () => {
+    const target = {
+      id: "workspace-target",
+      repository: "native-repository",
+      name: "target-workspace",
+      branch: "feature/target",
+      lifecycle: "backlog" as const,
+    }
+    const state: WorkspaceAdapterState = {
+      ...nativeWorkspaceState(),
+      workspaces: [...nativeWorkspaceState().workspaces, target],
+    }
+    const targetState: WorkspaceAdapterState = {
+      ...state,
+      activeWorkspaceId: target.id,
+      draft: {
+        text: "",
+        effort: "fast",
+        revision: 0,
+        contextSnapshots: [],
+      },
+    }
+    const codex = richCodexState()
+    const transition = deferred<WorkspaceAdapterState>()
+    const stopAndSwitchWorkspace = vi.fn(() => transition.promise)
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex(listener) {
+        listener(codex)
+        return () => undefined
+      },
+      stopAndSwitchWorkspace,
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+
+    const current = await screen.findByRole("button", {
+      name: /^native-repository\/restored-workspace,/u,
+    })
+    const targetRow = screen.getByRole("button", {
+      name: /^native-repository\/target-workspace,/u,
+    })
+    await user.click(targetRow)
+    const dialog = screen.getByRole("dialog", {
+      name: "Stop and switch workspaces?",
+    })
+    await user.click(
+      within(dialog).getByRole("button", { name: "Stop and switch" }),
+    )
+
+    expect(stopAndSwitchWorkspace).toHaveBeenCalledWith({
+      fromWorkspaceId: "workspace-native",
+      toWorkspaceId: "workspace-target",
+      expectedGeneration: 1,
+    })
+    expect(current).toHaveAttribute("aria-current", "page")
+    expect(targetRow).not.toHaveAttribute("aria-current")
+    expect(
+      within(dialog).getByRole("status", {
+        name: "",
+      }),
+    ).toHaveTextContent("Stopping and switching…")
+    expect(
+      within(dialog).getByRole("button", {
+        name: "Stopping and switching…",
+      }),
+    ).toBeDisabled()
+    expect(
+      within(dialog).getByRole("button", { name: "Go back" }),
+    ).toBeDisabled()
+
+    await act(async () => {
+      transition.resolve(targetState)
+      await transition.promise
+    })
+    await waitFor(() =>
+      expect(targetRow).toHaveAttribute("aria-current", "page"),
+    )
+    expect(current).not.toHaveAttribute("aria-current")
+    expect(
+      screen.queryByRole("dialog", { name: "Stop and switch workspaces?" }),
+    ).not.toBeInTheDocument()
   })
 })

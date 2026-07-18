@@ -54,6 +54,18 @@ const en = {
         "The latest draft could not be saved, so the project was not unregistered.",
     },
   },
+  workspaceSwitch: {
+    title: "Stop and switch workspaces?",
+    description:
+      "The current workspace stays active until its exact turn is interrupted, reaches a terminal state, and finishes local cleanup.",
+    from: "Current workspace",
+    to: "Switch to",
+    goBack: "Go back",
+    confirm: "Stop and switch",
+    stopping: "Stopping and switching…",
+    failed:
+      "The turn could not be stopped and cleaned up. The current workspace remains active; no draft or selection was changed.",
+  },
   dismiss: "Dismiss",
   switchWorkspace: "Switch workspace",
   repository: "Repository",
@@ -560,6 +572,18 @@ const ja: typeof en = {
       draft:
         "最新の下書きを保存できなかったため、プロジェクト登録を解除しませんでした。",
     },
+  },
+  workspaceSwitch: {
+    title: "停止してワークスペースを切り替えますか？",
+    description:
+      "現在のワークスペースは、対象ターンの中断、終了状態の確認、ローカル後処理が完了するまで選択中のままです。",
+    from: "現在のワークスペース",
+    to: "切り替え先",
+    goBack: "戻る",
+    confirm: "停止して切り替え",
+    stopping: "停止して切り替え中…",
+    failed:
+      "ターンの停止と後処理を完了できませんでした。現在のワークスペースを維持し、下書きと選択は変更していません。",
   },
   dismiss: "閉じる",
   switchWorkspace: "ワークスペースを切り替える",

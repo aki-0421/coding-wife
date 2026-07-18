@@ -50,6 +50,11 @@ export interface StartCodexTurnResult {
   readonly turnHandle: string
 }
 
+export interface StopCodexTurnAndWaitRequest {
+  readonly workspaceId: string
+  readonly expectedGeneration: number | null
+}
+
 export interface CodexTerminalWorkUnitEvent {
   readonly schemaVersion: 1
   readonly workUnitId: string
@@ -99,6 +104,13 @@ interface ActivationIdentity {
   readonly workspaceId: string
   readonly threadHandle: string
   readonly generation: number
+}
+
+interface ExactTurnIdentity {
+  readonly workspaceId: string
+  readonly generation: number
+  readonly threadHandle: string
+  readonly turnHandle: string
 }
 
 interface AcceptedWorkUnit {
@@ -528,6 +540,62 @@ export class CodexWorkspaceSessionAdapter {
     }
   }
 
+  async stopTurnAndWaitForTerminal(
+    request: StopCodexTurnAndWaitRequest,
+  ): Promise<void> {
+    validateWorkspaceId(request.workspaceId)
+    const initial = this.store.snapshot()
+    if (
+      initial.activeWorkspaceId !== request.workspaceId ||
+      request.expectedGeneration === null ||
+      initial.generation !== request.expectedGeneration
+    ) {
+      throw codedError("CODEX-TURN-IDENTITY-STALE")
+    }
+
+    const pendingStart = this.turnStart
+    if (pendingStart !== null) {
+      await timeout(
+        pendingStart,
+        5_000,
+        this.clock,
+        "CODEX-TURN-START-CLEANUP-TIMEOUT",
+      )
+    }
+
+    const current = this.store.snapshot()
+    if (
+      current.activeWorkspaceId !== request.workspaceId ||
+      current.generation !== request.expectedGeneration
+    ) {
+      throw codedError("CODEX-TURN-IDENTITY-STALE")
+    }
+    if (current.threadHandle === null || current.turnHandle === null) {
+      await this.flushHistory(request.workspaceId)
+      return
+    }
+    const identity: ExactTurnIdentity = {
+      workspaceId: request.workspaceId,
+      generation: request.expectedGeneration,
+      threadHandle: current.threadHandle,
+      turnHandle: current.turnHandle,
+    }
+    const session = this.sessionStore.snapshot()
+
+    if (
+      session.activeThreadHandle !== identity.threadHandle ||
+      session.activeTurnHandle !== identity.turnHandle ||
+      !terminalTurnStatuses.has(session.turnStatus)
+    ) {
+      await this.stopTurn(request.workspaceId)
+      await this.waitForExactTerminal(identity)
+    } else {
+      this.assertExactTerminal(identity, session)
+    }
+    await this.flushHistory(request.workspaceId)
+    this.assertExactTerminal(identity, this.sessionStore.snapshot())
+  }
+
   respondPending(request: CodexPendingResponseRequest): Promise<boolean> {
     return this.client.respondPending(request)
   }
@@ -540,6 +608,66 @@ export class CodexWorkspaceSessionAdapter {
 
   flushHistory(workspaceId: string): Promise<void> {
     return this.historyQueues.get(workspaceId) ?? Promise.resolve()
+  }
+
+  private async waitForExactTerminal(
+    identity: ExactTurnIdentity,
+  ): Promise<void> {
+    let unsubscribe: () => void = () => undefined
+    const terminal = new Promise<void>((resolve, reject) => {
+      unsubscribe = this.sessionStore.subscribe((snapshot) => {
+        if (
+          snapshot.workspaceId !== identity.workspaceId ||
+          (snapshot.generation !== null &&
+            snapshot.generation !== identity.generation) ||
+          (snapshot.activeThreadHandle !== null &&
+            snapshot.activeThreadHandle !== identity.threadHandle) ||
+          (snapshot.activeTurnHandle !== null &&
+            snapshot.activeTurnHandle !== identity.turnHandle)
+        ) {
+          reject(codedError("CODEX-TURN-IDENTITY-CHANGED"))
+          return
+        }
+        if (terminalTurnStatuses.has(snapshot.turnStatus)) {
+          try {
+            this.assertExactTerminal(identity, snapshot)
+            resolve()
+          } catch (error) {
+            reject(
+              error instanceof Error
+                ? error
+                : codedError("CODEX-TURN-TERMINAL-CLEANUP-INCOMPLETE"),
+            )
+          }
+        }
+      })
+    })
+    try {
+      await timeout(
+        terminal,
+        10_000,
+        this.clock,
+        "CODEX-INTERRUPT-TERMINAL-TIMEOUT",
+      )
+    } finally {
+      unsubscribe()
+    }
+  }
+
+  private assertExactTerminal(
+    identity: ExactTurnIdentity,
+    snapshot: ReturnType<CodexSessionStore["snapshot"]>,
+  ): void {
+    if (
+      snapshot.workspaceId !== identity.workspaceId ||
+      snapshot.generation !== identity.generation ||
+      snapshot.activeThreadHandle !== identity.threadHandle ||
+      snapshot.activeTurnHandle !== identity.turnHandle ||
+      !terminalTurnStatuses.has(snapshot.turnStatus) ||
+      snapshot.pendingRequests.length !== 0
+    ) {
+      throw codedError("CODEX-TURN-TERMINAL-CLEANUP-INCOMPLETE")
+    }
   }
 
   private validateAttachmentRequest(

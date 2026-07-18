@@ -133,6 +133,12 @@ export interface WorkspaceCreateRequest {
   readonly branch: string
 }
 
+export interface WorkspaceTransitionRequest {
+  readonly fromWorkspaceId: string
+  readonly toWorkspaceId: string
+  readonly expectedGeneration: number | null
+}
+
 export interface SendTurnRequest {
   readonly workspaceId: string
   readonly instruction: string
@@ -148,6 +154,9 @@ export interface WorkspaceViewAdapter {
   readonly loadState?: () => Promise<WorkspaceAdapterState>
   readonly selectWorkspace?: (
     workspaceId: string,
+  ) => Promise<WorkspaceAdapterState>
+  readonly stopAndSwitchWorkspace?: (
+    request: WorkspaceTransitionRequest,
   ) => Promise<WorkspaceAdapterState>
   readonly cancelWorkspace?: (
     workspaceId: string,

@@ -819,4 +819,202 @@ describe("CodexWorkspaceSessionAdapter", () => {
 
     expect(adapter.snapshot().phase).toBe("interrupted")
   })
+
+  it("waits for the exact terminal event and pending-request cleanup before returning", async () => {
+    const { adapter, history, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await adapter.sendTurn({
+      workspaceId: "workspace-fixture",
+      text: "Stop only at the owned terminal boundary.",
+      effort: "low",
+      attachmentHandles: [],
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    const pending = parseCodexEvent(fixture.events[1])
+    if (running.kind !== "turn_status" || pending.kind !== "pending_request") {
+      throw new Error("turn fixtures")
+    }
+    transport.emit(running)
+    transport.emit(pending)
+
+    let settled = false
+    const stopping = adapter
+      .stopTurnAndWaitForTerminal({
+        workspaceId: "workspace-fixture",
+        expectedGeneration: 7,
+      })
+      .then(() => {
+        settled = true
+      })
+    await vi.waitFor(() =>
+      expect(transport.calls.at(-1)?.command).toBe(codexCommands.turnInterrupt),
+    )
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-fixture",
+      phase: "stopping",
+      pendingRequests: [
+        expect.objectContaining({ pendingId: "pending_handle_fixture" }),
+      ],
+    })
+
+    transport.emit({
+      ...running,
+      eventId: "event-exact-terminal",
+      sequence: 3,
+      payload: { ...running.payload, status: "interrupted" },
+    })
+    await stopping
+
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-fixture",
+      generation: 7,
+      threadHandle: fixture.thread.threadHandle,
+      turnHandle: fixture.turn.turnHandle,
+      phase: "interrupted",
+      pendingRequests: [],
+    })
+    expect(adapter.sessionStore.snapshot()).toMatchObject({
+      workspaceId: "workspace-fixture",
+      generation: 7,
+      activeThreadHandle: fixture.thread.threadHandle,
+      activeTurnHandle: fixture.turn.turnHandle,
+      turnStatus: "interrupted",
+      pendingRequests: [],
+    })
+    expect(history.events.at(-1)).toMatchObject({
+      eventId: "event-exact-terminal",
+      kind: "code.session.status.changed",
+      payload: { status: "interrupted" },
+    })
+  })
+
+  it("waits for an in-flight turn start before interrupting its accepted identity", async () => {
+    const { adapter, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    const pendingTurn = deferred<CodexResponseMap["codex_turn_start"]>()
+    transport.turnResponse = pendingTurn.promise
+    const sending = adapter.sendTurn({
+      workspaceId: "workspace-fixture",
+      text: "Accept this turn before stopping it.",
+      effort: "max",
+      attachmentHandles: [],
+    })
+    await vi.waitFor(() =>
+      expect(transport.calls.at(-1)?.command).toBe(codexCommands.turnStart),
+    )
+
+    const stopping = adapter.stopTurnAndWaitForTerminal({
+      workspaceId: "workspace-fixture",
+      expectedGeneration: 7,
+    })
+    expect(
+      transport.calls.some(
+        ({ command }) => command === codexCommands.turnInterrupt,
+      ),
+    ).toBe(false)
+
+    pendingTurn.resolve(fixture.turn)
+    await expect(sending).resolves.toMatchObject({ accepted: true })
+    await vi.waitFor(() =>
+      expect(transport.calls.at(-1)).toEqual({
+        command: codexCommands.turnInterrupt,
+        request: {
+          workspaceId: "workspace-fixture",
+          threadHandle: fixture.thread.threadHandle,
+          turnHandle: fixture.turn.turnHandle,
+        },
+      }),
+    )
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    transport.emit({
+      ...running,
+      eventId: "event-pending-start-terminal",
+      payload: { ...running.payload, status: "interrupted" },
+    })
+
+    await expect(stopping).resolves.toBeUndefined()
+    expect(adapter.snapshot()).toMatchObject({
+      phase: "interrupted",
+      turnHandle: fixture.turn.turnHandle,
+    })
+  })
+
+  it("rejects a stale generation without interrupting any turn", async () => {
+    const { adapter, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await adapter.sendTurn({
+      workspaceId: "workspace-fixture",
+      text: "Keep the current generation active.",
+      effort: "low",
+      attachmentHandles: [],
+    })
+
+    await expect(
+      adapter.stopTurnAndWaitForTerminal({
+        workspaceId: "workspace-fixture",
+        expectedGeneration: 8,
+      }),
+    ).rejects.toMatchObject({ code: "CODEX-TURN-IDENTITY-STALE" })
+    expect(
+      transport.calls.filter(
+        ({ command }) => command === codexCommands.turnInterrupt,
+      ),
+    ).toHaveLength(0)
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-fixture",
+      generation: 7,
+      phase: "running",
+    })
+  })
+
+  it("fails closed if a different turn becomes active before terminalization", async () => {
+    const { adapter, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+    await adapter.sendTurn({
+      workspaceId: "workspace-fixture",
+      text: "Stop only this exact turn.",
+      effort: "low",
+      attachmentHandles: [],
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    transport.emit(running)
+    const stopping = adapter.stopTurnAndWaitForTerminal({
+      workspaceId: "workspace-fixture",
+      expectedGeneration: 7,
+    })
+    await vi.waitFor(() =>
+      expect(transport.calls.at(-1)?.command).toBe(codexCommands.turnInterrupt),
+    )
+
+    transport.emit({
+      ...running,
+      eventId: "event-different-turn-terminal",
+      sequence: 2,
+      payload: {
+        ...running.payload,
+        turnHandle: "turn_handle_different",
+        status: "interrupted",
+      },
+    })
+
+    await expect(stopping).rejects.toMatchObject({
+      code: "CODEX-TURN-IDENTITY-CHANGED",
+    })
+  })
 })

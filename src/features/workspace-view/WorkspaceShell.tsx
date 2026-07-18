@@ -3,6 +3,14 @@ import { AlertCircleIcon, InfoIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -148,6 +156,20 @@ export function WorkspaceShell({
   const activeTab = view.activeTab
   const registerAttachmentPaths = view.registerAttachmentPaths
   const selectedWorkspaceId = view.selectedWorkspace?.id ?? null
+  const pendingWorkspaceTransition = view.pendingWorkspaceTransition
+  const transitionFromWorkspace = pendingWorkspaceTransition
+    ? view.workspaces.find(
+        (workspace) =>
+          workspace.id === pendingWorkspaceTransition.fromWorkspaceId,
+      )
+    : undefined
+  const transitionToWorkspace = pendingWorkspaceTransition
+    ? view.workspaces.find(
+        (workspace) =>
+          workspace.id === pendingWorkspaceTransition.toWorkspaceId,
+      )
+    : undefined
+  const transitionStopping = pendingWorkspaceTransition?.status === "stopping"
   const codexGeneration = view.codex.generation
   const workspaceGeneration =
     selectedWorkspaceId !== null &&
@@ -663,6 +685,70 @@ export function WorkspaceShell({
           </div>
         ) : null}
       </Tabs>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && !transitionStopping) view.cancelWorkspaceTransition()
+        }}
+        open={pendingWorkspaceTransition !== null}
+      >
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{copy.workspaceSwitch.title}</DialogTitle>
+            <DialogDescription>
+              {copy.workspaceSwitch.description}
+            </DialogDescription>
+          </DialogHeader>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-md gap-y-sm rounded-control border border-divider bg-muted/40 p-md text-caption">
+            <dt className="text-muted-foreground">
+              {copy.workspaceSwitch.from}
+            </dt>
+            <dd className="m-0 truncate font-medium text-text-strong">
+              {transitionFromWorkspace
+                ? `${transitionFromWorkspace.repository}/${transitionFromWorkspace.name}`
+                : pendingWorkspaceTransition?.fromWorkspaceId}
+            </dd>
+            <dt className="text-muted-foreground">{copy.workspaceSwitch.to}</dt>
+            <dd className="m-0 truncate font-medium text-text-strong">
+              {transitionToWorkspace
+                ? `${transitionToWorkspace.repository}/${transitionToWorkspace.name}`
+                : pendingWorkspaceTransition?.toWorkspaceId}
+            </dd>
+          </dl>
+          {transitionStopping ? (
+            <p
+              aria-live="polite"
+              className="m-0 text-caption text-muted-foreground"
+              role="status"
+            >
+              {copy.workspaceSwitch.stopping}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button
+              disabled={transitionStopping}
+              onClick={view.cancelWorkspaceTransition}
+              type="button"
+              variant="ghost"
+            >
+              {copy.workspaceSwitch.goBack}
+            </Button>
+            <Button
+              disabled={transitionStopping}
+              onClick={() =>
+                void view.confirmWorkspaceTransition(
+                  copy.workspaceSwitch.failed,
+                )
+              }
+              type="button"
+            >
+              {transitionStopping
+                ? copy.workspaceSwitch.stopping
+                : copy.workspaceSwitch.confirm}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {view.notice ? (
         <div
