@@ -76,6 +76,34 @@ function renderCaption(
   return { onDismiss, onVisible }
 }
 
+function mockCaptionLayout(
+  caption: HTMLElement,
+  bounds: Partial<DOMRect> = {},
+): void {
+  const rect = {
+    x: 100,
+    y: 100,
+    top: 100,
+    right: 700,
+    bottom: 300,
+    left: 100,
+    width: 600,
+    height: 200,
+    toJSON: () => ({}),
+    ...bounds,
+  } satisfies DOMRect
+  Object.defineProperties(caption, {
+    getBoundingClientRect: {
+      configurable: true,
+      value: () => rect,
+    },
+    getClientRects: {
+      configurable: true,
+      value: () => ({ length: 1 }),
+    },
+  })
+}
+
 describe("CommitNarrationCaption", () => {
   it("renders every accepted chunk in a polite visible log", () => {
     renderCaption(presentation())
@@ -104,10 +132,7 @@ describe("CommitNarrationCaption", () => {
     const onVisible = vi.fn()
     renderCaption(presentation(), vi.fn(), onVisible)
     const caption = screen.getByRole("region", { name: "コミットの説明" })
-    Object.defineProperty(caption, "getClientRects", {
-      configurable: true,
-      value: () => ({ length: 1 }),
-    })
+    mockCaptionLayout(caption)
 
     act(() => frames.flush())
     expect(onVisible).not.toHaveBeenCalled()
@@ -129,6 +154,24 @@ describe("CommitNarrationCaption", () => {
     const frames = installAnimationFrames()
     const onVisible = vi.fn()
     renderCaption(presentation(), vi.fn(), onVisible)
+
+    act(() => frames.flush())
+    act(() => frames.flush())
+
+    expect(onVisible).not.toHaveBeenCalled()
+  })
+
+  it("does not acknowledge a caption clipped outside the active viewport", () => {
+    const frames = installAnimationFrames()
+    const onVisible = vi.fn()
+    renderCaption(presentation(), vi.fn(), onVisible)
+    const caption = screen.getByRole("region", { name: "コミットの説明" })
+    mockCaptionLayout(caption, {
+      y: -240,
+      top: -240,
+      right: 700,
+      bottom: -40,
+    })
 
     act(() => frames.flush())
     act(() => frames.flush())

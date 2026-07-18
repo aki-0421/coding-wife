@@ -33,12 +33,32 @@ function isVisible(element: HTMLElement): boolean {
     return false
   }
   const style = window.getComputedStyle(element)
-  return (
-    style.display !== "none" &&
-    style.visibility !== "hidden" &&
-    style.visibility !== "collapse" &&
-    document.visibilityState !== "hidden"
-  )
+  if (
+    style.display === "none" ||
+    style.visibility === "hidden" ||
+    style.visibility === "collapse" ||
+    document.visibilityState === "hidden"
+  ) {
+    return false
+  }
+  const bounds = element.getBoundingClientRect()
+  const centerX = bounds.left + bounds.width / 2
+  const centerY = bounds.top + bounds.height / 2
+  if (
+    bounds.width <= 0 ||
+    bounds.height <= 0 ||
+    centerX < 0 ||
+    centerY < 0 ||
+    centerX > window.innerWidth ||
+    centerY > window.innerHeight
+  ) {
+    return false
+  }
+  if (typeof document.elementFromPoint === "function") {
+    const hit = document.elementFromPoint(centerX, centerY)
+    if (hit === null || !element.contains(hit)) return false
+  }
+  return true
 }
 
 function presentationVariant(
