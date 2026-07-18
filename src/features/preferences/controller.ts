@@ -30,6 +30,15 @@ export type AppPreferencesPatch = Readonly<{
 }>
 
 type Listener = () => void
+type RetryOperation =
+  | Readonly<{
+      kind: "update"
+      patch: AppPreferencesPatch
+    }>
+  | Readonly<{
+      kind: "reset"
+      postResetPatch: AppPreferencesPatch | null
+    }>
 const maxWriteRebaseAttempts = 3
 
 function initialSnapshot(
@@ -110,8 +119,7 @@ export class AppPreferencesController {
   #resetDefaults: AppPreferencesV1 | null = null
   #desired: AppPreferencesV1 | null = null
   #desiredPatch: AppPreferencesPatch | null = null
-  #retryDesired: AppPreferencesV1 | null = null
-  #retryPatch: AppPreferencesPatch | null = null
+  #retryOperation: RetryOperation | null = null
   #disposed = false
 
   public constructor(gateway: AppPreferencesGateway, defaultLocale: AppLocale) {
@@ -169,19 +177,34 @@ export class AppPreferencesController {
   public update(patch: AppPreferencesPatch): Promise<boolean> {
     if (this.#disposed) return Promise.resolve(false)
     const recoveringFromError = this.#state.status === "error"
+
+    if (recoveringFromError && this.#retryOperation !== null) {
+      const failedOperation = this.#retryOperation
+      this.#retryOperation =
+        failedOperation.kind === "reset"
+          ? {
+              kind: "reset",
+              postResetPatch: {
+                ...(failedOperation.postResetPatch ?? {}),
+                ...patch,
+              },
+            }
+          : {
+              kind: "update",
+              patch: { ...failedOperation.patch, ...patch },
+            }
+      return this.retry()
+    }
+
     const currentDesired =
-      this.#desired ??
-      this.#retryDesired ??
-      this.#resetDefaults ??
-      this.#authoritative.preferences
+      this.#desired ?? this.#resetDefaults ?? this.#authoritative.preferences
     const desired = applyPatch(currentDesired, patch)
     const desiredPatch = {
-      ...(this.#desiredPatch ?? this.#retryPatch ?? {}),
+      ...(this.#desiredPatch ?? {}),
       ...patch,
     }
 
-    this.#retryDesired = null
-    this.#retryPatch = null
+    this.#retryOperation = null
 
     if (
       this.#resetPromise === null &&
@@ -214,21 +237,77 @@ export class AppPreferencesController {
   public reset(): Promise<boolean> {
     if (this.#disposed) return Promise.resolve(false)
     if (this.#resetPromise !== null) return this.#resetPromise
-    if (this.#state.status === "error") this.#initializePromise = null
+    return this.startReset(null, this.#state.status === "error")
+  }
+
+  public retry(): Promise<boolean> {
+    if (this.#disposed) return Promise.resolve(false)
+    if (this.#state.status !== "error") return Promise.resolve(true)
+    if (this.#retryPromise !== null) return this.#retryPromise
+    const failedOperation = this.#retryOperation
+    this.#retryOperation = null
+    this.#initializePromise = null
+    this.publish({
+      ...this.#state,
+      status: "loading",
+      pendingPreferences: null,
+      errorCode: null,
+    })
+
+    let retry: Promise<boolean>
+    if (failedOperation?.kind === "reset") {
+      const reset = this.startReset(failedOperation.postResetPatch, false)
+      retry = reset.then((succeeded) => {
+        if (!succeeded || this.#disposed) return false
+        return this.#desired === null ? true : this.ensureUpdateDrain()
+      })
+    } else {
+      if (failedOperation?.kind === "update") {
+        this.#desiredPatch = failedOperation.patch
+        this.#desired = applyPatch(
+          this.#authoritative.preferences,
+          failedOperation.patch,
+        )
+      }
+      retry = this.initialize().then((initialized) => {
+        if (!initialized || this.#disposed) return false
+        return this.#desired === null ? true : this.ensureUpdateDrain()
+      })
+    }
+    this.#retryPromise = retry
+    void retry.finally(() => {
+      if (this.#retryPromise === retry) this.#retryPromise = null
+    })
+    return retry
+  }
+
+  public dispose(): void {
+    this.#disposed = true
+    this.#desired = null
+    this.#desiredPatch = null
+    this.#retryOperation = null
+    this.#listeners.clear()
+  }
+
+  private startReset(
+    postResetPatch: AppPreferencesPatch | null,
+    reloadBeforeReset: boolean,
+  ): Promise<boolean> {
+    if (reloadBeforeReset) this.#initializePromise = null
     const defaults: AppPreferencesV1 = {
       ...createSafeDefaultPreferences(this.#defaultLocale),
       version: this.#authoritative.preferences.version,
       snapshotId: this.#authoritative.preferences.snapshotId,
     }
-    this.#desired = null
-    this.#desiredPatch = null
-    this.#retryDesired = null
-    this.#retryPatch = null
+    this.#desired =
+      postResetPatch === null ? null : applyPatch(defaults, postResetPatch)
+    this.#desiredPatch = postResetPatch
+    this.#retryOperation = null
     this.#resetDefaults = defaults
     this.publish({
       ...this.#state,
       status: "saving",
-      pendingPreferences: defaults,
+      pendingPreferences: this.#desired ?? defaults,
       errorCode: null,
     })
 
@@ -256,41 +335,6 @@ export class AppPreferencesController {
       }
     })
     return run
-  }
-
-  public retry(): Promise<boolean> {
-    if (this.#disposed) return Promise.resolve(false)
-    if (this.#state.status !== "error") return Promise.resolve(true)
-    if (this.#retryPromise !== null) return this.#retryPromise
-    this.#desired = this.#retryDesired
-    this.#desiredPatch = this.#retryPatch
-    this.#retryDesired = null
-    this.#retryPatch = null
-    this.#initializePromise = null
-    this.publish({
-      ...this.#state,
-      status: "loading",
-      pendingPreferences: null,
-      errorCode: null,
-    })
-    const retry = this.initialize().then((initialized) => {
-      if (!initialized || this.#disposed) return false
-      return this.#desired === null ? true : this.ensureUpdateDrain()
-    })
-    this.#retryPromise = retry
-    void retry.finally(() => {
-      if (this.#retryPromise === retry) this.#retryPromise = null
-    })
-    return retry
-  }
-
-  public dispose(): void {
-    this.#disposed = true
-    this.#desired = null
-    this.#desiredPatch = null
-    this.#retryDesired = null
-    this.#retryPatch = null
-    this.#listeners.clear()
   }
 
   private ensureUpdateDrain(): Promise<boolean> {
@@ -475,8 +519,19 @@ export class AppPreferencesController {
 
   private fail(error: unknown): false {
     if (this.#disposed) return false
-    this.#retryDesired = this.#desired
-    this.#retryPatch = this.#desiredPatch
+    const retryOperation: RetryOperation | null =
+      this.#resetPromise !== null
+        ? {
+            kind: "reset",
+            postResetPatch: this.#desiredPatch,
+          }
+        : this.#desiredPatch === null
+          ? null
+          : {
+              kind: "update",
+              patch: this.#desiredPatch,
+            }
+    if (retryOperation !== null) this.#retryOperation = retryOperation
     this.#desired = null
     this.#desiredPatch = null
     this.publish({

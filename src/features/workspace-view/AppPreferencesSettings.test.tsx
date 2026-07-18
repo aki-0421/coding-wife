@@ -503,10 +503,14 @@ describe("AppPreferencesSettings", () => {
     })
   })
 
-  it("keeps a failed reset dialog open, clears resetting, and allows retry", async () => {
+  it("keeps a failed reset through dialog cancel and retries the reset operation", async () => {
     const user = userEvent.setup()
     const gateway = new DeferredNativePreferencesGateway()
     gateway.deferResets = true
+    gateway.durable = nativeSnapshot(5, "en", {
+      reducedMotion: "on",
+      characterVisibility: "hidden",
+    })
     const controller = new AppPreferencesController(gateway, "en")
     await controller.initialize()
     renderSettings(controller)
@@ -535,7 +539,13 @@ describe("AppPreferencesSettings", () => {
     expect(dialog).toBeVisible()
     expect(controller.getSnapshot()).toMatchObject({
       status: "error",
-      snapshot: { preferences: { version: 0 } },
+      snapshot: {
+        preferences: {
+          version: 5,
+          reducedMotion: "on",
+          characterVisibility: "hidden",
+        },
+      },
       errorCode: "APP-PREFERENCES-WRITE",
     })
 
@@ -543,7 +553,19 @@ describe("AppPreferencesSettings", () => {
     expect(trigger).toHaveFocus()
     const alert = alertContaining("Preferences were not saved")
     await user.click(within(alert).getByRole("button", { name: "Retry" }))
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
-    expect(controller.getSnapshot().status).toBe("ready")
+    await waitFor(() => expect(gateway.resetResults).toHaveLength(4))
+    expect(gateway.resets[3]).toEqual({
+      schemaVersion: 1,
+      expectedVersion: 5,
+      defaultLocale: "en",
+    })
+    gateway.resetResults[3]?.resolve(nativeSnapshot(6, "en"))
+    await waitFor(() => expect(controller.getSnapshot().status).toBe("ready"))
+    expect(controller.getSnapshot().snapshot.preferences).toMatchObject({
+      version: 6,
+      reducedMotion: "system",
+      characterVisibility: "visible",
+    })
+    expect(screen.queryByRole("alert")).toBeNull()
   })
 })
