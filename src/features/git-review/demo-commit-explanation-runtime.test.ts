@@ -21,6 +21,53 @@ function scope(locale: "ja" | "en") {
   } as const
 }
 
+function userDispatch(
+  commitEvidenceId: string,
+  requestId: string,
+  selectionVersion: number,
+) {
+  return {
+    request: {
+      schemaVersion: gitReviewSchemaVersion,
+      requestId,
+      workspaceId,
+      workspaceGeneration,
+      commitEvidenceId,
+      locale: "en" as const,
+      selectionVersion,
+      trigger: "user_request" as const,
+      requestedAt: now.toISOString(),
+    },
+    evidence: {
+      schemaVersion: gitReviewSchemaVersion,
+      commitId: commitEvidenceId,
+      subject: "chore: update local project metadata",
+      body: "Keep the demo presentation bound to its selected commit.",
+      changes: [
+        {
+          changeKind: "modified" as const,
+          fileCount: 1,
+          additions: 1,
+          deletions: 1,
+          binaryFiles: 0,
+        },
+      ],
+      diffSummary: {
+        filesChanged: 1,
+        additions: 1,
+        deletions: 1,
+        binaryFiles: 0,
+      },
+      verification: [],
+      decisions: [],
+      risks: [],
+      locale: "en" as const,
+      workspaceGeneration,
+      selectionVersion,
+    },
+  }
+}
+
 describe("DemoCommitExplanationRuntime", () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
@@ -106,7 +153,7 @@ describe("DemoCommitExplanationRuntime", () => {
     ).toBe("generated")
   })
 
-  it("drops timers from an older locale scope and resumes safely after lifecycle disposal", async () => {
+  it("preserves jobs from an older locale scope and resumes safely after lifecycle disposal", async () => {
     const runtime = new DemoCommitExplanationRuntime({
       runningDelayMs: 40,
       generatedDelayMs: 100,
@@ -136,6 +183,82 @@ describe("DemoCommitExplanationRuntime", () => {
         demoCurrentCommitEvidenceId,
       ),
     ).toMatchObject({ status: "generated", locale: "ja" })
+    await runtime.setScope(scope("en"))
+    expect(
+      runtime.getState(
+        workspaceId,
+        workspaceGeneration,
+        demoCurrentCommitEvidenceId,
+      ),
+    ).toMatchObject({ status: "generated", locale: "en" })
+  })
+
+  it("presents a generated cache hit immediately on the first user action", async () => {
+    const runtime = new DemoCommitExplanationRuntime({
+      runningDelayMs: 40,
+      generatedDelayMs: 100,
+      now: () => now,
+    })
+    const events: unknown[] = []
+    runtime.narrationSource.subscribe((event) => events.push(event))
+    await runtime.start()
+    await runtime.setScope(scope("en"))
+    await vi.advanceTimersByTimeAsync(100)
+    expect(events).toEqual([])
+
+    await runtime.request(
+      userDispatch(demoCurrentCommitEvidenceId, "demo-cache-hit", 2),
+    )
+
+    expect(events).toHaveLength(5)
+    expect(events[0]).toEqual(
+      expect.objectContaining({ kind: "started", requestId: "demo-cache-hit" }),
+    )
+    expect(
+      runtime.getState(
+        workspaceId,
+        workspaceGeneration,
+        demoCurrentCommitEvidenceId,
+      ),
+    ).toMatchObject({ status: "generated", requestId: "demo-cache-hit" })
+  })
+
+  it("revokes only presentation intent while a user-requested job completes and stays cached", async () => {
+    const runtime = new DemoCommitExplanationRuntime({
+      runningDelayMs: 40,
+      generatedDelayMs: 100,
+      now: () => now,
+    })
+    const events: unknown[] = []
+    runtime.narrationSource.subscribe((event) => events.push(event))
+    await runtime.start()
+    await runtime.setScope(scope("en"))
+    await runtime.request(
+      userDispatch(previousCommitEvidenceId, "demo-revoked", 2),
+    )
+    runtime.revokePresentationIntent("turn_stop")
+    await vi.advanceTimersByTimeAsync(100)
+
+    const generated = runtime.getState(
+      workspaceId,
+      workspaceGeneration,
+      previousCommitEvidenceId,
+    )
+    expect(generated).toMatchObject({
+      status: "generated",
+      requestId: "demo-revoked",
+    })
+    expect(events).toEqual([])
+    await runtime.present({
+      schemaVersion: gitReviewSchemaVersion,
+      workspaceId,
+      workspaceGeneration,
+      commitEvidenceId: previousCommitEvidenceId,
+      requestId: "demo-revoked",
+      mode: "show",
+      requestedAt: now.toISOString(),
+    })
+    expect(events).toHaveLength(5)
   })
 
   it("cancels only the exact active request and ignores its late phase timers", async () => {
@@ -185,7 +308,7 @@ describe("DemoCommitExplanationRuntime", () => {
     })
   })
 
-  it("uses the selected commit identity for a user-requested presentation", async () => {
+  it("presents the selected commit after one user request", async () => {
     const runtime = new DemoCommitExplanationRuntime({
       runningDelayMs: 40,
       generatedDelayMs: 100,
@@ -239,16 +362,6 @@ describe("DemoCommitExplanationRuntime", () => {
       },
     })
     await vi.advanceTimersByTimeAsync(100)
-
-    await runtime.present({
-      schemaVersion: gitReviewSchemaVersion,
-      workspaceId,
-      workspaceGeneration,
-      commitEvidenceId: previousCommitEvidenceId,
-      requestId: "demo-previous-commit",
-      mode: "show",
-      requestedAt: now.toISOString(),
-    })
 
     expect(events).toEqual([
       expect.objectContaining({

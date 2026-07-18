@@ -8,6 +8,7 @@ import {
   CommitExplanationBoundaryError,
   type CommitExplanationAppRuntime,
   type CommitExplanationPresentationActivator,
+  type CommitExplanationPresentationRevokeReason,
 } from "@/features/git-review/commit-explanation-adapter"
 import { demoCurrentCommitEvidenceId } from "@/features/git-review/demo-transport"
 import {
@@ -33,8 +34,17 @@ import {
 type TimerHandle = ReturnType<typeof setTimeout>
 
 interface ActiveRequest {
+  request: CommitExplanationRequestedV1
+  readonly timers: Set<TimerHandle>
+}
+
+interface PresentationIntent {
+  readonly epoch: number
   readonly request: CommitExplanationRequestedV1
-  readonly scopeEpoch: number
+  readonly commitSha: string
+  readonly mode: CommitExplanationPresentationV1["mode"]
+  readonly issuedAt: number
+  presented: boolean
 }
 
 export interface DemoCommitExplanationRuntimeOptions {
@@ -50,8 +60,14 @@ function stateKey(
   workspaceId: string,
   workspaceGeneration: number,
   commitEvidenceId: string,
+  locale: "ja" | "en",
 ): string {
-  return JSON.stringify([workspaceId, workspaceGeneration, commitEvidenceId])
+  return JSON.stringify([
+    workspaceId,
+    workspaceGeneration,
+    commitEvidenceId,
+    locale,
+  ])
 }
 
 function sameScope(
@@ -197,16 +213,17 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
   readonly #stateListeners = new Set<() => void>()
   readonly #narrationListeners = new Set<(event: unknown) => void>()
   readonly #timers = new Set<TimerHandle>()
+  readonly #activeRequests = new Map<string, ActiveRequest>()
   readonly #generationHighWater = new Map<string, number>()
   readonly #runningDelayMs: number
   readonly #generatedDelayMs: number
   readonly #now: () => Date
   #scope: CommitExplanationScopeRequestedV1 | null = null
-  #scopeEpoch = 0
   #requestSequence = 0
-  #activeRequest: ActiveRequest | null = null
   #started = false
   #presentationActivator: CommitExplanationPresentationActivator | null = null
+  #presentationIntentEpoch = 0
+  #presentationIntent: PresentationIntent | null = null
 
   readonly narrationSource: CommitNarrationConsumerPort = {
     subscribe: (listener) => {
@@ -240,11 +257,12 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
 
   start(): Promise<void> {
     this.#started = true
-    this.resumeActiveRequest()
+    this.resumeActiveRequests()
     return Promise.resolve()
   }
 
   dispose(): void {
+    this.revokePresentationIntent("dispose")
     this.#started = false
     this.clearTimers()
   }
@@ -261,7 +279,7 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
         )
       }
       if (sameScope(this.#scope, scope)) {
-        this.resumeActiveRequest()
+        this.resumeActiveRequests()
         return
       }
 
@@ -269,9 +287,19 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
         scope.workspaceId,
         scope.workspaceGeneration,
       )
-      this.clearTimers()
-      const scopeEpoch = ++this.#scopeEpoch
+      this.revokePresentationIntent("scope_change")
       this.#scope = scope
+      const key = stateKey(
+        scope.workspaceId,
+        scope.workspaceGeneration,
+        demoCurrentCommitEvidenceId,
+        scope.locale,
+      )
+      const existing = this.#states.get(key)
+      if (existing !== undefined) {
+        this.resumeActiveRequests()
+        return
+      }
       const request = createCommitExplanationRequested({
         schemaVersion: gitReviewSchemaVersion,
         requestId: `demo-auto-${scope.workspaceGeneration}-${++this.#requestSequence}`,
@@ -283,8 +311,16 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
         trigger: "auto_verified_commit",
         requestedAt: this.timestamp(),
       })
-      this.beginRequest(request, scopeEpoch)
+      this.beginRequest(request)
     })
+  }
+
+  revokePresentationIntent(
+    reason: CommitExplanationPresentationRevokeReason,
+  ): void {
+    void reason
+    ++this.#presentationIntentEpoch
+    this.#presentationIntent = null
   }
 
   readonly request = (
@@ -306,22 +342,44 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
           true,
         )
       }
+      this.issuePresentationIntent(dispatch.request, "show")
 
       const existing = this.#states.get(
         stateKey(
           dispatch.request.workspaceId,
           dispatch.request.workspaceGeneration,
           dispatch.request.commitEvidenceId,
+          dispatch.request.locale,
         ),
       )
       if (existing?.status === "generated") {
-        this.clearTimers()
-        this.#activeRequest = null
         this.applyState(this.stateFor(dispatch.request, "generated"))
         return
       }
-      this.clearTimers()
-      this.beginRequest(dispatch.request, this.#scopeEpoch)
+      if (existing?.status === "queued" || existing?.status === "running") {
+        const key = this.requestKey(dispatch.request)
+        const active = this.#activeRequests.get(key)
+        if (active !== undefined) active.request = dispatch.request
+        this.applyState(this.stateFor(dispatch.request, existing.status))
+        this.resumeActiveRequests()
+        return
+      }
+      if (
+        existing !== undefined &&
+        existing.status !== "not_generated" &&
+        dispatch.request.trigger !== "user_retry"
+      ) {
+        this.applyState({
+          ...existing,
+          requestId: dispatch.request.requestId,
+          locale: dispatch.request.locale,
+          selectionVersion: dispatch.request.selectionVersion,
+          trigger: dispatch.request.trigger,
+          updatedAt: this.timestamp(),
+        })
+        return
+      }
+      this.beginRequest(dispatch.request)
     })
   }
 
@@ -330,23 +388,27 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
   ): Promise<void> => {
     return runPromiseBoundary(() => {
       const request = createCommitExplanationCancelRequested(requestValue)
-      const active = this.#activeRequest
+      const active = [...this.#activeRequests.values()].find(
+        (candidate) =>
+          candidate.request.requestId === request.requestId &&
+          candidate.request.workspaceGeneration ===
+            request.workspaceGeneration &&
+          candidate.request.selectionVersion === request.selectionVersion,
+      )
       const state =
-        active === null
+        active === undefined
           ? undefined
           : this.#states.get(
               stateKey(
                 active.request.workspaceId,
                 active.request.workspaceGeneration,
                 active.request.commitEvidenceId,
+                active.request.locale,
               ),
             )
       if (
-        active === null ||
+        active === undefined ||
         state === undefined ||
-        active.request.requestId !== request.requestId ||
-        active.request.workspaceGeneration !== request.workspaceGeneration ||
-        active.request.selectionVersion !== request.selectionVersion ||
         (state.status !== "queued" && state.status !== "running")
       ) {
         throw boundaryError(
@@ -355,8 +417,11 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
           true,
         )
       }
-      this.clearTimers()
-      this.#activeRequest = null
+      this.clearRequestTimers(active)
+      this.#activeRequests.delete(this.requestKey(active.request))
+      if (this.#presentationIntent?.request.requestId === request.requestId) {
+        this.revokePresentationIntent("close")
+      }
       this.applyState(
         this.stateFor(active.request, "canceled", "CODEX-SUPPORT-CANCELED"),
       )
@@ -374,6 +439,7 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
           request.workspaceId,
           request.workspaceGeneration,
           request.commitEvidenceId,
+          scope?.locale ?? "ja",
         ),
       )
       if (
@@ -411,6 +477,20 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
         latencyMs: this.#generatedDelayMs,
         presentedAt: this.timestamp(),
       })
+      this.issuePresentationIntent(
+        createCommitExplanationRequested({
+          schemaVersion: gitReviewSchemaVersion,
+          requestId: state.requestId,
+          workspaceId: state.workspaceId,
+          workspaceGeneration: state.workspaceGeneration,
+          commitEvidenceId: state.commitEvidenceId,
+          locale: state.locale,
+          selectionVersion: state.selectionVersion,
+          trigger: state.trigger,
+          requestedAt: request.requestedAt,
+        }),
+        request.mode,
+      )
       this.publishPresentation(presentation)
     })
   }
@@ -430,7 +510,20 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
     } catch {
       return null
     }
-    const key = stateKey(workspaceId, workspaceGeneration, commitEvidenceId)
+    const scope = this.#scope
+    if (
+      scope === null ||
+      scope.workspaceId !== workspaceId ||
+      scope.workspaceGeneration !== workspaceGeneration
+    ) {
+      return null
+    }
+    const key = stateKey(
+      workspaceId,
+      workspaceGeneration,
+      commitEvidenceId,
+      scope.locale,
+    )
     const existing = this.#states.get(key)
     if (existing !== undefined) return existing
     const state = parseCommitExplanationControllerState({
@@ -456,6 +549,114 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
     return this.#now().toISOString()
   }
 
+  private issuePresentationIntent(
+    request: CommitExplanationRequestedV1,
+    mode: CommitExplanationPresentationV1["mode"],
+  ): PresentationIntent {
+    const commitSha = fullCommitSha(request.commitEvidenceId)
+    if (commitSha === null) {
+      throw boundaryError(
+        "CODEX-SUPPORT-PRESENTATION-STALE",
+        commitExplanationCommands.present,
+        false,
+      )
+    }
+    const parsedIssuedAt = Date.parse(request.requestedAt)
+    const intent: PresentationIntent = {
+      epoch: ++this.#presentationIntentEpoch,
+      request,
+      commitSha,
+      mode,
+      issuedAt: Number.isFinite(parsedIssuedAt)
+        ? parsedIssuedAt
+        : this.#now().getTime(),
+      presented: false,
+    }
+    this.#presentationIntent = intent
+    return intent
+  }
+
+  private isPresentationIntentCurrent(intent: PresentationIntent): boolean {
+    return (
+      this.#presentationIntent === intent &&
+      this.#presentationIntentEpoch === intent.epoch
+    )
+  }
+
+  private intentMatchesState(
+    intent: PresentationIntent,
+    state: CommitExplanationControllerStateV1,
+  ): boolean {
+    const request = intent.request
+    return (
+      state.workspaceId === request.workspaceId &&
+      state.workspaceGeneration === request.workspaceGeneration &&
+      state.commitEvidenceId === request.commitEvidenceId &&
+      state.requestId === request.requestId &&
+      state.locale === request.locale &&
+      state.selectionVersion === request.selectionVersion &&
+      state.trigger === request.trigger
+    )
+  }
+
+  private presentMatchingIntent(
+    state: CommitExplanationControllerStateV1,
+  ): void {
+    const intent = this.#presentationIntent
+    if (
+      intent === null ||
+      intent.presented ||
+      !this.isPresentationIntentCurrent(intent) ||
+      !this.intentMatchesState(intent, state)
+    ) {
+      return
+    }
+    if (state.status !== "generated" || !state.presentationAvailable) {
+      if (
+        state.status === "failed" ||
+        state.status === "unavailable" ||
+        state.status === "canceled"
+      ) {
+        this.revokePresentationIntent("close")
+      }
+      return
+    }
+    this.publishPresentation(this.presentationFor(state, intent.mode))
+  }
+
+  private presentationFor(
+    state: CommitExplanationControllerStateV1,
+    mode: CommitExplanationPresentationV1["mode"],
+  ): CommitExplanationPresentationV1 {
+    if (
+      state.requestId === null ||
+      state.locale === null ||
+      state.selectionVersion === null ||
+      state.trigger === null
+    ) {
+      throw boundaryError(
+        "CODEX-SUPPORT-PRESENTATION-STALE",
+        commitExplanationCommands.present,
+        true,
+      )
+    }
+    return parseCommitExplanationPresentation({
+      schemaVersion: gitReviewSchemaVersion,
+      workspaceId: state.workspaceId,
+      workspaceGeneration: state.workspaceGeneration,
+      commitEvidenceId: state.commitEvidenceId,
+      requestId: state.requestId,
+      selectionVersion: state.selectionVersion,
+      trigger: state.trigger,
+      locale: state.locale,
+      mode,
+      explanation: explanationFor(state.locale),
+      usage: { inputTokens: 384, outputTokens: 146, totalTokens: 530 },
+      latencyMs: this.#generatedDelayMs,
+      presentedAt: this.timestamp(),
+    })
+  }
+
   private requestMatchesScope(request: CommitExplanationRequestedV1): boolean {
     return (
       this.#scope?.workspaceId === request.workspaceId &&
@@ -464,35 +665,51 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
     )
   }
 
-  private beginRequest(
-    request: CommitExplanationRequestedV1,
-    scopeEpoch: number,
-  ): void {
-    this.#activeRequest = { request, scopeEpoch }
-    this.applyState(this.stateFor(request, "queued"))
-    this.resumeActiveRequest()
+  private requestKey(request: CommitExplanationRequestedV1): string {
+    return stateKey(
+      request.workspaceId,
+      request.workspaceGeneration,
+      request.commitEvidenceId,
+      request.locale,
+    )
   }
 
-  private resumeActiveRequest(): void {
-    const active = this.#activeRequest
-    if (!this.#started || active === null || this.#timers.size > 0) return
+  private beginRequest(request: CommitExplanationRequestedV1): void {
+    const active: ActiveRequest = { request, timers: new Set() }
+    this.#activeRequests.set(this.requestKey(request), active)
+    this.applyState(this.stateFor(request, "queued"))
+    this.resumeActiveRequest(active)
+  }
+
+  private resumeActiveRequests(): void {
+    for (const active of this.#activeRequests.values()) {
+      this.resumeActiveRequest(active)
+    }
+  }
+
+  private resumeActiveRequest(active: ActiveRequest): void {
+    if (!this.#started || active.timers.size > 0 || !this.isActive(active)) {
+      return
+    }
     const state = this.#states.get(
       stateKey(
         active.request.workspaceId,
         active.request.workspaceGeneration,
         active.request.commitEvidenceId,
+        active.request.locale,
       ),
     )
     if (state?.status === "queued") {
-      this.schedule(this.#runningDelayMs, () => {
+      this.schedule(active, this.#runningDelayMs, () => {
         if (!this.isActive(active)) return
         this.applyState(this.stateFor(active.request, "running"))
       })
-      this.schedule(this.#generatedDelayMs, () => {
+      this.schedule(active, this.#generatedDelayMs, () => {
         this.finishRequest(active)
       })
     } else if (state?.status === "running") {
       this.schedule(
+        active,
         Math.max(0, this.#generatedDelayMs - this.#runningDelayMs),
         () => this.finishRequest(active),
       )
@@ -501,16 +718,14 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
 
   private finishRequest(active: ActiveRequest): void {
     if (!this.isActive(active)) return
-    this.#activeRequest = null
+    this.#activeRequests.delete(this.requestKey(active.request))
     this.applyState(this.stateFor(active.request, "generated"))
   }
 
   private isActive(active: ActiveRequest): boolean {
     return (
       this.#started &&
-      this.#activeRequest === active &&
-      this.#scopeEpoch === active.scopeEpoch &&
-      this.requestMatchesScope(active.request)
+      this.#activeRequests.get(this.requestKey(active.request)) === active
     )
   }
 
@@ -542,6 +757,7 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
         state.workspaceId,
         state.workspaceGeneration,
         state.commitEvidenceId,
+        state.locale ?? this.#scope?.locale ?? "ja",
       ),
       state,
     )
@@ -552,26 +768,66 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
         // A demo view subscriber cannot interrupt the deterministic fixture.
       }
     }
+    this.presentMatchingIntent(state)
   }
 
-  private schedule(delayMs: number, action: () => void): void {
+  private schedule(
+    active: ActiveRequest,
+    delayMs: number,
+    action: () => void,
+  ): void {
     const timer = setTimeout(() => {
       this.#timers.delete(timer)
+      active.timers.delete(timer)
       action()
     }, delayMs)
     this.#timers.add(timer)
+    active.timers.add(timer)
+  }
+
+  private clearRequestTimers(active: ActiveRequest): void {
+    for (const timer of active.timers) {
+      clearTimeout(timer)
+      this.#timers.delete(timer)
+    }
+    active.timers.clear()
   }
 
   private clearTimers(): void {
     for (const timer of this.#timers) clearTimeout(timer)
     this.#timers.clear()
+    for (const active of this.#activeRequests.values()) {
+      active.timers.clear()
+    }
   }
 
   private publishPresentation(
     presentation: CommitExplanationPresentationV1,
   ): void {
+    const intent = this.#presentationIntent
     const commitSha = fullCommitSha(presentation.commitEvidenceId)
-    if (commitSha === null) return
+    const presentedAt = Date.parse(presentation.presentedAt)
+    if (
+      intent === null ||
+      intent.presented ||
+      !this.isPresentationIntentCurrent(intent) ||
+      commitSha === null ||
+      commitSha !== intent.commitSha ||
+      presentation.workspaceId !== intent.request.workspaceId ||
+      presentation.workspaceGeneration !== intent.request.workspaceGeneration ||
+      presentation.commitEvidenceId !== intent.request.commitEvidenceId ||
+      presentation.requestId !== intent.request.requestId ||
+      presentation.selectionVersion !== intent.request.selectionVersion ||
+      presentation.trigger !== intent.request.trigger ||
+      presentation.locale !== intent.request.locale ||
+      presentation.mode !== intent.mode ||
+      !Number.isFinite(presentedAt) ||
+      presentedAt < intent.issuedAt ||
+      !this.requestMatchesScope(intent.request)
+    ) {
+      return
+    }
+    intent.presented = true
     const base = {
       schemaVersion: gitReviewSchemaVersion,
       source: "background_support" as const,
@@ -600,7 +856,9 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
       }),
     ]
     for (const event of events) {
+      if (!this.isPresentationIntentCurrent(intent)) return
       for (const listener of [...this.#narrationListeners]) {
+        if (!this.isPresentationIntentCurrent(intent)) return
         try {
           listener(event)
         } catch {
@@ -610,7 +868,7 @@ export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime
     }
 
     const activator = this.#presentationActivator
-    if (activator === null) return
+    if (activator === null || !this.isPresentationIntentCurrent(intent)) return
     const key: CommitNarrationSourceKey = {
       workspaceId: presentation.workspaceId,
       workspaceGeneration: presentation.workspaceGeneration,

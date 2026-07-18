@@ -29,6 +29,7 @@ class FakeCommitExplanationRuntime implements CommitExplanationAppRuntime {
   readonly getState = vi.fn(() => null)
   readonly subscribe = vi.fn(() => () => undefined)
   readonly setScope = vi.fn(() => Promise.resolve())
+  readonly revokePresentationIntent = vi.fn(() => undefined)
   readonly start = vi.fn(() => Promise.resolve())
   readonly dispose = vi.fn(() => undefined)
   readonly setPresentationActivator = vi.fn(() => undefined)
@@ -162,6 +163,7 @@ describe("App commit explanation composition", () => {
     fireEvent.click(await screen.findByRole("button", { name: "停止" }))
     await waitFor(() => expect(stopTurn).toHaveBeenCalledOnce())
     expect(dismissPresentation).toHaveBeenCalledWith("turn_stop")
+    expect(runtime.revokePresentationIntent).toHaveBeenCalledWith("turn_stop")
     expect(runtime.cancel).not.toHaveBeenCalled()
 
     resolveStop?.()

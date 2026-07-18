@@ -189,6 +189,7 @@ struct ExplanationKey {
     workspace_id: String,
     workspace_generation: u64,
     commit_evidence_id: String,
+    locale: String,
 }
 
 impl ExplanationKey {
@@ -197,15 +198,14 @@ impl ExplanationKey {
             workspace_id: request.workspace_id.clone(),
             workspace_generation: request.workspace_generation,
             commit_evidence_id: request.commit_evidence_id.clone(),
+            locale: request.locale.clone(),
         }
     }
 
-    fn from_state_request(request: &CommitExplanationStateRequestedV1) -> Self {
-        Self {
-            workspace_id: request.workspace_id.clone(),
-            workspace_generation: request.workspace_generation,
-            commit_evidence_id: request.commit_evidence_id.clone(),
-        }
+    fn matches_state_request(&self, request: &CommitExplanationStateRequestedV1) -> bool {
+        self.workspace_id == request.workspace_id
+            && self.workspace_generation == request.workspace_generation
+            && self.commit_evidence_id == request.commit_evidence_id
     }
 }
 
@@ -720,20 +720,20 @@ impl CommitExplanationController {
         request: CommitExplanationPresentationRequestedV1,
     ) -> Result<CommitExplanationPresentationV1, CommitExplanationControllerError> {
         validate_presentation(&request)?;
-        let key = ExplanationKey {
-            workspace_id: request.workspace_id.clone(),
-            workspace_generation: request.workspace_generation,
-            commit_evidence_id: request.commit_evidence_id.clone(),
-        };
         let cached = self
             .inner
             .data
             .lock()
             .await
             .cache
-            .get(&key)
-            .cloned()
-            .filter(|cached| cached.request.request_id == request.request_id)
+            .iter()
+            .find(|(key, cached)| {
+                key.workspace_id == request.workspace_id
+                    && key.workspace_generation == request.workspace_generation
+                    && key.commit_evidence_id == request.commit_evidence_id
+                    && cached.request.request_id == request.request_id
+            })
+            .map(|(_, cached)| cached.clone())
             .ok_or_else(|| {
                 controller_error(
                     "CODEX-SUPPORT-PRESENTATION-MISSING",
@@ -751,15 +751,27 @@ impl CommitExplanationController {
         request: CommitExplanationStateRequestedV1,
     ) -> Result<CommitExplanationControllerStateV1, CommitExplanationControllerError> {
         validate_state_request(&request)?;
-        let key = ExplanationKey::from_state_request(&request);
-        Ok(self
-            .inner
-            .data
-            .lock()
-            .await
+        let data = self.inner.data.lock().await;
+        let scoped_locale = data.active_scope.as_ref().and_then(|scope| {
+            (scope.workspace_id == request.workspace_id
+                && scope.workspace_generation == request.workspace_generation)
+                .then_some(scope.locale.as_str())
+        });
+        let scoped = scoped_locale.and_then(|locale| {
+            data.states.iter().find_map(|(key, state)| {
+                (key.matches_state_request(&request) && key.locale == locale)
+                    .then_some(state.clone())
+            })
+        });
+        let fallback = data
             .states
-            .get(&key)
-            .cloned()
+            .iter()
+            .filter(|(key, _)| key.matches_state_request(&request))
+            .map(|(_, state)| state)
+            .max_by(|left, right| left.updated_at.cmp(&right.updated_at))
+            .cloned();
+        Ok(scoped
+            .or(fallback)
             .unwrap_or_else(|| CommitExplanationControllerStateV1 {
                 schema_version: 1,
                 workspace_id: request.workspace_id,
@@ -796,65 +808,7 @@ impl CommitExplanationController {
         }
         data.generations
             .insert(request.workspace_id.clone(), request.workspace_generation);
-        data.active_scope = Some(request.clone());
-
-        let stale_queue = data
-            .queue
-            .iter()
-            .filter(|task| !scope_matches_task(&request, task))
-            .map(|task| task.key.clone())
-            .collect::<Vec<_>>();
-        data.queue.retain(|task| !stale_queue.contains(&task.key));
-        let mut changed = Vec::new();
-        for key in stale_queue {
-            if let Some(previous) = data.states.get(&key).cloned() {
-                let state = canceled_for_scope(previous);
-                data.states.insert(key, state.clone());
-                changed.push(state);
-            }
-        }
-        let stale_cache = data
-            .cache
-            .iter()
-            .filter(|(key, cached)| {
-                key.workspace_id == request.workspace_id
-                    && key.workspace_generation == request.workspace_generation
-                    && cached.request.locale != request.locale
-            })
-            .map(|(key, _)| key.clone())
-            .collect::<Vec<_>>();
-        for key in stale_cache {
-            data.cache.remove(&key);
-            data.cache_order.retain(|candidate| candidate != &key);
-            if let Some(previous) = data.states.get(&key).cloned() {
-                let state = canceled_for_scope(previous);
-                data.states.insert(key, state.clone());
-                changed.push(state);
-            }
-        }
-        let active_request = data.active.as_ref().and_then(|active| {
-            (!scope_matches_task(&request, &active.task)).then(|| {
-                active.canceled.store(true, Ordering::Release);
-                active.executor_request_id.clone()
-            })
-        });
-        if let Some(active) = data.active.as_ref() {
-            if active_request.is_some() {
-                if let Some(previous) = data.states.get(&active.task.key).cloned() {
-                    let key = active.task.key.clone();
-                    let state = canceled_for_scope(previous);
-                    data.states.insert(key, state.clone());
-                    changed.push(state);
-                }
-            }
-        }
-        drop(data);
-        for state in changed {
-            self.inner.events.emit_state(&state);
-        }
-        if let Some(request_id) = active_request {
-            let _ = self.inner.executor.cancel(&request_id).await;
-        }
+        data.active_scope = Some(request);
         Ok(())
     }
 
@@ -901,20 +855,6 @@ impl CommitExplanationController {
                     data.worker_running = false;
                     return;
                 };
-                if !data
-                    .active_scope
-                    .as_ref()
-                    .is_some_and(|scope| scope_matches_task(scope, &task))
-                {
-                    if let Some(previous) = data.states.get(&task.key).cloned() {
-                        let state = canceled_for_scope(previous);
-                        data.states.insert(task.key.clone(), state.clone());
-                        drop(data);
-                        self.inner.events.emit_state(&state);
-                        continue;
-                    }
-                    continue;
-                }
                 let canceled = Arc::new(AtomicBool::new(false));
                 let running = lifecycle_state(
                     &task.dispatch.request,
@@ -959,7 +899,7 @@ impl CommitExplanationController {
                 }
             };
 
-            let (state, presentation) = {
+            let state = {
                 let mut data = self.inner.data.lock().await;
                 let rebound_request = data.active.as_ref().and_then(|active| {
                     (active.executor_request_id == task.dispatch.request.request_id)
@@ -970,15 +910,11 @@ impl CommitExplanationController {
                 }
                 let previous = data.states.get(&task.key).cloned();
                 if rebound_request.is_none()
-                    || !data
-                        .active_scope
-                        .as_ref()
-                        .is_some_and(|scope| scope_matches_task(scope, &task))
                     || previous.as_ref().is_some_and(|state| {
                         state.status == CommitExplanationControllerStatus::Canceled
                     })
                 {
-                    (None, None)
+                    None
                 } else {
                     let output_request = rebound_request
                         .as_ref()
@@ -1010,13 +946,7 @@ impl CommitExplanationController {
                                 )
                             };
                             data.states.insert(task.key.clone(), state.clone());
-                            (
-                                Some(state),
-                                Some(presentation(
-                                    &cached,
-                                    CommitExplanationPresentationMode::Show,
-                                )),
-                            )
+                            Some(state)
                         }
                         Ok(_) => {
                             let state = terminal_state(
@@ -1026,7 +956,7 @@ impl CommitExplanationController {
                                 Some("CODEX-SUPPORT-RESULT-STALE"),
                             );
                             data.states.insert(task.key.clone(), state.clone());
-                            (Some(state), None)
+                            Some(state)
                         }
                         Err(error) => {
                             let (status, retryable) = error_state(error);
@@ -1037,16 +967,13 @@ impl CommitExplanationController {
                                 Some(error.code()),
                             );
                             data.states.insert(task.key.clone(), state.clone());
-                            (Some(state), None)
+                            Some(state)
                         }
                     }
                 }
             };
             if let Some(state) = state {
                 self.inner.events.emit_state(&state);
-            }
-            if let Some(presentation) = presentation {
-                self.inner.events.emit_presentation(&presentation);
             }
         }
     }
@@ -1147,19 +1074,6 @@ fn terminal_state(
         error_code: error_code.map(str::to_owned),
         updated_at: now(),
         ..lifecycle_state(request, status)
-    }
-}
-
-fn canceled_for_scope(
-    previous: CommitExplanationControllerStateV1,
-) -> CommitExplanationControllerStateV1 {
-    CommitExplanationControllerStateV1 {
-        status: CommitExplanationControllerStatus::Canceled,
-        retryable: true,
-        presentation_available: false,
-        error_code: Some("CODEX-SUPPORT-WORKSPACE-STALE".to_owned()),
-        updated_at: now(),
-        ..previous
     }
 }
 
@@ -1324,10 +1238,6 @@ fn scope_matches_request(
     scope.workspace_id == request.workspace_id
         && scope.workspace_generation == request.workspace_generation
         && scope.locale == request.locale
-}
-
-fn scope_matches_task(scope: &CommitExplanationScopeRequestedV1, task: &ExplanationTask) -> bool {
-    scope_matches_request(scope, &task.dispatch.request)
 }
 
 fn controller_error(
@@ -1724,10 +1634,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sha_generation_dedupe_reuses_cache_and_presentation() {
+    async fn auto_generation_is_silent_and_explicit_request_reuses_cache_for_presentation() {
         let (controller, executor, events) =
             harness(FakeMode::Immediate, 2, 4, Duration::from_secs(1));
-        let first = dispatch('a', "request-first", 1);
+        let mut first = dispatch('a', "request-first", 1);
+        first.request.trigger = CommitExplanationTrigger::AutoVerifiedCommit;
         controller.request(first.clone()).await.expect("first");
         let generated = wait_for_status(
             &controller,
@@ -1735,6 +1646,7 @@ mod tests {
             CommitExplanationControllerStatus::Generated,
         )
         .await;
+        assert!(events.presentations.lock().expect("events").is_empty());
 
         let mut duplicate = dispatch('a', "request-duplicate", 1);
         duplicate.request.selection_version = 2;
@@ -1767,7 +1679,7 @@ mod tests {
             replay.mode,
             CommitExplanationPresentationMode::ReplayNarration
         );
-        assert_eq!(events.presentations.lock().expect("events").len(), 2);
+        assert_eq!(events.presentations.lock().expect("events").len(), 1);
     }
 
     #[tokio::test]
@@ -1923,7 +1835,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn generation_change_and_shutdown_terminalize_active_and_queued() {
+    async fn generation_change_preserves_old_jobs_while_shutdown_still_cancels() {
         let (controller, executor, _) = harness(FakeMode::Block, 2, 4, Duration::from_secs(2));
         let active = dispatch('a', "request-active", 1);
         let queued = dispatch('b', "request-queued", 1);
@@ -1944,27 +1856,27 @@ mod tests {
             })
             .await
             .expect("scope");
-        assert_eq!(
-            wait_for_status(
-                &controller,
-                &active,
-                CommitExplanationControllerStatus::Canceled,
-            )
-            .await
-            .error_code
-            .as_deref(),
-            Some("CODEX-SUPPORT-WORKSPACE-STALE")
-        );
-        assert_eq!(
-            wait_for_status(
-                &controller,
-                &queued,
-                CommitExplanationControllerStatus::Canceled,
-            )
-            .await
-            .status,
-            CommitExplanationControllerStatus::Canceled
-        );
+        assert_eq!(executor.cancels.load(Ordering::Acquire), 0);
+        executor.release_one();
+        wait_for_status(
+            &controller,
+            &active,
+            CommitExplanationControllerStatus::Generated,
+        )
+        .await;
+        wait_for_status(
+            &controller,
+            &queued,
+            CommitExplanationControllerStatus::Running,
+        )
+        .await;
+        executor.release_one();
+        wait_for_status(
+            &controller,
+            &queued,
+            CommitExplanationControllerStatus::Generated,
+        )
+        .await;
 
         let stale = dispatch('c', "request-stale", 1);
         assert_eq!(
@@ -1992,11 +1904,11 @@ mod tests {
             .as_deref(),
             Some("CODEX-SUPPORT-SHUTDOWN")
         );
-        assert!(executor.cancels.load(Ordering::Acquire) >= 2);
+        assert!(executor.cancels.load(Ordering::Acquire) >= 1);
     }
 
     #[tokio::test]
-    async fn workspace_and_locale_scope_changes_cancel_old_work_without_losing_identity() {
+    async fn workspace_and_locale_scope_changes_preserve_old_work_and_cache() {
         let (controller, executor, _) = harness(FakeMode::Block, 2, 4, Duration::from_secs(2));
         controller
             .set_scope(CommitExplanationScopeRequestedV1 {
@@ -2027,15 +1939,53 @@ mod tests {
             })
             .await
             .expect("workspace switch");
-        let canceled = wait_for_status(
+        let still_running = wait_for_status(
             &controller,
             &active,
-            CommitExplanationControllerStatus::Canceled,
+            CommitExplanationControllerStatus::Running,
         )
         .await;
-        assert_eq!(canceled.locale.as_deref(), Some("ja"));
-        assert_eq!(canceled.selection_version, Some(1));
-        assert_eq!(executor.cancels.load(Ordering::Acquire), 1);
+        assert_eq!(still_running.locale.as_deref(), Some("ja"));
+        assert_eq!(still_running.selection_version, Some(1));
+        assert_eq!(executor.cancels.load(Ordering::Acquire), 0);
+        executor.release_one();
+        wait_for_status(
+            &controller,
+            &active,
+            CommitExplanationControllerStatus::Generated,
+        )
+        .await;
+        controller
+            .set_scope(CommitExplanationScopeRequestedV1 {
+                schema_version: 1,
+                workspace_id: "workspace-fixture".to_owned(),
+                workspace_generation: 1,
+                locale: "ja".to_owned(),
+            })
+            .await
+            .expect("return to original scope");
+        assert_eq!(
+            controller
+                .get_state(CommitExplanationStateRequestedV1 {
+                    schema_version: 1,
+                    workspace_id: active.request.workspace_id.clone(),
+                    workspace_generation: 1,
+                    commit_evidence_id: active.request.commit_evidence_id.clone(),
+                })
+                .await
+                .expect("preserved state")
+                .status,
+            CommitExplanationControllerStatus::Generated
+        );
+        controller
+            .set_scope(CommitExplanationScopeRequestedV1 {
+                schema_version: 1,
+                workspace_id: "workspace-other".to_owned(),
+                workspace_generation: 1,
+                locale: "en".to_owned(),
+            })
+            .await
+            .expect("restore other scope");
         assert_eq!(
             controller
                 .trusted_enqueuer()

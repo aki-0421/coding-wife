@@ -39,6 +39,20 @@ type ScopeWaiter = {
   readonly resolve: () => void
   readonly reject: (error: CommitExplanationBoundaryError) => void
 }
+type PresentationIntent = {
+  readonly epoch: number
+  readonly workspaceId: string
+  readonly workspaceGeneration: number
+  readonly commitEvidenceId: string
+  readonly commitSha: string
+  readonly requestId: string
+  readonly selectionVersion: number
+  readonly trigger: CommitExplanationPresentationV1["trigger"]
+  readonly locale: CommitExplanationPresentationV1["locale"]
+  readonly mode: CommitExplanationPresentationV1["mode"]
+  readonly issuedAt: number
+  presentation: Promise<void> | null
+}
 type NativeArgument =
   | { readonly dispatch: CommitExplanationDispatchV1 }
   | {
@@ -66,7 +80,13 @@ export interface TauriCommitExplanationAdapterDependencies {
 
 export interface ScopedCommitExplanationController extends CommitExplanationController {
   setScope(scope: CommitExplanationScopeRequestedV1): Promise<void>
+  revokePresentationIntent(
+    reason: CommitExplanationPresentationRevokeReason,
+  ): void
 }
+
+export type CommitExplanationPresentationRevokeReason =
+  "scope_change" | "selection_change" | "turn_stop" | "close" | "dispose"
 
 export type CommitExplanationPresentationActivator = (
   key: CommitNarrationSourceKey,
@@ -208,6 +228,8 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   #startPromise: Promise<void> | null = null
   #started = false
   #presentationActivator: CommitExplanationPresentationActivator | null = null
+  #presentationIntentEpoch = 0
+  #presentationIntent: PresentationIntent | null = null
 
   readonly narrationSource: CommitNarrationConsumerPort = {
     subscribe: (listener) => {
@@ -272,6 +294,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   }
 
   dispose(): void {
+    this.revokePresentationIntent("dispose")
     ++this.#lifecycleEpoch
     ++this.#scopeLifecycleEpoch
     ++this.#desiredScopeRevision
@@ -313,6 +336,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       !sameScope(this.#desiredScope, scope) ||
       this.#failedScopeRevision === this.#desiredScopeRevision
     ) {
+      this.revokePresentationIntent("scope_change")
       this.#desiredScope = scope
       ++this.#desiredScopeRevision
       this.#failedScopeRevision = 0
@@ -325,6 +349,14 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
     })
     this.ensureScopeWriter()
     return pending
+  }
+
+  revokePresentationIntent(
+    reason: CommitExplanationPresentationRevokeReason,
+  ): void {
+    void reason
+    ++this.#presentationIntentEpoch
+    this.#presentationIntent = null
   }
 
   private currentScope(): CommitExplanationScopeRequestedV1 | null {
@@ -416,6 +448,143 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
     }
   }
 
+  private issuePresentationIntent(
+    value: Omit<
+      PresentationIntent,
+      "epoch" | "commitSha" | "issuedAt" | "presentation"
+    > & { readonly requestedAt: string },
+  ): PresentationIntent {
+    const commitSha = fullCommitSha(value.commitEvidenceId)
+    if (commitSha === null) {
+      throw boundaryError(
+        "CODEX-SUPPORT-PRESENTATION-STALE",
+        commitExplanationCommands.present,
+        false,
+      )
+    }
+    const parsedIssuedAt = Date.parse(value.requestedAt)
+    const intent: PresentationIntent = {
+      epoch: ++this.#presentationIntentEpoch,
+      workspaceId: value.workspaceId,
+      workspaceGeneration: value.workspaceGeneration,
+      commitEvidenceId: value.commitEvidenceId,
+      commitSha,
+      requestId: value.requestId,
+      selectionVersion: value.selectionVersion,
+      trigger: value.trigger,
+      locale: value.locale,
+      mode: value.mode,
+      issuedAt: Number.isFinite(parsedIssuedAt) ? parsedIssuedAt : Date.now(),
+      presentation: null,
+    }
+    this.#presentationIntent = intent
+    return intent
+  }
+
+  private isPresentationIntentCurrent(intent: PresentationIntent): boolean {
+    return (
+      this.#presentationIntent === intent &&
+      this.#presentationIntentEpoch === intent.epoch
+    )
+  }
+
+  private intentMatchesState(
+    intent: PresentationIntent,
+    state: CommitExplanationControllerStateV1,
+  ): boolean {
+    return (
+      state.workspaceId === intent.workspaceId &&
+      state.workspaceGeneration === intent.workspaceGeneration &&
+      state.commitEvidenceId === intent.commitEvidenceId &&
+      state.requestId === intent.requestId &&
+      state.selectionVersion === intent.selectionVersion &&
+      state.trigger === intent.trigger &&
+      state.locale === intent.locale
+    )
+  }
+
+  private presentMatchingIntent(
+    state: CommitExplanationControllerStateV1,
+  ): Promise<void> | null {
+    const intent = this.#presentationIntent
+    if (
+      intent === null ||
+      !this.isPresentationIntentCurrent(intent) ||
+      !this.intentMatchesState(intent, state)
+    ) {
+      return null
+    }
+    if (state.status !== "generated" || !state.presentationAvailable) {
+      if (
+        state.status === "failed" ||
+        state.status === "unavailable" ||
+        state.status === "canceled"
+      ) {
+        this.revokePresentationIntent("close")
+      }
+      return null
+    }
+    return this.presentIntent(
+      intent,
+      createCommitExplanationPresentationRequested({
+        schemaVersion: gitReviewSchemaVersion,
+        workspaceId: intent.workspaceId,
+        workspaceGeneration: intent.workspaceGeneration,
+        commitEvidenceId: intent.commitEvidenceId,
+        requestId: intent.requestId,
+        mode: intent.mode,
+        requestedAt: new Date().toISOString(),
+      }),
+    )
+  }
+
+  private presentIntent(
+    intent: PresentationIntent,
+    request: CommitExplanationPresentationRequestedV1,
+  ): Promise<void> {
+    if (!this.isPresentationIntentCurrent(intent)) return Promise.resolve()
+    if (intent.presentation !== null) return intent.presentation
+    const operation = (async () => {
+      try {
+        const presentation = parseCommitExplanationPresentation(
+          await this.#invoke(commitExplanationCommands.present, { request }),
+        )
+        if (!this.isPresentationIntentCurrent(intent)) return
+        if (!this.presentationMatchesIntent(presentation, intent)) {
+          throw new GitReviewContractError()
+        }
+        this.publishPresentation(presentation)
+      } catch (error) {
+        if (this.isPresentationIntentCurrent(intent)) {
+          this.revokePresentationIntent("close")
+        }
+        throw normalizeError(commitExplanationCommands.present, error)
+      }
+    })()
+    intent.presentation = operation
+    return operation
+  }
+
+  private presentationMatchesIntent(
+    presentation: CommitExplanationPresentationV1,
+    intent: PresentationIntent,
+  ): boolean {
+    const presentedAt = Date.parse(presentation.presentedAt)
+    return (
+      this.isPresentationIntentCurrent(intent) &&
+      presentation.workspaceId === intent.workspaceId &&
+      presentation.workspaceGeneration === intent.workspaceGeneration &&
+      presentation.commitEvidenceId === intent.commitEvidenceId &&
+      presentation.requestId === intent.requestId &&
+      presentation.selectionVersion === intent.selectionVersion &&
+      presentation.trigger === intent.trigger &&
+      presentation.locale === intent.locale &&
+      presentation.mode === intent.mode &&
+      Number.isFinite(presentedAt) &&
+      presentedAt >= intent.issuedAt
+    )
+  }
+
   readonly request = async (
     dispatchValue: CommitExplanationDispatchV1,
   ): Promise<void> => {
@@ -440,6 +609,17 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
         true,
       )
     }
+    const intent = this.issuePresentationIntent({
+      workspaceId: dispatch.request.workspaceId,
+      workspaceGeneration: dispatch.request.workspaceGeneration,
+      commitEvidenceId: dispatch.request.commitEvidenceId,
+      requestId: dispatch.request.requestId,
+      selectionVersion: dispatch.request.selectionVersion,
+      trigger: dispatch.request.trigger,
+      locale: dispatch.request.locale,
+      mode: "show",
+      requestedAt: dispatch.request.requestedAt,
+    })
     try {
       const state = parseCommitExplanationControllerState(
         await this.#invoke(commitExplanationCommands.request, { dispatch }),
@@ -455,8 +635,13 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       ) {
         throw new GitReviewContractError()
       }
-      this.applyState(state)
+      if (!this.isPresentationIntentCurrent(intent)) return
+      const presentation = this.applyState(state)
+      if (presentation !== null) await presentation
     } catch (error) {
+      if (this.isPresentationIntentCurrent(intent)) {
+        this.revokePresentationIntent("close")
+      }
       throw normalizeError(commitExplanationCommands.request, error)
     }
   }
@@ -465,6 +650,9 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
     requestValue: CommitExplanationCancelRequestedV1,
   ): Promise<void> => {
     const request = createCommitExplanationCancelRequested(requestValue)
+    if (this.#presentationIntent?.requestId === request.requestId) {
+      this.revokePresentationIntent("close")
+    }
     try {
       const response = await this.#invoke(commitExplanationCommands.cancel, {
         request,
@@ -478,7 +666,8 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       ) {
         throw new GitReviewContractError()
       }
-      this.applyState(state)
+      const presentation = this.applyState(state)
+      void presentation?.catch(() => undefined)
     } catch (error) {
       throw normalizeError(commitExplanationCommands.cancel, error)
     }
@@ -508,23 +697,29 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
         true,
       )
     }
-    try {
-      const presentation = parseCommitExplanationPresentation(
-        await this.#invoke(commitExplanationCommands.present, { request }),
+    if (
+      state.locale === null ||
+      state.selectionVersion === null ||
+      state.trigger === null
+    ) {
+      throw boundaryError(
+        "CODEX-SUPPORT-PRESENTATION-STALE",
+        commitExplanationCommands.present,
+        true,
       )
-      if (
-        presentation.workspaceId !== request.workspaceId ||
-        presentation.workspaceGeneration !== request.workspaceGeneration ||
-        presentation.commitEvidenceId !== request.commitEvidenceId ||
-        presentation.requestId !== request.requestId ||
-        presentation.mode !== request.mode
-      ) {
-        throw new GitReviewContractError()
-      }
-      this.publishPresentation(presentation)
-    } catch (error) {
-      throw normalizeError(commitExplanationCommands.present, error)
     }
+    const intent = this.issuePresentationIntent({
+      workspaceId: request.workspaceId,
+      workspaceGeneration: request.workspaceGeneration,
+      commitEvidenceId: request.commitEvidenceId,
+      requestId: request.requestId,
+      selectionVersion: state.selectionVersion,
+      trigger: state.trigger,
+      locale: state.locale,
+      mode: request.mode,
+      requestedAt: request.requestedAt,
+    })
+    await this.presentIntent(intent, request)
   }
 
   readonly getState = (
@@ -581,7 +776,8 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
         ) {
           return
         }
-        this.applyState(state)
+        const presentation = this.applyState(state)
+        void presentation?.catch(() => undefined)
       })
       .catch(() => undefined)
       .finally(() => {
@@ -596,14 +792,17 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
     try {
       const state = parseCommitExplanationControllerState(payload)
       if (!stateMatchesScope(state, this.currentScope())) return
-      this.applyState(state)
+      const presentation = this.applyState(state)
+      void presentation?.catch(() => undefined)
     } catch {
       // Dedicated native events are untrusted until their exact schema passes.
     }
   }
 
-  private applyState(state: CommitExplanationControllerStateV1): void {
-    if (!stateMatchesScope(state, this.currentScope())) return
+  private applyState(
+    state: CommitExplanationControllerStateV1,
+  ): Promise<void> | null {
+    if (!stateMatchesScope(state, this.currentScope())) return null
     const key = stateKey(
       state.workspaceId,
       state.workspaceGeneration,
@@ -616,12 +815,14 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       state.selectionVersion !== null &&
       state.selectionVersion < current.selectionVersion
     ) {
-      return
+      return null
     }
-    if (sameState(current, state)) return
-    this.#states.set(key, state)
-    this.#stateRevisions.set(key, (this.#stateRevisions.get(key) ?? 0) + 1)
-    this.emitStateChange()
+    if (!sameState(current, state)) {
+      this.#states.set(key, state)
+      this.#stateRevisions.set(key, (this.#stateRevisions.get(key) ?? 0) + 1)
+      this.emitStateChange()
+    }
+    return this.presentMatchingIntent(state)
   }
 
   private emitStateChange(): void {
@@ -645,11 +846,15 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
   private publishPresentation(
     presentation: CommitExplanationPresentationV1,
   ): void {
+    const intent = this.#presentationIntent
     const scope = this.currentScope()
     const sha = fullCommitSha(presentation.commitEvidenceId)
     if (
+      intent === null ||
+      !this.presentationMatchesIntent(presentation, intent) ||
       scope === null ||
       sha === null ||
+      sha !== intent.commitSha ||
       presentation.workspaceId !== scope.workspaceId ||
       presentation.workspaceGeneration !== scope.workspaceGeneration ||
       presentation.locale !== scope.locale
@@ -683,6 +888,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       presentation.requestId,
       presentation.locale,
       presentation.mode,
+      intent.epoch,
       digest,
     ])
     if (this.#presentationDedupe.has(dedupeKey)) return
@@ -723,7 +929,9 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       }),
     ]
     for (const event of events) {
+      if (!this.isPresentationIntentCurrent(intent)) return
       for (const listener of [...this.#narrationListeners]) {
+        if (!this.isPresentationIntentCurrent(intent)) return
         try {
           listener(event)
         } catch {
@@ -732,7 +940,7 @@ export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntim
       }
     }
     const activator = this.#presentationActivator
-    if (activator !== null) {
+    if (activator !== null && this.isPresentationIntentCurrent(intent)) {
       const key: CommitNarrationSourceKey = {
         workspaceId: presentation.workspaceId,
         workspaceGeneration: presentation.workspaceGeneration,

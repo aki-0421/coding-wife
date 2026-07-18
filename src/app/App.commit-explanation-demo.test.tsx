@@ -77,7 +77,7 @@ describe("App interactive commit explanation demo", () => {
     window.history.replaceState({}, "", "/")
   })
 
-  it("runs verified evidence through caption and TTS while selection, locale, and Stop only dismiss presentation", async () => {
+  it("keeps auto generation silent, presents cache with TTS off, and presents one-click user requests with TTS on", async () => {
     const user = userEvent.setup()
     const gateway = new DemoNarrationGateway()
     const speak = vi.spyOn(gateway, "speak")
@@ -242,5 +242,34 @@ describe("App interactive commit explanation demo", () => {
         name: "chore: update local project metadata",
       }),
     ).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Explain this commit" }),
+    ).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Explain this commit" }))
+    await waitFor(
+      () =>
+        expect(
+          runtime.getState(workspaceId, 1, `commit-${"b".repeat(40)}`),
+        ).toMatchObject({ status: "generated", trigger: "user_request" }),
+      { timeout: 3_000 },
+    )
+    await waitFor(
+      () => {
+        const presentation = controller.getSnapshot().presentation
+        expect(presentation?.key.commitSha).toBe("b".repeat(40))
+        expect(typeof presentation?.key.requestId).toBe("string")
+      },
+      { timeout: 3_000 },
+    )
+    expect(
+      screen.getByRole("button", { name: "Show explanation" }),
+    ).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Close explanation" }))
+    await waitFor(() =>
+      expect(controller.getSnapshot().presentation).toBeNull(),
+    )
+    expect(
+      runtime.getState(workspaceId, 1, `commit-${"b".repeat(40)}`),
+    ).toMatchObject({ status: "generated", trigger: "user_request" })
   }, 15_000)
 })

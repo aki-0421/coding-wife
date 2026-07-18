@@ -236,6 +236,76 @@ describe("TauriCommitExplanationAdapter", () => {
     expect(observed).toEqual(queued)
   })
 
+  it("presents a generated cache hit during the first user request", async () => {
+    const { adapter, invoke } = adapterHarness((command) => {
+      if (command === commitExplanationCommands.request) return state()
+      if (command === commitExplanationCommands.present) return presentation()
+      return null
+    })
+    await setJapaneseScope(adapter)
+    const narrated: unknown[] = []
+    adapter.narrationSource.subscribe((event) => narrated.push(event))
+    vi.mocked(invoke).mockClear()
+
+    await adapter.request(dispatch())
+
+    expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+      commitExplanationCommands.request,
+      commitExplanationCommands.present,
+    ])
+    expect(narrated).toEqual([
+      expect.objectContaining({ kind: "started", requestId: "request-ja-2" }),
+      expect.objectContaining({ kind: "chunk", sequence: 0 }),
+      expect.objectContaining({ kind: "chunk", sequence: 1 }),
+      expect.objectContaining({ kind: "terminal", status: "completed" }),
+    ])
+  })
+
+  it("keeps a completed job state but drops presentation that arrives after intent revocation", async () => {
+    let resolvePresentation:
+      ((value: CommitExplanationPresentationV1) => void) | undefined
+    const pendingPresentation = new Promise<CommitExplanationPresentationV1>(
+      (resolve) => {
+        resolvePresentation = resolve
+      },
+    )
+    const queued = state({
+      status: "queued",
+      presentationAvailable: false,
+      updatedAt: "2026-07-18T01:00:01.000Z",
+    })
+    const { adapter, events, invoke } = adapterHarness((command) => {
+      if (command === commitExplanationCommands.request) return queued
+      if (command === commitExplanationCommands.present) {
+        return pendingPresentation
+      }
+      return null
+    })
+    await adapter.start()
+    await setJapaneseScope(adapter)
+    const narrated: unknown[] = []
+    adapter.narrationSource.subscribe((event) => narrated.push(event))
+
+    await adapter.request(dispatch())
+    events.emit(commitExplanationEventChannels.state, state())
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        commitExplanationCommands.present,
+        expect.anything(),
+      ),
+    )
+    adapter.revokePresentationIntent("selection_change")
+    events.emit(commitExplanationEventChannels.presentation, presentation())
+    resolvePresentation?.(presentation())
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(narrated).toEqual([])
+    expect(adapter.getState("workspace-one", 3, commitEvidenceId)).toEqual(
+      state(),
+    )
+  })
+
   it("serializes scope writes, coalesces intermediate desires, and closes the stale event gate", async () => {
     const events = new FakeNativeEvents()
     const scopes: Array<{
@@ -473,7 +543,38 @@ describe("TauriCommitExplanationAdapter", () => {
   })
 
   it("publishes exact presentation events once and drops stale selection, locale, and malformed events", async () => {
-    const { adapter, events } = adapterHarness()
+    const englishPresentation = presentation({
+      requestId: "request-en-3",
+      locale: "en",
+      selectionVersion: 3,
+      explanation: {
+        ...presentation().explanation,
+        locale: "en",
+        summary: "Verified commit explanation.",
+        changes: ["Added read-only evidence."],
+        reasons: ["To keep the change auditable."],
+        verification: ["Tests passed."],
+        impact: ["Available from the commit view."],
+        cautions: ["No known caution."],
+        howToReadNext: ["Review verification evidence."],
+        narrationChunks: [
+          { sequence: 1, section: "summary", text: "Verified commit." },
+        ],
+      },
+      presentedAt: "2026-07-18T01:00:08.000Z",
+    })
+    const { adapter, events } = adapterHarness((command, argument) => {
+      if (
+        command === commitExplanationCommands.present &&
+        "request" in argument &&
+        "mode" in argument.request
+      ) {
+        return argument.request.requestId === "request-en-3"
+          ? englishPresentation
+          : presentation({ mode: argument.request.mode })
+      }
+      return null
+    })
     const activatePresentation = vi.fn(() => Promise.resolve(true))
     adapter.setPresentationActivator(activatePresentation)
     await adapter.start()
@@ -495,6 +596,19 @@ describe("TauriCommitExplanationAdapter", () => {
 
     const valid = presentation()
     events.emit(commitExplanationEventChannels.presentation, valid)
+    events.emit(commitExplanationEventChannels.presentation, valid)
+    expect(narrated).toEqual([])
+    expect(activatePresentation).not.toHaveBeenCalled()
+
+    await adapter.present({
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      commitEvidenceId,
+      requestId: "request-ja-2",
+      mode: "show",
+      requestedAt: "2026-07-18T01:00:02.000Z",
+    })
     events.emit(commitExplanationEventChannels.presentation, valid)
     expect(narrated).toEqual([
       {
@@ -569,27 +683,18 @@ describe("TauriCommitExplanationAdapter", () => {
     )
     events.emit(
       commitExplanationEventChannels.presentation,
-      presentation({
-        requestId: "request-en-3",
-        locale: "en",
-        selectionVersion: 3,
-        explanation: {
-          ...presentation().explanation,
-          locale: "en",
-          summary: "Verified commit explanation.",
-          changes: ["Added read-only evidence."],
-          reasons: ["To keep the change auditable."],
-          verification: ["Tests passed."],
-          impact: ["Available from the commit view."],
-          cautions: ["No known caution."],
-          howToReadNext: ["Review verification evidence."],
-          narrationChunks: [
-            { sequence: 1, section: "summary", text: "Verified commit." },
-          ],
-        },
-        presentedAt: "2026-07-18T01:00:08.000Z",
-      }),
+      englishPresentation,
     )
+    expect(narrated).toHaveLength(4)
+    await adapter.present({
+      schemaVersion: 1,
+      workspaceId: "workspace-one",
+      workspaceGeneration: 3,
+      commitEvidenceId,
+      requestId: "request-en-3",
+      mode: "show",
+      requestedAt: "2026-07-18T01:00:07.000Z",
+    })
     expect(narrated.slice(4)).toEqual([
       expect.objectContaining({ kind: "started", locale: "en" }),
       expect.objectContaining({
@@ -604,7 +709,10 @@ describe("TauriCommitExplanationAdapter", () => {
 
   it("deduplicates the presentation event emitted during the matching present response", async () => {
     const events = new FakeNativeEvents()
-    const valid = presentation({ mode: "replay_narration" })
+    const valid = presentation({
+      mode: "replay_narration",
+      presentedAt: "2026-07-18T01:00:10.000Z",
+    })
     const invoke = vi.fn<CommitExplanationInvoker>((command) => {
       if (command === commitExplanationCommands.present) {
         events.emit(commitExplanationEventChannels.presentation, valid)

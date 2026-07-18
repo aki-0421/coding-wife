@@ -174,9 +174,10 @@ export function WorkspaceShell({
     const previous = previousSelectedWorkspaceId.current
     previousSelectedWorkspaceId.current = selectedWorkspaceId
     if (previous !== null && previous !== selectedWorkspaceId) {
+      commitExplanationController?.revokePresentationIntent("scope_change")
       void narrationController.dismissPresentation("workspace_switch")
     }
-  }, [narrationController, selectedWorkspaceId])
+  }, [commitExplanationController, narrationController, selectedWorkspaceId])
 
   useEffect(() => {
     if (selectedWorkspaceId === null || workspaceGeneration === null) return
@@ -215,12 +216,13 @@ export function WorkspaceShell({
   ])
 
   const stopTurn = useCallback(async () => {
+    commitExplanationController?.revokePresentationIntent("turn_stop")
     const [mainTurn] = await Promise.allSettled([
       view.stopTurn(),
       narrationController.dismissPresentation("turn_stop"),
     ])
     return mainTurn.status === "fulfilled" ? mainTurn.value : false
-  }, [narrationController, view])
+  }, [commitExplanationController, narrationController, view])
 
   const reportWorkspaceAction = useCallback(
     (result: Awaited<ReturnType<typeof view.cancelSelectedWorkspace>>) => {
@@ -260,8 +262,14 @@ export function WorkspaceShell({
   )
 
   const dismissCommitPresentation = useCallback(() => {
+    commitExplanationController?.revokePresentationIntent("selection_change")
     void narrationController.dismissPresentation("explicit_cancel")
-  }, [narrationController])
+  }, [commitExplanationController, narrationController])
+
+  const closeCommitPresentation = useCallback(() => {
+    commitExplanationController?.revokePresentationIntent("close")
+    void narrationController.dismissPresentation("explicit_cancel")
+  }, [commitExplanationController, narrationController])
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return
@@ -648,7 +656,7 @@ export function WorkspaceShell({
             data-workspace-tab={view.activeTab}
           >
             <CommitNarrationCaption
-              onDismiss={() => void narrationController.dismissPresentation()}
+              onDismiss={closeCommitPresentation}
               onVisible={narrationController.acknowledgeCaptionVisible}
               presentation={commitPresentation}
             />
