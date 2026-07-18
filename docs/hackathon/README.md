@@ -1,7 +1,7 @@
 ---
 title: OpenAI Build Week 2026 — Hackathon Guide
 description: "OpenAI Build Week 2026の要件、期限、提出準備資料への入口をまとめるハッカソンガイド。"
-updated: 2026-07-15
+updated: 2026-07-18
 read_when:
   - "OpenAI Build Weekの要件や提出準備の全体像を確認するとき。"
   - "ハッカソン関連文書の参照先を選ぶとき。"
@@ -61,6 +61,7 @@ source_of_truth: https://openai.devpost.com/rules
 | [09-evidence-log-template.md](./09-evidence-log-template.md) | Codex、GPT-5.6、コミット、人間の判断の記録 |
 | [10-final-submission-checklist.md](./10-final-submission-checklist.md) | 提出前の最終チェックリスト |
 | [11-sources-and-open-questions.md](./11-sources-and-open-questions.md) | 情報源、矛盾、未確認事項、保守的な判断 |
+| [12-final-submission-materials.md](./12-final-submission-materials.md) | Devpost入力、審査手順、動画台本、証跡台帳、匿名スモークの最終提出パッケージ |
 
 ## 情報の扱い
 
