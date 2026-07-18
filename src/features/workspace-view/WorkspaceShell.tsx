@@ -120,11 +120,7 @@ export function WorkspaceShell({
     void import("@tauri-apps/api/webview")
       .then(({ getCurrentWebview }) =>
         getCurrentWebview().onDragDropEvent((event) => {
-          if (
-            active &&
-            activeTab === "chat" &&
-            event.payload.type === "drop"
-          ) {
+          if (active && activeTab === "chat" && event.payload.type === "drop") {
             void registerAttachmentPaths("drop", event.payload.paths)
           }
         }),
@@ -313,6 +309,8 @@ export function WorkspaceShell({
             history={view.history}
             muted={view.muted}
             onAddAttachments={view.addAttachmentFiles}
+            onAnswerApproval={view.answerApproval}
+            onAnswerDecision={view.answerDecision}
             onCaptureContext={(source) =>
               view.captureContext(source, copy.contextUnavailable)
             }
@@ -342,6 +340,9 @@ export function WorkspaceShell({
             renderer={characterRenderer}
             runtimeError={runtime.state.status === "error"}
             timeline={view.timeline}
+            pendingRequestIds={view.codex.pendingRequests.map(
+              (request) => request.pendingId,
+            )}
             turnState={view.turnState}
             workspaceId={selectedWorkspace.id}
           />

@@ -1,9 +1,11 @@
 import {
   AlertTriangleIcon,
+  ArrowDownIcon,
   InfoIcon,
   Volume2Icon,
   VolumeXIcon,
 } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -21,6 +23,7 @@ import type {
   WorkspaceDraft,
   WorkspaceTimelineItem,
 } from "@/features/workspace-view/types"
+import type { ApprovalDecision, PendingRequestView } from "@/lib/contracts"
 import { cn } from "@/lib/utils"
 
 interface ChatViewProps {
@@ -36,8 +39,17 @@ interface ChatViewProps {
   readonly runtimeError: boolean
   readonly turnState: TurnUiState
   readonly timeline: readonly WorkspaceTimelineItem[]
+  readonly pendingRequestIds: readonly string[]
   readonly workspaceId: string
   readonly onAddAttachments: (files: readonly File[]) => void
+  readonly onAnswerApproval: (
+    request: PendingRequestView,
+    decision: ApprovalDecision,
+  ) => Promise<boolean>
+  readonly onAnswerDecision: (
+    request: PendingRequestView,
+    answers: Readonly<Record<string, readonly string[]>>,
+  ) => Promise<boolean>
   readonly onCaptureContext: (
     source: ContextSnapshotItem["source"],
   ) => void | Promise<void>
@@ -73,8 +85,11 @@ export function ChatView({
   runtimeError,
   turnState,
   timeline,
+  pendingRequestIds,
   workspaceId,
   onAddAttachments,
+  onAnswerApproval,
+  onAnswerDecision,
   onCaptureContext,
   onDraftChange,
   onEffortChange,
@@ -89,11 +104,73 @@ export function ChatView({
   onSend,
   onStop,
 }: ChatViewProps) {
+  const scrollRootRef = useRef<HTMLDivElement>(null)
+  const previousTimelineLength = useRef(timeline.length)
+  const [scrollLocked, setScrollLocked] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
   const companionState = connected
     ? turnState === "running" || turnState === "sending"
       ? "acting"
       : "idle"
     : "disconnected"
+
+  const scrollToLatest = () => {
+    const viewport = scrollRootRef.current?.querySelector<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    )
+    if (!viewport) return
+    if (typeof viewport.scrollTo === "function") {
+      viewport.scrollTo({
+        behavior: reducedMotion ? "auto" : "smooth",
+        top: viewport.scrollHeight,
+      })
+    } else {
+      viewport.scrollTop = viewport.scrollHeight
+    }
+    setScrollLocked(false)
+    setUnreadCount(0)
+  }
+
+  useEffect(() => {
+    const viewport = scrollRootRef.current?.querySelector<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    )
+    if (!viewport) return
+    const updateLock = () => {
+      const distance =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+      const locked = distance > 48
+      setScrollLocked(locked)
+      if (!locked) setUnreadCount(0)
+    }
+    viewport.addEventListener("scroll", updateLock, { passive: true })
+    const frame = window.requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight
+      updateLock()
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      viewport.removeEventListener("scroll", updateLock)
+    }
+  }, [workspaceId])
+
+  useEffect(() => {
+    const viewport = scrollRootRef.current?.querySelector<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    )
+    const added = Math.max(0, timeline.length - previousTimelineLength.current)
+    previousTimelineLength.current = timeline.length
+    if (!viewport) return
+    const distance =
+      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+    if (distance <= 48) {
+      const frame = window.requestAnimationFrame(() => {
+        viewport.scrollTop = viewport.scrollHeight
+      })
+      return () => window.cancelAnimationFrame(frame)
+    }
+    if (added > 0) setUnreadCount((count) => count + added)
+  }, [timeline])
 
   return (
     <div
@@ -143,7 +220,11 @@ export function ChatView({
           ) : null}
         </div>
 
-        <ScrollArea className="size-full pt-9">
+        <ScrollArea
+          className="size-full pt-9"
+          data-scroll-locked={scrollLocked || undefined}
+          ref={scrollRootRef}
+        >
           <div className="px-xl">
             <Timeline
               compactStatus={
@@ -176,10 +257,30 @@ export function ChatView({
               copy={copy}
               events={timeline}
               history={history}
+              interruptAvailable={turnState === "running"}
+              onAnswerApproval={onAnswerApproval}
+              onAnswerDecision={onAnswerDecision}
+              onInterrupt={onStop}
               onOpenDiagnostics={onOpenDiagnostics}
+              pendingRequestIds={pendingRequestIds}
             />
           </div>
         </ScrollArea>
+
+        {scrollLocked || unreadCount > 0 ? (
+          <Button
+            className="absolute bottom-[154px] left-1/2 z-20 -translate-x-1/2 shadow-overlay"
+            onClick={scrollToLatest}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <ArrowDownIcon data-icon="inline-start" />
+            {unreadCount > 0
+              ? `${copy.timelineEvent.newUpdates}: ${String(unreadCount)}`
+              : copy.timelineEvent.latest}
+          </Button>
+        ) : null}
 
         <Composer
           connected={connected}
