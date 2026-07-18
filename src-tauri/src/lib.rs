@@ -4,6 +4,8 @@ pub mod git_review;
 pub mod narration;
 pub mod workspace_history;
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use tauri::{http, Manager, State};
 
@@ -31,6 +33,7 @@ use git_review::commands::{
     list_commit_evidence, observe_git_repository, observe_terminal_work_unit,
     prepare_commit_explanation_evidence, read_commit_diff_file, read_commit_evidence,
 };
+use git_review::main_work_unit_runtime::GitReviewMainWorkUnitRuntime;
 use git_review::GitReviewService;
 use narration::commands::{
     narration_cancel, narration_get_runtime, narration_get_settings, narration_list_voices,
@@ -191,12 +194,19 @@ pub fn run() {
                 history_service.clone(),
             )
             .map_err(|error| std::io::Error::other(error.code))?;
-            app.manage(history_service.clone());
-            app.manage(git_review_service);
-            app.manage(CommitExplanationController::production(
+            let explanation_controller = CommitExplanationController::production(
                 setup_supervisor.clone(),
                 app.handle().clone(),
+            );
+            setup_supervisor.attach_main_work_unit_runtime(Arc::new(
+                GitReviewMainWorkUnitRuntime::production(
+                    git_review_service.clone(),
+                    explanation_controller.trusted_enqueuer(),
+                ),
             ));
+            app.manage(history_service.clone());
+            app.manage(git_review_service);
+            app.manage(explanation_controller);
             tauri::async_runtime::spawn(async move {
                 history_service.restore_startup().await;
             });

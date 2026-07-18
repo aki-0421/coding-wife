@@ -5,7 +5,16 @@ use std::pin::Pin;
 use std::process::Command;
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
+
+use crate::codex::main_work_unit::{
+    MainCommandCompleted, MainCommandStarted, MainWorkUnitRuntime, MainWorkUnitStart,
+    MainWorkUnitTerminal, MainWorkUnitTerminalState,
+};
+use crate::codex::types::MainSkillInjectionAudit;
+
 use super::history::MemoryGitReviewHistory;
+use super::main_work_unit_runtime::{GitReviewMainWorkUnitRuntime, VerifiedCommitExplanationSink};
 use super::runner::GitRunner;
 use super::service::{GitReviewService, GitWorkspaceResolver};
 use super::trusted::TrustedCommitCandidateInput;
@@ -17,6 +26,44 @@ use super::types::{
     WorkUnitTerminalState, GIT_REVIEW_SCHEMA_VERSION,
 };
 use super::GitReviewError;
+
+#[derive(Default)]
+struct RecordingExplanationSink {
+    locale: Option<String>,
+    evidence: Mutex<Vec<super::types::CommitEvidenceV1>>,
+}
+
+impl RecordingExplanationSink {
+    fn active(locale: &str) -> Self {
+        Self {
+            locale: Some(locale.to_owned()),
+            evidence: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl VerifiedCommitExplanationSink for RecordingExplanationSink {
+    fn locale_for_scope<'a>(
+        &'a self,
+        _workspace_id: &'a str,
+        _workspace_generation: u64,
+    ) -> Pin<Box<dyn Future<Output = Option<String>> + Send + 'a>> {
+        Box::pin(async move { self.locale.clone() })
+    }
+
+    fn enqueue_verified_commit<'a>(
+        &'a self,
+        _workspace_id: String,
+        _workspace_generation: u64,
+        _commit_evidence_id: String,
+        evidence: super::types::CommitEvidenceV1,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ()>> + Send + 'a>> {
+        Box::pin(async move {
+            self.evidence.lock().await.push(evidence);
+            Ok(())
+        })
+    }
+}
 
 #[derive(Clone)]
 struct FixedResolver {
@@ -124,6 +171,158 @@ async fn terminal_observation_detects_main_commit_without_mutating_git_state() {
         fixture.git_text(&["status", "--porcelain=v2"]),
         status_before_read
     );
+}
+
+#[tokio::test]
+async fn production_work_unit_runtime_enqueues_only_the_exact_verified_commit() {
+    let fixture = RepositoryFixture::new("work-unit-runtime-auto");
+    let history = Arc::new(MemoryGitReviewHistory::new());
+    let service = service(&fixture.root, history.clone());
+    let sink = Arc::new(RecordingExplanationSink::active("ja"));
+    let runtime = GitReviewMainWorkUnitRuntime::with_dependencies(service, sink.clone());
+    let lease = runtime
+        .begin(runtime_start())
+        .await
+        .expect("work unit lease");
+
+    std::fs::write(fixture.root.join("auto.txt"), "trusted auto explanation\n")
+        .expect("write auto fixture");
+    fixture.git(&["add", "auto.txt"]);
+    runtime
+        .command_started(
+            lease.clone(),
+            MainCommandStarted {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-fixture".to_owned(),
+                item_id: "item-runtime-auto".to_owned(),
+            },
+        )
+        .await;
+    fixture.git(&["commit", "-q", "-m", "feat: wire trusted explanation"]);
+    let committed_sha = fixture.git_text(&["rev-parse", "HEAD"]);
+    runtime
+        .command_completed(
+            lease.clone(),
+            MainCommandCompleted {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-fixture".to_owned(),
+                item_id: "item-runtime-auto".to_owned(),
+                successful: true,
+            },
+        )
+        .await;
+    runtime
+        .terminal(
+            lease.clone(),
+            MainWorkUnitTerminal {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-fixture".to_owned(),
+                state: MainWorkUnitTerminalState::Completed,
+            },
+        )
+        .await;
+
+    let evidence = sink.evidence.lock().await;
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0].commit_id, format!("commit-{committed_sha}"));
+    assert_eq!(evidence[0].locale, "ja");
+    assert_eq!(evidence[0].selection_version, 1);
+    assert_eq!(history.commit_count(), 1);
+    drop(evidence);
+
+    runtime
+        .terminal(
+            lease,
+            MainWorkUnitTerminal {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-fixture".to_owned(),
+                state: MainWorkUnitTerminalState::Completed,
+            },
+        )
+        .await;
+    assert_eq!(sink.evidence.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn production_work_unit_runtime_drops_no_change_failure_and_invalidated_generation() {
+    let fixture = RepositoryFixture::new("work-unit-runtime-negative");
+    let history = Arc::new(MemoryGitReviewHistory::new());
+    let service = service(&fixture.root, history.clone());
+    let sink = Arc::new(RecordingExplanationSink::active("en"));
+    let runtime = GitReviewMainWorkUnitRuntime::with_dependencies(service, sink.clone());
+    let unchanged = runtime
+        .begin(runtime_start())
+        .await
+        .expect("unchanged lease");
+    runtime
+        .command_started(
+            unchanged.clone(),
+            MainCommandStarted {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-unchanged".to_owned(),
+                item_id: "item-unchanged".to_owned(),
+            },
+        )
+        .await;
+    runtime
+        .command_completed(
+            unchanged.clone(),
+            MainCommandCompleted {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-unchanged".to_owned(),
+                item_id: "item-unchanged".to_owned(),
+                successful: true,
+            },
+        )
+        .await;
+    runtime
+        .terminal(
+            unchanged,
+            MainWorkUnitTerminal {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-unchanged".to_owned(),
+                state: MainWorkUnitTerminalState::Completed,
+            },
+        )
+        .await;
+
+    let invalidated = runtime
+        .begin(runtime_start())
+        .await
+        .expect("invalidated lease");
+    runtime.invalidate_generation(1).await;
+    runtime
+        .command_completed(
+            invalidated.clone(),
+            MainCommandCompleted {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-invalidated".to_owned(),
+                item_id: "item-invalidated".to_owned(),
+                successful: false,
+            },
+        )
+        .await;
+    runtime
+        .terminal(
+            invalidated,
+            MainWorkUnitTerminal {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-invalidated".to_owned(),
+                state: MainWorkUnitTerminalState::Failed,
+            },
+        )
+        .await;
+    assert!(sink.evidence.lock().await.is_empty());
+    assert_eq!(history.commit_count(), 0);
 }
 
 #[tokio::test]
@@ -460,6 +659,20 @@ fn service(root: &Path, history: Arc<MemoryGitReviewHistory>) -> GitReviewServic
         }),
         history,
     )
+}
+
+fn runtime_start() -> MainWorkUnitStart {
+    MainWorkUnitStart {
+        workspace_id: "workspace-fixture".to_owned(),
+        workspace_generation: 1,
+        raw_thread_id: "thread-fixture".to_owned(),
+        client_message_id: "message-fixture".to_owned(),
+        skill_injection: MainSkillInjectionAudit {
+            name: "coding-wife-commit-work".to_owned(),
+            version: "1.0.0".to_owned(),
+            content_digest: format!("sha256:{}", "a".repeat(64)),
+        },
+    }
 }
 
 fn start_request(client_request_id: &str) -> ObserveGitRepositoryRequest {

@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -125,6 +125,7 @@ pub struct CommitExplanationScopeRequestedV1 {
     pub schema_version: u16,
     pub workspace_id: String,
     pub workspace_generation: u64,
+    pub locale: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -135,6 +136,8 @@ pub struct CommitExplanationControllerStateV1 {
     pub workspace_generation: u64,
     pub commit_evidence_id: String,
     pub request_id: Option<String>,
+    pub locale: Option<String>,
+    pub selection_version: Option<u64>,
     pub status: CommitExplanationControllerStatus,
     pub trigger: Option<CommitExplanationTrigger>,
     pub retryable: bool,
@@ -151,6 +154,7 @@ pub struct CommitExplanationPresentationV1 {
     pub workspace_generation: u64,
     pub commit_evidence_id: String,
     pub request_id: String,
+    pub selection_version: u64,
     pub trigger: CommitExplanationTrigger,
     pub locale: String,
     pub mode: CommitExplanationPresentationMode,
@@ -225,6 +229,7 @@ struct CachedExplanation {
 
 #[derive(Default)]
 struct ControllerData {
+    active_scope: Option<CommitExplanationScopeRequestedV1>,
     generations: HashMap<String, u64>,
     states: HashMap<ExplanationKey, CommitExplanationControllerStateV1>,
     queue: VecDeque<ExplanationTask>,
@@ -410,6 +415,11 @@ pub struct CommitExplanationController {
     inner: Arc<CommitExplanationControllerInner>,
 }
 
+#[derive(Clone)]
+pub(crate) struct CommitExplanationTrustedEnqueuer {
+    inner: Weak<CommitExplanationControllerInner>,
+}
+
 impl CommitExplanationController {
     pub fn production(supervisor: CodexSupervisor, app_handle: AppHandle) -> Self {
         Self::with_dependencies(
@@ -440,6 +450,12 @@ impl CommitExplanationController {
         }
     }
 
+    pub(crate) fn trusted_enqueuer(&self) -> CommitExplanationTrustedEnqueuer {
+        CommitExplanationTrustedEnqueuer {
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
     pub async fn request(
         &self,
         dispatch: CommitExplanationDispatchV1,
@@ -466,6 +482,7 @@ impl CommitExplanationController {
                     schema_version: 1,
                     workspace_id: key.workspace_id.clone(),
                     workspace_generation: key.workspace_generation,
+                    locale: dispatch.request.locale.clone(),
                 })
                 .await?;
                 data = self.inner.data.lock().await;
@@ -475,6 +492,30 @@ impl CommitExplanationController {
                     .insert(key.workspace_id.clone(), key.workspace_generation);
             }
             _ => {}
+        }
+
+        match data.active_scope.as_ref() {
+            None => {
+                data.active_scope = Some(CommitExplanationScopeRequestedV1 {
+                    schema_version: 1,
+                    workspace_id: dispatch.request.workspace_id.clone(),
+                    workspace_generation: dispatch.request.workspace_generation,
+                    locale: dispatch.request.locale.clone(),
+                });
+            }
+            Some(scope) if scope_matches_request(scope, &dispatch.request) => {}
+            Some(_) => {
+                let state = terminal_state(
+                    &dispatch.request,
+                    CommitExplanationControllerStatus::Unavailable,
+                    true,
+                    Some("CODEX-SUPPORT-WORKSPACE-STALE"),
+                );
+                data.states.insert(key, state.clone());
+                drop(data);
+                self.inner.events.emit_state(&state);
+                return Ok(state);
+            }
         }
 
         if let Some(existing) = data.states.get(&key).cloned() {
@@ -672,6 +713,8 @@ impl CommitExplanationController {
                 workspace_generation: request.workspace_generation,
                 commit_evidence_id: request.commit_evidence_id,
                 request_id: None,
+                locale: None,
+                selection_version: None,
                 status: CommitExplanationControllerStatus::NotGenerated,
                 trigger: None,
                 retryable: false,
@@ -700,14 +743,12 @@ impl CommitExplanationController {
         }
         data.generations
             .insert(request.workspace_id.clone(), request.workspace_generation);
+        data.active_scope = Some(request.clone());
 
         let stale_queue = data
             .queue
             .iter()
-            .filter(|task| {
-                task.key.workspace_id == request.workspace_id
-                    && task.key.workspace_generation != request.workspace_generation
-            })
+            .filter(|task| !scope_matches_task(&request, task))
             .map(|task| task.key.clone())
             .collect::<Vec<_>>();
         data.queue.retain(|task| !stale_queue.contains(&task.key));
@@ -719,13 +760,30 @@ impl CommitExplanationController {
                 changed.push(state);
             }
         }
+        let stale_cache = data
+            .cache
+            .iter()
+            .filter(|(key, cached)| {
+                key.workspace_id == request.workspace_id
+                    && key.workspace_generation == request.workspace_generation
+                    && cached.request.locale != request.locale
+            })
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        for key in stale_cache {
+            data.cache.remove(&key);
+            data.cache_order.retain(|candidate| candidate != &key);
+            if let Some(previous) = data.states.get(&key).cloned() {
+                let state = canceled_for_scope(previous);
+                data.states.insert(key, state.clone());
+                changed.push(state);
+            }
+        }
         let active_request = data.active.as_ref().and_then(|active| {
-            (active.task.key.workspace_id == request.workspace_id
-                && active.task.key.workspace_generation != request.workspace_generation)
-                .then(|| {
-                    active.canceled.store(true, Ordering::Release);
-                    active.task.dispatch.request.request_id.clone()
-                })
+            (!scope_matches_task(&request, &active.task)).then(|| {
+                active.canceled.store(true, Ordering::Release);
+                active.task.dispatch.request.request_id.clone()
+            })
         });
         if let Some(active) = data.active.as_ref() {
             if active_request.is_some() {
@@ -793,8 +851,11 @@ impl CommitExplanationController {
                     data.worker_running = false;
                     return;
                 };
-                let current_generation = data.generations.get(&task.key.workspace_id).copied();
-                if current_generation != Some(task.key.workspace_generation) {
+                if !data
+                    .active_scope
+                    .as_ref()
+                    .is_some_and(|scope| scope_matches_task(scope, &task))
+                {
                     if let Some(previous) = data.states.get(&task.key).cloned() {
                         let state = canceled_for_scope(previous);
                         data.states.insert(task.key.clone(), state.clone());
@@ -855,10 +916,12 @@ impl CommitExplanationController {
                 if active_matches {
                     data.active = None;
                 }
-                let current_generation = data.generations.get(&task.key.workspace_id).copied();
                 let previous = data.states.get(&task.key).cloned();
                 if !active_matches
-                    || current_generation != Some(task.key.workspace_generation)
+                    || !data
+                        .active_scope
+                        .as_ref()
+                        .is_some_and(|scope| scope_matches_task(scope, &task))
                     || previous.as_ref().is_some_and(|state| {
                         state.status == CommitExplanationControllerStatus::Canceled
                     })
@@ -934,6 +997,45 @@ impl CommitExplanationController {
     }
 }
 
+impl CommitExplanationTrustedEnqueuer {
+    pub(crate) async fn locale_for_scope(
+        &self,
+        workspace_id: &str,
+        workspace_generation: u64,
+    ) -> Option<String> {
+        let inner = self.inner.upgrade()?;
+        let data = inner.data.lock().await;
+        data.active_scope
+            .as_ref()
+            .filter(|scope| {
+                scope.workspace_id == workspace_id
+                    && scope.workspace_generation == workspace_generation
+            })
+            .map(|scope| scope.locale.clone())
+    }
+
+    pub(crate) async fn enqueue_verified_commit(
+        &self,
+        workspace_id: String,
+        workspace_generation: u64,
+        commit_evidence_id: String,
+        evidence: CommitEvidenceV1,
+    ) -> Result<CommitExplanationControllerStateV1, CommitExplanationControllerError> {
+        let inner = self
+            .inner
+            .upgrade()
+            .ok_or_else(|| controller_error("CODEX-SUPPORT-SHUTDOWN", OPERATION_REQUEST, true))?;
+        CommitExplanationController { inner }
+            .enqueue_verified_commit(
+                workspace_id,
+                workspace_generation,
+                commit_evidence_id,
+                evidence,
+            )
+            .await
+    }
+}
+
 fn insert_cache(
     data: &mut ControllerData,
     key: ExplanationKey,
@@ -968,6 +1070,8 @@ fn lifecycle_state(
         workspace_generation: request.workspace_generation,
         commit_evidence_id: request.commit_evidence_id.clone(),
         request_id: Some(request.request_id.clone()),
+        locale: Some(request.locale.clone()),
+        selection_version: Some(request.selection_version),
         status,
         trigger: Some(request.trigger),
         retryable: false,
@@ -1027,6 +1131,7 @@ fn presentation(
         workspace_generation: cached.request.workspace_generation,
         commit_evidence_id: cached.request.commit_evidence_id.clone(),
         request_id: cached.request.request_id.clone(),
+        selection_version: cached.request.selection_version,
         trigger: cached.request.trigger,
         locale: cached.request.locale.clone(),
         mode,
@@ -1146,6 +1251,7 @@ fn validate_scope(
     if request.schema_version != 1
         || !valid_id(&request.workspace_id, 128)
         || request.workspace_generation == 0
+        || !matches!(request.locale.as_str(), "ja" | "en")
     {
         return Err(controller_error(
             "CODEX-SUPPORT-SCOPE-INVALID",
@@ -1154,6 +1260,19 @@ fn validate_scope(
         ));
     }
     Ok(())
+}
+
+fn scope_matches_request(
+    scope: &CommitExplanationScopeRequestedV1,
+    request: &CommitExplanationRequestedV1,
+) -> bool {
+    scope.workspace_id == request.workspace_id
+        && scope.workspace_generation == request.workspace_generation
+        && scope.locale == request.locale
+}
+
+fn scope_matches_task(scope: &CommitExplanationScopeRequestedV1, task: &ExplanationTask) -> bool {
+    scope_matches_request(scope, &task.dispatch.request)
 }
 
 fn controller_error(
@@ -1173,9 +1292,7 @@ fn valid_id(value: &str, maximum: usize) -> bool {
 }
 
 fn valid_evidence_id(value: &str) -> bool {
-    value
-        .strip_prefix("commit-")
-        .is_some_and(|sha| valid_sha(sha))
+    value.strip_prefix("commit-").is_some_and(valid_sha)
 }
 
 fn valid_sha(value: &str) -> bool {
@@ -1706,6 +1823,7 @@ mod tests {
                 schema_version: 1,
                 workspace_id: active.request.workspace_id.clone(),
                 workspace_generation: 2,
+                locale: "ja".to_owned(),
             })
             .await
             .expect("scope");
@@ -1758,6 +1876,62 @@ mod tests {
             Some("CODEX-SUPPORT-SHUTDOWN")
         );
         assert!(executor.cancels.load(Ordering::Acquire) >= 2);
+    }
+
+    #[tokio::test]
+    async fn workspace_and_locale_scope_changes_cancel_old_work_without_losing_identity() {
+        let (controller, executor, _) = harness(FakeMode::Block, 2, 4, Duration::from_secs(2));
+        controller
+            .set_scope(CommitExplanationScopeRequestedV1 {
+                schema_version: 1,
+                workspace_id: "workspace-fixture".to_owned(),
+                workspace_generation: 1,
+                locale: "ja".to_owned(),
+            })
+            .await
+            .expect("initial scope");
+        let active = dispatch('a', "request-scoped", 1);
+        controller.request(active.clone()).await.expect("request");
+        let running = wait_for_status(
+            &controller,
+            &active,
+            CommitExplanationControllerStatus::Running,
+        )
+        .await;
+        assert_eq!(running.locale.as_deref(), Some("ja"));
+        assert_eq!(running.selection_version, Some(1));
+
+        controller
+            .set_scope(CommitExplanationScopeRequestedV1 {
+                schema_version: 1,
+                workspace_id: "workspace-other".to_owned(),
+                workspace_generation: 1,
+                locale: "en".to_owned(),
+            })
+            .await
+            .expect("workspace switch");
+        let canceled = wait_for_status(
+            &controller,
+            &active,
+            CommitExplanationControllerStatus::Canceled,
+        )
+        .await;
+        assert_eq!(canceled.locale.as_deref(), Some("ja"));
+        assert_eq!(canceled.selection_version, Some(1));
+        assert_eq!(executor.cancels.load(Ordering::Acquire), 1);
+        assert_eq!(
+            controller
+                .trusted_enqueuer()
+                .locale_for_scope("workspace-other", 1)
+                .await
+                .as_deref(),
+            Some("en")
+        );
+        assert!(controller
+            .trusted_enqueuer()
+            .locale_for_scope("workspace-fixture", 1)
+            .await
+            .is_none());
     }
 
     #[test]

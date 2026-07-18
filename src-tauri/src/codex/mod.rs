@@ -6,7 +6,7 @@ pub mod commit_explanation;
 pub mod decision;
 pub mod dynamic_tools;
 pub mod jsonl;
-mod main_work_unit;
+pub(crate) mod main_work_unit;
 pub mod normalizer;
 pub mod process;
 pub mod protocol;
