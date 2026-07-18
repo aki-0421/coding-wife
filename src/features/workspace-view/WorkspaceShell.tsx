@@ -205,6 +205,10 @@ export function WorkspaceShell({
     readonly locale: typeof locale
   } | null>(null)
   const transitionOriginRef = useRef<HTMLElement | null>(null)
+  const explanationPresentationTriggerRef = useRef<HTMLButtonElement | null>(
+    null,
+  )
+  const explanationFocusRestoreVersionRef = useRef(0)
   const transitionSafeActionRef = useRef<HTMLButtonElement | null>(null)
   const safeQuitRequestRef = useRef<AppCloseRequestedV1 | null>(null)
   const cleanupFailureRef = useRef<AppCleanupFailedV1 | null>(null)
@@ -466,14 +470,32 @@ export function WorkspaceShell({
   )
 
   const dismissCommitPresentation = useCallback(() => {
+    explanationFocusRestoreVersionRef.current += 1
+    explanationPresentationTriggerRef.current = null
     commitExplanationController?.revokePresentationIntent("selection_change")
     void narrationController.dismissPresentation("explicit_cancel")
   }, [commitExplanationController, narrationController])
 
   const closeCommitPresentation = useCallback(() => {
+    const trigger = explanationPresentationTriggerRef.current
+    explanationPresentationTriggerRef.current = null
+    const restoreVersion = ++explanationFocusRestoreVersionRef.current
     commitExplanationController?.revokePresentationIntent("close")
     void narrationController.dismissPresentation("explicit_cancel")
+    window.requestAnimationFrame(() => {
+      if (
+        explanationFocusRestoreVersionRef.current === restoreVersion &&
+        trigger?.isConnected
+      ) {
+        trigger.focus()
+      }
+    })
   }, [commitExplanationController, narrationController])
+
+  useEffect(() => {
+    explanationFocusRestoreVersionRef.current += 1
+    explanationPresentationTriggerRef.current = null
+  }, [locale, selectedWorkspaceId, workspaceGeneration])
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return
@@ -810,6 +832,10 @@ export function WorkspaceShell({
             locale={locale}
             onBackToChat={() => view.setActiveTab("chat")}
             onCommitSelectionChange={dismissCommitPresentation}
+            onExplanationPresentationTrigger={(trigger) => {
+              explanationFocusRestoreVersionRef.current += 1
+              explanationPresentationTriggerRef.current = trigger
+            }}
             transport={gitReviewTransport}
             workspaceGeneration={workspaceGeneration ?? 1}
             workspaceId={selectedWorkspace.id}

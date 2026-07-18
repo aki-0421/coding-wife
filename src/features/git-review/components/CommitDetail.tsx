@@ -48,6 +48,7 @@ export interface CommitDetailProps {
   readonly onPresentExplanation: (
     state: CommitExplanationControllerStateV1,
     mode: CommitExplanationPresentationMode,
+    trigger: HTMLButtonElement,
   ) => void
 }
 
@@ -396,8 +397,12 @@ export function CommitDetail({
             explanationControllerState?.presentationAvailable ? (
               <Button
                 disabled={intentBusy}
-                onClick={() =>
-                  onPresentExplanation(explanationControllerState, "show")
+                onClick={(event) =>
+                  onPresentExplanation(
+                    explanationControllerState,
+                    "show",
+                    event.currentTarget,
+                  )
                 }
                 type="button"
                 variant="secondary"
@@ -426,8 +431,12 @@ export function CommitDetail({
               <>
                 <Button
                   disabled={intentBusy}
-                  onClick={() =>
-                    onPresentExplanation(explanationControllerState, "show")
+                  onClick={(event) =>
+                    onPresentExplanation(
+                      explanationControllerState,
+                      "show",
+                      event.currentTarget,
+                    )
                   }
                   type="button"
                   variant="secondary"
@@ -437,10 +446,11 @@ export function CommitDetail({
                 </Button>
                 <Button
                   disabled={intentBusy}
-                  onClick={() =>
+                  onClick={(event) =>
                     onPresentExplanation(
                       explanationControllerState,
                       "replay_narration",
+                      event.currentTarget,
                     )
                   }
                   type="button"

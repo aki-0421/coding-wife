@@ -59,6 +59,9 @@ export interface EvidenceViewProps {
   readonly transport: GitReviewTransport
   readonly onBackToChat: () => void
   readonly onCommitSelectionChange?: () => void
+  readonly onExplanationPresentationTrigger?: (
+    trigger: HTMLButtonElement,
+  ) => void
   readonly commitExplanationController?: CommitExplanationController | undefined
   readonly store?: GitReviewStore
 }
@@ -158,6 +161,7 @@ export function EvidenceView({
   transport,
   onBackToChat,
   onCommitSelectionChange,
+  onExplanationPresentationTrigger,
   commitExplanationController,
   store: providedStore,
 }: EvidenceViewProps) {
@@ -565,9 +569,10 @@ export function EvidenceView({
                   onCancelExplanation={(state) =>
                     void review.cancelExplanation(state)
                   }
-                  onPresentExplanation={(state, mode) =>
+                  onPresentExplanation={(state, mode, trigger) => {
+                    onExplanationPresentationTrigger?.(trigger)
                     void review.presentExplanation(state, mode)
-                  }
+                  }}
                   onRequestExplanation={(trigger) =>
                     void review.requestExplanation(locale, trigger)
                   }
