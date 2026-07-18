@@ -4,6 +4,7 @@ import {
   codexCommands,
   parseCodexDiagnostic,
   parseCodexEvent,
+  parseThreadResponse,
   type CodexCommand,
   type CodexEvent,
   type CodexRequestMap,
@@ -22,6 +23,8 @@ import {
   type CodexSessionClock,
   type CodexTurnLifecycleSink,
 } from "@/features/codex/workspace-session-adapter"
+
+const threadFixture = parseThreadResponse(fixture.thread)
 
 interface Deferred<T> {
   readonly promise: Promise<T>
@@ -74,7 +77,7 @@ class FakeCodexTransport implements CodexTransport {
               | CodexRequestMap["codex_thread_start"]
               | CodexRequestMap["codex_thread_resume"]
           ).workspaceId,
-        ) ?? Promise.resolve(fixture.thread)) as Promise<CodexResponseMap[K]>
+        ) ?? Promise.resolve(threadFixture)) as Promise<CodexResponseMap[K]>
       case codexCommands.pickAttachments:
       case codexCommands.registerAttachmentPaths:
         return Promise.resolve({
@@ -429,7 +432,7 @@ describe("CodexWorkspaceSessionAdapter", () => {
     transport.threadResponses.set(
       "workspace-b",
       Promise.resolve({
-        ...fixture.thread,
+        ...threadFixture,
         threadHandle: "thread-handle-b",
         generation: 8,
       }),
@@ -589,7 +592,7 @@ describe("CodexWorkspaceSessionAdapter", () => {
     transport.threadResponses.set(
       "workspace-d",
       Promise.resolve({
-        ...fixture.thread,
+        ...threadFixture,
         threadHandle: "thread-handle-d",
         generation: 10,
       }),

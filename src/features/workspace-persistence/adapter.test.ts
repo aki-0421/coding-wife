@@ -5,6 +5,7 @@ import {
   workspaceHistoryCommands,
   type WorkspaceStateSnapshot,
 } from "@/lib/contracts/workspace-history"
+import { parseCodexEvent } from "@/lib/contracts/codex"
 import codexFixture from "@/test/fixtures/codex-runtime.v1.json"
 import fixture from "@/test/fixtures/workspace-history.v1.json"
 
@@ -98,7 +99,11 @@ describe("PersistentWorkspaceViewAdapter", () => {
         uncertainty: "limited_context",
       },
     }
-    const approvalRequest = codexFixture.events[1]!.payload.request
+    const approvalEvent = parseCodexEvent(codexFixture.events[1])
+    if (approvalEvent.kind !== "pending_request") {
+      throw new Error("Expected a pending approval fixture")
+    }
+    const approvalRequest = approvalEvent.payload.request
     const state = parseWorkspaceStateSnapshot({
       ...fixture.state,
       timeline: {

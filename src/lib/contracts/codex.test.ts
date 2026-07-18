@@ -147,7 +147,7 @@ describe("Codex runtime contract", () => {
   })
 
   it("enforces discriminated pending request invariants", () => {
-    const pending = fixture.events[1]
+    const pending = parseCodexEvent(fixture.events[1])
     if (pending?.kind !== "pending_request") throw new Error("fixture")
     const base = pending.payload.request
     const userInput = {

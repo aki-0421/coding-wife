@@ -121,6 +121,19 @@ interface AnimationFrameHarness {
   flush(): void
 }
 
+interface Deferred<T> {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 function installAnimationFrames(): AnimationFrameHarness {
   let nextId = 0
   let timestamp = 0
@@ -434,15 +447,14 @@ describe("atomic character pack switching", () => {
       }
       const statusesBeforeLoss = statuses.length
       const metricsBeforeLoss = metrics.length
-      let restoredModel: FakeCharacterModel | null = null
-      let resolveRestore: ((model: FakeCharacterModel) => void) | null = null
+      const restoredModel = new FakeCharacterModel("committed")
+      const restore = deferred<FakeCharacterModel>()
       runtimeHarness.createModel.mockImplementationOnce(
-        (client: { manifest: CharacterPackManifest }) =>
-          new Promise<FakeCharacterModel>((resolve) => {
-            restoredModel = new FakeCharacterModel(client.manifest.packId)
-            runtimeHarness.models.set("committed:restored", restoredModel)
-            resolveRestore = resolve
-          }),
+        (client: { manifest: CharacterPackManifest }) => {
+          expect(client.manifest.packId).toBe("committed")
+          runtimeHarness.models.set("committed:restored", restoredModel)
+          return restore.promise
+        },
       )
 
       canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }))
@@ -453,6 +465,11 @@ describe("atomic character pack switching", () => {
       expect(statuses.at(-1)?.phase).toBe("recovering")
       expect(controller.metrics).toEqual(committedMetrics)
       expect(metrics).toHaveLength(metricsBeforeLoss)
+      await waitFor(() =>
+        expect(runtimeHarness.models.get("committed:restored")).toBe(
+          restoredModel,
+        ),
+      )
 
       const candidateLoad = controller.loadPack(
         pack("candidate"),
@@ -469,10 +486,7 @@ describe("atomic character pack switching", () => {
         ),
       ).toBe(false)
 
-      if (resolveRestore === null || restoredModel === null) {
-        throw new Error("Deferred restoration was not observed")
-      }
-      resolveRestore(restoredModel)
+      restore.resolve(restoredModel)
       await Promise.resolve()
       if (policyDuringRestore === "hidden") {
         await flushCandidateFrame()
@@ -526,29 +540,30 @@ describe("atomic character pack switching", () => {
     await initialLoad
 
     const originalModel = runtimeHarness.models.get("committed")!
-    let restoredModel: FakeCharacterModel | null = null
-    let resolveRestore: ((model: FakeCharacterModel) => void) | null = null
+    const restoredModel = new FakeCharacterModel("committed")
+    const restore = deferred<FakeCharacterModel>()
     runtimeHarness.createModel.mockImplementationOnce(
-      (client: { manifest: CharacterPackManifest }) =>
-        new Promise<FakeCharacterModel>((resolve) => {
-          restoredModel = new FakeCharacterModel(client.manifest.packId)
-          runtimeHarness.models.set("committed:restored", restoredModel)
-          resolveRestore = resolve
-        }),
+      (client: { manifest: CharacterPackManifest }) => {
+        expect(client.manifest.packId).toBe("committed")
+        runtimeHarness.models.set("committed:restored", restoredModel)
+        return restore.promise
+      },
     )
     canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }))
     canvas.dispatchEvent(new Event("webglcontextrestored"))
     await waitFor(() => expect(originalModel.release).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(runtimeHarness.models.get("committed:restored")).toBe(
+        restoredModel,
+      ),
+    )
 
     const failedSwitch = controller.loadPack(
       pack("candidate"),
       new AbortController().signal,
       false,
     )
-    if (resolveRestore === null || restoredModel === null) {
-      throw new Error("Deferred restoration was not observed")
-    }
-    resolveRestore(restoredModel)
+    restore.resolve(restoredModel)
     await flushCandidateFrame()
     await waitFor(() =>
       expect(runtimeHarness.models.has("candidate")).toBe(true),
@@ -642,19 +657,23 @@ describe("atomic character pack switching", () => {
     await initialLoad
 
     const originalModel = runtimeHarness.models.get("committed")!
-    let restoredModel: FakeCharacterModel | null = null
-    let resolveRestore: ((model: FakeCharacterModel) => void) | null = null
+    const restoredModel = new FakeCharacterModel("committed")
+    const restore = deferred<FakeCharacterModel>()
     runtimeHarness.createModel.mockImplementationOnce(
-      (client: { manifest: CharacterPackManifest }) =>
-        new Promise<FakeCharacterModel>((resolve) => {
-          restoredModel = new FakeCharacterModel(client.manifest.packId)
-          runtimeHarness.models.set("committed:restored", restoredModel)
-          resolveRestore = resolve
-        }),
+      (client: { manifest: CharacterPackManifest }) => {
+        expect(client.manifest.packId).toBe("committed")
+        runtimeHarness.models.set("committed:restored", restoredModel)
+        return restore.promise
+      },
     )
     canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }))
     canvas.dispatchEvent(new Event("webglcontextrestored"))
     await waitFor(() => expect(originalModel.release).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(runtimeHarness.models.get("committed:restored")).toBe(
+        restoredModel,
+      ),
+    )
 
     const abortController = new AbortController()
     const abortedSwitch = controller.loadPack(
@@ -666,10 +685,7 @@ describe("atomic character pack switching", () => {
     await expect(abortedSwitch).rejects.toMatchObject({ code: "disposed" })
     expect(runtimeHarness.models.has("candidate")).toBe(false)
 
-    if (resolveRestore === null || restoredModel === null) {
-      throw new Error("Deferred restoration was not observed")
-    }
-    resolveRestore(restoredModel)
+    restore.resolve(restoredModel)
     await flushCandidateFrame()
     await waitFor(() =>
       expect(statuses.at(-1)).toMatchObject({

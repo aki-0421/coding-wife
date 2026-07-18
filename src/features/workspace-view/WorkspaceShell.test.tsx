@@ -41,6 +41,14 @@ function renderWorkspace(adapter?: WorkspaceViewAdapter) {
   )
 }
 
+function expectFocusWithin(container: HTMLElement): void {
+  const activeElement = document.activeElement
+  if (!(activeElement instanceof HTMLElement)) {
+    throw new Error("Expected focus to be on an HTML element")
+  }
+  expect(container).toContainElement(activeElement)
+}
+
 function nativeWorkspaceState(
   contextSnapshots: NonNullable<
     WorkspaceAdapterState["draft"]
@@ -1055,9 +1063,9 @@ describe("WorkspaceShell", () => {
     const dialog = await screen.findByRole("dialog", {
       name: "Interrupt this turn?",
     })
-    expect(dialog).toContainElement(document.activeElement)
+    expectFocusWithin(dialog)
     await user.tab()
-    expect(dialog).toContainElement(document.activeElement)
+    expectFocusWithin(dialog)
     await user.keyboard("{Escape}")
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     expect(trigger).toHaveFocus()
