@@ -6,12 +6,13 @@
     "cargoLock": "src-tauri/Cargo.lock",
     "cargoLockSha256": "6e9f0afbd74299b9f6f11f4f23661536ff25ef16f675f06b2f3eb95ec29d28de",
     "cargoTarget": "aarch64-apple-darwin",
-    "policyVersion": 1
+    "cargoGraph": "cargo tree --locked --offline --target aarch64-apple-darwin --edges normal",
+    "policyVersion": 2
   },
   "summary": {
-    "total": 640,
+    "total": 630,
     "npm": 395,
-    "cargo": 245,
+    "cargo": 235,
     "unknown": 0,
     "forbidden": 0,
     "missing": 0
@@ -351,28 +352,6 @@
           "file": "LICENSE",
           "bytes": 1483,
           "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "bs58",
-      "version": "0.5.1",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4",
-      "license": "MIT/Apache-2.0",
-      "attribution": [],
-      "repository": "https://github.com/Nullus157/bs58-rs",
-      "evidence": [
-        {
-          "file": "LICENSE-APACHE",
-          "bytes": 10847,
-          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
-        },
-        {
-          "file": "LICENSE-MIT",
-          "bytes": 1082,
-          "sha256": "42d3bf7e7d4d49d72c0555d14ed99c3ee7ce9ce3cbffbc38bbafe8c103f50969"
         }
       ]
     },
@@ -1188,54 +1167,6 @@
           "file": "LICENSE",
           "bytes": 16725,
           "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "dtor",
-      "version": "0.3.0",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "f1057d6c64987086ff8ed0fd3fbf377a6b7d205cc7715868cd401705f715cbe4",
-      "license": "Apache-2.0 OR MIT",
-      "attribution": [
-        "Matt Mastracci <matthew@mastracci.com>"
-      ],
-      "repository": "https://github.com/mmastrac/rust-ctor",
-      "evidence": [
-        {
-          "file": "LICENSE-APACHE",
-          "bytes": 11324,
-          "sha256": "a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae"
-        },
-        {
-          "file": "LICENSE-MIT",
-          "bytes": 1022,
-          "sha256": "bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "dtor-proc-macro",
-      "version": "0.0.6",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "f678cf4a922c215c63e0de95eb1ff08a958a81d47e485cf9da1e27bf6305cfa5",
-      "license": "Apache-2.0 OR MIT",
-      "attribution": [
-        "Matt Mastracci <matthew@mastracci.com>"
-      ],
-      "repository": "https://github.com/mmastrac/rust-ctor",
-      "evidence": [
-        {
-          "file": "LICENSE-APACHE",
-          "bytes": 11324,
-          "sha256": "a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae"
-        },
-        {
-          "file": "LICENSE-MIT",
-          "bytes": 1022,
-          "sha256": "bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3"
         }
       ]
     },
@@ -2715,17 +2646,6 @@
     },
     {
       "ecosystem": "cargo",
-      "name": "objc2-core-graphics",
-      "version": "0.3.2",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "e022c9d066895efa1345f8e33e584b9f958da2fd4cd116792e15e07e4720a807",
-      "license": "Zlib OR Apache-2.0 OR MIT",
-      "attribution": [],
-      "repository": "https://github.com/madsmtm/objc2",
-      "evidence": []
-    },
-    {
-      "ecosystem": "cargo",
       "name": "objc2-encode",
       "version": "4.1.0",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
@@ -2757,17 +2677,6 @@
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "integrity": "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272",
       "license": "MIT",
-      "attribution": [],
-      "repository": "https://github.com/madsmtm/objc2",
-      "evidence": []
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "objc2-io-surface",
-      "version": "0.3.2",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d",
-      "license": "Zlib OR Apache-2.0 OR MIT",
       "attribution": [],
       "repository": "https://github.com/madsmtm/objc2",
       "evidence": []
@@ -3222,54 +3131,6 @@
     },
     {
       "ecosystem": "cargo",
-      "name": "ref-cast",
-      "version": "1.0.25",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "f354300ae66f76f1c85c5f84693f0ce81d747e2c3f21a45fef496d89c960bf7d",
-      "license": "MIT OR Apache-2.0",
-      "attribution": [
-        "David Tolnay <dtolnay@gmail.com>"
-      ],
-      "repository": "https://github.com/dtolnay/ref-cast",
-      "evidence": [
-        {
-          "file": "LICENSE-APACHE",
-          "bytes": 9723,
-          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
-        },
-        {
-          "file": "LICENSE-MIT",
-          "bytes": 1023,
-          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "ref-cast-impl",
-      "version": "1.0.25",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da",
-      "license": "MIT OR Apache-2.0",
-      "attribution": [
-        "David Tolnay <dtolnay@gmail.com>"
-      ],
-      "repository": "https://github.com/dtolnay/ref-cast",
-      "evidence": [
-        {
-          "file": "LICENSE-APACHE",
-          "bytes": 9723,
-          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
-        },
-        {
-          "file": "LICENSE-MIT",
-          "bytes": 1023,
-          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
       "name": "regex",
       "version": "1.13.1",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
@@ -3435,44 +3296,6 @@
       "version": "0.8.22",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "integrity": "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615",
-      "license": "MIT",
-      "attribution": [
-        "Graham Esau <gesau@hotmail.co.uk>"
-      ],
-      "repository": "https://github.com/GREsau/schemars",
-      "evidence": [
-        {
-          "file": "LICENSE",
-          "bytes": 1068,
-          "sha256": "1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "schemars",
-      "version": "0.9.0",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f",
-      "license": "MIT",
-      "attribution": [
-        "Graham Esau <gesau@hotmail.co.uk>"
-      ],
-      "repository": "https://github.com/GREsau/schemars",
-      "evidence": [
-        {
-          "file": "LICENSE",
-          "bytes": 1068,
-          "sha256": "1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "schemars",
-      "version": "1.2.1",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc",
       "license": "MIT",
       "attribution": [
         "Graham Esau <gesau@hotmail.co.uk>"
@@ -4808,33 +4631,6 @@
           "file": "LICENSE",
           "bytes": 1062,
           "sha256": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "tray-icon",
-      "version": "0.24.1",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "integrity": "65ba1e5f6b9ef9fd87e21b9c6f351554dbd717960089168fcfdef854686961dc",
-      "license": "MIT OR Apache-2.0",
-      "attribution": [],
-      "repository": "https://github.com/tauri-apps/tray-icon",
-      "evidence": [
-        {
-          "file": "LICENSE-APACHE",
-          "bytes": 10847,
-          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
-        },
-        {
-          "file": "LICENSE-MIT",
-          "bytes": 1108,
-          "sha256": "2ab5537b8c0cb1d475e2145b6a7994b04e7c71e6e5bd836f7f9c47c221a5ad9a"
-        },
-        {
-          "file": "LICENSE.spdx",
-          "bytes": 832,
-          "sha256": "6c1e5d0ccf5e8951401cb964036ae664d52fc8d1148173b53bc54fc534f5d404"
         }
       ]
     },

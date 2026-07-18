@@ -6,11 +6,14 @@ import test from "node:test"
 
 import {
   assertArtifactMatches,
+  cargoPackageIdentityKey,
   checkDependencyNotices,
   classifyLicense,
   DEPENDENCY_INVENTORY_FILE,
   DEPENDENCY_NOTICE_FILE,
   parseCargoLockPackages,
+  parseCargoTreePackageIds,
+  parseLicenseExpression,
   parsePnpmLockPackages,
   summarizeDependencies,
   validateCargoResolution,
@@ -44,24 +47,206 @@ name = "example"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+[[package]]
+name = "example"
+version = "1.2.3"
+source = "registry+https://example.invalid/index"
+checksum = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 `)
-  assert.deepEqual(packages.get("example@1.2.3"), {
-    name: "example",
-    version: "1.2.3",
-    source: "registry+https://github.com/rust-lang/crates.io-index",
-    checksum:
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  })
+  assert.deepEqual(
+    packages.get(
+      cargoPackageIdentityKey(
+        "example",
+        "1.2.3",
+        "registry+https://github.com/rust-lang/crates.io-index",
+      ),
+    ),
+    {
+      name: "example",
+      version: "1.2.3",
+      source: "registry+https://github.com/rust-lang/crates.io-index",
+      checksum:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    },
+  )
+  assert.equal(packages.size, 2)
 })
 
-test("license policy allows reviewed SPDX expressions and fails closed", () => {
+test("Cargo tree parser uses the effective normal target graph and exact package identities", () => {
+  const root = "path+file:///repo/src-tauri#coding-wife@0.1.0"
+  const workspaceHelper = "path+file:///repo/helper#workspace-helper@0.2.0"
+  const normalV1 =
+    "registry+https://github.com/rust-lang/crates.io-index#normal@1.0.0"
+  const normalV2 =
+    "registry+https://github.com/rust-lang/crates.io-index#normal@2.0.0"
+  const procMacro =
+    "registry+https://github.com/rust-lang/crates.io-index#normal-macro@1.0.0"
+  const metadata = {
+    packages: [
+      { id: root, name: "coding-wife", version: "0.1.0" },
+      { id: workspaceHelper, name: "workspace-helper", version: "0.2.0" },
+      { id: normalV1, name: "normal", version: "1.0.0" },
+      { id: normalV2, name: "normal", version: "2.0.0" },
+      { id: procMacro, name: "normal-macro", version: "1.0.0" },
+      {
+        id: "registry#index#optional-only@1.0.0",
+        name: "optional-only",
+        version: "1.0.0",
+      },
+      {
+        id: "registry#index#wrong-target@1.0.0",
+        name: "wrong-target",
+        version: "1.0.0",
+      },
+      {
+        id: "registry#index#build-only@1.0.0",
+        name: "build-only",
+        version: "1.0.0",
+      },
+    ],
+    workspace_members: [root, workspaceHelper],
+    resolve: { root },
+  }
+  const ids = parseCargoTreePackageIds(
+    `coding-wife v0.1.0 (/repo/src-tauri)
+workspace-helper v0.2.0 (/repo/helper)
+normal v1.0.0
+normal v2.0.0
+normal v1.0.0 (*)
+normal-macro v1.0.0 (proc-macro)
+normal-macro v1.0.0 (proc-macro) (*)
+`,
+    metadata,
+  )
+
+  assert.deepEqual(ids, new Set([normalV1, normalV2, procMacro]))
+  assert.equal(ids.has(root), false)
+  assert.equal(ids.has(workspaceHelper), false)
+  assert.equal(
+    [...ids].some((id) => id.includes("optional-only")),
+    false,
+  )
+  assert.equal(
+    [...ids].some((id) => id.includes("wrong-target")),
+    false,
+  )
+  assert.equal(
+    [...ids].some((id) => id.includes("build-only")),
+    false,
+  )
+})
+
+test("Cargo tree parser rejects ambiguous, unknown, malformed, and rootless displays", () => {
+  const root = "path+file:///repo#app@0.1.0"
+  const metadata = {
+    packages: [
+      { id: root, name: "app", version: "0.1.0" },
+      {
+        id: "registry#one#duplicate@1.0.0",
+        name: "duplicate",
+        version: "1.0.0",
+      },
+      {
+        id: "registry#two#duplicate@1.0.0",
+        name: "duplicate",
+        version: "1.0.0",
+      },
+    ],
+    workspace_members: [root],
+    resolve: { root },
+  }
+
+  assert.throws(
+    () =>
+      parseCargoTreePackageIds(
+        "app v0.1.0 (/repo)\nduplicate v1.0.0\n",
+        metadata,
+      ),
+    /LICENSE_CARGO_TREE_PACKAGE_AMBIGUOUS/u,
+  )
+  assert.throws(
+    () =>
+      parseCargoTreePackageIds(
+        "app v0.1.0 (/repo)\nunknown v1.0.0\n",
+        metadata,
+      ),
+    /LICENSE_CARGO_TREE_PACKAGE_UNKNOWN/u,
+  )
+  assert.throws(
+    () => parseCargoTreePackageIds(" app v0.1.0 (/repo)\n", metadata),
+    /LICENSE_CARGO_TREE_FORMAT_INVALID/u,
+  )
+  assert.throws(
+    () => parseCargoTreePackageIds("duplicate v1.0.0\n", metadata),
+    /LICENSE_CARGO_TREE_PACKAGE_AMBIGUOUS/u,
+  )
+  assert.throws(
+    () =>
+      parseCargoTreePackageIds("duplicate v2.0.0\n", {
+        packages: [
+          { id: root, name: "app", version: "0.1.0" },
+          {
+            id: "registry#duplicate@2.0.0",
+            name: "duplicate",
+            version: "2.0.0",
+          },
+        ],
+        workspace_members: [root],
+        resolve: { root },
+      }),
+    /LICENSE_CARGO_TREE_ROOT_MISSING/u,
+  )
+})
+
+test("license policy parses strict SPDX expressions and reviewed legacy slash forms", () => {
   assert.deepEqual(classifyLicense("MIT OR Apache-2.0"), {
     status: "allowed",
     ids: ["MIT", "Apache-2.0"],
   })
+  assert.deepEqual(parseLicenseExpression("MIT/Apache-2.0"), {
+    normalized: "MIT OR Apache-2.0",
+    licenseIds: ["MIT", "Apache-2.0"],
+    exceptionIds: [],
+  })
+  assert.deepEqual(classifyLicense("(MIT OR Apache-2.0) AND Unicode-3.0"), {
+    status: "allowed",
+    ids: ["MIT", "Apache-2.0", "Unicode-3.0"],
+  })
+  assert.deepEqual(classifyLicense("Apache-2.0 WITH LLVM-exception"), {
+    status: "allowed",
+    ids: ["Apache-2.0", "LLVM-exception"],
+  })
+  assert.equal(classifyLicense("LicenseRef-Internal").status, "unknown")
+  assert.equal(
+    classifyLicense("DocumentRef-vendor:LicenseRef-Internal").status,
+    "unknown",
+  )
+  assert.equal(
+    classifyLicense("Apache-2.0 WITH Unknown-exception").status,
+    "unknown",
+  )
   assert.equal(classifyLicense("Mystery-1.0").status, "unknown")
   assert.equal(classifyLicense("AGPL-3.0-only").status, "forbidden")
   assert.equal(classifyLicense("").status, "missing")
+
+  for (const malformed of [
+    "MIT OR",
+    "(MIT",
+    "MIT Apache-2.0",
+    "MIT OR OR Apache-2.0",
+    "MIT / / Apache-2.0",
+    "MIT WITH",
+    "(MIT) WITH LLVM-exception",
+    "MIT WITH LicenseRef-Exception",
+    "MIT WITH LLVM-exception WITH OpenSSL-exception",
+  ]) {
+    assert.throws(
+      () => classifyLicense(malformed),
+      /LICENSE_EXPRESSION_INVALID/u,
+      malformed,
+    )
+  }
 
   assert.throws(
     () => summarizeDependencies([{ ecosystem: "npm", license: "Mystery-1.0" }]),
@@ -137,10 +322,14 @@ test("stale generated artifacts are rejected byte-for-byte", () => {
 
 test("committed and packaged dependency notices match the offline locks", () => {
   const summary = checkDependencyNotices()
-  assert.equal(summary.total, summary.npm + summary.cargo)
-  assert.equal(summary.unknown, 0)
-  assert.equal(summary.forbidden, 0)
-  assert.equal(summary.missing, 0)
+  assert.deepEqual(summary, {
+    total: 630,
+    npm: 395,
+    cargo: 235,
+    unknown: 0,
+    forbidden: 0,
+    missing: 0,
+  })
 
   for (const file of [DEPENDENCY_INVENTORY_FILE, DEPENDENCY_NOTICE_FILE]) {
     assert.deepEqual(

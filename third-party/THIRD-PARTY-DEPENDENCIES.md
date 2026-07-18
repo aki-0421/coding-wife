@@ -1,6 +1,6 @@
 # Production Dependency Notices
 
-This generated notice conservatively covers the complete locked npm `dependencies` closure and the Cargo normal dependency closure for `aarch64-apple-darwin`. The npm list is based on package-manager classification, not a claim that every listed package contributed bytes to the final Vite bundle; for example, the declared `shadcn` dependency brings CLI transitive packages even though the application imports its build-time stylesheet. The notice is generated offline by `scripts/licenses/dependency-notices.mjs`; do not edit it directly.
+This generated notice conservatively covers the complete locked npm `dependencies` closure and the effective Cargo normal dependency graph reported by `cargo tree --locked --offline --target aarch64-apple-darwin --edges normal`. Cargo output is captured with the C locale and color disabled, then every display is resolved to exactly one `cargo metadata` package ID; ambiguous identities fail closed. The npm list is based on package-manager classification, not a claim that every listed package contributed bytes to the final Vite bundle; for example, the declared `shadcn` dependency brings CLI transitive packages even though the application imports its build-time stylesheet. The notice is generated offline by `scripts/licenses/dependency-notices.mjs`; do not edit it directly.
 
 The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms remain indexed separately in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). This notice does not grant a license to Coding Wife itself.
 
@@ -9,7 +9,7 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 - pnpm lock SHA-256: `9b1a5f60b855c508dbda15a2066bc1123484d6a067706d5ec3927946fb929ae4`
 - Cargo lock SHA-256: `6e9f0afbd74299b9f6f11f4f23661536ff25ef16f675f06b2f3eb95ec29d28de`
 - npm declared production-closure dependencies: `395`
-- Cargo runtime dependencies: `245`
+- Cargo runtime dependencies: `235`
 - Unknown licenses: `0`
 - Forbidden licenses: `0`
 - Missing required metadata: `0`
@@ -33,7 +33,6 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 | cargo | block2 | 0.6.2 | MIT | Mads Marquart <mads@marquart.dk> | https://github.com/madsmtm/objc2 | None bundled |
 | cargo | brotli | 8.0.4 | BSD-3-Clause AND MIT | Daniel Reiter Horn <danielrh@dropbox.com>; The Brotli Authors | https://github.com/dropbox/rust-brotli | c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae<br>3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94 |
 | cargo | brotli-decompressor | 5.0.3 | BSD-3-Clause/MIT | Daniel Reiter Horn <danielrh@dropbox.com>; The Brotli Authors | https://github.com/dropbox/rust-brotli-decompressor | c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae |
-| cargo | bs58 | 0.5.1 | MIT/Apache-2.0 | https://github.com/Nullus157/bs58-rs | https://github.com/Nullus157/bs58-rs | a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2<br>42d3bf7e7d4d49d72c0555d14ed99c3ee7ce9ce3cbffbc38bbafe8c103f50969 |
 | cargo | byteorder | 1.5.0 | Unlicense OR MIT | Andrew Gallant <jamslam@gmail.com> | https://github.com/BurntSushi/byteorder | 01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f<br>0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f |
 | cargo | bytes | 1.12.1 | MIT | Carl Lerche <me@carllerche.com>; Sean McArthur <sean@seanmonstar.com> | https://github.com/tokio-rs/bytes | 45f522cacecb1023856e46df79ca625dfc550c94910078bd8aec6e02880b3d42 |
 | cargo | camino | 1.2.4 | MIT OR Apache-2.0 | Without Boats <saoirse@without.boats>; Ashley Williams <ashley666ashley@gmail.com>; Steve Klabnik <steve@steveklabnik.com>; Rain <rain@sunshowers.io> | https://github.com/camino-rs/camino | a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2<br>23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3 |
@@ -71,8 +70,6 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 | cargo | dpi | 0.1.2 | Apache-2.0 AND MIT | https://github.com/rust-windowing/winit | https://github.com/rust-windowing/winit | 6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a<br>9eff396a99bafd208e7126602420d6864f6066c08b84485a5b032320a9c01997 |
 | cargo | dtoa | 1.0.11 | MIT OR Apache-2.0 | David Tolnay <dtolnay@gmail.com> | https://github.com/dtolnay/dtoa | 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a<br>23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3 |
 | cargo | dtoa-short | 0.3.5 | MPL-2.0 | Xidorn Quan <me@upsuper.org> | https://github.com/upsuper/dtoa-short | 1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5 |
-| cargo | dtor | 0.3.0 | Apache-2.0 OR MIT | Matt Mastracci <matthew@mastracci.com> | https://github.com/mmastrac/rust-ctor | a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae<br>bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3 |
-| cargo | dtor-proc-macro | 0.0.6 | Apache-2.0 OR MIT | Matt Mastracci <matthew@mastracci.com> | https://github.com/mmastrac/rust-ctor | a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae<br>bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3 |
 | cargo | dunce | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 | Kornel <kornel@geekhood.net> | https://gitlab.com/kornelski/dunce | a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499 |
 | cargo | dyn-clone | 1.0.20 | MIT OR Apache-2.0 | David Tolnay <dtolnay@gmail.com> | https://github.com/dtolnay/dyn-clone | 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a<br>23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3 |
 | cargo | embed_plist | 1.2.2 | MIT OR Apache-2.0 | Nikolai Vazquez <hello@nikolaivazquez.com> | https://github.com/nvzqz/embed-plist-rs | cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30<br>daacc37f680c7dd0a758ac99a109f2f57d9f21d3683df9e9245055922842a695 |
@@ -139,11 +136,9 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 | cargo | objc2 | 0.6.4 | MIT | Mads Marquart <mads@marquart.dk> | https://github.com/madsmtm/objc2 | None bundled |
 | cargo | objc2-app-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | https://github.com/madsmtm/objc2 | https://github.com/madsmtm/objc2 | None bundled |
 | cargo | objc2-core-foundation | 0.3.2 | Zlib OR Apache-2.0 OR MIT | https://github.com/madsmtm/objc2 | https://github.com/madsmtm/objc2 | None bundled |
-| cargo | objc2-core-graphics | 0.3.2 | Zlib OR Apache-2.0 OR MIT | https://github.com/madsmtm/objc2 | https://github.com/madsmtm/objc2 | None bundled |
 | cargo | objc2-encode | 4.1.0 | MIT | Mads Marquart <mads@marquart.dk> | https://github.com/madsmtm/objc2 | None bundled |
 | cargo | objc2-exception-helper | 0.1.1 | Zlib OR Apache-2.0 OR MIT | Mads Marquart <mads@marquart.dk> | https://github.com/madsmtm/objc2 | None bundled |
 | cargo | objc2-foundation | 0.3.2 | MIT | https://github.com/madsmtm/objc2 | https://github.com/madsmtm/objc2 | None bundled |
-| cargo | objc2-io-surface | 0.3.2 | Zlib OR Apache-2.0 OR MIT | https://github.com/madsmtm/objc2 | https://github.com/madsmtm/objc2 | None bundled |
 | cargo | objc2-web-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | https://github.com/madsmtm/objc2 | https://github.com/madsmtm/objc2 | None bundled |
 | cargo | once_cell | 1.21.4 | MIT OR Apache-2.0 | Aleksey Kladov <aleksey.kladov@gmail.com> | https://github.com/matklad/once_cell | a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2<br>23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3 |
 | cargo | option-ext | 0.2.0 | MPL-2.0 | Simon Ochsenreither <simon@ochsenreither.de> | https://github.com/soc/option-ext.git | 66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172 |
@@ -165,8 +160,6 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 | cargo | quick-xml | 0.41.0 | MIT | https://github.com/tafia/quick-xml | https://github.com/tafia/quick-xml | 5b2c207dcf571267ebe0bbdd5bf321f561ddc22ff597e7b363e96f4539507a29 |
 | cargo | quote | 1.0.46 | MIT OR Apache-2.0 | David Tolnay <dtolnay@gmail.com> | https://github.com/dtolnay/quote | 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a<br>23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3 |
 | cargo | raw-window-handle | 0.6.2 | MIT OR Apache-2.0 OR Zlib | Osspial <osspial@gmail.com> | https://github.com/rust-windowing/raw-window-handle | 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594<br>9c5a80639a57c1c945570e7ebbca0706305849ce3c098021325cca9db2f7acc4<br>ae895c8576e682f310fb70d93d9f99b1dd82872094c54a8f6cdfe2ca5c2d6ecb |
-| cargo | ref-cast | 1.0.25 | MIT OR Apache-2.0 | David Tolnay <dtolnay@gmail.com> | https://github.com/dtolnay/ref-cast | 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a<br>23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3 |
-| cargo | ref-cast-impl | 1.0.25 | MIT OR Apache-2.0 | David Tolnay <dtolnay@gmail.com> | https://github.com/dtolnay/ref-cast | 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a<br>23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3 |
 | cargo | regex | 1.13.1 | MIT OR Apache-2.0 | The Rust Project Developers; Andrew Gallant <jamslam@gmail.com> | https://github.com/rust-lang/regex | a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2<br>6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb |
 | cargo | regex-automata | 0.4.16 | MIT OR Apache-2.0 | The Rust Project Developers; Andrew Gallant <jamslam@gmail.com> | https://github.com/rust-lang/regex | a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2<br>6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb |
 | cargo | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | The Rust Project Developers; Andrew Gallant <jamslam@gmail.com> | https://github.com/rust-lang/regex | a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2<br>6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb |
@@ -175,8 +168,6 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 | cargo | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | The Rust Project Developers | https://github.com/rust-lang/rustc-hash | 95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc<br>30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652 |
 | cargo | same-file | 1.0.6 | Unlicense/MIT | Andrew Gallant <jamslam@gmail.com> | https://github.com/BurntSushi/same-file | 01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f<br>cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14 |
 | cargo | schemars | 0.8.22 | MIT | Graham Esau <gesau@hotmail.co.uk> | https://github.com/GREsau/schemars | 1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30 |
-| cargo | schemars | 0.9.0 | MIT | Graham Esau <gesau@hotmail.co.uk> | https://github.com/GREsau/schemars | 1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30 |
-| cargo | schemars | 1.2.1 | MIT | Graham Esau <gesau@hotmail.co.uk> | https://github.com/GREsau/schemars | 1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30 |
 | cargo | schemars_derive | 0.8.22 | MIT | Graham Esau <gesau@hotmail.co.uk> | https://github.com/GREsau/schemars | 1954992a2b32e8a2af24a4c11b726902e344c1934b947a77f04d404908f8db30 |
 | cargo | scopeguard | 1.2.0 | MIT OR Apache-2.0 | bluss | https://github.com/bluss/scopeguard | a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2<br>fb77f0a9c53e473abe5103c8632ef9f0f2874d4fb3f17cb2d8c661aab9cee9d7 |
 | cargo | selectors | 0.36.1 | MPL-2.0 | The Servo Project Developers | https://github.com/servo/stylo | None bundled |
@@ -234,7 +225,6 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 | cargo | tracing | 0.1.44 | MIT | Eliza Weisman <eliza@buoyant.io>; Tokio Contributors <team@tokio.rs> | https://github.com/tokio-rs/tracing | 898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1 |
 | cargo | tracing-attributes | 0.1.31 | MIT | Tokio Contributors <team@tokio.rs>; Eliza Weisman <eliza@buoyant.io>; David Barsky <dbarsky@amazon.com> | https://github.com/tokio-rs/tracing | 898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1 |
 | cargo | tracing-core | 0.1.36 | MIT | Tokio Contributors <team@tokio.rs> | https://github.com/tokio-rs/tracing | 898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1 |
-| cargo | tray-icon | 0.24.1 | MIT OR Apache-2.0 | https://github.com/tauri-apps/tray-icon | https://github.com/tauri-apps/tray-icon | a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2<br>2ab5537b8c0cb1d475e2145b6a7994b04e7c71e6e5bd836f7f9c47c221a5ad9a<br>6c1e5d0ccf5e8951401cb964036ae664d52fc8d1148173b53bc54fc534f5d404 |
 | cargo | typeid | 1.0.3 | MIT OR Apache-2.0 | David Tolnay <dtolnay@gmail.com> | https://github.com/dtolnay/typeid | 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a<br>23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3 |
 | cargo | typenum | 1.20.1 | MIT OR Apache-2.0 | https://github.com/paholg/typenum | https://github.com/paholg/typenum | db11fec9946737df39ca3898d9cd8c10ec6f6c3a884a6802b0ad0b81b4e8f23a<br>516b24e051bf5630880ebbd55c40a25ce9552ebaf8970a53e8976eb70e522406<br>a825bd853ab71619a4923d7b4311221427848070ff44d990da39b0b274c1683f |
 | cargo | unic-char-property | 0.9.0 | MIT/Apache-2.0 | The UNIC Project Developers | https://github.com/open-i18n/rust-unic/ | None bundled |
@@ -4932,33 +4922,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### 42d3bf7e7d4d49d72c0555d14ed99c3ee7ce9ce3cbffbc38bbafe8c103f50969
-
-- Source bytes: `1082`
-
-```text
-MIT License
-Copyright (c) 2016 The roaring-rs developers.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
 ### 435a6722c786b0a56fbe7387028f1d9d3f3a2d0fb615bb8fee118727c3f59b7b
 
 - Source bytes: `1073`
@@ -7489,32 +7452,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-```
-
-### 6c1e5d0ccf5e8951401cb964036ae664d52fc8d1148173b53bc54fc534f5d404
-
-- Source bytes: `832`
-
-```text
-SPDXVersion: SPDX-2.1
-DataLicense: CC0-1.0
-PackageName: tray-icon
-DataFormat: SPDXRef-1
-PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
-PackageHomePage: https://tauri.app
-PackageLicenseDeclared: Apache-2.0
-PackageLicenseDeclared: MIT
-PackageCopyrightText: 2020-2022, The Tauri Programme in the Commons Conservancy
-PackageSummary: <text>Create tray icons for desktop applications.
-                </text>
-PackageComment: <text>The package includes the following libraries; see
-Relationship information.
-                </text>
-Created: 2022-12-05T09:00:00Z
-PackageDownloadLocation: git://github.com/tauri-apps/tray-icon
-PackageDownloadLocation: git+https://github.com/tauri-apps/tray-icon.git
-PackageDownloadLocation: git+ssh://github.com/tauri-apps/tray-icon.git
-Creator: Person: Daniel Thompson-Yvetot
 ```
 
 ### 6ca87d1dce5b82873603e566fd83dabe8771fb169013337d4a14bb9bbf794687

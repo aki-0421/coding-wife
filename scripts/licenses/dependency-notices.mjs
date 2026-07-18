@@ -56,6 +56,18 @@ const forbiddenLicensePrefixes = [
   "SSPL-",
 ]
 
+const allowedLicenseExceptions = new Set([
+  "Classpath-exception-2.0",
+  "GCC-exception-3.1",
+  "LLVM-exception",
+  "OpenSSL-exception",
+])
+
+const licenseIdPattern = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/u
+const licenseExceptionPattern = /^[A-Za-z0-9][A-Za-z0-9.-]*$/u
+const licenseRefPattern =
+  /^(?:DocumentRef-[A-Za-z0-9.-]+:)?LicenseRef-[A-Za-z0-9.-]+$/u
+
 const evidenceNamePattern =
   /^(licen[cs]e|copying|notice|third[-_ ]party)([-_. ].*)?$/iu
 const maxEvidenceBytes = 1024 * 1024
@@ -76,7 +88,12 @@ function runJson(command, args, code) {
   const result = spawnSync(command, args, {
     cwd: projectRoot,
     encoding: "utf8",
-    env: process.env,
+    env: {
+      ...process.env,
+      CARGO_TERM_COLOR: "never",
+      LANG: "C",
+      LC_ALL: "C",
+    },
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"],
   })
@@ -86,6 +103,26 @@ function runJson(command, args, code) {
   } catch {
     fail(`${code}_INVALID_JSON`)
   }
+}
+
+function runText(command, args, code) {
+  const result = spawnSync(command, args, {
+    cwd: projectRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      CARGO_TERM_COLOR: "never",
+      LANG: "C",
+      LC_ALL: "C",
+    },
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+  if (result.error !== undefined || result.status !== 0) fail(code)
+  if (typeof result.stdout !== "string" || result.stdout.trim() === "") {
+    fail(`${code}_EMPTY`)
+  }
+  return result.stdout
 }
 
 function unquoteYamlKey(value) {
@@ -141,7 +178,7 @@ export function parseCargoLockPackages(contents) {
     if (!name || !version) fail("LICENSE_CARGO_LOCK_INVALID")
     const source = parseTomlString(block, "source")
     const checksum = parseTomlString(block, "checksum")
-    const key = `${name}@${version}`
+    const key = cargoPackageIdentityKey(name, version, source)
     if (packages.has(key)) fail("LICENSE_CARGO_LOCK_DUPLICATE")
     packages.set(key, { name, version, source, checksum })
   }
@@ -149,24 +186,151 @@ export function parseCargoLockPackages(contents) {
   return packages
 }
 
+export function cargoPackageIdentityKey(name, version, source) {
+  return JSON.stringify([name, version, source ?? null])
+}
+
+function tokenizeLicenseExpression(expression) {
+  const tokens = []
+  let offset = 0
+  while (offset < expression.length) {
+    const character = expression[offset]
+    if (/[ \t\r\n]/u.test(character)) {
+      offset += 1
+      continue
+    }
+    if (character === "(" || character === ")" || character === "/") {
+      tokens.push({ type: character, value: character })
+      offset += 1
+      continue
+    }
+
+    let end = offset
+    while (end < expression.length && !/[ \t\r\n()/]/u.test(expression[end])) {
+      end += 1
+    }
+    const value = expression.slice(offset, end)
+    if (value === "AND" || value === "OR" || value === "WITH") {
+      tokens.push({ type: value, value })
+    } else if (licenseIdPattern.test(value) || licenseRefPattern.test(value)) {
+      tokens.push({ type: "id", value })
+    } else {
+      fail("LICENSE_EXPRESSION_INVALID")
+    }
+    offset = end
+  }
+  return tokens
+}
+
+export function parseLicenseExpression(expression) {
+  if (typeof expression !== "string" || expression.trim() === "") {
+    fail("LICENSE_EXPRESSION_INVALID")
+  }
+
+  const tokens = tokenizeLicenseExpression(expression)
+  const licenseIds = []
+  const exceptionIds = []
+  let cursor = 0
+
+  const peek = () => tokens[cursor]
+  const consume = (type) => {
+    const token = peek()
+    if (!token || token.type !== type) fail("LICENSE_EXPRESSION_INVALID")
+    cursor += 1
+    return token
+  }
+
+  const parsePrimary = () => {
+    const token = peek()
+    if (!token) fail("LICENSE_EXPRESSION_INVALID")
+    if (token.type === "id") {
+      cursor += 1
+      licenseIds.push(token.value)
+      return { normalized: token.value, simple: true }
+    }
+    if (token.type === "(") {
+      cursor += 1
+      const nested = parseOr()
+      consume(")")
+      return { normalized: `(${nested.normalized})`, simple: false }
+    }
+    fail("LICENSE_EXPRESSION_INVALID")
+  }
+
+  const parseWith = () => {
+    const primary = parsePrimary()
+    if (peek()?.type !== "WITH") return primary
+    if (!primary.simple) fail("LICENSE_EXPRESSION_INVALID")
+    cursor += 1
+    const exception = consume("id").value
+    if (
+      !licenseExceptionPattern.test(exception) ||
+      licenseRefPattern.test(exception)
+    ) {
+      fail("LICENSE_EXPRESSION_INVALID")
+    }
+    exceptionIds.push(exception)
+    return {
+      normalized: `${primary.normalized} WITH ${exception}`,
+      simple: false,
+    }
+  }
+
+  const parseAnd = () => {
+    let left = parseWith()
+    while (peek()?.type === "AND") {
+      cursor += 1
+      const right = parseWith()
+      left = {
+        normalized: `${left.normalized} AND ${right.normalized}`,
+        simple: false,
+      }
+    }
+    return left
+  }
+
+  function parseOr() {
+    let left = parseAnd()
+    while (peek()?.type === "OR" || peek()?.type === "/") {
+      cursor += 1
+      const right = parseAnd()
+      left = {
+        normalized: `${left.normalized} OR ${right.normalized}`,
+        simple: false,
+      }
+    }
+    return left
+  }
+
+  const parsed = parseOr()
+  if (cursor !== tokens.length) fail("LICENSE_EXPRESSION_INVALID")
+  return {
+    normalized: parsed.normalized,
+    licenseIds,
+    exceptionIds,
+  }
+}
+
 export function classifyLicense(expression) {
   if (typeof expression !== "string" || expression.trim() === "") {
     return { status: "missing", ids: [] }
   }
 
-  const ids = expression
-    .match(/[A-Za-z0-9.+-]+/gu)
-    ?.filter((candidate) => !["AND", "OR", "WITH"].includes(candidate))
-
-  if (!ids || ids.length === 0) return { status: "missing", ids: [] }
+  const parsed = parseLicenseExpression(expression)
+  const ids = [...parsed.licenseIds, ...parsed.exceptionIds]
   if (
-    ids.some((id) =>
+    parsed.licenseIds.some((id) =>
       forbiddenLicensePrefixes.some((prefix) => id.startsWith(prefix)),
     )
   ) {
     return { status: "forbidden", ids }
   }
-  if (ids.some((id) => !allowedLicenseIds.has(id))) {
+  if (
+    parsed.licenseIds.some(
+      (id) => licenseRefPattern.test(id) || !allowedLicenseIds.has(id),
+    ) ||
+    parsed.exceptionIds.some((id) => !allowedLicenseExceptions.has(id))
+  ) {
     return { status: "unknown", ids }
   }
   return { status: "allowed", ids }
@@ -334,29 +498,61 @@ function collectPnpmPackages(pnpmLock) {
   })
 }
 
-function collectCargoPackageIds(metadata) {
-  if (!metadata.resolve?.root || !Array.isArray(metadata.resolve.nodes)) {
+export function parseCargoTreePackageIds(contents, metadata) {
+  if (
+    !metadata.resolve?.root ||
+    !Array.isArray(metadata.packages) ||
+    !Array.isArray(metadata.workspace_members)
+  ) {
     fail("LICENSE_CARGO_METADATA_INVALID")
   }
-  const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]))
-  const visited = new Set([metadata.resolve.root])
-  const queue = [metadata.resolve.root]
 
-  while (queue.length > 0) {
-    const node = nodes.get(queue.shift())
-    if (!node) fail("LICENSE_CARGO_NODE_MISSING")
-    for (const dependency of node.deps) {
-      const isNormal = dependency.dep_kinds.some(
-        (kind) => (kind.kind ?? "normal") === "normal",
-      )
-      if (isNormal && !visited.has(dependency.pkg)) {
-        visited.add(dependency.pkg)
-        queue.push(dependency.pkg)
-      }
+  const candidatesByNameVersion = new Map()
+  for (const entry of metadata.packages) {
+    if (
+      typeof entry.id !== "string" ||
+      typeof entry.name !== "string" ||
+      typeof entry.version !== "string"
+    ) {
+      fail("LICENSE_CARGO_METADATA_INVALID")
     }
+    const key = JSON.stringify([entry.name, entry.version])
+    const candidates = candidatesByNameVersion.get(key) ?? []
+    candidates.push(entry.id)
+    candidatesByNameVersion.set(key, candidates)
   }
-  visited.delete(metadata.resolve.root)
-  return visited
+
+  const packageIds = new Set()
+  let rootSeen = false
+  for (const rawLine of contents.split(/\r?\n/u)) {
+    if (rawLine === "") continue
+    if (rawLine !== rawLine.trim() || rawLine.includes("\t")) {
+      fail("LICENSE_CARGO_TREE_FORMAT_INVALID")
+    }
+
+    let descriptor = rawLine
+    if (descriptor.endsWith(" (*)")) descriptor = descriptor.slice(0, -4)
+    if (descriptor.endsWith(" (proc-macro)")) {
+      descriptor = descriptor.slice(0, -13)
+    }
+    const match =
+      /^([A-Za-z0-9_-]+) v([0-9][0-9A-Za-z.+-]*)(?: \(.+\))?$/u.exec(descriptor)
+    if (!match) fail("LICENSE_CARGO_TREE_FORMAT_INVALID")
+
+    const candidates =
+      candidatesByNameVersion.get(JSON.stringify([match[1], match[2]])) ?? []
+    if (candidates.length === 0) fail("LICENSE_CARGO_TREE_PACKAGE_UNKNOWN")
+    if (candidates.length !== 1) fail("LICENSE_CARGO_TREE_PACKAGE_AMBIGUOUS")
+    const packageId = candidates[0]
+    packageIds.add(packageId)
+    if (packageId === metadata.resolve.root) rootSeen = true
+  }
+
+  if (!rootSeen) fail("LICENSE_CARGO_TREE_ROOT_MISSING")
+  for (const workspaceMember of metadata.workspace_members) {
+    packageIds.delete(workspaceMember)
+  }
+  return packageIds
 }
 
 export function validateCargoResolution(locked, source) {
@@ -387,12 +583,33 @@ function collectCargoPackages(cargoLock) {
     ],
     "LICENSE_CARGO_METADATA_FAILED",
   )
+  const tree = runText(
+    "cargo",
+    [
+      "tree",
+      "--locked",
+      "--offline",
+      "--target",
+      CARGO_TARGET,
+      "--edges",
+      "normal",
+      "--manifest-path",
+      "src-tauri/Cargo.toml",
+      "--prefix",
+      "none",
+      "--format",
+      "{p}",
+    ],
+    "LICENSE_CARGO_TREE_FAILED",
+  )
   const packages = new Map(metadata.packages.map((entry) => [entry.id, entry]))
 
-  return [...collectCargoPackageIds(metadata)].map((id) => {
+  return [...parseCargoTreePackageIds(tree, metadata)].map((id) => {
     const entry = packages.get(id)
     if (!entry) fail("LICENSE_CARGO_PACKAGE_MISSING")
-    const locked = cargoLock.get(`${entry.name}@${entry.version}`)
+    const locked = cargoLock.get(
+      cargoPackageIdentityKey(entry.name, entry.version, entry.source),
+    )
     validateCargoResolution(locked, entry.source)
 
     const packageDirectory = path.dirname(entry.manifest_path)
@@ -465,7 +682,7 @@ ${markdownCodeBlock(evidence.text)}`,
 
   return `# Production Dependency Notices
 
-This generated notice conservatively covers the complete locked npm \`dependencies\` closure and the Cargo normal dependency closure for \`${CARGO_TARGET}\`. The npm list is based on package-manager classification, not a claim that every listed package contributed bytes to the final Vite bundle; for example, the declared \`shadcn\` dependency brings CLI transitive packages even though the application imports its build-time stylesheet. The notice is generated offline by \`scripts/licenses/dependency-notices.mjs\`; do not edit it directly.
+This generated notice conservatively covers the complete locked npm \`dependencies\` closure and the effective Cargo normal dependency graph reported by \`cargo tree --locked --offline --target ${CARGO_TARGET} --edges normal\`. Cargo output is captured with the C locale and color disabled, then every display is resolved to exactly one \`cargo metadata\` package ID; ambiguous identities fail closed. The npm list is based on package-manager classification, not a claim that every listed package contributed bytes to the final Vite bundle; for example, the declared \`shadcn\` dependency brings CLI transitive packages even though the application imports its build-time stylesheet. The notice is generated offline by \`scripts/licenses/dependency-notices.mjs\`; do not edit it directly.
 
 The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms remain indexed separately in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). This notice does not grant a license to Coding Wife itself.
 
@@ -554,7 +771,8 @@ export function generateDependencyNoticeArtifacts() {
       cargoLock: "src-tauri/Cargo.lock",
       cargoLockSha256: sha256(cargoLockContents),
       cargoTarget: CARGO_TARGET,
-      policyVersion: 1,
+      cargoGraph: `cargo tree --locked --offline --target ${CARGO_TARGET} --edges normal`,
+      policyVersion: 2,
     },
     summary,
     dependencies: dependencies.map(publicDependency),
