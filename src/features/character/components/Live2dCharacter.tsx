@@ -192,7 +192,11 @@ export function Live2dCharacter({
     syncReducedMotion()
     mediaQuery?.addEventListener("change", syncReducedMotion)
 
+    const syncDocumentVisibility = () => {
+      controller.syncDocumentVisibility()
+    }
     const syncSize = () => {
+      syncDocumentVisibility()
       const bounds = host.getBoundingClientRect()
       controller.resize(bounds.width, bounds.height, window.devicePixelRatio)
     }
@@ -200,9 +204,10 @@ export function Live2dCharacter({
     if (typeof ResizeObserver === "function") {
       resizeObserver = new ResizeObserver(syncSize)
       resizeObserver.observe(host)
-    } else {
-      window.addEventListener("resize", syncSize)
     }
+    window.addEventListener("resize", syncSize)
+    window.addEventListener("focus", syncDocumentVisibility)
+    window.addEventListener("pageshow", syncDocumentVisibility)
 
     let active = true
     void controller.mount(canvas).then(
@@ -220,6 +225,8 @@ export function Live2dCharacter({
       active = false
       resizeObserver?.disconnect()
       window.removeEventListener("resize", syncSize)
+      window.removeEventListener("focus", syncDocumentVisibility)
+      window.removeEventListener("pageshow", syncDocumentVisibility)
       mediaQuery?.removeEventListener("change", syncReducedMotion)
       controller.dispose()
       setMountedController((current) =>

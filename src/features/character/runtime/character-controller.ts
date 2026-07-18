@@ -160,8 +160,7 @@ export class CharacterController {
   #cssHeight = 1
 
   readonly #handleVisibilityChange = () => {
-    this.#documentVisible = document.visibilityState === "visible"
-    this.applyMotionPolicy()
+    this.syncDocumentVisibility()
   }
 
   readonly #handleContextLost = (event: Event) => {
@@ -227,7 +226,7 @@ export class CharacterController {
     canvas.addEventListener("webglcontextlost", this.#handleContextLost)
     canvas.addEventListener("webglcontextrestored", this.#handleContextRestored)
     document.addEventListener("visibilitychange", this.#handleVisibilityChange)
-    this.#documentVisible = document.visibilityState === "visible"
+    this.syncDocumentVisibility()
 
     const bounds = canvas.getBoundingClientRect()
     this.resize(bounds.width, bounds.height, window.devicePixelRatio)
@@ -332,6 +331,13 @@ export class CharacterController {
 
   public setSystemPrefersReducedMotion(prefersReducedMotion: boolean): void {
     this.#systemPrefersReducedMotion = prefersReducedMotion
+    this.applyMotionPolicy()
+  }
+
+  public syncDocumentVisibility(): void {
+    const documentVisible = document.visibilityState === "visible"
+    if (this.#documentVisible === documentVisible) return
+    this.#documentVisible = documentVisible
     this.applyMotionPolicy()
   }
 
