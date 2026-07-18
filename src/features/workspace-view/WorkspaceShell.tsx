@@ -191,6 +191,8 @@ export function WorkspaceShell({
     readonly workspaceGeneration: number
     readonly locale: typeof locale
   } | null>(null)
+  const transitionOriginRef = useRef<HTMLElement | null>(null)
+  const transitionSafeActionRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     const previous = previousSelectedWorkspaceId.current
@@ -261,16 +263,25 @@ export function WorkspaceShell({
 
   const cancelWorkspace = useCallback(
     async (stopFirst: boolean) => {
-      if (stopFirst && !(await stopTurn())) {
-        view.setNotice({
-          tone: "error",
-          message: copy.workspaceMenu.error.active,
-        })
+      const canceled = reportWorkspaceAction(
+        await view.cancelSelectedWorkspace(
+          stopFirst ? workspaceGeneration : null,
+        ),
+      )
+      if (!canceled) {
         return false
       }
-      return reportWorkspaceAction(await view.cancelSelectedWorkspace())
+      commitExplanationController?.revokePresentationIntent("selection_change")
+      await narrationController.dismissPresentation("explicit_cancel")
+      return true
     },
-    [copy.workspaceMenu.error.active, reportWorkspaceAction, stopTurn, view],
+    [
+      commitExplanationController,
+      narrationController,
+      reportWorkspaceAction,
+      view,
+      workspaceGeneration,
+    ],
   )
 
   const repairWorkspace = useCallback(
@@ -692,7 +703,26 @@ export function WorkspaceShell({
         }}
         open={pendingWorkspaceTransition !== null}
       >
-        <DialogContent showCloseButton={false}>
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            const origin = transitionOriginRef.current
+            transitionOriginRef.current = null
+            window.requestAnimationFrame(() => origin?.focus())
+          }}
+          onEscapeKeyDown={(event) => {
+            event.preventDefault()
+            if (!transitionStopping) view.cancelWorkspaceTransition()
+          }}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            if (document.activeElement instanceof HTMLElement) {
+              transitionOriginRef.current = document.activeElement
+            }
+            transitionSafeActionRef.current?.focus()
+          }}
+          showCloseButton={false}
+        >
           <DialogHeader>
             <DialogTitle>{copy.workspaceSwitch.title}</DialogTitle>
             <DialogDescription>
@@ -728,6 +758,7 @@ export function WorkspaceShell({
             <Button
               disabled={transitionStopping}
               onClick={view.cancelWorkspaceTransition}
+              ref={transitionSafeActionRef}
               type="button"
               variant="ghost"
             >

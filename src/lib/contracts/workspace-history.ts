@@ -32,6 +32,7 @@ export const workspaceHistoryCommands = {
   repair: "workspace_repair",
   unregister: "workspace_unregister",
   updateLifecycle: "workspace_update_lifecycle",
+  cancel: "workspace_cancel",
   saveDraft: "workspace_save_draft",
   saveContextSnapshot: "workspace_save_context_snapshot",
   loadEditableContext: "workspace_load_editable_context",
@@ -176,6 +177,11 @@ export interface WorkspaceUpdateLifecycleRequest {
   readonly expectedUpdatedAt: string
 }
 
+export interface WorkspaceCancelRequest {
+  readonly workspaceId: string
+  readonly expectedUpdatedAt: string
+}
+
 export interface WorkspaceSaveDraftRequest {
   readonly workspaceId: string
   readonly text: string
@@ -244,6 +250,7 @@ export interface WorkspaceHistoryRequestMap {
   workspace_repair: WorkspaceRepairRequest
   workspace_unregister: WorkspaceUnregisterRequest
   workspace_update_lifecycle: WorkspaceUpdateLifecycleRequest
+  workspace_cancel: WorkspaceCancelRequest
   workspace_save_draft: WorkspaceSaveDraftRequest
   workspace_save_context_snapshot: WorkspaceSaveContextRequest
   workspace_load_editable_context: WorkspaceLoadEditableContextRequest
@@ -264,6 +271,7 @@ export interface WorkspaceHistoryResponseMap {
   workspace_repair: WorkspaceStateSnapshot
   workspace_unregister: WorkspaceStateSnapshot
   workspace_update_lifecycle: PersistedWorkspaceSummary
+  workspace_cancel: PersistedWorkspaceSummary
   workspace_save_draft: PersistedWorkspaceDraft
   workspace_save_context_snapshot: PersistedContextSnapshot
   workspace_load_editable_context: WorkspaceEditableContext
@@ -1185,6 +1193,7 @@ export function parseWorkspaceHistoryResponse<
     case workspaceHistoryCommands.pickRegister:
       return parseWorkspacePickResponse(value) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.updateLifecycle:
+    case workspaceHistoryCommands.cancel:
       return parsePersistedWorkspaceSummary(
         value,
       ) as WorkspaceHistoryResponseMap[K]

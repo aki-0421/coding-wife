@@ -119,6 +119,7 @@ export {
   type PersistedWorkspaceDraft,
   type PersistedWorkspaceSummary,
   type WorkspaceCommandErrorEnvelope,
+  type WorkspaceCancelRequest,
   type WorkspaceContextSource,
   type WorkspaceCreateSessionRequest,
   type WorkspaceDeleteChallenge,

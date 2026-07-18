@@ -28,7 +28,7 @@ const en = {
     cancelBody:
       "Its app lifecycle changes to Canceled. Source files, the worktree, Git refs, and history are kept.",
     cancelRunningBody:
-      "The active turn must be stopped first. After the stop is accepted, the workspace lifecycle changes to Canceled.",
+      "The active turn must stop first. Its lifecycle changes to Canceled only after the exact turn is terminal and local cleanup finishes.",
     keepWorkspace: "Go back",
     confirmCancel: "Cancel workspace",
     stopAndCancel: "Stop and cancel",
@@ -547,7 +547,7 @@ const ja: typeof en = {
     cancelBody:
       "アプリ内の状態を「中止」に変更します。ソースファイル、worktree、Git ref、履歴は保持します。",
     cancelRunningBody:
-      "先に進行中のターンを停止します。停止が受理された後、ワークスペースの状態を「中止」に変更します。",
+      "先に進行中のターンを停止します。対象ターンの終了状態を確認し、ローカル後処理が完了した後だけワークスペースの状態を「中止」に変更します。",
     keepWorkspace: "戻る",
     confirmCancel: "ワークスペースを中止",
     stopAndCancel: "停止して中止",

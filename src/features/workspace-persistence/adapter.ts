@@ -141,9 +141,8 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
     workspaceId: string,
     expectedUpdatedAt: string,
   ): Promise<WorkspaceAdapterState> {
-    await this.transport.request(workspaceHistoryCommands.updateLifecycle, {
+    await this.transport.request(workspaceHistoryCommands.cancel, {
       workspaceId,
-      lifecycle: "canceled",
       expectedUpdatedAt,
     })
     return this.absorb(

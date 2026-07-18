@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   BanIcon,
   ChevronRightIcon,
@@ -133,6 +133,7 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirmation, setConfirmation] = useState<ConfirmationStage>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const safeActionRef = useRef<HTMLButtonElement | null>(null)
   const busy = props.actionPending !== null
   const cancelDisabled =
     busy ||
@@ -149,6 +150,14 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
   const completeUnregister = async () => {
     if (await props.onUnregister()) closeConfirmation()
   }
+
+  useEffect(() => {
+    if (confirmation === null) return
+    const frame = window.requestAnimationFrame(() =>
+      safeActionRef.current?.focus(),
+    )
+    return () => window.cancelAnimationFrame(frame)
+  }, [confirmation])
 
   return (
     <>
@@ -240,9 +249,18 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
         open={confirmation !== null}
       >
         <DialogContent
+          closeLabel={props.copy.dismiss}
           onCloseAutoFocus={(event) => {
             event.preventDefault()
             window.requestAnimationFrame(() => triggerRef.current?.focus())
+          }}
+          onEscapeKeyDown={(event) => {
+            event.preventDefault()
+            if (!busy) closeConfirmation()
+          }}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            safeActionRef.current?.focus()
           }}
           showCloseButton={!busy}
         >
@@ -268,6 +286,7 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
             <Button
               disabled={busy}
               onClick={closeConfirmation}
+              ref={safeActionRef}
               type="button"
               variant="ghost"
             >
@@ -275,7 +294,6 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
             </Button>
             {confirmation === "unregister" ? (
               <Button
-                autoFocus
                 onClick={() => setConfirmation("unregister_final")}
                 type="button"
                 variant="secondary"
@@ -284,7 +302,6 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
               </Button>
             ) : confirmation === "unregister_final" ? (
               <Button
-                autoFocus
                 disabled={busy}
                 onClick={() => void completeUnregister()}
                 type="button"
@@ -296,7 +313,6 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
               </Button>
             ) : (
               <Button
-                autoFocus
                 disabled={busy}
                 onClick={() => void completeCancel()}
                 type="button"

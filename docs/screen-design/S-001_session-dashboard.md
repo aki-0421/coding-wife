@@ -177,7 +177,7 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 | Git preflight | Rust child process | `diagnose_project` | canonical root、read-only allowlist Git command | running checkをsafe abort | check別Blocked |
 | Codex preflight | Rust supervisor | `diagnose_codex` | executable/stdio capability、auth内容非読取 | 前回結果維持 | failure stageを表示 |
 | create/select | Rust DB + Codex supervisor | `create/select_workspace` | typed workspace/project ID、expected generation | transaction前なら変更なし | 元selection/turn/lifecycle維持 |
-| workspace cancel | Rust DB + Codex supervisor | `cancel_workspace` | typed workspace ID、expected DB version。supervisor gateはactive/pending turnとcancel中のturn開始をatomicに拒否し、active cancelはexact terminal、cleanup、履歴flush proof後だけ呼ぶ | transaction前なら変更なし | generic lifecycle mutationを拒否し、元selection/turn/lifecycle維持 |
+| workspace cancel | Rust DB + Codex supervisor | `workspace_cancel` | typed workspace ID、expected DB version。supervisor gateはactive/pending turnとcancel中のturn開始をatomicに拒否し、active cancelはexact terminal、cleanup、履歴flush proof後だけ呼ぶ | transaction前なら変更なし | `workspace_update_lifecycle`によるCanceled指定を拒否し、元selection/turn/lifecycle維持 |
 | active workspace切替 | Rust supervisor + DB | `interrupt_and_switch_workspace` | old workspace/thread/turn/generation、pending selection、terminal cleanup proof | old workspaceの全state維持 | old workspaceをactiveのままerror |
 | repository repair | Tauri dialog → Rust project service | `repair_project_linkage` | target Project ID、saved `RepositoryIdentityV1`、canonical worktree exact identity、atomic transaction | linkage/selection不変 | source/Gitを変更せずtyped reason |
 | project登録解除 | Rust DB | `unregister_project` | active/pending turn 0件、二段階confirmation token、metadata scope | 変更なし | source/Git/library/history本文を変更しない |

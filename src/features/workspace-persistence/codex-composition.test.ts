@@ -30,6 +30,7 @@ class CompositionCodexTransport implements CodexTransport {
     readonly request: unknown
   }[] = []
   readonly connectFailures = new Map<string, Error>()
+  interruptFailure: Error | null = null
   private callbacks: CodexEventCallbacks | null = null
 
   request<K extends CodexCommand>(
@@ -75,6 +76,10 @@ class CompositionCodexTransport implements CodexTransport {
           rejections: [],
         } as unknown as CodexResponseMap[K])
       case codexCommands.turnInterrupt:
+        if (this.interruptFailure !== null) {
+          return Promise.reject(this.interruptFailure)
+        }
+        return Promise.resolve({ accepted: true } as CodexResponseMap[K])
       case codexCommands.respondPending:
         return Promise.resolve({ accepted: true } as CodexResponseMap[K])
       case codexCommands.answerFallbackDecision:
@@ -423,6 +428,127 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         ({ command }) => command === codexCommands.turnInterrupt,
       ),
     ).toHaveLength(1)
+  })
+
+  it("waits for exact terminal cleanup and history flush before canceling once", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const historyRequest = vi.spyOn(history, "request")
+    const codex = new CompositionCodexTransport()
+    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const state = await adapter.loadState()
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("active fixture workspace")
+    const updatedAt = state.workspaces.find(
+      (workspace) => workspace.id === workspaceId,
+    )?.updatedAt
+    if (updatedAt === undefined) throw new Error("active fixture revision")
+    await adapter.sendTurn({
+      workspaceId,
+      instruction: "Cancel only after terminal cleanup.",
+      effort: "fast",
+      attachments: [],
+      contextSnapshots: [],
+      editableContextSnapshot:
+        await adapter.getTurnContextSnapshot(workspaceId),
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    codex.emit({ ...running, workspaceId })
+
+    const first = adapter.cancelWorkspace(
+      workspaceId,
+      updatedAt,
+      fixture.thread.generation,
+    )
+    const duplicate = adapter.cancelWorkspace(
+      workspaceId,
+      updatedAt,
+      fixture.thread.generation,
+    )
+    expect(duplicate).toBe(first)
+    await vi.waitFor(() =>
+      expect(codex.calls.at(-1)?.command).toBe(codexCommands.turnInterrupt),
+    )
+    expect(
+      historyRequest.mock.calls.filter(
+        ([command]) => command === "workspace_cancel",
+      ),
+    ).toHaveLength(0)
+
+    codex.emit({
+      ...running,
+      workspaceId,
+      eventId: "event-cancel-terminal",
+      sequence: 2,
+      payload: { ...running.payload, status: "interrupted" },
+    })
+    const canceled = await first
+    expect(
+      canceled.workspaces.find((workspace) => workspace.id === workspaceId),
+    ).toMatchObject({ id: workspaceId, lifecycle: "canceled" })
+
+    const calls = historyRequest.mock.calls
+    const terminalAppendIndex = calls.findIndex(
+      ([command, request]) =>
+        command === "history_append_domain_event" &&
+        isRecord(request) &&
+        request.eventId === "event-cancel-terminal",
+    )
+    const cancelIndex = calls.findIndex(
+      ([command]) => command === "workspace_cancel",
+    )
+    expect(terminalAppendIndex).toBeGreaterThanOrEqual(0)
+    expect(cancelIndex).toBeGreaterThan(terminalAppendIndex)
+    expect(
+      calls.filter(([command]) => command === "workspace_cancel"),
+    ).toHaveLength(1)
+  })
+
+  it("keeps lifecycle unchanged when interrupt acknowledgement fails", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const historyRequest = vi.spyOn(history, "request")
+    const codex = new CompositionCodexTransport()
+    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const state = await adapter.loadState()
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("active fixture workspace")
+    const workspace = state.workspaces.find(
+      (candidate) => candidate.id === workspaceId,
+    )
+    if (workspace?.updatedAt === undefined)
+      throw new Error("active fixture workspace")
+    await adapter.sendTurn({
+      workspaceId,
+      instruction: "Preserve lifecycle on interrupt failure.",
+      effort: "fast",
+      attachments: [],
+      contextSnapshots: [],
+      editableContextSnapshot:
+        await adapter.getTurnContextSnapshot(workspaceId),
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    codex.emit({ ...running, workspaceId })
+    codex.interruptFailure = new Error("CODEX-INTERRUPT-FAILED")
+
+    await expect(
+      adapter.cancelWorkspace(
+        workspaceId,
+        workspace.updatedAt,
+        fixture.thread.generation,
+      ),
+    ).rejects.toThrow("CODEX-INTERRUPT-FAILED")
+    expect(
+      historyRequest.mock.calls.filter(
+        ([command]) => command === "workspace_cancel",
+      ),
+    ).toHaveLength(0)
+    const after = await history.request("workspace_list", undefined)
+    expect(
+      after.workspaces.find(
+        (candidate) => candidate.workspaceId === workspaceId,
+      ),
+    ).toMatchObject({ workspaceId, lifecycle: workspace.lifecycle })
   })
 
   it("rejects stale transitions and restores the old workspace after target activation failure", async () => {

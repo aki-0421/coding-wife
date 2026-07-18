@@ -207,6 +207,10 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
         return this.updateLifecycle(
           request as WorkspaceHistoryRequestMap["workspace_update_lifecycle"],
         )
+      case workspaceHistoryCommands.cancel:
+        return this.cancelWorkspace(
+          request as WorkspaceHistoryRequestMap["workspace_cancel"],
+        )
       case workspaceHistoryCommands.saveDraft:
         return this.saveDraft(
           request as WorkspaceHistoryRequestMap["workspace_save_draft"],
@@ -432,32 +436,54 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
   private updateLifecycle(
     request: WorkspaceHistoryRequestMap["workspace_update_lifecycle"],
   ): PersistedWorkspaceSummary {
-    const current = this.workspace(
+    if (request.lifecycle === "canceled") {
+      throw this.error(
+        "WORKSPACE-CANCEL-COMMAND-REQUIRED",
+        workspaceHistoryCommands.updateLifecycle,
+        false,
+      )
+    }
+    return this.applyLifecycle(
       request.workspaceId,
+      request.lifecycle,
+      request.expectedUpdatedAt,
       workspaceHistoryCommands.updateLifecycle,
     )
-    if (current.updatedAt !== request.expectedUpdatedAt) {
-      throw this.error(
-        "WORKSPACE-REVISION-CONFLICT",
-        workspaceHistoryCommands.updateLifecycle,
-        true,
-      )
+  }
+
+  private cancelWorkspace(
+    request: WorkspaceHistoryRequestMap["workspace_cancel"],
+  ): PersistedWorkspaceSummary {
+    return this.applyLifecycle(
+      request.workspaceId,
+      "canceled",
+      request.expectedUpdatedAt,
+      workspaceHistoryCommands.cancel,
+    )
+  }
+
+  private applyLifecycle(
+    workspaceId: string,
+    lifecycle: PersistedWorkspaceSummary["lifecycle"],
+    expectedUpdatedAt: string,
+    command:
+      | typeof workspaceHistoryCommands.updateLifecycle
+      | typeof workspaceHistoryCommands.cancel,
+  ): PersistedWorkspaceSummary {
+    const current = this.workspace(workspaceId, command)
+    if (current.updatedAt !== expectedUpdatedAt) {
+      throw this.error("WORKSPACE-REVISION-CONFLICT", command, true)
     }
     const updated = {
       ...current,
-      lifecycle: request.lifecycle,
+      lifecycle,
       updatedAt: this.timestamp(),
     }
     this.replaceWorkspace(updated)
     this.pushEvent(
-      this.event(
-        request.workspaceId,
-        "work",
-        "work.workspace.lifecycle.changed",
-        {
-          lifecycle: request.lifecycle,
-        },
-      ),
+      this.event(workspaceId, "work", "work.workspace.lifecycle.changed", {
+        lifecycle,
+      }),
     )
     return updated
   }

@@ -910,8 +910,10 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     [adapter, applyAdapterState, pendingWorkspaceTransition],
   )
 
-  const cancelSelectedWorkspace =
-    useCallback(async (): Promise<WorkspaceActionResult> => {
+  const cancelSelectedWorkspace = useCallback(
+    async (
+      expectedGeneration: number | null = null,
+    ): Promise<WorkspaceActionResult> => {
       if (
         !adapterReady ||
         !selectedWorkspace?.updatedAt ||
@@ -925,6 +927,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
           await adapter.cancelWorkspace(
             selectedWorkspace.id,
             selectedWorkspace.updatedAt,
+            expectedGeneration,
           ),
         )
         setNotice(null)
@@ -938,7 +941,9 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
       } finally {
         setWorkspaceAction(null)
       }
-    }, [adapter, adapterReady, applyAdapterState, selectedWorkspace])
+    },
+    [adapter, adapterReady, applyAdapterState, selectedWorkspace],
+  )
 
   const repairSelectedWorkspace =
     useCallback(async (): Promise<WorkspaceActionResult> => {

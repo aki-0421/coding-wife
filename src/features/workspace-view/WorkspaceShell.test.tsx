@@ -1552,7 +1552,7 @@ describe("WorkspaceShell", () => {
     expect(sendTurn.mock.calls[0]?.[0]).not.toHaveProperty("paths")
   })
 
-  it("stops an active turn before canceling and blocks unregister while running", async () => {
+  it("delegates terminal cancellation atomically and blocks unregister while running", async () => {
     const timestamp = "2026-07-18T01:00:00.000Z"
     const activeState: WorkspaceAdapterState = {
       ...nativeWorkspaceState(),
@@ -1602,12 +1602,68 @@ describe("WorkspaceShell", () => {
     await user.click(screen.getByRole("button", { name: "Stop and cancel" }))
 
     await waitFor(() => expect(cancelWorkspace).toHaveBeenCalledOnce())
-    expect(stopTurn).toHaveBeenCalledWith("workspace-native")
-    expect(cancelWorkspace).toHaveBeenCalledWith("workspace-native", timestamp)
-    expect(stopTurn.mock.invocationCallOrder[0]).toBeLessThan(
-      cancelWorkspace.mock.invocationCallOrder[0]!,
+    expect(stopTurn).not.toHaveBeenCalled()
+    expect(cancelWorkspace).toHaveBeenCalledWith(
+      "workspace-native",
+      timestamp,
+      1,
     )
     expect(unregisterWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("focuses the safe cancel action, handles Escape, and restores the opener", async () => {
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      cancelWorkspace: vi.fn(),
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+    const opener = await screen.findByRole("button", {
+      name: "Workspace actions",
+    })
+
+    await user.click(opener)
+    await user.click(screen.getByRole("button", { name: /Cancel workspace/u }))
+    const dialog = screen.getByRole("dialog", {
+      name: "Cancel this workspace?",
+    })
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "Go back" }),
+      ).toHaveFocus(),
+    )
+    expect(
+      within(dialog).getByRole("button", { name: "Dismiss" }),
+    ).toBeVisible()
+
+    fireEvent.keyDown(dialog, { code: "Escape", key: "Escape" })
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it("localizes the destructive dialog close control in Japanese", async () => {
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      cancelWorkspace: vi.fn(),
+    }
+    const user = userEvent.setup()
+    render(
+      <App
+        localeStore={japaneseLocaleStore}
+        transport={new DemoTransport()}
+        workspaceAdapter={adapter}
+      />,
+    )
+
+    await user.click(
+      await screen.findByRole("button", { name: "ワークスペース操作" }),
+    )
+    await user.click(
+      screen.getByRole("button", { name: /ワークスペースを中止/u }),
+    )
+    expect(screen.getByRole("button", { name: "閉じる" })).toBeVisible()
   })
 
   it("shows repository health and repairs it from the state-aware action menu", async () => {
@@ -1690,9 +1746,15 @@ describe("WorkspaceShell", () => {
     )
     expect(screen.getByText("Unregister this project?")).toBeVisible()
     expect(unregisterWorkspace).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Go back" })).toHaveFocus(),
+    )
     await user.click(screen.getByRole("button", { name: "Continue" }))
     expect(screen.getByText("Confirm project unregister")).toBeVisible()
     expect(unregisterWorkspace).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Go back" })).toHaveFocus(),
+    )
     await user.click(screen.getByRole("button", { name: "Unregister project" }))
 
     await waitFor(() =>
@@ -1771,6 +1833,11 @@ describe("WorkspaceShell", () => {
     const dialog = screen.getByRole("dialog", {
       name: "Stop and switch workspaces?",
     })
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "Go back" }),
+      ).toHaveFocus(),
+    )
     expect(within(dialog).getByText("Current workspace")).toBeVisible()
     expect(
       within(dialog).getByText("native-repository/restored-workspace"),
@@ -1791,6 +1858,14 @@ describe("WorkspaceShell", () => {
     expect(stopAndSwitchWorkspace).not.toHaveBeenCalled()
     expect(dismissPresentation).not.toHaveBeenCalled()
     expect(cancelSpeech).not.toHaveBeenCalled()
+
+    await user.click(targetRow)
+    const escapeDialog = screen.getByRole("dialog", {
+      name: "Stop and switch workspaces?",
+    })
+    fireEvent.keyDown(escapeDialog, { code: "Escape", key: "Escape" })
+    await waitFor(() => expect(escapeDialog).not.toBeInTheDocument())
+    await waitFor(() => expect(targetRow).toHaveFocus())
   })
 
   it("keeps the old workspace selected until Stop and switch finishes", async () => {

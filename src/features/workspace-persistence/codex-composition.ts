@@ -62,6 +62,10 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     readonly key: string
     readonly operation: Promise<WorkspaceAdapterState>
   } | null = null
+  private workspaceCancellation: {
+    readonly key: string
+    readonly operation: Promise<WorkspaceAdapterState>
+  } | null = null
 
   constructor(
     historyTransport: WorkspaceHistoryTransport,
@@ -98,6 +102,9 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   stopAndSwitchWorkspace(
     request: WorkspaceTransitionRequest,
   ): Promise<WorkspaceAdapterState> {
+    if (this.workspaceCancellation !== null) {
+      return Promise.reject(new Error("WORKSPACE-CANCEL-IN-PROGRESS"))
+    }
     const key = `${request.fromWorkspaceId}:${request.toWorkspaceId}:${String(request.expectedGeneration)}`
     if (this.workspaceTransition !== null) {
       if (this.workspaceTransition.key === key) {
@@ -114,8 +121,32 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return operation
   }
 
-  cancelWorkspace(workspaceId: string, expectedUpdatedAt: string) {
-    return this.history.cancelWorkspace(workspaceId, expectedUpdatedAt)
+  cancelWorkspace(
+    workspaceId: string,
+    expectedUpdatedAt: string,
+    expectedGeneration: number | null = null,
+  ): Promise<WorkspaceAdapterState> {
+    if (this.workspaceTransition !== null) {
+      return Promise.reject(new Error("WORKSPACE-TRANSITION-IN-PROGRESS"))
+    }
+    const key = `${workspaceId}:${expectedUpdatedAt}:${String(expectedGeneration)}`
+    if (this.workspaceCancellation !== null) {
+      if (this.workspaceCancellation.key === key) {
+        return this.workspaceCancellation.operation
+      }
+      return Promise.reject(new Error("WORKSPACE-CANCEL-IN-PROGRESS"))
+    }
+    const operation = this.performWorkspaceCancellation(
+      workspaceId,
+      expectedUpdatedAt,
+      expectedGeneration,
+    ).finally(() => {
+      if (this.workspaceCancellation?.operation === operation) {
+        this.workspaceCancellation = null
+      }
+    })
+    this.workspaceCancellation = { key, operation }
+    return operation
   }
 
   async repairWorkspace(workspaceId: string): Promise<WorkspaceAdapterState> {
@@ -313,6 +344,27 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       }
       throw error
     }
+  }
+
+  private async performWorkspaceCancellation(
+    workspaceId: string,
+    expectedUpdatedAt: string,
+    expectedGeneration: number | null,
+  ): Promise<WorkspaceAdapterState> {
+    if (expectedGeneration !== null) {
+      const before = this.codex.snapshot()
+      if (
+        before.activeWorkspaceId !== workspaceId ||
+        before.generation !== expectedGeneration
+      ) {
+        throw new Error("WORKSPACE-CANCEL-STALE")
+      }
+      await this.codex.stopTurnAndWaitForTerminal({
+        workspaceId,
+        expectedGeneration,
+      })
+    }
+    return this.history.cancelWorkspace(workspaceId, expectedUpdatedAt)
   }
 
   private async activateCodexStrict(

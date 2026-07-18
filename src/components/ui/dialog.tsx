@@ -12,9 +12,11 @@ const DialogClose = DialogPrimitive.Close
 function DialogContent({
   className,
   children,
+  closeLabel = "Close",
   showCloseButton = true,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  closeLabel?: string
   showCloseButton?: boolean
 }) {
   return (
@@ -32,13 +34,13 @@ function DialogContent({
         {showCloseButton ? (
           <DialogPrimitive.Close asChild>
             <Button
-              aria-label="Close"
+              aria-label={closeLabel}
               className="absolute top-sm right-sm"
               size="icon-xs"
               type="button"
               variant="ghost"
             >
-              <XIcon />
+              <XIcon data-icon="inline-end" />
             </Button>
           </DialogPrimitive.Close>
         ) : null}

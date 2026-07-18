@@ -196,6 +196,12 @@ describe("workspace history contract", () => {
     ).toEqual(fixture.summary)
     expect(
       parseWorkspaceHistoryResponse(
+        workspaceHistoryCommands.cancel,
+        fixture.summary,
+      ),
+    ).toEqual(fixture.summary)
+    expect(
+      parseWorkspaceHistoryResponse(
         workspaceHistoryCommands.saveDraft,
         fixture.draft,
       ),

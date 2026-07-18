@@ -115,6 +115,35 @@ describe("DemoWorkspaceHistoryTransport", () => {
     })
   })
 
+  it("requires the dedicated cancellation command", async () => {
+    const transport = new DemoWorkspaceHistoryTransport()
+    const initial = await transport.request(
+      workspaceHistoryCommands.list,
+      undefined,
+    )
+    const workspace = initial.workspaces.find(
+      (candidate) => candidate.workspaceId === initial.activeWorkspaceId,
+    )
+    if (workspace === undefined) throw new Error("demo fixture")
+
+    await expect(
+      transport.request(workspaceHistoryCommands.updateLifecycle, {
+        workspaceId: workspace.workspaceId,
+        lifecycle: "canceled",
+        expectedUpdatedAt: workspace.updatedAt,
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKSPACE-CANCEL-COMMAND-REQUIRED",
+      operation: workspaceHistoryCommands.updateLifecycle,
+    })
+    await expect(
+      transport.request(workspaceHistoryCommands.cancel, {
+        workspaceId: workspace.workspaceId,
+        expectedUpdatedAt: workspace.updatedAt,
+      }),
+    ).resolves.toMatchObject({ lifecycle: "canceled" })
+  })
+
   it("bounds context snapshots and rejects stale draft revisions", async () => {
     const transport = new DemoWorkspaceHistoryTransport()
     const initial = await transport.request(

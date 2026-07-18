@@ -161,6 +161,7 @@ export interface WorkspaceViewAdapter {
   readonly cancelWorkspace?: (
     workspaceId: string,
     expectedUpdatedAt: string,
+    expectedGeneration?: number | null,
   ) => Promise<WorkspaceAdapterState>
   readonly repairWorkspace?: (
     workspaceId: string,
