@@ -169,7 +169,7 @@ decisionはtimeline内の強いoutline surfaceとして表示し、必要時だ�
 
 canvasはpointer eventを奪わず、decorative扱いとする。model animationはevent severityを誇張せず、error/decisionを祝福表現にしない。tabがbackground、window occluded、reduced motion、thermal pressure時はFPSを下げ、Chat入力とevent描画を優先する。
 
-verified commit後にapp-owned explanation controllerが`queued` / `running`へ遷移したら、`explaining_commit`状態とsequence付きのredacted narration chunkをvisible HTML captionへ表示する。captionはTTSより先に確定し、TTS enabled時だけ同じtextを同じ順で読む。workspace/selection変更、Cancel、stale/schema invalid後のchunkは表示・再生しない。
+verified commit後にapp-owned explanation controllerが`queued` / `running`へ遷移しても、Commit UIのbackground statusだけを更新し、caption/live region/TTSは開始しない。利用者が「詳しく教えて」または再表示を1回選んだ時だけ、そのselection/request/intent epochへ束縛した`explaining_commit`状態とsequence付きのredacted narration chunkをvisible HTML captionへ表示する。未生成、生成中、自動生成済みcacheのどれも同じ1回で表示し、captionをTTSより先に確定して、TTS enabled時だけ同じtextを同じ順で読む。workspace/locale/selection変更、Stop、Close、Cancel、stale/schema invalid後の旧intent chunkは表示・再生しない。StopとCloseはbackground support job/cacheを維持する。
 
 ### Context subview
 
@@ -210,7 +210,8 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | 再起動復旧 | started turnにterminal eventなし | Interrupted marker、draft、last observed commit、review/new turn/diagnostic | read-only inspect、Commit、new turn前preflight |利用者が次操作を選ぶ |
 | stale event | sequence gap、duplicate、workspace mismatch | affected pointでingestion pause、diagnostic | local history、Stop | supervisorがgap解消またはterminal error |
 | companion fallback | WebGL/model/render/audio failure | staticまたはtext-only、visible reason、Chatは継続 | Chat全操作、Settings | retryまたは別model選択 |
-| commit説明中 | app controllerがverified commitを`queued` / `running`としている | `explaining_commit`、streamed HTML caption、Cancel、mute。main timelineへmessageを追加しない | read-only tab、Cancel、mute | generated/canceled/failed/unavailable/selection変更 |
+| commit説明準備中 | app controllerがverified commitを`queued` / `running`としているが明示presentation intentはない | background status、「詳しく教えて」、Cancel。caption/live region/TTSは0件でmain timelineへmessageを追加しない | read-only tab、詳しく教えて、Cancel | 明示intent、generated/canceled/failed/unavailable/selection変更 |
+| commit説明表示中 | `user_request` / `user_retry` / 明示Showのintentとcontroller stateがexact一致する | `explaining_commit`、streamed HTML caption、Cancel、mute。active tabは維持 | read-only tab、Close、Cancel、mute | generated/canceled/failed/unavailable/selection/locale/workspace変更、Stop、Close |
 | demo memory | browser previewの決定的memory adapter | Codex/Git未接続、`Demo memory` badge、再起動で戻る説明。`Persisted locally`を表示しない | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
 
 ## 操作

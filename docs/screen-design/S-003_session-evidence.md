@@ -126,9 +126,9 @@ row全体をsingle selection controlとし、内部へmutation actionを置か�
 | Producer | `Main Codex`または`External/Uncorrelated`。`App checkpoint`とは表示しない |
 | Actions | controller stateに応じた`詳しく教えて`、presentation表示・再読上げ、`Retry`、`Cancel`。Commit/Restore/Branchは存在しない |
 
-actionはactive selection、Freshなworkspace generation、valid redaction、同じcommit evidence IDのcontroller stateへ束縛する。`not_generated`なら「詳しく教えて」からapp controllerへ`trigger=user_request`、`queued` / `running`ならpresentation activateとCancel、`generated`ならcached presentation表示と任意の同一transcript再読上げ、`failed` / `canceled`なら`trigger=user_retry`、`unavailable`なら理由と`retryable=true`の場合だけ`trigger=user_retry`を表示する。disabled時は理由をbutton近傍のtextで示し、どのactionもmain sessionへ送らない。
+actionはactive selection、Freshなworkspace generation、valid redaction、同じcommit evidence IDのcontroller stateへ束縛する。`not_generated`なら「詳しく教えて」からapp controllerへ`trigger=user_request`、`queued` / `running`なら同じ「詳しく教えて」をpresent-on-complete intentとしてrebindしてCancelも表示し、`generated`なら同じ1回でcached presentationを表示して任意の同一transcript再読上げを提供する。`failed` / `canceled`なら`trigger=user_retry`、`unavailable`なら理由と`retryable=true`の場合だけ`trigger=user_retry`を表示する。selection / locale / workspace / Stop / Closeはintent epochを先に失効させ、後着event/responseを再表示しない。disabled時は理由をbutton近傍のtextで示し、どのactionもmain sessionへ送らない。
 
-App rootはnative explanation adapterとNarrationControllerを各1個だけ所有する。WorkspaceShellはselected workspace ID、同workspaceへ接続した実Codex generation、UI localeが揃った時だけ両controllerへscopeを設定し、EvidenceViewへ同じgenerationを渡す。固定値generation、別workspaceの直前snapshot、tab visibilityをscope根拠にしない。
+App rootはnative explanation adapterとNarrationControllerを各1個だけ所有する。WorkspaceShellはselected workspace ID、同workspaceへ接続した実Codex generation、UI localeが揃った時だけ両controllerへscopeを設定し、EvidenceViewへ同じgenerationを渡す。adapterはscope invokeを単一writerで直列化し、latest desired scopeへcoalesceして適用完了まではevent/responseを閉じる。固定値generation、別workspaceの直前snapshot、tab visibility、並列invokeの完了順をscope根拠にしない。
 
 ### Detail tabs
 
@@ -203,8 +203,8 @@ TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでloca
 | Observer unavailable | repo/Git/policy/error | 保存済みevidence、typed reason | Retry、Settings、Chat | fresh/error |
 | Diff loading | fileを明示選択 | row skeleton、Cancel | Cancel、別file | loaded/error |
 | Explanation not_generated | 起動前から存在したcommit、または自動enqueue前 | `詳しく教えて`と自動生成対象か否かのtext | `user_request`、inspect | queued/unavailable |
-| Explanation queued/running | `auto_verified_commit` / `user_request` / `user_retry`受理後 | status、presentation activate、caption portal、Cancel | presentation、Cancel、read-only inspect | generated/failed/canceled/unavailable |
-| Explanation generated | done受理、current runtimeにcached presentationあり | explanation表示、同一transcriptの任意再読上げ | presentation、inspect | selection/new request |
+| Explanation queued/running | `auto_verified_commit` / `user_request` / `user_retry`受理後 | background status、「詳しく教えて」、Cancel。明示intent前はcaption/TTS 0件 | present-on-complete intent、Cancel、read-only inspect | generated/failed/canceled/unavailable |
+| Explanation generated | done受理、current runtimeにcached presentationあり | 「詳しく教えて」1回でexplanation表示、同一transcriptの任意再読上げ | presentation、inspect | selection/new request |
 | Explanation failed/canceled | model/schema/timeout、またはCancel terminal | deterministic reason、Retry | `user_retry`、inspect | queued/unavailable |
 | Explanation unavailable | support off/offline/redaction/capability error | deterministic reason。`retryable=true`の場合だけRetry | inspect、Settings、条件付き`user_retry` | queued/unavailable |
 
@@ -218,9 +218,9 @@ support unavailableはcommit evidenceを隠さず、main turnのstatusを変え�
 | Refresh | active、observer idle | new observationとlist projection | in-flight read cancel | Stale/Unavailable、Git不変 | `GIT-F-074`, `GIT-F-078` |
 | commit選択 | valid evidence ID | detail表示 | 非該当 | selection解除、list維持 | `GIT-F-084` |
 | file diff表示 | valid file evidence ID | lazy diff表示 | requestだけ停止 | typed row error | `GIT-F-085` |
-| verified commit自動説明 | success commit command、新しいSHAとevidence検証済み | app controllerが`not_generated`→`queued`、background explanation開始 | controller Cancelでterminal化 | failed/unavailable caption、main不変 | `CODE-F-077`〜`CODE-F-079`, `GIT-F-090`〜`GIT-F-096` |
-| 詳しく教えて | `not_generated`、active selection、redaction pass | app controllerへ`trigger=user_request`、background explanation開始 | Cancelでterminal化 | unavailable caption、main不変 | `GIT-F-090`〜`GIT-F-096` |
-| 説明表示・再読上げ | `queued` / `running` / `generated`のpresentationあり | cached/streaming presentationをactivateし、任意で同じtranscriptを再読上げ | presentationを閉じても生成継続 | captionを維持しTTSだけunavailable | `GIT-F-093`, `GIT-F-094`, `GIT-F-096` |
+| verified commit自動説明 | success commit command、新しいSHAとevidence検証済み | app controllerが`not_generated`→`queued`、background explanation開始。presentation event/caption/TTSは0件 | controller Cancelでterminal化 | failed/unavailable status、main不変 | `CODE-F-077`〜`CODE-F-079`, `GIT-F-090`〜`GIT-F-096` |
+| 詳しく教えて | `not_generated` / `queued` / `running` / `generated`、active selection、redaction pass | `user_request` / `user_retry`または既存requestへのpresent-on-complete intentをexact selectionへ束縛し、cache hitを含め1回で表示 | 生成Cancelでterminal化。Close/Stopはintentだけ失効 | unavailable caption、main不変 | `GIT-F-090`〜`GIT-F-096` |
+| 説明表示・再読上げ | current intentと`queued` / `running` / `generated` stateがexact一致 | cached/streaming presentationをactivateし、任意で同じtranscriptを再読上げ | presentationを閉じても生成とcacheは継続し、late eventで再openしない | captionを維持しTTSだけunavailable | `GIT-F-093`, `GIT-F-094`, `GIT-F-096` |
 | 説明Retry | `failed` / `canceled`、または`unavailable`かつ`retryable=true` | app controllerへ`trigger=user_retry` | request前ならstate不変 | reasonを更新しmain不変 | `GIT-F-095`, `GIT-F-096`, `SUP-F-078` |
 | 説明Cancel | active request | 1秒以内interrupt、以後delta破棄 | 非該当 | 5秒後timeout terminal | `SUP-F-075`, `NARR-F-081` |
 

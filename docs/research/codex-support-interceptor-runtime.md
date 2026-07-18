@@ -48,17 +48,19 @@ support入力はnative Git serviceが作成し、path / secret scannerと64 KiB�
 1. native adapterは5 commandと`coding-wife://commit-explanation-state` / `coding-wife://commit-explanation-presentation`を購読し、stateをworkspace generation + commit evidence IDでmemory cacheする。購読完了前の`get_state`でnative snapshotを取得し、event到着後は同期`getState`を更新してからsubscriberへ通知する。
 2. adapterはstate / presentationのschema、request ID、selection version、trigger、locale、full commit SHAをexactに検証する。public `request()`へ`auto_verified_commit`が渡された場合はinvoke前に拒否する。
 3. App rootはadapterと`NarrationController`を各1個だけ生成し、同じadapterをCommit UI controllerと`CommitNarrationConsumerPort` sourceへ渡す。React再render、tab切替、force-mounted panelでinstanceやnative listenerを増やさない。
-4. `WorkspaceShell`はselected workspaceと、そのworkspaceに一致する実Codex generationが揃った時だけadapter / narrationへ`setScope`する。workspace switch、generation rollback、scope request raceは古いscopeを再適用しない。
+4. `WorkspaceShell`はselected workspaceと、そのworkspaceに一致する実Codex generationが揃った時だけadapter / narrationへ`setScope`する。adapterはnative writeをApp-lifetimeの単一writerへ集約し、進行中Aの後にB/Cが来た場合はA完了後にlatest Cだけを適用する。latest desired scopeとnative applied scopeが一致するまではstate/presentation event、hydrate、requestを閉じる。workspace switch、generation rollback、locale連打、reverse completion、dispose中responseは古いscopeを再適用しない。
 
 ### presentationとStop
 
-native presentationの`commitEvidenceId=commit-<full SHA>`からfull SHAを取り出し、workspace ID、generation、request ID、locale、triggerが最新controller stateと一致した時だけNarration sourceへ次を同期順で発行する。
+native controllerは`auto_verified_commit`成功時にgenerated state/cacheだけを更新し、presentation eventを発行しない。WebView adapterは`user_request` / `user_retry`または明示Showを受けた時にpresentation intent epochを進め、workspace ID、generation、commit evidence ID、selection version、request ID、locale、triggerを固定する。queued/runningへのdedupe合流は同じintentへrebindし、generated cache hitはその1回の操作から即座にnative `present`する。
+
+native presentationの`commitEvidenceId=commit-<full SHA>`からfull SHAを取り出し、上記identityとintent epochが最新controller stateに一致した時だけNarration sourceへ次を同期順で発行する。native event受信時、invoke response受信時、Narration activation直前の各点で同じepochを再検査する。
 
 1. `started`
 2. schema済み`narrationChunks`を1-origin連続`chunk`
 3. `terminal(status=completed)`
 
-NarrationController側のpresentation generationはこのsource keyのactivateごとに増やす。native workspace generationをpresentation generationとして再利用しない。duplicate presentation eventは同一source key + mode + payload digestで1回に集約し、mismatch、stale、cancel後のeventは捨てる。
+NarrationController側のpresentation generationはこのsource keyのactivateごとに増やす。native workspace generationをpresentation generationとして再利用しない。duplicate presentation eventは同一source key + mode + payload digestで1回に集約し、mismatch、stale、cancel後、revoked intentのeventは捨てる。selection / workspace / locale / Stop / Closeはadapterのintent epochを同期的に失効させてからcaption/TTSをdismissする。再度の明示Showだけが新epochでcacheを再提示できる。
 
 S-002の実Stopはmain `turn/interrupt`と`NarrationController.dismissPresentation("turn_stop")`を同時に開始する。これはvisible caption / TTSを閉じるだけで、app-owned support generationへcancelを送らない。producer cancelはS-003の明示Cancel、workspace/generation scope変更、timeout、App closeだけに限定する。
 
