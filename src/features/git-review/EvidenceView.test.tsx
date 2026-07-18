@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -152,7 +152,7 @@ describe("EvidenceView", () => {
               schemaVersion: 1,
               items: [],
               nextCursor: "offset-50",
-            } as GitReviewResponseMap[K]
+            } as unknown as GitReviewResponseMap[K]
           }
         }
         return delegate.request(command, request)
@@ -168,6 +168,30 @@ describe("EvidenceView", () => {
         name: /feat\(git\): add read-only commit evidence/,
       }),
     ).toBeVisible()
+  })
+
+  it("exposes the compact commit drawer and restores focus after Escape", async () => {
+    const user = userEvent.setup()
+    renderEvidence()
+    await screen.findByRole("heading", {
+      name: "feat(git): add read-only commit evidence",
+    })
+    const trigger = screen.getByRole("button", { name: "Open commit list" })
+
+    trigger.focus()
+    await user.click(trigger)
+    const drawer = screen.getByRole("region", { name: "Open commit list" })
+    const close = within(drawer).getByRole("button", { name: "Close" })
+    await waitFor(() => expect(close).toHaveFocus())
+    expect(trigger).toHaveAttribute("aria-controls", "commit-list-drawer")
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+
+    await user.keyboard("{Escape}")
+    expect(
+      screen.queryByRole("region", { name: "Open commit list" }),
+    ).not.toBeInTheDocument()
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
   })
 
   it("routes a not-generated explanation through app-owned user_request", async () => {

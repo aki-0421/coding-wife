@@ -149,6 +149,103 @@ describe("GitReviewStore", () => {
     )
   })
 
+  it("discards a presentation failure after the commit selection changes", async () => {
+    let rejectPresentation: ((error: Error) => void) | undefined
+    const presentation = new Promise<void>((_resolve, reject) => {
+      rejectPresentation = reject
+    })
+    let controllerState: CommitExplanationControllerStateV1 | null = null
+    const controller: CommitExplanationController = {
+      request: vi.fn(),
+      cancel: vi.fn(),
+      present: vi.fn(() => presentation),
+      getState: () => controllerState,
+      subscribe: () => () => {},
+    }
+    const store = new GitReviewStore(
+      "workspace-demo",
+      new RecordingTransport(),
+      { commitExplanationController: controller },
+    )
+    await store.activate()
+    const [current, previous] = store.snapshot().items
+    if (current === undefined || previous === undefined) {
+      throw new Error("Demo commits are missing")
+    }
+    controllerState = {
+      schemaVersion: 1,
+      workspaceId: "workspace-demo",
+      workspaceGeneration: 1,
+      commitEvidenceId: current.commitEvidenceId,
+      requestId: "presentation-one",
+      status: "generated",
+      trigger: "auto_verified_commit",
+      retryable: false,
+      presentationAvailable: true,
+      errorCode: null,
+      updatedAt: "2026-07-18T09:00:00.000Z",
+    }
+
+    const stale = store.presentExplanation(controllerState, "show")
+    await Promise.resolve()
+    await store.selectCommitEvidence(previous.commitEvidenceId)
+    rejectPresentation?.(new Error("stale presentation failed"))
+    await stale
+
+    expect(store.snapshot()).toMatchObject({
+      selectedCommitEvidenceId: previous.commitEvidenceId,
+      explanation: { status: "idle", requestId: null, error: null },
+    })
+  })
+
+  it("discards a presentation failure after the controller request changes", async () => {
+    let rejectPresentation: ((error: Error) => void) | undefined
+    const presentation = new Promise<void>((_resolve, reject) => {
+      rejectPresentation = reject
+    })
+    let controllerState: CommitExplanationControllerStateV1 | null = null
+    const controller: CommitExplanationController = {
+      request: vi.fn(),
+      cancel: vi.fn(),
+      present: vi.fn(() => presentation),
+      getState: () => controllerState,
+      subscribe: () => () => {},
+    }
+    const store = new GitReviewStore(
+      "workspace-demo",
+      new RecordingTransport(),
+      { commitExplanationController: controller },
+    )
+    await store.activate()
+    const commitEvidenceId = store.snapshot().selectedCommitEvidenceId
+    if (commitEvidenceId === null) throw new Error("Demo commit is missing")
+    controllerState = {
+      schemaVersion: 1,
+      workspaceId: "workspace-demo",
+      workspaceGeneration: 1,
+      commitEvidenceId,
+      requestId: "presentation-one",
+      status: "generated",
+      trigger: "auto_verified_commit",
+      retryable: false,
+      presentationAvailable: true,
+      errorCode: null,
+      updatedAt: "2026-07-18T09:00:00.000Z",
+    }
+
+    const stale = store.presentExplanation(controllerState, "show")
+    await Promise.resolve()
+    controllerState = { ...controllerState, requestId: "presentation-two" }
+    rejectPresentation?.(new Error("superseded presentation failed"))
+    await stale
+
+    expect(store.snapshot().explanation).toEqual({
+      status: "idle",
+      requestId: null,
+      error: null,
+    })
+  })
+
   it("discards a stale detail response after a rapid selection change", async () => {
     const delegate = new DemoGitReviewTransport(0)
     let release: (() => void) | undefined
@@ -242,7 +339,7 @@ describe("GitReviewStore", () => {
               schemaVersion: 1,
               items: [],
               nextCursor: "offset-50",
-            } as GitReviewResponseMap[K]
+            } as unknown as GitReviewResponseMap[K]
           }
         }
         return delegate.request(command, request)

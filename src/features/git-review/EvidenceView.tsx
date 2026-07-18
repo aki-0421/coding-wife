@@ -1,7 +1,9 @@
 import {
+  type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react"
@@ -155,6 +157,8 @@ export function EvidenceView({
   const review = useGitReview(store)
   const copy = gitReviewCopy[locale]
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const drawerTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const drawerCloseRef = useRef<HTMLButtonElement | null>(null)
   const explanationControllerState = useCommitExplanationControllerState(
     commitExplanationController,
     workspaceId,
@@ -173,6 +177,41 @@ export function EvidenceView({
     }
   }, [active, store])
 
+  const openDrawer = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    drawerTriggerRef.current = event.currentTarget
+    setDrawerOpen(true)
+  }
+
+  const closeDrawer = useCallback((restoreFocus = true) => {
+    setDrawerOpen(false)
+    if (!restoreFocus) return
+    const trigger = drawerTriggerRef.current
+    window.requestAnimationFrame(() => trigger?.focus())
+  }, [])
+
+  useEffect(() => {
+    if (active || !drawerOpen) return
+    const closeFrame = window.requestAnimationFrame(() => closeDrawer(false))
+    return () => window.cancelAnimationFrame(closeFrame)
+  }, [active, closeDrawer, drawerOpen])
+
+  useEffect(() => {
+    if (!active || !drawerOpen) return
+    const focusFrame = window.requestAnimationFrame(() => {
+      drawerCloseRef.current?.focus()
+    })
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      event.preventDefault()
+      closeDrawer()
+    }
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [active, closeDrawer, drawerOpen, review.collectionStatus])
+
   const observation = review.observation
   const refreshing = review.observationStatus === "loading"
   const selectedWorkUnitId = review.detail?.workUnitId ?? null
@@ -184,7 +223,7 @@ export function EvidenceView({
     review.detailStatus === "ready"
 
   const selectCommit = (commitEvidenceId: string) => {
-    setDrawerOpen(false)
+    if (drawerOpen) closeDrawer()
     void review.selectCommitEvidence(commitEvidenceId)
   }
 
@@ -211,9 +250,11 @@ export function EvidenceView({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
+                aria-controls="commit-list-drawer"
+                aria-expanded={active && drawerOpen}
                 aria-label={copy.openCommitList}
                 className="hidden max-[840px]:inline-flex"
-                onClick={() => setDrawerOpen(true)}
+                onClick={openDrawer}
                 size="icon-xs"
                 type="button"
                 variant="ghost"
@@ -380,14 +421,20 @@ export function EvidenceView({
           <div className="relative grid min-h-0 grid-cols-[280px_minmax(0,1fr)] min-[1280px]:grid-cols-[300px_minmax(0,1fr)] max-[840px]:grid-cols-1">
             <div className="min-h-0 max-[840px]:hidden">{list}</div>
             {active && drawerOpen ? (
-              <div className="absolute inset-y-0 left-0 z-20 hidden w-[min(300px,86%)] min-h-0 bg-sidebar shadow-overlay max-[840px]:block">
+              <aside
+                aria-label={copy.openCommitList}
+                className="absolute inset-y-0 left-0 z-20 hidden w-[min(300px,86%)] min-h-0 bg-sidebar shadow-overlay max-[840px]:block"
+                id="commit-list-drawer"
+                role="region"
+              >
                 {list}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       aria-label={copy.close}
                       className="absolute top-xs right-10"
-                      onClick={() => setDrawerOpen(false)}
+                      onClick={() => closeDrawer()}
+                      ref={drawerCloseRef}
                       size="icon-xs"
                       type="button"
                       variant="ghost"
@@ -397,7 +444,7 @@ export function EvidenceView({
                   </TooltipTrigger>
                   <TooltipContent>{copy.close}</TooltipContent>
                 </Tooltip>
-              </div>
+              </aside>
             ) : null}
 
             <section className="flex min-h-0 min-w-0 flex-col">
@@ -434,8 +481,10 @@ export function EvidenceView({
                   </EmptyHeader>
                   <EmptyContent>
                     <Button
+                      aria-controls="commit-list-drawer"
+                      aria-expanded={active && drawerOpen}
                       className="hidden max-[840px]:inline-flex"
-                      onClick={() => setDrawerOpen(true)}
+                      onClick={openDrawer}
                       type="button"
                       variant="secondary"
                     >

@@ -527,24 +527,45 @@ export class GitReviewStore {
       return
     }
 
+    const generation = ++this.explanationGeneration
+    const selectionVersion = this.current.selectionVersion
+    const commitEvidenceId = state.commitEvidenceId
+    const requestId = state.requestId
+    const isCurrentPresentation = () => {
+      const controllerState = this.explanationController?.getState(
+        this.workspaceId,
+        this.workspaceGeneration,
+        commitEvidenceId,
+      )
+      return (
+        generation === this.explanationGeneration &&
+        this.current.active &&
+        this.current.selectionVersion === selectionVersion &&
+        this.current.selectedCommitEvidenceId === commitEvidenceId &&
+        controllerState?.requestId === requestId
+      )
+    }
+
     try {
       await this.explanationController.present(
         createCommitExplanationPresentationRequested({
           schemaVersion: gitReviewSchemaVersion,
           workspaceId: this.workspaceId,
           workspaceGeneration: this.workspaceGeneration,
-          commitEvidenceId: state.commitEvidenceId,
-          requestId: state.requestId,
+          commitEvidenceId,
+          requestId,
           mode,
           requestedAt: this.now().toISOString(),
         }),
       )
+      if (!isCurrentPresentation()) return
     } catch (error) {
+      if (!isCurrentPresentation()) return
       this.setSnapshot({
         ...this.current,
         explanation: {
           status: "error",
-          requestId: state.requestId,
+          requestId,
           error: errorState(error, "GIT-EXPLANATION-PRESENT-FAILED"),
         },
       })
