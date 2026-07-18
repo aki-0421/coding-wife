@@ -1,6 +1,7 @@
 pub mod character;
 pub mod codex;
 pub mod git_review;
+pub mod narration;
 pub mod workspace_history;
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,12 @@ use git_review::commands::{
     prepare_commit_explanation_evidence, read_commit_diff_file, read_commit_evidence,
 };
 use git_review::GitReviewService;
+use narration::commands::{
+    narration_cancel, narration_get_runtime, narration_get_settings, narration_list_voices,
+    narration_reset_settings, narration_set_muted, narration_set_scope, narration_speak,
+    narration_update_settings,
+};
+use narration::NarrationService;
 use workspace_history::commands::{
     history_append_domain_event, workspace_create_session, workspace_delete,
     workspace_issue_delete_challenge, workspace_list, workspace_list_timeline,
@@ -168,6 +175,7 @@ pub fn run() {
             let attachment_service = AttachmentService::production(&app_data_directory)
                 .map_err(|error| std::io::Error::other(error.code))?;
             app.manage(attachment_service);
+            app.manage(NarrationService::production(&app_data_directory));
             let history_store = WorkspaceHistoryStore::open(&app_data_directory)?;
             let history_service = WorkspaceHistoryService::new_pending_restore(
                 history_store,
@@ -245,12 +253,24 @@ pub fn run() {
             character_cancel_import,
             character_select_pack,
             character_delete_pack,
+            narration_get_settings,
+            narration_get_runtime,
+            narration_list_voices,
+            narration_update_settings,
+            narration_set_muted,
+            narration_reset_settings,
+            narration_set_scope,
+            narration_speak,
+            narration_cancel,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the Coding Wife application");
 
     app.run(move |_app_handle, event| {
         if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            if let Some(narration_service) = _app_handle.try_state::<NarrationService>() {
+                let _ = tauri::async_runtime::block_on(narration_service.shutdown());
+            }
             tauri::async_runtime::block_on(shutdown_supervisor.shutdown());
         }
     });
