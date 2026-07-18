@@ -109,9 +109,11 @@ export function App({
       transport={activeTransport}
     >
       <NarrationProvider
-        controller={narrationController}
+        {...(narrationController === undefined
+          ? {}
+          : { controller: narrationController })}
         gateway={narrationGateway ?? fallbackNarrationGateway}
-        source={narrationSource}
+        {...(narrationSource === undefined ? {} : { source: narrationSource })}
       >
         <CharacterRuntimeStatusProvider rendererKind={characterRendererKind}>
           <WorkspaceShell

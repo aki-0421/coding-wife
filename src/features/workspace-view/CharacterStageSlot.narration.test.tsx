@@ -21,6 +21,7 @@ import { getWorkspaceCopy } from "@/features/workspace-view/copy"
 import type { CharacterStageRenderer } from "@/features/workspace-view/types"
 
 const jaStore: LocalePreferenceStore = {
+  persistence: "session-only",
   read: () => "ja",
   write: () => true,
 }

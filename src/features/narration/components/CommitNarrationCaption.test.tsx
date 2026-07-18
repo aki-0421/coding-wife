@@ -10,6 +10,7 @@ import { CommitNarrationCaption } from "@/features/narration/components/CommitNa
 import type { CommitNarrationPresentationSnapshot } from "@/features/narration/controller"
 
 const jaStore: LocalePreferenceStore = {
+  persistence: "session-only",
   read: () => "ja",
   write: () => true,
 }

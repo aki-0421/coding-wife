@@ -23,6 +23,7 @@ import type { LocalePreferenceStore } from "@/features/localization"
 import { DemoTransport } from "@/features/runtime"
 import type {
   CharacterStageRenderProps,
+  WorkspaceCodexState,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 
@@ -80,10 +81,32 @@ describe("default App character integration", () => {
   })
 
   it("updates state generations without remounting for turns and workspaces", async () => {
+    const codexListeners = new Set<(state: WorkspaceCodexState) => void>()
     const adapter: WorkspaceViewAdapter = {
       connected: true,
       sendTurn: () => Promise.resolve({ accepted: true }),
-      stopTurn: () => Promise.resolve(),
+      stopTurn: () => {
+        for (const listener of codexListeners) {
+          listener({
+            phase: "completed",
+            connected: true,
+            readiness: {
+              ready: true,
+              fastAvailable: true,
+              maxAvailable: true,
+              reasonCode: null,
+            },
+            pendingRequests: [],
+            timeline: [],
+            errorCode: null,
+          })
+        }
+        return Promise.resolve()
+      },
+      subscribeCodex(listener) {
+        codexListeners.add(listener)
+        return () => codexListeners.delete(listener)
+      },
     }
 
     render(
@@ -114,13 +137,13 @@ describe("default App character integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
 
     await waitFor(() => expect(latestLive2dProps()?.state).toBe("acting"))
-    expect(latestLive2dProps()?.stateGeneration).toBe(initialGeneration + 1)
+    expect(latestLive2dProps()?.stateGeneration).toBe(initialGeneration + 2)
     expect(screen.getByTestId("live2d-character")).toBe(initialNode)
 
     fireEvent.click(await screen.findByRole("button", { name: "Stop" }))
     await waitFor(() => expect(latestLive2dProps()?.state).toBe("idle"))
     const idleGeneration = latestLive2dProps()?.stateGeneration ?? 0
-    expect(idleGeneration).toBe(initialGeneration + 2)
+    expect(idleGeneration).toBe(initialGeneration + 3)
 
     fireEvent.click(
       within(companionPane as HTMLElement).getByRole("button", {

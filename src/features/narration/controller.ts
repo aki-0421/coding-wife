@@ -351,7 +351,6 @@ export class NarrationController {
       if (
         existing.status === "ready" ||
         existing.status === "failed" ||
-        existing.status === "canceled" ||
         event.sequence !== existing.chunks.length
       ) {
         this.failPrepared(existing, "NARRATION-PRESENTATION-SEQUENCE")

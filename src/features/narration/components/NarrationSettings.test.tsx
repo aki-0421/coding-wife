@@ -17,6 +17,7 @@ import {
 } from "@/features/narration/transport"
 
 const jaStore: LocalePreferenceStore = {
+  persistence: "session-only",
   read: () => "ja",
   write: () => true,
 }
@@ -69,7 +70,7 @@ function setup(onMutedChange?: (muted: boolean) => void) {
     <Harness
       controller={controller}
       gateway={gateway}
-      onMutedChange={onMutedChange}
+      {...(onMutedChange === undefined ? {} : { onMutedChange })}
     />,
   )
   return { controller, gateway }
