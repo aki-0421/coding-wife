@@ -258,6 +258,14 @@ Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面
 
 Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の list だけを scroll させる。workspace item は 242.25×49.5px、active item だけ selected-row を持つ。header は 40.5px の breadcrumb row と 40.5px の tab row。active tab は strong text と 1.5px warm-active underline、inactive は readable muted text とし、keyboard roving focus を提供する。960〜1279px では sidebar を 64px rail または drawer へ畳み、960px 未満は MVP native window で許可しない。200% text zoom などで有効幅が 700px 以下になる場合は、永続化状態と companion 状態を同じ status region で縦積みし、timeline、composer、Send、mute を隠さない。
 
+### Commit Evidence
+
+Commit tab は main Codex が作成したコミットを確認する読み取り専用面とし、上 64px の observer bar、300px の commit list、残幅の detail を連続した作業面として構成する。list row は subject、SHA、time、work unit相関、Verification / Risk、change summaryのsingle selection controlとし、detailは Overview / Changes / Evidence の3 tabだけを持つ。Commit、Stage、Restore、Revert、Branch等のGit mutation actionを置かない。
+
+file summaryを先に表示し、sanitized diffはfile selection後に1件ずつlazy loadする。binary、oversize、invalid UTF-8は本文を表示せず、text付きtyped stateを残す。960px未満または200% text zoom時はlistをmodalでないdrawerへ移し、detailとerror reasonを隠さない。
+
+「詳しく教えて」はactive selectionとfresh observationがある時の明示操作でだけ発火する。path、raw diff、secretを除去したevidenceをisolated supportへ渡し、説明はcanvasに依存しないvisible HTML captionへstreamする。TTSを使う場合もcaptionと同じ確定文だけを読み、selection変更、Cancel、stale response後のchunkを適用しない。
+
 ### Live2D Companion
 
 607.84×754.99px の透明な単一 canvas を Continuous Desk 上へ bottom-contain し、頭、手、裾を切らない。canvas 自体は pointer と accessibility tree を占有せず、mute は右下 21px inset の 27×27px circle とする。renderer failure は animated → reduced → static preview → text-only の順に縮退する。
@@ -279,7 +287,7 @@ Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の l
 
 ### Don't:
 
-- **Don't** 「汎用 AI chat の複製」にし、状態、証拠、復元を会話の奥へ隠す。
+- **Don't** 「汎用 AI chat の複製」にし、状態、コミット、検証証拠、明示的な説明を会話の奥へ隠す。
 - **Don't** 「terminal clone」にし、shell の生入出力や汎用 terminal control を主画面へ置く。
 - **Don't** 「game HUD」の常時点滅、報酬演出、過剰な gauge で作業を奪う。
 - **Don't** 「neon purple AI dashboard」の紫 gradient、発光 border、full-saturation accent を装飾として使う。
