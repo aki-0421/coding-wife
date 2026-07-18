@@ -85,7 +85,7 @@ UI/HISTへ渡すCodex eventは、少なくとも次へ分類する。
 
 - `Approve once`、`Reject`、`Hold`、`Other`、`Interrupt`はpending kindが許す時だけ表示する。Holdはwire応答を送らずcardを維持する。
 - approvalの`Other`や自由文accept、未知methodの近似許可は実装しない。
-- native user inputのOtherはschema上の明示optionとして存在する場合だけ回答し、fallback decisionはcontractどおり自由文を許可しない。
+- native user inputのOtherはUIで1〜2,000文字のtrim済み自由回答として構築し、typed `user_input.answers`だけへ渡す。Holdはwire応答を送らずcardと入力を維持する。fallback decisionはcontractどおり自由文を許可しない。
 - assistant/tool/plan/file/error/completionはsemantic rowとして表示し、120文字超のsanitized本文は展開とcopyを提供する。raw terminalとreasoningは表示しない。
 - bottomから48px超離れている間はscrollを固定し、新event件数と`最新へ`を表示する。
 
@@ -161,6 +161,10 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 | `src/lib/contracts/codex.ts`                | response/eventのexact-key parserとpublic DTO                        |
 | `src/features/codex/transport.ts`           | Tauri invoke/listen境界と決定的demo transport                       |
 | `src/features/codex/session-store.ts`       | generation、sequence、duplicate、pending response state             |
+| `src/features/codex/workspace-session-adapter.ts` | workspace activation、turn受理、terminal Stop、HIST追記のcomposition |
+| `src/features/workspace-persistence/codex-composition.ts` | historyとCodex sessionをS-002用`WorkspaceViewAdapter`へ束ねる         |
+| `src/features/workspace-view/Timeline.tsx`  | semantic row、decision/approval、Other/Hold、safe detail操作         |
+| `src/features/workspace-view/ChatView.tsx`  | 48px scroll lock、未読更新、composerとLive2D stageの配置             |
 | `src/features/codex/workspace-store.ts`     | native pickerのsingle-flight、opaque registration、safe error state |
 | `src/features/codex/use-codex-workspace.ts` | workspace storeを購読するReact hook                                 |
 | `src/features/codex/client.ts`              | event購読とpending responseのsingle-claim制御                       |
@@ -170,6 +174,24 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 `CodexEvent`はbase fieldだけでなくvariant payloadもcamelCaseでserializeする。Rust round-tripとTypeScript parser testが同じfixtureを読むため、一方だけのfield名変更はgateで失敗する。
 
 ## Fake App Server
+
+### Browser用interactive demo
+
+Viteのdevelopment buildだけは、`?demoAppServer=1`を付けると`DemoCodexTransport`とephemeral historyをcompositionした決定論的App Server demoを起動する。queryが無い通常browser previewは従来どおりCodex未接続で、production buildではqueryを付けても有効化しない。
+
+| composer入力 | 発生する検証用event |
+|---|---|
+| `demo:workflow` | accepted user、running、plan、assistant delta、tool、file、diff、native decision。Other/Hold回答後にapprovalへ進む |
+| `demo:approval` | 既知command approval。Approve once、Reject、Stopだけを表示する |
+| `demo:unknown` | 未知approval相当を`CODEX-PROTOCOL-UNSUPPORTED`としてblockedにし、許可UIを作らずInterruptedへ進む |
+| `demo:stop` | runningを維持し、UI Stopからinterrupt terminalを確認する |
+| `demo:crash` | `CODEX-APP-SERVER-EXITED`とInterruptedを1回だけ出し、turnを再送しない |
+
+Addはabsolute pathを持たない固定opaque attachment handleを返す。demoのsemantic eventもproductionと同じHIST validatorを通るため、private path、未知change kind、invalid approval contextを追加するとcompositionがfail closedになる。
+
+2026-07-18のagent-browser gateでは1470×956、960×900、480×900 CSS pxで横overflow 0、ja/en即時切替、Ctrl+Tab、Shift+Ctrl+Tab、⌘K compact filter、⌘↵ send/answer、OS reduced motion、stream→tool/file→Other/Hold→approval、Approve/Reject、unknown blocked、Stop、crash後1秒間のevent count不変を確認した。検証画像は`/tmp`だけに保存し、repositoryへ含めない。
+
+### Native process fixture
 
 `src-tauri/tests/fixtures/fake_codex_app_server.py`は`--version`、schema生成、stdio app-serverを実装したtest executableである。`CODING_WIFE_CODEX_FAKE_MODE`で次を選ぶ。
 
