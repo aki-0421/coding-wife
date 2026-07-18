@@ -36,6 +36,7 @@ export interface ActivateCodexWorkspaceRequest {
 export interface StartCodexTurnRequest {
   readonly workspaceId: string
   readonly text: string
+  readonly publicText?: string
   readonly effort: ReasoningPreset
   readonly attachmentHandles: readonly string[]
 }
@@ -324,6 +325,7 @@ export class CodexWorkspaceSessionAdapter {
       throw new Error("CODEX-TURN-START-IN-FLIGHT")
     }
     const snapshot = this.store.snapshot()
+    const publicText = request.publicText ?? request.text
     if (
       snapshot.activeWorkspaceId !== request.workspaceId ||
       this.staleExecutions.size > 0 ||
@@ -332,9 +334,10 @@ export class CodexWorkspaceSessionAdapter {
       snapshot.phase === "running" ||
       snapshot.phase === "waiting" ||
       snapshot.phase === "stopping" ||
-      (request.text.trim().length === 0 &&
+      (publicText.trim().length === 0 &&
         request.attachmentHandles.length === 0) ||
-      unicodeScalarCount(request.text) > 32_000 ||
+      unicodeScalarCount(publicText) > 32_000 ||
+      unicodeScalarCount(request.text) > 80_000 ||
       request.attachmentHandles.length > 10 ||
       new Set(request.attachmentHandles).size !==
         request.attachmentHandles.length ||
@@ -374,7 +377,7 @@ export class CodexWorkspaceSessionAdapter {
         )
         this.acceptedWorkUnits.set(key, {
           workUnitId: clientUserMessageId,
-          objective: request.text,
+          objective: publicText,
           effort: request.effort,
           attachmentCount: request.attachmentHandles.length,
         })
@@ -389,7 +392,7 @@ export class CodexWorkspaceSessionAdapter {
           generation,
           sourceSequence,
           occurredAt: this.clock.now(),
-          text: request.text,
+          text: publicText,
           effort: request.effort,
           attachmentCount: request.attachmentHandles.length,
         })

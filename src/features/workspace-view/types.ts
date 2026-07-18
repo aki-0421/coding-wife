@@ -13,6 +13,14 @@ import type {
   CodexWorkspacePhase,
   CodexReadiness,
 } from "@/features/codex"
+import type {
+  CharacterContext,
+  ProjectContext,
+  VersionedCharacterContext,
+  VersionedProjectContext,
+  WorkspaceEditableContext,
+  WorkspaceTurnContextSnapshot,
+} from "@/lib/contracts/workspace-context"
 
 export type WorkspaceTab = "chat" | "commit" | "context" | "settings"
 export type WorkspaceLifecycle =
@@ -123,6 +131,7 @@ export interface SendTurnRequest {
   readonly effort: ReasoningEffort
   readonly attachments: readonly AttachmentItem[]
   readonly contextSnapshots: readonly ContextSnapshotItem[]
+  readonly editableContextSnapshot: WorkspaceTurnContextSnapshot
 }
 
 export interface WorkspaceViewAdapter {
@@ -146,6 +155,22 @@ export interface WorkspaceViewAdapter {
     workspaceId: string,
     source: ContextSnapshotItem["source"],
   ) => Promise<ContextSnapshotItem>
+  readonly loadEditableContext?: (
+    workspaceId: string,
+  ) => Promise<WorkspaceEditableContext>
+  readonly saveProjectContext?: (
+    workspaceId: string,
+    expectedVersion: number,
+    context: ProjectContext,
+  ) => Promise<VersionedProjectContext>
+  readonly saveCharacterContext?: (
+    workspaceId: string,
+    expectedVersion: number,
+    context: CharacterContext,
+  ) => Promise<VersionedCharacterContext>
+  readonly getTurnContextSnapshot?: (
+    workspaceId: string,
+  ) => Promise<WorkspaceTurnContextSnapshot>
   readonly sendTurn?: (
     request: SendTurnRequest,
   ) => Promise<{ readonly accepted: boolean }>

@@ -103,6 +103,8 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     ).resolves.toMatchObject({
       items: [{ name: "notes.txt", relativePath: "notes.txt" }],
     })
+    const editableContextSnapshot =
+      await adapter.getTurnContextSnapshot(workspaceId)
     await expect(
       adapter.sendTurn({
         workspaceId,
@@ -110,12 +112,17 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         effort: "fast",
         attachments: [],
         contextSnapshots: [],
+        editableContextSnapshot,
       }),
     ).resolves.toEqual({ accepted: true })
     expect(
       codex.calls.find((call) => call.command === codexCommands.turnStart),
     ).toMatchObject({
-      request: { effort: "low", attachmentHandles: [] },
+      request: {
+        effort: "low",
+        attachmentHandles: [],
+        text: expect.stringContaining("CODING_WIFE_CONTEXT_SNAPSHOT_V1"),
+      },
     })
 
     codex.emit({
@@ -147,6 +154,12 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         expect.objectContaining({ kind: "code.message.completed" }),
       ]),
     )
+    const acceptedInstruction = persisted.timeline.items.find(
+      (item) => item.kind === "code.user.instruction.accepted",
+    )
+    expect(acceptedInstruction?.payload).toMatchObject({
+      text: "Run the focused checks.",
+    })
   })
 
   it("keeps turn start blocked when native history is not write-ready", async () => {
@@ -176,6 +189,8 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         effort: "fast",
         attachments: [],
         contextSnapshots: [],
+        editableContextSnapshot:
+          await nativeReadOnly.getTurnContextSnapshot(workspaceId),
       }),
     ).rejects.toThrow("CODEX-TURN-PREFLIGHT-BLOCKED")
   })
@@ -197,6 +212,8 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         effort: "max",
         attachments: [],
         contextSnapshots: [],
+        editableContextSnapshot:
+          await adapter.getTurnContextSnapshot(workspaceId),
       })
       await vi.advanceTimersByTimeAsync(600)
       for (let iteration = 0; iteration < 16; iteration += 1) {

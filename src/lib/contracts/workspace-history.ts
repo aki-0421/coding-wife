@@ -8,6 +8,19 @@ import {
   parseGitObservation,
   parseWorkUnitGitObservation,
 } from "./git-review"
+import {
+  parseVersionedCharacterContext,
+  parseVersionedProjectContext,
+  parseWorkspaceEditableContext,
+  parseWorkspaceTurnContextSnapshot,
+  type VersionedCharacterContext,
+  type VersionedProjectContext,
+  type WorkspaceEditableContext,
+  type WorkspaceLoadEditableContextRequest,
+  type WorkspaceSaveCharacterContextRequest,
+  type WorkspaceSaveProjectContextRequest,
+  type WorkspaceTurnContextSnapshot,
+} from "./workspace-context"
 
 export const workspaceHistorySchemaVersion = 1 as const
 
@@ -19,6 +32,10 @@ export const workspaceHistoryCommands = {
   updateLifecycle: "workspace_update_lifecycle",
   saveDraft: "workspace_save_draft",
   saveContextSnapshot: "workspace_save_context_snapshot",
+  loadEditableContext: "workspace_load_editable_context",
+  saveProjectContext: "workspace_save_project_context",
+  saveCharacterContext: "workspace_save_character_context",
+  getTurnContextSnapshot: "workspace_get_turn_context_snapshot",
   listTimeline: "workspace_list_timeline",
   issueDeleteChallenge: "workspace_issue_delete_challenge",
   delete: "workspace_delete",
@@ -222,6 +239,10 @@ export interface WorkspaceHistoryRequestMap {
   workspace_update_lifecycle: WorkspaceUpdateLifecycleRequest
   workspace_save_draft: WorkspaceSaveDraftRequest
   workspace_save_context_snapshot: WorkspaceSaveContextRequest
+  workspace_load_editable_context: WorkspaceLoadEditableContextRequest
+  workspace_save_project_context: WorkspaceSaveProjectContextRequest
+  workspace_save_character_context: WorkspaceSaveCharacterContextRequest
+  workspace_get_turn_context_snapshot: WorkspaceLoadEditableContextRequest
   workspace_list_timeline: WorkspaceTimelineRequest
   workspace_issue_delete_challenge: WorkspaceDeleteChallengeRequest
   workspace_delete: WorkspaceDeleteRequest
@@ -236,6 +257,10 @@ export interface WorkspaceHistoryResponseMap {
   workspace_update_lifecycle: PersistedWorkspaceSummary
   workspace_save_draft: PersistedWorkspaceDraft
   workspace_save_context_snapshot: PersistedContextSnapshot
+  workspace_load_editable_context: WorkspaceEditableContext
+  workspace_save_project_context: VersionedProjectContext
+  workspace_save_character_context: VersionedCharacterContext
+  workspace_get_turn_context_snapshot: WorkspaceTurnContextSnapshot
   workspace_list_timeline: PersistedTimelinePage
   workspace_issue_delete_challenge: WorkspaceDeleteChallenge
   workspace_delete: WorkspaceStateSnapshot
@@ -1157,6 +1182,22 @@ export function parseWorkspaceHistoryResponse<
       ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.saveContextSnapshot:
       return parsePersistedContextSnapshot(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
+    case workspaceHistoryCommands.loadEditableContext:
+      return parseWorkspaceEditableContext(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
+    case workspaceHistoryCommands.saveProjectContext:
+      return parseVersionedProjectContext(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
+    case workspaceHistoryCommands.saveCharacterContext:
+      return parseVersionedCharacterContext(
+        value,
+      ) as WorkspaceHistoryResponseMap[K]
+    case workspaceHistoryCommands.getTurnContextSnapshot:
+      return parseWorkspaceTurnContextSnapshot(
         value,
       ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.listTimeline:

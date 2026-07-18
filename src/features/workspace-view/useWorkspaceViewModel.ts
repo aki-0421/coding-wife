@@ -21,12 +21,49 @@ import type {
   WorkspaceTimelineItem,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
+import type { WorkspaceTurnContextSnapshot } from "@/lib/contracts/workspace-context"
 
 const emptyDraft: WorkspaceDraft = {
   text: "",
   effort: "fast",
   attachments: [],
   contextSnapshots: [],
+}
+
+const defaultProjectHash =
+  "e0da727f2381a1c290ddcb74bdb52b44b0ec890559443d795f29731d68fe1323"
+const defaultCharacterHash =
+  "0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c"
+
+function fallbackContextSnapshot(
+  workspaceId: string,
+): WorkspaceTurnContextSnapshot {
+  return {
+    schemaVersion: 1,
+    workspaceId,
+    projectVersion: 1,
+    projectHash: defaultProjectHash,
+    characterVersion: 1,
+    characterHash: defaultCharacterHash,
+    snapshotHash:
+      "c84d287d3d716df45e08d627bb15ed4b94e27a9eebc257d635c889cfd6ac7365",
+    capturedAt: new Date(0).toISOString(),
+    project: {
+      goal: "",
+      constraints: "",
+      definitionOfDone: [],
+      technicalReferences: [],
+      userNotes: "",
+    },
+    character: {
+      displayName: "Sol",
+      tone: "neutral",
+      toneNotes: "",
+      speechDensity: "key_events",
+      behavior: "",
+      prohibitedExpressions: [],
+    },
+  }
 }
 
 const disconnectedCodexState: WorkspaceCodexState = {
@@ -517,16 +554,30 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
   const sendTurn = useCallback(async () => {
     if (!adapterReady || !selectedWorkspace || !adapter?.sendTurn) return false
     const draft = draftFor(drafts, selectedWorkspace.id)
-    const request: SendTurnRequest = {
-      workspaceId: selectedWorkspace.id,
-      instruction: draft.text,
-      effort: draft.effort,
-      attachments: draft.attachments,
-      contextSnapshots: draft.contextSnapshots,
-    }
 
     setTurnState("sending")
     try {
+      const editableContextSnapshot =
+        adapter.getTurnContextSnapshot === undefined
+          ? adapter.hydrationMode === "native"
+            ? null
+            : fallbackContextSnapshot(selectedWorkspace.id)
+          : await adapter.getTurnContextSnapshot(selectedWorkspace.id)
+      if (
+        editableContextSnapshot === null ||
+        editableContextSnapshot.workspaceId !== selectedWorkspace.id
+      ) {
+        setTurnState("idle")
+        return false
+      }
+      const request: SendTurnRequest = {
+        workspaceId: selectedWorkspace.id,
+        instruction: draft.text,
+        effort: draft.effort,
+        attachments: draft.attachments,
+        contextSnapshots: draft.contextSnapshots,
+        editableContextSnapshot,
+      }
       const result = await adapter.sendTurn(request)
       if (!result.accepted) {
         setTurnState("idle")

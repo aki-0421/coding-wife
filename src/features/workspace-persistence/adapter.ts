@@ -4,6 +4,14 @@ import {
   type PersistedWorkspaceDraft,
   type WorkspaceStateSnapshot,
 } from "@/lib/contracts/workspace-history"
+import type {
+  CharacterContext,
+  ProjectContext,
+  VersionedCharacterContext,
+  VersionedProjectContext,
+  WorkspaceEditableContext,
+  WorkspaceTurnContextSnapshot,
+} from "@/lib/contracts/workspace-context"
 import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
 import { PersistedCodexEventProjector } from "@/features/workspace-persistence/codex-event-projector"
 import {
@@ -232,6 +240,47 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
         workspaceHistoryCommands.saveContextSnapshot,
         { workspaceId, source },
       ),
+    )
+  }
+
+  loadEditableContext(workspaceId: string): Promise<WorkspaceEditableContext> {
+    return this.transport.request(
+      workspaceHistoryCommands.loadEditableContext,
+      {
+        workspaceId,
+      },
+    )
+  }
+
+  saveProjectContext(
+    workspaceId: string,
+    expectedVersion: number,
+    context: ProjectContext,
+  ): Promise<VersionedProjectContext> {
+    return this.transport.request(workspaceHistoryCommands.saveProjectContext, {
+      workspaceId,
+      expectedVersion,
+      context,
+    })
+  }
+
+  saveCharacterContext(
+    workspaceId: string,
+    expectedVersion: number,
+    context: CharacterContext,
+  ): Promise<VersionedCharacterContext> {
+    return this.transport.request(
+      workspaceHistoryCommands.saveCharacterContext,
+      { workspaceId, expectedVersion, context },
+    )
+  }
+
+  getTurnContextSnapshot(
+    workspaceId: string,
+  ): Promise<WorkspaceTurnContextSnapshot> {
+    return this.transport.request(
+      workspaceHistoryCommands.getTurnContextSnapshot,
+      { workspaceId },
     )
   }
 

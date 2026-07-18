@@ -147,4 +147,58 @@ describe("DemoWorkspaceHistoryTransport", () => {
       recoverable: true,
     })
   })
+
+  it("keeps versioned editable context isolated and rejects stale saves", async () => {
+    const transport = new DemoWorkspaceHistoryTransport()
+    const state = await transport.request(
+      workspaceHistoryCommands.list,
+      undefined,
+    )
+    const workspaceId = state.activeWorkspaceId
+    const otherWorkspaceId = state.workspaces.find(
+      (workspace) => workspace.workspaceId !== workspaceId,
+    )?.workspaceId
+    if (workspaceId === null || otherWorkspaceId === undefined) {
+      throw new Error("demo fixture")
+    }
+    const initial = await transport.request(
+      workspaceHistoryCommands.loadEditableContext,
+      { workspaceId },
+    )
+    const saved = await transport.request(
+      workspaceHistoryCommands.saveProjectContext,
+      {
+        workspaceId,
+        expectedVersion: initial.project.version,
+        context: {
+          ...initial.project.context,
+          goal: "Persist this workspace only",
+        },
+      },
+    )
+    expect(saved).toMatchObject({ version: 2 })
+    await expect(
+      transport.request(workspaceHistoryCommands.saveProjectContext, {
+        workspaceId,
+        expectedVersion: initial.project.version,
+        context: initial.project.context,
+      }),
+    ).rejects.toMatchObject({
+      code: "WORKSPACE-PROJECT-CONTEXT-CONFLICT",
+    })
+    await expect(
+      transport.request(workspaceHistoryCommands.loadEditableContext, {
+        workspaceId: otherWorkspaceId,
+      }),
+    ).resolves.toMatchObject({ project: { version: 1 } })
+    await expect(
+      transport.request(workspaceHistoryCommands.getTurnContextSnapshot, {
+        workspaceId,
+      }),
+    ).resolves.toMatchObject({
+      workspaceId,
+      projectVersion: 2,
+      characterVersion: 1,
+    })
+  })
 })

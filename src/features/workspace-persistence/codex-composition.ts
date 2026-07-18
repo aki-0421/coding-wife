@@ -9,6 +9,7 @@ import {
   type CodexWorkspaceSessionSnapshot,
 } from "@/features/codex"
 import { PersistentWorkspaceViewAdapter } from "@/features/workspace-persistence/adapter"
+import { composeTurnInstruction } from "@/features/workspace-persistence/turn-context"
 import type { WorkspaceHistoryTransport } from "@/features/workspace-persistence/transport"
 import type {
   SendTurnRequest,
@@ -116,12 +117,52 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return this.history.captureContext(workspaceId, source)
   }
 
+  loadEditableContext(workspaceId: string) {
+    return this.history.loadEditableContext(workspaceId)
+  }
+
+  saveProjectContext(
+    workspaceId: string,
+    expectedVersion: number,
+    context: Parameters<
+      PersistentWorkspaceViewAdapter["saveProjectContext"]
+    >[2],
+  ) {
+    return this.history.saveProjectContext(
+      workspaceId,
+      expectedVersion,
+      context,
+    )
+  }
+
+  saveCharacterContext(
+    workspaceId: string,
+    expectedVersion: number,
+    context: Parameters<
+      PersistentWorkspaceViewAdapter["saveCharacterContext"]
+    >[2],
+  ) {
+    return this.history.saveCharacterContext(
+      workspaceId,
+      expectedVersion,
+      context,
+    )
+  }
+
+  getTurnContextSnapshot(workspaceId: string) {
+    return this.history.getTurnContextSnapshot(workspaceId)
+  }
+
   async sendTurn(
     request: SendTurnRequest,
   ): Promise<{ readonly accepted: boolean }> {
     await this.codex.sendTurn({
       workspaceId: request.workspaceId,
-      text: request.instruction,
+      text: composeTurnInstruction(
+        request.instruction,
+        request.editableContextSnapshot,
+      ),
+      publicText: request.instruction,
       effort: request.effort === "fast" ? "low" : "max",
       attachmentHandles: request.attachments
         .filter((attachment) => attachment.valid)

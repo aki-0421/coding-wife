@@ -13,6 +13,14 @@ import {
   type WorkspaceHistoryResponseMap,
   type WorkspaceStateSnapshot,
 } from "@/lib/contracts/workspace-history"
+import {
+  parseCharacterContext,
+  parseProjectContext,
+  type CharacterContext,
+  type ProjectContext,
+  type WorkspaceEditableContext,
+  type WorkspaceTurnContextSnapshot,
+} from "@/lib/contracts/workspace-context"
 
 import {
   WorkspaceHistoryBoundaryError,
@@ -20,6 +28,27 @@ import {
 } from "@/features/workspace-persistence/transport"
 
 const baseTimestamp = Date.parse("2026-07-18T00:00:00.000Z")
+const defaultProjectHash =
+  "e0da727f2381a1c290ddcb74bdb52b44b0ec890559443d795f29731d68fe1323"
+const defaultCharacterHash =
+  "0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c"
+
+const defaultProjectContext: ProjectContext = {
+  goal: "",
+  constraints: "",
+  definitionOfDone: [],
+  technicalReferences: [],
+  userNotes: "",
+}
+
+const defaultCharacterContext: CharacterContext = {
+  displayName: "Sol",
+  tone: "neutral",
+  toneNotes: "",
+  speechDensity: "key_events",
+  behavior: "",
+  prohibitedExpressions: [],
+}
 
 function demoWorkspace(
   workspaceId: string,
@@ -91,6 +120,10 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     ]),
   )
   private readonly contexts = new Map<string, PersistedContextSnapshot[]>()
+  private readonly editableContexts = new Map<
+    string,
+    WorkspaceEditableContext
+  >()
   private readonly events = new Map<string, PersistedTimelineEvent[]>()
   private readonly requestWorkspaces = new Map<string, string>()
   private readonly deleteTokens = new Map<string, string>()
@@ -101,6 +134,10 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
 
   constructor() {
     for (const workspace of this.workspaces) {
+      this.editableContexts.set(
+        workspace.workspaceId,
+        this.defaultEditableContext(workspace.workspaceId, workspace.updatedAt),
+      )
       this.events.set(workspace.workspaceId, [
         this.event(
           workspace.workspaceId,
@@ -160,6 +197,27 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       case workspaceHistoryCommands.saveContextSnapshot:
         return this.saveContext(
           request as WorkspaceHistoryRequestMap["workspace_save_context_snapshot"],
+        )
+      case workspaceHistoryCommands.loadEditableContext:
+        return this.editableContext(
+          (
+            request as WorkspaceHistoryRequestMap["workspace_load_editable_context"]
+          ).workspaceId,
+          command,
+        )
+      case workspaceHistoryCommands.saveProjectContext:
+        return this.saveProjectContext(
+          request as WorkspaceHistoryRequestMap["workspace_save_project_context"],
+        )
+      case workspaceHistoryCommands.saveCharacterContext:
+        return this.saveCharacterContext(
+          request as WorkspaceHistoryRequestMap["workspace_save_character_context"],
+        )
+      case workspaceHistoryCommands.getTurnContextSnapshot:
+        return this.turnContextSnapshot(
+          (
+            request as WorkspaceHistoryRequestMap["workspace_get_turn_context_snapshot"]
+          ).workspaceId,
         )
       case workspaceHistoryCommands.listTimeline:
         return this.timeline(
@@ -234,6 +292,10 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
         workspace.workspaceId,
         emptyDraft(workspace.workspaceId, timestamp),
       )
+      this.editableContexts.set(
+        workspace.workspaceId,
+        this.defaultEditableContext(workspace.workspaceId, timestamp),
+      )
       this.events.set(workspace.workspaceId, [
         this.event(
           workspace.workspaceId,
@@ -278,6 +340,10 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       ...emptyDraft(workspaceId, timestamp),
       text: request.goal,
     })
+    this.editableContexts.set(
+      workspaceId,
+      this.defaultEditableContext(workspaceId, timestamp),
+    )
     this.events.set(workspaceId, [
       this.event(workspaceId, "work", "work.workspace.lifecycle.changed", {
         lifecycle: "backlog",
@@ -397,6 +463,92 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     return snapshot
   }
 
+  private saveProjectContext(
+    request: WorkspaceHistoryRequestMap["workspace_save_project_context"],
+  ): WorkspaceHistoryResponseMap["workspace_save_project_context"] {
+    const current = this.editableContext(
+      request.workspaceId,
+      workspaceHistoryCommands.saveProjectContext,
+    )
+    if (current.project.version !== request.expectedVersion) {
+      throw this.error(
+        "WORKSPACE-PROJECT-CONTEXT-CONFLICT",
+        workspaceHistoryCommands.saveProjectContext,
+        true,
+      )
+    }
+    const context = parseProjectContext(request.context)
+    const version = current.project.version + 1
+    const updated: WorkspaceEditableContext = {
+      ...current,
+      project: {
+        schemaVersion: 1,
+        workspaceId: request.workspaceId,
+        version,
+        contentHash: this.demoHash(version, "a"),
+        updatedAt: this.timestamp(),
+        context,
+      },
+    }
+    this.editableContexts.set(request.workspaceId, updated)
+    return updated.project
+  }
+
+  private saveCharacterContext(
+    request: WorkspaceHistoryRequestMap["workspace_save_character_context"],
+  ): WorkspaceHistoryResponseMap["workspace_save_character_context"] {
+    const current = this.editableContext(
+      request.workspaceId,
+      workspaceHistoryCommands.saveCharacterContext,
+    )
+    if (current.character.version !== request.expectedVersion) {
+      throw this.error(
+        "WORKSPACE-CHARACTER-CONTEXT-CONFLICT",
+        workspaceHistoryCommands.saveCharacterContext,
+        true,
+      )
+    }
+    const context = parseCharacterContext(request.context)
+    const version = current.character.version + 1
+    const updated: WorkspaceEditableContext = {
+      ...current,
+      character: {
+        schemaVersion: 1,
+        workspaceId: request.workspaceId,
+        version,
+        contentHash: this.demoHash(version, "b"),
+        updatedAt: this.timestamp(),
+        context,
+      },
+    }
+    this.editableContexts.set(request.workspaceId, updated)
+    return updated.character
+  }
+
+  private turnContextSnapshot(
+    workspaceId: string,
+  ): WorkspaceTurnContextSnapshot {
+    const current = this.editableContext(
+      workspaceId,
+      workspaceHistoryCommands.getTurnContextSnapshot,
+    )
+    return {
+      schemaVersion: 1,
+      workspaceId,
+      projectVersion: current.project.version,
+      projectHash: current.project.contentHash,
+      characterVersion: current.character.version,
+      characterHash: current.character.contentHash,
+      snapshotHash: this.demoHash(
+        current.project.version + current.character.version,
+        "c",
+      ),
+      capturedAt: this.timestamp(),
+      project: current.project.context,
+      character: current.character.context,
+    }
+  }
+
   private timeline(
     request: WorkspaceHistoryRequestMap["workspace_list_timeline"],
   ): PersistedTimelinePage {
@@ -460,6 +612,7 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     )
     this.drafts.delete(request.workspaceId)
     this.contexts.delete(request.workspaceId)
+    this.editableContexts.delete(request.workspaceId)
     this.events.delete(request.workspaceId)
     this.activeWorkspaceId =
       this.activeWorkspaceId === request.workspaceId
@@ -530,6 +683,49 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
       throw this.error("WORKSPACE-NOT-FOUND", operation, false)
     }
     return workspace
+  }
+
+  private editableContext(
+    workspaceId: string,
+    operation: WorkspaceHistoryCommand,
+  ): WorkspaceEditableContext {
+    this.workspace(workspaceId, operation)
+    const context = this.editableContexts.get(workspaceId)
+    if (context === undefined) {
+      throw this.error("WORKSPACE-NOT-FOUND", operation, false)
+    }
+    return context
+  }
+
+  private defaultEditableContext(
+    workspaceId: string,
+    updatedAt: string,
+  ): WorkspaceEditableContext {
+    return {
+      schemaVersion: 1,
+      workspaceId,
+      project: {
+        schemaVersion: 1,
+        workspaceId,
+        version: 1,
+        contentHash: defaultProjectHash,
+        updatedAt,
+        context: defaultProjectContext,
+      },
+      character: {
+        schemaVersion: 1,
+        workspaceId,
+        version: 1,
+        contentHash: defaultCharacterHash,
+        updatedAt,
+        context: defaultCharacterContext,
+      },
+    }
+  }
+
+  private demoHash(version: number, prefix: string): string {
+    const suffix = Math.max(0, version).toString(16).slice(-8).padStart(8, "0")
+    return `${prefix.repeat(56)}${suffix}`
   }
 
   private replaceWorkspace(workspace: PersistedWorkspaceSummary): void {

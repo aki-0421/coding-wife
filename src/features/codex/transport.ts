@@ -390,7 +390,13 @@ export class DemoCodexTransport implements CodexTransport {
     workspaceId: string,
     turnHandle: string,
   ): void {
-    const scenario = instruction.trim().toLocaleLowerCase()
+    const publicInstructionMarker = "\nCODING_WIFE_USER_INSTRUCTION_V1\n"
+    const markerIndex = instruction.indexOf(publicInstructionMarker)
+    const publicInstruction =
+      markerIndex === -1
+        ? instruction
+        : instruction.slice(markerIndex + publicInstructionMarker.length)
+    const scenario = publicInstruction.trim().toLocaleLowerCase()
     if (!scenario.startsWith("demo:")) {
       queueMicrotask(() => {
         this.emit(
@@ -603,7 +609,9 @@ export class DemoCodexTransport implements CodexTransport {
             risk: "medium",
             reversibility: "unknown",
             recommendation: "bounded",
-            evidence: ["A bounded continuation keeps the next change reviewable."],
+            evidence: [
+              "A bounded continuation keeps the next change reviewable.",
+            ],
             uncertainty: "limited_context",
           },
         },
