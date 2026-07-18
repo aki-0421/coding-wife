@@ -285,37 +285,6 @@ const privateTextPatterns = [
 
 const unicodeWhitespacePattern = /^\p{White_Space}$/u
 const unicodePathBoundaryPattern = /^(?:\p{White_Space}|\p{P}|\p{S})$/u
-const publicUrlTailCharacters = "-._~:/?#@!$&*+,;=%"
-
-function isAsciiAlphanumeric(character: string | undefined): boolean {
-  if (character === undefined) return false
-  const codePoint = character.codePointAt(0)
-  return (
-    codePoint !== undefined &&
-    ((codePoint >= 0x30 && codePoint <= 0x39) ||
-      (codePoint >= 0x41 && codePoint <= 0x5a) ||
-      (codePoint >= 0x61 && codePoint <= 0x7a))
-  )
-}
-
-function isAsciiDigit(character: string | undefined): boolean {
-  if (character === undefined) return false
-  const codePoint = character.codePointAt(0)
-  return codePoint !== undefined && codePoint >= 0x30 && codePoint <= 0x39
-}
-
-function isAsciiIpLiteralCharacter(character: string | undefined): boolean {
-  if (character === undefined) return false
-  const codePoint = character.codePointAt(0)
-  return (
-    codePoint !== undefined &&
-    ((codePoint >= 0x30 && codePoint <= 0x39) ||
-      (codePoint >= 0x41 && codePoint <= 0x46) ||
-      (codePoint >= 0x61 && codePoint <= 0x66) ||
-      character === ":" ||
-      character === ".")
-  )
-}
 
 function matchesAsciiCaseInsensitive(
   characters: readonly string[],
@@ -335,60 +304,158 @@ function matchesAsciiCaseInsensitive(
   return true
 }
 
-function consumePublicUrlHost(
+function publicUrlSchemeLength(
   characters: readonly string[],
   start: number,
 ): number | null {
-  if (characters[start] === "[") {
-    let cursor = start + 1
-    const addressStart = cursor
-    while (isAsciiIpLiteralCharacter(characters[cursor])) {
-      cursor += 1
-    }
-    return cursor > addressStart && characters[cursor] === "]"
-      ? cursor + 1
-      : null
-  }
-
-  let cursor = start
-  if (!isAsciiAlphanumeric(characters[cursor])) return null
-  cursor += 1
-  while (
-    isAsciiAlphanumeric(characters[cursor]) ||
-    characters[cursor] === "-"
-  ) {
-    cursor += 1
-  }
-  if (characters[cursor - 1] === "-") return null
-
-  while (
-    characters[cursor] === "." &&
-    isAsciiAlphanumeric(characters[cursor + 1])
-  ) {
-    cursor += 2
-    while (
-      isAsciiAlphanumeric(characters[cursor]) ||
-      characters[cursor] === "-"
-    ) {
-      cursor += 1
-    }
-    if (characters[cursor - 1] === "-") return null
-  }
-  return cursor
+  if (matchesAsciiCaseInsensitive(characters, start, "https://")) return 8
+  if (matchesAsciiCaseInsensitive(characters, start, "http://")) return 7
+  return null
 }
 
-function isPublicUrlTailCharacter(character: string | undefined): boolean {
+function matchingUrlQuoteTerminator(
+  previous: string | undefined,
+): string | null {
+  switch (previous) {
+    case '"':
+    case "'":
+    case "`":
+      return previous
+    case "“":
+      return "”"
+    case "‘":
+      return "’"
+    case "«":
+      return "»"
+    case "「":
+      return "」"
+    case "『":
+      return "』"
+    default:
+      return null
+  }
+}
+
+function isUrlWrapperTerminator(character: string): boolean {
   return (
-    character !== undefined &&
-    (isAsciiAlphanumeric(character) ||
-      publicUrlTailCharacters.includes(character))
+    character === '"' ||
+    character === "`" ||
+    character === "<" ||
+    character === ">" ||
+    character === "）" ||
+    character === "】" ||
+    character === "〉" ||
+    character === "》" ||
+    character === "」" ||
+    character === "』" ||
+    character === "”" ||
+    character === "’" ||
+    character === "»"
   )
 }
 
-function publicUrlEnd(
+function publicUrlCandidateEnd(
   characters: readonly string[],
   start: number,
-): number | null {
+): number {
+  const quoteTerminator = matchingUrlQuoteTerminator(characters[start - 1])
+  let parentheses = 0
+  let brackets = 0
+  let braces = 0
+  for (let cursor = start; cursor < characters.length; cursor += 1) {
+    const character = characters[cursor]
+    if (character === undefined || unicodeWhitespacePattern.test(character)) {
+      return cursor
+    }
+    if (
+      cursor > start &&
+      ((quoteTerminator !== null && character === quoteTerminator) ||
+        isUrlWrapperTerminator(character))
+    ) {
+      return cursor
+    }
+    if (character === "(") parentheses += 1
+    else if (character === ")") {
+      if (parentheses === 0) return cursor
+      parentheses -= 1
+    } else if (character === "[") brackets += 1
+    else if (character === "]") {
+      if (brackets === 0) return cursor
+      brackets -= 1
+    } else if (character === "{") braces += 1
+    else if (character === "}") {
+      if (braces === 0) return cursor
+      braces -= 1
+    }
+  }
+  return characters.length
+}
+
+function rawUrlAuthority(candidate: string, schemeLength: number): string {
+  const authorityEnd = candidate.slice(schemeLength).search(/[/?#]/u)
+  const end =
+    authorityEnd === -1 ? candidate.length : schemeLength + authorityEnd
+  return candidate.slice(schemeLength, end)
+}
+
+function isAsciiDnsAlphanumeric(character: string | undefined): boolean {
+  if (character === undefined) return false
+  const codePoint = character.codePointAt(0)
+  return (
+    codePoint !== undefined &&
+    ((codePoint >= 0x30 && codePoint <= 0x39) ||
+      (codePoint >= 0x41 && codePoint <= 0x5a) ||
+      (codePoint >= 0x61 && codePoint <= 0x7a))
+  )
+}
+
+function isValidPublicHostname(hostname: string): boolean {
+  if (hostname.startsWith("[") && hostname.endsWith("]")) return true
+  const domain = hostname.endsWith(".") ? hostname.slice(0, -1) : hostname
+  if (domain.length === 0 || domain.length > 253) return false
+  return domain.split(".").every((label) => {
+    return (
+      label.length >= 1 &&
+      label.length <= 63 &&
+      isAsciiDnsAlphanumeric(label[0]) &&
+      isAsciiDnsAlphanumeric(label[label.length - 1]) &&
+      [...label].every(
+        (character) => isAsciiDnsAlphanumeric(character) || character === "-",
+      )
+    )
+  })
+}
+
+function isPublicUrlCandidate(
+  candidate: string,
+  schemeLength: number,
+): boolean {
+  try {
+    const parsed = new URL(candidate)
+    const rawAuthority = rawUrlAuthority(candidate, schemeLength)
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      rawAuthority.length > 0 &&
+      !rawAuthority.includes("@") &&
+      parsed.hostname.length > 0 &&
+      isValidPublicHostname(parsed.hostname) &&
+      parsed.username.length === 0 &&
+      parsed.password.length === 0
+    )
+  } catch {
+    return false
+  }
+}
+
+interface PublicUrlCandidateSpan {
+  readonly end: number
+  readonly safe: boolean
+}
+
+function publicUrlCandidateSpan(
+  characters: readonly string[],
+  start: number,
+): PublicUrlCandidateSpan | null {
   const previous = characters[start - 1]
   if (
     start !== 0 &&
@@ -397,46 +464,32 @@ function publicUrlEnd(
     return null
   }
 
-  const schemeLength = matchesAsciiCaseInsensitive(
-    characters,
-    start,
-    "https://",
-  )
-    ? 8
-    : matchesAsciiCaseInsensitive(characters, start, "http://")
-      ? 7
-      : null
+  const schemeLength = publicUrlSchemeLength(characters, start)
   if (schemeLength === null) return null
 
-  let cursor = consumePublicUrlHost(characters, start + schemeLength)
-  if (cursor === null) return null
-  if (characters[cursor] === ":") {
-    cursor += 1
-    const portStart = cursor
-    while (isAsciiDigit(characters[cursor])) cursor += 1
-    if (cursor === portStart) return null
+  const end = publicUrlCandidateEnd(characters, start)
+  const candidate = characters.slice(start, end).join("")
+  return {
+    end,
+    safe: isPublicUrlCandidate(candidate, schemeLength),
   }
-  if (
-    characters[cursor] === "/" ||
-    characters[cursor] === "?" ||
-    characters[cursor] === "#"
-  ) {
-    while (isPublicUrlTailCharacter(characters[cursor])) cursor += 1
-  }
-  return cursor
 }
 
 function findPublicUrlMask(characters: readonly string[]): readonly boolean[] {
   const mask = Array<boolean>(characters.length).fill(false)
   let cursor = 0
   while (cursor < characters.length) {
-    const end = publicUrlEnd(characters, cursor)
-    if (end === null) {
+    const candidate = publicUrlCandidateSpan(characters, cursor)
+    if (candidate === null) {
       cursor += 1
       continue
     }
-    for (let index = cursor; index < end; index += 1) mask[index] = true
-    cursor = end
+    if (candidate.safe) {
+      for (let index = cursor; index < candidate.end; index += 1) {
+        mask[index] = true
+      }
+    }
+    cursor = candidate.end
   }
   return mask
 }

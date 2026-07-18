@@ -155,23 +155,27 @@ describe("narration contracts", () => {
   it("matches the shared redaction parity fixture", () => {
     expect(redactionFixture.schemaVersion).toBe(narrationSchemaVersion)
     for (const fixture of redactionFixture.safe) {
-      expect(() =>
-        parseCommitNarrationConsumerEvent({
-          ...started(),
-          kind: "chunk",
-          sequence: 0,
-          text: fixture.text,
-        }),
+      expect(
+        () =>
+          parseCommitNarrationConsumerEvent({
+            ...started(),
+            kind: "chunk",
+            sequence: 0,
+            text: fixture.text,
+          }),
+        `safe fixture rejected: ${fixture.name}`,
       ).not.toThrow()
     }
     for (const fixture of redactionFixture.private) {
-      expect(() =>
-        parseCommitNarrationConsumerEvent({
-          ...started(),
-          kind: "chunk",
-          sequence: 0,
-          text: fixture.text,
-        }),
+      expect(
+        () =>
+          parseCommitNarrationConsumerEvent({
+            ...started(),
+            kind: "chunk",
+            sequence: 0,
+            text: fixture.text,
+          }),
+        `private fixture accepted: ${fixture.name}`,
       ).toThrowError("NARRATION-PRESENTATION-ENVELOPE")
     }
   })

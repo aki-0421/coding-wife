@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use regex::Regex;
+use url::{Host, Url};
 
 use super::types::{
     NarrationPriority, NarrationScopeRequestV1, NarrationSemanticType, NarrationSpeakRequestV1,
@@ -240,61 +241,118 @@ fn matches_ascii_case_insensitive(characters: &[char], start: usize, expected: &
     })
 }
 
-fn consume_public_url_host(characters: &[char], start: usize) -> Option<usize> {
-    if characters.get(start) == Some(&'[') {
-        let mut cursor = start + 1;
-        let address_start = cursor;
-        while characters.get(cursor).is_some_and(|character| {
-            character.is_ascii_hexdigit() || matches!(*character, ':' | '.')
-        }) {
-            cursor += 1;
-        }
-        return (cursor > address_start && characters.get(cursor) == Some(&']'))
-            .then_some(cursor + 1);
+fn public_url_scheme_length(characters: &[char], start: usize) -> Option<usize> {
+    if matches_ascii_case_insensitive(characters, start, "https://") {
+        Some(8)
+    } else if matches_ascii_case_insensitive(characters, start, "http://") {
+        Some(7)
+    } else {
+        None
     }
+}
 
-    let mut cursor = start;
-    if !characters
-        .get(cursor)
-        .is_some_and(char::is_ascii_alphanumeric)
-    {
-        return None;
+fn matching_url_quote_terminator(previous: Option<char>) -> Option<char> {
+    match previous {
+        Some(character @ ('"' | '\'' | '`')) => Some(character),
+        Some('“') => Some('”'),
+        Some('‘') => Some('’'),
+        Some('«') => Some('»'),
+        Some('「') => Some('」'),
+        Some('『') => Some('』'),
+        _ => None,
     }
-    cursor += 1;
-    while characters
-        .get(cursor)
-        .is_some_and(|character| character.is_ascii_alphanumeric() || *character == '-')
-    {
+}
+
+fn is_url_wrapper_terminator(character: char) -> bool {
+    matches!(
+        character,
+        '"' | '`' | '<' | '>' | '）' | '】' | '〉' | '》' | '」' | '』' | '”' | '’' | '»'
+    )
+}
+
+fn public_url_candidate_end(characters: &[char], start: usize) -> usize {
+    let quote_terminator =
+        matching_url_quote_terminator(start.checked_sub(1).map(|index| characters[index]));
+    let mut parentheses = 0_usize;
+    let mut brackets = 0_usize;
+    let mut braces = 0_usize;
+    let mut cursor = start;
+    while let Some(character) = characters.get(cursor).copied() {
+        if is_unicode_whitespace(character) {
+            return cursor;
+        }
+        if cursor > start
+            && (quote_terminator == Some(character) || is_url_wrapper_terminator(character))
+        {
+            return cursor;
+        }
+        match character {
+            '(' => parentheses += 1,
+            ')' if parentheses == 0 => return cursor,
+            ')' => parentheses -= 1,
+            '[' => brackets += 1,
+            ']' if brackets == 0 => return cursor,
+            ']' => brackets -= 1,
+            '{' => braces += 1,
+            '}' if braces == 0 => return cursor,
+            '}' => braces -= 1,
+            _ => {}
+        }
         cursor += 1;
     }
-    if characters.get(cursor.wrapping_sub(1)) == Some(&'-') {
-        return None;
-    }
-
-    while characters.get(cursor) == Some(&'.')
-        && characters
-            .get(cursor + 1)
-            .is_some_and(char::is_ascii_alphanumeric)
-    {
-        cursor += 2;
-        while characters
-            .get(cursor)
-            .is_some_and(|character| character.is_ascii_alphanumeric() || *character == '-')
-        {
-            cursor += 1;
-        }
-        if characters.get(cursor.wrapping_sub(1)) == Some(&'-') {
-            return None;
-        }
-    }
-    Some(cursor)
+    characters.len()
 }
 
-fn is_public_url_tail_character(character: char) -> bool {
-    character.is_ascii_alphanumeric() || "-._~:/?#@!$&*+,;=%".contains(character)
+fn raw_url_authority(candidate: &str, scheme_length: usize) -> &str {
+    let authority = &candidate[scheme_length..];
+    let authority_end = authority
+        .find(|character| matches!(character, '/' | '?' | '#'))
+        .unwrap_or(authority.len());
+    &authority[..authority_end]
 }
 
-fn public_url_end(characters: &[char], start: usize) -> Option<usize> {
+fn is_valid_dns_domain(domain: &str) -> bool {
+    let domain = domain.strip_suffix('.').unwrap_or(domain);
+    !domain.is_empty()
+        && domain.len() <= 253
+        && domain.split('.').all(|label| {
+            (1..=63).contains(&label.len())
+                && label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+}
+
+fn is_valid_public_host(parsed: &Url) -> bool {
+    match parsed.host() {
+        Some(Host::Domain(domain)) => is_valid_dns_domain(domain),
+        Some(Host::Ipv4(_) | Host::Ipv6(_)) => true,
+        None => false,
+    }
+}
+
+fn is_public_url_candidate(candidate: &str, scheme_length: usize) -> bool {
+    let Ok(parsed) = Url::parse(candidate) else {
+        return false;
+    };
+    let raw_authority = raw_url_authority(candidate, scheme_length);
+    matches!(parsed.scheme(), "http" | "https")
+        && !raw_authority.is_empty()
+        && !raw_authority.contains('@')
+        && is_valid_public_host(&parsed)
+        && parsed.username().is_empty()
+        && parsed.password().is_none_or(str::is_empty)
+}
+
+fn public_url_candidate_span(characters: &[char], start: usize) -> Option<(usize, bool)> {
     if start != 0
         && !characters
             .get(start.wrapping_sub(1))
@@ -303,48 +361,23 @@ fn public_url_end(characters: &[char], start: usize) -> Option<usize> {
         return None;
     }
 
-    let scheme_length = if matches_ascii_case_insensitive(characters, start, "https://") {
-        8
-    } else if matches_ascii_case_insensitive(characters, start, "http://") {
-        7
-    } else {
-        return None;
-    };
-
-    let mut cursor = consume_public_url_host(characters, start + scheme_length)?;
-    if characters.get(cursor) == Some(&':') {
-        cursor += 1;
-        let port_start = cursor;
-        while characters.get(cursor).is_some_and(char::is_ascii_digit) {
-            cursor += 1;
-        }
-        if cursor == port_start {
-            return None;
-        }
-    }
-    if characters
-        .get(cursor)
-        .is_some_and(|character| matches!(*character, '/' | '?' | '#'))
-    {
-        while characters
-            .get(cursor)
-            .is_some_and(|character| is_public_url_tail_character(*character))
-        {
-            cursor += 1;
-        }
-    }
-    Some(cursor)
+    let scheme_length = public_url_scheme_length(characters, start)?;
+    let end = public_url_candidate_end(characters, start);
+    let candidate = characters[start..end].iter().collect::<String>();
+    Some((end, is_public_url_candidate(&candidate, scheme_length)))
 }
 
 fn find_public_url_mask(characters: &[char]) -> Vec<bool> {
     let mut mask = vec![false; characters.len()];
     let mut cursor = 0;
     while cursor < characters.len() {
-        let Some(end) = public_url_end(characters, cursor) else {
+        let Some((end, safe)) = public_url_candidate_span(characters, cursor) else {
             cursor += 1;
             continue;
         };
-        mask[cursor..end].fill(true);
+        if safe {
+            mask[cursor..end].fill(true);
+        }
         cursor = end;
     }
     mask

@@ -60,6 +60,74 @@
     {
       "name": "uppercase-http-url-with-port",
       "text": "See HTTP://example.com:8080/x for the public guide."
+    },
+    {
+      "name": "https-balanced-parentheses-path",
+      "text": "See https://example.com/a(b)/c."
+    },
+    {
+      "name": "https-parenthesized-query-path",
+      "text": "See https://example.com/x?next=(/x)&mode=public."
+    },
+    {
+      "name": "https-trailing-dot-host",
+      "text": "See https://example.com./x."
+    },
+    {
+      "name": "https-unicode-idn-host",
+      "text": "See https://例え.テスト/x."
+    },
+    {
+      "name": "https-maximum-port",
+      "text": "See https://example.com:65535/x."
+    },
+    {
+      "name": "https-ipv4-host",
+      "text": "See https://192.0.2.1/x."
+    },
+    {
+      "name": "https-ipv6-loopback-host",
+      "text": "See https://[::1]/x."
+    },
+    {
+      "name": "https-ipv6-documentation-host",
+      "text": "See https://[2001:db8::1]/x."
+    },
+    {
+      "name": "https-angle-bracket-wrapper",
+      "text": "See <https://example.com/x>."
+    },
+    {
+      "name": "https-punycode-idn-host",
+      "text": "See https://xn--r8jz45g.xn--zckzah/x."
+    },
+    {
+      "name": "https-percent-encoded-path",
+      "text": "See https://example.com/a%28b%29/c."
+    },
+    {
+      "name": "https-query-and-fragment-paths",
+      "text": "See https://example.com/x?next=/x#frag=/y."
+    },
+    {
+      "name": "https-semicolon-path",
+      "text": "See https://example.com/a;b/c."
+    },
+    {
+      "name": "https-apostrophe-path",
+      "text": "See https://example.com/a'b/c."
+    },
+    {
+      "name": "http-localhost",
+      "text": "See http://localhost/x."
+    },
+    {
+      "name": "markdown-url-with-balanced-parentheses",
+      "text": "Read [docs](https://example.com/a(b)/c)."
+    },
+    {
+      "name": "unicode-quoted-url-with-balanced-parentheses",
+      "text": "参照：「https://example.com/a(b)/c」。"
     }
   ],
   "private": [
@@ -186,6 +254,90 @@
     {
       "name": "invalid-https-empty-authority-path",
       "text": "Read https:///x."
+    },
+    {
+      "name": "invalid-https-ipv6-authority",
+      "text": "Read https://[:]/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-ipv6-characters",
+      "text": "Read https://[gg::1]/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-unclosed-ipv6-bracket",
+      "text": "Read https://[2001:db8::1/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-port-overflow",
+      "text": "Read https://example.com:65536/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-nonnumeric-port",
+      "text": "Read https://example.com:abc/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-ipv4-authority",
+      "text": "Read https://999.999.999.999/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-leading-hyphen-dns-label",
+      "text": "Read https://-example.com/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-trailing-hyphen-dns-label",
+      "text": "Read https://example-.com/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-underscore-dns-label",
+      "text": "Read https://invalid_host.example/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-empty-dns-label",
+      "text": "Read https://example..com/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-punctuation-in-host",
+      "text": "Read https://example.com;/Users/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-apostrophe-in-host",
+      "text": "Read https://example.com'/Users/alice/private.ts."
+    },
+    {
+      "name": "private-https-username-only-userinfo",
+      "text": "Read https://user@example.com/Users/alice/private.ts."
+    },
+    {
+      "name": "private-https-numeric-password-userinfo",
+      "text": "Read https://user:123@example.com/Users/alice/private.ts."
+    },
+    {
+      "name": "private-https-alphabetic-password-userinfo",
+      "text": "Read https://user:private@example.com/Users/alice/private.ts."
+    },
+    {
+      "name": "private-https-empty-userinfo-separator",
+      "text": "Read https://@example.com/Users/alice/private.ts."
+    },
+    {
+      "name": "private-https-empty-password-userinfo",
+      "text": "Read https://user:@example.com/Users/alice/private.ts."
+    },
+    {
+      "name": "private-https-empty-username-userinfo",
+      "text": "Read https://:123@example.com/Users/alice/private.ts."
+    },
+    {
+      "name": "private-markdown-https-userinfo",
+      "text": "Read [docs](https://user@example.com/Users/alice/private.ts)."
+    },
+    {
+      "name": "private-unicode-quoted-invalid-authority",
+      "text": "対象：「https://[:]/Users/alice/private.ts」。"
+    },
+    {
+      "name": "unsupported-ftp-url-path",
+      "text": "Read ftp://example.com/Users/alice/private.ts."
     },
     {
       "name": "markdown-url-followed-by-private-path",
