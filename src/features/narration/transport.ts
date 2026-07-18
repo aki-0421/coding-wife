@@ -343,7 +343,8 @@ export class DemoNarrationGateway implements NarrationGateway {
     return this.response("queued")
   }
 
-  public cancel(_reason: NarrationCancelReason): Promise<void> {
+  public cancel(reason: NarrationCancelReason): Promise<void> {
+    void reason
     if (this.#playbackTimer !== null) clearTimeout(this.#playbackTimer)
     this.#playbackTimer = null
     this.#snapshot = { ...this.#snapshot, runtime: initialRuntime() }
