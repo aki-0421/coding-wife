@@ -253,6 +253,234 @@ describe("CharacterLibraryStore", () => {
     })
   })
 
+  it("recovers a pending project hydration after a global deletion", async () => {
+    const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
+    const projectA = projectSnapshot(snapshot, "workspace-a", "project-a")
+    const staleProjectB = projectSnapshot(
+      snapshot,
+      "workspace-b",
+      "project-b",
+      { diagnostics: ["CHARACTER-SELECTION-FALLBACK"] },
+    )
+    const freshProjectB = projectSnapshot(snapshot, "workspace-b", "project-b")
+    const staleHydration = deferred<CharacterLibrarySnapshot>()
+    const freshHydration = deferred<CharacterLibrarySnapshot>()
+    let projectBLoads = 0
+    const store = new CharacterLibraryStore(
+      createGateway({
+        getLibrary: ({ workspaceId }) => {
+          if (workspaceId === "workspace-a") return Promise.resolve(projectA)
+          projectBLoads += 1
+          return projectBLoads === 1
+            ? staleHydration.promise
+            : freshHydration.promise
+        },
+        deletePack: () => Promise.resolve(projectA),
+      }),
+    )
+    await store.load("workspace-a")
+    const staleLoad = store.load("workspace-b")
+
+    await store.deletePack("workspace-a", "custom:deleted")
+
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "idle",
+      snapshot: null,
+      errorCode: null,
+    })
+    const freshLoad = store.load("workspace-b")
+    expect(store.getState("workspace-b").status).toBe("loading")
+
+    staleHydration.resolve(staleProjectB)
+    await staleLoad
+
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "loading",
+      snapshot: null,
+    })
+    expect(store.load("workspace-b")).toBe(freshLoad)
+
+    freshHydration.resolve(freshProjectB)
+    await freshLoad
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "ready",
+      snapshot: {
+        projectId: "project-b",
+        diagnostics: [],
+      },
+    })
+  })
+
+  it("invalidates an early pending hydration error when a global mutation publishes", async () => {
+    const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
+    const projectA = projectSnapshot(snapshot, "workspace-a", "project-a")
+    const projectB = projectSnapshot(snapshot, "workspace-b", "project-b")
+    const projectC = projectSnapshot(snapshot, "workspace-c", "project-c")
+    const staleHydration = deferred<CharacterLibrarySnapshot>()
+    const projectCRefresh = deferred<CharacterLibrarySnapshot>()
+    let projectBLoads = 0
+    let refreshHydratedProjects = false
+    const getLibrary = vi.fn(({ workspaceId }: { workspaceId: string }) => {
+      if (workspaceId === "workspace-a") return Promise.resolve(projectA)
+      if (workspaceId === "workspace-c") {
+        return refreshHydratedProjects
+          ? projectCRefresh.promise
+          : Promise.resolve(projectC)
+      }
+      projectBLoads += 1
+      return projectBLoads === 1
+        ? staleHydration.promise
+        : Promise.resolve(projectB)
+    })
+    const store = new CharacterLibraryStore(
+      createGateway({
+        getLibrary,
+        deletePack: () => Promise.resolve(projectA),
+      }),
+    )
+    await store.load("workspace-a")
+    await store.load("workspace-c")
+    const staleLoad = store.load("workspace-b")
+    refreshHydratedProjects = true
+
+    const deletion = store.deletePack("workspace-a", "custom:deleted")
+    await vi.waitFor(() => expect(getLibrary).toHaveBeenCalledTimes(4))
+    staleHydration.reject(new CharacterLibraryOperationError())
+    await expect(staleLoad).rejects.toBeInstanceOf(
+      CharacterLibraryOperationError,
+    )
+    expect(store.getState("workspace-b").status).toBe("error")
+
+    projectCRefresh.resolve(projectC)
+    await deletion
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "idle",
+      snapshot: null,
+      errorCode: null,
+    })
+
+    await store.load("workspace-b")
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "ready",
+      snapshot: { projectId: "project-b" },
+    })
+  })
+
+  it("keeps only the newest hydration across rapid global mutations", async () => {
+    const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
+    const projectA = projectSnapshot(snapshot, "workspace-a", "project-a")
+    const afterDeleteA = withMappingVersion(projectA, 2)
+    const afterMappingA = withMappingVersion(projectA, 3)
+    const staleProjectB = projectSnapshot(
+      withMappingVersion(snapshot, 1),
+      "workspace-b",
+      "project-b",
+    )
+    const supersededProjectB = projectSnapshot(
+      withMappingVersion(snapshot, 2),
+      "workspace-b",
+      "project-b",
+    )
+    const freshProjectB = projectSnapshot(
+      withMappingVersion(snapshot, 3),
+      "workspace-b",
+      "project-b",
+    )
+    const hydrations = [
+      deferred<CharacterLibrarySnapshot>(),
+      deferred<CharacterLibrarySnapshot>(),
+      deferred<CharacterLibrarySnapshot>(),
+    ]
+    let projectBLoads = 0
+    const store = new CharacterLibraryStore(
+      createGateway({
+        getLibrary: ({ workspaceId }) => {
+          if (workspaceId === "workspace-a") return Promise.resolve(projectA)
+          const hydration = hydrations[projectBLoads]
+          projectBLoads += 1
+          if (hydration === undefined) throw new Error("unexpected hydration")
+          return hydration.promise
+        },
+        deletePack: () => Promise.resolve(afterDeleteA),
+        saveSemanticMapping: () => Promise.resolve(afterMappingA),
+      }),
+    )
+    await store.load("workspace-a")
+    const staleLoad = store.load("workspace-b")
+
+    await store.deletePack("workspace-a", "custom:deleted")
+    const supersededLoad = store.load("workspace-b")
+    await store.saveSemanticMapping({
+      workspaceId: "workspace-a",
+      packId: snapshot.selectedPackId,
+      manifestHash: snapshot.semanticMapping.manifestHash,
+      expectedMappingVersion: 2,
+      assignments: snapshot.semanticMapping.assignments,
+    })
+    expect(store.getState("workspace-b").status).toBe("idle")
+    const freshLoad = store.load("workspace-b")
+
+    hydrations[0]?.resolve(staleProjectB)
+    await staleLoad
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "loading",
+      snapshot: null,
+    })
+    expect(store.load("workspace-b")).toBe(freshLoad)
+
+    hydrations[2]?.resolve(freshProjectB)
+    await freshLoad
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "ready",
+      snapshot: { semanticMapping: { mappingVersion: 3 } },
+    })
+
+    hydrations[1]?.resolve(supersededProjectB)
+    await supersededLoad
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "ready",
+      snapshot: { semanticMapping: { mappingVersion: 3 } },
+    })
+  })
+
+  it("leaves an unmounted pending consumer idle until remount hydration", async () => {
+    const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
+    const projectA = projectSnapshot(snapshot, "workspace-a", "project-a")
+    const projectB = projectSnapshot(snapshot, "workspace-b", "project-b")
+    const staleHydration = deferred<CharacterLibrarySnapshot>()
+    let projectBLoads = 0
+    const store = new CharacterLibraryStore(
+      createGateway({
+        getLibrary: ({ workspaceId }) => {
+          if (workspaceId === "workspace-a") return Promise.resolve(projectA)
+          projectBLoads += 1
+          return projectBLoads === 1
+            ? staleHydration.promise
+            : Promise.resolve(projectB)
+        },
+        deletePack: () => Promise.resolve(projectA),
+      }),
+    )
+    await store.load("workspace-a")
+    const unsubscribe = store.subscribe(vi.fn())
+    const staleLoad = store.load("workspace-b")
+    unsubscribe()
+
+    await store.deletePack("workspace-a", "custom:deleted")
+    staleHydration.resolve(projectB)
+    await staleLoad
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "idle",
+      snapshot: null,
+    })
+
+    await store.load("workspace-b")
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "ready",
+      snapshot: { projectId: "project-b" },
+    })
+  })
+
   it("invalidates a project that cannot refresh after a global mutation", async () => {
     const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
     const projectA = projectSnapshot(snapshot, "workspace-a", "project-a")

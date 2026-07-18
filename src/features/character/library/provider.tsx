@@ -50,6 +50,12 @@ export interface CharacterLibraryState {
 
 type Listener = () => void
 
+interface CharacterLibraryLoad {
+  readonly generation: number
+  readonly revision: number
+  readonly promise: Promise<CharacterLibrarySnapshot>
+}
+
 function initialState(workspaceId: string): CharacterLibraryState {
   return {
     status: "idle",
@@ -72,11 +78,12 @@ export class CharacterLibraryStore {
   public readonly gateway: CharacterLibraryGateway
   readonly #states = new Map<string, CharacterLibraryState>()
   readonly #listeners = new Set<Listener>()
-  readonly #loads = new Map<string, Promise<CharacterLibrarySnapshot>>()
+  readonly #loads = new Map<string, CharacterLibraryLoad>()
   readonly #sessionCounts = new Map<string, number>()
   readonly #previewCancellations = new Map<string, Promise<void>>()
   readonly #restoreFocus = new Set<string>()
   #globalRevision = 0
+  #loadGeneration = 0
 
   public constructor(gateway: CharacterLibraryGateway) {
     this.gateway = gateway
@@ -131,7 +138,7 @@ export class CharacterLibraryStore {
 
   public load(workspaceId: string): Promise<CharacterLibrarySnapshot> {
     const inFlight = this.#loads.get(workspaceId)
-    if (inFlight !== undefined) return inFlight
+    if (inFlight !== undefined) return inFlight.promise
     const current = this.getState(workspaceId)
     this.setState(workspaceId, {
       ...current,
@@ -139,16 +146,23 @@ export class CharacterLibraryStore {
       errorCode: null,
     })
     const revision = this.#globalRevision
-    const load = this.gateway
+    const generation = (this.#loadGeneration += 1)
+    const promise = this.gateway
       .getLibrary({ workspaceId })
       .then((snapshot) => {
-        if (revision === this.#globalRevision) {
+        if (
+          this.isCurrentLoad(workspaceId, generation) &&
+          revision === this.#globalRevision
+        ) {
           this.setReadyProjectSnapshot(workspaceId, snapshot)
         }
         return snapshot
       })
       .catch((error: unknown) => {
-        if (revision === this.#globalRevision) {
+        if (
+          this.isCurrentLoad(workspaceId, generation) &&
+          revision === this.#globalRevision
+        ) {
           this.setState(workspaceId, {
             ...this.getState(workspaceId),
             status: "error",
@@ -158,12 +172,13 @@ export class CharacterLibraryStore {
         throw error
       })
       .finally(() => {
-        if (this.#loads.get(workspaceId) === load) {
+        if (this.isCurrentLoad(workspaceId, generation)) {
           this.#loads.delete(workspaceId)
         }
       })
+    const load = { generation, revision, promise }
     this.#loads.set(workspaceId, load)
-    return load
+    return promise
   }
 
   public async beginImport(
@@ -372,6 +387,7 @@ export class CharacterLibraryStore {
       ) {
         continue
       }
+      this.#loads.delete(candidateWorkspaceId)
       this.#states.set(candidateWorkspaceId, {
         ...current,
         status: "ready",
@@ -431,15 +447,24 @@ export class CharacterLibraryStore {
     }
 
     this.#globalRevision += 1
+    const publishedRevision = this.#globalRevision
     for (const [workspaceId, current] of this.#states) {
       const projectId =
         current.snapshot?.projectId ??
         (workspaceId === originWorkspaceId
           ? originSnapshot?.projectId
           : undefined)
-      if (projectId === undefined) continue
+      if (projectId === undefined) {
+        this.invalidateUnhydratedProject(
+          workspaceId,
+          current,
+          publishedRevision,
+        )
+        continue
+      }
       const snapshot = snapshotsByProject.get(projectId)
       if (snapshot !== undefined) {
+        this.#loads.delete(workspaceId)
         this.#states.set(workspaceId, {
           ...current,
           status: "ready",
@@ -456,17 +481,48 @@ export class CharacterLibraryStore {
         invalidatedProjects.has(projectId) ||
         !representatives.has(projectId)
       ) {
-        this.#loads.delete(workspaceId)
-        this.#states.set(workspaceId, {
-          ...current,
-          status: "idle",
-          snapshot: null,
-          mutation: workspaceId === originWorkspaceId ? null : current.mutation,
-          errorCode: null,
-        })
+        this.invalidateProject(
+          workspaceId,
+          current,
+          publishedRevision,
+          workspaceId === originWorkspaceId,
+        )
       }
     }
     for (const listener of this.#listeners) listener()
+  }
+
+  private invalidateUnhydratedProject(
+    workspaceId: string,
+    current: CharacterLibraryState,
+    publishedRevision: number,
+  ): void {
+    if (current.snapshot !== null) return
+    this.invalidateProject(workspaceId, current, publishedRevision, false)
+  }
+
+  private invalidateProject(
+    workspaceId: string,
+    current: CharacterLibraryState,
+    publishedRevision: number,
+    clearMutation: boolean,
+  ): void {
+    const load = this.#loads.get(workspaceId)
+    if (load !== undefined && load.revision >= publishedRevision) return
+    if (load !== undefined && this.#loads.get(workspaceId) === load) {
+      this.#loads.delete(workspaceId)
+    }
+    this.#states.set(workspaceId, {
+      ...current,
+      status: "idle",
+      snapshot: null,
+      mutation: clearMutation ? null : current.mutation,
+      errorCode: null,
+    })
+  }
+
+  private isCurrentLoad(workspaceId: string, generation: number): boolean {
+    return this.#loads.get(workspaceId)?.generation === generation
   }
 
   private scheduleUnownedPreviewCancellation(workspaceId: string): void {
