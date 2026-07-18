@@ -113,6 +113,7 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
     ),
   ]
   private activeWorkspaceId = "build-live2d-desktop-app"
+  private readonly unregisteredWorkspaces: PersistedWorkspaceSummary[] = []
   private readonly drafts = new Map<string, PersistedWorkspaceDraft>(
     this.workspaces.map((workspace) => [
       workspace.workspaceId,
@@ -192,6 +193,16 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
             .workspaceId,
           command,
         )
+      case workspaceHistoryCommands.repair:
+        return this.repair(
+          (request as WorkspaceHistoryRequestMap["workspace_repair"])
+            .workspaceId,
+        )
+      case workspaceHistoryCommands.unregister:
+        return this.unregister(
+          (request as WorkspaceHistoryRequestMap["workspace_unregister"])
+            .workspaceId,
+        )
       case workspaceHistoryCommands.updateLifecycle:
         return this.updateLifecycle(
           request as WorkspaceHistoryRequestMap["workspace_update_lifecycle"],
@@ -245,9 +256,8 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
   }
 
   private state(): WorkspaceStateSnapshot {
-    const active = this.workspace(
-      this.activeWorkspaceId,
-      workspaceHistoryCommands.list,
+    const active = this.workspaces.find(
+      (workspace) => workspace.workspaceId === this.activeWorkspaceId,
     )
     return {
       schemaVersion: 1,
@@ -258,15 +268,28 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
         backupName: null,
       },
       workspaces: [...this.workspaces],
-      activeWorkspaceId: active.workspaceId,
-      draft: this.drafts.get(active.workspaceId) ?? null,
-      contextSnapshots: [...(this.contexts.get(active.workspaceId) ?? [])],
-      timeline: this.timeline({
-        workspaceId: active.workspaceId,
-        beforeSequence: null,
-        limit: 200,
-        search: null,
-      }),
+      activeWorkspaceId: active?.workspaceId ?? null,
+      draft:
+        active === undefined
+          ? null
+          : (this.drafts.get(active.workspaceId) ?? null),
+      contextSnapshots:
+        active === undefined
+          ? []
+          : [...(this.contexts.get(active.workspaceId) ?? [])],
+      timeline:
+        active === undefined
+          ? {
+              schemaVersion: 1,
+              items: [],
+              nextBeforeSequence: null,
+            }
+          : this.timeline({
+              workspaceId: active.workspaceId,
+              beforeSequence: null,
+              limit: 200,
+              search: null,
+            }),
     }
   }
 
@@ -366,6 +389,43 @@ export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport 
   ): WorkspaceStateSnapshot {
     this.workspace(workspaceId, operation)
     this.activeWorkspaceId = workspaceId
+    return this.state()
+  }
+
+  private repair(workspaceId: string): WorkspaceStateSnapshot {
+    const workspace = this.workspace(
+      workspaceId,
+      workspaceHistoryCommands.repair,
+    )
+    const updatedAt = this.timestamp()
+    this.workspaces = this.workspaces.map((candidate) =>
+      candidate.projectId === workspace.projectId
+        ? { ...candidate, health: "ready", updatedAt }
+        : candidate,
+    )
+    this.activeWorkspaceId = workspaceId
+    return this.state()
+  }
+
+  private unregister(workspaceId: string): WorkspaceStateSnapshot {
+    const workspace = this.workspace(
+      workspaceId,
+      workspaceHistoryCommands.unregister,
+    )
+    const removed = this.workspaces.filter(
+      (candidate) => candidate.projectId === workspace.projectId,
+    )
+    this.unregisteredWorkspaces.push(...removed)
+    this.workspaces = this.workspaces.filter(
+      (candidate) => candidate.projectId !== workspace.projectId,
+    )
+    if (
+      removed.some(
+        (candidate) => candidate.workspaceId === this.activeWorkspaceId,
+      )
+    ) {
+      this.activeWorkspaceId = this.workspaces[0]?.workspaceId ?? ""
+    }
     return this.state()
   }
 

@@ -137,6 +137,39 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
     )
   }
 
+  async cancelWorkspace(
+    workspaceId: string,
+    expectedUpdatedAt: string,
+  ): Promise<WorkspaceAdapterState> {
+    await this.transport.request(workspaceHistoryCommands.updateLifecycle, {
+      workspaceId,
+      lifecycle: "canceled",
+      expectedUpdatedAt,
+    })
+    return this.absorb(
+      await this.transport.request(workspaceHistoryCommands.list, undefined),
+    )
+  }
+
+  async repairWorkspace(workspaceId: string): Promise<WorkspaceAdapterState> {
+    return this.absorb(
+      await this.transport.request(workspaceHistoryCommands.repair, {
+        workspaceId,
+      }),
+    )
+  }
+
+  async unregisterWorkspace(
+    workspaceId: string,
+  ): Promise<WorkspaceAdapterState> {
+    this.drafts.delete(workspaceId)
+    return this.absorb(
+      await this.transport.request(workspaceHistoryCommands.unregister, {
+        workspaceId,
+      }),
+    )
+  }
+
   async requestAddProject(): Promise<WorkspaceAdapterState> {
     const response = await this.transport.request(
       workspaceHistoryCommands.pickRegister,

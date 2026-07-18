@@ -34,7 +34,10 @@ import {
 } from "@/features/narration"
 import { ChatView } from "@/features/workspace-view/ChatView"
 import { ContextView } from "@/features/workspace-view/ContextView"
-import { getWorkspaceCopy } from "@/features/workspace-view/copy"
+import {
+  getWorkspaceCopy,
+  type WorkspaceCopy,
+} from "@/features/workspace-view/copy"
 import { SettingsView } from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
@@ -75,6 +78,23 @@ function getSystemReducedMotion(): boolean {
     typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   )
+}
+
+function workspaceActionError(copy: WorkspaceCopy, code: string): string {
+  if (code.includes("ACTIVE") || code.includes("RUNNING")) {
+    return copy.workspaceMenu.error.active
+  }
+  if (code.includes("UNAVAILABLE")) {
+    return copy.workspaceMenu.error.unavailable
+  }
+  if (code.includes("CONFLICT") || code.includes("REVISION")) {
+    return copy.workspaceMenu.error.conflict
+  }
+  if (code === "WORKSPACE-REPAIR-ROOT-IN-USE") {
+    return copy.workspaceMenu.error.rootInUse
+  }
+  if (code.includes("DRAFT")) return copy.workspaceMenu.error.draft
+  return copy.workspaceMenu.error.generic
 }
 
 export function WorkspaceShell({
@@ -201,6 +221,43 @@ export function WorkspaceShell({
     ])
     return mainTurn.status === "fulfilled" ? mainTurn.value : false
   }, [narrationController, view])
+
+  const reportWorkspaceAction = useCallback(
+    (result: Awaited<ReturnType<typeof view.cancelSelectedWorkspace>>) => {
+      if (!result.ok) {
+        view.setNotice({
+          tone: "error",
+          message: workspaceActionError(copy, result.errorCode),
+        })
+      }
+      return result.ok
+    },
+    [copy, view],
+  )
+
+  const cancelWorkspace = useCallback(
+    async (stopFirst: boolean) => {
+      if (stopFirst && !(await stopTurn())) {
+        view.setNotice({
+          tone: "error",
+          message: copy.workspaceMenu.error.active,
+        })
+        return false
+      }
+      return reportWorkspaceAction(await view.cancelSelectedWorkspace())
+    },
+    [copy.workspaceMenu.error.active, reportWorkspaceAction, stopTurn, view],
+  )
+
+  const repairWorkspace = useCallback(
+    async () => reportWorkspaceAction(await view.repairSelectedWorkspace()),
+    [reportWorkspaceAction, view],
+  )
+
+  const unregisterWorkspace = useCallback(
+    async () => reportWorkspaceAction(await view.unregisterSelectedWorkspace()),
+    [reportWorkspaceAction, view],
+  )
 
   const dismissCommitPresentation = useCallback(() => {
     void narrationController.dismissPresentation("explicit_cancel")
@@ -407,7 +464,7 @@ export function WorkspaceShell({
     return (
       <main className="flex min-h-dvh min-w-[960px] items-center justify-center bg-background p-xl">
         <Empty>
-          <EmptyHeader>
+          <EmptyHeader className="max-w-[24rem]">
             <EmptyTitle>{copy.workspaces}</EmptyTitle>
             <EmptyDescription>{copy.noMatches}</EmptyDescription>
           </EmptyHeader>
@@ -452,8 +509,16 @@ export function WorkspaceShell({
       >
         <WorkspaceHeader
           activeTab={view.activeTab}
+          actionPending={view.workspaceAction}
+          canCancel={adapter?.cancelWorkspace !== undefined}
+          canRepair={adapter?.repairWorkspace !== undefined}
+          canUnregister={adapter?.unregisterWorkspace !== undefined}
           connection={connection}
           copy={copy}
+          onCancel={cancelWorkspace}
+          onRepair={repairWorkspace}
+          onUnregister={unregisterWorkspace}
+          turnActive={turnActive}
           workspace={selectedWorkspace}
         />
 

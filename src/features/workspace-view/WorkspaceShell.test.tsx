@@ -1534,4 +1534,154 @@ describe("WorkspaceShell", () => {
     )
     expect(sendTurn.mock.calls[0]?.[0]).not.toHaveProperty("paths")
   })
+
+  it("stops an active turn before canceling and blocks unregister while running", async () => {
+    const timestamp = "2026-07-18T01:00:00.000Z"
+    const activeState: WorkspaceAdapterState = {
+      ...nativeWorkspaceState(),
+      workspaces: [
+        {
+          ...nativeWorkspaceState().workspaces[0]!,
+          updatedAt: timestamp,
+          health: "ready",
+        },
+      ],
+    }
+    const canceledState: WorkspaceAdapterState = {
+      ...activeState,
+      workspaces: activeState.workspaces.map((workspace) => ({
+        ...workspace,
+        lifecycle: "canceled" as const,
+        updatedAt: "2026-07-18T01:00:01.000Z",
+      })),
+    }
+    const codex = richCodexState()
+    const stopTurn = vi.fn().mockResolvedValue(undefined)
+    const cancelWorkspace = vi.fn().mockResolvedValue(canceledState)
+    const unregisterWorkspace = vi.fn().mockResolvedValue(canceledState)
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(activeState),
+      codexSnapshot: () => codex,
+      subscribeCodex(listener) {
+        listener(codex)
+        return () => undefined
+      },
+      stopTurn,
+      cancelWorkspace,
+      unregisterWorkspace,
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Workspace actions" }),
+    )
+    expect(
+      screen.getByRole("button", { name: /Unregister project/u }),
+    ).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: /Cancel workspace/u }))
+    expect(screen.getByText("Cancel this workspace?")).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Stop and cancel" }))
+
+    await waitFor(() => expect(cancelWorkspace).toHaveBeenCalledOnce())
+    expect(stopTurn).toHaveBeenCalledWith("workspace-native")
+    expect(cancelWorkspace).toHaveBeenCalledWith("workspace-native", timestamp)
+    expect(stopTurn.mock.invocationCallOrder[0]).toBeLessThan(
+      cancelWorkspace.mock.invocationCallOrder[0]!,
+    )
+    expect(unregisterWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("shows repository health and repairs it from the state-aware action menu", async () => {
+    const unhealthyState: WorkspaceAdapterState = {
+      ...nativeWorkspaceState(),
+      workspaces: [
+        {
+          ...nativeWorkspaceState().workspaces[0]!,
+          updatedAt: "2026-07-18T01:00:00.000Z",
+          health: "missing",
+        },
+      ],
+    }
+    const repairWorkspace = vi.fn().mockResolvedValue({
+      ...unhealthyState,
+      workspaces: unhealthyState.workspaces.map((workspace) => ({
+        ...workspace,
+        health: "ready" as const,
+      })),
+    })
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(unhealthyState),
+      repairWorkspace,
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+
+    expect((await screen.findAllByText("Repository missing")).length).toBe(2)
+    await user.click(screen.getByRole("button", { name: "Workspace actions" }))
+    await user.click(
+      screen.getByRole("button", { name: /Reselect repository/u }),
+    )
+
+    await waitFor(() =>
+      expect(repairWorkspace).toHaveBeenCalledWith("workspace-native"),
+    )
+    expect(screen.queryByText("Repository missing")).not.toBeInTheDocument()
+  })
+
+  it("requires two confirmations before unregistering app metadata", async () => {
+    const selected = {
+      ...nativeWorkspaceState().workspaces[0]!,
+      updatedAt: "2026-07-18T01:00:00.000Z",
+      health: "ready" as const,
+    }
+    const fallback = {
+      id: "workspace-fallback",
+      repository: "fallback-repository",
+      name: "preserved-workspace",
+      branch: "main",
+      lifecycle: "backlog" as const,
+      updatedAt: "2026-07-18T01:00:00.000Z",
+      health: "ready" as const,
+    }
+    const state: WorkspaceAdapterState = {
+      ...nativeWorkspaceState(),
+      workspaces: [selected, fallback],
+    }
+    const afterUnregister: WorkspaceAdapterState = {
+      ...state,
+      workspaces: [fallback],
+      activeWorkspaceId: fallback.id,
+      draft: { ...state.draft!, revision: 0 },
+    }
+    const unregisterWorkspace = vi.fn().mockResolvedValue(afterUnregister)
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      unregisterWorkspace,
+    }
+    const user = userEvent.setup()
+    renderWorkspace(adapter)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Workspace actions" }),
+    )
+    await user.click(
+      screen.getByRole("button", { name: /Unregister project/u }),
+    )
+    expect(screen.getByText("Unregister this project?")).toBeVisible()
+    expect(unregisterWorkspace).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Continue" }))
+    expect(screen.getByText("Confirm project unregister")).toBeVisible()
+    expect(unregisterWorkspace).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Unregister project" }))
+
+    await waitFor(() =>
+      expect(unregisterWorkspace).toHaveBeenCalledWith("workspace-native"),
+    )
+    expect(await screen.findByText("preserved-workspace")).toBeVisible()
+    expect(screen.queryByText("restored-workspace")).not.toBeInTheDocument()
+  })
 })

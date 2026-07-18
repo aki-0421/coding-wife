@@ -90,6 +90,24 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return state
   }
 
+  cancelWorkspace(workspaceId: string, expectedUpdatedAt: string) {
+    return this.history.cancelWorkspace(workspaceId, expectedUpdatedAt)
+  }
+
+  async repairWorkspace(workspaceId: string): Promise<WorkspaceAdapterState> {
+    const state = await this.history.repairWorkspace(workspaceId)
+    await this.activateCodex(state)
+    return state
+  }
+
+  async unregisterWorkspace(
+    workspaceId: string,
+  ): Promise<WorkspaceAdapterState> {
+    const state = await this.history.unregisterWorkspace(workspaceId)
+    if (state.activeWorkspaceId !== null) await this.activateCodex(state)
+    return state
+  }
+
   saveDraft(
     workspaceId: string,
     text: string,

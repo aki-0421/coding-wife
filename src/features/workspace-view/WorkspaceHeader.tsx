@@ -1,14 +1,32 @@
+import { useRef, useState } from "react"
 import {
+  BanIcon,
   ChevronRightIcon,
   EllipsisIcon,
+  FolderMinusIcon,
+  FolderSearchIcon,
   GitBranchIcon,
   LoaderCircleIcon,
   SparklesIcon,
+  TriangleAlertIcon,
   WifiOffIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Tooltip,
@@ -29,6 +47,14 @@ interface WorkspaceHeaderProps {
   readonly connection: HeaderConnectionState
   readonly copy: WorkspaceCopy
   readonly workspace: WorkspaceRecord
+  readonly actionPending: "cancel" | "repair" | "unregister" | null
+  readonly canCancel: boolean
+  readonly canRepair: boolean
+  readonly canUnregister: boolean
+  readonly turnActive: boolean
+  readonly onCancel: (stopFirst: boolean) => Promise<boolean>
+  readonly onRepair: () => Promise<boolean>
+  readonly onUnregister: () => Promise<boolean>
 }
 
 const tabOrder: readonly WorkspaceTab[] = [
@@ -76,10 +102,232 @@ function ConnectionStatus({
   )
 }
 
+function WorkspaceHealthStatus({
+  copy,
+  workspace,
+}: Pick<WorkspaceHeaderProps, "copy" | "workspace">) {
+  if (workspace.health === undefined || workspace.health === "ready")
+    return null
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="flex min-w-0 items-center gap-xxs text-label text-destructive"
+          data-workspace-health={workspace.health}
+          role="status"
+        >
+          <TriangleAlertIcon aria-hidden="true" className="size-3 shrink-0" />
+          <span className="hidden max-w-48 truncate min-[1180px]:inline">
+            {copy.workspaceHealth[workspace.health]}
+          </span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{copy.workspaceHealth[workspace.health]}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+type ConfirmationStage = "cancel" | "unregister" | "unregister_final" | null
+
+function WorkspaceActions(props: WorkspaceHeaderProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [confirmation, setConfirmation] = useState<ConfirmationStage>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const busy = props.actionPending !== null
+  const cancelDisabled =
+    busy ||
+    !props.canCancel ||
+    props.workspace.lifecycle === "canceled" ||
+    props.workspace.lifecycle === "done"
+  const repairDisabled = busy || !props.canRepair || props.turnActive
+  const unregisterDisabled = busy || !props.canUnregister || props.turnActive
+
+  const closeConfirmation = () => setConfirmation(null)
+  const completeCancel = async () => {
+    if (await props.onCancel(props.turnActive)) closeConfirmation()
+  }
+  const completeUnregister = async () => {
+    if (await props.onUnregister()) closeConfirmation()
+  }
+
+  return (
+    <>
+      <Popover onOpenChange={setMenuOpen} open={menuOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            aria-label={props.copy.workspaceActions}
+            ref={triggerRef}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            <EllipsisIcon />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          className="w-72 gap-xxs p-xs"
+          data-workspace-action-menu=""
+        >
+          <Button
+            className="h-auto justify-start gap-sm px-sm py-xs text-start"
+            disabled={cancelDisabled}
+            onClick={() => {
+              setMenuOpen(false)
+              setConfirmation("cancel")
+            }}
+            type="button"
+            variant="ghost"
+          >
+            <BanIcon className="size-3 shrink-0" />
+            <span className="flex min-w-0 flex-col items-start">
+              <span>{props.copy.workspaceMenu.cancel}</span>
+              <span className="whitespace-normal text-caption font-normal text-muted-foreground">
+                {props.copy.workspaceMenu.cancelDescription}
+              </span>
+            </span>
+          </Button>
+          {props.workspace.health !== undefined &&
+          props.workspace.health !== "ready" ? (
+            <Button
+              className="h-auto justify-start gap-sm px-sm py-xs text-start"
+              disabled={repairDisabled}
+              onClick={() => {
+                setMenuOpen(false)
+                void props.onRepair()
+              }}
+              type="button"
+              variant="ghost"
+            >
+              <FolderSearchIcon className="size-3 shrink-0" />
+              <span className="flex min-w-0 flex-col items-start">
+                <span>{props.copy.workspaceMenu.repair}</span>
+                <span className="whitespace-normal text-caption font-normal text-muted-foreground">
+                  {props.turnActive
+                    ? props.copy.workspaceMenu.runningBlocked
+                    : props.copy.workspaceMenu.repairDescription}
+                </span>
+              </span>
+            </Button>
+          ) : null}
+          <Button
+            className="h-auto justify-start gap-sm px-sm py-xs text-start text-destructive hover:text-destructive"
+            disabled={unregisterDisabled}
+            onClick={() => {
+              setMenuOpen(false)
+              setConfirmation("unregister")
+            }}
+            type="button"
+            variant="ghost"
+          >
+            <FolderMinusIcon className="size-3 shrink-0" />
+            <span className="flex min-w-0 flex-col items-start">
+              <span>{props.copy.workspaceMenu.unregister}</span>
+              <span className="whitespace-normal text-caption font-normal text-muted-foreground">
+                {props.turnActive
+                  ? props.copy.workspaceMenu.runningBlocked
+                  : props.copy.workspaceMenu.unregisterDescription}
+              </span>
+            </span>
+          </Button>
+        </PopoverContent>
+      </Popover>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && !busy) closeConfirmation()
+        }}
+        open={confirmation !== null}
+      >
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            window.requestAnimationFrame(() => triggerRef.current?.focus())
+          }}
+          showCloseButton={!busy}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {confirmation === "cancel"
+                ? props.copy.workspaceMenu.cancelTitle
+                : confirmation === "unregister"
+                  ? props.copy.workspaceMenu.unregisterTitle
+                  : props.copy.workspaceMenu.unregisterFinalTitle}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmation === "cancel"
+                ? props.turnActive
+                  ? props.copy.workspaceMenu.cancelRunningBody
+                  : props.copy.workspaceMenu.cancelBody
+                : confirmation === "unregister"
+                  ? props.copy.workspaceMenu.unregisterBody
+                  : props.copy.workspaceMenu.unregisterFinalBody}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              disabled={busy}
+              onClick={closeConfirmation}
+              type="button"
+              variant="ghost"
+            >
+              {props.copy.workspaceMenu.keepWorkspace}
+            </Button>
+            {confirmation === "unregister" ? (
+              <Button
+                autoFocus
+                onClick={() => setConfirmation("unregister_final")}
+                type="button"
+                variant="secondary"
+              >
+                {props.copy.workspaceMenu.continueUnregister}
+              </Button>
+            ) : confirmation === "unregister_final" ? (
+              <Button
+                autoFocus
+                disabled={busy}
+                onClick={() => void completeUnregister()}
+                type="button"
+                variant="destructive"
+              >
+                {busy
+                  ? props.copy.workspaceMenu.working
+                  : props.copy.workspaceMenu.confirmUnregister}
+              </Button>
+            ) : (
+              <Button
+                autoFocus
+                disabled={busy}
+                onClick={() => void completeCancel()}
+                type="button"
+                variant="destructive"
+              >
+                {busy
+                  ? props.copy.workspaceMenu.working
+                  : props.turnActive
+                    ? props.copy.workspaceMenu.stopAndCancel
+                    : props.copy.workspaceMenu.confirmCancel}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 export function WorkspaceHeader({
   activeTab,
+  actionPending,
+  canCancel,
+  canRepair,
+  canUnregister,
   connection,
   copy,
+  onCancel,
+  onRepair,
+  onUnregister,
+  turnActive,
   workspace,
 }: WorkspaceHeaderProps) {
   return (
@@ -124,14 +372,21 @@ export function WorkspaceHeader({
           </TooltipTrigger>
           <TooltipContent>{workspace.branch}</TooltipContent>
         </Tooltip>
-        <Button
-          aria-label={copy.workspaceActions}
-          size="icon-xs"
-          type="button"
-          variant="ghost"
-        >
-          <EllipsisIcon />
-        </Button>
+        <WorkspaceHealthStatus copy={copy} workspace={workspace} />
+        <WorkspaceActions
+          actionPending={actionPending}
+          activeTab={activeTab}
+          canCancel={canCancel}
+          canRepair={canRepair}
+          canUnregister={canUnregister}
+          connection={connection}
+          copy={copy}
+          onCancel={onCancel}
+          onRepair={onRepair}
+          onUnregister={onUnregister}
+          turnActive={turnActive}
+          workspace={workspace}
+        />
         <ConnectionStatus connection={connection} copy={copy} />
       </div>
 

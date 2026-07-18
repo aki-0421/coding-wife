@@ -8,6 +8,7 @@ import {
   MenuIcon,
   PlusIcon,
   SettingsIcon,
+  TriangleAlertIcon,
   XIcon,
 } from "lucide-react"
 
@@ -116,13 +117,17 @@ function WorkspaceRow({
   readonly onSelect: () => void
 }) {
   const fullName = `${workspace.repository}/${workspace.name}`
+  const health =
+    workspace.health === undefined || workspace.health === "ready"
+      ? null
+      : copy.workspaceHealth[workspace.health]
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           aria-current={selected ? "page" : undefined}
-          aria-label={`${fullName}, ${workspace.branch}, ${copy.lifecycle[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}`}
+          aria-label={`${fullName}, ${workspace.branch}, ${copy.lifecycle[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
           className={cn(
             "group/workspace flex h-[49.5px] w-full items-center gap-sm rounded-control px-sm py-xs text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
             selected && "bg-selected-row",
@@ -161,6 +166,18 @@ function WorkspaceRow({
                   className="size-3 shrink-0 text-destructive"
                 />
               ) : null}
+              {health ? (
+                <span
+                  className="flex min-w-0 items-center gap-xxs truncate text-destructive"
+                  data-workspace-health={workspace.health}
+                >
+                  <TriangleAlertIcon
+                    aria-hidden="true"
+                    className="size-3 shrink-0"
+                  />
+                  <span className="truncate text-label">{health}</span>
+                </span>
+              ) : null}
             </span>
           </span>
         </button>
@@ -168,6 +185,7 @@ function WorkspaceRow({
       <TooltipContent side="right">
         {fullName} · {workspace.branch}
         {workspace.attention ? ` · ${copy.attention[workspace.attention]}` : ""}
+        {health ? ` · ${health}` : ""}
       </TooltipContent>
     </Tooltip>
   )

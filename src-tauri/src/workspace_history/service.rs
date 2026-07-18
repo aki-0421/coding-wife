@@ -363,6 +363,94 @@ impl WorkspaceHistoryService {
         }
     }
 
+    pub async fn repair(
+        &self,
+        request: WorkspaceSelectRequest,
+    ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_repair")?;
+        let _operation = self.operation_lock.lock().await;
+        let original_records = self
+            .store
+            .private_project_workspace_records(&request.workspace_id)
+            .map_err(|error| history_error("workspace_repair", error))?;
+        let selected = match self.workspace.pick_validated().await {
+            Ok(candidate) => candidate,
+            Err(error) if error.code == PICK_CANCELED_CODE => {
+                return self
+                    .store
+                    .snapshot(Some(&request.workspace_id))
+                    .map_err(|error| history_error("workspace_repair", error));
+            }
+            Err(error) => return Err(codex_error("workspace_repair", error)),
+        };
+
+        let mut deactivated = Vec::new();
+        for record in &original_records {
+            if let Err(error) = self
+                .workspace
+                .deactivate_workspace(&record.workspace_id)
+                .await
+            {
+                self.restore_private_records(&deactivated).await;
+                return Err(codex_error("workspace_repair", error));
+            }
+            deactivated.push(record.clone());
+        }
+
+        let mut activated_ids = Vec::new();
+        for record in &original_records {
+            let mut candidate = selected.clone();
+            candidate.registration.workspace_id = record.workspace_id.clone();
+            candidate.registration.alias = selected.registration.alias.clone();
+            if let Err(error) = self.workspace.activate_candidate(candidate).await {
+                self.deactivate_records(&activated_ids).await;
+                self.restore_private_records(&original_records).await;
+                return Err(codex_error("workspace_repair", error));
+            }
+            activated_ids.push(record.workspace_id.clone());
+        }
+
+        match self.store.repair_project(&request.workspace_id, &selected) {
+            Ok(state) => Ok(state),
+            Err(error) => {
+                self.deactivate_records(&activated_ids).await;
+                self.restore_private_records(&original_records).await;
+                Err(history_error("workspace_repair", error))
+            }
+        }
+    }
+
+    pub async fn unregister(
+        &self,
+        request: WorkspaceSelectRequest,
+    ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_unregister")?;
+        let _operation = self.operation_lock.lock().await;
+        let records = self
+            .store
+            .private_project_workspace_records(&request.workspace_id)
+            .map_err(|error| history_error("workspace_unregister", error))?;
+        let mut deactivated = Vec::new();
+        for record in &records {
+            if let Err(error) = self
+                .workspace
+                .deactivate_workspace(&record.workspace_id)
+                .await
+            {
+                self.restore_private_records(&deactivated).await;
+                return Err(codex_error("workspace_unregister", error));
+            }
+            deactivated.push(record.clone());
+        }
+        match self.store.unregister_project(&request.workspace_id) {
+            Ok(state) => Ok(state),
+            Err(error) => {
+                self.restore_private_records(&records).await;
+                Err(history_error("workspace_unregister", error))
+            }
+        }
+    }
+
     pub async fn update_lifecycle(
         &self,
         request: WorkspaceUpdateLifecycleRequest,
@@ -669,6 +757,24 @@ impl WorkspaceHistoryService {
                 }
                 Err(history_error(operation, error))
             }
+        }
+    }
+
+    async fn deactivate_records(&self, workspace_ids: &[String]) {
+        for workspace_id in workspace_ids {
+            let _ = self.workspace.deactivate_workspace(workspace_id).await;
+        }
+    }
+
+    async fn restore_private_records(
+        &self,
+        records: &[crate::codex::workspace::AppPrivateWorkspaceRecord],
+    ) {
+        for record in records {
+            let _ = self
+                .workspace
+                .restore_private_workspace(record.clone())
+                .await;
         }
     }
 

@@ -44,6 +44,22 @@ pub async fn workspace_select(
 }
 
 #[tauri::command]
+pub async fn workspace_repair(
+    request: WorkspaceSelectRequest,
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+    service.repair(request).await
+}
+
+#[tauri::command]
+pub async fn workspace_unregister(
+    request: WorkspaceSelectRequest,
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+    service.unregister(request).await
+}
+
+#[tauri::command]
 pub async fn workspace_update_lifecycle(
     request: WorkspaceUpdateLifecycleRequest,
     service: State<'_, WorkspaceHistoryService>,

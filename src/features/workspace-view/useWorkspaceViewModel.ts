@@ -130,6 +130,10 @@ function draftFor(
 
 export type TurnUiState = "idle" | "sending" | "running" | "stopping"
 export type WorkspaceAdapterStatus = "loading" | "ready" | "error"
+export type WorkspaceAction = "cancel" | "repair" | "unregister"
+
+export type WorkspaceActionResult =
+  { readonly ok: true } | { readonly ok: false; readonly errorCode: string }
 
 export interface WorkspaceViewNotice {
   readonly tone: "neutral" | "error"
@@ -161,6 +165,8 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     nativeHydration ? "loading" : "ready",
   )
   const [adapterLoadAttempt, setAdapterLoadAttempt] = useState(0)
+  const [workspaceAction, setWorkspaceAction] =
+    useState<WorkspaceAction | null>(null)
   const [timeline, setTimeline] = useState<readonly WorkspaceTimelineItem[]>([])
   const [history, setHistory] = useState<WorkspaceAdapterState["history"]>({
     mode: "ready",
@@ -791,6 +797,93 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     [adapter, adapterReady, applyAdapterState, selectedWorkspaceId],
   )
 
+  const cancelSelectedWorkspace =
+    useCallback(async (): Promise<WorkspaceActionResult> => {
+      if (
+        !adapterReady ||
+        !selectedWorkspace?.updatedAt ||
+        !adapter?.cancelWorkspace
+      ) {
+        return { ok: false, errorCode: "WORKSPACE-CANCEL-UNAVAILABLE" }
+      }
+      setWorkspaceAction("cancel")
+      try {
+        applyAdapterState(
+          await adapter.cancelWorkspace(
+            selectedWorkspace.id,
+            selectedWorkspace.updatedAt,
+          ),
+        )
+        setNotice(null)
+        return { ok: true }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode:
+            error instanceof Error ? error.message : "WORKSPACE-CANCEL-FAILED",
+        }
+      } finally {
+        setWorkspaceAction(null)
+      }
+    }, [adapter, adapterReady, applyAdapterState, selectedWorkspace])
+
+  const repairSelectedWorkspace =
+    useCallback(async (): Promise<WorkspaceActionResult> => {
+      if (!adapterReady || !selectedWorkspace || !adapter?.repairWorkspace) {
+        return { ok: false, errorCode: "WORKSPACE-REPAIR-UNAVAILABLE" }
+      }
+      setWorkspaceAction("repair")
+      try {
+        applyAdapterState(await adapter.repairWorkspace(selectedWorkspace.id))
+        setNotice(null)
+        return { ok: true }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode:
+            error instanceof Error ? error.message : "WORKSPACE-REPAIR-FAILED",
+        }
+      } finally {
+        setWorkspaceAction(null)
+      }
+    }, [adapter, adapterReady, applyAdapterState, selectedWorkspace])
+
+  const unregisterSelectedWorkspace =
+    useCallback(async (): Promise<WorkspaceActionResult> => {
+      if (
+        !adapterReady ||
+        !selectedWorkspace ||
+        !adapter?.unregisterWorkspace
+      ) {
+        return { ok: false, errorCode: "WORKSPACE-UNREGISTER-UNAVAILABLE" }
+      }
+      const workspaceId = selectedWorkspace.id
+      setWorkspaceAction("unregister")
+      try {
+        const pending = pendingDraftSaves.current.get(workspaceId)
+        if (pending !== undefined && adapter.saveDraft !== undefined) {
+          const timer = draftSaveTimers.current.get(workspaceId)
+          if (timer !== undefined) window.clearTimeout(timer)
+          draftSaveTimers.current.delete(workspaceId)
+          await adapter.saveDraft(workspaceId, pending.text, pending.effort)
+          pendingDraftSaves.current.delete(workspaceId)
+        }
+        applyAdapterState(await adapter.unregisterWorkspace(workspaceId))
+        setNotice(null)
+        return { ok: true }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode:
+            error instanceof Error
+              ? error.message
+              : "WORKSPACE-UNREGISTER-FAILED",
+        }
+      } finally {
+        setWorkspaceAction(null)
+      }
+    }, [adapter, adapterReady, applyAdapterState, selectedWorkspace])
+
   const deleteSelectedWorkspaceHistory = useCallback(async () => {
     if (
       !adapterReady ||
@@ -853,6 +946,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     answerApproval,
     answerDecision,
     captureContext,
+    cancelSelectedWorkspace,
     characterHidden,
     codex,
     deleteSelectedWorkspaceHistory,
@@ -863,6 +957,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     pickAttachments,
     history,
     reducedMotion,
+    repairSelectedWorkspace,
     registerAttachmentPaths,
     removeAttachment,
     removeContext,
@@ -888,5 +983,7 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     timeline: combinedTimeline,
     turnState,
     workspaces,
+    workspaceAction,
+    unregisterSelectedWorkspace,
   }
 }

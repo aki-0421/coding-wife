@@ -45,7 +45,13 @@ export interface WorkspaceRecord {
   readonly lifecycle: WorkspaceLifecycle
   readonly attention?:
     "needs_answer" | "approval_required" | "test_failed" | "high_risk"
-  readonly health?: "ready" | "missing" | "changed" | "unreadable" | "read_only"
+  readonly health?:
+    | "ready"
+    | "missing"
+    | "changed"
+    | "unreadable"
+    | "read_only"
+    | "stale_branch"
   readonly updatedAt?: string
 }
 
@@ -141,6 +147,16 @@ export interface WorkspaceViewAdapter {
   readonly hydrationMode?: "native" | "demo"
   readonly loadState?: () => Promise<WorkspaceAdapterState>
   readonly selectWorkspace?: (
+    workspaceId: string,
+  ) => Promise<WorkspaceAdapterState>
+  readonly cancelWorkspace?: (
+    workspaceId: string,
+    expectedUpdatedAt: string,
+  ) => Promise<WorkspaceAdapterState>
+  readonly repairWorkspace?: (
+    workspaceId: string,
+  ) => Promise<WorkspaceAdapterState>
+  readonly unregisterWorkspace?: (
     workspaceId: string,
   ) => Promise<WorkspaceAdapterState>
   readonly saveDraft?: (

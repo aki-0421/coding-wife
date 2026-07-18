@@ -8,6 +8,52 @@ const en = {
   settings: "Settings",
   appMark: "Coding Wife workspace",
   workspaceActions: "Workspace actions",
+  workspaceHealth: {
+    ready: "Repository ready",
+    missing: "Repository missing",
+    changed: "Repository identity changed",
+    unreadable: "Repository unreadable",
+    read_only: "Repository is read-only",
+    stale_branch: "Branch changed outside the app",
+  },
+  workspaceMenu: {
+    cancel: "Cancel workspace",
+    cancelDescription: "Stop work and keep its history for review.",
+    repair: "Reselect repository…",
+    repairDescription: "Choose the repository again to repair local access.",
+    unregister: "Unregister project…",
+    unregisterDescription: "Hide this project without deleting its history.",
+    runningBlocked: "Unavailable while a turn is running.",
+    cancelTitle: "Cancel this workspace?",
+    cancelBody:
+      "Its app lifecycle changes to Canceled. Source files, the worktree, Git refs, and history are kept.",
+    cancelRunningBody:
+      "The active turn must be stopped first. After the stop is accepted, the workspace lifecycle changes to Canceled.",
+    keepWorkspace: "Go back",
+    confirmCancel: "Cancel workspace",
+    stopAndCancel: "Stop and cancel",
+    unregisterTitle: "Unregister this project?",
+    unregisterBody:
+      "All of this project's workspaces disappear from navigation. Source files, the worktree, Git refs, drafts, and history are not deleted.",
+    continueUnregister: "Continue",
+    unregisterFinalTitle: "Confirm project unregister",
+    unregisterFinalBody:
+      "This removes only the app's active project registration. You can register the repository again later to restore its preserved history.",
+    confirmUnregister: "Unregister project",
+    working: "Working…",
+    error: {
+      generic:
+        "The workspace action could not be completed. No source or Git state was changed.",
+      active:
+        "The project is still running. Stop its active turn before unregistering or repairing it.",
+      unavailable: "This action is not available in the current runtime.",
+      conflict:
+        "The workspace changed in another operation. Refresh it and try again.",
+      rootInUse: "That repository is already registered to another project.",
+      draft:
+        "The latest draft could not be saved, so the project was not unregistered.",
+    },
+  },
   dismiss: "Dismiss",
   switchWorkspace: "Switch workspace",
   repository: "Repository",
@@ -469,6 +515,52 @@ const ja: typeof en = {
   settings: "設定",
   appMark: "Coding Wifeワークスペース",
   workspaceActions: "ワークスペース操作",
+  workspaceHealth: {
+    ready: "リポジトリ準備完了",
+    missing: "リポジトリが見つかりません",
+    changed: "リポジトリの実体が変わりました",
+    unreadable: "リポジトリを読み取れません",
+    read_only: "リポジトリは読み取り専用です",
+    stale_branch: "アプリ外でブランチが変わりました",
+  },
+  workspaceMenu: {
+    cancel: "ワークスペースを中止",
+    cancelDescription: "作業を止め、レビュー用の履歴は保持します。",
+    repair: "リポジトリを再選択…",
+    repairDescription: "リポジトリを選び直し、ローカルアクセスを修復します。",
+    unregister: "プロジェクトの登録を解除…",
+    unregisterDescription: "履歴を削除せず、プロジェクトを非表示にします。",
+    runningBlocked: "ターンの実行中は操作できません。",
+    cancelTitle: "このワークスペースを中止しますか？",
+    cancelBody:
+      "アプリ内の状態を「中止」に変更します。ソースファイル、worktree、Git ref、履歴は保持します。",
+    cancelRunningBody:
+      "先に進行中のターンを停止します。停止が受理された後、ワークスペースの状態を「中止」に変更します。",
+    keepWorkspace: "戻る",
+    confirmCancel: "ワークスペースを中止",
+    stopAndCancel: "停止して中止",
+    unregisterTitle: "このプロジェクトの登録を解除しますか？",
+    unregisterBody:
+      "このプロジェクトの全ワークスペースがナビゲーションから消えます。ソースファイル、worktree、Git ref、下書き、履歴は削除しません。",
+    continueUnregister: "続ける",
+    unregisterFinalTitle: "プロジェクト登録の解除を確認",
+    unregisterFinalBody:
+      "アプリの有効なプロジェクト登録だけを解除します。後で同じリポジトリを再登録すると、保持された履歴を復元できます。",
+    confirmUnregister: "プロジェクト登録を解除",
+    working: "処理中…",
+    error: {
+      generic:
+        "ワークスペース操作を完了できませんでした。ソースやGitの状態は変更していません。",
+      active:
+        "プロジェクトはまだ実行中です。修復や登録解除の前に進行中のターンを停止してください。",
+      unavailable: "現在の実行環境ではこの操作を利用できません。",
+      conflict:
+        "別の操作でワークスペースが更新されました。再読み込みしてからお試しください。",
+      rootInUse: "そのリポジトリは別のプロジェクトに登録済みです。",
+      draft:
+        "最新の下書きを保存できなかったため、プロジェクト登録を解除しませんでした。",
+    },
+  },
   dismiss: "閉じる",
   switchWorkspace: "ワークスペースを切り替える",
   repository: "リポジトリ",

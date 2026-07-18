@@ -29,6 +29,8 @@ export const workspaceHistoryCommands = {
   pickRegister: "workspace_pick_register",
   createSession: "workspace_create_session",
   select: "workspace_select",
+  repair: "workspace_repair",
+  unregister: "workspace_unregister",
   updateLifecycle: "workspace_update_lifecycle",
   saveDraft: "workspace_save_draft",
   saveContextSnapshot: "workspace_save_context_snapshot",
@@ -49,7 +51,7 @@ export type WorkspaceLifecycle =
 export type WorkspaceAttention =
   "needs_answer" | "approval_required" | "test_failed" | "high_risk"
 export type WorkspaceHealth =
-  "ready" | "missing" | "changed" | "unreadable" | "read_only"
+  "ready" | "missing" | "changed" | "unreadable" | "read_only" | "stale_branch"
 export type WorkspaceReasoningEffort = "fast" | "max"
 export type WorkspaceContextSource = "files" | "git_diff" | "terminal_output"
 
@@ -165,6 +167,9 @@ export interface WorkspaceSelectRequest {
   readonly workspaceId: string
 }
 
+export type WorkspaceRepairRequest = WorkspaceSelectRequest
+export type WorkspaceUnregisterRequest = WorkspaceSelectRequest
+
 export interface WorkspaceUpdateLifecycleRequest {
   readonly workspaceId: string
   readonly lifecycle: WorkspaceLifecycle
@@ -236,6 +241,8 @@ export interface WorkspaceHistoryRequestMap {
   workspace_pick_register: undefined
   workspace_create_session: WorkspaceCreateSessionRequest
   workspace_select: WorkspaceSelectRequest
+  workspace_repair: WorkspaceRepairRequest
+  workspace_unregister: WorkspaceUnregisterRequest
   workspace_update_lifecycle: WorkspaceUpdateLifecycleRequest
   workspace_save_draft: WorkspaceSaveDraftRequest
   workspace_save_context_snapshot: WorkspaceSaveContextRequest
@@ -254,6 +261,8 @@ export interface WorkspaceHistoryResponseMap {
   workspace_pick_register: WorkspacePickResponse
   workspace_create_session: WorkspaceStateSnapshot
   workspace_select: WorkspaceStateSnapshot
+  workspace_repair: WorkspaceStateSnapshot
+  workspace_unregister: WorkspaceStateSnapshot
   workspace_update_lifecycle: PersistedWorkspaceSummary
   workspace_save_draft: PersistedWorkspaceDraft
   workspace_save_context_snapshot: PersistedContextSnapshot
@@ -421,6 +430,7 @@ export function parsePersistedWorkspaceSummary(
       "changed",
       "unreadable",
       "read_only",
+      "stale_branch",
     ] as const) ||
     !isTimestamp(value.createdAt) ||
     !isTimestamp(value.updatedAt) ||
@@ -1166,6 +1176,8 @@ export function parseWorkspaceHistoryResponse<
     case workspaceHistoryCommands.list:
     case workspaceHistoryCommands.createSession:
     case workspaceHistoryCommands.select:
+    case workspaceHistoryCommands.repair:
+    case workspaceHistoryCommands.unregister:
     case workspaceHistoryCommands.delete:
       return parseWorkspaceStateSnapshot(
         value,

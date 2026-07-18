@@ -84,6 +84,7 @@ pub enum WorkspaceHealth {
     Changed,
     Unreadable,
     ReadOnly,
+    StaleBranch,
 }
 
 impl WorkspaceHealth {
@@ -94,6 +95,7 @@ impl WorkspaceHealth {
             Self::Changed => "changed",
             Self::Unreadable => "unreadable",
             Self::ReadOnly => "read_only",
+            Self::StaleBranch => "stale_branch",
         }
     }
 }
@@ -108,6 +110,7 @@ impl TryFrom<&str> for WorkspaceHealth {
             "changed" => Ok(Self::Changed),
             "unreadable" => Ok(Self::Unreadable),
             "read_only" => Ok(Self::ReadOnly),
+            "stale_branch" => Ok(Self::StaleBranch),
             _ => Err(()),
         }
     }

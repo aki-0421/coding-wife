@@ -178,6 +178,18 @@ describe("workspace history contract", () => {
     ).toEqual(fixture.state)
     expect(
       parseWorkspaceHistoryResponse(
+        workspaceHistoryCommands.repair,
+        fixture.state,
+      ),
+    ).toEqual(fixture.state)
+    expect(
+      parseWorkspaceHistoryResponse(
+        workspaceHistoryCommands.unregister,
+        fixture.state,
+      ),
+    ).toEqual(fixture.state)
+    expect(
+      parseWorkspaceHistoryResponse(
         workspaceHistoryCommands.updateLifecycle,
         fixture.summary,
       ),
@@ -194,6 +206,15 @@ describe("workspace history contract", () => {
         fixture.timeline,
       ),
     ).toEqual(fixture.timeline)
+  })
+
+  it("accepts stale branch health as a bounded repair state", () => {
+    expect(
+      parsePersistedWorkspaceSummary({
+        ...fixture.summary,
+        health: "stale_branch",
+      }),
+    ).toMatchObject({ health: "stale_branch" })
   })
 
   it("rejects future schemas, snake_case, unknown fields, and cross-workspace state", () => {

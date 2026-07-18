@@ -53,6 +53,35 @@ describe("DemoWorkspaceHistoryTransport", () => {
     })
   })
 
+  it("unregisters a project as metadata without deleting its preserved state", async () => {
+    const transport = new DemoWorkspaceHistoryTransport()
+    const selectedProject = await transport.request(
+      workspaceHistoryCommands.pickRegister,
+      undefined,
+    )
+    const workspaceId = selectedProject.state.activeWorkspaceId
+    if (workspaceId === null || selectedProject.state.draft === null) {
+      throw new Error("demo fixture")
+    }
+    await transport.request(workspaceHistoryCommands.saveDraft, {
+      workspaceId,
+      text: "Preserve this draft",
+      effort: "max",
+      expectedRevision: selectedProject.state.draft.revision,
+    })
+
+    const remaining = await transport.request(
+      workspaceHistoryCommands.unregister,
+      { workspaceId },
+    )
+
+    expect(remaining.workspaces).toHaveLength(3)
+    expect(remaining.activeWorkspaceId).not.toBe(workspaceId)
+    await expect(
+      transport.request(workspaceHistoryCommands.select, { workspaceId }),
+    ).rejects.toMatchObject({ code: "WORKSPACE-NOT-FOUND" })
+  })
+
   it("creates sessions idempotently and records lifecycle events", async () => {
     const transport = new DemoWorkspaceHistoryTransport()
     const initial = await transport.request(
