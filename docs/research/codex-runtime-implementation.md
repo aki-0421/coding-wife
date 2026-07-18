@@ -17,7 +17,7 @@ read_when:
 
 ## 実装上の不変条件
 
-1. active App Server processは1件だけにし、workspace generationを跨ぐeventとpending requestを適用しない。
+1. active App Server processは1件だけにし、turn開始と全mutationをactivation token、workspace、thread、generationへ束縛する。stale response/event/errorをcurrent storeへ適用せず、accepted stale turnはexact旧turnをinterruptして旧workspaceへだけterminalを保存する。
 2. `gpt-5.6-sol`だけを許可し、各turnでmodelと`low`または`max`を明示する。service tierは送らない。
 3. 切断後にuser turnを自動再送しない。interrupt responseはterminal eventとして扱わない。
 4. command approval、file change approval、permissions approvalの3 methodだけを受け付ける。未知request、invalid RUI、未登録dynamic toolはfail closedにしてactive turnをinterruptする。
@@ -30,6 +30,9 @@ read_when:
 11. native RUIが使えない場合のassistant完了文は`result`または`decision_request`のJSON全体だけを受理する。自由文、freeform、approval代替、不正optionは表示せずactive turnをinterruptする。
 12. fallback decisionはnative server request ledgerへ入れず、workspace、generation、source thread/turn、元のreasoning effortへ束縛した専用ledgerで管理する。source turnの正常完了後だけ、opaque decision handleとoption IDだけを含む固定JSONを同じthreadの新しいturnへ送る。invalid optionはcardを残し、同時応答は1件だけを開始し、開始失敗やchild crash後に自動再送しない。
 13. binary discovery、version、schema、identity、capability probeのいずれかが失敗した時点で、以前のbinary/schema cacheとdiagnostic上のversion、hash、fingerprint、capability/account証跡を一括消去し、active childを停止する。次のconnectは必ず新しいdiscoveryとprobeから始める。
+14. public textはfield別に検証する。identifier/aliasはsingle-line、prompt/assistant/tool excerpt/effect/evidenceは正規化済み`\n`と`\t`だけをcontrol例外として許可し、NUL、その他control、secret、private pathを拒否する。RustとTypeScriptはUnicode scalarで同じ上限を数える。
+15. HISTのversioned CODE payloadはlive semantic eventと同じexact projectorで復元する。pending decision/approvalはsupervisor ownership照合成功時だけactionableにし、unknown/invalid payloadはraw/generic行へfallbackしない。
+16. `DecisionContext`はnative RUI、fallback、normalizer、HIST、WebViewを通じてversion、effect、scope、risk、reversibility、recommendation、evidence、uncertaintyを保持する。不正contextを回答可能cardへ近似しない。
 
 ## Binary trustとprobe境界
 
@@ -93,9 +96,9 @@ UI/HISTへ渡すCodex eventは、少なくとも次へ分類する。
 
 attachmentはRustが発行するopaque handleだけをturn requestへ渡す。native picker、drop、pasteは同じvalidatorを使い、active workspace内のregular readable non-symlink、non-executable fileだけを許可する。1件25MiB、10件、合計50MiBの境界をRustで再検証し、imageは`localImage`、他fileは`mention`へRust内で変換する。directory、root外、symlink、実行可能file、権限不足、期限切れhandleは無効itemだけを拒否し、draftと他のvalid itemを保持する。
 
-handleは発行時のworkspace ID、Codex generation、canonical rootのdevice/inode、source fileのdevice/inode/size/SHA-256へ束縛し、TTLは30分とする。pickerが返すpathとdrop/pasteで受け取るpathは同じRust validatorへ渡し、drop/pasteのabsolute pathは入力にだけ使ってresponse、event、logへechoしない。validatorはrootから対象までのsymlink componentを拒否し、`O_NOFOLLOW`で開いたregular fileを読み切って前後metadataとhashを確定する。PNG、JPEG、GIF、WebPのmagicに一致するraster imageだけを`localImage`、それ以外を`mention`へ投影する。
+handleは発行時のworkspace ID、Codex generation、canonical rootのdevice/inode、source fileのdevice/inode/size/SHA-256へ束縛し、TTLは30分とする。pickerが返すpathとdrop/pasteで受け取るpathは同じRust validatorへ渡し、drop/pasteのabsolute pathは入力にだけ使ってresponse、event、logへechoしない。validatorはroot directory descriptorから各componentを`openat`/no-followで開き、最終regular file descriptorを読み切って前後metadataとhashを確定する。PNG、JPEG、GIF、WebPのmagicに一致するraster imageだけを`localImage`、それ以外を`mention`へ投影する。
 
-turn送信直前にroot identity、active generation、TTL、件数、合計size、source metadata/hashを全件再照合する。1件でもhandleがstaleならApp Server requestを開始せず、draftと全attachment chipを保持する。検証済みhandleは`turn/start` responseが受理された後だけconsumeし、validation/transport failureでは再利用可能なまま保持する。validationとApp Server requestの間で自動copyやworkspace mutationは行わない。
+turn送信直前にroot identity、active generation、TTL、件数、合計size、source metadata/hashをstable descriptorで全件再照合する。検証済みdescriptorからowner-only app-private staging directory（0700）のimmutable snapshot file（0600）へcopyし、fileとdirectoryをfsyncしてsnapshot descriptorのmetadata/hashを再検証する。App Serverにはsnapshot pathだけを渡し、source pathを再openさせない。1件でもsnapshot化に失敗すればApp Server requestを開始せずdraftと全attachment chipを保持する。accepted response、開始失敗、terminal、interrupt/crash、TTL expiryの各境界でsnapshotを削除し、WebView/public event/logへsource/snapshot pathを出さない。
 
 Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpathをturn payloadへ組み立てない。未実装の`terminal_output`を成功表示へfallbackしない。
 
@@ -105,13 +108,13 @@ Contextは既存のnative snapshot IDだけを渡し、WebViewが本文やpath�
 
 1. native compositionを起動し、diagnostic→connect→thread/start→turn/start response→stream→terminalの順序を確認する。
 2. turn/start拒否ではdraft/attachmentが残り、受理response後だけclear通知が1回発生することを確認する。
-3. workspace切替とgeneration更新の直後に旧eventを遅延送信し、旧workspaceへだけ永続化され現在timelineへ出ないことを確認する。
-4. assistant、tool、plan、file、decision、approval、error、completionをsemantic projectionし、reload後もsequence順で復元する。
+3. workspace切替とgeneration更新の直後に旧`turn/start` success/errorと旧eventを遅延送信し、current storeを変更せず、accepted旧turnをexact interruptし、旧workspaceへだけterminalを永続化する。二連続切替でもactive native turnが最大1件であることを確認する。
+4. assistant、tool、plan、file、diff、decision、approval、error、completionをversioned semantic projectionし、reload後もstable ID・sequence順・multiline text・DecisionContext付きでexactに復元する。pending actionはownership照合時だけ操作可能にする。
 5. approval/native input/fallbackを同時二重応答し、wire requestが1件だけであること、unknown requestが許可されないことを確認する。
 6. Stop開始が1秒以内、ack boundaryが5秒以内で、ackだけではterminalにならないことをfake clockで確認する。
 7. child crash後に受信済みevent、draft、Interruptedが残り、turn/startが自動再送されないことを確認する。
 8. Sol、low、maxのいずれかをmodel/list fixtureから欠落させ、Sendと対応表示がfail closedになることを確認する。
-9. attachmentのroot外、symlink、directory、executable、permission、size/count/total、stale handleをRust integrationで拒否し、有効なimage/fileだけがlocalImage/mentionになることを確認する。
+9. attachmentのroot外、symlink、directory、executable、permission、size/count/total、stale handleをRust integrationで拒否し、有効なimage/fileだけがapp-private snapshotのlocalImage/mentionになることを確認する。検証後にleafとancestorを差し替えるfake App Server raceでexact validated bytesだけを観測し、accepted/failed/terminal/expiry cleanupと0700/0600を確認する。
 10. agent-browserで1470/960/480 CSS px、200% zoom、ja/en、keyboard、reduced motion、scroll lock、decision回答、Stopを実操作する。
 
 実Codexを使う通常gateは既存の読み取り専用diagnostic smokeだけに限定する。user repositoryでthread、turn、review、attachmentを作らず、実行系E2Eはfake App Serverと`/tmp` repositoryだけで行う。

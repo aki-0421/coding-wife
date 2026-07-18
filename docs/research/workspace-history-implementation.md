@@ -21,7 +21,7 @@ read_when:
 2. project登録はnative folder picker、Git preflight、DB transaction、Codex supervisor登録、active selectionの順に行う。後段が失敗した場合はDBとsupervisorをrollbackし、片側だけに登録を残さない。
 3. `.git` markerと`HEAD`はregular non-symlink fileだけを許可する。current userまたはroot所有かつowner-writableで、group/world-writableなmetadataを拒否する。linked worktreeの外部gitdirは同じ検査を通す。
 4. 起動復元では保存済みidentityを再検証する。repositoryの消失、identity変更、権限不足をそれぞれ`missing`、`changed`、`unreadable`として残し、履歴を削除したり自動実行したりしない。
-5. eventはworkspaceごとの単調増加sequenceで追記し、同じevent IDの再送は冪等に扱う。既存eventを訂正目的で更新しない。
+5. eventはworkspaceごとの単調増加sequenceで追記し、同じevent IDの再送は冪等に扱う。CODE eventはexact versioned semantic payloadを保存し、live/reload共通projectorでstable ID・sequenceを保つ。unknown/invalid payloadをgeneric history rowへ近似しない。既存eventを訂正目的で更新しない。
 6. draftはworkspace単位かつrevision付きで保存する。WebView adapterは同じworkspaceへの書き込みを直列化し、revision conflict時だけ最新値を再取得して1回再試行する。
 7. 保存前にsecret、credential、private rootをredactする。raw reasoning、raw protocol payload、生成音声、support prompt/responseをschemaへ追加しない。
 8. event payloadは256 KiB、context snapshotは1 MiB、context保持数はworkspaceごとに最新10件、timeline pageは最大200件、workspace一覧は最大200件とする。上限を緩める場合はSQLite、IPC、UIの負荷試験を先に追加する。
@@ -42,6 +42,7 @@ read_when:
 | `src/lib/contracts/workspace-history.ts` | response/errorのexact-key parserとrequest/response map |
 | `src/features/workspace-persistence/transport.ts` | Tauri invoke envelopeとcontract boundary error |
 | `src/features/workspace-persistence/adapter.ts` | persisted stateのUI projection、draft queue、context、二段階削除 |
+| `src/features/workspace-persistence/codex-event-projector.ts` | versioned HIST CODE payloadからsemantic timelineへのexact fail-closed再構築 |
 | `src/features/codex/workspace-session-adapter.ts` | Codex diagnostic/thread/turn/eventと履歴adapterを通常S-002へcompositionし、送信可否を導出 |
 | `src/features/codex/event-projection.ts` | generationで分離されたCodexEventをsemantic timeline/HIST eventへfail-closed投影 |
 | `src/features/workspace-persistence/demo-transport.ts` | ブラウザー専用の決定的demo。native成功や再起動永続化を偽装しない |

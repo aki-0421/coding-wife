@@ -78,7 +78,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `CODE-F-058` | 利用者はstreaming進捗を構造化eventで確認できる | plan、assistant text、tool start/result、file change、error、decision、completionを種類とtimestamp付きで到着順に表示する | Approved | 非該当 |
+| `CODE-F-058` | 利用者はstreaming進捗を構造化eventで確認できる | plan、assistant text、tool start/result、file change、diff、error、decision、approval、completionをversion付きpayloadとしてsequence順に表示・保存し、再起動後も同じsemantic card、stable ID、順序へexactに再構築する。unknown versionまたはinvalid payloadはgeneric成功表示へ落とさずUnsupportedとしてfail closedにする | Approved | 非該当 |
 | `CODE-F-059` | tool実行はread-only eventとして表示される | command summaryをBash/tool rowとcode chipで表示し、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
 | `CODE-F-060` | 利用者は長いtool eventを展開・copyできる | 120文字超を一行ellipsisにし、keyboardで全文展開とcopyへ到達し、copy内容が表示全文と一致する | Approved | 非該当 |
 | `CODE-F-061` | scroll中の利用者を自動で最下部へ戻さない | 利用者がbottomから48px超上へ移動中にeventが届いてもscroll位置を維持し、「最新へ」を表示する | Approved | 非該当 |
@@ -88,7 +88,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `CODE-F-063` | 利用者は構造化decisionへ回答できる | question、why now、options、effect/scope、risk、reversibility、recommendation/evidence、uncertaintyを一つのkeyboard-operable cardに表示する | Approved | 非該当 |
+| `CODE-F-063` | 利用者は構造化decisionへ回答できる | native user inputとfallback decisionの双方がexact versioned `DecisionContext`としてquestion、why now、options、effect/scope、risk、reversibility、recommendation/evidence、uncertaintyを一つのkeyboard-operable cardに表示・保存する。unknown/invalid contextは回答可能にせず安全に停止する | Approved | 非該当 |
 | `CODE-F-064` | 利用者は既定選択肢以外を入力できる | Otherを選ぶと1〜2,000文字の入力欄が開き、送信またはcancelまでcardと入力を保持する | Approved | 非該当 |
 | `CODE-F-065` | 利用者はdecisionを保留またはturnを中断できる | Holdは回答を送らずwaiting状態を維持し、Interruptは確認後にturn interruptを要求する | Approved | 非該当 |
 | `CODE-F-066` | 利用者はapproval対象を確認して許可・拒否できる | `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/permissions/requestApproval`だけをoperation、scope、対象path/host、risk、可逆性、推奨付きcardへ正規化し、Approve once、Reject、Stopを元request IDへ1回だけ返す。未知methodは許可せずBlockedにする | Approved | 非該当 |
@@ -99,25 +99,25 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `CODE-F-069` | 利用者はfile/imageを添付できる | picker、drag/drop、pasteからworkspace root内の合計10件まで追加し、各25MiB以下、合計50MiB以下を送信前に表示する。RustはimageをApp Serverの`localImage`、その他のregular fileを`mention`へ変換し、absolute pathをWebViewへ返さない | Approved | 非該当 |
+| `CODE-F-069` | 利用者はfile/imageを添付できる | picker、drag/drop、pasteからworkspace root内の合計10件まで追加し、各25MiB以下、合計50MiB以下を送信前に表示する。Rustはstable root descriptorから検証済みbytesをowner-only app-private snapshotへ複製し、同じopen descriptorでfsync/hashを再検証したimmutable copyだけをimage=`localImage`、その他=`mention`としてApp Serverへ渡す。source/snapshot absolute pathはWebView、event、logへ返さない | Approved | 非該当 |
 | `CODE-F-070` | アプリは許可外attachmentを拒否する | directory、symlink、実行可能file、25MiB超、読取権限なしを送信せず、他の有効attachmentを維持する | Approved | 非該当 |
 | `CODE-F-071` | 利用者はread-only contextをturnへ付与できる | Files & folders、Git diff、Terminal output snapshotを選択し、capture時刻、source、byte数を送信前に確認できる | Approved | 非該当 |
 | `CODE-F-072` | context menuはcomposerでclipされない | Dropdown/Popoverがportalで表示され、1470×836と960×640で全項目がviewport内またはscrollで操作できる | Approved | 非該当 |
 | `CODE-F-073` | 利用者は実行中turnを停止できる | Stop後1秒以内にinterrupt requestを送信し、ackまたは5秒timeoutでStopped/Errorを表示して新規turnを二重開始しない | Approved | 非該当 |
 | `CODE-F-074` | process crash後にturnを自動再送しない | child終了時にturnをInterruptedとし、draftと受信済みeventを維持してReconnect/New turnを表示する | Approved | 非該当 |
 | `CODE-F-075` | loginまたはSol利用不可を区別する | unauthenticated、model unavailable、protocol unsupportedを別error codeで表示し、auth fileやtoken内容を読まない | Approved | 非該当 |
-| `CODE-F-076` | workspace切替時に旧turnを混在させない | 切替後に遅延到着した旧workspace eventを旧timelineへ保存し、新workspace timelineとLive2D stateへ表示しない | Approved | 非該当 |
+| `CODE-F-076` | workspace切替時に旧turnを混在させない | turn開始と全mutationをactivation token、workspace、thread、generationへ束縛する。切替後に遅延到着した旧workspace event/errorを旧timelineへだけ保存し、新workspace timeline、connection、Live2D stateへ表示しない。stale `turn/start`がacceptedならexact旧turnをinterruptし、そのterminalだけを旧workspaceへ保存する | Approved | 非該当 |
 
 ## 入力項目要件
 
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
 |---|---|---|---|---|---|
-| Composer | prompt | workspace draft | 条件付き | 0〜32,000 Unicode scalar、attachment/contextがなければ1文字以上 | draft保持、超過数表示 |
+| Composer | prompt | workspace draft | 条件付き | 正規化済み改行・tabを含む0〜32,000 Unicode scalar、NUL/その他control不可。attachment/contextがなければtrim後1文字以上 | draft保持、共通scalar countで超過数表示 |
 | Composer | attachment | なし | 任意 | 10件、各25MiB、合計50MiB、regular readable file | 無効itemだけ拒否し他を保持 |
 | Composer | context | なし | 任意 | 10件、各1MiB text snapshot、sourceとtimestamp必須 | 無効snapshotを送信しない |
 | Composer | effort | Fast（`low`） | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | 対応値がなければSendを無効にし診断理由を表示 |
 | Decision | selected option | なし | 必須 | schema内optionまたはOther | card保持、回答未送信 |
-| Decision | Other text | 空 | 条件付き | trim後1〜2,000文字 | 入力保持、送信無効 |
+| Decision | Other text | 空 | 条件付き | trim後1〜2,000 Unicode scalar、NUL/その他control不可 | 入力保持、共通scalar countで送信無効 |
 
 ## デスクトップ固有要件
 

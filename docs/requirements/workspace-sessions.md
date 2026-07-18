@@ -90,7 +90,7 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | `WORK-F-058` | アプリは一度に一つのactive executionだけを許可する | 別workspaceでSendした時に既存turnが実行中なら「既存を停止して切替」「戻る」を表示し、同時に二つのCodex turnを開始しない | Approved | 非該当 |
-| `WORK-F-059` | workspace切替はview stateとaudioを分離する | 切替時に旧workspaceの音声を停止し、新workspace固有のdraftとscroll位置を復元し、旧音声を新workspaceで再生しない | Approved | 非該当 |
+| `WORK-F-059` | workspace切替はview stateとaudioを分離する | 切替時に旧workspaceの音声を停止し、新workspace固有のdraftとtimeline anchor ID/sequence/offsetを復元し、anchor消失時だけ最寄りsequenceへ補正する。旧workspaceのevent/error/音声を新workspaceで表示・再生しない | Approved | 非該当 |
 | `WORK-F-060` | アプリはworkspace stateを再起動後に復元する | 20件のworkspace、group、active selection、draft、last summaryがapp再起動後に一致する | Approved | 非該当 |
 | `WORK-F-061` | アプリは外部branch変更を検出する | active repositoryのHEADが外部で変わった場合、次のSendまたはwindow focus後1秒以内にstale warningを表示し、再preflightまでturnを開始しない | Approved | 非該当 |
 | `WORK-F-062` | 消失repositoryは復旧可能なerrorになる | 登録後にfolderが移動・削除された場合、workspace履歴を残してMissing表示にし、再選択または登録解除を提示する | Approved | 非該当 |

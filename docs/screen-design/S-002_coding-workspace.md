@@ -103,7 +103,7 @@ status: "Approved"
 
 ### Chat timeline
 
-eventは受信順ではなくworkspace内のvalidated `sequence`順に表示する。表示型は次のallowlistに限定し、未知typeは生payloadではなく`未対応のイベント`、event ID、診断linkにする。
+eventはworkspace内のvalidated `sequence`順に表示する。live/HISTは共通のversioned projectorでstable IDとsemantic cardを復元する。pending actionはsupervisorが同じworkspace/thread/generationを所有する時だけ操作可能にする。unknown/invalid payloadは生値やgeneric成功行へ落とさず`未対応のイベント`、event ID、診断linkにする。
 
 | event kind | compact表示 | 展開表示 | 主要action |
 |---|---|---|---|
@@ -131,13 +131,13 @@ timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted 
 | attachment | paperclip。native pickerでworkspace root内の許可fileを選択 | turn開始中、permission不足 |
 | Context | `Files & folders` / `Git diff` / `Terminal output`のread-only snapshotを選ぶpopover。portalで描画 | snapshot取得または検証不可 |
 | model | `GPT-5.6 Sol`固定label。picker chevronを出さない | 常時read-only |
-| effort | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけをselect。modelやservice tierは変更しない | 対応値未確認・未対応時は前回valid値を表示してSend不可 |
+| effort | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけをselect。unsupported optionは理由付きでdisabledにし、最後のvalid値を保持する。modelやservice tierは変更しない | 対応値未確認、選択中値未対応、valid optionなしではSend不可 |
 | Send | primary icon button、accessible label `Send / 送信` | instruction条件不成立 |
 | Stop | running時にSend位置へ表示。明示clickだけ | turn非実行時 |
 
 attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、Context tabのproject/character編集とは別の送信時参照として扱う。
 
-送信時はworkspace ID、draft hash、context versions、Git fingerprint、effort、attachment handlesをRustで再検証する。二重clickとkey repeatは同じidempotency keyに集約し、turnは1件だけ作る。
+送信時はworkspace、draft hash、context version、Git fingerprint、effort、attachmentをRustで再検証する。sourceはstable root dirfdからno-followで開き、descriptorから0700/0600のapp-private snapshotへcopy、fsync、hash再検証する。App Serverへはsnapshotだけを渡し、accepted/failed/terminal/expiryで削除する。二重操作は同じidempotency keyへ集約する。
 
 ### 構造化decision
 
@@ -150,6 +150,8 @@ attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level 
 | Interrupt | current turnとsupport taskを停止し、完了済みcheckpointと未完了workを分ける |
 | Approve | 既知のApp Server approval request ID、具体的operation、scope、期限を示した場合だけ表示。包括承認や未知methodの許可を作らない |
 | Answer | 1回だけ送信し、answer eventと選択時fingerprintを履歴化する |
+
+native/fallbackのdecisionは共通のexact versioned `DecisionContext`を使う。`effect`、`scope`、`risk`、`reversibility`、`recommendation`、bounded evidence、`uncertainty`をsafe public textだけで構成し、unknown field/version、NUL/control、secret、private pathを含むcontextはcardをactionableにせずturnを安全に停止する。再起動後も同じcontextを復元する。
 
 decisionはtimeline内の強いoutline surfaceとして表示し、必要時だけ同じDOM内容をportal overlayでも提示する。Live2Dの表情、音声、色、animationで回答を急かさない。背景のSendは無効にするが、timeline、Context、Commit、Settingsのread-only閲覧は許可する。
 
@@ -281,7 +283,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | データ | 正本・保存先 | 保存契機 | 復元契機 | 破棄条件 | 失敗時 |
 |---|---|---|---|---|---|
 | thread/turn/work unit | Codex + Rust SQLite mapping | validated lifecycle event | route return/restart | history明示削除 | Interrupted/read-only |
-| normalized event | append-only SQLite + hash | schema/redaction合格後 | sequence順query | workspace history明示削除 | ingestion pause、raw event非保存 |
+| normalized event | append-only SQLite + hash | versioned semantic schema/redaction合格後 | exact projectorでstable ID・sequence順にassistant/tool/file/diff/plan/completion/error/decision/approvalを復元 | workspace history明示削除 | unknown/invalidはUnsupportedへ隔離、raw event非保存 |
 | draft/attachment handle/effort | Rust SQLite | debounce、valid変更、route leave | workspace選択 | send成功または明示clear | UI入力保持とretry |
 | project/character context | Rust SQLite versioned row | section save transaction | Context/turn開始 | project解除/履歴削除契約 | expected version conflict |
 | timeline anchor/tab | Rust SQLite | scroll settle/tab移動 | route return | Reset UI state | nearest sequence |

@@ -78,7 +78,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `HIST-F-045` | appは起動時にactive workspaceを再構築する | native読込中はdemo rowを表示せずskeletonだけを表示しmutationを無効にする。20 workspace・各1,000 eventのfixtureはshell表示後に非同期復元し、成功時だけactive selection、last summary、draft、last checkpointへ置換し、失敗時は回復errorを表示してmutationを無効のままにする | Approved | 非該当 |
+| `HIST-F-045` | appは起動時にactive workspaceを再構築する | native読込中はdemo rowを表示せずskeletonだけを表示しmutationを無効にする。20 workspace・各1,000 eventのfixtureはshell表示後に非同期復元し、成功時だけactive selection、last summary、draft、last checkpointとversioned CODE semantic event（assistant/tool/file/diff/plan/completion/error/decision/approval）をstable ID・sequence順でexactに再構築する。pending actionはsupervisorが同じworkspace/thread/generationのownershipを確認した時だけactionableにし、invalid/unknown payloadはUnsupportedとしてfail closedにする | Approved | 非該当 |
 | `HIST-F-046` | crash中のturnをInterruptedにする | startedでterminal eventのないturnを再起動時にInterruptedとして表示し、自動再送・自動commitを行わない | Approved | 非該当 |
 | `HIST-F-047` | 利用者はtimelineを種類と期間でfilterできる | All/Decisions/Errors/Verification/CheckpointsとUTC期間を選び、0件時にfilter解除とempty説明を表示する | Approved | 非該当 |
 | `HIST-F-048` | timelineはpage単位で読み込む | 1page最大200 eventを取得し、100,000 eventのworkspaceで初回query p95 200ms以下、次page p95 200ms以下になる | Approved | 非該当 |
