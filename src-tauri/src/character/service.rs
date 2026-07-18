@@ -13,7 +13,8 @@ use tokio::sync::Mutex;
 
 use super::error::{character_error, CharacterResult};
 use super::manifest::{
-    is_sha256, CharacterPackManifest, BUILTIN_HIYORI_PACK_ID, CHARACTER_SCHEMA_VERSION,
+    is_sha256, is_valid_cue_id, CharacterPackManifest, BUILTIN_HIYORI_PACK_ID,
+    CHARACTER_SCHEMA_VERSION,
 };
 use super::semantic_mapping::{
     SemanticAssignmentsV1, SemanticCueInventory, SemanticMappingStatus, SemanticMappingV1,
@@ -1229,7 +1230,7 @@ fn builtin_cue_inventory(value: &serde_json::Value) -> SemanticCueInventory {
         .filter_map(serde_json::Value::as_array)
         .flatten()
         .filter_map(|cue| cue.get("cueId").and_then(serde_json::Value::as_str))
-        .filter(|cue_id| valid_cue_id(cue_id))
+        .filter(|cue_id| is_valid_cue_id(cue_id))
         .map(str::to_owned)
         .collect();
     let expressions = inventory
@@ -1238,21 +1239,13 @@ fn builtin_cue_inventory(value: &serde_json::Value) -> SemanticCueInventory {
         .into_iter()
         .flatten()
         .filter_map(|cue| cue.get("cueId").and_then(serde_json::Value::as_str))
-        .filter(|cue_id| valid_cue_id(cue_id))
+        .filter(|cue_id| is_valid_cue_id(cue_id))
         .map(str::to_owned)
         .collect();
     SemanticCueInventory {
         motions,
         expressions,
     }
-}
-
-fn valid_cue_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.chars().count() <= 80
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"-_[]@".contains(&byte))
 }
 
 fn expected_manifest_asset_mime<'a>(
@@ -1412,6 +1405,39 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources/characters/builtin-hiyori/runtime")
             .join("hiyori_pro_t11.model3.json")
+    }
+
+    fn write_invalid_motion_source(root: &Path) -> PathBuf {
+        let mut motions = serde_json::Map::new();
+        motions.insert(
+            "https://example.test/Tap".to_owned(),
+            serde_json::json!([{ "File": "tap.motion3.json" }]),
+        );
+        fs::write(
+            root.join("test.model3.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "Version": 3,
+                "FileReferences": {
+                    "Moc": "test.moc3",
+                    "Textures": ["texture.png"],
+                    "Motions": Value::Object(motions),
+                },
+            }))
+            .expect("invalid motion model json"),
+        )
+        .expect("invalid motion model");
+        fs::write(root.join("test.moc3"), b"MOC3\x03\x00\x00\x00payload").expect("moc");
+        fs::write(root.join("tap.motion3.json"), b"{}").expect("motion");
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, 1, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("png header");
+            writer.write_image_data(&[255, 0, 0, 255]).expect("png");
+        }
+        fs::write(root.join("texture.png"), png).expect("texture");
+        root.join("test.model3.json")
     }
 
     fn asset_request(
@@ -2200,6 +2226,42 @@ mod tests {
         );
         let library = selected_picker
             .library(CharacterLibraryRequest { workspace_id })
+            .await
+            .expect("unchanged library");
+        assert_eq!(library.packs.len(), 1);
+        assert_eq!(library.selected_pack_id, BUILTIN_HIYORI_PACK_ID);
+    }
+
+    #[tokio::test]
+    async fn invalid_picker_cue_leaves_no_preview_session_or_quarantine() {
+        let app_data = TestDirectory::new();
+        let source = TestDirectory::new();
+        let selected = write_invalid_motion_source(source.path());
+        let service = CharacterService::new(
+            CharacterStorage::open(app_data.path()).expect("character storage"),
+            resolve_builtin_directory(Path::new("/missing")),
+            Arc::new(FixedPicker(Some(selected))),
+        );
+
+        let error = service
+            .pick_import(CharacterLibraryRequest {
+                workspace_id: "workspace-invalid-cue".to_owned(),
+            })
+            .await
+            .expect_err("invalid cue must fail before preview");
+
+        assert_eq!(error.code, "CHARACTER-MOTION-SCHEMA");
+        assert!(service.pending.lock().await.is_empty());
+        assert_eq!(
+            fs::read_dir(app_data.path().join("characters/quarantine"))
+                .expect("quarantine directory")
+                .count(),
+            0
+        );
+        let library = service
+            .library(CharacterLibraryRequest {
+                workspace_id: "workspace-invalid-cue".to_owned(),
+            })
             .await
             .expect("unchanged library");
         assert_eq!(library.packs.len(), 1);

@@ -1,4 +1,5 @@
 import type { CharacterPackManifest } from "@/features/character/model"
+import { isCharacterCueId } from "@/features/character/cue-id"
 import {
   expectedCharacterResourceContentType,
   parseCharacterPackManifest,
@@ -197,7 +198,6 @@ const customPackIdPattern = new RegExp(
 )
 const workspacePattern = /^[A-Za-z0-9_:][A-Za-z0-9_:-]{0,159}$/
 const projectPattern = /^[A-Za-z0-9_-]{1,160}$/
-const cueIdPattern = /^[A-Za-z0-9_@[\]-]{1,80}$/
 const allowedDiagnostics = new Set([
   "CHARACTER-PACK-QUARANTINED",
   "CHARACTER-SELECTION-FALLBACK",
@@ -281,7 +281,7 @@ function parseCueSelection(value: unknown): SemanticCueSelection {
     (value.kind === "motion" || value.kind === "expression") &&
     exact(value, ["kind", "cueId"]) &&
     typeof value.cueId === "string" &&
-    cueIdPattern.test(value.cueId)
+    isCharacterCueId(value.cueId)
   ) {
     return { kind: value.kind, cueId: value.cueId }
   }
@@ -545,12 +545,8 @@ function parseCharacterPackView(value: unknown): CharacterPackView {
     !exact(value.cueInventory, ["motions", "expressions"]) ||
     !Array.isArray(value.cueInventory.motions) ||
     !Array.isArray(value.cueInventory.expressions) ||
-    !value.cueInventory.motions.every(
-      (cue) => typeof cue === "string" && cueIdPattern.test(cue),
-    ) ||
-    !value.cueInventory.expressions.every(
-      (cue) => typeof cue === "string" && cueIdPattern.test(cue),
-    ) ||
+    !value.cueInventory.motions.every((cue) => isCharacterCueId(cue)) ||
+    !value.cueInventory.expressions.every((cue) => isCharacterCueId(cue)) ||
     new Set(value.cueInventory.motions).size !==
       value.cueInventory.motions.length ||
     new Set(value.cueInventory.expressions).size !==

@@ -10,6 +10,7 @@ pub const BUILTIN_HIYORI_PACK_ID: &str = "builtin:hiyori_pro";
 pub const CHARACTER_TRUSTED_FRAME_ASSET_ID: &str = "__coding-wife/trusted-frame.png";
 pub const MAX_TRUSTED_FRAME_BYTES: u64 = 2 * 1024 * 1024;
 pub const MAX_TRUSTED_FRAME_DIMENSION: u32 = 2048;
+pub const MAX_CUE_ID_BYTES: usize = 80;
 const MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_TEXTURE_DIMENSION: u32 = 8192;
 const MAX_MODEL_ITEMS: u32 = 1_000_000;
@@ -295,11 +296,11 @@ fn valid_motion_inventory(manifest: &CharacterPackManifest) -> bool {
         .collect::<HashSet<_>>();
     let mut cues = HashSet::new();
     for (group, group_cues) in &manifest.inventory.motion_groups {
-        if group.trim().is_empty() || group.chars().count() > 80 {
+        if motion_cue_id(group, 0).is_none() {
             return false;
         }
         for (index, cue) in group_cues.iter().enumerate() {
-            if cue.cue_id != format!("{group}[{index}]")
+            if motion_cue_id(group, index).as_deref() != Some(cue.cue_id.as_str())
                 || !motion_assets.contains(cue.asset_id.as_str())
                 || !cues.insert(cue.asset_id.as_str())
             {
@@ -323,16 +324,31 @@ fn valid_expression_inventory(manifest: &CharacterPackManifest) -> bool {
     let mut cue_ids = HashSet::new();
     let mut asset_ids = HashSet::new();
     manifest.inventory.expression_cues.iter().all(|cue| {
-        !cue.cue_id.trim().is_empty()
-            && cue.cue_id.chars().count() <= 80
-            && cue
-                .cue_id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"-_[]".contains(&byte))
+        is_valid_cue_id(&cue.cue_id)
             && expression_assets.contains(cue.asset_id.as_str())
             && cue_ids.insert(cue.cue_id.as_str())
             && asset_ids.insert(cue.asset_id.as_str())
     }) && asset_ids.len() == expression_assets.len()
+}
+
+pub(crate) fn is_valid_cue_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_CUE_ID_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_.@[]".contains(&byte))
+}
+
+pub(crate) fn motion_cue_id(group: &str, index: usize) -> Option<String> {
+    if group.is_empty()
+        || !group
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_.@".contains(&byte))
+    {
+        return None;
+    }
+    let cue_id = format!("{group}[{index}]");
+    is_valid_cue_id(&cue_id).then_some(cue_id)
 }
 
 pub fn is_safe_asset_id(asset_id: &str) -> bool {
@@ -386,5 +402,21 @@ mod tests {
             assert!(!is_safe_asset_id(unsafe_id), "{unsafe_id}");
         }
         assert!(is_safe_asset_id("runtime/model.model3.json"));
+    }
+
+    #[test]
+    fn cue_ids_share_the_ascii_allowlist_and_completed_length_boundary() {
+        assert_eq!(motion_cue_id("Tap.Body", 0).as_deref(), Some("Tap.Body[0]"));
+        assert_eq!(motion_cue_id("Tap@Body", 0).as_deref(), Some("Tap@Body[0]"));
+        assert!(motion_cue_id("https://example.test/Tap", 0).is_none());
+
+        let cue_79 = format!("{}[0]", "a".repeat(76));
+        let cue_80 = format!("{}[0]", "a".repeat(77));
+        assert_eq!(cue_79.len(), 79);
+        assert_eq!(cue_80.len(), 80);
+        assert!(is_valid_cue_id(&cue_79));
+        assert!(is_valid_cue_id(&cue_80));
+        assert!(motion_cue_id(&"a".repeat(77), 0).is_some());
+        assert!(motion_cue_id(&"a".repeat(78), 0).is_none());
     }
 }

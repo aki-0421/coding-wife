@@ -84,6 +84,40 @@ describe("character library contract", () => {
     ).toThrow(CharacterLibraryContractError)
   })
 
+  it("accepts dotted cue IDs through 80 ASCII bytes and rejects URLs or overflow", () => {
+    const cue79 = `${"a".repeat(76)}[0]`
+    const cue80 = `${"a".repeat(77)}[0]`
+    const cue81 = `${"a".repeat(78)}[0]`
+    const requestWithCue = (cueId: string) => ({
+      ...fixture.semanticMappingSaveRequest,
+      assignments: {
+        ...fixture.semanticMappingSaveRequest.assignments,
+        success: { kind: "motion", cueId },
+      },
+    })
+
+    expect(
+      parseCharacterSemanticMappingSaveRequest(requestWithCue("Tap.Body[0]"))
+        .assignments.success,
+    ).toEqual({ kind: "motion", cueId: "Tap.Body[0]" })
+    expect(
+      parseCharacterSemanticMappingSaveRequest(requestWithCue(cue79))
+        .assignments.success,
+    ).toEqual({ kind: "motion", cueId: cue79 })
+    expect(
+      parseCharacterSemanticMappingSaveRequest(requestWithCue(cue80))
+        .assignments.success,
+    ).toEqual({ kind: "motion", cueId: cue80 })
+    expect(() =>
+      parseCharacterSemanticMappingSaveRequest(
+        requestWithCue("https://example.test/Tap.motion3.json"),
+      ),
+    ).toThrow(CharacterLibraryContractError)
+    expect(() =>
+      parseCharacterSemanticMappingSaveRequest(requestWithCue(cue81)),
+    ).toThrow(CharacterLibraryContractError)
+  })
+
   it("rejects unknown fields, snake case, future schemas, and private paths", () => {
     expect(() =>
       parseCharacterLibrarySnapshot({

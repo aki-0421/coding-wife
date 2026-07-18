@@ -6,6 +6,10 @@ import {
   type CharacterPackRef,
   type CharacterTrustedFrame,
 } from "@/features/character/model"
+import {
+  characterMotionCueId,
+  isCharacterCueId,
+} from "@/features/character/cue-id"
 
 const MAX_FILES = 128
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024
@@ -283,14 +287,16 @@ function parseMotionGroups(
   > = {}
   const referenced = new Set<string>()
   for (const [group, rawCues] of Object.entries(value)) {
-    if (!isNonEmptyString(group, 80) || !Array.isArray(rawCues)) {
+    if (characterMotionCueId(group, 0) === null || !Array.isArray(rawCues)) {
       return violation("Pack motion groups are invalid")
     }
     parsed[group] = rawCues.map((rawCue, index) => {
+      const expectedCueId = characterMotionCueId(group, index)
       if (
         !isRecord(rawCue) ||
         !hasExactKeys(rawCue, ["cueId", "assetId"]) ||
-        rawCue.cueId !== `${group}[${String(index)}]` ||
+        expectedCueId === null ||
+        rawCue.cueId !== expectedCueId ||
         typeof rawCue.assetId !== "string" ||
         filesByAssetId.get(rawCue.assetId)?.role !== "motion" ||
         referenced.has(rawCue.assetId)
@@ -322,8 +328,7 @@ function parseExpressionCues(
     if (
       !isRecord(rawCue) ||
       !hasExactKeys(rawCue, ["cueId", "assetId"]) ||
-      !isNonEmptyString(rawCue.cueId, 80) ||
-      !/^[A-Za-z0-9_[\]-]+$/.test(rawCue.cueId) ||
+      !isCharacterCueId(rawCue.cueId) ||
       typeof rawCue.assetId !== "string" ||
       filesByAssetId.get(rawCue.assetId)?.role !== "expression" ||
       cueIds.has(rawCue.cueId) ||

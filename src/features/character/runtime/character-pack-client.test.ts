@@ -18,6 +18,22 @@ import {
 const fixtureSha256 =
   "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a"
 
+function packWithRenamedMotionGroup(from: string, to: string) {
+  const pack = structuredClone(hiyoriPack)
+  const groups = pack.inventory.motionGroups as unknown as Record<
+    string,
+    { cueId: string; assetId: string }[]
+  >
+  const cues = groups[from]
+  if (cues === undefined) throw new Error(`Missing motion group: ${from}`)
+  delete groups[from]
+  groups[to] = cues.map((cue, index) => ({
+    ...cue,
+    cueId: `${to}[${String(index)}]`,
+  }))
+  return pack
+}
+
 function createPackWithAsset(
   role: CharacterPackFile["role"],
   bytes: Uint8Array,
@@ -116,6 +132,34 @@ describe("character pack manifest", () => {
     expect(manifest.packId).toBe("builtin:hiyori_pro")
     expect(manifest.files).toHaveLength(17)
     expect(manifest.inventory.motionCount).toBe(10)
+  })
+
+  it("matches native dotted cue IDs, URL rejection, and the 80-byte boundary", () => {
+    const dotted = parseCharacterPackManifest(
+      packWithRenamedMotionGroup("Tap@Body", "Tap.Body"),
+    )
+    expect(dotted.inventory.motionGroups["Tap.Body"]?.[0]?.cueId).toBe(
+      "Tap.Body[0]",
+    )
+
+    const boundaryGroup = "a".repeat(77)
+    const boundary = parseCharacterPackManifest(
+      packWithRenamedMotionGroup("Flick", boundaryGroup),
+    )
+    expect(
+      boundary.inventory.motionGroups[boundaryGroup]?.[0]?.cueId,
+    ).toHaveLength(80)
+
+    expect(() =>
+      parseCharacterPackManifest(
+        packWithRenamedMotionGroup("Flick", "https://example.test/Tap"),
+      ),
+    ).toThrow("motion groups")
+    expect(() =>
+      parseCharacterPackManifest(
+        packWithRenamedMotionGroup("Flick", "a".repeat(78)),
+      ),
+    ).toThrow("motion groups")
   })
 
   it("accepts an unattested custom preview from the Rust contract", () => {

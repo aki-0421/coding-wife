@@ -17,11 +17,11 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use super::error::{character_error, CharacterResult};
 use super::manifest::{
-    is_safe_asset_id, CharacterAssetRole, CharacterCompatibility, CharacterDimensions,
-    CharacterExpressionCue, CharacterInventory, CharacterMotionCue, CharacterPackFile,
-    CharacterPackManifest, CharacterProvenance, CharacterProvenanceKind, CharacterTrustedFrame,
-    CHARACTER_SCHEMA_VERSION, CHARACTER_TRUSTED_FRAME_ASSET_ID, MAX_TRUSTED_FRAME_BYTES,
-    MAX_TRUSTED_FRAME_DIMENSION,
+    is_safe_asset_id, motion_cue_id, CharacterAssetRole, CharacterCompatibility,
+    CharacterDimensions, CharacterExpressionCue, CharacterInventory, CharacterMotionCue,
+    CharacterPackFile, CharacterPackManifest, CharacterProvenance, CharacterProvenanceKind,
+    CharacterTrustedFrame, CHARACTER_SCHEMA_VERSION, CHARACTER_TRUSTED_FRAME_ASSET_ID,
+    MAX_TRUSTED_FRAME_BYTES, MAX_TRUSTED_FRAME_DIMENSION,
 };
 
 const MAX_FILES: usize = 128;
@@ -184,7 +184,9 @@ pub fn snapshot_character_model(
                     .entry(group.to_owned())
                     .or_default()
                     .push(CharacterMotionCue {
-                        cue_id: format!("{group}[{index}]"),
+                        cue_id: motion_cue_id(group, index).ok_or_else(|| {
+                            character_error(operation, "CHARACTER-MOTION-SCHEMA", false)
+                        })?,
                         asset_id: reference.asset_id,
                     });
             }
@@ -381,13 +383,16 @@ fn collect_model_references(
             .as_object()
             .ok_or_else(|| character_error(operation, "CHARACTER-MOTION-SCHEMA", false))?;
         for (group, cues) in groups {
-            if group.trim().is_empty() || group.chars().count() > 80 {
+            if motion_cue_id(group, 0).is_none() {
                 return Err(character_error(operation, "CHARACTER-MOTION-SCHEMA", false));
             }
             let cues = cues
                 .as_array()
                 .ok_or_else(|| character_error(operation, "CHARACTER-MOTION-SCHEMA", false))?;
             for (index, cue) in cues.iter().enumerate() {
+                if motion_cue_id(group, index).is_none() {
+                    return Err(character_error(operation, "CHARACTER-MOTION-SCHEMA", false));
+                }
                 let file = cue
                     .as_object()
                     .and_then(|item| item.get("File"))
@@ -850,6 +855,29 @@ mod tests {
         fs::write(root.join("texture.png"), png).expect("texture");
     }
 
+    fn write_model_with_motion(root: &Path, group: &str) {
+        write_minimal_model(root, "test.moc3");
+        let mut motions = serde_json::Map::new();
+        motions.insert(
+            group.to_owned(),
+            serde_json::json!([{ "File": "tap.motion3.json" }]),
+        );
+        fs::write(
+            root.join("test.model3.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "Version": 3,
+                "FileReferences": {
+                    "Moc": "test.moc3",
+                    "Textures": ["texture.png"],
+                    "Motions": Value::Object(motions),
+                },
+            }))
+            .expect("motion model json"),
+        )
+        .expect("motion model");
+        fs::write(root.join("tap.motion3.json"), b"{}").expect("motion");
+    }
+
     fn selected_model(root: &Path) -> PathBuf {
         root.join("test.model3.json")
     }
@@ -1037,6 +1065,44 @@ mod tests {
         assert_eq!(snapshot.manifest.inventory.expression_count, 0);
         assert_eq!(snapshot.manifest.compatibility.moc_version, 3);
         assert!(verify_source_unchanged(&snapshot).is_ok());
+    }
+
+    #[test]
+    fn motion_groups_use_the_shared_ascii_and_completed_cue_boundary() {
+        for (group, expected_cue) in [
+            ("Tap.Body".to_owned(), Some("Tap.Body[0]".to_owned())),
+            ("a".repeat(76), Some(format!("{}[0]", "a".repeat(76)))),
+            ("a".repeat(77), Some(format!("{}[0]", "a".repeat(77)))),
+            ("https://example.test/Tap".to_owned(), None),
+            ("a".repeat(78), None),
+        ] {
+            let directory = TestDirectory::new();
+            write_model_with_motion(directory.path(), &group);
+            let result = snapshot_character_model(
+                &selected_model(directory.path()),
+                format!("custom:{}", uuid::Uuid::new_v4()),
+                "2026-07-18T00:00:00Z".to_owned(),
+            );
+            match expected_cue {
+                Some(expected_cue) => {
+                    let snapshot = result.expect("valid motion cue");
+                    assert_eq!(
+                        snapshot
+                            .manifest
+                            .inventory
+                            .motion_groups
+                            .get(&group)
+                            .and_then(|cues| cues.first())
+                            .map(|cue| cue.cue_id.as_str()),
+                        Some(expected_cue.as_str())
+                    );
+                }
+                None => assert_eq!(
+                    result.expect_err("invalid motion cue").code,
+                    "CHARACTER-MOTION-SCHEMA"
+                ),
+            }
+        }
     }
 
     #[test]
