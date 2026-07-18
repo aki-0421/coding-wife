@@ -1,6 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -9,12 +9,15 @@ use tokio::process::Command;
 
 use crate::codex::process::{run_bounded_command, BoundedCommandError, BoundedCommandOutput};
 
+use super::git_layout::{is_safe_head_reference, GitRepositoryLayout};
+
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 const GIT_MUTATION_TIMEOUT: Duration = Duration::from_secs(10);
 const GIT_STDERR_LIMIT: usize = 16 * 1024;
 const GIT_DEFAULT_STDOUT_LIMIT: usize = 2 * 1024 * 1024;
 const GIT_LARGE_STDOUT_LIMIT: usize = 52 * 1024 * 1024;
 const MAX_GIT_BINARY_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum GitRunnerError {
@@ -76,6 +79,110 @@ pub(crate) struct GitExecutionContext {
     pub alternate_object_directories: Option<OsString>,
 }
 
+#[derive(Debug)]
+struct PrivateGitEnvironment {
+    root: PathBuf,
+    git_dir: PathBuf,
+    home: PathBuf,
+    hooks: PathBuf,
+    index_file: PathBuf,
+    object_directory: PathBuf,
+    alternate_object_directories: OsString,
+    real_git_dir: PathBuf,
+}
+
+impl PrivateGitEnvironment {
+    fn new(root: &Path, context: &GitExecutionContext) -> Result<Self, GitRunnerError> {
+        let layout = GitRepositoryLayout::inspect(root).map_err(|_| GitRunnerError::Io)?;
+        let private_root = std::env::temp_dir().join(format!(
+            "coding-wife-git-shadow-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        create_private_directory(&private_root)?;
+        let git_dir = private_root.join("git");
+        let home = private_root.join("home");
+        let hooks = private_root.join("hooks");
+        create_private_directory(&git_dir)?;
+        create_private_directory(&home)?;
+        create_private_directory(&hooks)?;
+
+        write_private_file(
+            &git_dir.join("config"),
+            b"[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tfilemode = true\n\tfsmonitor = false\n\thooksPath = /dev/null\n\tattributesFile = /dev/null\n[gc]\n\tauto = 0\n",
+        )?;
+        let head_value = layout
+            .head_reference
+            .as_ref()
+            .map(|reference| format!("ref: {reference}\n"))
+            .unwrap_or_else(|| format!("{}\n", layout.head_sha));
+        write_private_file(&git_dir.join("HEAD"), head_value.as_bytes())?;
+        if let Some(reference) = &layout.head_reference {
+            if !is_safe_head_reference(reference) {
+                return Err(GitRunnerError::Io);
+            }
+            if layout.head_sha != "unborn" {
+                let reference_path = git_dir.join(reference);
+                create_private_ancestors(&git_dir, &reference_path)?;
+                write_private_file(&reference_path, format!("{}\n", layout.head_sha).as_bytes())?;
+            }
+        }
+
+        let index_file = if let Some(index_file) = &context.index_file {
+            index_file.clone()
+        } else {
+            let shadow_index = private_root.join("index");
+            match fs::symlink_metadata(&layout.index_file) {
+                Ok(metadata)
+                    if metadata.is_file()
+                        && !metadata.file_type().is_symlink()
+                        && metadata.len() <= MAX_INDEX_BYTES =>
+                {
+                    fs::copy(&layout.index_file, &shadow_index).map_err(|_| GitRunnerError::Io)?;
+                    fs::set_permissions(&shadow_index, fs::Permissions::from_mode(0o600))
+                        .map_err(|_| GitRunnerError::Io)?;
+                }
+                Ok(_) => return Err(GitRunnerError::Io),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(GitRunnerError::Io),
+            }
+            shadow_index
+        };
+        let object_directory = if let Some(object_directory) = &context.object_directory {
+            object_directory.clone()
+        } else {
+            let directory = git_dir.join("objects");
+            create_private_directory(&directory)?;
+            directory
+        };
+        let mut alternates = context
+            .alternate_object_directories
+            .clone()
+            .unwrap_or_default();
+        if !alternates.is_empty() {
+            alternates.push(OsStr::new(":"));
+        }
+        alternates.push(layout.object_directory.as_os_str());
+
+        Ok(Self {
+            root: private_root,
+            git_dir,
+            home,
+            hooks,
+            index_file,
+            object_directory,
+            alternate_object_directories: alternates,
+            real_git_dir: layout.canonical_git_dir,
+        })
+    }
+}
+
+impl Drop for PrivateGitEnvironment {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct GitRunner {
     binary: GitBinaryIdentity,
@@ -97,40 +204,32 @@ impl GitRunner {
         stdout_limit: usize,
     ) -> Result<BoundedCommandOutput, GitRunnerError> {
         self.binary.revalidate()?;
+        let environment = PrivateGitEnvironment::new(root, context)?;
         let mut command = Command::new(&self.binary.canonical_path);
+        configure_command(&mut command, root, &environment, false);
         command
-            .arg("--literal-pathspecs")
-            .arg("-c")
-            .arg("color.ui=false")
-            .arg("-c")
-            .arg("core.pager=cat")
-            .arg("-c")
-            .arg("core.hooksPath=/dev/null")
-            .arg("-c")
-            .arg("commit.gpgSign=false")
-            .arg("-C")
-            .arg(root)
             .args(arguments)
             .env_clear()
             .env("LC_ALL", "C")
             .env("LANG", "C")
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_ATTR_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_PAGER", "cat")
-            .env("PAGER", "cat");
-        if let Some(home) = std::env::var_os("HOME") {
-            command.env("HOME", home);
-        }
-        if let Some(index_file) = &context.index_file {
-            command.env("GIT_INDEX_FILE", index_file);
-        }
-        if let Some(object_directory) = &context.object_directory {
-            command.env("GIT_OBJECT_DIRECTORY", object_directory);
-        }
-        if let Some(alternates) = &context.alternate_object_directories {
-            command.env("GIT_ALTERNATE_OBJECT_DIRECTORIES", alternates);
-        }
+            .env("PAGER", "cat")
+            .env("HOME", &environment.home)
+            .env("XDG_CONFIG_HOME", &environment.home)
+            .env("GIT_DIR", &environment.git_dir)
+            .env("GIT_WORK_TREE", root)
+            .env("GIT_INDEX_FILE", &environment.index_file)
+            .env("GIT_OBJECT_DIRECTORY", &environment.object_directory)
+            .env(
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                &environment.alternate_object_directories,
+            );
         let output = run_bounded_command(command, timeout, stdout_limit, GIT_STDERR_LIMIT)
             .await
             .map_err(map_bounded_error)?;
@@ -206,8 +305,12 @@ impl GitRunner {
     }
 
     pub async fn index_entries(&self, root: &Path) -> Result<BoundedCommandOutput, GitRunnerError> {
-        self.read(root, &["ls-files", "--stage", "-z"], GIT_LARGE_STDOUT_LIMIT)
-            .await
+        self.read(
+            root,
+            &["ls-files", "--stage", "-v", "-z"],
+            GIT_LARGE_STDOUT_LIMIT,
+        )
+        .await
     }
 
     pub async fn show_superproject(
@@ -551,17 +654,10 @@ impl GitRunner {
         context: &GitExecutionContext,
     ) -> Result<BoundedCommandOutput, GitRunnerError> {
         self.binary.revalidate()?;
+        let environment = PrivateGitEnvironment::new(root, context)?;
         let mut command = Command::new(&self.binary.canonical_path);
+        configure_command(&mut command, root, &environment, false);
         command
-            .arg("--literal-pathspecs")
-            .arg("-c")
-            .arg("color.ui=false")
-            .arg("-c")
-            .arg("core.hooksPath=/dev/null")
-            .arg("-c")
-            .arg("commit.gpgSign=false")
-            .arg("-C")
-            .arg(root)
             .arg("commit-tree")
             .arg(tree)
             .arg("-p")
@@ -572,21 +668,25 @@ impl GitRunner {
             .env("LC_ALL", "C")
             .env("LANG", "C")
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_ATTR_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("HOME", &environment.home)
+            .env("XDG_CONFIG_HOME", &environment.home)
+            .env("GIT_DIR", &environment.git_dir)
+            .env("GIT_WORK_TREE", root)
+            .env("GIT_INDEX_FILE", &environment.index_file)
+            .env("GIT_OBJECT_DIRECTORY", &environment.object_directory)
+            .env(
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                &environment.alternate_object_directories,
+            )
             .env("GIT_AUTHOR_NAME", &author.name)
             .env("GIT_AUTHOR_EMAIL", &author.email)
             .env("GIT_COMMITTER_NAME", &author.name)
             .env("GIT_COMMITTER_EMAIL", &author.email);
-        if let Some(index_file) = &context.index_file {
-            command.env("GIT_INDEX_FILE", index_file);
-        }
-        if let Some(object_directory) = &context.object_directory {
-            command.env("GIT_OBJECT_DIRECTORY", object_directory);
-        }
-        if let Some(alternates) = &context.alternate_object_directories {
-            command.env("GIT_ALTERNATE_OBJECT_DIRECTORIES", alternates);
-        }
         let output = run_bounded_command(command, GIT_MUTATION_TIMEOUT, 256, GIT_STDERR_LIMIT)
             .await
             .map_err(map_bounded_error)?;
@@ -601,21 +701,43 @@ impl GitRunner {
         new_value: &str,
         old_value: &str,
     ) -> Result<BoundedCommandOutput, GitRunnerError> {
-        let args = vec![
-            OsString::from("update-ref"),
-            OsString::from("--no-deref"),
-            OsString::from(reference),
-            OsString::from(new_value),
-            OsString::from(old_value),
-        ];
-        self.run(
-            root,
-            args,
-            &GitExecutionContext::default(),
-            GIT_MUTATION_TIMEOUT,
-            4096,
-        )
-        .await
+        if reference != "HEAD" && !is_safe_head_reference(reference) {
+            return Err(GitRunnerError::Io);
+        }
+        if !super::git_layout::is_object_id(new_value)
+            || !super::git_layout::is_object_id(old_value)
+        {
+            return Err(GitRunnerError::Io);
+        }
+        self.binary.revalidate()?;
+        let environment = PrivateGitEnvironment::new(root, &GitExecutionContext::default())?;
+        let mut command = Command::new(&self.binary.canonical_path);
+        configure_command(&mut command, root, &environment, true);
+        command
+            .arg("update-ref")
+            .arg("--no-deref")
+            .arg(reference)
+            .arg(new_value)
+            .arg(old_value)
+            .env_clear()
+            .env("LC_ALL", "C")
+            .env("LANG", "C")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_ATTR_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("HOME", &environment.home)
+            .env("XDG_CONFIG_HOME", &environment.home)
+            .env("GIT_DIR", &environment.real_git_dir)
+            .env("GIT_WORK_TREE", root)
+            .env("GIT_INDEX_FILE", &environment.index_file);
+        let output = run_bounded_command(command, GIT_MUTATION_TIMEOUT, 4096, GIT_STDERR_LIMIT)
+            .await
+            .map_err(map_bounded_error)?;
+        self.binary.revalidate()?;
+        Ok(output)
     }
 
     pub async fn check_ref_format_branch(
@@ -779,6 +901,78 @@ impl GitRunner {
 pub(crate) struct GitAuthor {
     pub name: String,
     pub email: String,
+}
+
+fn configure_command(
+    command: &mut Command,
+    root: &Path,
+    environment: &PrivateGitEnvironment,
+    real_git_dir: bool,
+) {
+    let git_dir = if real_git_dir {
+        &environment.real_git_dir
+    } else {
+        &environment.git_dir
+    };
+    let mut hooks_path = OsString::from("core.hooksPath=");
+    hooks_path.push(environment.hooks.as_os_str());
+    command
+        .arg("--literal-pathspecs")
+        .arg("--git-dir")
+        .arg(git_dir)
+        .arg("--work-tree")
+        .arg(root)
+        .arg("-c")
+        .arg("color.ui=false")
+        .arg("-c")
+        .arg("core.pager=cat")
+        .arg("-c")
+        .arg(hooks_path)
+        .arg("-c")
+        .arg("core.fsmonitor=false")
+        .arg("-c")
+        .arg("core.untrackedCache=false")
+        .arg("-c")
+        .arg("core.preloadIndex=false")
+        .arg("-c")
+        .arg("core.attributesFile=/dev/null")
+        .arg("-c")
+        .arg("diff.external=")
+        .arg("-c")
+        .arg("credential.helper=")
+        .arg("-c")
+        .arg("protocol.allow=never")
+        .arg("-c")
+        .arg("protocol.file.allow=never")
+        .arg("-c")
+        .arg("submodule.recurse=false")
+        .arg("-c")
+        .arg("commit.gpgSign=false")
+        .arg("-C")
+        .arg(root);
+}
+
+fn create_private_directory(path: &Path) -> Result<(), GitRunnerError> {
+    fs::create_dir(path).map_err(|_| GitRunnerError::Io)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|_| GitRunnerError::Io)
+}
+
+fn create_private_ancestors(root: &Path, path: &Path) -> Result<(), GitRunnerError> {
+    let parent = path.parent().ok_or(GitRunnerError::Io)?;
+    fs::create_dir_all(parent).map_err(|_| GitRunnerError::Io)?;
+    let mut current = root.to_path_buf();
+    let relative = parent.strip_prefix(root).map_err(|_| GitRunnerError::Io)?;
+    for component in relative.components() {
+        current.push(component);
+        fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
+            .map_err(|_| GitRunnerError::Io)?;
+    }
+    Ok(())
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), GitRunnerError> {
+    fs::write(path, bytes).map_err(|_| GitRunnerError::Io)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|_| GitRunnerError::Io)
 }
 
 fn map_bounded_error(error: BoundedCommandError) -> GitRunnerError {

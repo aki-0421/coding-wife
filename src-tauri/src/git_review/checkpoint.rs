@@ -5,19 +5,17 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
-use sha2::Digest;
-
 use super::error::{git_error, GitReviewError};
 use super::ownership::{OwnershipEvaluation, PrivateMaterialDirectory};
 use super::repository::{
-    inspect_repository, is_object_id, read_worktree_material, same_repository_identity,
-    worktree_mode, BaselineRecord, FileMaterial, RepositorySnapshot,
+    inspect_repository, is_object_id, read_local_config_value, read_worktree_material,
+    same_repository_identity, worktree_mode, BaselineRecord, FileMaterial, RepositorySnapshot,
 };
 use super::runner::{
     os_path_list, trimmed_stdout, GitAuthor, GitExecutionContext, GitRunner, GitRunnerError,
 };
 use super::types::CheckpointIdentity;
+use chrono::Utc;
 
 const OPERATION: &str = "evaluate_and_checkpoint_work_unit";
 
@@ -214,9 +212,20 @@ pub(crate) async fn prepare_checkpoint(
     if !is_object_id(&commit_sha) {
         return Err(git_error("GIT-COMMIT-ID", OPERATION, false));
     }
-    let object_ids = enumerate_loose_objects(&object_directory, commit_sha.len())?;
+    let mut object_ids = enumerate_loose_objects(&object_directory, commit_sha.len())?;
     if !object_ids.iter().any(|value| value == &commit_sha) {
-        return Err(git_error("GIT-COMMIT-OBJECT-MISSING", OPERATION, false));
+        let commit_type = runner
+            .cat_object_type(&baseline.repository.canonical_root, &commit_sha)
+            .await
+            .map_err(runner_error)?;
+        if !commit_type.status.success()
+            || trimmed_stdout(&commit_type).map_err(runner_error)? != "commit"
+        {
+            return Err(git_error("GIT-COMMIT-OBJECT-MISSING", OPERATION, false));
+        }
+        object_ids.push(commit_sha.clone());
+        object_ids.sort();
+        object_ids.dedup();
     }
     let observed = inspect_repository(runner, &baseline.repository.canonical_root).await?;
     if observed.repository_fingerprint != current.repository_fingerprint {
@@ -337,18 +346,21 @@ pub(crate) async fn update_checkpoint_reference(
         );
     }
 
-    let index = runner
-        .index_entries(&prepared.baseline.repository.canonical_root)
-        .await
-        .map_err(runner_error)?;
-    if !index.status.success() {
+    let after = match inspect_repository(runner, &prepared.baseline.repository.canonical_root).await
+    {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            compensate_reference(runner, &prepared).await;
+            return Err(error);
+        }
+    };
+    if !same_repository_identity(&prepared.baseline.repository, &after.identity)
+        || after.identity.head_sha != prepared.commit_sha
+    {
         compensate_reference(runner, &prepared).await;
-        return Err(git_error("GIT-INDEX-VERIFY", OPERATION, true));
+        return Err(git_error("GIT-REF-VERIFY", OPERATION, true));
     }
-    let index_after = format!(
-        "sha256:{}",
-        hex::encode(sha2::Sha256::digest(&index.stdout))
-    );
+    let index_after = after.index_fingerprint;
     if index_after != prepared.expected_index_fingerprint {
         compensate_reference(runner, &prepared).await;
         return Err(git_error("GIT-INDEX-MUTATED", OPERATION, false));
@@ -382,19 +394,13 @@ async fn compensate_reference(runner: &GitRunner, prepared: &PreparedCheckpoint)
 }
 
 async fn read_author(runner: &GitRunner, root: &Path) -> Result<GitAuthor, GitReviewError> {
-    let name = runner
-        .config_get(root, "user.name")
-        .await
-        .map_err(runner_error)?;
-    let email = runner
-        .config_get(root, "user.email")
-        .await
-        .map_err(runner_error)?;
-    if !name.status.success() || !email.status.success() {
-        return Err(git_error("GIT-IDENTITY-MISSING", OPERATION, false));
-    }
-    let name = trimmed_stdout(&name).map_err(runner_error)?;
-    let email = trimmed_stdout(&email).map_err(runner_error)?;
+    let _ = runner;
+    let layout = super::git_layout::GitRepositoryLayout::inspect(root)
+        .map_err(|_| git_error("GIT-IDENTITY-READ", OPERATION, false))?;
+    let name = read_local_config_value(&layout.canonical_common_dir, "user", "name")?
+        .ok_or_else(|| git_error("GIT-IDENTITY-MISSING", OPERATION, false))?;
+    let email = read_local_config_value(&layout.canonical_common_dir, "user", "email")?
+        .ok_or_else(|| git_error("GIT-IDENTITY-MISSING", OPERATION, false))?;
     if name.is_empty()
         || name.chars().count() > 200
         || name.chars().any(char::is_control)

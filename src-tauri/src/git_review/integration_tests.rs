@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::future::Future;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::{Command, Output};
@@ -376,6 +377,197 @@ async fn pre_existing_changes_are_visible_but_never_committed() {
     assert_eq!(repository.read("user.txt"), b"private user value\n");
     assert_eq!(repository.read("notes.txt"), b"untracked private note\n");
     assert_eq!(repository.index_bytes(), index_before);
+}
+
+#[tokio::test]
+async fn repository_fingerprints_bind_changed_content_and_index_flags() {
+    let repository = DisposableRepository::new();
+    repository.write("tracked.txt", b"committed\n");
+    repository.commit_all("fixture");
+    let runner = GitRunner::production().expect("runner");
+
+    repository.write("tracked.txt", b"dirty-a\n");
+    let tracked_a = inspect_repository(&runner, repository.path())
+        .await
+        .expect("tracked content A");
+    repository.write("tracked.txt", b"dirty-b\n");
+    let tracked_b = inspect_repository(&runner, repository.path())
+        .await
+        .expect("tracked content B");
+    assert_ne!(tracked_a.status_fingerprint, tracked_b.status_fingerprint);
+    assert_ne!(
+        tracked_a.repository_fingerprint,
+        tracked_b.repository_fingerprint
+    );
+
+    repository.write("untracked.txt", b"untracked-a\n");
+    let untracked_a = inspect_repository(&runner, repository.path())
+        .await
+        .expect("untracked content A");
+    repository.write("untracked.txt", b"untracked-b\n");
+    let untracked_b = inspect_repository(&runner, repository.path())
+        .await
+        .expect("untracked content B");
+    assert_ne!(
+        untracked_a.repository_fingerprint,
+        untracked_b.repository_fingerprint
+    );
+
+    repository.write("tracked.txt", b"committed\n");
+    repository.remove("untracked.txt");
+    let ordinary = inspect_repository(&runner, repository.path())
+        .await
+        .expect("ordinary index");
+    repository.git_ok(&["update-index", "--skip-worktree", "tracked.txt"]);
+    let skip_worktree = inspect_repository(&runner, repository.path())
+        .await
+        .expect("skip-worktree index");
+    assert_ne!(ordinary.index_fingerprint, skip_worktree.index_fingerprint);
+
+    repository.git_ok(&["update-index", "--no-skip-worktree", "tracked.txt"]);
+    repository.git_ok(&["update-index", "--assume-unchanged", "tracked.txt"]);
+    let assume_unchanged = inspect_repository(&runner, repository.path())
+        .await
+        .expect("assume-unchanged index");
+    assert_ne!(
+        ordinary.index_fingerprint,
+        assume_unchanged.index_fingerprint
+    );
+    assert_ne!(
+        skip_worktree.index_fingerprint,
+        assume_unchanged.index_fingerprint
+    );
+}
+
+#[tokio::test]
+async fn pre_existing_manifest_classifies_staged_unstaged_untracked_delete_and_mode() {
+    let repository = DisposableRepository::new();
+    for path in [
+        "staged.txt",
+        "unstaged.txt",
+        "both.txt",
+        "deleted.txt",
+        "mode.txt",
+    ] {
+        repository.write(path, b"committed\n");
+    }
+    repository.commit_all("fixture");
+    repository.write("staged.txt", b"staged\n");
+    repository.git_ok(&["add", "staged.txt"]);
+    repository.write("unstaged.txt", b"unstaged\n");
+    repository.write("both.txt", b"staged-half\n");
+    repository.git_ok(&["add", "both.txt"]);
+    repository.write("both.txt", b"worktree-half\n");
+    repository.write("untracked.txt", b"untracked\n");
+    repository.remove("deleted.txt");
+    let mut permissions = fs::metadata(repository.path().join("mode.txt"))
+        .expect("mode metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(repository.path().join("mode.txt"), permissions)
+        .expect("make mode executable");
+
+    let runner = GitRunner::production().expect("runner");
+    let baseline = capture_baseline(&runner, WORKSPACE_ID, repository.path())
+        .await
+        .expect("baseline");
+    let current = inspect_repository(&runner, repository.path())
+        .await
+        .expect("current");
+    let ownership = evaluate_ownership(&runner, &baseline, &current, &[])
+        .await
+        .expect("ownership");
+    let kind = |path: &str| {
+        let entry = ownership
+            .manifest
+            .iter()
+            .find(|entry| entry.relative_path == path)
+            .expect("manifest entry");
+        assert_eq!(entry.ownership, OwnershipClass::PreExisting);
+        assert_eq!(
+            entry.reason_code.as_deref(),
+            Some("GIT-PREEXISTING-PROTECTED")
+        );
+        entry.change_kind
+    };
+    assert_eq!(kind("staged.txt"), ChangeKind::Modified);
+    assert_eq!(kind("unstaged.txt"), ChangeKind::Modified);
+    assert_eq!(kind("both.txt"), ChangeKind::Modified);
+    assert_eq!(kind("untracked.txt"), ChangeKind::Added);
+    assert_eq!(kind("deleted.txt"), ChangeKind::Deleted);
+    assert_eq!(kind("mode.txt"), ChangeKind::TypeChanged);
+    assert!(ownership.owned_changes.is_empty());
+}
+
+#[tokio::test]
+async fn repository_config_cannot_execute_fsmonitor_hooks_diff_or_filters() {
+    let repository = DisposableRepository::new();
+    repository.write("app.txt", b"before\n");
+    repository.write(".gitattributes", b"app.txt diff=hostile filter=hostile\n");
+    repository.commit_all("fixture");
+
+    let fixture_root = std::env::temp_dir().join(format!(
+        "coding-wife-git-config-fixture-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir(&fixture_root).expect("fixture root");
+    let marker = fixture_root.join("executed");
+    let command = fixture_root.join("hostile.sh");
+    fs::write(
+        &command,
+        format!("#!/bin/sh\n: > '{}'\nexit 0\n", marker.display()),
+    )
+    .expect("hostile command");
+    fs::set_permissions(&command, fs::Permissions::from_mode(0o700)).expect("command mode");
+    let hooks = fixture_root.join("hooks");
+    fs::create_dir(&hooks).expect("hooks");
+    fs::copy(&command, hooks.join("reference-transaction")).expect("hook command");
+
+    let command_value = command.to_string_lossy().into_owned();
+    let hooks_value = hooks.to_string_lossy().into_owned();
+    repository.git_ok(&["config", "core.fsmonitor", &command_value]);
+    repository.git_ok(&["config", "core.hooksPath", &hooks_value]);
+    repository.git_ok(&["config", "diff.external", &command_value]);
+    repository.git_ok(&["config", "filter.hostile.clean", &command_value]);
+    repository.git_ok(&["config", "filter.hostile.smudge", &command_value]);
+
+    let runner = GitRunner::production().expect("runner");
+    let baseline = capture_baseline(&runner, WORKSPACE_ID, repository.path())
+        .await
+        .expect("baseline");
+    repository.write("app.txt", b"after\n");
+    let current = inspect_repository(&runner, repository.path())
+        .await
+        .expect("current");
+    let event = file_event(
+        &baseline.public,
+        "event-hostile-config",
+        "app.txt",
+        ChangeKind::Modified,
+        Some(b"before\n"),
+        Some(b"after\n"),
+    );
+    let ownership = evaluate_ownership(&runner, &baseline, &current, &[event])
+        .await
+        .expect("ownership");
+    let prepared = prepare_checkpoint(
+        &runner,
+        &baseline,
+        &current,
+        &ownership,
+        "feat(git): isolate repository config\n\n- disable executable config surfaces\n- preserve repository state",
+    )
+    .await
+    .expect("prepare");
+    let promoted = promote_checkpoint_objects(&runner, prepared)
+        .await
+        .expect("promote");
+    update_checkpoint_reference(&runner, promoted)
+        .await
+        .expect("update ref");
+
+    assert!(!marker.exists(), "repository config executed a process");
+    let _ = fs::remove_dir_all(fixture_root);
 }
 
 #[tokio::test]

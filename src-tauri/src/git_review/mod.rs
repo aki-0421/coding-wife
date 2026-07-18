@@ -1,6 +1,7 @@
 pub mod checkpoint;
 pub mod commands;
 pub mod error;
+pub(crate) mod git_layout;
 pub mod history;
 pub mod ownership;
 pub mod repository;

@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
@@ -7,13 +9,23 @@ use sha2::{Digest, Sha256};
 use crate::codex::workspace::validate_git_repository;
 
 use super::error::{git_error, GitReviewError};
-use super::runner::{trimmed_stdout, GitRunner, GitRunnerError};
+pub(crate) use super::git_layout::is_object_id;
+use super::git_layout::{GitLayoutError, GitRepositoryLayout};
+use super::runner::{GitRunner, GitRunnerError};
 use super::types::{
     GitBaseline, GitSupportState, ProtectedChangeSummary, GIT_REVIEW_SCHEMA_VERSION,
     MAX_CHANGED_BYTES, MAX_CHANGED_FILES,
 };
 
 const OPERATION_INSPECT: &str = "inspect_git_baseline";
+const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct IndexState {
+    bytes_fingerprint: String,
+    metadata_fingerprint: String,
+    locked: bool,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum FileMaterial {
@@ -157,72 +169,22 @@ pub(crate) async fn inspect_repository(
         .map_err(|_| git_error("GIT-REPOSITORY-UNTRUSTED", OPERATION_INSPECT, false))?;
     let canonical_root = validated.canonical_root;
     let canonical_git_dir = validated.canonical_git_dir;
-
-    let common_output = runner
-        .git_common_dir(&canonical_root)
-        .await
-        .map_err(runner_inspect_error)?;
-    if !common_output.status.success() {
+    let layout = GitRepositoryLayout::inspect(&canonical_root).map_err(layout_inspect_error)?;
+    if layout.canonical_root != canonical_root || layout.canonical_git_dir != canonical_git_dir {
         return Err(git_error(
             "GIT-REPOSITORY-IDENTITY",
             OPERATION_INSPECT,
             false,
         ));
     }
-    let common_value = trimmed_stdout(&common_output).map_err(runner_inspect_error)?;
-    let common_path = Path::new(&common_value);
-    let canonical_common_dir = tokio::fs::canonicalize(if common_path.is_absolute() {
-        common_path.to_path_buf()
-    } else {
-        canonical_root.join(common_path)
-    })
-    .await
-    .map_err(|_| git_error("GIT-REPOSITORY-IDENTITY", OPERATION_INSPECT, false))?;
-    if canonical_common_dir != canonical_git_dir
-        && !canonical_git_dir.starts_with(&canonical_common_dir)
-    {
-        return Err(git_error(
-            "GIT-REPOSITORY-CLOSURE",
-            OPERATION_INSPECT,
-            false,
-        ));
-    }
-    let object_directory = canonical_common_dir.join("objects");
-    let object_metadata = tokio::fs::symlink_metadata(&object_directory)
-        .await
-        .map_err(|_| git_error("GIT-OBJECT-DIRECTORY", OPERATION_INSPECT, false))?;
-    if !object_metadata.is_dir() || object_metadata.file_type().is_symlink() {
-        return Err(git_error("GIT-OBJECT-DIRECTORY", OPERATION_INSPECT, false));
-    }
-
-    let head_output = runner
-        .rev_parse_head(&canonical_root)
-        .await
-        .map_err(runner_inspect_error)?;
+    let canonical_common_dir = layout.canonical_common_dir.clone();
+    let object_directory = layout.object_directory.clone();
     let mut blocked_reasons = Vec::new();
-    let head_sha = if head_output.status.success() {
-        let value = trimmed_stdout(&head_output).map_err(runner_inspect_error)?;
-        if !is_object_id(&value) {
-            return Err(git_error("GIT-HEAD-INVALID", OPERATION_INSPECT, false));
-        }
-        value
-    } else {
+    let head_sha = layout.head_sha.clone();
+    if head_sha == "unborn" {
         blocked_reasons.push("GIT-HEAD-UNBORN".to_owned());
-        "unborn".to_owned()
-    };
-    let symbolic = runner
-        .symbolic_head(&canonical_root)
-        .await
-        .map_err(runner_inspect_error)?;
-    let head_reference = if symbolic.status.success() {
-        let value = trimmed_stdout(&symbolic).map_err(runner_inspect_error)?;
-        if !is_safe_head_reference(&value) {
-            return Err(git_error("GIT-HEAD-REFERENCE", OPERATION_INSPECT, false));
-        }
-        Some(value)
-    } else {
-        None
-    };
+    }
+    let head_reference = layout.head_reference.clone();
     let detached = head_reference.is_none();
     let branch = head_reference
         .as_deref()
@@ -230,28 +192,15 @@ pub(crate) async fn inspect_repository(
         .map(str::to_owned)
         .unwrap_or_else(|| head_sha.chars().take(12).collect());
 
-    let superproject = runner
-        .show_superproject(&canonical_root)
-        .await
-        .map_err(runner_inspect_error)?;
-    if !superproject.status.success() {
-        blocked_reasons.push("GIT-SUBMODULE-STATE-UNKNOWN".to_owned());
-    } else if !trimmed_stdout(&superproject)
-        .map_err(runner_inspect_error)?
-        .is_empty()
-    {
+    if is_submodule_layout(&canonical_common_dir) {
         blocked_reasons.push("GIT-SUBMODULE-ROOT-UNSUPPORTED".to_owned());
     }
-    let sparse = runner
-        .config_get(&canonical_root, "core.sparseCheckout")
-        .await
-        .map_err(runner_inspect_error)?;
-    if sparse.status.success()
-        && trimmed_stdout(&sparse)
-            .map_err(runner_inspect_error)?
-            .eq_ignore_ascii_case("true")
-    {
-        blocked_reasons.push("GIT-SPARSE-CHECKOUT-UNSUPPORTED".to_owned());
+    if let Some(value) = read_local_config_value(&canonical_common_dir, "core", "sparsecheckout")? {
+        match parse_git_bool(&value) {
+            Some(false) => {}
+            Some(true) => blocked_reasons.push("GIT-SPARSE-CHECKOUT-UNSUPPORTED".to_owned()),
+            None => blocked_reasons.push("GIT-SPARSE-CHECKOUT-UNKNOWN".to_owned()),
+        }
     }
     for state in [
         "MERGE_HEAD",
@@ -261,26 +210,15 @@ pub(crate) async fn inspect_repository(
         "rebase-merge",
         "rebase-apply",
     ] {
-        let output = runner
-            .git_path(&canonical_root, state)
-            .await
-            .map_err(runner_inspect_error)?;
-        if !output.status.success() {
-            blocked_reasons.push("GIT-OPERATION-STATE-UNKNOWN".to_owned());
-            continue;
-        }
-        let value = trimmed_stdout(&output).map_err(runner_inspect_error)?;
-        let path = Path::new(&value);
-        let resolved = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            canonical_root.join(path)
-        };
-        if tokio::fs::symlink_metadata(&resolved).await.is_ok() {
+        if metadata_state_exists(&canonical_git_dir, &canonical_common_dir, state)? {
             blocked_reasons.push(format!("GIT-OPERATION-IN-PROGRESS:{state}"));
         }
     }
 
+    let index_state_before = read_index_state(&layout.index_file)?;
+    if index_state_before.locked {
+        blocked_reasons.push("GIT-INDEX-LOCKED".to_owned());
+    }
     let index_output = runner
         .index_entries(&canonical_root)
         .await
@@ -288,7 +226,7 @@ pub(crate) async fn inspect_repository(
     if !index_output.status.success() {
         return Err(git_error("GIT-INDEX-READ", OPERATION_INSPECT, true));
     }
-    let index_fingerprint = bytes_hash(&index_output.stdout);
+    let index_fingerprint = index_fingerprint(&index_state_before, &index_output.stdout);
     let status_output = runner
         .status_porcelain(&canonical_root)
         .await
@@ -296,7 +234,6 @@ pub(crate) async fn inspect_repository(
     if !status_output.status.success() {
         return Err(git_error("GIT-STATUS-READ", OPERATION_INSPECT, true));
     }
-    let status_fingerprint = bytes_hash(&status_output.stdout);
     let entries = parse_status(&status_output.stdout)?;
     if entries.len() > MAX_CHANGED_FILES {
         blocked_reasons.push("GIT-LIMIT-FILES".to_owned());
@@ -328,6 +265,35 @@ pub(crate) async fn inspect_repository(
     if total_bytes > MAX_CHANGED_BYTES {
         blocked_reasons.push("GIT-LIMIT-BYTES".to_owned());
     }
+
+    let index_state_after = read_index_state(&layout.index_file)?;
+    let index_after = runner
+        .index_entries(&canonical_root)
+        .await
+        .map_err(runner_inspect_error)?;
+    let status_after = runner
+        .status_porcelain(&canonical_root)
+        .await
+        .map_err(runner_inspect_error)?;
+    let layout_after =
+        GitRepositoryLayout::inspect(&canonical_root).map_err(layout_inspect_error)?;
+    if index_state_after != index_state_before
+        || !index_after.status.success()
+        || index_after.stdout != index_output.stdout
+        || !status_after.status.success()
+        || status_after.stdout != status_output.stdout
+        || layout_after.head_sha != layout.head_sha
+        || layout_after.head_reference != layout.head_reference
+    {
+        return Err(git_error("GIT-STATE-RACE", OPERATION_INSPECT, true));
+    }
+    for entry in changes.values() {
+        let material = read_worktree_material(&canonical_root, &entry.relative_path).await?;
+        let mode = worktree_mode(&canonical_root, &entry.relative_path).await?;
+        if material != entry.material || mode != entry.mode {
+            return Err(git_error("GIT-STATE-RACE", OPERATION_INSPECT, true));
+        }
+    }
     blocked_reasons.sort();
     blocked_reasons.dedup();
 
@@ -345,8 +311,9 @@ pub(crate) async fn inspect_repository(
         branch,
         detached,
     };
+    let status_fingerprint = status_fingerprint(&status_output.stdout, &changes);
     let repository_fingerprint =
-        repository_fingerprint(&identity, &index_fingerprint, &status_fingerprint);
+        repository_fingerprint(&identity, &index_fingerprint, &status_fingerprint, &changes);
     Ok(RepositorySnapshot {
         identity,
         index_fingerprint,
@@ -508,6 +475,7 @@ pub(crate) fn repository_fingerprint(
     identity: &RepositoryIdentity,
     index_fingerprint: &str,
     status_fingerprint: &str,
+    changes: &BTreeMap<String, FileSnapshot>,
 ) -> String {
     let mut hasher = Sha256::new();
     hasher.update(identity.root_device.to_le_bytes());
@@ -520,6 +488,7 @@ pub(crate) fn repository_fingerprint(
     }
     hasher.update(index_fingerprint.as_bytes());
     hasher.update(status_fingerprint.as_bytes());
+    hash_changes(&mut hasher, changes);
     format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
@@ -530,10 +499,6 @@ pub(crate) fn content_hash(bytes: &[u8]) -> String {
 pub(crate) fn file_id(relative_path: &str) -> String {
     let digest = Sha256::digest(relative_path.as_bytes());
     format!("file-{}", &hex::encode(digest)[..24])
-}
-
-pub(crate) fn is_object_id(value: &str) -> bool {
-    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 pub(crate) fn validate_workspace_id(value: &str) -> Result<(), GitReviewError> {
@@ -584,6 +549,227 @@ pub(crate) fn validate_relative_path(value: &str) -> Result<(), GitReviewError> 
         return Err(git_error("GIT-PATH-INVALID", OPERATION_INSPECT, false));
     }
     Ok(())
+}
+
+pub(crate) fn read_local_config_value(
+    common_dir: &Path,
+    expected_section: &str,
+    expected_key: &str,
+) -> Result<Option<String>, GitReviewError> {
+    let path = common_dir.join("config");
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(git_error("GIT-CONFIG-READ", OPERATION_INSPECT, true)),
+    };
+    let uid = unsafe { libc::geteuid() };
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > 1024 * 1024
+        || !matches!(metadata.uid(), owner if owner == uid || owner == 0)
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return Err(git_error("GIT-CONFIG-UNTRUSTED", OPERATION_INSPECT, false));
+    }
+    let contents = fs::read_to_string(path)
+        .map_err(|_| git_error("GIT-CONFIG-READ", OPERATION_INSPECT, true))?;
+    if contents.contains('\0') {
+        return Err(git_error("GIT-CONFIG-UNTRUSTED", OPERATION_INSPECT, false));
+    }
+    let mut section = String::new();
+    let mut result = None;
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') {
+            let Some(value) = line
+                .strip_prefix('[')
+                .and_then(|value| value.strip_suffix(']'))
+            else {
+                return Err(git_error("GIT-CONFIG-UNTRUSTED", OPERATION_INSPECT, false));
+            };
+            section = value
+                .split_ascii_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            continue;
+        }
+        if section != expected_section.to_ascii_lowercase() {
+            continue;
+        }
+        let (key, value) = line
+            .split_once('=')
+            .map(|(key, value)| (key.trim(), value.trim()))
+            .unwrap_or((line, "true"));
+        if key.eq_ignore_ascii_case(expected_key) {
+            result = Some(parse_config_scalar(value)?);
+        }
+    }
+    Ok(result)
+}
+
+fn parse_config_scalar(value: &str) -> Result<String, GitReviewError> {
+    let value = if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    };
+    if value.len() > 4_096 || value.chars().any(|character| character == '\0') {
+        return Err(git_error("GIT-CONFIG-UNTRUSTED", OPERATION_INSPECT, false));
+    }
+    Ok(value.replace("\\\"", "\"").replace("\\\\", "\\"))
+}
+
+fn parse_git_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => Some(true),
+        "false" | "no" | "off" | "0" | "" => Some(false),
+        _ => None,
+    }
+}
+
+fn is_submodule_layout(common_dir: &Path) -> bool {
+    let components = common_dir
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    components
+        .windows(2)
+        .any(|pair| pair[0].eq_ignore_ascii_case(".git") && pair[1] == "modules")
+}
+
+fn metadata_state_exists(
+    git_dir: &Path,
+    common_dir: &Path,
+    name: &str,
+) -> Result<bool, GitReviewError> {
+    for base in [git_dir, common_dir] {
+        match fs::symlink_metadata(base.join(name)) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(git_error("GIT-OPERATION-STATE", OPERATION_INSPECT, true)),
+        }
+    }
+    Ok(false)
+}
+
+fn read_index_state(index_file: &Path) -> Result<IndexState, GitReviewError> {
+    let lock_file = index_file.with_extension("lock");
+    let lock_metadata = match fs::symlink_metadata(&lock_file) {
+        Ok(metadata) => Some(metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return Err(git_error("GIT-INDEX-LOCK", OPERATION_INSPECT, true)),
+    };
+    let locked = lock_metadata.is_some();
+    let (bytes_fingerprint, mut metadata_fingerprint) = match fs::symlink_metadata(index_file) {
+        Ok(before) => {
+            validate_index_metadata(&before)?;
+            let bytes = fs::read(index_file)
+                .map_err(|_| git_error("GIT-INDEX-READ", OPERATION_INSPECT, true))?;
+            let after = fs::symlink_metadata(index_file)
+                .map_err(|_| git_error("GIT-INDEX-READ", OPERATION_INSPECT, true))?;
+            validate_index_metadata(&after)?;
+            if file_metadata_fingerprint(&before) != file_metadata_fingerprint(&after) {
+                return Err(git_error("GIT-STATE-RACE", OPERATION_INSPECT, true));
+            }
+            (bytes_hash(&bytes), file_metadata_fingerprint(&after))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            ("missing".to_owned(), "missing".to_owned())
+        }
+        Err(_) => return Err(git_error("GIT-INDEX-READ", OPERATION_INSPECT, true)),
+    };
+    metadata_fingerprint.push('|');
+    metadata_fingerprint.push_str(
+        &lock_metadata
+            .as_ref()
+            .map(file_metadata_fingerprint)
+            .unwrap_or_else(|| "unlocked".to_owned()),
+    );
+    Ok(IndexState {
+        bytes_fingerprint,
+        metadata_fingerprint,
+        locked,
+    })
+}
+
+fn validate_index_metadata(metadata: &fs::Metadata) -> Result<(), GitReviewError> {
+    let uid = unsafe { libc::geteuid() };
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > MAX_INDEX_BYTES
+        || !matches!(metadata.uid(), owner if owner == uid || owner == 0)
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return Err(git_error("GIT-INDEX-UNTRUSTED", OPERATION_INSPECT, false));
+    }
+    Ok(())
+}
+
+fn file_metadata_fingerprint(metadata: &fs::Metadata) -> String {
+    format!(
+        "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        metadata.dev(),
+        metadata.ino(),
+        metadata.uid(),
+        metadata.gid(),
+        metadata.permissions().mode(),
+        metadata.len(),
+        metadata.mtime(),
+        metadata.mtime_nsec(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    )
+}
+
+fn index_fingerprint(index: &IndexState, canonical_entries: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(index.bytes_fingerprint.as_bytes());
+    hasher.update(index.metadata_fingerprint.as_bytes());
+    hasher.update([u8::from(index.locked)]);
+    hasher.update(canonical_entries);
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+fn status_fingerprint(porcelain_status: &[u8], changes: &BTreeMap<String, FileSnapshot>) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(porcelain_status);
+    hash_changes(&mut hasher, changes);
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+fn hash_changes(hasher: &mut Sha256, changes: &BTreeMap<String, FileSnapshot>) {
+    for (path, entry) in changes {
+        hasher.update((path.len() as u64).to_le_bytes());
+        hasher.update(path.as_bytes());
+        match &entry.material {
+            FileMaterial::Missing => hasher.update([0]),
+            FileMaterial::Regular(bytes) => {
+                hasher.update([1]);
+                hasher.update((bytes.len() as u64).to_le_bytes());
+                hasher.update(Sha256::digest(bytes));
+            }
+            FileMaterial::Symlink(bytes) => {
+                hasher.update([2]);
+                hasher.update((bytes.len() as u64).to_le_bytes());
+                hasher.update(Sha256::digest(bytes));
+            }
+        }
+        if let Some(mode) = &entry.mode {
+            hasher.update([1]);
+            hasher.update(mode.as_bytes());
+        } else {
+            hasher.update([0]);
+        }
+        hasher.update([
+            u8::from(entry.staged),
+            u8::from(entry.unstaged),
+            u8::from(entry.untracked),
+        ]);
+    }
 }
 
 fn parse_status(bytes: &[u8]) -> Result<Vec<StatusEntry>, GitReviewError> {
@@ -692,21 +878,6 @@ fn bytes_hash(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
-fn is_safe_head_reference(value: &str) -> bool {
-    value.starts_with("refs/heads/")
-        && value.len() <= 251
-        && !value.contains("..")
-        && !value.contains("@{")
-        && !value.ends_with('.')
-        && !value.ends_with('/')
-        && !value
-            .chars()
-            .any(|character| character.is_control() || " ~^:?*[\\".contains(character))
-        && value.split('/').all(|component| {
-            !component.is_empty() && component != "." && !component.ends_with(".lock")
-        })
-}
-
 fn runner_inspect_error(error: GitRunnerError) -> GitReviewError {
     match error {
         GitRunnerError::BinaryUnavailable | GitRunnerError::Spawn => {
@@ -721,6 +892,13 @@ fn runner_inspect_error(error: GitRunnerError) -> GitReviewError {
         }
         GitRunnerError::ProcessTree => git_error("GIT-PROCESS-TREE", OPERATION_INSPECT, false),
         GitRunnerError::Io => git_error("GIT-PROCESS-IO", OPERATION_INSPECT, true),
+    }
+}
+
+fn layout_inspect_error(error: GitLayoutError) -> GitReviewError {
+    match error {
+        GitLayoutError::Invalid => git_error("GIT-REPOSITORY-IDENTITY", OPERATION_INSPECT, false),
+        GitLayoutError::Io => git_error("GIT-REPOSITORY-READ", OPERATION_INSPECT, true),
     }
 }
 

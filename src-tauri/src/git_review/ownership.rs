@@ -165,28 +165,38 @@ pub(crate) async fn evaluate_ownership(
                     && entry.mode == current_mode
             }) {
                 let entry = baseline_entry.expect("checked baseline entry");
+                let (head, head_mode) = head_material(runner, &baseline.repository, &path).await?;
                 manifest.push(ManifestEntry {
                     file_id: file_id(&path),
                     relative_path: path,
                     change_kind: infer_change_kind(
-                        &FileMaterial::Missing,
+                        &head,
                         &entry.material,
-                        None,
+                        head_mode.as_deref(),
                         entry.mode.as_deref(),
                     ),
                     ownership: OwnershipClass::PreExisting,
-                    before_hash: None,
+                    before_hash: head.content_hash(),
                     after_hash: entry.material.content_hash(),
                     additions: 0,
                     deletions: 0,
                     reason_code: Some("GIT-PREEXISTING-PROTECTED".to_owned()),
                 });
             } else {
+                let baseline_material = baseline_entry
+                    .map(|entry| entry.material.clone())
+                    .unwrap_or(FileMaterial::Missing);
+                let baseline_mode = baseline_entry.and_then(|entry| entry.mode.as_deref());
                 reasons.push(format!("GIT-EXTERNAL-CHANGE:{}", file_id(&path)));
                 manifest.push(ManifestEntry {
                     file_id: file_id(&path),
                     relative_path: path,
-                    change_kind: ChangeKind::Modified,
+                    change_kind: infer_change_kind(
+                        &baseline_material,
+                        &current_material,
+                        baseline_mode,
+                        current_mode.as_deref(),
+                    ),
                     ownership: OwnershipClass::External,
                     before_hash: baseline_entry.and_then(|entry| entry.material.content_hash()),
                     after_hash: current_material.content_hash(),
