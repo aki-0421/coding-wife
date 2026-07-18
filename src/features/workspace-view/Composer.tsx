@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import {
   ArrowUpIcon,
   AtSignIcon,
@@ -41,7 +41,6 @@ interface ComposerProps {
   readonly readiness: WorkspaceCodexState["readiness"]
   readonly repositoryHealth?: WorkspaceRecord["health"]
   readonly turnState: TurnUiState
-  readonly onAddAttachments: (files: readonly File[]) => void
   readonly onCaptureContext: (
     source: ContextSnapshotItem["source"],
   ) => void | Promise<void>
@@ -101,7 +100,6 @@ export function Composer({
   readiness,
   repositoryHealth,
   turnState,
-  onAddAttachments,
   onCaptureContext,
   onDraftChange,
   onEffortChange,
@@ -112,8 +110,9 @@ export function Composer({
   onSend,
   onStop,
 }: ComposerProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const [contextOpen, setContextOpen] = useState(false)
+  const attachmentCapabilitiesAvailable =
+    onPickAttachments !== undefined && onRegisterAttachmentPaths !== undefined
   const validAttachments = draft.attachments.filter((item) => item.valid)
   const hasContent =
     draft.text.trim().length > 0 ||
@@ -166,13 +165,15 @@ export function Composer({
   ])
 
   const addDroppedFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return
-    const paths = fileSystemPaths(files)
-    if (onRegisterAttachmentPaths !== undefined) {
-      if (paths.length > 0) void onRegisterAttachmentPaths("drop", paths)
+    if (
+      !files ||
+      files.length === 0 ||
+      onRegisterAttachmentPaths === undefined
+    ) {
       return
     }
-    onAddAttachments(Array.from(files))
+    const paths = fileSystemPaths(files)
+    if (paths.length > 0) void onRegisterAttachmentPaths("drop", paths)
   }
 
   return (
@@ -185,18 +186,6 @@ export function Composer({
           addDroppedFiles(event.dataTransfer.files)
         }}
       >
-        <input
-          className="sr-only"
-          multiple
-          onChange={(event) => {
-            addDroppedFiles(event.currentTarget.files)
-            event.currentTarget.value = ""
-          }}
-          ref={fileInputRef}
-          tabIndex={-1}
-          type="file"
-        />
-
         <div className="flex min-h-0 flex-1 flex-col">
           {draft.attachments.length > 0 || draft.contextSnapshots.length > 0 ? (
             <div
@@ -271,8 +260,7 @@ export function Composer({
                 }
                 return
               }
-              const files = Array.from(event.clipboardData.files)
-              if (files.length > 0) onAddAttachments(files)
+              if (event.clipboardData.files.length > 0) event.preventDefault()
             }}
             placeholder={copy.composerPlaceholder}
             rows={2}
@@ -283,20 +271,27 @@ export function Composer({
         <p
           className="m-0 h-[17px] truncate text-caption leading-[16.5px] text-muted-foreground"
           id="composer-help"
-          title={copy.composerHint}
+          title={
+            attachmentCapabilitiesAvailable
+              ? copy.composerHint
+              : copy.pickerUnavailable
+          }
         >
-          {copy.composerHint}
+          {attachmentCapabilitiesAvailable
+            ? copy.composerHint
+            : copy.pickerUnavailable}
         </p>
 
         <div className="flex min-h-8 flex-wrap items-end gap-xs pt-sm">
           <Button
-            disabled={turnState === "sending" || turnState === "stopping"}
+            aria-describedby="composer-help"
+            disabled={
+              onPickAttachments === undefined ||
+              turnState === "sending" ||
+              turnState === "stopping"
+            }
             onClick={() => {
-              if (onPickAttachments !== undefined) {
-                void onPickAttachments()
-              } else {
-                fileInputRef.current?.click()
-              }
+              if (onPickAttachments !== undefined) void onPickAttachments()
             }}
             size="xs"
             type="button"

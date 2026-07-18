@@ -55,7 +55,6 @@ interface ChatViewProps {
   } | null
   readonly pendingRequestIds: readonly string[]
   readonly workspaceId: string
-  readonly onAddAttachments: (files: readonly File[]) => void
   readonly onAnswerApproval: (
     request: PendingRequestView,
     decision: ApprovalDecision,
@@ -188,7 +187,6 @@ export function ChatView({
   timelineAnchor,
   pendingRequestIds,
   workspaceId,
-  onAddAttachments,
   onAnswerApproval,
   onAnswerDecision,
   onCaptureContext,
@@ -501,7 +499,6 @@ export function ChatView({
           connected={connected}
           copy={copy}
           draft={draft}
-          onAddAttachments={onAddAttachments}
           onCaptureContext={onCaptureContext}
           onDraftChange={onDraftChange}
           onEffortChange={onEffortChange}

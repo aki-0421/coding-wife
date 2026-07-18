@@ -523,32 +523,6 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     ],
   )
 
-  const addAttachmentFiles = useCallback(
-    (files: readonly File[]) => {
-      if (!adapterReady || !selectedWorkspace) return
-      const additions: readonly AttachmentItem[] = files
-        .slice(0, 10)
-        .map((file, index) => ({
-          id: `${file.name}-${file.size}-${file.lastModified}-${index}`,
-          name: file.name,
-          size: file.size,
-          valid: file.size <= 25 * 1024 * 1024,
-          relativePath: file.name,
-          kind: file.type.startsWith("image/")
-            ? ("image" as const)
-            : ("file" as const),
-          source: "drop" as const,
-          expiresAt: new Date(Date.now() + 30 * 60 * 1_000).toISOString(),
-        }))
-
-      updateDraft(selectedWorkspace.id, (current) => ({
-        ...current,
-        attachments: [...current.attachments, ...additions].slice(0, 10),
-      }))
-    },
-    [adapterReady, selectedWorkspace, updateDraft],
-  )
-
   const applyAttachmentRegistration = useCallback(
     (workspaceId: string, response: AttachmentRegistrationResponse) => {
       const additions = attachmentItems(response)
@@ -1257,7 +1231,6 @@ export function useWorkspaceViewModel(adapter?: WorkspaceViewAdapter) {
     activeTab,
     adapter,
     adapterStatus,
-    addAttachmentFiles,
     addWorkspace,
     answerApproval,
     answerDecision,

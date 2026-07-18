@@ -773,7 +773,6 @@ export function WorkspaceShell({
             history={view.history}
             lastSummary={view.lastSummary}
             muted={view.muted}
-            onAddAttachments={view.addAttachmentFiles}
             onAnswerApproval={view.answerApproval}
             onAnswerDecision={view.answerDecision}
             onCaptureContext={(source) =>
