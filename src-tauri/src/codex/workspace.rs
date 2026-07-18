@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
 use super::process::{run_bounded_command, BoundedCommandError, BoundedCommandOutput};
-use super::supervisor::CodexSupervisor;
+use super::supervisor::{CodexSupervisor, WorkspaceCancellationGuard};
 use super::types::CodexCommandError;
 
 pub const WORKSPACE_REGISTRATION_SCHEMA_VERSION: u16 = 1;
@@ -61,6 +61,19 @@ pub struct AppPrivateWorkspaceRecord {
     pub workspace_id: String,
     pub alias: String,
     pub canonical_root: PathBuf,
+}
+
+/// Immutable project linkage kept exclusively in app-private persistence.
+/// Repair uses this as a compare-and-swap token and never accepts it over IPC.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppPrivateProjectIdentity {
+    pub project_id: String,
+    pub canonical_root: PathBuf,
+    pub project_identity: String,
+    pub root_device: u64,
+    pub root_inode: u64,
+    pub git_device: u64,
+    pub git_inode: u64,
 }
 
 /// This record belongs to app-private settings and is deliberately not a
@@ -207,6 +220,7 @@ impl WorkspaceService {
         &self,
         candidate: ValidatedWorkspaceCandidate,
     ) -> Result<WorkspaceRegistration, CodexCommandError> {
+        let candidate = self.revalidate_candidate(&candidate).await?;
         if let Some(existing) = self
             .trusted
             .lock()
@@ -239,6 +253,32 @@ impl WorkspaceService {
             },
         );
         Ok(registration)
+    }
+
+    pub async fn revalidate_candidate(
+        &self,
+        candidate: &ValidatedWorkspaceCandidate,
+    ) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
+        let live = validate_git_repository(&candidate.git.canonical_root).await?;
+        if candidate.git.canonical_root != live.canonical_root
+            || candidate.git.canonical_git_dir != live.canonical_git_dir
+            || !same_repository_identity(&candidate.git, &live)
+        {
+            return Err(workspace_error("CODEX-WORKSPACE-IDENTITY-CHANGED", false));
+        }
+        Ok(ValidatedWorkspaceCandidate {
+            registration: candidate.registration.clone(),
+            git: live,
+        })
+    }
+
+    pub(crate) async fn begin_cancellation(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceCancellationGuard, CodexCommandError> {
+        self.supervisor
+            .begin_workspace_cancellation(workspace_id)
+            .await
     }
 
     pub async fn validate_private_candidate(
@@ -276,6 +316,28 @@ impl WorkspaceService {
         };
         Ok(ValidatedWorkspaceCandidate { registration, git })
     }
+}
+
+pub fn same_repository_identity(
+    left: &GitRepositoryIdentity,
+    right: &GitRepositoryIdentity,
+) -> bool {
+    left.project_identity == right.project_identity
+        && left.root_device == right.root_device
+        && left.root_inode == right.root_inode
+        && left.git_device == right.git_device
+        && left.git_inode == right.git_inode
+}
+
+pub fn matches_saved_repository_identity(
+    candidate: &GitRepositoryIdentity,
+    saved: &AppPrivateProjectIdentity,
+) -> bool {
+    candidate.project_identity == saved.project_identity
+        && candidate.root_device == saved.root_device
+        && candidate.root_inode == saved.root_inode
+        && candidate.git_device == saved.git_device
+        && candidate.git_inode == saved.git_inode
 }
 
 pub async fn validate_git_repository(
@@ -709,6 +771,57 @@ mod tests {
         let error = service.pick_and_register().await.expect_err("not git");
         assert_eq!(error.code, "CODEX-WORKSPACE-NOT-GIT");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn candidate_revalidation_rejects_same_path_git_directory_replacement() {
+        let root = git_repository();
+        fs::write(root.join("README.md"), "preserve source\n").expect("source fixture");
+        let service =
+            WorkspaceService::new(CodexSupervisor::new(), Arc::new(FixedPicker(root.clone())));
+        let candidate = service.pick_validated().await.expect("candidate");
+        fs::rename(root.join(".git"), root.join(".git-preserved"))
+            .expect("preserve original git directory");
+        let status = std::process::Command::new("/usr/bin/git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(&root)
+            .status()
+            .expect("replacement git init");
+        assert!(status.success());
+        let source_before = fs::read(root.join("README.md")).expect("source before");
+        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before");
+
+        let error = service
+            .revalidate_candidate(&candidate)
+            .await
+            .expect_err("replacement must be rejected");
+        assert_eq!(error.code, "CODEX-WORKSPACE-IDENTITY-CHANGED");
+        assert_eq!(
+            fs::read(root.join("README.md")).expect("source after"),
+            source_before
+        );
+        assert_eq!(
+            fs::read(root.join(".git/HEAD")).expect("HEAD after"),
+            head_before
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn immutable_repository_identity_survives_a_same_filesystem_move() {
+        let root = git_repository();
+        let before = validate_git_repository(&root)
+            .await
+            .expect("identity before move");
+        let moved = root.with_file_name(format!("coding-wife-repo-moved-{}", uuid::Uuid::new_v4()));
+        fs::rename(&root, &moved).expect("move repository");
+        let after = validate_git_repository(&moved)
+            .await
+            .expect("identity after move");
+
+        assert_ne!(before.canonical_root, after.canonical_root);
+        assert!(same_repository_identity(&before, &after));
+        let _ = fs::remove_dir_all(moved);
     }
 
     #[tokio::test]

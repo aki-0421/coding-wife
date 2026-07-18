@@ -70,7 +70,7 @@ read_when:
 | `WORK-F-046` | アプリは無効repositoryを拒否する | non-Git directory、bare repository、存在しないpathを選ぶと登録せず、原因と再選択を表示する | Approved | 非該当 |
 | `WORK-F-047` | アプリは読取権限不足を拒否する | repositoryまたは`.git` metadataを読めない場合は登録せず、権限不足をI/O errorと区別して表示する | Approved | 非該当 |
 | `WORK-F-048` | 利用者は送信前preflightを確認できる | Git、Codex executable、auth、`gpt-5.6-sol`、character packを`ready/warning/blocked`で表示し、blocked項目があればSendを無効にする | Approved | 非該当 |
-| `WORK-F-049` | 同じrepositoryの重複登録を防ぐ | symlink表記や`..`を含む同一canonical pathを再選択すると新規作成せず、既存workspaceを選択する | Approved | 非該当 |
+| `WORK-F-049` | 同じrepositoryの重複登録を防ぐ | symlink表記や`..`を含む同一canonical pathかつ保存済みrepository identityとexact一致するrepositoryを再選択すると新規作成せず、既存workspaceを選択する。登録中projectの同じpathが別identityへ置換されていればtyped changed errorで拒否し、登録解除済みprojectはidentity一致時だけ同じProject IDへ復帰する。identity不一致のrepositoryを追加する場合は新しいProject IDと履歴partitionを発行し、旧workspace/historyへ再linkしない | Approved | 非該当 |
 
 ### Workspace作成・一覧・切替
 
@@ -82,7 +82,7 @@ read_when:
 | `WORK-F-053` | アプリはlifecycleとattentionを別に表示する | lifecycleを変えずにNeeds answer、Approval required、Test failed、High riskをbadgeとaccessible labelで併記できる | Approved | 非該当 |
 | `WORK-F-054` | アプリは現在のrepoとbranchを表示する | selected itemとheaderに実Gitのrepo名とbranchまたはdetached HEAD短縮SHAを表示し、長い値はellipsisと全文tooltipを持つ | Approved | 非該当 |
 | `WORK-F-055` | 利用者は空一覧から最初のprojectを追加できる | workspaceが0件の時、説明、FolderPlus、keyboard shortcutを表示し、decorative card gridを表示しない | Approved | 非該当 |
-| `WORK-F-056` | 利用者はworkspaceをCanceledへ移せる | idle workspaceは確認後にCanceled groupへ移す。active/pending turnがある場合は「停止してキャンセル」と「戻る」を表示し、terminal interruptとworkspace cleanupが完了した後だけlifecycleをCanceledへ変更する。「戻る」またはinterrupt失敗ではselection、turn、lifecycle、draft、caption/TTSを変更しない。いずれの場合もsource、working tree、Git index/object/ref、履歴本文を変更しない | Approved | 非該当 |
+| `WORK-F-056` | 利用者はworkspaceをCanceledへ移せる | idle workspaceは確認後に専用native cancel commandでCanceled groupへ移す。active/pending turnがある場合は「停止してキャンセル」と「戻る」を表示し、exact turnのterminal interrupt、workspace cleanup、履歴flushが完了した後だけ同commandを実行する。native supervisorはcancel transaction中のturn開始とactive/pending turnをatomicに拒否し、generic lifecycle commandによるCanceled指定もtyped errorで拒否する。「戻る」またはinterrupt/cleanup/flush失敗ではselection、turn、lifecycle、draft、caption/TTSを変更しない。いずれの場合もsource、working tree、Git index/object/ref、履歴本文を変更しない | Approved | 非該当 |
 | `WORK-F-057` | 利用者はproject登録を外せる | 対象project配下にactive/pending turnがない時だけ、action選択と対象project名を示す最終確認の二段階を完了してproject/workspaceのapp registration metadataを削除する。実行中turnがある場合は操作を拒否し、履歴本文の変更・削除は`HIST-F-049`の別操作に限定する。repository内のfile、working tree、Git index/object/ref、共有model libraryを変更しない | Approved | 非該当 |
 
 ### 継続性と境界
@@ -97,7 +97,7 @@ read_when:
 | `WORK-F-063` | 利用者はproject contextとcharacter contextを分離して編集できる | Context tabで二つのsectionを別々に保存し、character contextからtechnical rule、permission、checkpoint policyを変更できない | Approved | 非該当 |
 | `WORK-F-064` | 利用者はboundedなread-only workspace contextを取得できる | FilesとGit diffはtrusted root内のnative Git processから5秒以内、stdout 1MiB・stderr 4KiB以内で取得し、超過・停止時はprocess treeを終了して保存しない。workspaceごとにcapture順で最新10件だけをUIとDBへ一致して残し、信頼できるproducerがないTerminal outputはdemoを含め成功表示しない | Approved | 非該当 |
 | `WORK-F-065` | native workspace読込はdemo状態と分離する | native初期化中はworkspace skeletonと読込状態だけを表示し、add/create/select/draft/context/deleteを開始しない。読込失敗時もdemo workspaceへfallbackせず、回復errorと再試行可能性だけを表示する | Approved | 非該当 |
-| `WORK-F-066` | repository healthとrepairを状態付きで扱う | 各projectを`healthy` / `missing` / `changed` / `unreadable` / `read_only` / `stale_branch`へ分類し、workspace rowとheaderへ色だけでなくlocalized textとiconで表示する。Repair pickerは新しいcanonical Git worktreeのrepository identityが対象Project IDの保存identityと一致する時だけlinkageをatomic更新し、workspace ID、history、Context、draft、summary、anchorを維持する。identity不一致、picker cancel、権限不足、I/O失敗ではlinkageとselectionを変更せず、新規project追加を案内する。repairはsource、working tree、Git index/object/refを変更しない | Approved | 非該当 |
+| `WORK-F-066` | repository healthとrepairを状態付きで扱う | 各projectを`healthy` / `missing` / `changed` / `unreadable` / `read_only` / `stale_branch`へ分類し、workspace rowとheaderへ色だけでなくlocalized textとiconで表示する。Repair pickerは新しいcanonical Git worktreeのrepository identityが対象Project IDの保存identityと一致する時だけlinkageをatomic更新し、workspace ID、history、Context、draft、summary、anchorを維持する。candidate identityはpicker直後、mutation前、activation直前、DB transaction直前にlive filesystemから再検証し、DBでは保存Project ID・旧linkage・immutable identityとのcompare-and-swapを行う。同一repositoryの通常renameは許可するが、same-path replacementとTOCTOUはtyped changed errorで拒否する。identity不一致、picker cancel、権限不足、I/O失敗ではlinkageとselectionを変更せず、新規project追加を案内する。repairはsource、working tree、Git index/object/refを変更しない | Approved | 非該当 |
 
 `RepositoryIdentityV1`は、symlinkをたどらず検証したGit common directoryのfilesystem device/inodeとGit object formatをnativeだけで保持する。通常のpath renameでは同一identityを維持し、copy、別volumeへの移動、Git directory置換、object format変更はidentity不一致としてrepairせず新規project追加を要求する。Project IDはappが一度だけ発行するopaque UUIDであり、path、workspace、branch、character selectionのいずれからも再生成しない。
 

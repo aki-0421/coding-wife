@@ -484,6 +484,13 @@ pub struct WorkspaceUpdateLifecycleRequest {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceCancelRequest {
+    pub workspace_id: String,
+    pub expected_updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkspaceSaveDraftRequest {
     pub workspace_id: String,
     pub text: String,

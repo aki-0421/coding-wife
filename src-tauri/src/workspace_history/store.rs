@@ -12,7 +12,8 @@ use sha2::{Digest, Sha256};
 use crate::codex::redaction::redact_text;
 use crate::codex::types::{ApprovalDecision, PendingKind, PendingRequestView, PendingResponseKind};
 use crate::codex::workspace::{
-    AppPrivateWorkspaceRecord, GitRepositoryIdentity, ValidatedWorkspaceCandidate,
+    matches_saved_repository_identity, AppPrivateProjectIdentity, AppPrivateWorkspaceRecord,
+    GitRepositoryIdentity, ValidatedWorkspaceCandidate,
 };
 use crate::git_review::repository::{
     is_object_id, validate_opaque_id as validate_git_opaque_id, validate_relative_path,
@@ -231,6 +232,41 @@ pub struct PersistedWorkspaceRegistration {
 }
 
 #[derive(Clone, Debug)]
+struct StoredProjectLinkage {
+    project_id: String,
+    workspace_id: String,
+    canonical_root: PathBuf,
+    registered: bool,
+    project_identity: String,
+    root_device: u64,
+    root_inode: u64,
+    git_device: u64,
+    git_inode: u64,
+}
+
+impl StoredProjectLinkage {
+    fn matches(&self, candidate: &GitRepositoryIdentity) -> bool {
+        self.project_identity == candidate.project_identity
+            && self.root_device == candidate.root_device
+            && self.root_inode == candidate.root_inode
+            && self.git_device == candidate.git_device
+            && self.git_inode == candidate.git_inode
+    }
+
+    fn private_identity(&self) -> AppPrivateProjectIdentity {
+        AppPrivateProjectIdentity {
+            project_id: self.project_id.clone(),
+            canonical_root: self.canonical_root.clone(),
+            project_identity: self.project_identity.clone(),
+            root_device: self.root_device,
+            root_inode: self.root_inode,
+            git_device: self.git_device,
+            git_inode: self.git_inode,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct PersistedSessionWorkspace {
     pub workspace: WorkspaceSummary,
     pub private_record: AppPrivateWorkspaceRecord,
@@ -310,47 +346,80 @@ impl WorkspaceHistoryStore {
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
         let root_bytes = path_to_bytes(&candidate.git.canonical_root);
 
-        if let Some(existing_id) = transaction
-            .query_row(
-                "SELECT w.id FROM projects p JOIN workspaces w ON w.project_id = p.id \
-                 WHERE p.canonical_root = ?1 ORDER BY w.created_at ASC LIMIT 1",
-                params![root_bytes],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?
-        {
+        if let Some(existing) = project_linkage_at_root(&transaction, &root_bytes)? {
+            if !existing.matches(&candidate.git) {
+                if existing.registered {
+                    return Err(history_error("WORKSPACE-PROJECT-IDENTITY-CHANGED", false));
+                }
+                move_unregistered_project_to_private_root(&transaction, &existing.project_id)?;
+            } else {
+                let existing_id = existing.workspace_id;
+                let now = now();
+                transaction
+                    .execute(
+                        "UPDATE projects SET registered = 1, alias = ?1,
+                           branch = ?2, head = ?3, detached = ?4, health = 'ready', updated_at = ?5
+                         WHERE id = ?6",
+                        params![
+                            candidate.registration.alias,
+                            candidate.git.branch,
+                            candidate.git.head,
+                            i64::from(candidate.git.detached),
+                            now,
+                            existing.project_id,
+                        ],
+                    )
+                    .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
+                transaction
+                    .execute(
+                        "UPDATE workspaces SET health = 'ready', updated_at = ?1
+                         WHERE project_id = ?2",
+                        params![now, existing.project_id],
+                    )
+                    .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
+                let workspace = workspace_by_id(&transaction, &existing_id)?;
+                let private_record = private_workspace_by_id(&transaction, &existing_id)?;
+                transaction
+                    .commit()
+                    .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
+                return Ok(PersistedWorkspaceRegistration {
+                    workspace,
+                    private_record,
+                    duplicate: true,
+                });
+            }
+        }
+
+        if let Some(existing) = project_linkage_by_identity(&transaction, &candidate.git)? {
+            if existing.registered {
+                return Err(history_error("WORKSPACE-PROJECT-ALREADY-REGISTERED", false));
+            }
             let now = now();
             transaction
                 .execute(
-                    "UPDATE projects SET registered = 1, alias = ?1, project_identity = ?2,
-                       root_device = ?3, root_inode = ?4, git_device = ?5, git_inode = ?6,
-                       branch = ?7, head = ?8, detached = ?9, health = 'ready', updated_at = ?10
-                     WHERE id = (SELECT project_id FROM workspaces WHERE id = ?11)",
+                    "UPDATE projects SET canonical_root = ?1, registered = 1, alias = ?2,
+                       branch = ?3, head = ?4, detached = ?5, health = 'ready', updated_at = ?6
+                     WHERE id = ?7",
                     params![
+                        root_bytes,
                         candidate.registration.alias,
-                        candidate.git.project_identity,
-                        candidate.git.root_device as i64,
-                        candidate.git.root_inode as i64,
-                        candidate.git.git_device as i64,
-                        candidate.git.git_inode as i64,
                         candidate.git.branch,
                         candidate.git.head,
                         i64::from(candidate.git.detached),
                         now,
-                        existing_id,
+                        existing.project_id,
                     ],
                 )
                 .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
             transaction
                 .execute(
                     "UPDATE workspaces SET health = 'ready', updated_at = ?1
-                     WHERE project_id = (SELECT project_id FROM workspaces WHERE id = ?2)",
-                    params![now, existing_id],
+                     WHERE project_id = ?2",
+                    params![now, existing.project_id],
                 )
                 .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
-            let workspace = workspace_by_id(&transaction, &existing_id)?;
-            let private_record = private_workspace_by_id(&transaction, &existing_id)?;
+            let workspace = workspace_by_id(&transaction, &existing.workspace_id)?;
+            let private_record = private_workspace_by_id(&transaction, &existing.workspace_id)?;
             transaction
                 .commit()
                 .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
@@ -576,9 +645,32 @@ impl WorkspaceHistoryStore {
         Ok(records)
     }
 
+    pub fn private_project_identity(
+        &self,
+        workspace_id: &str,
+    ) -> Result<AppPrivateProjectIdentity, WorkspaceHistoryError> {
+        validate_workspace_id(workspace_id)?;
+        let inner = self.lock();
+        let linkage = inner
+            .connection
+            .query_row(
+                "SELECT p.id, w.id, p.canonical_root, p.registered, p.project_identity,
+                        p.root_device, p.root_inode, p.git_device, p.git_inode
+                 FROM workspaces w JOIN projects p ON p.id = w.project_id
+                 WHERE w.id = ?1 AND p.registered = 1",
+                params![workspace_id],
+                decode_project_linkage,
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))?
+            .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
+        Ok(linkage.private_identity())
+    }
+
     pub fn repair_project(
         &self,
         workspace_id: &str,
+        expected: &AppPrivateProjectIdentity,
         candidate: &ValidatedWorkspaceCandidate,
     ) -> Result<WorkspaceStateSnapshot, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
@@ -588,43 +680,49 @@ impl WorkspaceHistoryStore {
             .connection
             .transaction()
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
-        let project_id = transaction
+        let current = transaction
             .query_row(
-                "SELECT p.id FROM workspaces w JOIN projects p ON p.id = w.project_id
+                "SELECT p.id, w.id, p.canonical_root, p.registered, p.project_identity,
+                        p.root_device, p.root_inode, p.git_device, p.git_inode
+                 FROM workspaces w JOIN projects p ON p.id = w.project_id
                  WHERE w.id = ?1 AND p.registered = 1",
                 params![workspace_id],
-                |row| row.get::<_, String>(0),
+                decode_project_linkage,
             )
             .optional()
             .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))?
             .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
+        if current.private_identity() != *expected {
+            return Err(history_error("WORKSPACE-REPAIR-LINKAGE-STALE", true));
+        }
+        if !matches_saved_repository_identity(&candidate.git, expected) {
+            return Err(history_error("WORKSPACE-REPAIR-IDENTITY-CHANGED", false));
+        }
+        let project_id = current.project_id;
         let root_bytes = path_to_bytes(&candidate.git.canonical_root);
         let root_owner = transaction
             .query_row(
-                "SELECT id FROM projects WHERE canonical_root = ?1 AND id != ?2",
+                "SELECT id, registered FROM projects WHERE canonical_root = ?1 AND id != ?2",
                 params![root_bytes, project_id],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0)),
             )
             .optional()
             .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))?;
-        if root_owner.is_some() {
-            return Err(history_error("WORKSPACE-REPAIR-ROOT-IN-USE", false));
+        if let Some((owner_id, registered)) = root_owner {
+            if registered {
+                return Err(history_error("WORKSPACE-REPAIR-ROOT-IN-USE", false));
+            }
+            move_unregistered_project_to_private_root(&transaction, &owner_id)?;
         }
         let updated_at = now();
         transaction
             .execute(
-                "UPDATE projects SET canonical_root = ?1, alias = ?2, project_identity = ?3,
-                   root_device = ?4, root_inode = ?5, git_device = ?6, git_inode = ?7,
-                   branch = ?8, head = ?9, detached = ?10, health = 'ready',
-                   registered = 1, updated_at = ?11 WHERE id = ?12",
+                "UPDATE projects SET canonical_root = ?1, alias = ?2,
+                   branch = ?3, head = ?4, detached = ?5, health = 'ready',
+                   registered = 1, updated_at = ?6 WHERE id = ?7",
                 params![
                     root_bytes,
                     candidate.registration.alias,
-                    candidate.git.project_identity,
-                    candidate.git.root_device as i64,
-                    candidate.git.root_inode as i64,
-                    candidate.git.git_device as i64,
-                    candidate.git.git_inode as i64,
                     candidate.git.branch,
                     candidate.git.head,
                     i64::from(candidate.git.detached),
@@ -670,8 +768,9 @@ impl WorkspaceHistoryStore {
             .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
         transaction
             .execute(
-                "UPDATE projects SET registered = 0, updated_at = ?1 WHERE id = ?2",
-                params![now(), project_id],
+                "UPDATE projects SET registered = 0, canonical_root = ?1, updated_at = ?2
+                 WHERE id = ?3",
+                params![private_unregistered_root(&project_id), now(), project_id],
             )
             .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
         let active_workspace_id = active_workspace(&transaction)?;
@@ -2644,6 +2743,80 @@ fn decode_workspace_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceSu
     })
 }
 
+fn decode_project_linkage(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredProjectLinkage> {
+    Ok(StoredProjectLinkage {
+        project_id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        canonical_root: path_from_bytes(row.get::<_, Vec<u8>>(2)?),
+        registered: row.get::<_, i64>(3)? != 0,
+        project_identity: row.get(4)?,
+        root_device: row.get::<_, i64>(5)? as u64,
+        root_inode: row.get::<_, i64>(6)? as u64,
+        git_device: row.get::<_, i64>(7)? as u64,
+        git_inode: row.get::<_, i64>(8)? as u64,
+    })
+}
+
+fn project_linkage_at_root(
+    transaction: &Transaction<'_>,
+    root: &[u8],
+) -> Result<Option<StoredProjectLinkage>, WorkspaceHistoryError> {
+    transaction
+        .query_row(
+            "SELECT p.id, w.id, p.canonical_root, p.registered, p.project_identity,
+                    p.root_device, p.root_inode, p.git_device, p.git_inode
+             FROM projects p JOIN workspaces w ON w.project_id = p.id
+             WHERE p.canonical_root = ?1
+             ORDER BY w.created_at ASC LIMIT 1",
+            params![root],
+            decode_project_linkage,
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))
+}
+
+fn project_linkage_by_identity(
+    transaction: &Transaction<'_>,
+    identity: &GitRepositoryIdentity,
+) -> Result<Option<StoredProjectLinkage>, WorkspaceHistoryError> {
+    transaction
+        .query_row(
+            "SELECT p.id, w.id, p.canonical_root, p.registered, p.project_identity,
+                    p.root_device, p.root_inode, p.git_device, p.git_inode
+             FROM projects p JOIN workspaces w ON w.project_id = p.id
+             WHERE p.project_identity = ?1 AND p.root_device = ?2 AND p.root_inode = ?3
+               AND p.git_device = ?4 AND p.git_inode = ?5
+             ORDER BY p.registered DESC, p.created_at ASC, w.created_at ASC LIMIT 1",
+            params![
+                identity.project_identity,
+                identity.root_device as i64,
+                identity.root_inode as i64,
+                identity.git_device as i64,
+                identity.git_inode as i64,
+            ],
+            decode_project_linkage,
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))
+}
+
+fn private_unregistered_root(project_id: &str) -> Vec<u8> {
+    format!("\0coding-wife-unregistered:{project_id}").into_bytes()
+}
+
+fn move_unregistered_project_to_private_root(
+    transaction: &Transaction<'_>,
+    project_id: &str,
+) -> Result<(), WorkspaceHistoryError> {
+    transaction
+        .execute(
+            "UPDATE projects SET canonical_root = ?1 WHERE id = ?2 AND registered = 0",
+            params![private_unregistered_root(project_id), project_id],
+        )
+        .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
+    Ok(())
+}
+
 fn private_workspace_by_id(
     connection: &Connection,
     workspace_id: &str,
@@ -2982,6 +3155,28 @@ mod tests {
         root
     }
 
+    fn git_status(root: &Path) -> Vec<u8> {
+        let output = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(root)
+            .args(["status", "--porcelain=v1", "--untracked-files=all"])
+            .output()
+            .expect("git status");
+        assert!(output.status.success());
+        output.stdout
+    }
+
+    fn replace_git_directory(root: &Path) {
+        fs::rename(root.join(".git"), root.join(".git-preserved"))
+            .expect("preserve original git directory");
+        let status = std::process::Command::new("/usr/bin/git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(root)
+            .status()
+            .expect("replace git directory");
+        assert!(status.success());
+    }
+
     fn reference_validation(root: &Path) -> ProjectReferenceValidation {
         let root = fs::canonicalize(root).expect("canonical reference root");
         let metadata = fs::metadata(&root).expect("reference root metadata");
@@ -3225,6 +3420,210 @@ mod tests {
 
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn registered_same_path_replacement_is_rejected_without_relinking_history() {
+        let data = temp_directory("history-registered-replacement");
+        let root = git_repository();
+        fs::write(root.join("README.md"), "preserve source\n").expect("source fixture");
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let registration = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration");
+        let workspace_id = registration.workspace.workspace_id.clone();
+        let project_id = registration.workspace.project_id.clone();
+        store
+            .save_draft(&workspace_id, "Preserved draft", ReasoningEffort::Max, 0)
+            .expect("draft");
+        let history_before = store
+            .timeline(&workspace_id, None, 200, None)
+            .expect("history")
+            .items;
+
+        replace_git_directory(&root);
+        let source_before = fs::read(root.join("README.md")).expect("source before");
+        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before");
+        let status_before = git_status(&root);
+        let error = store
+            .register_candidate(&candidate(&root).await)
+            .expect_err("replacement must not reuse a registered project");
+
+        assert_eq!(error.code, "WORKSPACE-PROJECT-IDENTITY-CHANGED");
+        let snapshot = store
+            .select_workspace(&workspace_id)
+            .expect("original workspace remains registered");
+        assert_eq!(snapshot.workspaces[0].project_id, project_id);
+        assert_eq!(snapshot.draft.expect("draft").text, "Preserved draft");
+        assert_eq!(
+            store
+                .timeline(&workspace_id, None, 200, None)
+                .expect("history after")
+                .items,
+            history_before
+        );
+        assert_eq!(
+            fs::read(root.join("README.md")).expect("source after"),
+            source_before
+        );
+        assert_eq!(
+            fs::read(root.join(".git/HEAD")).expect("HEAD after"),
+            head_before
+        );
+        assert_eq!(git_status(&root), status_before);
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn replacement_after_unregister_gets_a_fresh_project_history_partition() {
+        let data = temp_directory("history-unregistered-replacement");
+        let root = git_repository();
+        fs::write(root.join("README.md"), "preserve source\n").expect("source fixture");
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let original = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration");
+        let old_workspace_id = original.workspace.workspace_id.clone();
+        let old_project_id = original.workspace.project_id.clone();
+        store
+            .save_draft(
+                &old_workspace_id,
+                "Old history draft",
+                ReasoningEffort::Max,
+                0,
+            )
+            .expect("draft");
+        let old_history = store
+            .timeline(&old_workspace_id, None, 200, None)
+            .expect("old history")
+            .items;
+        store
+            .unregister_project(&old_workspace_id)
+            .expect("unregister");
+
+        replace_git_directory(&root);
+        let source_before = fs::read(root.join("README.md")).expect("source before");
+        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before");
+        let status_before = git_status(&root);
+        let replacement = store
+            .register_candidate(&candidate(&root).await)
+            .expect("register replacement as new project");
+
+        assert!(!replacement.duplicate);
+        assert_ne!(replacement.workspace.project_id, old_project_id);
+        assert_ne!(replacement.workspace.workspace_id, old_workspace_id);
+        assert_eq!(
+            store
+                .select_workspace(&replacement.workspace.workspace_id)
+                .expect("select replacement")
+                .draft
+                .expect("replacement draft")
+                .text,
+            ""
+        );
+        assert_eq!(
+            store
+                .load_editable_context(&old_workspace_id)
+                .expect("old context remains app-private")
+                .workspace_id,
+            old_workspace_id
+        );
+        assert_eq!(
+            store
+                .timeline(&old_workspace_id, None, 200, None)
+                .expect("old history remains app-private")
+                .items,
+            old_history
+        );
+        assert_eq!(
+            fs::read(root.join("README.md")).expect("source after"),
+            source_before
+        );
+        assert_eq!(
+            fs::read(root.join(".git/HEAD")).expect("HEAD after"),
+            head_before
+        );
+        assert_eq!(git_status(&root), status_before);
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn repair_requires_saved_identity_and_allows_a_same_repository_move() {
+        let data = temp_directory("history-repair-identity");
+        let root = git_repository();
+        fs::write(root.join("README.md"), "preserve source\n").expect("source fixture");
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let registration = store
+            .register_candidate(&candidate(&root).await)
+            .expect("registration");
+        let workspace_id = registration.workspace.workspace_id;
+        let saved = store
+            .private_project_identity(&workspace_id)
+            .expect("saved identity");
+        let different = git_repository();
+        let mismatch = candidate(&different).await;
+        let history_before = store
+            .timeline(&workspace_id, None, 200, None)
+            .expect("history")
+            .items;
+
+        let mismatch_error = store
+            .repair_project(&workspace_id, &saved, &mismatch)
+            .expect_err("different repository must not repair linkage");
+        assert_eq!(mismatch_error.code, "WORKSPACE-REPAIR-IDENTITY-CHANGED");
+        assert_eq!(
+            store
+                .private_workspace_record(&workspace_id)
+                .expect("unchanged linkage")
+                .canonical_root,
+            fs::canonicalize(&root).expect("canonical original")
+        );
+        assert_eq!(
+            store
+                .timeline(&workspace_id, None, 200, None)
+                .expect("unchanged history")
+                .items,
+            history_before
+        );
+
+        let moved = root.with_file_name(format!(
+            "coding-wife-history-repo-moved-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::rename(&root, &moved).expect("move repository");
+        let source_before = fs::read(moved.join("README.md")).expect("source before");
+        let head_before = fs::read(moved.join(".git/HEAD")).expect("HEAD before");
+        let status_before = git_status(&moved);
+        let moved_candidate = candidate(&moved).await;
+        let repaired = store
+            .repair_project(&workspace_id, &saved, &moved_candidate)
+            .expect("same repository move repairs linkage");
+
+        assert_eq!(repaired.workspaces[0].workspace_id, workspace_id);
+        assert_eq!(
+            store
+                .private_workspace_record(&workspace_id)
+                .expect("moved linkage")
+                .canonical_root,
+            fs::canonicalize(&moved).expect("canonical moved")
+        );
+        assert_eq!(
+            fs::read(moved.join("README.md")).expect("source after"),
+            source_before
+        );
+        assert_eq!(
+            fs::read(moved.join(".git/HEAD")).expect("HEAD after"),
+            head_before
+        );
+        assert_eq!(git_status(&moved), status_before);
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(moved);
+        let _ = fs::remove_dir_all(different);
     }
 
     #[tokio::test]

@@ -7,7 +7,10 @@ use tokio::sync::{Mutex, Notify};
 
 use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
-use crate::codex::workspace::{ValidatedWorkspaceCandidate, WorkspaceService};
+use crate::codex::workspace::{
+    matches_saved_repository_identity, AppPrivateProjectIdentity, ValidatedWorkspaceCandidate,
+    WorkspaceService,
+};
 
 use super::editable_context::{
     capture_project_reference_manifest, normalize_character_context, normalize_project_context,
@@ -17,14 +20,14 @@ use super::store::WorkspaceHistoryStore;
 use super::types::{
     AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, ContextSource,
     HistoryMode, NormalizedDomainEvent, TimelinePage, VersionedCharacterContext,
-    VersionedProjectContext, WorkspaceCommandError, WorkspaceCreateSessionRequest,
-    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView,
-    WorkspaceEditableContext, WorkspaceHealth, WorkspaceLoadEditableContextRequest,
-    WorkspacePickOutcome, WorkspacePickResponse, WorkspaceSaveCharacterContextRequest,
-    WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest, WorkspaceSaveProjectContextRequest,
-    WorkspaceSelectRequest, WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineRequest,
-    WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
-    WORKSPACE_HISTORY_SCHEMA_VERSION,
+    VersionedProjectContext, WorkspaceCancelRequest, WorkspaceCommandError,
+    WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
+    WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth,
+    WorkspaceLoadEditableContextRequest, WorkspacePickOutcome, WorkspacePickResponse,
+    WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
+    WorkspaceSaveProjectContextRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
+    WorkspaceSummary, WorkspaceTimelineRequest, WorkspaceTurnContextSnapshot,
+    WorkspaceUpdateLifecycleRequest, WORKSPACE_HISTORY_SCHEMA_VERSION,
 };
 
 const PICK_CANCELED_CODE: &str = "CODEX-WORKSPACE-PICK-CANCELED";
@@ -373,6 +376,10 @@ impl WorkspaceHistoryService {
             .store
             .private_project_workspace_records(&request.workspace_id)
             .map_err(|error| history_error("workspace_repair", error))?;
+        let saved_identity = self
+            .store
+            .private_project_identity(&request.workspace_id)
+            .map_err(|error| history_error("workspace_repair", error))?;
         let selected = match self.workspace.pick_validated().await {
             Ok(candidate) => candidate,
             Err(error) if error.code == PICK_CANCELED_CODE => {
@@ -383,6 +390,12 @@ impl WorkspaceHistoryService {
             }
             Err(error) => return Err(codex_error("workspace_repair", error)),
         };
+        let selected = self
+            .workspace
+            .revalidate_candidate(&selected)
+            .await
+            .map_err(|error| codex_error("workspace_repair", error))?;
+        ensure_repair_identity(&selected, &saved_identity)?;
 
         let mut deactivated = Vec::new();
         for record in &original_records {
@@ -395,6 +408,18 @@ impl WorkspaceHistoryService {
                 return Err(codex_error("workspace_repair", error));
             }
             deactivated.push(record.clone());
+        }
+
+        let selected = match self.workspace.revalidate_candidate(&selected).await {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                self.restore_private_records(&original_records).await;
+                return Err(codex_error("workspace_repair", error));
+            }
+        };
+        if let Err(error) = ensure_repair_identity(&selected, &saved_identity) {
+            self.restore_private_records(&original_records).await;
+            return Err(error);
         }
 
         let mut activated_ids = Vec::new();
@@ -410,7 +435,24 @@ impl WorkspaceHistoryService {
             activated_ids.push(record.workspace_id.clone());
         }
 
-        match self.store.repair_project(&request.workspace_id, &selected) {
+        let selected = match self.workspace.revalidate_candidate(&selected).await {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                self.deactivate_records(&activated_ids).await;
+                self.restore_private_records(&original_records).await;
+                return Err(codex_error("workspace_repair", error));
+            }
+        };
+        if let Err(error) = ensure_repair_identity(&selected, &saved_identity) {
+            self.deactivate_records(&activated_ids).await;
+            self.restore_private_records(&original_records).await;
+            return Err(error);
+        }
+
+        match self
+            .store
+            .repair_project(&request.workspace_id, &saved_identity, &selected)
+        {
             Ok(state) => Ok(state),
             Err(error) => {
                 self.deactivate_records(&activated_ids).await;
@@ -456,6 +498,13 @@ impl WorkspaceHistoryService {
         request: WorkspaceUpdateLifecycleRequest,
     ) -> Result<WorkspaceSummary, WorkspaceCommandError> {
         self.ensure_startup_ready("workspace_update_lifecycle")?;
+        if request.lifecycle == super::types::WorkspaceLifecycle::Canceled {
+            return Err(WorkspaceCommandError::new(
+                "WORKSPACE-CANCEL-COMMAND-REQUIRED",
+                "workspace_update_lifecycle",
+                false,
+            ));
+        }
         let _operation = self.operation_lock.lock().await;
         self.store
             .update_lifecycle(
@@ -464,6 +513,26 @@ impl WorkspaceHistoryService {
                 &request.expected_updated_at,
             )
             .map_err(|error| history_error("workspace_update_lifecycle", error))
+    }
+
+    pub async fn cancel(
+        &self,
+        request: WorkspaceCancelRequest,
+    ) -> Result<WorkspaceSummary, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_cancel")?;
+        let _operation = self.operation_lock.lock().await;
+        let guard = self
+            .workspace
+            .begin_cancellation(&request.workspace_id)
+            .await
+            .map_err(|error| codex_error("workspace_cancel", error))?;
+        let result = self.store.update_lifecycle(
+            &request.workspace_id,
+            super::types::WorkspaceLifecycle::Canceled,
+            &request.expected_updated_at,
+        );
+        guard.release().await;
+        result.map_err(|error| history_error("workspace_cancel", error))
     }
 
     pub async fn save_draft(
@@ -697,6 +766,11 @@ impl WorkspaceHistoryService {
         candidate: ValidatedWorkspaceCandidate,
         operation: &'static str,
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        let candidate = self
+            .workspace
+            .revalidate_candidate(&candidate)
+            .await
+            .map_err(|error| codex_error(operation, error))?;
         let persisted = self
             .store
             .register_candidate(&candidate)
@@ -897,6 +971,21 @@ fn health_for_preflight_error(error: &CodexCommandError) -> WorkspaceHealth {
             WorkspaceHealth::ReadOnly
         }
         _ => WorkspaceHealth::Unreadable,
+    }
+}
+
+fn ensure_repair_identity(
+    candidate: &ValidatedWorkspaceCandidate,
+    saved: &AppPrivateProjectIdentity,
+) -> Result<(), WorkspaceCommandError> {
+    if matches_saved_repository_identity(&candidate.git, saved) {
+        Ok(())
+    } else {
+        Err(WorkspaceCommandError::new(
+            "WORKSPACE-REPAIR-IDENTITY-CHANGED",
+            "workspace_repair",
+            false,
+        ))
     }
 }
 
@@ -1177,6 +1266,55 @@ mod tests {
 
         assert_eq!(error.code, "CODEX-WORKSPACE-MISSING");
         assert!(service.list().expect("state").workspaces.is_empty());
+    }
+
+    #[tokio::test]
+    async fn canceled_lifecycle_requires_the_supervisor_gated_command() {
+        let (service, root, data, workspace_id) =
+            registered_context_service("cancel-command").await;
+        let before = service
+            .list()
+            .expect("state")
+            .workspaces
+            .into_iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .expect("workspace");
+
+        let direct_error = service
+            .update_lifecycle(WorkspaceUpdateLifecycleRequest {
+                workspace_id: workspace_id.clone(),
+                lifecycle: super::super::types::WorkspaceLifecycle::Canceled,
+                expected_updated_at: before.updated_at.clone(),
+            })
+            .await
+            .expect_err("generic command must reject canceled lifecycle");
+        assert_eq!(direct_error.code, "WORKSPACE-CANCEL-COMMAND-REQUIRED");
+        assert_eq!(
+            service
+                .list()
+                .expect("unchanged state")
+                .workspaces
+                .into_iter()
+                .find(|workspace| workspace.workspace_id == workspace_id)
+                .expect("workspace")
+                .lifecycle,
+            before.lifecycle
+        );
+
+        let canceled = service
+            .cancel(WorkspaceCancelRequest {
+                workspace_id: workspace_id.clone(),
+                expected_updated_at: before.updated_at,
+            })
+            .await
+            .expect("dedicated cancel");
+        assert_eq!(
+            canceled.lifecycle,
+            super::super::types::WorkspaceLifecycle::Canceled
+        );
+
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]

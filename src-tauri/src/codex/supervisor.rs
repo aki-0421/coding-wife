@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
@@ -100,6 +100,7 @@ struct SupervisorState {
     active_turn_id: Option<String>,
     active_turn_effort: Option<ReasoningPreset>,
     pending_turn_start: Option<PendingTurnStart>,
+    workspace_cancellation_gates: HashSet<String>,
     main_work_units: HashMap<(String, String), MainWorkUnitLease>,
     skill_injection_audits: HashMap<String, MainSkillInjectionAudit>,
     next_turn_start_token: u64,
@@ -130,6 +131,36 @@ struct PendingTurnStartGuard {
     generation: u64,
     token: u64,
     armed: bool,
+}
+
+pub(crate) struct WorkspaceCancellationGuard {
+    supervisor: CodexSupervisor,
+    workspace_id: String,
+    armed: bool,
+}
+
+impl WorkspaceCancellationGuard {
+    pub(crate) async fn release(mut self) {
+        self.supervisor
+            .release_workspace_cancellation(&self.workspace_id)
+            .await;
+        self.armed = false;
+    }
+}
+
+impl Drop for WorkspaceCancellationGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let supervisor = self.supervisor.clone();
+        let workspace_id = self.workspace_id.clone();
+        tauri::async_runtime::spawn(async move {
+            supervisor
+                .release_workspace_cancellation(&workspace_id)
+                .await;
+        });
+    }
 }
 
 impl PendingTurnStartGuard {
@@ -359,6 +390,57 @@ impl CodexSupervisor {
             state.active_workspace = None;
         }
         Ok(())
+    }
+
+    pub(crate) async fn begin_workspace_cancellation(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceCancellationGuard, CodexCommandError> {
+        let mut state = self.inner.state.lock().await;
+        if !state.workspaces.contains_key(workspace_id) {
+            return Err(command_error(
+                "CODEX-WORKSPACE-MISSING",
+                "codex.workspace.cancel",
+                false,
+            ));
+        }
+        let turn_active = state.active_workspace.as_deref() == Some(workspace_id)
+            && state.active_turn_id.is_some();
+        let turn_pending = state
+            .pending_turn_start
+            .as_ref()
+            .is_some_and(|pending| pending.workspace_id == workspace_id);
+        if turn_active || turn_pending {
+            return Err(command_error(
+                "CODEX-WORKSPACE-ACTIVE",
+                "codex.workspace.cancel",
+                true,
+            ));
+        }
+        if !state
+            .workspace_cancellation_gates
+            .insert(workspace_id.to_owned())
+        {
+            return Err(command_error(
+                "CODEX-WORKSPACE-LIFECYCLE-MUTATION",
+                "codex.workspace.cancel",
+                true,
+            ));
+        }
+        Ok(WorkspaceCancellationGuard {
+            supervisor: self.clone(),
+            workspace_id: workspace_id.to_owned(),
+            armed: true,
+        })
+    }
+
+    async fn release_workspace_cancellation(&self, workspace_id: &str) {
+        self.inner
+            .state
+            .lock()
+            .await
+            .workspace_cancellation_gates
+            .remove(workspace_id);
     }
 
     pub async fn set_explicit_binary(&self, path: Option<PathBuf>) {
@@ -964,6 +1046,7 @@ impl CodexSupervisor {
         let (raw_thread, token) = {
             let mut state = self.inner.state.lock().await;
             ensure_generation(&state, generation, "turn/start")?;
+            ensure_workspace_turn_start_allowed(&state, &request.workspace_id, "turn/start")?;
             if state.active_turn_id.is_some() || state.pending_turn_start.is_some() {
                 return Err(command_error("CODEX-TURN-ACTIVE", "turn/start", false));
             }
@@ -1258,6 +1341,11 @@ impl CodexSupervisor {
         let (claim, token) = {
             let mut state = self.inner.state.lock().await;
             ensure_generation(&state, generation, "codex.decision.answer")?;
+            ensure_workspace_turn_start_allowed(
+                &state,
+                &request.workspace_id,
+                "codex.decision.answer",
+            )?;
             if state.active_turn_id.is_some() || state.pending_turn_start.is_some() {
                 return Err(command_error(
                     "CODEX-TURN-ACTIVE",
@@ -2317,6 +2405,22 @@ fn ensure_generation(
     }
 }
 
+fn ensure_workspace_turn_start_allowed(
+    state: &SupervisorState,
+    workspace_id: &str,
+    operation: &str,
+) -> Result<(), CodexCommandError> {
+    if state.workspace_cancellation_gates.contains(workspace_id) {
+        Err(command_error(
+            "CODEX-WORKSPACE-LIFECYCLE-MUTATION",
+            operation,
+            true,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 fn next_turn_start_token(state: &mut SupervisorState) -> u64 {
     state.next_turn_start_token = state.next_turn_start_token.wrapping_add(1).max(1);
     state.next_turn_start_token
@@ -2504,6 +2608,88 @@ mod tests {
             version: "1.0.0".to_owned(),
             content_digest: format!("sha256:{}", "a".repeat(64)),
         }
+    }
+
+    fn pending_turn_start(workspace_id: &str) -> PendingTurnStart {
+        PendingTurnStart {
+            token: 1,
+            generation: 1,
+            workspace_id: workspace_id.to_owned(),
+            raw_thread_id: "thread-raw".to_owned(),
+            thread_handle: "thread-handle".to_owned(),
+            effort: ReasoningPreset::Low,
+            client_message_id: "message".to_owned(),
+            raw_turn_id: None,
+            turn_handle: None,
+            terminal: false,
+            purpose: PendingTurnStartPurpose::User,
+            attachment_snapshot: None,
+            skill_injection: skill_audit(),
+            main_work_unit: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_gate_rejects_active_and_pending_turns_atomically() {
+        let supervisor = CodexSupervisor::new();
+        {
+            let mut state = supervisor.inner.state.lock().await;
+            state
+                .workspaces
+                .insert("workspace-one".to_owned(), PathBuf::from("/workspace"));
+            state.active_workspace = Some("workspace-one".to_owned());
+            state.active_turn_id = Some("turn-raw".to_owned());
+        }
+        assert_eq!(
+            supervisor
+                .begin_workspace_cancellation("workspace-one")
+                .await
+                .err()
+                .expect("active turn must reject cancellation")
+                .code,
+            "CODEX-WORKSPACE-ACTIVE"
+        );
+        {
+            let mut state = supervisor.inner.state.lock().await;
+            state.active_turn_id = None;
+            state.pending_turn_start = Some(pending_turn_start("workspace-one"));
+        }
+        assert_eq!(
+            supervisor
+                .begin_workspace_cancellation("workspace-one")
+                .await
+                .err()
+                .expect("pending turn must reject cancellation")
+                .code,
+            "CODEX-WORKSPACE-ACTIVE"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_gate_blocks_turn_reservation_until_released() {
+        let supervisor = CodexSupervisor::new();
+        {
+            let mut state = supervisor.inner.state.lock().await;
+            state
+                .workspaces
+                .insert("workspace-one".to_owned(), PathBuf::from("/workspace"));
+        }
+        let guard = supervisor
+            .begin_workspace_cancellation("workspace-one")
+            .await
+            .expect("idle workspace cancellation gate");
+        {
+            let state = supervisor.inner.state.lock().await;
+            assert_eq!(
+                ensure_workspace_turn_start_allowed(&state, "workspace-one", "turn/start")
+                    .expect_err("turn reservation must fail while cancellation mutates lifecycle")
+                    .code,
+                "CODEX-WORKSPACE-LIFECYCLE-MUTATION"
+            );
+        }
+        guard.release().await;
+        let state = supervisor.inner.state.lock().await;
+        assert!(ensure_workspace_turn_start_allowed(&state, "workspace-one", "turn/start").is_ok());
     }
 
     #[test]

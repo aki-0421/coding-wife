@@ -3,10 +3,10 @@ use tauri::State;
 use super::service::WorkspaceHistoryService;
 use super::types::{
     AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, TimelinePage,
-    VersionedCharacterContext, VersionedProjectContext, WorkspaceCommandError,
-    WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeRequest, WorkspaceDeleteChallengeView,
-    WorkspaceDeleteRequest, WorkspaceDraftView, WorkspaceEditableContext,
-    WorkspaceLoadEditableContextRequest, WorkspacePickResponse,
+    VersionedCharacterContext, VersionedProjectContext, WorkspaceCancelRequest,
+    WorkspaceCommandError, WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeRequest,
+    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView,
+    WorkspaceEditableContext, WorkspaceLoadEditableContextRequest, WorkspacePickResponse,
     WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
     WorkspaceSaveProjectContextRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
     WorkspaceSummary, WorkspaceTimelineRequest, WorkspaceTurnContextSnapshot,
@@ -65,6 +65,14 @@ pub async fn workspace_update_lifecycle(
     service: State<'_, WorkspaceHistoryService>,
 ) -> Result<WorkspaceSummary, WorkspaceCommandError> {
     service.update_lifecycle(request).await
+}
+
+#[tauri::command]
+pub async fn workspace_cancel(
+    request: WorkspaceCancelRequest,
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspaceSummary, WorkspaceCommandError> {
+    service.cancel(request).await
 }
 
 #[tauri::command]
