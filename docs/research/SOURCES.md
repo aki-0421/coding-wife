@@ -2,6 +2,7 @@
 title: "出典台帳"
 description: "調査資料で参照するOpenAI、Tauri、Live2D、Git、セキュリティ、Human-AI Interactionの出典と確認論点を管理する。"
 updated: 2026-07-18
+last_verified: 2026-07-18
 read_when:
   - "調査結論の根拠を確認する、または公開情報を再検証して出典を更新するとき。"
 ---
@@ -100,6 +101,27 @@ MCP自体の脅威と防御については[SEC-04](#sec-04)も参照する。
 - 音声モデル・音声種別の可用性が変化するため、製品で固定値を埋め込まず設定・能力検出を行うべきこと。
 
 読み上げ機能はCodexサブスクリプションとは別のAPI利用になり得るため、本文では既定オフ、明示設定、別資格情報としている。
+
+## OAI-08
+
+**Codex permission profiles と 0.144.5 support-runtime isolation — 公式資料・公式ソース**
+
+- Permission profiles: <https://learn.chatgpt.com/docs/permissions>
+- Codex release `rust-v0.144.5`: <https://github.com/openai/codex/releases/tag/rust-v0.144.5>
+- `shell_tool=false` の shell tool 無効化: <https://github.com/openai/codex/blob/87db9bc18ba5bc82c1cb4e4381b44f693ee35623/codex-rs/tools/src/tool_config.rs#L81-L115>
+- environment、core utility、MCP、dynamic tool の登録条件: <https://github.com/openai/codex/blob/87db9bc18ba5bc82c1cb4e4381b44f693ee35623/codex-rs/core/src/tools/spec_plan.rs#L606-L759>
+- `thread/start` の environment、runtime root、permission profile と response provenance: <https://github.com/openai/codex/blob/87db9bc18ba5bc82c1cb4e4381b44f693ee35623/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L56-L195>
+- request user input / orchestrator capability の既定解決: <https://github.com/openai/codex/blob/87db9bc18ba5bc82c1cb4e4381b44f693ee35623/codex-rs/core/src/config/mod.rs#L2473-L2485>
+
+確認に用いた論点:
+
+- Permission profile が local sandboxed command の filesystem / network を制約し、macOS では Seatbelt で強制されること。
+- 強制できない policy を unsandboxed で続行せず、command を拒否すること。
+- 0.144.5 では shell tool と environment-dependent tool を明示的に除去できること。
+- `update_plan` が通常 thread の core utility として残るため、tool 配列 0 ではなく external-authority tool 0 を検証すべきこと。
+- environment、MCP、dynamic tool、orchestrator skill、request user input の未指定既定に依存せず、clean config と実 wire capture で確認する必要があること。
+
+公式 source は moving `main` ではなく `rust-v0.144.5` の peeled commit `87db9bc18ba5bc82c1cb4e4381b44f693ee35623` に固定した。Codex 更新時は同じ source path だけでなく、generated schema と mock Responses wire probe も再実行する。
 
 ## Tauri
 

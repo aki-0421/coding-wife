@@ -24,7 +24,7 @@ read_when:
 
 ただし、Codex App Server 自体が実験機能であり、サーバーは交渉済み capability を initialize 応答へ列挙しない。したがって、CLI の版文字列だけを信用せず、その CLI 自身が生成した実験 API スキーマの fingerprint、initialize の成否、model/list の結果を組み合わせた feature detection が必要である。
 
-サポートエージェントは現状 No-Go とする。ephemeral thread が rollout 一覧へ残らないことは確認できたが、同じ thread は絶対 cwd と 1 個の runtime workspace root を持った。dynamicTools を空にしても Codex 組み込みの shell、file、MCP 等が 0 個になることは証明できない。承認済み要件の「tool 0、cwd なし、ファイル・shell・MCP なし」を満たす明示的な thread 単位 allowlist も、今回の生成スキーマにはない。隔離 capability を将来証明できるまで、サポートセッション数は 0、決定的なローカル集約をフォールバックとする。
+サポートエージェントは追加調査により Conditional Go とする。専用 process、clean `CODEX_HOME`、`shell_tool=false`、environment / runtime root / MCP / dynamic tool / orchestrator capability 0、permission profile、mock Responses wire capture を組み合わせると、external-authority tool を 0 件にできる。wire 上には無条件登録の inert `update_plan` が 1 件だけ残るため、exact schema/hash allowlist と「呼び出されたら task failed」の runtime policy を必須にする。詳細と 0.144.5 の canary 実測は [Codex support runtime の実効権限ゼロ隔離調査](codex-support-runtime-isolation.md)を正本とする。証明に一つでも失敗した場合はサポートセッション数 0、決定的なローカル集約へ fail closed する。
 
 ## 上位仕様と適用順
 
@@ -416,7 +416,7 @@ protocol adapter 自体は汎用 shell、任意ファイル、任意 Tauri comma
 
 主セッションのレビューは、会話を汚染しにくい detached を既定にする。target は可能なら baseBranch または commit の構造化 variant を使い、custom instructions へ巨大 diff を埋め込まない。reviewThreadId の通知も通常 thread と同じ normalizer へ入れるが、main と review の役割を分ける。
 
-固定 reviewer support session の代替として review/start を使ってはいけない。detached review も thread であり、tool 0、cwd なしを証明しない。最大 1 MiB の exact diff を受ける固定 reviewer は support isolation gate が通るまで 0 件とし、Git diff の決定的検証だけを実行する。
+固定 reviewer support session の代替として review/start を使ってはいけない。detached review も独立した support isolation を証明しない。最大 1 MiB の exact diff を受ける固定 reviewer は [support isolation gate](codex-support-runtime-isolation.md)を同じ release constructor で通った場合だけ 1 件を許し、失敗時は Git diff の決定的検証だけを実行する。
 
 ## event normalization
 
@@ -522,24 +522,24 @@ config/read は effective config と origins / layers を含み得る。Rust 内
 | duplicate response / request | id map | 同一なら idempotent、内容差なら protocol_mismatch |
 | interrupt ack のみ | response | terminal と扱わず turn/completed を待つ |
 | review 失敗 | review turn terminal | main turn と gate を変更せず review_failed |
-| support isolation 未証明 | capability probe | support session 0、決定的 fallback |
+| support isolation 証明失敗 | native wire / canary / profile / auth bridge probe | support session 0、決定的 fallback |
 
 restart loop は指数 backoff と jitter を使い、短時間の連続 crash 3 回で自動 restart を止める。ユーザーが再確認を選ぶまで無限再起動しない。
 
 ## privacy と隔離
 
-- Codex の auth lifecycle を再実装せず、auth.json を読まない。
+- main process は Codex の auth lifecycle を再実装せず、auth file を読まない。support process だけは clean `CODEX_HOME` を保つため、source/destination を no-follow・owner・`0600`・bounded size で検証した一時 auth bridge を host transport の最小例外として使い、内容を解釈・記録・model input 化しない。
 - main prompt と assistant final message は製品要件に従って保存できるが、raw protocol、reasoning、support prompt / response は保存しない。
 - stderr は秘密・絶対 path・token pattern を redaction してから bounded ring に入れる。
 - thread / turn / item id は内部 alias に変換し、必要な相関だけ保存する。
 - 添付 path は Rust で workspace containment を確認する。
 - App Server の stdout をブラウザ console へ出さない。
 - review diff は 1 MiB 上限、一般ログへ出さない。
-- support audit は CODEX_HOME の前後 metadata hash を比較し、新規 rollout、session DB row、log 増分を検出する。ただし監査が通っても tool 0 の明示証明なしには capability を supported にしない。
+- support audit は専用 run directory、ephemeral thread、session DB / rollout、cleanup、wire tool fingerprint を検証する。external-authority tool 0、exact inert tool allowlist、profile、auth bridge、malicious canary の全証明が揃わなければ capability を supported にしない。
 
 ## 実装とsupport gate
 
-0.144.xのsupport隔離は未証明で`unavailable`とする。ファイル責務、fixture、通常gate、live smoke、隔離の実測表は[Codex runtime実装ガイド](codex-runtime-implementation.md)を正本とする。
+0.144.5 の support 隔離は [追加調査](codex-support-runtime-isolation.md)の release preflight をすべて通った場合だけ `supported` とする。失敗時は `unavailable` であり、main の `ready` を変更しない。ファイル責務、fixture、通常gate、live smoke は [Codex runtime実装ガイド](codex-runtime-implementation.md)にも同期する。
 
 ## 採用判断
 
@@ -548,7 +548,7 @@ restart loop は指数 backoff と jitter を使い、短時間の連続 crash 3
 - native requestUserInput: Conditional Go。experimentalApi、schema、厳密 validator、fail-closed が条件。
 - dynamic tools: Mechanism only。汎用 tool は登録せず、具体的な意味 API ごとに追加審査する。
 - detached review: Go。main thread と reviewThreadId を分離して追跡する。
-- ephemeral support / fixed reviewer support: No-Go。tool 0、cwd なしを証明できない。
+- ephemeral support / fixed reviewer support: Conditional Go。external-authority tool 0、exact inert `update_plan` allowlist、空の owner-only cwd、runtime root 0、permission profile、auth bridge、malicious canary、model transport の release proof が条件。
 - transport 自動再送: No-Go。切断後の user turn は自動 replay しない。
 
 次回再検証は Codex binary の canonical path、version、hash、experimental schema fingerprint のいずれかが変わった時、またはリリース候補作成時に行う。
