@@ -157,7 +157,8 @@ describe("IsolatedCharacterPreview", () => {
         },
       },
       true,
-      "e".repeat(64),
+      fixture.attestationRequest.thumbnailSha256,
+      new Uint8Array(fixture.attestationRequest.thumbnailPng).buffer,
     )
 
     childMessage(iframe, { ...success, generation: success.generation + 1 })

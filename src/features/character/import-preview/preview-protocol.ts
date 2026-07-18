@@ -5,6 +5,7 @@ import type {
 import { parseCharacterPackManifest } from "@/features/character/runtime/character-pack-client"
 
 export const characterPreviewProtocol = "character-preview-v1" as const
+export const maxTrustedFrameBytes = 2 * 1024 * 1024
 
 export interface CharacterPreviewLoadMessage {
   readonly protocol: typeof characterPreviewProtocol
@@ -35,7 +36,8 @@ export interface CharacterPreviewSuccessMessage {
   readonly parameterCount: number
   readonly partCount: number
   readonly drawableCount: number
-  readonly thumbnailSha256: string | null
+  readonly thumbnailSha256: string
+  readonly thumbnailPng: ArrayBuffer
 }
 
 export interface CharacterPreviewFailureMessage {
@@ -170,7 +172,8 @@ export function createCharacterPreviewSuccessMessage(
   }>,
   metrics: CharacterFrameMetrics,
   stateCueObserved: boolean,
-  thumbnailSha256: string | null,
+  thumbnailSha256: string,
+  thumbnailPng: ArrayBuffer,
 ): CharacterPreviewSuccessMessage {
   const inventory = metrics.modelInventory
   return parseCharacterPreviewResultMessage({
@@ -187,6 +190,7 @@ export function createCharacterPreviewSuccessMessage(
     partCount: inventory?.partCount ?? 0,
     drawableCount: inventory?.drawableCount ?? 0,
     thumbnailSha256,
+    thumbnailPng,
   }) as CharacterPreviewSuccessMessage
 }
 
@@ -238,6 +242,7 @@ export function parseCharacterPreviewResultMessage(
       "partCount",
       "drawableCount",
       "thumbnailSha256",
+      "thumbnailPng",
     ]) ||
     !uuid(value.rendererNonce) ||
     !integer(value.frameCount, 1) ||
@@ -250,9 +255,15 @@ export function parseCharacterPreviewResultMessage(
     !integer(value.parameterCount, 1, 1_000_000) ||
     !integer(value.partCount, 1, 1_000_000) ||
     !integer(value.drawableCount, 1, 1_000_000) ||
-    (value.thumbnailSha256 !== null &&
-      (typeof value.thumbnailSha256 !== "string" ||
-        !sha256Pattern.test(value.thumbnailSha256)))
+    typeof value.thumbnailSha256 !== "string" ||
+    !sha256Pattern.test(value.thumbnailSha256) ||
+    !(value.thumbnailPng instanceof ArrayBuffer) ||
+    value.thumbnailPng.byteLength === 0 ||
+    value.thumbnailPng.byteLength > maxTrustedFrameBytes ||
+    ![137, 80, 78, 71, 13, 10, 26, 10].every(
+      (byte, index) =>
+        new Uint8Array(value.thumbnailPng as ArrayBuffer)[index] === byte,
+    )
   ) {
     return invalid()
   }

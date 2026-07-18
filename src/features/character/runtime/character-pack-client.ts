@@ -4,6 +4,7 @@ import {
   type CharacterPackFile,
   type CharacterPackManifest,
   type CharacterPackRef,
+  type CharacterTrustedFrame,
 } from "@/features/character/model"
 
 const MAX_FILES = 128
@@ -11,6 +12,9 @@ const MAX_TOTAL_BYTES = 100 * 1024 * 1024
 const MAX_FILE_BYTES = 32 * 1024 * 1024
 const MAX_TEXTURE_DIMENSION = 8192
 const MAX_MODEL_ITEMS = 1_000_000
+const MAX_TRUSTED_FRAME_BYTES = 2 * 1024 * 1024
+const MAX_TRUSTED_FRAME_DIMENSION = 2048
+const TRUSTED_FRAME_ASSET_ID = "__coding-wife/trusted-frame.png" as const
 const sha256Pattern = /^[a-f0-9]{64}$/
 const customPackIdPattern =
   /^custom:[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
@@ -235,6 +239,32 @@ function parseFiles(value: unknown): readonly CharacterPackFile[] {
   return files
 }
 
+function parseTrustedFrame(value: unknown): CharacterTrustedFrame {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["assetId", "bytes", "sha256", "dimensions"]) ||
+    value.assetId !== TRUSTED_FRAME_ASSET_ID ||
+    !isBoundedInteger(value.bytes, 1, MAX_TRUSTED_FRAME_BYTES) ||
+    typeof value.sha256 !== "string" ||
+    !sha256Pattern.test(value.sha256) ||
+    !isRecord(value.dimensions) ||
+    !hasExactKeys(value.dimensions, ["width", "height"]) ||
+    !isBoundedInteger(value.dimensions.width, 1, MAX_TRUSTED_FRAME_DIMENSION) ||
+    !isBoundedInteger(value.dimensions.height, 1, MAX_TRUSTED_FRAME_DIMENSION)
+  ) {
+    return violation("Trusted frame metadata is outside the reviewed schema")
+  }
+  return {
+    assetId: TRUSTED_FRAME_ASSET_ID,
+    bytes: value.bytes,
+    sha256: value.sha256,
+    dimensions: {
+      width: value.dimensions.width,
+      height: value.dimensions.height,
+    },
+  }
+}
+
 function parseMotionGroups(
   value: unknown,
   filesByAssetId: ReadonlyMap<string, CharacterPackFile>,
@@ -453,18 +483,11 @@ function parseCustomManifest(
   value: Record<string, unknown>,
 ): CharacterPackManifest {
   if (
-    !hasExactKeys(
-      value,
-      [...manifestKeys, "importedAt"],
-      ["thumbnailSha256"],
-    ) ||
+    !hasExactKeys(value, [...manifestKeys, "importedAt"], ["trustedFrame"]) ||
     typeof value.packId !== "string" ||
     !customPackIdPattern.test(value.packId) ||
     value.bundledVersion !== "custom-import-v1" ||
-    !isRfc3339(value.importedAt) ||
-    (value.thumbnailSha256 !== undefined &&
-      (typeof value.thumbnailSha256 !== "string" ||
-        !sha256Pattern.test(value.thumbnailSha256)))
+    !isRfc3339(value.importedAt)
   ) {
     return violation("Custom pack manifest shape is invalid")
   }
@@ -480,6 +503,19 @@ function parseCustomManifest(
   ) {
     return violation("Custom pack provenance is invalid")
   }
+  const compatibility = parseCompatibility(value.compatibility, false)
+  const trustedFrame =
+    value.trustedFrame === undefined
+      ? undefined
+      : parseTrustedFrame(value.trustedFrame)
+  const hasAttestedInventory = compatibility.expectedDrawables !== null
+  if (
+    hasAttestedInventory !== (trustedFrame !== undefined) ||
+    (trustedFrame !== undefined &&
+      files.some((file) => file.assetId === trustedFrame.assetId))
+  ) {
+    return violation("Custom pack trusted frame does not match attestation")
+  }
   const manifest: CharacterPackManifest = {
     schemaVersion: 1,
     packId: value.packId,
@@ -493,13 +529,11 @@ function parseCustomManifest(
       importedAt: value.importedAt,
     },
     inventory: parseInventory(value.inventory, files),
-    compatibility: parseCompatibility(value.compatibility, false),
+    compatibility,
     files,
     importedAt: value.importedAt,
   }
-  return value.thumbnailSha256 === undefined
-    ? manifest
-    : { ...manifest, thumbnailSha256: value.thumbnailSha256 }
+  return trustedFrame === undefined ? manifest : { ...manifest, trustedFrame }
 }
 
 export function parseCharacterPackManifest(
@@ -534,6 +568,31 @@ export async function computeCharacterSha256(
       { cause: error },
     )
   }
+}
+
+export async function loadTrustedCharacterFrame(
+  pack: CharacterPackRef,
+  signal: AbortSignal,
+): Promise<ArrayBuffer | null> {
+  if (pack.kind !== "native") return null
+  const manifest = parseCharacterPackManifest(pack.manifest)
+  const frame = manifest.trustedFrame
+  if (frame === undefined) return null
+  abortIfNeeded(signal)
+  const bytes = await pack.readAsset(frame.assetId, "image/png", signal)
+  abortIfNeeded(signal)
+  if (
+    !(bytes instanceof ArrayBuffer) ||
+    bytes.byteLength !== frame.bytes ||
+    (await computeCharacterSha256(bytes)) !== frame.sha256
+  ) {
+    throw new CharacterError(
+      "asset_fetch_failed",
+      "Trusted character frame did not match its immutable manifest",
+      false,
+    )
+  }
+  return bytes
 }
 
 function abortIfNeeded(signal: AbortSignal): void {

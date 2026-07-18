@@ -2,11 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import hiyoriPack from "../../../../src-tauri/resources/characters/builtin-hiyori/pack.json"
 import characterFixture from "@/test/fixtures/character-library.v1.json"
-import type { CharacterPackFile } from "@/features/character/model"
+import type {
+  CharacterPackFile,
+  CharacterPackManifest,
+  CharacterPackRef,
+} from "@/features/character/model"
 import {
   CharacterPackClient,
   isAcceptedCharacterResourceContentType,
   isSafeCharacterAssetId,
+  loadTrustedCharacterFrame,
   parseCharacterPackManifest,
 } from "@/features/character/runtime/character-pack-client"
 
@@ -121,6 +126,45 @@ describe("character pack manifest", () => {
     expect(manifest.packId).toBe("custom:11111111-1111-4111-8111-111111111111")
     expect(manifest.provenance.sourceKind).toBe("user_imported")
     expect(manifest.compatibility.expectedDrawables).toBeNull()
+  })
+
+  it("loads only a trusted frame bound to the native manifest", async () => {
+    const preview = parseCharacterPackManifest(
+      structuredClone(characterFixture.importResponse.preview.manifest),
+    )
+    const png = new Uint8Array(characterFixture.attestationRequest.thumbnailPng)
+    const manifest: CharacterPackManifest = {
+      ...preview,
+      compatibility: {
+        ...preview.compatibility,
+        expectedParameters: 70,
+        expectedParts: 24,
+        expectedDrawables: 134,
+      },
+      trustedFrame: {
+        assetId: "__coding-wife/trusted-frame.png",
+        bytes: png.byteLength,
+        sha256: characterFixture.attestationRequest.thumbnailSha256,
+        dimensions: { width: 1, height: 1 },
+      },
+    }
+    const pack = (contents: Uint8Array): CharacterPackRef => ({
+      kind: "native",
+      manifest,
+      manifestHash: "d".repeat(64),
+      previewToken: null,
+      readAsset: () => Promise.resolve(contents.slice().buffer),
+    })
+    await expect(
+      loadTrustedCharacterFrame(pack(png), new AbortController().signal),
+    ).resolves.toEqual(png.buffer)
+
+    const tampered = png.slice()
+    const lastIndex = tampered.length - 1
+    tampered[lastIndex] = (tampered[lastIndex] ?? 0) ^ 0xff
+    await expect(
+      loadTrustedCharacterFrame(pack(tampered), new AbortController().signal),
+    ).rejects.toThrow("immutable manifest")
   })
 
   it.each([

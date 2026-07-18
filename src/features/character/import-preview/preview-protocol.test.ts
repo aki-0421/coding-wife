@@ -107,7 +107,8 @@ describe("isolated character preview protocol", () => {
       },
       frameMetrics(),
       true,
-      "e".repeat(64),
+      fixture.attestationRequest.thumbnailSha256,
+      new Uint8Array(fixture.attestationRequest.thumbnailPng).buffer,
     )
     expect(parseCharacterPreviewResultMessage(result)).toEqual(result)
     expect(result).toMatchObject({
@@ -133,7 +134,8 @@ describe("isolated character preview protocol", () => {
       identity,
       frameMetrics(),
       true,
-      null,
+      fixture.attestationRequest.thumbnailSha256,
+      new Uint8Array(fixture.attestationRequest.thumbnailPng).buffer,
     )
     for (const mutation of [
       { ...valid, stateCueObserved: false },

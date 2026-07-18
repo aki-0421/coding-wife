@@ -57,6 +57,14 @@ export function computeCharacterBackingSize(
   }
 }
 
+export function resolveLoadFailureStaticPreview(
+  hadCommittedPack: boolean,
+  currentPreviewAvailable: boolean,
+  candidatePreviewAvailable: boolean,
+): boolean {
+  return hadCommittedPack ? currentPreviewAvailable : candidatePreviewAvailable
+}
+
 function samplePixels(
   gl: WebGLRenderingContext | WebGL2RenderingContext,
   width: number,
@@ -229,6 +237,7 @@ export class CharacterController {
   public async loadPack(
     pack: CharacterPackRef,
     signal: AbortSignal,
+    hasTrustedStaticPreview = false,
   ): Promise<void> {
     if (this.#canvas === null || this.#gl === null) {
       throw new CharacterError(
@@ -245,9 +254,9 @@ export class CharacterController {
     signal.addEventListener("abort", abortFromCaller, { once: true })
     if (signal.aborted) abortFromCaller()
 
+    const hadCommittedPack = this.#client !== null
     this.#phase = "loading"
     this.#error = null
-    this.#fallbackLevel = "text_only"
     this.emitStatus()
 
     try {
@@ -272,7 +281,8 @@ export class CharacterController {
       this.#model?.release()
       this.#model = model
       this.#client = client
-      this.resetFrameMetrics(true)
+      this.resetFrameMetrics()
+      this.#hasStaticPreview = hasTrustedStaticPreview
       this.#phase = "ready"
       this.#fallbackLevel =
         this.effectiveMotionPolicy === "animated"
@@ -289,6 +299,11 @@ export class CharacterController {
     } catch (error) {
       if (loadAbortController.signal.aborted || this.#disposed) throw error
       const characterError = toCharacterError(error, "asset_fetch_failed")
+      this.#hasStaticPreview = resolveLoadFailureStaticPreview(
+        hadCommittedPack,
+        this.#hasStaticPreview,
+        hasTrustedStaticPreview,
+      )
       this.#phase = "error"
       this.#error = characterError
       this.#fallbackLevel = this.#hasStaticPreview ? "static" : "text_only"
@@ -621,14 +636,13 @@ export class CharacterController {
     reject(error)
   }
 
-  private resetFrameMetrics(clearStaticPreview = false): void {
+  private resetFrameMetrics(): void {
     this.#frameCount = 0
     this.#nonTransparentSamples = 0
     this.#signature = "00000000"
     this.#signatureChanges = 0
     this.#lastDeltaMilliseconds = 0
     this.#webglError = 0
-    if (clearStaticPreview) this.#hasStaticPreview = false
   }
 
   private enterContextLostState(): void {

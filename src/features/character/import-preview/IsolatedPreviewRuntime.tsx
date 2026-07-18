@@ -9,6 +9,7 @@ import type {
 import {
   createCharacterPreviewFailureMessage,
   createCharacterPreviewSuccessMessage,
+  maxTrustedFrameBytes,
   parseCharacterPreviewLoadMessage,
   type CharacterPreviewLoadMessage,
 } from "@/features/character/import-preview/preview-protocol"
@@ -20,6 +21,9 @@ function dataUrlBytes(dataUrl: string): ArrayBuffer {
     throw new Error("texture_decode_failed")
   }
   const decoded = atob(dataUrl.slice(separator + 1))
+  if (decoded.length === 0 || decoded.length > maxTrustedFrameBytes) {
+    throw new Error("texture_decode_failed")
+  }
   const bytes = new Uint8Array(decoded.length)
   for (let index = 0; index < decoded.length; index++) {
     bytes[index] = decoded.charCodeAt(index)
@@ -54,7 +58,10 @@ export function IsolatedPreviewRuntime() {
   const [stateGeneration, setStateGeneration] = useState(1)
   const [stateCueObserved, setStateCueObserved] = useState(false)
   const [metrics, setMetrics] = useState<CharacterFrameMetrics | null>(null)
-  const [thumbnailSha256, setThumbnailSha256] = useState<string | null>(null)
+  const [trustedFrame, setTrustedFrame] = useState<Readonly<{
+    sha256: string
+    png: ArrayBuffer
+  }> | null>(null)
   const rendererNonce = useMemo(() => crypto.randomUUID(), [])
   const memoryPackRef = useMemo(() => {
     if (payload === null) return null
@@ -101,26 +108,25 @@ export function IsolatedPreviewRuntime() {
         payload.manifest.inventory.textureCount ||
       metrics.webglError !== 0 ||
       !stateCueObserved ||
-      thumbnailSha256 === null
+      trustedFrame === null
     ) {
       return
     }
     reportedRef.current = true
-    parent.postMessage(
-      createCharacterPreviewSuccessMessage(
-        {
-          channelNonce: payload.channelNonce,
-          previewNonce: payload.previewNonce,
-          generation: payload.generation,
-          rendererNonce,
-        },
-        metrics,
-        stateCueObserved,
-        thumbnailSha256,
-      ),
-      "*",
+    const message = createCharacterPreviewSuccessMessage(
+      {
+        channelNonce: payload.channelNonce,
+        previewNonce: payload.previewNonce,
+        generation: payload.generation,
+        rendererNonce,
+      },
+      metrics,
+      stateCueObserved,
+      trustedFrame.sha256,
+      trustedFrame.png,
     )
-  }, [metrics, payload, rendererNonce, stateCueObserved, thumbnailSha256])
+    parent.postMessage(message, "*", [message.thumbnailPng])
+  }, [metrics, payload, rendererNonce, stateCueObserved, trustedFrame])
 
   if (payload === null || memoryPackRef === null) {
     return (
@@ -137,10 +143,15 @@ export function IsolatedPreviewRuntime() {
       motionPolicy="animated"
       onMetricsChange={setMetrics}
       onStaticPreviewChange={(dataUrl) => {
-        void computeCharacterSha256(dataUrlBytes(dataUrl)).then(
-          setThumbnailSha256,
-          () => postFailure(payload, "texture_decode_failed"),
-        )
+        try {
+          const png = dataUrlBytes(dataUrl)
+          void computeCharacterSha256(png).then(
+            (sha256) => setTrustedFrame({ sha256, png }),
+            () => postFailure(payload, "texture_decode_failed"),
+          )
+        } catch {
+          postFailure(payload, "texture_decode_failed")
+        }
       }}
       onStatusChange={(status: CharacterControllerStatus) => {
         if (status.phase === "error") {

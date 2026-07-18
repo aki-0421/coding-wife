@@ -19,7 +19,8 @@ use super::error::{character_error, CharacterResult};
 use super::manifest::{
     is_safe_asset_id, CharacterAssetRole, CharacterCompatibility, CharacterDimensions,
     CharacterInventory, CharacterMotionCue, CharacterPackFile, CharacterPackManifest,
-    CharacterProvenance, CharacterProvenanceKind, CHARACTER_SCHEMA_VERSION,
+    CharacterProvenance, CharacterProvenanceKind, CharacterTrustedFrame, CHARACTER_SCHEMA_VERSION,
+    CHARACTER_TRUSTED_FRAME_ASSET_ID, MAX_TRUSTED_FRAME_BYTES, MAX_TRUSTED_FRAME_DIMENSION,
 };
 
 const MAX_FILES: usize = 128;
@@ -236,7 +237,7 @@ pub fn snapshot_character_model(
         },
         files,
         imported_at,
-        thumbnail_sha256: None,
+        trusted_frame: None,
     };
     manifest.validate(operation)?;
     Ok(ValidatedCharacterSnapshot {
@@ -718,6 +719,40 @@ fn json_depth(value: &Value) -> usize {
 }
 
 fn validate_png(contents: &[u8], operation: &str) -> CharacterResult<CharacterDimensions> {
+    validate_png_dimensions(contents, operation, MAX_TEXTURE_DIMENSION)
+}
+
+pub fn validate_trusted_frame_png(
+    contents: &[u8],
+    expected_sha256: &str,
+) -> CharacterResult<CharacterTrustedFrame> {
+    let operation = "character_attest_preview";
+    if contents.is_empty()
+        || contents.len() as u64 > MAX_TRUSTED_FRAME_BYTES
+        || !super::manifest::is_sha256(expected_sha256)
+        || hex::encode(Sha256::digest(contents)) != expected_sha256
+    {
+        return Err(character_error(
+            operation,
+            "CHARACTER-TRUSTED-FRAME-INTEGRITY",
+            false,
+        ));
+    }
+    let dimensions = validate_png_dimensions(contents, operation, MAX_TRUSTED_FRAME_DIMENSION)
+        .map_err(|error| error.with_operation(operation))?;
+    Ok(CharacterTrustedFrame {
+        asset_id: CHARACTER_TRUSTED_FRAME_ASSET_ID.to_owned(),
+        bytes: contents.len() as u64,
+        sha256: expected_sha256.to_owned(),
+        dimensions,
+    })
+}
+
+fn validate_png_dimensions(
+    contents: &[u8],
+    operation: &str,
+    max_dimension: u32,
+) -> CharacterResult<CharacterDimensions> {
     let limits = png::Limits {
         bytes: 64 * 1024 * 1024,
     };
@@ -728,8 +763,8 @@ fn validate_png(contents: &[u8], operation: &str) -> CharacterResult<CharacterDi
     let (width, height) = reader.info().size();
     if width == 0
         || height == 0
-        || width > MAX_TEXTURE_DIMENSION
-        || height > MAX_TEXTURE_DIMENSION
+        || width > max_dimension
+        || height > max_dimension
         || reader.info().animation_control.is_some()
     {
         return Err(character_error(

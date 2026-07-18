@@ -15,7 +15,7 @@ use super::manifest::{
     is_sha256, CharacterPackManifest, BUILTIN_HIYORI_PACK_ID, CHARACTER_SCHEMA_VERSION,
 };
 use super::storage::{CharacterStateFile, CharacterStorage, StoredPack};
-use super::validation::snapshot_character_model;
+use super::validation::{snapshot_character_model, validate_trusted_frame_png};
 
 const PREVIEW_TTL: Duration = Duration::from_secs(10 * 60);
 const BUILTIN_MANIFEST_FILE: &str = "pack.json";
@@ -142,7 +142,8 @@ pub struct CharacterPreviewAttestationRequest {
     pub parameter_count: u32,
     pub part_count: u32,
     pub drawable_count: u32,
-    pub thumbnail_sha256: Option<String>,
+    pub thumbnail_sha256: String,
+    pub thumbnail_png: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -197,7 +198,7 @@ struct PendingImport {
     directory: PathBuf,
     manifest: CharacterPackManifest,
     expires: Instant,
-    attested: bool,
+    attestation: Option<CharacterPreviewAttestationRequest>,
 }
 
 #[derive(Clone)]
@@ -275,7 +276,7 @@ impl CharacterService {
             directory,
             manifest: snapshot.manifest.clone(),
             expires: Instant::now() + PREVIEW_TTL,
-            attested: false,
+            attestation: None,
         };
         self.pending.lock().await.insert(token.clone(), pending);
         Ok(CharacterImportResponse {
@@ -315,14 +316,15 @@ impl CharacterService {
                 character_error("character_read_asset", "CHARACTER-PREVIEW-EXPIRED", true)
             })?;
             validate_pending_asset(session, &request)?;
-            let asset = session.manifest.asset(&request.asset_id).ok_or_else(|| {
-                character_error(
-                    "character_read_asset",
-                    "CHARACTER-ASSET-NOT-ALLOWLISTED",
-                    false,
-                )
-            })?;
-            if request.expected_mime != asset.role.mime() {
+            let expected_mime = expected_manifest_asset_mime(&session.manifest, &request.asset_id)
+                .ok_or_else(|| {
+                    character_error(
+                        "character_read_asset",
+                        "CHARACTER-ASSET-NOT-ALLOWLISTED",
+                        false,
+                    )
+                })?;
+            if request.expected_mime != expected_mime {
                 return Err(character_error(
                     "character_read_asset",
                     "CHARACTER-ASSET-MIME-MISMATCH",
@@ -340,14 +342,15 @@ impl CharacterService {
             return self.read_builtin_asset(&request);
         }
         let pack = self.storage.load_pack(&request.pack_id)?;
-        let asset = pack.manifest.asset(&request.asset_id).ok_or_else(|| {
-            character_error(
-                "character_read_asset",
-                "CHARACTER-ASSET-NOT-ALLOWLISTED",
-                false,
-            )
-        })?;
-        if request.expected_mime != asset.role.mime() {
+        let expected_mime = expected_manifest_asset_mime(&pack.manifest, &request.asset_id)
+            .ok_or_else(|| {
+                character_error(
+                    "character_read_asset",
+                    "CHARACTER-ASSET-NOT-ALLOWLISTED",
+                    false,
+                )
+            })?;
+        if request.expected_mime != expected_mime {
             return Err(character_error(
                 "character_read_asset",
                 "CHARACTER-ASSET-MIME-MISMATCH",
@@ -380,10 +383,7 @@ impl CharacterService {
             || request.parameter_count == 0
             || request.part_count == 0
             || request.drawable_count == 0
-            || request
-                .thumbnail_sha256
-                .as_deref()
-                .is_some_and(|hash| !is_sha256(hash))
+            || !is_sha256(&request.thumbnail_sha256)
         {
             return Err(character_error(
                 "character_attest_preview",
@@ -391,6 +391,8 @@ impl CharacterService {
                 false,
             ));
         }
+        let trusted_frame =
+            validate_trusted_frame_png(&request.thumbnail_png, &request.thumbnail_sha256)?;
         let mut pending = self.pending.lock().await;
         let session = pending.get_mut(&request.preview_token).ok_or_else(|| {
             character_error(
@@ -406,21 +408,40 @@ impl CharacterService {
             &request.manifest_hash,
             "character_attest_preview",
         )?;
-        if session.attested
-            || request.texture_decode_count != session.manifest.inventory.texture_count
-        {
+        if let Some(attestation) = &session.attestation {
+            if attestation == &request {
+                return Ok(CharacterPreviewAttestationResponse {
+                    schema_version: CHARACTER_SCHEMA_VERSION,
+                    attested: true,
+                    renderer_nonce: request.renderer_nonce,
+                });
+            }
             return Err(character_error(
                 "character_attest_preview",
                 "CHARACTER-PREVIEW-ATTESTATION-REPLAY",
                 false,
             ));
         }
+        if request.texture_decode_count != session.manifest.inventory.texture_count
+            || session.manifest.asset(&trusted_frame.asset_id).is_some()
+        {
+            return Err(character_error(
+                "character_attest_preview",
+                "CHARACTER-PREVIEW-ATTESTATION-INVALID",
+                false,
+            ));
+        }
+        self.storage.persist_trusted_frame(
+            &session.directory,
+            &trusted_frame,
+            &request.thumbnail_png,
+        )?;
         session.manifest.compatibility.expected_parameters = Some(request.parameter_count);
         session.manifest.compatibility.expected_parts = Some(request.part_count);
         session.manifest.compatibility.expected_drawables = Some(request.drawable_count);
-        session.manifest.thumbnail_sha256 = request.thumbnail_sha256;
+        session.manifest.trusted_frame = Some(trusted_frame);
         session.renderer_nonce = Some(request.renderer_nonce.clone());
-        session.attested = true;
+        session.attestation = Some(request.clone());
         Ok(CharacterPreviewAttestationResponse {
             schema_version: CHARACTER_SCHEMA_VERSION,
             attested: true,
@@ -457,7 +478,9 @@ impl CharacterService {
             &request.manifest_hash,
             "character_confirm_import",
         )?;
-        if !session.attested || session.renderer_nonce.as_deref() != Some(&request.renderer_nonce) {
+        if session.attestation.is_none()
+            || session.renderer_nonce.as_deref() != Some(&request.renderer_nonce)
+        {
             return Err(character_error(
                 "character_confirm_import",
                 "CHARACTER-PREVIEW-NOT-ATTESTED",
@@ -465,8 +488,11 @@ impl CharacterService {
             ));
         }
         session.manifest.display_name = request.display_name.trim().to_owned();
-        self.storage
-            .publish(&session.directory, &session.manifest)?;
+        self.storage.publish_and_select(
+            &session.directory,
+            &session.manifest,
+            &request.workspace_id,
+        )?;
         pending.remove(&request.preview_token);
         drop(pending);
         self.snapshot(&request.workspace_id)
@@ -737,8 +763,26 @@ fn custom_pack_view(pack: &StoredPack, state: &CharacterStateFile) -> CharacterP
             .values()
             .any(|selected| selected == &pack.manifest.pack_id),
         manifest: Some(pack.manifest.clone()),
-        thumbnail_sha256: pack.manifest.thumbnail_sha256.clone(),
+        thumbnail_sha256: pack
+            .manifest
+            .trusted_frame
+            .as_ref()
+            .map(|frame| frame.sha256.clone()),
     }
+}
+
+fn expected_manifest_asset_mime<'a>(
+    manifest: &'a CharacterPackManifest,
+    asset_id: &str,
+) -> Option<&'a str> {
+    if let Some(asset) = manifest.asset(asset_id) {
+        return Some(asset.role.mime());
+    }
+    manifest
+        .trusted_frame
+        .as_ref()
+        .filter(|frame| frame.asset_id == asset_id)
+        .map(|_| "image/png")
 }
 
 fn validate_pending_asset(
@@ -878,6 +922,7 @@ mod tests {
         preview: &CharacterPreviewSession,
         renderer_nonce: &str,
     ) -> CharacterPreviewAttestationRequest {
+        let thumbnail_png = trusted_frame_png();
         CharacterPreviewAttestationRequest {
             preview_token: preview.preview_token.clone(),
             preview_nonce: preview.preview_nonce.clone(),
@@ -893,8 +938,23 @@ mod tests {
             parameter_count: 70,
             part_count: 24,
             drawable_count: 134,
-            thumbnail_sha256: Some("a".repeat(64)),
+            thumbnail_sha256: hex::encode(Sha256::digest(&thumbnail_png)),
+            thumbnail_png,
         }
+    }
+
+    fn trusted_frame_png() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 1, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("thumbnail header");
+            writer
+                .write_image_data(&[255, 128, 64, 255])
+                .expect("thumbnail pixels");
+        }
+        bytes
     }
 
     fn assert_fixture_contract<T>(fixture: &Value, key: &str)
@@ -1092,11 +1152,18 @@ mod tests {
             .expect("first-frame attestation");
         assert!(accepted.attested);
         assert_eq!(accepted.renderer_nonce, renderer_nonce);
+        let retry = service
+            .attest_preview(attestation.clone())
+            .await
+            .expect("identical attestation retry");
+        assert_eq!(retry, accepted);
+        let mut different_attestation = attestation;
+        different_attestation.signature = "cafebabe".to_owned();
         assert_eq!(
             service
-                .attest_preview(attestation)
+                .attest_preview(different_attestation)
                 .await
-                .expect_err("attestation replay")
+                .expect_err("different attestation replay")
                 .code,
             "CHARACTER-PREVIEW-ATTESTATION-REPLAY"
         );
@@ -1113,6 +1180,7 @@ mod tests {
             })
             .await
             .expect("atomic publish");
+        assert_eq!(published.selected_pack_id, preview.pack_id);
         assert_eq!(published.packs.len(), 2);
         let custom = published
             .packs
@@ -1152,15 +1220,6 @@ mod tests {
             "CHARACTER-PREVIEW-EXPIRED"
         );
 
-        let selected = service
-            .select_pack(CharacterSelectRequest {
-                workspace_id: workspace_id.clone(),
-                pack_id: preview.pack_id.clone(),
-            })
-            .await
-            .expect("select custom pack");
-        assert_eq!(selected.selected_pack_id, preview.pack_id);
-
         let restarted = CharacterService::new(
             storage,
             resolve_builtin_directory(Path::new("/missing")),
@@ -1178,6 +1237,33 @@ mod tests {
             .iter()
             .find(|pack| pack.pack_id == preview.pack_id)
             .expect("persisted pack");
+        let trusted_frame = persisted_custom
+            .manifest
+            .as_ref()
+            .and_then(|manifest| manifest.trusted_frame.as_ref())
+            .expect("persisted trusted frame");
+        let trusted_frame_bytes = restarted
+            .read_asset(
+                "main",
+                CharacterAssetRequest {
+                    pack_id: preview.pack_id.clone(),
+                    asset_id: trusted_frame.asset_id.clone(),
+                    manifest_hash: persisted_custom.manifest_hash.clone(),
+                    expected_mime: "image/png".to_owned(),
+                    preview_token: None,
+                },
+            )
+            .await
+            .expect("opaque trusted frame read");
+        assert_eq!(
+            hex::encode(Sha256::digest(&trusted_frame_bytes)),
+            trusted_frame.sha256
+        );
+        let published_directory = app_data
+            .path()
+            .join("characters/library")
+            .join(preview.pack_id.strip_prefix("custom:").expect("custom id"));
+        assert!(published_directory.join(&trusted_frame.asset_id).is_file());
         let published_request = CharacterAssetRequest {
             pack_id: preview.pack_id.clone(),
             asset_id: moc.asset_id.clone(),
@@ -1221,6 +1307,62 @@ mod tests {
             .expect("delete inactive pack");
         assert_eq!(deleted.packs.len(), 1);
         assert_eq!(deleted.selected_pack_id, BUILTIN_HIYORI_PACK_ID);
+        assert!(!published_directory.exists());
+    }
+
+    #[tokio::test]
+    async fn trusted_frame_attestation_rejects_untrusted_png_bytes() {
+        let app_data = TestDirectory::new();
+        let service = CharacterService::new(
+            CharacterStorage::open(app_data.path()).expect("character storage"),
+            resolve_builtin_directory(Path::new("/missing")),
+            Arc::new(FixedPicker(Some(reviewed_hiyori_source()))),
+        );
+        let preview = service
+            .pick_import(CharacterLibraryRequest {
+                workspace_id: "workspace-frame-validation".to_owned(),
+            })
+            .await
+            .expect("import pick")
+            .preview
+            .expect("preview session");
+        let renderer_nonce = uuid::Uuid::new_v4().to_string();
+
+        let mut oversized = attestation(&preview, &renderer_nonce);
+        oversized.thumbnail_png =
+            vec![0; super::super::manifest::MAX_TRUSTED_FRAME_BYTES as usize + 1];
+        oversized.thumbnail_sha256 = hex::encode(Sha256::digest(&oversized.thumbnail_png));
+        assert_eq!(
+            service
+                .attest_preview(oversized)
+                .await
+                .expect_err("oversized frame")
+                .code,
+            "CHARACTER-TRUSTED-FRAME-INTEGRITY"
+        );
+
+        let mut mismatched = attestation(&preview, &renderer_nonce);
+        mismatched.thumbnail_sha256 = "0".repeat(64);
+        assert_eq!(
+            service
+                .attest_preview(mismatched)
+                .await
+                .expect_err("mismatched frame hash")
+                .code,
+            "CHARACTER-TRUSTED-FRAME-INTEGRITY"
+        );
+
+        let mut malformed = attestation(&preview, &renderer_nonce);
+        malformed.thumbnail_png = b"not a png".to_vec();
+        malformed.thumbnail_sha256 = hex::encode(Sha256::digest(&malformed.thumbnail_png));
+        assert_eq!(
+            service
+                .attest_preview(malformed)
+                .await
+                .expect_err("malformed frame")
+                .code,
+            "CHARACTER-PNG-DECODE"
+        );
     }
 
     #[tokio::test]
@@ -1298,13 +1440,6 @@ mod tests {
             .expect("import pick")
             .preview
             .expect("preview session");
-        let moc = preview
-            .manifest
-            .files
-            .iter()
-            .find(|asset| asset.role == super::super::manifest::CharacterAssetRole::Moc)
-            .expect("moc asset")
-            .clone();
         let renderer_nonce = uuid::Uuid::new_v4().to_string();
         service
             .attest_preview(attestation(&preview, &renderer_nonce))
@@ -1334,13 +1469,14 @@ mod tests {
             .path()
             .join("characters/library")
             .join(preview.pack_id.strip_prefix("custom:").expect("custom id"));
-        let moc_path = pack_directory.join(moc.asset_id);
-        fs::set_permissions(&moc_path, fs::Permissions::from_mode(0o600))
+        let trusted_frame_path =
+            pack_directory.join(super::super::manifest::CHARACTER_TRUSTED_FRAME_ASSET_ID);
+        fs::set_permissions(&trusted_frame_path, fs::Permissions::from_mode(0o600))
             .expect("allow test corruption");
-        let mut bytes = fs::read(&moc_path).expect("published moc");
-        let last = bytes.last_mut().expect("moc contents");
+        let mut bytes = fs::read(&trusted_frame_path).expect("published trusted frame");
+        let last = bytes.last_mut().expect("trusted frame contents");
         *last ^= 0xff;
-        fs::write(&moc_path, bytes).expect("corrupt published moc");
+        fs::write(&trusted_frame_path, bytes).expect("corrupt published trusted frame");
 
         let restarted = CharacterService::new(
             storage,

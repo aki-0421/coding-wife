@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { computeCharacterBackingSize } from "@/features/character/runtime/character-controller"
+import {
+  computeCharacterBackingSize,
+  resolveLoadFailureStaticPreview,
+} from "@/features/character/runtime/character-controller"
 
 describe("character canvas backing size", () => {
   it("tracks CSS pixels while capping high-density displays", () => {
@@ -27,5 +30,12 @@ describe("character canvas backing size", () => {
       height: 50,
       devicePixelRatio: 1,
     })
+  })
+
+  it("keeps the committed frame on a failed switch and uses a persisted frame on initial failure", () => {
+    expect(resolveLoadFailureStaticPreview(true, true, false)).toBe(true)
+    expect(resolveLoadFailureStaticPreview(true, false, true)).toBe(false)
+    expect(resolveLoadFailureStaticPreview(false, false, true)).toBe(true)
+    expect(resolveLoadFailureStaticPreview(false, false, false)).toBe(false)
   })
 })

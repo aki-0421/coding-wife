@@ -7,6 +7,9 @@ use super::error::{character_error, CharacterResult};
 
 pub const CHARACTER_SCHEMA_VERSION: u16 = 1;
 pub const BUILTIN_HIYORI_PACK_ID: &str = "builtin:hiyori_pro";
+pub const CHARACTER_TRUSTED_FRAME_ASSET_ID: &str = "__coding-wife/trusted-frame.png";
+pub const MAX_TRUSTED_FRAME_BYTES: u64 = 2 * 1024 * 1024;
+pub const MAX_TRUSTED_FRAME_DIMENSION: u32 = 2048;
 const MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_TEXTURE_DIMENSION: u32 = 8192;
 const MAX_MODEL_ITEMS: u32 = 1_000_000;
@@ -75,6 +78,15 @@ pub struct CharacterPackFile {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CharacterTrustedFrame {
+    pub asset_id: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub dimensions: CharacterDimensions,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CharacterMotionCue {
     pub cue_id: String,
     pub asset_id: String,
@@ -130,7 +142,7 @@ pub struct CharacterPackManifest {
     pub files: Vec<CharacterPackFile>,
     pub imported_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub thumbnail_sha256: Option<String>,
+    pub trusted_frame: Option<CharacterTrustedFrame>,
 }
 
 impl CharacterPackManifest {
@@ -162,10 +174,17 @@ impl CharacterPackManifest {
             || self.provenance.source_label != "Local folder"
             || self.provenance.imported_at != self.imported_at
             || chrono::DateTime::parse_from_rfc3339(&self.imported_at).is_err()
-            || self
-                .thumbnail_sha256
-                .as_deref()
-                .is_some_and(|hash| !is_sha256(hash))
+            || self.trusted_frame.as_ref().is_some_and(|frame| {
+                frame.asset_id != CHARACTER_TRUSTED_FRAME_ASSET_ID
+                    || frame.bytes == 0
+                    || frame.bytes > MAX_TRUSTED_FRAME_BYTES
+                    || !is_sha256(&frame.sha256)
+                    || frame.dimensions.width == 0
+                    || frame.dimensions.height == 0
+                    || frame.dimensions.width > MAX_TRUSTED_FRAME_DIMENSION
+                    || frame.dimensions.height > MAX_TRUSTED_FRAME_DIMENSION
+                    || self.asset(&frame.asset_id).is_some()
+            })
             || self.compatibility.model_schema_version != 3
             || !(1..=6).contains(&self.compatibility.moc_version)
             || !valid_expected_inventory(&self.compatibility)

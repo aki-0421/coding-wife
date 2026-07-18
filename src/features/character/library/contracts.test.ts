@@ -123,7 +123,12 @@ describe("character library contract", () => {
         expectedParts: 24,
         expectedDrawables: 134,
       },
-      thumbnailSha256: "e".repeat(64),
+      trustedFrame: {
+        assetId: "__coding-wife/trusted-frame.png",
+        bytes: fixture.attestationRequest.thumbnailPng.length,
+        sha256: fixture.attestationRequest.thumbnailSha256,
+        dimensions: { width: 1, height: 1 },
+      },
     }
     const custom = {
       ...fixture.librarySnapshot.packs[0],
@@ -140,7 +145,7 @@ describe("character library contract", () => {
       selectedWorkspaceCount: 0,
       deletable: true,
       manifest,
-      thumbnailSha256: manifest.thumbnailSha256,
+      thumbnailSha256: manifest.trustedFrame.sha256,
     }
     expect(
       parseCharacterLibrarySnapshot({

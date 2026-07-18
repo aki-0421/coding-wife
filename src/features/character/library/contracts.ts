@@ -48,7 +48,8 @@ export interface CharacterPreviewAttestationRequest {
   readonly parameterCount: number
   readonly partCount: number
   readonly drawableCount: number
-  readonly thumbnailSha256: string | null
+  readonly thumbnailSha256: string
+  readonly thumbnailPng: readonly number[]
 }
 
 export interface CharacterPreviewAttestationResponse {
@@ -283,6 +284,7 @@ export function parseCharacterPreviewAttestationRequest(
       "partCount",
       "drawableCount",
       "thumbnailSha256",
+      "thumbnailPng",
     ]) ||
     !uuid(value.previewToken) ||
     !uuid(value.previewNonce) ||
@@ -299,7 +301,11 @@ export function parseCharacterPreviewAttestationRequest(
     !integer(value.parameterCount, 1, 1_000_000) ||
     !integer(value.partCount, 1, 1_000_000) ||
     !integer(value.drawableCount, 1, 1_000_000) ||
-    (value.thumbnailSha256 !== null && !sha256(value.thumbnailSha256))
+    !sha256(value.thumbnailSha256) ||
+    !Array.isArray(value.thumbnailPng) ||
+    value.thumbnailPng.length === 0 ||
+    value.thumbnailPng.length > 2 * 1024 * 1024 ||
+    !value.thumbnailPng.every((byte) => integer(byte, 0, 255))
   ) {
     return violation()
   }
@@ -434,7 +440,7 @@ function parseCharacterPackView(value: unknown): CharacterPackView {
     manifest.inventory.textureCount !== value.textureCount ||
     manifest.inventory.motionCount !== value.motionCount ||
     manifest.inventory.expressionCount !== value.expressionCount ||
-    (manifest.thumbnailSha256 ?? null) !== value.thumbnailSha256 ||
+    (manifest.trustedFrame?.sha256 ?? null) !== value.thumbnailSha256 ||
     manifest.compatibility.expectedDrawables === null
   ) {
     return violation()
@@ -519,7 +525,8 @@ function parsePreviewSession(value: unknown): CharacterPreviewSession {
     manifest.packId !== value.packId ||
     manifest.compatibility.expectedParameters !== null ||
     manifest.compatibility.expectedParts !== null ||
-    manifest.compatibility.expectedDrawables !== null
+    manifest.compatibility.expectedDrawables !== null ||
+    manifest.trustedFrame !== undefined
   ) {
     return violation()
   }

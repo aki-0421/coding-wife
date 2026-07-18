@@ -317,6 +317,7 @@ function CharacterModelLibrarySession({
           partCount: evidence.partCount,
           drawableCount: evidence.drawableCount,
           thumbnailSha256: evidence.thumbnailSha256,
+          thumbnailPng: Array.from(new Uint8Array(evidence.thumbnailPng)),
         })
         if (response.rendererNonce !== evidence.rendererNonce) {
           setPreviewFailure("attestation_identity_mismatch")
@@ -351,12 +352,11 @@ function CharacterModelLibrarySession({
         manifestHash: preview.manifestHash,
         displayName: trimmedDisplayName,
       })
-      await store.selectPack(workspaceId, preview.packId)
       setImportOpen(false)
       setAttestedRendererNonce(null)
       setPreviewFailure(null)
     } catch {
-      // The imported pack remains visible if publication succeeded but selection failed.
+      // Keep the verified dialog open so atomic confirmation can be retried.
     }
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { getCharacterCaption } from "@/features/character/copy"
 import type {
@@ -9,6 +9,7 @@ import type {
   CharacterState,
 } from "@/features/character/model"
 import { CharacterController } from "@/features/character/runtime/character-controller"
+import { loadTrustedCharacterFrame } from "@/features/character/runtime/character-pack-client"
 import type { SupportedLocale } from "@/features/localization"
 import { cn } from "@/lib/utils"
 
@@ -48,6 +49,15 @@ interface CallbackProps {
   readonly onStaticPreviewChange?: Live2dCharacterProps["onStaticPreviewChange"]
 }
 
+function pngDataUrl(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  let binary = ""
+  for (let offset = 0; offset < bytes.length; offset += 32_768) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768))
+  }
+  return `data:image/png;base64,${btoa(binary)}`
+}
+
 export function Live2dCharacter({
   className,
   state,
@@ -68,6 +78,11 @@ export function Live2dCharacter({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const controllerRef = useRef<CharacterController | null>(null)
   const callbackPropsRef = useRef<CallbackProps>({})
+  const committedPackIdRef = useRef<string | null>(null)
+  const pendingTrustedPreviewRef = useRef<Readonly<{
+    packId: string
+    dataUrl: string
+  }> | null>(null)
   const initialPresentationRef = useRef({
     state,
     stateGeneration,
@@ -85,6 +100,11 @@ export function Live2dCharacter({
     () => packRef ?? { kind: "url", manifestUrl },
     [manifestUrl, packRef],
   )
+
+  const updateStaticPreview = useCallback((dataUrl: string) => {
+    setStaticPreview(dataUrl)
+    callbackPropsRef.current.onStaticPreviewChange?.(dataUrl)
+  }, [])
 
   useEffect(() => {
     callbackPropsRef.current = {
@@ -109,7 +129,14 @@ export function Live2dCharacter({
       preserveDrawingBuffer,
       callbacks: {
         onStatus: (nextStatus) => {
-          if (nextStatus.phase === "loading") setStaticPreview(null)
+          const pending = pendingTrustedPreviewRef.current
+          if (nextStatus.phase === "ready" && nextStatus.pack !== null) {
+            committedPackIdRef.current = nextStatus.pack.packId
+            if (pending?.packId === nextStatus.pack.packId) {
+              pendingTrustedPreviewRef.current = null
+              updateStaticPreview(pending.dataUrl)
+            }
+          }
           setStatus(nextStatus)
           callbackPropsRef.current.onStatusChange?.(nextStatus)
         },
@@ -143,8 +170,7 @@ export function Live2dCharacter({
           callbackPropsRef.current.onMetricsChange?.(metrics)
         },
         onStaticPreview: (dataUrl) => {
-          setStaticPreview(dataUrl)
-          callbackPropsRef.current.onStaticPreviewChange?.(dataUrl)
+          updateStaticPreview(dataUrl)
         },
       },
     })
@@ -202,18 +228,50 @@ export function Live2dCharacter({
       if (controllerRef.current === controller) controllerRef.current = null
       callbackPropsRef.current.onControllerChange?.(null)
     }
-  }, [preserveDrawingBuffer])
+  }, [preserveDrawingBuffer, updateStaticPreview])
 
   useEffect(() => {
     if (mountedController === null) return
     const loadController = new AbortController()
-    void mountedController
-      .loadPack(activePackRef, loadController.signal)
-      .catch(() => {
+    void (async () => {
+      let trustedPreview: string | null = null
+      try {
+        const bytes = await loadTrustedCharacterFrame(
+          activePackRef,
+          loadController.signal,
+        )
+        if (bytes !== null) trustedPreview = pngDataUrl(bytes)
+      } catch {
+        // The normal pack load will apply the same native integrity boundary.
+      }
+      if (loadController.signal.aborted) return
+      const candidatePackId =
+        activePackRef.kind === "native" ? activePackRef.manifest.packId : null
+      pendingTrustedPreviewRef.current =
+        trustedPreview === null || candidatePackId === null
+          ? null
+          : { packId: candidatePackId, dataUrl: trustedPreview }
+      if (committedPackIdRef.current === null && trustedPreview !== null) {
+        updateStaticPreview(trustedPreview)
+      }
+      try {
+        await mountedController.loadPack(
+          activePackRef,
+          loadController.signal,
+          trustedPreview !== null,
+        )
+      } catch {
+        if (
+          committedPackIdRef.current !== null &&
+          pendingTrustedPreviewRef.current?.packId === candidatePackId
+        ) {
+          pendingTrustedPreviewRef.current = null
+        }
         // CharacterController emits a localized, non-blocking fallback status.
-      })
+      }
+    })()
     return () => loadController.abort()
-  }, [activePackRef, mountedController, reloadToken])
+  }, [activePackRef, mountedController, reloadToken, updateStaticPreview])
 
   useEffect(() => {
     controllerRef.current?.setState(state, stateGeneration)

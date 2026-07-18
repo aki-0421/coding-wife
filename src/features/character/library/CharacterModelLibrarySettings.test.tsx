@@ -49,7 +49,8 @@ vi.mock("@/features/character/import-preview/IsolatedCharacterPreview", () => ({
       parameterCount: number
       partCount: number
       drawableCount: number
-      thumbnailSha256: null
+      thumbnailSha256: string
+      thumbnailPng: ArrayBuffer
     }) => void
     onProgress?: (completed: number, total: number, phase: "rendering") => void
   }) => (
@@ -72,7 +73,10 @@ vi.mock("@/features/character/import-preview/IsolatedCharacterPreview", () => ({
           parameterCount: 12,
           partCount: 4,
           drawableCount: 20,
-          thumbnailSha256: null,
+          thumbnailSha256:
+            "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+          thumbnailPng: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+            .buffer,
         })
       }}
       type="button"
@@ -183,11 +187,12 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
     }
     this.snapshot = {
       ...this.snapshot,
+      selectedPackId: published.packId,
       packs: [
-        ...this.snapshot.packs.filter(
-          (pack) => pack.packId !== published.packId,
-        ),
-        published,
+        ...this.snapshot.packs
+          .filter((pack) => pack.packId !== published.packId)
+          .map((pack) => ({ ...pack, selectedWorkspaceCount: 0 })),
+        { ...published, selectedWorkspaceCount: 1, deletable: false },
       ],
     }
     return Promise.resolve(this.snapshot)
@@ -324,7 +329,7 @@ describe("CharacterModelLibrarySettings", () => {
 
     await waitFor(() => expect(gateway.confirmationRequests).toHaveLength(1))
     expect(gateway.confirmationRequests[0]?.displayName).toBe("My local model")
-    expect(gateway.selectionRequests.at(-1)).toBe(customPack.packId)
+    expect(gateway.selectionRequests).toHaveLength(0)
     expect(
       await screen.findByRole("radio", { name: /My local model/ }),
     ).toHaveAttribute("aria-checked", "true")

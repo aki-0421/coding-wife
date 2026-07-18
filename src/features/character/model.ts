@@ -59,6 +59,16 @@ export interface CharacterPackFile {
   }>
 }
 
+export interface CharacterTrustedFrame {
+  readonly assetId: "__coding-wife/trusted-frame.png"
+  readonly bytes: number
+  readonly sha256: string
+  readonly dimensions: Readonly<{
+    width: number
+    height: number
+  }>
+}
+
 export interface CharacterDeveloperProvenance {
   readonly sourceKind: "developer-provided"
   readonly sourceNotice: string
@@ -110,7 +120,7 @@ export interface CharacterPackManifest {
   }>
   readonly files: readonly CharacterPackFile[]
   readonly importedAt?: string
-  readonly thumbnailSha256?: string
+  readonly trustedFrame?: CharacterTrustedFrame
 }
 
 export interface CharacterUrlPackRef {

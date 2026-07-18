@@ -126,7 +126,7 @@ export function projectCharacterRuntime(
           noticeSha256:
             packProvenance?.sourceKind === "developer-provided"
               ? packProvenance.noticeSha256
-              : (status.pack.thumbnailSha256 ?? "—"),
+              : (status.pack.trustedFrame?.sha256 ?? "—"),
         }
       : BUILTIN_HIYORI_PACK,
     currentErrorCode:

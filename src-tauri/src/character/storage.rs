@@ -11,8 +11,8 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 use super::error::{character_error, CharacterResult};
 use super::manifest::{
-    is_opaque_pack_id, is_safe_asset_id, is_sha256, CharacterPackManifest, BUILTIN_HIYORI_PACK_ID,
-    CHARACTER_SCHEMA_VERSION,
+    is_opaque_pack_id, is_safe_asset_id, is_sha256, CharacterPackManifest, CharacterTrustedFrame,
+    BUILTIN_HIYORI_PACK_ID, CHARACTER_SCHEMA_VERSION,
 };
 use super::validation::{verify_source_unchanged, ValidatedCharacterSnapshot};
 
@@ -196,6 +196,7 @@ impl CharacterStorage {
         if manifest.compatibility.expected_parameters.is_none()
             || manifest.compatibility.expected_parts.is_none()
             || manifest.compatibility.expected_drawables.is_none()
+            || manifest.trusted_frame.is_none()
         {
             return Err(character_error(
                 "character_confirm_import",
@@ -237,6 +238,68 @@ impl CharacterStorage {
             manifest_hash,
             directory: destination,
         })
+    }
+
+    pub fn persist_trusted_frame(
+        &self,
+        quarantine_directory: &Path,
+        frame: &CharacterTrustedFrame,
+        contents: &[u8],
+    ) -> CharacterResult<()> {
+        if !quarantine_directory.starts_with(&self.quarantine)
+            || contents.len() as u64 != frame.bytes
+            || hex::encode(Sha256::digest(contents)) != frame.sha256
+        {
+            return Err(character_error(
+                "character_attest_preview",
+                "CHARACTER-TRUSTED-FRAME-INTEGRITY",
+                false,
+            ));
+        }
+        let path = checked_asset_path(quarantine_directory, &frame.asset_id)?;
+        let parent = path.parent().ok_or_else(|| {
+            character_error(
+                "character_attest_preview",
+                "CHARACTER-TRUSTED-FRAME-WRITE",
+                false,
+            )
+        })?;
+        fs::create_dir_all(parent).map_err(|_| {
+            character_error(
+                "character_attest_preview",
+                "CHARACTER-TRUSTED-FRAME-WRITE",
+                true,
+            )
+        })?;
+        set_private_directory(parent);
+        atomic_write(parent, &path, contents, "character_attest_preview")?;
+        verify_file(
+            &path,
+            frame.bytes,
+            &frame.sha256,
+            "character_attest_preview",
+        )
+    }
+
+    pub fn publish_and_select(
+        &self,
+        quarantine_directory: &Path,
+        manifest: &CharacterPackManifest,
+        workspace_id: &str,
+    ) -> CharacterResult<StoredPack> {
+        let mut state = self.load_state()?;
+        let published = self.publish(quarantine_directory, manifest)?;
+        state
+            .workspace_selections
+            .insert(workspace_id.to_owned(), manifest.pack_id.clone());
+        if let Err(error) = self.save_state(&state) {
+            if self.load_state().ok().as_ref() == Some(&state) {
+                return Ok(published);
+            }
+            self.rollback_publish(&published.directory, quarantine_directory)?;
+            return Err(error);
+        }
+        Ok(published)
     }
 
     pub fn load_custom_packs(&self) -> CharacterResult<(Vec<StoredPack>, Vec<String>)> {
@@ -311,7 +374,7 @@ impl CharacterStorage {
         manifest_hash: &str,
         asset_id: &str,
     ) -> CharacterResult<Vec<u8>> {
-        if manifest.sha256()? != manifest_hash {
+        if !is_sha256(manifest_hash) {
             return Err(character_error(
                 "character_read_asset",
                 "CHARACTER-MANIFEST-HASH-MISMATCH",
@@ -386,6 +449,10 @@ impl CharacterStorage {
             let path = checked_asset_path(directory, &asset.asset_id)?;
             verify_file(&path, asset.bytes, &asset.sha256, operation)?;
         }
+        if let Some(frame) = &manifest.trusted_frame {
+            let path = checked_asset_path(directory, &frame.asset_id)?;
+            verify_file(&path, frame.bytes, &frame.sha256, operation)?;
+        }
         Ok(())
     }
 
@@ -396,25 +463,24 @@ impl CharacterStorage {
         asset_id: &str,
         operation: &str,
     ) -> CharacterResult<Vec<u8>> {
-        let asset = manifest
-            .asset(asset_id)
+        let (expected_bytes, expected_sha256) = manifest_asset_integrity(manifest, asset_id)
             .ok_or_else(|| character_error(operation, "CHARACTER-ASSET-NOT-ALLOWLISTED", false))?;
         let path = checked_asset_path(directory, asset_id)?;
         let mut file = open_read_no_follow(&path, operation)?;
         let metadata = file
             .metadata()
             .map_err(|_| character_error(operation, "CHARACTER-ASSET-METADATA", true))?;
-        if !metadata.is_file() || metadata.len() != asset.bytes {
+        if !metadata.is_file() || metadata.len() != expected_bytes {
             return Err(character_error(
                 operation,
                 "CHARACTER-ASSET-LENGTH-MISMATCH",
                 false,
             ));
         }
-        let mut contents = Vec::with_capacity(asset.bytes as usize);
+        let mut contents = Vec::with_capacity(expected_bytes as usize);
         file.read_to_end(&mut contents)
             .map_err(|_| character_error(operation, "CHARACTER-ASSET-READ", true))?;
-        if hex::encode(Sha256::digest(&contents)) != asset.sha256 {
+        if hex::encode(Sha256::digest(&contents)) != expected_sha256 {
             return Err(character_error(
                 operation,
                 "CHARACTER-ASSET-HASH-MISMATCH",
@@ -422,6 +488,22 @@ impl CharacterStorage {
             ));
         }
         Ok(contents)
+    }
+
+    fn rollback_publish(
+        &self,
+        published_directory: &Path,
+        quarantine_directory: &Path,
+    ) -> CharacterResult<()> {
+        fs::rename(published_directory, quarantine_directory).map_err(|_| {
+            character_error(
+                "character_confirm_import",
+                "CHARACTER-PUBLISH-ROLLBACK",
+                false,
+            )
+        })?;
+        sync_directory(&self.library)?;
+        sync_directory(&self.quarantine)
     }
 
     fn cleanup_interrupted_quarantine(&self) -> CharacterResult<()> {
@@ -440,6 +522,20 @@ impl CharacterStorage {
             character_error("character_library_get", "CHARACTER-BROKEN-QUARANTINE", true)
         })
     }
+}
+
+fn manifest_asset_integrity<'a>(
+    manifest: &'a CharacterPackManifest,
+    asset_id: &str,
+) -> Option<(u64, &'a str)> {
+    if let Some(asset) = manifest.asset(asset_id) {
+        return Some((asset.bytes, asset.sha256.as_str()));
+    }
+    manifest
+        .trusted_frame
+        .as_ref()
+        .filter(|frame| frame.asset_id == asset_id)
+        .map(|frame| (frame.bytes, frame.sha256.as_str()))
 }
 
 fn checked_asset_path(root: &Path, asset_id: &str) -> CharacterResult<PathBuf> {
