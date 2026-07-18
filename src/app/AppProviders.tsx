@@ -14,11 +14,16 @@ import {
   type CharacterLibraryGateway,
 } from "@/features/character"
 import { RuntimeProvider, type AppTransport } from "@/features/runtime"
+import {
+  NativeReadinessProvider,
+  type NativeReadinessController,
+} from "@/features/readiness"
 
 export interface AppProvidersProps {
   readonly children: ReactNode
   readonly characterLibraryGateway: CharacterLibraryGateway
-  readonly localeStore?: LocalePreferenceStore
+  readonly localeStore: LocalePreferenceStore | undefined
+  readonly readinessController: NativeReadinessController
   readonly preferencesController: AppPreferencesController
   readonly transport: AppTransport
 }
@@ -27,22 +32,24 @@ export function AppProviders({
   children,
   characterLibraryGateway,
   localeStore,
+  readinessController,
   preferencesController,
   transport,
 }: AppProvidersProps) {
   return (
     <AppPreferencesProvider controller={preferencesController}>
       <I18nProvider
-        preferencesController={
-          localeStore === undefined ? preferencesController : undefined
-        }
-        store={localeStore}
+        {...(localeStore === undefined
+          ? { preferencesController }
+          : { store: localeStore })}
       >
-        <CharacterLibraryProvider gateway={characterLibraryGateway}>
-          <RuntimeProvider transport={transport}>
-            <TooltipProvider>{children}</TooltipProvider>
-          </RuntimeProvider>
-        </CharacterLibraryProvider>
+        <NativeReadinessProvider controller={readinessController}>
+          <CharacterLibraryProvider gateway={characterLibraryGateway}>
+            <RuntimeProvider transport={transport}>
+              <TooltipProvider>{children}</TooltipProvider>
+            </RuntimeProvider>
+          </CharacterLibraryProvider>
+        </NativeReadinessProvider>
       </I18nProvider>
     </AppPreferencesProvider>
   )

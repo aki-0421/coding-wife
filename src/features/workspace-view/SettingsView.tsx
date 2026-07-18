@@ -41,6 +41,12 @@ import {
 import { useI18n } from "@/features/localization"
 import { NarrationSettings } from "@/features/narration"
 import {
+  checkById,
+  NativeReadinessDiagnostics,
+  ReadinessStatusBadge,
+  useNativeReadiness,
+} from "@/features/readiness"
+import {
   useAppPreferences,
   useAppPreferencesController,
 } from "@/features/preferences"
@@ -329,11 +335,7 @@ function CompanionSettings({
   workspaceId,
 }: Pick<
   SettingsViewProps,
-  | "characterRuntime"
-  | "copy"
-  | "muted"
-  | "onRetryCharacter"
-  | "workspaceId"
+  "characterRuntime" | "copy" | "muted" | "onRetryCharacter" | "workspaceId"
 >) {
   const preferences = useAppPreferences()
   const controller = useAppPreferencesController()
@@ -444,100 +446,16 @@ function SupportSettings({ copy }: { readonly copy: WorkspaceCopy }) {
 function DiagnosticsSettings({
   characterRuntime,
   copy,
-  history,
   muted,
-  runtimeState,
   onRetryCharacter,
-  onRetryRuntime,
 }: Pick<
   SettingsViewProps,
-  | "characterRuntime"
-  | "copy"
-  | "history"
-  | "muted"
-  | "runtimeState"
-  | "onRetryCharacter"
-  | "onRetryRuntime"
+  "characterRuntime" | "copy" | "muted" | "onRetryCharacter"
 >) {
   return (
     <section className="flex flex-col gap-lg">
-      <div className="flex items-center justify-between gap-md">
-        <h2 className="m-0 text-headline text-text-strong">
-          {copy.settingsView.diagnosticsTitle}
-        </h2>
-        <Button
-          onClick={onRetryRuntime}
-          size="xs"
-          type="button"
-          variant="secondary"
-        >
-          {copy.settingsView.recheck}
-        </Button>
-      </div>
-      {runtimeState.status === "error" ? (
-        <div
-          className="rounded-control border border-destructive/40 bg-destructive/10 p-md"
-          role="alert"
-        >
-          <p className="m-0 text-title text-destructive">
-            {copy.runtimeErrorTitle}
-          </p>
-          <p className="m-0 mt-xs font-mono text-label text-destructive">
-            {runtimeState.error.code}
-          </p>
-        </div>
-      ) : null}
-      <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-xl gap-y-sm text-caption">
-        <dt className="text-muted-foreground">
-          {copy.settingsView.runtimeMode}
-        </dt>
-        <dd className="m-0 text-foreground">{runtimeState.status}</dd>
-        <dt className="text-muted-foreground">{copy.settingsView.platform}</dt>
-        <dd className="m-0 font-mono text-foreground">
-          {runtimeState.status === "ready"
-            ? `${runtimeState.metadata.platform} / ${runtimeState.metadata.architecture}`
-            : "—"}
-        </dd>
-      </dl>
+      <NativeReadinessDiagnostics />
       <Separator />
-      <h3 className="m-0 text-title text-text-strong">
-        {copy.settingsView.integrations}
-      </h3>
-      <div className="flex flex-col">
-        {(["Codex", "Git"] as const).map((integration) => (
-          <div
-            className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption"
-            key={integration}
-          >
-            <span>{integration}</span>
-            <Badge variant="outline">{copy.settingsView.notConfigured}</Badge>
-          </div>
-        ))}
-        <div className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption">
-          <span>{copy.settingsView.localHistory}</span>
-          <Badge
-            variant={
-              history.mode === "ready"
-                ? "success"
-                : history.mode === "recovery_required"
-                  ? "destructive"
-                  : "outline"
-            }
-          >
-            {history.mode === "ready"
-              ? copy.persistedBadge
-              : history.mode === "ephemeral"
-                ? copy.settingsView.historyEphemeral
-                : history.mode === "read_only"
-                  ? copy.settingsView.historyReadOnly
-                  : copy.historyUnavailable}
-          </Badge>
-        </div>
-        <div className="flex items-center justify-between gap-md border-b border-divider py-sm text-caption">
-          <span>{copy.settingsView.live2dStatus}</span>
-          <CharacterReadinessBadge copy={copy} runtime={characterRuntime} />
-        </div>
-      </div>
       <CharacterRuntimeErrorAlert
         characterRuntime={characterRuntime}
         copy={copy}
@@ -557,11 +475,26 @@ function HistorySettings({
   history,
   onDeleteHistory,
 }: Pick<SettingsViewProps, "copy" | "history" | "onDeleteHistory">) {
+  const { locale } = useI18n()
+  const nativeReadiness = useNativeReadiness()
+  const nativeHistory = checkById(nativeReadiness.snapshot, "history")
   const [confirmationOpen, setConfirmationOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const historyActionRef = useRef<HTMLButtonElement>(null)
   const ephemeral = history.mode === "ephemeral"
-  const canChangeHistory = history.mode === "ready" || ephemeral
+  const nativePersistenceReady = nativeHistory?.status === "ready"
+  const canChangeHistory =
+    ephemeral || (history.mode === "ready" && nativePersistenceReady)
+  const persistenceUnavailable = {
+    en: {
+      title: "Local persistence unavailable",
+      body: "This readiness snapshot does not verify a writable history database. The app does not claim that history is persisted locally.",
+    },
+    ja: {
+      title: "ローカル保存を利用できません",
+      body: "この準備状況スナップショットでは、書き込み可能な履歴データベースを確認できていません。履歴をローカル保存済みとは表示しません。",
+    },
+  }[locale]
 
   const confirmDelete = async () => {
     setDeleting(true)
@@ -574,20 +507,44 @@ function HistorySettings({
 
   return (
     <section className="flex flex-col gap-xl">
-      <h2 className="m-0 text-headline text-text-strong">
-        {copy.settingsView.historyTitle}
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-md">
+        <h2 className="m-0 text-headline text-text-strong">
+          {copy.settingsView.historyTitle}
+        </h2>
+        <span
+          data-history-readiness-snapshot={
+            nativeReadiness.snapshot?.snapshotId ?? "pending"
+          }
+        >
+          {nativeHistory === null ? (
+            <Badge variant="running">{copy.settingsView.live2dLoading}</Badge>
+          ) : (
+            <ReadinessStatusBadge
+              locale={locale}
+              stale={
+                nativeReadiness.status === "rechecking" ||
+                nativeReadiness.status === "error"
+              }
+              status={nativeHistory.status}
+            />
+          )}
+        </span>
+      </div>
       <div className="flex flex-col gap-xs">
         <h3 className="m-0 flex items-center gap-xs text-title text-text-strong">
           <DatabaseIcon aria-hidden="true" className="size-3" />
           {ephemeral
             ? copy.settingsView.storedEphemeral
-            : copy.settingsView.stored}
+            : nativePersistenceReady
+              ? copy.settingsView.stored
+              : persistenceUnavailable.title}
         </h3>
         <p className="m-0 max-w-[70ch] text-caption text-muted-foreground">
           {ephemeral
             ? copy.settingsView.storedEphemeralBody
-            : copy.settingsView.storedBody}
+            : nativePersistenceReady
+              ? copy.settingsView.storedBody
+              : persistenceUnavailable.body}
         </p>
       </div>
       <div className="flex flex-col gap-xs">

@@ -17,6 +17,12 @@ import type {
 } from "@/features/app-lifecycle"
 import type { LocalePreferenceStore } from "@/features/localization"
 import { DemoNarrationGateway, NarrationController } from "@/features/narration"
+import {
+  NativeReadinessController,
+  readinessCheckIds,
+  type NativeReadinessGateway,
+  type NativeReadinessSnapshotV1,
+} from "@/features/readiness"
 import { DemoTransport } from "@/features/runtime"
 import type {
   SendTurnRequest,
@@ -82,11 +88,44 @@ function appLifecycleHarness() {
   }
 }
 
+function readyNativeReadinessController(): NativeReadinessController {
+  const checkedAt = "2026-07-18T00:00:00.000Z"
+  const snapshot: NativeReadinessSnapshotV1 = {
+    schemaVersion: 1,
+    snapshotId: "123e4567-e89b-42d3-a456-426614174000",
+    checkedAt,
+    source: "native",
+    checks: readinessCheckIds.map((id) => ({
+      id,
+      status: "ready",
+      checkedAt,
+      code: `READINESS-${id.toUpperCase().replace("_", "-")}-READY`,
+      recoverable: false,
+      recoveryAction: "none",
+      facts: [],
+    })),
+  }
+  const gateway: NativeReadinessGateway = {
+    kind: "native",
+    run: () => Promise.resolve(snapshot),
+    copy: (snapshotId) =>
+      Promise.resolve({
+        schemaVersion: 1,
+        snapshotId,
+        summary: "Coding Wife diagnostics v1\nsource=native\n",
+      }),
+  }
+  return new NativeReadinessController(gateway)
+}
+
 function renderWorkspace(adapter?: WorkspaceViewAdapter) {
   return render(
     <App
       localeStore={englishLocaleStore}
       transport={new DemoTransport()}
+      {...(adapter?.hydrationMode === "native"
+        ? { readinessController: readyNativeReadinessController() }
+        : {})}
       {...(adapter ? { workspaceAdapter: adapter } : {})}
     />,
   )
@@ -376,9 +415,7 @@ describe("WorkspaceShell", () => {
     await act(async () => Promise.resolve())
     act(() => lifecycle.emit(request))
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Stop and Quit" }),
-    )
+    fireEvent.click(screen.getByRole("button", { name: "Stop and Quit" }))
     expect(prepareAppQuit).toHaveBeenCalledWith({
       workspaceId: "workspace-native",
       expectedGeneration: 1,
@@ -793,8 +830,10 @@ describe("WorkspaceShell", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
     fireEvent.click(screen.getByRole("button", { name: "Diagnostics" }))
 
-    const localHistory = await screen.findByText("Local history")
-    expect(localHistory.parentElement).toHaveTextContent("Persisted locally")
+    const localHistory = await screen.findByRole("heading", {
+      name: "Workspace history",
+    })
+    expect(localHistory.closest("article")).toHaveTextContent("Ready")
   })
 
   it("labels demo history as ephemeral and resets only preview memory", async () => {
@@ -820,8 +859,10 @@ describe("WorkspaceShell", () => {
 
     await user.click(screen.getByRole("tab", { name: "Settings" }))
     await user.click(screen.getByRole("button", { name: "Diagnostics" }))
-    const localHistory = await screen.findByText("Local history")
-    expect(localHistory.parentElement).toHaveTextContent("Demo memory")
+    const localHistory = await screen.findByRole("heading", {
+      name: "Workspace history",
+    })
+    expect(localHistory.closest("article")).toHaveTextContent("Unavailable")
 
     await user.click(screen.getByRole("button", { name: "History & privacy" }))
     expect(screen.getByText("Stored in demo memory")).toBeVisible()

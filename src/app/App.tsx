@@ -35,6 +35,10 @@ import {
   createAppPreferencesGateway,
 } from "@/features/preferences"
 import { createAppTransport, type AppTransport } from "@/features/runtime"
+import {
+  createNativeReadinessGateway,
+  NativeReadinessController,
+} from "@/features/readiness"
 import { createWorkspaceViewAdapter } from "@/features/workspace-persistence"
 import {
   WorkspaceShell,
@@ -52,6 +56,7 @@ export interface AppProps {
   readonly narrationController?: NarrationController
   readonly narrationGateway?: NarrationGateway
   readonly narrationSource?: CommitNarrationConsumerPort | null
+  readonly readinessController?: NativeReadinessController
   readonly transport?: AppTransport
   readonly workspaceAdapter?: WorkspaceViewAdapter
 }
@@ -75,6 +80,7 @@ export function App({
   narrationController,
   narrationGateway,
   narrationSource,
+  readinessController,
   transport,
   workspaceAdapter,
 }: AppProps) {
@@ -97,6 +103,17 @@ export function App({
   )
   const activePreferencesController =
     appPreferencesController ?? fallbackPreferencesController
+  const fallbackReadinessController = useMemo(
+    () =>
+      new NativeReadinessController(
+        createNativeReadinessGateway(
+          activeTransport.kind === "tauri" ? "native" : "demo",
+        ),
+      ),
+    [activeTransport.kind],
+  )
+  const activeReadinessController =
+    readinessController ?? fallbackReadinessController
   const fallbackWorkspaceAdapter = useMemo(
     () =>
       createWorkspaceViewAdapter(activeTransport.kind, {
@@ -177,6 +194,7 @@ export function App({
       }
       localeStore={localeStore}
       preferencesController={activePreferencesController}
+      readinessController={activeReadinessController}
       transport={activeTransport}
     >
       <NarrationProvider

@@ -521,6 +521,31 @@ impl CharacterStorage {
         Ok((packs, diagnostics))
     }
 
+    pub(crate) fn verify_library_readiness(&self) -> CharacterResult<()> {
+        self.load_state()?;
+        let entries = fs::read_dir(&self.library)
+            .map_err(|_| character_error("character_readiness", "CHARACTER-LIBRARY-READ", true))?;
+        for entry in entries {
+            let entry = entry.map_err(|_| {
+                character_error("character_readiness", "CHARACTER-LIBRARY-READ", true)
+            })?;
+            let directory = entry.path();
+            let metadata = fs::symlink_metadata(&directory).map_err(|_| {
+                character_error("character_readiness", "CHARACTER-LIBRARY-READ", true)
+            })?;
+            if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                return Err(character_error(
+                    "character_readiness",
+                    "CHARACTER-LIBRARY-INVALID",
+                    true,
+                ));
+            }
+            self.load_pack_directory(&directory)
+                .map_err(|error| error.with_operation("character_readiness"))?;
+        }
+        Ok(())
+    }
+
     pub fn load_pack(&self, pack_id: &str) -> CharacterResult<StoredPack> {
         let directory = self.library.join(custom_directory_name(pack_id)?);
         self.load_pack_directory(&directory)

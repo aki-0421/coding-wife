@@ -11,6 +11,13 @@ use super::types::{
 
 const RECOVERY_UNAVAILABLE: &str = "APP-PREFERENCES-UNAVAILABLE";
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AppPreferencesReadiness {
+    pub schema_version: u16,
+    pub recovery_code: Option<String>,
+    pub store_available: bool,
+}
+
 #[derive(Debug)]
 struct AppPreferencesState {
     store: Option<AppPreferencesStore>,
@@ -94,6 +101,21 @@ impl AppPreferencesService {
         };
         persist(&mut state, &next, "app_preferences_reset")?;
         Ok(snapshot(&state, request.default_locale))
+    }
+
+    pub(crate) fn readiness(&self) -> AppPreferencesReadiness {
+        match self.state.lock() {
+            Ok(state) => AppPreferencesReadiness {
+                schema_version: APP_PREFERENCES_SCHEMA_VERSION,
+                recovery_code: state.recovery_code.clone(),
+                store_available: state.store.is_some(),
+            },
+            Err(_) => AppPreferencesReadiness {
+                schema_version: APP_PREFERENCES_SCHEMA_VERSION,
+                recovery_code: Some(RECOVERY_UNAVAILABLE.to_owned()),
+                store_available: false,
+            },
+        }
     }
 }
 

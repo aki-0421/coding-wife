@@ -4,6 +4,7 @@ pub mod codex;
 pub mod git_review;
 pub mod narration;
 pub mod preferences;
+pub mod readiness;
 pub mod workspace_history;
 
 use std::sync::Arc;
@@ -49,6 +50,8 @@ use narration::commands::{
 use narration::NarrationService;
 use preferences::commands::{app_preferences_get, app_preferences_reset, app_preferences_update};
 use preferences::AppPreferencesService;
+use readiness::commands::{copy_sanitized_diagnostics, run_diagnostic_check};
+use readiness::NativeReadinessService;
 use workspace_history::commands::{
     history_append_domain_event, workspace_cancel, workspace_create_session, workspace_delete,
     workspace_get_turn_context_snapshot, workspace_issue_delete_challenge, workspace_list,
@@ -192,7 +195,8 @@ pub fn run() {
             setup_supervisor.attach_app_handle(app.handle().clone());
             setup_supervisor.start_signal_loop();
             let app_data_directory = app.path().app_data_dir()?;
-            app.manage(AppPreferencesService::production(&app_data_directory));
+            let preferences_service = AppPreferencesService::production(&app_data_directory);
+            app.manage(preferences_service.clone());
             let attachment_service = AttachmentService::production(&app_data_directory)
                 .map_err(|error| std::io::Error::other(error.code))?;
             app.manage(attachment_service);
@@ -230,9 +234,16 @@ pub fn run() {
             app.manage(history_service.clone());
             app.manage(git_review_service);
             app.manage(explanation_controller);
+            let startup_history_service = history_service.clone();
             tauri::async_runtime::spawn(async move {
-                history_service.restore_startup().await;
+                startup_history_service.restore_startup().await;
             });
+            app.manage(NativeReadinessService::new(
+                setup_supervisor.clone(),
+                history_service.clone(),
+                character_service.clone(),
+                preferences_service,
+            ));
             app.manage(character_service);
             let window_config = app.config().app.windows.first().ok_or_else(|| {
                 std::io::Error::new(
@@ -260,6 +271,8 @@ pub fn run() {
             app_preferences_get,
             app_preferences_update,
             app_preferences_reset,
+            run_diagnostic_check,
+            copy_sanitized_diagnostics,
             app_quit_cancel,
             app_quit_confirm,
             codex_pick_workspace,

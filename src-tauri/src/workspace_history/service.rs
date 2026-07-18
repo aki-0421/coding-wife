@@ -20,7 +20,7 @@ use super::editable_context::{
 use super::store::WorkspaceHistoryStore;
 use super::types::{
     AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, ContextSource,
-    HistoryMode, NormalizedDomainEvent, TimelinePage, VersionedCharacterContext,
+    HistoryMode, HistoryStatus, NormalizedDomainEvent, TimelinePage, VersionedCharacterContext,
     VersionedProjectContext, WorkspaceCancelRequest, WorkspaceCommandError,
     WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
     WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth,
@@ -161,6 +161,10 @@ impl WorkspaceHistoryService {
 
     pub fn history_mode(&self) -> HistoryMode {
         self.store.status().mode
+    }
+
+    pub fn history_status(&self) -> HistoryStatus {
+        self.store.status()
     }
 
     pub async fn list_after_startup(

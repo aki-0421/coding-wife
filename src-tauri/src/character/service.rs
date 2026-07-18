@@ -25,6 +25,16 @@ use super::validation::{snapshot_character_model, validate_trusted_frame_png};
 const PREVIEW_TTL: Duration = Duration::from_secs(10 * 60);
 const BUILTIN_MANIFEST_FILE: &str = "pack.json";
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
+const LIVE2D_CORE_BYTES: &[u8] =
+    include_bytes!("../../../public/vendor/live2d/core/live2dcubismcore.min.js");
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CharacterReadinessProbe {
+    pub schema_version: u16,
+    pub core_available: bool,
+    pub builtin_resources_available: bool,
+    pub library_available: bool,
+}
 
 pub type CharacterPickerFuture<'a> = Pin<Box<dyn Future<Output = Option<PathBuf>> + Send + 'a>>;
 
@@ -424,6 +434,92 @@ impl CharacterService {
         let _operation = self.operations.lock().await;
         self.cleanup_expired().await;
         self.snapshot(&request.workspace_id)
+    }
+
+    pub(crate) fn readiness(&self) -> CharacterReadinessProbe {
+        CharacterReadinessProbe {
+            schema_version: CHARACTER_SCHEMA_VERSION,
+            core_available: !LIVE2D_CORE_BYTES.is_empty(),
+            builtin_resources_available: self.verify_builtin_resources().is_ok(),
+            library_available: self.storage.verify_library_readiness().is_ok(),
+        }
+    }
+
+    fn verify_builtin_resources(&self) -> CharacterResult<()> {
+        let manifest_bytes = std::fs::read(self.builtin_directory.join(BUILTIN_MANIFEST_FILE))
+            .map_err(|_| {
+                character_error("character_readiness", "CHARACTER-BUILTIN-MANIFEST", false)
+            })?;
+        if manifest_bytes.len() > 1024 * 1024 {
+            return Err(character_error(
+                "character_readiness",
+                "CHARACTER-BUILTIN-MANIFEST",
+                false,
+            ));
+        }
+        let value: serde_json::Value = serde_json::from_slice(&manifest_bytes).map_err(|_| {
+            character_error("character_readiness", "CHARACTER-BUILTIN-MANIFEST", false)
+        })?;
+        if value
+            .get("schemaVersion")
+            .and_then(serde_json::Value::as_u64)
+            != Some(u64::from(CHARACTER_SCHEMA_VERSION))
+            || value.get("packId").and_then(serde_json::Value::as_str)
+                != Some(BUILTIN_HIYORI_PACK_ID)
+        {
+            return Err(character_error(
+                "character_readiness",
+                "CHARACTER-BUILTIN-SCHEMA",
+                false,
+            ));
+        }
+        let files = value
+            .get("files")
+            .and_then(serde_json::Value::as_array)
+            .filter(|files| !files.is_empty())
+            .ok_or_else(|| {
+                character_error("character_readiness", "CHARACTER-BUILTIN-MANIFEST", false)
+            })?;
+        for asset in files {
+            let asset_id = asset
+                .get("assetId")
+                .and_then(serde_json::Value::as_str)
+                .filter(|asset_id| {
+                    !asset_id.is_empty()
+                        && std::path::Path::new(asset_id)
+                            .components()
+                            .all(|component| matches!(component, std::path::Component::Normal(_)))
+                })
+                .ok_or_else(|| {
+                    character_error("character_readiness", "CHARACTER-BUILTIN-ASSET", false)
+                })?;
+            let expected_bytes = asset
+                .get("bytes")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| {
+                    character_error("character_readiness", "CHARACTER-BUILTIN-ASSET", false)
+                })?;
+            let expected_hash = asset
+                .get("sha256")
+                .and_then(serde_json::Value::as_str)
+                .filter(|hash| is_sha256(hash))
+                .ok_or_else(|| {
+                    character_error("character_readiness", "CHARACTER-BUILTIN-ASSET", false)
+                })?;
+            let contents = std::fs::read(self.builtin_directory.join(asset_id)).map_err(|_| {
+                character_error("character_readiness", "CHARACTER-BUILTIN-ASSET", false)
+            })?;
+            if contents.len() as u64 != expected_bytes
+                || hex::encode(Sha256::digest(&contents)) != expected_hash
+            {
+                return Err(character_error(
+                    "character_readiness",
+                    "CHARACTER-BUILTIN-ASSET",
+                    false,
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub async fn pick_import(
