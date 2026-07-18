@@ -263,15 +263,9 @@ interface PendingRequestBase {
 export interface DecisionContext {
   readonly schemaVersion: 1
   readonly category:
-    | "command_execution"
-    | "file_change"
-    | "permissions"
-    | "user_decision"
+    "command_execution" | "file_change" | "permissions" | "user_decision"
   readonly targetKind:
-    | "network_host"
-    | "workspace"
-    | "workspace_path"
-    | "active_turn"
+    "network_host" | "workspace" | "workspace_path" | "active_turn"
   readonly targetAlias: string
   readonly effect:
     | "execute_command"
@@ -1017,8 +1011,10 @@ function parseDecisionContext(value: unknown): DecisionContext {
     !oneOf(value.scope, approvalScopes) ||
     !oneOf(value.risk, approvalRisks) ||
     !oneOf(value.reversibility, approvalReversibility) ||
-    !(value.recommendation === null ||
-      isPublicSingleLineText(value.recommendation, 256)) ||
+    !(
+      value.recommendation === null ||
+      isPublicSingleLineText(value.recommendation, 256)
+    ) ||
     !Array.isArray(value.evidence) ||
     value.evidence.length < 1 ||
     value.evidence.length > 8 ||
