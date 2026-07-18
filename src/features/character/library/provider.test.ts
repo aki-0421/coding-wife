@@ -8,6 +8,7 @@ import {
   type CharacterLibrarySnapshot,
   type CharacterPreviewAttestationRequest,
   type CharacterPreviewAttestationResponse,
+  type SemanticMappingV1,
 } from "@/features/character/library/contracts"
 import { CharacterLibraryStore } from "@/features/character/library/provider"
 import {
@@ -56,6 +57,39 @@ function createGateway(
     }),
     ...overrides,
   }
+}
+
+function projectSnapshot(
+  snapshot: CharacterLibrarySnapshot,
+  workspaceId: string,
+  projectId: string,
+  overrides: Partial<CharacterLibrarySnapshot> = {},
+): CharacterLibrarySnapshot {
+  return { ...snapshot, workspaceId, projectId, ...overrides }
+}
+
+function withMappingVersion(
+  snapshot: CharacterLibrarySnapshot,
+  mappingVersion: number,
+): CharacterLibrarySnapshot {
+  return {
+    ...snapshot,
+    semanticMappingStatus: "saved",
+    semanticMapping: {
+      ...snapshot.semanticMapping,
+      mappingVersion,
+    } satisfies SemanticMappingV1,
+  }
+}
+
+function mappingConflict(): CharacterLibraryOperationError {
+  return new CharacterLibraryOperationError({
+    code: "CHARACTER-MAPPING-CONFLICT",
+    operation: "character_semantic_mapping_save",
+    recoverable: true,
+    userMessageKey: "character.error.generic",
+    detailRef: "character-library-v1",
+  })
 }
 
 describe("CharacterLibraryStore", () => {
@@ -147,6 +181,185 @@ describe("CharacterLibraryStore", () => {
       projectId: snapshot.projectId,
       fallbackApplied: true,
       diagnostics: ["CHARACTER-SELECTION-FALLBACK"],
+    })
+  })
+
+  it("publishes a global pack deletion atomically while preserving each project selection", async () => {
+    const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
+    const customPack = {
+      ...snapshot.packs[0],
+      packId: "custom:11111111-1111-4111-8111-111111111111",
+      displayName: "Project A pack",
+      kind: "custom" as const,
+      deletable: true,
+    }
+    const projectA = projectSnapshot(snapshot, "workspace-a", "project-a", {
+      packs: [...snapshot.packs, customPack],
+      selectedPackId: customPack.packId,
+      semanticMapping: {
+        ...snapshot.semanticMapping,
+        packId: customPack.packId,
+      },
+    })
+    const projectB = projectSnapshot(snapshot, "workspace-b", "project-b", {
+      packs: [...snapshot.packs, customPack],
+    })
+    const deletedA = projectSnapshot(snapshot, "workspace-a", "project-a")
+    const deletedB = projectSnapshot(snapshot, "workspace-b", "project-b")
+    const projectBRefresh = deferred<CharacterLibrarySnapshot>()
+    let hydrate = true
+    const getLibrary = vi.fn(
+      ({ workspaceId }: { readonly workspaceId: string }) => {
+        if (hydrate) {
+          return Promise.resolve(
+            workspaceId === "workspace-a" ? projectA : projectB,
+          )
+        }
+        return projectBRefresh.promise
+      },
+    )
+    const store = new CharacterLibraryStore(
+      createGateway({
+        getLibrary,
+        deletePack: () => Promise.resolve(deletedA),
+      }),
+    )
+    await store.load("workspace-a")
+    await store.load("workspace-b")
+    hydrate = false
+
+    const deletion = store.deletePack("workspace-a", customPack.packId)
+    await Promise.resolve()
+
+    expect(store.getState("workspace-a").snapshot?.packs).toHaveLength(2)
+    expect(store.getState("workspace-b").snapshot?.packs).toHaveLength(2)
+    expect(store.getState("workspace-a").mutation).toBe("deleting")
+
+    projectBRefresh.resolve(deletedB)
+    await deletion
+
+    expect(store.getState("workspace-a").snapshot).toMatchObject({
+      projectId: "project-a",
+      selectedPackId: "builtin:hiyori_pro",
+      packs: [{ packId: "builtin:hiyori_pro" }],
+    })
+    expect(store.getState("workspace-b").snapshot).toMatchObject({
+      projectId: "project-b",
+      selectedPackId: "builtin:hiyori_pro",
+      packs: [{ packId: "builtin:hiyori_pro" }],
+    })
+  })
+
+  it("invalidates a project that cannot refresh after a global mutation", async () => {
+    const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
+    const projectA = projectSnapshot(snapshot, "workspace-a", "project-a")
+    const projectB = projectSnapshot(snapshot, "workspace-b", "project-b")
+    let refreshProjectB = false
+    const getLibrary = vi.fn(
+      ({ workspaceId }: { readonly workspaceId: string }) => {
+        if (refreshProjectB && workspaceId === "workspace-b") {
+          return Promise.reject(new CharacterLibraryOperationError())
+        }
+        return Promise.resolve(
+          workspaceId === "workspace-a" ? projectA : projectB,
+        )
+      },
+    )
+    const store = new CharacterLibraryStore(
+      createGateway({
+        getLibrary,
+        deletePack: () => Promise.resolve(projectA),
+      }),
+    )
+    await store.load("workspace-a")
+    await store.load("workspace-b")
+    refreshProjectB = true
+
+    await store.deletePack("workspace-a", "custom:missing")
+
+    expect(store.getState("workspace-a")).toMatchObject({
+      status: "ready",
+      snapshot: { projectId: "project-a" },
+    })
+    expect(store.getState("workspace-b")).toMatchObject({
+      status: "idle",
+      snapshot: null,
+      errorCode: null,
+    })
+  })
+
+  it("reloads every project after a mapping conflict and retries with the fresh version", async () => {
+    const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
+    let projectA = withMappingVersion(
+      projectSnapshot(snapshot, "workspace-a", "project-a"),
+      1,
+    )
+    let projectB = withMappingVersion(
+      projectSnapshot(snapshot, "workspace-b", "project-b"),
+      1,
+    )
+    const saveSemanticMapping = vi.fn(
+      (
+        request: Parameters<CharacterLibraryGateway["saveSemanticMapping"]>[0],
+      ) => {
+        if (request.expectedMappingVersion === 1) {
+          projectA = withMappingVersion(projectA, 2)
+          projectB = withMappingVersion(projectB, 2)
+          return Promise.reject(mappingConflict())
+        }
+        projectA = withMappingVersion(projectA, 3)
+        projectB = withMappingVersion(projectB, 3)
+        return Promise.resolve(projectA)
+      },
+    )
+    const store = new CharacterLibraryStore(
+      createGateway({
+        getLibrary: ({ workspaceId }) =>
+          Promise.resolve(workspaceId === "workspace-a" ? projectA : projectB),
+        saveSemanticMapping,
+      }),
+    )
+    await store.load("workspace-a")
+    await store.load("workspace-b")
+    const assignments = snapshot.semanticMapping.assignments
+
+    await expect(
+      store.saveSemanticMapping({
+        workspaceId: "workspace-a",
+        packId: snapshot.selectedPackId,
+        manifestHash: snapshot.semanticMapping.manifestHash,
+        expectedMappingVersion: 1,
+        assignments,
+      }),
+    ).rejects.toThrow("CHARACTER-MAPPING-CONFLICT")
+
+    expect(store.getState("workspace-a")).toMatchObject({
+      errorCode: "CHARACTER-MAPPING-CONFLICT",
+      snapshot: { semanticMapping: { mappingVersion: 2 } },
+    })
+    expect(store.getState("workspace-b").snapshot).toMatchObject({
+      projectId: "project-b",
+      semanticMapping: { mappingVersion: 2 },
+    })
+
+    await store.saveSemanticMapping({
+      workspaceId: "workspace-a",
+      packId: snapshot.selectedPackId,
+      manifestHash: snapshot.semanticMapping.manifestHash,
+      expectedMappingVersion: 2,
+      assignments,
+    })
+
+    expect(saveSemanticMapping).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedMappingVersion: 2 }),
+    )
+    expect(store.getState("workspace-a")).toMatchObject({
+      errorCode: null,
+      snapshot: { semanticMapping: { mappingVersion: 3 } },
+    })
+    expect(store.getState("workspace-b").snapshot).toMatchObject({
+      projectId: "project-b",
+      semanticMapping: { mappingVersion: 3 },
     })
   })
 

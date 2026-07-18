@@ -76,6 +76,7 @@ export class CharacterLibraryStore {
   readonly #sessionCounts = new Map<string, number>()
   readonly #previewCancellations = new Map<string, Promise<void>>()
   readonly #restoreFocus = new Set<string>()
+  #globalRevision = 0
 
   public constructor(gateway: CharacterLibraryGateway) {
     this.gateway = gateway
@@ -137,18 +138,23 @@ export class CharacterLibraryStore {
       status: current.snapshot === null ? "loading" : current.status,
       errorCode: null,
     })
+    const revision = this.#globalRevision
     const load = this.gateway
       .getLibrary({ workspaceId })
       .then((snapshot) => {
-        this.setReadyProjectSnapshot(workspaceId, snapshot)
+        if (revision === this.#globalRevision) {
+          this.setReadyProjectSnapshot(workspaceId, snapshot)
+        }
         return snapshot
       })
       .catch((error: unknown) => {
-        this.setState(workspaceId, {
-          ...this.getState(workspaceId),
-          status: "error",
-          errorCode: safeErrorCode(error),
-        })
+        if (revision === this.#globalRevision) {
+          this.setState(workspaceId, {
+            ...this.getState(workspaceId),
+            status: "error",
+            errorCode: safeErrorCode(error),
+          })
+        }
         throw error
       })
       .finally(() => {
@@ -205,7 +211,7 @@ export class CharacterLibraryStore {
     this.beginMutation(request.workspaceId, "confirming")
     try {
       const snapshot = await this.gateway.confirmImport(request)
-      this.setReadyProjectSnapshot(request.workspaceId, snapshot, true)
+      await this.synchronizeGlobalSnapshots(request.workspaceId, snapshot, true)
       return snapshot
     } catch (error) {
       this.failMutation(request.workspaceId, error)
@@ -252,7 +258,7 @@ export class CharacterLibraryStore {
     this.beginMutation(workspaceId, "deleting")
     try {
       const snapshot = await this.gateway.deletePack({ workspaceId, packId })
-      this.setReadyProjectSnapshot(workspaceId, snapshot)
+      await this.synchronizeGlobalSnapshots(workspaceId, snapshot)
       return snapshot
     } catch (error) {
       this.failMutation(workspaceId, error)
@@ -266,9 +272,15 @@ export class CharacterLibraryStore {
     this.beginMutation(request.workspaceId, "saving_mapping")
     try {
       const snapshot = await this.gateway.saveSemanticMapping(request)
-      this.setReadyProjectSnapshot(request.workspaceId, snapshot)
+      await this.synchronizeGlobalSnapshots(request.workspaceId, snapshot)
       return snapshot
     } catch (error) {
+      if (
+        error instanceof CharacterLibraryOperationError &&
+        error.code === "CHARACTER-MAPPING-CONFLICT"
+      ) {
+        await this.synchronizeGlobalSnapshots(request.workspaceId)
+      }
       this.failMutation(request.workspaceId, error)
       throw error
     }
@@ -371,6 +383,88 @@ export class CharacterLibraryStore {
         mutation: null,
         errorCode: null,
       })
+    }
+    for (const listener of this.#listeners) listener()
+  }
+
+  private async synchronizeGlobalSnapshots(
+    originWorkspaceId: string,
+    originSnapshot?: CharacterLibrarySnapshot,
+    clearOriginPreview = false,
+  ): Promise<void> {
+    const representatives = new Map<string, string>()
+    for (const [workspaceId, state] of this.#states) {
+      if (state.snapshot !== null) {
+        representatives.set(state.snapshot.projectId, workspaceId)
+      }
+    }
+    if (originSnapshot !== undefined) {
+      representatives.set(originSnapshot.projectId, originWorkspaceId)
+    }
+
+    const snapshotsByProject = new Map<string, CharacterLibrarySnapshot>()
+    if (originSnapshot !== undefined) {
+      snapshotsByProject.set(originSnapshot.projectId, originSnapshot)
+    }
+    const refreshes = [...representatives].filter(
+      ([projectId]) => !snapshotsByProject.has(projectId),
+    )
+    const results = await Promise.all(
+      refreshes.map(async ([projectId, workspaceId]) => {
+        try {
+          return {
+            projectId,
+            snapshot: await this.gateway.getLibrary({ workspaceId }),
+          } as const
+        } catch {
+          return { projectId, snapshot: null } as const
+        }
+      }),
+    )
+    const invalidatedProjects = new Set<string>()
+    for (const result of results) {
+      if (result.snapshot === null) {
+        invalidatedProjects.add(result.projectId)
+      } else {
+        snapshotsByProject.set(result.projectId, result.snapshot)
+      }
+    }
+
+    this.#globalRevision += 1
+    for (const [workspaceId, current] of this.#states) {
+      const projectId =
+        current.snapshot?.projectId ??
+        (workspaceId === originWorkspaceId
+          ? originSnapshot?.projectId
+          : undefined)
+      if (projectId === undefined) continue
+      const snapshot = snapshotsByProject.get(projectId)
+      if (snapshot !== undefined) {
+        this.#states.set(workspaceId, {
+          ...current,
+          status: "ready",
+          snapshot: { ...snapshot, workspaceId },
+          preview:
+            clearOriginPreview && workspaceId === originWorkspaceId
+              ? null
+              : current.preview,
+          mutation: workspaceId === originWorkspaceId ? null : current.mutation,
+          errorCode:
+            workspaceId === originWorkspaceId ? null : current.errorCode,
+        })
+      } else if (
+        invalidatedProjects.has(projectId) ||
+        !representatives.has(projectId)
+      ) {
+        this.#loads.delete(workspaceId)
+        this.#states.set(workspaceId, {
+          ...current,
+          status: "idle",
+          snapshot: null,
+          mutation: workspaceId === originWorkspaceId ? null : current.mutation,
+          errorCode: null,
+        })
+      }
     }
     for (const listener of this.#listeners) listener()
   }
