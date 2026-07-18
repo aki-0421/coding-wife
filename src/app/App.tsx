@@ -11,6 +11,11 @@ import {
   createLocalePreferenceStore,
   type LocalePreferenceStore,
 } from "@/features/localization"
+import {
+  DemoGitReviewTransport,
+  TauriGitReviewTransport,
+  type GitReviewTransport,
+} from "@/features/git-review"
 import { createAppTransport, type AppTransport } from "@/features/runtime"
 import { createWorkspaceViewAdapter } from "@/features/workspace-persistence"
 import {
@@ -67,6 +72,13 @@ export function App({
       ),
     [activeTransport.kind],
   )
+  const gitReviewTransport = useMemo<GitReviewTransport>(
+    () =>
+      activeTransport.kind === "tauri"
+        ? new TauriGitReviewTransport()
+        : new DemoGitReviewTransport(0),
+    [activeTransport.kind],
+  )
 
   return (
     <AppProviders
@@ -80,6 +92,7 @@ export function App({
         <WorkspaceShell
           adapter={workspaceAdapter ?? fallbackWorkspaceAdapter}
           characterRenderer={activeCharacterRenderer}
+          gitReviewTransport={gitReviewTransport}
         />
       </CharacterRuntimeStatusProvider>
     </AppProviders>

@@ -286,6 +286,24 @@ describe("WorkspaceShell", () => {
     await waitFor(() => expect(filter).toHaveFocus())
   })
 
+  it("opens stored checkpoint evidence without exposing a manual commit action", async () => {
+    renderWorkspace()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Commit" }))
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Connect automatic Git checkpoints to a reviewable evidence workflow.",
+      }),
+    ).toBeVisible()
+    for (const gate of ["Scope", "Ownership", "Verification", "Risk"]) {
+      expect(screen.getAllByText(gate).length).toBeGreaterThan(0)
+    }
+    expect(
+      screen.queryByRole("button", { name: /^commit$/i }),
+    ).not.toBeInTheDocument()
+  })
+
   it("opens the compact filter with Command+K and restores its opener", async () => {
     renderWorkspace()
     const opener = screen.getByRole("button", {
@@ -800,7 +818,11 @@ describe("WorkspaceShell", () => {
     }
 
     renderWorkspace(adapter)
-    expect(await screen.findByText("Ready")).toBeVisible()
+    await waitFor(() =>
+      expect(
+        document.querySelector('main[data-runtime="ready"]'),
+      ).toBeVisible(),
+    )
 
     const composer = screen.getByPlaceholderText(
       "Ask Codex to plan, build, explain, or fix anything…",

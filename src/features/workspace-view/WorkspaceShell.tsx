@@ -22,10 +22,10 @@ import {
   useCharacterRuntimeStatus,
   useCharacterRuntimeStatusStore,
 } from "@/features/character"
+import { EvidenceView, type GitReviewTransport } from "@/features/git-review"
 import { ChatView } from "@/features/workspace-view/ChatView"
 import { ContextView } from "@/features/workspace-view/ContextView"
 import { getWorkspaceCopy } from "@/features/workspace-view/copy"
-import { EvidenceView } from "@/features/workspace-view/EvidenceView"
 import { SettingsView } from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
@@ -48,6 +48,7 @@ const tabOrder: readonly WorkspaceTab[] = [
 export interface WorkspaceShellProps {
   readonly adapter?: WorkspaceViewAdapter | undefined
   readonly characterRenderer?: CharacterStageRenderer | undefined
+  readonly gitReviewTransport: GitReviewTransport
 }
 
 function isWorkspaceTab(value: string): value is WorkspaceTab {
@@ -65,6 +66,7 @@ function getSystemReducedMotion(): boolean {
 export function WorkspaceShell({
   adapter,
   characterRenderer,
+  gitReviewTransport,
 }: WorkspaceShellProps) {
   const { locale } = useI18n()
   const copy = getWorkspaceCopy(locale)
@@ -409,8 +411,10 @@ export function WorkspaceShell({
           value="commit"
         >
           <EvidenceView
-            copy={copy}
+            locale={locale}
             onBackToChat={() => view.setActiveTab("chat")}
+            transport={gitReviewTransport}
+            workspaceId={selectedWorkspace.id}
           />
         </TabsContent>
 

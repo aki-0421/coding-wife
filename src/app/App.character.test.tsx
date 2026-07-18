@@ -94,9 +94,17 @@ describe("default App character integration", () => {
       />,
     )
 
-    await screen.findByText("Ready")
+    const initialNode = await screen.findByTestId("live2d-character")
+    const companionPane = initialNode.closest(".companion-pane")
+    expect(companionPane).not.toBeNull()
+    await waitFor(() =>
+      expect(
+        companionPane?.querySelector(
+          '[data-character-runtime-readiness="ready"]',
+        ),
+      ).toBeInTheDocument(),
+    )
     await waitFor(() => expect(latestLive2dProps()?.state).toBe("idle"))
-    const initialNode = screen.getByTestId("live2d-character")
     const initialGeneration = latestLive2dProps()?.stateGeneration ?? 0
 
     const composer = screen.getByPlaceholderText(
@@ -114,8 +122,6 @@ describe("default App character integration", () => {
     const idleGeneration = latestLive2dProps()?.stateGeneration ?? 0
     expect(idleGeneration).toBe(initialGeneration + 2)
 
-    const companionPane = initialNode.closest(".companion-pane")
-    expect(companionPane).not.toBeNull()
     fireEvent.click(
       within(companionPane as HTMLElement).getByRole("button", {
         name: "Mute companion",
