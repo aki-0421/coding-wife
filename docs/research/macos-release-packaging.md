@@ -54,9 +54,11 @@ Apple公式の[Safely open apps on your Mac](https://support.apple.com/en-us/102
 
 tracked diffはexternal diffとtextconvを無効にした`git diff --check`、untracked fileはNUL区切りの`git ls-files --others --exclude-standard`とfileごとの`git diff --no-index --check`で検査する。Gitのraw stdout/stderrは利用者へ渡さず、failureはscopeとsafe codeだけを返す。
 
-whitespace検査の除外は`src-tauri/resources/characters/builtin-hiyori/NOTICE.txt`のexact pathだけである。その除外と独立して、正本がregular fileであることと`scripts/live2d/constants.mjs` の`HIYORI_NOTICE_SHA256`へ一致することを検査前後に確認する。このためNOTICEの改変、削除、rename、symlink置換は`PROTECTED_NOTICE_INVALID`になり、同じbyteを他pathへ置いても通常のwhitespace検査対象になる。
+whitespace検査の除外は`src-tauri/resources/characters/builtin-hiyori/NOTICE.txt`のexact pathだけである。その除外と独立して、worktreeの正本がregular fileであることと`scripts/live2d/constants.mjs` の`HIYORI_NOTICE_SHA256`へ一致することを検査前後に確認する。このためNOTICEのworktree上の改変、削除、rename、symlink置換は`PROTECTED_NOTICE_INVALID`になり、同じbyteを他pathへ置いても通常のwhitespace検査対象になる。
 
-変更時は`pnpm test:diff-hygiene`を実行する。`scripts/release/check-diff-hygiene.test.mjs`は隔離Git repositoryを作り、committed / staged / unstaged / untracked、base不在、canonical noticeの後日add、他path copy、modify / delete / rename / symlink、secret・absolute path非表示を検査する。`.github/workflows/diff-hygiene.yml`はPull Requestのbase SHAで同じ`pnpm check:diff`を実行する。
+さらに、`HEAD`または選択したbase commitにNOTICEが存在する場合は、indexにもexact pathのstage 0 entryが1件必要である。entryはmode `100644`かつregular blobで、blobのbyte列が固定SHA-256へ一致しなければならない。これによりworktreeをcanonicalなまま残す`git rm --cached`、index内だけの内容差分、mode変更、rename、symlinkを`PROTECTED_NOTICE_INDEX_INVALID`として拒否する。`HEAD`と選択baseのどちらにもNOTICEがない場合だけcanonical untracked addを許可し、staged addがあれば同じindex検証を適用する。`--working-tree`では`HEAD`だけをtracked baselineとして扱う。
+
+変更時は`pnpm test:diff-hygiene`を実行する。`scripts/release/check-diff-hygiene.test.mjs`は隔離Git repositoryを作り、committed / staged / unstaged / untracked、base不在、canonical noticeの後日add、他path copy、worktreeのmodify / delete / rename / symlink、indexのcached delete / blob drift / mode / rename / symlink、base選択差、secret・absolute path非表示を検査する。fixtureは利用者のglobal `core.autocrlf`に左右されずbyte-exact blobを作る。`.github/workflows/diff-hygiene.yml`はPull Requestのbase SHAで同じ`pnpm check:diff`を実行する。
 
 ## 配布境界
 

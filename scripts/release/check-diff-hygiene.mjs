@@ -117,6 +117,40 @@ function captureRepositoryRoot() {
   return path.isAbsolute(root) ? root : null
 }
 
+function resolveCommit(repositoryRoot, revision) {
+  const result = runGit(
+    repositoryRoot,
+    ["rev-parse", "--verify", "--quiet", `${revision}^{commit}`],
+    { capture: true },
+  )
+  if (result.status !== 0) {
+    return null
+  }
+
+  const commit = result.output.toString("utf8").replace(/\r?\n$/u, "")
+  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(commit) ? commit : null
+}
+
+function revisionContainsNotice(repositoryRoot, commit) {
+  const result = runGit(
+    repositoryRoot,
+    ["ls-tree", "--full-tree", "--name-only", "-z", commit, "--", NOTICE_PATH],
+    { capture: true },
+  )
+  if (result.status !== 0) {
+    return null
+  }
+
+  const paths = parseNullTerminatedPaths(result.output)
+  if (paths === null || paths.length > 1) {
+    return null
+  }
+  if (paths.length === 0) {
+    return false
+  }
+  return paths[0] === NOTICE_PATH ? true : null
+}
+
 async function noticeIsCanonical(repositoryRoot) {
   const noticePath = path.join(repositoryRoot, NOTICE_PATH)
 
@@ -131,6 +165,69 @@ async function noticeIsCanonical(repositoryRoot) {
   } catch {
     return false
   }
+}
+
+function parseNoticeIndexEntry(buffer) {
+  if (buffer.byteLength === 0) {
+    return []
+  }
+
+  const records = parseNullTerminatedPaths(buffer)
+  if (records === null) {
+    return null
+  }
+
+  const entries = []
+  for (const record of records) {
+    const match =
+      /^(?<mode>[0-9]{6}) (?<object>(?:[0-9a-f]{40}|[0-9a-f]{64})) (?<stage>[0-3])\t(?<path>.+)$/u.exec(
+        record,
+      )
+    if (match?.groups === undefined) {
+      return null
+    }
+    entries.push(match.groups)
+  }
+
+  return entries
+}
+
+function noticeIndexIsCanonical(repositoryRoot, required) {
+  const listed = runGit(
+    repositoryRoot,
+    ["ls-files", "--stage", "--full-name", "-z", "--", NOTICE_PATH],
+    { capture: true },
+  )
+  if (listed.status !== 0) {
+    return false
+  }
+
+  const entries = parseNoticeIndexEntry(listed.output)
+  if (entries === null || entries.length > 1) {
+    return false
+  }
+  if (entries.length === 0) {
+    return !required
+  }
+
+  const [entry] = entries
+  if (
+    entry.mode !== "100644" ||
+    entry.stage !== "0" ||
+    entry.path !== NOTICE_PATH
+  ) {
+    return false
+  }
+
+  const blob = runGit(repositoryRoot, ["cat-file", "blob", entry.object], {
+    capture: true,
+  })
+  if (blob.status !== 0) {
+    return false
+  }
+
+  const actualHash = createHash("sha256").update(blob.output).digest("hex")
+  return actualHash === HIYORI_NOTICE_SHA256
 }
 
 function trackedDiffFailed(repositoryRoot, args) {
@@ -242,23 +339,44 @@ async function main() {
     return
   }
 
+  const headCommit = resolveCommit(repositoryRoot, "HEAD")
+  if (headCommit === null) {
+    fail("DIFF_HEAD_UNAVAILABLE")
+    return
+  }
+
+  const headContainsNotice = revisionContainsNotice(repositoryRoot, headCommit)
+  if (headContainsNotice === null) {
+    fail("PROTECTED_NOTICE_BASELINE_INVALID")
+    return
+  }
+
+  let baseCommit = null
+  let baseContainsNotice = false
   if (!options.workingTreeOnly) {
-    const base = runGit(repositoryRoot, [
-      "rev-parse",
-      "--verify",
-      "--quiet",
-      `${options.base}^{commit}`,
-    ])
-    if (base.status !== 0) {
+    baseCommit = resolveCommit(repositoryRoot, options.base)
+    if (baseCommit === null) {
       fail("DIFF_BASE_UNAVAILABLE")
+      return
+    }
+
+    baseContainsNotice = revisionContainsNotice(repositoryRoot, baseCommit)
+    if (baseContainsNotice === null) {
+      fail("PROTECTED_NOTICE_BASELINE_INVALID")
       return
     }
   }
 
+  const noticeIndexRequired = headContainsNotice || baseContainsNotice
+  if (!noticeIndexIsCanonical(repositoryRoot, noticeIndexRequired)) {
+    fail("PROTECTED_NOTICE_INDEX_INVALID")
+    return
+  }
+
   const failedScopes = []
   if (
-    !options.workingTreeOnly &&
-    trackedDiffFailed(repositoryRoot, [`${options.base}...HEAD`])
+    baseCommit !== null &&
+    trackedDiffFailed(repositoryRoot, [`${baseCommit}...${headCommit}`])
   ) {
     failedScopes.push("committed")
   }
@@ -274,6 +392,10 @@ async function main() {
 
   if (!(await noticeIsCanonical(repositoryRoot))) {
     fail("PROTECTED_NOTICE_INVALID")
+    return
+  }
+  if (!noticeIndexIsCanonical(repositoryRoot, noticeIndexRequired)) {
+    fail("PROTECTED_NOTICE_INDEX_INVALID")
     return
   }
   if (failedScopes.length > 0) {

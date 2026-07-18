@@ -59,7 +59,7 @@ async function writeRelative(root, relativePath, contents) {
 
 async function createFixture(
   context,
-  { noticeInBase = true, remote = true } = {},
+  { noticeAfterBase = "committed", noticeInBase = true, remote = true } = {},
 ) {
   const root = await mkdtemp(
     path.join(os.tmpdir(), "coding-wife-diff-hygiene-"),
@@ -71,6 +71,7 @@ async function createFixture(
   git(root, ["init", "-q", "-b", "develop"])
   git(root, ["config", "user.name", "Coding Wife Test"])
   git(root, ["config", "user.email", "coding-wife-test@example.invalid"])
+  git(root, ["config", "core.autocrlf", "false"])
   await writeRelative(root, "tracked.txt", "clean\n")
 
   if (noticeInBase) {
@@ -90,8 +91,12 @@ async function createFixture(
     const destination = path.join(root, noticeRelativePath)
     await mkdir(path.dirname(destination), { recursive: true })
     await copyFile(canonicalNoticePath, destination)
-    git(root, ["add", "--", noticeRelativePath])
-    git(root, ["commit", "-q", "-m", "test: add canonical notice"])
+    if (noticeAfterBase === "committed") {
+      git(root, ["add", "--", noticeRelativePath])
+      git(root, ["commit", "-q", "-m", "test: add canonical notice"])
+    } else {
+      assert.equal(noticeAfterBase, "untracked")
+    }
   }
 
   return root
@@ -240,6 +245,110 @@ test("notice modification, deletion, rename, and symlink replacement fail closed
       [root, noticeRelativePath, target],
     )
   })
+})
+
+test("tracked notice requires one canonical stage-zero index entry", async (context) => {
+  await context.test("rm cached", async (child) => {
+    const root = await createFixture(child)
+    const canonicalBytes = await readFile(path.join(root, noticeRelativePath))
+    git(root, ["rm", "-q", "--cached", "--", noticeRelativePath])
+    assert.deepEqual(
+      await readFile(path.join(root, noticeRelativePath)),
+      canonicalBytes,
+    )
+    assertSafeFailure(
+      runChecker(root, ["--working-tree"]),
+      "PROTECTED_NOTICE_INDEX_INVALID",
+      [root, noticeRelativePath],
+    )
+  })
+
+  await context.test("staged blob drift and reset", async (child) => {
+    const root = await createFixture(child)
+    const canonicalBytes = await readFile(path.join(root, noticeRelativePath))
+    await writeRelative(
+      root,
+      noticeRelativePath,
+      "staged noncanonical notice\n",
+    )
+    git(root, ["add", "--", noticeRelativePath])
+    await writeRelative(root, noticeRelativePath, canonicalBytes)
+    assertSafeFailure(
+      runChecker(root, ["--working-tree"]),
+      "PROTECTED_NOTICE_INDEX_INVALID",
+      [root, noticeRelativePath, "staged noncanonical notice"],
+    )
+
+    git(root, ["reset", "-q", "HEAD", "--", noticeRelativePath])
+    assert.equal(runChecker(root, ["--working-tree"]).status, 0)
+  })
+
+  await context.test("executable mode", async (child) => {
+    const root = await createFixture(child)
+    git(root, ["update-index", "--chmod=+x", "--", noticeRelativePath])
+    assertSafeFailure(
+      runChecker(root, ["--working-tree"]),
+      "PROTECTED_NOTICE_INDEX_INVALID",
+      [root, noticeRelativePath],
+    )
+  })
+
+  await context.test("staged symlink", async (child) => {
+    const root = await createFixture(child)
+    const canonicalBytes = await readFile(path.join(root, noticeRelativePath))
+    const target = path.join(root, "canonical-target.txt")
+    await writeFile(target, canonicalBytes)
+    await rm(path.join(root, noticeRelativePath))
+    await symlink(target, path.join(root, noticeRelativePath))
+    git(root, ["add", "--", noticeRelativePath])
+    await rm(path.join(root, noticeRelativePath))
+    await writeFile(path.join(root, noticeRelativePath), canonicalBytes)
+    assertSafeFailure(
+      runChecker(root, ["--working-tree"]),
+      "PROTECTED_NOTICE_INDEX_INVALID",
+      [root, noticeRelativePath, target],
+    )
+  })
+
+  await context.test("staged rename", async (child) => {
+    const root = await createFixture(child)
+    const canonicalBytes = await readFile(path.join(root, noticeRelativePath))
+    git(root, ["mv", noticeRelativePath, "renamed-index-notice.txt"])
+    await writeRelative(root, noticeRelativePath, canonicalBytes)
+    assertSafeFailure(
+      runChecker(root, ["--working-tree"]),
+      "PROTECTED_NOTICE_INDEX_INVALID",
+      [root, noticeRelativePath, "renamed-index-notice.txt"],
+    )
+  })
+})
+
+test("a canonical untracked notice remains valid only when selected tracked baselines omit it", async (context) => {
+  const untrackedRoot = await createFixture(context, {
+    noticeAfterBase: "untracked",
+    noticeInBase: false,
+  })
+  assert.equal(runChecker(untrackedRoot).status, 0)
+  assert.equal(runChecker(untrackedRoot, ["--working-tree"]).status, 0)
+
+  git(untrackedRoot, ["add", "--", noticeRelativePath])
+  assert.equal(runChecker(untrackedRoot).status, 0)
+  assert.equal(runChecker(untrackedRoot, ["--working-tree"]).status, 0)
+
+  const scopedRoot = await createFixture(context)
+  const canonicalBytes = await readFile(
+    path.join(scopedRoot, noticeRelativePath),
+  )
+  git(scopedRoot, ["rm", "-q", "--", noticeRelativePath])
+  git(scopedRoot, ["commit", "-q", "-m", "test: delete notice from HEAD"])
+  await writeRelative(scopedRoot, noticeRelativePath, canonicalBytes)
+
+  assert.equal(runChecker(scopedRoot, ["--working-tree"]).status, 0)
+  assert.equal(runChecker(scopedRoot, ["--base", "HEAD"]).status, 0)
+  assertSafeFailure(runChecker(scopedRoot), "PROTECTED_NOTICE_INDEX_INVALID", [
+    scopedRoot,
+    noticeRelativePath,
+  ])
 })
 
 test("tracked additions and renamed content remain checked while clean untracked files pass", async (context) => {
