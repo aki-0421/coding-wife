@@ -202,7 +202,7 @@ Coding Wife のmarkは、人とagentを表す二つの穏やかな流れが、�
 
 ```bash
 icon_output="$(mktemp -d)"
-pnpm tauri icon src-tauri/icons/app-icon.svg --output "$icon_output"
+pnpm exec tauri icon src-tauri/icons/app-icon.svg --output "$icon_output"
 cp "$icon_output/32x32.png" "$icon_output/128x128.png" "$icon_output/128x128@2x.png" "$icon_output/icon.icns" src-tauri/icons/
 ```
 

@@ -1,7 +1,7 @@
 ---
 title: "Live2Dランタイム実装・検証ガイド"
 description: "同梱Hiyoriとユーザー提供Live2Dモデルのrenderer、隔離preview、native quarantineを再現、診断、更新するための実装・検証ガイド。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "同梱HiyoriのLive2D描画、resize、motion policy、context recoveryを変更または検証するとき。"
   - "任意Live2Dモデルの取り込み、隔離preview、workspace選択、削除を変更または検証するとき。"
@@ -42,7 +42,7 @@ opaque originのmodule graphを読み込ませるため、development serverは`
 
 ## 通常の検証順序
 
-1. `pnpm live2d:verify` で59 Framework sources、13 shaders、17 Hiyori runtime files、8 release notice filesと固定hashを検査する。
+1. `node scripts/live2d/verify-live2d.mjs` で59 Framework sources、13 shaders、17 Hiyori runtime files、8 release notice filesと固定hashを検査する。
 2. `pnpm typecheck` で公式FrameworkをTypeScript 5.9.3で再生成し、アプリのstrict type checkを行う。
 3. `pnpm test` でsupply-chain、manifest fail-closed、Core one-shot/version、state generation、motion policy、backing sizeを検査する。
 4. `pnpm lint` でReact lifecycleとruntime error pathを含む静的検査を行う。

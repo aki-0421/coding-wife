@@ -75,7 +75,7 @@ printf '%s\n' "$JUDGE_REPO_PATH"
 From the Coding Wife checkout, start the native app:
 
 ```bash
-pnpm tauri dev
+pnpm tauri:dev
 ```
 
 Then:
@@ -236,7 +236,7 @@ cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple
 Then run the production native composition with:
 
 ```bash
-pnpm tauri dev
+pnpm tauri:dev
 ```
 
 ### Sample data and assets

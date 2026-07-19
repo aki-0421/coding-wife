@@ -90,7 +90,7 @@ function main() {
     const detail = error instanceof Error ? error.message : String(error)
     fail(
       `${detail}\nDownload ${SDK_URL}, accept the upstream terms, and run ` +
-        "`LIVE2D_SDK_ARCHIVE=/absolute/path/CubismSdkForWeb-5-r.5.zip pnpm live2d:sync:sdk`.",
+        "`LIVE2D_SDK_ARCHIVE=/absolute/path/CubismSdkForWeb-5-r.5.zip node scripts/live2d/sync-sdk.mjs`.",
     )
   }
 

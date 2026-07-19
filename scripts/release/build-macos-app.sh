@@ -240,7 +240,7 @@ export CARGO_PROFILE_RELEASE_STRIP=symbols
 
 if ! (
   cd "$project_root"
-  "$pnpm_binary" tauri build --ci --bundles app
+  "$pnpm_binary" exec tauri build --ci --bundles app
 ) >>"$tool_log" 2>&1; then
   fail 'APP_BUILD_FAILED'
 fi

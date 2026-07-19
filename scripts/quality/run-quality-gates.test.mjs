@@ -6,10 +6,12 @@ import { executeGateSequence, QUALITY_GATES } from "./run-quality-gates.mjs"
 const expectedGateOrder = [
   "format",
   "dependency-licenses",
+  "dependency-license-tests",
   "clean-checkout",
   "typecheck",
   "frontend-build",
   "live2d-inventory",
+  "release-tests",
   "rust-format",
   "rust-clippy",
   "rust-test",
@@ -77,6 +79,12 @@ test("dependency licenses use the repository-owned offline check", () => {
   const gate = QUALITY_GATES.find(({ id }) => id === "dependency-licenses")
   assert.ok(gate)
   assert.deepEqual(gate.args, ["licenses:check"])
+})
+
+test("release integration remains outside the normal test command", () => {
+  const gate = QUALITY_GATES.find(({ id }) => id === "release-tests")
+  assert.ok(gate)
+  assert.deepEqual(gate.args, ["test:release"])
 })
 
 test("Rust integration budgets are isolated from cross-test contention", () => {

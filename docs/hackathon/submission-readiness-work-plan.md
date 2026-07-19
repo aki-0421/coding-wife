@@ -264,7 +264,7 @@ read_when:
   - Parallel: 英語README/動画台本の草案と可。
   - Commit 1: `fix(app): exclude demo runtime from production bundles`。Vite development serverの明示`?demoAppServer=1`だけがdemo runtimeをloadし、queryless/native productionはnative adapterを維持する。production `dist`と`.app`で承認済みdemo markerを各0件にする。
   - Commit 2: `fix(release): seal and verify macos artifacts`。nested codeからapp順にtimestampなしad-hoc署名し、全resource sealのstrict検証後だけDMGへ進む。Developer ID署名・Apple公証済みとは分類しない。
-  - Done: clean final HEADからsealed `.app`を生成し、それだけをDMG入力にする。別々の2回のread-only mountでroot 2entry、Applications link、sorted app inventoryがsourceと一致する。DMG byte同一性は要求せず、公開するfinal candidateのsizeとSHA-256だけを凍結する。失敗・INT・TERM後のmount、staging、一時directoryが0件で、`pnpm release:macos:verify`が正本検証となる。
+  - Done: clean final HEADからsealed `.app`を生成し、それだけをDMG入力にする。別々の2回のread-only mountでroot 2entry、Applications link、sorted app inventoryがsourceと一致する。DMG byte同一性は要求せず、公開するfinal candidateのsizeとSHA-256だけを凍結する。失敗・INT・TERM後のmount、staging、一時directoryが0件で、`scripts/release/verify-macos-release.sh`が正本検証となる。
 
 - [ ] **C17 `docs(hackathon): record installed artifact acceptance`**
   - Depends on: C16

@@ -182,7 +182,7 @@ printf '%s\n' "$JUDGE_REPO_PATH"
 Start the native app from the Coding Wife checkout:
 
 ```bash
-pnpm tauri dev
+pnpm tauri:dev
 ```
 
 Then:
@@ -357,7 +357,7 @@ Run this after the source commit, README, DMG, video, screenshots, and Devpost d
 - [ ] Use a macOS 14+ Apple Silicon machine or a clean test profile.
 - [ ] Verify a compatible local Codex installation is authenticated without exposing credentials.
 - [ ] Create the disposable repository from section 3.
-- [ ] Run `pnpm tauri dev` from the frozen source commit.
+- [ ] Run `pnpm tauri:dev` from the frozen source commit.
 - [ ] Add only the disposable repository.
 - [ ] Confirm preflight reports `gpt-5.6-sol` and supported capabilities.
 - [ ] Complete Path B and inspect the real resulting commit.
