@@ -899,6 +899,12 @@ describe("WorkspaceShell", () => {
   it("supports keyboard tab cycling and the workspace filter shortcut", async () => {
     renderWorkspace()
 
+    const workspaceTabs = within(
+      screen.getByRole("tablist", { name: "Workspace views" }),
+    )
+    expect(workspaceTabs.getAllByRole("tab")).toHaveLength(3)
+    expect(workspaceTabs.queryByRole("tab", { name: "Context" })).toBeNull()
+
     const chatTab = screen.getByRole("tab", { name: /Chat/ })
     const commitTab = screen.getByRole("tab", { name: "Commit" })
     expect(chatTab).toHaveAttribute("aria-selected", "true")

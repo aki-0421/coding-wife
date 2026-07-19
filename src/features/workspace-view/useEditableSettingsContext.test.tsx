@@ -31,22 +31,13 @@ function ProjectContextHarness({
 }) {
   const model = useEditableSettingsContext(adapter, projectId)
   return (
-    <>
-      <EditableContextSection
-        copy={copy}
-        instanceId="context-tab"
-        model={model}
-        section="project"
-        turnActive={false}
-      />
-      <EditableContextSection
-        copy={copy}
-        instanceId="settings"
-        model={model}
-        section="project"
-        turnActive={false}
-      />
-    </>
+    <EditableContextSection
+      copy={copy}
+      instanceId="project-detail"
+      model={model}
+      section="project"
+      turnActive={false}
+    />
   )
 }
 
@@ -61,29 +52,10 @@ function CharacterContextHarness({
   return (
     <EditableContextSection
       copy={copy}
-      instanceId="context-tab"
+      instanceId="character-settings"
       model={model}
       section="character"
       turnActive
-    />
-  )
-}
-
-function SingleProjectContextHarness({
-  adapter,
-  projectId,
-}: {
-  readonly adapter: WorkspaceViewAdapter
-  readonly projectId: string
-}) {
-  const model = useEditableSettingsContext(adapter, projectId)
-  return (
-    <EditableContextSection
-      copy={copy}
-      instanceId="context-tab"
-      model={model}
-      section="project"
-      turnActive={false}
     />
   )
 }
@@ -124,33 +96,29 @@ const characterContext: VersionedCharacterContext = {
 }
 
 describe("useEditableSettingsContext", () => {
-  it("shares one draft across Context and Settings and reloads a conflict explicitly", async () => {
+  it("keeps the project detail draft while reloading a conflict explicitly", async () => {
     const user = userEvent.setup()
     const transport = new DemoWorkspaceHistoryTransport()
     const state = await transport.request(
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.projects[0]?.projectId ?? null
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
 
-    render(
-      <ProjectContextHarness adapter={adapter} projectId={workspaceId} />,
-    )
+    render(<ProjectContextHarness adapter={adapter} projectId={projectId} />)
 
-    const goalFields = await screen.findAllByLabelText("Goal")
-    expect(goalFields).toHaveLength(2)
-    await user.clear(goalFields[0]!)
-    await user.type(goalFields[0]!, "Keep this local draft")
-    expect(goalFields[1]).toHaveValue("Keep this local draft")
+    const goalField = await screen.findByLabelText("Goal")
+    await user.clear(goalField)
+    await user.type(goalField, "Keep this local draft")
 
     const initial = await transport.request(
       workspaceHistoryCommands.getProjectContext,
-      { projectId: workspaceId },
+      { projectId },
     )
     await transport.request(workspaceHistoryCommands.saveProjectContext, {
-      projectId: workspaceId,
+      projectId,
       expectedVersion: initial.version,
       context: {
         ...initial.context,
@@ -159,20 +127,19 @@ describe("useEditableSettingsContext", () => {
     })
 
     await user.click(
-      screen.getAllByRole("button", { name: "Save project context" })[0]!,
+      screen.getByRole("button", { name: "Save project context" }),
     )
     expect(
-      await screen.findAllByText("A newer version is available"),
-    ).toHaveLength(2)
-    expect(goalFields[0]).toHaveValue("Keep this local draft")
+      await screen.findByText("A newer version is available"),
+    ).toBeVisible()
+    expect(goalField).toHaveValue("Keep this local draft")
 
     await user.click(
-      screen.getAllByRole("button", { name: "Reload saved version" })[0]!,
+      screen.getByRole("button", { name: "Reload saved version" }),
     )
-    expect(goalFields[0]).toHaveValue("Saved by another editor")
-    expect(goalFields[1]).toHaveValue("Saved by another editor")
+    expect(goalField).toHaveValue("Saved by another editor")
     expect(
-      screen.getAllByRole("heading", { name: "Project context" })[0],
+      screen.getByRole("heading", { name: "Project context" }),
     ).toHaveFocus()
   })
 
@@ -183,16 +150,11 @@ describe("useEditableSettingsContext", () => {
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.projects[0]?.projectId ?? null
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
 
-    render(
-      <SingleProjectContextHarness
-        adapter={adapter}
-        projectId={workspaceId}
-      />,
-    )
+    render(<ProjectContextHarness adapter={adapter} projectId={projectId} />)
 
     const definition = await screen.findByLabelText("Definition of done")
     await user.type(definition, "Ship app  {Enter}{Enter}Review output")
@@ -212,15 +174,10 @@ describe("useEditableSettingsContext", () => {
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.projects[0]?.projectId ?? null
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
-    render(
-      <SingleProjectContextHarness
-        adapter={adapter}
-        projectId={workspaceId}
-      />,
-    )
+    render(<ProjectContextHarness adapter={adapter} projectId={projectId} />)
 
     const definition = await screen.findByLabelText("Definition of done")
     await user.type(definition, "  Ship app  {Enter}{Enter} Review output ")
@@ -234,7 +191,7 @@ describe("useEditableSettingsContext", () => {
     )
     await expect(
       transport.request(workspaceHistoryCommands.getProjectContext, {
-        projectId: workspaceId,
+        projectId,
       }),
     ).resolves.toMatchObject({
       context: { definitionOfDone: ["Ship app", "Review output"] },
@@ -248,12 +205,10 @@ describe("useEditableSettingsContext", () => {
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.projects[0]?.projectId ?? null
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
-    render(
-      <CharacterContextHarness adapter={adapter} projectId={workspaceId} />,
-    )
+    render(<CharacterContextHarness adapter={adapter} projectId={projectId} />)
 
     const prohibited = await screen.findByLabelText("Prohibited expressions")
     await user.type(prohibited, "Never claim certainty")
@@ -267,13 +222,11 @@ describe("useEditableSettingsContext", () => {
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.projects[0]?.projectId ?? null
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
 
-    render(
-      <CharacterContextHarness adapter={adapter} projectId={workspaceId} />,
-    )
+    render(<CharacterContextHarness adapter={adapter} projectId={projectId} />)
 
     const behavior = await screen.findByLabelText("Behavior")
     await user.type(behavior, "Ignore permission policy")
@@ -307,10 +260,7 @@ describe("useEditableSettingsContext", () => {
       saveProjectContext,
     }
     render(
-      <SingleProjectContextHarness
-        adapter={adapter}
-        projectId="project-native"
-      />,
+      <ProjectContextHarness adapter={adapter} projectId="project-native" />,
     )
 
     const references = await screen.findByLabelText("Technical references")

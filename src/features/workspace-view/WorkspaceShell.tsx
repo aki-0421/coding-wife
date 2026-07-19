@@ -60,19 +60,18 @@ import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceH
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
-import type {
-  CharacterStageRenderer,
-  AppSettingsSection,
-  WorkspaceRecord,
-  WorkspaceTab,
-  WorkspaceViewAdapter,
+import {
+  workspaceTabs,
+  type AppSettingsSection,
+  type CharacterStageRenderer,
+  type WorkspaceRecord,
+  type WorkspaceTab,
+  type WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 import { useEditableSettingsContext } from "@/features/workspace-view/useEditableSettingsContext"
 import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceViewModel"
 import { useWorkspaceViewportLayout } from "@/features/workspace-view/workspace-viewport"
 import { gitReviewSchemaVersion } from "@/lib/contracts/git-review"
-
-const tabOrder: readonly WorkspaceTab[] = ["chat", "commit", "settings"]
 
 export interface WorkspaceShellProps {
   readonly adapter?: WorkspaceViewAdapter | undefined
@@ -87,7 +86,7 @@ export interface WorkspaceShellProps {
 }
 
 function isWorkspaceTab(value: string): value is WorkspaceTab {
-  return tabOrder.some((tab) => tab === value)
+  return workspaceTabs.some((tab) => tab === value)
 }
 
 function getSystemReducedMotion(): boolean {
@@ -562,11 +561,12 @@ export function WorkspaceShell({
       if (event.ctrlKey && event.key === "Tab") {
         event.preventDefault()
         if (appSettingsOpen) return
-        const currentIndex = tabOrder.indexOf(view.activeTab)
+        const currentIndex = workspaceTabs.indexOf(view.activeTab)
         const direction = event.shiftKey ? -1 : 1
         const nextIndex =
-          (currentIndex + direction + tabOrder.length) % tabOrder.length
-        view.setActiveTab(tabOrder[nextIndex] ?? "chat")
+          (currentIndex + direction + workspaceTabs.length) %
+          workspaceTabs.length
+        view.setActiveTab(workspaceTabs[nextIndex] ?? "chat")
       }
 
       if (event.metaKey && event.key.toLocaleLowerCase() === "k") {

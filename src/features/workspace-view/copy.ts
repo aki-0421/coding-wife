@@ -108,7 +108,6 @@ const en = {
   tabs: {
     chat: "Chat",
     commit: "Commit",
-    context: "Context",
     settings: "Settings",
   },
   connection: {
@@ -694,7 +693,6 @@ const ja: typeof en = {
   tabs: {
     chat: "チャット",
     commit: "コミット",
-    context: "コンテキスト",
     settings: "設定",
   },
   connection: {
