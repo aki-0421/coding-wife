@@ -85,8 +85,6 @@ const en = {
   branch: "Branch",
   active: "Active",
   noMatches: "No workspaces match this filter.",
-  noWorkspaces:
-    "No workspaces yet. Add a project, then create its first workspace.",
   loadingWorkspacesTitle: "Restoring workspace history",
   loadingWorkspacesDescription:
     "Checking local workspace records before enabling changes.",
@@ -569,12 +567,14 @@ const en = {
   },
   createWorkspace: {
     title: "Create workspace",
+    firstTitle: "Create your first workspace",
     description:
       "Creates a Git worktree for the selected project on a new app-managed branch.",
     project: "Project",
     name: "Workspace name",
     cancel: "Cancel",
-    create: "Create",
+    create: "Create workspace",
+    creating: "Creating…",
   },
   compactSidebar: "Open workspace navigation",
 }
@@ -665,8 +665,6 @@ const ja: typeof en = {
   branch: "ブランチ",
   active: "選択中",
   noMatches: "条件に一致するワークスペースはありません。",
-  noWorkspaces:
-    "ワークスペースはまだありません。プロジェクトを追加して、最初のワークスペースを作成してください。",
   loadingWorkspacesTitle: "ワークスペース履歴を復元中",
   loadingWorkspacesDescription:
     "変更を有効にする前にローカルのワークスペース記録を確認しています。",
@@ -1147,12 +1145,14 @@ const ja: typeof en = {
   },
   createWorkspace: {
     title: "ワークスペースを作成",
+    firstTitle: "最初のワークスペースを作成",
     description:
       "選択したプロジェクトに、アプリ管理の新しいブランチとGit worktreeを作成します。",
     project: "プロジェクト",
     name: "ワークスペース名",
     cancel: "キャンセル",
-    create: "作成",
+    create: "ワークスペースを作成",
+    creating: "作成中…",
   },
   compactSidebar: "ワークスペースnavigationを開く",
 }

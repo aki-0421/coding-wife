@@ -15,17 +15,13 @@ import {
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Tooltip,
@@ -33,6 +29,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
 import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
 import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
 import type {
@@ -192,18 +189,6 @@ function WorkspaceRow({
   )
 }
 
-function defaultWorkspaceName(): string {
-  const now = new Date()
-  const part = (value: number) => value.toString().padStart(2, "0")
-  const suffix =
-    typeof globalThis.crypto?.randomUUID === "function"
-      ? globalThis.crypto.randomUUID().slice(0, 4)
-      : Math.floor(Math.random() * 36 ** 4)
-          .toString(36)
-          .padStart(4, "0")
-  return `ws-${part(now.getMonth() + 1)}${part(now.getDate())}-${suffix}`
-}
-
 function CreateWorkspaceDialog({
   copy,
   projects,
@@ -216,29 +201,9 @@ function CreateWorkspaceDialog({
   readonly onCreate: (projectId: string, name: string) => Promise<boolean>
 }) {
   const [open, setOpen] = useState(false)
-  const [projectId, setProjectId] = useState("")
-  const [name, setName] = useState("")
-
-  const setDialogOpen = (nextOpen: boolean) => {
-    if (nextOpen) {
-      setProjectId(
-        projects.some((project) => project.id === selectedProjectId)
-          ? (selectedProjectId ?? "")
-          : (projects[0]?.id ?? ""),
-      )
-      setName(defaultWorkspaceName())
-    }
-    setOpen(nextOpen)
-  }
-
-  const submit = async () => {
-    if (await onCreate(projectId, name)) {
-      setOpen(false)
-    }
-  }
 
   return (
-    <Dialog onOpenChange={setDialogOpen} open={open}>
+    <Dialog onOpenChange={setOpen} open={open}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DialogTrigger asChild>
@@ -262,51 +227,19 @@ function CreateWorkspaceDialog({
             {copy.createWorkspace.description}
           </DialogDescription>
         </DialogHeader>
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="workspace-project">
-              {copy.createWorkspace.project}
-            </FieldLabel>
-            <NativeSelect
-              className="w-full"
-              id="workspace-project"
-              onChange={(event) => setProjectId(event.currentTarget.value)}
-              value={projectId}
-            >
-              {projects.map((project) => (
-                <NativeSelectOption key={project.id} value={project.id}>
-                  {project.githubRepository ?? project.name}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="workspace-name">
-              {copy.createWorkspace.name}
-            </FieldLabel>
-            <Input
-              autoFocus
-              id="workspace-name"
-              maxLength={80}
-              onChange={(event) => setName(event.currentTarget.value)}
-              value={name}
-            />
-          </Field>
-        </FieldGroup>
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button type="button" variant="ghost">
-              {copy.createWorkspace.cancel}
-            </Button>
-          </DialogClose>
-          <Button
-            disabled={projectId.length === 0 || name.trim().length === 0}
-            onClick={() => void submit()}
-            type="button"
-          >
-            {copy.createWorkspace.create}
-          </Button>
-        </DialogFooter>
+        <WorkspaceCreateForm
+          ariaLabel={copy.createWorkspace.title}
+          autoFocusName
+          copy={copy}
+          onCancel={() => setOpen(false)}
+          onCreate={async (projectId, name) => {
+            const created = await onCreate(projectId, name)
+            if (created) setOpen(false)
+            return created
+          }}
+          projects={projects}
+          selectedProjectId={selectedProjectId}
+        />
       </DialogContent>
     </Dialog>
   )
@@ -335,12 +268,14 @@ function SidebarPanel({
   const lifecycleContentIdPrefix = useId()
   const groups = useMemo(
     () =>
-      lifecycleOrder.map((lifecycle) => ({
-        lifecycle,
-        workspaces: filteredWorkspaces.filter(
-          (workspace) => workspace.lifecycle === lifecycle,
-        ),
-      })),
+      filteredWorkspaces.length === 0
+        ? []
+        : lifecycleOrder.map((lifecycle) => ({
+            lifecycle,
+            workspaces: filteredWorkspaces.filter(
+              (workspace) => workspace.lifecycle === lifecycle,
+            ),
+          })),
     [filteredWorkspaces],
   )
 
@@ -470,21 +405,19 @@ function SidebarPanel({
             )
           })}
 
-          {filteredWorkspaces.length === 0 ? (
+          {filteredWorkspaces.length === 0 && filter.length > 0 ? (
             <div className="flex flex-col items-start gap-xs px-sm py-lg">
               <p className="m-0 text-sidebar-helper text-muted-foreground">
-                {filter.length > 0 ? copy.noMatches : copy.noWorkspaces}
+                {copy.noMatches}
               </p>
-              {filter.length > 0 ? (
-                <Button
-                  onClick={() => onFilterChange("")}
-                  size="xs"
-                  type="button"
-                  variant="secondary"
-                >
-                  {copy.clearFilter}
-                </Button>
-              ) : null}
+              <Button
+                onClick={() => onFilterChange("")}
+                size="xs"
+                type="button"
+                variant="secondary"
+              >
+                {copy.clearFilter}
+              </Button>
             </div>
           ) : null}
         </nav>

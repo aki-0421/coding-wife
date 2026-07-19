@@ -133,7 +133,7 @@ repository healthはpreflightの集約結果とは別のversioned stateとして
 
 window focus、workspace選択確定、Send直前にrepository identity、HEAD、branch、readability、writeabilityをread-onlyで再検査する。前snapshotとの差があれば1秒以内にheaderとrowを更新し、明示preflightが成功するまでturnを開始しない。
 
-workspace cancel、project登録解除、active-turn切替の確認dialogは安全な`戻る / Back`を初期focusとし、focusをdialog内にtrapする。`Escape`は`戻る`と同じで、selection、turn、lifecycle、draft、timeline anchor、caption/TTS、Git fingerprintを変更せず、閉じた後は起点controlへfocusを戻す。成功後は次のvalid workspace item、存在しなければempty CTAへfocusする。processingはpolite、失敗はassertive live regionへ1回だけ通知する。
+workspace cancel、project登録解除、active-turn切替の確認dialogは安全な`戻る / Back`を初期focusとし、focusをdialog内にtrapする。`Escape`は`戻る`と同じで、selection、turn、lifecycle、draft、timeline anchor、caption/TTS、Git fingerprintを変更せず、閉じた後は起点controlへfocusを戻す。成功後は次のvalid workspace item、存在しなければinline create formの最初の操作可能なfieldへfocusする。processingはpolite、失敗はassertive live regionへ1回だけ通知する。
 
 ## 表示状態
 
@@ -141,8 +141,8 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 |---|---|---|---|---|
 | 初期化中 | DB、workspace、Git linkageを読込中 | sidebar/list/project surfaceのskeleton、locale、Quit。demo workspaceを表示しない | Quitだけ。add/create/select/draft/context/deleteを開始しない | queryとmigrationがterminalになる |
 | 通常 | 1件以上のvalid workspace | group list、active project、preflight、primary action 1件 | filter、select、add、create、state action | 操作開始、offline、error |
-| projectなし | registered project 0件 | 理由、`Projectを追加`、shortcut。空gridは出さない | picker、Settings、Quit | project登録またはrehydrate |
-| workspaceなし | registered project 1件以上、workspace 0件 | project登録済みの説明、`Workspaceを作成`、project追加 | create dialog、Settings、Quit | worktree作成またはproject登録解除 |
+| projectなし | registered project 0件、workspace 0件 | main surfaceのinline create form。Project fieldには`Projectを追加`、workspace nameには短い既定値を表示する。sidebar本文は空にする | picker、name編集、Settings、Quit | project登録またはrehydrate |
+| workspaceなし | registered project 1件以上、workspace 0件 | main surfaceのProject select、workspace name、`Workspaceを作成`を持つinline form。sidebar本文は空にする | inline create、project追加、Settings、Quit | worktree作成またはproject登録解除 |
 | 処理中 | picker後検証、preflight、create、cancel、remove | 対象stepとprogress、他workspaceは利用可能 | 可能なCancel、影響外select | success、cancel、error |
 | オフライン | network/Codex接続なし | local list、Git/DB status、Codex offline | filter、Context、local project操作可。Send不可 | 明示preflight成功 |
 | エラー | Git I/O、DB write、Codex診断失敗 | code、対象、保持data、retry/reselect/details | 影響外workspaceを開ける | 明示回復または登録解除 |
@@ -158,9 +158,9 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 
 | 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
 |---|---|---|---|---|---|
-| Projectを追加 | FolderPlusまたはempty CTA | native pickerの1 directoryをRust診断し、validならprojectだけを1件追加。workspaceは作成しない | 一覧とselection維持、errorなし | 登録せず原因と再選択 | `WORK-F-044`〜`WORK-F-049` |
+| Projectを追加 | toolbar FolderPlusまたはinline formのProject field | native pickerの1 directoryをRust診断し、validならprojectだけを1件追加。workspaceは作成せず、inline formのProject selectへ反映する | 一覧、selection、inline入力を維持し、errorなし | 登録せず原因と再選択 | `WORK-F-044`〜`WORK-F-049` |
 | preflight再診断 | project rootが存在 | Git/Codex/login/Sol/characterを更新 | 非該当 | check単位でBlocked、既存履歴維持 | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
-| Workspace作成 | registered project 1件以上、project/name valid | 選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、成功後だけBacklogへ1件追加して選択する | dialog入力を破棄し一覧・filesystemを維持 | 入力保持、field error。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
+| Workspace作成 | inline formまたはdialog、registered project 1件以上、project/name valid | 選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、成功後だけBacklogへ1件追加して選択する | dialog入力を破棄し、inline入力は維持する。一覧・filesystemは変更しない | 入力保持、field error。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
 | workspaceをArchive | sidebar rowのArchive、active/pending turnなし | 確認後、対象worktreeを削除してrowを一覧から外す。既にworktreeが消失済みなら成功扱い | workspace、worktree、selection不変 | 対象以外を変更せず、再試行可能なerror | `WORK-F-067` |
 | filter | query 0〜200文字 | repo/branch/nameの部分一致を100ms以内に表示 | Escapeで直前query維持 | 一覧維持、境界表示 | `WORK-F-051` |
 | workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Context、Companionを同一IDへ100ms以内にatomic切替 | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
@@ -176,7 +176,7 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 |---|---|---|---|---|---|
 | repository folder | なし | project追加時必須 | regular Git worktree、canonical path、duplicate不可 | itemを作らず再選択 | 全preflight transaction成功 |
 | project | project 1件なら自動選択、複数なら直前値または先頭 | 必須 | registered Project IDのselect | field直下、入力保持 | Create成功 |
-| workspace name | `workspace-YYYYMMDD-HHmmss-<random>` | 必須 | trim後1〜80 Unicode scalar、改行不可。path/branchはnativeが安全な別名を生成 | field直下、入力保持 | Create成功 |
+| workspace name | `ws-MMDD-<random 4文字>` | 必須 | trim後1〜80 Unicode scalar、改行不可。path/branchはnativeが安全な別名を生成 | field直下、入力保持 | Create成功 |
 | filter query | 前回値 | 任意 | 0〜200 Unicode scalar、case-insensitive | query維持、検索未実行 | debounce後workspace単位 |
 
 ## ネイティブ連携
@@ -203,18 +203,18 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 |---|---|
 | 生成・再利用 | `main`の既存sidebarとproject surfaceを再利用 |
 | 初期サイズ・最小サイズ | 共通の1470×836 / 960×640 |
-| リサイズ | 960〜1279pxで64px rail + portal drawer。main formは最大760px |
+| リサイズ | 960〜1279pxで64px rail + portal drawer。workspace 0件のcreate surfaceはmain幅いっぱいに外周paddingを取り、見出しとselect / input / actionは最大640pxで中央配置 |
 | 最大化・全画面 | 共通仕様どおり |
 | 常に手前へ表示 | 不可 |
 | 閉じる操作 | 共通仕様どおり |
-| 未保存変更がある場合 | create inputはdialog cancel/route離脱で破棄、既存workspace draftは保存 |
+| 未保存変更がある場合 | dialogのcreate inputはcancel/route離脱で破棄し、inline create inputはworkspace 0件の表示中だけ保持する。既存workspace draftは保存 |
 
 ## メニュー・ショートカット
 
 | 操作 | macOS | Windows / Linux | 有効条件 | 実行結果 |
 |---|---|---|---|---|
 | filterへfocus | `Command+K` | 非対応 | destructive dialogなし | drawerを開きqueryへfocus |
-| project追加 | toolbar/empty CTA | 非対応 | picker未起動 | native pickerを1回開く |
+| project追加 | toolbar/inline Project field | 非対応 | picker未起動 | native pickerを1回開く |
 | workspace開く | `Enter` | 非対応 | item focus、Missing以外 | S-002へ移動 |
 | drawer/menuを閉じる | `Escape` | 非対応 | non-destructive overlay | 入力維持、triggerへfocus |
 
