@@ -94,13 +94,13 @@ function renderStage({
           <CharacterStageSlot
             characterRuntime={runtime}
             copy={getWorkspaceCopy("ja")}
-            hidden={false}
             muted={false}
             onMutedChange={onMutedChange}
             onRetryCharacter={() => undefined}
             reducedMotion={false}
             renderer={renderer}
             state="idle"
+            visible
             workspaceId="workspace-1"
           />
         </TooltipProvider>

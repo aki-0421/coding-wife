@@ -87,7 +87,7 @@ status: "Approved"
 | Companion pane | 607.84×754.99px | Live2D canvas、visible caption、mute | mute、fallback詳細 |
 | composer | Chat内571.11×128.25px、left/right 18px、bottom 15px | input、attachment、context、Sol、effort、send/stop | draft編集、popover、turn操作 |
 
-標準geometryではsidebar、81px header、Chat/Companion境界、composerをFigma node `8:2`の±2 CSS px以内に合わせる。ChatとCompanionの間へcard、rail、shadow、visible dividerを追加しない。Companion背景は大きなdecorative gradientやparticleを使わず、Live2Dと状態captionの可読性を優先する。
+標準geometryではsidebar、81px header、primary work surface/Companion境界、composerをFigma node `8:2`の±2 CSS px以内に合わせる。ChatとContextは同じCompanion instanceを右paneへ継続表示し、tab切替でcanvasを再生成しない。primary work surfaceとCompanionの間へcard、rail、shadow、visible dividerを追加しない。Companion背景は大きなdecorative gradientやparticleを使わず、Live2Dと状態captionの可読性を優先する。
 
 ### headerとtab
 
@@ -177,7 +177,7 @@ verified commit後にapp-owned explanation controllerが`queued` / `running`へ�
 
 ### Context subview
 
-Context tabはS-002内のsubviewであり、sidebarとheaderを維持してChat/Companion bodyを一続きのeditorへ置換する。
+Context tabはS-002内のsubviewであり、sidebarとheaderを維持して左のChat paneだけを一続きのeditorへ置換する。右のCompanion paneと同じcanvas instance、semantic state、mute、captionは維持する。
 
 | section | 内容 | 適用範囲 | 禁止 |
 |---|---|---|---|

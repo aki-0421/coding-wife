@@ -1,7 +1,7 @@
 ---
 title: "LIVE Live2Dコンパニオン要件定義"
 description: "同梱Hiyori、semantic state、縮退、ユーザーmodelの安全なimport・選択を定義する。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "Live2D renderer、character pack、state mappingを実装するとき。"
   - "ユーザーmodel importのsecurity、boundary、fallbackを検証するとき。"
@@ -15,7 +15,7 @@ read_when:
 | 状態           | Approved           |
 | 仕様責任者     | プロダクトオーナー |
 | 作成日         | 2026-07-18         |
-| 最終レビュー日 | 2026-07-18         |
+| 最終レビュー日 | 2026-07-20         |
 
 ## 背景
 
@@ -68,9 +68,9 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------- | ---------------- |
 | `LIVE-F-055` | appは指定Hiyori runtimeを同梱する           | `hiyori_pro_t11.model3.json`、moc3、texture 2件、physics、pose、cdi、motion 10件の17fileをrelease resourceから解決できる | Approved | 非該当           |
 | `LIVE-F-056` | appは編集用assetを配布へ含めない            | release resourceに`.cmo3`、`.can3`、`.DS_Store`がなく、runtime packとnoticeだけが存在する                                | Approved | 非該当           |
-| `LIVE-F-057` | companionはdemo比率で表示される             | 1470×836で607.84×754.99px paneへbottom-containし、頭頂、両手、裾がcanvas外へ切れない                                     | Approved | 非該当           |
+| `LIVE-F-057` | companionはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commit、Contextで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。Project SettingsとApp Settingsでは表示しない | Approved | 非該当           |
 | `LIVE-F-058` | rendererはwindow resizeへ追従する           | 1470×836、1280×800、960×640の各resize後500ms以内にcontain scaleを再計算し、composerまたはdecisionを覆わない              | Approved | 非該当           |
-| `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | workspace/modelを20回切り替えても描画canvasが1枚で、旧texture/motion/WebGL resourceが参照されない                        | Approved | 非該当           |
+| `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | Chat、Commit、Context、Project Settingsを含むtabとworkspace/modelを20回切り替えても描画canvasが1枚で、作業tab間では同じDOM canvasを再利用し、旧texture/motion/WebGL resourceが参照されない | Approved | 非該当           |
 | `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | Project settingsからpack名、creator、source notice、同梱version/hashへ到達できる                                         | Approved | 非該当           |
 
 ### Semantic stateと縮退

@@ -88,6 +88,7 @@ function createExplanationController(
 function renderEvidence(
   options: {
     readonly active?: boolean
+    readonly companionVisible?: boolean
     readonly locale?: "ja" | "en"
     readonly transport?: GitReviewTransport
     readonly explanationController?: CommitExplanationController
@@ -103,6 +104,9 @@ function renderEvidence(
       commitExplanationController={options.explanationController}
       locale={options.locale ?? "en"}
       onBackToChat={onBackToChat}
+      {...(options.companionVisible === undefined
+        ? {}
+        : { companionVisible: options.companionVisible })}
       {...(options.onExplanationPresentationTrigger === undefined
         ? {}
         : {
@@ -117,6 +121,22 @@ function renderEvidence(
 }
 
 describe("EvidenceView", () => {
+  it("uses the commit drawer when the companion shares the workspace body", async () => {
+    renderEvidence({ companionVisible: true })
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "feat(git): add read-only commit evidence",
+      }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole("main", { name: "Commit evidence" }),
+    ).toHaveAttribute("data-evidence-companion", "true")
+    expect(
+      screen.getByRole("button", { name: "Open commit list" }),
+    ).toBeVisible()
+  })
+
   it("shows read-only commit identity and all four observed gates", async () => {
     const user = userEvent.setup()
     renderEvidence()

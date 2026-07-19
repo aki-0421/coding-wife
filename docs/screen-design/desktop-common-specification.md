@@ -1,7 +1,7 @@
 ---
 title: "デスクトップ共通仕様"
 description: "Coding Wifeの単一macOSウィンドウ、共通レイアウト、状態、操作、信頼境界、復旧、アクセシビリティを定義する。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "S-001〜S-006の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
   - "個別画面仕様とdesktop-shell要件の整合を確認するとき。"
@@ -126,12 +126,12 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 
 | effective width | shell | S-002 body | tab / control |
 |---:|---|---|---|
-| 1470px以上 | sidebar 255.04px固定。超過幅はmainへ与える | ChatとCompanionを1:1で拡張 | tab row固定、長値ellipsis |
-| 1280〜1469px | sidebar 255.04px固定 | 残幅をChat/Companionで1:1。Chat 500px未満ならCompanionを先に縮める | composerはChat内で左右18px |
-| 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | Chatを最低520px、Companionへ残幅。decision/review時はCompanionをcompact化 | tabsはhorizontal scroll、footer controlsはwrap |
+| 1470px以上 | sidebar 255.04px固定。超過幅はmainへ与える | Chat/Commit/ContextとCompanionを同じ1:1基準で拡張 | tab row固定、長値ellipsis |
+| 1280〜1469px | sidebar 255.04px固定 | 残幅をprimary work surface/Companionへ全作業tab共通の比率で配分 | composerはChat内で左右18px |
+| 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | primaryを最低520px、Companionへ残幅。全作業tabで同じ配分を維持 | tabsはhorizontal scroll、footer controlsはwrap |
 | 200% text zoom | 64px rail + drawerを使用 | Companionをhide可能、Chat/decisionを優先 | labelを縮小せずwrap/overflow menu |
 
-S-003はevidence、S-005とS-006はsetting formを優先してbodyを再構成できる。S-002の標準表示だけはChatとCompanionの間へdividerまたは別cardを置かない。
+選択workspaceのChat、Commit、Contextは同じCompanion instanceを右paneへ継続表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCompanionを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005とS-006はCompanionを表示せずsetting formを全幅で構成する。character visibilityがHiddenの場合もprimary work surfaceを全幅へ戻し、visible HTML stateを残す。Chat、Commit、ContextとCompanionの間へdividerまたは別cardを置かない。
 
 ## surface、文字、motion
 

@@ -24,11 +24,11 @@ import type {
 interface CharacterStageSlotProps {
   readonly copy: WorkspaceCopy
   readonly characterRuntime: CharacterRuntimeView
-  readonly hidden: boolean
   readonly muted: boolean
   readonly reducedMotion: boolean
   readonly renderer?: CharacterStageRenderer | undefined
   readonly state: CompanionSemanticState
+  readonly visible: boolean
   readonly workspaceId: string
   readonly onMutedChange: (muted: boolean) => void
   readonly onRetryCharacter: () => void
@@ -37,11 +37,11 @@ interface CharacterStageSlotProps {
 export function CharacterStageSlot({
   copy,
   characterRuntime,
-  hidden,
   muted,
   reducedMotion,
   renderer,
   state,
+  visible,
   workspaceId,
   onMutedChange,
   onRetryCharacter,
@@ -100,8 +100,9 @@ export function CharacterStageSlot({
       className="companion-pane relative min-h-0 overflow-hidden bg-app-bg"
       data-narration-presentation={presentation?.status ?? "inactive"}
       data-narration-speech={presentation?.speechStatus ?? "idle"}
+      hidden={!visible}
     >
-      {!hidden && CharacterRenderer ? (
+      {CharacterRenderer ? (
         <div className="absolute inset-0" data-character-stage-slot="ready">
           <CharacterRenderer
             muted={effectiveMuted}
@@ -111,7 +112,7 @@ export function CharacterStageSlot({
             workspaceId={workspaceId}
           />
         </div>
-      ) : !hidden ? (
+      ) : (
         <div
           className="absolute inset-0 flex items-center justify-center px-2xl pb-20 text-center"
           data-character-stage-slot="pending"
@@ -129,7 +130,7 @@ export function CharacterStageSlot({
             </p>
           </div>
         </div>
-      ) : null}
+      )}
 
       <div className="absolute inset-x-xl bottom-lg flex items-end justify-between gap-md">
         <div
