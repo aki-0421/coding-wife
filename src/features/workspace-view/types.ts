@@ -284,12 +284,9 @@ export type CharacterStageRenderer = (
   props: CharacterStageRenderProps,
 ) => ReactNode
 
-export type SettingsSection =
-  | "general"
-  | "project_context"
-  | "character_context"
-  | "companion"
-  | "audio"
-  | "support"
-  | "diagnostics"
-  | "history"
+export type AppSettingsSection = "general" | "audio" | "support" | "diagnostics"
+
+export type ProjectSettingsSection =
+  "project_context" | "character_context" | "companion" | "history"
+
+export type SettingsSection = AppSettingsSection | ProjectSettingsSection

@@ -1,7 +1,7 @@
 ---
 title: "GIT Gitレビュー観測要件定義"
 description: "main Codexが作るcommitをnative backendがread-only観測し、commit evidence、skill監査、説明導線を提供する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "Git observer、commit evidence、Commit tabを実装するとき。"
   - "commit skill注入、work unitとcommitの相関、native Git権限を検証するとき。"
@@ -171,7 +171,7 @@ restore SHA、branch name、restore confirmation、commit messageの入力欄は
 |---|---|---|---|---|
 | `S-002` | コーディングワークスペース | `GIT-F-073`〜`GIT-F-083`, `GIT-F-090`〜`GIT-F-096` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証拠 | `GIT-F-072`〜`GIT-F-096` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
-| `S-004` | 設定・診断 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-005` | アプリ設定・診断 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092` | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
 
 ## 非機能要件
 

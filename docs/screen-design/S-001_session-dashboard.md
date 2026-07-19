@@ -53,7 +53,7 @@ status: "Approved"
 
 | 項目 | 内容 |
 |---|---|
-| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、S-002〜S-004からSessionsへ戻る |
+| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、S-002〜S-006からSessionsへ戻る |
 | 表示前提 | app-private DBをreadできること。読めない場合はrecovery stateを表示する |
 | 初期フォーカス | 0件時は`Projectを追加`、通常時はactive workspace item、error時は最初の回復操作 |
 | 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |
@@ -79,7 +79,7 @@ status: "Approved"
 | native titlebar safe area | sidebar上40.5px | OS所有のnative traffic lights用余白。WebViewは赤・黄・緑の円を描画しない | close、minimize、zoomはmacOS native controlで行う |
 | workspace heading | sidebar内40.5px | `Workspaces`、ListFilter、FolderPlus、Plus | filter、project追加、workspace作成 |
 | workspace list | sidebar幅255.04px、item 242.25×49.5px | Done / In Review / In Progress / Backlog / Canceled | select、attention確認、overflow |
-| sidebar footer | 40.5px | Settings gear | [S-004](S-004_settings-diagnostics.md)へ移動 |
+| sidebar footer | 40.5px | App settings gear | [S-005](S-005_app-settings-diagnostics.md)へ移動 |
 | main header | sidebar右、81px | `Sessions` breadcrumb、preflight summary | current project切替、診断詳細 |
 | project surface | main content | project概要、preflight、workspace create/empty/recovery | add、recheck、create、open |
 

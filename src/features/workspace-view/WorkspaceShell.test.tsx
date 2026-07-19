@@ -212,6 +212,14 @@ function renderWorkspace(adapter?: WorkspaceViewAdapter) {
   )
 }
 
+function appSettingsButton(): HTMLButtonElement {
+  const button = document.querySelector<HTMLButtonElement>(
+    "button[data-app-settings-trigger]",
+  )
+  if (button === null) throw new Error("Expected the app settings trigger")
+  return button
+}
+
 function expectFocusWithin(container: HTMLElement): void {
   const activeElement = document.activeElement
   if (!(activeElement instanceof HTMLElement)) {
@@ -1306,6 +1314,62 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
   })
 
+  it("separates app settings from the selected project settings", async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Project settings" }),
+    ).toBeVisible()
+    expect(
+      screen.getByText(
+        "Context, companion, and history settings for coding-wife/build-live2d-desktop-app.",
+      ),
+    ).toBeVisible()
+    expect(
+      screen.getAllByRole("button", { name: "Project context" })[0],
+    ).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Character context" }),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Companion" })).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "History & privacy" }),
+    ).toBeVisible()
+    expect(screen.queryByRole("button", { name: "General" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Audio" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Support" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Diagnostics" })).toBeNull()
+
+    await user.click(appSettingsButton())
+    const appHeading = screen.getByRole("heading", {
+      level: 1,
+      name: "App settings",
+    })
+    expect(appHeading).toBeVisible()
+    await waitFor(() => expect(appHeading).toHaveFocus())
+    expect(appSettingsButton()).toHaveAttribute("aria-current", "page")
+    expect(screen.getAllByRole("button", { name: "General" })[0]).toBeVisible()
+    expect(screen.getByRole("button", { name: "Audio" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Support" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Diagnostics" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Project context" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Companion" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "History & privacy" }),
+    ).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Project settings" }),
+    ).toBeVisible()
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /Settings/ })).toHaveFocus(),
+    )
+  })
+
   it("uses the persisted history mode consistently in chat and diagnostics", async () => {
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
@@ -1319,7 +1383,7 @@ describe("WorkspaceShell", () => {
         "Codex and Git are not connected. Local workspace history is persisted and available.",
       ),
     ).toBeVisible()
-    fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
+    fireEvent.click(appSettingsButton())
     fireEvent.click(screen.getByRole("button", { name: "Diagnostics" }))
 
     const localHistory = await screen.findByRole("heading", {
@@ -1349,13 +1413,15 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
     expect(screen.getByText("Demo memory")).toBeVisible()
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(appSettingsButton())
     await user.click(screen.getByRole("button", { name: "Diagnostics" }))
     const localHistory = await screen.findByRole("heading", {
       name: "Workspace history",
     })
     expect(localHistory.closest("article")).toHaveTextContent("Unavailable")
 
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
     await user.click(screen.getByRole("button", { name: "History & privacy" }))
     expect(screen.getByText("Stored in demo memory")).toBeVisible()
     expect(
@@ -1429,7 +1495,7 @@ describe("WorkspaceShell", () => {
 
     await user.click(screen.getByRole("tab", { name: "Settings" }))
     const navigationTrigger = screen
-      .getAllByRole<HTMLButtonElement>("button", { name: "General" })
+      .getAllByRole<HTMLButtonElement>("button", { name: "Project context" })
       .find((button) => button.dataset.slot === "popover-trigger")
     expect(navigationTrigger).toBeDefined()
 
@@ -1474,7 +1540,7 @@ describe("WorkspaceShell", () => {
       document.querySelector('[data-slot="popover-content"]'),
     ).toBeInTheDocument()
     const outsideTarget = screen.getByRole("heading", {
-      name: "Settings & diagnostics",
+      name: "Project settings",
     })
     await user.click(outsideTarget)
     await waitFor(() =>

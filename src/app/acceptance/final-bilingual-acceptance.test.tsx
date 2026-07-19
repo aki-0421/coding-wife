@@ -632,11 +632,11 @@ describe("final bilingual App acceptance", () => {
     )
 
     await user.click(
-      await screen.findByRole("tab", { name: copy.en.settingsTab }),
+      (await screen.findAllByRole("button", { name: "App settings" }))[0]!,
     )
     await user.click(screen.getByRole("radio", { name: "日本語" }))
     expect(
-      await screen.findByRole("heading", { level: 1, name: "設定・診断" }),
+      await screen.findByRole("heading", { level: 1, name: "アプリ設定" }),
     ).toBeVisible()
     expect(localeStore.value).toBe("ja")
     await waitFor(() => expect(lifecycle.listenerCount).toBe(2))

@@ -1,7 +1,7 @@
 ---
 title: "S-002 コーディングワークスペース"
 description: "Codex main session、構造化tool event、意思決定、Context、Live2D companionを一つの安全な作業面で扱う画面仕様。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "Chat/Context tab、composer、Codex event timeline、decision、Live2D companionを実装するとき。"
   - "S-002とWORK、CODE、SUP、GIT、HIST、LIVE、NARR、APP要件の対応を確認するとき。"
@@ -48,8 +48,8 @@ status: "Approved"
 | Git mutation control | native observerをread-onlyに保ち、commit producerをmain Codexへ一本化する | [S-003](S-003_session-evidence.md)はevidence閲覧だけ |
 | support agentへの直接chat | coding identityと支援runtimeを分離する | commit説明はapp-owned controllerが管理し、main conversationへrequest/resultを注入しない |
 | model picker | MVPの固定契約は`GPT-5.6 Sol` | availabilityはpreflightで診断 |
-| microphone / speech input | MVPは音声出力だけ | [S-004](S-004_settings-diagnostics.md) |
-| character asset import | quarantineとpreviewが必要 | [S-004](S-004_settings-diagnostics.md) |
+| microphone / speech input | MVPは音声出力だけ | [S-005](S-005_app-settings-diagnostics.md) |
+| character asset import | quarantineとpreviewが必要 | [S-006](S-006_project-settings.md) |
 
 ## 表示契機と終了
 
@@ -80,7 +80,7 @@ status: "Approved"
 
 | 領域 | 実装拘束値 | 表示内容 | 主な操作 |
 |---|---:|---|---|
-| workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、footer gear | filter、workspace選択、Settings |
+| workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、App settings gear | filter、workspace選択、App settings |
 | breadcrumb row | main上段40.5px | repo / workspace、branch、connection、attention | Sessionsへ戻る、diagnostic詳細 |
 | tab row | main下段40.5px | Chat / Commit / Context / Settings | view切替 |
 | Chat pane | 607.11×754.99px | event timeline、decision、composer | inspect、copy、send、stop、answer |
@@ -100,7 +100,7 @@ status: "Approved"
 | Chat | 本画面のmain route。unread error/decision countをbadge表示する |
 | Commit | [S-003](S-003_session-evidence.md)へ遷移する。manual commit buttonではない |
 | Context | 本画面のContext subviewへ遷移する |
-| Settings | [S-004](S-004_settings-diagnostics.md)へ遷移する |
+| Settings | [S-006](S-006_project-settings.md)へ遷移する |
 
 ### Chat timeline
 
@@ -166,13 +166,13 @@ decisionはtimeline内の強いoutline surfaceとして表示し、必要時だ�
 | State | versioned semantic state `neutral` / `thinking` / `working` / `asking` / `success` / `warning` / `error` | 同じja/en HTML visible state textを常時同期 |
 | Uncertainty |確信度を断定表情へ変換せず、`確認中`、`判断が必要`等のtextを出す | text-onlyで同一情報 |
 | Audio | eligible commentaryとcommit explanation確定chunkの再生status、mute | TTS off/失敗時も同じcaption textを欠落させない |
-| Control | mute、fallback detail。model変更はSettings link | keyboard操作とaccessible name |
+| Control | mute、fallback detail。model変更はProject settings link | keyboard操作とaccessible name |
 
 canvasはpointer eventを奪わず、decorative扱いとする。選択packの正本はstable Project IDであり、同じProject IDの全workspaceは選択変更を即時共有する。model animationはevent severityを誇張せず、error/decisionを祝福表現にしない。tabがbackground、window occluded、reduced motion、thermal pressure時はFPSを下げ、Chat入力とevent描画を優先する。
 
 operational eventはversioned mapperで`idle`→`neutral`、`thinking`→`thinking`、`acting` / `reviewing` / explicit commit presentation→`working`、`waiting_for_user`→`asking`、`completed`→`success`、`disconnected`→`warning`、`error`→`error`へ決定的に変換する。unknown/unsupported eventは`neutral`へ戻す。semantic stateからは検証済みmanifest inventory内のmotion cue、expression cue、またはneutralだけを使い、Codex/support output、path、URL、parameter式、任意file名をcueとして採用しない。unknown mapping version、manifest hash不一致、invalid/deleted cueではmapping全体を実行せずneutral/static/textへ戻す。
 
-verified commit後にapp-owned explanation controllerが`queued` / `running`へ遷移しても、Commit UIのbackground生成statusだけを更新し、caption/live region/TTSは開始しない。利用者が「詳しく教えて」または再表示を1回選んだ時だけ、そのselection/request/presentation intent epochへ束縛した`working`状態とsequence付きのredacted narration chunkをvisible HTML captionへ表示する。未生成、生成中、background生成済みcacheのどれも同じ1回で表示し、captionをTTSより先に確定して、TTS enabled時だけ同じtextを同じ順で読む。`Close explanation`、workspace/locale/selection変更、main turnのStop、stale/schema invalidはpresentation intentだけをrevokeし、旧chunkを表示・再生せず、background support job/cacheを維持する。queued/running jobをterminal化するのはS-003/S-004の明示`Cancel explanation generation`、timeout、またはapp process終了時の共通runtime cleanupだけである。
+verified commit後にapp-owned explanation controllerが`queued` / `running`へ遷移しても、Commit UIのbackground生成statusだけを更新し、caption/live region/TTSは開始しない。利用者が「詳しく教えて」または再表示を1回選んだ時だけ、そのselection/request/presentation intent epochへ束縛した`working`状態とsequence付きのredacted narration chunkをvisible HTML captionへ表示する。未生成、生成中、background生成済みcacheのどれも同じ1回で表示し、captionをTTSより先に確定して、TTS enabled時だけ同じtextを同じ順で読む。`Close explanation`、workspace/locale/selection変更、main turnのStop、stale/schema invalidはpresentation intentだけをrevokeし、旧chunkを表示・再生せず、background support job/cacheを維持する。queued/running jobをterminal化するのはS-003/S-005の明示`Cancel explanation generation`、timeout、またはapp process終了時の共通runtime cleanupだけである。
 
 ### Context subview
 
@@ -286,7 +286,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 | 項目 | 動作 |
 |---|---|
-| 生成・再利用 | S-001〜S-004と同じ`main`を再利用し、workspace IDだけをatomicに切替える |
+| 生成・再利用 | S-001〜S-006と同じ`main`を再利用し、workspace IDだけをatomicに切替える |
 | 初期サイズ・最小サイズ |共通の1470×836 / 960×640 |
 | リサイズ | breakpoint表に従い、Chat/decisionをCompanionより優先する |
 | 最大化・全画面 | Chat/Companionを1:1で拡張し、composerは最大720px |
@@ -315,7 +315,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | project/character context | Rust SQLite versioned row | section save transaction | Context/turn開始 | project解除/履歴削除契約 | expected version conflict |
 | last summary/timeline anchor/tab | Rust SQLite | terminal summary、scroll settle/tab移動 | route return/restart | history削除契約 | 同workspaceのnearest valid sequenceだけへ補正 |
 | repository identity/health snapshot | Rust SQLite、Git read-only再検査 | window focus、selection、Send直前 | route return/restart | project登録解除 | stale status、Repair/Recheck |
-| selected character | stable Project ID → app-private library pack ID | Settingsのatomic選択成功 | startup/同Project全workspaceへ即時同期 | project登録解除契約。選択中packは削除不可 | invalid legacy値はbundled Hiyori、render失敗はstatic/text fallback |
+| selected character | stable Project ID → app-private library pack ID | Project settingsのatomic選択成功 | startup/同Project全workspaceへ即時同期 | project登録解除契約。選択中packは削除不可 | invalid legacy値はbundled Hiyori、render失敗はstatic/text fallback |
 | audio byte | memory only |再生中だけ |復元しない | playback/stop/route/quit | textは保持 |
 | raw reasoning/support raw history/commit explanation transcript |保存しない | 非該当 |復元しない | task終了時 | redacted summaryまたはusage/status metadataだけ保持 |
 

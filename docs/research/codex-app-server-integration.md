@@ -1,7 +1,7 @@
 ---
 title: "Codex App Server 接続契約と実装設計"
 description: "Coding Wife がローカル Codex App Server を安全に起動し、固定モデルの主セッション、承認、構造化意思決定、レビュー、診断を扱うための版管理された接続契約を定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
 last_verified: 2026-07-18
 read_when:
   - "Codex App Server のプロセス管理、JSON-RPC、スレッド、ターン、承認、レビュー、診断を実装または変更するとき。"
@@ -37,7 +37,7 @@ read_when:
 - ../requirements/activity-history.md
 - ../screen-design/S-002_coding-workspace.md
 - ../screen-design/S-003_session-evidence.md
-- ../screen-design/S-004_settings-diagnostics.md
+- ../screen-design/S-005_app-settings-diagnostics.md
 - ../screen-design/desktop-common-specification.md
 
 競合時は Approved の要件・画面設計を優先する。特に、既存の 03-codex-integration.md にある requestUserInput から動的ツールや MCP elicitation へ順次フォールバックする案は採用しない。CODE-F-067 に従い、native requestUserInput が利用できない場合は通常の assistant 最終出力に含む版管理済み decision schema だけを許可する。自由文から質問や承認を推測しない。

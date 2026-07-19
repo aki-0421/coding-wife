@@ -1,12 +1,11 @@
 ---
 title: "S-004 設定・診断"
-description: "言語、Context、Live2D model、音声、support、履歴・privacy、起動前提と復旧状態を安全に管理する画面仕様。"
+description: "アプリ全体設定とプロジェクト設定を混在させていた旧画面仕様。S-005とS-006へ分離済み。"
 updated: 2026-07-19
 read_when:
-  - "Settings tab、診断、Live2D import、TTS、support、history/privacy設定を実装するとき。"
-  - "S-004とWORK、CODE、SUP、GIT、HIST、LIVE、NARR、APP要件の対応を確認するとき。"
+  - "旧設定画面からS-005/S-006への分離理由を確認するとき。"
 screen_id: "S-004"
-status: "Approved"
+status: "Deprecated"
 ---
 
 # S-004 設定・診断
@@ -18,8 +17,12 @@ status: "Approved"
 | 対象OS                 | macOS 14以降、Apple Silicon                                                                     |
 | デザイン               | [DESIGN.md](../../DESIGN.md)、Figma Desktop node `8:2`のshell、[demo.png](../thinking/demo.png) |
 | 共通仕様               | [デスクトップ共通仕様](desktop-common-specification.md)                                         |
-| 廃止理由               | 非該当                                                                                          |
-| 後継画面ID             | 非該当                                                                                          |
+| 廃止理由               | app-globalとproject-scopedの設定が同一画面に混在してscopeを識別できなかったため                 |
+| 後継画面ID             | [S-005](S-005_app-settings-diagnostics.md)、[S-006](S-006_project-settings.md)                  |
+
+## 廃止と後継
+
+本画面は実装対象ではない。sidebar gearから開くアプリ全体設定はS-005、workspaceのSettings tabから開くプロジェクト設定はS-006を正本とする。以下は分離前の履歴仕様として保持する。
 
 ## 目的
 
@@ -464,16 +467,16 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 
 | 項目         | 内容       |
 | ------------ | ---------- |
-| レビュー結果 | Approved   |
-| レビュー日   | 2026-07-18 |
+| レビュー結果 | Deprecated |
+| レビュー日   | 2026-07-19 |
 
 - [x] front matter、title、filenameの`S-004`が一致する。
-- [x] `status: Approved`である。
+- [x] `status: Deprecated`で後継S-005/S-006を示す。
 - [x] 8 section、project/character context分離、diagnostics、history/privacyを定義した。
 - [x] `tmp/hiyori_pro`をbuild入力とし、runtime 17 fileだけを同梱する契約を定義した。
 - [x] custom model importのpicker、closure、resource limit、quarantine、preview、mapping、deleteを定義した。
 - [x] `AppPreferencesV1`、native readiness snapshot、Project-scoped selection、`SemanticMappingV1`の正常・loading・empty・error・disabled・recoveryを定義した。
 - [x] TTS default off、local binary/voice/test/mute、text parity、dismiss/cancel分離、voice retry、dirty draft保持、network/microphone/audio file禁止を定義した。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
-- [x] 関連要件IDを要件定義書のS-004対応と一致させた。
+- [x] 後継画面の関連要件IDをS-005/S-006へ移した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。

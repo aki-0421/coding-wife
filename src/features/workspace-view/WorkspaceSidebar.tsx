@@ -62,6 +62,7 @@ const initiallyExpandedLifecycles = {
 } as const satisfies Readonly<Record<WorkspaceLifecycle, boolean>>
 
 interface WorkspaceSidebarProps {
+  readonly appSettingsActive: boolean
   readonly copy: WorkspaceCopy
   readonly filter: string
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
@@ -252,6 +253,7 @@ function CreateWorkspaceDialog({
 }
 
 function SidebarPanel({
+  appSettingsActive,
   copy,
   expandedLifecycles,
   filter,
@@ -417,7 +419,12 @@ function SidebarPanel({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              aria-label={copy.settings}
+              aria-current={appSettingsActive ? "page" : undefined}
+              aria-label={copy.appSettings}
+              className={cn(
+                appSettingsActive && "bg-selected-row text-text-strong",
+              )}
+              data-app-settings-trigger=""
               onClick={onOpenSettings}
               size="icon-sm"
               type="button"
@@ -426,7 +433,7 @@ function SidebarPanel({
               <SettingsIcon />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="right">{copy.settings}</TooltipContent>
+          <TooltipContent side="right">{copy.appSettings}</TooltipContent>
         </Tooltip>
       </div>
     </div>
@@ -563,8 +570,13 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
         </Dialog>
 
         <Button
-          aria-label={props.copy.settings}
-          className="mb-xs"
+          aria-current={props.appSettingsActive ? "page" : undefined}
+          aria-label={props.copy.appSettings}
+          className={cn(
+            "mb-xs",
+            props.appSettingsActive && "bg-selected-row text-text-strong",
+          )}
+          data-app-settings-trigger=""
           onClick={props.onOpenSettings}
           size="icon-sm"
           type="button"

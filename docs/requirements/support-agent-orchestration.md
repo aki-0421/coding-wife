@@ -91,7 +91,7 @@ read_when:
 |---|---|---|---|---|
 | `SUP-F-062` | support concurrencyとqueueを制限する | active supportは1件、queueは最大10件とし、11件目は低優先eventをdropしてDropped metadataを記録する | Approved | 非該当 |
 | `SUP-F-063` | support taskは時間とtoken budgetを持つ | 1taskは15秒timeout、input+output合計16,000 token上限とし、超過時はcancelしてfallbackを返す | Approved | 非該当 |
-| `SUP-F-064` | 利用者はsupport利用状況を確認できる | Settings/diagnosticsにrole、status、model family、token usage、latency、queue、last errorを表示し、prompt/response本文は表示しない | Approved | 非該当 |
+| `SUP-F-064` | 利用者はsupport利用状況を確認できる | App settings/diagnosticsにrole、status、model family、token usage、latency、queue、last errorを表示し、prompt/response本文は表示しない | Approved | 非該当 |
 | `SUP-F-065` | 利用者はsupportをglobalまたはrole単位で無効化できる | toggle off後にqueued taskをcancelし、新規invocationを0件にしてmainとdeterministic fallbackを維持する | Approved | 非該当 |
 | `SUP-F-066` | support raw historyをapp persistenceへ残さない | invocation完了後にapp DB、artifact、logを検索してもprompt/response本文が0件で、usage metadataだけが存在する | Approved | 非該当 |
 | `SUP-F-067` | release前にephemeral non-persistenceを監査する | test用CODEX_HOME snapshotのbefore/after差分にsupport thread history fileが0件であることをCI/manual release evidenceへ記録する。private rootは作成時directory descriptorとdevice/inode/ownerを保持し、同一identityのmode driftを0700へ戻してauth copyごとno-follow cleanupする。元pathのNotFoundだけをcleanup成功とせず、保持descriptorのdevice/inode/link数と安全に発見したdisplaced inodeを照合し、auth-bearing inodeのtree削除と消滅確認後だけcleanedにする。explicit cleanup失敗ではcleaned状態にせずDrop retryを残し、unsafe-modeまたはdisplaced stale rootも次回起動時にowner/identity/lockを再検証して回収する | Approved | 非該当 |
@@ -135,7 +135,7 @@ read_when:
 | 領域 | 要件 | 対象要件ID |
 |---|---|---|
 | 対象OS・OS差分 | Codex App Serverが動作するmacOS 14以降 | `SUP-F-050` |
-| ウィンドウ生成・再利用 | support専用windowを作らずS-002/S-004へstatusだけ表示 | `SUP-F-064` |
+| ウィンドウ生成・再利用 | support専用windowを作らずS-002/S-005へstatusだけ表示 | `SUP-F-064` |
 | 閉じる・アプリ終了 | queued/active taskをcancelし5秒後にprocess cleanup | `SUP-F-061`, `SUP-F-062` |
 | 未保存データ | 非該当: support draftは存在しない | 非該当 |
 | ローカルデータ | usage metadataだけをHISTへ保存 | `SUP-F-064`, `SUP-F-066` |
@@ -153,7 +153,7 @@ read_when:
 |---|---|---|---|---|
 | `S-002` | コーディングワークスペース | `SUP-F-051`, `SUP-F-057`〜`SUP-F-061`, `SUP-F-074`〜`SUP-F-076`, `SUP-F-078` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証拠 | `SUP-F-056`〜`SUP-F-058`, `SUP-F-069`〜`SUP-F-078` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
-| `S-004` | 設定・診断 | `SUP-F-062`〜`SUP-F-068`, `SUP-F-071`, `SUP-F-072`, `SUP-F-077` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-005` | アプリ設定・診断 | `SUP-F-062`〜`SUP-F-068`, `SUP-F-071`, `SUP-F-072`, `SUP-F-077` | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
 
 ## 非機能要件
 

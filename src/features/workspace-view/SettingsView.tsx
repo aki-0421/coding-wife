@@ -1,7 +1,8 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ActivityIcon,
   AlertTriangleIcon,
+  ArrowLeftIcon,
   BotIcon,
   ChevronDownIcon,
   DatabaseIcon,
@@ -11,6 +12,7 @@ import {
   Settings2Icon,
   ShieldCheckIcon,
   SparklesIcon,
+  type LucideIcon,
 } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -31,8 +33,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
 import {
   CharacterModelLibrarySettings,
   getCharacterErrorMessage,
@@ -46,10 +46,7 @@ import {
   ReadinessStatusBadge,
   useNativeReadiness,
 } from "@/features/readiness"
-import {
-  useAppPreferences,
-  useAppPreferencesController,
-} from "@/features/preferences"
+import { useAppPreferences } from "@/features/preferences"
 import { SupportControlsSettings } from "@/features/support-controls"
 import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
 import { EditableContextSection } from "@/features/workspace-view/EditableContextSection"
@@ -57,33 +54,47 @@ import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type { EditableWorkspaceContextModel } from "@/features/workspace-view/useEditableWorkspaceContext"
 import type { RuntimeState } from "@/features/runtime"
 import type {
+  AppSettingsSection,
+  ProjectSettingsSection,
   SettingsSection,
   WorkspaceAdapterState,
 } from "@/features/workspace-view/types"
 import { cn } from "@/lib/utils"
 
-interface SettingsViewProps {
+interface CharacterRuntimeSettingsProps {
   readonly characterRuntime: CharacterRuntimeView
   readonly copy: WorkspaceCopy
-  readonly contextModel: EditableWorkspaceContextModel
-  readonly history: WorkspaceAdapterState["history"]
+  readonly muted: boolean
+  readonly onRetryCharacter: () => void
+}
+
+interface AppSettingsViewProps {
+  readonly copy: WorkspaceCopy
   readonly muted: boolean
   readonly runtimeState: RuntimeState
-  readonly section: SettingsSection
-  readonly turnActive: boolean
+  readonly section: AppSettingsSection
   readonly workspaceId: string
-  readonly onDeleteHistory: () => Promise<boolean>
+  readonly onBack: () => void
   readonly onMutedChange: (muted: boolean) => void
   readonly onResetUi: () => void
-  readonly onRetryRuntime: () => void
-  readonly onRetryCharacter: () => void
-  readonly onSectionChange: (section: SettingsSection) => void
+  readonly onSectionChange: (section: AppSettingsSection) => void
+}
+
+interface ProjectSettingsViewProps extends CharacterRuntimeSettingsProps {
+  readonly contextModel: EditableWorkspaceContextModel
+  readonly history: WorkspaceAdapterState["history"]
+  readonly section: ProjectSettingsSection
+  readonly turnActive: boolean
+  readonly workspaceId: string
+  readonly workspaceLabel: string
+  readonly onDeleteHistory: () => Promise<boolean>
+  readonly onSectionChange: (section: ProjectSettingsSection) => void
 }
 
 function CharacterReadinessBadge({
   copy,
   runtime,
-}: Pick<SettingsViewProps, "copy"> & {
+}: Pick<CharacterRuntimeSettingsProps, "copy"> & {
   readonly runtime: CharacterRuntimeView
 }) {
   const label = {
@@ -118,7 +129,7 @@ function CharacterRuntimeDetails({
   characterRuntime,
   copy,
   muted,
-}: Pick<SettingsViewProps, "characterRuntime" | "copy" | "muted">) {
+}: Pick<CharacterRuntimeSettingsProps, "characterRuntime" | "copy" | "muted">) {
   const rendererLabel =
     characterRuntime.rendererKind === "builtin_hiyori"
       ? copy.settingsView.builtinRenderer
@@ -191,7 +202,10 @@ function CharacterRuntimeErrorAlert({
   characterRuntime,
   copy,
   onRetryCharacter,
-}: Pick<SettingsViewProps, "characterRuntime" | "copy" | "onRetryCharacter">) {
+}: Pick<
+  CharacterRuntimeSettingsProps,
+  "characterRuntime" | "copy" | "onRetryCharacter"
+>) {
   const { locale } = useI18n()
   if (characterRuntime.currentErrorCode === null) return null
 
@@ -222,14 +236,17 @@ function CharacterRuntimeErrorAlert({
   )
 }
 
-const sectionOrder: readonly SettingsSection[] = [
+const appSectionOrder: readonly AppSettingsSection[] = [
   "general",
-  "project_context",
-  "character_context",
-  "companion",
   "audio",
   "support",
   "diagnostics",
+]
+
+const projectSectionOrder: readonly ProjectSettingsSection[] = [
+  "project_context",
+  "character_context",
+  "companion",
   "history",
 ]
 
@@ -244,18 +261,25 @@ const sectionIcons = {
   history: HistoryIcon,
 } as const
 
-function SettingsNavigation({
+function SettingsNavigation<Section extends SettingsSection>({
   closeOnSelect = false,
   copy,
+  label,
+  sections,
   section,
   onSectionChange,
-}: Pick<SettingsViewProps, "copy" | "section" | "onSectionChange"> & {
+}: {
   readonly closeOnSelect?: boolean
+  readonly copy: WorkspaceCopy
+  readonly label: string
+  readonly sections: readonly Section[]
+  readonly section: Section
+  readonly onSectionChange: (section: Section) => void
 }) {
   return (
-    <nav aria-label={copy.settings} className="flex flex-col gap-xxs p-md">
-      {sectionOrder.map((item) => {
-        const Icon = sectionIcons[item]
+    <nav aria-label={label} className="flex flex-col gap-xxs p-md">
+      {sections.map((item) => {
+        const Icon = sectionIcons[item] as LucideIcon
         const navigationButton = (
           <button
             aria-current={section === item ? "page" : undefined}
@@ -281,6 +305,48 @@ function SettingsNavigation({
         )
       })}
     </nav>
+  )
+}
+
+function SettingsSectionPicker<Section extends SettingsSection>({
+  copy,
+  label,
+  sections,
+  section,
+  onSectionChange,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly label: string
+  readonly sections: readonly Section[]
+  readonly section: Section
+  readonly onSectionChange: (section: Section) => void
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          className="max-w-[45%] min-[1280px]:hidden"
+          size="xs"
+          type="button"
+          variant="secondary"
+        >
+          <span className="truncate">
+            {copy.settingsView.sections[section]}
+          </span>
+          <ChevronDownIcon className="shrink-0" data-icon="inline-end" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 max-w-[calc(100dvw-2rem)]">
+        <SettingsNavigation
+          closeOnSelect
+          copy={copy}
+          label={label}
+          onSectionChange={onSectionChange}
+          section={section}
+          sections={sections}
+        />
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -334,15 +400,7 @@ function CompanionSettings({
   muted,
   onRetryCharacter,
   workspaceId,
-}: Pick<
-  SettingsViewProps,
-  "characterRuntime" | "copy" | "muted" | "onRetryCharacter" | "workspaceId"
->) {
-  const preferences = useAppPreferences()
-  const controller = useAppPreferencesController()
-  const characterHidden =
-    preferences.snapshot.preferences.characterVisibility === "hidden"
-
+}: CharacterRuntimeSettingsProps & { readonly workspaceId: string }) {
   return (
     <section className="flex flex-col gap-lg">
       <div className="flex items-center justify-between gap-md">
@@ -362,22 +420,6 @@ function CompanionSettings({
         muted={muted}
       />
       <CharacterModelLibrarySettings workspaceId={workspaceId} />
-      <SettingRow
-        action={
-          <Switch
-            aria-label={copy.settingsView.hideCharacter}
-            checked={characterHidden}
-            disabled={preferences.status === "loading"}
-            onCheckedChange={(hidden) => {
-              void controller.update({
-                characterVisibility: hidden ? "hidden" : "visible",
-              })
-            }}
-          />
-        }
-        description={copy.settingsView.hideCharacterDescription}
-        label={copy.settingsView.hideCharacter}
-      />
     </section>
   )
 }
@@ -388,7 +430,7 @@ function AudioSettings({
   workspaceId,
   onMutedChange,
 }: Pick<
-  SettingsViewProps,
+  AppSettingsViewProps,
   "copy" | "muted" | "workspaceId" | "onMutedChange"
 >) {
   return (
@@ -412,38 +454,15 @@ function SupportSettings() {
   )
 }
 
-function DiagnosticsSettings({
-  characterRuntime,
-  copy,
-  muted,
-  onRetryCharacter,
-}: Pick<
-  SettingsViewProps,
-  "characterRuntime" | "copy" | "muted" | "onRetryCharacter"
->) {
-  return (
-    <section className="flex flex-col gap-lg">
-      <NativeReadinessDiagnostics />
-      <Separator />
-      <CharacterRuntimeErrorAlert
-        characterRuntime={characterRuntime}
-        copy={copy}
-        onRetryCharacter={onRetryCharacter}
-      />
-      <CharacterRuntimeDetails
-        characterRuntime={characterRuntime}
-        copy={copy}
-        muted={muted}
-      />
-    </section>
-  )
+function DiagnosticsSettings() {
+  return <NativeReadinessDiagnostics />
 }
 
 function HistorySettings({
   copy,
   history,
   onDeleteHistory,
-}: Pick<SettingsViewProps, "copy" | "history" | "onDeleteHistory">) {
+}: Pick<ProjectSettingsViewProps, "copy" | "history" | "onDeleteHistory">) {
   const { locale } = useI18n()
   const nativeReadiness = useNativeReadiness()
   const nativeHistory = checkById(nativeReadiness.snapshot, "history")
@@ -608,7 +627,13 @@ function HistorySettings({
   )
 }
 
-export function SettingsView(props: SettingsViewProps) {
+export function AppSettingsView(props: AppSettingsViewProps) {
+  const headingRef = useRef<HTMLHeadingElement>(null)
+
+  useEffect(() => {
+    headingRef.current?.focus()
+  }, [])
+
   const sectionContent = (() => {
     switch (props.section) {
       case "general":
@@ -619,6 +644,74 @@ export function SettingsView(props: SettingsViewProps) {
             runtimeState={props.runtimeState}
           />
         )
+      case "audio":
+        return <AudioSettings {...props} />
+      case "support":
+        return <SupportSettings />
+      case "diagnostics":
+        return <DiagnosticsSettings />
+    }
+  })()
+
+  return (
+    <section
+      aria-labelledby="app-settings-title"
+      className="workspace-tabs"
+      data-settings-scope="app"
+    >
+      <header className="workspace-header flex min-w-0 items-center gap-md border-b border-divider bg-surface px-xl max-[700px]:px-md">
+        <Button onClick={props.onBack} size="xs" type="button" variant="ghost">
+          <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
+          {props.copy.settingsView.backToWorkspace}
+        </Button>
+        <div className="flex min-w-0 flex-1 flex-col gap-xxs">
+          <h1
+            className="m-0 text-balance text-headline text-text-strong"
+            id="app-settings-title"
+            ref={headingRef}
+            tabIndex={-1}
+          >
+            {props.copy.settingsView.appTitle}
+          </h1>
+          <p className="m-0 text-pretty text-caption text-muted-foreground">
+            {props.copy.settingsView.appDescription}
+          </p>
+        </div>
+        <SettingsSectionPicker
+          copy={props.copy}
+          label={props.copy.appSettings}
+          onSectionChange={props.onSectionChange}
+          section={props.section}
+          sections={appSectionOrder}
+        />
+      </header>
+
+      <div className="workspace-view grid size-full min-h-0 min-w-0 grid-cols-[228px_minmax(0,1fr)] overflow-hidden bg-app-bg max-[1279px]:grid-cols-1">
+        <aside className="min-h-0 border-r border-divider bg-sidebar/40 max-[1279px]:hidden">
+          <ScrollArea className="size-full">
+            <SettingsNavigation
+              copy={props.copy}
+              label={props.copy.appSettings}
+              onSectionChange={props.onSectionChange}
+              section={props.section}
+              sections={appSectionOrder}
+            />
+          </ScrollArea>
+        </aside>
+
+        <ScrollArea className="min-h-0 min-w-0">
+          <div className="mx-auto w-full min-w-0 max-w-[780px] px-2xl py-xl max-[700px]:px-md max-[700px]:py-lg">
+            {sectionContent}
+          </div>
+        </ScrollArea>
+      </div>
+    </section>
+  )
+}
+
+export function ProjectSettingsView(props: ProjectSettingsViewProps) {
+  const sectionContent = (() => {
+    switch (props.section) {
       case "project_context":
         return (
           <ContextSettings
@@ -638,26 +731,34 @@ export function SettingsView(props: SettingsViewProps) {
           />
         )
       case "companion":
-        return <CompanionSettings {...props} />
-      case "audio":
-        return <AudioSettings {...props} />
-      case "support":
-        return <SupportSettings />
-      case "diagnostics":
-        return <DiagnosticsSettings {...props} />
+        return (
+          <CompanionSettings
+            characterRuntime={props.characterRuntime}
+            copy={props.copy}
+            muted={props.muted}
+            onRetryCharacter={props.onRetryCharacter}
+            workspaceId={props.workspaceId}
+          />
+        )
       case "history":
         return <HistorySettings {...props} />
     }
   })()
 
   return (
-    <main className="grid size-full min-h-0 min-w-0 grid-cols-[228px_minmax(0,1fr)] overflow-hidden bg-app-bg max-[1279px]:grid-cols-1">
+    <section
+      aria-labelledby="project-settings-title"
+      className="grid size-full min-h-0 min-w-0 grid-cols-[228px_minmax(0,1fr)] overflow-hidden bg-app-bg max-[1279px]:grid-cols-1"
+      data-settings-scope="project"
+    >
       <aside className="min-h-0 border-r border-divider bg-sidebar/40 max-[1279px]:hidden">
         <ScrollArea className="size-full">
           <SettingsNavigation
             copy={props.copy}
+            label={props.copy.settingsView.projectTitle}
             onSectionChange={props.onSectionChange}
             section={props.section}
+            sections={projectSectionOrder}
           />
         </ScrollArea>
       </aside>
@@ -665,39 +766,23 @@ export function SettingsView(props: SettingsViewProps) {
       <section className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
         <header className="flex min-h-[58px] min-w-0 items-center justify-between gap-md border-b border-divider px-xl py-sm max-[700px]:items-start max-[700px]:px-md">
           <div className="flex min-w-0 flex-col gap-xxs">
-            <h1 className="m-0 text-headline text-text-strong">
-              {props.copy.settingsView.title}
+            <h1
+              className="m-0 text-balance text-headline text-text-strong"
+              id="project-settings-title"
+            >
+              {props.copy.settingsView.projectTitle}
             </h1>
-            <p className="m-0 truncate text-caption text-muted-foreground max-[700px]:whitespace-normal">
-              {props.copy.settingsView.description}
+            <p className="m-0 text-pretty text-caption text-muted-foreground">
+              {props.copy.settingsView.projectDescription(props.workspaceLabel)}
             </p>
           </div>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                className="max-w-[45%] min-[1280px]:hidden"
-                size="xs"
-                type="button"
-                variant="secondary"
-              >
-                <span className="truncate">
-                  {props.copy.settingsView.sections[props.section]}
-                </span>
-                <ChevronDownIcon className="shrink-0" data-icon="inline-end" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="end"
-              className="w-64 max-w-[calc(100dvw-2rem)]"
-            >
-              <SettingsNavigation
-                closeOnSelect
-                copy={props.copy}
-                onSectionChange={props.onSectionChange}
-                section={props.section}
-              />
-            </PopoverContent>
-          </Popover>
+          <SettingsSectionPicker
+            copy={props.copy}
+            label={props.copy.settingsView.projectTitle}
+            onSectionChange={props.onSectionChange}
+            section={props.section}
+            sections={projectSectionOrder}
+          />
         </header>
         <ScrollArea className="min-h-0 min-w-0">
           <div className="mx-auto w-full min-w-0 max-w-[780px] px-2xl py-xl max-[700px]:px-md max-[700px]:py-lg">
@@ -705,6 +790,6 @@ export function SettingsView(props: SettingsViewProps) {
           </div>
         </ScrollArea>
       </section>
-    </main>
+    </section>
   )
 }

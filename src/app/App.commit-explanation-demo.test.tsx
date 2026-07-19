@@ -196,13 +196,19 @@ describe("App interactive commit explanation demo", () => {
     })
     await waitFor(() => expect(speak).toHaveBeenCalled())
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(
+      screen.getAllByRole("button", { name: "App settings" })[0]!,
+    )
     await user.click(screen.getByRole("radio", { name: "日本語" }))
     await waitFor(() =>
       expect(controller.getSnapshot().presentation).toBeNull(),
     )
     await user.click(screen.getByRole("radio", { name: "English" }))
-    await user.click(await screen.findByRole("tab", { name: "Commit" }))
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    expect(await screen.findByRole("tab", { name: /Commit/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
     expect(
       await screen.findByText("Explanation ready", {}, { timeout: 3_000 }),
     ).toBeVisible()
