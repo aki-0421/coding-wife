@@ -778,12 +778,13 @@ impl CharacterService {
             ));
         }
         session.manifest.display_name = request.display_name.trim().to_owned();
-        self.storage.publish_and_select(
+        self.storage.publish_and_replace_custom(
             &session.directory,
             &session.manifest,
             state,
             &project_id,
             current_timestamp(),
+            &custom_packs,
         )?;
         pending.remove(&request.preview_token);
         drop(pending);
@@ -947,22 +948,15 @@ impl CharacterService {
         let _operation = self.operations.lock().await;
         self.resolve_project_id(&request.workspace_id)?;
         let (custom_packs, _) = self.storage.load_custom_packs()?;
-        let mut state = self.load_project_state(&custom_packs)?;
-        if state
-            .project_selections
-            .values()
-            .any(|selection| selection.pack_id == request.pack_id)
-        {
-            return Err(character_error(
-                "character_delete_pack",
-                "CHARACTER-ACTIVE-DELETE-DENIED",
-                true,
-            ));
-        }
-        self.storage.delete_pack(&request.pack_id)?;
-        if state.semantic_mappings.remove(&request.pack_id).is_some() {
-            self.storage.save_state(&state)?;
-        }
+        let pack = custom_packs
+            .iter()
+            .find(|pack| pack.manifest.pack_id == request.pack_id)
+            .ok_or_else(|| {
+                character_error("character_delete_pack", "CHARACTER-PACK-NOT-FOUND", true)
+            })?;
+        let state = self.load_project_state(&custom_packs)?;
+        self.storage
+            .delete_custom_and_fallback(pack, state, current_timestamp())?;
         self.snapshot(&request.workspace_id)
     }
 
@@ -1179,10 +1173,7 @@ fn custom_pack_view(pack: &StoredPack, state: &CharacterStateFile) -> CharacterP
             .values()
             .filter(|selection| selection.pack_id == pack.manifest.pack_id)
             .count() as u32,
-        deletable: !state
-            .project_selections
-            .values()
-            .any(|selection| selection.pack_id == pack.manifest.pack_id),
+        deletable: true,
         manifest: Some(pack.manifest.clone()),
         thumbnail_sha256: pack
             .manifest
@@ -1599,7 +1590,7 @@ mod tests {
             .contains_key("project-active"));
         let active_view = custom_pack_view(&pack, &active_state);
         assert_eq!(active_view.selected_project_count, 1);
-        assert!(!active_view.deletable);
+        assert!(active_view.deletable);
 
         connection
             .execute(
@@ -1971,45 +1962,149 @@ mod tests {
                 .len() as u64,
             moc.bytes
         );
-        assert_eq!(
-            restarted
-                .delete_pack(CharacterDeleteRequest {
-                    workspace_id: workspace_id.clone(),
-                    pack_id: preview.pack_id.clone(),
-                })
-                .await
-                .expect_err("active pack deletion")
-                .code,
-            "CHARACTER-ACTIVE-DELETE-DENIED"
-        );
-
-        restarted
-            .select_pack(CharacterSelectRequest {
-                workspace_id: workspace_id.clone(),
-                pack_id: BUILTIN_HIYORI_PACK_ID.to_owned(),
-            })
-            .await
-            .expect("select builtin");
-        assert_eq!(
-            restarted
-                .library(CharacterLibraryRequest {
-                    workspace_id: sibling_workspace_id.clone(),
-                })
-                .await
-                .expect("shared builtin selection")
-                .selected_pack_id,
-            BUILTIN_HIYORI_PACK_ID
-        );
         let deleted = restarted
             .delete_pack(CharacterDeleteRequest {
-                workspace_id: sibling_workspace_id,
+                workspace_id: workspace_id.clone(),
                 pack_id: preview.pack_id,
             })
             .await
-            .expect("delete inactive pack");
+            .expect("delete active custom slot");
         assert_eq!(deleted.packs.len(), 1);
         assert_eq!(deleted.selected_pack_id, BUILTIN_HIYORI_PACK_ID);
+        assert_eq!(
+            restarted
+                .library(CharacterLibraryRequest {
+                    workspace_id: sibling_workspace_id,
+                })
+                .await
+                .expect("shared bundled fallback")
+                .selected_pack_id,
+            BUILTIN_HIYORI_PACK_ID
+        );
         assert!(!published_directory.exists());
+    }
+
+    #[tokio::test]
+    async fn replacing_custom_slot_migrates_every_project_and_removes_the_old_pack() {
+        let app_data = TestDirectory::new();
+        let storage = CharacterStorage::open(app_data.path()).expect("character storage");
+        let workspace_a = "workspace-slot-a".to_owned();
+        let workspace_b = "workspace-slot-b".to_owned();
+        let resolver: Arc<dyn CharacterProjectResolver> =
+            Arc::new(FixedProjectResolver(BTreeMap::from([
+                (workspace_a.clone(), "project-slot-a".to_owned()),
+                (workspace_b.clone(), "project-slot-b".to_owned()),
+            ])));
+        let service = CharacterService::new_with_project_resolver(
+            storage,
+            resolve_builtin_directory(Path::new("/missing")),
+            Arc::new(FixedPicker(Some(reviewed_hiyori_source()))),
+            resolver,
+        );
+        for workspace_id in [&workspace_a, &workspace_b] {
+            service
+                .library(CharacterLibraryRequest {
+                    workspace_id: (*workspace_id).clone(),
+                })
+                .await
+                .expect("initialize project selection");
+        }
+
+        let first = service
+            .pick_import(CharacterLibraryRequest {
+                workspace_id: workspace_a.clone(),
+            })
+            .await
+            .expect("first import")
+            .preview
+            .expect("first preview");
+        let first_renderer_nonce = uuid::Uuid::new_v4().to_string();
+        service
+            .attest_preview(attestation(&first, &first_renderer_nonce))
+            .await
+            .expect("first attestation");
+        service
+            .confirm_import(CharacterConfirmImportRequest {
+                workspace_id: workspace_a.clone(),
+                preview_token: first.preview_token.clone(),
+                preview_nonce: first.preview_nonce.clone(),
+                renderer_nonce: first_renderer_nonce,
+                generation: first.generation,
+                manifest_hash: first.manifest_hash.clone(),
+                display_name: "First custom".to_owned(),
+            })
+            .await
+            .expect("first publish");
+        service
+            .select_pack(CharacterSelectRequest {
+                workspace_id: workspace_b.clone(),
+                pack_id: first.pack_id.clone(),
+            })
+            .await
+            .expect("second project selects first custom");
+
+        let second = service
+            .pick_import(CharacterLibraryRequest {
+                workspace_id: workspace_a.clone(),
+            })
+            .await
+            .expect("replacement import")
+            .preview
+            .expect("replacement preview");
+        assert_ne!(first.pack_id, second.pack_id);
+        let second_renderer_nonce = uuid::Uuid::new_v4().to_string();
+        service
+            .attest_preview(attestation(&second, &second_renderer_nonce))
+            .await
+            .expect("replacement attestation");
+        let replaced = service
+            .confirm_import(CharacterConfirmImportRequest {
+                workspace_id: workspace_a.clone(),
+                preview_token: second.preview_token.clone(),
+                preview_nonce: second.preview_nonce.clone(),
+                renderer_nonce: second_renderer_nonce,
+                generation: second.generation,
+                manifest_hash: second.manifest_hash.clone(),
+                display_name: "Replacement custom".to_owned(),
+            })
+            .await
+            .expect("atomic slot replacement");
+
+        assert_eq!(replaced.packs.len(), 2);
+        assert_eq!(replaced.selected_pack_id, second.pack_id);
+        assert!(replaced
+            .packs
+            .iter()
+            .all(|pack| pack.pack_id != first.pack_id));
+        let replacement = replaced
+            .packs
+            .iter()
+            .find(|pack| pack.kind == CharacterPackKind::Custom)
+            .expect("one custom slot");
+        assert_eq!(replacement.pack_id, second.pack_id);
+        assert_eq!(replacement.selected_project_count, 2);
+        assert!(replacement.deletable);
+        assert_eq!(
+            service
+                .library(CharacterLibraryRequest {
+                    workspace_id: workspace_b,
+                })
+                .await
+                .expect("migrated second project")
+                .selected_pack_id,
+            second.pack_id
+        );
+        assert_eq!(
+            fs::read_dir(app_data.path().join("characters/library"))
+                .expect("single custom directory")
+                .count(),
+            1
+        );
+        assert!(!app_data
+            .path()
+            .join("characters/library")
+            .join(first.pack_id.strip_prefix("custom:").expect("custom id"))
+            .exists());
     }
 
     #[tokio::test]
