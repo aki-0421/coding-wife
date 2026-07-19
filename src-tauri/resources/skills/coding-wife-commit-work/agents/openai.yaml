@@ -1,0 +1,6 @@
+interface:
+  display_name: "Commit Cohesive Work"
+  short_description: "Safely commit one cohesive, verified work unit"
+  default_prompt: "Use $coding-wife-commit-work to commit this cohesive work unit safely."
+policy:
+  allow_implicit_invocation: false

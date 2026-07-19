@@ -1,0 +1,347 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/noto-sans-jp";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-ui);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-app-bg: var(--app-bg);
+  --color-surface: var(--surface);
+  --color-selected-row: var(--selected-row);
+  --color-selected-row-secondary: var(--selected-row-secondary);
+  --color-code-chip: var(--code-chip);
+  --color-divider: var(--divider);
+  --color-text-strong: var(--text-strong);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-disabled: var(--text-disabled);
+  --color-warm-active: var(--warm-active);
+  --color-branch-selected: var(--branch-selected);
+  --color-success: var(--success);
+  --color-running: var(--running);
+  --color-canceled: var(--canceled);
+
+  --text-display: 14.25px;
+  --text-display--line-height: 1.5;
+  --text-display--font-weight: 600;
+  --text-headline: 13.5px;
+  --text-headline--line-height: 1.5;
+  --text-headline--font-weight: 600;
+  --text-title: 12px;
+  --text-title--line-height: 1.5;
+  --text-title--font-weight: 500;
+  --text-body: 13.5px;
+  --text-body--line-height: 1.5556;
+  --text-body--font-weight: 400;
+  --text-label: 11px;
+  --text-label--line-height: 1.5;
+  --text-label--font-weight: 500;
+  --text-caption: 11px;
+  --text-caption--line-height: 1.5;
+  --text-caption--font-weight: 400;
+
+  --radius-control: 4.5px;
+  --radius-window: 7.5px;
+  --radius-composer: 9px;
+  --radius-circle: 9999px;
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-composer);
+  --radius-xl: 12px;
+  --radius-2xl: 15px;
+  --radius-3xl: 15px;
+  --radius-4xl: 15px;
+
+  --spacing-xxs: 3px;
+  --spacing-xs: 6px;
+  --spacing-sm: 9px;
+  --spacing-md: 12px;
+  --spacing-lg: 15px;
+  --spacing-xl: 18px;
+  --spacing-2xl: 21px;
+
+  --shadow-window: 0 18.75px 37.5px -9px rgb(0 0 0 / 25%);
+  --shadow-composer: 0 9px 9px rgb(0 0 0 / 18%);
+  --shadow-overlay: 0 9px 10.5px rgb(0 0 0 / 42%);
+}
+
+:root {
+  color-scheme: dark;
+  --font-ui: "Inter Variable", "Noto Sans JP Variable", system-ui, sans-serif;
+  --font-code:
+    "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+
+  --app-bg: #171514;
+  --background: #171514;
+  --foreground: #d4d4d8;
+  --surface: #211f1e;
+  --card: #211f1e;
+  --card-foreground: #d4d4d8;
+  --popover: #211f1e;
+  --popover-foreground: #f4f4f5;
+  --primary: #d7d4d2;
+  --primary-foreground: #171514;
+  --secondary: #211f1e;
+  --secondary-foreground: #d4d4d8;
+  --muted: #2b2928;
+  --muted-foreground: #898993;
+  --accent: #2b2928;
+  --accent-foreground: #f4f4f5;
+  --destructive: #ed575d;
+  --border: #302d2b;
+  --input: #302d2b;
+  --ring: #d0b1a3;
+  --selected-row: #2b2928;
+  --selected-row-secondary: #9999a3;
+  --code-chip: #292624;
+  --divider: #302d2b;
+  --text-strong: #f4f4f5;
+  --text-secondary: #9f9fa9;
+  --text-disabled: #71717b;
+  --warm-active: #d0b1a3;
+  --branch-selected: #b6a7ff;
+  --success: #3bd677;
+  --running: #e5c400;
+  --canceled: #52525c;
+  --sidebar: #1c1a19;
+  --sidebar-foreground: #d4d4d8;
+  --sidebar-primary: #d7d4d2;
+  --sidebar-primary-foreground: #171514;
+  --sidebar-accent: #2b2928;
+  --sidebar-accent-foreground: #f4f4f5;
+  --sidebar-border: #302d2b;
+  --sidebar-ring: #d0b1a3;
+  --radius: 4.5px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+  }
+
+  html {
+    @apply bg-background font-sans text-foreground;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply m-0 min-h-dvh bg-background text-body text-foreground;
+    overflow: hidden;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--warm-active) 35%, transparent);
+    color: var(--text-strong);
+  }
+}
+
+#root {
+  width: 100dvw;
+  height: 100dvh;
+  min-height: 100dvh;
+}
+
+@layer components {
+  .workspace-shell {
+    position: relative;
+    display: grid;
+    grid-template-columns: 255.04px minmax(0, 1fr);
+    width: 100dvw;
+    height: 100dvh;
+    min-width: 960px;
+    min-height: 640px;
+    overflow: hidden;
+    background: var(--app-bg);
+  }
+
+  .workspace-sidebar {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace-tabs {
+    position: relative;
+    display: grid;
+    grid-column: 2;
+    grid-row: 1;
+    grid-template-rows: 81px minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    gap: 0;
+  }
+
+  .workspace-narration-overlay {
+    position: absolute;
+    right: var(--spacing-xl);
+    bottom: var(--spacing-xl);
+    z-index: 30;
+    width: min(36rem, calc(100% - var(--spacing-xl) - var(--spacing-xl)));
+    pointer-events: auto;
+  }
+
+  .workspace-narration-overlay[data-workspace-tab="chat"] {
+    bottom: 5rem;
+  }
+
+  .workspace-header {
+    grid-row: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace-view {
+    grid-row: 2;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .chat-layout {
+    grid-template-columns:
+      minmax(520px, 607.11fr)
+      minmax(248px, 607.84fr);
+  }
+
+  .chat-layout.character-hidden {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat-pane {
+    grid-column: 1;
+  }
+
+  .companion-pane {
+    grid-column: 2;
+  }
+
+  .workspace-notice {
+    position: absolute;
+    z-index: 40;
+    top: 90px;
+    right: 18px;
+    max-width: min(420px, calc(100dvw - 100px));
+  }
+
+  [data-slot="scroll-area-viewport"] > div {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1279px) {
+  .workspace-shell {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 840px) {
+  .workspace-shell {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .chat-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .companion-pane {
+    display: none;
+  }
+
+  .companion-status-mobile {
+    display: flex;
+  }
+
+  .workspace-narration-overlay {
+    right: var(--spacing-md);
+    bottom: var(--spacing-md);
+    left: var(--spacing-md);
+    width: auto;
+  }
+
+  .workspace-narration-overlay[data-workspace-tab="chat"] {
+    bottom: 154px;
+  }
+
+  .timeline-content {
+    padding-top: var(--spacing-sm);
+  }
+
+  .timeline-status-region {
+    gap: var(--spacing-xxs);
+  }
+}
+
+[data-reduced-motion="true"] *,
+[data-reduced-motion="true"] *::before,
+[data-reduced-motion="true"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline-color: CanvasText;
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "diagnostic": {
+    "adapterVersion": 1,
+    "health": "ready",
+    "checkedAt": "2026-07-18T00:00:00Z",
+    "operation": "codex.initialize",
+    "recoverable": true,
+    "cliVersion": "codex-cli 0.144.5",
+    "binarySource": "test_fixture",
+    "binaryHashPrefix": "0123456789abcdef",
+    "schemaFingerprintPrefix": "fedcba9876543210",
+    "generatedBySameBinary": true,
+    "experimentalApiRequested": true,
+    "experimentalApiAccepted": true,
+    "accountPresent": true,
+    "authKind": "chatgpt",
+    "requiresOpenaiAuth": true,
+    "modelAvailable": true,
+    "fastAvailable": true,
+    "maxAvailable": true,
+    "configModelPresent": true,
+    "childState": "ready",
+    "lastSuccessfulHandshakeAt": "2026-07-18T00:00:00Z",
+    "capabilities": {
+      "coreLifecycle": "supported",
+      "modelDiscovery": "supported",
+      "nativeRequestUserInput": "supported",
+      "dynamicTools": "supported",
+      "permissionsApproval": "supported",
+      "detachedReview": "supported",
+      "ephemeralThread": "supported",
+      "supportIsolation": "unavailable"
+    },
+    "errorCode": null,
+    "detailRef": null
+  },
+  "threadList": {
+    "data": [
+      {
+        "threadHandle": "thread_handle_fixture",
+        "status": "idle",
+        "title": "Fixture session",
+        "updatedAt": "2026-07-18T00:00:00Z"
+      }
+    ],
+    "nextCursor": null
+  },
+  "thread": {
+    "threadHandle": "thread_handle_fixture",
+    "model": "gpt-5.6-sol",
+    "generation": 7
+  },
+  "turn": {
+    "threadHandle": "thread_handle_fixture",
+    "turnHandle": "turn_handle_fixture"
+  },
+  "review": {
+    "reviewThreadHandle": "review_thread_handle_fixture",
+    "turnHandle": "review_turn_handle_fixture"
+  },
+  "accepted": {
+    "accepted": true
+  },
+  "commandError": {
+    "code": "CODEX-WORKSPACE-NOT-GIT",
+    "operation": "codex.workspace.pick",
+    "recoverable": false,
+    "userMessageKey": "codex.error.generic"
+  },
+  "events": [
+    {
+      "schemaVersion": 1,
+      "eventId": "event-1",
+      "workspaceId": "workspace-fixture",
+      "generation": 7,
+      "sequence": 1,
+      "occurredAt": "2026-07-18T00:00:01Z",
+      "kind": "turn_status",
+      "payload": {
+        "threadHandle": "thread_handle_fixture",
+        "turnHandle": "turn_handle_fixture",
+        "status": "running"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "event-2",
+      "workspaceId": "workspace-fixture",
+      "generation": 7,
+      "sequence": 2,
+      "occurredAt": "2026-07-18T00:00:02Z",
+      "kind": "pending_request",
+      "payload": {
+        "request": {
+          "pendingId": "pending_handle_fixture",
+          "kind": "command_approval",
+          "responseKind": "native_server_request",
+          "operation": "item/commandExecution/requestApproval",
+          "targetAlias": "project command",
+          "reason": null,
+          "questions": [],
+          "allowedDecisions": ["approve_once", "reject", "stop"],
+          "decisionContext": {
+            "schemaVersion": 1,
+            "category": "command_execution",
+            "targetKind": "workspace_path",
+            "targetAlias": "project command",
+            "effect": "execute_command",
+            "scope": "command",
+            "risk": "low",
+            "reversibility": "reversible",
+            "recommendation": "approve_once",
+            "evidence": ["read_only_action"],
+            "uncertainty": "none"
+          }
+        }
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "event-3",
+      "workspaceId": "workspace-fixture",
+      "generation": 7,
+      "sequence": 3,
+      "occurredAt": "2026-07-18T00:00:03Z",
+      "kind": "agent_message_completed",
+      "payload": {
+        "itemHandle": "item_handle_fixture",
+        "text": "The fixture completed safely."
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "event-4",
+      "workspaceId": "workspace-fixture",
+      "generation": 7,
+      "sequence": 4,
+      "occurredAt": "2026-07-18T00:00:04Z",
+      "kind": "pending_request_resolved",
+      "payload": {
+        "pendingId": "pending_handle_fixture",
+        "status": "accepted"
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+name: Diff hygiene
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check repository diffs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.12.0
+
+      - name: Enable pinned pnpm
+        run: corepack enable
+
+      - name: Check Pull Request diff hygiene
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: pnpm check:diff -- --base "$BASE_SHA"
+
+      - name: Check default-branch diff hygiene
+        if: github.event_name != 'pull_request'
+        run: pnpm check:diff

@@ -30,7 +30,7 @@ Codexとの統合には、端末画面や標準出力の見た目を解析する
 
 ### 2. 既存サブスクリプションは再利用できるが、認証情報をアプリへコピーしてはいけない
 
-Codex CLIはChatGPTサインインによるサブスクリプション利用とAPIキー利用の両方をサポートする。アプリはユーザーが既にログイン済みのCodexプロセスを起動し、その認証ライフサイクルをCodex側に任せる。`auth.json`やトークンを独自DBへ複製しない。読み上げ用APIキーだけは別の資格情報であり、明示的な設定と安全な秘密保管が必要である。参照: [OAI-02](SOURCES.md#oai-02)、[TAU-09](SOURCES.md#tau-09)
+Codex CLIはChatGPTサインインによるサブスクリプション利用とAPIキー利用の両方をサポートする。アプリはユーザーが既にログイン済みのCodexプロセスを起動し、その認証ライフサイクルをCodex側に任せる。`auth.json`やトークンを独自DBへ複製しない。読み上げは外部provider/keyを追加せず、default offのmacOS local speech adapterへ限定する。参照: [OAI-02](SOURCES.md#oai-02)、[TAU-09](SOURCES.md#tau-09)、[macOS local narration実測](macos-local-narration-runtime.md)
 
 ### 3. メインモデル固定とサポートモデル選択は両立する
 
@@ -79,6 +79,8 @@ TauriはWindows、macOS、Linuxを同一コードベースで扱えるが、各O
 | [09-security-privacy.md](09-security-privacy.md) | 脅威モデル、権限、プロンプトインジェクション、秘密、保持 |
 | [10-quality-evaluation.md](10-quality-evaluation.md) | 品質モデル、評価指標、観測、実験計画 |
 | [11-mvp-and-open-questions.md](11-mvp-and-open-questions.md) | MVP境界、実装順序、Go/No-Goゲート、未決事項 |
+| [codex-commit-skill-injection.md](codex-commit-skill-injection.md) | app同梱commit skill、turn単位注入、version/digest監査、互換fallback |
+| [macos-local-narration-runtime.md](macos-local-narration-runtime.md) | `/usr/bin/say`の実測、fixed binary/voice/stdin/process境界、privacy判断 |
 | [SOURCES.md](SOURCES.md) | 一次資料・標準・研究文献一覧 |
 
 ## エビデンス表記
@@ -95,7 +97,7 @@ TauriはWindows、macOS、Linuxを同一コードベースで扱えるが、各O
 1. Live2D SDKとユーザーモデル追加機能の公開ライセンス確認。
 2. 対応するCodex CLI最小バージョンと、実験的App Server機能のフォールバック検証。
 3. `ephemeral`サポートセッションが通常の履歴ファイルを生成しないことの自動監査。
-4. 既存の未コミット変更を一切取り込まない、変更所有権・自動コミットの安全性検証。
+4. main Codex のcommit skill注入と既存の未コミット変更を保護する運用、およびnative Git observerがread-onlyであることの検証。
 5. Windows、macOS、LinuxそれぞれのWebGL、入力、GPU負荷、プロセス終了、署名済み配布検証。
 6. キャラクター表現がリスクを矮小化したり、ユーザーを急かしたりしないことのUX評価。
 

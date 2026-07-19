@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "healthCheck": {
+    "schemaVersion": 1,
+    "runtime": "tauri",
+    "foundationState": "ready"
+  },
+  "runtimeMetadata": {
+    "schemaVersion": 1,
+    "runtime": "tauri",
+    "appVersion": "0.1.0",
+    "platform": "macos",
+    "architecture": "aarch64",
+    "integrations": {
+      "codex": "not_configured",
+      "git": "not_configured",
+      "live2d": "not_configured",
+      "history": "ready"
+    }
+  }
+}

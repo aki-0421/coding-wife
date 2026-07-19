@@ -2,13 +2,14 @@
 title: "出典台帳"
 description: "調査資料で参照するOpenAI、Tauri、Live2D、Git、セキュリティ、Human-AI Interactionの出典と確認論点を管理する。"
 updated: 2026-07-18
+last_verified: 2026-07-18
 read_when:
   - "調査結論の根拠を確認する、または公開情報を再検証して出典を更新するとき。"
 ---
 
 # 出典台帳
 
-- 最終確認日: 2026-07-16（JST）
+- 最終確認日: 2026-07-18（JST）
 - 方針: 公式ドキュメント、仕様、標準、一次研究、公式ソースコードを優先した。
 - 注意: 製品・モデル・SDKの仕様は更新される。要件確定時、実装開始時、リリース候補作成時に再確認すること。
 
@@ -100,6 +101,27 @@ MCP自体の脅威と防御については[SEC-04](#sec-04)も参照する。
 - 音声モデル・音声種別の可用性が変化するため、製品で固定値を埋め込まず設定・能力検出を行うべきこと。
 
 読み上げ機能はCodexサブスクリプションとは別のAPI利用になり得るため、本文では既定オフ、明示設定、別資格情報としている。
+
+## OAI-08
+
+**Codex permission profiles と 0.144.5 support-runtime isolation — 公式資料・公式ソース**
+
+- Permission profiles: <https://learn.chatgpt.com/docs/permissions>
+- Codex release `rust-v0.144.5`: <https://github.com/openai/codex/releases/tag/rust-v0.144.5>
+- `shell_tool=false` の shell tool 無効化: <https://github.com/openai/codex/blob/87db9bc18ba5bc82c1cb4e4381b44f693ee35623/codex-rs/tools/src/tool_config.rs#L81-L115>
+- environment、core utility、MCP、dynamic tool の登録条件: <https://github.com/openai/codex/blob/87db9bc18ba5bc82c1cb4e4381b44f693ee35623/codex-rs/core/src/tools/spec_plan.rs#L606-L759>
+- `thread/start` の environment、runtime root、permission profile と response provenance: <https://github.com/openai/codex/blob/87db9bc18ba5bc82c1cb4e4381b44f693ee35623/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L56-L195>
+- request user input / orchestrator capability の既定解決: <https://github.com/openai/codex/blob/87db9bc18ba5bc82c1cb4e4381b44f693ee35623/codex-rs/core/src/config/mod.rs#L2473-L2485>
+
+確認に用いた論点:
+
+- Permission profile が local sandboxed command の filesystem / network を制約し、macOS では Seatbelt で強制されること。
+- 強制できない policy を unsandboxed で続行せず、command を拒否すること。
+- 0.144.5 では shell tool と environment-dependent tool を明示的に除去できること。
+- `update_plan`のinternal handlerは通常threadに残る一方、production modelの実Responses wireでは`tools` field不在になり得ること。したがってsource上のhandler登録とwire-advertised tool 0を分離し、internal plan eventもapp policyで拒否する必要があること。
+- environment、MCP、dynamic tool、orchestrator skill、request user input の未指定既定に依存せず、clean config と実 wire capture で確認する必要があること。
+
+公式 source は moving `main` ではなく `rust-v0.144.5` の peeled commit `87db9bc18ba5bc82c1cb4e4381b44f693ee35623` に固定した。Codex 更新時は同じ source path だけでなく、generated schema と mock Responses wire probe も再実行する。
 
 ## Tauri
 
@@ -472,6 +494,22 @@ worktreeは開発上の分離であり、同じユーザー権限・ファイル
 - エンゲージメントと信頼への効果が一様ではなく、誤った能力帰属にも注意が必要なこと。
 
 プレプリントの初期版であり、キャラクター表現のリスク仮説を補助する資料としてのみ扱う。
+
+## HCI-08
+
+**shadcn/ui DialogおよびRadix Dialog — 公式ドキュメント**
+
+- shadcn/ui Dialog: <https://ui.shadcn.com/docs/components/radix/dialog>
+- Radix Dialog: <https://www.radix-ui.com/primitives/docs/components/dialog>
+
+確認に用いた論点:
+
+- モーダル表示中は背面を操作不能にし、タイトルと説明を支援技術へ関連付ける。
+- `Tab`と`Shift+Tab`でダイアログ内のフォーカスを移動し、`Escape`で閉じる。
+- 閉じた時はトリガーへフォーカスを戻す。
+- 非同期操作後に閉じる場合は、controlled open stateで完了境界を管理する。
+
+2026-07-18（JST）に公式ページを再確認した。実装ではリポジトリ同梱のshadcn Dialogプリミティブを使用する。
 
 ## 抽象化したUI/UX観察
 

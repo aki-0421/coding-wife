@@ -1,11 +1,11 @@
 ---
 title: Timeline in PDT and JST
 description: "OpenAI Build Week 2026の日程をPDTとJSTで整理し、公開ページ間の差異を記録する。"
-updated: 2026-07-15
+updated: 2026-07-18
 read_when:
   - "開発、提出、審査の日程をJSTで計画するとき。"
   - "締切や公開日程の不一致を確認するとき。"
-last_verified: 2026-07-15 JST
+last_verified: 2026-07-18 JST
 ---
 
 # 日程 — PDT / JST
@@ -19,13 +19,14 @@ last_verified: 2026-07-15 JST
 | Registration opens | 2026-07-09 10:00 PDT | 2026-07-10 02:00 JST |
 | Submission opens | 2026-07-13 09:00 PDT | 2026-07-14 01:00 JST |
 | Codex credits request deadline | 2026-07-17 12:00 PDT | **2026-07-18 04:00 JST** |
+| Codex credits use deadline | **2026-07-21 17:00 PDT** | **2026-07-22 09:00 JST** |
 | Registration / submission deadline | **2026-07-21 17:00 PDT** | **2026-07-22 09:00 JST** |
 | Judging starts — Official Rules | 2026-07-22 10:00 PDT | 2026-07-23 02:00 JST |
 | Judging ends — Official Rules | 2026-08-05 17:00 PDT | 2026-08-06 09:00 JST |
 | Winners announced, around | 2026-08-12 14:00 PDT | 2026-08-13 06:00 JST |
 | DevDay | 2026-09-29, time unspecified | 2026-09-29/30 JST, exact time TBD |
 
-Codex credits は **2026-07-31 までに使用**する必要がありますが、公開規約の該当箇所には timezone が明記されていません。早めに使い切る計画にしてください。
+現行 Official Rules は、配布済み Codex credits の使用期限を Submission Period と同じ **2026-07-21 17:00 PDT / 2026-07-22 09:00 JST** としています。2026-07-18 時点で request form は終了し、Resources と最新 Update は全 credits 配布済みと案内しています。
 
 ## 2. 公式ページ間の不一致
 
@@ -55,7 +56,7 @@ Codex credits は **2026-07-31 までに使用**する必要がありますが�
 
 ## 3. 今後の公式セッション — JST 換算
 
-OpenAI Build Week page に掲載された予定です。変更される可能性があるため、参加前に公式ページを再確認してください。
+OpenAI Build Week page に掲載されていた予定です。2026-07-18 の再確認では同ページが Cloudflare challenge を返し、本文を独立取得できませんでした。変更される可能性があるため、参加前に公式ページまたは Devpost Resources を再確認してください。
 
 | セッション | Pacific Time | Japan Time |
 |---|---|---|

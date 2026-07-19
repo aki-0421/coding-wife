@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "generationBoundary": 9007199254740991,
+  "generationOverflow": 9007199254740992,
+  "libraryRequest": {
+    "workspaceId": "workspace-fixture"
+  },
+  "assetRequest": {
+    "packId": "custom:11111111-1111-4111-8111-111111111111",
+    "assetId": "texture.png",
+    "manifestHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "expectedMime": "image/png",
+    "previewToken": "22222222-2222-4222-8222-222222222222"
+  },
+  "attestationRequest": {
+    "previewToken": "22222222-2222-4222-8222-222222222222",
+    "previewNonce": "33333333-3333-4333-8333-333333333333",
+    "rendererNonce": "44444444-4444-4444-8444-444444444444",
+    "generation": 42,
+    "manifestHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "frameCount": 1,
+    "nonTransparentSamples": 16,
+    "signature": "deadbeef",
+    "textureDecodeCount": 1,
+    "stateCueObserved": true,
+    "webglError": 0,
+    "parameterCount": 70,
+    "partCount": 24,
+    "drawableCount": 134,
+    "thumbnailSha256": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+    "thumbnailPng": [
+      137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1,
+      0, 0, 0, 1, 8, 4, 0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84,
+      120, 218, 99, 100, 248, 15, 0, 1, 5, 1, 1, 39, 24, 227, 102, 0, 0, 0, 0,
+      73, 69, 78, 68, 174, 66, 96, 130
+    ]
+  },
+  "attestationResponse": {
+    "schemaVersion": 1,
+    "attested": true,
+    "rendererNonce": "44444444-4444-4444-8444-444444444444"
+  },
+  "confirmRequest": {
+    "workspaceId": "workspace-fixture",
+    "previewToken": "22222222-2222-4222-8222-222222222222",
+    "previewNonce": "33333333-3333-4333-8333-333333333333",
+    "rendererNonce": "44444444-4444-4444-8444-444444444444",
+    "generation": 42,
+    "manifestHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "displayName": "Fixture model"
+  },
+  "cancelRequest": {
+    "previewToken": "22222222-2222-4222-8222-222222222222",
+    "previewNonce": "33333333-3333-4333-8333-333333333333",
+    "generation": 42
+  },
+  "selectRequest": {
+    "workspaceId": "workspace-fixture",
+    "packId": "custom:11111111-1111-4111-8111-111111111111"
+  },
+  "deleteRequest": {
+    "workspaceId": "workspace-fixture",
+    "packId": "custom:11111111-1111-4111-8111-111111111111"
+  },
+  "semanticMappingSaveRequest": {
+    "workspaceId": "workspace-fixture",
+    "packId": "builtin:hiyori_pro",
+    "manifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "expectedMappingVersion": 0,
+    "assignments": {
+      "neutral": { "kind": "motion", "cueId": "Idle[0]" },
+      "thinking": { "kind": "motion", "cueId": "Flick[0]" },
+      "working": { "kind": "motion", "cueId": "FlickDown[0]" },
+      "asking": { "kind": "motion", "cueId": "Tap[0]" },
+      "success": { "kind": "motion", "cueId": "FlickUp[0]" },
+      "warning": { "kind": "motion", "cueId": "Flick@Body[0]" },
+      "error": { "kind": "motion", "cueId": "Tap@Body[0]" }
+    }
+  },
+  "importResponse": {
+    "schemaVersion": 1,
+    "outcome": "selected",
+    "preview": {
+      "schemaVersion": 1,
+      "previewToken": "22222222-2222-4222-8222-222222222222",
+      "previewNonce": "33333333-3333-4333-8333-333333333333",
+      "generation": 42,
+      "packId": "custom:11111111-1111-4111-8111-111111111111",
+      "manifestHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "expiresAt": "2026-07-18T00:10:00.000Z",
+      "manifest": {
+        "schemaVersion": 1,
+        "packId": "custom:11111111-1111-4111-8111-111111111111",
+        "displayName": "fixture",
+        "bundledVersion": "custom-import-v1",
+        "entrypoint": "fixture.model3.json",
+        "immutable": true,
+        "provenance": {
+          "sourceKind": "user_imported",
+          "sourceLabel": "Local folder",
+          "importedAt": "2026-07-18T00:00:00.000Z"
+        },
+        "inventory": {
+          "runtimeFileCount": 3,
+          "totalBytes": 600,
+          "textureCount": 1,
+          "motionCount": 0,
+          "expressionCount": 0,
+          "motionGroups": {}
+        },
+        "compatibility": {
+          "modelSchemaVersion": 3,
+          "mocVersion": 3,
+          "expectedParameters": null,
+          "expectedParts": null,
+          "expectedDrawables": null
+        },
+        "files": [
+          {
+            "assetId": "fixture.model3.json",
+            "role": "model",
+            "bytes": 100,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "assetId": "fixture.moc3",
+            "role": "moc",
+            "bytes": 200,
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "assetId": "texture.png",
+            "role": "texture",
+            "bytes": 300,
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "dimensions": {
+              "width": 1,
+              "height": 1
+            }
+          }
+        ],
+        "importedAt": "2026-07-18T00:00:00.000Z"
+      }
+    }
+  },
+  "canceledImportResponse": {
+    "schemaVersion": 1,
+    "outcome": "canceled",
+    "preview": null
+  },
+  "librarySnapshot": {
+    "schemaVersion": 1,
+    "workspaceId": "workspace-fixture",
+    "projectId": "project-fixture",
+    "selectedPackId": "builtin:hiyori_pro",
+    "fallbackApplied": false,
+    "diagnostics": [],
+    "packs": [
+      {
+        "schemaVersion": 1,
+        "packId": "builtin:hiyori_pro",
+        "displayName": "Hiyori",
+        "kind": "builtin",
+        "manifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "provenanceLabel": "かにビーム / Live2D",
+        "importedAt": null,
+        "runtimeFileCount": 17,
+        "totalBytes": 4923819,
+        "textureCount": 2,
+        "motionCount": 10,
+        "expressionCount": 0,
+        "selectedProjectCount": 1,
+        "deletable": false,
+        "manifest": null,
+        "thumbnailSha256": null,
+        "cueInventory": {
+          "motions": [
+            "Idle[0]",
+            "Idle[1]",
+            "Idle[2]",
+            "Flick[0]",
+            "FlickDown[0]",
+            "FlickUp[0]",
+            "Tap[0]",
+            "Tap[1]",
+            "Tap@Body[0]",
+            "Flick@Body[0]"
+          ],
+          "expressions": []
+        }
+      }
+    ],
+    "semanticMapping": {
+      "schemaVersion": 1,
+      "packId": "builtin:hiyori_pro",
+      "manifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "mappingVersion": 0,
+      "assignments": {
+        "neutral": { "kind": "neutral" },
+        "thinking": { "kind": "neutral" },
+        "working": { "kind": "neutral" },
+        "asking": { "kind": "neutral" },
+        "success": { "kind": "neutral" },
+        "warning": { "kind": "neutral" },
+        "error": { "kind": "neutral" }
+      }
+    },
+    "semanticMappingStatus": "default"
+  },
+  "error": {
+    "code": "CHARACTER-ASSET-HASH-MISMATCH",
+    "operation": "character_read_asset",
+    "recoverable": false,
+    "userMessageKey": "character.error.generic",
+    "detailRef": "character-library-v1"
+  }
+}

@@ -1,0 +1,91 @@
+---
+title: "Live2Dランタイム実装・検証ガイド"
+description: "同梱Hiyoriとユーザー提供Live2Dモデルのrenderer、隔離preview、native quarantineを再現、診断、更新するための実装・検証ガイド。"
+updated: 2026-07-18
+read_when:
+  - "同梱HiyoriのLive2D描画、resize、motion policy、context recoveryを変更または検証するとき。"
+  - "任意Live2Dモデルの取り込み、隔離preview、workspace選択、削除を変更または検証するとき。"
+  - "Live2Dの供給網検査や診断previewが失敗したとき。"
+---
+
+# Live2Dランタイム実装・検証ガイド
+
+## 現在の完了範囲
+
+2026-07-18 時点で、同梱 Hiyori を通常 App の既定 companion として使う実ランタイムに加え、ユーザーがローカルのLive2D `.model3.json`を1ファイルだけ選び、隔離previewで実描画を確認してからProject単位で選択・永続化・削除するmodel libraryを実装した。公式 Cubism SDK for Web 5-r.5 の Core、Framework、13 shaders と、`tmp/hiyori_pro` から固定した17 runtime filesだけを同梱モデルに使う。rendererは透明な1 canvasを所有し、Idle[0]、semantic stateのHTML caption、animated/reduced/hidden、static/text fallback、resize、WebGL context recoveryを扱う。
+
+`live2d-preview.html` はproduction Appのrouteへ依存しない診断用entry pointである。`pnpm dev` の後に `/live2d-preview.html` を開くと、semantic state、motion policy、WebGL context loss/restore、frame metricsを同じ画面で確認できる。診断画面はS-002の255 px sidebar、81 px header、Chat/Companionの連続面を再現する。検証スクリーンショットは `/tmp` へだけ保存し、commitしない。
+
+## 通常Appへの統合契約
+
+`App` は `characterRenderer` が省略されたときだけ `DefaultCharacterStageRenderer` を注入する。明示的なrendererはtest、custom renderer、後続のmodel selector用overrideとして常に優先する。既定rendererはworkspace側の8 `CompanionSemanticState`を同名の`CharacterState`へ明示的に写像し、workspace IDまたはsemantic stateが変わったときだけgenerationを単調増加させる。stateとgenerationは同じrenderで切り替え、Live2D component、canvas、packはremount/reloadしない。
+
+`reducedMotion` は`reduced` motion policyへだけ写像する。controllerはneutral frameを得た後にRAFを止め、表示層はWebGL canvasを隠して検証済みtrusted frameの`img`へ切り替える。trusted frameを利用できない間はcanvasを再表示せず、ja/enのstateとtext-only fallbackを`role=status`で残す。muteは将来のTTS/audio境界であり、motion、generation、canvasを停止しない。character hideは既存のstage unmountを使いGPU resourceを解放する。通常stageがHTML captionを所有するため、内側の`Live2dCharacter`は`showCaption={false}`とする。
+
+inactive tabではstageをremountせず、`ResizeObserver`が報告する0×0でRAFを停止する。activeへ戻ってpositive sizeを受けたら同じcanvasとpackでRAFを再開する。compact layoutの0×0はmotion policyを`hidden`へ変更しない。document visibilityは`visibilitychange`に加えてwindowの`resize`、`focus`、`pageshow`で現在値を再同期し、初期化直後の復帰通知を取りこぼしてもdesktop復帰時にanimated/reducedへ戻す。ユーザー指定の`hidden`はrequested policyとして別に保持し、この再同期では解除しない。first-frameの3秒deadlineは同じrenderer generationでanimated、document visible、positive size、context正常の間だけ進み、compact、hidden、reduced、context loss中は残り時間を消費しない。context restoreでは残り時間を新generationへ引き継ぎ、旧timer callbackを無効化する。
+
+## 任意モデル取り込みの信頼境界
+
+任意モデルはfrontendへローカルパスを渡さず、native single-file pickerで通常fileかつ名前が正確に`.model3.json`で終わるentrypointを1つだけ選び、Rustのquarantineへ一度コピーする。closure rootは選択fileの親directoryであり、別の`.model3.json`を再帰探索しない。同じ親にある未参照modelは選択結果へ影響しない。Unixではcanonical rootのdirectory descriptorを開き、参照assetの全componentを`openat`と`O_NOFOLLOW`で辿ってからfingerprintとbytesを同じhandleから読む。Rust validatorは選択modelが参照したruntime fileだけを対象に、最大128 files、合計100 MiB、1 file 32 MiB、texture 8192×8192、JSON depth 64、MOC version 1–6を上限とする。motion groupはASCII英数字と`-_.@`だけ、完成cue IDは構造用の`[]`を加えた同一allowlistかつ最大80 bytesとし、`Tap.Body[0]`を受理する一方でURL、path、81 bytes以上を`CHARACTER-MOTION-SCHEMA`としてquarantine作成前に拒否する。absolute path、parent traversal、remote URL、symlink、hardlink、実行可能file、非regular file、未知の`FileReferences`も拒否する。sourceのdevice、inode、size、SHA-256とコピー後のmanifestを照合し、quarantine内のbytesをread-only化してatomic renameした後だけlibraryへ公開する。
+
+frontendとRustのIPCはpack ID、preview token、nonce、generation、manifest hash、relative asset ID、binary bytesだけを交換する。rendererはallowlist済みmanifestに含まれるassetだけをbinary transportで取得し、ローカルパスや任意URLを解決しない。選択は登録中Projectをownerとしてnative stateに保存し、履歴resolverも`projects.registered = 1`だけを解決する。pack libraryとpack別semantic mappingはglobal stateなので、import、delete、mapping保存後はhydrated済みの全Projectを読み直してからsnapshotを一括公開し、各Project固有のselectionは混ぜない。再読込できないProjectは古いsnapshotを使わせずinvalidateし、mapping version競合では全Projectのfresh snapshotを得て利用者のdraftを保持したまま新versionで再試行する。state読込時は登録解除済みProjectのselectionを削除してatomic保存するため、再起動後のselection countやcustom pack削除保護へorphanを残さない。Project登録解除はCharacterのselect/deleteと同じnative operation lockで直列化し、履歴DB更新前にselectionを削除し、DB失敗時はselectionとworkspace activationをrollbackする。履歴本文、source file、Git stateは変更しない。起動時にpackが欠損または破損していれば同梱Hiyoriへfail closedで戻す。選択中のcustom packと同梱packは削除できない。
+
+schema version 1のworkspace selectionをProject selectionへ移行するときは、top-level schema mismatchや構造破損をtyped failureとして止める一方、個別の不正workspace ID、timestamp、opaque pack candidateだけを除外する。有効candidateが1件も残らないProjectは同梱Hiyoriへ決定的にfallbackし、別Projectの有効selectionは保持する。atomic write失敗では元のversion 1 stateを残し、再試行とその後の再起動を冪等に扱う。
+
+previewは`character-import-preview.html`を`<iframe sandbox="allow-scripts">`で実行する。`allow-same-origin`を追加してはならない。子documentはopaque origin (`null`) となり、親は`event.source`、`event.origin === "null"`、channel nonce、preview nonce、generationをすべて照合する。asset bytesはtransferable `ArrayBuffer`として一度だけ渡し、childはnetwork APIをguardした上で描画する。Rustはframe count、非透明pixel sample、8桁frame signature、state cue、texture decode count、WebGL error、parameter/part/drawable countをpreview identityへ結び付ける。最初の信頼済みframeは最大2 MiB・2048×2048のPNG bytesとSHA-256として渡し、Rustで完全decode、寸法、hashを再検証して`__coding-wife/trusted-frame.png`へatomic writeする。同じattestationの再送は同じ成功応答を返し、異なる再送だけをreplayとして拒否する。
+
+1–80文字の表示名とrenderer nonceを含むconfirmは、quarantine publishと対象workspaceの選択保存を同じnative operation内で行う。選択保存に失敗したpublishはquarantineへrollbackする。公開manifestはtrusted frameのasset ID、bytes、dimensions、SHA-256を含み、通常rendererはopaque IDとbinary IPCでだけ読み、再起動後やcontext loss、renderer failureでもstatic fallbackとして使う。新packのload中は既存modelと既存trusted frameを維持し、model・status・frameを成功時にまとめて切り替える。
+
+Settingsのpreview所有権はworkspace session leaseで管理する。section、main tab、workspaceから離れた場合は、picker loading中、描画中、attestation中のいずれでも確定した同一tokenを1回だけcancelする。React Strict Modeの即時再mountはlease再取得を確認してcancelしない。取消失敗でpreviewが残った場合は次のmountでdialogを再開し、戻ったときはimport triggerへfocusを復元する。
+
+opaque originのmodule graphを読み込ませるため、development serverは`Origin: null`へ`Access-Control-Allow-Origin: null`を返す。productionはmain windowを設定から自動生成せず、`WebviewWindowBuilder`のresponse hookが`tauri:` requestかつrequest Originが正確に`null`の場合だけ同headerを上書きする。通常origin、HTTP(S)、attacker originには適用しない。child CSPはViteのmode-specific HTML transformで生成し、developmentでは`http://localhost:1420`だけ、productionでは`tauri://localhost`だけをscript/style/font/img sourceへ許可する。production出力へHTTP development originを残してはならない。inline script/style、`unsafe-eval`、wildcard、connect、form、popup、top navigationを許可せず、CSSは外部fileとして読み込む。このwindow生成とCORS hookは隔離previewのsecurity requirementなので、Tauriのwindow `create`を`true`へ戻す場合は同等のresponse hookを必ず維持する。
+
+## 通常の検証順序
+
+1. `pnpm live2d:verify` で59 Framework sources、13 shaders、17 Hiyori runtime files、8 release notice filesと固定hashを検査する。
+2. `pnpm typecheck` で公式FrameworkをTypeScript 5.9.3で再生成し、アプリのstrict type checkを行う。
+3. `pnpm test` でsupply-chain、manifest fail-closed、Core one-shot/version、state generation、motion policy、backing sizeを検査する。
+4. `pnpm lint` でReact lifecycleとruntime error pathを含む静的検査を行う。
+5. `pnpm build` でCore/shader、`pack.json`、Hiyori 17 files、通常Appと診断entry pointが配布物へ入ることを確認する。
+6. `agent-browser` で通常Appと診断画面を1470×836と960×640で開き、非透明pixel、motion signature、canvas backing size、visible caption、reduced/hidden、tab復帰、workspace切替、context restoreを確認する。
+7. native IPCを使う任意モデル検証では、pickerから`tmp/hiyori_pro/hiyori_pro_t11.model3.json`を選び、隔離previewが`verified`になるまで待つ。明示名で確定後にstageのpack ID、settingsの選択状態、再読込後の永続化とtrusted static frameを確認する。先に同梱Hiyoriへ戻してからcustom packを削除し、確認dialog、library、stage、trusted frame cleanupの整合を確認する。
+
+## 実描画の基準値
+
+実装時の検証値は次のとおり。固定性能budgetではないが、空canvas、停止motion、resize不追従を切り分ける回帰基準として使える。
+
+| viewport | canvas CSS | backing | 非透明sample | frame delta | 結果 |
+| --- | --- | --- | ---: | ---: | --- |
+| 1470×836 | 607.5×755 | 608×755 | 2,410 | 16.7 ms | `ready`、animated、signature change 48 |
+| 960×640 | 373.33×559 | 373×559 | 2,574 | 16.7 ms | resize後も頭と足を欠かずbottom-contain |
+
+reducedはneutral frame後の500 msでframe countとsignature changeが不変だった。hiddenはcanvasとRAFを停止し、HTML captionを維持した。人工的なcontext lossではtrusted first-frame PNGへ縮退し、restore後にshader、offscreen、texture resourceを再生成して `ready`、`error=null`、非透明sample 2,574へ復旧した。検証時のWebGL `getError()` は0だった。
+
+通常Appのproduction previewでは1470×836でCSS 607.86×755、backing 608×755、非透明sample 2,410、16.7 ms、960×640でCSS/backing 376×559、非透明sample 2,562を確認した。頭頂、両手、裾はcanvas内に収まった。Commit tabではCSS 0×0、backing 1×1となり750 msのframe countが2,744のまま停止し、Chat復帰後は同じcanvas、asset request 8件のまま2,792へ再開した。workspace切替でもgeneration 1→2、同じcanvas、asset request 8→8だった。mute中はanimatedのままframeが1,408→1,464、generationは1のまま、reducedは750 msでframe 5,696とsignature change 712が不変だった。
+
+pack manifestはsame-originかつ`application/json`（charset parameterは許可）を必須とし、missing、HTML、plain textをfail closedで拒否する。manifest内assetはroleごとにJSON=`application/json`、texture=`image/png`、MOC=`application/octet-stream`だけを受理する。Vite production previewが`.moc3`へ空の`Content-Type`を返す場合に限り、same-origin、manifest allowlist、role別suffix、body byte length、SHA-256の全照合を代替証跡としてmissing MIMEを受理する。
+
+shaderは`text/plain`（charset parameterは許可）を期待する。production previewでMIMEが欠落する場合を含め、読み込み前preflightで13 filesすべてをsame-originのbundled canonical Framework sourceとbyte-for-byte照合する。明示されたunexpected MIMEまたはcanonical sourceとの差分は、Framework rendererへ渡す前に拒否する。
+
+配布時の第三者通知は`src-tauri/resources/legal/THIRD-PARTY-NOTICES.md`を単一entry pointとする。ここからCubism SDK/Core/Frameworkの原文LICENSE、`RedistributableFiles.txt`、固定した`UPSTREAM.json`と`checksums.sha256`、Hiyoriの原文NOTICEへ辿れる。各コピーはcanonical vendor/resource sourceとbyte-for-byte一致しなければ`sync`後のverify、Vite build、Tauri resource packagingを通過しない。
+
+## 障害の切り分け
+
+| 症状 | 最初に確認する値 | 主な原因 |
+| --- | --- | --- |
+| model読込前にerror | `status.error.code`、Core request | Core version、manifest、MOC inventory、MIME |
+| shader requestは成功するが空canvas | shader managerのloaded/link、WebGL error、非透明sample | model projection、shader compile、texture binding |
+| resize後にぼやける | CSS sizeとbacking size | `ResizeObserver`、device pixel ratio上限 |
+| reducedでもframeが増える | policy、frame count | neutral frame後のRAF停止漏れ |
+| production previewだけMOCでerror | response MIME、manifest length/hash | missing MIMEの限定受理またはasset protocolのMIME設定 |
+| context restore後だけ空になる | shader/offscreen再生成 | contextに紐づいた失効済みGPU resourceの再利用 |
+| isolated previewが`starting_renderer`で停止 | child document/moduleのOrigin、CSP、CORS | opaque originに対するmoduleまたはCSS responseのCORS不足 |
+| custom packが再起動後にHiyoriへ戻る | library diagnostics、published manifest/hash/trusted frame hash | runtime assetまたはtrusted PNGの破損・欠損、workspace selectionのfail-closed fallback |
+
+Hiyoriのmodel3にlayout指定はない。`CubismModelMatrix` は生成時にmodel heightを2へ正規化するため、追加の `centerX` / `bottom` 平行移動を重ねるとmodelがviewport外へ出る。配置は公式sampleと同じ既定model matrixにprojectionのaspect補正だけを掛ける。
+
+## 後続実装との境界
+
+任意モデルのsingle-file picker、descriptor-relative Rust quarantine validator、source/copied bytesの照合、isolated preview、trusted PNG永続化、atomic publish-and-select、workspace session cleanup、Project単位の選択、pack別semantic mapping UIは完了している。mapping editorはpack identityでlocal draftを区切り、snapshot更新をeffectで入力stateへ上書きしないため、version競合から再読込しても利用者の変更を保持する。mapping未設定時は安全なIdle fallbackを維持し、未検証directory、absolute path、remote URLをfrontend manifest URLへ直接渡して代替してはならない。
+
+版、hash、配布条件、pack schema、任意モデルのtrust boundaryを変更する場合は、先に [Live2D実ランタイム統合調査](live2d-runtime-integration.md) を更新し、公開情報を再確認した場合は `updated` と `last_verified` も更新する。

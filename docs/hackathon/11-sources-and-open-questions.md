@@ -1,12 +1,12 @@
 ---
 title: Sources, Conflicts, and Open Questions
 description: "公式情報源の優先順位、確認済みの矛盾、未確認事項、再検証項目を管理する。"
-updated: 2026-07-15
+updated: 2026-07-18
 read_when:
   - "ハッカソン情報の根拠や矛盾を確認するとき。"
   - "agent-browserで公式情報を再検証するとき。"
   - "未確認事項を公式窓口へ問い合わせるか判断するとき。"
-last_verified: 2026-07-15 JST
+last_verified: 2026-07-18 JST
 ---
 
 # 情報源・矛盾・未確認事項
@@ -34,6 +34,7 @@ Discussion Board のコメントは、公式運営者であることが明確で
 - Schedule: https://openai.devpost.com/details/dates
 - FAQ: https://openai.devpost.com/details/faqs
 - Updates: https://openai.devpost.com/updates
+- Latest deadline update (2026-07-18 verification): https://openai.devpost.com/updates/45371-tuesday-last-minute-tips
 - Discussions: https://openai.devpost.com/forum_topics
 
 ### OpenAI
@@ -77,6 +78,13 @@ Discussion Board のコメントは、公式運営者であることが明確で
 
 **Working decision:** project 全体では両方を実質的に使う。既存 project の新規作業でも、可能な限り両方の証拠を残す。
 
+### 3.5 YouTube visibility
+
+- Official Rules は publicly visible on YouTube、Overview と FAQ は public YouTube と記載。
+- 2026-07-18 の最新 Update は “Unlisted is fine” と記載。
+
+**Working decision:** Official Rules を優先し、visibility は **Public** にする。Unlisted を唯一の提出動画にしない。
+
 ## 4. Important clarifications already available
 
 ### Credits
@@ -84,9 +92,18 @@ Discussion Board のコメントは、公式運営者であることが明確で
 - $100 は Codex credits。
 - OpenAI API credits / tokens は別途配布されない。
 - product runtime で OpenAI API を使う場合は、自分の API billing が必要。
-- credit request は registered participant が対象、在庫・承認条件付き。
-- deadline は 2026-07-18 04:00 JST。
+- credit request は registered participant が対象、在庫・承認条件付きだった。
+- request deadline は 2026-07-18 04:00 JST。2026-07-18 時点で Resources と最新 Update は全 credits 配布済みと案内している。
+- 現行 Official Rules 上、配布済み Codex credits の使用期限は **2026-07-22 09:00 JST**。
 - one code per Entrant。
+
+### GPT-5.6 family and scope
+
+- OpenAI の現行 model catalog は `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` を GPT-5.6 family として掲載し、`gpt-5.6` alias は Sol を指す。
+- 現行 FAQ と最新 Update は、Free plan の Codex で GPT-5.6 Terra を利用できること、他モデルを併用しつつ project の一部で GPT-5.6 を使えることを明記している。
+- 同じ FAQ は Codex と GPT-5.6 を incidental / decorative にできないとも記載する。
+
+**Working decision:** submission では実際に使った exact model ID と実質的な code path を記録する。Coding Wife は `gpt-5.6-sol` を主要 path として証明するため、tier の未確認リスクはない。
 
 ### Codex usage proof
 
@@ -111,31 +128,25 @@ Discussion Board のコメントは、公式運営者であることが明確で
 
 ## 5. Open questions
 
-### 5.1 GPT-5.6 tier
-
-規約は “GPT-5.6” とだけ記載し、Sol / Terra / Luna のどれが対象かを明示していません。OpenAI 公式 model docs では3つとも GPT-5.6 family です。
-
-**安全側:** `gpt-5.6` alias / `gpt-5.6-sol` は要件名との対応が明確なので、exact model ID を記録しやすい。ただし唯一の許容 tier と断定はしない。Terra / Luna を eligibility 上の主要 path に使う場合は、Discord または Devpost で公式確認を取る。
-
-### 5.2 GPT-5.6 は runtime 必須か
+### 5.1 GPT-5.6 は runtime 必須か
 
 FAQ は「project must use GPT-5.6」「code repository と demo video で evidence を見る」「Codex と GPT-5.6 は incidental / decorative ではいけない」と記載しています。
 
 **安全側:** Codex の内部モデルとして使っただけではなく、製品 runtime / core workflow に GPT-5.6 を統合する。
 
-### 5.3 Submission form の正確なフィールド
+### 5.2 Submission form の正確なフィールド
 
 ログイン前の公開ページからは、submission form の全フィールドと文字数制限を確認できません。
 
 **対応:** 早めに Devpost draft を作り、必須欄と制限を確認する。
 
-### 5.4 Pro Account prize の人数
+### 5.3 Pro Account prize の人数
 
 Official Rules の表は Pro Account for 1 year と記載しますが、team の何名に付与されるか公開要約では明確ではありません。
 
 **対応:** 受賞時の案内に従う。提案・予算には人数を仮定しない。
 
-### 5.5 Judging access の保持期限
+### 5.4 Judging access の保持期限
 
 Official Rules の Judging Period と他ページの日程が不一致です。
 
@@ -143,7 +154,6 @@ Official Rules の Judging Period と他ページの日程が不一致です。
 
 ## 6. Questions to ask support only if relevant
 
-- Terra / Luna を core product path で使っても GPT-5.6 要件を満たすか。
 - private repository の具体的な共有方式・アカウント名。
 - 日本語 narration + 英語 subtitle / transcript で translation requirement を満たすか。
 - Sponsor / Administrator から過去に支援を受けた project の eligibility。
@@ -169,3 +179,10 @@ Support:
 - [ ] `/feedback` Session ID field
 - [ ] judging dates / test access requirement
 - [ ] prize details
+
+## 8. 2026-07-18 public re-verification record
+
+- Official Rules、Overview、FAQ、Schedule、Resources、Updates と最新 Update を agent-browser で確認した。
+- deadline、eligibility、4 tracks、private repository の共有先、3分未満の public video、Codex / GPT-5.6、`/feedback` Session ID、submission freeze、English materials、judging access の要件は、上記の明示した差異を除き現行文書と一致した。
+- OpenAI Build Week page は Cloudflare challenge により本文取得不可だった。Devpost の Official Rules を source of truth として採用した。
+- logged-in submission form の fields、文字数、private repository の具体的な招待 UI は未確認であり、推測せず `PENDING` を維持する。

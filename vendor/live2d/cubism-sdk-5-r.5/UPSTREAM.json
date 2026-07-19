@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "sdkVersion": "5-r.5",
+  "sdkUrl": "https://cubism.live2d.com/sdk-web/bin/CubismSdkForWeb-5-r.5.zip",
+  "sdkArchiveSha256": "67064a7fb1812cf502f5c4a03bfe12cc638c75a621bb4acf06bb28763df06ba0",
+  "frameworkTag": "5-r.5",
+  "frameworkTagCommit": "198a3769c26ca3d7b600e932590433badd392edd",
+  "coreVersion": 100663297,
+  "coreSha256": "8741f739779b5d5210872bd3d7d99f0f1e56e6c87409e7d26d6bb4b80aa1ef47",
+  "coreDeclarationSha256": "25fcaa2a6dfe311db95ad1795a2a7e6286d9192719df4e2c3e634915dc050334",
+  "frameworkSourceFileCount": 59,
+  "shaderFileCount": 13
+}

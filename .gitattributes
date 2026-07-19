@@ -1,0 +1,2 @@
+# The bundled Hiyori notice is hashed byte-for-byte from the reviewed source.
+src-tauri/resources/characters/builtin-hiyori/NOTICE.txt -text

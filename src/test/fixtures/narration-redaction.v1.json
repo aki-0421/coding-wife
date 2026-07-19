@@ -1,0 +1,387 @@
+{
+  "schemaVersion": 1,
+  "safe": [
+    {
+      "name": "ordinary-ja-caption",
+      "text": "検証済みの変更とテスト結果を説明します。"
+    },
+    {
+      "name": "relative-source-path",
+      "text": "Updated src/features/narration/controller.ts."
+    },
+    {
+      "name": "credential-policy-prose",
+      "text": "Password and token handling now fail closed."
+    },
+    {
+      "name": "bearer-challenge-prose",
+      "text": "The bearer challenge path now returns a typed error."
+    },
+    {
+      "name": "github-issue-reference",
+      "text": "The change resolves GitHub issue gh-123."
+    },
+    {
+      "name": "https-url-with-path",
+      "text": "See https://example.com/root/workspace/details for the public guide."
+    },
+    {
+      "name": "https-url-with-single-component-path",
+      "text": "See https://example.com/x for the public guide."
+    },
+    {
+      "name": "short-relative-source-path",
+      "text": "Updated src/x."
+    },
+    {
+      "name": "numeric-division",
+      "text": "Compute 10/2 and 10 / 2 before reporting the result."
+    },
+    {
+      "name": "markdown-https-link",
+      "text": "Read [the public guide](https://example.com/x)."
+    },
+    {
+      "name": "https-url-with-query-path",
+      "text": "See https://example.com/root/x?next=/x&mode=public."
+    },
+    {
+      "name": "https-url-with-double-slash-path",
+      "text": "See https://example.com//public/x."
+    },
+    {
+      "name": "inline-code-relative-path",
+      "text": "Read `src/x`."
+    },
+    {
+      "name": "inline-code-division",
+      "text": "Compute `10/2` and 10 / 2."
+    },
+    {
+      "name": "uppercase-http-url-with-port",
+      "text": "See HTTP://example.com:8080/x for the public guide."
+    },
+    {
+      "name": "https-balanced-parentheses-path",
+      "text": "See https://example.com/a(b)/c."
+    },
+    {
+      "name": "https-parenthesized-query-path",
+      "text": "See https://example.com/x?next=(/x)&mode=public."
+    },
+    {
+      "name": "https-trailing-dot-host",
+      "text": "See https://example.com./x."
+    },
+    {
+      "name": "https-unicode-idn-host",
+      "text": "See https://例え.テスト/x."
+    },
+    {
+      "name": "https-maximum-port",
+      "text": "See https://example.com:65535/x."
+    },
+    {
+      "name": "https-ipv4-host",
+      "text": "See https://192.0.2.1/x."
+    },
+    {
+      "name": "https-ipv6-loopback-host",
+      "text": "See https://[::1]/x."
+    },
+    {
+      "name": "https-ipv6-documentation-host",
+      "text": "See https://[2001:db8::1]/x."
+    },
+    {
+      "name": "https-angle-bracket-wrapper",
+      "text": "See <https://example.com/x>."
+    },
+    {
+      "name": "https-punycode-idn-host",
+      "text": "See https://xn--r8jz45g.xn--zckzah/x."
+    },
+    {
+      "name": "https-percent-encoded-path",
+      "text": "See https://example.com/a%28b%29/c."
+    },
+    {
+      "name": "https-query-and-fragment-paths",
+      "text": "See https://example.com/x?next=/x#frag=/y."
+    },
+    {
+      "name": "https-semicolon-path",
+      "text": "See https://example.com/a;b/c."
+    },
+    {
+      "name": "https-apostrophe-path",
+      "text": "See https://example.com/a'b/c."
+    },
+    {
+      "name": "http-localhost",
+      "text": "See http://localhost/x."
+    },
+    {
+      "name": "markdown-url-with-balanced-parentheses",
+      "text": "Read [docs](https://example.com/a(b)/c)."
+    },
+    {
+      "name": "unicode-quoted-url-with-balanced-parentheses",
+      "text": "参照：「https://example.com/a(b)/c」。"
+    }
+  ],
+  "private": [
+    {
+      "name": "punctuated-users-path",
+      "text": "Updated (/\u0055sers/alice/private-project/src/main.ts)."
+    },
+    {
+      "name": "japanese-punctuated-private-path",
+      "text": "対象：/\u0070rivate/var/db/application/state.json"
+    },
+    {
+      "name": "arbitrary-root-path",
+      "text": "Read /root/x before continuing."
+    },
+    {
+      "name": "arbitrary-workspace-path",
+      "text": "Generated (/workspace/x/output.json)."
+    },
+    {
+      "name": "arbitrary-system-path",
+      "text": "対象：/System/x/configuration.plist"
+    },
+    {
+      "name": "single-component-root-path",
+      "text": "Read /x before continuing."
+    },
+    {
+      "name": "parenthesized-single-component-path",
+      "text": "Read (/x)."
+    },
+    {
+      "name": "colon-single-component-path",
+      "text": "Read path:/x."
+    },
+    {
+      "name": "double-quoted-assignment-path",
+      "text": "target=\"/x\"."
+    },
+    {
+      "name": "single-quoted-assignment-path",
+      "text": "source='/x', then continue."
+    },
+    {
+      "name": "punctuated-single-component-path",
+      "text": "Read,/x,then continue."
+    },
+    {
+      "name": "japanese-quoted-single-component-path",
+      "text": "対象：「/x」。"
+    },
+    {
+      "name": "inline-code-single-component-path",
+      "text": "Read `/x`."
+    },
+    {
+      "name": "inline-code-private-home-path",
+      "text": "Read `/\u0055sers/alice/private.ts`."
+    },
+    {
+      "name": "same-line-fenced-code-path",
+      "text": "Read ```/x``` now."
+    },
+    {
+      "name": "multiline-fenced-code-path",
+      "text": "Read:\n```\n/x\n```"
+    },
+    {
+      "name": "double-slash-path",
+      "text": "Read //private/x."
+    },
+    {
+      "name": "markdown-link-label-path",
+      "text": "Read [/x](https://example.com/docs)."
+    },
+    {
+      "name": "markdown-relative-link-target",
+      "text": "Read [docs](/x)."
+    },
+    {
+      "name": "em-dash-boundary-path",
+      "text": "Read—/x"
+    },
+    {
+      "name": "middle-dot-boundary-path",
+      "text": "Read・/x"
+    },
+    {
+      "name": "fullwidth-parenthesis-boundary-path",
+      "text": "Read（/x）"
+    },
+    {
+      "name": "corner-bracket-boundary-path",
+      "text": "Read【/x】"
+    },
+    {
+      "name": "ellipsis-boundary-path",
+      "text": "Read…/x"
+    },
+    {
+      "name": "bullet-boundary-path",
+      "text": "Read•/x"
+    },
+    {
+      "name": "angle-bracket-boundary-path",
+      "text": "Read〈/x〉"
+    },
+    {
+      "name": "double-angle-bracket-boundary-path",
+      "text": "Read《/x》"
+    },
+    {
+      "name": "curly-quote-boundary-path",
+      "text": "Read“/x”"
+    },
+    {
+      "name": "guillemet-boundary-path",
+      "text": "Read«/x»"
+    },
+    {
+      "name": "fullwidth-semicolon-boundary-path",
+      "text": "Read；/x"
+    },
+    {
+      "name": "invalid-https-empty-authority-path",
+      "text": "Read https:///x."
+    },
+    {
+      "name": "invalid-https-ipv6-authority",
+      "text": "Read https://[:]/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-ipv6-characters",
+      "text": "Read https://[gg::1]/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-unclosed-ipv6-bracket",
+      "text": "Read https://[2001:db8::1/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-port-overflow",
+      "text": "Read https://example.com:65536/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-nonnumeric-port",
+      "text": "Read https://example.com:abc/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-ipv4-authority",
+      "text": "Read https://999.999.999.999/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-leading-hyphen-dns-label",
+      "text": "Read https://-example.com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-trailing-hyphen-dns-label",
+      "text": "Read https://example-.com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-underscore-dns-label",
+      "text": "Read https://invalid_host.example/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-empty-dns-label",
+      "text": "Read https://example..com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-punctuation-in-host",
+      "text": "Read https://example.com;/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "invalid-https-apostrophe-in-host",
+      "text": "Read https://example.com'/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "private-https-username-only-userinfo",
+      "text": "Read https://user@example.com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "private-https-numeric-password-userinfo",
+      "text": "Read https://user:123@example.com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "private-https-alphabetic-password-userinfo",
+      "text": "Read https://user:private@example.com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "private-https-empty-userinfo-separator",
+      "text": "Read https://@example.com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "private-https-empty-password-userinfo",
+      "text": "Read https://user:@example.com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "private-https-empty-username-userinfo",
+      "text": "Read https://:123@example.com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "private-markdown-https-userinfo",
+      "text": "Read [docs](https://user@example.com/\u0055sers/alice/private.ts)."
+    },
+    {
+      "name": "private-unicode-quoted-invalid-authority",
+      "text": "対象：「https://[:]/\u0055sers/alice/private.ts」。"
+    },
+    {
+      "name": "unsupported-ftp-url-path",
+      "text": "Read ftp://example.com/\u0055sers/alice/private.ts."
+    },
+    {
+      "name": "markdown-url-followed-by-private-path",
+      "text": "Read [docs](https://example.com/x)/private."
+    },
+    {
+      "name": "bearer-token",
+      "text": "Authorization: Bearer abcdefghijklmnop1234567890"
+    },
+    {
+      "name": "github-classic-token",
+      "text": "ghp_abcdefghijklmnopqrstuvwxyz1234567890"
+    },
+    {
+      "name": "github-fine-grained-token",
+      "text": "github_pat_11AA00abcdefghijklmnopqrstuvwxyz1234"
+    },
+    {
+      "name": "aws-access-key",
+      "text": "AKIAABCDEFGHIJKLMNOP"
+    },
+    {
+      "name": "aws-secret-assignment",
+      "text": "AWS_SECRET_ACCESS_KEY=fabricated-secret-value"
+    },
+    {
+      "name": "slack-bot-token",
+      "text": "xoxb-123456789012-abcdefghijklmnopqrstuvwx"
+    },
+    {
+      "name": "pem-private-key",
+      "text": "-----BEGIN OPENSSH PRIVATE KEY-----"
+    },
+    {
+      "name": "prefixed-password-assignment",
+      "text": "DATABASE_PASSWORD=private-value"
+    },
+    {
+      "name": "session-assignment",
+      "text": "session_id: abcdefghijklmnop"
+    },
+    {
+      "name": "openai-style-token",
+      "text": "sk-proj_abcdefghijklmnopqrstuvwxyz"
+    }
+  ]
+}
