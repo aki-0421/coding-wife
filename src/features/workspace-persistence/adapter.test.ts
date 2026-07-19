@@ -246,14 +246,13 @@ describe("PersistentWorkspaceViewAdapter", () => {
     )
     const initial = await adapter.loadState()
     const selected = await adapter.requestAddProject()
-    const projectWorkspaceId = selected.activeWorkspaceId
-    if (projectWorkspaceId === null) throw new Error("demo fixture")
+    const project = selected.projects.find(
+      (candidate) => candidate.id === "project-demo-selected",
+    )
+    if (project === undefined) throw new Error("demo fixture")
     const created = await adapter.requestAddWorkspace({
-      fromWorkspaceId: projectWorkspaceId,
+      projectId: project.id,
       name: "Adapter session",
-      goal: "Persist adapter state",
-      repository: "selected-project",
-      branch: "main",
     })
     const createdId = created.activeWorkspaceId
     if (createdId === null) throw new Error("demo fixture")

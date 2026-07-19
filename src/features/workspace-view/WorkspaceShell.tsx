@@ -973,9 +973,7 @@ export function WorkspaceShell({
               onCreate={view.addWorkspace}
               prominent
               projects={view.projects}
-              selectedProjectId={
-                selectedWorkspace?.projectId ?? view.projects[0]?.id
-              }
+              selectedProjectId={view.projects[0]?.id}
             />
           </Empty>
         </section>
