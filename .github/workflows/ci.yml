@@ -64,7 +64,7 @@ jobs:
       - name: Install locked JavaScript dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check formatting
+      - name: Check formatting with Biome
         run: pnpm format:check
 
       - name: Set up Go for agent-docs
@@ -85,7 +85,7 @@ jobs:
       - name: Lint managed documentation
         run: agent-docs --no-user-config lint
 
-      - name: Lint frontend and repository scripts
+      - name: Lint frontend and repository scripts with Biome
         run: pnpm lint
 
       - name: Check TypeScript types

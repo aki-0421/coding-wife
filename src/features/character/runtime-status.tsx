@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- The provider and its external-store hooks share one private context. */
 import {
   createContext,
   useContext,

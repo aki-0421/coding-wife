@@ -1,0 +1,69 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.4/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "src/**",
+      "scripts/**",
+      "src-tauri/**/*.json",
+      "vendor/live2d/*.json",
+      "*.js",
+      "*.ts",
+      "*.json",
+      "*.html",
+      "!!src-tauri/resources/characters/**/runtime",
+      "!!src-tauri/resources/legal/THIRD-PARTY-DEPENDENCIES.json",
+      "!!third-party/THIRD-PARTY-DEPENDENCIES.json"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80,
+    "lineEnding": "lf"
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "useComponentExportOnlyModules": "error"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "semicolons": "asNeeded",
+      "quoteStyle": "double",
+      "trailingCommas": "all"
+    }
+  },
+  "html": {
+    "formatter": {
+      "enabled": true
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "src/components/ui/**/*.tsx",
+        "src/features/character/library/provider.tsx",
+        "src/features/character/runtime-status.tsx",
+        "src/features/readiness/NativeReadinessDiagnostics.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "useComponentExportOnlyModules": "off"
+          }
+        }
+      }
+    }
+  ]
+}

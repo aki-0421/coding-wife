@@ -12,9 +12,9 @@
     "tauri:dev": "tauri dev",
     "build": "node scripts/live2d/verify-live2d.mjs && node scripts/live2d/build-framework.mjs && tsc -b && vite build && node scripts/release/production-bundle.mjs --root dist",
     "tauri:build": "tauri build",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/{licenses,live2d,quality,release,skills}/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \".github/workflows/*.{yml,yaml}\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/{licenses,live2d,quality,release,skills}/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \".github/workflows/*.{yml,yaml}\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
-    "lint": "node scripts/live2d/verify-live2d.mjs && eslint . --max-warnings 0",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "node scripts/live2d/verify-live2d.mjs && biome lint . --error-on-warnings",
     "typecheck": "node scripts/live2d/verify-live2d.mjs && node scripts/live2d/build-framework.mjs && tsc -b --pretty false",
     "test": "node scripts/live2d/verify-live2d.mjs && node scripts/live2d/build-framework.mjs && node --test scripts/skills/*.test.mjs && node --test scripts/live2d/*.test.mjs && node --test scripts/release/check-diff-hygiene.test.mjs && node --test scripts/quality/*.test.mjs && vitest run --fileParallelism=false",
     "test:watch": "node scripts/live2d/verify-live2d.mjs && node scripts/live2d/build-framework.mjs && vitest",
@@ -41,7 +41,7 @@
     "tw-animate-css": "1.4.0"
   },
   "devDependencies": {
-    "@eslint/js": "10.0.1",
+    "@biomejs/biome": "2.5.4",
     "@tailwindcss/vite": "4.3.3",
     "@tauri-apps/cli": "2.11.4",
     "@testing-library/jest-dom": "6.9.1",
@@ -51,16 +51,10 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
-    "eslint": "10.6.0",
-    "eslint-plugin-react-hooks": "7.1.1",
-    "eslint-plugin-react-refresh": "0.5.3",
-    "globals": "17.7.0",
     "jsdom": "29.1.1",
-    "prettier": "3.9.5",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.2",
     "typescript-cubism": "npm:typescript@5.9.3",
-    "typescript-eslint": "8.62.0",
     "vite": "8.1.1",
     "vitest": "4.1.10"
   }
