@@ -951,7 +951,6 @@ export function WorkspaceShell({
             <CharacterStageSlot
               characterRuntime={characterRuntime}
               copy={copy}
-              hidden={characterHidden}
               muted={view.muted}
               onMutedChange={view.setMuted}
               onRetryCharacter={() => {
@@ -959,6 +958,7 @@ export function WorkspaceShell({
               }}
               reducedMotion={reducedMotion}
               state={companionState}
+              visible={view.activeTab !== "settings" && !appSettingsOpen}
               workspaceId={selectedWorkspace.id}
               {...(characterRenderer ? { renderer: characterRenderer } : {})}
             />
