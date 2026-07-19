@@ -1,7 +1,7 @@
 ---
 title: "LIVE Live2Dコンパニオン要件定義"
 description: "同梱Hiyori、semantic state、縮退、ユーザーmodelの安全なimport・選択を定義する。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "Live2D renderer、character pack、state mappingを実装するとき。"
   - "ユーザーmodel importのsecurity、boundary、fallbackを検証するとき。"
@@ -27,7 +27,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ----------------------------- | -------------------------------------------------------------------- |
 | 既定companionを確実に表示する | cold startでHiyoriがdemo比率の右paneへ収まり、状態に反応する         |
 | model差分へ安全に対応する     | motion/expression欠落時もneutral/static/textへ縮退し、Chatを止めない |
-| ユーザーmodelを設定可能にする | model3.jsonを隔離・検証・previewし、projectごとに選択・復元できる    |
+| ユーザーmodelを設定可能にする | model3.jsonを隔離・検証・previewし、app全体で選択・復元できる        |
 
 ## スコープ
 
@@ -39,7 +39,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | Rendering      | Cubism SDK/Core、透明single canvas、resize、WebGL recovery                       |
 | Semantic state | idle、thinking、acting、waiting、reviewing、error、completed、disconnected       |
 | Accessibility  | text equivalent、hide、reduced motion、static/text-only fallback                 |
-| Custom pack    | model3 picker、quarantine、validation、copy、preview、mapping、project selection |
+| Custom pack    | model3 picker、quarantine、validation、copy、preview、mapping、app-global selection |
 
 ### 含めない
 
@@ -71,7 +71,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-057` | companionはdemo比率で表示される             | 1470×836で607.84×754.99px paneへbottom-containし、頭頂、両手、裾がcanvas外へ切れない                                     | Approved | 非該当           |
 | `LIVE-F-058` | rendererはwindow resizeへ追従する           | 1470×836、1280×800、960×640の各resize後500ms以内にcontain scaleを再計算し、composerまたはdecisionを覆わない              | Approved | 非該当           |
 | `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | workspace/modelを20回切り替えても描画canvasが1枚で、旧texture/motion/WebGL resourceが参照されない                        | Approved | 非該当           |
-| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | Project settingsからpack名、creator、source notice、同梱version/hashへ到達できる                                         | Approved | 非該当           |
+| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | App settingsのCompanionからpack名、creator、source notice、同梱version/hashへ到達できる                                  | Approved | 非該当           |
 
 ### Semantic stateと縮退
 
@@ -96,10 +96,10 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-072` | importerはresource境界を適用する               | file数128以下、合計100MiB以下、1file 32MiB以下、texture各8192×8192以下、JSON depth 64以下だけを受理する                                                                                                                                                                                                                                                  | Approved | 非該当           |
 | `LIVE-F-073` | importerはquarantineからatomicに昇格する       | 全fileをquarantineへcopyして再hash・再検証し、manifest作成後のatomic rename成功時だけlibraryへpack IDを追加する                                                                                                                                                                                                                                          | Approved | 非該当           |
 | `LIVE-F-074` | WebViewはimport元absolute pathを受け取らない   | import完了payloadとrenderer requestにpack UUIDとrelative asset IDだけが含まれ、source path/home pathがない                                                                                                                                                                                                                                               | Approved | 非該当           |
-| `LIVE-F-075` | 利用者はimport packをpreview後にProjectへ選択できる     | previewのfirst frameとstate testが成功した後だけSelectを有効にし、selectionの正本をstable Project IDへatomic保存する。同じProject IDに属する全workspaceは即時に同じpackを使い、restart後も一致する。legacy workspace-scoped selectionはProjectごとに`selectionUpdatedAt DESC, workspaceId ASC`で最初のvalid packを一度だけ移行し、valid値がなければbundled Hiyoriへ戻す。library cardはmanifestへ拘束されたtrusted PNGをpack IDとasset IDだけのopaque binary IPCで読み、thumbnailと省略hashを表示し、完全hashをaccessibility treeから取得できる。missingまたはhash不一致のframeは表示しない | Approved | 非該当           |
+| `LIVE-F-075` | 利用者はimport packをpreview後にapp全体へ選択できる     | previewのfirst frameとstate testが成功した後だけSelectを有効にし、selectionの正本をapp-globalなowner-only stateへatomic保存する。全workspaceは即時に同じpackを使い、restart後も一致する。legacy project/workspace-scoped selectionは`selectionUpdatedAt DESC, scope ID ASC`で最初のvalid packを一度だけglobal値へ移行し、valid値がなければbundled Hiyoriへ戻す。library cardはmanifestへ拘束されたtrusted PNGをpack IDとasset IDだけのopaque binary IPCで読み、thumbnailと省略hashを表示し、完全hashをaccessibility treeから取得できる。missingまたはhash不一致のframeは表示しない | Approved | 非該当           |
 | `LIVE-F-076` | import失敗は現在modelを壊さない                | malformed、missing、unsupported MOC、I/O、first-frame失敗、abortの各fixtureで現在pack選択とrenderingが継続し、失敗packがlibraryに残らない。model switchはcandidate client/model/trusted frameをfirst accepted frameまで分離し、その時点だけrenderer、committed pack、metrics、status、frameを一括更新する。失敗またはabortではcandidateだけをreleaseする | Approved | 非該当           |
 | `LIVE-F-077` | 利用者はpackごとのversioned semantic mappingを設定できる | `SemanticMappingV1`はneutral/thinking/working/asking/success/warning/errorの各stateへ検証済みmanifest inventory内のmotion cue、expression cue、またはneutralだけを割り当て、pack ID、manifest hash、mapping versionとatomic保存する。unknown version、hash不一致、invalid cueはmapping全体を実行せずneutralへfallbackする。mapping操作はja/en label、keyboard-only、visible focus、stateごとのpreviewを持ち、reduced motion時はanimationを再生せずtrusted static frameとtextで確認できる | Approved | 非該当           |
-| `LIVE-F-078` | 利用者は未使用custom packを削除できる          | どのProject IDからも選択されていないcustom packだけを確認後削除し、bundled Hiyoriと一つ以上のProject IDが選択中のpackのDeleteを無効にする。stale workspace viewやraceしたselection responseからdeleteを開始せず、選択とdeleteを同じnative transactionで再検査する | Approved | 非該当           |
+| `LIVE-F-078` | 利用者は未使用custom packを削除できる          | app-globalな現在選択pack以外のcustom packだけを確認後削除し、bundled Hiyoriと現在選択packのDeleteを無効にする。stale settings viewやraceしたselection responseからdeleteを開始せず、選択とdeleteを同じnative transactionで再検査する | Approved | 非該当           |
 
 ### 性能とinteraction boundary
 

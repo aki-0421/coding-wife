@@ -1,7 +1,7 @@
 ---
 title: "デスクトップ共通仕様"
 description: "Coding Wifeの単一macOSウィンドウ、共通レイアウト、状態、操作、信頼境界、復旧、アクセシビリティを定義する。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "S-001〜S-006の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
   - "個別画面仕様とdesktop-shell要件の整合を確認するとき。"
@@ -245,12 +245,13 @@ loading中に最終dataがある場合は前回dataを薄く残し、全画面sp
 |---|---|---|---|---|
 | window geometry / route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | Reset UI state |
 | `AppPreferencesV1` (`locale` / `reducedMotion` / `characterVisibility`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | Reset Preferencesでrecordだけsafe defaultへ |
-| project/workspace/context/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
+| project/workspace/Project context/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
+| app-global Character context | Rust管理SQLite singleton record | App settingsのexpected-version save | 全workspaceへ同じversion/hashを復元 | app data reset契約 |
 | repository identity/health snapshot | Rust管理SQLite + read-only Git再検査 | 登録、window focus、selection、Send直前 | row/headerへ復元後にfreshness再検査 | project登録解除 |
 | normalized event / review pack | append-only SQLite + hash artifact | redaction/schema合格後 | sequence順に再構築 | workspace history明示削除 |
 | Git object / source | repository | appはread-only観測だけを保存 | Gitを正本として再診断 | appから変更・自動削除しない |
-| project-scoped selected character | stable Project ID → verified pack ID | preview/state test後のatomic選択 | 同Project全workspaceへ即時同期しrestart後に復元 | pack delete前の全Project usage再検査 |
-| custom character pack / `SemanticMappingV1` | app-private character library + pack ID/manifest hash/version | quarantine昇格、inventory検証付きatomic mapping save | pack ID/hash/versionから復元 | 全Project未選択packの明示削除 |
+| app-global selected character | owner-only character state → verified pack ID | preview/state test後のatomic選択 | 全workspaceへ即時同期しrestart後に復元 | 選択packの削除拒否 |
+| custom character pack / `SemanticMappingV1` | app-private character library + pack ID/manifest hash/version | quarantine昇格、inventory検証付きatomic mapping save | pack ID/hash/versionから復元 | 未選択packの明示削除 |
 | TTS key | OS secret store |明示保存 | set/unsetだけ表示 |明示削除 |
 | audio byte / support raw history / raw reasoning | 保存しない | 非該当 | 復元しない | playback/task終了時 |
 

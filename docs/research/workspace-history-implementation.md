@@ -1,11 +1,11 @@
 ---
 title: "ワークスペース履歴ランタイム実装ガイド"
-description: "ローカルSQLite履歴、ワークスペース復元、versioned editable context、native context取得、WebView adapterを安全に変更・検証するための責務と不変条件。"
-updated: 2026-07-19
+description: "ローカルSQLite履歴、ワークスペース復元、workspace Project context、app-global Character context、native context取得、WebView adapterを安全に変更・検証するための責務と不変条件。"
+updated: 2026-07-20
 read_when:
   - "ワークスペースの追加・選択・下書き・タイムライン・履歴削除を変更するとき。"
   - "SQLite migration、破損復旧、Git preflight、context snapshotのprivacy境界を検証するとき。"
-  - "Project / Character contextの保存、競合、次turn反映、Context / Project settings UIを変更するとき。"
+  - "Project / Character contextの保存、競合、次turn反映、Context / Settings UIを変更するとき。"
 ---
 
 # ワークスペース履歴ランタイム実装ガイド
@@ -30,9 +30,9 @@ read_when:
 10. 履歴削除はUI確認の後にnative challenge tokenを発行し、対象workspaceのapp metadataだけをtransactionで削除する。repository file、commit、branchを変更しない。
 11. migrationはtransaction内でversion順に適用し、既存versionのSQLを書き換えない。破損またはmigration失敗時は元DBを上書きせず、basenameだけをpublicに返すrecovery backupとread-only状態を使う。
 12. 履歴adapter単体はCodex接続を推定しない。通常起動ではCodex composition層が`CodexDiagnostic`とcapability/model/effortを正本に送信可否を導出し、固定`connected=false`を公開しない。履歴の利用可否は引き続き`history.mode`とタイムラインのbadgeで別に表示し、履歴writerが`ready`でない時は新規turnを開始しない。
-13. editableなProject / Character contextは、native producerが作るread-only Files / Git diff snapshotとは別recordである。SQLite migration version 2の`workspace_contexts`へworkspace IDをpartition keyとして保存し、ProjectとCharacterのversionを独立して増やす。片方の保存で他方のversionまたは未保存draftを変更しない。
+13. editableなProject / Character contextは、native producerが作るread-only Files / Git diff snapshotとは別recordである。ProjectはSQLite migration version 2の`workspace_contexts`へworkspace IDをpartition keyとして保存し、Characterはapp-global singleton recordへ保存する。二つのversionを独立して増やし、片方の保存で他方のversionまたは未保存draftを変更しない。旧workspace Character値はmigration時に`last_selected_at DESC, updated_at DESC, workspace_id ASC`で一つだけglobal recordへ移し、以後workspace rowを参照しない。
 14. editable context保存は`expectedVersion`の一致をSQLite transaction内で検証し、成功時だけversionを1増やしてcanonical JSONのSHA-256を更新する。競合時はremote versionを読み直すがlocal draftを維持し、利用者が「保存済みバージョンを再読込」を選ぶまで上書きしない。Definition of done、技術参照、禁止表現は入力中のraw multiline draftを保持し、blurまたは保存時だけtrim、空行除去、改行正規化を行う。
-15. Sendは入力確定後かつCodex turn開始前に、同じread transactionでProject / Characterのversion、hash、内容を一度だけ取得する。`running` / `waiting`中の保存を既存requestへ途中注入せず、次のSendだけが新versionを使う。snapshotのworkspace IDがactive workspaceと一致しない場合はturnを開始しない。
+15. Sendは入力確定後かつCodex turn開始前に、同じread transactionでactive workspaceのProjectとapp-global Characterのversion、hash、内容を一度だけ取得する。`running` / `waiting`中の保存を既存requestへ途中注入せず、次のSendだけが新versionを使う。Project snapshotのworkspace IDがactive workspaceと一致しない場合はturnを開始しない。
 16. Codexへ渡すprivate request textと、timeline / objectiveへ残すpublic instructionを分離する。private textはversion/hash付きJSON envelopeを含む完全な直列化後の値で80,000 Unicode scalarを上限とし、public instructionとdraftは32,000を維持する。context JSONは`CODING_WIFE_UNTRUSTED_CONTEXT_V1`と明示したquoted data境界へ置き、permission、approval、safety、verification、tool、model、Git policyの権限を持たせない。その後に`CODING_WIFE_AUTHORITATIVE_USER_INSTRUCTION_V1`として利用者の指示を置く。上限はProject 32,000 + Character 12,000の単純加算ではなく、JSON escape、metadata、marker、public instructionを含む最終envelopeへ適用する。
 17. Characterの自由入力は技術・安全policyを変更できない。NFKC、case、句読点を正規化し、表示文言・結果・error・実行中の発話状態などpresentation clauseとして明示的に分類できる部分を除いた後、permission、approval、verification、tool等のpolicy-domain objectが残れば、命令・同義語・説明文の別を問わずRustとTypeScriptの両境界でfail-closed拒否する。共通corpus `src/test/fixtures/workspace-context-policy.v1.json`のja / en accepted・rejectedケースを両実装で通す。
 18. 技術参照は`doc:`を除きtrusted repository rootからの相対pathだけを受理し、`.`や重複separatorを保存前にcanonicalizeする。native保存時は参照の存在、各symlink componentのroot内解決、rootとtargetのdevice / inodeを検証し、migration version 3のprivate `project_reference_manifest_json`へidentityを保存する。Send snapshotは同じtransaction内で再検証し、参照の消失・置換、symlink retarget、repository root交換を検知したらturnを開始しない。旧recordは自動で信頼せず、技術参照がある場合は利用者の明示再保存でmanifestを作る。
@@ -59,9 +59,9 @@ read_when:
 | `src/features/codex/event-projection.ts` | generationで分離されたCodexEventをsemantic timeline/HIST eventへfail-closed投影 |
 | `src/features/workspace-persistence/demo-transport.ts` | ブラウザー専用の決定的demo。native成功や再起動永続化を偽装しない |
 | `src/features/workspace-view/useWorkspaceViewModel.ts` | hydration、workspace切替race防止、250 ms draft debounce、UI notice |
-| `src/features/workspace-view/useEditableWorkspaceContext.ts` | Context / Project settings共通draft、workspace partition、save、競合保持、明示reload |
+| `src/features/workspace-view/useEditableWorkspaceContext.ts` | workspace Project draftとapp-global Character draft、save、競合保持、明示reload |
 | `src/features/workspace-view/EditableContextSection.tsx` | Project / Character editor、field境界、version/hash、次turn表示、error focus |
-| `src/features/workspace-view/SettingsView.tsx` | S-005のapp-global 4 sectionとS-006のproject-scoped 4 sectionを別viewとして構成する |
+| `src/features/workspace-view/SettingsView.tsx` | S-005のapp-global 7 sectionとS-006のproject-scoped 2 sectionを別viewとして構成する |
 | `src/features/workspace-view/WorkspaceShell.tsx` | sidebar gearのS-005遷移、Settings tabのS-006遷移、直前tabとfocusの復元を所有する |
 | `src/test/fixtures/workspace-context-policy.v1.json` | RustとTypeScriptで共有するCharacter policyのja / en accepted・rejected corpus |
 | `src/test/fixtures/workspace-history.v1.json` | RustとTypeScriptが共有するpublic contract fixture |
@@ -92,7 +92,7 @@ Rust testはmigration rollback、破損backup、concurrent sequence、redaction�
 - public DTOへpathらしいfieldを追加しない。必要なfilesystem操作はopaque workspace IDをRustでtrusted rootへ解決する。
 - context sourceを追加するときは利用者入力の本文を保存せず、native producer、サイズ上限、secret fixture、失敗時の構造化errorを用意する。
 - draft保存失敗やworkspace切替失敗で別workspaceのdraft、timeline、selectionを上書きしない。
-- editable context commandを変えるときはProject / Characterの別version、exact expected-version transaction、workspace-bound snapshotを同じ変更で検証する。
+- editable context commandを変えるときはProject / Characterの別version、exact expected-version transaction、workspace-bound Projectとapp-global Characterを合成するturn snapshotを同じ変更で検証する。
 - list fieldを変えるときはraw draftを配列へ即時変換せず、blur / save境界でだけ正規化する。validation codeを増やす場合はfield / reason mapping、ja / en copy、`aria-describedby`、focus testを同時に更新する。
 - Character policy検出を変えるときはTypeScriptとRustの実装を別々に推測で直さず、先に共有corpusへaccepted / rejectedケースを追加して両方を実行する。presentation例を誤拒否しない回帰caseも残す。
 - 技術参照またはtrusted rootのidentity規則を変えるときはmigrationを追記し、save時captureとsnapshot時revalidationを同時に更新する。public DTO、content hash、snapshot hashへprivate device / inodeを含めない。

@@ -1,7 +1,7 @@
 ---
 title: "S-005 アプリ設定・診断"
-description: "全プロジェクトへ共通適用する表示、登録project一覧、音声、支援、診断を管理する画面仕様。"
-updated: 2026-07-19
+description: "全プロジェクトへ共通適用する表示、character presentation、登録project一覧、音声、支援、診断を管理する画面仕様。"
+updated: 2026-07-20
 read_when:
   - "sidebar gear、アプリ全体の設定、project登録一覧、音声、support、native diagnosticsを実装するとき。"
   - "S-005とAPP、CODE、SUP、GIT、LIVE、NARR要件の対応を確認するとき。"
@@ -31,18 +31,19 @@ status: "Approved"
 
 | section     | 内容                                                                                                     |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
-| General     | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
-| Projects    | appへ登録しているGit project一覧、workspace件数、登録解除                                              |
-| Audio       | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
-| Support     | app共通のsupport role enable、readiness、capacity、usage、sanitized error                                |
-| Diagnostics | OS/app、Codex、Git、DB、Live2D、audio、supportのnative readinessとrecheck                                |
+| General           | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
+| Projects          | appへ登録しているGit project一覧、workspace件数、登録解除                                              |
+| Character context | app-globalなname、tone、speech density、behavior、prohibited expressions                                |
+| Companion         | app-globalなmodel選択、import、inventory、preview、semantic mapping、provenance、delete、runtime status  |
+| Audio             | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
+| Support           | app共通のsupport role enable、readiness、capacity、usage、sanitized error                                |
+| Diagnostics       | OS/app、Codex、Git、DB、Live2D、audio、supportのnative readinessとrecheck                                |
 
 ### 含めない
 
 | 非対象                                                | 理由                      | 扱う画面・文書                         |
 | ----------------------------------------------------- | ------------------------- | -------------------------------------- |
-| Project / Character context                           | workspace-scopedのため    | [S-006](S-006_project-settings.md)     |
-| character model選択・mapping                          | project-scopedのため      | [S-006](S-006_project-settings.md)     |
+| Project context                                       | workspace-scopedのため    | [S-006](S-006_project-settings.md)     |
 | workspace history削除                                 | workspace-scopedのため    | [S-006](S-006_project-settings.md)     |
 | account credential、raw stderr、absolute private path | secret boundaryを守るため | sanitized readiness statusだけ表示する |
 
@@ -51,7 +52,7 @@ status: "Approved"
 | 項目           | 内容                                                                                     |
 | -------------- | ---------------------------------------------------------------------------------------- |
 | 表示契機       | workspace sidebar最下部の`App settings / アプリ設定` gear、Chatのdiagnostics link        |
-| 表示前提       | workspace選択は不要。registered project/workspaceが0件でもGeneral、Projects、Diagnosticsは表示する |
+| 表示前提       | workspace選択は不要。registered project/workspaceが0件でも7 sectionすべてを表示する                 |
 | 初期フォーカス | app settings heading                                                                      |
 | 正常完了       | section単位の保存を即時反映し、画面を維持する                                            |
 | キャンセル     | section固有のdraftと保存済み値を各契約どおり維持する                                     |
@@ -62,9 +63,9 @@ status: "Approved"
 
 | 利用者・ロール | 表示                                                                 | 操作                            | 拒否時の動作                                       |
 | -------------- | -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------- |
-| ローカル利用者 | non-secret global setting、sanitized readiness                       | edit、test、retry、reset        | 保存済み値を維持し、操作箇所にsafe errorを表示する |
+| ローカル利用者 | non-secret global setting、character metadata、sanitized readiness   | edit、import、select、test、retry、reset | 保存済み値を維持し、操作箇所にsafe errorを表示する |
 | React WebView  | typed snapshot、status、safe code                                    | render、input、typed IPC        | raw path、secret、arbitrary commandを保持しない    |
-| Rust service   | owner-only preference/narration store、readiness、support controller | validate、atomic save、diagnose | scope外payloadを拒否し、前snapshotを維持する       |
+| Rust service   | owner-only preference/context/character/narration store、readiness、support controller | validate、atomic save、diagnose | scope外payloadを拒否し、前snapshotを維持する |
 
 ## 画面構成
 
@@ -72,7 +73,7 @@ status: "Approved"
 | ------------------- | ------------------------------------------------------------- | ------------------------------ |
 | workspace sidebar   | workspace一覧、activeなapp settings gear                      | workspaceへ戻る、project追加   |
 | app settings header | back action、`App settings / アプリ設定`、全project共通の説明 | 直前workspace tabへ戻る        |
-| section navigation  | General、Projects、Audio、Support、Diagnosticsの5 section     | section選択                    |
+| section navigation  | General、Projects、Character context、Companion、Audio、Support、Diagnosticsの7 section | section選択 |
 | settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
 
 app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tabを表示しない。これによりproject scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
@@ -82,7 +83,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | 状態       | 進入条件                          | 表示                                           | 操作可否               | 状態から抜ける条件      |
 | ---------- | --------------------------------- | ---------------------------------------------- | ---------------------- | ----------------------- |
 | 初期化中   | preference/readiness未取得        | field shape skeleton、loading status           | backのみ可             | snapshot取得またはerror |
-| 通常       | snapshot取得済み                  | 5 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
+| 通常       | snapshot取得済み                  | 7 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
 | データなし | voiceまたはdiagnostic resultが0件 | 理由とRetry                                    | 影響しないsectionは可  | 再取得成功              |
 | 処理中     | save、test、reset、recheck中      | 操作箇所のprocessing status                    | 同一操作の二重実行不可 | terminal result         |
 | オフライン | network/Codex unavailable         | local settingは表示、診断はBlocked/Unavailable | local saveとrecheck可  | readiness更新           |
@@ -97,6 +98,8 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | workspaceへ戻る       | S-005表示中           | 直前のactive tab、workspace、composer draftを復元 | 非該当                         | 同じ画面を維持                  | `APP-F-055`, `APP-F-083`              |
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
 | preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry/Reset | `APP-F-057`〜`APP-F-061`, `APP-F-076` |
+| Character contextを保存する | Character contextがready | global versionを更新し次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063` |
+| modelを選択する       | verified pack preview成功 | 全workspaceへatomic適用                           | 前selection維持                | 前selection維持、safe error     | `APP-F-084`, `LIVE-F-075` |
 | readinessを再確認する | Diagnostics表示中     | shared snapshot IDを更新                          | 前snapshotをstale表示          | safe codeとRetry                | `APP-F-070`                           |
 | project登録を解除する | Projects表示中、対象にactive/pending turnなし | 確認後にapp registrationだけを外し、repositoryと既存worktreeを残す | 一覧とregistrationを維持 | 対象を残してsafe errorとRetry | `WORK-F-057`, `WORK-F-068` |
 
@@ -107,6 +110,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | Language             | OS locale | 必須     | `ja` / `en`                           | field直下、前言語維持 | 選択時   |
 | Reduced motion       | `system`  | 必須     | `system` / `on` / `off`               | field直下、前値維持   | 選択時   |
 | Character visibility | `visible` | 必須     | `visible` / `hidden`                  | field直下、前値維持   | toggle時 |
+| Character context    | `Sol`と既定presentation | 任意 | display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
 | Audio settings       | off       | 条件付き | verified local voice、rate 0.75〜1.25 | Audio内Alert          | Save     |
 | Support controls     | disabled  | 条件付き | approved role/policyだけ              | Support内Alert        | toggle時 |
 
@@ -115,6 +119,8 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | ユーザー操作                | 実行境界                 | Tauri plugin / Command             | 必要なCapability・認可                | キャンセル時      | 拒否・失敗時                          |
 | --------------------------- | ------------------------ | ---------------------------------- | ------------------------------------- | ----------------- | ------------------------------------- |
 | preference取得・更新・reset | Rust owner-only store    | `app_preferences_get/update/reset` | exact schema/version                  | 前record維持      | safe defaultまたは前record、safe code |
+| Character context load/save | Rust SQLite             | app character context commands     | global singleton、expected version    | draft維持         | conflictまたはsafe code                |
+| model import/select/mapping/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash | quarantine cleanup、前selection維持 | bundled/selected delete拒否、前selection維持 |
 | Audio取得・保存・test       | Rust local process/store | `narration_*`                      | fixed `/usr/bin/say`、voice allowlist | process group停止 | caption維持、TTS offへfail closed     |
 | Support control             | Rust supervisor          | `configure/cancel_support`         | role allowlist、budget固定            | 前config維持      | disabled fallback                     |
 | readiness recheck           | Rust readiness service   | `run_diagnostic_check`             | read-only check                       | 前snapshot維持    | stale snapshotとsafe code             |
@@ -133,7 +139,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 
 ## データ保持
 
-AppPreferences、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。S-005の表示・section選択はworkspace history、Context、character model selection、Git stateを変更しない。
+AppPreferences、app-global Character context、character library selection/mapping、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。S-005の表示・section選択だけではworkspace history、Project context、Git stateを変更しない。
 
 ## OS差分
 
@@ -150,12 +156,12 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 
 | 要件ID                                                               | この画面での扱い                                 | 要件定義書                                                                    |
 | -------------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076`, `APP-F-083`      | global navigation、preference、diagnostics、a11y | [desktop-shell](../requirements/desktop-shell.md)                             |
+| `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076`, `APP-F-083`, `APP-F-084` | global navigation、preference、character presentation、diagnostics、a11y | [desktop-shell](../requirements/desktop-shell.md) |
 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`                             | Codex readiness                                  | [codex-main-session](../requirements/codex-main-session.md)                   |
 | `SUP-F-062`〜`SUP-F-078`                                             | global support control/readiness                 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092`                   | read-only Git/skill diagnostics                  | [git-review-harness](../requirements/git-review-harness.md)                   |
 | `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089` | app共通Audio                                     | [audio-commentary](../requirements/audio-commentary.md)                       |
-| `LIVE-F-055`〜`LIVE-F-059`, `LIVE-F-079`〜`LIVE-F-081`               | runtime readiness                                | [live2d-companion](../requirements/live2d-companion.md)                       |
+| `LIVE-F-055`〜`LIVE-F-081`                                          | global model library、mapping、runtime readiness | [live2d-companion](../requirements/live2d-companion.md)                       |
 
 ## 未確定事項
 
@@ -168,9 +174,9 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | 項目         | 内容       |
 | ------------ | ---------- |
 | レビュー結果 | Approved   |
-| レビュー日   | 2026-07-19 |
+| レビュー日   | 2026-07-20 |
 
-- [x] app-global 4 sectionとproject-scoped非対象が一意である。
+- [x] app-global 7 sectionとproject-scoped非対象が一意である。
 - [x] heading、Back、workspace選択時の状態維持を定義した。
 - [x] loading、empty、processing、offline、error、permissionを定義した。
 - [x] native boundary、ja/en、keyboard、200% zoomを定義した。

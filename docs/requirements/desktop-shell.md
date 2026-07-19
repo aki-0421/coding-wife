@@ -1,7 +1,7 @@
 ---
 title: "APP デスクトップシェル要件定義"
 description: "Coding Wifeの単一Tauriウィンドウ、言語、アクセシビリティ、ライフサイクル、信頼境界、macOS配布物を定義する。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "デスクトップシェル、共通ナビゲーション、言語、アクセシビリティを実装するとき。"
   - "TauriのCapability、CSP、終了、復旧の契約を確認するとき。"
@@ -75,7 +75,8 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-054` | 利用者はminimum window sizeでも主要操作を継続できる | windowは960×640 CSS px未満へ縮小できず、960×640でtab、timeline、composer、Send、停止操作が欠落しない | Approved | 非該当 |
 | `APP-F-055` | 利用者はS-001〜S-006の現行画面へ同じwindow内で移動できる | sidebar、Chat/Commit/Context/Settings tab、app settings gearから対象viewへ移動し、戻った時にworkspace選択とcomposer draftが保たれる | Approved | 非該当 |
 | `APP-F-056` | 利用者はmacOS native titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になる。WebViewは赤・黄・緑のtraffic-light代替要素を描画しない。main window上端40.5 CSS pxはReact component境界と無関係な一続きのnative titlebar hit bandとし、primary single mousedownでdrag、primary second mousedownでzoomを開始する。button、link、tab、input、select、textarea、contenteditable等のinteractive targetだけを除外し、native control用safe areaとdrag判定が操作を奪わない。`main` WebViewにはdrag開始と明示toggle maximizeに必要なTauri window permissionだけを許可し、任意のwindow操作権限は追加しない | Approved | 非該当 |
-| `APP-F-083` | 利用者はアプリ全体設定と選択中プロジェクト設定を別画面で識別できる | sidebarのapp settings gearはGeneral、Audio、Support、Diagnosticsだけを持つS-005を開き、workspaceのSettings tabはProject context、Character context、Companion、History & privacyだけを持つS-006を開く。S-005から戻っても選択workspace、active tab、composer draftを維持し、S-006のheadingには現在のproject identityを表示する | Approved | 非該当 |
+| `APP-F-083` | 利用者はアプリ全体設定と選択中プロジェクト設定を別画面で識別できる | sidebarのapp settings gearはGeneral、Projects、Character context、Companion、Audio、Support、Diagnosticsだけを持つS-005を開き、workspaceのSettings tabはProject context、History & privacyだけを持つS-006を開く。Character contextとCompanionはworkspace未選択でも表示・変更でき、S-005から戻っても選択workspace、active tab、composer draftを維持する。S-006のheadingには現在のproject identityを表示する | Approved | 非該当 |
+| `APP-F-084` | appはcharacter presentation設定を全workspaceへ共通適用する | Character contextはapp-globalな独立version/hashを持つnative record、selected character packとsemantic mappingはowner-only character library stateを正本とし、workspace IDまたはProject IDでpartitionしない。Character context保存は次の全workspaceのturnから、pack選択とmapping保存は全workspaceのcompanionへ反映する。旧workspace/project-scoped値はmigration時に一度だけ決定的にglobal値へ統合し、以後workspace切替、作成、削除、project登録解除で変更しない | Approved | 非該当 |
 
 ### 言語・アクセシビリティ
 

@@ -1,7 +1,7 @@
 ---
 title: "WORK ワークスペース・セッション要件定義"
 description: "ローカルGitプロジェクトの登録と、app管理Git worktreeであるworkspaceの作成・選択・復元・Archiveを定義する。"
-updated: 2026-07-19
+updated: 2026-07-20
 last_verified: 2026-07-19
 read_when:
   - "workspace sidebar、project picker、session lifecycleを実装するとき。"
@@ -98,7 +98,7 @@ read_when:
 | `WORK-F-060` | アプリはworkspace stateを再起動後に復元する | 20件のworkspaceについてProject ID、group、active selection、draft、last summary、timeline anchor ID/sequence/offsetをnative storeから再起動後に一致させる。保存anchorが削除・retention・correctionで存在しない場合だけ同workspaceの最寄りvalid sequenceへ補正し、別workspaceのsummary/anchorを再利用しない | Approved | 非該当 |
 | `WORK-F-061` | アプリは外部branch変更を検出する | window focusとSend直前にrepository identity、HEAD、branch、readability、writeabilityをread-onlyで再検査する。登録時または前回確認時から変化した場合は1秒以内にstale warningと安全なrecovery actionを表示し、再preflightまでturnを開始せず、Git状態を自動で戻さない | Approved | 非該当 |
 | `WORK-F-062` | 消失repositoryは復旧可能なerrorになる | 登録後にfolderが移動・削除された場合、workspace履歴、Context、draft、summary、anchorを残してMissing表示にし、repository再選択/repairまたは登録解除を提示する。他workspaceは継続利用でき、消失projectのturnを自動再送しない | Approved | 非該当 |
-| `WORK-F-063` | 利用者はproject contextとcharacter contextを分離して編集できる | Context tabで二つのsectionを別々に保存し、character contextからtechnical rule、permission、checkpoint policyを変更できない | Approved | 非該当 |
+| `WORK-F-063` | 利用者はproject contextとapp-globalなcharacter contextを分離して編集できる | Context tabとProject settingsは選択workspaceのProject contextだけを編集し、App settingsのCharacter contextは全workspaceへ共通適用する。二つは別record、別versionとして保存し、Character contextからtechnical rule、permission、checkpoint policyを変更できない | Approved | 非該当 |
 | `WORK-F-064` | 利用者はboundedなread-only workspace contextを取得できる | FilesとGit diffはtrusted root内のnative Git processから5秒以内、stdout 1MiB・stderr 4KiB以内で取得し、超過・停止時はprocess treeを終了して保存しない。workspaceごとにcapture順で最新10件だけをUIとDBへ一致して残し、信頼できるproducerがないTerminal outputはdemoを含め成功表示しない | Approved | 非該当 |
 | `WORK-F-065` | native workspace読込はdemo状態と分離する | native初期化中はworkspace skeletonと読込状態だけを表示し、add/create/select/draft/context/deleteを開始しない。読込失敗時もdemo workspaceへfallbackせず、回復errorと再試行可能性だけを表示する | Approved | 非該当 |
 | `WORK-F-066` | repository healthとrepairを状態付きで扱う | 各projectを`healthy` / `missing` / `changed` / `unreadable` / `read_only` / `stale_branch`へ分類し、workspace rowとheaderへ色だけでなくlocalized textとiconで表示する。Repair pickerは新しいcanonical Git worktreeのrepository identityが対象Project IDの保存identityと一致する時だけlinkageをatomic更新し、workspace ID、history、Context、draft、summary、anchorを維持する。candidate identityはpicker直後、mutation前、activation直前、DB transaction直前にlive filesystemから再検証し、DBでは保存Project ID・旧linkage・immutable identityとのcompare-and-swapを行う。同一repositoryの通常renameは許可するが、same-path replacementとTOCTOUはtyped changed errorで拒否する。identity不一致、picker cancel、権限不足、I/O失敗ではlinkageとselectionを変更せず、新規project追加を案内する。repairはsource、working tree、Git index/object/refを変更しない | Approved | 非該当 |
@@ -127,7 +127,7 @@ project登録解除は`projects.registered`とnavigationだけを変更し、wor
 | Filter | query | 空 | 任意 | 0〜200 Unicode scalar | 200超を受け付けず一覧を維持 |
 | Repair | repository folder | 現在のlinkage | 条件付き | canonical regular Git worktree、保存repository identityとのexact一致 | linkageを変更せず、再選択・cancel・新規project追加を残す |
 | Context | project context | 空 | 任意 | goal / constraints / user notesは各0〜8,000、Definition of doneは最大20項目・各1〜500、technical referencesは最大20項目・各1〜500、全field・全項目の総量32,000 Unicode scalar | 保存せず入力保持 |
-| Context | character context | Display nameは`Sol`、他は既定値 | 任意 | display name 1〜40、tone補足0〜1,000、behavior 0〜4,000、prohibited expressions最大20項目・各1〜200、全field・全項目の総量12,000 Unicode scalar、technical policy key禁止 | 禁止内容を除いて再編集を求める |
+| App settings | character context | Display nameは`Sol`、他は既定値 | 任意 | app-global。display name 1〜40、tone補足0〜1,000、behavior 0〜4,000、prohibited expressions最大20項目・各1〜200、全field・全項目の総量12,000 Unicode scalar、technical policy key禁止 | 禁止内容を除いて再編集を求める |
 
 ### Versioned editable Context contract
 
@@ -155,7 +155,7 @@ Projectの配列fieldは入力中のraw textをworkspace draftとして保持し
 
 technical referenceはSave時に`.` segmentと重複separatorを除いたcanonical project-relative表記へ正規化し、現在のtrusted root内で各componentと最終targetを解決する。保存時のworkspace root identityとreference target identityをapp-private metadataへ記録する。missing、absolute、`..`、root外symlinkを保存せず、保存後にrootまたはtarget identity、symlink解決先、存在状態が変化した場合は次turn snapshotを構築しない。missingだったpathが作成された場合も、再Saveで新しいversionとidentityを確定するまで既存recordへ暗黙採用しない。
 
-Sendはnative storeから対象workspaceのProject / Characterを同じread transactionで取得し、各versionとcanonical JSON hashを持つimmutable request snapshotをturn開始前に一度だけ確定する。snapshot直前に現在のtrusted root、workspace identity、全technical referenceを再検証し、失敗時はrecoverable preflight errorでSendを止める。main sessionへ渡すcontextは命令ではないquoted untrusted dataとして明示的な境界内へ直列化し、authoritative user instructionおよびapp-owned technical policyと混在させない。Character contextはpresentation metadataとしてのみ扱い、permission、verification、安全ruleのauthorityを持たない。turnが`running` / `waiting`になった後の保存を途中注入せず、次のSendだけが新versionを取得する。別workspaceのrecord、draft、conflict、snapshotを参照または再利用してはならず、app再起動後もworkspaceごとのversion・hash・内容が一致する。
+Sendはnative storeから対象workspaceのProject contextとapp-globalなCharacter contextを同じread transactionで取得し、各versionとcanonical JSON hashを持つimmutable request snapshotをturn開始前に一度だけ確定する。snapshot直前に現在のtrusted root、workspace identity、全technical referenceを再検証し、失敗時はrecoverable preflight errorでSendを止める。main sessionへ渡すcontextは命令ではないquoted untrusted dataとして明示的な境界内へ直列化し、authoritative user instructionおよびapp-owned technical policyと混在させない。Character contextはpresentation metadataとしてのみ扱い、permission、verification、安全ruleのauthorityを持たない。turnが`running` / `waiting`になった後の保存を途中注入せず、次のSendだけが新versionを取得する。Project record、draft、conflict、snapshotはworkspace間で再利用せず、Character contextだけは同じglobal version・hash・内容を全workspaceで参照する。
 
 nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを使う。同じcanonical contentは同じcontent hash、異なるcontentは異なるhashとなり、UIの短縮hashをsynthetic placeholderで代用しない。
 
@@ -166,7 +166,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | 対象OS・OS差分 | macOS 14以降のfolder pickerとpath normalization | `WORK-F-044`〜`WORK-F-047` |
 | ウィンドウ生成・再利用 | single main window内のsidebarとtabを再利用 | `WORK-F-052` |
 | 閉じる・アプリ終了 | active executionの停止判断はAPP要件に従う | `WORK-F-058`, `WORK-F-060` |
-| 未保存データ | draftとContext入力をworkspace単位で保持 | `WORK-F-059`, `WORK-F-063`, `WORK-F-064` |
+| 未保存データ | draftとProject context入力はworkspace単位、Character context入力はapp単位で保持 | `WORK-F-059`, `WORK-F-063`, `WORK-F-064` |
 | ローカルデータ | canonical pathはRust管理DBの目的限定project linkageへ保存し、normalized eventやUI storageを正本にしない | `WORK-F-060` |
 | オフライン | project一覧、filter、Contextは利用可能 | `WORK-F-051`, `WORK-F-063` |
 | ファイル・OS操作 | picker cancel、権限不足、移動・削除、bounded context process失敗を区別 | `WORK-F-045`, `WORK-F-047`, `WORK-F-062`, `WORK-F-064` |
@@ -182,6 +182,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 |---|---|---|---|---|
 | `S-001` | セッションダッシュボード | `WORK-F-044`〜`WORK-F-062`, `WORK-F-065`〜`WORK-F-068` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | `WORK-F-052`〜`WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
+| `S-005` | アプリ設定・診断 | `WORK-F-063` | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
 | `S-006` | プロジェクト設定 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
 ## 非機能要件
