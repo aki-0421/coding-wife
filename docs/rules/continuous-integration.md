@@ -70,7 +70,8 @@ Cargoの実効runtime graphと生成済み法務台帳のbyte一致を、対象p
 - 外部GitHub Actionはrelease tagの完全なcommit SHAへ固定し、同じ行のcommentへ対応versionを残す。version更新時は公式releaseとSHAを再確認する。
 - pnpm store、Cargo registry、Cargo Git DB、Cargo targetはlockfileとtoolchainから導いたkeyでcacheしてよい。cacheは高速化だけを担い、cache missでも同じ結果になることを必須とする。
 - CIはsource、lockfile、生成済み法務台帳を自動更新しない。staleな生成物は失敗として報告する。
-- `third-party/THIRD-PARTY-DEPENDENCIES.json`とpackaged copyは生成器がbyte列を所有するためPrettier対象外とし、`pnpm licenses:check`のbyte一致と完全性検査だけを正本とする。
+- `third-party/THIRD-PARTY-DEPENDENCIES.json`とpackaged copyは生成器がbyte列を所有するためBiome対象外とし、`pnpm licenses:check`のbyte一致と完全性検査だけを正本とする。
+- JavaScript系lintと対応形式のformatはrootの`biome.json`を共通の正本とする。YAMLとMarkdownはBiome 2.5.4のformat対象外であり、CI用に第二のformatterを導入しない。
 
 ## 権限と秘密情報
 

@@ -21,9 +21,9 @@ read_when:
 | `pnpm tauri:dev` | Tauriのnative development appを起動する |
 | `pnpm build` | Live2D準備、TypeScript、Vite production build、production bundle検査を連続実行する |
 | `pnpm tauri:build` | Tauri production appをbuildする。通常のローカル検証には使わない |
-| `pnpm format` | Prettier対象を更新する |
-| `pnpm format:check` | Prettier対象を変更せず検査する |
-| `pnpm lint` | Live2D固定入力とESLintを検査する |
+| `pnpm format` | Biome対応形式の対象fileを更新する |
+| `pnpm format:check` | Biome対応形式の対象fileを変更せず検査する |
+| `pnpm lint` | Live2D固定入力とBiome linterを検査する |
 | `pnpm typecheck` | Live2Dを準備し、application TypeScriptを検査する |
 | `pnpm test` | PR向けのsupply-chain、repository、frontend testを実行する |
 | `pnpm test:watch` | Live2Dを準備し、Vitest watch modeを起動する |
@@ -42,6 +42,7 @@ read_when:
 - `scripts/live2d/`、`scripts/licenses/`、`scripts/quality/`、`scripts/release/`、`scripts/skills/`配下の個別処理は、公開ワークフローの内部から実体fileを直接呼ぶ。保守担当が個別診断するときも実体fileを使い、package scriptsへ一処理一aliasを追加しない。
 - macOS releaseのapp、DMG、verify単体診断は`scripts/release/`配下のshell scriptを直接使う。審査用成果物の正規入口は`pnpm release:macos`だけとする。
 - scriptを追加する場合は、既存の公開コマンドへoptionを追加できず、人が独立して選ぶ反復可能なworkflowであり、CIまたは文書から安定名を参照する必要があることを説明できなければならない。
+- lintとformatの対象、除外、ruleは[Biome運用仕様](biome.md)とrootの`biome.json`を正本とする。公開コマンドから別のlintまたはformatterを呼ばない。
 
 ## 受け入れ条件
 

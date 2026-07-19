@@ -1,7 +1,7 @@
 ---
 title: Git review runtime 実装・検証ガイド
 description: main Codex が作成した commit を read-only で観測し、commit evidence、lazy diff、app-owned 説明導線を安全に変更・検証するためのガイド。
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - Git observer、work unit correlation、commit evidence を実装または変更するとき。
   - Commit tab の list、detail、filter、lazy diff、4 gate を接続または検証するとき。
@@ -104,7 +104,7 @@ cargo test --manifest-path src-tauri/Cargo.toml git_review
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 pnpm exec tsc --noEmit
 pnpm exec vitest run src/lib/contracts/git-review.test.ts src/lib/contracts/domain-event.test.ts src/lib/contracts/workspace-history.test.ts src/features/git-review/store.test.ts src/features/git-review/transport.test.ts src/features/git-review/EvidenceView.test.tsx src/features/workspace-view/WorkspaceShell.test.tsx
-pnpm exec eslint src/features/git-review src/lib/contracts/git-review.ts --max-warnings 0
+pnpm exec biome lint src/features/git-review src/lib/contracts/git-review.ts --error-on-warnings
 agent-docs lint
 ```
 
