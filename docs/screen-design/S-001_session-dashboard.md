@@ -160,7 +160,7 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 |---|---|---|---|---|---|
 | Projectを追加 | toolbar FolderPlusまたはinline formのProject field | native pickerの1 directoryをRust診断し、validならprojectだけを1件追加。workspaceは作成せず、inline formのProject selectへ反映する | 一覧、selection、inline入力を維持し、errorなし | 登録せず原因と再選択 | `WORK-F-044`〜`WORK-F-049` |
 | preflight再診断 | project rootが存在 | Git/Codex/login/Sol/characterを更新 | 非該当 | check単位でBlocked、既存履歴維持 | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
-| Workspace作成 | inline formまたはdialog、registered project 1件以上、project/name valid | 選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、成功後だけBacklogへ1件追加して選択する | dialog入力を破棄し、inline入力は維持する。一覧・filesystemは変更しない | 入力保持、field error。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
+| Workspace作成 | inline formまたはdialog、registered project 1件以上、project/name valid | 選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、workspace固有rootとprojectのGit common directory identityを照合して、成功後だけBacklogへ1件追加・選択する | dialog入力を破棄し、inline入力は維持する。一覧・filesystemは変更しない | 入力保持、field error。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
 | workspaceをArchive | sidebar rowのArchive、active/pending turnなし | 確認後、対象worktreeを削除してrowを一覧から外す。既にworktreeが消失済みなら成功扱い | workspace、worktree、selection不変 | 対象以外を変更せず、再試行可能なerror | `WORK-F-067` |
 | filter | query 0〜200文字 | repo/branch/nameの部分一致を100ms以内に表示 | Escapeで直前query維持 | 一覧維持、境界表示 | `WORK-F-051` |
 | workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Context、Companionを同一IDへ100ms以内にatomic切替 | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |

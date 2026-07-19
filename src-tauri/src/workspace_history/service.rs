@@ -10,8 +10,9 @@ use crate::character::CharacterService;
 use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
 use crate::codex::workspace::{
-    matches_saved_git_repository, matches_saved_repository_identity, validate_git_repository,
-    AppPrivateProjectIdentity, ValidatedWorkspaceCandidate, WorkspaceService,
+    matches_saved_git_repository, matches_saved_repository_identity, same_git_common_directory,
+    validate_git_repository, AppPrivateProjectIdentity, ValidatedWorkspaceCandidate,
+    WorkspaceService,
 };
 
 use super::editable_context::{
@@ -548,6 +549,9 @@ impl WorkspaceHistoryService {
                 false,
             ));
         }
+        self.store
+            .confirm_project_common_identity(&request.project_id, &live_project)
+            .map_err(|error| history_error("workspace_create_session", error))?;
         let workspace_id = format!("workspace-{}", uuid::Uuid::new_v4());
         let branch = format!("coding-wife/{}", uuid::Uuid::new_v4());
         let worktree_root = self
@@ -570,7 +574,7 @@ impl WorkspaceHistoryService {
                 return Err(codex_error("workspace_create_session", error));
             }
         };
-        if !matches_saved_git_repository(&candidate.git, &project) {
+        if !same_git_common_directory(&candidate.git, &live_project) {
             rollback_managed_worktree(&project.canonical_root, &worktree_root, &branch).await;
             return Err(WorkspaceCommandError::new(
                 "WORKSPACE-PROJECT-IDENTITY-CHANGED",
@@ -1760,6 +1764,8 @@ mod tests {
             root_inode,
             git_device: 1,
             git_inode,
+            common_git_device: 1,
+            common_git_inode: git_inode,
             project_identity: hex::encode(digest),
             github_repository: Some("fixture-owner/fixture-repository".to_owned()),
             branch: "main".to_owned(),
