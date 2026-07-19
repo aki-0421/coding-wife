@@ -360,10 +360,7 @@ export function WorkspaceHeader({
 }: WorkspaceHeaderProps) {
   return (
     <header className="workspace-header border-b border-divider bg-surface">
-      <div
-        className="flex h-[40px] min-w-0 items-center gap-sm px-xl"
-        data-tauri-drag-region=""
-      >
+      <div className="flex h-[40px] min-w-0 items-center gap-sm px-xl">
         <Tooltip>
           <TooltipTrigger asChild>
             <span
@@ -401,6 +398,7 @@ export function WorkspaceHeader({
           <TooltipContent>{workspace.branch}</TooltipContent>
         </Tooltip>
         <WorkspaceHealthStatus copy={copy} workspace={workspace} />
+        <span aria-hidden="true" className="h-full min-w-12 flex-1" />
         <WorkspaceActions
           actionPending={actionPending}
           activeTab={activeTab}
