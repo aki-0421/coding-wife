@@ -25,8 +25,57 @@ release_release_lock() {
   return 0
 }
 
+classify_app_build_failure() {
+  local log="${tool_log:-}"
+  local line=''
+  local storage=0
+  local terminated=0
+  local linker=0
+  local compiler=0
+  local frontend=0
+  local bundler=0
+
+  [[ -n "$log" && -f "$log" && ! -L "$log" ]] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      *'No space left on device'*|*'os error 28'*) storage=1 ;;
+      *'signal: 9'*|*'SIGKILL'*|*'Killed: 9'*) terminated=1 ;;
+      *'linking with '*failed*|*'Undefined symbols for architecture'*) linker=1 ;;
+      *'error[E'[0-9][0-9][0-9][0-9]']'*|*'error: could not compile'*) compiler=1 ;;
+      *'beforeBuildCommand'*failed*|*'ELIFECYCLE'*) frontend=1 ;;
+      *'failed to bundle project'*|*'failed to bundle app'*) bundler=1 ;;
+    esac
+  done <"$log"
+
+  if [[ "$storage" -eq 1 ]]; then
+    /usr/bin/printf '%s' 'BUILD_STORAGE_EXHAUSTED'
+  elif [[ "$terminated" -eq 1 ]]; then
+    /usr/bin/printf '%s' 'BUILD_PROCESS_TERMINATED'
+  elif [[ "$linker" -eq 1 ]]; then
+    /usr/bin/printf '%s' 'RUST_LINK_FAILED'
+  elif [[ "$compiler" -eq 1 ]]; then
+    /usr/bin/printf '%s' 'RUST_COMPILE_FAILED'
+  elif [[ "$frontend" -eq 1 ]]; then
+    /usr/bin/printf '%s' 'FRONTEND_BUILD_FAILED'
+  elif [[ "$bundler" -eq 1 ]]; then
+    /usr/bin/printf '%s' 'TAURI_BUNDLE_FAILED'
+  else
+    return 1
+  fi
+}
+
 fail() {
-  /usr/bin/printf '%s %s\n' "$ERROR_PREFIX" "$1" >&2
+  local code="$1"
+  local cause=''
+  if [[ "$code" == 'APP_BUILD_FAILED' ]]; then
+    cause="$(classify_app_build_failure 2>/dev/null || true)"
+  fi
+  case "$cause" in
+    BUILD_STORAGE_EXHAUSTED|BUILD_PROCESS_TERMINATED|RUST_LINK_FAILED|RUST_COMPILE_FAILED|FRONTEND_BUILD_FAILED|TAURI_BUNDLE_FAILED)
+      /usr/bin/printf '%s %s cause=%s\n' "$ERROR_PREFIX" "$code" "$cause" >&2
+      ;;
+    *) /usr/bin/printf '%s %s\n' "$ERROR_PREFIX" "$code" >&2 ;;
+  esac
   exit 1
 }
 

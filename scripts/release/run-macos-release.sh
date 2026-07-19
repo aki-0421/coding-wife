@@ -29,8 +29,33 @@ usage() {
   /usr/bin/printf '%s\n' 'Usage: run-macos-release.sh [--output-root <bundle-directory>]'
 }
 
+app_failure_cause() {
+  local log="${tool_log:-}"
+  local line=''
+  local cause=''
+
+  [[ -n "$log" && -f "$log" && ! -L "$log" ]] || return 1
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\[release\]\ APP_BUILD_FAILED\ cause=(BUILD_STORAGE_EXHAUSTED|BUILD_PROCESS_TERMINATED|RUST_LINK_FAILED|RUST_COMPILE_FAILED|FRONTEND_BUILD_FAILED|TAURI_BUNDLE_FAILED)$ ]]; then
+      cause="${BASH_REMATCH[1]}"
+    fi
+  done <"$log"
+  [[ -n "$cause" ]] || return 1
+  /usr/bin/printf '%s' "$cause"
+}
+
 fail() {
-  /usr/bin/printf '%s %s\n' "$ERROR_PREFIX" "$1" >&2
+  local code="$1"
+  local cause=''
+  if [[ "$code" == 'RELEASE_APP_FAILED' ]]; then
+    cause="$(app_failure_cause 2>/dev/null || true)"
+  fi
+  case "$cause" in
+    BUILD_STORAGE_EXHAUSTED|BUILD_PROCESS_TERMINATED|RUST_LINK_FAILED|RUST_COMPILE_FAILED|FRONTEND_BUILD_FAILED|TAURI_BUNDLE_FAILED)
+      /usr/bin/printf '%s %s cause=%s\n' "$ERROR_PREFIX" "$code" "$cause" >&2
+      ;;
+    *) /usr/bin/printf '%s %s\n' "$ERROR_PREFIX" "$code" >&2 ;;
+  esac
   exit 1
 }
 
