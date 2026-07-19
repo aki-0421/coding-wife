@@ -785,7 +785,10 @@ export function useEditableSettingsContext(
   const project = states[workspaceId] ?? loadingState()
   const globalCharacter =
     states[globalCharacterKey]?.character ?? loadingState().character
-  const current = { project: project.project, character: globalCharacter }
+  const current = useMemo(
+    () => ({ project: project.project, character: globalCharacter }),
+    [project.project, globalCharacter],
+  )
   return useMemo(
     () => ({
       projectId,
