@@ -14,10 +14,24 @@ export const QUALITY_GATES = Object.freeze([
     command: pnpm,
     args: ["licenses:check"],
   },
-  { id: "clean-checkout", command: pnpm, args: ["test:clean-checkout"] },
+  {
+    id: "dependency-license-tests",
+    command: process.execPath,
+    args: ["--test", "scripts/licenses/dependency-notices.test.mjs"],
+  },
+  {
+    id: "clean-checkout",
+    command: process.execPath,
+    args: ["scripts/live2d/clean-checkout-smoke.mjs"],
+  },
   { id: "typecheck", command: pnpm, args: ["typecheck"] },
   { id: "frontend-build", command: pnpm, args: ["build"] },
-  { id: "live2d-inventory", command: pnpm, args: ["live2d:verify"] },
+  {
+    id: "live2d-inventory",
+    command: process.execPath,
+    args: ["scripts/live2d/verify-live2d.mjs"],
+  },
+  { id: "release-tests", command: pnpm, args: ["test:release"] },
   {
     id: "rust-format",
     command: "cargo",
@@ -54,7 +68,7 @@ export const QUALITY_GATES = Object.freeze([
     command: "agent-docs",
     args: ["--no-user-config", "lint"],
   },
-  { id: "tauri-build", command: pnpm, args: ["tauri", "build"] },
+  { id: "tauri-build", command: pnpm, args: ["tauri:build"] },
   { id: "repository-diff", command: pnpm, args: ["check:diff"] },
 ])
 

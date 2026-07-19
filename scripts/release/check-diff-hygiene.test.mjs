@@ -590,6 +590,25 @@ test("README, testing instructions, package commands, and CI separate PR and rel
     ])
   const packageJson = JSON.parse(packageText)
 
+  assert.deepEqual(Object.keys(packageJson.scripts), [
+    "dev",
+    "tauri:dev",
+    "build",
+    "tauri:build",
+    "format",
+    "format:check",
+    "lint",
+    "typecheck",
+    "test",
+    "test:watch",
+    "test:release",
+    "check:diff",
+    "licenses:generate",
+    "licenses:check",
+    "quality:check",
+    "release:macos",
+  ])
+  assert.equal(packageJson.scripts["tauri:dev"], "tauri dev")
   assert.equal(
     packageJson.scripts["check:diff"],
     "node scripts/release/check-diff-hygiene.mjs",
@@ -599,13 +618,15 @@ test("README, testing instructions, package commands, and CI separate PR and rel
     "node scripts/quality/run-quality-gates.mjs",
   )
   assert.equal("test:release:unit" in packageJson.scripts, false)
-  assert.doesNotMatch(packageJson.scripts["test:pr"], /test:release/u)
+  assert.doesNotMatch(packageJson.scripts.test, /test:release/u)
+  assert.equal("test:pr" in packageJson.scripts, false)
+  assert.match(readme, /pnpm tauri:dev/u)
   assert.match(readme, /pnpm check:diff/u)
   assert.equal(readme.includes("git diff --check"), false)
   assert.match(testingInstructions, /pnpm check:diff/u)
   assert.match(testingInstructions, /pnpm quality:check/u)
   assert.match(workflow, /pnpm check:diff/u)
-  assert.match(workflow, /pnpm test:pr/u)
+  assert.match(workflow, /pnpm test(?:\s|$)/u)
   assert.match(workflow, /pnpm licenses:check/u)
   assert.match(workflow, /cargo clippy --locked/u)
   assert.match(workflow, /cargo test --locked/u)
@@ -623,8 +644,7 @@ test("README, testing instructions, package commands, and CI separate PR and rel
   assert.doesNotMatch(workflow, /uses: [^\n]+@v[0-9]+(?:\s|$)/u)
   assert.doesNotMatch(workflow, /pnpm quality:check/u)
   assert.doesNotMatch(workflow, /pnpm test:release(?:\s|$)/u)
-  assert.doesNotMatch(workflow, /pnpm test:clean-checkout/u)
-  assert.doesNotMatch(workflow, /pnpm tauri build/u)
+  assert.doesNotMatch(workflow, /pnpm tauri:build/u)
   assert.match(qualityRunner, /--all-targets/u)
   assert.match(qualityRunner, /pnpm.*tauri/u)
 })

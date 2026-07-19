@@ -38,7 +38,7 @@ pnpm dev
 Run the native shell with:
 
 ```bash
-pnpm tauri dev
+pnpm tauri:dev
 ```
 
 ## Run the release-candidate quality gates
@@ -53,13 +53,13 @@ pnpm quality:check
 git status --short
 ```
 
-Both status commands must print nothing. `pnpm quality:check` refuses a dirty checkout and runs every expensive gate synchronously in this order: `format:check`, the offline locked-dependency license check, `test:clean-checkout`, `typecheck`, `build`, `live2d:verify`, Rust format, Clippy with warnings denied, Rust tests, deterministic `agent-docs` lint, the production Tauri build, and the final repository diff check. Frontend and Cargo workloads never overlap. The command checks the worktree again after the build and stops at the first failed gate. Running an individual command is partial validation only and is not release-candidate evidence.
+Both status commands must print nothing. `pnpm quality:check` refuses a dirty checkout and runs every expensive gate synchronously in this order: `format:check`, the offline locked-dependency license check and its generator test, clean-checkout reconstruction, `typecheck`, `build`, the Live2D inventory check, `test:release`, Rust format, Clippy with warnings denied, Rust tests, deterministic `agent-docs` lint, `tauri:build`, and the final repository diff check. Frontend and Cargo workloads never overlap. The command checks the worktree again after the build and stops at the first failed gate. Running an individual command is partial validation only and is not release-candidate evidence.
 
 The dependency-license gate compares committed and packaged JSON/Markdown notices byte-for-byte with the complete pnpm declared `dependencies` closure and the effective Cargo runtime graph. The Cargo graph comes from color-disabled `LC_ALL=C cargo tree --locked --offline --target aarch64-apple-darwin --edges normal`; every displayed package is resolved to one exact metadata package ID, and ambiguous output, malformed SPDX expressions, stale output, or missing, unknown, forbidden, or unapproved license/source/integrity metadata fails closed. It uses only the lockfiles, installed package metadata, and local Cargo registry sources. The npm closure is intentionally conservative package-manager classification and is not presented as a Vite bundle module inventory.
 
 The Rust gate uses the committed lockfile and libtest `--test-threads=1`. Several native integration tests deliberately enforce real wall-clock budgets while running Git, SQLite, and local process fixtures; serial suite scheduling prevents unrelated fixtures from consuming one another's product budgets. Concurrency behavior remains covered inside the individual tests with controlled tasks and peak counters. The gate does not extend, retry, ignore, or remove any timeout or performance assertion.
 
-`pnpm test:clean-checkout` creates a detached temporary worktree from `HEAD`, installs the pinned lockfile, and proves lint, tests, type checking, and Live2D preparation do not depend on ignored Framework output.
+`node scripts/live2d/clean-checkout-smoke.mjs` creates a detached temporary worktree from `HEAD`, installs the pinned lockfile, and proves lint, tests, type checking, and Live2D preparation do not depend on ignored Framework output.
 
 `pnpm check:diff` checks committed changes from `origin/develop...HEAD`, staged changes, unstaged changes, and untracked files for whitespace errors and unresolved conflict markers. Its committed-diff policy also rejects generated/build paths, private-state paths, newly added machine-local checkout or home paths, and binary files outside the explicit application asset allowlist. CI passes the Pull Request base commit to the same command. Use `pnpm check:diff -- --working-tree` for local whitespace checks when the base ref is intentionally unavailable.
 
@@ -73,12 +73,18 @@ Build and verify both the Tauri app bundle and the repository-owned DMG:
 pnpm release:macos
 ```
 
-The commands are intentionally split for diagnosis:
+The implementation scripts remain directly available for diagnosis without expanding the package command surface:
 
 ```bash
-pnpm release:macos:app
-pnpm release:macos:dmg
-pnpm release:macos:verify
+bash scripts/release/build-macos-app.sh
+bash scripts/release/build-macos-dmg.sh \
+  --app "$PWD/src-tauri/target/release/bundle/macos/Coding Wife.app" \
+  --output "$PWD/src-tauri/target/release/bundle/dmg/Coding-Wife.dmg" \
+  --volume-name "Coding Wife" \
+  --overwrite
+bash scripts/release/verify-macos-release.sh \
+  --app "$PWD/src-tauri/target/release/bundle/macos/Coding Wife.app" \
+  --dmg "$PWD/src-tauri/target/release/bundle/dmg/Coding-Wife.dmg"
 ```
 
 Tauri produces only `Coding Wife.app`. The app command builds in a fresh private target, keeps raw tool output in a mode-`0700` work directory and mode-`0600` log, checks that locked dependency notices are current and packaged legal files are byte-identical, excludes the development-only demo runtime, signs nested executable code first, and seals the complete app with a timestamp-free ad-hoc signature. It full-verifies the private and same-filesystem ready copies before publishing the app and its run manifest. The combined command supplies a private output, so the child app build never changes the canonical path. This integrity seal does not provide a Developer ID identity and does not prove notarization.

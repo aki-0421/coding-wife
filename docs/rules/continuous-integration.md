@@ -16,7 +16,7 @@ read_when:
 
 ## 正本と責務境界
 
-- PR向けJavaScript test集合の正本は`pnpm test:pr`とする。macOS固有かどうかを問わず、`pnpm test:release`配下のrelease testは呼び出さない。
+- PR向けJavaScript test集合の正本は`pnpm test`とする。macOS固有かどうかを問わず、`pnpm test:release`配下のrelease testは呼び出さない。
 - CIは`.github/workflows/ci.yml`に列挙したformat、documentation、frontend、native、dependency inventoryだけを固定依存のclean checkoutで実行する。
 - 通常のローカル開発では、これらのCI検証やリリース候補向け検証を変更後の確認として自動実行しない。ローカル検証は、ユーザーが明示的に依頼した場合、または依頼された作業自体がリリース候補の作成・検証である場合に限定する。
 - `pnpm quality:check`はrelease候補用の完全ゲートとして維持する。clean-checkout再構築、macOS release integration、Tauri bundle、最終diff再検査を含むため、PRごとのCIでは実行しない。
@@ -43,9 +43,9 @@ read_when:
 | 前提 | full Git history、Node.js `22.12.0`、pnpm `10.12.2`、agent-docs `v0.1.1` |
 | 差分 | PRは`pull_request.base.sha`、pushは`push.before`をbaseに`pnpm check:diff` |
 | Repository | `pnpm format:check`、`agent-docs --no-user-config lint` |
-| Frontend | `pnpm lint`、`pnpm typecheck`、`pnpm test:pr`、`pnpm build` |
+| Frontend | `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` |
 
-`pnpm check:diff`を依存install前に実行して不正な差分を早期に拒否する。`pnpm test:pr`はLive2Dとbundled skillのsupply-chain test、diff hygieneとquality runnerのrepository test、frontend Vitestを実行する。symlink modeなどrunner OSで意味が変わるrelease testは、部分的にLinuxへ移さず`pnpm test:release`へ集約する。production frontend buildとdemo marker除外は`pnpm build`で確認する。
+`pnpm check:diff`を依存install前に実行して不正な差分を早期に拒否する。`pnpm test`はLive2Dとbundled skillのsupply-chain test、diff hygieneとquality runnerのrepository test、frontend Vitestを実行する。symlink modeなどrunner OSで意味が変わるrelease testは、部分的にLinuxへ移さず`pnpm test:release`へ集約する。production frontend buildとdemo marker除外は`pnpm build`で確認する。
 
 Frontend VitestはLinux上のjsdomで実行する。character asset integrity testは省略せず、browser realmの`ArrayBuffer`をNode WebCryptoへ渡す境界では`Uint8Array`の`BufferSource` viewへ正規化する。UI fixtureは、target branchの現行アクセシブル名とnavigation構造を検証し、過去の表示構造を固定しない。
 
@@ -59,10 +59,10 @@ Frontend VitestはLinux上のjsdomで実行する。character asset integrity te
 | Node / pnpm | Node.js `22.12.0` / pnpm `10.12.2` |
 | Rust | `rust-toolchain.toml`のRust `1.88.0`、Clippy、rustfmt |
 | Dependency preparation | `pnpm install --frozen-lockfile`とApple Silicon targetへの`cargo fetch --locked` |
-| Compliance | `pnpm licenses:check`、`pnpm test:licenses` |
+| Compliance | `pnpm licenses:check`、`node --test scripts/licenses/*.test.mjs` |
 | Native | `cargo fmt --check`、warningsを拒否するlocked Clippy、serialなlocked Rust test |
 
-Cargoの実効runtime graphと生成済み法務台帳のbyte一致を、対象platformのregistry metadataで検証する。Rust unit/integration testは実行するが、`pnpm tauri build`とrelease packagingは実行しない。
+Cargoの実効runtime graphと生成済み法務台帳のbyte一致を、対象platformのregistry metadataで検証する。Rust unit/integration testは実行するが、`pnpm tauri:build`とrelease packagingは実行しない。
 
 ## 再現性とcache
 

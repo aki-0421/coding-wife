@@ -40,9 +40,9 @@ Web情報を更新した場合は、対象文書の `updated` と `last_verified
 
 * `pnpm quality:check`
 * `pnpm test:release`
-* `pnpm test:clean-checkout`
-* `pnpm tauri build`
-* `pnpm release:macos`とその配下のapp、DMG、verifyコマンド
+* `node scripts/live2d/clean-checkout-smoke.mjs`
+* `pnpm tauri:build`
+* `pnpm release:macos`と`scripts/release/`配下のapp、DMG、verifyコマンド
 
 ## コミットメッセージ
 

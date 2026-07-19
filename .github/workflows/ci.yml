@@ -92,7 +92,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Run Pull Request test suite
-        run: pnpm test:pr
+        run: pnpm test
 
       - name: Build production frontend
         run: pnpm build
@@ -146,7 +146,7 @@ jobs:
         run: pnpm licenses:check
 
       - name: Test dependency license inventory
-        run: pnpm test:licenses
+        run: node --test scripts/licenses/*.test.mjs
 
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check

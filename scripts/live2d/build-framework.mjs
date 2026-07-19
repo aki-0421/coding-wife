@@ -197,7 +197,7 @@ function assertTrackedFrameworkTypes(stage, trackedTypes) {
     const tracked = readFileSync(path.join(trackedTypes, relative), "utf8")
     if (generated !== tracked) {
       fail(
-        `tracked Cubism declaration differs from fixed-compiler output: ${relative}; run pnpm live2d:sync:framework-types`,
+        `tracked Cubism declaration differs from fixed-compiler output: ${relative}; run node scripts/live2d/sync-framework-types.mjs`,
       )
     }
   }
