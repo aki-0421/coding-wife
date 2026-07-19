@@ -194,7 +194,7 @@ Coding Wife のmarkは、人とagentを表す二つの穏やかな流れが、�
 - **Geometry:** 正本は `src-tauri/icons/app-icon.svg` の 1024×1024 viewBox とする。角丸160の暗色squareの中へ、左側約22〜48%を通るround-capの二曲線と、中央約41%から右側約80%を占める非対称なround work surfaceを置く。中心円、外周ring、交差線、細い装飾、内側glyphを追加しない。二曲線の間には最小72pxのnegative spaceを保つ。
 - **No text / no letter:** mark内部へ文字、頭文字、monogram、数字、顔、目、星、sparkle、check、魔術・占星術記号を描かない。特に `H`、`W`、`Y`、目、門、檻、警告標識へ見える中心対称・縦横接続・囲い込みを禁止する。名称は隣接HTML text、tooltip、`aria-label`で伝え、図形へ埋め込まない。
 - **Colors:** 背景は App BG `#171514`、上の流線は Warm Active `#d0b1a3`、下の流線は Primary Text `#d4d4d8`、作業面は Action Fill `#d7d4d2` を使う。gradient、glow、shadow、暗い円環は使わず、既存のrestrained paletteから色を増やさない。
-- **Small-size rules:** 24pxのheader、32pxのbundle icon、128px、256pxで同じsilhouetteを保つ。24/32pxでは二流線、流線間の空間、前進する作業面の三要素が個別に読める太さを下限とし、1px未満になるdetailを持ち込まない。角丸square外はtransparentのまま、edgeへ接触させない。inline表示は共通の`BrandMark` SVG componentを使い、装飾用途以外ではaccessible nameを保持する。
+- **Small-size rules:** 24pxのinline mark、32pxのbundle icon、128px、256pxで同じsilhouetteを保つ。24/32pxでは二流線、流線間の空間、前進する作業面の三要素が個別に読める太さを下限とし、1px未満になるdetailを持ち込まない。角丸square外はtransparentのまま、edgeへ接触させない。app identityを示すinline表示は共通の`BrandMark` SVG componentを使い、装飾用途以外ではaccessible nameを保持する。workspace headerの先頭はapp identityではなくrepository owner identityを示すため、このmarkを置かない。
 
 ### Source and regeneration
 
@@ -311,7 +311,7 @@ Sidebarは255.04px幅と49.5px itemに合わせた固定4段階を使う。**Sid
 
 ### Navigation
 
-Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の list だけを scroll させる。workspace item は 242.25×49.5px、active item だけ selected-row を持つ。header は 40.5px の breadcrumb row と 40.5px の tab row。active tab は strong text と 1.5px warm-active underline、inactive は readable muted text とし、keyboard roving focus を提供する。960〜1279px では sidebar を 64px rail または drawer へ畳み、960px 未満は MVP native window で許可しない。200% text zoom などで有効幅が 700px 以下になる場合は、永続化状態と companion 状態を同じ status region で縦積みし、timeline、composer、Send、mute を隠さない。
+Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の list だけを scroll させる。workspace item は 242.25×49.5px、active item だけ selected-row を持つ。header は 40.5px の breadcrumb row と 40.5px の tab row。breadcrumb rowはGitHub originがある時にowner avatar、`owner/repo`、workspace名を順に置き、GitHub originがない時またはavatar取得失敗時はapp markではなくneutral repository fallbackを使う。active tab は strong text と 1.5px warm-active underline、inactive は readable muted text とし、keyboard roving focus を提供する。960〜1279px では sidebar を 64px rail または drawer へ畳み、960px 未満は MVP native window で許可しない。200% text zoom などで有効幅が 700px 以下になる場合は、永続化状態と companion 状態を同じ status region で縦積みし、timeline、composer、Send、mute を隠さない。
 
 ### Commit Evidence
 
