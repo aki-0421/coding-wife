@@ -70,11 +70,11 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-052` | 利用者はmacOS 14以降で単一main windowを起動できる | cold startでmain windowが1枚だけ表示される。app-private single-instance lockを保持中の二重起動要求は新しいWebView、Codex/App Server、support runtime、audio controller、DB writerを作らず、既存windowをunminimizeしてfocus/raiseしてから新processを終了する。stale lockはowner/process identityを検証した場合だけ回収する | Approved | 非該当 |
-| `APP-F-053` | 利用者はFigma基準の三領域を表示できる | 1470×836 CSS pxでsidebar 255.04px、header 81px、Chat 607.11px、Companion 607.84pxとなり、主要境界が各基準値の±2px以内になる | Approved | 非該当 |
+| `APP-F-052` | 利用者はmacOS 14以降で単一main windowを起動できる | cold startでmain windowが1枚だけ表示される。native windowは初期React shellとCSSのlayoutが確定するまで非表示とし、1文字ずつ折り返す狭幅frame、unstyled content、空のWebViewを利用者へ見せない。frontend moduleの読込に失敗した場合もraw errorを出さず、OS localeに応じたja/enの再起動案内をstyled shellで表示する。app-private single-instance lockを保持中の二重起動要求は新しいWebView、Codex/App Server、support runtime、audio controller、DB writerを作らず、既存windowをunminimizeしてfocus/raiseしてから新processを終了する。stale lockはowner/process identityを検証した場合だけ回収する | Approved | 非該当 |
+| `APP-F-053` | 利用者はFigma基準の三領域を表示できる | 1470×836 CSS pxでsidebar 255.04px、header 81px、Chat 607.11px、Companion 607.84pxとなり、主要境界が各基準値の±2px以内になる。起動画面の利用可能領域が標準geometryより小さい場合はwindow全体をwork area内へ収め、native resize edgeとtraffic lightsを画面外へ出さない | Approved | 非該当 |
 | `APP-F-054` | 利用者はminimum window sizeでも主要操作を継続できる | windowは960×640 CSS px未満へ縮小できず、960×640でtab、timeline、composer、Send、停止操作が欠落しない | Approved | 非該当 |
 | `APP-F-055` | 利用者はS-001〜S-006の現行画面へ同じwindow内で移動できる | sidebar、Chat/Commit/Context/Settings tab、app settings gearから対象viewへ移動し、戻った時にworkspace選択とcomposer draftが保たれる | Approved | 非該当 |
-| `APP-F-056` | 利用者はmacOS native titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になる。WebViewは赤・黄・緑のtraffic-light代替要素を描画せず、native control用safe areaとdrag regionがbutton操作を奪わない | Approved | 非該当 |
+| `APP-F-056` | 利用者はmacOS native titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になる。WebViewは赤・黄・緑のtraffic-light代替要素を描画せず、native control用safe areaとdrag regionがbutton操作を奪わない。`main` WebViewにはbreadcrumb drag開始とnative titlebarのダブルクリックzoomに必要なTauri window permissionだけを許可し、任意のwindow操作権限は追加しない | Approved | 非該当 |
 | `APP-F-083` | 利用者はアプリ全体設定と選択中プロジェクト設定を別画面で識別できる | sidebarのapp settings gearはGeneral、Audio、Support、Diagnosticsだけを持つS-005を開き、workspaceのSettings tabはProject context、Character context、Companion、History & privacyだけを持つS-006を開く。S-005から戻っても選択workspace、active tab、composer draftを維持し、S-006のheadingには現在のproject identityを表示する | Approved | 非該当 |
 
 ### 言語・アクセシビリティ

@@ -21,9 +21,12 @@
         "minWidth": 960,
         "minHeight": 640,
         "center": true,
+        "preventOverflow": true,
         "resizable": true,
+        "maximizable": true,
         "fullscreen": false,
         "maximized": false,
+        "visible": false,
         "decorations": true,
         "hiddenTitle": true,
         "titleBarStyle": "Overlay"

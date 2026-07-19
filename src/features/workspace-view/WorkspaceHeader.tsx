@@ -401,6 +401,11 @@ export function WorkspaceHeader({
           <TooltipContent>{workspace.branch}</TooltipContent>
         </Tooltip>
         <WorkspaceHealthStatus copy={copy} workspace={workspace} />
+        <span
+          aria-hidden="true"
+          className="h-full min-w-12 flex-1"
+          data-tauri-drag-region=""
+        />
         <WorkspaceActions
           actionPending={actionPending}
           activeTab={activeTab}

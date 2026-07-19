@@ -78,11 +78,12 @@ Context tabはS-002内の`/workspace/:workspaceId/context` subviewであり、�
 |---|---|
 | window label | `main` |
 | 生成数 | system全体で`main` 1枚。app-private single-instance lock保持中の二重起動は新しいWebView、Codex/App Server、support runtime、audio controller、DB writerを作らず、既存windowをunminimizeしてfocus/raiseしてから新processを終了する。stale lockはowner/process identityを検証した場合だけ回収する |
-| default geometry | 1470×836 CSS px |
+| startup visibility | native windowは非表示で生成し、初期React shellまたは起動error shellを`flushSync`でDOMへcommitした直後に`app_window_ready`で1回だけshow / focusする。非表示のWebViewでは`requestAnimationFrame`の進行を表示条件にしない。狭幅の中間frame、unstyled content、空のWebViewは表示しない。frontend module読込失敗時はraw errorを表示せず、OS localeに対応するja/enの再起動案内を同じstyled shellへ描画してからwindowを表示する |
+| default geometry | 1470×836 CSS px。起動画面のwork areaより大きい場合はwork area内へ収め、native resize edgeとtraffic lightsを到達可能なまま保つ |
 | minimum geometry | 960×640 CSS px。これ未満へのresizeをOSへ許可しない |
 | maximum / fullscreen | macOS標準zoomとfullscreenを許可し、終了時geometryを保存する |
 | titlebar | macOS native overlay。close / minimize / zoomのtraffic lightsはOSが描画し、WebViewは赤・黄・緑の代替要素を描画しない。sidebarは見出しがnative controlに重ならない40.5pxのsafe areaだけを予約する |
-| drag region | native titlebar safe area、button、tab、input、scrollbarを除くbreadcrumb rowだけ |
+| drag region | native titlebar safe area、button、tab、input、scrollbarを除くbreadcrumb rowだけ。`main` capabilityはdrag開始用`core:window:allow-start-dragging`とnative titlebarのダブルクリックzoom用`core:window:allow-internal-toggle-maximize`だけをwindow操作権限として持つ |
 | radius | window 7.5px、compact control 4.5px、composer/decision 9px |
 | close | active/pending turn 0件ならorderly shutdown。1件以上ならnative closeを保留し、`停止して終了 / Stop and Quit`と`終了しない / Don’t Quit`だけを表示する |
 
