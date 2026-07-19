@@ -141,8 +141,8 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 |---|---|---|---|---|
 | 初期化中 | DB、workspace、Git linkageを読込中 | sidebar/list/project surfaceのskeleton、locale、Quit。demo workspaceを表示しない | Quitだけ。add/create/select/draft/context/deleteを開始しない | queryとmigrationがterminalになる |
 | 通常 | 1件以上のvalid workspace | group list、active project、preflight、primary action 1件 | filter、select、add、create、state action | 操作開始、offline、error |
-| projectなし | registered project 0件、workspace 0件 | main surfaceのinline create form。Project fieldには`Projectを追加`、workspace nameには短い既定値を表示する。sidebar本文は空にする | picker、name編集、Settings、Quit | project登録またはrehydrate |
-| workspaceなし | registered project 1件以上、workspace 0件 | main surfaceのProject select、workspace name、`Workspaceを作成`を持つinline form。sidebar本文は空にする | inline create、project追加、Settings、Quit | worktree作成またはproject登録解除 |
+| projectなし | registered project 0件、workspace 0件 | main surfaceのinline create form。Project fieldには`Projectを追加`、workspace nameには短い既定値を表示する。sidebarにはempty説明文を置かず、5つのlifecycle groupを常に表示する | picker、name編集、Settings、Quit | project登録またはrehydrate |
+| workspaceなし | registered project 1件以上、workspace 0件 | main surfaceのProject select、workspace name、`Workspaceを作成`を持つinline form。sidebarにはempty説明文を置かず、5つのlifecycle groupを常に表示する | inline create、project追加、Settings、Quit | worktree作成またはproject登録解除 |
 | 処理中 | picker後検証、preflight、create、cancel、remove | 対象stepとprogress、他workspaceは利用可能 | 可能なCancel、影響外select | success、cancel、error |
 | オフライン | network/Codex接続なし | local list、Git/DB status、Codex offline | filter、Context、local project操作可。Send不可 | 明示preflight成功 |
 | エラー | Git I/O、DB write、Codex診断失敗 | code、対象、保持data、retry/reselect/details | 影響外workspaceを開ける | 明示回復または登録解除 |

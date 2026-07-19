@@ -268,14 +268,12 @@ function SidebarPanel({
   const lifecycleContentIdPrefix = useId()
   const groups = useMemo(
     () =>
-      filteredWorkspaces.length === 0
-        ? []
-        : lifecycleOrder.map((lifecycle) => ({
-            lifecycle,
-            workspaces: filteredWorkspaces.filter(
-              (workspace) => workspace.lifecycle === lifecycle,
-            ),
-          })),
+      lifecycleOrder.map((lifecycle) => ({
+        lifecycle,
+        workspaces: filteredWorkspaces.filter(
+          (workspace) => workspace.lifecycle === lifecycle,
+        ),
+      })),
     [filteredWorkspaces],
   )
 
