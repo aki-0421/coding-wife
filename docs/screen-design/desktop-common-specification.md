@@ -1,7 +1,7 @@
 ---
 title: "デスクトップ共通仕様"
 description: "Coding Wifeの単一macOSウィンドウ、共通レイアウト、状態、操作、信頼境界、復旧、アクセシビリティを定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "S-001〜S-004の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
   - "個別画面仕様とdesktop-shell要件の整合を確認するとき。"
@@ -115,7 +115,7 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 | content inset | 18px | timeline/composer左右 |
 | composer | 571.11×128.25px | S-002標準、bottom 15px |
 | focus outline | 2px + 2px offset | `warm-active`、背景比3:1以上 |
-| visual/hit target | visual 12〜27px / hit 24×24px以上 | icon-only control |
+| icon-only control | glyph 16×16px（`icon-lg`は20×20px）/ control 24〜36px / hit 24×24px以上 | 共通Buttonとcustom icon-only button。ラベル付きbuttonのinline iconは12×12pxを維持 |
 
 標準geometryで主要boundaryはFigma node `8:2`の±2 CSS px以内とする。0.75pxのFigma strokeは実装で1px dividerへ丸め、DPRぼけを避ける。
 
