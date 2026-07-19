@@ -189,14 +189,14 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
 |---|---|---|---|---|
 | 初期化中 | workspace、event、Codex、characterを読込中 | shell、timeline/composer/companionのshape skeleton。demo workspace、draft、timelineを表示しない | tab read-only、Quit。workspace mutationとSendは開始しない | 全queryがterminalになる |
-| 通常 | connected、turnなし、decisionなし | timeline、enabled composer、idle companion | send、inspect、Context、tab移動 | send、offline、error |
+| 通常 | connected、turnなし、decisionなし | timeline、enabled composer、idle companion | send、inspect、read-only context snapshot、Chat/Commit/Settings tab移動 | send、offline、error |
 | データなし | event 0件 |一文の開始案内、composerをprimaryにする | draft、context、send | first turn作成 |
 | 処理中 | turn running | live timeline、phase、Stop、`thinking` / `acting` caption | stop、inspect、read-only tab、mute | completed、failed、stopped、decision |
 | 意思決定待ち | structured decision受信 | decisionをtimelineとattentionへ表示、`waiting_for_user` caption | answer、hold、interrupt、read-only閲覧 | answer accepted、interrupt terminal |
-| オフライン | Codex disconnect/auth loss | persistent banner、last sequence、draft、Reconnect | local history/Context/Commit/Settings、Stop可能ならStop |明示reconnectとsequence照合成功 |
+| オフライン | Codex disconnect/auth loss | persistent banner、last sequence、draft、Reconnect | local history、Commit、Workspace Settings、App SettingsのProject / Character context、Stop可能ならStop |明示reconnectとsequence照合成功 |
 | エラー | turn/tool/normalize/persist failure | code、operation、impact、保持data、retry/modify/stop/details |安全な回復操作、影響外閲覧 | terminal recovery event |
 | 権限不足 | filesystem/process/Git/attachment拒否 |拒否operation、scope、再選択/診断。raw path非表示 | modify、Settings、Stop | valid permissionで明示retry |
-| キャンセル後 | attachment picker、popover、Context editをcancel |開始前のdraft、selection、event位置 |元操作または別操作 |次の明示操作 |
+| キャンセル後 | attachment picker、popover、App Settingsのcontext editをcancel |開始前のdraft、selection、event位置 |元操作または別操作 |次の明示操作 |
 | Stop処理中 | 利用者がStop | stopping phase、重複Stop disabled | read-only閲覧 | stopped/failed timeout |
 | 再起動復旧 | started turnにterminal eventなし | Interrupted marker、draft、last observed commit、review/new turn/diagnostic | read-only inspect、Commit、new turn前preflight |利用者が次操作を選ぶ |
 | stale event | sequence gap、duplicate、workspace mismatch | affected pointでingestion pause、diagnostic | local history、Stop | supervisorがgap解消またはterminal error |

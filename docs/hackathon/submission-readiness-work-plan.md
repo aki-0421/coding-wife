@@ -31,7 +31,7 @@ read_when:
 
 | 領域 | 現在の完了境界 | 残る境界 |
 | --- | --- | --- |
-| 主画面 | demoのsidebar、header、Chat、Commit、Context、Companion、composerを含むmain layoutがある。desktop、compact/tablet、実効480pxでも主要領域へ到達できる。 | 全操作の実接続、bilingual/accessibility、installed-appでの最終QAが必要。 |
+| 主画面 | demoのsidebar、header、Chat、Commit、Settings、Companion、composerを含むmain layoutがある。Project / Character contextはApp Settingsへ集約し、workspace側には専用tabを置かない。desktop、compact/tablet、実効480pxでも主要領域へ到達できる。 | 全操作の実接続、bilingual/accessibility、installed-appでの最終QAが必要。 |
 | Live2D | defaultのライセンス許諾済み`tmp/hiyori_pro`由来Hiyoriを同梱し、custom modelの検証、隔離、preview、publish、選択、削除の主要経路がある。 | semantic state mappingとapp-global selection、final artifactでの再起動確認が必要。 |
 | Workspace/Codex/history | workspaceの追加・作成・選択、Codex接続、draft、SQLite timeline/historyの基盤がある。 | cancel/repair/unregister、active-turn切替、終了、summary/anchor、branch/missing recoveryが必要。 |
 | Git evidence | Commit画面にread-onlyのコミット証跡を表示できる。アプリはコミット、revert、undoを提供せず、sourceやGit refを書き換えない。 | support presentation raceを閉じ、read-only契約を全error pathでも維持する必要がある。 |
