@@ -417,7 +417,7 @@ describe("WorkspaceShell", () => {
 
     expect(
       within(navigation).getByRole("button", {
-        name: "coding-wife/sol-desktop, main, Done",
+        name: "main, aki-0421/coding-wife, Done",
       }),
     ).toBeVisible()
     for (const localizedLabel of [
@@ -460,7 +460,7 @@ describe("WorkspaceShell", () => {
       name: "Backlog(0)",
     })
     const selectedWorkspace = within(navigation).getByRole("button", {
-      name: /coding-wife\/build-live2d-desktop-app/,
+      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
     })
 
     expect(doneToggle).toHaveAttribute("aria-expanded", "true")
@@ -468,7 +468,7 @@ describe("WorkspaceShell", () => {
     expect(doneToggle.querySelector("[data-workspace-status-count]")).toBeNull()
     expect(
       within(navigation).getByRole("button", {
-        name: "coding-wife/sol-desktop, main, Done",
+        name: "main, aki-0421/coding-wife, Done",
       }),
     ).toBeVisible()
     expect(selectedWorkspace).toHaveAttribute("aria-current", "page")
@@ -496,7 +496,7 @@ describe("WorkspaceShell", () => {
     expect(reviewToggle).toHaveAttribute("aria-expanded", "true")
     expect(
       within(navigation).queryByRole("button", {
-        name: "coding-wife/sol-desktop, main, Done",
+        name: "main, aki-0421/coding-wife, Done",
       }),
     ).toBeNull()
     expect(selectedWorkspace).toHaveAttribute("aria-current", "page")
@@ -514,41 +514,41 @@ describe("WorkspaceShell", () => {
     expect(doneToggle.querySelector("[data-workspace-status-count]")).toBeNull()
     expect(
       within(navigation).getByRole("button", {
-        name: "coding-wife/sol-desktop, main, Done",
+        name: "main, aki-0421/coding-wife, Done",
       }),
     ).toBeVisible()
   })
 
-  it("uses a stable typography hierarchy in the workspace sidebar", () => {
+  it("uses branch titles and GitHub repository metadata with stable typography", () => {
     renderWorkspace()
     const navigation = screen.getByRole("navigation", { name: "Workspaces" })
     const doneToggle = within(navigation).getByRole("button", {
       name: "Done(1)",
     })
     const doneWorkspace = within(navigation).getByRole("button", {
-      name: "coding-wife/sol-desktop, main, Done",
+      name: "main, aki-0421/coding-wife, Done",
     })
     const selectedWorkspace = within(navigation).getByRole("button", {
-      name: /coding-wife\/build-live2d-desktop-app/,
+      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
     })
 
     expect(screen.getByRole("heading", { name: "Workspaces" })).toHaveClass(
       "text-sidebar-heading",
     )
     expect(doneToggle).toHaveClass("text-sidebar-status")
-    expect(
-      within(doneWorkspace).getByText("coding-wife/sol-desktop"),
-    ).toHaveClass("text-sidebar-item", "text-foreground")
     expect(within(doneWorkspace).getByText("main")).toHaveClass(
+      "text-sidebar-item",
+      "text-foreground",
+    )
+    expect(within(doneWorkspace).getByText("aki-0421/coding-wife")).toHaveClass(
       "font-mono",
       "text-sidebar-meta",
       "text-muted-foreground",
     )
     expect(
-      within(selectedWorkspace).getByText(
-        "coding-wife/build-live2d-desktop-app",
-      ),
+      within(selectedWorkspace).getByText("feature/live2d-companion"),
     ).toHaveClass("text-sidebar-item", "text-text-strong")
+    expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
   })
 
   it("keeps duplicate native close requests behind one safe cancellation", async () => {
@@ -905,14 +905,14 @@ describe("WorkspaceShell", () => {
     })
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: "coding-wife/sol-desktop, main, Done",
+        name: "main, aki-0421/coding-wife, Done",
       }),
     )
     expect(composer).toHaveValue("")
 
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: /coding-wife\/build-live2d-desktop-app/,
+        name: /feature\/live2d-companion, aki-0421\/coding-wife/,
       }),
     )
     expect(composer).toHaveValue("Keep this draft with the Live2D workspace")
@@ -963,14 +963,14 @@ describe("WorkspaceShell", () => {
     await waitFor(() =>
       expect(
         within(workspaceNavigation).getByRole("button", {
-          name: /fixture\/workspace-a/,
+          name: /main, fixture, In Progress/,
         }),
       ).toBeVisible(),
     )
     fireEvent.change(composer, { target: { value: "Keep draft A" } })
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: /fixture\/workspace-b/,
+        name: /main, fixture, Backlog/,
       }),
     )
 
@@ -1223,7 +1223,7 @@ describe("WorkspaceShell", () => {
     const navigation = screen.getByRole("navigation", { name: "Workspaces" })
     fireEvent.click(
       within(navigation).getByRole("button", {
-        name: /fixture\/workspace-b/u,
+        name: /main, fixture, Backlog/u,
       }),
     )
 
@@ -1520,7 +1520,7 @@ describe("WorkspaceShell", () => {
     expect(reopenedDialog).toHaveAccessibleName("Workspaces")
     await user.click(
       within(reopenedDialog).getByRole("button", {
-        name: "coding-wife/sol-desktop, main, Done",
+        name: "main, aki-0421/coding-wife, Done",
       }),
     )
 
@@ -2146,13 +2146,13 @@ describe("WorkspaceShell", () => {
 
       fireEvent.click(
         within(navigation).getByRole("button", {
-          name: /fixture\/workspace-b/u,
+          name: /main, fixture, Backlog/u,
         }),
       )
       expect(await screen.findByText("code.fixture.11")).toBeVisible()
       fireEvent.click(
         within(navigation).getByRole("button", {
-          name: /fixture\/workspace-a/u,
+          name: /main, fixture, In Progress/u,
         }),
       )
       expect(await screen.findByText("code.fixture.4")).toBeVisible()
@@ -2677,13 +2677,13 @@ describe("WorkspaceShell", () => {
 
     const current = await waitFor(() => {
       const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label^="native-repository/restored-workspace,"]',
+        'button[aria-label^="main, native-repository,"]',
       )
       expect(button).not.toBeNull()
       return button as HTMLButtonElement
     })
     const targetRow = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="native-repository/target-workspace,"]',
+      'button[aria-label^="feature/target, native-repository,"]',
     )
     expect(targetRow).not.toBeNull()
     const composer = screen.getByPlaceholderText(
@@ -2757,7 +2757,7 @@ describe("WorkspaceShell", () => {
     const { container } = renderWorkspace(adapter)
     const targetRow = await waitFor(() => {
       const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label^="native-repository/target-workspace,"]',
+        'button[aria-label^="feature/target, native-repository,"]',
       )
       expect(button).not.toBeNull()
       return button as HTMLButtonElement
@@ -2811,13 +2811,13 @@ describe("WorkspaceShell", () => {
 
     const current = await waitFor(() => {
       const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label^="native-repository/restored-workspace,"]',
+        'button[aria-label^="main, native-repository,"]',
       )
       expect(button).not.toBeNull()
       return button as HTMLButtonElement
     })
     const targetRow = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="native-repository/target-workspace,"]',
+      'button[aria-label^="feature/target, native-repository,"]',
     )
     expect(targetRow).not.toBeNull()
     await user.click(targetRow as HTMLButtonElement)

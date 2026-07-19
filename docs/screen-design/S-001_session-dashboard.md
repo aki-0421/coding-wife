@@ -101,11 +101,11 @@ sidebarのlifecycle statusは[LinearのIssue status](https://linear.app/docs/con
 
 workspace navigation contentは242.25pxを上限として、右端の件数とchevronを255.04px sidebar内へ収める。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "expands lifecycle groups by default and toggles them independently"`で初期展開、独立開閉、1件・0件表示、ARIA、content幅を検証する。
 
-sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、workspace nameを13px / 500 / 19.5px、branchを11px / 400 / 16.5px、filter 0件helperを12px / 400 / 18pxとする。workspace selectionでfont weightと文字幅を変えず、selected backgroundとstrong textだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。
+sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、branch titleを13px / 500 / 19.5px、GitHub repository full nameを11px / 400 / 16.5px、filter 0件helperを12px / 400 / 18pxとする。workspace selectionでfont weightと文字幅を変えず、selected backgroundとstrong textだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。
 
-`text-sidebar-*`のsize roleと`text-*` colorを同じ`cn` / Tailwind mergeへ渡すとsize roleが競合classとして除去されるため、両classをmergeしないかmerge設定を明示する。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "uses a stable typography hierarchy"`でrole classの保持とselection時の安定性を検証する。
+`text-sidebar-*`のsize roleと`text-*` colorを同じ`cn` / Tailwind mergeへ渡すとsize roleが競合classとして除去されるため、両classをmergeしないかmerge設定を明示する。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "uses branch titles and GitHub repository metadata with stable typography"`でbranch/repositoryの表示順、role classの保持、selection時の安定性を検証する。
 
-attentionはlifecycleを変更せず、`Needs answer / Approval required / Test failed / High risk`のicon、text、countをitem右端へ付ける。active itemだけ`selected-row`、strong text、branch violet iconを使う。repo/branchは一行ellipsis + tooltipとする。
+attentionはlifecycleを変更せず、`Needs answer / Approval required / Test failed / High risk`のicon、text、countをitem右端へ付ける。active itemだけ`selected-row`、strong text、branch violet iconを使う。itemの第一行はbranchまたはdetached HEAD短縮SHA、第二行はGitHub `origin`から抽出した`owner/repo`とし、GitHub `origin`がない場合はlocal repo名へfallbackする。remote URL自体やcredentialはWebView、DB、logへ渡さない。repo/branchは一行ellipsis + tooltipとする。
 
 ### preflight
 
@@ -182,6 +182,8 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 
 実際のCapability設定は`src-tauri/capabilities/`を正本とする。
 
+GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/workspace.rs`がtrusted worktreeで`git config --get remote.origin.url`をread-only実行し、`github.com`のHTTPS / SSH / SCP形式だけを`owner/repo`へ正規化する。remote URL全体とcredentialは破棄し、nullableな`projects.github_repository`（workspace history DB migration 6）だけを保存する。HEADとremoteのGit processは同時観測し、20 repositoryの起動復元を5秒未満に保つ。`src/features/workspace-persistence/adapter.ts`がこの値をoptionalなview metadataへ変換し、値がない場合は`WorkspaceSidebar.tsx`がlocal repository aliasへfallbackする。parser、Git読取、migration、cross-language contractを変更した場合は`cargo test github_repository`、`cargo test repository_identity_reads_github_origin_without_network_access`、`cargo test legacy_versions_migrate_resume_state_and_registration_columns`、`cargo test serialized_contracts_match_the_cross_language_fixture`、`cargo test startup_restore_of_twenty_repositories_stays_within_the_budget`を実行する。
+
 | ユーザー操作 | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
 |---|---|---|---|---|---|
 | project folder選択 | Tauri dialog → Rust | `select_project_root`（設計名） | directory picker 1件、選択rootのread診断 | 変更なし | path非表示のerror code |
@@ -222,7 +224,7 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 | workspace/lifecycle/attention | Rust SQLite + normalized event | valid state transition | cold start/route return | history削除契約 | stale表示 |
 | active selection/filter/scroll | Rust SQLite | valid selection/query/scroll settle | route return/restart | Reset UI state | safe default + notice |
 | summary/timeline anchor | Rust SQLite | terminal summary、scroll settle | route return/restart | history削除契約 | 同workspaceの最寄りvalid sequenceだけへ補正 |
-| repository identity/health、HEAD/branch | Gitを観測正本、Rust DBはversioned last snapshot | 登録、window focus、selection、Send直前 | route return/restart後に再照合 | project登録解除 | `missing` / `changed` / `unreadable` / `read_only` / `stale_branch` |
+| repository identity/health、HEAD/branch、GitHub `owner/repo` | Gitを観測正本、Rust DBはversioned last snapshot。GitHub full nameはlocal `origin` URLから抽出した非秘密値だけを保存する | 登録、window focus、selection、Send直前 | route return/restart後に再照合 | project登録解除 | GitHub `origin`なしではlocal repo名へfallbackし、health判定は変更しない |
 | create input | React transient state | 保存しない | dialog中だけ | success/cancel/route leave | input保持できる範囲で保持 |
 
 ## OS差分

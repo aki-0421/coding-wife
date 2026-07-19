@@ -91,7 +91,7 @@ function WorkspaceRow({
   readonly workspace: WorkspaceRecord
   readonly onSelect: () => void
 }) {
-  const fullName = `${workspace.repository}/${workspace.name}`
+  const repositoryLabel = workspace.githubRepository ?? workspace.repository
   const health =
     workspace.health === undefined || workspace.health === "ready"
       ? null
@@ -102,7 +102,7 @@ function WorkspaceRow({
       <TooltipTrigger asChild>
         <button
           aria-current={selected ? "page" : undefined}
-          aria-label={`${fullName}, ${workspace.branch}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
+          aria-label={`${workspace.branch}, ${repositoryLabel}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
           className={cn(
             "group/workspace flex h-[49.5px] w-full items-center gap-sm rounded-control px-sm py-xs text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
             selected && "bg-selected-row",
@@ -121,13 +121,13 @@ function WorkspaceRow({
             <span
               className={`truncate text-sidebar-item ${selected ? "text-text-strong" : "text-foreground"}`}
             >
-              {fullName}
+              {workspace.branch}
             </span>
             <span className="flex min-w-0 items-center gap-xs">
               <span
                 className={`truncate font-mono text-sidebar-meta transition-colors group-hover/workspace:text-selected-row-secondary group-focus-visible/workspace:text-selected-row-secondary ${selected ? "text-selected-row-secondary" : "text-muted-foreground"}`}
               >
-                {workspace.branch}
+                {repositoryLabel}
               </span>
               {workspace.attention ? (
                 <CircleAlertIcon
@@ -152,7 +152,7 @@ function WorkspaceRow({
         </button>
       </TooltipTrigger>
       <TooltipContent side="right">
-        {fullName} · {workspace.branch}
+        {workspace.branch} · {repositoryLabel}
         {workspace.attention ? ` · ${copy.attention[workspace.attention]}` : ""}
         {health ? ` · ${health}` : ""}
       </TooltipContent>

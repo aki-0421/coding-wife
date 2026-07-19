@@ -8,6 +8,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
+use url::Url;
 
 use super::process::{run_bounded_command, BoundedCommandError, BoundedCommandOutput};
 use super::supervisor::{CodexSupervisor, WorkspaceCancellationGuard};
@@ -106,6 +107,7 @@ pub struct GitRepositoryIdentity {
     pub git_device: u64,
     pub git_inode: u64,
     pub project_identity: String,
+    pub github_repository: Option<String>,
     pub branch: String,
     pub head: String,
     pub detached: bool,
@@ -624,7 +626,10 @@ async fn repository_identity(
         return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
     }
     let head_value = head_value.trim();
-    let (branch, head, detached) = if let Some(reference) = head_value.strip_prefix("ref: ") {
+    let github_repository = read_github_repository(&canonical_root);
+    let (branch, head, detached, github_repository) = if let Some(reference) =
+        head_value.strip_prefix("ref: ")
+    {
         if !is_safe_head_reference(reference) {
             return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
         }
@@ -636,14 +641,15 @@ async fn repository_identity(
         {
             return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
         }
-        let head = read_head_object_id(&canonical_root).await?;
-        (branch.to_owned(), head, false)
+        let (head, github_repository) =
+            tokio::join!(read_head_object_id(&canonical_root), github_repository);
+        (branch.to_owned(), head?, false, github_repository)
     } else {
         if !is_git_object_id(head_value) {
             return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
         }
         let short = head_value.chars().take(12).collect::<String>();
-        (short.clone(), short, true)
+        (short.clone(), short, true, github_repository.await)
     };
 
     #[cfg(unix)]
@@ -675,10 +681,69 @@ async fn repository_identity(
         git_device,
         git_inode,
         project_identity,
+        github_repository,
         branch,
         head,
         detached,
     })
+}
+
+async fn read_github_repository(root: &Path) -> Option<String> {
+    let output = run_workspace_git(root, &["config", "--get", "remote.origin.url"], 2_048)
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let remote = String::from_utf8(output.stdout).ok()?;
+    parse_github_repository(remote.trim())
+}
+
+fn parse_github_repository(remote: &str) -> Option<String> {
+    if remote.is_empty() || remote.chars().any(char::is_control) {
+        return None;
+    }
+    let normalized = if remote.contains("://") {
+        remote.to_owned()
+    } else {
+        let (authority, path) = remote.split_once(':')?;
+        if !authority
+            .rsplit('@')
+            .next()
+            .is_some_and(|host| host.eq_ignore_ascii_case("github.com"))
+        {
+            return None;
+        }
+        format!("ssh://{authority}/{path}")
+    };
+    let parsed = Url::parse(&normalized).ok()?;
+    if !parsed
+        .host_str()
+        .is_some_and(|host| host.eq_ignore_ascii_case("github.com"))
+    {
+        return None;
+    }
+    let segments = parsed
+        .path_segments()?
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments.len() != 2 {
+        return None;
+    }
+    let owner = segments[0];
+    let repository = segments[1].strip_suffix(".git").unwrap_or(segments[1]);
+    if !is_github_slug_component(owner, 39) || !is_github_slug_component(repository, 100) {
+        return None;
+    }
+    Some(format!("{owner}/{repository}"))
+}
+
+fn is_github_slug_component(value: &str, maximum: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= maximum
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 async fn read_head_object_id(root: &Path) -> Result<String, CodexCommandError> {
@@ -775,6 +840,59 @@ mod tests {
             .expect("git init");
         assert!(status.success());
         root
+    }
+
+    #[test]
+    fn github_repository_parser_accepts_https_ssh_and_scp_origins() {
+        for remote in [
+            "https://github.com/aki-0421/coding-wife.git",
+            "ssh://git@github.com/aki-0421/coding-wife.git",
+            "git@github.com:aki-0421/coding-wife.git",
+        ] {
+            assert_eq!(
+                parse_github_repository(remote),
+                Some("aki-0421/coding-wife".to_owned())
+            );
+        }
+    }
+
+    #[test]
+    fn github_repository_parser_rejects_non_github_and_unsafe_paths() {
+        for remote in [
+            "https://gitlab.com/aki-0421/coding-wife.git",
+            "https://github.com/aki-0421/coding-wife/extra",
+            "https://token@github.com/aki-0421/%2Fsecret.git",
+            "git@example.com:aki-0421/coding-wife.git",
+        ] {
+            assert_eq!(parse_github_repository(remote), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn repository_identity_reads_github_origin_without_network_access() {
+        let root = git_repository();
+        let status = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:aki-0421/coding-wife.git",
+            ])
+            .status()
+            .expect("add origin");
+        assert!(status.success());
+
+        let identity = validate_git_repository(&root)
+            .await
+            .expect("repository identity");
+
+        assert_eq!(
+            identity.github_repository,
+            Some("aki-0421/coding-wife".to_owned())
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]

@@ -29,9 +29,12 @@ export function projectWorkspaceNavigation(
     query.length === 0
       ? workspaces
       : workspaces.filter((workspace) =>
-          [workspace.repository, workspace.name, workspace.branch].some(
-            (value) => value.toLocaleLowerCase().includes(query),
-          ),
+          [
+            workspace.repository,
+            workspace.githubRepository,
+            workspace.name,
+            workspace.branch,
+          ].some((value) => value?.toLocaleLowerCase().includes(query)),
         )
 
   return { filteredWorkspaces, selectedWorkspace }

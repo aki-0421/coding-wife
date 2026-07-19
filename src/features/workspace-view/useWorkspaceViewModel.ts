@@ -899,6 +899,9 @@ export function useWorkspaceViewModel(
       const record: WorkspaceRecord = {
         id: `local-${Date.now()}`,
         repository: selectedWorkspace?.repository ?? "local-project",
+        ...(selectedWorkspace?.githubRepository === undefined
+          ? {}
+          : { githubRepository: selectedWorkspace.githubRepository }),
         name: trimmedName,
         branch: selectedWorkspace?.branch ?? "main",
         lifecycle: "backlog",
