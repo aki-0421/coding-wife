@@ -74,7 +74,7 @@ const copy: Readonly<
     commitTab: "Commit",
     contextTab: "Context",
     goal: "Goal",
-    saveProject: "Save project draft",
+    saveProject: "Save project context",
     saved: "Saved. This version will be used from the next turn.",
     explanationReady: "Explanation ready",
     showExplanation: "Show explanation",

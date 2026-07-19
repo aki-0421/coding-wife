@@ -126,7 +126,7 @@ describe("workspace context contract", () => {
       workspaceId: "workspace-fixture",
       project: {
         schemaVersion: 1,
-        workspaceId: "workspace-fixture",
+        projectId: "project-fixture",
         version: 2,
         contentHash: hash,
         updatedAt: "2026-07-18T00:00:00.000Z",
@@ -144,7 +144,7 @@ describe("workspace context contract", () => {
     expect(() =>
       parseWorkspaceEditableContext({
         ...bundle,
-        project: { ...bundle.project, workspaceId: "workspace-other" },
+        project: { ...bundle.project, projectId: "invalid/project" },
       }),
     ).toThrow(WorkspaceContextContractError)
 

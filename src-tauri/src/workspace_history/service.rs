@@ -23,15 +23,15 @@ use super::store::WorkspaceHistoryStore;
 use super::types::{
     AppSaveCharacterContextRequest, AppendDomainEventRequest, AppendDomainEventResponse,
     ContextSnapshotView, ContextSource, HistoryMode, HistoryStatus, NormalizedDomainEvent,
-    ProjectSelectRequest, TimelinePage, VersionedCharacterContext, VersionedProjectContext,
-    WorkspaceArchiveRequest, WorkspaceCancelRequest, WorkspaceCommandError,
-    WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
-    WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth,
+    ProjectGetContextRequest, ProjectSaveContextRequest, ProjectSelectRequest, TimelinePage,
+    VersionedCharacterContext, VersionedProjectContext, WorkspaceArchiveRequest,
+    WorkspaceCancelRequest, WorkspaceCommandError, WorkspaceCreateSessionRequest,
+    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView, WorkspaceHealth,
     WorkspaceLoadEditableContextRequest, WorkspacePickOutcome, WorkspacePickResponse,
     WorkspaceRecheckRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
-    WorkspaceSaveProjectContextRequest, WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest,
-    WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineAnchorView,
-    WorkspaceTimelineRequest, WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
+    WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
+    WorkspaceSummary, WorkspaceTimelineAnchorView, WorkspaceTimelineRequest,
+    WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
     WORKSPACE_HISTORY_SCHEMA_VERSION,
 };
 
@@ -1106,50 +1106,53 @@ impl WorkspaceHistoryService {
             .map_err(|error| history_error("workspace_save_context_snapshot", error))
     }
 
-    pub fn load_editable_context(
+    pub fn project_context(
         &self,
-        request: WorkspaceLoadEditableContextRequest,
-    ) -> Result<WorkspaceEditableContext, WorkspaceCommandError> {
-        self.ensure_startup_ready("workspace_load_editable_context")?;
+        request: ProjectGetContextRequest,
+    ) -> Result<VersionedProjectContext, WorkspaceCommandError> {
+        self.ensure_startup_ready("project_context_get")?;
         self.store
-            .load_editable_context(&request.workspace_id)
-            .map_err(|error| history_error("workspace_load_editable_context", error))
+            .project_context(&request.project_id)
+            .map_err(|error| history_error("project_context_get", error))
     }
 
     pub async fn save_project_context(
         &self,
-        request: WorkspaceSaveProjectContextRequest,
+        request: ProjectSaveContextRequest,
     ) -> Result<VersionedProjectContext, WorkspaceCommandError> {
-        self.ensure_startup_ready("workspace_save_project_context")?;
+        self.ensure_startup_ready("project_context_save")?;
         let _operation = self.operation_lock.lock().await;
         let identity = self
-            .workspace
-            .trusted_identity(&request.workspace_id)
+            .store
+            .private_project_identity_by_project_id(&request.project_id)
+            .map_err(|error| history_error("project_context_save", error))?;
+        let live_project = validate_git_repository(&identity.canonical_root)
             .await
-            .ok_or_else(|| {
-                WorkspaceCommandError::new(
-                    "WORKSPACE-CONTEXT-PREFLIGHT",
-                    "workspace_save_project_context",
-                    true,
-                )
-            })?;
+            .map_err(|error| codex_error("project_context_save", error))?;
+        if !matches_saved_repository_identity(&live_project, &identity) {
+            return Err(WorkspaceCommandError::new(
+                "PROJECT-CONTEXT-PREFLIGHT",
+                "project_context_save",
+                true,
+            ));
+        }
         let validation = ProjectReferenceValidation::new(
             identity.canonical_root,
             identity.root_device,
             identity.root_inode,
         );
         let context = normalize_project_context(request.context, Some(validation.root()))
-            .map_err(|error| history_error("workspace_save_project_context", error))?;
+            .map_err(|error| history_error("project_context_save", error))?;
         let reference_manifest = capture_project_reference_manifest(&context, &validation)
-            .map_err(|error| history_error("workspace_save_project_context", error))?;
+            .map_err(|error| history_error("project_context_save", error))?;
         self.store
             .save_project_context(
-                &request.workspace_id,
+                &request.project_id,
                 request.expected_version,
                 context,
                 Some(reference_manifest),
             )
-            .map_err(|error| history_error("workspace_save_project_context", error))
+            .map_err(|error| history_error("project_context_save", error))
     }
 
     pub fn character_context(&self) -> Result<VersionedCharacterContext, WorkspaceCommandError> {
@@ -1852,6 +1855,25 @@ mod tests {
         (service, workspace_root, data, workspace_id)
     }
 
+    fn project_id_for_workspace(service: &WorkspaceHistoryService, workspace_id: &str) -> String {
+        service
+            .store
+            .private_project_identity(workspace_id)
+            .expect("project identity")
+            .project_id
+    }
+
+    fn project_root_for_workspace(
+        service: &WorkspaceHistoryService,
+        workspace_id: &str,
+    ) -> PathBuf {
+        service
+            .store
+            .private_project_identity(workspace_id)
+            .expect("project identity")
+            .canonical_root
+    }
+
     struct ProjectLifecycleFixture {
         history: WorkspaceHistoryService,
         character: CharacterService,
@@ -2390,12 +2412,16 @@ mod tests {
     async fn project_context_normalizes_existing_references_and_rejects_missing_paths() {
         let (service, root, data, workspace_id) =
             registered_context_service("reference-save").await;
-        fs::create_dir_all(root.join("docs")).expect("docs directory");
-        fs::write(root.join("docs/guide.md"), "guide").expect("guide");
+        let project_id = project_id_for_workspace(&service, &workspace_id);
+        let project_root = project_root_for_workspace(&service, &workspace_id);
+        for reference_root in [&project_root, &root] {
+            fs::create_dir_all(reference_root.join("docs")).expect("docs directory");
+            fs::write(reference_root.join("docs/guide.md"), "guide").expect("guide");
+        }
 
         let saved = service
-            .save_project_context(WorkspaceSaveProjectContextRequest {
-                workspace_id: workspace_id.clone(),
+            .save_project_context(ProjectSaveContextRequest {
+                project_id: project_id.clone(),
                 expected_version: 1,
                 context: ProjectContext {
                     technical_references: vec!["./docs//guide.md".to_owned()],
@@ -2407,8 +2433,8 @@ mod tests {
         assert_eq!(saved.context.technical_references, ["docs/guide.md"]);
 
         let error = service
-            .save_project_context(WorkspaceSaveProjectContextRequest {
-                workspace_id,
+            .save_project_context(ProjectSaveContextRequest {
+                project_id,
                 expected_version: saved.version,
                 context: ProjectContext {
                     technical_references: vec!["docs/missing.md".to_owned()],
@@ -2424,19 +2450,23 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn turn_snapshot_revalidates_symlink_resolution_and_target_identity() {
+    async fn turn_snapshot_revalidates_references_inside_each_worktree() {
         use std::os::unix::fs::symlink;
 
         let (service, root, data, workspace_id) =
             registered_context_service("reference-retarget").await;
-        fs::create_dir_all(root.join("docs")).expect("docs directory");
-        fs::write(root.join("docs/target-a.md"), "a").expect("target a");
-        fs::write(root.join("docs/target-b.md"), "b").expect("target b");
-        symlink("target-a.md", root.join("docs/current.md")).expect("symlink a");
+        let project_id = project_id_for_workspace(&service, &workspace_id);
+        let project_root = project_root_for_workspace(&service, &workspace_id);
+        for reference_root in [&project_root, &root] {
+            fs::create_dir_all(reference_root.join("docs")).expect("docs directory");
+            fs::write(reference_root.join("docs/target-a.md"), "a").expect("target a");
+            fs::write(reference_root.join("docs/target-b.md"), "b").expect("target b");
+            symlink("target-a.md", reference_root.join("docs/current.md")).expect("symlink a");
+        }
 
-        let saved = service
-            .save_project_context(WorkspaceSaveProjectContextRequest {
-                workspace_id: workspace_id.clone(),
+        service
+            .save_project_context(ProjectSaveContextRequest {
+                project_id: project_id.clone(),
                 expected_version: 1,
                 context: ProjectContext {
                     technical_references: vec!["docs/current.md".to_owned()],
@@ -2454,29 +2484,12 @@ mod tests {
 
         fs::remove_file(root.join("docs/current.md")).expect("remove symlink a");
         symlink("target-b.md", root.join("docs/current.md")).expect("symlink b");
-        let error = service
-            .turn_context_snapshot(WorkspaceLoadEditableContextRequest {
-                workspace_id: workspace_id.clone(),
-            })
-            .await
-            .expect_err("retargeted symlink blocked");
-        assert_eq!(error.code, "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED");
-
-        let resaved = service
-            .save_project_context(WorkspaceSaveProjectContextRequest {
-                workspace_id: workspace_id.clone(),
-                expected_version: saved.version,
-                context: saved.context,
-            })
-            .await
-            .expect("explicit resave accepts current target");
-        assert_eq!(resaved.version, 3);
         service
             .turn_context_snapshot(WorkspaceLoadEditableContextRequest {
                 workspace_id: workspace_id.clone(),
             })
             .await
-            .expect("resaved target snapshots");
+            .expect("branch-specific target snapshots");
 
         let outside = temp_directory("reference-outside");
         fs::write(outside.join("outside.md"), "outside").expect("outside target");
@@ -2493,15 +2506,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_then_available_reference_requires_explicit_resave() {
+    async fn missing_then_available_workspace_reference_is_revalidated() {
         let (service, root, data, workspace_id) =
             registered_context_service("reference-recreate").await;
-        fs::create_dir_all(root.join("docs")).expect("docs directory");
-        fs::write(root.join("docs/current.md"), "first").expect("current target");
-        fs::write(root.join("docs/replacement.md"), "replacement").expect("replacement target");
-        let saved = service
-            .save_project_context(WorkspaceSaveProjectContextRequest {
-                workspace_id: workspace_id.clone(),
+        let project_id = project_id_for_workspace(&service, &workspace_id);
+        let project_root = project_root_for_workspace(&service, &workspace_id);
+        for reference_root in [&project_root, &root] {
+            fs::create_dir_all(reference_root.join("docs")).expect("docs directory");
+            fs::write(reference_root.join("docs/current.md"), "first").expect("current target");
+            fs::write(reference_root.join("docs/replacement.md"), "replacement")
+                .expect("replacement target");
+        }
+        service
+            .save_project_context(ProjectSaveContextRequest {
+                project_id: project_id.clone(),
                 expected_version: 1,
                 context: ProjectContext {
                     technical_references: vec!["docs/current.md".to_owned()],
@@ -2524,26 +2542,12 @@ mod tests {
             root.join("docs/current.md"),
         )
         .expect("make replacement available");
-        let changed = service
+        service
             .turn_context_snapshot(WorkspaceLoadEditableContextRequest {
                 workspace_id: workspace_id.clone(),
             })
             .await
-            .expect_err("replacement is not adopted implicitly");
-        assert_eq!(changed.code, "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED");
-
-        service
-            .save_project_context(WorkspaceSaveProjectContextRequest {
-                workspace_id: workspace_id.clone(),
-                expected_version: saved.version,
-                context: saved.context,
-            })
-            .await
-            .expect("resave replacement identity");
-        service
-            .turn_context_snapshot(WorkspaceLoadEditableContextRequest { workspace_id })
-            .await
-            .expect("replacement accepted after resave");
+            .expect("replacement accepted after workspace revalidation");
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
     }

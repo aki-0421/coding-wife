@@ -18,11 +18,10 @@ import type {
   ProjectContext,
   VersionedCharacterContext,
   VersionedProjectContext,
-  WorkspaceEditableContext,
   WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
 
-export type WorkspaceTab = "chat" | "commit" | "context" | "settings"
+export type WorkspaceTab = "chat" | "commit" | "settings"
 export type WorkspaceLifecycle =
   | "done"
   | "in_review"
@@ -248,12 +247,12 @@ export interface WorkspaceViewAdapter {
     workspaceId: string,
     source: ContextSnapshotItem["source"],
   ) => Promise<ContextSnapshotItem>
-  readonly loadEditableContext?: (
-    workspaceId: string,
-  ) => Promise<WorkspaceEditableContext>
+  readonly loadProjectContext?: (
+    projectId: string,
+  ) => Promise<VersionedProjectContext>
   readonly loadCharacterContext?: () => Promise<VersionedCharacterContext>
   readonly saveProjectContext?: (
-    workspaceId: string,
+    projectId: string,
     expectedVersion: number,
     context: ProjectContext,
   ) => Promise<VersionedProjectContext>
@@ -314,6 +313,4 @@ export type AppSettingsSection =
   | "support"
   | "diagnostics"
 
-export type ProjectSettingsSection = "project_context" | "history"
-
-export type SettingsSection = AppSettingsSection | ProjectSettingsSection
+export type SettingsSection = AppSettingsSection

@@ -462,8 +462,6 @@ pub(super) fn validate_project_reference_manifest(
     let manifest = serde_json::from_str::<ProjectReferenceManifest>(manifest_json)
         .map_err(|_| reference_error("WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED", OPERATION))?;
     if manifest.schema_version != PROJECT_REFERENCE_MANIFEST_SCHEMA_VERSION
-        || manifest.root_device != validation.root_device
-        || manifest.root_inode != validation.root_inode
         || manifest.references.len() != context.technical_references.len()
     {
         return Err(reference_error(
@@ -482,13 +480,7 @@ pub(super) fn validate_project_reference_manifest(
                 OPERATION,
             ));
         }
-        let current = resolve_reference_target(reference, validation.root(), OPERATION)?;
-        if current != entry.target {
-            return Err(reference_error(
-                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED",
-                OPERATION,
-            ));
-        }
+        let _current = resolve_reference_target(reference, validation.root(), OPERATION)?;
     }
     Ok(())
 }

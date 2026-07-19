@@ -24,7 +24,7 @@ export interface CharacterContext {
 
 export interface VersionedProjectContext {
   readonly schemaVersion: typeof workspaceContextSchemaVersion
-  readonly workspaceId: string
+  readonly projectId: string
   readonly version: number
   readonly contentHash: string
   readonly updatedAt: string
@@ -50,8 +50,12 @@ export interface WorkspaceLoadEditableContextRequest {
   readonly workspaceId: string
 }
 
-export interface WorkspaceSaveProjectContextRequest {
-  readonly workspaceId: string
+export interface ProjectGetContextRequest {
+  readonly projectId: string
+}
+
+export interface ProjectSaveContextRequest {
+  readonly projectId: string
   readonly expectedVersion: number
   readonly context: ProjectContext
 }
@@ -428,15 +432,15 @@ function parseVersionedProject(value: unknown): VersionedProjectContext {
     !isRecord(value) ||
     !hasExactKeys(value, [
       "schemaVersion",
-      "workspaceId",
+      "projectId",
       "version",
       "contentHash",
       "updatedAt",
       "context",
     ]) ||
     value.schemaVersion !== workspaceContextSchemaVersion ||
-    typeof value.workspaceId !== "string" ||
-    !workspaceIdPattern.test(value.workspaceId) ||
+    typeof value.projectId !== "string" ||
+    !workspaceIdPattern.test(value.projectId) ||
     !isSafePositiveInteger(value.version) ||
     typeof value.contentHash !== "string" ||
     !hashPattern.test(value.contentHash) ||
@@ -446,7 +450,7 @@ function parseVersionedProject(value: unknown): VersionedProjectContext {
   }
   return {
     schemaVersion: 1,
-    workspaceId: value.workspaceId,
+    projectId: value.projectId,
     version: value.version,
     contentHash: value.contentHash,
     updatedAt: value.updatedAt,
@@ -500,9 +504,6 @@ export function parseWorkspaceEditableContext(
   }
   const project = parseVersionedProject(value.project)
   const character = parseVersionedCharacter(value.character)
-  if (project.workspaceId !== value.workspaceId) {
-    return violation()
-  }
   return {
     schemaVersion: 1,
     workspaceId: value.workspaceId,

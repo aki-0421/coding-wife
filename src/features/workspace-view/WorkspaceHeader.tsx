@@ -61,12 +61,7 @@ interface WorkspaceHeaderProps {
   readonly onRepair: () => Promise<boolean>
 }
 
-const tabOrder: readonly WorkspaceTab[] = [
-  "chat",
-  "commit",
-  "context",
-  "settings",
-]
+const tabOrder: readonly WorkspaceTab[] = ["chat", "commit", "settings"]
 
 function ConnectionStatus({
   connection,

@@ -67,7 +67,7 @@ export interface EditableContextSection<T, V, L> {
   readonly conflict: ContextConflict | null
 }
 
-interface WorkspaceContextState {
+interface SettingsContextState {
   readonly project: EditableContextSection<
     ProjectContext,
     VersionedProjectContext,
@@ -80,8 +80,8 @@ interface WorkspaceContextState {
   >
 }
 
-export interface EditableWorkspaceContextModel extends WorkspaceContextState {
-  readonly workspaceId: string
+export interface EditableSettingsContextModel extends SettingsContextState {
+  readonly projectId: string
   readonly updateProject: (change: Partial<ProjectContext>) => void
   readonly updateCharacter: (change: Partial<CharacterContext>) => void
   readonly updateProjectList: (
@@ -137,7 +137,7 @@ function characterListDrafts(context: CharacterContext): CharacterListDrafts {
   return { prohibitedExpressions: context.prohibitedExpressions.join("\n") }
 }
 
-function loadingState(): WorkspaceContextState {
+function loadingState(): SettingsContextState {
   return {
     project: {
       persisted: null,
@@ -201,7 +201,7 @@ function characterContextWithLists(
 }
 
 function projectNativeFieldError(code: string): ContextFieldError | null {
-  const suffix = code.replace("WORKSPACE-PROJECT-CONTEXT-", "")
+  const suffix = code.replace(/^(?:WORKSPACE-)?PROJECT-CONTEXT-/u, "")
   if (suffix === "GOAL") return { field: "goal", reason: "text" }
   if (suffix === "CONSTRAINTS") {
     return { field: "constraints", reason: "text" }
@@ -257,12 +257,13 @@ function changedFields<T extends object>(local: T, remote: T): string[] {
   )
 }
 
-export function useEditableWorkspaceContext(
+export function useEditableSettingsContext(
   adapter: WorkspaceViewAdapter | undefined,
-  workspaceId: string,
-): EditableWorkspaceContextModel {
+  projectId: string,
+): EditableSettingsContextModel {
+  const workspaceId = projectId
   const [states, setStates] = useState<
-    Readonly<Record<string, WorkspaceContextState>>
+    Readonly<Record<string, SettingsContextState>>
   >({})
   const statesRef = useRef(states)
   const loadGenerations = useRef(new Map<string, number>())
@@ -276,7 +277,7 @@ export function useEditableWorkspaceContext(
   const replaceWorkspace = useCallback(
     (
       id: string,
-      update: (current: WorkspaceContextState) => WorkspaceContextState,
+      update: (current: SettingsContextState) => SettingsContextState,
     ) => {
       setStates((current) => ({
         ...current,
@@ -289,8 +290,8 @@ export function useEditableWorkspaceContext(
   const replaceCharacter = useCallback(
     (
       update: (
-        current: WorkspaceContextState["character"],
-      ) => WorkspaceContextState["character"],
+        current: SettingsContextState["character"],
+      ) => SettingsContextState["character"],
     ) => {
       setStates((current) => {
         const global = current[globalCharacterKey] ?? loadingState()
@@ -357,37 +358,37 @@ export function useEditableWorkspaceContext(
     (id: string, force = false) => {
       const token = (loadGenerations.current.get(id) ?? 0) + 1
       loadGenerations.current.set(id, token)
-      if (id === "__no_workspace__") return
+      if (id === "__no_project__") return
       const cached = statesRef.current[id]
       if (!force && cached !== undefined && cached.project.persisted !== null) {
         return
       }
       replaceWorkspace(id, () => loadingState())
-      if (adapter?.loadEditableContext === undefined) {
+      if (adapter?.loadProjectContext === undefined) {
         replaceWorkspace(id, (current) => ({
           project: {
             ...current.project,
             status: "error",
-            errorCode: "WORKSPACE-CONTEXT-UNAVAILABLE",
+            errorCode: "PROJECT-CONTEXT-UNAVAILABLE",
             fieldError: null,
           },
           character: current.character,
         }))
         return
       }
-      void adapter.loadEditableContext(id).then(
-        (bundle) => {
+      void adapter.loadProjectContext(id).then(
+        (persisted) => {
           if (
             token !== loadGenerations.current.get(id) ||
-            bundle.workspaceId !== id
+            persisted.projectId !== id
           ) {
             return
           }
           replaceWorkspace(id, () => ({
             project: {
-              persisted: bundle.project,
-              draft: bundle.project.context,
-              listDrafts: projectListDrafts(bundle.project.context),
+              persisted,
+              draft: persisted.context,
+              listDrafts: projectListDrafts(persisted.context),
               status: "ready",
               dirty: false,
               errorCode: null,
@@ -401,7 +402,7 @@ export function useEditableWorkspaceContext(
           if (token !== loadGenerations.current.get(id)) return
           const errorCode = safeErrorCode(
             error,
-            "WORKSPACE-CONTEXT-LOAD-FAILED",
+            "PROJECT-CONTEXT-LOAD-FAILED",
           )
           replaceWorkspace(id, (current) => ({
             project: {
@@ -557,7 +558,7 @@ export function useEditableWorkspaceContext(
         project: {
           ...state.project,
           status: "error",
-          errorCode: "WORKSPACE-PROJECT-CONTEXT-INVALID",
+          errorCode: "PROJECT-CONTEXT-INVALID",
           fieldError:
             issue === null
               ? null
@@ -583,7 +584,7 @@ export function useEditableWorkspaceContext(
       )
       if (
         token !== projectSaveGenerations.current.get(workspaceId) ||
-        saved.workspaceId !== workspaceId
+        saved.projectId !== workspaceId
       ) {
         return false
       }
@@ -605,16 +606,17 @@ export function useEditableWorkspaceContext(
       if (token !== projectSaveGenerations.current.get(workspaceId)) {
         return false
       }
-      const code = safeErrorCode(error, "WORKSPACE-PROJECT-CONTEXT-SAVE-FAILED")
+      const code = safeErrorCode(error, "PROJECT-CONTEXT-SAVE-FAILED")
       if (
-        code === "WORKSPACE-PROJECT-CONTEXT-CONFLICT" &&
-        adapter.loadEditableContext !== undefined
+        (code === "PROJECT-CONTEXT-CONFLICT" ||
+          code === "WORKSPACE-PROJECT-CONTEXT-CONFLICT") &&
+        adapter.loadProjectContext !== undefined
       ) {
         try {
-          const remote = await adapter.loadEditableContext(workspaceId)
+          const remote = await adapter.loadProjectContext(workspaceId)
           if (
             token !== projectSaveGenerations.current.get(workspaceId) ||
-            remote.workspaceId !== workspaceId
+            remote.projectId !== workspaceId
           ) {
             return false
           }
@@ -622,14 +624,14 @@ export function useEditableWorkspaceContext(
             ...state,
             project: {
               ...state.project,
-              persisted: remote.project,
+              persisted: remote,
               status: "conflict",
               errorCode: code,
               fieldError: null,
               conflict: {
                 localVersion: expectedVersion,
-                remoteVersion: remote.project.version,
-                changedFields: changedFields(candidate, remote.project.context),
+                remoteVersion: remote.version,
+                changedFields: changedFields(candidate, remote.context),
               },
             },
           }))
@@ -783,13 +785,13 @@ export function useEditableWorkspaceContext(
     )
   }, [replaceCharacter])
 
-  const workspace = states[workspaceId] ?? loadingState()
+  const project = states[workspaceId] ?? loadingState()
   const globalCharacter =
     states[globalCharacterKey]?.character ?? loadingState().character
-  const current = { project: workspace.project, character: globalCharacter }
+  const current = { project: project.project, character: globalCharacter }
   return useMemo(
     () => ({
-      workspaceId,
+      projectId,
       ...current,
       updateProject,
       updateCharacter,
@@ -823,6 +825,7 @@ export function useEditableWorkspaceContext(
       updateProject,
       updateProjectList,
       workspaceId,
+      projectId,
     ],
   )
 }

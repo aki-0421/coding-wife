@@ -25,19 +25,19 @@ import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import {
   normalizeContextListDraft,
   type EditableContextField,
-  type EditableWorkspaceContextModel,
-} from "@/features/workspace-view/useEditableWorkspaceContext"
+  type EditableSettingsContextModel,
+} from "@/features/workspace-view/useEditableSettingsContext"
 import { unicodeScalarCount } from "@/lib/public-text"
 
 interface EditableContextSectionProps {
   readonly copy: WorkspaceCopy
   readonly instanceId: string
-  readonly model: EditableWorkspaceContextModel
+  readonly model: EditableSettingsContextModel
   readonly section: "project" | "character"
   readonly turnActive: boolean
 }
 
-function projectTotal(model: EditableWorkspaceContextModel): number {
+function projectTotal(model: EditableSettingsContextModel): number {
   const context = model.project.draft
   return [
     context.goal,
@@ -48,7 +48,7 @@ function projectTotal(model: EditableWorkspaceContextModel): number {
   ].reduce((total, value) => total + unicodeScalarCount(value), 0)
 }
 
-function characterTotal(model: EditableWorkspaceContextModel): number {
+function characterTotal(model: EditableSettingsContextModel): number {
   const context = model.character.draft
   return [
     context.displayName,

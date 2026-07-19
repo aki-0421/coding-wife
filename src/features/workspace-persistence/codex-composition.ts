@@ -257,8 +257,8 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return this.history.captureContext(workspaceId, source)
   }
 
-  loadEditableContext(workspaceId: string) {
-    return this.history.loadEditableContext(workspaceId)
+  loadProjectContext(projectId: string) {
+    return this.history.loadProjectContext(projectId)
   }
 
   loadCharacterContext() {
@@ -266,17 +266,13 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   }
 
   saveProjectContext(
-    workspaceId: string,
+    projectId: string,
     expectedVersion: number,
     context: Parameters<
       PersistentWorkspaceViewAdapter["saveProjectContext"]
     >[2],
   ) {
-    return this.history.saveProjectContext(
-      workspaceId,
-      expectedVersion,
-      context,
-    )
+    return this.history.saveProjectContext(projectId, expectedVersion, context)
   }
 
   saveCharacterContext(

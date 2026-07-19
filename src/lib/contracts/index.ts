@@ -172,6 +172,7 @@ export {
   type WorkspaceEditableContext,
   type WorkspaceLoadEditableContextRequest,
   type AppSaveCharacterContextRequest,
-  type WorkspaceSaveProjectContextRequest,
+  type ProjectGetContextRequest,
+  type ProjectSaveContextRequest,
   type WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"

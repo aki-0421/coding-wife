@@ -22,7 +22,7 @@ import {
   type CharacterContext,
   type ProjectContext,
   type VersionedCharacterContext,
-  type WorkspaceEditableContext,
+  type VersionedProjectContext,
   type WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
 
@@ -142,10 +142,7 @@ export class DemoWorkspaceHistoryTransport
     ]),
   )
   private readonly contexts = new Map<string, PersistedContextSnapshot[]>()
-  private readonly editableContexts = new Map<
-    string,
-    WorkspaceEditableContext
-  >()
+  private readonly projectContexts = new Map<string, VersionedProjectContext>()
   private characterContext: VersionedCharacterContext = {
     schemaVersion: 1,
     version: 1,
@@ -166,10 +163,12 @@ export class DemoWorkspaceHistoryTransport
 
   constructor() {
     for (const workspace of this.workspaces) {
-      this.editableContexts.set(
-        workspace.workspaceId,
-        this.defaultEditableContext(workspace.workspaceId, workspace.updatedAt),
-      )
+      if (!this.projectContexts.has(workspace.projectId)) {
+        this.projectContexts.set(
+          workspace.projectId,
+          this.defaultProjectContext(workspace.projectId, workspace.updatedAt),
+        )
+      }
       this.events.set(workspace.workspaceId, [
         this.event(
           workspace.workspaceId,
@@ -265,16 +264,15 @@ export class DemoWorkspaceHistoryTransport
         return this.saveContext(
           request as WorkspaceHistoryRequestMap["workspace_save_context_snapshot"],
         )
-      case workspaceHistoryCommands.loadEditableContext:
-        return this.editableContext(
-          (
-            request as WorkspaceHistoryRequestMap["workspace_load_editable_context"]
-          ).workspaceId,
+      case workspaceHistoryCommands.getProjectContext:
+        return this.projectContext(
+          (request as WorkspaceHistoryRequestMap["project_context_get"])
+            .projectId,
           command,
         )
       case workspaceHistoryCommands.saveProjectContext:
         return this.saveProjectContext(
-          request as WorkspaceHistoryRequestMap["workspace_save_project_context"],
+          request as WorkspaceHistoryRequestMap["project_context_save"],
         )
       case workspaceHistoryCommands.getCharacterContext:
         return this.characterContext
@@ -381,6 +379,10 @@ export class DemoWorkspaceHistoryTransport
             updatedAt: timestamp,
           },
         ]
+        this.projectContexts.set(
+          "project-demo-selected",
+          this.defaultProjectContext("project-demo-selected", timestamp),
+        )
       } else {
         const restoredWorkspaces = this.hiddenWorkspaces.filter(
           (workspace) => workspace.projectId === hiddenProject.projectId,
@@ -456,10 +458,6 @@ export class DemoWorkspaceHistoryTransport
             updatedAt: timestamp,
           }
         : candidate,
-    )
-    this.editableContexts.set(
-      workspaceId,
-      this.defaultEditableContext(workspaceId, timestamp),
     )
     this.events.set(workspaceId, [
       this.event(workspaceId, "work", "work.workspace.lifecycle.changed", {
@@ -540,7 +538,6 @@ export class DemoWorkspaceHistoryTransport
     )
     this.drafts.delete(workspaceId)
     this.contexts.delete(workspaceId)
-    this.editableContexts.delete(workspaceId)
     this.events.delete(workspaceId)
     this.activeWorkspaceId =
       this.activeWorkspaceId === workspaceId
@@ -709,37 +706,33 @@ export class DemoWorkspaceHistoryTransport
   }
 
   private async saveProjectContext(
-    request: WorkspaceHistoryRequestMap["workspace_save_project_context"],
-  ): Promise<WorkspaceHistoryResponseMap["workspace_save_project_context"]> {
-    const current = this.editableContext(
-      request.workspaceId,
+    request: WorkspaceHistoryRequestMap["project_context_save"],
+  ): Promise<WorkspaceHistoryResponseMap["project_context_save"]> {
+    const current = this.projectContext(
+      request.projectId,
       workspaceHistoryCommands.saveProjectContext,
     )
-    if (current.project.version !== request.expectedVersion) {
+    if (current.version !== request.expectedVersion) {
       throw this.error(
-        "WORKSPACE-PROJECT-CONTEXT-CONFLICT",
+        "PROJECT-CONTEXT-CONFLICT",
         workspaceHistoryCommands.saveProjectContext,
         true,
       )
     }
     const context = normalizeProjectContextForSave(request.context)
-    const version = current.project.version + 1
-    const updated: WorkspaceEditableContext = {
-      ...current,
-      project: {
-        schemaVersion: 1,
-        workspaceId: request.workspaceId,
-        version,
-        contentHash: await this.canonicalJsonHash(
-          context,
-          workspaceHistoryCommands.saveProjectContext,
-        ),
-        updatedAt: this.timestamp(),
+    const updated: VersionedProjectContext = {
+      schemaVersion: 1,
+      projectId: request.projectId,
+      version: current.version + 1,
+      contentHash: await this.canonicalJsonHash(
         context,
-      },
+        workspaceHistoryCommands.saveProjectContext,
+      ),
+      updatedAt: this.timestamp(),
+      context,
     }
-    this.editableContexts.set(request.workspaceId, updated)
-    return updated.project
+    this.projectContexts.set(request.projectId, updated)
+    return updated
   }
 
   private async saveCharacterContext(
@@ -770,29 +763,33 @@ export class DemoWorkspaceHistoryTransport
   private async turnContextSnapshot(
     workspaceId: string,
   ): Promise<WorkspaceTurnContextSnapshot> {
-    const current = this.editableContext(
+    const workspace = this.workspace(
       workspaceId,
+      workspaceHistoryCommands.getTurnContextSnapshot,
+    )
+    const project = this.projectContext(
+      workspace.projectId,
       workspaceHistoryCommands.getTurnContextSnapshot,
     )
     return {
       schemaVersion: 1,
       workspaceId,
-      projectVersion: current.project.version,
-      projectHash: current.project.contentHash,
-      characterVersion: current.character.version,
-      characterHash: current.character.contentHash,
+      projectVersion: project.version,
+      projectHash: project.contentHash,
+      characterVersion: this.characterContext.version,
+      characterHash: this.characterContext.contentHash,
       snapshotHash: await this.canonicalJsonHash(
         {
-          projectVersion: current.project.version,
-          projectHash: current.project.contentHash,
-          characterVersion: current.character.version,
-          characterHash: current.character.contentHash,
+          projectVersion: project.version,
+          projectHash: project.contentHash,
+          characterVersion: this.characterContext.version,
+          characterHash: this.characterContext.contentHash,
         },
         workspaceHistoryCommands.getTurnContextSnapshot,
       ),
       capturedAt: this.timestamp(),
-      project: current.project.context,
-      character: current.character.context,
+      project: project.context,
+      character: this.characterContext.context,
     }
   }
 
@@ -854,10 +851,6 @@ export class DemoWorkspaceHistoryTransport
       emptyDraft(request.workspaceId, updatedAt),
     )
     this.contexts.delete(request.workspaceId)
-    this.editableContexts.set(
-      request.workspaceId,
-      this.defaultEditableContext(request.workspaceId, updatedAt),
-    )
     this.events.delete(request.workspaceId)
     this.lastSummaries.delete(request.workspaceId)
     this.timelineAnchors.delete(request.workspaceId)
@@ -943,40 +936,31 @@ export class DemoWorkspaceHistoryTransport
     return workspace
   }
 
-  private editableContext(
-    workspaceId: string,
+  private projectContext(
+    projectId: string,
     operation: WorkspaceHistoryCommand,
-  ): WorkspaceEditableContext {
-    this.workspace(workspaceId, operation)
-    const context = this.editableContexts.get(workspaceId)
-    if (context === undefined) {
-      throw this.error("WORKSPACE-NOT-FOUND", operation, false)
+  ): VersionedProjectContext {
+    const project = [...this.projects, ...this.hiddenProjects].find(
+      (candidate) => candidate.projectId === projectId,
+    )
+    const context = this.projectContexts.get(projectId)
+    if (project === undefined || context === undefined) {
+      throw this.error("PROJECT-NOT-FOUND", operation, false)
     }
-    return { ...context, character: this.characterContext }
+    return context
   }
 
-  private defaultEditableContext(
-    workspaceId: string,
+  private defaultProjectContext(
+    projectId: string,
     updatedAt: string,
-  ): WorkspaceEditableContext {
+  ): VersionedProjectContext {
     return {
       schemaVersion: 1,
-      workspaceId,
-      project: {
-        schemaVersion: 1,
-        workspaceId,
-        version: 1,
-        contentHash: defaultProjectHash,
-        updatedAt,
-        context: defaultProjectContext,
-      },
-      character: {
-        schemaVersion: 1,
-        version: 1,
-        contentHash: defaultCharacterHash,
-        updatedAt,
-        context: defaultCharacterContext,
-      },
+      projectId,
+      version: 1,
+      contentHash: defaultProjectHash,
+      updatedAt,
+      context: defaultProjectContext,
     }
   }
 

@@ -11,14 +11,13 @@ import {
 import {
   parseVersionedCharacterContext,
   parseVersionedProjectContext,
-  parseWorkspaceEditableContext,
   parseWorkspaceTurnContextSnapshot,
   type VersionedCharacterContext,
   type VersionedProjectContext,
-  type WorkspaceEditableContext,
+  type ProjectGetContextRequest,
+  type ProjectSaveContextRequest,
   type WorkspaceLoadEditableContextRequest,
   type AppSaveCharacterContextRequest,
-  type WorkspaceSaveProjectContextRequest,
   type WorkspaceTurnContextSnapshot,
 } from "./workspace-context"
 
@@ -38,8 +37,8 @@ export const workspaceHistoryCommands = {
   saveDraft: "workspace_save_draft",
   saveTimelineAnchor: "workspace_save_timeline_anchor",
   saveContextSnapshot: "workspace_save_context_snapshot",
-  loadEditableContext: "workspace_load_editable_context",
-  saveProjectContext: "workspace_save_project_context",
+  getProjectContext: "project_context_get",
+  saveProjectContext: "project_context_save",
   getCharacterContext: "app_character_context_get",
   saveCharacterContext: "app_character_context_save",
   getTurnContextSnapshot: "workspace_get_turn_context_snapshot",
@@ -329,8 +328,8 @@ export interface WorkspaceHistoryRequestMap {
   workspace_save_draft: WorkspaceSaveDraftRequest
   workspace_save_timeline_anchor: WorkspaceSaveTimelineAnchorRequest
   workspace_save_context_snapshot: WorkspaceSaveContextRequest
-  workspace_load_editable_context: WorkspaceLoadEditableContextRequest
-  workspace_save_project_context: WorkspaceSaveProjectContextRequest
+  project_context_get: ProjectGetContextRequest
+  project_context_save: ProjectSaveContextRequest
   app_character_context_get: undefined
   app_character_context_save: AppSaveCharacterContextRequest
   workspace_get_turn_context_snapshot: WorkspaceLoadEditableContextRequest
@@ -354,8 +353,8 @@ export interface WorkspaceHistoryResponseMap {
   workspace_save_draft: PersistedWorkspaceDraft
   workspace_save_timeline_anchor: WorkspaceTimelineAnchor
   workspace_save_context_snapshot: PersistedContextSnapshot
-  workspace_load_editable_context: WorkspaceEditableContext
-  workspace_save_project_context: VersionedProjectContext
+  project_context_get: VersionedProjectContext
+  project_context_save: VersionedProjectContext
   app_character_context_get: VersionedCharacterContext
   app_character_context_save: VersionedCharacterContext
   workspace_get_turn_context_snapshot: WorkspaceTurnContextSnapshot
@@ -1489,10 +1488,7 @@ export function parseWorkspaceHistoryResponse<
       return parsePersistedContextSnapshot(
         value,
       ) as WorkspaceHistoryResponseMap[K]
-    case workspaceHistoryCommands.loadEditableContext:
-      return parseWorkspaceEditableContext(
-        value,
-      ) as WorkspaceHistoryResponseMap[K]
+    case workspaceHistoryCommands.getProjectContext:
     case workspaceHistoryCommands.saveProjectContext:
       return parseVersionedProjectContext(
         value,

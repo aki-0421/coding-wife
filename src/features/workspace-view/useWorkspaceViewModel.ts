@@ -12,7 +12,6 @@ import type {
   AttachmentItem,
   ContextSnapshotItem,
   ProjectRecord,
-  ProjectSettingsSection,
   ReasoningEffort,
   SendTurnRequest,
   WorkspaceAdapterState,
@@ -217,8 +216,6 @@ export function useWorkspaceViewModel(
     )
   })
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat")
-  const [projectSettingsSection, setProjectSettingsSection] =
-    useState<ProjectSettingsSection>("project_context")
   const [filter, setFilter] = useState("")
   const [drafts, setDrafts] = useState<
     Readonly<Record<string, WorkspaceDraft>>
@@ -1294,7 +1291,6 @@ export function useWorkspaceViewModel(
   const resetUiState = useCallback(() => {
     setFilter("")
     setActiveTab("chat")
-    setProjectSettingsSection("project_context")
     setNotice(null)
   }, [])
 
@@ -1344,8 +1340,6 @@ export function useWorkspaceViewModel(
     setNotice,
     setReducedMotion,
     setSelectedWorkspaceId: selectWorkspace,
-    setProjectSettingsSection,
-    projectSettingsSection,
     stopTurn,
     timeline: combinedTimeline,
     timelineAnchor,

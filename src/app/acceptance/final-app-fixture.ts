@@ -19,7 +19,6 @@ import type {
   ProjectContext,
   VersionedCharacterContext,
   VersionedProjectContext,
-  WorkspaceEditableContext,
   WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
 import type {
@@ -85,11 +84,11 @@ export class MemoryLocalePreferenceStore implements LocalePreferenceStore {
   }
 }
 
-function contextFor(workspaceId: string): StoredContext {
+function contextFor(projectId: string): StoredContext {
   return {
     project: {
       schemaVersion: 1,
-      workspaceId,
+      projectId,
       version: 1,
       contentHash: projectHash,
       updatedAt: fixtureTime,
@@ -201,6 +200,7 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
           ? "workspace-primary"
           : `workspace-existing-${String(index)}`,
       repository: "coding-wife",
+      projectId: "project-acceptance",
       name: index === 0 ? "primary" : `existing-${String(index)}`,
       branch: "develop",
       lifecycle: index === 0 ? "in_progress" : "backlog",
@@ -216,7 +216,12 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
         revision: 1,
         contextSnapshots: [],
       })
-      this.#contexts.set(workspace.id, contextFor(workspace.id))
+      if (!this.#contexts.has(workspace.projectId ?? "project-acceptance")) {
+        this.#contexts.set(
+          workspace.projectId ?? "project-acceptance",
+          contextFor(workspace.projectId ?? "project-acceptance"),
+        )
+      }
       this.#timeline.set(workspace.id, [])
     }
   }
@@ -287,7 +292,9 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
       revision: 1,
       contextSnapshots: [],
     })
-    this.#contexts.set(workspaceId, contextFor(workspaceId))
+    if (!this.#contexts.has(request.projectId)) {
+      this.#contexts.set(request.projectId, contextFor(request.projectId))
+    }
     this.#timeline.set(workspaceId, [])
     this.activate(workspaceId)
     return Promise.resolve(this.snapshot())
@@ -380,29 +387,20 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
     )
   }
 
-  loadEditableContext = (
-    workspaceId: string,
-  ): Promise<WorkspaceEditableContext> => {
-    const context = this.context(workspaceId)
-    return Promise.resolve({
-      schemaVersion: 1,
-      workspaceId,
-      project: structuredClone(context.project),
-      character: structuredClone(this.#characterContext),
-    })
-  }
+  loadProjectContext = (projectId: string): Promise<VersionedProjectContext> =>
+    Promise.resolve(structuredClone(this.context(projectId).project))
 
   loadCharacterContext = (): Promise<VersionedCharacterContext> =>
     Promise.resolve(structuredClone(this.#characterContext))
 
   saveProjectContext = (
-    workspaceId: string,
+    projectId: string,
     expectedVersion: number,
     project: ProjectContext,
   ): Promise<VersionedProjectContext> => {
-    const context = this.context(workspaceId)
+    const context = this.context(projectId)
     if (context.project.version !== expectedVersion) {
-      return Promise.reject(new Error("WORKSPACE-PROJECT-CONTEXT-CONFLICT"))
+      return Promise.reject(new Error("PROJECT-CONTEXT-CONFLICT"))
     }
     const saved: VersionedProjectContext = {
       ...context.project,
@@ -411,7 +409,7 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
       updatedAt: "2026-07-19T00:01:00.000Z",
       context: structuredClone(project),
     }
-    this.#contexts.set(workspaceId, { ...context, project: saved })
+    this.#contexts.set(projectId, { ...context, project: saved })
     this.savedProjectContexts.push(structuredClone(saved))
     return Promise.resolve(structuredClone(saved))
   }
@@ -437,7 +435,11 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
   getTurnContextSnapshot = (
     workspaceId: string,
   ): Promise<WorkspaceTurnContextSnapshot> => {
-    const context = this.context(workspaceId)
+    const workspace = this.#workspaces.find(
+      (candidate) => candidate.id === workspaceId,
+    )
+    if (workspace === undefined) throw new Error("WORKSPACE-NOT-FOUND")
+    const context = this.context(workspace.projectId ?? "project-acceptance")
     return Promise.resolve({
       schemaVersion: 1,
       workspaceId,
@@ -569,11 +571,11 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
     return draft
   }
 
-  private context(workspaceId: string): StoredContext {
-    const existing = this.#contexts.get(workspaceId)
+  private context(projectId: string): StoredContext {
+    const existing = this.#contexts.get(projectId)
     if (existing !== undefined) return existing
-    const context = contextFor(workspaceId)
-    this.#contexts.set(workspaceId, context)
+    const context = contextFor(projectId)
+    this.#contexts.set(projectId, context)
     return context
   }
 

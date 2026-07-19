@@ -48,14 +48,13 @@ import {
   useNarrationSnapshot,
 } from "@/features/narration"
 import { ChatView } from "@/features/workspace-view/ChatView"
-import { ContextView } from "@/features/workspace-view/ContextView"
 import {
   getWorkspaceCopy,
   type WorkspaceCopy,
 } from "@/features/workspace-view/copy"
 import {
   AppSettingsView,
-  ProjectSettingsView,
+  WorkspaceSettingsView,
 } from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
@@ -68,17 +67,12 @@ import type {
   WorkspaceTab,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
-import { useEditableWorkspaceContext } from "@/features/workspace-view/useEditableWorkspaceContext"
+import { useEditableSettingsContext } from "@/features/workspace-view/useEditableSettingsContext"
 import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceViewModel"
 import { useWorkspaceViewportLayout } from "@/features/workspace-view/workspace-viewport"
 import { gitReviewSchemaVersion } from "@/lib/contracts/git-review"
 
-const tabOrder: readonly WorkspaceTab[] = [
-  "chat",
-  "commit",
-  "context",
-  "settings",
-]
+const tabOrder: readonly WorkspaceTab[] = ["chat", "commit", "settings"]
 
 export interface WorkspaceShellProps {
   readonly adapter?: WorkspaceViewAdapter | undefined
@@ -139,9 +133,12 @@ export function WorkspaceShell({
   const appPreferences = useAppPreferences().snapshot.preferences
   const characterHidden = appPreferences.characterVisibility === "hidden"
   const view = useWorkspaceViewModel(adapter, initialWorkspaces)
-  const contextModel = useEditableWorkspaceContext(
+  const [appSettingsProjectId, setAppSettingsProjectId] = useState<
+    string | null
+  >(null)
+  const contextModel = useEditableSettingsContext(
     adapter,
-    view.selectedWorkspace?.id ?? "__no_workspace__",
+    appSettingsProjectId ?? "__no_project__",
   )
   const characterRuntimeStore = useCharacterRuntimeStatusStore()
   const characterRuntimeSnapshot = useCharacterRuntimeStatus(
@@ -655,11 +652,13 @@ export function WorkspaceShell({
   }, [appSettingsOpen, copy.filterWorkspaces, view])
 
   const openAppSettings = (section: AppSettingsSection = "general") => {
+    setAppSettingsProjectId(null)
     setAppSettingsSection(section)
     setAppSettingsOpen(true)
   }
 
   const closeAppSettings = () => {
+    setAppSettingsProjectId(null)
     setAppSettingsOpen(false)
     window.requestAnimationFrame(() => {
       document
@@ -670,12 +669,14 @@ export function WorkspaceShell({
 
   const resetUiState = () => {
     view.resetUiState()
+    setAppSettingsProjectId(null)
     setAppSettingsSection("general")
     setAppSettingsOpen(false)
   }
 
   const setActiveTab = (value: string) => {
     if (!isWorkspaceTab(value)) return
+    setAppSettingsProjectId(null)
     setAppSettingsOpen(false)
     view.setActiveTab(value)
   }
@@ -766,6 +767,7 @@ export function WorkspaceShell({
         }
         onRequestArchive={setArchiveCandidate}
         onSelectWorkspace={(workspaceId) => {
+          setAppSettingsProjectId(null)
           setAppSettingsOpen(false)
           view.setSelectedWorkspaceId(workspaceId)
         }}
@@ -793,12 +795,18 @@ export function WorkspaceShell({
             )
           }}
           onResetUi={resetUiState}
-          onSectionChange={setAppSettingsSection}
+          onCloseProject={() => setAppSettingsProjectId(null)}
+          onOpenProject={setAppSettingsProjectId}
+          onSectionChange={(section) => {
+            setAppSettingsProjectId(null)
+            setAppSettingsSection(section)
+          }}
           onUnregisterProject={unregisterProject}
           projectActionPending={view.workspaceAction !== null || turnActive}
           projects={view.projects}
           runtimeState={runtime.state}
           section={appSettingsSection}
+          selectedProjectId={appSettingsProjectId}
           turnActive={turnActive}
           workspaceId={selectedWorkspace?.id ?? "__no_workspace__"}
         />
@@ -912,28 +920,12 @@ export function WorkspaceShell({
 
           <TabsContent
             className="workspace-view data-[state=inactive]:hidden"
-            forceMount
-            value="context"
-          >
-            <ContextView
-              copy={copy}
-              model={contextModel}
-              turnActive={turnActive}
-            />
-          </TabsContent>
-
-          <TabsContent
-            className="workspace-view data-[state=inactive]:hidden"
             value="settings"
           >
-            <ProjectSettingsView
-              contextModel={contextModel}
+            <WorkspaceSettingsView
               copy={copy}
               history={view.history}
               onDeleteHistory={view.deleteSelectedWorkspaceHistory}
-              onSectionChange={view.setProjectSettingsSection}
-              section={view.projectSettingsSection}
-              turnActive={turnActive}
               workspaceLabel={`${selectedWorkspace.repository}/${selectedWorkspace.name}`}
             />
           </TabsContent>
