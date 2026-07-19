@@ -83,7 +83,7 @@ Context tabはS-002内の`/workspace/:workspaceId/context` subviewであり、�
 | minimum geometry | 960×640 CSS px。これ未満へのresizeをOSへ許可しない |
 | maximum / fullscreen | macOS標準zoomとfullscreenを許可し、終了時geometryを保存する |
 | titlebar | macOS native overlay。close / minimize / zoomのtraffic lightsはOSが描画し、WebViewは赤・黄・緑の代替要素を描画しない。sidebarは見出しがnative controlに重ならない40.5pxのsafe areaだけを予約する |
-| drag region | native titlebar safe area、button、tab、input、scrollbarを除くbreadcrumb rowだけ。`main` capabilityはdrag開始用`core:window:allow-start-dragging`とnative titlebarのダブルクリックzoom用`core:window:allow-internal-toggle-maximize`だけをwindow操作権限として持つ |
+| titlebar hit band | main window上端40.5 CSS pxをdocument captureの一続きのhit bandとし、React componentや子要素の境界へ依存させない。primary `mousedown`の`detail=1`でdrag、`detail=2`でzoomを開始する。button、link、tab、input、select、textarea、summary、contenteditableと明示opt-out targetは除外し、透明overlayでpointer/focusを奪わない。`main` capabilityは`core:window:allow-start-dragging`と`core:window:allow-toggle-maximize`だけをwindow操作権限として持つ |
 | radius | window 7.5px、compact control 4.5px、composer/decision 9px |
 | close | active/pending turn 0件ならorderly shutdown。1件以上ならnative closeを保留し、`停止して終了 / Stop and Quit`と`終了しない / Don’t Quit`だけを表示する |
 

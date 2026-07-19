@@ -4,6 +4,7 @@ import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 
 import { loadApplication } from "#app-loader"
+import { installNativeTitlebarControls } from "@/app/native-titlebar-controls"
 import "@/index.css"
 
 const appWindowReadyCommand = "app_window_ready" as const
@@ -18,13 +19,16 @@ const bootstrapFailureCopy = navigator.language.toLowerCase().startsWith("ja")
     }
 
 const root = document.getElementById("root")
+const nativeRuntime = isTauri()
 
 if (!root) {
   throw new Error("Application root element was not found")
 }
 
+if (nativeRuntime) installNativeTitlebarControls()
+
 function revealNativeWindow() {
-  if (!isTauri()) return
+  if (!nativeRuntime) return
 
   void invoke(appWindowReadyCommand)
 }
