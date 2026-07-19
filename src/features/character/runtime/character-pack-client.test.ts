@@ -134,6 +134,32 @@ describe("character pack manifest", () => {
     expect(manifest.inventory.motionCount).toBe(10)
   })
 
+  it("accepts inventories above the legacy 128-file boundary", () => {
+    const pack = structuredClone(hiyoriPack)
+    const files = pack.files as unknown as Array<{
+      assetId: string
+      role: string
+      bytes: number
+      sha256: string
+      dimensions?: { width: number; height: number }
+    }>
+    for (let index = 0; index < 112; index += 1) {
+      files.push({
+        assetId: `runtime/metadata/extra-${String(index)}.cdi3.json`,
+        role: "display_info",
+        bytes: 1,
+        sha256: "0".repeat(64),
+      })
+    }
+    pack.inventory.runtimeFileCount = files.length
+    pack.inventory.totalBytes = files.reduce(
+      (total, file) => total + file.bytes,
+      0,
+    )
+
+    expect(parseCharacterPackManifest(pack).files).toHaveLength(129)
+  })
+
   it("matches native dotted cue IDs, URL rejection, and the 80-byte boundary", () => {
     const dotted = parseCharacterPackManifest(
       packWithRenamedMotionGroup("Tap@Body", "Tap.Body"),

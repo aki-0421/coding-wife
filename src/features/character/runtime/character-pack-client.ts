@@ -11,7 +11,7 @@ import {
   isCharacterCueId,
 } from "@/features/character/cue-id"
 
-const MAX_FILES = 128
+const MAX_FILES = 4096
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024
 const MAX_FILE_BYTES = 32 * 1024 * 1024
 const MAX_TEXTURE_DIMENSION = 8192

@@ -529,11 +529,11 @@ function parseCharacterPackView(value: unknown): CharacterPackView {
     !string(value.displayName, 80) ||
     !sha256(value.manifestHash) ||
     !string(value.provenanceLabel, 80) ||
-    !integer(value.runtimeFileCount, 1, 128) ||
+    !integer(value.runtimeFileCount, 1, 4096) ||
     !integer(value.totalBytes, 1, 100 * 1024 * 1024) ||
-    !integer(value.textureCount, 1, 128) ||
-    !integer(value.motionCount, 0, 128) ||
-    !integer(value.expressionCount, 0, 128) ||
+    !integer(value.textureCount, 1, 4096) ||
+    !integer(value.motionCount, 0, 4096) ||
+    !integer(value.expressionCount, 0, 4096) ||
     !integer(value.selectedProjectCount, 0) ||
     typeof value.deletable !== "boolean" ||
     (value.thumbnailSha256 !== null && !sha256(value.thumbnailSha256))

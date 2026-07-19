@@ -24,7 +24,7 @@ use super::manifest::{
     MAX_TRUSTED_FRAME_BYTES, MAX_TRUSTED_FRAME_DIMENSION,
 };
 
-const MAX_FILES: usize = 128;
+const MAX_FILES: usize = 4096;
 const MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_TEXTURE_DIMENSION: u32 = 8192;
@@ -878,6 +878,30 @@ mod tests {
         fs::write(root.join("tap.motion3.json"), b"{}").expect("motion");
     }
 
+    fn write_model_with_motion_count(root: &Path, count: usize) {
+        write_minimal_model(root, "test.moc3");
+        let cues = (0..count)
+            .map(|index| {
+                let file = format!("motion-{index}.motion3.json");
+                fs::write(root.join(&file), b"{}").expect("motion");
+                serde_json::json!({ "File": file })
+            })
+            .collect::<Vec<_>>();
+        fs::write(
+            root.join("test.model3.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "Version": 3,
+                "FileReferences": {
+                    "Moc": "test.moc3",
+                    "Textures": ["texture.png"],
+                    "Motions": { "Idle": cues },
+                },
+            }))
+            .expect("many-motion model json"),
+        )
+        .expect("many-motion model");
+    }
+
     fn selected_model(root: &Path) -> PathBuf {
         root.join("test.model3.json")
     }
@@ -896,6 +920,21 @@ mod tests {
         assert_eq!(snapshot.assets.len(), 3);
         assert!(!public.contains(directory.path().to_string_lossy().as_ref()));
         assert!(snapshot.manifest.validate("test").is_ok());
+    }
+
+    #[test]
+    fn models_above_the_legacy_128_file_boundary_are_accepted() {
+        let directory = TestDirectory::new();
+        write_model_with_motion_count(directory.path(), 129);
+        let snapshot = snapshot_character_model(
+            &selected_model(directory.path()),
+            format!("custom:{}", uuid::Uuid::new_v4()),
+            "2026-07-20T00:00:00Z".to_owned(),
+        )
+        .expect("129-motion model remains within the abnormal-input guard");
+
+        assert_eq!(snapshot.manifest.inventory.motion_count, 129);
+        assert_eq!(snapshot.manifest.inventory.runtime_file_count, 132);
     }
 
     #[test]

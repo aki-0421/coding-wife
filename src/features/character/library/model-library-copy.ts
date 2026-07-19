@@ -69,7 +69,7 @@ const en = {
     unsafe:
       "This model contains an external path, link, URL, or file type that cannot be imported safely.",
     limits:
-      "This model exceeds the supported file count, file size, texture size, or JSON depth limit.",
+      "This model is too large to process safely: more than 4,096 files, more than 100 MiB total, a file over 32 MiB, an oversized texture, or unusually deep JSON.",
     preview:
       "The isolated renderer could not verify a visible frame for this model. The current model is unchanged.",
     access:
@@ -147,7 +147,7 @@ const ja: typeof en = {
     unsafe:
       "外部パス、リンク、URL、または安全に取り込めないファイル形式がモデルに含まれています。",
     limits:
-      "ファイル数、ファイルサイズ、テクスチャサイズ、またはJSON階層が対応上限を超えています。",
+      "安全に処理できる範囲を超えています。4,096ファイル超、合計100MiB超、1ファイル32MiB超、過大なテクスチャ、または異常に深いJSONが含まれています。",
     preview:
       "分離レンダラーで表示フレームを確認できませんでした。現在のモデルは変更していません。",
     access:

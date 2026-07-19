@@ -222,6 +222,15 @@ describe("character library contract", () => {
     ).toThrow("The value did not match the character library contract.")
   })
 
+  it("accepts pack metadata above the legacy 128-file boundary", () => {
+    const snapshot = structuredClone(fixture.librarySnapshot)
+    snapshot.packs[0]!.runtimeFileCount = 129
+
+    expect(
+      parseCharacterLibrarySnapshot(snapshot).packs[0]?.runtimeFileCount,
+    ).toBe(129)
+  })
+
   it("rejects custom manifest resource escalation and partial attestation", () => {
     const oversized = structuredClone(
       fixture.importResponse.preview.manifest,
