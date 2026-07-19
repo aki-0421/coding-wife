@@ -118,6 +118,12 @@ describe("isolated character preview CSP", () => {
         developmentOrigin,
       )
     }
+    expect(parentProductionPolicy.get("img-src")).toContain(
+      "https://avatars.githubusercontent.com",
+    )
+    expect(parentDevelopmentPolicy.get("img-src")).toContain(
+      "https://avatars.githubusercontent.com",
+    )
     expect(
       sourceAttribute(
         previewHtml,

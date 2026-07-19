@@ -81,7 +81,7 @@ status: "Approved"
 | 領域 | 実装拘束値 | 表示内容 | 主な操作 |
 |---|---:|---|---|
 | workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、App settings gear | filter、workspace選択、App settings |
-| breadcrumb row | main上段40.5px | repo / workspace、branch、connection、attention | Sessionsへ戻る、diagnostic詳細 |
+| breadcrumb row | main上段40.5px | owner avatar、`owner/repo` / workspace、branch、connection、attention | Sessionsへ戻る、diagnostic詳細 |
 | tab row | main下段40.5px | Chat / Commit / Context / Settings | view切替 |
 | Chat pane | 607.11×754.99px | event timeline、decision、composer | inspect、copy、send、stop、answer |
 | Companion pane | 607.84×754.99px | Live2D canvas、visible caption、mute | mute、fallback詳細 |
@@ -93,7 +93,8 @@ status: "Approved"
 
 | 要素 | 規則 |
 |---|---|
-| breadcrumb | repo名とworkspace名を一行表示し、overflow時はworkspace名を先にellipsisする |
+| repository avatar | GitHub `origin`の`owner/repo`がある時はownerの24px GitHub avatarを`https://avatars.githubusercontent.com`から`no-referrer`で表示する。CSPの外部画像許可は同originだけに限定し、画像失敗時はneutral user fallback、GitHub metadataがないlocal repositoryではneutral Git worktree fallbackを使う。app iconはrepository identityとして使わない |
+| breadcrumb | avatarの次にGitHub `origin`由来の`owner/repo`、workspace名をこの順で一行表示する。GitHub metadataがない時は保存済みlocal repo名へfallbackし、長いrepo/workspace値はellipsisと全文tooltipを持つ |
 | branch | Git観測値。stale時はicon、`再確認が必要`、tooltipを併記する |
 | repository health | `healthy` / `missing` / `changed` / `unreadable` / `read_only` / `stale_branch`をja/en text、icon、shapeで表示し、色だけにしない。`healthy`以外はSend不可理由とRepair/Recheckを関連付ける |
 | connection | Ready / Working / Needs answer / Offline / Interruptedをtextとshapeで表示する |

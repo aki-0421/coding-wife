@@ -23,9 +23,9 @@ import type { LocalePreferenceStore } from "@/features/localization"
 import { DemoNarrationGateway, NarrationController } from "@/features/narration"
 import {
   NativeReadinessController,
-  readinessCheckIds,
   type NativeReadinessGateway,
   type NativeReadinessSnapshotV1,
+  readinessCheckIds,
 } from "@/features/readiness"
 import { DemoTransport } from "@/features/runtime"
 import type {
@@ -554,6 +554,12 @@ describe("WorkspaceShell", () => {
       "text-muted-foreground",
     )
     expect(
+      navigation.querySelectorAll('[data-repository-avatar="github"]'),
+    ).toHaveLength(3)
+    expect(
+      doneWorkspace.querySelector('[data-repository-avatar="github"]'),
+    ).toHaveAttribute("data-github-owner", "aki-0421")
+    expect(
       within(selectedWorkspace).getByText("feature/live2d-companion"),
     ).toHaveClass("text-sidebar-item", "text-text-strong")
     expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
@@ -820,11 +826,73 @@ describe("WorkspaceShell", () => {
     expect(loadState).toHaveBeenCalledTimes(2)
   })
 
-  it("labels the workspace mark with the localized product name", () => {
-    renderWorkspace()
+  it("shows the GitHub owner avatar before the repository breadcrumb", async () => {
+    const BrowserImage = window.Image
+    class LoadedImage extends BrowserImage {
+      constructor() {
+        super()
+        Object.defineProperties(this, {
+          complete: { configurable: true, value: true },
+          naturalWidth: { configurable: true, value: 48 },
+        })
+      }
+    }
+    vi.stubGlobal("Image", LoadedImage)
 
+    try {
+      renderWorkspace()
+
+      const breadcrumb = screen.getByRole("navigation", {
+        name: "Repository location",
+      })
+      expect(within(breadcrumb).getByText("aki-0421/coding-wife")).toBeVisible()
+      expect(
+        within(breadcrumb).getByText("build-live2d-desktop-app"),
+      ).toHaveAttribute("aria-current", "page")
+
+      const avatar = breadcrumb
+        .closest("header")
+        ?.querySelector('[data-repository-avatar="github"]')
+      expect(avatar).toHaveAttribute("data-github-owner", "aki-0421")
+      await waitFor(() =>
+        expect(
+          avatar?.querySelector('[data-slot="avatar-image"]'),
+        ).toHaveAttribute(
+          "src",
+          "https://avatars.githubusercontent.com/aki-0421?size=48",
+        ),
+      )
+      expect(
+        avatar?.querySelector('[data-slot="avatar-image"]'),
+      ).toHaveAttribute("referrerpolicy", "no-referrer")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("uses a neutral repository avatar when GitHub metadata is absent", async () => {
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+    }
+
+    renderWorkspace(adapter)
+
+    expect(await screen.findByText("restored-workspace")).toBeVisible()
+    const breadcrumb = screen.getByRole("navigation", {
+      name: "Repository location",
+    })
+    const avatar = breadcrumb
+      .closest("header")
+      ?.querySelector('[data-repository-avatar="local"]')
+    expect(avatar).toBeVisible()
     expect(
-      screen.getByRole("img", { name: "Coding Wife workspace" }),
+      avatar?.querySelector('[data-slot="avatar-image"]'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen
+        .getByRole("navigation", { name: "Workspaces" })
+        .querySelector('[data-repository-avatar="local"]'),
     ).toBeVisible()
   })
 
