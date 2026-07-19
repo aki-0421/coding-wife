@@ -1,7 +1,7 @@
 ---
 title: "S-006 プロジェクト設定"
 description: "選択中プロジェクトだけへ適用するContext、companion、履歴設定を管理する画面仕様。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "workspaceのSettings tab、project/character context、project companion、workspace historyを実装するとき。"
   - "S-006とWORK、HIST、LIVE、APP要件の対応を確認するとき。"
@@ -33,7 +33,7 @@ status: "Approved"
 | ----------------- | ---------------------------------------------------------------------------------------------------------- |
 | Project context   | goal、constraints、definition of done、technical references、user notes                                    |
 | Character context | name、tone、speech density、behavior、prohibited expressions                                               |
-| Companion         | project-scoped model選択、import、inventory、preview、semantic mapping、provenance、delete、runtime status |
+| Companion         | 常設bundled modelと1件のcustom slot、選択、import/置換、preview、semantic mapping、provenance、delete、runtime status |
 | History & Privacy | 選択workspaceの保存内容、non-persistence、履歴削除、migration/recovery                                     |
 
 ### 含めない
@@ -61,7 +61,7 @@ status: "Approved"
 
 | 利用者・ロール | 表示                                                                       | 操作                                               | 拒否時の動作                                                  |
 | -------------- | -------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------- |
-| ローカル利用者 | 選択project/workspaceのnon-secret context、model metadata、history summary | edit、save、import、preview、select、delete、retry | 他projectの値を表示せず、入力と前snapshotを維持する           |
+| ローカル利用者 | 選択project/workspaceのnon-secret context、model metadata、history summary | edit、save、import/置換、preview、select、custom delete、retry | 他projectの値を表示せず、入力と前snapshotを維持する           |
 | React WebView  | workspace ID、versioned context、pack ID、sanitized state                  | render、input、typed IPC                           | absolute source path、secret、raw support historyを保持しない |
 | Rust service   | workspace/project-scoped store、character library、history                 | scope検証、atomic save、import、delete             | workspace/project不一致を拒否し、他scopeを変更しない          |
 
@@ -84,7 +84,7 @@ Project Settings表示中はLive2D canvasとCompanion paneを表示せず、sect
 | ---------- | ------------------------------- | ------------------------------------------------- | -------------------------- | ----------------------- |
 | 初期化中   | workspace-scoped snapshot未取得 | project identityとfield skeleton                  | tab移動のみ可              | snapshot取得またはerror |
 | 通常       | snapshot取得済み                | 4 sectionとversion/status                         | 契約済み操作が可           | edit/import/delete開始  |
-| データなし | custom model/historyが0件       | bundled Hiyoriまたはnon-persistence説明と次action | context編集可              | import/history生成      |
+| データなし | custom model/historyが0件       | 削除不可のbundled Hiyori、空のcustom slot、non-persistence説明と次action | context編集、custom import可 | import/history生成      |
 | 処理中     | save/import/preview/delete中    | 対象sectionのprogress                             | 同一操作の二重実行不可     | terminal result         |
 | オフライン | Codex/network unavailable       | local context/model/historyを表示                 | local操作可、send不可      | connection回復          |
 | エラー     | load/save/import/delete失敗     | section-local safe code、Retry                    | 他sectionと他workspaceは可 | retry/reload成功        |
@@ -97,7 +97,10 @@ Project Settings表示中はLive2D canvasとCompanion paneを表示せず、sect
 | Project settingsを開く      | workspace選択済み               | Settings tabをactiveにしS-006だけを表示 | 非該当            | 現在tabを維持                        | `APP-F-083`                |
 | workspaceを切り替える       | running/pending turnなし        | 新workspace identityとscoped dataへ切替 | 旧workspaceを維持 | 旧snapshotを復元しsafe error         | `WORK-F-048`, `APP-F-055`  |
 | Contextを保存する           | valid、expected version一致     | versionを更新し次turnから適用           | draft維持         | field errorまたはconflict、draft維持 | `WORK-F-063`, `WORK-F-066` |
-| modelを選択する             | verified pack preview成功       | 選択projectだけへatomic適用             | 前selection維持   | 前selection維持、safe error          | `LIVE-F-066`〜`LIVE-F-073` |
+| modelを選択する             | bundledまたはverified custom    | 選択projectだけへatomic適用             | 前selection維持   | 前selection維持、safe error          | `LIVE-F-066`〜`LIVE-F-078` |
+| custom modelを取り込む      | native picker利用可能           | 空slotへ追加し選択projectへatomic適用   | 前selection維持   | localized reasonとsafe code、前slot維持 | `LIVE-F-068`〜`LIVE-F-076` |
+| custom modelを置き換える    | custom slot使用中               | 検証成功後に旧custom利用projectを新packへ引継ぎ、slotをatomic置換 | 前slot維持 | localized reasonとsafe code、前slot維持 | `LIVE-F-073`〜`LIVE-F-078` |
+| custom modelを削除する      | custom slot使用中、確認済み     | 全projectをbundledへ戻しcustom assetとmappingを削除 | 前slot維持 | 前slotとselectionを維持、safe error | `LIVE-F-078` |
 | workspace historyを削除する | running 0、native history ready | 選択workspaceを維持し、app history・draft・contextだけ初期化。workspace登録、worktree、branchは保持 | 何も変更しない | partial successを表示せずrecovery | `HIST-F-049`, `HIST-F-050`, `HIST-F-059` |
 
 ## 入力項目
@@ -109,7 +112,7 @@ Project / Character contextのfield、境界、conflict契約は[workspace sessi
 | ユーザー操作                       | 実行境界                    | Tauri plugin / Command     | 必要なCapability・認可                              | キャンセル時                        | 拒否・失敗時                                 |
 | ---------------------------------- | --------------------------- | -------------------------- | --------------------------------------------------- | ----------------------------------- | -------------------------------------------- |
 | Context load/save                  | Rust SQLite                 | workspace context commands | workspace ID、expected version、canonical reference | draft維持                           | conflictまたはsafe code                      |
-| model import/select/mapping/delete | Rust asset/settings service | character library commands | project/workspace ID、pack ID、manifest hash        | quarantine cleanup、前selection維持 | bundled/selected delete拒否、前selection維持 |
+| model import/select/mapping/delete | Rust asset/settings service | character library commands | project/workspace ID、pack ID、manifest hash、custom slot上限1 | quarantine cleanup、前selection維持 | bundled delete拒否、置換/削除失敗時は前slotとselection維持 |
 | history delete                     | Rust DB/artifact service    | `workspace_issue_delete_challenge` / `workspace_delete` | running 0、workspace ID、短命challenge | row/artifact不変 | workspace登録とGitを維持しrecovery state |
 
 ## ウィンドウ固有動作
@@ -125,7 +128,7 @@ Project / Character contextのfield、境界、conflict契約は[workspace sessi
 
 ## データ保持
 
-project/character context、selected character、semantic mapping、workspace historyの正本と破棄条件は各要件定義書に従う。S-006を開閉してもAppPreferences、Narration settings、Support controls、他workspaceのdraft/historyを変更しない。
+project/character context、selected character、semantic mapping、workspace historyの正本と破棄条件は各要件定義書に従う。bundled Hiyoriは削除せず、customはapp全体で1 slotだけ保持する。customのimportにlicenseや権利宣言の入力は要求しない。S-006を開閉してもAppPreferences、Narration settings、Support controls、他workspaceのdraft/historyを変更しない。
 
 ## OS差分
 

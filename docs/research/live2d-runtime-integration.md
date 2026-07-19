@@ -1,7 +1,7 @@
 ---
 title: "Live2D実ランタイム統合調査"
 description: "Cubism SDK for Web 5-r.5、同梱Hiyori PRO、Tauri資産プロトコルを使い、実描画・モーション・リサイズ・安全な任意モデル追加を成立させる実装契約。"
-updated: 2026-07-19
+updated: 2026-07-20
 last_verified: 2026-07-18
 read_when:
   - "Live2Dの実描画、モーション制御、同梱モデル、任意モデルインポートを実装または検証するとき。"
@@ -323,7 +323,7 @@ preview renderer は本画面と分離する。第一候補は capabilities を�
 
 - Hiyori pack に `ReadMe.txt` を NOTICE として含め、作者表記「かにビーム」と modeler 表記「Live2D」を保持する。
 - SDK/Core/Framework の LICENSE、RedistributableFiles、version、source URL、SHA-256 を package と配布物に保持する。
-- custom pack はユーザーが取得元と権利確認メモを任意入力できる provenance field を持つ。アプリが権利保有を自動認定する表示はしない。
+- custom pack は個人利用のlocal modelとしてsourceを`Local folder`へ固定し、license、権利宣言、取得元の入力を要求しない。appは同梱HiyoriのnoticeとSDKの配布条件だけを保持する。
 - SDK sample Hiyori と指定 Hiyori を混ぜず、pack manifest のハッシュで差し替えを検出する。
 
 ## 実装ファイルと依存関係
