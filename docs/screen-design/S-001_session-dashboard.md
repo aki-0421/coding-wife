@@ -1,7 +1,8 @@
 ---
 title: "S-001 セッションダッシュボード"
 description: "ローカルGit projectを安全に追加・診断し、workspaceの状態を一覧して作成・選択・復元する画面仕様。"
-updated: 2026-07-18
+updated: 2026-07-19
+last_verified: 2026-07-19
 read_when:
   - "project picker、preflight、workspace sidebar、lifecycle、filter、selectionを実装するとき。"
   - "S-001とWORK、CODE、HIST、APP要件の対応を確認するとき。"
@@ -52,7 +53,7 @@ status: "Approved"
 
 | 項目 | 内容 |
 |---|---|
-| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、S-002〜S-004からSessionsへ戻る |
+| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、S-002〜S-006からSessionsへ戻る |
 | 表示前提 | app-private DBをreadできること。読めない場合はrecovery stateを表示する |
 | 初期フォーカス | 0件時は`Projectを追加`、通常時はactive workspace item、error時は最初の回復操作 |
 | 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |
@@ -75,10 +76,10 @@ status: "Approved"
 
 | 領域 | 実装拘束値 | 表示内容 | 主な操作 |
 |---|---:|---|---|
-| custom titlebar | sidebar上40.5px | traffic lights | close、minimize、zoom |
+| native titlebar safe area | sidebar上40.5px | OS所有のnative traffic lights用余白。WebViewは赤・黄・緑の円を描画しない | close、minimize、zoomはmacOS native controlで行う |
 | workspace heading | sidebar内40.5px | `Workspaces`、ListFilter、FolderPlus、Plus | filter、project追加、workspace作成 |
-| workspace list | sidebar幅255.04px、item 242.25×49.5px | Done / In review / In progress / Backlog / Canceled | select、attention確認、overflow |
-| sidebar footer | 40.5px | Settings gear | [S-004](S-004_settings-diagnostics.md)へ移動 |
+| workspace list | sidebar幅255.04px、item 242.25×49.5px | Done / In Review / In Progress / Backlog / Canceled | select、attention確認、overflow |
+| sidebar footer | 40.5px | App settings gear | [S-005](S-005_app-settings-diagnostics.md)へ移動 |
 | main header | sidebar右、81px | `Sessions` breadcrumb、preflight summary | current project切替、診断詳細 |
 | project surface | main content | project概要、preflight、workspace create/empty/recovery | add、recheck、create、open |
 
@@ -88,13 +89,23 @@ S-001のmain contentはChat/Companionを描画せず、main幅中央へ最大760
 
 | lifecycle | shape | color token | label |
 |---|---|---|---|
-| Done | fill + check | successの代わりにwarm done fill | `Done / 完了` |
-| In review | outline circle | `success` | `In review / レビュー可能` |
-| In progress | outline circle | `running` | `In progress / 実行中` |
-| Backlog | dashed circle | `text-muted-accessible` | `Backlog / 未着手` |
-| Canceled | fill + x | `canceled` | `Canceled / 中止` |
+| Done | filled circle + check | successの代わりにwarm done fill | `Done` |
+| In Review | half-filled progress circle | `success` | `In Review` |
+| In Progress | quarter-filled progress circle | `running` | `In Progress` |
+| Backlog | dotted circle | `text-muted-accessible` | `Backlog` |
+| Canceled | filled circle + x | `canceled` | `Canceled` |
 
-attentionはlifecycleを変更せず、`Needs answer / Approval required / Test failed / High risk`のicon、text、countをitem右端へ付ける。active itemだけ`selected-row`、strong text、branch violet iconを使う。repo/branchは一行ellipsis + tooltipとする。
+sidebarのlifecycle statusは[LinearのIssue status](https://linear.app/docs/configuring-workflows)と同じ英語表記と進捗円形状を正本とし、app localeが日本語でも翻訳しない。この例外はgroup headingとworkspace itemのaccessible lifecycle labelだけに限定し、周辺control、attention、repository healthはja/en localeへ追従する。status colorは本appのsemantic tokenを維持する。
+
+各lifecycle groupはheading行全体をaccordion toggleとし、画面mount時はすべて展開する。heading行の任意位置をclickすると対象groupだけを開閉し、他group、active workspace、filterを変更しない。toggleは`aria-expanded`と`aria-controls`を持ち、折り畳みchevronはpointer hover時だけ表示する。keyboard操作ではaffordanceを失わないようfocus-visible時にも表示し、`Enter`または`Space`で同じ開閉を行う。展開状態は永続化せず、画面を再mountすると全groupを展開する。折り畳み中だけheading右端に対象workspaceの数値件数を表示し、0件も`0`として省略しない。読み上げ名には展開状態にかかわらず同じ件数を1回だけ含める。
+
+workspace navigation contentは242.25pxを上限として、右端の件数とchevronを255.04px sidebar内へ収める。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "expands lifecycle groups by default and toggles them independently"`で初期展開、独立開閉、1件・0件表示、ARIA、content幅を検証する。
+
+sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、branch titleを13px / 500 / 19.5px、GitHub repository full nameを11px / 400 / 16.5px、filter 0件helperを12px / 400 / 18pxとする。workspace selectionでfont weightと文字幅を変えず、selected backgroundとstrong textだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。
+
+`text-sidebar-*`のsize roleと`text-*` colorを同じ`cn` / Tailwind mergeへ渡すとsize roleが競合classとして除去されるため、両classをmergeしないかmerge設定を明示する。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "uses branch titles and GitHub repository metadata with stable typography"`でbranch/repositoryの表示順、role classの保持、selection時の安定性を検証する。
+
+attentionはlifecycleを変更せず、`Needs answer / Approval required / Test failed / High risk`のicon、text、countをitem右端へ付ける。active itemだけ`selected-row`、strong text、branch violet iconを使う。itemの第一行はbranchまたはdetached HEAD短縮SHA、第二行はGitHub `origin`から抽出した`owner/repo`とし、GitHub `origin`がない場合はlocal repo名へfallbackする。remote URL自体やcredentialはWebView、DB、logへ渡さない。repo/branchは一行ellipsis + tooltipとする。
 
 ### preflight
 
@@ -171,6 +182,8 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 
 実際のCapability設定は`src-tauri/capabilities/`を正本とする。
 
+GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/workspace.rs`がtrusted worktreeで`git config --get remote.origin.url`をread-only実行し、`github.com`のHTTPS / SSH / SCP形式だけを`owner/repo`へ正規化する。remote URL全体とcredentialは破棄し、nullableな`projects.github_repository`（workspace history DB migration 6）だけを保存する。HEADとremoteのGit processは同時観測し、20 repositoryの起動復元を5秒未満に保つ。`src/features/workspace-persistence/adapter.ts`がこの値をoptionalなview metadataへ変換し、値がない場合は`WorkspaceSidebar.tsx`がlocal repository aliasへfallbackする。parser、Git読取、migration、cross-language contractを変更した場合は`cargo test github_repository`、`cargo test repository_identity_reads_github_origin_without_network_access`、`cargo test legacy_versions_migrate_resume_state_and_registration_columns`、`cargo test serialized_contracts_match_the_cross_language_fixture`、`cargo test startup_restore_of_twenty_repositories_stays_within_the_budget`を実行する。
+
 | ユーザー操作 | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
 |---|---|---|---|---|---|
 | project folder選択 | Tauri dialog → Rust | `select_project_root`（設計名） | directory picker 1件、選択rootのread診断 | 変更なし | path非表示のerror code |
@@ -211,7 +224,7 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 | workspace/lifecycle/attention | Rust SQLite + normalized event | valid state transition | cold start/route return | history削除契約 | stale表示 |
 | active selection/filter/scroll | Rust SQLite | valid selection/query/scroll settle | route return/restart | Reset UI state | safe default + notice |
 | summary/timeline anchor | Rust SQLite | terminal summary、scroll settle | route return/restart | history削除契約 | 同workspaceの最寄りvalid sequenceだけへ補正 |
-| repository identity/health、HEAD/branch | Gitを観測正本、Rust DBはversioned last snapshot | 登録、window focus、selection、Send直前 | route return/restart後に再照合 | project登録解除 | `missing` / `changed` / `unreadable` / `read_only` / `stale_branch` |
+| repository identity/health、HEAD/branch、GitHub `owner/repo` | Gitを観測正本、Rust DBはversioned last snapshot。GitHub full nameはlocal `origin` URLから抽出した非秘密値だけを保存する | 登録、window focus、selection、Send直前 | route return/restart後に再照合 | project登録解除 | GitHub `origin`なしではlocal repo名へfallbackし、health判定は変更しない |
 | create input | React transient state | 保存しない | dialog中だけ | success/cancel/route leave | input保持できる範囲で保持 |
 
 ## OS差分

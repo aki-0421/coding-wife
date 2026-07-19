@@ -1,7 +1,7 @@
 ---
 title: "Live2D実ランタイム統合調査"
 description: "Cubism SDK for Web 5-r.5、同梱Hiyori PRO、Tauri資産プロトコルを使い、実描画・モーション・リサイズ・安全な任意モデル追加を成立させる実装契約。"
-updated: 2026-07-18
+updated: 2026-07-19
 last_verified: 2026-07-18
 read_when:
   - "Live2Dの実描画、モーション制御、同梱モデル、任意モデルインポートを実装または検証するとき。"
@@ -25,7 +25,7 @@ read_when:
 - WebView へ絶対パスを渡さない。`pack_id` と検証済みの相対 asset ID だけを受け付ける read-only プロトコルから配信する。
 - Hiyori の各モーションの意味は画像で確認するまで断定しない。最初の実装では全状態をテキストで区別し、映像はニュートラルな `Idle[0]` を基本にする。
 
-本書は `../requirements/live2d-companion.md`、`../screen-design/S-002_coding-workspace.md`、`../screen-design/S-004_settings-diagnostics.md`、`../../PRODUCT.md`、`../../DESIGN.md` を実装可能な契約へ落とした補足調査である。競合時は Approved の要件・画面設計を優先する。
+本書は `../requirements/live2d-companion.md`、`../screen-design/S-002_coding-workspace.md`、`../screen-design/S-005_app-settings-diagnostics.md`、`../screen-design/S-006_project-settings.md`、`../../PRODUCT.md`、`../../DESIGN.md` を実装可能な契約へ落とした補足調査である。競合時は Approved の要件・画面設計を優先する。
 
 ## 調査方法と一次資料
 

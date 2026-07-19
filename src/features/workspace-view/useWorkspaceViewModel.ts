@@ -11,9 +11,9 @@ import { projectWorkspaceNavigation } from "@/features/workspace-view/workspace-
 import type {
   AttachmentItem,
   ContextSnapshotItem,
+  ProjectSettingsSection,
   ReasoningEffort,
   SendTurnRequest,
-  SettingsSection,
   WorkspaceAdapterState,
   WorkspaceCodexState,
   WorkspaceDraft,
@@ -187,8 +187,8 @@ export function useWorkspaceViewModel(
     )
   })
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat")
-  const [settingsSection, setSettingsSection] =
-    useState<SettingsSection>("general")
+  const [projectSettingsSection, setProjectSettingsSection] =
+    useState<ProjectSettingsSection>("project_context")
   const [filter, setFilter] = useState("")
   const [drafts, setDrafts] = useState<
     Readonly<Record<string, WorkspaceDraft>>
@@ -899,6 +899,9 @@ export function useWorkspaceViewModel(
       const record: WorkspaceRecord = {
         id: `local-${Date.now()}`,
         repository: selectedWorkspace?.repository ?? "local-project",
+        ...(selectedWorkspace?.githubRepository === undefined
+          ? {}
+          : { githubRepository: selectedWorkspace.githubRepository }),
         name: trimmedName,
         branch: selectedWorkspace?.branch ?? "main",
         lifecycle: "backlog",
@@ -1221,7 +1224,7 @@ export function useWorkspaceViewModel(
   const resetUiState = useCallback(() => {
     setFilter("")
     setActiveTab("chat")
-    setSettingsSection("general")
+    setProjectSettingsSection("project_context")
     setNotice(null)
   }, [])
 
@@ -1269,8 +1272,8 @@ export function useWorkspaceViewModel(
     setNotice,
     setReducedMotion,
     setSelectedWorkspaceId: selectWorkspace,
-    setSettingsSection,
-    settingsSection,
+    setProjectSettingsSection,
+    projectSettingsSection,
     stopTurn,
     timeline: combinedTimeline,
     timelineAnchor,

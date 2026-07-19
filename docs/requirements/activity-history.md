@@ -1,7 +1,7 @@
 ---
 title: "HIST アクティビティ履歴要件定義"
 description: "構造化イベントの追記保存、秘匿化、再構築、検索・削除、破損復旧を定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "SQLite schema、event timeline、crash recoveryを実装するとき。"
   - "保存対象、redaction、retention、query性能を検証するとき。"
@@ -134,7 +134,7 @@ read_when:
 | `S-001` | セッションダッシュボード | `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059`, `HIST-F-061` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証拠 | `HIST-F-038`, `HIST-F-044`〜`HIST-F-051`, `HIST-F-057`, `HIST-F-061` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
-| `S-004` | 設定・診断 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-006` | プロジェクト設定 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
 ## 非機能要件
 

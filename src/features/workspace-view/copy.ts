@@ -6,6 +6,7 @@ const en = {
   addProject: "Add project",
   addWorkspace: "Add workspace",
   settings: "Settings",
+  appSettings: "App settings",
   appMark: "Coding Wife workspace",
   workspaceActions: "Workspace actions",
   workspaceHealth: {
@@ -375,9 +376,12 @@ const en = {
     saving: "Saving…",
   },
   settingsView: {
-    title: "Settings & diagnostics",
-    description:
-      "Local preferences, safety boundaries, and integration readiness.",
+    appTitle: "App settings",
+    appDescription: "Preferences and diagnostics shared by every project.",
+    projectTitle: "Project settings",
+    projectDescription: (project: string) =>
+      `Context, companion, and history settings for ${project}.`,
+    backToWorkspace: "Back to workspace",
     sections: {
       general: "General",
       project_context: "Project context",
@@ -555,6 +559,7 @@ const ja: typeof en = {
   addProject: "プロジェクトを追加",
   addWorkspace: "ワークスペースを追加",
   settings: "設定",
+  appSettings: "アプリ設定",
   appMark: "Coding Wifeワークスペース",
   workspaceActions: "ワークスペース操作",
   workspaceHealth: {
@@ -923,8 +928,12 @@ const ja: typeof en = {
     saving: "保存中…",
   },
   settingsView: {
-    title: "設定・診断",
-    description: "ローカル設定、安全境界、連携準備状況を確認します。",
+    appTitle: "アプリ設定",
+    appDescription: "すべてのプロジェクトに共通する設定と診断です。",
+    projectTitle: "プロジェクト設定",
+    projectDescription: (project: string) =>
+      `${project} のコンテキスト、コンパニオン、履歴に適用されます。`,
+    backToWorkspace: "ワークスペースへ戻る",
     sections: {
       general: "一般",
       project_context: "プロジェクトコンテキスト",

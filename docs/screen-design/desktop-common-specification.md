@@ -3,7 +3,7 @@ title: "デスクトップ共通仕様"
 description: "Coding Wifeの単一macOSウィンドウ、共通レイアウト、状態、操作、信頼境界、復旧、アクセシビリティを定義する。"
 updated: 2026-07-19
 read_when:
-  - "S-001〜S-004の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
+  - "S-001〜S-006の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
   - "個別画面仕様とdesktop-shell要件の整合を確認するとき。"
 status: "Approved"
 ---
@@ -12,14 +12,14 @@ status: "Approved"
 
 ## 目的と正本
 
-本書は、単一のTauri `main` windowでS-001〜S-004を表示する時の共通契約を定義する。個別画面は本書との差分だけを各画面詳細仕様へ記載する。
+本書は、単一のTauri `main` windowでS-001〜S-006を表示する時の共通契約を定義する。個別画面は本書との差分だけを各画面詳細仕様へ記載する。
 
 優先順位は次の通りとする。
 
 1. [PRODUCT.md](../../PRODUCT.md)と[DESIGN.md](../../DESIGN.md)。
 2. `docs/requirements/`の8要件定義書。
 3. Figma Desktop node `8:2`と[demo.png](../thinking/demo.png)。
-4. 本書とS-001〜S-004。
+4. 本書とS-001〜S-006。
 
 Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍scaleの比較画像として扱う。Figmaの低contrast文字と8.25〜9px文字は採用せず、DESIGN.mdの`text-muted-accessible`と11px captionを実装値とする。
 
@@ -31,7 +31,7 @@ Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍sca
 |---|---|
 | Platform | macOS 14以降、Apple Silicon、単一利用者、単一`main` window |
 | Frontend | React + TypeScript + ViteをTauri v2 WebViewへbundleする |
-| Navigation | persistent workspace sidebar、二段header、Chat/Commit/Context/Settings、settings gear |
+| Navigation | persistent workspace sidebar、二段header、Chat/Commit/Context/Settings、app settings gear |
 | State | loading、empty、processing、offline、error、permission、disabled、cancel、repository repair、restart recovery |
 | Trust boundary | WebViewは表示と入力、Rustはprocess、Git、DB、filesystem、asset、secretの認可 |
 | Inclusion | ja/en、keyboard-only、WCAG 2.2 AA、200% text zoom、reduced motion |
@@ -53,7 +53,9 @@ Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍sca
 | [S-001](S-001_session-dashboard.md) | セッションダッシュボード | `/sessions` / `session-dashboard` | cold start、FolderPlus、Plus、missing project |
 | [S-002](S-002_coding-workspace.md) | コーディングワークスペース | `/workspace/:workspaceId/chat` / `coding-workspace` | workspace選択、Chat tab |
 | [S-003](S-003_session-evidence.md) | セッション証拠 | `/workspace/:workspaceId/evidence` / `session-evidence` | Commit tab、checkpoint通知 |
-| [S-004](S-004_settings-diagnostics.md) | 設定・診断 | `/settings/:section?` / `settings-diagnostics` | Settings tab、sidebar gear、診断link |
+| [S-004](S-004_settings-diagnostics.md) | 設定・診断（廃止） | 非該当 | 履歴参照だけ |
+| [S-005](S-005_app-settings-diagnostics.md) | アプリ設定・診断 | `/app-settings/:section?` / `app-settings` | sidebar gear、診断link |
+| [S-006](S-006_project-settings.md) | プロジェクト設定 | `/workspace/:workspaceId/settings/:section?` / `project-settings` | Settings tab |
 
 Context tabはS-002内の`/workspace/:workspaceId/context` subviewであり、新しい画面IDを発行しない。確認dialog、OS picker、decision overlay、popoverも独立した画面IDを持たない。
 
@@ -79,8 +81,8 @@ Context tabはS-002内の`/workspace/:workspaceId/context` subviewであり、�
 | default geometry | 1470×836 CSS px |
 | minimum geometry | 960×640 CSS px。これ未満へのresizeをOSへ許可しない |
 | maximum / fullscreen | macOS標準zoomとfullscreenを許可し、終了時geometryを保存する |
-| titlebar | custom overlay。traffic lightsは12×12、左15px、上14.25px、間隔9px |
-| drag region | traffic lights、button、tab、input、scrollbarを除くbreadcrumb rowだけ |
+| titlebar | macOS native overlay。close / minimize / zoomのtraffic lightsはOSが描画し、WebViewは赤・黄・緑の代替要素を描画しない。sidebarは見出しがnative controlに重ならない40.5pxのsafe areaだけを予約する |
+| drag region | native titlebar safe area、button、tab、input、scrollbarを除くbreadcrumb rowだけ |
 | radius | window 7.5px、compact control 4.5px、composer/decision 9px |
 | close | active/pending turn 0件ならorderly shutdown。1件以上ならnative closeを保留し、`停止して終了 / Stop and Quit`と`終了しない / Don’t Quit`だけを表示する |
 
@@ -128,7 +130,7 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 | 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | Chatを最低520px、Companionへ残幅。decision/review時はCompanionをcompact化 | tabsはhorizontal scroll、footer controlsはwrap |
 | 200% text zoom | 64px rail + drawerを使用 | Companionをhide可能、Chat/decisionを優先 | labelを縮小せずwrap/overflow menu |
 
-S-003はevidence、S-004はsetting formを優先してbodyを再構成できる。S-002の標準表示だけはChatとCompanionの間へdividerまたは別cardを置かない。
+S-003はevidence、S-005とS-006はsetting formを優先してbodyを再構成できる。S-002の標準表示だけはChatとCompanionの間へdividerまたは別cardを置かない。
 
 ## surface、文字、motion
 
@@ -159,10 +161,11 @@ shadcnはinteractionとkeyboard behaviorだけに使う。shell、sidebar、even
 
 | 領域 | scroll owner | 固定要素 | 復元key |
 |---|---|---|---|
-| workspace sidebar | status-group list | traffic lights、heading actions、gear footer | workspace collection + filter |
+| workspace sidebar | status-group list | native titlebar safe area、heading actions、gear footer | workspace collection + filter |
 | S-002 | event timeline | header、composer、Companion mute | workspace ID + Chat tab |
 | S-003 | checkpoint/event listとdetailを別scroll | header、summary/filter | workspace ID + selected evidence |
-| S-004 | settings main panel | header、section navigation | selected settings section |
+| S-005 | app settings main panel | app settings header、section navigation | selected app settings section |
+| S-006 | project settings main panel | workspace header、section navigation | selected project settings section |
 | portal | popover/dialog自身 | trigger位置 | open中だけ。route変更で閉じる |
 
 wheel/trackpad eventを親へ二重伝播させない。timelineがbottomから48px超離れた状態でeventを受けてもscrollを動かさず、「最新へ」を表示する。
@@ -171,7 +174,7 @@ wheel/trackpad eventを親へ二重伝播させない。timelineがbottomから4
 
 ### 共通focus順
 
-1. traffic lights以外のheader navigation。
+1. header navigation。native traffic lightsはOS所有でありWebViewのfocus順に含めない。
 2. sidebar heading actions、workspace groups/items、gear。
 3. active viewのheading、filter、primary content。
 4. composerまたは画面固有action。
@@ -291,7 +294,7 @@ agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced moti
 | 項目 | macOS 14+ Apple Silicon | Windows | Linux |
 |---|---|---|---|
 | release / support | MVP対応・実機検証対象 | MVP非対応 | MVP非対応 |
-| window chrome | custom titlebar + traffic lights | artifactを提供しない | artifactを提供しない |
+| window chrome | macOS native traffic lights + overlay。WebViewに複製を描画しない | artifactを提供しない | artifactを提供しない |
 | modifier | Command | 非該当 | 非該当 |
 | file picker / secret store | native picker / Keychain相当 | 非該当 | 非該当 |
 | unsupported起動 | 非該当 | 対応済みと表示しない | 対応済みと表示しない |

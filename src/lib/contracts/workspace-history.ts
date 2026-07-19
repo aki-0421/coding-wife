@@ -70,6 +70,7 @@ export interface PersistedWorkspaceSummary {
   readonly workspaceId: string
   readonly projectId: string
   readonly repository: string
+  readonly githubRepository: string | null
   readonly name: string
   readonly branch: string
   readonly head: string
@@ -344,6 +345,7 @@ const workspaceKeys = [
   "workspaceId",
   "projectId",
   "repository",
+  "githubRepository",
   "name",
   "branch",
   "head",
@@ -415,6 +417,14 @@ function validatePublicString(value: unknown, maximum = 512): value is string {
   return isPublicSingleLineText(value, maximum)
 }
 
+function isGithubRepository(value: unknown): value is string | null {
+  return (
+    value === null ||
+    (typeof value === "string" &&
+      /^[A-Za-z0-9_.-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/.test(value))
+  )
+}
+
 function parseHistoryStatus(value: unknown): WorkspaceHistoryStatus {
   if (
     !isRecord(value) ||
@@ -457,6 +467,7 @@ export function parsePersistedWorkspaceSummary(
     !validatePublicString(value.workspaceId, 128) ||
     !validatePublicString(value.projectId, 128) ||
     !validatePublicString(value.repository, 80) ||
+    !isGithubRepository(value.githubRepository) ||
     !validatePublicString(value.name, 80) ||
     !validatePublicString(value.branch, 240) ||
     !validatePublicString(value.head, 64) ||
@@ -496,6 +507,7 @@ export function parsePersistedWorkspaceSummary(
     workspaceId: value.workspaceId,
     projectId: value.projectId,
     repository: value.repository,
+    githubRepository: value.githubRepository,
     name: value.name,
     branch: value.branch,
     head: value.head,

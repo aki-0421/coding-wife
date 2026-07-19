@@ -72,6 +72,21 @@
   --text-caption: 11px;
   --text-caption--line-height: 1.5;
   --text-caption--font-weight: 400;
+  --text-sidebar-heading: 0.875rem;
+  --text-sidebar-heading--line-height: 1.5;
+  --text-sidebar-heading--font-weight: 600;
+  --text-sidebar-status: 0.75rem;
+  --text-sidebar-status--line-height: 1.5;
+  --text-sidebar-status--font-weight: 600;
+  --text-sidebar-item: 0.8125rem;
+  --text-sidebar-item--line-height: 1.5;
+  --text-sidebar-item--font-weight: 500;
+  --text-sidebar-meta: 0.6875rem;
+  --text-sidebar-meta--line-height: 1.5;
+  --text-sidebar-meta--font-weight: 400;
+  --text-sidebar-helper: 0.75rem;
+  --text-sidebar-helper--line-height: 1.5;
+  --text-sidebar-helper--font-weight: 400;
 
   --radius-control: 4.5px;
   --radius-window: 7.5px;

@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
@@ -327,6 +328,7 @@ describe("default App character integration", () => {
   })
 
   it("keeps an explicitly supplied renderer as the App override", async () => {
+    const user = userEvent.setup()
     const explicitCalls: CharacterStageRenderProps[] = []
 
     render(
@@ -350,16 +352,16 @@ describe("default App character integration", () => {
       screen.getByText("External renderer · status unavailable"),
     ).toBeVisible()
 
-    fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
-    fireEvent.click(screen.getByRole("button", { name: "Companion" }))
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(screen.getByRole("button", { name: "Companion" }))
     expect(screen.getByText("External renderer")).toBeVisible()
     expect(
       screen.getByText("Unknown", { selector: "[data-slot=badge]" }),
     ).toBeVisible()
-    expect(screen.queryByText("桃瀬ひより - PRO")).not.toBeInTheDocument()
   })
 
   it("reports Hiyori provenance, preferences, errors, and retry from the mounted renderer", async () => {
+    const user = userEvent.setup()
     render(
       <App localeStore={englishLocaleStore} transport={new DemoTransport()} />,
     )
@@ -369,31 +371,42 @@ describe("default App character integration", () => {
         document.querySelector('[data-character-runtime-readiness="ready"]'),
       ).toBeInTheDocument(),
     )
-    fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
-    fireEvent.click(screen.getByRole("button", { name: "Companion" }))
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(screen.getByRole("button", { name: "Companion" }))
     expect(screen.getAllByText("桃瀬ひより - PRO").length).toBeGreaterThan(0)
     expect(screen.getByText("hiyori_pro_t11")).toBeVisible()
     expect(screen.getByText("かにビーム")).toBeVisible()
 
-    fireEvent.click(screen.getByRole("button", { name: "General" }))
+    fireEvent.click(screen.getAllByRole("button", { name: "App settings" })[0]!)
     fireEvent.change(screen.getByRole("combobox", { name: "Reduced motion" }), {
       target: { value: "on" },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Companion" }))
+    fireEvent.click(screen.getByRole("switch", { name: "Character visible" }))
     await waitFor(() =>
-      expect(screen.getAllByText("Reduced").length).toBeGreaterThan(0),
+      expect(
+        screen.getByRole("switch", { name: "Character visible" }),
+      ).not.toBeChecked(),
     )
-
-    fireEvent.click(screen.getByRole("switch", { name: "Hide character" }))
+    fireEvent.click(screen.getByRole("button", { name: "Back to workspace" }))
     await waitFor(() =>
       expect(
         screen.getByText("Hidden", { selector: "[data-slot=badge]" }),
       ).toBeVisible(),
     )
     const presentationsBeforeShow = live2dCalls.length
-    fireEvent.click(screen.getByRole("switch", { name: "Hide character" }))
+    fireEvent.click(screen.getAllByRole("button", { name: "App settings" })[0]!)
+    fireEvent.click(screen.getByRole("switch", { name: "Character visible" }))
+    await waitFor(() =>
+      expect(
+        screen.getByRole("switch", { name: "Character visible" }),
+      ).toBeChecked(),
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Back to workspace" }))
     await waitFor(() =>
       expect(live2dCalls.length).toBeGreaterThan(presentationsBeforeShow),
+    )
+    await waitFor(() =>
+      expect(screen.getAllByText("Reduced").length).toBeGreaterThan(0),
     )
 
     const failedStatus = {

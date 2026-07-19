@@ -40,6 +40,7 @@ export type CompanionSemanticState =
 export interface WorkspaceRecord {
   readonly id: string
   readonly repository: string
+  readonly githubRepository?: string
   readonly name: string
   readonly branch: string
   readonly lifecycle: WorkspaceLifecycle
@@ -283,12 +284,9 @@ export type CharacterStageRenderer = (
   props: CharacterStageRenderProps,
 ) => ReactNode
 
-export type SettingsSection =
-  | "general"
-  | "project_context"
-  | "character_context"
-  | "companion"
-  | "audio"
-  | "support"
-  | "diagnostics"
-  | "history"
+export type AppSettingsSection = "general" | "audio" | "support" | "diagnostics"
+
+export type ProjectSettingsSection =
+  "project_context" | "character_context" | "companion" | "history"
+
+export type SettingsSection = AppSettingsSection | ProjectSettingsSection

@@ -1,7 +1,8 @@
 ---
 title: "WORK ワークスペース・セッション要件定義"
 description: "ローカルGitプロジェクトの追加、preflight、状態別一覧、選択、復元を定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
+last_verified: 2026-07-19
 read_when:
   - "workspace sidebar、project picker、session lifecycleを実装するとき。"
   - "active workspace切替とdraft・audio分離を検証するとき。"
@@ -15,7 +16,7 @@ read_when:
 | 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 2026-07-18 |
+| 最終レビュー日 | 2026-07-19 |
 
 ## 背景
 
@@ -37,7 +38,7 @@ read_when:
 |---|---|
 | Project registration | local Git repository選択、canonicalization、診断 |
 | Workspace list | filter、state grouping、repo/branch、active selection、empty state |
-| Lifecycle | Backlog、In progress、In review、Done、Canceledと別軸attention |
+| Lifecycle | Backlog、In Progress、In Review、Done、Canceledと別軸attention |
 | Session continuity | active workspace、draft、scroll、summaryのlocal persistence |
 | Preflight | Git、Codex、auth、Sol、characterの送信前診断 |
 
@@ -78,9 +79,9 @@ read_when:
 |---|---|---|---|---|
 | `WORK-F-050` | 利用者は登録projectにworkspaceを作成できる | nameとgoalを確定するとBacklog groupへworkspaceが作成され、同じprojectに複数workspace metadataを持てる | Approved | 非該当 |
 | `WORK-F-051` | 利用者はworkspace一覧をfilterできる | repo、branch、workspace nameのcase-insensitive部分一致で200件を絞り込み、0件時はfilter解除操作を表示する | Approved | 非該当 |
-| `WORK-F-052` | 利用者はlifecycle groupからworkspaceを選択できる | Done/In review/In progress/Backlog/Canceledごとに表示し、item選択でheader、Chat、Commit、Context、Companionが同一workspaceへ100ms以内に切り替わる | Approved | 非該当 |
+| `WORK-F-052` | 利用者はlifecycle groupからworkspaceを選択できる | app localeにかかわらずLinearと同じ英語のDone/In Review/In Progress/Backlog/Canceledでgroupを表示し、各statusをcheck、half-filled progress、quarter-filled progress、dotted、xの円形iconで識別できる。各groupは初期展開され、heading行全体のclick、`Enter`、`Space`で他groupとselectionを変えず独立して開閉できる。toggleは`aria-expanded`と`aria-controls`を持ち、chevronはhoverまたはfocus-visible時だけ表示する。折り畳み中だけ対象workspaceの数値件数を0件を含めて表示し、accessible nameでは展開状態にかかわらず件数を1回だけ伝える。item選択でheader、Chat、Commit、Context、Companionが同一workspaceへ100ms以内に切り替わる | Approved | 非該当 |
 | `WORK-F-053` | アプリはlifecycleとattentionを別に表示する | lifecycleを変えずにNeeds answer、Approval required、Test failed、High riskをbadgeとaccessible labelで併記できる | Approved | 非該当 |
-| `WORK-F-054` | アプリは現在のrepoとbranchを表示する | selected itemとheaderに実Gitのrepo名とbranchまたはdetached HEAD短縮SHAを表示し、長い値はellipsisと全文tooltipを持つ | Approved | 非該当 |
+| `WORK-F-054` | アプリは現在のrepoとbranchを表示する | sidebar itemでは実Gitのbranchまたはdetached HEAD短縮SHAを最も目立つtitleとして表示し、GitHub `origin`がある場合はcredentialを除いた`owner/repo`を小さい補助文字で表示する。GitHub `origin`がないlocal repositoryは保存済みrepo名へfallbackする。selected itemとheaderの長い値はellipsisと全文tooltipを持つ | Approved | 非該当 |
 | `WORK-F-055` | 利用者は空一覧から最初のprojectを追加できる | workspaceが0件の時、説明、FolderPlus、keyboard shortcutを表示し、decorative card gridを表示しない | Approved | 非該当 |
 | `WORK-F-056` | 利用者はworkspaceをCanceledへ移せる | idle workspaceは確認後に専用native cancel commandでCanceled groupへ移す。active/pending turnがある場合は「停止してキャンセル」と「戻る」を表示し、exact turnのterminal interrupt、workspace cleanup、履歴flushが完了した後だけ同commandを実行する。native supervisorはcancel transaction中のturn開始とactive/pending turnをatomicに拒否し、generic lifecycle commandによるCanceled指定もtyped errorで拒否する。「戻る」またはinterrupt/cleanup/flush失敗ではselection、turn、lifecycle、draft、caption/TTSを変更しない。いずれの場合もsource、working tree、Git index/object/ref、履歴本文を変更しない | Approved | 非該当 |
 | `WORK-F-057` | 利用者はproject登録を外せる | 対象project配下にactive/pending turnがない時だけ、action選択と対象project名を示す最終確認の二段階を完了してproject/workspaceのapp registration metadataを削除する。実行中turnがある場合は操作を拒否し、履歴本文の変更・削除は`HIST-F-049`の別操作に限定する。repository内のfile、working tree、Git index/object/ref、共有model libraryを変更しない | Approved | 非該当 |
@@ -166,7 +167,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 |---|---|---|---|---|
 | `S-001` | セッションダッシュボード | `WORK-F-044`〜`WORK-F-062`, `WORK-F-065`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | `WORK-F-052`〜`WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
-| `S-004` | 設定・診断 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-006` | プロジェクト設定 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
 ## 非機能要件
 
@@ -179,7 +180,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | 性能 | 200 workspaceのfilter・group更新p95 100ms、selection更新p95 100ms |
 | 信頼性・復旧 | DBまたはrepo消失時も他workspaceを開け、破損itemを明示する |
 | アクセシビリティ | statusを色だけで表さず、label、icon、stroke/fillを併用する |
-| 多言語・地域 | app labelはja/en、repo/branch/user contextは翻訳しない |
+| 多言語・地域 | app labelはja/en。sidebarのlifecycle statusだけはLinearと同じ英語表記へ固定し、repo/branch/user contextも翻訳しない |
 
 ## 依存関係・前提
 
@@ -205,6 +206,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | [DESIGN.md](../../DESIGN.md) | sidebar、status、responsive仕様 |
 | [プロダクト論点](../research/01-product-thesis.md) | 対象利用者と負担 |
 | [体験設計](../research/02-experience-design.md) | workspaceとcontext分離 |
+| [Linear Issue status](https://linear.app/docs/configuring-workflows) | lifecycle statusの英語表記と円形icon表現 |
 
 ## レビュー・合意
 
@@ -212,7 +214,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 |---|---|
 | レビュー結果 | Ready |
 | 仕様責任者 | プロダクトオーナー |
-| 合意日 | 2026-07-18 |
+| 合意日 | 2026-07-19 |
 | 残る非ブロック論点 | 並列実行、worktree自動作成はMVP非対象 |
 
 ## 着手可チェック

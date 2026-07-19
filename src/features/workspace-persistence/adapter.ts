@@ -61,6 +61,9 @@ export function projectWorkspaceState(
     workspaces: state.workspaces.map((workspace) => ({
       id: workspace.workspaceId,
       repository: workspace.repository,
+      ...(workspace.githubRepository === null
+        ? {}
+        : { githubRepository: workspace.githubRepository }),
       name: workspace.name,
       branch: workspace.branch,
       lifecycle: workspace.lifecycle,

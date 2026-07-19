@@ -50,7 +50,7 @@ use super::types::{
 };
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
-const CURRENT_DATABASE_VERSION: i64 = 5;
+const CURRENT_DATABASE_VERSION: i64 = 6;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
@@ -62,7 +62,8 @@ const DELETE_TOKEN_TTL: Duration = Duration::from_secs(60);
 const WORKSPACE_SELECT: &str = r#"
 SELECT
   w.id, w.project_id, p.alias, w.name, p.branch, p.head, p.detached,
-  w.lifecycle, w.attention, w.health, w.created_at, w.updated_at, w.last_selected_at
+  w.lifecycle, w.attention, w.health, w.created_at, w.updated_at, w.last_selected_at,
+  p.github_repository
 FROM workspaces w
 JOIN projects p ON p.id = w.project_id
 "#;
@@ -240,6 +241,11 @@ CREATE INDEX IF NOT EXISTS idx_resume_anchor_sequence
   ON workspace_resume_states(workspace_id, timeline_anchor_sequence);
 "#;
 
+const MIGRATION_6: &str = r#"
+ALTER TABLE projects
+  ADD COLUMN github_repository TEXT;
+"#;
+
 #[derive(Debug)]
 struct StoreInner {
     connection: Connection,
@@ -355,6 +361,7 @@ impl WorkspaceHistoryStore {
                         (3, MIGRATION_3),
                         (4, MIGRATION_4),
                         (5, MIGRATION_5),
+                        (6, MIGRATION_6),
                     ],
                 )
                 .map_err(|_| history_error("HIST-RECOVERY-SCHEMA", false))?;
@@ -615,13 +622,14 @@ impl WorkspaceHistoryStore {
                 transaction
                     .execute(
                         "UPDATE projects SET registered = 1, alias = ?1,
-                           branch = ?2, head = ?3, detached = ?4, health = 'ready', updated_at = ?5
-                         WHERE id = ?6",
+                           branch = ?2, head = ?3, detached = ?4, github_repository = ?5,
+                           health = 'ready', updated_at = ?6 WHERE id = ?7",
                         params![
                             candidate.registration.alias,
                             candidate.git.branch,
                             candidate.git.head,
                             i64::from(candidate.git.detached),
+                            candidate.git.github_repository,
                             now,
                             existing.project_id,
                         ],
@@ -655,14 +663,15 @@ impl WorkspaceHistoryStore {
             transaction
                 .execute(
                     "UPDATE projects SET canonical_root = ?1, registered = 1, alias = ?2,
-                       branch = ?3, head = ?4, detached = ?5, health = 'ready', updated_at = ?6
-                     WHERE id = ?7",
+                       branch = ?3, head = ?4, detached = ?5, github_repository = ?6,
+                       health = 'ready', updated_at = ?7 WHERE id = ?8",
                     params![
                         root_bytes,
                         candidate.registration.alias,
                         candidate.git.branch,
                         candidate.git.head,
                         i64::from(candidate.git.detached),
+                        candidate.git.github_repository,
                         now,
                         existing.project_id,
                     ],
@@ -696,8 +705,10 @@ impl WorkspaceHistoryStore {
             .execute(
                 "INSERT INTO projects (
                    id, canonical_root, alias, project_identity, root_device, root_inode,
-                   git_device, git_inode, branch, head, detached, health, created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'ready', ?12, ?12)",
+                   git_device, git_inode, branch, head, detached, github_repository,
+                   health, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                   'ready', ?13, ?13)",
                 params![
                     project_id,
                     root_bytes,
@@ -710,6 +721,7 @@ impl WorkspaceHistoryStore {
                     candidate.git.branch,
                     candidate.git.head,
                     i64::from(candidate.git.detached),
+                    candidate.git.github_repository,
                     now,
                 ],
             )
@@ -975,14 +987,15 @@ impl WorkspaceHistoryStore {
         transaction
             .execute(
                 "UPDATE projects SET canonical_root = ?1, alias = ?2,
-                   branch = ?3, head = ?4, detached = ?5, health = 'ready',
-                   registered = 1, updated_at = ?6 WHERE id = ?7",
+                   branch = ?3, head = ?4, detached = ?5, github_repository = ?6,
+                   health = 'ready', registered = 1, updated_at = ?7 WHERE id = ?8",
                 params![
                     root_bytes,
                     candidate.registration.alias,
                     candidate.git.branch,
                     candidate.git.head,
                     i64::from(candidate.git.detached),
+                    candidate.git.github_repository,
                     updated_at,
                     project_id,
                 ],
@@ -1779,11 +1792,13 @@ impl WorkspaceHistoryStore {
                     transaction
                         .execute(
                             "UPDATE projects SET branch = ?1, head = ?2, detached = ?3,
-                               health = ?4, updated_at = ?5 WHERE id = ?6",
+                               github_repository = ?4, health = ?5, updated_at = ?6
+                             WHERE id = ?7",
                             params![
                                 git.branch,
                                 git.head,
                                 i64::from(git.detached),
+                                git.github_repository,
                                 health.as_str(),
                                 now,
                                 project_id,
@@ -1920,6 +1935,7 @@ fn open_configured_connection(
             (3, MIGRATION_3),
             (4, MIGRATION_4),
             (5, MIGRATION_5),
+            (6, MIGRATION_6),
         ],
     )?;
     if status.mode == HistoryMode::Ready {
@@ -3263,6 +3279,7 @@ fn decode_workspace_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceSu
         workspace_id: row.get(0)?,
         project_id: row.get(1)?,
         repository: row.get(2)?,
+        github_repository: row.get(13)?,
         name: row.get(3)?,
         branch: row.get(4)?,
         head: row.get(5)?,
@@ -4020,6 +4037,18 @@ mod tests {
     async fn migration_registration_and_restore_are_idempotent() {
         let data = temp_directory("history-data");
         let root = git_repository();
+        let remote = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&root)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/aki-0421/coding-wife.git",
+            ])
+            .status()
+            .expect("add GitHub origin");
+        assert!(remote.success());
         let store = WorkspaceHistoryStore::open(&data).expect("open store");
         let first_candidate = candidate(&root).await;
         let first = store
@@ -4033,6 +4062,10 @@ mod tests {
         assert!(!first.duplicate);
         assert!(second.duplicate);
         assert_eq!(first.workspace.workspace_id, second.workspace.workspace_id);
+        assert_eq!(
+            first.workspace.github_repository.as_deref(),
+            Some("aki-0421/coding-wife")
+        );
         assert_eq!(store.private_workspace_records().expect("records").len(), 1);
         store
             .select_workspace(&first.workspace.workspace_id)
@@ -4056,6 +4089,15 @@ mod tests {
         assert_eq!(editable.project.version, 1);
         assert_eq!(editable.project.content_hash, DEFAULT_PROJECT_HASH);
         assert_eq!(editable.character.context, CharacterContext::default());
+        assert_eq!(
+            reopened
+                .snapshot(None)
+                .expect("reopened snapshot")
+                .workspaces[0]
+                .github_repository
+                .as_deref(),
+            Some("aki-0421/coding-wife")
+        );
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
     }
@@ -5701,6 +5743,36 @@ mod tests {
                 .expect("resume state columns"),
             4
         );
+
+        apply_migrations(
+            &connection,
+            &[
+                (1, MIGRATION_1),
+                (2, MIGRATION_2),
+                (3, MIGRATION_3),
+                (4, MIGRATION_4),
+                (5, MIGRATION_5),
+                (6, MIGRATION_6),
+            ],
+        )
+        .expect("version six schema");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version six"),
+            6
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('projects')
+                     WHERE name = 'github_repository'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("GitHub repository column"),
+            1
+        );
     }
 
     #[test]
@@ -5923,7 +5995,7 @@ mod tests {
                 connection
                     .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .expect("migrated version"),
-                5
+                6
             );
             let mut statement = connection
                 .prepare(

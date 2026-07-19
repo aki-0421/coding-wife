@@ -1,7 +1,7 @@
 ---
 title: "LIVE Live2Dコンパニオン要件定義"
 description: "同梱Hiyori、semantic state、縮退、ユーザーmodelの安全なimport・選択を定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "Live2D renderer、character pack、state mappingを実装するとき。"
   - "ユーザーmodel importのsecurity、boundary、fallbackを検証するとき。"
@@ -71,7 +71,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-057` | companionはdemo比率で表示される             | 1470×836で607.84×754.99px paneへbottom-containし、頭頂、両手、裾がcanvas外へ切れない                                     | Approved | 非該当           |
 | `LIVE-F-058` | rendererはwindow resizeへ追従する           | 1470×836、1280×800、960×640の各resize後500ms以内にcontain scaleを再計算し、composerまたはdecisionを覆わない              | Approved | 非該当           |
 | `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | workspace/modelを20回切り替えても描画canvasが1枚で、旧texture/motion/WebGL resourceが参照されない                        | Approved | 非該当           |
-| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | Settingsからpack名、creator、source notice、同梱version/hashへ到達できる                                                 | Approved | 非該当           |
+| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | Project settingsからpack名、creator、source notice、同梱version/hashへ到達できる                                         | Approved | 非該当           |
 
 ### Semantic stateと縮退
 
@@ -133,7 +133,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ファイル・OS操作            | picker cancel、permission、quarantine、atomic rename               | `LIVE-F-068`〜`LIVE-F-076` |
 | メニュー・ショートカット    | hide/muteにaccessible toggle、importに標準picker                   | `LIVE-F-065`, `LIVE-F-068` |
 | Deep Link・ファイル関連付け | 非該当: model file associationを登録しない                         | 非該当                     |
-| 通知                        | renderer/import errorはSettingsとtext statusへ表示                 | `LIVE-F-067`, `LIVE-F-076` |
+| 通知                        | renderer/import errorはProject settingsとtext statusへ表示         | `LIVE-F-067`, `LIVE-F-076` |
 | Capability・認可            | character libraryと限定asset protocolだけを許可                    | `LIVE-F-071`〜`LIVE-F-074` |
 | アップデート・互換性        | unsupported model/MOC versionを拒否し、既存packを維持              | `LIVE-F-076`               |
 
@@ -142,7 +142,8 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | 画面ID  | 画面名                     | 対象要件ID                                             | 扱い | 画面詳細仕様                                                   |
 | ------- | -------------------------- | ------------------------------------------------------ | ---- | -------------------------------------------------------------- |
 | `S-002` | コーディングワークスペース | `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-079`〜`LIVE-F-081` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md)     |
-| `S-004` | 設定・診断                 | `LIVE-F-055`〜`LIVE-F-081`                             | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-005` | アプリ設定・診断           | `LIVE-F-055`〜`LIVE-F-059`, `LIVE-F-079`〜`LIVE-F-081` | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
+| `S-006` | プロジェクト設定           | `LIVE-F-060`〜`LIVE-F-078`                             | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
 ## 非機能要件
 
