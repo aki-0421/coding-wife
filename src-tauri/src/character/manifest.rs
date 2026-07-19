@@ -10,6 +10,7 @@ pub const BUILTIN_HIYORI_PACK_ID: &str = "builtin:hiyori_pro";
 pub const CHARACTER_TRUSTED_FRAME_ASSET_ID: &str = "__coding-wife/trusted-frame.png";
 pub const MAX_TRUSTED_FRAME_BYTES: u64 = 2 * 1024 * 1024;
 pub const MAX_TRUSTED_FRAME_DIMENSION: u32 = 2048;
+pub const MAX_CHARACTER_FILES: usize = 4096;
 pub const MAX_CUE_ID_BYTES: usize = 80;
 const MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_TEXTURE_DIMENSION: u32 = 8192;
@@ -177,7 +178,7 @@ impl CharacterPackManifest {
             || self.bundled_version != "custom-import-v1"
             || !is_safe_asset_id(&self.entrypoint)
             || self.files.is_empty()
-            || self.files.len() > 128
+            || self.files.len() > MAX_CHARACTER_FILES
             || self.inventory.runtime_file_count as usize != self.files.len()
             || self.inventory.total_bytes != self.files.iter().map(|asset| asset.bytes).sum::<u64>()
             || self.inventory.total_bytes > MAX_TOTAL_BYTES

@@ -9,7 +9,9 @@ import {
 } from "react"
 import {
   CheckCircle2Icon,
+  CircleAlertIcon,
   FolderPlusIcon,
+  LockKeyholeIcon,
   PackageIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
@@ -107,6 +109,50 @@ function replaceDate(template: string, date: string): string {
 
 function abbreviateHash(value: string): string {
   return `${value.slice(0, 8)}…${value.slice(-8)}`
+}
+
+function operationErrorMessage(
+  errorCode: string,
+  copy: CharacterModelLibraryCopy,
+): string {
+  const normalized = errorCode.toUpperCase()
+  if (normalized === "CHARACTER-MODEL3-SELECTION") {
+    return copy.errorMessages.selection
+  }
+  if (
+    /(?:ASSET|MOC|TEXTURE)-(?:MISSING|OPEN|READ|METADATA)/u.test(normalized) ||
+    normalized === "CHARACTER-SOURCE-UNREADABLE"
+  ) {
+    return copy.errorMessages.missingAssets
+  }
+  if (
+    /(?:MODEL3|MOC|MOTION|EXPRESSION|JSON)-(?:SCHEMA|VERSION|INVALID|UNSUPPORTED)/u.test(
+      normalized,
+    )
+  ) {
+    return copy.errorMessages.unsupported
+  }
+  if (
+    /(?:TRAVERSAL|REFERENCE|UNKNOWN-REFERENCE|SYMLINK|HARDLINK|NONREGULAR|EXECUTABLE)/u.test(
+      normalized,
+    )
+  ) {
+    return copy.errorMessages.unsafe
+  }
+  if (/(?:LIMIT|DIMENSIONS)/u.test(normalized)) {
+    return copy.errorMessages.limits
+  }
+  if (/(?:PREVIEW|ATTESTATION|PNG-DECODE|TRUSTED-FRAME)/u.test(normalized)) {
+    return copy.errorMessages.preview
+  }
+  if (
+    /(?:QUARANTINE|ATOMIC|STORAGE|LIBRARY|DIRECTORY|PERMISSION|REMOVE|SOURCE-CHANGED)/u.test(
+      normalized,
+    )
+  ) {
+    return copy.errorMessages.access
+  }
+  return copy.errorMessages.generic
 }
 
 function IntegrityHash({ label, value }: { label: string; value: string }) {
@@ -342,14 +388,23 @@ function ModelCard({
           type="button"
           variant="ghost"
         >
-          <Trash2Icon aria-hidden="true" />
+          <Trash2Icon aria-hidden="true" data-icon="inline-start" />
           {copy.delete}
         </Button>
       ) : (
-        <PackageIcon
-          aria-hidden="true"
-          className="mt-xxs size-4 text-muted-foreground"
-        />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              aria-label={copy.bundledProtected}
+              className="mt-xxs flex size-6 items-center justify-center text-muted-foreground"
+              role="img"
+              tabIndex={0}
+            >
+              <LockKeyholeIcon aria-hidden="true" className="size-4" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{copy.bundledProtected}</TooltipContent>
+        </Tooltip>
       )}
     </div>
   )
@@ -382,6 +437,8 @@ function CharacterModelLibrarySession({
 
   const snapshot = library.snapshot
   const preview = library.preview
+  const customPack = snapshot?.packs.find((pack) => pack.kind === "custom")
+  const replacingCustom = customPack !== undefined
   const previewPackRef = useMemo(
     () => (preview === null ? null : store.previewPackRef(workspaceId)),
     [preview, store, workspaceId],
@@ -560,14 +617,25 @@ function CharacterModelLibrarySession({
           type="button"
           variant="secondary"
         >
-          <FolderPlusIcon aria-hidden="true" />
-          {library.mutation === "importing" ? copy.preparing : copy.importModel}
+          <FolderPlusIcon aria-hidden="true" data-icon="inline-start" />
+          {library.mutation === "importing"
+            ? copy.preparing
+            : replacingCustom
+              ? copy.replaceModel
+              : copy.importModel}
         </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-xs text-label text-muted-foreground">
         <ShieldCheckIcon aria-hidden="true" className="size-3" />
         <span>{copy.privateLibrary}</span>
+        <span aria-hidden="true">·</span>
+        <span>{copy.customSlot}</span>
+        <Badge variant="outline">
+          {replacingCustom ? copy.customSlotFilled : copy.customSlotAvailable}
+        </Badge>
+        <span aria-hidden="true">·</span>
+        <span>{copy.noLicenseRequired}</span>
         {store.gateway.kind !== "native" ? (
           <span>· {copy.importUnavailable}</span>
         ) : null}
@@ -583,8 +651,10 @@ function CharacterModelLibrarySession({
 
       {library.errorCode !== null ? (
         <Alert>
+          <CircleAlertIcon aria-hidden="true" />
           <AlertTitle>{copy.operationFailed}</AlertTitle>
-          <AlertDescription className="flex flex-wrap items-center gap-xs">
+          <AlertDescription className="flex flex-col items-start gap-xs">
+            <span>{operationErrorMessage(library.errorCode, copy)}</span>
             <code className="font-mono text-label text-destructive">
               {library.errorCode}
             </code>
@@ -669,7 +739,11 @@ function CharacterModelLibrarySession({
         >
           <DialogHeader>
             <DialogTitle>{copy.importTitle}</DialogTitle>
-            <DialogDescription>{copy.importDescription}</DialogDescription>
+            <DialogDescription>
+              {replacingCustom
+                ? copy.replaceDescription
+                : copy.importDescription}
+            </DialogDescription>
           </DialogHeader>
 
           {preview !== null && previewPackRef !== null ? (
@@ -726,8 +800,10 @@ function CharacterModelLibrarySession({
 
               {previewFailure !== null ? (
                 <Alert>
+                  <CircleAlertIcon aria-hidden="true" />
                   <AlertTitle>{copy.previewFailed}</AlertTitle>
-                  <AlertDescription className="flex flex-wrap items-center gap-xs">
+                  <AlertDescription className="flex flex-col items-start gap-xs">
+                    <span>{operationErrorMessage(previewFailure, copy)}</span>
                     <code className="font-mono text-label text-destructive">
                       {previewFailure}
                     </code>
@@ -784,7 +860,9 @@ function CharacterModelLibrarySession({
             >
               {library.mutation === "confirming"
                 ? copy.confirming
-                : copy.confirmImport}
+                : replacingCustom
+                  ? copy.confirmReplace
+                  : copy.confirmImport}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -806,9 +884,16 @@ function CharacterModelLibrarySession({
             </DialogDescription>
           </DialogHeader>
           {library.errorCode !== null ? (
-            <code className="font-mono text-label text-destructive">
-              {library.errorCode}
-            </code>
+            <Alert>
+              <CircleAlertIcon aria-hidden="true" />
+              <AlertTitle>{copy.operationFailed}</AlertTitle>
+              <AlertDescription className="flex flex-col items-start gap-xs">
+                <span>{operationErrorMessage(library.errorCode, copy)}</span>
+                <code className="font-mono text-label text-destructive">
+                  {library.errorCode}
+                </code>
+              </AlertDescription>
+            </Alert>
           ) : null}
           <DialogFooter>
             <Button

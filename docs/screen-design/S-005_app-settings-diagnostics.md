@@ -34,7 +34,7 @@ status: "Approved"
 | General           | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
 | Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
 | Character context | app-globalなname、tone、speech density、behavior、prohibited expressions                                |
-| Companion         | app-globalなmodel選択、import、inventory、preview、semantic mapping、provenance、delete、runtime status  |
+| Companion         | app-globalなbundled Hiyoriとcustom 1枠、選択、import/置換、preview、semantic mapping、provenance、delete、runtime status |
 | Audio             | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
 | Support           | app共通のsupport role enable、readiness、capacity、usage、sanitized error                                |
 | Diagnostics       | OS/app、Codex、Git、DB、Live2D、audio、supportのnative readinessとrecheck                                |
@@ -99,6 +99,9 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry/Reset | `APP-F-057`〜`APP-F-061`, `APP-F-076` |
 | Character contextを保存する | Character contextがready | global versionを更新し次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063` |
 | modelを選択する       | verified pack preview成功 | 全workspaceへatomic適用                           | 前selection維持                | 前selection維持、safe error     | `APP-F-084`, `LIVE-F-075` |
+| custom modelを取り込む | custom slotが空、native picker利用可能 | 検証・preview成功後に1件を保存しapp-global選択へatomic適用 | 前selectionと空slotを維持 | localized reasonとsafe code、前selection維持 | `LIVE-F-068`〜`LIVE-F-076` |
+| custom modelを置き換える | custom slot使用中、native picker利用可能 | 検証・preview成功後に旧assetを新packへatomic置換しapp-global選択を新packへ切り替える | 前slotとselectionを維持 | 前slotとselectionを維持しlocalized reasonとsafe code | `LIVE-F-073`〜`LIVE-F-078` |
+| custom modelを削除する | custom slot使用中、確認済み | app-global selectionをbundled Hiyoriへ戻してからassetとmappingを削除 | 前slotとselectionを維持 | 前slotとselectionを維持しsafe error | `LIVE-F-078` |
 | readinessを再確認する | Diagnostics表示中     | shared snapshot IDを更新                          | 前snapshotをstale表示          | safe codeとRetry                | `APP-F-070`                           |
 | project登録を解除する | Projects表示中、対象にactive/pending turnなし | 確認後にapp registrationだけを外し、repositoryと既存worktreeを残す | 一覧とregistrationを維持 | 対象を残してsafe errorとRetry | `WORK-F-057`, `WORK-F-068` |
 | project詳細を開く | Projects一覧で登録projectを選択 | 同じProjects section内でproject identityとProject context editorを表示 | 一覧を維持 | 一覧と他projectのdraftを維持 | `WORK-F-063`, `APP-F-083` |
@@ -123,7 +126,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | preference取得・更新・reset | Rust owner-only store    | `app_preferences_get/update/reset` | exact schema/version                  | 前record維持      | safe defaultまたは前record、safe code |
 | Character context load/save | Rust SQLite             | app character context commands     | global singleton、expected version    | draft維持         | conflictまたはsafe code                |
 | Project context load/save | Rust SQLite | `project_context_get` / `project_context_save` | registered Project ID、expected version、canonical project-relative reference | draft維持 | conflictまたはsafe code |
-| model import/select/mapping/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash | quarantine cleanup、前selection維持 | bundled/selected delete拒否、前selection維持 |
+| model import/select/mapping/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1 | quarantine cleanup、前selection維持 | bundled delete拒否、置換/削除失敗時は前slotとselection維持 |
 | Audio取得・保存・test       | Rust local process/store | `narration_*`                      | fixed `/usr/bin/say`、voice allowlist | process group停止 | caption維持、TTS offへfail closed     |
 | Support control             | Rust supervisor          | `configure/cancel_support`         | role allowlist、budget固定            | 前config維持      | disabled fallback                     |
 | readiness recheck           | Rust readiness service   | `run_diagnostic_check`             | read-only check                       | 前snapshot維持    | stale snapshotとsafe code             |

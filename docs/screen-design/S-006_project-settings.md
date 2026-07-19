@@ -65,6 +65,8 @@ status: "Approved"
 
 app-global sectionやProject context navigationを表示しない。単一sectionのためsection navigationとcompact popoverは設けず、履歴の正本、削除範囲、残るGit dataを一続きの面で示す。
 
+Workspace Settings表示中はLive2D canvasとCompanion paneを表示せず、settings mainをworkspace bodyの全幅で使う。renderer instanceは破棄せず、ChatまたはCommitへ戻った時に同じworkspace、canvas、semantic stateを継続する。runtime readiness、pack provenance、fallback、retryはApp SettingsのCompanion sectionで確認できる。
+
 ## 表示状態
 
 | 状態       | 進入条件                  | 表示                                           | 操作可否               | 状態から抜ける条件       |

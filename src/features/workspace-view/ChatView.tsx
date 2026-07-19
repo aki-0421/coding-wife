@@ -9,18 +9,16 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import type { CharacterRuntimeView } from "@/features/character"
 import {
   useNarrationController,
   useNarrationSnapshot,
 } from "@/features/narration"
-import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { Composer } from "@/features/workspace-view/Composer"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import { Timeline } from "@/features/workspace-view/Timeline"
 import type { TurnUiState } from "@/features/workspace-view/useWorkspaceViewModel"
 import type {
-  CharacterStageRenderer,
+  CompanionSemanticState,
   ContextSnapshotItem,
   ReasoningEffort,
   WorkspaceAdapterState,
@@ -33,8 +31,7 @@ import type { ApprovalDecision, PendingRequestView } from "@/lib/contracts"
 import { cn } from "@/lib/utils"
 
 interface ChatViewProps {
-  readonly characterHidden: boolean
-  readonly characterRuntime: CharacterRuntimeView
+  readonly companionState: CompanionSemanticState
   readonly connected: boolean
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
@@ -44,7 +41,6 @@ interface ChatViewProps {
   readonly reducedMotion: boolean
   readonly readiness: WorkspaceCodexState["readiness"]
   readonly repositoryHealth?: WorkspaceRecord["health"]
-  readonly renderer?: CharacterStageRenderer | undefined
   readonly runtimeError: boolean
   readonly turnState: TurnUiState
   readonly timeline: readonly WorkspaceTimelineItem[]
@@ -80,7 +76,6 @@ interface ChatViewProps {
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onRemoveContext: (snapshotId: string) => void
   readonly onRetryRuntime: () => void
-  readonly onRetryCharacter: () => void
   readonly onSend: () => Promise<boolean>
   readonly onStop: () => boolean | void | Promise<boolean | void>
   readonly onTimelineAnchorChange?: (
@@ -169,8 +164,7 @@ function restoreTimelineAnchor(
 }
 
 export function ChatView({
-  characterHidden,
-  characterRuntime,
+  companionState,
   connected,
   copy,
   draft,
@@ -180,7 +174,6 @@ export function ChatView({
   reducedMotion,
   readiness,
   repositoryHealth,
-  renderer,
   runtimeError,
   turnState,
   timeline,
@@ -199,7 +192,6 @@ export function ChatView({
   onRemoveAttachment,
   onRemoveContext,
   onRetryRuntime,
-  onRetryCharacter,
   onSend,
   onStop,
   onTimelineAnchorChange,
@@ -213,15 +205,6 @@ export function ChatView({
   const anchorSaveTimer = useRef<number | null>(null)
   const [scrollLocked, setScrollLocked] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
-  const companionState = !connected
-    ? "disconnected"
-    : pendingRequestIds.length > 0
-      ? "waiting_for_user"
-      : turnState === "sending"
-        ? "thinking"
-        : turnState === "running" || turnState === "stopping"
-          ? "acting"
-          : "idle"
   const presentation =
     narration.presentation?.key.workspaceId === workspaceId &&
     narration.presentation.status !== "canceled"
@@ -382,12 +365,7 @@ export function ChatView({
   }, [timeline, workspaceId])
 
   return (
-    <div
-      className={cn(
-        "chat-layout grid size-full min-h-0 bg-app-bg",
-        characterHidden && "character-hidden",
-      )}
-    >
+    <div className="size-full min-h-0 bg-app-bg">
       <section
         aria-labelledby="activity-heading"
         className="chat-pane relative min-h-0 overflow-hidden"
@@ -513,21 +491,6 @@ export function ChatView({
           turnState={turnState}
         />
       </section>
-
-      {!characterHidden ? (
-        <CharacterStageSlot
-          characterRuntime={characterRuntime}
-          copy={copy}
-          hidden={characterHidden}
-          muted={muted}
-          onMutedChange={onMutedChange}
-          onRetryCharacter={onRetryCharacter}
-          reducedMotion={reducedMotion}
-          state={companionState}
-          workspaceId={workspaceId}
-          {...(renderer ? { renderer } : {})}
-        />
-      ) : null}
     </div>
   )
 }

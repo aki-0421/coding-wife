@@ -86,7 +86,7 @@ status: "Approved"
 | Companion pane | 607.84×754.99px | Live2D canvas、visible caption、mute | mute、fallback詳細 |
 | composer | Chat内571.11×128.25px、left/right 18px、bottom 15px | input、attachment、context、Sol、effort、send/stop | draft編集、popover、turn操作 |
 
-標準geometryではsidebar、81px header、Chat/Companion境界、composerをFigma node `8:2`の±2 CSS px以内に合わせる。ChatとCompanionの間へcard、rail、shadow、visible dividerを追加しない。Companion背景は大きなdecorative gradientやparticleを使わず、Live2Dと状態captionの可読性を優先する。
+標準geometryではsidebar、81px header、primary work surface/Companion境界、composerをFigma node `8:2`の±2 CSS px以内に合わせる。ChatとCommitは同じCompanion instanceを右paneへ継続表示し、tab切替でcanvasを再生成しない。Settingsでは同じrenderer instanceを非表示のまま保持する。primary work surfaceとCompanionの間へcard、rail、shadow、visible dividerを追加しない。Companion背景は大きなdecorative gradientやparticleを使わず、Live2Dと状態captionの可読性を優先する。
 
 ### headerとtab
 
@@ -362,6 +362,6 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] timeline、decision、Context、Live2D、audio、native boundary、data retentionを定義した。
 - [x] verified commitからapp-owned explanation controllerへのbackground handoffとmain conversation非介入を定義した。
-- [x] Context conflict/next-turn、repository health、active-turn切替、summary/anchor、app-global semantic mappingの状態とfocusを定義した。
+- [x] App SettingsのContext conflict/next-turn、repository health、active-turn切替、summary/anchor、app-global semantic mappingの状態とfocusを定義した。
 - [x] 関連要件IDを要件定義書のS-002対応と一致させた。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。

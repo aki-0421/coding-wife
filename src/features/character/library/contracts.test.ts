@@ -194,6 +194,47 @@ describe("character library contract", () => {
         packs: [fixture.librarySnapshot.packs[0], custom],
       }).packs[1]?.manifest?.compatibility.expectedDrawables,
     ).toBe(134)
+
+    expect(() =>
+      parseCharacterLibrarySnapshot({
+        ...fixture.librarySnapshot,
+        packs: [
+          fixture.librarySnapshot.packs[0],
+          { ...custom, deletable: false },
+        ],
+      }),
+    ).toThrow("The value did not match the character library contract.")
+
+    const secondPackId = "custom:22222222-2222-4222-8222-222222222222"
+    expect(() =>
+      parseCharacterLibrarySnapshot({
+        ...fixture.librarySnapshot,
+        packs: [
+          fixture.librarySnapshot.packs[0],
+          custom,
+          {
+            ...custom,
+            packId: secondPackId,
+            manifest: { ...manifest, packId: secondPackId },
+          },
+        ],
+      }),
+    ).toThrow("The value did not match the character library contract.")
+  })
+
+  it("accepts pack metadata above the legacy 128-file boundary", () => {
+    const snapshot = structuredClone(fixture.librarySnapshot)
+    snapshot.packs[0]!.runtimeFileCount = 129
+
+    expect(
+      parseCharacterLibrarySnapshot(snapshot).packs[0]?.runtimeFileCount,
+    ).toBe(129)
+    expect(
+      parseCharacterPreviewAttestationRequest({
+        ...fixture.attestationRequest,
+        textureDecodeCount: 129,
+      }).textureDecodeCount,
+    ).toBe(129)
   })
 
   it("rejects custom manifest resource escalation and partial attestation", () => {

@@ -47,6 +47,7 @@ import {
   type NarrationController,
   useNarrationSnapshot,
 } from "@/features/narration"
+import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { ChatView } from "@/features/workspace-view/ChatView"
 import {
   getWorkspaceCopy,
@@ -176,6 +177,15 @@ export function WorkspaceShell({
     view.turnState === "stopping" ||
     view.codex.phase === "running" ||
     view.codex.phase === "stopping"
+  const companionState = !connected
+    ? "disconnected"
+    : view.codex.pendingRequests.length > 0
+      ? "waiting_for_user"
+      : view.turnState === "sending"
+        ? "thinking"
+        : turnActive
+          ? "acting"
+          : "idle"
   const activeTab = view.activeTab
   const registerAttachmentPaths = view.registerAttachmentPaths
   const selectedWorkspaceId = view.selectedWorkspace?.id ?? null
@@ -814,7 +824,12 @@ export function WorkspaceShell({
 
       {selectedWorkspace ? (
         <Tabs
-          className="workspace-tabs"
+          className="workspace-tabs grid"
+          data-companion-active={
+            view.activeTab !== "settings" && !characterHidden
+          }
+          data-companion-layout=""
+          data-workspace-tab={view.activeTab}
           hidden={appSettingsOpen}
           onValueChange={setActiveTab}
           orientation="horizontal"
@@ -842,8 +857,7 @@ export function WorkspaceShell({
             value="chat"
           >
             <ChatView
-              characterHidden={characterHidden}
-              characterRuntime={characterRuntime}
+              companionState={companionState}
               connected={connected}
               copy={copy}
               draft={view.selectedDraft}
@@ -872,16 +886,12 @@ export function WorkspaceShell({
               onRemoveAttachment={view.removeAttachment}
               onRemoveContext={view.removeContext}
               onRetryRuntime={runtime.refresh}
-              onRetryCharacter={() => {
-                characterRuntimeStore.retry(selectedWorkspace.id)
-              }}
               onSend={view.sendTurn}
               onStop={stopTurn}
               onTimelineAnchorChange={view.saveTimelineAnchor}
               reducedMotion={reducedMotion}
               readiness={view.codex.readiness}
               repositoryHealth={selectedWorkspace.health}
-              renderer={characterRenderer}
               runtimeError={runtime.state.status === "error"}
               timeline={view.timeline}
               timelineAnchor={view.timelineAnchor}
@@ -905,6 +915,7 @@ export function WorkspaceShell({
                   workspaceGeneration !== null)
               }
               commitExplanationController={commitExplanationController}
+              companionVisible={!characterHidden}
               locale={locale}
               onBackToChat={() => view.setActiveTab("chat")}
               onCommitSelectionChange={dismissCommitPresentation}
@@ -929,6 +940,23 @@ export function WorkspaceShell({
               workspaceLabel={`${selectedWorkspace.repository}/${selectedWorkspace.name}`}
             />
           </TabsContent>
+
+          {!characterHidden ? (
+            <CharacterStageSlot
+              characterRuntime={characterRuntime}
+              copy={copy}
+              muted={view.muted}
+              onMutedChange={view.setMuted}
+              onRetryCharacter={() => {
+                characterRuntimeStore.retry(selectedWorkspace.id)
+              }}
+              reducedMotion={reducedMotion}
+              state={companionState}
+              visible={view.activeTab !== "settings" && !appSettingsOpen}
+              workspaceId={selectedWorkspace.id}
+              {...(characterRenderer ? { renderer: characterRenderer } : {})}
+            />
+          ) : null}
 
           {commitPresentation ? (
             <div

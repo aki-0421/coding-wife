@@ -15,7 +15,7 @@ read_when:
 | 状態           | Approved           |
 | 仕様責任者     | プロダクトオーナー |
 | 作成日         | 2026-07-18         |
-| 最終レビュー日 | 2026-07-18         |
+| 最終レビュー日 | 2026-07-20         |
 
 ## 背景
 
@@ -39,7 +39,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | Rendering      | Cubism SDK/Core、透明single canvas、resize、WebGL recovery                       |
 | Semantic state | idle、thinking、acting、waiting、reviewing、error、completed、disconnected       |
 | Accessibility  | text equivalent、hide、reduced motion、static/text-only fallback                 |
-| Custom pack    | model3 picker、quarantine、validation、copy、preview、mapping、app-global selection |
+| Custom pack    | 1件分のmodel3 slot、quarantine、validation、copy、preview、mapping、app-global selection |
 
 ### 含めない
 
@@ -68,9 +68,9 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------- | ---------------- |
 | `LIVE-F-055` | appは指定Hiyori runtimeを同梱する           | `hiyori_pro_t11.model3.json`、moc3、texture 2件、physics、pose、cdi、motion 10件の17fileをrelease resourceから解決できる | Approved | 非該当           |
 | `LIVE-F-056` | appは編集用assetを配布へ含めない            | release resourceに`.cmo3`、`.can3`、`.DS_Store`がなく、runtime packとnoticeだけが存在する                                | Approved | 非該当           |
-| `LIVE-F-057` | companionはdemo比率で表示される             | 1470×836で607.84×754.99px paneへbottom-containし、頭頂、両手、裾がcanvas外へ切れない                                     | Approved | 非該当           |
+| `LIVE-F-057` | companionはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commitで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。Workspace SettingsとApp Settingsでは表示しない | Approved | 非該当           |
 | `LIVE-F-058` | rendererはwindow resizeへ追従する           | 1470×836、1280×800、960×640の各resize後500ms以内にcontain scaleを再計算し、composerまたはdecisionを覆わない              | Approved | 非該当           |
-| `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | workspace/modelを20回切り替えても描画canvasが1枚で、旧texture/motion/WebGL resourceが参照されない                        | Approved | 非該当           |
+| `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | Chat、Commit、Workspace Settingsを含むtabとworkspace/modelを20回切り替えても描画canvasが1枚で、Chat / Commit間では同じDOM canvasを再利用する。Workspace Settingsでは同じrenderer instanceを非表示のまま保持し、旧texture/motion/WebGL resourceを参照しない | Approved | 非該当           |
 | `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | App settingsのCompanionからpack名、creator、source notice、同梱version/hashへ到達できる                                  | Approved | 非該当           |
 
 ### Semantic stateと縮退
@@ -89,17 +89,17 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 
 | 要件ID       | 要件                                           | 受け入れ条件                                                                                                                                                                                                                                                                                                                                             | 状態     | 廃止理由・後継ID |
 | ------------ | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------- |
-| `LIVE-F-068` | 利用者はmodel3.jsonを1件選択してimportできる   | OS pickerでregular `.model3.json`を選ぶと検証結果、file数、合計size、motion/expression inventoryをpreview前に表示する                                                                                                                                                                                                                                    | Approved | 非該当           |
+| `LIVE-F-068` | 利用者はmodel3.jsonを1件選択してimportできる   | OS pickerでregular `.model3.json`を選ぶと検証結果、file数、合計size、motion/expression inventoryをpreview前に表示する。個人利用のlocal modelとして扱い、license、権利宣言、source metadataの入力を要求しない                                                                                                                                                  | Approved | 非該当           |
 | `LIVE-F-069` | 利用者はimport pickerをcancelできる            | cancel時にquarantine/library/DBを変更せず、現在選択modelとSettings入力を維持してerrorを表示しない                                                                                                                                                                                                                                                        | Approved | 非該当           |
 | `LIVE-F-070` | importerはmodel参照closureを検証する           | Moc、Textures、Physics、Pose、DisplayInfo、Expressions、Motions、UserDataの存在する参照を収集し、root内regular fileだけを受理する                                                                                                                                                                                                                        | Approved | 非該当           |
 | `LIVE-F-071` | importerは危険参照を拒否する                   | `..`、absolute path、`file/http/https` URL、symlink/alias解決後のroot外参照、HTML、JavaScript、実行可能fileを含むpackを登録しない                                                                                                                                                                                                                        | Approved | 非該当           |
-| `LIVE-F-072` | importerはresource境界を適用する               | file数128以下、合計100MiB以下、1file 32MiB以下、texture各8192×8192以下、JSON depth 64以下だけを受理する                                                                                                                                                                                                                                                  | Approved | 非該当           |
+| `LIVE-F-072` | importerはresource境界を適用する               | 通常のcustom modelへ実用上のfile数制限を課さず、異常入力による停止を防ぐ4096fileの内部guard、合計100MiB以下、1file 32MiB以下、texture各8192×8192以下、JSON depth 64以下を適用する                                                                                                                                                                            | Approved | 非該当           |
 | `LIVE-F-073` | importerはquarantineからatomicに昇格する       | 全fileをquarantineへcopyして再hash・再検証し、manifest作成後のatomic rename成功時だけlibraryへpack IDを追加する                                                                                                                                                                                                                                          | Approved | 非該当           |
 | `LIVE-F-074` | WebViewはimport元absolute pathを受け取らない   | import完了payloadとrenderer requestにpack UUIDとrelative asset IDだけが含まれ、source path/home pathがない                                                                                                                                                                                                                                               | Approved | 非該当           |
-| `LIVE-F-075` | 利用者はimport packをpreview後にapp全体へ選択できる     | previewのfirst frameとstate testが成功した後だけSelectを有効にし、selectionの正本をapp-globalなowner-only stateへatomic保存する。全workspaceは即時に同じpackを使い、restart後も一致する。legacy project/workspace-scoped selectionは`selectionUpdatedAt DESC, scope ID ASC`で最初のvalid packを一度だけglobal値へ移行し、valid値がなければbundled Hiyoriへ戻す。library cardはmanifestへ拘束されたtrusted PNGをpack IDとasset IDだけのopaque binary IPCで読み、thumbnailと省略hashを表示し、完全hashをaccessibility treeから取得できる。missingまたはhash不一致のframeは表示しない | Approved | 非該当           |
-| `LIVE-F-076` | import失敗は現在modelを壊さない                | malformed、missing、unsupported MOC、I/O、first-frame失敗、abortの各fixtureで現在pack選択とrenderingが継続し、失敗packがlibraryに残らない。model switchはcandidate client/model/trusted frameをfirst accepted frameまで分離し、その時点だけrenderer、committed pack、metrics、status、frameを一括更新する。失敗またはabortではcandidateだけをreleaseする | Approved | 非該当           |
+| `LIVE-F-075` | 利用者はimport packをpreview後にapp全体へ選択できる     | previewのfirst frameとstate testが成功した後だけSelectを有効にし、selectionの正本をapp-globalなowner-only stateへatomic保存する。全workspaceは即時に同じpackを使い、restart後も一致する。custom slotの置換時はapp-global selectionを新packへ同じtransactionで切り替える。legacy project/workspace-scoped selectionは`selectionUpdatedAt DESC, scope ID ASC`で最初のvalid packを一度だけglobal値へ移行し、valid値がなければbundled Hiyoriへ戻す。library cardはmanifestへ拘束されたtrusted PNGをpack IDとasset IDだけのopaque binary IPCで読み、thumbnailと省略hashを表示し、完全hashをaccessibility treeから取得できる。missingまたはhash不一致のframeは表示しない | Approved | 非該当           |
+| `LIVE-F-076` | import失敗は現在modelを壊さない                | malformed、missing、unsupported MOC、I/O、first-frame失敗、abortの各fixtureで現在pack選択とrenderingが継続し、失敗packがlibraryに残らない。App settingsは利用者が直せるja/enの理由を先に表示し、診断用safe codeを補足として残す。model switchはcandidate client/model/trusted frameをfirst accepted frameまで分離し、その時点だけrenderer、committed pack、metrics、status、frameを一括更新する。失敗またはabortではcandidateだけをreleaseする | Approved | 非該当           |
 | `LIVE-F-077` | 利用者はpackごとのversioned semantic mappingを設定できる | `SemanticMappingV1`はneutral/thinking/working/asking/success/warning/errorの各stateへ検証済みmanifest inventory内のmotion cue、expression cue、またはneutralだけを割り当て、pack ID、manifest hash、mapping versionとatomic保存する。unknown version、hash不一致、invalid cueはmapping全体を実行せずneutralへfallbackする。mapping操作はja/en label、keyboard-only、visible focus、stateごとのpreviewを持ち、reduced motion時はanimationを再生せずtrusted static frameとtextで確認できる | Approved | 非該当           |
-| `LIVE-F-078` | 利用者は未使用custom packを削除できる          | app-globalな現在選択pack以外のcustom packだけを確認後削除し、bundled Hiyoriと現在選択packのDeleteを無効にする。stale settings viewやraceしたselection responseからdeleteを開始せず、選択とdeleteを同じnative transactionで再検査する | Approved | 非該当           |
+| `LIVE-F-078` | appはbundled 1件とcustom 1件のslotを管理する   | bundled Hiyoriは常設しDelete操作を表示せず、custom packはapp全体で最大1件だけ表示・保存する。customがある状態のimportは検証成功後にslotをatomic置換してapp-global selectionを新packへ切り替える。customのDeleteは確認後にselectionをbundled Hiyoriへ戻してからassetとmappingを削除する。置換、削除、失敗、再起動の各時点でlibraryへcustom packを2件以上残さない | Approved | 非該当           |
 
 ### 性能とinteraction boundary
 

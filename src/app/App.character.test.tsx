@@ -82,6 +82,7 @@ describe("default App character integration", () => {
   })
 
   it("updates state generations without remounting for turns and workspaces", async () => {
+    const user = userEvent.setup()
     const codexListeners = new Set<(state: WorkspaceCodexState) => void>()
     const adapter: WorkspaceViewAdapter = {
       connected: true,
@@ -161,10 +162,36 @@ describe("default App character integration", () => {
     expect(latestLive2dProps()?.motionPolicy).toBe("animated")
     expect(latestLive2dProps()?.stateGeneration).toBe(idleGeneration)
 
-    fireEvent.click(screen.getByRole("tab", { name: "Commit" }))
+    await user.click(screen.getByRole("tab", { name: "Commit" }))
     expect(screen.getByTestId("live2d-character")).toBe(initialNode)
+    expect(screen.getByTestId("live2d-character")).toBeVisible()
     expect(latestLive2dProps()?.stateGeneration).toBe(idleGeneration)
-    fireEvent.click(screen.getByRole("tab", { name: /Chat/ }))
+
+    await user.click(screen.getByRole("tab", { name: "Context" }))
+    expect(screen.getByTestId("live2d-character")).toBe(initialNode)
+    expect(screen.getByTestId("live2d-character")).toBeVisible()
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await waitFor(() =>
+      expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
+    )
+
+    await user.click(
+      screen.getAllByRole("button", { name: "App settings" })[0]!,
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
+    )
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    await waitFor(() =>
+      expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
+    )
+
+    await user.click(screen.getByRole("tab", { name: /Chat/ }))
+    expect(screen.getByTestId("live2d-character")).toBe(initialNode)
+    await waitFor(() =>
+      expect(screen.getByTestId("live2d-character")).toBeVisible(),
+    )
 
     const workspaceNavigation = screen.getByRole("navigation", {
       name: "Workspaces",
@@ -253,7 +280,7 @@ describe("default App character integration", () => {
           motionCount: 10,
           expressionCount: 0,
           selectedProjectCount: 1,
-          deletable: false,
+          deletable: true,
           manifest: null,
           thumbnailSha256: null,
           cueInventory: {

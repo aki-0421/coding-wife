@@ -126,12 +126,12 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 
 | effective width | shell | S-002 body | tab / control |
 |---:|---|---|---|
-| 1470px以上 | sidebar 255.04px固定。超過幅はmainへ与える | ChatとCompanionを1:1で拡張 | tab row固定、長値ellipsis |
-| 1280〜1469px | sidebar 255.04px固定 | 残幅をChat/Companionで1:1。Chat 500px未満ならCompanionを先に縮める | composerはChat内で左右18px |
-| 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | Chatを最低520px、Companionへ残幅。decision/review時はCompanionをcompact化 | tabsはhorizontal scroll、footer controlsはwrap |
+| 1470px以上 | sidebar 255.04px固定。超過幅はmainへ与える | Chat/CommitとCompanionを同じ1:1基準で拡張 | tab row固定、長値ellipsis |
+| 1280〜1469px | sidebar 255.04px固定 | 残幅をprimary work surface/Companionへ全作業tab共通の比率で配分 | composerはChat内で左右18px |
+| 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | primaryを最低520px、Companionへ残幅。全作業tabで同じ配分を維持 | tabsはhorizontal scroll、footer controlsはwrap |
 | 200% text zoom | 64px rail + drawerを使用 | Companionをhide可能、Chat/decisionを優先 | labelを縮小せずwrap/overflow menu |
 
-S-003はevidence、S-005とS-006はsetting formを優先してbodyを再構成できる。S-002の標準表示だけはChatとCompanionの間へdividerまたは別cardを置かない。
+選択workspaceのChat、Commitは同じCompanion instanceを右paneへ継続表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCompanionを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005とS-006はCompanionを表示せずsetting formを全幅で構成する。character visibilityがHiddenの場合もprimary work surfaceを全幅へ戻し、visible HTML stateを残す。Chat、CommitとCompanionの間へdividerまたは別cardを置かない。
 
 ## surface、文字、motion
 
@@ -310,7 +310,7 @@ agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced moti
 | `WORK-F-056`〜`WORK-F-066` | cancel/unregister/switch、workspace continuity、repository health/repair | [workspace-sessions](../requirements/workspace-sessions.md) |
 | `CODE-F-073`〜`CODE-F-076` | stop、crash、auth、stale event | [codex-main-session](../requirements/codex-main-session.md) |
 | `HIST-F-037`〜`HIST-F-057` | local persistence、redaction、migration、recovery | [activity-history](../requirements/activity-history.md) |
-| `LIVE-F-058`〜`LIVE-F-067`, `LIVE-F-075`, `LIVE-F-077`, `LIVE-F-078` | Project-scoped selection、semantic mapping、single canvas、text/reduced/static fallback | [live2d-companion](../requirements/live2d-companion.md) |
+| `LIVE-F-058`〜`LIVE-F-067`, `LIVE-F-075`, `LIVE-F-077`, `LIVE-F-078` | app-global selection、semantic mapping、single canvas、text/reduced/static fallback | [live2d-companion](../requirements/live2d-companion.md) |
 | `NARR-F-064`〜`NARR-F-089` | default off、secret、mute、explicit presentation、dismiss/cancel分離、fallback、microphone禁止 | [audio-commentary](../requirements/audio-commentary.md) |
 
 ## 未確定事項

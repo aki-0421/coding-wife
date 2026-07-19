@@ -155,7 +155,7 @@ describe("CharacterLibraryStore", () => {
     releaseSession()
   })
 
-  it("publishes project-scoped mutations to every hydrated sibling workspace", async () => {
+  it("publishes app-scoped mutations to every hydrated sibling workspace", async () => {
     const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
     const getLibrary = vi.fn((request: { readonly workspaceId: string }) =>
       Promise.resolve({ ...snapshot, workspaceId: request.workspaceId }),
@@ -185,7 +185,7 @@ describe("CharacterLibraryStore", () => {
     })
   })
 
-  it("publishes a global pack deletion atomically while preserving each project selection", async () => {
+  it("publishes an app-global pack deletion atomically to every hydrated workspace", async () => {
     const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
     const builtinPack = snapshot.packs[0]
     if (builtinPack === undefined) throw new Error("builtin pack fixture")
@@ -519,7 +519,7 @@ describe("CharacterLibraryStore", () => {
     })
   })
 
-  it("reloads every project after a mapping conflict and retries with the fresh version", async () => {
+  it("reloads every hydrated workspace after a mapping conflict and retries with the fresh version", async () => {
     const snapshot = parseCharacterLibrarySnapshot(fixture.librarySnapshot)
     let projectA = withMappingVersion(
       projectSnapshot(snapshot, "workspace-a", "project-a"),

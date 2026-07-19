@@ -56,6 +56,26 @@ impl CharacterStateFile {
         self.selected_pack_id = pack_id;
         self.selection_updated_at = updated_at;
     }
+
+    fn replace_custom_packs(
+        &mut self,
+        replaced_pack_ids: &HashSet<String>,
+        replacement_pack_id: &str,
+        updated_at: &str,
+    ) {
+        if replaced_pack_ids.contains(&self.selected_pack_id) {
+            self.select(replacement_pack_id.to_owned(), updated_at.to_owned());
+        }
+        self.semantic_mappings
+            .retain(|pack_id, _| !replaced_pack_ids.contains(pack_id));
+    }
+
+    fn remove_custom_pack(&mut self, pack_id: &str, updated_at: &str) {
+        if self.selected_pack_id == pack_id {
+            self.select(BUILTIN_HIYORI_PACK_ID.to_owned(), updated_at.to_owned());
+        }
+        self.semantic_mappings.remove(pack_id);
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -472,23 +492,59 @@ impl CharacterStorage {
         )
     }
 
-    pub fn publish_and_select(
+    pub fn publish_and_replace_custom(
         &self,
         quarantine_directory: &Path,
         manifest: &CharacterPackManifest,
         mut state: CharacterStateFile,
         selection_updated_at: String,
+        replaced_packs: &[StoredPack],
     ) -> CharacterResult<StoredPack> {
         let published = self.publish(quarantine_directory, manifest)?;
+        let archived = match self.archive_packs(replaced_packs, "character_confirm_import") {
+            Ok(archived) => archived,
+            Err(error) => {
+                self.rollback_publish(&published.directory, quarantine_directory)?;
+                return Err(error);
+            }
+        };
+        let replaced_pack_ids = replaced_packs
+            .iter()
+            .map(|pack| pack.manifest.pack_id.clone())
+            .collect::<HashSet<_>>();
+        state.replace_custom_packs(&replaced_pack_ids, &manifest.pack_id, &selection_updated_at);
         state.select(manifest.pack_id.clone(), selection_updated_at);
         if let Err(error) = self.save_state(&state) {
             if self.load_state().ok().as_ref() == Some(&state) {
+                self.discard_archived_packs(&archived);
                 return Ok(published);
             }
+            self.restore_archived_packs(&archived)?;
             self.rollback_publish(&published.directory, quarantine_directory)?;
             return Err(error);
         }
+        self.discard_archived_packs(&archived);
         Ok(published)
+    }
+
+    pub fn delete_custom_and_fallback(
+        &self,
+        pack: &StoredPack,
+        mut state: CharacterStateFile,
+        selection_updated_at: String,
+    ) -> CharacterResult<()> {
+        let archived = self.archive_packs(std::slice::from_ref(pack), "character_delete_pack")?;
+        state.remove_custom_pack(&pack.manifest.pack_id, &selection_updated_at);
+        if let Err(error) = self.save_state(&state) {
+            if self.load_state().ok().as_ref() == Some(&state) {
+                self.discard_archived_packs(&archived);
+                return Ok(());
+            }
+            self.restore_archived_packs(&archived)?;
+            return Err(error);
+        }
+        self.discard_archived_packs(&archived);
+        Ok(())
     }
 
     pub fn load_custom_packs(&self) -> CharacterResult<(Vec<StoredPack>, Vec<String>)> {
@@ -617,19 +673,6 @@ impl CharacterStorage {
         remove_tree(directory)
     }
 
-    pub fn delete_pack(&self, pack_id: &str) -> CharacterResult<()> {
-        let directory = self.library.join(custom_directory_name(pack_id)?);
-        if !directory.exists() {
-            return Err(character_error(
-                "character_delete_pack",
-                "CHARACTER-PACK-NOT-FOUND",
-                true,
-            ));
-        }
-        remove_tree(&directory)?;
-        sync_directory(&self.library)
-    }
-
     fn load_pack_directory(&self, directory: &Path) -> CharacterResult<StoredPack> {
         let manifest_path = directory.join(MANIFEST_FILE_NAME);
         let bytes = fs::read(&manifest_path).map_err(|_| {
@@ -745,6 +788,60 @@ impl CharacterStorage {
         })?;
         sync_directory(&self.library)?;
         sync_directory(&self.quarantine)
+    }
+
+    fn archive_packs(
+        &self,
+        packs: &[StoredPack],
+        operation: &str,
+    ) -> CharacterResult<Vec<(PathBuf, PathBuf)>> {
+        let mut archived = Vec::with_capacity(packs.len());
+        for pack in packs {
+            if !pack.directory.starts_with(&self.library) || !pack.directory.exists() {
+                self.restore_archived_packs(&archived)?;
+                return Err(character_error(operation, "CHARACTER-PACK-NOT-FOUND", true));
+            }
+            let backup = self
+                .quarantine
+                .join(format!("replaced-{}.tmp", uuid::Uuid::new_v4()));
+            if fs::rename(&pack.directory, &backup).is_err() {
+                self.restore_archived_packs(&archived)?;
+                return Err(character_error(
+                    operation,
+                    "CHARACTER-REPLACE-ATOMIC-RENAME",
+                    true,
+                ));
+            }
+            archived.push((pack.directory.clone(), backup));
+        }
+        if let Err(error) =
+            sync_directory(&self.library).and_then(|_| sync_directory(&self.quarantine))
+        {
+            self.restore_archived_packs(&archived)?;
+            return Err(error);
+        }
+        Ok(archived)
+    }
+
+    fn restore_archived_packs(&self, archived: &[(PathBuf, PathBuf)]) -> CharacterResult<()> {
+        for (original, backup) in archived.iter().rev() {
+            if fs::rename(backup, original).is_err() {
+                return Err(character_error(
+                    "character_storage",
+                    "CHARACTER-PUBLISH-ROLLBACK",
+                    false,
+                ));
+            }
+        }
+        sync_directory(&self.library)?;
+        sync_directory(&self.quarantine)
+    }
+
+    fn discard_archived_packs(&self, archived: &[(PathBuf, PathBuf)]) {
+        for (_, backup) in archived {
+            let _ = remove_tree(backup);
+        }
+        let _ = sync_directory(&self.quarantine);
     }
 
     fn cleanup_interrupted_quarantine(&self) -> CharacterResult<()> {
@@ -1076,7 +1173,7 @@ mod tests {
 
         let migrated = storage
             .load_or_migrate_state(&HashSet::from([first.clone(), second]))
-            .expect("project scoped migration");
+            .expect("project-scoped migration to app state");
 
         assert_eq!(migrated.selected(), first);
         assert_eq!(migrated.selection_updated_at, "2026-07-18T03:00:00.000Z");
