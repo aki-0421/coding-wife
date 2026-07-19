@@ -36,7 +36,6 @@ const copy: Readonly<
       readonly addWorkspace: string
       readonly createWorkspace: string
       readonly workspaceName: string
-      readonly create: string
       readonly add: string
       readonly composer: string
       readonly stop: string
@@ -68,7 +67,6 @@ const copy: Readonly<
     addWorkspace: "Add workspace",
     createWorkspace: "Create workspace",
     workspaceName: "Workspace name",
-    create: "Create",
     add: "Add",
     composer: "Ask Codex to plan, build, explain, or fix anything…",
     stop: "Stop",
@@ -99,7 +97,6 @@ const copy: Readonly<
     addWorkspace: "ワークスペースを追加",
     createWorkspace: "ワークスペースを作成",
     workspaceName: "ワークスペース名",
-    create: "作成",
     add: "追加",
     composer: "Codexに計画、実装、説明、修正を依頼…",
     stop: "停止",
@@ -217,7 +214,9 @@ describe("final bilingual App acceptance", () => {
       await waitFor(() => expect(workspaceName).toHaveFocus())
       await user.type(workspaceName, "acceptance-flow")
       await user.click(
-        within(createDialog).getByRole("button", { name: localized.create }),
+        within(createDialog).getByRole("button", {
+          name: localized.createWorkspace,
+        }),
       )
 
       const composer = await screen.findByPlaceholderText(localized.composer)

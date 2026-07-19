@@ -2663,7 +2663,7 @@ describe("WorkspaceShell", () => {
     const user = userEvent.setup()
     renderWorkspace(adapter)
 
-    await user.click(appSettingsButton())
+    await user.click(await waitFor(appSettingsButton))
     await user.click(screen.getByRole("button", { name: "Projects" }))
     await user.click(screen.getByRole("button", { name: "Unregister" }))
     expect(screen.getByText("Unregister this project?")).toBeVisible()
