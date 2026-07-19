@@ -5,10 +5,16 @@ import {
 } from "@/features/readiness/transport"
 
 export type NativeReadinessControllerStatus =
-  "loading" | "ready" | "rechecking" | "error"
+  | "loading"
+  | "ready"
+  | "rechecking"
+  | "error"
 export type NativeReadinessCopyStatus = "idle" | "copying" | "copied" | "error"
 export type NativeReadinessRecheckOutcome =
-  "idle" | "complete" | "attention" | "failed"
+  | "idle"
+  | "complete"
+  | "attention"
+  | "failed"
 
 export interface NativeReadinessControllerState {
   readonly status: NativeReadinessControllerStatus

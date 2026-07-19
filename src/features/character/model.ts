@@ -12,7 +12,10 @@ export const characterStates = [
 export type CharacterState = (typeof characterStates)[number]
 export type CharacterMotionPolicy = "animated" | "reduced" | "hidden"
 export type CharacterFallbackLevel =
-  "animated" | "reduced" | "static" | "text_only"
+  | "animated"
+  | "reduced"
+  | "static"
+  | "text_only"
 
 export type CharacterErrorCode =
   | "core_load_failed"
@@ -151,7 +154,9 @@ export interface CharacterMemoryPackRef {
 }
 
 export type CharacterPackRef =
-  CharacterUrlPackRef | CharacterNativePackRef | CharacterMemoryPackRef
+  | CharacterUrlPackRef
+  | CharacterNativePackRef
+  | CharacterMemoryPackRef
 
 export interface CharacterModelInventory {
   readonly parameterCount: number
@@ -174,7 +179,12 @@ export interface CharacterFrameMetrics {
 
 export interface CharacterControllerStatus {
   readonly phase:
-    "idle" | "loading" | "ready" | "recovering" | "error" | "disposed"
+    | "idle"
+    | "loading"
+    | "ready"
+    | "recovering"
+    | "error"
+    | "disposed"
   readonly state: CharacterState
   readonly motionPolicy: CharacterMotionPolicy
   readonly fallbackLevel: CharacterFallbackLevel

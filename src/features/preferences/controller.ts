@@ -14,7 +14,11 @@ import {
 } from "@/features/preferences/transport"
 
 export type AppPreferencesControllerStatus =
-  "loading" | "ready" | "saving" | "recovery" | "error"
+  | "loading"
+  | "ready"
+  | "saving"
+  | "recovery"
+  | "error"
 
 export interface AppPreferencesControllerState {
   readonly status: AppPreferencesControllerStatus

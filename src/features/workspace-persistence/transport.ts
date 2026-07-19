@@ -64,7 +64,9 @@ function boundaryError(
   })
 }
 
-export class TauriWorkspaceHistoryTransport implements WorkspaceHistoryTransport {
+export class TauriWorkspaceHistoryTransport
+  implements WorkspaceHistoryTransport
+{
   readonly kind = "tauri"
 
   constructor(

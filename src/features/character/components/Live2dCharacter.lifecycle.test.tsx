@@ -32,7 +32,8 @@ vi.mock("@/features/character/runtime/character-controller", () => {
       this.emitStatus()
     })
     private readonly onStatus:
-      ((status: CharacterControllerStatus) => void) | undefined
+      | ((status: CharacterControllerStatus) => void)
+      | undefined
     private state: CharacterState = "idle"
     private requestedPolicy: CharacterMotionPolicy = "animated"
     private systemPrefersReducedMotion = false

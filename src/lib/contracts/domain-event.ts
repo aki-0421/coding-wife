@@ -7,7 +7,11 @@ export interface DomainEventPayloadMap {
   }
   "work.workspace.lifecycle.changed": {
     readonly lifecycle:
-      "backlog" | "in_progress" | "in_review" | "done" | "canceled"
+      | "backlog"
+      | "in_progress"
+      | "in_review"
+      | "done"
+      | "canceled"
   }
   "code.session.status.changed": {
     readonly semanticVersion: 1
@@ -16,7 +20,12 @@ export interface DomainEventPayloadMap {
     readonly threadHandle: string
     readonly turnHandle: string
     readonly status:
-      "idle" | "running" | "waiting" | "interrupted" | "failed" | "completed"
+      | "idle"
+      | "running"
+      | "waiting"
+      | "interrupted"
+      | "failed"
+      | "completed"
   }
   "live.renderer.status.changed": {
     readonly level: "animated" | "reduced" | "static" | "text_only"

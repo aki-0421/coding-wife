@@ -94,7 +94,9 @@ function emptyDraft(
   }
 }
 
-export class DemoWorkspaceHistoryTransport implements WorkspaceHistoryTransport {
+export class DemoWorkspaceHistoryTransport
+  implements WorkspaceHistoryTransport
+{
   readonly kind = "demo"
   private workspaces: PersistedWorkspaceSummary[] = [
     demoWorkspace("sol-desktop", "sol-desktop", "main", "done", null, 0),

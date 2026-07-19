@@ -32,7 +32,11 @@ export function canConsumeCharacterFirstFrameDeadline({
 }
 
 export type CharacterFirstFrameDeadlineState =
-  "idle" | "paused" | "running" | "completed" | "expired"
+  | "idle"
+  | "paused"
+  | "running"
+  | "completed"
+  | "expired"
 
 export interface CharacterFirstFrameDeadlineSnapshot {
   readonly generation: number | null

@@ -88,7 +88,8 @@ export interface TauriCommitExplanationAdapterDependencies {
   readonly listen?: CommitExplanationEventListener
 }
 
-export interface ScopedCommitExplanationController extends CommitExplanationController {
+export interface ScopedCommitExplanationController
+  extends CommitExplanationController {
   setScope(scope: CommitExplanationScopeRequestedV1): Promise<void>
   revokePresentationIntent(
     reason: CommitExplanationPresentationRevokeReason,
@@ -96,13 +97,18 @@ export interface ScopedCommitExplanationController extends CommitExplanationCont
 }
 
 export type CommitExplanationPresentationRevokeReason =
-  "scope_change" | "selection_change" | "turn_stop" | "close" | "dispose"
+  | "scope_change"
+  | "selection_change"
+  | "turn_stop"
+  | "close"
+  | "dispose"
 
 export type CommitExplanationPresentationActivator = (
   key: CommitNarrationSourceKey,
 ) => boolean | void | Promise<boolean | void>
 
-export interface CommitExplanationAppRuntime extends ScopedCommitExplanationController {
+export interface CommitExplanationAppRuntime
+  extends ScopedCommitExplanationController {
   readonly narrationSource: CommitNarrationConsumerPort
   start(): Promise<void>
   dispose(): void
@@ -228,7 +234,9 @@ const terminalPresentationCopy = {
  * App-lifetime owner of the five native commit-explanation commands and two
  * dedicated event channels. It never writes to the main Codex event stream.
  */
-export class TauriCommitExplanationAdapter implements CommitExplanationAppRuntime {
+export class TauriCommitExplanationAdapter
+  implements CommitExplanationAppRuntime
+{
   readonly #invoke: CommitExplanationInvoker
   readonly #listen: CommitExplanationEventListener
   readonly #states = new Map<string, CommitExplanationControllerStateV1>()

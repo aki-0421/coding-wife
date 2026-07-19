@@ -12,7 +12,11 @@ import { materializeCharacterPack } from "@/features/character/runtime/character
 import { cn } from "@/lib/utils"
 
 export type IsolatedCharacterPreviewPhase =
-  "loading_assets" | "starting_renderer" | "rendering" | "verified" | "error"
+  | "loading_assets"
+  | "starting_renderer"
+  | "rendering"
+  | "verified"
+  | "error"
 
 export interface IsolatedCharacterPreviewProps {
   readonly className?: string

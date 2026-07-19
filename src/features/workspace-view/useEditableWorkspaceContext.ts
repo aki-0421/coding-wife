@@ -21,7 +21,12 @@ import {
 import type { WorkspaceViewAdapter } from "@/features/workspace-view/types"
 
 type SectionStatus =
-  "loading" | "ready" | "saving" | "saved" | "conflict" | "error"
+  | "loading"
+  | "ready"
+  | "saving"
+  | "saved"
+  | "conflict"
+  | "error"
 
 export interface ContextConflict {
   readonly localVersion: number

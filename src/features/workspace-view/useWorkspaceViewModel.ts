@@ -152,7 +152,8 @@ export type WorkspaceAdapterStatus = "loading" | "ready" | "error"
 export type WorkspaceAction = "cancel" | "repair" | "unregister"
 
 export type WorkspaceActionResult =
-  { readonly ok: true } | { readonly ok: false; readonly errorCode: string }
+  | { readonly ok: true }
+  | { readonly ok: false; readonly errorCode: string }
 
 export interface PendingWorkspaceTransition {
   readonly id: number
