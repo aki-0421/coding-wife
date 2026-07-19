@@ -27,7 +27,7 @@ The explicit Cargo fetch installs the locked Apple Silicon registry metadata bef
 
 GitHub Actions runs the repository CI for every Pull Request into `develop`, every push to `develop`, and manual dispatches. `CI / Frontend and repository` checks diff hygiene before dependency installation, then verifies formatting, managed documentation, lint, types, the PR-scoped test suite, and the production frontend build on Linux. After it passes, `CI / Native` verifies the locked dependency-license inventory plus Rust formatting, Clippy, and serial tests on a macOS 14 Apple Silicon runner. Both checks must be required by the `develop` branch ruleset.
 
-PR CI intentionally does not run `pnpm quality:check`, clean-checkout reconstruction, the macOS release integration fixture, a Tauri bundle, or DMG packaging. Those expensive release-candidate checks remain in the canonical quality sequence below. CI has read-only repository permission and does not publish an app or DMG. See the [continuous integration specification](rules/continuous-integration.md) for the exact triggers, versions, cache policy, and release boundary.
+PR CI intentionally does not run `pnpm quality:check`, clean-checkout reconstruction, any test behind `pnpm test:release`, a Tauri bundle, or DMG packaging. Release tests remain together because filesystem semantics such as symlink modes vary by runner OS. Those release-candidate checks remain in the canonical quality sequence below. CI has read-only repository permission and does not publish an app or DMG. See the [continuous integration specification](rules/continuous-integration.md) for the exact triggers, versions, cache policy, and release boundary.
 
 ## Run the development build
 

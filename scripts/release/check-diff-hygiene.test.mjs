@@ -598,11 +598,8 @@ test("README, testing instructions, package commands, and CI separate PR and rel
     packageJson.scripts["quality:check"],
     "node scripts/quality/run-quality-gates.mjs",
   )
-  assert.match(packageJson.scripts["test:pr"], /test:release:unit/u)
-  assert.equal(
-    packageJson.scripts["test:pr"].includes("test:release &&"),
-    false,
-  )
+  assert.equal("test:release:unit" in packageJson.scripts, false)
+  assert.doesNotMatch(packageJson.scripts["test:pr"], /test:release/u)
   assert.match(readme, /pnpm check:diff/u)
   assert.equal(readme.includes("git diff --check"), false)
   assert.match(testingInstructions, /pnpm check:diff/u)

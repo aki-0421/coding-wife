@@ -16,7 +16,7 @@ read_when:
 
 ## 正本と責務境界
 
-- PR向けJavaScript test集合の正本は`pnpm test:pr`とする。macOS release integrationを含む`pnpm test:release`は呼び出さない。
+- PR向けJavaScript test集合の正本は`pnpm test:pr`とする。macOS固有かどうかを問わず、`pnpm test:release`配下のrelease testは呼び出さない。
 - CIは`.github/workflows/ci.yml`に列挙したformat、documentation、frontend、native、dependency inventoryだけを固定依存のclean checkoutで実行する。
 - 通常のローカル開発では、これらのCI検証やリリース候補向け検証を変更後の確認として自動実行しない。ローカル検証は、ユーザーが明示的に依頼した場合、または依頼された作業自体がリリース候補の作成・検証である場合に限定する。
 - `pnpm quality:check`はrelease候補用の完全ゲートとして維持する。clean-checkout再構築、macOS release integration、Tauri bundle、最終diff再検査を含むため、PRごとのCIでは実行しない。
@@ -45,7 +45,7 @@ read_when:
 | Repository | `pnpm format:check`、`agent-docs --no-user-config lint` |
 | Frontend | `pnpm lint`、`pnpm typecheck`、`pnpm test:pr`、`pnpm build` |
 
-`pnpm check:diff`を依存install前に実行して不正な差分を早期に拒否する。`pnpm test:pr`はlicense testを除くrepository-owned Node test、Live2Dとbundled skillのsupply-chain test、release logicのplatform非依存unit test、frontend Vitestを実行する。production frontend buildとdemo marker除外は`pnpm build`で確認する。
+`pnpm check:diff`を依存install前に実行して不正な差分を早期に拒否する。`pnpm test:pr`はLive2Dとbundled skillのsupply-chain test、diff hygieneとquality runnerのrepository test、frontend Vitestを実行する。symlink modeなどrunner OSで意味が変わるrelease testは、部分的にLinuxへ移さず`pnpm test:release`へ集約する。production frontend buildとdemo marker除外は`pnpm build`で確認する。
 
 ### `CI / Native`
 
