@@ -568,14 +568,14 @@ test("CLI rejects unsafe or contradictory options without echoing them", async (
   assert.equal(help.stdout.includes(root), false)
 })
 
-test("README, testing instructions, package commands, and CI use repository gates", async () => {
+test("README, testing instructions, package commands, and CI separate PR and release gates", async () => {
   const [packageText, readme, testingInstructions, workflow, qualityRunner] =
     await Promise.all([
       readFile(path.join(repositoryRoot, "package.json"), "utf8"),
       readFile(path.join(repositoryRoot, "README.md"), "utf8"),
       readFile(path.join(repositoryRoot, "docs", "testing.md"), "utf8"),
       readFile(
-        path.join(repositoryRoot, ".github", "workflows", "diff-hygiene.yml"),
+        path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
         "utf8",
       ),
       readFile(
@@ -598,13 +598,36 @@ test("README, testing instructions, package commands, and CI use repository gate
     packageJson.scripts["quality:check"],
     "node scripts/quality/run-quality-gates.mjs",
   )
+  assert.match(packageJson.scripts["test:pr"], /test:release:unit/u)
+  assert.equal(
+    packageJson.scripts["test:pr"].includes("test:release &&"),
+    false,
+  )
   assert.match(readme, /pnpm check:diff/u)
   assert.equal(readme.includes("git diff --check"), false)
   assert.match(testingInstructions, /pnpm check:diff/u)
   assert.match(testingInstructions, /pnpm quality:check/u)
   assert.match(workflow, /pnpm check:diff/u)
-  assert.match(workflow, /actions\/checkout@v7/u)
-  assert.match(workflow, /actions\/setup-node@v7/u)
+  assert.match(workflow, /pnpm test:pr/u)
+  assert.match(workflow, /pnpm licenses:check/u)
+  assert.match(workflow, /cargo clippy --locked/u)
+  assert.match(workflow, /cargo test --locked/u)
+  assert.match(workflow, /runs-on: macos-14/u)
+  assert.match(workflow, /permissions:\n  contents: read/u)
+  assert.match(workflow, /persist-credentials: false/u)
+  assert.match(
+    workflow,
+    /actions\/checkout@[a-f0-9]{40} # v[0-9]+\.[0-9]+\.[0-9]+/u,
+  )
+  assert.match(
+    workflow,
+    /actions\/setup-node@[a-f0-9]{40} # v[0-9]+\.[0-9]+\.[0-9]+/u,
+  )
+  assert.doesNotMatch(workflow, /uses: [^\n]+@v[0-9]+(?:\s|$)/u)
+  assert.doesNotMatch(workflow, /pnpm quality:check/u)
+  assert.doesNotMatch(workflow, /pnpm test:release(?:\s|$)/u)
+  assert.doesNotMatch(workflow, /pnpm test:clean-checkout/u)
+  assert.doesNotMatch(workflow, /pnpm tauri build/u)
   assert.match(qualityRunner, /--all-targets/u)
   assert.match(qualityRunner, /pnpm.*tauri/u)
 })
