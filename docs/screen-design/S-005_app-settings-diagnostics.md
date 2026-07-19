@@ -1,9 +1,9 @@
 ---
 title: "S-005 アプリ設定・診断"
-description: "全プロジェクトへ共通適用する表示、音声、支援、診断だけを管理する画面仕様。"
+description: "全プロジェクトへ共通適用する表示、登録project一覧、音声、支援、診断を管理する画面仕様。"
 updated: 2026-07-19
 read_when:
-  - "sidebar gear、アプリ全体の設定、音声、support、native diagnosticsを実装するとき。"
+  - "sidebar gear、アプリ全体の設定、project登録一覧、音声、support、native diagnosticsを実装するとき。"
   - "S-005とAPP、CODE、SUP、GIT、LIVE、NARR要件の対応を確認するとき。"
 screen_id: "S-005"
 status: "Approved"
@@ -32,6 +32,7 @@ status: "Approved"
 | section     | 内容                                                                                                     |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
 | General     | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
+| Projects    | appへ登録しているGit project一覧、workspace件数、登録解除                                              |
 | Audio       | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
 | Support     | app共通のsupport role enable、readiness、capacity、usage、sanitized error                                |
 | Diagnostics | OS/app、Codex、Git、DB、Live2D、audio、supportのnative readinessとrecheck                                |
@@ -50,7 +51,7 @@ status: "Approved"
 | 項目           | 内容                                                                                     |
 | -------------- | ---------------------------------------------------------------------------------------- |
 | 表示契機       | workspace sidebar最下部の`App settings / アプリ設定` gear、Chatのdiagnostics link        |
-| 表示前提       | 1件以上のworkspaceが選択済み。native readinessが失敗してもGeneralとDiagnosticsは表示する |
+| 表示前提       | workspace選択は不要。registered project/workspaceが0件でもGeneral、Projects、Diagnosticsは表示する |
 | 初期フォーカス | app settings heading                                                                      |
 | 正常完了       | section単位の保存を即時反映し、画面を維持する                                            |
 | キャンセル     | section固有のdraftと保存済み値を各契約どおり維持する                                     |
@@ -71,7 +72,7 @@ status: "Approved"
 | ------------------- | ------------------------------------------------------------- | ------------------------------ |
 | workspace sidebar   | workspace一覧、activeなapp settings gear                      | workspaceへ戻る、project追加   |
 | app settings header | back action、`App settings / アプリ設定`、全project共通の説明 | 直前workspace tabへ戻る        |
-| section navigation  | General、Audio、Support、Diagnosticsの4 section               | section選択                    |
+| section navigation  | General、Projects、Audio、Support、Diagnosticsの5 section     | section選択                    |
 | settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
 
 app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tabを表示しない。これによりproject scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
@@ -81,7 +82,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | 状態       | 進入条件                          | 表示                                           | 操作可否               | 状態から抜ける条件      |
 | ---------- | --------------------------------- | ---------------------------------------------- | ---------------------- | ----------------------- |
 | 初期化中   | preference/readiness未取得        | field shape skeleton、loading status           | backのみ可             | snapshot取得またはerror |
-| 通常       | snapshot取得済み                  | 4 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
+| 通常       | snapshot取得済み                  | 5 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
 | データなし | voiceまたはdiagnostic resultが0件 | 理由とRetry                                    | 影響しないsectionは可  | 再取得成功              |
 | 処理中     | save、test、reset、recheck中      | 操作箇所のprocessing status                    | 同一操作の二重実行不可 | terminal result         |
 | オフライン | network/Codex unavailable         | local settingは表示、診断はBlocked/Unavailable | local saveとrecheck可  | readiness更新           |
@@ -97,6 +98,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
 | preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry/Reset | `APP-F-057`〜`APP-F-061`, `APP-F-076` |
 | readinessを再確認する | Diagnostics表示中     | shared snapshot IDを更新                          | 前snapshotをstale表示          | safe codeとRetry                | `APP-F-070`                           |
+| project登録を解除する | Projects表示中、対象にactive/pending turnなし | 確認後にapp registrationだけを外し、repositoryと既存worktreeを残す | 一覧とregistrationを維持 | 対象を残してsafe errorとRetry | `WORK-F-057`, `WORK-F-068` |
 
 ## 入力項目
 
@@ -116,6 +118,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | Audio取得・保存・test       | Rust local process/store | `narration_*`                      | fixed `/usr/bin/say`、voice allowlist | process group停止 | caption維持、TTS offへfail closed     |
 | Support control             | Rust supervisor          | `configure/cancel_support`         | role allowlist、budget固定            | 前config維持      | disabled fallback                     |
 | readiness recheck           | Rust readiness service   | `run_diagnostic_check`             | read-only check                       | 前snapshot維持    | stale snapshotとsafe code             |
+| project一覧・登録解除       | Rust workspace store     | `workspace_list` / `workspace_unregister` | typed Project ID、metadata-only mutation | 一覧維持 | repository/worktreeを変更せずsafe code |
 
 ## ウィンドウ固有動作
 

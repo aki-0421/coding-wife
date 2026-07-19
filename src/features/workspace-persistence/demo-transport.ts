@@ -6,6 +6,7 @@ import {
   type PersistedContextSnapshot,
   type PersistedTimelineEvent,
   type PersistedTimelinePage,
+  type PersistedProjectSummary,
   type PersistedWorkspaceDraft,
   type PersistedWorkspaceSummary,
   type WorkspaceHistoryCommand,
@@ -98,6 +99,18 @@ export class DemoWorkspaceHistoryTransport
   implements WorkspaceHistoryTransport
 {
   readonly kind = "demo"
+  private projects: PersistedProjectSummary[] = [
+    {
+      schemaVersion: 1,
+      projectId: "project-demo",
+      name: "coding-wife",
+      githubRepository: "aki-0421/coding-wife",
+      health: "ready",
+      workspaceCount: 3,
+      createdAt: new Date(baseTimestamp).toISOString(),
+      updatedAt: new Date(baseTimestamp + 2 * 60_000).toISOString(),
+    },
+  ]
   private workspaces: PersistedWorkspaceSummary[] = [
     demoWorkspace("sol-desktop", "sol-desktop", "main", "done", null, 0),
     demoWorkspace(
@@ -119,6 +132,8 @@ export class DemoWorkspaceHistoryTransport
   ]
   private activeWorkspaceId = "build-live2d-desktop-app"
   private readonly unregisteredWorkspaces: PersistedWorkspaceSummary[] = []
+  private readonly hiddenProjects: PersistedProjectSummary[] = []
+  private readonly hiddenWorkspaces: PersistedWorkspaceSummary[] = []
   private readonly drafts = new Map<string, PersistedWorkspaceDraft>(
     this.workspaces.map((workspace) => [
       workspace.workspaceId,
@@ -215,6 +230,11 @@ export class DemoWorkspaceHistoryTransport
       case workspaceHistoryCommands.unregister:
         return this.unregister(
           (request as WorkspaceHistoryRequestMap["workspace_unregister"])
+            .projectId,
+        )
+      case workspaceHistoryCommands.archive:
+        return this.archive(
+          (request as WorkspaceHistoryRequestMap["workspace_archive"])
             .workspaceId,
         )
       case workspaceHistoryCommands.updateLifecycle:
@@ -289,6 +309,7 @@ export class DemoWorkspaceHistoryTransport
         errorCode: null,
         backupName: null,
       },
+      projects: [...this.projects],
       workspaces: [...this.workspaces],
       activeWorkspaceId: active?.workspaceId ?? null,
       draft:
@@ -328,50 +349,53 @@ export class DemoWorkspaceHistoryTransport
   }
 
   private pickRegister(): WorkspaceHistoryResponseMap["workspace_pick_register"] {
-    const existing = this.workspaces.find(
-      (workspace) =>
-        workspace.workspaceId === "workspace-demo-selected-project",
+    const existing = this.projects.find(
+      (project) => project.projectId === "project-demo-selected",
     )
     if (existing === undefined) {
       const timestamp = this.timestamp()
-      const workspace: PersistedWorkspaceSummary = {
-        schemaVersion: 1,
-        workspaceId: "workspace-demo-selected-project",
-        projectId: "project-demo-selected",
-        repository: "selected-project",
-        githubRepository: null,
-        name: "selected-project",
-        branch: "main",
-        head: "unborn",
-        detached: false,
-        lifecycle: "backlog",
-        attention: null,
-        health: "ready",
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        lastSelectedAt: timestamp,
-      }
-      this.workspaces = [...this.workspaces, workspace]
-      this.drafts.set(
-        workspace.workspaceId,
-        emptyDraft(workspace.workspaceId, timestamp),
+      const hiddenProject = this.hiddenProjects.find(
+        (project) => project.projectId === "project-demo-selected",
       )
-      this.editableContexts.set(
-        workspace.workspaceId,
-        this.defaultEditableContext(workspace.workspaceId, timestamp),
-      )
-      this.events.set(workspace.workspaceId, [
-        this.event(
-          workspace.workspaceId,
-          "work",
-          "work.workspace.lifecycle.changed",
+      if (hiddenProject === undefined) {
+        this.projects = [
+          ...this.projects,
           {
-            lifecycle: "backlog",
+            schemaVersion: 1,
+            projectId: "project-demo-selected",
+            name: "selected-project",
+            githubRepository: null,
+            health: "ready",
+            workspaceCount: 0,
+            createdAt: timestamp,
+            updatedAt: timestamp,
           },
-        ),
-      ])
+        ]
+      } else {
+        const restoredWorkspaces = this.hiddenWorkspaces.filter(
+          (workspace) => workspace.projectId === hiddenProject.projectId,
+        )
+        this.projects = [
+          ...this.projects,
+          {
+            ...hiddenProject,
+            workspaceCount: restoredWorkspaces.length,
+            updatedAt: timestamp,
+          },
+        ]
+        this.workspaces = [...this.workspaces, ...restoredWorkspaces]
+        this.hiddenProjects.splice(
+          this.hiddenProjects.indexOf(hiddenProject),
+          1,
+        )
+        for (const workspace of restoredWorkspaces) {
+          this.hiddenWorkspaces.splice(
+            this.hiddenWorkspaces.indexOf(workspace),
+            1,
+          )
+        }
+      }
     }
-    this.activeWorkspaceId = "workspace-demo-selected-project"
     return { schemaVersion: 1, outcome: "selected", state: this.state() }
   }
 
@@ -382,28 +406,47 @@ export class DemoWorkspaceHistoryTransport
     if (existingId !== undefined) {
       return this.select(existingId, workspaceHistoryCommands.createSession)
     }
-    const source = this.workspace(
-      request.fromWorkspaceId,
-      workspaceHistoryCommands.createSession,
+    const project = this.projects.find(
+      (candidate) => candidate.projectId === request.projectId,
     )
+    if (project === undefined) {
+      throw this.error(
+        "PROJECT-NOT-FOUND",
+        workspaceHistoryCommands.createSession,
+        false,
+      )
+    }
     this.workspaceCounter += 1
     const workspaceId = `workspace-demo-session-${String(this.workspaceCounter)}`
     const timestamp = this.timestamp()
     const workspace: PersistedWorkspaceSummary = {
-      ...source,
+      schemaVersion: 1,
       workspaceId,
+      projectId: project.projectId,
+      repository: project.name,
+      githubRepository: project.githubRepository,
       name: request.name,
+      branch: `coding-wife/demo-${String(this.workspaceCounter)}`,
+      head: "0123456789ab",
+      detached: false,
       lifecycle: "backlog",
       attention: null,
+      health: "ready",
       createdAt: timestamp,
       updatedAt: timestamp,
       lastSelectedAt: timestamp,
     }
     this.workspaces = [...this.workspaces, workspace]
-    this.drafts.set(workspaceId, {
-      ...emptyDraft(workspaceId, timestamp),
-      text: request.goal,
-    })
+    this.drafts.set(workspaceId, emptyDraft(workspaceId, timestamp))
+    this.projects = this.projects.map((candidate) =>
+      candidate.projectId === project.projectId
+        ? {
+            ...candidate,
+            workspaceCount: candidate.workspaceCount + 1,
+            updatedAt: timestamp,
+          }
+        : candidate,
+    )
     this.editableContexts.set(
       workspaceId,
       this.defaultEditableContext(workspaceId, timestamp),
@@ -442,17 +485,21 @@ export class DemoWorkspaceHistoryTransport
     return this.state()
   }
 
-  private unregister(workspaceId: string): WorkspaceStateSnapshot {
-    const workspace = this.workspace(
-      workspaceId,
-      workspaceHistoryCommands.unregister,
+  private unregister(projectId: string): WorkspaceStateSnapshot {
+    const project = this.projects.find(
+      (candidate) => candidate.projectId === projectId,
     )
     const removed = this.workspaces.filter(
-      (candidate) => candidate.projectId === workspace.projectId,
+      (candidate) => candidate.projectId === projectId,
     )
     this.unregisteredWorkspaces.push(...removed)
+    if (project !== undefined) this.hiddenProjects.push(project)
+    this.hiddenWorkspaces.push(...removed)
     this.workspaces = this.workspaces.filter(
-      (candidate) => candidate.projectId !== workspace.projectId,
+      (candidate) => candidate.projectId !== projectId,
+    )
+    this.projects = this.projects.filter(
+      (candidate) => candidate.projectId !== projectId,
     )
     if (
       removed.some(
@@ -461,6 +508,34 @@ export class DemoWorkspaceHistoryTransport
     ) {
       this.activeWorkspaceId = this.workspaces[0]?.workspaceId ?? ""
     }
+    return this.state()
+  }
+
+  private archive(workspaceId: string): WorkspaceStateSnapshot {
+    const workspace = this.workspace(
+      workspaceId,
+      workspaceHistoryCommands.archive,
+    )
+    this.workspaces = this.workspaces.filter(
+      (candidate) => candidate.workspaceId !== workspaceId,
+    )
+    this.projects = this.projects.map((project) =>
+      project.projectId === workspace.projectId
+        ? {
+            ...project,
+            workspaceCount: Math.max(0, project.workspaceCount - 1),
+            updatedAt: this.timestamp(),
+          }
+        : project,
+    )
+    this.drafts.delete(workspaceId)
+    this.contexts.delete(workspaceId)
+    this.editableContexts.delete(workspaceId)
+    this.events.delete(workspaceId)
+    this.activeWorkspaceId =
+      this.activeWorkspaceId === workspaceId
+        ? (this.workspaces[0]?.workspaceId ?? "")
+        : this.activeWorkspaceId
     return this.state()
   }
 
@@ -770,27 +845,22 @@ export class DemoWorkspaceHistoryTransport
         false,
       )
     }
-    if (this.workspaces.length === 1) {
-      throw this.error(
-        "WORKSPACE-DEMO-EMPTY",
-        workspaceHistoryCommands.delete,
-        false,
-      )
-    }
     this.deleteTokens.delete(request.token)
-    this.workspaces = this.workspaces.filter(
-      (workspace) => workspace.workspaceId !== request.workspaceId,
+    this.workspace(request.workspaceId, workspaceHistoryCommands.delete)
+    const updatedAt = this.timestamp()
+    this.drafts.set(
+      request.workspaceId,
+      emptyDraft(request.workspaceId, updatedAt),
     )
-    this.drafts.delete(request.workspaceId)
     this.contexts.delete(request.workspaceId)
-    this.editableContexts.delete(request.workspaceId)
+    this.editableContexts.set(
+      request.workspaceId,
+      this.defaultEditableContext(request.workspaceId, updatedAt),
+    )
     this.events.delete(request.workspaceId)
     this.lastSummaries.delete(request.workspaceId)
     this.timelineAnchors.delete(request.workspaceId)
-    this.activeWorkspaceId =
-      this.activeWorkspaceId === request.workspaceId
-        ? (this.workspaces[0]?.workspaceId ?? "")
-        : this.activeWorkspaceId
+    this.activeWorkspaceId = request.workspaceId
     return this.state()
   }
 

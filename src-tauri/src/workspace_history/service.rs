@@ -10,7 +10,8 @@ use crate::character::CharacterService;
 use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
 use crate::codex::workspace::{
-    matches_saved_repository_identity, AppPrivateProjectIdentity, ValidatedWorkspaceCandidate,
+    matches_saved_git_repository, matches_saved_repository_identity, same_git_common_directory,
+    validate_git_repository, AppPrivateProjectIdentity, ValidatedWorkspaceCandidate,
     WorkspaceService,
 };
 
@@ -21,16 +22,16 @@ use super::editable_context::{
 use super::store::WorkspaceHistoryStore;
 use super::types::{
     AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, ContextSource,
-    HistoryMode, HistoryStatus, NormalizedDomainEvent, TimelinePage, VersionedCharacterContext,
-    VersionedProjectContext, WorkspaceCancelRequest, WorkspaceCommandError,
-    WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
-    WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth,
-    WorkspaceLoadEditableContextRequest, WorkspacePickOutcome, WorkspacePickResponse,
-    WorkspaceRecheckRequest, WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest,
-    WorkspaceSaveDraftRequest, WorkspaceSaveProjectContextRequest,
-    WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
-    WorkspaceSummary, WorkspaceTimelineAnchorView, WorkspaceTimelineRequest,
-    WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
+    HistoryMode, HistoryStatus, NormalizedDomainEvent, ProjectSelectRequest, TimelinePage,
+    VersionedCharacterContext, VersionedProjectContext, WorkspaceArchiveRequest,
+    WorkspaceCancelRequest, WorkspaceCommandError, WorkspaceCreateSessionRequest,
+    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView,
+    WorkspaceEditableContext, WorkspaceHealth, WorkspaceLoadEditableContextRequest,
+    WorkspacePickOutcome, WorkspacePickResponse, WorkspaceRecheckRequest,
+    WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
+    WorkspaceSaveProjectContextRequest, WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest,
+    WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineAnchorView,
+    WorkspaceTimelineRequest, WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
     WORKSPACE_HISTORY_SCHEMA_VERSION,
 };
 
@@ -39,6 +40,8 @@ const CONTEXT_CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTEXT_STDOUT_LIMIT: usize = 1024 * 1024;
 const CONTEXT_STDERR_LIMIT: usize = 4 * 1024;
 const REPOSITORY_RECHECK_TIMEOUT: Duration = Duration::from_secs(1);
+const WORKTREE_MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
+const WORKTREE_OUTPUT_LIMIT: usize = 4 * 1024;
 const STARTUP_REPOSITORY_VALIDATION_CONCURRENCY: usize = 2;
 const STARTUP_PENDING: u8 = 0;
 const STARTUP_READY: u8 = 1;
@@ -288,7 +291,7 @@ impl WorkspaceHistoryService {
             Err(_) => return repository_probe(RepositoryReadinessState::Unavailable),
         };
 
-        let identity_matches = matches_saved_repository_identity(&candidate.git, &saved_identity);
+        let identity_matches = matches_saved_git_repository(&candidate.git, &saved_identity);
         let head_matches = public.head == candidate.git.head;
         let branch_matches =
             public.branch == candidate.git.branch && public.detached == candidate.git.detached;
@@ -522,15 +525,80 @@ impl WorkspaceHistoryService {
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
         self.ensure_startup_ready("workspace_create_session")?;
         let _operation = self.operation_lock.lock().await;
+        if let Some(existing) = self
+            .store
+            .session_workspace_for_request(&request.client_request_id)
+            .map_err(|error| history_error("workspace_create_session", error))?
+        {
+            return self
+                .store
+                .select_workspace(&existing.workspace.workspace_id)
+                .map_err(|error| history_error("workspace_create_session", error));
+        }
+        let project = self
+            .store
+            .private_project_identity_by_project_id(&request.project_id)
+            .map_err(|error| history_error("workspace_create_session", error))?;
+        let live_project = validate_git_repository(&project.canonical_root)
+            .await
+            .map_err(|error| codex_error("workspace_create_session", error))?;
+        if !matches_saved_repository_identity(&live_project, &project) {
+            return Err(WorkspaceCommandError::new(
+                "WORKSPACE-PROJECT-IDENTITY-CHANGED",
+                "workspace_create_session",
+                false,
+            ));
+        }
+        self.store
+            .confirm_project_common_identity(&request.project_id, &live_project)
+            .map_err(|error| history_error("workspace_create_session", error))?;
+        let workspace_id = format!("workspace-{}", uuid::Uuid::new_v4());
+        let branch = format!("coding-wife/{}", uuid::Uuid::new_v4());
+        let worktree_root = self
+            .store
+            .managed_worktree_path(&request.project_id, &workspace_id)
+            .map_err(|error| history_error("workspace_create_session", error))?;
+        create_managed_worktree(&project.canonical_root, &worktree_root, &branch).await?;
+        let candidate = match self
+            .workspace
+            .validate_workspace_root(
+                worktree_root.clone(),
+                workspace_id.clone(),
+                request.name.clone(),
+            )
+            .await
+        {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                rollback_managed_worktree(&project.canonical_root, &worktree_root, &branch).await;
+                return Err(codex_error("workspace_create_session", error));
+            }
+        };
+        if !same_git_common_directory(&candidate.git, &live_project) {
+            rollback_managed_worktree(&project.canonical_root, &worktree_root, &branch).await;
+            return Err(WorkspaceCommandError::new(
+                "WORKSPACE-PROJECT-IDENTITY-CHANGED",
+                "workspace_create_session",
+                false,
+            ));
+        }
         let persisted = self
             .store
-            .create_session_workspace(
-                &request.from_workspace_id,
+            .create_managed_session_workspace(
+                &request.project_id,
+                &workspace_id,
                 &request.name,
-                &request.goal,
                 &request.client_request_id,
+                &candidate,
             )
-            .map_err(|error| history_error("workspace_create_session", error))?;
+            .map_err(|error| history_error("workspace_create_session", error));
+        let persisted = match persisted {
+            Ok(persisted) => persisted,
+            Err(error) => {
+                rollback_managed_worktree(&project.canonical_root, &worktree_root, &branch).await;
+                return Err(error);
+            }
+        };
         let was_trusted = self
             .workspace
             .trusted_root(&persisted.workspace.workspace_id)
@@ -547,6 +615,8 @@ impl WorkspaceHistoryService {
                     let _ = self
                         .store
                         .rollback_registration(&persisted.workspace.workspace_id);
+                    rollback_managed_worktree(&project.canonical_root, &worktree_root, &branch)
+                        .await;
                 }
                 return Err(codex_error("workspace_create_session", error));
             }
@@ -561,6 +631,8 @@ impl WorkspaceHistoryService {
                     let _ = self
                         .store
                         .rollback_registration(&persisted.workspace.workspace_id);
+                    rollback_managed_worktree(&project.canonical_root, &worktree_root, &branch)
+                        .await;
                 }
                 return Err(history_error("workspace_create_session", error));
             }
@@ -570,6 +642,7 @@ impl WorkspaceHistoryService {
                 let _ = self
                     .store
                     .rollback_registration(&persisted.workspace.workspace_id);
+                rollback_managed_worktree(&project.canonical_root, &worktree_root, &branch).await;
             }
             return Err(WorkspaceCommandError::new(
                 "WORKSPACE-PREFLIGHT-CHANGED",
@@ -582,6 +655,7 @@ impl WorkspaceHistoryService {
                 let _ = self
                     .store
                     .rollback_registration(&persisted.workspace.workspace_id);
+                rollback_managed_worktree(&project.canonical_root, &worktree_root, &branch).await;
             }
             return Err(codex_error("workspace_create_session", error));
         }
@@ -601,6 +675,8 @@ impl WorkspaceHistoryService {
                     let _ = self
                         .store
                         .rollback_registration(&persisted.workspace.workspace_id);
+                    rollback_managed_worktree(&project.canonical_root, &worktree_root, &branch)
+                        .await;
                 }
                 Err(history_error("workspace_create_session", error))
             }
@@ -836,7 +912,7 @@ impl WorkspaceHistoryService {
 
     pub async fn unregister(
         &self,
-        request: WorkspaceSelectRequest,
+        request: ProjectSelectRequest,
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
         self.ensure_startup_ready("workspace_unregister")?;
         let _operation = self.operation_lock.lock().await;
@@ -847,7 +923,7 @@ impl WorkspaceHistoryService {
         };
         let records = self
             .store
-            .private_project_workspace_records(&request.workspace_id)
+            .private_project_workspace_records_by_project(&request.project_id)
             .map_err(|error| history_error("workspace_unregister", error))?;
         let mut deactivated = Vec::new();
         for record in &records {
@@ -862,7 +938,7 @@ impl WorkspaceHistoryService {
             deactivated.push(record.clone());
         }
         let character_rollback = if let Some(character) = &self.character {
-            match character.prepare_project_unregistration(&request.workspace_id) {
+            match character.prepare_project_id_unregistration(&request.project_id) {
                 Ok(rollback) => rollback,
                 Err(_) => {
                     self.restore_private_records(&records).await;
@@ -876,7 +952,7 @@ impl WorkspaceHistoryService {
         } else {
             None
         };
-        match self.store.unregister_project(&request.workspace_id) {
+        match self.store.unregister_project(&request.project_id) {
             Ok(state) => Ok(state),
             Err(error) => {
                 let character_rollback_failed = match (&self.character, character_rollback) {
@@ -897,6 +973,69 @@ impl WorkspaceHistoryService {
                 }
             }
         }
+    }
+
+    pub async fn archive(
+        &self,
+        request: WorkspaceArchiveRequest,
+    ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        self.ensure_startup_ready("workspace_archive")?;
+        let _operation = self.operation_lock.lock().await;
+        let record = self
+            .store
+            .workspace_archive_record(&request.workspace_id)
+            .map_err(|error| history_error("workspace_archive", error))?;
+        let was_trusted = self
+            .workspace
+            .trusted_root(&request.workspace_id)
+            .await
+            .is_some();
+        let guard = if was_trusted {
+            Some(
+                self.workspace
+                    .begin_cancellation(&request.workspace_id)
+                    .await
+                    .map_err(|error| codex_error("workspace_archive", error))?,
+            )
+        } else {
+            None
+        };
+        if was_trusted {
+            self.workspace
+                .deactivate_workspace(&request.workspace_id)
+                .await
+                .map_err(|error| codex_error("workspace_archive", error))?;
+        }
+        if record.managed_worktree {
+            let expected = self
+                .store
+                .managed_worktree_path(&record.project_id, &request.workspace_id)
+                .map_err(|error| history_error("workspace_archive", error))?;
+            if record.private_record.canonical_root != expected {
+                if let Some(guard) = guard {
+                    guard.release().await;
+                }
+                return Err(WorkspaceCommandError::new(
+                    "WORKSPACE-WORKTREE-ROOT-INVALID",
+                    "workspace_archive",
+                    false,
+                ));
+            }
+            remove_managed_worktree(
+                &record.project_root,
+                &record.private_record.canonical_root,
+                "workspace_archive",
+            )
+            .await?;
+        }
+        let result = self
+            .store
+            .archive_workspace(&request.workspace_id)
+            .map_err(|error| history_error("workspace_archive", error));
+        if let Some(guard) = guard {
+            guard.release().await;
+        }
+        result
     }
 
     pub async fn update_lifecycle(
@@ -1120,40 +1259,11 @@ impl WorkspaceHistoryService {
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
         self.ensure_startup_ready("workspace_delete")?;
         let _operation = self.operation_lock.lock().await;
-        let was_trusted = self
-            .workspace
-            .trusted_root(&request.workspace_id)
-            .await
-            .is_some();
-        let restore_candidate = if was_trusted {
-            match self.store.private_workspace_record(&request.workspace_id) {
-                Ok(record) => self
-                    .workspace
-                    .validate_private_candidate(&record)
-                    .await
-                    .ok(),
-                Err(_) => None,
-            }
-        } else {
-            None
-        };
-        if was_trusted {
-            self.workspace
-                .deactivate_workspace(&request.workspace_id)
-                .await
-                .map_err(|error| codex_error("workspace_delete", error))?;
-        }
-        if let Err(error) = self
-            .store
-            .delete_workspace(&request.workspace_id, &request.token)
-        {
-            if let Some(candidate) = restore_candidate {
-                let _ = self.workspace.activate_candidate(candidate).await;
-            }
-            return Err(history_error("workspace_delete", error));
-        }
         self.store
-            .snapshot(None)
+            .delete_workspace(&request.workspace_id, &request.token)
+            .map_err(|error| history_error("workspace_delete", error))?;
+        self.store
+            .snapshot(Some(&request.workspace_id))
             .map_err(|error| history_error("workspace_delete", error))
     }
 
@@ -1195,65 +1305,13 @@ impl WorkspaceHistoryService {
             .map_err(|error| codex_error(operation, error))?;
         let persisted = self
             .store
-            .register_candidate(&candidate)
+            .register_project_candidate(&candidate)
             .map_err(|error| history_error(operation, error))?;
-        let was_trusted = self
-            .workspace
-            .trusted_root(&persisted.workspace.workspace_id)
-            .await
-            .is_some();
-        let activation_candidate =
-            if persisted.workspace.workspace_id == candidate.registration.workspace_id {
-                candidate
-            } else {
-                match self
-                    .workspace
-                    .validate_private_candidate(&persisted.private_record)
-                    .await
-                {
-                    Ok(candidate) => candidate,
-                    Err(error) => {
-                        if !persisted.duplicate {
-                            let _ = self
-                                .store
-                                .rollback_registration(&persisted.workspace.workspace_id);
-                        }
-                        return Err(codex_error(operation, error));
-                    }
-                }
-            };
-        if let Err(error) = self
-            .workspace
-            .activate_candidate(activation_candidate)
-            .await
-        {
-            if !persisted.duplicate {
-                let _ = self
-                    .store
-                    .rollback_registration(&persisted.workspace.workspace_id);
-            }
-            return Err(codex_error(operation, error));
-        }
-        match self
-            .store
-            .select_workspace(&persisted.workspace.workspace_id)
-        {
-            Ok(state) => Ok(state),
-            Err(error) => {
-                if !was_trusted {
-                    let _ = self
-                        .workspace
-                        .deactivate_workspace(&persisted.workspace.workspace_id)
-                        .await;
-                }
-                if !persisted.duplicate {
-                    let _ = self
-                        .store
-                        .rollback_registration(&persisted.workspace.workspace_id);
-                }
-                Err(history_error(operation, error))
-            }
-        }
+        let _ = persisted.project;
+        let _ = persisted.duplicate;
+        self.store
+            .snapshot(None)
+            .map_err(|error| history_error(operation, error))
     }
 
     async fn deactivate_records(&self, workspace_ids: &[String]) {
@@ -1342,6 +1400,117 @@ async fn capture_context(
             true,
         )),
     }
+}
+
+async fn create_managed_worktree(
+    project_root: &Path,
+    worktree_root: &Path,
+    branch: &str,
+) -> Result<(), WorkspaceCommandError> {
+    let Some(parent) = worktree_root.parent() else {
+        return Err(WorkspaceCommandError::new(
+            "WORKSPACE-WORKTREE-ROOT-INVALID",
+            "workspace_create_session",
+            false,
+        ));
+    };
+    tokio::fs::create_dir_all(parent).await.map_err(|_| {
+        WorkspaceCommandError::new(
+            "WORKSPACE-WORKTREE-DIRECTORY-CREATE",
+            "workspace_create_session",
+            true,
+        )
+    })?;
+    let mut command = tokio::process::Command::new("/usr/bin/git");
+    command
+        .arg("-C")
+        .arg(project_root)
+        .args(["worktree", "add", "-b", branch])
+        .arg(worktree_root)
+        .arg("HEAD")
+        .env_clear()
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    run_git_worktree_command(command, "workspace_create_session").await
+}
+
+async fn remove_managed_worktree(
+    project_root: &Path,
+    worktree_root: &Path,
+    operation: &'static str,
+) -> Result<(), WorkspaceCommandError> {
+    let existed = tokio::fs::try_exists(worktree_root).await.unwrap_or(false);
+    let mut command = tokio::process::Command::new("/usr/bin/git");
+    command
+        .arg("-C")
+        .arg(project_root)
+        .args(["worktree", "remove", "--force"])
+        .arg(worktree_root)
+        .env_clear()
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    if run_git_worktree_command(command, operation).await.is_ok() {
+        return Ok(());
+    }
+    if existed {
+        return Err(WorkspaceCommandError::new(
+            "WORKSPACE-WORKTREE-REMOVE-FAILED",
+            operation,
+            true,
+        ));
+    }
+    let mut prune = tokio::process::Command::new("/usr/bin/git");
+    prune
+        .arg("-C")
+        .arg(project_root)
+        .args(["worktree", "prune"])
+        .env_clear()
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let _ = run_git_worktree_command(prune, operation).await;
+    Ok(())
+}
+
+async fn rollback_managed_worktree(project_root: &Path, worktree_root: &Path, branch: &str) {
+    let _ = remove_managed_worktree(project_root, worktree_root, "workspace_create_session").await;
+    let mut branch_delete = tokio::process::Command::new("/usr/bin/git");
+    branch_delete
+        .arg("-C")
+        .arg(project_root)
+        .args(["branch", "-D", branch])
+        .env_clear()
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let _ = run_git_worktree_command(branch_delete, "workspace_create_session").await;
+}
+
+async fn run_git_worktree_command(
+    command: tokio::process::Command,
+    operation: &'static str,
+) -> Result<(), WorkspaceCommandError> {
+    let output = run_bounded_command(
+        command,
+        WORKTREE_MUTATION_TIMEOUT,
+        WORKTREE_OUTPUT_LIMIT,
+        WORKTREE_OUTPUT_LIMIT,
+    )
+    .await
+    .map_err(|error| {
+        let code = if error == BoundedCommandError::Timeout {
+            "WORKSPACE-WORKTREE-GIT-TIMEOUT"
+        } else {
+            "WORKSPACE-WORKTREE-GIT-FAILED"
+        };
+        WorkspaceCommandError::new(code, operation, true)
+    })?;
+    if !output.status.success() {
+        return Err(WorkspaceCommandError::new(
+            "WORKSPACE-WORKTREE-GIT-FAILED",
+            operation,
+            true,
+        ));
+    }
+    Ok(())
 }
 
 async fn run_git_capture(
@@ -1595,6 +1764,8 @@ mod tests {
             root_inode,
             git_device: 1,
             git_inode,
+            common_git_device: 1,
+            common_git_inode: git_inode,
             project_identity: hex::encode(digest),
             github_repository: Some("fixture-owner/fixture-repository".to_owned()),
             branch: "main".to_owned(),
@@ -1614,25 +1785,93 @@ mod tests {
             .expect("candidate")
     }
 
+    fn ensure_repository_head(root: &Path) {
+        let has_head = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "--verify", "HEAD"])
+            .output()
+            .expect("inspect fixture HEAD")
+            .status
+            .success();
+        if has_head {
+            return;
+        }
+        let status = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(root)
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "fixture",
+            ])
+            .status()
+            .expect("create fixture HEAD");
+        assert!(status.success());
+    }
+
+    async fn register_project_workspace(
+        service: &WorkspaceHistoryService,
+        project_root: &Path,
+        label: &str,
+    ) -> WorkspaceStateSnapshot {
+        ensure_repository_head(project_root);
+        let existing_project_ids = service
+            .list()
+            .expect("state before project registration")
+            .projects
+            .into_iter()
+            .map(|project| project.project_id)
+            .collect::<Vec<_>>();
+        let registered = service
+            .register_validated_candidate(
+                candidate(&service.workspace, project_root).await,
+                "workspace_pick_register",
+            )
+            .await
+            .expect("register project");
+        let project_id = registered
+            .projects
+            .iter()
+            .find(|project| !existing_project_ids.contains(&project.project_id))
+            .expect("newly registered project")
+            .project_id
+            .clone();
+        service
+            .create_session(WorkspaceCreateSessionRequest {
+                project_id,
+                name: format!("Fixture {label}"),
+                client_request_id: format!("request-{label}-{}", uuid::Uuid::new_v4()),
+            })
+            .await
+            .expect("create project worktree")
+    }
+
     async fn registered_context_service(
         label: &str,
     ) -> (WorkspaceHistoryService, PathBuf, PathBuf, String) {
         let data = temp_directory(&format!("history-service-context-{label}"));
-        let root = git_repository();
+        let original_root = git_repository();
+        let project_root = data.join("project");
+        fs::rename(original_root, &project_root).expect("move fixture project into data root");
         let workspace = WorkspaceService::production(CodexSupervisor::new());
         let service = WorkspaceHistoryService::new(
             WorkspaceHistoryStore::open(&data).expect("store"),
             workspace.clone(),
         );
-        let state = service
-            .register_validated_candidate(
-                candidate(&workspace, &root).await,
-                "workspace_pick_register",
-            )
-            .await
-            .expect("register context workspace");
+        let state = register_project_workspace(&service, &project_root, label).await;
         let workspace_id = state.active_workspace_id.expect("active workspace");
-        (service, root, data, workspace_id)
+        let workspace_root = service
+            .store
+            .private_workspace_record(&workspace_id)
+            .expect("private workspace root")
+            .canonical_root;
+        (service, workspace_root, data, workspace_id)
     }
 
     struct ProjectLifecycleFixture {
@@ -1672,6 +1911,11 @@ mod tests {
             .to_owned()
     }
 
+    fn git_directory(root: &Path) -> PathBuf {
+        fs::canonicalize(run_git(root, &["rev-parse", "--absolute-git-dir"]))
+            .expect("canonical git directory")
+    }
+
     async fn project_lifecycle_fixture(label: &str) -> ProjectLifecycleFixture {
         let data = temp_directory(&format!("history-character-{label}"));
         let root = git_repository();
@@ -1706,13 +1950,7 @@ mod tests {
             character.clone(),
             project_operations.clone(),
         );
-        let state = history
-            .register_validated_candidate(
-                candidate(&workspace, &root).await,
-                "workspace_pick_register",
-            )
-            .await
-            .expect("register project lifecycle workspace");
+        let state = register_project_workspace(&history, &root, label).await;
         let workspace_id = state.active_workspace_id.expect("active workspace");
         let project_id = state
             .workspaces
@@ -1849,8 +2087,8 @@ mod tests {
 
         fixture
             .history
-            .unregister(WorkspaceSelectRequest {
-                workspace_id: fixture.workspace_id.clone(),
+            .unregister(ProjectSelectRequest {
+                project_id: fixture.project_id.clone(),
             })
             .await
             .expect("unregister project");
@@ -1928,8 +2166,8 @@ mod tests {
 
         let error = fixture
             .history
-            .unregister(WorkspaceSelectRequest {
-                workspace_id: fixture.workspace_id.clone(),
+            .unregister(ProjectSelectRequest {
+                project_id: fixture.project_id.clone(),
             })
             .await
             .expect_err("history failure must reject unregister");
@@ -1974,10 +2212,10 @@ mod tests {
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
         let history = select_first.history.clone();
-        let workspace_id = select_first.workspace_id.clone();
+        let project_id = select_first.project_id.clone();
         let unregister = tokio::spawn(async move {
             history
-                .unregister(WorkspaceSelectRequest { workspace_id })
+                .unregister(ProjectSelectRequest { project_id })
                 .await
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -2007,10 +2245,10 @@ mod tests {
             .lock_owned()
             .await;
         let history = unregister_first.history.clone();
-        let workspace_id = unregister_first.workspace_id.clone();
+        let project_id = unregister_first.project_id.clone();
         let unregister = tokio::spawn(async move {
             history
-                .unregister(WorkspaceSelectRequest { workspace_id })
+                .unregister(ProjectSelectRequest { project_id })
                 .await
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -2047,14 +2285,8 @@ mod tests {
 
         let delete_race = project_lifecycle_fixture("race-delete").await;
         let observer_root = git_repository();
-        let observer = delete_race
-            .history
-            .register_validated_candidate(
-                candidate(&delete_race.history.workspace, &observer_root).await,
-                "workspace_pick_register",
-            )
-            .await
-            .expect("register observer project");
+        let observer =
+            register_project_workspace(&delete_race.history, &observer_root, "observer").await;
         let observer_workspace_id = observer
             .active_workspace_id
             .expect("observer active workspace");
@@ -2072,10 +2304,10 @@ mod tests {
             .expect("observer library before race");
         let held = delete_race.project_operations.clone().lock_owned().await;
         let history = delete_race.history.clone();
-        let workspace_id = delete_race.workspace_id.clone();
+        let project_id = delete_race.project_id.clone();
         let unregister = tokio::spawn(async move {
             history
-                .unregister(WorkspaceSelectRequest { workspace_id })
+                .unregister(ProjectSelectRequest { project_id })
                 .await
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -2447,8 +2679,9 @@ mod tests {
     async fn readiness_revalidates_the_active_private_repository_without_git_mutation() {
         let (service, root, data, _) = registered_context_service("readiness-repository").await;
         fs::write(root.join("untracked.txt"), "preserve\n").expect("untracked fixture");
-        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before readiness");
-        let index_before = fs::read(root.join(".git/index")).ok();
+        let git_directory = git_directory(&root);
+        let head_before = fs::read(git_directory.join("HEAD")).expect("HEAD before readiness");
+        let index_before = fs::read(git_directory.join("index")).ok();
         let status_before = std::process::Command::new("/usr/bin/git")
             .arg("-C")
             .arg(&root)
@@ -2463,10 +2696,10 @@ mod tests {
         assert!(ready.head_matches);
         assert!(ready.branch_matches);
         assert_eq!(
-            fs::read(root.join(".git/HEAD")).expect("HEAD after readiness"),
+            fs::read(git_directory.join("HEAD")).expect("HEAD after readiness"),
             head_before,
         );
-        assert_eq!(fs::read(root.join(".git/index")).ok(), index_before);
+        assert_eq!(fs::read(git_directory.join("index")).ok(), index_before);
         assert_eq!(
             std::process::Command::new("/usr/bin/git")
                 .arg("-C")
@@ -2488,9 +2721,9 @@ mod tests {
         let stale = service.repository_readiness().await;
         assert_eq!(stale.state, RepositoryReadinessState::StaleBranch);
         assert!(stale.identity_matches);
-        assert!(stale.head_matches);
+        assert!(!stale.head_matches);
         assert!(!stale.branch_matches);
-        fs::write(root.join(".git/HEAD"), &head_before).expect("restore fixture HEAD");
+        fs::write(git_directory.join("HEAD"), &head_before).expect("restore fixture HEAD");
 
         let moved_root = root.with_file_name(format!(
             "{}-moved",
@@ -2516,13 +2749,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn readiness_blocks_a_changed_saved_repository_identity() {
+    async fn readiness_blocks_a_changed_saved_common_git_identity() {
         let data = temp_directory("history-service-readiness-identity");
         let root = git_repository();
         let workspace = WorkspaceService::production(CodexSupervisor::new());
         let store = WorkspaceHistoryStore::open(&data).expect("store");
         let mut original = candidate(&workspace, &root).await;
-        original.git.project_identity = "changed-saved-identity".to_owned();
+        original.git.common_git_inode = original.git.common_git_inode.saturating_add(1);
         let registration = store
             .register_candidate(&original)
             .expect("register changed identity");
@@ -2544,13 +2777,8 @@ mod tests {
         let (service, root, data, workspace_id) =
             registered_context_service("missing-recheck").await;
         let other_root = git_repository();
-        let other_workspace_id = service
-            .register_validated_candidate(
-                candidate(&service.workspace, &other_root).await,
-                "workspace_pick_register",
-            )
+        let other_workspace_id = register_project_workspace(&service, &other_root, "other")
             .await
-            .expect("register other project")
             .active_workspace_id
             .expect("other workspace active");
         service
@@ -2662,6 +2890,14 @@ mod tests {
     async fn recheck_requires_explicit_acceptance_for_external_head_without_mutating_git() {
         let (service, root, data, workspace_id) =
             registered_context_service("external-head-recheck").await;
+        let initial_head = service
+            .list()
+            .expect("initial state")
+            .workspaces
+            .into_iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .expect("initial workspace")
+            .head;
         fs::write(root.join("README.md"), "external change\n").expect("source fixture");
         for arguments in [
             vec!["-C", root.to_str().expect("root"), "add", "README.md"],
@@ -2684,7 +2920,8 @@ mod tests {
                 .expect("git fixture command")
                 .success());
         }
-        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before recheck");
+        let git_directory = git_directory(&root);
+        let head_before = fs::read(git_directory.join("HEAD")).expect("HEAD before recheck");
         let status_before = std::process::Command::new("/usr/bin/git")
             .arg("-C")
             .arg(&root)
@@ -2706,7 +2943,7 @@ mod tests {
             .find(|workspace| workspace.workspace_id == workspace_id)
             .expect("stale workspace");
         assert_eq!(stale_workspace.health, WorkspaceHealth::StaleBranch);
-        assert_eq!(stale_workspace.head, "unborn");
+        assert_eq!(stale_workspace.head, initial_head);
 
         let ready = service
             .recheck(WorkspaceRecheckRequest {
@@ -2721,9 +2958,9 @@ mod tests {
             .find(|workspace| workspace.workspace_id == workspace_id)
             .expect("ready workspace");
         assert_eq!(ready_workspace.health, WorkspaceHealth::Ready);
-        assert_ne!(ready_workspace.head, "unborn");
+        assert_ne!(ready_workspace.head, initial_head);
         assert_eq!(
-            fs::read(root.join(".git/HEAD")).expect("HEAD after recheck"),
+            fs::read(git_directory.join("HEAD")).expect("HEAD after recheck"),
             head_before
         );
         assert_eq!(
@@ -2748,7 +2985,7 @@ mod tests {
         let workspace = WorkspaceService::production(CodexSupervisor::new());
         let store = WorkspaceHistoryStore::open(&data).expect("store");
         let mut original = candidate(&workspace, &root).await;
-        original.git.project_identity = "known-original-identity".to_owned();
+        original.git.common_git_inode = original.git.common_git_inode.saturating_add(1);
         store.register_candidate(&original).expect("register");
         let service = WorkspaceHistoryService::new(store, workspace);
 
@@ -2762,22 +2999,9 @@ mod tests {
 
     #[tokio::test]
     async fn context_capture_reads_only_allowlisted_native_git_sources() {
-        let data = temp_directory("history-service-context");
-        let root = git_repository();
+        let (service, root, data, workspace_id) =
+            registered_context_service("capture-sources").await;
         fs::write(root.join("fixture.txt"), "fixture context\n").expect("fixture file");
-        let workspace = WorkspaceService::production(CodexSupervisor::new());
-        let service = WorkspaceHistoryService::new(
-            WorkspaceHistoryStore::open(&data).expect("store"),
-            workspace.clone(),
-        );
-        let state = service
-            .register_validated_candidate(
-                candidate(&workspace, &root).await,
-                "workspace_pick_register",
-            )
-            .await
-            .expect("register and activate");
-        let workspace_id = state.active_workspace_id.expect("active workspace");
 
         let snapshot = service
             .save_context(WorkspaceSaveContextRequest {
@@ -2797,6 +3021,7 @@ mod tests {
             .await
             .expect_err("terminal output has no trusted producer yet");
         assert_eq!(error.code, "WORKSPACE-CONTEXT-SOURCE-UNAVAILABLE");
+        let _ = fs::remove_dir_all(data);
     }
 
     #[tokio::test]

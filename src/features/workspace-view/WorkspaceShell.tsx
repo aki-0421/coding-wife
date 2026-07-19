@@ -59,6 +59,7 @@ import {
 } from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
+import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
 import type {
   CharacterStageRenderer,
@@ -153,6 +154,9 @@ export function WorkspaceShell({
   const [appSettingsOpen, setAppSettingsOpen] = useState(false)
   const [appSettingsSection, setAppSettingsSection] =
     useState<AppSettingsSection>("general")
+  const [archiveCandidate, setArchiveCandidate] =
+    useState<WorkspaceRecord | null>(null)
+  const archiveSafeActionRef = useRef<HTMLButtonElement | null>(null)
   const [systemReducedMotion, setSystemReducedMotion] = useState(
     getSystemReducedMotion,
   )
@@ -474,10 +478,20 @@ export function WorkspaceShell({
     [reportWorkspaceAction, view],
   )
 
-  const unregisterWorkspace = useCallback(
-    async () => reportWorkspaceAction(await view.unregisterSelectedWorkspace()),
+  const unregisterProject = useCallback(
+    async (projectId: string) =>
+      reportWorkspaceAction(await view.unregisterProject(projectId)),
     [reportWorkspaceAction, view],
   )
+
+  const confirmArchiveWorkspace = useCallback(async () => {
+    if (archiveCandidate === null) return
+    if (
+      reportWorkspaceAction(await view.archiveWorkspace(archiveCandidate.id))
+    ) {
+      setArchiveCandidate(null)
+    }
+  }, [archiveCandidate, reportWorkspaceAction, view])
 
   const dismissCommitPresentation = useCallback(() => {
     explanationFocusRestoreVersionRef.current += 1
@@ -726,29 +740,6 @@ export function WorkspaceShell({
     )
   }
 
-  if (!view.selectedWorkspace) {
-    return (
-      <main
-        className="flex min-h-dvh min-w-[960px] items-center justify-center bg-background p-xl"
-        data-workspace-viewport={viewportLayout}
-      >
-        <Empty>
-          <EmptyHeader className="max-w-[24rem]">
-            <EmptyTitle>{copy.workspaces}</EmptyTitle>
-            <EmptyDescription>{copy.noMatches}</EmptyDescription>
-          </EmptyHeader>
-          <Button
-            onClick={() => void view.requestAddProject(copy.pickerUnavailable)}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            {copy.addProject}
-          </Button>
-        </Empty>
-      </main>
-    )
-  }
   const selectedWorkspace = view.selectedWorkspace
 
   return (
@@ -763,14 +754,27 @@ export function WorkspaceShell({
         copy={copy}
         filter={view.filter}
         filteredWorkspaces={view.filteredWorkspaces}
+        projects={view.projects}
+        archiveDisabledWorkspaceId={
+          turnActive ? selectedWorkspace?.id : undefined
+        }
         onAddProject={() => void view.requestAddProject(copy.pickerUnavailable)}
         onCreateWorkspace={view.addWorkspace}
         onFilterChange={view.setFilter}
-        onOpenSettings={() => openAppSettings("general")}
+        onOpenSettings={() =>
+          openAppSettings(view.projects.length === 0 ? "projects" : "general")
+        }
+        onRequestArchive={setArchiveCandidate}
         onSelectWorkspace={(workspaceId) => {
           setAppSettingsOpen(false)
           view.setSelectedWorkspaceId(workspaceId)
         }}
+        selectedProjectId={
+          selectedWorkspace?.projectId ??
+          view.projects.find(
+            (project) => project.name === selectedWorkspace?.repository,
+          )?.id
+        }
         selectedWorkspace={selectedWorkspace}
         selectedWorkspaceId={view.selectedWorkspaceId}
       />
@@ -783,169 +787,256 @@ export function WorkspaceShell({
           onMutedChange={view.setMuted}
           onResetUi={resetUiState}
           onSectionChange={setAppSettingsSection}
+          onUnregisterProject={unregisterProject}
+          projectActionPending={view.workspaceAction !== null || turnActive}
+          projects={view.projects}
           runtimeState={runtime.state}
           section={appSettingsSection}
-          workspaceId={selectedWorkspace.id}
+          workspaceId={selectedWorkspace?.id ?? "__no_workspace__"}
         />
       ) : null}
 
-      <Tabs
-        className="workspace-tabs"
-        hidden={appSettingsOpen}
-        onValueChange={setActiveTab}
-        orientation="horizontal"
-        value={view.activeTab}
-      >
-        <WorkspaceHeader
-          activeTab={view.activeTab}
-          actionPending={view.workspaceAction}
-          canCancel={adapter?.cancelWorkspace !== undefined}
-          canRepair={
-            adapter?.repairWorkspace !== undefined ||
-            adapter?.recheckWorkspace !== undefined
-          }
-          canUnregister={adapter?.unregisterWorkspace !== undefined}
-          connection={connection}
-          copy={copy}
-          onCancel={cancelWorkspace}
-          onRepair={repairWorkspace}
-          onUnregister={unregisterWorkspace}
-          turnActive={turnActive}
-          workspace={selectedWorkspace}
-        />
-
-        <TabsContent
-          className="workspace-view data-[state=inactive]:hidden"
-          forceMount
-          value="chat"
+      {selectedWorkspace ? (
+        <Tabs
+          className="workspace-tabs"
+          hidden={appSettingsOpen}
+          onValueChange={setActiveTab}
+          orientation="horizontal"
+          value={view.activeTab}
         >
-          <ChatView
-            characterHidden={characterHidden}
-            characterRuntime={characterRuntime}
-            connected={connected}
+          <WorkspaceHeader
+            activeTab={view.activeTab}
+            actionPending={view.workspaceAction}
+            canCancel={adapter?.cancelWorkspace !== undefined}
+            canRepair={
+              adapter?.repairWorkspace !== undefined ||
+              adapter?.recheckWorkspace !== undefined
+            }
+            connection={connection}
             copy={copy}
-            draft={view.selectedDraft}
-            history={view.history}
-            lastSummary={view.lastSummary}
-            muted={view.muted}
-            onAnswerApproval={view.answerApproval}
-            onAnswerDecision={view.answerDecision}
-            onCaptureContext={(source) =>
-              view.captureContext(source, copy.contextUnavailable)
-            }
-            onDraftChange={view.setDraftText}
-            onEffortChange={view.setEffort}
-            onMutedChange={view.setMuted}
-            onOpenDiagnostics={() => openAppSettings("diagnostics")}
-            onPickAttachments={
-              adapter?.pickAttachments === undefined
-                ? undefined
-                : view.pickAttachments
-            }
-            onRegisterAttachmentPaths={
-              adapter?.registerAttachmentPaths === undefined
-                ? undefined
-                : view.registerAttachmentPaths
-            }
-            onRemoveAttachment={view.removeAttachment}
-            onRemoveContext={view.removeContext}
-            onRetryRuntime={runtime.refresh}
-            onRetryCharacter={() => {
-              characterRuntimeStore.retry(selectedWorkspace.id)
-            }}
-            onSend={view.sendTurn}
-            onStop={stopTurn}
-            onTimelineAnchorChange={view.saveTimelineAnchor}
-            reducedMotion={reducedMotion}
-            readiness={view.codex.readiness}
-            repositoryHealth={selectedWorkspace.health}
-            renderer={characterRenderer}
-            runtimeError={runtime.state.status === "error"}
-            timeline={view.timeline}
-            timelineAnchor={view.timelineAnchor}
-            pendingRequestIds={view.codex.pendingRequests.map(
-              (request) => request.pendingId,
-            )}
-            turnState={view.turnState}
-            workspaceId={selectedWorkspace.id}
-          />
-        </TabsContent>
-
-        <TabsContent
-          className="workspace-view data-[state=inactive]:hidden"
-          forceMount
-          value="commit"
-        >
-          <EvidenceView
-            active={
-              view.activeTab === "commit" &&
-              (gitReviewTransport.kind === "demo" ||
-                workspaceGeneration !== null)
-            }
-            commitExplanationController={commitExplanationController}
-            locale={locale}
-            onBackToChat={() => view.setActiveTab("chat")}
-            onCommitSelectionChange={dismissCommitPresentation}
-            onExplanationPresentationTrigger={(trigger) => {
-              explanationFocusRestoreVersionRef.current += 1
-              explanationPresentationTriggerRef.current = trigger
-            }}
-            transport={gitReviewTransport}
-            workspaceGeneration={workspaceGeneration ?? 1}
-            workspaceId={selectedWorkspace.id}
-          />
-        </TabsContent>
-
-        <TabsContent
-          className="workspace-view data-[state=inactive]:hidden"
-          forceMount
-          value="context"
-        >
-          <ContextView
-            copy={copy}
-            model={contextModel}
+            onCancel={cancelWorkspace}
+            onRepair={repairWorkspace}
             turnActive={turnActive}
+            workspace={selectedWorkspace}
           />
-        </TabsContent>
 
-        <TabsContent
-          className="workspace-view data-[state=inactive]:hidden"
-          value="settings"
-        >
-          <ProjectSettingsView
-            characterRuntime={characterRuntime}
-            contextModel={contextModel}
-            copy={copy}
-            history={view.history}
-            muted={view.muted}
-            onDeleteHistory={view.deleteSelectedWorkspaceHistory}
-            onRetryCharacter={() => {
-              characterRuntimeStore.retry(selectedWorkspace.id)
-            }}
-            onSectionChange={view.setProjectSettingsSection}
-            section={view.projectSettingsSection}
-            turnActive={turnActive}
-            workspaceId={selectedWorkspace.id}
-            workspaceLabel={`${selectedWorkspace.repository}/${selectedWorkspace.name}`}
-          />
-        </TabsContent>
-
-        {commitPresentation ? (
-          <div
-            className="workspace-narration-overlay"
-            data-narration-presentation={commitPresentation.status}
-            data-narration-speech={commitPresentation.speechStatus}
-            data-workspace-narration-overlay=""
-            data-workspace-tab={view.activeTab}
+          <TabsContent
+            className="workspace-view data-[state=inactive]:hidden"
+            forceMount
+            value="chat"
           >
-            <CommitNarrationCaption
-              onDismiss={closeCommitPresentation}
-              onVisible={narrationController.acknowledgeCaptionVisible}
-              presentation={commitPresentation}
+            <ChatView
+              characterHidden={characterHidden}
+              characterRuntime={characterRuntime}
+              connected={connected}
+              copy={copy}
+              draft={view.selectedDraft}
+              history={view.history}
+              lastSummary={view.lastSummary}
+              muted={view.muted}
+              onAnswerApproval={view.answerApproval}
+              onAnswerDecision={view.answerDecision}
+              onCaptureContext={(source) =>
+                view.captureContext(source, copy.contextUnavailable)
+              }
+              onDraftChange={view.setDraftText}
+              onEffortChange={view.setEffort}
+              onMutedChange={view.setMuted}
+              onOpenDiagnostics={() => openAppSettings("diagnostics")}
+              onPickAttachments={
+                adapter?.pickAttachments === undefined
+                  ? undefined
+                  : view.pickAttachments
+              }
+              onRegisterAttachmentPaths={
+                adapter?.registerAttachmentPaths === undefined
+                  ? undefined
+                  : view.registerAttachmentPaths
+              }
+              onRemoveAttachment={view.removeAttachment}
+              onRemoveContext={view.removeContext}
+              onRetryRuntime={runtime.refresh}
+              onRetryCharacter={() => {
+                characterRuntimeStore.retry(selectedWorkspace.id)
+              }}
+              onSend={view.sendTurn}
+              onStop={stopTurn}
+              onTimelineAnchorChange={view.saveTimelineAnchor}
+              reducedMotion={reducedMotion}
+              readiness={view.codex.readiness}
+              repositoryHealth={selectedWorkspace.health}
+              renderer={characterRenderer}
+              runtimeError={runtime.state.status === "error"}
+              timeline={view.timeline}
+              timelineAnchor={view.timelineAnchor}
+              pendingRequestIds={view.codex.pendingRequests.map(
+                (request) => request.pendingId,
+              )}
+              turnState={view.turnState}
+              workspaceId={selectedWorkspace.id}
             />
-          </div>
-        ) : null}
-      </Tabs>
+          </TabsContent>
+
+          <TabsContent
+            className="workspace-view data-[state=inactive]:hidden"
+            forceMount
+            value="commit"
+          >
+            <EvidenceView
+              active={
+                view.activeTab === "commit" &&
+                (gitReviewTransport.kind === "demo" ||
+                  workspaceGeneration !== null)
+              }
+              commitExplanationController={commitExplanationController}
+              locale={locale}
+              onBackToChat={() => view.setActiveTab("chat")}
+              onCommitSelectionChange={dismissCommitPresentation}
+              onExplanationPresentationTrigger={(trigger) => {
+                explanationFocusRestoreVersionRef.current += 1
+                explanationPresentationTriggerRef.current = trigger
+              }}
+              transport={gitReviewTransport}
+              workspaceGeneration={workspaceGeneration ?? 1}
+              workspaceId={selectedWorkspace.id}
+            />
+          </TabsContent>
+
+          <TabsContent
+            className="workspace-view data-[state=inactive]:hidden"
+            forceMount
+            value="context"
+          >
+            <ContextView
+              copy={copy}
+              model={contextModel}
+              turnActive={turnActive}
+            />
+          </TabsContent>
+
+          <TabsContent
+            className="workspace-view data-[state=inactive]:hidden"
+            value="settings"
+          >
+            <ProjectSettingsView
+              characterRuntime={characterRuntime}
+              contextModel={contextModel}
+              copy={copy}
+              history={view.history}
+              muted={view.muted}
+              onDeleteHistory={view.deleteSelectedWorkspaceHistory}
+              onRetryCharacter={() => {
+                characterRuntimeStore.retry(selectedWorkspace.id)
+              }}
+              onSectionChange={view.setProjectSettingsSection}
+              section={view.projectSettingsSection}
+              turnActive={turnActive}
+              workspaceId={selectedWorkspace.id}
+              workspaceLabel={`${selectedWorkspace.repository}/${selectedWorkspace.name}`}
+            />
+          </TabsContent>
+
+          {commitPresentation ? (
+            <div
+              className="workspace-narration-overlay"
+              data-narration-presentation={commitPresentation.status}
+              data-narration-speech={commitPresentation.speechStatus}
+              data-workspace-narration-overlay=""
+              data-workspace-tab={view.activeTab}
+            >
+              <CommitNarrationCaption
+                onDismiss={closeCommitPresentation}
+                onVisible={narrationController.acknowledgeCaptionVisible}
+                presentation={commitPresentation}
+              />
+            </div>
+          ) : null}
+        </Tabs>
+      ) : appSettingsOpen ? null : (
+        <section className="workspace-tabs bg-background">
+          <Empty className="row-span-2 row-start-1 w-full items-stretch gap-xl p-10 text-start max-[840px]:p-xl">
+            <EmptyHeader className="mx-auto w-full max-w-[40rem] items-start gap-sm text-start">
+              <EmptyTitle className="text-lg font-semibold tracking-tight">
+                {copy.createWorkspace.firstTitle}
+              </EmptyTitle>
+              <EmptyDescription className="text-body">
+                {copy.createWorkspace.description}
+              </EmptyDescription>
+            </EmptyHeader>
+            <WorkspaceCreateForm
+              ariaLabel={copy.createWorkspace.firstTitle}
+              className="mx-auto max-w-[40rem]"
+              copy={copy}
+              onAddProject={() =>
+                void view.requestAddProject(copy.pickerUnavailable)
+              }
+              onCreate={view.addWorkspace}
+              prominent
+              projects={view.projects}
+              selectedProjectId={view.projects[0]?.id}
+            />
+          </Empty>
+        </section>
+      )}
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && view.workspaceAction !== "archive") {
+            setArchiveCandidate(null)
+          }
+        }}
+        open={archiveCandidate !== null}
+      >
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            const archivedId = archiveCandidate?.id
+            if (archivedId === undefined) return
+            const archiveButton = [
+              ...document.querySelectorAll<HTMLElement>(
+                "[data-workspace-archive]",
+              ),
+            ].find(
+              (element) =>
+                element.getAttribute("data-workspace-archive") === archivedId,
+            )
+            archiveButton?.focus()
+          }}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            archiveSafeActionRef.current?.focus()
+          }}
+          showCloseButton={view.workspaceAction !== "archive"}
+        >
+          <DialogHeader>
+            <DialogTitle>{copy.archiveDialog.title}</DialogTitle>
+            <DialogDescription>
+              {copy.archiveDialog.body(archiveCandidate?.name ?? "")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              disabled={view.workspaceAction === "archive"}
+              onClick={() => setArchiveCandidate(null)}
+              ref={archiveSafeActionRef}
+              type="button"
+              variant="outline"
+            >
+              {copy.archiveDialog.cancel}
+            </Button>
+            <Button
+              disabled={view.workspaceAction === "archive"}
+              onClick={() => void confirmArchiveWorkspace()}
+              type="button"
+              variant="destructive"
+            >
+              {view.workspaceAction === "archive"
+                ? copy.archiveDialog.working
+                : copy.archiveDialog.confirm}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         onOpenChange={(open) => {

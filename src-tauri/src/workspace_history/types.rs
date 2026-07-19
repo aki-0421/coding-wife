@@ -226,6 +226,19 @@ pub struct WorkspaceSummary {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProjectSummary {
+    pub schema_version: u16,
+    pub project_id: String,
+    pub name: String,
+    pub github_repository: Option<String>,
+    pub health: WorkspaceHealth,
+    pub workspace_count: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkspaceDraftView {
     pub schema_version: u16,
     pub workspace_id: String,
@@ -472,6 +485,7 @@ pub struct WorkspaceResumeStateView {
 pub struct WorkspaceStateSnapshot {
     pub schema_version: u16,
     pub history: HistoryStatus,
+    pub projects: Vec<ProjectSummary>,
     pub workspaces: Vec<WorkspaceSummary>,
     pub active_workspace_id: Option<String>,
     pub draft: Option<WorkspaceDraftView>,
@@ -498,10 +512,21 @@ pub struct WorkspacePickResponse {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkspaceCreateSessionRequest {
-    pub from_workspace_id: String,
+    pub project_id: String,
     pub name: String,
-    pub goal: String,
     pub client_request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProjectSelectRequest {
+    pub project_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceArchiveRequest {
+    pub workspace_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -720,6 +745,19 @@ mod tests {
         }
     }
 
+    fn project() -> ProjectSummary {
+        ProjectSummary {
+            schema_version: 1,
+            project_id: "project-fixture".to_owned(),
+            name: "fixture-repository".to_owned(),
+            github_repository: Some("fixture-owner/fixture-repository".to_owned()),
+            health: WorkspaceHealth::Ready,
+            workspace_count: 1,
+            created_at: "2026-07-18T00:00:00.000Z".to_owned(),
+            updated_at: "2026-07-18T00:01:00.000Z".to_owned(),
+        }
+    }
+
     fn draft() -> WorkspaceDraftView {
         WorkspaceDraftView {
             schema_version: 1,
@@ -773,6 +811,7 @@ mod tests {
         WorkspaceStateSnapshot {
             schema_version: 1,
             history: HistoryStatus::ready(),
+            projects: vec![project()],
             workspaces: vec![summary()],
             active_workspace_id: Some("workspace-fixture".to_owned()),
             draft: Some(draft()),

@@ -32,6 +32,7 @@ export const workspaceHistoryCommands = {
   recheck: "workspace_recheck",
   repair: "workspace_repair",
   unregister: "workspace_unregister",
+  archive: "workspace_archive",
   updateLifecycle: "workspace_update_lifecycle",
   cancel: "workspace_cancel",
   saveDraft: "workspace_save_draft",
@@ -96,6 +97,17 @@ export interface PersistedWorkspaceSummary {
   readonly createdAt: string
   readonly updatedAt: string
   readonly lastSelectedAt: string | null
+}
+
+export interface PersistedProjectSummary {
+  readonly schemaVersion: typeof workspaceHistorySchemaVersion
+  readonly projectId: string
+  readonly name: string
+  readonly githubRepository: string | null
+  readonly health: WorkspaceHealth
+  readonly workspaceCount: number
+  readonly createdAt: string
+  readonly updatedAt: string
 }
 
 export interface PersistedWorkspaceDraft {
@@ -189,6 +201,7 @@ export interface WorkspaceResumeState {
 export interface WorkspaceStateSnapshot {
   readonly schemaVersion: typeof workspaceHistorySchemaVersion
   readonly history: WorkspaceHistoryStatus
+  readonly projects: readonly PersistedProjectSummary[]
   readonly workspaces: readonly PersistedWorkspaceSummary[]
   readonly activeWorkspaceId: string | null
   readonly draft: PersistedWorkspaceDraft | null
@@ -204,9 +217,8 @@ export interface WorkspacePickResponse {
 }
 
 export interface WorkspaceCreateSessionRequest {
-  readonly fromWorkspaceId: string
+  readonly projectId: string
   readonly name: string
-  readonly goal: string
   readonly clientRequestId: string
 }
 
@@ -219,7 +231,10 @@ export interface WorkspaceRecheckRequest extends WorkspaceSelectRequest {
 }
 
 export type WorkspaceRepairRequest = WorkspaceSelectRequest
-export type WorkspaceUnregisterRequest = WorkspaceSelectRequest
+export interface WorkspaceUnregisterRequest {
+  readonly projectId: string
+}
+export type WorkspaceArchiveRequest = WorkspaceSelectRequest
 
 export interface WorkspaceUpdateLifecycleRequest {
   readonly workspaceId: string
@@ -307,6 +322,7 @@ export interface WorkspaceHistoryRequestMap {
   workspace_recheck: WorkspaceRecheckRequest
   workspace_repair: WorkspaceRepairRequest
   workspace_unregister: WorkspaceUnregisterRequest
+  workspace_archive: WorkspaceArchiveRequest
   workspace_update_lifecycle: WorkspaceUpdateLifecycleRequest
   workspace_cancel: WorkspaceCancelRequest
   workspace_save_draft: WorkspaceSaveDraftRequest
@@ -330,6 +346,7 @@ export interface WorkspaceHistoryResponseMap {
   workspace_recheck: WorkspaceStateSnapshot
   workspace_repair: WorkspaceStateSnapshot
   workspace_unregister: WorkspaceStateSnapshot
+  workspace_archive: WorkspaceStateSnapshot
   workspace_update_lifecycle: PersistedWorkspaceSummary
   workspace_cancel: PersistedWorkspaceSummary
   workspace_save_draft: PersistedWorkspaceDraft
@@ -469,6 +486,52 @@ function parseHistoryStatus(value: unknown): WorkspaceHistoryStatus {
     mode: value.mode,
     errorCode: value.errorCode,
     backupName: value.backupName,
+  }
+}
+
+export function parsePersistedProjectSummary(
+  value: unknown,
+): PersistedProjectSummary {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "schemaVersion",
+      "projectId",
+      "name",
+      "githubRepository",
+      "health",
+      "workspaceCount",
+      "createdAt",
+      "updatedAt",
+    ]) ||
+    value.schemaVersion !== workspaceHistorySchemaVersion ||
+    !validatePublicString(value.projectId, 128) ||
+    !validatePublicString(value.name, 80) ||
+    !isGithubRepository(value.githubRepository) ||
+    !oneOf(value.health, [
+      "ready",
+      "missing",
+      "changed",
+      "unreadable",
+      "read_only",
+      "stale_branch",
+    ] as const) ||
+    !isSafeUnsignedInteger(value.workspaceCount) ||
+    value.workspaceCount > 200 ||
+    !isTimestamp(value.createdAt) ||
+    !isTimestamp(value.updatedAt)
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: 1,
+    projectId: value.projectId,
+    name: value.name,
+    githubRepository: value.githubRepository,
+    health: value.health,
+    workspaceCount: value.workspaceCount,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
   }
 }
 
@@ -1223,6 +1286,7 @@ export function parseWorkspaceStateSnapshot(
     !hasExactKeys(value, [
       "schemaVersion",
       "history",
+      "projects",
       "workspaces",
       "activeWorkspaceId",
       "draft",
@@ -1231,6 +1295,8 @@ export function parseWorkspaceStateSnapshot(
       "resumeState",
     ]) ||
     value.schemaVersion !== workspaceHistorySchemaVersion ||
+    !Array.isArray(value.projects) ||
+    value.projects.length > 200 ||
     !Array.isArray(value.workspaces) ||
     value.workspaces.length > 200 ||
     !Array.isArray(value.contextSnapshots) ||
@@ -1241,7 +1307,16 @@ export function parseWorkspaceStateSnapshot(
   ) {
     return violation()
   }
+  const projects = value.projects.map(parsePersistedProjectSummary)
   const workspaces = value.workspaces.map(parsePersistedWorkspaceSummary)
+  if (
+    workspaces.some(
+      (workspace) =>
+        !projects.some((project) => project.projectId === workspace.projectId),
+    )
+  ) {
+    return violation()
+  }
   const activeWorkspaceId = value.activeWorkspaceId
   if (
     activeWorkspaceId !== null &&
@@ -1276,6 +1351,7 @@ export function parseWorkspaceStateSnapshot(
   return {
     schemaVersion: 1,
     history: parseHistoryStatus(value.history),
+    projects,
     workspaces,
     activeWorkspaceId,
     draft,
@@ -1386,6 +1462,7 @@ export function parseWorkspaceHistoryResponse<
     case workspaceHistoryCommands.recheck:
     case workspaceHistoryCommands.repair:
     case workspaceHistoryCommands.unregister:
+    case workspaceHistoryCommands.archive:
     case workspaceHistoryCommands.delete:
       return parseWorkspaceStateSnapshot(
         value,

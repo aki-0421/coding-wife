@@ -271,16 +271,17 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
       ...this.#workspaces,
       {
         id: workspaceId,
-        repository: request.repository,
+        projectId: request.projectId,
+        repository: "coding-wife",
         name: request.name,
-        branch: request.branch,
+        branch: `coding-wife/${workspaceId}`,
         lifecycle: "backlog",
         health: "ready",
         updatedAt: fixtureTime,
       },
     ]
     this.#drafts.set(workspaceId, {
-      text: request.goal,
+      text: "",
       effort: "fast",
       revision: 1,
       contextSnapshots: [],

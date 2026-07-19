@@ -24,6 +24,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
 
     expect(projected.workspaces[0]).toEqual({
       id: "workspace-fixture",
+      projectId: "project-fixture",
       repository: "fixture-repository",
       githubRepository: "fixture-owner/fixture-repository",
       name: "Fixture workspace",
@@ -240,20 +241,19 @@ describe("PersistentWorkspaceViewAdapter", () => {
     expect(restored.draft).toMatchObject({ text: "latest", effort: "max" })
   })
 
-  it("supports project registration, session creation, context, and confirmed deletion", async () => {
+  it("supports project registration, session creation, context, and worktree archival", async () => {
     const adapter = new PersistentWorkspaceViewAdapter(
       new DemoWorkspaceHistoryTransport(),
     )
     const initial = await adapter.loadState()
     const selected = await adapter.requestAddProject()
-    const projectWorkspaceId = selected.activeWorkspaceId
-    if (projectWorkspaceId === null) throw new Error("demo fixture")
+    const project = (selected.projects ?? []).find(
+      (candidate) => candidate.id === "project-demo-selected",
+    )
+    if (project === undefined) throw new Error("demo fixture")
     const created = await adapter.requestAddWorkspace({
-      fromWorkspaceId: projectWorkspaceId,
+      projectId: project.id,
       name: "Adapter session",
-      goal: "Persist adapter state",
-      repository: "selected-project",
-      branch: "main",
     })
     const createdId = created.activeWorkspaceId
     if (createdId === null) throw new Error("demo fixture")
@@ -264,11 +264,11 @@ describe("PersistentWorkspaceViewAdapter", () => {
       source: "git_diff",
       label: "Working tree diff",
     })
-    const afterDelete = await adapter.deleteWorkspaceHistory(createdId)
+    const afterArchive = await adapter.archiveWorkspace(createdId)
 
     expect(initial.workspaces).toHaveLength(3)
     expect(
-      afterDelete.workspaces.some((workspace) => workspace.id === createdId),
+      afterArchive.workspaces.some((workspace) => workspace.id === createdId),
     ).toBe(false)
   })
 

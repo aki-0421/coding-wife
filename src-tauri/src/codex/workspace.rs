@@ -89,6 +89,8 @@ pub struct AppPrivateProjectIdentity {
     pub root_inode: u64,
     pub git_device: u64,
     pub git_inode: u64,
+    pub common_git_device: Option<u64>,
+    pub common_git_inode: Option<u64>,
 }
 
 /// This record belongs to app-private settings and is deliberately not a
@@ -101,11 +103,15 @@ pub struct AppPrivateBinaryRecord {
 #[derive(Clone, Debug)]
 pub struct GitRepositoryIdentity {
     pub canonical_root: PathBuf,
+    /// The worktree-specific Git directory reported by `--absolute-git-dir`.
     pub canonical_git_dir: PathBuf,
     pub root_device: u64,
     pub root_inode: u64,
     pub git_device: u64,
     pub git_inode: u64,
+    /// The device and inode of the shared Git common directory.
+    pub common_git_device: u64,
+    pub common_git_inode: u64,
     pub project_identity: String,
     pub github_repository: Option<String>,
     pub branch: String,
@@ -333,6 +339,16 @@ impl WorkspaceService {
         .await
     }
 
+    pub async fn validate_workspace_root(
+        &self,
+        root: PathBuf,
+        workspace_id: String,
+        alias: String,
+    ) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
+        self.validate_candidate(root, workspace_id, Some(alias))
+            .await
+    }
+
     async fn validate_candidate(
         &self,
         selected: PathBuf,
@@ -365,6 +381,8 @@ pub fn same_repository_identity(
         && left.root_inode == right.root_inode
         && left.git_device == right.git_device
         && left.git_inode == right.git_inode
+        && left.common_git_device == right.common_git_device
+        && left.common_git_inode == right.common_git_inode
 }
 
 pub fn matches_saved_repository_identity(
@@ -376,6 +394,28 @@ pub fn matches_saved_repository_identity(
         && candidate.root_inode == saved.root_inode
         && candidate.git_device == saved.git_device
         && candidate.git_inode == saved.git_inode
+        && saved
+            .common_git_device
+            .is_none_or(|device| device == candidate.common_git_device)
+        && saved
+            .common_git_inode
+            .is_none_or(|inode| inode == candidate.common_git_inode)
+}
+
+pub fn matches_saved_git_repository(
+    candidate: &GitRepositoryIdentity,
+    saved: &AppPrivateProjectIdentity,
+) -> bool {
+    candidate.common_git_device == saved.common_git_device.unwrap_or(saved.git_device)
+        && candidate.common_git_inode == saved.common_git_inode.unwrap_or(saved.git_inode)
+}
+
+pub fn same_git_common_directory(
+    left: &GitRepositoryIdentity,
+    right: &GitRepositoryIdentity,
+) -> bool {
+    left.common_git_device == right.common_git_device
+        && left.common_git_inode == right.common_git_inode
 }
 
 pub async fn validate_git_repository(
@@ -413,8 +453,8 @@ pub async fn validate_git_repository(
     }
     validate_private_regular_file(&head)?;
     validate_repository_ownership(&canonical, &git_directory).await?;
-    validate_git_root_closure(&canonical, &git_directory).await?;
-    repository_identity(canonical, git_directory).await
+    let common_git_directory = validate_git_root_closure(&canonical, &git_directory).await?;
+    repository_identity(canonical, git_directory, common_git_directory).await
 }
 
 fn validate_private_regular_file(metadata: &std::fs::Metadata) -> Result<(), CodexCommandError> {
@@ -549,7 +589,7 @@ async fn run_workspace_git(
 async fn validate_git_root_closure(
     root: &Path,
     git_directory: &Path,
-) -> Result<(), CodexCommandError> {
+) -> Result<PathBuf, CodexCommandError> {
     let output = run_workspace_git(
         root,
         &[
@@ -606,17 +646,22 @@ async fn validate_git_root_closure(
     {
         return Err(workspace_error("CODEX-WORKSPACE-GIT-CLOSURE", false));
     }
-    validate_repository_ownership(root, &reported_common_dir).await
+    validate_repository_ownership(root, &reported_common_dir).await?;
+    Ok(reported_common_dir)
 }
 
 async fn repository_identity(
     canonical_root: PathBuf,
     canonical_git_dir: PathBuf,
+    canonical_common_git_dir: PathBuf,
 ) -> Result<GitRepositoryIdentity, CodexCommandError> {
     let root_metadata = tokio::fs::metadata(&canonical_root)
         .await
         .map_err(|_| workspace_error("CODEX-WORKSPACE-MISSING", true))?;
     let git_metadata = tokio::fs::metadata(&canonical_git_dir)
+        .await
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    let common_git_metadata = tokio::fs::metadata(&canonical_common_git_dir)
         .await
         .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
     let head_value = tokio::fs::read_to_string(canonical_git_dir.join("HEAD"))
@@ -653,18 +698,26 @@ async fn repository_identity(
     };
 
     #[cfg(unix)]
-    let (root_device, root_inode, git_device, git_inode) = {
+    let (root_device, root_inode, git_device, git_inode, common_git_device, common_git_inode) = {
         use std::os::unix::fs::MetadataExt;
         (
             root_metadata.dev(),
             root_metadata.ino(),
             git_metadata.dev(),
             git_metadata.ino(),
+            common_git_metadata.dev(),
+            common_git_metadata.ino(),
         )
     };
     #[cfg(not(unix))]
-    let (root_device, root_inode, git_device, git_inode) =
-        (0, root_metadata.len(), 0, git_metadata.len());
+    let (root_device, root_inode, git_device, git_inode, common_git_device, common_git_inode) = (
+        0,
+        root_metadata.len(),
+        0,
+        git_metadata.len(),
+        0,
+        common_git_metadata.len(),
+    );
 
     let mut identity = Sha256::new();
     identity.update(root_device.to_le_bytes());
@@ -680,6 +733,8 @@ async fn repository_identity(
         root_inode,
         git_device,
         git_inode,
+        common_git_device,
+        common_git_inode,
         project_identity,
         github_repository,
         branch,
@@ -1052,6 +1107,9 @@ mod tests {
             .expect("git worktree add");
         assert!(add_worktree.success());
 
+        let project_identity = validate_git_repository(&root)
+            .await
+            .expect("project identity");
         let identity = validate_git_repository(&worktree)
             .await
             .expect("linked worktree identity");
@@ -1061,6 +1119,28 @@ mod tests {
         assert_eq!(identity.branch, "fixture-linked");
         assert_ne!(identity.head, "unborn");
         assert_eq!(identity.head.len(), 12);
+        assert_ne!(identity.git_inode, project_identity.git_inode);
+        assert_eq!(
+            identity.common_git_device,
+            project_identity.common_git_device
+        );
+        assert_eq!(identity.common_git_inode, project_identity.common_git_inode);
+        assert_ne!(identity.root_inode, project_identity.root_inode);
+        assert_ne!(identity.project_identity, project_identity.project_identity);
+        assert!(matches_saved_git_repository(
+            &identity,
+            &AppPrivateProjectIdentity {
+                project_id: "project-linked-fixture".to_owned(),
+                canonical_root: project_identity.canonical_root.clone(),
+                project_identity: project_identity.project_identity.clone(),
+                root_device: project_identity.root_device,
+                root_inode: project_identity.root_inode,
+                git_device: project_identity.git_device,
+                git_inode: project_identity.git_inode,
+                common_git_device: Some(project_identity.common_git_device),
+                common_git_inode: Some(project_identity.common_git_inode),
+            },
+        ));
         assert_eq!(
             identity.canonical_git_dir,
             fs::canonicalize(raw_git_dir).expect("canonical linked git directory")

@@ -406,15 +406,21 @@ impl CharacterService {
         Ok(state)
     }
 
-    pub(crate) fn prepare_project_unregistration(
+    pub(crate) fn prepare_project_id_unregistration(
         &self,
-        workspace_id: &str,
+        project_id: &str,
     ) -> CharacterResult<Option<CharacterProjectSelectionRollback>> {
-        let project_id = self.resolve_project_id(workspace_id)?;
+        if !valid_project_id(project_id) {
+            return Err(character_error(
+                "character_library_unregister_project",
+                "CHARACTER-PROJECT-NOT-FOUND",
+                true,
+            ));
+        }
         let (custom_packs, _) = self.storage.load_custom_packs()?;
         let state = self.load_project_state(&custom_packs)?;
         let mut updated = state.clone();
-        if !updated.remove_project(&project_id) {
+        if !updated.remove_project(project_id) {
             return Ok(None);
         }
         self.storage.save_state(&updated)?;

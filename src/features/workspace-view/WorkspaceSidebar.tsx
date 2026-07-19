@@ -1,5 +1,6 @@
 import { useId, useMemo, useRef, useState } from "react"
 import {
+  ArchiveIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   FolderPlusIcon,
@@ -14,33 +15,26 @@ import {
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
 import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
 import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
 import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
 import type {
+  ProjectRecord,
   WorkspaceLifecycle,
   WorkspaceRecord,
 } from "@/features/workspace-view/types"
@@ -67,12 +61,19 @@ interface WorkspaceSidebarProps {
   readonly copy: WorkspaceCopy
   readonly filter: string
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
-  readonly selectedWorkspace: WorkspaceRecord
+  readonly projects: readonly ProjectRecord[]
+  readonly selectedProjectId?: string | undefined
+  readonly selectedWorkspace?: WorkspaceRecord | undefined
   readonly selectedWorkspaceId: string
+  readonly archiveDisabledWorkspaceId?: string | undefined
   readonly onAddProject: () => void
-  readonly onCreateWorkspace: (name: string, goal: string) => Promise<boolean>
+  readonly onCreateWorkspace: (
+    projectId: string,
+    name: string,
+  ) => Promise<boolean>
   readonly onFilterChange: (value: string) => void
   readonly onOpenSettings: () => void
+  readonly onRequestArchive: (workspace: WorkspaceRecord) => void
   readonly onSelectWorkspace: (workspaceId: string) => void
 }
 
@@ -86,11 +87,15 @@ function WorkspaceRow({
   copy,
   selected,
   workspace,
+  archiveDisabled,
+  onArchive,
   onSelect,
 }: {
   readonly copy: WorkspaceCopy
   readonly selected: boolean
   readonly workspace: WorkspaceRecord
+  readonly archiveDisabled: boolean
+  readonly onArchive: () => void
   readonly onSelect: () => void
 }) {
   const repositoryLabel = workspace.githubRepository ?? workspace.repository
@@ -100,89 +105,106 @@ function WorkspaceRow({
       : copy.workspaceHealth[workspace.health]
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          aria-current={selected ? "page" : undefined}
-          aria-label={`${workspace.branch}, ${repositoryLabel}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
-          className={cn(
-            "group/workspace flex h-[49.5px] w-full items-center gap-sm rounded-control px-sm py-xs text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-            selected && "bg-selected-row",
-          )}
-          onClick={onSelect}
-          type="button"
-        >
-          <RepositoryAvatar workspace={workspace} />
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="flex min-w-0 items-center gap-xxs">
-              <GitBranchIcon
-                aria-hidden="true"
-                className={cn(
-                  "size-3 shrink-0 text-muted-foreground",
-                  selected && "text-branch-selected",
-                )}
-              />
-              <span
-                className={`truncate text-sidebar-item ${selected ? "text-text-strong" : "text-foreground"}`}
-              >
-                {workspace.branch}
-              </span>
-            </span>
-            <span className="flex min-w-0 items-center gap-xs">
-              <span
-                className={`truncate font-mono text-sidebar-meta transition-colors group-hover/workspace:text-selected-row-secondary group-focus-visible/workspace:text-selected-row-secondary ${selected ? "text-selected-row-secondary" : "text-muted-foreground"}`}
-              >
-                {repositoryLabel}
-              </span>
-              {workspace.attention ? (
-                <CircleAlertIcon
+    <div
+      className={cn(
+        "group/workspace relative flex h-[49.5px] w-full items-center rounded-control transition-colors hover:bg-muted focus-within:bg-muted",
+        selected && "bg-selected-row",
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-current={selected ? "page" : undefined}
+            aria-label={`${workspace.branch}, ${repositoryLabel}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
+            className="flex h-full min-w-0 flex-1 items-center gap-sm rounded-control px-sm py-xs pr-xl text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={onSelect}
+            type="button"
+          >
+            <RepositoryAvatar workspace={workspace} />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="flex min-w-0 items-center gap-xxs">
+                <GitBranchIcon
                   aria-hidden="true"
-                  className="size-3 shrink-0 text-destructive"
+                  className={cn(
+                    "size-3 shrink-0 text-muted-foreground",
+                    selected && "text-branch-selected",
+                  )}
                 />
-              ) : null}
-              {health ? (
                 <span
-                  className="flex min-w-0 items-center gap-xxs truncate text-destructive"
-                  data-workspace-health={workspace.health}
+                  className={`truncate text-sidebar-item ${selected ? "text-text-strong" : "text-foreground"}`}
                 >
-                  <TriangleAlertIcon
-                    aria-hidden="true"
-                    className="size-3 shrink-0"
-                  />
-                  <span className="truncate text-label">{health}</span>
+                  {workspace.branch}
                 </span>
-              ) : null}
+              </span>
+              <span className="flex min-w-0 items-center gap-xs">
+                <span
+                  className={`truncate font-mono text-sidebar-meta transition-colors group-hover/workspace:text-selected-row-secondary group-focus-within/workspace:text-selected-row-secondary ${selected ? "text-selected-row-secondary" : "text-muted-foreground"}`}
+                >
+                  {repositoryLabel}
+                </span>
+                {workspace.attention ? (
+                  <CircleAlertIcon
+                    aria-hidden="true"
+                    className="size-3 shrink-0 text-destructive"
+                  />
+                ) : null}
+                {health ? (
+                  <span
+                    className="flex min-w-0 items-center gap-xxs truncate text-destructive"
+                    data-workspace-health={workspace.health}
+                  >
+                    <TriangleAlertIcon
+                      aria-hidden="true"
+                      className="size-3 shrink-0"
+                    />
+                    <span className="truncate text-label">{health}</span>
+                  </span>
+                ) : null}
+              </span>
             </span>
-          </span>
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="right">
-        {workspace.branch} · {repositoryLabel}
-        {workspace.attention ? ` · ${copy.attention[workspace.attention]}` : ""}
-        {health ? ` · ${health}` : ""}
-      </TooltipContent>
-    </Tooltip>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          {workspace.branch} · {repositoryLabel}
+          {workspace.attention
+            ? ` · ${copy.attention[workspace.attention]}`
+            : ""}
+          {health ? ` · ${health}` : ""}
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-label={`${copy.archiveWorkspace}: ${workspace.name}`}
+            className="absolute right-xs size-6 opacity-0 transition-opacity group-hover/workspace:opacity-100 group-focus-within/workspace:opacity-100 focus-visible:opacity-100"
+            data-workspace-archive={workspace.id}
+            disabled={archiveDisabled}
+            onClick={onArchive}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            <ArchiveIcon />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="right">{copy.archiveWorkspace}</TooltipContent>
+      </Tooltip>
+    </div>
   )
 }
 
 function CreateWorkspaceDialog({
   copy,
+  projects,
+  selectedProjectId,
   onCreate,
 }: {
   readonly copy: WorkspaceCopy
-  readonly onCreate: (name: string, goal: string) => Promise<boolean>
+  readonly projects: readonly ProjectRecord[]
+  readonly selectedProjectId?: string | undefined
+  readonly onCreate: (projectId: string, name: string) => Promise<boolean>
 }) {
   const [open, setOpen] = useState(false)
-  const [name, setName] = useState("")
-  const [goal, setGoal] = useState("")
-
-  const submit = async () => {
-    if (await onCreate(name, goal)) {
-      setName("")
-      setGoal("")
-      setOpen(false)
-    }
-  }
 
   return (
     <Dialog onOpenChange={setOpen} open={open}>
@@ -191,6 +213,7 @@ function CreateWorkspaceDialog({
           <DialogTrigger asChild>
             <Button
               aria-label={copy.addWorkspace}
+              disabled={projects.length === 0}
               size="icon-xs"
               type="button"
               variant="ghost"
@@ -208,49 +231,19 @@ function CreateWorkspaceDialog({
             {copy.createWorkspace.description}
           </DialogDescription>
         </DialogHeader>
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="workspace-name">
-              {copy.createWorkspace.name}
-            </FieldLabel>
-            <Input
-              autoFocus
-              id="workspace-name"
-              maxLength={80}
-              onChange={(event) => setName(event.currentTarget.value)}
-              value={name}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="workspace-goal">
-              {copy.createWorkspace.goal}
-            </FieldLabel>
-            <Textarea
-              id="workspace-goal"
-              maxLength={4000}
-              onChange={(event) => setGoal(event.currentTarget.value)}
-              rows={4}
-              value={goal}
-            />
-            <FieldDescription>
-              {goal.length.toLocaleString()} / 4,000
-            </FieldDescription>
-          </Field>
-        </FieldGroup>
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button type="button" variant="ghost">
-              {copy.createWorkspace.cancel}
-            </Button>
-          </DialogClose>
-          <Button
-            disabled={name.trim().length === 0}
-            onClick={() => void submit()}
-            type="button"
-          >
-            {copy.createWorkspace.create}
-          </Button>
-        </DialogFooter>
+        <WorkspaceCreateForm
+          ariaLabel={copy.createWorkspace.title}
+          autoFocusName
+          copy={copy}
+          onCancel={() => setOpen(false)}
+          onCreate={async (projectId, name) => {
+            const created = await onCreate(projectId, name)
+            if (created) setOpen(false)
+            return created
+          }}
+          projects={projects}
+          selectedProjectId={selectedProjectId}
+        />
       </DialogContent>
     </Dialog>
   )
@@ -262,12 +255,16 @@ function SidebarPanel({
   expandedLifecycles,
   filter,
   filteredWorkspaces,
+  projects,
+  selectedProjectId,
   selectedWorkspaceId,
+  archiveDisabledWorkspaceId,
   reserveTitlebarSpace,
   onAddProject,
   onCreateWorkspace,
   onFilterChange,
   onOpenSettings,
+  onRequestArchive,
   onSelectWorkspace,
   onToggleLifecycle,
 }: SidebarPanelProps) {
@@ -325,7 +322,12 @@ function SidebarPanel({
             </TooltipTrigger>
             <TooltipContent>{copy.addProject}</TooltipContent>
           </Tooltip>
-          <CreateWorkspaceDialog copy={copy} onCreate={onCreateWorkspace} />
+          <CreateWorkspaceDialog
+            copy={copy}
+            onCreate={onCreateWorkspace}
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+          />
         </div>
       </div>
 
@@ -389,8 +391,12 @@ function SidebarPanel({
                 <div hidden={!expanded} id={contentId}>
                   {workspaces.map((workspace) => (
                     <WorkspaceRow
+                      archiveDisabled={
+                        archiveDisabledWorkspaceId === workspace.id
+                      }
                       copy={copy}
                       key={workspace.id}
+                      onArchive={() => onRequestArchive(workspace)}
                       onSelect={() => onSelectWorkspace(workspace.id)}
                       selected={workspace.id === selectedWorkspaceId}
                       workspace={workspace}
@@ -401,7 +407,7 @@ function SidebarPanel({
             )
           })}
 
-          {filteredWorkspaces.length === 0 ? (
+          {filteredWorkspaces.length === 0 && filter.length > 0 ? (
             <div className="flex flex-col items-start gap-xs px-sm py-lg">
               <p className="m-0 text-sidebar-helper text-muted-foreground">
                 {copy.noMatches}
@@ -451,7 +457,6 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   >(() => ({ ...initiallyExpandedLifecycles }))
   const compactOpenerRef = useRef<HTMLButtonElement | null>(null)
   const selected = props.selectedWorkspace
-
   const toggleLifecycle = (lifecycle: WorkspaceLifecycle) => {
     setExpandedLifecycles((current) => ({
       ...current,
@@ -532,8 +537,8 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 closeCompactNavigation()
                 props.onAddProject()
               }}
-              onCreateWorkspace={async (name, goal) => {
-                const created = await props.onCreateWorkspace(name, goal)
+              onCreateWorkspace={async (projectId, name) => {
+                const created = await props.onCreateWorkspace(projectId, name)
                 if (created) closeCompactNavigation()
                 return created
               }}
@@ -548,28 +553,30 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
           </DialogContent>
 
           <div className="mt-md flex flex-1 flex-col items-center gap-sm">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-controls="compact-workspace-navigation"
-                  aria-expanded={compactNavigationOpen}
-                  aria-haspopup="dialog"
-                  aria-label={`${props.copy.switchWorkspace}: ${selected.repository}/${selected.name}`}
-                  onClick={(event) =>
-                    openCompactNavigation(event.currentTarget)
-                  }
-                  size="icon-sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  <GitBranchIcon />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                {props.copy.switchWorkspace}: {selected.repository}/
-                {selected.name}
-              </TooltipContent>
-            </Tooltip>
+            {selected ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-controls="compact-workspace-navigation"
+                    aria-expanded={compactNavigationOpen}
+                    aria-haspopup="dialog"
+                    aria-label={`${props.copy.switchWorkspace}: ${selected.repository}/${selected.name}`}
+                    onClick={(event) =>
+                      openCompactNavigation(event.currentTarget)
+                    }
+                    size="icon-sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    <GitBranchIcon />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {props.copy.switchWorkspace}: {selected.repository}/
+                  {selected.name}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </Dialog>
 

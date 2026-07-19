@@ -16,6 +16,8 @@ use crate::codex::workspace::{
     matches_saved_repository_identity, AppPrivateProjectIdentity, AppPrivateWorkspaceRecord,
     GitRepositoryIdentity, ValidatedWorkspaceCandidate,
 };
+#[cfg(test)]
+use crate::codex::workspace::{WorkspacePreflight, WorkspaceRegistration};
 use crate::git_review::repository::{
     is_object_id, validate_opaque_id as validate_git_opaque_id, validate_relative_path,
 };
@@ -40,17 +42,17 @@ use super::editable_context::{
 };
 use super::types::{
     AppendEventResult, CharacterContext, ContextSnapshotView, ContextSource, HistoryMode,
-    HistoryStatus, NormalizedDomainEvent, ProjectContext, ReasoningEffort, TimelineEventView,
-    TimelinePage, VersionedCharacterContext, VersionedProjectContext, WorkspaceAttention,
-    WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth, WorkspaceHistoryError,
-    WorkspaceLastSummaryView, WorkspaceLifecycle, WorkspaceResumeStateView, WorkspaceStateSnapshot,
-    WorkspaceSummary, WorkspaceTimelineAnchorView, WorkspaceTurnContextSnapshot,
-    DOMAIN_EVENT_SCHEMA_VERSION, WORKSPACE_CONTEXT_SCHEMA_VERSION,
+    HistoryStatus, NormalizedDomainEvent, ProjectContext, ProjectSummary, ReasoningEffort,
+    TimelineEventView, TimelinePage, VersionedCharacterContext, VersionedProjectContext,
+    WorkspaceAttention, WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth,
+    WorkspaceHistoryError, WorkspaceLastSummaryView, WorkspaceLifecycle, WorkspaceResumeStateView,
+    WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineAnchorView,
+    WorkspaceTurnContextSnapshot, DOMAIN_EVENT_SCHEMA_VERSION, WORKSPACE_CONTEXT_SCHEMA_VERSION,
     WORKSPACE_HISTORY_SCHEMA_VERSION, WORKSPACE_RESUME_STATE_SCHEMA_VERSION,
 };
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
-const CURRENT_DATABASE_VERSION: i64 = 6;
+const CURRENT_DATABASE_VERSION: i64 = 8;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
@@ -61,7 +63,7 @@ const DELETE_TOKEN_TTL: Duration = Duration::from_secs(60);
 
 const WORKSPACE_SELECT: &str = r#"
 SELECT
-  w.id, w.project_id, p.alias, w.name, p.branch, p.head, p.detached,
+  w.id, w.project_id, p.alias, w.name, w.branch, w.head, w.detached,
   w.lifecycle, w.attention, w.health, w.created_at, w.updated_at, w.last_selected_at,
   p.github_repository
 FROM workspaces w
@@ -246,6 +248,33 @@ ALTER TABLE projects
   ADD COLUMN github_repository TEXT;
 "#;
 
+const MIGRATION_7: &str = r#"
+ALTER TABLE workspaces ADD COLUMN canonical_root BLOB;
+ALTER TABLE workspaces ADD COLUMN root_device INTEGER;
+ALTER TABLE workspaces ADD COLUMN root_inode INTEGER;
+ALTER TABLE workspaces ADD COLUMN branch TEXT;
+ALTER TABLE workspaces ADD COLUMN head TEXT;
+ALTER TABLE workspaces ADD COLUMN detached INTEGER NOT NULL DEFAULT 0 CHECK (detached IN (0, 1));
+ALTER TABLE workspaces ADD COLUMN managed_worktree INTEGER NOT NULL DEFAULT 0 CHECK (managed_worktree IN (0, 1));
+
+UPDATE workspaces
+SET canonical_root = (SELECT canonical_root FROM projects WHERE projects.id = workspaces.project_id),
+    root_device = (SELECT root_device FROM projects WHERE projects.id = workspaces.project_id),
+    root_inode = (SELECT root_inode FROM projects WHERE projects.id = workspaces.project_id),
+    branch = (SELECT branch FROM projects WHERE projects.id = workspaces.project_id),
+    head = (SELECT head FROM projects WHERE projects.id = workspaces.project_id),
+    detached = (SELECT detached FROM projects WHERE projects.id = workspaces.project_id)
+WHERE canonical_root IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_workspaces_managed
+  ON workspaces(managed_worktree, project_id);
+"#;
+
+const MIGRATION_8: &str = r#"
+ALTER TABLE projects ADD COLUMN common_git_device INTEGER;
+ALTER TABLE projects ADD COLUMN common_git_inode INTEGER;
+"#;
+
 #[derive(Debug)]
 struct StoreInner {
     connection: Connection,
@@ -267,6 +296,13 @@ pub struct DeleteChallenge {
 }
 
 #[derive(Clone, Debug)]
+pub struct PersistedProjectRegistration {
+    pub project: ProjectSummary,
+    pub duplicate: bool,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug)]
 pub struct PersistedWorkspaceRegistration {
     pub workspace: WorkspaceSummary,
     pub private_record: AppPrivateWorkspaceRecord,
@@ -276,7 +312,6 @@ pub struct PersistedWorkspaceRegistration {
 #[derive(Clone, Debug)]
 struct StoredProjectLinkage {
     project_id: String,
-    workspace_id: String,
     canonical_root: PathBuf,
     registered: bool,
     project_identity: String,
@@ -284,6 +319,8 @@ struct StoredProjectLinkage {
     root_inode: u64,
     git_device: u64,
     git_inode: u64,
+    common_git_device: Option<u64>,
+    common_git_inode: Option<u64>,
 }
 
 impl StoredProjectLinkage {
@@ -293,6 +330,12 @@ impl StoredProjectLinkage {
             && self.root_inode == candidate.root_inode
             && self.git_device == candidate.git_device
             && self.git_inode == candidate.git_inode
+            && self
+                .common_git_device
+                .is_none_or(|device| device == candidate.common_git_device)
+            && self
+                .common_git_inode
+                .is_none_or(|inode| inode == candidate.common_git_inode)
     }
 
     fn private_identity(&self) -> AppPrivateProjectIdentity {
@@ -304,6 +347,8 @@ impl StoredProjectLinkage {
             root_inode: self.root_inode,
             git_device: self.git_device,
             git_inode: self.git_inode,
+            common_git_device: self.common_git_device,
+            common_git_inode: self.common_git_inode,
         }
     }
 }
@@ -313,6 +358,14 @@ pub struct PersistedSessionWorkspace {
     pub workspace: WorkspaceSummary,
     pub private_record: AppPrivateWorkspaceRecord,
     pub created: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkspaceArchiveRecord {
+    pub project_id: String,
+    pub private_record: AppPrivateWorkspaceRecord,
+    pub project_root: PathBuf,
+    pub managed_worktree: bool,
 }
 
 #[derive(Clone)]
@@ -362,6 +415,8 @@ impl WorkspaceHistoryStore {
                         (4, MIGRATION_4),
                         (5, MIGRATION_5),
                         (6, MIGRATION_6),
+                        (7, MIGRATION_7),
+                        (8, MIGRATION_8),
                     ],
                 )
                 .map_err(|_| history_error("HIST-RECOVERY-SCHEMA", false))?;
@@ -598,10 +653,10 @@ impl WorkspaceHistoryStore {
             .map_err(|_| history_error("HIST-TEST-UNREGISTER-FAILURE", false))
     }
 
-    pub fn register_candidate(
+    pub fn register_project_candidate(
         &self,
         candidate: &ValidatedWorkspaceCandidate,
-    ) -> Result<PersistedWorkspaceRegistration, WorkspaceHistoryError> {
+    ) -> Result<PersistedProjectRegistration, WorkspaceHistoryError> {
         self.ensure_writable("workspace.pick_register")?;
         let mut inner = self.lock();
         let transaction = inner
@@ -617,39 +672,32 @@ impl WorkspaceHistoryStore {
                 }
                 move_unregistered_project_to_private_root(&transaction, &existing.project_id)?;
             } else {
-                let existing_id = existing.workspace_id;
                 let now = now();
                 transaction
                     .execute(
                         "UPDATE projects SET registered = 1, alias = ?1,
                            branch = ?2, head = ?3, detached = ?4, github_repository = ?5,
-                           health = 'ready', updated_at = ?6 WHERE id = ?7",
+                           common_git_device = ?6, common_git_inode = ?7,
+                           health = 'ready', updated_at = ?8 WHERE id = ?9",
                         params![
                             candidate.registration.alias,
                             candidate.git.branch,
                             candidate.git.head,
                             i64::from(candidate.git.detached),
                             candidate.git.github_repository,
+                            candidate.git.common_git_device as i64,
+                            candidate.git.common_git_inode as i64,
                             now,
                             existing.project_id,
                         ],
                     )
                     .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
-                transaction
-                    .execute(
-                        "UPDATE workspaces SET health = 'ready', updated_at = ?1
-                         WHERE project_id = ?2",
-                        params![now, existing.project_id],
-                    )
-                    .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
-                let workspace = workspace_by_id(&transaction, &existing_id)?;
-                let private_record = private_workspace_by_id(&transaction, &existing_id)?;
+                let project = project_by_id(&transaction, &existing.project_id)?;
                 transaction
                     .commit()
                     .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
-                return Ok(PersistedWorkspaceRegistration {
-                    workspace,
-                    private_record,
+                return Ok(PersistedProjectRegistration {
+                    project,
                     duplicate: true,
                 });
             }
@@ -664,7 +712,8 @@ impl WorkspaceHistoryStore {
                 .execute(
                     "UPDATE projects SET canonical_root = ?1, registered = 1, alias = ?2,
                        branch = ?3, head = ?4, detached = ?5, github_repository = ?6,
-                       health = 'ready', updated_at = ?7 WHERE id = ?8",
+                       common_git_device = ?7, common_git_inode = ?8,
+                       health = 'ready', updated_at = ?9 WHERE id = ?10",
                     params![
                         root_bytes,
                         candidate.registration.alias,
@@ -672,43 +721,34 @@ impl WorkspaceHistoryStore {
                         candidate.git.head,
                         i64::from(candidate.git.detached),
                         candidate.git.github_repository,
+                        candidate.git.common_git_device as i64,
+                        candidate.git.common_git_inode as i64,
                         now,
                         existing.project_id,
                     ],
                 )
                 .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
-            transaction
-                .execute(
-                    "UPDATE workspaces SET health = 'ready', updated_at = ?1
-                     WHERE project_id = ?2",
-                    params![now, existing.project_id],
-                )
-                .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
-            let workspace = workspace_by_id(&transaction, &existing.workspace_id)?;
-            let private_record = private_workspace_by_id(&transaction, &existing.workspace_id)?;
+            let project = project_by_id(&transaction, &existing.project_id)?;
             transaction
                 .commit()
                 .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
-            return Ok(PersistedWorkspaceRegistration {
-                workspace,
-                private_record,
+            return Ok(PersistedProjectRegistration {
+                project,
                 duplicate: true,
             });
         }
-        ensure_workspace_capacity(&transaction)?;
 
         let now = now();
         let project_id = format!("project-{}", uuid::Uuid::new_v4());
-        let workspace_id = candidate.registration.workspace_id.clone();
-        let session_id = format!("session-{}", uuid::Uuid::new_v4());
         transaction
             .execute(
                 "INSERT INTO projects (
                    id, canonical_root, alias, project_identity, root_device, root_inode,
-                   git_device, git_inode, branch, head, detached, github_repository,
+                   git_device, git_inode, common_git_device, common_git_inode,
+                   branch, head, detached, github_repository,
                    health, created_at, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                   'ready', ?13, ?13)",
+                   ?13, ?14, 'ready', ?15, ?15)",
                 params![
                     project_id,
                     root_bytes,
@@ -718,6 +758,8 @@ impl WorkspaceHistoryStore {
                     candidate.git.root_inode as i64,
                     candidate.git.git_device as i64,
                     candidate.git.git_inode as i64,
+                    candidate.git.common_git_device as i64,
+                    candidate.git.common_git_inode as i64,
                     candidate.git.branch,
                     candidate.git.head,
                     i64::from(candidate.git.detached),
@@ -726,57 +768,13 @@ impl WorkspaceHistoryStore {
                 ],
             )
             .map_err(|_| history_error("HIST-PROJECT-INSERT", true))?;
-        transaction
-            .execute(
-                "INSERT INTO workspaces (
-                   id, project_id, name, goal, lifecycle, attention, health,
-                   created_at, updated_at, last_selected_at
-                 ) VALUES (?1, ?2, ?3, '', 'backlog', NULL, 'ready', ?4, ?4, NULL)",
-                params![workspace_id, project_id, candidate.registration.alias, now],
-            )
-            .map_err(|_| history_error("HIST-WORKSPACE-INSERT", true))?;
-        transaction
-            .execute(
-                "INSERT INTO sessions (id, workspace_id, client_request_id, status, created_at, updated_at)
-                 VALUES (?1, ?2, NULL, 'idle', ?3, ?3)",
-                params![session_id, workspace_id, now],
-            )
-            .map_err(|_| history_error("HIST-SESSION-INSERT", true))?;
-        transaction
-            .execute(
-                "INSERT INTO workspace_preferences (workspace_id, draft_text, effort, draft_revision, updated_at)
-                 VALUES (?1, '', 'fast', 0, ?2)",
-                params![workspace_id, now],
-            )
-            .map_err(|_| history_error("HIST-PREFERENCE-INSERT", true))?;
-        insert_default_editable_context(&transaction, &workspace_id, &now)?;
-        append_event_in_transaction(
-            &transaction,
-            &NormalizedDomainEvent {
-                schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
-                event_id: format!("event-{}", uuid::Uuid::new_v4()),
-                workspace_id: workspace_id.clone(),
-                session_id: Some(session_id),
-                producer: "work".to_owned(),
-                kind: "work.workspace.lifecycle.changed".to_owned(),
-                occurred_at: now.clone(),
-                payload: json!({ "lifecycle": "backlog" }),
-            },
-            Some(&candidate.git.canonical_root),
-        )?;
-        let workspace = workspace_by_id(&transaction, &workspace_id)?;
-        let private_record = AppPrivateWorkspaceRecord {
-            workspace_id: workspace_id.clone(),
-            alias: candidate.registration.alias.clone(),
-            canonical_root: candidate.git.canonical_root.clone(),
-        };
+        let project = project_by_id(&transaction, &project_id)?;
         transaction
             .commit()
             .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
 
-        Ok(PersistedWorkspaceRegistration {
-            workspace,
-            private_record,
+        Ok(PersistedProjectRegistration {
+            project,
             duplicate: false,
         })
     }
@@ -788,14 +786,6 @@ impl WorkspaceHistoryStore {
             .connection
             .transaction()
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
-        let project_id = transaction
-            .query_row(
-                "SELECT project_id FROM workspaces WHERE id = ?1",
-                params![workspace_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?;
         transaction
             .execute(
                 "DELETE FROM workspaces WHERE id = ?1",
@@ -813,8 +803,9 @@ impl WorkspaceHistoryStore {
         if active_workspace_id.as_deref() == Some(workspace_id) {
             let fallback_workspace_id = transaction
                 .query_row(
-                    "SELECT id FROM workspaces
-                     ORDER BY last_selected_at DESC, updated_at DESC, id ASC LIMIT 1",
+                    "SELECT w.id FROM workspaces w JOIN projects p ON p.id = w.project_id
+                     WHERE p.registered = 1 AND w.managed_worktree = 1
+                     ORDER BY w.last_selected_at DESC, w.updated_at DESC, w.id ASC LIMIT 1",
                     [],
                     |row| row.get::<_, String>(0),
                 )
@@ -828,16 +819,6 @@ impl WorkspaceHistoryStore {
                     .map_err(|_| history_error("HIST-SETTING-WRITE", true))?;
             }
         }
-        if let Some(project_id) = project_id {
-            transaction
-                .execute(
-                    "DELETE FROM projects WHERE id = ?1 AND NOT EXISTS (
-                       SELECT 1 FROM workspaces WHERE project_id = ?1
-                     )",
-                    params![project_id],
-                )
-                .map_err(|_| history_error("HIST-PROJECT-DELETE", true))?;
-        }
         transaction
             .commit()
             .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))
@@ -850,9 +831,9 @@ impl WorkspaceHistoryStore {
         let mut statement = inner
             .connection
             .prepare(
-                "SELECT w.id, p.alias, p.canonical_root
+                "SELECT w.id, w.name, w.canonical_root
                  FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE p.registered = 1
+                 WHERE p.registered = 1 AND w.managed_worktree = 1
                  ORDER BY w.created_at ASC",
             )
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
@@ -879,6 +860,94 @@ impl WorkspaceHistoryStore {
         private_workspace_by_id(&inner.connection, workspace_id)
     }
 
+    pub fn managed_worktree_path(
+        &self,
+        project_id: &str,
+        workspace_id: &str,
+    ) -> Result<PathBuf, WorkspaceHistoryError> {
+        validate_project_id(project_id)?;
+        validate_workspace_id(workspace_id)?;
+        let inner = self.lock();
+        let app_data_root = inner
+            .database_path
+            .as_deref()
+            .and_then(Path::parent)
+            .ok_or_else(|| history_error("WORKSPACE-WORKTREE-ROOT-UNAVAILABLE", false))?;
+        Ok(app_data_root
+            .join("worktrees")
+            .join(project_id)
+            .join(workspace_id))
+    }
+
+    pub fn workspace_archive_record(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceArchiveRecord, WorkspaceHistoryError> {
+        validate_workspace_id(workspace_id)?;
+        let inner = self.lock();
+        inner
+            .connection
+            .query_row(
+                "SELECT w.project_id, w.id, w.name, w.canonical_root, p.canonical_root, w.managed_worktree
+                 FROM workspaces w JOIN projects p ON p.id = w.project_id
+                 WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
+                params![workspace_id],
+                |row| {
+                    Ok(WorkspaceArchiveRecord {
+                        project_id: row.get(0)?,
+                        private_record: AppPrivateWorkspaceRecord {
+                            workspace_id: row.get(1)?,
+                            alias: row.get(2)?,
+                            canonical_root: path_from_bytes(row.get::<_, Vec<u8>>(3)?),
+                        },
+                        project_root: path_from_bytes(row.get::<_, Vec<u8>>(4)?),
+                        managed_worktree: row.get::<_, i64>(5)? != 0,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?
+            .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))
+    }
+
+    pub fn archive_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceStateSnapshot, WorkspaceHistoryError> {
+        self.rollback_registration(workspace_id)?;
+        self.snapshot(None)
+    }
+
+    pub fn private_project_workspace_records_by_project(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<AppPrivateWorkspaceRecord>, WorkspaceHistoryError> {
+        validate_project_id(project_id)?;
+        let inner = self.lock();
+        let mut statement = inner
+            .connection
+            .prepare(
+                "SELECT w.id, w.name, w.canonical_root
+                 FROM workspaces w JOIN projects p ON p.id = w.project_id
+                 WHERE w.project_id = ?1 AND p.registered = 1 AND w.managed_worktree = 1
+                 ORDER BY w.created_at ASC",
+            )
+            .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
+        let rows = statement
+            .query_map(params![project_id], |row| {
+                Ok(AppPrivateWorkspaceRecord {
+                    workspace_id: row.get(0)?,
+                    alias: row.get(1)?,
+                    canonical_root: path_from_bytes(row.get::<_, Vec<u8>>(2)?),
+                })
+            })
+            .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
+        let records = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| history_error("HIST-WORKSPACE-DECODE", false))?;
+        Ok(records)
+    }
+
     pub fn private_project_workspace_records(
         &self,
         workspace_id: &str,
@@ -888,11 +957,12 @@ impl WorkspaceHistoryStore {
         let mut statement = inner
             .connection
             .prepare(
-                "SELECT sibling.id, p.alias, p.canonical_root
+                "SELECT sibling.id, sibling.name, sibling.canonical_root
                  FROM workspaces selected
                  JOIN projects p ON p.id = selected.project_id
                  JOIN workspaces sibling ON sibling.project_id = p.id
                  WHERE selected.id = ?1 AND p.registered = 1
+                   AND selected.managed_worktree = 1 AND sibling.managed_worktree = 1
                  ORDER BY sibling.created_at ASC",
             )
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
@@ -914,6 +984,72 @@ impl WorkspaceHistoryStore {
         Ok(records)
     }
 
+    pub fn private_project_identity_by_project_id(
+        &self,
+        project_id: &str,
+    ) -> Result<AppPrivateProjectIdentity, WorkspaceHistoryError> {
+        validate_project_id(project_id)?;
+        let inner = self.lock();
+        let linkage = inner
+            .connection
+            .query_row(
+                "SELECT id, canonical_root, registered, project_identity,
+                        root_device, root_inode, git_device, git_inode,
+                        common_git_device, common_git_inode
+                 FROM projects WHERE id = ?1 AND registered = 1",
+                params![project_id],
+                decode_project_linkage,
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))?
+            .ok_or_else(|| history_error("PROJECT-NOT-FOUND", false))?;
+        Ok(linkage.private_identity())
+    }
+
+    pub fn confirm_project_common_identity(
+        &self,
+        project_id: &str,
+        candidate: &GitRepositoryIdentity,
+    ) -> Result<(), WorkspaceHistoryError> {
+        validate_project_id(project_id)?;
+        self.ensure_writable("workspace.create_session")?;
+        let mut inner = self.lock();
+        let transaction = inner
+            .connection
+            .transaction()
+            .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
+        let linkage = transaction
+            .query_row(
+                "SELECT id, canonical_root, registered, project_identity,
+                        root_device, root_inode, git_device, git_inode,
+                        common_git_device, common_git_inode
+                 FROM projects WHERE id = ?1 AND registered = 1",
+                params![project_id],
+                decode_project_linkage,
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))?
+            .ok_or_else(|| history_error("PROJECT-NOT-FOUND", false))?;
+        if !linkage.matches(candidate) {
+            return Err(history_error("WORKSPACE-PROJECT-IDENTITY-CHANGED", false));
+        }
+        transaction
+            .execute(
+                "UPDATE projects SET common_git_device = ?1, common_git_inode = ?2,
+                   updated_at = ?3 WHERE id = ?4 AND registered = 1",
+                params![
+                    candidate.common_git_device as i64,
+                    candidate.common_git_inode as i64,
+                    now(),
+                    project_id,
+                ],
+            )
+            .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
+        transaction
+            .commit()
+            .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))
+    }
+
     pub fn private_project_identity(
         &self,
         workspace_id: &str,
@@ -923,10 +1059,11 @@ impl WorkspaceHistoryStore {
         let linkage = inner
             .connection
             .query_row(
-                "SELECT p.id, w.id, p.canonical_root, p.registered, p.project_identity,
-                        p.root_device, p.root_inode, p.git_device, p.git_inode
+                "SELECT p.id, p.canonical_root, p.registered, p.project_identity,
+                        p.root_device, p.root_inode, p.git_device, p.git_inode,
+                        p.common_git_device, p.common_git_inode
                  FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE w.id = ?1 AND p.registered = 1",
+                 WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
                 params![workspace_id],
                 decode_project_linkage,
             )
@@ -951,10 +1088,11 @@ impl WorkspaceHistoryStore {
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
         let current = transaction
             .query_row(
-                "SELECT p.id, w.id, p.canonical_root, p.registered, p.project_identity,
-                        p.root_device, p.root_inode, p.git_device, p.git_inode
+                "SELECT p.id, p.canonical_root, p.registered, p.project_identity,
+                        p.root_device, p.root_inode, p.git_device, p.git_inode,
+                        p.common_git_device, p.common_git_inode
                  FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE w.id = ?1 AND p.registered = 1",
+                 WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
                 params![workspace_id],
                 decode_project_linkage,
             )
@@ -988,7 +1126,8 @@ impl WorkspaceHistoryStore {
             .execute(
                 "UPDATE projects SET canonical_root = ?1, alias = ?2,
                    branch = ?3, head = ?4, detached = ?5, github_repository = ?6,
-                   health = 'ready', registered = 1, updated_at = ?7 WHERE id = ?8",
+                   common_git_device = ?7, common_git_inode = ?8,
+                   health = 'ready', registered = 1, updated_at = ?9 WHERE id = ?10",
                 params![
                     root_bytes,
                     candidate.registration.alias,
@@ -996,6 +1135,8 @@ impl WorkspaceHistoryStore {
                     candidate.git.head,
                     i64::from(candidate.git.detached),
                     candidate.git.github_repository,
+                    candidate.git.common_git_device as i64,
+                    candidate.git.common_git_inode as i64,
                     updated_at,
                     project_id,
                 ],
@@ -1017,32 +1158,25 @@ impl WorkspaceHistoryStore {
 
     pub fn unregister_project(
         &self,
-        workspace_id: &str,
+        project_id: &str,
     ) -> Result<WorkspaceStateSnapshot, WorkspaceHistoryError> {
-        validate_workspace_id(workspace_id)?;
+        validate_project_id(project_id)?;
         self.ensure_writable("workspace.unregister")?;
         let mut inner = self.lock();
         let transaction = inner
             .connection
             .transaction()
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
-        let project_id = transaction
-            .query_row(
-                "SELECT p.id FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE w.id = ?1 AND p.registered = 1",
-                params![workspace_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))?
-            .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
-        transaction
+        let changed = transaction
             .execute(
                 "UPDATE projects SET registered = 0, canonical_root = ?1, updated_at = ?2
-                 WHERE id = ?3",
-                params![private_unregistered_root(&project_id), now(), project_id],
+                 WHERE id = ?3 AND registered = 1",
+                params![private_unregistered_root(project_id), now(), project_id],
             )
             .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
+        if changed != 1 {
+            return Err(history_error("PROJECT-NOT-FOUND", false));
+        }
         let active_workspace_id = active_workspace(&transaction)?;
         let active_belongs_to_project = active_workspace_id.as_deref().is_some_and(|active_id| {
             transaction
@@ -1058,7 +1192,7 @@ impl WorkspaceHistoryStore {
             let fallback_workspace_id = transaction
                 .query_row(
                     "SELECT w.id FROM workspaces w JOIN projects p ON p.id = w.project_id
-                     WHERE p.registered = 1
+                     WHERE p.registered = 1 AND w.managed_worktree = 1
                      ORDER BY w.last_selected_at DESC, w.updated_at DESC, w.id ASC LIMIT 1",
                     [],
                     |row| row.get::<_, String>(0),
@@ -1080,17 +1214,18 @@ impl WorkspaceHistoryStore {
         self.snapshot(None)
     }
 
-    pub fn create_session_workspace(
+    pub fn create_managed_session_workspace(
         &self,
-        from_workspace_id: &str,
+        project_id: &str,
+        workspace_id: &str,
         name: &str,
-        goal: &str,
         client_request_id: &str,
+        candidate: &ValidatedWorkspaceCandidate,
     ) -> Result<PersistedSessionWorkspace, WorkspaceHistoryError> {
-        validate_workspace_id(from_workspace_id)?;
+        validate_project_id(project_id)?;
+        validate_workspace_id(workspace_id)?;
         validate_client_request_id(client_request_id)?;
         let name = validate_workspace_name(name)?;
-        let goal = validate_goal(goal)?;
         self.ensure_writable("workspace.create_session")?;
         let mut inner = self.lock();
         let transaction = inner
@@ -1117,25 +1252,49 @@ impl WorkspaceHistoryStore {
         }
         ensure_workspace_capacity(&transaction)?;
 
-        let project_id = transaction
+        let project_common_git_identity = transaction
             .query_row(
-                "SELECT project_id FROM workspaces WHERE id = ?1",
-                params![from_workspace_id],
-                |row| row.get::<_, String>(0),
+                "SELECT common_git_device, common_git_inode FROM projects
+                 WHERE id = ?1 AND registered = 1",
+                params![project_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?.map(|value| value as u64),
+                        row.get::<_, Option<i64>>(1)?.map(|value| value as u64),
+                    ))
+                },
             )
             .optional()
-            .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?
-            .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
-        let workspace_id = format!("workspace-{}", uuid::Uuid::new_v4());
+            .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))?
+            .ok_or_else(|| history_error("PROJECT-NOT-FOUND", false))?;
+        if project_common_git_identity.0 != Some(candidate.git.common_git_device)
+            || project_common_git_identity.1 != Some(candidate.git.common_git_inode)
+            || candidate.registration.workspace_id != workspace_id
+        {
+            return Err(history_error("WORKSPACE-PROJECT-IDENTITY-CHANGED", false));
+        }
         let session_id = format!("session-{}", uuid::Uuid::new_v4());
         let now = now();
         transaction
             .execute(
                 "INSERT INTO workspaces (
                    id, project_id, name, goal, lifecycle, attention, health,
-                   created_at, updated_at, last_selected_at
-                 ) VALUES (?1, ?2, ?3, ?4, 'backlog', NULL, 'ready', ?5, ?5, NULL)",
-                params![workspace_id, project_id, name, goal, now],
+                   created_at, updated_at, last_selected_at, canonical_root,
+                   root_device, root_inode, branch, head, detached, managed_worktree
+                 ) VALUES (?1, ?2, ?3, '', 'backlog', NULL, 'ready', ?4, ?4, NULL,
+                   ?5, ?6, ?7, ?8, ?9, ?10, 1)",
+                params![
+                    workspace_id,
+                    project_id,
+                    name,
+                    now,
+                    path_to_bytes(&candidate.git.canonical_root),
+                    candidate.git.root_device as i64,
+                    candidate.git.root_inode as i64,
+                    candidate.git.branch,
+                    candidate.git.head,
+                    i64::from(candidate.git.detached),
+                ],
             )
             .map_err(|_| history_error("HIST-WORKSPACE-INSERT", true))?;
         transaction
@@ -1148,27 +1307,27 @@ impl WorkspaceHistoryStore {
         transaction
             .execute(
                 "INSERT INTO workspace_preferences (workspace_id, draft_text, effort, draft_revision, updated_at)
-                 VALUES (?1, ?2, 'fast', 0, ?3)",
-                params![workspace_id, goal, now],
+                 VALUES (?1, '', 'fast', 0, ?2)",
+                params![workspace_id, now],
             )
             .map_err(|_| history_error("HIST-PREFERENCE-INSERT", true))?;
-        insert_default_editable_context(&transaction, &workspace_id, &now)?;
+        insert_default_editable_context(&transaction, workspace_id, &now)?;
         append_event_in_transaction(
             &transaction,
             &NormalizedDomainEvent {
                 schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
                 event_id: format!("event-{}", uuid::Uuid::new_v4()),
-                workspace_id: workspace_id.clone(),
+                workspace_id: workspace_id.to_owned(),
                 session_id: Some(session_id),
                 producer: "work".to_owned(),
                 kind: "work.workspace.lifecycle.changed".to_owned(),
                 occurred_at: now,
                 payload: json!({ "lifecycle": "backlog" }),
             },
-            None,
+            Some(&candidate.git.canonical_root),
         )?;
-        let workspace = workspace_by_id(&transaction, &workspace_id)?;
-        let private_record = private_workspace_by_id(&transaction, &workspace_id)?;
+        let workspace = workspace_by_id(&transaction, workspace_id)?;
+        let private_record = private_workspace_by_id(&transaction, workspace_id)?;
         transaction
             .commit()
             .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
@@ -1177,6 +1336,156 @@ impl WorkspaceHistoryStore {
             private_record,
             created: true,
         })
+    }
+
+    #[cfg(test)]
+    pub fn register_candidate(
+        &self,
+        candidate: &ValidatedWorkspaceCandidate,
+    ) -> Result<PersistedWorkspaceRegistration, WorkspaceHistoryError> {
+        let registration = self.register_project_candidate(candidate)?;
+        if let Some((workspace, private_record)) = {
+            let inner = self.lock();
+            inner
+                .connection
+                .query_row(
+                    "SELECT id FROM workspaces WHERE project_id = ?1 AND managed_worktree = 1
+                     ORDER BY created_at ASC, id ASC LIMIT 1",
+                    params![registration.project.project_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?
+                .map(|workspace_id| {
+                    Ok((
+                        workspace_by_id(&inner.connection, &workspace_id)?,
+                        private_workspace_by_id(&inner.connection, &workspace_id)?,
+                    ))
+                })
+                .transpose()?
+        } {
+            return Ok(PersistedWorkspaceRegistration {
+                workspace,
+                private_record,
+                duplicate: true,
+            });
+        }
+        let persisted = self.create_managed_session_workspace(
+            &registration.project.project_id,
+            &candidate.registration.workspace_id,
+            &candidate.registration.alias,
+            &format!("request-register-{}", registration.project.project_id),
+            candidate,
+        )?;
+        Ok(PersistedWorkspaceRegistration {
+            workspace: persisted.workspace,
+            private_record: persisted.private_record,
+            duplicate: registration.duplicate,
+        })
+    }
+
+    #[cfg(test)]
+    pub fn create_session_workspace(
+        &self,
+        from_workspace_id: &str,
+        name: &str,
+        goal: &str,
+        client_request_id: &str,
+    ) -> Result<PersistedSessionWorkspace, WorkspaceHistoryError> {
+        let goal = validate_goal(goal)?;
+        let (project_id, git) = {
+            let inner = self.lock();
+            inner
+                .connection
+                .query_row(
+                    "SELECT w.project_id, w.canonical_root, w.root_device, w.root_inode,
+                            p.canonical_root, p.git_device, p.git_inode, p.project_identity,
+                            p.github_repository, w.branch, w.head, w.detached
+                     FROM workspaces w JOIN projects p ON p.id = w.project_id
+                     WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
+                    params![from_workspace_id],
+                    |row| {
+                        let workspace_root = path_from_bytes(row.get::<_, Vec<u8>>(1)?);
+                        let project_root = path_from_bytes(row.get::<_, Vec<u8>>(4)?);
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            GitRepositoryIdentity {
+                                canonical_root: workspace_root,
+                                canonical_git_dir: project_root.join(".git"),
+                                root_device: row.get::<_, i64>(2)? as u64,
+                                root_inode: row.get::<_, i64>(3)? as u64,
+                                git_device: row.get::<_, i64>(5)? as u64,
+                                git_inode: row.get::<_, i64>(6)? as u64,
+                                common_git_device: row.get::<_, i64>(5)? as u64,
+                                common_git_inode: row.get::<_, i64>(6)? as u64,
+                                project_identity: row.get(7)?,
+                                github_repository: row.get(8)?,
+                                branch: row.get(9)?,
+                                head: row.get(10)?,
+                                detached: row.get::<_, i64>(11)? != 0,
+                            },
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?
+                .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?
+        };
+        let workspace_id = format!("workspace-{}", uuid::Uuid::new_v4());
+        let candidate = ValidatedWorkspaceCandidate {
+            registration: WorkspaceRegistration {
+                schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
+                workspace_id: workspace_id.clone(),
+                alias: name.to_owned(),
+                preflight: WorkspacePreflight {
+                    git_repository: true,
+                    owned_by_current_user: true,
+                    writable: true,
+                },
+            },
+            git,
+        };
+        let persisted = self.create_managed_session_workspace(
+            &project_id,
+            &workspace_id,
+            name,
+            client_request_id,
+            &candidate,
+        )?;
+        self.lock()
+            .connection
+            .execute(
+                "UPDATE workspaces SET goal = ?1 WHERE id = ?2",
+                params![goal, persisted.workspace.workspace_id],
+            )
+            .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
+        Ok(persisted)
+    }
+
+    pub fn session_workspace_for_request(
+        &self,
+        client_request_id: &str,
+    ) -> Result<Option<PersistedSessionWorkspace>, WorkspaceHistoryError> {
+        validate_client_request_id(client_request_id)?;
+        let inner = self.lock();
+        let workspace_id = inner
+            .connection
+            .query_row(
+                "SELECT workspace_id FROM sessions WHERE client_request_id = ?1",
+                params![client_request_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-SESSION-LOOKUP", true))?;
+        workspace_id
+            .map(|workspace_id| {
+                Ok(PersistedSessionWorkspace {
+                    workspace: workspace_by_id(&inner.connection, &workspace_id)?,
+                    private_record: private_workspace_by_id(&inner.connection, &workspace_id)?,
+                    created: false,
+                })
+            })
+            .transpose()
     }
 
     pub fn select_workspace(
@@ -1657,6 +1966,7 @@ impl WorkspaceHistoryStore {
     ) -> Result<WorkspaceStateSnapshot, WorkspaceHistoryError> {
         let status = self.status();
         let inner = self.lock();
+        let projects = all_projects(&inner.connection)?;
         let workspaces = all_workspaces(&inner.connection)?;
         let active_workspace_id = selected_workspace_id
             .map(str::to_owned)
@@ -1693,6 +2003,7 @@ impl WorkspaceHistoryStore {
         Ok(WorkspaceStateSnapshot {
             schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
             history: status,
+            projects,
             workspaces,
             active_workspace_id,
             draft,
@@ -1731,52 +2042,43 @@ impl WorkspaceHistoryStore {
             .connection
             .transaction()
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
-        let project_id = transaction
-            .query_row(
-                "SELECT project_id FROM workspaces WHERE id = ?1",
-                params![workspace_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?
-            .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
         let now = now();
         let health = match result {
             Ok(git) => {
                 let (
-                    prior_identity,
                     prior_root_device,
                     prior_root_inode,
-                    prior_git_device,
-                    prior_git_inode,
+                    prior_common_git_device,
+                    prior_common_git_inode,
                     prior_branch,
                     prior_head,
                     prior_detached,
                 ) = transaction
                     .query_row(
-                        "SELECT project_identity, root_device, root_inode,
-                                git_device, git_inode, branch, head, detached
-                         FROM projects WHERE id = ?1",
-                        params![project_id],
+                        "SELECT w.root_device, w.root_inode,
+                                COALESCE(p.common_git_device, p.git_device),
+                                COALESCE(p.common_git_inode, p.git_inode),
+                                w.branch, w.head, w.detached
+                         FROM workspaces w JOIN projects p ON p.id = w.project_id
+                         WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
+                        params![workspace_id],
                         |row| {
                             Ok((
-                                row.get::<_, String>(0)?,
+                                row.get::<_, i64>(0)? as u64,
                                 row.get::<_, i64>(1)? as u64,
                                 row.get::<_, i64>(2)? as u64,
                                 row.get::<_, i64>(3)? as u64,
-                                row.get::<_, i64>(4)? as u64,
+                                row.get::<_, String>(4)?,
                                 row.get::<_, String>(5)?,
-                                row.get::<_, String>(6)?,
-                                row.get::<_, i64>(7)? != 0,
+                                row.get::<_, i64>(6)? != 0,
                             ))
                         },
                     )
-                    .map_err(|_| history_error("HIST-PROJECT-LOOKUP", true))?;
-                let health = if prior_identity != git.project_identity
-                    || prior_root_device != git.root_device
+                    .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?;
+                let health = if prior_root_device != git.root_device
                     || prior_root_inode != git.root_inode
-                    || prior_git_device != git.git_device
-                    || prior_git_inode != git.git_inode
+                    || prior_common_git_device != git.common_git_device
+                    || prior_common_git_inode != git.common_git_inode
                 {
                     WorkspaceHealth::Changed
                 } else if !accept_observed_head
@@ -1791,47 +2093,33 @@ impl WorkspaceHistoryStore {
                 if health == WorkspaceHealth::Ready {
                     transaction
                         .execute(
-                            "UPDATE projects SET branch = ?1, head = ?2, detached = ?3,
-                               github_repository = ?4, health = ?5, updated_at = ?6
-                             WHERE id = ?7",
+                            "UPDATE workspaces SET branch = ?1, head = ?2, detached = ?3,
+                               health = ?4, updated_at = ?5 WHERE id = ?6",
                             params![
                                 git.branch,
                                 git.head,
                                 i64::from(git.detached),
-                                git.github_repository,
                                 health.as_str(),
                                 now,
-                                project_id,
+                                workspace_id,
                             ],
                         )
-                        .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
+                        .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
                 } else {
                     transaction
                         .execute(
-                            "UPDATE projects SET health = ?1, updated_at = ?2 WHERE id = ?3",
-                            params![health.as_str(), now, project_id],
+                            "UPDATE workspaces SET health = ?1, updated_at = ?2 WHERE id = ?3",
+                            params![health.as_str(), now, workspace_id],
                         )
-                        .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
+                        .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
                 }
-                transaction
-                    .execute(
-                        "UPDATE workspaces SET health = ?1, updated_at = ?2 WHERE project_id = ?3",
-                        params![health.as_str(), now, project_id],
-                    )
-                    .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
                 health
             }
             Err(health) => {
                 transaction
                     .execute(
-                        "UPDATE projects SET health = ?1, updated_at = ?2 WHERE id = ?3",
-                        params![health.as_str(), now, project_id],
-                    )
-                    .map_err(|_| history_error("HIST-PROJECT-UPDATE", true))?;
-                transaction
-                    .execute(
-                        "UPDATE workspaces SET health = ?1, updated_at = ?2 WHERE project_id = ?3",
-                        params![health.as_str(), now, project_id],
+                        "UPDATE workspaces SET health = ?1, updated_at = ?2 WHERE id = ?3",
+                        params![health.as_str(), now, workspace_id],
                     )
                     .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
                 health
@@ -1890,7 +2178,67 @@ impl WorkspaceHistoryStore {
             })
             .ok_or_else(|| history_error("WORKSPACE-DELETE-TOKEN-INVALID", false))?;
         drop(challenge);
-        self.rollback_registration(workspace_id)
+        let mut inner = self.lock();
+        let transaction = inner
+            .connection
+            .transaction()
+            .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
+        workspace_by_id(&transaction, workspace_id)?;
+        let updated_at = now();
+        transaction
+            .execute(
+                "DELETE FROM domain_events WHERE workspace_id = ?1",
+                params![workspace_id],
+            )
+            .map_err(|_| history_error("HIST-EVENT-DELETE", true))?;
+        transaction
+            .execute(
+                "DELETE FROM sessions WHERE workspace_id = ?1",
+                params![workspace_id],
+            )
+            .map_err(|_| history_error("HIST-SESSION-DELETE", true))?;
+        transaction
+            .execute(
+                "DELETE FROM context_snapshots WHERE workspace_id = ?1",
+                params![workspace_id],
+            )
+            .map_err(|_| history_error("HIST-CONTEXT-DELETE", true))?;
+        transaction
+            .execute(
+                "DELETE FROM workspace_resume_states WHERE workspace_id = ?1",
+                params![workspace_id],
+            )
+            .map_err(|_| history_error("HIST-RESUME-DELETE", true))?;
+        transaction
+            .execute(
+                "UPDATE workspace_preferences
+                 SET draft_text = '', effort = 'fast', draft_revision = draft_revision + 1,
+                     updated_at = ?1 WHERE workspace_id = ?2",
+                params![updated_at, workspace_id],
+            )
+            .map_err(|_| history_error("HIST-PREFERENCE-RESET", true))?;
+        transaction
+            .execute(
+                "UPDATE workspace_contexts
+                 SET project_json = ?1, project_version = project_version + 1,
+                     project_hash = ?2, project_updated_at = ?3,
+                     character_json = ?4, character_version = character_version + 1,
+                     character_hash = ?5, character_updated_at = ?3,
+                     project_reference_manifest_json = NULL
+                 WHERE workspace_id = ?6",
+                params![
+                    DEFAULT_PROJECT_JSON,
+                    DEFAULT_PROJECT_HASH,
+                    updated_at,
+                    DEFAULT_CHARACTER_JSON,
+                    DEFAULT_CHARACTER_HASH,
+                    workspace_id,
+                ],
+            )
+            .map_err(|_| history_error("HIST-CONTEXT-RESET", true))?;
+        transaction
+            .commit()
+            .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))
     }
 
     fn ensure_writable(&self, operation: &str) -> Result<(), WorkspaceHistoryError> {
@@ -1936,6 +2284,8 @@ fn open_configured_connection(
             (4, MIGRATION_4),
             (5, MIGRATION_5),
             (6, MIGRATION_6),
+            (7, MIGRATION_7),
+            (8, MIGRATION_8),
         ],
     )?;
     if status.mode == HistoryMode::Ready {
@@ -2210,9 +2560,11 @@ fn set_active_workspace(
 
 fn ensure_workspace_capacity(transaction: &Transaction<'_>) -> Result<(), WorkspaceHistoryError> {
     let count = transaction
-        .query_row("SELECT COUNT(*) FROM workspaces", [], |row| {
-            row.get::<_, i64>(0)
-        })
+        .query_row(
+            "SELECT COUNT(*) FROM workspaces WHERE managed_worktree = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
         .map_err(|_| history_error("HIST-WORKSPACE-COUNT", true))?;
     if count >= MAX_WORKSPACES {
         return Err(history_error("WORKSPACE-LIMIT", false));
@@ -3240,13 +3592,66 @@ fn sanitize_json(
     }
 }
 
+fn project_by_id(
+    connection: &Connection,
+    project_id: &str,
+) -> Result<ProjectSummary, WorkspaceHistoryError> {
+    connection
+        .query_row(
+            "SELECT p.id, p.alias, p.github_repository, p.health,
+                    COUNT(w.id), p.created_at, p.updated_at
+             FROM projects p LEFT JOIN workspaces w
+               ON w.project_id = p.id AND w.managed_worktree = 1
+             WHERE p.id = ?1 AND p.registered = 1 GROUP BY p.id",
+            params![project_id],
+            decode_project_row,
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-PROJECT-QUERY", true))?
+        .ok_or_else(|| history_error("PROJECT-NOT-FOUND", false))
+}
+
+fn all_projects(connection: &Connection) -> Result<Vec<ProjectSummary>, WorkspaceHistoryError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT p.id, p.alias, p.github_repository, p.health,
+                    COUNT(w.id), p.created_at, p.updated_at
+             FROM projects p LEFT JOIN workspaces w
+               ON w.project_id = p.id AND w.managed_worktree = 1
+             WHERE p.registered = 1 GROUP BY p.id
+             ORDER BY p.updated_at DESC, p.alias ASC",
+        )
+        .map_err(|_| history_error("HIST-PROJECT-QUERY", true))?;
+    let rows = statement
+        .query_map([], decode_project_row)
+        .map_err(|_| history_error("HIST-PROJECT-QUERY", true))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|_| history_error("HIST-PROJECT-DECODE", false))
+}
+
+fn decode_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectSummary> {
+    let health = row.get::<_, String>(3)?;
+    Ok(ProjectSummary {
+        schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
+        project_id: row.get(0)?,
+        name: row.get(1)?,
+        github_repository: row.get(2)?,
+        health: WorkspaceHealth::try_from(health.as_str()).unwrap_or(WorkspaceHealth::Unreadable),
+        workspace_count: row.get::<_, i64>(4)? as u64,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
 fn workspace_by_id(
     connection: &Connection,
     workspace_id: &str,
 ) -> Result<WorkspaceSummary, WorkspaceHistoryError> {
     connection
         .query_row(
-            &format!("{WORKSPACE_SELECT} WHERE w.id = ?1 AND p.registered = 1"),
+            &format!(
+                "{WORKSPACE_SELECT} WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1"
+            ),
             params![workspace_id],
             decode_workspace_row,
         )
@@ -3258,7 +3663,7 @@ fn workspace_by_id(
 fn all_workspaces(connection: &Connection) -> Result<Vec<WorkspaceSummary>, WorkspaceHistoryError> {
     let mut statement = connection
         .prepare(&format!(
-            "{WORKSPACE_SELECT} WHERE p.registered = 1 ORDER BY CASE w.lifecycle
+            "{WORKSPACE_SELECT} WHERE p.registered = 1 AND w.managed_worktree = 1 ORDER BY CASE w.lifecycle
                WHEN 'done' THEN 0 WHEN 'in_review' THEN 1 WHEN 'in_progress' THEN 2
                WHEN 'backlog' THEN 3 ELSE 4 END, w.updated_at DESC"
         ))
@@ -3299,14 +3704,15 @@ fn decode_workspace_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceSu
 fn decode_project_linkage(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredProjectLinkage> {
     Ok(StoredProjectLinkage {
         project_id: row.get(0)?,
-        workspace_id: row.get(1)?,
-        canonical_root: path_from_bytes(row.get::<_, Vec<u8>>(2)?),
-        registered: row.get::<_, i64>(3)? != 0,
-        project_identity: row.get(4)?,
-        root_device: row.get::<_, i64>(5)? as u64,
-        root_inode: row.get::<_, i64>(6)? as u64,
-        git_device: row.get::<_, i64>(7)? as u64,
-        git_inode: row.get::<_, i64>(8)? as u64,
+        canonical_root: path_from_bytes(row.get::<_, Vec<u8>>(1)?),
+        registered: row.get::<_, i64>(2)? != 0,
+        project_identity: row.get(3)?,
+        root_device: row.get::<_, i64>(4)? as u64,
+        root_inode: row.get::<_, i64>(5)? as u64,
+        git_device: row.get::<_, i64>(6)? as u64,
+        git_inode: row.get::<_, i64>(7)? as u64,
+        common_git_device: row.get::<_, Option<i64>>(8)?.map(|value| value as u64),
+        common_git_inode: row.get::<_, Option<i64>>(9)?.map(|value| value as u64),
     })
 }
 
@@ -3316,11 +3722,10 @@ fn project_linkage_at_root(
 ) -> Result<Option<StoredProjectLinkage>, WorkspaceHistoryError> {
     transaction
         .query_row(
-            "SELECT p.id, w.id, p.canonical_root, p.registered, p.project_identity,
-                    p.root_device, p.root_inode, p.git_device, p.git_inode
-             FROM projects p JOIN workspaces w ON w.project_id = p.id
-             WHERE p.canonical_root = ?1
-             ORDER BY w.created_at ASC LIMIT 1",
+            "SELECT p.id, p.canonical_root, p.registered, p.project_identity,
+                    p.root_device, p.root_inode, p.git_device, p.git_inode,
+                    p.common_git_device, p.common_git_inode
+             FROM projects p WHERE p.canonical_root = ?1 LIMIT 1",
             params![root],
             decode_project_linkage,
         )
@@ -3334,12 +3739,13 @@ fn project_linkage_by_identity(
 ) -> Result<Option<StoredProjectLinkage>, WorkspaceHistoryError> {
     transaction
         .query_row(
-            "SELECT p.id, w.id, p.canonical_root, p.registered, p.project_identity,
-                    p.root_device, p.root_inode, p.git_device, p.git_inode
-             FROM projects p JOIN workspaces w ON w.project_id = p.id
+            "SELECT p.id, p.canonical_root, p.registered, p.project_identity,
+                    p.root_device, p.root_inode, p.git_device, p.git_inode,
+                    p.common_git_device, p.common_git_inode
+             FROM projects p
              WHERE p.project_identity = ?1 AND p.root_device = ?2 AND p.root_inode = ?3
                AND p.git_device = ?4 AND p.git_inode = ?5
-             ORDER BY p.registered DESC, p.created_at ASC, w.created_at ASC LIMIT 1",
+             ORDER BY p.registered DESC, p.created_at ASC LIMIT 1",
             params![
                 identity.project_identity,
                 identity.root_device as i64,
@@ -3376,9 +3782,9 @@ fn private_workspace_by_id(
 ) -> Result<AppPrivateWorkspaceRecord, WorkspaceHistoryError> {
     connection
         .query_row(
-            "SELECT w.id, p.alias, p.canonical_root
+            "SELECT w.id, w.name, w.canonical_root
              FROM workspaces w JOIN projects p ON p.id = w.project_id
-             WHERE w.id = ?1 AND p.registered = 1",
+             WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
             params![workspace_id],
             |row| {
                 Ok(AppPrivateWorkspaceRecord {
@@ -3399,7 +3805,7 @@ fn private_root_by_workspace(
 ) -> Result<PathBuf, WorkspaceHistoryError> {
     connection
         .query_row(
-            "SELECT p.canonical_root FROM workspaces w JOIN projects p ON p.id = w.project_id
+            "SELECT w.canonical_root FROM workspaces w JOIN projects p ON p.id = w.project_id
              WHERE w.id = ?1",
             params![workspace_id],
             |row| Ok(path_from_bytes(row.get::<_, Vec<u8>>(0)?)),
@@ -3640,6 +4046,18 @@ fn validate_workspace_id(value: &str) -> Result<(), WorkspaceHistoryError> {
     Ok(())
 }
 
+fn validate_project_id(value: &str) -> Result<(), WorkspaceHistoryError> {
+    if !value.starts_with("project-")
+        || value.len() > 128
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+    {
+        return Err(history_error("PROJECT-ID-INVALID", false));
+    }
+    Ok(())
+}
+
 fn validate_opaque_id(value: &str, code: &str) -> Result<(), WorkspaceHistoryError> {
     if value.is_empty()
         || value.len() > 160
@@ -3668,6 +4086,7 @@ fn validate_workspace_name(value: &str) -> Result<String, WorkspaceHistoryError>
     Ok(value.to_owned())
 }
 
+#[cfg(test)]
 fn validate_goal(value: &str) -> Result<String, WorkspaceHistoryError> {
     if value.chars().count() > 4_000 || value.contains('\0') {
         return Err(history_error("WORKSPACE-GOAL-INVALID", false));
@@ -4103,6 +4522,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reregistered_project_does_not_expose_legacy_root_workspace() {
+        let data = temp_directory("history-legacy-root");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let registration = store
+            .register_candidate(&candidate(&root).await)
+            .expect("legacy registration fixture");
+        let project_id = registration.workspace.project_id.clone();
+        let workspace_id = registration.workspace.workspace_id;
+        store
+            .select_workspace(&workspace_id)
+            .expect("select legacy fixture");
+        store
+            .lock()
+            .connection
+            .execute(
+                "UPDATE workspaces SET managed_worktree = 0 WHERE id = ?1",
+                params![workspace_id],
+            )
+            .expect("mark fixture as legacy root");
+        store
+            .unregister_project(&project_id)
+            .expect("unregister legacy project");
+
+        let restored = store
+            .register_project_candidate(&candidate(&root).await)
+            .expect("re-register project only");
+        let state = store.snapshot(None).expect("restored project state");
+
+        assert!(restored.duplicate);
+        assert_eq!(restored.project.workspace_count, 0);
+        assert_eq!(state.projects.len(), 1);
+        assert_eq!(state.projects[0].workspace_count, 0);
+        assert!(state.workspaces.is_empty());
+        assert_eq!(state.active_workspace_id, None);
+        assert!(store
+            .private_workspace_records()
+            .expect("restore records")
+            .is_empty());
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn unregister_hides_registration_without_deleting_workspace_history() {
         let data = temp_directory("history-unregister");
         let root = git_repository();
@@ -4111,6 +4574,7 @@ mod tests {
             .register_candidate(&candidate(&root).await)
             .expect("registration");
         let workspace_id = registration.workspace.workspace_id;
+        let project_id = registration.workspace.project_id;
         let sibling = store
             .create_session_workspace(
                 &workspace_id,
@@ -4124,7 +4588,7 @@ mod tests {
             .expect("draft");
 
         let hidden = store
-            .unregister_project(&workspace_id)
+            .unregister_project(&project_id)
             .expect("unregister project");
         assert!(hidden.workspaces.is_empty());
         assert_eq!(hidden.active_workspace_id, None);
@@ -4239,7 +4703,7 @@ mod tests {
             .expect("old history")
             .items;
         store
-            .unregister_project(&old_workspace_id)
+            .unregister_project(&old_project_id)
             .expect("unregister");
 
         replace_git_directory(&root);
@@ -4303,6 +4767,10 @@ mod tests {
         let saved = store
             .private_project_identity(&workspace_id)
             .expect("saved identity");
+        let original_workspace_root = store
+            .private_workspace_record(&workspace_id)
+            .expect("saved workspace linkage")
+            .canonical_root;
         let different = git_repository();
         let mismatch = candidate(&different).await;
         let history_before = store
@@ -4345,10 +4813,17 @@ mod tests {
         assert_eq!(repaired.workspaces[0].workspace_id, workspace_id);
         assert_eq!(
             store
-                .private_workspace_record(&workspace_id)
-                .expect("moved linkage")
+                .private_project_identity(&workspace_id)
+                .expect("moved project linkage")
                 .canonical_root,
             fs::canonicalize(&moved).expect("canonical moved")
+        );
+        assert_eq!(
+            store
+                .private_workspace_record(&workspace_id)
+                .expect("preserved workspace linkage")
+                .canonical_root,
+            original_workspace_root
         );
         assert_eq!(
             fs::read(moved.join("README.md")).expect("source after"),
@@ -5773,6 +6248,58 @@ mod tests {
                 .expect("GitHub repository column"),
             1
         );
+
+        apply_migrations(
+            &connection,
+            &[
+                (1, MIGRATION_1),
+                (2, MIGRATION_2),
+                (3, MIGRATION_3),
+                (4, MIGRATION_4),
+                (5, MIGRATION_5),
+                (6, MIGRATION_6),
+                (7, MIGRATION_7),
+            ],
+        )
+        .expect("version seven schema");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version seven"),
+            7
+        );
+
+        apply_migrations(
+            &connection,
+            &[
+                (1, MIGRATION_1),
+                (2, MIGRATION_2),
+                (3, MIGRATION_3),
+                (4, MIGRATION_4),
+                (5, MIGRATION_5),
+                (6, MIGRATION_6),
+                (7, MIGRATION_7),
+                (8, MIGRATION_8),
+            ],
+        )
+        .expect("version eight schema");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version eight"),
+            8
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('projects')
+                     WHERE name IN ('common_git_device', 'common_git_inode')",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("Git common directory identity columns"),
+            2
+        );
     }
 
     #[test]
@@ -5975,18 +6502,10 @@ mod tests {
 
         let store = WorkspaceHistoryStore::open(&data).expect("migrate v4 fixture");
         assert_eq!(store.status().mode, HistoryMode::Ready);
-        for (workspace_id, event_id, summary_text, sequence) in &expected {
-            let snapshot = store
-                .snapshot(Some(workspace_id))
-                .expect("snapshot migrated workspace");
-            let resume = snapshot.resume_state.expect("backfilled resume state");
-            let summary = resume.last_summary.expect("backfilled summary");
-            assert_eq!(summary.workspace_id, *workspace_id);
-            assert_eq!(summary.event_id, *event_id);
-            assert_eq!(summary.sequence, *sequence);
-            assert_eq!(summary.text, *summary_text);
-            assert!(resume.timeline_anchor.is_none());
-        }
+        let public_snapshot = store.snapshot(None).expect("public migrated snapshot");
+        assert!(public_snapshot.workspaces.is_empty());
+        assert!(public_snapshot.active_workspace_id.is_none());
+        assert!(public_snapshot.resume_state.is_none());
         drop(store);
 
         let rows_after_migration = {
@@ -5995,7 +6514,7 @@ mod tests {
                 connection
                     .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .expect("migrated version"),
-                6
+                CURRENT_DATABASE_VERSION
             );
             let mut statement = connection
                 .prepare(
@@ -6018,6 +6537,20 @@ mod tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .expect("decode migrated summaries")
         };
+        let mut expected_rows = expected
+            .iter()
+            .map(|(workspace_id, event_id, summary, sequence)| {
+                (
+                    workspace_id.clone(),
+                    event_id.clone(),
+                    *sequence,
+                    summary.clone(),
+                    0,
+                )
+            })
+            .collect::<Vec<_>>();
+        expected_rows.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(rows_after_migration, expected_rows);
         assert_eq!(rows_after_migration.len(), 20);
         assert!(rows_after_migration
             .iter()

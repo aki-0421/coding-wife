@@ -197,10 +197,14 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return state
   }
 
-  async unregisterWorkspace(
-    workspaceId: string,
-  ): Promise<WorkspaceAdapterState> {
-    const state = await this.history.unregisterWorkspace(workspaceId)
+  async unregisterProject(projectId: string): Promise<WorkspaceAdapterState> {
+    const state = await this.history.unregisterProject(projectId)
+    if (state.activeWorkspaceId !== null) await this.activateCodex(state)
+    return state
+  }
+
+  async archiveWorkspace(workspaceId: string): Promise<WorkspaceAdapterState> {
+    const state = await this.history.archiveWorkspace(workspaceId)
     if (state.activeWorkspaceId !== null) await this.activateCodex(state)
     return state
   }
@@ -235,9 +239,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   }
 
   async requestAddProject(): Promise<WorkspaceAdapterState> {
-    const state = await this.history.requestAddProject()
-    await this.activateCodex(state)
-    return state
+    return this.history.requestAddProject()
   }
 
   async requestAddWorkspace(

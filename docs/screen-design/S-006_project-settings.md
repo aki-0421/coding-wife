@@ -96,7 +96,7 @@ headingの説明に`repository/workspace`を表示し、選択中scopeを文字�
 | workspaceを切り替える       | running/pending turnなし        | 新workspace identityとscoped dataへ切替 | 旧workspaceを維持 | 旧snapshotを復元しsafe error         | `WORK-F-048`, `APP-F-055`  |
 | Contextを保存する           | valid、expected version一致     | versionを更新し次turnから適用           | draft維持         | field errorまたはconflict、draft維持 | `WORK-F-063`, `WORK-F-066` |
 | modelを選択する             | verified pack preview成功       | 選択projectだけへatomic適用             | 前selection維持   | 前selection維持、safe error          | `LIVE-F-066`〜`LIVE-F-073` |
-| workspace historyを削除する | running 0、native history ready | 選択workspaceのapp historyだけ削除      | 何も変更しない    | partial successを表示せずrecovery    | `HIST-F-058`, `HIST-F-059` |
+| workspace historyを削除する | running 0、native history ready | 選択workspaceを維持し、app history・draft・contextだけ初期化。workspace登録、worktree、branchは保持 | 何も変更しない | partial successを表示せずrecovery | `HIST-F-049`, `HIST-F-050`, `HIST-F-059` |
 
 ## 入力項目
 
@@ -108,7 +108,7 @@ Project / Character contextのfield、境界、conflict契約は[workspace sessi
 | ---------------------------------- | --------------------------- | -------------------------- | --------------------------------------------------- | ----------------------------------- | -------------------------------------------- |
 | Context load/save                  | Rust SQLite                 | workspace context commands | workspace ID、expected version、canonical reference | draft維持                           | conflictまたはsafe code                      |
 | model import/select/mapping/delete | Rust asset/settings service | character library commands | project/workspace ID、pack ID、manifest hash        | quarantine cleanup、前selection維持 | bundled/selected delete拒否、前selection維持 |
-| history delete                     | Rust DB/artifact service    | `delete_workspace_history` | running 0、workspace ID                             | row/artifact不変                    | recovery state、Git不変                      |
+| history delete                     | Rust DB/artifact service    | `workspace_issue_delete_challenge` / `workspace_delete` | running 0、workspace ID、短命challenge | row/artifact不変 | workspace登録とGitを維持しrecovery state |
 
 ## ウィンドウ固有動作
 

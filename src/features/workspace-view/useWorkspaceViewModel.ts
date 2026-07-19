@@ -11,6 +11,7 @@ import { projectWorkspaceNavigation } from "@/features/workspace-view/workspace-
 import type {
   AttachmentItem,
   ContextSnapshotItem,
+  ProjectRecord,
   ProjectSettingsSection,
   ReasoningEffort,
   SendTurnRequest,
@@ -34,6 +35,30 @@ const defaultProjectHash =
   "e0da727f2381a1c290ddcb74bdb52b44b0ec890559443d795f29731d68fe1323"
 const defaultCharacterHash =
   "0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c"
+
+function projectIdForWorkspace(workspace: WorkspaceRecord): string {
+  return workspace.projectId ?? `legacy:${workspace.repository}`
+}
+
+function projectsForWorkspaces(
+  workspaces: readonly WorkspaceRecord[],
+): readonly ProjectRecord[] {
+  const grouped = new Map<string, WorkspaceRecord[]>()
+  for (const workspace of workspaces) {
+    const projectId = projectIdForWorkspace(workspace)
+    grouped.set(projectId, [...(grouped.get(projectId) ?? []), workspace])
+  }
+  return [...grouped.entries()].map(([id, items]) => ({
+    id,
+    name: items[0]?.repository ?? id,
+    ...(items[0]?.githubRepository === undefined
+      ? {}
+      : { githubRepository: items[0].githubRepository }),
+    health: items[0]?.health ?? "ready",
+    workspaceCount: items.length,
+    updatedAt: items[0]?.updatedAt ?? new Date(0).toISOString(),
+  }))
+}
 
 function fallbackContextSnapshot(
   workspaceId: string,
@@ -149,7 +174,7 @@ function durableTimelineIdentity(
 
 export type TurnUiState = "idle" | "sending" | "running" | "stopping"
 export type WorkspaceAdapterStatus = "loading" | "ready" | "error"
-export type WorkspaceAction = "cancel" | "repair" | "unregister"
+export type WorkspaceAction = "archive" | "cancel" | "repair" | "unregister"
 
 export type WorkspaceActionResult =
   | { readonly ok: true }
@@ -177,6 +202,10 @@ export function useWorkspaceViewModel(
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceRecord[]>(
     () => (nativeHydration ? [] : initialWorkspaces),
   )
+  const [projects, setProjects] = useState<readonly ProjectRecord[]>(() => {
+    if (nativeHydration) return []
+    return projectsForWorkspaces(initialWorkspaces)
+  })
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(() => {
     if (nativeHydration) return ""
     return (
@@ -252,6 +281,7 @@ export function useWorkspaceViewModel(
   }, [adapter])
 
   const applyAdapterState = useCallback((state: WorkspaceAdapterState) => {
+    setProjects(state.projects ?? projectsForWorkspaces(state.workspaces))
     setWorkspaces(state.workspaces)
     setTimeline(state.timeline)
     setLastSummary(state.lastSummary ?? null)
@@ -289,6 +319,7 @@ export function useWorkspaceViewModel(
       queueMicrotask(() => {
         if (!current) return
         setAdapterStatus("loading")
+        setProjects([])
         setWorkspaces([])
         setSelectedWorkspaceId("")
         setDrafts({})
@@ -868,17 +899,16 @@ export function useWorkspaceViewModel(
   )
 
   const addWorkspace = useCallback(
-    async (name: string, goal: string) => {
+    async (projectId: string, name: string) => {
       const trimmedName = name.trim()
       if (!adapterReady || trimmedName.length === 0) return false
-      if (adapter?.requestAddWorkspace && selectedWorkspace) {
+      const project = projects.find((candidate) => candidate.id === projectId)
+      if (project === undefined) return false
+      if (adapter?.requestAddWorkspace) {
         try {
           const state = await adapter.requestAddWorkspace({
-            fromWorkspaceId: selectedWorkspace.id,
+            projectId,
             name: trimmedName,
-            goal: goal.trim(),
-            repository: selectedWorkspace.repository,
-            branch: selectedWorkspace.branch,
           })
           if (state !== undefined) {
             applyAdapterState(state)
@@ -899,24 +929,36 @@ export function useWorkspaceViewModel(
       }
       const record: WorkspaceRecord = {
         id: `local-${Date.now()}`,
-        repository: selectedWorkspace?.repository ?? "local-project",
-        ...(selectedWorkspace?.githubRepository === undefined
+        projectId,
+        repository: project.name,
+        ...(project.githubRepository === undefined
           ? {}
-          : { githubRepository: selectedWorkspace.githubRepository }),
+          : { githubRepository: project.githubRepository }),
         name: trimmedName,
-        branch: selectedWorkspace?.branch ?? "main",
+        branch: `coding-wife/local-${Date.now()}`,
         lifecycle: "backlog",
       }
       setWorkspaces((current) => [...current, record])
+      setProjects((current) =>
+        current.map((candidate) =>
+          candidate.id === projectId
+            ? {
+                ...candidate,
+                workspaceCount: candidate.workspaceCount + 1,
+                updatedAt: new Date().toISOString(),
+              }
+            : candidate,
+        ),
+      )
       setSelectedWorkspaceId(record.id)
       setActiveTab("chat")
       setDrafts((current) => ({
         ...current,
-        [record.id]: { ...emptyDraft, text: goal.trim() },
+        [record.id]: emptyDraft,
       }))
       return true
     },
-    [adapter, adapterReady, applyAdapterState, selectedWorkspace],
+    [adapter, adapterReady, applyAdapterState, projects],
   )
 
   const requestAddProject = useCallback(
@@ -1140,27 +1182,18 @@ export function useWorkspaceViewModel(
       }
     }, [adapter, adapterReady, applyAdapterState, selectedWorkspace])
 
-  const unregisterSelectedWorkspace =
-    useCallback(async (): Promise<WorkspaceActionResult> => {
+  const unregisterProject = useCallback(
+    async (projectId: string): Promise<WorkspaceActionResult> => {
       if (
         !adapterReady ||
-        !selectedWorkspace ||
-        !adapter?.unregisterWorkspace
+        !projects.some((project) => project.id === projectId) ||
+        !adapter?.unregisterProject
       ) {
         return { ok: false, errorCode: "WORKSPACE-UNREGISTER-UNAVAILABLE" }
       }
-      const workspaceId = selectedWorkspace.id
       setWorkspaceAction("unregister")
       try {
-        const pending = pendingDraftSaves.current.get(workspaceId)
-        if (pending !== undefined && adapter.saveDraft !== undefined) {
-          const timer = draftSaveTimers.current.get(workspaceId)
-          if (timer !== undefined) window.clearTimeout(timer)
-          draftSaveTimers.current.delete(workspaceId)
-          await adapter.saveDraft(workspaceId, pending.text, pending.effort)
-          pendingDraftSaves.current.delete(workspaceId)
-        }
-        applyAdapterState(await adapter.unregisterWorkspace(workspaceId))
+        applyAdapterState(await adapter.unregisterProject(projectId))
         setNotice(null)
         return { ok: true }
       } catch (error) {
@@ -1174,7 +1207,43 @@ export function useWorkspaceViewModel(
       } finally {
         setWorkspaceAction(null)
       }
-    }, [adapter, adapterReady, applyAdapterState, selectedWorkspace])
+    },
+    [adapter, adapterReady, applyAdapterState, projects],
+  )
+
+  const archiveWorkspace = useCallback(
+    async (workspaceId: string): Promise<WorkspaceActionResult> => {
+      if (!adapterReady || !adapter?.archiveWorkspace) {
+        return { ok: false, errorCode: "WORKSPACE-ARCHIVE-UNAVAILABLE" }
+      }
+      setWorkspaceAction("archive")
+      deletingWorkspaceIds.current.add(workspaceId)
+      pendingDraftSaves.current.delete(workspaceId)
+      const timer = draftSaveTimers.current.get(workspaceId)
+      if (timer !== undefined) window.clearTimeout(timer)
+      draftSaveTimers.current.delete(workspaceId)
+      try {
+        applyAdapterState(await adapter.archiveWorkspace(workspaceId))
+        setDrafts((current) => {
+          const next = { ...current }
+          delete next[workspaceId]
+          return next
+        })
+        setNotice(null)
+        return { ok: true }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode:
+            error instanceof Error ? error.message : "WORKSPACE-ARCHIVE-FAILED",
+        }
+      } finally {
+        deletingWorkspaceIds.current.delete(workspaceId)
+        setWorkspaceAction(null)
+      }
+    },
+    [adapter, adapterReady, applyAdapterState],
+  )
 
   const deleteSelectedWorkspaceHistory = useCallback(async () => {
     if (
@@ -1236,6 +1305,7 @@ export function useWorkspaceViewModel(
     addWorkspace,
     answerApproval,
     answerDecision,
+    archiveWorkspace,
     captureContext,
     cancelSelectedWorkspace,
     cancelWorkspaceTransition,
@@ -1248,6 +1318,7 @@ export function useWorkspaceViewModel(
     notice,
     pendingWorkspaceTransition,
     pickAttachments,
+    projects,
     history,
     lastSummary,
     reducedMotion,
@@ -1281,6 +1352,6 @@ export function useWorkspaceViewModel(
     turnState,
     workspaces,
     workspaceAction,
-    unregisterSelectedWorkspace,
+    unregisterProject,
   }
 }

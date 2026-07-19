@@ -108,20 +108,33 @@ describe("DemoWorkspaceHistoryTransport", () => {
       workspaceHistoryCommands.pickRegister,
       undefined,
     )
-    const workspaceId = selectedProject.state.activeWorkspaceId
-    if (workspaceId === null || selectedProject.state.draft === null) {
+    const project = selectedProject.state.projects.find(
+      (candidate) => candidate.projectId === "project-demo-selected",
+    )
+    if (project === undefined) {
       throw new Error("demo fixture")
     }
+    const created = await transport.request(
+      workspaceHistoryCommands.createSession,
+      {
+        projectId: project.projectId,
+        name: "Preserved workspace",
+        clientRequestId: "request-demo-preserved",
+      },
+    )
+    const workspaceId = created.activeWorkspaceId
+    if (workspaceId === null || created.draft === null)
+      throw new Error("demo fixture")
     await transport.request(workspaceHistoryCommands.saveDraft, {
       workspaceId,
       text: "Preserve this draft",
       effort: "max",
-      expectedRevision: selectedProject.state.draft.revision,
+      expectedRevision: created.draft.revision,
     })
 
     const remaining = await transport.request(
       workspaceHistoryCommands.unregister,
-      { workspaceId },
+      { projectId: project.projectId },
     )
 
     expect(remaining.workspaces).toHaveLength(3)
@@ -129,6 +142,10 @@ describe("DemoWorkspaceHistoryTransport", () => {
     await expect(
       transport.request(workspaceHistoryCommands.select, { workspaceId }),
     ).rejects.toMatchObject({ code: "WORKSPACE-NOT-FOUND" })
+    await transport.request(workspaceHistoryCommands.pickRegister, undefined)
+    await expect(
+      transport.request(workspaceHistoryCommands.select, { workspaceId }),
+    ).resolves.toMatchObject({ draft: { text: "Preserve this draft" } })
   })
 
   it("creates sessions idempotently and records lifecycle events", async () => {
@@ -137,12 +154,11 @@ describe("DemoWorkspaceHistoryTransport", () => {
       workspaceHistoryCommands.list,
       undefined,
     )
-    const fromWorkspaceId = initial.activeWorkspaceId
-    if (fromWorkspaceId === null) throw new Error("demo fixture")
+    const projectId = initial.projects[0]?.projectId
+    if (projectId === undefined) throw new Error("demo fixture")
     const request = {
-      fromWorkspaceId,
+      projectId,
       name: "Demo persisted session",
-      goal: "Exercise the adapter",
       clientRequestId: "request-demo-create",
     }
 
@@ -157,7 +173,7 @@ describe("DemoWorkspaceHistoryTransport", () => {
 
     expect(created.activeWorkspaceId).toBe(duplicate.activeWorkspaceId)
     expect(duplicate.workspaces).toHaveLength(initial.workspaces.length + 1)
-    expect(duplicate.draft?.text).toBe("Exercise the adapter")
+    expect(duplicate.draft?.text).toBe("")
     expect(duplicate.timeline.items.at(-1)).toMatchObject({
       kind: "work.workspace.lifecycle.changed",
       payload: { lifecycle: "backlog" },

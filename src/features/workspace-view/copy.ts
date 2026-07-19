@@ -5,6 +5,7 @@ const en = {
   filterWorkspaces: "Filter workspaces",
   addProject: "Add project",
   addWorkspace: "Add workspace",
+  archiveWorkspace: "Archive workspace",
   settings: "Settings",
   appSettings: "App settings",
   repositoryBreadcrumb: "Repository location",
@@ -57,6 +58,14 @@ const en = {
       draft:
         "The latest draft could not be saved, so the project was not unregistered.",
     },
+  },
+  archiveDialog: {
+    title: "Archive this workspace?",
+    body: (workspace: string) =>
+      `The Git worktree for ${workspace} and its app history will be removed. The project repository and branch are kept.`,
+    cancel: "Keep workspace",
+    confirm: "Archive workspace",
+    working: "Archiving…",
   },
   workspaceSwitch: {
     title: "Stop and switch workspaces?",
@@ -384,6 +393,7 @@ const en = {
     backToWorkspace: "Back to workspace",
     sections: {
       general: "General",
+      projects: "Projects",
       project_context: "Project context",
       character_context: "Character context",
       companion: "Companion",
@@ -393,6 +403,21 @@ const en = {
       history: "History & privacy",
     },
     generalTitle: "General",
+    projectsTitle: "Registered projects",
+    projectsDescription:
+      "Repositories available when creating a workspace. Unregistering changes only this app.",
+    noProjectsTitle: "No registered projects",
+    noProjectsDescription:
+      "Use the folder button in the sidebar to register a Git repository.",
+    workspaceCount: (count: number) =>
+      `${count.toLocaleString()} ${count === 1 ? "workspace" : "workspaces"}`,
+    unregisterProject: "Unregister",
+    unregisterProjectTitle: "Unregister this project?",
+    unregisterProjectBody: (project: string) =>
+      `${project} will disappear from this app. Its repository, worktrees, branches, and files remain on disk.`,
+    keepProject: "Keep project",
+    confirmUnregisterProject: "Unregister project",
+    unregisteringProject: "Unregistering…",
     language: "Language",
     languageDescription:
       "Applies to all app-owned copy as soon as the preference store accepts the change.",
@@ -542,12 +567,14 @@ const en = {
   },
   createWorkspace: {
     title: "Create workspace",
+    firstTitle: "Create your first workspace",
     description:
-      "Creates a Backlog session in the selected project and keeps its goal as the first draft.",
+      "Creates a Git worktree for the selected project on a new app-managed branch.",
+    project: "Project",
     name: "Workspace name",
-    goal: "Goal",
     cancel: "Cancel",
-    create: "Create",
+    create: "Create workspace",
+    creating: "Creating…",
   },
   compactSidebar: "Open workspace navigation",
 }
@@ -558,6 +585,7 @@ const ja: typeof en = {
   filterWorkspaces: "ワークスペースを絞り込む",
   addProject: "プロジェクトを追加",
   addWorkspace: "ワークスペースを追加",
+  archiveWorkspace: "ワークスペースをアーカイブ",
   settings: "設定",
   appSettings: "アプリ設定",
   repositoryBreadcrumb: "リポジトリの現在地",
@@ -610,6 +638,14 @@ const ja: typeof en = {
       draft:
         "最新の下書きを保存できなかったため、プロジェクト登録を解除しませんでした。",
     },
+  },
+  archiveDialog: {
+    title: "このワークスペースをアーカイブしますか？",
+    body: (workspace: string) =>
+      `${workspace} のGit worktreeとアプリ内履歴を削除します。プロジェクトのリポジトリとブランチは保持します。`,
+    cancel: "ワークスペースを保持",
+    confirm: "ワークスペースをアーカイブ",
+    working: "アーカイブ中…",
   },
   workspaceSwitch: {
     title: "停止してワークスペースを切り替えますか？",
@@ -936,6 +972,7 @@ const ja: typeof en = {
     backToWorkspace: "ワークスペースへ戻る",
     sections: {
       general: "一般",
+      projects: "プロジェクト",
       project_context: "プロジェクトコンテキスト",
       character_context: "キャラクターコンテキスト",
       companion: "コンパニオン",
@@ -945,6 +982,21 @@ const ja: typeof en = {
       history: "履歴とプライバシー",
     },
     generalTitle: "一般",
+    projectsTitle: "登録済みプロジェクト",
+    projectsDescription:
+      "ワークスペースの作成先として利用できるリポジトリです。登録解除はこのアプリ内だけに反映されます。",
+    noProjectsTitle: "登録済みプロジェクトはありません",
+    noProjectsDescription:
+      "サイドバーのフォルダボタンからGitリポジトリを登録してください。",
+    workspaceCount: (count: number) =>
+      `${count.toLocaleString()}件のワークスペース`,
+    unregisterProject: "登録解除",
+    unregisterProjectTitle: "このプロジェクトの登録を解除しますか？",
+    unregisterProjectBody: (project: string) =>
+      `${project} をこのアプリから非表示にします。リポジトリ、worktree、ブランチ、ファイルはディスク上に保持します。`,
+    keepProject: "プロジェクトを保持",
+    confirmUnregisterProject: "プロジェクト登録を解除",
+    unregisteringProject: "登録解除中…",
     language: "言語",
     languageDescription:
       "設定ストアが変更を受理すると、すべてのアプリ管理文言へ即時に反映します。",
@@ -1093,12 +1145,14 @@ const ja: typeof en = {
   },
   createWorkspace: {
     title: "ワークスペースを作成",
+    firstTitle: "最初のワークスペースを作成",
     description:
-      "選択中のプロジェクトにBacklogセッションを作成し、目標を最初の下書きとして保存します。",
+      "選択したプロジェクトに、アプリ管理の新しいブランチとGit worktreeを作成します。",
+    project: "プロジェクト",
     name: "ワークスペース名",
-    goal: "目標",
     cancel: "キャンセル",
-    create: "作成",
+    create: "ワークスペースを作成",
+    creating: "作成中…",
   },
   compactSidebar: "ワークスペースnavigationを開く",
 }

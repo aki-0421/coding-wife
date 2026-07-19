@@ -2,13 +2,13 @@ use tauri::State;
 
 use super::service::WorkspaceHistoryService;
 use super::types::{
-    AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, TimelinePage,
-    VersionedCharacterContext, VersionedProjectContext, WorkspaceCancelRequest,
-    WorkspaceCommandError, WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeRequest,
-    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView,
-    WorkspaceEditableContext, WorkspaceLoadEditableContextRequest, WorkspacePickResponse,
-    WorkspaceRecheckRequest, WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest,
-    WorkspaceSaveDraftRequest, WorkspaceSaveProjectContextRequest,
+    AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, ProjectSelectRequest,
+    TimelinePage, VersionedCharacterContext, VersionedProjectContext, WorkspaceArchiveRequest,
+    WorkspaceCancelRequest, WorkspaceCommandError, WorkspaceCreateSessionRequest,
+    WorkspaceDeleteChallengeRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
+    WorkspaceDraftView, WorkspaceEditableContext, WorkspaceLoadEditableContextRequest,
+    WorkspacePickResponse, WorkspaceRecheckRequest, WorkspaceSaveCharacterContextRequest,
+    WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest, WorkspaceSaveProjectContextRequest,
     WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
     WorkspaceSummary, WorkspaceTimelineAnchorView, WorkspaceTimelineRequest,
     WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
@@ -62,10 +62,18 @@ pub async fn workspace_repair(
 
 #[tauri::command]
 pub async fn workspace_unregister(
-    request: WorkspaceSelectRequest,
+    request: ProjectSelectRequest,
     service: State<'_, WorkspaceHistoryService>,
 ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
     service.unregister(request).await
+}
+
+#[tauri::command]
+pub async fn workspace_archive(
+    request: WorkspaceArchiveRequest,
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+    service.archive(request).await
 }
 
 #[tauri::command]
