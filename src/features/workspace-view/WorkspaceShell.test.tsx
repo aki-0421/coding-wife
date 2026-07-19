@@ -449,11 +449,15 @@ describe("WorkspaceShell", () => {
     const user = userEvent.setup()
     renderWorkspace()
     const navigation = screen.getByRole("navigation", { name: "Workspaces" })
+    expect(navigation).toHaveClass("max-w-[242.25px]")
     const doneToggle = within(navigation).getByRole("button", {
       name: "Done(1)",
     })
     const reviewToggle = within(navigation).getByRole("button", {
       name: "In Review(1)",
+    })
+    const backlogToggle = within(navigation).getByRole("button", {
+      name: "Backlog(0)",
     })
     const selectedWorkspace = within(navigation).getByRole("button", {
       name: /coding-wife\/build-live2d-desktop-app/,
@@ -461,6 +465,7 @@ describe("WorkspaceShell", () => {
 
     expect(doneToggle).toHaveAttribute("aria-expanded", "true")
     expect(reviewToggle).toHaveAttribute("aria-expanded", "true")
+    expect(doneToggle.querySelector("[data-workspace-status-count]")).toBeNull()
     expect(
       within(navigation).getByRole("button", {
         name: "coding-wife/sol-desktop, main, Done",
@@ -480,6 +485,11 @@ describe("WorkspaceShell", () => {
     await user.click(doneToggle)
 
     expect(doneToggle).toHaveAttribute("aria-expanded", "false")
+    const doneCount = doneToggle.querySelector(
+      '[data-workspace-status-count="done"]',
+    )
+    expect(doneCount).toHaveTextContent("1")
+    expect(doneCount).toHaveAttribute("aria-hidden", "true")
     expect(
       document.getElementById(controlledContentId as string),
     ).toHaveAttribute("hidden")
@@ -491,10 +501,17 @@ describe("WorkspaceShell", () => {
     ).toBeNull()
     expect(selectedWorkspace).toHaveAttribute("aria-current", "page")
 
+    await user.click(backlogToggle)
+    expect(backlogToggle).toHaveAttribute("aria-expanded", "false")
+    expect(
+      backlogToggle.querySelector('[data-workspace-status-count="backlog"]'),
+    ).toHaveTextContent("0")
+
     doneToggle.focus()
     await user.keyboard(" ")
 
     expect(doneToggle).toHaveAttribute("aria-expanded", "true")
+    expect(doneToggle.querySelector("[data-workspace-status-count]")).toBeNull()
     expect(
       within(navigation).getByRole("button", {
         name: "coding-wife/sol-desktop, main, Done",

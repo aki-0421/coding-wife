@@ -337,7 +337,10 @@ function SidebarPanel({
       ) : null}
 
       <ScrollArea className="min-h-0 flex-1 px-xs">
-        <nav aria-label={copy.workspaces} className="flex flex-col pb-md">
+        <nav
+          aria-label={copy.workspaces}
+          className="flex w-full max-w-[242.25px] flex-col pb-md"
+        >
           {groups.map(({ lifecycle, workspaces }) => {
             const expanded = expandedLifecycles[lifecycle]
             const contentId = `${lifecycleContentIdPrefix}-${lifecycle}`
@@ -356,14 +359,25 @@ function SidebarPanel({
                     <WorkspaceLifecycleIcon lifecycle={lifecycle} />
                     <span>{linearWorkspaceStatusLabels[lifecycle]}</span>
                     <span className="sr-only">({workspaces.length})</span>
-                    <ChevronRightIcon
-                      aria-hidden="true"
-                      className={cn(
-                        "ml-auto size-3 shrink-0 opacity-0 transition-[opacity,transform] duration-150 motion-reduce:transition-none group-hover/status:opacity-100 group-focus-visible/status:opacity-100",
-                        expanded && "rotate-90",
-                      )}
-                      data-workspace-status-chevron=""
-                    />
+                    <span className="ml-auto flex items-center gap-xxs">
+                      {!expanded ? (
+                        <span
+                          aria-hidden="true"
+                          className="tabular-nums text-label text-muted-foreground"
+                          data-workspace-status-count={lifecycle}
+                        >
+                          {workspaces.length}
+                        </span>
+                      ) : null}
+                      <ChevronRightIcon
+                        aria-hidden="true"
+                        className={cn(
+                          "size-3 shrink-0 opacity-0 transition-[opacity,transform] duration-150 motion-reduce:transition-none group-hover/status:opacity-100 group-focus-visible/status:opacity-100",
+                          expanded && "rotate-90",
+                        )}
+                        data-workspace-status-chevron=""
+                      />
+                    </span>
                   </button>
                 </h2>
                 <div hidden={!expanded} id={contentId}>
