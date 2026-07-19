@@ -554,6 +554,12 @@ describe("WorkspaceShell", () => {
       "text-muted-foreground",
     )
     expect(
+      navigation.querySelectorAll('[data-repository-avatar="github"]'),
+    ).toHaveLength(3)
+    expect(
+      doneWorkspace.querySelector('[data-repository-avatar="github"]'),
+    ).toHaveAttribute("data-github-owner", "aki-0421")
+    expect(
       within(selectedWorkspace).getByText("feature/live2d-companion"),
     ).toHaveClass("text-sidebar-item", "text-text-strong")
     expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
@@ -831,7 +837,9 @@ describe("WorkspaceShell", () => {
       within(breadcrumb).getByText("build-live2d-desktop-app"),
     ).toHaveAttribute("aria-current", "page")
 
-    const avatar = document.querySelector('[data-repository-avatar="github"]')
+    const avatar = breadcrumb
+      .closest("header")
+      ?.querySelector('[data-repository-avatar="github"]')
     expect(avatar).toHaveAttribute("data-github-owner", "aki-0421")
     expect(avatar?.querySelector('[data-slot="avatar-image"]')).toHaveAttribute(
       "src",
@@ -852,11 +860,21 @@ describe("WorkspaceShell", () => {
     renderWorkspace(adapter)
 
     expect(await screen.findByText("restored-workspace")).toBeVisible()
-    const avatar = document.querySelector('[data-repository-avatar="local"]')
+    const breadcrumb = screen.getByRole("navigation", {
+      name: "Repository location",
+    })
+    const avatar = breadcrumb
+      .closest("header")
+      ?.querySelector('[data-repository-avatar="local"]')
     expect(avatar).toBeVisible()
     expect(
       avatar?.querySelector('[data-slot="avatar-image"]'),
     ).not.toBeInTheDocument()
+    expect(
+      screen
+        .getByRole("navigation", { name: "Workspaces" })
+        .querySelector('[data-repository-avatar="local"]'),
+    ).toBeVisible()
   })
 
   it("supports keyboard tab cycling and the workspace filter shortcut", async () => {

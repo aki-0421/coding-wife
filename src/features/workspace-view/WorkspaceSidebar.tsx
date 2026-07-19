@@ -37,6 +37,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
 import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
 import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
 import type {
@@ -111,18 +112,21 @@ function WorkspaceRow({
           onClick={onSelect}
           type="button"
         >
-          <GitBranchIcon
-            aria-hidden="true"
-            className={cn(
-              "size-3 shrink-0 text-muted-foreground",
-              selected && "text-branch-selected",
-            )}
-          />
+          <RepositoryAvatar workspace={workspace} />
           <span className="flex min-w-0 flex-1 flex-col">
-            <span
-              className={`truncate text-sidebar-item ${selected ? "text-text-strong" : "text-foreground"}`}
-            >
-              {workspace.branch}
+            <span className="flex min-w-0 items-center gap-xxs">
+              <GitBranchIcon
+                aria-hidden="true"
+                className={cn(
+                  "size-3 shrink-0 text-muted-foreground",
+                  selected && "text-branch-selected",
+                )}
+              />
+              <span
+                className={`truncate text-sidebar-item ${selected ? "text-text-strong" : "text-foreground"}`}
+              >
+                {workspace.branch}
+              </span>
             </span>
             <span className="flex min-w-0 items-center gap-xs">
               <span

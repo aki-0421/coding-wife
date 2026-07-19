@@ -2,18 +2,15 @@ import { useEffect, useRef, useState } from "react"
 import {
   BanIcon,
   EllipsisIcon,
-  FolderGit2Icon,
   FolderMinusIcon,
   FolderSearchIcon,
   GitBranchIcon,
   LoaderCircleIcon,
   RefreshCwIcon,
   TriangleAlertIcon,
-  UserRoundIcon,
   WifiOffIcon,
 } from "lucide-react"
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
@@ -43,6 +40,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
 import type {
   WorkspaceRecord,
   WorkspaceTab,
@@ -72,46 +70,6 @@ const tabOrder: readonly WorkspaceTab[] = [
   "context",
   "settings",
 ]
-
-const githubRepositoryPattern =
-  /^([A-Za-z0-9_.-]{1,39})\/[A-Za-z0-9_.-]{1,100}$/
-
-function githubOwner(repository: string | undefined): string | null {
-  return repository?.match(githubRepositoryPattern)?.[1] ?? null
-}
-
-function githubAvatarUrl(owner: string): string {
-  return `https://avatars.githubusercontent.com/${encodeURIComponent(owner)}?size=48`
-}
-
-function RepositoryAvatar({
-  workspace,
-}: {
-  readonly workspace: WorkspaceRecord
-}) {
-  const owner = githubOwner(workspace.githubRepository)
-
-  return (
-    <Avatar
-      aria-hidden="true"
-      data-github-owner={owner ?? undefined}
-      data-repository-avatar={owner === null ? "local" : "github"}
-      size="sm"
-    >
-      {owner === null ? null : (
-        <AvatarImage
-          alt=""
-          decoding="async"
-          referrerPolicy="no-referrer"
-          src={githubAvatarUrl(owner)}
-        />
-      )}
-      <AvatarFallback className="[&>svg]:size-3">
-        {owner === null ? <FolderGit2Icon /> : <UserRoundIcon />}
-      </AvatarFallback>
-    </Avatar>
-  )
-}
 
 function ConnectionStatus({
   connection,
