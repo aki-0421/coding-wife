@@ -65,6 +65,7 @@ interface WorkspaceSidebarProps {
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
   readonly projects: readonly ProjectRecord[]
   readonly selectedProjectId?: string | undefined
+  readonly selectedWorkspace?: WorkspaceRecord | undefined
   readonly selectedWorkspaceId: string
   readonly archiveDisabledWorkspaceId?: string | undefined
   readonly onAddProject: () => void
@@ -195,7 +196,12 @@ function defaultWorkspaceName(): string {
   const now = new Date()
   const part = (value: number) => value.toString().padStart(2, "0")
   const timestamp = `${now.getFullYear()}${part(now.getMonth() + 1)}${part(now.getDate())}-${part(now.getHours())}${part(now.getMinutes())}${part(now.getSeconds())}`
-  const suffix = crypto.randomUUID().slice(0, 4)
+  const suffix =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID().slice(0, 4)
+      : Math.floor(Math.random() * 36 ** 4)
+          .toString(36)
+          .padStart(4, "0")
   return `workspace-${timestamp}-${suffix}`
 }
 
@@ -212,7 +218,7 @@ function CreateWorkspaceDialog({
 }) {
   const [open, setOpen] = useState(false)
   const [projectId, setProjectId] = useState("")
-  const [name, setName] = useState(defaultWorkspaceName)
+  const [name, setName] = useState("")
 
   const setDialogOpen = (nextOpen: boolean) => {
     if (nextOpen) {
@@ -516,6 +522,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
     Readonly<Record<WorkspaceLifecycle, boolean>>
   >(() => ({ ...initiallyExpandedLifecycles }))
   const compactOpenerRef = useRef<HTMLButtonElement | null>(null)
+  const selected = props.selectedWorkspace
   const toggleLifecycle = (lifecycle: WorkspaceLifecycle) => {
     setExpandedLifecycles((current) => ({
       ...current,
@@ -596,8 +603,8 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 closeCompactNavigation()
                 props.onAddProject()
               }}
-              onCreateWorkspace={async (name, goal) => {
-                const created = await props.onCreateWorkspace(name, goal)
+              onCreateWorkspace={async (projectId, name) => {
+                const created = await props.onCreateWorkspace(projectId, name)
                 if (created) closeCompactNavigation()
                 return created
               }}
@@ -612,28 +619,30 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
           </DialogContent>
 
           <div className="mt-md flex flex-1 flex-col items-center gap-sm">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-controls="compact-workspace-navigation"
-                  aria-expanded={compactNavigationOpen}
-                  aria-haspopup="dialog"
-                  aria-label={`${props.copy.switchWorkspace}: ${selected.repository}/${selected.name}`}
-                  onClick={(event) =>
-                    openCompactNavigation(event.currentTarget)
-                  }
-                  size="icon-sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  <GitBranchIcon />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                {props.copy.switchWorkspace}: {selected.repository}/
-                {selected.name}
-              </TooltipContent>
-            </Tooltip>
+            {selected ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-controls="compact-workspace-navigation"
+                    aria-expanded={compactNavigationOpen}
+                    aria-haspopup="dialog"
+                    aria-label={`${props.copy.switchWorkspace}: ${selected.repository}/${selected.name}`}
+                    onClick={(event) =>
+                      openCompactNavigation(event.currentTarget)
+                    }
+                    size="icon-sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    <GitBranchIcon />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {props.copy.switchWorkspace}: {selected.repository}/
+                  {selected.name}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </Dialog>
 

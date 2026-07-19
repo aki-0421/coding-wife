@@ -87,6 +87,7 @@ read_when:
 | `WORK-F-057` | 利用者はproject登録を外せる | App SettingsのProjects一覧で対象project名を示す確認を完了するとprojectと配下workspaceをnavigationから外す。実行中turnがある場合は操作を拒否し、履歴本文の変更・削除は`HIST-F-049`の別操作に限定する。project repository、作成済みworktree directory、Git index/object/ref、branch、共有model libraryを変更・削除しない | Approved | 非該当 |
 | `WORK-F-067` | 利用者はworkspaceをArchiveしてworktreeを削除できる | sidebar rowのhoverまたはfocus-withinでArchive iconを表示し、確認後にactive/pending turnがない対象へapp-owned root境界を検証した`git worktree remove --force`を実行し、workspace recordをnavigationから削除する。worktree directoryまたはGit worktree registrationが既に存在しない場合も成功としてmetadataを収束させる。project repository、他worktree、branch、Git object/refを削除しない | Approved | 非該当 |
 | `WORK-F-068` | 利用者は登録project一覧を管理できる | App SettingsのProjects sectionで登録中projectをworkspace件数とともに一覧し、project登録解除を開始できる。workspaceが0件でもproject一覧とApp Settingsへ到達できる | Approved | 非該当 |
+| `WORK-F-069` | workspace UIの初期描画は空windowへ失敗しない | 0件を含むworkspace selectionを全viewportのsidebarでoptionalとして扱い、compact navigationも存在しないselectionを参照しない。create dialogを開く前の初期描画ではrandom UUID APIを呼び出さず、dialogを開いた時にlocal timestampとrandom suffixを生成し、WebViewが`crypto.randomUUID`を提供しない場合もfallback suffixを生成して画面を維持する。application moduleの読込またはReact描画が失敗した場合はrootを空のままにせず、localeに合う回復案内と再読込操作を表示する | Approved | 非該当 |
 
 ### 継続性と境界
 
@@ -112,7 +113,7 @@ read_when:
 | persistence / migration | `src-tauri/src/workspace_history/store.rs` | `projects.registered`、workspace固有canonical root、`managed_worktree`、DB version、cross-language fixture |
 | Git mutation / trust | `src-tauri/src/workspace_history/service.rs`、`src-tauri/src/codex/workspace.rs` | project common Git identity、app-owned worktree path、固定Git引数、partial failure rollback |
 | frontend state | `src/features/workspace-persistence/adapter.ts`、`src/features/workspace-view/useWorkspaceViewModel.ts` | Project IDをworkspace作成まで維持し、workspace 0件でもproject一覧を失わない |
-| UI | `WorkspaceSidebar.tsx`、`SettingsView.tsx`、`WorkspaceShell.tsx` | create dialog、hover/focus Archive、zero-workspace shell、Projects登録解除確認 |
+| UI | `src/main.tsx`、`src/app/StartupFailure.tsx`、`WorkspaceSidebar.tsx`、`SettingsView.tsx`、`WorkspaceShell.tsx` | startup error boundary、create dialog、hover/focus Archive、zero-workspace shell、compact navigation、Projects登録解除確認 |
 
 project登録解除は`projects.registered`とnavigationだけを変更し、workspace row、history、worktree、branchを物理削除しない。workspace Archiveだけが`managed_worktree = 1`かつ保存rootがapp data配下の導出済みexact pathと一致する対象へ固定`git worktree remove --force`を実行する。legacy workspaceまたはroot不一致にGit削除を拡張してはならない。履歴削除はworkspace登録とworktreeを残し、履歴・draft・editable contextだけを初期化する。
 

@@ -774,6 +774,7 @@ export function WorkspaceShell({
             (project) => project.name === selectedWorkspace?.repository,
           )?.id
         }
+        selectedWorkspace={selectedWorkspace}
         selectedWorkspaceId={view.selectedWorkspaceId}
       />
 
