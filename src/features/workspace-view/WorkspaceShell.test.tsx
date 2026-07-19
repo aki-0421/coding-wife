@@ -2665,7 +2665,7 @@ describe("WorkspaceShell", () => {
 
     await user.click(await waitFor(appSettingsButton))
     await user.click(screen.getByRole("button", { name: "Projects" }))
-    await user.click(screen.getByRole("button", { name: "Unregister" }))
+    await user.click(screen.getAllByRole("button", { name: "Unregister" })[0]!)
     expect(screen.getByText("Unregister this project?")).toBeVisible()
     expect(unregisterWorkspace).not.toHaveBeenCalled()
     const dialog = screen
