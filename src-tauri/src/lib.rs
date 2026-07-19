@@ -54,10 +54,10 @@ use preferences::AppPreferencesService;
 use readiness::commands::{copy_sanitized_diagnostics, run_diagnostic_check};
 use readiness::NativeReadinessService;
 use workspace_history::commands::{
-    history_append_domain_event, workspace_cancel, workspace_create_session, workspace_delete,
-    workspace_get_turn_context_snapshot, workspace_issue_delete_challenge, workspace_list,
-    workspace_list_timeline, workspace_load_editable_context, workspace_pick_register,
-    workspace_recheck, workspace_repair, workspace_save_character_context,
+    history_append_domain_event, workspace_archive, workspace_cancel, workspace_create_session,
+    workspace_delete, workspace_get_turn_context_snapshot, workspace_issue_delete_challenge,
+    workspace_list, workspace_list_timeline, workspace_load_editable_context,
+    workspace_pick_register, workspace_recheck, workspace_repair, workspace_save_character_context,
     workspace_save_context_snapshot, workspace_save_draft, workspace_save_project_context,
     workspace_save_timeline_anchor, workspace_select, workspace_unregister,
     workspace_update_lifecycle,
@@ -301,6 +301,7 @@ pub fn run() {
             workspace_recheck,
             workspace_repair,
             workspace_unregister,
+            workspace_archive,
             workspace_update_lifecycle,
             workspace_cancel,
             workspace_save_draft,

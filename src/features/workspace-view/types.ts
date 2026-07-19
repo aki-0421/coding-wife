@@ -43,6 +43,7 @@ export type CompanionSemanticState =
 
 export interface WorkspaceRecord {
   readonly id: string
+  readonly projectId?: string
   readonly repository: string
   readonly githubRepository?: string
   readonly name: string
@@ -61,6 +62,15 @@ export interface WorkspaceRecord {
     | "read_only"
     | "stale_branch"
   readonly updatedAt?: string
+}
+
+export interface ProjectRecord {
+  readonly id: string
+  readonly name: string
+  readonly githubRepository?: string
+  readonly health: NonNullable<WorkspaceRecord["health"]>
+  readonly workspaceCount: number
+  readonly updatedAt: string
 }
 
 export interface AttachmentItem {
@@ -123,6 +133,7 @@ export interface WorkspaceAdapterDraft {
 }
 
 export interface WorkspaceAdapterState {
+  readonly projects?: readonly ProjectRecord[]
   readonly workspaces: readonly WorkspaceRecord[]
   readonly activeWorkspaceId: string | null
   readonly draft: WorkspaceAdapterDraft | null
@@ -154,11 +165,8 @@ export interface WorkspaceAdapterTimelinePage {
 }
 
 export interface WorkspaceCreateRequest {
-  readonly fromWorkspaceId: string
+  readonly projectId: string
   readonly name: string
-  readonly goal: string
-  readonly repository: string
-  readonly branch: string
 }
 
 export interface WorkspaceTransitionRequest {
@@ -208,7 +216,10 @@ export interface WorkspaceViewAdapter {
   readonly repairWorkspace?: (
     workspaceId: string,
   ) => Promise<WorkspaceAdapterState>
-  readonly unregisterWorkspace?: (
+  readonly unregisterProject?: (
+    projectId: string,
+  ) => Promise<WorkspaceAdapterState>
+  readonly archiveWorkspace?: (
     workspaceId: string,
   ) => Promise<WorkspaceAdapterState>
   readonly saveDraft?: (
@@ -294,7 +305,12 @@ export type CharacterStageRenderer = (
   props: CharacterStageRenderProps,
 ) => ReactNode
 
-export type AppSettingsSection = "general" | "audio" | "support" | "diagnostics"
+export type AppSettingsSection =
+  | "general"
+  | "projects"
+  | "audio"
+  | "support"
+  | "diagnostics"
 
 export type ProjectSettingsSection =
   | "project_context"

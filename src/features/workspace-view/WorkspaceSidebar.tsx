@@ -1,5 +1,6 @@
 import { useId, useMemo, useRef, useState } from "react"
 import {
+  ArchiveIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   FolderPlusIcon,
@@ -22,15 +23,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Tooltip,
   TooltipContent,
@@ -40,6 +36,7 @@ import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
 import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
 import type {
+  ProjectRecord,
   WorkspaceLifecycle,
   WorkspaceRecord,
 } from "@/features/workspace-view/types"
@@ -66,12 +63,18 @@ interface WorkspaceSidebarProps {
   readonly copy: WorkspaceCopy
   readonly filter: string
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
-  readonly selectedWorkspace: WorkspaceRecord
+  readonly projects: readonly ProjectRecord[]
+  readonly selectedProjectId?: string | undefined
   readonly selectedWorkspaceId: string
+  readonly archiveDisabledWorkspaceId?: string | undefined
   readonly onAddProject: () => void
-  readonly onCreateWorkspace: (name: string, goal: string) => Promise<boolean>
+  readonly onCreateWorkspace: (
+    projectId: string,
+    name: string,
+  ) => Promise<boolean>
   readonly onFilterChange: (value: string) => void
   readonly onOpenSettings: () => void
+  readonly onRequestArchive: (workspace: WorkspaceRecord) => void
   readonly onSelectWorkspace: (workspaceId: string) => void
 }
 
@@ -85,11 +88,15 @@ function WorkspaceRow({
   copy,
   selected,
   workspace,
+  archiveDisabled,
+  onArchive,
   onSelect,
 }: {
   readonly copy: WorkspaceCopy
   readonly selected: boolean
   readonly workspace: WorkspaceRecord
+  readonly archiveDisabled: boolean
+  readonly onArchive: () => void
   readonly onSelect: () => void
 }) {
   const repositoryLabel = workspace.githubRepository ?? workspace.repository
@@ -99,94 +106,140 @@ function WorkspaceRow({
       : copy.workspaceHealth[workspace.health]
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          aria-current={selected ? "page" : undefined}
-          aria-label={`${workspace.branch}, ${repositoryLabel}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
-          className={cn(
-            "group/workspace flex h-[49.5px] w-full items-center gap-sm rounded-control px-sm py-xs text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-            selected && "bg-selected-row",
-          )}
-          onClick={onSelect}
-          type="button"
-        >
-          <GitBranchIcon
-            aria-hidden="true"
-            className={cn(
-              "size-3 shrink-0 text-muted-foreground",
-              selected && "text-branch-selected",
-            )}
-          />
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span
-              className={`truncate text-sidebar-item ${selected ? "text-text-strong" : "text-foreground"}`}
-            >
-              {workspace.branch}
-            </span>
-            <span className="flex min-w-0 items-center gap-xs">
+    <div
+      className={cn(
+        "group/workspace relative flex h-[49.5px] w-full items-center rounded-control transition-colors hover:bg-muted focus-within:bg-muted",
+        selected && "bg-selected-row",
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-current={selected ? "page" : undefined}
+            aria-label={`${workspace.branch}, ${repositoryLabel}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
+            className="flex h-full min-w-0 flex-1 items-center gap-sm rounded-control px-sm py-xs pr-xl text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={onSelect}
+            type="button"
+          >
+            <GitBranchIcon
+              aria-hidden="true"
+              className={cn(
+                "size-3 shrink-0 text-muted-foreground",
+                selected && "text-branch-selected",
+              )}
+            />
+            <span className="flex min-w-0 flex-1 flex-col">
               <span
-                className={`truncate font-mono text-sidebar-meta transition-colors group-hover/workspace:text-selected-row-secondary group-focus-visible/workspace:text-selected-row-secondary ${selected ? "text-selected-row-secondary" : "text-muted-foreground"}`}
+                className={`truncate text-sidebar-item ${selected ? "text-text-strong" : "text-foreground"}`}
               >
-                {repositoryLabel}
+                {workspace.branch}
               </span>
-              {workspace.attention ? (
-                <CircleAlertIcon
-                  aria-hidden="true"
-                  className="size-3 shrink-0 text-destructive"
-                />
-              ) : null}
-              {health ? (
+              <span className="flex min-w-0 items-center gap-xs">
                 <span
-                  className="flex min-w-0 items-center gap-xxs truncate text-destructive"
-                  data-workspace-health={workspace.health}
+                  className={`truncate font-mono text-sidebar-meta transition-colors group-hover/workspace:text-selected-row-secondary group-focus-within/workspace:text-selected-row-secondary ${selected ? "text-selected-row-secondary" : "text-muted-foreground"}`}
                 >
-                  <TriangleAlertIcon
-                    aria-hidden="true"
-                    className="size-3 shrink-0"
-                  />
-                  <span className="truncate text-label">{health}</span>
+                  {repositoryLabel}
                 </span>
-              ) : null}
+                {workspace.attention ? (
+                  <CircleAlertIcon
+                    aria-hidden="true"
+                    className="size-3 shrink-0 text-destructive"
+                  />
+                ) : null}
+                {health ? (
+                  <span
+                    className="flex min-w-0 items-center gap-xxs truncate text-destructive"
+                    data-workspace-health={workspace.health}
+                  >
+                    <TriangleAlertIcon
+                      aria-hidden="true"
+                      className="size-3 shrink-0"
+                    />
+                    <span className="truncate text-label">{health}</span>
+                  </span>
+                ) : null}
+              </span>
             </span>
-          </span>
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="right">
-        {workspace.branch} · {repositoryLabel}
-        {workspace.attention ? ` · ${copy.attention[workspace.attention]}` : ""}
-        {health ? ` · ${health}` : ""}
-      </TooltipContent>
-    </Tooltip>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          {workspace.branch} · {repositoryLabel}
+          {workspace.attention
+            ? ` · ${copy.attention[workspace.attention]}`
+            : ""}
+          {health ? ` · ${health}` : ""}
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-label={`${copy.archiveWorkspace}: ${workspace.name}`}
+            className="absolute right-xs size-6 opacity-0 transition-opacity group-hover/workspace:opacity-100 group-focus-within/workspace:opacity-100 focus-visible:opacity-100"
+            data-workspace-archive={workspace.id}
+            disabled={archiveDisabled}
+            onClick={onArchive}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            <ArchiveIcon />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="right">{copy.archiveWorkspace}</TooltipContent>
+      </Tooltip>
+    </div>
   )
+}
+
+function defaultWorkspaceName(): string {
+  const now = new Date()
+  const part = (value: number) => value.toString().padStart(2, "0")
+  const timestamp = `${now.getFullYear()}${part(now.getMonth() + 1)}${part(now.getDate())}-${part(now.getHours())}${part(now.getMinutes())}${part(now.getSeconds())}`
+  const suffix = crypto.randomUUID().slice(0, 4)
+  return `workspace-${timestamp}-${suffix}`
 }
 
 function CreateWorkspaceDialog({
   copy,
+  projects,
+  selectedProjectId,
   onCreate,
 }: {
   readonly copy: WorkspaceCopy
-  readonly onCreate: (name: string, goal: string) => Promise<boolean>
+  readonly projects: readonly ProjectRecord[]
+  readonly selectedProjectId?: string | undefined
+  readonly onCreate: (projectId: string, name: string) => Promise<boolean>
 }) {
   const [open, setOpen] = useState(false)
-  const [name, setName] = useState("")
-  const [goal, setGoal] = useState("")
+  const [projectId, setProjectId] = useState("")
+  const [name, setName] = useState(defaultWorkspaceName)
+
+  const setDialogOpen = (nextOpen: boolean) => {
+    if (nextOpen) {
+      setProjectId(
+        projects.some((project) => project.id === selectedProjectId)
+          ? (selectedProjectId ?? "")
+          : (projects[0]?.id ?? ""),
+      )
+      setName(defaultWorkspaceName())
+    }
+    setOpen(nextOpen)
+  }
 
   const submit = async () => {
-    if (await onCreate(name, goal)) {
-      setName("")
-      setGoal("")
+    if (await onCreate(projectId, name)) {
       setOpen(false)
     }
   }
 
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
+    <Dialog onOpenChange={setDialogOpen} open={open}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DialogTrigger asChild>
             <Button
               aria-label={copy.addWorkspace}
+              disabled={projects.length === 0}
               size="icon-xs"
               type="button"
               variant="ghost"
@@ -206,6 +259,23 @@ function CreateWorkspaceDialog({
         </DialogHeader>
         <FieldGroup>
           <Field>
+            <FieldLabel htmlFor="workspace-project">
+              {copy.createWorkspace.project}
+            </FieldLabel>
+            <NativeSelect
+              className="w-full"
+              id="workspace-project"
+              onChange={(event) => setProjectId(event.currentTarget.value)}
+              value={projectId}
+            >
+              {projects.map((project) => (
+                <NativeSelectOption key={project.id} value={project.id}>
+                  {project.githubRepository ?? project.name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field>
             <FieldLabel htmlFor="workspace-name">
               {copy.createWorkspace.name}
             </FieldLabel>
@@ -217,21 +287,6 @@ function CreateWorkspaceDialog({
               value={name}
             />
           </Field>
-          <Field>
-            <FieldLabel htmlFor="workspace-goal">
-              {copy.createWorkspace.goal}
-            </FieldLabel>
-            <Textarea
-              id="workspace-goal"
-              maxLength={4000}
-              onChange={(event) => setGoal(event.currentTarget.value)}
-              rows={4}
-              value={goal}
-            />
-            <FieldDescription>
-              {goal.length.toLocaleString()} / 4,000
-            </FieldDescription>
-          </Field>
         </FieldGroup>
         <DialogFooter>
           <DialogClose asChild>
@@ -240,7 +295,7 @@ function CreateWorkspaceDialog({
             </Button>
           </DialogClose>
           <Button
-            disabled={name.trim().length === 0}
+            disabled={projectId.length === 0 || name.trim().length === 0}
             onClick={() => void submit()}
             type="button"
           >
@@ -258,12 +313,16 @@ function SidebarPanel({
   expandedLifecycles,
   filter,
   filteredWorkspaces,
+  projects,
+  selectedProjectId,
   selectedWorkspaceId,
+  archiveDisabledWorkspaceId,
   reserveTitlebarSpace,
   onAddProject,
   onCreateWorkspace,
   onFilterChange,
   onOpenSettings,
+  onRequestArchive,
   onSelectWorkspace,
   onToggleLifecycle,
 }: SidebarPanelProps) {
@@ -321,7 +380,12 @@ function SidebarPanel({
             </TooltipTrigger>
             <TooltipContent>{copy.addProject}</TooltipContent>
           </Tooltip>
-          <CreateWorkspaceDialog copy={copy} onCreate={onCreateWorkspace} />
+          <CreateWorkspaceDialog
+            copy={copy}
+            onCreate={onCreateWorkspace}
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+          />
         </div>
       </div>
 
@@ -385,8 +449,12 @@ function SidebarPanel({
                 <div hidden={!expanded} id={contentId}>
                   {workspaces.map((workspace) => (
                     <WorkspaceRow
+                      archiveDisabled={
+                        archiveDisabledWorkspaceId === workspace.id
+                      }
                       copy={copy}
                       key={workspace.id}
+                      onArchive={() => onRequestArchive(workspace)}
                       onSelect={() => onSelectWorkspace(workspace.id)}
                       selected={workspace.id === selectedWorkspaceId}
                       workspace={workspace}
@@ -400,16 +468,18 @@ function SidebarPanel({
           {filteredWorkspaces.length === 0 ? (
             <div className="flex flex-col items-start gap-xs px-sm py-lg">
               <p className="m-0 text-sidebar-helper text-muted-foreground">
-                {copy.noMatches}
+                {filter.length > 0 ? copy.noMatches : copy.noWorkspaces}
               </p>
-              <Button
-                onClick={() => onFilterChange("")}
-                size="xs"
-                type="button"
-                variant="secondary"
-              >
-                {copy.clearFilter}
-              </Button>
+              {filter.length > 0 ? (
+                <Button
+                  onClick={() => onFilterChange("")}
+                  size="xs"
+                  type="button"
+                  variant="secondary"
+                >
+                  {copy.clearFilter}
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </nav>
@@ -446,8 +516,6 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
     Readonly<Record<WorkspaceLifecycle, boolean>>
   >(() => ({ ...initiallyExpandedLifecycles }))
   const compactOpenerRef = useRef<HTMLButtonElement | null>(null)
-  const selected = props.selectedWorkspace
-
   const toggleLifecycle = (lifecycle: WorkspaceLifecycle) => {
     setExpandedLifecycles((current) => ({
       ...current,

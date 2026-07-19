@@ -7,6 +7,7 @@ import {
   ChevronDownIcon,
   DatabaseIcon,
   FolderCogIcon,
+  FolderIcon,
   HistoryIcon,
   Mic2Icon,
   Settings2Icon,
@@ -26,6 +27,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import {
   Popover,
   PopoverClose,
@@ -55,6 +62,7 @@ import type { EditableWorkspaceContextModel } from "@/features/workspace-view/us
 import type { RuntimeState } from "@/features/runtime"
 import type {
   AppSettingsSection,
+  ProjectRecord,
   ProjectSettingsSection,
   SettingsSection,
   WorkspaceAdapterState,
@@ -74,10 +82,13 @@ interface AppSettingsViewProps {
   readonly runtimeState: RuntimeState
   readonly section: AppSettingsSection
   readonly workspaceId: string
+  readonly projects: readonly ProjectRecord[]
+  readonly projectActionPending: boolean
   readonly onBack: () => void
   readonly onMutedChange: (muted: boolean) => void
   readonly onResetUi: () => void
   readonly onSectionChange: (section: AppSettingsSection) => void
+  readonly onUnregisterProject: (projectId: string) => Promise<boolean>
 }
 
 interface ProjectSettingsViewProps extends CharacterRuntimeSettingsProps {
@@ -238,6 +249,7 @@ function CharacterRuntimeErrorAlert({
 
 const appSectionOrder: readonly AppSettingsSection[] = [
   "general",
+  "projects",
   "audio",
   "support",
   "diagnostics",
@@ -252,6 +264,7 @@ const projectSectionOrder: readonly ProjectSettingsSection[] = [
 
 const sectionIcons = {
   general: Settings2Icon,
+  projects: FolderIcon,
   project_context: FolderCogIcon,
   character_context: BotIcon,
   companion: SparklesIcon,
@@ -458,6 +471,151 @@ function DiagnosticsSettings() {
   return <NativeReadinessDiagnostics />
 }
 
+function ProjectsSettings({
+  copy,
+  projectActionPending,
+  projects,
+  onUnregisterProject,
+}: Pick<
+  AppSettingsViewProps,
+  "copy" | "projectActionPending" | "projects" | "onUnregisterProject"
+>) {
+  const [pendingProject, setPendingProject] = useState<ProjectRecord | null>(
+    null,
+  )
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const safeActionRef = useRef<HTMLButtonElement | null>(null)
+
+  const confirmUnregister = async () => {
+    if (
+      pendingProject !== null &&
+      (await onUnregisterProject(pendingProject.id))
+    ) {
+      setPendingProject(null)
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-lg">
+      <div className="flex flex-col gap-xs">
+        <h2 className="m-0 text-headline text-text-strong">
+          {copy.settingsView.projectsTitle}
+        </h2>
+        <p className="m-0 max-w-[70ch] text-caption text-muted-foreground">
+          {copy.settingsView.projectsDescription}
+        </p>
+      </div>
+
+      {projects.length === 0 ? (
+        <Empty className="min-h-56 rounded-panel border border-dashed border-divider bg-surface/40">
+          <EmptyHeader>
+            <EmptyTitle>{copy.settingsView.noProjectsTitle}</EmptyTitle>
+            <EmptyDescription>
+              {copy.settingsView.noProjectsDescription}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <div className="flex flex-col divide-y divide-divider rounded-panel border border-divider bg-surface px-md">
+          {projects.map((project) => (
+            <div
+              className="flex min-w-0 items-center gap-md py-md max-[700px]:items-start"
+              key={project.id}
+            >
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-control border border-divider bg-muted text-muted-foreground">
+                <FolderIcon aria-hidden="true" className="size-4" />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-xxs">
+                <span className="truncate text-title text-text-strong">
+                  {project.name}
+                </span>
+                <span className="flex min-w-0 flex-wrap items-center gap-xs text-label text-muted-foreground">
+                  {project.githubRepository ? (
+                    <span className="truncate font-mono">
+                      {project.githubRepository}
+                    </span>
+                  ) : null}
+                  <span>
+                    {copy.settingsView.workspaceCount(project.workspaceCount)}
+                  </span>
+                  {project.health !== "ready" ? (
+                    <Badge variant="destructive">
+                      {copy.workspaceHealth[project.health]}
+                    </Badge>
+                  ) : null}
+                </span>
+              </span>
+              <Button
+                disabled={projectActionPending}
+                onClick={(event) => {
+                  triggerRef.current = event.currentTarget
+                  setPendingProject(project)
+                }}
+                size="xs"
+                type="button"
+                variant="outline"
+              >
+                {copy.settingsView.unregisterProject}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && !projectActionPending) setPendingProject(null)
+        }}
+        open={pendingProject !== null}
+      >
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            triggerRef.current?.focus()
+          }}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            safeActionRef.current?.focus()
+          }}
+          showCloseButton={!projectActionPending}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {copy.settingsView.unregisterProjectTitle}
+            </DialogTitle>
+            <DialogDescription>
+              {copy.settingsView.unregisterProjectBody(
+                pendingProject?.name ?? "",
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              disabled={projectActionPending}
+              onClick={() => setPendingProject(null)}
+              ref={safeActionRef}
+              type="button"
+              variant="outline"
+            >
+              {copy.settingsView.keepProject}
+            </Button>
+            <Button
+              disabled={projectActionPending}
+              onClick={() => void confirmUnregister()}
+              type="button"
+              variant="destructive"
+            >
+              {projectActionPending
+                ? copy.settingsView.unregisteringProject
+                : copy.settingsView.confirmUnregisterProject}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  )
+}
+
 function HistorySettings({
   copy,
   history,
@@ -644,6 +802,8 @@ export function AppSettingsView(props: AppSettingsViewProps) {
             runtimeState={props.runtimeState}
           />
         )
+      case "projects":
+        return <ProjectsSettings {...props} />
       case "audio":
         return <AudioSettings {...props} />
       case "support":

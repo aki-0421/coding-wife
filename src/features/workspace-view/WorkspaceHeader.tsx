@@ -3,7 +3,6 @@ import {
   BanIcon,
   ChevronRightIcon,
   EllipsisIcon,
-  FolderMinusIcon,
   FolderSearchIcon,
   GitBranchIcon,
   LoaderCircleIcon,
@@ -48,14 +47,12 @@ interface WorkspaceHeaderProps {
   readonly connection: HeaderConnectionState
   readonly copy: WorkspaceCopy
   readonly workspace: WorkspaceRecord
-  readonly actionPending: "cancel" | "repair" | "unregister" | null
+  readonly actionPending: "cancel" | "repair" | "unregister" | "archive" | null
   readonly canCancel: boolean
   readonly canRepair: boolean
-  readonly canUnregister: boolean
   readonly turnActive: boolean
   readonly onCancel: (stopFirst: boolean) => Promise<boolean>
   readonly onRepair: () => Promise<boolean>
-  readonly onUnregister: () => Promise<boolean>
 }
 
 const tabOrder: readonly WorkspaceTab[] = [
@@ -128,11 +125,9 @@ function WorkspaceHealthStatus({
   )
 }
 
-type ConfirmationStage = "cancel" | "unregister" | "unregister_final" | null
-
 function WorkspaceActions(props: WorkspaceHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [confirmation, setConfirmation] = useState<ConfirmationStage>(null)
+  const [confirmationOpen, setConfirmationOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const safeActionRef = useRef<HTMLButtonElement | null>(null)
   const busy = props.actionPending !== null
@@ -142,24 +137,19 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
     props.workspace.lifecycle === "canceled" ||
     props.workspace.lifecycle === "done"
   const repairDisabled = busy || !props.canRepair || props.turnActive
-  const unregisterDisabled = busy || !props.canUnregister || props.turnActive
   const recheckRepository = props.workspace.health === "stale_branch"
 
-  const closeConfirmation = () => setConfirmation(null)
+  const closeConfirmation = () => setConfirmationOpen(false)
   const completeCancel = async () => {
     if (await props.onCancel(props.turnActive)) closeConfirmation()
   }
-  const completeUnregister = async () => {
-    if (await props.onUnregister()) closeConfirmation()
-  }
-
   useEffect(() => {
-    if (confirmation === null) return
+    if (!confirmationOpen) return
     const frame = window.requestAnimationFrame(() =>
       safeActionRef.current?.focus(),
     )
     return () => window.cancelAnimationFrame(frame)
-  }, [confirmation])
+  }, [confirmationOpen])
 
   return (
     <>
@@ -185,7 +175,7 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
             disabled={cancelDisabled}
             onClick={() => {
               setMenuOpen(false)
-              setConfirmation("cancel")
+              setConfirmationOpen(true)
             }}
             type="button"
             variant="ghost"
@@ -231,26 +221,6 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
               </span>
             </Button>
           ) : null}
-          <Button
-            className="h-auto justify-start gap-sm px-sm py-xs text-start text-destructive hover:text-destructive"
-            disabled={unregisterDisabled}
-            onClick={() => {
-              setMenuOpen(false)
-              setConfirmation("unregister")
-            }}
-            type="button"
-            variant="ghost"
-          >
-            <FolderMinusIcon className="size-3 shrink-0" />
-            <span className="flex min-w-0 flex-col items-start">
-              <span>{props.copy.workspaceMenu.unregister}</span>
-              <span className="whitespace-normal text-caption font-normal text-muted-foreground">
-                {props.turnActive
-                  ? props.copy.workspaceMenu.runningBlocked
-                  : props.copy.workspaceMenu.unregisterDescription}
-              </span>
-            </span>
-          </Button>
         </PopoverContent>
       </Popover>
 
@@ -258,7 +228,7 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
         onOpenChange={(open) => {
           if (!open && !busy) closeConfirmation()
         }}
-        open={confirmation !== null}
+        open={confirmationOpen}
       >
         <DialogContent
           closeLabel={props.copy.dismiss}
@@ -277,21 +247,11 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
           showCloseButton={!busy}
         >
           <DialogHeader>
-            <DialogTitle>
-              {confirmation === "cancel"
-                ? props.copy.workspaceMenu.cancelTitle
-                : confirmation === "unregister"
-                  ? props.copy.workspaceMenu.unregisterTitle
-                  : props.copy.workspaceMenu.unregisterFinalTitle}
-            </DialogTitle>
+            <DialogTitle>{props.copy.workspaceMenu.cancelTitle}</DialogTitle>
             <DialogDescription>
-              {confirmation === "cancel"
-                ? props.turnActive
-                  ? props.copy.workspaceMenu.cancelRunningBody
-                  : props.copy.workspaceMenu.cancelBody
-                : confirmation === "unregister"
-                  ? props.copy.workspaceMenu.unregisterBody
-                  : props.copy.workspaceMenu.unregisterFinalBody}
+              {props.turnActive
+                ? props.copy.workspaceMenu.cancelRunningBody
+                : props.copy.workspaceMenu.cancelBody}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -304,39 +264,18 @@ function WorkspaceActions(props: WorkspaceHeaderProps) {
             >
               {props.copy.workspaceMenu.keepWorkspace}
             </Button>
-            {confirmation === "unregister" ? (
-              <Button
-                onClick={() => setConfirmation("unregister_final")}
-                type="button"
-                variant="secondary"
-              >
-                {props.copy.workspaceMenu.continueUnregister}
-              </Button>
-            ) : confirmation === "unregister_final" ? (
-              <Button
-                disabled={busy}
-                onClick={() => void completeUnregister()}
-                type="button"
-                variant="destructive"
-              >
-                {busy
-                  ? props.copy.workspaceMenu.working
-                  : props.copy.workspaceMenu.confirmUnregister}
-              </Button>
-            ) : (
-              <Button
-                disabled={busy}
-                onClick={() => void completeCancel()}
-                type="button"
-                variant="destructive"
-              >
-                {busy
-                  ? props.copy.workspaceMenu.working
-                  : props.turnActive
-                    ? props.copy.workspaceMenu.stopAndCancel
-                    : props.copy.workspaceMenu.confirmCancel}
-              </Button>
-            )}
+            <Button
+              disabled={busy}
+              onClick={() => void completeCancel()}
+              type="button"
+              variant="destructive"
+            >
+              {busy
+                ? props.copy.workspaceMenu.working
+                : props.turnActive
+                  ? props.copy.workspaceMenu.stopAndCancel
+                  : props.copy.workspaceMenu.confirmCancel}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -349,12 +288,10 @@ export function WorkspaceHeader({
   actionPending,
   canCancel,
   canRepair,
-  canUnregister,
   connection,
   copy,
   onCancel,
   onRepair,
-  onUnregister,
   turnActive,
   workspace,
 }: WorkspaceHeaderProps) {
@@ -406,12 +343,10 @@ export function WorkspaceHeader({
           activeTab={activeTab}
           canCancel={canCancel}
           canRepair={canRepair}
-          canUnregister={canUnregister}
           connection={connection}
           copy={copy}
           onCancel={onCancel}
           onRepair={onRepair}
-          onUnregister={onUnregister}
           turnActive={turnActive}
           workspace={workspace}
         />

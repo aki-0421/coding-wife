@@ -333,6 +333,16 @@ impl WorkspaceService {
         .await
     }
 
+    pub async fn validate_workspace_root(
+        &self,
+        root: PathBuf,
+        workspace_id: String,
+        alias: String,
+    ) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
+        self.validate_candidate(root, workspace_id, Some(alias))
+            .await
+    }
+
     async fn validate_candidate(
         &self,
         selected: PathBuf,
@@ -374,6 +384,15 @@ pub fn matches_saved_repository_identity(
     candidate.project_identity == saved.project_identity
         && candidate.root_device == saved.root_device
         && candidate.root_inode == saved.root_inode
+        && candidate.git_device == saved.git_device
+        && candidate.git_inode == saved.git_inode
+}
+
+pub fn matches_saved_git_repository(
+    candidate: &GitRepositoryIdentity,
+    saved: &AppPrivateProjectIdentity,
+) -> bool {
+    candidate.project_identity == saved.project_identity
         && candidate.git_device == saved.git_device
         && candidate.git_inode == saved.git_inode
 }

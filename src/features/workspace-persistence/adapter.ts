@@ -58,8 +58,19 @@ export function projectWorkspaceState(
 ): WorkspaceAdapterState {
   const projectedTimeline = projectTimelinePage(state.timeline)
   return {
+    projects: state.projects.map((project) => ({
+      id: project.projectId,
+      name: project.name,
+      ...(project.githubRepository === null
+        ? {}
+        : { githubRepository: project.githubRepository }),
+      health: project.health,
+      workspaceCount: project.workspaceCount,
+      updatedAt: project.updatedAt,
+    })),
     workspaces: state.workspaces.map((workspace) => ({
       id: workspace.workspaceId,
+      projectId: workspace.projectId,
       repository: workspace.repository,
       ...(workspace.githubRepository === null
         ? {}
@@ -205,12 +216,18 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
     )
   }
 
-  async unregisterWorkspace(
-    workspaceId: string,
-  ): Promise<WorkspaceAdapterState> {
-    this.drafts.delete(workspaceId)
+  async unregisterProject(projectId: string): Promise<WorkspaceAdapterState> {
     return this.absorb(
       await this.transport.request(workspaceHistoryCommands.unregister, {
+        projectId,
+      }),
+    )
+  }
+
+  async archiveWorkspace(workspaceId: string): Promise<WorkspaceAdapterState> {
+    this.drafts.delete(workspaceId)
+    return this.absorb(
+      await this.transport.request(workspaceHistoryCommands.archive, {
         workspaceId,
       }),
     )
@@ -234,9 +251,8 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
         : `workspace-create-${globalThis.crypto.randomUUID()}`
     return this.absorb(
       await this.transport.request(workspaceHistoryCommands.createSession, {
-        fromWorkspaceId: request.fromWorkspaceId,
+        projectId: request.projectId,
         name: request.name,
-        goal: request.goal,
         clientRequestId,
       }),
     )

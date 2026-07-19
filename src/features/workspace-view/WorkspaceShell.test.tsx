@@ -2404,7 +2404,7 @@ describe("WorkspaceShell", () => {
       },
       stopTurn,
       cancelWorkspace,
-      unregisterWorkspace,
+      unregisterProject: unregisterWorkspace,
     }
     const user = userEvent.setup()
     const { container } = renderWorkspace(adapter)
@@ -2637,7 +2637,7 @@ describe("WorkspaceShell", () => {
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () => Promise.resolve(state),
-      unregisterWorkspace,
+      unregisterProject: unregisterWorkspace,
     }
     const user = userEvent.setup()
     const { container } = renderWorkspace(adapter)

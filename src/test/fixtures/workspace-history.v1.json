@@ -8,6 +8,18 @@
       "errorCode": null,
       "backupName": null
     },
+    "projects": [
+      {
+        "schemaVersion": 1,
+        "projectId": "project-fixture",
+        "name": "fixture-repository",
+        "githubRepository": "fixture-owner/fixture-repository",
+        "health": "ready",
+        "workspaceCount": 1,
+        "createdAt": "2026-07-18T00:00:00.000Z",
+        "updatedAt": "2026-07-18T00:01:00.000Z"
+      }
+    ],
     "workspaces": [
       {
         "schemaVersion": 1,
