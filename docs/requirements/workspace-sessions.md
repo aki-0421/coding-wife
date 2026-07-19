@@ -47,7 +47,7 @@ read_when:
 | 非対象 | 理由 | 扱う機能・文書 |
 |---|---|---|
 | 初回からの並列実行 | MVPでは一つのactive executionへ集中する | 将来のmulti-workspace execution |
-| 自動worktree作成 | 既存変更とbranch所有権の安全性を優先する | 将来のworkspace isolation |
+| project root自体をworkspaceとして自動登録 | projectとworktreeの区別を保つ | 利用者がWorkspace作成dialogから明示作成する |
 | GitHub origin必須 | local repositoryを第一級で扱う | 非対象 |
 | repository clone/fetch UI | network credentialと競合解決を今回含めない | 外部Git client |
 | repository file削除 | appからproject登録を外してもsourceを変更しない | 非対象 |
@@ -66,25 +66,27 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `WORK-F-044` | 利用者はfolder pickerからlocal projectを追加できる | regular directory内のGit worktreeを選ぶとopaqueでstableなProject ID、canonical path、repository identity、repo名、branchをnative storeへ保存し、workspace一覧へ1件追加する。Project IDとcanonical pathは通常UI、support payload、logへ表示しない | Approved | 非該当 |
+| `WORK-F-044` | 利用者はfolder pickerからlocal projectを追加できる | regular directory内のGit repository worktreeを選ぶとopaqueでstableなProject ID、canonical path、repository identity、repo名、branchをnative storeへ保存する。project追加だけではworkspaceを作成・選択せず、Project IDとcanonical pathは通常UI、support payload、logへ表示しない | Approved | 非該当 |
 | `WORK-F-045` | 利用者はfolder選択をcancelできる | pickerをcancelすると既存一覧とactive selectionを維持し、errorを表示しない | Approved | 非該当 |
 | `WORK-F-046` | アプリは無効repositoryを拒否する | non-Git directory、bare repository、存在しないpathを選ぶと登録せず、原因と再選択を表示する | Approved | 非該当 |
 | `WORK-F-047` | アプリは読取権限不足を拒否する | repositoryまたは`.git` metadataを読めない場合は登録せず、権限不足をI/O errorと区別して表示する | Approved | 非該当 |
 | `WORK-F-048` | 利用者は送信前preflightを確認できる | Git、Codex executable、auth、`gpt-5.6-sol`、character packを`ready/warning/blocked`で表示し、blocked項目があればSendを無効にする | Approved | 非該当 |
-| `WORK-F-049` | 同じrepositoryの重複登録を防ぐ | symlink表記や`..`を含む同一canonical pathかつ保存済みrepository identityとexact一致するrepositoryを再選択すると新規作成せず、既存workspaceを選択する。登録中projectの同じpathが別identityへ置換されていればtyped changed errorで拒否し、登録解除済みprojectはidentity一致時だけ同じProject IDへ復帰する。identity不一致のrepositoryを追加する場合は新しいProject IDと履歴partitionを発行し、旧workspace/historyへ再linkしない | Approved | 非該当 |
+| `WORK-F-049` | 同じrepositoryの重複登録を防ぐ | symlink表記や`..`を含む同一canonical pathかつ保存済みrepository identityとexact一致するrepositoryを再選択すると新規作成せず、既存project登録を返す。登録中projectの同じpathが別identityへ置換されていればtyped changed errorで拒否し、登録解除済みprojectはidentity一致時だけ同じProject IDへ復帰する。identity不一致のrepositoryを追加する場合は新しいProject IDと履歴partitionを発行し、旧workspace/historyへ再linkしない | Approved | 非該当 |
 
 ### Workspace作成・一覧・切替
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `WORK-F-050` | 利用者は登録projectにworkspaceを作成できる | nameとgoalを確定するとBacklog groupへworkspaceが作成され、同じprojectに複数workspace metadataを持てる | Approved | 非該当 |
+| `WORK-F-050` | 利用者は登録projectにworkspaceを作成できる | `+`からdialogを開き、登録projectをselectし、任意nameを確定すると、projectの現在HEADを起点にapp-owned worktree root配下へ新branchとGit worktreeを作成する。name未編集時はlocal timestampとrandom suffixを含む衝突しない既定値を使う。作成成功後だけBacklog groupへworkspace recordを追加・選択し、同じprojectに複数worktreeを持てる | Approved | 非該当 |
 | `WORK-F-051` | 利用者はworkspace一覧をfilterできる | repo、branch、workspace nameのcase-insensitive部分一致で200件を絞り込み、0件時はfilter解除操作を表示する | Approved | 非該当 |
 | `WORK-F-052` | 利用者はlifecycle groupからworkspaceを選択できる | app localeにかかわらずLinearと同じ英語のDone/In Review/In Progress/Backlog/Canceledでgroupを表示し、各statusをcheck、half-filled progress、quarter-filled progress、dotted、xの円形iconで識別できる。各groupは初期展開され、heading行全体のclick、`Enter`、`Space`で他groupとselectionを変えず独立して開閉できる。toggleは`aria-expanded`と`aria-controls`を持ち、chevronはhoverまたはfocus-visible時だけ表示する。折り畳み中だけ対象workspaceの数値件数を0件を含めて表示し、accessible nameでは展開状態にかかわらず件数を1回だけ伝える。item選択でheader、Chat、Commit、Context、Companionが同一workspaceへ100ms以内に切り替わる | Approved | 非該当 |
 | `WORK-F-053` | アプリはlifecycleとattentionを別に表示する | lifecycleを変えずにNeeds answer、Approval required、Test failed、High riskをbadgeとaccessible labelで併記できる | Approved | 非該当 |
 | `WORK-F-054` | アプリは現在のrepoとbranchを表示する | sidebar itemでは実Gitのbranchまたはdetached HEAD短縮SHAを最も目立つtitleとして表示し、GitHub `origin`がある場合はcredentialを除いた`owner/repo`を小さい補助文字で表示する。GitHub `origin`がないlocal repositoryは保存済みrepo名へfallbackする。selected itemとheaderの長い値はellipsisと全文tooltipを持つ | Approved | 非該当 |
 | `WORK-F-055` | 利用者は空一覧から最初のprojectを追加できる | workspaceが0件の時、説明、FolderPlus、keyboard shortcutを表示し、decorative card gridを表示しない | Approved | 非該当 |
 | `WORK-F-056` | 利用者はworkspaceをCanceledへ移せる | idle workspaceは確認後に専用native cancel commandでCanceled groupへ移す。active/pending turnがある場合は「停止してキャンセル」と「戻る」を表示し、exact turnのterminal interrupt、workspace cleanup、履歴flushが完了した後だけ同commandを実行する。native supervisorはcancel transaction中のturn開始とactive/pending turnをatomicに拒否し、generic lifecycle commandによるCanceled指定もtyped errorで拒否する。「戻る」またはinterrupt/cleanup/flush失敗ではselection、turn、lifecycle、draft、caption/TTSを変更しない。いずれの場合もsource、working tree、Git index/object/ref、履歴本文を変更しない | Approved | 非該当 |
-| `WORK-F-057` | 利用者はproject登録を外せる | 対象project配下にactive/pending turnがない時だけ、action選択と対象project名を示す最終確認の二段階を完了してproject/workspaceのapp registration metadataを削除する。実行中turnがある場合は操作を拒否し、履歴本文の変更・削除は`HIST-F-049`の別操作に限定する。repository内のfile、working tree、Git index/object/ref、共有model libraryを変更しない | Approved | 非該当 |
+| `WORK-F-057` | 利用者はproject登録を外せる | App SettingsのProjects一覧で対象project名を示す確認を完了するとprojectと配下workspaceをnavigationから外す。実行中turnがある場合は操作を拒否し、履歴本文の変更・削除は`HIST-F-049`の別操作に限定する。project repository、作成済みworktree directory、Git index/object/ref、branch、共有model libraryを変更・削除しない | Approved | 非該当 |
+| `WORK-F-067` | 利用者はworkspaceをArchiveしてworktreeを削除できる | sidebar rowのhoverまたはfocus-withinでArchive iconを表示し、確認後にactive/pending turnがない対象へapp-owned root境界を検証した`git worktree remove --force`を実行し、workspace recordをnavigationから削除する。worktree directoryまたはGit worktree registrationが既に存在しない場合も成功としてmetadataを収束させる。project repository、他worktree、branch、Git object/refを削除しない | Approved | 非該当 |
+| `WORK-F-068` | 利用者は登録project一覧を管理できる | App SettingsのProjects sectionで登録中projectをworkspace件数とともに一覧し、project登録解除を開始できる。workspaceが0件でもproject一覧とApp Settingsへ到達できる | Approved | 非該当 |
 
 ### 継続性と境界
 
@@ -107,7 +109,8 @@ read_when:
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
 |---|---|---|---|---|---|
 | Project | repository folder | なし | 必須 | canonical regular directory、Git worktree、同一path重複不可 | 入力を登録せず、再選択とcancelを残す |
-| Workspace | name | repo名 + timestamp | 必須 | trim後1〜80 Unicode scalar、改行不可 | 入力保持、該当fieldへerror |
+| Workspace | project | projectが1件ならそのproject、複数なら直前選択または先頭 | 必須 | 登録済みProject IDだけ | 入力保持、該当fieldへerror |
+| Workspace | name | `workspace-YYYYMMDD-HHmmss-<random>` | 必須 | trim後1〜80 Unicode scalar、改行不可。Git branch/worktree pathへはnative側で安全なslugとopaque IDを使用し、表示nameをpathへ直接使用しない | 入力保持、該当fieldへerror |
 | Workspace | goal | 空 | 任意 | 0〜4,000 Unicode scalar | 入力保持、超過数を表示 |
 | Filter | query | 空 | 任意 | 0〜200 Unicode scalar | 200超を受け付けず一覧を維持 |
 | Repair | repository folder | 現在のlinkage | 条件付き | canonical regular Git worktree、保存repository identityとのexact一致 | linkageを変更せず、再選択・cancel・新規project追加を残す |

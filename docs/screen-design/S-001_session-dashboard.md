@@ -24,7 +24,7 @@ status: "Approved"
 
 ## 目的
 
-利用者が既存のローカルGit projectを破壊的変更なしで登録・診断し、作業単位のworkspaceを作成する。workspaceのlifecycleと介入要否を一覧から理解し、同じrepo、branch、draft、履歴を持つ作業面へ移動できるようにする。
+利用者が既存のローカルGit projectを破壊的変更なしで登録・診断し、そのprojectから作業単位のGit worktreeであるworkspaceを作成する。workspaceのlifecycleと介入要否を一覧から理解し、固有のworktree、branch、draft、履歴を持つ作業面へ移動できるようにする。
 
 ## 対象範囲
 
@@ -34,17 +34,16 @@ status: "Approved"
 |---|---|
 | Project追加 | OS folder picker、canonicalization、Git worktree検証、重複選択 |
 | Preflight | Git、Codex executable、login、GPT-5.6 Sol、character packのready/warning/blocked |
-| Workspace作成 | name、goal、Backlog登録 |
+| Workspace作成 | project select、既定name、app-owned Git worktree作成、Backlog登録 |
 | Sidebar | lifecycle group、attention、repo、branch、filter、active selection |
 | Continuity | Project ID、group、active workspace、filter、draft、last summary、timeline anchor ID/sequence/offset、repository healthの復元 |
-| Safe removal | workspace cancel、project metadata登録解除。sourceとGit refは削除しない |
+| Safe removal | workspace Archiveによる対象worktree削除、project metadata登録解除。Archive以外ではworktreeとGit refを削除しない |
 
 ### 含めない
 
 | 非対象 | 理由 | 扱う画面・文書 |
 |---|---|---|
 | repository clone / fetch | network credentialと競合解決をMVPへ含めない | 外部Git client |
-| 自動worktree作成 | 既存変更とownershipを優先する | 将来のworkspace isolation |
 | 同時に複数turnを実行 | MVPはactive execution 1件 | [S-002](S-002_coding-workspace.md) |
 | manual commit / terminal | workspace作成の目的ではない | [S-003](S-003_session-evidence.md)、read-only tool event |
 | Context本文編集 | active workspaceを選んでから行う | [S-002](S-002_coding-workspace.md) Context tab |
@@ -142,7 +141,8 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 |---|---|---|---|---|
 | 初期化中 | DB、workspace、Git linkageを読込中 | sidebar/list/project surfaceのskeleton、locale、Quit。demo workspaceを表示しない | Quitだけ。add/create/select/draft/context/deleteを開始しない | queryとmigrationがterminalになる |
 | 通常 | 1件以上のvalid workspace | group list、active project、preflight、primary action 1件 | filter、select、add、create、state action | 操作開始、offline、error |
-| データなし | projectまたはworkspace 0件 | 理由、`Projectを追加`、shortcut。空gridは出さない | picker、Settings、Quit | project登録またはrehydrate |
+| projectなし | registered project 0件 | 理由、`Projectを追加`、shortcut。空gridは出さない | picker、Settings、Quit | project登録またはrehydrate |
+| workspaceなし | registered project 1件以上、workspace 0件 | project登録済みの説明、`Workspaceを作成`、project追加 | create dialog、Settings、Quit | worktree作成またはproject登録解除 |
 | 処理中 | picker後検証、preflight、create、cancel、remove | 対象stepとprogress、他workspaceは利用可能 | 可能なCancel、影響外select | success、cancel、error |
 | オフライン | network/Codex接続なし | local list、Git/DB status、Codex offline | filter、Context、local project操作可。Send不可 | 明示preflight成功 |
 | エラー | Git I/O、DB write、Codex診断失敗 | code、対象、保持data、retry/reselect/details | 影響外workspaceを開ける | 明示回復または登録解除 |
@@ -158,14 +158,15 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 
 | 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
 |---|---|---|---|---|---|
-| Projectを追加 | FolderPlusまたはempty CTA | native pickerの1 directoryをRust診断し、validならprojectを1件追加 | 一覧とselection維持、errorなし | 登録せず原因と再選択 | `WORK-F-044`〜`WORK-F-049` |
+| Projectを追加 | FolderPlusまたはempty CTA | native pickerの1 directoryをRust診断し、validならprojectだけを1件追加。workspaceは作成しない | 一覧とselection維持、errorなし | 登録せず原因と再選択 | `WORK-F-044`〜`WORK-F-049` |
 | preflight再診断 | project rootが存在 | Git/Codex/login/Sol/characterを更新 | 非該当 | check単位でBlocked、既存履歴維持 | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
-| Workspace作成 | registered project、name valid | Backlogへ1件追加し選択する | dialog入力を破棄し一覧維持 | 入力保持、field error | `WORK-F-050` |
+| Workspace作成 | registered project 1件以上、project/name valid | 選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、成功後だけBacklogへ1件追加して選択する | dialog入力を破棄し一覧・filesystemを維持 | 入力保持、field error。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
+| workspaceをArchive | sidebar rowのArchive、active/pending turnなし | 確認後、対象worktreeを削除してrowを一覧から外す。既にworktreeが消失済みなら成功扱い | workspace、worktree、selection不変 | 対象以外を変更せず、再試行可能なerror | `WORK-F-067` |
 | filter | query 0〜200文字 | repo/branch/nameの部分一致を100ms以内に表示 | Escapeで直前query維持 | 一覧維持、境界表示 | `WORK-F-051` |
 | workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Context、Companionを同一IDへ100ms以内にatomic切替 | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
 | active turn中のworkspace切替 | active/pending turnを持つold workspaceから別workspaceを選択または別workspaceでSend | selectionを保留し確認。`停止して切替`後、exact old turnのterminal interruptとcleanup完了時だけnew workspaceをactivateし、固有draft/summary/anchorを復元 | `戻る`でold selection、turn、draft、anchor、caption/TTSを完全維持 | old workspaceをactiveのままerrorとRetryを表示。rapid/duplicate/stale responseでnew workspaceをactivateしない | `WORK-F-058`, `WORK-F-059` |
 | workspaceをCanceledへ移動 | idle、またはactive/pending turnを停止可能 | idleは確認後、activeは`停止してキャンセル / Stop and Cancel`後のexact terminal interrupt、cleanup、履歴flush完了時だけ専用native cancel commandでCanceled groupへ移動 | `戻る`でselection、turn、lifecycle、draft、caption/TTS、Git fingerprint不変 | generic lifecycle commandのCanceled指定を含めて拒否し、元groupとturnを維持してretry。source、working tree、Git index/object/ref、履歴本文を変更しない | `WORK-F-056` |
-| project登録解除 | 対象project配下のactive/pending turn 0件 | action選択とproject名を示す最終確認の二段階後、project/workspaceのapp registration metadataだけ削除 | DB/repo/file/library/history本文不変 | 完了表示せずretry。running時は拒否 | `WORK-F-057` |
+| project登録解除 | App Settings Projects、対象project配下のactive/pending turn 0件 | project名を示す確認後、project/workspaceのapp registrationをnavigationから外す | DB/repo/worktree/file/library/history本文不変 | 完了表示せずretry。running時は拒否 | `WORK-F-057`, `WORK-F-068` |
 | repository再選択・Repair | `missing` / `changed` / `unreadable`、保存済み`RepositoryIdentityV1`あり | picker後・mutation前・activation直前・DB直前にlive identityを再検査し、対象Project IDの保存identityとexact一致した時だけcompare-and-swapでlinkageを更新してworkspace ID、history、Context、draft、summary、anchorを維持 | linkage、selection、health維持 | same-path replacement、TOCTOU、identity不一致、権限、I/Oは候補を保存せず新規project追加を案内。source、working tree、Git index/object/refを変更しない | `WORK-F-062`, `WORK-F-066` |
 | repository再確認 | window focus、workspace選択確定、Send直前 | identity、HEAD、branch、readability、writeabilityをread-only照合しsnapshot更新 | 非該当 | stale warningと回復操作を表示しSendを開始しない | `WORK-F-061`, `WORK-F-066` |
 
@@ -174,8 +175,8 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 | 項目 | 初期値 | 必須 | 制約・境界 | エラー表示 | 保存契機 |
 |---|---|---|---|---|---|
 | repository folder | なし | project追加時必須 | regular Git worktree、canonical path、duplicate不可 | itemを作らず再選択 | 全preflight transaction成功 |
-| workspace name | `repo名 + timestamp` | 必須 | trim後1〜80 Unicode scalar、改行不可 | field直下、入力保持 | Create成功 |
-| goal | 空 | 任意 | 0〜4,000 Unicode scalar | 超過数、入力保持 | Create成功 |
+| project | project 1件なら自動選択、複数なら直前値または先頭 | 必須 | registered Project IDのselect | field直下、入力保持 | Create成功 |
+| workspace name | `workspace-YYYYMMDD-HHmmss-<random>` | 必須 | trim後1〜80 Unicode scalar、改行不可。path/branchはnativeが安全な別名を生成 | field直下、入力保持 | Create成功 |
 | filter query | 前回値 | 任意 | 0〜200 Unicode scalar、case-insensitive | query維持、検索未実行 | debounce後workspace単位 |
 
 ## ネイティブ連携
@@ -189,11 +190,12 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 | project folder選択 | Tauri dialog → Rust | `select_project_root`（設計名） | directory picker 1件、選択rootのread診断 | 変更なし | path非表示のerror code |
 | Git preflight | Rust child process | `diagnose_project` | canonical root、read-only allowlist Git command | running checkをsafe abort | check別Blocked |
 | Codex preflight | Rust supervisor | `diagnose_codex` | executable/stdio capability、auth内容非読取 | 前回結果維持 | failure stageを表示 |
-| create/select | Rust DB + Codex supervisor | `create/select_workspace` | typed workspace/project ID、expected generation | transaction前なら変更なし | 元selection/turn/lifecycle維持 |
+| create/select | Rust Git process + DB + Codex supervisor | `create/select_workspace` | typed Project ID/workspace name、app-owned worktree root、固定Git引数、expected generation | worktree/DBを作らない | partial worktree/DBをrollbackし、元selection/turn/lifecycle維持 |
+| workspace Archive | Rust Git process + DB | `workspace_archive` | typed workspace ID、app-owned root containment、固定`git worktree remove --force`。missing targetは成功扱い | 変更なし | 他worktree/project/refを変更しない |
 | workspace cancel | Rust DB + Codex supervisor | `workspace_cancel` | typed workspace ID、expected DB version。supervisor gateはactive/pending turnとcancel中のturn開始をatomicに拒否し、active cancelはexact terminal、cleanup、履歴flush proof後だけ呼ぶ | transaction前なら変更なし | `workspace_update_lifecycle`によるCanceled指定を拒否し、元selection/turn/lifecycle維持 |
 | active workspace切替 | Rust supervisor + DB | `interrupt_and_switch_workspace` | old workspace/thread/turn/generation、pending selection、terminal cleanup proof | old workspaceの全state維持 | old workspaceをactiveのままerror |
 | repository repair | Tauri dialog → Rust project service | `repair_project_linkage` | target Project ID、saved `RepositoryIdentityV1`、canonical worktree exact identity、atomic transaction | linkage/selection不変 | source/Gitを変更せずtyped reason |
-| project登録解除 | Rust DB | `unregister_project` | active/pending turn 0件、二段階confirmation token、metadata scope | 変更なし | source/Git/library/history本文を変更しない |
+| project登録解除 | Rust DB | `unregister_project` | typed Project ID、active/pending turn 0件、confirmation、metadata scope | 変更なし | source/Git/worktree/library/history本文を変更しない |
 
 ## ウィンドウ固有動作
 
@@ -221,7 +223,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 | データ | 正本・保存先 | 保存契機 | 復元契機 | 破棄条件 | 失敗時 |
 |---|---|---|---|---|---|
 | project canonical path/metadata | Rust SQLiteの目的限定project linkage | registration transaction | cold start |明示登録解除 | 前回transaction維持 |
-| workspace/lifecycle/attention | Rust SQLite + normalized event | valid state transition | cold start/route return | history削除契約 | stale表示 |
+| workspace worktree linkage/lifecycle/attention | Rust SQLite + normalized event。worktree pathはapp-private | worktree作成成功後のtransaction、valid state transition | cold start/route return | workspace Archive | stale表示 |
 | active selection/filter/scroll | Rust SQLite | valid selection/query/scroll settle | route return/restart | Reset UI state | safe default + notice |
 | summary/timeline anchor | Rust SQLite | terminal summary、scroll settle | route return/restart | history削除契約 | 同workspaceの最寄りvalid sequenceだけへ補正 |
 | repository identity/health、HEAD/branch、GitHub `owner/repo` | Gitを観測正本、Rust DBはversioned last snapshot。GitHub full nameはlocal `origin` URLから抽出した非秘密値だけを保存する | 登録、window focus、selection、Send直前 | route return/restart後に再照合 | project登録解除 | GitHub `origin`なしではlocal repo名へfallbackし、health判定は変更しない |
