@@ -290,6 +290,8 @@ trait CommitExplanationExecutor: Send + Sync {
 
     fn force_cleanup_now<'a>(&'a self) -> ExplanationFuture<'a, bool>;
 
+    fn has_owned_executions<'a>(&'a self) -> ExplanationFuture<'a, bool>;
+
     fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool>;
 
     fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool>;
@@ -818,6 +820,10 @@ impl CommitExplanationExecutor for IsolatedSupportExecutor {
 
     fn force_cleanup_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
         Box::pin(async move { self.cleanup_executions(true).await })
+    }
+
+    fn has_owned_executions<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+        Box::pin(async move { !self.active.lock().await.is_empty() })
     }
 
     fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool> {
@@ -1465,6 +1471,17 @@ impl CommitExplanationController {
     ) -> SupportControlResult<SupportControlSnapshotV1> {
         validate_support_schema(request.schema_version, OPERATION_SUPPORT_UPDATE)?;
         let _admission = self.inner.admission.lock().await;
+        let executor_owned_on_entry = if request.global_enabled && request.commit_explainer_enabled
+        {
+            tokio::time::timeout(
+                SUPPORT_DISABLE_GRACE_TIMEOUT,
+                self.inner.executor.has_owned_executions(),
+            )
+            .await
+            .unwrap_or(true)
+        } else {
+            false
+        };
         let mut data = self.inner.data.lock().await;
         if data.settings.version != request.expected_version {
             return Err(SupportControlCommandError::new(
@@ -1478,7 +1495,7 @@ impl CommitExplanationController {
             && (!data.settings.global_enabled || !data.settings.commit_explainer_enabled);
         if enabling
             && data.last_error_code.as_deref() == Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
-            && (data.active.is_some() || data.worker_running)
+            && (data.active.is_some() || data.worker_running || executor_owned_on_entry)
         {
             return Err(SupportControlCommandError::new(
                 "CODEX-SUPPORT-DISABLE-INCOMPLETE",
@@ -1593,7 +1610,14 @@ impl CommitExplanationController {
             } else {
                 false
             };
-            let force_required = !cancel_converged || !grace_converged;
+            let executor_owned_before_force = tokio::time::timeout(
+                SUPPORT_DISABLE_GRACE_TIMEOUT,
+                self.inner.executor.has_owned_executions(),
+            )
+            .await
+            .unwrap_or(true);
+            let force_required =
+                !cancel_converged || !grace_converged || executor_owned_before_force;
             let force_converged = if force_required {
                 tokio::time::timeout(
                     SUPPORT_DISABLE_FORCE_TIMEOUT,
@@ -1615,11 +1639,21 @@ impl CommitExplanationController {
             } else {
                 grace_converged
             };
-            let ownership_released = {
+            let controller_ownership_released = {
                 let data = self.inner.data.lock().await;
                 data.queue.is_empty() && data.active.is_none() && !data.worker_running
             };
-            if !force_converged || !worker_converged || !ownership_released {
+            let executor_ownership_released = !tokio::time::timeout(
+                SUPPORT_DISABLE_FORCE_TIMEOUT,
+                self.inner.executor.has_owned_executions(),
+            )
+            .await
+            .unwrap_or(true);
+            if !force_converged
+                || !worker_converged
+                || !controller_ownership_released
+                || !executor_ownership_released
+            {
                 let mut data = self.inner.data.lock().await;
                 data.last_error_code = Some("CODEX-SUPPORT-DISABLE-INCOMPLETE".to_owned());
                 let _ = self.persist_audit(&mut data, OPERATION_SUPPORT_UPDATE);
@@ -1725,10 +1759,12 @@ impl CommitExplanationController {
         if let Some(completion) = worker_completion {
             completion.wait().await;
         }
+        let executor_ownership_released = !self.inner.executor.has_owned_executions().await;
         let data = self.inner.data.lock().await;
         audit_persisted
             && cancel_converged
             && executor_converged
+            && executor_ownership_released
             && data.queue.is_empty()
             && data.active.is_none()
             && !data.worker_running
@@ -2652,6 +2688,10 @@ mod tests {
             })
         }
 
+        fn has_owned_executions<'a>(&'a self) -> ExplanationFuture<'a, bool> {
+            Box::pin(async move { self.inflight.load(Ordering::Acquire) != 0 })
+        }
+
         fn force_shutdown_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
             Box::pin(async move {
                 self.forces.fetch_add(1, Ordering::AcqRel);
@@ -2938,6 +2978,64 @@ mod tests {
             Duration::from_secs(2),
         );
         (controller, executor, events, root)
+    }
+
+    fn isolated_policy_harness(
+        readiness: SupportReleaseReadinessV1,
+    ) -> (
+        CommitExplanationController,
+        Arc<IsolatedSupportExecutor>,
+        PathBuf,
+    ) {
+        let root = std::env::temp_dir().join(format!(
+            "coding-wife-support-isolated-policy-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let opened = SupportSettingsStore::open(&root);
+        let audit = SupportAuditStore::open(&root, Some(opened.settings.version));
+        let executor = Arc::new(IsolatedSupportExecutor::new(CodexSupervisor::new()));
+        let controller = CommitExplanationController::with_control_dependencies(
+            executor.clone(),
+            Arc::new(RecordingEvents::default()),
+            Arc::new(FixedReadinessProvider(readiness)),
+            opened.store,
+            audit.store,
+            opened.settings,
+            audit.state,
+            opened.recovery_code,
+            SUPPORT_MAX_QUEUE_CAPACITY,
+            4,
+            Duration::from_secs(2),
+        );
+        (controller, executor, root)
+    }
+
+    async fn retain_unconverged_execution(
+        executor: &IsolatedSupportExecutor,
+        cleanup: Arc<RetryCleanupFixture>,
+        request_id: &str,
+        generation: u64,
+    ) {
+        let cleanup_target = cleanup as Arc<dyn SupportExecutionCleanup>;
+        let completion = Arc::new(SupportExecutionCompletion::default());
+        completion
+            .finish(SupportExecutionOutcome {
+                result: Err(SupportRuntimeError::Protocol),
+                cleanup_converged: false,
+                pending_cleanup: Some(cleanup_target.clone()),
+            })
+            .await;
+        executor.active.lock().await.insert(
+            (request_id.to_owned(), generation),
+            SupportExecution {
+                generation,
+                canceled: Arc::new(AtomicBool::new(false)),
+                force_requested: Arc::new(AtomicBool::new(false)),
+                phase: SupportExecutionPhase::Unconverged(cleanup_target),
+                task: Arc::new(Mutex::new(None)),
+                completion,
+            },
+        );
     }
 
     fn approved_readiness() -> SupportReleaseReadinessV1 {
@@ -3811,6 +3909,109 @@ mod tests {
         .await;
         assert_eq!(executor.calls.load(Ordering::Acquire), 2);
         assert_eq!(executor.forces.load(Ordering::Acquire), 0);
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn disable_forces_retained_isolated_ownership_after_worker_is_gone() {
+        let (controller, executor, root) = isolated_policy_harness(approved_readiness());
+        let cleanup = Arc::new(RetryCleanupFixture::default());
+        cleanup.converges.store(true, Ordering::Release);
+        retain_unconverged_execution(&executor, cleanup.clone(), "retained-success", 41).await;
+        assert!(executor.has_owned_executions().await);
+        {
+            let data = controller.inner.data.lock().await;
+            assert!(data.active.is_none());
+            assert!(!data.worker_running);
+        }
+
+        let disabled = controller
+            .update_support_settings(update_support_request(1, false, false))
+            .await
+            .expect("retained executor cleanup converges");
+        assert!(!disabled.effective_enabled);
+        assert_eq!(cleanup.force_calls.load(Ordering::Acquire), 1);
+        assert!(!executor.has_owned_executions().await);
+        assert!(!executor.shutting_down.load(Ordering::Acquire));
+
+        let enabled = controller
+            .update_support_settings(update_support_request(2, true, true))
+            .await
+            .expect("re-enable after retained cleanup");
+        assert!(enabled.effective_enabled);
+        let next = dispatch('e', "request-after-isolated-recovery", 1);
+        controller
+            .request(next.clone())
+            .await
+            .expect("next request");
+        let state = wait_for_status(
+            &controller,
+            &next,
+            CommitExplanationControllerStatus::Unavailable,
+        )
+        .await;
+        assert_eq!(
+            state.error_code.as_deref(),
+            Some("CODEX-SUPPORT-RELEASE-UNSUPPORTED")
+        );
+        assert_eq!(executor.next_generation.load(Ordering::Acquire), 2);
+        assert!(!executor.has_owned_executions().await);
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn retained_isolated_ownership_keeps_failed_disable_persisted_off() {
+        let (controller, executor, root) = isolated_policy_harness(approved_readiness());
+        let cleanup = Arc::new(RetryCleanupFixture::default());
+        retain_unconverged_execution(&executor, cleanup.clone(), "retained-failure", 43).await;
+
+        let error = controller
+            .update_support_settings(update_support_request(1, false, false))
+            .await
+            .expect_err("retained ownership must fail disable");
+        assert_eq!(error.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
+        assert_eq!(cleanup.force_calls.load(Ordering::Acquire), 1);
+        assert!(executor.has_owned_executions().await);
+        let snapshot = controller
+            .support_snapshot(get_support_request())
+            .await
+            .expect("authoritative failed-disable snapshot");
+        assert_eq!(snapshot.settings.version, 2);
+        assert!(!snapshot.settings.global_enabled);
+        assert!(!snapshot.settings.commit_explainer_enabled);
+        assert_eq!(
+            snapshot.last_error_code.as_deref(),
+            Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
+        );
+        let persisted = SupportSettingsStore::open(&root);
+        assert_eq!(persisted.settings.version, 2);
+        assert!(!persisted.settings.global_enabled);
+        let audit = SupportAuditStore::open(&root, Some(2));
+        assert_eq!(
+            audit.state.last_error_code.as_deref(),
+            Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
+        );
+
+        let rejected = controller
+            .update_support_settings(update_support_request(2, true, true))
+            .await
+            .expect_err("retained executor ownership blocks re-enable");
+        assert_eq!(rejected.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
+        assert_eq!(SupportSettingsStore::open(&root).settings.version, 2);
+
+        cleanup.converges.store(true, Ordering::Release);
+        let recovered = controller
+            .update_support_settings(update_support_request(2, false, false))
+            .await
+            .expect("retry force cleanup converges");
+        assert_eq!(recovered.settings.version, 3);
+        assert!(!executor.has_owned_executions().await);
+        assert_eq!(cleanup.force_calls.load(Ordering::Acquire), 2);
+        let enabled = controller
+            .update_support_settings(update_support_request(3, true, true))
+            .await
+            .expect("re-enable after cleanup recovery");
+        assert!(enabled.effective_enabled);
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 

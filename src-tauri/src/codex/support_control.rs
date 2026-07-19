@@ -322,6 +322,22 @@ struct PrivateEntryMetadata {
     size: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AtomicPublishError {
+    NamespaceUnsafe,
+    Sync,
+}
+
+struct AtomicPublishRequest<'a> {
+    root: &'a Path,
+    directory: &'a File,
+    source: &'a str,
+    destination: &'a str,
+    source_identity: FileIdentity,
+    expected_destination_identity: Option<FileIdentity>,
+    maximum_bytes: u64,
+}
+
 #[derive(Debug)]
 struct SupportAuditStoreState {
     entry_identity: Option<FileIdentity>,
@@ -499,6 +515,20 @@ impl SupportAuditStore {
     where
         F: FnOnce(),
     {
+        self.replace_database_with_hooks(payload, operation, before_namespace_commit, || {})
+    }
+
+    fn replace_database_with_hooks<F, G>(
+        &self,
+        payload: &str,
+        operation: &'static str,
+        before_namespace_commit: F,
+        after_namespace_validation: G,
+    ) -> SupportControlResult<()>
+    where
+        F: FnOnce(),
+        G: FnOnce(),
+    {
         let mut store_state = self.state.lock().map_err(|_| {
             SupportControlCommandError::new(SUPPORT_AUDIT_UNAVAILABLE, operation, true)
         })?;
@@ -583,36 +613,26 @@ impl SupportAuditStore {
             })?;
 
             before_namespace_commit();
-            verify_directory_identity(&self.root, &self.root_directory).map_err(|_| {
-                SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false)
-            })?;
-            verify_optional_entry_identity_at(
-                &self.root_directory,
-                AUDIT_FILE,
-                store_state.entry_identity,
-                MAX_AUDIT_DATABASE_BYTES,
+            publish_private_entry_with_hook(
+                AtomicPublishRequest {
+                    root: &self.root,
+                    directory: &self.root_directory,
+                    source: &temporary_name,
+                    destination: AUDIT_FILE,
+                    source_identity: temporary_identity,
+                    expected_destination_identity: store_state.entry_identity,
+                    maximum_bytes: MAX_AUDIT_DATABASE_BYTES,
+                },
+                after_namespace_validation,
             )
-            .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
-            verify_entry_identity_at(
-                &self.root_directory,
-                &temporary_name,
-                temporary_identity,
-                MAX_AUDIT_DATABASE_BYTES,
-            )
-            .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
-            rename_entry_at(&self.root_directory, &temporary_name, AUDIT_FILE).map_err(|_| {
-                SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-RENAME", operation, true)
+            .map_err(|error| match error {
+                AtomicPublishError::NamespaceUnsafe => {
+                    SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false)
+                }
+                AtomicPublishError::Sync => {
+                    SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-SYNC", operation, true)
+                }
             })?;
-            self.root_directory.sync_all().map_err(|_| {
-                SupportControlCommandError::new("CODEX-SUPPORT-AUDIT-SYNC", operation, true)
-            })?;
-            verify_entry_identity_at(
-                &self.root_directory,
-                AUDIT_FILE,
-                temporary_identity,
-                MAX_AUDIT_DATABASE_BYTES,
-            )
-            .map_err(|_| SupportControlCommandError::new(SUPPORT_AUDIT_UNSAFE, operation, false))?;
             store_state.entry_identity = Some(temporary_identity);
             Ok(())
         })();
@@ -1144,6 +1164,320 @@ fn rename_entry_at(directory: &File, source: &str, destination: &str) -> std::io
     }
 }
 
+fn link_entry_at(directory: &File, source: &str, destination: &str) -> std::io::Result<()> {
+    let source =
+        CString::new(source).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let destination = CString::new(destination)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: both names are valid and relative to the same pinned directory.
+    // No AT_SYMLINK_FOLLOW flag is used, so the source entry is never followed.
+    if unsafe {
+        libc::linkat(
+            directory.as_raw_fd(),
+            source.as_ptr(),
+            directory.as_raw_fd(),
+            destination.as_ptr(),
+            0,
+        )
+    } == 0
+    {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn atomic_exchange_entries_at(
+    directory: &File,
+    source: &str,
+    destination: &str,
+) -> std::io::Result<()> {
+    let source =
+        CString::new(source).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let destination = CString::new(destination)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: renameatx_np atomically swaps two entries in the pinned directory.
+    if unsafe {
+        libc::renameatx_np(
+            directory.as_raw_fd(),
+            source.as_ptr(),
+            directory.as_raw_fd(),
+            destination.as_ptr(),
+            libc::RENAME_SWAP,
+        )
+    } == 0
+    {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn atomic_exchange_entries_at(
+    directory: &File,
+    source: &str,
+    destination: &str,
+) -> std::io::Result<()> {
+    let source =
+        CString::new(source).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let destination = CString::new(destination)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: renameat2 atomically exchanges two entries in the pinned directory.
+    if unsafe {
+        libc::renameat2(
+            directory.as_raw_fd(),
+            source.as_ptr(),
+            directory.as_raw_fd(),
+            destination.as_ptr(),
+            libc::RENAME_EXCHANGE,
+        )
+    } == 0
+    {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn atomic_exchange_entries_at(
+    _directory: &File,
+    _source: &str,
+    _destination: &str,
+) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "atomic namespace exchange is unavailable",
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn atomic_rename_exclusive_at(
+    directory: &File,
+    source: &str,
+    destination: &str,
+) -> std::io::Result<()> {
+    let source =
+        CString::new(source).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let destination = CString::new(destination)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: RENAME_EXCL publishes source only while destination is absent.
+    if unsafe {
+        libc::renameatx_np(
+            directory.as_raw_fd(),
+            source.as_ptr(),
+            directory.as_raw_fd(),
+            destination.as_ptr(),
+            libc::RENAME_EXCL,
+        )
+    } == 0
+    {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn atomic_rename_exclusive_at(
+    directory: &File,
+    source: &str,
+    destination: &str,
+) -> std::io::Result<()> {
+    let source =
+        CString::new(source).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let destination = CString::new(destination)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: RENAME_NOREPLACE publishes source only while destination is absent.
+    if unsafe {
+        libc::renameat2(
+            directory.as_raw_fd(),
+            source.as_ptr(),
+            directory.as_raw_fd(),
+            destination.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    } == 0
+    {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn atomic_rename_exclusive_at(
+    _directory: &File,
+    _source: &str,
+    _destination: &str,
+) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "exclusive atomic rename is unavailable",
+    ))
+}
+
+fn restore_canonical_from_backup(
+    root: &Path,
+    directory: &File,
+    backup: &str,
+    destination: &str,
+    expected_identity: FileIdentity,
+    maximum_bytes: u64,
+) -> bool {
+    if verify_entry_identity_at(directory, backup, expected_identity, maximum_bytes).is_err() {
+        return false;
+    }
+    // A normal rename is used only for rollback from a verified private hard-link;
+    // it is never a publication fallback when atomic exchange is unavailable.
+    if rename_entry_at(directory, backup, destination).is_err()
+        || directory.sync_all().is_err()
+        || verify_directory_identity(root, directory).is_err()
+        || verify_entry_identity_at(directory, destination, expected_identity, maximum_bytes)
+            .is_err()
+    {
+        return false;
+    }
+    true
+}
+
+fn publish_private_entry_with_hook<F>(
+    request: AtomicPublishRequest<'_>,
+    after_namespace_validation: F,
+) -> Result<(), AtomicPublishError>
+where
+    F: FnOnce(),
+{
+    let AtomicPublishRequest {
+        root,
+        directory,
+        source,
+        destination,
+        source_identity,
+        expected_destination_identity,
+        maximum_bytes,
+    } = request;
+    verify_directory_identity(root, directory).map_err(|_| AtomicPublishError::NamespaceUnsafe)?;
+    verify_entry_identity_at(directory, source, source_identity, maximum_bytes)
+        .map_err(|_| AtomicPublishError::NamespaceUnsafe)?;
+    verify_optional_entry_identity_at(
+        directory,
+        destination,
+        expected_destination_identity,
+        maximum_bytes,
+    )
+    .map_err(|_| AtomicPublishError::NamespaceUnsafe)?;
+
+    let Some(expected_destination_identity) = expected_destination_identity else {
+        after_namespace_validation();
+        atomic_rename_exclusive_at(directory, source, destination)
+            .map_err(|_| AtomicPublishError::NamespaceUnsafe)?;
+        if verify_directory_identity(root, directory).is_err()
+            || verify_entry_identity_at(directory, destination, source_identity, maximum_bytes)
+                .is_err()
+        {
+            // Restore the original absent state only when the canonical entry is
+            // still the inode this operation published. Never remove a swapped entry.
+            if verify_entry_identity_at(directory, destination, source_identity, maximum_bytes)
+                .is_ok()
+            {
+                let _ = unlink_entry_at(directory, destination);
+                let _ = directory.sync_all();
+            }
+            return Err(AtomicPublishError::NamespaceUnsafe);
+        }
+        directory.sync_all().map_err(|_| AtomicPublishError::Sync)?;
+        return Ok(());
+    };
+
+    let backup = format!(".{destination}.{}.rollback", uuid::Uuid::new_v4());
+    if link_entry_at(directory, destination, &backup).is_err()
+        || verify_entry_identity_at(
+            directory,
+            &backup,
+            expected_destination_identity,
+            maximum_bytes,
+        )
+        .is_err()
+        || verify_entry_identity_at(
+            directory,
+            destination,
+            expected_destination_identity,
+            maximum_bytes,
+        )
+        .is_err()
+        || verify_entry_identity_at(directory, source, source_identity, maximum_bytes).is_err()
+    {
+        let _ = unlink_entry_at(directory, &backup);
+        return Err(AtomicPublishError::NamespaceUnsafe);
+    }
+    if directory.sync_all().is_err() {
+        let _ = unlink_entry_at(directory, &backup);
+        return Err(AtomicPublishError::Sync);
+    }
+
+    // Tests place a deterministic namespace swap here. In production there is
+    // deliberately no user-space validation between this point and the exchange.
+    after_namespace_validation();
+    if atomic_exchange_entries_at(directory, source, destination).is_err() {
+        let _ = restore_canonical_from_backup(
+            root,
+            directory,
+            &backup,
+            destination,
+            expected_destination_identity,
+            maximum_bytes,
+        );
+        return Err(AtomicPublishError::NamespaceUnsafe);
+    }
+
+    let exchange_matches = verify_directory_identity(root, directory).is_ok()
+        && verify_entry_identity_at(directory, destination, source_identity, maximum_bytes).is_ok()
+        && verify_entry_identity_at(
+            directory,
+            source,
+            expected_destination_identity,
+            maximum_bytes,
+        )
+        .is_ok()
+        && verify_entry_identity_at(
+            directory,
+            &backup,
+            expected_destination_identity,
+            maximum_bytes,
+        )
+        .is_ok();
+    if !exchange_matches {
+        let _ = restore_canonical_from_backup(
+            root,
+            directory,
+            &backup,
+            destination,
+            expected_destination_identity,
+            maximum_bytes,
+        );
+        return Err(AtomicPublishError::NamespaceUnsafe);
+    }
+
+    if unlink_entry_at(directory, source).is_err() || unlink_entry_at(directory, &backup).is_err() {
+        let _ = restore_canonical_from_backup(
+            root,
+            directory,
+            &backup,
+            destination,
+            expected_destination_identity,
+            maximum_bytes,
+        );
+        return Err(AtomicPublishError::NamespaceUnsafe);
+    }
+    directory.sync_all().map_err(|_| AtomicPublishError::Sync)?;
+    verify_directory_identity(root, directory).map_err(|_| AtomicPublishError::NamespaceUnsafe)?;
+    verify_entry_identity_at(directory, destination, source_identity, maximum_bytes)
+        .map_err(|_| AtomicPublishError::NamespaceUnsafe)
+}
+
 fn unlink_entry_at(directory: &File, name: &str) -> std::io::Result<()> {
     let name =
         CString::new(name).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
@@ -1175,6 +1509,30 @@ fn atomic_write_with_hook<F>(
 ) -> SupportControlResult<()>
 where
     F: FnOnce(),
+{
+    atomic_write_with_hooks(
+        root,
+        root_directory,
+        name,
+        bytes,
+        operation,
+        before_namespace_commit,
+        || {},
+    )
+}
+
+fn atomic_write_with_hooks<F, G>(
+    root: &Path,
+    root_directory: &File,
+    name: &str,
+    bytes: &[u8],
+    operation: &'static str,
+    before_namespace_commit: F,
+    after_namespace_validation: G,
+) -> SupportControlResult<()>
+where
+    F: FnOnce(),
+    G: FnOnce(),
 {
     verify_directory_identity(root, root_directory)
         .map_err(|_| SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false))?;
@@ -1210,34 +1568,26 @@ where
             SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-SYNC", operation, true)
         })?;
         before_namespace_commit();
-        verify_directory_identity(root, root_directory).map_err(|_| {
-            SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false)
-        })?;
-        verify_optional_entry_identity_at(
-            root_directory,
-            name,
-            expected_identity,
-            MAX_SETTINGS_BYTES,
+        publish_private_entry_with_hook(
+            AtomicPublishRequest {
+                root,
+                directory: root_directory,
+                source: &temporary_name,
+                destination: name,
+                source_identity: temporary_identity,
+                expected_destination_identity: expected_identity,
+                maximum_bytes: MAX_SETTINGS_BYTES,
+            },
+            after_namespace_validation,
         )
-        .map_err(|_| SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false))?;
-        verify_entry_identity_at(
-            root_directory,
-            &temporary_name,
-            temporary_identity,
-            MAX_SETTINGS_BYTES,
-        )
-        .map_err(|_| SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false))?;
-        rename_entry_at(root_directory, &temporary_name, name).map_err(|_| {
-            SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-RENAME", operation, true)
-        })?;
-        root_directory.sync_all().map_err(|_| {
-            SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-SYNC", operation, true)
-        })?;
-        verify_directory_identity(root, root_directory).map_err(|_| {
-            SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false)
-        })?;
-        verify_entry_identity_at(root_directory, name, temporary_identity, MAX_SETTINGS_BYTES)
-            .map_err(|_| SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false))
+        .map_err(|error| match error {
+            AtomicPublishError::NamespaceUnsafe => {
+                SupportControlCommandError::new(SUPPORT_SETTINGS_UNSAFE, operation, false)
+            }
+            AtomicPublishError::Sync => {
+                SupportControlCommandError::new("CODEX-SUPPORT-SETTINGS-SYNC", operation, true)
+            }
+        })
     })();
     if result.is_err() {
         let _ = unlink_entry_at(root_directory, &temporary_name);
@@ -1514,6 +1864,57 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 
+    #[test]
+    fn settings_swap_after_final_validation_rolls_back_original_inode() {
+        let root = temporary_directory("support-settings-post-validation-swap");
+        let store = SupportSettingsStore::open(&root).store.expect("store");
+        let original = fs::read(&store.path).expect("original settings");
+        let original_identity =
+            file_identity(&fs::symlink_metadata(&store.path).expect("original settings metadata"));
+        let attacker_backup = store.root.join("attacker-settings-backup.json");
+        let public_target = root.join("public-settings-target.txt");
+        fs::write(&public_target, b"public-settings-sentinel").expect("public target");
+        let next = SupportSettingsV1 {
+            version: 2,
+            global_enabled: false,
+            ..SupportSettingsV1::default()
+        };
+        let bytes = serde_json::to_vec_pretty(&next).expect("settings payload");
+
+        let error = atomic_write_with_hooks(
+            &store.root,
+            &store.root_directory,
+            SETTINGS_FILE,
+            &bytes,
+            "test",
+            || {},
+            || {
+                fs::rename(&store.path, &attacker_backup).expect("move validated canonical");
+                symlink(&public_target, &store.path).expect("insert post-validation symlink");
+            },
+        )
+        .expect_err("post-validation swap must fail closed");
+
+        assert_eq!(error.code, SUPPORT_SETTINGS_UNSAFE);
+        let canonical = fs::symlink_metadata(&store.path).expect("rolled-back canonical");
+        assert!(canonical.is_file());
+        assert_eq!(file_identity(&canonical), original_identity);
+        assert_eq!(fs::read(&store.path).expect("rolled-back bytes"), original);
+        assert_eq!(
+            fs::read(&public_target).expect("public sentinel"),
+            b"public-settings-sentinel"
+        );
+        assert!(fs::read_dir(&store.root)
+            .expect("support entries")
+            .all(|entry| {
+                let name = entry.expect("entry").file_name();
+                let name = name.to_string_lossy();
+                !name.ends_with(".tmp") && !name.ends_with(".rollback")
+            }));
+        fs::remove_file(attacker_backup).expect("remove attacker backup");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
     fn populated_audit(policy_version: u64, attempted_tasks: u64) -> SupportDurableAuditV1 {
         SupportDurableAuditV1 {
             schema_version: AUDIT_SCHEMA_VERSION,
@@ -1756,6 +2157,58 @@ mod tests {
         assert!(SupportAuditStore::open(&root, Some(1))
             .recovery_code
             .is_none());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn audit_swap_after_final_validation_rolls_back_original_inode() {
+        let root = temporary_directory("support-audit-post-validation-swap");
+        let opened = SupportAuditStore::open(&root, Some(1));
+        let original_state = opened.state.clone();
+        let store = opened.store.expect("store");
+        let original = fs::read(&store.path).expect("original audit database");
+        let original_identity =
+            file_identity(&fs::symlink_metadata(&store.path).expect("original audit metadata"));
+        let attacker_backup = store.root.join("attacker-audit-backup.sqlite3");
+        let public_target = root.join("public-audit-target.txt");
+        fs::write(&public_target, b"public-audit-sentinel").expect("public target");
+        let payload = serde_json::to_string(&populated_audit(1, 7)).expect("next audit payload");
+
+        let error = store
+            .replace_database_with_hooks(
+                &payload,
+                "test",
+                || {},
+                || {
+                    fs::rename(&store.path, &attacker_backup).expect("move validated canonical");
+                    symlink(&public_target, &store.path).expect("insert post-validation symlink");
+                },
+            )
+            .expect_err("post-validation swap must fail closed");
+
+        assert_eq!(error.code, SUPPORT_AUDIT_UNSAFE);
+        let canonical = fs::symlink_metadata(&store.path).expect("rolled-back canonical");
+        assert!(canonical.is_file());
+        assert_eq!(file_identity(&canonical), original_identity);
+        assert_eq!(
+            fs::read(&store.path).expect("rolled-back database"),
+            original
+        );
+        assert_eq!(
+            fs::read(&public_target).expect("public sentinel"),
+            b"public-audit-sentinel"
+        );
+        assert!(fs::read_dir(&store.root)
+            .expect("support entries")
+            .all(|entry| {
+                let name = entry.expect("entry").file_name();
+                let name = name.to_string_lossy();
+                !name.ends_with(".tmp") && !name.ends_with(".rollback")
+            }));
+        let reopened = SupportAuditStore::open(&root, Some(1));
+        assert!(reopened.recovery_code.is_none());
+        assert_eq!(reopened.state, original_state);
+        fs::remove_file(attacker_backup).expect("remove attacker backup");
         fs::remove_dir_all(root).expect("cleanup");
     }
 
