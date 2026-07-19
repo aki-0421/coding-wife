@@ -134,7 +134,7 @@ read_when:
 | `S-001` | セッションダッシュボード | `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059`, `HIST-F-061` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証拠 | `HIST-F-038`, `HIST-F-044`〜`HIST-F-051`, `HIST-F-057`, `HIST-F-061` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
-| `S-006` | プロジェクト設定 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
+| `S-006` | ワークスペース設定 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
 ## 非機能要件
 

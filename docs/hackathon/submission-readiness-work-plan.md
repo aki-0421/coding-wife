@@ -103,7 +103,7 @@ read_when:
 
 ### 2. Contextのversioned next-turn slice
 
-- workspace-scoped Project Contextとapp-global Character Contextを別schema、別versionとしてnative SQLiteへ保存する。
+- Project ID-scoped Project Contextとapp-global Character Contextを別schema、別versionとしてnative SQLiteへ保存する。
 - typed IPC、migration、size limit、validation、expected-version transaction、conflict/reload UXを先に確定する。
 - Project Contextはgoal、constraints、Definition of Done、technical references、user notesを扱う。
 - Character Contextはdisplay name、tone、speech density、behavior、prohibited expressionsを扱う。
@@ -205,7 +205,7 @@ read_when:
 
 - [ ] **C07 `feat(workspaces): add cancel repair and unregister actions`**
   - Depends on: C02
-  - Parallel: Commit/Context/Settings系列と可。
+  - Parallel: Commit/Settings系列と可。
   - Done: state-aware menu、二段階確認、health表示、repair、focus restorationが動き、source/Git ref/history本文を変更しないnative integration testがgreen。
 
 - [ ] **C08 `feat(workspaces): confirm active-turn transitions`**

@@ -1,9 +1,9 @@
 ---
 title: "S-002 コーディングワークスペース"
-description: "Codex main session、構造化tool event、意思決定、Context、Live2D companionを一つの安全な作業面で扱う画面仕様。"
+description: "Codex main session、構造化tool event、意思決定、read-only Context、Live2D companionを一つの安全な作業面で扱う画面仕様。"
 updated: 2026-07-20
 read_when:
-  - "Chat/Context tab、composer、Codex event timeline、decision、Live2D companionを実装するとき。"
+  - "Chat tab、composer、Codex event timeline、decision、Live2D companionを実装するとき。"
   - "S-002とWORK、CODE、SUP、GIT、HIST、LIVE、NARR、APP要件の対応を確認するとき。"
 screen_id: "S-002"
 status: "Approved"
@@ -15,7 +15,7 @@ status: "Approved"
 |---|---|
 | window label | `main` |
 | React route / view key | `/workspace/:workspaceId/chat` / `coding-workspace` |
-| subview | `/workspace/:workspaceId/context` / `workspace-context` |
+| subview | 非該当 |
 | 対象OS | macOS 14以降、Apple Silicon |
 | デザイン | [DESIGN.md](../../DESIGN.md)、Figma Desktop node `8:2`、[demo.png](../thinking/demo.png) |
 | 共通仕様 | [デスクトップ共通仕様](desktop-common-specification.md) |
@@ -36,7 +36,6 @@ status: "Approved"
 | Timeline | user/assistant text、tool開始・結果、file変更、test、Git、support、decision、errorの正規化event |
 | Composer | multiline指示、attachment、project context参照、reasoning effort、send、stop |
 | Decision | 選択肢、自由入力、保留、中断、明示承認、理由・影響・可逆性 |
-| Context subview | workspace-scoped project contextの編集・保存・version表示 |
 | Companion | default/custom Live2D、状態表現、mute、visible caption、static/text fallback |
 | Continuity | draft、timeline位置、turn、event sequence、selected contextの復元 |
 
@@ -67,7 +66,7 @@ status: "Approved"
 
 | 利用者・ロール | 表示 | 操作 | 拒否時の動作 |
 |---|---|---|---|
-| ローカル利用者 | redacted event、repo/branch、context、decision、verification | send、stop、answer、inspect、copy、context編集、mute | permission、ownership、stale stateを理由付きで表示 |
+| ローカル利用者 | redacted event、repo/branch、context、decision、verification | send、stop、answer、inspect、copy、mute | permission、ownership、stale stateを理由付きで表示 |
 | React WebView | normalized event、typed action、asset handle | render、input、focus、route、typed IPC | raw shell、Git args、absolute private path、secretを保持しない |
 | Rust supervisor | workspace scope、Codex process、event sequence、DB | spawn、validate、normalize、redact、persist、cancel | invalid/stale/duplicateを構造化errorにする |
 | Codex main agent | project context、approved tool scope、decision answer | plan、delegate、implement、verify、summarize | allowlist外operationを実行せずdecisionへ戻す |
@@ -82,7 +81,7 @@ status: "Approved"
 |---|---:|---|---|
 | workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、App settings gear | filter、workspace選択、App settings |
 | breadcrumb row | main上段40.5px | owner avatar、`owner/repo` / workspace、branch、connection、attention | Sessionsへ戻る、diagnostic詳細 |
-| tab row | main下段40.5px | Chat / Commit / Context / Settings | view切替 |
+| tab row | main下段40.5px | Chat / Commit / Settings | view切替 |
 | Chat pane | 607.11×754.99px | event timeline、decision、composer | inspect、copy、send、stop、answer |
 | Companion pane | 607.84×754.99px | Live2D canvas、visible caption、mute | mute、fallback詳細 |
 | composer | Chat内571.11×128.25px、left/right 18px、bottom 15px | input、attachment、context、Sol、effort、send/stop | draft編集、popover、turn操作 |
@@ -100,8 +99,7 @@ status: "Approved"
 | connection | Ready / Working / Needs answer / Offline / Interruptedをtextとshapeで表示する |
 | Chat | 本画面のmain route。unread error/decision countをbadge表示する |
 | Commit | [S-003](S-003_session-evidence.md)へ遷移する。manual commit buttonではない |
-| Context | 本画面のContext subviewへ遷移する |
-| Settings | [S-006](S-006_project-settings.md)へ遷移する |
+| Settings | [S-006](S-006_project-settings.md)のworkspace History & Privacyへ遷移する |
 
 ### Chat timeline
 
@@ -139,7 +137,7 @@ timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted 
 | Send | primary icon button、accessible label `Send / 送信` | instruction条件不成立 |
 | Stop | running時にSend位置へ表示。明示clickだけ | turn非実行時 |
 
-attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、Context tabのProject context編集やApp settingsのCharacter context編集とは別の送信時参照として扱う。
+attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、App settings > Projects > project detailのProject Context編集やApp settingsのCharacter context編集とは別の送信時参照として扱う。
 
 送信時はworkspace、draft hash、context version、Git fingerprint、effort、attachmentをRustで再検証する。public instructionは32,000 Unicode scalar以下を維持し、開始時に固定したProject/Character context、version/hash metadata、JSON escaping、固定markerとの合成text全体を80,000 Unicode scalar以下にする。WebViewとRustはUTF-8 byte数ではなくUnicode scalar数で同じexact boundaryを検査し、80,001 scalar、NUL、その他controlをApp Server送信前に拒否してdraftとcontext versionを保持する。sourceはstable root dirfdからno-followで開き、descriptorから0700/0600のapp-private snapshotへcopy、fsync、hash再検証する。App Serverへはsnapshotだけを渡し、accepted/failed/terminal/expiryで削除する。二重操作は同じidempotency keyへ集約する。
 
@@ -157,7 +155,7 @@ attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level 
 
 native/fallbackのdecisionは共通のexact versioned `DecisionContext`を使う。`effect`、`scope`、`risk`、`reversibility`、`recommendation`、bounded evidence、`uncertainty`をsafe public textだけで構成し、unknown field/version、NUL/control、secret、private pathを含むcontextはcardをactionableにせずturnを安全に停止する。再起動後も同じcontextを復元する。
 
-decisionはtimeline内の強いoutline surfaceとして表示し、必要時だけ同じDOM内容をportal overlayでも提示する。Live2Dの表情、音声、色、animationで回答を急かさない。背景のSendは無効にするが、timeline、Context、Commit、Settingsのread-only閲覧は許可する。
+decisionはtimeline内の強いoutline surfaceとして表示し、必要時だけ同じDOM内容をportal overlayでも提示する。Live2Dの表情、音声、色、animationで回答を急かさない。背景のSendは無効にするが、timeline、Commit、Settingsのread-only閲覧は許可する。
 
 ### Companion
 
@@ -167,34 +165,13 @@ decisionはtimeline内の強いoutline surfaceとして表示し、必要時だ�
 | State | versioned semantic state `neutral` / `thinking` / `working` / `asking` / `success` / `warning` / `error` | 同じja/en HTML visible state textを常時同期 |
 | Uncertainty |確信度を断定表情へ変換せず、`確認中`、`判断が必要`等のtextを出す | text-onlyで同一情報 |
 | Audio | eligible commentaryとcommit explanation確定chunkの再生status、mute | TTS off/失敗時も同じcaption textを欠落させない |
-| Control | mute、fallback detail。model変更はProject settings link | keyboard操作とaccessible name |
+| Control | mute、fallback detail。model変更はApp settings > Companion link | keyboard操作とaccessible name |
 
 canvasはpointer eventを奪わず、decorative扱いとする。選択packの正本はapp-globalなowner-only character library stateであり、全workspaceは選択変更を即時共有する。model animationはevent severityを誇張せず、error/decisionを祝福表現にしない。tabがbackground、window occluded、reduced motion、thermal pressure時はFPSを下げ、Chat入力とevent描画を優先する。
 
 operational eventはversioned mapperで`idle`→`neutral`、`thinking`→`thinking`、`acting` / `reviewing` / explicit commit presentation→`working`、`waiting_for_user`→`asking`、`completed`→`success`、`disconnected`→`warning`、`error`→`error`へ決定的に変換する。unknown/unsupported eventは`neutral`へ戻す。semantic stateからは検証済みmanifest inventory内のmotion cue、expression cue、またはneutralだけを使い、Codex/support output、path、URL、parameter式、任意file名をcueとして採用しない。unknown mapping version、manifest hash不一致、invalid/deleted cueではmapping全体を実行せずneutral/static/textへ戻す。
 
 verified commit後にapp-owned explanation controllerが`queued` / `running`へ遷移しても、Commit UIのbackground生成statusだけを更新し、caption/live region/TTSは開始しない。利用者が「詳しく教えて」または再表示を1回選んだ時だけ、そのselection/request/presentation intent epochへ束縛した`working`状態とsequence付きのredacted narration chunkをvisible HTML captionへ表示する。未生成、生成中、background生成済みcacheのどれも同じ1回で表示し、captionをTTSより先に確定して、TTS enabled時だけ同じtextを同じ順で読む。`Close explanation`、workspace/locale/selection変更、main turnのStop、stale/schema invalidはpresentation intentだけをrevokeし、旧chunkを表示・再生せず、background support job/cacheを維持する。queued/running jobをterminal化するのはS-003/S-005の明示`Cancel explanation generation`、timeout、またはapp process終了時の共通runtime cleanupだけである。
-
-### Context subview
-
-Context tabはS-002内のsubviewであり、sidebarとheaderを維持してChat/Companion bodyを一続きのeditorへ置換する。
-
-| section | 内容 | 適用範囲 | 禁止 |
-|---|---|---|---|
-| Project context | goal、constraints、definition of done、tech/rules参照、user notes | Codex mainとallowlist済みsupport snapshotへversion付きで渡す。commit explainerには渡さない | secret、無制限absolute path、characterによる上書き |
-
-Project contextは最終保存時刻、version、適用先を表示する。保存はworkspace単位のtransactionとし、app-globalなCharacter contextを上書きしない。running turnには開始時versionを固定し、保存後は`次のturnから適用`と明示する。
-
-| Context state | 表示 | 操作・focus |
-|---|---|---|
-| loading | field shape skeleton、workspace名。旧workspace本文を表示しない | Save disabled。terminal後はsection headingまたは最初のinvalid fieldへfocus |
-| clean / dirty | version/hash、`次のturnから適用`。dirtyは文字数と`未保存` | Save / 変更を破棄。running turnへ途中適用しない |
-| saving / saved | 対象sectionだけprocessing。成功後`Version N+1` | 二重Save disabled。成功はpolite status、focusを奪わない |
-| validation error | field直下のlocalized safe reason | 入力を保持し最初のinvalid fieldへfocus |
-| version conflict | `手元 Version N / 保存済み Version M`、差があるfield名、手元draft | `保存済みを再読み込み`だけが当該sectionを置換。Cancel/Escapeはdraftを維持しeditorへ戻り、再読込後はsection headingへfocus |
-| load/save unavailable | sanitized code、保持data、Retry | 他section/他workspaceを変更せず、errorをassertiveに1回通知 |
-
-Send受付時はworkspace-scoped Project contextとapp-global Character contextのversionとhashをimmutable request snapshotへ固定する。保存済みContextの変更は必ず次のturnから適用し、running turnへ後着responseを注入しない。
 
 ## responsive behavior
 
@@ -224,7 +201,7 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | 再起動復旧 | started turnにterminal eventなし | Interrupted marker、draft、last observed commit、review/new turn/diagnostic | read-only inspect、Commit、new turn前preflight |利用者が次操作を選ぶ |
 | stale event | sequence gap、duplicate、workspace mismatch | affected pointでingestion pause、diagnostic | local history、Stop | supervisorがgap解消またはterminal error |
 | companion fallback | WebGL/model/render/audio failure | staticまたはtext-only、visible reason、Chatは継続 | Chat全操作、Settings | retryまたは別model選択 |
-| repository blocked | healthが`missing` / `changed` / `unreadable` / `read_only` / `stale_branch` | header/rowのlocalized status、保持timeline/draft、Send不可理由 | Commit/Context/Settings、Repair/Recheck | `healthy`のfresh snapshot |
+| repository blocked | healthが`missing` / `changed` / `unreadable` / `read_only` / `stale_branch` | header/rowのlocalized status、保持timeline/draft、Send不可理由 | Commit/Settings、Repair/Recheck | `healthy`のfresh snapshot |
 | workspace切替確認 | old workspaceにactive/pending turnがあり別workspaceを選択/Send | new selectionを保留し、old workspaceをactive表示したまま`停止して切替 / Stop and Switch`、`戻る / Back`だけ | 明示2操作だけ | exact old terminal interrupt + cleanup、またはBack |
 | commit説明準備中 | app controllerがverified commitを`queued` / `running`としているが明示presentation intentはない | background生成status、「詳しく教えて」、`Cancel explanation generation`。caption/live region/TTSは0件でmain timelineへmessageを追加しない | read-only tab、詳しく教えて、生成cancel | 明示intent、generated/canceled/failed/unavailable/selection変更 |
 | commit説明表示中 | `user_request` / `user_retry` / 明示Showのintentとcontroller stateがexact一致する | semantic `working`、streamed HTML caption、`Close explanation`、queued/running時だけ`Cancel explanation generation`、mute。active tabは維持 | read-only tab、Close、条件付き生成Cancel、mute | generated/canceled/failed/unavailable/selection/locale/workspace変更、Stop、Close |
@@ -242,7 +219,6 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | interrupt | decisionまたはrunning turn | main/support停止、completed/partial/unknownを分類 |確認cancelで継続 | Interruptedとしてreviewへ誘導 | `SUP-F-057`〜`SUP-F-061` |
 | attachment追加 | picker起動可能 | validated handleをdraftへ追加 | draft不変、errorなし | chipを追加せずreason表示 | `CODE-F-053`, `APP-F-066`〜`APP-F-069` |
 | workspace切替 | 別workspace選択、old active/pending turnなし、または確認済みinterrupt | old presentation/audio停止後、new workspaceのdraft、last summary、anchor ID/sequence/offsetをatomic復元。app-global character設定は維持 | `戻る`でold state完全維持 | old workspaceをactiveのままerror、new activation 0件 | `WORK-F-058`〜`WORK-F-060` |
-| Context保存 | Project context validation成功、expected version一致 | versionを1増やし`次のturnから適用`。running turn snapshot不変 | dirty draft維持 | 入力保持、field/conflictと安全なreloadを表示 | `WORK-F-063` |
 | mute切替 | audio/companion利用可能 |即時再生停止または次eligible textから再開、設定保存 | 非該当 | text表示は継続 | `NARR-F-068`〜`NARR-F-075` |
 | Commit tabを開く | workspace valid | same workspaceの[S-003](S-003_session-evidence.md)を表示し、初回active表示時だけread-only observationを取得 | 非該当 | Chatを維持してerror | `GIT-F-072`〜`GIT-F-089` |
 
@@ -257,7 +233,6 @@ evidence failure、blocking decision、permission errorはCompanionより表示�
 | effort |前回valid値、初回`Fast` | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | Send不可理由 | valid変更時workspace preference |
 | decision option | 未選択 |回答時必須 | server提示IDの1件 | decision surface | answer accepted時event |
 | Other text |空 | Other選択時必須 | trim後1〜2,000 Unicode scalar | field直下、入力保持 | answer accepted時event |
-| project context |前version | 任意 |各field 0〜8,000、総量32,000 Unicode scalar | section内 | section transaction成功 |
 
 composerへsecret patternを検出した場合は送信前に対象範囲とredaction案を示し、`修正する`をprimaryにする。検出結果そのものへsecretを複製しない。
 
@@ -276,7 +251,6 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | attachment選択 | Tauri dialog → Rust | `select_workspace_attachments` | file picker、canonical workspace root、size/type |変更なし | invalid fileをhandle化しない |
 | read-only context取得 | Rust context adapter | `capture_turn_context` | source allowlist、5秒deadline、stdout 1MiB、stderr 4KiB、process tree cleanup、timestamp、redaction、content hash | draft不変 | raw terminal/pathへfallbackせず、Terminal outputはunsupportedを返す |
 | decision / approval回答 | Rust App Server adapter | `answer_decision_or_approval` | negotiated requestUserInputまたは既知approval method、元request ID、idempotency | Hold/cancelは未回答維持 | 未知method/schemaは許可せずBlocked |
-| Context保存 | Rust DB | `save_workspace_project_context` | workspace ID、expected version、schema |変更なし | optimistic conflictを表示 |
 | Live2D読込 | Rust asset protocol → WebView renderer | `load_character_pack` | selected verified pack ID、app-private root |前model維持 | static/text fallback |
 | mute/audio | Rust audio/TTS | `set_mute` / `stop_audio` | selected voice、redacted eligible text、secret handle |前設定維持 | text-only継続 |
 | clipboard copy | Tauri clipboard | `copy_event_summary` | redacted rendered textだけ | 非該当 | copy失敗notice、raw payload不可 |
@@ -291,7 +265,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | 最大化・全画面 | Chat/Companionを1:1で拡張し、composerは最大720px |
 | 常に手前へ表示 | 不可 |
 | 閉じる操作 | running時は共通の停止して終了/終了しないを表示 |
-| 未保存変更がある場合 | draftとContext sectionをDBへ保存してからroute/close。失敗時は閉じない |
+| 未保存変更がある場合 | composer draftをDBへ保存してからroute/close。失敗時は閉じない |
 
 ## メニュー・ショートカット
 
@@ -299,7 +273,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 |---|---|---|---|---|
 | turn送信 | `Command+Enter` | 非対応 | Sendと同条件 | 1 turnだけ作成 |
 |改行 | `Enter` | 非対応 | composer focus | newline追加 |
-| tab移動 | `Control+Tab` / `Control+Shift+Tab` | 非対応 | main window active | 4 tab循環 |
+| tab移動 | `Control+Tab` / `Control+Shift+Tab` | 非対応 | main window active | 3 tab循環 |
 | popover/previewを閉じる | `Escape` | 非対応 | non-destructive overlay |入力維持、triggerへfocus |
 | decision回答 | `Command+Enter` | 非対応 | valid selection/Other | answerを1回送信 |
 | Stop | shortcutなし | 非対応 | running | buttonだけで実行 |
@@ -311,7 +285,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | thread/turn/work unit | Codex + Rust SQLite mapping | validated lifecycle event | route return/restart | history明示削除 | Interrupted/read-only |
 | normalized event | append-only SQLite + hash | versioned semantic schema/redaction合格後 | exact projectorでstable ID・sequence順にassistant/tool/file/diff/plan/completion/error/decision/approvalを復元 | workspace history明示削除 | unknown/invalidはUnsupportedへ隔離、raw event非保存 |
 | draft/attachment handle/effort | Rust SQLite | debounce、valid変更、route leave | workspace選択 | send成功または明示clear | UI入力保持とretry |
-| project context | Rust SQLite workspace row | section save transaction | Context/turn開始 | project解除/履歴削除契約 | expected version conflict |
+| project context | Rust SQLite project row | App settingsのproject detailでexpected-version save | project detail/turn開始 | project登録解除契約 | expected version conflict |
 | character context | Rust SQLite app-global singleton row | App settingsのexpected-version save | App settings/turn開始 | app data reset契約 | expected version conflict |
 | last summary/timeline anchor/tab | Rust SQLite | terminal summary、scroll settle/tab移動 | route return/restart | history削除契約 | 同workspaceのnearest valid sequenceだけへ補正 |
 | repository identity/health snapshot | Rust SQLite、Git read-only再検査 | window focus、selection、Send直前 | route return/restart | project登録解除 | stale status、Repair/Recheck |

@@ -73,9 +73,9 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-052` | 利用者はmacOS 14以降で単一main windowを起動できる | cold startでmain windowが1枚だけ表示される。native windowは初期React shellとCSSのlayoutが確定するまで非表示とし、1文字ずつ折り返す狭幅frame、unstyled content、空のWebViewを利用者へ見せない。frontend moduleの読込に失敗した場合もraw errorを出さず、OS localeに応じたja/enの再起動案内をstyled shellで表示する。app-private single-instance lockを保持中の二重起動要求は新しいWebView、Codex/App Server、support runtime、audio controller、DB writerを作らず、既存windowをunminimizeしてfocus/raiseしてから新processを終了する。stale lockはowner/process identityを検証した場合だけ回収する | Approved | 非該当 |
 | `APP-F-053` | 利用者はFigma基準の三領域を表示できる | 1470×836 CSS pxでsidebar 255.04px、header 81px、Chat 607.11px、Companion 607.84pxとなり、主要境界が各基準値の±2px以内になる。起動画面の利用可能領域が標準geometryより小さい場合はwindow全体をwork area内へ収め、native resize edgeとtraffic lightsを画面外へ出さない | Approved | 非該当 |
 | `APP-F-054` | 利用者はminimum window sizeでも主要操作を継続できる | windowは960×640 CSS px未満へ縮小できず、960×640でtab、timeline、composer、Send、停止操作が欠落しない | Approved | 非該当 |
-| `APP-F-055` | 利用者はS-001〜S-006の現行画面へ同じwindow内で移動できる | sidebar、Chat/Commit/Context/Settings tab、app settings gearから対象viewへ移動し、戻った時にworkspace選択とcomposer draftが保たれる | Approved | 非該当 |
+| `APP-F-055` | 利用者はS-001〜S-006の現行画面へ同じwindow内で移動できる | sidebar、Chat/Commit/Settings tab、app settings gearから対象viewへ移動し、戻った時にworkspace選択とcomposer draftが保たれる | Approved | 非該当 |
 | `APP-F-056` | 利用者はmacOS native titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になる。WebViewは赤・黄・緑のtraffic-light代替要素を描画しない。main window上端40.5 CSS pxはReact component境界と無関係な一続きのnative titlebar hit bandとし、primary single mousedownでdrag、primary second mousedownでzoomを開始する。button、link、tab、input、select、textarea、contenteditable等のinteractive targetだけを除外し、native control用safe areaとdrag判定が操作を奪わない。`main` WebViewにはdrag開始と明示toggle maximizeに必要なTauri window permissionだけを許可し、任意のwindow操作権限は追加しない | Approved | 非該当 |
-| `APP-F-083` | 利用者はアプリ全体設定と選択中プロジェクト設定を別画面で識別できる | sidebarのapp settings gearはGeneral、Projects、Character context、Companion、Audio、Support、Diagnosticsだけを持つS-005を開き、workspaceのSettings tabはProject context、History & privacyだけを持つS-006を開く。Character contextとCompanionはworkspace未選択でも表示・変更でき、S-005から戻っても選択workspace、active tab、composer draftを維持する。S-006のheadingには現在のproject identityを表示する | Approved | 非該当 |
+| `APP-F-083` | 利用者はアプリ全体設定とworkspace設定を別画面で識別できる | sidebarのapp settings gearはGeneral、Projects、Character context、Companion、Audio、Support、Diagnosticsを持つS-005を開く。Projectsの各project rowは同じProject IDに属する全workspaceで共有するProject Contextのdetailを開く。workspaceのSettings tabはHistory & Privacyだけを持つS-006を開く。Character contextとCompanionはworkspace未選択でも表示・変更でき、S-005から戻っても選択workspace、active tab、composer draftを維持する。S-006のheadingには現在のworkspace identityを表示する | Approved | 非該当 |
 | `APP-F-084` | appはcharacter presentation設定を全workspaceへ共通適用する | Character contextはapp-globalな独立version/hashを持つnative record、selected character packとsemantic mappingはowner-only character library stateを正本とし、workspace IDまたはProject IDでpartitionしない。Character context保存は次の全workspaceのturnから、pack選択とmapping保存は全workspaceのcompanionへ反映する。旧workspace/project-scoped値はmigration時に一度だけ決定的にglobal値へ統合し、以後workspace切替、作成、削除、project登録解除で変更しない | Approved | 非該当 |
 
 ### 言語・アクセシビリティ
@@ -169,7 +169,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `S-003` | セッション証拠 | `APP-F-055`, `APP-F-059`〜`APP-F-062` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
 | `S-004` | 設定・診断（廃止） | 非該当 | 廃止 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
 | `S-005` | アプリ設定・診断 | `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076`, `APP-F-083` | 追加 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
-| `S-006` | プロジェクト設定 | `APP-F-055`, `APP-F-059`, `APP-F-060`, `APP-F-062`, `APP-F-066`, `APP-F-072`, `APP-F-083` | 追加 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
+| `S-006` | ワークスペース設定 | `APP-F-055`, `APP-F-059`, `APP-F-060`, `APP-F-062`, `APP-F-066`, `APP-F-072`, `APP-F-083` | 追加 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
 `APP-F-073`〜`APP-F-075`と`APP-F-077`〜`APP-F-082`はrelease/CI/installed artifact境界の要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
 

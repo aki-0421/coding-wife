@@ -31,7 +31,7 @@ Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍sca
 |---|---|
 | Platform | macOS 14以降、Apple Silicon、単一利用者、単一`main` window |
 | Frontend | React + TypeScript + ViteをTauri v2 WebViewへbundleする |
-| Navigation | persistent workspace sidebar、二段header、Chat/Commit/Context/Settings、app settings gear |
+| Navigation | persistent workspace sidebar、二段header、Chat/Commit/Settings、app settings gear |
 | State | loading、empty、processing、offline、error、permission、disabled、cancel、repository repair、restart recovery |
 | Trust boundary | WebViewは表示と入力、Rustはprocess、Git、DB、filesystem、asset、secretの認可 |
 | Inclusion | ja/en、keyboard-only、WCAG 2.2 AA、200% text zoom、reduced motion |
@@ -55,9 +55,9 @@ Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍sca
 | [S-003](S-003_session-evidence.md) | セッション証拠 | `/workspace/:workspaceId/evidence` / `session-evidence` | Commit tab、checkpoint通知 |
 | [S-004](S-004_settings-diagnostics.md) | 設定・診断（廃止） | 非該当 | 履歴参照だけ |
 | [S-005](S-005_app-settings-diagnostics.md) | アプリ設定・診断 | `/app-settings/:section?` / `app-settings` | sidebar gear、診断link |
-| [S-006](S-006_project-settings.md) | プロジェクト設定 | `/workspace/:workspaceId/settings/:section?` / `project-settings` | Settings tab |
+| [S-006](S-006_project-settings.md) | ワークスペース設定 | `/workspace/:workspaceId/settings` / `workspace-settings` | Settings tab |
 
-Context tabはS-002内の`/workspace/:workspaceId/context` subviewであり、新しい画面IDを発行しない。確認dialog、OS picker、decision overlay、popoverも独立した画面IDを持たない。
+App settingsのproject detailはS-005内の`/app-settings/projects/:projectId` subviewであり、新しい画面IDを発行しない。確認dialog、OS picker、decision overlay、popoverも独立した画面IDを持たない。
 
 ## 技術境界
 
@@ -166,7 +166,7 @@ shadcnはinteractionとkeyboard behaviorだけに使う。shell、sidebar、even
 | S-002 | event timeline | header、composer、Companion mute | workspace ID + Chat tab |
 | S-003 | checkpoint/event listとdetailを別scroll | header、summary/filter | workspace ID + selected evidence |
 | S-005 | app settings main panel | app settings header、section navigation | selected app settings section |
-| S-006 | project settings main panel | workspace header、section navigation | selected project settings section |
+| S-006 | workspace settings main panel | workspace header | History & Privacy heading |
 | portal | popover/dialog自身 | trigger位置 | open中だけ。route変更で閉じる |
 
 wheel/trackpad eventを親へ二重伝播させない。timelineがbottomから48px超離れた状態でeventを受けてもscrollを動かさず、「最新へ」を表示する。
@@ -190,7 +190,7 @@ destructive/interrupt confirmationの共通DOM順はheading、対象、影響、
 | 操作 | shortcut | 条件 | 結果 |
 |---|---|---|---|
 | turn送信 | `Command+Enter` | valid composer、online、decisionなし | 1 turnだけ開始。Enterは改行 |
-| tab移動 | `Control+Tab` / `Control+Shift+Tab` | main window active | Chat/Commit/Context/Settingsを循環 |
+| tab移動 | `Control+Tab` / `Control+Shift+Tab` | main window active | Chat/Commit/Settingsを循環 |
 | workspace filter | `Command+K` | destructive dialogなし | sidebarを開きfilterへfocus |
 | non-destructive overlay close | `Escape` | popover/drawer/preview表示中 | 入力を保持しtriggerへfocus |
 | decision answer | `Command+Enter` | optionと条件付きOtherがvalid | answerを1回送信 |
@@ -245,7 +245,8 @@ loading中に最終dataがある場合は前回dataを薄く残し、全画面sp
 |---|---|---|---|---|
 | window geometry / route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | Reset UI state |
 | `AppPreferencesV1` (`locale` / `reducedMotion` / `characterVisibility`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | Reset Preferencesでrecordだけsafe defaultへ |
-| project/workspace/Project context/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
+| project/workspace/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
+| Project context | Rust管理SQLiteのProject ID-scoped record | App settings project detailのexpected-version save | project detailまたは同Project IDのworkspace turn開始 | project登録解除契約 | optimistic conflict |
 | app-global Character context | Rust管理SQLite singleton record | App settingsのexpected-version save | 全workspaceへ同じversion/hashを復元 | app data reset契約 |
 | repository identity/health snapshot | Rust管理SQLite + read-only Git再検査 | 登録、window focus、selection、Send直前 | row/headerへ復元後にfreshness再検査 | project登録解除 |
 | normalized event / review pack | append-only SQLite + hash artifact | redaction/schema合格後 | sequence順に再構築 | workspace history明示削除 |

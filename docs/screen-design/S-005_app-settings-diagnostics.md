@@ -1,9 +1,9 @@
 ---
 title: "S-005 アプリ設定・診断"
-description: "全プロジェクトへ共通適用する表示、character presentation、登録project一覧、音声、支援、診断を管理する画面仕様。"
+description: "登録projectごとのProject contextと、全projectへ共通適用するcharacter presentation、表示、音声、支援、診断を管理する画面仕様。"
 updated: 2026-07-20
 read_when:
-  - "sidebar gear、アプリ全体の設定、project登録一覧、音声、support、native diagnosticsを実装するとき。"
+  - "sidebar gear、project一覧とProject context詳細、アプリ全体の設定、音声、support、native diagnosticsを実装するとき。"
   - "S-005とAPP、CODE、SUP、GIT、LIVE、NARR要件の対応を確認するとき。"
 screen_id: "S-005"
 status: "Approved"
@@ -14,7 +14,7 @@ status: "Approved"
 | 項目                   | 内容                                                          |
 | ---------------------- | ------------------------------------------------------------- |
 | window label           | `main`                                                        |
-| React route / view key | `/app-settings/:section?` / `app-settings`                    |
+| React route / view key | `/app-settings/:section?`、`/app-settings/projects/:projectId` / `app-settings` |
 | 対象OS                 | macOS 14以降、Apple Silicon                                   |
 | デザイン               | [DESIGN.md](../../DESIGN.md)、Figma Desktop node `8:2`のshell |
 | 共通仕様               | [デスクトップ共通仕様](desktop-common-specification.md)       |
@@ -23,7 +23,7 @@ status: "Approved"
 
 ## 目的
 
-利用者が、すべてのプロジェクトへ共通して適用される設定とアプリ実行環境の診断だけを、選択中プロジェクトの設定と混同せず確認・変更・復旧できるようにする。
+利用者が、登録projectを起点にProject contextを管理し、すべてのprojectへ共通適用する設定とアプリ実行環境の診断も、workspace固有の履歴設定と混同せず確認・変更・復旧できるようにする。
 
 ## 対象範囲
 
@@ -32,7 +32,7 @@ status: "Approved"
 | section     | 内容                                                                                                     |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
 | General           | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
-| Projects          | appへ登録しているGit project一覧、workspace件数、登録解除                                              |
+| Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
 | Character context | app-globalなname、tone、speech density、behavior、prohibited expressions                                |
 | Companion         | app-globalなmodel選択、import、inventory、preview、semantic mapping、provenance、delete、runtime status  |
 | Audio             | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
@@ -43,7 +43,6 @@ status: "Approved"
 
 | 非対象                                                | 理由                      | 扱う画面・文書                         |
 | ----------------------------------------------------- | ------------------------- | -------------------------------------- |
-| Project context                                       | workspace-scopedのため    | [S-006](S-006_project-settings.md)     |
 | workspace history削除                                 | workspace-scopedのため    | [S-006](S-006_project-settings.md)     |
 | account credential、raw stderr、absolute private path | secret boundaryを守るため | sanitized readiness statusだけ表示する |
 
@@ -76,7 +75,7 @@ status: "Approved"
 | section navigation  | General、Projects、Character context、Companion、Audio、Support、Diagnosticsの7 section | section選択 |
 | settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
 
-app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tabを表示しない。これによりproject scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
+app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示しない。これによりworkspace scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
 
 ## 表示状態
 
@@ -102,6 +101,8 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | modelを選択する       | verified pack preview成功 | 全workspaceへatomic適用                           | 前selection維持                | 前selection維持、safe error     | `APP-F-084`, `LIVE-F-075` |
 | readinessを再確認する | Diagnostics表示中     | shared snapshot IDを更新                          | 前snapshotをstale表示          | safe codeとRetry                | `APP-F-070`                           |
 | project登録を解除する | Projects表示中、対象にactive/pending turnなし | 確認後にapp registrationだけを外し、repositoryと既存worktreeを残す | 一覧とregistrationを維持 | 対象を残してsafe errorとRetry | `WORK-F-057`, `WORK-F-068` |
+| project詳細を開く | Projects一覧で登録projectを選択 | 同じProjects section内でproject identityとProject context editorを表示 | 一覧を維持 | 一覧と他projectのdraftを維持 | `WORK-F-063`, `APP-F-083` |
+| Project contextを保存する | project詳細がready | Project ID単位のversionを更新し、同projectの全workspaceで次turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `WORK-F-063` |
 
 ## 入力項目
 
@@ -111,6 +112,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | Reduced motion       | `system`  | 必須     | `system` / `on` / `off`               | field直下、前値維持   | 選択時   |
 | Character visibility | `visible` | 必須     | `visible` / `hidden`                  | field直下、前値維持   | toggle時 |
 | Character context    | `Sol`と既定presentation | 任意 | display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
+| Project context      | 空       | 任意 | goal / constraints / notes各8,000、配列各20件、総量32,000 scalar、project-relative reference | field直下、draft維持 | Save |
 | Audio settings       | off       | 条件付き | verified local voice、rate 0.75〜1.25 | Audio内Alert          | Save     |
 | Support controls     | disabled  | 条件付き | approved role/policyだけ              | Support内Alert        | toggle時 |
 
@@ -120,6 +122,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | --------------------------- | ------------------------ | ---------------------------------- | ------------------------------------- | ----------------- | ------------------------------------- |
 | preference取得・更新・reset | Rust owner-only store    | `app_preferences_get/update/reset` | exact schema/version                  | 前record維持      | safe defaultまたは前record、safe code |
 | Character context load/save | Rust SQLite             | app character context commands     | global singleton、expected version    | draft維持         | conflictまたはsafe code                |
+| Project context load/save | Rust SQLite | `project_context_get` / `project_context_save` | registered Project ID、expected version、canonical project-relative reference | draft維持 | conflictまたはsafe code |
 | model import/select/mapping/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash | quarantine cleanup、前selection維持 | bundled/selected delete拒否、前selection維持 |
 | Audio取得・保存・test       | Rust local process/store | `narration_*`                      | fixed `/usr/bin/say`、voice allowlist | process group停止 | caption維持、TTS offへfail closed     |
 | Support control             | Rust supervisor          | `configure/cancel_support`         | role allowlist、budget固定            | 前config維持      | disabled fallback                     |
@@ -139,7 +142,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 
 ## データ保持
 
-AppPreferences、app-global Character context、character library selection/mapping、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。S-005の表示・section選択だけではworkspace history、Project context、Git stateを変更しない。
+Project ID単位のProject context、AppPreferences、app-global Character context、character library selection/mapping、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。Projects一覧と詳細の表示だけではworkspace history、Git state、他projectのdraftを変更しない。
 
 ## OS差分
 
@@ -149,6 +152,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 
 - gearは`App settings / アプリ設定`というscopeを含むaccessible nameと`aria-current`を持つ。
 - 画面進入時にapp settings headingへfocusし、Back後はactive workspace tabへfocusを戻す。
+- project行は名前、repository、workspace件数を含むaccessible nameを持ち、詳細から一覧へ戻ると起点projectへfocusを戻す。
 - section navigation、error、readinessを色だけで表現しない。
 - 200% text zoomではsection navigationをpopover化し、全fieldとactionへ到達できる。
 
@@ -176,7 +180,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | レビュー結果 | Approved   |
 | レビュー日   | 2026-07-20 |
 
-- [x] app-global 7 sectionとproject-scoped非対象が一意である。
+- [x] app settingsの7 section、Projects内のproject-scoped詳細、workspace-scoped非対象が一意である。
 - [x] heading、Back、workspace選択時の状態維持を定義した。
 - [x] loading、empty、processing、offline、error、permissionを定義した。
 - [x] native boundary、ja/en、keyboard、200% zoomを定義した。

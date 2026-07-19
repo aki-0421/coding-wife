@@ -46,7 +46,7 @@ status: "Approved"
 | repository clone / fetch | network credentialと競合解決をMVPへ含めない | 外部Git client |
 | 同時に複数turnを実行 | MVPはactive execution 1件 | [S-002](S-002_coding-workspace.md) |
 | manual commit / terminal | workspace作成の目的ではない | [S-003](S-003_session-evidence.md)、read-only tool event |
-| Context本文編集 | active workspaceを選んでから行う | [S-002](S-002_coding-workspace.md) Context tab |
+| Project Context本文編集 | App settingsのProjectsから対象projectを開いて行う | [S-005](S-005_app-settings-diagnostics.md) project detail |
 
 ## 表示契機と終了
 
