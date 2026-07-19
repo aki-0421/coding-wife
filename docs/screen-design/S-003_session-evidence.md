@@ -1,7 +1,7 @@
 ---
 title: "S-003 セッション証拠 画面詳細仕様"
 description: "main Codexが作ったcommitのlist、metadata、diff、gate evidenceと、安全なcommit説明導線をread-onlyで提供する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "Commit tab、Git observer、commit evidence list/detail/diffを実装するとき。"
   - "『詳しく教えて』、説明caption、説明cancel/fallbackを実装するとき。"
@@ -17,7 +17,7 @@ status: "Approved"
 | tab label | `Commit`。main Codexが作った履歴を確認するread-only入口 |
 | route | main shell内のCommit tab。別windowを作らない |
 | 状態 | Approved |
-| 最終レビュー日 | 2026-07-18 |
+| 最終レビュー日 | 2026-07-19 |
 
 ## 画面の目的
 
@@ -82,16 +82,17 @@ status: "Approved"
 
 ## レイアウト
 
-sidebarと81px headerはS-002と同じ位置を維持し、Commit tabをactiveにする。main bodyはlist/detail splitとする。
+sidebarと81px headerはS-002と同じ位置を維持し、Commit tabをactiveにする。main bodyはevidence primary surfaceとS-002から継続するCompanion paneで構成し、同じLive2D canvas instanceを表示する。evidenceの可読幅を優先してCompanionをChat時より縮小し、evidence primary surfaceではdetailを主表示、commit listを非modal drawerとする。
 
 | 領域 | 標準幅・高さ | 内容 | resize時 |
 |---|---|---|---|
-| observer bar | body上64px | repository state、last observed、Fresh/Stale、Refresh、filter | 2行wrap可 |
-| commit list | 300px | commit row、work unit/status badge、empty/loading | 960〜1279pxは280px、200% zoomはdrawer |
-| detail | 残幅 | header、tabs、evidence、diff、explanation action | 最低560pxを優先 |
-| character caption portal | viewport右下またはglobal Companion領域 | streamed explanation、status、Cancel、mute | canvasがhiddenでもHTML captionを維持 |
+| observer bar | evidence上64px以上 | repository state、last observed、Fresh/Stale、Refresh、filter | 必要時は高さを広げて2行wrap |
+| commit list | 非modal drawer、最大300px | commit row、work unit/status badge、empty/loading | trigger、Escape、outside clickで開閉しfocusを復元 |
+| detail | evidence primary surfaceの残幅 | header、tabs、evidence、diff、explanation action | 560px以上を優先 |
+| Companion pane | main bodyの残幅 | S-002と同じLive2D canvas、state、caption、mute | evidenceを優先してChat時より縮小 |
+| character caption portal | Companion領域 | streamed explanation、status、Cancel、mute | canvasがhiddenでもHTML captionを維持 |
 
-960px未満はcommit listをmodalでないdrawerへ移し、detailを全幅にする。caption portalはdetailを覆わないようbottom insetと最大幅を調整する。200% text zoomで横scrollを要求せず、diff code blockだけ内部scrollを許す。
+character visibilityがHiddenの場合はCompanionを表示せず、evidence primary surfaceを全幅へ戻して300px list/detail splitを許可する。960px未満と200% text zoomではcharacter visibilityに関係なくcommit listを非modal drawerへ移し、detailを全幅にする。caption portalはdetailを覆わないようCompanion内へ置き、canvasがhiddenまたはtext-onlyへ縮退した場合もHTML captionを維持する。200% text zoomで横scrollを要求せず、diff code blockだけ内部scrollを許す。
 
 ## コンポーネント
 

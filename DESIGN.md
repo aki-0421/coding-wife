@@ -182,7 +182,7 @@ Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面
 - 文字・形・icon を併用する証拠中心の semantic state
 - 150〜250ms の状態 transition と完全な reduced-motion 代替
 
-**The Continuous Desk Rule.** Chat と companion は一つの机である。通常状態で二つの card や中央 divider に分割してはならない。
+**The Continuous Desk Rule.** Chat、Commit、Context のprimary work surfaceとcompanionは一つの机である。通常状態で二つのcardや中央dividerに分割してはならない。Project SettingsとApp Settingsだけはcompanionを表示せず、設定面を全幅で使う。
 
 **The Evidence Priority Rule.** 判断、error、review diff、test result が必要な時は companion を縮小または静止し、証拠と操作の可読領域を優先する。
 
@@ -323,7 +323,7 @@ file summaryを先に表示し、sanitized diffはfile selection後に1件ずつ
 
 ### Live2D Companion
 
-607.84×754.99px の透明な単一 canvas を Continuous Desk 上へ bottom-contain し、頭、手、裾を切らない。canvas 自体は pointer と accessibility tree を占有せず、mute は右下 21px inset の 27×27px circle とする。renderer failure は animated → reduced → static preview → text-only の順に縮退する。
+607.84×754.99px の透明な単一canvasをContinuous Desk上へbottom-containし、頭、手、裾を切らない。選択workspaceのChat、Commit、Contextでは同じcanvas instanceを右paneに継続表示し、tab切替でrendererを再生成しない。Commitではevidence detailを優先してcompanionを縮小し、commit listは非modal drawerへ退避できる。Project SettingsとApp Settingsではcanvasを表示せずprimary surfaceを全幅へ戻す。character visibilityをHiddenにした場合も同様にprimary surfaceを全幅へ戻し、HTML text statusを残す。canvas自体はpointerとaccessibility treeを占有せず、muteは右下21px insetの27×27px circleとする。renderer failureはanimated → reduced → static preview → text-onlyの順に縮退する。
 
 ### Decision Card
 

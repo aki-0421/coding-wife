@@ -76,6 +76,8 @@ status: "Approved"
 
 headingの説明に`repository/workspace`を表示し、選択中scopeを文字で確認できるようにする。app-global sectionをnavigationへ表示しない。960〜1279pxではsection navigationをpopoverへ移す。
 
+Project Settings表示中はLive2D canvasとCompanion paneを表示せず、section navigationとsettings mainをworkspace bodyの全幅で使う。renderer instanceは破棄せず、Chat、Commit、Contextへ戻った時に同じworkspace、canvas、semantic stateを継続する。runtime readiness、pack provenance、fallback、retryはCompanion sectionのHTML UIで確認できる。
+
 ## 表示状態
 
 | 状態       | 進入条件                        | 表示                                              | 操作可否                   | 状態から抜ける条件      |
@@ -112,7 +114,7 @@ Project / Character contextのfield、境界、conflict契約は[workspace sessi
 
 ## ウィンドウ固有動作
 
-単一`main` windowを再利用し、workspace sidebarと81px workspace headerを維持する。Settings tab bodyだけをsection navigationとproject-scoped main formへ置換する。その他は共通仕様どおり。
+単一`main` windowを再利用し、workspace sidebarと81px workspace headerを維持する。Settings tab bodyだけをCompanionなしの全幅section navigationとproject-scoped main formへ置換する。その他は共通仕様どおり。
 
 ## メニュー・ショートカット
 
