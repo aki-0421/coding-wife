@@ -23,9 +23,9 @@ import type { LocalePreferenceStore } from "@/features/localization"
 import { DemoNarrationGateway, NarrationController } from "@/features/narration"
 import {
   NativeReadinessController,
-  readinessCheckIds,
   type NativeReadinessGateway,
   type NativeReadinessSnapshotV1,
+  readinessCheckIds,
 } from "@/features/readiness"
 import { DemoTransport } from "@/features/runtime"
 import type {
@@ -826,29 +826,48 @@ describe("WorkspaceShell", () => {
     expect(loadState).toHaveBeenCalledTimes(2)
   })
 
-  it("shows the GitHub owner avatar before the repository breadcrumb", () => {
-    renderWorkspace()
+  it("shows the GitHub owner avatar before the repository breadcrumb", async () => {
+    const BrowserImage = window.Image
+    class LoadedImage extends BrowserImage {
+      constructor() {
+        super()
+        Object.defineProperties(this, {
+          complete: { configurable: true, value: true },
+          naturalWidth: { configurable: true, value: 48 },
+        })
+      }
+    }
+    vi.stubGlobal("Image", LoadedImage)
 
-    const breadcrumb = screen.getByRole("navigation", {
-      name: "Repository location",
-    })
-    expect(within(breadcrumb).getByText("aki-0421/coding-wife")).toBeVisible()
-    expect(
-      within(breadcrumb).getByText("build-live2d-desktop-app"),
-    ).toHaveAttribute("aria-current", "page")
+    try {
+      renderWorkspace()
 
-    const avatar = breadcrumb
-      .closest("header")
-      ?.querySelector('[data-repository-avatar="github"]')
-    expect(avatar).toHaveAttribute("data-github-owner", "aki-0421")
-    expect(avatar?.querySelector('[data-slot="avatar-image"]')).toHaveAttribute(
-      "src",
-      "https://avatars.githubusercontent.com/aki-0421?size=48",
-    )
-    expect(avatar?.querySelector('[data-slot="avatar-image"]')).toHaveAttribute(
-      "referrerpolicy",
-      "no-referrer",
-    )
+      const breadcrumb = screen.getByRole("navigation", {
+        name: "Repository location",
+      })
+      expect(within(breadcrumb).getByText("aki-0421/coding-wife")).toBeVisible()
+      expect(
+        within(breadcrumb).getByText("build-live2d-desktop-app"),
+      ).toHaveAttribute("aria-current", "page")
+
+      const avatar = breadcrumb
+        .closest("header")
+        ?.querySelector('[data-repository-avatar="github"]')
+      expect(avatar).toHaveAttribute("data-github-owner", "aki-0421")
+      await waitFor(() =>
+        expect(
+          avatar?.querySelector('[data-slot="avatar-image"]'),
+        ).toHaveAttribute(
+          "src",
+          "https://avatars.githubusercontent.com/aki-0421?size=48",
+        ),
+      )
+      expect(
+        avatar?.querySelector('[data-slot="avatar-image"]'),
+      ).toHaveAttribute("referrerpolicy", "no-referrer")
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("uses a neutral repository avatar when GitHub metadata is absent", async () => {
