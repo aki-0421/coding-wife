@@ -1,6 +1,6 @@
 ---
 title: "Testing Coding Wife"
-description: "Judge-facing setup, verification, macOS release packaging, installation, and Gatekeeper instructions for Coding Wife."
+description: "Judge-facing setup, CI, release-candidate verification, macOS packaging, installation, and Gatekeeper instructions for Coding Wife."
 updated: 2026-07-19
 read_when:
   - "Reproducing the hackathon build or verifying Coding Wife on macOS."
@@ -23,6 +23,12 @@ cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple
 
 The explicit Cargo fetch installs the locked Apple Silicon registry metadata before the quality sequence switches its license generator to offline mode. No application API key is required. A compatible, authenticated local Codex installation is required for the production conversation path.
 
+## Continuous integration
+
+GitHub Actions runs the repository CI for every Pull Request into `develop`, every push to `develop`, and manual dispatches. `CI / Frontend and repository` checks diff hygiene before dependency installation, then verifies formatting, managed documentation, lint, types, the PR-scoped test suite, and the production frontend build on Linux. After it passes, `CI / Native` verifies the locked dependency-license inventory plus Rust formatting, Clippy, and serial tests on a macOS 14 Apple Silicon runner. Both checks must be required by the `develop` branch ruleset.
+
+PR CI intentionally does not run `pnpm quality:check`, clean-checkout reconstruction, any test behind `pnpm test:release`, a Tauri bundle, or DMG packaging. Release tests remain together because filesystem semantics such as symlink modes vary by runner OS. Those release-candidate checks remain in the canonical quality sequence below. CI has read-only repository permission and does not publish an app or DMG. See the [continuous integration specification](rules/continuous-integration.md) for the exact triggers, versions, cache policy, and release boundary.
+
 ## Run the development build
 
 ```bash
@@ -35,7 +41,9 @@ Run the native shell with:
 pnpm tauri dev
 ```
 
-## Run the quality gates
+## Run the release-candidate quality gates
+
+Do not run this sequence as routine local-development validation. Pull Request validation belongs to CI. Run these release-specific checks only when the task is to prepare or verify a release candidate, or when the user explicitly requests them. Agents must also follow the local-validation policy in [`AGENTS.md`](../AGENTS.md).
 
 Start from a clean committed checkout, then run the repository-owned sequence:
 
@@ -92,7 +100,7 @@ src-tauri/target/release/bundle/dmg/Coding-Wife.dmg
 src-tauri/target/release/bundle/dmg/Coding-Wife.dmg.release.json
 ```
 
-Run the packaging test without compiling the real application:
+When preparing or verifying a release candidate, run the packaging test without compiling the real application:
 
 ```bash
 pnpm test:release

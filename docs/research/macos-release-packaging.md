@@ -6,7 +6,7 @@ read_when:
   - "macOSの.app・DMG生成、Tauri bundle target、release commandを変更するとき。"
   - "Finder AppleScript timeout、Gatekeeper、ad-hoc署名・未公証artifactの検証手順を確認するとき。"
   - "Hiyori NOTICEを保持したdiff hygiene、Pull Requestの差分検査、safe failureを変更するとき。"
-last_verified: 2026-07-18 JST
+last_verified: 2026-07-19 JST
 ---
 
 # macOS release packagingとFinder非依存DMG調査
@@ -35,7 +35,9 @@ Apple公式の[Safely open apps on your Mac](https://support.apple.com/en-us/102
 
 ### GitHub Actions
 
-2026-07-18 JSTにGitHub公式repositoryの latest releaseを確認し、[actions/checkout v7.0.0](https://github.com/actions/checkout/releases/tag/v7.0.0)と[actions/setup-node v7.0.0](https://github.com/actions/setup-node/releases/tag/v7.0.0)をdiff hygiene workflowの現行majorとする。Pull Requestのbase commitからの差分を検査できるようcheckoutはfull historyを取得し、Nodeはrepositoryの最低要件に合わせて22.12.0を明示する。
+2026-07-19 JSTに[GitHub-hosted runners reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)を確認した。private repositoryの標準`macos-14`はM1のarm64 runnerであり、サポート対象のApple Siliconで正本品質ゲートを実行できる。
+
+同日に公式releaseを確認した現行pinは、[actions/checkout v6.0.2](https://github.com/actions/checkout/releases/tag/v6.0.2)、[actions/setup-node v6.4.0](https://github.com/actions/setup-node/releases/tag/v6.4.0)、[actions/setup-go v6.4.0](https://github.com/actions/setup-go/releases/tag/v6.4.0)、[actions/cache v5.0.3](https://github.com/actions/cache/releases/tag/v5.0.3)、[pnpm/action-setup v4.2.0](https://github.com/pnpm/action-setup/releases/tag/v4.2.0)である。`.github/workflows/ci.yml`は各releaseの実commitを完全SHAで固定する。annotated tagはtag objectではなくdereferenceしたcommitを使う。Pull Requestのbase commitからの差分を検査できるようcheckoutはfull historyを取得し、Nodeはrepositoryの最低要件に合わせて22.12.0を明示する。CI全体の正本は[継続的インテグレーション仕様](../rules/continuous-integration.md)とする。
 
 ## 実装契約
 
@@ -62,7 +64,7 @@ whitespace検査の除外は`src-tauri/resources/characters/builtin-hiyori/NOTIC
 
 さらに、`HEAD`または選択したbase commitにNOTICEが存在する場合は、indexにもexact pathのstage 0 entryが1件必要である。entryはmode `100644`かつregular blobで、blobのbyte列が固定SHA-256へ一致しなければならない。これによりworktreeをcanonicalなまま残す`git rm --cached`、index内だけの内容差分、mode変更、rename、symlinkを`PROTECTED_NOTICE_INDEX_INVALID`として拒否する。`HEAD`と選択baseのどちらにもNOTICEがない場合だけcanonical untracked addを許可し、staged addがあれば同じindex検証を適用する。`--working-tree`では`HEAD`だけをtracked baselineとして扱う。
 
-変更時は`pnpm test:diff-hygiene`を実行する。`scripts/release/check-diff-hygiene.test.mjs`は隔離Git repositoryを作り、committed / staged / unstaged / untracked、base不在、canonical noticeの後日add、他path copy、worktreeのmodify / delete / rename / symlink、indexのcached delete / blob drift / mode / rename / symlink、base選択差、secret・absolute path非表示を検査する。fixtureは利用者のglobal `core.autocrlf`に左右されずbyte-exact blobを作る。`.github/workflows/diff-hygiene.yml`はPull Requestのbase SHAで同じ`pnpm check:diff`を実行する。
+変更時は`pnpm test:diff-hygiene`を実行する。`scripts/release/check-diff-hygiene.test.mjs`は隔離Git repositoryを作り、committed / staged / unstaged / untracked、base不在、canonical noticeの後日add、他path copy、worktreeのmodify / delete / rename / symlink、indexのcached delete / blob drift / mode / rename / symlink、base選択差、secret・absolute path非表示を検査する。fixtureは利用者のglobal `core.autocrlf`に左右されずbyte-exact blobを作る。`.github/workflows/ci.yml`のfrontend jobは依存install前にPull Requestのbase SHAで同じ`pnpm check:diff`を実行し、成功後だけPR向けfrontend/repository検証を続行する。Apple Silicon jobはlicense inventoryとRust検証に限定し、完全release品質gateは`pnpm quality:check`へ分離する。
 
 ## 配布境界
 

@@ -143,7 +143,9 @@ describe("App commit explanation composition", () => {
     )
     expect(runtime.start).toHaveBeenCalledOnce()
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }))
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "App settings" }))[0]!,
+    )
     fireEvent.click(screen.getByRole("radio", { name: "日本語" }))
     await waitFor(() =>
       expect(runtime.setScope).toHaveBeenLastCalledWith({
@@ -154,6 +156,9 @@ describe("App commit explanation composition", () => {
       }),
     )
     expect(dismissPresentation).toHaveBeenCalledWith("workspace_switch")
+    fireEvent.click(
+      screen.getByRole("button", { name: "ワークスペースへ戻る" }),
+    )
 
     dismissPresentation.mockClear()
     act(() => {

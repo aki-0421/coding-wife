@@ -19,6 +19,8 @@
     "typecheck": "pnpm live2d:prepare && tsc -b --pretty false",
     "pretest": "pnpm live2d:prepare",
     "test": "pnpm test:licenses && pnpm skills:test:supply-chain && pnpm live2d:test:supply-chain && pnpm test:release && pnpm test:diff-hygiene && pnpm test:quality && vitest run --fileParallelism=false",
+    "pretest:pr": "pnpm live2d:prepare",
+    "test:pr": "pnpm skills:test:supply-chain && pnpm live2d:test:supply-chain && pnpm test:diff-hygiene && pnpm test:quality && vitest run --fileParallelism=false",
     "pretest:watch": "pnpm live2d:prepare",
     "test:watch": "vitest",
     "pretest:workspace-history": "pnpm live2d:prepare",
@@ -44,8 +46,8 @@
     "release:macos:dmg": "bash scripts/release/build-macos-dmg.sh --app \"$PWD/src-tauri/target/release/bundle/macos/Coding Wife.app\" --output \"$PWD/src-tauri/target/release/bundle/dmg/Coding-Wife.dmg\" --volume-name \"Coding Wife\" --overwrite",
     "release:macos:verify": "bash scripts/release/verify-macos-release.sh --app \"$PWD/src-tauri/target/release/bundle/macos/Coding Wife.app\" --dmg \"$PWD/src-tauri/target/release/bundle/dmg/Coding-Wife.dmg\"",
     "release:macos": "bash scripts/release/run-macos-release.sh",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/{licenses,live2d,quality,release,skills}/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/{licenses,live2d,quality,release,skills}/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/{licenses,live2d,quality,release,skills}/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \".github/workflows/*.{yml,yaml}\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/{licenses,live2d,quality,release,skills}/**/*.{mjs,json}\" \"src-tauri/**/*.json\" \"vendor/live2d/*.json\" \".github/workflows/*.{yml,yaml}\" \"*.config.{js,ts}\" \"tsconfig*.json\" package.json components.json index.html README.md",
     "tauri": "tauri"
   },
   "dependencies": {
