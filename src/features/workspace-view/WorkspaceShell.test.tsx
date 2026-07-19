@@ -2688,8 +2688,20 @@ describe("WorkspaceShell", () => {
     await waitFor(() =>
       expect(unregisterWorkspace).toHaveBeenCalledWith("project-native"),
     )
-    expect(await screen.findByText("fallback-repository")).toBeVisible()
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    const appSettings = document.querySelector<HTMLElement>(
+      '[data-settings-scope="app"]',
+    )
+    expect(appSettings).not.toBeNull()
+    expect(
+      await within(appSettings as HTMLElement).findByText(
+        "fallback-repository",
+      ),
+    ).toBeVisible()
+    await user.click(
+      within(appSettings as HTMLElement).getByRole("button", {
+        name: "Back to workspace",
+      }),
+    )
     expect(await screen.findByText("preserved-workspace")).toBeVisible()
     expect(screen.queryByText("restored-workspace")).not.toBeInTheDocument()
   })
