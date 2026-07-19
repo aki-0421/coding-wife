@@ -26,14 +26,23 @@ fail() {
 
 safe_remove_work() {
   local candidate="$1"
+  local attempt=0
   local parent=''
   local name=''
-  [[ -n "$candidate" && -d "$candidate" && ! -L "$candidate" ]] || return 0
+  [[ -n "$candidate" ]] || return 0
+  [[ -e "$candidate" || -L "$candidate" ]] || return 0
+  [[ -d "$candidate" && ! -L "$candidate" ]] || return 1
   parent="$(cd "$candidate/.." >/dev/null 2>&1 && pwd -P)" || return 1
   name="$(/usr/bin/basename "$candidate" 2>/dev/null || true)"
   [[ "$parent" == '/private/tmp' && "$name" == "$WORK_PREFIX"* ]] || return 1
-  /bin/chmod -R u+w "$candidate" >/dev/null 2>&1 || true
-  /bin/rm -rf -- "$candidate" >/dev/null 2>&1
+  while [[ -e "$candidate" || -L "$candidate" ]]; do
+    [[ "$attempt" -lt 100 && -d "$candidate" && ! -L "$candidate" ]] || return 1
+    /bin/chmod -R u+w "$candidate" >/dev/null 2>&1 || true
+    /bin/rm -rf -- "$candidate" >/dev/null 2>&1 || true
+    [[ ! -e "$candidate" && ! -L "$candidate" ]] && return 0
+    /bin/sleep 0.05
+    attempt=$((attempt + 1))
+  done
 }
 
 cleanup_current_mount() {

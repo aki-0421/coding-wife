@@ -19,6 +19,7 @@ publish_started=0
 publish_committed=0
 original_app=0
 original_manifest=0
+output_input=''
 
 release_release_lock() {
   return 0
@@ -29,19 +30,32 @@ fail() {
   exit 1
 }
 
+usage() {
+  /usr/bin/printf '%s\n' 'Usage: build-macos-app.sh [--output <bundle.app>]'
+}
+
 safe_remove_tree() {
   local candidate="$1"
   local expected_parent="$2"
   local expected_prefix="$3"
+  local attempt=0
   local parent=''
   local name=''
 
-  [[ -n "$candidate" && -d "$candidate" && ! -L "$candidate" ]] || return 0
+  [[ -n "$candidate" ]] || return 0
+  [[ -e "$candidate" || -L "$candidate" ]] || return 0
+  [[ -d "$candidate" && ! -L "$candidate" ]] || return 1
   parent="$(cd "$candidate/.." >/dev/null 2>&1 && pwd -P)" || return 1
   name="$(/usr/bin/basename "$candidate" 2>/dev/null || true)"
   [[ "$parent" == "$expected_parent" && "$name" == "$expected_prefix"* ]] || return 1
-  /bin/chmod -R u+w "$candidate" >/dev/null 2>&1 || true
-  /bin/rm -rf -- "$candidate" >/dev/null 2>&1
+  while [[ -e "$candidate" || -L "$candidate" ]]; do
+    [[ "$attempt" -lt 100 && -d "$candidate" && ! -L "$candidate" ]] || return 1
+    /bin/chmod -R u+w "$candidate" >/dev/null 2>&1 || true
+    /bin/rm -rf -- "$candidate" >/dev/null 2>&1 || true
+    [[ ! -e "$candidate" && ! -L "$candidate" ]] && return 0
+    /bin/sleep 0.05
+    attempt=$((attempt + 1))
+  done
 }
 
 rollback_publish() {
@@ -100,7 +114,23 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-[[ $# -eq 0 ]] || fail 'APP_BUILD_ARGUMENT_INVALID'
+output_seen=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output)
+      [[ "$output_seen" -eq 0 && $# -ge 2 ]] || fail 'APP_BUILD_ARGUMENT_INVALID'
+      output_input="$2"
+      output_seen=1
+      shift 2
+      ;;
+    --help)
+      [[ $# -eq 1 ]] || fail 'APP_BUILD_ARGUMENT_INVALID'
+      usage
+      exit 0
+      ;;
+    *) fail 'APP_BUILD_ARGUMENT_INVALID' ;;
+  esac
+done
 [[ "$(/usr/bin/uname -s 2>/dev/null || true)" == 'Darwin' ]] || fail 'APP_BUILD_PLATFORM_UNSUPPORTED'
 
 script_dir="$(cd "$(/usr/bin/dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)" || fail 'APP_BUILD_ROOT_INVALID'
@@ -110,17 +140,25 @@ project_root="$(cd "$script_dir/../.." >/dev/null 2>&1 && pwd -P)" || fail 'APP_
 node_binary="$(command -v node 2>/dev/null || true)"
 pnpm_binary="$(command -v pnpm 2>/dev/null || true)"
 [[ -n "$node_binary" && -x "$node_binary" && -n "$pnpm_binary" && -x "$pnpm_binary" ]] || fail 'APP_BUILD_TOOL_UNAVAILABLE'
-for tool in /bin/chmod /bin/mkdir /bin/mv /bin/rm /usr/bin/basename /usr/bin/dirname /usr/bin/ditto /usr/bin/mktemp /usr/bin/touch /usr/bin/uname /usr/bin/uuidgen; do
+for tool in /bin/chmod /bin/mkdir /bin/mv /bin/rm /bin/sleep /usr/bin/basename /usr/bin/dirname /usr/bin/ditto /usr/bin/mktemp /usr/bin/touch /usr/bin/uname /usr/bin/uuidgen; do
   [[ -x "$tool" ]] || fail 'APP_BUILD_TOOL_UNAVAILABLE'
 done
 
 release_acquire_lock || fail 'APP_BUILD_LOCK_UNAVAILABLE'
 
-output_parent="$project_root/src-tauri/target/release/bundle/macos"
-app_path="$output_parent/Coding Wife.app"
+if [[ "$output_seen" -eq 1 ]]; then
+  [[ -n "$output_input" && ! "$output_input" =~ [[:cntrl:]] ]] || fail 'APP_BUILD_OUTPUT_INVALID'
+  output_parent_input="$(/usr/bin/dirname "$output_input" 2>/dev/null)" || fail 'APP_BUILD_OUTPUT_INVALID'
+  output_name="$(/usr/bin/basename "$output_input" 2>/dev/null)" || fail 'APP_BUILD_OUTPUT_INVALID'
+  [[ ${#output_name} -le 127 && "$output_name" =~ ^[A-Za-z0-9][A-Za-z0-9._\ -]*\.app$ ]] || fail 'APP_BUILD_OUTPUT_INVALID'
+else
+  output_parent_input="$project_root/src-tauri/target/release/bundle/macos"
+  output_name='Coding Wife.app'
+fi
+/bin/mkdir -p "$output_parent_input" >/dev/null 2>&1 || fail 'APP_BUILD_OUTPUT_UNAVAILABLE'
+output_parent="$(cd "$output_parent_input" >/dev/null 2>&1 && pwd -P)" || fail 'APP_BUILD_OUTPUT_UNAVAILABLE'
+app_path="$output_parent/$output_name"
 manifest_path="$app_path.release.json"
-/bin/mkdir -p "$output_parent" >/dev/null 2>&1 || fail 'APP_BUILD_OUTPUT_UNAVAILABLE'
-output_parent="$(cd "$output_parent" >/dev/null 2>&1 && pwd -P)" || fail 'APP_BUILD_OUTPUT_UNAVAILABLE'
 
 [[ ! -L "$app_path" && ! -L "$manifest_path" ]] || fail 'APP_BUILD_OUTPUT_INVALID'
 if [[ -e "$app_path" ]]; then
@@ -173,8 +211,8 @@ fi
 ready_container="$(/usr/bin/mktemp -d "$output_parent/$READY_PREFIX"'XXXXXX' 2>/dev/null)" || fail 'APP_BUILD_READY_FAILED'
 [[ -d "$ready_container" && ! -L "$ready_container" ]] || fail 'APP_BUILD_READY_FAILED'
 /bin/chmod 700 "$ready_container" >/dev/null 2>&1 || fail 'APP_BUILD_READY_FAILED'
-ready_app="$ready_container/Coding Wife.app"
-ready_manifest="$ready_container/Coding Wife.app.release.json"
+ready_app="$ready_container/$output_name"
+ready_manifest="$ready_container/$output_name.release.json"
 /usr/bin/ditto "$candidate_app" "$ready_app" >>"$tool_log" 2>&1 || fail 'APP_BUILD_READY_FAILED'
 "$node_binary" "$script_dir/macos-release.mjs" verify-app --app "$ready_app" --expected "$candidate_inventory" >>"$tool_log" 2>&1 || fail 'APP_BUILD_READY_VERIFY_FAILED'
 "$node_binary" "$script_dir/macos-release.mjs" manifest-create \

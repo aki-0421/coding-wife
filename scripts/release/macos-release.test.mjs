@@ -143,6 +143,28 @@ test("inventory rejects absolute, escaping, broken, and private symlinks and ent
     collectAppInventory(privateEntry),
     expectReleaseCode("APP_PRIVATE_PATH_ENTRY"),
   )
+
+  const uncComponent = ["", "", "server", "share", "secret.txt"].join("\\")
+  const privateComponentEntry = await appWithContents("PrivateComponent.app")
+  await mkdir(path.join(privateComponentEntry, "Contents", "safe"))
+  await writeFile(
+    path.join(privateComponentEntry, "Contents", "safe", uncComponent),
+    "safe",
+  )
+  await assert.rejects(
+    collectAppInventory(privateComponentEntry),
+    expectReleaseCode("APP_PRIVATE_PATH_ENTRY"),
+  )
+
+  const privateComponentTarget = await appWithContents("PrivateTarget.app")
+  await symlink(
+    `safe/${uncComponent}`,
+    path.join(privateComponentTarget, "Contents", "link"),
+  )
+  await assert.rejects(
+    collectAppInventory(privateComponentTarget),
+    expectReleaseCode("APP_PRIVATE_PATH_SYMLINK"),
+  )
 })
 
 test("shared private-path hygiene covers POSIX, arbitrary drives, and UNC without rejecting placeholders", () => {
@@ -156,6 +178,7 @@ test("shared private-path hygiene covers POSIX, arbitrary drives, and UNC withou
     ["q:", "Users", "alice"].join("\\"),
     ["", "", "server", "share", "project"].join("\\"),
     ["", "", "server", "share"].join("\\"),
+    `Contents/${["", "", "server", "share", "project"].join("\\")}`,
   ]
   for (const value of values)
     assert.equal(containsPrivateAbsolutePath(value), true)
@@ -167,6 +190,16 @@ test("shared private-path hygiene covers POSIX, arbitrary drives, and UNC withou
     containsPrivateAbsolutePath(
       `https://example.invalid${["", "Users", "alice", "project"].join("/")}`,
     ),
+    false,
+  )
+  const uncComponent = ["", "", "server", "share", "project"].join("\\")
+  assert.equal(containsPrivateAbsolutePath(`identifier${uncComponent}`), false)
+  assert.equal(
+    containsPrivateAbsolutePath(`https://example.invalid/path/${uncComponent}`),
+    false,
+  )
+  assert.equal(
+    containsPrivateAbsolutePath("Contents/safe\\server\\share\\project"),
     false,
   )
 })
@@ -468,6 +501,20 @@ test("real release verifier fails closed for product, content, seal, and quarant
     await writeFile(
       path.join(item.appPath, "Contents", "Resources", "private.txt"),
       ["", "home", "builder", "checkout"].join("/"),
+    )
+    await sealProductFixture(item.appPath)
+    await assert.rejects(
+      verifyReleaseApp(item.appPath),
+      expectReleaseCode("APP_PRIVATE_PATH_CONTENT"),
+    )
+  })
+
+  await t.test("UNC component bytes", async () => {
+    const item = await fixture()
+    const uncComponent = ["", "", "server", "share", "secret.txt"].join("\\")
+    await writeFile(
+      path.join(item.appPath, "Contents", "Resources", "private.txt"),
+      `safe-prefix/${uncComponent}`,
     )
     await sealProductFixture(item.appPath)
     await assert.rejects(

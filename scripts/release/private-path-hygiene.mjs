@@ -11,7 +11,7 @@ const PRIVATE_VAR_PATH_PATTERN =
 const WINDOWS_HOME_PATH_PATTERN =
   /[A-Za-z]:[\\/]+Users[\\/]+(?<user>[^\\/\s"'`,;:]+)(?=[\\/]|[\s"'`,;:]|$)/giu
 const UNC_PATH_PATTERN =
-  /(?:^|[\s("'`=:[{,])\\{2,}(?<server>[A-Za-z0-9][A-Za-z0-9._-]{0,62}|<[^<>]+>)\\+(?<share>[A-Za-z0-9][A-Za-z0-9$_.-]{0,79}|<[^<>]+>)(?=\\|[\s"'`,;:]|$)/gu
+  /(?:^|[\/\s("'`=:[{,])\\{2,}(?<server>[A-Za-z0-9][A-Za-z0-9._-]{0,62}|<[^<>]+>)\\+(?<share>[A-Za-z0-9][A-Za-z0-9$_.-]{0,79}|<[^<>]+>)(?=\\|[\s"'`,;:]|$)/gu
 const EXPLICIT_PLACEHOLDER_PATTERN =
   /^(?:<[^<>]+>|\{[^{}]+\}|\$\{[^{}]+\}|\$[A-Z_][A-Z0-9_]*|%[A-Z_][A-Z0-9_]*%|\[[^\[\]]+\]|USER(?:NAME)?|YOUR_(?:USER|USERNAME))$/iu
 
