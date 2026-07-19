@@ -124,6 +124,11 @@ fn health_check() -> HealthCheckResponse {
     }
 }
 
+#[tauri::command]
+fn app_window_ready(app: tauri::AppHandle) {
+    raise_main_window(&app);
+}
+
 fn runtime_metadata(
     app_version: impl Into<String>,
     platform: impl Into<String>,
@@ -188,7 +193,13 @@ pub fn run() {
     let setup_workspace_service = workspace_service.clone();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            raise_main_window(app);
+            let main_window_visible = app
+                .get_webview_window("main")
+                .and_then(|window| window.is_visible().ok())
+                .unwrap_or(false);
+            if main_window_visible {
+                raise_main_window(app);
+            }
         }))
         .manage(Arc::new(AppLifecycleCoordinator::default()))
         .manage(supervisor)
@@ -270,6 +281,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            app_window_ready,
             health_check,
             get_runtime_metadata,
             app_preferences_get,
