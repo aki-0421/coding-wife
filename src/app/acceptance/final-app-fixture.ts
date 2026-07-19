@@ -97,7 +97,6 @@ function contextFor(workspaceId: string): StoredContext {
     },
     character: {
       schemaVersion: 1,
-      workspaceId,
       version: 1,
       contentHash: characterHash,
       updatedAt: fixtureTime,
@@ -186,6 +185,8 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
   readonly #listeners = new Set<(state: WorkspaceCodexState) => void>()
   readonly #drafts = new Map<string, StoredDraft>()
   readonly #contexts = new Map<string, StoredContext>()
+  #characterContext: VersionedCharacterContext =
+    contextFor("__app_character__").character
   readonly #timeline = new Map<string, readonly CodexSemanticTimelineEvent[]>()
   readonly #attachmentPickerResponses: AttachmentRegistrationResponse[] = []
   #workspaces: WorkspaceRecord[]
@@ -387,9 +388,12 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
       schemaVersion: 1,
       workspaceId,
       project: structuredClone(context.project),
-      character: structuredClone(context.character),
+      character: structuredClone(this.#characterContext),
     })
   }
+
+  loadCharacterContext = (): Promise<VersionedCharacterContext> =>
+    Promise.resolve(structuredClone(this.#characterContext))
 
   saveProjectContext = (
     workspaceId: string,
@@ -413,22 +417,20 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
   }
 
   saveCharacterContext = (
-    workspaceId: string,
     expectedVersion: number,
     character: CharacterContext,
   ): Promise<VersionedCharacterContext> => {
-    const context = this.context(workspaceId)
-    if (context.character.version !== expectedVersion) {
-      return Promise.reject(new Error("WORKSPACE-CHARACTER-CONTEXT-CONFLICT"))
+    if (this.#characterContext.version !== expectedVersion) {
+      return Promise.reject(new Error("APP-CHARACTER-CONTEXT-CONFLICT"))
     }
     const saved: VersionedCharacterContext = {
-      ...context.character,
+      ...this.#characterContext,
       version: expectedVersion + 1,
       contentHash: "5".repeat(64),
       updatedAt: "2026-07-19T00:01:00.000Z",
       context: structuredClone(character),
     }
-    this.#contexts.set(workspaceId, { ...context, character: saved })
+    this.#characterContext = saved
     return Promise.resolve(structuredClone(saved))
   }
 
@@ -441,12 +443,12 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
       workspaceId,
       projectVersion: context.project.version,
       projectHash: context.project.contentHash,
-      characterVersion: context.character.version,
-      characterHash: context.character.contentHash,
+      characterVersion: this.#characterContext.version,
+      characterHash: this.#characterContext.contentHash,
       snapshotHash,
       capturedAt: fixtureTime,
       project: structuredClone(context.project.context),
-      character: structuredClone(context.character.context),
+      character: structuredClone(this.#characterContext.context),
     })
   }
 

@@ -21,6 +21,7 @@ import {
   normalizeProjectContextForSave,
   type CharacterContext,
   type ProjectContext,
+  type VersionedCharacterContext,
   type WorkspaceEditableContext,
   type WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
@@ -145,6 +146,13 @@ export class DemoWorkspaceHistoryTransport
     string,
     WorkspaceEditableContext
   >()
+  private characterContext: VersionedCharacterContext = {
+    schemaVersion: 1,
+    version: 1,
+    contentHash: defaultCharacterHash,
+    updatedAt: new Date(baseTimestamp).toISOString(),
+    context: defaultCharacterContext,
+  }
   private readonly events = new Map<string, PersistedTimelineEvent[]>()
   private readonly lastSummaries = new Map<string, WorkspaceLastSummary>()
   private readonly timelineAnchors = new Map<string, WorkspaceTimelineAnchor>()
@@ -268,9 +276,11 @@ export class DemoWorkspaceHistoryTransport
         return this.saveProjectContext(
           request as WorkspaceHistoryRequestMap["workspace_save_project_context"],
         )
+      case workspaceHistoryCommands.getCharacterContext:
+        return this.characterContext
       case workspaceHistoryCommands.saveCharacterContext:
         return this.saveCharacterContext(
-          request as WorkspaceHistoryRequestMap["workspace_save_character_context"],
+          request as WorkspaceHistoryRequestMap["app_character_context_save"],
         )
       case workspaceHistoryCommands.getTurnContextSnapshot:
         return this.turnContextSnapshot(
@@ -733,37 +743,28 @@ export class DemoWorkspaceHistoryTransport
   }
 
   private async saveCharacterContext(
-    request: WorkspaceHistoryRequestMap["workspace_save_character_context"],
-  ): Promise<WorkspaceHistoryResponseMap["workspace_save_character_context"]> {
-    const current = this.editableContext(
-      request.workspaceId,
-      workspaceHistoryCommands.saveCharacterContext,
-    )
-    if (current.character.version !== request.expectedVersion) {
+    request: WorkspaceHistoryRequestMap["app_character_context_save"],
+  ): Promise<WorkspaceHistoryResponseMap["app_character_context_save"]> {
+    if (this.characterContext.version !== request.expectedVersion) {
       throw this.error(
-        "WORKSPACE-CHARACTER-CONTEXT-CONFLICT",
+        "APP-CHARACTER-CONTEXT-CONFLICT",
         workspaceHistoryCommands.saveCharacterContext,
         true,
       )
     }
     const context = parseCharacterContext(request.context)
-    const version = current.character.version + 1
-    const updated: WorkspaceEditableContext = {
-      ...current,
-      character: {
-        schemaVersion: 1,
-        workspaceId: request.workspaceId,
-        version,
-        contentHash: await this.canonicalJsonHash(
-          context,
-          workspaceHistoryCommands.saveCharacterContext,
-        ),
-        updatedAt: this.timestamp(),
+    const updated: VersionedCharacterContext = {
+      schemaVersion: 1,
+      version: this.characterContext.version + 1,
+      contentHash: await this.canonicalJsonHash(
         context,
-      },
+        workspaceHistoryCommands.saveCharacterContext,
+      ),
+      updatedAt: this.timestamp(),
+      context,
     }
-    this.editableContexts.set(request.workspaceId, updated)
-    return updated.character
+    this.characterContext = updated
+    return updated
   }
 
   private async turnContextSnapshot(
@@ -951,7 +952,7 @@ export class DemoWorkspaceHistoryTransport
     if (context === undefined) {
       throw this.error("WORKSPACE-NOT-FOUND", operation, false)
     }
-    return context
+    return { ...context, character: this.characterContext }
   }
 
   private defaultEditableContext(
@@ -971,7 +972,6 @@ export class DemoWorkspaceHistoryTransport
       },
       character: {
         schemaVersion: 1,
-        workspaceId,
         version: 1,
         contentHash: defaultCharacterHash,
         updatedAt,

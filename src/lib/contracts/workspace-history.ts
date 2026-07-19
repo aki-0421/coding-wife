@@ -17,7 +17,7 @@ import {
   type VersionedProjectContext,
   type WorkspaceEditableContext,
   type WorkspaceLoadEditableContextRequest,
-  type WorkspaceSaveCharacterContextRequest,
+  type AppSaveCharacterContextRequest,
   type WorkspaceSaveProjectContextRequest,
   type WorkspaceTurnContextSnapshot,
 } from "./workspace-context"
@@ -40,7 +40,8 @@ export const workspaceHistoryCommands = {
   saveContextSnapshot: "workspace_save_context_snapshot",
   loadEditableContext: "workspace_load_editable_context",
   saveProjectContext: "workspace_save_project_context",
-  saveCharacterContext: "workspace_save_character_context",
+  getCharacterContext: "app_character_context_get",
+  saveCharacterContext: "app_character_context_save",
   getTurnContextSnapshot: "workspace_get_turn_context_snapshot",
   listTimeline: "workspace_list_timeline",
   issueDeleteChallenge: "workspace_issue_delete_challenge",
@@ -330,7 +331,8 @@ export interface WorkspaceHistoryRequestMap {
   workspace_save_context_snapshot: WorkspaceSaveContextRequest
   workspace_load_editable_context: WorkspaceLoadEditableContextRequest
   workspace_save_project_context: WorkspaceSaveProjectContextRequest
-  workspace_save_character_context: WorkspaceSaveCharacterContextRequest
+  app_character_context_get: undefined
+  app_character_context_save: AppSaveCharacterContextRequest
   workspace_get_turn_context_snapshot: WorkspaceLoadEditableContextRequest
   workspace_list_timeline: WorkspaceTimelineRequest
   workspace_issue_delete_challenge: WorkspaceDeleteChallengeRequest
@@ -354,7 +356,8 @@ export interface WorkspaceHistoryResponseMap {
   workspace_save_context_snapshot: PersistedContextSnapshot
   workspace_load_editable_context: WorkspaceEditableContext
   workspace_save_project_context: VersionedProjectContext
-  workspace_save_character_context: VersionedCharacterContext
+  app_character_context_get: VersionedCharacterContext
+  app_character_context_save: VersionedCharacterContext
   workspace_get_turn_context_snapshot: WorkspaceTurnContextSnapshot
   workspace_list_timeline: PersistedTimelinePage
   workspace_issue_delete_challenge: WorkspaceDeleteChallenge
@@ -1494,6 +1497,7 @@ export function parseWorkspaceHistoryResponse<
       return parseVersionedProjectContext(
         value,
       ) as WorkspaceHistoryResponseMap[K]
+    case workspaceHistoryCommands.getCharacterContext:
     case workspaceHistoryCommands.saveCharacterContext:
       return parseVersionedCharacterContext(
         value,

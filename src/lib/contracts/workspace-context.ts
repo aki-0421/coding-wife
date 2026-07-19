@@ -33,7 +33,6 @@ export interface VersionedProjectContext {
 
 export interface VersionedCharacterContext {
   readonly schemaVersion: typeof workspaceContextSchemaVersion
-  readonly workspaceId: string
   readonly version: number
   readonly contentHash: string
   readonly updatedAt: string
@@ -57,8 +56,7 @@ export interface WorkspaceSaveProjectContextRequest {
   readonly context: ProjectContext
 }
 
-export interface WorkspaceSaveCharacterContextRequest {
-  readonly workspaceId: string
+export interface AppSaveCharacterContextRequest {
   readonly expectedVersion: number
   readonly context: CharacterContext
 }
@@ -461,15 +459,12 @@ function parseVersionedCharacter(value: unknown): VersionedCharacterContext {
     !isRecord(value) ||
     !hasExactKeys(value, [
       "schemaVersion",
-      "workspaceId",
       "version",
       "contentHash",
       "updatedAt",
       "context",
     ]) ||
     value.schemaVersion !== workspaceContextSchemaVersion ||
-    typeof value.workspaceId !== "string" ||
-    !workspaceIdPattern.test(value.workspaceId) ||
     !isSafePositiveInteger(value.version) ||
     typeof value.contentHash !== "string" ||
     !hashPattern.test(value.contentHash) ||
@@ -479,7 +474,6 @@ function parseVersionedCharacter(value: unknown): VersionedCharacterContext {
   }
   return {
     schemaVersion: 1,
-    workspaceId: value.workspaceId,
     version: value.version,
     contentHash: value.contentHash,
     updatedAt: value.updatedAt,
@@ -506,10 +500,7 @@ export function parseWorkspaceEditableContext(
   }
   const project = parseVersionedProject(value.project)
   const character = parseVersionedCharacter(value.character)
-  if (
-    project.workspaceId !== value.workspaceId ||
-    character.workspaceId !== value.workspaceId
-  ) {
+  if (project.workspaceId !== value.workspaceId) {
     return violation()
   }
   return {

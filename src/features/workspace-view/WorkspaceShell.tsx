@@ -781,10 +781,17 @@ export function WorkspaceShell({
 
       {appSettingsOpen ? (
         <AppSettingsView
+          characterRuntime={characterRuntime}
+          contextModel={contextModel}
           copy={copy}
           muted={view.muted}
           onBack={closeAppSettings}
           onMutedChange={view.setMuted}
+          onRetryCharacter={() => {
+            characterRuntimeStore.retry(
+              selectedWorkspace?.id ?? "__no_workspace__",
+            )
+          }}
           onResetUi={resetUiState}
           onSectionChange={setAppSettingsSection}
           onUnregisterProject={unregisterProject}
@@ -792,6 +799,7 @@ export function WorkspaceShell({
           projects={view.projects}
           runtimeState={runtime.state}
           section={appSettingsSection}
+          turnActive={turnActive}
           workspaceId={selectedWorkspace?.id ?? "__no_workspace__"}
         />
       ) : null}
@@ -919,19 +927,13 @@ export function WorkspaceShell({
             value="settings"
           >
             <ProjectSettingsView
-              characterRuntime={characterRuntime}
               contextModel={contextModel}
               copy={copy}
               history={view.history}
-              muted={view.muted}
               onDeleteHistory={view.deleteSelectedWorkspaceHistory}
-              onRetryCharacter={() => {
-                characterRuntimeStore.retry(selectedWorkspace.id)
-              }}
               onSectionChange={view.setProjectSettingsSection}
               section={view.projectSettingsSection}
               turnActive={turnActive}
-              workspaceId={selectedWorkspace.id}
               workspaceLabel={`${selectedWorkspace.repository}/${selectedWorkspace.name}`}
             />
           </TabsContent>

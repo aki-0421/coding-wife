@@ -1392,16 +1392,16 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
     expect(
       screen.getByText(
-        "Context, companion, and history settings for coding-wife/build-live2d-desktop-app.",
+        "Project context and history settings for coding-wife/build-live2d-desktop-app.",
       ),
     ).toBeVisible()
     expect(
       screen.getAllByRole("button", { name: "Project context" })[0],
     ).toBeVisible()
     expect(
-      screen.getByRole("button", { name: "Character context" }),
-    ).toBeVisible()
-    expect(screen.getByRole("button", { name: "Companion" })).toBeVisible()
+      screen.queryByRole("button", { name: "Character context" }),
+    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "Companion" })).toBeNull()
     expect(
       screen.getByRole("button", { name: "History & privacy" }),
     ).toBeVisible()
@@ -1419,11 +1419,14 @@ describe("WorkspaceShell", () => {
     await waitFor(() => expect(appHeading).toHaveFocus())
     expect(appSettingsButton()).toHaveAttribute("aria-current", "page")
     expect(screen.getAllByRole("button", { name: "General" })[0]).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Character context" }),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Companion" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Audio" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Support" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Diagnostics" })).toBeVisible()
     expect(screen.queryByRole("button", { name: "Project context" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Companion" })).toBeNull()
     expect(
       screen.queryByRole("button", { name: "History & privacy" }),
     ).toBeNull()

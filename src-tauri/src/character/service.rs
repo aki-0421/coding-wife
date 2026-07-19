@@ -29,6 +29,7 @@ const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 const LIVE2D_CORE_BYTES: &[u8] =
     include_bytes!("../../../public/vendor/live2d/core/live2dcubismcore.min.js");
 const LIVE2D_CORE_SHA256: &str = "8741f739779b5d5210872bd3d7d99f0f1e56e6c87409e7d26d6bb4b80aa1ef47";
+const APP_CHARACTER_SCOPE_ID: &str = "__app_character__";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CharacterReadinessProbe {
@@ -46,7 +47,6 @@ pub trait CharacterModelPicker: Send + Sync {
 
 pub trait CharacterProjectResolver: Send + Sync {
     fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>>;
-    fn is_registered_project(&self, project_id: &str) -> CharacterResult<bool>;
 }
 
 struct WorkspaceIdentityProjectResolver;
@@ -54,10 +54,6 @@ struct WorkspaceIdentityProjectResolver;
 impl CharacterProjectResolver for WorkspaceIdentityProjectResolver {
     fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>> {
         Ok(Some(workspace_id.to_owned()))
-    }
-
-    fn is_registered_project(&self, project_id: &str) -> CharacterResult<bool> {
-        Ok(valid_project_id(project_id))
     }
 }
 
@@ -81,22 +77,6 @@ impl CharacterProjectResolver for WorkspaceHistoryProjectResolver {
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .map_err(|_| character_error("character_library_get", "CHARACTER-PROJECT-LOOKUP", true))
-    }
-
-    fn is_registered_project(&self, project_id: &str) -> CharacterResult<bool> {
-        let connection = Connection::open_with_flags(
-            &self.database_path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|_| character_error("character_library_get", "CHARACTER-PROJECT-LOOKUP", true))?;
-        connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1 AND registered = 1)",
-                [project_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|registered| registered != 0)
             .map_err(|_| character_error("character_library_get", "CHARACTER-PROJECT-LOOKUP", true))
     }
 }
@@ -299,11 +279,6 @@ pub struct CharacterService {
     operations: Arc<Mutex<()>>,
 }
 
-#[derive(Clone)]
-pub(crate) struct CharacterProjectSelectionRollback {
-    state: CharacterStateFile,
-}
-
 impl CharacterService {
     pub fn production(storage: CharacterStorage, builtin_directory: PathBuf) -> Self {
         Self::production_with_operations(storage, builtin_directory, Arc::new(Mutex::new(())))
@@ -372,6 +347,9 @@ impl CharacterService {
     }
 
     fn resolve_project_id(&self, workspace_id: &str) -> CharacterResult<String> {
+        if workspace_id == APP_CHARACTER_SCOPE_ID {
+            return Ok("__app__".to_owned());
+        }
         self.project_resolver
             .resolve_project(workspace_id)?
             .filter(|project_id| valid_project_id(project_id))
@@ -388,50 +366,7 @@ impl CharacterService {
             .iter()
             .map(|pack| pack.manifest.pack_id.clone())
             .collect::<HashSet<_>>();
-        let mut state = self
-            .storage
-            .load_or_migrate_state(&valid_pack_ids, |workspace_id| {
-                self.project_resolver.resolve_project(workspace_id)
-            })?;
-        let projects = state.project_selections.keys().cloned().collect::<Vec<_>>();
-        let mut changed = false;
-        for project_id in projects {
-            if !self.project_resolver.is_registered_project(&project_id)? {
-                changed |= state.remove_project(&project_id);
-            }
-        }
-        if changed {
-            self.storage.save_state(&state)?;
-        }
-        Ok(state)
-    }
-
-    pub(crate) fn prepare_project_id_unregistration(
-        &self,
-        project_id: &str,
-    ) -> CharacterResult<Option<CharacterProjectSelectionRollback>> {
-        if !valid_project_id(project_id) {
-            return Err(character_error(
-                "character_library_unregister_project",
-                "CHARACTER-PROJECT-NOT-FOUND",
-                true,
-            ));
-        }
-        let (custom_packs, _) = self.storage.load_custom_packs()?;
-        let state = self.load_project_state(&custom_packs)?;
-        let mut updated = state.clone();
-        if !updated.remove_project(project_id) {
-            return Ok(None);
-        }
-        self.storage.save_state(&updated)?;
-        Ok(Some(CharacterProjectSelectionRollback { state }))
-    }
-
-    pub(crate) fn rollback_project_unregistration(
-        &self,
-        rollback: CharacterProjectSelectionRollback,
-    ) -> CharacterResult<()> {
-        self.storage.save_state(&rollback.state)
+        self.storage.load_or_migrate_state(&valid_pack_ids)
     }
 
     pub async fn library(
@@ -750,7 +685,7 @@ impl CharacterService {
         }
         let _operation = self.operations.lock().await;
         self.cleanup_expired().await;
-        let project_id = self.resolve_project_id(&request.workspace_id)?;
+        self.resolve_project_id(&request.workspace_id)?;
         let (custom_packs, _) = self.storage.load_custom_packs()?;
         let state = self.load_project_state(&custom_packs)?;
         let mut pending = self.pending.lock().await;
@@ -782,7 +717,6 @@ impl CharacterService {
             &session.directory,
             &session.manifest,
             state,
-            &project_id,
             current_timestamp(),
         )?;
         pending.remove(&request.preview_token);
@@ -820,7 +754,7 @@ impl CharacterService {
     ) -> CharacterResult<CharacterLibrarySnapshot> {
         validate_workspace_id(&request.workspace_id, "character_select_pack")?;
         let _operation = self.operations.lock().await;
-        let project_id = self.resolve_project_id(&request.workspace_id)?;
+        self.resolve_project_id(&request.workspace_id)?;
         let (custom_packs, _) = self.storage.load_custom_packs()?;
         if request.pack_id != BUILTIN_HIYORI_PACK_ID {
             let pack = custom_packs
@@ -838,7 +772,7 @@ impl CharacterService {
             }
         }
         let mut state = self.load_project_state(&custom_packs)?;
-        state.select(project_id, request.pack_id, current_timestamp());
+        state.select(request.pack_id, current_timestamp());
         self.storage.save_state(&state)?;
         self.snapshot(&request.workspace_id)
     }
@@ -856,10 +790,10 @@ impl CharacterService {
             ));
         }
         let _operation = self.operations.lock().await;
-        let project_id = self.resolve_project_id(&request.workspace_id)?;
+        self.resolve_project_id(&request.workspace_id)?;
         let (custom_packs, _) = self.storage.load_custom_packs()?;
         let mut state = self.load_project_state(&custom_packs)?;
-        if state.selected_for(&project_id) != request.pack_id {
+        if state.selected() != request.pack_id {
             return Err(character_error(
                 "character_semantic_mapping_save",
                 "CHARACTER-MAPPING-STALE-PACK",
@@ -948,11 +882,7 @@ impl CharacterService {
         self.resolve_project_id(&request.workspace_id)?;
         let (custom_packs, _) = self.storage.load_custom_packs()?;
         let mut state = self.load_project_state(&custom_packs)?;
-        if state
-            .project_selections
-            .values()
-            .any(|selection| selection.pack_id == request.pack_id)
-        {
+        if state.selected() == request.pack_id {
             return Err(character_error(
                 "character_delete_pack",
                 "CHARACTER-ACTIVE-DELETE-DENIED",
@@ -967,30 +897,22 @@ impl CharacterService {
     }
 
     fn snapshot(&self, workspace_id: &str) -> CharacterResult<CharacterLibrarySnapshot> {
-        let project_id = self.resolve_project_id(workspace_id)?;
+        self.resolve_project_id(workspace_id)?;
         let (custom_packs, mut diagnostics) = self.storage.load_custom_packs()?;
         let valid_ids = custom_packs
             .iter()
             .map(|pack| pack.manifest.pack_id.as_str())
             .collect::<Vec<_>>();
         let mut state = self.load_project_state(&custom_packs)?;
-        let requested = state.selected_for(&project_id).to_owned();
+        let requested = state.selected().to_owned();
         let fallback_applied = requested != BUILTIN_HIYORI_PACK_ID
             && !valid_ids.iter().any(|candidate| *candidate == requested);
         let selected_pack_id = if fallback_applied {
             diagnostics.push("CHARACTER-SELECTION-FALLBACK".to_owned());
-            state.select(
-                project_id.clone(),
-                BUILTIN_HIYORI_PACK_ID.to_owned(),
-                current_timestamp(),
-            );
+            state.select(BUILTIN_HIYORI_PACK_ID.to_owned(), current_timestamp());
             self.storage.save_state(&state)?;
             BUILTIN_HIYORI_PACK_ID.to_owned()
         } else {
-            if !state.project_selections.contains_key(&project_id) {
-                state.select(project_id.clone(), requested.clone(), current_timestamp());
-                self.storage.save_state(&state)?;
-            }
             requested
         };
         let mut packs = vec![self.builtin_pack_view(&state)?];
@@ -1014,7 +936,7 @@ impl CharacterService {
         Ok(CharacterLibrarySnapshot {
             schema_version: CHARACTER_SCHEMA_VERSION,
             workspace_id: workspace_id.to_owned(),
-            project_id,
+            project_id: "__app__".to_owned(),
             selected_pack_id,
             fallback_applied,
             diagnostics,
@@ -1057,11 +979,7 @@ impl CharacterService {
             texture_count: get_u64("textureCount") as u32,
             motion_count: get_u64("motionCount") as u32,
             expression_count: get_u64("expressionCount") as u32,
-            selected_project_count: state
-                .project_selections
-                .values()
-                .filter(|selection| selection.pack_id == BUILTIN_HIYORI_PACK_ID)
-                .count() as u32,
+            selected_project_count: u32::from(state.selected() == BUILTIN_HIYORI_PACK_ID),
             deletable: false,
             manifest: None,
             thumbnail_sha256: None,
@@ -1174,15 +1092,8 @@ fn custom_pack_view(pack: &StoredPack, state: &CharacterStateFile) -> CharacterP
         texture_count: pack.manifest.inventory.texture_count,
         motion_count: pack.manifest.inventory.motion_count,
         expression_count: pack.manifest.inventory.expression_count,
-        selected_project_count: state
-            .project_selections
-            .values()
-            .filter(|selection| selection.pack_id == pack.manifest.pack_id)
-            .count() as u32,
-        deletable: !state
-            .project_selections
-            .values()
-            .any(|selection| selection.pack_id == pack.manifest.pack_id),
+        selected_project_count: u32::from(state.selected() == pack.manifest.pack_id),
+        deletable: state.selected() != pack.manifest.pack_id,
         manifest: Some(pack.manifest.clone()),
         thumbnail_sha256: pack
             .manifest
@@ -1385,10 +1296,6 @@ mod tests {
         fn resolve_project(&self, workspace_id: &str) -> CharacterResult<Option<String>> {
             Ok(self.0.get(workspace_id).cloned())
         }
-
-        fn is_registered_project(&self, project_id: &str) -> CharacterResult<bool> {
-            Ok(self.0.values().any(|candidate| candidate == project_id))
-        }
     }
 
     struct TestDirectory(PathBuf);
@@ -1531,33 +1438,12 @@ mod tests {
     }
 
     #[test]
-    fn workspace_history_resolver_prunes_unregistered_project_selections() {
+    fn global_selection_is_not_pruned_with_project_registration_changes() {
         let app_data = TestDirectory::new();
         let storage = CharacterStorage::open(app_data.path()).expect("character storage");
-        let connection = Connection::open(storage.workspace_history_path()).expect("history db");
-        connection
-            .execute_batch(
-                "CREATE TABLE projects (id TEXT PRIMARY KEY, registered INTEGER NOT NULL);
-                 CREATE TABLE workspaces (id TEXT PRIMARY KEY, project_id TEXT NOT NULL);
-                 INSERT INTO projects (id, registered) VALUES
-                   ('project-active', 1), ('project-inactive', 0);
-                 INSERT INTO workspaces (id, project_id) VALUES
-                   ('workspace-active', 'project-active'),
-                   ('workspace-inactive', 'project-inactive');",
-            )
-            .expect("resolver fixture");
         let custom_pack_id = format!("custom:{}", uuid::Uuid::new_v4());
         let mut state = storage.load_state().expect("initial state");
-        state.select(
-            "project-active".to_owned(),
-            custom_pack_id.clone(),
-            current_timestamp(),
-        );
-        state.select(
-            "project-inactive".to_owned(),
-            custom_pack_id.clone(),
-            current_timestamp(),
-        );
+        state.select(custom_pack_id.clone(), current_timestamp());
         storage.save_state(&state).expect("selected state");
         let mut manifest = snapshot_character_model(
             &reviewed_hiyori_source(),
@@ -1572,57 +1458,29 @@ mod tests {
             manifest_hash: "a".repeat(64),
             directory: app_data.path().join("unused-pack"),
         };
-        let service = CharacterService::production(
+        let service = CharacterService::new(
             storage.clone(),
             resolve_builtin_directory(Path::new("/missing")),
-        );
-
-        assert_eq!(
-            service
-                .resolve_project_id("workspace-active")
-                .expect("active project"),
-            "project-active"
-        );
-        assert_eq!(
-            service
-                .resolve_project_id("workspace-inactive")
-                .expect_err("inactive project must not resolve")
-                .code,
-            "CHARACTER-PROJECT-NOT-FOUND"
+            Arc::new(FixedPicker(None)),
         );
         let active_state = service
             .load_project_state(std::slice::from_ref(&pack))
-            .expect("pruned active state");
-        assert_eq!(active_state.project_selections.len(), 1);
-        assert!(active_state
-            .project_selections
-            .contains_key("project-active"));
+            .expect("global state");
+        assert_eq!(active_state.selected(), custom_pack_id);
         let active_view = custom_pack_view(&pack, &active_state);
         assert_eq!(active_view.selected_project_count, 1);
         assert!(!active_view.deletable);
 
-        connection
-            .execute(
-                "UPDATE projects SET registered = 0 WHERE id = 'project-active'",
-                [],
-            )
-            .expect("unregister active project");
-        let restarted = CharacterService::production(
+        let restarted = CharacterService::new(
             storage.clone(),
             resolve_builtin_directory(Path::new("/missing")),
+            Arc::new(FixedPicker(None)),
         );
         let restarted_state = restarted
             .load_project_state(std::slice::from_ref(&pack))
-            .expect("restart prunes orphan selection");
-        assert!(restarted_state.project_selections.is_empty());
-        let inactive_view = custom_pack_view(&pack, &restarted_state);
-        assert_eq!(inactive_view.selected_project_count, 0);
-        assert!(inactive_view.deletable);
-        assert!(storage
-            .load_state()
-            .expect("persisted pruned state")
-            .project_selections
-            .is_empty());
+            .expect("restarted global state");
+        assert_eq!(restarted_state.selected(), custom_pack_id);
+        assert!(!custom_pack_view(&pack, &restarted_state).deletable);
     }
 
     #[test]
@@ -1697,7 +1555,7 @@ mod tests {
             .await
             .expect("initial library");
         assert_eq!(initial.selected_pack_id, BUILTIN_HIYORI_PACK_ID);
-        assert_eq!(initial.project_id, "project-e2e");
+        assert_eq!(initial.project_id, "__app__");
         assert_eq!(initial.packs.len(), 1);
 
         let response = service

@@ -372,7 +372,6 @@ pub struct VersionedProjectContext {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct VersionedCharacterContext {
     pub schema_version: u16,
-    pub workspace_id: String,
     pub version: u64,
     pub content_hash: String,
     pub updated_at: String,
@@ -404,8 +403,7 @@ pub struct WorkspaceSaveProjectContextRequest {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct WorkspaceSaveCharacterContextRequest {
-    pub workspace_id: String,
+pub struct AppSaveCharacterContextRequest {
     pub expected_version: u64,
     pub context: CharacterContext,
 }

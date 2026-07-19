@@ -225,7 +225,7 @@ describe("default App character integration", () => {
     ).toBeInTheDocument()
   })
 
-  it("loads the workspace-selected custom pack into the default renderer", async () => {
+  it("loads the app-selected custom pack into the default renderer", async () => {
     const customPackId = "custom:11111111-1111-4111-8111-111111111111"
     const customPackRef: CharacterPackRef = {
       kind: "url",

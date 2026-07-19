@@ -251,13 +251,13 @@ export interface WorkspaceViewAdapter {
   readonly loadEditableContext?: (
     workspaceId: string,
   ) => Promise<WorkspaceEditableContext>
+  readonly loadCharacterContext?: () => Promise<VersionedCharacterContext>
   readonly saveProjectContext?: (
     workspaceId: string,
     expectedVersion: number,
     context: ProjectContext,
   ) => Promise<VersionedProjectContext>
   readonly saveCharacterContext?: (
-    workspaceId: string,
     expectedVersion: number,
     context: CharacterContext,
   ) => Promise<VersionedCharacterContext>
@@ -308,14 +308,12 @@ export type CharacterStageRenderer = (
 export type AppSettingsSection =
   | "general"
   | "projects"
+  | "character_context"
+  | "companion"
   | "audio"
   | "support"
   | "diagnostics"
 
-export type ProjectSettingsSection =
-  | "project_context"
-  | "character_context"
-  | "companion"
-  | "history"
+export type ProjectSettingsSection = "project_context" | "history"
 
 export type SettingsSection = AppSettingsSection | ProjectSettingsSection

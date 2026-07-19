@@ -1,10 +1,10 @@
 ---
 title: "Live2Dランタイム実装・検証ガイド"
 description: "同梱Hiyoriとユーザー提供Live2Dモデルのrenderer、隔離preview、native quarantineを再現、診断、更新するための実装・検証ガイド。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "同梱HiyoriのLive2D描画、resize、motion policy、context recoveryを変更または検証するとき。"
-  - "任意Live2Dモデルの取り込み、隔離preview、workspace選択、削除を変更または検証するとき。"
+  - "任意Live2Dモデルの取り込み、隔離preview、app-globalな選択、削除を変更または検証するとき。"
   - "Live2Dの供給網検査や診断previewが失敗したとき。"
 ---
 
@@ -12,7 +12,7 @@ read_when:
 
 ## 現在の完了範囲
 
-2026-07-18 時点で、同梱 Hiyori を通常 App の既定 companion として使う実ランタイムに加え、ユーザーがローカルのLive2D `.model3.json`を1ファイルだけ選び、隔離previewで実描画を確認してからProject単位で選択・永続化・削除するmodel libraryを実装した。公式 Cubism SDK for Web 5-r.5 の Core、Framework、13 shaders と、`tmp/hiyori_pro` から固定した17 runtime filesだけを同梱モデルに使う。rendererは透明な1 canvasを所有し、Idle[0]、semantic stateのHTML caption、animated/reduced/hidden、static/text fallback、resize、WebGL context recoveryを扱う。
+2026-07-20 時点で、同梱 Hiyori を通常 App の既定 companion として使う実ランタイムに加え、ユーザーがローカルのLive2D `.model3.json`を1ファイルだけ選び、隔離previewで実描画を確認してからapp-globalに選択・永続化・削除するmodel libraryを実装した。公式 Cubism SDK for Web 5-r.5 の Core、Framework、13 shaders と、`tmp/hiyori_pro` から固定した17 runtime filesだけを同梱モデルに使う。rendererは透明な1 canvasを所有し、Idle[0]、semantic stateのHTML caption、animated/reduced/hidden、static/text fallback、resize、WebGL context recoveryを扱う。
 
 `live2d-preview.html` はproduction Appのrouteへ依存しない診断用entry pointである。`pnpm dev` の後に `/live2d-preview.html` を開くと、semantic state、motion policy、WebGL context loss/restore、frame metricsを同じ画面で確認できる。診断画面はS-002の255 px sidebar、81 px header、Chat/Companionの連続面を再現する。検証スクリーンショットは `/tmp` へだけ保存し、commitしない。
 
@@ -28,15 +28,15 @@ inactive tabではstageをremountせず、`ResizeObserver`が報告する0×0で
 
 任意モデルはfrontendへローカルパスを渡さず、native single-file pickerで通常fileかつ名前が正確に`.model3.json`で終わるentrypointを1つだけ選び、Rustのquarantineへ一度コピーする。closure rootは選択fileの親directoryであり、別の`.model3.json`を再帰探索しない。同じ親にある未参照modelは選択結果へ影響しない。Unixではcanonical rootのdirectory descriptorを開き、参照assetの全componentを`openat`と`O_NOFOLLOW`で辿ってからfingerprintとbytesを同じhandleから読む。Rust validatorは選択modelが参照したruntime fileだけを対象に、最大128 files、合計100 MiB、1 file 32 MiB、texture 8192×8192、JSON depth 64、MOC version 1–6を上限とする。motion groupはASCII英数字と`-_.@`だけ、完成cue IDは構造用の`[]`を加えた同一allowlistかつ最大80 bytesとし、`Tap.Body[0]`を受理する一方でURL、path、81 bytes以上を`CHARACTER-MOTION-SCHEMA`としてquarantine作成前に拒否する。absolute path、parent traversal、remote URL、symlink、hardlink、実行可能file、非regular file、未知の`FileReferences`も拒否する。sourceのdevice、inode、size、SHA-256とコピー後のmanifestを照合し、quarantine内のbytesをread-only化してatomic renameした後だけlibraryへ公開する。
 
-frontendとRustのIPCはpack ID、preview token、nonce、generation、manifest hash、relative asset ID、binary bytesだけを交換する。rendererはallowlist済みmanifestに含まれるassetだけをbinary transportで取得し、ローカルパスや任意URLを解決しない。選択は登録中Projectをownerとしてnative stateに保存し、履歴resolverも`projects.registered = 1`だけを解決する。pack libraryとpack別semantic mappingはglobal stateなので、import、delete、mapping保存後はhydrated済みの全Projectを読み直してからsnapshotを一括公開し、各Project固有のselectionは混ぜない。再読込できないProjectは古いsnapshotを使わせずinvalidateし、mapping version競合では全Projectのfresh snapshotを得て利用者のdraftを保持したまま新versionで再試行する。state読込時は登録解除済みProjectのselectionを削除してatomic保存するため、再起動後のselection countやcustom pack削除保護へorphanを残さない。Project登録解除はCharacterのselect/deleteと同じnative operation lockで直列化し、履歴DB更新前にselectionを削除し、DB失敗時はselectionとworkspace activationをrollbackする。履歴本文、source file、Git stateは変更しない。起動時にpackが欠損または破損していれば同梱Hiyoriへfail closedで戻す。選択中のcustom packと同梱packは削除できない。
+frontendとRustのIPCはpack ID、preview token、nonce、generation、manifest hash、relative asset ID、binary bytesだけを交換する。rendererはallowlist済みmanifestに含まれるassetだけをbinary transportで取得し、ローカルパスや任意URLを解決しない。選択、pack library、pack別semantic mappingはapp-globalなnative stateとして保存し、すべてのworkspaceが同じsnapshotを参照する。import、select、delete、mapping保存後はglobal snapshotを読み直して一括公開し、workspace切替、作成、Archive、project登録解除ではselectionを変更しない。mapping version競合ではfresh snapshotを得て利用者のdraftを保持したまま新versionで再試行する。起動時に選択packが欠損または破損していれば同梱Hiyoriへfail closedで戻す。選択中のcustom packと同梱packは削除できない。
 
-schema version 1のworkspace selectionをProject selectionへ移行するときは、top-level schema mismatchや構造破損をtyped failureとして止める一方、個別の不正workspace ID、timestamp、opaque pack candidateだけを除外する。有効candidateが1件も残らないProjectは同梱Hiyoriへ決定的にfallbackし、別Projectの有効selectionは保持する。atomic write失敗では元のversion 1 stateを残し、再試行とその後の再起動を冪等に扱う。
+schema version 1のworkspace selectionまたはversion 2のProject selectionをversion 3のglobal selectionへ移行するときは、top-level schema mismatchや構造破損をtyped failureとして止める一方、個別の不正scope ID、timestamp、opaque pack candidateだけを除外する。存在するpackを指す候補を更新日時の降順、scope IDの昇順で並べ、先頭をglobal selectionへ採用する。有効candidateがなければ同梱Hiyoriへ決定的にfallbackする。atomic write失敗では旧stateを残し、再試行とその後の再起動を冪等に扱う。
 
 previewは`character-import-preview.html`を`<iframe sandbox="allow-scripts">`で実行する。`allow-same-origin`を追加してはならない。子documentはopaque origin (`null`) となり、親は`event.source`、`event.origin === "null"`、channel nonce、preview nonce、generationをすべて照合する。asset bytesはtransferable `ArrayBuffer`として一度だけ渡し、childはnetwork APIをguardした上で描画する。Rustはframe count、非透明pixel sample、8桁frame signature、state cue、texture decode count、WebGL error、parameter/part/drawable countをpreview identityへ結び付ける。最初の信頼済みframeは最大2 MiB・2048×2048のPNG bytesとSHA-256として渡し、Rustで完全decode、寸法、hashを再検証して`__coding-wife/trusted-frame.png`へatomic writeする。同じattestationの再送は同じ成功応答を返し、異なる再送だけをreplayとして拒否する。
 
-1–80文字の表示名とrenderer nonceを含むconfirmは、quarantine publishと対象workspaceの選択保存を同じnative operation内で行う。選択保存に失敗したpublishはquarantineへrollbackする。公開manifestはtrusted frameのasset ID、bytes、dimensions、SHA-256を含み、通常rendererはopaque IDとbinary IPCでだけ読み、再起動後やcontext loss、renderer failureでもstatic fallbackとして使う。新packのload中は既存modelと既存trusted frameを維持し、model・status・frameを成功時にまとめて切り替える。
+1–80文字の表示名とrenderer nonceを含むconfirmは、quarantine publishとglobal selection保存を同じnative operation内で行う。選択保存に失敗したpublishはquarantineへrollbackする。公開manifestはtrusted frameのasset ID、bytes、dimensions、SHA-256を含み、通常rendererはopaque IDとbinary IPCでだけ読み、再起動後やcontext loss、renderer failureでもstatic fallbackとして使う。新packのload中は既存modelと既存trusted frameを維持し、model・status・frameを成功時にまとめて切り替える。
 
-Settingsのpreview所有権はworkspace session leaseで管理する。section、main tab、workspaceから離れた場合は、picker loading中、描画中、attestation中のいずれでも確定した同一tokenを1回だけcancelする。React Strict Modeの即時再mountはlease再取得を確認してcancelしない。取消失敗でpreviewが残った場合は次のmountでdialogを再開し、戻ったときはimport triggerへfocusを復元する。
+Settingsのpreview所有権はapp-globalなCharacter library scopeのsession leaseで管理する。Companion sectionまたはApp settingsから離れた場合は、picker loading中、描画中、attestation中のいずれでも確定した同一tokenを1回だけcancelする。React Strict Modeの即時再mountはlease再取得を確認してcancelしない。取消失敗でpreviewが残った場合は次のmountでdialogを再開し、戻ったときはimport triggerへfocusを復元する。
 
 opaque originのmodule graphを読み込ませるため、development serverは`Origin: null`へ`Access-Control-Allow-Origin: null`を返す。productionはmain windowを設定から自動生成せず、`WebviewWindowBuilder`のresponse hookが`tauri:` requestかつrequest Originが正確に`null`の場合だけ同headerを上書きする。通常origin、HTTP(S)、attacker originには適用しない。child CSPはViteのmode-specific HTML transformで生成し、developmentでは`http://localhost:1420`だけ、productionでは`tauri://localhost`だけをscript/style/font/img sourceへ許可する。production出力へHTTP development originを残してはならない。inline script/style、`unsafe-eval`、wildcard、connect、form、popup、top navigationを許可せず、CSSは外部fileとして読み込む。このwindow生成とCORS hookは隔離previewのsecurity requirementなので、Tauriのwindow `create`を`true`へ戻す場合は同等のresponse hookを必ず維持する。
 
@@ -86,6 +86,6 @@ Hiyoriのmodel3にlayout指定はない。`CubismModelMatrix` は生成時にmod
 
 ## 後続実装との境界
 
-任意モデルのsingle-file picker、descriptor-relative Rust quarantine validator、source/copied bytesの照合、isolated preview、trusted PNG永続化、atomic publish-and-select、workspace session cleanup、Project単位の選択、pack別semantic mapping UIは完了している。mapping editorはpack identityでlocal draftを区切り、snapshot更新をeffectで入力stateへ上書きしないため、version競合から再読込しても利用者の変更を保持する。mapping未設定時は安全なIdle fallbackを維持し、未検証directory、absolute path、remote URLをfrontend manifest URLへ直接渡して代替してはならない。
+任意モデルのsingle-file picker、descriptor-relative Rust quarantine validator、source/copied bytesの照合、isolated preview、trusted PNG永続化、atomic publish-and-select、preview session cleanup、app-globalな選択、pack別semantic mapping UIは完了している。mapping editorはpack identityでlocal draftを区切り、snapshot更新をeffectで入力stateへ上書きしないため、version競合から再読込しても利用者の変更を保持する。mapping未設定時は安全なIdle fallbackを維持し、未検証directory、absolute path、remote URLをfrontend manifest URLへ直接渡して代替してはならない。
 
 版、hash、配布条件、pack schema、任意モデルのtrust boundaryを変更する場合は、先に [Live2D実ランタイム統合調査](live2d-runtime-integration.md) を更新し、公開情報を再確認した場合は `updated` と `last_verified` も更新する。

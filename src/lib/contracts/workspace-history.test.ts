@@ -213,6 +213,32 @@ describe("workspace history contract", () => {
         fixture.draft,
       ),
     ).toEqual(fixture.draft)
+    const character = {
+      schemaVersion: 1 as const,
+      version: 3,
+      contentHash: "d".repeat(64),
+      updatedAt: "2026-07-18T00:00:30.000Z",
+      context: {
+        displayName: "Sol",
+        tone: "neutral" as const,
+        toneNotes: "",
+        speechDensity: "key_events" as const,
+        behavior: "",
+        prohibitedExpressions: [],
+      },
+    }
+    expect(
+      parseWorkspaceHistoryResponse(
+        workspaceHistoryCommands.getCharacterContext,
+        character,
+      ),
+    ).toEqual(character)
+    expect(
+      parseWorkspaceHistoryResponse(
+        workspaceHistoryCommands.saveCharacterContext,
+        character,
+      ),
+    ).toEqual(character)
     const anchor = {
       schemaVersion: 1,
       workspaceId: "workspace-fixture",

@@ -21,14 +21,14 @@ use super::editable_context::{
 };
 use super::store::WorkspaceHistoryStore;
 use super::types::{
-    AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, ContextSource,
-    HistoryMode, HistoryStatus, NormalizedDomainEvent, ProjectSelectRequest, TimelinePage,
-    VersionedCharacterContext, VersionedProjectContext, WorkspaceArchiveRequest,
-    WorkspaceCancelRequest, WorkspaceCommandError, WorkspaceCreateSessionRequest,
-    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView,
-    WorkspaceEditableContext, WorkspaceHealth, WorkspaceLoadEditableContextRequest,
-    WorkspacePickOutcome, WorkspacePickResponse, WorkspaceRecheckRequest,
-    WorkspaceSaveCharacterContextRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
+    AppSaveCharacterContextRequest, AppendDomainEventRequest, AppendDomainEventResponse,
+    ContextSnapshotView, ContextSource, HistoryMode, HistoryStatus, NormalizedDomainEvent,
+    ProjectSelectRequest, TimelinePage, VersionedCharacterContext, VersionedProjectContext,
+    WorkspaceArchiveRequest, WorkspaceCancelRequest, WorkspaceCommandError,
+    WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
+    WorkspaceDraftView, WorkspaceEditableContext, WorkspaceHealth,
+    WorkspaceLoadEditableContextRequest, WorkspacePickOutcome, WorkspacePickResponse,
+    WorkspaceRecheckRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
     WorkspaceSaveProjectContextRequest, WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest,
     WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineAnchorView,
     WorkspaceTimelineRequest, WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
@@ -937,40 +937,11 @@ impl WorkspaceHistoryService {
             }
             deactivated.push(record.clone());
         }
-        let character_rollback = if let Some(character) = &self.character {
-            match character.prepare_project_id_unregistration(&request.project_id) {
-                Ok(rollback) => rollback,
-                Err(_) => {
-                    self.restore_private_records(&records).await;
-                    return Err(WorkspaceCommandError::new(
-                        "WORKSPACE-CHARACTER-SELECTION-CLEANUP",
-                        "workspace_unregister",
-                        true,
-                    ));
-                }
-            }
-        } else {
-            None
-        };
         match self.store.unregister_project(&request.project_id) {
             Ok(state) => Ok(state),
             Err(error) => {
-                let character_rollback_failed = match (&self.character, character_rollback) {
-                    (Some(character), Some(rollback)) => {
-                        character.rollback_project_unregistration(rollback).is_err()
-                    }
-                    _ => false,
-                };
                 self.restore_private_records(&records).await;
-                if character_rollback_failed {
-                    Err(WorkspaceCommandError::new(
-                        "WORKSPACE-CHARACTER-SELECTION-ROLLBACK",
-                        "workspace_unregister",
-                        false,
-                    ))
-                } else {
-                    Err(history_error("workspace_unregister", error))
-                }
+                Err(history_error("workspace_unregister", error))
             }
         }
     }
@@ -1181,17 +1152,24 @@ impl WorkspaceHistoryService {
             .map_err(|error| history_error("workspace_save_project_context", error))
     }
 
+    pub fn character_context(&self) -> Result<VersionedCharacterContext, WorkspaceCommandError> {
+        self.ensure_startup_ready("app_character_context_get")?;
+        self.store
+            .character_context()
+            .map_err(|error| history_error("app_character_context_get", error))
+    }
+
     pub async fn save_character_context(
         &self,
-        request: WorkspaceSaveCharacterContextRequest,
+        request: AppSaveCharacterContextRequest,
     ) -> Result<VersionedCharacterContext, WorkspaceCommandError> {
-        self.ensure_startup_ready("workspace_save_character_context")?;
+        self.ensure_startup_ready("app_character_context_save")?;
         let _operation = self.operation_lock.lock().await;
         let context = normalize_character_context(request.context)
-            .map_err(|error| history_error("workspace_save_character_context", error))?;
+            .map_err(|error| history_error("app_character_context_save", error))?;
         self.store
-            .save_character_context(&request.workspace_id, request.expected_version, context)
-            .map_err(|error| history_error("workspace_save_character_context", error))
+            .save_character_context(request.expected_version, context)
+            .map_err(|error| history_error("app_character_context_save", error))
     }
 
     pub async fn turn_context_snapshot(
@@ -2045,7 +2023,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unregister_cleans_character_selection_without_mutating_history_source_or_git() {
+    async fn unregister_preserves_global_character_selection_and_history_source_git() {
         let fixture = project_lifecycle_fixture("unregister-cleanup").await;
         fixture
             .character
@@ -2054,12 +2032,14 @@ mod tests {
             })
             .await
             .expect("initialize project selection");
-        assert!(fixture
-            .storage
-            .load_state()
-            .expect("selected state")
-            .project_selections
-            .contains_key(&fixture.project_id));
+        assert_eq!(
+            fixture
+                .storage
+                .load_state()
+                .expect("selected state")
+                .selected(),
+            BUILTIN_HIYORI_PACK_ID
+        );
 
         let context = fixture
             .store
@@ -2097,12 +2077,14 @@ mod tests {
             &fixture.storage,
             &fixture.project_id
         ));
-        assert!(!fixture
-            .storage
-            .load_state()
-            .expect("cleaned state")
-            .project_selections
-            .contains_key(&fixture.project_id));
+        assert_eq!(
+            fixture
+                .storage
+                .load_state()
+                .expect("global state")
+                .selected(),
+            BUILTIN_HIYORI_PACK_ID
+        );
         assert_eq!(
             persisted_context(&fixture.storage, &context.snapshot_id),
             context_before
@@ -2138,18 +2120,20 @@ mod tests {
                 .code,
             "CHARACTER-PROJECT-NOT-FOUND"
         );
-        assert!(!fixture
-            .storage
-            .load_state()
-            .expect("restart state")
-            .project_selections
-            .contains_key(&fixture.project_id));
+        assert_eq!(
+            fixture
+                .storage
+                .load_state()
+                .expect("restart state")
+                .selected(),
+            BUILTIN_HIYORI_PACK_ID
+        );
 
         fixture.cleanup();
     }
 
     #[tokio::test]
-    async fn unregister_rolls_back_character_selection_when_history_commit_fails() {
+    async fn unregister_failure_leaves_global_character_selection_unchanged() {
         let fixture = project_lifecycle_fixture("unregister-rollback").await;
         fixture
             .character
@@ -2230,12 +2214,14 @@ mod tests {
             .expect("unregister timeout")
             .expect("unregister task")
             .expect("unregister after select");
-        assert!(!select_first
-            .storage
-            .load_state()
-            .expect("select-first final state")
-            .project_selections
-            .contains_key(&select_first.project_id));
+        assert_eq!(
+            select_first
+                .storage
+                .load_state()
+                .expect("select-first final state")
+                .selected(),
+            BUILTIN_HIYORI_PACK_ID
+        );
         select_first.cleanup();
 
         let unregister_first = project_lifecycle_fixture("race-unregister-first").await;
@@ -2275,12 +2261,14 @@ mod tests {
             .expect("select task")
             .expect_err("select after unregister must fail");
         assert_eq!(error.code, "CHARACTER-PROJECT-NOT-FOUND");
-        assert!(!unregister_first
-            .storage
-            .load_state()
-            .expect("unregister-first final state")
-            .project_selections
-            .contains_key(&unregister_first.project_id));
+        assert_eq!(
+            unregister_first
+                .storage
+                .load_state()
+                .expect("unregister-first final state")
+                .selected(),
+            BUILTIN_HIYORI_PACK_ID
+        );
         unregister_first.cleanup();
 
         let delete_race = project_lifecycle_fixture("race-delete").await;
@@ -2357,12 +2345,14 @@ mod tests {
                 .expect("observer library after stale delete"),
             library_before
         );
-        assert!(!delete_race
-            .storage
-            .load_state()
-            .expect("delete race final state")
-            .project_selections
-            .contains_key(&delete_race.project_id));
+        assert_eq!(
+            delete_race
+                .storage
+                .load_state()
+                .expect("delete race final state")
+                .selected(),
+            BUILTIN_HIYORI_PACK_ID
+        );
 
         let selected = delete_race
             .character

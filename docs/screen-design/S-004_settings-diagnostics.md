@@ -170,7 +170,7 @@ build時の入力はrepositoryの`tmp/hiyori_pro`とし、release resourceには
 | Select         | preview first frameとstate test成功後だけstable Project ID単位で有効。atomic保存成功時に同じProject IDの全workspaceへ即時反映する。切替時はcandidate client/model/trusted frameをfirst accepted frameまでstageし、成功時だけrenderer、React committed pack、metrics、status、frameを一括で置換する。失敗またはabortではcandidateだけをreleaseし、現在表示を全項目そのまま維持する |
 | Delete         | どのProject IDからも選択されていないcustom packだけ。bundled Hiyoriまたは1件以上のProjectが選択中ならdisabled理由を表示し、確認後にselectionとusageを同じnative transactionで再検査してapp-private copyを削除                                                                                                                                                                         |
 
-legacy workspace-scoped selectionはProjectごとに`selectionUpdatedAt DESC, workspaceId ASC`で最初のvalid packを一度だけ移行する。valid値がなければbundled Hiyoriへ戻し、stale workspace responseから選択やDeleteを開始しない。
+legacy project/workspace-scoped selectionは`selectionUpdatedAt DESC, scope ID ASC`で最初のvalid packを一度だけapp-globalな選択へ移行する。valid値がなければbundled Hiyoriへ戻し、stale responseから選択やDeleteを開始しない。
 
 #### custom model import
 

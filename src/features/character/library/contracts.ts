@@ -7,6 +7,7 @@ import {
 
 export const characterLibrarySchemaVersion = 1 as const
 export const builtinHiyoriPackId = "builtin:hiyori_pro" as const
+export const characterLibraryScopeId = "__app_character__" as const
 
 export const characterLibraryCommands = {
   get: "character_library_get",

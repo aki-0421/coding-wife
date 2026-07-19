@@ -361,7 +361,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | `SUP-F-051`, `SUP-F-057`〜`SUP-F-061`, `SUP-F-069`〜`SUP-F-078` | app-owned commit explainer status、failure、interrupt、stream統合、main conversation分離 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-072`〜`GIT-F-096` | read-only observation、main commit skill、typed terminal handoff、background説明生成と明示presentation、Commit tab | [git-review-harness](../requirements/git-review-harness.md) |
 | `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059`, `HIST-F-061` | normalized timeline、sequence、scroll、restart recovery、observation/evidence appendとdurability表示 | [activity-history](../requirements/activity-history.md) |
-| `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-075`, `LIVE-F-077`, `LIVE-F-079`〜`LIVE-F-081` | Project-scoped selection、semantic mapping、canvas、fallback、text parity、performance | [live2d-companion](../requirements/live2d-companion.md) |
+| `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-075`, `LIVE-F-077`, `LIVE-F-079`〜`LIVE-F-081` | app-global selection、semantic mapping、canvas、fallback、text parity、performance | [live2d-companion](../requirements/live2d-companion.md) |
 | `NARR-F-057`〜`NARR-F-063`, `NARR-F-068`〜`NARR-F-089` | eligible speech、explicit commit presentation、text parity、queue、mute、dismiss/cancel分離、fallback | [audio-commentary](../requirements/audio-commentary.md) |
 | `APP-F-053`〜`APP-F-069` | shell、tabs、responsive、focus、native boundary、picker | [desktop-shell](../requirements/desktop-shell.md) |
 
@@ -388,6 +388,6 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] timeline、decision、Context、Live2D、audio、native boundary、data retentionを定義した。
 - [x] verified commitからapp-owned explanation controllerへのbackground handoffとmain conversation非介入を定義した。
-- [x] Context conflict/next-turn、repository health、active-turn切替、summary/anchor、Project-scoped semantic mappingの状態とfocusを定義した。
+- [x] Context conflict/next-turn、repository health、active-turn切替、summary/anchor、app-global semantic mappingの状態とfocusを定義した。
 - [x] 関連要件IDを要件定義書のS-002対応と一致させた。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。

@@ -15,6 +15,7 @@ export {
 } from "@/features/character/import-preview/IsolatedCharacterPreview"
 export {
   builtinHiyoriPackId,
+  characterLibraryScopeId,
   characterLibraryCommands,
   characterLibrarySchemaVersion,
   type CharacterConfirmImportRequest,

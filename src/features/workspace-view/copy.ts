@@ -316,9 +316,9 @@ const en = {
     unmute: "Unmute companion",
   },
   contextView: {
-    title: "Workspace context",
+    title: "Project context",
     description:
-      "Project instructions and companion presentation remain separate. Changes apply from the next turn.",
+      "Project-specific instructions for Codex. Changes apply from the next turn.",
     projectTitle: "Project context",
     projectDescription: "Goals, constraints, and definition of done for Codex.",
     characterTitle: "Character context",
@@ -386,10 +386,11 @@ const en = {
   },
   settingsView: {
     appTitle: "App settings",
-    appDescription: "Preferences and diagnostics shared by every project.",
+    appDescription:
+      "Character, companion, preferences, and diagnostics shared by every project.",
     projectTitle: "Project settings",
     projectDescription: (project: string) =>
-      `Context, companion, and history settings for ${project}.`,
+      `Project context and history settings for ${project}.`,
     backToWorkspace: "Back to workspace",
     sections: {
       general: "General",
@@ -897,9 +898,9 @@ const ja: typeof en = {
     unmute: "コンパニオンのミュートを解除",
   },
   contextView: {
-    title: "ワークスペースコンテキスト",
+    title: "プロジェクトコンテキスト",
     description:
-      "project指示とcompanion表現を分離します。変更は次のturnから適用します。",
+      "Codexへ渡すプロジェクト固有の指示です。変更は次のturnから適用します。",
     projectTitle: "プロジェクトコンテキスト",
     projectDescription: "Codexへ渡す目標、制約、完了条件です。",
     characterTitle: "キャラクターコンテキスト",
@@ -965,10 +966,11 @@ const ja: typeof en = {
   },
   settingsView: {
     appTitle: "アプリ設定",
-    appDescription: "すべてのプロジェクトに共通する設定と診断です。",
+    appDescription:
+      "すべてのプロジェクトに共通するキャラクター、コンパニオン、設定、診断です。",
     projectTitle: "プロジェクト設定",
     projectDescription: (project: string) =>
-      `${project} のコンテキスト、コンパニオン、履歴に適用されます。`,
+      `${project} のプロジェクトコンテキストと履歴に適用されます。`,
     backToWorkspace: "ワークスペースへ戻る",
     sections: {
       general: "一般",

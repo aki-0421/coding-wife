@@ -120,7 +120,7 @@ describe("workspace context contract", () => {
     }
   })
 
-  it("binds both versioned records and snapshots to one workspace", () => {
+  it("binds project context to the workspace and accepts global character context", () => {
     const bundle = {
       schemaVersion: 1,
       workspaceId: "workspace-fixture",
@@ -134,7 +134,6 @@ describe("workspace context contract", () => {
       },
       character: {
         schemaVersion: 1,
-        workspaceId: "workspace-fixture",
         version: 3,
         contentHash: "b".repeat(64),
         updatedAt: "2026-07-18T00:00:01.000Z",
@@ -145,7 +144,7 @@ describe("workspace context contract", () => {
     expect(() =>
       parseWorkspaceEditableContext({
         ...bundle,
-        character: { ...bundle.character, workspaceId: "workspace-other" },
+        project: { ...bundle.project, workspaceId: "workspace-other" },
       }),
     ).toThrow(WorkspaceContextContractError)
 

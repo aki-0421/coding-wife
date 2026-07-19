@@ -52,7 +52,7 @@ use super::types::{
 };
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
-const CURRENT_DATABASE_VERSION: i64 = 8;
+const CURRENT_DATABASE_VERSION: i64 = 9;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
@@ -275,6 +275,41 @@ ALTER TABLE projects ADD COLUMN common_git_device INTEGER;
 ALTER TABLE projects ADD COLUMN common_git_inode INTEGER;
 "#;
 
+const MIGRATION_9: &str = r#"
+CREATE TABLE IF NOT EXISTS app_character_context (
+  singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+  character_json TEXT NOT NULL,
+  character_version INTEGER NOT NULL CHECK (character_version >= 1),
+  character_hash TEXT NOT NULL,
+  character_updated_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO app_character_context (
+  singleton_id, character_json, character_version, character_hash, character_updated_at
+)
+SELECT
+  1, wc.character_json, wc.character_version, wc.character_hash, wc.character_updated_at
+FROM workspace_contexts wc
+JOIN workspaces w ON w.id = wc.workspace_id
+ORDER BY
+  (w.last_selected_at IS NULL) ASC,
+  w.last_selected_at DESC,
+  w.updated_at DESC,
+  w.id ASC
+LIMIT 1;
+
+INSERT OR IGNORE INTO app_character_context (
+  singleton_id, character_json, character_version, character_hash, character_updated_at
+)
+VALUES (
+  1,
+  '{"displayName":"Sol","tone":"neutral","toneNotes":"","speechDensity":"key_events","behavior":"","prohibitedExpressions":[]}',
+  1,
+  '0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c',
+  '1970-01-01T00:00:00.000Z'
+);
+"#;
+
 #[derive(Debug)]
 struct StoreInner {
     connection: Connection,
@@ -417,6 +452,7 @@ impl WorkspaceHistoryStore {
                         (6, MIGRATION_6),
                         (7, MIGRATION_7),
                         (8, MIGRATION_8),
+                        (9, MIGRATION_9),
                     ],
                 )
                 .map_err(|_| history_error("HIST-RECOVERY-SCHEMA", false))?;
@@ -1655,6 +1691,11 @@ impl WorkspaceHistoryStore {
         editable_context_by_workspace(&inner.connection, workspace_id)
     }
 
+    pub fn character_context(&self) -> Result<VersionedCharacterContext, WorkspaceHistoryError> {
+        let inner = self.lock();
+        app_character_context(&inner.connection)
+    }
+
     pub(super) fn save_project_context(
         &self,
         workspace_id: &str,
@@ -1708,44 +1749,41 @@ impl WorkspaceHistoryStore {
 
     pub fn save_character_context(
         &self,
-        workspace_id: &str,
         expected_version: u64,
         context: CharacterContext,
     ) -> Result<VersionedCharacterContext, WorkspaceHistoryError> {
-        validate_workspace_id(workspace_id)?;
         let context = normalize_character_context(context)?;
-        self.ensure_writable("workspace.save_character_context")?;
+        self.ensure_writable("app.save_character_context")?;
         let mut inner = self.lock();
         let transaction = inner
             .connection
             .transaction()
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
-        let current = editable_context_by_workspace(&transaction, workspace_id)?;
-        if current.character.version != expected_version {
-            return Err(history_error("WORKSPACE-CHARACTER-CONTEXT-CONFLICT", true));
+        let current = app_character_context(&transaction)?;
+        if current.version != expected_version {
+            return Err(history_error("APP-CHARACTER-CONTEXT-CONFLICT", true));
         }
         let character_json = canonical_json(&context)?;
         let character_hash = content_hash(&character_json);
         let updated_at = now();
         let changed = transaction
             .execute(
-                "UPDATE workspace_contexts
+                "UPDATE app_character_context
                  SET character_json = ?1, character_version = character_version + 1,
                      character_hash = ?2, character_updated_at = ?3
-                 WHERE workspace_id = ?4 AND character_version = ?5",
+                 WHERE singleton_id = 1 AND character_version = ?4",
                 params![
                     character_json,
                     character_hash,
                     updated_at,
-                    workspace_id,
                     expected_version as i64,
                 ],
             )
             .map_err(|_| history_error("HIST-CHARACTER-CONTEXT-WRITE", true))?;
         if changed != 1 {
-            return Err(history_error("WORKSPACE-CHARACTER-CONTEXT-CONFLICT", true));
+            return Err(history_error("APP-CHARACTER-CONTEXT-CONFLICT", true));
         }
-        let saved = editable_context_by_workspace(&transaction, workspace_id)?.character;
+        let saved = app_character_context(&transaction)?;
         transaction
             .commit()
             .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
@@ -2222,16 +2260,12 @@ impl WorkspaceHistoryStore {
                 "UPDATE workspace_contexts
                  SET project_json = ?1, project_version = project_version + 1,
                      project_hash = ?2, project_updated_at = ?3,
-                     character_json = ?4, character_version = character_version + 1,
-                     character_hash = ?5, character_updated_at = ?3,
                      project_reference_manifest_json = NULL
-                 WHERE workspace_id = ?6",
+                 WHERE workspace_id = ?4",
                 params![
                     DEFAULT_PROJECT_JSON,
                     DEFAULT_PROJECT_HASH,
                     updated_at,
-                    DEFAULT_CHARACTER_JSON,
-                    DEFAULT_CHARACTER_HASH,
                     workspace_id,
                 ],
             )
@@ -2286,6 +2320,7 @@ fn open_configured_connection(
             (6, MIGRATION_6),
             (7, MIGRATION_7),
             (8, MIGRATION_8),
+            (9, MIGRATION_9),
         ],
     )?;
     if status.mode == HistoryMode::Ready {
@@ -2602,8 +2637,7 @@ fn editable_context_by_workspace(
 ) -> Result<WorkspaceEditableContext, WorkspaceHistoryError> {
     let row = connection
         .query_row(
-            "SELECT project_json, project_version, project_hash, project_updated_at,
-                    character_json, character_version, character_hash, character_updated_at
+            "SELECT project_json, project_version, project_hash, project_updated_at
              FROM workspace_contexts WHERE workspace_id = ?1",
             params![workspace_id],
             |row| {
@@ -2612,42 +2646,21 @@ fn editable_context_by_workspace(
                     row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
                 ))
             },
         )
         .optional()
         .map_err(|_| history_error("HIST-EDITABLE-CONTEXT-READ", true))?
         .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
-    let (
-        project_json,
-        project_version,
-        project_hash,
-        project_updated_at,
-        character_json,
-        character_version,
-        character_hash,
-        character_updated_at,
-    ) = row;
-    if project_version < 1 || character_version < 1 {
+    let (project_json, project_version, project_hash, project_updated_at) = row;
+    if project_version < 1 {
         return Err(history_error("HIST-EDITABLE-CONTEXT-CORRUPT", false));
     }
     let project = serde_json::from_str::<ProjectContext>(&project_json)
         .map_err(|_| history_error("HIST-PROJECT-CONTEXT-DECODE", false))?;
-    let character = serde_json::from_str::<CharacterContext>(&character_json)
-        .map_err(|_| history_error("HIST-CHARACTER-CONTEXT-DECODE", false))?;
     let project = normalize_project_context(project, None)?;
-    let character = normalize_character_context(character)?;
     let canonical_project = canonical_json(&project)?;
-    let canonical_character = canonical_json(&character)?;
-    if canonical_project != project_json
-        || content_hash(&canonical_project) != project_hash
-        || canonical_character != character_json
-        || content_hash(&canonical_character) != character_hash
-    {
+    if canonical_project != project_json || content_hash(&canonical_project) != project_hash {
         return Err(history_error("HIST-EDITABLE-CONTEXT-INTEGRITY", false));
     }
     Ok(WorkspaceEditableContext {
@@ -2661,14 +2674,48 @@ fn editable_context_by_workspace(
             updated_at: project_updated_at,
             context: project,
         },
-        character: VersionedCharacterContext {
-            schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
-            workspace_id: workspace_id.to_owned(),
-            version: character_version as u64,
-            content_hash: character_hash,
-            updated_at: character_updated_at,
-            context: character,
-        },
+        character: app_character_context(connection)?,
+    })
+}
+
+fn app_character_context(
+    connection: &Connection,
+) -> Result<VersionedCharacterContext, WorkspaceHistoryError> {
+    let row = connection
+        .query_row(
+            "SELECT character_json, character_version, character_hash, character_updated_at
+             FROM app_character_context WHERE singleton_id = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| history_error("HIST-CHARACTER-CONTEXT-READ", true))?
+        .ok_or_else(|| history_error("HIST-CHARACTER-CONTEXT-MISSING", false))?;
+    let (character_json, character_version, character_hash, character_updated_at) = row;
+    if character_version < 1 {
+        return Err(history_error("HIST-CHARACTER-CONTEXT-CORRUPT", false));
+    }
+    let character = serde_json::from_str::<CharacterContext>(&character_json)
+        .map_err(|_| history_error("HIST-CHARACTER-CONTEXT-DECODE", false))?;
+    let character = normalize_character_context(character)?;
+    let canonical_character = canonical_json(&character)?;
+    if canonical_character != character_json || content_hash(&canonical_character) != character_hash
+    {
+        return Err(history_error("HIST-CHARACTER-CONTEXT-INTEGRITY", false));
+    }
+    Ok(VersionedCharacterContext {
+        schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
+        version: character_version as u64,
+        content_hash: character_hash,
+        updated_at: character_updated_at,
+        context: character,
     })
 }
 
@@ -5205,7 +5252,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn editable_context_is_versioned_atomic_restart_safe_and_workspace_scoped() {
+    async fn editable_context_keeps_project_scoped_and_character_global() {
         let data = temp_directory("editable-context");
         let root = git_repository();
         let store = WorkspaceHistoryStore::open(&data).expect("open store");
@@ -5272,10 +5319,10 @@ mod tests {
         };
         assert_eq!(
             store
-                .save_character_context(&first.workspace_id, 1, policy)
+                .save_character_context(1, policy)
                 .expect_err("policy key rejected")
                 .code,
-            "WORKSPACE-CHARACTER-CONTEXT-POLICY"
+            "APP-CHARACTER-CONTEXT-POLICY"
         );
         let character = CharacterContext {
             display_name: "Hiyori".to_owned(),
@@ -5283,9 +5330,17 @@ mod tests {
             ..CharacterContext::default()
         };
         let character_saved = store
-            .save_character_context(&first.workspace_id, 1, character.clone())
+            .save_character_context(1, character.clone())
             .expect("save character context");
         assert_eq!(character_saved.version, 2);
+        assert_eq!(
+            store
+                .load_editable_context(&second.workspace_id)
+                .expect("global character in second workspace")
+                .character
+                .context,
+            character
+        );
         let snapshot = store
             .turn_context_snapshot(&first.workspace_id, &reference_validation)
             .expect("immutable turn snapshot");
@@ -6299,6 +6354,130 @@ mod tests {
                 )
                 .expect("Git common directory identity columns"),
             2
+        );
+
+        let older_character = CharacterContext {
+            display_name: "Older".to_owned(),
+            ..CharacterContext::default()
+        };
+        let recent_character = CharacterContext {
+            display_name: "Recent".to_owned(),
+            ..CharacterContext::default()
+        };
+        let older_character_json = canonical_json(&older_character).expect("older character JSON");
+        let recent_character_json =
+            canonical_json(&recent_character).expect("recent character JSON");
+        for (project_id, root, identity) in [
+            (
+                "project-older",
+                b"/tmp/project-older".as_slice(),
+                "identity-older",
+            ),
+            (
+                "project-recent",
+                b"/tmp/project-recent".as_slice(),
+                "identity-recent",
+            ),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO projects (
+                       id, canonical_root, alias, project_identity,
+                       root_device, root_inode, git_device, git_inode,
+                       branch, head, detached, health, created_at, updated_at
+                     ) VALUES (?1, ?2, ?1, ?3, 1, 1, 1, 1, 'main', 'abc123', 0,
+                               'healthy', '2026-07-18T00:00:00.000Z',
+                               '2026-07-18T00:00:00.000Z')",
+                    params![project_id, root, identity],
+                )
+                .expect("legacy project");
+        }
+        for (workspace_id, project_id, selected_at, character_json, character_version) in [
+            (
+                "workspace-older",
+                "project-older",
+                "2026-07-19T00:00:00.000Z",
+                older_character_json.as_str(),
+                3_i64,
+            ),
+            (
+                "workspace-recent",
+                "project-recent",
+                "2026-07-20T00:00:00.000Z",
+                recent_character_json.as_str(),
+                7_i64,
+            ),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO workspaces (
+                       id, project_id, name, lifecycle, health,
+                       created_at, updated_at, last_selected_at
+                     ) VALUES (?1, ?2, ?1, 'in_progress', 'healthy',
+                               '2026-07-18T00:00:00.000Z', ?3, ?3)",
+                    params![workspace_id, project_id, selected_at],
+                )
+                .expect("legacy workspace");
+            connection
+                .execute(
+                    "INSERT INTO workspace_contexts (
+                       workspace_id, project_json, project_version, project_hash,
+                       project_updated_at, character_json, character_version,
+                       character_hash, character_updated_at
+                     ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?4)",
+                    params![
+                        workspace_id,
+                        DEFAULT_PROJECT_JSON,
+                        DEFAULT_PROJECT_HASH,
+                        selected_at,
+                        character_json,
+                        character_version,
+                        content_hash(character_json),
+                    ],
+                )
+                .expect("legacy workspace context");
+        }
+
+        apply_migrations(
+            &connection,
+            &[
+                (1, MIGRATION_1),
+                (2, MIGRATION_2),
+                (3, MIGRATION_3),
+                (4, MIGRATION_4),
+                (5, MIGRATION_5),
+                (6, MIGRATION_6),
+                (7, MIGRATION_7),
+                (8, MIGRATION_8),
+                (9, MIGRATION_9),
+            ],
+        )
+        .expect("version nine schema");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version nine"),
+            9
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT character_version FROM app_character_context WHERE singleton_id = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("app character context singleton"),
+            7
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT character_json FROM app_character_context WHERE singleton_id = 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("most recently selected character context"),
+            recent_character_json
         );
     }
 

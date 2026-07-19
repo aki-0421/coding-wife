@@ -76,11 +76,11 @@ interface CharacterRuntimeSettingsProps {
   readonly onRetryCharacter: () => void
 }
 
-interface AppSettingsViewProps {
-  readonly copy: WorkspaceCopy
-  readonly muted: boolean
+interface AppSettingsViewProps extends CharacterRuntimeSettingsProps {
+  readonly contextModel: EditableWorkspaceContextModel
   readonly runtimeState: RuntimeState
   readonly section: AppSettingsSection
+  readonly turnActive: boolean
   readonly workspaceId: string
   readonly projects: readonly ProjectRecord[]
   readonly projectActionPending: boolean
@@ -91,12 +91,12 @@ interface AppSettingsViewProps {
   readonly onUnregisterProject: (projectId: string) => Promise<boolean>
 }
 
-interface ProjectSettingsViewProps extends CharacterRuntimeSettingsProps {
+interface ProjectSettingsViewProps {
+  readonly copy: WorkspaceCopy
   readonly contextModel: EditableWorkspaceContextModel
   readonly history: WorkspaceAdapterState["history"]
   readonly section: ProjectSettingsSection
   readonly turnActive: boolean
-  readonly workspaceId: string
   readonly workspaceLabel: string
   readonly onDeleteHistory: () => Promise<boolean>
   readonly onSectionChange: (section: ProjectSettingsSection) => void
@@ -250,6 +250,8 @@ function CharacterRuntimeErrorAlert({
 const appSectionOrder: readonly AppSettingsSection[] = [
   "general",
   "projects",
+  "character_context",
+  "companion",
   "audio",
   "support",
   "diagnostics",
@@ -257,8 +259,6 @@ const appSectionOrder: readonly AppSettingsSection[] = [
 
 const projectSectionOrder: readonly ProjectSettingsSection[] = [
   "project_context",
-  "character_context",
-  "companion",
   "history",
 ]
 
@@ -412,8 +412,7 @@ function CompanionSettings({
   copy,
   muted,
   onRetryCharacter,
-  workspaceId,
-}: CharacterRuntimeSettingsProps & { readonly workspaceId: string }) {
+}: CharacterRuntimeSettingsProps) {
   return (
     <section className="flex flex-col gap-lg">
       <div className="flex items-center justify-between gap-md">
@@ -432,7 +431,7 @@ function CompanionSettings({
         copy={copy}
         muted={muted}
       />
-      <CharacterModelLibrarySettings workspaceId={workspaceId} />
+      <CharacterModelLibrarySettings />
     </section>
   )
 }
@@ -804,6 +803,24 @@ export function AppSettingsView(props: AppSettingsViewProps) {
         )
       case "projects":
         return <ProjectsSettings {...props} />
+      case "character_context":
+        return (
+          <ContextSettings
+            character
+            copy={props.copy}
+            contextModel={props.contextModel}
+            turnActive={props.turnActive}
+          />
+        )
+      case "companion":
+        return (
+          <CompanionSettings
+            characterRuntime={props.characterRuntime}
+            copy={props.copy}
+            muted={props.muted}
+            onRetryCharacter={props.onRetryCharacter}
+          />
+        )
       case "audio":
         return <AudioSettings {...props} />
       case "support":
@@ -879,25 +896,6 @@ export function ProjectSettingsView(props: ProjectSettingsViewProps) {
             copy={props.copy}
             contextModel={props.contextModel}
             turnActive={props.turnActive}
-          />
-        )
-      case "character_context":
-        return (
-          <ContextSettings
-            character
-            copy={props.copy}
-            contextModel={props.contextModel}
-            turnActive={props.turnActive}
-          />
-        )
-      case "companion":
-        return (
-          <CompanionSettings
-            characterRuntime={props.characterRuntime}
-            copy={props.copy}
-            muted={props.muted}
-            onRetryCharacter={props.onRetryCharacter}
-            workspaceId={props.workspaceId}
           />
         )
       case "history":

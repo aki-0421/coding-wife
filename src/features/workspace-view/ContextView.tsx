@@ -30,15 +30,6 @@ export function ContextView({ copy, model, turnActive }: ContextViewProps) {
             section="project"
             turnActive={turnActive}
           />
-          <div className="border-t border-divider pt-lg">
-            <EditableContextSection
-              copy={copy}
-              instanceId="context-tab"
-              model={model}
-              section="character"
-              turnActive={turnActive}
-            />
-          </div>
         </div>
       </ScrollArea>
     </main>

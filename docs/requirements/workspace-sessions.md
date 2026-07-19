@@ -131,7 +131,7 @@ project登録解除は`projects.registered`とnavigationだけを変更し、wor
 
 ### Versioned editable Context contract
 
-`ProjectContext`と`CharacterContext`はcapture済みFiles / Git diffとは別のeditable contextであり、workspace IDをpartition keyとして一つのversioned storeへ保存する。ProjectとCharacterは別versionを持ち、片方の保存が他方の未保存draftまたはversionを変更してはならない。
+`ProjectContext`と`CharacterContext`はcapture済みFiles / Git diffとは別のeditable contextである。Projectはworkspace IDをpartition keyとして保存し、Characterはapp-globalなsingletonとして保存する。ProjectとCharacterは別versionを持ち、片方の保存が他方の未保存draftまたはversionを変更してはならない。
 
 | record | field | 型・保存境界 |
 |---|---|---|
@@ -147,7 +147,7 @@ project登録解除は`projects.registered`とnavigationだけを変更し、wor
 | `CharacterContext` | `behavior` | string、0〜4,000 Unicode scalar。presentation上の希望だけを扱う |
 | `CharacterContext` | `prohibitedExpressions` | string配列、0〜20項目、各trim後1〜200 Unicode scalar |
 
-Project総量は32,000、Character総量は12,000 Unicode scalarを上限とし、配列の各itemも総量へ加算する。保存requestは`workspaceId`、対象record、`expectedVersion`を必須にし、SQLite transaction内で現在versionとの一致を検証してからversionをちょうど1増やし、canonical JSONのSHA-256を更新する。不一致時は`WORKSPACE-PROJECT-CONTEXT-CONFLICT`または`WORKSPACE-CHARACTER-CONTEXT-CONFLICT`を返し、DBと利用者のdraftを変更しない。
+Project総量は32,000、Character総量は12,000 Unicode scalarを上限とし、配列の各itemも総量へ加算する。Projectの保存requestは`workspaceId`と`expectedVersion`、Characterの保存requestは`expectedVersion`を必須にし、SQLite transaction内で現在versionとの一致を検証してからversionをちょうど1増やし、canonical JSONのSHA-256を更新する。不一致時は`WORKSPACE-PROJECT-CONTEXT-CONFLICT`または`APP-CHARACTER-CONTEXT-CONFLICT`を返し、DBと利用者のdraftを変更しない。
 
 Characterの自由入力は、行頭またはJSON key位置にある`permission`、`approval`、`model`、`tool`、`git`、`commit_skill`、`verification`、`privacy`、`support_capability`、`checkpoint_policy`と、その表記揺れをtechnical policy keyとして拒否する。また`override` / `bypass` / `disable` / `ignore`とtechnical policy名を組み合わせた指示に限らず、grant / deny / allow / skip / avoid / never askや「常に許可」「確認しない」「検証を省略」等、権限、承認、検証、安全、checkpointの実行ruleを変更する意味的な指示もja/en共通fixtureに基づき拒否する。presentation上の語（例: permission errorを簡潔に説明する、verification結果を温かく伝える）は拒否しない。拒否はCharacter record全体をatomicに失敗させ、Project Contextへ自動コピーしない。
 

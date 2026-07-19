@@ -110,7 +110,6 @@ function editableContext(
     },
     character: {
       schemaVersion: 1,
-      workspaceId,
       version: 1,
       contentHash: "b".repeat(64),
       updatedAt: "2026-07-18T00:00:00.000Z",
@@ -385,5 +384,27 @@ describe("useEditableWorkspaceContext", () => {
     )
     expect(result.current.project.dirty).toBe(true)
     expect(loaded).toEqual(["workspace-first", "workspace-second"])
+  })
+
+  it("keeps one character draft while switching workspaces", async () => {
+    const character = editableContext("workspace-first", "First").character
+    const loadCharacterContext = vi.fn(() => Promise.resolve(character))
+    const adapter: WorkspaceViewAdapter = {
+      loadEditableContext: (workspaceId) =>
+        Promise.resolve(editableContext(workspaceId, workspaceId)),
+      loadCharacterContext,
+    }
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) => useEditableWorkspaceContext(adapter, workspaceId),
+      { initialProps: { workspaceId: "workspace-first" } },
+    )
+    await waitFor(() => expect(result.current.character.status).toBe("ready"))
+    act(() => result.current.updateCharacter({ behavior: "Shared app draft" }))
+
+    rerender({ workspaceId: "workspace-second" })
+
+    expect(result.current.character.draft.behavior).toBe("Shared app draft")
+    expect(result.current.character.dirty).toBe(true)
+    expect(loadCharacterContext).toHaveBeenCalledTimes(1)
   })
 })
