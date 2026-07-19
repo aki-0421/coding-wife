@@ -1603,9 +1603,7 @@ describe("WorkspaceShell", () => {
         document.querySelector('[data-slot="popover-content"]'),
       ).not.toBeInTheDocument(),
     )
-    expect(
-      screen.getByRole("heading", { name: "Native readiness" }),
-    ).toBeVisible()
+    expect(screen.getByRole("heading", { name: "Diagnostics" })).toBeVisible()
     expect(navigationTrigger).toHaveFocus()
 
     await user.click(navigationTrigger as HTMLButtonElement)

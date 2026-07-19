@@ -41,7 +41,10 @@ const copy: Readonly<
       readonly stop: string
       readonly chatTab: string
       readonly commitTab: string
-      readonly contextTab: string
+      readonly appSettings: string
+      readonly projects: string
+      readonly projectCard: RegExp
+      readonly backToWorkspace: string
       readonly goal: string
       readonly saveProject: string
       readonly saved: string
@@ -72,7 +75,10 @@ const copy: Readonly<
     stop: "Stop",
     chatTab: "Chat",
     commitTab: "Commit",
-    contextTab: "Context",
+    appSettings: "App settings",
+    projects: "Projects",
+    projectCard: /coding-wife.*3 workspaces/u,
+    backToWorkspace: "Back to workspace",
     goal: "Goal",
     saveProject: "Save project context",
     saved: "Saved. This version will be used from the next turn.",
@@ -102,9 +108,12 @@ const copy: Readonly<
     stop: "停止",
     chatTab: "チャット",
     commitTab: "コミット",
-    contextTab: "コンテキスト",
+    appSettings: "アプリ設定",
+    projects: "プロジェクト",
+    projectCard: /coding-wife.*3件のワークスペース/u,
+    backToWorkspace: "ワークスペースへ戻る",
     goal: "目標",
-    saveProject: "Project下書きを保存",
+    saveProject: "プロジェクトコンテキストを保存",
     saved: "保存しました。次のturnからこのバージョンを使います。",
     explanationReady: "説明を生成済み",
     showExplanation: "説明を表示",
@@ -148,7 +157,7 @@ describe("final bilingual App acceptance", () => {
   })
 
   it.each(finalAcceptanceLocales)(
-    "runs the explicit workspace-to-caption and Context path in %s",
+    "runs the explicit workspace-to-caption and project settings path in %s",
     async (locale) => {
       const localized = copy[locale]
       const recorder = new FinalAcceptanceEvidenceRecorder(
@@ -363,7 +372,13 @@ describe("final bilingual App acceptance", () => {
         expect(showExplanation).toHaveFocus()
       })
 
-      await user.click(screen.getByRole("tab", { name: localized.contextTab }))
+      await user.click(
+        screen.getAllByRole("button", { name: localized.appSettings })[0]!,
+      )
+      await user.click(screen.getByRole("button", { name: localized.projects }))
+      await user.click(
+        screen.getByRole("button", { name: localized.projectCard }),
+      )
       const goal = await screen.findByRole("textbox", { name: localized.goal })
       await user.clear(goal)
       await user.type(goal, "Preserve acceptance evidence across restart")
@@ -375,6 +390,9 @@ describe("final bilingual App acceptance", () => {
         version: 2,
         context: { goal: "Preserve acceptance evidence across restart" },
       })
+      await user.click(
+        screen.getByRole("button", { name: localized.backToWorkspace }),
+      )
 
       const createdWorkspaceId = workspace.activeWorkspaceId
       await user.click(screen.getByRole("tab", { name: localized.chatTab }))
@@ -602,7 +620,7 @@ describe("final bilingual App acceptance", () => {
     },
   )
 
-  it("restores locale and Context in the fixture while suppressing late scope events and preserving native-only boundaries", async () => {
+  it("restores locale in the fixture while suppressing late scope events and preserving native-only boundaries", async () => {
     const recorder = new FinalAcceptanceEvidenceRecorder(
       "webview_contract_fixture",
     )

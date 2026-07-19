@@ -167,10 +167,6 @@ describe("default App character integration", () => {
     expect(screen.getByTestId("live2d-character")).toBeVisible()
     expect(latestLive2dProps()?.stateGeneration).toBe(idleGeneration)
 
-    await user.click(screen.getByRole("tab", { name: "Context" }))
-    expect(screen.getByTestId("live2d-character")).toBe(initialNode)
-    expect(screen.getByTestId("live2d-character")).toBeVisible()
-
     await user.click(screen.getByRole("tab", { name: "Settings" }))
     await waitFor(() =>
       expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
@@ -379,7 +375,9 @@ describe("default App character integration", () => {
       screen.getByText("External renderer · status unavailable"),
     ).toBeVisible()
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(
+      screen.getAllByRole("button", { name: "App settings" })[0]!,
+    )
     await user.click(screen.getByRole("button", { name: "Companion" }))
     expect(screen.getByText("External renderer")).toBeVisible()
     expect(
@@ -398,7 +396,9 @@ describe("default App character integration", () => {
         document.querySelector('[data-character-runtime-readiness="ready"]'),
       ).toBeInTheDocument(),
     )
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(
+      screen.getAllByRole("button", { name: "App settings" })[0]!,
+    )
     await user.click(screen.getByRole("button", { name: "Companion" }))
     expect(screen.getAllByText("桃瀬ひより - PRO").length).toBeGreaterThan(0)
     expect(screen.getByText("hiyori_pro_t11")).toBeVisible()
@@ -416,9 +416,7 @@ describe("default App character integration", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Back to workspace" }))
     await waitFor(() =>
-      expect(
-        screen.getByText("Hidden", { selector: "[data-slot=badge]" }),
-      ).toBeVisible(),
+      expect(screen.queryByTestId("live2d-character")).not.toBeInTheDocument(),
     )
     const presentationsBeforeShow = live2dCalls.length
     fireEvent.click(screen.getAllByRole("button", { name: "App settings" })[0]!)
@@ -433,7 +431,7 @@ describe("default App character integration", () => {
       expect(live2dCalls.length).toBeGreaterThan(presentationsBeforeShow),
     )
     await waitFor(() =>
-      expect(screen.getAllByText("Reduced").length).toBeGreaterThan(0),
+      expect(latestLive2dProps()?.motionPolicy).toBe("reduced"),
     )
 
     const failedStatus = {
@@ -449,6 +447,10 @@ describe("default App character integration", () => {
       pack: null,
     } as const
     act(() => latestLive2dProps()?.onStatusChange?.(failedStatus))
+    await user.click(
+      screen.getAllByRole("button", { name: "App settings" })[0]!,
+    )
+    await user.click(screen.getByRole("button", { name: "Companion" }))
     expect(
       (await screen.findAllByText("asset_fetch_failed")).length,
     ).toBeGreaterThan(0)

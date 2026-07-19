@@ -280,21 +280,23 @@ describe("DemoWorkspaceHistoryTransport", () => {
       undefined,
     )
     const workspaceId = state.activeWorkspaceId
-    const otherWorkspaceId = state.workspaces.find(
-      (workspace) => workspace.workspaceId !== workspaceId,
-    )?.workspaceId
-    if (workspaceId === null || otherWorkspaceId === undefined) {
+    if (workspaceId === null) {
       throw new Error("demo fixture")
     }
     const projectId = state.workspaces.find(
       (workspace) => workspace.workspaceId === workspaceId,
     )?.projectId
-    const otherProjectId = state.workspaces.find(
-      (workspace) => workspace.workspaceId === otherWorkspaceId,
-    )?.projectId
-    if (projectId === undefined || otherProjectId === undefined) {
+    if (projectId === undefined) {
       throw new Error("demo project fixture")
     }
+    const registered = await transport.request(
+      workspaceHistoryCommands.pickRegister,
+      undefined,
+    )
+    const otherProjectId = registered.state.projects.find(
+      (project) => project.projectId !== projectId,
+    )?.projectId
+    if (otherProjectId === undefined) throw new Error("demo project fixture")
     const initial = await transport.request(
       workspaceHistoryCommands.getProjectContext,
       { projectId },
