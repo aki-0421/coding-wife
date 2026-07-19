@@ -47,6 +47,8 @@ read_when:
 
 `pnpm check:diff`を依存install前に実行して不正な差分を早期に拒否する。`pnpm test:pr`はLive2Dとbundled skillのsupply-chain test、diff hygieneとquality runnerのrepository test、frontend Vitestを実行する。symlink modeなどrunner OSで意味が変わるrelease testは、部分的にLinuxへ移さず`pnpm test:release`へ集約する。production frontend buildとdemo marker除外は`pnpm build`で確認する。
 
+Frontend VitestはLinux上のjsdomで実行する。character asset integrity testは省略せず、browser realmの`ArrayBuffer`をNode WebCryptoへ渡す境界では`Uint8Array`の`BufferSource` viewへ正規化する。UI fixtureは、target branchの現行アクセシブル名とnavigation構造を検証し、過去の表示構造を固定しない。
+
 ### `CI / Native`
 
 | 項目 | 仕様 |

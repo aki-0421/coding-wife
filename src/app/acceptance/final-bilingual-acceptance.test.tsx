@@ -392,9 +392,12 @@ describe("final bilingual App acceptance", () => {
       const navigation = screen.getByRole("navigation", {
         name: localized.workspaces,
       })
+      const createdWorkspaceButton = within(navigation).getByRole("button", {
+        current: "page",
+      })
       await user.click(
         within(navigation).getByRole("button", {
-          name: /coding-wife\/primary/u,
+          name: "develop, coding-wife, In Progress",
         }),
       )
       await waitFor(() =>
@@ -407,11 +410,7 @@ describe("final bilingual App acceptance", () => {
       expect(workspace.suppressedLateEvents).toContain(
         `${createdWorkspaceId}:${String(oldGeneration - 1)}`,
       )
-      await user.click(
-        within(navigation).getByRole("button", {
-          name: /coding-wife\/acceptance-flow/u,
-        }),
-      )
+      await user.click(createdWorkspaceButton)
       await waitFor(() =>
         expect(screen.getByPlaceholderText(localized.composer)).toHaveValue(
           "created workspace private draft",

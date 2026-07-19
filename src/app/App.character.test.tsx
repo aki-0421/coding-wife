@@ -171,7 +171,7 @@ describe("default App character integration", () => {
     })
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: "coding-wife/sol-desktop, main, Done",
+        name: "main, aki-0421/coding-wife, Done",
       }),
     )
 
