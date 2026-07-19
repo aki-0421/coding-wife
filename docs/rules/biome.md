@@ -25,6 +25,7 @@ JavaScript系sourceのlintと、Biomeが対応するrepository fileのformatを`
 
 - JavaScript / TypeScriptはsemicolonなし、double quote、indent幅2、複数行の末尾commaありを維持する。
 - Biomeが正式対応するJavaScript、TypeScript、JSX、TSX、JSON、CSSを対象とする。rootのapplication HTMLもHTML formatterを明示的に有効化して対象にする。
+- `src/index.css`はTailwind v4の`@custom-variant`、`@theme`、`@apply`を使うため、`css.parser.tailwindDirectives`を有効なまま維持する。
 - YAMLとMarkdownはBiome 2.5.4のformatter対象外である。第二のformatterは導入せず、`.github/workflows/*.yml`とMarkdownはformat gateの対象外とする。
 - dependency notice、Live2D runtime、minified vendor code、build output、private state、tooling assetなど、生成器または外部供給元がbyte列を所有するfileは変更しない。
 
