@@ -208,7 +208,9 @@ function explanationFor(
  * Deterministic, development-only support fixture. App composition owns the
  * explicit query gate; this runtime itself has no native, Git, or history port.
  */
-export class DemoCommitExplanationRuntime implements CommitExplanationAppRuntime {
+export class DemoCommitExplanationRuntime
+  implements CommitExplanationAppRuntime
+{
   readonly #states = new Map<string, CommitExplanationControllerStateV1>()
   readonly #stateListeners = new Set<() => void>()
   readonly #narrationListeners = new Set<(event: unknown) => void>()

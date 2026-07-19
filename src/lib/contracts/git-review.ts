@@ -24,22 +24,33 @@ export const commitExplanationEventChannels = {
 
 export type GitSupportState = "ready" | "blocked"
 export type GitObservationReason =
-  "active_view" | "work_unit_started" | "work_unit_terminal" | "manual_refresh"
+  | "active_view"
+  | "work_unit_started"
+  | "work_unit_terminal"
+  | "manual_refresh"
 export type WorkUnitTerminalState =
-  "completed" | "failed" | "interrupted" | "canceled"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "canceled"
 export type CommitProducer = "main_codex" | "external_uncorrelated"
 export type ChangeKind = "added" | "modified" | "deleted" | "type_changed"
 export type GateOutcome = "pass" | "needs_review" | "fail" | "unknown"
 export type GateKind = "scope" | "ownership" | "verification" | "risk"
 export type RiskLevel = "low" | "medium" | "high" | "critical"
 export type VerificationResult =
-  "passed" | "failed" | "skipped" | "inconclusive"
+  | "passed"
+  | "failed"
+  | "skipped"
+  | "inconclusive"
 export type DiffContentState = "text" | "binary" | "oversize" | "invalid_utf8"
 export type CommitEvidenceFilter = "all" | "this_work_unit" | "needs_attention"
 export type SkillPathAuthority = "app_bundle"
 export type SkillInjectionMode = "skill_input" | "developer_instructions"
 export type CommitExplanationRequestTrigger =
-  "auto_verified_commit" | "user_request" | "user_retry"
+  | "auto_verified_commit"
+  | "user_request"
+  | "user_retry"
 export type CommitExplanationUserRequestTrigger = Exclude<
   CommitExplanationRequestTrigger,
   "auto_verified_commit"
@@ -336,7 +347,8 @@ export interface ReadCommitDiffRequest extends CommitEvidenceDetailRequest {
   readonly fileEvidenceId: string
 }
 
-export interface PrepareCommitExplanationEvidenceRequest extends CommitEvidenceDetailRequest {
+export interface PrepareCommitExplanationEvidenceRequest
+  extends CommitEvidenceDetailRequest {
   readonly locale: "ja" | "en"
   readonly selectionVersion: number
 }
@@ -539,7 +551,12 @@ export interface CommitExplanationDeltaV1 {
 }
 
 export type CommitExplanationTerminalStatus =
-  "completed" | "canceled" | "unavailable" | "failed" | "timeout" | "stale"
+  | "completed"
+  | "canceled"
+  | "unavailable"
+  | "failed"
+  | "timeout"
+  | "stale"
 
 export interface CommitExplanationUsage {
   readonly inputTokens: number

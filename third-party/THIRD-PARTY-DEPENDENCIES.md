@@ -6,7 +6,7 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 
 ## Reproducibility
 
-- pnpm lock SHA-256: `9b1a5f60b855c508dbda15a2066bc1123484d6a067706d5ec3927946fb929ae4`
+- pnpm lock SHA-256: `020ed455df4ba67368286dc207c3d4739200db6e61c6162fc7e6a3c267b28167`
 - Cargo lock SHA-256: `6e9f0afbd74299b9f6f11f4f23661536ff25ef16f675f06b2f3eb95ec29d28de`
 - npm declared production-closure dependencies: `395`
 - Cargo runtime dependencies: `235`

@@ -22,10 +22,17 @@ import {
 } from "@/features/git-review/transport"
 
 export type GitReviewCollectionStatus =
-  "idle" | "loading" | "ready" | "empty" | "error"
+  | "idle"
+  | "loading"
+  | "ready"
+  | "empty"
+  | "error"
 export type GitReviewResourceStatus = "idle" | "loading" | "ready" | "error"
 export type CommitExplanationIntentStatus =
-  "idle" | "preparing" | "canceling" | "error"
+  | "idle"
+  | "preparing"
+  | "canceling"
+  | "error"
 
 export interface GitReviewErrorState {
   readonly code: string
@@ -122,7 +129,8 @@ export class GitReviewStore {
   private readonly listeners = new Set<ReviewListener>()
   private readonly workspaceGeneration: number
   private readonly explanationController:
-    CommitExplanationController | undefined
+    | CommitExplanationController
+    | undefined
   private readonly now: () => Date
   private activatedOnce = false
   private initialSelectionEstablished = false

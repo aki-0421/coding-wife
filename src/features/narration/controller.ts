@@ -25,12 +25,25 @@ type Listener = () => void
 type Wait = (milliseconds: number) => Promise<void>
 
 export type NarrationLoadStatus =
-  "idle" | "loading" | "ready" | "saving" | "error"
+  | "idle"
+  | "loading"
+  | "ready"
+  | "saving"
+  | "error"
 export type NarrationVoiceStatus = "idle" | "loading" | "ready" | "error"
 export type CommitNarrationPresentationStatus =
-  "preparing" | "streaming" | "ready" | "canceled" | "unavailable"
+  | "preparing"
+  | "streaming"
+  | "ready"
+  | "canceled"
+  | "unavailable"
 export type NarrationSpeechStatus =
-  "off" | "muted" | "idle" | "queued" | "playing" | "unavailable"
+  | "off"
+  | "muted"
+  | "idle"
+  | "queued"
+  | "playing"
+  | "unavailable"
 
 export interface NarrationScope {
   readonly workspaceId: string
@@ -86,7 +99,10 @@ interface PreparedCommitNarration {
 }
 
 type CaptionSpeechSequenceState =
-  "waiting" | "leading" | "scheduled" | "skipped"
+  | "waiting"
+  | "leading"
+  | "scheduled"
+  | "skipped"
 
 interface CaptionSpeechGate {
   readonly key: CommitNarrationSourceKey

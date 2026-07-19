@@ -18,9 +18,14 @@ export type SupportEffectiveState =
   | "release_blocked"
   | "settings_recovery"
 export type SupportOutcomeStatus =
-  "generated" | "failed" | "canceled" | "unavailable"
+  | "generated"
+  | "failed"
+  | "canceled"
+  | "unavailable"
 export type SupportTrigger =
-  "auto_verified_commit" | "user_request" | "user_retry"
+  | "auto_verified_commit"
+  | "user_request"
+  | "user_retry"
 
 export interface SupportSettingsV1 {
   readonly schemaVersion: typeof supportControlSchemaVersion

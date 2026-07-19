@@ -1,0 +1,105 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.4/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "src/**",
+      "scripts/**",
+      "src-tauri/**/*.json",
+      "vendor/live2d/*.json",
+      "*.js",
+      "*.ts",
+      "*.json",
+      "*.html",
+      "!!src-tauri/resources/characters/**/runtime",
+      "!!src-tauri/resources/legal/THIRD-PARTY-DEPENDENCIES.json",
+      "!!third-party/THIRD-PARTY-DEPENDENCIES.json"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80,
+    "lineEnding": "lf"
+  },
+  "linter": {
+    "enabled": true,
+    "includes": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "*.ts"],
+    "rules": {
+      "preset": "recommended",
+      "a11y": "off",
+      "complexity": {
+        "useOptionalChain": "off"
+      },
+      "correctness": {
+        "noVoidTypeReturn": "off",
+        "useExhaustiveDependencies": {
+          "level": "on",
+          "options": {
+            "reportUnnecessaryDependencies": false
+          }
+        }
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useComponentExportOnlyModules": {
+          "level": "on",
+          "options": {
+            "allowConstantExport": true
+          }
+        },
+        "useImportType": "off"
+      },
+      "suspicious": {
+        "noArrayIndexKey": "off",
+        "noAssignInExpressions": "off",
+        "noConfusingVoidType": "off",
+        "noExportsInTest": "off",
+        "noImplicitAnyLet": "off",
+        "useIterableCallbackReturn": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "semicolons": "asNeeded",
+      "quoteStyle": "double",
+      "trailingCommas": "all"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "html": {
+    "formatter": {
+      "enabled": true,
+      "selfCloseVoidElements": "always"
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "src/**/*.test.tsx",
+        "src/components/ui/**/*.tsx",
+        "src/features/character/library/provider.tsx",
+        "src/features/character/runtime-status.tsx",
+        "src/features/readiness/NativeReadinessDiagnostics.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "useComponentExportOnlyModules": "off"
+          }
+        }
+      }
+    }
+  ]
+}

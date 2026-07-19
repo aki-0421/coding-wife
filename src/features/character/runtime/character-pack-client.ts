@@ -48,7 +48,9 @@ const assetSuffixByRole: Readonly<Record<CharacterAssetRole, string>> = {
 }
 
 export type CharacterResourceMediaKind =
-  CharacterAssetRole | "manifest" | "shader"
+  | CharacterAssetRole
+  | "manifest"
+  | "shader"
 
 const expectedContentTypeByKind: Readonly<
   Record<CharacterResourceMediaKind, string>

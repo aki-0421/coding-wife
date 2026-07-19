@@ -9,7 +9,10 @@ export type RuntimeKind = "tauri" | "demo"
 export type FoundationState = "ready" | "demo_only"
 export type IntegrationId = "codex" | "git" | "live2d" | "history"
 export type IntegrationReadiness =
-  "not_configured" | "ready" | "read_only" | "recovery_required"
+  | "not_configured"
+  | "ready"
+  | "read_only"
+  | "recovery_required"
 
 export interface HealthCheckResponse {
   readonly schemaVersion: typeof ipcSchemaVersion

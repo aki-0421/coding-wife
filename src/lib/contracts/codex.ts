@@ -41,7 +41,10 @@ export type CodexChildState =
   | "restarting"
   | "stopping"
 export type CodexBinarySource =
-  "explicit" | "path" | "known_install" | "test_fixture"
+  | "explicit"
+  | "path"
+  | "known_install"
+  | "test_fixture"
 export type ReasoningPreset = "low" | "max"
 export type ApprovalDecision = "approve_once" | "reject" | "stop"
 export type PendingKind =
@@ -263,9 +266,15 @@ interface PendingRequestBase {
 export interface DecisionContext {
   readonly schemaVersion: 1
   readonly category:
-    "command_execution" | "file_change" | "permissions" | "user_decision"
+    | "command_execution"
+    | "file_change"
+    | "permissions"
+    | "user_decision"
   readonly targetKind:
-    "network_host" | "workspace" | "workspace_path" | "active_turn"
+    | "network_host"
+    | "workspace"
+    | "workspace_path"
+    | "active_turn"
   readonly targetAlias: string
   readonly effect:
     | "execute_command"
@@ -275,7 +284,10 @@ export interface DecisionContext {
   readonly scope: "command" | "turn"
   readonly risk: "low" | "medium" | "high"
   readonly reversibility:
-    "reversible" | "partially_reversible" | "not_reversible" | "unknown"
+    | "reversible"
+    | "partially_reversible"
+    | "not_reversible"
+    | "unknown"
   readonly recommendation: string | null
   readonly evidence: readonly string[]
   readonly uncertainty: "none" | "limited_context" | "unknown_effects"

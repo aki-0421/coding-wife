@@ -667,7 +667,9 @@ export function parseCharacterLibrarySnapshot(
     packs,
     semanticMapping,
     semanticMappingStatus: value.semanticMappingStatus as
-      "default" | "saved" | "invalid",
+      | "default"
+      | "saved"
+      | "invalid",
   }
 }
 

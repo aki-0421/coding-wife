@@ -86,7 +86,8 @@ export interface WorkspaceShellProps {
   readonly gitReviewTransport: GitReviewTransport
   readonly initialWorkspaces?: readonly WorkspaceRecord[] | undefined
   readonly commitExplanationController?:
-    ScopedCommitExplanationController | undefined
+    | ScopedCommitExplanationController
+    | undefined
   readonly narrationController: NarrationController
 }
 

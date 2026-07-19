@@ -21,7 +21,6 @@
   "include": [
     "vite.config.ts",
     "vitest.config.ts",
-    "eslint.config.js",
     "scripts/character-preview-csp.ts"
   ]
 }

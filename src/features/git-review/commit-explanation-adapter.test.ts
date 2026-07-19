@@ -19,7 +19,9 @@ const commitEvidenceId = `commit-${sha}`
 
 function dispatch(
   trigger:
-    "auto_verified_commit" | "user_request" | "user_retry" = "user_request",
+    | "auto_verified_commit"
+    | "user_request"
+    | "user_retry" = "user_request",
   selectionVersion = 2,
   locale: "ja" | "en" = "ja",
 ): CommitExplanationDispatchV1 {
@@ -488,7 +490,8 @@ describe("TauriCommitExplanationAdapter", () => {
 
   it("keeps a completed job state but drops presentation that arrives after intent revocation", async () => {
     let resolvePresentation:
-      ((value: CommitExplanationPresentationV1) => void) | undefined
+      | ((value: CommitExplanationPresentationV1) => void)
+      | undefined
     const pendingPresentation = new Promise<CommitExplanationPresentationV1>(
       (resolve) => {
         resolvePresentation = resolve

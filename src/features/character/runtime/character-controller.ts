@@ -995,8 +995,9 @@ export class CharacterController {
     try {
       previousModel?.release()
       this.#model = null
-      const { CubismCharacterModel, resetCubismWebGlResources } =
-        await import("./cubism-character-model")
+      const { CubismCharacterModel, resetCubismWebGlResources } = await import(
+        "./cubism-character-model"
+      )
       resetCubismWebGlResources(this.#gl)
       this.#contextLost = false
       restoredModel = await CubismCharacterModel.create(

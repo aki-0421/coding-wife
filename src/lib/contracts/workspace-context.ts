@@ -77,7 +77,12 @@ export interface WorkspaceTurnContextSnapshot {
 }
 
 export type WorkspaceContextValidationReason =
-  "required" | "text" | "items" | "technicalReference" | "policy" | "total"
+  | "required"
+  | "text"
+  | "items"
+  | "technicalReference"
+  | "policy"
+  | "total"
 
 export interface WorkspaceContextValidationIssue<Field extends string> {
   readonly field: Field

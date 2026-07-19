@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- Status labels and badges share the diagnostic locale table. */
 import {
   AlertCircleIcon,
   CheckCircle2Icon,

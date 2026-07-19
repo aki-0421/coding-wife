@@ -17,7 +17,10 @@ export type NarrationCommand =
   (typeof narrationCommands)[keyof typeof narrationCommands]
 export type NarrationLocale = "ja" | "en"
 export type NarrationPlaybackState =
-  "idle" | "preparing" | "playing" | "unavailable"
+  | "idle"
+  | "preparing"
+  | "playing"
+  | "unavailable"
 export type NarrationDisposition =
   | "queued"
   | "disabled"
@@ -35,7 +38,9 @@ export type NarrationCancelReason =
   | "app_close"
   | "reset"
 export type NarrationCommitJobTrigger =
-  "auto_verified_commit" | "user_request" | "user_retry"
+  | "auto_verified_commit"
+  | "user_request"
+  | "user_retry"
 
 export interface NarrationVoiceSelectionV1 {
   readonly ja: string | null
@@ -160,7 +165,9 @@ export interface CommitNarrationTerminalV1 extends CommitNarrationEventBaseV1 {
 }
 
 export type CommitNarrationConsumerEventV1 =
-  CommitNarrationStartedV1 | CommitNarrationChunkV1 | CommitNarrationTerminalV1
+  | CommitNarrationStartedV1
+  | CommitNarrationChunkV1
+  | CommitNarrationTerminalV1
 
 export interface CommitNarrationSourceKey {
   readonly workspaceId: string

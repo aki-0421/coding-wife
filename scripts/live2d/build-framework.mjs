@@ -121,24 +121,28 @@ export async function withBuildLock(
         }
         throw error
       }
-      if (!(
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "EEXIST"
-      )) {
+      if (
+        !(
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "EEXIST"
+        )
+      ) {
         throw error
       }
       if (staleLock(lockFile, staleAfterMs, now)) {
         try {
           unlinkSync(lockFile)
         } catch (unlinkError) {
-          if (!(
-            typeof unlinkError === "object" &&
-            unlinkError !== null &&
-            "code" in unlinkError &&
-            unlinkError.code === "ENOENT"
-          )) {
+          if (
+            !(
+              typeof unlinkError === "object" &&
+              unlinkError !== null &&
+              "code" in unlinkError &&
+              unlinkError.code === "ENOENT"
+            )
+          ) {
             throw unlinkError
           }
         }
@@ -159,12 +163,14 @@ export async function withBuildLock(
       try {
         unlinkSync(lockFile)
       } catch (error) {
-        if (!(
-          typeof error === "object" &&
-          error !== null &&
-          "code" in error &&
-          error.code === "ENOENT"
-        )) {
+        if (
+          !(
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "ENOENT"
+          )
+        ) {
           throw error
         }
       }

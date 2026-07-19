@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- Provider and external-store hooks share one scoped store. */
 import {
   createContext,
   useContext,

@@ -16,7 +16,9 @@ export type FinalAcceptanceViewportId =
   (typeof finalAcceptanceViewports)[number]["id"]
 
 export type AcceptanceSurface =
-  "browser_demo" | "webview_contract_fixture" | "native_tauri"
+  | "browser_demo"
+  | "webview_contract_fixture"
+  | "native_tauri"
 
 export type AcceptanceScenarioId =
   | "bilingual_happy_path"

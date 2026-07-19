@@ -48,13 +48,28 @@ export const workspaceHistoryCommands = {
 } as const
 
 export type WorkspaceHistoryMode =
-  "ready" | "ephemeral" | "read_only" | "recovery_required"
+  | "ready"
+  | "ephemeral"
+  | "read_only"
+  | "recovery_required"
 export type WorkspaceLifecycle =
-  "backlog" | "in_progress" | "in_review" | "done" | "canceled"
+  | "backlog"
+  | "in_progress"
+  | "in_review"
+  | "done"
+  | "canceled"
 export type WorkspaceAttention =
-  "needs_answer" | "approval_required" | "test_failed" | "high_risk"
+  | "needs_answer"
+  | "approval_required"
+  | "test_failed"
+  | "high_risk"
 export type WorkspaceHealth =
-  "ready" | "missing" | "changed" | "unreadable" | "read_only" | "stale_branch"
+  | "ready"
+  | "missing"
+  | "changed"
+  | "unreadable"
+  | "read_only"
+  | "stale_branch"
 export type WorkspaceReasoningEffort = "fast" | "max"
 export type WorkspaceContextSource = "files" | "git_diff" | "terminal_output"
 

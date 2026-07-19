@@ -66,9 +66,8 @@ describe("native character library transport", () => {
       Promise.resolve(Uint8Array.from([1, 2, 3, 4])),
     ) as unknown as FakeInvoke
     const gateway = new NativeCharacterLibraryGateway(invoke)
-    const preview = parseCharacterImportResponse(
-      fixture.importResponse,
-    ).preview!
+    const preview = parseCharacterImportResponse(fixture.importResponse)
+      .preview!
     const ref = gateway.createPreviewPackRef(preview)
     expect(ref.kind).toBe("native")
     if (ref.kind !== "native") throw new Error("native ref expected")
@@ -134,9 +133,8 @@ describe("native character library transport", () => {
   it("does not start a binary IPC read for an already aborted signal", async () => {
     const invoke = vi.fn()
     const gateway = new NativeCharacterLibraryGateway(invoke)
-    const preview = parseCharacterImportResponse(
-      fixture.importResponse,
-    ).preview!
+    const preview = parseCharacterImportResponse(fixture.importResponse)
+      .preview!
     const ref = gateway.createPreviewPackRef(preview)
     if (ref.kind !== "native") throw new Error("native ref expected")
     const controller = new AbortController()

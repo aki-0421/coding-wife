@@ -24,7 +24,11 @@ import type {
 
 export type WorkspaceTab = "chat" | "commit" | "context" | "settings"
 export type WorkspaceLifecycle =
-  "done" | "in_review" | "in_progress" | "backlog" | "canceled"
+  | "done"
+  | "in_review"
+  | "in_progress"
+  | "backlog"
+  | "canceled"
 
 export type ReasoningEffort = "fast" | "max"
 export type CompanionSemanticState =
@@ -45,7 +49,10 @@ export interface WorkspaceRecord {
   readonly branch: string
   readonly lifecycle: WorkspaceLifecycle
   readonly attention?:
-    "needs_answer" | "approval_required" | "test_failed" | "high_risk"
+    | "needs_answer"
+    | "approval_required"
+    | "test_failed"
+    | "high_risk"
   readonly health?:
     | "ready"
     | "missing"
@@ -94,7 +101,8 @@ export interface PersistedWorkspaceTimelineItem {
 }
 
 export type WorkspaceTimelineItem =
-  PersistedWorkspaceTimelineItem | CodexSemanticTimelineEvent
+  | PersistedWorkspaceTimelineItem
+  | CodexSemanticTimelineEvent
 
 export interface WorkspaceCodexState {
   readonly activeWorkspaceId: string | null
@@ -219,7 +227,9 @@ export interface WorkspaceViewAdapter {
     beforeSequence: number,
   ) => Promise<WorkspaceAdapterTimelinePage>
   readonly requestAddProject?: () =>
-    void | WorkspaceAdapterState | Promise<void | WorkspaceAdapterState>
+    | void
+    | WorkspaceAdapterState
+    | Promise<void | WorkspaceAdapterState>
   readonly requestAddWorkspace?: (
     workspace: WorkspaceCreateRequest,
   ) => void | WorkspaceAdapterState | Promise<void | WorkspaceAdapterState>
@@ -287,6 +297,9 @@ export type CharacterStageRenderer = (
 export type AppSettingsSection = "general" | "audio" | "support" | "diagnostics"
 
 export type ProjectSettingsSection =
-  "project_context" | "character_context" | "companion" | "history"
+  | "project_context"
+  | "character_context"
+  | "companion"
+  | "history"
 
 export type SettingsSection = AppSettingsSection | ProjectSettingsSection
