@@ -97,11 +97,7 @@ export function Live2dPreviewHarness() {
   return (
     <main className="preview-shell">
       <aside className="preview-sidebar" aria-label="Workspaces">
-        <div className="preview-traffic" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
+        <div className="preview-titlebar-spacer" aria-hidden="true" />
         <div className="preview-sidebar-heading">
           <span>Workspaces</span>
           <MoreHorizontalIcon aria-hidden="true" />

@@ -287,13 +287,13 @@ function SidebarPanel({
   filter,
   filteredWorkspaces,
   selectedWorkspaceId,
-  showTrafficLights,
+  reserveTitlebarSpace,
   onAddProject,
   onCreateWorkspace,
   onFilterChange,
   onOpenSettings,
   onSelectWorkspace,
-}: WorkspaceSidebarProps & { readonly showTrafficLights: boolean }) {
+}: WorkspaceSidebarProps & { readonly reserveTitlebarSpace: boolean }) {
   const [filterVisible, setFilterVisible] = useState(false)
   const groups = useMemo(
     () =>
@@ -308,17 +308,8 @@ function SidebarPanel({
 
   return (
     <div className="flex size-full min-h-0 flex-col bg-sidebar">
-      {showTrafficLights ? (
-        <div
-          className="flex h-[40.5px] shrink-0 items-center px-lg"
-          aria-hidden="true"
-        >
-          <span className="flex gap-sm">
-            <span className="size-3 rounded-circle bg-[#ff5f57]" />
-            <span className="size-3 rounded-circle bg-[#febc2e]" />
-            <span className="size-3 rounded-circle bg-[#28c840]" />
-          </span>
-        </div>
+      {reserveTitlebarSpace ? (
+        <div className="h-[40.5px] shrink-0" aria-hidden="true" />
       ) : null}
 
       <div className="flex h-[40.5px] shrink-0 items-center justify-between px-md">
@@ -452,15 +443,11 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   return (
     <aside className="workspace-sidebar border-r border-divider">
       <div className="hidden size-full min-[1280px]:block">
-        <SidebarPanel {...props} showTrafficLights />
+        <SidebarPanel {...props} reserveTitlebarSpace />
       </div>
 
       <div className="flex size-full flex-col items-center bg-sidebar min-[1280px]:hidden">
-        <div className="flex h-[40.5px] items-center gap-xs" aria-hidden="true">
-          <span className="size-xs rounded-circle bg-[#ff5f57]" />
-          <span className="size-xs rounded-circle bg-[#febc2e]" />
-          <span className="size-xs rounded-circle bg-[#28c840]" />
-        </div>
+        <div className="h-[40.5px] shrink-0" aria-hidden="true" />
         <Dialog
           onOpenChange={setCompactNavigationOpen}
           open={compactNavigationOpen}
@@ -518,7 +505,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 props.onOpenSettings()
               }}
               onSelectWorkspace={selectFromCompactNavigation}
-              showTrafficLights={false}
+              reserveTitlebarSpace={false}
             />
           </DialogContent>
 

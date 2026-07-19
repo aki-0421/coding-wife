@@ -1,7 +1,7 @@
 ---
 title: "S-001 セッションダッシュボード"
 description: "ローカルGit projectを安全に追加・診断し、workspaceの状態を一覧して作成・選択・復元する画面仕様。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "project picker、preflight、workspace sidebar、lifecycle、filter、selectionを実装するとき。"
   - "S-001とWORK、CODE、HIST、APP要件の対応を確認するとき。"
@@ -75,7 +75,7 @@ status: "Approved"
 
 | 領域 | 実装拘束値 | 表示内容 | 主な操作 |
 |---|---:|---|---|
-| custom titlebar | sidebar上40.5px | traffic lights | close、minimize、zoom |
+| native titlebar safe area | sidebar上40.5px | OS所有のnative traffic lights用余白。WebViewは赤・黄・緑の円を描画しない | close、minimize、zoomはmacOS native controlで行う |
 | workspace heading | sidebar内40.5px | `Workspaces`、ListFilter、FolderPlus、Plus | filter、project追加、workspace作成 |
 | workspace list | sidebar幅255.04px、item 242.25×49.5px | Done / In review / In progress / Backlog / Canceled | select、attention確認、overflow |
 | sidebar footer | 40.5px | Settings gear | [S-004](S-004_settings-diagnostics.md)へ移動 |

@@ -1,7 +1,7 @@
 ---
 title: "デスクトップ共通仕様"
 description: "Coding Wifeの単一macOSウィンドウ、共通レイアウト、状態、操作、信頼境界、復旧、アクセシビリティを定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "S-001〜S-004の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
   - "個別画面仕様とdesktop-shell要件の整合を確認するとき。"
@@ -79,8 +79,8 @@ Context tabはS-002内の`/workspace/:workspaceId/context` subviewであり、�
 | default geometry | 1470×836 CSS px |
 | minimum geometry | 960×640 CSS px。これ未満へのresizeをOSへ許可しない |
 | maximum / fullscreen | macOS標準zoomとfullscreenを許可し、終了時geometryを保存する |
-| titlebar | custom overlay。traffic lightsは12×12、左15px、上14.25px、間隔9px |
-| drag region | traffic lights、button、tab、input、scrollbarを除くbreadcrumb rowだけ |
+| titlebar | macOS native overlay。close / minimize / zoomのtraffic lightsはOSが描画し、WebViewは赤・黄・緑の代替要素を描画しない。sidebarは見出しがnative controlに重ならない40.5pxのsafe areaだけを予約する |
+| drag region | native titlebar safe area、button、tab、input、scrollbarを除くbreadcrumb rowだけ |
 | radius | window 7.5px、compact control 4.5px、composer/decision 9px |
 | close | active/pending turn 0件ならorderly shutdown。1件以上ならnative closeを保留し、`停止して終了 / Stop and Quit`と`終了しない / Don’t Quit`だけを表示する |
 
@@ -159,7 +159,7 @@ shadcnはinteractionとkeyboard behaviorだけに使う。shell、sidebar、even
 
 | 領域 | scroll owner | 固定要素 | 復元key |
 |---|---|---|---|
-| workspace sidebar | status-group list | traffic lights、heading actions、gear footer | workspace collection + filter |
+| workspace sidebar | status-group list | native titlebar safe area、heading actions、gear footer | workspace collection + filter |
 | S-002 | event timeline | header、composer、Companion mute | workspace ID + Chat tab |
 | S-003 | checkpoint/event listとdetailを別scroll | header、summary/filter | workspace ID + selected evidence |
 | S-004 | settings main panel | header、section navigation | selected settings section |
@@ -171,7 +171,7 @@ wheel/trackpad eventを親へ二重伝播させない。timelineがbottomから4
 
 ### 共通focus順
 
-1. traffic lights以外のheader navigation。
+1. header navigation。native traffic lightsはOS所有でありWebViewのfocus順に含めない。
 2. sidebar heading actions、workspace groups/items、gear。
 3. active viewのheading、filter、primary content。
 4. composerまたは画面固有action。
@@ -291,7 +291,7 @@ agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced moti
 | 項目 | macOS 14+ Apple Silicon | Windows | Linux |
 |---|---|---|---|
 | release / support | MVP対応・実機検証対象 | MVP非対応 | MVP非対応 |
-| window chrome | custom titlebar + traffic lights | artifactを提供しない | artifactを提供しない |
+| window chrome | macOS native traffic lights + overlay。WebViewに複製を描画しない | artifactを提供しない | artifactを提供しない |
 | modifier | Command | 非該当 | 非該当 |
 | file picker / secret store | native picker / Keychain相当 | 非該当 | 非該当 |
 | unsupported起動 | 非該当 | 対応済みと表示しない | 対応済みと表示しない |
