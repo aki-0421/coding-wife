@@ -400,10 +400,7 @@ export function useEditableSettingsContext(
         },
         (error: unknown) => {
           if (token !== loadGenerations.current.get(id)) return
-          const errorCode = safeErrorCode(
-            error,
-            "PROJECT-CONTEXT-LOAD-FAILED",
-          )
+          const errorCode = safeErrorCode(error, "PROJECT-CONTEXT-LOAD-FAILED")
           replaceWorkspace(id, (current) => ({
             project: {
               ...current.project,
