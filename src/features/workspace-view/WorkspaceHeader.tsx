@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import {
   BanIcon,
-  ChevronRightIcon,
   EllipsisIcon,
   FolderSearchIcon,
   GitBranchIcon,
@@ -11,8 +10,14 @@ import {
   WifiOffIcon,
 } from "lucide-react"
 
-import { BrandMark } from "@/components/brand-mark"
 import { Badge } from "@/components/ui/badge"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -34,6 +39,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
 import type {
   WorkspaceRecord,
   WorkspaceTab,
@@ -298,33 +304,34 @@ export function WorkspaceHeader({
   return (
     <header className="workspace-header border-b border-divider bg-surface">
       <div className="flex h-[40px] min-w-0 items-center gap-sm px-xl">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              aria-label={copy.appMark}
-              className="flex size-6 shrink-0 items-center justify-center"
-              role="img"
-            >
-              <BrandMark className="size-6" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{copy.appMark}</TooltipContent>
-        </Tooltip>
-        <span className="shrink-0 text-display font-medium text-muted-foreground">
-          {workspace.repository}
-        </span>
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="size-3 shrink-0 text-text-disabled"
-        />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="min-w-0 truncate text-display font-semibold text-text-strong">
-              {workspace.name}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{workspace.name}</TooltipContent>
-        </Tooltip>
+        <RepositoryAvatar workspace={workspace} />
+        <Breadcrumb aria-label={copy.repositoryBreadcrumb} className="min-w-0">
+          <BreadcrumbList className="min-w-0 flex-nowrap gap-sm text-display">
+            <BreadcrumbItem className="min-w-0 max-w-56 shrink">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="truncate font-medium text-muted-foreground">
+                    {workspace.githubRepository ?? workspace.repository}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {workspace.githubRepository ?? workspace.repository}
+                </TooltipContent>
+              </Tooltip>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator className="shrink-0 text-text-disabled" />
+            <BreadcrumbItem className="min-w-0">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <BreadcrumbPage className="truncate font-semibold text-text-strong">
+                    {workspace.name}
+                  </BreadcrumbPage>
+                </TooltipTrigger>
+                <TooltipContent>{workspace.name}</TooltipContent>
+              </Tooltip>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="hidden min-w-0 items-center gap-xxs font-mono text-label text-muted-foreground min-[1120px]:flex">
