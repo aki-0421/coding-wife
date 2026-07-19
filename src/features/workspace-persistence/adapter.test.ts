@@ -246,7 +246,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
     )
     const initial = await adapter.loadState()
     const selected = await adapter.requestAddProject()
-    const project = selected.projects.find(
+    const project = (selected.projects ?? []).find(
       (candidate) => candidate.id === "project-demo-selected",
     )
     if (project === undefined) throw new Error("demo fixture")
