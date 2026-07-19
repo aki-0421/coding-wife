@@ -2370,7 +2370,7 @@ describe("WorkspaceShell", () => {
     expect(sendTurn.mock.calls[0]?.[0]).not.toHaveProperty("paths")
   })
 
-  it("delegates terminal cancellation atomically and blocks unregister while running", async () => {
+  it("delegates terminal cancellation atomically without exposing project actions", async () => {
     const timestamp = "2026-07-18T01:00:00.000Z"
     const activeState: WorkspaceAdapterState = {
       ...nativeWorkspaceState(),
@@ -2425,8 +2425,8 @@ describe("WorkspaceShell", () => {
       return value as HTMLElement
     })
     expect(
-      within(actionMenu).getByRole("button", { name: /Unregister project/u }),
-    ).toBeDisabled()
+      within(actionMenu).queryByRole("button", { name: /Unregister project/u }),
+    ).not.toBeInTheDocument()
     await user.click(
       within(actionMenu).getByRole("button", { name: /Cancel workspace/u }),
     )
@@ -2608,14 +2608,16 @@ describe("WorkspaceShell", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("requires two confirmations before unregistering app metadata", async () => {
+  it("unregisters project metadata from app settings after confirmation", async () => {
     const selected = {
       ...nativeWorkspaceState().workspaces[0]!,
+      projectId: "project-native",
       updatedAt: "2026-07-18T01:00:00.000Z",
       health: "ready" as const,
     }
     const fallback = {
       id: "workspace-fallback",
+      projectId: "project-fallback",
       repository: "fallback-repository",
       name: "preserved-workspace",
       branch: "main",
@@ -2625,10 +2627,29 @@ describe("WorkspaceShell", () => {
     }
     const state: WorkspaceAdapterState = {
       ...nativeWorkspaceState(),
+      projects: [
+        {
+          id: "project-native",
+          name: "native-repository",
+          health: "ready",
+          workspaceCount: 1,
+          updatedAt: "2026-07-18T01:00:00.000Z",
+        },
+        {
+          id: "project-fallback",
+          name: "fallback-repository",
+          health: "ready",
+          workspaceCount: 1,
+          updatedAt: "2026-07-18T01:00:00.000Z",
+        },
+      ],
       workspaces: [selected, fallback],
     }
     const afterUnregister: WorkspaceAdapterState = {
       ...state,
+      projects:
+        state.projects?.filter((project) => project.id !== "project-native") ??
+        [],
       workspaces: [fallback],
       activeWorkspaceId: fallback.id,
       draft: { ...state.draft!, revision: 0 },
@@ -2640,57 +2661,35 @@ describe("WorkspaceShell", () => {
       unregisterProject: unregisterWorkspace,
     }
     const user = userEvent.setup()
-    const { container } = renderWorkspace(adapter)
+    renderWorkspace(adapter)
 
-    const actions = await waitFor(() => {
-      const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label="Workspace actions"]',
-      )
-      expect(button).not.toBeNull()
-      return button as HTMLButtonElement
-    })
-    await user.click(actions)
-    const unregisterAction = screen
-      .getByText(/Unregister project/u)
-      .closest("button")
-    expect(unregisterAction).not.toBeNull()
-    await user.click(unregisterAction as HTMLButtonElement)
+    await user.click(appSettingsButton())
+    await user.click(screen.getByRole("button", { name: "Projects" }))
+    await user.click(screen.getByRole("button", { name: "Unregister" }))
     expect(screen.getByText("Unregister this project?")).toBeVisible()
     expect(unregisterWorkspace).not.toHaveBeenCalled()
-    const firstDialog = screen
+    const dialog = screen
       .getByText("Unregister this project?")
       .closest('[role="dialog"]')
-    expect(firstDialog).not.toBeNull()
-    const firstGoBack = within(firstDialog as HTMLElement)
-      .getByText("Go back")
-      .closest("button")
-    expect(firstGoBack).not.toBeNull()
-    await waitFor(() => expect(firstGoBack).toHaveFocus())
-    const continueAction = within(firstDialog as HTMLElement)
-      .getByText("Continue")
-      .closest("button")
-    expect(continueAction).not.toBeNull()
-    await user.click(continueAction as HTMLButtonElement)
-    expect(screen.getByText("Confirm project unregister")).toBeVisible()
-    expect(unregisterWorkspace).not.toHaveBeenCalled()
-    const confirmationDialog = screen
-      .getByText("Confirm project unregister")
-      .closest('[role="dialog"]')
-    expect(confirmationDialog).not.toBeNull()
-    const confirmationGoBack = within(confirmationDialog as HTMLElement)
-      .getByText("Go back")
-      .closest("button")
-    expect(confirmationGoBack).not.toBeNull()
-    await waitFor(() => expect(confirmationGoBack).toHaveFocus())
-    const confirmAction = within(confirmationDialog as HTMLElement)
-      .getByText("Unregister project")
-      .closest("button")
-    expect(confirmAction).not.toBeNull()
-    await user.click(confirmAction as HTMLButtonElement)
+    expect(dialog).not.toBeNull()
+    await waitFor(() =>
+      expect(
+        within(dialog as HTMLElement).getByRole("button", {
+          name: "Keep project",
+        }),
+      ).toHaveFocus(),
+    )
+    await user.click(
+      within(dialog as HTMLElement).getByRole("button", {
+        name: "Unregister project",
+      }),
+    )
 
     await waitFor(() =>
-      expect(unregisterWorkspace).toHaveBeenCalledWith("workspace-native"),
+      expect(unregisterWorkspace).toHaveBeenCalledWith("project-native"),
     )
+    expect(await screen.findByText("fallback-repository")).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
     expect(await screen.findByText("preserved-workspace")).toBeVisible()
     expect(screen.queryByText("restored-workspace")).not.toBeInTheDocument()
   })

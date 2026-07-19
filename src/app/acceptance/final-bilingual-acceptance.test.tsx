@@ -36,7 +36,6 @@ const copy: Readonly<
       readonly addWorkspace: string
       readonly createWorkspace: string
       readonly workspaceName: string
-      readonly workspaceGoal: string
       readonly create: string
       readonly add: string
       readonly composer: string
@@ -69,7 +68,6 @@ const copy: Readonly<
     addWorkspace: "Add workspace",
     createWorkspace: "Create workspace",
     workspaceName: "Workspace name",
-    workspaceGoal: "Goal",
     create: "Create",
     add: "Add",
     composer: "Ask Codex to plan, build, explain, or fix anything…",
@@ -101,7 +99,6 @@ const copy: Readonly<
     addWorkspace: "ワークスペースを追加",
     createWorkspace: "ワークスペースを作成",
     workspaceName: "ワークスペース名",
-    workspaceGoal: "目標",
     create: "作成",
     add: "追加",
     composer: "Codexに計画、実装、説明、修正を依頼…",
@@ -219,17 +216,12 @@ describe("final bilingual App acceptance", () => {
       })
       await waitFor(() => expect(workspaceName).toHaveFocus())
       await user.type(workspaceName, "acceptance-flow")
-      await user.type(
-        within(createDialog).getByRole("textbox", {
-          name: localized.workspaceGoal,
-        }),
-        "Complete the final acceptance flow",
-      )
       await user.click(
         within(createDialog).getByRole("button", { name: localized.create }),
       )
 
       const composer = await screen.findByPlaceholderText(localized.composer)
+      await user.type(composer, "Complete the final acceptance flow")
       expect(composer).toHaveValue("Complete the final acceptance flow")
       const addAttachment = screen.getByRole("button", { name: localized.add })
       addAttachment.focus()
