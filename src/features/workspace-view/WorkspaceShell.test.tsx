@@ -820,12 +820,43 @@ describe("WorkspaceShell", () => {
     expect(loadState).toHaveBeenCalledTimes(2)
   })
 
-  it("labels the workspace mark with the localized product name", () => {
+  it("shows the GitHub owner avatar before the repository breadcrumb", () => {
     renderWorkspace()
 
+    const breadcrumb = screen.getByRole("navigation", {
+      name: "Repository location",
+    })
+    expect(within(breadcrumb).getByText("aki-0421/coding-wife")).toBeVisible()
     expect(
-      screen.getByRole("img", { name: "Coding Wife workspace" }),
-    ).toBeVisible()
+      within(breadcrumb).getByText("build-live2d-desktop-app"),
+    ).toHaveAttribute("aria-current", "page")
+
+    const avatar = document.querySelector('[data-repository-avatar="github"]')
+    expect(avatar).toHaveAttribute("data-github-owner", "aki-0421")
+    expect(avatar?.querySelector('[data-slot="avatar-image"]')).toHaveAttribute(
+      "src",
+      "https://avatars.githubusercontent.com/aki-0421?size=48",
+    )
+    expect(avatar?.querySelector('[data-slot="avatar-image"]')).toHaveAttribute(
+      "referrerpolicy",
+      "no-referrer",
+    )
+  })
+
+  it("uses a neutral repository avatar when GitHub metadata is absent", async () => {
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+    }
+
+    renderWorkspace(adapter)
+
+    expect(await screen.findByText("restored-workspace")).toBeVisible()
+    const avatar = document.querySelector('[data-repository-avatar="local"]')
+    expect(avatar).toBeVisible()
+    expect(
+      avatar?.querySelector('[data-slot="avatar-image"]'),
+    ).not.toBeInTheDocument()
   })
 
   it("supports keyboard tab cycling and the workspace filter shortcut", async () => {

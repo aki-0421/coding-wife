@@ -7,7 +7,7 @@ const en = {
   addWorkspace: "Add workspace",
   settings: "Settings",
   appSettings: "App settings",
-  appMark: "Coding Wife workspace",
+  repositoryBreadcrumb: "Repository location",
   workspaceActions: "Workspace actions",
   workspaceHealth: {
     ready: "Repository ready",
@@ -560,7 +560,7 @@ const ja: typeof en = {
   addWorkspace: "ワークスペースを追加",
   settings: "設定",
   appSettings: "アプリ設定",
-  appMark: "Coding Wifeワークスペース",
+  repositoryBreadcrumb: "リポジトリの現在地",
   workspaceActions: "ワークスペース操作",
   workspaceHealth: {
     ready: "リポジトリ準備完了",

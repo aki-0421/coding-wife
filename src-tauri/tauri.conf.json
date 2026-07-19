@@ -31,8 +31,8 @@
     ],
     "security": {
       "freezePrototype": true,
-      "csp": "default-src 'self'; base-uri 'self'; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' tauri://localhost data:; form-action 'none'; frame-ancestors 'self'; frame-src 'self'; img-src 'self' tauri://localhost data: blob:; object-src 'none'; script-src 'self' tauri://localhost; style-src 'self' tauri://localhost 'unsafe-inline'",
-      "devCsp": "default-src 'self' http://localhost:1420; base-uri 'self'; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420; font-src 'self' data: http://localhost:1420; form-action 'none'; frame-ancestors 'self'; frame-src 'self' http://localhost:1420; img-src 'self' data: blob: http://localhost:1420; object-src 'none'; script-src 'self' http://localhost:1420; style-src 'self' 'unsafe-inline' http://localhost:1420"
+      "csp": "default-src 'self'; base-uri 'self'; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' tauri://localhost data:; form-action 'none'; frame-ancestors 'self'; frame-src 'self'; img-src 'self' tauri://localhost data: blob: https://avatars.githubusercontent.com; object-src 'none'; script-src 'self' tauri://localhost; style-src 'self' tauri://localhost 'unsafe-inline'",
+      "devCsp": "default-src 'self' http://localhost:1420; base-uri 'self'; connect-src 'self' ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420; font-src 'self' data: http://localhost:1420; form-action 'none'; frame-ancestors 'self'; frame-src 'self' http://localhost:1420; img-src 'self' data: blob: http://localhost:1420 https://avatars.githubusercontent.com; object-src 'none'; script-src 'self' http://localhost:1420; style-src 'self' 'unsafe-inline' http://localhost:1420"
     }
   },
   "bundle": {
