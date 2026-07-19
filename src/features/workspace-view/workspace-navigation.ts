@@ -1,4 +1,15 @@
-import type { WorkspaceRecord } from "@/features/workspace-view/types"
+import type {
+  WorkspaceLifecycle,
+  WorkspaceRecord,
+} from "@/features/workspace-view/types"
+
+export const linearWorkspaceStatusLabels = {
+  done: "Done",
+  in_review: "In Review",
+  in_progress: "In Progress",
+  backlog: "Backlog",
+  canceled: "Canceled",
+} as const satisfies Readonly<Record<WorkspaceLifecycle, string>>
 
 export interface WorkspaceNavigationProjection {
   readonly selectedWorkspace: WorkspaceRecord | undefined

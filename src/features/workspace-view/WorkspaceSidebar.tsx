@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from "react"
 import {
-  CheckIcon,
   CircleAlertIcon,
   FolderPlusIcon,
   GitBranchIcon,
@@ -9,7 +8,6 @@ import {
   PlusIcon,
   SettingsIcon,
   TriangleAlertIcon,
-  XIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -38,6 +36,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
+import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
 import type {
   WorkspaceLifecycle,
   WorkspaceRecord,
@@ -65,46 +65,6 @@ interface WorkspaceSidebarProps {
   readonly onSelectWorkspace: (workspaceId: string) => void
 }
 
-function StatusMarker({
-  lifecycle,
-}: {
-  readonly lifecycle: WorkspaceLifecycle
-}) {
-  if (lifecycle === "done") {
-    return (
-      <span
-        aria-hidden="true"
-        className="flex size-[10.5px] shrink-0 items-center justify-center rounded-circle bg-warm-active text-[7px] text-app-bg"
-      >
-        <CheckIcon className="size-[7px]" />
-      </span>
-    )
-  }
-
-  if (lifecycle === "canceled") {
-    return (
-      <span
-        aria-hidden="true"
-        className="flex size-[10.5px] shrink-0 items-center justify-center rounded-circle bg-canceled text-[7px] text-app-bg"
-      >
-        <XIcon className="size-[7px]" />
-      </span>
-    )
-  }
-
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "size-[10.5px] shrink-0 rounded-circle border-[1.5px]",
-        lifecycle === "in_review" && "border-success",
-        lifecycle === "in_progress" && "border-running",
-        lifecycle === "backlog" && "border-dashed border-muted-foreground",
-      )}
-    />
-  )
-}
-
 function WorkspaceRow({
   copy,
   selected,
@@ -127,7 +87,7 @@ function WorkspaceRow({
       <TooltipTrigger asChild>
         <button
           aria-current={selected ? "page" : undefined}
-          aria-label={`${fullName}, ${workspace.branch}, ${copy.lifecycle[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
+          aria-label={`${fullName}, ${workspace.branch}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
           className={cn(
             "group/workspace flex h-[49.5px] w-full items-center gap-sm rounded-control px-sm py-xs text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
             selected && "bg-selected-row",
@@ -369,8 +329,8 @@ function SidebarPanel({
           {groups.map(({ lifecycle, workspaces }) => (
             <section className="flex flex-col pt-sm" key={lifecycle}>
               <h2 className="m-0 flex h-6 items-center gap-xs px-xs text-title font-medium text-muted-foreground">
-                <StatusMarker lifecycle={lifecycle} />
-                <span>{copy.lifecycle[lifecycle]}</span>
+                <WorkspaceLifecycleIcon lifecycle={lifecycle} />
+                <span>{linearWorkspaceStatusLabels[lifecycle]}</span>
                 <span className="sr-only">({workspaces.length})</span>
               </h2>
               {workspaces.map((workspace) => (

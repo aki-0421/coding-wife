@@ -2,6 +2,7 @@
 title: "S-001 セッションダッシュボード"
 description: "ローカルGit projectを安全に追加・診断し、workspaceの状態を一覧して作成・選択・復元する画面仕様。"
 updated: 2026-07-19
+last_verified: 2026-07-19
 read_when:
   - "project picker、preflight、workspace sidebar、lifecycle、filter、selectionを実装するとき。"
   - "S-001とWORK、CODE、HIST、APP要件の対応を確認するとき。"
@@ -77,7 +78,7 @@ status: "Approved"
 |---|---:|---|---|
 | native titlebar safe area | sidebar上40.5px | OS所有のnative traffic lights用余白。WebViewは赤・黄・緑の円を描画しない | close、minimize、zoomはmacOS native controlで行う |
 | workspace heading | sidebar内40.5px | `Workspaces`、ListFilter、FolderPlus、Plus | filter、project追加、workspace作成 |
-| workspace list | sidebar幅255.04px、item 242.25×49.5px | Done / In review / In progress / Backlog / Canceled | select、attention確認、overflow |
+| workspace list | sidebar幅255.04px、item 242.25×49.5px | Done / In Review / In Progress / Backlog / Canceled | select、attention確認、overflow |
 | sidebar footer | 40.5px | Settings gear | [S-004](S-004_settings-diagnostics.md)へ移動 |
 | main header | sidebar右、81px | `Sessions` breadcrumb、preflight summary | current project切替、診断詳細 |
 | project surface | main content | project概要、preflight、workspace create/empty/recovery | add、recheck、create、open |
@@ -88,11 +89,13 @@ S-001のmain contentはChat/Companionを描画せず、main幅中央へ最大760
 
 | lifecycle | shape | color token | label |
 |---|---|---|---|
-| Done | fill + check | successの代わりにwarm done fill | `Done / 完了` |
-| In review | outline circle | `success` | `In review / レビュー可能` |
-| In progress | outline circle | `running` | `In progress / 実行中` |
-| Backlog | dashed circle | `text-muted-accessible` | `Backlog / 未着手` |
-| Canceled | fill + x | `canceled` | `Canceled / 中止` |
+| Done | filled circle + check | successの代わりにwarm done fill | `Done` |
+| In Review | half-filled progress circle | `success` | `In Review` |
+| In Progress | quarter-filled progress circle | `running` | `In Progress` |
+| Backlog | dotted circle | `text-muted-accessible` | `Backlog` |
+| Canceled | filled circle + x | `canceled` | `Canceled` |
+
+sidebarのlifecycle statusは[LinearのIssue status](https://linear.app/docs/configuring-workflows)と同じ英語表記と進捗円形状を正本とし、app localeが日本語でも翻訳しない。この例外はgroup headingとworkspace itemのaccessible lifecycle labelだけに限定し、周辺control、attention、repository healthはja/en localeへ追従する。status colorは本appのsemantic tokenを維持する。
 
 attentionはlifecycleを変更せず、`Needs answer / Approval required / Test failed / High risk`のicon、text、countをitem右端へ付ける。active itemだけ`selected-row`、strong text、branch violet iconを使う。repo/branchは一行ellipsis + tooltipとする。
 

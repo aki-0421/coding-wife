@@ -1,7 +1,8 @@
 ---
 title: "WORK ワークスペース・セッション要件定義"
 description: "ローカルGitプロジェクトの追加、preflight、状態別一覧、選択、復元を定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
+last_verified: 2026-07-19
 read_when:
   - "workspace sidebar、project picker、session lifecycleを実装するとき。"
   - "active workspace切替とdraft・audio分離を検証するとき。"
@@ -15,7 +16,7 @@ read_when:
 | 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 2026-07-18 |
+| 最終レビュー日 | 2026-07-19 |
 
 ## 背景
 
@@ -37,7 +38,7 @@ read_when:
 |---|---|
 | Project registration | local Git repository選択、canonicalization、診断 |
 | Workspace list | filter、state grouping、repo/branch、active selection、empty state |
-| Lifecycle | Backlog、In progress、In review、Done、Canceledと別軸attention |
+| Lifecycle | Backlog、In Progress、In Review、Done、Canceledと別軸attention |
 | Session continuity | active workspace、draft、scroll、summaryのlocal persistence |
 | Preflight | Git、Codex、auth、Sol、characterの送信前診断 |
 
@@ -78,7 +79,7 @@ read_when:
 |---|---|---|---|---|
 | `WORK-F-050` | 利用者は登録projectにworkspaceを作成できる | nameとgoalを確定するとBacklog groupへworkspaceが作成され、同じprojectに複数workspace metadataを持てる | Approved | 非該当 |
 | `WORK-F-051` | 利用者はworkspace一覧をfilterできる | repo、branch、workspace nameのcase-insensitive部分一致で200件を絞り込み、0件時はfilter解除操作を表示する | Approved | 非該当 |
-| `WORK-F-052` | 利用者はlifecycle groupからworkspaceを選択できる | Done/In review/In progress/Backlog/Canceledごとに表示し、item選択でheader、Chat、Commit、Context、Companionが同一workspaceへ100ms以内に切り替わる | Approved | 非該当 |
+| `WORK-F-052` | 利用者はlifecycle groupからworkspaceを選択できる | app localeにかかわらずLinearと同じ英語のDone/In Review/In Progress/Backlog/Canceledでgroupを表示し、各statusをcheck、half-filled progress、quarter-filled progress、dotted、xの円形iconで識別できる。item選択でheader、Chat、Commit、Context、Companionが同一workspaceへ100ms以内に切り替わる | Approved | 非該当 |
 | `WORK-F-053` | アプリはlifecycleとattentionを別に表示する | lifecycleを変えずにNeeds answer、Approval required、Test failed、High riskをbadgeとaccessible labelで併記できる | Approved | 非該当 |
 | `WORK-F-054` | アプリは現在のrepoとbranchを表示する | selected itemとheaderに実Gitのrepo名とbranchまたはdetached HEAD短縮SHAを表示し、長い値はellipsisと全文tooltipを持つ | Approved | 非該当 |
 | `WORK-F-055` | 利用者は空一覧から最初のprojectを追加できる | workspaceが0件の時、説明、FolderPlus、keyboard shortcutを表示し、decorative card gridを表示しない | Approved | 非該当 |
@@ -179,7 +180,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | 性能 | 200 workspaceのfilter・group更新p95 100ms、selection更新p95 100ms |
 | 信頼性・復旧 | DBまたはrepo消失時も他workspaceを開け、破損itemを明示する |
 | アクセシビリティ | statusを色だけで表さず、label、icon、stroke/fillを併用する |
-| 多言語・地域 | app labelはja/en、repo/branch/user contextは翻訳しない |
+| 多言語・地域 | app labelはja/en。sidebarのlifecycle statusだけはLinearと同じ英語表記へ固定し、repo/branch/user contextも翻訳しない |
 
 ## 依存関係・前提
 
@@ -205,6 +206,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | [DESIGN.md](../../DESIGN.md) | sidebar、status、responsive仕様 |
 | [プロダクト論点](../research/01-product-thesis.md) | 対象利用者と負担 |
 | [体験設計](../research/02-experience-design.md) | workspaceとcontext分離 |
+| [Linear Issue status](https://linear.app/docs/configuring-workflows) | lifecycle statusの英語表記と円形icon表現 |
 
 ## レビュー・合意
 
@@ -212,7 +214,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 |---|---|
 | レビュー結果 | Ready |
 | 仕様責任者 | プロダクトオーナー |
-| 合意日 | 2026-07-18 |
+| 合意日 | 2026-07-19 |
 | 残る非ブロック論点 | 並列実行、worktree自動作成はMVP非対象 |
 
 ## 着手可チェック

@@ -393,6 +393,58 @@ function richCodexState(): WorkspaceCodexState {
 }
 
 describe("WorkspaceShell", () => {
+  it("keeps Linear workspace statuses in English for the Japanese locale", () => {
+    const { container } = render(
+      <App localeStore={japaneseLocaleStore} transport={new DemoTransport()} />,
+    )
+    const navigation = screen.getByRole("navigation", {
+      name: "ワークスペース",
+    })
+
+    for (const [label, count] of [
+      ["Done", 1],
+      ["In Review", 1],
+      ["In Progress", 1],
+      ["Backlog", 0],
+      ["Canceled", 0],
+    ] as const) {
+      expect(
+        within(navigation).getByRole("heading", {
+          name: `${label}(${count})`,
+        }),
+      ).toBeVisible()
+    }
+
+    expect(
+      within(navigation).getByRole("button", {
+        name: "coding-wife/sol-desktop, main, Done",
+      }),
+    ).toBeVisible()
+    for (const localizedLabel of [
+      "完了",
+      "レビュー可能",
+      "実行中",
+      "未着手",
+      "中止",
+    ]) {
+      expect(within(navigation).queryByText(localizedLabel)).toBeNull()
+    }
+    expect(
+      container.querySelectorAll("[data-linear-status-icon]"),
+    ).toHaveLength(5)
+    for (const lifecycle of [
+      "done",
+      "in_review",
+      "in_progress",
+      "backlog",
+      "canceled",
+    ]) {
+      expect(
+        container.querySelector(`[data-linear-status-icon="${lifecycle}"]`),
+      ).not.toBeNull()
+    }
+  })
+
   it("keeps duplicate native close requests behind one safe cancellation", async () => {
     const lifecycle = appLifecycleHarness()
     const prepareAppQuit = vi.fn()
