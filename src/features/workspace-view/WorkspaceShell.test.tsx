@@ -502,6 +502,38 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
   })
 
+  it("uses a stable typography hierarchy in the workspace sidebar", () => {
+    renderWorkspace()
+    const navigation = screen.getByRole("navigation", { name: "Workspaces" })
+    const doneToggle = within(navigation).getByRole("button", {
+      name: "Done(1)",
+    })
+    const doneWorkspace = within(navigation).getByRole("button", {
+      name: "coding-wife/sol-desktop, main, Done",
+    })
+    const selectedWorkspace = within(navigation).getByRole("button", {
+      name: /coding-wife\/build-live2d-desktop-app/,
+    })
+
+    expect(screen.getByRole("heading", { name: "Workspaces" })).toHaveClass(
+      "text-sidebar-heading",
+    )
+    expect(doneToggle).toHaveClass("text-sidebar-status")
+    expect(
+      within(doneWorkspace).getByText("coding-wife/sol-desktop"),
+    ).toHaveClass("text-sidebar-item", "text-foreground")
+    expect(within(doneWorkspace).getByText("main")).toHaveClass(
+      "font-mono",
+      "text-sidebar-meta",
+      "text-muted-foreground",
+    )
+    expect(
+      within(selectedWorkspace).getByText(
+        "coding-wife/build-live2d-desktop-app",
+      ),
+    ).toHaveClass("text-sidebar-item", "text-text-strong")
+  })
+
   it("keeps duplicate native close requests behind one safe cancellation", async () => {
     const lifecycle = appLifecycleHarness()
     const prepareAppQuit = vi.fn()

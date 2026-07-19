@@ -99,6 +99,10 @@ sidebarのlifecycle statusは[LinearのIssue status](https://linear.app/docs/con
 
 各lifecycle groupはheading行全体をaccordion toggleとし、画面mount時はすべて展開する。heading行の任意位置をclickすると対象groupだけを開閉し、他group、active workspace、filterを変更しない。toggleは`aria-expanded`と`aria-controls`を持ち、折り畳みchevronはpointer hover時だけ表示する。keyboard操作ではaffordanceを失わないようfocus-visible時にも表示し、`Enter`または`Space`で同じ開閉を行う。展開状態は永続化せず、画面を再mountすると全groupを展開する。
 
+sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、workspace nameを13px / 500 / 19.5px、branchを11px / 400 / 16.5px、filter 0件helperを12px / 400 / 18pxとする。workspace selectionでfont weightと文字幅を変えず、selected backgroundとstrong textだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。
+
+`text-sidebar-*`のsize roleと`text-*` colorを同じ`cn` / Tailwind mergeへ渡すとsize roleが競合classとして除去されるため、両classをmergeしないかmerge設定を明示する。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "uses a stable typography hierarchy"`でrole classの保持とselection時の安定性を検証する。
+
 attentionはlifecycleを変更せず、`Needs answer / Approval required / Test failed / High risk`のicon、text、countをitem右端へ付ける。active itemだけ`selected-row`、strong text、branch violet iconを使う。repo/branchは一行ellipsis + tooltipとする。
 
 ### preflight

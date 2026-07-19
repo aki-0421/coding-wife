@@ -119,19 +119,13 @@ function WorkspaceRow({
           />
           <span className="flex min-w-0 flex-1 flex-col">
             <span
-              className={cn(
-                "truncate text-body text-foreground",
-                selected && "font-medium text-text-strong",
-              )}
+              className={`truncate text-sidebar-item ${selected ? "text-text-strong" : "text-foreground"}`}
             >
               {fullName}
             </span>
             <span className="flex min-w-0 items-center gap-xs">
               <span
-                className={cn(
-                  "truncate font-mono text-label text-muted-foreground transition-colors group-hover/workspace:text-selected-row-secondary group-focus-visible/workspace:text-selected-row-secondary",
-                  selected && "text-selected-row-secondary",
-                )}
+                className={`truncate font-mono text-sidebar-meta transition-colors group-hover/workspace:text-selected-row-secondary group-focus-visible/workspace:text-selected-row-secondary ${selected ? "text-selected-row-secondary" : "text-muted-foreground"}`}
               >
                 {workspace.branch}
               </span>
@@ -291,7 +285,7 @@ function SidebarPanel({
       ) : null}
 
       <div className="flex h-[40.5px] shrink-0 items-center justify-between px-md">
-        <h1 className="m-0 text-headline text-muted-foreground">
+        <h1 className="m-0 text-sidebar-heading text-muted-foreground">
           {copy.workspaces}
         </h1>
         <div className="flex items-center gap-xxs">
@@ -354,7 +348,7 @@ function SidebarPanel({
                   <button
                     aria-controls={contentId}
                     aria-expanded={expanded}
-                    className="group/status flex h-6 w-full cursor-pointer items-center gap-xs rounded-control px-xs text-start text-title font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    className="group/status flex h-6 w-full cursor-pointer items-center gap-xs rounded-control px-xs text-start text-sidebar-status text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                     data-workspace-status-toggle={lifecycle}
                     onClick={() => onToggleLifecycle(lifecycle)}
                     type="button"
@@ -389,7 +383,7 @@ function SidebarPanel({
 
           {filteredWorkspaces.length === 0 ? (
             <div className="flex flex-col items-start gap-xs px-sm py-lg">
-              <p className="m-0 text-caption text-muted-foreground">
+              <p className="m-0 text-sidebar-helper text-muted-foreground">
                 {copy.noMatches}
               </p>
               <Button
