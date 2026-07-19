@@ -168,6 +168,7 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
     readonly expectedMime: string
   }[] = []
   public pickerCount = 0
+  public pickerErrorCode: string | null = null
   public conflictNextSemanticSave = false
   private snapshot: CharacterLibrarySnapshot
 
@@ -216,6 +217,17 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
   ): Promise<CharacterImportResponse> {
     void request
     this.pickerCount += 1
+    if (this.pickerErrorCode !== null) {
+      return Promise.reject(
+        new CharacterLibraryOperationError({
+          code: this.pickerErrorCode,
+          operation: "character_import_pick",
+          recoverable: true,
+          userMessageKey: "character.error.generic",
+          detailRef: "character-library-v1",
+        }),
+      )
+    }
     return Promise.resolve(importedPreview)
   }
 
@@ -248,9 +260,9 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
       },
       packs: [
         ...this.snapshot.packs
-          .filter((pack) => pack.packId !== published.packId)
+          .filter((pack) => pack.kind === "builtin")
           .map((pack) => ({ ...pack, selectedProjectCount: 0 })),
-        { ...published, selectedProjectCount: 1, deletable: false },
+        { ...published, selectedProjectCount: 1, deletable: true },
       ],
     }
     return Promise.resolve(this.snapshot)
@@ -278,7 +290,7 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
       packs: this.snapshot.packs.map((pack) => ({
         ...pack,
         selectedProjectCount: pack.packId === request.packId ? 1 : 0,
-        deletable: pack.kind === "custom" && pack.packId !== request.packId,
+        deletable: pack.kind === "custom",
       })),
     }
     return Promise.resolve(this.snapshot)
@@ -290,9 +302,15 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
     this.deletionRequests.push(request.packId)
     this.snapshot = {
       ...this.snapshot,
-      packs: this.snapshot.packs.filter(
-        (pack) => pack.packId !== request.packId,
-      ),
+      selectedPackId: builtinPack.packId,
+      semanticMapping: {
+        ...this.snapshot.semanticMapping,
+        packId: builtinPack.packId,
+        manifestHash: builtinPack.manifestHash,
+      },
+      packs: this.snapshot.packs
+        .filter((pack) => pack.packId !== request.packId)
+        .map((pack) => ({ ...pack, selectedProjectCount: 1 })),
     }
     return Promise.resolve(this.snapshot)
   }
@@ -556,11 +574,16 @@ describe("CharacterModelLibrarySettings", () => {
     },
   )
 
-  it("selects by keyboard and deletes an unused custom model explicitly", async () => {
+  it("keeps bundled Hiyori protected and deletes the active custom slot with fallback", async () => {
     const user = userEvent.setup()
     const gateway = new ModelLibraryGateway()
     renderLibrary(gateway)
 
+    expect(
+      await screen.findByRole("button", { name: "Replace custom model" }),
+    ).toBeVisible()
+    expect(screen.getByText("No license information required")).toBeVisible()
+    expect(screen.getByText("Filled")).toBeVisible()
     const customRadio = await screen.findByRole("radio", {
       name: /Local model/,
     })
@@ -569,14 +592,12 @@ describe("CharacterModelLibrarySettings", () => {
     await waitFor(() =>
       expect(gateway.selectionRequests).toEqual([customPack.packId]),
     )
-
-    await user.click(screen.getByRole("radio", { name: /Hiyori/ }))
-    await waitFor(() =>
-      expect(gateway.selectionRequests).toEqual([
-        customPack.packId,
-        builtinPack.packId,
-      ]),
-    )
+    expect(
+      screen.getByLabelText(/bundled model.*cannot be deleted/i),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Delete: Hiyori" }),
+    ).not.toBeInTheDocument()
 
     await user.click(
       screen.getByRole("button", { name: "Delete: Local model" }),
@@ -590,6 +611,61 @@ describe("CharacterModelLibrarySettings", () => {
       expect(gateway.deletionRequests).toEqual([customPack.packId]),
     )
     expect(screen.queryByText("Local model")).not.toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: /Hiyori/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    expect(
+      screen.getByRole("button", { name: "Import custom model" }),
+    ).toBeVisible()
+    expect(screen.getByText("Available")).toBeVisible()
+  })
+
+  it("explains import failures in Japanese while retaining the diagnostic code", async () => {
+    const user = userEvent.setup()
+    const gateway = new ModelLibraryGateway([builtinPack])
+    gateway.pickerErrorCode = "CHARACTER-MOC-MISSING"
+    renderLibrary(gateway, "ja")
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "カスタムモデルを取り込む",
+      }),
+    )
+
+    expect(
+      await screen.findByText(/モデルが参照するファイルの一部が見つからない/),
+    ).toBeVisible()
+    expect(screen.getByText("CHARACTER-MOC-MISSING")).toBeVisible()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("keeps the current custom slot until a replacement preview is confirmed", async () => {
+    const user = userEvent.setup()
+    const gateway = new ModelLibraryGateway()
+    renderLibrary(gateway)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Replace custom model" }),
+    )
+    expect(
+      await screen.findByText(/current custom model stays available/),
+    ).toBeVisible()
+    expect(gateway.confirmationRequests).toHaveLength(0)
+
+    await user.click(
+      screen.getByRole("button", { name: "Complete isolated preview" }),
+    )
+    await screen.findAllByText("Preview verified")
+    await user.click(
+      await screen.findByRole("button", { name: "Replace and use model" }),
+    )
+
+    await waitFor(() => expect(gateway.confirmationRequests).toHaveLength(1))
+    expect(screen.getAllByRole("radio")).toHaveLength(2)
+    expect(
+      screen.getByRole("button", { name: "Replace custom model" }),
+    ).toBeVisible()
   })
 
   it("publishes only after isolated evidence and an explicit display name", async () => {
@@ -598,7 +674,7 @@ describe("CharacterModelLibrarySettings", () => {
     renderLibrary(gateway)
 
     await user.click(
-      await screen.findByRole("button", { name: "Import model" }),
+      await screen.findByRole("button", { name: "Import custom model" }),
     )
     expect(gateway.pickerCount).toBe(1)
     expect(
@@ -634,7 +710,7 @@ describe("CharacterModelLibrarySettings", () => {
     renderLibrary(gateway)
 
     await user.click(
-      await screen.findByRole("button", { name: "Import model" }),
+      await screen.findByRole("button", { name: "Import custom model" }),
     )
     await screen.findByRole("heading", { name: "Review imported model" })
     await user.keyboard("{Escape}")
@@ -650,7 +726,7 @@ describe("CharacterModelLibrarySettings", () => {
     const gateway = new ModelLibraryGateway([builtinPack])
     const view = render(libraryTree(gateway, "workspace-fixture"))
     await user.click(
-      await screen.findByRole("button", { name: "Import model" }),
+      await screen.findByRole("button", { name: "Import custom model" }),
     )
     expect(
       await screen.findByRole("heading", { name: "Review imported model" }),
@@ -659,7 +735,9 @@ describe("CharacterModelLibrarySettings", () => {
     view.rerender(libraryTree(gateway, null))
     await waitFor(() => expect(gateway.cancellationRequests).toHaveLength(1))
     view.rerender(libraryTree(gateway, "workspace-fixture"))
-    const trigger = await screen.findByRole("button", { name: "Import model" })
+    const trigger = await screen.findByRole("button", {
+      name: "Import custom model",
+    })
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
@@ -668,7 +746,7 @@ describe("CharacterModelLibrarySettings", () => {
     const gateway = new ModelLibraryGateway([builtinPack])
     const view = render(libraryTree(gateway, "workspace-fixture"))
     await user.click(
-      await screen.findByRole("button", { name: "Import model" }),
+      await screen.findByRole("button", { name: "Import custom model" }),
     )
 
     view.rerender(libraryTree(gateway, "workspace-next"))
@@ -687,7 +765,7 @@ describe("CharacterModelLibrarySettings", () => {
       await screen.findByRole("heading", { name: "キャラクターモデル" }),
     ).toBeVisible()
     expect(
-      screen.getByRole("button", { name: "モデルを取り込む" }),
+      screen.getByRole("button", { name: "カスタムモデルを取り込む" }),
     ).toBeDisabled()
     expect(
       screen.getByText(/モデルの取り込みはデスクトップアプリ/),
