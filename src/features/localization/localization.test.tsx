@@ -57,11 +57,13 @@ describe("localization foundation", () => {
 
     render(<App localeStore={localeStore} transport={new DemoTransport()} />)
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(
+      screen.getAllByRole("button", { name: "App settings" })[0]!,
+    )
     await user.click(screen.getByRole("radio", { name: "日本語" }))
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "設定・診断" }),
+      screen.getByRole("heading", { level: 1, name: "アプリ設定" }),
     ).toBeInTheDocument()
     expect(document.documentElement).toHaveAttribute("lang", "ja")
   })
@@ -72,7 +74,9 @@ describe("localization foundation", () => {
 
     render(<App localeStore={localeStore} transport={new DemoTransport()} />)
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(
+      screen.getAllByRole("button", { name: "App settings" })[0]!,
+    )
     const japaneseButton = screen.getByRole("radio", { name: "日本語" })
     const englishButton = screen.getByRole("radio", { name: "English" })
 
@@ -82,7 +86,7 @@ describe("localization foundation", () => {
     expect(
       screen.getByRole("heading", {
         level: 1,
-        name: "Settings & diagnostics",
+        name: "App settings",
       }),
     ).toBeVisible()
     expect(document.documentElement).toHaveAttribute("lang", "en")
@@ -97,7 +101,7 @@ describe("localization foundation", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }))
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "設定・診断" }),
+      screen.getByRole("heading", { level: 1, name: "アプリ設定" }),
     ).toBeVisible()
     expect(document.documentElement).toHaveAttribute("lang", "ja")
     expect(japaneseButton).toHaveAttribute("aria-checked", "true")

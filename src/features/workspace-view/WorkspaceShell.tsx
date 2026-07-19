@@ -53,13 +53,16 @@ import {
   getWorkspaceCopy,
   type WorkspaceCopy,
 } from "@/features/workspace-view/copy"
-import { SettingsView } from "@/features/workspace-view/SettingsView"
+import {
+  AppSettingsView,
+  ProjectSettingsView,
+} from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
 import type {
   CharacterStageRenderer,
-  SettingsSection,
+  AppSettingsSection,
   WorkspaceRecord,
   WorkspaceTab,
   WorkspaceViewAdapter,
@@ -146,6 +149,9 @@ export function WorkspaceShell({
     characterRuntimeSnapshot,
     characterHidden,
   )
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false)
+  const [appSettingsSection, setAppSettingsSection] =
+    useState<AppSettingsSection>("general")
   const [systemReducedMotion, setSystemReducedMotion] = useState(
     getSystemReducedMotion,
   )
@@ -543,6 +549,7 @@ export function WorkspaceShell({
     const handleKeyboard = (event: KeyboardEvent) => {
       if (event.ctrlKey && event.key === "Tab") {
         event.preventDefault()
+        if (appSettingsOpen) return
         const currentIndex = tabOrder.indexOf(view.activeTab)
         const direction = event.shiftKey ? -1 : 1
         const nextIndex =
@@ -630,15 +637,32 @@ export function WorkspaceShell({
 
     window.addEventListener("keydown", handleKeyboard)
     return () => window.removeEventListener("keydown", handleKeyboard)
-  }, [copy.filterWorkspaces, view])
+  }, [appSettingsOpen, copy.filterWorkspaces, view])
 
-  const openSettings = (section: SettingsSection = "general") => {
-    view.setSettingsSection(section)
-    view.setActiveTab("settings")
+  const openAppSettings = (section: AppSettingsSection = "general") => {
+    setAppSettingsSection(section)
+    setAppSettingsOpen(true)
+  }
+
+  const closeAppSettings = () => {
+    setAppSettingsOpen(false)
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+        ?.focus()
+    })
+  }
+
+  const resetUiState = () => {
+    view.resetUiState()
+    setAppSettingsSection("general")
+    setAppSettingsOpen(false)
   }
 
   const setActiveTab = (value: string) => {
-    if (isWorkspaceTab(value)) view.setActiveTab(value)
+    if (!isWorkspaceTab(value)) return
+    setAppSettingsOpen(false)
+    view.setActiveTab(value)
   }
 
   if (view.adapterStatus === "loading") {
@@ -734,20 +758,39 @@ export function WorkspaceShell({
       data-workspace-viewport={viewportLayout}
     >
       <WorkspaceSidebar
+        appSettingsActive={appSettingsOpen}
         copy={copy}
         filter={view.filter}
         filteredWorkspaces={view.filteredWorkspaces}
         onAddProject={() => void view.requestAddProject(copy.pickerUnavailable)}
         onCreateWorkspace={view.addWorkspace}
         onFilterChange={view.setFilter}
-        onOpenSettings={() => openSettings("general")}
-        onSelectWorkspace={view.setSelectedWorkspaceId}
+        onOpenSettings={() => openAppSettings("general")}
+        onSelectWorkspace={(workspaceId) => {
+          setAppSettingsOpen(false)
+          view.setSelectedWorkspaceId(workspaceId)
+        }}
         selectedWorkspace={selectedWorkspace}
         selectedWorkspaceId={view.selectedWorkspaceId}
       />
 
+      {appSettingsOpen ? (
+        <AppSettingsView
+          copy={copy}
+          muted={view.muted}
+          onBack={closeAppSettings}
+          onMutedChange={view.setMuted}
+          onResetUi={resetUiState}
+          onSectionChange={setAppSettingsSection}
+          runtimeState={runtime.state}
+          section={appSettingsSection}
+          workspaceId={selectedWorkspace.id}
+        />
+      ) : null}
+
       <Tabs
         className="workspace-tabs"
+        hidden={appSettingsOpen}
         onValueChange={setActiveTab}
         orientation="horizontal"
         value={view.activeTab}
@@ -792,7 +835,7 @@ export function WorkspaceShell({
             onDraftChange={view.setDraftText}
             onEffortChange={view.setEffort}
             onMutedChange={view.setMuted}
-            onOpenDiagnostics={() => openSettings("diagnostics")}
+            onOpenDiagnostics={() => openAppSettings("diagnostics")}
             onPickAttachments={
               adapter?.pickAttachments === undefined
                 ? undefined
@@ -866,27 +909,23 @@ export function WorkspaceShell({
 
         <TabsContent
           className="workspace-view data-[state=inactive]:hidden"
-          forceMount
           value="settings"
         >
-          <SettingsView
+          <ProjectSettingsView
             characterRuntime={characterRuntime}
             contextModel={contextModel}
             copy={copy}
             history={view.history}
             muted={view.muted}
-            onMutedChange={view.setMuted}
             onDeleteHistory={view.deleteSelectedWorkspaceHistory}
-            onResetUi={view.resetUiState}
-            onRetryRuntime={runtime.refresh}
             onRetryCharacter={() => {
               characterRuntimeStore.retry(selectedWorkspace.id)
             }}
-            onSectionChange={view.setSettingsSection}
-            runtimeState={runtime.state}
-            section={view.settingsSection}
+            onSectionChange={view.setProjectSettingsSection}
+            section={view.projectSettingsSection}
             turnActive={turnActive}
             workspaceId={selectedWorkspace.id}
+            workspaceLabel={`${selectedWorkspace.repository}/${selectedWorkspace.name}`}
           />
         </TabsContent>
 
