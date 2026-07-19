@@ -31,10 +31,11 @@ JavaScript系sourceのlintと、Biomeが対応するrepository fileのformatを`
 
 ## lint規約
 
-- Biome recommended rulesを基準とし、React Hooksのtop-level呼び出しとdependency、Vite Fast Refreshのcomponent export制約を維持する。
+- Biome recommended rulesを基準とし、React Hooksのtop-level呼び出しと不足dependency、Vite Fast Refreshのcomponent export制約を維持する。Biome固有の不要dependency診断は、旧React Hooks ruleとの互換性を保つため無効にする。
 - Fast Refresh制約を意図的に適用しないmoduleは`biome.json`の限定overrideへ列挙し、旧tool名のinline suppressionをsourceへ残さない。
 - BiomeはTypeScript compilerの型検査を置き換えない。型、unused local / parameter、switch fallthroughなどのcompiler制約は`pnpm typecheck`で引き続き検査する。
-- lint対象はrepository所有のJS / TS / JSX / TSX sourceとする。vendored source、generated output、bundled third-party runtime、`.agents/`、`.context/`、`tmp/`は対象外とする。
+- lint対象は旧ESLintと同じapplication TS / TSX、repository script TS、root config TSとする。formatter対象であってもMJS、CSS、JSON、HTMLはlint対象へ暗黙に追加しない。vendored source、generated output、bundled third-party runtime、`.agents/`、`.context/`、`tmp/`も対象外とする。
+- 旧ESLint configに対応しないBiome ruleは、移行時のbehavior changeを避けるためroot設定で明示的に無効化する。新しいlint policyとして導入する場合は、別の仕様変更として既存diagnosticの解消と同時に行う。
 
 ## 変更時の条件
 

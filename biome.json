@@ -30,10 +30,39 @@
   },
   "linter": {
     "enabled": true,
+    "includes": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "*.ts"],
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
+      "a11y": "off",
+      "complexity": {
+        "useOptionalChain": "off"
+      },
+      "correctness": {
+        "noVoidTypeReturn": "off",
+        "useExhaustiveDependencies": {
+          "level": "on",
+          "options": {
+            "reportUnnecessaryDependencies": false
+          }
+        }
+      },
       "style": {
-        "useComponentExportOnlyModules": "error"
+        "noNonNullAssertion": "off",
+        "useComponentExportOnlyModules": {
+          "level": "on",
+          "options": {
+            "allowConstantExport": true
+          }
+        },
+        "useImportType": "off"
+      },
+      "suspicious": {
+        "noArrayIndexKey": "off",
+        "noAssignInExpressions": "off",
+        "noConfusingVoidType": "off",
+        "noExportsInTest": "off",
+        "noImplicitAnyLet": "off",
+        "useIterableCallbackReturn": "off"
       }
     }
   },
@@ -57,6 +86,7 @@
   "overrides": [
     {
       "includes": [
+        "src/**/*.test.tsx",
         "src/components/ui/**/*.tsx",
         "src/features/character/library/provider.tsx",
         "src/features/character/runtime-status.tsx",
