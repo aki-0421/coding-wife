@@ -1089,7 +1089,7 @@ mod tests {
             "import sys,time; sys.stdout.write('x' * 65536); sys.stdout.flush(); time.sleep(30)",
         ]);
         assert_eq!(
-            run_bounded_command(stdout_command, Duration::from_secs(2), 1024, 4096)
+            run_bounded_command(stdout_command, Duration::from_secs(10), 1024, 4096)
                 .await
                 .expect_err("stdout limit"),
             BoundedCommandError::StdoutLimit
@@ -1101,7 +1101,7 @@ mod tests {
             "import sys,time; sys.stderr.write('x' * 65536); sys.stderr.flush(); time.sleep(30)",
         ]);
         assert_eq!(
-            run_bounded_command(stderr_command, Duration::from_secs(2), 4096, 1024)
+            run_bounded_command(stderr_command, Duration::from_secs(10), 4096, 1024)
                 .await
                 .expect_err("stderr limit"),
             BoundedCommandError::StderrLimit

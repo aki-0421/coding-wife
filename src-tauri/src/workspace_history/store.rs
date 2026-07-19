@@ -5360,7 +5360,7 @@ mod tests {
             .workspace;
         let second = store
             .create_session_workspace(
-                &first.project_id,
+                &first.workspace_id,
                 "Second context",
                 "",
                 "request-editable-context-second",
@@ -5387,7 +5387,7 @@ mod tests {
                 .expect("reference manifest");
         let saved = store
             .save_project_context(
-                &first.workspace_id,
+                &first.project_id,
                 1,
                 project.clone(),
                 Some(reference_manifest),
