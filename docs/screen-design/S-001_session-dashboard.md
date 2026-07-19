@@ -190,12 +190,12 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 | project folder選択 | Tauri dialog → Rust | `select_project_root`（設計名） | directory picker 1件、選択rootのread診断 | 変更なし | path非表示のerror code |
 | Git preflight | Rust child process | `diagnose_project` | canonical root、read-only allowlist Git command | running checkをsafe abort | check別Blocked |
 | Codex preflight | Rust supervisor | `diagnose_codex` | executable/stdio capability、auth内容非読取 | 前回結果維持 | failure stageを表示 |
-| create/select | Rust Git process + DB + Codex supervisor | `create/select_workspace` | typed Project ID/workspace name、app-owned worktree root、固定Git引数、expected generation | worktree/DBを作らない | partial worktree/DBをrollbackし、元selection/turn/lifecycle維持 |
+| create/select | Rust Git process + DB + Codex supervisor | `workspace_create_session` / `workspace_select` | typed Project ID/workspace name、app-owned worktree root、固定Git引数、expected generation | worktree/DBを作らない | partial worktree/DBをrollbackし、元selection/turn/lifecycle維持 |
 | workspace Archive | Rust Git process + DB | `workspace_archive` | typed workspace ID、app-owned root containment、固定`git worktree remove --force`。missing targetは成功扱い | 変更なし | 他worktree/project/refを変更しない |
 | workspace cancel | Rust DB + Codex supervisor | `workspace_cancel` | typed workspace ID、expected DB version。supervisor gateはactive/pending turnとcancel中のturn開始をatomicに拒否し、active cancelはexact terminal、cleanup、履歴flush proof後だけ呼ぶ | transaction前なら変更なし | `workspace_update_lifecycle`によるCanceled指定を拒否し、元selection/turn/lifecycle維持 |
 | active workspace切替 | Rust supervisor + DB | `interrupt_and_switch_workspace` | old workspace/thread/turn/generation、pending selection、terminal cleanup proof | old workspaceの全state維持 | old workspaceをactiveのままerror |
 | repository repair | Tauri dialog → Rust project service | `repair_project_linkage` | target Project ID、saved `RepositoryIdentityV1`、canonical worktree exact identity、atomic transaction | linkage/selection不変 | source/Gitを変更せずtyped reason |
-| project登録解除 | Rust DB | `unregister_project` | typed Project ID、active/pending turn 0件、confirmation、metadata scope | 変更なし | source/Git/worktree/library/history本文を変更しない |
+| project登録解除 | Rust DB | `workspace_unregister` | typed Project ID、active/pending turn 0件、confirmation、metadata scope | 変更なし | source/Git/worktree/library/history本文を変更しない |
 
 ## ウィンドウ固有動作
 

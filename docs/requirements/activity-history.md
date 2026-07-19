@@ -82,7 +82,7 @@ read_when:
 | `HIST-F-046` | crash中のturnをInterruptedにする | startedでterminal eventのないturnを再起動時にInterruptedとして表示し、自動再送・自動commitを行わない | Approved | 非該当 |
 | `HIST-F-047` | 利用者はtimelineを種類と期間でfilterできる | All/Decisions/Errors/Verification/CommitsとUTC期間を選び、0件時にfilter解除とempty説明を表示する | Approved | 非該当 |
 | `HIST-F-048` | timelineはpage単位で読み込む | 1page最大200 eventを取得し、100,000 eventのworkspaceで初回query p95 200ms以下、次page p95 200ms以下になる | Approved | 非該当 |
-| `HIST-F-049` | 利用者はworkspace historyを削除できる | 実行中turnがない対象で確認すると対象のpending draft saveを新規開始不可にして既開始分を完了待ちし、app DB/artifactとUI/native draft cacheを削除する。成功後に遅延save errorを表示せず、Git repository、commit、branchを変更しない | Approved | 非該当 |
+| `HIST-F-049` | 利用者はworkspace historyを削除できる | 実行中turnがない対象で確認すると対象のpending draft saveを新規開始不可にして既開始分を完了待ちし、domain event、session、context snapshot、resume stateを削除してdraftとeditable contextを既定値へ更新する。workspace登録、Project ID、worktree、branch、active selectionは維持し、成功後に遅延save errorを表示しない | Approved | 非該当 |
 | `HIST-F-050` | 利用者は履歴削除をcancelできる | confirmation cancel時にrow/artifact数が変わらず、workspace selectionとfilterを維持する | Approved | 非該当 |
 | `HIST-F-051` | empty historyは次の操作を示す | eventが0件なら「最初のturnを開始」「project診断を確認」を表示し、空のtable/card gridを表示しない | Approved | 非該当 |
 
@@ -97,7 +97,7 @@ read_when:
 | `HIST-F-056` | appはsupport利用を透明に記録する | support invocationごとにrole、trigger、model family、token usage、latency、statusを記録し、prompt/response本文を記録しない | Approved | 非該当 |
 | `HIST-F-057` | event表示時刻はlocaleへ適応する | 保存UTC値をja/en localeで表示し、timezone変更後も同一instantとsequenceを維持する | Approved | 非該当 |
 | `HIST-F-058` | app-private履歴のpermissionをfail closedにする | DB directory、DB/WAL/SHM、migration/recovery backupのowner-only permission適用に失敗するとwrite-readyで起動せず、既存dataを保持して構造化errorまたはread-only recoveryへ移行する | Approved | 非該当 |
-| `HIST-F-059` | appは履歴のdurabilityを実態どおり表示する | native SQLiteの`ready`、`read_only`、`recovery_required`と、browser demoの`ephemeral`を別状態として契約する。`ephemeral`を`Persisted locally`または再起動後も残る履歴として表示せず、Chat、timeline、Diagnostics、History & Privacyで同じdemo memory表示を使う。demo resetは現在のpreview memoryだけを変更し、再起動でfixtureへ戻ることを明示する | Approved | 非該当 |
+| `HIST-F-059` | appは履歴のdurabilityを実態どおり表示する | native SQLiteの`ready`、`read_only`、`recovery_required`と、browser demoの`ephemeral`を別状態として契約する。`ephemeral`を`Persisted locally`または再起動後も残る履歴として表示せず、Chat、timeline、Diagnostics、History & Privacyで同じdemo memory表示を使う。demo resetはworkspace rowを残して現在のpreview memory内の履歴・draft・contextだけを初期化し、再起動でfixtureへ戻ることを明示する | Approved | 非該当 |
 | `HIST-F-060` | 外部mutation producerはexact eventを事前検証する | native Git mutation producerを廃止したため使用しない | Deprecated | `HIST-F-061`へ置換 |
 | `HIST-F-061` | Git observer evidenceをmutationなしでexact保存する | redaction後のobservation/commit evidence/skill auditが256KiB以下、schema-valid、canonical digest確定済みの場合だけ追記し、同一eventはexact replayだけを受理する。失敗時もGit index/object/ref/worktreeとmain turn resultを変更しない | Approved | 非該当 |
 
@@ -142,7 +142,7 @@ read_when:
 |---|---|
 | セキュリティ | schema validationとredactionをwrite前に行い、SQL parameter bindingを使う |
 | 権限 | DB/artifact/recovery backupをapp-private directoryへ限定する |
-| プライバシー | local-only、raw reasoning/secret/audio/support本文非保存、canonical project rootは目的限定linkageだけに保存し、workspace単位削除を提供する |
+| プライバシー | local-only、raw reasoning/secret/audio/support本文非保存、canonical project rootは目的限定linkageだけに保存し、workspace単位の履歴初期化を提供する |
 | 監査・ログ | event sequence、schema version、migration、deletion、corruption、support usage metadataを記録する |
 | 性能 | 100,000 eventでpage query p95 200ms、20,000 event rehydrate 3秒以下、1event 256KiB以下 |
 | 信頼性・復旧 | append-only、single writer、transaction migration、read-only recovery、exact replay only。履歴失敗時もGitを変更しない |
@@ -161,7 +161,7 @@ read_when:
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| 自動retention | MVPは自動削除せず、利用者のworkspace削除だけ | 100,000 event性能試験後にpolicyを評価する | いいえ |
+| 自動retention | MVPは自動削除せず、利用者のworkspace history削除だけ | 100,000 event性能試験後にpolicyを評価する | いいえ |
 | 履歴export | MVP非対象 | 審査後の利用者需要で形式を決める | いいえ |
 
 ## 参照資料

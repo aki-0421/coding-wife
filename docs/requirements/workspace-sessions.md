@@ -1,6 +1,6 @@
 ---
 title: "WORK ワークスペース・セッション要件定義"
-description: "ローカルGitプロジェクトの追加、preflight、状態別一覧、選択、復元を定義する。"
+description: "ローカルGitプロジェクトの登録と、app管理Git worktreeであるworkspaceの作成・選択・復元・Archiveを定義する。"
 updated: 2026-07-19
 last_verified: 2026-07-19
 read_when:
@@ -104,6 +104,18 @@ read_when:
 
 `RepositoryIdentityV1`は、symlinkをたどらず検証したGit common directoryのfilesystem device/inodeとGit object formatをnativeだけで保持する。通常のpath renameでは同一identityを維持し、copy、別volumeへの移動、Git directory置換、object format変更はidentity不一致としてrepairせず新規project追加を要求する。Project IDはappが一度だけ発行するopaque UUIDであり、path、workspace、branch、character selectionのいずれからも再生成しない。
 
+## 実装参照と変更時の不変条件
+
+| 境界 | 正本 | 変更時に同時確認する範囲 |
+|---|---|---|
+| IPC contract | `src/lib/contracts/workspace-history.ts`、`src-tauri/src/workspace_history/types.rs` | Project summary、workspace summary、create/unregister/archive requestのja/en UI projection |
+| persistence / migration | `src-tauri/src/workspace_history/store.rs` | `projects.registered`、workspace固有canonical root、`managed_worktree`、DB version、cross-language fixture |
+| Git mutation / trust | `src-tauri/src/workspace_history/service.rs`、`src-tauri/src/codex/workspace.rs` | project common Git identity、app-owned worktree path、固定Git引数、partial failure rollback |
+| frontend state | `src/features/workspace-persistence/adapter.ts`、`src/features/workspace-view/useWorkspaceViewModel.ts` | Project IDをworkspace作成まで維持し、workspace 0件でもproject一覧を失わない |
+| UI | `WorkspaceSidebar.tsx`、`SettingsView.tsx`、`WorkspaceShell.tsx` | create dialog、hover/focus Archive、zero-workspace shell、Projects登録解除確認 |
+
+project登録解除は`projects.registered`とnavigationだけを変更し、workspace row、history、worktree、branchを物理削除しない。workspace Archiveだけが`managed_worktree = 1`かつ保存rootがapp data配下の導出済みexact pathと一致する対象へ固定`git worktree remove --force`を実行する。legacy workspaceまたはroot不一致にGit削除を拡張してはならない。履歴削除はworkspace登録とworktreeを残し、履歴・draft・editable contextだけを初期化する。
+
 ## 入力項目要件
 
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
@@ -111,7 +123,6 @@ read_when:
 | Project | repository folder | なし | 必須 | canonical regular directory、Git worktree、同一path重複不可 | 入力を登録せず、再選択とcancelを残す |
 | Workspace | project | projectが1件ならそのproject、複数なら直前選択または先頭 | 必須 | 登録済みProject IDだけ | 入力保持、該当fieldへerror |
 | Workspace | name | `workspace-YYYYMMDD-HHmmss-<random>` | 必須 | trim後1〜80 Unicode scalar、改行不可。Git branch/worktree pathへはnative側で安全なslugとopaque IDを使用し、表示nameをpathへ直接使用しない | 入力保持、該当fieldへerror |
-| Workspace | goal | 空 | 任意 | 0〜4,000 Unicode scalar | 入力保持、超過数を表示 |
 | Filter | query | 空 | 任意 | 0〜200 Unicode scalar | 200超を受け付けず一覧を維持 |
 | Repair | repository folder | 現在のlinkage | 条件付き | canonical regular Git worktree、保存repository identityとのexact一致 | linkageを変更せず、再選択・cancel・新規project追加を残す |
 | Context | project context | 空 | 任意 | goal / constraints / user notesは各0〜8,000、Definition of doneは最大20項目・各1〜500、technical referencesは最大20項目・各1〜500、全field・全項目の総量32,000 Unicode scalar | 保存せず入力保持 |
@@ -168,7 +179,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 
 | 画面ID | 画面名 | 対象要件ID | 扱い | 画面詳細仕様 |
 |---|---|---|---|---|
-| `S-001` | セッションダッシュボード | `WORK-F-044`〜`WORK-F-062`, `WORK-F-065`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
+| `S-001` | セッションダッシュボード | `WORK-F-044`〜`WORK-F-062`, `WORK-F-065`〜`WORK-F-068` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | `WORK-F-052`〜`WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
 | `S-006` | プロジェクト設定 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
@@ -177,7 +188,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | 領域 | 要件 |
 |---|---|
 | セキュリティ | pathをcanonicalizeし、WebViewへhome directoryを含むabsolute pathを通常表示しない |
-| 権限 | project rootのread診断とapp metadata writeだけを許可し、登録解除でsourceを削除しない |
+| 権限 | project rootのread診断、app metadata write、app-owned root内のworktree add/removeだけを許可し、登録解除でsource/worktreeを削除しない |
 | プライバシー | repository path、goal、Contextはlocal保存のみ。支援agentへ送る場合は別要件のredactionを通す |
 | 監査・ログ | add、cancel、select、lifecycle、preflight resultをsecretなしで記録する |
 | 性能 | 200 workspaceのfilter・group更新p95 100ms、selection更新p95 100ms |
@@ -199,7 +210,6 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
 | 並列workspace実行 | MVPはactive execution 1件、一覧と履歴は複数件 | demo後に需要を計測する | いいえ |
-| worktree自動作成 | MVP非対象、既存worktreeだけを登録 | checkpoint運用後に安全性を評価する | いいえ |
 
 ## 参照資料
 
@@ -218,7 +228,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | レビュー結果 | Ready |
 | 仕様責任者 | プロダクトオーナー |
 | 合意日 | 2026-07-19 |
-| 残る非ブロック論点 | 並列実行、worktree自動作成はMVP非対象 |
+| 残る非ブロック論点 | 並列workspace実行はMVP非対象 |
 
 ## 着手可チェック
 

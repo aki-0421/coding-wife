@@ -1,9 +1,9 @@
 ---
 title: "S-005 アプリ設定・診断"
-description: "全プロジェクトへ共通適用する表示、音声、支援、診断だけを管理する画面仕様。"
+description: "全プロジェクトへ共通適用する表示、登録project一覧、音声、支援、診断を管理する画面仕様。"
 updated: 2026-07-19
 read_when:
-  - "sidebar gear、アプリ全体の設定、音声、support、native diagnosticsを実装するとき。"
+  - "sidebar gear、アプリ全体の設定、project登録一覧、音声、support、native diagnosticsを実装するとき。"
   - "S-005とAPP、CODE、SUP、GIT、LIVE、NARR要件の対応を確認するとき。"
 screen_id: "S-005"
 status: "Approved"
@@ -118,7 +118,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Context/Settings tab�
 | Audio取得・保存・test       | Rust local process/store | `narration_*`                      | fixed `/usr/bin/say`、voice allowlist | process group停止 | caption維持、TTS offへfail closed     |
 | Support control             | Rust supervisor          | `configure/cancel_support`         | role allowlist、budget固定            | 前config維持      | disabled fallback                     |
 | readiness recheck           | Rust readiness service   | `run_diagnostic_check`             | read-only check                       | 前snapshot維持    | stale snapshotとsafe code             |
-| project一覧・登録解除       | Rust workspace store     | `workspace_list` / `project_unregister` | typed Project ID、metadata-only mutation | 一覧維持 | repository/worktreeを変更せずsafe code |
+| project一覧・登録解除       | Rust workspace store     | `workspace_list` / `workspace_unregister` | typed Project ID、metadata-only mutation | 一覧維持 | repository/worktreeを変更せずsafe code |
 
 ## ウィンドウ固有動作
 
