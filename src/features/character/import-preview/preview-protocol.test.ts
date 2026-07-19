@@ -22,6 +22,31 @@ function assetsForFixture() {
   )
 }
 
+function manifestAboveLegacyFileBoundary() {
+  const pack = structuredClone(fixture.importResponse.preview.manifest)
+  const files = pack.files as unknown as Array<{
+    assetId: string
+    role: string
+    bytes: number
+    sha256: string
+    dimensions?: { width: number; height: number }
+  }>
+  for (let index = 0; index < 112; index += 1) {
+    files.push({
+      assetId: `runtime/metadata/extra-${String(index)}.cdi3.json`,
+      role: "display_info",
+      bytes: 1,
+      sha256: "0".repeat(64),
+    })
+  }
+  pack.inventory.runtimeFileCount = files.length
+  pack.inventory.totalBytes = files.reduce(
+    (total, file) => total + file.bytes,
+    0,
+  )
+  return parseCharacterPackManifest(pack)
+}
+
 function frameMetrics(): CharacterFrameMetrics {
   return {
     frameCount: 2,
@@ -61,6 +86,22 @@ describe("isolated character preview protocol", () => {
     ).toBe(true)
     expect(JSON.stringify(parsed)).not.toContain("previewToken")
     expect(JSON.stringify(parsed)).not.toContain("/Users/")
+  })
+
+  it("accepts a complete pack above the legacy 128-file boundary", () => {
+    const manifest = manifestAboveLegacyFileBoundary()
+    const assets = new Map(
+      manifest.files.map((file) => [file.assetId, new ArrayBuffer(file.bytes)]),
+    )
+    const message = createCharacterPreviewLoadMessage(
+      channelNonce,
+      fixture.importResponse.preview.previewNonce,
+      fixture.importResponse.preview.generation,
+      manifest,
+      assets,
+    )
+
+    expect(parseCharacterPreviewLoadMessage(message).assets).toHaveLength(129)
   })
 
   it("rejects missing, duplicate, oversized-generation, and unexpected payloads", () => {

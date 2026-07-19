@@ -229,6 +229,12 @@ describe("character library contract", () => {
     expect(
       parseCharacterLibrarySnapshot(snapshot).packs[0]?.runtimeFileCount,
     ).toBe(129)
+    expect(
+      parseCharacterPreviewAttestationRequest({
+        ...fixture.attestationRequest,
+        textureDecodeCount: 129,
+      }).textureDecodeCount,
+    ).toBe(129)
   })
 
   it("rejects custom manifest resource escalation and partial attestation", () => {

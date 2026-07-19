@@ -2,7 +2,10 @@ import type {
   CharacterFrameMetrics,
   CharacterPackManifest,
 } from "@/features/character/model"
-import { parseCharacterPackManifest } from "@/features/character/runtime/character-pack-client"
+import {
+  maxCharacterPackFiles,
+  parseCharacterPackManifest,
+} from "@/features/character/runtime/character-pack-client"
 
 export const characterPreviewProtocol = "character-preview-v1" as const
 export const maxTrustedFrameBytes = 2 * 1024 * 1024
@@ -131,7 +134,7 @@ export function parseCharacterPreviewLoadMessage(
     !integer(value.generation, 1) ||
     !Array.isArray(value.assets) ||
     value.assets.length === 0 ||
-    value.assets.length > 128
+    value.assets.length > maxCharacterPackFiles
   ) {
     return invalid()
   }
@@ -250,7 +253,7 @@ export function parseCharacterPreviewResultMessage(
     !integer(value.nonTransparentSamples, 1) ||
     typeof value.signature !== "string" ||
     !/^[a-f0-9]{8}$/.test(value.signature) ||
-    !integer(value.textureDecodeCount, 1, 128) ||
+    !integer(value.textureDecodeCount, 1, maxCharacterPackFiles) ||
     value.stateCueObserved !== true ||
     value.webglError !== 0 ||
     !integer(value.parameterCount, 1, 1_000_000) ||

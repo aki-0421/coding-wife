@@ -2,6 +2,7 @@ import type { CharacterPackManifest } from "@/features/character/model"
 import { isCharacterCueId } from "@/features/character/cue-id"
 import {
   expectedCharacterResourceContentType,
+  maxCharacterPackFiles,
   parseCharacterPackManifest,
 } from "@/features/character/runtime/character-pack-client"
 
@@ -395,7 +396,7 @@ export function parseCharacterPreviewAttestationRequest(
     !integer(value.nonTransparentSamples, 1) ||
     typeof value.signature !== "string" ||
     !/^[a-f0-9]{8}$/.test(value.signature) ||
-    !integer(value.textureDecodeCount, 1, 128) ||
+    !integer(value.textureDecodeCount, 1, maxCharacterPackFiles) ||
     value.stateCueObserved !== true ||
     value.webglError !== 0 ||
     !integer(value.parameterCount, 1, 1_000_000) ||
@@ -529,11 +530,11 @@ function parseCharacterPackView(value: unknown): CharacterPackView {
     !string(value.displayName, 80) ||
     !sha256(value.manifestHash) ||
     !string(value.provenanceLabel, 80) ||
-    !integer(value.runtimeFileCount, 1, 4096) ||
+    !integer(value.runtimeFileCount, 1, maxCharacterPackFiles) ||
     !integer(value.totalBytes, 1, 100 * 1024 * 1024) ||
-    !integer(value.textureCount, 1, 4096) ||
-    !integer(value.motionCount, 0, 4096) ||
-    !integer(value.expressionCount, 0, 4096) ||
+    !integer(value.textureCount, 1, maxCharacterPackFiles) ||
+    !integer(value.motionCount, 0, maxCharacterPackFiles) ||
+    !integer(value.expressionCount, 0, maxCharacterPackFiles) ||
     !integer(value.selectedProjectCount, 0) ||
     typeof value.deletable !== "boolean" ||
     (value.thumbnailSha256 !== null && !sha256(value.thumbnailSha256))

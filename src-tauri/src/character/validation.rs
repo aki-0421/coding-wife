@@ -21,10 +21,9 @@ use super::manifest::{
     CharacterDimensions, CharacterExpressionCue, CharacterInventory, CharacterMotionCue,
     CharacterPackFile, CharacterPackManifest, CharacterProvenance, CharacterProvenanceKind,
     CharacterTrustedFrame, CHARACTER_SCHEMA_VERSION, CHARACTER_TRUSTED_FRAME_ASSET_ID,
-    MAX_TRUSTED_FRAME_BYTES, MAX_TRUSTED_FRAME_DIMENSION,
+    MAX_CHARACTER_FILES, MAX_TRUSTED_FRAME_BYTES, MAX_TRUSTED_FRAME_DIMENSION,
 };
 
-const MAX_FILES: usize = 4096;
 const MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_TEXTURE_DIMENSION: u32 = 8192;
@@ -135,7 +134,7 @@ pub fn snapshot_character_model(
     let model_json = parse_json(&model_asset.contents, operation)?;
     let references = collect_model_references(&model_json, model_name, operation)?;
 
-    if references.len() > MAX_FILES {
+    if references.len() > MAX_CHARACTER_FILES {
         return Err(character_error(
             operation,
             "CHARACTER-FILE-COUNT-LIMIT",

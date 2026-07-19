@@ -11,7 +11,7 @@ import {
   isCharacterCueId,
 } from "@/features/character/cue-id"
 
-const MAX_FILES = 4096
+export const maxCharacterPackFiles = 4096
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024
 const MAX_FILE_BYTES = 32 * 1024 * 1024
 const MAX_TEXTURE_DIMENSION = 8192
@@ -238,7 +238,11 @@ function parsePackFile(value: unknown): CharacterPackFile {
 }
 
 function parseFiles(value: unknown): readonly CharacterPackFile[] {
-  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_FILES) {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > maxCharacterPackFiles
+  ) {
     return violation("Pack file inventory is outside the resource bounds")
   }
   const files = value.map(parsePackFile)
@@ -384,9 +388,9 @@ function parseInventory(
     value.textureCount !== roleCount("texture") ||
     value.motionCount !== roleCount("motion") ||
     value.expressionCount !== roleCount("expression") ||
-    !isBoundedInteger(value.textureCount, 1, MAX_FILES) ||
-    !isBoundedInteger(value.motionCount, 0, MAX_FILES) ||
-    !isBoundedInteger(value.expressionCount, 0, MAX_FILES)
+    !isBoundedInteger(value.textureCount, 1, maxCharacterPackFiles) ||
+    !isBoundedInteger(value.motionCount, 0, maxCharacterPackFiles) ||
+    !isBoundedInteger(value.expressionCount, 0, maxCharacterPackFiles)
   ) {
     return violation("Pack inventory does not match its files")
   }
