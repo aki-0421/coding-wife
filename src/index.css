@@ -239,12 +239,6 @@
       minmax(248px, 607.84fr);
   }
 
-  .workspace-tabs[data-companion-layout][data-workspace-tab="commit"] {
-    grid-template-columns:
-      minmax(620px, 1.35fr)
-      minmax(248px, 0.85fr);
-  }
-
   .workspace-tabs[data-companion-layout][data-companion-active="false"] {
     grid-template-columns: minmax(0, 1fr);
   }
