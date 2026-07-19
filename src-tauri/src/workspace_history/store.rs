@@ -779,7 +779,7 @@ impl WorkspaceHistoryStore {
             let fallback_workspace_id = transaction
                 .query_row(
                     "SELECT w.id FROM workspaces w JOIN projects p ON p.id = w.project_id
-                     WHERE p.registered = 1
+                     WHERE p.registered = 1 AND w.managed_worktree = 1
                      ORDER BY w.last_selected_at DESC, w.updated_at DESC, w.id ASC LIMIT 1",
                     [],
                     |row| row.get::<_, String>(0),
@@ -808,7 +808,7 @@ impl WorkspaceHistoryStore {
             .prepare(
                 "SELECT w.id, w.name, w.canonical_root
                  FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE p.registered = 1
+                 WHERE p.registered = 1 AND w.managed_worktree = 1
                  ORDER BY w.created_at ASC",
             )
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
@@ -865,7 +865,7 @@ impl WorkspaceHistoryStore {
             .query_row(
                 "SELECT w.project_id, w.id, w.name, w.canonical_root, p.canonical_root, w.managed_worktree
                  FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE w.id = ?1 AND p.registered = 1",
+                 WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
                 params![workspace_id],
                 |row| {
                     Ok(WorkspaceArchiveRecord {
@@ -904,7 +904,7 @@ impl WorkspaceHistoryStore {
             .prepare(
                 "SELECT w.id, w.name, w.canonical_root
                  FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE w.project_id = ?1 AND p.registered = 1
+                 WHERE w.project_id = ?1 AND p.registered = 1 AND w.managed_worktree = 1
                  ORDER BY w.created_at ASC",
             )
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
@@ -937,6 +937,7 @@ impl WorkspaceHistoryStore {
                  JOIN projects p ON p.id = selected.project_id
                  JOIN workspaces sibling ON sibling.project_id = p.id
                  WHERE selected.id = ?1 AND p.registered = 1
+                   AND selected.managed_worktree = 1 AND sibling.managed_worktree = 1
                  ORDER BY sibling.created_at ASC",
             )
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
@@ -991,7 +992,7 @@ impl WorkspaceHistoryStore {
                 "SELECT p.id, p.canonical_root, p.registered, p.project_identity,
                         p.root_device, p.root_inode, p.git_device, p.git_inode
                  FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE w.id = ?1 AND p.registered = 1",
+                 WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
                 params![workspace_id],
                 decode_project_linkage,
             )
@@ -1019,7 +1020,7 @@ impl WorkspaceHistoryStore {
                 "SELECT p.id, p.canonical_root, p.registered, p.project_identity,
                         p.root_device, p.root_inode, p.git_device, p.git_inode
                  FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE w.id = ?1 AND p.registered = 1",
+                 WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
                 params![workspace_id],
                 decode_project_linkage,
             )
@@ -1116,7 +1117,7 @@ impl WorkspaceHistoryStore {
             let fallback_workspace_id = transaction
                 .query_row(
                     "SELECT w.id FROM workspaces w JOIN projects p ON p.id = w.project_id
-                     WHERE p.registered = 1
+                     WHERE p.registered = 1 AND w.managed_worktree = 1
                      ORDER BY w.last_selected_at DESC, w.updated_at DESC, w.id ASC LIMIT 1",
                     [],
                     |row| row.get::<_, String>(0),
@@ -1275,7 +1276,7 @@ impl WorkspaceHistoryStore {
             inner
                 .connection
                 .query_row(
-                    "SELECT id FROM workspaces WHERE project_id = ?1
+                    "SELECT id FROM workspaces WHERE project_id = ?1 AND managed_worktree = 1
                      ORDER BY created_at ASC, id ASC LIMIT 1",
                     params![registration.project.project_id],
                     |row| row.get::<_, String>(0),
@@ -1303,13 +1304,6 @@ impl WorkspaceHistoryStore {
             &format!("request-register-{}", registration.project.project_id),
             candidate,
         )?;
-        self.lock()
-            .connection
-            .execute(
-                "UPDATE workspaces SET managed_worktree = 0 WHERE id = ?1",
-                params![persisted.workspace.workspace_id],
-            )
-            .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
         Ok(PersistedWorkspaceRegistration {
             workspace: persisted.workspace,
             private_record: persisted.private_record,
@@ -1335,7 +1329,7 @@ impl WorkspaceHistoryStore {
                             p.canonical_root, p.git_device, p.git_inode, p.project_identity,
                             p.github_repository, w.branch, w.head, w.detached
                      FROM workspaces w JOIN projects p ON p.id = w.project_id
-                     WHERE w.id = ?1 AND p.registered = 1",
+                     WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
                     params![from_workspace_id],
                     |row| {
                         let workspace_root = path_from_bytes(row.get::<_, Vec<u8>>(1)?);
@@ -1386,7 +1380,7 @@ impl WorkspaceHistoryStore {
         self.lock()
             .connection
             .execute(
-                "UPDATE workspaces SET goal = ?1, managed_worktree = 0 WHERE id = ?2",
+                "UPDATE workspaces SET goal = ?1 WHERE id = ?2",
                 params![goal, persisted.workspace.workspace_id],
             )
             .map_err(|_| history_error("HIST-WORKSPACE-UPDATE", true))?;
@@ -1990,7 +1984,7 @@ impl WorkspaceHistoryStore {
                         "SELECT p.project_identity, w.root_device, w.root_inode,
                                 p.git_device, p.git_inode, w.branch, w.head, w.detached
                          FROM workspaces w JOIN projects p ON p.id = w.project_id
-                         WHERE w.id = ?1 AND p.registered = 1",
+                         WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
                         params![workspace_id],
                         |row| {
                             Ok((
@@ -2491,9 +2485,11 @@ fn set_active_workspace(
 
 fn ensure_workspace_capacity(transaction: &Transaction<'_>) -> Result<(), WorkspaceHistoryError> {
     let count = transaction
-        .query_row("SELECT COUNT(*) FROM workspaces", [], |row| {
-            row.get::<_, i64>(0)
-        })
+        .query_row(
+            "SELECT COUNT(*) FROM workspaces WHERE managed_worktree = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
         .map_err(|_| history_error("HIST-WORKSPACE-COUNT", true))?;
     if count >= MAX_WORKSPACES {
         return Err(history_error("WORKSPACE-LIMIT", false));
@@ -3529,7 +3525,8 @@ fn project_by_id(
         .query_row(
             "SELECT p.id, p.alias, p.github_repository, p.health,
                     COUNT(w.id), p.created_at, p.updated_at
-             FROM projects p LEFT JOIN workspaces w ON w.project_id = p.id
+             FROM projects p LEFT JOIN workspaces w
+               ON w.project_id = p.id AND w.managed_worktree = 1
              WHERE p.id = ?1 AND p.registered = 1 GROUP BY p.id",
             params![project_id],
             decode_project_row,
@@ -3544,7 +3541,8 @@ fn all_projects(connection: &Connection) -> Result<Vec<ProjectSummary>, Workspac
         .prepare(
             "SELECT p.id, p.alias, p.github_repository, p.health,
                     COUNT(w.id), p.created_at, p.updated_at
-             FROM projects p LEFT JOIN workspaces w ON w.project_id = p.id
+             FROM projects p LEFT JOIN workspaces w
+               ON w.project_id = p.id AND w.managed_worktree = 1
              WHERE p.registered = 1 GROUP BY p.id
              ORDER BY p.updated_at DESC, p.alias ASC",
         )
@@ -3576,7 +3574,9 @@ fn workspace_by_id(
 ) -> Result<WorkspaceSummary, WorkspaceHistoryError> {
     connection
         .query_row(
-            &format!("{WORKSPACE_SELECT} WHERE w.id = ?1 AND p.registered = 1"),
+            &format!(
+                "{WORKSPACE_SELECT} WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1"
+            ),
             params![workspace_id],
             decode_workspace_row,
         )
@@ -3588,7 +3588,7 @@ fn workspace_by_id(
 fn all_workspaces(connection: &Connection) -> Result<Vec<WorkspaceSummary>, WorkspaceHistoryError> {
     let mut statement = connection
         .prepare(&format!(
-            "{WORKSPACE_SELECT} WHERE p.registered = 1 ORDER BY CASE w.lifecycle
+            "{WORKSPACE_SELECT} WHERE p.registered = 1 AND w.managed_worktree = 1 ORDER BY CASE w.lifecycle
                WHEN 'done' THEN 0 WHEN 'in_review' THEN 1 WHEN 'in_progress' THEN 2
                WHEN 'backlog' THEN 3 ELSE 4 END, w.updated_at DESC"
         ))
@@ -3705,7 +3705,7 @@ fn private_workspace_by_id(
         .query_row(
             "SELECT w.id, w.name, w.canonical_root
              FROM workspaces w JOIN projects p ON p.id = w.project_id
-             WHERE w.id = ?1 AND p.registered = 1",
+             WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
             params![workspace_id],
             |row| {
                 Ok(AppPrivateWorkspaceRecord {
@@ -4438,6 +4438,50 @@ mod tests {
                 .as_deref(),
             Some("aki-0421/coding-wife")
         );
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn reregistered_project_does_not_expose_legacy_root_workspace() {
+        let data = temp_directory("history-legacy-root");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let registration = store
+            .register_candidate(&candidate(&root).await)
+            .expect("legacy registration fixture");
+        let project_id = registration.workspace.project_id.clone();
+        let workspace_id = registration.workspace.workspace_id;
+        store
+            .select_workspace(&workspace_id)
+            .expect("select legacy fixture");
+        store
+            .lock()
+            .connection
+            .execute(
+                "UPDATE workspaces SET managed_worktree = 0 WHERE id = ?1",
+                params![workspace_id],
+            )
+            .expect("mark fixture as legacy root");
+        store
+            .unregister_project(&project_id)
+            .expect("unregister legacy project");
+
+        let restored = store
+            .register_project_candidate(&candidate(&root).await)
+            .expect("re-register project only");
+        let state = store.snapshot(None).expect("restored project state");
+
+        assert!(restored.duplicate);
+        assert_eq!(restored.project.workspace_count, 0);
+        assert_eq!(state.projects.len(), 1);
+        assert_eq!(state.projects[0].workspace_count, 0);
+        assert!(state.workspaces.is_empty());
+        assert_eq!(state.active_workspace_id, None);
+        assert!(store
+            .private_workspace_records()
+            .expect("restore records")
+            .is_empty());
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
     }

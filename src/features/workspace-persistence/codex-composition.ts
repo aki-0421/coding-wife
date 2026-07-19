@@ -239,9 +239,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   }
 
   async requestAddProject(): Promise<WorkspaceAdapterState> {
-    const state = await this.history.requestAddProject()
-    await this.activateCodex(state)
-    return state
+    return this.history.requestAddProject()
   }
 
   async requestAddWorkspace(
