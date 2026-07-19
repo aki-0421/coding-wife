@@ -163,8 +163,24 @@ describe("default App character integration", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Commit" }))
     expect(screen.getByTestId("live2d-character")).toBe(initialNode)
+    expect(screen.getByTestId("live2d-character")).toBeVisible()
     expect(latestLive2dProps()?.stateGeneration).toBe(idleGeneration)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Context" }))
+    expect(screen.getByTestId("live2d-character")).toBe(initialNode)
+    expect(screen.getByTestId("live2d-character")).toBeVisible()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }))
+    expect(screen.getByTestId("live2d-character")).not.toBeVisible()
+
+    fireEvent.click(screen.getAllByRole("button", { name: "App settings" })[0]!)
+    expect(screen.getByTestId("live2d-character")).not.toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Back to workspace" }))
+    expect(screen.getByTestId("live2d-character")).not.toBeVisible()
+
     fireEvent.click(screen.getByRole("tab", { name: /Chat/ }))
+    expect(screen.getByTestId("live2d-character")).toBe(initialNode)
+    expect(screen.getByTestId("live2d-character")).toBeVisible()
 
     const workspaceNavigation = screen.getByRole("navigation", {
       name: "Workspaces",

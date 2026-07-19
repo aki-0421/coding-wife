@@ -50,12 +50,14 @@ import type {
   CommitExplanationControllerStateV1,
 } from "@/lib/contracts/git-review"
 import { parseCommitExplanationControllerState } from "@/lib/contracts/git-review"
+import { cn } from "@/lib/utils"
 
 export interface EvidenceViewProps {
   readonly workspaceId: string
   readonly workspaceGeneration?: number
   readonly active: boolean
   readonly locale: SupportedLocale
+  readonly companionVisible?: boolean
   readonly transport: GitReviewTransport
   readonly onBackToChat: () => void
   readonly onCommitSelectionChange?: () => void
@@ -111,10 +113,28 @@ function useCommitExplanationControllerState(
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-function CollectionLoading({ loadingText }: { readonly loadingText: string }) {
+function CollectionLoading({
+  companionVisible,
+  loadingText,
+}: {
+  readonly companionVisible: boolean
+  readonly loadingText: string
+}) {
   return (
-    <div className="grid min-h-0 grid-cols-[280px_minmax(0,1fr)] min-[1280px]:grid-cols-[300px_minmax(0,1fr)] max-[840px]:grid-cols-1">
-      <aside className="flex min-h-0 flex-col gap-sm border-r border-divider p-md max-[840px]:hidden">
+    <div
+      className={cn(
+        "grid min-h-0",
+        companionVisible
+          ? "grid-cols-1"
+          : "grid-cols-[280px_minmax(0,1fr)] min-[1280px]:grid-cols-[300px_minmax(0,1fr)] max-[840px]:grid-cols-1",
+      )}
+    >
+      <aside
+        className={cn(
+          "min-h-0 flex-col gap-sm border-r border-divider p-md",
+          companionVisible ? "hidden" : "flex max-[840px]:hidden",
+        )}
+      >
         <Skeleton className="h-6 w-1/2" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-24 w-full" />
@@ -158,6 +178,7 @@ export function EvidenceView({
   workspaceGeneration = 1,
   active,
   locale,
+  companionVisible = false,
   transport,
   onBackToChat,
   onCommitSelectionChange,
@@ -278,7 +299,8 @@ export function EvidenceView({
     <TooltipProvider>
       <main
         aria-label={copy.title}
-        className="grid size-full min-h-0 grid-rows-[64px_minmax(0,1fr)] bg-app-bg"
+        className="grid size-full min-h-0 grid-rows-[minmax(64px,auto)_minmax(0,1fr)] bg-app-bg"
+        data-evidence-companion={companionVisible || undefined}
       >
         <header className="flex min-w-0 flex-wrap items-center gap-sm border-b border-divider bg-surface px-lg py-xs max-[680px]:px-md">
           <Tooltip>
@@ -287,7 +309,11 @@ export function EvidenceView({
                 aria-controls="commit-list-drawer"
                 aria-expanded={active && drawerOpen}
                 aria-label={copy.openCommitList}
-                className="hidden max-[840px]:inline-flex"
+                className={cn(
+                  companionVisible
+                    ? "inline-flex"
+                    : "hidden max-[840px]:inline-flex",
+                )}
                 onClick={openDrawer}
                 size="icon-xs"
                 type="button"
@@ -402,7 +428,10 @@ export function EvidenceView({
 
         {review.collectionStatus === "idle" ||
         review.collectionStatus === "loading" ? (
-          <CollectionLoading loadingText={copy.loading} />
+          <CollectionLoading
+            companionVisible={companionVisible}
+            loadingText={copy.loading}
+          />
         ) : null}
 
         {review.collectionStatus === "empty" ? (
@@ -452,12 +481,29 @@ export function EvidenceView({
         ) : null}
 
         {review.collectionStatus === "ready" ? (
-          <div className="relative grid min-h-0 grid-cols-[280px_minmax(0,1fr)] min-[1280px]:grid-cols-[300px_minmax(0,1fr)] max-[840px]:grid-cols-1">
-            <div className="min-h-0 max-[840px]:hidden">{list}</div>
+          <div
+            className={cn(
+              "relative grid min-h-0",
+              companionVisible
+                ? "grid-cols-1"
+                : "grid-cols-[280px_minmax(0,1fr)] min-[1280px]:grid-cols-[300px_minmax(0,1fr)] max-[840px]:grid-cols-1",
+            )}
+          >
+            <div
+              className={cn(
+                "min-h-0",
+                companionVisible ? "hidden" : "max-[840px]:hidden",
+              )}
+            >
+              {list}
+            </div>
             {active && drawerOpen ? (
               <aside
                 aria-label={copy.openCommitList}
-                className="absolute inset-y-0 left-0 z-20 hidden w-[min(300px,86%)] min-h-0 bg-sidebar shadow-overlay max-[840px]:block"
+                className={cn(
+                  "absolute inset-y-0 left-0 z-20 w-[min(300px,86%)] min-h-0 bg-sidebar shadow-overlay",
+                  companionVisible ? "block" : "hidden max-[840px]:block",
+                )}
                 id="commit-list-drawer"
                 role="region"
               >
@@ -517,7 +563,11 @@ export function EvidenceView({
                     <Button
                       aria-controls="commit-list-drawer"
                       aria-expanded={active && drawerOpen}
-                      className="hidden max-[840px]:inline-flex"
+                      className={cn(
+                        companionVisible
+                          ? "inline-flex"
+                          : "hidden max-[840px]:inline-flex",
+                      )}
                       onClick={openDrawer}
                       type="button"
                       variant="secondary"
