@@ -31,7 +31,9 @@ function manifestAboveLegacyFileBoundary() {
     sha256: string
     dimensions?: { width: number; height: number }
   }>
-  for (let index = 0; index < 112; index += 1) {
+  const fileCountAboveLegacyBoundary = 129
+  const additionalFileCount = fileCountAboveLegacyBoundary - files.length
+  for (let index = 0; index < additionalFileCount; index += 1) {
     files.push({
       assetId: `runtime/metadata/extra-${String(index)}.cdi3.json`,
       role: "display_info",
@@ -101,7 +103,9 @@ describe("isolated character preview protocol", () => {
       assets,
     )
 
-    expect(parseCharacterPreviewLoadMessage(message).assets).toHaveLength(129)
+    expect(parseCharacterPreviewLoadMessage(message).assets).toHaveLength(
+      manifest.files.length,
+    )
   })
 
   it("rejects missing, duplicate, oversized-generation, and unexpected payloads", () => {

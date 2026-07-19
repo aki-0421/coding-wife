@@ -135,7 +135,9 @@ describe("character pack manifest", () => {
   })
 
   it("accepts inventories above the legacy 128-file boundary", () => {
-    const pack = structuredClone(hiyoriPack)
+    const pack = structuredClone(
+      characterFixture.importResponse.preview.manifest,
+    )
     const files = pack.files as unknown as Array<{
       assetId: string
       role: string
@@ -143,7 +145,9 @@ describe("character pack manifest", () => {
       sha256: string
       dimensions?: { width: number; height: number }
     }>
-    for (let index = 0; index < 112; index += 1) {
+    const fileCountAboveLegacyBoundary = 129
+    const additionalFileCount = fileCountAboveLegacyBoundary - files.length
+    for (let index = 0; index < additionalFileCount; index += 1) {
       files.push({
         assetId: `runtime/metadata/extra-${String(index)}.cdi3.json`,
         role: "display_info",
@@ -157,7 +161,9 @@ describe("character pack manifest", () => {
       0,
     )
 
-    expect(parseCharacterPackManifest(pack).files).toHaveLength(129)
+    expect(parseCharacterPackManifest(pack).files).toHaveLength(
+      fileCountAboveLegacyBoundary,
+    )
   })
 
   it("matches native dotted cue IDs, URL rejection, and the 80-byte boundary", () => {
