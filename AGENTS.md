@@ -32,6 +32,8 @@ Web情報を更新した場合は、対象文書の `updated` と `last_verified
 
 実装を始める前に、仕様を書面で記録する。
 
+挙動、公開型、コマンド契約、永続化形式を変更するときは、影響するテストとfixtureを同じ変更で更新する。新旧契約の参照をリポジトリ全体で検索し、Frontend、acceptance、nativeの各境界に古い前提を残さない。
+
 ## ローカル検証
 
 通常のローカル開発では、ユーザーから明示的な依頼がない限り、テスト、lint、build、品質ゲートを実行しない。PR単位の検証はCIに任せ、未実施のローカル検証を実施済みとして報告しない。
@@ -43,6 +45,8 @@ Web情報を更新した場合は、対象文書の `updated` と `last_verified
 * `node scripts/live2d/clean-checkout-smoke.mjs`
 * `pnpm tauri:build`
 * `pnpm release:macos`と`scripts/release/`配下のapp、DMG、verifyコマンド
+
+ユーザーからCIの全通過またはマージまで依頼された場合、CI失敗を修正した後は、再push前に失敗ジョブと同等の対象コマンド、または失敗を再現する最小のコマンドをローカルで成功させる。契約変更によりテストやfixtureを更新した場合は、関連テストファイル全体もローカルで成功させる。
 
 ## コミットメッセージ
 
