@@ -167,7 +167,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 |---|---|---|---|---|
 | `S-001` | セッションダッシュボード | `WORK-F-044`〜`WORK-F-062`, `WORK-F-065`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | `WORK-F-052`〜`WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
-| `S-004` | 設定・診断 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-006` | プロジェクト設定 | `WORK-F-048`, `WORK-F-057`, `WORK-F-063`, `WORK-F-066` | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
 ## 非機能要件
 

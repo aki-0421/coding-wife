@@ -1,18 +1,18 @@
 ---
 title: "ワークスペース履歴ランタイム実装ガイド"
 description: "ローカルSQLite履歴、ワークスペース復元、versioned editable context、native context取得、WebView adapterを安全に変更・検証するための責務と不変条件。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "ワークスペースの追加・選択・下書き・タイムライン・履歴削除を変更するとき。"
   - "SQLite migration、破損復旧、Git preflight、context snapshotのprivacy境界を検証するとき。"
-  - "Project / Character contextの保存、競合、次turn反映、Context / Settings UIを変更するとき。"
+  - "Project / Character contextの保存、競合、次turn反映、Context / Project settings UIを変更するとき。"
 ---
 
 # ワークスペース履歴ランタイム実装ガイド
 
 ## 適用仕様
 
-上位要件は[ワークスペース・セッション](../requirements/workspace-sessions.md)と[アクティビティ履歴](../requirements/activity-history.md)、画面契約は[S-001](../screen-design/S-001_session-dashboard.md)、[S-002](../screen-design/S-002_coding-workspace.md)、[S-004](../screen-design/S-004_settings-diagnostics.md)を正本とする。
+上位要件は[ワークスペース・セッション](../requirements/workspace-sessions.md)と[アクティビティ履歴](../requirements/activity-history.md)、画面契約は[S-001](../screen-design/S-001_session-dashboard.md)、[S-002](../screen-design/S-002_coding-workspace.md)、[S-006](../screen-design/S-006_project-settings.md)を正本とする。
 
 履歴ランタイムは、macOSのapp-private data directoryに置く`workspace-history.sqlite3`を正本とする。WebViewはraw pathやSQLiteを直接扱わず、version 1のTauri commandとexact-key TypeScript parserを経由する。ブラウザー実行時の`DemoWorkspaceHistoryTransport`は操作確認用の決定的なメモリ実装であり、永続化済みとはみなさない。
 
@@ -59,8 +59,10 @@ read_when:
 | `src/features/codex/event-projection.ts` | generationで分離されたCodexEventをsemantic timeline/HIST eventへfail-closed投影 |
 | `src/features/workspace-persistence/demo-transport.ts` | ブラウザー専用の決定的demo。native成功や再起動永続化を偽装しない |
 | `src/features/workspace-view/useWorkspaceViewModel.ts` | hydration、workspace切替race防止、250 ms draft debounce、UI notice |
-| `src/features/workspace-view/useEditableWorkspaceContext.ts` | Context / Settings共通draft、workspace partition、save、競合保持、明示reload |
+| `src/features/workspace-view/useEditableWorkspaceContext.ts` | Context / Project settings共通draft、workspace partition、save、競合保持、明示reload |
 | `src/features/workspace-view/EditableContextSection.tsx` | Project / Character editor、field境界、version/hash、次turn表示、error focus |
+| `src/features/workspace-view/SettingsView.tsx` | S-005のapp-global 4 sectionとS-006のproject-scoped 4 sectionを別viewとして構成する |
+| `src/features/workspace-view/WorkspaceShell.tsx` | sidebar gearのS-005遷移、Settings tabのS-006遷移、直前tabとfocusの復元を所有する |
 | `src/test/fixtures/workspace-context-policy.v1.json` | RustとTypeScriptで共有するCharacter policyのja / en accepted・rejected corpus |
 | `src/test/fixtures/workspace-history.v1.json` | RustとTypeScriptが共有するpublic contract fixture |
 
@@ -71,6 +73,7 @@ cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --lib --tests -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml workspace_history --lib
 pnpm exec vitest run src/features/workspace-persistence/*.test.ts src/features/workspace-view/WorkspaceShell.test.tsx src/app/App.test.tsx
+pnpm exec vitest run src/features/localization/localization.test.tsx src/app/App.character.test.tsx
 pnpm exec vitest run src/lib/contracts/workspace-context.test.ts src/features/workspace-view/useEditableWorkspaceContext.test.tsx
 pnpm format:check
 pnpm lint
@@ -79,7 +82,7 @@ pnpm test
 pnpm build
 ```
 
-Rust testはmigration rollback、破損backup、concurrent sequence、redaction、context上限、起動復元、linked worktreeに加え、editable contextの再起動復元、workspace分離、expected-version競合、shared policy corpus、参照の消失・置換、symlink retarget、root交換、旧recordの再保存要求を検証する。TypeScript testはexact contract、raw list draft、blur / save正規化、field error focus、project追加、session作成、context、削除、fresh adapterでの再hydration、次turnの信頼境界付きenvelope、競合時のdraft保持を検証する。Demo transportのhash testはRustと同じcanonical JSONの既知SHA-256を比較し、表示用の疑似hashへ戻らないことを保証する。UIを変更した場合は`agent-browser`でContext / Settingsの同一draft、入力中とblur後のlist値、保存後version / hash、workspace切替、ja / en、validation・競合時focus、1470 / 960 / 480 pxを操作し、screenshotは`/tmp`またはignore済み`tmp/`へ保存する。
+Rust testはmigration rollback、破損backup、concurrent sequence、redaction、context上限、起動復元、linked worktreeに加え、editable contextの再起動復元、workspace分離、expected-version競合、shared policy corpus、参照の消失・置換、symlink retarget、root交換、旧recordの再保存要求を検証する。TypeScript testはexact contract、raw list draft、blur / save正規化、field error focus、project追加、session作成、context、削除、fresh adapterでの再hydration、次turnの信頼境界付きenvelope、競合時のdraft保持を検証する。`WorkspaceShell.test.tsx`はsidebar gearがS-005だけを、Settings tabがS-006だけを表示し、Back後に直前tabとfocusを復元することも検証する。Demo transportのhash testはRustと同じcanonical JSONの既知SHA-256を比較し、表示用の疑似hashへ戻らないことを保証する。UIを変更した場合は`agent-browser`でContext / Project settingsの同一draft、App settingsとのsection非重複、Back後のtab復元、入力中とblur後のlist値、保存後version / hash、workspace切替、ja / en、validation・競合時focus、1470 / 960 / 480 pxを操作し、screenshotは`/tmp`またはignore済み`tmp/`へ保存する。
 
 ## 変更時チェックリスト
 

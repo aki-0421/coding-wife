@@ -1,7 +1,7 @@
 ---
 title: "NARR 音声実況要件定義"
 description: "意味あるイベントの字幕優先実況、任意TTS、mute、rate limit、privacy、fallbackを定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "narration policy、TTS、mute、captionを実装するとき。"
   - "active workspace分離、stale破棄、local process境界を検証するとき。"
@@ -133,7 +133,7 @@ read_when:
 | 領域                        | 要件                                                                                    | 対象要件ID                               |
 | --------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------- |
 | 対象OS・OS差分              | macOS 14以降のroot-owned `/usr/bin/say`とsystem audio output                            | `NARR-F-065`, `NARR-F-068`               |
-| ウィンドウ生成・再利用      | S-002のmuteとS-004設定を同一stateで再利用                                               | `NARR-F-068`, `NARR-F-069`               |
+| ウィンドウ生成・再利用      | S-002のmuteとS-005アプリ設定を同一stateで再利用                                         | `NARR-F-068`, `NARR-F-069`               |
 | 閉じる・アプリ終了          | process groupとqueueをbounded cancelしaudio fileを残さない                              | `NARR-F-070`, `NARR-F-073`               |
 | 未保存データ                | voice/rateの未保存入力はdialog cancelで破棄                                             | `NARR-F-066`                             |
 | ローカルデータ              | owner-only atomic settingsとtranscript metadataだけを保存し、audioはDB/fileへ保存しない | `NARR-F-064`, `NARR-F-073`               |
@@ -151,7 +151,7 @@ read_when:
 | ------- | -------------------------- | ---------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------- |
 | `S-002` | コーディングワークスペース | `NARR-F-057`〜`NARR-F-063`, `NARR-F-068`〜`NARR-F-075`, `NARR-F-078`〜`NARR-F-088` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md)     |
 | `S-003` | セッション証拠             | `NARR-F-078`〜`NARR-F-088`                                                         | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md)     |
-| `S-004` | 設定・診断                 | `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089`               | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-005` | アプリ設定・診断           | `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089`               | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
 
 ## 非機能要件
 

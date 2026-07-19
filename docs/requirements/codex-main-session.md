@@ -1,7 +1,7 @@
 ---
 title: "CODE Codexメインセッション要件定義"
 description: "固定GPT-5.6 SolによるApp Server会話、構造化イベント、判断・承認、停止・復旧を定義する。"
-updated: 2026-07-18
+updated: 2026-07-19
 read_when:
   - "Codex App Server supervisor、protocol adapter、Chat composerを実装するとき。"
   - "判断カード、approval、attachment、stop、reconnectを検証するとき。"
@@ -153,7 +153,7 @@ read_when:
 |---|---|---|---|---|
 | `S-001` | セッションダッシュボード | `CODE-F-051`, `CODE-F-075` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | `CODE-F-052`〜`CODE-F-079` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
-| `S-004` | 設定・診断 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075` | 変更 | [画面詳細仕様](../screen-design/S-004_settings-diagnostics.md) |
+| `S-005` | アプリ設定・診断 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075` | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
 
 ## 非機能要件
 
