@@ -7,4 +7,4 @@ documents:
   exclude:
     - node_modules/**
   ignoreReserved: false
-  maxSize: 32 KiB
+  maxSize: 64 KiB
