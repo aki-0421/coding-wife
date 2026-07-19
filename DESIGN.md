@@ -96,6 +96,7 @@ components:
     textColor: "{colors.text-primary}"
     rounded: "{rounded.circle}"
     size: "27px"
+    glyphSize: "16px"
   composer-field:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text-primary}"
@@ -250,7 +251,7 @@ cp "$icon_output/32x32.png" "$icon_output/128x128.png" "$icon_output/128x128@2x.
 
 ### Buttons
 
-- **Shape:** compact controls は緩い矩形（4.5px radius）、height 24px。icon-only hit target は見た目が 12〜27px でも 24×24px 以上を確保する。
+- **Shape:** compact controls は緩い矩形（4.5px radius）、height 24px。icon-only control は24〜36pxの外形を維持し、標準glyphを16px、`icon-lg`だけ20pxにする。ラベル付きbuttonのinline iconは12pxを維持し、hit targetは24×24px以上を確保する。
 - **Primary:** action fill 上に app-bg の文字、左右 9px。通常画面で primary action は一つだけにする。
 - **Hover / Focus / Active:** hover は面の lightness を一段だけ上げ、focus-visible は 2px warm-active ring + 2px offset、active は 120ms の 1px translate。disabled は opacity だけにせず label と `aria-disabled` を持つ。
 - **Secondary / Ghost:** surface または透明背景、1px divider border。hover で selected-row を使い、shadow を付けない。

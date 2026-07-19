@@ -212,7 +212,7 @@ export function Composer({
                     onClick={() => onRemoveAttachment(attachment.id)}
                     type="button"
                   >
-                    <XIcon className="size-3" />
+                    <XIcon className="size-4" />
                   </button>
                 </span>
               ))}
@@ -230,7 +230,7 @@ export function Composer({
                     onClick={() => onRemoveContext(snapshot.id)}
                     type="button"
                   >
-                    <XIcon className="size-3" />
+                    <XIcon className="size-4" />
                   </button>
                 </span>
               ))}
