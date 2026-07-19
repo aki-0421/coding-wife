@@ -78,7 +78,7 @@ status: "Approved"
 |---|---:|---|---|
 | native titlebar safe area | sidebar上40.5px | OS所有のnative traffic lights用余白。WebViewは赤・黄・緑の円を描画しない | close、minimize、zoomはmacOS native controlで行う |
 | workspace heading | sidebar内40.5px | `Workspaces`、ListFilter、FolderPlus、Plus | filter、project追加、workspace作成 |
-| workspace list | sidebar幅255.04px、item 242.25×49.5px | Done / In Review / In Progress / Backlog / Canceled | select、attention確認、overflow |
+| workspace list | sidebar幅255.04px、item 242.25×49.5px | owner avatar、branch、`owner/repo`、Done / In Review / In Progress / Backlog / Canceled | select、attention確認、overflow |
 | sidebar footer | 40.5px | App settings gear | [S-005](S-005_app-settings-diagnostics.md)へ移動 |
 | main header | sidebar右、81px | `Sessions` breadcrumb、preflight summary | current project切替、診断詳細 |
 | project surface | main content | project概要、preflight、workspace create/empty/recovery | add、recheck、create、open |
@@ -101,11 +101,11 @@ sidebarのlifecycle statusは[LinearのIssue status](https://linear.app/docs/con
 
 workspace navigation contentは242.25pxを上限として、右端の件数とchevronを255.04px sidebar内へ収める。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "expands lifecycle groups by default and toggles them independently"`で初期展開、独立開閉、1件・0件表示、ARIA、content幅を検証する。
 
-sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、branch titleを13px / 500 / 19.5px、GitHub repository full nameを11px / 400 / 16.5px、filter 0件helperを12px / 400 / 18pxとする。workspace selectionでfont weightと文字幅を変えず、selected backgroundとstrong textだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。
+sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、branch titleを13px / 500 / 19.5px、GitHub repository full nameを11px / 400 / 16.5px、filter 0件helperを12px / 400 / 18pxとする。workspace itemの先頭にはheaderと同じ24px owner avatarを置き、GitHub metadataがない時はneutral Git worktree fallback、画像取得失敗時はneutral user fallbackを使う。workspace selectionでfont weight、文字幅、avatar geometryを変えず、selected background、strong text、branch violet iconだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。
 
 `text-sidebar-*`のsize roleと`text-*` colorを同じ`cn` / Tailwind mergeへ渡すとsize roleが競合classとして除去されるため、両classをmergeしないかmerge設定を明示する。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "uses branch titles and GitHub repository metadata with stable typography"`でbranch/repositoryの表示順、role classの保持、selection時の安定性を検証する。
 
-attentionはlifecycleを変更せず、`Needs answer / Approval required / Test failed / High risk`のicon、text、countをitem右端へ付ける。active itemだけ`selected-row`、strong text、branch violet iconを使う。itemの第一行はbranchまたはdetached HEAD短縮SHA、第二行はGitHub `origin`から抽出した`owner/repo`とし、GitHub `origin`がない場合はlocal repo名へfallbackする。remote URL自体やcredentialはWebView、DB、logへ渡さない。repo/branchは一行ellipsis + tooltipとする。
+attentionはlifecycleを変更せず、`Needs answer / Approval required / Test failed / High risk`のicon、text、countをitem右端へ付ける。active itemだけ`selected-row`、strong text、branch violet iconを使う。itemはowner avatar、二行のtext columnの順とし、第一行はbranch iconとbranchまたはdetached HEAD短縮SHA、第二行はGitHub `origin`から抽出した`owner/repo`とする。GitHub `origin`がない場合はlocal repo名へfallbackする。remote URL自体やcredentialはWebView、DB、logへ渡さない。repo/branchは一行ellipsis + tooltipとする。
 
 ### preflight
 
