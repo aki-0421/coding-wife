@@ -32,6 +32,18 @@ Web情報を更新した場合は、対象文書の `updated` と `last_verified
 
 実装を始める前に、仕様を書面で記録する。
 
+## ローカル検証
+
+通常のローカル開発では、ユーザーから明示的な依頼がない限り、テスト、lint、build、品質ゲートを実行しない。PR単位の検証はCIに任せ、未実施のローカル検証を実施済みとして報告しない。
+
+特に、次のリリース候補向け検証を通常の実装確認として実行しない。これらは、依頼された作業自体がリリース候補の作成・検証である場合、またはユーザーから明示的に指示された場合にだけ実行する。
+
+* `pnpm quality:check`
+* `pnpm test:release`
+* `pnpm test:clean-checkout`
+* `pnpm tauri build`
+* `pnpm release:macos`とその配下のapp、DMG、verifyコマンド
+
 ## コミットメッセージ
 
 * コミットメッセージは Conventional Commits をベースにし、英語で作成する。

@@ -4,7 +4,7 @@ description: "developを保護するGitHub Actions CIのトリガー、必須ゲ
 updated: 2026-07-19
 read_when:
   - "GitHub Actions、ブランチ保護、またはリポジトリ品質ゲートを変更するとき。"
-  - "CI失敗を調査し、ローカルで同じ検証を再現するとき。"
+  - "CI失敗の検証範囲と担当jobを特定するとき。"
   - "macOSリリース検証と通常CIの責務境界を判断するとき。"
 ---
 
@@ -18,6 +18,7 @@ read_when:
 
 - PR向けJavaScript test集合の正本は`pnpm test:pr`とする。macOS release integrationを含む`pnpm test:release`は呼び出さない。
 - CIは`.github/workflows/ci.yml`に列挙したformat、documentation、frontend、native、dependency inventoryだけを固定依存のclean checkoutで実行する。
+- 通常のローカル開発では、これらのCI検証やリリース候補向け検証を変更後の確認として自動実行しない。ローカル検証は、ユーザーが明示的に依頼した場合、または依頼された作業自体がリリース候補の作成・検証である場合に限定する。
 - `pnpm quality:check`はrelease候補用の完全ゲートとして維持する。clean-checkout再構築、macOS release integration、Tauri bundle、最終diff再検査を含むため、PRごとのCIでは実行しない。
 - `.app`とDMGの生成・公開、Developer ID署名、公証、stapling、fresh-profileまたは別Macでのinstall smoke、Devpost提出はCIの対象外とする。リリース候補を固定した後、[Testing Coding Wife](../testing.md)の手順で実施する。
 

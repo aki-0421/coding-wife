@@ -1,6 +1,6 @@
 ---
 title: "Testing Coding Wife"
-description: "Judge-facing setup, CI, verification, macOS release packaging, installation, and Gatekeeper instructions for Coding Wife."
+description: "Judge-facing setup, CI, release-candidate verification, macOS packaging, installation, and Gatekeeper instructions for Coding Wife."
 updated: 2026-07-19
 read_when:
   - "Reproducing the hackathon build or verifying Coding Wife on macOS."
@@ -41,7 +41,9 @@ Run the native shell with:
 pnpm tauri dev
 ```
 
-## Run the quality gates
+## Run the release-candidate quality gates
+
+Do not run this sequence as routine local-development validation. Pull Request validation belongs to CI. Run these release-specific checks only when the task is to prepare or verify a release candidate, or when the user explicitly requests them. Agents must also follow the local-validation policy in [`AGENTS.md`](../AGENTS.md).
 
 Start from a clean committed checkout, then run the repository-owned sequence:
 
@@ -98,7 +100,7 @@ src-tauri/target/release/bundle/dmg/Coding-Wife.dmg
 src-tauri/target/release/bundle/dmg/Coding-Wife.dmg.release.json
 ```
 
-Run the packaging test without compiling the real application:
+When preparing or verifying a release candidate, run the packaging test without compiling the real application:
 
 ```bash
 pnpm test:release
