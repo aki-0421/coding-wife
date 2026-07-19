@@ -406,14 +406,6 @@ impl CharacterService {
         Ok(state)
     }
 
-    pub(crate) fn prepare_project_unregistration(
-        &self,
-        workspace_id: &str,
-    ) -> CharacterResult<Option<CharacterProjectSelectionRollback>> {
-        let project_id = self.resolve_project_id(workspace_id)?;
-        self.prepare_project_id_unregistration(&project_id)
-    }
-
     pub(crate) fn prepare_project_id_unregistration(
         &self,
         project_id: &str,

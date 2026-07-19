@@ -1785,25 +1785,93 @@ mod tests {
             .expect("candidate")
     }
 
+    fn ensure_repository_head(root: &Path) {
+        let has_head = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "--verify", "HEAD"])
+            .output()
+            .expect("inspect fixture HEAD")
+            .status
+            .success();
+        if has_head {
+            return;
+        }
+        let status = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(root)
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "fixture",
+            ])
+            .status()
+            .expect("create fixture HEAD");
+        assert!(status.success());
+    }
+
+    async fn register_project_workspace(
+        service: &WorkspaceHistoryService,
+        project_root: &Path,
+        label: &str,
+    ) -> WorkspaceStateSnapshot {
+        ensure_repository_head(project_root);
+        let existing_project_ids = service
+            .list()
+            .expect("state before project registration")
+            .projects
+            .into_iter()
+            .map(|project| project.project_id)
+            .collect::<Vec<_>>();
+        let registered = service
+            .register_validated_candidate(
+                candidate(&service.workspace, project_root).await,
+                "workspace_pick_register",
+            )
+            .await
+            .expect("register project");
+        let project_id = registered
+            .projects
+            .iter()
+            .find(|project| !existing_project_ids.contains(&project.project_id))
+            .expect("newly registered project")
+            .project_id
+            .clone();
+        service
+            .create_session(WorkspaceCreateSessionRequest {
+                project_id,
+                name: format!("Fixture {label}"),
+                client_request_id: format!("request-{label}-{}", uuid::Uuid::new_v4()),
+            })
+            .await
+            .expect("create project worktree")
+    }
+
     async fn registered_context_service(
         label: &str,
     ) -> (WorkspaceHistoryService, PathBuf, PathBuf, String) {
         let data = temp_directory(&format!("history-service-context-{label}"));
-        let root = git_repository();
+        let original_root = git_repository();
+        let project_root = data.join("project");
+        fs::rename(original_root, &project_root).expect("move fixture project into data root");
         let workspace = WorkspaceService::production(CodexSupervisor::new());
         let service = WorkspaceHistoryService::new(
             WorkspaceHistoryStore::open(&data).expect("store"),
             workspace.clone(),
         );
-        let state = service
-            .register_validated_candidate(
-                candidate(&workspace, &root).await,
-                "workspace_pick_register",
-            )
-            .await
-            .expect("register context workspace");
+        let state = register_project_workspace(&service, &project_root, label).await;
         let workspace_id = state.active_workspace_id.expect("active workspace");
-        (service, root, data, workspace_id)
+        let workspace_root = service
+            .store
+            .private_workspace_record(&workspace_id)
+            .expect("private workspace root")
+            .canonical_root;
+        (service, workspace_root, data, workspace_id)
     }
 
     struct ProjectLifecycleFixture {
@@ -1843,6 +1911,11 @@ mod tests {
             .to_owned()
     }
 
+    fn git_directory(root: &Path) -> PathBuf {
+        fs::canonicalize(run_git(root, &["rev-parse", "--absolute-git-dir"]))
+            .expect("canonical git directory")
+    }
+
     async fn project_lifecycle_fixture(label: &str) -> ProjectLifecycleFixture {
         let data = temp_directory(&format!("history-character-{label}"));
         let root = git_repository();
@@ -1877,13 +1950,7 @@ mod tests {
             character.clone(),
             project_operations.clone(),
         );
-        let state = history
-            .register_validated_candidate(
-                candidate(&workspace, &root).await,
-                "workspace_pick_register",
-            )
-            .await
-            .expect("register project lifecycle workspace");
+        let state = register_project_workspace(&history, &root, label).await;
         let workspace_id = state.active_workspace_id.expect("active workspace");
         let project_id = state
             .workspaces
@@ -2020,8 +2087,8 @@ mod tests {
 
         fixture
             .history
-            .unregister(WorkspaceSelectRequest {
-                workspace_id: fixture.workspace_id.clone(),
+            .unregister(ProjectSelectRequest {
+                project_id: fixture.project_id.clone(),
             })
             .await
             .expect("unregister project");
@@ -2099,8 +2166,8 @@ mod tests {
 
         let error = fixture
             .history
-            .unregister(WorkspaceSelectRequest {
-                workspace_id: fixture.workspace_id.clone(),
+            .unregister(ProjectSelectRequest {
+                project_id: fixture.project_id.clone(),
             })
             .await
             .expect_err("history failure must reject unregister");
@@ -2145,10 +2212,10 @@ mod tests {
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
         let history = select_first.history.clone();
-        let workspace_id = select_first.workspace_id.clone();
+        let project_id = select_first.project_id.clone();
         let unregister = tokio::spawn(async move {
             history
-                .unregister(WorkspaceSelectRequest { workspace_id })
+                .unregister(ProjectSelectRequest { project_id })
                 .await
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -2178,10 +2245,10 @@ mod tests {
             .lock_owned()
             .await;
         let history = unregister_first.history.clone();
-        let workspace_id = unregister_first.workspace_id.clone();
+        let project_id = unregister_first.project_id.clone();
         let unregister = tokio::spawn(async move {
             history
-                .unregister(WorkspaceSelectRequest { workspace_id })
+                .unregister(ProjectSelectRequest { project_id })
                 .await
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -2218,14 +2285,8 @@ mod tests {
 
         let delete_race = project_lifecycle_fixture("race-delete").await;
         let observer_root = git_repository();
-        let observer = delete_race
-            .history
-            .register_validated_candidate(
-                candidate(&delete_race.history.workspace, &observer_root).await,
-                "workspace_pick_register",
-            )
-            .await
-            .expect("register observer project");
+        let observer =
+            register_project_workspace(&delete_race.history, &observer_root, "observer").await;
         let observer_workspace_id = observer
             .active_workspace_id
             .expect("observer active workspace");
@@ -2243,10 +2304,10 @@ mod tests {
             .expect("observer library before race");
         let held = delete_race.project_operations.clone().lock_owned().await;
         let history = delete_race.history.clone();
-        let workspace_id = delete_race.workspace_id.clone();
+        let project_id = delete_race.project_id.clone();
         let unregister = tokio::spawn(async move {
             history
-                .unregister(WorkspaceSelectRequest { workspace_id })
+                .unregister(ProjectSelectRequest { project_id })
                 .await
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -2618,8 +2679,9 @@ mod tests {
     async fn readiness_revalidates_the_active_private_repository_without_git_mutation() {
         let (service, root, data, _) = registered_context_service("readiness-repository").await;
         fs::write(root.join("untracked.txt"), "preserve\n").expect("untracked fixture");
-        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before readiness");
-        let index_before = fs::read(root.join(".git/index")).ok();
+        let git_directory = git_directory(&root);
+        let head_before = fs::read(git_directory.join("HEAD")).expect("HEAD before readiness");
+        let index_before = fs::read(git_directory.join("index")).ok();
         let status_before = std::process::Command::new("/usr/bin/git")
             .arg("-C")
             .arg(&root)
@@ -2634,10 +2696,10 @@ mod tests {
         assert!(ready.head_matches);
         assert!(ready.branch_matches);
         assert_eq!(
-            fs::read(root.join(".git/HEAD")).expect("HEAD after readiness"),
+            fs::read(git_directory.join("HEAD")).expect("HEAD after readiness"),
             head_before,
         );
-        assert_eq!(fs::read(root.join(".git/index")).ok(), index_before);
+        assert_eq!(fs::read(git_directory.join("index")).ok(), index_before);
         assert_eq!(
             std::process::Command::new("/usr/bin/git")
                 .arg("-C")
@@ -2659,9 +2721,9 @@ mod tests {
         let stale = service.repository_readiness().await;
         assert_eq!(stale.state, RepositoryReadinessState::StaleBranch);
         assert!(stale.identity_matches);
-        assert!(stale.head_matches);
+        assert!(!stale.head_matches);
         assert!(!stale.branch_matches);
-        fs::write(root.join(".git/HEAD"), &head_before).expect("restore fixture HEAD");
+        fs::write(git_directory.join("HEAD"), &head_before).expect("restore fixture HEAD");
 
         let moved_root = root.with_file_name(format!(
             "{}-moved",
@@ -2687,13 +2749,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn readiness_blocks_a_changed_saved_repository_identity() {
+    async fn readiness_blocks_a_changed_saved_common_git_identity() {
         let data = temp_directory("history-service-readiness-identity");
         let root = git_repository();
         let workspace = WorkspaceService::production(CodexSupervisor::new());
         let store = WorkspaceHistoryStore::open(&data).expect("store");
         let mut original = candidate(&workspace, &root).await;
-        original.git.project_identity = "changed-saved-identity".to_owned();
+        original.git.common_git_inode = original.git.common_git_inode.saturating_add(1);
         let registration = store
             .register_candidate(&original)
             .expect("register changed identity");
@@ -2715,13 +2777,8 @@ mod tests {
         let (service, root, data, workspace_id) =
             registered_context_service("missing-recheck").await;
         let other_root = git_repository();
-        let other_workspace_id = service
-            .register_validated_candidate(
-                candidate(&service.workspace, &other_root).await,
-                "workspace_pick_register",
-            )
+        let other_workspace_id = register_project_workspace(&service, &other_root, "other")
             .await
-            .expect("register other project")
             .active_workspace_id
             .expect("other workspace active");
         service
@@ -2833,6 +2890,14 @@ mod tests {
     async fn recheck_requires_explicit_acceptance_for_external_head_without_mutating_git() {
         let (service, root, data, workspace_id) =
             registered_context_service("external-head-recheck").await;
+        let initial_head = service
+            .list()
+            .expect("initial state")
+            .workspaces
+            .into_iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)
+            .expect("initial workspace")
+            .head;
         fs::write(root.join("README.md"), "external change\n").expect("source fixture");
         for arguments in [
             vec!["-C", root.to_str().expect("root"), "add", "README.md"],
@@ -2855,7 +2920,8 @@ mod tests {
                 .expect("git fixture command")
                 .success());
         }
-        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before recheck");
+        let git_directory = git_directory(&root);
+        let head_before = fs::read(git_directory.join("HEAD")).expect("HEAD before recheck");
         let status_before = std::process::Command::new("/usr/bin/git")
             .arg("-C")
             .arg(&root)
@@ -2877,7 +2943,7 @@ mod tests {
             .find(|workspace| workspace.workspace_id == workspace_id)
             .expect("stale workspace");
         assert_eq!(stale_workspace.health, WorkspaceHealth::StaleBranch);
-        assert_eq!(stale_workspace.head, "unborn");
+        assert_eq!(stale_workspace.head, initial_head);
 
         let ready = service
             .recheck(WorkspaceRecheckRequest {
@@ -2892,9 +2958,9 @@ mod tests {
             .find(|workspace| workspace.workspace_id == workspace_id)
             .expect("ready workspace");
         assert_eq!(ready_workspace.health, WorkspaceHealth::Ready);
-        assert_ne!(ready_workspace.head, "unborn");
+        assert_ne!(ready_workspace.head, initial_head);
         assert_eq!(
-            fs::read(root.join(".git/HEAD")).expect("HEAD after recheck"),
+            fs::read(git_directory.join("HEAD")).expect("HEAD after recheck"),
             head_before
         );
         assert_eq!(
@@ -2919,7 +2985,7 @@ mod tests {
         let workspace = WorkspaceService::production(CodexSupervisor::new());
         let store = WorkspaceHistoryStore::open(&data).expect("store");
         let mut original = candidate(&workspace, &root).await;
-        original.git.project_identity = "known-original-identity".to_owned();
+        original.git.common_git_inode = original.git.common_git_inode.saturating_add(1);
         store.register_candidate(&original).expect("register");
         let service = WorkspaceHistoryService::new(store, workspace);
 
@@ -2933,22 +2999,9 @@ mod tests {
 
     #[tokio::test]
     async fn context_capture_reads_only_allowlisted_native_git_sources() {
-        let data = temp_directory("history-service-context");
-        let root = git_repository();
+        let (service, root, data, workspace_id) =
+            registered_context_service("capture-sources").await;
         fs::write(root.join("fixture.txt"), "fixture context\n").expect("fixture file");
-        let workspace = WorkspaceService::production(CodexSupervisor::new());
-        let service = WorkspaceHistoryService::new(
-            WorkspaceHistoryStore::open(&data).expect("store"),
-            workspace.clone(),
-        );
-        let state = service
-            .register_validated_candidate(
-                candidate(&workspace, &root).await,
-                "workspace_pick_register",
-            )
-            .await
-            .expect("register and activate");
-        let workspace_id = state.active_workspace_id.expect("active workspace");
 
         let snapshot = service
             .save_context(WorkspaceSaveContextRequest {
@@ -2968,6 +3021,7 @@ mod tests {
             .await
             .expect_err("terminal output has no trusted producer yet");
         assert_eq!(error.code, "WORKSPACE-CONTEXT-SOURCE-UNAVAILABLE");
+        let _ = fs::remove_dir_all(data);
     }
 
     #[tokio::test]

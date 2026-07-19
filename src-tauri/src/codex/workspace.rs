@@ -396,10 +396,10 @@ pub fn matches_saved_repository_identity(
         && candidate.git_inode == saved.git_inode
         && saved
             .common_git_device
-            .map_or(true, |device| device == candidate.common_git_device)
+            .is_none_or(|device| device == candidate.common_git_device)
         && saved
             .common_git_inode
-            .map_or(true, |inode| inode == candidate.common_git_inode)
+            .is_none_or(|inode| inode == candidate.common_git_inode)
 }
 
 pub fn matches_saved_git_repository(

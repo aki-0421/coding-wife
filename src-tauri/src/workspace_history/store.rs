@@ -332,10 +332,10 @@ impl StoredProjectLinkage {
             && self.git_inode == candidate.git_inode
             && self
                 .common_git_device
-                .map_or(true, |device| device == candidate.common_git_device)
+                .is_none_or(|device| device == candidate.common_git_device)
             && self
                 .common_git_inode
-                .map_or(true, |inode| inode == candidate.common_git_inode)
+                .is_none_or(|inode| inode == candidate.common_git_inode)
     }
 
     fn private_identity(&self) -> AppPrivateProjectIdentity {
@@ -1311,7 +1311,7 @@ impl WorkspaceHistoryStore {
                 params![workspace_id, now],
             )
             .map_err(|_| history_error("HIST-PREFERENCE-INSERT", true))?;
-        insert_default_editable_context(&transaction, &workspace_id, &now)?;
+        insert_default_editable_context(&transaction, workspace_id, &now)?;
         append_event_in_transaction(
             &transaction,
             &NormalizedDomainEvent {
@@ -1326,8 +1326,8 @@ impl WorkspaceHistoryStore {
             },
             Some(&candidate.git.canonical_root),
         )?;
-        let workspace = workspace_by_id(&transaction, &workspace_id)?;
-        let private_record = private_workspace_by_id(&transaction, &workspace_id)?;
+        let workspace = workspace_by_id(&transaction, workspace_id)?;
+        let private_record = private_workspace_by_id(&transaction, workspace_id)?;
         transaction
             .commit()
             .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
@@ -4574,6 +4574,7 @@ mod tests {
             .register_candidate(&candidate(&root).await)
             .expect("registration");
         let workspace_id = registration.workspace.workspace_id;
+        let project_id = registration.workspace.project_id;
         let sibling = store
             .create_session_workspace(
                 &workspace_id,
@@ -4587,7 +4588,7 @@ mod tests {
             .expect("draft");
 
         let hidden = store
-            .unregister_project(&workspace_id)
+            .unregister_project(&project_id)
             .expect("unregister project");
         assert!(hidden.workspaces.is_empty());
         assert_eq!(hidden.active_workspace_id, None);
@@ -4702,7 +4703,7 @@ mod tests {
             .expect("old history")
             .items;
         store
-            .unregister_project(&old_workspace_id)
+            .unregister_project(&old_project_id)
             .expect("unregister");
 
         replace_git_directory(&root);
@@ -4766,6 +4767,10 @@ mod tests {
         let saved = store
             .private_project_identity(&workspace_id)
             .expect("saved identity");
+        let original_workspace_root = store
+            .private_workspace_record(&workspace_id)
+            .expect("saved workspace linkage")
+            .canonical_root;
         let different = git_repository();
         let mismatch = candidate(&different).await;
         let history_before = store
@@ -4808,10 +4813,17 @@ mod tests {
         assert_eq!(repaired.workspaces[0].workspace_id, workspace_id);
         assert_eq!(
             store
-                .private_workspace_record(&workspace_id)
-                .expect("moved linkage")
+                .private_project_identity(&workspace_id)
+                .expect("moved project linkage")
                 .canonical_root,
             fs::canonicalize(&moved).expect("canonical moved")
+        );
+        assert_eq!(
+            store
+                .private_workspace_record(&workspace_id)
+                .expect("preserved workspace linkage")
+                .canonical_root,
+            original_workspace_root
         );
         assert_eq!(
             fs::read(moved.join("README.md")).expect("source after"),
@@ -6490,18 +6502,10 @@ mod tests {
 
         let store = WorkspaceHistoryStore::open(&data).expect("migrate v4 fixture");
         assert_eq!(store.status().mode, HistoryMode::Ready);
-        for (workspace_id, event_id, summary_text, sequence) in &expected {
-            let snapshot = store
-                .snapshot(Some(workspace_id))
-                .expect("snapshot migrated workspace");
-            let resume = snapshot.resume_state.expect("backfilled resume state");
-            let summary = resume.last_summary.expect("backfilled summary");
-            assert_eq!(summary.workspace_id, *workspace_id);
-            assert_eq!(summary.event_id, *event_id);
-            assert_eq!(summary.sequence, *sequence);
-            assert_eq!(summary.text, *summary_text);
-            assert!(resume.timeline_anchor.is_none());
-        }
+        let public_snapshot = store.snapshot(None).expect("public migrated snapshot");
+        assert!(public_snapshot.workspaces.is_empty());
+        assert!(public_snapshot.active_workspace_id.is_none());
+        assert!(public_snapshot.resume_state.is_none());
         drop(store);
 
         let rows_after_migration = {
@@ -6510,7 +6514,7 @@ mod tests {
                 connection
                     .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .expect("migrated version"),
-                6
+                CURRENT_DATABASE_VERSION
             );
             let mut statement = connection
                 .prepare(
@@ -6533,6 +6537,20 @@ mod tests {
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .expect("decode migrated summaries")
         };
+        let mut expected_rows = expected
+            .iter()
+            .map(|(workspace_id, event_id, summary, sequence)| {
+                (
+                    workspace_id.clone(),
+                    event_id.clone(),
+                    *sequence,
+                    summary.clone(),
+                    0,
+                )
+            })
+            .collect::<Vec<_>>();
+        expected_rows.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(rows_after_migration, expected_rows);
         assert_eq!(rows_after_migration.len(), 20);
         assert!(rows_after_migration
             .iter()
