@@ -156,7 +156,9 @@ describe("App commit explanation composition", () => {
       }),
     )
     expect(dismissPresentation).toHaveBeenCalledWith("workspace_switch")
-    fireEvent.click(screen.getByRole("button", { name: "ワークスペースへ戻る" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "ワークスペースへ戻る" }),
+    )
 
     dismissPresentation.mockClear()
     act(() => {
