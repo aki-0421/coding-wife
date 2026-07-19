@@ -74,7 +74,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-053` | 利用者はFigma基準の三領域を表示できる | 1470×836 CSS pxでsidebar 255.04px、header 81px、Chat 607.11px、Companion 607.84pxとなり、主要境界が各基準値の±2px以内になる | Approved | 非該当 |
 | `APP-F-054` | 利用者はminimum window sizeでも主要操作を継続できる | windowは960×640 CSS px未満へ縮小できず、960×640でtab、timeline、composer、Send、停止操作が欠落しない | Approved | 非該当 |
 | `APP-F-055` | 利用者はS-001〜S-004の目的へ同じwindow内で移動できる | sidebar、Chat/Commit/Context/Settings tab、settings gearから対象viewへ移動し、戻った時にworkspace選択とcomposer draftが保たれる | Approved | 非該当 |
-| `APP-F-056` | 利用者はcustom titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になり、traffic-light周辺のdrag regionがbutton操作を奪わない | Approved | 非該当 |
+| `APP-F-056` | 利用者はmacOS native titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になる。WebViewは赤・黄・緑のtraffic-light代替要素を描画せず、native control用safe areaとdrag regionがbutton操作を奪わない | Approved | 非該当 |
 
 ### 言語・アクセシビリティ
 

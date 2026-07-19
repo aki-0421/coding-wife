@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from "react"
+import { useId, useMemo, useRef, useState } from "react"
 import {
-  CheckIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   FolderPlusIcon,
   GitBranchIcon,
@@ -9,7 +9,6 @@ import {
   PlusIcon,
   SettingsIcon,
   TriangleAlertIcon,
-  XIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -38,6 +37,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
+import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
 import type {
   WorkspaceLifecycle,
   WorkspaceRecord,
@@ -52,6 +53,14 @@ const lifecycleOrder: readonly WorkspaceLifecycle[] = [
   "canceled",
 ]
 
+const initiallyExpandedLifecycles = {
+  done: true,
+  in_review: true,
+  in_progress: true,
+  backlog: true,
+  canceled: true,
+} as const satisfies Readonly<Record<WorkspaceLifecycle, boolean>>
+
 interface WorkspaceSidebarProps {
   readonly copy: WorkspaceCopy
   readonly filter: string
@@ -65,44 +74,10 @@ interface WorkspaceSidebarProps {
   readonly onSelectWorkspace: (workspaceId: string) => void
 }
 
-function StatusMarker({
-  lifecycle,
-}: {
-  readonly lifecycle: WorkspaceLifecycle
-}) {
-  if (lifecycle === "done") {
-    return (
-      <span
-        aria-hidden="true"
-        className="flex size-[10.5px] shrink-0 items-center justify-center rounded-circle bg-warm-active text-[7px] text-app-bg"
-      >
-        <CheckIcon className="size-[7px]" />
-      </span>
-    )
-  }
-
-  if (lifecycle === "canceled") {
-    return (
-      <span
-        aria-hidden="true"
-        className="flex size-[10.5px] shrink-0 items-center justify-center rounded-circle bg-canceled text-[7px] text-app-bg"
-      >
-        <XIcon className="size-[7px]" />
-      </span>
-    )
-  }
-
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "size-[10.5px] shrink-0 rounded-circle border-[1.5px]",
-        lifecycle === "in_review" && "border-success",
-        lifecycle === "in_progress" && "border-running",
-        lifecycle === "backlog" && "border-dashed border-muted-foreground",
-      )}
-    />
-  )
+interface SidebarPanelProps extends WorkspaceSidebarProps {
+  readonly expandedLifecycles: Readonly<Record<WorkspaceLifecycle, boolean>>
+  readonly reserveTitlebarSpace: boolean
+  readonly onToggleLifecycle: (lifecycle: WorkspaceLifecycle) => void
 }
 
 function WorkspaceRow({
@@ -116,7 +91,7 @@ function WorkspaceRow({
   readonly workspace: WorkspaceRecord
   readonly onSelect: () => void
 }) {
-  const fullName = `${workspace.repository}/${workspace.name}`
+  const repositoryLabel = workspace.githubRepository ?? workspace.repository
   const health =
     workspace.health === undefined || workspace.health === "ready"
       ? null
@@ -127,7 +102,7 @@ function WorkspaceRow({
       <TooltipTrigger asChild>
         <button
           aria-current={selected ? "page" : undefined}
-          aria-label={`${fullName}, ${workspace.branch}, ${copy.lifecycle[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
+          aria-label={`${workspace.branch}, ${repositoryLabel}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
           className={cn(
             "group/workspace flex h-[49.5px] w-full items-center gap-sm rounded-control px-sm py-xs text-start outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
             selected && "bg-selected-row",
@@ -144,21 +119,15 @@ function WorkspaceRow({
           />
           <span className="flex min-w-0 flex-1 flex-col">
             <span
-              className={cn(
-                "truncate text-body text-foreground",
-                selected && "font-medium text-text-strong",
-              )}
+              className={`truncate text-sidebar-item ${selected ? "text-text-strong" : "text-foreground"}`}
             >
-              {fullName}
+              {workspace.branch}
             </span>
             <span className="flex min-w-0 items-center gap-xs">
               <span
-                className={cn(
-                  "truncate font-mono text-label text-muted-foreground transition-colors group-hover/workspace:text-selected-row-secondary group-focus-visible/workspace:text-selected-row-secondary",
-                  selected && "text-selected-row-secondary",
-                )}
+                className={`truncate font-mono text-sidebar-meta transition-colors group-hover/workspace:text-selected-row-secondary group-focus-visible/workspace:text-selected-row-secondary ${selected ? "text-selected-row-secondary" : "text-muted-foreground"}`}
               >
-                {workspace.branch}
+                {repositoryLabel}
               </span>
               {workspace.attention ? (
                 <CircleAlertIcon
@@ -183,7 +152,7 @@ function WorkspaceRow({
         </button>
       </TooltipTrigger>
       <TooltipContent side="right">
-        {fullName} · {workspace.branch}
+        {workspace.branch} · {repositoryLabel}
         {workspace.attention ? ` · ${copy.attention[workspace.attention]}` : ""}
         {health ? ` · ${health}` : ""}
       </TooltipContent>
@@ -284,17 +253,20 @@ function CreateWorkspaceDialog({
 
 function SidebarPanel({
   copy,
+  expandedLifecycles,
   filter,
   filteredWorkspaces,
   selectedWorkspaceId,
-  showTrafficLights,
+  reserveTitlebarSpace,
   onAddProject,
   onCreateWorkspace,
   onFilterChange,
   onOpenSettings,
   onSelectWorkspace,
-}: WorkspaceSidebarProps & { readonly showTrafficLights: boolean }) {
+  onToggleLifecycle,
+}: SidebarPanelProps) {
   const [filterVisible, setFilterVisible] = useState(false)
+  const lifecycleContentIdPrefix = useId()
   const groups = useMemo(
     () =>
       lifecycleOrder.map((lifecycle) => ({
@@ -308,21 +280,12 @@ function SidebarPanel({
 
   return (
     <div className="flex size-full min-h-0 flex-col bg-sidebar">
-      {showTrafficLights ? (
-        <div
-          className="flex h-[40.5px] shrink-0 items-center px-lg"
-          aria-hidden="true"
-        >
-          <span className="flex gap-sm">
-            <span className="size-3 rounded-circle bg-[#ff5f57]" />
-            <span className="size-3 rounded-circle bg-[#febc2e]" />
-            <span className="size-3 rounded-circle bg-[#28c840]" />
-          </span>
-        </div>
+      {reserveTitlebarSpace ? (
+        <div className="h-[40.5px] shrink-0" aria-hidden="true" />
       ) : null}
 
       <div className="flex h-[40.5px] shrink-0 items-center justify-between px-md">
-        <h1 className="m-0 text-headline text-muted-foreground">
+        <h1 className="m-0 text-sidebar-heading text-muted-foreground">
           {copy.workspaces}
         </h1>
         <div className="flex items-center gap-xxs">
@@ -374,29 +337,67 @@ function SidebarPanel({
       ) : null}
 
       <ScrollArea className="min-h-0 flex-1 px-xs">
-        <nav aria-label={copy.workspaces} className="flex flex-col pb-md">
-          {groups.map(({ lifecycle, workspaces }) => (
-            <section className="flex flex-col pt-sm" key={lifecycle}>
-              <h2 className="m-0 flex h-6 items-center gap-xs px-xs text-title font-medium text-muted-foreground">
-                <StatusMarker lifecycle={lifecycle} />
-                <span>{copy.lifecycle[lifecycle]}</span>
-                <span className="sr-only">({workspaces.length})</span>
-              </h2>
-              {workspaces.map((workspace) => (
-                <WorkspaceRow
-                  copy={copy}
-                  key={workspace.id}
-                  onSelect={() => onSelectWorkspace(workspace.id)}
-                  selected={workspace.id === selectedWorkspaceId}
-                  workspace={workspace}
-                />
-              ))}
-            </section>
-          ))}
+        <nav
+          aria-label={copy.workspaces}
+          className="flex w-full max-w-[242.25px] flex-col pb-md"
+        >
+          {groups.map(({ lifecycle, workspaces }) => {
+            const expanded = expandedLifecycles[lifecycle]
+            const contentId = `${lifecycleContentIdPrefix}-${lifecycle}`
+
+            return (
+              <section className="flex flex-col pt-sm" key={lifecycle}>
+                <h2 className="m-0">
+                  <button
+                    aria-controls={contentId}
+                    aria-expanded={expanded}
+                    className="group/status flex h-6 w-full cursor-pointer items-center gap-xs rounded-control px-xs text-start text-sidebar-status text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    data-workspace-status-toggle={lifecycle}
+                    onClick={() => onToggleLifecycle(lifecycle)}
+                    type="button"
+                  >
+                    <WorkspaceLifecycleIcon lifecycle={lifecycle} />
+                    <span>{linearWorkspaceStatusLabels[lifecycle]}</span>
+                    <span className="sr-only">({workspaces.length})</span>
+                    <span className="ml-auto flex items-center gap-xxs">
+                      {!expanded ? (
+                        <span
+                          aria-hidden="true"
+                          className="tabular-nums text-label text-muted-foreground"
+                          data-workspace-status-count={lifecycle}
+                        >
+                          {workspaces.length}
+                        </span>
+                      ) : null}
+                      <ChevronRightIcon
+                        aria-hidden="true"
+                        className={cn(
+                          "size-3 shrink-0 opacity-0 transition-[opacity,transform] duration-150 motion-reduce:transition-none group-hover/status:opacity-100 group-focus-visible/status:opacity-100",
+                          expanded && "rotate-90",
+                        )}
+                        data-workspace-status-chevron=""
+                      />
+                    </span>
+                  </button>
+                </h2>
+                <div hidden={!expanded} id={contentId}>
+                  {workspaces.map((workspace) => (
+                    <WorkspaceRow
+                      copy={copy}
+                      key={workspace.id}
+                      onSelect={() => onSelectWorkspace(workspace.id)}
+                      selected={workspace.id === selectedWorkspaceId}
+                      workspace={workspace}
+                    />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
 
           {filteredWorkspaces.length === 0 ? (
             <div className="flex flex-col items-start gap-xs px-sm py-lg">
-              <p className="m-0 text-caption text-muted-foreground">
+              <p className="m-0 text-sidebar-helper text-muted-foreground">
                 {copy.noMatches}
               </p>
               <Button
@@ -434,8 +435,18 @@ function SidebarPanel({
 
 export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   const [compactNavigationOpen, setCompactNavigationOpen] = useState(false)
+  const [expandedLifecycles, setExpandedLifecycles] = useState<
+    Readonly<Record<WorkspaceLifecycle, boolean>>
+  >(() => ({ ...initiallyExpandedLifecycles }))
   const compactOpenerRef = useRef<HTMLButtonElement | null>(null)
   const selected = props.selectedWorkspace
+
+  const toggleLifecycle = (lifecycle: WorkspaceLifecycle) => {
+    setExpandedLifecycles((current) => ({
+      ...current,
+      [lifecycle]: !current[lifecycle],
+    }))
+  }
 
   const openCompactNavigation = (opener: HTMLButtonElement) => {
     compactOpenerRef.current = opener
@@ -452,15 +463,16 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   return (
     <aside className="workspace-sidebar border-r border-divider">
       <div className="hidden size-full min-[1280px]:block">
-        <SidebarPanel {...props} showTrafficLights />
+        <SidebarPanel
+          {...props}
+          expandedLifecycles={expandedLifecycles}
+          onToggleLifecycle={toggleLifecycle}
+          reserveTitlebarSpace
+        />
       </div>
 
       <div className="flex size-full flex-col items-center bg-sidebar min-[1280px]:hidden">
-        <div className="flex h-[40.5px] items-center gap-xs" aria-hidden="true">
-          <span className="size-xs rounded-circle bg-[#ff5f57]" />
-          <span className="size-xs rounded-circle bg-[#febc2e]" />
-          <span className="size-xs rounded-circle bg-[#28c840]" />
-        </div>
+        <div className="h-[40.5px] shrink-0" aria-hidden="true" />
         <Dialog
           onOpenChange={setCompactNavigationOpen}
           open={compactNavigationOpen}
@@ -504,6 +516,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
             </DialogTitle>
             <SidebarPanel
               {...props}
+              expandedLifecycles={expandedLifecycles}
               onAddProject={() => {
                 closeCompactNavigation()
                 props.onAddProject()
@@ -518,7 +531,8 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 props.onOpenSettings()
               }}
               onSelectWorkspace={selectFromCompactNavigation}
-              showTrafficLights={false}
+              onToggleLifecycle={toggleLifecycle}
+              reserveTitlebarSpace={false}
             />
           </DialogContent>
 

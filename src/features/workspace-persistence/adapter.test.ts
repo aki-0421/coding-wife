@@ -25,6 +25,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
     expect(projected.workspaces[0]).toEqual({
       id: "workspace-fixture",
       repository: "fixture-repository",
+      githubRepository: "fixture-owner/fixture-repository",
       name: "Fixture workspace",
       branch: "main",
       lifecycle: "in_progress",

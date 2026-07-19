@@ -63,6 +63,36 @@ typography:
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "0"
+  sidebarHeading:
+    fontFamily: "Inter, Noto Sans JP, system-ui, sans-serif"
+    fontSize: "14px"
+    fontWeight: 600
+    lineHeight: 1.5
+    letterSpacing: "0"
+  sidebarStatus:
+    fontFamily: "Inter, Noto Sans JP, system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 600
+    lineHeight: 1.5
+    letterSpacing: "0"
+  sidebarItem:
+    fontFamily: "Inter, Noto Sans JP, system-ui, sans-serif"
+    fontSize: "13px"
+    fontWeight: 500
+    lineHeight: 1.5
+    letterSpacing: "0"
+  sidebarMeta:
+    fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace"
+    fontSize: "11px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "0"
+  sidebarHelper:
+    fontFamily: "Inter, Noto Sans JP, system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "0"
 rounded:
   control: "4.5px"
   window: "7.5px"
@@ -113,7 +143,7 @@ components:
   workspace-selected:
     backgroundColor: "{colors.selected-row}"
     textColor: "{colors.text-strong}"
-    typography: "{typography.body}"
+    typography: "{typography.sidebarItem}"
     rounded: "{rounded.control}"
     padding: "6px 9px"
     height: "49.5px"
@@ -222,12 +252,14 @@ cp "$icon_output/32x32.png" "$icon_output/128x128.png" "$icon_output/128x128@2x.
 ### Hierarchy
 
 - **Display**（600、14.25px、21.375px）: current workspace を示す header breadcrumb。marketing hero には使用しない。
-- **Headline**（600、13.5px、20.25px）: Workspaces heading と panel heading。
+- **Headline**（600、13.5px、20.25px）: panel heading。
 - **Title**（500、12px、18px）: tabs、status group、decision title。
 - **Body**（400、13.5px、21px）: assistant message と説明。長文は 65〜75ch を上限にする。
 - **Label**（500、11px、16.5px）: compact control、menu、metadata。
 - **Mono**（400、11px、16.5px）: branch、tool summary、SHA、path。長い値は ellipsis と全文表示を併用する。
 - **Caption**（400、11px、16.5px）: helper と shortcut。Figma の 8.25〜9px source 値は通常表示に使わず、11px へ引き上げる。
+
+Sidebarは255.04px幅と49.5px itemに合わせた固定4段階を使う。**Sidebar Heading**は600、14px、21px、**Sidebar Item**は500、13px、19.5px、**Sidebar Status**は600、12px、18px、**Sidebar Meta**は400、11px、16.5pxとする。filter 0件のhelperは400、12px、18pxとする。workspace selectionでfont weightや文字幅を変えず、背景色とstrong textで現在地を示す。branchだけJetBrains Monoを使い、他はUI sansを維持する。
 
 **The Two-Family Rule.** UI sans と code mono 以外の font family を追加しない。button、tab、label に display font を使うことは禁止する。
 

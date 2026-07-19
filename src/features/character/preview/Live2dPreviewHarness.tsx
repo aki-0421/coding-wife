@@ -1,7 +1,6 @@
 import {
   BotIcon,
   CheckIcon,
-  CircleIcon,
   GitBranchIcon,
   MoreHorizontalIcon,
   SettingsIcon,
@@ -18,6 +17,7 @@ import type {
   CharacterState,
 } from "@/features/character/model"
 import type { CharacterController } from "@/features/character/runtime/character-controller"
+import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
 
 const states: readonly CharacterState[] = [
   "idle",
@@ -97,25 +97,22 @@ export function Live2dPreviewHarness() {
   return (
     <main className="preview-shell">
       <aside className="preview-sidebar" aria-label="Workspaces">
-        <div className="preview-traffic" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
+        <div className="preview-titlebar-spacer" aria-hidden="true" />
         <div className="preview-sidebar-heading">
           <span>Workspaces</span>
           <MoreHorizontalIcon aria-hidden="true" />
         </div>
         <div className="preview-workspace-list">
           <p className="preview-section-label">
-            <CheckIcon aria-hidden="true" /> <span>Done</span>
+            <WorkspaceLifecycleIcon lifecycle="done" /> <span>Done</span>
           </p>
           <p className="preview-workspace-row">
             <GitBranchIcon aria-hidden="true" />
             <span>coding-wife/desktop-shell</span>
           </p>
           <p className="preview-section-label preview-running">
-            <CircleIcon aria-hidden="true" /> <span>In progress</span>
+            <WorkspaceLifecycleIcon lifecycle="in_progress" />
+            <span>In Progress</span>
           </p>
           <p className="preview-workspace-row preview-workspace-selected">
             <BotIcon aria-hidden="true" />

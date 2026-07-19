@@ -1596,6 +1596,7 @@ mod tests {
             git_device: 1,
             git_inode,
             project_identity: hex::encode(digest),
+            github_repository: Some("fixture-owner/fixture-repository".to_owned()),
             branch: "main".to_owned(),
             head: "unborn".to_owned(),
             detached: false,

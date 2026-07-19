@@ -20,27 +20,9 @@
   background: var(--sidebar);
 }
 
-.preview-traffic {
-  display: flex;
+.preview-titlebar-spacer {
   height: 51px;
-  align-items: center;
-  gap: 9px;
-  padding-inline: 16px;
-}
-
-.preview-traffic span {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  background: #ff5f57;
-}
-
-.preview-traffic span:nth-child(2) {
-  background: #febc2e;
-}
-
-.preview-traffic span:nth-child(3) {
-  background: #28c840;
+  flex: none;
 }
 
 .preview-sidebar-heading,

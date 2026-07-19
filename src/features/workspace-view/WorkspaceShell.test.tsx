@@ -393,6 +393,164 @@ function richCodexState(): WorkspaceCodexState {
 }
 
 describe("WorkspaceShell", () => {
+  it("keeps Linear workspace statuses in English for the Japanese locale", () => {
+    const { container } = render(
+      <App localeStore={japaneseLocaleStore} transport={new DemoTransport()} />,
+    )
+    const navigation = screen.getByRole("navigation", {
+      name: "ワークスペース",
+    })
+
+    for (const [label, count] of [
+      ["Done", 1],
+      ["In Review", 1],
+      ["In Progress", 1],
+      ["Backlog", 0],
+      ["Canceled", 0],
+    ] as const) {
+      expect(
+        within(navigation).getByRole("heading", {
+          name: `${label}(${count})`,
+        }),
+      ).toBeVisible()
+    }
+
+    expect(
+      within(navigation).getByRole("button", {
+        name: "main, aki-0421/coding-wife, Done",
+      }),
+    ).toBeVisible()
+    for (const localizedLabel of [
+      "完了",
+      "レビュー可能",
+      "実行中",
+      "未着手",
+      "中止",
+    ]) {
+      expect(within(navigation).queryByText(localizedLabel)).toBeNull()
+    }
+    expect(
+      container.querySelectorAll("[data-linear-status-icon]"),
+    ).toHaveLength(5)
+    for (const lifecycle of [
+      "done",
+      "in_review",
+      "in_progress",
+      "backlog",
+      "canceled",
+    ]) {
+      expect(
+        container.querySelector(`[data-linear-status-icon="${lifecycle}"]`),
+      ).not.toBeNull()
+    }
+  })
+
+  it("expands lifecycle groups by default and toggles them independently", async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+    const navigation = screen.getByRole("navigation", { name: "Workspaces" })
+    expect(navigation).toHaveClass("max-w-[242.25px]")
+    const doneToggle = within(navigation).getByRole("button", {
+      name: "Done(1)",
+    })
+    const reviewToggle = within(navigation).getByRole("button", {
+      name: "In Review(1)",
+    })
+    const backlogToggle = within(navigation).getByRole("button", {
+      name: "Backlog(0)",
+    })
+    const selectedWorkspace = within(navigation).getByRole("button", {
+      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+    })
+
+    expect(doneToggle).toHaveAttribute("aria-expanded", "true")
+    expect(reviewToggle).toHaveAttribute("aria-expanded", "true")
+    expect(doneToggle.querySelector("[data-workspace-status-count]")).toBeNull()
+    expect(
+      within(navigation).getByRole("button", {
+        name: "main, aki-0421/coding-wife, Done",
+      }),
+    ).toBeVisible()
+    expect(selectedWorkspace).toHaveAttribute("aria-current", "page")
+
+    const controlledContentId = doneToggle.getAttribute("aria-controls")
+    expect(controlledContentId).not.toBeNull()
+    expect(
+      document.getElementById(controlledContentId as string),
+    ).not.toHaveAttribute("hidden")
+    expect(
+      doneToggle.querySelector("[data-workspace-status-chevron]"),
+    ).toHaveClass("opacity-0", "group-hover/status:opacity-100")
+
+    await user.click(doneToggle)
+
+    expect(doneToggle).toHaveAttribute("aria-expanded", "false")
+    const doneCount = doneToggle.querySelector(
+      '[data-workspace-status-count="done"]',
+    )
+    expect(doneCount).toHaveTextContent("1")
+    expect(doneCount).toHaveAttribute("aria-hidden", "true")
+    expect(
+      document.getElementById(controlledContentId as string),
+    ).toHaveAttribute("hidden")
+    expect(reviewToggle).toHaveAttribute("aria-expanded", "true")
+    expect(
+      within(navigation).queryByRole("button", {
+        name: "main, aki-0421/coding-wife, Done",
+      }),
+    ).toBeNull()
+    expect(selectedWorkspace).toHaveAttribute("aria-current", "page")
+
+    await user.click(backlogToggle)
+    expect(backlogToggle).toHaveAttribute("aria-expanded", "false")
+    expect(
+      backlogToggle.querySelector('[data-workspace-status-count="backlog"]'),
+    ).toHaveTextContent("0")
+
+    doneToggle.focus()
+    await user.keyboard(" ")
+
+    expect(doneToggle).toHaveAttribute("aria-expanded", "true")
+    expect(doneToggle.querySelector("[data-workspace-status-count]")).toBeNull()
+    expect(
+      within(navigation).getByRole("button", {
+        name: "main, aki-0421/coding-wife, Done",
+      }),
+    ).toBeVisible()
+  })
+
+  it("uses branch titles and GitHub repository metadata with stable typography", () => {
+    renderWorkspace()
+    const navigation = screen.getByRole("navigation", { name: "Workspaces" })
+    const doneToggle = within(navigation).getByRole("button", {
+      name: "Done(1)",
+    })
+    const doneWorkspace = within(navigation).getByRole("button", {
+      name: "main, aki-0421/coding-wife, Done",
+    })
+    const selectedWorkspace = within(navigation).getByRole("button", {
+      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+    })
+
+    expect(screen.getByRole("heading", { name: "Workspaces" })).toHaveClass(
+      "text-sidebar-heading",
+    )
+    expect(doneToggle).toHaveClass("text-sidebar-status")
+    expect(within(doneWorkspace).getByText("main")).toHaveClass(
+      "text-sidebar-item",
+      "text-foreground",
+    )
+    expect(within(doneWorkspace).getByText("aki-0421/coding-wife")).toHaveClass(
+      "font-mono",
+      "text-sidebar-meta",
+      "text-muted-foreground",
+    )
+    expect(
+      within(selectedWorkspace).getByText("feature/live2d-companion"),
+    ).toHaveClass("text-sidebar-item", "text-text-strong")
+    expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
+  })
+
   it("keeps duplicate native close requests behind one safe cancellation", async () => {
     const lifecycle = appLifecycleHarness()
     const prepareAppQuit = vi.fn()
@@ -747,14 +905,14 @@ describe("WorkspaceShell", () => {
     })
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: "coding-wife/sol-desktop, main, Done",
+        name: "main, aki-0421/coding-wife, Done",
       }),
     )
     expect(composer).toHaveValue("")
 
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: /coding-wife\/build-live2d-desktop-app/,
+        name: /feature\/live2d-companion, aki-0421\/coding-wife/,
       }),
     )
     expect(composer).toHaveValue("Keep this draft with the Live2D workspace")
@@ -805,14 +963,14 @@ describe("WorkspaceShell", () => {
     await waitFor(() =>
       expect(
         within(workspaceNavigation).getByRole("button", {
-          name: /fixture\/workspace-a/,
+          name: /main, fixture, In Progress/,
         }),
       ).toBeVisible(),
     )
     fireEvent.change(composer, { target: { value: "Keep draft A" } })
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: /fixture\/workspace-b/,
+        name: /main, fixture, Backlog/,
       }),
     )
 
@@ -1065,7 +1223,7 @@ describe("WorkspaceShell", () => {
     const navigation = screen.getByRole("navigation", { name: "Workspaces" })
     fireEvent.click(
       within(navigation).getByRole("button", {
-        name: /fixture\/workspace-b/u,
+        name: /main, fixture, Backlog/u,
       }),
     )
 
@@ -1362,7 +1520,7 @@ describe("WorkspaceShell", () => {
     expect(reopenedDialog).toHaveAccessibleName("Workspaces")
     await user.click(
       within(reopenedDialog).getByRole("button", {
-        name: "coding-wife/sol-desktop, main, Done",
+        name: "main, aki-0421/coding-wife, Done",
       }),
     )
 
@@ -1988,13 +2146,13 @@ describe("WorkspaceShell", () => {
 
       fireEvent.click(
         within(navigation).getByRole("button", {
-          name: /fixture\/workspace-b/u,
+          name: /main, fixture, Backlog/u,
         }),
       )
       expect(await screen.findByText("code.fixture.11")).toBeVisible()
       fireEvent.click(
         within(navigation).getByRole("button", {
-          name: /fixture\/workspace-a/u,
+          name: /main, fixture, In Progress/u,
         }),
       )
       expect(await screen.findByText("code.fixture.4")).toBeVisible()
@@ -2519,13 +2677,13 @@ describe("WorkspaceShell", () => {
 
     const current = await waitFor(() => {
       const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label^="native-repository/restored-workspace,"]',
+        'button[aria-label^="main, native-repository,"]',
       )
       expect(button).not.toBeNull()
       return button as HTMLButtonElement
     })
     const targetRow = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="native-repository/target-workspace,"]',
+      'button[aria-label^="feature/target, native-repository,"]',
     )
     expect(targetRow).not.toBeNull()
     const composer = screen.getByPlaceholderText(
@@ -2599,7 +2757,7 @@ describe("WorkspaceShell", () => {
     const { container } = renderWorkspace(adapter)
     const targetRow = await waitFor(() => {
       const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label^="native-repository/target-workspace,"]',
+        'button[aria-label^="feature/target, native-repository,"]',
       )
       expect(button).not.toBeNull()
       return button as HTMLButtonElement
@@ -2653,13 +2811,13 @@ describe("WorkspaceShell", () => {
 
     const current = await waitFor(() => {
       const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label^="native-repository/restored-workspace,"]',
+        'button[aria-label^="main, native-repository,"]',
       )
       expect(button).not.toBeNull()
       return button as HTMLButtonElement
     })
     const targetRow = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="native-repository/target-workspace,"]',
+      'button[aria-label^="feature/target, native-repository,"]',
     )
     expect(targetRow).not.toBeNull()
     await user.click(targetRow as HTMLButtonElement)

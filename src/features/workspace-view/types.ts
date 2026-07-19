@@ -40,6 +40,7 @@ export type CompanionSemanticState =
 export interface WorkspaceRecord {
   readonly id: string
   readonly repository: string
+  readonly githubRepository?: string
   readonly name: string
   readonly branch: string
   readonly lifecycle: WorkspaceLifecycle
