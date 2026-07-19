@@ -194,6 +194,32 @@ describe("character library contract", () => {
         packs: [fixture.librarySnapshot.packs[0], custom],
       }).packs[1]?.manifest?.compatibility.expectedDrawables,
     ).toBe(134)
+
+    expect(() =>
+      parseCharacterLibrarySnapshot({
+        ...fixture.librarySnapshot,
+        packs: [
+          fixture.librarySnapshot.packs[0],
+          { ...custom, deletable: false },
+        ],
+      }),
+    ).toThrow("The value did not match the character library contract.")
+
+    const secondPackId = "custom:22222222-2222-4222-8222-222222222222"
+    expect(() =>
+      parseCharacterLibrarySnapshot({
+        ...fixture.librarySnapshot,
+        packs: [
+          fixture.librarySnapshot.packs[0],
+          custom,
+          {
+            ...custom,
+            packId: secondPackId,
+            manifest: { ...manifest, packId: secondPackId },
+          },
+        ],
+      }),
+    ).toThrow("The value did not match the character library contract.")
   })
 
   it("rejects custom manifest resource escalation and partial attestation", () => {

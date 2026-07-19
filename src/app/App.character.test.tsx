@@ -280,7 +280,7 @@ describe("default App character integration", () => {
           motionCount: 10,
           expressionCount: 0,
           selectedProjectCount: 1,
-          deletable: false,
+          deletable: true,
           manifest: null,
           thumbnailSha256: null,
           cueInventory: {

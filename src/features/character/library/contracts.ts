@@ -572,7 +572,8 @@ function parseCharacterPackView(value: unknown): CharacterPackView {
     value.kind !== "custom" ||
     value.packId === builtinHiyoriPackId ||
     !timestamp(value.importedAt) ||
-    !isRecord(value.manifest)
+    !isRecord(value.manifest) ||
+    !value.deletable
   ) {
     return violation()
   }
@@ -621,7 +622,7 @@ export function parseCharacterLibrarySnapshot(
     ) ||
     !Array.isArray(value.packs) ||
     value.packs.length === 0 ||
-    value.packs.length > 129
+    value.packs.length > 2
   ) {
     return violation()
   }
@@ -631,6 +632,7 @@ export function parseCharacterLibrarySnapshot(
   if (
     new Set(ids).size !== ids.length ||
     ids.filter((id) => id === builtinHiyoriPackId).length !== 1 ||
+    packs.filter((pack) => pack.kind === "custom").length > 1 ||
     !ids.includes(value.selectedPackId)
   ) {
     return violation()
