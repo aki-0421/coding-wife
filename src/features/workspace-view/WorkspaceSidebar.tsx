@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from "react"
+import { useId, useMemo, useRef, useState } from "react"
 import {
+  ChevronRightIcon,
   CircleAlertIcon,
   FolderPlusIcon,
   GitBranchIcon,
@@ -52,6 +53,14 @@ const lifecycleOrder: readonly WorkspaceLifecycle[] = [
   "canceled",
 ]
 
+const initiallyExpandedLifecycles = {
+  done: true,
+  in_review: true,
+  in_progress: true,
+  backlog: true,
+  canceled: true,
+} as const satisfies Readonly<Record<WorkspaceLifecycle, boolean>>
+
 interface WorkspaceSidebarProps {
   readonly copy: WorkspaceCopy
   readonly filter: string
@@ -63,6 +72,12 @@ interface WorkspaceSidebarProps {
   readonly onFilterChange: (value: string) => void
   readonly onOpenSettings: () => void
   readonly onSelectWorkspace: (workspaceId: string) => void
+}
+
+interface SidebarPanelProps extends WorkspaceSidebarProps {
+  readonly expandedLifecycles: Readonly<Record<WorkspaceLifecycle, boolean>>
+  readonly reserveTitlebarSpace: boolean
+  readonly onToggleLifecycle: (lifecycle: WorkspaceLifecycle) => void
 }
 
 function WorkspaceRow({
@@ -244,6 +259,7 @@ function CreateWorkspaceDialog({
 
 function SidebarPanel({
   copy,
+  expandedLifecycles,
   filter,
   filteredWorkspaces,
   selectedWorkspaceId,
@@ -253,8 +269,10 @@ function SidebarPanel({
   onFilterChange,
   onOpenSettings,
   onSelectWorkspace,
-}: WorkspaceSidebarProps & { readonly reserveTitlebarSpace: boolean }) {
+  onToggleLifecycle,
+}: SidebarPanelProps) {
   const [filterVisible, setFilterVisible] = useState(false)
+  const lifecycleContentIdPrefix = useId()
   const groups = useMemo(
     () =>
       lifecycleOrder.map((lifecycle) => ({
@@ -326,24 +344,48 @@ function SidebarPanel({
 
       <ScrollArea className="min-h-0 flex-1 px-xs">
         <nav aria-label={copy.workspaces} className="flex flex-col pb-md">
-          {groups.map(({ lifecycle, workspaces }) => (
-            <section className="flex flex-col pt-sm" key={lifecycle}>
-              <h2 className="m-0 flex h-6 items-center gap-xs px-xs text-title font-medium text-muted-foreground">
-                <WorkspaceLifecycleIcon lifecycle={lifecycle} />
-                <span>{linearWorkspaceStatusLabels[lifecycle]}</span>
-                <span className="sr-only">({workspaces.length})</span>
-              </h2>
-              {workspaces.map((workspace) => (
-                <WorkspaceRow
-                  copy={copy}
-                  key={workspace.id}
-                  onSelect={() => onSelectWorkspace(workspace.id)}
-                  selected={workspace.id === selectedWorkspaceId}
-                  workspace={workspace}
-                />
-              ))}
-            </section>
-          ))}
+          {groups.map(({ lifecycle, workspaces }) => {
+            const expanded = expandedLifecycles[lifecycle]
+            const contentId = `${lifecycleContentIdPrefix}-${lifecycle}`
+
+            return (
+              <section className="flex flex-col pt-sm" key={lifecycle}>
+                <h2 className="m-0">
+                  <button
+                    aria-controls={contentId}
+                    aria-expanded={expanded}
+                    className="group/status flex h-6 w-full cursor-pointer items-center gap-xs rounded-control px-xs text-start text-title font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    data-workspace-status-toggle={lifecycle}
+                    onClick={() => onToggleLifecycle(lifecycle)}
+                    type="button"
+                  >
+                    <WorkspaceLifecycleIcon lifecycle={lifecycle} />
+                    <span>{linearWorkspaceStatusLabels[lifecycle]}</span>
+                    <span className="sr-only">({workspaces.length})</span>
+                    <ChevronRightIcon
+                      aria-hidden="true"
+                      className={cn(
+                        "ml-auto size-3 shrink-0 opacity-0 transition-[opacity,transform] duration-150 motion-reduce:transition-none group-hover/status:opacity-100 group-focus-visible/status:opacity-100",
+                        expanded && "rotate-90",
+                      )}
+                      data-workspace-status-chevron=""
+                    />
+                  </button>
+                </h2>
+                <div hidden={!expanded} id={contentId}>
+                  {workspaces.map((workspace) => (
+                    <WorkspaceRow
+                      copy={copy}
+                      key={workspace.id}
+                      onSelect={() => onSelectWorkspace(workspace.id)}
+                      selected={workspace.id === selectedWorkspaceId}
+                      workspace={workspace}
+                    />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
 
           {filteredWorkspaces.length === 0 ? (
             <div className="flex flex-col items-start gap-xs px-sm py-lg">
@@ -385,8 +427,18 @@ function SidebarPanel({
 
 export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   const [compactNavigationOpen, setCompactNavigationOpen] = useState(false)
+  const [expandedLifecycles, setExpandedLifecycles] = useState<
+    Readonly<Record<WorkspaceLifecycle, boolean>>
+  >(() => ({ ...initiallyExpandedLifecycles }))
   const compactOpenerRef = useRef<HTMLButtonElement | null>(null)
   const selected = props.selectedWorkspace
+
+  const toggleLifecycle = (lifecycle: WorkspaceLifecycle) => {
+    setExpandedLifecycles((current) => ({
+      ...current,
+      [lifecycle]: !current[lifecycle],
+    }))
+  }
 
   const openCompactNavigation = (opener: HTMLButtonElement) => {
     compactOpenerRef.current = opener
@@ -403,7 +455,12 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   return (
     <aside className="workspace-sidebar border-r border-divider">
       <div className="hidden size-full min-[1280px]:block">
-        <SidebarPanel {...props} reserveTitlebarSpace />
+        <SidebarPanel
+          {...props}
+          expandedLifecycles={expandedLifecycles}
+          onToggleLifecycle={toggleLifecycle}
+          reserveTitlebarSpace
+        />
       </div>
 
       <div className="flex size-full flex-col items-center bg-sidebar min-[1280px]:hidden">
@@ -451,6 +508,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
             </DialogTitle>
             <SidebarPanel
               {...props}
+              expandedLifecycles={expandedLifecycles}
               onAddProject={() => {
                 closeCompactNavigation()
                 props.onAddProject()
@@ -465,6 +523,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 props.onOpenSettings()
               }}
               onSelectWorkspace={selectFromCompactNavigation}
+              onToggleLifecycle={toggleLifecycle}
               reserveTitlebarSpace={false}
             />
           </DialogContent>

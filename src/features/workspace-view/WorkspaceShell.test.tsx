@@ -445,6 +445,63 @@ describe("WorkspaceShell", () => {
     }
   })
 
+  it("expands lifecycle groups by default and toggles them independently", async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+    const navigation = screen.getByRole("navigation", { name: "Workspaces" })
+    const doneToggle = within(navigation).getByRole("button", {
+      name: "Done(1)",
+    })
+    const reviewToggle = within(navigation).getByRole("button", {
+      name: "In Review(1)",
+    })
+    const selectedWorkspace = within(navigation).getByRole("button", {
+      name: /coding-wife\/build-live2d-desktop-app/,
+    })
+
+    expect(doneToggle).toHaveAttribute("aria-expanded", "true")
+    expect(reviewToggle).toHaveAttribute("aria-expanded", "true")
+    expect(
+      within(navigation).getByRole("button", {
+        name: "coding-wife/sol-desktop, main, Done",
+      }),
+    ).toBeVisible()
+    expect(selectedWorkspace).toHaveAttribute("aria-current", "page")
+
+    const controlledContentId = doneToggle.getAttribute("aria-controls")
+    expect(controlledContentId).not.toBeNull()
+    expect(
+      document.getElementById(controlledContentId as string),
+    ).not.toHaveAttribute("hidden")
+    expect(
+      doneToggle.querySelector("[data-workspace-status-chevron]"),
+    ).toHaveClass("opacity-0", "group-hover/status:opacity-100")
+
+    await user.click(doneToggle)
+
+    expect(doneToggle).toHaveAttribute("aria-expanded", "false")
+    expect(
+      document.getElementById(controlledContentId as string),
+    ).toHaveAttribute("hidden")
+    expect(reviewToggle).toHaveAttribute("aria-expanded", "true")
+    expect(
+      within(navigation).queryByRole("button", {
+        name: "coding-wife/sol-desktop, main, Done",
+      }),
+    ).toBeNull()
+    expect(selectedWorkspace).toHaveAttribute("aria-current", "page")
+
+    doneToggle.focus()
+    await user.keyboard(" ")
+
+    expect(doneToggle).toHaveAttribute("aria-expanded", "true")
+    expect(
+      within(navigation).getByRole("button", {
+        name: "coding-wife/sol-desktop, main, Done",
+      }),
+    ).toBeVisible()
+  })
+
   it("keeps duplicate native close requests behind one safe cancellation", async () => {
     const lifecycle = appLifecycleHarness()
     const prepareAppQuit = vi.fn()
