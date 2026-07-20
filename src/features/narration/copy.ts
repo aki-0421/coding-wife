@@ -16,17 +16,9 @@ export interface NarrationCopy {
   readonly apiKeyConfigured: string
   readonly apiKeyNotConfigured: string
   readonly clearApiKey: string
-  readonly apiKeyWillBeRemoved: string
   readonly model: string
   readonly voice: string
   readonly speed: string
-  readonly save: string
-  readonly discard: string
-  readonly reset: string
-  readonly resetTitle: string
-  readonly resetDescription: string
-  readonly resetConfirm: string
-  readonly resetCancel: string
   readonly test: string
   readonly cancelTest: string
   readonly testSample: string
@@ -36,7 +28,9 @@ export interface NarrationCopy {
   readonly unavailableDescription: string
   readonly retry: string
   readonly errorTitle: string
-  readonly unsaved: string
+  readonly saving: string
+  readonly savePending: string
+  readonly saveFailed: string
   readonly saved: string
   readonly captionTitle: string
   readonly captionPreparing: string
@@ -62,18 +56,9 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
     apiKeyConfigured: "APIキー設定済み",
     apiKeyNotConfigured: "APIキー未設定",
     clearApiKey: "APIキーを削除",
-    apiKeyWillBeRemoved: "保存するとAPIキーを削除し、TTSを無効にします。",
     model: "TTSモデル",
     voice: "ボイス",
     speed: "読み上げ速度",
-    save: "音声設定を保存",
-    discard: "変更を破棄",
-    reset: "音声設定をリセット",
-    resetTitle: "音声設定をリセットしますか？",
-    resetDescription:
-      "TTSをオフにしてAPIキーを削除し、OpenAIのモデル、ボイス、速度を初期値へ戻します。",
-    resetConfirm: "リセット",
-    resetCancel: "キャンセル",
     test: "音声をテスト",
     cancelTest: "テストを停止",
     testSample:
@@ -85,7 +70,9 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
       "字幕は引き続き利用できます。再読み込み後も失敗する場合は診断を確認してください。",
     retry: "再読み込み",
     errorTitle: "音声設定を更新できませんでした",
-    unsaved: "未保存の変更",
+    saving: "保存中…",
+    savePending: "保存待ち",
+    saveFailed: "保存できませんでした",
     saved: "保存済み",
     captionTitle: "コミットの説明",
     captionPreparing: "説明を準備しています…",
@@ -120,18 +107,9 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
     apiKeyConfigured: "API key configured",
     apiKeyNotConfigured: "API key not configured",
     clearApiKey: "Remove API key",
-    apiKeyWillBeRemoved: "Saving will remove the API key and disable TTS.",
     model: "TTS model",
     voice: "Voice",
     speed: "Speech speed",
-    save: "Save audio settings",
-    discard: "Discard changes",
-    reset: "Reset audio settings",
-    resetTitle: "Reset audio settings?",
-    resetDescription:
-      "Turns TTS off, removes the API key, and restores the default OpenAI model, voice, and speed.",
-    resetConfirm: "Reset",
-    resetCancel: "Cancel",
     test: "Test voice",
     cancelTest: "Stop test",
     testSample:
@@ -143,7 +121,9 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
       "Captions remain available. If retrying still fails, check Diagnostics.",
     retry: "Retry",
     errorTitle: "Audio settings could not be updated",
-    unsaved: "Unsaved changes",
+    saving: "Saving…",
+    savePending: "Waiting to save",
+    saveFailed: "Could not save",
     saved: "Saved",
     captionTitle: "Commit explanation",
     captionPreparing: "Preparing the explanation…",

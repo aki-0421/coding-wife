@@ -7,6 +7,7 @@ import {
   type LocalePreferenceStore,
 } from "@/features/localization"
 import { NarrationSettings } from "@/features/narration/components/NarrationSettings"
+import type { NarrationSettingsUpdateV2 } from "@/features/narration/contracts"
 import { NarrationController } from "@/features/narration/controller"
 import { NarrationProvider } from "@/features/narration/provider"
 import {
@@ -51,6 +52,25 @@ class FailingSettingsGateway extends DemoNarrationGateway {
   }
 }
 
+class FailingSettingsUpdateGateway extends DemoNarrationGateway {
+  public updateAttempts = 0
+
+  public override updateSettings(
+    _request: NarrationSettingsUpdateV2,
+  ): Promise<never> {
+    this.updateAttempts += 1
+    return Promise.reject(
+      new NarrationBoundaryError({
+        code: "NARRATION-SETTINGS-WRITE",
+        operation: "narration_update_settings",
+        recoverable: true,
+        userMessageKey: "narration.error.generic",
+        detailRef: "narration-v2",
+      }),
+    )
+  }
+}
+
 function setup(gateway: NarrationGateway = new DemoNarrationGateway()) {
   const controller = new NarrationController(gateway)
   render(<Harness controller={controller} gateway={gateway} />)
@@ -77,9 +97,14 @@ describe("NarrationSettings", () => {
     ).toBeTruthy()
     expect(screen.queryByRole("switch", { name: "ミュート" })).toBeNull()
     expect(screen.queryByText("表示中のコミット説明")).toBeNull()
+    expect(screen.queryByRole("button", { name: "音声設定を保存" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "変更を破棄" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "音声設定をリセット" }),
+    ).toBeNull()
   })
 
-  it("configures a hidden API key before allowing TTS to be enabled", async () => {
+  it("automatically saves a hidden API key and subsequent TTS changes", async () => {
     const user = userEvent.setup()
     const { controller } = setup()
     await screen.findByRole("heading", { name: "音声" })
@@ -87,13 +112,12 @@ describe("NarrationSettings", () => {
     const apiKey = screen.getByLabelText("APIキー")
     await user.type(apiKey, "sk-test-fixture")
     expect(apiKey).toHaveValue("sk-test-fixture")
-    expect(screen.getByLabelText("TTSプロバイダー")).toHaveValue("openai")
 
     const enabled = screen.getByRole("switch", { name: "TTSを有効にする" })
-    expect(enabled).toBeEnabled()
+    await waitFor(() => expect(enabled).toBeEnabled())
+    expect(screen.getByLabelText("TTSプロバイダー")).toHaveValue("openai")
+    expect(apiKey).toHaveValue("")
     await user.click(enabled)
-    await user.selectOptions(screen.getByLabelText("読み上げ速度"), "1.15")
-    await user.click(screen.getByRole("button", { name: "音声設定を保存" }))
 
     await waitFor(() =>
       expect(controller.getSnapshot().settingsSnapshot?.settings).toMatchObject(
@@ -102,22 +126,42 @@ describe("NarrationSettings", () => {
           provider: "openai",
           model: "gpt-4o-mini-tts",
           voice: "marin",
-          speed: 1.15,
         },
       ),
     )
-    expect(apiKey).toHaveValue("")
+
+    await user.selectOptions(screen.getByLabelText("ボイス"), "cedar")
+    await waitFor(() =>
+      expect(controller.getSnapshot().settingsSnapshot?.settings.voice).toBe(
+        "cedar",
+      ),
+    )
   })
 
-  it("removes the key and disables TTS in one saved change", async () => {
+  it("automatically saves speech speed when the slider value is committed", async () => {
+    const user = userEvent.setup()
+    const { controller } = setup()
+    await screen.findByRole("heading", { name: "音声" })
+
+    const speed = screen.getByRole("slider", { name: "読み上げ速度" })
+    speed.focus()
+    await user.keyboard("{ArrowRight}")
+
+    await waitFor(() =>
+      expect(controller.getSnapshot().settingsSnapshot?.settings.speed).toBe(
+        1.05,
+      ),
+    )
+  })
+
+  it("removes the key and disables TTS in one automatic save", async () => {
     const user = userEvent.setup()
     const { controller } = setup()
     await screen.findByRole("heading", { name: "音声" })
     await user.type(screen.getByLabelText("APIキー"), "sk-test-fixture")
     const enabled = screen.getByRole("switch", { name: "TTSを有効にする" })
-    expect(enabled).toBeEnabled()
+    await waitFor(() => expect(enabled).toBeEnabled())
     await user.click(enabled)
-    await user.click(screen.getByRole("button", { name: "音声設定を保存" }))
     await waitFor(() =>
       expect(controller.getSnapshot().settingsSnapshot?.settings.enabled).toBe(
         true,
@@ -125,7 +169,6 @@ describe("NarrationSettings", () => {
     )
 
     await user.click(screen.getByRole("button", { name: "APIキーを削除" }))
-    await user.click(screen.getByRole("button", { name: "音声設定を保存" }))
 
     await waitFor(() =>
       expect(controller.getSnapshot().settingsSnapshot?.settings).toMatchObject(
@@ -139,6 +182,24 @@ describe("NarrationSettings", () => {
     expect(
       screen.getByRole("switch", { name: "TTSを有効にする" }),
     ).toBeDisabled()
+  })
+
+  it("keeps a failed API key edit without retrying indefinitely", async () => {
+    const user = userEvent.setup()
+    const gateway = new FailingSettingsUpdateGateway()
+    setup(gateway)
+    await screen.findByRole("heading", { name: "音声" })
+
+    const apiKey = screen.getByLabelText("APIキー")
+    await user.type(apiKey, "sk-test-fixture")
+    await user.tab()
+
+    expect(
+      await screen.findByText("音声設定を更新できませんでした"),
+    ).toBeVisible()
+    expect(apiKey).toHaveValue("sk-test-fixture")
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(gateway.updateAttempts).toBe(1)
   })
 
   it("shows a terminal settings load error with retry", async () => {

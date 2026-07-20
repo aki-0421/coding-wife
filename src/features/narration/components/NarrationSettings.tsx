@@ -1,4 +1,10 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react"
 import {
   CircleAlertIcon,
   KeyRoundIcon,
@@ -9,14 +15,6 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
@@ -30,6 +28,7 @@ import {
 import {
   openAiTtsModels,
   openAiTtsVoices,
+  type NarrationApiKeyActionV2,
   type NarrationTtsProvider,
   type NarrationSettingsV2,
   type OpenAiTtsModel,
@@ -49,7 +48,6 @@ interface NarrationDraft {
   readonly voice: OpenAiTtsVoice
   readonly speed: number
   readonly apiKey: string
-  readonly clearApiKey: boolean
 }
 
 export interface NarrationSettingsProps {
@@ -65,7 +63,6 @@ function draftFromSettings(settings: NarrationSettingsV2): NarrationDraft {
     voice: settings.voice,
     speed: settings.speed,
     apiKey: "",
-    clearApiKey: false,
   }
 }
 
@@ -76,10 +73,11 @@ function sameDraft(draft: NarrationDraft, settings: NarrationSettingsV2) {
     draft.model === settings.model &&
     draft.voice === settings.voice &&
     draft.speed === settings.speed &&
-    draft.apiKey.length === 0 &&
-    !draft.clearApiKey
+    draft.apiKey.length === 0
   )
 }
+
+const apiKeySaveDelayMilliseconds = 500
 
 function NarrationSettingsForm({
   heading,
@@ -91,17 +89,17 @@ function NarrationSettingsForm({
   const controller = useNarrationController()
   const snapshot = useNarrationSnapshot()
   const [draft, setDraft] = useState(() => draftFromSettings(settings))
-  const [resetOpen, setResetOpen] = useState(false)
   const testCaptionRef = useRef<HTMLDivElement>(null)
+  const apiKeySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const apiKeyEditRevisionRef = useRef(0)
+  const lastApiKeyAttemptRevisionRef = useRef(-1)
+  const saveInFlightRef = useRef(false)
   const dirty = !sameDraft(draft, settings)
   const saving = snapshot.settingsStatus === "saving"
   const apiKeyValid =
     draft.apiKey.length === 0 ||
     (draft.apiKey.length <= 512 && /^[A-Za-z0-9._-]+$/u.test(draft.apiKey))
-  const providerAvailable =
-    !draft.clearApiKey &&
-    (settings.apiKeyConfigured || (draft.apiKey.length > 0 && apiKeyValid))
-  const canSave = dirty && !saving && apiKeyValid
+  const providerAvailable = settings.apiKeyConfigured
   const canTest =
     !dirty &&
     settings.enabled &&
@@ -121,34 +119,96 @@ function NarrationSettingsForm({
     })
   }, [controller, snapshot.test.generation, snapshot.test.status])
 
-  const statusLabel = useMemo(() => {
-    if (snapshot.settingsStatus === "saving") return copy.unsaved
-    return dirty ? copy.unsaved : copy.saved
-  }, [copy.saved, copy.unsaved, dirty, snapshot.settingsStatus])
+  const statusLabel =
+    snapshot.settingsStatus === "saving"
+      ? copy.saving
+      : snapshot.settingsStatus === "error"
+        ? copy.saveFailed
+        : dirty
+          ? copy.savePending
+          : copy.saved
 
-  const save = async () => {
-    const nextHasKey =
-      draft.apiKey.length > 0 ||
-      (settings.apiKeyConfigured && !draft.clearApiKey)
-    const saved = await controller.saveSettings({
-      enabled: nextHasKey ? draft.enabled : false,
-      muted: settings.muted,
-      provider: nextHasKey ? (draft.provider ?? "openai") : null,
-      apiKeyAction: draft.clearApiKey
-        ? { kind: "clear" }
-        : draft.apiKey.length > 0
-          ? { kind: "replace", value: draft.apiKey }
-          : { kind: "keep" },
-      model: draft.model,
-      voice: draft.voice,
-      speed: draft.speed,
-    })
-    if (saved) {
-      const savedSettings = controller.getSnapshot().settingsSnapshot?.settings
-      if (savedSettings !== undefined) {
-        setDraft(draftFromSettings(savedSettings))
+  const persistDraft = useCallback(
+    async (
+      nextDraft: NarrationDraft,
+      apiKeyAction?: NarrationApiKeyActionV2,
+    ) => {
+      if (saveInFlightRef.current) return
+      const currentSettings =
+        controller.getSnapshot().settingsSnapshot?.settings
+      if (currentSettings === undefined) return
+
+      saveInFlightRef.current = true
+      const nextApiKeyAction =
+        apiKeyAction ??
+        (nextDraft.apiKey.length > 0
+          ? { kind: "replace" as const, value: nextDraft.apiKey }
+          : { kind: "keep" as const })
+      if (nextApiKeyAction.kind === "replace") {
+        lastApiKeyAttemptRevisionRef.current = apiKeyEditRevisionRef.current
+      }
+      const nextHasKey =
+        nextApiKeyAction.kind === "replace" ||
+        (currentSettings.apiKeyConfigured && nextApiKeyAction.kind !== "clear")
+
+      try {
+        const saved = await controller.saveSettings({
+          enabled: nextHasKey ? nextDraft.enabled : false,
+          muted: currentSettings.muted,
+          provider: nextHasKey ? (nextDraft.provider ?? "openai") : null,
+          apiKeyAction: nextApiKeyAction,
+          model: nextDraft.model,
+          voice: nextDraft.voice,
+          speed: nextDraft.speed,
+        })
+        if (!saved) return
+
+        const savedSettings =
+          controller.getSnapshot().settingsSnapshot?.settings
+        if (savedSettings !== undefined) {
+          setDraft(draftFromSettings(savedSettings))
+        }
+      } finally {
+        saveInFlightRef.current = false
+      }
+    },
+    [controller],
+  )
+
+  useEffect(() => {
+    if (apiKeySaveTimerRef.current !== null) {
+      clearTimeout(apiKeySaveTimerRef.current)
+      apiKeySaveTimerRef.current = null
+    }
+    if (
+      saving ||
+      !apiKeyValid ||
+      draft.apiKey.length === 0 ||
+      lastApiKeyAttemptRevisionRef.current === apiKeyEditRevisionRef.current
+    ) {
+      return
+    }
+
+    apiKeySaveTimerRef.current = setTimeout(() => {
+      apiKeySaveTimerRef.current = null
+      void persistDraft(draft)
+    }, apiKeySaveDelayMilliseconds)
+
+    return () => {
+      if (apiKeySaveTimerRef.current !== null) {
+        clearTimeout(apiKeySaveTimerRef.current)
+        apiKeySaveTimerRef.current = null
       }
     }
+  }, [apiKeyValid, draft, persistDraft, saving])
+
+  const saveApiKeyOnBlur = () => {
+    if (saving || !apiKeyValid || draft.apiKey.length === 0) return
+    if (apiKeySaveTimerRef.current !== null) {
+      clearTimeout(apiKeySaveTimerRef.current)
+      apiKeySaveTimerRef.current = null
+    }
+    void persistDraft(draft)
   }
 
   const playTest = async () => {
@@ -162,22 +222,26 @@ function NarrationSettingsForm({
     )
   }
 
-  const reset = async () => {
-    if (await controller.resetSettings()) {
-      const resetSettings = controller.getSnapshot().settingsSnapshot?.settings
-      if (resetSettings !== undefined) {
-        setDraft(draftFromSettings(resetSettings))
-      }
-      setResetOpen(false)
-    }
-  }
-
   return (
     <section
       className="flex max-w-[780px] flex-col gap-xl"
       data-narration-settings
     >
-      <h2 className="m-0 text-headline text-text-strong">{heading}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-sm">
+        <h2 className="m-0 text-headline text-text-strong">{heading}</h2>
+        <Badge
+          aria-live="polite"
+          variant={
+            snapshot.settingsStatus === "error"
+              ? "destructive"
+              : saving || dirty
+                ? "running"
+                : "outline"
+          }
+        >
+          {statusLabel}
+        </Badge>
+      </div>
 
       {snapshot.settingsStatus === "error" ? (
         <Alert>
@@ -203,9 +267,11 @@ function NarrationSettingsForm({
             checked={draft.enabled}
             disabled={saving || !providerAvailable}
             id="narration-enabled"
-            onCheckedChange={(enabled) =>
-              setDraft((current) => ({ ...current, enabled }))
-            }
+            onCheckedChange={(enabled) => {
+              const nextDraft = { ...draft, enabled }
+              setDraft(nextDraft)
+              void persistDraft(nextDraft)
+            }}
           />
         </Field>
 
@@ -218,10 +284,9 @@ function NarrationSettingsForm({
             onChange={(event) => {
               const provider =
                 event.currentTarget.value === "openai" ? "openai" : null
-              setDraft((current) => ({
-                ...current,
-                provider,
-              }))
+              const nextDraft = { ...draft, provider }
+              setDraft(nextDraft)
+              void persistDraft(nextDraft)
             }}
             value={providerAvailable ? (draft.provider ?? "openai") : ""}
           >
@@ -257,14 +322,10 @@ function NarrationSettingsForm({
                   {copy.apiKey}
                 </FieldLabel>
                 <Badge
-                  variant={
-                    settings.apiKeyConfigured && !draft.clearApiKey
-                      ? "success"
-                      : "outline"
-                  }
+                  variant={settings.apiKeyConfigured ? "success" : "outline"}
                 >
                   <KeyRoundIcon aria-hidden="true" className="size-3" />
-                  {settings.apiKeyConfigured && !draft.clearApiKey
+                  {settings.apiKeyConfigured
                     ? copy.apiKeyConfigured
                     : copy.apiKeyNotConfigured}
                 </Badge>
@@ -276,11 +337,13 @@ function NarrationSettingsForm({
                 aria-invalid={!apiKeyValid}
                 autoComplete="off"
                 className="max-w-[28rem]"
-                disabled={saving || draft.clearApiKey}
+                disabled={saving}
                 id="narration-openai-api-key"
                 maxLength={512}
+                onBlur={saveApiKeyOnBlur}
                 onChange={(event) => {
                   const apiKey = event.currentTarget.value
+                  apiKeyEditRevisionRef.current += 1
                   setDraft((current) => ({
                     ...current,
                     apiKey,
@@ -300,32 +363,25 @@ function NarrationSettingsForm({
                 </p>
               ) : null}
               {settings.apiKeyConfigured ? (
-                <div className="flex flex-wrap items-center gap-sm">
-                  <Button
-                    disabled={saving}
-                    onClick={() =>
-                      setDraft((current) => ({
-                        ...current,
-                        enabled: current.clearApiKey ? settings.enabled : false,
-                        provider: current.clearApiKey
-                          ? settings.provider
-                          : null,
-                        apiKey: "",
-                        clearApiKey: !current.clearApiKey,
-                      }))
+                <Button
+                  className="self-start"
+                  disabled={saving}
+                  onClick={() => {
+                    const nextDraft = {
+                      ...draft,
+                      enabled: false,
+                      provider: null,
+                      apiKey: "",
                     }
-                    size="xs"
-                    type="button"
-                    variant="outline"
-                  >
-                    {draft.clearApiKey ? copy.resetCancel : copy.clearApiKey}
-                  </Button>
-                  {draft.clearApiKey ? (
-                    <span className="text-caption text-destructive">
-                      {copy.apiKeyWillBeRemoved}
-                    </span>
-                  ) : null}
-                </div>
+                    setDraft(nextDraft)
+                    void persistDraft(nextDraft, { kind: "clear" })
+                  }}
+                  size="xs"
+                  type="button"
+                  variant="outline"
+                >
+                  {copy.clearApiKey}
+                </Button>
               ) : null}
             </Field>
 
@@ -338,10 +394,9 @@ function NarrationSettingsForm({
                   id="narration-model"
                   onChange={(event) => {
                     const model = event.currentTarget.value as OpenAiTtsModel
-                    setDraft((current) => ({
-                      ...current,
-                      model,
-                    }))
+                    const nextDraft = { ...draft, model }
+                    setDraft(nextDraft)
+                    void persistDraft(nextDraft)
                   }}
                   value={draft.model}
                 >
@@ -361,10 +416,9 @@ function NarrationSettingsForm({
                   id="narration-voice"
                   onChange={(event) => {
                     const voice = event.currentTarget.value as OpenAiTtsVoice
-                    setDraft((current) => ({
-                      ...current,
-                      voice,
-                    }))
+                    const nextDraft = { ...draft, voice }
+                    setDraft(nextDraft)
+                    void persistDraft(nextDraft)
                   }}
                   value={draft.voice}
                 >
@@ -380,7 +434,10 @@ function NarrationSettingsForm({
             <div className="grid items-end gap-lg sm:grid-cols-2">
               <Field>
                 <div className="flex items-center justify-between gap-sm">
-                  <FieldLabel htmlFor="narration-speed">
+                  <FieldLabel
+                    htmlFor="narration-speed"
+                    id="narration-speed-label"
+                  >
                     {copy.speed}
                   </FieldLabel>
                   <output
@@ -391,7 +448,7 @@ function NarrationSettingsForm({
                   </output>
                 </div>
                 <Slider
-                  aria-label={copy.speed}
+                  aria-labelledby="narration-speed-label"
                   disabled={saving}
                   id="narration-speed"
                   max={1.25}
@@ -401,6 +458,14 @@ function NarrationSettingsForm({
                     if (rawSpeed === undefined) return
                     const speed = Math.round(rawSpeed * 100) / 100
                     setDraft((current) => ({ ...current, speed }))
+                  }}
+                  onValueCommit={(value) => {
+                    const rawSpeed = value[0]
+                    if (rawSpeed === undefined) return
+                    const speed = Math.round(rawSpeed * 100) / 100
+                    const nextDraft = { ...draft, speed }
+                    setDraft(nextDraft)
+                    void persistDraft(nextDraft)
                   }}
                   step={0.05}
                   value={[draft.speed]}
@@ -456,54 +521,6 @@ function NarrationSettingsForm({
           ) : null}
         </TabsContent>
       </Tabs>
-
-      <div className="flex flex-wrap items-center gap-sm border-t border-divider pt-md">
-        <Button disabled={!canSave} onClick={() => void save()} type="button">
-          {copy.save}
-        </Button>
-        <Button
-          disabled={!dirty || saving}
-          onClick={() => setDraft(draftFromSettings(settings))}
-          type="button"
-          variant="secondary"
-        >
-          {copy.discard}
-        </Button>
-        <Badge variant={dirty ? "running" : "outline"}>{statusLabel}</Badge>
-        <Button
-          className="sm:ml-auto"
-          onClick={() => setResetOpen(true)}
-          type="button"
-          variant="destructive"
-        >
-          {copy.reset}
-        </Button>
-      </div>
-
-      <Dialog onOpenChange={setResetOpen} open={resetOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{copy.resetTitle}</DialogTitle>
-            <DialogDescription>{copy.resetDescription}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              onClick={() => setResetOpen(false)}
-              type="button"
-              variant="secondary"
-            >
-              {copy.resetCancel}
-            </Button>
-            <Button
-              onClick={() => void reset()}
-              type="button"
-              variant="destructive"
-            >
-              {copy.resetConfirm}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </section>
   )
 }
