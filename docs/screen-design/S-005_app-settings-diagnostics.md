@@ -52,10 +52,10 @@ status: "Approved"
 | -------------- | ---------------------------------------------------------------------------------------- |
 | 表示契機       | workspace sidebar最下部の`App settings / アプリ設定` gear、Chatのdiagnostics link        |
 | 表示前提       | workspace選択は不要。registered project/workspaceが0件でも7 sectionすべてを表示する                 |
-| 初期フォーカス | app settings heading                                                                      |
+| 初期フォーカス | header breadcrumbの現在section                                                           |
 | 正常完了       | section単位の保存を即時反映し、画面を維持する                                            |
 | キャンセル     | section固有のdraftと保存済み値を各契約どおり維持する                                     |
-| 閉じる操作     | `Back to workspace / ワークスペースへ戻る`で直前のworkspace tabへ戻る                    |
+| 閉じる操作     | workspace sidebarでworkspaceを選び、現在のworkspace tabへ戻る                             |
 | 再表示         | gearはGeneral、diagnostics linkはDiagnosticsを開き、保存済み値を維持する                  |
 
 ## 利用者と権限
@@ -71,7 +71,7 @@ status: "Approved"
 | 領域                | 表示内容                                                      | 主な操作                       |
 | ------------------- | ------------------------------------------------------------- | ------------------------------ |
 | workspace sidebar   | workspace一覧、activeなapp settings gear                      | workspaceへ戻る、project追加   |
-| app settings header | back action、`App settings / アプリ設定`、全project共通の説明 | 直前workspace tabへ戻る        |
+| app settings header | `App settings / アプリ設定` > 現在sectionのbreadcrumbだけを表示する | compact幅では現在sectionからsection pickerを開く |
 | section navigation  | General、Projects、Character context、Companion、Audio、Support、Diagnosticsの7 section | section選択 |
 | settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
 
@@ -81,7 +81,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 
 | 状態       | 進入条件                          | 表示                                           | 操作可否               | 状態から抜ける条件      |
 | ---------- | --------------------------------- | ---------------------------------------------- | ---------------------- | ----------------------- |
-| 初期化中   | preference/readiness未取得        | field shape skeleton、loading status           | backのみ可             | snapshot取得またはerror |
+| 初期化中   | preference/readiness未取得        | field shape skeleton、loading status           | workspace選択のみ可    | snapshot取得またはerror |
 | 通常       | snapshot取得済み                  | 7 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
 | データなし | voiceまたはdiagnostic resultが0件 | 理由とRetry                                    | 影響しないsectionは可  | 再取得成功              |
 | 処理中     | save、test、reset、recheck中      | 操作箇所のprocessing status                    | 同一操作の二重実行不可 | terminal result         |
@@ -94,7 +94,6 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | 操作                  | 事前条件              | 正常結果                                          | キャンセル時                   | 失敗時                          | 関連要件ID                            |
 | --------------------- | --------------------- | ------------------------------------------------- | ------------------------------ | ------------------------------- | ------------------------------------- |
 | app settingsを開く    | workspace shell表示中 | gearをactiveにしS-005のGeneralだけを表示          | 非該当                         | shellとworkspace stateを維持    | `APP-F-083`                           |
-| workspaceへ戻る       | S-005表示中           | 直前のactive tab、workspace、composer draftを復元 | 非該当                         | 同じ画面を維持                  | `APP-F-055`, `APP-F-083`              |
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
 | preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry/Reset | `APP-F-057`〜`APP-F-061`, `APP-F-076` |
 | Character contextを保存する | Character contextがready | global versionを更新し次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063` |
@@ -141,7 +140,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | 操作                 | macOS    | Windows / Linux | 有効条件             | 実行結果                     |
 | -------------------- | -------- | --------------- | -------------------- | ---------------------------- |
 | overlayを閉じる      | `Escape` | 非対応          | popover/dialog表示中 | 入力を維持してtriggerへfocus |
-| app settingsを閉じる | 明示Back | 非対応          | S-005表示中          | 直前workspace tabへ戻る      |
+| app settingsを閉じる | workspace選択 | 非対応      | S-005表示中          | 現在のworkspace tabへ戻る    |
 
 ## データ保持
 
@@ -154,7 +153,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 ## アクセシビリティ
 
 - gearは`App settings / アプリ設定`というscopeを含むaccessible nameと`aria-current`を持つ。
-- 画面進入時にapp settings headingへfocusし、Back後はactive workspace tabへfocusを戻す。
+- 画面進入時とsection変更時にbreadcrumbの現在sectionへfocusする。専用のBack buttonは置かず、workspace選択後は選択したworkspace rowへfocusを維持する。
 - project行は名前、repository、workspace件数を含むaccessible nameを持ち、詳細から一覧へ戻ると起点projectへfocusを戻す。
 - section navigation、error、readinessを色だけで表現しない。
 - 200% text zoomではsection navigationをpopover化し、全fieldとactionへ到達できる。
@@ -184,7 +183,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | レビュー日   | 2026-07-20 |
 
 - [x] app settingsの7 section、Projects内のproject-scoped詳細、workspace-scoped非対象が一意である。
-- [x] heading、Back、workspace選択時の状態維持を定義した。
+- [x] breadcrumb、workspace選択時の終了と状態維持を定義した。
 - [x] loading、empty、processing、offline、error、permissionを定義した。
 - [x] native boundary、ja/en、keyboard、200% zoomを定義した。
 - [x] `agent-docs lint`対象のfront matterと相互参照を記載した。
