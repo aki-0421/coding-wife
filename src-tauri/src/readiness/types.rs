@@ -65,7 +65,6 @@ pub enum ReadinessRecoveryAction {
     RepairHistory,
     RestoreLive2d,
     SavePreferences,
-    ResetPreferences,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

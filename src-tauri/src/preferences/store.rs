@@ -7,8 +7,9 @@ use serde_json::Value;
 
 use super::error::{preferences_error, AppPreferencesResult};
 use super::types::{
-    AppPreferencesV1, CharacterVisibility, LegacyAppPreferencesV0, ReducedMotionPreference,
-    APP_PREFERENCES_LEGACY_SCHEMA_VERSION, APP_PREFERENCES_SCHEMA_VERSION,
+    AppLocale, AppPreferencesV2, LegacyAppPreferencesV0, LegacyAppPreferencesV1,
+    APP_PREFERENCES_SCHEMA_VERSION, APP_PREFERENCES_V0_SCHEMA_VERSION,
+    APP_PREFERENCES_V1_SCHEMA_VERSION,
 };
 
 const PREFERENCES_DIRECTORY: &str = "preferences";
@@ -30,7 +31,7 @@ pub(crate) struct AppPreferencesStore {
 #[derive(Clone, Debug)]
 pub(crate) struct AppPreferencesStoreOpen {
     pub store: AppPreferencesStore,
-    pub preferences: Option<AppPreferencesV1>,
+    pub preferences: Option<AppPreferencesV2>,
     pub recovery_code: Option<String>,
 }
 
@@ -42,8 +43,9 @@ enum LoadIssue {
 }
 
 enum LoadedPreferences {
-    Current(AppPreferencesV1),
-    Legacy(LegacyAppPreferencesV0),
+    Current(AppPreferencesV2),
+    LegacyV1(LegacyAppPreferencesV1),
+    LegacyV0(LegacyAppPreferencesV0),
 }
 
 impl AppPreferencesStore {
@@ -70,18 +72,34 @@ impl AppPreferencesStore {
                 preferences: Some(preferences),
                 recovery_code: None,
             }),
-            Ok(LoadedPreferences::Legacy(legacy)) => match store.migrate(legacy) {
-                Ok(preferences) => Ok(AppPreferencesStoreOpen {
-                    store,
-                    preferences: Some(preferences),
-                    recovery_code: None,
-                }),
-                Err(_) => Ok(AppPreferencesStoreOpen {
-                    store,
-                    preferences: None,
-                    recovery_code: Some(RECOVERY_MIGRATION_FAILED.to_owned()),
-                }),
-            },
+            Ok(LoadedPreferences::LegacyV1(legacy)) => {
+                match store.migrate(legacy.version, legacy.locale) {
+                    Ok(preferences) => Ok(AppPreferencesStoreOpen {
+                        store,
+                        preferences: Some(preferences),
+                        recovery_code: None,
+                    }),
+                    Err(_) => Ok(AppPreferencesStoreOpen {
+                        store,
+                        preferences: None,
+                        recovery_code: Some(RECOVERY_MIGRATION_FAILED.to_owned()),
+                    }),
+                }
+            }
+            Ok(LoadedPreferences::LegacyV0(legacy)) => {
+                match store.migrate(legacy.version, legacy.locale) {
+                    Ok(preferences) => Ok(AppPreferencesStoreOpen {
+                        store,
+                        preferences: Some(preferences),
+                        recovery_code: None,
+                    }),
+                    Err(_) => Ok(AppPreferencesStoreOpen {
+                        store,
+                        preferences: None,
+                        recovery_code: Some(RECOVERY_MIGRATION_FAILED.to_owned()),
+                    }),
+                }
+            }
             Err(issue) => Ok(AppPreferencesStoreOpen {
                 store,
                 preferences: None,
@@ -114,42 +132,49 @@ impl AppPreferencesStore {
             .ok_or(LoadIssue::Corrupt)?;
         match schema_version {
             version if version == u64::from(APP_PREFERENCES_SCHEMA_VERSION) => {
-                let preferences: AppPreferencesV1 =
+                let preferences: AppPreferencesV2 =
                     serde_json::from_value(value).map_err(|_| LoadIssue::Corrupt)?;
                 validate_preferences(&preferences).map_err(|_| LoadIssue::Corrupt)?;
                 Ok(LoadedPreferences::Current(preferences))
             }
-            version if version == u64::from(APP_PREFERENCES_LEGACY_SCHEMA_VERSION) => {
-                let preferences: LegacyAppPreferencesV0 =
+            version if version == u64::from(APP_PREFERENCES_V1_SCHEMA_VERSION) => {
+                let preferences: LegacyAppPreferencesV1 =
                     serde_json::from_value(value).map_err(|_| LoadIssue::Corrupt)?;
-                if preferences.schema_version != APP_PREFERENCES_LEGACY_SCHEMA_VERSION {
+                if preferences.schema_version != APP_PREFERENCES_V1_SCHEMA_VERSION {
                     return Err(LoadIssue::Corrupt);
                 }
-                Ok(LoadedPreferences::Legacy(preferences))
+                let snapshot = uuid::Uuid::parse_str(&preferences.snapshot_id)
+                    .map_err(|_| LoadIssue::Corrupt)?;
+                if snapshot.is_nil() {
+                    return Err(LoadIssue::Corrupt);
+                }
+                Ok(LoadedPreferences::LegacyV1(preferences))
+            }
+            version if version == u64::from(APP_PREFERENCES_V0_SCHEMA_VERSION) => {
+                let preferences: LegacyAppPreferencesV0 =
+                    serde_json::from_value(value).map_err(|_| LoadIssue::Corrupt)?;
+                if preferences.schema_version != APP_PREFERENCES_V0_SCHEMA_VERSION {
+                    return Err(LoadIssue::Corrupt);
+                }
+                Ok(LoadedPreferences::LegacyV0(preferences))
             }
             _ => Err(LoadIssue::UnknownVersion),
         }
     }
 
-    fn migrate(&self, legacy: LegacyAppPreferencesV0) -> AppPreferencesResult<AppPreferencesV1> {
-        let version = legacy.version.checked_add(1).ok_or_else(|| {
+    fn migrate(
+        &self,
+        legacy_version: u64,
+        locale: AppLocale,
+    ) -> AppPreferencesResult<AppPreferencesV2> {
+        let version = legacy_version.checked_add(1).ok_or_else(|| {
             preferences_error("app_preferences_migrate", "APP-PREFERENCES-VERSION", false)
         })?;
-        let preferences = AppPreferencesV1 {
+        let preferences = AppPreferencesV2 {
             schema_version: APP_PREFERENCES_SCHEMA_VERSION,
             version,
             snapshot_id: uuid::Uuid::new_v4().to_string(),
-            locale: legacy.locale,
-            reduced_motion: if legacy.reduced_motion {
-                ReducedMotionPreference::On
-            } else {
-                ReducedMotionPreference::Off
-            },
-            character_visibility: if legacy.character_hidden {
-                CharacterVisibility::Hidden
-            } else {
-                CharacterVisibility::Visible
-            },
+            locale,
         };
         self.save(&preferences, "app_preferences_migrate")?;
         Ok(preferences)
@@ -157,7 +182,7 @@ impl AppPreferencesStore {
 
     pub fn save(
         &self,
-        preferences: &AppPreferencesV1,
+        preferences: &AppPreferencesV2,
         operation: &'static str,
     ) -> AppPreferencesResult<()> {
         validate_preferences(preferences).map_err(|error| error.with_operation(operation))?;
@@ -178,7 +203,7 @@ impl AppPreferencesStore {
     }
 }
 
-pub(crate) fn validate_preferences(preferences: &AppPreferencesV1) -> AppPreferencesResult<()> {
+pub(crate) fn validate_preferences(preferences: &AppPreferencesV2) -> AppPreferencesResult<()> {
     if preferences.schema_version != APP_PREFERENCES_SCHEMA_VERSION {
         return Err(preferences_error(
             "app_preferences_validate",
@@ -257,7 +282,7 @@ fn atomic_write(
     bytes: &[u8],
     operation: &'static str,
 ) -> AppPreferencesResult<()> {
-    let temporary = root.join(format!(".app-preferences-v1.{}.tmp", uuid::Uuid::new_v4()));
+    let temporary = root.join(format!(".app-preferences-v2.{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| {
         let mut options = OpenOptions::new();
         options.create_new(true).write(true).mode(0o600);

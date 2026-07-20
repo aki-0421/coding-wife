@@ -86,7 +86,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | データなし | voiceまたはdiagnostic resultが0件 | 理由とRetry                                    | 影響しないsectionは可  | 再取得成功              |
 | 処理中     | save、test、reset、recheck中      | 操作箇所のprocessing status                    | 同一操作の二重実行不可 | terminal result         |
 | オフライン | network/Codex unavailable         | local settingは表示、診断はBlocked/Unavailable | local saveとrecheck可  | readiness更新           |
-| エラー     | storeまたはdiagnostic失敗         | safe code、前snapshot、Retry/Reset             | 破壊的fallback不可     | retry/reset成功         |
+| エラー     | storeまたはdiagnostic失敗         | safe code、前snapshot、Retry                   | 破壊的fallback不可     | retry成功               |
 | 権限不足   | native operation拒否              | localized reason、変更前値                     | scope外操作不可        | permission回復後のretry |
 
 ## 操作

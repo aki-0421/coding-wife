@@ -21,7 +21,7 @@ impl AppPreferencesCommandError {
             operation: operation.into(),
             recoverable,
             user_message_key: "preferences.error.generic".to_owned(),
-            detail_ref: "app-preferences-v1".to_owned(),
+            detail_ref: "app-preferences-v2".to_owned(),
         }
     }
 

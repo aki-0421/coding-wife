@@ -8,8 +8,7 @@ mod types;
 pub use error::AppPreferencesCommandError;
 pub use service::AppPreferencesService;
 pub use types::{
-    AppPreferencesGetRequestV1, AppPreferencesResetRequestV1, AppPreferencesSnapshotV1,
-    AppPreferencesUpdateRequestV1,
+    AppPreferencesGetRequestV2, AppPreferencesSnapshotV2, AppPreferencesUpdateRequestV2,
 };
 
 #[cfg(test)]

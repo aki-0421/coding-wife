@@ -437,31 +437,9 @@ const en = {
       "Safe defaults are active. The unreadable value was not shown or applied.",
     preferenceErrorTitle: "Preferences were not saved",
     preferenceErrorBody:
-      "The last durable preferences remain active. Retry the change or reset only the preference record.",
+      "The last durable language remains active. Retry the change.",
     preferenceSafeCode: "Safe code",
-    motion: "Reduced motion",
-    motionDescription:
-      "System preference always takes precedence when reduction is requested.",
-    system: "System",
-    reduce: "Reduce",
-    allow: "Allow",
-    characterVisibility: "Character visibility",
-    characterVisibilityDescription:
-      "Hiding stops the canvas and GPU animation across every workspace while keeping the text state.",
-    characterVisible: "Character visible",
     appVersion: "App version",
-    resetPreferences: "Reset preferences",
-    resetPreferencesDescription:
-      "Returns language to the OS default, motion to System, and the character to Visible. Workspaces, history, Context, model library, Git, and audio settings are unchanged.",
-    resetPreferencesConfirmTitle: "Reset app preferences?",
-    resetPreferencesConfirmBody:
-      "Only AppPreferencesV1 will be replaced. Workspaces, history, Context, the character model library, Git state, and audio settings stay unchanged.",
-    resetPreferencesCancel: "Cancel",
-    resetPreferencesConfirm: "Reset preferences",
-    resetPreferencesInProgress: "Resetting…",
-    resetUi: "Reset UI state",
-    resetUiDescription:
-      "Resets filters and local view selections. Repository and history data are not changed.",
     companionTitle: "Companion",
     bundledModel: "Model",
     bundledModelValue: "Hiyori",
@@ -1022,30 +1000,9 @@ const ja: typeof en = {
       "安全な初期値を使用しています。読み取れない値は表示も適用もしていません。",
     preferenceErrorTitle: "設定を保存できませんでした",
     preferenceErrorBody:
-      "最後に保存できた設定を維持しています。変更を再試行するか、設定レコードだけをリセットしてください。",
+      "最後に保存できた言語を維持しています。変更を再試行してください。",
     preferenceSafeCode: "安全なコード",
-    motion: "動きを減らす",
-    motionDescription: "OSが動きの削減を要求している場合は常に優先します。",
-    system: "システム",
-    reduce: "減らす",
-    allow: "許可",
-    characterVisibility: "キャラクター表示",
-    characterVisibilityDescription:
-      "非表示にすると全ワークスペースのcanvasとGPU animationを停止し、text状態は残します。",
-    characterVisible: "キャラクターを表示",
     appVersion: "アプリバージョン",
-    resetPreferences: "設定をリセット",
-    resetPreferencesDescription:
-      "言語をOS初期値、動きをシステム、キャラクターを表示へ戻します。ワークスペース、履歴、Context、モデルライブラリ、Git、音声設定は変更しません。",
-    resetPreferencesConfirmTitle: "アプリ設定をリセットしますか？",
-    resetPreferencesConfirmBody:
-      "AppPreferencesV1だけを置き換えます。ワークスペース、履歴、Context、キャラクターモデルライブラリ、Git状態、音声設定は変わりません。",
-    resetPreferencesCancel: "キャンセル",
-    resetPreferencesConfirm: "設定をリセット",
-    resetPreferencesInProgress: "リセット中…",
-    resetUi: "UI状態をリセット",
-    resetUiDescription:
-      "filterとローカル選択だけを戻します。repositoryと履歴dataは変更しません。",
     companionTitle: "コンパニオン",
     bundledModel: "モデル",
     bundledModelValue: "Hiyori",

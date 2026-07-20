@@ -103,8 +103,8 @@ const diagnosticsCopy = {
       repair_workspace: "Repair or reselect the affected workspace.",
       repair_history: "Use workspace recovery before relying on local history.",
       restore_live2d: "Restore the bundled Live2D app resources.",
-      save_preferences: "Save any app preference to create the native record.",
-      reset_preferences: "Reset only app preferences to a safe schema.",
+      save_preferences:
+        "Retry saving the language in General to create or repair the native record.",
     },
   },
   ja: {
@@ -193,9 +193,7 @@ const diagnosticsCopy = {
         "ローカル履歴を使う前にワークスペースを復旧してください。",
       restore_live2d: "アプリ同梱のLive2Dリソースを復元してください。",
       save_preferences:
-        "任意のアプリ設定を保存し、ネイティブ記録を作成してください。",
-      reset_preferences:
-        "アプリ設定だけを安全なスキーマへリセットしてください。",
+        "一般で言語の保存を再試行し、ネイティブ記録を作成または修復してください。",
     },
   },
 } as const

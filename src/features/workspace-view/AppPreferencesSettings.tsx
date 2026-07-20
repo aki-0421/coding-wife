@@ -1,26 +1,16 @@
 import { useEffect, useRef, useState } from "react"
-import { AlertTriangleIcon, DatabaseIcon } from "lucide-react"
+import { AlertTriangleIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useI18n, type SupportedLocale } from "@/features/localization"
 import {
@@ -33,7 +23,6 @@ import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 export interface AppPreferencesSettingsProps {
   readonly copy: WorkspaceCopy
   readonly runtimeState: RuntimeState
-  readonly onResetUi: () => void
 }
 
 function PreferencesStatus({
@@ -65,10 +54,8 @@ function PreferencesStatus({
 
 function PreferenceAlert({
   copy,
-  onReset,
   onRetry,
 }: Pick<AppPreferencesSettingsProps, "copy"> & {
-  readonly onReset: () => void
   readonly onRetry: () => void
 }) {
   const state = useAppPreferences()
@@ -95,21 +82,9 @@ function PreferenceAlert({
           <span>{copy.settingsView.preferenceSafeCode}</span>
           <code className="font-mono text-label text-destructive">{code}</code>
         </span>
-        <span className="flex flex-wrap gap-xs">
-          {!recovering ? (
-            <Button
-              onClick={onRetry}
-              size="xs"
-              type="button"
-              variant="secondary"
-            >
-              {copy.retry}
-            </Button>
-          ) : null}
-          <Button onClick={onReset} size="xs" type="button" variant="secondary">
-            {copy.settingsView.resetPreferences}
-          </Button>
-        </span>
+        <Button onClick={onRetry} size="xs" type="button" variant="secondary">
+          {copy.retry}
+        </Button>
       </AlertDescription>
     </Alert>
   )
@@ -118,18 +93,11 @@ function PreferenceAlert({
 export function AppPreferencesSettings({
   copy,
   runtimeState,
-  onResetUi,
 }: AppPreferencesSettingsProps) {
   const { locale, setLocale, t } = useI18n()
   const controller = useAppPreferencesController()
   const state = useAppPreferences()
-  const preferences = state.snapshot.preferences
-  const controlPreferences = state.pendingPreferences ?? preferences
   const [failedLocale, setFailedLocale] = useState<SupportedLocale | null>(null)
-  const [resetOpen, setResetOpen] = useState(false)
-  const [resetting, setResetting] = useState(false)
-  const resetTriggerRef = useRef<HTMLButtonElement>(null)
-  const resetCancelRef = useRef<HTMLButtonElement>(null)
   const localeIntentRef = useRef(0)
   const mountedRef = useRef(true)
   const loading = state.status === "loading"
@@ -151,17 +119,6 @@ export function AppPreferencesSettings({
     setFailedLocale(succeeded ? null : nextLocale)
   }
 
-  const resetPreferences = async () => {
-    setResetting(true)
-    const succeeded = await controller.reset().catch(() => false)
-    if (!mountedRef.current) return
-    setResetting(false)
-    if (succeeded) {
-      setFailedLocale(null)
-      setResetOpen(false)
-    }
-  }
-
   return (
     <section
       aria-labelledby="settings-general-title"
@@ -179,8 +136,15 @@ export function AppPreferencesSettings({
 
       <PreferenceAlert
         copy={copy}
-        onReset={() => setResetOpen(true)}
-        onRetry={() => void controller.retry()}
+        onRetry={() => {
+          if (state.status === "recovery") {
+            void controller.update({
+              locale: state.snapshot.preferences.locale,
+            })
+          } else {
+            void controller.retry()
+          }
+        }}
       />
 
       <FieldGroup>
@@ -217,65 +181,6 @@ export function AppPreferencesSettings({
             </div>
           ) : null}
         </Field>
-
-        <Field data-invalid={invalid || undefined}>
-          <FieldLabel htmlFor="app-reduced-motion">
-            {copy.settingsView.motion}
-          </FieldLabel>
-          <FieldDescription id="app-reduced-motion-description">
-            {copy.settingsView.motionDescription}
-          </FieldDescription>
-          <NativeSelect
-            aria-describedby="app-reduced-motion-description"
-            aria-invalid={invalid || undefined}
-            disabled={loading}
-            id="app-reduced-motion"
-            onChange={(event) => {
-              const value = event.currentTarget.value
-              if (value === "system" || value === "on" || value === "off") {
-                void controller.update({ reducedMotion: value })
-              }
-            }}
-            value={controlPreferences.reducedMotion}
-          >
-            <NativeSelectOption value="system">
-              {copy.settingsView.system}
-            </NativeSelectOption>
-            <NativeSelectOption value="on">
-              {copy.settingsView.reduce}
-            </NativeSelectOption>
-            <NativeSelectOption value="off">
-              {copy.settingsView.allow}
-            </NativeSelectOption>
-          </NativeSelect>
-        </Field>
-
-        <Field
-          className="flex-row items-center justify-between gap-lg"
-          data-invalid={invalid || undefined}
-        >
-          <div className="flex min-w-0 flex-col gap-xs">
-            <FieldLabel htmlFor="app-character-visible">
-              {copy.settingsView.characterVisibility}
-            </FieldLabel>
-            <FieldDescription id="app-character-visible-description">
-              {copy.settingsView.characterVisibilityDescription}
-            </FieldDescription>
-          </div>
-          <Switch
-            aria-describedby="app-character-visible-description"
-            aria-invalid={invalid || undefined}
-            aria-label={copy.settingsView.characterVisible}
-            checked={controlPreferences.characterVisibility === "visible"}
-            disabled={loading}
-            id="app-character-visible"
-            onCheckedChange={(visible) => {
-              void controller.update({
-                characterVisibility: visible ? "visible" : "hidden",
-              })
-            }}
-          />
-        </Field>
       </FieldGroup>
 
       <Separator />
@@ -289,98 +194,6 @@ export function AppPreferencesSettings({
             : "—"}
         </dd>
       </dl>
-
-      <div className="flex flex-col gap-md">
-        <div className="flex min-w-0 items-start justify-between gap-xl border-b border-divider py-md max-[700px]:flex-col max-[700px]:gap-sm">
-          <div className="flex min-w-0 max-w-[60ch] flex-col gap-xxs">
-            <span className="text-title text-text-strong">
-              {copy.settingsView.resetPreferences}
-            </span>
-            <span className="break-words text-caption text-muted-foreground">
-              {copy.settingsView.resetPreferencesDescription}
-            </span>
-          </div>
-          <Button
-            disabled={resetting || state.status === "saving"}
-            onClick={() => setResetOpen(true)}
-            ref={resetTriggerRef}
-            size="xs"
-            type="button"
-            variant="secondary"
-          >
-            <DatabaseIcon aria-hidden="true" data-icon="inline-start" />
-            {copy.settingsView.resetPreferences}
-          </Button>
-        </div>
-        <div className="flex min-w-0 items-start justify-between gap-xl border-b border-divider py-md max-[700px]:flex-col max-[700px]:gap-sm">
-          <div className="flex min-w-0 max-w-[60ch] flex-col gap-xxs">
-            <span className="text-title text-text-strong">
-              {copy.settingsView.resetUi}
-            </span>
-            <span className="break-words text-caption text-muted-foreground">
-              {copy.settingsView.resetUiDescription}
-            </span>
-          </div>
-          <Button
-            onClick={onResetUi}
-            size="xs"
-            type="button"
-            variant="secondary"
-          >
-            {copy.settingsView.resetUi}
-          </Button>
-        </div>
-      </div>
-
-      <Dialog
-        onOpenChange={(open) => {
-          if (!resetting) setResetOpen(open)
-        }}
-        open={resetOpen}
-      >
-        <DialogContent
-          closeLabel={copy.dismiss}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            resetTriggerRef.current?.focus()
-          }}
-          onOpenAutoFocus={(event) => {
-            event.preventDefault()
-            resetCancelRef.current?.focus()
-          }}
-          showCloseButton={!resetting}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {copy.settingsView.resetPreferencesConfirmTitle}
-            </DialogTitle>
-            <DialogDescription>
-              {copy.settingsView.resetPreferencesConfirmBody}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              disabled={resetting}
-              onClick={() => setResetOpen(false)}
-              ref={resetCancelRef}
-              type="button"
-              variant="outline"
-            >
-              {copy.settingsView.resetPreferencesCancel}
-            </Button>
-            <Button
-              disabled={resetting}
-              onClick={() => void resetPreferences()}
-              type="button"
-              variant="destructive"
-            >
-              {resetting
-                ? copy.settingsView.resetPreferencesInProgress
-                : copy.settingsView.resetPreferencesConfirm}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </section>
   )
 }

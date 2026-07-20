@@ -729,13 +729,13 @@ fn preferences_check(checked_at: &str, service: &AppPreferencesService) -> Readi
             ReadinessStatus::Blocked,
             "READINESS-PREFERENCES-SCHEMA-INCOMPATIBLE",
             true,
-            ReadinessRecoveryAction::ResetPreferences,
+            ReadinessRecoveryAction::SavePreferences,
         ),
         Some(_) if probe.store_available => (
             ReadinessStatus::Blocked,
             "READINESS-PREFERENCES-RECOVERY-REQUIRED",
             true,
-            ReadinessRecoveryAction::ResetPreferences,
+            ReadinessRecoveryAction::SavePreferences,
         ),
         _ => (
             ReadinessStatus::Unavailable,

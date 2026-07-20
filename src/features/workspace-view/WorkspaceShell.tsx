@@ -32,7 +32,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useI18n } from "@/features/localization"
-import { useAppPreferences } from "@/features/preferences"
 import { useRuntime } from "@/features/runtime"
 import {
   projectCharacterRuntime,
@@ -130,8 +129,6 @@ export function WorkspaceShell({
   const safeQuitCopy = getSafeQuitCopy(locale)
   const runtime = useRuntime()
   const narration = useNarrationSnapshot()
-  const appPreferences = useAppPreferences().snapshot.preferences
-  const characterHidden = appPreferences.characterVisibility === "hidden"
   const view = useWorkspaceViewModel(adapter, initialWorkspaces)
   const [appSettingsProjectId, setAppSettingsProjectId] = useState<
     string | null
@@ -144,10 +141,7 @@ export function WorkspaceShell({
   const characterRuntimeSnapshot = useCharacterRuntimeStatus(
     view.selectedWorkspace?.id ?? "__no_workspace__",
   )
-  const characterRuntime = projectCharacterRuntime(
-    characterRuntimeSnapshot,
-    characterHidden,
-  )
+  const characterRuntime = projectCharacterRuntime(characterRuntimeSnapshot)
   const [appSettingsOpen, setAppSettingsOpen] = useState(false)
   const [appSettingsSection, setAppSettingsSection] =
     useState<AppSettingsSection>("general")
@@ -169,8 +163,7 @@ export function WorkspaceShell({
           : connected
             ? "ready"
             : "offline"
-  const reducedMotion =
-    systemReducedMotion || appPreferences.reducedMotion === "on"
+  const reducedMotion = systemReducedMotion
   const turnActive =
     view.turnState === "sending" ||
     view.turnState === "running" ||
@@ -677,13 +670,6 @@ export function WorkspaceShell({
     })
   }
 
-  const resetUiState = () => {
-    view.resetUiState()
-    setAppSettingsProjectId(null)
-    setAppSettingsSection("general")
-    setAppSettingsOpen(false)
-  }
-
   const setActiveTab = (value: string) => {
     if (!isWorkspaceTab(value)) return
     setAppSettingsProjectId(null)
@@ -804,7 +790,6 @@ export function WorkspaceShell({
               selectedWorkspace?.id ?? "__no_workspace__",
             )
           }}
-          onResetUi={resetUiState}
           onCloseProject={() => setAppSettingsProjectId(null)}
           onOpenProject={setAppSettingsProjectId}
           onSectionChange={(section) => {
@@ -825,9 +810,7 @@ export function WorkspaceShell({
       {selectedWorkspace ? (
         <Tabs
           className="workspace-tabs grid"
-          data-companion-active={
-            view.activeTab !== "settings" && !characterHidden
-          }
+          data-companion-active={view.activeTab !== "settings"}
           data-companion-layout=""
           data-workspace-tab={view.activeTab}
           hidden={appSettingsOpen}
@@ -915,7 +898,7 @@ export function WorkspaceShell({
                   workspaceGeneration !== null)
               }
               commitExplanationController={commitExplanationController}
-              companionVisible={!characterHidden}
+              companionVisible
               locale={locale}
               onBackToChat={() => view.setActiveTab("chat")}
               onCommitSelectionChange={dismissCommitPresentation}
@@ -941,22 +924,20 @@ export function WorkspaceShell({
             />
           </TabsContent>
 
-          {!characterHidden ? (
-            <CharacterStageSlot
-              characterRuntime={characterRuntime}
-              copy={copy}
-              muted={view.muted}
-              onMutedChange={view.setMuted}
-              onRetryCharacter={() => {
-                characterRuntimeStore.retry(selectedWorkspace.id)
-              }}
-              reducedMotion={reducedMotion}
-              state={companionState}
-              visible={view.activeTab !== "settings" && !appSettingsOpen}
-              workspaceId={selectedWorkspace.id}
-              {...(characterRenderer ? { renderer: characterRenderer } : {})}
-            />
-          ) : null}
+          <CharacterStageSlot
+            characterRuntime={characterRuntime}
+            copy={copy}
+            muted={view.muted}
+            onMutedChange={view.setMuted}
+            onRetryCharacter={() => {
+              characterRuntimeStore.retry(selectedWorkspace.id)
+            }}
+            reducedMotion={reducedMotion}
+            state={companionState}
+            visible={view.activeTab !== "settings" && !appSettingsOpen}
+            workspaceId={selectedWorkspace.id}
+            {...(characterRenderer ? { renderer: characterRenderer } : {})}
+          />
 
           {commitPresentation ? (
             <div
