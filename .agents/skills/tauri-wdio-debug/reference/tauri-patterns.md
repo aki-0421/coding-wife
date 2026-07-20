@@ -48,15 +48,17 @@ unrelated to the behavior under test.
 ## Window sizes
 
 ```ts
-await browser.setWindowSize(1280, 800)
-await browser.waitUntil(
-  async () => (await browser.getWindowSize()).width === 1280,
-  { timeoutMsg: "Tauri window did not reach 1280px" },
-)
+import { setLogicalWindowSize } from "./support/window"
+
+const metrics = await setLogicalWindowSize({ width: 1280, height: 800 })
+expect(metrics.viewport).toEqual({ width: 1280, height: 800 })
 ```
 
-The app enforces a 960 x 640 minimum. Test smaller effective layouts only when the product
-contract explicitly supplies an in-app mechanism; a browser-only viewport is not native evidence.
+WebdriverIO reports physical pixels on macOS, while the acceptance sizes and CSS viewport use
+logical pixels. The helper converts through `window.devicePixelRatio` and verifies the resulting
+CSS viewport. On a 2x Retina display, a logical 960 x 640 capture is a 1920 x 1280 PNG. The app
+enforces a 960 x 640 logical minimum. Test smaller effective layouts only when the product contract
+explicitly supplies an in-app mechanism; a browser-only viewport is not native evidence.
 
 ## Manual screenshot
 

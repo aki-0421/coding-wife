@@ -57,8 +57,10 @@ scenario outside `e2e/desktop/`.
    prove the real Rust path.
 6. Keep `maxInstances` at 1. Use `CODING_WIFE_WDIO_PORT` only when a caller needs an explicit
    port; Conductor workspaces otherwise derive it from `CONDUCTOR_PORT`.
-7. Verify 1470 x 836, 1280 x 800, and the native minimum 960 x 640 when layout is in scope.
-   Do not claim a 480px Chrome viewport as native Tauri evidence.
+7. Verify 1470 x 836, 1280 x 800, and the native minimum 960 x 640 logical pixels when layout is
+   in scope. Use `setLogicalWindowSize` from `e2e/desktop/support/window.ts`; raw
+   `browser.setWindowSize(960, 640)` produces a 480 x 320 CSS viewport on a 2x Retina display.
+   Do not claim a 480px viewport as native 960px Tauri evidence.
 
 Use explicit imports in specs:
 

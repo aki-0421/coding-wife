@@ -35,7 +35,7 @@ Web検索またはHTTP取得手段で公式一次資料を確認し、アプリQ
 - `browser.tauri.execute()`によるread-onlyなruntime診断。
 - frontend consoleとRust標準出力の取得。
 - 失敗時のスクリーンショットとログ保存。
-- 1470 x 836、1280 x 800、最小960 x 640のnative window。
+- 1470 x 836、1280 x 800、最小960 x 640論理pxのnative window。
 - 日本語、英語、keyboard、reduced motionを含む主要な受け入れ条件。
 
 対象外はmacOSのファイル選択・権限dialog、Dock、menu barなど、WebView外のOS UIである。
@@ -65,6 +65,19 @@ embedded providerの`browser.tauri.execute()`はこの環境変数からdirect-e
 `@wdio/native-utils@2.4.0`はそのexportを含まない。`package.json`のpnpm overrideで2.5.0へ
 固定しているのはこの公開package間の不整合を避けるためである。overrideを外すのは、上流の
 依存指定が修正された版へ更新し、`pnpm test:desktop`で実起動とIPCの両方を確認するときに限る。
+
+## ウィンドウサイズ契約
+
+受け入れ条件の幅と高さはCSS viewportと同じ論理pxを表す。macOSのembedded WebDriverは
+`setWindowSize`と`getWindowSize`を物理pxとして扱うため、Retina環境で
+`browser.setWindowSize(960, 640)`を直接呼ぶとCSS viewportは480 x 320になる。
+この状態を960 x 640のnative検証として報告してはならない。
+
+デスクトップspecは`e2e/desktop/support/window.ts`の`setLogicalWindowSize`を使う。
+helperは`window.devicePixelRatio`を掛けた物理サイズをWebDriverへ渡し、最終的な
+`document.documentElement.clientWidth`と`clientHeight`が要求した論理サイズに一致するまで
+待機して検証する。スクリーンショットは物理pxで保存されるため、device pixel ratioが2の
+環境では960 x 640論理pxの画像が1920 x 1280pxになるのが正しい。
 
 ## Productionとデータの境界
 
