@@ -4615,7 +4615,7 @@ mod tests {
     fn private_codex_binary_setting_survives_restart_and_can_be_cleared() {
         let data = temp_directory("codex-binary-setting");
         let expected = AppPrivateBinaryRecord {
-            canonical_path: PathBuf::from("/Users/fixture/.local/bin/codex"),
+            canonical_path: PathBuf::from("/opt/coding-wife-fixture/bin/codex"),
         };
         let store = WorkspaceHistoryStore::open(&data).expect("open store");
         store

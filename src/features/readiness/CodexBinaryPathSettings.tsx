@@ -15,7 +15,7 @@ const copy = {
     label: "Custom Codex CLI path",
     description:
       "Coding Wife checks your default shell automatically. If Codex is elsewhere, enter its absolute executable path.",
-    placeholder: "/Users/you/.local/bin/codex",
+    placeholder: "/Users/<user>/.local/bin/codex",
     save: "Use this path",
     saving: "Checking path…",
     automatic: "Use automatic detection",
@@ -31,7 +31,7 @@ const copy = {
     label: "Codex CLIのカスタムパス",
     description:
       "通常はデフォルトシェルから自動検出します。別の場所にある場合は実行ファイルの絶対パスを入力してください。",
-    placeholder: "/Users/you/.local/bin/codex",
+    placeholder: "/Users/<user>/.local/bin/codex",
     save: "このパスを使用",
     saving: "パスを確認中…",
     automatic: "自動検出を使用",

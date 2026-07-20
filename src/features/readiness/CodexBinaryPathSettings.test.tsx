@@ -72,10 +72,10 @@ describe("CodexBinaryPathSettings", () => {
     const input = await screen.findByRole("textbox", {
       name: "Custom Codex CLI path",
     })
-    await user.type(input, "/Users/test/.local/bin/codex")
+    await user.type(input, "/opt/coding-wife-fixture/bin/codex")
     await user.click(screen.getByRole("button", { name: "Use this path" }))
     expect(configureCodexBinary).toHaveBeenLastCalledWith(
-      "/Users/test/.local/bin/codex",
+      "/opt/coding-wife-fixture/bin/codex",
     )
     expect(onConfigurationApplied).toHaveBeenCalledOnce()
     expect(

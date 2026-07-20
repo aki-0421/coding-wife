@@ -1257,8 +1257,8 @@ mod tests {
     #[test]
     fn login_shell_candidate_requires_one_absolute_control_free_path() {
         assert_eq!(
-            parse_login_shell_candidate(b"profile message\n/Users/test/.local/bin/codex\n"),
-            Some(PathBuf::from("/Users/test/.local/bin/codex"))
+            parse_login_shell_candidate(b"profile message\n/opt/coding-wife-fixture/bin/codex\n"),
+            Some(PathBuf::from("/opt/coding-wife-fixture/bin/codex"))
         );
         assert_eq!(
             parse_login_shell_candidate(b"/first/codex\n/second/codex\n"),

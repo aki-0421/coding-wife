@@ -99,7 +99,7 @@ describe("NativeReadinessController", () => {
     await initial
 
     const configuring = controller.configureCodexBinary(
-      "/Users/test/.local/bin/codex",
+      "/opt/coding-wife-fixture/bin/codex",
     )
     expect(controller.getSnapshot()).toMatchObject({
       status: "configuring",

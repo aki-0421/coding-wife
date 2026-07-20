@@ -1045,8 +1045,9 @@ mod tests {
     #[test]
     fn configured_codex_path_requires_a_bounded_absolute_value() {
         assert_eq!(
-            validate_configured_codex_path("/Users/test/.local/bin/codex").expect("absolute path"),
-            PathBuf::from("/Users/test/.local/bin/codex")
+            validate_configured_codex_path("/opt/coding-wife-fixture/bin/codex")
+                .expect("absolute path"),
+            PathBuf::from("/opt/coding-wife-fixture/bin/codex")
         );
         for value in ["codex", " /usr/local/bin/codex", "/tmp/codex\n"] {
             assert!(validate_configured_codex_path(value).is_err(), "{value:?}");
