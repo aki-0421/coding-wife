@@ -1542,6 +1542,42 @@ describe("WorkspaceShell", () => {
     }
   })
 
+  it("copies exact header values without tooltips or workspace actions", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    renderWorkspace()
+
+    const breadcrumb = screen.getByRole("navigation", {
+      name: "Repository location",
+    })
+    const header = breadcrumb.closest("header")
+    expect(header).not.toBeNull()
+
+    for (const [name, value] of [
+      ["Copy repository: aki-0421/coding-wife", "aki-0421/coding-wife"],
+      [
+        "Copy workspace name: build-live2d-desktop-app",
+        "build-live2d-desktop-app",
+      ],
+      ["Copy branch: feature/live2d-character", "feature/live2d-character"],
+    ] as const) {
+      fireEvent.click(
+        within(header as HTMLElement).getByRole("button", { name }),
+      )
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(value))
+    }
+
+    expect(header?.querySelector('[data-slot="tooltip-trigger"]')).toBeNull()
+    expect(
+      within(header as HTMLElement).queryByRole("button", {
+        name: "Workspace actions",
+      }),
+    ).toBeNull()
+  })
+
   it("uses a neutral repository avatar when GitHub metadata is absent", async () => {
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
@@ -3079,166 +3115,7 @@ describe("WorkspaceShell", () => {
     expect(sendTurn.mock.calls[0]?.[0]).not.toHaveProperty("paths")
   })
 
-  it("delegates terminal cancellation atomically without exposing project actions", async () => {
-    const timestamp = "2026-07-18T01:00:00.000Z"
-    const activeState: WorkspaceAdapterState = {
-      ...nativeWorkspaceState(),
-      workspaces: [
-        {
-          ...nativeWorkspaceState().workspaces[0]!,
-          updatedAt: timestamp,
-          health: "ready",
-        },
-      ],
-    }
-    const canceledState: WorkspaceAdapterState = {
-      ...activeState,
-      workspaces: activeState.workspaces.map((workspace) => ({
-        ...workspace,
-        lifecycle: "canceled" as const,
-        updatedAt: "2026-07-18T01:00:01.000Z",
-      })),
-    }
-    const codex = richCodexState()
-    const stopTurn = vi.fn().mockResolvedValue(undefined)
-    const cancelWorkspace = vi.fn().mockResolvedValue(canceledState)
-    const unregisterWorkspace = vi.fn().mockResolvedValue(canceledState)
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(activeState),
-      codexSnapshot: () => codex,
-      subscribeCodex(listener) {
-        listener(codex)
-        return () => undefined
-      },
-      stopTurn,
-      cancelWorkspace,
-      unregisterProject: unregisterWorkspace,
-    }
-    const user = userEvent.setup()
-    const { container } = renderWorkspace(adapter)
-
-    const actions = await waitFor(() => {
-      const value = container.querySelector<HTMLButtonElement>(
-        'button[aria-label="Workspace actions"]',
-      )
-      expect(value).not.toBeNull()
-      return value as HTMLButtonElement
-    })
-    await user.click(actions)
-    const actionMenu = await waitFor(() => {
-      const value = document.querySelector<HTMLElement>(
-        "[data-workspace-action-menu]",
-      )
-      expect(value).not.toBeNull()
-      return value as HTMLElement
-    })
-    expect(
-      within(actionMenu).queryByRole("button", { name: /Unregister project/u }),
-    ).not.toBeInTheDocument()
-    await user.click(
-      within(actionMenu).getByRole("button", { name: /Cancel workspace/u }),
-    )
-    const dialog = await waitFor(() => {
-      const title = Array.from(document.querySelectorAll("h2")).find(
-        (heading) => heading.textContent === "Cancel this workspace?",
-      )
-      const value = title?.closest<HTMLElement>('[role="dialog"]') ?? null
-      expect(value).not.toBeNull()
-      return value as HTMLElement
-    })
-    expect(within(dialog).getByText("Cancel this workspace?")).toBeVisible()
-    await user.click(
-      within(dialog).getByRole("button", { name: "Stop and cancel" }),
-    )
-
-    await waitFor(() => expect(cancelWorkspace).toHaveBeenCalledOnce())
-    expect(stopTurn).not.toHaveBeenCalled()
-    expect(cancelWorkspace).toHaveBeenCalledWith(
-      "workspace-native",
-      timestamp,
-      1,
-    )
-    expect(unregisterWorkspace).not.toHaveBeenCalled()
-  })
-
-  it("focuses the safe cancel action, handles Escape, and restores the opener", async () => {
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(nativeWorkspaceState()),
-      cancelWorkspace: vi.fn(),
-    }
-    const user = userEvent.setup()
-    renderWorkspace(adapter)
-    const opener = await screen.findByRole("button", {
-      name: "Workspace actions",
-    })
-
-    await user.click(opener)
-    await user.click(screen.getByRole("button", { name: /Cancel workspace/u }))
-    const dialog = screen.getByRole("dialog", {
-      name: "Cancel this workspace?",
-    })
-    await waitFor(() =>
-      expect(
-        within(dialog).getByRole("button", { name: "Go back" }),
-      ).toHaveFocus(),
-    )
-    expect(
-      within(dialog).getByRole("button", { name: "Dismiss" }),
-    ).toBeVisible()
-
-    fireEvent.keyDown(dialog, { code: "Escape", key: "Escape" })
-    await waitFor(() => expect(dialog).not.toBeInTheDocument())
-    await waitFor(() => expect(opener).toHaveFocus())
-  })
-
-  it("localizes the destructive dialog close control in Japanese", async () => {
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(nativeWorkspaceState()),
-      cancelWorkspace: vi.fn(),
-    }
-    const user = userEvent.setup()
-    const { container } = render(
-      <App
-        localeStore={japaneseLocaleStore}
-        transport={new DemoTransport()}
-        workspaceAdapter={adapter}
-      />,
-    )
-
-    const actions = await waitFor(() => {
-      const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label="ワークスペース操作"]',
-      )
-      expect(button).not.toBeNull()
-      return button as HTMLButtonElement
-    })
-    await user.click(actions)
-    const actionMenu = await waitFor(() => {
-      const value = document.querySelector<HTMLElement>(
-        "[data-workspace-action-menu]",
-      )
-      expect(value).not.toBeNull()
-      return value as HTMLElement
-    })
-    await user.click(
-      within(actionMenu).getByRole("button", {
-        name: /ワークスペースを中止/u,
-      }),
-    )
-    const dialog = await waitFor(() => {
-      const value = document.querySelector<HTMLElement>(
-        '[role="dialog"][aria-labelledby]',
-      )
-      expect(value).not.toBeNull()
-      return value as HTMLElement
-    })
-    expect(within(dialog).getByRole("button", { name: "閉じる" })).toBeVisible()
-  })
-
-  it("shows repository health and repairs it from the state-aware action menu", async () => {
+  it("keeps repository health visible without offline or action chrome", async () => {
     const unhealthyState: WorkspaceAdapterState = {
       ...nativeWorkspaceState(),
       workspaces: [
@@ -3249,72 +3126,26 @@ describe("WorkspaceShell", () => {
         },
       ],
     }
-    const repairWorkspace = vi.fn().mockResolvedValue({
-      ...unhealthyState,
-      workspaces: unhealthyState.workspaces.map((workspace) => ({
-        ...workspace,
-        health: "ready" as const,
-      })),
-    })
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () => Promise.resolve(unhealthyState),
-      repairWorkspace,
     }
-    const user = userEvent.setup()
     renderWorkspace(adapter)
 
-    expect((await screen.findAllByText("Repository missing")).length).toBe(2)
-    await user.click(screen.getByRole("button", { name: "Workspace actions" }))
-    await user.click(
-      screen.getByRole("button", { name: /Reselect repository/u }),
-    )
-
-    await waitFor(() =>
-      expect(repairWorkspace).toHaveBeenCalledWith("workspace-native"),
-    )
-    expect(screen.queryByText("Repository missing")).not.toBeInTheDocument()
-  })
-
-  it("labels stale HEAD recovery as an explicit read-only recheck", async () => {
-    const staleState: WorkspaceAdapterState = {
-      ...nativeWorkspaceState(),
-      workspaces: [
-        {
-          ...nativeWorkspaceState().workspaces[0]!,
-          health: "stale_branch",
-        },
-      ],
-    }
-    const recheckWorkspace = vi.fn().mockResolvedValue({
-      ...staleState,
-      workspaces: staleState.workspaces.map((workspace) => ({
-        ...workspace,
-        health: "ready" as const,
-      })),
+    const breadcrumb = await screen.findByRole("navigation", {
+      name: "Repository location",
     })
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(staleState),
-      recheckWorkspace,
-    }
-    const user = userEvent.setup()
-    renderWorkspace(adapter)
-
+    const header = breadcrumb.closest("header")
+    expect(header).not.toBeNull()
     expect(
-      (await screen.findAllByText("Branch changed outside the app")).length,
-    ).toBe(2)
-    await user.click(screen.getByRole("button", { name: "Workspace actions" }))
-    await user.click(
-      screen.getByRole("button", { name: /^Recheck repository/u }),
-    )
-
-    await waitFor(() =>
-      expect(recheckWorkspace).toHaveBeenCalledWith("workspace-native", true),
-    )
+      await within(header as HTMLElement).findByText("Repository missing"),
+    ).toBeInTheDocument()
+    expect(within(header as HTMLElement).queryByText("Offline")).toBeNull()
     expect(
-      screen.queryByText("Branch changed outside the app"),
-    ).not.toBeInTheDocument()
+      within(header as HTMLElement).queryByRole("button", {
+        name: "Workspace actions",
+      }),
+    ).toBeNull()
   })
 
   it("unregisters project metadata from app settings after confirmation", async () => {

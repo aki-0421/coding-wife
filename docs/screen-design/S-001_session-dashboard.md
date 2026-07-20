@@ -263,7 +263,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 - lifecycle/attentionは色、label、icon、fill/outline/dashを併用する。
 - 12px visual iconは24×24px以上のhit areaとtooltipを持つ。
 - repo/branch ellipsisはfocus/hover tooltipとaccessible full valueを持つ。
-- repository health、切替保留、Cancel/Repair/登録解除の状態はja/en textとiconで示し、rowとheaderを同じaccessible statusへ関連付ける。
+- repository healthはja/en textとiconで示し、rowとheaderを同じaccessible statusへ関連付ける。切替保留、Archive、登録解除の状態は操作を開始したsidebarまたはApp Settingsとdialogへ関連付け、Cancel/Repair actionをheaderへ表示しない。
 - destructive/interrupt dialogはDOM順を説明、対象、保持data、`戻る`、実行actionとし、`戻る`へ初期focus、close後はtriggerへfocusを返す。
 - processing updateはpolite、blocked/errorはassertive live regionへ1回だけ通知する。
 - 200% text zoomではdrawer内itemを2行のまま保ち、primary actionを欠落させない。
