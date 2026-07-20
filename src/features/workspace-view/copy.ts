@@ -11,7 +11,13 @@ const en = {
   archiveWorkspace: "Archive workspace",
   appSettings: "App settings",
   repositoryBreadcrumb: "Repository location",
-  workspaceActions: "Workspace actions",
+  headerCopy: {
+    repository: "Copy repository",
+    workspace: "Copy workspace name",
+    branch: "Copy branch",
+    copied: "Copied",
+    failed: "The value could not be copied.",
+  },
   workspaceHealth: {
     ready: "Repository ready",
     missing: "Repository missing",
@@ -21,33 +27,6 @@ const en = {
     stale_branch: "Branch changed outside the app",
   },
   workspaceMenu: {
-    cancel: "Cancel workspace",
-    cancelDescription: "Stop work and keep its history for review.",
-    repair: "Reselect repository…",
-    repairDescription: "Choose the repository again to repair local access.",
-    recheckRepository: "Recheck repository",
-    recheckDescription:
-      "Verify and use the branch and HEAD currently present on disk.",
-    unregister: "Unregister project…",
-    unregisterDescription: "Hide this project without deleting its history.",
-    runningBlocked: "Unavailable while a turn is running.",
-    cancelTitle: "Cancel this workspace?",
-    cancelBody:
-      "Its app lifecycle changes to Canceled. Source files, the worktree, Git refs, and history are kept.",
-    cancelRunningBody:
-      "The active turn must stop first. Its lifecycle changes to Canceled only after the exact turn is terminal and local cleanup finishes.",
-    keepWorkspace: "Go back",
-    confirmCancel: "Cancel workspace",
-    stopAndCancel: "Stop and cancel",
-    unregisterTitle: "Unregister this project?",
-    unregisterBody:
-      "All of this project's workspaces disappear from navigation. Source files, the worktree, Git refs, drafts, and history are not deleted.",
-    continueUnregister: "Continue",
-    unregisterFinalTitle: "Confirm project unregister",
-    unregisterFinalBody:
-      "This removes only the app's active project registration. You can register the repository again later to restore its preserved history.",
-    confirmUnregister: "Unregister project",
-    working: "Working…",
     error: {
       generic:
         "The workspace action could not be completed. No source or Git state was changed.",
@@ -500,7 +479,13 @@ const ja: typeof en = {
   archiveWorkspace: "ワークスペースをアーカイブ",
   appSettings: "アプリ設定",
   repositoryBreadcrumb: "リポジトリの現在地",
-  workspaceActions: "ワークスペース操作",
+  headerCopy: {
+    repository: "リポジトリをコピー",
+    workspace: "ワークスペース名をコピー",
+    branch: "ブランチをコピー",
+    copied: "コピーしました",
+    failed: "値をコピーできませんでした。",
+  },
   workspaceHealth: {
     ready: "リポジトリ準備完了",
     missing: "リポジトリが見つかりません",
@@ -510,33 +495,6 @@ const ja: typeof en = {
     stale_branch: "アプリ外でブランチが変わりました",
   },
   workspaceMenu: {
-    cancel: "ワークスペースを中止",
-    cancelDescription: "作業を止め、レビュー用の履歴は保持します。",
-    repair: "リポジトリを再選択…",
-    repairDescription: "リポジトリを選び直し、ローカルアクセスを修復します。",
-    recheckRepository: "リポジトリを再確認",
-    recheckDescription:
-      "現在のブランチとHEADを読み取り専用で確認し、明示的に使用します。",
-    unregister: "プロジェクトの登録を解除…",
-    unregisterDescription: "履歴を削除せず、プロジェクトを非表示にします。",
-    runningBlocked: "ターンの実行中は操作できません。",
-    cancelTitle: "このワークスペースを中止しますか？",
-    cancelBody:
-      "アプリ内の状態を「中止」に変更します。ソースファイル、worktree、Git ref、履歴は保持します。",
-    cancelRunningBody:
-      "先に進行中のターンを停止します。対象ターンの終了状態を確認し、ローカル後処理が完了した後だけワークスペースの状態を「中止」に変更します。",
-    keepWorkspace: "戻る",
-    confirmCancel: "ワークスペースを中止",
-    stopAndCancel: "停止して中止",
-    unregisterTitle: "このプロジェクトの登録を解除しますか？",
-    unregisterBody:
-      "このプロジェクトの全ワークスペースがナビゲーションから消えます。ソースファイル、worktree、Git ref、下書き、履歴は削除しません。",
-    continueUnregister: "続ける",
-    unregisterFinalTitle: "プロジェクト登録の解除を確認",
-    unregisterFinalBody:
-      "アプリの有効なプロジェクト登録だけを解除します。後で同じリポジトリを再登録すると、保持された履歴を復元できます。",
-    confirmUnregister: "プロジェクト登録を解除",
-    working: "処理中…",
     error: {
       generic:
         "ワークスペース操作を完了できませんでした。ソースやGitの状態は変更していません。",

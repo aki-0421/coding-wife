@@ -80,7 +80,7 @@ status: "Approved"
 | 領域 | 実装拘束値 | 表示内容 | 主な操作 |
 |---|---:|---|---|
 | workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、App settings gear | filter、workspace選択、App settings |
-| breadcrumb row | main上段40.5px | owner avatar、`owner/repo` / workspace、branch、connection、attention | Sessionsへ戻る、diagnostic詳細 |
+| breadcrumb row | main上段40.5px | owner avatar、`owner/repo` / workspace、branch、connection、attention | repository / workspace / branchの値をcopy |
 | tab row | main下段40.5px | Chat / Commit / Settings | view切替 |
 | Chat pane | 607.11×754.99px | event timeline、decision、composer | inspect、copy、send、stop、answer |
 | Character pane | 607.84×754.99px | Live2D canvas、visible caption、mute | mute、fallback詳細 |
@@ -93,10 +93,11 @@ status: "Approved"
 | 要素 | 規則 |
 |---|---|
 | repository avatar | GitHub `origin`の`owner/repo`がある時はownerの24px GitHub avatarを`https://avatars.githubusercontent.com`から`no-referrer`で表示する。CSPの外部画像許可は同originだけに限定し、画像失敗時はneutral user fallback、GitHub metadataがないlocal repositoryではneutral Git worktree fallbackを使う。app iconはrepository identityとして使わない |
-| breadcrumb | avatarの次にGitHub `origin`由来の`owner/repo`、workspace名をこの順で一行表示する。GitHub metadataがない時は保存済みlocal repo名へfallbackし、長いrepo/workspace値はellipsisと全文tooltipを持つ |
-| branch | Git観測値。stale時はicon、`再確認が必要`、tooltipを併記する |
+| breadcrumb | avatarの次にGitHub `origin`由来の`owner/repo`、workspace名をこの順で一行表示する。GitHub metadataがない時は保存済みlocal repo名へfallbackする。repositoryとworkspace名は長い時も一行ellipsisを維持し、hover / focus-visibleで背景と文字色を変えて操作可能性を示す。pointer clickまたはkeyboard activationで省略前のexact valueをclipboardへcopyし、tooltipとnative `title`は表示しない。copy icon、成功check icon、その予約領域は表示せず、hoverとcopy成功でtext buttonのinline幅を変えない |
+| branch | Git観測値をbranch iconとmono textで表示する。長い時は一行ellipsisを維持し、repository / workspace名と同じhover、focus-visible、clipboard copy、幅不変の契約を使う。stale時の状態説明はrepository healthへ分離し、branch値のtooltipやcopy結果iconは表示しない |
 | repository health | `healthy` / `missing` / `changed` / `unreadable` / `read_only` / `stale_branch`をja/en text、icon、shapeで表示し、色だけにしない。`healthy`以外はSend不可理由とRepair/Recheckを関連付ける |
-| connection | Ready / Working / Needs answer / Offline / Interruptedをtextとshapeで表示する |
+| connection | Ready / Working / Needs answer / Interruptedをtextとshapeで表示する。offline時はpersistent bannerとSend不可理由を正本とし、breadcrumb rowへ`Offline / オフライン`のicon、text、空のplaceholderを表示しない |
+| workspace action | breadcrumb rowへ3点actionを表示しない。Cancel / Repair / Recheck / Archiveをこのrowへ置かず、workspace Archiveはsidebar rowからだけ開始する |
 | Chat | 本画面のmain route。unread error/decision countをbadge表示する |
 | Commit | [S-003](S-003_session-evidence.md)へ遷移する。manual commit buttonではない |
 
@@ -303,7 +304,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 ## アクセシビリティ
 
-- focus順はheader tabs、timeline heading、new updates、events、decision、composer controls、Character controlsとする。
+- focus順はheaderのrepository / workspace / branch copy control、header tabs、timeline heading、new updates、events、decision、composer controls、Character controlsとする。
 - timelineは`role=feed`相当を使う場合も追加eventごとに読み上げず、完了、decision、errorだけをlive regionへ要約する。
 - tool groupのcollapsed/expanded、running/failed、file create/update/deleteをtextでも示す。
 - decisionはheading、説明、option、Other、Hold/Interrupt/Approve、submitのDOM順とし、keyboardだけで完結する。
@@ -313,7 +314,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 - commit background生成statusはcaption live regionへ流さず、明示presentation開始後の確定chunkだけをpolite、terminal errorだけをassertiveに1回通知する。
 - muteは音量iconだけにせず`Mute / ミュート`と現在値をaccessible nameへ含める。
 - 200% text zoomではChatを維持し、Characterが消えてもstatusとmuteへ到達できる。
-- ja/enの長いerror、repo/branch、relative pathは文字を縮小せずwrap、ellipsis + tooltip、horizontal code scrollで扱う。
+- ja/enの長いerrorとrelative pathは文字を縮小せずwrap、必要なellipsis + tooltip、horizontal code scrollで扱う。headerのrepository / workspace / branchはellipsis + exact value copyで扱い、tooltipを表示しない。
 
 ## 性能と失敗隔離
 

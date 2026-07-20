@@ -1,13 +1,8 @@
-import { useEffect, useRef, useState } from "react"
+import { useState, type ReactNode } from "react"
 import {
-  BanIcon,
-  EllipsisIcon,
-  FolderSearchIcon,
   GitBranchIcon,
   LoaderCircleIcon,
-  RefreshCwIcon,
   TriangleAlertIcon,
-  WifiOffIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -15,29 +10,10 @@ import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbList,
-  BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import { TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
 import {
@@ -54,26 +30,21 @@ interface WorkspaceHeaderProps {
   readonly connection: HeaderConnectionState
   readonly copy: WorkspaceCopy
   readonly workspace: WorkspaceRecord
-  readonly actionPending: "cancel" | "repair" | "unregister" | "archive" | null
-  readonly canCancel: boolean
-  readonly canRepair: boolean
-  readonly turnActive: boolean
-  readonly onCancel: (stopFirst: boolean) => Promise<boolean>
-  readonly onRepair: () => Promise<boolean>
 }
 
 function ConnectionStatus({
   connection,
   copy,
 }: Pick<WorkspaceHeaderProps, "connection" | "copy">) {
+  if (connection === "offline") return null
+
   return (
     <span
       className={cn(
         "ml-auto flex shrink-0 items-center gap-xs text-label",
         connection === "ready" && "text-success",
         connection === "checking" && "text-running",
-        (connection === "preview" || connection === "offline") &&
-          "text-muted-foreground",
+        connection === "preview" && "text-muted-foreground",
       )}
       role="status"
     >
@@ -82,8 +53,6 @@ function ConnectionStatus({
           aria-hidden="true"
           className="size-3 animate-spin motion-reduce:animate-none"
         />
-      ) : connection === "offline" ? (
-        <WifiOffIcon aria-hidden="true" className="size-3" />
       ) : (
         <span
           aria-hidden="true"
@@ -107,194 +76,71 @@ function WorkspaceHealthStatus({
   if (workspace.health === undefined || workspace.health === "ready")
     return null
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="flex min-w-0 items-center gap-xxs text-label text-destructive"
-          data-workspace-health={workspace.health}
-          role="status"
-        >
-          <TriangleAlertIcon aria-hidden="true" className="size-3 shrink-0" />
-          <span className="hidden max-w-48 truncate min-[1180px]:inline">
-            {copy.workspaceHealth[workspace.health]}
-          </span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{copy.workspaceHealth[workspace.health]}</TooltipContent>
-    </Tooltip>
+    <span
+      className="flex min-w-0 items-center gap-xxs text-label text-destructive"
+      data-workspace-health={workspace.health}
+      role="status"
+    >
+      <TriangleAlertIcon aria-hidden="true" className="size-3 shrink-0" />
+      <span className="hidden max-w-48 truncate min-[1180px]:inline">
+        {copy.workspaceHealth[workspace.health]}
+      </span>
+    </span>
   )
 }
 
-function WorkspaceActions(props: WorkspaceHeaderProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [confirmationOpen, setConfirmationOpen] = useState(false)
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const safeActionRef = useRef<HTMLButtonElement | null>(null)
-  const busy = props.actionPending !== null
-  const cancelDisabled =
-    busy ||
-    !props.canCancel ||
-    props.workspace.lifecycle === "canceled" ||
-    props.workspace.lifecycle === "done"
-  const repairDisabled = busy || !props.canRepair || props.turnActive
-  const recheckRepository = props.workspace.health === "stale_branch"
-
-  const closeConfirmation = () => setConfirmationOpen(false)
-  const completeCancel = async () => {
-    if (await props.onCancel(props.turnActive)) closeConfirmation()
-  }
-  useEffect(() => {
-    if (!confirmationOpen) return
-    const frame = window.requestAnimationFrame(() =>
-      safeActionRef.current?.focus(),
-    )
-    return () => window.cancelAnimationFrame(frame)
-  }, [confirmationOpen])
-
+function HeaderValueButton({
+  children,
+  className,
+  copyLabel,
+  current,
+  onCopy,
+  value,
+}: {
+  readonly children?: ReactNode
+  readonly className?: string | undefined
+  readonly copyLabel: string
+  readonly current?: boolean | undefined
+  readonly onCopy: () => void
+  readonly value: string
+}) {
   return (
-    <>
-      <Popover onOpenChange={setMenuOpen} open={menuOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            aria-label={props.copy.workspaceActions}
-            ref={triggerRef}
-            size="icon-xs"
-            type="button"
-            variant="ghost"
-          >
-            <EllipsisIcon />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="start"
-          className="w-72 gap-xxs p-xs"
-          data-workspace-action-menu=""
-        >
-          <Button
-            className="h-auto justify-start gap-sm px-sm py-xs text-start"
-            disabled={cancelDisabled}
-            onClick={() => {
-              setMenuOpen(false)
-              setConfirmationOpen(true)
-            }}
-            type="button"
-            variant="ghost"
-          >
-            <BanIcon className="size-3 shrink-0" />
-            <span className="flex min-w-0 flex-col items-start">
-              <span>{props.copy.workspaceMenu.cancel}</span>
-              <span className="whitespace-normal text-caption font-normal text-muted-foreground">
-                {props.copy.workspaceMenu.cancelDescription}
-              </span>
-            </span>
-          </Button>
-          {props.workspace.health !== undefined &&
-          props.workspace.health !== "ready" ? (
-            <Button
-              className="h-auto justify-start gap-sm px-sm py-xs text-start"
-              disabled={repairDisabled}
-              onClick={() => {
-                setMenuOpen(false)
-                void props.onRepair()
-              }}
-              type="button"
-              variant="ghost"
-            >
-              {recheckRepository ? (
-                <RefreshCwIcon className="size-3 shrink-0" />
-              ) : (
-                <FolderSearchIcon className="size-3 shrink-0" />
-              )}
-              <span className="flex min-w-0 flex-col items-start">
-                <span>
-                  {recheckRepository
-                    ? props.copy.workspaceMenu.recheckRepository
-                    : props.copy.workspaceMenu.repair}
-                </span>
-                <span className="whitespace-normal text-caption font-normal text-muted-foreground">
-                  {props.turnActive
-                    ? props.copy.workspaceMenu.runningBlocked
-                    : recheckRepository
-                      ? props.copy.workspaceMenu.recheckDescription
-                      : props.copy.workspaceMenu.repairDescription}
-                </span>
-              </span>
-            </Button>
-          ) : null}
-        </PopoverContent>
-      </Popover>
-
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open && !busy) closeConfirmation()
-        }}
-        open={confirmationOpen}
-      >
-        <DialogContent
-          closeLabel={props.copy.dismiss}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            window.requestAnimationFrame(() => triggerRef.current?.focus())
-          }}
-          onEscapeKeyDown={(event) => {
-            event.preventDefault()
-            if (!busy) closeConfirmation()
-          }}
-          onOpenAutoFocus={(event) => {
-            event.preventDefault()
-            safeActionRef.current?.focus()
-          }}
-          showCloseButton={!busy}
-        >
-          <DialogHeader>
-            <DialogTitle>{props.copy.workspaceMenu.cancelTitle}</DialogTitle>
-            <DialogDescription>
-              {props.turnActive
-                ? props.copy.workspaceMenu.cancelRunningBody
-                : props.copy.workspaceMenu.cancelBody}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              disabled={busy}
-              onClick={closeConfirmation}
-              ref={safeActionRef}
-              type="button"
-              variant="ghost"
-            >
-              {props.copy.workspaceMenu.keepWorkspace}
-            </Button>
-            <Button
-              disabled={busy}
-              onClick={() => void completeCancel()}
-              type="button"
-              variant="destructive"
-            >
-              {busy
-                ? props.copy.workspaceMenu.working
-                : props.turnActive
-                  ? props.copy.workspaceMenu.stopAndCancel
-                  : props.copy.workspaceMenu.confirmCancel}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+    <Button
+      aria-current={current ? "page" : undefined}
+      aria-label={`${copyLabel}: ${value}`}
+      className={cn("min-w-0 justify-start px-xs", className)}
+      onClick={onCopy}
+      size="xs"
+      type="button"
+      variant="ghost"
+    >
+      {children}
+      <span className="min-w-0 flex-1 truncate text-start">{value}</span>
+    </Button>
   )
 }
 
 export function WorkspaceHeader({
   activeTab,
-  actionPending,
-  canCancel,
-  canRepair,
   connection,
   copy,
-  onCancel,
-  onRepair,
-  turnActive,
   workspace,
 }: WorkspaceHeaderProps) {
+  const [copyAnnouncement, setCopyAnnouncement] = useState("")
+  const repository = workspace.githubRepository ?? workspace.repository
+
+  const copyHeaderValue = async (value: string) => {
+    try {
+      if (navigator.clipboard?.writeText === undefined) {
+        throw new Error("Clipboard is unavailable")
+      }
+      await navigator.clipboard.writeText(value)
+      setCopyAnnouncement(`${copy.headerCopy.copied}: ${value}`)
+    } catch {
+      setCopyAnnouncement(copy.headerCopy.failed)
+    }
+  }
+
   return (
     <header className="workspace-header border-b border-divider bg-surface">
       <div className="flex h-[40px] min-w-0 items-center gap-sm px-xl">
@@ -302,54 +148,39 @@ export function WorkspaceHeader({
         <Breadcrumb aria-label={copy.repositoryBreadcrumb} className="min-w-0">
           <BreadcrumbList className="min-w-0 flex-nowrap gap-sm text-display">
             <BreadcrumbItem className="min-w-0 max-w-56 shrink">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="truncate font-medium text-muted-foreground">
-                    {workspace.githubRepository ?? workspace.repository}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {workspace.githubRepository ?? workspace.repository}
-                </TooltipContent>
-              </Tooltip>
+              <HeaderValueButton
+                className="w-full text-display font-medium text-muted-foreground"
+                copyLabel={copy.headerCopy.repository}
+                onCopy={() => void copyHeaderValue(repository)}
+                value={repository}
+              />
             </BreadcrumbItem>
             <BreadcrumbSeparator className="shrink-0 text-text-disabled" />
-            <BreadcrumbItem className="min-w-0">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <BreadcrumbPage className="truncate font-semibold text-text-strong">
-                    {workspace.name}
-                  </BreadcrumbPage>
-                </TooltipTrigger>
-                <TooltipContent>{workspace.name}</TooltipContent>
-              </Tooltip>
+            <BreadcrumbItem className="min-w-0 max-w-64 shrink">
+              <HeaderValueButton
+                className="w-full text-display font-semibold text-text-strong"
+                copyLabel={copy.headerCopy.workspace}
+                current
+                onCopy={() => void copyHeaderValue(workspace.name)}
+                value={workspace.name}
+              />
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="hidden min-w-0 items-center gap-xxs font-mono text-label text-muted-foreground min-[1120px]:flex">
-              <GitBranchIcon aria-hidden="true" className="size-3 shrink-0" />
-              <span className="max-w-44 truncate">{workspace.branch}</span>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{workspace.branch}</TooltipContent>
-        </Tooltip>
+        <HeaderValueButton
+          className="hidden max-w-52 shrink font-mono text-label text-muted-foreground min-[1120px]:inline-flex"
+          copyLabel={copy.headerCopy.branch}
+          onCopy={() => void copyHeaderValue(workspace.branch)}
+          value={workspace.branch}
+        >
+          <GitBranchIcon aria-hidden="true" data-icon="inline-start" />
+        </HeaderValueButton>
         <WorkspaceHealthStatus copy={copy} workspace={workspace} />
         <span aria-hidden="true" className="h-full min-w-12 flex-1" />
-        <WorkspaceActions
-          actionPending={actionPending}
-          activeTab={activeTab}
-          canCancel={canCancel}
-          canRepair={canRepair}
-          connection={connection}
-          copy={copy}
-          onCancel={onCancel}
-          onRepair={onRepair}
-          turnActive={turnActive}
-          workspace={workspace}
-        />
         <ConnectionStatus connection={connection} copy={copy} />
+        <span aria-live="polite" className="sr-only" role="status">
+          {copyAnnouncement}
+        </span>
       </div>
 
       <div className="flex h-[40px] min-w-0 items-end overflow-x-auto px-xl">

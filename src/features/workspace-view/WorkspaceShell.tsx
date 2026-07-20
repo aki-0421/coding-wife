@@ -471,34 +471,6 @@ export function WorkspaceShell({
     [copy, view],
   )
 
-  const cancelWorkspace = useCallback(
-    async (stopFirst: boolean) => {
-      const canceled = reportWorkspaceAction(
-        await view.cancelSelectedWorkspace(
-          stopFirst ? workspaceGeneration : null,
-        ),
-      )
-      if (!canceled) {
-        return false
-      }
-      commitExplanationController?.revokePresentationIntent("selection_change")
-      await narrationController.dismissPresentation("explicit_cancel")
-      return true
-    },
-    [
-      commitExplanationController,
-      narrationController,
-      reportWorkspaceAction,
-      view,
-      workspaceGeneration,
-    ],
-  )
-
-  const repairWorkspace = useCallback(
-    async () => reportWorkspaceAction(await view.repairSelectedWorkspace()),
-    [reportWorkspaceAction, view],
-  )
-
   const unregisterProject = useCallback(
     async (projectId: string) =>
       reportWorkspaceAction(await view.unregisterProject(projectId)),
@@ -942,17 +914,8 @@ export function WorkspaceShell({
         >
           <WorkspaceHeader
             activeTab={view.activeTab}
-            actionPending={view.workspaceAction}
-            canCancel={adapter?.cancelWorkspace !== undefined}
-            canRepair={
-              adapter?.repairWorkspace !== undefined ||
-              adapter?.recheckWorkspace !== undefined
-            }
             connection={connection}
             copy={copy}
-            onCancel={cancelWorkspace}
-            onRepair={repairWorkspace}
-            turnActive={turnActive}
             workspace={selectedWorkspace}
           />
 

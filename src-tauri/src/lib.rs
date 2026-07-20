@@ -7,6 +7,8 @@ pub mod preferences;
 pub mod readiness;
 pub mod workspace_history;
 
+mod window_state;
+
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -54,6 +56,7 @@ use readiness::commands::{
     configure_codex_binary, copy_sanitized_diagnostics, run_diagnostic_check,
 };
 use readiness::NativeReadinessService;
+use window_state::MainWindowStateController;
 use workspace_history::commands::{
     app_character_context_get, app_character_context_save, history_append_domain_event,
     project_context_get, project_context_save, workspace_archive, workspace_cancel,
@@ -222,6 +225,7 @@ pub fn run() {
                     setup_supervisor.set_explicit_binary(Some(record.canonical_path)),
                 );
             }
+            let window_state_controller = MainWindowStateController::new(history_store.clone());
             let resource_directory = app.path().resource_dir()?;
             let character_storage = CharacterStorage::open(&app_data_directory)?;
             let project_operations = Arc::new(tokio::sync::Mutex::new(()));
@@ -267,23 +271,30 @@ pub fn run() {
                 preferences_service,
             ));
             app.manage(character_service);
-            let window_config = app.config().app.windows.first().ok_or_else(|| {
+            let mut window_config = app.config().app.windows.first().cloned().ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "main window configuration is required",
                 )
             })?;
-            let window = tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+            window_state_controller.configure_startup(&mut window_config);
+            let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &window_config)?
                 .on_web_resource_request(|request, response| {
                     allow_opaque_preview_module_request(&request, response);
                 })
                 .build()?;
             let close_app = app.handle().clone();
-            window.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            let observed_window = window.clone();
+            window.on_window_event(move |event| match event {
+                tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                    window_state_controller.schedule_save(&observed_window);
+                }
+                tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
+                    window_state_controller.save_before_close(&observed_window);
                     request_app_close(close_app.clone());
                 }
+                _ => {}
             });
             Ok(())
         })

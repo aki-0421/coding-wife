@@ -616,6 +616,42 @@ impl WorkspaceHistoryStore {
         DATABASE_FILE_NAME
     }
 
+    pub(crate) fn read_app_setting(
+        &self,
+        key: &str,
+    ) -> Result<Option<String>, WorkspaceHistoryError> {
+        let inner = self.lock();
+        inner
+            .connection
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-SETTING-READ", true))
+    }
+
+    pub(crate) fn write_app_setting(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> Result<(), WorkspaceHistoryError> {
+        self.ensure_writable("history.write_app_setting")?;
+        let inner = self.lock();
+        inner
+            .connection
+            .execute(
+                "INSERT INTO settings (key, value, version, updated_at)
+                 VALUES (?1, ?2, 1, ?3)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                   version = settings.version + 1, updated_at = excluded.updated_at",
+                params![key, value, now()],
+            )
+            .map_err(|_| history_error("HIST-SETTING-WRITE", true))?;
+        Ok(())
+    }
+
     pub fn recover_unfinished_turns(&self) -> Result<usize, WorkspaceHistoryError> {
         self.ensure_writable("history.recover_unfinished_turns")?;
         self.recover_unfinished_turns_for_shutdown()
