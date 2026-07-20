@@ -159,7 +159,7 @@ fn corrupt_and_unknown_records_fail_closed_without_exposing_values() {
             "unknown",
             json!({
                 "schemaVersion": 99,
-                "secret": "/Users/private/token"
+                "secret": "opaque-private-value"
             }),
             RECOVERY_UNKNOWN_VERSION,
         ),
@@ -177,7 +177,7 @@ fn corrupt_and_unknown_records_fail_closed_without_exposing_values() {
         assert_eq!(snapshot.preferences.version, 0);
         assert_eq!(snapshot.preferences.locale, AppLocale::En);
         let serialized = serde_json::to_string(&snapshot).expect("safe snapshot json");
-        assert!(!serialized.contains("/Users/private/token"));
+        assert!(!serialized.contains("opaque-private-value"));
 
         let repaired = service
             .update(update_request(

@@ -54,7 +54,7 @@ describe("NativeAppPreferencesGateway", () => {
 
   it("fails closed when native data is malformed", async () => {
     const malformed = new NativeAppPreferencesGateway(() =>
-      Promise.resolve({ ...nativeSnapshot, raw: "/Users/private" }),
+      Promise.resolve({ ...nativeSnapshot, raw: "opaque-private-value" }),
     )
     await expect(malformed.get("en")).rejects.toMatchObject({
       code: "APP-PREFERENCES-CONTRACT-INVALID",

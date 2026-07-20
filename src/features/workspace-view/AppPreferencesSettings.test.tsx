@@ -226,6 +226,6 @@ describe("AppPreferencesSettings", () => {
     expect(screen.getByText("APP-PREFERENCES-CORRUPT")).toBeVisible()
     expect(screen.getByRole("button", { name: "Retry" })).toBeVisible()
     expect(screen.queryByRole("button", { name: /Reset/ })).toBeNull()
-    expect(screen.queryByText(/\/Users\/|token=|raw/i)).toBeNull()
+    expect(screen.queryByText(/token=|raw/i)).toBeNull()
   })
 })

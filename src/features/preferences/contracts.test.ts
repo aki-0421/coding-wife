@@ -60,7 +60,7 @@ describe("AppPreferencesV2 contracts", () => {
           reducedMotion: "system",
         },
       },
-      { ...persistedFixture, raw: "/Users/private" },
+      { ...persistedFixture, raw: "opaque-private-value" },
     ]) {
       expect(() => parseAppPreferencesSnapshot(fixture)).toThrow(
         AppPreferencesContractError,
