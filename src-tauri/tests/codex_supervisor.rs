@@ -2269,6 +2269,9 @@ async fn setup_probe_only_discovers_and_initializes_a_short_lived_app_server() {
     assert!(setup.fast_service_tier.is_none());
     assert!(setup.supported_reasoning_efforts.is_empty());
     let state = read_state(&fixture.state).await;
+    let version = state.find("setup_version").expect("setup version probe");
+    let initialize = state.find("setup_initialize").expect("setup initialize");
+    assert!(version < initialize);
     assert!(state.contains("setup_initialize"));
     assert!(!state.contains("setup_schema_requested"));
     assert!(!state.contains("setup_account_read"));

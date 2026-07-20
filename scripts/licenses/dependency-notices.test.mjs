@@ -323,8 +323,8 @@ test("stale generated artifacts are rejected byte-for-byte", () => {
 test("committed and packaged dependency notices match the offline locks", () => {
   const summary = checkDependencyNotices()
   assert.deepEqual(summary, {
-    total: 630,
-    npm: 395,
+    total: 632,
+    npm: 397,
     cargo: 235,
     unknown: 0,
     forbidden: 0,

@@ -31,7 +31,7 @@ const states: readonly CharacterState[] = [
 ]
 
 const timeline = [
-  ["Bash", "agent-browser skills get core"],
+  ["Bash", "pnpm test:desktop"],
   ["Bash", "node scripts/live2d/verify-live2d.mjs"],
   ["Read", "docs/research/live2d-runtime-integration.md"],
   ["Bash", "pnpm typecheck && pnpm test"],

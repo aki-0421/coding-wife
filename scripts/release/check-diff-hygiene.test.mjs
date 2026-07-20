@@ -600,6 +600,7 @@ test("README, testing instructions, package commands, and CI separate PR and rel
     "lint",
     "typecheck",
     "test",
+    "test:desktop",
     "test:watch",
     "test:release",
     "check:diff",

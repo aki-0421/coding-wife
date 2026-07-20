@@ -16,11 +16,18 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "types": ["node"]
+    "types": [
+      "node",
+      "@wdio/globals/types",
+      "@wdio/mocha-framework",
+      "@wdio/tauri-service"
+    ]
   },
   "include": [
     "vite.config.ts",
     "vitest.config.ts",
+    "wdio.conf.ts",
+    "e2e/desktop/**/*.ts",
     "scripts/character-preview-csp.ts"
   ]
 }

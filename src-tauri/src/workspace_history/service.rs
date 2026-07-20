@@ -380,6 +380,12 @@ impl WorkspaceHistoryService {
     pub async fn list_after_startup(
         &self,
     ) -> Result<WorkspaceStateSnapshot, WorkspaceCommandError> {
+        self.wait_for_startup_restore().await;
+        self.ensure_startup_ready("workspace_list")?;
+        self.list()
+    }
+
+    pub(crate) async fn wait_for_startup_restore(&self) {
         loop {
             let notified = self.startup.notify.notified();
             if self.startup.state.load(Ordering::Acquire) != STARTUP_PENDING {
@@ -387,8 +393,6 @@ impl WorkspaceHistoryService {
             }
             notified.await;
         }
-        self.ensure_startup_ready("workspace_list")?;
-        self.list()
     }
 
     pub async fn restore_startup(&self) -> StartupRestoreReport {
@@ -4247,7 +4251,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn native_list_waits_for_restore_and_mutations_fail_while_pending() {
+    async fn native_consumers_wait_for_restore_and_mutations_fail_while_pending() {
         let data = temp_directory("history-service-startup-gate");
         let workspace = WorkspaceService::production(CodexSupervisor::new());
         let service = WorkspaceHistoryService::new_pending_restore(
@@ -4256,9 +4260,13 @@ mod tests {
         );
         let list_service = service.clone();
         let list_task = tokio::spawn(async move { list_service.list_after_startup().await });
+        let readiness_service = service.clone();
+        let readiness_task =
+            tokio::spawn(async move { readiness_service.wait_for_startup_restore().await });
         tokio::task::yield_now().await;
 
         assert!(!list_task.is_finished());
+        assert!(!readiness_task.is_finished());
         assert_eq!(
             service
                 .issue_delete_challenge("workspace-pending")
@@ -4275,6 +4283,7 @@ mod tests {
             .expect("state")
             .workspaces
             .is_empty());
+        readiness_task.await.expect("startup restore barrier");
         let _ = fs::remove_dir_all(data);
     }
 

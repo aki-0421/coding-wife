@@ -47,7 +47,7 @@ opaque originのmodule graphを読み込ませるため、development serverは`
 3. `pnpm test` でsupply-chain、manifest fail-closed、Core one-shot/version、state generation、motion policy、backing sizeを検査する。
 4. `pnpm lint` でReact lifecycleとruntime error pathを含む静的検査を行う。
 5. `pnpm build` でCore/shader、`pack.json`、Hiyori 17 files、通常Appと診断entry pointが配布物へ入ることを確認する。
-6. `agent-browser` で通常Appと診断画面を1470×836と960×640で開き、非透明pixel、motion signature、canvas backing size、visible caption、reduced/hidden、tab復帰、workspace切替、context restoreを確認する。
+6. WebdriverIOで通常Appと診断画面を実Tauri windowの1470×836と960×640で開き、非透明pixel、motion signature、canvas backing size、visible caption、reduced/hidden、tab復帰、workspace切替、context restoreを確認する。
 7. native IPCを使う任意モデル検証では、pickerから`tmp/hiyori_pro/hiyori_pro_t11.model3.json`を選び、隔離previewが`verified`になるまで待つ。明示名で確定後にstageのpack ID、settingsの選択状態、再読込後の永続化とtrusted static frameを確認する。先に同梱Hiyoriへ戻してからcustom packを削除し、確認dialog、library、stage、trusted frame cleanupの整合を確認する。
 
 ## 実描画の基準値
