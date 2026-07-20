@@ -41,6 +41,25 @@ Run the native shell with:
 pnpm tauri:dev
 ```
 
+## Run desktop QA
+
+To let an AI agent or developer operate the real macOS Tauri window, build the
+debug-only QA binary and run the WebdriverIO desktop scenarios:
+
+```bash
+pnpm test:desktop
+```
+
+This uses the embedded WebDriver inside the actual Tauri binary; it does not open
+the Vite frontend in Chrome. The QA bridge, global Tauri API, and `wdio:*`
+capabilities are enabled only by the QA config and Cargo feature, and a release
+build with that feature is rejected. App data, logs, and failure screenshots stay
+under the ignored `tmp/desktop-qa/` directory, with separate ports and data roots
+for concurrent Conductor workspaces. Do not point a desktop scenario at a user's
+real repository; create disposable fixtures under `/tmp` or the ignored `tmp/`
+directory. See [AI agent Tauri desktop QA](research/tauri-desktop-qa.md) for the
+debugging workflow and native-UI limitations.
+
 ## Run the release-candidate quality gates
 
 Do not run this sequence as routine local-development validation. Pull Request validation belongs to CI. Run these release-specific checks only when the task is to prepare or verify a release candidate, or when the user explicitly requests them. Agents must also follow the local-validation policy in [`AGENTS.md`](../AGENTS.md).

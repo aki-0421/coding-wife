@@ -9,6 +9,10 @@ pub mod workspace_history;
 
 mod window_state;
 
+#[cfg(all(feature = "desktop-qa", not(debug_assertions)))]
+compile_error!("the desktop-qa feature is restricted to debug builds");
+
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -190,13 +194,50 @@ fn allow_opaque_preview_module_request<B>(
     );
 }
 
+#[cfg(feature = "desktop-qa")]
+fn enable_desktop_qa(
+    builder: tauri::Builder<tauri::Wry>,
+) -> tauri::Builder<tauri::Wry> {
+    if std::env::var_os("TAURI_WEBDRIVER_PORT").is_none() {
+        return builder;
+    }
+
+    builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init())
+}
+
+#[cfg(feature = "desktop-qa")]
+fn desktop_qa_app_data_directory() -> std::io::Result<Option<PathBuf>> {
+    let Some(raw_path) = std::env::var_os("CODING_WIFE_DESKTOP_QA_DATA_DIR") else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(raw_path);
+    if !path.is_absolute() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "CODING_WIFE_DESKTOP_QA_DATA_DIR must be absolute",
+        ));
+    }
+    std::fs::create_dir_all(&path)?;
+    Ok(Some(path))
+}
+
+#[cfg(not(feature = "desktop-qa"))]
+fn desktop_qa_app_data_directory() -> std::io::Result<Option<PathBuf>> {
+    Ok(None)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let supervisor = CodexSupervisor::new();
     let setup_supervisor = supervisor.clone();
     let workspace_service = WorkspaceService::production(supervisor.clone());
     let setup_workspace_service = workspace_service.clone();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "desktop-qa")]
+    let builder = enable_desktop_qa(builder);
+    let app = builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let main_window_visible = app
                 .get_webview_window("main")
@@ -212,7 +253,10 @@ pub fn run() {
         .setup(move |app| {
             setup_supervisor.attach_app_handle(app.handle().clone());
             setup_supervisor.start_signal_loop();
-            let app_data_directory = app.path().app_data_dir()?;
+            let app_data_directory = match desktop_qa_app_data_directory()? {
+                Some(path) => path,
+                None => app.path().app_data_dir()?,
+            };
             let preferences_service = AppPreferencesService::production(&app_data_directory);
             app.manage(preferences_service.clone());
             let attachment_service = AttachmentService::production(&app_data_directory)

@@ -27,7 +27,13 @@ function revealNativeWindow() {
 
 const applicationRoot = createRoot(root)
 
-void loadApplication()
+async function prepareDesktopQaBridge() {
+  if (import.meta.env.VITE_DESKTOP_QA !== "true") return
+  await import("@wdio/tauri-plugin")
+}
+
+void prepareDesktopQaBridge()
+  .then(loadApplication)
   .then(({ App }) => {
     flushSync(() => {
       applicationRoot.render(
