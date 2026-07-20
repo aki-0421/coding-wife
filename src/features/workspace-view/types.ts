@@ -314,7 +314,6 @@ export type AppSettingsSection =
   | "projects"
   | "character"
   | "audio"
-  | "support"
   | "diagnostics"
 
 export type SettingsSection = AppSettingsSection

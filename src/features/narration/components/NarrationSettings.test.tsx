@@ -226,9 +226,7 @@ describe("NarrationSettings", () => {
   it("shows the quiet local-only source and default-off state", async () => {
     setup()
 
-    expect(
-      await screen.findByText("App-owned · background support"),
-    ).toBeVisible()
+    expect(await screen.findByText("アプリ内生成 · コミット説明")).toBeVisible()
     expect(screen.getByRole("heading", { name: "音声" })).toBeVisible()
     expect(screen.getByText("ローカルのみ · macOS")).toBeVisible()
     expect(

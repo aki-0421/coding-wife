@@ -47,7 +47,7 @@ status: "Deprecated"
 | Language                                                    | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
 | reduced motion、character visibility control               | OS設定だけを尊重し、characterは常時表示するため | [APP要件](../requirements/desktop-shell.md)、[LIVE要件](../requirements/live2d-character.md) |
 | Character context、Character                                | app-global library内のpack-scoped設定のため | [S-005](S-005_app-settings-diagnostics.md) |
-| Audio、Support、native readiness                            | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
+| Audio、native readiness                                     | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
 | Git commit/revert/reset                                     | read-only observer境界のため         | [S-003](S-003_session-evidence.md)         |
 
 ## 表示契機と終了
@@ -113,7 +113,7 @@ Workspace Settings表示中はLive2D canvasとCharacter paneを表示せず、se
 
 ## データ保持
 
-workspace historyの正本と破棄条件は[activity history要件](../requirements/activity-history.md)に従う。履歴削除はProject context、pack-scoped Character context、selected character、semantic mapping、AppPreferences、Narration settings、Support controls、repository、worktree、branchを変更しない。
+workspace historyの正本と破棄条件は[activity history要件](../requirements/activity-history.md)に従う。履歴削除はProject context、pack-scoped Character context、selected character、semantic mapping、AppPreferences、Narration settings、コミット説明の内部policy、repository、worktree、branchを変更しない。
 
 ## OS差分
 

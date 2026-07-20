@@ -61,7 +61,7 @@ read_when:
 | `src/features/workspace-view/useWorkspaceViewModel.ts` | hydration、workspace切替race防止、250 ms draft debounce、UI notice |
 | `src/features/workspace-view/useEditableSettingsContext.ts` | Project ID-scoped Project draftとpack ID-scoped Character draft、save、競合保持、明示reload |
 | `src/features/workspace-view/EditableContextSection.tsx` | Project / Character editor、field境界、次turn表示、error focus。Projectではversion/hashを表示し、Character detailでは技術metadataを表示しない |
-| `src/features/workspace-view/SettingsView.tsx` | S-005の6 sectionとProjects内のProject ID-scoped detail、Character内のpack ID-scoped detailを構成する |
+| `src/features/workspace-view/SettingsView.tsx` | S-005の5 sectionとProjects内のProject ID-scoped detail、Character内のpack ID-scoped detailを構成する |
 | `src/features/workspace-view/WorkspaceShell.tsx` | Chat / Commitの2 tab、sidebar gearのS-005遷移、project / character detail selection、直前tabとfocusの復元を所有する |
 | `src/test/fixtures/workspace-context-policy.v1.json` | RustとTypeScriptで共有するCharacter policyのja / en accepted・rejected corpus |
 | `src/test/fixtures/workspace-history.v1.json` | RustとTypeScriptが共有するpublic contract fixture |

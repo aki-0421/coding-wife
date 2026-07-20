@@ -1,10 +1,10 @@
 ---
 title: "S-005 アプリ設定・診断"
-description: "登録projectごとのProject contextと、characterごとのpresentation、表示、音声、支援、診断を管理する画面仕様。"
+description: "登録projectごとのProject contextと、characterごとのpresentation、表示、音声、診断を管理する画面仕様。"
 updated: 2026-07-20
 read_when:
-  - "sidebar gear、project一覧とProject context詳細、アプリ全体の設定、音声、support、native diagnosticsを実装するとき。"
-  - "S-005とAPP、CODE、SUP、GIT、LIVE、NARR要件の対応を確認するとき。"
+  - "sidebar gear、project一覧とProject context詳細、アプリ全体の設定、音声、native diagnosticsを実装するとき。"
+  - "S-005とAPP、CODE、GIT、LIVE、NARR要件の対応を確認するとき。"
 screen_id: "S-005"
 status: "Approved"
 ---
@@ -23,7 +23,7 @@ status: "Approved"
 
 ## 目的
 
-利用者が、登録projectを起点にProject contextを管理し、すべてのprojectへ共通適用する設定とアプリ実行環境の診断も、workspace固有の履歴設定と混同せず確認・変更・復旧できるようにする。
+利用者が、登録projectを起点にProject contextを管理し、すべてのprojectへ共通適用する設定とアプリ実行環境の診断も、workspace固有の状態と混同せず確認・変更・復旧できるようにする。
 
 ## 対象範囲
 
@@ -35,8 +35,7 @@ status: "Approved"
 | Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
 | Character         | character一覧、model名から開く個別設定、packごとのCharacter context、app-globalな選択、custom 1枠のimport/置換・motion編集・delete、bundled Hiyori固定motion preset |
 | Audio             | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
-| Support           | app共通のsupport role enable、readiness、capacity、usage、sanitized error                                |
-| Diagnostics       | OS/app、Codex、Git、DB、Live2D、audio、supportのnative readinessとrecheck                                |
+| Diagnostics       | OS/app、Codex、Git、DB、Live2D、audioのnative readinessとrecheck                                         |
 
 ### 含めない
 
@@ -50,7 +49,7 @@ status: "Approved"
 | 項目           | 内容                                                                                     |
 | -------------- | ---------------------------------------------------------------------------------------- |
 | 表示契機       | workspace sidebar最下部の`App settings / アプリ設定` gear、Chatのdiagnostics link        |
-| 表示前提       | workspace選択は不要。registered project/workspaceが0件でも6 sectionすべてを表示する                 |
+| 表示前提       | workspace選択は不要。registered project/workspaceが0件でも5 sectionすべてを表示する                 |
 | 初期フォーカス | header breadcrumbの現在section                                                           |
 | 正常完了       | section単位の保存を即時反映し、画面を維持する                                            |
 | キャンセル     | section固有のdraftと保存済み値を各契約どおり維持する                                     |
@@ -63,7 +62,7 @@ status: "Approved"
 | -------------- | -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------- |
 | ローカル利用者 | non-secret global setting、character metadata、sanitized readiness   | edit、import、select、test、retry、reset | 保存済み値を維持し、操作箇所にsafe errorを表示する |
 | React WebView  | typed snapshot、status、safe code                                    | render、input、typed IPC        | raw path、secret、arbitrary commandを保持しない    |
-| Rust service   | owner-only preference/context/character/narration store、readiness、support controller | validate、atomic save、diagnose | scope外payloadを拒否し、前snapshotを維持する |
+| Rust service   | owner-only preference/context/character/narration store、readiness | validate、atomic save、diagnose | scope外payloadを拒否し、前snapshotを維持する |
 
 ## 画面構成
 
@@ -71,7 +70,7 @@ status: "Approved"
 | ------------------- | ------------------------------------------------------------- | ------------------------------ |
 | workspace sidebar   | workspace一覧、activeなapp settings gear                      | workspaceへ戻る、project追加   |
 | app settings header | `App settings / アプリ設定` > 現在sectionのbreadcrumbだけを表示する | compact幅では現在sectionからsection pickerを開く |
-| section navigation  | General、Projects、Character、Audio、Support、Diagnosticsの6 section | section選択 |
+| section navigation  | General、Projects、Character、Audio、Diagnosticsの5 section | section選択 |
 | settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
 
 app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない。これによりworkspace scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
@@ -81,7 +80,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | 状態       | 進入条件                          | 表示                                           | 操作可否               | 状態から抜ける条件      |
 | ---------- | --------------------------------- | ---------------------------------------------- | ---------------------- | ----------------------- |
 | 初期化中   | preference/readiness未取得        | field shape skeleton、loading status           | workspace選択のみ可    | snapshot取得またはerror |
-| 通常       | snapshot取得済み                  | 6 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
+| 通常       | snapshot取得済み                  | 5 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
 | データなし | voiceまたはdiagnostic resultが0件 | 理由とRetry                                    | 影響しないsectionは可  | 再取得成功              |
 | 処理中     | save、test、reset、recheck中      | 操作箇所のprocessing status                    | 同一操作の二重実行不可 | terminal result         |
 | オフライン | network/Codex unavailable         | local settingは表示、診断はBlocked/Unavailable | local saveとrecheck可  | readiness更新           |
@@ -115,7 +114,6 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | Character context    | bundled Hiyoriは桃瀬ひよりpreset、customはpack表示名と中立な既定値 | 任意 | opaque pack ID単位、display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
 | Project context      | 空       | 任意 | goal / constraints / notes各8,000、配列各20件、総量32,000 scalar、project-relative reference | field直下、draft維持 | Save |
 | Audio settings       | off       | 条件付き | verified local voice、rate 0.75〜1.25 | Audio内Alert          | Save     |
-| Support controls     | disabled  | 条件付き | approved role/policyだけ              | Support内Alert        | toggle時 |
 
 ## ネイティブ連携
 
@@ -126,7 +124,6 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | Project context load/save | Rust SQLite | `project_context_get` / `project_context_save` | registered Project ID、expected version、canonical project-relative reference | draft維持 | conflictまたはsafe code |
 | model import/select/motion設定/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1。bundled Hiyoriのpreset保存要求は拒否 | quarantine cleanup、前selection維持 | bundled preset編集・delete拒否、置換/削除失敗時は前slotとselection維持 |
 | Audio取得・保存・test       | Rust local process/store | `narration_*`                      | fixed `/usr/bin/say`、voice allowlist | process group停止 | caption維持、TTS offへfail closed     |
-| Support control             | Rust supervisor          | `configure/cancel_support`         | role allowlist、budget固定            | 前config維持      | disabled fallback                     |
 | readiness recheck           | Rust readiness service   | `run_diagnostic_check`             | read-only check                       | 前snapshot維持    | stale snapshotとsafe code             |
 | project一覧・登録解除       | Rust workspace store     | `workspace_list` / `workspace_unregister` | typed Project ID、metadata-only mutation | 一覧維持 | repository/worktreeを変更せずsafe code |
 
@@ -143,7 +140,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 
 ## データ保持
 
-Project ID単位のProject context、言語だけを保持する`AppPreferencesV2`、pack ID単位のCharacter context、character library selection/custom motion設定、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。`AppPreferencesV1`からはlocaleだけを移行し、廃止したreduced motion、character visibility、Reset Preferences、Reset UI stateを公開しない。一覧と詳細の表示だけではworkspace history、Git state、他projectまたは他packのdraftを変更しない。
+Project ID単位のProject context、言語だけを保持する`AppPreferencesV2`、pack ID単位のCharacter context、character library selection/custom motion設定、Narration settings、readiness snapshotの正本と失敗契約は各要件定義書に従う。`AppPreferencesV1`からはlocaleだけを移行し、廃止したreduced motion、character visibility、Reset Preferences、Reset UI stateを公開しない。コミット説明の内部実行単位、model policy、利用量、監査metadataはS-005に表示しない。一覧と詳細の表示だけではworkspace history、Git state、他projectまたは他packのdraftを変更しない。
 
 ## OS差分
 
@@ -164,7 +161,6 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | -------------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------- |
 | `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076`, `APP-F-083`, `APP-F-084` | global navigation、preference、character presentation、diagnostics、a11y | [desktop-shell](../requirements/desktop-shell.md) |
 | `CODE-F-051`〜`CODE-F-053`, `CODE-F-075`                             | Codex readiness                                  | [codex-main-session](../requirements/codex-main-session.md)                   |
-| `SUP-F-062`〜`SUP-F-078`                                             | global support control/readiness                 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092`                   | read-only Git/skill diagnostics                  | [git-review-harness](../requirements/git-review-harness.md)                   |
 | `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089` | app共通Audio                                     | [audio-commentary](../requirements/audio-commentary.md)                       |
 | `LIVE-F-055`〜`LIVE-F-081`, `LIVE-F-083`〜`LIVE-F-086`              | global model library、motion設定、一覧・個別設定、固定Hiyori motion preset、pack別context、character用語契約 | [live2d-character](../requirements/live2d-character.md)                       |
@@ -182,7 +178,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | レビュー結果 | Approved   |
 | レビュー日   | 2026-07-20 |
 
-- [x] app settingsの6 section、Projects内のproject-scoped詳細、Character内のpack-scoped詳細、workspace-scoped非対象が一意である。
+- [x] app settingsの5 section、Projects内のproject-scoped詳細、Character内のpack-scoped詳細、workspace-scoped非対象が一意である。
 - [x] breadcrumb、workspace選択時の終了と状態維持を定義した。
 - [x] loading、empty、processing、offline、error、permissionを定義した。
 - [x] native boundary、ja/en、keyboard、200% zoomを定義した。
