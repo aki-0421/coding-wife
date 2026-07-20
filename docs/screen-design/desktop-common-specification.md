@@ -79,9 +79,10 @@ App settingsのproject detailはS-005内の`/app-settings/projects/:projectId` s
 | window label | `main` |
 | 生成数 | system全体で`main` 1枚。app-private single-instance lock保持中の二重起動は新しいWebView、Codex/App Server、support runtime、audio controller、DB writerを作らず、既存windowをunminimizeしてfocus/raiseしてから新processを終了する。stale lockはowner/process identityを検証した場合だけ回収する |
 | startup visibility | native windowは非表示で生成し、初期React shellまたは起動error shellを`flushSync`でDOMへcommitした直後に`app_window_ready`で1回だけshow / focusする。非表示のWebViewでは`requestAnimationFrame`の進行を表示条件にしない。狭幅の中間frame、unstyled content、空のWebViewは表示しない。frontend module読込失敗時はraw errorを表示せず、OS localeに対応するja/enの再起動案内を同じstyled shellへ描画してからwindowを表示する |
-| default geometry | 1470×836 CSS px。起動画面のwork areaより大きい場合はwork area内へ収め、native resize edgeとtraffic lightsを到達可能なまま保つ |
+| first launch / fallback geometry | 1470×836 CSS pxを設計・安全fallback基準とする。有効な保存状態がない起動では、非表示中にmacOS標準zoomを適用して現在のwork area内で最大化し、fullscreenにはしない |
+| restored geometry | 最後の安全な非fullscreen状態のlogical width / heightとzoom状態を、React shell表示前にTauri window configへ反映する。通常サイズはcenterと`preventOverflow`を通し、保存値が現画面より大きい場合もnative resize edgeとtraffic lightsを到達可能なまま保つ |
 | minimum geometry | 960×640 CSS px。これ未満へのresizeをOSへ許可しない |
-| maximum / fullscreen | macOS標準zoomとfullscreenを許可し、終了時geometryを保存する |
+| maximum / fullscreen | macOS標準zoomとfullscreenを許可する。zoom状態は通常windowサイズと一緒に保存するが、fullscreen中の寸法とfullscreen状態は保存値へ反映しない |
 | titlebar | macOS native overlay。close / minimize / zoomのtraffic lightsはOSが描画し、WebViewは赤・黄・緑の代替要素を描画しない。sidebarは見出しがnative controlに重ならない40.5pxのsafe areaだけを予約する |
 | titlebar hit band | main window上端40.5 CSS pxをdocument captureの一続きのhit bandとし、React componentや子要素の境界へ依存させない。primary `mousedown`の`detail=1`でdrag、`detail=2`でzoomを開始する。button、link、tab、input、select、textarea、summary、contenteditableと明示opt-out targetは除外し、透明overlayでpointer/focusを奪わない。`main` capabilityは`core:window:allow-start-dragging`と`core:window:allow-toggle-maximize`だけをwindow操作権限として持つ |
 | radius | window 7.5px、compact control 4.5px、composer/decision 9px |
@@ -241,7 +242,8 @@ loading中に最終dataがある場合は前回dataを薄く残し、全画面sp
 
 | data | 正本 | 保存契機 | restart | 破棄 |
 |---|---|---|---|---|
-| window geometry / route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | schema不整合またはunsafe boundsだけをsafe defaultへ補正 |
+| main window size / zoom state | Rust管理SQLiteのversion付きapp setting | 非fullscreenのresize settle時とorderly close受付時 | hidden windowのTauri configへ反映後、通常サイズはcenter / work area補正、zoomは標準maximizeとして復元 | missing、破損、未知schema、960×640未満、非有限値はraw値を出さずfirst launch動作へfail closed。fullscreen由来の値は保存しない |
+| route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | schema不整合またはunsafe boundsだけをsafe defaultへ補正 |
 | `AppPreferencesV2` (`locale`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | missing/corrupt/unknown versionだけをsafe defaultへfail closed |
 | project/workspace/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
 | Project context | Rust管理SQLiteのProject ID-scoped record | App settings project detailのexpected-version save | project detailまたは同Project IDのworkspace turn開始 | project登録解除契約 | optimistic conflict |
@@ -287,6 +289,7 @@ Web Storageを永続正本にしない。preferenceのmissing/corrupt/unknown ve
 | event render | receiptからp95 200ms以下 |
 | Live2D input interference | Chat input p95 100ms、100ms超main-thread long task 0件 |
 | visual regression | 1470×836でFigma主要boundary ±2px |
+| window restart | first launchが非fullscreenの標準zoom、通常resize後のcold startが同じlogical size、zoom後のcold startがzoom状態、fullscreen終了が直前の非fullscreen状態を復元 |
 
 agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced motion、ja/enを検証し、screenshotは`/tmp`またはignore済み`tmp/`へ保存する。
 
