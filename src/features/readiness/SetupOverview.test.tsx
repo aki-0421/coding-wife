@@ -10,12 +10,12 @@ import {
 } from "@/features/readiness/contracts"
 import { NativeReadinessController } from "@/features/readiness/controller"
 import { NativeReadinessProvider } from "@/features/readiness/provider"
+import { SetupOverview } from "@/features/readiness/SetupOverview"
 import {
-  SetupOverview,
   type SetupRequirementOverrides,
   shouldShowSetupOverview,
   unresolvedSetupRequirements,
-} from "@/features/readiness/SetupOverview"
+} from "@/features/readiness/setup-requirements"
 import type { NativeReadinessGateway } from "@/features/readiness/transport"
 
 function readinessSnapshot(
