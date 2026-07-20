@@ -1,7 +1,7 @@
-//! Native support policy persistence and the safe Settings/diagnostics contract.
+//! Native commit-explanation policy persistence and bounded audit metadata.
 //!
-//! Only desired booleans and bounded audit metadata cross this boundary. Support
-//! prompts, responses, paths, credentials, and transcripts are deliberately absent.
+//! The required model policy is app-owned and has no user-facing settings boundary.
+//! Prompts, responses, paths, credentials, and transcripts are deliberately absent.
 
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
@@ -13,9 +13,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
-
-use super::support::SUPPORT_PERMISSION_PROFILE;
-use super::types::CODEX_MODEL;
 
 pub const SUPPORT_CONTROL_SCHEMA_VERSION: u16 = 1;
 pub const SUPPORT_MAX_QUEUE_CAPACITY: usize = 10;
@@ -72,12 +69,15 @@ impl SupportSettingsV1 {
             commit_explainer_enabled: false,
         }
     }
-}
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SupportPersistence {
-    Native,
+    fn normalize_required_policy(mut self) -> (Self, bool) {
+        if self.global_enabled && self.commit_explainer_enabled {
+            return (self, false);
+        }
+        self.global_enabled = true;
+        self.commit_explainer_enabled = true;
+        (self, true)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -103,16 +103,6 @@ pub struct SupportReleaseReadinessV1 {
     pub skill_digest_prefix: Option<String>,
     pub reason_code: Option<String>,
     pub checked_at: String,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SupportEffectiveState {
-    Enabled,
-    UserDisabled,
-    RoleDisabled,
-    ReleaseBlocked,
-    SettingsRecovery,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -154,45 +144,6 @@ pub struct SupportLatestOutcomeV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct SupportCapacityV1 {
-    pub maximum_active: usize,
-    pub maximum_queued: usize,
-    pub active: usize,
-    pub queued: usize,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct SupportAuditV1 {
-    pub role: String,
-    pub model_family: String,
-    pub reasoning_effort: String,
-    pub permission_profile: String,
-    pub raw_transcript_persisted: bool,
-    pub task_timeout_ms: u64,
-    pub token_budget: u64,
-    pub fallback_tasks: u64,
-    pub latest_outcome: Option<SupportLatestOutcomeV1>,
-}
-
-impl SupportAuditV1 {
-    pub(crate) fn new(latest_outcome: Option<SupportLatestOutcomeV1>, fallback_tasks: u64) -> Self {
-        Self {
-            role: "commit_explainer".to_owned(),
-            model_family: CODEX_MODEL.to_owned(),
-            reasoning_effort: "low".to_owned(),
-            permission_profile: SUPPORT_PERMISSION_PROFILE.to_owned(),
-            raw_transcript_persisted: false,
-            task_timeout_ms: SUPPORT_TASK_TIMEOUT_MS,
-            token_budget: SUPPORT_TOKEN_BUDGET,
-            fallback_tasks,
-            latest_outcome,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(crate) struct SupportDurableAuditV1 {
     pub schema_version: u16,
     pub policy_version: u64,
@@ -217,38 +168,6 @@ impl SupportDurableAuditV1 {
             updated_at: chrono::Utc::now().to_rfc3339(),
         }
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct SupportControlSnapshotV1 {
-    pub schema_version: u16,
-    pub settings: SupportSettingsV1,
-    pub persistence: SupportPersistence,
-    pub recovery_code: Option<String>,
-    pub readiness: SupportReleaseReadinessV1,
-    pub effective_state: SupportEffectiveState,
-    pub effective_enabled: bool,
-    pub fallback_reason_code: Option<String>,
-    pub capacity: SupportCapacityV1,
-    pub usage: SupportUsageCountersV1,
-    pub audit: SupportAuditV1,
-    pub last_error_code: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct SupportSettingsGetRequestV1 {
-    pub schema_version: u16,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct SupportSettingsUpdateRequestV1 {
-    pub schema_version: u16,
-    pub expected_version: u64,
-    pub global_enabled: bool,
-    pub commit_explainer_enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -687,11 +606,25 @@ impl SupportSettingsStore {
         }
 
         match store.load() {
-            Ok(settings) => Ok(SupportSettingsStoreOpen {
-                store: Some(store),
-                settings,
-                recovery_code: None,
-            }),
+            Ok(settings) => {
+                let (settings, migrated) = settings.normalize_required_policy();
+                if migrated {
+                    store
+                        .save(&settings, "support_settings_startup")
+                        .map_err(|error| {
+                            if error.code == SUPPORT_SETTINGS_UNSAFE {
+                                SUPPORT_SETTINGS_UNSAFE
+                            } else {
+                                SUPPORT_SETTINGS_UNAVAILABLE
+                            }
+                        })?;
+                }
+                Ok(SupportSettingsStoreOpen {
+                    store: Some(store),
+                    settings,
+                    recovery_code: None,
+                })
+            }
             Err(code @ SUPPORT_SETTINGS_UNSAFE) => Err(code),
             Err(code) => Ok(SupportSettingsStoreOpen {
                 store: Some(store),
@@ -1613,20 +1546,34 @@ mod tests {
     }
 
     #[test]
-    fn fresh_settings_preserve_existing_desired_behavior_and_restart() {
+    fn legacy_disabled_settings_migrate_once_to_required_policy() {
         let root = temporary_directory("support-settings-restart");
         let opened = SupportSettingsStore::open(&root);
         assert_eq!(opened.settings, SupportSettingsV1::default());
         let store = opened.store.expect("store");
-        let changed = SupportSettingsV1 {
+        let legacy = SupportSettingsV1 {
             schema_version: SUPPORT_CONTROL_SCHEMA_VERSION,
             version: 2,
             global_enabled: false,
-            commit_explainer_enabled: true,
+            commit_explainer_enabled: false,
         };
-        store.save(&changed, "test").expect("save");
+        store.save(&legacy, "test").expect("save legacy settings");
+        assert!(SupportAuditStore::open(&root, Some(legacy.version))
+            .recovery_code
+            .is_none());
         let restarted = SupportSettingsStore::open(&root);
-        assert_eq!(restarted.settings, changed);
+        assert_eq!(
+            restarted.settings,
+            SupportSettingsV1 {
+                version: 2,
+                ..SupportSettingsV1::default()
+            }
+        );
+        assert!(SupportAuditStore::open(&root, Some(restarted.settings.version))
+            .recovery_code
+            .is_none());
+        let stable = SupportSettingsStore::open(&root);
+        assert_eq!(stable.settings, restarted.settings);
         assert_eq!(
             fs::metadata(root.join(SUPPORT_DIRECTORY))
                 .expect("directory")

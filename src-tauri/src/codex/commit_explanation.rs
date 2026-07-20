@@ -27,13 +27,10 @@ use super::support::{
     SupportRuntime, SupportRuntimeCleanup, SupportRuntimeError, SupportUsage, SUPPORT_TASK_TIMEOUT,
 };
 use super::support_control::{
-    SupportAuditStore, SupportAuditV1, SupportCapacityV1, SupportControlCommandError,
-    SupportControlResult, SupportControlSnapshotV1, SupportDurableAuditV1, SupportEffectiveState,
-    SupportLatestOutcomeV1, SupportOutcomeStatus, SupportPersistence, SupportReadinessStatus,
-    SupportReleaseReadinessV1, SupportSettingsGetRequestV1, SupportSettingsStore,
-    SupportSettingsUpdateRequestV1, SupportSettingsV1, SupportUsageCountersV1,
-    SUPPORT_CONTROL_SCHEMA_VERSION, SUPPORT_MAX_QUEUE_CAPACITY, SUPPORT_MAX_SAFE_COUNTER,
-    SUPPORT_SETTINGS_UNAVAILABLE,
+    SupportAuditStore, SupportControlCommandError, SupportControlResult, SupportDurableAuditV1,
+    SupportLatestOutcomeV1, SupportOutcomeStatus, SupportReadinessStatus,
+    SupportReleaseReadinessV1, SupportSettingsStore, SupportSettingsV1, SupportUsageCountersV1,
+    SUPPORT_MAX_QUEUE_CAPACITY, SUPPORT_MAX_SAFE_COUNTER,
 };
 use super::support_isolation::{
     SUPPORTED_ARM64_BINARY_SHA256, SUPPORTED_CLI_VERSION, SUPPORTED_EXPLAIN_SKILL_SHA256,
@@ -53,18 +50,6 @@ const OPERATION_PRESENT: &str = "commit_explanation.present";
 const OPERATION_STATE: &str = "commit_explanation.state";
 const OPERATION_SCOPE: &str = "commit_explanation.scope";
 const OPERATION_SHUTDOWN: &str = "commit_explanation.shutdown";
-const OPERATION_SUPPORT_GET: &str = "support_settings_get";
-const OPERATION_SUPPORT_UPDATE: &str = "support_settings_update";
-
-#[cfg(not(test))]
-const SUPPORT_DISABLE_GRACE_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(test)]
-const SUPPORT_DISABLE_GRACE_TIMEOUT: Duration = Duration::from_millis(50);
-#[cfg(not(test))]
-const SUPPORT_DISABLE_FORCE_TIMEOUT: Duration = Duration::from_secs(1);
-#[cfg(test)]
-const SUPPORT_DISABLE_FORCE_TIMEOUT: Duration = Duration::from_millis(25);
-
 type ExplanationFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1453,227 +1438,6 @@ impl CommitExplanationController {
         Ok(())
     }
 
-    pub async fn support_snapshot(
-        &self,
-        request: SupportSettingsGetRequestV1,
-    ) -> SupportControlResult<SupportControlSnapshotV1> {
-        validate_support_schema(request.schema_version, OPERATION_SUPPORT_GET)?;
-        let _admission = self.inner.admission.lock().await;
-        let readiness = self.inner.readiness.snapshot().await;
-        let mut data = self.inner.data.lock().await;
-        data.last_readiness = Some(readiness.clone());
-        Ok(support_snapshot(&data, readiness, self.inner.queue_limit))
-    }
-
-    pub async fn update_support_settings(
-        &self,
-        request: SupportSettingsUpdateRequestV1,
-    ) -> SupportControlResult<SupportControlSnapshotV1> {
-        validate_support_schema(request.schema_version, OPERATION_SUPPORT_UPDATE)?;
-        let _admission = self.inner.admission.lock().await;
-        let executor_owned_on_entry = if request.global_enabled && request.commit_explainer_enabled
-        {
-            tokio::time::timeout(
-                SUPPORT_DISABLE_GRACE_TIMEOUT,
-                self.inner.executor.has_owned_executions(),
-            )
-            .await
-            .unwrap_or(true)
-        } else {
-            false
-        };
-        let mut data = self.inner.data.lock().await;
-        if data.settings.version != request.expected_version {
-            return Err(SupportControlCommandError::new(
-                "CODEX-SUPPORT-SETTINGS-CONFLICT",
-                OPERATION_SUPPORT_UPDATE,
-                true,
-            ));
-        }
-        let enabling = request.global_enabled
-            && request.commit_explainer_enabled
-            && (!data.settings.global_enabled || !data.settings.commit_explainer_enabled);
-        if enabling
-            && data.last_error_code.as_deref() == Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
-            && (data.active.is_some() || data.worker_running || executor_owned_on_entry)
-        {
-            return Err(SupportControlCommandError::new(
-                "CODEX-SUPPORT-DISABLE-INCOMPLETE",
-                OPERATION_SUPPORT_UPDATE,
-                true,
-            ));
-        }
-        let version = request.expected_version.checked_add(1).ok_or_else(|| {
-            SupportControlCommandError::new(
-                "CODEX-SUPPORT-SETTINGS-VERSION",
-                OPERATION_SUPPORT_UPDATE,
-                false,
-            )
-        })?;
-        let next = SupportSettingsV1 {
-            schema_version: SUPPORT_CONTROL_SCHEMA_VERSION,
-            version,
-            global_enabled: request.global_enabled,
-            commit_explainer_enabled: request.commit_explainer_enabled,
-        };
-        let store = self.inner.settings_store.as_ref().ok_or_else(|| {
-            SupportControlCommandError::new(
-                SUPPORT_SETTINGS_UNAVAILABLE,
-                OPERATION_SUPPORT_UPDATE,
-                true,
-            )
-        })?;
-        store.save(&next, OPERATION_SUPPORT_UPDATE)?;
-        data.settings = next;
-        data.settings_recovery_code = None;
-        if data.last_error_code.as_deref() == Some("CODEX-SUPPORT-DISABLE-INCOMPLETE") {
-            data.last_error_code = None;
-        }
-
-        let disabling = !request.global_enabled || !request.commit_explainer_enabled;
-        let mut changed = Vec::new();
-        let mut active_executor_request_id = None;
-        let worker_completion = if disabling {
-            let queued = data
-                .queue
-                .drain(..)
-                .map(|task| task.key)
-                .collect::<Vec<_>>();
-            for key in queued {
-                if let Some(previous) = data.states.get(&key).cloned() {
-                    let state = canceled_for_policy(previous);
-                    data.states.insert(key, state.clone());
-                    changed.push(state);
-                }
-            }
-            let active = data.active.as_ref().map(|active| {
-                active.canceled.store(true, Ordering::Release);
-                (active.task.key.clone(), active.executor_request_id.clone())
-            });
-            if let Some((key, request_id)) = active {
-                active_executor_request_id = Some(request_id);
-                if let Some(previous) = data.states.get(&key).cloned() {
-                    let state = canceled_for_policy(previous);
-                    data.states.insert(key, state.clone());
-                    changed.push(state);
-                }
-            }
-            if !changed.is_empty() {
-                let canceled = u64::try_from(changed.len()).unwrap_or(u64::MAX);
-                bounded_add(&mut data.usage.canceled_tasks, canceled);
-                data.latest_outcome = changed.last().map(|state| SupportLatestOutcomeV1 {
-                    status: SupportOutcomeStatus::Canceled,
-                    trigger: state
-                        .trigger
-                        .map(trigger_name)
-                        .unwrap_or("unknown")
-                        .to_owned(),
-                    completed_at: state.updated_at.clone(),
-                    latency_ms: None,
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    total_tokens: 0,
-                    error_code: Some("CODEX-SUPPORT-DISABLED".to_owned()),
-                });
-            }
-            data.worker_completion.clone()
-        } else {
-            None
-        };
-        let audit_error = self
-            .persist_audit(&mut data, OPERATION_SUPPORT_UPDATE)
-            .err();
-        drop(data);
-
-        for state in changed {
-            self.inner.events.emit_state(&state);
-        }
-        if disabling {
-            let cancel_converged = if let Some(request_id) = active_executor_request_id {
-                tokio::time::timeout(
-                    SUPPORT_DISABLE_GRACE_TIMEOUT,
-                    self.inner.executor.cancel(&request_id),
-                )
-                .await
-                .unwrap_or(false)
-            } else {
-                true
-            };
-            let grace_converged = if cancel_converged {
-                if let Some(completion) = worker_completion.as_ref() {
-                    tokio::time::timeout(SUPPORT_DISABLE_GRACE_TIMEOUT, completion.wait())
-                        .await
-                        .is_ok()
-                } else {
-                    true
-                }
-            } else {
-                false
-            };
-            let executor_owned_before_force = tokio::time::timeout(
-                SUPPORT_DISABLE_GRACE_TIMEOUT,
-                self.inner.executor.has_owned_executions(),
-            )
-            .await
-            .unwrap_or(true);
-            let force_required =
-                !cancel_converged || !grace_converged || executor_owned_before_force;
-            let force_converged = if force_required {
-                tokio::time::timeout(
-                    SUPPORT_DISABLE_FORCE_TIMEOUT,
-                    self.inner.executor.force_cleanup_now(),
-                )
-                .await
-                .unwrap_or(false)
-            } else {
-                true
-            };
-            let worker_converged = if force_required {
-                if let Some(completion) = worker_completion.as_ref() {
-                    tokio::time::timeout(SUPPORT_DISABLE_FORCE_TIMEOUT, completion.wait())
-                        .await
-                        .is_ok()
-                } else {
-                    true
-                }
-            } else {
-                grace_converged
-            };
-            let controller_ownership_released = {
-                let data = self.inner.data.lock().await;
-                data.queue.is_empty() && data.active.is_none() && !data.worker_running
-            };
-            let executor_ownership_released = !tokio::time::timeout(
-                SUPPORT_DISABLE_FORCE_TIMEOUT,
-                self.inner.executor.has_owned_executions(),
-            )
-            .await
-            .unwrap_or(true);
-            if !force_converged
-                || !worker_converged
-                || !controller_ownership_released
-                || !executor_ownership_released
-            {
-                let mut data = self.inner.data.lock().await;
-                data.last_error_code = Some("CODEX-SUPPORT-DISABLE-INCOMPLETE".to_owned());
-                let _ = self.persist_audit(&mut data, OPERATION_SUPPORT_UPDATE);
-                return Err(SupportControlCommandError::new(
-                    "CODEX-SUPPORT-DISABLE-INCOMPLETE",
-                    OPERATION_SUPPORT_UPDATE,
-                    true,
-                ));
-            }
-        }
-        if let Some(error) = audit_error {
-            return Err(error);
-        }
-
-        let readiness = self.inner.readiness.snapshot().await;
-        let mut data = self.inner.data.lock().await;
-        data.last_readiness = Some(readiness.clone());
-        Ok(support_snapshot(&data, readiness, self.inner.queue_limit))
-    }
-
     async fn begin_shutdown(
         &self,
     ) -> (
@@ -2090,19 +1854,6 @@ fn canceled_for_shutdown(
     }
 }
 
-fn canceled_for_policy(
-    previous: CommitExplanationControllerStateV1,
-) -> CommitExplanationControllerStateV1 {
-    CommitExplanationControllerStateV1 {
-        status: CommitExplanationControllerStatus::Canceled,
-        retryable: true,
-        presentation_available: false,
-        error_code: Some("CODEX-SUPPORT-DISABLED".to_owned()),
-        updated_at: now(),
-        ..previous
-    }
-}
-
 fn support_gate_reason(
     data: &ControllerData,
     readiness: &SupportReleaseReadinessV1,
@@ -2125,44 +1876,6 @@ fn support_gate_reason(
         );
     }
     None
-}
-
-fn support_snapshot(
-    data: &ControllerData,
-    readiness: SupportReleaseReadinessV1,
-    queue_limit: usize,
-) -> SupportControlSnapshotV1 {
-    let fallback_reason_code = support_gate_reason(data, &readiness);
-    let effective_state = if data.settings_recovery_code.is_some() {
-        SupportEffectiveState::SettingsRecovery
-    } else if !data.settings.global_enabled {
-        SupportEffectiveState::UserDisabled
-    } else if !data.settings.commit_explainer_enabled {
-        SupportEffectiveState::RoleDisabled
-    } else if readiness.status != SupportReadinessStatus::Approved {
-        SupportEffectiveState::ReleaseBlocked
-    } else {
-        SupportEffectiveState::Enabled
-    };
-    SupportControlSnapshotV1 {
-        schema_version: SUPPORT_CONTROL_SCHEMA_VERSION,
-        settings: data.settings.clone(),
-        persistence: SupportPersistence::Native,
-        recovery_code: data.settings_recovery_code.clone(),
-        readiness,
-        effective_state,
-        effective_enabled: effective_state == SupportEffectiveState::Enabled,
-        fallback_reason_code,
-        capacity: SupportCapacityV1 {
-            maximum_active: 1,
-            maximum_queued: queue_limit,
-            active: usize::from(data.active.is_some()),
-            queued: data.queue.len(),
-        },
-        usage: data.usage.clone(),
-        audit: SupportAuditV1::new(data.latest_outcome.clone(), data.fallback_tasks),
-        last_error_code: data.last_error_code.clone(),
-    }
 }
 
 fn durable_audit(data: &ControllerData) -> SupportDurableAuditV1 {
@@ -2300,20 +2013,6 @@ fn trigger_name(trigger: CommitExplanationTrigger) -> &'static str {
         CommitExplanationTrigger::UserRequest => "user_request",
         CommitExplanationTrigger::UserRetry => "user_retry",
     }
-}
-
-fn validate_support_schema(
-    schema_version: u16,
-    operation: &'static str,
-) -> SupportControlResult<()> {
-    if schema_version != SUPPORT_CONTROL_SCHEMA_VERSION {
-        return Err(SupportControlCommandError::new(
-            "CODEX-SUPPORT-SETTINGS-SCHEMA",
-            operation,
-            false,
-        ));
-    }
-    Ok(())
 }
 
 fn prefix16(value: &str) -> String {
@@ -2543,22 +2242,6 @@ pub async fn commit_explanation_set_scope(
     controller: tauri::State<'_, CommitExplanationController>,
 ) -> Result<(), CommitExplanationControllerError> {
     controller.set_scope(request).await
-}
-
-#[tauri::command]
-pub async fn support_settings_get(
-    request: SupportSettingsGetRequestV1,
-    controller: tauri::State<'_, CommitExplanationController>,
-) -> SupportControlResult<SupportControlSnapshotV1> {
-    controller.support_snapshot(request).await
-}
-
-#[tauri::command]
-pub async fn support_settings_update(
-    request: SupportSettingsUpdateRequestV1,
-    controller: tauri::State<'_, CommitExplanationController>,
-) -> SupportControlResult<SupportControlSnapshotV1> {
-    controller.update_support_settings(request).await
 }
 
 #[cfg(test)]
@@ -3083,25 +2766,6 @@ mod tests {
         let last = bytes.last_mut().expect("nonempty identity");
         *last = if *last == b'0' { b'1' } else { b'0' };
         String::from_utf8(bytes).expect("ascii identity")
-    }
-
-    fn get_support_request() -> SupportSettingsGetRequestV1 {
-        SupportSettingsGetRequestV1 {
-            schema_version: SUPPORT_CONTROL_SCHEMA_VERSION,
-        }
-    }
-
-    fn update_support_request(
-        expected_version: u64,
-        global_enabled: bool,
-        commit_explainer_enabled: bool,
-    ) -> SupportSettingsUpdateRequestV1 {
-        SupportSettingsUpdateRequestV1 {
-            schema_version: SUPPORT_CONTROL_SCHEMA_VERSION,
-            expected_version,
-            global_enabled,
-            commit_explainer_enabled,
-        }
     }
 
     fn dispatch(hex: char, request_id: &str, generation: u64) -> CommitExplanationDispatchV1 {
@@ -3711,411 +3375,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn support_snapshot_is_typed_bounded_and_reports_real_usage() {
-        let (controller, executor, _, root) =
-            policy_harness(FakeMode::Immediate, approved_readiness());
-        let initial = controller
-            .support_snapshot(get_support_request())
-            .await
-            .expect("initial snapshot");
-        assert_eq!(initial.settings, SupportSettingsV1::default());
-        assert!(initial.effective_enabled);
-        assert_eq!(initial.effective_state, SupportEffectiveState::Enabled);
-        assert_eq!(initial.capacity.maximum_active, 1);
-        assert_eq!(initial.capacity.maximum_queued, SUPPORT_MAX_QUEUE_CAPACITY);
-        assert_eq!(initial.audit.model_family, super::super::types::CODEX_MODEL);
-        assert_eq!(initial.audit.reasoning_effort, "low");
-        assert!(!initial.audit.raw_transcript_persisted);
-        let conflict = controller
-            .update_support_settings(update_support_request(0, false, false))
-            .await
-            .expect_err("stale settings update rejected");
-        assert_eq!(conflict.code, "CODEX-SUPPORT-SETTINGS-CONFLICT");
-        assert!(conflict.recoverable);
-        assert_eq!(
-            controller
-                .support_snapshot(get_support_request())
-                .await
-                .expect("snapshot after conflict")
-                .settings,
-            SupportSettingsV1::default()
-        );
-
-        let request = dispatch('a', "request-usage", 1);
-        controller.request(request.clone()).await.expect("request");
-        wait_for_status(
-            &controller,
-            &request,
-            CommitExplanationControllerStatus::Generated,
-        )
-        .await;
-        let measured = controller
-            .support_snapshot(get_support_request())
-            .await
-            .expect("measured snapshot");
-        assert_eq!(executor.calls.load(Ordering::Acquire), 1);
-        assert_eq!(measured.usage.attempted_tasks, 1);
-        assert_eq!(measured.usage.started_tasks, 1);
-        assert_eq!(measured.usage.succeeded_tasks, 1);
-        assert_eq!(measured.usage.input_tokens, 10);
-        assert_eq!(measured.usage.output_tokens, 5);
-        assert_eq!(measured.usage.total_tokens, 15);
-        assert_eq!(measured.usage.total_latency_ms, 12);
-        let restarted_audit = SupportAuditStore::open(&root, Some(1));
-        assert!(restarted_audit.recovery_code.is_none());
-        assert_eq!(restarted_audit.state.usage, measured.usage);
-        assert_eq!(
-            restarted_audit.state.latest_outcome,
-            measured.audit.latest_outcome
-        );
-        assert_eq!(restarted_audit.state.fallback_tasks, 0);
-        assert_eq!(
-            measured
-                .audit
-                .latest_outcome
-                .as_ref()
-                .map(|value| value.status),
-            Some(SupportOutcomeStatus::Generated)
-        );
-        let serialized = serde_json::to_string(&measured).expect("serialize snapshot");
-        assert!(!serialized.contains("presence"));
-        assert!(!serialized.contains("decision"));
-        assert!(!serialized.contains(root.to_string_lossy().as_ref()));
-        assert_eq!(
-            controller
-                .support_snapshot(SupportSettingsGetRequestV1 { schema_version: 2 })
-                .await
-                .expect_err("future schema rejected")
-                .code,
-            "CODEX-SUPPORT-SETTINGS-SCHEMA"
-        );
-        std::fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[tokio::test]
-    async fn disabling_support_cancels_active_and_queue_before_returning() {
-        let (controller, executor, _, root) = policy_harness(FakeMode::Block, approved_readiness());
-        let active = dispatch('a', "request-active-disable", 1);
-        let queued = dispatch('b', "request-queued-disable", 1);
-        controller.request(active.clone()).await.expect("active");
-        wait_for_status(
-            &controller,
-            &active,
-            CommitExplanationControllerStatus::Running,
-        )
-        .await;
-        assert_eq!(
-            controller
-                .request(queued.clone())
-                .await
-                .expect("queued")
-                .status,
-            CommitExplanationControllerStatus::Queued
-        );
-
-        let disabled = controller
-            .update_support_settings(update_support_request(1, false, true))
-            .await
-            .expect("disable converges");
-        assert_eq!(
-            disabled.effective_state,
-            SupportEffectiveState::UserDisabled
-        );
-        assert!(!disabled.effective_enabled);
-        assert_eq!(disabled.capacity.active, 0);
-        assert_eq!(disabled.capacity.queued, 0);
-        assert_eq!(disabled.usage.canceled_tasks, 2);
-        assert_eq!(executor.calls.load(Ordering::Acquire), 1);
-        assert_eq!(executor.cancels.load(Ordering::Acquire), 1);
-        assert_eq!(
-            wait_for_status(
-                &controller,
-                &active,
-                CommitExplanationControllerStatus::Canceled,
-            )
-            .await
-            .error_code
-            .as_deref(),
-            Some("CODEX-SUPPORT-DISABLED")
-        );
-        assert_eq!(
-            wait_for_status(
-                &controller,
-                &queued,
-                CommitExplanationControllerStatus::Canceled,
-            )
-            .await
-            .error_code
-            .as_deref(),
-            Some("CODEX-SUPPORT-DISABLED")
-        );
-
-        let blocked = dispatch('c', "request-after-disable", 1);
-        let blocked_state = controller.request(blocked).await.expect("fallback");
-        assert_eq!(
-            blocked_state.status,
-            CommitExplanationControllerStatus::Unavailable
-        );
-        assert_eq!(
-            blocked_state.error_code.as_deref(),
-            Some("CODEX-SUPPORT-DISABLED")
-        );
-        assert_eq!(executor.calls.load(Ordering::Acquire), 1);
-
-        let reopened = SupportSettingsStore::open(&root);
-        assert!(!reopened.settings.global_enabled);
-        assert!(reopened.settings.commit_explainer_enabled);
-        assert_eq!(reopened.settings.version, 2);
-        std::fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[tokio::test]
-    async fn cancel_false_forces_recovery_then_reenable_starts_the_next_executor() {
-        let (controller, executor, _, root) = policy_harness(FakeMode::Block, approved_readiness());
-        let active = dispatch('a', "request-cancel-false-disable", 1);
-        controller.request(active.clone()).await.expect("active");
-        wait_for_status(
-            &controller,
-            &active,
-            CommitExplanationControllerStatus::Running,
-        )
-        .await;
-        executor.cancel_converges.store(false, Ordering::Release);
-
-        let disabled = controller
-            .update_support_settings(update_support_request(1, false, false))
-            .await
-            .expect("forced recovery converges");
-        assert!(!disabled.effective_enabled);
-        assert_eq!(executor.cancels.load(Ordering::Acquire), 1);
-        assert_eq!(executor.cleanup_forces.load(Ordering::Acquire), 1);
-        assert_eq!(executor.forces.load(Ordering::Acquire), 0);
-
-        let enabled = controller
-            .update_support_settings(update_support_request(2, true, true))
-            .await
-            .expect("re-enable after recovery cleanup");
-        assert!(enabled.effective_enabled);
-        let next = dispatch('b', "request-after-reenable", 1);
-        controller
-            .request(next.clone())
-            .await
-            .expect("next request");
-        wait_for_status(
-            &controller,
-            &next,
-            CommitExplanationControllerStatus::Generated,
-        )
-        .await;
-        assert_eq!(executor.calls.load(Ordering::Acquire), 2);
-        assert_eq!(executor.forces.load(Ordering::Acquire), 0);
-        std::fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[tokio::test]
-    async fn disable_forces_retained_isolated_ownership_after_worker_is_gone() {
-        let (controller, executor, root) = isolated_policy_harness(approved_readiness());
-        let cleanup = Arc::new(RetryCleanupFixture::default());
-        cleanup.converges.store(true, Ordering::Release);
-        retain_unconverged_execution(&executor, cleanup.clone(), "retained-success", 41).await;
-        assert!(executor.has_owned_executions().await);
-        {
-            let data = controller.inner.data.lock().await;
-            assert!(data.active.is_none());
-            assert!(!data.worker_running);
-        }
-
-        let disabled = controller
-            .update_support_settings(update_support_request(1, false, false))
-            .await
-            .expect("retained executor cleanup converges");
-        assert!(!disabled.effective_enabled);
-        assert_eq!(cleanup.force_calls.load(Ordering::Acquire), 1);
-        assert!(!executor.has_owned_executions().await);
-        assert!(!executor.shutting_down.load(Ordering::Acquire));
-
-        let enabled = controller
-            .update_support_settings(update_support_request(2, true, true))
-            .await
-            .expect("re-enable after retained cleanup");
-        assert!(enabled.effective_enabled);
-        let next = dispatch('e', "request-after-isolated-recovery", 1);
-        controller
-            .request(next.clone())
-            .await
-            .expect("next request");
-        let state = wait_for_status(
-            &controller,
-            &next,
-            CommitExplanationControllerStatus::Unavailable,
-        )
-        .await;
-        assert_eq!(
-            state.error_code.as_deref(),
-            Some("CODEX-SUPPORT-RELEASE-UNSUPPORTED")
-        );
-        assert_eq!(executor.next_generation.load(Ordering::Acquire), 2);
-        assert!(!executor.has_owned_executions().await);
-        std::fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[tokio::test]
-    async fn retained_isolated_ownership_keeps_failed_disable_persisted_off() {
-        let (controller, executor, root) = isolated_policy_harness(approved_readiness());
-        let cleanup = Arc::new(RetryCleanupFixture::default());
-        retain_unconverged_execution(&executor, cleanup.clone(), "retained-failure", 43).await;
-
-        let error = controller
-            .update_support_settings(update_support_request(1, false, false))
-            .await
-            .expect_err("retained ownership must fail disable");
-        assert_eq!(error.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
-        assert_eq!(cleanup.force_calls.load(Ordering::Acquire), 1);
-        assert!(executor.has_owned_executions().await);
-        let snapshot = controller
-            .support_snapshot(get_support_request())
-            .await
-            .expect("authoritative failed-disable snapshot");
-        assert_eq!(snapshot.settings.version, 2);
-        assert!(!snapshot.settings.global_enabled);
-        assert!(!snapshot.settings.commit_explainer_enabled);
-        assert_eq!(
-            snapshot.last_error_code.as_deref(),
-            Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
-        );
-        let persisted = SupportSettingsStore::open(&root);
-        assert_eq!(persisted.settings.version, 2);
-        assert!(!persisted.settings.global_enabled);
-        let audit = SupportAuditStore::open(&root, Some(2));
-        assert_eq!(
-            audit.state.last_error_code.as_deref(),
-            Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
-        );
-
-        let rejected = controller
-            .update_support_settings(update_support_request(2, true, true))
-            .await
-            .expect_err("retained executor ownership blocks re-enable");
-        assert_eq!(rejected.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
-        assert_eq!(SupportSettingsStore::open(&root).settings.version, 2);
-
-        cleanup.converges.store(true, Ordering::Release);
-        let recovered = controller
-            .update_support_settings(update_support_request(2, false, false))
-            .await
-            .expect("retry force cleanup converges");
-        assert_eq!(recovered.settings.version, 3);
-        assert!(!executor.has_owned_executions().await);
-        assert_eq!(cleanup.force_calls.load(Ordering::Acquire), 2);
-        let enabled = controller
-            .update_support_settings(update_support_request(3, true, true))
-            .await
-            .expect("re-enable after cleanup recovery");
-        assert!(enabled.effective_enabled);
-        std::fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[tokio::test]
-    async fn disable_cleanup_failure_keeps_persisted_off_snapshot_and_new_version() {
-        let (controller, executor, _, root) = policy_harness(FakeMode::Never, approved_readiness());
-        executor
-            .cleanup_force_converges
-            .store(false, Ordering::Release);
-        let request = dispatch('c', "request-disable-never-converges", 1);
-        controller.request(request.clone()).await.expect("queued");
-        wait_for_status(
-            &controller,
-            &request,
-            CommitExplanationControllerStatus::Running,
-        )
-        .await;
-
-        let error = controller
-            .update_support_settings(update_support_request(1, false, false))
-            .await
-            .expect_err("disable must report incomplete cleanup");
-        assert_eq!(error.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
-        let snapshot = controller
-            .support_snapshot(get_support_request())
-            .await
-            .expect("authoritative off snapshot");
-        assert_eq!(snapshot.settings.version, 2);
-        assert!(!snapshot.settings.global_enabled);
-        assert!(!snapshot.settings.commit_explainer_enabled);
-        assert!(!snapshot.effective_enabled);
-        assert_eq!(
-            snapshot.last_error_code.as_deref(),
-            Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
-        );
-        assert_eq!(snapshot.usage.succeeded_tasks, 0);
-        assert_eq!(executor.calls.load(Ordering::Acquire), 1);
-        assert_eq!(executor.cleanup_forces.load(Ordering::Acquire), 1);
-        assert_eq!(executor.forces.load(Ordering::Acquire), 0);
-
-        let persisted = SupportSettingsStore::open(&root);
-        assert_eq!(persisted.settings.version, 2);
-        assert!(!persisted.settings.global_enabled);
-        assert!(!persisted.settings.commit_explainer_enabled);
-        let audit = SupportAuditStore::open(&root, Some(2));
-        assert!(audit.recovery_code.is_none());
-        assert_eq!(
-            audit.state.last_error_code.as_deref(),
-            Some("CODEX-SUPPORT-DISABLE-INCOMPLETE")
-        );
-
-        let retry = controller
-            .update_support_settings(update_support_request(2, false, false))
-            .await
-            .expect_err("retry reaches cleanup rather than version conflict");
-        assert_eq!(retry.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
-        assert_ne!(retry.code, "CODEX-SUPPORT-SETTINGS-CONFLICT");
-        assert_eq!(SupportSettingsStore::open(&root).settings.version, 3);
-
-        let reenable = controller
-            .update_support_settings(update_support_request(3, true, true))
-            .await
-            .expect_err("unconverged worker cannot be re-enabled");
-        assert_eq!(reenable.code, "CODEX-SUPPORT-DISABLE-INCOMPLETE");
-        assert_eq!(SupportSettingsStore::open(&root).settings.version, 3);
-        std::fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[tokio::test]
-    async fn disable_wins_the_admission_race_and_never_starts_a_late_job() {
-        let (controller, executor, _, root) =
-            policy_harness(FakeMode::Immediate, approved_readiness());
-        let admission = controller.inner.admission.lock().await;
-        let update_controller = controller.clone();
-        let update = tokio::spawn(async move {
-            update_controller
-                .update_support_settings(update_support_request(1, true, false))
-                .await
-        });
-        tokio::task::yield_now().await;
-        let request_controller = controller.clone();
-        let request = tokio::spawn(async move {
-            request_controller
-                .request(dispatch('d', "request-admission-race", 1))
-                .await
-        });
-        tokio::task::yield_now().await;
-        drop(admission);
-
-        let snapshot = update.await.expect("update task").expect("role disable");
-        assert_eq!(
-            snapshot.effective_state,
-            SupportEffectiveState::RoleDisabled
-        );
-        let state = request.await.expect("request task").expect("fallback");
-        assert_eq!(
-            state.error_code.as_deref(),
-            Some("CODEX-SUPPORT-COMMIT-EXPLAINER-DISABLED")
-        );
-        assert_eq!(executor.calls.load(Ordering::Acquire), 0);
-        std::fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[tokio::test]
     async fn unapproved_release_is_deterministic_fallback_without_model_use() {
         let mut readiness = approved_readiness();
         readiness.status = SupportReadinessStatus::Blocked;
@@ -4131,22 +3390,17 @@ mod tests {
             Some("CODEX-SUPPORT-RELEASE-UNSUPPORTED")
         );
         assert_eq!(executor.calls.load(Ordering::Acquire), 0);
-        let snapshot = controller
-            .support_snapshot(get_support_request())
-            .await
-            .expect("snapshot");
+        let data = controller.inner.data.lock().await;
+        assert!(data.active.is_none());
+        assert!(data.queue.is_empty());
+        assert_eq!(data.usage.started_tasks, 0);
+        assert_eq!(data.usage.unavailable_tasks, 1);
+        let readiness = data.last_readiness.as_ref().expect("readiness snapshot");
         assert_eq!(
-            snapshot.effective_state,
-            SupportEffectiveState::ReleaseBlocked
-        );
-        assert_eq!(snapshot.capacity.active, 0);
-        assert_eq!(snapshot.capacity.queued, 0);
-        assert_eq!(snapshot.usage.started_tasks, 0);
-        assert_eq!(snapshot.usage.unavailable_tasks, 1);
-        assert_eq!(
-            snapshot.fallback_reason_code.as_deref(),
+            support_gate_reason(&data, readiness).as_deref(),
             Some("CODEX-SUPPORT-RELEASE-UNSUPPORTED")
         );
+        drop(data);
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -4217,14 +3471,12 @@ mod tests {
             .await
             .expect("deterministic fallback");
         assert_eq!(state.status, CommitExplanationControllerStatus::Unavailable);
-        let snapshot = controller
-            .support_snapshot(get_support_request())
-            .await
-            .expect("blocked snapshot");
         assert_eq!(executor.calls.load(Ordering::Acquire), 0);
-        assert_eq!(snapshot.usage.started_tasks, 0);
-        assert_eq!(snapshot.usage.succeeded_tasks, 0);
-        assert_eq!(snapshot.audit.fallback_tasks, 1);
+        let data = controller.inner.data.lock().await;
+        assert_eq!(data.usage.started_tasks, 0);
+        assert_eq!(data.usage.succeeded_tasks, 0);
+        assert_eq!(data.fallback_tasks, 1);
+        drop(data);
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 

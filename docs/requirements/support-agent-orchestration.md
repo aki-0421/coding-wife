@@ -27,7 +27,7 @@ read_when:
 |---|---|
 | main identityを保つ | 利用者に見えるcoding identityはSolだけで、support rootを別chat/persona、設定section、diagnostic、model/usage表示として露出しない |
 | contextと権限を最小化する | 通常支援はredacted normalized eventだけを受け、external-authority toolを0件にし、repo、shell、filesystem、MCPへのauthorityを持たない |
-| 失敗を隔離する | timeout、schema error、disable時もmain turnを継続し、text fallbackを表示する |
+| 失敗を隔離する | timeout、schema error、runtime unavailable時もmain turnを継続し、text fallbackを表示する |
 | commit説明をmainから分離する | verified commitをapp controllerが自動処理し、main conversationへrequest、status、resultを1件も注入しない |
 
 ## スコープ
@@ -98,7 +98,7 @@ read_when:
 | `SUP-F-068` | support model familyとeffortはrole policyで固定される | role mappingに存在するGPT-5.6 family/effortだけをsession startへ渡し、support outputからmodelを変更できない。release probeは全captured Responses requestの`reasoning.effort`がexact `low`である場合だけcapacityを1にし、missing、null、`medium`、その他文字列、または異なる構造ではcapacityを0にする | Approved | 非該当 |
 | `SUP-F-079` | support希望設定をnativeへ永続化し、実効状態を安全に導出する | user-editableな希望設定は廃止し、legacy recordは`SUP-F-087`に従って移行する | Deprecated | `SUP-F-087`へ置換 |
 | `SUP-F-080` | policy gateと透明性snapshotをcontroller admission境界で一意に扱う | full binary/schema/skill identity不一致またはreadiness不足はexecutor start/model invocationを0件のままdeterministic `unavailable`へterminal化する。Approved/effective availableはCLI versionとbinary SHA-256、schema SHA-256、skill digest/versionのfull exact一致だけで決め、16文字prefixは内部監査専用とする | Approved | 非該当 |
-| `SUP-F-081` | bounded support auditをowner-only SQLiteへ永続化する | attempted/started/succeeded/failed/canceled/unavailable、input/output/total token、total latency、latest outcome、last safe error、raw transcript non-persistence、fallback count、policy versionをapp-private SQLiteのschema-versioned single state rowへatomic保存し、再起動後に復元する。DB/fileは0600、parentは0700、page/row/string sizeをboundedにし、concurrent updateを直列化する。schema/corrupt/permission/policy-version不整合はsupportをoff/offへfail closedし、prompt/response、repository/private path、credential、raw eventを列にもJSONにも保存しない | Approved | 非該当 |
+| `SUP-F-081` | bounded support auditをowner-only SQLiteへ永続化する | attempted/started/succeeded/failed/canceled/unavailable、input/output/total token、total latency、latest outcome、last safe error、raw transcript non-persistence、fallback count、policy versionをapp-private SQLiteのschema-versioned single state rowへatomic保存し、再起動後に復元する。DB/fileは0600、parentは0700、page/row/string sizeをboundedにし、concurrent updateを直列化する。schema/corrupt/permission/policy-version不整合は要求を`unavailable`へfail closedし、prompt/response、repository/private path、credential、raw eventを列にもJSONにも保存しない | Approved | 非該当 |
 | `SUP-F-082` | Settings controller lifecycleはStrict Mode replayとunmountを区別する | Support settings画面とfrontend controllerを提供しない | Deprecated | `SUP-F-086`へ置換 |
 | `SUP-F-083` | support settingsとaudit persistenceはnamespace swapへfail closedする | settings/auditのparentとentryを`lstat`相当で検証し、dangling symlink、非regular、owner不一致、group/other permissionをopen/renameより前に拒否する。settings読込とaudit SQLite接続はno-followで開いたdescriptorのowner/mode/device/inodeを再検証し、transaction直前にもpath identity一致を確認する。既存canonical更新では検証済み旧inodeのprivate hard-linkを保持し、macOS `renameatx_np(RENAME_SWAP)`またはLinux `renameat2(RENAME_EXCHANGE)`でsource/destinationを原子的に交換してから両identityを検証する。最終検証後のswap不一致では旧canonical inodeへrollback・directory fsyncして新payloadを公開せず、canonical未作成時はexclusive native renameだけを使う。対応kernel primitiveがないplatformで通常renameへfallbackせずfail closedする。検証後のentry swapやpublic targetへread/writeせず`CODEX-SUPPORT-SETTINGS-UNSAFE`または`CODEX-SUPPORT-AUDIT-UNSAFE`にする | Approved | 非該当 |
 | `SUP-F-084` | disable cleanupとterminal shutdownのforce lifecycleを分離する | user-facing disableは提供しない。process terminal shutdownはlate admissionを永久拒否し、active/queued説明生成をbounded cleanupする | Deprecated | `SUP-F-087`と`SUP-F-050`へ置換 |
@@ -136,7 +136,7 @@ read_when:
 | 領域 | 要件 | 対象要件ID |
 |---|---|---|
 | 対象OS・OS差分 | Codex App Serverが動作するmacOS 14以降 | `SUP-F-050` |
-| ウィンドウ生成・再利用 | support専用windowを作らずS-002/S-005へstatusだけ表示 | `SUP-F-064` |
+| ウィンドウ生成・再利用 | 内部runtime専用windowやsettings sectionを作らず、S-002/S-003へ説明状態だけを表示 | `SUP-F-086` |
 | 閉じる・アプリ終了 | queued/active taskをcancelし5秒後にprocess cleanup | `SUP-F-061`, `SUP-F-062` |
 | 未保存データ | 非該当: support draftは存在しない | 非該当 |
 | ローカルデータ | usage metadataだけをHISTへ保存 | `SUP-F-064`, `SUP-F-066` |
@@ -183,7 +183,7 @@ read_when:
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
 | role初期構成 | verified commit後のcommit explainerをP0、presence/narrationとdecisionを段階導入 | vertical slice後に実測token/latencyで順序を確認する | いいえ |
-| ephemeral実装差分 | capabilityがなければ支援を無効化しdeterministic fallback | release testでnon-persistenceを証明する | いいえ |
+| ephemeral実装差分 | capabilityがなければ説明を`unavailable`へ縮退しdeterministic fallback | release testでnon-persistenceを証明する | いいえ |
 
 ## 参照資料
 

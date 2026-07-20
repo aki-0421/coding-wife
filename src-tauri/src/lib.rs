@@ -32,8 +32,7 @@ use codex::commands::{
 };
 use codex::commit_explanation::{
     commit_explanation_cancel, commit_explanation_get_state, commit_explanation_present,
-    commit_explanation_request, commit_explanation_set_scope, support_settings_get,
-    support_settings_update, CommitExplanationController,
+    commit_explanation_request, commit_explanation_set_scope, CommitExplanationController,
 };
 use codex::supervisor::CodexSupervisor;
 use codex::workspace::WorkspaceService;
@@ -339,8 +338,6 @@ pub fn run() {
             commit_explanation_present,
             commit_explanation_get_state,
             commit_explanation_set_scope,
-            support_settings_get,
-            support_settings_update,
             character_library_get,
             character_import_pick,
             character_read_asset,
