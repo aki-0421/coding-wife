@@ -222,6 +222,16 @@ struct SetupProbeContext {
     workspace_root: Option<PathBuf>,
 }
 
+async fn expected_binary_for_configured_path(
+    configured_binary: Option<&Path>,
+    binary: Option<BinaryInfo>,
+) -> Option<BinaryInfo> {
+    let configured_binary = configured_binary?;
+    let binary = binary?;
+    let canonical_path = tokio::fs::canonicalize(configured_binary).await.ok()?;
+    (canonical_path == binary.canonical_path).then_some(binary)
+}
+
 impl Default for CodexSupervisor {
     fn default() -> Self {
         Self::new()
@@ -484,7 +494,7 @@ impl CodexSupervisor {
     /// Checks only the prerequisites required to leave the first-run setup:
     /// a trusted executable and a short-lived App Server that can initialize.
     pub async fn setup_probe(&self) -> CodexDiagnostic {
-        let context = {
+        let (configured_binary, binary, workspace_root) = {
             let state = self.inner.state.lock().await;
             let workspace_root = state
                 .active_workspace
@@ -500,15 +510,15 @@ impl CodexSupervisor {
                     .filter(|binary| binary.source != BinarySource::Explicit)
                     .map(|binary| binary.canonical_path.clone())
             });
-            let expected_binary = state.binary.clone().filter(|binary| {
-                configured_binary.as_deref() == Some(binary.canonical_path.as_path())
-            });
-            SetupProbeContext {
-                configured_binary,
-                expected_binary,
-                verified_binary: None,
-                workspace_root,
-            }
+            (configured_binary, state.binary.clone(), workspace_root)
+        };
+        let expected_binary =
+            expected_binary_for_configured_path(configured_binary.as_deref(), binary).await;
+        let context = SetupProbeContext {
+            configured_binary,
+            expected_binary,
+            verified_binary: None,
+            workspace_root,
         };
 
         bounded_setup_probe(context).await
@@ -564,7 +574,7 @@ impl CodexSupervisor {
     /// the app-owned runtime. Diagnostics must never stop or replace an active
     /// turn, so this probe uses an isolated short-lived app-server process.
     pub async fn readiness_probe(&self) -> CodexDiagnostic {
-        let context = {
+        let (configured_binary, binary, schema, workspace_root) = {
             let state = self.inner.state.lock().await;
             let workspace_root = state
                 .active_workspace
@@ -580,15 +590,20 @@ impl CodexSupervisor {
                     .filter(|binary| binary.source != BinarySource::Explicit)
                     .map(|binary| binary.canonical_path.clone())
             });
-            let expected_binary = state.binary.clone().filter(|binary| {
-                configured_binary.as_deref() == Some(binary.canonical_path.as_path())
-            });
-            ReadinessProbeContext {
+            (
                 configured_binary,
-                expected_schema: expected_binary.as_ref().and(state.schema.clone()),
-                expected_binary,
+                state.binary.clone(),
+                state.schema.clone(),
                 workspace_root,
-            }
+            )
+        };
+        let expected_binary =
+            expected_binary_for_configured_path(configured_binary.as_deref(), binary).await;
+        let context = ReadinessProbeContext {
+            configured_binary,
+            expected_schema: expected_binary.as_ref().and(schema),
+            expected_binary,
+            workspace_root,
         };
 
         match tokio::time::timeout(READINESS_PROBE_TIMEOUT, run_readiness_probe(context)).await {

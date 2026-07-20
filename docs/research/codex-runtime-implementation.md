@@ -1,7 +1,7 @@
 ---
 title: "Codex runtime実装ガイド"
 description: "Codex App Server adapterのファイル責務、不変条件、fake process試験、共有契約、live smokeの実行方法を記録する。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "Codex runtimeのprocess監督、IPC、event parser、session storeを変更するとき。"
   - "Codex CLI更新後の互換性、障害復旧、privacy gateを検証するとき。"
@@ -41,9 +41,11 @@ read_when:
 
 自動探索は明示app-private path、GUI processの`PATH`、default shellの`command -v codex`、`~/.local/bin`を含む既知install位置の順で行う。default shellはaccount情報または`SHELL`からabsolute executableを得て同じtrust検証を通し、interactive login commandを3秒以内、stdout/stderr各64KiB以内でprocess groupごと終了する。結果はtrim済みの単一absolute pathだけを受理する。初回setupまたはGeneralから受けたpathはUTF-8 absolute path 4,096 byte以下として一時的にIPC requestへ入るが、binary trust、version、App Server spawnとstableな`initialize` / `initialized`に成功したcanonical pathだけをSQLite `settings`のapp-private recordへ保存し、response、diagnostics、domain event、通常logへ返さない。設定解除はrecordを削除して自動探索へ戻し、実行中sessionには適用せず次のconnectから使う。
 
+supervisorが設定pathを既存binary identityへ束縛する時は、入力表記ではなくcanonical pathを比較する。macOSの`/var`と`/private/var`のように同じ実体へ解決される表記では以前のidentityをexpected evidenceとして維持し、同一path上の差し替えをfail closedで検知する。異なるcanonical pathへの明示変更だけは以前のidentityへ束縛せず、新しいbinaryとして検証する。
+
 Native readinessのCodex setup probeはbinary discoveryと上記App Server初期化だけをbounded実行する。schema生成、account/read、config/read、model/list、experimental initializeはsetup probeで呼ばない。setup probe成功後はoverviewを直ちに終了し、選択workspaceの通常接続を非同期に開始する。通常接続は従来どおりschemaと全handshakeをfail closedで確認し、auth、model、effort、capability不足をSend不可へ反映するがoverviewへ戻さない。
 
-この境界を変更した時は`cargo test --manifest-path src-tauri/Cargo.toml --test codex_supervisor setup_probe_only_discovers_and_initializes_a_short_lived_app_server -- --test-threads=1`でsetup processがschema、account、config、modelを呼ばないことを確認し、`pnpm exec vitest run src/features/readiness/SetupOverview.test.tsx src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`でchecking中の空画面、問題時だけのoverview、workspace handshake失敗時の通常shell維持を確認する。
+この境界を変更した時は`cargo test --manifest-path src-tauri/Cargo.toml --test codex_supervisor setup_probe_only_discovers_and_initializes_a_short_lived_app_server -- --test-threads=1`でsetup processがschema、account、config、modelを呼ばないことを確認する。設定pathとidentityの束縛を変更した時は`cargo test --locked --manifest-path src-tauri/Cargo.toml --test codex_supervisor readiness_probe_blocks_a_changed_configured_binary_without_turn_mutation -- --test-threads=1`でcanonical aliasを経由しても差し替えを拒否することを確認する。UI側は`pnpm exec vitest run src/features/readiness/SetupOverview.test.tsx src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`でchecking中の空画面、問題時だけのoverview、workspace handshake失敗時の通常shell維持を確認する。
 
 probeの上限はstdout/stderr各1 MiB、絶対deadline 10秒、schema depth 16、file数2,048、1 file 8 MiB、合計64 MiBである。schema tree内のfile/directory symlinkとnon-regular fileは拒否する。capabilityはmethod文字列の存在ではなく、request/notification unionのsingleton method discriminant、params `$ref`、required field、response object shapeをJSONとして構造照合した場合だけ`Supported`にする。
 
