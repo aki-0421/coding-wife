@@ -66,7 +66,6 @@ interface SetupOverviewProps {
 interface SetupCopy {
   readonly brandLabel: string
   readonly title: string
-  readonly description: string
   readonly remaining: (count: number) => string
   readonly checkingTitle: string
   readonly checkingDescription: string
@@ -100,8 +99,6 @@ const setupCopy: Readonly<Record<SupportedLocale, SetupCopy>> = {
   en: {
     brandLabel: "Coding Wife",
     title: "Finish the local setup",
-    description:
-      "Only items that still need attention are shown. Once they are ready, choose your first project and start a reviewable Codex workspace.",
     remaining: (count) => `${count} ${count === 1 ? "item" : "items"} left`,
     checkingTitle: "Checking this Mac",
     checkingDescription:
@@ -170,8 +167,6 @@ const setupCopy: Readonly<Record<SupportedLocale, SetupCopy>> = {
   ja: {
     brandLabel: "Coding Wife",
     title: "ローカル環境の準備を完了する",
-    description:
-      "対応が必要な項目だけを表示しています。準備が整うと、最初のプロジェクトからレビュー可能なCodexワークスペースを開始できます。",
     remaining: (count) => `残り${count}件`,
     checkingTitle: "このMacを確認しています",
     checkingDescription:
@@ -403,9 +398,6 @@ export function SetupOverview({
             <h1 className="m-0 text-balance text-lg font-semibold text-text-strong">
               {copy.title}
             </h1>
-            <p className="m-0 mt-xs max-w-[70ch] text-pretty text-body text-muted-foreground">
-              {copy.description}
-            </p>
           </div>
         </header>
 
