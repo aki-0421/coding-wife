@@ -10,6 +10,7 @@ import {
   FolderIcon,
   Mic2Icon,
   Settings2Icon,
+  ShieldCheckIcon,
   SparklesIcon,
   type LucideIcon,
 } from "lucide-react"
