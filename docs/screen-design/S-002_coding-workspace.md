@@ -84,7 +84,7 @@ status: "Approved"
 | tab row | main下段40.5px | Chat / Commit / Settings | view切替 |
 | Chat pane | 607.11×754.99px | event timeline、decision、composer | inspect、copy、send、stop、answer |
 | Character pane | 607.84×754.99px | Live2D canvas、visible caption、mute | mute、fallback詳細 |
-| composer | Chat内571.11×128.25px、left/right 18px、bottom 15px | input、attachment、context、Sol、effort、send/stop | draft編集、popover、turn操作 |
+| composer | Chat内571.11×128.25px、left/right 18px、bottom 15px | input、draft item、補助操作、実行操作 | draft編集、attachment/context追加、effort選択、send/stop |
 
 標準geometryではsidebar、81px header、primary work surface/Character境界、composerをFigma node `8:2`の±2 CSS px以内に合わせる。ChatとCommitは同じCharacter instanceを右paneへ継続表示し、tab切替でcanvasを再生成しない。Settingsでは同じrenderer instanceを非表示のまま保持する。primary work surfaceとCharacterの間へcard、rail、shadow、visible dividerを追加しない。Character背景は大きなdecorative gradientやparticleを使わず、Live2Dと状態captionの可読性を優先する。
 
@@ -136,6 +136,10 @@ timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted 
 | effort | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけをselect。unsupported optionは理由付きでdisabledにし、最後のvalid値を保持する。modelやservice tierは変更しない | 対応値未確認、選択中値未対応、valid optionなしではSend不可 |
 | Send | primary icon button、accessible label `Send / 送信` | instruction条件不成立 |
 | Stop | running時にSend位置へ表示。明示clickだけ | turn非実行時 |
+
+composerは一つの入力surfaceとして、上から`draft item`、instruction、footerの順に積む。footerは左の追加操作、中央の固定modelとreasoning effort、右のkeyboard hintとSend/Stopへ視線が流れる三群構成にする。attachmentはpaperclip/plusのicon-only control、Contextは`@`と短いlabel、Send/Stopはfooter末尾の円形icon buttonとし、accessible labelとtooltipで名称・無効理由を伝える。固定modelとeffortは実行条件のため残すが、primary actionと競合するborderやfillを持たせない。
+
+通常時はpaste/drop/@の長い説明文をsurface内へ常設せず、Addのtooltipとinstructionのaccessible descriptionへまとめる。native pickerが利用不能な時だけ、理由とdraft保持をinstruction直下へvisible statusとして表示する。`Command+Enter` hintはSendの直前へ置き、狭幅ではvisual textを省略してもaccessible descriptionとshortcut動作を維持する。draft itemはinstructionより上で横scrollし、basenameまたはsnapshot label、種別icon、削除操作を24pxの同一行へ収める。invalid attachmentは色だけでなく`!`と送信不可説明を残す。
 
 attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、App settings > Projects > project detailのProject Context編集やApp settings > Character > character detailのCharacter Context編集とは別の送信時参照として扱う。
 
@@ -359,6 +363,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 - [x] `status: Approved`である。
 - [x] demo/Figmaのsidebar、81px header、Chat、Character、composer寸法を定義した。
 - [x] modelは`GPT-5.6 Sol`固定で、`Fast` / `Max`はreasoning effortとして定義した。
+- [x] composerをdraft item、instruction、補助操作、実行操作の優先順位で整理し、狭幅でもSend/Stopと無効理由を維持する。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] timeline、decision、Context、Live2D、audio、native boundary、data retentionを定義した。
 - [x] verified commitからapp-owned explanation controllerへのbackground handoffとmain conversation非介入を定義した。
