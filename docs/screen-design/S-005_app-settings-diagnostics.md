@@ -31,7 +31,7 @@ status: "Approved"
 
 | section     | 内容                                                                                                     |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
-| General           | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
+| General           | ja/en、app version                                                                                       |
 | Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
 | Character context | app-globalなname、tone、speech density、behavior、prohibited expressions                                |
 | Companion         | app-globalなbundled Hiyoriとcustom 1枠、選択、import/置換、preview、semantic mapping、provenance、delete、runtime status |
@@ -96,7 +96,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | app settingsを開く    | workspace shell表示中 | gearをactiveにしS-005のGeneralだけを表示          | 非該当                         | shellとworkspace stateを維持    | `APP-F-083`                           |
 | workspaceへ戻る       | S-005表示中           | 直前のactive tab、workspace、composer draftを復元 | 非該当                         | 同じ画面を維持                  | `APP-F-055`, `APP-F-083`              |
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
-| preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry/Reset | `APP-F-057`〜`APP-F-061`, `APP-F-076` |
+| preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry       | `APP-F-057`, `APP-F-058`, `APP-F-076` |
 | Character contextを保存する | Character contextがready | global versionを更新し次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063` |
 | modelを選択する       | verified pack preview成功 | 全workspaceへatomic適用                           | 前selection維持                | 前selection維持、safe error     | `APP-F-084`, `LIVE-F-075` |
 | custom modelを取り込む | custom slotが空、native picker利用可能 | 検証・preview成功後に1件を保存しapp-global選択へatomic適用 | 前selectionと空slotを維持 | localized reasonとsafe code、前selection維持 | `LIVE-F-068`〜`LIVE-F-076` |
@@ -112,8 +112,6 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | 項目                 | 初期値    | 必須     | 制約・境界                            | エラー表示            | 保存契機 |
 | -------------------- | --------- | -------- | ------------------------------------- | --------------------- | -------- |
 | Language             | OS locale | 必須     | `ja` / `en`                           | field直下、前言語維持 | 選択時   |
-| Reduced motion       | `system`  | 必須     | `system` / `on` / `off`               | field直下、前値維持   | 選択時   |
-| Character visibility | `visible` | 必須     | `visible` / `hidden`                  | field直下、前値維持   | toggle時 |
 | Character context    | `Sol`と既定presentation | 任意 | display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
 | Project context      | 空       | 任意 | goal / constraints / notes各8,000、配列各20件、総量32,000 scalar、project-relative reference | field直下、draft維持 | Save |
 | Audio settings       | off       | 条件付き | verified local voice、rate 0.75〜1.25 | Audio内Alert          | Save     |
@@ -123,7 +121,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 
 | ユーザー操作                | 実行境界                 | Tauri plugin / Command             | 必要なCapability・認可                | キャンセル時      | 拒否・失敗時                          |
 | --------------------------- | ------------------------ | ---------------------------------- | ------------------------------------- | ----------------- | ------------------------------------- |
-| preference取得・更新・reset | Rust owner-only store    | `app_preferences_get/update/reset` | exact schema/version                  | 前record維持      | safe defaultまたは前record、safe code |
+| preference取得・更新       | Rust owner-only store    | `app_preferences_get/update`       | exact schema/version                  | 前record維持      | safe defaultまたは前record、safe code |
 | Character context load/save | Rust SQLite             | app character context commands     | global singleton、expected version    | draft維持         | conflictまたはsafe code                |
 | Project context load/save | Rust SQLite | `project_context_get` / `project_context_save` | registered Project ID、expected version、canonical project-relative reference | draft維持 | conflictまたはsafe code |
 | model import/select/mapping/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1 | quarantine cleanup、前selection維持 | bundled delete拒否、置換/削除失敗時は前slotとselection維持 |
@@ -145,7 +143,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 
 ## データ保持
 
-Project ID単位のProject context、AppPreferences、app-global Character context、character library selection/mapping、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。Projects一覧と詳細の表示だけではworkspace history、Git state、他projectのdraftを変更しない。
+Project ID単位のProject context、言語だけを保持する`AppPreferencesV2`、app-global Character context、character library selection/mapping、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。`AppPreferencesV1`からはlocaleだけを移行し、廃止したreduced motion、character visibility、Reset Preferences、Reset UI stateを公開しない。Projects一覧と詳細の表示だけではworkspace history、Git state、他projectのdraftを変更しない。
 
 ## OS差分
 
@@ -168,7 +166,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | `SUP-F-062`〜`SUP-F-078`                                             | global support control/readiness                 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092`                   | read-only Git/skill diagnostics                  | [git-review-harness](../requirements/git-review-harness.md)                   |
 | `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089` | app共通Audio                                     | [audio-commentary](../requirements/audio-commentary.md)                       |
-| `LIVE-F-055`〜`LIVE-F-081`                                          | global model library、mapping、runtime readiness | [live2d-companion](../requirements/live2d-companion.md)                       |
+| `LIVE-F-055`〜`LIVE-F-083`                                          | global model library、mapping、runtime readiness、常時表示 | [live2d-companion](../requirements/live2d-companion.md)                       |
 
 ## 未確定事項
 

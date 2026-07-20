@@ -90,9 +90,9 @@ sidebarと81px headerはS-002と同じ位置を維持し、Commit tabをactive�
 | commit list | 非modal drawer、最大300px | commit row、work unit/status badge、empty/loading | trigger、Escape、outside clickで開閉しfocusを復元 |
 | detail | evidence primary surfaceの全幅 | header、tabs、evidence、diff、explanation action | drawerを閉じた状態でprimary幅を使用 |
 | Companion pane | 607.84px基準 | S-002と同じLive2D canvas、state、caption、mute | Chatと同じwindow幅なら差1px以内 |
-| character caption portal | Companion領域 | streamed explanation、status、Cancel、mute | canvasがhiddenでもHTML captionを維持 |
+| character caption portal | Companion領域 | streamed explanation、status、Cancel、mute | canvasがtext-onlyへfallbackしてもHTML captionを維持 |
 
-character visibilityがHiddenの場合はCompanionを表示せず、evidence primary surfaceを全幅へ戻して300px list/detail splitを許可する。960px未満と200% text zoomではcharacter visibilityに関係なくcommit listを非modal drawerへ移し、detailを全幅にする。caption portalはdetailを覆わないようCompanion内へ置き、canvasがhiddenまたはtext-onlyへ縮退した場合もHTML captionを維持する。200% text zoomで横scrollを要求せず、diff code blockだけ内部scrollを許す。
+Companionは常時表示し、960px未満と200% text zoomではcommit listを非modal drawerへ移してdetailを全幅にする。caption portalはdetailを覆わないようCompanion内へ置き、canvasがtext-onlyへ縮退した場合もHTML captionを維持する。200% text zoomで横scrollを要求せず、diff code blockだけ内部scrollを許す。
 
 ## コンポーネント
 
