@@ -4,6 +4,8 @@ import {
   NarrationContractError,
   narrationCommands,
   narrationSchemaVersion,
+  narrationSettingsSchemaVersion,
+  openAiTtsVoices,
   parseNarrationCommandError,
   parseNarrationRuntime,
   parseNarrationSettingsSnapshot,
@@ -16,7 +18,7 @@ import {
   type NarrationRuntimeSnapshotV1,
   type NarrationScopeRequestV1,
   type NarrationSettingsSnapshotV1,
-  type NarrationSettingsUpdateV1,
+  type NarrationSettingsUpdateV2,
   type NarrationSpeakRequestV1,
   type NarrationSpeakResponseV1,
   type NarrationVoiceListV1,
@@ -35,7 +37,7 @@ export interface NarrationGateway {
   getRuntime(): Promise<NarrationRuntimeSnapshotV1>
   listVoices(): Promise<NarrationVoiceListV1>
   updateSettings(
-    request: NarrationSettingsUpdateV1,
+    request: NarrationSettingsUpdateV2,
   ): Promise<NarrationSettingsSnapshotV1>
   setMuted(
     request: NarrationMuteRequestV1,
@@ -117,7 +119,7 @@ export class NativeNarrationGateway implements NarrationGateway {
   }
 
   public async updateSettings(
-    request: NarrationSettingsUpdateV1,
+    request: NarrationSettingsUpdateV2,
   ): Promise<NarrationSettingsSnapshotV1> {
     return this.request(
       narrationCommands.updateSettings,
@@ -217,12 +219,15 @@ function initialSettings(): NarrationSettingsSnapshotV1 {
   return {
     schemaVersion: narrationSchemaVersion,
     settings: {
-      schemaVersion: narrationSchemaVersion,
+      schemaVersion: narrationSettingsSchemaVersion,
       version: 0,
       enabled: false,
       muted: false,
-      voices: { ja: null, en: null },
-      rate: 1,
+      provider: null,
+      apiKeyConfigured: false,
+      model: "gpt-4o-mini-tts",
+      voice: "marin",
+      speed: 1,
     },
     runtime: initialRuntime(),
     loadWarningCode: null,
@@ -246,26 +251,66 @@ export class DemoNarrationGateway implements NarrationGateway {
   public listVoices(): Promise<NarrationVoiceListV1> {
     return Promise.resolve({
       schemaVersion: narrationSchemaVersion,
-      voices: [
-        { name: "Kyoko", locale: "ja_JP" },
-        { name: "Samantha", locale: "en_US" },
-      ],
+      voices: openAiTtsVoices.flatMap((name) => [
+        { name, locale: "ja_JP" },
+        { name, locale: "en_US" },
+      ]),
     })
   }
 
   public async updateSettings(
-    request: NarrationSettingsUpdateV1,
+    request: NarrationSettingsUpdateV2,
   ): Promise<NarrationSettingsSnapshotV1> {
     this.requireVersion(request.expectedVersion)
+    if (
+      request.schemaVersion !== narrationSettingsSchemaVersion ||
+      request.model !== "gpt-4o-mini-tts" ||
+      !openAiTtsVoices.includes(request.voice) ||
+      request.speed < 0.75 ||
+      request.speed > 1.25 ||
+      Math.abs(request.speed * 20 - Math.round(request.speed * 20)) > 1e-9 ||
+      (request.apiKeyAction.kind === "replace" &&
+        (request.apiKeyAction.value.length > 512 ||
+          !/^[A-Za-z0-9._-]+$/u.test(request.apiKeyAction.value)))
+    ) {
+      throw new NarrationBoundaryError({
+        code: "NARRATION-SETTINGS-INVALID",
+        operation: "narration_update_settings",
+        recoverable: false,
+        userMessageKey: "narration.error.generic",
+        detailRef: "narration-v2",
+      })
+    }
+    const apiKeyConfigured =
+      request.apiKeyAction.kind === "replace"
+        ? request.apiKeyAction.value.trim().length > 0
+        : request.apiKeyAction.kind === "clear"
+          ? false
+          : this.#snapshot.settings.apiKeyConfigured
+    if (
+      (!apiKeyConfigured && request.provider !== null) ||
+      (request.enabled && (!apiKeyConfigured || request.provider !== "openai"))
+    ) {
+      throw new NarrationBoundaryError({
+        code: "NARRATION-API-KEY-REQUIRED",
+        operation: "narration_update_settings",
+        recoverable: true,
+        userMessageKey: "narration.error.generic",
+        detailRef: "narration-v2",
+      })
+    }
     this.#snapshot = {
       ...this.#snapshot,
       settings: {
-        schemaVersion: narrationSchemaVersion,
+        schemaVersion: narrationSettingsSchemaVersion,
         version: request.expectedVersion + 1,
         enabled: request.enabled,
         muted: request.muted,
-        voices: structuredClone(request.voices),
-        rate: request.rate,
+        provider: apiKeyConfigured ? request.provider : null,
+        apiKeyConfigured,
+        model: request.model,
+        voice: request.voice,
+        speed: request.speed,
       },
     }
     return this.getSettings()
@@ -321,9 +366,11 @@ export class DemoNarrationGateway implements NarrationGateway {
     ) {
       return this.response("stale", "NARRATION-STALE")
     }
-    const voice = this.#snapshot.settings.voices[request.locale]
-    if (voice === null) {
-      return this.response("unavailable", "NARRATION-VOICE-UNAVAILABLE")
+    if (
+      !this.#snapshot.settings.apiKeyConfigured ||
+      this.#snapshot.settings.provider !== "openai"
+    ) {
+      return this.response("unavailable", "NARRATION-PROVIDER-UNAVAILABLE")
     }
     if (this.#playbackTimer !== null) clearTimeout(this.#playbackTimer)
     this.#snapshot = {

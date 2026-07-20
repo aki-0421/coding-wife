@@ -251,7 +251,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | read-only context取得 | Rust context adapter | `capture_turn_context` | source allowlist、5秒deadline、stdout 1MiB、stderr 4KiB、process tree cleanup、timestamp、redaction、content hash | draft不変 | raw terminal/pathへfallbackせず、Terminal outputはunsupportedを返す |
 | decision / approval回答 | Rust App Server adapter | `answer_decision_or_approval` | negotiated requestUserInputまたは既知approval method、元request ID、idempotency | Hold/cancelは未回答維持 | 未知method/schemaは許可せずBlocked |
 | Live2D読込 | Rust asset protocol → WebView renderer | `load_character_pack` | selected verified pack ID、app-private root |前model維持 | static/text fallback |
-| mute/audio | Rust audio/TTS | `set_mute` / `stop_audio` | selected voice、redacted eligible text、secret handle |前設定維持 | text-only継続 |
+| mute/audio | Rust audio/TTS | `set_mute` / `stop_audio` | 設定済みprovider、selected model/voice、redacted eligible text、native-only credential |前設定維持 | text-only継続 |
 | clipboard copy | Tauri clipboard | `copy_event_summary` | redacted rendered textだけ | 非該当 | copy失敗notice、raw payload不可 |
 
 ## ウィンドウ固有動作
@@ -289,7 +289,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | last summary/timeline anchor/tab | Rust SQLite | terminal summary、scroll settle/tab移動 | route return/restart | history削除契約 | 同workspaceのnearest valid sequenceだけへ補正 |
 | repository identity/health snapshot | Rust SQLite、Git read-only再検査 | window focus、selection、Send直前 | route return/restart | project登録解除 | stale status、Repair/Recheck |
 | selected character | app-global state → app-private library pack ID | App settingsのatomic選択成功 | startup/全workspaceへ即時同期 | 選択変更後だけ旧packを削除可 | invalid legacy値はbundled Hiyori、render失敗はstatic/text fallback |
-| audio byte | memory only |再生中だけ |復元しない | playback/stop/route/quit | textは保持 |
+| audio byte | owner-only temporary file | provider response完了後から再生中だけ |復元しない | playback/stop/route/quitの全terminal path | textは保持 |
 | raw reasoning/support raw history/commit explanation transcript |保存しない | 非該当 |復元しない | task終了時 | redacted summaryまたはusage/status metadataだけ保持 |
 
 ## OS差分

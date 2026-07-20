@@ -178,8 +178,11 @@ describe("App interactive commit explanation demo", () => {
       settingsSaved = await controller.saveSettings({
         enabled: true,
         muted: false,
-        voices: { ja: "Kyoko", en: "Samantha" },
-        rate: 1,
+        provider: "openai",
+        apiKeyAction: { kind: "replace", value: "sk-test-fixture" },
+        model: "gpt-4o-mini-tts",
+        voice: "marin",
+        speed: 1,
       })
     })
     expect(settingsSaved).toBe(true)

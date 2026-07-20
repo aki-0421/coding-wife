@@ -1,23 +1,21 @@
 use serde::{Deserialize, Serialize};
 
 pub const NARRATION_SCHEMA_VERSION: u16 = 1;
+pub const NARRATION_SETTINGS_SCHEMA_VERSION: u16 = 2;
 pub const NARRATION_MAX_TEXT_SCALARS: usize = 240;
 pub const NARRATION_MAX_QUEUE_DEPTH: usize = 3;
+pub const OPENAI_TTS_MODEL: &str = "gpt-4o-mini-tts";
+pub const OPENAI_DEFAULT_VOICE: &str = "marin";
+pub const OPENAI_TTS_VOICES: &[&str] = &[
+    "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse",
+    "marin", "cedar",
+];
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NarrationLocale {
     Ja,
     En,
-}
-
-impl NarrationLocale {
-    pub(crate) fn accepts_locale(self, locale: &str) -> bool {
-        match self {
-            Self::Ja => locale == "ja_JP",
-            Self::En => locale.starts_with("en_") && locale.len() == 5,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -63,7 +61,6 @@ pub enum NarrationDisposition {
     Queued,
     Disabled,
     Muted,
-    DroppedDuplicate,
     DroppedQueueFull,
     DroppedSequence,
     Stale,
@@ -81,55 +78,62 @@ pub enum NarrationCancelReason {
     Reset,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct NarrationVoiceSelectionV1 {
-    pub ja: Option<String>,
-    pub en: Option<String>,
-}
-
-impl NarrationVoiceSelectionV1 {
-    pub(crate) fn for_locale(&self, locale: NarrationLocale) -> Option<&str> {
-        match locale {
-            NarrationLocale::Ja => self.ja.as_deref(),
-            NarrationLocale::En => self.en.as_deref(),
-        }
-    }
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum NarrationProvider {
+    #[serde(rename = "openai")]
+    OpenAi,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct NarrationSettingsV1 {
+pub struct NarrationSettingsV2 {
     pub schema_version: u16,
     pub version: u64,
     pub enabled: bool,
     pub muted: bool,
-    pub voices: NarrationVoiceSelectionV1,
-    pub rate: f64,
+    pub provider: Option<NarrationProvider>,
+    pub api_key_configured: bool,
+    pub model: String,
+    pub voice: String,
+    pub speed: f64,
 }
 
-impl Default for NarrationSettingsV1 {
+impl Default for NarrationSettingsV2 {
     fn default() -> Self {
         Self {
-            schema_version: NARRATION_SCHEMA_VERSION,
+            schema_version: NARRATION_SETTINGS_SCHEMA_VERSION,
             version: 0,
             enabled: false,
             muted: false,
-            voices: NarrationVoiceSelectionV1::default(),
-            rate: 1.0,
+            provider: None,
+            api_key_configured: false,
+            model: OPENAI_TTS_MODEL.to_owned(),
+            voice: OPENAI_DEFAULT_VOICE.to_owned(),
+            speed: 1.0,
         }
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+pub enum NarrationApiKeyActionV2 {
+    Keep,
+    Replace { value: String },
+    Clear,
+}
+
+#[derive(Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct NarrationSettingsUpdateV1 {
+pub struct NarrationSettingsUpdateV2 {
     pub schema_version: u16,
     pub expected_version: u64,
     pub enabled: bool,
     pub muted: bool,
-    pub voices: NarrationVoiceSelectionV1,
-    pub rate: f64,
+    pub provider: Option<NarrationProvider>,
+    pub api_key_action: NarrationApiKeyActionV2,
+    pub model: String,
+    pub voice: String,
+    pub speed: f64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -214,7 +218,7 @@ pub struct NarrationRuntimeSnapshotV1 {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct NarrationSettingsSnapshotV1 {
     pub schema_version: u16,
-    pub settings: NarrationSettingsV1,
+    pub settings: NarrationSettingsV2,
     pub runtime: NarrationRuntimeSnapshotV1,
     pub load_warning_code: Option<String>,
 }

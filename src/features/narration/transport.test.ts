@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   narrationCommands,
   narrationSchemaVersion,
-  type NarrationSettingsUpdateV1,
+  narrationSettingsSchemaVersion,
+  type NarrationSettingsUpdateV2,
   type NarrationSpeakRequestV1,
 } from "@/features/narration/contracts"
 import {
@@ -15,12 +16,15 @@ import {
 const settingsSnapshot = {
   schemaVersion: narrationSchemaVersion,
   settings: {
-    schemaVersion: narrationSchemaVersion,
+    schemaVersion: narrationSettingsSchemaVersion,
     version: 0,
     enabled: false,
     muted: false,
-    voices: { ja: null, en: null },
-    rate: 1,
+    provider: null,
+    apiKeyConfigured: false,
+    model: "gpt-4o-mini-tts",
+    voice: "marin",
+    speed: 1,
   },
   runtime: {
     schemaVersion: narrationSchemaVersion,
@@ -32,13 +36,16 @@ const settingsSnapshot = {
   loadWarningCode: null,
 } as const
 
-const updateRequest: NarrationSettingsUpdateV1 = {
-  schemaVersion: narrationSchemaVersion,
+const updateRequest: NarrationSettingsUpdateV2 = {
+  schemaVersion: narrationSettingsSchemaVersion,
   expectedVersion: 0,
   enabled: true,
   muted: false,
-  voices: { ja: "Kyoko", en: "Samantha" },
-  rate: 1,
+  provider: "openai",
+  apiKeyAction: { kind: "replace", value: "sk-test-fixture" },
+  model: "gpt-4o-mini-tts",
+  voice: "marin",
+  speed: 1,
 }
 
 const speakRequest: NarrationSpeakRequestV1 = {
@@ -62,12 +69,15 @@ describe("NativeNarrationGateway", () => {
         return {
           ...settingsSnapshot,
           settings: {
-            schemaVersion: narrationSchemaVersion,
+            schemaVersion: narrationSettingsSchemaVersion,
             version: 1,
             enabled: updateRequest.enabled,
             muted: updateRequest.muted,
-            voices: updateRequest.voices,
-            rate: updateRequest.rate,
+            provider: updateRequest.provider,
+            apiKeyConfigured: true,
+            model: updateRequest.model,
+            voice: updateRequest.voice,
+            speed: updateRequest.speed,
           },
         }
       }
@@ -138,7 +148,7 @@ describe("DemoNarrationGateway", () => {
   it("is quiet by default and only plays in the exact configured scope", async () => {
     const gateway = new DemoNarrationGateway()
     await expect(gateway.getSettings()).resolves.toMatchObject({
-      settings: { enabled: false, muted: false, rate: 1 },
+      settings: { enabled: false, muted: false, speed: 1 },
     })
     await expect(gateway.speak(speakRequest)).resolves.toMatchObject({
       disposition: "disabled",

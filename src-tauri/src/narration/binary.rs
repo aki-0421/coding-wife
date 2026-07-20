@@ -1,144 +1,86 @@
-use std::collections::BTreeSet;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::Command;
+use tokio::io::AsyncWriteExt;
+use tokio::process::{Child, Command};
 
 use super::error::{narration_error, NarrationResult};
 use super::process::{terminate_owned_child, NarrationProcessControl};
-use super::types::{NarrationLocale, NarrationVoiceV1};
 
-const PRODUCTION_SAY_PATH: &str = "/usr/bin/say";
-const VOICE_LIST_LIMIT: usize = 64 * 1024;
-const VOICE_LIST_MAX_LINES: usize = 512;
-const VOICE_LIST_TIMEOUT: Duration = Duration::from_secs(5);
+const PRODUCTION_CURL_PATH: &str = "/usr/bin/curl";
+const PRODUCTION_PLAYER_PATH: &str = "/usr/bin/afplay";
+const OPENAI_SPEECH_ENDPOINT: &str = "https://api.openai.com/v1/audio/speech";
+const MAX_AUDIO_BYTES: u64 = 8 * 1024 * 1024;
+
+#[derive(Clone, Debug)]
+enum NarrationAdapter {
+    Production {
+        curl_path: PathBuf,
+        player_path: PathBuf,
+        runtime_directory: PathBuf,
+    },
+    #[cfg(test)]
+    Fixture { path: PathBuf },
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct NarrationBinary {
-    path: PathBuf,
+    adapter: NarrationAdapter,
     expected_uid: u32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub(crate) struct NarrationSpeech<'a> {
-    pub locale: NarrationLocale,
+    pub api_key: &'a str,
+    pub model: &'a str,
     pub voice: &'a str,
-    pub words_per_minute: u16,
+    pub speed: f64,
     pub text: &'a str,
     pub timeout: Duration,
 }
 
 impl NarrationBinary {
-    pub fn production() -> Self {
+    pub fn production(app_data_directory: impl AsRef<Path>) -> Self {
         Self {
-            path: PathBuf::from(PRODUCTION_SAY_PATH),
+            adapter: NarrationAdapter::Production {
+                curl_path: PathBuf::from(PRODUCTION_CURL_PATH),
+                player_path: PathBuf::from(PRODUCTION_PLAYER_PATH),
+                runtime_directory: app_data_directory.as_ref().join("narration"),
+            },
             expected_uid: 0,
         }
     }
 
     #[cfg(test)]
     pub fn fixture(path: PathBuf, expected_uid: u32) -> Self {
-        Self { path, expected_uid }
+        Self {
+            adapter: NarrationAdapter::Fixture { path },
+            expected_uid,
+        }
     }
 
+    #[cfg(test)]
     pub fn verify(&self, operation: &str) -> NarrationResult<()> {
-        if self.expected_uid == 0 && self.path != Path::new(PRODUCTION_SAY_PATH) {
-            return Err(narration_error(operation, "NARRATION-BINARY-PATH", false));
-        }
-        let metadata = std::fs::symlink_metadata(&self.path)
-            .map_err(|_| narration_error(operation, "NARRATION-BINARY-UNAVAILABLE", true))?;
-        let mode = metadata.permissions().mode();
-        if !metadata.file_type().is_file()
-            || metadata.uid() != self.expected_uid
-            || mode & 0o022 != 0
-            || mode & 0o111 == 0
-        {
-            return Err(narration_error(
-                operation,
-                "NARRATION-BINARY-UNTRUSTED",
-                false,
-            ));
-        }
-        Ok(())
-    }
-
-    pub async fn list_voices(
-        &self,
-        control: Arc<NarrationProcessControl>,
-        expected_epoch: u64,
-    ) -> NarrationResult<Vec<NarrationVoiceV1>> {
-        self.verify("narration_list_voices")?;
-        let mut command = Command::new(&self.path);
-        command
-            .arg("-v")
-            .arg("?")
-            .env_clear()
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        self.verify("narration_list_voices")?;
-        let mut child = control.spawn(&mut command, expected_epoch)?;
-        let pid = child.id().ok_or_else(|| {
-            narration_error("narration_list_voices", "NARRATION-PROCESS-SPAWN", true)
-        })?;
-        let stdout = match child.stdout.take() {
-            Some(stdout) => stdout,
-            None => {
-                terminate_owned_child(&control, &mut child, pid).await;
-                return Err(narration_error(
-                    "narration_list_voices",
-                    "NARRATION-PROCESS-STDOUT",
-                    true,
-                ));
+        match &self.adapter {
+            NarrationAdapter::Production {
+                curl_path,
+                player_path,
+                ..
+            } => {
+                verify_binary(curl_path, PRODUCTION_CURL_PATH, self.expected_uid)
+                    .map_err(|error| error.with_operation(operation))?;
+                verify_binary(player_path, PRODUCTION_PLAYER_PATH, self.expected_uid)
+                    .map_err(|error| error.with_operation(operation))
             }
-        };
-        let capture = tokio::spawn(read_bounded(stdout, VOICE_LIST_LIMIT));
-        let status = match tokio::time::timeout(VOICE_LIST_TIMEOUT, child.wait()).await {
-            Ok(Ok(status)) => status,
-            Ok(Err(_)) => {
-                terminate_owned_child(&control, &mut child, pid).await;
-                capture.abort();
-                return Err(narration_error(
-                    "narration_list_voices",
-                    "NARRATION-PROCESS-WAIT",
-                    true,
-                ));
-            }
-            Err(_) => {
-                terminate_owned_child(&control, &mut child, pid).await;
-                capture.abort();
-                return Err(narration_error(
-                    "narration_list_voices",
-                    "NARRATION-PROCESS-TIMEOUT",
-                    true,
-                ));
-            }
-        };
-        control.clear(pid);
-        if !control.is_current(expected_epoch) {
-            capture.abort();
-            return Err(narration_error(
-                "narration_list_voices",
-                "NARRATION-CANCELED",
-                true,
-            ));
+            #[cfg(test)]
+            NarrationAdapter::Fixture { path } => verify_binary(path, path, self.expected_uid)
+                .map_err(|error| error.with_operation(operation)),
         }
-        if !status.success() {
-            capture.abort();
-            return Err(narration_error(
-                "narration_list_voices",
-                "NARRATION-VOICE-LIST-EXIT",
-                true,
-            ));
-        }
-        let output = capture.await.map_err(|_| {
-            narration_error("narration_list_voices", "NARRATION-VOICE-LIST-READ", true)
-        })??;
-        parse_voice_list(&output)
     }
 
     pub async fn speak(
@@ -147,41 +89,153 @@ impl NarrationBinary {
         expected_epoch: u64,
         speech: NarrationSpeech<'_>,
     ) -> NarrationResult<()> {
-        let voices = self.list_voices(control.clone(), expected_epoch).await?;
-        if !exact_voice_available(&voices, speech.locale, speech.voice) {
-            return Err(narration_error(
-                "narration_speak",
-                "NARRATION-VOICE-UNAVAILABLE",
-                true,
-            ));
+        match &self.adapter {
+            NarrationAdapter::Production {
+                curl_path,
+                player_path,
+                runtime_directory,
+            } => {
+                self.speak_openai(
+                    curl_path,
+                    player_path,
+                    runtime_directory,
+                    control,
+                    expected_epoch,
+                    speech,
+                )
+                .await
+            }
+            #[cfg(test)]
+            NarrationAdapter::Fixture { path } => {
+                self.speak_fixture(path, control, expected_epoch, speech)
+                    .await
+            }
         }
-        self.verify("narration_speak")?;
-        let mut command = Command::new(&self.path);
+    }
+
+    async fn speak_openai(
+        &self,
+        curl_path: &Path,
+        player_path: &Path,
+        runtime_directory: &Path,
+        control: Arc<NarrationProcessControl>,
+        expected_epoch: u64,
+        speech: NarrationSpeech<'_>,
+    ) -> NarrationResult<()> {
+        verify_binary(curl_path, PRODUCTION_CURL_PATH, self.expected_uid)?;
+        verify_binary(player_path, PRODUCTION_PLAYER_PATH, self.expected_uid)?;
+        let started = Instant::now();
+        let files = SpeechFiles::create(runtime_directory, &speech)?;
+        let mut command = Command::new(curl_path);
         command
-            .arg("-v")
-            .arg(speech.voice)
-            .arg("-r")
-            .arg(speech.words_per_minute.to_string())
+            .arg("-q")
+            .arg("--fail")
+            .arg("--silent")
+            .arg("--show-error")
+            .arg("--connect-timeout")
+            .arg("10")
+            .arg("--max-time")
+            .arg("30")
+            .arg("--max-filesize")
+            .arg(MAX_AUDIO_BYTES.to_string())
+            .arg("--request")
+            .arg("POST")
+            .arg("--header")
+            .arg("Content-Type: application/json")
+            .arg("--config")
+            .arg("-")
+            .arg("--data-binary")
+            .arg(format!("@{}", files.request.display()))
+            .arg("--output")
+            .arg(&files.audio)
+            .arg(OPENAI_SPEECH_ENDPOINT)
             .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        self.verify("narration_speak")?;
+        verify_binary(curl_path, PRODUCTION_CURL_PATH, self.expected_uid)?;
         let mut child = control.spawn(&mut command, expected_epoch)?;
         let pid = child
             .id()
             .ok_or_else(|| narration_error("narration_speak", "NARRATION-PROCESS-SPAWN", true))?;
-        let mut stdin = match child.stdin.take() {
-            Some(stdin) => stdin,
-            None => {
-                terminate_owned_child(&control, &mut child, pid).await;
-                return Err(narration_error(
-                    "narration_speak",
-                    "NARRATION-PROCESS-STDIN",
-                    true,
-                ));
-            }
-        };
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| narration_error("narration_speak", "NARRATION-PROCESS-STDIN", true))?;
+        let authorization = format!("header = \"Authorization: Bearer {}\"\n", speech.api_key);
+        if stdin.write_all(authorization.as_bytes()).await.is_err()
+            || stdin.shutdown().await.is_err()
+        {
+            terminate_owned_child(&control, &mut child, pid).await;
+            return Err(narration_error(
+                "narration_speak",
+                "NARRATION-PROCESS-STDIN",
+                true,
+            ));
+        }
+        drop(stdin);
+        wait_for_success(&control, &mut child, pid, expected_epoch, speech.timeout).await?;
+        verify_audio_file(&files.audio)?;
+        if !control.is_current(expected_epoch) {
+            return Err(narration_error(
+                "narration_speak",
+                "NARRATION-CANCELED",
+                true,
+            ));
+        }
+
+        let mut player = Command::new(player_path);
+        player
+            .arg(&files.audio)
+            .env_clear()
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        verify_binary(player_path, PRODUCTION_PLAYER_PATH, self.expected_uid)?;
+        let mut child = control.spawn(&mut player, expected_epoch)?;
+        let pid = child
+            .id()
+            .ok_or_else(|| narration_error("narration_speak", "NARRATION-PROCESS-SPAWN", true))?;
+        let remaining = speech.timeout.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            terminate_owned_child(&control, &mut child, pid).await;
+            return Err(narration_error(
+                "narration_speak",
+                "NARRATION-PROCESS-TIMEOUT",
+                true,
+            ));
+        }
+        wait_for_success(&control, &mut child, pid, expected_epoch, remaining).await
+    }
+
+    #[cfg(test)]
+    async fn speak_fixture(
+        &self,
+        path: &Path,
+        control: Arc<NarrationProcessControl>,
+        expected_epoch: u64,
+        speech: NarrationSpeech<'_>,
+    ) -> NarrationResult<()> {
+        verify_binary(path, path, self.expected_uid)?;
+        let mut command = Command::new(path);
+        command
+            .arg("-v")
+            .arg(speech.voice)
+            .arg("-r")
+            .arg(speech.speed.to_string())
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        verify_binary(path, path, self.expected_uid)?;
+        let mut child = control.spawn(&mut command, expected_epoch)?;
+        let pid = child
+            .id()
+            .ok_or_else(|| narration_error("narration_speak", "NARRATION-PROCESS-SPAWN", true))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| narration_error("narration_speak", "NARRATION-PROCESS-STDIN", true))?;
         if stdin.write_all(speech.text.as_bytes()).await.is_err() || stdin.shutdown().await.is_err()
         {
             terminate_owned_child(&control, &mut child, pid).await;
@@ -192,161 +246,168 @@ impl NarrationBinary {
             ));
         }
         drop(stdin);
-        let status = match tokio::time::timeout(speech.timeout, child.wait()).await {
-            Ok(Ok(status)) => status,
-            Ok(Err(_)) => {
-                terminate_owned_child(&control, &mut child, pid).await;
-                return Err(narration_error(
-                    "narration_speak",
-                    "NARRATION-PROCESS-WAIT",
-                    true,
-                ));
-            }
-            Err(_) => {
-                terminate_owned_child(&control, &mut child, pid).await;
-                return Err(narration_error(
-                    "narration_speak",
-                    "NARRATION-PROCESS-TIMEOUT",
-                    true,
-                ));
-            }
-        };
-        control.clear(pid);
-        if !control.is_current(expected_epoch) {
-            return Err(narration_error(
-                "narration_speak",
-                "NARRATION-CANCELED",
-                true,
-            ));
-        }
-        if !status.success() {
-            return Err(narration_error(
-                "narration_speak",
-                "NARRATION-PROCESS-EXIT",
-                true,
-            ));
-        }
-        Ok(())
+        wait_for_success(&control, &mut child, pid, expected_epoch, speech.timeout).await
     }
 }
 
-async fn read_bounded<R>(mut reader: R, limit: usize) -> NarrationResult<Vec<u8>>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut output = Vec::with_capacity(limit.min(16 * 1024));
-    let mut buffer = [0_u8; 4096];
-    loop {
-        let count = reader.read(&mut buffer).await.map_err(|_| {
-            narration_error("narration_list_voices", "NARRATION-VOICE-LIST-READ", true)
-        })?;
-        if count == 0 {
-            return Ok(output);
-        }
-        if output.len().saturating_add(count) > limit {
+async fn wait_for_success(
+    control: &NarrationProcessControl,
+    child: &mut Child,
+    pid: u32,
+    expected_epoch: u64,
+    timeout: Duration,
+) -> NarrationResult<()> {
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(_)) => {
+            terminate_owned_child(control, child, pid).await;
             return Err(narration_error(
-                "narration_list_voices",
-                "NARRATION-VOICE-LIST-SIZE",
-                false,
+                "narration_speak",
+                "NARRATION-PROCESS-WAIT",
+                true,
             ));
         }
-        output.extend_from_slice(&buffer[..count]);
-    }
-}
-
-fn parse_voice_list(bytes: &[u8]) -> NarrationResult<Vec<NarrationVoiceV1>> {
-    let output = std::str::from_utf8(bytes).map_err(|_| {
-        narration_error("narration_list_voices", "NARRATION-VOICE-LIST-UTF8", false)
-    })?;
-    if output.lines().count() > VOICE_LIST_MAX_LINES {
-        return Err(narration_error(
-            "narration_list_voices",
-            "NARRATION-VOICE-LIST-SIZE",
-            false,
-        ));
-    }
-    let mut seen = BTreeSet::new();
-    let mut voices = Vec::new();
-    for line in output.lines() {
-        let columns = line
-            .split_once('#')
-            .map_or(line, |(columns, _)| columns)
-            .split_whitespace()
-            .collect::<Vec<_>>();
-        let Some(locale_index) = columns.iter().position(|column| {
-            *column == "ja_JP"
-                || (column.starts_with("en_")
-                    && column.len() == 5
-                    && column[3..].bytes().all(|byte| byte.is_ascii_uppercase()))
-        }) else {
-            continue;
-        };
-        if locale_index == 0 {
-            continue;
-        }
-        let name = columns[..locale_index].join(" ");
-        let locale = columns[locale_index].to_owned();
-        if name.is_empty()
-            || name.chars().count() > 128
-            || name.starts_with('-')
-            || name.chars().any(char::is_control)
-        {
+        Err(_) => {
+            terminate_owned_child(control, child, pid).await;
             return Err(narration_error(
-                "narration_list_voices",
-                "NARRATION-VOICE-LIST-INVALID",
-                false,
+                "narration_speak",
+                "NARRATION-PROCESS-TIMEOUT",
+                true,
             ));
         }
-        if seen.insert((locale.clone(), name.clone())) {
-            voices.push(NarrationVoiceV1 { name, locale });
-        }
-    }
-    voices.sort_by(|left, right| {
-        left.locale
-            .cmp(&right.locale)
-            .then_with(|| left.name.cmp(&right.name))
-    });
-    if voices.is_empty() {
+    };
+    control.clear(pid);
+    if !control.is_current(expected_epoch) {
         return Err(narration_error(
-            "narration_list_voices",
-            "NARRATION-VOICE-UNAVAILABLE",
+            "narration_speak",
+            "NARRATION-CANCELED",
             true,
         ));
     }
-    Ok(voices)
-}
-
-pub(crate) fn exact_voice_available(
-    voices: &[NarrationVoiceV1],
-    locale: NarrationLocale,
-    selected: &str,
-) -> bool {
-    voices
-        .iter()
-        .any(|voice| voice.name == selected && locale.accepts_locale(&voice.locale))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_unicode_and_space_bearing_exact_voice_names() {
-        let voices = parse_voice_list(
-            "Kyoko               ja_JP    # sample\nEddy (日本語（日本）)    ja_JP # sample\nSamantha en_US # sample\n"
-                .as_bytes(),
-        )
-        .expect("voice list");
-        assert_eq!(voices.len(), 3);
-        assert!(exact_voice_available(
-            &voices,
-            NarrationLocale::Ja,
-            "Eddy (日本語（日本）)"
-        ));
-        assert!(!exact_voice_available(
-            &voices,
-            NarrationLocale::En,
-            "Eddy (日本語（日本）)"
+    if !status.success() {
+        return Err(narration_error(
+            "narration_speak",
+            "NARRATION-PROCESS-EXIT",
+            true,
         ));
     }
+    Ok(())
+}
+
+fn verify_binary(
+    path: &Path,
+    expected_path: impl AsRef<Path>,
+    expected_uid: u32,
+) -> NarrationResult<()> {
+    if path != expected_path.as_ref() {
+        return Err(narration_error(
+            "narration_speak",
+            "NARRATION-BINARY-PATH",
+            false,
+        ));
+    }
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| narration_error("narration_speak", "NARRATION-BINARY-UNAVAILABLE", true))?;
+    let mode = metadata.permissions().mode();
+    if !metadata.file_type().is_file()
+        || metadata.uid() != expected_uid
+        || mode & 0o022 != 0
+        || mode & 0o111 == 0
+    {
+        return Err(narration_error(
+            "narration_speak",
+            "NARRATION-BINARY-UNTRUSTED",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct SpeechFiles {
+    request: PathBuf,
+    audio: PathBuf,
+}
+
+impl SpeechFiles {
+    fn create(runtime_directory: &Path, speech: &NarrationSpeech<'_>) -> NarrationResult<Self> {
+        let request = runtime_directory.join(format!("request-{}.json", uuid::Uuid::new_v4()));
+        let audio = runtime_directory.join(format!("speech-{}.wav", uuid::Uuid::new_v4()));
+        let files = Self { request, audio };
+        (|| {
+            let mut request_file = private_new_file(&files.request)?;
+            let _audio_file = private_new_file(&files.audio)?;
+            let body = serde_json::to_vec(&serde_json::json!({
+                "model": speech.model,
+                "input": speech.text,
+                "voice": speech.voice,
+                "speed": speech.speed,
+                "response_format": "wav",
+            }))
+            .map_err(|_| {
+                narration_error("narration_speak", "NARRATION-REQUEST-SERIALIZE", false)
+            })?;
+            request_file
+                .write_all(&body)
+                .map_err(|_| narration_error("narration_speak", "NARRATION-REQUEST-WRITE", true))?;
+            request_file
+                .sync_all()
+                .map_err(|_| narration_error("narration_speak", "NARRATION-REQUEST-WRITE", true))?;
+            Ok(())
+        })()?;
+        Ok(files)
+    }
+}
+
+impl Drop for SpeechFiles {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.request);
+        let _ = fs::remove_file(&self.audio);
+    }
+}
+
+fn private_new_file(path: &Path) -> NarrationResult<File> {
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true).mode(0o600);
+    let file = options
+        .open(path)
+        .map_err(|_| narration_error("narration_speak", "NARRATION-TEMP-FILE", true))?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|_| narration_error("narration_speak", "NARRATION-TEMP-FILE", true))?;
+    Ok(file)
+}
+
+fn verify_audio_file(path: &Path) -> NarrationResult<()> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| narration_error("narration_speak", "NARRATION-AUDIO-INVALID", true))?;
+    if !metadata.file_type().is_file()
+        || metadata.uid() != effective_uid()
+        || metadata.mode() & 0o077 != 0
+        || metadata.len() > MAX_AUDIO_BYTES
+        || metadata.len() < 12
+    {
+        return Err(narration_error(
+            "narration_speak",
+            "NARRATION-AUDIO-INVALID",
+            false,
+        ));
+    }
+    let mut file = File::open(path)
+        .map_err(|_| narration_error("narration_speak", "NARRATION-AUDIO-INVALID", true))?;
+    let mut header = [0_u8; 12];
+    file.read_exact(&mut header)
+        .map_err(|_| narration_error("narration_speak", "NARRATION-AUDIO-INVALID", false))?;
+    if &header[..4] != b"RIFF" || &header[8..] != b"WAVE" {
+        return Err(narration_error(
+            "narration_speak",
+            "NARRATION-AUDIO-INVALID",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn effective_uid() -> u32 {
+    // SAFETY: geteuid has no arguments and returns the current process identity.
+    unsafe { libc::geteuid() }
 }

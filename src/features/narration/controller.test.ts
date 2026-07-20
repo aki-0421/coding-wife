@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   narrationSchemaVersion,
+  narrationSettingsSchemaVersion,
   sourceKeyFromCommitNarrationEvent,
   type CommitNarrationConsumerEventV1,
   type CommitNarrationSourceKey,
@@ -10,7 +11,7 @@ import {
   type NarrationRuntimeSnapshotV1,
   type NarrationScopeRequestV1,
   type NarrationSettingsSnapshotV1,
-  type NarrationSettingsUpdateV1,
+  type NarrationSettingsUpdateV2,
   type NarrationSpeakRequestV1,
   type NarrationSpeakResponseV1,
   type NarrationVoiceListV1,
@@ -60,12 +61,15 @@ function initialSnapshot(enabled = false): NarrationSettingsSnapshotV1 {
   return {
     schemaVersion: narrationSchemaVersion,
     settings: {
-      schemaVersion: narrationSchemaVersion,
+      schemaVersion: narrationSettingsSchemaVersion,
       version: 0,
       enabled,
       muted: false,
-      voices: { ja: "Kyoko", en: "Samantha" },
-      rate: 1,
+      provider: enabled ? "openai" : null,
+      apiKeyConfigured: enabled,
+      model: "gpt-4o-mini-tts",
+      voice: "marin",
+      speed: 1,
     },
     runtime: {
       schemaVersion: narrationSchemaVersion,
@@ -110,24 +114,32 @@ class FakeNarrationGateway implements NarrationGateway {
     return Promise.resolve({
       schemaVersion: narrationSchemaVersion,
       voices: [
-        { name: "Kyoko", locale: "ja_JP" },
-        { name: "Samantha", locale: "en_US" },
+        { name: "marin", locale: "ja_JP" },
+        { name: "cedar", locale: "en_US" },
       ],
     })
   }
 
   public updateSettings(
-    request: NarrationSettingsUpdateV1,
+    request: NarrationSettingsUpdateV2,
   ): Promise<NarrationSettingsSnapshotV1> {
     this.#snapshot = {
       ...this.#snapshot,
       settings: {
-        schemaVersion: narrationSchemaVersion,
+        schemaVersion: narrationSettingsSchemaVersion,
         version: request.expectedVersion + 1,
         enabled: request.enabled,
         muted: request.muted,
-        voices: request.voices,
-        rate: request.rate,
+        provider: request.provider,
+        apiKeyConfigured:
+          request.apiKeyAction.kind === "clear"
+            ? false
+            : request.apiKeyAction.kind === "replace"
+              ? true
+              : this.#snapshot.settings.apiKeyConfigured,
+        model: request.model,
+        voice: request.voice,
+        speed: request.speed,
       },
     }
     return this.getSettings()
@@ -707,7 +719,7 @@ describe("NarrationController", () => {
     }
   })
 
-  it("cancels test playback at the dedicated five-second watchdog", async () => {
+  it("cancels test playback at the dedicated fifty-second watchdog", async () => {
     vi.useFakeTimers()
     try {
       const gateway = new FakeNarrationGateway(true)
@@ -721,7 +733,7 @@ describe("NarrationController", () => {
       const playback = controller.playTest(
         { workspaceId: "workspace-1", generation: 3 },
         "ja",
-        "5秒で停止します。",
+        "50秒で停止します。",
       )
       await vi.advanceTimersByTimeAsync(0)
       expect(controller.getSnapshot().test.status).toBe("preparing")
@@ -733,7 +745,7 @@ describe("NarrationController", () => {
 
       await vi.advanceTimersByTimeAsync(100)
       expect(gateway.speech).toHaveLength(1)
-      await vi.advanceTimersByTimeAsync(4_999)
+      await vi.advanceTimersByTimeAsync(49_999)
       expect(gateway.cancelReasons).not.toContain("explicit_cancel")
       await vi.advanceTimersByTimeAsync(1)
 
@@ -756,8 +768,11 @@ describe("NarrationController", () => {
       controller.saveSettings({
         enabled: true,
         muted: false,
-        voices: { ja: null, en: null },
-        rate: 1.12,
+        provider: null,
+        apiKeyAction: { kind: "keep" },
+        model: "gpt-4o-mini-tts",
+        voice: "marin",
+        speed: 1.12,
       }),
     ).resolves.toBe(false)
     expect(updateSpy).not.toHaveBeenCalled()

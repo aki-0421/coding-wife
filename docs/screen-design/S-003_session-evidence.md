@@ -23,7 +23,7 @@ status: "Approved"
 
 利用者が、main Codexの作業を「完了したという主張」だけで判断せず、commit単位のmetadata、変更量、sanitized diff、verification、decision、riskから確認できるようにする。commit producerは`coding-wife-commit-work`を毎turn受け取るmain Codexであり、本画面とnative Git backendはGit状態を変更しない。
 
-専門的なcommitは、App ServerのGit commit command成功とread-only SHA検証をapp側interceptorが相関した直後に、app-owned explanation controllerがbackground説明生成へenqueueする。background生成だけではpresentation intent、caption、live region、TTSを一切開始しない。main sessionのsubagent、turn、event、commandとしても起動しない。起動前から存在したcommitなど本当に`not_generated`の選択には「詳しく教えて」を表示し、app controllerへ`user_request`と同じselectionに束縛したpresentation intentを送る。生成済み説明は同じ1操作でcacheからpresentationし、失敗時だけ`user_retry`する。path/raw diff/secretを除去した`CommitEvidenceV1`だけをisolated supportへ送り、`coding-wife-explain-commit`から返る日本語/英語の説明は明示intentがcurrentの時だけcharacter captionへstreamする。TTSは任意で、visible captionと同じ文だけを検証済みmacOS local `/usr/bin/say` adapterで読む。外部TTS provider、API key、network送信は使用しない。
+専門的なcommitは、App ServerのGit commit command成功とread-only SHA検証をapp側interceptorが相関した直後に、app-owned explanation controllerがbackground説明生成へenqueueする。background生成だけではpresentation intent、caption、live region、TTSを一切開始しない。main sessionのsubagent、turn、event、commandとしても起動しない。起動前から存在したcommitなど本当に`not_generated`の選択には「詳しく教えて」を表示し、app controllerへ`user_request`と同じselectionに束縛したpresentation intentを送る。生成済み説明は同じ1操作でcacheからpresentationし、失敗時だけ`user_retry`する。path/raw diff/secretを除去した`CommitEvidenceV1`だけをisolated supportへ送り、`coding-wife-explain-commit`から返る日本語/英語の説明は明示intentがcurrentの時だけcharacter captionへstreamする。TTSは任意で、visible captionと同じ文だけをnative OpenAI Speech adapterへ送る。API keyはowner-only native設定に保持し、WebViewへ返さず、生成audioは再生後に削除する。
 
 ## スコープ
 
@@ -207,7 +207,7 @@ background statusは`aria-live`へ流さない。明示intent後の通常chunk/c
 6. 注意 / Cautions。
 7. 次の見方 / What to inspect next。
 
-TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでlocal adapterのstdinへ渡す。TTS off/mute/binary・voice・audio device unavailableでもcaptionを省略しない。selection/locale/workspace変更、main Stop、`Close explanation`、stale/schema invalid後のdeltaはcaption/TTS queueへ適用せず、active process groupも100ms以内に停止するがbackground job/cacheは維持する。`Cancel explanation generation`だけはjobをterminal化し、同requestの後着delta/cache replayも破棄する。
+TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceで固定OpenAI Speech endpointへ送る。TTS off/mute/API key・provider・network・player・audio device unavailableでもcaptionを省略しない。selection/locale/workspace変更、main Stop、`Close explanation`、stale/schema invalid後のdeltaはcaption/TTS queueへ適用せず、active process groupも100ms以内に停止するがbackground job/cacheは維持する。`Cancel explanation generation`だけはjobをterminal化し、同requestの後着delta/cache replayも破棄する。
 
 説明本文はHISTへ保存しない。status、skill ID/version/digest、opaque commit/request ID、locale、usage、latency、error codeだけを保存する。
 
