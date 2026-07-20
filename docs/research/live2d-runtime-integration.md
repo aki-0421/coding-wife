@@ -29,7 +29,7 @@ read_when:
 
 ## 調査方法と一次資料
 
-公開情報は 2026-07-18 に `agent-browser` で公式一次資料を確認した。取得した zip と Core はローカルでハッシュを取り、指定モデルは公式 Core を実際に読み込ませて互換性を検証した。
+公開情報は2026-07-18に公式一次資料を確認した。取得したzipとCoreはローカルでハッシュを取り、指定モデルは公式Coreを実際に読み込ませて互換性を検証した。
 
 | 公式資料 | 確認した内容 |
 | --- | --- |
@@ -403,7 +403,7 @@ preview renderer は本画面と分離する。第一候補は capabilities を�
 - release build、代表 Mac、cold bundled model load の first meaningful Live2D frame は p95 3 秒未満。
 - idle 30 秒の median は 30 fps 以上。100 ms を超える main-thread long task を作らず、coding input latency p95 は 100 ms 未満。
 - model load、texture decode、shader fetch、context restore の時間と error code を秘密なしで diagnostics に出す。
-- `agent-browser` で S-002 の reference screenshot と実画面を 1470 x 836、1280、960 で比較し、continuous desk、透明 canvas、bottom-contain、mute control、text fallback を目視確認する。
+- WebdriverIOでS-002のreference screenshotと実Tauri画面を1470 x 836、1280 x 800、960 x 640で比較し、continuous desk、透明canvas、bottom-contain、mute control、text fallbackを目視確認する。
 - keyboard、screen reader、reduced motion、character hidden の各経路で coding、approval、interrupt、review の操作性が変わらない。
 
 ## 実装順序と完了ゲート
@@ -414,7 +414,7 @@ preview renderer は本画面と分離する。第一候補は capabilities を�
 4. state generation、Idle scheduler、reduced/hidden、context fallback を追加する。
 5. 設定画面へ picker、Rust quarantine validator、isolated preview、atomic publish を追加する。
 6. motion gallery を目視レビューし、意味が確認できた cue だけを versioned mapping に追加する。
-7. adversarial、performance、accessibility、`agent-browser` visual acceptance を通す。
+7. adversarial、performance、accessibility、WebdriverIO desktop visual acceptanceを通す。
 
 最初の「実ランタイム」完了ゲートは、同梱 Hiyori が transparent canvas へ描画され、Idle が動き、状態文言と同期し、resize/reduced/hidden/context loss を安全に処理できること。任意モデル機能の完了ゲートは、失敗時に現行モデルを一切変えず、絶対パスを WebView に渡さず、quarantine から preview と atomic publish を通った pack だけを再起動後も選択できることである。
 

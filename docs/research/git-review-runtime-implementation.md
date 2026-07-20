@@ -1,7 +1,7 @@
 ---
 title: Git review runtime 実装・検証ガイド
 description: main Codex が作成した commit を read-only で観測し、commit evidence、lazy diff、app-owned 説明導線を安全に変更・検証するためのガイド。
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - Git observer、work unit correlation、commit evidence を実装または変更するとき。
   - Commit tab の list、detail、filter、lazy diff、4 gate を接続または検証するとき。
@@ -108,7 +108,7 @@ pnpm exec biome lint src/features/git-review src/lib/contracts/git-review.ts --e
 agent-docs lint
 ```
 
-Rust test は `/tmp` の使い捨て repository を使い、実 workspace の index/worktree/ref fingerprint が変化しないことを検証する。UI変更後は `agent-browser` で desktop と800px幅を操作し、list/detail、4 gate、file 選択前後の lazy diff、filter、Arrow key、drawer、mutation action非露出、console errorを確認する。
+Rust testは`/tmp`の使い捨てrepositoryを使い、実workspaceのindex/worktree/ref fingerprintが変化しないことを検証する。UI変更後はWebdriverIOで実Tauri windowを1470×836、1280×800、960×640にして操作し、list/detail、4 gate、file選択前後のlazy diff、filter、Arrow key、drawer、mutation action非露出、frontend/backend errorを確認する。
 
 ## 安全に変更するための注意
 

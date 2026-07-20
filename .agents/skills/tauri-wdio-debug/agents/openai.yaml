@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tauri Desktop Debug"
+  short_description: "Debug the real Tauri app with embedded WebDriver"
+  default_prompt: "Use $tauri-wdio-debug to reproduce and diagnose this Coding Wife desktop behavior."

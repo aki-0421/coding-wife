@@ -129,7 +129,7 @@ Contextの編集・保存は既存のnative snapshotを正本とし、turn開始
 8. Sol、low、maxのいずれかをmodel/list fixtureから欠落させ、Sendと対応表示がfail closedになることを確認する。
 9. attachmentのroot外、symlink、directory、executable、permission、size/count/total、stale handleをRust integrationで拒否し、有効なimage/fileだけがapp-private snapshotのlocalImage/mentionになることを確認する。検証後にleafとancestorを差し替えるfake App Server raceでexact validated bytesだけを観測し、accepted/failed/terminal/expiry cleanupと0700/0600を確認する。
 10. main turn textの80,000/80,001 Unicode scalar、multibyte scalar、NUL、empty-without-attachmentをnative境界で検証し、public draft/instructionの32,000 scalarとsupportの64KiB byte上限が変わらないことを確認する。
-11. agent-browserで1470/960/480 CSS px、200% zoom、ja/en、keyboard、reduced motion、scroll lock、decision回答、Stopを実操作する。
+11. WebdriverIOで実Tauri windowを1470×836、1280×800、960×640にして、200% zoom、ja/en、keyboard、reduced motion、scroll lock、decision回答、Stopを実操作する。
 
 実Codexを使う通常gateは既存の読み取り専用diagnostic smokeだけに限定する。user repositoryでthread、turn、review、attachmentを作らず、実行系E2Eはfake App Serverと`/tmp` repositoryだけで行う。
 
@@ -203,7 +203,7 @@ Viteのdevelopment buildだけは、`?demoAppServer=1`を付けると`DemoCodexT
 
 Addはabsolute pathを持たない固定opaque attachment handleを返す。demoのsemantic eventもproductionと同じHIST validatorを通るため、private path、未知change kind、invalid approval contextを追加するとcompositionがfail closedになる。
 
-2026-07-18のagent-browser gateでは1470×956、960×900、480×900 CSS pxで横overflow 0、ja/en即時切替、Ctrl+Tab、Shift+Ctrl+Tab、⌘K compact filter、⌘↵ send/answer、OS reduced motion、stream→tool/file→Other/Hold→approval、Approve/Reject、unknown blocked、Stop、crash後1秒間のevent count不変を確認した。検証画像は`/tmp`だけに保存し、repositoryへ含めない。
+2026-07-18の旧WebView gateでは1470×956、960×900、480×900 CSS pxで横overflow 0、ja/en即時切替、Ctrl+Tab、Shift+Ctrl+Tab、⌘K compact filter、⌘↵ send/answer、OS reduced motion、stream→tool/file→Other/Hold→approval、Approve/Reject、unknown blocked、Stop、crash後1秒間のevent count不変を確認した。この記録は480pxを含むbrowser-onlyの過去証跡であり、実Tauri desktop QAの代替にはしない。検証画像は`/tmp`だけに保存し、repositoryへ含めない。
 
 同日のCommit説明gateでは、通常クリックでCommit tabを維持したままcaptionを共通overlayへ表示し、main history件数が1から増えないことを確認した。1470×836では3 chunkが全てviewport内かつfrontmostで、960×700のoverlayは右端942・下端682、480×800では右端468・下端788に収まり、狭幅でも全3 chunkが完全表示かつfrontmostだった。Audio設定を保存した再読上げは`speechStatus=queued`へ進み、commit選択、locale変更、ChatのStopはいずれも表示中captionを閉じた。元commitのprepared cacheは再選択後のExplainで待ち時間なく新しいselection versionへ再bindされ、再提示できた。検証画像は`/tmp`だけに保存し、repositoryへ含めない。
 

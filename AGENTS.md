@@ -6,7 +6,7 @@
 提出期限は **2026年7月22日 09:00 JST**。
 
 ハッカソン要件と提出準備は [docs/hackathon/](docs/hackathon/) から確認する。
-公開Web情報を再確認するときは `agent-browser` を使い、Official Rulesを最優先する。
+公開Web情報を再確認するときは、利用可能なWeb検索またはHTTP取得手段で公式一次資料を確認し、Official Rulesを最優先する。
 Web情報を更新した場合は、対象文書の `updated` と `last_verified` も更新する。
 ハッカソン成果物の実装証跡を残すため、PR本文にはターゲットブランチとの差分を基準として、このブランチで行った変更、その意図、検証結果を正確かつ漏れなく記載する。
 
@@ -56,6 +56,6 @@ Web情報を更新した場合は、対象文書の `updated` と `last_verified
 
 ## 作業成果物
 
-UIと挙動の検証には `agent-browser` を使う。
-`agent-browser` で作成した検証スクリーンショットは `/tmp`、またはリポジトリ内の ignore 済み `tmp/` ディレクトリに保存し、コミットに含めない。
-`agent-browser` を使用した場合は、検証の成功・失敗にかかわらず、最終報告の前にこの作業で開始または使用した各セッションを `agent-browser --session <session-name> close` で明示的に終了する。ほかの作業や利用者が所有するセッションを一括終了してはならない。
+UIと挙動の検証には `.agents/skills/tauri-wdio-debug/` の手順を使い、WebdriverIOからQA専用debug Tauri binaryを起動して実WKWebView、IPC、Rust backendを操作する。
+WebdriverIOで作成したlogとスクリーンショットは `/tmp`、またはリポジトリ内のignore済み `tmp/desktop-qa/` ディレクトリに保存し、コミットに含めない。
+WebdriverIOに起動・終了を管理させる。中断でprocessが残った場合は、この作業で起動したQA binaryとPIDを特定して終了し、ほかの作業や利用者のprocessを一括終了してはならない。

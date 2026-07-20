@@ -26,6 +26,7 @@ read_when:
 | `pnpm lint` | Live2D固定入力とBiome linterを検査する |
 | `pnpm typecheck` | Live2Dを準備し、application TypeScriptを検査する |
 | `pnpm test` | PR向けのsupply-chain、repository、frontend testを実行する |
+| `pnpm test:desktop` | QA専用debug binaryをbuildし、WebdriverIOでmacOSの実Tauri appを操作する |
 | `pnpm test:watch` | Live2Dを準備し、Vitest watch modeを起動する |
 | `pnpm test:release` | macOS release実装の重いintegration testを実行する |
 | `pnpm check:diff` | repository差分のhygieneを検査する |
@@ -38,7 +39,7 @@ read_when:
 
 - `predev`、`prebuild`、`postbuild`、`prelint`、`pretest*`は定義しない。必要な準備と検査は、対応する公開コマンド本体へ明示する。
 - CIは公開コマンドを使う。同じPR向けtest集合を別名の`test:pr`として重複公開しない。
-- `@tauri-apps/cli`の任意のsubcommandが必要なときは`pnpm exec tauri ...`を使う。日常起動とrelease候補buildだけは`tauri:dev`と`tauri:build`を安定入口として公開する。
+- `@tauri-apps/cli`の任意のsubcommandが必要なときは`pnpm exec tauri ...`を使う。日常起動、desktop QA、release候補buildだけは`tauri:dev`、`test:desktop`、`tauri:build`を安定入口として公開する。
 - `scripts/live2d/`、`scripts/licenses/`、`scripts/quality/`、`scripts/release/`、`scripts/skills/`配下の個別処理は、公開ワークフローの内部から実体fileを直接呼ぶ。保守担当が個別診断するときも実体fileを使い、package scriptsへ一処理一aliasを追加しない。
 - macOS releaseのapp、DMG、verify単体診断は`scripts/release/`配下のshell scriptを直接使う。審査用成果物の正規入口は`pnpm release:macos`だけとする。
 - scriptを追加する場合は、既存の公開コマンドへoptionを追加できず、人が独立して選ぶ反復可能なworkflowであり、CIまたは文書から安定名を参照する必要があることを説明できなければならない。
@@ -46,7 +47,7 @@ read_when:
 
 ## 受け入れ条件
 
-- `package.json`のscriptsは上記16個だけである。
+- `package.json`のscriptsは上記17個だけである。
 - `pnpm tauri:dev`だけでVite serverとnative appの起動が始まり、別terminalで`pnpm dev`を先に実行する必要がない。
 - `pnpm test`はrelease integrationを含まず、CIのPR向けtest集合と一致する。
 - `pnpm quality:check`はlicense test、clean-checkout再現、release integration、Rust、documentation、Tauri build、diff hygieneを引き続き含む。

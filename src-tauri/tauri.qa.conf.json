@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Coding Wife QA",
+  "identifier": "app.codingwife.desktop.qa",
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "main-runtime",
+        {
+          "identifier": "desktop-qa",
+          "description": "Debug-only WebdriverIO access for the main QA window.",
+          "windows": ["main"],
+          "permissions": ["wdio:default", "wdio-webdriver:default"]
+        }
+      ]
+    }
+  }
+}

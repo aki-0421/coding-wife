@@ -1,11 +1,11 @@
 ---
 title: OpenAI Build Week 2026 — Hackathon Guide
 description: "OpenAI Build Week 2026の要件、期限、提出準備資料への入口をまとめるハッカソンガイド。"
-updated: 2026-07-18
+updated: 2026-07-20
 read_when:
   - "OpenAI Build Weekの要件や提出準備の全体像を確認するとき。"
   - "ハッカソン関連文書の参照先を選ぶとき。"
-  - "agent-browserで公式情報を再確認するとき。"
+  - "Web検索またはHTTP取得で公式情報を再確認するとき。"
 last_verified: 2026-07-18 JST
 source_of_truth: https://openai.devpost.com/rules
 ---
@@ -17,9 +17,9 @@ source_of_truth: https://openai.devpost.com/rules
 ## 管理ルール
 
 - 文書の探索・読取・lint は `agent-docs` を使います。
-- 公式Web情報の再確認は `agent-browser` を使い、Official Rulesを最優先します。
+- 公式Web情報の再確認は利用可能なWeb検索またはHTTP取得手段を使い、Official Rulesを最優先します。
 - Web情報を更新した場合は、front matterの `updated` と `last_verified` を更新します。
-- `agent-browser` の検証スクリーンショットは `/tmp` またはignore済みの `tmp/` に置き、コミットしません。
+- 実アプリの検証にはWebdriverIOのQA専用Tauri経路を使い、logとスクリーンショットは`/tmp`またはignore済みの`tmp/desktop-qa/`に置いてコミットしません。
 
 > [!IMPORTANT]
 > **Official Rules が最優先です。** Devpost の概要・FAQ・日程ページ、OpenAI のイベントページ、Devpost Hackathons Plugin と矛盾する場合は、Official Rules を採用してください。規約は変更される可能性があるため、提出直前に再確認してください。

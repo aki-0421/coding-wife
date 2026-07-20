@@ -343,7 +343,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| 1280px時のCharacter最小幅 | Chat 500pxを守り、残りをCharacterへ与える | agent-browserでcaptionとmuteの欠落を確認する | いいえ |
+| 1280px時のCharacter最小幅 | Chat 500pxを守り、残りをCharacterへ与える | WebdriverIOで実Tauri windowを操作しcaptionとmuteの欠落を確認する | いいえ |
 | timeline groupの初期展開 | running、failure、decisionを展開し、成功済みtoolをcompactにする | 100 eventの可読性testで調整する | いいえ |
 | TTS読み上げ密度 | default off。enable後もcompletion/decision/errorだけ | demoの聴取時間とqueue backlogを記録する | いいえ |
 | static preview生成 | import時に1枚生成しapp-privateへ保存 | model種別ごとの生成成功率を確認する | いいえ |

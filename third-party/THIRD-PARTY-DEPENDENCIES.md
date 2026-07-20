@@ -6,9 +6,9 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 
 ## Reproducibility
 
-- pnpm lock SHA-256: `020ed455df4ba67368286dc207c3d4739200db6e61c6162fc7e6a3c267b28167`
-- Cargo lock SHA-256: `6e9f0afbd74299b9f6f11f4f23661536ff25ef16f675f06b2f3eb95ec29d28de`
-- npm declared production-closure dependencies: `395`
+- pnpm lock SHA-256: `9bfdf659e2f3c877b8df97abff0281043f7f03048df2d5df2d069f0129b23036`
+- Cargo lock SHA-256: `e76110259ad5a5f9a5bcd9480e192fcbbde3a345251348071169b1e0d7fccffc`
+- npm declared production-closure dependencies: `397`
 - Cargo runtime dependencies: `235`
 - Unknown licenses: `0`
 - Forbidden licenses: `0`
@@ -469,6 +469,7 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 | npm | glob-parent | 5.1.2 | ISC | Gulp Team <team@gulpjs.com> (https://gulpjs.com/); Elan Shanker (https://github.com/es128); Blaine Bublitz <blaine.bublitz@gmail.com> | gulpjs/glob-parent | 2c46f1325bd3822a33c1e2c1e49c18d13127ac00f9c8b3b79196c7a126f73cd9 |
 | npm | gopd | 1.2.0 | MIT | Jordan Harband <ljharb@gmail.com> | https://github.com/ljharb/gopd.git | d90bf0a089da4cf43d644ed240a0b3825dcdb705e64e38371d56995a4cc9e4c5 |
 | npm | graceful-fs | 4.2.11 | ISC | https://github.com/isaacs/node-graceful-fs | https://github.com/isaacs/node-graceful-fs | f65c5d9f22a317b2a10803bd1868461ce6499c2ed7217bc80c0cc772a748789c |
+| npm | has-flag | 4.0.0 | MIT | Sindre Sorhus <sindresorhus@gmail.com> | sindresorhus/has-flag | 48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0 |
 | npm | has-symbols | 1.1.0 | MIT | Jordan Harband <ljharb@gmail.com>; Jordan Harband <ljharb@gmail.com> | git://github.com/inspect-js/has-symbols.git | 206c1adcf206dc0031b11232f5b054ec5f1662407ab1ca415247921cab2068ab |
 | npm | hasown | 2.0.4 | MIT | Jordan Harband <ljharb@gmail.com> | https://github.com/inspect-js/hasOwn.git | bf9b0d665be2a689851eea667ca9f42066ea1d903b38349c51e6a44b2577680a |
 | npm | hono | 4.12.30 | MIT | Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe) | https://github.com/honojs/hono.git | a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115 |
@@ -618,6 +619,7 @@ The Live2D Cubism SDK, Cubism Core, Cubism Framework, and bundled Hiyori terms r
 | npm | strip-bom | 3.0.0 | MIT | Sindre Sorhus <sindresorhus@gmail.com> | sindresorhus/strip-bom | 6fb9754611c20f6649f68805e8c990e83261f29316e29de9e6cedae607b8634c |
 | npm | strip-final-newline | 2.0.0 | MIT | Sindre Sorhus <sindresorhus@gmail.com> | sindresorhus/strip-final-newline | 48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0 |
 | npm | strip-final-newline | 4.0.0 | MIT | Sindre Sorhus <sindresorhus@gmail.com> | sindresorhus/strip-final-newline | 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3 |
+| npm | supports-color | 8.1.1 | MIT | Sindre Sorhus <sindresorhus@gmail.com> | chalk/supports-color | 5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3 |
 | npm | systeminformation | 5.31.17 | MIT | Sebastian Hildebrandt <hildebrandt@plus-innovations.com> (https://plus-innovations.com) | https://github.com/sebhildebrandt/systeminformation.git | 6d8a81695f864778d1fa5bb09cf8a8743049ca472b48658b1fff24a4d41300bd |
 | npm | tailwind-merge | 3.6.0 | MIT | Dany Castillo | https://github.com/dcastil/tailwind-merge.git | d4c70c7ce38cea8778f0aed3fc0bef0a9dbd27f13bd8b6773cbd6d37941971e5 |
 | npm | tiny-invariant | 1.3.3 | MIT | Alex Reardon <alexreardon@gmail.com> | https://github.com/alexreardon/tiny-invariant.git | b1c501095de70182748cb8e8d97ac5577701a4ef3b755ba30d59fd87b24bdb0f |
