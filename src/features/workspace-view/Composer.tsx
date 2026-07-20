@@ -4,11 +4,10 @@ import {
   AtSignIcon,
   BotIcon,
   FilePlus2Icon,
-  GaugeIcon,
+  InfoIcon,
   PlusIcon,
   SquareIcon,
   XIcon,
-  ZapIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -179,7 +178,7 @@ export function Composer({
   return (
     <div className="composer-wrap pointer-events-none absolute inset-x-0 bottom-0 z-20 px-xl pb-lg">
       <div
-        className="pointer-events-auto flex min-h-[128.25px] w-full flex-col rounded-composer border border-divider bg-surface p-[12.75px] shadow-composer transition-colors focus-within:border-warm-active focus-within:ring-2 focus-within:ring-ring"
+        className="composer-surface pointer-events-auto flex min-h-[128.25px] w-full flex-col rounded-composer border border-divider bg-surface p-[12.75px] shadow-composer transition-colors has-[textarea:focus-visible]:border-warm-active has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring"
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault()
@@ -189,12 +188,12 @@ export function Composer({
         <div className="flex min-h-0 flex-1 flex-col">
           {draft.attachments.length > 0 || draft.contextSnapshots.length > 0 ? (
             <div
-              className="mb-xxs flex min-h-5 gap-xxs overflow-x-auto"
+              className="mb-xs flex min-h-6 gap-xxs overflow-x-auto"
               aria-label={copy.draftItems}
             >
               {draft.attachments.map((attachment) => (
                 <span
-                  className="flex h-5 max-w-44 shrink-0 items-center gap-xxs rounded-control bg-code-chip pl-xs text-label text-text-secondary"
+                  className="flex h-6 max-w-44 shrink-0 items-center gap-xxs rounded-control bg-code-chip pl-xs text-label text-text-secondary"
                   key={attachment.id}
                   title={`${attachment.name} · ${formatBytes(attachment.size)}`}
                 >
@@ -208,7 +207,7 @@ export function Composer({
                   ) : null}
                   <button
                     aria-label={`${copy.removeAttachment}: ${attachment.name}`}
-                    className="flex size-6 shrink-0 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground"
+                    className="flex size-6 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => onRemoveAttachment(attachment.id)}
                     type="button"
                   >
@@ -218,7 +217,7 @@ export function Composer({
               ))}
               {draft.contextSnapshots.map((snapshot) => (
                 <span
-                  className="flex h-5 max-w-44 shrink-0 items-center gap-xxs rounded-control bg-code-chip pl-xs text-label text-text-secondary"
+                  className="flex h-6 max-w-44 shrink-0 items-center gap-xxs rounded-control bg-code-chip pl-xs text-label text-text-secondary"
                   key={snapshot.id}
                   title={`${snapshot.label} · ${formatBytes(snapshot.byteCount)}`}
                 >
@@ -226,7 +225,7 @@ export function Composer({
                   <span className="truncate">{snapshot.label}</span>
                   <button
                     aria-label={`${copy.removeAttachment}: ${snapshot.label}`}
-                    className="flex size-6 shrink-0 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground"
+                    className="flex size-6 shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => onRemoveContext(snapshot.id)}
                     type="button"
                   >
@@ -239,7 +238,8 @@ export function Composer({
 
           <Textarea
             aria-describedby="composer-help composer-disabled-reason"
-            className="max-h-12 min-h-8 flex-1 border-0 p-0 shadow-none focus-visible:ring-0"
+            aria-keyshortcuts="Meta+Enter"
+            className="max-h-20 min-h-12 flex-1 overflow-y-auto border-0 p-0 shadow-none focus-visible:ring-0"
             onChange={(event) =>
               onDraftChange(
                 Array.from(event.currentTarget.value).slice(0, 32_000).join(""),
@@ -263,118 +263,139 @@ export function Composer({
               if (event.clipboardData.files.length > 0) event.preventDefault()
             }}
             placeholder={copy.composerPlaceholder}
-            rows={2}
+            rows={1}
             value={draft.text}
           />
         </div>
 
         <p
-          className="m-0 h-[17px] truncate text-caption leading-[16.5px] text-muted-foreground"
-          id="composer-help"
-          title={
+          className={
             attachmentCapabilitiesAvailable
-              ? copy.composerHint
-              : copy.pickerUnavailable
+              ? "sr-only"
+              : "m-0 mt-xs flex items-start gap-xs text-pretty text-caption text-muted-foreground"
           }
+          data-composer-capability-status={
+            attachmentCapabilitiesAvailable ? undefined : "unavailable"
+          }
+          id="composer-help"
         >
-          {attachmentCapabilitiesAvailable
-            ? copy.composerHint
-            : copy.pickerUnavailable}
+          {!attachmentCapabilitiesAvailable ? (
+            <InfoIcon aria-hidden="true" className="mt-xxs size-3 shrink-0" />
+          ) : null}
+          <span>
+            {attachmentCapabilitiesAvailable
+              ? copy.composerHint
+              : copy.pickerUnavailable}
+          </span>
         </p>
 
-        <div className="flex min-h-8 flex-wrap items-end gap-xs pt-sm">
-          <Button
-            aria-describedby="composer-help"
-            disabled={
-              onPickAttachments === undefined ||
-              turnState === "sending" ||
-              turnState === "stopping"
-            }
-            onClick={() => {
-              if (onPickAttachments !== undefined) void onPickAttachments()
-            }}
-            size="xs"
-            type="button"
-            variant="outline"
-          >
-            <PlusIcon data-icon="inline-start" />
-            {copy.add}
-          </Button>
-
-          <Popover onOpenChange={setContextOpen} open={contextOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                disabled={isBusy}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                <AtSignIcon data-icon="inline-start" />
-                {copy.context}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" side="top">
-              {contextSources.map((source) => {
-                const label =
-                  source === "files"
-                    ? copy.filesFolders
-                    : source === "git_diff"
-                      ? copy.gitDiff
-                      : copy.terminalOutput
-                return (
+        <div className="flex min-h-7 items-center gap-xs pt-sm">
+          <div className="flex shrink-0 items-center gap-xxs">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
                   <Button
-                    className="w-full justify-start"
-                    key={source}
+                    aria-describedby="composer-help"
+                    aria-label={copy.add}
+                    disabled={
+                      onPickAttachments === undefined ||
+                      turnState === "sending" ||
+                      turnState === "stopping"
+                    }
                     onClick={() => {
-                      setContextOpen(false)
-                      void onCaptureContext(source)
+                      if (onPickAttachments !== undefined)
+                        void onPickAttachments()
                     }}
-                    size="xs"
+                    size="icon-xs"
                     type="button"
                     variant="ghost"
                   >
-                    {label}
+                    <PlusIcon />
                   </Button>
-                )
-              })}
-            </PopoverContent>
-          </Popover>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {attachmentCapabilitiesAvailable
+                  ? copy.composerHint
+                  : copy.pickerUnavailable}
+              </TooltipContent>
+            </Tooltip>
 
-          <span
-            aria-label={`${copy.model}, ${copy.fixedModel}`}
-            className="hidden h-6 shrink-0 items-center gap-xxs px-xs text-label text-foreground min-[1080px]:flex"
-          >
-            <BotIcon aria-hidden="true" className="size-3" />
-            {copy.model}
-          </span>
+            <Popover onOpenChange={setContextOpen} open={contextOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  disabled={isBusy}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <AtSignIcon data-icon="inline-start" />
+                  {copy.context}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" side="top">
+                {contextSources.map((source) => {
+                  const label =
+                    source === "files"
+                      ? copy.filesFolders
+                      : source === "git_diff"
+                        ? copy.gitDiff
+                        : copy.terminalOutput
+                  return (
+                    <Button
+                      className="w-full justify-start"
+                      key={source}
+                      onClick={() => {
+                        setContextOpen(false)
+                        void onCaptureContext(source)
+                      }}
+                      size="xs"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {label}
+                    </Button>
+                  )
+                })}
+              </PopoverContent>
+            </Popover>
+          </div>
 
-          <ToggleGroup
-            aria-label={copy.reasoningEffort}
-            disabled={isBusy}
-            onValueChange={(value) => {
-              if (value === "fast" || value === "max") onEffortChange(value)
-            }}
-            type="single"
-            value={draft.effort}
-          >
-            <ToggleGroupItem
-              aria-label={copy.fast}
-              className="data-[state=on]:bg-warm-active/15 data-[state=on]:text-warm-active"
-              disabled={isBusy || !readiness.fastAvailable}
-              value="fast"
+          <div className="composer-execution-options flex min-w-0 items-center gap-xs">
+            <span
+              aria-label={`${copy.model}, ${copy.fixedModel}`}
+              className="composer-model flex h-6 shrink-0 items-center gap-xxs px-xs text-label text-muted-foreground"
             >
-              <ZapIcon aria-hidden="true" className="size-3" />
-              <span className="hidden min-[1080px]:inline">{copy.fast}</span>
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              aria-label={copy.max}
-              disabled={isBusy || !readiness.maxAvailable}
-              value="max"
+              <BotIcon aria-hidden="true" className="size-3" />
+              {copy.model}
+            </span>
+
+            <ToggleGroup
+              aria-label={copy.reasoningEffort}
+              disabled={isBusy}
+              onValueChange={(value) => {
+                if (value === "fast" || value === "max") onEffortChange(value)
+              }}
+              type="single"
+              value={draft.effort}
             >
-              <GaugeIcon aria-hidden="true" className="size-3" />
-              <span className="hidden min-[1080px]:inline">{copy.max}</span>
-            </ToggleGroupItem>
-          </ToggleGroup>
+              <ToggleGroupItem
+                aria-label={copy.fast}
+                className="data-[state=on]:bg-warm-active/15 data-[state=on]:text-warm-active"
+                disabled={isBusy || !readiness.fastAvailable}
+                value="fast"
+              >
+                {copy.fast}
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                aria-label={copy.max}
+                disabled={isBusy || !readiness.maxAvailable}
+                value="max"
+              >
+                {copy.max}
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
 
           {unavailableEffort !== null ? (
             <span
@@ -386,45 +407,59 @@ export function Composer({
             </span>
           ) : null}
 
-          <span
-            className="ml-auto hidden shrink-0 font-mono text-caption text-muted-foreground min-[1120px]:inline"
-            data-composer-command-hint=""
-          >
-            {copy.commandSend}
-          </span>
-
-          {turnState === "running" || turnState === "stopping" ? (
-            <Button
-              disabled={turnState === "stopping"}
-              onClick={() => void onStop()}
-              size="xs"
-              type="button"
-              variant="destructive"
+          <div className="ml-auto flex shrink-0 items-center gap-xs">
+            <span
+              className="composer-command-hint shrink-0 font-mono text-caption text-muted-foreground"
+              data-composer-command-hint=""
             >
-              <SquareIcon data-icon="inline-start" />
-              {copy.stop}
-            </Button>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    aria-describedby="composer-disabled-reason"
-                    disabled={!canSend}
-                    onClick={() => void onSend()}
-                    size="xs"
-                    type="button"
-                  >
-                    <ArrowUpIcon data-icon="inline-start" />
-                    {copy.send}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              {!canSend ? (
-                <TooltipContent side="top">{disabledReason}</TooltipContent>
-              ) : null}
-            </Tooltip>
-          )}
+              {copy.commandSend}
+            </span>
+
+            {turnState === "running" || turnState === "stopping" ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      aria-label={copy.stop}
+                      data-composer-action=""
+                      disabled={turnState === "stopping"}
+                      onClick={() => void onStop()}
+                      size="icon-sm"
+                      type="button"
+                      variant="destructive"
+                    >
+                      <SquareIcon />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">{copy.stop}</TooltipContent>
+              </Tooltip>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      aria-describedby="composer-disabled-reason"
+                      aria-keyshortcuts="Meta+Enter"
+                      aria-label={copy.send}
+                      data-composer-action=""
+                      disabled={!canSend}
+                      onClick={() => void onSend()}
+                      size="icon-sm"
+                      type="button"
+                    >
+                      <ArrowUpIcon />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {!canSend
+                    ? disabledReason
+                    : `${copy.send} · ${copy.commandSend}`}
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
         </div>
 
         <span className="sr-only" id="composer-disabled-reason">
