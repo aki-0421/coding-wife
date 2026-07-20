@@ -44,7 +44,6 @@ const copy: Readonly<
       readonly appSettings: string
       readonly projects: string
       readonly projectCard: RegExp
-      readonly backToWorkspace: string
       readonly goal: string
       readonly saveProject: string
       readonly saved: string
@@ -77,7 +76,6 @@ const copy: Readonly<
     appSettings: "App settings",
     projects: "Projects",
     projectCard: /coding-wife.*3 workspaces/u,
-    backToWorkspace: "Back to workspace",
     goal: "Goal",
     saveProject: "Save project context",
     saved: "Saved. This version will be used from the next turn.",
@@ -109,7 +107,6 @@ const copy: Readonly<
     appSettings: "アプリ設定",
     projects: "プロジェクト",
     projectCard: /coding-wife.*3件のワークスペース/u,
-    backToWorkspace: "ワークスペースへ戻る",
     goal: "目標",
     saveProject: "プロジェクトコンテキストを保存",
     saved: "保存しました。次のturnからこのバージョンを使います。",
@@ -388,7 +385,9 @@ describe("final bilingual App acceptance", () => {
         context: { goal: "Preserve acceptance evidence across restart" },
       })
       await user.click(
-        screen.getByRole("button", { name: localized.backToWorkspace }),
+        within(
+          screen.getByRole("navigation", { name: localized.workspaces }),
+        ).getByRole("button", { current: "page" }),
       )
 
       const createdWorkspaceId = workspace.activeWorkspaceId
@@ -641,7 +640,9 @@ describe("final bilingual App acceptance", () => {
     )
     await user.click(screen.getByRole("radio", { name: "日本語" }))
     expect(
-      await screen.findByRole("heading", { level: 1, name: "アプリ設定" }),
+      await screen.findByRole("navigation", {
+        name: "アプリ設定の現在地",
+      }),
     ).toBeVisible()
     expect(localeStore.value).toBe("ja")
     await waitFor(() => expect(lifecycle.listenerCount).toBe(2))

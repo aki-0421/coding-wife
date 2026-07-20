@@ -383,11 +383,9 @@ const en = {
   },
   settingsView: {
     appTitle: "App settings",
-    appDescription:
-      "Character, companion, preferences, and diagnostics shared by every project.",
+    appBreadcrumbLabel: "App settings location",
     projectTitle: "Project settings",
     projectDescription: (project: string) => `Settings for ${project}.`,
-    backToWorkspace: "Back to workspace",
     backToProjects: "Back to projects",
     sections: {
       general: "General",
@@ -908,11 +906,9 @@ const ja: typeof en = {
   },
   settingsView: {
     appTitle: "アプリ設定",
-    appDescription:
-      "すべてのプロジェクトに共通するキャラクター、コンパニオン、設定、診断です。",
+    appBreadcrumbLabel: "アプリ設定の現在地",
     projectTitle: "プロジェクト設定",
     projectDescription: (project: string) => `${project} の設定です。`,
-    backToWorkspace: "ワークスペースへ戻る",
     backToProjects: "プロジェクト一覧へ戻る",
     sections: {
       general: "一般",
