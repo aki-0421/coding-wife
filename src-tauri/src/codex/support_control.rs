@@ -1569,9 +1569,11 @@ mod tests {
                 ..SupportSettingsV1::default()
             }
         );
-        assert!(SupportAuditStore::open(&root, Some(restarted.settings.version))
-            .recovery_code
-            .is_none());
+        assert!(
+            SupportAuditStore::open(&root, Some(restarted.settings.version))
+                .recovery_code
+                .is_none()
+        );
         let stable = SupportSettingsStore::open(&root);
         assert_eq!(stable.settings, restarted.settings);
         assert_eq!(

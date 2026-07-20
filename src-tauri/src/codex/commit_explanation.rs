@@ -273,8 +273,6 @@ trait CommitExplanationExecutor: Send + Sync {
 
     fn cancel<'a>(&'a self, request_id: &'a str) -> ExplanationFuture<'a, bool>;
 
-    fn force_cleanup_now<'a>(&'a self) -> ExplanationFuture<'a, bool>;
-
     fn has_owned_executions<'a>(&'a self) -> ExplanationFuture<'a, bool>;
 
     fn shutdown<'a>(&'a self) -> ExplanationFuture<'a, bool>;
@@ -801,10 +799,6 @@ impl CommitExplanationExecutor for IsolatedSupportExecutor {
             }
             self.stop_selected(executions, false).await
         })
-    }
-
-    fn force_cleanup_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
-        Box::pin(async move { self.cleanup_executions(true).await })
     }
 
     fn has_owned_executions<'a>(&'a self) -> ExplanationFuture<'a, bool> {
@@ -2277,8 +2271,6 @@ mod tests {
         calls: AtomicUsize,
         cancels: AtomicUsize,
         cancel_converges: AtomicBool,
-        cleanup_forces: AtomicUsize,
-        cleanup_force_converges: AtomicBool,
         shutdowns: AtomicUsize,
         shutdown_converges: AtomicBool,
         forces: AtomicUsize,
@@ -2294,8 +2286,6 @@ mod tests {
                 calls: AtomicUsize::new(0),
                 cancels: AtomicUsize::new(0),
                 cancel_converges: AtomicBool::new(true),
-                cleanup_forces: AtomicUsize::new(0),
-                cleanup_force_converges: AtomicBool::new(true),
                 shutdowns: AtomicUsize::new(0),
                 shutdown_converges: AtomicBool::new(true),
                 forces: AtomicUsize::new(0),
@@ -2358,16 +2348,6 @@ mod tests {
                     self.release_one();
                 }
                 self.shutdown_converges.load(Ordering::Acquire)
-            })
-        }
-
-        fn force_cleanup_now<'a>(&'a self) -> ExplanationFuture<'a, bool> {
-            Box::pin(async move {
-                self.cleanup_forces.fetch_add(1, Ordering::AcqRel);
-                if matches!(self.mode, FakeMode::Block) {
-                    self.release_one();
-                }
-                self.cleanup_force_converges.load(Ordering::Acquire)
             })
         }
 
@@ -2516,7 +2496,7 @@ mod tests {
     #[tokio::test]
     async fn recovery_cleanup_does_not_arm_the_permanent_shutdown_latch() {
         let executor = IsolatedSupportExecutor::new(CodexSupervisor::new());
-        assert!(executor.force_cleanup_now().await);
+        assert!(executor.cleanup_executions(true).await);
         assert!(!executor.shutting_down.load(Ordering::Acquire));
 
         assert!(executor.force_shutdown_now().await);
@@ -2661,64 +2641,6 @@ mod tests {
             Duration::from_secs(2),
         );
         (controller, executor, events, root)
-    }
-
-    fn isolated_policy_harness(
-        readiness: SupportReleaseReadinessV1,
-    ) -> (
-        CommitExplanationController,
-        Arc<IsolatedSupportExecutor>,
-        PathBuf,
-    ) {
-        let root = std::env::temp_dir().join(format!(
-            "coding-wife-support-isolated-policy-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let opened = SupportSettingsStore::open(&root);
-        let audit = SupportAuditStore::open(&root, Some(opened.settings.version));
-        let executor = Arc::new(IsolatedSupportExecutor::new(CodexSupervisor::new()));
-        let controller = CommitExplanationController::with_control_dependencies(
-            executor.clone(),
-            Arc::new(RecordingEvents::default()),
-            Arc::new(FixedReadinessProvider(readiness)),
-            opened.store,
-            audit.store,
-            opened.settings,
-            audit.state,
-            opened.recovery_code,
-            SUPPORT_MAX_QUEUE_CAPACITY,
-            4,
-            Duration::from_secs(2),
-        );
-        (controller, executor, root)
-    }
-
-    async fn retain_unconverged_execution(
-        executor: &IsolatedSupportExecutor,
-        cleanup: Arc<RetryCleanupFixture>,
-        request_id: &str,
-        generation: u64,
-    ) {
-        let cleanup_target = cleanup as Arc<dyn SupportExecutionCleanup>;
-        let completion = Arc::new(SupportExecutionCompletion::default());
-        completion
-            .finish(SupportExecutionOutcome {
-                result: Err(SupportRuntimeError::Protocol),
-                cleanup_converged: false,
-                pending_cleanup: Some(cleanup_target.clone()),
-            })
-            .await;
-        executor.active.lock().await.insert(
-            (request_id.to_owned(), generation),
-            SupportExecution {
-                generation,
-                canceled: Arc::new(AtomicBool::new(false)),
-                force_requested: Arc::new(AtomicBool::new(false)),
-                phase: SupportExecutionPhase::Unconverged(cleanup_target),
-                task: Arc::new(Mutex::new(None)),
-                completion,
-            },
-        );
     }
 
     fn approved_readiness() -> SupportReleaseReadinessV1 {
