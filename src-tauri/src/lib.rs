@@ -57,9 +57,10 @@ use workspace_history::commands::{
     project_context_get, project_context_save, workspace_archive, workspace_cancel,
     workspace_create_session, workspace_delete, workspace_get_turn_context_snapshot,
     workspace_issue_delete_challenge, workspace_list, workspace_list_timeline,
-    workspace_pick_register, workspace_recheck, workspace_repair, workspace_save_context_snapshot,
-    workspace_save_draft, workspace_save_timeline_anchor, workspace_select, workspace_unregister,
-    workspace_update_lifecycle,
+    workspace_pick_register, workspace_project_setup_cancel, workspace_project_setup_git_init,
+    workspace_project_setup_github, workspace_recheck, workspace_repair,
+    workspace_save_context_snapshot, workspace_save_draft, workspace_save_timeline_anchor,
+    workspace_select, workspace_unregister, workspace_update_lifecycle,
 };
 use workspace_history::{WorkspaceHistoryService, WorkspaceHistoryStore};
 
@@ -306,6 +307,9 @@ pub fn run() {
             codex_answer_fallback_decision,
             workspace_list,
             workspace_pick_register,
+            workspace_project_setup_git_init,
+            workspace_project_setup_github,
+            workspace_project_setup_cancel,
             workspace_create_session,
             workspace_select,
             workspace_recheck,

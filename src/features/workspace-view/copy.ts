@@ -2,7 +2,10 @@ import type { SupportedLocale } from "@/features/localization"
 
 const en = {
   workspaces: "Workspaces",
-  filterWorkspaces: "Filter workspaces",
+  filterWorkspaces: "Filter",
+  projectFilterLabel: "Project",
+  allProjects: "All",
+  selectedProjects: (count: number) => `${count} selected`,
   addProject: "Add project",
   addWorkspace: "Add workspace",
   archiveWorkspace: "Archive workspace",
@@ -49,7 +52,7 @@ const en = {
       generic:
         "The workspace action could not be completed. No source or Git state was changed.",
       active:
-        "The project is still running. Stop its active turn before unregistering or repairing it.",
+        "The workspace is still running. Stop its active turn before retrying this action.",
       unavailable: "This action is not available in the current runtime.",
       conflict:
         "The workspace changed in another operation. Refresh it and try again.",
@@ -59,12 +62,12 @@ const en = {
     },
   },
   archiveDialog: {
-    title: "Archive this workspace?",
+    title: "Stop and archive this workspace?",
     body: (workspace: string) =>
-      `The Git worktree for ${workspace} and its app history will be removed. The project repository and branch are kept.`,
-    cancel: "Keep workspace",
-    confirm: "Archive workspace",
-    working: "Archiving…",
+      `The main session in ${workspace} will stop first. After it reaches a terminal state and local cleanup finishes, its Git worktree and app history will be removed. The project repository and branch are kept.`,
+    cancel: "Keep running",
+    confirm: "Stop and archive",
+    working: "Stopping and archiving…",
   },
   workspaceSwitch: {
     title: "Stop and switch workspaces?",
@@ -78,19 +81,41 @@ const en = {
     failed:
       "The turn could not be stopped and cleaned up. The current workspace remains active; no draft or selection was changed.",
   },
+  projectSetup: {
+    title: "Set up project",
+    initializeGit: "Initialize Git",
+    initializingGit: "Initializing Git…",
+    ownerAccessibilityLabel: "GitHub owner",
+    repositoryAccessibilityLabel: "GitHub repository",
+    setupGithub: "Set up GitHub",
+    settingUpGithub: "Setting up GitHub…",
+    retryGithub: "Retry GitHub connection",
+    checkingGithub: "Checking GitHub…",
+    cancel: "Cancel",
+    canceling: "Canceling…",
+    close: "Close project setup",
+    invalidRepository:
+      "Enter 1–100 characters using letters, numbers, periods, underscores, or hyphens. Do not use .git as a suffix.",
+    githubCliMissing:
+      "GitHub CLI is required. Install gh, sign in, then retry this check.",
+    githubAuthRequired:
+      "GitHub CLI is not signed in. Run gh auth login, then retry this check.",
+    githubUnavailable:
+      "GitHub owners could not be loaded. Check the network and GitHub CLI, then retry.",
+    genericError:
+      "Project setup could not be completed. The project has not been registered.",
+  },
   dismiss: "Dismiss",
   switchWorkspace: "Switch workspace",
   repository: "Repository",
   branch: "Branch",
   active: "Active",
-  noMatches: "No workspaces match this filter.",
   loadingWorkspacesTitle: "Restoring workspace history",
   loadingWorkspacesDescription:
     "Checking local workspace records before enabling changes.",
   workspaceLoadFailedTitle: "Workspace history could not be restored",
   workspaceLoadFailedDescription:
     "Demo data was not substituted. Retry the local history check to continue safely.",
-  clearFilter: "Clear filter",
   lifecycle: {
     done: "Done",
     in_review: "In review",
@@ -467,15 +492,10 @@ const en = {
       "Preview preference · not persisted to the native settings service",
   },
   createWorkspace: {
-    title: "Create workspace",
-    firstTitle: "Create your first workspace",
-    description:
-      "Creates a Git worktree for the selected project on a new app-managed branch.",
-    project: "Project",
-    name: "Workspace name",
-    cancel: "Cancel",
-    create: "Create workspace",
+    selectProject: "Select a project",
+    close: "Close project selection",
     creating: "Creating…",
+    failed: "The workspace could not be created. Choose a project to retry.",
   },
   compactSidebar: "Open workspace navigation",
 }
@@ -483,7 +503,10 @@ const en = {
 const ja: typeof en = {
   ...en,
   workspaces: "ワークスペース",
-  filterWorkspaces: "ワークスペースを絞り込む",
+  filterWorkspaces: "フィルター",
+  projectFilterLabel: "プロジェクト",
+  allProjects: "すべて",
+  selectedProjects: (count: number) => `${count}件選択`,
   addProject: "プロジェクトを追加",
   addWorkspace: "ワークスペースを追加",
   archiveWorkspace: "ワークスペースをアーカイブ",
@@ -530,7 +553,7 @@ const ja: typeof en = {
       generic:
         "ワークスペース操作を完了できませんでした。ソースやGitの状態は変更していません。",
       active:
-        "プロジェクトはまだ実行中です。修復や登録解除の前に進行中のターンを停止してください。",
+        "ワークスペースはまだ実行中です。進行中のターンを停止してから、この操作を再試行してください。",
       unavailable: "現在の実行環境ではこの操作を利用できません。",
       conflict:
         "別の操作でワークスペースが更新されました。再読み込みしてからお試しください。",
@@ -540,12 +563,12 @@ const ja: typeof en = {
     },
   },
   archiveDialog: {
-    title: "このワークスペースをアーカイブしますか？",
+    title: "停止してこのワークスペースをアーカイブしますか？",
     body: (workspace: string) =>
-      `${workspace} のGit worktreeとアプリ内履歴を削除します。プロジェクトのリポジトリとブランチは保持します。`,
-    cancel: "ワークスペースを保持",
-    confirm: "ワークスペースをアーカイブ",
-    working: "アーカイブ中…",
+      `${workspace} のメインセッションを先に停止します。対象ターンの終了状態を確認し、ローカル後処理が完了した後にGit worktreeとアプリ内履歴を削除します。プロジェクトのリポジトリとブランチは保持します。`,
+    cancel: "実行を続ける",
+    confirm: "停止してアーカイブ",
+    working: "停止してアーカイブ中…",
   },
   workspaceSwitch: {
     title: "停止してワークスペースを切り替えますか？",
@@ -559,19 +582,41 @@ const ja: typeof en = {
     failed:
       "ターンの停止と後処理を完了できませんでした。現在のワークスペースを維持し、下書きと選択は変更していません。",
   },
+  projectSetup: {
+    title: "プロジェクトをセットアップ",
+    initializeGit: "Gitを初期化",
+    initializingGit: "Gitを初期化中…",
+    ownerAccessibilityLabel: "GitHub owner",
+    repositoryAccessibilityLabel: "GitHub repository",
+    setupGithub: "GitHubをセットアップ",
+    settingUpGithub: "GitHubをセットアップ中…",
+    retryGithub: "GitHub接続を再確認",
+    checkingGithub: "GitHub接続を確認中…",
+    cancel: "キャンセル",
+    canceling: "キャンセル中…",
+    close: "プロジェクトのセットアップを閉じる",
+    invalidRepository:
+      "英数字、ピリオド、アンダースコア、ハイフンで1〜100文字を入力し、末尾に.gitを付けないでください。",
+    githubCliMissing:
+      "GitHub CLIが必要です。ghをインストールしてサインインした後、再確認してください。",
+    githubAuthRequired:
+      "GitHub CLIにサインインしていません。gh auth loginを実行した後、再確認してください。",
+    githubUnavailable:
+      "GitHubのowner候補を取得できませんでした。ネットワークとGitHub CLIを確認して再試行してください。",
+    genericError:
+      "プロジェクトのセットアップを完了できませんでした。プロジェクトは登録していません。",
+  },
   dismiss: "閉じる",
   switchWorkspace: "ワークスペースを切り替える",
   repository: "リポジトリ",
   branch: "ブランチ",
   active: "選択中",
-  noMatches: "条件に一致するワークスペースはありません。",
   loadingWorkspacesTitle: "ワークスペース履歴を復元中",
   loadingWorkspacesDescription:
     "変更を有効にする前にローカルのワークスペース記録を確認しています。",
   workspaceLoadFailedTitle: "ワークスペース履歴を復元できませんでした",
   workspaceLoadFailedDescription:
     "デモデータへの置き換えは行っていません。安全に続行するにはローカル履歴を再確認してください。",
-  clearFilter: "フィルターを解除",
   lifecycle: {
     done: "完了",
     in_review: "レビュー可能",
@@ -946,15 +991,11 @@ const ja: typeof en = {
     localPreview: "プレビュー設定 · native settings serviceには未保存",
   },
   createWorkspace: {
-    title: "ワークスペースを作成",
-    firstTitle: "最初のワークスペースを作成",
-    description:
-      "選択したプロジェクトに、アプリ管理の新しいブランチとGit worktreeを作成します。",
-    project: "プロジェクト",
-    name: "ワークスペース名",
-    cancel: "キャンセル",
-    create: "ワークスペースを作成",
+    selectProject: "プロジェクトを選択",
+    close: "プロジェクト選択を閉じる",
     creating: "作成中…",
+    failed:
+      "ワークスペースを作成できませんでした。プロジェクトを選び直してください。",
   },
   compactSidebar: "ワークスペースnavigationを開く",
 }

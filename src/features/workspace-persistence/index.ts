@@ -40,7 +40,10 @@ export function createCodexComposedWorkspaceViewAdapter(
 
 export function createWorkspaceViewAdapter(
   runtimeKind: "tauri" | "demo",
-  options: { readonly interactiveDemo?: boolean } = {},
+  options: {
+    readonly interactiveDemo?: boolean
+    readonly projectSetupDemo?: "git" | "github"
+  } = {},
 ): WorkspaceViewAdapter {
   if (runtimeKind === "tauri") {
     return new CodexComposedWorkspaceViewAdapter(
@@ -50,9 +53,19 @@ export function createWorkspaceViewAdapter(
   }
   if (options.interactiveDemo === true) {
     return new CodexComposedWorkspaceViewAdapter(
-      new DemoWorkspaceHistoryTransport(),
+      new DemoWorkspaceHistoryTransport({
+        ...(options.projectSetupDemo === undefined
+          ? {}
+          : { projectSetup: options.projectSetupDemo }),
+      }),
       new DemoCodexTransport(),
     )
   }
-  return new PersistentWorkspaceViewAdapter(new DemoWorkspaceHistoryTransport())
+  return new PersistentWorkspaceViewAdapter(
+    new DemoWorkspaceHistoryTransport({
+      ...(options.projectSetupDemo === undefined
+        ? {}
+        : { projectSetup: options.projectSetupDemo }),
+    }),
+  )
 }

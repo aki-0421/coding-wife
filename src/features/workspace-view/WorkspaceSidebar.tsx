@@ -12,16 +12,21 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import { Field, FieldLabel } from "@/components/ui/field"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Tooltip,
@@ -29,10 +34,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
-import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
+import { ProjectFilterSelect } from "@/features/workspace-view/ProjectFilterSelect"
 import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
 import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
 import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
+import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
 import type {
   ProjectRecord,
   WorkspaceLifecycle,
@@ -56,13 +62,14 @@ const initiallyExpandedLifecycles = {
   canceled: true,
 } as const satisfies Readonly<Record<WorkspaceLifecycle, boolean>>
 
+const sidebarIconButtonClassName = "text-muted-foreground"
+
 interface WorkspaceSidebarProps {
   readonly appSettingsActive: boolean
   readonly copy: WorkspaceCopy
-  readonly filter: string
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
+  readonly projectFilterIds: readonly string[]
   readonly projects: readonly ProjectRecord[]
-  readonly selectedProjectId?: string | undefined
   readonly selectedWorkspace?: WorkspaceRecord | undefined
   readonly selectedWorkspaceId: string
   readonly archiveDisabledWorkspaceId?: string | undefined
@@ -71,7 +78,7 @@ interface WorkspaceSidebarProps {
     projectId: string,
     name: string,
   ) => Promise<boolean>
-  readonly onFilterChange: (value: string) => void
+  readonly onProjectFilterChange: (projectIds: readonly string[]) => void
   readonly onOpenSettings: () => void
   readonly onRequestArchive: (workspace: WorkspaceRecord) => void
   readonly onSelectWorkspace: (workspaceId: string) => void
@@ -116,11 +123,11 @@ function WorkspaceRow({
           <button
             aria-current={selected ? "page" : undefined}
             aria-label={`${workspace.branch}, ${repositoryLabel}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
-            className="flex h-full min-w-0 flex-1 items-center gap-sm rounded-control px-sm py-xs pr-xl text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-full min-w-0 flex-1 items-center gap-sm rounded-control px-sm py-xs text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={onSelect}
             type="button"
           >
-            <RepositoryAvatar workspace={workspace} />
+            <RepositoryAvatar githubRepository={workspace.githubRepository} />
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="flex min-w-0 items-center gap-xxs">
                 <GitBranchIcon
@@ -176,7 +183,7 @@ function WorkspaceRow({
         <TooltipTrigger asChild>
           <Button
             aria-label={`${copy.archiveWorkspace}: ${workspace.name}`}
-            className="absolute right-xs size-6 opacity-0 transition-opacity group-hover/workspace:opacity-100 group-focus-within/workspace:opacity-100 focus-visible:opacity-100"
+            className="mr-xs size-6 text-muted-foreground opacity-0 transition-opacity group-hover/workspace:opacity-100 group-focus-within/workspace:opacity-100 focus-visible:opacity-100"
             data-workspace-archive={workspace.id}
             disabled={archiveDisabled}
             onClick={onArchive}
@@ -193,27 +200,36 @@ function WorkspaceRow({
   )
 }
 
-function CreateWorkspaceDialog({
+function CreateWorkspaceButton({
   copy,
   projects,
-  selectedProjectId,
   onCreate,
 }: {
   readonly copy: WorkspaceCopy
   readonly projects: readonly ProjectRecord[]
-  readonly selectedProjectId?: string | undefined
   readonly onCreate: (projectId: string, name: string) => Promise<boolean>
 }) {
   const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const label = creating ? copy.createWorkspace.creating : copy.addWorkspace
 
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        if (creating) return
+        setOpen(nextOpen)
+      }}
+      open={open}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <DialogTrigger asChild>
             <Button
-              aria-label={copy.addWorkspace}
-              disabled={projects.length === 0}
+              aria-busy={creating}
+              aria-label={label}
+              className={sidebarIconButtonClassName}
+              data-workspace-create=""
+              disabled={creating || projects.length === 0}
               size="icon-xs"
               type="button"
               variant="ghost"
@@ -222,27 +238,32 @@ function CreateWorkspaceDialog({
             </Button>
           </DialogTrigger>
         </TooltipTrigger>
-        <TooltipContent>{copy.addWorkspace}</TooltipContent>
+        <TooltipContent>{label}</TooltipContent>
       </Tooltip>
-      <DialogContent>
+      <DialogContent
+        aria-describedby={undefined}
+        className="w-[min(48rem,calc(100dvw-36px))]"
+        closeLabel={copy.createWorkspace.close}
+        data-workspace-project-dialog=""
+        onEscapeKeyDown={(event) => {
+          if (creating) event.preventDefault()
+        }}
+        onInteractOutside={(event) => {
+          if (creating) event.preventDefault()
+        }}
+        showCloseButton={!creating}
+      >
         <DialogHeader>
-          <DialogTitle>{copy.createWorkspace.title}</DialogTitle>
-          <DialogDescription>
-            {copy.createWorkspace.description}
-          </DialogDescription>
+          <DialogTitle className="text-balance">
+            {copy.createWorkspace.selectProject}
+          </DialogTitle>
         </DialogHeader>
-        <WorkspaceCreateForm
-          ariaLabel={copy.createWorkspace.title}
-          autoFocusName
+        <WorkspaceProjectSelection
           copy={copy}
-          onCancel={() => setOpen(false)}
-          onCreate={async (projectId, name) => {
-            const created = await onCreate(projectId, name)
-            if (created) setOpen(false)
-            return created
-          }}
+          onCreate={onCreate}
+          onCreated={() => setOpen(false)}
+          onCreatingChange={setCreating}
           projects={projects}
-          selectedProjectId={selectedProjectId}
         />
       </DialogContent>
     </Dialog>
@@ -253,23 +274,23 @@ function SidebarPanel({
   appSettingsActive,
   copy,
   expandedLifecycles,
-  filter,
   filteredWorkspaces,
+  projectFilterIds,
   projects,
-  selectedProjectId,
   selectedWorkspaceId,
   archiveDisabledWorkspaceId,
   reserveTitlebarSpace,
   onAddProject,
   onCreateWorkspace,
-  onFilterChange,
+  onProjectFilterChange,
   onOpenSettings,
   onRequestArchive,
   onSelectWorkspace,
   onToggleLifecycle,
 }: SidebarPanelProps) {
-  const [filterVisible, setFilterVisible] = useState(false)
+  const [filterOpen, setFilterOpen] = useState(false)
   const lifecycleContentIdPrefix = useId()
+  const projectFilterSelectId = useId()
   const groups = useMemo(
     () =>
       lifecycleOrder.map((lifecycle) => ({
@@ -292,26 +313,64 @@ function SidebarPanel({
           {copy.workspaces}
         </h1>
         <div className="flex items-center gap-xxs">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label={copy.filterWorkspaces}
-                aria-pressed={filterVisible}
-                data-workspace-filter-toggle=""
-                onClick={() => setFilterVisible((current) => !current)}
-                size="icon-xs"
-                type="button"
-                variant="ghost"
-              >
-                <ListFilterIcon />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{copy.filterWorkspaces}</TooltipContent>
-          </Tooltip>
+          <Popover onOpenChange={setFilterOpen} open={filterOpen}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    aria-label={copy.filterWorkspaces}
+                    aria-pressed={projectFilterIds.length > 0}
+                    className={cn(
+                      "relative",
+                      sidebarIconButtonClassName,
+                      projectFilterIds.length > 0 &&
+                        "bg-selected-row text-text-strong",
+                    )}
+                    data-workspace-filter-toggle=""
+                    disabled={projects.length === 0}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <ListFilterIcon />
+                    {projectFilterIds.length > 0 ? (
+                      <Badge
+                        aria-hidden="true"
+                        className="absolute -top-1 -right-1 h-4 min-w-4 px-1"
+                        data-workspace-filter-count=""
+                        variant="default"
+                      >
+                        {projectFilterIds.length}
+                      </Badge>
+                    ) : null}
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{copy.filterWorkspaces}</TooltipContent>
+            </Tooltip>
+            <PopoverContent align="end" className="w-[270px] p-lg!">
+              <Field className="flex-row items-center gap-sm">
+                <FieldLabel
+                  className="shrink-0 text-label font-medium text-foreground"
+                  htmlFor={projectFilterSelectId}
+                >
+                  {copy.projectFilterLabel}
+                </FieldLabel>
+                <ProjectFilterSelect
+                  copy={copy}
+                  id={projectFilterSelectId}
+                  onChange={onProjectFilterChange}
+                  projects={projects}
+                  selectedProjectIds={projectFilterIds}
+                />
+              </Field>
+            </PopoverContent>
+          </Popover>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 aria-label={copy.addProject}
+                className={sidebarIconButtonClassName}
                 onClick={onAddProject}
                 size="icon-xs"
                 type="button"
@@ -322,27 +381,13 @@ function SidebarPanel({
             </TooltipTrigger>
             <TooltipContent>{copy.addProject}</TooltipContent>
           </Tooltip>
-          <CreateWorkspaceDialog
+          <CreateWorkspaceButton
             copy={copy}
             onCreate={onCreateWorkspace}
             projects={projects}
-            selectedProjectId={selectedProjectId}
           />
         </div>
       </div>
-
-      {filterVisible ? (
-        <div className="shrink-0 px-xs pb-xs">
-          <Input
-            aria-label={copy.filterWorkspaces}
-            autoFocus
-            maxLength={200}
-            onChange={(event) => onFilterChange(event.currentTarget.value)}
-            placeholder={copy.filterWorkspaces}
-            value={filter}
-          />
-        </div>
-      ) : null}
 
       <ScrollArea className="min-h-0 flex-1 px-xs">
         <nav
@@ -406,22 +451,6 @@ function SidebarPanel({
               </section>
             )
           })}
-
-          {filteredWorkspaces.length === 0 && filter.length > 0 ? (
-            <div className="flex flex-col items-start gap-xs px-sm py-lg">
-              <p className="m-0 text-sidebar-helper text-muted-foreground">
-                {copy.noMatches}
-              </p>
-              <Button
-                onClick={() => onFilterChange("")}
-                size="xs"
-                type="button"
-                variant="secondary"
-              >
-                {copy.clearFilter}
-              </Button>
-            </div>
-          ) : null}
         </nav>
       </ScrollArea>
 
@@ -432,6 +461,7 @@ function SidebarPanel({
               aria-current={appSettingsActive ? "page" : undefined}
               aria-label={copy.appSettings}
               className={cn(
+                sidebarIconButtonClassName,
                 appSettingsActive && "bg-selected-row text-text-strong",
               )}
               data-app-settings-trigger=""
@@ -500,7 +530,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 aria-expanded={compactNavigationOpen}
                 aria-haspopup="dialog"
                 aria-label={props.copy.compactSidebar}
-                className="mt-xs"
+                className={cn("mt-xs", sidebarIconButtonClassName)}
                 data-workspace-navigation-toggle=""
                 onClick={(event) => openCompactNavigation(event.currentTarget)}
                 size="icon-sm"
@@ -561,6 +591,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                     aria-expanded={compactNavigationOpen}
                     aria-haspopup="dialog"
                     aria-label={`${props.copy.switchWorkspace}: ${selected.repository}/${selected.name}`}
+                    className={sidebarIconButtonClassName}
                     onClick={(event) =>
                       openCompactNavigation(event.currentTarget)
                     }
@@ -585,6 +616,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
           aria-label={props.copy.appSettings}
           className={cn(
             "mb-xs",
+            sidebarIconButtonClassName,
             props.appSettingsActive && "bg-selected-row text-text-strong",
           )}
           data-app-settings-trigger=""

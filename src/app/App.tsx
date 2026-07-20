@@ -67,6 +67,20 @@ function interactiveDemoEnabled(transport: AppTransport): boolean {
   )
 }
 
+function projectSetupDemoMode(
+  transport: AppTransport,
+): "git" | "github" | undefined {
+  if (
+    !import.meta.env.DEV ||
+    transport.kind !== "demo" ||
+    typeof window === "undefined"
+  ) {
+    return undefined
+  }
+  const value = new URLSearchParams(window.location.search).get("projectSetup")
+  return value === "git" || value === "github" ? value : undefined
+}
+
 export function App({
   appLifecycleGateway,
   appPreferencesController,
@@ -84,6 +98,7 @@ export function App({
   const [fallbackTransport] = useState(createAppTransport)
   const activeTransport = transport ?? fallbackTransport
   const interactiveDemo = interactiveDemoEnabled(activeTransport)
+  const projectSetupDemo = projectSetupDemoMode(activeTransport)
   const fallbackPreferencesController = useMemo(
     () =>
       new AppPreferencesController(
@@ -111,8 +126,9 @@ export function App({
     () =>
       createWorkspaceViewAdapter(activeTransport.kind, {
         interactiveDemo,
+        ...(projectSetupDemo === undefined ? {} : { projectSetupDemo }),
       }),
-    [activeTransport.kind, interactiveDemo],
+    [activeTransport.kind, interactiveDemo, projectSetupDemo],
   )
   const fallbackAppLifecycleGateway = useMemo(
     () => createAppLifecycleGateway(activeTransport.kind),

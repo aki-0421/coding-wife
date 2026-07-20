@@ -114,6 +114,9 @@ describe("DemoWorkspaceHistoryTransport", () => {
     if (project === undefined) {
       throw new Error("demo fixture")
     }
+    expect(selectedProject.outcome).toBe("selected")
+    expect(selectedProject.setup).toBeNull()
+    expect(project.githubRepository).toBe("aki-0421/selected-project")
     const created = await transport.request(
       workspaceHistoryCommands.createSession,
       {

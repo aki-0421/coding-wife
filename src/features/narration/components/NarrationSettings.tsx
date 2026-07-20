@@ -282,7 +282,7 @@ function NarrationSettingsForm({
             disabled={saving || !providerAvailable}
             id="narration-provider"
             onChange={(event) => {
-              const provider =
+              const provider: NarrationTtsProvider | null =
                 event.currentTarget.value === "openai" ? "openai" : null
               const nextDraft = { ...draft, provider }
               setDraft(nextDraft)

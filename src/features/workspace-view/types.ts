@@ -61,6 +61,7 @@ export interface WorkspaceRecord {
     | "unreadable"
     | "read_only"
     | "stale_branch"
+  readonly createdAt?: string
   readonly updatedAt?: string
 }
 
@@ -71,6 +72,26 @@ export interface ProjectRecord {
   readonly health: NonNullable<WorkspaceRecord["health"]>
   readonly workspaceCount: number
   readonly updatedAt: string
+}
+
+export interface ProjectSetupCandidate {
+  readonly setupId: string
+  readonly folderName: string
+  readonly gitStatus: "not_initialized" | "ready"
+  readonly githubOwnerStatus:
+    | "not_checked"
+    | "ready"
+    | "cli_missing"
+    | "auth_required"
+    | "unavailable"
+  readonly githubOwners: readonly string[]
+  readonly suggestedRepositoryName: string
+}
+
+export interface ProjectRegistrationResult {
+  readonly outcome: "selected" | "canceled" | "setup_required"
+  readonly state: WorkspaceAdapterState
+  readonly setup?: ProjectSetupCandidate
 }
 
 export interface AttachmentItem {
@@ -221,6 +242,7 @@ export interface WorkspaceViewAdapter {
   ) => Promise<WorkspaceAdapterState>
   readonly archiveWorkspace?: (
     workspaceId: string,
+    expectedGeneration?: number | null,
   ) => Promise<WorkspaceAdapterState>
   readonly saveDraft?: (
     workspaceId: string,
@@ -239,8 +261,17 @@ export interface WorkspaceViewAdapter {
   ) => Promise<WorkspaceAdapterTimelinePage>
   readonly requestAddProject?: () =>
     | void
-    | WorkspaceAdapterState
-    | Promise<void | WorkspaceAdapterState>
+    | ProjectRegistrationResult
+    | Promise<void | ProjectRegistrationResult>
+  readonly initializeProjectGit?: (
+    setupId: string,
+  ) => Promise<ProjectRegistrationResult>
+  readonly setupProjectGithub?: (
+    setupId: string,
+    owner: string,
+    repository: string,
+  ) => Promise<ProjectRegistrationResult>
+  readonly cancelProjectSetup?: (setupId: string) => Promise<void>
   readonly requestAddWorkspace?: (
     workspace: WorkspaceCreateRequest,
   ) => void | WorkspaceAdapterState | Promise<void | WorkspaceAdapterState>

@@ -3,6 +3,7 @@ import {
   type PersistedContextSnapshot,
   type PersistedTimelinePage,
   type PersistedWorkspaceDraft,
+  type WorkspacePickResponse,
   type WorkspaceStateSnapshot,
 } from "@/lib/contracts/workspace-history"
 import type {
@@ -19,6 +20,7 @@ import {
 } from "@/features/workspace-persistence/transport"
 import type {
   ContextSnapshotItem,
+  ProjectRegistrationResult,
   ReasoningEffort,
   WorkspaceAdapterState,
   WorkspaceAdapterTimelinePage,
@@ -81,6 +83,7 @@ export function projectWorkspaceState(
         ? {}
         : { attention: workspace.attention }),
       health: workspace.health,
+      createdAt: workspace.createdAt,
       updatedAt: workspace.updatedAt,
     })),
     activeWorkspaceId: state.activeWorkspaceId,
@@ -232,12 +235,67 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
     )
   }
 
-  async requestAddProject(): Promise<WorkspaceAdapterState> {
+  private projectRegistrationResult(
+    response: WorkspacePickResponse,
+  ): ProjectRegistrationResult {
+    return {
+      outcome: response.outcome,
+      state: this.absorb(response.state),
+      ...(response.setup === null
+        ? {}
+        : {
+            setup: {
+              setupId: response.setup.setupId,
+              folderName: response.setup.folderName,
+              gitStatus: response.setup.gitStatus,
+              githubOwnerStatus: response.setup.githubOwnerStatus,
+              githubOwners: response.setup.githubOwners,
+              suggestedRepositoryName: response.setup.suggestedRepositoryName,
+            },
+          }),
+    }
+  }
+
+  async requestAddProject(): Promise<ProjectRegistrationResult> {
     const response = await this.transport.request(
       workspaceHistoryCommands.pickRegister,
       undefined,
     )
-    return this.absorb(response.state)
+    return this.projectRegistrationResult(response)
+  }
+
+  async initializeProjectGit(
+    setupId: string,
+  ): Promise<ProjectRegistrationResult> {
+    return this.projectRegistrationResult(
+      await this.transport.request(
+        workspaceHistoryCommands.initializeProjectGit,
+        { setupId },
+      ),
+    )
+  }
+
+  async setupProjectGithub(
+    setupId: string,
+    owner: string,
+    repository: string,
+  ): Promise<ProjectRegistrationResult> {
+    return this.projectRegistrationResult(
+      await this.transport.request(
+        workspaceHistoryCommands.setupProjectGithub,
+        {
+          setupId,
+          owner,
+          repository,
+        },
+      ),
+    )
+  }
+
+  async cancelProjectSetup(setupId: string): Promise<void> {
+    await this.transport.request(workspaceHistoryCommands.cancelProjectSetup, {
+      setupId,
+    })
   }
 
   async requestAddWorkspace(

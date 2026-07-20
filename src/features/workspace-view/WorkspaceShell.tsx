@@ -18,12 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -55,7 +50,8 @@ import {
 import { AppSettingsView } from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
-import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
+import { ProjectSetupDialog } from "@/features/workspace-view/ProjectSetupDialog"
+import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
 import {
   workspaceTabs,
@@ -143,8 +139,13 @@ export function WorkspaceShell({
   const [appSettingsOpen, setAppSettingsOpen] = useState(false)
   const [appSettingsSection, setAppSettingsSection] =
     useState<AppSettingsSection>("general")
-  const [archiveCandidate, setArchiveCandidate] =
-    useState<WorkspaceRecord | null>(null)
+  const [archiveCandidate, setArchiveCandidate] = useState<{
+    readonly workspace: WorkspaceRecord
+    readonly expectedGeneration: number | null
+  } | null>(null)
+  const [archivePendingWorkspaceId, setArchivePendingWorkspaceId] = useState<
+    string | null
+  >(null)
   const archiveSafeActionRef = useRef<HTMLButtonElement | null>(null)
   const [systemReducedMotion, setSystemReducedMotion] = useState(
     getSystemReducedMotion,
@@ -481,14 +482,64 @@ export function WorkspaceShell({
     [reportWorkspaceAction, view],
   )
 
+  const executeArchiveWorkspace = useCallback(
+    async (workspaceId: string, expectedGeneration: number | null) => {
+      setArchivePendingWorkspaceId(workspaceId)
+      try {
+        const archived = reportWorkspaceAction(
+          await view.archiveWorkspace(workspaceId, expectedGeneration),
+        )
+        if (!archived) return false
+        setArchiveCandidate(null)
+        commitExplanationController?.revokePresentationIntent(
+          "selection_change",
+        )
+        await narrationController.dismissPresentation("explicit_cancel")
+        return true
+      } finally {
+        setArchivePendingWorkspaceId((current) =>
+          current === workspaceId ? null : current,
+        )
+      }
+    },
+    [
+      commitExplanationController,
+      narrationController,
+      reportWorkspaceAction,
+      view,
+    ],
+  )
+
+  const requestArchiveWorkspace = useCallback(
+    (workspace: WorkspaceRecord) => {
+      const hasActiveMainSession =
+        workspace.id === view.codex.activeWorkspaceId &&
+        (turnActive ||
+          view.codex.phase === "waiting" ||
+          view.codex.pendingRequests.length > 0)
+      if (hasActiveMainSession) {
+        const generation = view.codex.generation
+        setArchiveCandidate({
+          workspace,
+          expectedGeneration:
+            Number.isSafeInteger(generation) && Number(generation) > 0
+              ? generation
+              : null,
+        })
+        return
+      }
+      void executeArchiveWorkspace(workspace.id, null)
+    },
+    [executeArchiveWorkspace, turnActive, view.codex],
+  )
+
   const confirmArchiveWorkspace = useCallback(async () => {
     if (archiveCandidate === null) return
-    if (
-      reportWorkspaceAction(await view.archiveWorkspace(archiveCandidate.id))
-    ) {
-      setArchiveCandidate(null)
-    }
-  }, [archiveCandidate, reportWorkspaceAction, view])
+    await executeArchiveWorkspace(
+      archiveCandidate.workspace.id,
+      archiveCandidate.expectedGeneration,
+    )
+  }, [archiveCandidate, executeArchiveWorkspace])
 
   const dismissCommitPresentation = useCallback(() => {
     explanationFocusRestoreVersionRef.current += 1
@@ -574,15 +625,15 @@ export function WorkspaceShell({
         event.preventDefault()
         const visible = (element: HTMLElement) =>
           element.getClientRects().length > 0
-        const focusFilter = () => {
-          const inputs = Array.from(
-            document.querySelectorAll<HTMLInputElement>("input[aria-label]"),
-          ).filter(
-            (input) =>
-              input.getAttribute("aria-label") === copy.filterWorkspaces,
+        const focusProjectFilter = () => {
+          const controls = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "[data-workspace-project-filter]",
+            ),
           )
-          const filterInput = inputs.find(visible) ?? inputs[0]
-          filterInput?.focus()
+          const projectFilter = controls.find(visible) ?? controls[0]
+          projectFilter?.focus()
+          return projectFilter !== undefined
         }
 
         const filterToggles = Array.from(
@@ -592,10 +643,10 @@ export function WorkspaceShell({
         )
         const visibleFilterToggle = filterToggles.find(visible)
         if (visibleFilterToggle !== undefined) {
-          if (visibleFilterToggle.getAttribute("aria-pressed") !== "true") {
+          if (visibleFilterToggle.getAttribute("aria-expanded") !== "true") {
             visibleFilterToggle.click()
           }
-          window.requestAnimationFrame(focusFilter)
+          window.requestAnimationFrame(focusProjectFilter)
           return
         }
 
@@ -619,21 +670,12 @@ export function WorkspaceShell({
             const dialogFilterToggle = dialog?.querySelector<HTMLButtonElement>(
               "[data-workspace-filter-toggle]",
             )
-            if (dialogFilterToggle?.getAttribute("aria-pressed") !== "true") {
+            if (dialogFilterToggle?.getAttribute("aria-expanded") !== "true") {
               dialogFilterToggle?.click()
             }
             window.setTimeout(() => {
-              const dialogFilter = Array.from(
-                dialog?.querySelectorAll<HTMLInputElement>(
-                  "input[aria-label]",
-                ) ?? [],
-              ).find(
-                (input) =>
-                  input.getAttribute("aria-label") === copy.filterWorkspaces,
-              )
-              if (dialogFilter !== undefined) dialogFilter.focus()
-              else if (attempt < 4) prepareCompactFilter(attempt + 1)
-              else focusFilter()
+              if (focusProjectFilter()) return
+              if (attempt < 4) prepareCompactFilter(attempt + 1)
             }, 25)
           }
           window.setTimeout(() => prepareCompactFilter(0), 0)
@@ -641,16 +683,16 @@ export function WorkspaceShell({
         }
 
         const fallbackToggle = filterToggles[0]
-        if (fallbackToggle?.getAttribute("aria-pressed") !== "true") {
+        if (fallbackToggle?.getAttribute("aria-expanded") !== "true") {
           fallbackToggle?.click()
         }
-        window.requestAnimationFrame(focusFilter)
+        window.requestAnimationFrame(focusProjectFilter)
       }
     }
 
     window.addEventListener("keydown", handleKeyboard)
     return () => window.removeEventListener("keydown", handleKeyboard)
-  }, [appSettingsOpen, copy.filterWorkspaces, view])
+  }, [appSettingsOpen, view])
 
   const openAppSettings = (section: AppSettingsSection = "general") => {
     setAppSettingsProjectId(null)
@@ -737,30 +779,22 @@ export function WorkspaceShell({
       <WorkspaceSidebar
         appSettingsActive={appSettingsOpen}
         copy={copy}
-        filter={view.filter}
         filteredWorkspaces={view.filteredWorkspaces}
+        projectFilterIds={view.projectFilterIds}
         projects={view.projects}
-        archiveDisabledWorkspaceId={
-          turnActive ? selectedWorkspace?.id : undefined
-        }
+        archiveDisabledWorkspaceId={archivePendingWorkspaceId ?? undefined}
         onAddProject={() => void view.requestAddProject(copy.pickerUnavailable)}
         onCreateWorkspace={view.addWorkspace}
-        onFilterChange={view.setFilter}
+        onProjectFilterChange={view.setProjectFilterIds}
         onOpenSettings={() =>
           openAppSettings(view.projects.length === 0 ? "projects" : "general")
         }
-        onRequestArchive={setArchiveCandidate}
+        onRequestArchive={requestArchiveWorkspace}
         onSelectWorkspace={(workspaceId) => {
           setAppSettingsProjectId(null)
           setAppSettingsOpen(false)
           view.setSelectedWorkspaceId(workspaceId)
         }}
-        selectedProjectId={
-          selectedWorkspace?.projectId ??
-          view.projects.find(
-            (project) => project.name === selectedWorkspace?.repository,
-          )?.id
-        }
         selectedWorkspace={selectedWorkspace}
         selectedWorkspaceId={view.selectedWorkspaceId}
       />
@@ -933,34 +967,42 @@ export function WorkspaceShell({
         </Tabs>
       ) : appSettingsOpen ? null : (
         <section className="workspace-tabs bg-background">
-          <Empty className="row-span-2 row-start-1 w-full items-stretch gap-xl p-10 text-start max-[840px]:p-xl">
-            <EmptyHeader className="mx-auto w-full max-w-[40rem] items-start gap-sm text-start">
+          <Empty className="row-span-2 row-start-1 w-full items-stretch gap-lg p-10 text-start max-[840px]:p-xl">
+            <EmptyHeader className="mx-auto w-full max-w-[48rem] items-start text-start">
               <EmptyTitle className="text-lg font-semibold tracking-tight">
-                {copy.createWorkspace.firstTitle}
+                {copy.createWorkspace.selectProject}
               </EmptyTitle>
-              <EmptyDescription className="text-body">
-                {copy.createWorkspace.description}
-              </EmptyDescription>
             </EmptyHeader>
-            <WorkspaceCreateForm
-              ariaLabel={copy.createWorkspace.firstTitle}
-              className="mx-auto max-w-[40rem]"
-              copy={copy}
-              onAddProject={() =>
-                void view.requestAddProject(copy.pickerUnavailable)
-              }
-              onCreate={view.addWorkspace}
-              prominent
-              projects={view.projects}
-              selectedProjectId={view.projects[0]?.id}
-            />
+            <div className="mx-auto flex w-full max-w-[48rem] flex-col items-stretch">
+              <WorkspaceProjectSelection
+                copy={copy}
+                onAddProject={() =>
+                  void view.requestAddProject(copy.pickerUnavailable)
+                }
+                onCreate={view.addWorkspace}
+                projects={view.projects}
+              />
+            </div>
           </Empty>
         </section>
       )}
 
+      {view.projectSetup === null ? null : (
+        <ProjectSetupDialog
+          copy={copy}
+          key={view.projectSetup.candidate.setupId}
+          onCancel={() => void view.cancelProjectSetup()}
+          onInitializeGit={() => void view.initializeProjectGit()}
+          onSetupGithub={(owner, repository) =>
+            void view.setupProjectGithub(owner, repository)
+          }
+          setup={view.projectSetup}
+        />
+      )}
+
       <Dialog
         onOpenChange={(open) => {
-          if (!open && view.workspaceAction !== "archive") {
+          if (!open && archivePendingWorkspaceId === null) {
             setArchiveCandidate(null)
           }
         }}
@@ -969,7 +1011,7 @@ export function WorkspaceShell({
         <DialogContent
           onCloseAutoFocus={(event) => {
             event.preventDefault()
-            const archivedId = archiveCandidate?.id
+            const archivedId = archiveCandidate?.workspace.id
             if (archivedId === undefined) return
             const archiveButton = [
               ...document.querySelectorAll<HTMLElement>(
@@ -985,17 +1027,17 @@ export function WorkspaceShell({
             event.preventDefault()
             archiveSafeActionRef.current?.focus()
           }}
-          showCloseButton={view.workspaceAction !== "archive"}
+          showCloseButton={archivePendingWorkspaceId === null}
         >
           <DialogHeader>
             <DialogTitle>{copy.archiveDialog.title}</DialogTitle>
             <DialogDescription>
-              {copy.archiveDialog.body(archiveCandidate?.name ?? "")}
+              {copy.archiveDialog.body(archiveCandidate?.workspace.name ?? "")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button
-              disabled={view.workspaceAction === "archive"}
+              disabled={archivePendingWorkspaceId !== null}
               onClick={() => setArchiveCandidate(null)}
               ref={archiveSafeActionRef}
               type="button"
@@ -1004,12 +1046,12 @@ export function WorkspaceShell({
               {copy.archiveDialog.cancel}
             </Button>
             <Button
-              disabled={view.workspaceAction === "archive"}
+              disabled={archivePendingWorkspaceId !== null}
               onClick={() => void confirmArchiveWorkspace()}
               type="button"
               variant="destructive"
             >
-              {view.workspaceAction === "archive"
+              {archivePendingWorkspaceId !== null
                 ? copy.archiveDialog.working
                 : copy.archiveDialog.confirm}
             </Button>

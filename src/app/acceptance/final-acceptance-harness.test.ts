@@ -128,21 +128,28 @@ describe("final acceptance evidence harness", () => {
     expect(percentile95([5, 1, 4, 3, 2])).toBe(5)
   })
 
-  it("keeps 200-workspace filter and selection probes below the 100ms p95 budget", () => {
+  it("keeps 200-workspace project filter and selection probes below the 100ms p95 budget", () => {
     const workspaces = createAcceptanceWorkspaces()
     let selectedId = ""
     let filteredCount = 0
     const evidence = measureAcceptanceBudget(100, 100, (sample) => {
-      const query = `workspace-${String((sample % 20) + 1).padStart(3, "0")}`
-      const targetId = `acceptance-workspace-${query.slice(-3)}`
-      const projection = projectWorkspaceNavigation(workspaces, targetId, query)
+      const targetId = `acceptance-workspace-${String((sample % 200) + 1).padStart(3, "0")}`
+      const projectFilterIds = [
+        `acceptance-project-${String(sample % 8).padStart(2, "0")}`,
+        `acceptance-project-${String((sample + 1) % 8).padStart(2, "0")}`,
+      ]
+      const projection = projectWorkspaceNavigation(
+        workspaces,
+        targetId,
+        projectFilterIds,
+      )
       selectedId = projection.selectedWorkspace?.id ?? ""
       filteredCount = projection.filteredWorkspaces.length
     })
 
     expect(workspaces).toHaveLength(200)
     expect(selectedId).toMatch(/^acceptance-workspace-/u)
-    expect(filteredCount).toBeGreaterThan(0)
+    expect(filteredCount).toBe(50)
     expect(evidence.sampleCount).toBe(100)
     expect(evidence.passed).toBe(true)
     expect(evidence.p95Ms).toBeLessThanOrEqual(100)

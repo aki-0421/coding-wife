@@ -34,8 +34,7 @@ const copy: Readonly<
     SupportedLocale,
     {
       readonly addWorkspace: string
-      readonly createWorkspace: string
-      readonly workspaceName: string
+      readonly selectProject: string
       readonly add: string
       readonly composer: string
       readonly stop: string
@@ -66,8 +65,7 @@ const copy: Readonly<
 > = {
   en: {
     addWorkspace: "Add workspace",
-    createWorkspace: "Create workspace",
-    workspaceName: "Workspace name",
+    selectProject: "Select a project",
     add: "Add",
     composer: "Ask Codex to plan, build, explain, or fix anything…",
     stop: "Stop",
@@ -97,8 +95,7 @@ const copy: Readonly<
   },
   ja: {
     addWorkspace: "ワークスペースを追加",
-    createWorkspace: "ワークスペースを作成",
-    workspaceName: "ワークスペース名",
+    selectProject: "プロジェクトを選択",
     add: "追加",
     composer: "Codexに計画、実装、説明、修正を依頼…",
     stop: "停止",
@@ -209,18 +206,13 @@ describe("final bilingual App acceptance", () => {
         screen.getByRole("button", { name: localized.addWorkspace }),
       )
       const createDialog = await screen.findByRole("dialog", {
-        name: localized.createWorkspace,
+        name: localized.selectProject,
       })
-      const workspaceName = within(createDialog).getByRole("textbox", {
-        name: localized.workspaceName,
+      const projectCard = within(createDialog).getByRole("button", {
+        name: "coding-wife",
       })
-      await waitFor(() => expect(workspaceName).toHaveFocus())
-      await user.type(workspaceName, "acceptance-flow")
-      await user.click(
-        within(createDialog).getByRole("button", {
-          name: localized.createWorkspace,
-        }),
-      )
+      await waitFor(() => expect(projectCard).toHaveFocus())
+      await user.click(projectCard)
 
       const composer = await screen.findByPlaceholderText(localized.composer)
       await user.type(composer, "Complete the final acceptance flow")
@@ -454,7 +446,7 @@ describe("final bilingual App acceptance", () => {
         viewport: "desktop",
         assertions: [
           "Control-Tab cycled the App tabs in both directions.",
-          "Workspace creation focused its first field.",
+          "Workspace creation focused its first project card.",
           "The explicit caption used a polite log and restored trigger focus on close.",
         ],
       })

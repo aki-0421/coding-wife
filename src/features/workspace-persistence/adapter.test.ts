@@ -32,6 +32,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
       lifecycle: "in_progress",
       attention: "test_failed",
       health: "ready",
+      createdAt: "2026-07-18T00:00:00.000Z",
       updatedAt: "2026-07-18T00:01:00.000Z",
     })
     expect(projected.timeline[0]).toMatchObject({
@@ -247,10 +248,13 @@ describe("PersistentWorkspaceViewAdapter", () => {
     )
     const initial = await adapter.loadState()
     const selected = await adapter.requestAddProject()
-    const project = (selected.projects ?? []).find(
+    const project = (selected.state.projects ?? []).find(
       (candidate) => candidate.id === "project-demo-selected",
     )
     if (project === undefined) throw new Error("demo fixture")
+    expect(selected.outcome).toBe("selected")
+    expect(selected.setup).toBeUndefined()
+    expect(project.githubRepository).toBe("aki-0421/selected-project")
     const created = await adapter.requestAddWorkspace({
       projectId: project.id,
       name: "Adapter session",
@@ -270,6 +274,49 @@ describe("PersistentWorkspaceViewAdapter", () => {
     expect(
       afterArchive.workspaces.some((workspace) => workspace.id === createdId),
     ).toBe(false)
+  })
+
+  it("completes Git and GitHub setup before registering a project", async () => {
+    const adapter = new PersistentWorkspaceViewAdapter(
+      new DemoWorkspaceHistoryTransport({ projectSetup: "git" }),
+    )
+
+    const selected = await adapter.requestAddProject()
+    expect(selected).toMatchObject({
+      outcome: "setup_required",
+      setup: {
+        setupId: "project-setup-demo",
+        gitStatus: "not_initialized",
+        githubOwnerStatus: "not_checked",
+      },
+    })
+    if (selected.setup === undefined) throw new Error("demo fixture")
+
+    const initialized = await adapter.initializeProjectGit(
+      selected.setup.setupId,
+    )
+    expect(initialized).toMatchObject({
+      outcome: "setup_required",
+      setup: {
+        gitStatus: "ready",
+        githubOwnerStatus: "ready",
+        githubOwners: ["aki-0421", "openai-build-week"],
+      },
+    })
+
+    const registered = await adapter.setupProjectGithub(
+      selected.setup.setupId,
+      "openai-build-week",
+      "new-companion-tool",
+    )
+    expect(registered.outcome).toBe("selected")
+    expect(
+      registered.state.projects?.find(
+        (project) => project.id === "project-demo-selected",
+      ),
+    ).toMatchObject({
+      githubRepository: "openai-build-week/new-companion-tool",
+    })
   })
 
   it("rehydrates persisted native state in a fresh adapter after reload", async () => {

@@ -531,6 +531,36 @@ pub struct WorkspaceStateSnapshot {
 pub enum WorkspacePickOutcome {
     Selected,
     Canceled,
+    SetupRequired,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectSetupGitStatus {
+    NotInitialized,
+    Ready,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectSetupGithubOwnerStatus {
+    NotChecked,
+    Ready,
+    CliMissing,
+    AuthRequired,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProjectSetupView {
+    pub schema_version: u16,
+    pub setup_id: String,
+    pub folder_name: String,
+    pub git_status: ProjectSetupGitStatus,
+    pub github_owner_status: ProjectSetupGithubOwnerStatus,
+    pub github_owners: Vec<String>,
+    pub suggested_repository_name: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -539,6 +569,21 @@ pub struct WorkspacePickResponse {
     pub schema_version: u16,
     pub outcome: WorkspacePickOutcome,
     pub state: WorkspaceStateSnapshot,
+    pub setup: Option<ProjectSetupView>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProjectSetupRequest {
+    pub setup_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProjectSetupGithubRequest {
+    pub setup_id: String,
+    pub owner: String,
+    pub repository: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -891,6 +936,7 @@ mod tests {
             schema_version: 1,
             outcome: WorkspacePickOutcome::Selected,
             state: state(),
+            setup: None,
         });
         assert_eq!(pick["state"], fixture["state"]);
         assert_eq!(pick["outcome"], "selected");

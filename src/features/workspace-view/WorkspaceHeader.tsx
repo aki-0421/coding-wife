@@ -298,7 +298,7 @@ export function WorkspaceHeader({
   return (
     <header className="workspace-header border-b border-divider bg-surface">
       <div className="flex h-[40px] min-w-0 items-center gap-sm px-xl">
-        <RepositoryAvatar workspace={workspace} />
+        <RepositoryAvatar githubRepository={workspace.githubRepository} />
         <Breadcrumb aria-label={copy.repositoryBreadcrumb} className="min-w-0">
           <BreadcrumbList className="min-w-0 flex-nowrap gap-sm text-display">
             <BreadcrumbItem className="min-w-0 max-w-56 shrink">

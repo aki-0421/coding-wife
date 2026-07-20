@@ -361,6 +361,7 @@ export function createAcceptanceWorkspaces(
   }
   return Array.from({ length: count }, (_, index) => ({
     id: `acceptance-workspace-${String(index + 1).padStart(3, "0")}`,
+    projectId: `acceptance-project-${String(index % 8).padStart(2, "0")}`,
     repository: `fixture/repository-${String(index % 8).padStart(2, "0")}`,
     name: `workspace-${String(index + 1).padStart(3, "0")}`,
     branch: index % 2 === 0 ? "develop" : `feature/batch-${String(index % 20)}`,

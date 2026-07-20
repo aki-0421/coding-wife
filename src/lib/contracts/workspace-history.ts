@@ -27,6 +27,9 @@ export const workspaceHistorySchemaVersion = 1 as const
 export const workspaceHistoryCommands = {
   list: "workspace_list",
   pickRegister: "workspace_pick_register",
+  initializeProjectGit: "workspace_project_setup_git_init",
+  setupProjectGithub: "workspace_project_setup_github",
+  cancelProjectSetup: "workspace_project_setup_cancel",
   createSession: "workspace_create_session",
   select: "workspace_select",
   recheck: "workspace_recheck",
@@ -213,8 +216,33 @@ export interface WorkspaceStateSnapshot {
 
 export interface WorkspacePickResponse {
   readonly schemaVersion: typeof workspaceHistorySchemaVersion
-  readonly outcome: "selected" | "canceled"
+  readonly outcome: "selected" | "canceled" | "setup_required"
   readonly state: WorkspaceStateSnapshot
+  readonly setup: ProjectSetupView | null
+}
+
+export interface ProjectSetupView {
+  readonly schemaVersion: typeof workspaceHistorySchemaVersion
+  readonly setupId: string
+  readonly folderName: string
+  readonly gitStatus: "not_initialized" | "ready"
+  readonly githubOwnerStatus:
+    | "not_checked"
+    | "ready"
+    | "cli_missing"
+    | "auth_required"
+    | "unavailable"
+  readonly githubOwners: readonly string[]
+  readonly suggestedRepositoryName: string
+}
+
+export interface ProjectSetupRequest {
+  readonly setupId: string
+}
+
+export interface ProjectSetupGithubRequest extends ProjectSetupRequest {
+  readonly owner: string
+  readonly repository: string
 }
 
 export interface WorkspaceCreateSessionRequest {
@@ -318,6 +346,9 @@ export interface WorkspaceCommandErrorEnvelope {
 export interface WorkspaceHistoryRequestMap {
   workspace_list: undefined
   workspace_pick_register: undefined
+  workspace_project_setup_git_init: ProjectSetupRequest
+  workspace_project_setup_github: ProjectSetupGithubRequest
+  workspace_project_setup_cancel: ProjectSetupRequest
   workspace_create_session: WorkspaceCreateSessionRequest
   workspace_select: WorkspaceSelectRequest
   workspace_recheck: WorkspaceRecheckRequest
@@ -343,6 +374,9 @@ export interface WorkspaceHistoryRequestMap {
 export interface WorkspaceHistoryResponseMap {
   workspace_list: WorkspaceStateSnapshot
   workspace_pick_register: WorkspacePickResponse
+  workspace_project_setup_git_init: WorkspacePickResponse
+  workspace_project_setup_github: WorkspacePickResponse
+  workspace_project_setup_cancel: WorkspacePickResponse
   workspace_create_session: WorkspaceStateSnapshot
   workspace_select: WorkspaceStateSnapshot
   workspace_recheck: WorkspaceStateSnapshot
@@ -457,6 +491,25 @@ function isGithubRepository(value: unknown): value is string | null {
     value === null ||
     (typeof value === "string" &&
       /^[A-Za-z0-9_.-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/.test(value))
+  )
+}
+
+function isGithubOwner(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value !== "." &&
+    value !== ".." &&
+    /^[A-Za-z0-9_.-]{1,39}$/.test(value)
+  )
+}
+
+function isGithubRepositoryName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value !== "." &&
+    value !== ".." &&
+    !value.toLowerCase().endsWith(".git") &&
+    /^[A-Za-z0-9_.-]{1,100}$/.test(value)
   )
 }
 
@@ -1364,14 +1417,69 @@ export function parseWorkspaceStateSnapshot(
   }
 }
 
+function parseProjectSetupView(value: unknown): ProjectSetupView {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "schemaVersion",
+      "setupId",
+      "folderName",
+      "gitStatus",
+      "githubOwnerStatus",
+      "githubOwners",
+      "suggestedRepositoryName",
+    ]) ||
+    value.schemaVersion !== workspaceHistorySchemaVersion ||
+    !validatePublicString(value.setupId, 128) ||
+    !/^project-setup-[A-Za-z0-9-]+$/.test(value.setupId) ||
+    !validatePublicString(value.folderName, 80) ||
+    !oneOf(value.gitStatus, ["not_initialized", "ready"] as const) ||
+    !oneOf(value.githubOwnerStatus, [
+      "not_checked",
+      "ready",
+      "cli_missing",
+      "auth_required",
+      "unavailable",
+    ] as const) ||
+    !Array.isArray(value.githubOwners) ||
+    value.githubOwners.length > 101 ||
+    value.githubOwners.some((owner) => !isGithubOwner(owner)) ||
+    new Set(value.githubOwners).size !== value.githubOwners.length ||
+    !isGithubRepositoryName(value.suggestedRepositoryName) ||
+    (value.githubOwnerStatus === "ready") !== value.githubOwners.length > 0 ||
+    (value.gitStatus === "not_initialized" &&
+      value.githubOwnerStatus !== "not_checked")
+  ) {
+    return violation()
+  }
+  return {
+    schemaVersion: 1,
+    setupId: value.setupId,
+    folderName: value.folderName,
+    gitStatus: value.gitStatus,
+    githubOwnerStatus: value.githubOwnerStatus,
+    githubOwners: value.githubOwners as string[],
+    suggestedRepositoryName: value.suggestedRepositoryName,
+  }
+}
+
 export function parseWorkspacePickResponse(
   value: unknown,
 ): WorkspacePickResponse {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["schemaVersion", "outcome", "state"]) ||
+    !hasExactKeys(value, ["schemaVersion", "outcome", "state", "setup"]) ||
     value.schemaVersion !== workspaceHistorySchemaVersion ||
-    !oneOf(value.outcome, ["selected", "canceled"] as const)
+    !oneOf(value.outcome, [
+      "selected",
+      "canceled",
+      "setup_required",
+    ] as const) ||
+    !(
+      value.setup === null ||
+      (value.outcome === "setup_required" && isRecord(value.setup))
+    ) ||
+    (value.outcome === "setup_required") !== (value.setup !== null)
   ) {
     return violation()
   }
@@ -1379,6 +1487,7 @@ export function parseWorkspacePickResponse(
     schemaVersion: 1,
     outcome: value.outcome,
     state: parseWorkspaceStateSnapshot(value.state),
+    setup: value.setup === null ? null : parseProjectSetupView(value.setup),
   }
 }
 
@@ -1471,6 +1580,9 @@ export function parseWorkspaceHistoryResponse<
         value,
       ) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.pickRegister:
+    case workspaceHistoryCommands.initializeProjectGit:
+    case workspaceHistoryCommands.setupProjectGithub:
+    case workspaceHistoryCommands.cancelProjectSetup:
       return parseWorkspacePickResponse(value) as WorkspaceHistoryResponseMap[K]
     case workspaceHistoryCommands.updateLifecycle:
     case workspaceHistoryCommands.cancel:

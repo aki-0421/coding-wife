@@ -160,8 +160,36 @@ describe("workspace history contract", () => {
         schemaVersion: 1,
         outcome: "selected",
         state: fixture.state,
+        setup: null,
       }),
-    ).toEqual({ schemaVersion: 1, outcome: "selected", state: fixture.state })
+    ).toEqual({
+      schemaVersion: 1,
+      outcome: "selected",
+      state: fixture.state,
+      setup: null,
+    })
+    expect(
+      parseWorkspacePickResponse({
+        schemaVersion: 1,
+        outcome: "setup_required",
+        state: fixture.state,
+        setup: {
+          schemaVersion: 1,
+          setupId: "project-setup-fixture",
+          folderName: "new-project",
+          gitStatus: "ready",
+          githubOwnerStatus: "ready",
+          githubOwners: ["fixture-user", "fixture-org"],
+          suggestedRepositoryName: "new-project",
+        },
+      }),
+    ).toMatchObject({
+      outcome: "setup_required",
+      setup: {
+        setupId: "project-setup-fixture",
+        githubOwners: ["fixture-user", "fixture-org"],
+      },
+    })
   })
 
   it("routes each command to its exact parser", () => {
