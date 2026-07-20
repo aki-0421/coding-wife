@@ -1,6 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
-  AudioLinesIcon,
   CircleAlertIcon,
   KeyRoundIcon,
   Volume2Icon,
@@ -18,15 +17,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { Separator } from "@/components/ui/separator"
+import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -47,11 +41,6 @@ import {
   useNarrationSnapshot,
 } from "@/features/narration/hooks"
 import { useI18n } from "@/features/localization"
-
-const speedOptions = Array.from(
-  { length: 11 },
-  (_, index) => 0.75 + index * 0.05,
-)
 
 interface NarrationDraft {
   readonly enabled: boolean
@@ -188,12 +177,7 @@ function NarrationSettingsForm({
       className="flex max-w-[780px] flex-col gap-xl"
       data-narration-settings
     >
-      <div className="min-w-0">
-        <h2 className="m-0 text-headline text-text-strong">{heading}</h2>
-        <p className="m-0 mt-xs max-w-[68ch] text-caption text-muted-foreground">
-          {copy.description}
-        </p>
-      </div>
+      <h2 className="m-0 text-headline text-text-strong">{heading}</h2>
 
       {snapshot.settingsStatus === "error" ? (
         <Alert>
@@ -223,9 +207,6 @@ function NarrationSettingsForm({
               setDraft((current) => ({ ...current, enabled }))
             }
           />
-          <FieldDescription className="col-start-1">
-            {copy.enableDescription}
-          </FieldDescription>
         </Field>
 
         <Field data-disabled={!providerAvailable || undefined}>
@@ -253,7 +234,6 @@ function NarrationSettingsForm({
               <NativeSelectOption value="openai">OpenAI</NativeSelectOption>
             ) : null}
           </NativeSelect>
-          <FieldDescription>{copy.providerDescription}</FieldDescription>
         </Field>
       </FieldGroup>
 
@@ -291,9 +271,7 @@ function NarrationSettingsForm({
               </div>
               <Input
                 aria-describedby={
-                  apiKeyValid
-                    ? "narration-openai-api-key-description"
-                    : "narration-openai-api-key-description narration-openai-api-key-error"
+                  apiKeyValid ? undefined : "narration-openai-api-key-error"
                 }
                 aria-invalid={!apiKeyValid}
                 autoComplete="off"
@@ -313,9 +291,6 @@ function NarrationSettingsForm({
                 type="password"
                 value={draft.apiKey}
               />
-              <FieldDescription id="narration-openai-api-key-description">
-                {copy.apiKeyDescription}
-              </FieldDescription>
               {!apiKeyValid ? (
                 <p
                   className="m-0 text-caption text-destructive"
@@ -354,81 +329,131 @@ function NarrationSettingsForm({
               ) : null}
             </Field>
 
-            <Field>
-              <FieldLabel htmlFor="narration-model">{copy.model}</FieldLabel>
-              <NativeSelect
-                className="w-full max-w-72"
-                disabled={saving}
-                id="narration-model"
-                onChange={(event) => {
-                  const model = event.currentTarget.value as OpenAiTtsModel
-                  setDraft((current) => ({
-                    ...current,
-                    model,
-                  }))
-                }}
-                value={draft.model}
-              >
-                {openAiTtsModels.map((model) => (
-                  <NativeSelectOption key={model} value={model}>
-                    {model}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-              <FieldDescription>{copy.modelDescription}</FieldDescription>
-            </Field>
+            <div className="grid gap-lg sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="narration-model">{copy.model}</FieldLabel>
+                <NativeSelect
+                  className="w-52 max-w-full"
+                  disabled={saving}
+                  id="narration-model"
+                  onChange={(event) => {
+                    const model = event.currentTarget.value as OpenAiTtsModel
+                    setDraft((current) => ({
+                      ...current,
+                      model,
+                    }))
+                  }}
+                  value={draft.model}
+                >
+                  {openAiTtsModels.map((model) => (
+                    <NativeSelectOption key={model} value={model}>
+                      {model}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
 
-            <Field>
-              <FieldLabel htmlFor="narration-voice">{copy.voice}</FieldLabel>
-              <NativeSelect
-                className="w-full max-w-72"
-                disabled={saving}
-                id="narration-voice"
-                onChange={(event) => {
-                  const voice = event.currentTarget.value as OpenAiTtsVoice
-                  setDraft((current) => ({
-                    ...current,
-                    voice,
-                  }))
-                }}
-                value={draft.voice}
-              >
-                {openAiTtsVoices.map((voice) => (
-                  <NativeSelectOption key={voice} value={voice}>
-                    {voice}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-              <FieldDescription>{copy.voiceDescription}</FieldDescription>
-            </Field>
+              <Field>
+                <FieldLabel htmlFor="narration-voice">{copy.voice}</FieldLabel>
+                <NativeSelect
+                  className="w-52 max-w-full"
+                  disabled={saving}
+                  id="narration-voice"
+                  onChange={(event) => {
+                    const voice = event.currentTarget.value as OpenAiTtsVoice
+                    setDraft((current) => ({
+                      ...current,
+                      voice,
+                    }))
+                  }}
+                  value={draft.voice}
+                >
+                  {openAiTtsVoices.map((voice) => (
+                    <NativeSelectOption key={voice} value={voice}>
+                      {voice}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+            </div>
 
-            <Field>
-              <FieldLabel htmlFor="narration-speed">{copy.speed}</FieldLabel>
-              <NativeSelect
-                className="w-full max-w-44"
-                disabled={saving}
-                id="narration-speed"
-                onChange={(event) => {
-                  const speed = Number(event.currentTarget.value)
-                  setDraft((current) => ({ ...current, speed }))
-                }}
-                value={draft.speed.toFixed(2)}
-              >
-                {speedOptions.map((speed) => (
-                  <NativeSelectOption key={speed} value={speed.toFixed(2)}>
-                    {speed.toFixed(2)}×
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-              <FieldDescription>{copy.speedDescription}</FieldDescription>
-            </Field>
+            <div className="grid items-end gap-lg sm:grid-cols-2">
+              <Field>
+                <div className="flex items-center justify-between gap-sm">
+                  <FieldLabel htmlFor="narration-speed">
+                    {copy.speed}
+                  </FieldLabel>
+                  <output
+                    className="font-mono text-label text-muted-foreground"
+                    htmlFor="narration-speed"
+                  >
+                    {draft.speed.toFixed(2)}×
+                  </output>
+                </div>
+                <Slider
+                  aria-label={copy.speed}
+                  disabled={saving}
+                  id="narration-speed"
+                  max={1.25}
+                  min={0.75}
+                  onValueChange={(value) => {
+                    const rawSpeed = value[0]
+                    if (rawSpeed === undefined) return
+                    const speed = Math.round(rawSpeed * 100) / 100
+                    setDraft((current) => ({ ...current, speed }))
+                  }}
+                  step={0.05}
+                  value={[draft.speed]}
+                />
+              </Field>
+
+              <div className="flex flex-wrap items-center gap-sm">
+                <Button
+                  disabled={!canTest}
+                  onClick={() => void playTest()}
+                  type="button"
+                  variant="secondary"
+                >
+                  <Volume2Icon aria-hidden="true" data-icon="inline-start" />
+                  {copy.test}
+                </Button>
+                <Button
+                  disabled={
+                    snapshot.test.status !== "preparing" &&
+                    snapshot.test.status !== "playing"
+                  }
+                  onClick={() => void controller.cancelTest()}
+                  type="button"
+                  variant="outline"
+                >
+                  <VolumeXIcon aria-hidden="true" data-icon="inline-start" />
+                  {copy.cancelTest}
+                </Button>
+              </div>
+            </div>
           </FieldGroup>
 
-          <Alert className="mt-lg">
-            <AudioLinesIcon aria-hidden="true" />
-            <AlertTitle>{copy.openAi}</AlertTitle>
-            <AlertDescription>{copy.aiDisclosure}</AlertDescription>
-          </Alert>
+          {snapshot.test.text ? (
+            <div
+              aria-live="polite"
+              className="mt-lg rounded-control border border-divider bg-app-bg px-md py-sm"
+              data-narration-test-status={snapshot.test.status}
+              ref={testCaptionRef}
+              role={snapshot.test.status === "unavailable" ? "alert" : "status"}
+            >
+              <p className="m-0 text-label text-muted-foreground">
+                {copy.testCaption}
+              </p>
+              <p className="m-0 mt-xxs text-caption text-foreground">
+                {snapshot.test.text}
+              </p>
+              {snapshot.test.errorCode ? (
+                <p className="m-0 mt-xs font-mono text-label text-destructive">
+                  {snapshot.test.errorCode}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </TabsContent>
       </Tabs>
 
@@ -445,62 +470,14 @@ function NarrationSettingsForm({
           {copy.discard}
         </Button>
         <Badge variant={dirty ? "running" : "outline"}>{statusLabel}</Badge>
-      </div>
-
-      <Separator />
-
-      <div className="flex flex-col gap-sm">
-        <div className="flex flex-wrap items-center gap-sm">
-          <Button
-            disabled={!canTest}
-            onClick={() => void playTest()}
-            type="button"
-            variant="secondary"
-          >
-            <Volume2Icon aria-hidden="true" data-icon="inline-start" />
-            {copy.test}
-          </Button>
-          <Button
-            disabled={
-              snapshot.test.status !== "preparing" &&
-              snapshot.test.status !== "playing"
-            }
-            onClick={() => void controller.cancelTest()}
-            type="button"
-            variant="outline"
-          >
-            <VolumeXIcon aria-hidden="true" data-icon="inline-start" />
-            {copy.cancelTest}
-          </Button>
-          <Button
-            onClick={() => setResetOpen(true)}
-            type="button"
-            variant="destructive"
-          >
-            {copy.reset}
-          </Button>
-        </div>
-        {snapshot.test.text ? (
-          <div
-            aria-live="polite"
-            className="rounded-control border border-divider bg-app-bg px-md py-sm"
-            data-narration-test-status={snapshot.test.status}
-            ref={testCaptionRef}
-            role={snapshot.test.status === "unavailable" ? "alert" : "status"}
-          >
-            <p className="m-0 text-label text-muted-foreground">
-              {copy.testCaption}
-            </p>
-            <p className="m-0 mt-xxs text-caption text-foreground">
-              {snapshot.test.text}
-            </p>
-            {snapshot.test.errorCode ? (
-              <p className="m-0 mt-xs font-mono text-label text-destructive">
-                {snapshot.test.errorCode}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        <Button
+          className="sm:ml-auto"
+          onClick={() => setResetOpen(true)}
+          type="button"
+          variant="destructive"
+        >
+          {copy.reset}
+        </Button>
       </div>
 
       <Dialog onOpenChange={setResetOpen} open={resetOpen}>

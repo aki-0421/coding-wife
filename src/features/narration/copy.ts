@@ -5,29 +5,21 @@ import type {
 } from "@/features/narration/controller"
 
 export interface NarrationCopy {
-  readonly description: string
   readonly enable: string
-  readonly enableDescription: string
   readonly provider: string
-  readonly providerDescription: string
   readonly noProvider: string
   readonly providerTabsLabel: string
   readonly openAi: string
   readonly apiKey: string
   readonly apiKeyPlaceholder: string
-  readonly apiKeyDescription: string
   readonly apiKeyInvalid: string
   readonly apiKeyConfigured: string
   readonly apiKeyNotConfigured: string
   readonly clearApiKey: string
   readonly apiKeyWillBeRemoved: string
   readonly model: string
-  readonly modelDescription: string
   readonly voice: string
-  readonly voiceDescription: string
   readonly speed: string
-  readonly speedDescription: string
-  readonly aiDisclosure: string
   readonly save: string
   readonly discard: string
   readonly reset: string
@@ -58,20 +50,13 @@ export interface NarrationCopy {
 
 export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
   ja: {
-    description:
-      "字幕を正本とし、選択したプロバイダーで同じ内容を任意に読み上げます。",
     enable: "TTSを有効にする",
-    enableDescription:
-      "有効なAPIキーを入力し、使用するプロバイダーを選ぶと有効にできます。",
     provider: "TTSプロバイダー",
-    providerDescription: "設定済みのプロバイダーだけを選択できます。",
     noProvider: "設定済みのプロバイダーがありません",
     providerTabsLabel: "プロバイダー設定",
     openAi: "OpenAI",
     apiKey: "APIキー",
     apiKeyPlaceholder: "sk-…",
-    apiKeyDescription:
-      "保存済みのキーはこの画面へ返しません。新しいキーを入力した時だけ置き換えます。",
     apiKeyInvalid:
       "APIキーには英数字、ハイフン、アンダースコア、ピリオドだけを使用できます。",
     apiKeyConfigured: "APIキー設定済み",
@@ -79,13 +64,8 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
     clearApiKey: "APIキーを削除",
     apiKeyWillBeRemoved: "保存するとAPIキーを削除し、TTSを無効にします。",
     model: "TTSモデル",
-    modelDescription: "OpenAI Speech APIで使用するモデルです。",
     voice: "ボイス",
-    voiceDescription:
-      "AI生成の組み込み音声です。日本語にも対応しますが、英語向けに最適化されています。",
     speed: "読み上げ速度",
-    speedDescription: "0.75〜1.25倍",
-    aiDisclosure: "読み上げ音声はAIによって生成され、人間の声ではありません。",
     save: "音声設定を保存",
     discard: "変更を破棄",
     reset: "音声設定をリセット",
@@ -128,20 +108,13 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
     },
   },
   en: {
-    description:
-      "Captions remain the source of truth. An optional provider can read the same content aloud.",
     enable: "Enable TTS",
-    enableDescription:
-      "Enter a valid API key and select its provider before enabling TTS.",
     provider: "TTS provider",
-    providerDescription: "Only configured providers can be selected.",
     noProvider: "No configured providers",
     providerTabsLabel: "Provider settings",
     openAi: "OpenAI",
     apiKey: "API key",
     apiKeyPlaceholder: "sk-…",
-    apiKeyDescription:
-      "The saved key is never returned to this screen. Enter a new key only when you want to replace it.",
     apiKeyInvalid:
       "Use only letters, numbers, hyphens, underscores, and periods.",
     apiKeyConfigured: "API key configured",
@@ -149,14 +122,8 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
     clearApiKey: "Remove API key",
     apiKeyWillBeRemoved: "Saving will remove the API key and disable TTS.",
     model: "TTS model",
-    modelDescription: "The model used with the OpenAI Speech API.",
     voice: "Voice",
-    voiceDescription:
-      "A built-in AI-generated voice. Japanese is supported, though voices are optimized for English.",
     speed: "Speech speed",
-    speedDescription: "0.75–1.25×",
-    aiDisclosure:
-      "Speech is AI-generated and is not the voice of a human person.",
     save: "Save audio settings",
     discard: "Discard changes",
     reset: "Reset audio settings",
