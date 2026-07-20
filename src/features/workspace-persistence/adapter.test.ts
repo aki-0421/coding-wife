@@ -251,6 +251,9 @@ describe("PersistentWorkspaceViewAdapter", () => {
       (candidate) => candidate.id === "project-demo-selected",
     )
     if (project === undefined) throw new Error("demo fixture")
+    expect(selected.outcome).toBe("selected")
+    expect(selected.setup).toBeUndefined()
+    expect(project.githubRepository).toBe("aki-0421/selected-project")
     const created = await adapter.requestAddWorkspace({
       projectId: project.id,
       name: "Adapter session",

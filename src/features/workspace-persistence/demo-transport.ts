@@ -380,7 +380,7 @@ export class DemoWorkspaceHistoryTransport
       this.demoSetupActive = true
       return this.projectSetupResponse()
     }
-    return this.completeProjectRegistration()
+    return this.completeProjectRegistration("aki-0421/selected-project")
   }
 
   private projectSetupResponse(): WorkspaceHistoryResponseMap["workspace_pick_register"] {

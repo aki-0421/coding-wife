@@ -48,6 +48,7 @@ const WORKTREE_OUTPUT_LIMIT: usize = 4 * 1024;
 const PROJECT_SETUP_GIT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROJECT_SETUP_GITHUB_TIMEOUT: Duration = Duration::from_secs(30);
 const PROJECT_SETUP_OUTPUT_LIMIT: usize = 16 * 1024;
+const PROJECT_SETUP_GITHUB_PROBE_CONCURRENCY: usize = 4;
 const STARTUP_REPOSITORY_VALIDATION_CONCURRENCY: usize = 2;
 const STARTUP_PENDING: u8 = 0;
 const STARTUP_READY: u8 = 1;
@@ -548,6 +549,7 @@ impl WorkspaceHistoryService {
                 ));
             }
         };
+        let mut owner_probe = None;
         if marker_present {
             let candidate = self
                 .workspace
@@ -558,7 +560,9 @@ impl WorkspaceHistoryService {
                 )
                 .await
                 .map_err(|error| codex_error("workspace_pick_register", error))?;
-            if git_origin_configured(&pending.root, "workspace_pick_register").await? {
+            if candidate.git.github_repository.is_some()
+                || git_origin_configured(&pending.root, "workspace_pick_register").await?
+            {
                 let state = self
                     .register_validated_candidate(candidate, "workspace_pick_register")
                     .await?;
@@ -568,6 +572,68 @@ impl WorkspaceHistoryService {
                     None,
                 ));
             }
+
+            let probe = probe_github_owners().await;
+            if let Some(full_name) =
+                probe_existing_github_repository(&probe, &pending.suggested_repository_name).await
+            {
+                revalidate_project_setup_root(&pending, "workspace_pick_register").await?;
+                if git_origin_configured(&pending.root, "workspace_pick_register").await? {
+                    let candidate = self
+                        .workspace
+                        .validate_workspace_root(
+                            pending.root.clone(),
+                            format!("workspace-{}", uuid::Uuid::new_v4()),
+                            pending.folder_name.clone(),
+                        )
+                        .await
+                        .map_err(|error| codex_error("workspace_pick_register", error))?;
+                    let state = self
+                        .register_validated_candidate(candidate, "workspace_pick_register")
+                        .await?;
+                    return Ok(project_pick_response(
+                        WorkspacePickOutcome::Selected,
+                        state,
+                        None,
+                    ));
+                }
+                connect_existing_github_origin(
+                    &pending.root,
+                    &full_name,
+                    "workspace_pick_register",
+                )
+                .await?;
+                let candidate = self
+                    .workspace
+                    .validate_workspace_root(
+                        pending.root.clone(),
+                        format!("workspace-{}", uuid::Uuid::new_v4()),
+                        pending.folder_name.clone(),
+                    )
+                    .await
+                    .map_err(|error| codex_error("workspace_pick_register", error))?;
+                if !candidate
+                    .git
+                    .github_repository
+                    .as_deref()
+                    .is_some_and(|value| value.eq_ignore_ascii_case(&full_name))
+                {
+                    return Err(WorkspaceCommandError::new(
+                        "PROJECT-SETUP-ORIGIN-VERIFY",
+                        "workspace_pick_register",
+                        true,
+                    ));
+                }
+                let state = self
+                    .register_validated_candidate(candidate, "workspace_pick_register")
+                    .await?;
+                return Ok(project_pick_response(
+                    WorkspacePickOutcome::Selected,
+                    state,
+                    None,
+                ));
+            }
+            owner_probe = Some(probe);
         }
 
         let setup_id = format!("project-setup-{}", uuid::Uuid::new_v4());
@@ -575,7 +641,10 @@ impl WorkspaceHistoryService {
             git_initialized: marker_present,
             ..pending
         };
-        let setup = self.project_setup_view(&setup_id, &pending).await;
+        let setup = match owner_probe {
+            Some(probe) => project_setup_view(&setup_id, &pending, probe),
+            None => self.project_setup_view(&setup_id, &pending).await,
+        };
         self.pending_project_setups
             .lock()
             .await
@@ -616,7 +685,8 @@ impl WorkspaceHistoryService {
         if !marker_present {
             run_project_setup_git(&pending.root, &["init"], OPERATION).await?;
         }
-        self.workspace
+        let candidate = self
+            .workspace
             .validate_workspace_root(
                 pending.root.clone(),
                 format!("workspace-{}", uuid::Uuid::new_v4()),
@@ -626,16 +696,9 @@ impl WorkspaceHistoryService {
             .map_err(|error| codex_error(OPERATION, error))?;
         pending.git_initialized = true;
 
-        if git_origin_configured(&pending.root, OPERATION).await? {
-            let candidate = self
-                .workspace
-                .validate_workspace_root(
-                    pending.root.clone(),
-                    format!("workspace-{}", uuid::Uuid::new_v4()),
-                    pending.folder_name.clone(),
-                )
-                .await
-                .map_err(|error| codex_error(OPERATION, error))?;
+        if candidate.git.github_repository.is_some()
+            || git_origin_configured(&pending.root, OPERATION).await?
+        {
             let state = self
                 .register_validated_candidate(candidate, OPERATION)
                 .await?;
@@ -1964,7 +2027,8 @@ async fn git_origin_configured(
     let value = String::from_utf8(output.stdout).map_err(|_| {
         WorkspaceCommandError::new("PROJECT-SETUP-ORIGIN-INVALID", operation, false)
     })?;
-    Ok(!value.trim().is_empty() && !value.chars().any(char::is_control))
+    let value = value.trim();
+    Ok(!value.is_empty() && !value.chars().any(char::is_control))
 }
 
 fn validate_github_slug_component(value: &str, maximum: usize) -> bool {
@@ -2158,6 +2222,78 @@ async fn probe_github_owners() -> GithubOwnerProbe {
         },
         owners,
     }
+}
+
+async fn probe_existing_github_repository(
+    owner_probe: &GithubOwnerProbe,
+    repository: &str,
+) -> Option<String> {
+    if owner_probe.status != ProjectSetupGithubOwnerStatus::Ready
+        || validate_github_repository_name(repository).is_none()
+    {
+        return None;
+    }
+    let mut owners = owner_probe.owners.iter().cloned();
+    let mut probes = JoinSet::new();
+    for owner in owners.by_ref().take(PROJECT_SETUP_GITHUB_PROBE_CONCURRENCY) {
+        let repository = repository.to_owned();
+        probes.spawn(async move { probe_github_repository(owner, repository).await });
+    }
+    let mut matched = None;
+    while let Some(result) = probes.join_next().await {
+        if let Ok(Some(full_name)) = result {
+            if matched.is_some() {
+                probes.abort_all();
+                return None;
+            }
+            matched = Some(full_name);
+        }
+        if let Some(owner) = owners.next() {
+            let repository = repository.to_owned();
+            probes.spawn(async move { probe_github_repository(owner, repository).await });
+        }
+    }
+    matched
+}
+
+async fn probe_github_repository(owner: String, repository: String) -> Option<String> {
+    let executable = trusted_gh_executable()?;
+    let full_name = format!("{owner}/{repository}");
+    let mut view = configure_gh_command(&executable);
+    view.args(["repo", "view"]).arg(&full_name).args([
+        "--json",
+        "nameWithOwner",
+        "--jq",
+        ".nameWithOwner",
+    ]);
+    let output = run_project_setup_gh(view, "workspace_pick_register")
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let detected = String::from_utf8(output.stdout).ok()?;
+    if detected.trim().eq_ignore_ascii_case(&full_name) {
+        Some(full_name)
+    } else {
+        None
+    }
+}
+
+async fn connect_existing_github_origin(
+    root: &Path,
+    full_name: &str,
+    operation: &'static str,
+) -> Result<(), WorkspaceCommandError> {
+    let origin = format!("https://github.com/{full_name}.git");
+    if let Err(error) =
+        run_project_setup_git(root, &["remote", "add", "origin", &origin], operation).await
+    {
+        if !git_origin_configured(root, operation).await? {
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 
 async fn setup_github_origin(
@@ -2434,8 +2570,8 @@ mod tests {
     use crate::character::CharacterStorage;
     use crate::codex::supervisor::CodexSupervisor;
     use crate::codex::workspace::{
-        AppPrivateWorkspaceRecord, GitRepositoryIdentity, NativeFolderPicker,
-        RepositoryValidationFuture, RepositoryValidator, WorkspaceService,
+        AppPrivateWorkspaceRecord, FolderPicker, GitRepositoryIdentity, NativeFolderPicker,
+        PickerFuture, RepositoryValidationFuture, RepositoryValidator, WorkspaceService,
     };
     use crate::workspace_history::types::ProjectContext;
 
@@ -2457,6 +2593,15 @@ mod tests {
             .expect("git init");
         assert!(status.success());
         root
+    }
+
+    struct FixedFolderPicker(PathBuf);
+
+    impl FolderPicker for FixedFolderPicker {
+        fn pick_folder(&self) -> PickerFuture<'_> {
+            let root = self.0.clone();
+            Box::pin(async move { Some(root) })
+        }
     }
 
     #[derive(Clone)]
@@ -2885,6 +3030,62 @@ mod tests {
             .starts_with("coding-wife-project-setup-inspection-"));
         assert!(!setup.git_initialized);
         assert!(!root.join(".git").exists());
+    }
+
+    #[tokio::test]
+    async fn project_origin_probe_accepts_git_config_output_with_trailing_newline() {
+        let root = git_repository();
+        run_git(
+            &root,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://example.com/fixture/repository.git",
+            ],
+        );
+
+        assert!(git_origin_configured(&root, "workspace_pick_register")
+            .await
+            .expect("probe origin"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn project_pick_with_origin_registers_without_setup_dialog() {
+        let data = temp_directory("project-pick-origin-ready");
+        let root = git_repository();
+        ensure_repository_head(&root);
+        run_git(
+            &root,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/fixture-owner/fixture-repository.git",
+            ],
+        );
+        let workspace = WorkspaceService::new(
+            CodexSupervisor::new(),
+            Arc::new(FixedFolderPicker(root.clone())),
+        );
+        let service = WorkspaceHistoryService::new(
+            WorkspaceHistoryStore::open(&data).expect("store"),
+            workspace,
+        );
+
+        let response = service.pick_register().await.expect("register project");
+
+        assert_eq!(response.outcome, WorkspacePickOutcome::Selected);
+        assert!(response.setup.is_none());
+        assert!(response
+            .state
+            .projects
+            .iter()
+            .any(|project| project.github_repository.as_deref()
+                == Some("fixture-owner/fixture-repository")));
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]
