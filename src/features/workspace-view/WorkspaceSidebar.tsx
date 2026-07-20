@@ -1,5 +1,6 @@
 import { useId, useMemo, useRef, useState } from "react"
 import {
+  AlertCircleIcon,
   ArchiveIcon,
   ChevronRightIcon,
   CircleAlertIcon,
@@ -12,9 +13,16 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 
+import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import {
   Popover,
@@ -64,7 +72,6 @@ interface WorkspaceSidebarProps {
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
   readonly projectFilterIds: readonly string[]
   readonly projects: readonly ProjectRecord[]
-  readonly selectedProjectId?: string | undefined
   readonly selectedWorkspace?: WorkspaceRecord | undefined
   readonly selectedWorkspaceId: string
   readonly archiveDisabledWorkspaceId?: string | undefined
@@ -195,88 +202,134 @@ function WorkspaceRow({
   )
 }
 
-function preferredWorkspaceProjectId(
-  projects: readonly ProjectRecord[],
-  projectFilterIds: readonly string[],
-  selectedProjectId: string | undefined,
-): string {
-  if (
-    selectedProjectId !== undefined &&
-    projectFilterIds.includes(selectedProjectId) &&
-    projects.some((project) => project.id === selectedProjectId)
-  ) {
-    return selectedProjectId
-  }
-  const firstFilteredProject = projects.find((project) =>
-    projectFilterIds.includes(project.id),
-  )
-  if (firstFilteredProject !== undefined) {
-    return firstFilteredProject.id
-  }
-  if (projects.some((project) => project.id === selectedProjectId)) {
-    return selectedProjectId ?? ""
-  }
-  return projects[0]?.id ?? ""
-}
-
 function CreateWorkspaceButton({
   copy,
-  projectFilterIds,
   projects,
-  selectedProjectId,
   onCreate,
 }: {
   readonly copy: WorkspaceCopy
-  readonly projectFilterIds: readonly string[]
   readonly projects: readonly ProjectRecord[]
-  readonly selectedProjectId?: string | undefined
   readonly onCreate: (projectId: string, name: string) => Promise<boolean>
 }) {
-  const [creating, setCreating] = useState(false)
-  const creatingRef = useRef(false)
-  const projectId = preferredWorkspaceProjectId(
-    projects,
-    projectFilterIds,
-    selectedProjectId,
+  const [open, setOpen] = useState(false)
+  const [creatingProjectId, setCreatingProjectId] = useState<string | null>(
+    null,
   )
+  const [creationFailed, setCreationFailed] = useState(false)
+  const creatingRef = useRef(false)
+  const creating = creatingProjectId !== null
   const label = creating ? copy.createWorkspace.creating : copy.addWorkspace
 
-  const createWorkspace = async () => {
-    if (creatingRef.current || projectId.length === 0) return
+  const createWorkspace = async (projectId: string) => {
+    if (creatingRef.current) return
     creatingRef.current = true
-    setCreating(true)
+    setCreatingProjectId(projectId)
+    setCreationFailed(false)
     try {
-      await onCreate(projectId, defaultWorkspaceName())
+      const created = await onCreate(projectId, defaultWorkspaceName())
+      if (created) {
+        setOpen(false)
+      } else {
+        setCreationFailed(true)
+      }
     } finally {
       creatingRef.current = false
-      setCreating(false)
+      setCreatingProjectId(null)
     }
   }
 
   return (
-    <>
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        if (creatingRef.current) return
+        setOpen(nextOpen)
+        if (nextOpen) setCreationFailed(false)
+      }}
+      open={open}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            aria-busy={creating}
-            aria-label={label}
-            className={sidebarIconButtonClassName}
-            data-workspace-create=""
-            disabled={creating || projectId.length === 0}
-            onClick={() => void createWorkspace()}
-            size="icon-xs"
-            type="button"
-            variant="ghost"
-          >
-            <PlusIcon />
-          </Button>
+          <DialogTrigger asChild>
+            <Button
+              aria-busy={creating}
+              aria-label={label}
+              className={sidebarIconButtonClassName}
+              data-workspace-create=""
+              disabled={creating || projects.length === 0}
+              size="icon-xs"
+              type="button"
+              variant="ghost"
+            >
+              <PlusIcon />
+            </Button>
+          </DialogTrigger>
         </TooltipTrigger>
         <TooltipContent>{label}</TooltipContent>
       </Tooltip>
-      <span className="sr-only" aria-live="polite">
-        {creating ? copy.createWorkspace.creating : ""}
-      </span>
-    </>
+      <DialogContent
+        aria-describedby={undefined}
+        className="w-[min(48rem,calc(100dvw-36px))]"
+        closeLabel={copy.createWorkspace.close}
+        data-workspace-project-dialog=""
+        onEscapeKeyDown={(event) => {
+          if (creating) event.preventDefault()
+        }}
+        onInteractOutside={(event) => {
+          if (creating) event.preventDefault()
+        }}
+        showCloseButton={!creating}
+      >
+        <DialogHeader>
+          <DialogTitle className="text-balance">
+            {copy.createWorkspace.selectProject}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-3 gap-sm" data-workspace-project-grid="">
+          {projects.map((project) => {
+            const projectLabel = project.githubRepository ?? project.name
+            const projectCreating = creatingProjectId === project.id
+
+            return (
+              <Button
+                aria-busy={projectCreating}
+                className="h-16 min-w-0 justify-start gap-sm overflow-hidden px-md py-sm text-start"
+                data-project-id={project.id}
+                data-workspace-project-card=""
+                disabled={creating}
+                key={project.id}
+                onClick={() => void createWorkspace(project.id)}
+                type="button"
+                variant="outline"
+              >
+                <RepositoryAvatar
+                  githubRepository={project.githubRepository}
+                  size="default"
+                />
+                <span className="flex min-w-0 flex-1 flex-col items-start">
+                  <span className="max-w-full truncate text-title">
+                    {projectLabel}
+                  </span>
+                  {projectCreating ? (
+                    <span className="text-label text-muted-foreground">
+                      {copy.createWorkspace.creating}
+                    </span>
+                  ) : null}
+                </span>
+              </Button>
+            )
+          })}
+        </div>
+        {creationFailed ? (
+          <Alert aria-live="assertive">
+            <AlertCircleIcon className="text-destructive" />
+            <AlertTitle>{copy.createWorkspace.failed}</AlertTitle>
+          </Alert>
+        ) : null}
+        <span className="sr-only" aria-live="polite">
+          {creating ? copy.createWorkspace.creating : ""}
+        </span>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -287,7 +340,6 @@ function SidebarPanel({
   filteredWorkspaces,
   projectFilterIds,
   projects,
-  selectedProjectId,
   selectedWorkspaceId,
   archiveDisabledWorkspaceId,
   reserveTitlebarSpace,
@@ -395,9 +447,7 @@ function SidebarPanel({
           <CreateWorkspaceButton
             copy={copy}
             onCreate={onCreateWorkspace}
-            projectFilterIds={projectFilterIds}
             projects={projects}
-            selectedProjectId={selectedProjectId}
           />
         </div>
       </div>

@@ -15,8 +15,10 @@ function githubAvatarUrl(owner: string): string {
 
 export function RepositoryAvatar({
   githubRepository,
+  size = "sm",
 }: {
   readonly githubRepository: string | undefined
+  readonly size?: "default" | "sm" | "lg"
 }) {
   const owner = githubOwner(githubRepository)
 
@@ -25,7 +27,7 @@ export function RepositoryAvatar({
       aria-hidden="true"
       data-github-owner={owner ?? undefined}
       data-repository-avatar={owner === null ? "local" : "github"}
-      size="sm"
+      size={size}
     >
       {owner === null ? null : (
         <AvatarImage

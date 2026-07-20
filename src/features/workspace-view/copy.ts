@@ -574,10 +574,13 @@ const en = {
     firstTitle: "Create your first workspace",
     description:
       "Creates a Git worktree for the selected project on a new app-managed branch.",
+    selectProject: "Select a project",
+    close: "Close project selection",
     project: "Project",
     name: "Workspace name",
     create: "Create workspace",
     creating: "Creating…",
+    failed: "The workspace could not be created. Choose a project to retry.",
   },
   compactSidebar: "Open workspace navigation",
 }
@@ -1155,10 +1158,14 @@ const ja: typeof en = {
     firstTitle: "最初のワークスペースを作成",
     description:
       "選択したプロジェクトに、アプリ管理の新しいブランチとGit worktreeを作成します。",
+    selectProject: "プロジェクトを選択",
+    close: "プロジェクト選択を閉じる",
     project: "プロジェクト",
     name: "ワークスペース名",
     create: "ワークスペースを作成",
     creating: "作成中…",
+    failed:
+      "ワークスペースを作成できませんでした。プロジェクトを選び直してください。",
   },
   compactSidebar: "ワークスペースnavigationを開く",
 }

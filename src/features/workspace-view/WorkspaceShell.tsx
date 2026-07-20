@@ -759,12 +759,6 @@ export function WorkspaceShell({
           setAppSettingsOpen(false)
           view.setSelectedWorkspaceId(workspaceId)
         }}
-        selectedProjectId={
-          selectedWorkspace?.projectId ??
-          view.projects.find(
-            (project) => project.name === selectedWorkspace?.repository,
-          )?.id
-        }
         selectedWorkspace={selectedWorkspace}
         selectedWorkspaceId={view.selectedWorkspaceId}
       />

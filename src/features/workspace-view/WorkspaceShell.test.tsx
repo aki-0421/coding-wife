@@ -730,13 +730,14 @@ describe("WorkspaceShell", () => {
     ).toHaveTextContent("1")
   })
 
-  it("creates and opens a workspace immediately for the filtered project", async () => {
+  it("creates and opens a workspace from the three-column project card dialog", async () => {
     const user = userEvent.setup()
     const state: WorkspaceAdapterState = {
       projects: [
         {
           id: "project-alpha",
           name: "alpha-local",
+          githubRepository: "team/alpha",
           health: "ready",
           workspaceCount: 1,
           updatedAt: "2026-07-20T00:00:00.000Z",
@@ -744,8 +745,16 @@ describe("WorkspaceShell", () => {
         {
           id: "project-beta",
           name: "beta-local",
+          githubRepository: "team/beta",
           health: "ready",
           workspaceCount: 1,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+        {
+          id: "project-local",
+          name: "local-project",
+          health: "ready",
+          workspaceCount: 0,
           updatedAt: "2026-07-20T00:00:00.000Z",
         },
       ],
@@ -803,21 +812,39 @@ describe("WorkspaceShell", () => {
 
     renderWorkspace(adapter)
     await user.click(
-      await screen.findByRole("button", {
-        name: "Filter",
-      }),
+      await screen.findByRole("button", { name: "Add workspace" }),
     )
+
+    const createDialog = await screen.findByRole("dialog", {
+      name: "Select a project",
+    })
+    const projectGrid = createDialog.querySelector(
+      "[data-workspace-project-grid]",
+    )
+    if (!(projectGrid instanceof HTMLElement)) {
+      throw new Error("Expected the project card grid")
+    }
+    expect(projectGrid).toHaveClass("grid-cols-3")
+    expect(
+      projectGrid.querySelectorAll("[data-workspace-project-card]"),
+    ).toHaveLength(3)
+    expect(within(createDialog).queryByRole("table")).not.toBeInTheDocument()
+    expect(within(createDialog).queryByRole("combobox")).not.toBeInTheDocument()
+    expect(
+      within(createDialog)
+        .getByRole("button", { name: "team/alpha" })
+        .querySelector('[data-repository-avatar="github"]'),
+    ).toHaveAttribute("data-github-owner", "team")
+    expect(
+      within(createDialog)
+        .getByRole("button", { name: "local-project" })
+        .querySelector('[data-repository-avatar="local"]'),
+    ).toBeVisible()
+    expect(requestAddWorkspace).not.toHaveBeenCalled()
+
     await user.click(
-      await screen.findByRole("combobox", {
-        name: "Project",
-      }),
+      within(createDialog).getByRole("button", { name: "team/beta" }),
     )
-    fireEvent.click(
-      await screen.findByRole("option", {
-        name: "beta-local",
-      }),
-    )
-    await user.click(screen.getByRole("button", { name: "Add workspace" }))
 
     await waitFor(() => expect(requestAddWorkspace).toHaveBeenCalledOnce())
     expect(requestAddWorkspace).toHaveBeenCalledWith({
@@ -825,7 +852,7 @@ describe("WorkspaceShell", () => {
       name: expect.stringMatching(/^ws-\d{4}-[a-z0-9]{4}$/),
     })
     expect(
-      screen.queryByRole("dialog", { name: "Create workspace" }),
+      screen.queryByRole("dialog", { name: "Select a project" }),
     ).not.toBeInTheDocument()
     expect(
       within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole(
