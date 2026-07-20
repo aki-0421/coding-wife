@@ -119,8 +119,10 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | OpenAI API key       | 空        | 条件付き | password input、trim後1〜512文字。保存済み値はWebViewへ返さず、設定済み状態だけを返す | OpenAI tab内、入力値維持 | Save |
 | OpenAI model         | `gpt-4o-mini-tts` | 条件付き | app allowlist内のSpeech API対応model | OpenAI tab内 | Save |
 | OpenAI voice         | `marin`   | 条件付き | 選択modelで利用可能な組み込みvoice allowlist | OpenAI tab内 | Save |
-| Speech speed         | 1.0       | 必須     | 0.75〜1.25、0.05刻み | OpenAI tab内 | Save |
+| Speech speed         | 1.0       | 必須     | 0.75〜1.25、0.05刻みのslider | OpenAI tab内 | Save |
 | Support controls     | disabled  | 条件付き | approved role/policyだけ              | Support内Alert        | toggle時 |
+
+Audio sectionでは、通常時の見出し説明と各fieldの補助文を表示せず、validation errorやAPI key削除予告など操作結果に必要な動的feedbackだけを残す。OpenAI tab内のmodelとvoiceは同幅の2カラムへ配置し、selectはfield幅へ引き伸ばさず内容に必要なcompact幅とする。speed sliderとTest voice操作も2カラムへ並べ、狭いviewportと200% text zoomではfocus順を保った1カラムへ戻す。AI生成音声に関する静的calloutは表示しない。
 
 ## ネイティブ連携
 
