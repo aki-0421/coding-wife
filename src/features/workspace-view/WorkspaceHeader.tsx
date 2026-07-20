@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import {
-  CheckIcon,
-  CopyIcon,
   GitBranchIcon,
   LoaderCircleIcon,
   TriangleAlertIcon,
@@ -33,8 +31,6 @@ interface WorkspaceHeaderProps {
   readonly copy: WorkspaceCopy
   readonly workspace: WorkspaceRecord
 }
-
-type HeaderValueKind = "repository" | "workspace" | "branch"
 
 function ConnectionStatus({
   connection,
@@ -96,7 +92,6 @@ function WorkspaceHealthStatus({
 function HeaderValueButton({
   children,
   className,
-  copied,
   copyLabel,
   current,
   onCopy,
@@ -104,7 +99,6 @@ function HeaderValueButton({
 }: {
   readonly children?: ReactNode
   readonly className?: string | undefined
-  readonly copied: boolean
   readonly copyLabel: string
   readonly current?: boolean | undefined
   readonly onCopy: () => void
@@ -115,7 +109,6 @@ function HeaderValueButton({
       aria-current={current ? "page" : undefined}
       aria-label={`${copyLabel}: ${value}`}
       className={cn("min-w-0 justify-start px-xs", className)}
-      data-copied={copied ? "true" : undefined}
       onClick={onCopy}
       size="xs"
       type="button"
@@ -123,15 +116,6 @@ function HeaderValueButton({
     >
       {children}
       <span className="min-w-0 flex-1 truncate text-start">{value}</span>
-      {copied ? (
-        <CheckIcon aria-hidden="true" data-icon="inline-end" />
-      ) : (
-        <CopyIcon
-          aria-hidden="true"
-          className="opacity-0 transition-opacity motion-reduce:transition-none group-hover/button:opacity-100 group-focus-visible/button:opacity-100"
-          data-icon="inline-end"
-        />
-      )}
     </Button>
   )
 }
@@ -142,37 +126,17 @@ export function WorkspaceHeader({
   copy,
   workspace,
 }: WorkspaceHeaderProps) {
-  const [copiedValue, setCopiedValue] = useState<HeaderValueKind | null>(null)
   const [copyAnnouncement, setCopyAnnouncement] = useState("")
-  const copiedResetTimer = useRef<number | null>(null)
   const repository = workspace.githubRepository ?? workspace.repository
 
-  useEffect(
-    () => () => {
-      if (copiedResetTimer.current !== null) {
-        window.clearTimeout(copiedResetTimer.current)
-      }
-    },
-    [],
-  )
-
-  const copyHeaderValue = async (kind: HeaderValueKind, value: string) => {
+  const copyHeaderValue = async (value: string) => {
     try {
       if (navigator.clipboard?.writeText === undefined) {
         throw new Error("Clipboard is unavailable")
       }
       await navigator.clipboard.writeText(value)
-      setCopiedValue(kind)
       setCopyAnnouncement(`${copy.headerCopy.copied}: ${value}`)
-      if (copiedResetTimer.current !== null) {
-        window.clearTimeout(copiedResetTimer.current)
-      }
-      copiedResetTimer.current = window.setTimeout(() => {
-        setCopiedValue(null)
-        copiedResetTimer.current = null
-      }, 1_500)
     } catch {
-      setCopiedValue(null)
       setCopyAnnouncement(copy.headerCopy.failed)
     }
   }
@@ -186,9 +150,8 @@ export function WorkspaceHeader({
             <BreadcrumbItem className="min-w-0 max-w-56 shrink">
               <HeaderValueButton
                 className="w-full text-display font-medium text-muted-foreground"
-                copied={copiedValue === "repository"}
                 copyLabel={copy.headerCopy.repository}
-                onCopy={() => void copyHeaderValue("repository", repository)}
+                onCopy={() => void copyHeaderValue(repository)}
                 value={repository}
               />
             </BreadcrumbItem>
@@ -196,10 +159,9 @@ export function WorkspaceHeader({
             <BreadcrumbItem className="min-w-0 max-w-64 shrink">
               <HeaderValueButton
                 className="w-full text-display font-semibold text-text-strong"
-                copied={copiedValue === "workspace"}
                 copyLabel={copy.headerCopy.workspace}
                 current
-                onCopy={() => void copyHeaderValue("workspace", workspace.name)}
+                onCopy={() => void copyHeaderValue(workspace.name)}
                 value={workspace.name}
               />
             </BreadcrumbItem>
@@ -207,9 +169,8 @@ export function WorkspaceHeader({
         </Breadcrumb>
         <HeaderValueButton
           className="hidden max-w-52 shrink font-mono text-label text-muted-foreground min-[1120px]:inline-flex"
-          copied={copiedValue === "branch"}
           copyLabel={copy.headerCopy.branch}
-          onCopy={() => void copyHeaderValue("branch", workspace.branch)}
+          onCopy={() => void copyHeaderValue(workspace.branch)}
           value={workspace.branch}
         >
           <GitBranchIcon aria-hidden="true" data-icon="inline-start" />

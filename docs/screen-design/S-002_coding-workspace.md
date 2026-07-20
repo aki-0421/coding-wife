@@ -93,8 +93,8 @@ status: "Approved"
 | 要素 | 規則 |
 |---|---|
 | repository avatar | GitHub `origin`の`owner/repo`がある時はownerの24px GitHub avatarを`https://avatars.githubusercontent.com`から`no-referrer`で表示する。CSPの外部画像許可は同originだけに限定し、画像失敗時はneutral user fallback、GitHub metadataがないlocal repositoryではneutral Git worktree fallbackを使う。app iconはrepository identityとして使わない |
-| breadcrumb | avatarの次にGitHub `origin`由来の`owner/repo`、workspace名をこの順で一行表示する。GitHub metadataがない時は保存済みlocal repo名へfallbackする。repositoryとworkspace名は長い時も一行ellipsisを維持し、hover / focus-visibleで背景と文字色を変えて操作可能性を示す。pointer clickまたはkeyboard activationで省略前のexact valueをclipboardへcopyし、tooltipとnative `title`は表示しない |
-| branch | Git観測値をbranch iconとmono textで表示する。長い時は一行ellipsisを維持し、repository / workspace名と同じhover、focus-visible、clipboard copy契約を使う。stale時の状態説明はrepository healthへ分離し、branch値のtooltipは表示しない |
+| breadcrumb | avatarの次にGitHub `origin`由来の`owner/repo`、workspace名をこの順で一行表示する。GitHub metadataがない時は保存済みlocal repo名へfallbackする。repositoryとworkspace名は長い時も一行ellipsisを維持し、hover / focus-visibleで背景と文字色を変えて操作可能性を示す。pointer clickまたはkeyboard activationで省略前のexact valueをclipboardへcopyし、tooltipとnative `title`は表示しない。copy icon、成功check icon、その予約領域は表示せず、hoverとcopy成功でtext buttonのinline幅を変えない |
+| branch | Git観測値をbranch iconとmono textで表示する。長い時は一行ellipsisを維持し、repository / workspace名と同じhover、focus-visible、clipboard copy、幅不変の契約を使う。stale時の状態説明はrepository healthへ分離し、branch値のtooltipやcopy結果iconは表示しない |
 | repository health | `healthy` / `missing` / `changed` / `unreadable` / `read_only` / `stale_branch`をja/en text、icon、shapeで表示し、色だけにしない。`healthy`以外はSend不可理由とRepair/Recheckを関連付ける |
 | connection | Ready / Working / Needs answer / Interruptedをtextとshapeで表示する。offline時はpersistent bannerとSend不可理由を正本とし、breadcrumb rowへ`Offline / オフライン`のicon、text、空のplaceholderを表示しない |
 | workspace action | breadcrumb rowへ3点actionを表示しない。Cancel / Repair / Recheck / Archiveをこのrowへ置かず、workspace Archiveはsidebar rowからだけ開始する |

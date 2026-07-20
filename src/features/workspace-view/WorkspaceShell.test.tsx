@@ -1571,6 +1571,7 @@ describe("WorkspaceShell", () => {
     }
 
     expect(header?.querySelector('[data-slot="tooltip-trigger"]')).toBeNull()
+    expect(header?.querySelector('[data-icon="inline-end"]')).toBeNull()
     expect(
       within(header as HTMLElement).queryByRole("button", {
         name: "Workspace actions",
