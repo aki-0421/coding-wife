@@ -719,7 +719,7 @@ describe("NarrationController", () => {
     }
   })
 
-  it("cancels test playback at the dedicated five-second watchdog", async () => {
+  it("cancels test playback at the dedicated fifty-second watchdog", async () => {
     vi.useFakeTimers()
     try {
       const gateway = new FakeNarrationGateway(true)
@@ -733,7 +733,7 @@ describe("NarrationController", () => {
       const playback = controller.playTest(
         { workspaceId: "workspace-1", generation: 3 },
         "ja",
-        "5秒で停止します。",
+        "50秒で停止します。",
       )
       await vi.advanceTimersByTimeAsync(0)
       expect(controller.getSnapshot().test.status).toBe("preparing")
@@ -745,7 +745,7 @@ describe("NarrationController", () => {
 
       await vi.advanceTimersByTimeAsync(100)
       expect(gateway.speech).toHaveLength(1)
-      await vi.advanceTimersByTimeAsync(4_999)
+      await vi.advanceTimersByTimeAsync(49_999)
       expect(gateway.cancelReasons).not.toContain("explicit_cancel")
       await vi.advanceTimersByTimeAsync(1)
 

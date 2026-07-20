@@ -124,8 +124,8 @@ interface TestCaptionGate {
 
 const maximumPreparedPresentations = 12
 const speechPollMilliseconds = 125
-const speechTimeoutMilliseconds = 30_000
-const testSpeechTimeoutMilliseconds = 5_000
+const speechTimeoutMilliseconds = 50_000
+const testSpeechTimeoutMilliseconds = speechTimeoutMilliseconds
 const captionAcknowledgmentTimeoutMilliseconds = 1_000
 const captionSpeechLeadMilliseconds = 100
 

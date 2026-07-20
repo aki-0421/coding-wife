@@ -23,8 +23,8 @@ use super::types::{
     OPENAI_TTS_VOICES,
 };
 
-const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 const SPEECH_TIMEOUT: Duration = Duration::from_secs(45);
+const TEST_TIMEOUT: Duration = SPEECH_TIMEOUT;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct NarrationRequestKey {
