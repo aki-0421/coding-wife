@@ -83,6 +83,7 @@ export function projectWorkspaceState(
         ? {}
         : { attention: workspace.attention }),
       health: workspace.health,
+      createdAt: workspace.createdAt,
       updatedAt: workspace.updatedAt,
     })),
     activeWorkspaceId: state.activeWorkspaceId,

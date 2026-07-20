@@ -61,6 +61,7 @@ export interface WorkspaceRecord {
     | "unreadable"
     | "read_only"
     | "stale_branch"
+  readonly createdAt?: string
   readonly updatedAt?: string
 }
 

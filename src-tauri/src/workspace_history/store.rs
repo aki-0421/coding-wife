@@ -3810,7 +3810,7 @@ fn all_workspaces(connection: &Connection) -> Result<Vec<WorkspaceSummary>, Work
         .prepare(&format!(
             "{WORKSPACE_SELECT} WHERE p.registered = 1 AND w.managed_worktree = 1 ORDER BY CASE w.lifecycle
                WHEN 'done' THEN 0 WHEN 'in_review' THEN 1 WHEN 'in_progress' THEN 2
-               WHEN 'backlog' THEN 3 ELSE 4 END, w.updated_at DESC"
+               WHEN 'backlog' THEN 3 ELSE 4 END, w.created_at DESC, w.id ASC"
         ))
         .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
     let rows = statement
@@ -4662,6 +4662,69 @@ mod tests {
                 .as_deref(),
             Some("aki-0421/coding-wife")
         );
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn workspace_list_order_stays_created_at_descending_after_selection() {
+        let data = temp_directory("history-created-order");
+        let root = git_repository();
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        let older = store
+            .register_candidate(&candidate(&root).await)
+            .expect("register older workspace")
+            .workspace;
+        let newer = store
+            .create_session_workspace(
+                &older.workspace_id,
+                "Newer workspace",
+                "",
+                "request-created-order-newer",
+            )
+            .expect("create newer workspace")
+            .workspace;
+
+        {
+            let inner = store.lock();
+            inner
+                .connection
+                .execute(
+                    "UPDATE workspaces SET created_at = ?1, updated_at = ?1, last_selected_at = NULL WHERE id = ?2",
+                    params!["2026-07-18T00:00:00.000Z", &older.workspace_id],
+                )
+                .expect("set older creation time");
+            inner
+                .connection
+                .execute(
+                    "UPDATE workspaces SET created_at = ?1, updated_at = ?1, last_selected_at = NULL WHERE id = ?2",
+                    params!["2026-07-19T00:00:00.000Z", &newer.workspace_id],
+                )
+                .expect("set newer creation time");
+        }
+
+        let before_selection = store.snapshot(None).expect("snapshot before selection");
+        assert_eq!(
+            before_selection
+                .workspaces
+                .iter()
+                .map(|workspace| workspace.workspace_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![newer.workspace_id.as_str(), older.workspace_id.as_str()]
+        );
+
+        let after_selection = store
+            .select_workspace(&older.workspace_id)
+            .expect("select older workspace");
+        assert_eq!(
+            after_selection
+                .workspaces
+                .iter()
+                .map(|workspace| workspace.workspace_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![newer.workspace_id.as_str(), older.workspace_id.as_str()]
+        );
+
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
     }

@@ -32,6 +32,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
       lifecycle: "in_progress",
       attention: "test_failed",
       health: "ready",
+      createdAt: "2026-07-18T00:00:00.000Z",
       updatedAt: "2026-07-18T00:01:00.000Z",
     })
     expect(projected.timeline[0]).toMatchObject({
