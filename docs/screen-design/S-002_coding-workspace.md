@@ -1,7 +1,7 @@
 ---
 title: "S-002 コーディングワークスペース"
 description: "Codex main session、構造化tool event、意思決定、read-only Context、Live2D characterを一つの安全な作業面で扱う画面仕様。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "Chat tab、composer、Codex event timeline、decision、Live2D characterを実装するとき。"
   - "S-002とWORK、CODE、SUP、GIT、HIST、LIVE、NARR、APP要件の対応を確認するとき。"
@@ -118,6 +118,8 @@ eventはworkspace内のvalidated `sequence`順に表示する。live/HISTは共�
 | Error / Interrupted | code、影響、保持data、回復操作 | safe detail、retry condition、diagnostic ref | retry、modify、stop、diagnostic |
 
 連続する同種tool eventは同一work unit内だけgroup化し、running数とterminal数を見出しへ出す。groupを閉じてもerror、decision、verification failureを隠さない。toolのstdout/stderr全文、hidden reasoning、secret、home directory、unredacted promptは表示・保存しない。
+
+timeline rendererは全eventを同じcardへ描画せず、`message`、`operation`、`boundary`、`intervention`の四つへ分類する。User / Assistantは会話本文を主役にし、tool / file / diff / plan / history / status / errorは一行summaryと展開可能なsanitized detail、thread / turn / completion / request resolvedは細い状態境界、decision / approvalは単独の介入surfaceとして描画する。completed operationは初期状態で閉じ、running、failed、interruptedは開く。展開前もkind、targetまたは結果、terminal state、error code、時刻を確認できなければならない。
 
 commit explainerのrequest、status、delta、result、failureはChat timelineとmain conversationへ追加しない。これらはapp-owned explanation controller、S-003の状態表示、Character captionだけで扱う。
 
