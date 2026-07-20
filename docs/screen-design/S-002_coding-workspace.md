@@ -130,18 +130,20 @@ timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted 
 | control | 表示・動作 | 無効条件 |
 |---|---|---|
 | instruction | 1〜8行auto-grow。Enterは改行、`Command+Enter`で送信 | text、attachment、read-only contextがすべて空またはinvalid、offline、blocked preflight、decision未回答、別workspace実行競合 |
-| attachment | paperclip。native pickerでworkspace root内の許可fileを選択 | turn開始中、permission不足 |
-| Context | `Files & folders` / `Git diff` / `Terminal output`のread-only snapshotを選ぶpopover。portalで描画 | snapshot取得または検証不可 |
+| Add | icon-onlyの`+`からattachment、`Files & folders`、`Git diff`、`Terminal output`を一つのmenuで選ぶ。menuはportalで描画し、項目をattachmentとContextのgroupへ分ける | turn開始中。attachmentはpermission不足、Contextはsnapshot取得または検証不可 |
 | model | `GPT-5.6 Sol`固定label。picker chevronを出さない | 常時read-only |
-| effort | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけをselect。unsupported optionは理由付きでdisabledにし、最後のvalid値を保持する。modelやservice tierは変更しない | 対応値未確認、選択中値未対応、valid optionなしではSend不可 |
+| reasoning | bar iconと現在levelの短いlabelを一つのbuttonにする。clickごとに`Off`から`model/list`が広告したlevelを低い順に一段上げ、最高levelの次は`Off`へ戻る。`Off`は`turn/start.effort=null`でsession既定へ戻す | turn実行中。広告済みlevelがない時は`Off`だけを表示 |
+| Fast | 稲妻だけのflag button。選択時は`model/list.serviceTiers`が広告したFast tier IDを`turn/start.serviceTier`へ渡し、解除時は`null`で明示解除する | turn実行中、Fast tier未広告 |
+| Plan | map iconのflag button。選択中は`turn/start.collaborationMode`へ固定modelと選択reasoningを含む`plan` presetを渡し、解除時は`null`で明示解除する | turn実行中、experimental API未受理 |
+| Goals | target iconの一回性flag button。選択して送信すると、trim済みinstructionを`thread/goal/set.objective`へ設定してから同じinstructionのturnを開始し、turn受理後にflagだけ解除する | turn実行中、experimental API未受理、instructionが空、または4,000 scalar超 |
 | Send | primary icon button、accessible label `Send / 送信` | instruction条件不成立 |
 | Stop | running時にSend位置へ表示。明示clickだけ | turn非実行時 |
 
-composerは一つの入力surfaceとして、上から`draft item`、instruction、footerの順に積む。footerは左の追加操作、中央の固定modelとreasoning effort、右のkeyboard hintとSend/Stopへ視線が流れる三群構成にする。attachmentはpaperclip/plusのicon-only control、Contextは`@`と短いlabel、Send/Stopはfooter末尾の円形icon buttonとし、accessible labelとtooltipで名称・無効理由を伝える。固定modelとeffortは実行条件のため残すが、primary actionと競合するborderやfillを持たせない。
+composerは一つの入力surfaceとして、上から`draft item`、instruction、footerの順に積む。footerは左の`+`、中央の固定model・Reasoning・Fast・Goals・Plan flags、右のkeyboard hintとSend/Stopへ視線が流れる三群構成にする。Fast、Goals、Planはicon-onlyにして選択状態をfill、`aria-pressed`、tooltipで伝え、Send/Stopはfooter末尾の円形icon buttonにする。固定modelとReasoningは実行条件のため残すが、primary actionと競合するborderやfillを持たせない。
 
 通常時はpaste/drop/@の長い説明文をsurface内へ常設せず、Addのtooltipとinstructionのaccessible descriptionへまとめる。native pickerが利用不能な時だけ、理由とdraft保持をinstruction直下へvisible statusとして表示する。`Command+Enter` hintはSendの直前へ置き、狭幅ではvisual textを省略してもaccessible descriptionとshortcut動作を維持する。draft itemはinstructionより上で横scrollし、basenameまたはsnapshot label、種別icon、削除操作を24pxの同一行へ収める。invalid attachmentは色だけでなく`!`と送信不可説明を残す。
 
-attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、App settings > Projects > project detailのProject Context編集やApp settings > Character > character detailのCharacter Context編集とは別の送信時参照として扱う。
+Add menuはpaneの`overflow`にclipされないbody-level portalとし、`+` triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、App settings > Projects > project detailのProject Context編集やApp settings > Character > character detailのCharacter Context編集とは別の送信時参照として扱う。
 
 送信時はworkspace、draft hash、context version、Git fingerprint、effort、attachmentをRustで再検証する。public instructionは32,000 Unicode scalar以下を維持し、開始時に固定したProject/Character context、version/hash metadata、JSON escaping、固定markerとの合成text全体を80,000 Unicode scalar以下にする。WebViewとRustはUTF-8 byte数ではなくUnicode scalar数で同じexact boundaryを検査し、80,001 scalar、NUL、その他controlをApp Server送信前に拒否してdraftとcontext versionを保持する。sourceはstable root dirfdからno-followで開き、descriptorから0700/0600のapp-private snapshotへcopy、fsync、hash再検証する。App Serverへはsnapshotだけを渡し、accepted/failed/terminal/expiryで削除する。二重操作は同じidempotency keyへ集約する。
 
@@ -234,7 +236,10 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | composed turn text | instructionと開始時context snapshotから生成 | 条件付き | 固定marker、Project最大32,000 scalar、Character最大12,000 scalar、version/hash metadata、JSON escapingを含む全体で0〜80,000 Unicode scalar。multibyte文字も1 scalarとして数える | composer上の送信error、instruction/contextを保持 | 保存しない。App Serverへの当該turn inputだけに使用 |
 | attachment | なし | 任意 | 10件、各25MiB、合計50MiB、workspace root内のregular readable file。directory/symlink/executable不可 | chip単位、無効handleは除外 | draftにはhandle metadataだけ |
 | read-only context | なし | 任意 | Files & folders / Git diffを各1MiB、workspaceごとにcapture順の最新10件。sourceとcapture時刻必須。Terminal outputはtrusted producer実装までunavailable | 無効snapshotを追加せず理由表示 | redacted snapshot metadataとcontent hash |
-| effort |前回valid値、初回`Fast` | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | Send不可理由 | valid変更時workspace preference |
+| reasoning | 前回valid値、初回`Off` | 任意 | `Off`、または`gpt-5.6-sol`の`model/list.supportedReasoningEfforts`が広告した値。未知値は選択・送信しない | capability更新で選択値が消えた時は`Off`へ戻して理由表示 | valid変更時workspace preference |
+| Fast flag | off | 任意 | `model/list.serviceTiers`でFastとして広告されたexact tier IDだけ | 未広告時はoffへ戻してdisabled理由をtooltip表示 | WebView session内。turnへ明示送信 |
+| Plan flag | off | 任意 | `collaborationMode.mode=plan`、固定model、現在reasoning。offでは`null` | experimental API未受理時はoffへ戻してdisabled理由をtooltip表示 | WebView session内。turnへ明示送信 |
+| Goals flag | off | 任意 | 選択時はtrim済みinstruction 1〜4,000 scalarをobjectiveにする。attachment/contextだけの送信では選択不可 | instructionを保持し、goal未設定のままSend不可理由 | turn受理後だけoffへ戻す |
 | decision option | 未選択 |回答時必須 | server提示IDの1件 | decision surface | answer accepted時event |
 | Other text |空 | Other選択時必須 | trim後1〜2,000 Unicode scalar | field直下、入力保持 | answer accepted時event |
 

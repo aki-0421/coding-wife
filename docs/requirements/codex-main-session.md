@@ -70,7 +70,10 @@ read_when:
 |---|---|---|---|---|
 | `CODE-F-051` | アプリはCodex App Serverの利用可否を診断する | executableは明示設定、GUI processの`PATH`、時間・出力上限を持つ利用者のdefault login shell、既知の安全なinstall位置の順で探索し、候補のcanonical path、所有者、書込権限、実行権限、version、hashをRustで検証する。初回setupのbounded probeは同binaryからApp Serverを起動し、stableな`initialize` / `initialized`が成功した時点でreadyとし、schema生成、account/read、config/read、model/listを実行しない。通常workspaceの接続時にはschema、initialize、protocol capability、login、config、model/listを順に確認し、失敗段階と回復操作をSend可否へ反映する。通常workspace側の失敗だけでは初回setupへ戻さない。利用者は初回setupとGeneral settingsでCodex executableの絶対pathを任意指定または自動検出へ戻すことができ、setup probeに成功したcanonical pathだけをapp-private設定へ保存する | Approved | 非該当 |
 | `CODE-F-052` | main sessionは`gpt-5.6-sol`だけを使用する | thread/start payloadとheader表示が`gpt-5.6-sol`になり、UIまたは保存設定から別modelへ変更できない | Approved | 非該当 |
-| `CODE-F-053` | 利用者は利用可能なreasoning effortを選べる | `gpt-5.6-sol`のmodel/listで`low`と`max`がsupportedReasoningEffortsにある時だけFast=`low`、Max=`max`として表示・送信し、model、service tier、`ultra`をこの操作で変更しない | Approved | 非該当 |
+| `CODE-F-053` | 利用者は利用可能なreasoning effortを段階的に選べる | ComposerのReasoning buttonを押すたびに`Off`から`gpt-5.6-sol`の`model/list.supportedReasoningEfforts`が広告した値を低い順に一段上げ、最高値の次は`Off`へ戻る。広告されない値を表示・送信せず、`Off`は`turn/start.effort=null`としてsession既定へ戻す | Approved | 非該当 |
+| `CODE-F-053A` | 利用者はFast service tierを独立して切り替えられる | model catalogがFastとして広告したexact service tier IDだけを稲妻のicon-only flagからon/offし、onはそのID、offは`null`を`turn/start.serviceTier`へ毎回明示する。reasoning effortは変更しない | Approved | 非該当 |
+| `CODE-F-053B` | 利用者は次のturnをPlan modeにできる | map icon flagのon時は固定modelと現在reasoningを含む`collaborationMode.mode=plan`を送り、off時は`collaborationMode=null`を送る。experimental API未受理時は選択不可にする | Approved | 非該当 |
+| `CODE-F-053C` | 利用者はcomposerのinstructionをpersistent Goalとして開始できる | target icon flagのon時はtrim済みinstruction 1〜4,000 scalarを`thread/goal/set.objective`へ設定してから同じturnを開始し、turn受理後だけflagをoffへ戻す。goal設定またはturn開始失敗時はinstructionとflagを保持する | Approved | 非該当 |
 | `CODE-F-054` | appはactive workspaceのcwdでmain threadを開始する | canonical project rootとselected effortを使ってthreadを1件開始し、別workspace pathを使用しない | Approved | 非該当 |
 | `CODE-F-055` | 利用者は有効なcomposer内容をturnとして送信できる | text、attachment、contextのいずれか1件以上が有効な時、Command+EnterまたはSendで1turnだけ開始する。public instructionは32,000 Unicode scalar以下を維持し、Project ID-scoped Project context、nativeで解決した選択pack ID-scoped Character context、pack IDと各version/hash metadata、JSON escaping、固定markerを合成したApp Server向けtext全体は80,000 Unicode scalar以下とする。WebViewとRust supervisorの双方が同じscalar単位でexact 80,000を受理し、80,001、NUL、その他controlをtransport前に拒否する | Approved | 非該当 |
 | `CODE-F-056` | 空composerは送信できない | trim後textが空かつattachmentとcontextが0件ならSendをdisabledにし、Command+Enterでturnを開始しない。attachmentまたはcontextがvalidならtext 0文字でも送信できる | Approved | 非該当 |
@@ -126,7 +129,10 @@ read_when:
 | Turn transport | composed text envelope | promptと開始時context snapshotから生成 | 条件付き | 固定marker、Project Context最大32,000 scalar、Character Context最大12,000 scalar、version/hash metadata、JSON escaping、public instructionを含む全体で0〜80,000 Unicode scalar。UTF-8 byte数では数えず、NUL/その他control不可 | draft、context version、attachmentを保持し、WebViewは`WORKSPACE-CONTEXT-TURN-TOO-LARGE`、Rustは`CODEX-TURN-INVALID`でApp Server送信前に拒否 |
 | Composer | attachment | なし | 任意 | 10件、各25MiB、合計50MiB、regular readable file | 無効itemだけ拒否し他を保持 |
 | Composer | context | なし | 任意 | 10件、各1MiB text snapshot、sourceとtimestamp必須 | 無効snapshotを送信しない |
-| Composer | effort | Fast（`low`） | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | 対応値がなければSendを無効にし診断理由を表示 |
+| Composer | reasoning | Off | 任意 | `Off`または`gpt-5.6-sol`が広告したreasoning effort。button clickで昇順循環 | 未広告値は選択せず、capability変更時はOffへ戻す |
+| Composer | Fast flag | off | 任意 | 広告済みFast service tierのexact IDだけ | 未広告またはturn実行中はdisabled |
+| Composer | Plan flag | off | 任意 | experimental `collaborationMode.mode=plan`だけ | experimental API未受理またはturn実行中はdisabled |
+| Composer | Goals flag | off | 任意 | 選択時はtrim済みprompt 1〜4,000 Unicode scalar | 無効時はdraftとflagを保持しgoalを設定しない |
 | App setting | Codex executable path | 自動検出 | 任意 | UTF-8の絶対path、1〜4,096 byte、NULとcontrol不可。Rustでcanonicalize後にtrusted executable、`codex-cli` version、App Server起動とstable initializeを検証し、成功時だけ保存する | 入力を保持し、safe codeをfield直下へ表示。以前の設定と実行中sessionは変更しない |
 | Decision | selected option | なし | 必須 | schema内optionまたはOther | card保持、回答未送信 |
 | Decision | Other text | 空 | 条件付き | trim後1〜2,000 Unicode scalar、NUL/その他control不可 | 入力保持、共通scalar countで送信無効 |
