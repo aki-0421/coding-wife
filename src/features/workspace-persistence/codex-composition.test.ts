@@ -1,23 +1,21 @@
 import { describe, expect, it, vi } from "vitest"
-
 import {
-  codexCommands,
-  parseCodexDiagnostic,
-  parseCodexEvent,
+  type CodexEventCallbacks,
+  type CodexTransport,
+  DemoCodexTransport,
+} from "@/features/codex"
+import { CodexComposedWorkspaceViewAdapter } from "@/features/workspace-persistence/codex-composition"
+import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
+import {
   type CodexCommand,
   type CodexEvent,
   type CodexRequestMap,
   type CodexResponseMap,
+  codexCommands,
+  parseCodexDiagnostic,
+  parseCodexEvent,
 } from "@/lib/contracts"
 import fixture from "@/test/fixtures/codex-runtime.v1.json"
-
-import {
-  DemoCodexTransport,
-  type CodexEventCallbacks,
-  type CodexTransport,
-} from "@/features/codex"
-import { CodexComposedWorkspaceViewAdapter } from "@/features/workspace-persistence/codex-composition"
-import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -49,9 +47,7 @@ class CompositionCodexTransport implements CodexTransport {
           if (this.connectGate !== null) {
             return this.connectGate.then(
               () =>
-                parseCodexDiagnostic(
-                  fixture.diagnostic,
-                ) as CodexResponseMap[K],
+                parseCodexDiagnostic(fixture.diagnostic) as CodexResponseMap[K],
             )
           }
         }
@@ -111,6 +107,45 @@ class CompositionCodexTransport implements CodexTransport {
 }
 
 describe("CodexComposedWorkspaceViewAdapter", () => {
+  it("hydrates native workspace state before Codex activation completes", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const codex = new CompositionCodexTransport()
+    let releaseConnect!: () => void
+    codex.connectGate = new Promise<void>((resolve) => {
+      releaseConnect = resolve
+    })
+    const adapter = new CodexComposedWorkspaceViewAdapter(
+      {
+        kind: "tauri",
+        request: (command, request) => history.request(command, request),
+      },
+      codex,
+    )
+
+    const state = await adapter.loadState()
+
+    expect(state.activeWorkspaceId).not.toBeNull()
+    expect(adapter.codexSnapshot()).toMatchObject({
+      activeWorkspaceId: state.activeWorkspaceId,
+      connected: false,
+      phase: "connecting",
+    })
+    await vi.waitFor(() => {
+      expect(
+        codex.calls.filter((call) => call.command === codexCommands.connect),
+      ).toHaveLength(1)
+    })
+
+    releaseConnect()
+    await vi.waitFor(() => {
+      expect(adapter.codexSnapshot()).toMatchObject({
+        activeWorkspaceId: state.activeWorkspaceId,
+        connected: false,
+        phase: "blocked",
+      })
+    })
+  })
+
   it("single-flights concurrent activation for the same workspace", async () => {
     const history = new DemoWorkspaceHistoryTransport()
     const codex = new CompositionCodexTransport()
@@ -261,9 +296,11 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       codex,
     )
     await nativeReadOnly.loadState()
-    expect(nativeReadOnly.codexSnapshot()).toMatchObject({
-      connected: false,
-      phase: "blocked",
+    await vi.waitFor(() => {
+      expect(nativeReadOnly.codexSnapshot()).toMatchObject({
+        connected: false,
+        phase: "blocked",
+      })
     })
     await expect(
       nativeReadOnly.sendTurn({

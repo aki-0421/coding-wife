@@ -1,12 +1,10 @@
-import { workspaceHistoryCommands } from "@/lib/contracts"
-
 import type { CodexHistoryEvent } from "@/features/codex/event-projection"
 import type { CodexTransport } from "@/features/codex/transport"
 import { CodexWorkspaceSessionAdapter } from "@/features/codex/workspace-session-adapter"
 import type { CodexWorkspaceSessionSnapshot } from "@/features/codex/workspace-session-store"
 import { PersistentWorkspaceViewAdapter } from "@/features/workspace-persistence/adapter"
-import { composeTurnInstruction } from "@/features/workspace-persistence/turn-context"
 import type { WorkspaceHistoryTransport } from "@/features/workspace-persistence/transport"
+import { composeTurnInstruction } from "@/features/workspace-persistence/turn-context"
 import type {
   AppQuitPreparationRequest,
   ProjectRegistrationResult,
@@ -19,6 +17,7 @@ import type {
   WorkspaceTransitionRequest,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
+import { workspaceHistoryCommands } from "@/lib/contracts"
 
 function publicCodexState(
   snapshot: CodexWorkspaceSessionSnapshot,
@@ -112,7 +111,11 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
 
   async loadState(): Promise<WorkspaceAdapterState> {
     const state = await this.history.loadState()
-    await this.activateCodex(state)
+    if (this.hydrationMode === "native") {
+      void this.activateCodex(state)
+    } else {
+      await this.activateCodex(state)
+    }
     return state
   }
 

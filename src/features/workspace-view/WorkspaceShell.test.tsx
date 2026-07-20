@@ -1496,7 +1496,7 @@ describe("WorkspaceShell", () => {
     ).toBeEnabled()
   })
 
-  it("shows no visible startup UI while native history is pending", async () => {
+  it("shows workspace loading UI while native history is pending", async () => {
     let resolveState!: (state: WorkspaceAdapterState) => void
     const requestAddProject = vi.fn()
     const adapter: WorkspaceViewAdapter = {
@@ -1511,9 +1511,9 @@ describe("WorkspaceShell", () => {
     const { container } = renderWorkspace(adapter)
 
     expect(
-      container.querySelector('[data-native-startup="checking"]'),
+      container.querySelector('[data-workspace-hydration="loading"]'),
     ).not.toBeNull()
-    expect(container.textContent).toBe("")
+    expect(screen.getByText("Restoring workspace history")).toBeVisible()
     expect(
       screen.queryByText(/build-live2d-desktop-app/),
     ).not.toBeInTheDocument()
@@ -1900,7 +1900,7 @@ describe("WorkspaceShell", () => {
       byteCount: 42,
     })
     const adapter: WorkspaceViewAdapter = {
-      connected: false,
+      connected: true,
       loadState: () => Promise.resolve(restoredState),
       saveDraft,
       captureContext,
@@ -2313,7 +2313,7 @@ describe("WorkspaceShell", () => {
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
   })
 
-  it("renders no visible startup UI while native setup readiness is checking", () => {
+  it("renders the workspace while native setup readiness is checking", async () => {
     const pendingReadiness = deferred<NativeReadinessSnapshotV1>()
     const readinessController = new NativeReadinessController({
       kind: "native",
@@ -2326,12 +2326,14 @@ describe("WorkspaceShell", () => {
       loadState: () => Promise.resolve(nativeWorkspaceState()),
     }
 
-    const { container } = renderWorkspace(adapter, readinessController)
+    renderWorkspace(adapter, readinessController)
 
     expect(
-      container.querySelector('[data-native-startup="checking"]'),
-    ).not.toBeNull()
-    expect(container.textContent).toBe("")
+      await screen.findByPlaceholderText(
+        "Ask Codex to plan, build, explain, or fix anything…",
+      ),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
   })
 
   it("labels demo history as ephemeral in chat and diagnostics", async () => {

@@ -1,15 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircleIcon, InfoIcon, XIcon } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import {
-  getSafeQuitCopy,
-  SafeQuitDialog,
-  type AppCleanupFailedV1,
-  type AppCloseRequestedV1,
-  type AppLifecycleGateway,
-  type SafeQuitDialogStatus,
-} from "@/features/app-lifecycle"
 import {
   Dialog,
   DialogContent,
@@ -19,15 +11,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { useI18n } from "@/features/localization"
-import { useRuntime } from "@/features/runtime"
+import {
+  type AppCleanupFailedV1,
+  type AppCloseRequestedV1,
+  type AppLifecycleGateway,
+  getSafeQuitCopy,
+  SafeQuitDialog,
+  type SafeQuitDialogStatus,
+} from "@/features/app-lifecycle"
 import {
   projectCharacterRuntime,
   useCharacterRuntimeStatus,
@@ -36,6 +34,7 @@ import {
 import type { ScopedCommitExplanationController } from "@/features/git-review/commit-explanation-adapter"
 import { EvidenceView } from "@/features/git-review/EvidenceView"
 import type { GitReviewTransport } from "@/features/git-review/transport"
+import { useI18n } from "@/features/localization"
 import {
   CommitNarrationCaption,
   type NarrationController,
@@ -46,28 +45,29 @@ import {
   shouldShowSetupOverview,
   useNativeReadiness,
 } from "@/features/readiness"
+import { useRuntime } from "@/features/runtime"
 import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { ChatView } from "@/features/workspace-view/ChatView"
 import {
   getWorkspaceCopy,
   type WorkspaceCopy,
 } from "@/features/workspace-view/copy"
-import { AppSettingsView } from "@/features/workspace-view/SettingsView"
-import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
-import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { ProjectSetupDialog } from "@/features/workspace-view/ProjectSetupDialog"
-import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
-import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
+import { AppSettingsView } from "@/features/workspace-view/SettingsView"
 import {
-  workspaceTabs,
   type AppSettingsSection,
   type CharacterStageRenderer,
   type WorkspaceRecord,
   type WorkspaceTab,
   type WorkspaceViewAdapter,
+  workspaceTabs,
 } from "@/features/workspace-view/types"
 import { useEditableSettingsContext } from "@/features/workspace-view/useEditableSettingsContext"
 import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceViewModel"
+import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
+import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
+import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
+import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
 import { useWorkspaceViewportLayout } from "@/features/workspace-view/workspace-viewport"
 import { gitReviewSchemaVersion } from "@/lib/contracts/git-review"
 
@@ -704,22 +704,6 @@ export function WorkspaceShell({
     setAppSettingsProjectId(null)
     setAppSettingsOpen(false)
     view.setActiveTab(value)
-  }
-
-  const nativeStartupPending =
-    adapter?.hydrationMode === "native" &&
-    (view.adapterStatus === "loading" ||
-      (nativeReadiness.snapshot === null && nativeReadiness.status !== "error"))
-
-  if (nativeStartupPending) {
-    return (
-      <main
-        aria-busy="true"
-        className="min-h-dvh w-full bg-background"
-        data-native-startup="checking"
-        data-workspace-viewport={viewportLayout}
-      />
-    )
   }
 
   if (view.adapterStatus === "loading") {
