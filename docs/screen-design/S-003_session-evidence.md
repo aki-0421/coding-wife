@@ -225,7 +225,7 @@ TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでloca
 | Explanation queued/running | `auto_verified_commit` / `user_request` / `user_retry`受理後 | background status、「詳しく教えて」、`Cancel explanation generation`。明示intent前はcaption/live region/TTS 0件 | present-on-complete intent、生成Cancel、read-only inspect | generated/failed/canceled/unavailable |
 | Explanation generated | done受理、current runtimeにcached presentationあり | 「詳しく教えて」1回でexplanation表示、同一transcriptの任意再読上げ | presentation、inspect | selection/new request |
 | Explanation failed/canceled | model/schema/timeout、または生成Cancel terminal | deterministic reason、Retry | `user_retry`、inspect | queued/unavailable |
-| Explanation unavailable | support off/offline/redaction/capability error | deterministic reason。`retryable=true`の場合だけRetry | inspect、Settings、条件付き`user_retry` | queued/unavailable |
+| Explanation unavailable | offline/redaction/capability error | deterministic reason。`retryable=true`の場合だけRetry | inspect、Diagnostics、条件付き`user_retry` | queued/unavailable |
 
 support unavailableはcommit evidenceを隠さず、main turnのstatusを変えない。
 
