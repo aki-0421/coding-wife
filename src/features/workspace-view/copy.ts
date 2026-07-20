@@ -84,19 +84,10 @@ const en = {
   },
   projectSetup: {
     title: "Set up project",
-    description: (folder: string) =>
-      `Finish the required setup for ${folder} before registering it as a project.`,
-    gitTitle: "Initialize Git",
-    gitDescription:
-      "This creates Git metadata in the selected folder. If you cancel afterward, the Git initialization is kept.",
     initializeGit: "Initialize Git",
     initializingGit: "Initializing Git…",
-    githubTitle: "Connect GitHub",
-    githubDescription:
-      "An existing repository will be connected. If it does not exist, a new private repository will be created.",
-    ownerLabel: "Organization or user",
-    repositoryLabel: "Repository name",
-    repositoryHint: "Letters, numbers, periods, underscores, and hyphens only.",
+    ownerAccessibilityLabel: "GitHub owner",
+    repositoryAccessibilityLabel: "GitHub repository",
     setupGithub: "Set up GitHub",
     settingUpGithub: "Setting up GitHub…",
     retryGithub: "Retry GitHub connection",
@@ -676,20 +667,10 @@ const ja: typeof en = {
   },
   projectSetup: {
     title: "プロジェクトをセットアップ",
-    description: (folder: string) =>
-      `${folder} をプロジェクトとして登録する前に、必要なセットアップを完了します。`,
-    gitTitle: "Gitを初期化",
-    gitDescription:
-      "選択したフォルダにGit管理情報を作成します。この後にキャンセルしても、Gitの初期化は保持されます。",
     initializeGit: "Gitを初期化",
     initializingGit: "Gitを初期化中…",
-    githubTitle: "GitHubに接続",
-    githubDescription:
-      "同名のリポジトリがあれば接続し、存在しなければ新しいprivateリポジトリを作成します。",
-    ownerLabel: "組織またはユーザー",
-    repositoryLabel: "リポジトリ名",
-    repositoryHint:
-      "英数字、ピリオド、アンダースコア、ハイフンを使用できます。",
+    ownerAccessibilityLabel: "GitHub owner",
+    repositoryAccessibilityLabel: "GitHub repository",
     setupGithub: "GitHubをセットアップ",
     settingUpGithub: "GitHubをセットアップ中…",
     retryGithub: "GitHub接続を再確認",

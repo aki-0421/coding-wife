@@ -1,25 +1,18 @@
 import { useState } from "react"
 import { AlertCircleIcon, CloudIcon, GitBranchIcon } from "lucide-react"
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Field, FieldDescription, FieldGroup } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { Separator } from "@/components/ui/separator"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type { ProjectSetupState } from "@/features/workspace-view/useWorkspaceViewModel"
 
@@ -96,6 +89,7 @@ export function ProjectSetupDialog({
       open
     >
       <DialogContent
+        aria-describedby={undefined}
         closeLabel={copy.projectSetup.close}
         onEscapeKeyDown={(event) => {
           if (processing) event.preventDefault()
@@ -109,35 +103,14 @@ export function ProjectSetupDialog({
           <DialogTitle className="text-balance">
             {copy.projectSetup.title}
           </DialogTitle>
-          <DialogDescription className="text-pretty">
-            {copy.projectSetup.description(candidate.folderName)}
-          </DialogDescription>
         </DialogHeader>
 
         {candidate.gitStatus === "not_initialized" ? (
-          <section
-            className="flex flex-col gap-md"
-            aria-labelledby="git-setup-title"
-          >
-            <div className="flex items-start gap-sm">
-              <GitBranchIcon className="mt-xxs text-muted-foreground" />
-              <div className="flex min-w-0 flex-col gap-xxs">
-                <h2
-                  className="m-0 text-title text-text-strong"
-                  id="git-setup-title"
-                >
-                  {copy.projectSetup.gitTitle}
-                </h2>
-                <p className="m-0 text-pretty text-caption text-muted-foreground">
-                  {copy.projectSetup.gitDescription}
-                </p>
-              </div>
-            </div>
+          <div className="flex flex-col gap-md">
             {actionError !== null ? (
               <Alert aria-live="assertive">
                 <AlertCircleIcon className="text-destructive" />
-                <AlertTitle>{copy.projectSetup.genericError}</AlertTitle>
-                <AlertDescription>{actionError}</AlertDescription>
+                <AlertTitle>{actionError}</AlertTitle>
               </Alert>
             ) : null}
             <DialogFooter>
@@ -162,7 +135,7 @@ export function ProjectSetupDialog({
                   : copy.projectSetup.initializeGit}
               </Button>
             </DialogFooter>
-          </section>
+          </div>
         ) : (
           <form
             className="flex flex-col gap-md"
@@ -174,24 +147,16 @@ export function ProjectSetupDialog({
               }
             }}
           >
-            <div className="flex items-start gap-sm">
-              <CloudIcon className="mt-xxs text-muted-foreground" />
-              <div className="flex min-w-0 flex-col gap-xxs">
-                <h2 className="m-0 text-title text-text-strong">
-                  {copy.projectSetup.githubTitle}
-                </h2>
-                <p className="m-0 text-pretty text-caption text-muted-foreground">
-                  {copy.projectSetup.githubDescription}
-                </p>
-              </div>
-            </div>
-            <Separator />
-            <FieldGroup>
-              <Field data-disabled={!githubReady || processing}>
-                <FieldLabel htmlFor="project-setup-owner">
-                  {copy.projectSetup.ownerLabel}
-                </FieldLabel>
+            <FieldGroup
+              className="flex-row items-start gap-xs"
+              data-project-repository-slug=""
+            >
+              <Field
+                className="min-w-0 flex-1"
+                data-disabled={!githubReady || processing}
+              >
                 <NativeSelect
+                  aria-label={copy.projectSetup.ownerAccessibilityLabel}
                   className="w-full"
                   disabled={!githubReady || processing}
                   id="project-setup-owner"
@@ -206,11 +171,18 @@ export function ProjectSetupDialog({
                   ))}
                 </NativeSelect>
               </Field>
-              <Field data-invalid={repositoryTouched && !repositoryValid}>
-                <FieldLabel htmlFor="project-setup-repository">
-                  {copy.projectSetup.repositoryLabel}
-                </FieldLabel>
+              <span
+                aria-hidden="true"
+                className="flex h-8 shrink-0 items-center text-body text-muted-foreground"
+              >
+                /
+              </span>
+              <Field
+                className="min-w-0 flex-1"
+                data-invalid={repositoryTouched && !repositoryValid}
+              >
                 <Input
+                  aria-label={copy.projectSetup.repositoryAccessibilityLabel}
                   aria-invalid={repositoryTouched && !repositoryValid}
                   disabled={processing}
                   id="project-setup-repository"
@@ -219,18 +191,17 @@ export function ProjectSetupDialog({
                   onChange={(event) => setRepository(event.currentTarget.value)}
                   value={repository}
                 />
-                <FieldDescription>
-                  {repositoryTouched && !repositoryValid
-                    ? copy.projectSetup.invalidRepository
-                    : copy.projectSetup.repositoryHint}
-                </FieldDescription>
+                {repositoryTouched && !repositoryValid ? (
+                  <FieldDescription role="alert">
+                    {copy.projectSetup.invalidRepository}
+                  </FieldDescription>
+                ) : null}
               </Field>
             </FieldGroup>
             {ownerError !== null || actionError !== null ? (
               <Alert aria-live="assertive">
                 <AlertCircleIcon className="text-destructive" />
-                <AlertTitle>{copy.projectSetup.genericError}</AlertTitle>
-                <AlertDescription>{actionError ?? ownerError}</AlertDescription>
+                <AlertTitle>{actionError ?? ownerError}</AlertTitle>
               </Alert>
             ) : null}
             <p className="sr-only" aria-live="polite">

@@ -887,22 +887,41 @@ describe("WorkspaceShell", () => {
       name: "Set up project",
     })
     expect(
-      within(setupDialog).getByText(
+      within(setupDialog).queryByText(
         "This creates Git metadata in the selected folder. If you cancel afterward, the Git initialization is kept.",
       ),
-    ).toBeVisible()
+    ).not.toBeInTheDocument()
     await user.click(
       within(setupDialog).getByRole("button", { name: "Initialize Git" }),
     )
     expect(initializeProjectGit).toHaveBeenCalledWith("project-setup-fixture")
 
     const owner = await within(setupDialog).findByRole("combobox", {
-      name: "Organization or user",
+      name: "GitHub owner",
     })
     fireEvent.change(owner, { target: { value: "fixture-org" } })
     const repository = within(setupDialog).getByRole("textbox", {
-      name: "Repository name",
+      name: "GitHub repository",
     })
+    const repositorySlug = setupDialog.querySelector(
+      "[data-project-repository-slug]",
+    )
+    if (!(repositorySlug instanceof HTMLElement)) {
+      throw new Error("Expected the owner/repository input row")
+    }
+    expect(repositorySlug).toHaveClass("flex-row")
+    expect(within(repositorySlug).getByText("/")).toBeVisible()
+    expect(
+      within(setupDialog).queryByText("Organization or user"),
+    ).not.toBeInTheDocument()
+    expect(
+      within(setupDialog).queryByText("Repository name"),
+    ).not.toBeInTheDocument()
+    expect(
+      within(setupDialog).queryByText(
+        "Letters, numbers, periods, underscores, and hyphens only.",
+      ),
+    ).not.toBeInTheDocument()
     expect(repository).toHaveValue("new-companion-tool")
     await user.clear(repository)
     await user.type(repository, "reviewable-tool")
@@ -920,6 +939,52 @@ describe("WorkspaceShell", () => {
         screen.queryByRole("dialog", { name: "Set up project" }),
       ).not.toBeInTheDocument(),
     )
+  })
+
+  it("registers an already configured project without a setup dialog", async () => {
+    const user = userEvent.setup()
+    const state = nativeWorkspaceState()
+    const configuredState: WorkspaceAdapterState = {
+      ...state,
+      projects: [
+        {
+          id: "project-configured",
+          name: "configured-local",
+          githubRepository: "fixture/configured",
+          health: "ready",
+          workspaceCount: 0,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+      ],
+    }
+    const requestAddProject = vi
+      .fn<() => Promise<ProjectRegistrationResult>>()
+      .mockResolvedValue({ outcome: "selected", state: configuredState })
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      requestAddProject,
+    }
+
+    renderWorkspace(adapter)
+    await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    await user.click(screen.getByRole("button", { name: "Add project" }))
+    await user.click(screen.getByRole("button", { name: "Filter" }))
+    await user.click(
+      await screen.findByRole("combobox", {
+        name: "Project",
+      }),
+    )
+
+    expect(
+      await screen.findByRole("option", { name: "fixture/configured" }),
+    ).toBeVisible()
+    expect(requestAddProject).toHaveBeenCalledOnce()
+    expect(
+      screen.queryByRole("dialog", { name: "Set up project" }),
+    ).not.toBeInTheDocument()
   })
 
   it("keeps duplicate native close requests behind one safe cancellation", async () => {
