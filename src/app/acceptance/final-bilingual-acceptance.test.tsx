@@ -54,9 +54,7 @@ const copy: Readonly<
       readonly retry: string
       readonly preview: string
       readonly pickerUnavailable: string
-      readonly workspaceActions: string
       readonly repositoryMissing: string
-      readonly repair: RegExp
       readonly dontQuit: string
       readonly stopAndQuit: string
       readonly workspaces: string
@@ -86,9 +84,7 @@ const copy: Readonly<
     preview: "Preview only",
     pickerUnavailable:
       "The native operation is not connected in this preview. No local project state changed.",
-    workspaceActions: "Workspace actions",
     repositoryMissing: "Repository missing",
-    repair: /Reselect repository/u,
     dontQuit: "Don’t Quit",
     stopAndQuit: "Stop and Quit",
     workspaces: "Workspaces",
@@ -116,9 +112,7 @@ const copy: Readonly<
     preview: "プレビューのみ",
     pickerUnavailable:
       "このプレビューではnative操作が未接続です。ローカルproject状態は変更していません。",
-    workspaceActions: "ワークスペース操作",
     repositoryMissing: "リポジトリが見つかりません",
-    repair: /リポジトリを再選択/u,
     dontQuit: "終了しない",
     stopAndQuit: "停止して終了",
     workspaces: "ワークスペース",
@@ -662,14 +656,13 @@ describe("final bilingual App acceptance", () => {
     expect(
       (await screen.findAllByText(copy.ja.repositoryMissing)).length,
     ).toBeGreaterThan(0)
-    await user.click(
-      screen.getByRole("button", { name: copy.ja.workspaceActions }),
-    )
-    await user.click(screen.getByRole("button", { name: copy.ja.repair }))
-    await waitFor(() =>
-      expect(workspace.repairedWorkspaceIds).toEqual(["workspace-primary"]),
-    )
-    expect(screen.queryByText(copy.ja.repositoryMissing)).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "ワークスペース操作" }),
+    ).toBeNull()
+    expect(workspace.repairedWorkspaceIds).toEqual([])
+    expect(
+      screen.getAllByText(copy.ja.repositoryMissing).length,
+    ).toBeGreaterThan(0)
 
     act(() => {
       lifecycle.emitClose({

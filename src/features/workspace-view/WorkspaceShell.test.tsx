@@ -1519,7 +1519,9 @@ describe("WorkspaceShell", () => {
       })
       expect(within(breadcrumb).getByText("aki-0421/coding-wife")).toBeVisible()
       expect(
-        within(breadcrumb).getByText("build-live2d-desktop-app"),
+        within(breadcrumb).getByRole("button", {
+          name: "Copy workspace name: build-live2d-desktop-app",
+        }),
       ).toHaveAttribute("aria-current", "page")
 
       const avatar = breadcrumb
