@@ -25,7 +25,7 @@ read_when:
 - WebView へ絶対パスを渡さない。`pack_id` と検証済みの相対 asset ID だけを受け付ける read-only プロトコルから配信する。
 - Hiyori の各モーションの意味は画像で確認するまで断定しない。最初の実装では全状態をテキストで区別し、映像はニュートラルな `Idle[0]` を基本にする。
 
-本書は `../requirements/live2d-companion.md`、`../screen-design/S-002_coding-workspace.md`、`../screen-design/S-005_app-settings-diagnostics.md`、`../screen-design/S-006_project-settings.md`、`../../PRODUCT.md`、`../../DESIGN.md` を実装可能な契約へ落とした補足調査である。競合時は Approved の要件・画面設計を優先する。
+本書は `../requirements/live2d-character.md`、`../screen-design/S-002_coding-workspace.md`、`../screen-design/S-005_app-settings-diagnostics.md`、`../screen-design/S-006_project-settings.md`、`../../PRODUCT.md`、`../../DESIGN.md` を実装可能な契約へ落とした補足調査である。競合時は Approved の要件・画面設計を優先する。
 
 ## 調査方法と一次資料
 
@@ -236,7 +236,7 @@ S-002 の 1470 x 836 基準では、character pane は約 607.84 x 754.99。Hiyo
 | --- | --- | --- |
 | 全状態 | `Idle[0]`、motion gallery 完了後に版管理した mapping へ拡張 | 状態ごとの既定文言を必ず表示 |
 | `reduced` | motion を進めず、neutral pose の 1 frame を描画 | 通常通り |
-| `hidden` | RAF を停止し、canvas を非表示 | text-only companion を維持 |
+| `hidden` | RAF を停止し、canvas を非表示 | text-only character を維持 |
 
 motion gallery 後に拡張する場合も、状態から pack 内の allowlisted group/index へ決定的に変換し、モデルや assistant の自由文字列を asset path にしない。優先度は `error/waiting/completed > acting/thinking/reviewing > idle` を基準にし、同一 generation 内だけで割り込ませる。古い turn から遅れて届いた cue は捨て、TTL 後は `Idle[0]` に戻す。全 Hiyori motion が loop metadata を持つため、one-shot cue は明示的に停止して idle を再開する。
 

@@ -12,13 +12,13 @@ read_when:
 
 ## 現在の完了範囲
 
-2026-07-20 時点で、同梱 Hiyori を通常 App の既定 companion として使う実ランタイムに加え、ユーザーがローカルのLive2D `.model3.json`を1ファイルだけ選び、隔離previewで実描画を確認してからapp-globalに選択・永続化・削除するmodel libraryを実装した。公式 Cubism SDK for Web 5-r.5 の Core、Framework、13 shaders と、`tmp/hiyori_pro` から固定した17 runtime filesだけを同梱モデルに使う。rendererは透明な1 canvasを所有し、Idle[0]、semantic stateのHTML caption、animated/reduced/hidden、static/text fallback、resize、WebGL context recoveryを扱う。
+2026-07-20 時点で、同梱 Hiyori を通常 App の既定 character として使う実ランタイムに加え、ユーザーがローカルのLive2D `.model3.json`を1ファイルだけ選び、隔離previewで実描画を確認してからapp-globalに選択・永続化・削除するmodel libraryを実装した。公式 Cubism SDK for Web 5-r.5 の Core、Framework、13 shaders と、`tmp/hiyori_pro` から固定した17 runtime filesだけを同梱モデルに使う。rendererは透明な1 canvasを所有し、Idle[0]、semantic stateのHTML caption、animated/reduced/hidden、static/text fallback、resize、WebGL context recoveryを扱う。
 
-`live2d-preview.html` はproduction Appのrouteへ依存しない診断用entry pointである。`pnpm dev` の後に `/live2d-preview.html` を開くと、semantic state、motion policy、WebGL context loss/restore、frame metricsを同じ画面で確認できる。診断画面はS-002の255 px sidebar、81 px header、Chat/Companionの連続面を再現する。検証スクリーンショットは `/tmp` へだけ保存し、commitしない。
+`live2d-preview.html` はproduction Appのrouteへ依存しない診断用entry pointである。`pnpm dev` の後に `/live2d-preview.html` を開くと、semantic state、motion policy、WebGL context loss/restore、frame metricsを同じ画面で確認できる。診断画面はS-002の255 px sidebar、81 px header、Chat/Characterの連続面を再現する。検証スクリーンショットは `/tmp` へだけ保存し、commitしない。
 
 ## 通常Appへの統合契約
 
-`App` は `characterRenderer` が省略されたときだけ `DefaultCharacterStageRenderer` を注入する。明示的なrendererはtest、custom renderer、後続のmodel selector用overrideとして常に優先する。既定rendererはworkspace側の8 `CompanionSemanticState`を同名の`CharacterState`へ明示的に写像し、workspace IDまたはsemantic stateが変わったときだけgenerationを単調増加させる。stateとgenerationは同じrenderで切り替え、Live2D component、canvas、packはremount/reloadしない。
+`App` は `characterRenderer` が省略されたときだけ `DefaultCharacterStageRenderer` を注入する。明示的なrendererはtest、custom renderer、後続のmodel selector用overrideとして常に優先する。既定rendererはworkspace側の8 `CharacterSemanticState`を同名の`CharacterState`へ明示的に写像し、workspace IDまたはsemantic stateが変わったときだけgenerationを単調増加させる。stateとgenerationは同じrenderで切り替え、Live2D component、canvas、packはremount/reloadしない。
 
 `reducedMotion` は`reduced` motion policyへだけ写像する。controllerはneutral frameを得た後にRAFを止め、表示層はWebGL canvasを隠して検証済みtrusted frameの`img`へ切り替える。trusted frameを利用できない間はcanvasを再表示せず、ja/enのstateとtext-only fallbackを`role=status`で残す。muteは将来のTTS/audio境界であり、motion、generation、canvasを停止しない。character hideは既存のstage unmountを使いGPU resourceを解放する。通常stageがHTML captionを所有するため、内側の`Live2dCharacter`は`showCaption={false}`とする。
 
@@ -36,7 +36,7 @@ previewは`character-import-preview.html`を`<iframe sandbox="allow-scripts">`�
 
 1–80文字の表示名とrenderer nonceを含むconfirmは、quarantine publishとglobal selection保存を同じnative operation内で行う。選択保存に失敗したpublishはquarantineへrollbackする。公開manifestはtrusted frameのasset ID、bytes、dimensions、SHA-256を含み、通常rendererはopaque IDとbinary IPCでだけ読み、再起動後やcontext loss、renderer failureでもstatic fallbackとして使う。新packのload中は既存modelと既存trusted frameを維持し、model・status・frameを成功時にまとめて切り替える。
 
-Settingsのpreview所有権はapp-globalなCharacter library scopeのsession leaseで管理する。Companion sectionまたはApp settingsから離れた場合は、picker loading中、描画中、attestation中のいずれでも確定した同一tokenを1回だけcancelする。React Strict Modeの即時再mountはlease再取得を確認してcancelしない。取消失敗でpreviewが残った場合は次のmountでdialogを再開し、戻ったときはimport triggerへfocusを復元する。
+Settingsのpreview所有権はapp-globalなCharacter library scopeのsession leaseで管理する。Character sectionまたはApp settingsから離れた場合は、picker loading中、描画中、attestation中のいずれでも確定した同一tokenを1回だけcancelする。React Strict Modeの即時再mountはlease再取得を確認してcancelしない。取消失敗でpreviewが残った場合は次のmountでdialogを再開し、戻ったときはimport triggerへfocusを復元する。
 
 opaque originのmodule graphを読み込ませるため、development serverは`Origin: null`へ`Access-Control-Allow-Origin: null`を返す。productionはmain windowを設定から自動生成せず、`WebviewWindowBuilder`のresponse hookが`tauri:` requestかつrequest Originが正確に`null`の場合だけ同headerを上書きする。通常origin、HTTP(S)、attacker originには適用しない。child CSPはViteのmode-specific HTML transformで生成し、developmentでは`http://localhost:1420`だけ、productionでは`tauri://localhost`だけをscript/style/font/img sourceへ許可する。production出力へHTTP development originを残してはならない。inline script/style、`unsafe-eval`、wildcard、connect、form、popup、top navigationを許可せず、CSSは外部fileとして読み込む。このwindow生成とCORS hookは隔離previewのsecurity requirementなので、Tauriのwindow `create`を`true`へ戻す場合は同等のresponse hookを必ず維持する。
 

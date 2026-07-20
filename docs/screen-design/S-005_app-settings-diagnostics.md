@@ -34,7 +34,7 @@ status: "Approved"
 | General           | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
 | Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
 | Character context | app-globalなname、tone、speech density、behavior、prohibited expressions                                |
-| Companion         | app-globalなbundled Hiyoriとcustom 1枠、選択、import/置換、preview、semantic mapping、provenance、delete、runtime status |
+| Character         | app-globalなbundled Hiyoriとcustom 1枠、選択、import/置換、preview、semantic mapping、provenance、delete、runtime status |
 | Audio             | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
 | Support           | app共通のsupport role enable、readiness、capacity、usage、sanitized error                                |
 | Diagnostics       | OS/app、Codex、Git、DB、Live2D、audio、supportのnative readinessとrecheck                                |
@@ -72,7 +72,7 @@ status: "Approved"
 | ------------------- | ------------------------------------------------------------- | ------------------------------ |
 | workspace sidebar   | workspace一覧、activeなapp settings gear                      | workspaceへ戻る、project追加   |
 | app settings header | back action、`App settings / アプリ設定`、全project共通の説明 | 直前workspace tabへ戻る        |
-| section navigation  | General、Projects、Character context、Companion、Audio、Support、Diagnosticsの7 section | section選択 |
+| section navigation  | General、Projects、Character context、Character、Audio、Support、Diagnosticsの7 section | section選択 |
 | settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
 
 app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示しない。これによりworkspace scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
@@ -168,7 +168,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | `SUP-F-062`〜`SUP-F-078`                                             | global support control/readiness                 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092`                   | read-only Git/skill diagnostics                  | [git-review-harness](../requirements/git-review-harness.md)                   |
 | `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089` | app共通Audio                                     | [audio-commentary](../requirements/audio-commentary.md)                       |
-| `LIVE-F-055`〜`LIVE-F-081`                                          | global model library、mapping、runtime readiness | [live2d-companion](../requirements/live2d-companion.md)                       |
+| `LIVE-F-055`〜`LIVE-F-081`, `LIVE-F-083`                            | global model library、mapping、runtime readiness、character用語契約 | [live2d-character](../requirements/live2d-character.md)                       |
 
 ## 未確定事項
 

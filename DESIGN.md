@@ -167,7 +167,7 @@ components:
 
 **Creative North Star: "静かな作戦室"**
 
-Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面を基準にする。左 255.04px の workspace sidebar、上 81px の二段 header、中央 607.11px の Chat、右 607.84px の Live2D companion を一続きの暗い面として構成する。標準サイズでは sidebar / chat / companion を `255 / 607 / 608` の比率で固定し、Chat と companion の間へ可視 divider や card を置かない。
+Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面を基準にする。左 255.04px の workspace sidebar、上 81px の二段 header、中央 607.11px の Chat、右 607.84px の Live2D character を一続きの暗い面として構成する。標準サイズでは sidebar / chat / character を `255 / 607 / 608` の比率で固定し、Chat と character の間へ可視 divider や card を置かない。
 
 色戦略は Restrained。ほぼ無彩色の暗い面を基礎に、温かいローズを active state、状態色を証拠、Hiyori の色を人格表現へ限定する。shadcn は Tabs、Button、Textarea、ScrollArea、Popover、Dialog、RadioGroup、Tooltip、Skeleton の interaction primitive としてだけ使い、layout、密度、色、文字、radius はこの文書へ合わせる。
 
@@ -176,15 +176,15 @@ Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面
 **Key Characteristics:**
 
 - 1470×836 を基準にした 255 / 607 / 608 の三領域
-- 同じ背景へ同居し、枠へ閉じ込めない Live2D companion
+- 同じ背景へ同居し、枠へ閉じ込めない Live2D character
 - 3px 刻みの高密度な spacing と 4.5px 中心の小さな radius
 - Inter / Noto Sans JP と JetBrains Mono の二系統だけ
 - 文字・形・icon を併用する証拠中心の semantic state
 - 150〜250ms の状態 transition と完全な reduced-motion 代替
 
-**The Continuous Desk Rule.** Chat、Commitのprimary work surfaceとcompanionは一つの机である。通常状態で二つのcardや中央dividerに分割してはならない。Workspace SettingsとApp Settingsだけはcompanionを表示せず、設定面を全幅で使う。
+**The Continuous Desk Rule.** Chat、Commitのprimary work surfaceとcharacterは一つの机である。通常状態で二つのcardや中央dividerに分割してはならない。Workspace SettingsとApp Settingsだけはcharacterを表示せず、設定面を全幅で使う。
 
-**The Evidence Priority Rule.** 判断、error、review diff、test result が必要な時も作業tab間でcompanionの横幅を変えない。証拠と操作の可読領域はprimary surface内のdrawer、折り返し、内部scroll、必要時の静止poseで確保する。
+**The Evidence Priority Rule.** 判断、error、review diff、test result が必要な時も作業tab間でcharacterの横幅を変えない。証拠と操作の可読領域はprimary surface内のdrawer、折り返し、内部scroll、必要時の静止poseで確保する。
 
 ## Brand Mark
 
@@ -227,7 +227,7 @@ cp "$icon_output/32x32.png" "$icon_output/128x128.png" "$icon_output/128x128@2x.
 
 ### Neutral
 
-- **Continuous Desk** (`app-bg`): Chat と companion を連続させる最深面。
+- **Continuous Desk** (`app-bg`): Chat と character を連続させる最深面。
 - **Workspace Rail** (`sidebar`): workspace navigation を一段だけ持ち上げる。
 - **Working Surface** (`surface`): header、composer、popover の構造面。
 - **Selected Row / Code Chip / Divider** (`selected-row`, `code-chip`, `divider`): 選択、compact code、領域境界にだけ用いる。
@@ -311,7 +311,7 @@ Sidebarは255.04px幅と49.5px itemに合わせた固定4段階を使う。**Sid
 
 ### Navigation
 
-Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の list だけを scroll させる。workspace item は 242.25×49.5px、先頭に24px owner avatar、続いてbranch icon付きtitleと`owner/repo`の二行を置き、active item だけ selected-row を持つ。header は 40.5px の breadcrumb row と 40.5px の tab row。breadcrumb rowはGitHub originがある時にowner avatar、`owner/repo`、workspace名を順に置く。sidebarとheaderは同じavatar sourceを使い、GitHub originがない時またはavatar取得失敗時はapp markではなくneutral repository fallbackを使う。active tab は strong text と 1.5px warm-active underline、inactive は readable muted text とし、keyboard roving focus を提供する。960〜1279px では sidebar を 64px rail または drawer へ畳み、960px 未満は MVP native window で許可しない。200% text zoom などで有効幅が 700px 以下になる場合は、永続化状態と companion 状態を同じ status region で縦積みし、timeline、composer、Send、mute を隠さない。
+Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の list だけを scroll させる。workspace item は 242.25×49.5px、先頭に24px owner avatar、続いてbranch icon付きtitleと`owner/repo`の二行を置き、active item だけ selected-row を持つ。header は 40.5px の breadcrumb row と 40.5px の tab row。breadcrumb rowはGitHub originがある時にowner avatar、`owner/repo`、workspace名を順に置く。sidebarとheaderは同じavatar sourceを使い、GitHub originがない時またはavatar取得失敗時はapp markではなくneutral repository fallbackを使う。active tab は strong text と 1.5px warm-active underline、inactive は readable muted text とし、keyboard roving focus を提供する。960〜1279px では sidebar を 64px rail または drawer へ畳み、960px 未満は MVP native window で許可しない。200% text zoom などで有効幅が 700px 以下になる場合は、永続化状態と character 状態を同じ status region で縦積みし、timeline、composer、Send、mute を隠さない。
 
 ### Commit Evidence
 
@@ -321,9 +321,9 @@ file summaryを先に表示し、sanitized diffはfile selection後に1件ずつ
 
 新しいcommitは、App Serverのsuccess commit commandとread-only observerのSHA検証後にapp-owned explanation controllerが`not_generated`から`queued`へ自動遷移する。起動前から存在するcommitなど本当に`not_generated`の選択には「詳しく教えて」を表示し、mainではなくapp controllerへ`user_request`を送る。`queued` / `running`はpresentation表示とCancel、`generated`はcached presentation表示と任意の同一transcript再読上げ、`failed` / `canceled`は`user_retry`、`unavailable`は理由とretryableな場合だけ`user_retry`を示す。path、raw diff、secretを除去したevidenceだけをisolated supportへ渡し、説明はcanvasに依存しないvisible HTML captionへstreamする。isolated supportはmain非継承のclean runtime、external-authority tool 0件、wire上のexact inert `update_plan` 1件、permission profile、release proofが揃う時だけcapacity 1とし、`update_plan`の実callやtool schema/hash不一致では当該説明をfailedとして非表示にする。TTSを使う場合もcaptionと同じ確定文だけを読み、selection変更、Cancel、stale response後のchunkを適用しない。commit説明のrequest、status、result、failureをmain conversationへ入れない。
 
-### Live2D Companion
+### Live2D Character
 
-607.84×754.99px の透明な単一canvasをContinuous Desk上へbottom-containし、頭、手、裾を切らない。選択workspaceのChat、Commitでは同じcanvas instanceと同じpane幅を継続し、tab切替でrendererを再生成またはresizeしない。Commitのevidence detailはcompanionを縮小せず、commit listを非modal drawerへ退避して可読幅を確保する。Workspace SettingsとApp Settingsではcanvasを表示せずprimary surfaceを全幅へ戻す。character visibilityをHiddenにした場合も同様にprimary surfaceを全幅へ戻し、HTML text statusを残す。canvas自体はpointerとaccessibility treeを占有せず、muteは右下21px insetの27×27px circleとする。renderer failureはanimated → reduced → static preview → text-onlyの順に縮退する。
+607.84×754.99px の透明な単一canvasをContinuous Desk上へbottom-containし、頭、手、裾を切らない。選択workspaceのChat、Commitでは同じcanvas instanceと同じpane幅を継続し、tab切替でrendererを再生成またはresizeしない。Commitのevidence detailはcharacterを縮小せず、commit listを非modal drawerへ退避して可読幅を確保する。Workspace SettingsとApp Settingsではcanvasを表示せずprimary surfaceを全幅へ戻す。character visibilityをHiddenにした場合も同様にprimary surfaceを全幅へ戻し、HTML text statusを残す。canvas自体はpointerとaccessibility treeを占有せず、muteは右下21px insetの27×27px circleとする。renderer failureはanimated → reduced → static preview → text-onlyの順に縮退する。
 
 ### Decision Card
 
@@ -333,7 +333,7 @@ file summaryを先に表示し、sanitized diffはfile selection後に1件ずつ
 
 ### Do:
 
-- **Do** 1470×836 で sidebar 255.04px、header 81px、Chat 607.11px、companion 607.84px を基準にし、主要 boundary を Figma node `8:2` の ±2 CSS px に収める。
+- **Do** 1470×836 で sidebar 255.04px、header 81px、Chat 607.11px、character 607.84px を基準にし、主要 boundary を Figma node `8:2` の ±2 CSS px に収める。
 - **Do** card を selected workspace、code chip、composer、必要な overlay へ限定し、通常 message と tool event は連続面へ置く。
 - **Do** status を色、label、icon、fill/outline/dash の少なくとも三つで示す。
 - **Do** normal text contrast 4.5:1、visible focus、24×24px 以上の hit target、200% text zoom を検証する。

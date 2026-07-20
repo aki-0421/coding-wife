@@ -39,7 +39,7 @@ status: "Approved"
 | ----------------------------------------------------------- | ------------------------------------ | ------------------------------------------ |
 | Project context                                             | registered Project ID単位のため      | [S-005](S-005_app-settings-diagnostics.md) |
 | Language、reduced motion、全workspaceのcharacter visibility | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
-| Character context、Companion                                | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
+| Character context、Character                                | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
 | Audio、Support、native readiness                            | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
 | Git commit/revert/reset                                     | read-only observer境界のため         | [S-003](S-003_session-evidence.md)         |
 
@@ -65,7 +65,7 @@ status: "Approved"
 
 app-global sectionやProject context navigationを表示しない。単一sectionのためsection navigationとcompact popoverは設けず、履歴の正本、削除範囲、残るGit dataを一続きの面で示す。
 
-Workspace Settings表示中はLive2D canvasとCompanion paneを表示せず、settings mainをworkspace bodyの全幅で使う。renderer instanceは破棄せず、ChatまたはCommitへ戻った時に同じworkspace、canvas、semantic stateを継続する。runtime readiness、pack provenance、fallback、retryはApp SettingsのCompanion sectionで確認できる。
+Workspace Settings表示中はLive2D canvasとCharacter paneを表示せず、settings mainをworkspace bodyの全幅で使う。renderer instanceは破棄せず、ChatまたはCommitへ戻った時に同じworkspace、canvas、semantic stateを継続する。runtime readiness、pack provenance、fallback、retryはApp SettingsのCharacter sectionで確認できる。
 
 ## 表示状態
 

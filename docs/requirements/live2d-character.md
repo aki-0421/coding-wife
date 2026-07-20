@@ -1,5 +1,5 @@
 ---
-title: "LIVE Live2Dコンパニオン要件定義"
+title: "LIVE Live2Dキャラクター要件定義"
 description: "同梱Hiyori、semantic state、縮退、ユーザーmodelの安全なimport・選択を定義する。"
 updated: 2026-07-20
 read_when:
@@ -7,7 +7,7 @@ read_when:
   - "ユーザーmodel importのsecurity、boundary、fallbackを検証するとき。"
 ---
 
-# Live2Dコンパニオン 要件定義
+# Live2Dキャラクター 要件定義
 
 | 項目           | 内容               |
 | -------------- | ------------------ |
@@ -25,7 +25,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 
 | 目的                          | 達成したと判断できる状態                                             |
 | ----------------------------- | -------------------------------------------------------------------- |
-| 既定companionを確実に表示する | cold startでHiyoriがdemo比率の右paneへ収まり、状態に反応する         |
+| 既定characterを確実に表示する | cold startでHiyoriがdemo比率の右paneへ収まり、状態に反応する         |
 | model差分へ安全に対応する     | motion/expression欠落時もneutral/static/textへ縮退し、Chatを止めない |
 | ユーザーmodelを設定可能にする | model3.jsonを隔離・検証・previewし、app全体で選択・復元できる        |
 
@@ -68,16 +68,16 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------- | ---------------- |
 | `LIVE-F-055` | appは指定Hiyori runtimeを同梱する           | `hiyori_pro_t11.model3.json`、moc3、texture 2件、physics、pose、cdi、motion 10件の17fileをrelease resourceから解決できる | Approved | 非該当           |
 | `LIVE-F-056` | appは編集用assetを配布へ含めない            | release resourceに`.cmo3`、`.can3`、`.DS_Store`がなく、runtime packとnoticeだけが存在する                                | Approved | 非該当           |
-| `LIVE-F-057` | companionはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commitで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。Workspace SettingsとApp Settingsでは表示しない | Approved | 非該当           |
+| `LIVE-F-057` | characterはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commitで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。Workspace SettingsとApp Settingsでは表示しない | Approved | 非該当           |
 | `LIVE-F-058` | rendererはwindow resizeへ追従する           | 1470×836、1280×800、960×640の各resize後500ms以内にcontain scaleを再計算し、composerまたはdecisionを覆わない              | Approved | 非該当           |
 | `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | Chat、Commit、Workspace Settingsを含むtabとworkspace/modelを20回切り替えても描画canvasが1枚で、Chat / Commit間では同じDOM canvasを再利用する。Workspace Settingsでは同じrenderer instanceを非表示のまま保持し、旧texture/motion/WebGL resourceを参照しない | Approved | 非該当           |
-| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | App settingsのCompanionからpack名、creator、source notice、同梱version/hashへ到達できる                                  | Approved | 非該当           |
+| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | App settingsのCharacterからpack名、creator、source notice、同梱version/hashへ到達できる                                  | Approved | 非該当           |
 
 ### Semantic stateと縮退
 
 | 要件ID       | 要件                                                  | 受け入れ条件                                                                                                                                   | 状態     | 廃止理由・後継ID |
 | ------------ | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------- |
-| `LIVE-F-061` | companionはoperational stateへ決定的に反応する        | operational eventのidle→neutral、thinking→thinking、acting/reviewing→working、waiting_for_user→asking、completed→success、disconnected→warning、error→errorをversioned semantic stateへ変換し、同じevent列で毎回同じstate/cue優先順位になる。unknown/unsupported eventはneutralへ戻し、Codex/support outputからmotion file名を直接採用しない | Approved | 非該当           |
+| `LIVE-F-061` | characterはoperational stateへ決定的に反応する        | operational eventのidle→neutral、thinking→thinking、acting/reviewing→working、waiting_for_user→asking、completed→success、disconnected→warning、error→errorをversioned semantic stateへ変換し、同じevent列で毎回同じstate/cue優先順位になる。unknown/unsupported eventはneutralへ戻し、Codex/support outputからmotion file名を直接採用しない | Approved | 非該当           |
 | `LIVE-F-062` | state mappingはasset inventoryに存在するcueだけを使う | mapping候補を検証済みmanifestのmotion cueとexpression cueに限定し、parameter式、path、URL、任意file名を保存・実行しない。HiyoriではIdle/Flick/FlickDown/FlickUp/Tap/Tap@Body/Flick@Body inventory以外を要求せず、未割当、invalid、削除済みcue、expression 0件のpackはneutral/static/textへ戻る | Approved | 非該当           |
 | `LIVE-F-063` | expressionがないpackでも全stateを表示できる           | Expressionsが0件のfixtureでrendererが起動し、state labelとmotion/pose/neutral fallbackを表示する                                               | Approved | 非該当           |
 | `LIVE-F-064` | meaning stateはHTML textでも表示される                | canvasをhideまたはaccessibility treeから除外しても、現在state、uncertainty、waiting、verification resultをvisible text/live regionで確認できる | Approved | 非該当           |
@@ -107,8 +107,14 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ------------ | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------- |
 | `LIVE-F-079` | bundled modelは短時間でfirst frameを表示する           | Apple Silicon・release build・cold cacheでS-002表示からfirst frameまでのp95が3,000ms以下になる                                                                                                                                                                                                                                          | Approved | 非該当           |
 | `LIVE-F-080` | animationは基準端末で操作を妨げない                    | 60秒のacting stateでmedian 30fps以上、main-thread long task 100ms超が0回、Chat入力latency p95 100ms以下になる                                                                                                                                                                                                                           | Approved | 非該当           |
-| `LIVE-F-081` | canvasは主要UIのpointerを奪わない                      | companion以外のChat、composer、decision、muteへpointer/keyboard操作でき、透明canvas領域がそれらをblockしない                                                                                                                                                                                                                            | Approved | 非該当           |
+| `LIVE-F-081` | canvasは主要UIのpointerを奪わない                      | character以外のChat、composer、decision、muteへpointer/keyboard操作でき、透明canvas領域がそれらをblockしない                                                                                                                                                                                                                            | Approved | 非該当           |
 | `LIVE-F-082` | 標準検証commandはclean checkoutからFrameworkを再現する | `pnpm install --frozen-lockfile`直後にtypecheck/buildを先行せず`pnpm lint`と`pnpm test`を実行できる。testと公式related testは固定vendorを検証してFrameworkを自動生成し、並列prepareはlockで直列化、stagingからatomic publish、同じ入力への冪等結果を保証する。生成失敗はsuite collection errorではなくprepare stepの明示errorで停止する | Approved | 非該当           |
+
+### 用語契約
+
+| 要件ID       | 要件                                             | 受け入れ条件                                                                                                                                       | 状態     | 廃止理由・後継ID |
+| ------------ | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------- |
+| `LIVE-F-083` | app全体の対象機能をcharacterとして一意に表現する | 日本語UIは「キャラクター」、英語UIは「Character」を使い、accessible name、内部識別子、test、fixture、文書、ファイル名にも同じ語彙を一貫して用いる | Approved | 非該当           |
 
 ## 入力項目要件
 
@@ -133,7 +139,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ファイル・OS操作            | picker cancel、permission、quarantine、atomic rename               | `LIVE-F-068`〜`LIVE-F-076` |
 | メニュー・ショートカット    | hide/muteにaccessible toggle、importに標準picker                   | `LIVE-F-065`, `LIVE-F-068` |
 | Deep Link・ファイル関連付け | 非該当: model file associationを登録しない                         | 非該当                     |
-| 通知                        | renderer/import errorはApp settings > Companionとtext statusへ表示 | `LIVE-F-067`, `LIVE-F-076` |
+| 通知                        | renderer/import errorはApp settings > Characterとtext statusへ表示 | `LIVE-F-067`, `LIVE-F-076` |
 | Capability・認可            | character libraryと限定asset protocolだけを許可                    | `LIVE-F-071`〜`LIVE-F-074` |
 | アップデート・互換性        | unsupported model/MOC versionを拒否し、既存packを維持              | `LIVE-F-076`               |
 
@@ -141,8 +147,8 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 
 | 画面ID  | 画面名                     | 対象要件ID                                             | 扱い | 画面詳細仕様                                                   |
 | ------- | -------------------------- | ------------------------------------------------------ | ---- | -------------------------------------------------------------- |
-| `S-002` | コーディングワークスペース | `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-079`〜`LIVE-F-081` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md)     |
-| `S-005` | アプリ設定・診断           | `LIVE-F-055`〜`LIVE-F-081`                             | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
+| `S-002` | コーディングワークスペース | `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-079`〜`LIVE-F-081`, `LIVE-F-083` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md)     |
+| `S-005` | アプリ設定・診断           | `LIVE-F-055`〜`LIVE-F-081`, `LIVE-F-083`                             | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
 
 ## 非機能要件
 
@@ -177,7 +183,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 
 | 資料                                                   | 参照理由                           |
 | ------------------------------------------------------ | ---------------------------------- |
-| [PRODUCT.md](../../PRODUCT.md)                         | companionの役割とanti-coercion     |
+| [PRODUCT.md](../../PRODUCT.md)                         | characterの役割とanti-coercion     |
 | [DESIGN.md](../../DESIGN.md)                           | pane寸法、連続面、fallback、motion |
 | [Live2D runtime調査](../research/05-live2d-runtime.md) | pack、renderer、import boundary    |
 | [セキュリティ調査](../research/09-security-privacy.md) | quarantine、asset URL、CSP         |
