@@ -3,11 +3,18 @@ import {
   ArrowUpIcon,
   AtSignIcon,
   BotIcon,
+  ChartNoAxesColumnIncreasingIcon,
   FilePlus2Icon,
+  FilesIcon,
+  GitCompareArrowsIcon,
   InfoIcon,
+  MapIcon,
   PlusIcon,
   SquareIcon,
+  TargetIcon,
+  TerminalSquareIcon,
   XIcon,
+  ZapIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -17,7 +24,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   Tooltip,
   TooltipContent,
@@ -45,6 +51,9 @@ interface ComposerProps {
   ) => void | Promise<void>
   readonly onDraftChange: (value: string) => void
   readonly onEffortChange: (effort: ReasoningEffort) => void
+  readonly onFastModeChange: (enabled: boolean) => void
+  readonly onGoalModeChange: (enabled: boolean) => void
+  readonly onPlanModeChange: (enabled: boolean) => void
   readonly onPickAttachments?: (() => void | Promise<void>) | undefined
   readonly onRegisterAttachmentPaths?:
     | ((
@@ -62,6 +71,17 @@ const contextSources: readonly ContextSnapshotItem["source"][] = [
   "files",
   "git_diff",
   "terminal_output",
+]
+
+const reasoningOrder: readonly ReasoningEffort[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
 ]
 
 function formatBytes(value: number): string {
@@ -102,6 +122,9 @@ export function Composer({
   onCaptureContext,
   onDraftChange,
   onEffortChange,
+  onFastModeChange,
+  onGoalModeChange,
+  onPlanModeChange,
   onPickAttachments,
   onRegisterAttachmentPaths,
   onRemoveAttachment,
@@ -109,7 +132,7 @@ export function Composer({
   onSend,
   onStop,
 }: ComposerProps) {
-  const [contextOpen, setContextOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const attachmentCapabilitiesAvailable =
     onPickAttachments !== undefined && onRegisterAttachmentPaths !== undefined
   const validAttachments = draft.attachments.filter((item) => item.valid)
@@ -118,49 +141,70 @@ export function Composer({
     validAttachments.length > 0 ||
     draft.contextSnapshots.length > 0
   const isBusy = turnState !== "idle"
+  const goalObjectiveLength = Array.from(draft.text.trim()).length
+  const goalObjectiveValid =
+    !draft.goalMode || (goalObjectiveLength > 0 && goalObjectiveLength <= 4_000)
   const repositoryReady =
     repositoryHealth === undefined || repositoryHealth === "ready"
   const canSend =
-    connected && repositoryReady && hasContent && turnState === "idle"
+    connected &&
+    repositoryReady &&
+    hasContent &&
+    goalObjectiveValid &&
+    turnState === "idle"
   const disabledReason = !connected
     ? copy.sendUnavailable
     : repositoryHealth !== undefined && repositoryHealth !== "ready"
       ? copy.workspaceHealth[repositoryHealth]
       : isBusy
         ? copy.sendBusy
-        : !hasContent
-          ? copy.sendEmpty
-          : ""
-  const unavailableEffort =
-    !readiness.fastAvailable && !readiness.maxAvailable
-      ? copy.effortAvailability.none
-      : !readiness.fastAvailable
-        ? copy.effortAvailability.fast
-        : !readiness.maxAvailable
-          ? copy.effortAvailability.max
-          : null
+        : !goalObjectiveValid
+          ? copy.goalInstructionRequired
+          : !hasContent
+            ? copy.sendEmpty
+            : ""
+  const availableReasoningLevels = reasoningOrder.filter(
+    (effort) =>
+      effort === "off" ||
+      readiness.supportedReasoningEfforts.includes(
+        effort as Exclude<ReasoningEffort, "off">,
+      ),
+  )
+  const nextReasoning =
+    availableReasoningLevels[
+      (availableReasoningLevels.indexOf(draft.effort) + 1) %
+        availableReasoningLevels.length
+    ] ?? "off"
 
   useEffect(() => {
     if (isBusy) return
     if (
-      draft.effort === "fast" &&
-      !readiness.fastAvailable &&
-      readiness.maxAvailable
+      draft.effort !== "off" &&
+      !readiness.supportedReasoningEfforts.includes(draft.effort)
+    )
+      onEffortChange("off")
+    if (draft.fastMode && readiness.fastServiceTier === null)
+      onFastModeChange(false)
+    if (
+      (draft.planMode || draft.goalMode) &&
+      !readiness.experimentalModesAvailable
     ) {
-      onEffortChange("max")
-    } else if (
-      draft.effort === "max" &&
-      !readiness.maxAvailable &&
-      readiness.fastAvailable
-    ) {
-      onEffortChange("fast")
+      if (draft.planMode) onPlanModeChange(false)
+      if (draft.goalMode) onGoalModeChange(false)
     }
   }, [
     draft.effort,
+    draft.fastMode,
+    draft.goalMode,
+    draft.planMode,
     isBusy,
     onEffortChange,
-    readiness.fastAvailable,
-    readiness.maxAvailable,
+    onFastModeChange,
+    onGoalModeChange,
+    onPlanModeChange,
+    readiness.experimentalModesAvailable,
+    readiness.fastServiceTier,
+    readiness.supportedReasoningEfforts,
   ])
 
   const addDroppedFiles = (files: FileList | null) => {
@@ -291,49 +335,47 @@ export function Composer({
 
         <div className="flex min-h-7 items-center gap-xs pt-sm">
           <div className="flex shrink-0 items-center gap-xxs">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    aria-describedby="composer-help"
-                    aria-label={copy.add}
-                    disabled={
-                      onPickAttachments === undefined ||
-                      turnState === "sending" ||
-                      turnState === "stopping"
-                    }
-                    onClick={() => {
-                      if (onPickAttachments !== undefined)
-                        void onPickAttachments()
-                    }}
-                    size="icon-xs"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <PlusIcon />
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {attachmentCapabilitiesAvailable
-                  ? copy.composerHint
-                  : copy.pickerUnavailable}
-              </TooltipContent>
-            </Tooltip>
-
-            <Popover onOpenChange={setContextOpen} open={contextOpen}>
-              <PopoverTrigger asChild>
+            <Popover onOpenChange={setAddOpen} open={addOpen}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button
+                      aria-describedby="composer-help"
+                      aria-label={copy.add}
+                      disabled={isBusy}
+                      size="icon-xs"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <PlusIcon />
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="top">{copy.add}</TooltipContent>
+              </Tooltip>
+              <PopoverContent align="start" className="w-64 p-xs" side="top">
+                <p className="px-xs py-xxs text-caption text-muted-foreground">
+                  {copy.attachments}
+                </p>
                 <Button
-                  disabled={isBusy}
+                  className="w-full justify-start"
+                  disabled={onPickAttachments === undefined}
+                  onClick={() => {
+                    setAddOpen(false)
+                    if (onPickAttachments !== undefined)
+                      void onPickAttachments()
+                  }}
                   size="xs"
                   type="button"
                   variant="ghost"
                 >
-                  <AtSignIcon data-icon="inline-start" />
-                  {copy.context}
+                  <FilePlus2Icon data-icon="inline-start" />
+                  {copy.attachFiles}
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" side="top">
+                <div className="my-xxs border-t border-divider" />
+                <p className="px-xs py-xxs text-caption text-muted-foreground">
+                  {copy.context}
+                </p>
                 {contextSources.map((source) => {
                   const label =
                     source === "files"
@@ -346,13 +388,20 @@ export function Composer({
                       className="w-full justify-start"
                       key={source}
                       onClick={() => {
-                        setContextOpen(false)
+                        setAddOpen(false)
                         void onCaptureContext(source)
                       }}
                       size="xs"
                       type="button"
                       variant="ghost"
                     >
+                      {source === "files" ? (
+                        <FilesIcon data-icon="inline-start" />
+                      ) : source === "git_diff" ? (
+                        <GitCompareArrowsIcon data-icon="inline-start" />
+                      ) : (
+                        <TerminalSquareIcon data-icon="inline-start" />
+                      )}
                       {label}
                     </Button>
                   )
@@ -370,42 +419,104 @@ export function Composer({
               {copy.model}
             </span>
 
-            <ToggleGroup
-              aria-label={copy.reasoningEffort}
-              disabled={isBusy}
-              onValueChange={(value) => {
-                if (value === "fast" || value === "max") onEffortChange(value)
-              }}
-              type="single"
-              value={draft.effort}
-            >
-              <ToggleGroupItem
-                aria-label={copy.fast}
-                className="data-[state=on]:bg-warm-active/15 data-[state=on]:text-warm-active"
-                disabled={isBusy || !readiness.fastAvailable}
-                value="fast"
-              >
-                {copy.fast}
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                aria-label={copy.max}
-                disabled={isBusy || !readiness.maxAvailable}
-                value="max"
-              >
-                {copy.max}
-              </ToggleGroupItem>
-            </ToggleGroup>
-          </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={`${copy.reasoningEffort}: ${copy.reasoningLevels[draft.effort]}`}
+                  className="gap-xxs px-xs text-muted-foreground"
+                  disabled={isBusy}
+                  onClick={() => onEffortChange(nextReasoning)}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ChartNoAxesColumnIncreasingIcon data-icon="inline-start" />
+                  <span className="composer-reasoning-label">
+                    {copy.reasoningLevels[draft.effort]}
+                  </span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {copy.reasoningCycleHint}
+              </TooltipContent>
+            </Tooltip>
 
-          {unavailableEffort !== null ? (
-            <span
-              className="max-w-40 text-label text-muted-foreground"
-              data-effort-availability=""
-              role="status"
-            >
-              {unavailableEffort}
-            </span>
-          ) : null}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    aria-label={copy.fastMode}
+                    aria-pressed={draft.fastMode}
+                    className={
+                      draft.fastMode
+                        ? "bg-warm-active/15 text-warm-active"
+                        : undefined
+                    }
+                    disabled={isBusy || readiness.fastServiceTier === null}
+                    onClick={() => onFastModeChange(!draft.fastMode)}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <ZapIcon />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {readiness.fastServiceTier === null
+                  ? copy.fastModeUnavailable
+                  : copy.fastMode}
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    aria-label={copy.goalsMode}
+                    aria-pressed={draft.goalMode}
+                    className={
+                      draft.goalMode
+                        ? "bg-warm-active/15 text-warm-active"
+                        : undefined
+                    }
+                    disabled={isBusy || !readiness.experimentalModesAvailable}
+                    onClick={() => onGoalModeChange(!draft.goalMode)}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <TargetIcon />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{copy.goalsMode}</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    aria-label={copy.planMode}
+                    aria-pressed={draft.planMode}
+                    className={
+                      draft.planMode
+                        ? "bg-warm-active/15 text-warm-active"
+                        : undefined
+                    }
+                    disabled={isBusy || !readiness.experimentalModesAvailable}
+                    onClick={() => onPlanModeChange(!draft.planMode)}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <MapIcon />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{copy.planMode}</TooltipContent>
+            </Tooltip>
+          </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-xs">
             <span

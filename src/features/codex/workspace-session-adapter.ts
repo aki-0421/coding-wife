@@ -7,6 +7,7 @@ import {
   type CodexPendingResponseRequest,
   type ReasoningPreset,
 } from "@/lib/contracts"
+import type { WorkspaceReasoningEffort } from "@/lib/contracts/workspace-history"
 import {
   hasDisallowedMultilineControl,
   unicodeScalarCount,
@@ -40,7 +41,10 @@ export interface StartCodexTurnRequest {
   readonly workspaceId: string
   readonly text: string
   readonly publicText?: string
-  readonly effort: ReasoningPreset
+  readonly effort: ReasoningPreset | null
+  readonly serviceTier?: string | null
+  readonly planMode?: boolean
+  readonly goalObjective?: string | null
   readonly attachmentHandles: readonly string[]
 }
 
@@ -67,7 +71,7 @@ export interface CodexTerminalWorkUnitEvent {
   readonly sourceSequence: number
   readonly occurredAt: string
   readonly objective: string
-  readonly effort: ReasoningPreset
+  readonly effort: WorkspaceReasoningEffort
   readonly attachmentCount: number
 }
 
@@ -116,7 +120,7 @@ interface ExactTurnIdentity {
 interface AcceptedWorkUnit {
   readonly workUnitId: string
   readonly objective: string
-  readonly effort: ReasoningPreset
+  readonly effort: WorkspaceReasoningEffort
   readonly attachmentCount: number
 }
 
@@ -341,6 +345,9 @@ export class CodexWorkspaceSessionAdapter {
     }
     const snapshot = this.store.snapshot()
     const publicText = request.publicText ?? request.text
+    const serviceTier = request.serviceTier ?? null
+    const planMode = request.planMode ?? false
+    const goalObjective = request.goalObjective ?? null
     if (
       snapshot.activeWorkspaceId !== request.workspaceId ||
       this.staleExecutions.size > 0 ||
@@ -361,8 +368,18 @@ export class CodexWorkspaceSessionAdapter {
       request.attachmentHandles.some(
         (handle) => !attachmentHandlePattern.test(handle),
       ) ||
-      (request.effort === "low" && !snapshot.readiness.fastAvailable) ||
-      (request.effort === "max" && !snapshot.readiness.maxAvailable)
+      (request.effort !== null &&
+        !snapshot.readiness.supportedReasoningEfforts.includes(
+          request.effort,
+        )) ||
+      (serviceTier !== null &&
+        serviceTier !== snapshot.readiness.fastServiceTier) ||
+      ((planMode || goalObjective !== null) &&
+        !snapshot.readiness.experimentalModesAvailable) ||
+      (goalObjective !== null &&
+        (goalObjective.trim().length === 0 ||
+          unicodeScalarCount(goalObjective.trim()) > 4_000 ||
+          hasDisallowedMultilineControl(goalObjective)))
     ) {
       throw new Error("CODEX-TURN-PREFLIGHT-BLOCKED")
     }
@@ -384,6 +401,9 @@ export class CodexWorkspaceSessionAdapter {
         clientUserMessageId,
         text: request.text,
         effort: request.effort,
+        serviceTier,
+        planMode,
+        goalObjective,
         attachmentHandles: request.attachmentHandles,
       })
       .then(async (turn) => {
@@ -395,7 +415,7 @@ export class CodexWorkspaceSessionAdapter {
         this.acceptedWorkUnits.set(key, {
           workUnitId: clientUserMessageId,
           objective: publicText,
-          effort: request.effort,
+          effort: request.effort ?? "off",
           attachmentCount: request.attachmentHandles.length,
         })
         const observedTerminal = this.observedTerminalEvents.get(key)
@@ -410,7 +430,7 @@ export class CodexWorkspaceSessionAdapter {
           sourceSequence,
           occurredAt: this.clock.now(),
           text: publicText,
-          effort: request.effort,
+          effort: request.effort ?? "off",
           attachmentCount: request.attachmentHandles.length,
         })
         if (accepted.history !== null) this.enqueueHistory(accepted.history)

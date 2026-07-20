@@ -75,7 +75,18 @@ export type WorkspaceHealth =
   | "unreadable"
   | "read_only"
   | "stale_branch"
-export type WorkspaceReasoningEffort = "fast" | "max"
+export const workspaceReasoningEfforts = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+] as const
+export type WorkspaceReasoningEffort =
+  (typeof workspaceReasoningEfforts)[number]
 export type WorkspaceContextSource = "files" | "git_diff" | "terminal_output"
 
 export interface WorkspaceHistoryStatus {
@@ -671,7 +682,7 @@ export function parsePersistedWorkspaceDraft(
     value.schemaVersion !== workspaceHistorySchemaVersion ||
     !validatePublicString(value.workspaceId, 128) ||
     !isPublicMultilineText(value.text, 128_000, true) ||
-    !oneOf(value.effort, ["fast", "max"] as const) ||
+    !oneOf(value.effort, [...workspaceReasoningEfforts, "fast"] as const) ||
     !isSafeUnsignedInteger(value.revision) ||
     !isTimestamp(value.updatedAt)
   ) {
@@ -681,7 +692,7 @@ export function parsePersistedWorkspaceDraft(
     schemaVersion: 1,
     workspaceId: value.workspaceId,
     text: value.text,
-    effort: value.effort,
+    effort: value.effort === "fast" ? "low" : value.effort,
     revision: value.revision,
     updatedAt: value.updatedAt,
   }
@@ -826,7 +837,7 @@ function parseCodexHistoryPayload(
     kind === "code.user.instruction.accepted" &&
     hasCodexHistoryShape(payload, ["text", "effort", "attachmentCount"]) &&
     isPublicText(payload.text, 64 * 1024) &&
-    oneOf(payload.effort, ["low", "max"] as const) &&
+    oneOf(payload.effort, workspaceReasoningEfforts) &&
     isSafeUnsignedInteger(payload.attachmentCount) &&
     payload.attachmentCount <= 10
   ) {

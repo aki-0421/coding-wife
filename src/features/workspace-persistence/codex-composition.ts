@@ -10,6 +10,7 @@ import type { WorkspaceHistoryTransport } from "@/features/workspace-persistence
 import type {
   AppQuitPreparationRequest,
   ProjectRegistrationResult,
+  ReasoningEffort,
   SendTurnRequest,
   WorkspaceAdapterState,
   WorkspaceAdapterTimelinePage,
@@ -253,7 +254,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   saveDraft(
     workspaceId: string,
     text: string,
-    effort: "fast" | "max",
+    effort: ReasoningEffort,
   ): Promise<void> {
     return this.history.saveDraft(workspaceId, text, effort)
   }
@@ -349,6 +350,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   async sendTurn(
     request: SendTurnRequest,
   ): Promise<{ readonly accepted: boolean }> {
+    const readiness = this.codex.snapshot().readiness
     await this.codex.sendTurn({
       workspaceId: request.workspaceId,
       text: composeTurnInstruction(
@@ -356,7 +358,10 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
         request.editableContextSnapshot,
       ),
       publicText: request.instruction,
-      effort: request.effort === "fast" ? "low" : "max",
+      effort: request.effort === "off" ? null : request.effort,
+      serviceTier: request.fastMode ? readiness.fastServiceTier : null,
+      planMode: request.planMode,
+      goalObjective: request.goalMode ? request.instruction.trim() : null,
       attachmentHandles: request.attachments
         .filter((attachment) => attachment.valid)
         .map((attachment) => attachment.id),

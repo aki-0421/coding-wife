@@ -105,8 +105,8 @@ pub struct CodexDiagnostic {
     pub auth_kind: Option<String>,
     pub requires_openai_auth: bool,
     pub model_available: bool,
-    pub fast_available: bool,
-    pub max_available: bool,
+    pub fast_service_tier: Option<String>,
+    pub supported_reasoning_efforts: Vec<ReasoningPreset>,
     pub config_model_present: bool,
     pub child_state: ChildState,
     pub last_successful_handshake_at: Option<String>,
@@ -134,8 +134,8 @@ impl Default for CodexDiagnostic {
             auth_kind: None,
             requires_openai_auth: false,
             model_available: false,
-            fast_available: false,
-            max_available: false,
+            fast_service_tier: None,
+            supported_reasoning_efforts: Vec::new(),
             config_model_present: false,
             child_state: ChildState::Stopped,
             last_successful_handshake_at: None,
@@ -209,15 +209,38 @@ pub struct CodexThreadResumeRequest {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningPreset {
+    Minimal,
     Low,
+    Medium,
+    High,
+    Xhigh,
     Max,
+    Ultra,
 }
 
 impl ReasoningPreset {
     pub fn as_wire(self) -> &'static str {
         match self {
+            Self::Minimal => "minimal",
             Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
             Self::Max => "max",
+            Self::Ultra => "ultra",
+        }
+    }
+
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "minimal" => Some(Self::Minimal),
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            "xhigh" => Some(Self::Xhigh),
+            "max" => Some(Self::Max),
+            "ultra" => Some(Self::Ultra),
+            _ => None,
         }
     }
 }
@@ -229,7 +252,10 @@ pub struct CodexTurnStartRequest {
     pub thread_handle: String,
     pub client_user_message_id: String,
     pub text: String,
-    pub effort: ReasoningPreset,
+    pub effort: Option<ReasoningPreset>,
+    pub service_tier: Option<String>,
+    pub plan_mode: bool,
+    pub goal_objective: Option<String>,
     pub attachment_handles: Vec<String>,
 }
 

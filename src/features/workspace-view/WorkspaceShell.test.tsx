@@ -263,7 +263,7 @@ function nativeWorkspaceState(
     activeWorkspaceId: "workspace-native",
     draft: {
       text: "",
-      effort: "fast",
+      effort: "off",
       revision: 0,
       contextSnapshots,
     },
@@ -351,8 +351,9 @@ function richCodexState(): WorkspaceCodexState {
     connected: true,
     readiness: {
       ready: true,
-      fastAvailable: true,
-      maxAvailable: true,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: ["low", "max"],
+      experimentalModesAvailable: true,
       reasonCode: null,
     },
     pendingRequests: [decision, approval],
@@ -1806,7 +1807,7 @@ describe("WorkspaceShell", () => {
       activeWorkspaceId,
       draft: {
         text: "",
-        effort: "fast",
+        effort: "off",
         revision: 0,
         contextSnapshots: [],
       },
@@ -1844,10 +1845,10 @@ describe("WorkspaceShell", () => {
       expect(saveDraft).toHaveBeenCalledWith(
         "workspace-a",
         "Keep draft A",
-        "fast",
+        "off",
       ),
     )
-    expect(saveDraft).not.toHaveBeenCalledWith("workspace-b", "", "fast")
+    expect(saveDraft).not.toHaveBeenCalledWith("workspace-b", "", "off")
   })
 
   it("hydrates the persisted draft and timeline before saving later edits", async () => {
@@ -1926,7 +1927,7 @@ describe("WorkspaceShell", () => {
       ),
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Context" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
     fireEvent.click(screen.getByRole("button", { name: "Git diff" }))
     await waitFor(() =>
       expect(captureContext).toHaveBeenCalledWith(
@@ -2152,7 +2153,7 @@ describe("WorkspaceShell", () => {
         name: "Remove attachment: Snapshot 0",
       }),
     ).toBeVisible()
-    fireEvent.click(screen.getByRole("button", { name: "Context" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
     fireEvent.click(screen.getByRole("button", { name: "Git diff" }))
 
     expect(
@@ -2269,8 +2270,9 @@ describe("WorkspaceShell", () => {
       connected: false,
       readiness: {
         ready: false,
-        fastAvailable: false,
-        maxAvailable: false,
+        fastServiceTier: null,
+        supportedReasoningEfforts: [],
+        experimentalModesAvailable: false,
         reasonCode: "CODEX-NOT-CONNECTED",
       },
       pendingRequests: [],
@@ -2476,7 +2478,7 @@ describe("WorkspaceShell", () => {
     ).toBeInTheDocument()
   })
 
-  it("disables unavailable effort choices and falls back from a persisted choice", async () => {
+  it("falls back to Off when a persisted reasoning level is unavailable", async () => {
     const state = nativeWorkspaceState()
     const persistedMax: WorkspaceAdapterState = {
       ...state,
@@ -2488,8 +2490,9 @@ describe("WorkspaceShell", () => {
       connected: false,
       readiness: {
         ready: false,
-        fastAvailable: true,
-        maxAvailable: false,
+        fastServiceTier: "priority",
+        supportedReasoningEfforts: [],
+        experimentalModesAvailable: true,
         reasonCode: "CODEX-EFFORT-UNAVAILABLE",
       },
       pendingRequests: [],
@@ -2507,14 +2510,9 @@ describe("WorkspaceShell", () => {
     }
     renderWorkspace(adapter)
 
-    const maximum = await screen.findByRole("radio", { name: "Max" })
-    const fast = screen.getByRole("radio", { name: "Fast" })
-    expect(maximum).toBeDisabled()
-    expect(fast).toBeEnabled()
-    await waitFor(() => expect(fast).toHaveAttribute("aria-checked", "true"))
     expect(
-      screen.getByText("Maximum reasoning is not available in this runtime."),
-    ).toBeVisible()
+      await screen.findByRole("button", { name: "Reasoning effort: Off" }),
+    ).toBeEnabled()
   })
 
   it("bounds composer input by Unicode scalar values", () => {
@@ -2564,7 +2562,7 @@ describe("WorkspaceShell", () => {
     expect(requests[0]).toMatchObject({
       attachments: [],
       contextSnapshots: [],
-      effort: "fast",
+      effort: "off",
       instruction: "Run the bounded implementation",
       workspaceId: "build-live2d-desktop-app",
       editableContextSnapshot: {
@@ -2821,7 +2819,7 @@ describe("WorkspaceShell", () => {
     expect(
       card.getByText("One bounded unit keeps the next change reviewable."),
     ).toBeVisible()
-    expect(screen.getByLabelText("推論強度")).toBeVisible()
+    expect(screen.getByRole("button", { name: "推論強度: オフ" })).toBeVisible()
     expect(screen.getByLabelText("GPT-5.6 Sol, 固定モデル")).toBeVisible()
     expect(screen.getByLabelText("下書き項目")).toBeVisible()
     const compactCharacter = container.querySelector<HTMLElement>(
@@ -3007,7 +3005,7 @@ describe("WorkspaceShell", () => {
       activeWorkspaceId: workspaceId,
       draft: {
         text: "",
-        effort: "fast",
+        effort: "off",
         revision: 0,
         contextSnapshots: [],
       },
@@ -3167,6 +3165,9 @@ describe("WorkspaceShell", () => {
     )
 
     await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(
+      screen.getByRole("button", { name: "Attach files & images" }),
+    )
     await waitFor(() =>
       expect(pickAttachments).toHaveBeenCalledWith("workspace-native", []),
     )
@@ -3502,7 +3503,7 @@ describe("WorkspaceShell", () => {
       activeWorkspaceId: target.id,
       draft: {
         text: "",
-        effort: "fast",
+        effort: "off",
         revision: 0,
         contextSnapshots: [],
       },

@@ -94,6 +94,9 @@ describe("DemoCodexTransport", () => {
         clientUserMessageId: "message-1",
         text: "Run the demo.",
         effort: "low",
+        serviceTier: null,
+        planMode: false,
+        goalObjective: null,
         attachmentHandles: [],
       }),
     ).resolves.toEqual({
@@ -129,6 +132,9 @@ describe("DemoCodexTransport", () => {
         clientUserMessageId: "message-rich",
         text: "demo:workflow",
         effort: "max",
+        serviceTier: null,
+        planMode: false,
+        goalObjective: null,
         attachmentHandles: [],
       })
       await vi.advanceTimersByTimeAsync(600)
@@ -210,6 +216,9 @@ describe("DemoCodexTransport", () => {
         clientUserMessageId: "message-unknown",
         text: "demo:unknown",
         effort: "low",
+        serviceTier: null,
+        planMode: false,
+        goalObjective: null,
         attachmentHandles: [],
       })
       await vi.advanceTimersByTimeAsync(300)
@@ -234,6 +243,9 @@ describe("DemoCodexTransport", () => {
         clientUserMessageId: "message-crash",
         text: "demo:crash",
         effort: "low",
+        serviceTier: null,
+        planMode: false,
+        goalObjective: null,
         attachmentHandles: [],
       })
       await vi.advanceTimersByTimeAsync(1_000)

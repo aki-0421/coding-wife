@@ -63,6 +63,9 @@ interface ChatViewProps {
   ) => void | Promise<void>
   readonly onDraftChange: (value: string) => void
   readonly onEffortChange: (effort: ReasoningEffort) => void
+  readonly onFastModeChange: (enabled: boolean) => void
+  readonly onGoalModeChange: (enabled: boolean) => void
+  readonly onPlanModeChange: (enabled: boolean) => void
   readonly onMutedChange: (muted: boolean) => void
   readonly onOpenDiagnostics: () => void
   readonly onPickAttachments?: (() => void | Promise<void>) | undefined
@@ -184,6 +187,9 @@ export function ChatView({
   onCaptureContext,
   onDraftChange,
   onEffortChange,
+  onFastModeChange,
+  onGoalModeChange,
+  onPlanModeChange,
   onMutedChange,
   onOpenDiagnostics,
   onPickAttachments,
@@ -464,6 +470,9 @@ export function ChatView({
           onCaptureContext={onCaptureContext}
           onDraftChange={onDraftChange}
           onEffortChange={onEffortChange}
+          onFastModeChange={onFastModeChange}
+          onGoalModeChange={onGoalModeChange}
+          onPlanModeChange={onPlanModeChange}
           onPickAttachments={onPickAttachments}
           onRegisterAttachmentPaths={onRegisterAttachmentPaths}
           onRemoveAttachment={onRemoveAttachment}

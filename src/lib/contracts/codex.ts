@@ -45,7 +45,16 @@ export type CodexBinarySource =
   | "path"
   | "known_install"
   | "test_fixture"
-export type ReasoningPreset = "low" | "max"
+export const reasoningPresets = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+] as const
+export type ReasoningPreset = (typeof reasoningPresets)[number]
 export type ApprovalDecision = "approve_once" | "reject" | "stop"
 export type PendingKind =
   | "command_approval"
@@ -81,8 +90,8 @@ export interface CodexDiagnostic {
   readonly authKind: string | null
   readonly requiresOpenaiAuth: boolean
   readonly modelAvailable: boolean
-  readonly fastAvailable: boolean
-  readonly maxAvailable: boolean
+  readonly fastServiceTier: string | null
+  readonly supportedReasoningEfforts: readonly ReasoningPreset[]
   readonly configModelPresent: boolean
   readonly childState: CodexChildState
   readonly lastSuccessfulHandshakeAt: string | null
@@ -127,7 +136,10 @@ export interface CodexTurnStartRequest {
   readonly threadHandle: string
   readonly clientUserMessageId: string
   readonly text: string
-  readonly effort: ReasoningPreset
+  readonly effort: ReasoningPreset | null
+  readonly serviceTier: string | null
+  readonly planMode: boolean
+  readonly goalObjective: string | null
   readonly attachmentHandles: readonly string[]
 }
 
@@ -634,8 +646,8 @@ export function parseCodexDiagnostic(value: unknown): CodexDiagnostic {
     "authKind",
     "requiresOpenaiAuth",
     "modelAvailable",
-    "fastAvailable",
-    "maxAvailable",
+    "fastServiceTier",
+    "supportedReasoningEfforts",
     "configModelPresent",
     "childState",
     "lastSuccessfulHandshakeAt",
@@ -664,8 +676,13 @@ export function parseCodexDiagnostic(value: unknown): CodexDiagnostic {
     !nullableNonEmptyString(value.authKind) ||
     typeof value.requiresOpenaiAuth !== "boolean" ||
     typeof value.modelAvailable !== "boolean" ||
-    typeof value.fastAvailable !== "boolean" ||
-    typeof value.maxAvailable !== "boolean" ||
+    !nullableNonEmptyString(value.fastServiceTier) ||
+    !Array.isArray(value.supportedReasoningEfforts) ||
+    !value.supportedReasoningEfforts.every((effort) =>
+      oneOf(effort, reasoningPresets),
+    ) ||
+    new Set(value.supportedReasoningEfforts).size !==
+      value.supportedReasoningEfforts.length ||
     typeof value.configModelPresent !== "boolean" ||
     !oneOf(value.childState, childStates) ||
     !nullableTimestamp(value.lastSuccessfulHandshakeAt) ||
@@ -691,8 +708,9 @@ export function parseCodexDiagnostic(value: unknown): CodexDiagnostic {
     authKind: value.authKind,
     requiresOpenaiAuth: value.requiresOpenaiAuth,
     modelAvailable: value.modelAvailable,
-    fastAvailable: value.fastAvailable,
-    maxAvailable: value.maxAvailable,
+    fastServiceTier: value.fastServiceTier,
+    supportedReasoningEfforts:
+      value.supportedReasoningEfforts as readonly ReasoningPreset[],
     configModelPresent: value.configModelPresent,
     childState: value.childState,
     lastSuccessfulHandshakeAt: value.lastSuccessfulHandshakeAt,

@@ -17,21 +17,29 @@ import {
 const readyDiagnostic = parseCodexDiagnostic(fixture.diagnostic)
 
 describe("evaluateCodexReadiness", () => {
-  it("requires history, Sol, both efforts, account, and core capabilities", () => {
+  it("requires history, Sol, advertised reasoning, account, and core capabilities", () => {
     expect(evaluateCodexReadiness(readyDiagnostic, "ready")).toEqual({
       ready: true,
-      fastAvailable: true,
-      maxAvailable: true,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra",
+      ],
+      experimentalModesAvailable: true,
       reasonCode: null,
     })
-    const withoutMax = {
+    const withoutReasoning = {
       ...readyDiagnostic,
-      maxAvailable: false,
+      supportedReasoningEfforts: [],
     } satisfies CodexDiagnostic
-    expect(evaluateCodexReadiness(withoutMax, "ready")).toMatchObject({
+    expect(evaluateCodexReadiness(withoutReasoning, "ready")).toMatchObject({
       ready: false,
-      fastAvailable: true,
-      maxAvailable: false,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: [],
       reasonCode: "CODEX-EFFORT-UNAVAILABLE",
     })
     expect(evaluateCodexReadiness(readyDiagnostic, "read_only")).toMatchObject({

@@ -265,7 +265,7 @@ describe("final bilingual App acceptance", () => {
       expect(workspace.sentTurns[0]).toMatchObject({
         workspaceId: workspace.activeWorkspaceId,
         instruction: "Complete the final acceptance flow",
-        effort: "fast",
+        effort: "off",
         attachments: [
           {
             kind: "image",

@@ -939,6 +939,9 @@ export function WorkspaceShell({
               }
               onDraftChange={view.setDraftText}
               onEffortChange={view.setEffort}
+              onFastModeChange={view.setFastMode}
+              onGoalModeChange={view.setGoalMode}
+              onPlanModeChange={view.setPlanMode}
               onMutedChange={view.setMuted}
               onOpenDiagnostics={() => openAppSettings("diagnostics")}
               onPickAttachments={

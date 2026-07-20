@@ -631,7 +631,9 @@ pub(crate) fn turn_start_params(
     thread_id: &str,
     client_user_message_id: &str,
     text: &str,
-    effort: ReasoningPreset,
+    effort: Option<ReasoningPreset>,
+    service_tier: Option<&str>,
+    plan_mode: bool,
     attachments: &[ResolvedAttachment],
     commit_skill: &ResolvedBundledSkill,
     execution_class: TurnExecutionClass,
@@ -658,14 +660,32 @@ pub(crate) fn turn_start_params(
         "name": commit_skill.name,
         "path": commit_skill.path,
     }));
+    let collaboration_mode = if plan_mode {
+        json!({
+            "mode": "plan",
+            "settings": {
+                "model": CODEX_MODEL,
+                "reasoning_effort": effort.map(ReasoningPreset::as_wire),
+                "developer_instructions": null,
+            }
+        })
+    } else {
+        Value::Null
+    };
     Ok(json!({
         "threadId": thread_id,
         "clientUserMessageId": client_user_message_id,
         "input": input,
         "model": CODEX_MODEL,
-        "effort": effort.as_wire(),
+        "effort": effort.map(ReasoningPreset::as_wire),
+        "serviceTier": service_tier,
+        "collaborationMode": collaboration_mode,
         "outputSchema": decision_output_schema(),
     }))
+}
+
+pub fn thread_goal_set_params(thread_id: &str, objective: &str) -> Value {
+    json!({"threadId": thread_id, "objective": objective})
 }
 
 pub fn turn_interrupt_params(thread_id: &str, turn_id: &str) -> Value {
@@ -735,10 +755,12 @@ pub fn parse_thread_policy_response(
     })
 }
 
-pub fn validate_model_page(result: &Value) -> (bool, bool, bool, Option<String>) {
+pub fn validate_model_page(
+    result: &Value,
+) -> (bool, Vec<ReasoningPreset>, Option<String>, Option<String>) {
     let mut model_available = false;
-    let mut fast_available = false;
-    let mut max_available = false;
+    let mut supported_reasoning_efforts = Vec::new();
+    let mut fast_service_tier = None;
     if let Some(models) = result.get("data").and_then(Value::as_array) {
         for model in models {
             let exact = model.get("id").and_then(Value::as_str) == Some(CODEX_MODEL)
@@ -752,10 +774,28 @@ pub fn validate_model_page(result: &Value) -> (bool, bool, bool, Option<String>)
                 .and_then(Value::as_array)
             {
                 for effort in efforts {
-                    match effort.get("reasoningEffort").and_then(Value::as_str) {
-                        Some("low") => fast_available = true,
-                        Some("max") => max_available = true,
-                        _ => {}
+                    if let Some(effort) = effort
+                        .get("reasoningEffort")
+                        .and_then(Value::as_str)
+                        .and_then(ReasoningPreset::from_wire)
+                    {
+                        if !supported_reasoning_efforts.contains(&effort) {
+                            supported_reasoning_efforts.push(effort);
+                        }
+                    }
+                }
+            }
+            if let Some(tiers) = model.get("serviceTiers").and_then(Value::as_array) {
+                for tier in tiers {
+                    let id = tier.get("id").and_then(Value::as_str);
+                    let name = tier.get("name").and_then(Value::as_str);
+                    let is_fast = id.is_some_and(|value| {
+                        value.eq_ignore_ascii_case("fast") || value.eq_ignore_ascii_case("priority")
+                    }) || name
+                        .is_some_and(|value| value.eq_ignore_ascii_case("fast"));
+                    if is_fast {
+                        fast_service_tier = id.map(str::to_owned);
+                        break;
                     }
                 }
             }
@@ -765,7 +805,12 @@ pub fn validate_model_page(result: &Value) -> (bool, bool, bool, Option<String>)
         .get("nextCursor")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    (model_available, fast_available, max_available, next_cursor)
+    (
+        model_available,
+        supported_reasoning_efforts,
+        fast_service_tier,
+        next_cursor,
+    )
 }
 
 #[cfg(test)]
@@ -828,13 +873,15 @@ mod tests {
     }
 
     #[test]
-    fn turn_always_sets_exact_model_effort_and_omits_service_tier() {
+    fn turn_sets_reasoning_service_tier_and_plan_mode_independently() {
         let skill = commit_skill();
         let fast = turn_start_params(
             "thread",
             "message",
             "hello",
-            ReasoningPreset::Low,
+            Some(ReasoningPreset::Low),
+            Some("priority"),
+            true,
             &[],
             &skill,
             TurnExecutionClass::Main,
@@ -844,7 +891,9 @@ mod tests {
             "thread",
             "message",
             "hello",
-            ReasoningPreset::Max,
+            Some(ReasoningPreset::Max),
+            None,
+            false,
             &[],
             &skill,
             TurnExecutionClass::Main,
@@ -854,8 +903,11 @@ mod tests {
         assert_eq!(fast["model"], CODEX_MODEL);
         assert_eq!(fast["effort"], "low");
         assert_eq!(max["effort"], "max");
-        assert!(fast.get("serviceTier").is_none());
-        assert!(fast.get("collaborationMode").is_none());
+        assert_eq!(fast["serviceTier"], "priority");
+        assert_eq!(fast["collaborationMode"]["mode"], "plan");
+        assert_eq!(fast["collaborationMode"]["settings"]["model"], CODEX_MODEL);
+        assert_eq!(max["serviceTier"], Value::Null);
+        assert_eq!(max["collaborationMode"], Value::Null);
         assert!(fast.get("multiAgentMode").is_none());
         let skills = fast["input"]
             .as_array()
@@ -874,7 +926,9 @@ mod tests {
                 "thread",
                 "message",
                 "hello",
-                ReasoningPreset::Low,
+                Some(ReasoningPreset::Low),
+                None,
+                false,
                 &[],
                 &explain_skill(),
                 TurnExecutionClass::Main,
@@ -965,7 +1019,9 @@ mod tests {
             "thread",
             "message",
             "  ",
-            ReasoningPreset::Low,
+            Some(ReasoningPreset::Low),
+            None,
+            false,
             &attachments,
             &commit_skill(),
             TurnExecutionClass::Main,
@@ -1104,18 +1160,30 @@ mod tests {
     }
 
     #[test]
-    fn model_gate_requires_exact_sol_low_and_max() {
+    fn model_gate_returns_exact_sol_efforts_and_fast_tier() {
         let page = json!({
             "data": [{
                 "id": CODEX_MODEL,
                 "model": CODEX_MODEL,
                 "supportedReasoningEfforts": [
                     {"reasoningEffort": "low"},
-                    {"reasoningEffort": "max"}
+                    {"reasoningEffort": "max"},
+                    {"reasoningEffort": "future"}
+                ],
+                "serviceTiers": [
+                    {"id": "priority", "name": "Fast", "description": "Faster"}
                 ]
             }],
             "nextCursor": null
         });
-        assert_eq!(validate_model_page(&page), (true, true, true, None));
+        assert_eq!(
+            validate_model_page(&page),
+            (
+                true,
+                vec![ReasoningPreset::Low, ReasoningPreset::Max],
+                Some("priority".to_owned()),
+                None,
+            )
+        );
     }
 }

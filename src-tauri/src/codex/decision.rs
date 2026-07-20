@@ -33,7 +33,7 @@ pub struct FallbackDecisionContext {
     pub generation: u64,
     pub thread_id: String,
     pub source_turn_id: String,
-    pub effort: ReasoningPreset,
+    pub effort: Option<ReasoningPreset>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,7 +65,7 @@ pub struct FallbackDecisionClaim {
     pub generation: u64,
     pub thread_id: String,
     pub source_turn_id: String,
-    pub effort: ReasoningPreset,
+    pub effort: Option<ReasoningPreset>,
     token: u64,
 }
 
@@ -620,7 +620,7 @@ mod tests {
             generation: 7,
             thread_id: "thread-1".to_owned(),
             source_turn_id: "turn-1".to_owned(),
-            effort: ReasoningPreset::Max,
+            effort: Some(ReasoningPreset::Max),
         }
     }
 

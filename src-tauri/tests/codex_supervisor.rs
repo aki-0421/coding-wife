@@ -356,7 +356,10 @@ async fn start_active_turn(
             thread_handle: thread.thread_handle.clone(),
             client_user_message_id: "readiness-message".to_owned(),
             text: "Keep this turn active during diagnostics.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -603,7 +606,10 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
             thread_handle: thread.thread_handle.clone(),
             client_user_message_id: "message-1".to_owned(),
             text: "Inspect the fixture.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::High),
+            service_tier: Some("priority".to_owned()),
+            plan_mode: true,
+            goal_objective: Some("Inspect the fixture.".to_owned()),
             attachment_handles: vec![],
         })
         .await
@@ -628,6 +634,7 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
         .expect("interrupt ack");
     tokio::time::sleep(Duration::from_millis(100)).await;
     let state = read_state(&fixture.state).await;
+    assert!(state.contains("goal_set_ok"));
     assert!(state.contains("turn_contract_ok"));
     assert_eq!(state.matches("commit_skill_exactly_once_ok").count(), 1);
     assert_eq!(state.matches("commit_skill_audit:").count(), 1);
@@ -666,7 +673,10 @@ async fn main_turn_text_accepts_exact_scalar_boundary_and_rejects_invalid_input_
         thread_handle: thread.thread_handle.clone(),
         client_user_message_id: client_user_message_id.to_owned(),
         text,
-        effort: ReasoningPreset::Low,
+        effort: Some(ReasoningPreset::Low),
+        service_tier: None,
+        plan_mode: false,
+        goal_objective: None,
         attachment_handles: vec![],
     };
     let oversized = format!("{}😀", "x".repeat(80_000));
@@ -1447,7 +1457,10 @@ async fn missing_or_tampered_main_skill_blocks_turn_before_wire() {
                 thread_handle: thread.thread_handle,
                 client_user_message_id: format!("message-{case}"),
                 text: "Do not send this turn.".to_owned(),
-                effort: ReasoningPreset::Low,
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
                 attachment_handles: vec![],
             })
             .await
@@ -1598,7 +1611,10 @@ async fn validated_opaque_attachments_reach_the_fake_server_as_local_image_and_m
                 thread_handle: thread.thread_handle.clone(),
                 client_user_message_id: "message-attachments".to_owned(),
                 text: String::new(),
-                effort: ReasoningPreset::Low,
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
                 attachment_handles: handles.clone(),
             },
             resolved,
@@ -1664,7 +1680,10 @@ async fn snapshot_bytes_survive_leaf_and_ancestor_namespace_replacement() {
                 thread_handle,
                 client_user_message_id: "message-attachment-race".to_owned(),
                 text: String::new(),
-                effort: ReasoningPreset::Low,
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
                 attachment_handles: handles.clone(),
             },
             resolved,
@@ -1709,7 +1728,10 @@ async fn snapshot_cleanup_covers_rejection_terminal_before_response_and_child_cr
                     thread_handle,
                     client_user_message_id: format!("message-{mode}"),
                     text: String::new(),
-                    effort: ReasoningPreset::Low,
+                    effort: Some(ReasoningPreset::Low),
+                    service_tier: None,
+                    plan_mode: false,
+                    goal_objective: None,
                     attachment_handles: handles.clone(),
                 },
                 resolved,
@@ -1859,7 +1881,10 @@ async fn native_rui_round_trips_one_strict_answer() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-rui".to_owned(),
             text: "Request a choice.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -1949,7 +1974,10 @@ async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
                 thread_handle: thread.thread_handle,
                 client_user_message_id: format!("message-{mode}"),
                 text: "Produce a decision.".to_owned(),
-                effort: ReasoningPreset::Max,
+                effort: Some(ReasoningPreset::Max),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
                 attachment_handles: vec![],
             })
             .await
@@ -1996,7 +2024,10 @@ async fn fallback_decision_validates_then_starts_exactly_one_structured_continua
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-decision".to_owned(),
             text: "Produce a decision.".to_owned(),
-            effort: ReasoningPreset::Max,
+            effort: Some(ReasoningPreset::Max),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -2070,7 +2101,10 @@ async fn notification_first_turn_start_preserves_fallback_display_and_answer() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-notification-first".to_owned(),
             text: "Produce a decision.".to_owned(),
-            effort: ReasoningPreset::Max,
+            effort: Some(ReasoningPreset::Max),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -2126,7 +2160,10 @@ async fn failed_fallback_continuation_is_terminal_and_never_replayed() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-crash-decision".to_owned(),
             text: "Produce a decision.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -2229,8 +2266,8 @@ async fn setup_probe_only_discovers_and_initializes_a_short_lived_app_server() {
     assert!(!setup.generated_by_same_binary);
     assert!(!setup.account_present);
     assert!(!setup.model_available);
-    assert!(!setup.fast_available);
-    assert!(!setup.max_available);
+    assert!(setup.fast_service_tier.is_none());
+    assert!(setup.supported_reasoning_efforts.is_empty());
     let state = read_state(&fixture.state).await;
     assert!(state.contains("setup_initialize"));
     assert!(!state.contains("setup_schema_requested"));
@@ -2255,8 +2292,13 @@ async fn readiness_probe_observes_auth_change_without_stopping_the_active_turn()
     assert_eq!(readiness.health, CodexHealth::AuthRequired);
     assert!(!readiness.account_present);
     assert!(readiness.model_available);
-    assert!(readiness.fast_available);
-    assert!(readiness.max_available);
+    assert_eq!(readiness.fast_service_tier.as_deref(), Some("priority"));
+    assert!(readiness
+        .supported_reasoning_efforts
+        .contains(&ReasoningPreset::Low));
+    assert!(readiness
+        .supported_reasoning_efforts
+        .contains(&ReasoningPreset::Max));
     assert!(readiness.generated_by_same_binary);
     assert_eq!(supervisor.diagnostic().await, runtime_before);
 
@@ -2481,7 +2523,10 @@ async fn unknown_server_request_is_rejected_and_turn_is_interrupted() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-unknown".to_owned(),
             text: "Trigger the request.".to_owned(),
-            effort: ReasoningPreset::Max,
+            effort: Some(ReasoningPreset::Max),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -2558,7 +2603,10 @@ async fn crash_after_ready_restarts_once_without_replaying_a_turn() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-after-restart".to_owned(),
             text: "Verify skill injection after restart.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await

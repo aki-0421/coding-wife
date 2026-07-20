@@ -16,8 +16,15 @@
     "authKind": "chatgpt",
     "requiresOpenaiAuth": true,
     "modelAvailable": true,
-    "fastAvailable": true,
-    "maxAvailable": true,
+    "fastServiceTier": "priority",
+    "supportedReasoningEfforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
     "configModelPresent": true,
     "childState": "ready",
     "lastSuccessfulHandshakeAt": "2026-07-18T00:00:00Z",

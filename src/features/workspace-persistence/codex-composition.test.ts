@@ -115,7 +115,11 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       connected: true,
       generation: fixture.thread.generation,
       phase: "ready",
-      readiness: { fastAvailable: true, maxAvailable: true },
+      readiness: {
+        fastServiceTier: "priority",
+        supportedReasoningEfforts: expect.arrayContaining(["low", "max"]),
+        experimentalModesAvailable: true,
+      },
     })
     await expect(
       adapter.pickAttachments(workspaceId, []),
@@ -128,7 +132,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       adapter.sendTurn({
         workspaceId,
         instruction: "Run the focused checks.",
-        effort: "fast",
+        effort: "off",
         attachments: [],
         contextSnapshots: [],
         editableContextSnapshot,
@@ -143,7 +147,10 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     ) {
       throw new Error("Expected a typed turn start request")
     }
-    expect(turnStartRequest.effort).toBe("low")
+    expect(turnStartRequest.effort).toBeNull()
+    expect(turnStartRequest.serviceTier).toBeNull()
+    expect(turnStartRequest.planMode).toBe(false)
+    expect(turnStartRequest.goalObjective).toBeNull()
     expect(turnStartRequest.attachmentHandles).toEqual([])
     expect(turnStartRequest.text).toContain("CODING_WIFE_UNTRUSTED_CONTEXT_V1")
     expect(turnStartRequest.text).toContain(
@@ -211,7 +218,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       nativeReadOnly.sendTurn({
         workspaceId,
         instruction: "Must remain blocked",
-        effort: "fast",
+        effort: "off",
         attachments: [],
         contextSnapshots: [],
         editableContextSnapshot:
@@ -308,7 +315,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId: fromWorkspaceId,
       instruction: "Finish the owned turn before switching.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -387,7 +394,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId: fromWorkspaceId,
       instruction: "Deduplicate the transition.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -445,7 +452,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Cancel only after terminal cleanup.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -515,7 +522,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Archive only after the exact turn stops.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -594,7 +601,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Keep this workspace if stopping fails.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -637,7 +644,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Preserve lifecycle on interrupt failure.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -757,7 +764,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Finish before quitting.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -826,7 +833,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Keep running on interrupt failure.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -842,7 +849,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         workspaceId,
         expectedGeneration: fixture.thread.generation,
         draftText: "Must not persist after failure",
-        draftEffort: "fast",
+        draftEffort: "off",
       }),
     ).rejects.toThrow("interrupt unavailable")
     expect(

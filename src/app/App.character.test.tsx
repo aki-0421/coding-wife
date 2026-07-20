@@ -102,8 +102,9 @@ describe("default App character integration", () => {
             connected: true,
             readiness: {
               ready: true,
-              fastAvailable: true,
-              maxAvailable: true,
+              fastServiceTier: "priority",
+              supportedReasoningEfforts: ["low", "max"],
+              experimentalModesAvailable: true,
               reasonCode: null,
             },
             pendingRequests: [],

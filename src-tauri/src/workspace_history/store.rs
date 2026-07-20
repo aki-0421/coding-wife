@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS workspace_preferences (
   workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
   draft_text TEXT NOT NULL DEFAULT '',
-  effort TEXT NOT NULL DEFAULT 'fast',
+  effort TEXT NOT NULL DEFAULT 'off',
   draft_revision INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
@@ -1517,7 +1517,7 @@ impl WorkspaceHistoryStore {
         transaction
             .execute(
                 "INSERT INTO workspace_preferences (workspace_id, draft_text, effort, draft_revision, updated_at)
-                 VALUES (?1, '', 'fast', 0, ?2)",
+                 VALUES (?1, '', 'off', 0, ?2)",
                 params![workspace_id, now],
             )
             .map_err(|_| history_error("HIST-PREFERENCE-INSERT", true))?;
@@ -2479,7 +2479,7 @@ impl WorkspaceHistoryStore {
         transaction
             .execute(
                 "UPDATE workspace_preferences
-                 SET draft_text = '', effort = 'fast', draft_revision = draft_revision + 1,
+                 SET draft_text = '', effort = 'off', draft_revision = draft_revision + 1,
                      updated_at = ?1 WHERE workspace_id = ?2",
                 params![updated_at, workspace_id],
             )
@@ -3787,7 +3787,12 @@ fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Val
         "code.user.instruction.accepted" => {
             exact(&["text", "effort", "attachmentCount"])
                 && bounded_multiline("text", 64 * 1024, true)
-                && one_of("effort", &["low", "max"])
+                && one_of(
+                    "effort",
+                    &[
+                        "off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+                    ],
+                )
                 && unsigned("attachmentCount", 10)
         }
         "code.item.status.changed" => {
@@ -4158,7 +4163,7 @@ fn draft_by_workspace(
                     workspace_id: row.get(0)?,
                     text: row.get(1)?,
                     effort: ReasoningEffort::try_from(effort.as_str())
-                        .unwrap_or(ReasoningEffort::Fast),
+                        .unwrap_or(ReasoningEffort::Off),
                     revision: row.get::<_, i64>(3)? as u64,
                     updated_at: row.get(4)?,
                 })
@@ -6587,7 +6592,7 @@ mod tests {
             .is_some_and(|name| data.join(name).exists()));
         assert_eq!(
             store
-                .save_draft("workspace-missing", "draft", ReasoningEffort::Fast, 0)
+                .save_draft("workspace-missing", "draft", ReasoningEffort::Off, 0)
                 .unwrap_err()
                 .code,
             "HIST-READ-ONLY"
@@ -7107,7 +7112,7 @@ mod tests {
                     .execute(
                         "INSERT INTO workspace_preferences (
                            workspace_id, draft_text, effort, draft_revision, updated_at
-                         ) VALUES (?1, '', 'fast', 0, ?2)",
+                         ) VALUES (?1, '', 'off', 0, ?2)",
                         params![workspace_id, created_at],
                     )
                     .expect("insert legacy preferences");

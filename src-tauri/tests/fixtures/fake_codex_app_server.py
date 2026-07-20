@@ -364,11 +364,15 @@ def main():
             if MODE == "setup_probe":
                 record("setup_model_list")
             efforts = (
-                [{"reasoningEffort": "low"}]
+                []
                 if MODE == "readiness_effort_unavailable"
                 else [
                     {"reasoningEffort": "low"},
+                    {"reasoningEffort": "medium"},
+                    {"reasoningEffort": "high"},
+                    {"reasoningEffort": "xhigh"},
                     {"reasoningEffort": "max"},
+                    {"reasoningEffort": "ultra"},
                 ]
             )
             result(
@@ -381,6 +385,13 @@ def main():
                             "id": "gpt-5.6-sol",
                             "model": "gpt-5.6-sol",
                             "supportedReasoningEfforts": efforts,
+                            "serviceTiers": [
+                                {
+                                    "id": "priority",
+                                    "name": "Fast",
+                                    "description": "Faster responses",
+                                }
+                            ],
                         }
                     ],
                     "nextCursor": None,
@@ -402,6 +413,32 @@ def main():
             continue
         if method == "thread/list":
             result(message_id, {"data": [], "nextCursor": None})
+            continue
+        if method == "thread/goal/set":
+            objective = params.get("objective")
+            valid = (
+                params.get("threadId") == "thread-fixture"
+                and isinstance(objective, str)
+                and 0 < len(objective) <= 4_000
+            )
+            record("goal_set_ok" if valid else "goal_set_invalid")
+            if not valid:
+                send({"id": message_id, "error": {"code": -32602, "message": "Invalid params"}})
+                continue
+            result(
+                message_id,
+                {
+                    "goal": {
+                        "threadId": "thread-fixture",
+                        "objective": objective,
+                        "status": "active",
+                        "createdAt": 0,
+                        "updatedAt": 0,
+                        "tokensUsed": 0,
+                        "timeUsedSeconds": 0,
+                    }
+                },
+            )
             continue
         if method in ("thread/start", "thread/resume"):
             thread_id = params.get("threadId", "thread-fixture")
@@ -572,11 +609,22 @@ def main():
                     and "multiAgentMode" not in params
                 )
             else:
+                collaboration_mode = params.get("collaborationMode")
+                collaboration_valid = collaboration_mode is None or (
+                    isinstance(collaboration_mode, dict)
+                    and collaboration_mode.get("mode") == "plan"
+                    and collaboration_mode.get("settings", {}).get("model")
+                    == "gpt-5.6-sol"
+                )
                 valid = (
                     params.get("model") == "gpt-5.6-sol"
-                    and params.get("effort") in ("low", "max")
-                    and "serviceTier" not in params
-                    and "collaborationMode" not in params
+                    and "effort" in params
+                    and params.get("effort")
+                    in (None, "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+                    and "serviceTier" in params
+                    and params.get("serviceTier") in (None, "priority")
+                    and "collaborationMode" in params
+                    and collaboration_valid
                     and "multiAgentMode" not in params
                 )
             expected_skill = (

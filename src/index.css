@@ -317,6 +317,10 @@
 }
 
 @container (max-width: 390px) {
+  .composer-reasoning-label {
+    display: none;
+  }
+
   .composer-execution-options {
     margin-left: auto;
   }

@@ -45,7 +45,7 @@ const workspaceState: WorkspaceAdapterState = {
   activeWorkspaceId: workspaceId,
   draft: {
     text: "",
-    effort: "fast",
+    effort: "off",
     revision: 0,
     contextSnapshots: [],
   },
@@ -61,8 +61,9 @@ function codexState(phase: WorkspaceCodexState["phase"]): WorkspaceCodexState {
     connected: true,
     readiness: {
       ready: true,
-      fastAvailable: true,
-      maxAvailable: true,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: ["low", "max"],
+      experimentalModesAvailable: true,
       reasonCode: null,
     },
     pendingRequests: [],

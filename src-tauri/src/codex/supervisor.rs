@@ -25,8 +25,8 @@ use super::process::{spawn_process, ProcessError, ProcessRuntime};
 use super::protocol::{
     account_read_params, client_notification, config_read_params, initialize_params,
     model_list_params, parse_thread_policy_response, review_start_params, server_error,
-    server_result, thread_list_params, thread_resume_params, thread_start_params,
-    turn_interrupt_params, turn_start_params, InboundMessage, OutboundProfile,
+    server_result, thread_goal_set_params, thread_list_params, thread_resume_params,
+    thread_start_params, turn_interrupt_params, turn_start_params, InboundMessage, OutboundProfile,
 };
 use super::requests::{
     ActiveWireContext, RegisterOutcome, RequestValidationError, ServerRequestLedger,
@@ -50,6 +50,7 @@ const READINESS_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const READINESS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERRUPT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CODEX_TURN_TEXT_SCALARS: usize = 80_000;
+const MAX_GOAL_OBJECTIVE_SCALARS: usize = 4_000;
 
 fn is_valid_main_turn_text(value: &str, has_attachments: bool) -> bool {
     value.chars().count() <= MAX_CODEX_TURN_TEXT_SCALARS
@@ -57,6 +58,15 @@ fn is_valid_main_turn_text(value: &str, has_attachments: bool) -> bool {
         && !value
             .chars()
             .any(|character| character.is_control() && character != '\n' && character != '\t')
+}
+
+fn is_valid_goal_objective(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed.chars().count() <= MAX_GOAL_OBJECTIVE_SCALARS
+        && trimmed
+            .chars()
+            .all(|character| character == '\n' || character == '\t' || !character.is_control())
 }
 const MAX_MODEL_PAGES: usize = 20;
 const MAX_RESTARTS: usize = 3;
@@ -75,7 +85,7 @@ struct PendingTurnStart {
     workspace_id: String,
     raw_thread_id: String,
     thread_handle: String,
-    effort: ReasoningPreset,
+    effort: Option<ReasoningPreset>,
     client_message_id: String,
     raw_turn_id: Option<String>,
     turn_handle: Option<String>,
@@ -101,7 +111,7 @@ struct SupervisorState {
     turn_handles: HashMap<String, String>,
     active_thread_id: Option<String>,
     active_turn_id: Option<String>,
-    active_turn_effort: Option<ReasoningPreset>,
+    active_turn_effort: Option<Option<ReasoningPreset>>,
     pending_turn_start: Option<PendingTurnStart>,
     workspace_cancellation_gates: HashSet<String>,
     main_work_units: HashMap<(String, String), MainWorkUnitLease>,
@@ -203,8 +213,8 @@ struct HandshakeResult {
     auth_kind: Option<String>,
     requires_openai_auth: bool,
     model_available: bool,
-    fast_available: bool,
-    max_available: bool,
+    fast_service_tier: Option<String>,
+    supported_reasoning_efforts: Vec<ReasoningPreset>,
     config_model_present: bool,
 }
 
@@ -1154,6 +1164,17 @@ impl CodexSupervisor {
         {
             return Err(command_error("CODEX-TURN-INVALID", "turn/start", false));
         }
+        if request
+            .goal_objective
+            .as_deref()
+            .is_some_and(|objective| !is_valid_goal_objective(objective))
+        {
+            return Err(command_error(
+                "CODEX-GOAL-INVALID",
+                "thread/goal/set",
+                false,
+            ));
+        }
         let commit_skill = self.resolve_main_skill("turn/start")?;
         let skill_injection = commit_skill.audit();
         let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
@@ -1170,6 +1191,25 @@ impl CodexSupervisor {
             ensure_workspace_turn_start_allowed(&state, &request.workspace_id, "turn/start")?;
             if state.active_turn_id.is_some() || state.pending_turn_start.is_some() {
                 return Err(command_error("CODEX-TURN-ACTIVE", "turn/start", false));
+            }
+            if request.effort.is_some_and(|effort| {
+                !state
+                    .diagnostic
+                    .supported_reasoning_efforts
+                    .contains(&effort)
+            }) || request.service_tier.as_deref()
+                != request
+                    .service_tier
+                    .as_deref()
+                    .filter(|tier| state.diagnostic.fast_service_tier.as_deref() == Some(*tier))
+                || (request.plan_mode || request.goal_objective.is_some())
+                    && !state.diagnostic.experimental_api_accepted
+            {
+                return Err(command_error(
+                    "CODEX-TURN-CAPABILITY-UNAVAILABLE",
+                    "turn/start",
+                    false,
+                ));
             }
             let raw_thread = state
                 .thread_handles
@@ -1223,6 +1263,19 @@ impl CodexSupervisor {
                 }
             }
         }
+        if let Some(objective) = request.goal_objective.as_deref() {
+            if let Err(error) = connection
+                .request_default(
+                    "thread/goal/set",
+                    thread_goal_set_params(&raw_thread, objective.trim()),
+                )
+                .await
+            {
+                self.rollback_pending_turn_start(generation, token, true)
+                    .await;
+                return Err(rpc_command_error(error, "thread/goal/set"));
+            }
+        }
         let mut guard = PendingTurnStartGuard {
             supervisor: self.clone(),
             generation,
@@ -1237,6 +1290,8 @@ impl CodexSupervisor {
                     &request.client_user_message_id,
                     &request.text,
                     request.effort,
+                    request.service_tier.as_deref(),
+                    request.plan_mode,
                     &attachments,
                     &commit_skill,
                     TurnExecutionClass::Main,
@@ -1530,6 +1585,8 @@ impl CodexSupervisor {
                     &client_message_id,
                     &input,
                     claim.effort,
+                    None,
+                    false,
                     &[],
                     &commit_skill,
                     TurnExecutionClass::Main,
@@ -2448,16 +2505,22 @@ async fn handshake(
     let mut cursor = None;
     let mut seen_cursors = std::collections::HashSet::new();
     let mut model_available = false;
-    let mut fast_available = false;
-    let mut max_available = false;
+    let mut fast_service_tier = None;
+    let mut supported_reasoning_efforts = Vec::new();
     for _ in 0..MAX_MODEL_PAGES {
         let page = connection
             .request_default("model/list", model_list_params(cursor.as_deref()))
             .await?;
-        let (model, fast, max, next) = super::protocol::validate_model_page(&page);
+        let (model, efforts, fast_tier, next) = super::protocol::validate_model_page(&page);
         model_available |= model;
-        fast_available |= fast;
-        max_available |= max;
+        for effort in efforts {
+            if !supported_reasoning_efforts.contains(&effort) {
+                supported_reasoning_efforts.push(effort);
+            }
+        }
+        if fast_service_tier.is_none() {
+            fast_service_tier = fast_tier;
+        }
         match next {
             Some(next) if seen_cursors.insert(next.clone()) => cursor = Some(next),
             Some(_) => return Err(RpcRequestError::Protocol),
@@ -2471,8 +2534,8 @@ async fn handshake(
         auth_kind,
         requires_openai_auth,
         model_available,
-        fast_available,
-        max_available,
+        fast_service_tier,
+        supported_reasoning_efforts,
         config_model_present,
     })
 }
@@ -2752,7 +2815,7 @@ fn diagnostic_from_handshake(
         CodexHealth::AuthRequired
     } else if !handshake.model_available {
         CodexHealth::ModelUnavailable
-    } else if !handshake.fast_available || !handshake.max_available {
+    } else if handshake.supported_reasoning_efforts.is_empty() {
         CodexHealth::EffortUnavailable
     } else {
         CodexHealth::Ready
@@ -2775,8 +2838,8 @@ fn diagnostic_from_handshake(
         auth_kind: handshake.auth_kind,
         requires_openai_auth: handshake.requires_openai_auth,
         model_available: handshake.model_available,
-        fast_available: handshake.fast_available,
-        max_available: handshake.max_available,
+        fast_service_tier: handshake.fast_service_tier,
+        supported_reasoning_efforts: handshake.supported_reasoning_efforts,
         config_model_present: handshake.config_model_present,
         child_state,
         last_successful_handshake_at: Some(now),
@@ -2906,8 +2969,8 @@ fn diagnostic_from_probe(binary: &BinaryInfo, schema: &SchemaProbe) -> CodexDiag
         auth_kind: None,
         requires_openai_auth: false,
         model_available: false,
-        fast_available: false,
-        max_available: false,
+        fast_service_tier: None,
+        supported_reasoning_efforts: Vec::new(),
         config_model_present: false,
         child_state: ChildState::Stopped,
         last_successful_handshake_at: None,
@@ -3165,7 +3228,7 @@ mod tests {
             workspace_id: workspace_id.to_owned(),
             raw_thread_id: "thread-raw".to_owned(),
             thread_handle: "thread-handle".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
             client_message_id: "message".to_owned(),
             raw_turn_id: None,
             turn_handle: None,
@@ -3256,10 +3319,13 @@ mod tests {
             thread_handle: "thread".to_owned(),
             client_user_message_id: "message".to_owned(),
             text: "Implement it".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         };
-        assert_eq!(turn.effort.as_wire(), "low");
+        assert_eq!(turn.effort.map(ReasoningPreset::as_wire), Some("low"));
     }
 
     #[test]
@@ -3297,7 +3363,7 @@ mod tests {
                 workspace_id: "workspace".to_owned(),
                 raw_thread_id: "thread-raw".to_owned(),
                 thread_handle: "thread-handle".to_owned(),
-                effort: ReasoningPreset::Max,
+                effort: Some(ReasoningPreset::Max),
                 client_message_id: "message-1".to_owned(),
                 raw_turn_id: None,
                 turn_handle: None,
@@ -3318,7 +3384,7 @@ mod tests {
                 .expect("response confirms the same reservation");
         assert_eq!(first, second);
         assert_eq!(state.active_turn_id.as_deref(), Some("turn-raw"));
-        assert_eq!(state.active_turn_effort, Some(ReasoningPreset::Max));
+        assert_eq!(state.active_turn_effort, Some(Some(ReasoningPreset::Max)));
 
         assert_eq!(
             confirm_pending_turn_start(
@@ -3368,7 +3434,7 @@ mod tests {
                 workspace_id: "workspace".to_owned(),
                 raw_thread_id: "thread-raw".to_owned(),
                 thread_handle: "thread-handle".to_owned(),
-                effort: ReasoningPreset::Low,
+                effort: Some(ReasoningPreset::Low),
                 client_message_id: "message".to_owned(),
                 raw_turn_id: Some("turn-raw".to_owned()),
                 turn_handle: Some("turn-handle".to_owned()),

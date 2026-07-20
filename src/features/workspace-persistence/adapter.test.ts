@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   parseWorkspaceStateSnapshot,
   workspaceHistoryCommands,
+  type WorkspaceReasoningEffort,
   type WorkspaceStateSnapshot,
 } from "@/lib/contracts/workspace-history"
 import { parseCodexEvent } from "@/lib/contracts/codex"
@@ -233,7 +234,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
     if (workspaceId === null) throw new Error("demo fixture")
 
     await Promise.all([
-      adapter.saveDraft(workspaceId, "first", "fast"),
+      adapter.saveDraft(workspaceId, "first", "off"),
       adapter.saveDraft(workspaceId, "second", "max"),
       adapter.saveDraft(workspaceId, "latest", "max"),
     ])
@@ -329,7 +330,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
         const draftRequest = request as {
           readonly workspaceId: string
           readonly text: string
-          readonly effort: "fast" | "max"
+          readonly effort: WorkspaceReasoningEffort
           readonly expectedRevision: number
         }
         const updated = {
@@ -407,7 +408,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
 
     const deletion = adapter.deleteWorkspaceHistory("workspace-fixture")
     await expect(
-      adapter.saveDraft("workspace-fixture", "must not race", "fast"),
+      adapter.saveDraft("workspace-fixture", "must not race", "off"),
     ).resolves.toBeUndefined()
     expect(commands).not.toContain(
       workspaceHistoryCommands.issueDeleteChallenge,
@@ -428,7 +429,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
     ])
 
     await expect(
-      adapter.saveDraft("workspace-fixture", "after deletion", "fast"),
+      adapter.saveDraft("workspace-fixture", "after deletion", "off"),
     ).rejects.toMatchObject({ code: "WORKSPACE-NOT-FOUND" })
     expect(commands.at(-1)).toBe(workspaceHistoryCommands.select)
   })

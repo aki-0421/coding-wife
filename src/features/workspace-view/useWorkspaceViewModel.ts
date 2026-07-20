@@ -44,7 +44,10 @@ export interface ProjectSetupState {
 
 const emptyDraft: WorkspaceDraft = {
   text: "",
-  effort: "fast",
+  effort: "off",
+  fastMode: false,
+  planMode: false,
+  goalMode: false,
   attachments: [],
   contextSnapshots: [],
 }
@@ -106,8 +109,9 @@ const disconnectedCodexState: WorkspaceCodexState = {
   connected: false,
   readiness: {
     ready: false,
-    fastAvailable: false,
-    maxAvailable: false,
+    fastServiceTier: null,
+    supportedReasoningEfforts: [],
+    experimentalModesAvailable: false,
     reasonCode: "CODEX-NOT-CONNECTED",
   },
   pendingRequests: [],
@@ -127,8 +131,16 @@ function initialCodexState(
     connected: true,
     readiness: {
       ready: true,
-      fastAvailable: true,
-      maxAvailable: true,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra",
+      ],
+      experimentalModesAvailable: true,
       reasonCode: null,
     },
   }
@@ -311,6 +323,9 @@ export function useWorkspaceViewModel(
           [activeWorkspaceId]: {
             text: pendingDraft?.text ?? adapterDraft.text,
             effort: pendingDraft?.effort ?? adapterDraft.effort,
+            fastMode: existing.fastMode,
+            planMode: existing.planMode,
+            goalMode: existing.goalMode,
             attachments: existing.attachments,
             contextSnapshots: adapterDraft.contextSnapshots,
           },
@@ -586,6 +601,39 @@ export function useWorkspaceViewModel(
     ],
   )
 
+  const setFastMode = useCallback(
+    (fastMode: boolean) => {
+      if (!adapterReady || !selectedWorkspace) return
+      updateDraft(selectedWorkspace.id, (current) => ({
+        ...current,
+        fastMode,
+      }))
+    },
+    [adapterReady, selectedWorkspace, updateDraft],
+  )
+
+  const setPlanMode = useCallback(
+    (planMode: boolean) => {
+      if (!adapterReady || !selectedWorkspace) return
+      updateDraft(selectedWorkspace.id, (current) => ({
+        ...current,
+        planMode,
+      }))
+    },
+    [adapterReady, selectedWorkspace, updateDraft],
+  )
+
+  const setGoalMode = useCallback(
+    (goalMode: boolean) => {
+      if (!adapterReady || !selectedWorkspace) return
+      updateDraft(selectedWorkspace.id, (current) => ({
+        ...current,
+        goalMode,
+      }))
+    },
+    [adapterReady, selectedWorkspace, updateDraft],
+  )
+
   const applyAttachmentRegistration = useCallback(
     (workspaceId: string, response: AttachmentRegistrationResponse) => {
       const additions = attachmentItems(response)
@@ -759,6 +807,9 @@ export function useWorkspaceViewModel(
         workspaceId: selectedWorkspace.id,
         instruction: draft.text,
         effort: draft.effort,
+        fastMode: draft.fastMode,
+        planMode: draft.planMode,
+        goalMode: draft.goalMode,
         attachments: draft.attachments,
         contextSnapshots: draft.contextSnapshots,
         editableContextSnapshot,
@@ -773,6 +824,7 @@ export function useWorkspaceViewModel(
       updateDraft(selectedWorkspace.id, (current) => ({
         ...current,
         text: "",
+        goalMode: false,
         attachments: [],
         contextSnapshots: [],
       }))
@@ -1472,6 +1524,9 @@ export function useWorkspaceViewModel(
     setActiveTab,
     setDraftText,
     setEffort,
+    setFastMode,
+    setPlanMode,
+    setGoalMode,
     setProjectFilterIds,
     setMuted,
     setNotice,

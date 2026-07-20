@@ -3,6 +3,7 @@ import type {
   CodexEvent,
   PendingRequestView,
 } from "@/lib/contracts"
+import type { WorkspaceReasoningEffort } from "@/lib/contracts/workspace-history"
 import { unicodeScalarCount } from "@/lib/public-text"
 
 const maxStreamingText = 64 * 1024
@@ -51,7 +52,7 @@ export type CodexSemanticTimelineEvent = CodexTimelineEventBase &
     | {
         readonly kind: "user"
         readonly text: string
-        readonly effort: "low" | "max"
+        readonly effort: WorkspaceReasoningEffort
         readonly attachmentCount: number
       }
     | {
@@ -142,7 +143,7 @@ export interface AcceptedUserTurn {
   readonly sourceSequence: number
   readonly occurredAt: string
   readonly text: string
-  readonly effort: "low" | "max"
+  readonly effort: WorkspaceReasoningEffort
   readonly attachmentCount: number
 }
 
