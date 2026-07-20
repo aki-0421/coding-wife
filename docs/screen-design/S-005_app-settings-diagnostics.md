@@ -31,7 +31,7 @@ status: "Approved"
 
 | section     | 内容                                                                                                     |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
-| General           | ja/en、app version                                                                                       |
+| General           | ja/en、app version。preferenceのpersistence種別、record/schema version、snapshot IDは表示しない         |
 | Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
 | Character context | app-globalなname、tone、speech density、behavior、prohibited expressions                                |
 | Companion         | app-globalなbundled Hiyoriとcustom 1枠、選択、import/置換、preview、semantic mapping、provenance、delete、runtime status |
