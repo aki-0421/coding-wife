@@ -1,7 +1,7 @@
 ---
 title: "AIコーディング・キャラクターエディター 調査資料"
 description: "要件定義前に確認する技術成立性、体験設計、リスク、MVP境界をまとめた調査資料の入口。"
-updated: 2026-07-18
+updated: 2026-07-21
 read_when:
   - "Coding Wifeの要件定義前に、調査全体の結論と各資料への入口を確認するとき。"
 ---
@@ -80,6 +80,7 @@ TauriはWindows、macOS、Linuxを同一コードベースで扱えるが、各O
 | [10-quality-evaluation.md](10-quality-evaluation.md) | 品質モデル、評価指標、観測、実験計画 |
 | [11-mvp-and-open-questions.md](11-mvp-and-open-questions.md) | MVP境界、実装順序、Go/No-Goゲート、未決事項 |
 | [codex-commit-skill-injection.md](codex-commit-skill-injection.md) | app同梱commit skill、turn単位注入、version/digest監査、互換fallback |
+| [codex-startup-performance.md](codex-startup-performance.md) | App Server起動の待機依存、重複process、binary/schema cacheの性能設計監査 |
 | [macos-local-narration-runtime.md](macos-local-narration-runtime.md) | `/usr/bin/say`の実測、fixed binary/voice/stdin/process境界、privacy判断 |
 | [SOURCES.md](SOURCES.md) | 一次資料・標準・研究文献一覧 |
 
