@@ -360,7 +360,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       publicText: request.instruction,
       effort: request.effort === "off" ? null : request.effort,
       serviceTier: request.fastMode ? readiness.fastServiceTier : null,
-      planMode: request.planMode,
+      planMode: request.planMode ?? false,
       goalObjective: request.goalMode ? request.instruction.trim() : null,
       attachmentHandles: request.attachments
         .filter((attachment) => attachment.valid)
