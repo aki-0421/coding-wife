@@ -28,6 +28,10 @@ import {
   DemoCharacterLibraryGateway,
   type CharacterLibraryGateway,
 } from "@/features/character/library/transport"
+import {
+  builtinHiyoriMotionPreset,
+  neutralSemanticAssignments,
+} from "@/features/character/semantic-mapping"
 import type {
   CharacterPackManifest,
   CharacterPackRef,
@@ -101,7 +105,6 @@ const builtinPack = parseCharacterLibrarySnapshot(
 const trustedFrameBytes = new Uint8Array(
   characterFixture.attestationRequest.thumbnailPng,
 )
-const createdObjectUrls: string[] = []
 const customManifest: CharacterPackManifest = {
   ...importedPreview.preview!.manifest,
   compatibility: {
@@ -128,16 +131,14 @@ const customPack: CharacterPackView = {
   runtimeFileCount: 3,
   totalBytes: 600,
   textureCount: 1,
-  motionCount: 0,
+  motionCount: 1,
   expressionCount: 0,
   selectedProjectCount: 0,
   deletable: true,
   manifest: customManifest,
   thumbnailSha256: characterFixture.attestationRequest.thumbnailSha256,
-  cueInventory: { motions: [], expressions: [] },
+  cueInventory: { motions: ["FlickUp[0]"], expressions: [] },
 }
-
-type TrustedFrameMode = "valid" | "missing" | "tampered"
 
 class MemoryLocaleStore implements LocalePreferenceStore {
   readonly persistence = "session-only" as const
@@ -163,10 +164,6 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
   public readonly cancellationRequests: CharacterCancelImportRequest[] = []
   public readonly semanticMappingRequests: CharacterSemanticMappingSaveRequest[] =
     []
-  public readonly trustedFrameReads: {
-    readonly assetId: string
-    readonly expectedMime: string
-  }[] = []
   public pickerCount = 0
   public pickerErrorCode: string | null = null
   public conflictNextSemanticSave = false
@@ -174,7 +171,6 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
 
   public constructor(
     packs: readonly CharacterPackView[] = [builtinPack, customPack],
-    private readonly trustedFrameMode: TrustedFrameMode = "valid",
   ) {
     this.snapshot = {
       schemaVersion: 1,
@@ -189,15 +185,7 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
         packId: builtinPack.packId,
         manifestHash: builtinPack.manifestHash,
         mappingVersion: 0,
-        assignments: {
-          neutral: { kind: "neutral" },
-          thinking: { kind: "neutral" },
-          working: { kind: "neutral" },
-          asking: { kind: "neutral" },
-          success: { kind: "neutral" },
-          warning: { kind: "neutral" },
-          error: { kind: "neutral" },
-        },
+        assignments: builtinHiyoriMotionPreset,
       },
       semanticMappingStatus: "default",
     }
@@ -257,7 +245,10 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
         ...this.snapshot.semanticMapping,
         packId: published.packId,
         manifestHash: published.manifestHash,
+        mappingVersion: 0,
+        assignments: neutralSemanticAssignments(),
       },
+      semanticMappingStatus: "default",
       packs: [
         ...this.snapshot.packs
           .filter((pack) => pack.kind === "builtin")
@@ -286,7 +277,13 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
         manifestHash: this.snapshot.packs.find(
           (pack) => pack.packId === request.packId,
         )!.manifestHash,
+        mappingVersion: 0,
+        assignments:
+          request.packId === builtinPack.packId
+            ? builtinHiyoriMotionPreset
+            : neutralSemanticAssignments(),
       },
+      semanticMappingStatus: "default",
       packs: this.snapshot.packs.map((pack) => ({
         ...pack,
         selectedProjectCount: pack.packId === request.packId ? 1 : 0,
@@ -307,7 +304,10 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
         ...this.snapshot.semanticMapping,
         packId: builtinPack.packId,
         manifestHash: builtinPack.manifestHash,
+        mappingVersion: 0,
+        assignments: builtinHiyoriMotionPreset,
       },
+      semanticMappingStatus: "default",
       packs: this.snapshot.packs
         .filter((pack) => pack.packId !== request.packId)
         .map((pack) => ({ ...pack, selectedProjectCount: 1 })),
@@ -362,8 +362,7 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
       manifest: pack.manifest,
       manifestHash: pack.manifestHash,
       previewToken: null,
-      readAsset: (assetId, expectedMime, signal) => {
-        this.trustedFrameReads.push({ assetId, expectedMime })
+      readAsset: (_assetId, _expectedMime, signal) => {
         if (signal.aborted) {
           return Promise.reject(
             signal.reason instanceof Error
@@ -371,15 +370,7 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
               : new Error("trusted frame read canceled"),
           )
         }
-        if (this.trustedFrameMode === "missing") {
-          return Promise.reject(new CharacterLibraryOperationError())
-        }
-        const bytes = trustedFrameBytes.slice()
-        if (this.trustedFrameMode === "tampered") {
-          const lastIndex = bytes.length - 1
-          bytes[lastIndex] = (bytes[lastIndex] ?? 0) ^ 0xff
-        }
-        return Promise.resolve(bytes.buffer)
+        return Promise.resolve(trustedFrameBytes.slice().buffer)
       },
     }
   }
@@ -425,44 +416,90 @@ function libraryTree(
 }
 
 describe("CharacterModelLibrarySettings", () => {
-  it("edits, previews, and saves all semantic states from verified cue options", async () => {
+  it("opens bundled Hiyori from the simple list and shows a read-only motion preset", async () => {
     const user = userEvent.setup()
-    const gateway = new ModelLibraryGateway([builtinPack])
+    const gateway = new ModelLibraryGateway()
     renderLibrary(gateway)
 
-    const successCue = await screen.findByRole("combobox", {
-      name: "Success cue",
+    const hiyoriRow = await screen.findByRole("button", {
+      name: new RegExp(`Open character settings: ${builtinPack.displayName}`),
+    })
+    expect(screen.getByRole("button", { name: /Local model/ })).toBeVisible()
+    expect(
+      screen.queryByText(customPack.provenanceLabel),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(customPack.manifestHash)).not.toBeInTheDocument()
+
+    await user.click(hiyoriRow)
+    expect(
+      screen.getByRole("heading", { name: builtinPack.displayName }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole("heading", { name: "Motion settings" }),
+    ).toBeVisible()
+    expect(screen.getByText("Preset — cannot be edited")).toBeVisible()
+    expect(screen.getByText("Natural idle")).toBeVisible()
+    expect(screen.getAllByText("Working")).toHaveLength(2)
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Preview" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Save settings" }),
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Back to characters" }))
+    expect(
+      screen.getByRole("button", {
+        name: new RegExp(`Open character settings: ${builtinPack.displayName}`),
+      }),
+    ).toHaveFocus()
+  })
+
+  it("edits and saves custom motion settings without preview controls", async () => {
+    const user = userEvent.setup()
+    const gateway = new ModelLibraryGateway()
+    renderLibrary(gateway)
+
+    await user.click(await screen.findByRole("button", { name: /Local model/ }))
+    await user.click(screen.getByRole("button", { name: "Use this character" }))
+    await waitFor(() =>
+      expect(gateway.selectionRequests).toEqual([customPack.packId]),
+    )
+    const successCue = await screen.findByRole<HTMLSelectElement>("combobox", {
+      name: "Success",
     })
     await user.selectOptions(successCue, "motion:FlickUp[0]")
-    await user.click(screen.getAllByRole("button", { name: "Preview" })[4]!)
-    expect(screen.getByText(/Success · motion:FlickUp\[0\]/)).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Preview" }),
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save settings" }))
 
-    await user.click(screen.getByRole("button", { name: "Save mapping" }))
     await waitFor(() => expect(gateway.semanticMappingRequests).toHaveLength(1))
     expect(gateway.semanticMappingRequests[0]?.assignments.success).toEqual({
       kind: "motion",
       cueId: "FlickUp[0]",
     })
-    expect(await screen.findByText("Mapping saved")).toBeVisible()
+    expect(await screen.findByText("Motion settings saved")).toBeVisible()
   })
 
-  it("retains an edited draft and retries a conflict with the fresh mapping version", async () => {
+  it("retains an edited custom draft and retries a conflict with the fresh version", async () => {
     const user = userEvent.setup()
-    const gateway = new ModelLibraryGateway([builtinPack])
+    const gateway = new ModelLibraryGateway()
     gateway.conflictNextSemanticSave = true
     renderLibrary(gateway)
 
+    await user.click(await screen.findByRole("button", { name: /Local model/ }))
+    await user.click(screen.getByRole("button", { name: "Use this character" }))
     const successCue = await screen.findByRole<HTMLSelectElement>("combobox", {
-      name: "Success cue",
+      name: "Success",
     })
     await user.selectOptions(successCue, "motion:FlickUp[0]")
-    await user.click(screen.getByRole("button", { name: "Save mapping" }))
+    await user.click(screen.getByRole("button", { name: "Save settings" }))
 
     await waitFor(() => expect(gateway.semanticMappingRequests).toHaveLength(1))
-    expect(await screen.findByText("Version 1")).toBeVisible()
     expect(successCue.value).toBe("motion:FlickUp[0]")
-
-    await user.click(screen.getByRole("button", { name: "Save mapping" }))
+    await user.click(screen.getByRole("button", { name: "Save settings" }))
     await waitFor(() => expect(gateway.semanticMappingRequests).toHaveLength(2))
     expect(gateway.semanticMappingRequests[1]).toMatchObject({
       expectedMappingVersion: 1,
@@ -470,109 +507,17 @@ describe("CharacterModelLibrarySettings", () => {
         success: { kind: "motion", cueId: "FlickUp[0]" },
       },
     })
-    expect(await screen.findByText("Version 2")).toBeVisible()
-  })
-
-  it("keeps semantic previews static when reduced motion is requested", async () => {
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn(() => ({
-        matches: true,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    )
-    renderLibrary(new ModelLibraryGateway([builtinPack]))
-
-    expect(
-      await screen.findByText(/Static preview — motion is reduced/),
-    ).toBeVisible()
-    expect(
-      document.querySelector('[data-semantic-preview="static"]'),
-    ).toBeInTheDocument()
+    expect(await screen.findByText("Motion settings saved")).toBeVisible()
   })
 
   beforeEach(() => {
     document.documentElement.lang = "en"
-    createdObjectUrls.length = 0
-    let sequence = 0
-    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
-      const url = `blob:trusted-character-frame-${String(++sequence)}`
-      createdObjectUrls.push(url)
-      return url
-    })
-    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
-
-  it("restores the attested thumbnail and accessible hashes from restart snapshot data", async () => {
-    const firstGateway = new ModelLibraryGateway()
-    const first = renderLibrary(firstGateway)
-
-    await waitFor(() =>
-      expect(
-        first.container.querySelector(
-          `[data-character-pack="${customPack.packId}"] [data-character-thumbnail="trusted-frame"]`,
-        ),
-      ).toHaveAttribute("src", "blob:trusted-character-frame-1"),
-    )
-    expect(firstGateway.trustedFrameReads).toEqual([
-      {
-        assetId: "__coding-wife/trusted-frame.png",
-        expectedMime: "image/png",
-      },
-    ])
-    expect(
-      screen.getByLabelText(`Manifest: ${customPack.manifestHash}`),
-    ).toHaveTextContent("dddddddd…dddddddd")
-    expect(
-      screen.getByLabelText(
-        `Trusted frame: ${characterFixture.attestationRequest.thumbnailSha256}`,
-      ),
-    ).toHaveTextContent("431ced69…7f265460")
-
-    first.unmount()
-    const restartedGateway = new ModelLibraryGateway()
-    const restarted = renderLibrary(restartedGateway)
-    await waitFor(() =>
-      expect(
-        restarted.container.querySelector(
-          `[data-character-pack="${customPack.packId}"] [data-character-thumbnail="trusted-frame"]`,
-        ),
-      ).toHaveAttribute("src", "blob:trusted-character-frame-2"),
-    )
-    expect(restartedGateway.trustedFrameReads).toHaveLength(1)
-  })
-
-  it.each(["missing", "tampered"] as const)(
-    "fails closed when the persisted trusted frame is %s",
-    async (trustedFrameMode) => {
-      const gateway = new ModelLibraryGateway(
-        [builtinPack, customPack],
-        trustedFrameMode,
-      )
-      const view = renderLibrary(gateway)
-
-      await waitFor(() =>
-        expect(
-          view.container.querySelector(
-            `[data-character-pack="${customPack.packId}"] [data-character-thumbnail="unavailable"]`,
-          ),
-        ).toBeInTheDocument(),
-      )
-      expect(
-        view.container.querySelector(
-          `[data-character-pack="${customPack.packId}"] img`,
-        ),
-      ).not.toBeInTheDocument()
-      expect(createdObjectUrls).toEqual([])
-      expect(gateway.trustedFrameReads).toHaveLength(1)
-    },
-  )
 
   it("keeps bundled Hiyori protected and deletes the active custom slot with fallback", async () => {
     const user = userEvent.setup()
@@ -582,26 +527,13 @@ describe("CharacterModelLibrarySettings", () => {
     expect(
       await screen.findByRole("button", { name: "Replace custom model" }),
     ).toBeVisible()
-    expect(screen.getByText("No license information required")).toBeVisible()
-    expect(screen.getByText("Filled")).toBeVisible()
-    const customRadio = await screen.findByRole("radio", {
-      name: /Local model/,
-    })
-    customRadio.focus()
-    await user.keyboard(" ")
+    await user.click(await screen.findByRole("button", { name: /Local model/ }))
+    await user.click(screen.getByRole("button", { name: "Use this character" }))
     await waitFor(() =>
       expect(gateway.selectionRequests).toEqual([customPack.packId]),
     )
-    expect(
-      screen.getByLabelText(/bundled model.*cannot be deleted/i),
-    ).toBeVisible()
-    expect(
-      screen.queryByRole("button", { name: "Delete: Hiyori" }),
-    ).not.toBeInTheDocument()
 
-    await user.click(
-      screen.getByRole("button", { name: "Delete: Local model" }),
-    )
+    await user.click(screen.getByRole("button", { name: "Delete" }))
     expect(
       screen.getByRole("heading", { name: "Delete this character model?" }),
     ).toBeVisible()
@@ -611,14 +543,31 @@ describe("CharacterModelLibrarySettings", () => {
       expect(gateway.deletionRequests).toEqual([customPack.packId]),
     )
     expect(screen.queryByText("Local model")).not.toBeInTheDocument()
-    expect(screen.getByRole("radio", { name: /Hiyori/ })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    )
+    expect(
+      screen.getByRole("button", {
+        name: new RegExp(
+          `Open character settings: ${builtinPack.displayName}, In use`,
+        ),
+      }),
+    ).toBeVisible()
     expect(
       screen.getByRole("button", { name: "Import custom model" }),
     ).toBeVisible()
-    expect(screen.getByText("Available")).toBeVisible()
+  })
+
+  it("does not offer delete or editable motion controls for bundled Hiyori", async () => {
+    const user = userEvent.setup()
+    renderLibrary(new ModelLibraryGateway([builtinPack]))
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: new RegExp(`Open character settings: ${builtinPack.displayName}`),
+      }),
+    )
+    expect(
+      screen.queryByRole("button", { name: "Delete" }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
   })
 
   it("explains import failures in Japanese while retaining the diagnostic code", async () => {
@@ -662,7 +611,9 @@ describe("CharacterModelLibrarySettings", () => {
     )
 
     await waitFor(() => expect(gateway.confirmationRequests).toHaveLength(1))
-    expect(screen.getAllByRole("radio")).toHaveLength(2)
+    expect(
+      screen.getAllByRole("button", { name: /Open character settings/ }),
+    ).toHaveLength(2)
     expect(
       screen.getByRole("button", { name: "Replace custom model" }),
     ).toBeVisible()
@@ -700,8 +651,10 @@ describe("CharacterModelLibrarySettings", () => {
     expect(gateway.confirmationRequests[0]?.displayName).toBe("My local model")
     expect(gateway.selectionRequests).toHaveLength(0)
     expect(
-      await screen.findByRole("radio", { name: /My local model/ }),
-    ).toHaveAttribute("aria-checked", "true")
+      await screen.findByRole("button", {
+        name: /Open character settings: My local model, In use/,
+      }),
+    ).toBeVisible()
   })
 
   it("cancels quarantine when the preview dialog is dismissed with Escape", async () => {
@@ -760,13 +713,15 @@ describe("CharacterModelLibrarySettings", () => {
     renderLibrary(new DemoCharacterLibraryGateway(), "ja")
 
     expect(
-      await screen.findByRole("heading", { name: "キャラクターモデル" }),
+      await screen.findByRole("heading", { name: "キャラクター一覧" }),
     ).toBeVisible()
-    expect(
-      screen.getByRole("button", { name: "カスタムモデルを取り込む" }),
-    ).toBeDisabled()
-    expect(
-      screen.getByText(/モデルの取り込みはデスクトップアプリ/),
-    ).toBeVisible()
+    const importButton = screen.getByRole("button", {
+      name: "カスタムモデルを取り込む",
+    })
+    expect(importButton).toBeDisabled()
+    expect(importButton).toHaveAttribute(
+      "title",
+      "モデルの取り込みはデスクトップアプリで利用できます。",
+    )
   })
 })

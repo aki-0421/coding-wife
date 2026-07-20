@@ -379,13 +379,11 @@ describe("default App character integration", () => {
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
     await user.click(screen.getByRole("button", { name: "Character" }))
-    expect(screen.getByText("External renderer")).toBeVisible()
-    expect(
-      screen.getByText("Unknown", { selector: "[data-slot=badge]" }),
-    ).toBeVisible()
+    expect(screen.getByRole("heading", { name: "Characters" })).toBeVisible()
+    expect(screen.queryByText("External renderer")).not.toBeInTheDocument()
   })
 
-  it("reports Hiyori provenance, preferences, errors, and retry from the mounted renderer", async () => {
+  it("shows simplified Hiyori settings while preserving preferences, errors, and retry", async () => {
     const user = userEvent.setup()
     render(
       <App localeStore={englishLocaleStore} transport={new DemoTransport()} />,
@@ -400,9 +398,17 @@ describe("default App character integration", () => {
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
     await user.click(screen.getByRole("button", { name: "Character" }))
-    expect(screen.getAllByText("桃瀬ひより - PRO").length).toBeGreaterThan(0)
-    expect(screen.getByText("hiyori_pro_t11")).toBeVisible()
-    expect(screen.getByText("かにビーム")).toBeVisible()
+    await user.click(
+      await screen.findByRole("button", {
+        name: /Open character settings: 桃瀬ひより - PRO/,
+      }),
+    )
+    expect(
+      screen.getByRole("heading", { name: "Motion settings" }),
+    ).toBeVisible()
+    expect(screen.getByText("Preset — cannot be edited")).toBeVisible()
+    expect(screen.queryByText("hiyori_pro_t11")).not.toBeInTheDocument()
+    expect(screen.queryByText("かにビーム")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getAllByRole("button", { name: "App settings" })[0]!)
     fireEvent.change(screen.getByRole("combobox", { name: "Reduced motion" }), {

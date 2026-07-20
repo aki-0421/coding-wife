@@ -99,113 +99,6 @@ interface WorkspaceSettingsViewProps {
   readonly onDeleteHistory: () => Promise<boolean>
 }
 
-function CharacterReadinessBadge({
-  copy,
-  runtime,
-}: Pick<CharacterRuntimeSettingsProps, "copy"> & {
-  readonly runtime: CharacterRuntimeView
-}) {
-  const label = {
-    loading: copy.settingsView.live2dLoading,
-    ready: copy.settingsView.live2dReady,
-    recovering: copy.settingsView.live2dRecovering,
-    degraded: copy.settingsView.live2dDegraded,
-    error: copy.settingsView.live2dError,
-    hidden: copy.settingsView.live2dHidden,
-    unknown: copy.settingsView.live2dUnknown,
-  }[runtime.readiness]
-  const variant =
-    runtime.readiness === "ready"
-      ? "success"
-      : runtime.readiness === "loading" || runtime.readiness === "recovering"
-        ? "running"
-        : runtime.readiness === "error"
-          ? "destructive"
-          : "outline"
-
-  return (
-    <Badge
-      data-character-runtime-readiness={runtime.readiness}
-      variant={variant}
-    >
-      {label}
-    </Badge>
-  )
-}
-
-function CharacterRuntimeDetails({
-  characterRuntime,
-  copy,
-  muted,
-}: Pick<CharacterRuntimeSettingsProps, "characterRuntime" | "copy" | "muted">) {
-  const rendererLabel =
-    characterRuntime.rendererKind === "builtin_hiyori"
-      ? copy.settingsView.builtinRenderer
-      : copy.settingsView.externalRenderer
-  return (
-    <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-lg gap-y-xs text-caption">
-      <dt className="text-muted-foreground">{copy.settingsView.renderer}</dt>
-      <dd className="m-0 text-foreground">{rendererLabel}</dd>
-      {characterRuntime.pack ? (
-        <>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.bundledModel}
-          </dt>
-          <dd className="m-0 text-foreground">
-            {characterRuntime.pack.displayName}
-          </dd>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.bundledVersion}
-          </dt>
-          <dd className="m-0 font-mono text-foreground">
-            {characterRuntime.pack.bundledVersion}
-          </dd>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.illustrationCredit}
-          </dt>
-          <dd className="m-0 text-foreground">
-            {characterRuntime.pack.illustration}
-          </dd>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.modelingCredit}
-          </dt>
-          <dd className="m-0 text-foreground">
-            {characterRuntime.pack.modeling}
-          </dd>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.noticeHash}
-          </dt>
-          <dd className="m-0 truncate font-mono text-label text-foreground">
-            {characterRuntime.pack.noticeSha256}
-          </dd>
-        </>
-      ) : null}
-      <dt className="text-muted-foreground">{copy.settingsView.phase}</dt>
-      <dd className="m-0 text-foreground">
-        {copy.settingsView.characterPhases[characterRuntime.phase]}
-      </dd>
-      <dt className="text-muted-foreground">{copy.settingsView.fallback}</dt>
-      <dd className="m-0 text-foreground">
-        {copy.settingsView.characterFallbacks[characterRuntime.fallback]}
-      </dd>
-      <dt className="text-muted-foreground">
-        {copy.settingsView.motionPolicy}
-      </dt>
-      <dd className="m-0 text-foreground">
-        {copy.settingsView.characterPolicies[characterRuntime.motionPolicy]}
-      </dd>
-      <dt className="text-muted-foreground">{copy.settingsView.audioState}</dt>
-      <dd className="m-0 text-foreground">
-        {muted ? copy.character.muted : copy.character.unmuted}
-      </dd>
-      <dt className="text-muted-foreground">{copy.settingsView.lastError}</dt>
-      <dd className="m-0 font-mono text-label text-foreground">
-        {characterRuntime.lastErrorCode ?? copy.settingsView.noRecordedError}
-      </dd>
-    </dl>
-  )
-}
-
 function CharacterRuntimeErrorAlert({
   characterRuntime,
   copy,
@@ -400,26 +293,17 @@ function ContextSettings({
 function CharacterSettings({
   characterRuntime,
   copy,
-  muted,
   onRetryCharacter,
 }: CharacterRuntimeSettingsProps) {
   return (
     <section className="flex flex-col gap-lg">
-      <div className="flex items-center justify-between gap-md">
-        <h2 className="m-0 text-headline text-text-strong">
-          {copy.settingsView.characterTitle}
-        </h2>
-        <CharacterReadinessBadge copy={copy} runtime={characterRuntime} />
-      </div>
+      <h2 className="m-0 text-headline text-text-strong">
+        {copy.settingsView.characterTitle}
+      </h2>
       <CharacterRuntimeErrorAlert
         characterRuntime={characterRuntime}
         copy={copy}
         onRetryCharacter={onRetryCharacter}
-      />
-      <CharacterRuntimeDetails
-        characterRuntime={characterRuntime}
-        copy={copy}
-        muted={muted}
       />
       <CharacterModelLibrarySettings />
     </section>

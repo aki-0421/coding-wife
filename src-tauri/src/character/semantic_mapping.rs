@@ -46,6 +46,21 @@ impl SemanticAssignmentsV1 {
         }
     }
 
+    pub fn hiyori_preset() -> Self {
+        let motion = |cue_id: &str| SemanticCueSelection::Motion {
+            cue_id: cue_id.to_owned(),
+        };
+        Self {
+            neutral: motion("Idle[0]"),
+            thinking: motion("Idle[1]"),
+            working: motion("Tap@Body[0]"),
+            asking: motion("FlickUp[0]"),
+            success: motion("Tap[1]"),
+            warning: motion("FlickDown[0]"),
+            error: motion("Flick@Body[0]"),
+        }
+    }
+
     fn values(&self) -> [&SemanticCueSelection; 7] {
         [
             &self.neutral,
@@ -77,6 +92,16 @@ impl SemanticMappingV1 {
             manifest_hash,
             mapping_version: 0,
             assignments: SemanticAssignmentsV1::neutral(),
+        }
+    }
+
+    pub fn hiyori_preset(pack_id: String, manifest_hash: String) -> Self {
+        Self {
+            schema_version: SEMANTIC_MAPPING_SCHEMA_VERSION,
+            pack_id,
+            manifest_hash,
+            mapping_version: 0,
+            assignments: SemanticAssignmentsV1::hiyori_preset(),
         }
     }
 

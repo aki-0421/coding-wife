@@ -128,7 +128,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | preference取得・更新・reset | Rust owner-only store    | `app_preferences_get/update/reset` | exact schema/version                  | 前record維持      | safe defaultまたは前record、safe code |
 | Character context load/save | Rust SQLite             | app character context commands     | global singleton、expected version    | draft維持         | conflictまたはsafe code                |
 | Project context load/save | Rust SQLite | `project_context_get` / `project_context_save` | registered Project ID、expected version、canonical project-relative reference | draft維持 | conflictまたはsafe code |
-| model import/select/mapping/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1 | quarantine cleanup、前selection維持 | bundled delete拒否、置換/削除失敗時は前slotとselection維持 |
+| model import/select/motion設定/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1。bundled Hiyoriのpreset保存要求は拒否 | quarantine cleanup、前selection維持 | bundled preset編集・delete拒否、置換/削除失敗時は前slotとselection維持 |
 | Audio取得・保存・test       | Rust local process/store | `narration_*`                      | fixed `/usr/bin/say`、voice allowlist | process group停止 | caption維持、TTS offへfail closed     |
 | Support control             | Rust supervisor          | `configure/cancel_support`         | role allowlist、budget固定            | 前config維持      | disabled fallback                     |
 | readiness recheck           | Rust readiness service   | `run_diagnostic_check`             | read-only check                       | 前snapshot維持    | stale snapshotとsafe code             |
@@ -147,7 +147,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 
 ## データ保持
 
-Project ID単位のProject context、AppPreferences、app-global Character context、character library selection/mapping、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。Projects一覧と詳細の表示だけではworkspace history、Git state、他projectのdraftを変更しない。
+Project ID単位のProject context、AppPreferences、app-global Character context、character library selection/custom motion設定、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。Projects一覧と詳細の表示だけではworkspace history、Git state、他projectのdraftを変更しない。
 
 ## OS差分
 

@@ -783,6 +783,13 @@ impl CharacterService {
         request: CharacterSemanticMappingSaveRequest,
     ) -> CharacterResult<CharacterLibrarySnapshot> {
         validate_workspace_id(&request.workspace_id, "character_semantic_mapping_save")?;
+        if request.pack_id == BUILTIN_HIYORI_PACK_ID {
+            return Err(character_error(
+                "character_semantic_mapping_save",
+                "CHARACTER-BUILTIN-MAPPING-READ-ONLY",
+                false,
+            ));
+        }
         if request.expected_mapping_version > MAX_MAPPING_VERSION.saturating_sub(1) {
             return Err(character_error(
                 "character_semantic_mapping_save",
@@ -801,21 +808,17 @@ impl CharacterService {
                 true,
             ));
         }
-        let pack = if request.pack_id == BUILTIN_HIYORI_PACK_ID {
-            self.builtin_pack_view(&state)?
-        } else {
-            custom_packs
-                .iter()
-                .find(|pack| pack.manifest.pack_id == request.pack_id)
-                .map(|pack| custom_pack_view(pack, &state))
-                .ok_or_else(|| {
-                    character_error(
-                        "character_semantic_mapping_save",
-                        "CHARACTER-PACK-NOT-FOUND",
-                        true,
-                    )
-                })?
-        };
+        let pack = custom_packs
+            .iter()
+            .find(|pack| pack.manifest.pack_id == request.pack_id)
+            .map(|pack| custom_pack_view(pack, &state))
+            .ok_or_else(|| {
+                character_error(
+                    "character_semantic_mapping_save",
+                    "CHARACTER-PACK-NOT-FOUND",
+                    true,
+                )
+            })?;
         if pack.manifest_hash != request.manifest_hash {
             return Err(character_error(
                 "character_semantic_mapping_save",
@@ -1122,7 +1125,16 @@ fn semantic_mapping_view(
     state: &CharacterStateFile,
     pack: &CharacterPackView,
 ) -> (SemanticMappingV1, SemanticMappingStatus) {
-    let fallback = || SemanticMappingV1::neutral(pack.pack_id.clone(), pack.manifest_hash.clone());
+    let fallback = || {
+        if pack.pack_id == BUILTIN_HIYORI_PACK_ID {
+            SemanticMappingV1::hiyori_preset(pack.pack_id.clone(), pack.manifest_hash.clone())
+        } else {
+            SemanticMappingV1::neutral(pack.pack_id.clone(), pack.manifest_hash.clone())
+        }
+    };
+    if pack.pack_id == BUILTIN_HIYORI_PACK_ID {
+        return (fallback(), SemanticMappingStatus::Default);
+    }
     let Some(value) = state.semantic_mappings.get(&pack.pack_id) else {
         return (fallback(), SemanticMappingStatus::Default);
     };
@@ -1981,7 +1993,7 @@ mod tests {
         let service = CharacterService::new(
             storage.clone(),
             resolve_builtin_directory(Path::new("/missing")),
-            Arc::new(FixedPicker(None)),
+            Arc::new(FixedPicker(Some(reviewed_hiyori_source()))),
         );
         let workspace_id = "workspace-mapping".to_owned();
         let initial = service
@@ -1996,6 +2008,50 @@ mod tests {
         );
         assert_eq!(initial.semantic_mapping.mapping_version, 0);
         assert_eq!(initial.packs[0].expression_count, 0);
+        assert_eq!(
+            initial.semantic_mapping.assignments,
+            SemanticAssignmentsV1::hiyori_preset()
+        );
+        assert_eq!(
+            service
+                .save_semantic_mapping(CharacterSemanticMappingSaveRequest {
+                    workspace_id: workspace_id.clone(),
+                    pack_id: initial.selected_pack_id.clone(),
+                    manifest_hash: initial.packs[0].manifest_hash.clone(),
+                    expected_mapping_version: 0,
+                    assignments: SemanticAssignmentsV1::hiyori_preset(),
+                })
+                .await
+                .expect_err("bundled preset is read only")
+                .code,
+            "CHARACTER-BUILTIN-MAPPING-READ-ONLY"
+        );
+
+        let preview = service
+            .pick_import(CharacterLibraryRequest {
+                workspace_id: workspace_id.clone(),
+            })
+            .await
+            .expect("custom import pick")
+            .preview
+            .expect("custom preview");
+        let renderer_nonce = uuid::Uuid::new_v4().to_string();
+        service
+            .attest_preview(attestation(&preview, &renderer_nonce))
+            .await
+            .expect("custom preview attestation");
+        let custom = service
+            .confirm_import(CharacterConfirmImportRequest {
+                workspace_id: workspace_id.clone(),
+                preview_token: preview.preview_token,
+                preview_nonce: preview.preview_nonce,
+                renderer_nonce,
+                generation: preview.generation,
+                manifest_hash: preview.manifest_hash,
+                display_name: "Custom motion model".to_owned(),
+            })
+            .await
+            .expect("custom publish");
         let assignments = SemanticAssignmentsV1 {
             neutral: SemanticCueSelection::Motion {
                 cue_id: "Idle[0]".to_owned(),
@@ -2022,8 +2078,8 @@ mod tests {
         let saved = service
             .save_semantic_mapping(CharacterSemanticMappingSaveRequest {
                 workspace_id: workspace_id.clone(),
-                pack_id: initial.selected_pack_id,
-                manifest_hash: initial.packs[0].manifest_hash.clone(),
+                pack_id: custom.selected_pack_id,
+                manifest_hash: custom.semantic_mapping.manifest_hash,
                 expected_mapping_version: 0,
                 assignments: assignments.clone(),
             })
@@ -2069,10 +2125,10 @@ mod tests {
 
         let mut state = storage.load_state().expect("mapping state");
         state.semantic_mappings.insert(
-            BUILTIN_HIYORI_PACK_ID.to_owned(),
+            saved.selected_pack_id.clone(),
             serde_json::json!({
                 "schemaVersion": 99,
-                "packId": BUILTIN_HIYORI_PACK_ID,
+                "packId": saved.selected_pack_id,
                 "manifestHash": saved.semantic_mapping.manifest_hash,
                 "mappingVersion": 2,
                 "assignments": {}

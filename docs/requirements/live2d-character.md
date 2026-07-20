@@ -55,7 +55,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 
 | アクター               | 説明                               | 許可する操作                                                    | 拒否時の動作                                       |
 | ---------------------- | ---------------------------------- | --------------------------------------------------------------- | -------------------------------------------------- |
-| ローカル利用者         | modelの権利と選択を管理する本人    | import、preview、mapping、select、hide、delete                  | invalid packは登録せず現在modelを維持する          |
+| ローカル利用者         | modelの権利と選択を管理する本人    | import、preview、custom motion設定、select、hide、delete        | invalid packは登録せず現在modelを維持する          |
 | Rust character service | local assetの信頼境界              | picker result検証、quarantine copy、manifest、limited asset URL | root外参照、URL、symlink、過大assetを拒否する      |
 | WebView renderer       | 検証済みpackを描画する非信頼表示層 | pack IDとrelative asset IDのload、semantic cue再生              | absolute path、任意URL、scriptをloadしない         |
 | Codex/support output   | operational stateの入力            | allowlist semantic cueだけを要求                                | path、motion file、parameter式の直接指定を無視する |
@@ -96,7 +96,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-072` | importerはresource境界を適用する               | 通常のcustom modelへ実用上のfile数制限を課さず、異常入力による停止を防ぐ4096fileの内部guard、合計100MiB以下、1file 32MiB以下、texture各8192×8192以下、JSON depth 64以下を適用する                                                                                                                                                                            | Approved | 非該当           |
 | `LIVE-F-073` | importerはquarantineからatomicに昇格する       | 全fileをquarantineへcopyして再hash・再検証し、manifest作成後のatomic rename成功時だけlibraryへpack IDを追加する                                                                                                                                                                                                                                          | Approved | 非該当           |
 | `LIVE-F-074` | WebViewはimport元absolute pathを受け取らない   | import完了payloadとrenderer requestにpack UUIDとrelative asset IDだけが含まれ、source path/home pathがない                                                                                                                                                                                                                                               | Approved | 非該当           |
-| `LIVE-F-075` | 利用者はimport packをpreview後にapp全体へ選択できる     | previewのfirst frameとstate testが成功した後だけSelectを有効にし、selectionの正本をapp-globalなowner-only stateへatomic保存する。全workspaceは即時に同じpackを使い、restart後も一致する。custom slotの置換時はapp-global selectionを新packへ同じtransactionで切り替える。legacy project/workspace-scoped selectionは`selectionUpdatedAt DESC, scope ID ASC`で最初のvalid packを一度だけglobal値へ移行し、valid値がなければbundled Hiyoriへ戻す。library cardはmanifestへ拘束されたtrusted PNGをpack IDとasset IDだけのopaque binary IPCで読み、thumbnailと省略hashを表示し、完全hashをaccessibility treeから取得できる。missingまたはhash不一致のframeは表示しない | Approved | 非該当           |
+| `LIVE-F-075` | 利用者はimport packをpreview後にapp全体へ選択できる     | previewのfirst frameとstate testが成功した後だけSelectを有効にし、selectionの正本をapp-globalなowner-only stateへatomic保存する。全workspaceは即時に同じpackを使い、restart後も一致する。custom slotの置換時はapp-global selectionを新packへ同じtransactionで切り替える。legacy project/workspace-scoped selectionは`selectionUpdatedAt DESC, scope ID ASC`で最初のvalid packを一度だけglobal値へ移行し、valid値がなければbundled Hiyoriへ戻す。manifestへ拘束されたtrusted PNGはpack IDとasset IDだけのopaque binary IPCで検証・保存し、Settings一覧や個別設定ではthumbnail、hash、provenanceを表示しない | Approved | 非該当           |
 | `LIVE-F-076` | import失敗は現在modelを壊さない                | malformed、missing、unsupported MOC、I/O、first-frame失敗、abortの各fixtureで現在pack選択とrenderingが継続し、失敗packがlibraryに残らない。App settingsは利用者が直せるja/enの理由を先に表示し、診断用safe codeを補足として残す。model switchはcandidate client/model/trusted frameをfirst accepted frameまで分離し、その時点だけrenderer、committed pack、metrics、status、frameを一括更新する。失敗またはabortではcandidateだけをreleaseする | Approved | 非該当           |
 | `LIVE-F-077` | 利用者はcustom packのversioned motion設定を編集できる | `SemanticMappingV1`はneutral/thinking/working/asking/success/warning/errorの各stateへ検証済みmanifest inventory内のmotion cue、expression cue、またはneutralだけを割り当て、pack ID、manifest hash、mapping versionとatomic保存する。unknown version、hash不一致、invalid cueはmapping全体を実行せずneutralへfallbackする。custom packの設定だけをja/en label、keyboard-only、visible focusで編集でき、設定画面内でmotion previewを起動しない | Approved | 非該当           |
 | `LIVE-F-078` | appはbundled 1件とcustom 1件のslotを管理する   | bundled Hiyoriは常設しDelete操作を表示せず、custom packはapp全体で最大1件だけ表示・保存する。customがある状態のimportは検証成功後にslotをatomic置換してapp-global selectionを新packへ切り替える。customのDeleteは確認後にselectionをbundled Hiyoriへ戻してからassetとmappingを削除する。置換、削除、失敗、再起動の各時点でlibraryへcustom packを2件以上残さない | Approved | 非該当           |
@@ -124,7 +124,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | -------- | -------------------- | ------------------------ | ---- | --------------------------------------- | -------------------------------- |
 | Import   | model3.json          | なし                     | 必須 | regular `.model3.json` 1件、archive不可 | 現在pack維持、理由と拒否file表示 |
 | Import   | pack display name    | model Nameまたはfilename | 必須 | trim後1〜80文字                         | 入力保持、Select無効             |
-| Mapping  | semantic cue         | neutral                  | 必須 | manifest inventory内motion/expression cue IDまたはneutral | mappingを保存せずneutral previewを維持 |
+| Custom motion | stateごとのmotion設定 | neutral               | 必須 | manifest inventory内motion/expression cue IDまたはneutral | 設定を保存せずneutral fallbackを維持 |
 | Display  | character visibility | visible                  | 必須 | visible/hidden                          | 保存失敗時は現在表示維持         |
 | Display  | reduced motion       | APP設定継承              | 必須 | inherit/on/off                          | 不正値はinherit                  |
 
@@ -135,7 +135,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | 対象OS・OS差分              | macOS 14以降のWebGLとfile picker                                   | `LIVE-F-057`, `LIVE-F-068` |
 | ウィンドウ生成・再利用      | main windowのsingle canvasを再利用                                 | `LIVE-F-059`               |
 | 閉じる・アプリ終了          | audio/animationを停止しGPU resourceをrelease                       | `LIVE-F-059`, `LIVE-F-067` |
-| 未保存データ                | preview中mappingはSelectまで確定しない                             | `LIVE-F-075`, `LIVE-F-077` |
+| 未保存データ                | custom motion draftはSaveまで確定せず、import candidateは確認完了まで選択しない | `LIVE-F-075`, `LIVE-F-077` |
 | ローカルデータ              | bundled/imported packをapp libraryで管理し、projectへpack IDを保存 | `LIVE-F-073`〜`LIVE-F-075` |
 | オフライン                  | bundled/imported local packは表示可能                              | `LIVE-F-055`, `LIVE-F-075` |
 | ファイル・OS操作            | picker cancel、permission、quarantine、atomic rename               | `LIVE-F-068`〜`LIVE-F-076` |
@@ -171,14 +171,13 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ---------------- | ---------------------------------------- | ------------------------------------------ | -------------------------------- |
 | Hiyori許諾       | 同梱・再配布の許諾済みというユーザー指示 | 解決済み                                   | notice/provenanceは保持する      |
 | Cubism SDK/Core  | version/hash固定でapp resourceへbundle   | 解決済み（採用決定、integration test待ち） | 描画失敗時はstatic/text fallback |
-| Hiyori inventory | runtime 17file、motion 10、expression 0  | 解決済み（実測）                           | mappingは存在cueだけを使う       |
+| Hiyori inventory | runtime 17file、motion 10、expression 0  | 解決済み（実測、固定preset定義済み）       | presetは存在cueだけを使う        |
 | APP              | CSP、Capability、reduced motion          | 解決済み（相互参照確認済み）               | 独立レビューで整合確認           |
 
 ## 未確定事項
 
 | 論点                | 初期判断                                                       | 確認事項                           | 着手ブロック |
 | ------------------- | -------------------------------------------------------------- | ---------------------------------- | ------------ |
-| Hiyori motionの意味 | visual QA完了まではIdle/neutralだけを確定し、他stateはfallback | motion galleryでm01〜m10を記録する | いいえ       |
 | zip import          | MVP非対象                                                      | model3 import利用試験後に評価する  | いいえ       |
 
 ## 参照資料
@@ -197,7 +196,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | レビュー結果       | Ready                                                           |
 | 仕様責任者         | プロダクトオーナー                                              |
 | 合意日             | 2026-07-18                                                      |
-| 残る非ブロック論点 | motion意味のvisual QA、zip importはfallback/MVP非対象で解決済み |
+| 残る非ブロック論点 | zip importはMVP非対象で解決済み                                |
 
 ## 着手可チェック
 

@@ -1,9 +1,11 @@
 import type { SupportedLocale } from "@/features/localization"
 
 const en = {
-  title: "Character models",
-  description:
-    "Choose the bundled Live2D model or one private custom model used across the app.",
+  title: "Characters",
+  description: "Select a character to view its settings.",
+  backToList: "Back to characters",
+  openSettings: "Open character settings",
+  useCharacter: "Use this character",
   importModel: "Import custom model",
   replaceModel: "Replace custom model",
   importUnavailable: "Model import is available in the desktop app.",
@@ -11,23 +13,6 @@ const en = {
   loadFailed: "Character models could not be loaded.",
   retry: "Retry",
   selected: "In use",
-  bundled: "Bundled",
-  bundledProtected:
-    "The bundled model is always available and cannot be deleted.",
-  imported: "Imported",
-  customSlot: "1 custom model slot",
-  customSlotAvailable: "Available",
-  customSlotFilled: "Filled",
-  noLicenseRequired: "No license information required",
-  selectModel: "Character model",
-  textures: "textures",
-  motions: "motions",
-  expressions: "expressions",
-  files: "files",
-  manifestHash: "Manifest",
-  trustedFrameHash: "Trusted frame",
-  thumbnailLoading: "Loading verified model thumbnail",
-  importedAt: "Imported {date}",
   delete: "Delete",
   deleteTitle: "Delete this character model?",
   deleteDescription:
@@ -58,7 +43,6 @@ const en = {
   confirming: "Importing…",
   canceling: "Canceling…",
   operationFailed: "The model operation did not complete.",
-  privateLibrary: "Private app library",
   errorMessages: {
     selection: "Choose one regular Live2D .model3.json file.",
     missingAssets:
@@ -79,9 +63,11 @@ const en = {
 }
 
 const ja: typeof en = {
-  title: "キャラクターモデル",
-  description:
-    "アプリ全体で使用する同梱Live2Dモデル、または1件のカスタムモデルを選びます。",
+  title: "キャラクター一覧",
+  description: "キャラクターを選ぶと個別設定を表示します。",
+  backToList: "キャラクター一覧へ戻る",
+  openSettings: "キャラクター設定を開く",
+  useCharacter: "このキャラクターを使う",
   importModel: "カスタムモデルを取り込む",
   replaceModel: "カスタムモデルを置き換える",
   importUnavailable: "モデルの取り込みはデスクトップアプリで利用できます。",
@@ -89,22 +75,6 @@ const ja: typeof en = {
   loadFailed: "キャラクターモデルを読み込めませんでした。",
   retry: "再試行",
   selected: "使用中",
-  bundled: "同梱",
-  bundledProtected: "同梱モデルは常に利用でき、削除できません。",
-  imported: "取り込み済み",
-  customSlot: "カスタムモデル 1枠",
-  customSlotAvailable: "空き",
-  customSlotFilled: "使用中",
-  noLicenseRequired: "ライセンス情報の入力不要",
-  selectModel: "キャラクターモデル",
-  textures: "テクスチャ",
-  motions: "モーション",
-  expressions: "表情",
-  files: "ファイル",
-  manifestHash: "マニフェスト",
-  trustedFrameHash: "信頼済みフレーム",
-  thumbnailLoading: "検証済みモデル画像を読み込み中",
-  importedAt: "{date}に取り込み",
   delete: "削除",
   deleteTitle: "このキャラクターモデルを削除しますか？",
   deleteDescription:
@@ -135,7 +105,6 @@ const ja: typeof en = {
   confirming: "取り込み中…",
   canceling: "キャンセル中…",
   operationFailed: "モデル操作を完了できませんでした。",
-  privateLibrary: "アプリ専用ライブラリ",
   errorMessages: {
     selection: "Live2Dの.model3.jsonファイルを1件選んでください。",
     missingAssets:

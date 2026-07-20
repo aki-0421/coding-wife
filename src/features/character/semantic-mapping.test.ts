@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  builtinHiyoriMotionPreset,
   mapCharacterStateToSemanticState,
   neutralSemanticAssignments,
   resolveSemanticCue,
@@ -29,7 +30,7 @@ describe("semantic character mapping", () => {
     ])
   })
 
-  it("fails the whole mapping to neutral unless a saved mapping is valid", () => {
+  it("uses default presets and fails invalid mappings to neutral", () => {
     const mapping = {
       schemaVersion: 1,
       packId: "builtin:hiyori_pro",
@@ -47,5 +48,16 @@ describe("semantic character mapping", () => {
     expect(resolveSemanticCue(mapping, "invalid", "success")).toEqual({
       kind: "neutral",
     })
+    expect(
+      resolveSemanticCue(
+        {
+          ...mapping,
+          mappingVersion: 0,
+          assignments: builtinHiyoriMotionPreset,
+        },
+        "default",
+        "working",
+      ),
+    ).toEqual({ kind: "motion", cueId: "Tap@Body[0]" })
   })
 })
