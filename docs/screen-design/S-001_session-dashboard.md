@@ -52,7 +52,7 @@ status: "Approved"
 
 | 項目 | 内容 |
 |---|---|
-| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、S-002〜S-006からSessionsへ戻る |
+| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、現行S-002、S-003、S-005からSessionsへ戻る |
 | 表示前提 | app-private DBをreadできること。読めない場合はrecovery stateを表示する |
 | 初期フォーカス | 0件時は`Projectを追加`、通常時はactive workspace item、error時は最初の回復操作 |
 | 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |

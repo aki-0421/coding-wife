@@ -55,7 +55,6 @@ const copy: Readonly<
       readonly retry: string
       readonly preview: string
       readonly pickerUnavailable: string
-      readonly settingsTab: string
       readonly workspaceActions: string
       readonly repositoryMissing: string
       readonly repair: RegExp
@@ -89,7 +88,6 @@ const copy: Readonly<
     preview: "Preview only",
     pickerUnavailable:
       "The native operation is not connected in this preview. No local project state changed.",
-    settingsTab: "Settings",
     workspaceActions: "Workspace actions",
     repositoryMissing: "Repository missing",
     repair: /Reselect repository/u,
@@ -121,7 +119,6 @@ const copy: Readonly<
     preview: "プレビューのみ",
     pickerUnavailable:
       "このプレビューではnative操作が未接続です。ローカルproject状態は変更していません。",
-    settingsTab: "設定",
     workspaceActions: "ワークスペース操作",
     repositoryMissing: "リポジトリが見つかりません",
     repair: /リポジトリを再選択/u,

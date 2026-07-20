@@ -52,10 +52,7 @@ import {
   getWorkspaceCopy,
   type WorkspaceCopy,
 } from "@/features/workspace-view/copy"
-import {
-  AppSettingsView,
-  WorkspaceSettingsView,
-} from "@/features/workspace-view/SettingsView"
+import { AppSettingsView } from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
@@ -799,7 +796,7 @@ export function WorkspaceShell({
       {selectedWorkspace ? (
         <Tabs
           className="workspace-tabs grid"
-          data-companion-active={view.activeTab !== "settings"}
+          data-companion-active="true"
           data-companion-layout=""
           data-workspace-tab={view.activeTab}
           hidden={appSettingsOpen}
@@ -901,18 +898,6 @@ export function WorkspaceShell({
             />
           </TabsContent>
 
-          <TabsContent
-            className="workspace-view data-[state=inactive]:hidden"
-            value="settings"
-          >
-            <WorkspaceSettingsView
-              copy={copy}
-              history={view.history}
-              onDeleteHistory={view.deleteSelectedWorkspaceHistory}
-              workspaceLabel={`${selectedWorkspace.repository}/${selectedWorkspace.name}`}
-            />
-          </TabsContent>
-
           <CharacterStageSlot
             characterRuntime={characterRuntime}
             copy={copy}
@@ -923,7 +908,7 @@ export function WorkspaceShell({
             }}
             reducedMotion={reducedMotion}
             state={companionState}
-            visible={view.activeTab !== "settings" && !appSettingsOpen}
+            visible={!appSettingsOpen}
             workspaceId={selectedWorkspace.id}
             {...(characterRenderer ? { renderer: characterRenderer } : {})}
           />

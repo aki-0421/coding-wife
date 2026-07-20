@@ -6,7 +6,6 @@ import {
   BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  DatabaseIcon,
   FolderIcon,
   Mic2Icon,
   Settings2Icon,
@@ -53,12 +52,7 @@ import {
 } from "@/features/character"
 import { useI18n } from "@/features/localization"
 import { NarrationSettings } from "@/features/narration"
-import {
-  checkById,
-  NativeReadinessDiagnostics,
-  ReadinessStatusBadge,
-  useNativeReadiness,
-} from "@/features/readiness"
+import { NativeReadinessDiagnostics } from "@/features/readiness"
 import { useAppPreferences } from "@/features/preferences"
 import { SupportControlsSettings } from "@/features/support-controls"
 import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
@@ -70,7 +64,6 @@ import type {
   AppSettingsSection,
   ProjectRecord,
   SettingsSection,
-  WorkspaceAdapterState,
 } from "@/features/workspace-view/types"
 import { cn } from "@/lib/utils"
 
@@ -95,13 +88,6 @@ interface AppSettingsViewProps extends CharacterRuntimeSettingsProps {
   readonly onOpenProject: (projectId: string) => void
   readonly onCloseProject: () => void
   readonly onUnregisterProject: (projectId: string) => Promise<boolean>
-}
-
-interface WorkspaceSettingsViewProps {
-  readonly copy: WorkspaceCopy
-  readonly history: WorkspaceAdapterState["history"]
-  readonly workspaceLabel: string
-  readonly onDeleteHistory: () => Promise<boolean>
 }
 
 function CharacterReadinessBadge({
@@ -360,28 +346,6 @@ function SettingsSectionPicker<Section extends SettingsSection>({
         />
       </PopoverContent>
     </Popover>
-  )
-}
-
-function SettingRow({
-  action,
-  description,
-  label,
-}: {
-  readonly action: React.ReactNode
-  readonly description: string
-  readonly label: string
-}) {
-  return (
-    <div className="flex min-w-0 items-start justify-between gap-xl border-b border-divider py-md max-[700px]:flex-col max-[700px]:gap-sm">
-      <div className="flex min-w-0 max-w-[60ch] flex-col gap-xxs">
-        <span className="text-title text-text-strong">{label}</span>
-        <span className="break-words text-caption text-muted-foreground">
-          {description}
-        </span>
-      </div>
-      <div className="max-w-full shrink-0 max-[700px]:shrink">{action}</div>
-    </div>
   )
 }
 
@@ -704,175 +668,6 @@ function ProjectsSettings({
   )
 }
 
-function HistorySettings({
-  copy,
-  history,
-  onDeleteHistory,
-}: Pick<WorkspaceSettingsViewProps, "copy" | "history" | "onDeleteHistory">) {
-  const { locale } = useI18n()
-  const nativeReadiness = useNativeReadiness()
-  const nativeHistory = checkById(nativeReadiness.snapshot, "history")
-  const [confirmationOpen, setConfirmationOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const historyActionRef = useRef<HTMLButtonElement>(null)
-  const ephemeral = history.mode === "ephemeral"
-  const nativePersistenceReady = nativeHistory?.status === "ready"
-  const canChangeHistory =
-    ephemeral || (history.mode === "ready" && nativePersistenceReady)
-  const persistenceUnavailable = {
-    en: {
-      title: "Local persistence unavailable",
-      body: "This readiness snapshot does not verify a writable history database. The app does not claim that history is persisted locally.",
-    },
-    ja: {
-      title: "ローカル保存を利用できません",
-      body: "この準備状況スナップショットでは、書き込み可能な履歴データベースを確認できていません。履歴をローカル保存済みとは表示しません。",
-    },
-  }[locale]
-
-  const confirmDelete = async () => {
-    setDeleting(true)
-    try {
-      if (await onDeleteHistory()) setConfirmationOpen(false)
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  return (
-    <section className="flex flex-col gap-xl">
-      <div className="flex flex-wrap items-center justify-between gap-md">
-        <h2 className="m-0 text-headline text-text-strong">
-          {copy.settingsView.historyTitle}
-        </h2>
-        <span
-          data-history-readiness-snapshot={
-            nativeReadiness.snapshot?.snapshotId ?? "pending"
-          }
-        >
-          {nativeHistory === null ? (
-            <Badge variant="running">{copy.settingsView.live2dLoading}</Badge>
-          ) : (
-            <ReadinessStatusBadge
-              locale={locale}
-              stale={
-                nativeReadiness.status === "rechecking" ||
-                nativeReadiness.status === "error"
-              }
-              status={nativeHistory.status}
-            />
-          )}
-        </span>
-      </div>
-      <div className="flex flex-col gap-xs">
-        <h3 className="m-0 flex items-center gap-xs text-title text-text-strong">
-          <DatabaseIcon aria-hidden="true" className="size-3" />
-          {ephemeral
-            ? copy.settingsView.storedEphemeral
-            : nativePersistenceReady
-              ? copy.settingsView.stored
-              : persistenceUnavailable.title}
-        </h3>
-        <p className="m-0 max-w-[70ch] text-caption text-muted-foreground">
-          {ephemeral
-            ? copy.settingsView.storedEphemeralBody
-            : nativePersistenceReady
-              ? copy.settingsView.storedBody
-              : persistenceUnavailable.body}
-        </p>
-      </div>
-      <div className="flex flex-col gap-xs">
-        <h3 className="m-0 flex items-center gap-xs text-title text-text-strong">
-          <ShieldCheckIcon aria-hidden="true" className="size-3" />
-          {copy.settingsView.neverStored}
-        </h3>
-        <p className="m-0 max-w-[70ch] text-caption text-muted-foreground">
-          {copy.settingsView.neverStoredBody}
-        </p>
-      </div>
-      <SettingRow
-        action={
-          <Button
-            disabled={!canChangeHistory}
-            onClick={() => setConfirmationOpen(true)}
-            ref={historyActionRef}
-            size="xs"
-            type="button"
-            variant="destructive"
-          >
-            {ephemeral
-              ? copy.settingsView.resetDemoHistory
-              : copy.settingsView.deleteHistory}
-          </Button>
-        }
-        description={
-          canChangeHistory
-            ? ephemeral
-              ? copy.settingsView.resetDemoReady
-              : copy.settingsView.deleteReady
-            : copy.settingsView.deleteDisabled
-        }
-        label={
-          ephemeral
-            ? copy.settingsView.resetDemoHistory
-            : copy.settingsView.deleteHistory
-        }
-      />
-      <Dialog
-        onOpenChange={(open) => {
-          if (!deleting) setConfirmationOpen(open)
-        }}
-        open={confirmationOpen}
-      >
-        <DialogContent
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            historyActionRef.current?.focus()
-          }}
-          showCloseButton={!deleting}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {ephemeral
-                ? copy.settingsView.resetDemoConfirmTitle
-                : copy.settingsView.deleteConfirmTitle}
-            </DialogTitle>
-            <DialogDescription>
-              {ephemeral
-                ? copy.settingsView.resetDemoConfirmBody
-                : copy.settingsView.deleteConfirmBody}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              disabled={deleting}
-              onClick={() => setConfirmationOpen(false)}
-              type="button"
-              variant="outline"
-            >
-              {copy.settingsView.deleteCancel}
-            </Button>
-            <Button
-              disabled={deleting}
-              onClick={() => void confirmDelete()}
-              type="button"
-              variant="destructive"
-            >
-              {deleting
-                ? ephemeral
-                  ? copy.settingsView.resetDemoInProgress
-                  : copy.settingsView.deleteInProgress
-                : ephemeral
-                  ? copy.settingsView.resetDemoConfirm
-                  : copy.settingsView.deleteConfirm}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
-  )
-}
-
 export function AppSettingsView(props: AppSettingsViewProps) {
   const desktopBreadcrumbRef = useRef<HTMLSpanElement>(null)
   const compactBreadcrumbRef = useRef<HTMLButtonElement>(null)
@@ -990,35 +785,6 @@ export function AppSettingsView(props: AppSettingsViewProps) {
           </div>
         </ScrollArea>
       </div>
-    </section>
-  )
-}
-
-export function WorkspaceSettingsView(props: WorkspaceSettingsViewProps) {
-  return (
-    <section
-      aria-labelledby="workspace-settings-title"
-      className="grid size-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-app-bg"
-      data-settings-scope="workspace"
-    >
-      <header className="flex min-h-[58px] min-w-0 items-center border-b border-divider px-xl py-sm max-[700px]:px-md">
-        <div className="flex min-w-0 flex-col gap-xxs">
-          <h1
-            className="m-0 text-balance text-headline text-text-strong"
-            id="workspace-settings-title"
-          >
-            {props.copy.settingsView.workspaceTitle}
-          </h1>
-          <p className="m-0 text-pretty text-caption text-muted-foreground">
-            {props.copy.settingsView.workspaceDescription(props.workspaceLabel)}
-          </p>
-        </div>
-      </header>
-      <ScrollArea className="min-h-0 min-w-0">
-        <div className="mx-auto w-full min-w-0 max-w-[780px] px-2xl py-xl max-[700px]:px-md max-[700px]:py-lg">
-          <HistorySettings {...props} />
-        </div>
-      </ScrollArea>
     </section>
   )
 }
