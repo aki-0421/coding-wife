@@ -1367,18 +1367,24 @@ export function useWorkspaceViewModel(
   )
 
   const archiveWorkspace = useCallback(
-    async (workspaceId: string): Promise<WorkspaceActionResult> => {
+    async (
+      workspaceId: string,
+      expectedGeneration: number | null = null,
+    ): Promise<WorkspaceActionResult> => {
       if (!adapterReady || !adapter?.archiveWorkspace) {
         return { ok: false, errorCode: "WORKSPACE-ARCHIVE-UNAVAILABLE" }
       }
       setWorkspaceAction("archive")
+      const pendingDraft = pendingDraftSaves.current.get(workspaceId)
       deletingWorkspaceIds.current.add(workspaceId)
       pendingDraftSaves.current.delete(workspaceId)
       const timer = draftSaveTimers.current.get(workspaceId)
       if (timer !== undefined) window.clearTimeout(timer)
       draftSaveTimers.current.delete(workspaceId)
       try {
-        applyAdapterState(await adapter.archiveWorkspace(workspaceId))
+        applyAdapterState(
+          await adapter.archiveWorkspace(workspaceId, expectedGeneration),
+        )
         setDrafts((current) => {
           const next = { ...current }
           delete next[workspaceId]
@@ -1387,6 +1393,9 @@ export function useWorkspaceViewModel(
         setNotice(null)
         return { ok: true }
       } catch (error) {
+        if (pendingDraft !== undefined) {
+          scheduleDraftSave(workspaceId, pendingDraft.text, pendingDraft.effort)
+        }
         return {
           ok: false,
           errorCode:
@@ -1397,7 +1406,7 @@ export function useWorkspaceViewModel(
         setWorkspaceAction(null)
       }
     },
-    [adapter, adapterReady, applyAdapterState],
+    [adapter, adapterReady, applyAdapterState, scheduleDraftSave],
   )
 
   const deleteSelectedWorkspaceHistory = useCallback(async () => {

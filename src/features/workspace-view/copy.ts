@@ -53,7 +53,7 @@ const en = {
       generic:
         "The workspace action could not be completed. No source or Git state was changed.",
       active:
-        "The project is still running. Stop its active turn before unregistering or repairing it.",
+        "The workspace is still running. Stop its active turn before retrying this action.",
       unavailable: "This action is not available in the current runtime.",
       conflict:
         "The workspace changed in another operation. Refresh it and try again.",
@@ -63,12 +63,12 @@ const en = {
     },
   },
   archiveDialog: {
-    title: "Archive this workspace?",
+    title: "Stop and archive this workspace?",
     body: (workspace: string) =>
-      `The Git worktree for ${workspace} and its app history will be removed. The project repository and branch are kept.`,
-    cancel: "Keep workspace",
-    confirm: "Archive workspace",
-    working: "Archiving…",
+      `The main session in ${workspace} will stop first. After it reaches a terminal state and local cleanup finishes, its Git worktree and app history will be removed. The project repository and branch are kept.`,
+    cancel: "Keep running",
+    confirm: "Stop and archive",
+    working: "Stopping and archiving…",
   },
   workspaceSwitch: {
     title: "Stop and switch workspaces?",
@@ -639,7 +639,7 @@ const ja: typeof en = {
       generic:
         "ワークスペース操作を完了できませんでした。ソースやGitの状態は変更していません。",
       active:
-        "プロジェクトはまだ実行中です。修復や登録解除の前に進行中のターンを停止してください。",
+        "ワークスペースはまだ実行中です。進行中のターンを停止してから、この操作を再試行してください。",
       unavailable: "現在の実行環境ではこの操作を利用できません。",
       conflict:
         "別の操作でワークスペースが更新されました。再読み込みしてからお試しください。",
@@ -649,12 +649,12 @@ const ja: typeof en = {
     },
   },
   archiveDialog: {
-    title: "このワークスペースをアーカイブしますか？",
+    title: "停止してこのワークスペースをアーカイブしますか？",
     body: (workspace: string) =>
-      `${workspace} のGit worktreeとアプリ内履歴を削除します。プロジェクトのリポジトリとブランチは保持します。`,
-    cancel: "ワークスペースを保持",
-    confirm: "ワークスペースをアーカイブ",
-    working: "アーカイブ中…",
+      `${workspace} のメインセッションを先に停止します。対象ターンの終了状態を確認し、ローカル後処理が完了した後にGit worktreeとアプリ内履歴を削除します。プロジェクトのリポジトリとブランチは保持します。`,
+    cancel: "実行を続ける",
+    confirm: "停止してアーカイブ",
+    working: "停止してアーカイブ中…",
   },
   workspaceSwitch: {
     title: "停止してワークスペースを切り替えますか？",

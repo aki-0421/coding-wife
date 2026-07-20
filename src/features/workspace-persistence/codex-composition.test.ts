@@ -504,6 +504,123 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     ).toHaveLength(1)
   })
 
+  it("archives an active workspace only after confirmed terminal cleanup and history flush", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const historyRequest = vi.spyOn(history, "request")
+    const codex = new CompositionCodexTransport()
+    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const state = await adapter.loadState()
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("active fixture workspace")
+    await adapter.sendTurn({
+      workspaceId,
+      instruction: "Archive only after the exact turn stops.",
+      effort: "fast",
+      attachments: [],
+      contextSnapshots: [],
+      editableContextSnapshot:
+        await adapter.getTurnContextSnapshot(workspaceId),
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    codex.emit({ ...running, workspaceId })
+
+    await expect(adapter.archiveWorkspace(workspaceId)).rejects.toThrow(
+      "WORKSPACE-ARCHIVE-ACTIVE",
+    )
+    expect(
+      historyRequest.mock.calls.filter(
+        ([command]) => command === "workspace_archive",
+      ),
+    ).toHaveLength(0)
+    expect(
+      codex.calls.filter(
+        ({ command }) => command === codexCommands.turnInterrupt,
+      ),
+    ).toHaveLength(0)
+
+    const first = adapter.archiveWorkspace(
+      workspaceId,
+      fixture.thread.generation,
+    )
+    const duplicate = adapter.archiveWorkspace(
+      workspaceId,
+      fixture.thread.generation,
+    )
+    expect(duplicate).toBe(first)
+    await vi.waitFor(() =>
+      expect(codex.calls.at(-1)?.command).toBe(codexCommands.turnInterrupt),
+    )
+    expect(
+      historyRequest.mock.calls.filter(
+        ([command]) => command === "workspace_archive",
+      ),
+    ).toHaveLength(0)
+
+    codex.emit({
+      ...running,
+      workspaceId,
+      eventId: "event-archive-terminal",
+      sequence: 2,
+      payload: { ...running.payload, status: "interrupted" },
+    })
+    const archived = await first
+    expect(
+      archived.workspaces.some((workspace) => workspace.id === workspaceId),
+    ).toBe(false)
+
+    const calls = historyRequest.mock.calls
+    const terminalAppendIndex = calls.findIndex(
+      ([command, request]) =>
+        command === "history_append_domain_event" &&
+        isRecord(request) &&
+        request.eventId === "event-archive-terminal",
+    )
+    const archiveIndex = calls.findIndex(
+      ([command]) => command === "workspace_archive",
+    )
+    expect(terminalAppendIndex).toBeGreaterThanOrEqual(0)
+    expect(archiveIndex).toBeGreaterThan(terminalAppendIndex)
+  })
+
+  it("keeps the workspace when confirmed archive interruption fails", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const historyRequest = vi.spyOn(history, "request")
+    const codex = new CompositionCodexTransport()
+    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const state = await adapter.loadState()
+    const workspaceId = state.activeWorkspaceId
+    if (workspaceId === null) throw new Error("active fixture workspace")
+    await adapter.sendTurn({
+      workspaceId,
+      instruction: "Keep this workspace if stopping fails.",
+      effort: "fast",
+      attachments: [],
+      contextSnapshots: [],
+      editableContextSnapshot:
+        await adapter.getTurnContextSnapshot(workspaceId),
+    })
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    codex.emit({ ...running, workspaceId })
+    codex.interruptFailure = new Error("CODEX-INTERRUPT-FAILED")
+
+    await expect(
+      adapter.archiveWorkspace(workspaceId, fixture.thread.generation),
+    ).rejects.toThrow("CODEX-INTERRUPT-FAILED")
+    expect(
+      historyRequest.mock.calls.filter(
+        ([command]) => command === "workspace_archive",
+      ),
+    ).toHaveLength(0)
+    const after = await history.request("workspace_list", undefined)
+    expect(
+      after.workspaces.some(
+        (workspace) => workspace.workspaceId === workspaceId,
+      ),
+    ).toBe(true)
+  })
+
   it("keeps lifecycle unchanged when interrupt acknowledgement fails", async () => {
     const history = new DemoWorkspaceHistoryTransport()
     const historyRequest = vi.spyOn(history, "request")

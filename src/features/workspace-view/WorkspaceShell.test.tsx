@@ -596,6 +596,110 @@ describe("WorkspaceShell", () => {
     expect(archiveButton?.parentElement).toHaveClass("flex")
   })
 
+  it("archives an idle workspace immediately without a confirmation dialog", async () => {
+    const user = userEvent.setup()
+    const state = nativeWorkspaceState()
+    const archivedState: WorkspaceAdapterState = {
+      ...state,
+      workspaces: [],
+      activeWorkspaceId: null,
+      draft: null,
+    }
+    const codex: WorkspaceCodexState = {
+      ...richCodexState(),
+      activeWorkspaceId: "workspace-native",
+      generation: 7,
+      phase: "ready",
+      pendingRequests: [],
+      timeline: [],
+    }
+    const archiveWorkspace = vi.fn(
+      (_workspaceId: string, _expectedGeneration?: number | null) =>
+        Promise.resolve(archivedState),
+    )
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex: (listener) => {
+        listener(codex)
+        return () => undefined
+      },
+      archiveWorkspace,
+    }
+
+    renderWorkspace(adapter)
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Archive workspace: restored-workspace",
+      }),
+    )
+
+    await waitFor(() =>
+      expect(archiveWorkspace).toHaveBeenCalledWith("workspace-native", null),
+    )
+    expect(
+      screen.queryByRole("dialog", {
+        name: "Stop and archive this workspace?",
+      }),
+    ).toBeNull()
+  })
+
+  it("confirms stopping the exact active main session before archive", async () => {
+    const user = userEvent.setup()
+    const state = nativeWorkspaceState()
+    const archivedState: WorkspaceAdapterState = {
+      ...state,
+      workspaces: [],
+      activeWorkspaceId: null,
+      draft: null,
+    }
+    const codex: WorkspaceCodexState = {
+      ...richCodexState(),
+      activeWorkspaceId: "workspace-native",
+      generation: 7,
+      phase: "running",
+      pendingRequests: [],
+      timeline: [],
+    }
+    const archiveWorkspace = vi.fn(
+      (_workspaceId: string, _expectedGeneration?: number | null) =>
+        Promise.resolve(archivedState),
+    )
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex: (listener) => {
+        listener(codex)
+        return () => undefined
+      },
+      archiveWorkspace,
+    }
+
+    renderWorkspace(adapter)
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Archive workspace: restored-workspace",
+      }),
+    )
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Stop and archive this workspace?",
+    })
+    expect(archiveWorkspace).not.toHaveBeenCalled()
+    expect(
+      within(dialog).getByRole("button", { name: "Keep running" }),
+    ).toHaveFocus()
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Stop and archive" }),
+    )
+    await waitFor(() =>
+      expect(archiveWorkspace).toHaveBeenCalledWith("workspace-native", 7),
+    )
+  })
+
   it("filters workspaces with the registered project multi-select", async () => {
     const user = userEvent.setup()
     const state: WorkspaceAdapterState = {

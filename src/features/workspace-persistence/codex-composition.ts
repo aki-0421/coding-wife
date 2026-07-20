@@ -34,6 +34,17 @@ function publicCodexState(
   }
 }
 
+function hasActiveMainSession(
+  snapshot: CodexWorkspaceSessionSnapshot,
+  workspaceId: string,
+): boolean {
+  return (
+    snapshot.activeWorkspaceId === workspaceId &&
+    (["running", "waiting", "stopping"].includes(snapshot.phase) ||
+      snapshot.pendingRequests.length > 0)
+  )
+}
+
 class WorkspaceHistoryCodexSink {
   constructor(private readonly transport: WorkspaceHistoryTransport) {}
 
@@ -62,6 +73,10 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     readonly operation: Promise<WorkspaceAdapterState>
   } | null = null
   private workspaceCancellation: {
+    readonly key: string
+    readonly operation: Promise<WorkspaceAdapterState>
+  } | null = null
+  private workspaceArchive: {
     readonly key: string
     readonly operation: Promise<WorkspaceAdapterState>
   } | null = null
@@ -120,7 +135,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   stopAndSwitchWorkspace(
     request: WorkspaceTransitionRequest,
   ): Promise<WorkspaceAdapterState> {
-    if (this.workspaceCancellation !== null) {
+    if (this.workspaceCancellation !== null || this.workspaceArchive !== null) {
       return Promise.reject(new Error("WORKSPACE-CANCEL-IN-PROGRESS"))
     }
     const key = `${request.fromWorkspaceId}:${request.toWorkspaceId}:${String(request.expectedGeneration)}`
@@ -149,7 +164,8 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     }
     if (
       this.workspaceTransition !== null ||
-      this.workspaceCancellation !== null
+      this.workspaceCancellation !== null ||
+      this.workspaceArchive !== null
     ) {
       return Promise.reject(
         new Error("APP-QUIT-WORKSPACE-MUTATION-IN-PROGRESS"),
@@ -169,7 +185,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     expectedUpdatedAt: string,
     expectedGeneration: number | null = null,
   ): Promise<WorkspaceAdapterState> {
-    if (this.workspaceTransition !== null) {
+    if (this.workspaceTransition !== null || this.workspaceArchive !== null) {
       return Promise.reject(new Error("WORKSPACE-TRANSITION-IN-PROGRESS"))
     }
     const key = `${workspaceId}:${expectedUpdatedAt}:${String(expectedGeneration)}`
@@ -204,10 +220,34 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return state
   }
 
-  async archiveWorkspace(workspaceId: string): Promise<WorkspaceAdapterState> {
-    const state = await this.history.archiveWorkspace(workspaceId)
-    if (state.activeWorkspaceId !== null) await this.activateCodex(state)
-    return state
+  archiveWorkspace(
+    workspaceId: string,
+    expectedGeneration: number | null = null,
+  ): Promise<WorkspaceAdapterState> {
+    if (
+      this.workspaceTransition !== null ||
+      this.workspaceCancellation !== null ||
+      this.appQuitPreparation !== null
+    ) {
+      return Promise.reject(new Error("WORKSPACE-ARCHIVE-MUTATION-IN-PROGRESS"))
+    }
+    const key = `${workspaceId}:${String(expectedGeneration)}`
+    if (this.workspaceArchive !== null) {
+      if (this.workspaceArchive.key === key) {
+        return this.workspaceArchive.operation
+      }
+      return Promise.reject(new Error("WORKSPACE-ARCHIVE-IN-PROGRESS"))
+    }
+    const operation = this.performWorkspaceArchive(
+      workspaceId,
+      expectedGeneration,
+    ).finally(() => {
+      if (this.workspaceArchive?.operation === operation) {
+        this.workspaceArchive = null
+      }
+    })
+    this.workspaceArchive = { key, operation }
+    return operation
   }
 
   saveDraft(
@@ -442,6 +482,35 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       })
     }
     return this.history.cancelWorkspace(workspaceId, expectedUpdatedAt)
+  }
+
+  private async performWorkspaceArchive(
+    workspaceId: string,
+    expectedGeneration: number | null,
+  ): Promise<WorkspaceAdapterState> {
+    const before = this.codex.snapshot()
+    const activeMainSession = hasActiveMainSession(before, workspaceId)
+    if (expectedGeneration === null) {
+      if (activeMainSession) {
+        throw new Error("WORKSPACE-ARCHIVE-ACTIVE")
+      }
+    } else {
+      if (
+        before.activeWorkspaceId !== workspaceId ||
+        before.generation !== expectedGeneration
+      ) {
+        throw new Error("WORKSPACE-ARCHIVE-STALE")
+      }
+      if (activeMainSession) {
+        await this.codex.stopTurnAndWaitForTerminal({
+          workspaceId,
+          expectedGeneration,
+        })
+      }
+    }
+    const state = await this.history.archiveWorkspace(workspaceId)
+    if (state.activeWorkspaceId !== null) await this.activateCodex(state)
+    return state
   }
 
   private async performAppQuitPreparation(

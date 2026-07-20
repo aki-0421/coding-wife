@@ -241,6 +241,7 @@ export interface WorkspaceViewAdapter {
   ) => Promise<WorkspaceAdapterState>
   readonly archiveWorkspace?: (
     workspaceId: string,
+    expectedGeneration?: number | null,
   ) => Promise<WorkspaceAdapterState>
   readonly saveDraft?: (
     workspaceId: string,

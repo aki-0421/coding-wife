@@ -146,8 +146,13 @@ export function WorkspaceShell({
   const [appSettingsOpen, setAppSettingsOpen] = useState(false)
   const [appSettingsSection, setAppSettingsSection] =
     useState<AppSettingsSection>("general")
-  const [archiveCandidate, setArchiveCandidate] =
-    useState<WorkspaceRecord | null>(null)
+  const [archiveCandidate, setArchiveCandidate] = useState<{
+    readonly workspace: WorkspaceRecord
+    readonly expectedGeneration: number | null
+  } | null>(null)
+  const [archivePendingWorkspaceId, setArchivePendingWorkspaceId] = useState<
+    string | null
+  >(null)
   const archiveSafeActionRef = useRef<HTMLButtonElement | null>(null)
   const [systemReducedMotion, setSystemReducedMotion] = useState(
     getSystemReducedMotion,
@@ -484,14 +489,64 @@ export function WorkspaceShell({
     [reportWorkspaceAction, view],
   )
 
+  const executeArchiveWorkspace = useCallback(
+    async (workspaceId: string, expectedGeneration: number | null) => {
+      setArchivePendingWorkspaceId(workspaceId)
+      try {
+        const archived = reportWorkspaceAction(
+          await view.archiveWorkspace(workspaceId, expectedGeneration),
+        )
+        if (!archived) return false
+        setArchiveCandidate(null)
+        commitExplanationController?.revokePresentationIntent(
+          "selection_change",
+        )
+        await narrationController.dismissPresentation("explicit_cancel")
+        return true
+      } finally {
+        setArchivePendingWorkspaceId((current) =>
+          current === workspaceId ? null : current,
+        )
+      }
+    },
+    [
+      commitExplanationController,
+      narrationController,
+      reportWorkspaceAction,
+      view,
+    ],
+  )
+
+  const requestArchiveWorkspace = useCallback(
+    (workspace: WorkspaceRecord) => {
+      const hasActiveMainSession =
+        workspace.id === view.codex.activeWorkspaceId &&
+        (turnActive ||
+          view.codex.phase === "waiting" ||
+          view.codex.pendingRequests.length > 0)
+      if (hasActiveMainSession) {
+        const generation = view.codex.generation
+        setArchiveCandidate({
+          workspace,
+          expectedGeneration:
+            Number.isSafeInteger(generation) && Number(generation) > 0
+              ? generation
+              : null,
+        })
+        return
+      }
+      void executeArchiveWorkspace(workspace.id, null)
+    },
+    [executeArchiveWorkspace, turnActive, view.codex],
+  )
+
   const confirmArchiveWorkspace = useCallback(async () => {
     if (archiveCandidate === null) return
-    if (
-      reportWorkspaceAction(await view.archiveWorkspace(archiveCandidate.id))
-    ) {
-      setArchiveCandidate(null)
-    }
-  }, [archiveCandidate, reportWorkspaceAction, view])
+    await executeArchiveWorkspace(
+      archiveCandidate.workspace.id,
+      archiveCandidate.expectedGeneration,
+    )
+  }, [archiveCandidate, executeArchiveWorkspace])
 
   const dismissCommitPresentation = useCallback(() => {
     explanationFocusRestoreVersionRef.current += 1
@@ -744,16 +799,14 @@ export function WorkspaceShell({
         filteredWorkspaces={view.filteredWorkspaces}
         projectFilterIds={view.projectFilterIds}
         projects={view.projects}
-        archiveDisabledWorkspaceId={
-          turnActive ? selectedWorkspace?.id : undefined
-        }
+        archiveDisabledWorkspaceId={archivePendingWorkspaceId ?? undefined}
         onAddProject={() => void view.requestAddProject(copy.pickerUnavailable)}
         onCreateWorkspace={view.addWorkspace}
         onProjectFilterChange={view.setProjectFilterIds}
         onOpenSettings={() =>
           openAppSettings(view.projects.length === 0 ? "projects" : "general")
         }
-        onRequestArchive={setArchiveCandidate}
+        onRequestArchive={requestArchiveWorkspace}
         onSelectWorkspace={(workspaceId) => {
           setAppSettingsProjectId(null)
           setAppSettingsOpen(false)
@@ -983,7 +1036,7 @@ export function WorkspaceShell({
 
       <Dialog
         onOpenChange={(open) => {
-          if (!open && view.workspaceAction !== "archive") {
+          if (!open && archivePendingWorkspaceId === null) {
             setArchiveCandidate(null)
           }
         }}
@@ -992,7 +1045,7 @@ export function WorkspaceShell({
         <DialogContent
           onCloseAutoFocus={(event) => {
             event.preventDefault()
-            const archivedId = archiveCandidate?.id
+            const archivedId = archiveCandidate?.workspace.id
             if (archivedId === undefined) return
             const archiveButton = [
               ...document.querySelectorAll<HTMLElement>(
@@ -1008,17 +1061,17 @@ export function WorkspaceShell({
             event.preventDefault()
             archiveSafeActionRef.current?.focus()
           }}
-          showCloseButton={view.workspaceAction !== "archive"}
+          showCloseButton={archivePendingWorkspaceId === null}
         >
           <DialogHeader>
             <DialogTitle>{copy.archiveDialog.title}</DialogTitle>
             <DialogDescription>
-              {copy.archiveDialog.body(archiveCandidate?.name ?? "")}
+              {copy.archiveDialog.body(archiveCandidate?.workspace.name ?? "")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button
-              disabled={view.workspaceAction === "archive"}
+              disabled={archivePendingWorkspaceId !== null}
               onClick={() => setArchiveCandidate(null)}
               ref={archiveSafeActionRef}
               type="button"
@@ -1027,12 +1080,12 @@ export function WorkspaceShell({
               {copy.archiveDialog.cancel}
             </Button>
             <Button
-              disabled={view.workspaceAction === "archive"}
+              disabled={archivePendingWorkspaceId !== null}
               onClick={() => void confirmArchiveWorkspace()}
               type="button"
               variant="destructive"
             >
-              {view.workspaceAction === "archive"
+              {archivePendingWorkspaceId !== null
                 ? copy.archiveDialog.working
                 : copy.archiveDialog.confirm}
             </Button>
