@@ -22,12 +22,14 @@ function Slider({
           : [min, max],
     [value, defaultValue, min, max],
   )
+  const defaultValueProps = defaultValue === undefined ? {} : { defaultValue }
+  const valueProps = value === undefined ? {} : { value }
 
   return (
     <SliderPrimitive.Root
       data-slot="slider"
-      defaultValue={defaultValue}
-      value={value}
+      {...defaultValueProps}
+      {...valueProps}
       min={min}
       max={max}
       aria-label={ariaLabel}
