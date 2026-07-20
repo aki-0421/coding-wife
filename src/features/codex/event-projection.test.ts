@@ -66,6 +66,49 @@ describe("CodexEventProjector", () => {
     })
   })
 
+  it("keeps Codex warnings non-terminal while preserving the diagnostic history", () => {
+    const projected = new CodexEventProjector().project(
+      event(4, {
+        kind: "diagnostic",
+        payload: {
+          code: "CODEX-WARNING",
+          willRetry: false,
+          detailRef: "diagnostic-warning-1",
+        },
+      }),
+    )
+
+    expect(projected.timeline).toMatchObject({
+      kind: "status",
+      status: "warning",
+      itemType: "warning",
+      detailRef: "diagnostic-warning-1",
+    })
+    expect(projected.history).toMatchObject({
+      kind: "code.session.diagnostic",
+      payload: { code: "CODEX-WARNING", willRetry: false },
+    })
+  })
+
+  it("persists message item lifecycle without rendering duplicate status rows", () => {
+    const projected = new CodexEventProjector().project(
+      event(5, {
+        kind: "item_status",
+        payload: {
+          itemHandle: "item-assistant",
+          itemType: "agentMessage",
+          status: "running",
+        },
+      }),
+    )
+
+    expect(projected.timeline).toBeNull()
+    expect(projected.history).toMatchObject({
+      kind: "code.item.status.changed",
+      payload: { itemType: "agentMessage", status: "running" },
+    })
+  })
+
   it("projects tool, file, plan, diff, approval, error, and completion semantics", () => {
     const projector = new CodexEventProjector()
     const approval = parseCodexEvent(fixture.events[1])

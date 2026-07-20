@@ -56,6 +56,29 @@ const defaultProjectHash =
   "e0da727f2381a1c290ddcb74bdb52b44b0ec890559443d795f29731d68fe1323"
 const defaultCharacterHash =
   "7607f6f22a12f0abed924b078a0e1b202c87e993d67f4346a0c0a2682a1004af"
+const safeErrorCodePattern = /^[A-Z][A-Z0-9-]{2,127}$/u
+
+function safeErrorCode(error: unknown, fallback: string): string {
+  if (typeof error === "string" && safeErrorCodePattern.test(error)) {
+    return error
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    safeErrorCodePattern.test(error.code)
+  ) {
+    return error.code
+  }
+  if (
+    error instanceof Error &&
+    safeErrorCodePattern.test(error.message)
+  ) {
+    return error.message
+  }
+  return fallback
+}
 
 function projectsForWorkspaces(
   workspaces: readonly WorkspaceRecord[],
@@ -784,6 +807,10 @@ export function useWorkspaceViewModel(
         editableContextSnapshot.workspaceId !== selectedWorkspace.id
       ) {
         setTurnState("idle")
+        setNotice({
+          tone: "error",
+          message: "CODEX-TURN-CONTEXT-UNAVAILABLE",
+        })
         return false
       }
       if (adapter.recheckWorkspace !== undefined) {
@@ -806,6 +833,10 @@ export function useWorkspaceViewModel(
         selectedWorkspace.health !== "ready"
       ) {
         setTurnState("idle")
+        setNotice({
+          tone: "error",
+          message: `WORKSPACE-REPOSITORY-${selectedWorkspace.health}`,
+        })
         return false
       }
       const request: SendTurnRequest = {
@@ -823,6 +854,7 @@ export function useWorkspaceViewModel(
       if (sendVersion.current !== version) return false
       if (!result.accepted) {
         setTurnState("idle")
+        setNotice({ tone: "error", message: "CODEX-TURN-NOT-ACCEPTED" })
         return false
       }
 
@@ -837,8 +869,14 @@ export function useWorkspaceViewModel(
       setTurnState("running")
       setNotice(null)
       return true
-    } catch {
-      if (sendVersion.current === version) setTurnState("idle")
+    } catch (error) {
+      if (sendVersion.current === version) {
+        setTurnState("idle")
+        setNotice({
+          tone: "error",
+          message: safeErrorCode(error, "CODEX-TURN-START-FAILED"),
+        })
+      }
       return false
     }
   }, [

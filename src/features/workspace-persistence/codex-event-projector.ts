@@ -93,6 +93,19 @@ function turnKind(status: string): "turn" | "completion" | "error" {
   return "error"
 }
 
+export function isHiddenCodexHistoryEvent(
+  event: PersistedTimelineEvent,
+): boolean {
+  return (
+    event.producer === "code" &&
+    event.kind === "code.item.status.changed" &&
+    event.payload.semanticVersion === 1 &&
+    ["userMessage", "agentMessage"].includes(
+      stringField(event.payload, "itemType"),
+    )
+  )
+}
+
 export class PersistedCodexEventProjector {
   private readonly toolText = new Map<string, string>()
   private readonly toolKinds = new Map<string, string>()
@@ -170,6 +183,7 @@ export class PersistedCodexEventProjector {
         const itemType = stringField(payload, "itemType")
         const status = stringField(payload, "status")
         const stable = stableId(event, generation, "item", itemHandle)
+        if (isHiddenCodexHistoryEvent(event)) return null
         if (
           ["commandExecution", "mcpToolCall", "webSearch"].includes(itemType)
         ) {
@@ -306,6 +320,22 @@ export class PersistedCodexEventProjector {
       case "code.session.diagnostic": {
         const detailRef = stringField(payload, "detailRef")
         const willRetry = payload.willRetry as boolean
+        const code = stringField(payload, "code")
+        if (code === "CODEX-WARNING") {
+          return {
+            ...base(
+              event,
+              generation,
+              sourceSequence,
+              "warning",
+              stableId(event, generation, "diagnostic", detailRef),
+            ),
+            kind: "status",
+            itemHandle: null,
+            itemType: "warning",
+            detailRef,
+          }
+        }
         return {
           ...base(
             event,
@@ -315,7 +345,7 @@ export class PersistedCodexEventProjector {
             stableId(event, generation, "diagnostic", detailRef),
           ),
           kind: "error",
-          errorCode: stringField(payload, "code"),
+          errorCode: code,
           detailRef,
           willRetry,
         }

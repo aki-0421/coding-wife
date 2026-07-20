@@ -221,6 +221,48 @@ describe("useWorkspaceViewModel workspace transitions", () => {
     )
   })
 
+  it("preserves the draft and exposes a safe error when turn start fails", async () => {
+    const fixture = adapterFixture()
+    fixture.sendTurn.mockRejectedValueOnce(
+      Object.assign(new Error("raw transport detail"), {
+        code: "CODEX-TURN-PREFLIGHT-BLOCKED",
+      }),
+    )
+    const { result } = renderHook(() =>
+      useWorkspaceViewModel(fixture.adapter),
+    )
+    await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
+
+    await act(async () => {
+      await expect(result.current.sendTurn()).resolves.toBe(false)
+    })
+
+    expect(result.current.turnState).toBe("idle")
+    expect(result.current.selectedDraft.text).toBe("Preserve this draft.")
+    expect(result.current.notice).toEqual({
+      tone: "error",
+      message: "CODEX-TURN-PREFLIGHT-BLOCKED",
+    })
+  })
+
+  it("does not expose an unsafe turn start error", async () => {
+    const fixture = adapterFixture()
+    fixture.sendTurn.mockRejectedValueOnce(
+      new Error("/Users/private/.codex/auth.json"),
+    )
+    const { result } = renderHook(() =>
+      useWorkspaceViewModel(fixture.adapter),
+    )
+    await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
+
+    await act(async () => {
+      await expect(result.current.sendTurn()).resolves.toBe(false)
+    })
+
+    expect(result.current.selectedDraft.text).toBe("Preserve this draft.")
+    expect(result.current.notice?.message).toBe("CODEX-TURN-START-FAILED")
+  })
+
   it("rechecks the active repository on window focus and restores native anchor state", async () => {
     const initial: WorkspaceAdapterState = {
       ...state(),

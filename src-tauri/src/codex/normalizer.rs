@@ -391,7 +391,10 @@ impl EventNormalizer {
             | "item/reasoning/textDelta" => {
                 // Intentionally discard all raw reasoning payloads.
             }
-            "mcpServer/startupStatus/updated" | "remoteControl/status/changed" => {
+            "mcpServer/startupStatus/updated"
+            | "remoteControl/status/changed"
+            | "account/rateLimits/updated"
+            | "thread/tokenUsage/updated" => {
                 // These auxiliary status notifications do not affect the
                 // Coding Wife session, turn, model, or approval state.
             }
@@ -540,7 +543,7 @@ mod tests {
                     "text": concat!(
                         r#"{"schemaVersion":1,"kind":"result","message":"Bearer abc /"#,
                         "Users/alice/project/src/main.rs",
-                        r#""}"#
+                        r#"","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":null}"#
                     )
                 }}),
                 100,
@@ -612,6 +615,8 @@ mod tests {
         for method in [
             "mcpServer/startupStatus/updated",
             "remoteControl/status/changed",
+            "account/rateLimits/updated",
+            "thread/tokenUsage/updated",
         ] {
             let outcome = normalizer
                 .normalize(method, &json!({"private": "status"}), 42)

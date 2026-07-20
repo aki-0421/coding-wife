@@ -418,53 +418,40 @@ pub(crate) fn parse_support_thread_policy_response(
 
 pub fn decision_output_schema() -> Value {
     json!({
-        "oneOf": [
-            {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["schemaVersion", "kind", "message"],
-                "properties": {
-                    "schemaVersion": {"const": 1},
-                    "kind": {"const": "result"},
-                    "message": {"type": "string", "minLength": 1, "maxLength": 65536}
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "schemaVersion",
+            "kind",
+            "message",
+            "decisionId",
+            "question",
+            "options",
+            "context",
+            "allowFreeform"
+        ],
+        "properties": {
+            "schemaVersion": {"type": "integer", "enum": [1]},
+            "kind": {"type": "string", "enum": ["result", "decision_request"]},
+            "message": {"type": "string"},
+            "decisionId": {"type": ["string", "null"]},
+            "question": {"type": ["string", "null"]},
+            "options": {
+                "type": ["array", "null"],
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["id", "label", "description"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "label": {"type": "string"},
+                        "description": {"type": "string"}
+                    }
                 }
             },
-            {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                    "schemaVersion",
-                    "kind",
-                    "message",
-                    "decisionId",
-                    "question",
-                    "options",
-                    "context",
-                    "allowFreeform"
-                ],
-                "properties": {
-                    "schemaVersion": {"const": 1},
-                    "kind": {"const": "decision_request"},
-                    "message": {"type": "string", "minLength": 1, "maxLength": 4096},
-                    "decisionId": {"type": "string", "minLength": 1, "maxLength": 128},
-                    "question": {"type": "string", "minLength": 1, "maxLength": 4096},
-                    "options": {
-                        "type": "array",
-                        "minItems": 2,
-                        "maxItems": 3,
-                        "uniqueItems": true,
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": ["id", "label", "description"],
-                            "properties": {
-                                "id": {"type": "string", "minLength": 1, "maxLength": 128},
-                                "label": {"type": "string", "minLength": 1, "maxLength": 256},
-                                "description": {"type": "string", "maxLength": 1024}
-                            }
-                        }
-                    },
-                    "context": {
+            "context": {
+                "anyOf": [
+                    {
                         "type": "object",
                         "additionalProperties": false,
                         "required": [
@@ -481,14 +468,15 @@ pub fn decision_output_schema() -> Value {
                             "uncertainty"
                         ],
                         "properties": {
-                            "schemaVersion": {"const": 1},
-                            "category": {"const": "user_decision"},
-                            "targetKind": {"const": "active_turn"},
-                            "targetAlias": {"const": "active_turn"},
-                            "effect": {"const": "continue_turn"},
-                            "scope": {"const": "turn"},
-                            "risk": {"enum": ["low", "medium", "high"]},
+                            "schemaVersion": {"type": "integer", "enum": [1]},
+                            "category": {"type": "string", "enum": ["user_decision"]},
+                            "targetKind": {"type": "string", "enum": ["active_turn"]},
+                            "targetAlias": {"type": "string", "enum": ["active_turn"]},
+                            "effect": {"type": "string", "enum": ["continue_turn"]},
+                            "scope": {"type": "string", "enum": ["turn"]},
+                            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
                             "reversibility": {
+                                "type": "string",
                                 "enum": [
                                     "reversible",
                                     "partially_reversible",
@@ -496,28 +484,19 @@ pub fn decision_output_schema() -> Value {
                                     "unknown"
                                 ]
                             },
-                            "recommendation": {
-                                "oneOf": [
-                                    {"type": "string", "minLength": 1, "maxLength": 128},
-                                    {"type": "null"}
-                                ]
-                            },
-                            "evidence": {
-                                "type": "array",
-                                "minItems": 1,
-                                "maxItems": 8,
-                                "uniqueItems": true,
-                                "items": {"type": "string", "minLength": 1, "maxLength": 512}
-                            },
+                            "recommendation": {"type": ["string", "null"]},
+                            "evidence": {"type": "array", "items": {"type": "string"}},
                             "uncertainty": {
+                                "type": "string",
                                 "enum": ["none", "limited_context", "unknown_effects"]
                             }
                         }
                     },
-                    "allowFreeform": {"const": false}
-                }
-            }
-        ]
+                    {"type": "null"}
+                ]
+            },
+            "allowFreeform": {"type": ["boolean", "null"]}
+        }
     })
 }
 
@@ -917,6 +896,22 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0]["name"], "coding-wife-commit-work");
+    }
+
+    #[test]
+    fn decision_output_schema_uses_a_structured_outputs_root_object() {
+        let schema = decision_output_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema.get("oneOf").is_none());
+        assert_eq!(
+            schema["properties"]["kind"]["enum"],
+            json!(["result", "decision_request"])
+        );
+        assert_eq!(
+            schema["properties"]["decisionId"]["type"],
+            json!(["string", "null"])
+        );
+        assert_eq!(schema["required"].as_array().map(Vec::len), Some(8));
     }
 
     #[test]

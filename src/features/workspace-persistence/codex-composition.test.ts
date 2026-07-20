@@ -30,6 +30,7 @@ class CompositionCodexTransport implements CodexTransport {
     readonly request: unknown
   }[] = []
   readonly connectFailures = new Map<string, Error>()
+  connectGate: Promise<void> | null = null
   interruptFailure: Error | null = null
   private callbacks: CodexEventCallbacks | null = null
 
@@ -45,6 +46,14 @@ class CompositionCodexTransport implements CodexTransport {
             (request as CodexRequestMap["codex_connect"]).workspaceId,
           )
           if (failure !== undefined) return Promise.reject(failure)
+          if (this.connectGate !== null) {
+            return this.connectGate.then(
+              () =>
+                parseCodexDiagnostic(
+                  fixture.diagnostic,
+                ) as CodexResponseMap[K],
+            )
+          }
         }
         return Promise.resolve(
           parseCodexDiagnostic(fixture.diagnostic) as CodexResponseMap[K],
@@ -102,6 +111,48 @@ class CompositionCodexTransport implements CodexTransport {
 }
 
 describe("CodexComposedWorkspaceViewAdapter", () => {
+  it("single-flights concurrent activation for the same workspace", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const codex = new CompositionCodexTransport()
+    let releaseConnect!: () => void
+    codex.connectGate = new Promise<void>((resolve) => {
+      releaseConnect = resolve
+    })
+    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const loading = adapter.loadState()
+
+    await vi.waitFor(() => {
+      expect(
+        codex.calls.filter((call) => call.command === codexCommands.connect),
+      ).toHaveLength(1)
+    })
+    const connectRequest = codex.calls.find(
+      (call) => call.command === codexCommands.connect,
+    )?.request
+    if (
+      !isRecord(connectRequest) ||
+      typeof connectRequest.workspaceId !== "string"
+    ) {
+      throw new Error("Expected an activation workspace")
+    }
+
+    const firstRecheck = adapter.recheckWorkspace(connectRequest.workspaceId)
+    const secondRecheck = adapter.recheckWorkspace(connectRequest.workspaceId)
+    await vi.waitFor(() => {
+      expect(
+        codex.calls.filter((call) => call.command === codexCommands.connect),
+      ).toHaveLength(1)
+    })
+
+    releaseConnect()
+    await expect(
+      Promise.all([loading, firstRecheck, secondRecheck]),
+    ).resolves.toHaveLength(3)
+    expect(
+      codex.calls.filter((call) => call.command === codexCommands.connect),
+    ).toHaveLength(1)
+  })
+
   it("activates the selected workspace and composes send, attachment, live, and HIST state", async () => {
     const history = new DemoWorkspaceHistoryTransport()
     const codex = new CompositionCodexTransport()

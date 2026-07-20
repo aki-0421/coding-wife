@@ -270,7 +270,7 @@ export class CodexEventProjector {
       case "item_status": {
         const stable = stableId(event, "item", event.payload.itemHandle)
         const itemType = event.payload.itemType
-        let timeline: CodexSemanticTimelineEvent
+        let timeline: CodexSemanticTimelineEvent | null
         if (
           ["commandExecution", "mcpToolCall", "webSearch"].includes(itemType)
         ) {
@@ -289,6 +289,8 @@ export class CodexEventProjector {
             pathAlias: null,
             changeKind: null,
           }
+        } else if (["userMessage", "agentMessage"].includes(itemType)) {
+          timeline = null
         } else {
           timeline = {
             ...base(event, "status", event.payload.status, stable, true),
@@ -443,20 +445,29 @@ export class CodexEventProjector {
       }
       case "diagnostic": {
         const stable = stableId(event, "diagnostic", event.payload.detailRef)
+        const warning = event.payload.code === "CODEX-WARNING"
         return {
-          timeline: {
-            ...base(
-              event,
-              "error",
-              event.payload.willRetry ? "retrying" : "failed",
-              stable,
-              true,
-            ),
-            kind: "error",
-            errorCode: event.payload.code,
-            detailRef: event.payload.detailRef,
-            willRetry: event.payload.willRetry,
-          },
+          timeline: warning
+            ? {
+                ...base(event, "status", "warning", stable, true),
+                kind: "status",
+                itemHandle: null,
+                itemType: "warning",
+                detailRef: event.payload.detailRef,
+              }
+            : {
+                ...base(
+                  event,
+                  "error",
+                  event.payload.willRetry ? "retrying" : "failed",
+                  stable,
+                  true,
+                ),
+                kind: "error",
+                errorCode: event.payload.code,
+                detailRef: event.payload.detailRef,
+                willRetry: event.payload.willRetry,
+              },
           history: history(event, "code.session.diagnostic", event.payload),
         }
       }

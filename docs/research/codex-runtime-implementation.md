@@ -27,13 +27,15 @@ read_when:
 8. workspaceの絶対pathと明示Codex binary pathはapp-private recordにだけ保存する。WebViewはworkspaceについてnative folder pickerが返すopaque workspace ID、alias、boolean preflightだけを受け取る。Codex pathだけは利用者が設定formへ入力した値をbounded requestとしてRustへ渡せるが、canonical pathをresponse、snapshot、history、通常logへ返さない。
 9. thread開始・再開はresponseのmodel、canonical cwd、thread cwd、approval policy、sandbox type、ephemeral=falseを全て照合する。不足・不一致時はhandleを保存せずchildを停止する。
 10. pending responseはresponse variantと値をimmutable recordに対して検証してからatomicに消費する。invalid responseはpendingを残し、TypeScript側もpending kindとresponse typeを一致させてからsingle-claimする。
-11. native RUIが使えない場合のassistant完了文は`result`または`decision_request`のJSON全体だけを受理する。自由文、freeform、approval代替、不正optionは表示せずactive turnをinterruptする。
+11. native RUIが使えない場合のassistant完了文は`result`または`decision_request`のJSON全体だけを受理する。Codexへ渡す`outputSchema`はStructured Outputsが受理する単一root objectとし、全fieldをrequiredにしたうえでvariant固有fieldをnullableにする。`result`ではdecision固有fieldがすべてnull、`decision_request`では必要な値がすべてnon-nullであることをRustでも再検証する。root `oneOf`、自由文、freeform、approval代替、不正optionは受理せずactive turnをinterruptする。
 12. fallback decisionはnative server request ledgerへ入れず、workspace、generation、source thread/turn、元のreasoning effortへ束縛した専用ledgerで管理する。source turnの正常完了後だけ、opaque decision handleとoption IDだけを含む固定JSONを同じthreadの新しいturnへ送る。invalid optionはcardを残し、同時応答は1件だけを開始し、開始失敗やchild crash後に自動再送しない。
 13. binary discovery、version、schema、identity、capability probeのいずれかが失敗した時点で、以前のbinary/schema cacheとdiagnostic上のversion、hash、fingerprint、capability/account証跡を一括消去し、active childを停止する。次のconnectは必ず新しいdiscoveryとprobeから始める。
 14. public textはfield別に検証する。identifier/aliasはsingle-line、prompt/assistant/tool excerpt/effect/evidenceは正規化済み`\n`と`\t`だけをcontrol例外として許可し、NUL、その他control、secret、private pathを拒否する。RustとTypeScriptはUnicode scalarで同じ上限を数える。
 15. HISTのversioned CODE payloadはlive semantic eventと同じexact projectorで復元する。pending decision/approvalはsupervisor ownership照合成功時だけactionableにし、unknown/invalid payloadはraw/generic行へfallbackしない。
 16. `DecisionContext`はnative RUI、fallback、normalizer、HIST、WebViewを通じてversion、effect、scope、risk、reversibility、recommendation、evidence、uncertaintyを保持する。不正contextを回答可能cardへ近似しない。
 17. main turnのpublic instruction上限32,000 Unicode scalarと、contextを含む合成text上限80,000 Unicode scalarを分離する。Rust supervisorは後者をApp Server送信前に再検証し、exact 80,000を受理、80,001、NUL、空textかつattachmentなしを拒否する。multibyte文字もUTF-8 byte数ではなく1 scalarとして数える。この変更はsupport専用input/outputの64KiB byte上限を変更しない。
+18. repositoryのfocus recheckとSend直前recheckが同じworkspaceのCodex activationを同時に要求した場合は、同じworkspace・history modeの1件へsingle-flight化する。readyな同一sessionをrepository recheckだけで再生成せず、送信前activationの競合で接続済みgenerationをstaleにしない。
+19. Sendは`codex_turn_start`の受理後だけdraftを消去する。context取得、repository recheck、activation、preflight、transport、受理拒否のいずれで失敗してもworkspace固有draftとattachmentを保持し、raw例外ではなく安全なerror codeをComposer noticeへ表示する。
 
 ## Binary trustとprobe境界
 
@@ -76,7 +78,7 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 | active workspace | workspace historyのopaque workspace ID    | 選択確定後だけ`codex_connect`へ同じIDを渡す。pathを要求・保持しない                                                                                          |
 | 接続可否         | `CodexDiagnostic`                         | `health=ready`、core lifecycle/model discovery supported、Sol、1件以上の広告済みreasoning effort、accountが揃う場合だけSend可能にする                         |
 | thread           | Codex supervisor                          | workspace activationごとにconnect後、compositionが開始した所有threadを再利用し、所有handleが無い時だけ1件開始する。他clientの一覧結果を自動採用しない        |
-| turn受理         | `codex_turn_start` response               | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport失敗ではdraftとattachmentを保持する                                   |
+| turn受理         | `codex_turn_start` response               | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport、受理拒否ではdraftとattachmentを保持し、安全なerror codeを表示する      |
 | live state       | generation別`CodexSessionStore`           | workspace ID、generation、sequenceを全て照合し、旧workspaceまたは旧generation eventを現在表示へ混ぜない                                                      |
 | durable timeline | workspace history writer                  | CodexEventをallowlist済みsemantic eventへ投影してから追記する。deltaは表示用にcoalesceし、completed/error/decision/approval/terminalを永続正本にする         |
 | pending response | `CodexSessionClient`のsingle-claim ledger | approval、native user input、fallback decisionをkind一致で1回だけ応答する。unknown/invalidは操作UIを出さずfail closedにする                                  |
@@ -84,20 +86,29 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 
 接続状態と履歴状態は別軸である。履歴が`ready`でもCodex診断がblockedならtimeline閲覧とdraft保存だけを許可し、Sendは無効にする。逆にCodexがreadyでも履歴writerがread-only/recoveryなら新しいturnを開始しない。`connected=false`の固定値、demo successへのnative fallback、model/listを確認しないreasoning levelやFast service tier表示は禁止する。
 
+window focusとSendはどちらもrepository healthを再確認できるが、同じworkspace・history modeへ向くCodex activationはcomposition層でsingle-flightにする。すでに同条件で接続済みの所有threadがある場合はそのsessionを再利用する。Send中に別のrecheckが`beginActivation`してgenerationとthread handleを一時消去する競合を許してはならない。
+
 ### semantic event投影
 
 UI/HISTへ渡すCodex eventは、少なくとも次へ分類する。
 
 - thread/turn status: idle、running、waiting、completed、failed、interrupted。
 - assistant: streaming deltaはmemory上でitem単位に連結し、completed textを永続化する。
+- `userMessage`と`agentMessage`の内部item lifecycleは監査用HISTへ保存するが、accepted user行とassistant行に加えて重複するアクティビティ行を表示しない。特にturn完了後に内部`agentMessage: running`を残してはならない。
 - plan、tool、file、diff: raw command/stdout/stderr/pathを出さず、件数、sanitized excerpt、path alias、change kind、detail refだけを使う。
 - decision/approval: 検証済みquestion/optionsまたはversioned approval contextとpending handleだけを使う。
 - diagnostic/protocol/model violation: safe code、willRetry、detail refと復旧可否を使い、raw payloadへfallbackしない。
 - completion/error/interrupt: turn terminal authorityをstatus eventとして保存し、interrupt ackをcompletionへ変換しない。
 
-Codex 0.144.5が接続直後に送る`mcpServer/startupStatus/updated`と
-`remoteControl/status/changed`は、Coding Wifeのmain session、turn、model、approval状態を
-変更しない既知の補助notificationとして明示的に破棄する。この2 methodを
+App Serverの`warning` notificationは`CODEX-WARNING` diagnosticとして永続化するが、turn失敗を
+意味しない。live projectionとHIST復元ではnon-terminalな`status: warning`として表示し、
+`Action failed`または`status: failed`へ投影してはならない。`error` notificationは従来どおり
+`CODEX-TURN-ERROR`として失敗表示する。
+
+Codex 0.144.5が接続直後またはturn実行中に送る`mcpServer/startupStatus/updated`、
+`remoteControl/status/changed`、`account/rateLimits/updated`、
+`thread/tokenUsage/updated`は、Coding Wifeのmain session、turn、model、approval状態を
+変更しない既知の補助notificationとして明示的に破棄する。これらのmethodを
 `code.protocol.unsupported`へ投影して利用者へblocked errorを表示してはならない。その他の
 未知notification、未知item type、未知enumは従来どおりraw payloadを公開せず
 `CODEX-PROTOCOL-UNSUPPORTED`へfail closedする。

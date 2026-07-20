@@ -85,6 +85,10 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     readonly key: string
     readonly operation: Promise<void>
   } | null = null
+  private codexActivation: {
+    readonly key: string
+    readonly operation: Promise<void>
+  } | null = null
 
   constructor(
     historyTransport: WorkspaceHistoryTransport,
@@ -422,14 +426,37 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
         : state.history.mode === "recovery_required"
           ? "recovery_required"
           : "read_only"
-    try {
-      await this.codex.activateWorkspace({
+    const current = this.codex.snapshot()
+    if (
+      current.activeWorkspaceId === state.activeWorkspaceId &&
+      current.historyMode === historyMode &&
+      current.connected &&
+      current.readiness.ready &&
+      current.threadHandle !== null
+    ) {
+      return
+    }
+    const key = `${state.activeWorkspaceId}:${historyMode}`
+    if (this.codexActivation?.key === key) {
+      await this.codexActivation.operation
+      return
+    }
+    const operation = this.codex
+      .activateWorkspace({
         workspaceId: state.activeWorkspaceId,
         historyMode,
       })
-    } catch {
-      // The Codex store already exposes a safe error code through subscribeCodex.
-    }
+      .then(() => undefined)
+      .catch(() => {
+        // The Codex store already exposes a safe error code through subscribeCodex.
+      })
+      .finally(() => {
+        if (this.codexActivation?.operation === operation) {
+          this.codexActivation = null
+        }
+      })
+    this.codexActivation = { key, operation }
+    await operation
   }
 
   private async performWorkspaceTransition(

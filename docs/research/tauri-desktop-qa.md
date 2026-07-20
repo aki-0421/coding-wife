@@ -54,6 +54,11 @@ pnpm test:desktop
 `e2e/desktop/**/*.spec.ts`を実行する。調査中に一つのspecだけを再実行するときは、先に
 同じQA buildを作ったうえでWebdriverIOへ`--spec`を渡してよい。
 
+通常featureの`cargo test`、`cargo build`または別のTauri buildは、同じ
+`src-tauri/target/debug/coding-wife`をQA pluginなしのbinaryで上書きできる。Rustの検証を
+QA build後に実行した場合は、WebdriverIOを再実行する前に必ずQA専用Tauri buildを作り直す。
+embedded WebDriverへ接続できない状態をUI不具合として調査してはならない。
+
 WebdriverIOがbinaryを起動・終了し、既に起動している`pnpm tauri:dev`へ後付け接続しない。
 同時実行数は1とする。embedded WebDriver portは
 `CODING_WIFE_WDIO_PORT`、次にConductorの`CONDUCTOR_PORT + 5`、最後に4445の順で決める。
