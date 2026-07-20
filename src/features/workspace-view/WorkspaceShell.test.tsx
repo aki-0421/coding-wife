@@ -1495,7 +1495,7 @@ describe("WorkspaceShell", () => {
     ).toBeEnabled()
   })
 
-  it("shows only a non-mutating skeleton while native history is pending", async () => {
+  it("shows no visible startup UI while native history is pending", async () => {
     let resolveState!: (state: WorkspaceAdapterState) => void
     const requestAddProject = vi.fn()
     const adapter: WorkspaceViewAdapter = {
@@ -1507,9 +1507,12 @@ describe("WorkspaceShell", () => {
       requestAddProject,
     }
 
-    renderWorkspace(adapter)
+    const { container } = renderWorkspace(adapter)
 
-    expect(screen.getByText("Restoring workspace history")).toBeVisible()
+    expect(
+      container.querySelector('[data-native-startup="checking"]'),
+    ).not.toBeNull()
+    expect(container.textContent).toBe("")
     expect(
       screen.queryByText(/build-live2d-desktop-app/),
     ).not.toBeInTheDocument()
