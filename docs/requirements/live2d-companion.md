@@ -27,7 +27,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ----------------------------- | -------------------------------------------------------------------- |
 | 既定companionを確実に表示する | cold startでHiyoriがdemo比率の右paneへ収まり、状態に反応する         |
 | model差分へ安全に対応する     | motion/expression欠落時もneutral/static/textへ縮退し、Chatを止めない |
-| ユーザーmodelを設定可能にする | model3.jsonを隔離・検証・previewし、projectごとに選択・復元できる    |
+| ユーザーmodelを設定可能にする | model3.jsonを隔離・検証・previewし、app全体で選択・復元できる        |
 
 ## スコープ
 
@@ -39,7 +39,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | Rendering      | Cubism SDK/Core、透明single canvas、resize、WebGL recovery                       |
 | Semantic state | idle、thinking、acting、waiting、reviewing、error、completed、disconnected       |
 | Accessibility  | text equivalent、hide、reduced motion、static/text-only fallback                 |
-| Custom pack    | 1件分のmodel3 slot、quarantine、validation、copy、preview、mapping、project selection |
+| Custom pack    | 1件分のmodel3 slot、quarantine、validation、copy、preview、mapping、app-global selection |
 
 ### 含めない
 
@@ -68,10 +68,10 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------- | ---------------- |
 | `LIVE-F-055` | appは指定Hiyori runtimeを同梱する           | `hiyori_pro_t11.model3.json`、moc3、texture 2件、physics、pose、cdi、motion 10件の17fileをrelease resourceから解決できる | Approved | 非該当           |
 | `LIVE-F-056` | appは編集用assetを配布へ含めない            | release resourceに`.cmo3`、`.can3`、`.DS_Store`がなく、runtime packとnoticeだけが存在する                                | Approved | 非該当           |
-| `LIVE-F-057` | companionはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commit、Contextで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。Project SettingsとApp Settingsでは表示しない | Approved | 非該当           |
+| `LIVE-F-057` | companionはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commitで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。Workspace SettingsとApp Settingsでは表示しない | Approved | 非該当           |
 | `LIVE-F-058` | rendererはwindow resizeへ追従する           | 1470×836、1280×800、960×640の各resize後500ms以内にcontain scaleを再計算し、composerまたはdecisionを覆わない              | Approved | 非該当           |
-| `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | Chat、Commit、Context、Project Settingsを含むtabとworkspace/modelを20回切り替えても描画canvasが1枚で、作業tab間では同じDOM canvasを再利用し、旧texture/motion/WebGL resourceが参照されない | Approved | 非該当           |
-| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | Project settingsからpack名、creator、source notice、同梱version/hashへ到達できる                                         | Approved | 非該当           |
+| `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | Chat、Commit、Workspace Settingsを含むtabとworkspace/modelを20回切り替えても描画canvasが1枚で、Chat / Commit間では同じDOM canvasを再利用する。Workspace Settingsでは同じrenderer instanceを非表示のまま保持し、旧texture/motion/WebGL resourceを参照しない | Approved | 非該当           |
+| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | App settingsのCompanionからpack名、creator、source notice、同梱version/hashへ到達できる                                  | Approved | 非該当           |
 
 ### Semantic stateと縮退
 
@@ -96,10 +96,10 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-072` | importerはresource境界を適用する               | 通常のcustom modelへ実用上のfile数制限を課さず、異常入力による停止を防ぐ4096fileの内部guard、合計100MiB以下、1file 32MiB以下、texture各8192×8192以下、JSON depth 64以下を適用する                                                                                                                                                                            | Approved | 非該当           |
 | `LIVE-F-073` | importerはquarantineからatomicに昇格する       | 全fileをquarantineへcopyして再hash・再検証し、manifest作成後のatomic rename成功時だけlibraryへpack IDを追加する                                                                                                                                                                                                                                          | Approved | 非該当           |
 | `LIVE-F-074` | WebViewはimport元absolute pathを受け取らない   | import完了payloadとrenderer requestにpack UUIDとrelative asset IDだけが含まれ、source path/home pathがない                                                                                                                                                                                                                                               | Approved | 非該当           |
-| `LIVE-F-075` | 利用者はimport packをpreview後にProjectへ選択できる     | previewのfirst frameとstate testが成功した後だけSelectを有効にし、selectionの正本をstable Project IDへatomic保存する。同じProject IDに属する全workspaceは即時に同じpackを使い、restart後も一致する。カスタムslotの置換時は旧カスタムを選択していた全Project IDを新packへ同じnative transactionで引き継ぐ。legacy workspace-scoped selectionはProjectごとに`selectionUpdatedAt DESC, workspaceId ASC`で最初のvalid packを一度だけ移行し、valid値がなければbundled Hiyoriへ戻す。library cardはmanifestへ拘束されたtrusted PNGをpack IDとasset IDだけのopaque binary IPCで読み、thumbnailと省略hashを表示し、完全hashをaccessibility treeから取得できる。missingまたはhash不一致のframeは表示しない | Approved | 非該当           |
-| `LIVE-F-076` | import失敗は現在modelを壊さない                | malformed、missing、unsupported MOC、I/O、first-frame失敗、abortの各fixtureで現在pack選択とrenderingが継続し、失敗packがlibraryに残らない。Project settingsは利用者が直せるja/enの理由を先に表示し、診断用safe codeを補足として残す。model switchはcandidate client/model/trusted frameをfirst accepted frameまで分離し、その時点だけrenderer、committed pack、metrics、status、frameを一括更新する。失敗またはabortではcandidateだけをreleaseする | Approved | 非該当           |
+| `LIVE-F-075` | 利用者はimport packをpreview後にapp全体へ選択できる     | previewのfirst frameとstate testが成功した後だけSelectを有効にし、selectionの正本をapp-globalなowner-only stateへatomic保存する。全workspaceは即時に同じpackを使い、restart後も一致する。custom slotの置換時はapp-global selectionを新packへ同じtransactionで切り替える。legacy project/workspace-scoped selectionは`selectionUpdatedAt DESC, scope ID ASC`で最初のvalid packを一度だけglobal値へ移行し、valid値がなければbundled Hiyoriへ戻す。library cardはmanifestへ拘束されたtrusted PNGをpack IDとasset IDだけのopaque binary IPCで読み、thumbnailと省略hashを表示し、完全hashをaccessibility treeから取得できる。missingまたはhash不一致のframeは表示しない | Approved | 非該当           |
+| `LIVE-F-076` | import失敗は現在modelを壊さない                | malformed、missing、unsupported MOC、I/O、first-frame失敗、abortの各fixtureで現在pack選択とrenderingが継続し、失敗packがlibraryに残らない。App settingsは利用者が直せるja/enの理由を先に表示し、診断用safe codeを補足として残す。model switchはcandidate client/model/trusted frameをfirst accepted frameまで分離し、その時点だけrenderer、committed pack、metrics、status、frameを一括更新する。失敗またはabortではcandidateだけをreleaseする | Approved | 非該当           |
 | `LIVE-F-077` | 利用者はpackごとのversioned semantic mappingを設定できる | `SemanticMappingV1`はneutral/thinking/working/asking/success/warning/errorの各stateへ検証済みmanifest inventory内のmotion cue、expression cue、またはneutralだけを割り当て、pack ID、manifest hash、mapping versionとatomic保存する。unknown version、hash不一致、invalid cueはmapping全体を実行せずneutralへfallbackする。mapping操作はja/en label、keyboard-only、visible focus、stateごとのpreviewを持ち、reduced motion時はanimationを再生せずtrusted static frameとtextで確認できる | Approved | 非該当           |
-| `LIVE-F-078` | appはbundled 1件とcustom 1件のslotを管理する   | bundled Hiyoriは常設しDelete操作を表示せず、custom packはapp全体で最大1件だけ表示・保存する。customがある状態のimportは検証成功後にslotをatomic置換し、旧customを選択中のProject IDを新packへ引き継ぐ。customのDeleteは確認後に全Project IDをbundled Hiyoriへ戻してからassetとmappingを削除する。置換、削除、失敗、再起動の各時点でlibraryへcustom packを2件以上残さない | Approved | 非該当           |
+| `LIVE-F-078` | appはbundled 1件とcustom 1件のslotを管理する   | bundled Hiyoriは常設しDelete操作を表示せず、custom packはapp全体で最大1件だけ表示・保存する。customがある状態のimportは検証成功後にslotをatomic置換してapp-global selectionを新packへ切り替える。customのDeleteは確認後にselectionをbundled Hiyoriへ戻してからassetとmappingを削除する。置換、削除、失敗、再起動の各時点でlibraryへcustom packを2件以上残さない | Approved | 非該当           |
 
 ### 性能とinteraction boundary
 
@@ -133,7 +133,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ファイル・OS操作            | picker cancel、permission、quarantine、atomic rename               | `LIVE-F-068`〜`LIVE-F-076` |
 | メニュー・ショートカット    | hide/muteにaccessible toggle、importに標準picker                   | `LIVE-F-065`, `LIVE-F-068` |
 | Deep Link・ファイル関連付け | 非該当: model file associationを登録しない                         | 非該当                     |
-| 通知                        | renderer/import errorはProject settingsとtext statusへ表示         | `LIVE-F-067`, `LIVE-F-076` |
+| 通知                        | renderer/import errorはApp settings > Companionとtext statusへ表示 | `LIVE-F-067`, `LIVE-F-076` |
 | Capability・認可            | character libraryと限定asset protocolだけを許可                    | `LIVE-F-071`〜`LIVE-F-074` |
 | アップデート・互換性        | unsupported model/MOC versionを拒否し、既存packを維持              | `LIVE-F-076`               |
 
@@ -142,8 +142,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | 画面ID  | 画面名                     | 対象要件ID                                             | 扱い | 画面詳細仕様                                                   |
 | ------- | -------------------------- | ------------------------------------------------------ | ---- | -------------------------------------------------------------- |
 | `S-002` | コーディングワークスペース | `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-079`〜`LIVE-F-081` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md)     |
-| `S-005` | アプリ設定・診断           | `LIVE-F-055`〜`LIVE-F-059`, `LIVE-F-079`〜`LIVE-F-081` | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
-| `S-006` | プロジェクト設定           | `LIVE-F-060`〜`LIVE-F-078`                             | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
+| `S-005` | アプリ設定・診断           | `LIVE-F-055`〜`LIVE-F-081`                             | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
 
 ## 非機能要件
 

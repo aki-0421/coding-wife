@@ -18,11 +18,11 @@ import type {
   ProjectContext,
   VersionedCharacterContext,
   VersionedProjectContext,
-  WorkspaceEditableContext,
   WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
 
-export type WorkspaceTab = "chat" | "commit" | "context" | "settings"
+export const workspaceTabs = ["chat", "commit", "settings"] as const
+export type WorkspaceTab = (typeof workspaceTabs)[number]
 export type WorkspaceLifecycle =
   | "done"
   | "in_review"
@@ -248,16 +248,16 @@ export interface WorkspaceViewAdapter {
     workspaceId: string,
     source: ContextSnapshotItem["source"],
   ) => Promise<ContextSnapshotItem>
-  readonly loadEditableContext?: (
-    workspaceId: string,
-  ) => Promise<WorkspaceEditableContext>
+  readonly loadProjectContext?: (
+    projectId: string,
+  ) => Promise<VersionedProjectContext>
+  readonly loadCharacterContext?: () => Promise<VersionedCharacterContext>
   readonly saveProjectContext?: (
-    workspaceId: string,
+    projectId: string,
     expectedVersion: number,
     context: ProjectContext,
   ) => Promise<VersionedProjectContext>
   readonly saveCharacterContext?: (
-    workspaceId: string,
     expectedVersion: number,
     context: CharacterContext,
   ) => Promise<VersionedCharacterContext>
@@ -308,14 +308,10 @@ export type CharacterStageRenderer = (
 export type AppSettingsSection =
   | "general"
   | "projects"
+  | "character_context"
+  | "companion"
   | "audio"
   | "support"
   | "diagnostics"
 
-export type ProjectSettingsSection =
-  | "project_context"
-  | "character_context"
-  | "companion"
-  | "history"
-
-export type SettingsSection = AppSettingsSection | ProjectSettingsSection
+export type SettingsSection = AppSettingsSection

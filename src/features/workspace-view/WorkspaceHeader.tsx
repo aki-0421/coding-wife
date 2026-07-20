@@ -40,9 +40,10 @@ import {
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
-import type {
-  WorkspaceRecord,
-  WorkspaceTab,
+import {
+  workspaceTabs,
+  type WorkspaceRecord,
+  type WorkspaceTab,
 } from "@/features/workspace-view/types"
 import { cn } from "@/lib/utils"
 
@@ -60,13 +61,6 @@ interface WorkspaceHeaderProps {
   readonly onCancel: (stopFirst: boolean) => Promise<boolean>
   readonly onRepair: () => Promise<boolean>
 }
-
-const tabOrder: readonly WorkspaceTab[] = [
-  "chat",
-  "commit",
-  "context",
-  "settings",
-]
 
 function ConnectionStatus({
   connection,
@@ -360,7 +354,7 @@ export function WorkspaceHeader({
 
       <div className="flex h-[40px] min-w-0 items-end overflow-x-auto px-xl">
         <TabsList aria-label="Workspace views" className="h-full gap-xl">
-          {tabOrder.map((tab) => (
+          {workspaceTabs.map((tab) => (
             <TabsTrigger
               className="h-full px-xxs after:absolute after:inset-x-0 after:bottom-0 after:h-[1.5px] after:bg-warm-active after:opacity-0 after:transition-opacity data-[state=active]:after:opacity-100"
               key={tab}

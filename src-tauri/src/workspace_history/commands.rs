@@ -2,13 +2,13 @@ use tauri::State;
 
 use super::service::WorkspaceHistoryService;
 use super::types::{
-    AppendDomainEventRequest, AppendDomainEventResponse, ContextSnapshotView, ProjectSelectRequest,
+    AppSaveCharacterContextRequest, AppendDomainEventRequest, AppendDomainEventResponse,
+    ContextSnapshotView, ProjectGetContextRequest, ProjectSaveContextRequest, ProjectSelectRequest,
     TimelinePage, VersionedCharacterContext, VersionedProjectContext, WorkspaceArchiveRequest,
     WorkspaceCancelRequest, WorkspaceCommandError, WorkspaceCreateSessionRequest,
     WorkspaceDeleteChallengeRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
-    WorkspaceDraftView, WorkspaceEditableContext, WorkspaceLoadEditableContextRequest,
-    WorkspacePickResponse, WorkspaceRecheckRequest, WorkspaceSaveCharacterContextRequest,
-    WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest, WorkspaceSaveProjectContextRequest,
+    WorkspaceDraftView, WorkspaceLoadEditableContextRequest, WorkspacePickResponse,
+    WorkspaceRecheckRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
     WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
     WorkspaceSummary, WorkspaceTimelineAnchorView, WorkspaceTimelineRequest,
     WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
@@ -117,24 +117,31 @@ pub async fn workspace_save_context_snapshot(
 }
 
 #[tauri::command]
-pub fn workspace_load_editable_context(
-    request: WorkspaceLoadEditableContextRequest,
+pub fn project_context_get(
+    request: ProjectGetContextRequest,
     service: State<'_, WorkspaceHistoryService>,
-) -> Result<WorkspaceEditableContext, WorkspaceCommandError> {
-    service.load_editable_context(request)
+) -> Result<VersionedProjectContext, WorkspaceCommandError> {
+    service.project_context(request)
 }
 
 #[tauri::command]
-pub async fn workspace_save_project_context(
-    request: WorkspaceSaveProjectContextRequest,
+pub async fn project_context_save(
+    request: ProjectSaveContextRequest,
     service: State<'_, WorkspaceHistoryService>,
 ) -> Result<VersionedProjectContext, WorkspaceCommandError> {
     service.save_project_context(request).await
 }
 
 #[tauri::command]
-pub async fn workspace_save_character_context(
-    request: WorkspaceSaveCharacterContextRequest,
+pub fn app_character_context_get(
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<VersionedCharacterContext, WorkspaceCommandError> {
+    service.character_context()
+}
+
+#[tauri::command]
+pub async fn app_character_context_save(
+    request: AppSaveCharacterContextRequest,
     service: State<'_, WorkspaceHistoryService>,
 ) -> Result<VersionedCharacterContext, WorkspaceCommandError> {
     service.save_character_context(request).await

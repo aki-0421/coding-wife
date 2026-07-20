@@ -1,7 +1,7 @@
 ---
 title: "S-004 設定・診断"
 description: "アプリ全体設定とプロジェクト設定を混在させていた旧画面仕様。S-005とS-006へ分離済み。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "旧設定画面からS-005/S-006への分離理由を確認するとき。"
 screen_id: "S-004"
@@ -130,9 +130,9 @@ active project/workspaceを明示し、[S-002 Context subview](S-002_coding-work
 
 全field・全配列itemの合計は12,000 Unicode scalarを上限とする。Character contextはpermission、model、tool、Git observer、commit skill、verification、approval、privacy、support capability、checkpoint policyを上書きできない。行頭・JSON key位置のtechnical policy key、override / bypass / disable / ignore、またはgrant / deny / allow / skip / avoid / never askとtechnical policy名を組み合わせた意味的な変更指示を保存前にrecord単位で拒否する。ja/en fixtureを同じ結果へ固定し、単なるpresentation説明はfalse positiveにしない。拒否内容はProject contextへ自動コピーしない。running turnには次turnから適用する。
 
-#### Context editor stateと競合復旧
+#### Context editor stateと競合復旧（廃止）
 
-Context tabとSettings内のProject context / Character contextは、同じworkspace-scoped native storeと同じ画面内draft stateを編集する。SettingsからContextへ遷移した時、section focusは対応するheadingへ移り、保存済みversion、未保存入力、validation errorを維持する。
+旧workspace側editor entryと混在Settings間のcross-navigation契約は廃止した。現行UIではProject ContextをS-005のProjects detail、Character ContextをS-005のCharacter contextだけで編集し、S-006にはcontext入口、複製editor、focus遷移を置かない。以下の状態表は旧画面の履歴であり、現行実装の正本にはしない。
 
 | 状態 | 表示 | 操作・focus |
 |---|---|---|
@@ -170,7 +170,7 @@ build時の入力はrepositoryの`tmp/hiyori_pro`とし、release resourceには
 | Select         | preview first frameとstate test成功後だけstable Project ID単位で有効。atomic保存成功時に同じProject IDの全workspaceへ即時反映する。切替時はcandidate client/model/trusted frameをfirst accepted frameまでstageし、成功時だけrenderer、React committed pack、metrics、status、frameを一括で置換する。失敗またはabortではcandidateだけをreleaseし、現在表示を全項目そのまま維持する |
 | Delete         | どのProject IDからも選択されていないcustom packだけ。bundled Hiyoriまたは1件以上のProjectが選択中ならdisabled理由を表示し、確認後にselectionとusageを同じnative transactionで再検査してapp-private copyを削除                                                                                                                                                                         |
 
-legacy workspace-scoped selectionはProjectごとに`selectionUpdatedAt DESC, workspaceId ASC`で最初のvalid packを一度だけ移行する。valid値がなければbundled Hiyoriへ戻し、stale workspace responseから選択やDeleteを開始しない。
+legacy project/workspace-scoped selectionは`selectionUpdatedAt DESC, scope ID ASC`で最初のvalid packを一度だけapp-globalな選択へ移行する。valid値がなければbundled Hiyoriへ戻し、stale responseから選択やDeleteを開始しない。
 
 #### custom model import
 

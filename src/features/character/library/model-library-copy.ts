@@ -3,7 +3,7 @@ import type { SupportedLocale } from "@/features/localization"
 const en = {
   title: "Character models",
   description:
-    "Choose the bundled Live2D model or one private custom model shared by every workspace in this project.",
+    "Choose the bundled Live2D model or one private custom model used across the app.",
   importModel: "Import custom model",
   replaceModel: "Replace custom model",
   importUnavailable: "Model import is available in the desktop app.",
@@ -27,24 +27,23 @@ const en = {
   manifestHash: "Manifest",
   trustedFrameHash: "Trusted frame",
   thumbnailLoading: "Loading verified model thumbnail",
-  usedByProjects: "Used by {count} project(s)",
   importedAt: "Imported {date}",
   delete: "Delete",
   deleteTitle: "Delete this character model?",
   deleteDescription:
-    "The custom model will be removed from the private app library. Every project using it will return to bundled Hiyori. Source files beside the selected .model3.json are not changed.",
+    "The custom model will be removed from the private app library, and the app will return to bundled Hiyori. Source files beside the selected .model3.json are not changed.",
   cancel: "Cancel",
   deleteConfirm: "Delete model",
   deleting: "Deleting…",
   switching: "Switching model…",
   fallbackTitle: "The bundled model was restored",
   fallbackDescription:
-    "The previous model was unavailable, so this project safely fell back to Hiyori.",
+    "The previous model was unavailable, so the app safely fell back to Hiyori.",
   importTitle: "Review imported model",
   importDescription:
     "The selected .model3.json and its referenced local assets are copied to quarantine first. They are published only after an isolated preview renders successfully and you confirm the name.",
   replaceDescription:
-    "The current custom model stays available while the replacement is checked. After a successful preview, every project using the old custom model moves to the replacement.",
+    "The current custom model stays available while the replacement is checked. After a successful preview, the app switches atomically to the replacement.",
   previewLabel: "Isolated Live2D preview",
   preparing: "Checking model files…",
   starting: "Starting isolated renderer…",
@@ -82,7 +81,7 @@ const en = {
 const ja: typeof en = {
   title: "キャラクターモデル",
   description:
-    "このプロジェクトの全ワークスペースで共有する同梱Live2Dモデル、または1件のカスタムモデルを選びます。",
+    "アプリ全体で使用する同梱Live2Dモデル、または1件のカスタムモデルを選びます。",
   importModel: "カスタムモデルを取り込む",
   replaceModel: "カスタムモデルを置き換える",
   importUnavailable: "モデルの取り込みはデスクトップアプリで利用できます。",
@@ -105,24 +104,23 @@ const ja: typeof en = {
   manifestHash: "マニフェスト",
   trustedFrameHash: "信頼済みフレーム",
   thumbnailLoading: "検証済みモデル画像を読み込み中",
-  usedByProjects: "{count}個のプロジェクトで使用中",
   importedAt: "{date}に取り込み",
   delete: "削除",
   deleteTitle: "このキャラクターモデルを削除しますか？",
   deleteDescription:
-    "カスタムモデルをアプリ専用ライブラリから削除します。使用中の全プロジェクトは同梱Hiyoriへ戻ります。選択した.model3.jsonと同じ場所にある取り込み元ファイルは変更しません。",
+    "カスタムモデルをアプリ専用ライブラリから削除し、アプリ全体を同梱Hiyoriへ戻します。選択した.model3.jsonと同じ場所にある取り込み元ファイルは変更しません。",
   cancel: "キャンセル",
   deleteConfirm: "モデルを削除",
   deleting: "削除中…",
   switching: "モデルを切り替え中…",
   fallbackTitle: "同梱モデルへ戻しました",
   fallbackDescription:
-    "以前のモデルを利用できなかったため、このプロジェクトは安全にHiyoriへ戻りました。",
+    "以前のモデルを利用できなかったため、アプリ全体を安全にHiyoriへ戻しました。",
   importTitle: "取り込むモデルを確認",
   importDescription:
     "選択した.model3.jsonと参照先のローカル素材は最初に隔離領域へコピーされます。分離プレビューで正常描画を確認し、名前を確定するまで公開しません。",
   replaceDescription:
-    "置き換えるモデルの検証中も現在のカスタムモデルを維持します。プレビュー成功後、旧カスタムモデルを使用中の全プロジェクトを新モデルへ引き継ぎます。",
+    "置き換えるモデルの検証中も現在のカスタムモデルを維持します。プレビュー成功後、アプリ全体を新モデルへatomicに切り替えます。",
   previewLabel: "分離Live2Dプレビュー",
   preparing: "モデルファイルを確認中…",
   starting: "分離レンダラーを起動中…",

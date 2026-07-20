@@ -1,7 +1,7 @@
 ---
 title: "Coding Wife 提出準備完了までの作業計画"
 description: "現行実装から全デモ機能、macOS配布物、審査導線、Devpost提出証跡までを依存順に完了させる実行計画。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "残存するアプリ機能の実装順、コミット単位、完了条件を確認するとき。"
   - "OpenAI Build Week提出前のGo/No-Go判断、配布物、審査導線、外部依存を確認するとき。"
@@ -31,8 +31,8 @@ read_when:
 
 | 領域 | 現在の完了境界 | 残る境界 |
 | --- | --- | --- |
-| 主画面 | demoのsidebar、header、Chat、Commit、Context、Companion、composerを含むmain layoutがある。desktop、compact/tablet、実効480pxでも主要領域へ到達できる。 | 全操作の実接続、bilingual/accessibility、installed-appでの最終QAが必要。 |
-| Live2D | defaultのライセンス許諾済み`tmp/hiyori_pro`由来Hiyoriを同梱し、custom modelの検証、隔離、preview、publish、選択、削除の主要経路がある。 | semantic state mappingとproject-scoped selection、final artifactでの再起動確認が必要。 |
+| 主画面 | demoのsidebar、header、Chat、Commit、Settings、Companion、composerを含むmain layoutがある。Project / Character contextはApp Settingsへ集約し、workspace側には専用tabを置かない。desktop、compact/tablet、実効480pxでも主要領域へ到達できる。 | 全操作の実接続、bilingual/accessibility、installed-appでの最終QAが必要。 |
+| Live2D | defaultのライセンス許諾済み`tmp/hiyori_pro`由来Hiyoriを同梱し、custom modelの検証、隔離、preview、publish、選択、削除の主要経路がある。 | semantic state mappingとapp-global selection、final artifactでの再起動確認が必要。 |
 | Workspace/Codex/history | workspaceの追加・作成・選択、Codex接続、draft、SQLite timeline/historyの基盤がある。 | cancel/repair/unregister、active-turn切替、終了、summary/anchor、branch/missing recoveryが必要。 |
 | Git evidence | Commit画面にread-onlyのコミット証跡を表示できる。アプリはコミット、revert、undoを提供せず、sourceやGit refを書き換えない。 | support presentation raceを閉じ、read-only契約を全error pathでも維持する必要がある。 |
 | Commit Skill | main sessionの各turnへcommit Skillを注入する経路がある。 | turn/workspace切替後も正しいscopeだけが有効であることをrace testで固定する必要がある。 |
@@ -103,7 +103,7 @@ read_when:
 
 ### 2. Contextのversioned next-turn slice
 
-- Project ContextとCharacter Contextを別schema、別versionとしてnative SQLiteへ保存する。
+- Project ID-scoped Project Contextとapp-global Character Contextを別schema、別versionとしてnative SQLiteへ保存する。
 - typed IPC、migration、size limit、validation、expected-version transaction、conflict/reload UXを先に確定する。
 - Project Contextはgoal、constraints、Definition of Done、technical references、user notesを扱う。
 - Character Contextはdisplay name、tone、speech density、behavior、prohibited expressionsを扱う。
@@ -205,7 +205,7 @@ read_when:
 
 - [ ] **C07 `feat(workspaces): add cancel repair and unregister actions`**
   - Depends on: C02
-  - Parallel: Commit/Context/Settings系列と可。
+  - Parallel: Commit/Settings系列と可。
   - Done: state-aware menu、二段階確認、health表示、repair、focus restorationが動き、source/Git ref/history本文を変更しないnative integration testがgreen。
 
 - [ ] **C08 `feat(workspaces): confirm active-turn transitions`**

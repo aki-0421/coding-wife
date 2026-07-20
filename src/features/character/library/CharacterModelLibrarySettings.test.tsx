@@ -741,7 +741,7 @@ describe("CharacterModelLibrarySettings", () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
-  it("cancels the prior workspace preview before mounting another workspace session", async () => {
+  it("keeps the app-global preview when the selected workspace changes", async () => {
     const user = userEvent.setup()
     const gateway = new ModelLibraryGateway([builtinPack])
     const view = render(libraryTree(gateway, "workspace-fixture"))
@@ -750,12 +750,10 @@ describe("CharacterModelLibrarySettings", () => {
     )
 
     view.rerender(libraryTree(gateway, "workspace-next"))
-    await waitFor(() => expect(gateway.cancellationRequests).toHaveLength(1))
-    expect(gateway.cancellationRequests[0]).toMatchObject({
-      previewToken: importedPreview.preview?.previewToken,
-      previewNonce: importedPreview.preview?.previewNonce,
-      generation: importedPreview.preview?.generation,
-    })
+    expect(gateway.cancellationRequests).toHaveLength(0)
+    expect(
+      await screen.findByRole("heading", { name: "Review imported model" }),
+    ).toBeVisible()
   })
 
   it("shows Japanese copy and disables native import in browser mode", async () => {

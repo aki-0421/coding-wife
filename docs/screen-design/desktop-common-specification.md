@@ -31,7 +31,7 @@ Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍sca
 |---|---|
 | Platform | macOS 14以降、Apple Silicon、単一利用者、単一`main` window |
 | Frontend | React + TypeScript + ViteをTauri v2 WebViewへbundleする |
-| Navigation | persistent workspace sidebar、二段header、Chat/Commit/Context/Settings、app settings gear |
+| Navigation | persistent workspace sidebar、二段header、Chat/Commit/Settings、app settings gear |
 | State | loading、empty、processing、offline、error、permission、disabled、cancel、repository repair、restart recovery |
 | Trust boundary | WebViewは表示と入力、Rustはprocess、Git、DB、filesystem、asset、secretの認可 |
 | Inclusion | ja/en、keyboard-only、WCAG 2.2 AA、200% text zoom、reduced motion |
@@ -55,9 +55,9 @@ Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍sca
 | [S-003](S-003_session-evidence.md) | セッション証拠 | `/workspace/:workspaceId/evidence` / `session-evidence` | Commit tab、checkpoint通知 |
 | [S-004](S-004_settings-diagnostics.md) | 設定・診断（廃止） | 非該当 | 履歴参照だけ |
 | [S-005](S-005_app-settings-diagnostics.md) | アプリ設定・診断 | `/app-settings/:section?` / `app-settings` | sidebar gear、診断link |
-| [S-006](S-006_project-settings.md) | プロジェクト設定 | `/workspace/:workspaceId/settings/:section?` / `project-settings` | Settings tab |
+| [S-006](S-006_project-settings.md) | ワークスペース設定 | `/workspace/:workspaceId/settings` / `workspace-settings` | Settings tab |
 
-Context tabはS-002内の`/workspace/:workspaceId/context` subviewであり、新しい画面IDを発行しない。確認dialog、OS picker、decision overlay、popoverも独立した画面IDを持たない。
+App settingsのproject detailはS-005内の`/app-settings/projects/:projectId` subviewであり、新しい画面IDを発行しない。確認dialog、OS picker、decision overlay、popoverも独立した画面IDを持たない。
 
 ## 技術境界
 
@@ -126,12 +126,12 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 
 | effective width | shell | S-002 body | tab / control |
 |---:|---|---|---|
-| 1470px以上 | sidebar 255.04px固定。超過幅はmainへ与える | Chat/Commit/ContextとCompanionを同じ1:1基準で拡張 | tab row固定、長値ellipsis |
+| 1470px以上 | sidebar 255.04px固定。超過幅はmainへ与える | Chat/CommitとCompanionを同じ1:1基準で拡張 | tab row固定、長値ellipsis |
 | 1280〜1469px | sidebar 255.04px固定 | 残幅をprimary work surface/Companionへ全作業tab共通の比率で配分 | composerはChat内で左右18px |
 | 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | primaryを最低520px、Companionへ残幅。全作業tabで同じ配分を維持 | tabsはhorizontal scroll、footer controlsはwrap |
 | 200% text zoom | 64px rail + drawerを使用 | Companionをhide可能、Chat/decisionを優先 | labelを縮小せずwrap/overflow menu |
 
-選択workspaceのChat、Commit、Contextは同じCompanion instanceを右paneへ継続表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCompanionを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005とS-006はCompanionを表示せずsetting formを全幅で構成する。character visibilityがHiddenの場合もprimary work surfaceを全幅へ戻し、visible HTML stateを残す。Chat、Commit、ContextとCompanionの間へdividerまたは別cardを置かない。
+選択workspaceのChat、Commitは同じCompanion instanceを右paneへ継続表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCompanionを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005とS-006はCompanionを表示せずsetting formを全幅で構成する。character visibilityがHiddenの場合もprimary work surfaceを全幅へ戻し、visible HTML stateを残す。Chat、CommitとCompanionの間へdividerまたは別cardを置かない。
 
 ## surface、文字、motion
 
@@ -166,7 +166,7 @@ shadcnはinteractionとkeyboard behaviorだけに使う。shell、sidebar、even
 | S-002 | event timeline | header、composer、Companion mute | workspace ID + Chat tab |
 | S-003 | checkpoint/event listとdetailを別scroll | header、summary/filter | workspace ID + selected evidence |
 | S-005 | app settings main panel | app settings header、section navigation | selected app settings section |
-| S-006 | project settings main panel | workspace header、section navigation | selected project settings section |
+| S-006 | workspace settings main panel | workspace header | History & Privacy heading |
 | portal | popover/dialog自身 | trigger位置 | open中だけ。route変更で閉じる |
 
 wheel/trackpad eventを親へ二重伝播させない。timelineがbottomから48px超離れた状態でeventを受けてもscrollを動かさず、「最新へ」を表示する。
@@ -190,7 +190,7 @@ destructive/interrupt confirmationの共通DOM順はheading、対象、影響、
 | 操作 | shortcut | 条件 | 結果 |
 |---|---|---|---|
 | turn送信 | `Command+Enter` | valid composer、online、decisionなし | 1 turnだけ開始。Enterは改行 |
-| tab移動 | `Control+Tab` / `Control+Shift+Tab` | main window active | Chat/Commit/Context/Settingsを循環 |
+| tab移動 | `Control+Tab` / `Control+Shift+Tab` | main window active | Chat/Commit/Settingsを循環 |
 | workspace filter | `Command+K` | destructive dialogなし | sidebarを開きfilterへfocus |
 | non-destructive overlay close | `Escape` | popover/drawer/preview表示中 | 入力を保持しtriggerへfocus |
 | decision answer | `Command+Enter` | optionと条件付きOtherがvalid | answerを1回送信 |
@@ -245,12 +245,14 @@ loading中に最終dataがある場合は前回dataを薄く残し、全画面sp
 |---|---|---|---|---|
 | window geometry / route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | Reset UI state |
 | `AppPreferencesV1` (`locale` / `reducedMotion` / `characterVisibility`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | Reset Preferencesでrecordだけsafe defaultへ |
-| project/workspace/context/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
+| project/workspace/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
+| Project context | Rust管理SQLiteのProject ID-scoped record | App settings project detailのexpected-version save | project detailまたは同Project IDのworkspace turn開始 | project登録解除契約 | optimistic conflict |
+| app-global Character context | Rust管理SQLite singleton record | App settingsのexpected-version save | 全workspaceへ同じversion/hashを復元 | app data reset契約 |
 | repository identity/health snapshot | Rust管理SQLite + read-only Git再検査 | 登録、window focus、selection、Send直前 | row/headerへ復元後にfreshness再検査 | project登録解除 |
 | normalized event / review pack | append-only SQLite + hash artifact | redaction/schema合格後 | sequence順に再構築 | workspace history明示削除 |
 | Git object / source | repository | appはread-only観測だけを保存 | Gitを正本として再診断 | appから変更・自動削除しない |
-| project-scoped selected character | stable Project ID → verified pack ID | preview/state test後のatomic選択 | 同Project全workspaceへ即時同期しrestart後に復元 | pack delete前の全Project usage再検査 |
-| custom character pack / `SemanticMappingV1` | app-private character library + pack ID/manifest hash/version | quarantine昇格、inventory検証付きatomic mapping save | pack ID/hash/versionから復元 | 全Project未選択packの明示削除 |
+| app-global selected character | owner-only character state → verified pack ID | preview/state test後のatomic選択 | 全workspaceへ即時同期しrestart後に復元 | 選択packの削除拒否 |
+| custom character pack / `SemanticMappingV1` | app-private character library + pack ID/manifest hash/version | quarantine昇格、inventory検証付きatomic mapping save | pack ID/hash/versionから復元 | 未選択packの明示削除 |
 | TTS key | OS secret store |明示保存 | set/unsetだけ表示 |明示削除 |
 | audio byte / support raw history / raw reasoning | 保存しない | 非該当 | 復元しない | playback/task終了時 |
 
@@ -308,7 +310,7 @@ agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced moti
 | `WORK-F-056`〜`WORK-F-066` | cancel/unregister/switch、workspace continuity、repository health/repair | [workspace-sessions](../requirements/workspace-sessions.md) |
 | `CODE-F-073`〜`CODE-F-076` | stop、crash、auth、stale event | [codex-main-session](../requirements/codex-main-session.md) |
 | `HIST-F-037`〜`HIST-F-057` | local persistence、redaction、migration、recovery | [activity-history](../requirements/activity-history.md) |
-| `LIVE-F-058`〜`LIVE-F-067`, `LIVE-F-075`, `LIVE-F-077`, `LIVE-F-078` | Project-scoped selection、semantic mapping、single canvas、text/reduced/static fallback | [live2d-companion](../requirements/live2d-companion.md) |
+| `LIVE-F-058`〜`LIVE-F-067`, `LIVE-F-075`, `LIVE-F-077`, `LIVE-F-078` | app-global selection、semantic mapping、single canvas、text/reduced/static fallback | [live2d-companion](../requirements/live2d-companion.md) |
 | `NARR-F-064`〜`NARR-F-089` | default off、secret、mute、explicit presentation、dismiss/cancel分離、fallback、microphone禁止 | [audio-commentary](../requirements/audio-commentary.md) |
 
 ## 未確定事項

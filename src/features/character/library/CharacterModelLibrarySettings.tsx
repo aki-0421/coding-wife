@@ -43,7 +43,10 @@ import {
   type IsolatedCharacterPreviewPhase,
 } from "@/features/character/import-preview/IsolatedCharacterPreview"
 import type { CharacterPreviewSuccessMessage } from "@/features/character/import-preview/preview-protocol"
-import type { CharacterPackView } from "@/features/character/library/contracts"
+import {
+  characterLibraryScopeId,
+  type CharacterPackView,
+} from "@/features/character/library/contracts"
 import {
   useCharacterLibrary,
   useCharacterLibraryStore,
@@ -58,7 +61,7 @@ import { useI18n, type SupportedLocale } from "@/features/localization"
 import { cn } from "@/lib/utils"
 
 export interface CharacterModelLibrarySettingsProps {
-  readonly workspaceId: string
+  readonly workspaceId?: string
 }
 
 interface PreviewProgress {
@@ -98,10 +101,6 @@ function formatImportedAt(value: string, locale: SupportedLocale): string {
   return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
   }).format(date)
-}
-
-function replaceCount(template: string, count: number): string {
-  return template.replace("{count}", String(count))
 }
 
 function replaceDate(template: string, date: string): string {
@@ -376,11 +375,6 @@ function ModelCard({
                 copy.importedAt,
                 formatImportedAt(pack.importedAt, locale),
               )}
-            </span>
-          ) : null}
-          {pack.kind === "custom" && pack.selectedProjectCount > 0 ? (
-            <span className="mt-xxs block text-label text-muted-foreground">
-              {replaceCount(copy.usedByProjects, pack.selectedProjectCount)}
             </span>
           ) : null}
         </span>
@@ -927,10 +921,13 @@ function CharacterModelLibrarySession({
   )
 }
 
-export function CharacterModelLibrarySettings({
-  workspaceId,
-}: CharacterModelLibrarySettingsProps) {
+export function CharacterModelLibrarySettings(
+  _props: CharacterModelLibrarySettingsProps,
+) {
   return (
-    <CharacterModelLibrarySession key={workspaceId} workspaceId={workspaceId} />
+    <CharacterModelLibrarySession
+      key={characterLibraryScopeId}
+      workspaceId={characterLibraryScopeId}
+    />
   )
 }

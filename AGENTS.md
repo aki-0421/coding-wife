@@ -58,3 +58,4 @@ Web情報を更新した場合は、対象文書の `updated` と `last_verified
 
 UIと挙動の検証には `agent-browser` を使う。
 `agent-browser` で作成した検証スクリーンショットは `/tmp`、またはリポジトリ内の ignore 済み `tmp/` ディレクトリに保存し、コミットに含めない。
+`agent-browser` を使用した場合は、検証の成功・失敗にかかわらず、最終報告の前にこの作業で開始または使用した各セッションを `agent-browser --session <session-name> close` で明示的に終了する。ほかの作業や利用者が所有するセッションを一括終了してはならない。

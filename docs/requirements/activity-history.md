@@ -1,7 +1,7 @@
 ---
 title: "HIST アクティビティ履歴要件定義"
 description: "構造化イベントの追記保存、秘匿化、再構築、検索・削除、破損復旧を定義する。"
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - "SQLite schema、event timeline、crash recoveryを実装するとき。"
   - "保存対象、redaction、retention、query性能を検証するとき。"
@@ -68,7 +68,7 @@ read_when:
 | `HIST-F-037` | appはnormalized domain eventを追記保存する | valid eventを新しいrowとして保存する。同じevent IDの再送はworkspace、session、producer、kind、schema version、timestamp、redaction後payloadがすべて一致する場合だけ元sequenceを返し、一項目でも異なる再送または別workspace所属sessionの参照は保存せずconflictにする | Approved | 非該当 |
 | `HIST-F-038` | appは重要event typeを区別する | goal、plan、tool、file、error、decision、approval、verification、git_observation、commit_observed、skill_injection、support_statusをtype filterで識別できる | Approved | 非該当 |
 | `HIST-F-039` | appはevent順序を安定させる | UTC timestampが同一でもworkspace単調増加sequenceで順序が一意になり、再起動前後で表示順が変わらない | Approved | 非該当 |
-| `HIST-F-040` | appはworkspace再開に必要な正本を保存する | stable Project ID、workspace、turn、work unit、decision、last Git observation、commit evidence、skill injection audit、project-scoped selected character、locale、draft、last summary、timeline anchor ID/sequence/offset、repository identity/health snapshotをRust DBから復元できる。support explanation本文、caption chunk、TTS transcriptはこの正本へ含めない | Approved | 非該当 |
+| `HIST-F-040` | appはworkspace再開に必要な正本を保存する | stable Project ID、workspace、turn、work unit、decision、last Git observation、commit evidence、skill injection audit、locale、draft、last summary、timeline anchor ID/sequence/offset、repository identity/health snapshotをRust DBから復元できる。app-globalなCharacter contextとselected characterはworkspace履歴から分離したowner-only native storeから復元する。support explanation本文、caption chunk、TTS transcriptはこの正本へ含めない | Approved | 非該当 |
 | `HIST-F-041` | appは秘密を永続化前にredactする | API key、Bearer token、auth cookie、home path fixtureがnormalized event writerへ入る時、目的限定のproject linkage recordを除くDB/WAL/log/artifactの検索でraw値が0件になる。linkageからevent、diagnostic、support payloadへ派生するpathは必ずredactする | Approved | 非該当 |
 | `HIST-F-042` | appはraw reasoningを保存しない | reasoning fixtureを受け取ってもsummary、decision rationale、evidenceだけを保存し、chain-of-thought fieldをschemaが受理しない | Approved | 非該当 |
 | `HIST-F-043` | appはaudioとsupport raw historyを保存しない | generated audio byte、support prompt/response、commit explanation transcriptをDBへ渡すtestが拒否され、opaque request/commit IDとusage/latency/error metadataだけが残る | Approved | 非該当 |
@@ -134,7 +134,7 @@ read_when:
 | `S-001` | セッションダッシュボード | `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | 変更 | [画面詳細仕様](../screen-design/S-001_session-dashboard.md) |
 | `S-002` | コーディングワークスペース | `HIST-F-037`〜`HIST-F-048`, `HIST-F-057`, `HIST-F-059`, `HIST-F-061` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md) |
 | `S-003` | セッション証拠 | `HIST-F-038`, `HIST-F-044`〜`HIST-F-051`, `HIST-F-057`, `HIST-F-061` | 変更 | [画面詳細仕様](../screen-design/S-003_session-evidence.md) |
-| `S-006` | プロジェクト設定 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
+| `S-006` | ワークスペース設定 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059` | 変更 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
 ## 非機能要件
 

@@ -899,6 +899,12 @@ describe("WorkspaceShell", () => {
   it("supports keyboard tab cycling and the workspace filter shortcut", async () => {
     renderWorkspace()
 
+    const workspaceTabs = within(
+      screen.getByRole("tablist", { name: "Workspace views" }),
+    )
+    expect(workspaceTabs.getAllByRole("tab")).toHaveLength(3)
+    expect(workspaceTabs.queryByRole("tab", { name: "Context" })).toBeNull()
+
     const chatTab = screen.getByRole("tab", { name: /Chat/ })
     const commitTab = screen.getByRole("tab", { name: "Commit" })
     expect(chatTab).toHaveAttribute("aria-selected", "true")
@@ -1382,29 +1388,27 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
   })
 
-  it("separates app settings from the selected project settings", async () => {
+  it("separates project context details from workspace settings", async () => {
     const user = userEvent.setup()
     renderWorkspace()
 
     await user.click(screen.getByRole("tab", { name: "Settings" }))
     expect(
-      screen.getByRole("heading", { level: 1, name: "Project settings" }),
+      screen.getByRole("heading", { level: 1, name: "Workspace settings" }),
     ).toBeVisible()
     expect(
       screen.getByText(
-        "Context, companion, and history settings for coding-wife/build-live2d-desktop-app.",
+        "History and privacy for coding-wife/build-live2d-desktop-app.",
       ),
     ).toBeVisible()
     expect(
-      screen.getAllByRole("button", { name: "Project context" })[0],
+      screen.getByRole("heading", { name: "History & privacy" }),
     ).toBeVisible()
     expect(
-      screen.getByRole("button", { name: "Character context" }),
-    ).toBeVisible()
-    expect(screen.getByRole("button", { name: "Companion" })).toBeVisible()
-    expect(
-      screen.getByRole("button", { name: "History & privacy" }),
-    ).toBeVisible()
+      screen.queryByRole("button", { name: "Character context" }),
+    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "Companion" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Project context" })).toBeNull()
     expect(screen.queryByRole("button", { name: "General" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Audio" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Support" })).toBeNull()
@@ -1419,19 +1423,34 @@ describe("WorkspaceShell", () => {
     await waitFor(() => expect(appHeading).toHaveFocus())
     expect(appSettingsButton()).toHaveAttribute("aria-current", "page")
     expect(screen.getAllByRole("button", { name: "General" })[0]).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Character context" }),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Companion" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Audio" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Support" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Diagnostics" })).toBeVisible()
     expect(screen.queryByRole("button", { name: "Project context" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Companion" })).toBeNull()
     expect(
       screen.queryByRole("button", { name: "History & privacy" }),
     ).toBeNull()
     expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull()
 
+    await user.click(screen.getByRole("button", { name: "Projects" }))
+    await user.click(
+      screen.getByRole("button", { name: /coding-wife.*3 workspaces/ }),
+    )
+    expect(
+      screen.getByRole("heading", { level: 2, name: "coding-wife" }),
+    ).toBeVisible()
+    expect(
+      await screen.findByRole("button", { name: "Save project context" }),
+    ).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Back to projects" }))
+
     await user.click(screen.getByRole("button", { name: "Back to workspace" }))
     expect(
-      screen.getByRole("heading", { level: 1, name: "Project settings" }),
+      screen.getByRole("heading", { level: 1, name: "Workspace settings" }),
     ).toBeVisible()
     await waitFor(() =>
       expect(screen.getByRole("tab", { name: /Settings/ })).toHaveFocus(),
@@ -1490,7 +1509,6 @@ describe("WorkspaceShell", () => {
 
     await user.click(screen.getByRole("button", { name: "Back to workspace" }))
     await user.click(screen.getByRole("tab", { name: "Settings" }))
-    await user.click(screen.getByRole("button", { name: "History & privacy" }))
     expect(screen.getByText("Stored in demo memory")).toBeVisible()
     expect(
       screen.getByText(/Reloading restores the bundled demo/),
@@ -1522,7 +1540,6 @@ describe("WorkspaceShell", () => {
     renderWorkspace(adapter)
 
     await user.click(await screen.findByRole("tab", { name: "Settings" }))
-    await user.click(screen.getByRole("button", { name: "History & privacy" }))
     const trigger = screen.getByRole("button", {
       name: "Delete workspace history",
     })
@@ -1557,13 +1574,13 @@ describe("WorkspaceShell", () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
-  it("closes compact settings navigation after selection, Escape, and outside click", async () => {
+  it("closes compact app settings navigation after selection, Escape, and outside click", async () => {
     const user = userEvent.setup()
     renderWorkspace()
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
+    await user.click(appSettingsButton())
     const navigationTrigger = screen
-      .getAllByRole<HTMLButtonElement>("button", { name: "Project context" })
+      .getAllByRole<HTMLButtonElement>("button", { name: "General" })
       .find((button) => button.dataset.slot === "popover-trigger")
     expect(navigationTrigger).toBeDefined()
 
@@ -1575,10 +1592,10 @@ describe("WorkspaceShell", () => {
       expect(value).not.toBeNull()
       return value as HTMLElement
     })
-    const historyButton = within(navigation).getByRole("button", {
-      name: "History & privacy",
+    const diagnosticsButton = within(navigation).getByRole("button", {
+      name: "Diagnostics",
     })
-    historyButton.focus()
+    diagnosticsButton.focus()
     await user.keyboard("{Enter}")
 
     await waitFor(() =>
@@ -1586,9 +1603,7 @@ describe("WorkspaceShell", () => {
         document.querySelector('[data-slot="popover-content"]'),
       ).not.toBeInTheDocument(),
     )
-    expect(
-      screen.getByRole("heading", { name: "History & privacy" }),
-    ).toBeVisible()
+    expect(screen.getByRole("heading", { name: "Diagnostics" })).toBeVisible()
     expect(navigationTrigger).toHaveFocus()
 
     await user.click(navigationTrigger as HTMLButtonElement)
@@ -1608,7 +1623,7 @@ describe("WorkspaceShell", () => {
       document.querySelector('[data-slot="popover-content"]'),
     ).toBeInTheDocument()
     const outsideTarget = screen.getByRole("heading", {
-      name: "Project settings",
+      name: "App settings",
     })
     await user.click(outsideTarget)
     await waitFor(() =>

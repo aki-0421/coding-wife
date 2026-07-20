@@ -67,7 +67,7 @@ export interface EditableContextSection<T, V, L> {
   readonly conflict: ContextConflict | null
 }
 
-interface WorkspaceContextState {
+interface SettingsContextState {
   readonly project: EditableContextSection<
     ProjectContext,
     VersionedProjectContext,
@@ -80,8 +80,8 @@ interface WorkspaceContextState {
   >
 }
 
-export interface EditableWorkspaceContextModel extends WorkspaceContextState {
-  readonly workspaceId: string
+export interface EditableSettingsContextModel extends SettingsContextState {
+  readonly projectId: string
   readonly updateProject: (change: Partial<ProjectContext>) => void
   readonly updateCharacter: (change: Partial<CharacterContext>) => void
   readonly updateProjectList: (
@@ -117,6 +117,8 @@ const emptyCharacter: CharacterContext = {
   prohibitedExpressions: [],
 }
 
+const globalCharacterKey = "__app_character__"
+
 export function normalizeContextListDraft(value: string): readonly string[] {
   return value
     .split("\n")
@@ -135,7 +137,7 @@ function characterListDrafts(context: CharacterContext): CharacterListDrafts {
   return { prohibitedExpressions: context.prohibitedExpressions.join("\n") }
 }
 
-function loadingState(): WorkspaceContextState {
+function loadingState(): SettingsContextState {
   return {
     project: {
       persisted: null,
@@ -199,7 +201,7 @@ function characterContextWithLists(
 }
 
 function projectNativeFieldError(code: string): ContextFieldError | null {
-  const suffix = code.replace("WORKSPACE-PROJECT-CONTEXT-", "")
+  const suffix = code.replace(/^(?:WORKSPACE-)?PROJECT-CONTEXT-/u, "")
   if (suffix === "GOAL") return { field: "goal", reason: "text" }
   if (suffix === "CONSTRAINTS") {
     return { field: "constraints", reason: "text" }
@@ -228,7 +230,7 @@ function characterNativeFieldError(
   code: string,
   context: CharacterContext,
 ): ContextFieldError | null {
-  const suffix = code.replace("WORKSPACE-CHARACTER-CONTEXT-", "")
+  const suffix = code.replace("APP-CHARACTER-CONTEXT-", "")
   if (suffix === "DISPLAY-NAME") {
     return { field: "displayName", reason: "text" }
   }
@@ -255,12 +257,13 @@ function changedFields<T extends object>(local: T, remote: T): string[] {
   )
 }
 
-export function useEditableWorkspaceContext(
+export function useEditableSettingsContext(
   adapter: WorkspaceViewAdapter | undefined,
-  workspaceId: string,
-): EditableWorkspaceContextModel {
+  projectId: string,
+): EditableSettingsContextModel {
+  const workspaceId = projectId
   const [states, setStates] = useState<
-    Readonly<Record<string, WorkspaceContextState>>
+    Readonly<Record<string, SettingsContextState>>
   >({})
   const statesRef = useRef(states)
   const loadGenerations = useRef(new Map<string, number>())
@@ -274,7 +277,7 @@ export function useEditableWorkspaceContext(
   const replaceWorkspace = useCallback(
     (
       id: string,
-      update: (current: WorkspaceContextState) => WorkspaceContextState,
+      update: (current: SettingsContextState) => SettingsContextState,
     ) => {
       setStates((current) => ({
         ...current,
@@ -284,75 +287,120 @@ export function useEditableWorkspaceContext(
     [],
   )
 
+  const replaceCharacter = useCallback(
+    (
+      update: (
+        current: SettingsContextState["character"],
+      ) => SettingsContextState["character"],
+    ) => {
+      setStates((current) => {
+        const global = current[globalCharacterKey] ?? loadingState()
+        return {
+          ...current,
+          [globalCharacterKey]: {
+            ...global,
+            character: update(global.character),
+          },
+        }
+      })
+    },
+    [],
+  )
+
+  const loadCharacter = useCallback(
+    (force = false) => {
+      const token = (loadGenerations.current.get(globalCharacterKey) ?? 0) + 1
+      loadGenerations.current.set(globalCharacterKey, token)
+      const cached = statesRef.current[globalCharacterKey]?.character
+      if (!force && cached?.persisted !== null && cached !== undefined) return
+      replaceCharacter((current) => ({ ...current, status: "loading" }))
+      if (adapter?.loadCharacterContext === undefined) {
+        replaceCharacter((current) => ({
+          ...current,
+          status: "error",
+          errorCode: "APP-CHARACTER-CONTEXT-UNAVAILABLE",
+          fieldError: null,
+        }))
+        return
+      }
+      void adapter.loadCharacterContext().then(
+        (persisted) => {
+          if (token !== loadGenerations.current.get(globalCharacterKey)) return
+          replaceCharacter(() => ({
+            persisted,
+            draft: persisted.context,
+            listDrafts: characterListDrafts(persisted.context),
+            status: "ready",
+            dirty: false,
+            errorCode: null,
+            fieldError: null,
+            conflict: null,
+          }))
+        },
+        (error: unknown) => {
+          if (token !== loadGenerations.current.get(globalCharacterKey)) return
+          replaceCharacter((current) => ({
+            ...current,
+            status: "error",
+            errorCode: safeErrorCode(
+              error,
+              "APP-CHARACTER-CONTEXT-LOAD-FAILED",
+            ),
+            fieldError: null,
+          }))
+        },
+      )
+    },
+    [adapter, replaceCharacter],
+  )
+
   const load = useCallback(
     (id: string, force = false) => {
       const token = (loadGenerations.current.get(id) ?? 0) + 1
       loadGenerations.current.set(id, token)
-      if (id === "__no_workspace__") return
+      if (id === "__no_project__") return
       const cached = statesRef.current[id]
-      if (
-        !force &&
-        cached !== undefined &&
-        cached.project.persisted !== null &&
-        cached.character.persisted !== null
-      ) {
+      if (!force && cached !== undefined && cached.project.persisted !== null) {
         return
       }
       replaceWorkspace(id, () => loadingState())
-      if (adapter?.loadEditableContext === undefined) {
+      if (adapter?.loadProjectContext === undefined) {
         replaceWorkspace(id, (current) => ({
           project: {
             ...current.project,
             status: "error",
-            errorCode: "WORKSPACE-CONTEXT-UNAVAILABLE",
+            errorCode: "PROJECT-CONTEXT-UNAVAILABLE",
             fieldError: null,
           },
-          character: {
-            ...current.character,
-            status: "error",
-            errorCode: "WORKSPACE-CONTEXT-UNAVAILABLE",
-            fieldError: null,
-          },
+          character: current.character,
         }))
         return
       }
-      void adapter.loadEditableContext(id).then(
-        (bundle) => {
+      void adapter.loadProjectContext(id).then(
+        (persisted) => {
           if (
             token !== loadGenerations.current.get(id) ||
-            bundle.workspaceId !== id
+            persisted.projectId !== id
           ) {
             return
           }
           replaceWorkspace(id, () => ({
             project: {
-              persisted: bundle.project,
-              draft: bundle.project.context,
-              listDrafts: projectListDrafts(bundle.project.context),
+              persisted,
+              draft: persisted.context,
+              listDrafts: projectListDrafts(persisted.context),
               status: "ready",
               dirty: false,
               errorCode: null,
               fieldError: null,
               conflict: null,
             },
-            character: {
-              persisted: bundle.character,
-              draft: bundle.character.context,
-              listDrafts: characterListDrafts(bundle.character.context),
-              status: "ready",
-              dirty: false,
-              errorCode: null,
-              fieldError: null,
-              conflict: null,
-            },
+            character: loadingState().character,
           }))
         },
         (error: unknown) => {
           if (token !== loadGenerations.current.get(id)) return
-          const errorCode = safeErrorCode(
-            error,
-            "WORKSPACE-CONTEXT-LOAD-FAILED",
-          )
+          const errorCode = safeErrorCode(error, "PROJECT-CONTEXT-LOAD-FAILED")
           replaceWorkspace(id, (current) => ({
             project: {
               ...current.project,
@@ -360,12 +408,7 @@ export function useEditableWorkspaceContext(
               errorCode,
               fieldError: null,
             },
-            character: {
-              ...current.character,
-              status: "error",
-              errorCode,
-              fieldError: null,
-            },
+            character: current.character,
           }))
         },
       )
@@ -376,12 +419,15 @@ export function useEditableWorkspaceContext(
   useEffect(() => {
     let active = true
     queueMicrotask(() => {
-      if (active) load(workspaceId)
+      if (active) {
+        loadCharacter()
+        load(workspaceId)
+      }
     })
     return () => {
       active = false
     }
-  }, [load, workspaceId])
+  }, [load, loadCharacter, workspaceId])
 
   const updateProject = useCallback(
     (change: Partial<ProjectContext>) => {
@@ -403,20 +449,17 @@ export function useEditableWorkspaceContext(
 
   const updateCharacter = useCallback(
     (change: Partial<CharacterContext>) => {
-      replaceWorkspace(workspaceId, (current) => ({
+      replaceCharacter((current) => ({
         ...current,
-        character: {
-          ...current.character,
-          draft: { ...current.character.draft, ...change },
-          status: current.character.persisted === null ? "loading" : "ready",
-          dirty: true,
-          errorCode: null,
-          fieldError: null,
-          conflict: null,
-        },
+        draft: { ...current.draft, ...change },
+        status: current.persisted === null ? "loading" : "ready",
+        dirty: true,
+        errorCode: null,
+        fieldError: null,
+        conflict: null,
       }))
     },
-    [replaceWorkspace, workspaceId],
+    [replaceCharacter],
   )
 
   const updateProjectList = useCallback(
@@ -439,20 +482,17 @@ export function useEditableWorkspaceContext(
 
   const updateCharacterList = useCallback(
     (value: string) => {
-      replaceWorkspace(workspaceId, (current) => ({
+      replaceCharacter((current) => ({
         ...current,
-        character: {
-          ...current.character,
-          listDrafts: { prohibitedExpressions: value },
-          status: current.character.persisted === null ? "loading" : "ready",
-          dirty: true,
-          errorCode: null,
-          fieldError: null,
-          conflict: null,
-        },
+        listDrafts: { prohibitedExpressions: value },
+        status: current.persisted === null ? "loading" : "ready",
+        dirty: true,
+        errorCode: null,
+        fieldError: null,
+        conflict: null,
       }))
     },
-    [replaceWorkspace, workspaceId],
+    [replaceCharacter],
   )
 
   const normalizeProjectList = useCallback(
@@ -478,22 +518,19 @@ export function useEditableWorkspaceContext(
   )
 
   const normalizeCharacterList = useCallback(() => {
-    replaceWorkspace(workspaceId, (current) => {
+    replaceCharacter((current) => {
       const prohibitedExpressions = normalizeContextListDraft(
-        current.character.listDrafts.prohibitedExpressions,
+        current.listDrafts.prohibitedExpressions,
       )
       return {
         ...current,
-        character: {
-          ...current.character,
-          draft: { ...current.character.draft, prohibitedExpressions },
-          listDrafts: {
-            prohibitedExpressions: prohibitedExpressions.join("\n"),
-          },
+        draft: { ...current.draft, prohibitedExpressions },
+        listDrafts: {
+          prohibitedExpressions: prohibitedExpressions.join("\n"),
         },
       }
     })
-  }, [replaceWorkspace, workspaceId])
+  }, [replaceCharacter])
 
   const saveProject = useCallback(async () => {
     const current = statesRef.current[workspaceId]?.project
@@ -518,7 +555,7 @@ export function useEditableWorkspaceContext(
         project: {
           ...state.project,
           status: "error",
-          errorCode: "WORKSPACE-PROJECT-CONTEXT-INVALID",
+          errorCode: "PROJECT-CONTEXT-INVALID",
           fieldError:
             issue === null
               ? null
@@ -544,7 +581,7 @@ export function useEditableWorkspaceContext(
       )
       if (
         token !== projectSaveGenerations.current.get(workspaceId) ||
-        saved.workspaceId !== workspaceId
+        saved.projectId !== workspaceId
       ) {
         return false
       }
@@ -566,16 +603,17 @@ export function useEditableWorkspaceContext(
       if (token !== projectSaveGenerations.current.get(workspaceId)) {
         return false
       }
-      const code = safeErrorCode(error, "WORKSPACE-PROJECT-CONTEXT-SAVE-FAILED")
+      const code = safeErrorCode(error, "PROJECT-CONTEXT-SAVE-FAILED")
       if (
-        code === "WORKSPACE-PROJECT-CONTEXT-CONFLICT" &&
-        adapter.loadEditableContext !== undefined
+        (code === "PROJECT-CONTEXT-CONFLICT" ||
+          code === "WORKSPACE-PROJECT-CONTEXT-CONFLICT") &&
+        adapter.loadProjectContext !== undefined
       ) {
         try {
-          const remote = await adapter.loadEditableContext(workspaceId)
+          const remote = await adapter.loadProjectContext(workspaceId)
           if (
             token !== projectSaveGenerations.current.get(workspaceId) ||
-            remote.workspaceId !== workspaceId
+            remote.projectId !== workspaceId
           ) {
             return false
           }
@@ -583,14 +621,14 @@ export function useEditableWorkspaceContext(
             ...state,
             project: {
               ...state.project,
-              persisted: remote.project,
+              persisted: remote,
               status: "conflict",
               errorCode: code,
               fieldError: null,
               conflict: {
                 localVersion: expectedVersion,
-                remoteVersion: remote.project.version,
-                changedFields: changedFields(candidate, remote.project.context),
+                remoteVersion: remote.version,
+                changedFields: changedFields(candidate, remote.context),
               },
             },
           }))
@@ -613,7 +651,7 @@ export function useEditableWorkspaceContext(
   }, [adapter, replaceWorkspace, workspaceId])
 
   const saveCharacter = useCallback(async () => {
-    const current = statesRef.current[workspaceId]?.character
+    const current = statesRef.current[globalCharacterKey]?.character
     if (
       current?.persisted === null ||
       current === undefined ||
@@ -622,8 +660,9 @@ export function useEditableWorkspaceContext(
       return false
     }
     const expectedVersion = current.persisted.version
-    const token = (characterSaveGenerations.current.get(workspaceId) ?? 0) + 1
-    characterSaveGenerations.current.set(workspaceId, token)
+    const token =
+      (characterSaveGenerations.current.get(globalCharacterKey) ?? 0) + 1
+    characterSaveGenerations.current.set(globalCharacterKey, token)
     const candidate = characterContextWithLists(
       current.draft,
       current.listDrafts,
@@ -633,91 +672,63 @@ export function useEditableWorkspaceContext(
       context = parseCharacterContext(candidate)
     } catch {
       const issue = characterContextValidationIssue(candidate)
-      replaceWorkspace(workspaceId, (state) => ({
+      replaceCharacter((state) => ({
         ...state,
-        character: {
-          ...state.character,
-          status: "error",
-          errorCode: "WORKSPACE-CHARACTER-CONTEXT-INVALID",
-          fieldError:
-            issue === null
-              ? null
-              : { field: issue.field, reason: issue.reason },
-        },
+        status: "error",
+        errorCode: "APP-CHARACTER-CONTEXT-INVALID",
+        fieldError:
+          issue === null ? null : { field: issue.field, reason: issue.reason },
       }))
       return false
     }
-    replaceWorkspace(workspaceId, (state) => ({
+    replaceCharacter((state) => ({
       ...state,
-      character: {
-        ...state.character,
-        status: "saving",
-        errorCode: null,
-        fieldError: null,
-      },
+      status: "saving",
+      errorCode: null,
+      fieldError: null,
     }))
     try {
-      const saved = await adapter.saveCharacterContext(
-        workspaceId,
-        expectedVersion,
-        context,
-      )
-      if (
-        token !== characterSaveGenerations.current.get(workspaceId) ||
-        saved.workspaceId !== workspaceId
-      ) {
+      const saved = await adapter.saveCharacterContext(expectedVersion, context)
+      if (token !== characterSaveGenerations.current.get(globalCharacterKey)) {
         return false
       }
-      replaceWorkspace(workspaceId, (state) => ({
-        ...state,
-        character: {
-          persisted: saved,
-          draft: saved.context,
-          listDrafts: characterListDrafts(saved.context),
-          status: "saved",
-          dirty: false,
-          errorCode: null,
-          fieldError: null,
-          conflict: null,
-        },
+      replaceCharacter(() => ({
+        persisted: saved,
+        draft: saved.context,
+        listDrafts: characterListDrafts(saved.context),
+        status: "saved",
+        dirty: false,
+        errorCode: null,
+        fieldError: null,
+        conflict: null,
       }))
       return true
     } catch (error) {
-      if (token !== characterSaveGenerations.current.get(workspaceId)) {
+      if (token !== characterSaveGenerations.current.get(globalCharacterKey)) {
         return false
       }
-      const code = safeErrorCode(
-        error,
-        "WORKSPACE-CHARACTER-CONTEXT-SAVE-FAILED",
-      )
+      const code = safeErrorCode(error, "APP-CHARACTER-CONTEXT-SAVE-FAILED")
       if (
-        code === "WORKSPACE-CHARACTER-CONTEXT-CONFLICT" &&
-        adapter.loadEditableContext !== undefined
+        code === "APP-CHARACTER-CONTEXT-CONFLICT" &&
+        adapter.loadCharacterContext !== undefined
       ) {
         try {
-          const remote = await adapter.loadEditableContext(workspaceId)
+          const remote = await adapter.loadCharacterContext()
           if (
-            token !== characterSaveGenerations.current.get(workspaceId) ||
-            remote.workspaceId !== workspaceId
+            token !== characterSaveGenerations.current.get(globalCharacterKey)
           ) {
             return false
           }
-          replaceWorkspace(workspaceId, (state) => ({
+          replaceCharacter((state) => ({
             ...state,
-            character: {
-              ...state.character,
-              persisted: remote.character,
-              status: "conflict",
-              errorCode: code,
-              fieldError: null,
-              conflict: {
-                localVersion: expectedVersion,
-                remoteVersion: remote.character.version,
-                changedFields: changedFields(
-                  candidate,
-                  remote.character.context,
-                ),
-              },
+            persisted: remote,
+            status: "conflict",
+            errorCode: code,
+            fieldError: null,
+            conflict: {
+              localVersion: expectedVersion,
+              remoteVersion: remote.version,
+              changedFields: changedFields(candidate, remote.context),
             },
           }))
           return false
@@ -725,18 +736,15 @@ export function useEditableWorkspaceContext(
           // Fall through to the safe conflict code while preserving the draft.
         }
       }
-      replaceWorkspace(workspaceId, (state) => ({
+      replaceCharacter((state) => ({
         ...state,
-        character: {
-          ...state.character,
-          status: "error",
-          errorCode: code,
-          fieldError: characterNativeFieldError(code, candidate),
-        },
+        status: "error",
+        errorCode: code,
+        fieldError: characterNativeFieldError(code, candidate),
       }))
       return false
     }
-  }, [adapter, replaceWorkspace, workspaceId])
+  }, [adapter, replaceCharacter])
 
   const discardProject = useCallback(() => {
     replaceWorkspace(workspaceId, (state) => ({
@@ -758,30 +766,32 @@ export function useEditableWorkspaceContext(
   }, [replaceWorkspace, workspaceId])
 
   const discardCharacter = useCallback(() => {
-    replaceWorkspace(workspaceId, (state) => ({
-      ...state,
-      character:
-        state.character.persisted === null
-          ? state.character
-          : {
-              persisted: state.character.persisted,
-              draft: state.character.persisted.context,
-              listDrafts: characterListDrafts(
-                state.character.persisted.context,
-              ),
-              status: "ready",
-              dirty: false,
-              errorCode: null,
-              fieldError: null,
-              conflict: null,
-            },
-    }))
-  }, [replaceWorkspace, workspaceId])
+    replaceCharacter((state) =>
+      state.persisted === null
+        ? state
+        : {
+            persisted: state.persisted,
+            draft: state.persisted.context,
+            listDrafts: characterListDrafts(state.persisted.context),
+            status: "ready",
+            dirty: false,
+            errorCode: null,
+            fieldError: null,
+            conflict: null,
+          },
+    )
+  }, [replaceCharacter])
 
-  const current = states[workspaceId] ?? loadingState()
+  const project = states[workspaceId] ?? loadingState()
+  const globalCharacter =
+    states[globalCharacterKey]?.character ?? loadingState().character
+  const current = useMemo(
+    () => ({ project: project.project, character: globalCharacter }),
+    [project.project, globalCharacter],
+  )
   return useMemo(
     () => ({
-      workspaceId,
+      projectId,
       ...current,
       updateProject,
       updateCharacter,
@@ -795,13 +805,17 @@ export function useEditableWorkspaceContext(
       discardCharacter,
       reloadProject: discardProject,
       reloadCharacter: discardCharacter,
-      retryLoad: () => load(workspaceId, true),
+      retryLoad: () => {
+        load(workspaceId, true)
+        loadCharacter(true)
+      },
     }),
     [
       current,
       discardCharacter,
       discardProject,
       load,
+      loadCharacter,
       normalizeCharacterList,
       normalizeProjectList,
       saveCharacter,
@@ -811,6 +825,7 @@ export function useEditableWorkspaceContext(
       updateProject,
       updateProjectList,
       workspaceId,
+      projectId,
     ],
   )
 }

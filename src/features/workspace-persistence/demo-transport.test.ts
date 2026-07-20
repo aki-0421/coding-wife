@@ -273,31 +273,42 @@ describe("DemoWorkspaceHistoryTransport", () => {
     })
   })
 
-  it("keeps versioned editable context isolated and rejects stale saves", async () => {
+  it("keeps versioned project context isolated and rejects stale saves", async () => {
     const transport = new DemoWorkspaceHistoryTransport()
     const state = await transport.request(
       workspaceHistoryCommands.list,
       undefined,
     )
     const workspaceId = state.activeWorkspaceId
-    const otherWorkspaceId = state.workspaces.find(
-      (workspace) => workspace.workspaceId !== workspaceId,
-    )?.workspaceId
-    if (workspaceId === null || otherWorkspaceId === undefined) {
+    if (workspaceId === null) {
       throw new Error("demo fixture")
     }
+    const projectId = state.workspaces.find(
+      (workspace) => workspace.workspaceId === workspaceId,
+    )?.projectId
+    if (projectId === undefined) {
+      throw new Error("demo project fixture")
+    }
+    const registered = await transport.request(
+      workspaceHistoryCommands.pickRegister,
+      undefined,
+    )
+    const otherProjectId = registered.state.projects.find(
+      (project) => project.projectId !== projectId,
+    )?.projectId
+    if (otherProjectId === undefined) throw new Error("demo project fixture")
     const initial = await transport.request(
-      workspaceHistoryCommands.loadEditableContext,
-      { workspaceId },
+      workspaceHistoryCommands.getProjectContext,
+      { projectId },
     )
     const saved = await transport.request(
       workspaceHistoryCommands.saveProjectContext,
       {
-        workspaceId,
-        expectedVersion: initial.project.version,
+        projectId,
+        expectedVersion: initial.version,
         context: {
-          ...initial.project.context,
-          goal: "Persist this workspace only",
+          ...initial.context,
+          goal: "Persist this project only",
         },
       },
     )
@@ -305,7 +316,7 @@ describe("DemoWorkspaceHistoryTransport", () => {
     const normalized = await transport.request(
       workspaceHistoryCommands.saveProjectContext,
       {
-        workspaceId,
+        projectId,
         expectedVersion: saved.version,
         context: {
           ...saved.context,
@@ -319,18 +330,18 @@ describe("DemoWorkspaceHistoryTransport", () => {
     })
     await expect(
       transport.request(workspaceHistoryCommands.saveProjectContext, {
-        workspaceId,
-        expectedVersion: initial.project.version,
-        context: initial.project.context,
+        projectId,
+        expectedVersion: initial.version,
+        context: initial.context,
       }),
     ).rejects.toMatchObject({
-      code: "WORKSPACE-PROJECT-CONTEXT-CONFLICT",
+      code: "PROJECT-CONTEXT-CONFLICT",
     })
     await expect(
-      transport.request(workspaceHistoryCommands.loadEditableContext, {
-        workspaceId: otherWorkspaceId,
+      transport.request(workspaceHistoryCommands.getProjectContext, {
+        projectId: otherProjectId,
       }),
-    ).resolves.toMatchObject({ project: { version: 1 } })
+    ).resolves.toMatchObject({ version: 1 })
     await expect(
       transport.request(workspaceHistoryCommands.getTurnContextSnapshot, {
         workspaceId,
@@ -350,17 +361,21 @@ describe("DemoWorkspaceHistoryTransport", () => {
     )
     const workspaceId = state.activeWorkspaceId
     if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.workspaces.find(
+      (workspace) => workspace.workspaceId === workspaceId,
+    )?.projectId
+    if (projectId === undefined) throw new Error("demo project fixture")
     const initial = await transport.request(
-      workspaceHistoryCommands.loadEditableContext,
-      { workspaceId },
+      workspaceHistoryCommands.getProjectContext,
+      { projectId },
     )
-    const context = { ...initial.project.context, goal: "Ship it" }
+    const context = { ...initial.context, goal: "Ship it" }
 
     const saved = await transport.request(
       workspaceHistoryCommands.saveProjectContext,
       {
-        workspaceId,
-        expectedVersion: initial.project.version,
+        projectId,
+        expectedVersion: initial.version,
         context,
       },
     )
@@ -378,7 +393,7 @@ describe("DemoWorkspaceHistoryTransport", () => {
     const sameContent = await transport.request(
       workspaceHistoryCommands.saveProjectContext,
       {
-        workspaceId,
+        projectId,
         expectedVersion: saved.version,
         context,
       },
@@ -387,7 +402,7 @@ describe("DemoWorkspaceHistoryTransport", () => {
     const differentContent = await transport.request(
       workspaceHistoryCommands.saveProjectContext,
       {
-        workspaceId,
+        projectId,
         expectedVersion: sameContent.version,
         context: { ...context, goal: "Ship something else" },
       },

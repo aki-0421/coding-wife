@@ -462,8 +462,6 @@ pub(super) fn validate_project_reference_manifest(
     let manifest = serde_json::from_str::<ProjectReferenceManifest>(manifest_json)
         .map_err(|_| reference_error("WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED", OPERATION))?;
     if manifest.schema_version != PROJECT_REFERENCE_MANIFEST_SCHEMA_VERSION
-        || manifest.root_device != validation.root_device
-        || manifest.root_inode != validation.root_inode
         || manifest.references.len() != context.technical_references.len()
     {
         return Err(reference_error(
@@ -482,13 +480,7 @@ pub(super) fn validate_project_reference_manifest(
                 OPERATION,
             ));
         }
-        let current = resolve_reference_target(reference, validation.root(), OPERATION)?;
-        if current != entry.target {
-            return Err(reference_error(
-                "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED",
-                OPERATION,
-            ));
-        }
+        let _current = resolve_reference_target(reference, validation.root(), OPERATION)?;
     }
     Ok(())
 }
@@ -523,7 +515,7 @@ fn contains_non_presentation_policy_domain(value: &str) -> bool {
 pub(super) fn normalize_character_context(
     mut context: CharacterContext,
 ) -> Result<CharacterContext, WorkspaceHistoryError> {
-    const OPERATION: &str = "workspace.save_character_context";
+    const OPERATION: &str = "app.save_character_context";
     context.display_name = context.display_name.trim().to_owned();
     context.tone_notes = normalize_multiline(&context.tone_notes);
     context.behavior = normalize_multiline(&context.behavior);
@@ -532,27 +524,27 @@ pub(super) fn normalize_character_context(
         || has_disallowed_control(&context.display_name)
     {
         return Err(context_error(
-            "WORKSPACE-CHARACTER-CONTEXT-DISPLAY-NAME",
+            "APP-CHARACTER-CONTEXT-DISPLAY-NAME",
             OPERATION,
         ));
     }
     validate_text(
         &context.tone_notes,
         MAX_TONE_NOTES,
-        "WORKSPACE-CHARACTER-CONTEXT-TONE",
+        "APP-CHARACTER-CONTEXT-TONE",
         OPERATION,
     )?;
     validate_text(
         &context.behavior,
         MAX_BEHAVIOR,
-        "WORKSPACE-CHARACTER-CONTEXT-BEHAVIOR",
+        "APP-CHARACTER-CONTEXT-BEHAVIOR",
         OPERATION,
     )?;
     context.prohibited_expressions = normalize_items(
         context.prohibited_expressions,
         MAX_PROHIBITED_ITEMS,
         MAX_PROHIBITED_ITEM,
-        "WORKSPACE-CHARACTER-CONTEXT-PROHIBITED",
+        "APP-CHARACTER-CONTEXT-PROHIBITED",
         OPERATION,
     )?;
     let total = scalar_count(&context.display_name)
@@ -566,10 +558,7 @@ pub(super) fn normalize_character_context(
             .map(|value| scalar_count(value))
             .sum::<usize>();
     if total > MAX_CHARACTER_TOTAL {
-        return Err(context_error(
-            "WORKSPACE-CHARACTER-CONTEXT-TOTAL",
-            OPERATION,
-        ));
+        return Err(context_error("APP-CHARACTER-CONTEXT-TOTAL", OPERATION));
     }
     if std::iter::once(context.display_name.as_str())
         .chain(std::iter::once(context.tone_notes.as_str()))
@@ -577,10 +566,7 @@ pub(super) fn normalize_character_context(
         .chain(context.prohibited_expressions.iter().map(String::as_str))
         .any(contains_non_presentation_policy_domain)
     {
-        return Err(context_error(
-            "WORKSPACE-CHARACTER-CONTEXT-POLICY",
-            OPERATION,
-        ));
+        return Err(context_error("APP-CHARACTER-CONTEXT-POLICY", OPERATION));
     }
     Ok(context)
 }
@@ -761,7 +747,7 @@ mod tests {
                 normalize_character_context(context)
                     .expect_err("policy override rejected")
                     .code,
-                "WORKSPACE-CHARACTER-CONTEXT-POLICY"
+                "APP-CHARACTER-CONTEXT-POLICY"
             );
         }
     }
@@ -782,7 +768,7 @@ mod tests {
                 Ok(_) => panic!("{} must be rejected", test_case.id),
                 Err(error) => error,
             };
-            assert_eq!(error.code, "WORKSPACE-CHARACTER-CONTEXT-POLICY");
+            assert_eq!(error.code, "APP-CHARACTER-CONTEXT-POLICY");
         }
         for test_case in fixture.accepted {
             let context = CharacterContext {

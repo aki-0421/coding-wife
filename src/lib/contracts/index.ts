@@ -171,7 +171,8 @@ export {
   type VersionedProjectContext,
   type WorkspaceEditableContext,
   type WorkspaceLoadEditableContextRequest,
-  type WorkspaceSaveCharacterContextRequest,
-  type WorkspaceSaveProjectContextRequest,
+  type AppSaveCharacterContextRequest,
+  type ProjectGetContextRequest,
+  type ProjectSaveContextRequest,
   type WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"

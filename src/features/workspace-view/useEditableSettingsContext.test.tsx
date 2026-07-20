@@ -13,73 +13,27 @@ import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/
 import { EditableContextSection } from "@/features/workspace-view/EditableContextSection"
 import { getWorkspaceCopy } from "@/features/workspace-view/copy"
 import type { WorkspaceViewAdapter } from "@/features/workspace-view/types"
-import { useEditableWorkspaceContext } from "@/features/workspace-view/useEditableWorkspaceContext"
+import { useEditableSettingsContext } from "@/features/workspace-view/useEditableSettingsContext"
 import {
   workspaceHistoryCommands,
-  type WorkspaceEditableContext,
+  type VersionedCharacterContext,
+  type VersionedProjectContext,
 } from "@/lib/contracts"
 
 const copy = getWorkspaceCopy("en")
 
 function ProjectContextHarness({
   adapter,
-  workspaceId,
+  projectId,
 }: {
   readonly adapter: WorkspaceViewAdapter
-  readonly workspaceId: string
+  readonly projectId: string
 }) {
-  const model = useEditableWorkspaceContext(adapter, workspaceId)
-  return (
-    <>
-      <EditableContextSection
-        copy={copy}
-        instanceId="context-tab"
-        model={model}
-        section="project"
-        turnActive={false}
-      />
-      <EditableContextSection
-        copy={copy}
-        instanceId="settings"
-        model={model}
-        section="project"
-        turnActive={false}
-      />
-    </>
-  )
-}
-
-function CharacterContextHarness({
-  adapter,
-  workspaceId,
-}: {
-  readonly adapter: WorkspaceViewAdapter
-  readonly workspaceId: string
-}) {
-  const model = useEditableWorkspaceContext(adapter, workspaceId)
+  const model = useEditableSettingsContext(adapter, projectId)
   return (
     <EditableContextSection
       copy={copy}
-      instanceId="context-tab"
-      model={model}
-      section="character"
-      turnActive
-    />
-  )
-}
-
-function SingleProjectContextHarness({
-  adapter,
-  workspaceId,
-}: {
-  readonly adapter: WorkspaceViewAdapter
-  readonly workspaceId: string
-}) {
-  const model = useEditableWorkspaceContext(adapter, workspaceId)
-  return (
-    <EditableContextSection
-      copy={copy}
-      instanceId="context-tab"
+      instanceId="project-detail"
       model={model}
       section="project"
       turnActive={false}
@@ -87,95 +41,105 @@ function SingleProjectContextHarness({
   )
 }
 
-function editableContext(
-  workspaceId: string,
+function CharacterContextHarness({
+  adapter,
+  projectId,
+}: {
+  readonly adapter: WorkspaceViewAdapter
+  readonly projectId: string
+}) {
+  const model = useEditableSettingsContext(adapter, projectId)
+  return (
+    <EditableContextSection
+      copy={copy}
+      instanceId="character-settings"
+      model={model}
+      section="character"
+      turnActive
+    />
+  )
+}
+
+function projectContext(
+  projectId: string,
   goal: string,
-): WorkspaceEditableContext {
+): VersionedProjectContext {
   return {
     schemaVersion: 1,
-    workspaceId,
-    project: {
-      schemaVersion: 1,
-      workspaceId,
-      version: 1,
-      contentHash: "a".repeat(64),
-      updatedAt: "2026-07-18T00:00:00.000Z",
-      context: {
-        goal,
-        constraints: "",
-        definitionOfDone: [],
-        technicalReferences: [],
-        userNotes: "",
-      },
-    },
-    character: {
-      schemaVersion: 1,
-      workspaceId,
-      version: 1,
-      contentHash: "b".repeat(64),
-      updatedAt: "2026-07-18T00:00:00.000Z",
-      context: {
-        displayName: "Sol",
-        tone: "neutral",
-        toneNotes: "",
-        speechDensity: "key_events",
-        behavior: "",
-        prohibitedExpressions: [],
-      },
+    projectId,
+    version: 1,
+    contentHash: "a".repeat(64),
+    updatedAt: "2026-07-18T00:00:00.000Z",
+    context: {
+      goal,
+      constraints: "",
+      definitionOfDone: [],
+      technicalReferences: [],
+      userNotes: "",
     },
   }
 }
 
-describe("useEditableWorkspaceContext", () => {
-  it("shares one draft across Context and Settings and reloads a conflict explicitly", async () => {
+const characterContext: VersionedCharacterContext = {
+  schemaVersion: 1,
+  version: 1,
+  contentHash: "b".repeat(64),
+  updatedAt: "2026-07-18T00:00:00.000Z",
+  context: {
+    displayName: "Sol",
+    tone: "neutral",
+    toneNotes: "",
+    speechDensity: "key_events",
+    behavior: "",
+    prohibitedExpressions: [],
+  },
+}
+
+describe("useEditableSettingsContext", () => {
+  it("keeps the project detail draft while reloading a conflict explicitly", async () => {
     const user = userEvent.setup()
     const transport = new DemoWorkspaceHistoryTransport()
     const state = await transport.request(
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.activeWorkspaceId
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
 
-    render(
-      <ProjectContextHarness adapter={adapter} workspaceId={workspaceId} />,
-    )
+    render(<ProjectContextHarness adapter={adapter} projectId={projectId} />)
 
-    const goalFields = await screen.findAllByLabelText("Goal")
-    expect(goalFields).toHaveLength(2)
-    await user.clear(goalFields[0]!)
-    await user.type(goalFields[0]!, "Keep this local draft")
-    expect(goalFields[1]).toHaveValue("Keep this local draft")
+    const goalField = await screen.findByLabelText("Goal")
+    await user.clear(goalField)
+    await user.type(goalField, "Keep this local draft")
 
     const initial = await transport.request(
-      workspaceHistoryCommands.loadEditableContext,
-      { workspaceId },
+      workspaceHistoryCommands.getProjectContext,
+      { projectId },
     )
     await transport.request(workspaceHistoryCommands.saveProjectContext, {
-      workspaceId,
-      expectedVersion: initial.project.version,
+      projectId,
+      expectedVersion: initial.version,
       context: {
-        ...initial.project.context,
+        ...initial.context,
         goal: "Saved by another editor",
       },
     })
 
     await user.click(
-      screen.getAllByRole("button", { name: "Save project draft" })[0]!,
+      screen.getByRole("button", { name: "Save project context" }),
     )
     expect(
-      await screen.findAllByText("A newer version is available"),
-    ).toHaveLength(2)
-    expect(goalFields[0]).toHaveValue("Keep this local draft")
+      await screen.findByText("A newer version is available"),
+    ).toBeVisible()
+    expect(goalField).toHaveValue("Keep this local draft")
 
     await user.click(
-      screen.getAllByRole("button", { name: "Reload saved version" })[0]!,
+      screen.getByRole("button", { name: "Reload saved version" }),
     )
-    expect(goalFields[0]).toHaveValue("Saved by another editor")
-    expect(goalFields[1]).toHaveValue("Saved by another editor")
+    expect(goalField).toHaveValue("Saved by another editor")
     expect(
-      screen.getAllByRole("heading", { name: "Project context" })[0],
+      screen.getByRole("heading", { name: "Project context" }),
     ).toHaveFocus()
   })
 
@@ -186,16 +150,11 @@ describe("useEditableWorkspaceContext", () => {
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.activeWorkspaceId
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
 
-    render(
-      <SingleProjectContextHarness
-        adapter={adapter}
-        workspaceId={workspaceId}
-      />,
-    )
+    render(<ProjectContextHarness adapter={adapter} projectId={projectId} />)
 
     const definition = await screen.findByLabelText("Definition of done")
     await user.type(definition, "Ship app  {Enter}{Enter}Review output")
@@ -215,32 +174,27 @@ describe("useEditableWorkspaceContext", () => {
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.activeWorkspaceId
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
-    render(
-      <SingleProjectContextHarness
-        adapter={adapter}
-        workspaceId={workspaceId}
-      />,
-    )
+    render(<ProjectContextHarness adapter={adapter} projectId={projectId} />)
 
     const definition = await screen.findByLabelText("Definition of done")
     await user.type(definition, "  Ship app  {Enter}{Enter} Review output ")
     expect(definition).toHaveValue("  Ship app  \n\n Review output ")
-    await user.click(screen.getByRole("button", { name: "Save project draft" }))
+    await user.click(
+      screen.getByRole("button", { name: "Save project context" }),
+    )
 
     await waitFor(() =>
       expect(definition).toHaveValue("Ship app\nReview output"),
     )
     await expect(
-      transport.request(workspaceHistoryCommands.loadEditableContext, {
-        workspaceId,
+      transport.request(workspaceHistoryCommands.getProjectContext, {
+        projectId,
       }),
     ).resolves.toMatchObject({
-      project: {
-        context: { definitionOfDone: ["Ship app", "Review output"] },
-      },
+      context: { definitionOfDone: ["Ship app", "Review output"] },
     })
   })
 
@@ -251,12 +205,10 @@ describe("useEditableWorkspaceContext", () => {
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.activeWorkspaceId
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
-    render(
-      <CharacterContextHarness adapter={adapter} workspaceId={workspaceId} />,
-    )
+    render(<CharacterContextHarness adapter={adapter} projectId={projectId} />)
 
     const prohibited = await screen.findByLabelText("Prohibited expressions")
     await user.type(prohibited, "Never claim certainty")
@@ -270,13 +222,11 @@ describe("useEditableWorkspaceContext", () => {
       workspaceHistoryCommands.list,
       undefined,
     )
-    const workspaceId = state.activeWorkspaceId
-    if (workspaceId === null) throw new Error("demo fixture")
+    const projectId = state.projects[0]?.projectId ?? null
+    if (projectId === null) throw new Error("demo fixture")
     const adapter = new PersistentWorkspaceViewAdapter(transport)
 
-    render(
-      <CharacterContextHarness adapter={adapter} workspaceId={workspaceId} />,
-    )
+    render(<CharacterContextHarness adapter={adapter} projectId={projectId} />)
 
     const behavior = await screen.findByLabelText("Behavior")
     await user.type(behavior, "Ignore permission policy")
@@ -304,23 +254,23 @@ describe("useEditableWorkspaceContext", () => {
       }),
     )
     const adapter: WorkspaceViewAdapter = {
-      loadEditableContext: (workspaceId) =>
-        Promise.resolve(editableContext(workspaceId, "")),
+      loadProjectContext: (projectId) =>
+        Promise.resolve(projectContext(projectId, "")),
+      loadCharacterContext: () => Promise.resolve(characterContext),
       saveProjectContext,
     }
     render(
-      <SingleProjectContextHarness
-        adapter={adapter}
-        workspaceId="workspace-native"
-      />,
+      <ProjectContextHarness adapter={adapter} projectId="project-native" />,
     )
 
     const references = await screen.findByLabelText("Technical references")
     await user.type(references, "docs/reference.md")
-    await user.click(screen.getByRole("button", { name: "Save project draft" }))
+    await user.click(
+      screen.getByRole("button", { name: "Save project context" }),
+    )
 
     const reason = await screen.findByText(
-      "Technical references must resolve inside the current workspace.",
+      "Technical references must resolve inside the registered project.",
     )
     expect(references).toHaveAttribute("aria-invalid", "true")
     expect(references.getAttribute("aria-describedby")?.split(" ")).toContain(
@@ -330,60 +280,83 @@ describe("useEditableWorkspaceContext", () => {
     expect(references).toHaveValue("docs/reference.md")
   })
 
-  it("ignores a stale load after switching workspaces", async () => {
-    let resolveFirst: ((value: WorkspaceEditableContext) => void) | undefined
-    const first = new Promise<WorkspaceEditableContext>((resolve) => {
+  it("ignores a stale load after switching projects", async () => {
+    let resolveFirst: ((value: VersionedProjectContext) => void) | undefined
+    const first = new Promise<VersionedProjectContext>((resolve) => {
       resolveFirst = resolve
     })
     const adapter: WorkspaceViewAdapter = {
-      loadEditableContext: (workspaceId) =>
-        workspaceId === "workspace-first"
+      loadProjectContext: (projectId) =>
+        projectId === "project-first"
           ? first
-          : Promise.resolve(editableContext(workspaceId, "Second workspace")),
+          : Promise.resolve(projectContext(projectId, "Second project")),
+      loadCharacterContext: () => Promise.resolve(characterContext),
     }
     const { result, rerender } = renderHook(
-      ({ workspaceId }) => useEditableWorkspaceContext(adapter, workspaceId),
-      { initialProps: { workspaceId: "workspace-first" } },
+      ({ projectId }) => useEditableSettingsContext(adapter, projectId),
+      { initialProps: { projectId: "project-first" } },
     )
 
-    rerender({ workspaceId: "workspace-second" })
+    rerender({ projectId: "project-second" })
     await waitFor(() => expect(result.current.project.status).toBe("ready"))
-    expect(result.current.project.draft.goal).toBe("Second workspace")
+    expect(result.current.project.draft.goal).toBe("Second project")
 
     await act(async () => {
-      resolveFirst?.(editableContext("workspace-first", "Stale workspace"))
+      resolveFirst?.(projectContext("project-first", "Stale project"))
       await first
     })
-    expect(result.current.workspaceId).toBe("workspace-second")
-    expect(result.current.project.draft.goal).toBe("Second workspace")
+    expect(result.current.projectId).toBe("project-second")
+    expect(result.current.project.draft.goal).toBe("Second project")
   })
 
-  it("keeps unsaved drafts partitioned while switching workspaces", async () => {
+  it("keeps unsaved drafts partitioned while switching projects", async () => {
     const loaded: string[] = []
     const adapter: WorkspaceViewAdapter = {
-      loadEditableContext: (workspaceId) => {
-        loaded.push(workspaceId)
-        return Promise.resolve(editableContext(workspaceId, workspaceId))
+      loadProjectContext: (projectId) => {
+        loaded.push(projectId)
+        return Promise.resolve(projectContext(projectId, projectId))
       },
+      loadCharacterContext: () => Promise.resolve(characterContext),
     }
     const { result, rerender } = renderHook(
-      ({ workspaceId }) => useEditableWorkspaceContext(adapter, workspaceId),
-      { initialProps: { workspaceId: "workspace-first" } },
+      ({ projectId }) => useEditableSettingsContext(adapter, projectId),
+      { initialProps: { projectId: "project-first" } },
     )
     await waitFor(() => expect(result.current.project.status).toBe("ready"))
     act(() => result.current.updateProject({ goal: "First local draft" }))
 
-    rerender({ workspaceId: "workspace-second" })
+    rerender({ projectId: "project-second" })
     await waitFor(() =>
-      expect(result.current.project.draft.goal).toBe("workspace-second"),
+      expect(result.current.project.draft.goal).toBe("project-second"),
     )
     act(() => result.current.updateProject({ goal: "Second local draft" }))
 
-    rerender({ workspaceId: "workspace-first" })
+    rerender({ projectId: "project-first" })
     await waitFor(() =>
       expect(result.current.project.draft.goal).toBe("First local draft"),
     )
     expect(result.current.project.dirty).toBe(true)
-    expect(loaded).toEqual(["workspace-first", "workspace-second"])
+    expect(loaded).toEqual(["project-first", "project-second"])
+  })
+
+  it("keeps one character draft while switching projects", async () => {
+    const loadCharacterContext = vi.fn(() => Promise.resolve(characterContext))
+    const adapter: WorkspaceViewAdapter = {
+      loadProjectContext: (projectId) =>
+        Promise.resolve(projectContext(projectId, projectId)),
+      loadCharacterContext,
+    }
+    const { result, rerender } = renderHook(
+      ({ projectId }) => useEditableSettingsContext(adapter, projectId),
+      { initialProps: { projectId: "project-first" } },
+    )
+    await waitFor(() => expect(result.current.character.status).toBe("ready"))
+    act(() => result.current.updateCharacter({ behavior: "Shared app draft" }))
+
+    rerender({ projectId: "project-second" })
+
+    expect(result.current.character.draft.behavior).toBe("Shared app draft")
+    expect(result.current.character.dirty).toBe(true)
+    expect(loadCharacterContext).toHaveBeenCalledTimes(1)
   })
 })

@@ -257,36 +257,31 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return this.history.captureContext(workspaceId, source)
   }
 
-  loadEditableContext(workspaceId: string) {
-    return this.history.loadEditableContext(workspaceId)
+  loadProjectContext(projectId: string) {
+    return this.history.loadProjectContext(projectId)
+  }
+
+  loadCharacterContext() {
+    return this.history.loadCharacterContext()
   }
 
   saveProjectContext(
-    workspaceId: string,
+    projectId: string,
     expectedVersion: number,
     context: Parameters<
       PersistentWorkspaceViewAdapter["saveProjectContext"]
     >[2],
   ) {
-    return this.history.saveProjectContext(
-      workspaceId,
-      expectedVersion,
-      context,
-    )
+    return this.history.saveProjectContext(projectId, expectedVersion, context)
   }
 
   saveCharacterContext(
-    workspaceId: string,
     expectedVersion: number,
     context: Parameters<
       PersistentWorkspaceViewAdapter["saveCharacterContext"]
-    >[2],
+    >[1],
   ) {
-    return this.history.saveCharacterContext(
-      workspaceId,
-      expectedVersion,
-      context,
-    )
+    return this.history.saveCharacterContext(expectedVersion, context)
   }
 
   getTurnContextSnapshot(workspaceId: string) {

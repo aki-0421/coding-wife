@@ -49,37 +49,30 @@ import {
 } from "@/features/narration"
 import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { ChatView } from "@/features/workspace-view/ChatView"
-import { ContextView } from "@/features/workspace-view/ContextView"
 import {
   getWorkspaceCopy,
   type WorkspaceCopy,
 } from "@/features/workspace-view/copy"
 import {
   AppSettingsView,
-  ProjectSettingsView,
+  WorkspaceSettingsView,
 } from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
-import type {
-  CharacterStageRenderer,
-  AppSettingsSection,
-  WorkspaceRecord,
-  WorkspaceTab,
-  WorkspaceViewAdapter,
+import {
+  workspaceTabs,
+  type AppSettingsSection,
+  type CharacterStageRenderer,
+  type WorkspaceRecord,
+  type WorkspaceTab,
+  type WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
-import { useEditableWorkspaceContext } from "@/features/workspace-view/useEditableWorkspaceContext"
+import { useEditableSettingsContext } from "@/features/workspace-view/useEditableSettingsContext"
 import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceViewModel"
 import { useWorkspaceViewportLayout } from "@/features/workspace-view/workspace-viewport"
 import { gitReviewSchemaVersion } from "@/lib/contracts/git-review"
-
-const tabOrder: readonly WorkspaceTab[] = [
-  "chat",
-  "commit",
-  "context",
-  "settings",
-]
 
 export interface WorkspaceShellProps {
   readonly adapter?: WorkspaceViewAdapter | undefined
@@ -94,7 +87,7 @@ export interface WorkspaceShellProps {
 }
 
 function isWorkspaceTab(value: string): value is WorkspaceTab {
-  return tabOrder.some((tab) => tab === value)
+  return workspaceTabs.some((tab) => tab === value)
 }
 
 function getSystemReducedMotion(): boolean {
@@ -140,9 +133,12 @@ export function WorkspaceShell({
   const appPreferences = useAppPreferences().snapshot.preferences
   const characterHidden = appPreferences.characterVisibility === "hidden"
   const view = useWorkspaceViewModel(adapter, initialWorkspaces)
-  const contextModel = useEditableWorkspaceContext(
+  const [appSettingsProjectId, setAppSettingsProjectId] = useState<
+    string | null
+  >(null)
+  const contextModel = useEditableSettingsContext(
     adapter,
-    view.selectedWorkspace?.id ?? "__no_workspace__",
+    appSettingsProjectId ?? "__no_project__",
   )
   const characterRuntimeStore = useCharacterRuntimeStatusStore()
   const characterRuntimeSnapshot = useCharacterRuntimeStatus(
@@ -575,11 +571,12 @@ export function WorkspaceShell({
       if (event.ctrlKey && event.key === "Tab") {
         event.preventDefault()
         if (appSettingsOpen) return
-        const currentIndex = tabOrder.indexOf(view.activeTab)
+        const currentIndex = workspaceTabs.indexOf(view.activeTab)
         const direction = event.shiftKey ? -1 : 1
         const nextIndex =
-          (currentIndex + direction + tabOrder.length) % tabOrder.length
-        view.setActiveTab(tabOrder[nextIndex] ?? "chat")
+          (currentIndex + direction + workspaceTabs.length) %
+          workspaceTabs.length
+        view.setActiveTab(workspaceTabs[nextIndex] ?? "chat")
       }
 
       if (event.metaKey && event.key.toLocaleLowerCase() === "k") {
@@ -665,11 +662,13 @@ export function WorkspaceShell({
   }, [appSettingsOpen, copy.filterWorkspaces, view])
 
   const openAppSettings = (section: AppSettingsSection = "general") => {
+    setAppSettingsProjectId(null)
     setAppSettingsSection(section)
     setAppSettingsOpen(true)
   }
 
   const closeAppSettings = () => {
+    setAppSettingsProjectId(null)
     setAppSettingsOpen(false)
     window.requestAnimationFrame(() => {
       document
@@ -680,12 +679,14 @@ export function WorkspaceShell({
 
   const resetUiState = () => {
     view.resetUiState()
+    setAppSettingsProjectId(null)
     setAppSettingsSection("general")
     setAppSettingsOpen(false)
   }
 
   const setActiveTab = (value: string) => {
     if (!isWorkspaceTab(value)) return
+    setAppSettingsProjectId(null)
     setAppSettingsOpen(false)
     view.setActiveTab(value)
   }
@@ -776,6 +777,7 @@ export function WorkspaceShell({
         }
         onRequestArchive={setArchiveCandidate}
         onSelectWorkspace={(workspaceId) => {
+          setAppSettingsProjectId(null)
           setAppSettingsOpen(false)
           view.setSelectedWorkspaceId(workspaceId)
         }}
@@ -791,17 +793,31 @@ export function WorkspaceShell({
 
       {appSettingsOpen ? (
         <AppSettingsView
+          characterRuntime={characterRuntime}
+          contextModel={contextModel}
           copy={copy}
           muted={view.muted}
           onBack={closeAppSettings}
           onMutedChange={view.setMuted}
+          onRetryCharacter={() => {
+            characterRuntimeStore.retry(
+              selectedWorkspace?.id ?? "__no_workspace__",
+            )
+          }}
           onResetUi={resetUiState}
-          onSectionChange={setAppSettingsSection}
+          onCloseProject={() => setAppSettingsProjectId(null)}
+          onOpenProject={setAppSettingsProjectId}
+          onSectionChange={(section) => {
+            setAppSettingsProjectId(null)
+            setAppSettingsSection(section)
+          }}
           onUnregisterProject={unregisterProject}
           projectActionPending={view.workspaceAction !== null || turnActive}
           projects={view.projects}
           runtimeState={runtime.state}
           section={appSettingsSection}
+          selectedProjectId={appSettingsProjectId}
+          turnActive={turnActive}
           workspaceId={selectedWorkspace?.id ?? "__no_workspace__"}
         />
       ) : null}
@@ -915,34 +931,12 @@ export function WorkspaceShell({
 
           <TabsContent
             className="workspace-view data-[state=inactive]:hidden"
-            forceMount
-            value="context"
-          >
-            <ContextView
-              copy={copy}
-              model={contextModel}
-              turnActive={turnActive}
-            />
-          </TabsContent>
-
-          <TabsContent
-            className="workspace-view data-[state=inactive]:hidden"
             value="settings"
           >
-            <ProjectSettingsView
-              characterRuntime={characterRuntime}
-              contextModel={contextModel}
+            <WorkspaceSettingsView
               copy={copy}
               history={view.history}
-              muted={view.muted}
               onDeleteHistory={view.deleteSelectedWorkspaceHistory}
-              onRetryCharacter={() => {
-                characterRuntimeStore.retry(selectedWorkspace.id)
-              }}
-              onSectionChange={view.setProjectSettingsSection}
-              section={view.projectSettingsSection}
-              turnActive={turnActive}
-              workspaceId={selectedWorkspace.id}
               workspaceLabel={`${selectedWorkspace.repository}/${selectedWorkspace.name}`}
             />
           </TabsContent>

@@ -9,6 +9,7 @@ import {
   useCharacterLibrary,
   useCharacterLibraryStore,
 } from "@/features/character/library/provider"
+import { characterLibraryScopeId } from "@/features/character/library/contracts"
 import { useCharacterRuntimeStatusStore } from "@/features/character/runtime-status"
 import { mapCompanionStateToCharacterState } from "@/features/character/semantic-state"
 import {
@@ -48,7 +49,7 @@ export function DefaultCharacterStageRenderer({
   speaking = false,
 }: CharacterStageRenderProps) {
   const runtimeStatus = useCharacterRuntimeStatusStore()
-  const characterLibrary = useCharacterLibrary(workspaceId)
+  const characterLibrary = useCharacterLibrary(characterLibraryScopeId)
   const characterLibraryStore = useCharacterLibraryStore()
   const [presentation, setPresentation] = useState(() =>
     createPresentation(workspaceId, state, 1),
@@ -58,8 +59,9 @@ export function DefaultCharacterStageRenderer({
     () =>
       characterLibrary.snapshot === null
         ? undefined
-        : (characterLibraryStore.selectedPackRef(workspaceId) ?? undefined),
-    [characterLibrary.snapshot, characterLibraryStore, workspaceId],
+        : (characterLibraryStore.selectedPackRef(characterLibraryScopeId) ??
+          undefined),
+    [characterLibrary.snapshot, characterLibraryStore],
   )
   const semanticCue = useMemo(() => {
     const snapshot = characterLibrary.snapshot

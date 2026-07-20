@@ -108,7 +108,6 @@ const en = {
   tabs: {
     chat: "Chat",
     commit: "Commit",
-    context: "Context",
     settings: "Settings",
   },
   connection: {
@@ -316,9 +315,9 @@ const en = {
     unmute: "Unmute companion",
   },
   contextView: {
-    title: "Workspace context",
+    title: "Project context",
     description:
-      "Project instructions and companion presentation remain separate. Changes apply from the next turn.",
+      "Project-specific instructions for Codex. Changes apply from the next turn.",
     projectTitle: "Project context",
     projectDescription: "Goals, constraints, and definition of done for Codex.",
     characterTitle: "Character context",
@@ -330,9 +329,9 @@ const en = {
     displayName: "Display name",
     tone: "Tone",
     prohibited: "Prohibited expressions",
-    saveProject: "Save project draft",
+    saveProject: "Save project context",
     saveCharacter: "Save character draft",
-    localOnly: "Held locally until the workspace history service is connected.",
+    localOnly: "Held locally until the project context service is connected.",
     version: "Version",
     nextTurn: "Applies from the next turn",
     conflictTitle: "A newer version is available",
@@ -348,24 +347,24 @@ const en = {
       text: "This value exceeds its limit or contains unsupported control characters.",
       items: "Review the item count and per-item character limits.",
       technicalReference:
-        "Use a normalized workspace-relative path or supported document reference.",
+        "Use a normalized project-relative path or supported document reference.",
       policy:
         "Character presentation cannot change technical or safety policy.",
       total: "This context exceeds the total character limit.",
       referenceBoundary:
-        "Technical references must resolve inside the current workspace.",
+        "Technical references must resolve inside the registered project.",
       referenceMissing:
         "A saved technical reference is no longer available. Review and save it again.",
       referenceChanged:
         "A saved technical reference now resolves to a different target. Review and save it again.",
     },
     savedNextTurn: "Saved. This version will be used from the next turn.",
-    loading: "Loading workspace context",
+    loading: "Loading project context",
     unsaved: "Unsaved",
     technicalReferences: "Technical references",
     onePerLine: "One item per line",
     referencesDescription:
-      "Workspace-relative paths only. Policy files and paths outside this workspace are rejected.",
+      "Project-relative paths only. Policy files and paths outside this project are rejected.",
     userNotes: "User notes",
     toneNotes: "Tone notes",
     speechDensity: "Speech density",
@@ -386,11 +385,15 @@ const en = {
   },
   settingsView: {
     appTitle: "App settings",
-    appDescription: "Preferences and diagnostics shared by every project.",
+    appDescription:
+      "Character, companion, preferences, and diagnostics shared by every project.",
     projectTitle: "Project settings",
-    projectDescription: (project: string) =>
-      `Context, companion, and history settings for ${project}.`,
+    projectDescription: (project: string) => `Settings for ${project}.`,
+    workspaceTitle: "Workspace settings",
+    workspaceDescription: (workspace: string) =>
+      `History and privacy for ${workspace}.`,
     backToWorkspace: "Back to workspace",
+    backToProjects: "Back to projects",
     sections: {
       general: "General",
       projects: "Projects",
@@ -405,7 +408,9 @@ const en = {
     generalTitle: "General",
     projectsTitle: "Registered projects",
     projectsDescription:
-      "Repositories available when creating a workspace. Unregistering changes only this app.",
+      "Open a project to manage the context shared by its workspaces. Unregistering changes only this app.",
+    projectContextDescription: (workspaceCount: string) =>
+      `Context shared by this project's ${workspaceCount}.`,
     noProjectsTitle: "No registered projects",
     noProjectsDescription:
       "Use the folder button in the sidebar to register a Git repository.",
@@ -688,7 +693,6 @@ const ja: typeof en = {
   tabs: {
     chat: "チャット",
     commit: "コミット",
-    context: "コンテキスト",
     settings: "設定",
   },
   connection: {
@@ -897,9 +901,9 @@ const ja: typeof en = {
     unmute: "コンパニオンのミュートを解除",
   },
   contextView: {
-    title: "ワークスペースコンテキスト",
+    title: "プロジェクトコンテキスト",
     description:
-      "project指示とcompanion表現を分離します。変更は次のturnから適用します。",
+      "Codexへ渡すプロジェクト固有の指示です。変更は次のturnから適用します。",
     projectTitle: "プロジェクトコンテキスト",
     projectDescription: "Codexへ渡す目標、制約、完了条件です。",
     characterTitle: "キャラクターコンテキスト",
@@ -910,10 +914,10 @@ const ja: typeof en = {
     displayName: "表示名",
     tone: "口調",
     prohibited: "禁止表現",
-    saveProject: "Project下書きを保存",
+    saveProject: "プロジェクトコンテキストを保存",
     saveCharacter: "Character下書きを保存",
     localOnly:
-      "workspace履歴service接続まではローカル表示状態だけに保持します。",
+      "プロジェクトコンテキストservice接続まではローカル表示状態だけに保持します。",
     version: "バージョン",
     nextTurn: "次のturnから適用",
     conflictTitle: "新しいバージョンが保存されています",
@@ -929,23 +933,23 @@ const ja: typeof en = {
       text: "文字数上限を超えているか、使用できない制御文字が含まれています。",
       items: "項目数と各項目の文字数上限を確認してください。",
       technicalReference:
-        "正規化されたワークスペース相対パスか、対応する文書参照を指定してください。",
+        "正規化されたプロジェクト相対パスか、対応する文書参照を指定してください。",
       policy: "キャラクター表現から技術policyや安全policyは変更できません。",
       total: "コンテキスト全体の文字数上限を超えています。",
       referenceBoundary:
-        "技術参照は現在のワークスペース内で解決できる必要があります。",
+        "技術参照は登録済みプロジェクト内で解決できる必要があります。",
       referenceMissing:
         "保存済みの技術参照を利用できません。確認してから保存し直してください。",
       referenceChanged:
         "保存済みの技術参照が別の対象を指しています。確認してから保存し直してください。",
     },
     savedNextTurn: "保存しました。次のturnからこのバージョンを使います。",
-    loading: "ワークスペースコンテキストを読込中",
+    loading: "プロジェクトコンテキストを読込中",
     unsaved: "未保存",
     technicalReferences: "技術参照",
     onePerLine: "1行に1項目",
     referencesDescription:
-      "ワークスペース内の相対パスのみ指定できます。policyファイルや範囲外のパスは拒否します。",
+      "プロジェクト内の相対パスのみ指定できます。policyファイルや範囲外のパスは拒否します。",
     userNotes: "ユーザーメモ",
     toneNotes: "口調メモ",
     speechDensity: "発話密度",
@@ -965,11 +969,15 @@ const ja: typeof en = {
   },
   settingsView: {
     appTitle: "アプリ設定",
-    appDescription: "すべてのプロジェクトに共通する設定と診断です。",
+    appDescription:
+      "すべてのプロジェクトに共通するキャラクター、コンパニオン、設定、診断です。",
     projectTitle: "プロジェクト設定",
-    projectDescription: (project: string) =>
-      `${project} のコンテキスト、コンパニオン、履歴に適用されます。`,
+    projectDescription: (project: string) => `${project} の設定です。`,
+    workspaceTitle: "ワークスペース設定",
+    workspaceDescription: (workspace: string) =>
+      `${workspace} の履歴とプライバシーを管理します。`,
     backToWorkspace: "ワークスペースへ戻る",
+    backToProjects: "プロジェクト一覧へ戻る",
     sections: {
       general: "一般",
       projects: "プロジェクト",
@@ -984,7 +992,9 @@ const ja: typeof en = {
     generalTitle: "一般",
     projectsTitle: "登録済みプロジェクト",
     projectsDescription:
-      "ワークスペースの作成先として利用できるリポジトリです。登録解除はこのアプリ内だけに反映されます。",
+      "プロジェクトを開くと、所属ワークスペースで共有するコンテキストを管理できます。登録解除はこのアプリ内だけに反映されます。",
+    projectContextDescription: (workspaceCount: string) =>
+      `このプロジェクトの${workspaceCount}で共有するコンテキストです。`,
     noProjectsTitle: "登録済みプロジェクトはありません",
     noProjectsDescription:
       "サイドバーのフォルダボタンからGitリポジトリを登録してください。",

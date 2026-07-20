@@ -5,10 +5,9 @@ import {
   ArrowLeftIcon,
   BotIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   DatabaseIcon,
-  FolderCogIcon,
   FolderIcon,
-  HistoryIcon,
   Mic2Icon,
   Settings2Icon,
   ShieldCheckIcon,
@@ -58,12 +57,11 @@ import { SupportControlsSettings } from "@/features/support-controls"
 import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
 import { EditableContextSection } from "@/features/workspace-view/EditableContextSection"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
-import type { EditableWorkspaceContextModel } from "@/features/workspace-view/useEditableWorkspaceContext"
+import type { EditableSettingsContextModel } from "@/features/workspace-view/useEditableSettingsContext"
 import type { RuntimeState } from "@/features/runtime"
 import type {
   AppSettingsSection,
   ProjectRecord,
-  ProjectSettingsSection,
   SettingsSection,
   WorkspaceAdapterState,
 } from "@/features/workspace-view/types"
@@ -76,30 +74,29 @@ interface CharacterRuntimeSettingsProps {
   readonly onRetryCharacter: () => void
 }
 
-interface AppSettingsViewProps {
-  readonly copy: WorkspaceCopy
-  readonly muted: boolean
+interface AppSettingsViewProps extends CharacterRuntimeSettingsProps {
+  readonly contextModel: EditableSettingsContextModel
   readonly runtimeState: RuntimeState
   readonly section: AppSettingsSection
+  readonly turnActive: boolean
   readonly workspaceId: string
   readonly projects: readonly ProjectRecord[]
+  readonly selectedProjectId: string | null
   readonly projectActionPending: boolean
   readonly onBack: () => void
   readonly onMutedChange: (muted: boolean) => void
   readonly onResetUi: () => void
   readonly onSectionChange: (section: AppSettingsSection) => void
+  readonly onOpenProject: (projectId: string) => void
+  readonly onCloseProject: () => void
   readonly onUnregisterProject: (projectId: string) => Promise<boolean>
 }
 
-interface ProjectSettingsViewProps extends CharacterRuntimeSettingsProps {
-  readonly contextModel: EditableWorkspaceContextModel
+interface WorkspaceSettingsViewProps {
+  readonly copy: WorkspaceCopy
   readonly history: WorkspaceAdapterState["history"]
-  readonly section: ProjectSettingsSection
-  readonly turnActive: boolean
-  readonly workspaceId: string
   readonly workspaceLabel: string
   readonly onDeleteHistory: () => Promise<boolean>
-  readonly onSectionChange: (section: ProjectSettingsSection) => void
 }
 
 function CharacterReadinessBadge({
@@ -250,28 +247,21 @@ function CharacterRuntimeErrorAlert({
 const appSectionOrder: readonly AppSettingsSection[] = [
   "general",
   "projects",
+  "character_context",
+  "companion",
   "audio",
   "support",
   "diagnostics",
 ]
 
-const projectSectionOrder: readonly ProjectSettingsSection[] = [
-  "project_context",
-  "character_context",
-  "companion",
-  "history",
-]
-
 const sectionIcons = {
   general: Settings2Icon,
   projects: FolderIcon,
-  project_context: FolderCogIcon,
   character_context: BotIcon,
   companion: SparklesIcon,
   audio: Mic2Icon,
   support: ShieldCheckIcon,
   diagnostics: ActivityIcon,
-  history: HistoryIcon,
 } as const
 
 function SettingsNavigation<Section extends SettingsSection>({
@@ -393,7 +383,7 @@ function ContextSettings({
 }: {
   readonly character: boolean
   readonly copy: WorkspaceCopy
-  readonly contextModel: EditableWorkspaceContextModel
+  readonly contextModel: EditableSettingsContextModel
   readonly turnActive: boolean
 }) {
   return (
@@ -412,8 +402,7 @@ function CompanionSettings({
   copy,
   muted,
   onRetryCharacter,
-  workspaceId,
-}: CharacterRuntimeSettingsProps & { readonly workspaceId: string }) {
+}: CharacterRuntimeSettingsProps) {
   return (
     <section className="flex flex-col gap-lg">
       <div className="flex items-center justify-between gap-md">
@@ -432,7 +421,7 @@ function CompanionSettings({
         copy={copy}
         muted={muted}
       />
-      <CharacterModelLibrarySettings workspaceId={workspaceId} />
+      <CharacterModelLibrarySettings />
     </section>
   )
 }
@@ -472,19 +461,40 @@ function DiagnosticsSettings() {
 }
 
 function ProjectsSettings({
+  contextModel,
   copy,
   projectActionPending,
   projects,
+  selectedProjectId,
+  turnActive,
+  onCloseProject,
+  onOpenProject,
   onUnregisterProject,
 }: Pick<
   AppSettingsViewProps,
-  "copy" | "projectActionPending" | "projects" | "onUnregisterProject"
+  | "contextModel"
+  | "copy"
+  | "projectActionPending"
+  | "projects"
+  | "selectedProjectId"
+  | "turnActive"
+  | "onCloseProject"
+  | "onOpenProject"
+  | "onUnregisterProject"
 >) {
   const [pendingProject, setPendingProject] = useState<ProjectRecord | null>(
     null,
   )
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const safeActionRef = useRef<HTMLButtonElement | null>(null)
+  const detailHeadingRef = useRef<HTMLHeadingElement | null>(null)
+  const projectTriggerRefs = useRef(new Map<string, HTMLButtonElement>())
+  const selectedProject =
+    projects.find((project) => project.id === selectedProjectId) ?? null
+
+  useEffect(() => {
+    if (selectedProject !== null) detailHeadingRef.current?.focus()
+  }, [selectedProject])
 
   const confirmUnregister = async () => {
     if (
@@ -493,6 +503,59 @@ function ProjectsSettings({
     ) {
       setPendingProject(null)
     }
+  }
+
+  if (selectedProject !== null) {
+    return (
+      <section className="flex flex-col gap-xl" data-project-detail="true">
+        <div className="flex flex-col items-start gap-md">
+          <Button
+            onClick={() => {
+              const projectId = selectedProject.id
+              onCloseProject()
+              requestAnimationFrame(() =>
+                projectTriggerRefs.current.get(projectId)?.focus(),
+              )
+            }}
+            size="xs"
+            type="button"
+            variant="ghost"
+          >
+            <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
+            {copy.settingsView.backToProjects}
+          </Button>
+          <div className="flex min-w-0 items-start gap-md">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-control border border-divider bg-muted text-muted-foreground">
+              <FolderIcon aria-hidden="true" className="size-4" />
+            </span>
+            <div className="flex min-w-0 flex-col gap-xxs">
+              <h2
+                className="m-0 truncate text-headline text-text-strong outline-none"
+                ref={detailHeadingRef}
+                tabIndex={-1}
+              >
+                {selectedProject.name}
+              </h2>
+              <p className="m-0 text-caption text-muted-foreground">
+                {copy.settingsView.projectContextDescription(
+                  copy.settingsView.workspaceCount(
+                    selectedProject.workspaceCount,
+                  ),
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-divider pt-xl">
+          <ContextSettings
+            character={false}
+            copy={copy}
+            contextModel={contextModel}
+            turnActive={turnActive}
+          />
+        </div>
+      </section>
+    )
   }
 
   return (
@@ -522,29 +585,44 @@ function ProjectsSettings({
               className="flex min-w-0 items-center gap-md py-md max-[700px]:items-start"
               key={project.id}
             >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-control border border-divider bg-muted text-muted-foreground">
-                <FolderIcon aria-hidden="true" className="size-4" />
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col gap-xxs">
-                <span className="truncate text-title text-text-strong">
-                  {project.name}
+              <button
+                className="group flex min-w-0 flex-1 items-center gap-md rounded-control text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => onOpenProject(project.id)}
+                ref={(element) => {
+                  if (element === null)
+                    projectTriggerRefs.current.delete(project.id)
+                  else projectTriggerRefs.current.set(project.id, element)
+                }}
+                type="button"
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-control border border-divider bg-muted text-muted-foreground group-hover:text-foreground">
+                  <FolderIcon aria-hidden="true" className="size-4" />
                 </span>
-                <span className="flex min-w-0 flex-wrap items-center gap-xs text-label text-muted-foreground">
-                  {project.githubRepository ? (
-                    <span className="truncate font-mono">
-                      {project.githubRepository}
-                    </span>
-                  ) : null}
-                  <span>
-                    {copy.settingsView.workspaceCount(project.workspaceCount)}
+                <span className="flex min-w-0 flex-1 flex-col gap-xxs">
+                  <span className="truncate text-title text-text-strong">
+                    {project.name}
                   </span>
-                  {project.health !== "ready" ? (
-                    <Badge variant="destructive">
-                      {copy.workspaceHealth[project.health]}
-                    </Badge>
-                  ) : null}
+                  <span className="flex min-w-0 flex-wrap items-center gap-xs text-label text-muted-foreground">
+                    {project.githubRepository ? (
+                      <span className="truncate font-mono">
+                        {project.githubRepository}
+                      </span>
+                    ) : null}
+                    <span>
+                      {copy.settingsView.workspaceCount(project.workspaceCount)}
+                    </span>
+                    {project.health !== "ready" ? (
+                      <Badge variant="destructive">
+                        {copy.workspaceHealth[project.health]}
+                      </Badge>
+                    ) : null}
+                  </span>
                 </span>
-              </span>
+                <ChevronRightIcon
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                />
+              </button>
               <Button
                 disabled={projectActionPending}
                 onClick={(event) => {
@@ -620,7 +698,7 @@ function HistorySettings({
   copy,
   history,
   onDeleteHistory,
-}: Pick<ProjectSettingsViewProps, "copy" | "history" | "onDeleteHistory">) {
+}: Pick<WorkspaceSettingsViewProps, "copy" | "history" | "onDeleteHistory">) {
   const { locale } = useI18n()
   const nativeReadiness = useNativeReadiness()
   const nativeHistory = checkById(nativeReadiness.snapshot, "history")
@@ -804,6 +882,24 @@ export function AppSettingsView(props: AppSettingsViewProps) {
         )
       case "projects":
         return <ProjectsSettings {...props} />
+      case "character_context":
+        return (
+          <ContextSettings
+            character
+            copy={props.copy}
+            contextModel={props.contextModel}
+            turnActive={props.turnActive}
+          />
+        )
+      case "companion":
+        return (
+          <CompanionSettings
+            characterRuntime={props.characterRuntime}
+            copy={props.copy}
+            muted={props.muted}
+            onRetryCharacter={props.onRetryCharacter}
+          />
+        )
       case "audio":
         return <AudioSettings {...props} />
       case "support":
@@ -869,87 +965,31 @@ export function AppSettingsView(props: AppSettingsViewProps) {
   )
 }
 
-export function ProjectSettingsView(props: ProjectSettingsViewProps) {
-  const sectionContent = (() => {
-    switch (props.section) {
-      case "project_context":
-        return (
-          <ContextSettings
-            character={false}
-            copy={props.copy}
-            contextModel={props.contextModel}
-            turnActive={props.turnActive}
-          />
-        )
-      case "character_context":
-        return (
-          <ContextSettings
-            character
-            copy={props.copy}
-            contextModel={props.contextModel}
-            turnActive={props.turnActive}
-          />
-        )
-      case "companion":
-        return (
-          <CompanionSettings
-            characterRuntime={props.characterRuntime}
-            copy={props.copy}
-            muted={props.muted}
-            onRetryCharacter={props.onRetryCharacter}
-            workspaceId={props.workspaceId}
-          />
-        )
-      case "history":
-        return <HistorySettings {...props} />
-    }
-  })()
-
+export function WorkspaceSettingsView(props: WorkspaceSettingsViewProps) {
   return (
     <section
-      aria-labelledby="project-settings-title"
-      className="grid size-full min-h-0 min-w-0 grid-cols-[228px_minmax(0,1fr)] overflow-hidden bg-app-bg max-[1279px]:grid-cols-1"
-      data-settings-scope="project"
+      aria-labelledby="workspace-settings-title"
+      className="grid size-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-app-bg"
+      data-settings-scope="workspace"
     >
-      <aside className="min-h-0 border-r border-divider bg-sidebar/40 max-[1279px]:hidden">
-        <ScrollArea className="size-full">
-          <SettingsNavigation
-            copy={props.copy}
-            label={props.copy.settingsView.projectTitle}
-            onSectionChange={props.onSectionChange}
-            section={props.section}
-            sections={projectSectionOrder}
-          />
-        </ScrollArea>
-      </aside>
-
-      <section className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-        <header className="flex min-h-[58px] min-w-0 items-center justify-between gap-md border-b border-divider px-xl py-sm max-[700px]:items-start max-[700px]:px-md">
-          <div className="flex min-w-0 flex-col gap-xxs">
-            <h1
-              className="m-0 text-balance text-headline text-text-strong"
-              id="project-settings-title"
-            >
-              {props.copy.settingsView.projectTitle}
-            </h1>
-            <p className="m-0 text-pretty text-caption text-muted-foreground">
-              {props.copy.settingsView.projectDescription(props.workspaceLabel)}
-            </p>
-          </div>
-          <SettingsSectionPicker
-            copy={props.copy}
-            label={props.copy.settingsView.projectTitle}
-            onSectionChange={props.onSectionChange}
-            section={props.section}
-            sections={projectSectionOrder}
-          />
-        </header>
-        <ScrollArea className="min-h-0 min-w-0">
-          <div className="mx-auto w-full min-w-0 max-w-[780px] px-2xl py-xl max-[700px]:px-md max-[700px]:py-lg">
-            {sectionContent}
-          </div>
-        </ScrollArea>
-      </section>
+      <header className="flex min-h-[58px] min-w-0 items-center border-b border-divider px-xl py-sm max-[700px]:px-md">
+        <div className="flex min-w-0 flex-col gap-xxs">
+          <h1
+            className="m-0 text-balance text-headline text-text-strong"
+            id="workspace-settings-title"
+          >
+            {props.copy.settingsView.workspaceTitle}
+          </h1>
+          <p className="m-0 text-pretty text-caption text-muted-foreground">
+            {props.copy.settingsView.workspaceDescription(props.workspaceLabel)}
+          </p>
+        </div>
+      </header>
+      <ScrollArea className="min-h-0 min-w-0">
+        <div className="mx-auto w-full min-w-0 max-w-[780px] px-2xl py-xl max-[700px]:px-md max-[700px]:py-lg">
+          <HistorySettings {...props} />
+        </div>
+      </ScrollArea>
     </section>
   )
 }

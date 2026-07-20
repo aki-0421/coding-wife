@@ -10,7 +10,6 @@ import type {
   ProjectContext,
   VersionedCharacterContext,
   VersionedProjectContext,
-  WorkspaceEditableContext,
   WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
 import { PersistedCodexEventProjector } from "@/features/workspace-persistence/codex-event-projector"
@@ -366,35 +365,38 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
     )
   }
 
-  loadEditableContext(workspaceId: string): Promise<WorkspaceEditableContext> {
+  loadProjectContext(projectId: string): Promise<VersionedProjectContext> {
+    return this.transport.request(workspaceHistoryCommands.getProjectContext, {
+      projectId,
+    })
+  }
+
+  loadCharacterContext(): Promise<VersionedCharacterContext> {
     return this.transport.request(
-      workspaceHistoryCommands.loadEditableContext,
-      {
-        workspaceId,
-      },
+      workspaceHistoryCommands.getCharacterContext,
+      undefined,
     )
   }
 
   saveProjectContext(
-    workspaceId: string,
+    projectId: string,
     expectedVersion: number,
     context: ProjectContext,
   ): Promise<VersionedProjectContext> {
     return this.transport.request(workspaceHistoryCommands.saveProjectContext, {
-      workspaceId,
+      projectId,
       expectedVersion,
       context,
     })
   }
 
   saveCharacterContext(
-    workspaceId: string,
     expectedVersion: number,
     context: CharacterContext,
   ): Promise<VersionedCharacterContext> {
     return this.transport.request(
       workspaceHistoryCommands.saveCharacterContext,
-      { workspaceId, expectedVersion, context },
+      { expectedVersion, context },
     )
   }
 
