@@ -339,28 +339,6 @@ function SettingsSectionPicker<Section extends SettingsSection>({
   )
 }
 
-function SettingRow({
-  action,
-  description,
-  label,
-}: {
-  readonly action: React.ReactNode
-  readonly description: string
-  readonly label: string
-}) {
-  return (
-    <div className="flex min-w-0 items-start justify-between gap-xl border-b border-divider py-md max-[700px]:flex-col max-[700px]:gap-sm">
-      <div className="flex min-w-0 max-w-[60ch] flex-col gap-xxs">
-        <span className="text-title text-text-strong">{label}</span>
-        <span className="break-words text-caption text-muted-foreground">
-          {description}
-        </span>
-      </div>
-      <div className="max-w-full shrink-0 max-[700px]:shrink">{action}</div>
-    </div>
-  )
-}
-
 function ContextSettings({
   character,
   copy,
