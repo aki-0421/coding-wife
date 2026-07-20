@@ -119,6 +119,10 @@ impl NativeReadinessService {
     }
 
     async fn run_unlocked(&self) -> NativeReadinessSnapshotV1 {
+        // Startup restoration registers the trusted workspace roots used by
+        // the Codex setup probe. Do not publish a fallback-cwd failure that
+        // would remain stale after those roots become available.
+        self.history.wait_for_startup_restore().await;
         let (os_version, codex, explicit_binary, repository, history) = tokio::join!(
             read_macos_version(),
             self.codex.setup_probe(),
