@@ -411,7 +411,7 @@ function SidebarPanel({
               </TooltipTrigger>
               <TooltipContent>{copy.filterWorkspaces}</TooltipContent>
             </Tooltip>
-            <PopoverContent align="end" className="w-[270px] p-sm">
+            <PopoverContent align="end" className="w-[270px] p-lg!">
               <Field className="flex-row items-center gap-sm">
                 <FieldLabel
                   className="shrink-0 text-label font-medium text-foreground"

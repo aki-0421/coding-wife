@@ -84,7 +84,7 @@ export function ProjectFilterSelect({
           <ChevronDownIcon aria-hidden="true" className="ml-xs size-3" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-56 p-xxs">
+      <PopoverContent align="end" className="w-56 p-xs!">
         <ToggleGroup
           aria-label={copy.projectFilterLabel}
           aria-multiselectable="true"
