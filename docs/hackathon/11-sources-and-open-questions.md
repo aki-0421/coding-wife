@@ -1,10 +1,10 @@
 ---
 title: Sources, Conflicts, and Open Questions
 description: "公式情報源の優先順位、確認済みの矛盾、未確認事項、再検証項目を管理する。"
-updated: 2026-07-18
+updated: 2026-07-20
 read_when:
   - "ハッカソン情報の根拠や矛盾を確認するとき。"
-  - "agent-browserで公式情報を再検証するとき。"
+  - "Web検索またはHTTP取得で公式情報を再検証するとき。"
   - "未確認事項を公式窓口へ問い合わせるか判断するとき。"
 last_verified: 2026-07-18 JST
 ---
@@ -182,7 +182,7 @@ Support:
 
 ## 8. 2026-07-18 public re-verification record
 
-- Official Rules、Overview、FAQ、Schedule、Resources、Updates と最新 Update を agent-browser で確認した。
+- Official Rules、Overview、FAQ、Schedule、Resources、Updates と最新 Update を公式pageで確認した。
 - deadline、eligibility、4 tracks、private repository の共有先、3分未満の public video、Codex / GPT-5.6、`/feedback` Session ID、submission freeze、English materials、judging access の要件は、上記の明示した差異を除き現行文書と一致した。
 - OpenAI Build Week page は Cloudflare challenge により本文取得不可だった。Devpost の Official Rules を source of truth として採用した。
 - logged-in submission form の fields、文字数、private repository の具体的な招待 UI は未確認であり、推測せず `PENDING` を維持する。

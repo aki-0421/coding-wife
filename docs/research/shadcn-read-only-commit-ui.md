@@ -1,7 +1,7 @@
 ---
 title: "shadcn を使う読み取り専用 Commit UI 調査"
 description: "Commit evidence 画面で既存 shadcn primitive を使い、読み取り専用・高密度・アクセシブルな list/detail UI を組み立てる基準を整理する。"
-updated: 2026-07-18
+updated: 2026-07-20
 last_verified: 2026-07-18
 read_when:
   - "Commit evidence 画面の UI、状態、レスポンシブ表示を実装または変更するとき。"
@@ -18,7 +18,7 @@ mutation action は置かない。`Button` は local observation の Refresh、�
 
 ## 確認方法
 
-最終確認日は 2026-07-18 である。`pnpm dlx shadcn@latest info --json` と `pnpm dlx shadcn@latest docs` で、この repository が Vite、React client、Tailwind v4、Radix Nova、Lucide、`@/components/ui` alias を使い、対象 component がすべて導入済みであることを確認した。CLI が返した URL は `agent-browser` で開き、公式 component page の title と内容を確認した。
+最終確認日は2026-07-18である。`pnpm dlx shadcn@latest info --json`と`pnpm dlx shadcn@latest docs`で、このrepositoryがVite、React client、Tailwind v4、Radix Nova、Lucide、`@/components/ui` aliasを使い、対象componentがすべて導入済みであることを確認した。CLIが返したURLは公式component pageを開き、titleと内容を確認した。
 
 | 公式資料 | 確認した事項 | 実装判断 |
 |---|---|---|

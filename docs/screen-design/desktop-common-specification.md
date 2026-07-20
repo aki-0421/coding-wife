@@ -291,7 +291,7 @@ Web Storageを永続正本にしない。preferenceのmissing/corrupt/unknown ve
 | visual regression | 1470×836でFigma主要boundary ±2px |
 | window restart | first launchが非fullscreenの標準zoom、通常resize後のcold startが同じlogical size、zoom後のcold startがzoom状態、fullscreen終了が直前の非fullscreen状態を復元 |
 
-agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced motion、ja/enを検証し、screenshotは`/tmp`またはignore済み`tmp/`へ保存する。
+WebdriverIOで実Tauri windowを1470×836、1280×800、960×640にして、200% text zoom、reduced motion、ja/enを検証し、screenshotは`/tmp`またはignore済み`tmp/desktop-qa/`へ保存する。
 
 ## OS差分
 

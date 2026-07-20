@@ -21,9 +21,9 @@ read_when:
 - 対象: 残存アプリ機能、非機能要件、macOS release、英語審査導線、動画、Devpost、提出証跡
 - 非対象: 既存Git履歴のrevert、undo、rewind、書き換え。基準点以降は前進する追加コミットだけで閉じる。
 
-この文書でいう「完了」は、コードが存在することではない。実装者テスト、`agent-browser`によるUI QA、repository全体の品質ゲート、実配布物の起動確認、審査アクセスの証跡がすべて成立した状態を指す。現時点をproduction-readyまたはsubmission-readyとは扱わない。
+この文書でいう「完了」は、コードが存在することではない。実装者テスト、WebdriverIOによる実Tauri UI QA、repository全体の品質ゲート、実配布物の起動確認、審査アクセスの証跡がすべて成立した状態を指す。現時点をproduction-readyまたはsubmission-readyとは扱わない。
 
-独立レビューは締切までの工程から**一時的に除外**する。独立レビューを待たない一方で、実装者による自動テスト、race/error test、`agent-browser` UI QA、native smoke、lint/typecheck/test/buildなどの品質ゲートは省略しない。
+独立レビューは締切までの工程から**一時的に除外**する。独立レビューを待たない一方で、実装者による自動テスト、race/error test、WebdriverIO desktop QA、native smoke、lint/typecheck/test/buildなどの品質ゲートは省略しない。
 
 ## 現在の完了境界
 
@@ -64,7 +64,7 @@ read_when:
     → typed contract / schema / migration
       → native implementation
         → frontend composition
-          → tests / agent-browser / native smoke
+          → tests / WebdriverIO desktop QA / native smoke
 ```
 
 - 実装中に仕様差分が見つかった場合は、先にrequirements、次にscreen designを更新してからコードへ進む。
@@ -161,7 +161,7 @@ read_when:
 | Privacy/security | support本文をmain session/historyへ書かず、secret、token、absolute private path、raw stderr、PIIをUI/log/evidence/videoへ出さない。Commitとworkspace lifecycleはsource/Git refを変更しない。 |
 | Offline/error | Codex auth/model failure、network offline、TTS unavailable、repository missing/read-only/changed、DB corruption、Live2D invalid pack、timeout/quotaを安全なlocalized errorとrecoveryへ落とす。主要historyは保持する。 |
 | Performance | 200 workspaceでfilter/selectionの承認済みp95、Live2D first frame/FPS/input latency、caption latency、close cleanup deadlineをrelease artifactで測定し、長時間runでもlistener/process/cacheが増殖しない。 |
-| Responsive UI | `agent-browser`でdesktop 1470×836、tablet/compact 960×640、幅480の画面を確認する。横欠け、到達不能control、caption overflow、dialog clippingを0件にする。 |
+| Responsive UI | WebdriverIOで実Tauri windowを1470×836、1280×800、native最小960×640にして確認する。横欠け、到達不能control、caption overflow、dialog clippingを0件にする。 |
 | Native-only | picker、SQLite restart、process cleanup、single-instance、TTS、`.app` launchなどbrowserでは代替できない項目を実Tauri appで確認する。 |
 
 ## フェーズ別チェックリストと正確なコミット単位
@@ -242,7 +242,7 @@ read_when:
 ### Phase 1 Done gate
 
 - [ ] C03〜C13の全unitが統合され、demoに見える無反応button、local-only save、偽diagnostic、暗黙captionが0件。
-- [ ] ja/enの主要happy pathとmajor error pathを、desktop、tablet、幅480の`agent-browser`で完走する。
+- [ ] ja/enの主要happy pathとmajor error pathを、1470×836、1280×800、960×640の実Tauri windowでWebdriverIOから完走する。
 - [ ] 実Tauri appでworkspace作成→main turn→trusted commit evidence→「詳しく教えて」→caption/TTS設定→Context保存→restart→repair/quitを完走する。
 - [ ] このgateを通るまで、詳細改善や最終動画撮影へ進まない。
 
@@ -340,7 +340,7 @@ git status --short
 - [ ] primary build threadで`/feedback`を実行し、代表Session IDを保存してDevpostへ入力する。
 - [ ] evidenceにSession ID、final commit、artifact checksum、video URL、repository access、human decisions、Codex contributionの対応を残す。
 - [ ] draft保存後、previewを別sessionで開き、link、layout、video、repo、英語だけで理解できるjudge pathを確認する。
-- [ ] Official Rules、FAQ、Devpost formは提出直前に`agent-browser`で再確認し、新しい情報を使う場合は対象hackathon文書の`updated`と`last_verified`を更新する。
+- [ ] Official Rules、FAQ、Devpost formは提出直前にWeb検索またはHTTP取得で公式pageを再確認し、新しい情報を使う場合は対象hackathon文書の`updated`と`last_verified`を更新する。
 - [ ] submit confirmation、submission URL、最終screenshotを保存する。
 
 GitHub invitation、YouTube upload/publication、`/feedback`実行、Devpost draft write/submit、trackやteamを確定する操作はexternal stateを変更する。これらは最終段階で利用者から対象と範囲について**明示的な権限**を得てから実施する。権限がない間は、草案、command、field map、checklistの準備までに留める。
@@ -353,7 +353,7 @@ GitHub invitation、YouTube upload/publication、`/feedback`実行、Devpost dra
 
 - [ ] C01〜C20が完了し、demo-visible controlに無反応、local-only、fake readiness、暗黙presentationがない。
 - [ ] Commit read-only、support isolation、Stopのjob/cache維持、ja/en、accessibility、TTS、privacy/security、offline/error、performanceがgreenである。
-- [ ] desktop/tablet/幅480の`agent-browser`、native QA、全品質gate、real app/DMGのmount/launch/fresh-profile smokeがgreenである。
+- [ ] 1470×836、1280×800、960×640のWebdriverIO desktop QA、native QA、全品質gate、real app/DMGのmount/launch/fresh-profile smokeがgreenである。
 - [ ] Developer ID signing/notarization済み、または検証済みad-hoc sealとDeveloper ID未署名・unnotarized guideがある。
 - [ ] English README、public `< 3:00` video、Devpost、testing、Session ID、evidenceがfinal commitと一致する。
 - [ ] private repoの2審査先accessとsubmission confirmationを第三者相当sessionで確認し、締切前かつ十分なdiskがある。
@@ -379,7 +379,7 @@ GitHub invitation、YouTube upload/publication、`/feedback`実行、Devpost dra
 | macOS検証環境 | macOS 14+、fresh profileまたは別Mac相当環境、十分なdisk | C17、release Go |
 | Signing | Developer ID/notarization credentialと採用判断。ない場合はunsigned guide承認 | Distribution guidance、release Go |
 | Runtime prerequisites | Codex CLI/subscription、GPT-5.6 availability、optional TTS用設定、network/offline test環境 | Judge testing、error-path evidence |
-| Official Rules | submit直前のnetwork accessと`agent-browser`での再確認 | final evidence、submission |
+| Official Rules | submit直前のnetwork accessと公式pageのWeb検索またはHTTP取得 | final evidence、submission |
 | Deadline | 2026-07-21 23:00 JST内部締切、2026-07-22 09:00 JST公式締切 | 全外部操作とfinal Go |
 
 外部依存が未解決でも、権限不要の実装、テスト、草案、artifact作成は進める。外部writeが必要になった時点で対象、値、影響を提示して明示的な許可を求め、許可なしに招待・公開・送信しない。
