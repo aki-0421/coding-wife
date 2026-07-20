@@ -6,15 +6,15 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react"
 import {
+  ArrowLeftIcon,
   CheckCircle2Icon,
+  ChevronRightIcon,
   CircleAlertIcon,
   FolderPlusIcon,
-  LockKeyholeIcon,
-  PackageIcon,
   RefreshCwIcon,
-  ShieldCheckIcon,
   Trash2Icon,
 } from "lucide-react"
 
@@ -31,13 +31,7 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import {
   IsolatedCharacterPreview,
   type IsolatedCharacterPreviewPhase,
@@ -56,12 +50,12 @@ import {
   type CharacterModelLibraryCopy,
 } from "@/features/character/library/model-library-copy"
 import { SemanticMappingSettings } from "@/features/character/library/SemanticMappingSettings"
-import { loadTrustedCharacterFrame } from "@/features/character/runtime/character-pack-client"
-import { useI18n, type SupportedLocale } from "@/features/localization"
-import { cn } from "@/lib/utils"
+import { useI18n } from "@/features/localization"
 
 export interface CharacterModelLibrarySettingsProps {
   readonly workspaceId?: string
+  readonly onDetailPackChange?: (pack: CharacterPackView | null) => void
+  readonly renderCharacterContext?: (pack: CharacterPackView) => ReactNode
 }
 
 interface PreviewProgress {
@@ -78,37 +72,6 @@ const initialPreviewProgress: PreviewProgress = {
 
 function characterLength(value: string): number {
   return [...value].length
-}
-
-function formatBytes(value: number, locale: SupportedLocale): string {
-  if (value < 1024) return `${String(value)} B`
-  const units = ["KB", "MB", "GB"] as const
-  let size = value / 1024
-  let unit: (typeof units)[number] = units[0]
-  for (const candidate of units.slice(1)) {
-    if (size < 1024) break
-    size /= 1024
-    unit = candidate
-  }
-  return `${new Intl.NumberFormat(locale, {
-    maximumFractionDigits: size >= 10 ? 0 : 1,
-  }).format(size)} ${unit}`
-}
-
-function formatImportedAt(value: string, locale: SupportedLocale): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.valueOf())) return value
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-  }).format(date)
-}
-
-function replaceDate(template: string, date: string): string {
-  return template.replace("{date}", date)
-}
-
-function abbreviateHash(value: string): string {
-  return `${value.slice(0, 8)}…${value.slice(-8)}`
 }
 
 function operationErrorMessage(
@@ -155,113 +118,6 @@ function operationErrorMessage(
   return copy.errorMessages.generic
 }
 
-function IntegrityHash({ label, value }: { label: string; value: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <code
-          aria-label={`${label}: ${value}`}
-          className="font-mono text-caption text-muted-foreground"
-        >
-          {abbreviateHash(value)}
-        </code>
-      </TooltipTrigger>
-      <TooltipContent>
-        <code className="max-w-[38ch] break-all font-mono text-caption">
-          {value}
-        </code>
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-function TrustedFrameThumbnail({
-  copy,
-  pack,
-}: {
-  readonly copy: CharacterModelLibraryCopy
-  readonly pack: CharacterPackView
-}) {
-  const store = useCharacterLibraryStore()
-  const frameIdentity =
-    pack.kind === "custom" && pack.thumbnailSha256 !== null
-      ? `${pack.packId}:${pack.manifestHash}:${pack.thumbnailSha256}`
-      : null
-  const [thumbnail, setThumbnail] = useState<Readonly<{
-    identity: string
-    objectUrl: string
-  }> | null>(null)
-  const [unavailableIdentity, setUnavailableIdentity] = useState<string | null>(
-    null,
-  )
-
-  useEffect(() => {
-    if (frameIdentity === null || pack.manifest === null) return
-    const controller = new AbortController()
-    let objectUrl: string | null = null
-    void (async () => {
-      try {
-        const bytes = await loadTrustedCharacterFrame(
-          store.gateway.createPackRef(pack),
-          controller.signal,
-        )
-        if (bytes === null || controller.signal.aborted) return
-        objectUrl = URL.createObjectURL(
-          new Blob([new Uint8Array(bytes)], { type: "image/png" }),
-        )
-        if (controller.signal.aborted) {
-          URL.revokeObjectURL(objectUrl)
-          objectUrl = null
-          return
-        }
-        setThumbnail({ identity: frameIdentity, objectUrl })
-        setUnavailableIdentity(null)
-      } catch {
-        if (!controller.signal.aborted) setUnavailableIdentity(frameIdentity)
-      }
-    })()
-    return () => {
-      controller.abort()
-      if (objectUrl !== null) URL.revokeObjectURL(objectUrl)
-    }
-  }, [frameIdentity, pack, store.gateway])
-
-  const activeThumbnail =
-    thumbnail?.identity === frameIdentity ? thumbnail.objectUrl : null
-  const unavailable =
-    frameIdentity === null || unavailableIdentity === frameIdentity
-
-  if (activeThumbnail !== null) {
-    return (
-      <img
-        alt=""
-        aria-hidden="true"
-        className="size-[54px] shrink-0 rounded-control border border-divider bg-app-bg object-contain object-bottom"
-        data-character-thumbnail="trusted-frame"
-        src={activeThumbnail}
-      />
-    )
-  }
-  if (!unavailable) {
-    return (
-      <Skeleton
-        aria-label={copy.thumbnailLoading}
-        className="size-[54px] shrink-0 rounded-control"
-        data-character-thumbnail="loading"
-      />
-    )
-  }
-  return (
-    <span
-      aria-hidden="true"
-      className="flex size-[54px] shrink-0 items-center justify-center rounded-control border border-divider bg-app-bg"
-      data-character-thumbnail="unavailable"
-    >
-      <PackageIcon className="size-5 text-muted-foreground" />
-    </span>
-  )
-}
-
 function phaseLabel(
   phase: IsolatedCharacterPreviewPhase,
   copy: CharacterModelLibraryCopy,
@@ -280,139 +136,17 @@ function phaseLabel(
   }
 }
 
-function ModelCard({
-  copy,
-  disabled,
-  locale,
-  pack,
-  selected,
-  onRequestDelete,
-}: {
-  readonly copy: CharacterModelLibraryCopy
-  readonly disabled: boolean
-  readonly locale: SupportedLocale
-  readonly pack: CharacterPackView
-  readonly selected: boolean
-  readonly onRequestDelete: (pack: CharacterPackView) => void
-}) {
-  const inputId = `character-pack-${pack.packId}`
-  const detailId = `${inputId}-details`
-  return (
-    <div
-      className={cn(
-        "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-md rounded-control border border-divider bg-surface px-md py-md transition-colors",
-        selected && "border-primary/60 bg-selected-row",
-      )}
-      data-character-pack={pack.packId}
-      data-character-pack-selected={selected || undefined}
-    >
-      <RadioGroupItem
-        aria-describedby={detailId}
-        className="mt-xxs"
-        disabled={disabled}
-        id={inputId}
-        value={pack.packId}
-      />
-      <label
-        className="flex min-w-0 cursor-pointer items-start gap-sm"
-        htmlFor={inputId}
-      >
-        <TrustedFrameThumbnail copy={copy} pack={pack} />
-        <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 flex-wrap items-center gap-xs">
-            <span className="truncate text-title text-text-strong">
-              {pack.displayName}
-            </span>
-            {selected ? <Badge variant="success">{copy.selected}</Badge> : null}
-            <Badge variant="outline">
-              {pack.kind === "builtin" ? copy.bundled : copy.imported}
-            </Badge>
-          </span>
-          <span
-            className="mt-xs flex min-w-0 flex-wrap gap-x-md gap-y-xxs text-label text-muted-foreground"
-            id={detailId}
-          >
-            <span>{formatBytes(pack.totalBytes, locale)}</span>
-            <span>
-              {pack.textureCount} {copy.textures}
-            </span>
-            <span>
-              {pack.motionCount} {copy.motions}
-            </span>
-            {pack.expressionCount > 0 ? (
-              <span>
-                {pack.expressionCount} {copy.expressions}
-              </span>
-            ) : null}
-            <span>
-              {pack.runtimeFileCount} {copy.files}
-            </span>
-          </span>
-          <span className="mt-xs flex min-w-0 flex-wrap gap-x-md gap-y-xxs text-label text-muted-foreground">
-            <span className="inline-flex min-w-0 items-baseline gap-xxs">
-              <span>{copy.manifestHash}</span>
-              <IntegrityHash
-                label={copy.manifestHash}
-                value={pack.manifestHash}
-              />
-            </span>
-            {pack.thumbnailSha256 !== null ? (
-              <span className="inline-flex min-w-0 items-baseline gap-xxs">
-                <span>{copy.trustedFrameHash}</span>
-                <IntegrityHash
-                  label={copy.trustedFrameHash}
-                  value={pack.thumbnailSha256}
-                />
-              </span>
-            ) : null}
-          </span>
-          <span className="mt-xs block truncate text-label text-muted-foreground">
-            {pack.provenanceLabel}
-          </span>
-          {pack.importedAt !== null ? (
-            <span className="mt-xxs block text-label text-muted-foreground">
-              {replaceDate(
-                copy.importedAt,
-                formatImportedAt(pack.importedAt, locale),
-              )}
-            </span>
-          ) : null}
-        </span>
-      </label>
-      {pack.kind === "custom" ? (
-        <Button
-          aria-label={`${copy.delete}: ${pack.displayName}`}
-          disabled={disabled || !pack.deletable}
-          onClick={() => onRequestDelete(pack)}
-          size="xs"
-          type="button"
-          variant="ghost"
-        >
-          <Trash2Icon aria-hidden="true" data-icon="inline-start" />
-          {copy.delete}
-        </Button>
-      ) : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              aria-label={copy.bundledProtected}
-              className="mt-xxs flex size-6 items-center justify-center text-muted-foreground"
-              role="img"
-              tabIndex={0}
-            >
-              <LockKeyholeIcon aria-hidden="true" className="size-4" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{copy.bundledProtected}</TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  )
-}
-
 function CharacterModelLibrarySession({
+  onDetailPackChange,
+  renderCharacterContext,
   workspaceId,
 }: {
+  readonly onDetailPackChange:
+    | ((pack: CharacterPackView | null) => void)
+    | undefined
+  readonly renderCharacterContext:
+    | ((pack: CharacterPackView) => ReactNode)
+    | undefined
   workspaceId: string
 }) {
   const { locale } = useI18n()
@@ -434,11 +168,21 @@ function CharacterModelLibrarySession({
   const [deleteTarget, setDeleteTarget] = useState<CharacterPackView | null>(
     null,
   )
+  const [detailPackId, setDetailPackId] = useState<string | null>(null)
+  const characterRowRefs = useRef(new Map<string, HTMLButtonElement>())
+  const returnFocusPackIdRef = useRef<string | null>(null)
 
   const snapshot = library.snapshot
   const preview = library.preview
+  const detailPack = snapshot?.packs.find(
+    (pack) => pack.packId === detailPackId,
+  )
   const customPack = snapshot?.packs.find((pack) => pack.kind === "custom")
   const replacingCustom = customPack !== undefined
+
+  useEffect(() => {
+    onDetailPackChange?.(detailPack ?? null)
+  }, [detailPack, onDetailPackChange])
   const previewPackRef = useMemo(
     () => (preview === null ? null : store.previewPackRef(workspaceId)),
     [preview, store, workspaceId],
@@ -470,6 +214,24 @@ function CharacterModelLibrarySession({
     if (!store.consumeRestoreFocus(workspaceId)) return
     queueMicrotask(() => importTriggerRef.current?.focus())
   }, [store, workspaceId])
+
+  useEffect(() => {
+    if (
+      detailPackId === null ||
+      snapshot === null ||
+      detailPack !== undefined
+    ) {
+      return
+    }
+    setDetailPackId(null)
+  }, [detailPack, detailPackId, snapshot])
+
+  useEffect(() => {
+    if (detailPackId !== null || returnFocusPackIdRef.current === null) return
+    const originPackId = returnFocusPackIdRef.current
+    returnFocusPackIdRef.current = null
+    characterRowRefs.current.get(originPackId)?.focus()
+  }, [detailPackId])
 
   const beginImport = async () => {
     setPreviewFailure(null)
@@ -577,11 +339,19 @@ function CharacterModelLibrarySession({
     void store.selectPack(workspaceId, packId).catch(() => undefined)
   }
 
+  const closeDetail = () => {
+    if (detailPackId === null) return
+    const originPackId = detailPackId
+    returnFocusPackIdRef.current = originPackId
+    setDetailPackId(null)
+  }
+
   const deletePack = async () => {
     if (deleteTarget === null) return
     try {
       await store.deletePack(workspaceId, deleteTarget.packId)
       setDeleteTarget(null)
+      setDetailPackId(null)
     } catch {
       // Keep confirmation open and expose only the normalized store error.
     }
@@ -593,53 +363,95 @@ function CharacterModelLibrarySession({
       className="flex min-w-0 flex-col gap-md"
       data-character-library={library.status}
     >
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-md">
-        <div className="min-w-0 max-w-[62ch]">
-          <h3
-            className="m-0 text-title text-text-strong"
-            id="character-model-library-title"
+      {detailPackId === null ? (
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-md">
+          <div className="min-w-0 max-w-[62ch]">
+            <h3
+              className="m-0 text-title text-text-strong"
+              id="character-model-library-title"
+            >
+              {copy.title}
+            </h3>
+            <p className="m-0 mt-xxs text-caption text-muted-foreground">
+              {copy.description}
+            </p>
+          </div>
+          <Button
+            disabled={
+              mutationActive ||
+              preview !== null ||
+              store.gateway.kind !== "native"
+            }
+            onClick={() => void beginImport()}
+            ref={importTriggerRef}
+            size="xs"
+            title={
+              store.gateway.kind === "native"
+                ? undefined
+                : copy.importUnavailable
+            }
+            type="button"
+            variant="secondary"
           >
-            {copy.title}
-          </h3>
-          <p className="m-0 mt-xxs text-caption text-muted-foreground">
-            {copy.description}
-          </p>
+            <FolderPlusIcon aria-hidden="true" data-icon="inline-start" />
+            {library.mutation === "importing"
+              ? copy.preparing
+              : replacingCustom
+                ? copy.replaceModel
+                : copy.importModel}
+          </Button>
         </div>
-        <Button
-          disabled={
-            mutationActive ||
-            preview !== null ||
-            store.gateway.kind !== "native"
-          }
-          onClick={() => void beginImport()}
-          ref={importTriggerRef}
-          size="xs"
-          type="button"
-          variant="secondary"
-        >
-          <FolderPlusIcon aria-hidden="true" data-icon="inline-start" />
-          {library.mutation === "importing"
-            ? copy.preparing
-            : replacingCustom
-              ? copy.replaceModel
-              : copy.importModel}
-        </Button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-xs text-label text-muted-foreground">
-        <ShieldCheckIcon aria-hidden="true" className="size-3" />
-        <span>{copy.privateLibrary}</span>
-        <span aria-hidden="true">·</span>
-        <span>{copy.customSlot}</span>
-        <Badge variant="outline">
-          {replacingCustom ? copy.customSlotFilled : copy.customSlotAvailable}
-        </Badge>
-        <span aria-hidden="true">·</span>
-        <span>{copy.noLicenseRequired}</span>
-        {store.gateway.kind !== "native" ? (
-          <span>· {copy.importUnavailable}</span>
-        ) : null}
-      </div>
+      ) : detailPack !== undefined ? (
+        <div className="flex min-w-0 flex-col gap-sm">
+          <Button
+            className="self-start"
+            onClick={closeDetail}
+            size="xs"
+            type="button"
+            variant="ghost"
+          >
+            <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
+            {copy.backToList}
+          </Button>
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-md">
+            <div className="flex min-w-0 flex-wrap items-center gap-xs">
+              <h3
+                className="m-0 truncate text-headline text-text-strong"
+                id="character-model-library-title"
+              >
+                {detailPack.displayName}
+              </h3>
+              {detailPack.packId === snapshot?.selectedPackId ? (
+                <Badge variant="success">{copy.selected}</Badge>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-xs">
+              {detailPack.packId !== snapshot?.selectedPackId ? (
+                <Button
+                  disabled={mutationActive}
+                  onClick={() => selectPack(detailPack.packId)}
+                  size="xs"
+                  type="button"
+                >
+                  {copy.useCharacter}
+                </Button>
+              ) : null}
+              {detailPack.kind === "custom" ? (
+                <Button
+                  disabled={mutationActive || !detailPack.deletable}
+                  onClick={() => setDeleteTarget(detailPack)}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trash2Icon aria-hidden="true" data-icon="inline-start" />
+                  {copy.delete}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {snapshot?.fallbackApplied ? (
         <Alert>
@@ -685,25 +497,42 @@ function CharacterModelLibrarySession({
         </div>
       ) : null}
 
-      {snapshot !== null ? (
-        <RadioGroup
-          aria-label={copy.selectModel}
-          disabled={mutationActive}
-          onValueChange={selectPack}
-          value={snapshot.selectedPackId}
-        >
-          {snapshot.packs.map((pack) => (
-            <ModelCard
-              copy={copy}
-              disabled={mutationActive}
-              key={pack.packId}
-              locale={locale}
-              onRequestDelete={setDeleteTarget}
-              pack={pack}
-              selected={pack.packId === snapshot.selectedPackId}
-            />
-          ))}
-        </RadioGroup>
+      {snapshot !== null && detailPackId === null ? (
+        <div className="overflow-hidden rounded-control border border-divider">
+          {snapshot.packs.map((pack) => {
+            const selected = pack.packId === snapshot.selectedPackId
+            return (
+              <button
+                aria-label={`${copy.openSettings}: ${pack.displayName}${selected ? `, ${copy.selected}` : ""}`}
+                className={`flex min-h-14 w-full min-w-0 items-center gap-sm border-b border-divider px-md py-sm text-left transition-colors last:border-b-0 hover:bg-muted/60 focus-visible:z-10 ${selected ? "bg-selected-row" : "bg-surface"}`}
+                data-character-pack={pack.packId}
+                data-character-pack-selected={selected || undefined}
+                disabled={mutationActive}
+                key={pack.packId}
+                onClick={() => setDetailPackId(pack.packId)}
+                ref={(element) => {
+                  if (element === null)
+                    characterRowRefs.current.delete(pack.packId)
+                  else characterRowRefs.current.set(pack.packId, element)
+                }}
+                type="button"
+              >
+                <span className="min-w-0 flex-1 truncate text-title text-text-strong">
+                  {pack.displayName}
+                </span>
+                {selected ? (
+                  <Badge className="shrink-0" variant="success">
+                    {copy.selected}
+                  </Badge>
+                ) : null}
+                <ChevronRightIcon
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-muted-foreground"
+                />
+              </button>
+            )
+          })}
+        </div>
       ) : null}
 
       {library.mutation === "selecting" ? (
@@ -715,8 +544,14 @@ function CharacterModelLibrarySession({
         </p>
       ) : null}
 
-      {snapshot !== null ? (
-        <SemanticMappingSettings workspaceId={workspaceId} />
+      {detailPack !== undefined ? (
+        <>
+          <SemanticMappingSettings
+            packId={detailPack.packId}
+            workspaceId={workspaceId}
+          />
+          {renderCharacterContext?.(detailPack)}
+        </>
       ) : null}
 
       <Dialog
@@ -922,11 +757,13 @@ function CharacterModelLibrarySession({
 }
 
 export function CharacterModelLibrarySettings(
-  _props: CharacterModelLibrarySettingsProps,
+  props: CharacterModelLibrarySettingsProps,
 ) {
   return (
     <CharacterModelLibrarySession
       key={characterLibraryScopeId}
+      onDetailPackChange={props.onDetailPackChange}
+      renderCharacterContext={props.renderCharacterContext}
       workspaceId={characterLibraryScopeId}
     />
   )

@@ -131,7 +131,7 @@
       { "name": "press", "value": "120ms cubic-bezier(0.25, 1, 0.5, 1)", "purpose": "button active feedback。" },
       { "name": "state", "value": "150ms cubic-bezier(0.25, 1, 0.5, 1)", "purpose": "hover、selection、focusの標準遷移。" },
       { "name": "overlay", "value": "200ms cubic-bezier(0.25, 1, 0.5, 1)", "purpose": "tab、popover、dropdownの出現。" },
-      { "name": "panel", "value": "250ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "sidebar collapseとcompanion縮退。" },
+      { "name": "panel", "value": "250ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "sidebar collapseとcharacter縮退。" },
       { "name": "reduced", "value": "80ms linear", "purpose": "reduced motion時のcrossfade。位置とscaleは動かさない。" }
     ],
     "breakpoints": [
@@ -201,25 +201,25 @@
       "name": "Narration Mute Toggle",
       "kind": "button",
       "refersTo": "icon-toggle",
-      "description": "companion右下で次の発話からmute状態を切り替える27px circle。",
+      "description": "character右下で次の発話からmute状態を切り替える27px circle。",
       "html": "<button class=\"ds-mute\" type=\"button\" aria-pressed=\"false\" aria-label=\"Mute narration\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M11 5 6 9H2v6h4l5 4V5Zm4.5 3.5a5 5 0 0 1 0 7M18 6a8 8 0 0 1 0 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\"/></svg></button>",
       "css": ".ds-mute { display: grid; width: 27px; height: 27px; padding: 0; place-items: center; border: 1px solid rgba(255,255,255,.1); border-radius: 9999px; background: rgba(39,37,35,.8); color: #d4d4d8; transition: background 150ms cubic-bezier(.25,1,.5,1); } .ds-mute svg { width: 12px; height: 12px; } .ds-mute:hover { background: #2b2928; } .ds-mute:focus-visible { outline: 2px solid #d0b1a3; outline-offset: 2px; } .ds-mute[aria-pressed='true'] { color: #ed575d; }"
     }
   ],
   "narrative": {
     "northStar": "静かな作戦室",
-    "overview": "Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面を基準にする。左 255.04px の workspace sidebar、上 81px の二段 header、中央 607.11px の Chat、右 607.84px の Live2D companion を一続きの暗い面として構成する。標準サイズでは sidebar / chat / companion を `255 / 607 / 608` の比率で固定し、Chat と companion の間へ可視 divider や card を置かない。\n\n色戦略は Restrained。ほぼ無彩色の暗い面を基礎に、温かいローズを active state、状態色を証拠、Hiyori の色を人格表現へ限定する。shadcn は Tabs、Button、Textarea、ScrollArea、Popover、Dialog、RadioGroup、Tooltip、Skeleton の interaction primitive としてだけ使い、layout、密度、色、文字、radius はこの文書へ合わせる。\n\nこれは terminal clone、game HUD、neon purple AI dashboard ではない。glassmorphism と generic card grid を拒み、通常の message、tool event、error をカードへ分断せず、文字階層と 3px 系列の rhythm で読む。chatty mascot や emotional coercion によって判断を誘導せず、キャラクターは証拠の横で静かに状態を伝える。",
+    "overview": "Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面を基準にする。左 255.04px の workspace sidebar、上 81px の二段 header、中央 607.11px の Chat、右 607.84px の Live2D character を一続きの暗い面として構成する。標準サイズでは sidebar / chat / character を `255 / 607 / 608` の比率で固定し、Chat と character の間へ可視 divider や card を置かない。\n\n色戦略は Restrained。ほぼ無彩色の暗い面を基礎に、温かいローズを active state、状態色を証拠、Hiyori の色を人格表現へ限定する。shadcn は Tabs、Button、Textarea、ScrollArea、Popover、Dialog、RadioGroup、Tooltip、Skeleton の interaction primitive としてだけ使い、layout、密度、色、文字、radius はこの文書へ合わせる。\n\nこれは terminal clone、game HUD、neon purple AI dashboard ではない。glassmorphism と generic card grid を拒み、通常の message、tool event、error をカードへ分断せず、文字階層と 3px 系列の rhythm で読む。chatty mascot や emotional coercion によって判断を誘導せず、キャラクターは証拠の横で静かに状態を伝える。",
     "keyCharacteristics": [
       "1470×836 を基準にした 255 / 607 / 608 の三領域",
-      "同じ背景へ同居し、枠へ閉じ込めない Live2D companion",
+      "同じ背景へ同居し、枠へ閉じ込めない Live2D character",
       "3px 刻みの高密度な spacing と 4.5px 中心の小さな radius",
       "Inter / Noto Sans JP と JetBrains Mono の二系統だけ",
       "文字・形・icon を併用する証拠中心の semantic state",
       "150〜250ms の状態 transition と完全な reduced-motion 代替"
     ],
     "rules": [
-      { "name": "The Continuous Desk Rule", "body": "Chat と companion は一つの机である。通常状態で二つの card や中央 divider に分割してはならない。", "section": "overview" },
-      { "name": "The Evidence Priority Rule", "body": "判断、error、review diff、test result が必要な時は companion を縮小または静止し、証拠と操作の可読領域を優先する。", "section": "overview" },
+      { "name": "The Continuous Desk Rule", "body": "Chat と character は一つの机である。通常状態で二つの card や中央 divider に分割してはならない。", "section": "overview" },
+      { "name": "The Evidence Priority Rule", "body": "判断、error、review diff、test result が必要な時は character を縮小または静止し、証拠と操作の可読領域を優先する。", "section": "overview" },
       { "name": "The Ten Percent Rule", "body": "warm active、branch violet、semantic status を合わせても一画面の 10% を超えさせない。色の希少性が意味を守る。", "section": "colors" },
       { "name": "The Evidence Is Not Color Rule", "body": "error、success、running、canceled は label、icon、fill/outline/dash の形と併用し、色だけで区別しない。", "section": "colors" },
       { "name": "The Two-Family Rule", "body": "UI sans と code mono 以外の font family を追加しない。button、tab、label に display font を使うことは禁止する。", "section": "typography" },
@@ -228,7 +228,7 @@
       { "name": "The Semantic Stack Rule", "body": "z-order は timeline < sticky composer < dropdown/popover < decision overlay < toast/tooltip とし、任意の巨大な z-index を使わない。", "section": "elevation" }
     ],
     "dos": [
-      "Do 1470×836 で sidebar 255.04px、header 81px、Chat 607.11px、companion 607.84px を基準にし、主要 boundary を Figma node `8:2` の ±2 CSS px に収める。",
+      "Do 1470×836 で sidebar 255.04px、header 81px、Chat 607.11px、character 607.84px を基準にし、主要 boundary を Figma node `8:2` の ±2 CSS px に収める。",
       "Do card を selected workspace、code chip、composer、必要な overlay へ限定し、通常 message と tool event は連続面へ置く。",
       "Do status を色、label、icon、fill/outline/dash の少なくとも三つで示す。",
       "Do normal text contrast 4.5:1、visible focus、24×24px 以上の hit target、200% text zoom を検証する。",

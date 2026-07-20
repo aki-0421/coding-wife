@@ -222,6 +222,14 @@ function appSettingsButton(): HTMLButtonElement {
   return button
 }
 
+function selectedWorkspaceButton(): HTMLButtonElement {
+  const navigation = screen.getByRole("navigation", { name: "Workspaces" })
+  const button = within(navigation).getByRole<HTMLButtonElement>("button", {
+    current: "page",
+  })
+  return button
+}
+
 function expectFocusWithin(container: HTMLElement): void {
   const activeElement = document.activeElement
   if (!(activeElement instanceof HTMLElement)) {
@@ -475,7 +483,7 @@ describe("WorkspaceShell", () => {
       name: "Backlog(0)",
     })
     const selectedWorkspace = within(navigation).getByRole("button", {
-      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+      name: /feature\/live2d-character, aki-0421\/coding-wife/,
     })
 
     expect(doneToggle).toHaveAttribute("aria-expanded", "true")
@@ -544,7 +552,7 @@ describe("WorkspaceShell", () => {
       name: "main, aki-0421/coding-wife, Done",
     })
     const selectedWorkspace = within(navigation).getByRole("button", {
-      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+      name: /feature\/live2d-character, aki-0421\/coding-wife/,
     })
 
     expect(screen.getByRole("heading", { name: "Workspaces" })).toHaveClass(
@@ -567,7 +575,7 @@ describe("WorkspaceShell", () => {
       doneWorkspace.querySelector('[data-repository-avatar="github"]'),
     ).toHaveAttribute("data-github-owner", "aki-0421")
     expect(
-      within(selectedWorkspace).getByText("feature/live2d-companion"),
+      within(selectedWorkspace).getByText("feature/live2d-character"),
     ).toHaveClass("text-sidebar-item", "text-text-strong")
     expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
   })
@@ -1566,8 +1574,9 @@ describe("WorkspaceShell", () => {
     const workspaceTabs = within(
       screen.getByRole("tablist", { name: "Workspace views" }),
     )
-    expect(workspaceTabs.getAllByRole("tab")).toHaveLength(3)
+    expect(workspaceTabs.getAllByRole("tab")).toHaveLength(2)
     expect(workspaceTabs.queryByRole("tab", { name: "Context" })).toBeNull()
+    expect(workspaceTabs.queryByRole("tab", { name: "Settings" })).toBeNull()
 
     const chatTab = screen.getByRole("tab", { name: /Chat/ })
     const commitTab = screen.getByRole("tab", { name: "Commit" })
@@ -1575,6 +1584,9 @@ describe("WorkspaceShell", () => {
 
     fireEvent.keyDown(window, { ctrlKey: true, key: "Tab" })
     expect(commitTab).toHaveAttribute("aria-selected", "true")
+
+    fireEvent.keyDown(window, { ctrlKey: true, key: "Tab" })
+    expect(chatTab).toHaveAttribute("aria-selected", "true")
 
     fireEvent.keyDown(window, { key: "k", metaKey: true })
     const filter = await screen.findByRole("combobox", {
@@ -1658,7 +1670,7 @@ describe("WorkspaceShell", () => {
 
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+        name: /feature\/live2d-character, aki-0421\/coding-wife/,
       }),
     )
     expect(composer).toHaveValue("Keep this draft with the Live2D workspace")
@@ -2052,47 +2064,35 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
   })
 
-  it("separates project context details from workspace settings", async () => {
+  it("keeps project settings in app settings without a workspace settings tab", async () => {
     const user = userEvent.setup()
     renderWorkspace()
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Workspace settings" }),
-    ).toBeVisible()
-    expect(
-      screen.getByText(
-        "History and privacy for coding-wife/build-live2d-desktop-app.",
-      ),
-    ).toBeVisible()
-    expect(
-      screen.getByRole("heading", { name: "History & privacy" }),
-    ).toBeVisible()
-    expect(
-      screen.queryByRole("button", { name: "Character context" }),
-    ).toBeNull()
-    expect(screen.queryByRole("button", { name: "Companion" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Project context" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "General" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Audio" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Support" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Diagnostics" })).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull()
 
     await user.click(appSettingsButton())
-    const appHeading = screen.getByRole("heading", {
-      level: 1,
-      name: "App settings",
+    const appLocation = screen.getByRole("navigation", {
+      name: "App settings location",
     })
-    expect(appHeading).toBeVisible()
-    await waitFor(() => expect(appHeading).toHaveFocus())
+    expect(within(appLocation).getByText("App settings")).toBeVisible()
+    await waitFor(() => {
+      expect(document.activeElement).toHaveAttribute(
+        "data-app-settings-current-section",
+      )
+      expect(document.activeElement).toHaveAttribute("aria-current", "page")
+      expect(document.activeElement).toHaveTextContent("General")
+    })
+    expect(
+      screen.queryByRole("button", { name: "Back to workspace" }),
+    ).toBeNull()
     expect(appSettingsButton()).toHaveAttribute("aria-current", "page")
     expect(screen.getAllByRole("button", { name: "General" })[0]).toBeVisible()
     expect(
-      screen.getByRole("button", { name: "Character context" }),
-    ).toBeVisible()
-    expect(screen.getByRole("button", { name: "Companion" })).toBeVisible()
+      screen.queryByRole("button", { name: "Character context" }),
+    ).toBeNull()
+    expect(screen.getByRole("button", { name: "Character" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Audio" })).toBeVisible()
-    expect(screen.getByRole("button", { name: "Support" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Support" })).toBeNull()
     expect(screen.getByRole("button", { name: "Diagnostics" })).toBeVisible()
     expect(screen.queryByRole("button", { name: "Project context" })).toBeNull()
     expect(
@@ -2112,20 +2112,51 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Back to projects" }))
 
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Workspace settings" }),
-    ).toBeVisible()
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /Settings/ })).toHaveFocus(),
+    await user.click(selectedWorkspaceButton())
+    expect(screen.getByRole("tab", { name: /Chat/ })).toBeVisible()
+    expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull()
+    expect(selectedWorkspaceButton()).toHaveFocus()
+  })
+
+  it("edits bundled Hiyori context from the character detail", async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await user.click(appSettingsButton())
+    await user.click(screen.getByRole("button", { name: "Character" }))
+    await user.click(
+      await screen.findByRole("button", {
+        name: /Open character settings: 桃瀬ひより/,
+      }),
     )
+
+    expect(
+      await screen.findByRole("heading", { name: "Character context" }),
+    ).toBeVisible()
+    const displayName = screen.getByRole("textbox", { name: "Display name" })
+    const behavior = screen.getByRole("textbox", { name: "Behavior" })
+    expect(displayName).toHaveValue("桃瀬ひより")
+    expect(displayName).not.toBeDisabled()
+    expect(behavior).not.toBeDisabled()
+    await user.type(behavior, " Keep a gentle pace.")
+    await user.click(
+      screen.getByRole("button", { name: "Save character settings" }),
+    )
+
+    expect(
+      await screen.findByText(
+        "Saved. This version will be used from the next turn.",
+      ),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Character context" }),
+    ).not.toBeInTheDocument()
   })
 
   it("uses the persisted history mode consistently in chat and diagnostics", async () => {
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () => Promise.resolve(nativeWorkspaceState()),
-      deleteWorkspaceHistory: () => Promise.resolve(nativeWorkspaceState()),
     }
     renderWorkspace(adapter)
 
@@ -2143,16 +2174,14 @@ describe("WorkspaceShell", () => {
     expect(localHistory.closest("article")).toHaveTextContent("Ready")
   })
 
-  it("labels demo history as ephemeral and resets only preview memory", async () => {
+  it("labels demo history as ephemeral in chat and diagnostics", async () => {
     const ephemeralState: WorkspaceAdapterState = {
       ...nativeWorkspaceState(),
       history: { mode: "ephemeral", errorCode: null, backupName: null },
     }
-    const deleteWorkspaceHistory = vi.fn().mockResolvedValue(ephemeralState)
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "demo",
       loadState: () => Promise.resolve(ephemeralState),
-      deleteWorkspaceHistory,
     }
     const user = userEvent.setup()
     renderWorkspace(adapter)
@@ -2170,72 +2199,6 @@ describe("WorkspaceShell", () => {
       name: "Workspace history",
     })
     expect(localHistory.closest("article")).toHaveTextContent("Unavailable")
-
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
-    expect(screen.getByText("Stored in demo memory")).toBeVisible()
-    expect(
-      screen.getByText(/Reloading restores the bundled demo/),
-    ).toBeVisible()
-    const reset = screen.getByRole("button", { name: "Reset demo history" })
-    expect(reset).toBeEnabled()
-    await user.click(reset)
-    const dialog = await screen.findByRole("dialog", {
-      name: "Reset this preview's demo history?",
-    })
-    expect(dialog).toHaveTextContent(
-      "No repository files, commits, or branches",
-    )
-    await user.click(within(dialog).getByRole("button", { name: "Reset demo" }))
-    await waitFor(() => expect(deleteWorkspaceHistory).toHaveBeenCalledOnce())
-    await waitFor(() => expect(reset).toHaveFocus())
-  })
-
-  it("restores history action focus after Cancel, Escape, close, and confirm", async () => {
-    const deleteWorkspaceHistory = vi
-      .fn()
-      .mockResolvedValue(nativeWorkspaceState())
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(nativeWorkspaceState()),
-      deleteWorkspaceHistory,
-    }
-    const user = userEvent.setup()
-    renderWorkspace(adapter)
-
-    await user.click(await screen.findByRole("tab", { name: "Settings" }))
-    const trigger = screen.getByRole("button", {
-      name: "Delete workspace history",
-    })
-
-    await user.click(trigger)
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", {
-        name: "Cancel",
-      }),
-    )
-    await waitFor(() => expect(trigger).toHaveFocus())
-
-    await user.click(trigger)
-    await user.keyboard("{Escape}")
-    await waitFor(() => expect(trigger).toHaveFocus())
-
-    await user.click(trigger)
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", {
-        name: "Close",
-      }),
-    )
-    await waitFor(() => expect(trigger).toHaveFocus())
-
-    await user.click(trigger)
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", {
-        name: "Delete history",
-      }),
-    )
-    await waitFor(() => expect(deleteWorkspaceHistory).toHaveBeenCalledOnce())
-    await waitFor(() => expect(trigger).toHaveFocus())
   })
 
   it("closes compact app settings navigation after selection, Escape, and outside click", async () => {
@@ -2286,10 +2249,8 @@ describe("WorkspaceShell", () => {
     expect(
       document.querySelector('[data-slot="popover-content"]'),
     ).toBeInTheDocument()
-    const outsideTarget = screen.getByRole("heading", {
-      name: "App settings",
-    })
-    await user.click(outsideTarget)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await user.click(screen.getByRole("heading", { name: "Diagnostics" }))
     await waitFor(() =>
       expect(
         document.querySelector('[data-slot="popover-content"]'),
@@ -2347,7 +2308,7 @@ describe("WorkspaceShell", () => {
     ).toHaveFocus()
   })
 
-  it("groups compact persistence and companion status without removing controls", async () => {
+  it("groups compact persistence and character status without removing controls", async () => {
     const user = userEvent.setup()
     const { container } = renderWorkspace()
     const statusRegion = container.querySelector<HTMLElement>(
@@ -2356,17 +2317,17 @@ describe("WorkspaceShell", () => {
     const persistenceStatus = container.querySelector<HTMLElement>(
       "[data-persistence-status]",
     )
-    const companionStatus = container.querySelector<HTMLElement>(
-      "[data-companion-status-mobile]",
+    const characterStatus = container.querySelector<HTMLElement>(
+      "[data-character-status-mobile]",
     )
 
     expect(statusRegion).toContainElement(persistenceStatus)
-    expect(statusRegion).toContainElement(companionStatus)
+    expect(statusRegion).toContainElement(characterStatus)
     expect(persistenceStatus).toHaveTextContent("Persisted locally")
-    expect(companionStatus).toHaveTextContent("Disconnected")
+    expect(characterStatus).toHaveTextContent("Disconnected")
 
-    const mute = within(companionStatus as HTMLElement).getByRole("button", {
-      name: "Mute companion",
+    const mute = within(characterStatus as HTMLElement).getByRole("button", {
+      name: "Mute character",
     })
     await user.click(mute)
     expect(mute).toHaveAttribute("aria-pressed", "true")
@@ -2525,12 +2486,12 @@ describe("WorkspaceShell", () => {
     expect(
       within(toolEvent as HTMLElement).getByText("46 focused tests passed"),
     ).toBeVisible()
-    const compactCompanion = container.querySelector<HTMLElement>(
-      "[data-companion-status-mobile]",
+    const compactCharacter = container.querySelector<HTMLElement>(
+      "[data-character-status-mobile]",
     )
-    expect(compactCompanion).not.toBeNull()
+    expect(compactCharacter).not.toBeNull()
     expect(
-      within(compactCompanion as HTMLElement).getByText("Waiting for you"),
+      within(compactCharacter as HTMLElement).getByText("Waiting for you"),
     ).toBeVisible()
     const approval = container.querySelector<HTMLElement>(
       '[data-event-kind="approval"]',
@@ -2726,12 +2687,12 @@ describe("WorkspaceShell", () => {
     expect(screen.getByLabelText("推論強度")).toBeVisible()
     expect(screen.getByLabelText("GPT-5.6 Sol, 固定モデル")).toBeVisible()
     expect(screen.getByLabelText("下書き項目")).toBeVisible()
-    const compactCompanion = container.querySelector<HTMLElement>(
-      "[data-companion-status-mobile]",
+    const compactCharacter = container.querySelector<HTMLElement>(
+      "[data-character-status-mobile]",
     )
-    expect(compactCompanion).not.toBeNull()
+    expect(compactCharacter).not.toBeNull()
     expect(
-      within(compactCompanion as HTMLElement).getByText("回答待ち"),
+      within(compactCharacter as HTMLElement).getByText("回答待ち"),
     ).toBeVisible()
   })
 
@@ -3039,6 +3000,7 @@ describe("WorkspaceShell", () => {
           workspaceId: "workspace-native",
           projectVersion: 1,
           projectHash: "a".repeat(64),
+          characterPackId: "builtin:hiyori_pro",
           characterVersion: 1,
           characterHash: "b".repeat(64),
           snapshotHash: "c".repeat(64),
@@ -3444,11 +3406,7 @@ describe("WorkspaceShell", () => {
         "fallback-repository",
       ),
     ).toBeVisible()
-    await user.click(
-      within(appSettings as HTMLElement).getByRole("button", {
-        name: "Back to workspace",
-      }),
-    )
+    await user.click(selectedWorkspaceButton())
     expect(await screen.findByText("preserved-workspace")).toBeVisible()
     expect(screen.queryByText("restored-workspace")).not.toBeInTheDocument()
   })

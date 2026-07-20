@@ -20,6 +20,16 @@ export const neutralSemanticCue = Object.freeze({
   kind: "neutral",
 } as const satisfies SemanticCueSelection)
 
+export const builtinHiyoriMotionPreset = Object.freeze({
+  neutral: { kind: "motion", cueId: "Idle[0]" },
+  thinking: { kind: "motion", cueId: "Idle[1]" },
+  working: { kind: "motion", cueId: "Tap@Body[0]" },
+  asking: { kind: "motion", cueId: "FlickUp[0]" },
+  success: { kind: "motion", cueId: "Tap[1]" },
+  warning: { kind: "motion", cueId: "FlickDown[0]" },
+  error: { kind: "motion", cueId: "Flick@Body[0]" },
+} as const satisfies SemanticMappingV1["assignments"])
+
 export function mapCharacterStateToSemanticState(
   state: CharacterState,
 ): SemanticState {
@@ -31,7 +41,9 @@ export function resolveSemanticCue(
   status: "default" | "saved" | "invalid" | null,
   state: SemanticState,
 ): SemanticCueSelection {
-  if (mapping === null || status !== "saved") return neutralSemanticCue
+  if (mapping === null || status === null || status === "invalid") {
+    return neutralSemanticCue
+  }
   return mapping.assignments[state]
 }
 

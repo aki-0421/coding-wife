@@ -318,8 +318,8 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return this.history.loadProjectContext(projectId)
   }
 
-  loadCharacterContext() {
-    return this.history.loadCharacterContext()
+  loadCharacterContext(packId: string, displayName: string) {
+    return this.history.loadCharacterContext(packId, displayName)
   }
 
   saveProjectContext(
@@ -333,12 +333,13 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   }
 
   saveCharacterContext(
+    packId: string,
     expectedVersion: number,
     context: Parameters<
       PersistentWorkspaceViewAdapter["saveCharacterContext"]
-    >[1],
+    >[2],
   ) {
-    return this.history.saveCharacterContext(expectedVersion, context)
+    return this.history.saveCharacterContext(packId, expectedVersion, context)
   }
 
   getTurnContextSnapshot(workspaceId: string) {

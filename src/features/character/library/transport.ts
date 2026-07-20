@@ -6,6 +6,7 @@ import type {
   CharacterPackRef,
 } from "@/features/character/model"
 import { parseCharacterPackManifest } from "@/features/character/runtime/character-pack-client"
+import { builtinHiyoriMotionPreset } from "@/features/character/semantic-mapping"
 import {
   builtinHiyoriPackId,
   characterLibraryCommands,
@@ -266,15 +267,7 @@ export class DemoCharacterLibraryGateway implements CharacterLibraryGateway {
     packId: builtinHiyoriPackId,
     manifestHash: "0".repeat(64),
     mappingVersion: 0,
-    assignments: {
-      neutral: { kind: "neutral" },
-      thinking: { kind: "neutral" },
-      working: { kind: "neutral" },
-      asking: { kind: "neutral" },
-      success: { kind: "neutral" },
-      warning: { kind: "neutral" },
-      error: { kind: "neutral" },
-    },
+    assignments: builtinHiyoriMotionPreset,
   }
 
   public getLibrary(
@@ -331,6 +324,9 @@ export class DemoCharacterLibraryGateway implements CharacterLibraryGateway {
   public saveSemanticMapping(
     request: CharacterSemanticMappingSaveRequest,
   ): Promise<CharacterLibrarySnapshot> {
+    if (request.packId === builtinHiyoriPackId) {
+      return Promise.reject(new CharacterLibraryOperationError())
+    }
     const snapshot = this.snapshot(request.workspaceId)
     if (
       request.packId !== snapshot.selectedPackId ||

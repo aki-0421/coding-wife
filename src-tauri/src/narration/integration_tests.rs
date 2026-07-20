@@ -10,14 +10,15 @@ use super::process::{process_group_exists, NarrationProcessControl};
 use super::service::NarrationService;
 use super::settings::NarrationSettingsStore;
 use super::types::{
-    NarrationCancelReason, NarrationCancelRequestV1, NarrationDisposition, NarrationKind,
-    NarrationLocale, NarrationMuteRequestV1, NarrationPlaybackState, NarrationPriority,
-    NarrationResetRequestV1, NarrationScopeRequestV1, NarrationSemanticType,
-    NarrationSettingsUpdateV1, NarrationSpeakRequestV1, NarrationVoiceSelectionV1,
-    NARRATION_SCHEMA_VERSION,
+    NarrationApiKeyActionV2, NarrationCancelReason, NarrationCancelRequestV1, NarrationDisposition,
+    NarrationKind, NarrationLocale, NarrationMuteRequestV1, NarrationPlaybackState,
+    NarrationPriority, NarrationProvider, NarrationResetRequestV1, NarrationScopeRequestV1,
+    NarrationSemanticType, NarrationSettingsUpdateV2, NarrationSpeakRequestV1,
+    NARRATION_SCHEMA_VERSION, NARRATION_SETTINGS_SCHEMA_VERSION, OPENAI_DEFAULT_VOICE,
+    OPENAI_TTS_MODEL,
 };
 
-struct FakeSayFixture {
+struct FakeSpeechFixture {
     root: PathBuf,
     binary: PathBuf,
 }
@@ -37,19 +38,15 @@ struct RedactionCase {
     text: String,
 }
 
-impl FakeSayFixture {
+impl FakeSpeechFixture {
     fn new() -> Self {
         let root =
             std::env::temp_dir().join(format!("coding-wife-narration-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).expect("fixture directory");
-        let binary = root.join("fake-say");
+        let binary = root.join("fake-speech");
         fs::write(
             &binary,
             r#"#!/bin/sh
-if [ "$1" = "-v" ] && [ "$2" = "?" ]; then
-  printf 'Kyoko ja_JP # Japanese sample\nEddy (日本語（日本）) ja_JP # Japanese sample\nSamantha en_US # English sample\nDaniel en_GB # English sample\n'
-  exit 0
-fi
 printf '%s\n' "$$" > "$0.pid"
 printf '%s\n' "$@" > "$0.args"
 /bin/cat > "$0.stdin"
@@ -62,9 +59,9 @@ while [ -e "$0.block" ]; do
 done
 "#,
         )
-        .expect("fake say script");
+        .expect("fake speech script");
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o500))
-            .expect("fake say permissions");
+            .expect("fake speech permissions");
         Self { root, binary }
     }
 
@@ -93,14 +90,14 @@ done
     }
 }
 
-impl Drop for FakeSayFixture {
+impl Drop for FakeSpeechFixture {
     fn drop(&mut self) {
         self.unblock();
         let _ = fs::remove_dir_all(&self.root);
     }
 }
 
-async fn service_fixture(fixture: &FakeSayFixture) -> NarrationService {
+async fn service_fixture(fixture: &FakeSpeechFixture) -> NarrationService {
     let service = NarrationService::fixture(fixture.app_data(), fixture.binary.clone())
         .expect("narration fixture");
     service
@@ -117,16 +114,18 @@ async fn service_fixture(fixture: &FakeSayFixture) -> NarrationService {
 async fn enable(service: &NarrationService) {
     let snapshot = service.snapshot().expect("settings snapshot");
     service
-        .update_settings(NarrationSettingsUpdateV1 {
-            schema_version: NARRATION_SCHEMA_VERSION,
+        .update_settings(NarrationSettingsUpdateV2 {
+            schema_version: NARRATION_SETTINGS_SCHEMA_VERSION,
             expected_version: snapshot.settings.version,
             enabled: true,
             muted: false,
-            voices: NarrationVoiceSelectionV1 {
-                ja: Some("Kyoko".to_owned()),
-                en: Some("Samantha".to_owned()),
+            provider: Some(NarrationProvider::OpenAi),
+            api_key_action: NarrationApiKeyActionV2::Replace {
+                value: "sk-test-fixture".to_owned(),
             },
-            rate: 1.0,
+            model: OPENAI_TTS_MODEL.to_owned(),
+            voice: OPENAI_DEFAULT_VOICE.to_owned(),
+            speed: 1.0,
         })
         .await
         .expect("enable narration");
@@ -158,7 +157,7 @@ async fn wait_until(mut remaining: Duration, mut condition: impl FnMut() -> bool
 
 #[tokio::test]
 async fn passes_only_allowlisted_arguments_and_redacted_text_over_stdin() {
-    let fixture = FakeSayFixture::new();
+    let fixture = FakeSpeechFixture::new();
     let service = service_fixture(&fixture).await;
     enable(&service).await;
 
@@ -181,7 +180,7 @@ async fn passes_only_allowlisted_arguments_and_redacted_text_over_stdin() {
 
     assert_eq!(
         fs::read_to_string(fixture.sidecar("args")).expect("arguments"),
-        "-v\nKyoko\n-r\n180\n"
+        "-v\nmarin\n-r\n1\n"
     );
     assert_eq!(
         fs::read_to_string(fixture.sidecar("stdin")).expect("stdin"),
@@ -201,31 +200,23 @@ async fn passes_only_allowlisted_arguments_and_redacted_text_over_stdin() {
 }
 
 #[tokio::test]
-async fn voice_listing_and_speech_fail_closed_after_binary_tampering() {
-    let fixture = FakeSayFixture::new();
+async fn speech_fails_closed_after_binary_tampering() {
+    let fixture = FakeSpeechFixture::new();
     let binary = NarrationBinary::fixture(fixture.binary.clone(), effective_uid());
     let control = std::sync::Arc::new(NarrationProcessControl::default());
-    let voices = binary
-        .list_voices(control.clone(), control.epoch())
-        .await
-        .expect("trusted voice list");
-    assert!(voices.iter().any(|voice| voice.name == "Kyoko"));
+    binary.verify("narration_speak").expect("trusted fixture");
 
     fs::set_permissions(&fixture.binary, fs::Permissions::from_mode(0o520))
         .expect("tamper permissions");
-    let list_error = binary
-        .list_voices(control.clone(), control.epoch())
-        .await
-        .expect_err("tampered list must fail");
-    assert_eq!(list_error.code, "NARRATION-BINARY-UNTRUSTED");
     let speak_error = binary
         .speak(
             control.clone(),
             control.epoch(),
             NarrationSpeech {
-                locale: NarrationLocale::Ja,
-                voice: "Kyoko",
-                words_per_minute: 180,
+                api_key: "sk-test-fixture",
+                model: OPENAI_TTS_MODEL,
+                voice: OPENAI_DEFAULT_VOICE,
+                speed: 1.0,
                 text: "安全な本文です。",
                 timeout: Duration::from_secs(1),
             },
@@ -238,14 +229,14 @@ async fn voice_listing_and_speech_fail_closed_after_binary_tampering() {
 
 #[tokio::test]
 async fn persists_owner_only_settings_atomically_and_resets_to_off() {
-    let fixture = FakeSayFixture::new();
+    let fixture = FakeSpeechFixture::new();
     let service = service_fixture(&fixture).await;
     let initial = service.snapshot().expect("initial snapshot");
     assert!(!initial.settings.enabled);
     assert_eq!(initial.settings.version, 0);
     enable(&service).await;
 
-    let settings_path = fixture.app_data().join("narration/settings-v1.json");
+    let settings_path = fixture.app_data().join("narration/settings-v2.json");
     let directory_path = fixture.app_data().join("narration");
     let settings_metadata = fs::symlink_metadata(&settings_path).expect("settings metadata");
     let directory_metadata = fs::symlink_metadata(&directory_path).expect("directory metadata");
@@ -257,12 +248,16 @@ async fn persists_owner_only_settings_atomically_and_resets_to_off() {
         .expect("settings directory")
         .filter_map(Result::ok)
         .all(|entry| !entry.file_name().to_string_lossy().ends_with(".tmp")));
+    let public_snapshot = serde_json::to_string(&service.snapshot().expect("public snapshot"))
+        .expect("serialize public snapshot");
+    assert!(!public_snapshot.contains("sk-test-fixture"));
 
     service.shutdown().await.expect("shutdown");
     let reopened = NarrationService::fixture(fixture.app_data(), fixture.binary.clone())
         .expect("reopen service");
     let persisted = reopened.snapshot().expect("persisted snapshot");
     assert!(persisted.settings.enabled);
+    assert!(persisted.settings.api_key_configured);
     let reset = reopened
         .reset_settings(NarrationResetRequestV1 {
             schema_version: NARRATION_SCHEMA_VERSION,
@@ -272,20 +267,23 @@ async fn persists_owner_only_settings_atomically_and_resets_to_off() {
         .expect("reset settings");
     assert!(!reset.settings.enabled);
     assert!(!reset.settings.muted);
-    assert_eq!(reset.settings.voices, NarrationVoiceSelectionV1::default());
-    assert_eq!(reset.settings.rate, 1.0);
+    assert_eq!(reset.settings.provider, None);
+    assert!(!reset.settings.api_key_configured);
+    assert_eq!(reset.settings.model, OPENAI_TTS_MODEL);
+    assert_eq!(reset.settings.voice, OPENAI_DEFAULT_VOICE);
+    assert_eq!(reset.settings.speed, 1.0);
     reopened.shutdown().await.expect("shutdown reopened");
 
-    let stored = NarrationSettingsStore::open(fixture.app_data())
-        .expect("stored settings")
-        .settings;
+    let opened = NarrationSettingsStore::open(fixture.app_data()).expect("stored settings");
+    let stored = opened.settings;
     assert!(!stored.enabled);
     assert_eq!(stored.version, reset.settings.version);
+    assert!(opened.api_key.is_none());
 }
 
 #[tokio::test]
-async fn bounds_the_queue_preserves_fifo_within_priority_and_deduplicates() {
-    let fixture = FakeSayFixture::new();
+async fn bounds_the_queue_and_preserves_fifo_within_priority() {
+    let fixture = FakeSpeechFixture::new();
     fixture.block();
     let service = service_fixture(&fixture).await;
     enable(&service).await;
@@ -332,33 +330,42 @@ async fn bounds_the_queue_preserves_fifo_within_priority_and_deduplicates() {
         .map(|text| events.find(text).expect("ordered event"));
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
 
-    let first = service
-        .speak(request(
-            "request-dedupe-1",
-            "同じ説明です。",
-            NarrationPriority::High,
-        ))
-        .await
-        .expect("first duplicate candidate");
-    assert_eq!(first.disposition, NarrationDisposition::Queued);
-    let duplicate = service
-        .speak(request(
-            "request-dedupe-2",
-            "同じ説明です。",
-            NarrationPriority::High,
-        ))
-        .await
-        .expect("duplicate response");
-    assert_eq!(
-        duplicate.disposition,
-        NarrationDisposition::DroppedDuplicate
-    );
+    service.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
+async fn queues_repeated_text_as_independent_speech_requests() {
+    let fixture = FakeSpeechFixture::new();
+    fixture.block();
+    let service = service_fixture(&fixture).await;
+    enable(&service).await;
+
+    for id in ["request-repeat-1", "request-repeat-2"] {
+        let response = service
+            .speak(request(id, "同じ説明です。", NarrationPriority::High))
+            .await
+            .expect("repeated speech response");
+        assert_eq!(response.disposition, NarrationDisposition::Queued);
+        if id == "request-repeat-1" {
+            fixture.wait_for("playing").await;
+        }
+    }
+
+    fixture.unblock();
+    wait_until(Duration::from_secs(3), || {
+        fixture.events().matches("同じ説明です。").count() == 2
+            && service
+                .runtime_snapshot()
+                .is_ok_and(|runtime| runtime.playback_state == NarrationPlaybackState::Idle)
+    })
+    .await;
+    assert_eq!(fixture.events().matches("同じ説明です。").count(), 2);
     service.shutdown().await.expect("shutdown");
 }
 
 #[tokio::test]
 async fn a_full_queue_evicts_the_oldest_low_priority_item_for_fresher_narration() {
-    let fixture = FakeSayFixture::new();
+    let fixture = FakeSpeechFixture::new();
     fixture.block();
     let service = service_fixture(&fixture).await;
     enable(&service).await;
@@ -404,7 +411,7 @@ async fn a_full_queue_evicts_the_oldest_low_priority_item_for_fresher_narration(
 
 #[tokio::test]
 async fn mute_cancel_and_scope_switch_converge_without_stale_playback() {
-    let fixture = FakeSayFixture::new();
+    let fixture = FakeSpeechFixture::new();
     fixture.block();
     let service = service_fixture(&fixture).await;
     enable(&service).await;
@@ -489,7 +496,7 @@ async fn mute_cancel_and_scope_switch_converge_without_stale_playback() {
 
 #[tokio::test]
 async fn rejects_same_workspace_scope_rollback_with_a_stable_error() {
-    let fixture = FakeSayFixture::new();
+    let fixture = FakeSpeechFixture::new();
     let service = service_fixture(&fixture).await;
     service
         .set_scope(NarrationScopeRequestV1 {
@@ -516,7 +523,7 @@ async fn rejects_same_workspace_scope_rollback_with_a_stable_error() {
 
 #[tokio::test]
 async fn rejects_unsafe_text_before_spawning_speech() {
-    let fixture = FakeSayFixture::new();
+    let fixture = FakeSpeechFixture::new();
     let service = service_fixture(&fixture).await;
     enable(&service).await;
     let redaction: RedactionFixture = serde_json::from_str(include_str!(
@@ -543,11 +550,12 @@ async fn rejects_unsafe_text_before_spawning_speech() {
 
 #[cfg(target_os = "macos")]
 #[tokio::test]
-async fn production_say_binary_has_the_required_trust_metadata() {
-    let binary = NarrationBinary::production();
+async fn production_speech_binaries_have_the_required_trust_metadata() {
+    let runtime = std::env::temp_dir();
+    let binary = NarrationBinary::production(runtime);
     binary
         .verify("narration_test_binary")
-        .expect("trusted /usr/bin/say");
+        .expect("trusted curl and afplay binaries");
 }
 
 fn effective_uid() -> u32 {

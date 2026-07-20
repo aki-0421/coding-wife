@@ -25,7 +25,7 @@ export const initialWorkspaces: readonly WorkspaceRecord[] = [
     repository: "coding-wife",
     githubRepository: "aki-0421/coding-wife",
     name: "build-live2d-desktop-app",
-    branch: "feature/live2d-companion",
+    branch: "feature/live2d-character",
     lifecycle: "in_progress",
     attention: "test_failed",
   },

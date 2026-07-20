@@ -118,7 +118,7 @@ export function Live2dPreviewHarness() {
             <BotIcon aria-hidden="true" />
             <span>
               coding-wife/live2d-runtime
-              <small>feature/live2d-companion</small>
+              <small>feature/live2d-character</small>
             </span>
           </p>
         </div>
@@ -244,7 +244,7 @@ export function Live2dPreviewHarness() {
             </div>
           </section>
 
-          <section className="preview-character" aria-label="Live2D companion">
+          <section className="preview-character" aria-label="Live2D character">
             <Live2dCharacter
               locale="ja"
               motionPolicy={policy}

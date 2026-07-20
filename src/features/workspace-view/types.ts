@@ -21,7 +21,7 @@ import type {
   WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
 
-export const workspaceTabs = ["chat", "commit", "settings"] as const
+export const workspaceTabs = ["chat", "commit"] as const
 export type WorkspaceTab = (typeof workspaceTabs)[number]
 export type WorkspaceLifecycle =
   | "done"
@@ -31,7 +31,7 @@ export type WorkspaceLifecycle =
   | "canceled"
 
 export type ReasoningEffort = "fast" | "max"
-export type CompanionSemanticState =
+export type CharacterSemanticState =
   | "idle"
   | "thinking"
   | "acting"
@@ -282,13 +282,17 @@ export interface WorkspaceViewAdapter {
   readonly loadProjectContext?: (
     projectId: string,
   ) => Promise<VersionedProjectContext>
-  readonly loadCharacterContext?: () => Promise<VersionedCharacterContext>
+  readonly loadCharacterContext?: (
+    packId: string,
+    displayName: string,
+  ) => Promise<VersionedCharacterContext>
   readonly saveProjectContext?: (
     projectId: string,
     expectedVersion: number,
     context: ProjectContext,
   ) => Promise<VersionedProjectContext>
   readonly saveCharacterContext?: (
+    packId: string,
     expectedVersion: number,
     context: CharacterContext,
   ) => Promise<VersionedCharacterContext>
@@ -326,7 +330,7 @@ export interface WorkspaceViewAdapter {
 
 export interface CharacterStageRenderProps {
   readonly workspaceId: string
-  readonly state: CompanionSemanticState
+  readonly state: CharacterSemanticState
   readonly muted: boolean
   readonly reducedMotion: boolean
   readonly speaking?: boolean
@@ -339,10 +343,8 @@ export type CharacterStageRenderer = (
 export type AppSettingsSection =
   | "general"
   | "projects"
-  | "character_context"
-  | "companion"
+  | "character"
   | "audio"
-  | "support"
   | "diagnostics"
 
 export type SettingsSection = AppSettingsSection

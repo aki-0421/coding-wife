@@ -47,10 +47,7 @@ import {
   getWorkspaceCopy,
   type WorkspaceCopy,
 } from "@/features/workspace-view/copy"
-import {
-  AppSettingsView,
-  WorkspaceSettingsView,
-} from "@/features/workspace-view/SettingsView"
+import { AppSettingsView } from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { ProjectSetupDialog } from "@/features/workspace-view/ProjectSetupDialog"
@@ -132,6 +129,7 @@ export function WorkspaceShell({
   const contextModel = useEditableSettingsContext(
     adapter,
     appSettingsProjectId ?? "__no_project__",
+    null,
   )
   const characterRuntimeStore = useCharacterRuntimeStatusStore()
   const characterRuntimeSnapshot = useCharacterRuntimeStatus(
@@ -171,7 +169,7 @@ export function WorkspaceShell({
     view.turnState === "stopping" ||
     view.codex.phase === "running" ||
     view.codex.phase === "stopping"
-  const companionState = !connected
+  const characterState = !connected
     ? "disconnected"
     : view.codex.pendingRequests.length > 0
       ? "waiting_for_user"
@@ -702,16 +700,6 @@ export function WorkspaceShell({
     setAppSettingsOpen(true)
   }
 
-  const closeAppSettings = () => {
-    setAppSettingsProjectId(null)
-    setAppSettingsOpen(false)
-    window.requestAnimationFrame(() => {
-      document
-        .querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
-        ?.focus()
-    })
-  }
-
   const setActiveTab = (value: string) => {
     if (!isWorkspaceTab(value)) return
     setAppSettingsProjectId(null)
@@ -814,10 +802,10 @@ export function WorkspaceShell({
       {appSettingsOpen ? (
         <AppSettingsView
           characterRuntime={characterRuntime}
+          adapter={adapter}
           contextModel={contextModel}
           copy={copy}
           muted={view.muted}
-          onBack={closeAppSettings}
           onMutedChange={view.setMuted}
           onRetryCharacter={() => {
             characterRuntimeStore.retry(
@@ -844,8 +832,8 @@ export function WorkspaceShell({
       {selectedWorkspace ? (
         <Tabs
           className="workspace-tabs grid"
-          data-companion-active={view.activeTab !== "settings"}
-          data-companion-layout=""
+          data-character-active="true"
+          data-character-layout=""
           data-workspace-tab={view.activeTab}
           hidden={appSettingsOpen}
           onValueChange={setActiveTab}
@@ -874,7 +862,7 @@ export function WorkspaceShell({
             value="chat"
           >
             <ChatView
-              companionState={companionState}
+              characterState={characterState}
               connected={connected}
               copy={copy}
               draft={view.selectedDraft}
@@ -932,7 +920,7 @@ export function WorkspaceShell({
                   workspaceGeneration !== null)
               }
               commitExplanationController={commitExplanationController}
-              companionVisible
+              characterVisible
               locale={locale}
               onBackToChat={() => view.setActiveTab("chat")}
               onCommitSelectionChange={dismissCommitPresentation}
@@ -946,18 +934,6 @@ export function WorkspaceShell({
             />
           </TabsContent>
 
-          <TabsContent
-            className="workspace-view data-[state=inactive]:hidden"
-            value="settings"
-          >
-            <WorkspaceSettingsView
-              copy={copy}
-              history={view.history}
-              onDeleteHistory={view.deleteSelectedWorkspaceHistory}
-              workspaceLabel={`${selectedWorkspace.repository}/${selectedWorkspace.name}`}
-            />
-          </TabsContent>
-
           <CharacterStageSlot
             characterRuntime={characterRuntime}
             copy={copy}
@@ -967,8 +943,8 @@ export function WorkspaceShell({
               characterRuntimeStore.retry(selectedWorkspace.id)
             }}
             reducedMotion={reducedMotion}
-            state={companionState}
-            visible={view.activeTab !== "settings" && !appSettingsOpen}
+            state={characterState}
+            visible={!appSettingsOpen}
             workspaceId={selectedWorkspace.id}
             {...(characterRenderer ? { renderer: characterRenderer } : {})}
           />

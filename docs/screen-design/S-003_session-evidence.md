@@ -23,7 +23,7 @@ status: "Approved"
 
 利用者が、main Codexの作業を「完了したという主張」だけで判断せず、commit単位のmetadata、変更量、sanitized diff、verification、decision、riskから確認できるようにする。commit producerは`coding-wife-commit-work`を毎turn受け取るmain Codexであり、本画面とnative Git backendはGit状態を変更しない。
 
-専門的なcommitは、App ServerのGit commit command成功とread-only SHA検証をapp側interceptorが相関した直後に、app-owned explanation controllerがbackground説明生成へenqueueする。background生成だけではpresentation intent、caption、live region、TTSを一切開始しない。main sessionのsubagent、turn、event、commandとしても起動しない。起動前から存在したcommitなど本当に`not_generated`の選択には「詳しく教えて」を表示し、app controllerへ`user_request`と同じselectionに束縛したpresentation intentを送る。生成済み説明は同じ1操作でcacheからpresentationし、失敗時だけ`user_retry`する。path/raw diff/secretを除去した`CommitEvidenceV1`だけをisolated supportへ送り、`coding-wife-explain-commit`から返る日本語/英語の説明は明示intentがcurrentの時だけcharacter captionへstreamする。TTSは任意で、visible captionと同じ文だけを検証済みmacOS local `/usr/bin/say` adapterで読む。外部TTS provider、API key、network送信は使用しない。
+専門的なcommitは、App ServerのGit commit command成功とread-only SHA検証をapp側interceptorが相関した直後に、app-owned explanation controllerがbackground説明生成へenqueueする。background生成だけではpresentation intent、caption、live region、TTSを一切開始しない。main sessionのsubagent、turn、event、commandとしても起動しない。起動前から存在したcommitなど本当に`not_generated`の選択には「詳しく教えて」を表示し、app controllerへ`user_request`と同じselectionに束縛したpresentation intentを送る。生成済み説明は同じ1操作でcacheからpresentationし、失敗時だけ`user_retry`する。path/raw diff/secretを除去した`CommitEvidenceV1`だけをisolated supportへ送り、`coding-wife-explain-commit`から返る日本語/英語の説明は明示intentがcurrentの時だけcharacter captionへstreamする。TTSは任意で、visible captionと同じ文だけをnative OpenAI Speech adapterへ送る。API keyはowner-only native設定に保持し、WebViewへ返さず、生成audioは再生後に削除する。
 
 ## スコープ
 
@@ -82,17 +82,17 @@ status: "Approved"
 
 ## レイアウト
 
-sidebarと81px headerはS-002と同じ位置を維持し、Commit tabをactiveにする。main bodyはevidence primary surfaceとS-002から継続するCompanion paneで構成し、同じLive2D canvas instanceを表示する。CompanionはChatと同じ横幅を維持し、evidence primary surfaceではdetailを主表示、commit listを非modal drawerとして可読幅を確保する。
+sidebarと81px headerはS-002と同じ位置を維持し、Commit tabをactiveにする。main bodyはevidence primary surfaceとS-002から継続するCharacter paneで構成し、同じLive2D canvas instanceを表示する。CharacterはChatと同じ横幅を維持し、evidence primary surfaceではdetailを主表示、commit listを非modal drawerとして可読幅を確保する。
 
 | 領域 | 標準幅・高さ | 内容 | resize時 |
 |---|---|---|---|
 | observer bar | evidence上64px以上 | repository state、last observed、Fresh/Stale、Refresh、filter | 必要時は高さを広げて2行wrap |
 | commit list | 非modal drawer、最大300px | commit row、work unit/status badge、empty/loading | trigger、Escape、outside clickで開閉しfocusを復元 |
 | detail | evidence primary surfaceの全幅 | header、tabs、evidence、diff、explanation action | drawerを閉じた状態でprimary幅を使用 |
-| Companion pane | 607.84px基準 | S-002と同じLive2D canvas、state、caption、mute | Chatと同じwindow幅なら差1px以内 |
-| character caption portal | Companion領域 | streamed explanation、status、Cancel、mute | canvasがtext-onlyへfallbackしてもHTML captionを維持 |
+| Character pane | 607.84px基準 | S-002と同じLive2D canvas、state、caption、mute | Chatと同じwindow幅なら差1px以内 |
+| character caption portal | Character領域 | streamed explanation、status、Cancel、mute | canvasがtext-onlyへfallbackしてもHTML captionを維持 |
 
-Companionは常時表示し、960px未満と200% text zoomではcommit listを非modal drawerへ移してdetailを全幅にする。caption portalはdetailを覆わないようCompanion内へ置き、canvasがtext-onlyへ縮退した場合もHTML captionを維持する。200% text zoomで横scrollを要求せず、diff code blockだけ内部scrollを許す。
+Characterは常時表示し、960px未満と200% text zoomではcommit listを非modal drawerへ移してdetailを全幅にする。caption portalはdetailを覆わないようCharacter内へ置き、canvasがtext-onlyへ縮退した場合もHTML captionを維持する。200% text zoomで横scrollを要求せず、diff code blockだけ内部scrollを許す。
 
 ## コンポーネント
 
@@ -207,7 +207,7 @@ background statusは`aria-live`へ流さない。明示intent後の通常chunk/c
 6. 注意 / Cautions。
 7. 次の見方 / What to inspect next。
 
-TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでlocal adapterのstdinへ渡す。TTS off/mute/binary・voice・audio device unavailableでもcaptionを省略しない。selection/locale/workspace変更、main Stop、`Close explanation`、stale/schema invalid後のdeltaはcaption/TTS queueへ適用せず、active process groupも100ms以内に停止するがbackground job/cacheは維持する。`Cancel explanation generation`だけはjobをterminal化し、同requestの後着delta/cache replayも破棄する。
+TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceで固定OpenAI Speech endpointへ送る。TTS off/mute/API key・provider・network・player・audio device unavailableでもcaptionを省略しない。selection/locale/workspace変更、main Stop、`Close explanation`、stale/schema invalid後のdeltaはcaption/TTS queueへ適用せず、active process groupも100ms以内に停止するがbackground job/cacheは維持する。`Cancel explanation generation`だけはjobをterminal化し、同requestの後着delta/cache replayも破棄する。
 
 説明本文はHISTへ保存しない。status、skill ID/version/digest、opaque commit/request ID、locale、usage、latency、error codeだけを保存する。
 
@@ -225,7 +225,7 @@ TTS enabled時だけ、captionへ確定した同一chunkを同じsequenceでloca
 | Explanation queued/running | `auto_verified_commit` / `user_request` / `user_retry`受理後 | background status、「詳しく教えて」、`Cancel explanation generation`。明示intent前はcaption/live region/TTS 0件 | present-on-complete intent、生成Cancel、read-only inspect | generated/failed/canceled/unavailable |
 | Explanation generated | done受理、current runtimeにcached presentationあり | 「詳しく教えて」1回でexplanation表示、同一transcriptの任意再読上げ | presentation、inspect | selection/new request |
 | Explanation failed/canceled | model/schema/timeout、または生成Cancel terminal | deterministic reason、Retry | `user_retry`、inspect | queued/unavailable |
-| Explanation unavailable | support off/offline/redaction/capability error | deterministic reason。`retryable=true`の場合だけRetry | inspect、Settings、条件付き`user_retry` | queued/unavailable |
+| Explanation unavailable | offline/redaction/capability error | deterministic reason。`retryable=true`の場合だけRetry | inspect、Diagnostics、条件付き`user_retry` | queued/unavailable |
 
 support unavailableはcommit evidenceを隠さず、main turnのstatusを変えない。
 

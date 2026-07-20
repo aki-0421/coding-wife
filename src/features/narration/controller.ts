@@ -2,6 +2,7 @@ import {
   NarrationContractError,
   commitNarrationSourceKey,
   narrationSchemaVersion,
+  narrationSettingsSchemaVersion,
   parseCommitNarrationConsumerEvent,
   parseNarrationSettings,
   sourceKeyFromCommitNarrationEvent,
@@ -13,7 +14,7 @@ import {
   type NarrationLocale,
   type NarrationRuntimeSnapshotV1,
   type NarrationSettingsSnapshotV1,
-  type NarrationSettingsUpdateV1,
+  type NarrationSettingsUpdateV2,
   type NarrationVoiceV1,
 } from "@/features/narration/contracts"
 import {
@@ -123,8 +124,8 @@ interface TestCaptionGate {
 
 const maximumPreparedPresentations = 12
 const speechPollMilliseconds = 125
-const speechTimeoutMilliseconds = 30_000
-const testSpeechTimeoutMilliseconds = 5_000
+const speechTimeoutMilliseconds = 50_000
+const testSpeechTimeoutMilliseconds = speechTimeoutMilliseconds
 const captionAcknowledgmentTimeoutMilliseconds = 1_000
 const captionSpeechLeadMilliseconds = 100
 
@@ -272,7 +273,7 @@ export class NarrationController {
   }
 
   public async saveSettings(
-    input: Omit<NarrationSettingsUpdateV1, "schemaVersion" | "expectedVersion">,
+    input: Omit<NarrationSettingsUpdateV2, "schemaVersion" | "expectedVersion">,
   ): Promise<boolean> {
     const current = this.#snapshot.settingsSnapshot
     if (current === null) return false
@@ -287,7 +288,7 @@ export class NarrationController {
     this.update({ settingsStatus: "saving", lastErrorCode: null })
     try {
       const settingsSnapshot = await this.gateway.updateSettings({
-        schemaVersion: narrationSchemaVersion,
+        schemaVersion: narrationSettingsSchemaVersion,
         expectedVersion: current.settings.version,
         ...input,
       })
@@ -1206,32 +1207,37 @@ export class NarrationController {
   }
 
   private validateSettingsInput(
-    input: Omit<NarrationSettingsUpdateV1, "schemaVersion" | "expectedVersion">,
+    input: Omit<NarrationSettingsUpdateV2, "schemaVersion" | "expectedVersion">,
     version: number,
   ): string | null {
+    if (
+      input.apiKeyAction.kind === "replace" &&
+      (input.apiKeyAction.value.length > 512 ||
+        !/^[A-Za-z0-9._-]+$/u.test(input.apiKeyAction.value))
+    ) {
+      return "NARRATION-API-KEY-INVALID"
+    }
+    const current = this.#snapshot.settingsSnapshot?.settings
+    const apiKeyConfigured =
+      input.apiKeyAction.kind === "replace"
+        ? input.apiKeyAction.value.trim().length > 0
+        : input.apiKeyAction.kind === "clear"
+          ? false
+          : (current?.apiKeyConfigured ?? false)
     try {
       parseNarrationSettings({
-        schemaVersion: narrationSchemaVersion,
+        schemaVersion: narrationSettingsSchemaVersion,
         version,
-        ...input,
+        enabled: input.enabled,
+        muted: input.muted,
+        provider: input.provider,
+        apiKeyConfigured,
+        model: input.model,
+        voice: input.voice,
+        speed: input.speed,
       })
     } catch (error) {
       return errorCode(error)
-    }
-    if (input.enabled && input.voices.ja === null && input.voices.en === null) {
-      return "NARRATION-VOICE-REQUIRED"
-    }
-    if (!input.enabled) return null
-    for (const [locale, voiceName] of Object.entries(input.voices) as [
-      NarrationLocale,
-      string | null,
-    ][]) {
-      if (
-        voiceName !== null &&
-        !this.voicesForLocale(locale).some((voice) => voice.name === voiceName)
-      ) {
-        return "NARRATION-VOICE-UNAVAILABLE"
-      }
     }
     return null
   }

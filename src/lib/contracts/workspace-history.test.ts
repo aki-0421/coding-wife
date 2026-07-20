@@ -243,6 +243,7 @@ describe("workspace history contract", () => {
     ).toEqual(fixture.draft)
     const character = {
       schemaVersion: 1 as const,
+      packId: "builtin:hiyori_pro",
       version: 3,
       contentHash: "d".repeat(64),
       updatedAt: "2026-07-18T00:00:30.000Z",

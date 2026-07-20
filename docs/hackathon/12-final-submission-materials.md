@@ -1,7 +1,7 @@
 ---
 title: Coding Wife Final Submission Materials
 description: Paste-ready English copy, judging instructions, video script, field map, evidence ledger, and final smoke checklist for the Coding Wife OpenAI Build Week submission.
-updated: 2026-07-19
+updated: 2026-07-20
 read_when:
   - Preparing, reviewing, or entering the final Coding Wife submission in Devpost.
   - Recording the public demo video or capturing final submission screenshots.
@@ -85,9 +85,9 @@ The core workflow is:
 3. Review normalized plan, assistant, tool, file, test, Git, decision, diagnostic, and completion evidence as the work runs.
 4. Make bounded decisions instead of granting invisible standing approval.
 5. Inspect the completed commit through a separate read-only Git evidence service.
-6. Request a structured commit explanation; captions and optional local speech appear only after an explicit presentation action.
+6. Request a structured commit explanation; captions and optional OpenAI speech appear only after an explicit presentation action.
 
-Workspace metadata, drafts, context versions, and semantic events are retained in local SQLite. The selected Git repository remains the source of truth for the actual code. The included Live2D companion communicates status and optional speech, but it has no authority over technical policy, safety, verification, or approval.
+Workspace metadata, drafts, context versions, and semantic events are retained in local SQLite. The selected Git repository remains the source of truth for the actual code. The included Live2D character communicates status and optional speech, but it has no authority over technical policy, safety, verification, or approval.
 
 ### Why GPT-5.6 Sol is essential
 
@@ -99,13 +99,13 @@ Deterministic code enforces identity, schema, persistence, redaction, and presen
 
 We used Codex coding agents to translate written product and trust-boundary contracts into the React 19 and Tauri 2 implementation, connect TypeScript and Rust IPC, diagnose race and recovery failures, create focused and regression tests, and harden privacy, accessibility, packaging, and supply-chain behavior. The commit history preserves implementation and review units rather than presenting Codex as a single code-generation step.
 
-Humans retained the consequential decisions. We chose the authenticated local Codex App Server instead of putting an application API key in the WebView. We kept the WebView behind typed IPC and withheld generic shell, arbitrary filesystem, and arbitrary Git commands. We separated the write-capable main Codex work unit from the app-owned read-only Git observer. We also separated background commit-explanation generation from explicit caption and speech presentation, kept local speech disabled by default, and made the no-credential browser demo visibly deterministic rather than presenting fixture output as model work.
+Humans retained the consequential decisions. We chose the authenticated local Codex App Server instead of putting an application API key in the WebView. We kept the WebView behind typed IPC and withheld generic shell, arbitrary filesystem, and arbitrary Git commands. We separated the write-capable main Codex work unit from the app-owned read-only Git observer. We also separated background commit-explanation generation from explicit caption and speech presentation, kept optional OpenAI TTS disabled by default with its key behind the native boundary, and made the no-credential browser demo visibly deterministic rather than presenting fixture output as model work.
 
 ### Potential impact and novelty
 
 Coding Wife turns an agentic coding session into a reviewable work record: one place for the request, plan, bounded decisions, verification, commit evidence, and recovery state. This can reduce the manual reconstruction developers perform before they trust or continue long-running work. The impact has not yet been measured in a user study, so the current claim is a concrete workflow improvement rather than a quantified productivity result.
 
-The distinctive combination is a local developer command center with normalized semantic evidence, durable recovery, explicit intervention, a read-only Git review boundary, and a separately gated explanation layer. The Live2D companion adds presence and status without becoming a policy source or hiding the equivalent text UI.
+The distinctive combination is a local developer command center with normalized semantic evidence, durable recovery, explicit intervention, a read-only Git review boundary, and a separately gated explanation layer. The Live2D character adds presence and status without becoming a policy source or hiding the equivalent text UI.
 
 ### Honest limitations
 
@@ -217,13 +217,13 @@ Start from a clean frozen commit, confirm `git status --short` has no output, ru
 |---:|---:|---|---|
 | 0:00–0:08 | 8s | Clean title card over the English workspace UI. Show `Coding Wife` and `Developer Tools candidate`; do not show an unconfirmed award or track badge. | “Coding Wife is a local macOS command center for developers supervising long-running Codex work.” |
 | 0:08–0:20 | 12s | Rapid, readable cuts within the app: chat, activity evidence, a decision, and Commit. Keep all text sanitized. | “Today, developers reconstruct a session across chat, terminal output, file changes, tests, and Git. That makes it easy to miss what changed and where human judgment is still required.” |
-| 0:20–0:32 | 12s | Settle on the full workspace with the timeline, composer, tabs, and companion visible. | “Our Developer Tools project turns one coding session into a durable bilingual workspace with structured evidence, bounded decisions, and inspectable commits.” |
+| 0:20–0:32 | 12s | Settle on the full workspace with the timeline, composer, tabs, and character visible. | “Our Developer Tools project turns one coding session into a durable bilingual workspace with structured evidence, bounded decisions, and inspectable commits.” |
 | 0:32–0:45 | 13s | Start the verified native run on a disposable repository. Show sanitized preflight evidence containing `gpt-5.6-sol`; hide local paths beyond the fixture name. | “This is the production native path on a disposable repository. Preflight verifies the authenticated local Codex installation, repository boundary, and exact model: GPT-5.6 Sol.” |
 | 0:45–0:59 | 14s | Enter the README Usage task and send it. Briefly show the selected Fast or Max effort and the immutable context indicator. | “I ask it to update the README, run a relevant check, and commit. Coding Wife sends the instruction with a versioned, validated context snapshot, never generic shell access from the WebView.” |
 | 0:59–1:14 | 15s | Show the plan and bounded decision. Choose **One bounded unit** and submit the answer. | “GPT-5.6 Sol interprets the unfamiliar repository, builds a plan, and pauses at a bounded decision. I choose one bounded unit; the agent cannot silently decide for me.” |
 | 1:14–1:29 | 15s | Show the exact verification approval card. Select **Approve once**, then show tool, file, test, and completion events arriving. | “The proposed verification command appears with approve-once and reject controls. After I approve it, the timeline records tools, files, tests, and completion as normalized evidence rather than raw private reasoning.” |
 | 1:29–1:45 | 16s | Open **Commit** and show full SHA, work correlation, changed files, gate result, and risks. | “The completed commit now appears in the read-only Git evidence view. I can inspect its identity, correlation, changed files, verification result, and known risks without granting the observer write authority.” |
-| 1:45–2:01 | 16s | Let background generation finish without an overlay, then select **Show explanation** once. Show caption; keep speech off unless a clean local voice demonstration was rehearsed. | “A separate zero-tool support turn generates a redacted commit explanation in the background. Captions and optional local speech remain silent until I explicitly select Show explanation.” |
+| 1:45–2:01 | 16s | Let background generation finish without an overlay, then select **Show explanation** once. Show caption; keep speech off unless an OpenAI TTS demonstration was rehearsed with sanitized text. | “A separate zero-tool support turn generates a redacted commit explanation in the background. Captions and optional OpenAI speech remain silent until I explicitly select Show explanation.” |
 | 2:01–2:19 | 18s | Cut between the architecture diagram and readable snippets that pin `gpt-5.6-sol` in TypeScript and Rust. Avoid scrolling through dense code. | “GPT-5.6 Sol is essential for planning, repository tool use, editing, verification, and this bounded explanation. Typed TypeScript and Rust contracts pin the model, validate schemas, redact output, and fail closed on unsupported protocol shapes.” |
 | 2:19–2:33 | 14s | Show a concise commit-history or test-result montage with private identifiers removed. Overlay three labels: contracts, race recovery, regression tests. | “We used Codex agents to translate written contracts into React and Tauri, diagnose race and recovery failures, and build regression tests. Humans chose the trust boundaries, approval model, and explicit presentation policy.” |
 | 2:33–2:45 | 12s | Closing card with the final project, repository, and testing links. Include `macOS 14+ · Apple Silicon · authenticated local Codex required`. | “The result makes agent work reviewable without removing human responsibility. This Apple Silicon macOS release requires authenticated local Codex. Repository and testing instructions are in the submission.” |
@@ -319,7 +319,7 @@ Do not paste a checksum copied from a different build, renamed draft, transcoded
 | Production history is local SQLite; browser demo is deterministic | `src-tauri/src/workspace_history/store.rs`; explicit demo transport/runtime selection in `src/app/` and `src/features/git-review/demo-transport.ts` | Workspace history tests and App demo tests | Path A preview label plus native Path B | Final smoke `PENDING` |
 | Release target is macOS 14+ Apple Silicon | `src-tauri/tauri.conf.json`; release scripts; `docs/testing.md` | Release-script tests, debug native build, final DMG/install smoke | Closing card | Final DMG/install smoke `PENDING` |
 | Locked third-party dependencies are attributable and packaged | `scripts/licenses/dependency-notices.mjs`; `third-party/THIRD-PARTY-DEPENDENCIES.*`; `src-tauri/resources/legal/`; both lockfiles | Offline license gate; stale/unknown/forbidden/missing fixtures; Live2D supply-chain verification | Repository/testing evidence only | Dependency notice Ready; project license remains `PENDING` |
-| Live2D is presentation-only and optional speech is local | Character runtime and context contracts; `src-tauri/src/narration/`; `/usr/bin/say` policy | Character security, supply-chain, narration policy, caption, and settings tests | Main workspace and optional caption shot | Final gate `PENDING` |
+| Live2D is presentation-only and optional speech is explicit | Character runtime and context contracts; `src-tauri/src/narration/`; native OpenAI Speech policy | Character security, supply-chain, narration policy, caption, and settings tests | Main workspace and optional caption shot | Final gate `PENDING` |
 | Build Week work is separable from the audit boundary | Root README; Git history after `fbd7be97fe3805f916bb2cbe6f78f842caee3630` | `git diff --stat` and `git log` for the frozen range | Codex/test montage 2:19–2:33 | Final submission commit `PENDING` |
 
 The evidence map identifies where to verify a claim; it does not turn a pending gate or artifact into a completed one.

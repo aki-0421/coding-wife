@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { EyeIcon, PackageIcon, RotateCcwIcon, SaveIcon } from "lucide-react"
+import { LockKeyholeIcon, RotateCcwIcon, SaveIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -11,13 +11,13 @@ import {
   NativeSelectOption,
 } from "@/components/ui/native-select"
 import {
+  builtinHiyoriPackId,
   semanticStates,
   type CharacterLibrarySnapshot,
   type CharacterPackView,
   type SemanticAssignmentsV1,
   type SemanticCueSelection,
   type SemanticMappingV1,
-  type SemanticState,
 } from "@/features/character/library/contracts"
 import {
   type CharacterLibraryState,
@@ -46,54 +46,125 @@ function decodeCue(value: string): SemanticCueSelection {
     : { kind: "motion", cueId }
 }
 
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(() =>
-    typeof window.matchMedia === "function"
-      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      : false,
-  )
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)")
-    const update = () => setReduced(query.matches)
-    query.addEventListener("change", update)
-    return () => query.removeEventListener("change", update)
-  }, [])
-  return reduced
-}
-
 export function SemanticMappingSettings({
+  packId,
   workspaceId,
 }: {
+  readonly packId: string
   readonly workspaceId: string
 }) {
   const { locale } = useI18n()
   const copy = getSemanticMappingCopy(locale)
   const library = useCharacterLibrary(workspaceId)
   const store = useCharacterLibraryStore()
-  const reducedMotion = usePrefersReducedMotion()
   const snapshot = library.snapshot
-  const mapping = snapshot?.semanticMapping ?? null
-  const selectedPack = snapshot?.packs.find(
-    (pack) => pack.packId === snapshot.selectedPackId,
-  )
-  if (snapshot === null || mapping === null || selectedPack === undefined) {
-    return null
+  const pack = snapshot?.packs.find((candidate) => candidate.packId === packId)
+
+  if (snapshot === null || pack === undefined) return null
+  if (pack.packId === builtinHiyoriPackId) {
+    return <BundledHiyoriMotionSettings copy={copy} />
+  }
+  if (pack.packId !== snapshot.selectedPackId) {
+    return <InactiveCustomMotionSettings copy={copy} />
   }
 
   return (
     <SemanticMappingEditor
       copy={copy}
-      initialAssignments={mapping.assignments}
-      key={`${workspaceId}:${selectedPack.packId}:${selectedPack.manifestHash}`}
+      initialAssignments={snapshot.semanticMapping.assignments}
+      key={`${workspaceId}:${pack.packId}:${pack.manifestHash}`}
       library={library}
-      mapping={mapping}
-      reducedMotion={reducedMotion}
-      selectedPack={selectedPack}
+      mapping={snapshot.semanticMapping}
+      selectedPack={pack}
       snapshot={snapshot}
       store={store}
       workspaceId={workspaceId}
     />
+  )
+}
+
+function MotionSettingsHeading({
+  copy,
+  bundled,
+}: {
+  readonly copy: SemanticMappingCopy
+  readonly bundled: boolean
+}) {
+  return (
+    <div className="min-w-0 max-w-[62ch]">
+      <h4
+        className="m-0 text-title text-text-strong"
+        id="motion-settings-title"
+      >
+        {copy.title}
+      </h4>
+      <p className="m-0 mt-xxs text-caption text-muted-foreground">
+        {bundled ? copy.bundledDescription : copy.description}
+      </p>
+    </div>
+  )
+}
+
+function BundledHiyoriMotionSettings({
+  copy,
+}: {
+  readonly copy: SemanticMappingCopy
+}) {
+  return (
+    <section
+      aria-labelledby="motion-settings-title"
+      className="mt-sm flex min-w-0 flex-col gap-md border-t border-divider pt-md"
+      data-motion-settings="preset"
+    >
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-md">
+        <MotionSettingsHeading bundled copy={copy} />
+        <Badge variant="outline">
+          <LockKeyholeIcon aria-hidden="true" />
+          {copy.presetLocked}
+        </Badge>
+      </div>
+      <dl className="m-0 overflow-hidden rounded-control border border-divider">
+        {semanticStates.map((state) => (
+          <div
+            className="grid min-w-0 grid-cols-[minmax(7rem,0.7fr)_minmax(10rem,1.5fr)] items-center gap-sm border-b border-divider px-sm py-sm last:border-b-0 max-[560px]:grid-cols-1"
+            key={state}
+          >
+            <dt className="text-caption text-muted-foreground">
+              {copy[state]}
+            </dt>
+            <dd className="m-0 text-caption text-text-strong">
+              {copy.presetMotions[state]}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
+function InactiveCustomMotionSettings({
+  copy,
+}: {
+  readonly copy: SemanticMappingCopy
+}) {
+  return (
+    <section
+      aria-labelledby="motion-settings-title"
+      className="mt-sm flex min-w-0 flex-col gap-md border-t border-divider pt-md"
+      data-motion-settings="inactive"
+    >
+      <div className="min-w-0 max-w-[62ch]">
+        <h4
+          className="m-0 text-title text-text-strong"
+          id="motion-settings-title"
+        >
+          {copy.title}
+        </h4>
+        <p className="m-0 mt-xxs text-caption text-muted-foreground">
+          {copy.inactiveDescription}
+        </p>
+      </div>
+    </section>
   )
 }
 
@@ -102,7 +173,6 @@ function SemanticMappingEditor({
   initialAssignments,
   library,
   mapping,
-  reducedMotion,
   selectedPack,
   snapshot,
   store,
@@ -112,7 +182,6 @@ function SemanticMappingEditor({
   readonly initialAssignments: SemanticAssignmentsV1
   readonly library: CharacterLibraryState
   readonly mapping: SemanticMappingV1
-  readonly reducedMotion: boolean
   readonly selectedPack: CharacterPackView
   readonly snapshot: CharacterLibrarySnapshot
   readonly store: CharacterLibraryStore
@@ -121,17 +190,12 @@ function SemanticMappingEditor({
   const [draft, setDraft] = useState<SemanticAssignmentsV1>(
     () => initialAssignments,
   )
-  const [previewState, setPreviewState] = useState<SemanticState>("neutral")
   const firstCueRef = useRef<HTMLSelectElement>(null)
 
-  useEffect(
-    () => () => store.setSemanticPreview(workspaceId, null),
-    [store, workspaceId],
-  )
   useEffect(() => {
-    if (snapshot?.semanticMappingStatus !== "invalid") return
+    if (snapshot.semanticMappingStatus !== "invalid") return
     queueMicrotask(() => firstCueRef.current?.focus())
-  }, [snapshot?.semanticMappingStatus])
+  }, [snapshot.semanticMappingStatus])
 
   const cueOptions = useMemo(
     () => ({
@@ -141,7 +205,6 @@ function SemanticMappingEditor({
     [selectedPack],
   )
 
-  const previewCue = draft[previewState]
   const busy = library.mutation !== null
   const save = () => {
     void store
@@ -157,26 +220,11 @@ function SemanticMappingEditor({
 
   return (
     <section
-      aria-labelledby="semantic-mapping-title"
+      aria-labelledby="motion-settings-title"
       className="mt-sm flex min-w-0 flex-col gap-md border-t border-divider pt-md"
-      data-semantic-mapping-status={snapshot.semanticMappingStatus}
+      data-motion-settings={snapshot.semanticMappingStatus}
     >
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-md">
-        <div className="min-w-0 max-w-[62ch]">
-          <h3
-            className="m-0 text-title text-text-strong"
-            id="semantic-mapping-title"
-          >
-            {copy.title}
-          </h3>
-          <p className="m-0 mt-xxs text-caption text-muted-foreground">
-            {copy.description}
-          </p>
-        </div>
-        <Badge variant="outline">
-          {copy.version.replace("{version}", String(mapping.mappingVersion))}
-        </Badge>
-      </div>
+      <MotionSettingsHeading bundled={false} copy={copy} />
 
       {snapshot.semanticMappingStatus === "invalid" ? (
         <Alert>
@@ -187,26 +235,23 @@ function SemanticMappingEditor({
 
       <div className="overflow-hidden rounded-control border border-divider">
         {semanticStates.map((state) => {
-          const inputId = `semantic-cue-${state}`
+          const inputId = `motion-setting-${state}`
           return (
             <Field
-              className="grid min-w-0 grid-cols-[minmax(7rem,0.7fr)_minmax(10rem,1.5fr)_auto] items-center gap-sm border-b border-divider px-sm py-xs last:border-b-0 max-[560px]:grid-cols-1"
+              className="grid min-w-0 grid-cols-[minmax(7rem,0.7fr)_minmax(10rem,1.5fr)] items-center gap-sm border-b border-divider px-sm py-xs last:border-b-0 max-[560px]:grid-cols-1"
               key={state}
             >
               <FieldLabel className="text-caption" htmlFor={inputId}>
                 {copy[state]}
               </FieldLabel>
               <NativeSelect
-                aria-label={`${copy[state]} cue`}
+                aria-label={copy[state]}
                 className="w-full"
                 disabled={busy}
                 id={inputId}
                 onChange={(event) => {
                   const cue = decodeCue(event.currentTarget.value)
-                  setDraft((current) => ({
-                    ...current,
-                    [state]: cue,
-                  }))
+                  setDraft((current) => ({ ...current, [state]: cue }))
                 }}
                 ref={state === "neutral" ? firstCueRef : undefined}
                 size="sm"
@@ -237,40 +282,9 @@ function SemanticMappingEditor({
                   </NativeSelectOptGroup>
                 ) : null}
               </NativeSelect>
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  setPreviewState(state)
-                  store.setSemanticPreview(workspaceId, {
-                    state,
-                    cue: draft[state],
-                  })
-                }}
-                size="xs"
-                type="button"
-                variant="ghost"
-              >
-                <EyeIcon aria-hidden="true" />
-                {copy.preview}
-              </Button>
             </Field>
           )
         })}
-      </div>
-
-      <div
-        aria-live="polite"
-        className="flex min-w-0 items-center gap-sm rounded-control border border-divider bg-panel px-sm py-xs"
-        data-semantic-preview={reducedMotion ? "static" : "animated"}
-      >
-        <PackageIcon aria-hidden="true" className="size-4 text-primary" />
-        <span className="min-w-0 flex-1 text-caption text-muted-foreground">
-          <span className="text-text-strong">{copy.previewTitle}</span>
-          {" · "}
-          {copy[previewState]} · {encodeCue(previewCue)}
-          {" · "}
-          {reducedMotion ? copy.staticPreview : copy.animatedPreview}
-        </span>
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-xs">
@@ -281,14 +295,7 @@ function SemanticMappingEditor({
         ) : null}
         <Button
           disabled={busy}
-          onClick={() => {
-            setDraft(neutralSemanticAssignments())
-            setPreviewState("neutral")
-            store.setSemanticPreview(workspaceId, {
-              state: "neutral",
-              cue: { kind: "neutral" },
-            })
-          }}
+          onClick={() => setDraft(neutralSemanticAssignments())}
           size="xs"
           type="button"
           variant="ghost"

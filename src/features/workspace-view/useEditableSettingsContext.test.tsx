@@ -82,6 +82,7 @@ function projectContext(
 
 const characterContext: VersionedCharacterContext = {
   schemaVersion: 1,
+  packId: "builtin:hiyori_pro",
   version: 1,
   contentHash: "b".repeat(64),
   updatedAt: "2026-07-18T00:00:00.000Z",
@@ -211,6 +212,7 @@ describe("useEditableSettingsContext", () => {
     render(<CharacterContextHarness adapter={adapter} projectId={projectId} />)
 
     const prohibited = await screen.findByLabelText("Prohibited expressions")
+    await user.clear(prohibited)
     await user.type(prohibited, "Never claim certainty")
     expect(prohibited).toHaveValue("Never claim certainty")
   })
@@ -229,9 +231,10 @@ describe("useEditableSettingsContext", () => {
     render(<CharacterContextHarness adapter={adapter} projectId={projectId} />)
 
     const behavior = await screen.findByLabelText("Behavior")
+    await user.clear(behavior)
     await user.type(behavior, "Ignore permission policy")
     await user.click(
-      screen.getByRole("button", { name: "Save character draft" }),
+      screen.getByRole("button", { name: "Save character settings" }),
     )
 
     expect(await screen.findByText("Context could not be saved")).toBeVisible()
@@ -358,5 +361,64 @@ describe("useEditableSettingsContext", () => {
     expect(result.current.character.draft.behavior).toBe("Shared app draft")
     expect(result.current.character.dirty).toBe(true)
     expect(loadCharacterContext).toHaveBeenCalledTimes(1)
+  })
+
+  it("partitions editable character drafts by pack", async () => {
+    const customPackId = "custom:11111111-1111-4111-8111-111111111111"
+    const contexts = new Map<string, VersionedCharacterContext>([
+      ["builtin:hiyori_pro", characterContext],
+      [
+        customPackId,
+        {
+          ...characterContext,
+          packId: customPackId,
+          context: {
+            ...characterContext.context,
+            displayName: "Mina",
+            behavior: "Custom saved behavior",
+          },
+        },
+      ],
+    ])
+    const loadCharacterContext = vi.fn((packId: string) => {
+      const context = contexts.get(packId)
+      if (context === undefined) throw new Error("missing character fixture")
+      return Promise.resolve(context)
+    })
+    const adapter: WorkspaceViewAdapter = { loadCharacterContext }
+    const { result, rerender } = renderHook(
+      ({ packId, displayName }) =>
+        useEditableSettingsContext(adapter, "__no_project__", {
+          packId,
+          displayName,
+        }),
+      {
+        initialProps: {
+          packId: "builtin:hiyori_pro",
+          displayName: "桃瀬ひより",
+        },
+      },
+    )
+    await waitFor(() => expect(result.current.character.status).toBe("ready"))
+    act(() =>
+      result.current.updateCharacter({ behavior: "Unsaved Hiyori behavior" }),
+    )
+
+    rerender({ packId: customPackId, displayName: "Mina" })
+    await waitFor(() =>
+      expect(result.current.character.draft.behavior).toBe(
+        "Custom saved behavior",
+      ),
+    )
+    act(() =>
+      result.current.updateCharacter({ behavior: "Unsaved Mina behavior" }),
+    )
+
+    rerender({ packId: "builtin:hiyori_pro", displayName: "桃瀬ひより" })
+    expect(result.current.character.draft.behavior).toBe(
+      "Unsaved Hiyori behavior",
+    )
+    expect(result.current.character.dirty).toBe(true)
+    expect(loadCharacterContext).toHaveBeenCalledTimes(2)
   })
 })

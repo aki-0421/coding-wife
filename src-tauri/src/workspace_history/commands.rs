@@ -3,14 +3,15 @@ use tauri::State;
 use super::service::WorkspaceHistoryService;
 use super::types::{
     AppSaveCharacterContextRequest, AppendDomainEventRequest, AppendDomainEventResponse,
-    ContextSnapshotView, ProjectGetContextRequest, ProjectSaveContextRequest, ProjectSelectRequest,
-    ProjectSetupGithubRequest, ProjectSetupRequest, TimelinePage, VersionedCharacterContext,
-    VersionedProjectContext, WorkspaceArchiveRequest, WorkspaceCancelRequest,
-    WorkspaceCommandError, WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeRequest,
-    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView,
-    WorkspaceLoadEditableContextRequest, WorkspacePickResponse, WorkspaceRecheckRequest,
-    WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest, WorkspaceSaveTimelineAnchorRequest,
-    WorkspaceSelectRequest, WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineAnchorView,
+    CharacterGetContextRequest, ContextSnapshotView, ProjectGetContextRequest,
+    ProjectSaveContextRequest, ProjectSelectRequest, ProjectSetupGithubRequest,
+    ProjectSetupRequest, TimelinePage, VersionedCharacterContext, VersionedProjectContext,
+    WorkspaceArchiveRequest, WorkspaceCancelRequest, WorkspaceCommandError,
+    WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeRequest, WorkspaceDeleteChallengeView,
+    WorkspaceDeleteRequest, WorkspaceDraftView, WorkspaceLoadEditableContextRequest,
+    WorkspacePickResponse, WorkspaceRecheckRequest, WorkspaceSaveContextRequest,
+    WorkspaceSaveDraftRequest, WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest,
+    WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineAnchorView,
     WorkspaceTimelineRequest, WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
 };
 
@@ -158,9 +159,10 @@ pub async fn project_context_save(
 
 #[tauri::command]
 pub fn app_character_context_get(
+    request: CharacterGetContextRequest,
     service: State<'_, WorkspaceHistoryService>,
 ) -> Result<VersionedCharacterContext, WorkspaceCommandError> {
-    service.character_context()
+    service.character_context(request)
 }
 
 #[tauri::command]

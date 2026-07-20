@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -171,8 +178,11 @@ describe("App interactive commit explanation demo", () => {
       settingsSaved = await controller.saveSettings({
         enabled: true,
         muted: false,
-        voices: { ja: "Kyoko", en: "Samantha" },
-        rate: 1,
+        provider: "openai",
+        apiKeyAction: { kind: "replace", value: "sk-test-fixture" },
+        model: "gpt-4o-mini-tts",
+        voice: "marin",
+        speed: 1,
       })
     })
     expect(settingsSaved).toBe(true)
@@ -204,7 +214,12 @@ describe("App interactive commit explanation demo", () => {
       expect(controller.getSnapshot().presentation).toBeNull(),
     )
     await user.click(screen.getByRole("radio", { name: "English" }))
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole(
+        "button",
+        { current: "page" },
+      ),
+    )
     expect(await screen.findByRole("tab", { name: /Commit/ })).toHaveAttribute(
       "aria-selected",
       "true",

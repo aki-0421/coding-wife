@@ -52,7 +52,7 @@ status: "Approved"
 
 | 項目 | 内容 |
 |---|---|
-| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、S-002〜S-006からSessionsへ戻る |
+| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、現行S-002、S-003、S-005からSessionsへ戻る |
 | 表示前提 | app-private DBをreadできること。読めない場合はrecovery stateを表示する |
 | 初期フォーカス | 0件時は`Projectを追加`、通常時はactive workspace item、error時は最初の回復操作 |
 | 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |
@@ -82,7 +82,7 @@ status: "Approved"
 | main header | sidebar右、81px | `Sessions` breadcrumb、preflight summary | current project切替、診断詳細 |
 | project surface | main content | project概要、preflight、workspace create/empty/recovery | add、recheck、create、open |
 
-S-001のmain contentはChat/Companionを描画せず、main幅中央へ最大760pxの一続きの設定面を置く。projectごとに同型cardをgrid表示せず、選択project 1件の詳細とsidebar一覧を表示する。960〜1279pxでは64px rail + portal drawerを使い、project surfaceを残幅へ広げる。
+S-001のmain contentはChat/Characterを描画せず、main幅中央へ最大760pxの一続きの設定面を置く。projectごとに同型cardをgrid表示せず、選択project 1件の詳細とsidebar一覧を表示する。960〜1279pxでは64px rail + portal drawerを使い、project surfaceを残幅へ広げる。
 
 Project folder選択後、Git初期化済みかつorigin設定済みとnativeが診断した場合はsetup stateを生成せず、setup dialogを一度も描画しないでproject登録へ直行する。Git初期化済みでoriginだけがない場合は、folder basenameのsafe slugと認証済みGitHub current user / organizationを照合し、一意な既存`owner/repository`が見つかればHTTPS originへ自動接続して同じ直接登録へ進む。非Git、既存repositoryなし、または複数ownerで同名repositoryが競合する場合だけportalされた一つのsetup dialogで段階表示する。dialogは`プロジェクトをセットアップ / Set up project`のtitle、必要なcontrol、Cancelとprimary actionだけを表示し、folder説明、section heading、通常時helper、absolute path、Setup IDを表示しない。非Git時は`Gitを初期化 / Initialize Git`をprimary actionにする。初期化後または既にGitで自動接続できない場合は、認証済みGitHub current userを先頭、organizationを続けて重複なく列挙するowner select、literal `/`、folder basenameのsafe slugを初期値とするrepository inputを`owner/repository`形式の1行に置く。visible labelは置かず、各controlのaccessible nameだけを保持する。確定actionは`GitHubをセットアップ / Set up GitHub`とする。
 
@@ -175,7 +175,7 @@ workspace cancel、project登録解除、active-turn切替、active/pending main
 | Workspace作成 | 0件時はmain surface、通常時はsidebarのPlus。registered project 1件以上 | どちらも同じ3column project card contentを使い、cardで選んだProject IDと生成した既定nameを使う。選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、workspace固有rootとprojectのGit common directory identityを照合して、成功後だけBacklogへ1件追加・選択してそのworkspaceを開く。dialog経由ならdialogも閉じる | dialogは閉じ、作成開始前のselectionを維持する。一覧・filesystemは変更しない | project card一覧を維持してerror noticeを表示する。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
 | workspaceをArchive | sidebar rowのArchive | idleなら確認なしで対象worktreeを削除してrowを一覧から外す。active/pending main turnがあれば停止確認を表示し、確定後のexact terminal interrupt、cleanup、履歴flush完了後だけ同じ削除へ進む。既にworktreeが消失済みなら成功扱い | 停止確認の`戻る`ではworkspace、worktree、selection、turn、draft、履歴不変 | 停止失敗時はArchive commandを呼ばず全状態を保持する。削除失敗時は対象以外を変更せず再試行可能なerror | `WORK-F-067` |
 | project filter | 登録済みproject 1件以上 | Popoverの非native複数選択controlで選んだProject IDのいずれかと完全一致するworkspaceを100ms以内に表示し、ListFilterに選択件数を示す | Escapeで選択値を維持 | 一覧維持、無効Project IDだけを除去 | `WORK-F-051` |
-| workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Settings、Companionを同一IDへ100ms以内にatomic切替。選択時に更新される`last_selected_at`、`updated_at`ではsidebarの作成日時順を変更しない。App SettingsのProject / Character contextはworkspace tab状態へ含めない | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
+| workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Characterを同一IDへ100ms以内にatomic切替。選択時に更新される`last_selected_at`、`updated_at`ではsidebarの作成日時順を変更しない。App SettingsのProject detail / Character detailはworkspace tab状態へ含めない | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
 | active turn中のworkspace切替 | active/pending turnを持つold workspaceから別workspaceを選択または別workspaceでSend | selectionを保留し確認。`停止して切替`後、exact old turnのterminal interruptとcleanup完了時だけnew workspaceをactivateし、固有draft/summary/anchorを復元 | `戻る`でold selection、turn、draft、anchor、caption/TTSを完全維持 | old workspaceをactiveのままerrorとRetryを表示。rapid/duplicate/stale responseでnew workspaceをactivateしない | `WORK-F-058`, `WORK-F-059` |
 | workspaceをCanceledへ移動 | idle、またはactive/pending turnを停止可能 | idleは確認後、activeは`停止してキャンセル / Stop and Cancel`後のexact terminal interrupt、cleanup、履歴flush完了時だけ専用native cancel commandでCanceled groupへ移動 | `戻る`でselection、turn、lifecycle、draft、caption/TTS、Git fingerprint不変 | generic lifecycle commandのCanceled指定を含めて拒否し、元groupとturnを維持してretry。source、working tree、Git index/object/ref、履歴本文を変更しない | `WORK-F-056` |
 | project登録解除 | App Settings Projects、対象project配下のactive/pending turn 0件 | project名を示す確認後、project/workspaceのapp registrationをnavigationから外す | DB/repo/worktree/file/library/history本文不変 | 完了表示せずretry。running時は拒否 | `WORK-F-057`, `WORK-F-068` |

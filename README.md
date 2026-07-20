@@ -19,7 +19,7 @@ Developers supervising an autonomous coding session must correlate chat, tool ou
 
 ## Solution
 
-Coding Wife brings that workflow into one bilingual desktop workspace. A local Codex App Server runs `gpt-5.6-sol`; the app converts its activity into a structured, redacted timeline, persists recoverable workspace context in SQLite, presents bounded decisions, and exposes read-only commit evidence. A Live2D companion communicates status and optional local speech without becoming a source of technical or safety authority.
+Coding Wife brings that workflow into one bilingual desktop workspace. A local Codex App Server runs `gpt-5.6-sol`; the app converts its activity into a structured, redacted timeline, persists recoverable workspace context in SQLite, presents bounded decisions, and exposes read-only commit evidence. A Live2D character communicates status and optional OpenAI text-to-speech without becoming a source of technical or safety authority.
 
 ## What it does
 
@@ -131,7 +131,7 @@ The release-approved support runtime identity is `codex-cli 0.144.5` for Apple S
 
 Any other support binary, version, executable hash, schema fingerprint, or failed isolation proof is unapproved. In that state Coding Wife does not enqueue a support job, start a support process, or invoke the support model; it reports support as unavailable and retains the deterministic local commit-evidence fallback. This support gate is separate from main-session readiness, which still fails closed when its own authenticated App Server or model contract is unavailable.
 
-Settings exposes exactly two implemented desired-state controls: **Enable isolated support** and **Commit explainer**. Native mode reads and updates the owner-only, versioned setting through `support_settings_get` and `support_settings_update`; an enabled preference records intent but never overrides release readiness. A disable update is persisted before it blocks new admission, cancels queued and active explanation work, and returns only after support capacity converges to zero. The browser demo keeps this setting in ephemeral memory and never starts a support model.
+Commit explanation generation has no user-facing runtime, role, or model settings. The app-owned policy always keeps the required explainer role enabled, migrates legacy disabled preferences back to that policy at startup, and exposes only explanation-level actions such as request, retry, and cancel. Release readiness still has final authority: an unapproved or unavailable runtime produces a deterministic explanation fallback without changing the saved policy.
 
 ## How we used Codex to build Coding Wife
 
@@ -144,7 +144,7 @@ Humans retained the consequential product and trust decisions:
 - Let the main Codex work unit create commits, while the app-owned Git evidence service remains a read-only observer.
 - Separate background commit-explanation generation from explicit caption and speech presentation.
 - Treat the Live2D character as presentation and status only, with equivalent HTML text and no authority over policy or verification.
-- Use local `/usr/bin/say` speech, disabled by default, instead of a cloud TTS service or stored generated audio.
+- Keep OpenAI TTS disabled by default, hold its optional API key behind the native boundary, and delete generated audio after playback.
 - Keep the no-credential demo deterministic and visibly non-production.
 
 The primary Codex `/feedback` Session ID required by Devpost has not been recorded in this repository. It must be taken from the actual primary thread and submitted without inventing or substituting an ID.
@@ -172,7 +172,7 @@ flowchart LR
 - [`src/app/`](src/app/) selects native transports in Tauri and explicitly gated demo transports in browser development.
 - [`src/features/`](src/features/) owns workspace composition, localized UI, Codex state, Git evidence, narration, and Live2D presentation.
 - [`src/lib/contracts/`](src/lib/contracts/) defines exact, versioned payloads shared across the frontend boundaries.
-- [`src-tauri/src/`](src-tauri/src/) is the trusted native boundary for the Codex process, SQLite history, bounded Git observation, app-private files, character validation, and local speech.
+- [`src-tauri/src/`](src-tauri/src/) is the trusted native boundary for the Codex process, SQLite history, bounded Git observation, app-private files, character validation, and provider speech.
 - [`src-tauri/resources/skills/`](src-tauri/resources/skills/) contains the reviewed skills injected into main and support turns.
 
 SQLite stores normalized workspace metadata, drafts, context snapshots, and semantic events in the macOS application data directory. The primary work remains in the selected Git repository. Imported character packs and attachment snapshots are validated and copied into app-private storage rather than exposed as arbitrary paths to the WebView.
@@ -215,7 +215,7 @@ The implementation tree used for this README audit was `37b5330cefab76dce3b6332a
 - Xcode Command Line Tools for native development. See the release instructions for bundling requirements.
 - A compatible authenticated local Codex installation and a current-user-owned, writable Git repository for production turns.
 
-No `.env` values, application API keys, database server, or cloud TTS credentials are required. [`.env.example`](.env.example) documents this intentionally empty configuration boundary.
+No `.env` values, application API keys, or database server are required for the core app or deterministic demo. Optional TTS requires a user-supplied OpenAI API key entered in App Settings and stored only in the owner-readable native settings file; [`.env.example`](.env.example) remains intentionally empty.
 
 ### Install and run
 
@@ -277,22 +277,23 @@ The release workflow applies an ad-hoc integrity seal and verifies every resourc
 
 ## Privacy and security
 
-- No OpenAI credential is stored in the WebView or this application's environment. Production requests use the user's authenticated local Codex installation.
+- No OpenAI credential is stored in the WebView or this application's environment. Codex requests use the authenticated local Codex installation; an optional TTS key is stored in an owner-readable native settings file and is never returned to the WebView.
 - Production instructions, selected repository context, and approved attachments are sent through Codex/OpenAI as required to perform the task; Coding Wife is not an offline model and does not claim that this content remains on-device.
 - SQLite persistence is local to the macOS app-data directory. The UI provides scoped history deletion that does not delete repository files, commits, or branches.
 - The frontend receives versioned, normalized, redacted events. The persistence contract excludes raw reasoning, raw secrets, support prompts/responses, and generated audio.
 - Git review is read-only and path-bounded. The main Codex session may edit and commit only inside the selected repository under its own reviewed workflow.
 - Character context is presentation-only, imported packs are validated and quarantined before selection, and a model never controls technical policy.
-- Optional speech uses `/usr/bin/say`, is off by default, requires a visible caption/presentation scope, and stores no generated audio file.
+- Optional speech uses the fixed OpenAI Speech endpoint, is off by default, requires a configured provider and visible caption/presentation scope, and deletes its owner-only temporary audio after playback.
 
 ## Third-party services and notices
 
 | Component                         | Purpose                                          | Current notice or terms boundary                                                                    |
 | --------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
 | OpenAI Codex / `gpt-5.6-sol`      | Production coding and bounded commit explanation | Uses the judge's compatible authenticated local Codex configuration; no app API key is bundled      |
+| OpenAI Speech API                 | Optional caption-matched text-to-speech           | User-supplied key stays in owner-readable native settings; generated audio is temporary              |
 | Locked npm and Cargo dependencies | Conservative declared production/native closure  | [Generated inventory and attribution notice](src-tauri/resources/legal/THIRD-PARTY-DEPENDENCIES.md) |
 | Live2D Cubism SDK for Web 5-r.5   | Character rendering                              | [Packaged Live2D third-party notice index](src-tauri/resources/legal/THIRD-PARTY-NOTICES.md)        |
-| Bundled Hiyori model              | Default companion                                | [Byte-preserved model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)             |
+| Bundled Hiyori model              | Default character                                | [Byte-preserved model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)             |
 
 The generated inventory conservatively covers all 395 packages in the pnpm declared production closure and the 235 effective Cargo normal dependencies reported for `aarch64-apple-darwin`; it is not a claim that every npm package contributed bytes to the final Vite bundle. Generation is offline, resolves every Cargo tree display to one exact metadata package ID, parses license expressions with a strict SPDX grammar, and fails when either lock changes, a committed notice is stale, a Cargo identity is ambiguous, an expression is malformed, or required source, integrity/checksum, license, or attribution metadata is missing, unknown, or forbidden. The existing Live2D and Hiyori terms remain byte-verified and linked from the same packaged index.
 

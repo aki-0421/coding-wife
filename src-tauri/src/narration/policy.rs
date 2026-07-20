@@ -6,11 +6,10 @@ use regex::Regex;
 use url::{Host, Url};
 
 use super::types::{
-    NarrationPriority, NarrationScopeRequestV1, NarrationSemanticType, NarrationSpeakRequestV1,
+    NarrationPriority, NarrationScopeRequestV1, NarrationSpeakRequestV1,
     NARRATION_MAX_TEXT_SCALARS, NARRATION_SCHEMA_VERSION,
 };
 
-const DEDUPE_WINDOW: Duration = Duration::from_secs(30);
 const MINIMUM_START_INTERVAL: Duration = Duration::from_secs(8);
 const START_WINDOW: Duration = Duration::from_secs(60);
 const MAX_STARTS_PER_WINDOW: usize = 6;
@@ -27,7 +26,6 @@ pub(crate) enum PolicyRejection {
     UnsafeText,
     Stale,
     Sequence,
-    Duplicate,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,20 +40,12 @@ struct SequenceKey {
     request_id: String,
 }
 
-#[derive(Clone, Debug)]
-struct DedupeEntry {
-    semantic_type: NarrationSemanticType,
-    normalized_text: String,
-    observed_at: Instant,
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct NarrationPolicy {
     scope: Option<NarrationScopeRequestV1>,
     scope_generation_high_water: HashMap<String, u64>,
     sequences: HashMap<SequenceKey, u64>,
     canceled_requests: HashSet<SequenceKey>,
-    dedupe: VecDeque<DedupeEntry>,
     starts: VecDeque<Instant>,
 }
 
@@ -75,7 +65,6 @@ impl NarrationPolicy {
             self.scope = Some(scope);
             self.sequences.clear();
             self.canceled_requests.clear();
-            self.dedupe.clear();
         }
         Ok(changed)
     }
@@ -83,7 +72,6 @@ impl NarrationPolicy {
     pub fn validate_and_record(
         &mut self,
         request: &NarrationSpeakRequestV1,
-        now: Instant,
     ) -> Result<ValidatedNarration, PolicyRejection> {
         if request.schema_version != NARRATION_SCHEMA_VERSION {
             return Err(PolicyRejection::InvalidSchema);
@@ -116,26 +104,7 @@ impl NarrationPolicy {
             _ => return Err(PolicyRejection::Sequence),
         }
 
-        while self
-            .dedupe
-            .front()
-            .is_some_and(|entry| now.saturating_duration_since(entry.observed_at) >= DEDUPE_WINDOW)
-        {
-            self.dedupe.pop_front();
-        }
-        let normalized_text = normalize_text(&request.text);
-        if self.dedupe.iter().any(|entry| {
-            entry.semantic_type == request.semantic_type && entry.normalized_text == normalized_text
-        }) {
-            return Err(PolicyRejection::Duplicate);
-        }
-
         self.sequences.insert(sequence_key, request.sequence);
-        self.dedupe.push_back(DedupeEntry {
-            semantic_type: request.semantic_type,
-            normalized_text,
-            observed_at: now,
-        });
         Ok(ValidatedNarration {
             text: request.text.clone(),
         })
@@ -397,13 +366,6 @@ fn contains_private_absolute_path(characters: &[char]) -> bool {
     })
 }
 
-fn normalize_text(text: &str) -> String {
-    text.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
-}
-
 fn is_opaque_identifier(value: &str) -> bool {
     (1..=128).contains(&value.len())
         && value
@@ -414,7 +376,7 @@ fn is_opaque_identifier(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::narration::types::{NarrationKind, NarrationLocale};
+    use crate::narration::types::{NarrationKind, NarrationLocale, NarrationSemanticType};
     use serde::Deserialize;
 
     #[derive(Debug, Deserialize)]
@@ -460,49 +422,45 @@ mod tests {
     }
 
     #[test]
-    fn accepts_exact_sequences_and_rejects_duplicates_and_gaps() {
-        let now = Instant::now();
+    fn accepts_repeated_text_and_rejects_sequence_gaps() {
         let mut policy = policy();
         assert!(policy
-            .validate_and_record(&request("最初の説明です", 0), now)
+            .validate_and_record(&request("最初の説明です", 0))
+            .is_ok());
+        assert!(policy
+            .validate_and_record(&request("最初の説明です", 1))
             .is_ok());
         assert_eq!(
-            policy.validate_and_record(&request("最初の説明です", 1), now),
-            Err(PolicyRejection::Duplicate)
-        );
-        assert_eq!(
-            policy.validate_and_record(&request("三番目の説明です", 2), now),
+            policy.validate_and_record(&request("四番目の説明です", 3)),
             Err(PolicyRejection::Sequence)
         );
         assert!(policy
-            .validate_and_record(&request("次の説明です", 1), now)
+            .validate_and_record(&request("次の説明です", 2))
             .is_ok());
     }
 
     #[test]
     fn rejects_secret_path_and_stale_scope_text() {
-        let now = Instant::now();
         for text in [
             "api_key=unsafe-value",
             "Open /\u{0055}sers/example/private.txt",
             "sk-1234567890abcdef",
         ] {
             assert_eq!(
-                policy().validate_and_record(&request(text, 0), now),
+                policy().validate_and_record(&request(text, 0)),
                 Err(PolicyRejection::UnsafeText)
             );
         }
         let mut stale = request("安全な説明です", 0);
         stale.generation = 8;
         assert_eq!(
-            policy().validate_and_record(&stale, now),
+            policy().validate_and_record(&stale),
             Err(PolicyRejection::Stale)
         );
     }
 
     #[test]
     fn preserves_the_highest_generation_when_scope_rolls_back() {
-        let now = Instant::now();
         let mut policy = policy();
         policy
             .set_scope(NarrationScopeRequestV1 {
@@ -522,7 +480,7 @@ mod tests {
         let mut current = request("現在の世代です", 0);
         current.generation = 8;
 
-        assert!(policy.validate_and_record(&current, now).is_ok());
+        assert!(policy.validate_and_record(&current).is_ok());
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinSet;
 
+use crate::character::manifest::BUILTIN_HIYORI_PACK_ID;
 use crate::character::CharacterService;
 use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
@@ -23,13 +24,13 @@ use super::editable_context::{
 use super::store::WorkspaceHistoryStore;
 use super::types::{
     AppSaveCharacterContextRequest, AppendDomainEventRequest, AppendDomainEventResponse,
-    ContextSnapshotView, ContextSource, HistoryMode, HistoryStatus, NormalizedDomainEvent,
-    ProjectGetContextRequest, ProjectSaveContextRequest, ProjectSelectRequest,
-    ProjectSetupGitStatus, ProjectSetupGithubOwnerStatus, ProjectSetupGithubRequest,
-    ProjectSetupRequest, ProjectSetupView, TimelinePage, VersionedCharacterContext,
-    VersionedProjectContext, WorkspaceArchiveRequest, WorkspaceCancelRequest,
-    WorkspaceCommandError, WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView,
-    WorkspaceDeleteRequest, WorkspaceDraftView, WorkspaceHealth,
+    CharacterGetContextRequest, ContextSnapshotView, ContextSource, HistoryMode, HistoryStatus,
+    NormalizedDomainEvent, ProjectGetContextRequest, ProjectSaveContextRequest,
+    ProjectSelectRequest, ProjectSetupGitStatus, ProjectSetupGithubOwnerStatus,
+    ProjectSetupGithubRequest, ProjectSetupRequest, ProjectSetupView, TimelinePage,
+    VersionedCharacterContext, VersionedProjectContext, WorkspaceArchiveRequest,
+    WorkspaceCancelRequest, WorkspaceCommandError, WorkspaceCreateSessionRequest,
+    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView, WorkspaceHealth,
     WorkspaceLoadEditableContextRequest, WorkspacePickOutcome, WorkspacePickResponse,
     WorkspaceRecheckRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
     WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
@@ -1532,10 +1533,13 @@ impl WorkspaceHistoryService {
             .map_err(|error| history_error("project_context_save", error))
     }
 
-    pub fn character_context(&self) -> Result<VersionedCharacterContext, WorkspaceCommandError> {
+    pub fn character_context(
+        &self,
+        request: CharacterGetContextRequest,
+    ) -> Result<VersionedCharacterContext, WorkspaceCommandError> {
         self.ensure_startup_ready("app_character_context_get")?;
         self.store
-            .character_context()
+            .character_context(&request.pack_id, &request.display_name)
             .map_err(|error| history_error("app_character_context_get", error))
     }
 
@@ -1548,7 +1552,7 @@ impl WorkspaceHistoryService {
         let context = normalize_character_context(request.context)
             .map_err(|error| history_error("app_character_context_save", error))?;
         self.store
-            .save_character_context(request.expected_version, context)
+            .save_character_context(&request.pack_id, request.expected_version, context)
             .map_err(|error| history_error("app_character_context_save", error))
     }
 
@@ -1574,8 +1578,37 @@ impl WorkspaceHistoryService {
             identity.root_device,
             identity.root_inode,
         );
+        let (character_pack_id, character_display_name) =
+            if let Some(character) = self.character.as_ref() {
+                let library = character.app_library().await.map_err(|_| {
+                    WorkspaceCommandError::new(
+                        "WORKSPACE-CHARACTER-CONTEXT-PREFLIGHT",
+                        "workspace_get_turn_context_snapshot",
+                        true,
+                    )
+                })?;
+                let selected = library
+                    .packs
+                    .iter()
+                    .find(|pack| pack.pack_id == library.selected_pack_id)
+                    .ok_or_else(|| {
+                        WorkspaceCommandError::new(
+                            "WORKSPACE-CHARACTER-CONTEXT-PREFLIGHT",
+                            "workspace_get_turn_context_snapshot",
+                            true,
+                        )
+                    })?;
+                (selected.pack_id.clone(), selected.display_name.clone())
+            } else {
+                (BUILTIN_HIYORI_PACK_ID.to_owned(), "桃瀬ひより".to_owned())
+            };
         self.store
-            .turn_context_snapshot(&request.workspace_id, &validation)
+            .turn_context_snapshot(
+                &request.workspace_id,
+                &character_pack_id,
+                &character_display_name,
+                &validation,
+            )
             .map_err(|error| history_error("workspace_get_turn_context_snapshot", error))
     }
 
@@ -2573,7 +2606,9 @@ mod tests {
         AppPrivateWorkspaceRecord, FolderPicker, GitRepositoryIdentity, NativeFolderPicker,
         PickerFuture, RepositoryValidationFuture, RepositoryValidator, WorkspaceService,
     };
-    use crate::workspace_history::types::ProjectContext;
+    use crate::workspace_history::types::{
+        CharacterContext, CharacterTone, ProjectContext, SpeechDensity,
+    };
 
     use super::*;
 
@@ -3086,6 +3121,57 @@ mod tests {
                 == Some("fixture-owner/fixture-repository")));
         let _ = fs::remove_dir_all(data);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn turn_snapshot_uses_the_selected_pack_context() {
+        let fixture = project_lifecycle_fixture("selected-character-context").await;
+        fixture
+            .character
+            .library(CharacterLibraryRequest {
+                workspace_id: fixture.workspace_id.clone(),
+            })
+            .await
+            .expect("initialize character library");
+        let published = publish_unused_custom_pack(&fixture.storage);
+        fixture
+            .character
+            .select_pack(CharacterSelectRequest {
+                workspace_id: fixture.workspace_id.clone(),
+                pack_id: published.manifest.pack_id.clone(),
+            })
+            .await
+            .expect("select custom pack");
+        let custom_context = CharacterContext {
+            display_name: published.manifest.display_name.clone(),
+            tone: CharacterTone::Concise,
+            tone_notes: "短く、落ち着いて伝える。".to_owned(),
+            speech_density: SpeechDensity::KeyEvents,
+            behavior: "進捗の節目で、次に必要な行動を簡潔に示す。".to_owned(),
+            prohibited_expressions: vec!["利用者を責める表現".to_owned()],
+        };
+        fixture
+            .history
+            .save_character_context(AppSaveCharacterContextRequest {
+                pack_id: published.manifest.pack_id.clone(),
+                expected_version: 1,
+                context: custom_context.clone(),
+            })
+            .await
+            .expect("save selected pack context");
+
+        let snapshot = fixture
+            .history
+            .turn_context_snapshot(WorkspaceLoadEditableContextRequest {
+                workspace_id: fixture.workspace_id.clone(),
+            })
+            .await
+            .expect("selected pack turn snapshot");
+        assert_eq!(snapshot.character_pack_id, published.manifest.pack_id);
+        assert_eq!(snapshot.character_version, 2);
+        assert_eq!(snapshot.character, custom_context);
+
+        fixture.cleanup();
     }
 
     #[tokio::test]
