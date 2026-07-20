@@ -12,7 +12,7 @@ read_when:
 
 ## 適用仕様
 
-上位要件は[ワークスペース・セッション](../requirements/workspace-sessions.md)と[アクティビティ履歴](../requirements/activity-history.md)、画面契約は[S-001](../screen-design/S-001_session-dashboard.md)、[S-002](../screen-design/S-002_coding-workspace.md)、[S-006](../screen-design/S-006_project-settings.md)を正本とする。
+上位要件は[ワークスペース・セッション](../requirements/workspace-sessions.md)と[アクティビティ履歴](../requirements/activity-history.md)、現行画面契約は[S-001](../screen-design/S-001_session-dashboard.md)、[S-002](../screen-design/S-002_coding-workspace.md)を正本とする。[S-006](../screen-design/S-006_project-settings.md)は廃止履歴としてのみ参照する。
 
 履歴ランタイムは、macOSのapp-private data directoryに置く`workspace-history.sqlite3`を正本とする。WebViewはraw pathやSQLiteを直接扱わず、version 1のTauri commandとexact-key TypeScript parserを経由する。ブラウザー実行時の`DemoWorkspaceHistoryTransport`は操作確認用の決定的なメモリ実装であり、永続化済みとはみなさない。
 
@@ -61,8 +61,8 @@ read_when:
 | `src/features/workspace-view/useWorkspaceViewModel.ts` | hydration、workspace切替race防止、250 ms draft debounce、UI notice |
 | `src/features/workspace-view/useEditableSettingsContext.ts` | Project ID-scoped Project draftとapp-global Character draft、save、競合保持、明示reload |
 | `src/features/workspace-view/EditableContextSection.tsx` | Project / Character editor、field境界、version/hash、次turn表示、error focus |
-| `src/features/workspace-view/SettingsView.tsx` | S-005の7 sectionとProjects内のProject ID-scoped detail、S-006のworkspace-scoped History & Privacyを別viewとして構成する |
-| `src/features/workspace-view/WorkspaceShell.tsx` | sidebar gearのS-005遷移、project detail selection、Settings tabのS-006遷移、直前tabとfocusの復元を所有する |
+| `src/features/workspace-view/SettingsView.tsx` | S-005の7 sectionとProjects内のProject ID-scoped detailを構成する |
+| `src/features/workspace-view/WorkspaceShell.tsx` | sidebar gearのS-005遷移、project detail selection、直前workspace tabとfocusの復元を所有する |
 | `src/test/fixtures/workspace-context-policy.v1.json` | RustとTypeScriptで共有するCharacter policyのja / en accepted・rejected corpus |
 | `src/test/fixtures/workspace-history.v1.json` | RustとTypeScriptが共有するpublic contract fixture |
 
@@ -82,7 +82,7 @@ pnpm test
 pnpm build
 ```
 
-Rust testはmigration rollback、破損backup、concurrent sequence、redaction、context上限、起動復元、linked worktreeに加え、editable contextの再起動復元、Project ID共有、expected-version競合、shared policy corpus、参照の消失・置換、symlink retarget、root交換、旧workspace recordの決定的集約を検証する。TypeScript testはexact contract、raw list draft、blur / save正規化、field error focus、project追加、session作成、project detail、context、削除、fresh adapterでの再hydration、次turnの信頼境界付きenvelope、競合時のdraft保持を検証する。`WorkspaceShell.test.tsx`はsidebar gearがS-005だけを、project rowが同sectionのdetailを、Settings tabがS-006だけを表示し、Back後に直前tabとfocusを復元することも検証する。Demo transportのhash testはRustと同じcanonical JSONの既知SHA-256を比較し、表示用の疑似hashへ戻らないことを保証する。UIを変更した場合は`agent-browser`でProjects一覧からdetailへの遷移、projectごとのdraft、同Project ID workspaceでの共有、Workspace settingsとのsection非重複、Back後のfocus復元、入力中とblur後のlist値、保存後version / hash、ja / en、validation・競合時focus、1470 / 960 / 480 pxを操作し、screenshotは`/tmp`またはignore済み`tmp/`へ保存する。
+Rust testはmigration rollback、破損backup、concurrent sequence、redaction、context上限、起動復元、linked worktreeに加え、editable contextの再起動復元、Project ID共有、expected-version競合、shared policy corpus、参照の消失・置換、symlink retarget、root交換、旧workspace recordの決定的集約を検証する。TypeScript testはexact contract、raw list draft、blur / save正規化、field error focus、project追加、session作成、project detail、context、fresh adapterでの再hydration、次turnの信頼境界付きenvelope、競合時のdraft保持を検証する。`WorkspaceShell.test.tsx`はworkspace headerがChat / Commitだけを表示し、sidebar gearがS-005だけを、project rowが同sectionのdetailを開き、Back後に直前tabとfocusを復元することも検証する。Demo transportのhash testはRustと同じcanonical JSONの既知SHA-256を比較し、表示用の疑似hashへ戻らないことを保証する。UIを変更した場合は`agent-browser`でChat / Commitの2 tab、Projects一覧からdetailへの遷移、projectごとのdraft、同Project ID workspaceでの共有、Back後のfocus復元、入力中とblur後のlist値、保存後version / hash、ja / en、validation・競合時focus、1470 / 960 / 480 pxを操作し、screenshotは`/tmp`またはignore済み`tmp/`へ保存する。
 
 ## 変更時チェックリスト
 
