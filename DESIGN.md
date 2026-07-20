@@ -323,7 +323,7 @@ file summaryを先に表示し、sanitized diffはfile selection後に1件ずつ
 
 ### Live2D Companion
 
-607.84×754.99px の透明な単一canvasをContinuous Desk上へbottom-containし、頭、手、裾を切らない。選択workspaceのChat、Commitでは同じcanvas instanceと同じpane幅を継続し、tab切替でrendererを再生成またはresizeしない。Commitのevidence detailはcompanionを縮小せず、commit listを非modal drawerへ退避して可読幅を確保する。App Settingsではcanvasを表示せずprimary surfaceを全幅へ戻す。character visibilityをHiddenにした場合も同様にprimary surfaceを全幅へ戻し、HTML text statusを残す。canvas自体はpointerとaccessibility treeを占有せず、muteは右下21px insetの27×27px circleとする。renderer failureはanimated → reduced → static preview → text-onlyの順に縮退する。
+607.84×754.99px の透明な単一canvasをContinuous Desk上へbottom-containし、頭、手、裾を切らない。選択workspaceのChat、Commitでは常に同じcanvas instanceと同じpane幅を継続し、tab切替でrendererを再生成またはresizeしない。Commitのevidence detailはcompanionを縮小せず、commit listを非modal drawerへ退避して可読幅を確保する。App Settingsではcanvasを表示せずprimary surfaceを全幅へ戻す。canvas自体はpointerとaccessibility treeを占有せず、muteは右下21px insetの27×27px circleとする。renderer failureはanimated → reduced → static preview → text-onlyの順に縮退する。
 
 ### Decision Card
 

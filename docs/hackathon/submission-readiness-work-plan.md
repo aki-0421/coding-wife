@@ -127,9 +127,10 @@ read_when:
 
 ### 4. Settings、Diagnostics、session continuity
 
-- locale、reduced-motion override、character hiddenなど承認済みpreferenceをtyped native schemaへ保存し、restart後に復元する。
-- preference resetはpreferenceだけを安全なdefaultへ戻し、workspace、history、Context、model libraryを消さない。
-- corrupt/missing schemaはfail closedでdefaultへ回復し、ja/enを即時反映する。
+- `AppPreferencesV2`はlocaleだけをtyped native schemaへ保存し、restart後に復元する。V1からはlocaleだけを移行し、旧reduced-motion overrideとcharacter visibilityは破棄する。
+- reduced motionはOSの`prefers-reduced-motion`だけを尊重し、characterはChatとCommitで常時表示する。App settingsに両controlを置かない。
+- preference reset commandとReset UI state操作をproductionへ含めない。
+- corrupt/missing schemaはfail closedでdefaultへ回復し、sanitized codeとRetryを表示してja/enを即時反映する。
 - DiagnosticsはOS、app/build/schema、Codex binary/auth/model/schema、Git、DB、Live2Dのreal native readiness sourceを表示する。
 - 各diagnosticはstatus、checked time、安全なerror code、recovery actionを持つ。absolute path、token、raw stderrを表示・copyしない。
 - RecheckとHistory badgeは同じnative sourceを再評価する。
@@ -221,7 +222,7 @@ read_when:
 - [ ] **C10 `feat(settings): persist native preferences`**
   - Depends on: C02
   - Parallel: Commit/Context/Workspace系列と可。
-  - Done: locale/reduced-motion/character hiddenの保存、restart、reset scope、corrupt/missing recovery、ja/en即時反映がgreen。
+  - Done: locale-only V2の保存、V1 locale migration、restart、corrupt/missing recovery、ja/en即時反映、旧display controlとreset commandの不在がgreen。
 
 - [ ] **C11 `feat(settings): report native readiness diagnostics`**
   - Depends on: C10

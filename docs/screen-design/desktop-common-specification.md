@@ -131,7 +131,7 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 | 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | primaryを最低520px、Companionへ残幅。全作業tabで同じ配分を維持 | tabsはhorizontal scroll、footer controlsはwrap |
 | 200% text zoom | 64px rail + drawerを使用 | Companionをhide可能、Chat/decisionを優先 | labelを縮小せずwrap/overflow menu |
 
-選択workspaceのChat、Commitは同じCompanion instanceを右paneへ継続表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCompanionを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005はCompanionを表示せずsetting formを全幅で構成する。character visibilityがHiddenの場合もprimary work surfaceを全幅へ戻し、visible HTML stateを残す。Chat、CommitとCompanionの間へdividerまたは別cardを置かない。
+選択workspaceのChat、Commitは同じCompanion instanceを右paneへ常時表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCompanionを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005はCompanionを表示せずsetting formを全幅で構成する。Chat、CommitとCompanionの間へdividerまたは別cardを置かない。
 
 ## surface、文字、motion
 
@@ -214,7 +214,6 @@ macOS予約shortcutを上書きしない。icon-only操作にはaccessible name�
 | `commit.explain` | 詳しく教えて | Explain This Commit |
 | `commit.explanation.close` | 説明を閉じる | Close Explanation |
 | `commit.generation.cancel` | 説明生成をキャンセル | Cancel Explanation Generation |
-| `preferences.reset` | 設定をリセット | Reset Preferences |
 | `diagnostics.recheck` | 再診断 | Recheck |
 
 ## 共通表示状態
@@ -242,8 +241,8 @@ loading中に最終dataがある場合は前回dataを薄く残し、全画面sp
 
 | data | 正本 | 保存契機 | restart | 破棄 |
 |---|---|---|---|---|
-| window geometry / route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | Reset UI state |
-| `AppPreferencesV1` (`locale` / `reducedMotion` / `characterVisibility`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | Reset Preferencesでrecordだけsafe defaultへ |
+| window geometry / route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | schema不整合またはunsafe boundsだけをsafe defaultへ補正 |
+| `AppPreferencesV2` (`locale`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | missing/corrupt/unknown versionだけをsafe defaultへfail closed |
 | project/workspace/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
 | Project context | Rust管理SQLiteのProject ID-scoped record | App settings project detailのexpected-version save | project detailまたは同Project IDのworkspace turn開始 | project登録解除契約 | optimistic conflict |
 | app-global Character context | Rust管理SQLite singleton record | App settingsのexpected-version save | 全workspaceへ同じversion/hashを復元 | app data reset契約 |

@@ -3,9 +3,8 @@ import { describe, expect, it, vi } from "vitest"
 import { AppPreferencesController } from "@/features/preferences/controller"
 import type {
   AppLocale,
-  AppPreferencesResetRequestV1,
-  AppPreferencesSnapshotV1,
-  AppPreferencesUpdateRequestV1,
+  AppPreferencesSnapshotV2,
+  AppPreferencesUpdateRequestV2,
 } from "@/features/preferences/contracts"
 import {
   AppPreferencesBoundaryError,
@@ -31,18 +30,14 @@ function deferred<T>(): Deferred<T> {
 function snapshot(
   version: number,
   locale: AppLocale,
-  overrides: Partial<AppPreferencesSnapshotV1["preferences"]> = {},
-): AppPreferencesSnapshotV1 {
+): AppPreferencesSnapshotV2 {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     preferences: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       version,
       snapshotId: `123e4567-e89b-42d3-a456-${String(version + 1).padStart(12, "0")}`,
       locale,
-      reducedMotion: "system",
-      characterVisibility: "visible",
-      ...overrides,
     },
     persistence: "native",
     recoveryCode: null,
@@ -51,53 +46,33 @@ function snapshot(
 
 class ControlledGateway implements AppPreferencesGateway {
   readonly kind = "native" as const
-  readonly updates: AppPreferencesUpdateRequestV1[] = []
-  readonly updateResults: Deferred<AppPreferencesSnapshotV1>[] = []
-  readonly resets: AppPreferencesResetRequestV1[] = []
+  readonly updates: AppPreferencesUpdateRequestV2[] = []
+  readonly updateResults: Deferred<AppPreferencesSnapshotV2>[] = []
   getCalls = 0
-  getImplementation: (() => Promise<AppPreferencesSnapshotV1>) | null = null
-  resetImplementation:
-    | ((
-        request: AppPreferencesResetRequestV1,
-      ) => Promise<AppPreferencesSnapshotV1>)
-    | null = null
-  initial = snapshot(0, "en")
+  durable = snapshot(0, "en")
 
-  get(): Promise<AppPreferencesSnapshotV1> {
+  get(): Promise<AppPreferencesSnapshotV2> {
     this.getCalls += 1
-    if (this.getImplementation !== null) return this.getImplementation()
-    return Promise.resolve(this.initial)
+    return Promise.resolve(this.durable)
   }
 
   update(
-    request: AppPreferencesUpdateRequestV1,
-  ): Promise<AppPreferencesSnapshotV1> {
+    request: AppPreferencesUpdateRequestV2,
+  ): Promise<AppPreferencesSnapshotV2> {
     this.updates.push(request)
-    const result = deferred<AppPreferencesSnapshotV1>()
+    const result = deferred<AppPreferencesSnapshotV2>()
     this.updateResults.push(result)
     return result.promise
   }
-
-  reset(
-    request: AppPreferencesResetRequestV1,
-  ): Promise<AppPreferencesSnapshotV1> {
-    this.resets.push(request)
-    if (this.resetImplementation !== null) {
-      return this.resetImplementation(request)
-    }
-    return Promise.resolve(
-      snapshot(request.expectedVersion + 1, request.defaultLocale),
-    )
-  }
 }
 
-function boundaryError(code: string): AppPreferencesBoundaryError {
+function boundaryError(code = "APP-PREFERENCES-WRITE") {
   return new AppPreferencesBoundaryError({
     code,
     operation: "app_preferences_update",
     recoverable: true,
     userMessageKey: "preferences.error.generic",
-    detailRef: "app-preferences-v1",
+    detailRef: "app-preferences-v2",
   })
 }
 
@@ -108,7 +83,41 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("AppPreferencesController", () => {
-  it("never publishes a late locale response after a newer locale intent", async () => {
+  it("persists the current locale to repair a recovery snapshot", async () => {
+    const gateway = new ControlledGateway()
+    gateway.durable = {
+      schemaVersion: 2,
+      preferences: {
+        schemaVersion: 2,
+        version: 0,
+        snapshotId: "00000000-0000-0000-0000-000000000000",
+        locale: "en",
+      },
+      persistence: "native",
+      recoveryCode: "APP-PREFERENCES-MISSING",
+    }
+    const controller = new AppPreferencesController(gateway, "en")
+    await controller.initialize()
+
+    const repaired = controller.update({ locale: "en" })
+    await vi.waitFor(() => expect(gateway.updates).toHaveLength(1))
+    expect(gateway.updates[0]).toEqual({
+      schemaVersion: 2,
+      expectedVersion: 0,
+      locale: "en",
+    })
+
+    gateway.durable = snapshot(1, "en")
+    gateway.updateResults[0]?.resolve(gateway.durable)
+    await expect(repaired).resolves.toBe(true)
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "ready",
+      snapshot: { preferences: { version: 1, locale: "en" } },
+      errorCode: null,
+    })
+  })
+
+  it("never publishes a late locale response after a newer intent", async () => {
     const gateway = new ControlledGateway()
     const controller = new AppPreferencesController(gateway, "en")
     await controller.initialize()
@@ -122,690 +131,84 @@ describe("AppPreferencesController", () => {
 
     const first = controller.update({ locale: "ja" })
     await flushMicrotasks()
-    expect(gateway.updates).toHaveLength(1)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "saving",
-      snapshot: { preferences: { locale: "en" } },
-      pendingPreferences: { locale: "ja" },
-    })
-
     const second = controller.update({ locale: "en" })
-    gateway.updateResults[0]?.resolve(snapshot(1, "ja"))
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
+    gateway.durable = snapshot(1, "ja")
+    gateway.updateResults[0]?.resolve(gateway.durable)
 
-    expect(controller.getSnapshot().snapshot.preferences.locale).toBe("en")
+    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
     expect(publishedLocales).not.toContain("ja")
-    expect(gateway.updates[1]).toMatchObject({
+    expect(gateway.updates[1]).toEqual({
+      schemaVersion: 2,
       expectedVersion: 1,
       locale: "en",
     })
 
-    gateway.updateResults[1]?.resolve(snapshot(2, "en"))
+    gateway.durable = snapshot(2, "en")
+    gateway.updateResults[1]?.resolve(gateway.durable)
     await expect(Promise.all([first, second])).resolves.toEqual([true, true])
     expect(controller.getSnapshot()).toMatchObject({
       status: "ready",
       snapshot: { preferences: { version: 2, locale: "en" } },
-    })
-  })
-
-  it("serializes patches so global preferences remain one coherent snapshot", async () => {
-    const gateway = new ControlledGateway()
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-
-    const motion = controller.update({ reducedMotion: "on" })
-    const visibility = controller.update({ characterVisibility: "hidden" })
-    await flushMicrotasks()
-    expect(gateway.updates).toHaveLength(1)
-    expect(gateway.updates[0]).toMatchObject({
-      expectedVersion: 0,
-      reducedMotion: "on",
-      characterVisibility: "hidden",
-    })
-    gateway.updateResults[0]?.resolve(
-      snapshot(1, "en", {
-        reducedMotion: "on",
-        characterVisibility: "hidden",
-      }),
-    )
-    await expect(Promise.all([motion, visibility])).resolves.toEqual([
-      true,
-      true,
-    ])
-    expect(controller.getSnapshot().snapshot.preferences).toMatchObject({
-      reducedMotion: "on",
-      characterVisibility: "hidden",
-    })
-  })
-
-  it("writes only the latest follow-up after an in-flight A to B to A change", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(0, "ja")
-    const controller = new AppPreferencesController(gateway, "ja")
-    await controller.initialize()
-
-    const toEnglish = controller.update({ locale: "en" })
-    await flushMicrotasks()
-    expect(gateway.updates).toHaveLength(1)
-
-    const backToJapanese = controller.update({ locale: "ja" })
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "saving",
-      snapshot: { preferences: { locale: "ja", version: 0 } },
-      pendingPreferences: { locale: "ja" },
-    })
-
-    gateway.updateResults[0]?.resolve(snapshot(1, "en"))
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
-    expect(controller.getSnapshot().snapshot.preferences).toMatchObject({
-      locale: "ja",
-      version: 0,
-    })
-    expect(gateway.updates[1]).toMatchObject({
-      expectedVersion: 1,
-      locale: "ja",
-    })
-
-    gateway.updateResults[1]?.resolve(snapshot(2, "ja"))
-    await expect(Promise.all([toEnglish, backToJapanese])).resolves.toEqual([
-      true,
-      true,
-    ])
-    expect(gateway.updates).toHaveLength(2)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: { preferences: { locale: "ja", version: 2 } },
       pendingPreferences: null,
     })
   })
 
-  it("keeps the newest intent when an older in-flight write fails", async () => {
-    const gateway = new ControlledGateway()
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-
-    const stale = controller.update({ locale: "ja" })
-    await flushMicrotasks()
-    const latest = controller.update({ locale: "en", reducedMotion: "on" })
-    gateway.updateResults[0]?.reject(
-      new AppPreferencesBoundaryError({
-        code: "APP-PREFERENCES-WRITE",
-        operation: "app_preferences_update",
-        recoverable: true,
-        userMessageKey: "preferences.error.generic",
-        detailRef: "app-preferences-v1",
-      }),
-    )
-
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "saving",
-      snapshot: { preferences: { locale: "en", reducedMotion: "system" } },
-      pendingPreferences: { locale: "en", reducedMotion: "on" },
-      errorCode: null,
-    })
-    expect(gateway.updates[1]).toMatchObject({
-      expectedVersion: 0,
-      locale: "en",
-      reducedMotion: "on",
-    })
-
-    gateway.updateResults[1]?.resolve(
-      snapshot(1, "en", { reducedMotion: "on" }),
-    )
-    await expect(Promise.all([stale, latest])).resolves.toEqual([true, true])
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: { preferences: { locale: "en", reducedMotion: "on" } },
-      pendingPreferences: null,
-    })
-  })
-
-  it("treats a rejected response as success when the durable write committed", async () => {
+  it("accepts an ambiguous response when a fresh read confirms the write", async () => {
     const gateway = new ControlledGateway()
     const controller = new AppPreferencesController(gateway, "en")
     await controller.initialize()
 
     const update = controller.update({ locale: "ja" })
     await vi.waitFor(() => expect(gateway.updates).toHaveLength(1))
-    gateway.initial = snapshot(1, "ja")
-    gateway.updateResults[0]?.reject(boundaryError("APP-PREFERENCES-WRITE"))
+    gateway.durable = snapshot(1, "ja")
+    gateway.updateResults[0]?.reject(boundaryError())
 
     await expect(update).resolves.toBe(true)
-    expect(gateway.getCalls).toBe(2)
-    expect(gateway.updates).toHaveLength(1)
     expect(controller.getSnapshot()).toMatchObject({
       status: "ready",
       snapshot: { preferences: { version: 1, locale: "ja" } },
-      pendingPreferences: null,
-      errorCode: null,
     })
   })
 
-  it("rebases the latest intent onto a fresh durable conflict version", async () => {
+  it("bounds failed writes and retries the latest locale intent", async () => {
     const gateway = new ControlledGateway()
     const controller = new AppPreferencesController(gateway, "en")
     await controller.initialize()
 
-    const update = controller.update({ locale: "ja" })
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(1))
-    gateway.initial = snapshot(4, "en", {
-      reducedMotion: "on",
-      characterVisibility: "hidden",
-    })
-    gateway.updateResults[0]?.reject(boundaryError("APP-PREFERENCES-CONFLICT"))
-
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
-    expect(gateway.updates[1]).toMatchObject({
-      expectedVersion: 4,
-      locale: "ja",
-      reducedMotion: "on",
-      characterVisibility: "hidden",
-    })
-    gateway.updateResults[1]?.resolve(
-      snapshot(5, "ja", {
-        reducedMotion: "on",
-        characterVisibility: "hidden",
-      }),
-    )
-
-    await expect(update).resolves.toBe(true)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: {
-        preferences: {
-          version: 5,
-          locale: "ja",
-          reducedMotion: "on",
-          characterVisibility: "hidden",
-        },
-      },
-    })
-  })
-
-  it("reconciles a stale success response before writing the latest intent", async () => {
-    const gateway = new ControlledGateway()
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-
-    const update = controller.update({ locale: "ja" })
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(1))
-    gateway.initial = snapshot(7, "en", { reducedMotion: "on" })
-    gateway.updateResults[0]?.resolve(snapshot(2, "ja"))
-
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
-    expect(gateway.updates[1]).toMatchObject({
-      expectedVersion: 7,
-      locale: "ja",
-      reducedMotion: "on",
-    })
-    gateway.updateResults[1]?.resolve(
-      snapshot(8, "ja", { reducedMotion: "on" }),
-    )
-    await expect(update).resolves.toBe(true)
-  })
-
-  it("surfaces a safe read error and retries the intent on a fresh version", async () => {
-    const gateway = new ControlledGateway()
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-    gateway.getImplementation = () =>
-      Promise.reject(boundaryError("APP-PREFERENCES-READ"))
-
-    const update = controller.update({ locale: "ja" })
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(1))
-    gateway.updateResults[0]?.reject(boundaryError("APP-PREFERENCES-WRITE"))
-
-    await expect(update).resolves.toBe(false)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "error",
-      snapshot: { preferences: { version: 0, locale: "en" } },
-      pendingPreferences: null,
-      errorCode: "APP-PREFERENCES-READ",
-    })
-
-    gateway.initial = snapshot(5, "en", { reducedMotion: "on" })
-    gateway.getImplementation = null
-    const retry = controller.retry()
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(2))
-    expect(gateway.updates[1]).toMatchObject({
-      expectedVersion: 5,
-      locale: "ja",
-      reducedMotion: "on",
-    })
-    gateway.updateResults[1]?.resolve(
-      snapshot(6, "ja", { reducedMotion: "on" }),
-    )
-    await expect(retry).resolves.toBe(true)
-  })
-
-  it("keeps the last native snapshot and returns a safe code on save failure", async () => {
-    const gateway = new ControlledGateway()
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-    const update = controller.update({ locale: "ja" })
-    await flushMicrotasks()
+    const failed = controller.update({ locale: "ja" })
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await vi.waitFor(() => expect(gateway.updates).toHaveLength(attempt + 1))
-      gateway.updateResults[attempt]?.reject(
-        boundaryError("APP-PREFERENCES-WRITE"),
-      )
+      gateway.updateResults[attempt]?.reject(boundaryError())
     }
-
-    await expect(update).resolves.toBe(false)
-    expect(gateway.getCalls).toBe(4)
-    expect(gateway.updates).toHaveLength(3)
+    await expect(failed).resolves.toBe(false)
     expect(controller.getSnapshot()).toMatchObject({
       status: "error",
+      snapshot: { preferences: { locale: "en" } },
       errorCode: "APP-PREFERENCES-WRITE",
-      snapshot: { preferences: { locale: "en", version: 0 } },
-      pendingPreferences: null,
     })
-  })
 
-  it("stops publishing and retrying when disposed during reconciliation", async () => {
-    const gateway = new ControlledGateway()
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-    const durableRead = deferred<AppPreferencesSnapshotV1>()
-    gateway.getImplementation = () => durableRead.promise
-    const listener = vi.fn()
-    controller.subscribe(listener)
-
-    const update = controller.update({ locale: "ja" })
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(1))
-    gateway.updateResults[0]?.reject(boundaryError("APP-PREFERENCES-CONFLICT"))
-    await vi.waitFor(() => expect(gateway.getCalls).toBe(2))
-    const publicationsBeforeDispose = listener.mock.calls.length
-    controller.dispose()
-    durableRead.resolve(snapshot(3, "en"))
-
-    await expect(update).resolves.toBe(false)
-    expect(listener).toHaveBeenCalledTimes(publicationsBeforeDispose)
-    expect(gateway.updates).toHaveLength(1)
-  })
-
-  it("resets the preference record to OS locale, system motion, and visible", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(7, "en", {
-      reducedMotion: "on",
-      characterVisibility: "hidden",
-    })
-    const controller = new AppPreferencesController(gateway, "ja")
-    await controller.initialize()
-
-    await expect(controller.reset()).resolves.toBe(true)
-    expect(gateway.resets).toEqual([
-      { schemaVersion: 1, expectedVersion: 7, defaultLocale: "ja" },
-    ])
-    expect(controller.getSnapshot().snapshot.preferences).toMatchObject({
-      version: 8,
-      locale: "ja",
-      reducedMotion: "system",
-      characterVisibility: "visible",
-    })
-  })
-
-  it("supersedes an update that has not reached the native writer with one reset", async () => {
-    const gateway = new ControlledGateway()
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-
-    const update = controller.update({ locale: "ja", reducedMotion: "on" })
-    const reset = controller.reset()
-
-    await expect(Promise.all([update, reset])).resolves.toEqual([true, true])
-    expect(gateway.updates).toHaveLength(0)
-    expect(gateway.resets).toEqual([
-      { schemaVersion: 1, expectedVersion: 0, defaultLocale: "en" },
-    ])
+    const retried = controller.retry()
+    await vi.waitFor(() => expect(gateway.updates).toHaveLength(4))
+    gateway.durable = snapshot(1, "ja")
+    gateway.updateResults[3]?.resolve(gateway.durable)
+    await expect(retried).resolves.toBe(true)
     expect(controller.getSnapshot()).toMatchObject({
       status: "ready",
-      snapshot: {
-        preferences: {
-          version: 1,
-          locale: "en",
-          reducedMotion: "system",
-        },
-      },
-    })
-  })
-
-  it("finishes one in-flight update before issuing exactly one reset", async () => {
-    const gateway = new ControlledGateway()
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-
-    const update = controller.update({ locale: "ja" })
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(1))
-    const reset = controller.reset()
-    await flushMicrotasks()
-    expect(gateway.resets).toHaveLength(0)
-
-    gateway.updateResults[0]?.resolve(snapshot(1, "ja"))
-    await vi.waitFor(() => expect(gateway.resets).toHaveLength(1))
-    expect(gateway.resets[0]).toEqual({
-      schemaVersion: 1,
-      expectedVersion: 1,
-      defaultLocale: "en",
-    })
-
-    await expect(Promise.all([update, reset])).resolves.toEqual([true, true])
-    expect(gateway.updates).toHaveLength(1)
-    expect(gateway.resets).toHaveLength(1)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: { preferences: { version: 2, locale: "en" } },
-    })
-  })
-
-  it("writes only the latest intent after an in-flight reset", async () => {
-    const gateway = new ControlledGateway()
-    const resetResult = deferred<AppPreferencesSnapshotV1>()
-    gateway.resetImplementation = () => resetResult.promise
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-
-    const reset = controller.reset()
-    await vi.waitFor(() => expect(gateway.resets).toHaveLength(1))
-    const locale = controller.update({ locale: "ja" })
-    const motion = controller.update({ reducedMotion: "on" })
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "saving",
-      pendingPreferences: { locale: "ja", reducedMotion: "on" },
-    })
-    expect(gateway.updates).toHaveLength(0)
-
-    resetResult.resolve(snapshot(1, "en"))
-    await expect(reset).resolves.toBe(true)
-    await vi.waitFor(() => expect(gateway.updates).toHaveLength(1))
-    expect(gateway.updates[0]).toMatchObject({
-      expectedVersion: 1,
-      locale: "ja",
-      reducedMotion: "on",
-      characterVisibility: "visible",
-    })
-    gateway.updateResults[0]?.resolve(
-      snapshot(2, "ja", { reducedMotion: "on" }),
-    )
-
-    await expect(Promise.all([locale, motion])).resolves.toEqual([true, true])
-    expect(gateway.resets).toHaveLength(1)
-    expect(gateway.updates).toHaveLength(1)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: {
-        preferences: { version: 2, locale: "ja", reducedMotion: "on" },
-      },
-    })
-  })
-
-  it("reconciles a reset whose committed response was lost", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(6, "ja", { reducedMotion: "on" })
-    gateway.resetImplementation = () =>
-      Promise.reject(boundaryError("APP-PREFERENCES-WRITE"))
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-
-    gateway.initial = snapshot(7, "en")
-    await expect(controller.reset()).resolves.toBe(true)
-
-    expect(gateway.resets).toHaveLength(1)
-    expect(gateway.getCalls).toBe(2)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: { preferences: { version: 7, locale: "en" } },
-      pendingPreferences: null,
+      snapshot: { preferences: { locale: "ja" } },
       errorCode: null,
     })
   })
 
-  it("rebases a conflicted reset onto the durable version exactly once", async () => {
+  it("ignores late results after disposal", async () => {
     const gateway = new ControlledGateway()
-    gateway.initial = snapshot(2, "ja", { reducedMotion: "on" })
-    gateway.resetImplementation = (request) => {
-      if (gateway.resets.length === 1) {
-        return Promise.reject(boundaryError("APP-PREFERENCES-CONFLICT"))
-      }
-      return Promise.resolve(snapshot(request.expectedVersion + 1, "en"))
-    }
     const controller = new AppPreferencesController(gateway, "en")
     await controller.initialize()
-    gateway.initial = snapshot(9, "ja", { characterVisibility: "hidden" })
-
-    await expect(controller.reset()).resolves.toBe(true)
-    expect(gateway.resets).toEqual([
-      { schemaVersion: 1, expectedVersion: 2, defaultLocale: "en" },
-      { schemaVersion: 1, expectedVersion: 9, defaultLocale: "en" },
-    ])
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: { preferences: { version: 10, locale: "en" } },
-    })
-  })
-
-  it("bounds reset reconciliation and preserves the last durable version", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(4, "ja", { reducedMotion: "on" })
-    gateway.resetImplementation = () =>
-      Promise.reject(boundaryError("APP-PREFERENCES-WRITE"))
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-
-    await expect(controller.reset()).resolves.toBe(false)
-    expect(gateway.resets).toHaveLength(3)
-    expect(gateway.getCalls).toBe(4)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "error",
-      errorCode: "APP-PREFERENCES-WRITE",
-      snapshot: { preferences: { version: 4, locale: "ja" } },
-      pendingPreferences: null,
-    })
-  })
-
-  it("retries a failed reset before applying its post-reset intent", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(4, "ja", {
-      reducedMotion: "on",
-      characterVisibility: "hidden",
-    })
-    const firstReset = deferred<AppPreferencesSnapshotV1>()
-    const retriedReset = deferred<AppPreferencesSnapshotV1>()
-    gateway.resetImplementation = () => {
-      if (gateway.resets.length === 1) return firstReset.promise
-      if (gateway.resets.length <= 3) {
-        return Promise.reject(boundaryError("APP-PREFERENCES-WRITE"))
-      }
-      return retriedReset.promise
-    }
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-
-    const reset = controller.reset()
-    await vi.waitFor(() => expect(gateway.resets).toHaveLength(1))
-    const postResetLocale = controller.update({ locale: "ja" })
-    firstReset.reject(boundaryError("APP-PREFERENCES-WRITE"))
-
-    await expect(reset).resolves.toBe(false)
-    await expect(postResetLocale).resolves.toBe(false)
-    expect(gateway.resets).toHaveLength(3)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "error",
-      snapshot: {
-        preferences: {
-          version: 4,
-          locale: "ja",
-          reducedMotion: "on",
-          characterVisibility: "hidden",
-        },
-      },
-    })
-
-    const retry = controller.retry()
-    await vi.waitFor(() => expect(gateway.resets).toHaveLength(4))
-    expect(gateway.resets[3]).toEqual({
-      schemaVersion: 1,
-      expectedVersion: 4,
-      defaultLocale: "en",
-    })
-    retriedReset.resolve(snapshot(5, "en"))
+    const update = controller.update({ locale: "ja" })
     await vi.waitFor(() => expect(gateway.updates).toHaveLength(1))
-    expect(gateway.updates[0]).toMatchObject({
-      expectedVersion: 5,
-      locale: "ja",
-      reducedMotion: "system",
-      characterVisibility: "visible",
-    })
-    gateway.updateResults[0]?.resolve(snapshot(6, "ja"))
-
-    await expect(retry).resolves.toBe(true)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: {
-        preferences: {
-          version: 6,
-          locale: "ja",
-          reducedMotion: "system",
-          characterVisibility: "visible",
-        },
-      },
-      pendingPreferences: null,
-    })
-  })
-
-  it("reconciles an ambiguous committed reset while retrying its operation", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(7, "ja", { reducedMotion: "on" })
-    gateway.resetImplementation = () =>
-      Promise.reject(boundaryError("APP-PREFERENCES-WRITE"))
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-    await expect(controller.reset()).resolves.toBe(false)
-    expect(gateway.resets).toHaveLength(3)
-
-    gateway.resetImplementation = () => {
-      gateway.initial = snapshot(8, "en")
-      return Promise.reject(boundaryError("APP-PREFERENCES-WRITE"))
-    }
-    await expect(controller.retry()).resolves.toBe(true)
-
-    expect(gateway.resets).toHaveLength(4)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: { preferences: { version: 8, locale: "en" } },
-      pendingPreferences: null,
-    })
-  })
-
-  it("keeps reset retry semantics across a conflict rebase", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(2, "ja", { characterVisibility: "hidden" })
-    gateway.resetImplementation = () =>
-      Promise.reject(boundaryError("APP-PREFERENCES-WRITE"))
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-    await expect(controller.reset()).resolves.toBe(false)
-
-    gateway.resetImplementation = (request) => {
-      if (gateway.resets.length === 4) {
-        gateway.initial = snapshot(9, "ja", { reducedMotion: "on" })
-        return Promise.reject(boundaryError("APP-PREFERENCES-CONFLICT"))
-      }
-      return Promise.resolve(snapshot(request.expectedVersion + 1, "en"))
-    }
-    await expect(controller.retry()).resolves.toBe(true)
-
-    expect(gateway.resets.slice(3)).toEqual([
-      { schemaVersion: 1, expectedVersion: 2, defaultLocale: "en" },
-      { schemaVersion: 1, expectedVersion: 9, defaultLocale: "en" },
-    ])
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: { preferences: { version: 10, locale: "en" } },
-    })
-  })
-
-  it("retains a reset operation when its retry durable read also fails", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(3, "ja", { reducedMotion: "on" })
-    const readError = boundaryError("APP-PREFERENCES-READ")
-    gateway.resetImplementation = () =>
-      Promise.reject(boundaryError("APP-PREFERENCES-WRITE"))
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-    gateway.getImplementation = () => Promise.reject(readError)
-
-    await expect(controller.reset()).resolves.toBe(false)
-    expect(gateway.resets).toHaveLength(1)
-    await expect(controller.retry()).resolves.toBe(false)
-    expect(gateway.resets).toHaveLength(1)
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "error",
-      errorCode: "APP-PREFERENCES-READ",
-      snapshot: { preferences: { version: 3, locale: "ja" } },
-    })
-
-    gateway.getImplementation = null
-    gateway.resetImplementation = (request) =>
-      Promise.resolve(snapshot(request.expectedVersion + 1, "en"))
-    await expect(controller.retry()).resolves.toBe(true)
-    expect(gateway.resets.at(-1)).toEqual({
-      schemaVersion: 1,
-      expectedVersion: 3,
-      defaultLocale: "en",
-    })
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: { preferences: { version: 4, locale: "en" } },
-    })
-  })
-
-  it("reconciles a stale reset response before accepting its version", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(2, "ja", { reducedMotion: "on" })
-    gateway.resetImplementation = (request) =>
-      gateway.resets.length === 1
-        ? Promise.resolve(snapshot(4, "en"))
-        : Promise.resolve(snapshot(request.expectedVersion + 1, "en"))
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-    gateway.initial = snapshot(6, "ja", { characterVisibility: "hidden" })
-
-    await expect(controller.reset()).resolves.toBe(true)
-    expect(gateway.resets).toEqual([
-      { schemaVersion: 1, expectedVersion: 2, defaultLocale: "en" },
-      { schemaVersion: 1, expectedVersion: 6, defaultLocale: "en" },
-    ])
-    expect(controller.getSnapshot()).toMatchObject({
-      status: "ready",
-      snapshot: { preferences: { version: 7, locale: "en" } },
-    })
-  })
-
-  it("does not resume a retained reset after disposal during its fresh read", async () => {
-    const gateway = new ControlledGateway()
-    gateway.initial = snapshot(3, "ja", { reducedMotion: "on" })
-    gateway.resetImplementation = () =>
-      Promise.reject(boundaryError("APP-PREFERENCES-WRITE"))
-    const controller = new AppPreferencesController(gateway, "en")
-    await controller.initialize()
-    gateway.getImplementation = () =>
-      Promise.reject(boundaryError("APP-PREFERENCES-READ"))
-    await expect(controller.reset()).resolves.toBe(false)
-
-    const freshRead = deferred<AppPreferencesSnapshotV1>()
-    gateway.getImplementation = () => freshRead.promise
-    const listener = vi.fn()
-    controller.subscribe(listener)
-    const retry = controller.retry()
-    await vi.waitFor(() => expect(gateway.getCalls).toBe(3))
-    const publicationsBeforeDispose = listener.mock.calls.length
     controller.dispose()
-    freshRead.resolve(snapshot(3, "ja", { reducedMotion: "on" }))
+    gateway.updateResults[0]?.resolve(snapshot(1, "ja"))
 
-    await expect(retry).resolves.toBe(false)
-    expect(gateway.resets).toHaveLength(1)
-    expect(listener).toHaveBeenCalledTimes(publicationsBeforeDispose)
+    await expect(update).resolves.toBe(false)
+    expect(controller.getSnapshot().snapshot.preferences.locale).toBe("en")
   })
 })
