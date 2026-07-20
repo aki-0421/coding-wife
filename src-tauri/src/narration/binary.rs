@@ -65,7 +65,7 @@ impl NarrationBinary {
     }
 
     #[cfg(test)]
-    pub fn verify(&self, operation: &str) -> NarrationResult<()> {
+    pub fn verify(&self, operation: &'static str) -> NarrationResult<()> {
         match &self.adapter {
             NarrationAdapter::Production {
                 curl_path,
