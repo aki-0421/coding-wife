@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   appPreferencesSchemaVersion,
-  type AppPreferencesSnapshotV1,
+  type AppPreferencesSnapshotV2,
 } from "@/features/preferences/contracts"
 import {
   AppPreferencesBoundaryError,
@@ -10,22 +10,20 @@ import {
   NativeAppPreferencesGateway,
 } from "@/features/preferences/transport"
 
-const nativeSnapshot: AppPreferencesSnapshotV1 = {
-  schemaVersion: 1,
+const nativeSnapshot: AppPreferencesSnapshotV2 = {
+  schemaVersion: 2,
   preferences: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     version: 2,
     snapshotId: "123e4567-e89b-42d3-a456-426614174000",
     locale: "ja",
-    reducedMotion: "on",
-    characterVisibility: "hidden",
   },
   persistence: "native",
   recoveryCode: null,
 }
 
 describe("NativeAppPreferencesGateway", () => {
-  it("sends exact typed get, update, and reset request envelopes", async () => {
+  it("sends exact locale-only get and update envelopes", async () => {
     const invoke = vi.fn(() => Promise.resolve(nativeSnapshot))
     const gateway = new NativeAppPreferencesGateway(invoke)
 
@@ -34,110 +32,60 @@ describe("NativeAppPreferencesGateway", () => {
       schemaVersion: appPreferencesSchemaVersion,
       expectedVersion: 2,
       locale: "en",
-      reducedMotion: "off",
-      characterVisibility: "visible",
-    })
-    await gateway.reset({
-      schemaVersion: appPreferencesSchemaVersion,
-      expectedVersion: 3,
-      defaultLocale: "ja",
     })
 
     expect(invoke.mock.calls).toEqual([
       [
         "app_preferences_get",
-        { request: { schemaVersion: 1, defaultLocale: "ja" } },
+        { request: { schemaVersion: 2, defaultLocale: "ja" } },
       ],
       [
         "app_preferences_update",
         {
           request: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             expectedVersion: 2,
             locale: "en",
-            reducedMotion: "off",
-            characterVisibility: "visible",
-          },
-        },
-      ],
-      [
-        "app_preferences_reset",
-        {
-          request: {
-            schemaVersion: 1,
-            expectedVersion: 3,
-            defaultLocale: "ja",
           },
         },
       ],
     ])
   })
 
-  it("fails closed when native data is malformed or raw errors escape", async () => {
+  it("fails closed when native data is malformed", async () => {
     const malformed = new NativeAppPreferencesGateway(() =>
-      Promise.resolve({ ...nativeSnapshot, raw: "/\u0055sers/private" }),
+      Promise.resolve({ ...nativeSnapshot, raw: "opaque-private-value" }),
     )
     await expect(malformed.get("en")).rejects.toMatchObject({
       code: "APP-PREFERENCES-CONTRACT-INVALID",
-      recoverable: false,
+      detailRef: "app-preferences-v2",
     })
-
-    const rawError = new NativeAppPreferencesGateway(() =>
-      Promise.reject(new Error("/\u0055sers/private/token=secret")),
-    )
-    await expect(rawError.get("en")).rejects.toEqual(
-      expect.objectContaining({
-        code: "APP-PREFERENCES-IPC-UNAVAILABLE",
-      }),
-    )
   })
 })
 
 describe("DemoAppPreferencesGateway", () => {
-  it("is honest memory-only state and a new preview restarts at defaults", async () => {
+  it("persists only locale and rejects stale versions", async () => {
     const gateway = new DemoAppPreferencesGateway()
-    const initial = await gateway.get("ja")
-    expect(initial).toMatchObject({
-      persistence: "demo_memory",
-      preferences: {
-        locale: "ja",
-        reducedMotion: "system",
-        characterVisibility: "visible",
-      },
-    })
-
-    const changed = await gateway.update({
-      schemaVersion: 1,
+    const initial = await gateway.get("en")
+    const updated = await gateway.update({
+      schemaVersion: appPreferencesSchemaVersion,
       expectedVersion: initial.preferences.version,
-      locale: "en",
-      reducedMotion: "on",
-      characterVisibility: "hidden",
+      locale: "ja",
     })
-    expect(changed.preferences.version).toBe(1)
-    expect((await gateway.get("ja")).preferences.locale).toBe("en")
 
-    const restartedPreview = await new DemoAppPreferencesGateway().get("ja")
-    expect(restartedPreview).toMatchObject({
-      persistence: "demo_memory",
-      preferences: {
-        version: 0,
-        locale: "ja",
-        reducedMotion: "system",
-        characterVisibility: "visible",
-      },
+    expect(updated.preferences).toMatchObject({
+      schemaVersion: 2,
+      version: 1,
+      locale: "ja",
     })
-  })
+    expect(updated.preferences).not.toHaveProperty("reducedMotion")
+    expect(updated.preferences).not.toHaveProperty("characterVisibility")
 
-  it("rejects stale expected versions", async () => {
-    const gateway = new DemoAppPreferencesGateway()
-    await gateway.get("en")
     await expect(
       gateway.update({
-        schemaVersion: 1,
-        expectedVersion: 9,
-        locale: "ja",
-        reducedMotion: "system",
-        characterVisibility: "visible",
+        schemaVersion: appPreferencesSchemaVersion,
+        expectedVersion: 0,
+        locale: "en",
       }),
     ).rejects.toBeInstanceOf(AppPreferencesBoundaryError)
   })

@@ -391,7 +391,7 @@ describe("default App character integration", () => {
     ).toBeVisible()
   })
 
-  it("reports Hiyori provenance, preferences, errors, and retry from the mounted renderer", async () => {
+  it("reports Hiyori provenance, keeps the companion mounted, and exposes safe retry", async () => {
     const user = userEvent.setup()
     render(
       <App localeStore={englishLocaleStore} transport={new DemoTransport()} />,
@@ -410,40 +410,23 @@ describe("default App character integration", () => {
     expect(screen.getByText("hiyori_pro_t11")).toBeVisible()
     expect(screen.getByText("かにビーム")).toBeVisible()
 
-    fireEvent.click(screen.getAllByRole("button", { name: "App settings" })[0]!)
-    fireEvent.change(screen.getByRole("combobox", { name: "Reduced motion" }), {
-      target: { value: "on" },
-    })
-    fireEvent.click(screen.getByRole("switch", { name: "Character visible" }))
+    await user.click(screen.getByRole("button", { name: "General" }))
+    expect(screen.queryByText("Reduced motion")).toBeNull()
+    expect(screen.queryByText("Character visibility")).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Reset preferences" }),
+    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "Reset UI state" })).toBeNull()
+    await user.click(selectedWorkspaceButton())
+    expect(await screen.findByTestId("live2d-character")).toBeVisible()
     await waitFor(() =>
-      expect(
-        screen.getByRole("switch", { name: "Character visible" }),
-      ).not.toBeChecked(),
-    )
-    fireEvent.click(selectedWorkspaceButton())
-    await waitFor(() =>
-      expect(screen.queryByTestId("live2d-character")).not.toBeInTheDocument(),
-    )
-    const presentationsBeforeShow = live2dCalls.length
-    fireEvent.click(screen.getAllByRole("button", { name: "App settings" })[0]!)
-    fireEvent.click(screen.getByRole("switch", { name: "Character visible" }))
-    await waitFor(() =>
-      expect(
-        screen.getByRole("switch", { name: "Character visible" }),
-      ).toBeChecked(),
-    )
-    fireEvent.click(selectedWorkspaceButton())
-    await waitFor(() =>
-      expect(live2dCalls.length).toBeGreaterThan(presentationsBeforeShow),
-    )
-    await waitFor(() =>
-      expect(latestLive2dProps()?.motionPolicy).toBe("reduced"),
+      expect(latestLive2dProps()?.motionPolicy).toBe("animated"),
     )
 
     const failedStatus = {
       phase: "error",
       state: "disconnected",
-      motionPolicy: "reduced",
+      motionPolicy: "animated",
       fallbackLevel: "text_only",
       error: {
         code: "asset_fetch_failed",

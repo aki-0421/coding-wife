@@ -91,7 +91,6 @@ interface AppSettingsViewProps extends CharacterRuntimeSettingsProps {
   readonly selectedProjectId: string | null
   readonly projectActionPending: boolean
   readonly onMutedChange: (muted: boolean) => void
-  readonly onResetUi: () => void
   readonly onSectionChange: (section: AppSettingsSection) => void
   readonly onOpenProject: (projectId: string) => void
   readonly onCloseProject: () => void
@@ -900,7 +899,6 @@ export function AppSettingsView(props: AppSettingsViewProps) {
         return (
           <AppPreferencesSettings
             copy={props.copy}
-            onResetUi={props.onResetUi}
             runtimeState={props.runtimeState}
           />
         )

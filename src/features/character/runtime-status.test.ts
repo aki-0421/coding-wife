@@ -100,7 +100,7 @@ describe("CharacterRuntimeStatusStore", () => {
     store.report(session, status(), vi.fn())
 
     expect(
-      projectCharacterRuntime(store.getSnapshot("workspace-a"), false),
+      projectCharacterRuntime(store.getSnapshot("workspace-a")),
     ).toMatchObject({
       rendererKind: "external",
       phase: "unknown",
@@ -111,7 +111,7 @@ describe("CharacterRuntimeStatusStore", () => {
     })
   })
 
-  it("projects hide and reduced motion without marking inactive tabs stale", () => {
+  it("projects reduced motion without marking inactive tabs stale", () => {
     const store = new CharacterRuntimeStatusStore("builtin_hiyori")
     const session = store.createSession("workspace-a", 1)
     store.report(
@@ -121,20 +121,12 @@ describe("CharacterRuntimeStatusStore", () => {
     )
 
     expect(
-      projectCharacterRuntime(store.getSnapshot("workspace-a"), false),
+      projectCharacterRuntime(store.getSnapshot("workspace-a")),
     ).toMatchObject({
       phase: "ready",
       fallback: "reduced",
       motionPolicy: "reduced",
       readiness: "ready",
-    })
-    expect(
-      projectCharacterRuntime(store.getSnapshot("workspace-a"), true),
-    ).toMatchObject({
-      phase: "hidden",
-      fallback: "text_only",
-      motionPolicy: "hidden",
-      readiness: "hidden",
     })
     expect(store.getSnapshot("workspace-a").mounted).toBe(true)
   })

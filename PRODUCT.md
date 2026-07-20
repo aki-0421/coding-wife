@@ -50,4 +50,4 @@ Codex の自律作業を、main Codex によるレビュー可能なコミット
 
 WCAG 2.2 AA を基準とする。通常文字は背景に対して 4.5:1 以上、大きな文字と非テキスト UI は 3:1 以上を維持し、200% text zoom と keyboard-only 操作で主要フローを完了できるようにする。すべての操作には visible focus と accessible name を与え、icon-only control には tooltip を付ける。
 
-Live2D canvas は装飾として accessibility tree から除外し、処理中、入力待ち、失敗、完了、接続切れ、自動または明示fallbackで生成するコミット説明を HTML text と live region でも伝える。色、動き、音、表情を唯一の情報経路にしない。`prefers-reduced-motion` またはアプリ設定が有効な時は idle motion と装飾 transition を停止し、静止 pose と文字状態を残す。日本語と英語で同じ操作、エラー、判断、読み取り専用レビュー、caption を提供する。
+Live2D canvas は装飾として accessibility tree から除外し、処理中、入力待ち、失敗、完了、接続切れ、自動fallbackで生成するコミット説明を HTML text と live region でも伝える。色、動き、音、表情を唯一の情報経路にしない。OSの`prefers-reduced-motion`が有効な時は idle motion と装飾 transition を停止し、静止 pose と文字状態を残す。日本語と英語で同じ操作、エラー、判断、読み取り専用レビュー、caption を提供する。
