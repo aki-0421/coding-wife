@@ -6,7 +6,6 @@ const en = {
   addProject: "Add project",
   addWorkspace: "Add workspace",
   archiveWorkspace: "Archive workspace",
-  settings: "Settings",
   appSettings: "App settings",
   repositoryBreadcrumb: "Repository location",
   workspaceActions: "Workspace actions",
@@ -108,7 +107,6 @@ const en = {
   tabs: {
     chat: "Chat",
     commit: "Commit",
-    settings: "Settings",
   },
   connection: {
     checking: "Checking runtime",
@@ -386,14 +384,9 @@ const en = {
   },
   settingsView: {
     appTitle: "App settings",
-    appDescription:
-      "Character-specific presentation, display, preferences, and diagnostics for the app.",
+    appBreadcrumbLabel: "App settings location",
     projectTitle: "Project settings",
     projectDescription: (project: string) => `Settings for ${project}.`,
-    workspaceTitle: "Workspace settings",
-    workspaceDescription: (workspace: string) =>
-      `History and privacy for ${workspace}.`,
-    backToWorkspace: "Back to workspace",
     backToProjects: "Back to projects",
     sections: {
       general: "General",
@@ -403,7 +396,6 @@ const en = {
       audio: "Audio",
       support: "Support",
       diagnostics: "Diagnostics",
-      history: "History & privacy",
     },
     generalTitle: "General",
     projectsTitle: "Registered projects",
@@ -428,40 +420,15 @@ const en = {
       "Applies to all app-owned copy as soon as the preference store accepts the change.",
     languageSaveError:
       "The language could not be saved. The previous language is unchanged.",
-    preferenceStatusNative: "Native preferences",
-    preferenceStatusDemo: "Demo memory · resets when this preview restarts",
-    preferenceVersion: "Version",
     preferenceSaving: "Saving preferences…",
     preferenceRecoveryTitle: "Preferences need recovery",
     preferenceRecoveryBody:
       "Safe defaults are active. The unreadable value was not shown or applied.",
     preferenceErrorTitle: "Preferences were not saved",
     preferenceErrorBody:
-      "The last durable preferences remain active. Retry the change or reset only the preference record.",
+      "The last durable language remains active. Retry the change.",
     preferenceSafeCode: "Safe code",
-    motion: "Reduced motion",
-    motionDescription:
-      "System preference always takes precedence when reduction is requested.",
-    system: "System",
-    reduce: "Reduce",
-    allow: "Allow",
-    characterVisibility: "Character visibility",
-    characterVisibilityDescription:
-      "Hiding stops the canvas and GPU animation across every workspace while keeping the text state.",
-    characterVisible: "Character visible",
     appVersion: "App version",
-    resetPreferences: "Reset preferences",
-    resetPreferencesDescription:
-      "Returns language to the OS default, motion to System, and the character to Visible. Workspaces, history, Context, model library, Git, and audio settings are unchanged.",
-    resetPreferencesConfirmTitle: "Reset app preferences?",
-    resetPreferencesConfirmBody:
-      "Only AppPreferencesV1 will be replaced. Workspaces, history, Context, the character model library, Git state, and audio settings stay unchanged.",
-    resetPreferencesCancel: "Cancel",
-    resetPreferencesConfirm: "Reset preferences",
-    resetPreferencesInProgress: "Resetting…",
-    resetUi: "Reset UI state",
-    resetUiDescription:
-      "Resets filters and local view selections. Repository and history data are not changed.",
     characterTitle: "Character",
     characterFallbacks: {
       animated: "Animated",
@@ -503,34 +470,6 @@ const en = {
     localHistory: "Local history",
     historyReadOnly: "Read only",
     historyEphemeral: "Demo memory",
-    historyTitle: "History & privacy",
-    stored: "Stored locally",
-    storedBody:
-      "Workspace metadata, normalized events, drafts, context, and evidence packs.",
-    storedEphemeral: "Stored in demo memory",
-    storedEphemeralBody:
-      "Workspace metadata, activity, drafts, context, and evidence exist only for this preview. Reloading restores the bundled demo.",
-    neverStored: "Never stored",
-    neverStoredBody:
-      "Raw reasoning, generated audio, support prompt/response, and raw secrets.",
-    deleteHistory: "Delete workspace history",
-    deleteDisabled: "No connected history service; nothing was deleted.",
-    deleteReady:
-      "Deletes this workspace's app metadata and events. Repository files, commits, and branches are never changed.",
-    deleteConfirmTitle: "Delete this workspace history?",
-    deleteConfirmBody:
-      "This removes local app history for the selected workspace only. This action cannot be undone.",
-    deleteCancel: "Cancel",
-    deleteConfirm: "Delete history",
-    deleteInProgress: "Deleting…",
-    resetDemoHistory: "Reset demo history",
-    resetDemoReady:
-      "Clears only this preview's in-memory workspace activity. Reloading restores the demo. Repository files and Git are not connected or changed.",
-    resetDemoConfirmTitle: "Reset this preview's demo history?",
-    resetDemoConfirmBody:
-      "This clears only in-memory activity for the selected demo workspace. Reloading restores the bundled demo. No repository files, commits, or branches are connected or changed.",
-    resetDemoConfirm: "Reset demo",
-    resetDemoInProgress: "Resetting…",
     localPreview:
       "Preview preference · not persisted to the native settings service",
   },
@@ -555,7 +494,6 @@ const ja: typeof en = {
   addProject: "プロジェクトを追加",
   addWorkspace: "ワークスペースを追加",
   archiveWorkspace: "ワークスペースをアーカイブ",
-  settings: "設定",
   appSettings: "アプリ設定",
   repositoryBreadcrumb: "リポジトリの現在地",
   workspaceActions: "ワークスペース操作",
@@ -657,7 +595,6 @@ const ja: typeof en = {
   tabs: {
     chat: "チャット",
     commit: "コミット",
-    settings: "設定",
   },
   connection: {
     checking: "実行環境を確認中",
@@ -934,14 +871,9 @@ const ja: typeof en = {
   },
   settingsView: {
     appTitle: "アプリ設定",
-    appDescription:
-      "キャラクターごとの表現、キャラクター表示、アプリ設定、診断を管理します。",
+    appBreadcrumbLabel: "アプリ設定の現在地",
     projectTitle: "プロジェクト設定",
     projectDescription: (project: string) => `${project} の設定です。`,
-    workspaceTitle: "ワークスペース設定",
-    workspaceDescription: (workspace: string) =>
-      `${workspace} の履歴とプライバシーを管理します。`,
-    backToWorkspace: "ワークスペースへ戻る",
     backToProjects: "プロジェクト一覧へ戻る",
     sections: {
       general: "一般",
@@ -951,7 +883,6 @@ const ja: typeof en = {
       audio: "音声",
       support: "支援",
       diagnostics: "診断",
-      history: "履歴とプライバシー",
     },
     generalTitle: "一般",
     projectsTitle: "登録済みプロジェクト",
@@ -976,40 +907,15 @@ const ja: typeof en = {
       "設定ストアが変更を受理すると、すべてのアプリ管理文言へ即時に反映します。",
     languageSaveError:
       "言語を保存できませんでした。以前の言語を維持しています。",
-    preferenceStatusNative: "ネイティブ設定",
-    preferenceStatusDemo:
-      "デモ用メモリ · このプレビューを再起動すると初期値に戻ります",
-    preferenceVersion: "バージョン",
     preferenceSaving: "設定を保存中…",
     preferenceRecoveryTitle: "設定の復旧が必要です",
     preferenceRecoveryBody:
       "安全な初期値を使用しています。読み取れない値は表示も適用もしていません。",
     preferenceErrorTitle: "設定を保存できませんでした",
     preferenceErrorBody:
-      "最後に保存できた設定を維持しています。変更を再試行するか、設定レコードだけをリセットしてください。",
+      "最後に保存できた言語を維持しています。変更を再試行してください。",
     preferenceSafeCode: "安全なコード",
-    motion: "動きを減らす",
-    motionDescription: "OSが動きの削減を要求している場合は常に優先します。",
-    system: "システム",
-    reduce: "減らす",
-    allow: "許可",
-    characterVisibility: "キャラクター表示",
-    characterVisibilityDescription:
-      "非表示にすると全ワークスペースのcanvasとGPU animationを停止し、text状態は残します。",
-    characterVisible: "キャラクターを表示",
     appVersion: "アプリバージョン",
-    resetPreferences: "設定をリセット",
-    resetPreferencesDescription:
-      "言語をOS初期値、動きをシステム、キャラクターを表示へ戻します。ワークスペース、履歴、Context、モデルライブラリ、Git、音声設定は変更しません。",
-    resetPreferencesConfirmTitle: "アプリ設定をリセットしますか？",
-    resetPreferencesConfirmBody:
-      "AppPreferencesV1だけを置き換えます。ワークスペース、履歴、Context、キャラクターモデルライブラリ、Git状態、音声設定は変わりません。",
-    resetPreferencesCancel: "キャンセル",
-    resetPreferencesConfirm: "設定をリセット",
-    resetPreferencesInProgress: "リセット中…",
-    resetUi: "UI状態をリセット",
-    resetUiDescription:
-      "filterとローカル選択だけを戻します。repositoryと履歴dataは変更しません。",
     characterTitle: "キャラクター",
     characterFallbacks: {
       animated: "アニメーション",
@@ -1051,34 +957,6 @@ const ja: typeof en = {
     localHistory: "ローカル履歴",
     historyReadOnly: "読み取り専用",
     historyEphemeral: "デモ用メモリ",
-    historyTitle: "履歴とプライバシー",
-    stored: "ローカルに保存",
-    storedBody:
-      "ワークスペースのメタデータ、正規化済みイベント、下書き、コンテキスト、証拠パック。",
-    storedEphemeral: "デモ用メモリに保持",
-    storedEphemeralBody:
-      "ワークスペースのメタデータ、アクティビティ、下書き、コンテキスト、証拠はこのプレビューの間だけ保持されます。再読み込みすると同梱デモに戻ります。",
-    neverStored: "保存しない",
-    neverStoredBody:
-      "推論の生データ、生成音声、支援用の入出力、秘匿情報の生データ。",
-    deleteHistory: "ワークスペース履歴を削除",
-    deleteDisabled: "履歴サービスは未接続です。何も削除していません。",
-    deleteReady:
-      "このワークスペースのアプリ内メタデータとイベントを削除します。リポジトリのファイル、コミット、ブランチは変更しません。",
-    deleteConfirmTitle: "このワークスペースの履歴を削除しますか？",
-    deleteConfirmBody:
-      "選択中のワークスペースに属するローカルアプリ履歴だけを削除します。この操作は元に戻せません。",
-    deleteCancel: "キャンセル",
-    deleteConfirm: "履歴を削除",
-    deleteInProgress: "削除中…",
-    resetDemoHistory: "デモ履歴をリセット",
-    resetDemoReady:
-      "現在のプレビューにあるメモリ内アクティビティだけを消去します。再読み込みするとデモに戻ります。リポジトリとGitは未接続で、変更されません。",
-    resetDemoConfirmTitle: "このプレビューのデモ履歴をリセットしますか？",
-    resetDemoConfirmBody:
-      "選択中のデモ用ワークスペースにあるメモリ内アクティビティだけを消去します。再読み込みすると同梱デモに戻ります。リポジトリのファイル、コミット、ブランチは未接続で、変更されません。",
-    resetDemoConfirm: "デモをリセット",
-    resetDemoInProgress: "リセット中…",
     localPreview: "プレビュー設定 · native settings serviceには未保存",
   },
   createWorkspace: {

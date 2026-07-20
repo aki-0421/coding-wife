@@ -52,7 +52,7 @@ status: "Approved"
 
 | 項目 | 内容 |
 |---|---|
-| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、S-002〜S-006からSessionsへ戻る |
+| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、現行S-002、S-003、S-005からSessionsへ戻る |
 | 表示前提 | app-private DBをreadできること。読めない場合はrecovery stateを表示する |
 | 初期フォーカス | 0件時は`Projectを追加`、通常時はactive workspace item、error時は最初の回復操作 |
 | 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |
@@ -224,7 +224,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 |---|---|---|---|---|---|
 | project canonical path/metadata | Rust SQLiteの目的限定project linkage | registration transaction | cold start |明示登録解除 | 前回transaction維持 |
 | workspace worktree linkage/lifecycle/attention | Rust SQLite + normalized event。worktree pathはapp-private | worktree作成成功後のtransaction、valid state transition | cold start/route return | workspace Archive | stale表示 |
-| active selection/filter/scroll | Rust SQLite | valid selection/query/scroll settle | route return/restart | Reset UI state | safe default + notice |
+| active selection/filter/scroll | Rust SQLite | valid selection/query/scroll settle | route return/restart | record削除またはschema不整合 | safe default + notice |
 | summary/timeline anchor | Rust SQLite | terminal summary、scroll settle | route return/restart | history削除契約 | 同workspaceの最寄りvalid sequenceだけへ補正 |
 | repository identity/health、HEAD/branch、GitHub `owner/repo` | Gitを観測正本、Rust DBはversioned last snapshot。GitHub full nameはlocal `origin` URLから抽出した非秘密値だけを保存する | 登録、window focus、selection、Send直前 | route return/restart後に再照合 | project登録解除 | GitHub `origin`なしではlocal repo名へfallbackし、health判定は変更しない |
 | create input | React transient state | 保存しない | dialog中だけ | success/cancel/route leave | input保持できる範囲で保持 |

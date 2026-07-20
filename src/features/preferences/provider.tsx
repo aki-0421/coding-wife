@@ -1,9 +1,4 @@
-import {
-  useEffect,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react"
+import { useEffect, useState, type ReactNode } from "react"
 
 import { AppPreferencesContext } from "@/features/preferences/context"
 import type { AppPreferencesController } from "@/features/preferences/controller"
@@ -17,11 +12,6 @@ export function AppPreferencesProvider({
   children,
   controller,
 }: AppPreferencesProviderProps) {
-  const state = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot,
-  )
   const [systemReducedMotion, setSystemReducedMotion] = useState(() =>
     typeof window === "undefined" || window.matchMedia === undefined
       ? false
@@ -43,9 +33,7 @@ export function AppPreferencesProvider({
 
   useEffect(() => {
     if (typeof document === "undefined") return
-    const reduced =
-      systemReducedMotion || state.snapshot.preferences.reducedMotion === "on"
-    if (reduced) {
+    if (systemReducedMotion) {
       document.documentElement.dataset.reducedMotion = "true"
     } else {
       delete document.documentElement.dataset.reducedMotion
@@ -53,7 +41,7 @@ export function AppPreferencesProvider({
     return () => {
       delete document.documentElement.dataset.reducedMotion
     }
-  }, [state.snapshot.preferences.reducedMotion, systemReducedMotion])
+  }, [systemReducedMotion])
 
   return (
     <AppPreferencesContext.Provider value={controller}>

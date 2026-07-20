@@ -182,7 +182,7 @@ Figma node `8:2` を scan source とし、1470×836 CSS px の一つの作業面
 - 文字・形・icon を併用する証拠中心の semantic state
 - 150〜250ms の状態 transition と完全な reduced-motion 代替
 
-**The Continuous Desk Rule.** Chat、Commitのprimary work surfaceとcharacterは一つの机である。通常状態で二つのcardや中央dividerに分割してはならない。Workspace SettingsとApp Settingsだけはcharacterを表示せず、設定面を全幅で使う。
+**The Continuous Desk Rule.** Chat、Commitのprimary work surfaceとcharacterは一つの机である。通常状態で二つのcardや中央dividerに分割してはならない。App Settingsではcharacterを表示せず、設定面を全幅で使う。
 
 **The Evidence Priority Rule.** 判断、error、review diff、test result が必要な時も作業tab間でcharacterの横幅を変えない。証拠と操作の可読領域はprimary surface内のdrawer、折り返し、内部scroll、必要時の静止poseで確保する。
 
@@ -323,7 +323,7 @@ file summaryを先に表示し、sanitized diffはfile selection後に1件ずつ
 
 ### Live2D Character
 
-607.84×754.99px の透明な単一canvasをContinuous Desk上へbottom-containし、頭、手、裾を切らない。選択workspaceのChat、Commitでは同じcanvas instanceと同じpane幅を継続し、tab切替でrendererを再生成またはresizeしない。Commitのevidence detailはcharacterを縮小せず、commit listを非modal drawerへ退避して可読幅を確保する。Workspace SettingsとApp Settingsではcanvasを表示せずprimary surfaceを全幅へ戻す。character visibilityをHiddenにした場合も同様にprimary surfaceを全幅へ戻し、HTML text statusを残す。canvas自体はpointerとaccessibility treeを占有せず、muteは右下21px insetの27×27px circleとする。renderer failureはanimated → reduced → static preview → text-onlyの順に縮退する。
+607.84×754.99px の透明な単一canvasをContinuous Desk上へbottom-containし、頭、手、裾を切らない。選択workspaceのChat、Commitでは常に同じcanvas instanceと同じpane幅を継続し、tab切替でrendererを再生成またはresizeしない。Commitのevidence detailはcharacterを縮小せず、commit listを非modal drawerへ退避して可読幅を確保する。App Settingsではcanvasを表示せずprimary surfaceを全幅へ戻す。canvas自体はpointerとaccessibility treeを占有せず、muteは右下21px insetの27×27px circleとする。renderer failureはanimated → reduced → static preview → text-onlyの順に縮退する。
 
 ### Decision Card
 

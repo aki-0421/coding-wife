@@ -3,7 +3,7 @@ title: "デスクトップ共通仕様"
 description: "Coding Wifeの単一macOSウィンドウ、共通レイアウト、状態、操作、信頼境界、復旧、アクセシビリティを定義する。"
 updated: 2026-07-20
 read_when:
-  - "S-001〜S-006の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
+  - "現行S-001〜S-003、S-005の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
   - "個別画面仕様とdesktop-shell要件の整合を確認するとき。"
 status: "Approved"
 ---
@@ -12,14 +12,14 @@ status: "Approved"
 
 ## 目的と正本
 
-本書は、単一のTauri `main` windowでS-001〜S-006を表示する時の共通契約を定義する。個別画面は本書との差分だけを各画面詳細仕様へ記載する。
+本書は、単一のTauri `main` windowで現行S-001〜S-003、S-005を表示する時の共通契約を定義する。個別画面は本書との差分だけを各画面詳細仕様へ記載する。
 
 優先順位は次の通りとする。
 
 1. [PRODUCT.md](../../PRODUCT.md)と[DESIGN.md](../../DESIGN.md)。
 2. `docs/requirements/`の8要件定義書。
 3. Figma Desktop node `8:2`と[demo.png](../thinking/demo.png)。
-4. 本書とS-001〜S-006。
+4. 本書と現行S-001〜S-003、S-005。
 
 Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍scaleの比較画像として扱う。Figmaの低contrast文字と8.25〜9px文字は採用せず、DESIGN.mdの`text-muted-accessible`と11px captionを実装値とする。
 
@@ -31,7 +31,7 @@ Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍sca
 |---|---|
 | Platform | macOS 14以降、Apple Silicon、単一利用者、単一`main` window |
 | Frontend | React + TypeScript + ViteをTauri v2 WebViewへbundleする |
-| Navigation | persistent workspace sidebar、二段header、Chat/Commit/Settings、app settings gear |
+| Navigation | persistent workspace sidebar、二段header、Chat/Commit、app settings gear |
 | State | loading、empty、processing、offline、error、permission、disabled、cancel、repository repair、restart recovery |
 | Trust boundary | WebViewは表示と入力、Rustはprocess、Git、DB、filesystem、asset、secretの認可 |
 | Inclusion | ja/en、keyboard-only、WCAG 2.2 AA、200% text zoom、reduced motion |
@@ -55,7 +55,7 @@ Figmaの1470×836 CSS pxを標準表示とし、bitmapの2940×1672 pxは2倍sca
 | [S-003](S-003_session-evidence.md) | セッション証拠 | `/workspace/:workspaceId/evidence` / `session-evidence` | Commit tab、checkpoint通知 |
 | [S-004](S-004_settings-diagnostics.md) | 設定・診断（廃止） | 非該当 | 履歴参照だけ |
 | [S-005](S-005_app-settings-diagnostics.md) | アプリ設定・診断 | `/app-settings/:section?` / `app-settings` | sidebar gear、診断link |
-| [S-006](S-006_project-settings.md) | ワークスペース設定 | `/workspace/:workspaceId/settings` / `workspace-settings` | Settings tab |
+| [S-006](S-006_project-settings.md) | ワークスペース設定（廃止） | 非該当 | 履歴参照だけ |
 
 App settingsのproject detailはS-005内の`/app-settings/projects/:projectId` subviewであり、新しい画面IDを発行しない。確認dialog、OS picker、decision overlay、popoverも独立した画面IDを持たない。
 
@@ -131,7 +131,7 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 | 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | primaryを最低520px、Characterへ残幅。全作業tabで同じ配分を維持 | tabsはhorizontal scroll、footer controlsはwrap |
 | 200% text zoom | 64px rail + drawerを使用 | Characterをhide可能、Chat/decisionを優先 | labelを縮小せずwrap/overflow menu |
 
-選択workspaceのChat、Commitは同じCharacter instanceを右paneへ継続表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCharacterを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005とS-006はCharacterを表示せずsetting formを全幅で構成する。character visibilityがHiddenの場合もprimary work surfaceを全幅へ戻し、visible HTML stateを残す。Chat、CommitとCharacterの間へdividerまたは別cardを置かない。
+選択workspaceのChat、Commitは同じCharacter instanceを右paneへ常時表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCharacterを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005はCharacterを表示せずsetting formを全幅で構成する。Chat、CommitとCharacterの間へdividerまたは別cardを置かない。
 
 ## surface、文字、motion
 
@@ -166,7 +166,6 @@ shadcnはinteractionとkeyboard behaviorだけに使う。shell、sidebar、even
 | S-002 | event timeline | header、composer、Character mute | workspace ID + Chat tab |
 | S-003 | checkpoint/event listとdetailを別scroll | header、summary/filter | workspace ID + selected evidence |
 | S-005 | app settings main panel | app settings header、section navigation | selected app settings section |
-| S-006 | workspace settings main panel | workspace header | History & Privacy heading |
 | portal | popover/dialog自身 | trigger位置 | open中だけ。route変更で閉じる |
 
 wheel/trackpad eventを親へ二重伝播させない。timelineがbottomから48px超離れた状態でeventを受けてもscrollを動かさず、「最新へ」を表示する。
@@ -190,7 +189,7 @@ destructive/interrupt confirmationの共通DOM順はheading、対象、影響、
 | 操作 | shortcut | 条件 | 結果 |
 |---|---|---|---|
 | turn送信 | `Command+Enter` | valid composer、online、decisionなし | 1 turnだけ開始。Enterは改行 |
-| tab移動 | `Control+Tab` / `Control+Shift+Tab` | main window active | Chat/Commit/Settingsを循環 |
+| tab移動 | `Control+Tab` / `Control+Shift+Tab` | main window active | Chat/Commitを循環 |
 | workspace filter | `Command+K` | destructive dialogなし | sidebarを開きfilterへfocus |
 | non-destructive overlay close | `Escape` | popover/drawer/preview表示中 | 入力を保持しtriggerへfocus |
 | decision answer | `Command+Enter` | optionと条件付きOtherがvalid | answerを1回送信 |
@@ -215,7 +214,6 @@ macOS予約shortcutを上書きしない。icon-only操作にはaccessible name�
 | `commit.explain` | 詳しく教えて | Explain This Commit |
 | `commit.explanation.close` | 説明を閉じる | Close Explanation |
 | `commit.generation.cancel` | 説明生成をキャンセル | Cancel Explanation Generation |
-| `preferences.reset` | 設定をリセット | Reset Preferences |
 | `diagnostics.recheck` | 再診断 | Recheck |
 
 ## 共通表示状態
@@ -243,8 +241,8 @@ loading中に最終dataがある場合は前回dataを薄く残し、全画面sp
 
 | data | 正本 | 保存契機 | restart | 破棄 |
 |---|---|---|---|---|
-| window geometry / route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | Reset UI state |
-| `AppPreferencesV1` (`locale` / `reducedMotion` / `characterVisibility`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | Reset Preferencesでrecordだけsafe defaultへ |
+| window geometry / route UI state | Rust管理SQLite | valid変更時 | bounds補正後に復元 | schema不整合またはunsafe boundsだけをsafe defaultへ補正 |
+| `AppPreferencesV2` (`locale`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | missing/corrupt/unknown versionだけをsafe defaultへfail closed |
 | project/workspace/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
 | Project context | Rust管理SQLiteのProject ID-scoped record | App settings project detailのexpected-version save | project detailまたは同Project IDのworkspace turn開始 | project登録解除契約 | optimistic conflict |
 | pack-scoped Character context | Rust管理SQLiteのopaque pack ID-scoped record | App settings > Character detailのexpected-version save | 選択packのversion/hashを全workspaceの次turnへ復元 | app data reset契約 |

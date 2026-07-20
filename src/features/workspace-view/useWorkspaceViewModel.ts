@@ -246,10 +246,6 @@ export function useWorkspaceViewModel(
     backupName: null,
   })
   const [muted, setMuted] = useState(false)
-  const [characterHidden, setCharacterHidden] = useState(false)
-  const [reducedMotion, setReducedMotion] = useState<
-    "system" | "reduce" | "allow"
-  >("system")
   const selectionVersion = useRef(0)
   const transitionVersion = useRef(0)
   const transitionOperation = useRef<Promise<boolean> | null>(null)
@@ -1239,58 +1235,6 @@ export function useWorkspaceViewModel(
     [adapter, adapterReady, applyAdapterState],
   )
 
-  const deleteSelectedWorkspaceHistory = useCallback(async () => {
-    if (
-      !adapterReady ||
-      !selectedWorkspace ||
-      !adapter?.deleteWorkspaceHistory
-    ) {
-      return false
-    }
-    const workspaceId = selectedWorkspace.id
-    const pendingDraft = pendingDraftSaves.current.get(workspaceId)
-    deletingWorkspaceIds.current.add(workspaceId)
-    pendingDraftSaves.current.delete(workspaceId)
-    const timer = draftSaveTimers.current.get(workspaceId)
-    if (timer !== undefined) window.clearTimeout(timer)
-    draftSaveTimers.current.delete(workspaceId)
-    try {
-      applyAdapterState(await adapter.deleteWorkspaceHistory(workspaceId))
-      setDrafts((current) => {
-        const next = { ...current }
-        delete next[workspaceId]
-        return next
-      })
-      setNotice(null)
-      return true
-    } catch (error) {
-      deletingWorkspaceIds.current.delete(workspaceId)
-      if (pendingDraft !== undefined) {
-        scheduleDraftSave(workspaceId, pendingDraft.text, pendingDraft.effort)
-      }
-      setNotice({
-        tone: "error",
-        message:
-          error instanceof Error ? error.message : "WORKSPACE-DELETE-FAILED",
-      })
-      return false
-    } finally {
-      deletingWorkspaceIds.current.delete(workspaceId)
-    }
-  }, [
-    adapter,
-    adapterReady,
-    applyAdapterState,
-    scheduleDraftSave,
-    selectedWorkspace,
-  ])
-
-  const resetUiState = useCallback(() => {
-    setFilter("")
-    setActiveTab("chat")
-    setNotice(null)
-  }, [])
-
   return {
     activeTab,
     adapter,
@@ -1302,9 +1246,7 @@ export function useWorkspaceViewModel(
     captureContext,
     cancelSelectedWorkspace,
     cancelWorkspaceTransition,
-    characterHidden,
     codex,
-    deleteSelectedWorkspaceHistory,
     filteredWorkspaces,
     filter,
     muted,
@@ -1314,7 +1256,6 @@ export function useWorkspaceViewModel(
     projects,
     history,
     lastSummary,
-    reducedMotion,
     repairSelectedWorkspace,
     confirmWorkspaceTransition,
     registerAttachmentPaths,
@@ -1322,20 +1263,17 @@ export function useWorkspaceViewModel(
     removeContext,
     requestAddProject,
     retryAdapterLoad,
-    resetUiState,
     selectedDraft,
     selectedWorkspace,
     selectedWorkspaceId,
     saveTimelineAnchor,
     sendTurn,
     setActiveTab,
-    setCharacterHidden,
     setDraftText,
     setEffort,
     setFilter,
     setMuted,
     setNotice,
-    setReducedMotion,
     setSelectedWorkspaceId: selectWorkspace,
     stopTurn,
     timeline: combinedTimeline,

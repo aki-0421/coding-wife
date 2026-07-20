@@ -1,9 +1,9 @@
 ---
 title: "S-004 設定・診断"
-description: "アプリ全体設定とプロジェクト設定を混在させていた旧画面仕様。S-005とS-006へ分離済み。"
+description: "アプリ全体設定とプロジェクト設定を混在させていた旧画面仕様。S-005と、後に廃止したS-006へ分離した履歴を残す。"
 updated: 2026-07-20
 read_when:
-  - "旧設定画面からS-005/S-006への分離理由を確認するとき。"
+  - "旧設定画面からS-005と廃止済みS-006への分離履歴を確認するとき。"
 screen_id: "S-004"
 status: "Deprecated"
 ---
@@ -18,11 +18,11 @@ status: "Deprecated"
 | デザイン               | [DESIGN.md](../../DESIGN.md)、Figma Desktop node `8:2`のshell、[demo.png](../thinking/demo.png) |
 | 共通仕様               | [デスクトップ共通仕様](desktop-common-specification.md)                                         |
 | 廃止理由               | app-globalとproject-scopedの設定が同一画面に混在してscopeを識別できなかったため                 |
-| 後継画面ID             | [S-005](S-005_app-settings-diagnostics.md)、[S-006](S-006_project-settings.md)                  |
+| 後継画面ID             | [S-005](S-005_app-settings-diagnostics.md)。旧S-006は廃止済み                                |
 
 ## 廃止と後継
 
-本画面は実装対象ではない。sidebar gearから開くアプリ全体設定はS-005、workspaceのSettings tabから開くプロジェクト設定はS-006を正本とする。以下は分離前の履歴仕様として保持する。
+本画面は実装対象ではない。sidebar gearから開くアプリ全体設定はS-005を正本とする。分離時に作成したS-006も設定項目を持たないため廃止済みである。以下は分離前の履歴仕様として保持する。
 
 ## 目的
 
@@ -132,7 +132,7 @@ active project/workspaceを明示し、[S-002 Context subview](S-002_coding-work
 
 #### Context editor stateと競合復旧（廃止）
 
-旧workspace側editor entryと混在Settings間のcross-navigation契約は廃止した。現行UIではProject ContextをS-005のProjects detail、Character ContextをS-005のCharacter detailだけで編集し、S-006にはcontext入口、複製editor、focus遷移を置かない。以下の状態表は旧画面の履歴であり、現行実装の正本にはしない。
+旧workspace側editor entryと混在Settings間のcross-navigation契約は廃止した。現行UIではProject ContextをS-005のProjects detail、Character ContextをS-005のCharacter detailだけで編集し、workspace Settings tab自体を置かない。以下の状態表は旧画面の履歴であり、現行実装の正本にはしない。
 
 | 状態 | 表示 | 操作・focus |
 |---|---|---|
@@ -471,12 +471,12 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | レビュー日   | 2026-07-19 |
 
 - [x] front matter、title、filenameの`S-004`が一致する。
-- [x] `status: Deprecated`で後継S-005/S-006を示す。
+- [x] `status: Deprecated`で現行S-005と廃止済みS-006の履歴を示す。
 - [x] 8 section、project/character context分離、diagnostics、history/privacyを定義した。
 - [x] `tmp/hiyori_pro`をbuild入力とし、runtime 17 fileだけを同梱する契約を定義した。
 - [x] custom model importのpicker、closure、resource limit、quarantine、preview、mapping、deleteを定義した。
 - [x] `AppPreferencesV1`、native readiness snapshot、Project-scoped selection、`SemanticMappingV1`の正常・loading・empty・error・disabled・recoveryを定義した。
 - [x] TTS default off、local binary/voice/test/mute、text parity、dismiss/cancel分離、voice retry、dirty draft保持、network/microphone/audio file禁止を定義した。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
-- [x] 後継画面の関連要件IDをS-005/S-006へ移した。
+- [x] 現行要件をS-005へ集約し、S-006の廃止履歴を残した。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。

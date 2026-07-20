@@ -1,25 +1,31 @@
 ---
-title: "S-006 ワークスペース設定"
-description: "選択workspaceの履歴とプライバシー設定だけを管理する画面仕様。Project contextはS-005のProjects詳細へ移動済み。"
+title: "S-006 ワークスペース設定（廃止）"
+description: "設定項目を持たず履歴情報と削除操作だけを表示していたため廃止したワークスペース設定画面の履歴仕様。"
 updated: 2026-07-20
 read_when:
-  - "workspaceのSettings tab、workspace history、履歴削除を実装するとき。"
-  - "S-006とHIST、APP要件の対応を確認するとき。"
+  - "旧workspace Settings tabと履歴削除UIの廃止理由を確認するとき。"
+  - "S-006を参照していた旧HIST、APP要件の履歴を確認するとき。"
 screen_id: "S-006"
-status: "Approved"
+status: "Deprecated"
 ---
 
-# S-006 ワークスペース設定
+# S-006 ワークスペース設定（廃止）
 
 | 項目                   | 内容                                                                    |
 | ---------------------- | ----------------------------------------------------------------------- |
 | window label           | `main`                                                                  |
-| React route / view key | `/workspace/:workspaceId/settings` / `workspace-settings`               |
+| React route / view key | 非該当（旧 `/workspace/:workspaceId/settings` / `workspace-settings`）   |
 | 対象OS                 | macOS 14以降、Apple Silicon                                             |
 | デザイン               | [DESIGN.md](../../DESIGN.md)、Figma Desktop node `8:2`のworkspace shell |
 | 共通仕様               | [デスクトップ共通仕様](desktop-common-specification.md)                 |
-| 廃止理由               | 非該当                                                                  |
-| 後継画面ID             | 非該当                                                                  |
+| 廃止理由               | 設定項目を持たず、履歴情報と破壊的な削除操作だけを独立tabへ分離していたため |
+| 後継画面ID             | 非該当。App Settingsは引き続き[S-005](S-005_app-settings-diagnostics.md)を使う |
+
+## 廃止
+
+本画面とworkspace headerの`Settings / 設定` tabは廃止する。現行workspace tabは`Chat / チャット`と`Commit / コミット`の2つだけとし、`Control+Tab` / `Control+Shift+Tab`もこの2つを循環する。履歴の保存状態はChatとApp SettingsのDiagnosticsに残し、workspace履歴削除の専用UIは設けない。nativeの履歴削除command contractは互換性のため残すが、通常UIから呼び出さない。
+
+以下は廃止前の履歴仕様として保持し、新規実装の根拠にはしない。
 
 ## 目的
 
@@ -38,7 +44,8 @@ status: "Approved"
 | 非対象                                                      | 理由                                 | 扱う画面・文書                             |
 | ----------------------------------------------------------- | ------------------------------------ | ------------------------------------------ |
 | Project context                                             | registered Project ID単位のため      | [S-005](S-005_app-settings-diagnostics.md) |
-| Language、reduced motion、全workspaceのcharacter visibility | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
+| Language                                                    | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
+| reduced motion、character visibility control               | OS設定だけを尊重し、characterは常時表示するため | [APP要件](../requirements/desktop-shell.md)、[LIVE要件](../requirements/live2d-character.md) |
 | Character context、Character                                | app-global library内のpack-scoped設定のため | [S-005](S-005_app-settings-diagnostics.md) |
 | Audio、Support、native readiness                            | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
 | Git commit/revert/reset                                     | read-only observer境界のため         | [S-003](S-003_session-evidence.md)         |

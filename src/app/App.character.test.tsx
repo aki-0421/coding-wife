@@ -75,6 +75,12 @@ function latestLive2dProps(): Live2dCharacterProps | undefined {
   return live2dCalls.at(-1)
 }
 
+function selectedWorkspaceButton(): HTMLButtonElement {
+  return within(
+    screen.getByRole("navigation", { name: "Workspaces" }),
+  ).getByRole<HTMLButtonElement>("button", { current: "page" })
+}
+
 describe("default App character integration", () => {
   beforeEach(() => {
     live2dCalls.length = 0
@@ -167,21 +173,17 @@ describe("default App character integration", () => {
     expect(screen.getByTestId("live2d-character")).toBeVisible()
     expect(latestLive2dProps()?.stateGeneration).toBe(idleGeneration)
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
-    await waitFor(() =>
-      expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
-    )
-
     await user.click(
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
     await waitFor(() =>
       expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
     )
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    await user.click(selectedWorkspaceButton())
     await waitFor(() =>
-      expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
+      expect(screen.getByTestId("live2d-character")).toBeVisible(),
     )
+    expect(screen.getByTestId("live2d-character")).toBe(initialNode)
 
     await user.click(screen.getByRole("tab", { name: /Chat/ }))
     expect(screen.getByTestId("live2d-character")).toBe(initialNode)
@@ -383,7 +385,7 @@ describe("default App character integration", () => {
     expect(screen.queryByText("External renderer")).not.toBeInTheDocument()
   })
 
-  it("shows simplified Hiyori settings while preserving preferences, errors, and retry", async () => {
+  it("shows simplified Hiyori settings and exposes safe retry", async () => {
     const user = userEvent.setup()
     render(
       <App localeStore={englishLocaleStore} transport={new DemoTransport()} />,
@@ -410,40 +412,23 @@ describe("default App character integration", () => {
     expect(screen.queryByText("hiyori_pro_t11")).not.toBeInTheDocument()
     expect(screen.queryByText("かにビーム")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getAllByRole("button", { name: "App settings" })[0]!)
-    fireEvent.change(screen.getByRole("combobox", { name: "Reduced motion" }), {
-      target: { value: "on" },
-    })
-    fireEvent.click(screen.getByRole("switch", { name: "Character visible" }))
+    await user.click(screen.getByRole("button", { name: "General" }))
+    expect(screen.queryByText("Reduced motion")).toBeNull()
+    expect(screen.queryByText("Character visibility")).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Reset preferences" }),
+    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "Reset UI state" })).toBeNull()
+    await user.click(selectedWorkspaceButton())
+    expect(await screen.findByTestId("live2d-character")).toBeVisible()
     await waitFor(() =>
-      expect(
-        screen.getByRole("switch", { name: "Character visible" }),
-      ).not.toBeChecked(),
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Back to workspace" }))
-    await waitFor(() =>
-      expect(screen.queryByTestId("live2d-character")).not.toBeInTheDocument(),
-    )
-    const presentationsBeforeShow = live2dCalls.length
-    fireEvent.click(screen.getAllByRole("button", { name: "App settings" })[0]!)
-    fireEvent.click(screen.getByRole("switch", { name: "Character visible" }))
-    await waitFor(() =>
-      expect(
-        screen.getByRole("switch", { name: "Character visible" }),
-      ).toBeChecked(),
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Back to workspace" }))
-    await waitFor(() =>
-      expect(live2dCalls.length).toBeGreaterThan(presentationsBeforeShow),
-    )
-    await waitFor(() =>
-      expect(latestLive2dProps()?.motionPolicy).toBe("reduced"),
+      expect(latestLive2dProps()?.motionPolicy).toBe("animated"),
     )
 
     const failedStatus = {
       phase: "error",
       state: "disconnected",
-      motionPolicy: "reduced",
+      motionPolicy: "animated",
       fallbackLevel: "text_only",
       error: {
         code: "asset_fetch_failed",

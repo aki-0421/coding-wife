@@ -31,7 +31,7 @@ status: "Approved"
 
 | section     | 内容                                                                                                     |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
-| General           | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
+| General           | ja/en、app version。preferenceのpersistence種別、record/schema version、snapshot IDは表示しない         |
 | Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
 | Character         | character一覧、model名から開く個別設定、packごとのCharacter context、app-globalな選択、custom 1枠のimport/置換・motion編集・delete、bundled Hiyori固定motion preset |
 | Audio             | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
@@ -42,7 +42,7 @@ status: "Approved"
 
 | 非対象                                                | 理由                      | 扱う画面・文書                         |
 | ----------------------------------------------------- | ------------------------- | -------------------------------------- |
-| workspace history削除                                 | workspace-scopedのため    | [S-006](S-006_project-settings.md)     |
+| workspace history削除                                 | 専用UIを廃止したため      | 非該当                                 |
 | account credential、raw stderr、absolute private path | secret boundaryを守るため | sanitized readiness statusだけ表示する |
 
 ## 表示契機と終了
@@ -51,10 +51,10 @@ status: "Approved"
 | -------------- | ---------------------------------------------------------------------------------------- |
 | 表示契機       | workspace sidebar最下部の`App settings / アプリ設定` gear、Chatのdiagnostics link        |
 | 表示前提       | workspace選択は不要。registered project/workspaceが0件でも6 sectionすべてを表示する                 |
-| 初期フォーカス | app settings heading                                                                      |
+| 初期フォーカス | header breadcrumbの現在section                                                           |
 | 正常完了       | section単位の保存を即時反映し、画面を維持する                                            |
 | キャンセル     | section固有のdraftと保存済み値を各契約どおり維持する                                     |
-| 閉じる操作     | `Back to workspace / ワークスペースへ戻る`で直前のworkspace tabへ戻る                    |
+| 閉じる操作     | workspace sidebarでworkspaceを選び、現在のworkspace tabへ戻る                             |
 | 再表示         | gearはGeneral、diagnostics linkはDiagnosticsを開き、保存済み値を維持する                  |
 
 ## 利用者と権限
@@ -70,22 +70,22 @@ status: "Approved"
 | 領域                | 表示内容                                                      | 主な操作                       |
 | ------------------- | ------------------------------------------------------------- | ------------------------------ |
 | workspace sidebar   | workspace一覧、activeなapp settings gear                      | workspaceへ戻る、project追加   |
-| app settings header | back action、`App settings / アプリ設定`、全project共通の説明 | 直前workspace tabへ戻る        |
+| app settings header | `App settings / アプリ設定` > 現在sectionのbreadcrumbだけを表示する | compact幅では現在sectionからsection pickerを開く |
 | section navigation  | General、Projects、Character、Audio、Support、Diagnosticsの6 section | section選択 |
 | settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
 
-app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示しない。これによりworkspace scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
+app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない。これによりworkspace scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
 
 ## 表示状態
 
 | 状態       | 進入条件                          | 表示                                           | 操作可否               | 状態から抜ける条件      |
 | ---------- | --------------------------------- | ---------------------------------------------- | ---------------------- | ----------------------- |
-| 初期化中   | preference/readiness未取得        | field shape skeleton、loading status           | backのみ可             | snapshot取得またはerror |
+| 初期化中   | preference/readiness未取得        | field shape skeleton、loading status           | workspace選択のみ可    | snapshot取得またはerror |
 | 通常       | snapshot取得済み                  | 6 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
 | データなし | voiceまたはdiagnostic resultが0件 | 理由とRetry                                    | 影響しないsectionは可  | 再取得成功              |
 | 処理中     | save、test、reset、recheck中      | 操作箇所のprocessing status                    | 同一操作の二重実行不可 | terminal result         |
 | オフライン | network/Codex unavailable         | local settingは表示、診断はBlocked/Unavailable | local saveとrecheck可  | readiness更新           |
-| エラー     | storeまたはdiagnostic失敗         | safe code、前snapshot、Retry/Reset             | 破壊的fallback不可     | retry/reset成功         |
+| エラー     | storeまたはdiagnostic失敗         | safe code、前snapshot、Retry                   | 破壊的fallback不可     | retry成功               |
 | 権限不足   | native operation拒否              | localized reason、変更前値                     | scope外操作不可        | permission回復後のretry |
 
 ## 操作
@@ -93,9 +93,8 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | 操作                  | 事前条件              | 正常結果                                          | キャンセル時                   | 失敗時                          | 関連要件ID                            |
 | --------------------- | --------------------- | ------------------------------------------------- | ------------------------------ | ------------------------------- | ------------------------------------- |
 | app settingsを開く    | workspace shell表示中 | gearをactiveにしS-005のGeneralだけを表示          | 非該当                         | shellとworkspace stateを維持    | `APP-F-083`                           |
-| workspaceへ戻る       | S-005表示中           | 直前のactive tab、workspace、composer draftを復元 | 非該当                         | 同じ画面を維持                  | `APP-F-055`, `APP-F-083`              |
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
-| preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry/Reset | `APP-F-057`〜`APP-F-061`, `APP-F-076` |
+| preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry       | `APP-F-057`, `APP-F-058`, `APP-F-076` |
 | character個別設定を開く | Character一覧がready | 選択行のmodel名、必要な操作、motion設定、Character contextを同sectionに表示 | 非該当 | 一覧を維持 | `LIVE-F-084`, `LIVE-F-086` |
 | Character contextを保存する | character個別設定がready | 対象packのversionだけを更新し、そのpackを選択した次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063`, `LIVE-F-086` |
 | character一覧へ戻る | character個別設定を表示中 | 一覧を表示し、起点character行へfocusを戻す | 非該当 | 個別設定を維持 | `LIVE-F-084` |
@@ -113,8 +112,6 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | 項目                 | 初期値    | 必須     | 制約・境界                            | エラー表示            | 保存契機 |
 | -------------------- | --------- | -------- | ------------------------------------- | --------------------- | -------- |
 | Language             | OS locale | 必須     | `ja` / `en`                           | field直下、前言語維持 | 選択時   |
-| Reduced motion       | `system`  | 必須     | `system` / `on` / `off`               | field直下、前値維持   | 選択時   |
-| Character visibility | `visible` | 必須     | `visible` / `hidden`                  | field直下、前値維持   | toggle時 |
 | Character context    | bundled Hiyoriは桃瀬ひよりpreset、customはpack表示名と中立な既定値 | 任意 | opaque pack ID単位、display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
 | Project context      | 空       | 任意 | goal / constraints / notes各8,000、配列各20件、総量32,000 scalar、project-relative reference | field直下、draft維持 | Save |
 | Audio settings       | off       | 条件付き | verified local voice、rate 0.75〜1.25 | Audio内Alert          | Save     |
@@ -124,7 +121,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 
 | ユーザー操作                | 実行境界                 | Tauri plugin / Command             | 必要なCapability・認可                | キャンセル時      | 拒否・失敗時                          |
 | --------------------------- | ------------------------ | ---------------------------------- | ------------------------------------- | ----------------- | ------------------------------------- |
-| preference取得・更新・reset | Rust owner-only store    | `app_preferences_get/update/reset` | exact schema/version                  | 前record維持      | safe defaultまたは前record、safe code |
+| preference取得・更新       | Rust owner-only store    | `app_preferences_get/update`       | exact schema/version                  | 前record維持      | safe defaultまたは前record、safe code |
 | Character context load/save | Rust SQLite             | app character context commands     | opaque pack ID、expected version      | draft維持         | conflictまたはsafe code                |
 | Project context load/save | Rust SQLite | `project_context_get` / `project_context_save` | registered Project ID、expected version、canonical project-relative reference | draft維持 | conflictまたはsafe code |
 | model import/select/motion設定/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1。bundled Hiyoriのpreset保存要求は拒否 | quarantine cleanup、前selection維持 | bundled preset編集・delete拒否、置換/削除失敗時は前slotとselection維持 |
@@ -142,11 +139,11 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | 操作                 | macOS    | Windows / Linux | 有効条件             | 実行結果                     |
 | -------------------- | -------- | --------------- | -------------------- | ---------------------------- |
 | overlayを閉じる      | `Escape` | 非対応          | popover/dialog表示中 | 入力を維持してtriggerへfocus |
-| app settingsを閉じる | 明示Back | 非対応          | S-005表示中          | 直前workspace tabへ戻る      |
+| app settingsを閉じる | workspace選択 | 非対応      | S-005表示中          | 現在のworkspace tabへ戻る    |
 
 ## データ保持
 
-Project ID単位のProject context、pack ID単位のCharacter context、AppPreferences、character library selection/custom motion設定、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。一覧と詳細の表示だけではworkspace history、Git state、他projectまたは他packのdraftを変更しない。
+Project ID単位のProject context、言語だけを保持する`AppPreferencesV2`、pack ID単位のCharacter context、character library selection/custom motion設定、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。`AppPreferencesV1`からはlocaleだけを移行し、廃止したreduced motion、character visibility、Reset Preferences、Reset UI stateを公開しない。一覧と詳細の表示だけではworkspace history、Git state、他projectまたは他packのdraftを変更しない。
 
 ## OS差分
 
@@ -155,7 +152,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 ## アクセシビリティ
 
 - gearは`App settings / アプリ設定`というscopeを含むaccessible nameと`aria-current`を持つ。
-- 画面進入時にapp settings headingへfocusし、Back後はactive workspace tabへfocusを戻す。
+- 画面進入時とsection変更時にbreadcrumbの現在sectionへfocusする。専用のBack buttonは置かず、workspace選択後は選択したworkspace rowへfocusを維持する。
 - project行は名前、repository、workspace件数を含むaccessible nameを持ち、詳細から一覧へ戻ると起点projectへfocusを戻す。
 - character行はmodel名と使用中状態を含むaccessible nameを持ち、個別設定から一覧へ戻ると起点character行へfocusを戻す。
 - section navigation、error、readinessを色だけで表現しない。
@@ -186,7 +183,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | レビュー日   | 2026-07-20 |
 
 - [x] app settingsの6 section、Projects内のproject-scoped詳細、Character内のpack-scoped詳細、workspace-scoped非対象が一意である。
-- [x] heading、Back、workspace選択時の状態維持を定義した。
+- [x] breadcrumb、workspace選択時の終了と状態維持を定義した。
 - [x] loading、empty、processing、offline、error、permissionを定義した。
 - [x] native boundary、ja/en、keyboard、200% zoomを定義した。
 - [x] `agent-docs lint`対象のfront matterと相互参照を記載した。

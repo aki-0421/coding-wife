@@ -25,7 +25,7 @@ read_when:
 - WebView へ絶対パスを渡さない。`pack_id` と検証済みの相対 asset ID だけを受け付ける read-only プロトコルから配信する。
 - Hiyori の各モーションの意味は画像で確認するまで断定しない。最初の実装では全状態をテキストで区別し、映像はニュートラルな `Idle[0]` を基本にする。
 
-本書は `../requirements/live2d-character.md`、`../screen-design/S-002_coding-workspace.md`、`../screen-design/S-005_app-settings-diagnostics.md`、`../screen-design/S-006_project-settings.md`、`../../PRODUCT.md`、`../../DESIGN.md` を実装可能な契約へ落とした補足調査である。競合時は Approved の要件・画面設計を優先する。
+本書は `../requirements/live2d-character.md`、`../screen-design/S-002_coding-workspace.md`、`../screen-design/S-005_app-settings-diagnostics.md`、`../../PRODUCT.md`、`../../DESIGN.md` を実装可能な契約へ落とした補足調査である。競合時は Approved の要件・画面設計を優先する。
 
 ## 調査方法と一次資料
 
