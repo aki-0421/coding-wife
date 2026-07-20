@@ -20,7 +20,6 @@ import {
   bundledHiyoriCharacterContextPreset,
   parseCharacterContext,
   normalizeProjectContextForSave,
-  type CharacterContext,
   type ProjectContext,
   type VersionedCharacterContext,
   type VersionedProjectContext,
