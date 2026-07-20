@@ -17,14 +17,16 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { useI18n } from "@/features/localization"
 import type { SupportedLocale } from "@/features/localization/types"
-import type { ReadinessCheckV1 } from "@/features/readiness/contracts"
+import {
+  checkById,
+  type ReadinessCheckV1,
+} from "@/features/readiness/contracts"
 import { CodexBinaryPathSettings } from "@/features/readiness/CodexBinaryPathSettings"
 import {
   useNativeReadiness,
   useNativeReadinessController,
 } from "@/features/readiness/hooks"
 import {
-  checkById,
   gitExecutableIsReady,
   type SetupRequirement,
   type SetupRequirementKey,

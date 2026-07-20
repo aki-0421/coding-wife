@@ -1,7 +1,8 @@
-import type {
-  NativeReadinessSnapshotV1,
-  ReadinessCheckId,
-  ReadinessCheckV1,
+import {
+  checkById,
+  type NativeReadinessSnapshotV1,
+  type ReadinessCheckId,
+  type ReadinessCheckV1,
 } from "@/features/readiness/contracts"
 import type { NativeReadinessControllerState } from "@/features/readiness/controller"
 
@@ -26,13 +27,6 @@ export interface SetupRequirement {
 
 export interface SetupRequirementOverrides {
   readonly runtimeUnavailable?: boolean
-}
-
-export function checkById(
-  snapshot: NativeReadinessSnapshotV1 | null,
-  id: ReadinessCheckId,
-): ReadinessCheckV1 | null {
-  return snapshot?.checks.find((check) => check.id === id) ?? null
 }
 
 export function gitExecutableIsReady(check: ReadinessCheckV1 | null): boolean {
