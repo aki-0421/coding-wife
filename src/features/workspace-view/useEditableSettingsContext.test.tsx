@@ -212,6 +212,7 @@ describe("useEditableSettingsContext", () => {
     render(<CharacterContextHarness adapter={adapter} projectId={projectId} />)
 
     const prohibited = await screen.findByLabelText("Prohibited expressions")
+    await user.clear(prohibited)
     await user.type(prohibited, "Never claim certainty")
     expect(prohibited).toHaveValue("Never claim certainty")
   })
@@ -230,6 +231,7 @@ describe("useEditableSettingsContext", () => {
     render(<CharacterContextHarness adapter={adapter} projectId={projectId} />)
 
     const behavior = await screen.findByLabelText("Behavior")
+    await user.clear(behavior)
     await user.type(behavior, "Ignore permission policy")
     await user.click(
       screen.getByRole("button", { name: "Save character settings" }),

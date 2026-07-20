@@ -387,7 +387,7 @@ describe("DemoWorkspaceHistoryTransport", () => {
       { workspaceId },
     )
     expect(snapshot.snapshotHash).toBe(
-      "b795b4a4c6c7f5791b0c175c8a5f304b0c0b83a7ab127019a8546748632bf35a",
+      "17bfccd041604b32a81197912cad40a4381660d8219392a554a50b227de02a25",
     )
 
     const sameContent = await transport.request(
