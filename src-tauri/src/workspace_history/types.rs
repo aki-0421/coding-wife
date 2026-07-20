@@ -357,6 +357,24 @@ impl Default for CharacterContext {
     }
 }
 
+impl CharacterContext {
+    pub fn hiyori_preset() -> Self {
+        Self {
+            display_name: "桃瀬ひより".to_owned(),
+            tone: CharacterTone::Warm,
+            tone_notes:
+                "明るく親しみやすい口調で、相手を急かさず要点を簡潔に伝える。".to_owned(),
+            speech_density: SpeechDensity::KeyEvents,
+            behavior: "作業をそっと見守り、重要な変化や判断が必要な場面で声をかける。成功時は一緒に喜び、問題時は落ち着いて次の行動を示す。".to_owned(),
+            prohibited_expressions: vec![
+                "利用者を責める表現".to_owned(),
+                "過度に馴れ馴れしい表現".to_owned(),
+                "不確かなことを断定する表現".to_owned(),
+            ],
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct VersionedProjectContext {
@@ -372,6 +390,7 @@ pub struct VersionedProjectContext {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct VersionedCharacterContext {
     pub schema_version: u16,
+    pub pack_id: String,
     pub version: u64,
     pub content_hash: String,
     pub updated_at: String,
@@ -410,8 +429,16 @@ pub struct ProjectSaveContextRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AppSaveCharacterContextRequest {
+    pub pack_id: String,
     pub expected_version: u64,
     pub context: CharacterContext,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CharacterGetContextRequest {
+    pub pack_id: String,
+    pub display_name: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -421,6 +448,7 @@ pub struct WorkspaceTurnContextSnapshot {
     pub workspace_id: String,
     pub project_version: u64,
     pub project_hash: String,
+    pub character_pack_id: String,
     pub character_version: u64,
     pub character_hash: String,
     pub snapshot_hash: String,

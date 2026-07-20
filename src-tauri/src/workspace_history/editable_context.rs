@@ -586,6 +586,7 @@ pub(super) fn content_hash(json: &str) -> String {
 struct SnapshotHashMaterial<'a> {
     project_version: u64,
     project_hash: &'a str,
+    character_pack_id: &'a str,
     character_version: u64,
     character_hash: &'a str,
 }
@@ -593,12 +594,14 @@ struct SnapshotHashMaterial<'a> {
 pub(super) fn snapshot_hash(
     project_version: u64,
     project_hash: &str,
+    character_pack_id: &str,
     character_version: u64,
     character_hash: &str,
 ) -> Result<String, WorkspaceHistoryError> {
     let json = canonical_json(&SnapshotHashMaterial {
         project_version,
         project_hash,
+        character_pack_id,
         character_version,
         character_hash,
     })?;
@@ -615,6 +618,7 @@ pub(super) fn validate_turn_snapshot(
             != snapshot_hash(
                 snapshot.project_version,
                 &snapshot.project_hash,
+                &snapshot.character_pack_id,
                 snapshot.character_version,
                 &snapshot.character_hash,
             )?
@@ -664,11 +668,12 @@ mod tests {
             snapshot_hash(
                 2,
                 "d896fd57cecd520a3f6c0c4cf11885484d21ca0096b155fd127f493552280dbc",
+                "builtin:hiyori_pro",
                 1,
                 DEFAULT_CHARACTER_HASH,
             )
             .expect("snapshot hash"),
-            "b795b4a4c6c7f5791b0c175c8a5f304b0c0b83a7ab127019a8546748632bf35a"
+            "cae5d5eb10665bef5c4a9177b8e63f069eaa167d9cfb6f7fddfcbabf3311cc03"
         );
     }
 

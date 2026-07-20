@@ -379,6 +379,13 @@ impl CharacterService {
         self.snapshot(&request.workspace_id)
     }
 
+    pub(crate) async fn app_library(&self) -> CharacterResult<CharacterLibrarySnapshot> {
+        self.library(CharacterLibraryRequest {
+            workspace_id: APP_CHARACTER_SCOPE_ID.to_owned(),
+        })
+        .await
+    }
+
     pub(crate) fn readiness(&self) -> CharacterReadinessProbe {
         CharacterReadinessProbe {
             schema_version: CHARACTER_SCHEMA_VERSION,

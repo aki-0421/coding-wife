@@ -25,6 +25,7 @@ export function composeTurnInstruction(
       context: validated.project,
     },
     character: {
+      packId: validated.characterPackId,
       version: validated.characterVersion,
       hash: validated.characterHash,
       context: validated.character,

@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ActivityIcon,
   AlertTriangleIcon,
   ArrowLeftIcon,
-  BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   DatabaseIcon,
@@ -43,6 +42,7 @@ import {
   CharacterModelLibrarySettings,
   getCharacterErrorMessage,
   type CharacterRuntimeView,
+  type CharacterPackView,
 } from "@/features/character"
 import { useI18n } from "@/features/localization"
 import { NarrationSettings } from "@/features/narration"
@@ -57,13 +57,18 @@ import { SupportControlsSettings } from "@/features/support-controls"
 import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
 import { EditableContextSection } from "@/features/workspace-view/EditableContextSection"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
-import type { EditableSettingsContextModel } from "@/features/workspace-view/useEditableSettingsContext"
+import {
+  useEditableSettingsContext,
+  type CharacterContextTarget,
+  type EditableSettingsContextModel,
+} from "@/features/workspace-view/useEditableSettingsContext"
 import type { RuntimeState } from "@/features/runtime"
 import type {
   AppSettingsSection,
   ProjectRecord,
   SettingsSection,
   WorkspaceAdapterState,
+  WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 import { cn } from "@/lib/utils"
 
@@ -75,6 +80,7 @@ interface CharacterRuntimeSettingsProps {
 }
 
 interface AppSettingsViewProps extends CharacterRuntimeSettingsProps {
+  readonly adapter: WorkspaceViewAdapter | undefined
   readonly contextModel: EditableSettingsContextModel
   readonly runtimeState: RuntimeState
   readonly section: AppSettingsSection
@@ -140,7 +146,6 @@ function CharacterRuntimeErrorAlert({
 const appSectionOrder: readonly AppSettingsSection[] = [
   "general",
   "projects",
-  "character_context",
   "character",
   "audio",
   "support",
@@ -150,7 +155,6 @@ const appSectionOrder: readonly AppSettingsSection[] = [
 const sectionIcons = {
   general: Settings2Icon,
   projects: FolderIcon,
-  character_context: BotIcon,
   character: SparklesIcon,
   audio: Mic2Icon,
   support: ShieldCheckIcon,
@@ -291,10 +295,17 @@ function ContextSettings({
 }
 
 function CharacterSettings({
+  contextModel,
   characterRuntime,
   copy,
+  onContextTargetChange,
   onRetryCharacter,
-}: CharacterRuntimeSettingsProps) {
+  turnActive,
+}: CharacterRuntimeSettingsProps & {
+  readonly contextModel: EditableSettingsContextModel
+  readonly onContextTargetChange: (pack: CharacterPackView | null) => void
+  readonly turnActive: boolean
+}) {
   return (
     <section className="flex flex-col gap-lg">
       <h2 className="m-0 text-headline text-text-strong">
@@ -305,8 +316,42 @@ function CharacterSettings({
         copy={copy}
         onRetryCharacter={onRetryCharacter}
       />
-      <CharacterModelLibrarySettings />
+      <CharacterModelLibrarySettings
+        onDetailPackChange={onContextTargetChange}
+        renderCharacterContext={(pack) => (
+          <CharacterContextSettings
+            copy={copy}
+            model={contextModel}
+            pack={pack}
+            turnActive={turnActive}
+          />
+        )}
+      />
     </section>
+  )
+}
+
+function CharacterContextSettings({
+  copy,
+  model,
+  pack,
+  turnActive,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly model: EditableSettingsContextModel
+  readonly pack: CharacterPackView
+  readonly turnActive: boolean
+}) {
+  return (
+    <div className="border-t border-divider pt-xl">
+      <EditableContextSection
+        copy={copy}
+        instanceId={`settings-character-${pack.packId.replaceAll(":", "-")}`}
+        model={model}
+        section="character"
+        turnActive={turnActive}
+      />
+    </div>
   )
 }
 
@@ -749,6 +794,28 @@ function HistorySettings({
 
 export function AppSettingsView(props: AppSettingsViewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const [characterContextTarget, setCharacterContextTarget] =
+    useState<CharacterContextTarget | null>(null)
+  const characterContextModel = useEditableSettingsContext(
+    props.adapter,
+    "__no_project__",
+    characterContextTarget,
+  )
+  const updateCharacterContextTarget = useCallback(
+    (pack: CharacterPackView | null) => {
+      setCharacterContextTarget((current) => {
+        if (pack === null) return null
+        if (
+          current?.packId === pack.packId &&
+          current.displayName === pack.displayName
+        ) {
+          return current
+        }
+        return { packId: pack.packId, displayName: pack.displayName }
+      })
+    },
+    [],
+  )
 
   useEffect(() => {
     headingRef.current?.focus()
@@ -766,22 +833,16 @@ export function AppSettingsView(props: AppSettingsViewProps) {
         )
       case "projects":
         return <ProjectsSettings {...props} />
-      case "character_context":
-        return (
-          <ContextSettings
-            character
-            copy={props.copy}
-            contextModel={props.contextModel}
-            turnActive={props.turnActive}
-          />
-        )
       case "character":
         return (
           <CharacterSettings
             characterRuntime={props.characterRuntime}
+            contextModel={characterContextModel}
             copy={props.copy}
             muted={props.muted}
+            onContextTargetChange={updateCharacterContextTarget}
             onRetryCharacter={props.onRetryCharacter}
+            turnActive={props.turnActive}
           />
         )
       case "audio":

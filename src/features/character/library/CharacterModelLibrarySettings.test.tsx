@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -386,12 +387,18 @@ class ModelLibraryGateway implements CharacterLibraryGateway {
 function renderLibrary(
   gateway: CharacterLibraryGateway,
   locale: "en" | "ja" = "en",
+  renderCharacterContext?: (pack: CharacterPackView) => ReactNode,
 ) {
   return render(
     <I18nProvider store={new MemoryLocaleStore(locale)}>
       <TooltipProvider>
         <CharacterLibraryProvider gateway={gateway}>
-          <CharacterModelLibrarySettings workspaceId="workspace-fixture" />
+          <CharacterModelLibrarySettings
+            {...(renderCharacterContext === undefined
+              ? {}
+              : { renderCharacterContext })}
+            workspaceId="workspace-fixture"
+          />
         </CharacterLibraryProvider>
       </TooltipProvider>
     </I18nProvider>,
@@ -416,6 +423,28 @@ function libraryTree(
 }
 
 describe("CharacterModelLibrarySettings", () => {
+  it("renders the selected pack's character context inside its detail", async () => {
+    const user = userEvent.setup()
+    const renderCharacterContext = vi.fn((pack: CharacterPackView) => (
+      <p>Editable context for {pack.displayName}</p>
+    ))
+    renderLibrary(new ModelLibraryGateway(), "en", renderCharacterContext)
+
+    expect(
+      screen.queryByText(`Editable context for ${builtinPack.displayName}`),
+    ).not.toBeInTheDocument()
+    await user.click(
+      await screen.findByRole("button", {
+        name: new RegExp(`Open character settings: ${builtinPack.displayName}`),
+      }),
+    )
+
+    expect(
+      screen.getByText(`Editable context for ${builtinPack.displayName}`),
+    ).toBeVisible()
+    expect(renderCharacterContext).toHaveBeenLastCalledWith(builtinPack)
+  })
+
   it("opens bundled Hiyori from the simple list and shows a read-only motion preset", async () => {
     const user = userEvent.setup()
     const gateway = new ModelLibraryGateway()

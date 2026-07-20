@@ -21,6 +21,7 @@ import type {
   VersionedProjectContext,
   WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
+import { bundledHiyoriCharacterContextPreset } from "@/lib/contracts/workspace-context"
 import type {
   AppQuitPreparationRequest,
   ContextSnapshotItem,
@@ -48,14 +49,8 @@ const emptyProjectContext: ProjectContext = {
   userNotes: "",
 }
 
-const emptyCharacterContext: CharacterContext = {
-  displayName: "Sol",
-  tone: "neutral",
-  toneNotes: "",
-  speechDensity: "key_events",
-  behavior: "Keep explanations concise.",
-  prohibitedExpressions: [],
-}
+const emptyCharacterContext: CharacterContext =
+  bundledHiyoriCharacterContextPreset
 
 interface StoredDraft {
   text: string
@@ -96,6 +91,7 @@ function contextFor(projectId: string): StoredContext {
     },
     character: {
       schemaVersion: 1,
+      packId: "builtin:hiyori_pro",
       version: 1,
       contentHash: characterHash,
       updatedAt: fixtureTime,
@@ -184,8 +180,9 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
   readonly #listeners = new Set<(state: WorkspaceCodexState) => void>()
   readonly #drafts = new Map<string, StoredDraft>()
   readonly #contexts = new Map<string, StoredContext>()
-  #characterContext: VersionedCharacterContext =
-    contextFor("__app_character__").character
+  readonly #characterContexts = new Map<string, VersionedCharacterContext>([
+    ["builtin:hiyori_pro", contextFor("__app_character__").character],
+  ])
   readonly #timeline = new Map<string, readonly CodexSemanticTimelineEvent[]>()
   readonly #attachmentPickerResponses: AttachmentRegistrationResponse[] = []
   #workspaces: WorkspaceRecord[]
@@ -390,8 +387,21 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
   loadProjectContext = (projectId: string): Promise<VersionedProjectContext> =>
     Promise.resolve(structuredClone(this.context(projectId).project))
 
-  loadCharacterContext = (): Promise<VersionedCharacterContext> =>
-    Promise.resolve(structuredClone(this.#characterContext))
+  loadCharacterContext = (
+    packId: string,
+    displayName: string,
+  ): Promise<VersionedCharacterContext> => {
+    let current = this.#characterContexts.get(packId)
+    if (current === undefined) {
+      current = {
+        ...contextFor("__app_character__").character,
+        packId,
+        context: { ...emptyCharacterContext, displayName },
+      }
+      this.#characterContexts.set(packId, current)
+    }
+    return Promise.resolve(structuredClone(current))
+  }
 
   saveProjectContext = (
     projectId: string,
@@ -415,20 +425,22 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
   }
 
   saveCharacterContext = (
+    packId: string,
     expectedVersion: number,
     character: CharacterContext,
   ): Promise<VersionedCharacterContext> => {
-    if (this.#characterContext.version !== expectedVersion) {
+    const current = this.#characterContexts.get(packId)
+    if (current === undefined || current.version !== expectedVersion) {
       return Promise.reject(new Error("APP-CHARACTER-CONTEXT-CONFLICT"))
     }
     const saved: VersionedCharacterContext = {
-      ...this.#characterContext,
+      ...current,
       version: expectedVersion + 1,
       contentHash: "5".repeat(64),
       updatedAt: "2026-07-19T00:01:00.000Z",
       context: structuredClone(character),
     }
-    this.#characterContext = saved
+    this.#characterContexts.set(packId, saved)
     return Promise.resolve(structuredClone(saved))
   }
 
@@ -440,17 +452,20 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
     )
     if (workspace === undefined) throw new Error("WORKSPACE-NOT-FOUND")
     const context = this.context(workspace.projectId ?? "project-acceptance")
+    const character = this.#characterContexts.get("builtin:hiyori_pro")
+    if (character === undefined) throw new Error("CHARACTER-CONTEXT-NOT-FOUND")
     return Promise.resolve({
       schemaVersion: 1,
       workspaceId,
       projectVersion: context.project.version,
       projectHash: context.project.contentHash,
-      characterVersion: this.#characterContext.version,
-      characterHash: this.#characterContext.contentHash,
+      characterPackId: character.packId,
+      characterVersion: character.version,
+      characterHash: character.contentHash,
       snapshotHash,
       capturedAt: fixtureTime,
       project: structuredClone(context.project.context),
-      character: structuredClone(this.#characterContext.context),
+      character: structuredClone(character.context),
     })
   }
 

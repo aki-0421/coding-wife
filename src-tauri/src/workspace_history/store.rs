@@ -10,6 +10,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+use crate::character::manifest::{is_opaque_pack_id, BUILTIN_HIYORI_PACK_ID};
 use crate::codex::redaction::redact_text;
 use crate::codex::types::{ApprovalDecision, PendingKind, PendingRequestView, PendingResponseKind};
 use crate::codex::workspace::{
@@ -52,7 +53,7 @@ use super::types::{
 };
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
-const CURRENT_DATABASE_VERSION: i64 = 10;
+const CURRENT_DATABASE_VERSION: i64 = 11;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
@@ -358,6 +359,38 @@ CREATE INDEX IF NOT EXISTS idx_project_context_versions
   ON project_contexts(project_id, project_version);
 "#;
 
+const MIGRATION_11: &str = r#"
+CREATE TABLE IF NOT EXISTS character_contexts (
+  pack_id TEXT PRIMARY KEY,
+  character_json TEXT NOT NULL,
+  character_version INTEGER NOT NULL CHECK (character_version >= 1),
+  character_hash TEXT NOT NULL,
+  character_updated_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO character_contexts (
+  pack_id, character_json, character_version, character_hash, character_updated_at
+)
+SELECT
+  'builtin:hiyori_pro',
+  CASE
+    WHEN character_json = '{"displayName":"Sol","tone":"neutral","toneNotes":"","speechDensity":"key_events","behavior":"","prohibitedExpressions":[]}'
+      AND character_hash = '0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c'
+    THEN '{"displayName":"桃瀬ひより","tone":"warm","toneNotes":"明るく親しみやすい口調で、相手を急かさず要点を簡潔に伝える。","speechDensity":"key_events","behavior":"作業をそっと見守り、重要な変化や判断が必要な場面で声をかける。成功時は一緒に喜び、問題時は落ち着いて次の行動を示す。","prohibitedExpressions":["利用者を責める表現","過度に馴れ馴れしい表現","不確かなことを断定する表現"]}'
+    ELSE character_json
+  END,
+  character_version,
+  CASE
+    WHEN character_json = '{"displayName":"Sol","tone":"neutral","toneNotes":"","speechDensity":"key_events","behavior":"","prohibitedExpressions":[]}'
+      AND character_hash = '0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c'
+    THEN '7607f6f22a12f0abed924b078a0e1b202c87e993d67f4346a0c0a2682a1004af'
+    ELSE character_hash
+  END,
+  character_updated_at
+FROM app_character_context
+WHERE singleton_id = 1;
+"#;
+
 #[derive(Debug)]
 struct StoreInner {
     connection: Connection,
@@ -502,6 +535,7 @@ impl WorkspaceHistoryStore {
                         (8, MIGRATION_8),
                         (9, MIGRATION_9),
                         (10, MIGRATION_10),
+                        (11, MIGRATION_11),
                     ],
                 )
                 .map_err(|_| history_error("HIST-RECOVERY-SCHEMA", false))?;
@@ -1762,9 +1796,14 @@ impl WorkspaceHistoryStore {
         project_context_by_project(&inner.connection, project_id)
     }
 
-    pub fn character_context(&self) -> Result<VersionedCharacterContext, WorkspaceHistoryError> {
+    pub fn character_context(
+        &self,
+        pack_id: &str,
+        display_name: &str,
+    ) -> Result<VersionedCharacterContext, WorkspaceHistoryError> {
+        validate_character_pack_id(pack_id)?;
         let inner = self.lock();
-        app_character_context(&inner.connection)
+        character_context_by_pack(&inner.connection, pack_id, display_name)
     }
 
     pub(super) fn save_project_context(
@@ -1820,9 +1859,11 @@ impl WorkspaceHistoryStore {
 
     pub fn save_character_context(
         &self,
+        pack_id: &str,
         expected_version: u64,
         context: CharacterContext,
     ) -> Result<VersionedCharacterContext, WorkspaceHistoryError> {
+        validate_character_pack_id(pack_id)?;
         let context = normalize_character_context(context)?;
         self.ensure_writable("app.save_character_context")?;
         let mut inner = self.lock();
@@ -1830,7 +1871,7 @@ impl WorkspaceHistoryStore {
             .connection
             .transaction()
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
-        let current = app_character_context(&transaction)?;
+        let current = character_context_by_pack(&transaction, pack_id, &context.display_name)?;
         if current.version != expected_version {
             return Err(history_error("APP-CHARACTER-CONTEXT-CONFLICT", true));
         }
@@ -1839,22 +1880,33 @@ impl WorkspaceHistoryStore {
         let updated_at = now();
         let changed = transaction
             .execute(
-                "UPDATE app_character_context
+                "UPDATE character_contexts
                  SET character_json = ?1, character_version = character_version + 1,
                      character_hash = ?2, character_updated_at = ?3
-                 WHERE singleton_id = 1 AND character_version = ?4",
+                 WHERE pack_id = ?4 AND character_version = ?5",
                 params![
                     character_json,
                     character_hash,
                     updated_at,
+                    pack_id,
                     expected_version as i64,
                 ],
             )
             .map_err(|_| history_error("HIST-CHARACTER-CONTEXT-WRITE", true))?;
-        if changed != 1 {
+        if changed == 0 && expected_version == 1 {
+            transaction
+                .execute(
+                    "INSERT INTO character_contexts (
+                       pack_id, character_json, character_version, character_hash,
+                       character_updated_at
+                     ) VALUES (?1, ?2, 2, ?3, ?4)",
+                    params![pack_id, character_json, character_hash, updated_at],
+                )
+                .map_err(|_| history_error("APP-CHARACTER-CONTEXT-CONFLICT", true))?;
+        } else if changed != 1 {
             return Err(history_error("APP-CHARACTER-CONTEXT-CONFLICT", true));
         }
-        let saved = app_character_context(&transaction)?;
+        let saved = character_context_by_pack(&transaction, pack_id, &context.display_name)?;
         transaction
             .commit()
             .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
@@ -1864,39 +1916,55 @@ impl WorkspaceHistoryStore {
     pub(super) fn turn_context_snapshot(
         &self,
         workspace_id: &str,
+        character_pack_id: &str,
+        character_display_name: &str,
         reference_validation: &ProjectReferenceValidation,
     ) -> Result<WorkspaceTurnContextSnapshot, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
+        validate_character_pack_id(character_pack_id)?;
         let mut inner = self.lock();
         let transaction = inner
             .connection
             .transaction()
             .map_err(|_| history_error("HIST-TRANSACTION-BEGIN", true))?;
-        let bundle = editable_context_by_workspace(&transaction, workspace_id)?;
+        let project_id = transaction
+            .query_row(
+                "SELECT project_id FROM workspaces WHERE id = ?1",
+                params![workspace_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-EDITABLE-CONTEXT-READ", true))?
+            .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
+        let project = project_context_by_project(&transaction, &project_id)?;
+        let character =
+            character_context_by_pack(&transaction, character_pack_id, character_display_name)?;
         let reference_manifest_json =
             project_reference_manifest_by_workspace(&transaction, workspace_id)?;
         validate_project_reference_manifest(
-            &bundle.project.context,
+            &project.context,
             reference_manifest_json.as_deref(),
             reference_validation,
         )?;
         let snapshot_hash = snapshot_hash(
-            bundle.project.version,
-            &bundle.project.content_hash,
-            bundle.character.version,
-            &bundle.character.content_hash,
+            project.version,
+            &project.content_hash,
+            character_pack_id,
+            character.version,
+            &character.content_hash,
         )?;
         let snapshot = WorkspaceTurnContextSnapshot {
             schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
             workspace_id: workspace_id.to_owned(),
-            project_version: bundle.project.version,
-            project_hash: bundle.project.content_hash,
-            character_version: bundle.character.version,
-            character_hash: bundle.character.content_hash,
+            project_version: project.version,
+            project_hash: project.content_hash,
+            character_pack_id: character_pack_id.to_owned(),
+            character_version: character.version,
+            character_hash: character.content_hash,
             snapshot_hash,
             captured_at: now(),
-            project: bundle.project.context,
-            character: bundle.character.context,
+            project: project.context,
+            character: character.context,
         };
         validate_turn_snapshot(&snapshot)?;
         transaction
@@ -2378,6 +2446,7 @@ fn open_configured_connection(
             (8, MIGRATION_8),
             (9, MIGRATION_9),
             (10, MIGRATION_10),
+            (11, MIGRATION_11),
         ],
     )?;
     if status.mode == HistoryMode::Ready {
@@ -2727,7 +2796,7 @@ fn editable_context_by_workspace(
         schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
         workspace_id: workspace_id.to_owned(),
         project: project_context_by_project(connection, &project_id)?,
-        character: app_character_context(connection)?,
+        character: character_context_by_pack(connection, BUILTIN_HIYORI_PACK_ID, "桃瀬ひより")?,
     })
 }
 
@@ -2774,14 +2843,17 @@ fn project_context_by_project(
     })
 }
 
-fn app_character_context(
+fn character_context_by_pack(
     connection: &Connection,
+    pack_id: &str,
+    default_display_name: &str,
 ) -> Result<VersionedCharacterContext, WorkspaceHistoryError> {
+    validate_character_pack_id(pack_id)?;
     let row = connection
         .query_row(
             "SELECT character_json, character_version, character_hash, character_updated_at
-             FROM app_character_context WHERE singleton_id = 1",
-            [],
+             FROM character_contexts WHERE pack_id = ?1",
+            params![pack_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -2792,8 +2864,27 @@ fn app_character_context(
             },
         )
         .optional()
-        .map_err(|_| history_error("HIST-CHARACTER-CONTEXT-READ", true))?
-        .ok_or_else(|| history_error("HIST-CHARACTER-CONTEXT-MISSING", false))?;
+        .map_err(|_| history_error("HIST-CHARACTER-CONTEXT-READ", true))?;
+    let Some(row) = row else {
+        let mut context = if pack_id == BUILTIN_HIYORI_PACK_ID {
+            CharacterContext::hiyori_preset()
+        } else {
+            CharacterContext::default()
+        };
+        if pack_id != BUILTIN_HIYORI_PACK_ID {
+            context.display_name = default_display_name.to_owned();
+        }
+        let context = normalize_character_context(context)?;
+        let character_json = canonical_json(&context)?;
+        return Ok(VersionedCharacterContext {
+            schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
+            pack_id: pack_id.to_owned(),
+            version: 1,
+            content_hash: content_hash(&character_json),
+            updated_at: "1970-01-01T00:00:00.000Z".to_owned(),
+            context,
+        });
+    };
     let (character_json, character_version, character_hash, character_updated_at) = row;
     if character_version < 1 {
         return Err(history_error("HIST-CHARACTER-CONTEXT-CORRUPT", false));
@@ -2808,6 +2899,7 @@ fn app_character_context(
     }
     Ok(VersionedCharacterContext {
         schema_version: WORKSPACE_CONTEXT_SCHEMA_VERSION,
+        pack_id: pack_id.to_owned(),
         version: character_version as u64,
         content_hash: character_hash,
         updated_at: character_updated_at,
@@ -4203,6 +4295,13 @@ fn validate_project_id(value: &str) -> Result<(), WorkspaceHistoryError> {
     Ok(())
 }
 
+fn validate_character_pack_id(value: &str) -> Result<(), WorkspaceHistoryError> {
+    if !is_opaque_pack_id(value) {
+        return Err(history_error("CHARACTER-PACK-ID-INVALID", false));
+    }
+    Ok(())
+}
+
 fn validate_opaque_id(value: &str, code: &str) -> Result<(), WorkspaceHistoryError> {
     if value.is_empty()
         || value.len() > 160
@@ -5340,7 +5439,12 @@ mod tests {
         let validation = reference_validation(&root);
         assert_eq!(
             reopened
-                .turn_context_snapshot(&workspace_id, &validation)
+                .turn_context_snapshot(
+                    &workspace_id,
+                    BUILTIN_HIYORI_PACK_ID,
+                    "桃瀬ひより",
+                    &validation,
+                )
                 .expect_err("unverified legacy identity blocked")
                 .code,
             "WORKSPACE-PROJECT-CONTEXT-REFERENCE-CHANGED"
@@ -5350,7 +5454,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn editable_context_shares_project_and_character_scopes() {
+    async fn editable_context_scopes_project_and_character_by_pack() {
         let data = temp_directory("editable-context");
         let root = git_repository();
         let store = WorkspaceHistoryStore::open(&data).expect("open store");
@@ -5417,18 +5521,18 @@ mod tests {
         };
         assert_eq!(
             store
-                .save_character_context(1, policy)
+                .save_character_context(BUILTIN_HIYORI_PACK_ID, 1, policy)
                 .expect_err("policy key rejected")
                 .code,
             "APP-CHARACTER-CONTEXT-POLICY"
         );
         let character = CharacterContext {
             display_name: "Hiyori".to_owned(),
-            behavior: "Stay quiet while tools are running.".to_owned(),
+            behavior: "Greet the user warmly and explain the next useful step.".to_owned(),
             ..CharacterContext::default()
         };
         let character_saved = store
-            .save_character_context(1, character.clone())
+            .save_character_context(BUILTIN_HIYORI_PACK_ID, 1, character.clone())
             .expect("save character context");
         assert_eq!(character_saved.version, 2);
         assert_eq!(
@@ -5440,13 +5544,51 @@ mod tests {
             character
         );
         let snapshot = store
-            .turn_context_snapshot(&first.workspace_id, &reference_validation)
+            .turn_context_snapshot(
+                &first.workspace_id,
+                BUILTIN_HIYORI_PACK_ID,
+                "桃瀬ひより",
+                &reference_validation,
+            )
             .expect("immutable turn snapshot");
         assert_eq!(snapshot.project_version, 2);
         assert_eq!(snapshot.character_version, 2);
         assert_eq!(snapshot.project, project);
         assert_eq!(snapshot.character, character);
         validate_turn_snapshot(&snapshot).expect("snapshot integrity");
+
+        let custom_pack_id = "custom:11111111-1111-4111-8111-111111111111";
+        let custom_character = CharacterContext {
+            display_name: "Mina".to_owned(),
+            tone: crate::workspace_history::types::CharacterTone::Concise,
+            behavior: "Keep updates short and direct.".to_owned(),
+            ..CharacterContext::default()
+        };
+        let custom_saved = store
+            .save_character_context(custom_pack_id, 1, custom_character.clone())
+            .expect("save custom character context");
+        assert_eq!(custom_saved.pack_id, custom_pack_id);
+        assert_eq!(custom_saved.version, 2);
+        assert_eq!(custom_saved.context, custom_character);
+        assert_eq!(
+            store
+                .character_context(BUILTIN_HIYORI_PACK_ID, "桃瀬ひより")
+                .expect("Hiyori context remains isolated")
+                .context,
+            character
+        );
+        let custom_snapshot = store
+            .turn_context_snapshot(
+                &first.workspace_id,
+                custom_pack_id,
+                "Mina",
+                &reference_validation,
+            )
+            .expect("custom character snapshot");
+        assert_eq!(custom_snapshot.character_pack_id, custom_pack_id);
+        assert_eq!(custom_snapshot.character_version, 2);
+        assert_eq!(custom_snapshot.character, custom_character);
+        validate_turn_snapshot(&custom_snapshot).expect("custom snapshot integrity");
 
         drop(store);
         let reopened = WorkspaceHistoryStore::open(&data).expect("reopen store");
@@ -5458,7 +5600,12 @@ mod tests {
         assert_eq!(restored.character.version, 2);
         assert_eq!(restored.character.content_hash, snapshot.character_hash);
         reopened
-            .turn_context_snapshot(&first.workspace_id, &reference_validation)
+            .turn_context_snapshot(
+                &first.workspace_id,
+                BUILTIN_HIYORI_PACK_ID,
+                "桃瀬ひより",
+                &reference_validation,
+            )
             .expect("restored private reference identity");
 
         let _ = fs::remove_dir_all(data);
@@ -6609,6 +6756,90 @@ mod tests {
                 .expect("one context for each legacy project"),
             2
         );
+
+        apply_migrations(
+            &connection,
+            &[
+                (1, MIGRATION_1),
+                (2, MIGRATION_2),
+                (3, MIGRATION_3),
+                (4, MIGRATION_4),
+                (5, MIGRATION_5),
+                (6, MIGRATION_6),
+                (7, MIGRATION_7),
+                (8, MIGRATION_8),
+                (9, MIGRATION_9),
+                (10, MIGRATION_10),
+                (11, MIGRATION_11),
+            ],
+        )
+        .expect("version eleven schema");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version eleven"),
+            11
+        );
+        let migrated_character = connection
+            .query_row(
+                "SELECT pack_id, character_json, character_version
+                 FROM character_contexts WHERE pack_id = ?1",
+                params![BUILTIN_HIYORI_PACK_ID],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .expect("pack-scoped migrated character context");
+        assert_eq!(migrated_character.0, BUILTIN_HIYORI_PACK_ID);
+        assert_eq!(migrated_character.1, recent_character_json);
+        assert_eq!(migrated_character.2, 7);
+    }
+
+    #[test]
+    fn migration_eleven_seeds_the_editable_hiyori_preset() {
+        let connection = Connection::open_in_memory().expect("open migration database");
+        configure_connection(&connection).expect("configure migration database");
+        apply_migrations(
+            &connection,
+            &[
+                (1, MIGRATION_1),
+                (2, MIGRATION_2),
+                (3, MIGRATION_3),
+                (4, MIGRATION_4),
+                (5, MIGRATION_5),
+                (6, MIGRATION_6),
+                (7, MIGRATION_7),
+                (8, MIGRATION_8),
+                (9, MIGRATION_9),
+                (10, MIGRATION_10),
+                (11, MIGRATION_11),
+            ],
+        )
+        .expect("current schema");
+
+        let (character_json, character_hash, character_version) = connection
+            .query_row(
+                "SELECT character_json, character_hash, character_version
+                 FROM character_contexts WHERE pack_id = ?1",
+                params![BUILTIN_HIYORI_PACK_ID],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .expect("bundled Hiyori context");
+        let expected_json =
+            canonical_json(&CharacterContext::hiyori_preset()).expect("Hiyori preset JSON");
+        assert_eq!(character_json, expected_json);
+        assert_eq!(character_hash, content_hash(&expected_json));
+        assert_eq!(character_version, 1);
     }
 
     #[test]

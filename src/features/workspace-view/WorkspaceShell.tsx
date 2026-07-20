@@ -139,6 +139,7 @@ export function WorkspaceShell({
   const contextModel = useEditableSettingsContext(
     adapter,
     appSettingsProjectId ?? "__no_project__",
+    null,
   )
   const characterRuntimeStore = useCharacterRuntimeStatusStore()
   const characterRuntimeSnapshot = useCharacterRuntimeStatus(
@@ -794,6 +795,7 @@ export function WorkspaceShell({
       {appSettingsOpen ? (
         <AppSettingsView
           characterRuntime={characterRuntime}
+          adapter={adapter}
           contextModel={contextModel}
           copy={copy}
           muted={view.muted}

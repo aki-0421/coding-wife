@@ -1424,8 +1424,8 @@ describe("WorkspaceShell", () => {
     expect(appSettingsButton()).toHaveAttribute("aria-current", "page")
     expect(screen.getAllByRole("button", { name: "General" })[0]).toBeVisible()
     expect(
-      screen.getByRole("button", { name: "Character context" }),
-    ).toBeVisible()
+      screen.queryByRole("button", { name: "Character context" }),
+    ).toBeNull()
     expect(screen.getByRole("button", { name: "Character" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Audio" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Support" })).toBeVisible()
@@ -1455,6 +1455,41 @@ describe("WorkspaceShell", () => {
     await waitFor(() =>
       expect(screen.getByRole("tab", { name: /Settings/ })).toHaveFocus(),
     )
+  })
+
+  it("edits bundled Hiyori context from the character detail", async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await user.click(appSettingsButton())
+    await user.click(screen.getByRole("button", { name: "Character" }))
+    await user.click(
+      await screen.findByRole("button", {
+        name: /Open character settings: 桃瀬ひより/,
+      }),
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "Character context" }),
+    ).toBeVisible()
+    const displayName = screen.getByRole("textbox", { name: "Display name" })
+    const behavior = screen.getByRole("textbox", { name: "Behavior" })
+    expect(displayName).toHaveValue("桃瀬ひより")
+    expect(displayName).not.toBeDisabled()
+    expect(behavior).not.toBeDisabled()
+    await user.type(behavior, " Keep a gentle pace.")
+    await user.click(
+      screen.getByRole("button", { name: "Save character settings" }),
+    )
+
+    expect(
+      await screen.findByText(
+        "Saved. This version will be used from the next turn.",
+      ),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Character context" }),
+    ).not.toBeInTheDocument()
   })
 
   it("uses the persisted history mode consistently in chat and diagnostics", async () => {
@@ -2375,6 +2410,7 @@ describe("WorkspaceShell", () => {
           workspaceId: "workspace-native",
           projectVersion: 1,
           projectHash: "a".repeat(64),
+          characterPackId: "builtin:hiyori_pro",
           characterVersion: 1,
           characterHash: "b".repeat(64),
           snapshotHash: "c".repeat(64),

@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react"
 import {
   ArrowLeftIcon,
@@ -53,6 +54,8 @@ import { useI18n } from "@/features/localization"
 
 export interface CharacterModelLibrarySettingsProps {
   readonly workspaceId?: string
+  readonly onDetailPackChange?: (pack: CharacterPackView | null) => void
+  readonly renderCharacterContext?: (pack: CharacterPackView) => ReactNode
 }
 
 interface PreviewProgress {
@@ -134,8 +137,16 @@ function phaseLabel(
 }
 
 function CharacterModelLibrarySession({
+  onDetailPackChange,
+  renderCharacterContext,
   workspaceId,
 }: {
+  readonly onDetailPackChange:
+    | ((pack: CharacterPackView | null) => void)
+    | undefined
+  readonly renderCharacterContext:
+    | ((pack: CharacterPackView) => ReactNode)
+    | undefined
   workspaceId: string
 }) {
   const { locale } = useI18n()
@@ -168,6 +179,10 @@ function CharacterModelLibrarySession({
   )
   const customPack = snapshot?.packs.find((pack) => pack.kind === "custom")
   const replacingCustom = customPack !== undefined
+
+  useEffect(() => {
+    onDetailPackChange?.(detailPack ?? null)
+  }, [detailPack, onDetailPackChange])
   const previewPackRef = useMemo(
     () => (preview === null ? null : store.previewPackRef(workspaceId)),
     [preview, store, workspaceId],
@@ -530,10 +545,13 @@ function CharacterModelLibrarySession({
       ) : null}
 
       {detailPack !== undefined ? (
-        <SemanticMappingSettings
-          packId={detailPack.packId}
-          workspaceId={workspaceId}
-        />
+        <>
+          <SemanticMappingSettings
+            packId={detailPack.packId}
+            workspaceId={workspaceId}
+          />
+          {renderCharacterContext?.(detailPack)}
+        </>
       ) : null}
 
       <Dialog
@@ -739,11 +757,13 @@ function CharacterModelLibrarySession({
 }
 
 export function CharacterModelLibrarySettings(
-  _props: CharacterModelLibrarySettingsProps,
+  props: CharacterModelLibrarySettingsProps,
 ) {
   return (
     <CharacterModelLibrarySession
       key={characterLibraryScopeId}
+      onDetailPackChange={props.onDetailPackChange}
+      renderCharacterContext={props.renderCharacterContext}
       workspaceId={characterLibraryScopeId}
     />
   )

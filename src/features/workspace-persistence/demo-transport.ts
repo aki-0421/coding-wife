@@ -17,6 +17,7 @@ import {
   type WorkspaceTimelineAnchor,
 } from "@/lib/contracts/workspace-history"
 import {
+  bundledHiyoriCharacterContextPreset,
   parseCharacterContext,
   normalizeProjectContextForSave,
   type CharacterContext,
@@ -35,7 +36,7 @@ const baseTimestamp = Date.parse("2026-07-18T00:00:00.000Z")
 const defaultProjectHash =
   "e0da727f2381a1c290ddcb74bdb52b44b0ec890559443d795f29731d68fe1323"
 const defaultCharacterHash =
-  "0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c"
+  "7607f6f22a12f0abed924b078a0e1b202c87e993d67f4346a0c0a2682a1004af"
 
 const defaultProjectContext: ProjectContext = {
   goal: "",
@@ -43,15 +44,6 @@ const defaultProjectContext: ProjectContext = {
   definitionOfDone: [],
   technicalReferences: [],
   userNotes: "",
-}
-
-const defaultCharacterContext: CharacterContext = {
-  displayName: "Sol",
-  tone: "neutral",
-  toneNotes: "",
-  speechDensity: "key_events",
-  behavior: "",
-  prohibitedExpressions: [],
 }
 
 function demoWorkspace(
@@ -143,13 +135,22 @@ export class DemoWorkspaceHistoryTransport
   )
   private readonly contexts = new Map<string, PersistedContextSnapshot[]>()
   private readonly projectContexts = new Map<string, VersionedProjectContext>()
-  private characterContext: VersionedCharacterContext = {
-    schemaVersion: 1,
-    version: 1,
-    contentHash: defaultCharacterHash,
-    updatedAt: new Date(baseTimestamp).toISOString(),
-    context: defaultCharacterContext,
-  }
+  private readonly characterContexts = new Map<
+    string,
+    VersionedCharacterContext
+  >([
+    [
+      "builtin:hiyori_pro",
+      {
+        schemaVersion: 1,
+        packId: "builtin:hiyori_pro",
+        version: 1,
+        contentHash: defaultCharacterHash,
+        updatedAt: new Date(baseTimestamp).toISOString(),
+        context: bundledHiyoriCharacterContextPreset,
+      },
+    ],
+  ])
   private readonly events = new Map<string, PersistedTimelineEvent[]>()
   private readonly lastSummaries = new Map<string, WorkspaceLastSummary>()
   private readonly timelineAnchors = new Map<string, WorkspaceTimelineAnchor>()
@@ -275,7 +276,9 @@ export class DemoWorkspaceHistoryTransport
           request as WorkspaceHistoryRequestMap["project_context_save"],
         )
       case workspaceHistoryCommands.getCharacterContext:
-        return this.characterContext
+        return this.characterContext(
+          request as WorkspaceHistoryRequestMap["app_character_context_get"],
+        )
       case workspaceHistoryCommands.saveCharacterContext:
         return this.saveCharacterContext(
           request as WorkspaceHistoryRequestMap["app_character_context_save"],
@@ -738,7 +741,11 @@ export class DemoWorkspaceHistoryTransport
   private async saveCharacterContext(
     request: WorkspaceHistoryRequestMap["app_character_context_save"],
   ): Promise<WorkspaceHistoryResponseMap["app_character_context_save"]> {
-    if (this.characterContext.version !== request.expectedVersion) {
+    const current = await this.characterContext({
+      packId: request.packId,
+      displayName: request.context.displayName,
+    })
+    if (current.version !== request.expectedVersion) {
       throw this.error(
         "APP-CHARACTER-CONTEXT-CONFLICT",
         workspaceHistoryCommands.saveCharacterContext,
@@ -748,7 +755,8 @@ export class DemoWorkspaceHistoryTransport
     const context = parseCharacterContext(request.context)
     const updated: VersionedCharacterContext = {
       schemaVersion: 1,
-      version: this.characterContext.version + 1,
+      packId: request.packId,
+      version: current.version + 1,
       contentHash: await this.canonicalJsonHash(
         context,
         workspaceHistoryCommands.saveCharacterContext,
@@ -756,8 +764,34 @@ export class DemoWorkspaceHistoryTransport
       updatedAt: this.timestamp(),
       context,
     }
-    this.characterContext = updated
+    this.characterContexts.set(request.packId, updated)
     return updated
+  }
+
+  private async characterContext(
+    request: WorkspaceHistoryRequestMap["app_character_context_get"],
+  ): Promise<VersionedCharacterContext> {
+    const current = this.characterContexts.get(request.packId)
+    if (current !== undefined) return current
+    const context = parseCharacterContext({
+      displayName: request.displayName,
+      tone: "neutral",
+      toneNotes: "",
+      speechDensity: "key_events",
+      behavior: "",
+      prohibitedExpressions: [],
+    })
+    return {
+      schemaVersion: 1,
+      packId: request.packId,
+      version: 1,
+      contentHash: await this.canonicalJsonHash(
+        context,
+        workspaceHistoryCommands.getCharacterContext,
+      ),
+      updatedAt: new Date(baseTimestamp).toISOString(),
+      context,
+    }
   }
 
   private async turnContextSnapshot(
@@ -771,25 +805,31 @@ export class DemoWorkspaceHistoryTransport
       workspace.projectId,
       workspaceHistoryCommands.getTurnContextSnapshot,
     )
+    const character = await this.characterContext({
+      packId: "builtin:hiyori_pro",
+      displayName: "桃瀬ひより",
+    })
     return {
       schemaVersion: 1,
       workspaceId,
       projectVersion: project.version,
       projectHash: project.contentHash,
-      characterVersion: this.characterContext.version,
-      characterHash: this.characterContext.contentHash,
+      characterPackId: character.packId,
+      characterVersion: character.version,
+      characterHash: character.contentHash,
       snapshotHash: await this.canonicalJsonHash(
         {
           projectVersion: project.version,
           projectHash: project.contentHash,
-          characterVersion: this.characterContext.version,
-          characterHash: this.characterContext.contentHash,
+          characterPackId: character.packId,
+          characterVersion: character.version,
+          characterHash: character.contentHash,
         },
         workspaceHistoryCommands.getTurnContextSnapshot,
       ),
       capturedAt: this.timestamp(),
       project: project.context,
-      character: this.characterContext.context,
+      character: character.context,
     }
   }
 
