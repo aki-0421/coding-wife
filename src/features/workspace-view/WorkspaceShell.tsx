@@ -192,6 +192,15 @@ export function WorkspaceShell({
     view.turnState === "stopping" ||
     view.codex.phase === "running" ||
     view.codex.phase === "stopping"
+  const sessionInMotion =
+    view.turnState === "sending" ||
+    view.turnState === "stopping" ||
+    view.codex.phase === "running" ||
+    view.codex.phase === "stopping" ||
+    (view.turnState === "running" && view.codex.phase !== "waiting")
+  const runningWorkspaceId = sessionInMotion
+    ? (view.codex.activeWorkspaceId ?? view.selectedWorkspace?.id ?? null)
+    : null
   const characterState = !connected
     ? "disconnected"
     : view.codex.pendingRequests.length > 0
@@ -842,6 +851,7 @@ export function WorkspaceShell({
         filteredWorkspaces={view.filteredWorkspaces}
         projectFilterIds={view.projectFilterIds}
         projects={view.projects}
+        runningWorkspaceId={runningWorkspaceId}
         archiveDisabledWorkspaceId={archivePendingWorkspaceId ?? undefined}
         onAddProject={() => void view.requestAddProject(copy.pickerUnavailable)}
         onCreateWorkspace={view.addWorkspace}

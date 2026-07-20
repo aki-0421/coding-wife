@@ -588,6 +588,76 @@ describe("WorkspaceShell", () => {
     expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
   })
 
+  it("replaces the active workspace repository icon while its session is running", async () => {
+    const state = nativeWorkspaceState()
+    const codex: WorkspaceCodexState = {
+      ...richCodexState(),
+      activeWorkspaceId: "workspace-native",
+      phase: "running",
+      pendingRequests: [],
+      timeline: [],
+    }
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex: (listener) => {
+        listener(codex)
+        return () => undefined
+      },
+    }
+
+    renderWorkspace(adapter)
+
+    const workspace = await screen.findByRole("button", {
+      name: "main, native-repository, In Progress, Session running",
+    })
+    const spinner = workspace.querySelector(
+      '[data-workspace-session="running"]',
+    )
+    expect(spinner).toHaveClass("size-6", "text-running")
+    expect(spinner?.querySelector("svg")).toHaveClass(
+      "animate-spin",
+      "motion-reduce:animate-none",
+    )
+    expect(
+      workspace.querySelector('[data-repository-avatar="local"]'),
+    ).toBeNull()
+    const compactWorkspace = screen.getByRole("button", {
+      name: "Switch workspace: native-repository/restored-workspace, Session running",
+    })
+    expect(
+      compactWorkspace.querySelector('[data-workspace-session="running"]'),
+    ).not.toBeNull()
+  })
+
+  it("restores the repository icon while the active session waits for an answer", async () => {
+    const state = nativeWorkspaceState()
+    const codex = richCodexState()
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex: (listener) => {
+        listener(codex)
+        return () => undefined
+      },
+    }
+
+    renderWorkspace(adapter)
+
+    const workspace = await screen.findByRole("button", {
+      name: /main, native-repository, In Progress/,
+    })
+    expect(workspace).not.toHaveAccessibleName(/Session running/)
+    expect(
+      workspace.querySelector('[data-workspace-session="running"]'),
+    ).toBeNull()
+    expect(
+      workspace.querySelector('[data-repository-avatar="local"]'),
+    ).not.toBeNull()
+  })
+
   it("mutes sidebar icon controls and reserves the archive action width", () => {
     const { container } = renderWorkspace()
     const sidebar = container.querySelector(".workspace-sidebar")

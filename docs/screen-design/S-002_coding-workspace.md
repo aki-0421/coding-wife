@@ -79,7 +79,7 @@ status: "Approved"
 
 | 領域 | 実装拘束値 | 表示内容 | 主な操作 |
 |---|---:|---|---|
-| workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、App settings gear | filter、workspace選択、App settings |
+| workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、main turn送信開始・実行・停止処理中だけ対象rowのrepository avatarと置き換わるspinner、App settings gear | filter、workspace選択、App settings |
 | breadcrumb row | main上段40.5px | owner avatar、`owner/repo` / workspace、branch、connection、attention | repository / workspace / branchの値をcopy |
 | tab row | main下段40.5px | Chat / Commit / Settings | view切替 |
 | Chat pane | 607.11×754.99px | event timeline、decision、composer | inspect、copy、send、stop、answer |

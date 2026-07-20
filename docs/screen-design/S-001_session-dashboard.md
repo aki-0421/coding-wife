@@ -1,8 +1,8 @@
 ---
 title: "S-001 セッションダッシュボード"
 description: "ローカルfolderをGit/GitHub要件まで安全にセットアップしてproject登録し、workspaceの状態を一覧して作成・選択・復元する画面仕様。"
-updated: 2026-07-20
-last_verified: 2026-07-20
+updated: 2026-07-21
+last_verified: 2026-07-21
 read_when:
   - "project picker、preflight、workspace sidebar、lifecycle、filter、selectionを実装するとき。"
   - "S-001とWORK、CODE、HIST、APP要件の対応を確認するとき。"
@@ -106,7 +106,7 @@ sidebarのlifecycle statusは[LinearのIssue status](https://linear.app/docs/con
 
 workspace navigation contentは242.25pxを上限として、右端の件数とchevronを255.04px sidebar内へ収める。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "expands lifecycle groups by default and toggles them independently"`で初期展開、独立開閉、1件・0件表示、ARIA、content幅を検証する。
 
-sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、branch titleを13px / 500 / 19.5px、GitHub repository full nameを11px / 400 / 16.5pxとする。workspace itemの先頭にはheaderと同じ24px owner avatarを置き、GitHub metadataがない時はneutral Git worktree fallback、画像取得失敗時はneutral user fallbackを使う。workspace selectionでfont weight、文字幅、avatar geometryを変えず、selected background、strong text、branch violet iconだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。
+sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、branch titleを13px / 500 / 19.5px、GitHub repository full nameを11px / 400 / 16.5pxとする。workspace itemの先頭にはheaderと同じ24px owner avatarを置き、GitHub metadataがない時はneutral Git worktree fallback、画像取得失敗時はneutral user fallbackを使う。対象workspaceのmain turnが送信開始、実行中、停止処理中の時はavatarを同じ24px領域の`running`色spinnerへ置換し、rowのaccessible nameとtooltipへ`セッション実行中 / Session running`を追加する。回答待ち、terminal、idleではavatarへ戻す。spinnerは`prefers-reduced-motion`で回転を停止してもloader形状とtextを維持し、色やmotionだけを状態の根拠にしない。workspace selectionでfont weight、文字幅、avatar geometryを変えず、selected background、strong text、branch violet iconだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "repository icon"`で実行対象rowとcompact railの置換、accessible name、回答待ちでのavatar復帰を検証する。
 
 sidebar内のicon-only buttonは、project filter、project追加、workspace追加、Archive、App Settings、compact navigationを含め、静止時に`Workspaces` headingと同じ`text-muted-accessible`相当の色を使う。hover、focus-visible、active/current stateでは既存のforegroundまたはselected stateへ切り替え、操作可能性と現在地を示す。workspace rowはArchive buttonが透明な静止時も24pxのcontrol幅と右6px insetを通常flow内で確保し、branch、repository、healthのellipsis領域をその予約幅へ侵入させない。Archiveのhover/focus表示によってrow内の文字幅、折り返し、位置を変えない。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "mutes sidebar icon controls and reserves the archive action width"`でicon-only buttonの静止色とArchiveの通常flow内予約を検証する。
 

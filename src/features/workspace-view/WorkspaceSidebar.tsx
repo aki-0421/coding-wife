@@ -6,6 +6,7 @@ import {
   FolderPlusIcon,
   GitBranchIcon,
   ListFilterIcon,
+  LoaderCircleIcon,
   MenuIcon,
   PlusIcon,
   SettingsIcon,
@@ -72,6 +73,7 @@ interface WorkspaceSidebarProps {
   readonly projects: readonly ProjectRecord[]
   readonly selectedWorkspace?: WorkspaceRecord | undefined
   readonly selectedWorkspaceId: string
+  readonly runningWorkspaceId: string | null
   readonly archiveDisabledWorkspaceId?: string | undefined
   readonly onAddProject: () => void
   readonly onCreateWorkspace: (
@@ -92,6 +94,7 @@ interface SidebarPanelProps extends WorkspaceSidebarProps {
 
 function WorkspaceRow({
   copy,
+  running,
   selected,
   workspace,
   archiveDisabled,
@@ -99,6 +102,7 @@ function WorkspaceRow({
   onSelect,
 }: {
   readonly copy: WorkspaceCopy
+  readonly running: boolean
   readonly selected: boolean
   readonly workspace: WorkspaceRecord
   readonly archiveDisabled: boolean
@@ -122,12 +126,16 @@ function WorkspaceRow({
         <TooltipTrigger asChild>
           <button
             aria-current={selected ? "page" : undefined}
-            aria-label={`${workspace.branch}, ${repositoryLabel}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
+            aria-label={`${workspace.branch}, ${repositoryLabel}, ${linearWorkspaceStatusLabels[workspace.lifecycle]}${running ? `, ${copy.sessionRunning}` : ""}${workspace.attention ? `, ${copy.attention[workspace.attention]}` : ""}${health ? `, ${health}` : ""}`}
             className="flex h-full min-w-0 flex-1 items-center gap-sm rounded-control px-sm py-xs text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={onSelect}
             type="button"
           >
-            <RepositoryAvatar githubRepository={workspace.githubRepository} />
+            {running ? (
+              <WorkspaceSessionSpinner />
+            ) : (
+              <RepositoryAvatar githubRepository={workspace.githubRepository} />
+            )}
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="flex min-w-0 items-center gap-xxs">
                 <GitBranchIcon
@@ -173,6 +181,7 @@ function WorkspaceRow({
         </TooltipTrigger>
         <TooltipContent side="right">
           {workspace.branch} · {repositoryLabel}
+          {running ? ` · ${copy.sessionRunning}` : ""}
           {workspace.attention
             ? ` · ${copy.attention[workspace.attention]}`
             : ""}
@@ -197,6 +206,18 @@ function WorkspaceRow({
         <TooltipContent side="right">{copy.archiveWorkspace}</TooltipContent>
       </Tooltip>
     </div>
+  )
+}
+
+function WorkspaceSessionSpinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-6 shrink-0 items-center justify-center text-running [&>svg]:size-4"
+      data-workspace-session="running"
+    >
+      <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+    </span>
   )
 }
 
@@ -277,6 +298,7 @@ function SidebarPanel({
   filteredWorkspaces,
   projectFilterIds,
   projects,
+  runningWorkspaceId,
   selectedWorkspaceId,
   archiveDisabledWorkspaceId,
   reserveTitlebarSpace,
@@ -443,6 +465,7 @@ function SidebarPanel({
                       key={workspace.id}
                       onArchive={() => onRequestArchive(workspace)}
                       onSelect={() => onSelectWorkspace(workspace.id)}
+                      running={workspace.id === runningWorkspaceId}
                       selected={workspace.id === selectedWorkspaceId}
                       workspace={workspace}
                     />
@@ -487,6 +510,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   >(() => ({ ...initiallyExpandedLifecycles }))
   const compactOpenerRef = useRef<HTMLButtonElement | null>(null)
   const selected = props.selectedWorkspace
+  const selectedSessionRunning = selected?.id === props.runningWorkspaceId
   const toggleLifecycle = (lifecycle: WorkspaceLifecycle) => {
     setExpandedLifecycles((current) => ({
       ...current,
@@ -590,7 +614,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                     aria-controls="compact-workspace-navigation"
                     aria-expanded={compactNavigationOpen}
                     aria-haspopup="dialog"
-                    aria-label={`${props.copy.switchWorkspace}: ${selected.repository}/${selected.name}`}
+                    aria-label={`${props.copy.switchWorkspace}: ${selected.repository}/${selected.name}${selectedSessionRunning ? `, ${props.copy.sessionRunning}` : ""}`}
                     className={sidebarIconButtonClassName}
                     onClick={(event) =>
                       openCompactNavigation(event.currentTarget)
@@ -599,12 +623,19 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                     type="button"
                     variant="secondary"
                   >
-                    <GitBranchIcon />
+                    {selectedSessionRunning ? (
+                      <WorkspaceSessionSpinner />
+                    ) : (
+                      <GitBranchIcon />
+                    )}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="right">
                   {props.copy.switchWorkspace}: {selected.repository}/
                   {selected.name}
+                  {selectedSessionRunning
+                    ? ` · ${props.copy.sessionRunning}`
+                    : ""}
                 </TooltipContent>
               </Tooltip>
             ) : null}
