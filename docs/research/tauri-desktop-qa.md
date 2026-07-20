@@ -57,6 +57,14 @@ pnpm test:desktop
 WebdriverIOがbinaryを起動・終了し、既に起動している`pnpm tauri:dev`へ後付け接続しない。
 同時実行数は1とする。embedded WebDriver portは
 `CODING_WIFE_WDIO_PORT`、次にConductorの`CONDUCTOR_PORT + 5`、最後に4445の順で決める。
+`wdio.conf.ts`は決定したportを`TAURI_WEBDRIVER_PORT`にも設定する。
+embedded providerの`browser.tauri.execute()`はこの環境変数からdirect-evalの接続先を読むため、
+設定を外すとDOM操作は成功してもRust IPCだけが`fetch failed`になる。
+
+`@wdio/tauri-service@1.2.0`は`installMockSyncOverride`をimportするが、同packageが指定する
+`@wdio/native-utils@2.4.0`はそのexportを含まない。`package.json`のpnpm overrideで2.5.0へ
+固定しているのはこの公開package間の不整合を避けるためである。overrideを外すのは、上流の
+依存指定が修正された版へ更新し、`pnpm test:desktop`で実起動とIPCの両方を確認するときに限る。
 
 ## Productionとデータの境界
 
