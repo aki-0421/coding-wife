@@ -565,6 +565,30 @@ describe("WorkspaceShell", () => {
     expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
   })
 
+  it("mutes sidebar icon controls and reserves the archive action width", () => {
+    const { container } = renderWorkspace()
+    const sidebar = container.querySelector(".workspace-sidebar")
+    if (!(sidebar instanceof HTMLElement)) {
+      throw new Error("Expected the workspace sidebar")
+    }
+
+    const iconButtons = sidebar.querySelectorAll<HTMLButtonElement>(
+      'button[data-size^="icon"]',
+    )
+    expect(iconButtons.length).toBeGreaterThan(0)
+    for (const button of iconButtons) {
+      expect(button).toHaveClass("text-muted-foreground")
+    }
+
+    const archiveButton = sidebar.querySelector<HTMLButtonElement>(
+      "button[data-workspace-archive]",
+    )
+    expect(archiveButton).not.toBeNull()
+    expect(archiveButton).toHaveClass("mr-xs", "size-6", "opacity-0")
+    expect(archiveButton).not.toHaveClass("absolute")
+    expect(archiveButton?.parentElement).toHaveClass("flex")
+  })
+
   it("keeps duplicate native close requests behind one safe cancellation", async () => {
     const lifecycle = appLifecycleHarness()
     const prepareAppQuit = vi.fn()
