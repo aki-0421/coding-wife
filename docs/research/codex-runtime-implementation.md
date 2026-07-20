@@ -24,7 +24,7 @@ read_when:
 5. raw reasoning、secret、home/workspaceのprivate absolute path、raw stderr、raw protocol payloadをWebView eventへ出さない。
 6. thread、turn、item、pending IDはopaque handleへ変換し、WebViewからraw App Server IDを参照できないようにする。
 7. support isolationは明示的なtool 0、cwdなし、filesystem/shell/MCPなしを証明できない限り`unavailable`である。現行実装のsupport capacityは0で、生成文を含まない決定的fallbackだけを返す。
-8. workspaceの絶対pathと明示Codex binary pathはapp-private recordにだけ保存する。WebViewはnative folder pickerが返すopaque workspace ID、alias、boolean preflightだけを受け取る。
+8. workspaceの絶対pathと明示Codex binary pathはapp-private recordにだけ保存する。WebViewはworkspaceについてnative folder pickerが返すopaque workspace ID、alias、boolean preflightだけを受け取る。Codex pathだけは利用者が設定formへ入力した値をbounded requestとしてRustへ渡せるが、canonical pathをresponse、snapshot、history、通常logへ返さない。
 9. thread開始・再開はresponseのmodel、canonical cwd、thread cwd、approval policy、sandbox type、ephemeral=falseを全て照合する。不足・不一致時はhandleを保存せずchildを停止する。
 10. pending responseはresponse variantと値をimmutable recordに対して検証してからatomicに消費する。invalid responseはpendingを残し、TypeScript側もpending kindとresponse typeを一致させてからsingle-claimする。
 11. native RUIが使えない場合のassistant完了文は`result`または`decision_request`のJSON全体だけを受理する。自由文、freeform、approval代替、不正optionは表示せずactive turnをinterruptする。
@@ -39,7 +39,11 @@ read_when:
 
 `VerifiedBinaryIdentity`はcanonical path、owner UID、device、inode、size、mtime秒・ナノ秒、SHA-256を一組として保持する。binaryはcurrent userまたはroot所有だけを許し、対象fileと親directory chainのsymlink・writable policyを検査する。version取得、schema生成、spawnの各境界で同じtupleを再検証し、spawn直後にも再検証する。差し替えを検知した場合はprocess groupを停止し、supervisorのbinary、schema、runtime cacheを全て破棄する。
 
+自動探索は明示app-private path、GUI processの`PATH`、default shellの`command -v codex`、`~/.local/bin`を含む既知install位置の順で行う。default shellはaccount情報または`SHELL`からabsolute executableを得て同じtrust検証を通し、interactive login commandを3秒以内、stdout/stderr各64KiB以内でprocess groupごと終了する。結果はtrim済みの単一absolute pathだけを受理する。初回setupまたはGeneralから受けたpathはUTF-8 absolute path 4,096 byte以下として一時的にIPC requestへ入るが、schema probe成功後のcanonical pathだけをSQLite `settings`のapp-private recordへ保存し、response、diagnostics、domain event、通常logへ返さない。設定解除はrecordを削除して自動探索へ戻し、実行中sessionには適用せず次のconnectから使う。
+
 probeの上限はstdout/stderr各1 MiB、絶対deadline 10秒、schema depth 16、file数2,048、1 file 8 MiB、合計64 MiBである。schema tree内のfile/directory symlinkとnon-regular fileは拒否する。capabilityはmethod文字列の存在ではなく、request/notification unionのsingleton method discriminant、params `$ref`、required field、response object shapeをJSONとして構造照合した場合だけ`Supported`にする。
+
+探索順やshell出力parserを変更した場合は`cargo test --manifest-path src-tauri/Cargo.toml codex::binary::tests`、app-private binary recordを変更した場合は`cargo test --manifest-path src-tauri/Cargo.toml private_codex_binary_setting`を実行する。readiness IPCまたは設定UIを変更した場合は`pnpm exec vitest run src/features/readiness/CodexBinaryPathSettings.test.tsx src/features/readiness/controller.test.ts src/features/readiness/SetupOverview.test.tsx --fileParallelism=false`を実行し、absolute path送信、canonical path非返却、自動検出復帰、直前snapshot保持を確認する。
 
 schema正本fixtureは`src-tauri/tests/fixtures/codex_schema_subset_v0_144_5.json`、process tree fixtureは`src-tauri/tests/fixtures/codex_process_tree_fixture.py`である。Codex CLI versionまたは利用fieldを変えるときはactual generated schemaから前者を更新し、required field削除、params ref差し替え、method重複、descriptionへの文字列移動をmutationしてfail closedを確認する。単なるmethod一覧fixtureへ戻してはならない。
 
@@ -51,7 +55,7 @@ probe失敗後のdiagnosticを調べるとき、以前の成功時の`cliVersion
 
 ## Workspaceとpublic contract境界
 
-`codex_pick_workspace`だけが新しいworkspaceをproduction登録できる。native pickerで選択したdirectoryをcanonicalizeし、Git marker、HEAD、owner、writable policyをRust内で検査してからsupervisorへ登録する。app-private workspace復元と明示binary復元はserializable IPC requestにせず、`AppPrivateWorkspaceRecord`と`AppPrivateBinaryRecord`からのみ適用する。
+`codex_pick_workspace`だけが新しいworkspaceをproduction登録できる。native pickerで選択したdirectoryをcanonicalizeし、Git marker、HEAD、owner、writable policyをRust内で検査してからsupervisorへ登録する。起動時のapp-private workspace復元と明示binary復元はserializable IPC requestにせず、`AppPrivateWorkspaceRecord`と`AppPrivateBinaryRecord`からのみ適用する。利用者が明示的に変更する`configure_codex_binary`だけは未検証pathをbounded requestとして受け、検証成功後に同じprivate recordへ変換する。
 
 public `WorkspaceRegistration`にraw pathを追加してはならない。`PendingRequestView`のapproval cardもraw command、cwd、environment ID、host、reasonを公開せず、versioned `ApprovalContext`のcategory、hashed/path alias、scope、risk、reversibility、recommendation、固定evidence codeだけを公開する。
 

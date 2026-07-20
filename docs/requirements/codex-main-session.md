@@ -68,7 +68,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `CODE-F-051` | アプリはCodex App Serverの利用可否を診断する | executable、initialize、protocol capability、login、model/listを順に確認し、失敗段階と回復操作を区別して表示する | Approved | 非該当 |
+| `CODE-F-051` | アプリはCodex App Serverの利用可否を診断する | executableは明示設定、GUI processの`PATH`、時間・出力上限を持つ利用者のdefault login shell、既知の安全なinstall位置の順で探索し、候補のcanonical path、所有者、書込権限、実行権限、version、hashをRustで検証する。その後initialize、protocol capability、login、model/listを順に確認し、失敗段階と回復操作を区別して表示する。利用者は初回setupとGeneral settingsでCodex executableの絶対pathを任意指定または自動検出へ戻すことができ、検証成功したcanonical pathだけをapp-private設定へ保存する | Approved | 非該当 |
 | `CODE-F-052` | main sessionは`gpt-5.6-sol`だけを使用する | thread/start payloadとheader表示が`gpt-5.6-sol`になり、UIまたは保存設定から別modelへ変更できない | Approved | 非該当 |
 | `CODE-F-053` | 利用者は利用可能なreasoning effortを選べる | `gpt-5.6-sol`のmodel/listで`low`と`max`がsupportedReasoningEffortsにある時だけFast=`low`、Max=`max`として表示・送信し、model、service tier、`ultra`をこの操作で変更しない | Approved | 非該当 |
 | `CODE-F-054` | appはactive workspaceのcwdでmain threadを開始する | canonical project rootとselected effortを使ってthreadを1件開始し、別workspace pathを使用しない | Approved | 非該当 |
@@ -127,6 +127,7 @@ read_when:
 | Composer | attachment | なし | 任意 | 10件、各25MiB、合計50MiB、regular readable file | 無効itemだけ拒否し他を保持 |
 | Composer | context | なし | 任意 | 10件、各1MiB text snapshot、sourceとtimestamp必須 | 無効snapshotを送信しない |
 | Composer | effort | Fast（`low`） | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | 対応値がなければSendを無効にし診断理由を表示 |
+| App setting | Codex executable path | 自動検出 | 任意 | UTF-8の絶対path、1〜4,096 byte、NULとcontrol不可。Rustでcanonicalize後にtrusted executable、`codex-cli` version、App Server schemaを検証し、成功時だけ保存する | 入力を保持し、safe codeをfield直下へ表示。以前の設定と実行中sessionは変更しない |
 | Decision | selected option | なし | 必須 | schema内optionまたはOther | card保持、回答未送信 |
 | Decision | Other text | 空 | 条件付き | trim後1〜2,000 Unicode scalar、NUL/その他control不可 | 入力保持、共通scalar countで送信無効 |
 
@@ -159,7 +160,7 @@ read_when:
 
 | 領域 | 要件 |
 |---|---|
-| セキュリティ | Codex authへ委任し、auth file/tokenを読まない。attachment/contextはsize/type/path検証する |
+| セキュリティ | Codex authへ委任し、auth file/tokenを読まない。Codex pathは設定requestにだけ一時保持し、canonical valueをWebView response、履歴、通常logへ返さない。default shellの探索結果もabsolute executable候補以外を破棄し、同じbinary trust検証を通す。attachment/contextはsize/type/path検証する |
 | 権限 | child processとstdioはRustだけが保持し、WebViewへprocess handleを渡さない |
 | プライバシー | raw reasoningを要求・表示・保存しない。prompt送信先をApp Serverに限定する |
 | 監査・ログ | turn ID、model、effort、decision/approval result、error code、verified commit correlationをredacted eventとして記録する。commit説明本文は記録しない |
