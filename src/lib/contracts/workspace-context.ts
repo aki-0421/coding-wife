@@ -22,6 +22,20 @@ export interface CharacterContext {
   readonly prohibitedExpressions: readonly string[]
 }
 
+export const bundledHiyoriCharacterContextPreset: CharacterContext = {
+  displayName: "桃瀬ひより",
+  tone: "warm",
+  toneNotes: "明るく親しみやすい口調で、相手を急かさず要点を簡潔に伝える。",
+  speechDensity: "key_events",
+  behavior:
+    "作業をそっと見守り、重要な変化や判断が必要な場面で声をかける。成功時は一緒に喜び、問題時は落ち着いて次の行動を示す。",
+  prohibitedExpressions: [
+    "利用者を責める表現",
+    "過度に馴れ馴れしい表現",
+    "不確かなことを断定する表現",
+  ],
+}
+
 export interface VersionedProjectContext {
   readonly schemaVersion: typeof workspaceContextSchemaVersion
   readonly projectId: string
@@ -33,6 +47,7 @@ export interface VersionedProjectContext {
 
 export interface VersionedCharacterContext {
   readonly schemaVersion: typeof workspaceContextSchemaVersion
+  readonly packId: string
   readonly version: number
   readonly contentHash: string
   readonly updatedAt: string
@@ -61,8 +76,14 @@ export interface ProjectSaveContextRequest {
 }
 
 export interface AppSaveCharacterContextRequest {
+  readonly packId: string
   readonly expectedVersion: number
   readonly context: CharacterContext
+}
+
+export interface CharacterGetContextRequest {
+  readonly packId: string
+  readonly displayName: string
 }
 
 export interface WorkspaceTurnContextSnapshot {
@@ -70,6 +91,7 @@ export interface WorkspaceTurnContextSnapshot {
   readonly workspaceId: string
   readonly projectVersion: number
   readonly projectHash: string
+  readonly characterPackId: string
   readonly characterVersion: number
   readonly characterHash: string
   readonly snapshotHash: string
@@ -100,6 +122,15 @@ export class WorkspaceContextContractError extends Error {
 
 const workspaceIdPattern = /^[A-Za-z0-9-]{1,128}$/u
 const hashPattern = /^[0-9a-f]{64}$/u
+const customCharacterPackIdPattern =
+  /^custom:[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u
+
+function isCharacterPackId(value: unknown): value is string {
+  return (
+    value === "builtin:hiyori_pro" ||
+    (typeof value === "string" && customCharacterPackIdPattern.test(value))
+  )
+}
 const policyPresentationPatterns = [
   /\b(?:while|when)\s+(?:the\s+)?tools?\s+(?:(?:are|remain)\s+)?(?:run|runs|running|active|working|executing)\b/giu,
   /\b(?:say|quote|mention)\s+(?:the\s+)?(?:phrase\s+|words?\s+)?(?:permissions?|approvals?|verification|checks?|safety|privacy|models?|tools?|git)(?:\s+(?:denied|granted|allowed|required|optional))?\b/giu,
@@ -463,12 +494,14 @@ function parseVersionedCharacter(value: unknown): VersionedCharacterContext {
     !isRecord(value) ||
     !hasExactKeys(value, [
       "schemaVersion",
+      "packId",
       "version",
       "contentHash",
       "updatedAt",
       "context",
     ]) ||
     value.schemaVersion !== workspaceContextSchemaVersion ||
+    !isCharacterPackId(value.packId) ||
     !isSafePositiveInteger(value.version) ||
     typeof value.contentHash !== "string" ||
     !hashPattern.test(value.contentHash) ||
@@ -478,6 +511,7 @@ function parseVersionedCharacter(value: unknown): VersionedCharacterContext {
   }
   return {
     schemaVersion: 1,
+    packId: value.packId,
     version: value.version,
     contentHash: value.contentHash,
     updatedAt: value.updatedAt,
@@ -534,6 +568,7 @@ export function parseWorkspaceTurnContextSnapshot(
       "workspaceId",
       "projectVersion",
       "projectHash",
+      "characterPackId",
       "characterVersion",
       "characterHash",
       "snapshotHash",
@@ -547,6 +582,7 @@ export function parseWorkspaceTurnContextSnapshot(
     !isSafePositiveInteger(value.projectVersion) ||
     typeof value.projectHash !== "string" ||
     !hashPattern.test(value.projectHash) ||
+    !isCharacterPackId(value.characterPackId) ||
     !isSafePositiveInteger(value.characterVersion) ||
     typeof value.characterHash !== "string" ||
     !hashPattern.test(value.characterHash) ||
@@ -561,6 +597,7 @@ export function parseWorkspaceTurnContextSnapshot(
     workspaceId: value.workspaceId,
     projectVersion: value.projectVersion,
     projectHash: value.projectHash,
+    characterPackId: value.characterPackId,
     characterVersion: value.characterVersion,
     characterHash: value.characterHash,
     snapshotHash: value.snapshotHash,

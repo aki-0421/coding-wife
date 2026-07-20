@@ -26,7 +26,7 @@ status: "Deprecated"
 
 ## 目的
 
-利用者がアプリの前提条件、表示、Context、companion、音声、support、履歴を一か所で理解し、安全な範囲で変更・診断・復旧できるようにする。秘密、absolute private path、raw support historyを表示せず、設定失敗がmain coding sessionや現在選択中のLive2D modelを壊さないことを保証する。
+利用者がアプリの前提条件、表示、Context、character、音声、support、履歴を一か所で理解し、安全な範囲で変更・診断・復旧できるようにする。秘密、absolute private path、raw support historyを表示せず、設定失敗がmain coding sessionや現在選択中のLive2D modelを壊さないことを保証する。
 
 ## 対象範囲
 
@@ -37,7 +37,7 @@ status: "Deprecated"
 | General           | native `AppPreferencesV1`のja/en、reduced motion、character visibility、version、Reset Preferences、reset UI state |
 | Project context   | active project/workspaceのgoal、constraints、definition of done、technical references                     |
 | Character context | name、tone、speech density、表現上の禁止事項。technical policyから分離                                    |
-| Companion         | bundled Hiyori、custom model import、inventory、preview、semantic mapping、hide、provenance、delete       |
+| Character         | bundled Hiyori、custom model import、inventory、preview、semantic mapping、hide、provenance、delete       |
 | Audio             | default off、macOS local `/usr/bin/say`、voice、rate、test、mute、text fallback                           |
 | Support           | global/role enable、commit explainer skill、active/queue/budget、usage、last error、policy固定値          |
 | Diagnostics       | OS/app、Codex、commit skill注入、read-only Git、DB、Live2D、audio、support、capability、error code、retry |
@@ -122,17 +122,17 @@ active project/workspaceを明示し、[S-002 Context subview](S-002_coding-work
 
 | field                  | 初期値                                                   | 制約                                          | 適用                         |
 | ---------------------- | -------------------------------------------------------- | --------------------------------------------- | ---------------------------- |
-| Display name           | `Sol`                                                    | 1〜40文字                                     | visible companion identity   |
+| Display name           | `Sol`                                                    | 1〜40文字                                     | visible character identity   |
 | Tone                   | concise / warm / neutralのallowlist + 0〜1,000文字補足   | 感情的強制や虚偽確信を要求できない            | assistant presentation       |
 | Speech density         | quiet / key events / detailed                            | audio eligibility上限を越えない               | visible transcript/audio候補 |
-| Companion behavior     | 0〜4,000文字のpresentation希望                           | technical policyを変更せず、inventory外cueはneutral | Live2D presentation          |
+| Character behavior     | 0〜4,000文字のpresentation希望                           | technical policyを変更せず、inventory外cueはneutral | Live2D presentation          |
 | Prohibited expressions | 0〜20項目、各1〜200                                      | safety/error/decisionの事実表示は抑止できない | output presentation          |
 
 全field・全配列itemの合計は12,000 Unicode scalarを上限とする。Character contextはpermission、model、tool、Git observer、commit skill、verification、approval、privacy、support capability、checkpoint policyを上書きできない。行頭・JSON key位置のtechnical policy key、override / bypass / disable / ignore、またはgrant / deny / allow / skip / avoid / never askとtechnical policy名を組み合わせた意味的な変更指示を保存前にrecord単位で拒否する。ja/en fixtureを同じ結果へ固定し、単なるpresentation説明はfalse positiveにしない。拒否内容はProject contextへ自動コピーしない。running turnには次turnから適用する。
 
 #### Context editor stateと競合復旧（廃止）
 
-旧workspace側editor entryと混在Settings間のcross-navigation契約は廃止した。現行UIではProject ContextをS-005のProjects detail、Character ContextをS-005のCharacter contextだけで編集し、workspace Settings tab自体を置かない。以下の状態表は旧画面の履歴であり、現行実装の正本にはしない。
+旧workspace側editor entryと混在Settings間のcross-navigation契約は廃止した。現行UIではProject ContextをS-005のProjects detail、Character ContextをS-005のCharacter detailだけで編集し、workspace Settings tab自体を置かない。以下の状態表は旧画面の履歴であり、現行実装の正本にはしない。
 
 | 状態 | 表示 | 操作・focus |
 |---|---|---|
@@ -149,7 +149,7 @@ field error stateは`field + safe reason key + native code`を保持する。fie
 
 workspace切替時は旧workspaceのpending load/save responseをgenerationで無効化し、新workspaceのfieldへ適用しない。再起動後はSQLiteの保存済みrecordだけを復元し、未保存draftを保存済みと表示しない。Sendはclick/shortcut受付時にProject / Characterのversionとhashを一つのimmutable request snapshotへ固定し、実行中のturnへ後から注入しない。snapshot失敗時は該当field errorまたはpreflight errorを表示し、root/referenceを再Saveせずに暗黙採用しない。demoでもnativeと同じcanonical content digestを短縮表示する。
 
-### Companion
+### Character
 
 #### bundled Hiyori
 
@@ -158,7 +158,7 @@ build時の入力はrepositoryの`tmp/hiyori_pro`とし、release resourceには
 - `hiyori_pro_t11.model3.json`、`.moc3`、texture 2件、physics、pose、cdi、motion 10件。
 - `.cmo3`、`.can3`、`.DS_Store`、authoring cache、不要source assetは配布へ含めない。
 - install後はimmutable `builtin:hiyori_pro` packとしてapp resourceから解決し、sourceの`tmp/` pathをruntime/UIへ渡さない。
-- pack name、creator、source notice、bundled version、manifest hashへCompanion sectionから到達できる。
+- pack name、creator、source notice、bundled version、manifest hashへCharacter sectionから到達できる。
 
 #### library
 
@@ -302,7 +302,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | 再起動復旧            | save/import/delete/migrationが中断                       | last durable settings、quarantine cleanup、Interrupted operation、backup | diagnose、retry、discard quarantine                        | integrity/fingerprint確定    |
 | read-only recovery    | DB corruption/migration rollback                         | Diagnostics/History、backup、error code、Gitは不変                       | copy sanitized diagnostic、Quit                            | explicit successful recovery |
 | local TTS unavailable | binary metadata/voice/audio device検証失敗               | native typed reasonとcaptionを即時terminal表示しTTS off相当。voice list、保存値、未保存voice/rate draftを維持 | Recheck/Retry voices/Test/Mute                             | 全preflight成功              |
-| companion fallback    | pack/render failure                                      | current fallback level、Hiyori/text-only、Chat継続                       | Retry/Select/Hide                                          | first frame/state test成功   |
+| character fallback    | pack/render failure                                      | current fallback level、Hiyori/text-only、Chat継続                       | Retry/Select/Hide                                          | first frame/state test成功   |
 | preference recovery   | `AppPreferencesV1` missing/corrupt/unknown version       | safe default、sanitized code、`Reset Preferences`。raw値を表示しない     | Reset、Diagnostics、影響外section                          | atomic save成功              |
 | diagnostics rechecking | Recheck中                                                | 前snapshot + Stale、check progress、UTC checkedAt、`aria-busy`            | Cancel、影響外section、copyは前snapshot                    | 同一snapshotのterminal結果   |
 | diagnostics unavailable | native service/checkが結果を返せない                    | `Unavailable`、safe code、localized recovery。demo Readyを表示しない      | Recheck、Settings内回復                                    | native terminal result       |
@@ -450,7 +450,7 @@ history削除dialogはworkspace名、削除するapp data、残るGit data、不
 | `SUP-F-062`〜`SUP-F-078`                                        | concurrency、budget、usage、commit explainer skill、controller、toggle、non-persistence、model policy | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-072`, `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-090`〜`GIT-F-096` | read-only Git observer、main/explainer skill診断、background生成と明示presentation | [git-review-harness](../requirements/git-review-harness.md) |
 | `HIST-F-049`〜`HIST-F-056`, `HIST-F-058`, `HIST-F-059`          | history削除、migration、corruption、writer、schema、support metadata、durability表示      | [activity-history](../requirements/activity-history.md)                       |
-| `LIVE-F-055`〜`LIVE-F-081`                                      | bundled Hiyori、renderer、import、mapping、delete、performance                            | [live2d-companion](../requirements/live2d-companion.md)                       |
+| `LIVE-F-055`〜`LIVE-F-081`                                      | bundled Hiyori、renderer、import、mapping、delete、performance                            | [live2d-character](../requirements/live2d-character.md)                       |
 | `NARR-F-058`, `NARR-F-064`〜`NARR-F-089` | caption-first、default off、local binary/voice/test、explicit presentation、mute、dismiss/cancel、privacy、recovery、no network/microphone/audio file | [audio-commentary](../requirements/audio-commentary.md) |
 | `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076`              | navigation、versioned native preference、a11y、lifecycle、native readiness、performance   | [desktop-shell](../requirements/desktop-shell.md)                             |
 

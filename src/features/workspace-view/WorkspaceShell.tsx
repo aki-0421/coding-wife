@@ -133,6 +133,7 @@ export function WorkspaceShell({
   const contextModel = useEditableSettingsContext(
     adapter,
     appSettingsProjectId ?? "__no_project__",
+    null,
   )
   const characterRuntimeStore = useCharacterRuntimeStatusStore()
   const characterRuntimeSnapshot = useCharacterRuntimeStatus(
@@ -167,7 +168,7 @@ export function WorkspaceShell({
     view.turnState === "stopping" ||
     view.codex.phase === "running" ||
     view.codex.phase === "stopping"
-  const companionState = !connected
+  const characterState = !connected
     ? "disconnected"
     : view.codex.pendingRequests.length > 0
       ? "waiting_for_user"
@@ -767,6 +768,7 @@ export function WorkspaceShell({
       {appSettingsOpen ? (
         <AppSettingsView
           characterRuntime={characterRuntime}
+          adapter={adapter}
           contextModel={contextModel}
           copy={copy}
           muted={view.muted}
@@ -796,8 +798,8 @@ export function WorkspaceShell({
       {selectedWorkspace ? (
         <Tabs
           className="workspace-tabs grid"
-          data-companion-active="true"
-          data-companion-layout=""
+          data-character-active="true"
+          data-character-layout=""
           data-workspace-tab={view.activeTab}
           hidden={appSettingsOpen}
           onValueChange={setActiveTab}
@@ -826,7 +828,7 @@ export function WorkspaceShell({
             value="chat"
           >
             <ChatView
-              companionState={companionState}
+              characterState={characterState}
               connected={connected}
               copy={copy}
               draft={view.selectedDraft}
@@ -884,7 +886,7 @@ export function WorkspaceShell({
                   workspaceGeneration !== null)
               }
               commitExplanationController={commitExplanationController}
-              companionVisible
+              characterVisible
               locale={locale}
               onBackToChat={() => view.setActiveTab("chat")}
               onCommitSelectionChange={dismissCommitPresentation}
@@ -907,7 +909,7 @@ export function WorkspaceShell({
               characterRuntimeStore.retry(selectedWorkspace.id)
             }}
             reducedMotion={reducedMotion}
-            state={companionState}
+            state={characterState}
             visible={!appSettingsOpen}
             workspaceId={selectedWorkspace.id}
             {...(characterRenderer ? { renderer: characterRenderer } : {})}

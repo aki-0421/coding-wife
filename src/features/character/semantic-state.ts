@@ -1,7 +1,7 @@
 import type { CharacterState } from "@/features/character/model"
-import type { CompanionSemanticState } from "@/features/workspace-view/types"
+import type { CharacterSemanticState } from "@/features/workspace-view/types"
 
-export const characterStateByCompanionState = {
+export const characterStateBySemanticState = {
   idle: "idle",
   thinking: "thinking",
   acting: "acting",
@@ -10,10 +10,10 @@ export const characterStateByCompanionState = {
   error: "error",
   completed: "completed",
   disconnected: "disconnected",
-} as const satisfies Readonly<Record<CompanionSemanticState, CharacterState>>
+} as const satisfies Readonly<Record<CharacterSemanticState, CharacterState>>
 
-export function mapCompanionStateToCharacterState(
-  state: CompanionSemanticState,
+export function mapSemanticStateToCharacterState(
+  state: CharacterSemanticState,
 ): CharacterState {
-  return characterStateByCompanionState[state]
+  return characterStateBySemanticState[state]
 }

@@ -290,7 +290,7 @@ describe("final bilingual App acceptance", () => {
         ],
       })
       expect(workspace.sentTurns[0]?.editableContextSnapshot.project.goal).toBe(
-        "Ship a trustworthy local coding companion.",
+        "Ship a trustworthy local coding workspace.",
       )
       const rejectedAttachment = await workspace.registerAttachmentPaths(
         workspace.activeWorkspaceId,

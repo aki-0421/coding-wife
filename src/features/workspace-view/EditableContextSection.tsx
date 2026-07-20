@@ -142,10 +142,17 @@ function SectionStatus({
   return null
 }
 
-function LoadingContext({ copy }: { readonly copy: WorkspaceCopy }) {
+function LoadingContext({
+  copy,
+  section,
+}: Pick<EditableContextSectionProps, "copy" | "section">) {
   return (
     <div
-      aria-label={copy.contextView.loading}
+      aria-label={
+        section === "project"
+          ? copy.contextView.loadingProject
+          : copy.contextView.loadingCharacter
+      }
       className="flex flex-col gap-lg"
       role="status"
     >
@@ -230,7 +237,7 @@ export function EditableContextSection({
   }, [state.persisted])
 
   if (state.status === "loading" || state.persisted === null) {
-    return <LoadingContext copy={copy} />
+    return <LoadingContext copy={copy} section={section} />
   }
 
   const busy = state.status === "saving"
@@ -269,12 +276,16 @@ export function EditableContextSection({
           {state.dirty ? (
             <Badge variant="running">{copy.contextView.unsaved}</Badge>
           ) : null}
-          <Badge variant="outline">
-            {copy.contextView.version} {metadata?.version ?? "—"}
-          </Badge>
-          <Badge className="font-mono" variant="outline">
-            {metadata?.hash ?? "—"}
-          </Badge>
+          {project ? (
+            <>
+              <Badge variant="outline">
+                {copy.contextView.version} {metadata?.version ?? "—"}
+              </Badge>
+              <Badge className="font-mono" variant="outline">
+                {metadata?.hash ?? "—"}
+              </Badge>
+            </>
+          ) : null}
         </div>
       </div>
 

@@ -14,6 +14,7 @@ import {
   parseWorkspaceTurnContextSnapshot,
   type VersionedCharacterContext,
   type VersionedProjectContext,
+  type CharacterGetContextRequest,
   type ProjectGetContextRequest,
   type ProjectSaveContextRequest,
   type WorkspaceLoadEditableContextRequest,
@@ -330,7 +331,7 @@ export interface WorkspaceHistoryRequestMap {
   workspace_save_context_snapshot: WorkspaceSaveContextRequest
   project_context_get: ProjectGetContextRequest
   project_context_save: ProjectSaveContextRequest
-  app_character_context_get: undefined
+  app_character_context_get: CharacterGetContextRequest
   app_character_context_save: AppSaveCharacterContextRequest
   workspace_get_turn_context_snapshot: WorkspaceLoadEditableContextRequest
   workspace_list_timeline: WorkspaceTimelineRequest

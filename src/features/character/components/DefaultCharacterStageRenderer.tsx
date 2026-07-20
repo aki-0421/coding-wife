@@ -11,32 +11,32 @@ import {
 } from "@/features/character/library/provider"
 import { characterLibraryScopeId } from "@/features/character/library/contracts"
 import { useCharacterRuntimeStatusStore } from "@/features/character/runtime-status"
-import { mapCompanionStateToCharacterState } from "@/features/character/semantic-state"
+import { mapSemanticStateToCharacterState } from "@/features/character/semantic-state"
 import {
   mapCharacterStateToSemanticState,
   resolveSemanticCue,
 } from "@/features/character/semantic-mapping"
 import type {
   CharacterStageRenderProps,
-  CompanionSemanticState,
+  CharacterSemanticState,
 } from "@/features/workspace-view/types"
 
 interface CharacterPresentation {
   readonly workspaceId: string
-  readonly semanticState: CompanionSemanticState
+  readonly semanticState: CharacterSemanticState
   readonly characterState: CharacterState
   readonly generation: number
 }
 
 function createPresentation(
   workspaceId: string,
-  semanticState: CompanionSemanticState,
+  semanticState: CharacterSemanticState,
   generation: number,
 ): CharacterPresentation {
   return {
     workspaceId,
     semanticState,
-    characterState: mapCompanionStateToCharacterState(semanticState),
+    characterState: mapSemanticStateToCharacterState(semanticState),
     generation,
   }
 }

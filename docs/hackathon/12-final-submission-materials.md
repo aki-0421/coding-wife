@@ -87,7 +87,7 @@ The core workflow is:
 5. Inspect the completed commit through a separate read-only Git evidence service.
 6. Request a structured commit explanation; captions and optional local speech appear only after an explicit presentation action.
 
-Workspace metadata, drafts, context versions, and semantic events are retained in local SQLite. The selected Git repository remains the source of truth for the actual code. The included Live2D companion communicates status and optional speech, but it has no authority over technical policy, safety, verification, or approval.
+Workspace metadata, drafts, context versions, and semantic events are retained in local SQLite. The selected Git repository remains the source of truth for the actual code. The included Live2D character communicates status and optional speech, but it has no authority over technical policy, safety, verification, or approval.
 
 ### Why GPT-5.6 Sol is essential
 
@@ -105,7 +105,7 @@ Humans retained the consequential decisions. We chose the authenticated local Co
 
 Coding Wife turns an agentic coding session into a reviewable work record: one place for the request, plan, bounded decisions, verification, commit evidence, and recovery state. This can reduce the manual reconstruction developers perform before they trust or continue long-running work. The impact has not yet been measured in a user study, so the current claim is a concrete workflow improvement rather than a quantified productivity result.
 
-The distinctive combination is a local developer command center with normalized semantic evidence, durable recovery, explicit intervention, a read-only Git review boundary, and a separately gated explanation layer. The Live2D companion adds presence and status without becoming a policy source or hiding the equivalent text UI.
+The distinctive combination is a local developer command center with normalized semantic evidence, durable recovery, explicit intervention, a read-only Git review boundary, and a separately gated explanation layer. The Live2D character adds presence and status without becoming a policy source or hiding the equivalent text UI.
 
 ### Honest limitations
 
@@ -217,7 +217,7 @@ Start from a clean frozen commit, confirm `git status --short` has no output, ru
 |---:|---:|---|---|
 | 0:00–0:08 | 8s | Clean title card over the English workspace UI. Show `Coding Wife` and `Developer Tools candidate`; do not show an unconfirmed award or track badge. | “Coding Wife is a local macOS command center for developers supervising long-running Codex work.” |
 | 0:08–0:20 | 12s | Rapid, readable cuts within the app: chat, activity evidence, a decision, and Commit. Keep all text sanitized. | “Today, developers reconstruct a session across chat, terminal output, file changes, tests, and Git. That makes it easy to miss what changed and where human judgment is still required.” |
-| 0:20–0:32 | 12s | Settle on the full workspace with the timeline, composer, tabs, and companion visible. | “Our Developer Tools project turns one coding session into a durable bilingual workspace with structured evidence, bounded decisions, and inspectable commits.” |
+| 0:20–0:32 | 12s | Settle on the full workspace with the timeline, composer, tabs, and character visible. | “Our Developer Tools project turns one coding session into a durable bilingual workspace with structured evidence, bounded decisions, and inspectable commits.” |
 | 0:32–0:45 | 13s | Start the verified native run on a disposable repository. Show sanitized preflight evidence containing `gpt-5.6-sol`; hide local paths beyond the fixture name. | “This is the production native path on a disposable repository. Preflight verifies the authenticated local Codex installation, repository boundary, and exact model: GPT-5.6 Sol.” |
 | 0:45–0:59 | 14s | Enter the README Usage task and send it. Briefly show the selected Fast or Max effort and the immutable context indicator. | “I ask it to update the README, run a relevant check, and commit. Coding Wife sends the instruction with a versioned, validated context snapshot, never generic shell access from the WebView.” |
 | 0:59–1:14 | 15s | Show the plan and bounded decision. Choose **One bounded unit** and submit the answer. | “GPT-5.6 Sol interprets the unfamiliar repository, builds a plan, and pauses at a bounded decision. I choose one bounded unit; the agent cannot silently decide for me.” |

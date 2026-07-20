@@ -19,7 +19,7 @@ Developers supervising an autonomous coding session must correlate chat, tool ou
 
 ## Solution
 
-Coding Wife brings that workflow into one bilingual desktop workspace. A local Codex App Server runs `gpt-5.6-sol`; the app converts its activity into a structured, redacted timeline, persists recoverable workspace context in SQLite, presents bounded decisions, and exposes read-only commit evidence. A Live2D companion communicates status and optional local speech without becoming a source of technical or safety authority.
+Coding Wife brings that workflow into one bilingual desktop workspace. A local Codex App Server runs `gpt-5.6-sol`; the app converts its activity into a structured, redacted timeline, persists recoverable workspace context in SQLite, presents bounded decisions, and exposes read-only commit evidence. A Live2D character communicates status and optional local speech without becoming a source of technical or safety authority.
 
 ## What it does
 
@@ -292,7 +292,7 @@ The release workflow applies an ad-hoc integrity seal and verifies every resourc
 | OpenAI Codex / `gpt-5.6-sol`      | Production coding and bounded commit explanation | Uses the judge's compatible authenticated local Codex configuration; no app API key is bundled      |
 | Locked npm and Cargo dependencies | Conservative declared production/native closure  | [Generated inventory and attribution notice](src-tauri/resources/legal/THIRD-PARTY-DEPENDENCIES.md) |
 | Live2D Cubism SDK for Web 5-r.5   | Character rendering                              | [Packaged Live2D third-party notice index](src-tauri/resources/legal/THIRD-PARTY-NOTICES.md)        |
-| Bundled Hiyori model              | Default companion                                | [Byte-preserved model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)             |
+| Bundled Hiyori model              | Default character                                | [Byte-preserved model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)             |
 
 The generated inventory conservatively covers all 395 packages in the pnpm declared production closure and the 235 effective Cargo normal dependencies reported for `aarch64-apple-darwin`; it is not a claim that every npm package contributed bytes to the final Vite bundle. Generation is offline, resolves every Cargo tree display to one exact metadata package ID, parses license expressions with a strict SPDX grammar, and fails when either lock changes, a committed notice is stale, a Cargo identity is ambiguous, an expression is malformed, or required source, integrity/checksum, license, or attribution metadata is missing, unknown, or forbidden. The existing Live2D and Hiyori terms remain byte-verified and linked from the same packaged index.
 

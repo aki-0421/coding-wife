@@ -157,7 +157,7 @@ describe("CharacterStageSlot narration", () => {
     })
   })
 
-  it("routes the companion mute control through persisted narration settings", async () => {
+  it("routes the character mute control through persisted narration settings", async () => {
     const user = userEvent.setup()
     const onMutedChange = vi.fn()
     const gateway = new DemoNarrationGateway()
@@ -169,7 +169,7 @@ describe("CharacterStageSlot narration", () => {
     renderStage({ controller, gateway, renderer, onMutedChange })
 
     await user.click(
-      screen.getByRole("button", { name: "コンパニオンをミュート" }),
+      screen.getByRole("button", { name: "キャラクターをミュート" }),
     )
     await waitFor(() =>
       expect(controller.getSnapshot().settingsSnapshot?.settings.muted).toBe(

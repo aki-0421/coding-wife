@@ -112,7 +112,7 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 | standard sidebar | 255.04px | 1470px基準の左rail |
 | header | 81px | breadcrumb 40.5px + tabs 40.5px |
 | standard Chat | 607.11px | S-002標準 |
-| standard Companion | 607.84px | S-002標準 |
+| standard Character | 607.84px | S-002標準 |
 | sidebar footer | 40.5px | gear固定領域 |
 | workspace row | 242.25×49.5px | sidebar 255.04px時 |
 | content inset | 18px | timeline/composer左右 |
@@ -126,12 +126,12 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 
 | effective width | shell | S-002 body | tab / control |
 |---:|---|---|---|
-| 1470px以上 | sidebar 255.04px固定。超過幅はmainへ与える | Chat/CommitとCompanionを同じ1:1基準で拡張 | tab row固定、長値ellipsis |
-| 1280〜1469px | sidebar 255.04px固定 | 残幅をprimary work surface/Companionへ全作業tab共通の比率で配分 | composerはChat内で左右18px |
-| 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | primaryを最低520px、Companionへ残幅。全作業tabで同じ配分を維持 | tabsはhorizontal scroll、footer controlsはwrap |
-| 200% text zoom | 64px rail + drawerを使用 | Companionをhide可能、Chat/decisionを優先 | labelを縮小せずwrap/overflow menu |
+| 1470px以上 | sidebar 255.04px固定。超過幅はmainへ与える | Chat/CommitとCharacterを同じ1:1基準で拡張 | tab row固定、長値ellipsis |
+| 1280〜1469px | sidebar 255.04px固定 | 残幅をprimary work surface/Characterへ全作業tab共通の比率で配分 | composerはChat内で左右18px |
+| 960〜1279px | 64px icon rail。workspace listはbuttonからportal drawer | primaryを最低520px、Characterへ残幅。全作業tabで同じ配分を維持 | tabsはhorizontal scroll、footer controlsはwrap |
+| 200% text zoom | 64px rail + drawerを使用 | Characterをhide可能、Chat/decisionを優先 | labelを縮小せずwrap/overflow menu |
 
-選択workspaceのChat、Commitは同じCompanion instanceを右paneへ常時表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCompanionを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005はCompanionを表示せずsetting formを全幅で構成する。Chat、CommitとCompanionの間へdividerまたは別cardを置かない。
+選択workspaceのChat、Commitは同じCharacter instanceを右paneへ常時表示し、同じwindow geometryでtabを切り替えた時のpane幅差を1 CSS px以内にする。S-003はCharacterを縮小せず、commit listを非modal drawerへ移してevidence detailを確保する。S-005はCharacterを表示せずsetting formを全幅で構成する。Chat、CommitとCharacterの間へdividerまたは別cardを置かない。
 
 ## surface、文字、motion
 
@@ -163,7 +163,7 @@ shadcnはinteractionとkeyboard behaviorだけに使う。shell、sidebar、even
 | 領域 | scroll owner | 固定要素 | 復元key |
 |---|---|---|---|
 | workspace sidebar | status-group list | native titlebar safe area、heading actions、gear footer | workspace collection + filter |
-| S-002 | event timeline | header、composer、Companion mute | workspace ID + Chat tab |
+| S-002 | event timeline | header、composer、Character mute | workspace ID + Chat tab |
 | S-003 | checkpoint/event listとdetailを別scroll | header、summary/filter | workspace ID + selected evidence |
 | S-005 | app settings main panel | app settings header、section navigation | selected app settings section |
 | portal | popover/dialog自身 | trigger位置 | open中だけ。route変更で閉じる |
@@ -178,7 +178,7 @@ wheel/trackpad eventを親へ二重伝播させない。timelineがbottomから4
 2. sidebar heading actions、workspace groups/items、gear。
 3. active viewのheading、filter、primary content。
 4. composerまたは画面固有action。
-5. Companionのmute/hide、visible caption。
+5. Characterのmute/hide、visible caption。
 
 route遷移後は画面h1または最初の回復操作へfocusを置く。通常のworkspace切替後は直前の領域を保ち、消失した要素へfocusがあった場合だけactive view headingへ移す。active/pending turn中の切替はnew selectionを保留し、`戻る / Back`を初期focusとするtrap dialogを使う。成功後はnew workspaceのactive view heading、Cancel/失敗後はold workspaceの起点itemまたはSendへfocusを返す。popover/dialogを閉じるとexact triggerへ戻す。blocking decisionはdialog focus trapを使わず、decision headingから操作までをDOM上で連続させ、背景のSendをdisabledにする。
 
@@ -245,7 +245,7 @@ loading中に最終dataがある場合は前回dataを薄く残し、全画面sp
 | `AppPreferencesV2` (`locale`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | missing/corrupt/unknown versionだけをsafe defaultへfail closed |
 | project/workspace/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
 | Project context | Rust管理SQLiteのProject ID-scoped record | App settings project detailのexpected-version save | project detailまたは同Project IDのworkspace turn開始 | project登録解除契約 | optimistic conflict |
-| app-global Character context | Rust管理SQLite singleton record | App settingsのexpected-version save | 全workspaceへ同じversion/hashを復元 | app data reset契約 |
+| pack-scoped Character context | Rust管理SQLiteのopaque pack ID-scoped record | App settings > Character detailのexpected-version save | 選択packのversion/hashを全workspaceの次turnへ復元 | app data reset契約 |
 | repository identity/health snapshot | Rust管理SQLite + read-only Git再検査 | 登録、window focus、selection、Send直前 | row/headerへ復元後にfreshness再検査 | project登録解除 |
 | normalized event / review pack | append-only SQLite + hash artifact | redaction/schema合格後 | sequence順に再構築 | workspace history明示削除 |
 | Git object / source | repository | appはread-only観測だけを保存 | Gitを正本として再診断 | appから変更・自動削除しない |
@@ -308,14 +308,14 @@ agent-browserで1470×836、1280×800、960×640、200% text zoom、reduced moti
 | `WORK-F-056`〜`WORK-F-066` | cancel/unregister/switch、workspace continuity、repository health/repair | [workspace-sessions](../requirements/workspace-sessions.md) |
 | `CODE-F-073`〜`CODE-F-076` | stop、crash、auth、stale event | [codex-main-session](../requirements/codex-main-session.md) |
 | `HIST-F-037`〜`HIST-F-057` | local persistence、redaction、migration、recovery | [activity-history](../requirements/activity-history.md) |
-| `LIVE-F-058`〜`LIVE-F-067`, `LIVE-F-075`, `LIVE-F-077`, `LIVE-F-078` | app-global selection、semantic mapping、single canvas、text/reduced/static fallback | [live2d-companion](../requirements/live2d-companion.md) |
+| `LIVE-F-058`〜`LIVE-F-067`, `LIVE-F-075`, `LIVE-F-077`, `LIVE-F-078` | app-global selection、semantic mapping、single canvas、text/reduced/static fallback | [live2d-character](../requirements/live2d-character.md) |
 | `NARR-F-064`〜`NARR-F-089` | default off、secret、mute、explicit presentation、dismiss/cancel分離、fallback、microphone禁止 | [audio-commentary](../requirements/audio-commentary.md) |
 
 ## 未確定事項
 
 | 論点 | 初期判断 | 確認事項 | 着手ブロック |
 |---|---|---|---|
-| 1470px超の最大幅 | sidebar固定、S-002のChat/Companionを1:1で拡張する | 1728px visual QAでline lengthを確認する | いいえ |
+| 1470px超の最大幅 | sidebar固定、S-002のChat/Characterを1:1で拡張する | 1728px visual QAでline lengthを確認する | いいえ |
 | Intel Mac | MVP artifactはApple Siliconだけ | release工程でuniversal build時間を記録する | いいえ |
 | OS notification | MVPはapp内statusだけ | demo後に需要を計測する | いいえ |
 

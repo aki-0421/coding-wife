@@ -89,6 +89,7 @@ function contextSnapshot(): WorkspaceTurnContextSnapshot {
     projectVersion: 1,
     projectHash:
       "e0da727f2381a1c290ddcb74bdb52b44b0ec890559443d795f29731d68fe1323",
+    characterPackId: "builtin:hiyori_pro",
     characterVersion: 1,
     characterHash:
       "0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c",

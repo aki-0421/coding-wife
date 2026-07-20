@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  characterStateByCompanionState,
-  mapCompanionStateToCharacterState,
+  characterStateBySemanticState,
+  mapSemanticStateToCharacterState,
 } from "@/features/character/semantic-state"
-import type { CompanionSemanticState } from "@/features/workspace-view/types"
+import type { CharacterSemanticState } from "@/features/workspace-view/types"
 
-describe("companion semantic state mapping", () => {
+describe("character semantic state mapping", () => {
   it("maps every workspace state to a deterministic character state", () => {
     const expected = {
       idle: "idle",
@@ -18,12 +18,12 @@ describe("companion semantic state mapping", () => {
       completed: "completed",
       disconnected: "disconnected",
     } as const satisfies Readonly<
-      Record<CompanionSemanticState, CompanionSemanticState>
+      Record<CharacterSemanticState, CharacterSemanticState>
     >
 
-    expect(characterStateByCompanionState).toEqual(expected)
-    for (const state of Object.keys(expected) as CompanionSemanticState[]) {
-      expect(mapCompanionStateToCharacterState(state)).toBe(expected[state])
+    expect(characterStateBySemanticState).toEqual(expected)
+    for (const state of Object.keys(expected) as CharacterSemanticState[]) {
+      expect(mapSemanticStateToCharacterState(state)).toBe(expected[state])
     }
   })
 })

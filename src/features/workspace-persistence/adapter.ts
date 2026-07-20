@@ -371,10 +371,13 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
     })
   }
 
-  loadCharacterContext(): Promise<VersionedCharacterContext> {
+  loadCharacterContext(
+    packId: string,
+    displayName: string,
+  ): Promise<VersionedCharacterContext> {
     return this.transport.request(
       workspaceHistoryCommands.getCharacterContext,
-      undefined,
+      { packId, displayName },
     )
   }
 
@@ -391,12 +394,13 @@ export class PersistentWorkspaceViewAdapter implements WorkspaceViewAdapter {
   }
 
   saveCharacterContext(
+    packId: string,
     expectedVersion: number,
     context: CharacterContext,
   ): Promise<VersionedCharacterContext> {
     return this.transport.request(
       workspaceHistoryCommands.saveCharacterContext,
-      { expectedVersion, context },
+      { packId, expectedVersion, context },
     )
   }
 

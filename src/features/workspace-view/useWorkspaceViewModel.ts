@@ -5,7 +5,10 @@ import type {
   AttachmentRegistrationResponse,
   PendingRequestView,
 } from "@/lib/contracts"
-import type { WorkspaceTurnContextSnapshot } from "@/lib/contracts/workspace-context"
+import {
+  bundledHiyoriCharacterContextPreset,
+  type WorkspaceTurnContextSnapshot,
+} from "@/lib/contracts/workspace-context"
 
 import { projectWorkspaceNavigation } from "@/features/workspace-view/workspace-navigation"
 import type {
@@ -33,7 +36,7 @@ const emptyDraft: WorkspaceDraft = {
 const defaultProjectHash =
   "e0da727f2381a1c290ddcb74bdb52b44b0ec890559443d795f29731d68fe1323"
 const defaultCharacterHash =
-  "0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c"
+  "7607f6f22a12f0abed924b078a0e1b202c87e993d67f4346a0c0a2682a1004af"
 
 function projectIdForWorkspace(workspace: WorkspaceRecord): string {
   return workspace.projectId ?? `legacy:${workspace.repository}`
@@ -67,10 +70,11 @@ function fallbackContextSnapshot(
     workspaceId,
     projectVersion: 1,
     projectHash: defaultProjectHash,
+    characterPackId: "builtin:hiyori_pro",
     characterVersion: 1,
     characterHash: defaultCharacterHash,
     snapshotHash:
-      "c84d287d3d716df45e08d627bb15ed4b94e27a9eebc257d635c889cfd6ac7365",
+      "87bd96621876045566d8d24c4fb7c54f98dd5c2958d1c159b407b68f19a539e2",
     capturedAt: new Date(0).toISOString(),
     project: {
       goal: "",
@@ -79,14 +83,7 @@ function fallbackContextSnapshot(
       technicalReferences: [],
       userNotes: "",
     },
-    character: {
-      displayName: "Sol",
-      tone: "neutral",
-      toneNotes: "",
-      speechDensity: "key_events",
-      behavior: "",
-      prohibitedExpressions: [],
-    },
+    character: bundledHiyoriCharacterContextPreset,
   }
 }
 

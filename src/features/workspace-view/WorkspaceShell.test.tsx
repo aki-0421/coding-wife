@@ -476,7 +476,7 @@ describe("WorkspaceShell", () => {
       name: "Backlog(0)",
     })
     const selectedWorkspace = within(navigation).getByRole("button", {
-      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+      name: /feature\/live2d-character, aki-0421\/coding-wife/,
     })
 
     expect(doneToggle).toHaveAttribute("aria-expanded", "true")
@@ -545,7 +545,7 @@ describe("WorkspaceShell", () => {
       name: "main, aki-0421/coding-wife, Done",
     })
     const selectedWorkspace = within(navigation).getByRole("button", {
-      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+      name: /feature\/live2d-character, aki-0421\/coding-wife/,
     })
 
     expect(screen.getByRole("heading", { name: "Workspaces" })).toHaveClass(
@@ -568,7 +568,7 @@ describe("WorkspaceShell", () => {
       doneWorkspace.querySelector('[data-repository-avatar="github"]'),
     ).toHaveAttribute("data-github-owner", "aki-0421")
     expect(
-      within(selectedWorkspace).getByText("feature/live2d-companion"),
+      within(selectedWorkspace).getByText("feature/live2d-character"),
     ).toHaveClass("text-sidebar-item", "text-text-strong")
     expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
   })
@@ -1006,7 +1006,7 @@ describe("WorkspaceShell", () => {
 
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+        name: /feature\/live2d-character, aki-0421\/coding-wife/,
       }),
     )
     expect(composer).toHaveValue("Keep this draft with the Live2D workspace")
@@ -1421,17 +1421,12 @@ describe("WorkspaceShell", () => {
     expect(
       screen.queryByRole("button", { name: "Back to workspace" }),
     ).toBeNull()
-    expect(
-      screen.queryByText(
-        "Character, companion, preferences, and diagnostics shared by every project.",
-      ),
-    ).toBeNull()
     expect(appSettingsButton()).toHaveAttribute("aria-current", "page")
     expect(screen.getAllByRole("button", { name: "General" })[0]).toBeVisible()
     expect(
-      screen.getByRole("button", { name: "Character context" }),
-    ).toBeVisible()
-    expect(screen.getByRole("button", { name: "Companion" })).toBeVisible()
+      screen.queryByRole("button", { name: "Character context" }),
+    ).toBeNull()
+    expect(screen.getByRole("button", { name: "Character" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Audio" })).toBeVisible()
     expect(screen.queryByRole("button", { name: "Support" })).toBeNull()
     expect(screen.getByRole("button", { name: "Diagnostics" })).toBeVisible()
@@ -1457,6 +1452,41 @@ describe("WorkspaceShell", () => {
     expect(screen.getByRole("tab", { name: /Chat/ })).toBeVisible()
     expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull()
     expect(selectedWorkspaceButton()).toHaveFocus()
+  })
+
+  it("edits bundled Hiyori context from the character detail", async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await user.click(appSettingsButton())
+    await user.click(screen.getByRole("button", { name: "Character" }))
+    await user.click(
+      await screen.findByRole("button", {
+        name: /Open character settings: 桃瀬ひより/,
+      }),
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "Character context" }),
+    ).toBeVisible()
+    const displayName = screen.getByRole("textbox", { name: "Display name" })
+    const behavior = screen.getByRole("textbox", { name: "Behavior" })
+    expect(displayName).toHaveValue("桃瀬ひより")
+    expect(displayName).not.toBeDisabled()
+    expect(behavior).not.toBeDisabled()
+    await user.type(behavior, " Keep a gentle pace.")
+    await user.click(
+      screen.getByRole("button", { name: "Save character settings" }),
+    )
+
+    expect(
+      await screen.findByText(
+        "Saved. This version will be used from the next turn.",
+      ),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Character context" }),
+    ).not.toBeInTheDocument()
   })
 
   it("uses the persisted history mode consistently in chat and diagnostics", async () => {
@@ -1614,7 +1644,7 @@ describe("WorkspaceShell", () => {
     ).toHaveFocus()
   })
 
-  it("groups compact persistence and companion status without removing controls", async () => {
+  it("groups compact persistence and character status without removing controls", async () => {
     const user = userEvent.setup()
     const { container } = renderWorkspace()
     const statusRegion = container.querySelector<HTMLElement>(
@@ -1623,17 +1653,17 @@ describe("WorkspaceShell", () => {
     const persistenceStatus = container.querySelector<HTMLElement>(
       "[data-persistence-status]",
     )
-    const companionStatus = container.querySelector<HTMLElement>(
-      "[data-companion-status-mobile]",
+    const characterStatus = container.querySelector<HTMLElement>(
+      "[data-character-status-mobile]",
     )
 
     expect(statusRegion).toContainElement(persistenceStatus)
-    expect(statusRegion).toContainElement(companionStatus)
+    expect(statusRegion).toContainElement(characterStatus)
     expect(persistenceStatus).toHaveTextContent("Persisted locally")
-    expect(companionStatus).toHaveTextContent("Disconnected")
+    expect(characterStatus).toHaveTextContent("Disconnected")
 
-    const mute = within(companionStatus as HTMLElement).getByRole("button", {
-      name: "Mute companion",
+    const mute = within(characterStatus as HTMLElement).getByRole("button", {
+      name: "Mute character",
     })
     await user.click(mute)
     expect(mute).toHaveAttribute("aria-pressed", "true")
@@ -1792,12 +1822,12 @@ describe("WorkspaceShell", () => {
     expect(
       within(toolEvent as HTMLElement).getByText("46 focused tests passed"),
     ).toBeVisible()
-    const compactCompanion = container.querySelector<HTMLElement>(
-      "[data-companion-status-mobile]",
+    const compactCharacter = container.querySelector<HTMLElement>(
+      "[data-character-status-mobile]",
     )
-    expect(compactCompanion).not.toBeNull()
+    expect(compactCharacter).not.toBeNull()
     expect(
-      within(compactCompanion as HTMLElement).getByText("Waiting for you"),
+      within(compactCharacter as HTMLElement).getByText("Waiting for you"),
     ).toBeVisible()
     const approval = container.querySelector<HTMLElement>(
       '[data-event-kind="approval"]',
@@ -1993,12 +2023,12 @@ describe("WorkspaceShell", () => {
     expect(screen.getByLabelText("推論強度")).toBeVisible()
     expect(screen.getByLabelText("GPT-5.6 Sol, 固定モデル")).toBeVisible()
     expect(screen.getByLabelText("下書き項目")).toBeVisible()
-    const compactCompanion = container.querySelector<HTMLElement>(
-      "[data-companion-status-mobile]",
+    const compactCharacter = container.querySelector<HTMLElement>(
+      "[data-character-status-mobile]",
     )
-    expect(compactCompanion).not.toBeNull()
+    expect(compactCharacter).not.toBeNull()
     expect(
-      within(compactCompanion as HTMLElement).getByText("回答待ち"),
+      within(compactCharacter as HTMLElement).getByText("回答待ち"),
     ).toBeVisible()
   })
 
@@ -2306,6 +2336,7 @@ describe("WorkspaceShell", () => {
           workspaceId: "workspace-native",
           projectVersion: 1,
           projectHash: "a".repeat(64),
+          characterPackId: "builtin:hiyori_pro",
           characterVersion: 1,
           characterHash: "b".repeat(64),
           snapshotHash: "c".repeat(64),

@@ -128,11 +128,11 @@ describe("default App character integration", () => {
     )
 
     const initialNode = await screen.findByTestId("live2d-character")
-    const companionPane = initialNode.closest(".companion-pane")
-    expect(companionPane).not.toBeNull()
+    const characterPane = initialNode.closest(".character-pane")
+    expect(characterPane).not.toBeNull()
     await waitFor(() =>
       expect(
-        companionPane?.querySelector(
+        characterPane?.querySelector(
           '[data-character-runtime-readiness="ready"]',
         ),
       ).toBeInTheDocument(),
@@ -156,8 +156,8 @@ describe("default App character integration", () => {
     expect(idleGeneration).toBe(initialGeneration + 3)
 
     fireEvent.click(
-      within(companionPane as HTMLElement).getByRole("button", {
-        name: "Mute companion",
+      within(characterPane as HTMLElement).getByRole("button", {
+        name: "Mute character",
       }),
     )
     await waitFor(() =>
@@ -380,14 +380,12 @@ describe("default App character integration", () => {
     await user.click(
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
-    await user.click(screen.getByRole("button", { name: "Companion" }))
-    expect(screen.getByText("External renderer")).toBeVisible()
-    expect(
-      screen.getByText("Unknown", { selector: "[data-slot=badge]" }),
-    ).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Character" }))
+    expect(screen.getByRole("heading", { name: "Characters" })).toBeVisible()
+    expect(screen.queryByText("External renderer")).not.toBeInTheDocument()
   })
 
-  it("reports Hiyori provenance, keeps the companion mounted, and exposes safe retry", async () => {
+  it("shows simplified Hiyori settings and exposes safe retry", async () => {
     const user = userEvent.setup()
     render(
       <App localeStore={englishLocaleStore} transport={new DemoTransport()} />,
@@ -401,10 +399,18 @@ describe("default App character integration", () => {
     await user.click(
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
-    await user.click(screen.getByRole("button", { name: "Companion" }))
-    expect(screen.getAllByText("桃瀬ひより - PRO").length).toBeGreaterThan(0)
-    expect(screen.getByText("hiyori_pro_t11")).toBeVisible()
-    expect(screen.getByText("かにビーム")).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Character" }))
+    await user.click(
+      await screen.findByRole("button", {
+        name: /Open character settings: 桃瀬ひより - PRO/,
+      }),
+    )
+    expect(
+      screen.getByRole("heading", { name: "Motion settings" }),
+    ).toBeVisible()
+    expect(screen.getByText("Preset — cannot be edited")).toBeVisible()
+    expect(screen.queryByText("hiyori_pro_t11")).not.toBeInTheDocument()
+    expect(screen.queryByText("かにビーム")).not.toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "General" }))
     expect(screen.queryByText("Reduced motion")).toBeNull()
@@ -435,7 +441,7 @@ describe("default App character integration", () => {
     await user.click(
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
-    await user.click(screen.getByRole("button", { name: "Companion" }))
+    await user.click(screen.getByRole("button", { name: "Character" }))
     expect(
       (await screen.findAllByText("asset_fetch_failed")).length,
     ).toBeGreaterThan(0)
