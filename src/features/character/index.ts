@@ -79,6 +79,6 @@ export {
   type CharacterControllerOptions,
 } from "@/features/character/runtime/character-controller"
 export {
-  characterStateByCompanionState,
-  mapCompanionStateToCharacterState,
+  characterStateBySemanticState,
+  mapSemanticStateToCharacterState,
 } from "@/features/character/semantic-state"

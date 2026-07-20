@@ -122,11 +122,11 @@ describe("default App character integration", () => {
     )
 
     const initialNode = await screen.findByTestId("live2d-character")
-    const companionPane = initialNode.closest(".companion-pane")
-    expect(companionPane).not.toBeNull()
+    const characterPane = initialNode.closest(".character-pane")
+    expect(characterPane).not.toBeNull()
     await waitFor(() =>
       expect(
-        companionPane?.querySelector(
+        characterPane?.querySelector(
           '[data-character-runtime-readiness="ready"]',
         ),
       ).toBeInTheDocument(),
@@ -150,8 +150,8 @@ describe("default App character integration", () => {
     expect(idleGeneration).toBe(initialGeneration + 3)
 
     fireEvent.click(
-      within(companionPane as HTMLElement).getByRole("button", {
-        name: "Mute companion",
+      within(characterPane as HTMLElement).getByRole("button", {
+        name: "Mute character",
       }),
     )
     await waitFor(() =>
@@ -378,7 +378,7 @@ describe("default App character integration", () => {
     await user.click(
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
-    await user.click(screen.getByRole("button", { name: "Companion" }))
+    await user.click(screen.getByRole("button", { name: "Character" }))
     expect(screen.getByText("External renderer")).toBeVisible()
     expect(
       screen.getByText("Unknown", { selector: "[data-slot=badge]" }),
@@ -399,7 +399,7 @@ describe("default App character integration", () => {
     await user.click(
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
-    await user.click(screen.getByRole("button", { name: "Companion" }))
+    await user.click(screen.getByRole("button", { name: "Character" }))
     expect(screen.getAllByText("桃瀬ひより - PRO").length).toBeGreaterThan(0)
     expect(screen.getByText("hiyori_pro_t11")).toBeVisible()
     expect(screen.getByText("かにビーム")).toBeVisible()
@@ -450,7 +450,7 @@ describe("default App character integration", () => {
     await user.click(
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
-    await user.click(screen.getByRole("button", { name: "Companion" }))
+    await user.click(screen.getByRole("button", { name: "Character" }))
     expect(
       (await screen.findAllByText("asset_fetch_failed")).length,
     ).toBeGreaterThan(0)

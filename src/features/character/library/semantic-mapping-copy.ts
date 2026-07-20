@@ -3,7 +3,7 @@ import type { SupportedLocale } from "@/features/localization"
 const en = {
   title: "Semantic state mapping",
   description:
-    "Choose a verified motion or expression for each companion state. Unassigned or invalid mappings stay neutral.",
+    "Choose a verified motion or expression for each character state. Unassigned or invalid mappings stay neutral.",
   neutral: "Neutral",
   thinking: "Thinking",
   working: "Working",
@@ -17,7 +17,7 @@ const en = {
   preview: "Preview",
   previewTitle: "Cue preview",
   staticPreview: "Static preview — motion is reduced",
-  animatedPreview: "Animated preview on the companion stage",
+  animatedPreview: "Animated preview on the character stage",
   save: "Save mapping",
   saving: "Saving…",
   saved: "Mapping saved",
@@ -31,7 +31,7 @@ const en = {
 const ja: typeof en = {
   title: "セマンティック状態マッピング",
   description:
-    "各コンパニオン状態に、検証済みのモーションまたは表情を割り当てます。未割り当てや無効なマッピングはニュートラルになります。",
+    "各キャラクター状態に、検証済みのモーションまたは表情を割り当てます。未割り当てや無効なマッピングはニュートラルになります。",
   neutral: "ニュートラル",
   thinking: "思考中",
   working: "作業中",
@@ -45,7 +45,7 @@ const ja: typeof en = {
   preview: "プレビュー",
   previewTitle: "Cueプレビュー",
   staticPreview: "静的プレビュー — モーションを抑制中",
-  animatedPreview: "コンパニオン表示でアニメーションをプレビュー中",
+  animatedPreview: "キャラクター表示でアニメーションをプレビュー中",
   save: "マッピングを保存",
   saving: "保存中…",
   saved: "マッピングを保存しました",

@@ -31,7 +31,7 @@ export type WorkspaceLifecycle =
   | "canceled"
 
 export type ReasoningEffort = "fast" | "max"
-export type CompanionSemanticState =
+export type CharacterSemanticState =
   | "idle"
   | "thinking"
   | "acting"
@@ -295,7 +295,7 @@ export interface WorkspaceViewAdapter {
 
 export interface CharacterStageRenderProps {
   readonly workspaceId: string
-  readonly state: CompanionSemanticState
+  readonly state: CharacterSemanticState
   readonly muted: boolean
   readonly reducedMotion: boolean
   readonly speaking?: boolean
@@ -309,7 +309,7 @@ export type AppSettingsSection =
   | "general"
   | "projects"
   | "character_context"
-  | "companion"
+  | "character"
   | "audio"
   | "support"
   | "diagnostics"

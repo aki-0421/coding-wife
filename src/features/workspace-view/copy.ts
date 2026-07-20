@@ -118,7 +118,7 @@ const en = {
   },
   previewNoticeTitle: "Design preview",
   previewNotice:
-    "Codex, Git, and local history are not connected. The bundled Live2D companion reports its renderer state separately.",
+    "Codex, Git, and local history are not connected. The bundled Live2D character reports its renderer state separately.",
   previewNoticeWithHistory:
     "Codex and Git are not connected. Local workspace history is persisted and available.",
   previewNoticeWithEphemeralHistory:
@@ -297,7 +297,7 @@ const en = {
       "The app-owned Live2D renderer reports verified status and safe fallback details here.",
     externalRenderer: "External renderer · status unavailable",
     retryRenderer: "Retry Live2D",
-    state: "Companion state",
+    state: "Character state",
     disconnected: "Disconnected",
     semanticState: {
       idle: "Idle",
@@ -311,8 +311,8 @@ const en = {
     },
     muted: "Muted",
     unmuted: "Audio available",
-    mute: "Mute companion",
-    unmute: "Unmute companion",
+    mute: "Mute character",
+    unmute: "Unmute character",
   },
   contextView: {
     title: "Project context",
@@ -386,7 +386,7 @@ const en = {
   settingsView: {
     appTitle: "App settings",
     appDescription:
-      "Character, companion, preferences, and diagnostics shared by every project.",
+      "Character context, character display, preferences, and diagnostics shared by every project.",
     projectTitle: "Project settings",
     projectDescription: (project: string) => `Settings for ${project}.`,
     workspaceTitle: "Workspace settings",
@@ -399,7 +399,7 @@ const en = {
       projects: "Projects",
       project_context: "Project context",
       character_context: "Character context",
-      companion: "Companion",
+      character: "Character",
       audio: "Audio",
       support: "Support",
       diagnostics: "Diagnostics",
@@ -462,7 +462,7 @@ const en = {
     resetUi: "Reset UI state",
     resetUiDescription:
       "Resets filters and local view selections. Repository and history data are not changed.",
-    companionTitle: "Companion",
+    characterTitle: "Character",
     bundledModel: "Model",
     bundledModelValue: "Hiyori",
     renderer: "Renderer",
@@ -512,7 +512,7 @@ const en = {
     live2dHidden: "Hidden",
     live2dUnknown: "Unknown",
     characterErrorIntro:
-      "The companion fell back safely. Workspace controls remain available.",
+      "The character fell back safely. Workspace controls remain available.",
     retryCharacter: "Retry Live2D",
     importModel: "Import model",
     hideCharacter: "Hide character",
@@ -883,7 +883,7 @@ const ja: typeof en = {
       "アプリ管理Live2D rendererの検証済み状態と安全なfallbackを表示します。",
     externalRenderer: "外部renderer · 状態は取得できません",
     retryRenderer: "Live2Dを再試行",
-    state: "コンパニオン状態",
+    state: "キャラクター状態",
     disconnected: "切断中",
     semanticState: {
       idle: "待機中",
@@ -897,8 +897,8 @@ const ja: typeof en = {
     },
     muted: "ミュート中",
     unmuted: "音声利用可能",
-    mute: "コンパニオンをミュート",
-    unmute: "コンパニオンのミュートを解除",
+    mute: "キャラクターをミュート",
+    unmute: "キャラクターのミュートを解除",
   },
   contextView: {
     title: "プロジェクトコンテキスト",
@@ -970,7 +970,7 @@ const ja: typeof en = {
   settingsView: {
     appTitle: "アプリ設定",
     appDescription:
-      "すべてのプロジェクトに共通するキャラクター、コンパニオン、設定、診断です。",
+      "すべてのプロジェクトに共通するキャラクターコンテキスト、キャラクター表示、設定、診断です。",
     projectTitle: "プロジェクト設定",
     projectDescription: (project: string) => `${project} の設定です。`,
     workspaceTitle: "ワークスペース設定",
@@ -983,7 +983,7 @@ const ja: typeof en = {
       projects: "プロジェクト",
       project_context: "プロジェクトコンテキスト",
       character_context: "キャラクターコンテキスト",
-      companion: "コンパニオン",
+      character: "キャラクター",
       audio: "音声",
       support: "支援",
       diagnostics: "診断",
@@ -1046,7 +1046,7 @@ const ja: typeof en = {
     resetUi: "UI状態をリセット",
     resetUiDescription:
       "filterとローカル選択だけを戻します。repositoryと履歴dataは変更しません。",
-    companionTitle: "コンパニオン",
+    characterTitle: "キャラクター",
     bundledModel: "モデル",
     bundledModelValue: "Hiyori",
     renderer: "Renderer",
@@ -1096,7 +1096,7 @@ const ja: typeof en = {
     live2dHidden: "非表示",
     live2dUnknown: "不明",
     characterErrorIntro:
-      "コンパニオンは安全に縮退しました。ワークスペース操作は継続できます。",
+      "キャラクターは安全に縮退しました。ワークスペース操作は継続できます。",
     retryCharacter: "Live2Dを再試行",
     importModel: "モデルをimport",
     hideCharacter: "キャラクターを非表示",

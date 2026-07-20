@@ -468,7 +468,7 @@ describe("WorkspaceShell", () => {
       name: "Backlog(0)",
     })
     const selectedWorkspace = within(navigation).getByRole("button", {
-      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+      name: /feature\/live2d-character, aki-0421\/coding-wife/,
     })
 
     expect(doneToggle).toHaveAttribute("aria-expanded", "true")
@@ -537,7 +537,7 @@ describe("WorkspaceShell", () => {
       name: "main, aki-0421/coding-wife, Done",
     })
     const selectedWorkspace = within(navigation).getByRole("button", {
-      name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+      name: /feature\/live2d-character, aki-0421\/coding-wife/,
     })
 
     expect(screen.getByRole("heading", { name: "Workspaces" })).toHaveClass(
@@ -560,7 +560,7 @@ describe("WorkspaceShell", () => {
       doneWorkspace.querySelector('[data-repository-avatar="github"]'),
     ).toHaveAttribute("data-github-owner", "aki-0421")
     expect(
-      within(selectedWorkspace).getByText("feature/live2d-companion"),
+      within(selectedWorkspace).getByText("feature/live2d-character"),
     ).toHaveClass("text-sidebar-item", "text-text-strong")
     expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
   })
@@ -994,7 +994,7 @@ describe("WorkspaceShell", () => {
 
     fireEvent.click(
       within(workspaceNavigation).getByRole("button", {
-        name: /feature\/live2d-companion, aki-0421\/coding-wife/,
+        name: /feature\/live2d-character, aki-0421\/coding-wife/,
       }),
     )
     expect(composer).toHaveValue("Keep this draft with the Live2D workspace")
@@ -1407,7 +1407,7 @@ describe("WorkspaceShell", () => {
     expect(
       screen.queryByRole("button", { name: "Character context" }),
     ).toBeNull()
-    expect(screen.queryByRole("button", { name: "Companion" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Character" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Project context" })).toBeNull()
     expect(screen.queryByRole("button", { name: "General" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Audio" })).toBeNull()
@@ -1426,7 +1426,7 @@ describe("WorkspaceShell", () => {
     expect(
       screen.getByRole("button", { name: "Character context" }),
     ).toBeVisible()
-    expect(screen.getByRole("button", { name: "Companion" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Character" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Audio" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Support" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Diagnostics" })).toBeVisible()
@@ -1683,7 +1683,7 @@ describe("WorkspaceShell", () => {
     ).toHaveFocus()
   })
 
-  it("groups compact persistence and companion status without removing controls", async () => {
+  it("groups compact persistence and character status without removing controls", async () => {
     const user = userEvent.setup()
     const { container } = renderWorkspace()
     const statusRegion = container.querySelector<HTMLElement>(
@@ -1692,17 +1692,17 @@ describe("WorkspaceShell", () => {
     const persistenceStatus = container.querySelector<HTMLElement>(
       "[data-persistence-status]",
     )
-    const companionStatus = container.querySelector<HTMLElement>(
-      "[data-companion-status-mobile]",
+    const characterStatus = container.querySelector<HTMLElement>(
+      "[data-character-status-mobile]",
     )
 
     expect(statusRegion).toContainElement(persistenceStatus)
-    expect(statusRegion).toContainElement(companionStatus)
+    expect(statusRegion).toContainElement(characterStatus)
     expect(persistenceStatus).toHaveTextContent("Persisted locally")
-    expect(companionStatus).toHaveTextContent("Disconnected")
+    expect(characterStatus).toHaveTextContent("Disconnected")
 
-    const mute = within(companionStatus as HTMLElement).getByRole("button", {
-      name: "Mute companion",
+    const mute = within(characterStatus as HTMLElement).getByRole("button", {
+      name: "Mute character",
     })
     await user.click(mute)
     expect(mute).toHaveAttribute("aria-pressed", "true")
@@ -1861,12 +1861,12 @@ describe("WorkspaceShell", () => {
     expect(
       within(toolEvent as HTMLElement).getByText("46 focused tests passed"),
     ).toBeVisible()
-    const compactCompanion = container.querySelector<HTMLElement>(
-      "[data-companion-status-mobile]",
+    const compactCharacter = container.querySelector<HTMLElement>(
+      "[data-character-status-mobile]",
     )
-    expect(compactCompanion).not.toBeNull()
+    expect(compactCharacter).not.toBeNull()
     expect(
-      within(compactCompanion as HTMLElement).getByText("Waiting for you"),
+      within(compactCharacter as HTMLElement).getByText("Waiting for you"),
     ).toBeVisible()
     const approval = container.querySelector<HTMLElement>(
       '[data-event-kind="approval"]',
@@ -2062,12 +2062,12 @@ describe("WorkspaceShell", () => {
     expect(screen.getByLabelText("推論強度")).toBeVisible()
     expect(screen.getByLabelText("GPT-5.6 Sol, 固定モデル")).toBeVisible()
     expect(screen.getByLabelText("下書き項目")).toBeVisible()
-    const compactCompanion = container.querySelector<HTMLElement>(
-      "[data-companion-status-mobile]",
+    const compactCharacter = container.querySelector<HTMLElement>(
+      "[data-character-status-mobile]",
     )
-    expect(compactCompanion).not.toBeNull()
+    expect(compactCharacter).not.toBeNull()
     expect(
-      within(compactCompanion as HTMLElement).getByText("回答待ち"),
+      within(compactCharacter as HTMLElement).getByText("回答待ち"),
     ).toBeVisible()
   })
 

@@ -41,7 +41,7 @@ const snapshotHash = "3".repeat(64)
 const fixtureTime = "2026-07-19T00:00:00.000Z"
 
 const emptyProjectContext: ProjectContext = {
-  goal: "Ship a trustworthy local coding companion.",
+  goal: "Ship a trustworthy local coding workspace.",
   constraints: "Keep Git observation read-only.",
   definitionOfDone: ["Focused acceptance tests pass"],
   technicalReferences: ["docs/requirements/desktop-shell.md"],

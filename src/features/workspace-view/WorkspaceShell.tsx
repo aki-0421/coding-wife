@@ -177,7 +177,7 @@ export function WorkspaceShell({
     view.turnState === "stopping" ||
     view.codex.phase === "running" ||
     view.codex.phase === "stopping"
-  const companionState = !connected
+  const characterState = !connected
     ? "disconnected"
     : view.codex.pendingRequests.length > 0
       ? "waiting_for_user"
@@ -825,10 +825,10 @@ export function WorkspaceShell({
       {selectedWorkspace ? (
         <Tabs
           className="workspace-tabs grid"
-          data-companion-active={
+          data-character-active={
             view.activeTab !== "settings" && !characterHidden
           }
-          data-companion-layout=""
+          data-character-layout=""
           data-workspace-tab={view.activeTab}
           hidden={appSettingsOpen}
           onValueChange={setActiveTab}
@@ -857,7 +857,7 @@ export function WorkspaceShell({
             value="chat"
           >
             <ChatView
-              companionState={companionState}
+              characterState={characterState}
               connected={connected}
               copy={copy}
               draft={view.selectedDraft}
@@ -915,7 +915,7 @@ export function WorkspaceShell({
                   workspaceGeneration !== null)
               }
               commitExplanationController={commitExplanationController}
-              companionVisible={!characterHidden}
+              characterVisible={!characterHidden}
               locale={locale}
               onBackToChat={() => view.setActiveTab("chat")}
               onCommitSelectionChange={dismissCommitPresentation}
@@ -951,7 +951,7 @@ export function WorkspaceShell({
                 characterRuntimeStore.retry(selectedWorkspace.id)
               }}
               reducedMotion={reducedMotion}
-              state={companionState}
+              state={characterState}
               visible={view.activeTab !== "settings" && !appSettingsOpen}
               workspaceId={selectedWorkspace.id}
               {...(characterRenderer ? { renderer: characterRenderer } : {})}

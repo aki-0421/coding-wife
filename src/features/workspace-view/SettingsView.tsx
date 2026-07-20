@@ -248,7 +248,7 @@ const appSectionOrder: readonly AppSettingsSection[] = [
   "general",
   "projects",
   "character_context",
-  "companion",
+  "character",
   "audio",
   "support",
   "diagnostics",
@@ -258,7 +258,7 @@ const sectionIcons = {
   general: Settings2Icon,
   projects: FolderIcon,
   character_context: BotIcon,
-  companion: SparklesIcon,
+  character: SparklesIcon,
   audio: Mic2Icon,
   support: ShieldCheckIcon,
   diagnostics: ActivityIcon,
@@ -397,7 +397,7 @@ function ContextSettings({
   )
 }
 
-function CompanionSettings({
+function CharacterSettings({
   characterRuntime,
   copy,
   muted,
@@ -407,7 +407,7 @@ function CompanionSettings({
     <section className="flex flex-col gap-lg">
       <div className="flex items-center justify-between gap-md">
         <h2 className="m-0 text-headline text-text-strong">
-          {copy.settingsView.companionTitle}
+          {copy.settingsView.characterTitle}
         </h2>
         <CharacterReadinessBadge copy={copy} runtime={characterRuntime} />
       </div>
@@ -891,9 +891,9 @@ export function AppSettingsView(props: AppSettingsViewProps) {
             turnActive={props.turnActive}
           />
         )
-      case "companion":
+      case "character":
         return (
-          <CompanionSettings
+          <CharacterSettings
             characterRuntime={props.characterRuntime}
             copy={props.copy}
             muted={props.muted}

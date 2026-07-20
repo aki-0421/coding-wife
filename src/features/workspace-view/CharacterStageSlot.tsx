@@ -18,7 +18,7 @@ import {
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type {
   CharacterStageRenderer,
-  CompanionSemanticState,
+  CharacterSemanticState,
 } from "@/features/workspace-view/types"
 
 interface CharacterStageSlotProps {
@@ -27,7 +27,7 @@ interface CharacterStageSlotProps {
   readonly muted: boolean
   readonly reducedMotion: boolean
   readonly renderer?: CharacterStageRenderer | undefined
-  readonly state: CompanionSemanticState
+  readonly state: CharacterSemanticState
   readonly visible: boolean
   readonly workspaceId: string
   readonly onMutedChange: (muted: boolean) => void
@@ -96,8 +96,8 @@ export function CharacterStageSlot({
 
   return (
     <aside
-      aria-labelledby="companion-state"
-      className="companion-pane relative min-h-0 overflow-hidden bg-app-bg"
+      aria-labelledby="character-state"
+      className="character-pane relative min-h-0 overflow-hidden bg-app-bg"
       data-narration-presentation={presentation?.status ?? "inactive"}
       data-narration-speech={presentation?.speechStatus ?? "idle"}
       hidden={!visible}
@@ -144,7 +144,7 @@ export function CharacterStageSlot({
           </p>
           <p
             className="m-0 truncate text-caption text-foreground"
-            id="companion-state"
+            id="character-state"
           >
             {stateLabel} ·{" "}
             {effectiveMuted ? copy.character.muted : copy.character.unmuted}

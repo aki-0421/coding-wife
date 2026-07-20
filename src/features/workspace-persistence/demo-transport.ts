@@ -125,7 +125,7 @@ export class DemoWorkspaceHistoryTransport
     demoWorkspace(
       "build-live2d-desktop-app",
       "build-live2d-desktop-app",
-      "feature/live2d-companion",
+      "feature/live2d-character",
       "in_progress",
       "test_failed",
       2,
