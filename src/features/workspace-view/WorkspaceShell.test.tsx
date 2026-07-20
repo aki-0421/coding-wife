@@ -910,8 +910,9 @@ describe("WorkspaceShell", () => {
     const workspaceTabs = within(
       screen.getByRole("tablist", { name: "Workspace views" }),
     )
-    expect(workspaceTabs.getAllByRole("tab")).toHaveLength(3)
+    expect(workspaceTabs.getAllByRole("tab")).toHaveLength(2)
     expect(workspaceTabs.queryByRole("tab", { name: "Context" })).toBeNull()
+    expect(workspaceTabs.queryByRole("tab", { name: "Settings" })).toBeNull()
 
     const chatTab = screen.getByRole("tab", { name: /Chat/ })
     const commitTab = screen.getByRole("tab", { name: "Commit" })
@@ -919,6 +920,9 @@ describe("WorkspaceShell", () => {
 
     fireEvent.keyDown(window, { ctrlKey: true, key: "Tab" })
     expect(commitTab).toHaveAttribute("aria-selected", "true")
+
+    fireEvent.keyDown(window, { ctrlKey: true, key: "Tab" })
+    expect(chatTab).toHaveAttribute("aria-selected", "true")
 
     fireEvent.keyDown(window, { key: "k", metaKey: true })
     const filter = await screen.findByRole("textbox", {
@@ -1396,31 +1400,11 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
   })
 
-  it("separates project context details from workspace settings", async () => {
+  it("keeps project settings in app settings without a workspace settings tab", async () => {
     const user = userEvent.setup()
     renderWorkspace()
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Workspace settings" }),
-    ).toBeVisible()
-    expect(
-      screen.getByText(
-        "History and privacy for coding-wife/build-live2d-desktop-app.",
-      ),
-    ).toBeVisible()
-    expect(
-      screen.getByRole("heading", { name: "History & privacy" }),
-    ).toBeVisible()
-    expect(
-      screen.queryByRole("button", { name: "Character context" }),
-    ).toBeNull()
-    expect(screen.queryByRole("button", { name: "Companion" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Project context" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "General" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Audio" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Support" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Diagnostics" })).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull()
 
     await user.click(appSettingsButton())
     const appLocation = screen.getByRole("navigation", {
@@ -1470,9 +1454,8 @@ describe("WorkspaceShell", () => {
     await user.click(screen.getByRole("button", { name: "Back to projects" }))
 
     await user.click(selectedWorkspaceButton())
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Workspace settings" }),
-    ).toBeVisible()
+    expect(screen.getByRole("tab", { name: /Chat/ })).toBeVisible()
+    expect(screen.queryByRole("tab", { name: "Settings" })).toBeNull()
     expect(selectedWorkspaceButton()).toHaveFocus()
   })
 
@@ -1480,7 +1463,6 @@ describe("WorkspaceShell", () => {
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () => Promise.resolve(nativeWorkspaceState()),
-      deleteWorkspaceHistory: () => Promise.resolve(nativeWorkspaceState()),
     }
     renderWorkspace(adapter)
 
@@ -1498,16 +1480,14 @@ describe("WorkspaceShell", () => {
     expect(localHistory.closest("article")).toHaveTextContent("Ready")
   })
 
-  it("labels demo history as ephemeral and resets only preview memory", async () => {
+  it("labels demo history as ephemeral in chat and diagnostics", async () => {
     const ephemeralState: WorkspaceAdapterState = {
       ...nativeWorkspaceState(),
       history: { mode: "ephemeral", errorCode: null, backupName: null },
     }
-    const deleteWorkspaceHistory = vi.fn().mockResolvedValue(ephemeralState)
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "demo",
       loadState: () => Promise.resolve(ephemeralState),
-      deleteWorkspaceHistory,
     }
     const user = userEvent.setup()
     renderWorkspace(adapter)
@@ -1525,72 +1505,6 @@ describe("WorkspaceShell", () => {
       name: "Workspace history",
     })
     expect(localHistory.closest("article")).toHaveTextContent("Unavailable")
-
-    await user.click(selectedWorkspaceButton())
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
-    expect(screen.getByText("Stored in demo memory")).toBeVisible()
-    expect(
-      screen.getByText(/Reloading restores the bundled demo/),
-    ).toBeVisible()
-    const reset = screen.getByRole("button", { name: "Reset demo history" })
-    expect(reset).toBeEnabled()
-    await user.click(reset)
-    const dialog = await screen.findByRole("dialog", {
-      name: "Reset this preview's demo history?",
-    })
-    expect(dialog).toHaveTextContent(
-      "No repository files, commits, or branches",
-    )
-    await user.click(within(dialog).getByRole("button", { name: "Reset demo" }))
-    await waitFor(() => expect(deleteWorkspaceHistory).toHaveBeenCalledOnce())
-    await waitFor(() => expect(reset).toHaveFocus())
-  })
-
-  it("restores history action focus after Cancel, Escape, close, and confirm", async () => {
-    const deleteWorkspaceHistory = vi
-      .fn()
-      .mockResolvedValue(nativeWorkspaceState())
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(nativeWorkspaceState()),
-      deleteWorkspaceHistory,
-    }
-    const user = userEvent.setup()
-    renderWorkspace(adapter)
-
-    await user.click(await screen.findByRole("tab", { name: "Settings" }))
-    const trigger = screen.getByRole("button", {
-      name: "Delete workspace history",
-    })
-
-    await user.click(trigger)
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", {
-        name: "Cancel",
-      }),
-    )
-    await waitFor(() => expect(trigger).toHaveFocus())
-
-    await user.click(trigger)
-    await user.keyboard("{Escape}")
-    await waitFor(() => expect(trigger).toHaveFocus())
-
-    await user.click(trigger)
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", {
-        name: "Close",
-      }),
-    )
-    await waitFor(() => expect(trigger).toHaveFocus())
-
-    await user.click(trigger)
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", {
-        name: "Delete history",
-      }),
-    )
-    await waitFor(() => expect(deleteWorkspaceHistory).toHaveBeenCalledOnce())
-    await waitFor(() => expect(trigger).toHaveFocus())
   })
 
   it("closes compact app settings navigation after selection, Escape, and outside click", async () => {

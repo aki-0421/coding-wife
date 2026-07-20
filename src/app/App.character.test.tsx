@@ -173,11 +173,6 @@ describe("default App character integration", () => {
     expect(screen.getByTestId("live2d-character")).toBeVisible()
     expect(latestLive2dProps()?.stateGeneration).toBe(idleGeneration)
 
-    await user.click(screen.getByRole("tab", { name: "Settings" }))
-    await waitFor(() =>
-      expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
-    )
-
     await user.click(
       screen.getAllByRole("button", { name: "App settings" })[0]!,
     )
@@ -186,8 +181,9 @@ describe("default App character integration", () => {
     )
     await user.click(selectedWorkspaceButton())
     await waitFor(() =>
-      expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
+      expect(screen.getByTestId("live2d-character")).toBeVisible(),
     )
+    expect(screen.getByTestId("live2d-character")).toBe(initialNode)
 
     await user.click(screen.getByRole("tab", { name: /Chat/ }))
     expect(screen.getByTestId("live2d-character")).toBe(initialNode)

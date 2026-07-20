@@ -21,7 +21,7 @@ import type {
   WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
 
-export const workspaceTabs = ["chat", "commit", "settings"] as const
+export const workspaceTabs = ["chat", "commit"] as const
 export type WorkspaceTab = (typeof workspaceTabs)[number]
 export type WorkspaceLifecycle =
   | "done"

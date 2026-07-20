@@ -68,9 +68,9 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | ------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------- | ---------------- |
 | `LIVE-F-055` | appは指定Hiyori runtimeを同梱する           | `hiyori_pro_t11.model3.json`、moc3、texture 2件、physics、pose、cdi、motion 10件の17fileをrelease resourceから解決できる | Approved | 非該当           |
 | `LIVE-F-056` | appは編集用assetを配布へ含めない            | release resourceに`.cmo3`、`.can3`、`.DS_Store`がなく、runtime packとnoticeだけが存在する                                | Approved | 非該当           |
-| `LIVE-F-057` | companionはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commitで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。Workspace SettingsとApp Settingsでは表示しない | Approved | 非該当           |
+| `LIVE-F-057` | companionはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commitで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。App Settingsでは表示しない | Approved | 非該当           |
 | `LIVE-F-058` | rendererはwindow resizeへ追従する           | 1470×836、1280×800、960×640の各resize後500ms以内にcontain scaleを再計算し、composerまたはdecisionを覆わない              | Approved | 非該当           |
-| `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | Chat、Commit、Workspace Settingsを含むtabとworkspace/modelを20回切り替えても描画canvasが1枚で、Chat / Commit間では同じDOM canvasを再利用する。Workspace Settingsでは同じrenderer instanceを非表示のまま保持し、旧texture/motion/WebGL resourceを参照しない | Approved | 非該当           |
+| `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | Chat、Commitのtabとworkspace/modelを20回切り替えても描画canvasが1枚で、Chat / Commit間では同じDOM canvasを再利用する。App Settingsでは同じrenderer instanceを非表示のまま保持し、旧texture/motion/WebGL resourceを参照しない | Approved | 非該当           |
 | `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | App settingsのCompanionからpack名、creator、source notice、同梱version/hashへ到達できる                                  | Approved | 非該当           |
 
 ### Semantic stateと縮退

@@ -42,7 +42,7 @@ status: "Approved"
 
 | 非対象                                                | 理由                      | 扱う画面・文書                         |
 | ----------------------------------------------------- | ------------------------- | -------------------------------------- |
-| workspace history削除                                 | workspace-scopedのため    | [S-006](S-006_project-settings.md)     |
+| workspace history削除                                 | 専用UIを廃止したため      | 非該当                                 |
 | account credential、raw stderr、absolute private path | secret boundaryを守るため | sanitized readiness statusだけ表示する |
 
 ## 表示契機と終了
@@ -74,7 +74,7 @@ status: "Approved"
 | section navigation  | General、Projects、Character context、Companion、Audio、Diagnosticsの6 section | section選択 |
 | settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
 
-app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示しない。これによりworkspace scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
+app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない。これによりworkspace scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
 
 ## 表示状態
 
