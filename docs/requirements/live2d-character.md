@@ -71,14 +71,14 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-057` | characterはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commitで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。Workspace SettingsとApp Settingsでは表示しない | Approved | 非該当           |
 | `LIVE-F-058` | rendererはwindow resizeへ追従する           | 1470×836、1280×800、960×640の各resize後500ms以内にcontain scaleを再計算し、composerまたはdecisionを覆わない              | Approved | 非該当           |
 | `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | Chat、Commit、Workspace Settingsを含むtabとworkspace/modelを20回切り替えても描画canvasが1枚で、Chat / Commit間では同じDOM canvasを再利用する。Workspace Settingsでは同じrenderer instanceを非表示のまま保持し、旧texture/motion/WebGL resourceを参照しない | Approved | 非該当           |
-| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | App settingsのCharacterからpack名、creator、source notice、同梱version/hashへ到達できる                                  | Approved | 非該当           |
+| `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | 非該当                                                                                                                   | Deprecated | 個別設定をmodel名とmotionへ限定する`LIVE-F-084`へ移行 |
 
 ### Semantic stateと縮退
 
 | 要件ID       | 要件                                                  | 受け入れ条件                                                                                                                                   | 状態     | 廃止理由・後継ID |
 | ------------ | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------- |
 | `LIVE-F-061` | characterはoperational stateへ決定的に反応する        | operational eventのidle→neutral、thinking→thinking、acting/reviewing→working、waiting_for_user→asking、completed→success、disconnected→warning、error→errorをversioned semantic stateへ変換し、同じevent列で毎回同じstate/cue優先順位になる。unknown/unsupported eventはneutralへ戻し、Codex/support outputからmotion file名を直接採用しない | Approved | 非該当           |
-| `LIVE-F-062` | state mappingはasset inventoryに存在するcueだけを使う | mapping候補を検証済みmanifestのmotion cueとexpression cueに限定し、parameter式、path、URL、任意file名を保存・実行しない。HiyoriではIdle/Flick/FlickDown/FlickUp/Tap/Tap@Body/Flick@Body inventory以外を要求せず、未割当、invalid、削除済みcue、expression 0件のpackはneutral/static/textへ戻る | Approved | 非該当           |
+| `LIVE-F-062` | motion設定はasset inventoryに存在するcueだけを使う    | custom modelの候補を検証済みmanifestのmotion cueとexpression cueに限定し、parameter式、path、URL、任意file名を保存・実行しない。未割当、invalid、削除済みcue、expression 0件のpackはneutral/static/textへ戻る | Approved | 非該当           |
 | `LIVE-F-063` | expressionがないpackでも全stateを表示できる           | Expressionsが0件のfixtureでrendererが起動し、state labelとmotion/pose/neutral fallbackを表示する                                               | Approved | 非該当           |
 | `LIVE-F-064` | meaning stateはHTML textでも表示される                | canvasをhideまたはaccessibility treeから除外しても、現在state、uncertainty、waiting、verification resultをvisible text/live regionで確認できる | Approved | 非該当           |
 | `LIVE-F-065` | 利用者はcharacterをhideできる                         | Hideを有効にするとcanvasとGPU animationを停止し、Chat幅とtext stateを残し、再起動後も設定が戻る                                                | Approved | 非該当           |
@@ -98,7 +98,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-074` | WebViewはimport元absolute pathを受け取らない   | import完了payloadとrenderer requestにpack UUIDとrelative asset IDだけが含まれ、source path/home pathがない                                                                                                                                                                                                                                               | Approved | 非該当           |
 | `LIVE-F-075` | 利用者はimport packをpreview後にapp全体へ選択できる     | previewのfirst frameとstate testが成功した後だけSelectを有効にし、selectionの正本をapp-globalなowner-only stateへatomic保存する。全workspaceは即時に同じpackを使い、restart後も一致する。custom slotの置換時はapp-global selectionを新packへ同じtransactionで切り替える。legacy project/workspace-scoped selectionは`selectionUpdatedAt DESC, scope ID ASC`で最初のvalid packを一度だけglobal値へ移行し、valid値がなければbundled Hiyoriへ戻す。library cardはmanifestへ拘束されたtrusted PNGをpack IDとasset IDだけのopaque binary IPCで読み、thumbnailと省略hashを表示し、完全hashをaccessibility treeから取得できる。missingまたはhash不一致のframeは表示しない | Approved | 非該当           |
 | `LIVE-F-076` | import失敗は現在modelを壊さない                | malformed、missing、unsupported MOC、I/O、first-frame失敗、abortの各fixtureで現在pack選択とrenderingが継続し、失敗packがlibraryに残らない。App settingsは利用者が直せるja/enの理由を先に表示し、診断用safe codeを補足として残す。model switchはcandidate client/model/trusted frameをfirst accepted frameまで分離し、その時点だけrenderer、committed pack、metrics、status、frameを一括更新する。失敗またはabortではcandidateだけをreleaseする | Approved | 非該当           |
-| `LIVE-F-077` | 利用者はpackごとのversioned semantic mappingを設定できる | `SemanticMappingV1`はneutral/thinking/working/asking/success/warning/errorの各stateへ検証済みmanifest inventory内のmotion cue、expression cue、またはneutralだけを割り当て、pack ID、manifest hash、mapping versionとatomic保存する。unknown version、hash不一致、invalid cueはmapping全体を実行せずneutralへfallbackする。mapping操作はja/en label、keyboard-only、visible focus、stateごとのpreviewを持ち、reduced motion時はanimationを再生せずtrusted static frameとtextで確認できる | Approved | 非該当           |
+| `LIVE-F-077` | 利用者はcustom packのversioned motion設定を編集できる | `SemanticMappingV1`はneutral/thinking/working/asking/success/warning/errorの各stateへ検証済みmanifest inventory内のmotion cue、expression cue、またはneutralだけを割り当て、pack ID、manifest hash、mapping versionとatomic保存する。unknown version、hash不一致、invalid cueはmapping全体を実行せずneutralへfallbackする。custom packの設定だけをja/en label、keyboard-only、visible focusで編集でき、設定画面内でmotion previewを起動しない | Approved | 非該当           |
 | `LIVE-F-078` | appはbundled 1件とcustom 1件のslotを管理する   | bundled Hiyoriは常設しDelete操作を表示せず、custom packはapp全体で最大1件だけ表示・保存する。customがある状態のimportは検証成功後にslotをatomic置換してapp-global selectionを新packへ切り替える。customのDeleteは確認後にselectionをbundled Hiyoriへ戻してからassetとmappingを削除する。置換、削除、失敗、再起動の各時点でlibraryへcustom packを2件以上残さない | Approved | 非該当           |
 
 ### 性能とinteraction boundary
@@ -115,6 +115,8 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | 要件ID       | 要件                                             | 受け入れ条件                                                                                                                                       | 状態     | 廃止理由・後継ID |
 | ------------ | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------- |
 | `LIVE-F-083` | app全体の対象機能をcharacterとして一意に表現する | 日本語UIは「キャラクター」、英語UIは「Character」を使い、accessible name、内部識別子、test、fixture、文書、ファイル名にも同じ語彙を一貫して用いる | Approved | 非該当           |
+| `LIVE-F-084` | Character sectionは一覧から個別設定へ遷移する   | section進入時はcharacter一覧を表示し、各行はmodel名と使用中状態だけを示す。行を選ぶと同section内の個別設定へ進み、個別設定はmodel名、選択・削除に必要な操作、motion設定だけを表示する。戻る操作は一覧へ戻り起点行へfocusを復元する | Approved | 非該当           |
+| `LIVE-F-085` | 同梱Hiyoriは固定motion presetを使う             | neutral=`Idle[0]`、thinking=`Idle[1]`、working=`Tap@Body[0]`、asking=`FlickUp[0]`、success=`Tap[1]`、warning=`FlickDown[0]`、error=`Flick@Body[0]`を既定で実行し、個別設定では「モーション設定」として読み取り専用表示する。編集control、preview button、cue preview statusを表示しない | Approved | 非該当           |
 
 ## 入力項目要件
 
@@ -148,7 +150,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | 画面ID  | 画面名                     | 対象要件ID                                             | 扱い | 画面詳細仕様                                                   |
 | ------- | -------------------------- | ------------------------------------------------------ | ---- | -------------------------------------------------------------- |
 | `S-002` | コーディングワークスペース | `LIVE-F-057`〜`LIVE-F-067`, `LIVE-F-079`〜`LIVE-F-081`, `LIVE-F-083` | 変更 | [画面詳細仕様](../screen-design/S-002_coding-workspace.md)     |
-| `S-005` | アプリ設定・診断           | `LIVE-F-055`〜`LIVE-F-081`, `LIVE-F-083`                             | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
+| `S-005` | アプリ設定・診断           | `LIVE-F-055`〜`LIVE-F-081`, `LIVE-F-083`〜`LIVE-F-085`                | 変更 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
 
 ## 非機能要件
 

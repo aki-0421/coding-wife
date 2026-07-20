@@ -34,7 +34,7 @@ status: "Approved"
 | General           | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
 | Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
 | Character context | app-globalなname、tone、speech density、behavior、prohibited expressions                                |
-| Character         | app-globalなbundled Hiyoriとcustom 1枠、選択、import/置換、preview、semantic mapping、provenance、delete、runtime status |
+| Character         | character一覧、model名から開く個別設定、app-globalな選択、custom 1枠のimport/置換・motion編集・delete、bundled Hiyori固定motion preset |
 | Audio             | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
 | Support           | app共通のsupport role enable、readiness、capacity、usage、sanitized error                                |
 | Diagnostics       | OS/app、Codex、Git、DB、Live2D、audio、supportのnative readinessとrecheck                                |
@@ -98,6 +98,8 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
 | preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry/Reset | `APP-F-057`〜`APP-F-061`, `APP-F-076` |
 | Character contextを保存する | Character contextがready | global versionを更新し次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063` |
+| character個別設定を開く | Character一覧がready | 選択行のmodel名、必要な操作、motion設定だけを同sectionに表示 | 非該当 | 一覧を維持 | `LIVE-F-084` |
+| character一覧へ戻る | character個別設定を表示中 | 一覧を表示し、起点character行へfocusを戻す | 非該当 | 個別設定を維持 | `LIVE-F-084` |
 | modelを選択する       | verified pack preview成功 | 全workspaceへatomic適用                           | 前selection維持                | 前selection維持、safe error     | `APP-F-084`, `LIVE-F-075` |
 | custom modelを取り込む | custom slotが空、native picker利用可能 | 検証・preview成功後に1件を保存しapp-global選択へatomic適用 | 前selectionと空slotを維持 | localized reasonとsafe code、前selection維持 | `LIVE-F-068`〜`LIVE-F-076` |
 | custom modelを置き換える | custom slot使用中、native picker利用可能 | 検証・preview成功後に旧assetを新packへatomic置換しapp-global選択を新packへ切り替える | 前slotとselectionを維持 | 前slotとselectionを維持しlocalized reasonとsafe code | `LIVE-F-073`〜`LIVE-F-078` |
@@ -156,6 +158,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 - gearは`App settings / アプリ設定`というscopeを含むaccessible nameと`aria-current`を持つ。
 - 画面進入時にapp settings headingへfocusし、Back後はactive workspace tabへfocusを戻す。
 - project行は名前、repository、workspace件数を含むaccessible nameを持ち、詳細から一覧へ戻ると起点projectへfocusを戻す。
+- character行はmodel名と使用中状態を含むaccessible nameを持ち、個別設定から一覧へ戻ると起点character行へfocusを戻す。
 - section navigation、error、readinessを色だけで表現しない。
 - 200% text zoomではsection navigationをpopover化し、全fieldとactionへ到達できる。
 
@@ -168,7 +171,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | `SUP-F-062`〜`SUP-F-078`                                             | global support control/readiness                 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092`                   | read-only Git/skill diagnostics                  | [git-review-harness](../requirements/git-review-harness.md)                   |
 | `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089` | app共通Audio                                     | [audio-commentary](../requirements/audio-commentary.md)                       |
-| `LIVE-F-055`〜`LIVE-F-081`, `LIVE-F-083`                            | global model library、mapping、runtime readiness、character用語契約 | [live2d-character](../requirements/live2d-character.md)                       |
+| `LIVE-F-055`〜`LIVE-F-081`, `LIVE-F-083`〜`LIVE-F-085`              | global model library、motion設定、一覧・個別設定、固定Hiyori preset、character用語契約 | [live2d-character](../requirements/live2d-character.md)                       |
 
 ## 未確定事項
 
