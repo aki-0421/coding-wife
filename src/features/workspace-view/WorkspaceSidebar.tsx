@@ -1,6 +1,5 @@
 import { useId, useMemo, useRef, useState } from "react"
 import {
-  AlertCircleIcon,
   ArchiveIcon,
   ChevronRightIcon,
   CircleAlertIcon,
@@ -13,7 +12,6 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 
-import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -40,7 +38,7 @@ import { ProjectFilterSelect } from "@/features/workspace-view/ProjectFilterSele
 import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
 import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
 import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
-import { defaultWorkspaceName } from "@/features/workspace-view/workspace-name"
+import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
 import type {
   ProjectRecord,
   WorkspaceLifecycle,
@@ -212,38 +210,14 @@ function CreateWorkspaceButton({
   readonly onCreate: (projectId: string, name: string) => Promise<boolean>
 }) {
   const [open, setOpen] = useState(false)
-  const [creatingProjectId, setCreatingProjectId] = useState<string | null>(
-    null,
-  )
-  const [creationFailed, setCreationFailed] = useState(false)
-  const creatingRef = useRef(false)
-  const creating = creatingProjectId !== null
+  const [creating, setCreating] = useState(false)
   const label = creating ? copy.createWorkspace.creating : copy.addWorkspace
-
-  const createWorkspace = async (projectId: string) => {
-    if (creatingRef.current) return
-    creatingRef.current = true
-    setCreatingProjectId(projectId)
-    setCreationFailed(false)
-    try {
-      const created = await onCreate(projectId, defaultWorkspaceName())
-      if (created) {
-        setOpen(false)
-      } else {
-        setCreationFailed(true)
-      }
-    } finally {
-      creatingRef.current = false
-      setCreatingProjectId(null)
-    }
-  }
 
   return (
     <Dialog
       onOpenChange={(nextOpen) => {
-        if (creatingRef.current) return
+        if (creating) return
         setOpen(nextOpen)
-        if (nextOpen) setCreationFailed(false)
       }}
       open={open}
     >
@@ -284,50 +258,13 @@ function CreateWorkspaceButton({
             {copy.createWorkspace.selectProject}
           </DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-3 gap-sm" data-workspace-project-grid="">
-          {projects.map((project) => {
-            const projectLabel = project.githubRepository ?? project.name
-            const projectCreating = creatingProjectId === project.id
-
-            return (
-              <Button
-                aria-busy={projectCreating}
-                className="h-16 min-w-0 justify-start gap-sm overflow-hidden px-md py-sm text-start"
-                data-project-id={project.id}
-                data-workspace-project-card=""
-                disabled={creating}
-                key={project.id}
-                onClick={() => void createWorkspace(project.id)}
-                type="button"
-                variant="outline"
-              >
-                <RepositoryAvatar
-                  githubRepository={project.githubRepository}
-                  size="default"
-                />
-                <span className="flex min-w-0 flex-1 flex-col items-start">
-                  <span className="max-w-full truncate text-title">
-                    {projectLabel}
-                  </span>
-                  {projectCreating ? (
-                    <span className="text-label text-muted-foreground">
-                      {copy.createWorkspace.creating}
-                    </span>
-                  ) : null}
-                </span>
-              </Button>
-            )
-          })}
-        </div>
-        {creationFailed ? (
-          <Alert aria-live="assertive">
-            <AlertCircleIcon className="text-destructive" />
-            <AlertTitle>{copy.createWorkspace.failed}</AlertTitle>
-          </Alert>
-        ) : null}
-        <span className="sr-only" aria-live="polite">
-          {creating ? copy.createWorkspace.creating : ""}
-        </span>
+        <WorkspaceProjectSelection
+          copy={copy}
+          onCreate={onCreate}
+          onCreated={() => setOpen(false)}
+          onCreatingChange={setCreating}
+          projects={projects}
+        />
       </DialogContent>
     </Dialog>
   )

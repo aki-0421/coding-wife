@@ -966,6 +966,117 @@ describe("WorkspaceShell", () => {
     ).toHaveAttribute("aria-current", "page")
   })
 
+  it("uses the same three-column project cards for the first workspace", async () => {
+    const user = userEvent.setup()
+    const state: WorkspaceAdapterState = {
+      projects: [
+        {
+          id: "project-alpha",
+          name: "alpha-local",
+          githubRepository: "team/alpha",
+          health: "ready",
+          workspaceCount: 0,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+        {
+          id: "project-beta",
+          name: "beta-local",
+          githubRepository: "team/beta",
+          health: "ready",
+          workspaceCount: 0,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+        {
+          id: "project-local",
+          name: "local-project",
+          health: "ready",
+          workspaceCount: 0,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+      ],
+      workspaces: [],
+      activeWorkspaceId: null,
+      draft: null,
+      timeline: [],
+      history: { mode: "ready", errorCode: null, backupName: null },
+    }
+    const requestAddWorkspace = vi.fn(
+      (request: WorkspaceCreateRequest): Promise<WorkspaceAdapterState> =>
+        Promise.resolve({
+          ...state,
+          projects: (state.projects ?? []).map((project) =>
+            project.id === request.projectId
+              ? { ...project, workspaceCount: 1 }
+              : project,
+          ),
+          workspaces: [
+            {
+              id: "workspace-first",
+              projectId: request.projectId,
+              repository: "beta-local",
+              name: request.name,
+              branch: "coding-wife/first",
+              lifecycle: "backlog",
+            },
+          ],
+          activeWorkspaceId: "workspace-first",
+        }),
+    )
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      requestAddWorkspace,
+    }
+
+    renderWorkspace(adapter)
+
+    const title = await screen.findByRole("heading", {
+      name: "Select a project",
+    })
+    const emptySurface = title.closest('[data-slot="empty"]')
+    if (!(emptySurface instanceof HTMLElement)) {
+      throw new Error("Expected the first-workspace surface")
+    }
+    const projectGrid = emptySurface.querySelector(
+      "[data-workspace-project-grid]",
+    )
+    if (!(projectGrid instanceof HTMLElement)) {
+      throw new Error("Expected the first-workspace project grid")
+    }
+    expect(projectGrid).toHaveClass("grid-cols-3")
+    expect(
+      projectGrid.querySelectorAll("[data-workspace-project-card]"),
+    ).toHaveLength(3)
+    expect(within(emptySurface).queryByRole("combobox")).not.toBeInTheDocument()
+    expect(within(emptySurface).queryByRole("textbox")).not.toBeInTheDocument()
+    expect(
+      within(emptySurface)
+        .getByRole("button", { name: "team/alpha" })
+        .querySelector('[data-repository-avatar="github"]'),
+    ).toHaveAttribute("data-github-owner", "team")
+    expect(
+      within(emptySurface)
+        .getByRole("button", { name: "local-project" })
+        .querySelector('[data-repository-avatar="local"]'),
+    ).toBeVisible()
+
+    await user.click(
+      within(emptySurface).getByRole("button", { name: "team/beta" }),
+    )
+
+    await waitFor(() => expect(requestAddWorkspace).toHaveBeenCalledOnce())
+    expect(requestAddWorkspace).toHaveBeenCalledWith({
+      projectId: "project-beta",
+      name: expect.stringMatching(/^ws-\d{4}-[a-z0-9]{4}$/),
+    })
+    expect(
+      within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole(
+        "button",
+        { name: /coding-wife\/first, beta-local, Backlog/ },
+      ),
+    ).toHaveAttribute("aria-current", "page")
+  })
+
   it("sets up Git and GitHub before registering a selected project folder", async () => {
     const user = userEvent.setup()
     const state = nativeWorkspaceState()

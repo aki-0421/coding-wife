@@ -18,12 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -58,8 +53,8 @@ import {
 } from "@/features/workspace-view/SettingsView"
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
-import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
 import { ProjectSetupDialog } from "@/features/workspace-view/ProjectSetupDialog"
+import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
 import {
   workspaceTabs,
@@ -996,27 +991,22 @@ export function WorkspaceShell({
         </Tabs>
       ) : appSettingsOpen ? null : (
         <section className="workspace-tabs bg-background">
-          <Empty className="row-span-2 row-start-1 w-full items-stretch gap-xl p-10 text-start max-[840px]:p-xl">
-            <EmptyHeader className="mx-auto w-full max-w-[40rem] items-start gap-sm text-start">
+          <Empty className="row-span-2 row-start-1 w-full items-stretch gap-lg p-10 text-start max-[840px]:p-xl">
+            <EmptyHeader className="mx-auto w-full max-w-[48rem] items-start text-start">
               <EmptyTitle className="text-lg font-semibold tracking-tight">
-                {copy.createWorkspace.firstTitle}
+                {copy.createWorkspace.selectProject}
               </EmptyTitle>
-              <EmptyDescription className="text-body">
-                {copy.createWorkspace.description}
-              </EmptyDescription>
             </EmptyHeader>
-            <WorkspaceCreateForm
-              ariaLabel={copy.createWorkspace.firstTitle}
-              className="mx-auto max-w-[40rem]"
-              copy={copy}
-              onAddProject={() =>
-                void view.requestAddProject(copy.pickerUnavailable)
-              }
-              onCreate={view.addWorkspace}
-              prominent
-              projects={view.projects}
-              selectedProjectId={view.projects[0]?.id}
-            />
+            <div className="mx-auto flex w-full max-w-[48rem] flex-col items-stretch">
+              <WorkspaceProjectSelection
+                copy={copy}
+                onAddProject={() =>
+                  void view.requestAddProject(copy.pickerUnavailable)
+                }
+                onCreate={view.addWorkspace}
+                projects={view.projects}
+              />
+            </div>
           </Empty>
         </section>
       )}

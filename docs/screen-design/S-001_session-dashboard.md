@@ -88,7 +88,7 @@ Project folder選択後、Git初期化済みかつorigin設定済みとnativeが
 
 setup dialogはGitHub CLI未導入、未認証、owner取得失敗、invalid repository name、repository作成・origin設定失敗の該当errorだけをfieldまたはaction直上へ表示し、入力とSetup IDを保持して再試行できる。Git初期化とGitHub接続はprocessing中だけcontrolsを無効化し、polite live regionへ進行を通知する。全checkがreadyになったnative responseを受けた時だけdialogを閉じてproject一覧へ反映する。Escape / Cancelは未実行mutationとproject登録を行わず起点buttonへfocusを返すが、既に利用者が確定したGit初期化やGitHub側の作成をrollbackしない。
 
-registered projectが1件以上ある状態でsidebarのWorkspace追加を押すと、`プロジェクトを選択 / Select a project` dialogを開く。登録projectはtableやselectではなく、repository owner avatarまたはlocal repository fallback icon、GitHub `owner/repo`またはproject名を持つcard風buttonとして3column gridへ表示する。card全体をclick、`Enter`、`Space`で選択でき、選択時に既定workspace nameを生成して作成を開始する。processing中は全cardを無効化し、選択cardだけに作成中状態を表示する。成功時だけdialogを閉じて新workspaceを開き、失敗時は元selectionを維持したままdialog内で再試行できる。Escapeまたはcloseでは作成せず起点buttonへfocusを戻す。
+registered projectが1件以上ある状態でsidebarのWorkspace追加を押すと、`プロジェクトを選択 / Select a project` dialogを開く。workspace 0件のmain surfaceも同じtitleとproject選択contentを直接表示する。登録projectはtableやselectではなく、repository owner avatarまたはlocal repository fallback icon、GitHub `owner/repo`またはproject名を持つcard風buttonとして3column gridへ表示する。card全体をclick、`Enter`、`Space`で選択でき、選択時に既定workspace nameを生成して作成を開始する。processing中は全cardを無効化し、選択cardだけに作成中状態を表示する。成功時だけ新workspaceを開き、dialog経由ならdialogも閉じる。失敗時は元selectionを維持したまま同じcard一覧で再試行できる。Escapeまたはcloseでは作成せず起点buttonへfocusを戻す。
 
 ### sidebar visual state
 
@@ -143,7 +143,7 @@ repository healthはpreflightの集約結果とは別のversioned stateとして
 
 window focus、workspace選択確定、Send直前にrepository identity、HEAD、branch、readability、writeabilityをread-onlyで再検査する。前snapshotとの差があれば1秒以内にheaderとrowを更新し、明示preflightが成功するまでturnを開始しない。
 
-workspace cancel、project登録解除、active-turn切替、active/pending main turnを停止してArchiveする時だけ表示する確認dialogは、安全な`戻る / Back`を初期focusとし、focusをdialog内にtrapする。idle workspaceのArchiveにはdialogを表示しない。`Escape`は`戻る`と同じで、selection、turn、lifecycle、draft、timeline anchor、caption/TTS、Git fingerprintを変更せず、閉じた後は起点controlへfocusを戻す。成功後は次のvalid workspace item、存在しなければinline create formの最初の操作可能なfieldへfocusする。processingはpolite、失敗はassertive live regionへ1回だけ通知する。
+workspace cancel、project登録解除、active-turn切替、active/pending main turnを停止してArchiveする時だけ表示する確認dialogは、安全な`戻る / Back`を初期focusとし、focusをdialog内にtrapする。idle workspaceのArchiveにはdialogを表示しない。`Escape`は`戻る`と同じで、selection、turn、lifecycle、draft、timeline anchor、caption/TTS、Git fingerprintを変更せず、閉じた後は起点controlへfocusを戻す。成功後は次のvalid workspace item、存在しなければmain surfaceの最初のproject cardまたはProject追加buttonへfocusする。processingはpolite、失敗はassertive live regionへ1回だけ通知する。
 
 ## 表示状態
 
@@ -151,11 +151,11 @@ workspace cancel、project登録解除、active-turn切替、active/pending main
 |---|---|---|---|---|
 | 初期化中 | DB、workspace、Git linkageを読込中 | sidebar/list/project surfaceのskeleton、locale、Quit。demo workspaceを表示しない | Quitだけ。add/create/select/draft/context/deleteを開始しない | queryとmigrationがterminalになる |
 | 通常 | 1件以上のvalid workspace | group list。各group内はworkspace作成日時の新しい順、同時刻はWorkspace IDの昇順で固定する。active project、preflight、primary action 1件 | project filter、select、add、create、state action | 操作開始、offline、error |
-| projectなし | registered project 0件、workspace 0件 | main surfaceのinline create form。Project fieldには`Projectを追加`、workspace nameには短い既定値を表示する。sidebarにはempty説明文を置かず、5つのlifecycle groupを常に表示する | picker、name編集、Settings、Quit | project登録またはrehydrate |
+| projectなし | registered project 0件、workspace 0件 | main surfaceに`プロジェクトを選択 / Select a project`と`プロジェクトを追加 / Add project` buttonだけを表示する。sidebarにはempty説明文を置かず、5つのlifecycle groupを常に表示する | picker、Settings、Quit | project登録またはrehydrate |
 | project setup: Git未初期化 | pickerでregular writable non-Git folderを選択 | dialog title、`Gitを初期化`、Cancel。通常時の説明文は表示しない | 明示Git初期化、Cancel | Git初期化成功、Cancel、typed error |
 | project setup: origin自動接続不可 | valid Git repositoryにoriginがなく、同名の既存GitHub repositoryが0件または複数件 | visible labelなしの`owner / repository`横並びcontrol、`GitHubをセットアップ`、Cancel。通常時のhelperは表示しない | owner/name編集、確定、Cancel、owner再取得 | origin設定と最終診断成功、Cancel、typed error |
 | workspace project選択 | registered project 1件以上でsidebarのWorkspace追加を押す | repository icon画像とrepository名を持つ3columnのproject card grid | card選択、Escape、close | 作成成功、Cancel、typed error |
-| workspaceなし | registered project 1件以上、workspace 0件 | main surfaceのProject select、workspace name、`Workspaceを作成`を持つinline form。sidebarにはempty説明文を置かず、5つのlifecycle groupを常に表示する | inline create、project追加、Settings、Quit | worktree作成またはproject登録解除 |
+| workspaceなし | registered project 1件以上、workspace 0件 | main surfaceにdialogと同じ`プロジェクトを選択 / Select a project` titleとrepository icon画像付き3column project card gridを表示する。workspace name input、select、説明文、追加create buttonは置かない。sidebarにはempty説明文を置かず、5つのlifecycle groupを常に表示する | card選択、project追加、Settings、Quit | worktree作成またはproject登録解除 |
 | 処理中 | picker後検証、preflight、create、cancel、remove | 対象stepとprogress、他workspaceは利用可能 | 可能なCancel、影響外select | success、cancel、error |
 | オフライン | network/Codex接続なし | local list、Git/DB status、Codex offline | project filter、Context、local project操作可。Send不可 | 明示preflight成功 |
 | エラー | Git I/O、DB write、Codex診断失敗 | code、対象、保持data、retry/reselect/details | 影響外workspaceを開ける | 明示回復または登録解除 |
@@ -170,9 +170,9 @@ workspace cancel、project登録解除、active-turn切替、active/pending main
 
 | 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
 |---|---|---|---|---|---|
-| Projectを追加 | toolbar FolderPlusまたはinline formのProject field | native pickerの1 directoryをRust診断し、Gitとoriginがreadyならdialogを描画せずprojectだけを1件追加する。Git readyかつoriginなしでも、認証済みownerに同名GitHub repositoryが一意に存在すればoriginへ自動接続して直接登録する。非Git、既存repositoryなし、または複数owner競合時だけSetup IDによるdialogへ進み、全check成功後に同じ登録処理を行う。workspaceは作成せず、inline formのProject selectへ反映する | 一覧、selection、inline入力を維持し、errorなし。確定済みGit/GitHub mutationは保持 | 登録せず該当stepで入力と再試行を保持 | `WORK-F-044`〜`WORK-F-049`, `WORK-F-070` |
+| Projectを追加 | toolbar FolderPlusまたはworkspace 0件時のProject追加button | native pickerの1 directoryをRust診断し、Gitとoriginがreadyならdialogを描画せずprojectだけを1件追加する。Git readyかつoriginなしでも、認証済みownerに同名GitHub repositoryが一意に存在すればoriginへ自動接続して直接登録する。非Git、既存repositoryなし、または複数owner競合時だけSetup IDによるdialogへ進み、全check成功後に同じ登録処理を行う。workspaceは作成せず、main surfaceのproject card一覧へ反映する | 一覧とselectionを維持し、errorなし。確定済みGit/GitHub mutationは保持 | 登録せず該当stepで入力と再試行を保持 | `WORK-F-044`〜`WORK-F-049`, `WORK-F-070` |
 | preflight再診断 | project rootが存在 | Git/Codex/login/Sol/characterを更新 | 非該当 | check単位でBlocked、既存履歴維持 | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
-| Workspace作成 | 0件時はinline form、通常時はsidebarのPlus。registered project 1件以上 | inline formは指定project/nameを使う。sidebarは3columnのproject card dialogを開き、cardで選んだProject IDと生成した既定nameを使う。選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、workspace固有rootとprojectのGit common directory identityを照合して、成功後だけdialogを閉じ、Backlogへ1件追加・選択してそのworkspaceを開く | inline入力は維持する。sidebar dialogは閉じ、作成開始前のselectionを維持する。一覧・filesystemは変更しない | inlineは入力保持。sidebar dialogは開いたまま元selectionを維持してerror noticeを表示する。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
+| Workspace作成 | 0件時はmain surface、通常時はsidebarのPlus。registered project 1件以上 | どちらも同じ3column project card contentを使い、cardで選んだProject IDと生成した既定nameを使う。選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、workspace固有rootとprojectのGit common directory identityを照合して、成功後だけBacklogへ1件追加・選択してそのworkspaceを開く。dialog経由ならdialogも閉じる | dialogは閉じ、作成開始前のselectionを維持する。一覧・filesystemは変更しない | project card一覧を維持してerror noticeを表示する。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
 | workspaceをArchive | sidebar rowのArchive | idleなら確認なしで対象worktreeを削除してrowを一覧から外す。active/pending main turnがあれば停止確認を表示し、確定後のexact terminal interrupt、cleanup、履歴flush完了後だけ同じ削除へ進む。既にworktreeが消失済みなら成功扱い | 停止確認の`戻る`ではworkspace、worktree、selection、turn、draft、履歴不変 | 停止失敗時はArchive commandを呼ばず全状態を保持する。削除失敗時は対象以外を変更せず再試行可能なerror | `WORK-F-067` |
 | project filter | 登録済みproject 1件以上 | Popoverの非native複数選択controlで選んだProject IDのいずれかと完全一致するworkspaceを100ms以内に表示し、ListFilterに選択件数を示す | Escapeで選択値を維持 | 一覧維持、無効Project IDだけを除去 | `WORK-F-051` |
 | workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Settings、Companionを同一IDへ100ms以内にatomic切替。選択時に更新される`last_selected_at`、`updated_at`ではsidebarの作成日時順を変更しない。App SettingsのProject / Character contextはworkspace tab状態へ含めない | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
@@ -189,8 +189,8 @@ workspace cancel、project登録解除、active-turn切替、active/pending main
 | repository folder | なし | project追加時必須 | canonical regular directory、duplicate不可。登録確定時はregular Git worktreeかつorigin設定済み | itemを作らずsetupまたは再選択 | 全preflight transaction成功 |
 | GitHub owner | 認証済みcurrent user | origin未設定時必須 | nativeが返したcurrent user / organization loginのselectだけ。repository inputとliteral `/`を挟んで横並びにし、visible labelは置かない | field直下、選択保持 | GitHub setup成功 |
 | GitHub repository name | folder basenameのsafe slug | origin未設定時必須 | 1〜100文字のASCII英数字、`.`、`_`、`-`。`.` / `..`、control、slash、末尾`.git`は不可。owner selectと横並びにし、visible labelと通常時helperは置かない | field直下、入力保持 | GitHub setup成功 |
-| project | inline formはproject 1件なら自動選択、複数なら直前値または先頭。sidebar dialogは未選択 | 必須 | inline formはregistered Project IDのselect。sidebar dialogはrepository icon画像付き3column card buttonで単一選択し、tableとselectは使わない | field直下またはcreate actionのnotice、選択肢を維持 | Create成功 |
-| workspace name | `ws-MMDD-<random 4文字>` | 必須 | trim後1〜80 Unicode scalar、改行不可。path/branchはnativeが安全な別名を生成 | field直下、入力保持 | Create成功 |
+| project | 未選択 | 必須 | main surfaceとsidebar dialogの両方でrepository icon画像付き3column card buttonを単一選択し、tableとselectは使わない | card一覧とerror noticeを維持 | Create成功 |
+| workspace name | card選択時に`ws-MMDD-<random 4文字>`を生成 | 必須 | UIから編集させない。trim後1〜80 Unicode scalar、改行不可。path/branchはnativeが安全な別名を生成 | 同じcardからの再試行時に再生成 | Create成功 |
 | project filter | 前回のProject ID listまたは空list | 任意 | 重複のない登録済みProject IDの非native複数選択。空listはすべてを表示し、optionはrepository iconとGitHub `owner/repo`、なければproject名を表示 | 無効IDだけを除去 | 選択変更時 |
 
 ## ネイティブ連携
@@ -213,7 +213,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 | repository repair | Tauri dialog → Rust project service | `repair_project_linkage` | target Project ID、saved `RepositoryIdentityV1`、canonical worktree exact identity、atomic transaction | linkage/selection不変 | source/Gitを変更せずtyped reason |
 | project登録解除 | Rust DB | `workspace_unregister` | typed Project ID、active/pending turn 0件、confirmation、metadata scope | 変更なし | source/Git/worktree/library/history本文を変更しない |
 
-ローカルUI検証では`?demoAppServer=1`の通常一覧でsidebarのPlusを押し、repository icon画像付きproject cardが3columnで並ぶdialogを確認する。cardを選ぶとBacklogが1件増え、新workspaceのbranchとnameがsidebarのselected rowとheaderへ同時反映されることを確認する。同じ通常一覧でProject追加を押した時はreadyなprojectがsetup dialogなしで登録される。`?demoAppServer=1&projectSetup=git`ではGit初期化から簡素な`owner / repository`横並び入力への遷移、`?demoAppServer=1&projectSetup=github`ではorigin未設定のGit projectを直接再現する。いずれも実filesystem、GitHub repository、credentialを変更しないdemo transportだけで動作する。
+ローカルUI検証では`?demoAppServer=1`の通常一覧でsidebarのPlusを押し、repository icon画像付きproject cardが3columnで並ぶdialogを確認する。cardを選ぶとBacklogが1件増え、新workspaceのbranchとnameがsidebarのselected rowとheaderへ同時反映されることを確認する。全workspaceをArchiveした0件状態ではmain surfaceに同じtitleと3column project card contentがdialogなしで表示され、card選択だけで最初のworkspaceを作成できることを確認する。同じ通常一覧でProject追加を押した時はreadyなprojectがsetup dialogなしで登録される。`?demoAppServer=1&projectSetup=git`ではGit初期化から簡素な`owner / repository`横並び入力への遷移、`?demoAppServer=1&projectSetup=github`ではorigin未設定のGit projectを直接再現する。いずれも実filesystem、GitHub repository、credentialを変更しないdemo transportだけで動作する。
 
 ## ウィンドウ固有動作
 
@@ -225,7 +225,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 | 最大化・全画面 | 共通仕様どおり |
 | 常に手前へ表示 | 不可 |
 | 閉じる操作 | 共通仕様どおり |
-| 未保存変更がある場合 | dialogのcreate inputはcancel/route離脱で破棄し、inline create inputはworkspace 0件の表示中だけ保持する。既存workspace draftは保存 |
+| 未保存変更がある場合 | project card選択には未保存入力を持たない。既存workspace draftは保存 |
 
 ## メニュー・ショートカット
 
@@ -245,7 +245,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 | active selection/project filter/scroll | Rust SQLite | valid selection/Project ID list/scroll settle | route return/restart | Project登録解除またはschema不整合 | filterから無効IDだけを除去しselectionは維持 |
 | summary/timeline anchor | Rust SQLite | terminal summary、scroll settle | route return/restart | history削除契約 | 同workspaceの最寄りvalid sequenceだけへ補正 |
 | repository identity/health、HEAD/branch、GitHub `owner/repo` | Gitを観測正本、Rust DBはversioned last snapshot。GitHub full nameはlocal `origin` URLから抽出した非秘密値だけを保存する | 登録、window focus、selection、Send直前 | route return/restart後に再照合 | project登録解除 | GitHub `origin`なしではlocal repo名へfallbackし、health判定は変更しない |
-| create input | React transient state | 保存しない | dialog中だけ | success/cancel/route leave | input保持できる範囲で保持 |
+| create selection | React transient state | 保存しない | card選択からcreate完了まで | success/cancel/route leave | card一覧へ戻して再試行可能にする |
 
 ## OS差分
 
