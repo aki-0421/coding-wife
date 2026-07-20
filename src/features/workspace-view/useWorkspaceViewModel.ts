@@ -1334,6 +1334,31 @@ export function useWorkspaceViewModel(
       }
     }, [adapter, adapterReady, applyAdapterState, selectedWorkspace])
 
+  const recheckSelectedWorkspace =
+    useCallback(async (): Promise<WorkspaceActionResult> => {
+      if (
+        !adapterReady ||
+        !selectedWorkspace ||
+        adapter?.recheckWorkspace === undefined
+      ) {
+        return { ok: false, errorCode: "WORKSPACE-RECHECK-UNAVAILABLE" }
+      }
+      setWorkspaceAction("repair")
+      try {
+        applyAdapterState(await adapter.recheckWorkspace(selectedWorkspace.id))
+        setNotice(null)
+        return { ok: true }
+      } catch (error) {
+        return {
+          ok: false,
+          errorCode:
+            error instanceof Error ? error.message : "WORKSPACE-RECHECK-FAILED",
+        }
+      } finally {
+        setWorkspaceAction(null)
+      }
+    }, [adapter, adapterReady, applyAdapterState, selectedWorkspace])
+
   const unregisterProject = useCallback(
     async (projectId: string): Promise<WorkspaceActionResult> => {
       if (
@@ -1430,6 +1455,7 @@ export function useWorkspaceViewModel(
     history,
     initializeProjectGit,
     lastSummary,
+    recheckSelectedWorkspace,
     repairSelectedWorkspace,
     confirmWorkspaceTransition,
     registerAttachmentPaths,

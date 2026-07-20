@@ -156,6 +156,45 @@ export function WorkspaceShell({
   const [systemReducedMotion, setSystemReducedMotion] = useState(
     getSystemReducedMotion,
   )
+  const observesCodexConnection =
+    adapter?.hydrationMode === "native" &&
+    (adapter.codexSnapshot !== undefined ||
+      adapter.subscribeCodex !== undefined)
+  const [codexSetupRecoveryWorkspaceId, setCodexSetupRecoveryWorkspaceId] =
+    useState<string | null>(null)
+  const [runtimeSetupRecovery, setRuntimeSetupRecovery] = useState(false)
+
+  useEffect(() => {
+    const workspaceId = view.selectedWorkspace?.id
+    if (
+      !observesCodexConnection ||
+      workspaceId === undefined ||
+      view.codex.connected
+    ) {
+      setCodexSetupRecoveryWorkspaceId(null)
+      return
+    }
+    if (view.codex.phase !== "connecting") {
+      setCodexSetupRecoveryWorkspaceId(workspaceId)
+    }
+  }, [
+    observesCodexConnection,
+    view.codex.connected,
+    view.codex.phase,
+    view.selectedWorkspace?.id,
+  ])
+
+  useEffect(() => {
+    if (adapter?.hydrationMode !== "native") {
+      setRuntimeSetupRecovery(false)
+      return
+    }
+    if (runtime.state.status === "error") {
+      setRuntimeSetupRecovery(true)
+    } else if (runtime.state.status === "ready") {
+      setRuntimeSetupRecovery(false)
+    }
+  }, [adapter?.hydrationMode, runtime.state.status])
 
   const connected = view.codex.connected && runtime.state.status === "ready"
   const connection: HeaderConnectionState =
@@ -774,11 +813,30 @@ export function WorkspaceShell({
   }
 
   const selectedWorkspace = view.selectedWorkspace
+  const codexSetupRequired =
+    observesCodexConnection &&
+    selectedWorkspace !== undefined &&
+    ((!view.codex.connected && view.codex.phase !== "connecting") ||
+      codexSetupRecoveryWorkspaceId === selectedWorkspace.id)
+  const runtimeSetupRequired =
+    adapter?.hydrationMode === "native" &&
+    (runtime.state.status === "error" || runtimeSetupRecovery)
+  const setupRequirementOverrides = {
+    codexUnavailable: codexSetupRequired,
+    runtimeUnavailable: runtimeSetupRequired,
+  }
   const setupOverviewRequired = shouldShowSetupOverview(
     adapter?.hydrationMode,
     nativeReadiness,
     view.projects.length,
+    setupRequirementOverrides,
   )
+  const recheckSetup = async () => {
+    if (runtimeSetupRequired) runtime.refresh()
+    if (codexSetupRequired) {
+      reportWorkspaceAction(await view.recheckSelectedWorkspace())
+    }
+  }
   const projectSetupDialog =
     view.projectSetup === null ? null : (
       <ProjectSetupDialog
@@ -801,7 +859,9 @@ export function WorkspaceShell({
           onAddProject={() =>
             void view.requestAddProject(copy.pickerUnavailable)
           }
+          onRecheck={recheckSetup}
           projectCount={view.projects.length}
+          requirementOverrides={setupRequirementOverrides}
         />
         {projectSetupDialog}
         <SafeQuitDialog

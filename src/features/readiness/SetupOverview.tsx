@@ -53,13 +53,20 @@ interface SetupRequirement {
   readonly check: ReadinessCheckV1 | null
 }
 
+export interface SetupRequirementOverrides {
+  readonly codexUnavailable?: boolean
+  readonly runtimeUnavailable?: boolean
+}
+
 interface SetupOverviewProps {
   readonly notice?: {
     readonly message: string
     readonly tone: "error" | "neutral"
   } | null
   readonly onAddProject: () => void
+  readonly onRecheck?: () => void | Promise<void>
   readonly projectCount: number
+  readonly requirementOverrides?: SetupRequirementOverrides
 }
 
 interface SetupCopy {
@@ -248,6 +255,7 @@ function gitExecutableIsReady(check: ReadinessCheckV1 | null): boolean {
 export function unresolvedSetupRequirements(
   snapshot: NativeReadinessSnapshotV1 | null,
   projectCount: number,
+  overrides: SetupRequirementOverrides = {},
 ): readonly SetupRequirement[] {
   if (snapshot === null) {
     return [
@@ -261,11 +269,24 @@ export function unresolvedSetupRequirements(
   const requirements: SetupRequirement[] = []
   const codex = checkById(snapshot, "codex")
   const git = checkById(snapshot, "git")
-  if (codex === null || codex.status !== "ready") {
-    requirements.push({ key: "codex", check: codex })
+  if (
+    codex === null ||
+    codex.status !== "ready" ||
+    overrides.codexUnavailable === true
+  ) {
+    requirements.push({
+      key: "codex",
+      check:
+        overrides.codexUnavailable === true && codex?.status === "ready"
+          ? null
+          : codex,
+    })
   }
   if (!gitExecutableIsReady(git)) {
     requirements.push({ key: "git", check: git })
+  }
+  if (overrides.runtimeUnavailable === true) {
+    requirements.push({ key: "diagnostics", check: null })
   }
   if (projectCount === 0) {
     requirements.push({ key: "project", check: null })
@@ -286,12 +307,22 @@ export function shouldShowSetupOverview(
   hydrationMode: "demo" | "native" | undefined,
   state: NativeReadinessControllerState,
   projectCount: number,
+  overrides: SetupRequirementOverrides = {},
 ): boolean {
   if (hydrationMode !== "native") return false
   if (state.snapshot?.source === "demo") return false
-  if (projectCount === 0) return true
+  if (
+    projectCount === 0 ||
+    overrides.codexUnavailable === true ||
+    overrides.runtimeUnavailable === true
+  ) {
+    return true
+  }
   if (state.snapshot !== null) {
-    return unresolvedSetupRequirements(state.snapshot, projectCount).length > 0
+    return (
+      unresolvedSetupRequirements(state.snapshot, projectCount, overrides)
+        .length > 0
+    )
   }
   return state.status === "error"
 }
@@ -358,7 +389,9 @@ function SetupSkeleton({ copy }: { readonly copy: SetupCopy }) {
 export function SetupOverview({
   notice = null,
   onAddProject,
+  onRecheck,
   projectCount,
+  requirementOverrides,
 }: SetupOverviewProps) {
   const { locale } = useI18n()
   const copy = setupCopy[locale]
@@ -366,8 +399,13 @@ export function SetupOverview({
   const controller = useNativeReadinessController()
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [copyErrorCommand, setCopyErrorCommand] = useState<string | null>(null)
+  const [additionalRechecking, setAdditionalRechecking] = useState(false)
   const snapshot = state.snapshot
-  const requirements = unresolvedSetupRequirements(snapshot, projectCount)
+  const requirements = unresolvedSetupRequirements(
+    snapshot,
+    projectCount,
+    requirementOverrides,
+  )
   const firstRequirement = requirements[0]
   const focusGlobalRecheck =
     firstRequirement !== undefined &&
@@ -377,7 +415,8 @@ export function SetupOverview({
   const rechecking =
     state.status === "loading" ||
     state.status === "rechecking" ||
-    state.status === "configuring"
+    state.status === "configuring" ||
+    additionalRechecking
 
   const copyToClipboard = async (command: string) => {
     setCopyErrorCommand(null)
@@ -392,8 +431,15 @@ export function SetupOverview({
     }
   }
 
-  const recheck = () => {
-    if (!rechecking) void controller.recheck()
+  const recheck = async () => {
+    if (rechecking) return
+    setAdditionalRechecking(true)
+    try {
+      await controller.recheck()
+      await onRecheck?.()
+    } finally {
+      setAdditionalRechecking(false)
+    }
   }
 
   return (
@@ -428,7 +474,7 @@ export function SetupOverview({
                 aria-disabled={rechecking}
                 autoFocus={focusGlobalRecheck}
                 data-setup-recheck=""
-                onClick={recheck}
+                onClick={() => void recheck()}
                 size="xs"
                 type="button"
                 variant="ghost"

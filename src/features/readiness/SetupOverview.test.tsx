@@ -12,6 +12,7 @@ import { NativeReadinessController } from "@/features/readiness/controller"
 import { NativeReadinessProvider } from "@/features/readiness/provider"
 import {
   SetupOverview,
+  type SetupRequirementOverrides,
   shouldShowSetupOverview,
   unresolvedSetupRequirements,
 } from "@/features/readiness/SetupOverview"
@@ -52,6 +53,8 @@ function renderOverview(
   projectCount: number,
   locale: "en" | "ja" = "en",
   onAddProject = vi.fn(),
+  requirementOverrides?: SetupRequirementOverrides,
+  onRecheck?: () => void | Promise<void>,
 ) {
   const gateway: NativeReadinessGateway = {
     kind: "native",
@@ -76,6 +79,10 @@ function renderOverview(
           <SetupOverview
             onAddProject={onAddProject}
             projectCount={projectCount}
+            {...(onRecheck === undefined ? {} : { onRecheck })}
+            {...(requirementOverrides === undefined
+              ? {}
+              : { requirementOverrides })}
           />
         </NativeReadinessProvider>
       </I18nProvider>,
@@ -99,6 +106,18 @@ describe("SetupOverview", () => {
     expect(shouldShowSetupOverview("native", state, 0)).toBe(true)
     expect(shouldShowSetupOverview("native", state, 1)).toBe(false)
     expect(shouldShowSetupOverview("demo", state, 0)).toBe(false)
+
+    expect(
+      unresolvedSetupRequirements(readinessSnapshot(), 1, {
+        codexUnavailable: true,
+        runtimeUnavailable: true,
+      }).map((item) => item.key),
+    ).toEqual(["codex", "diagnostics"])
+    expect(
+      shouldShowSetupOverview("native", state, 1, {
+        codexUnavailable: true,
+      }),
+    ).toBe(true)
   })
 
   it("hides ready Git and internal checks while showing Codex recovery and the first project", async () => {
@@ -136,5 +155,27 @@ describe("SetupOverview", () => {
     expect(
       screen.queryByRole("heading", { name: "Gitをインストール" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("rechecks native readiness and the app-wide connection override from one action", async () => {
+    const user = userEvent.setup()
+    const onRecheck = vi.fn().mockResolvedValue(undefined)
+    renderOverview(
+      readinessSnapshot(),
+      1,
+      "en",
+      vi.fn(),
+      { codexUnavailable: true },
+      onRecheck,
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "Prepare Codex CLI" }),
+    ).toBeVisible()
+    const recheck = screen.getByRole("button", { name: "Recheck" })
+    expect(screen.getAllByRole("button", { name: "Recheck" })).toHaveLength(1)
+    await user.click(recheck)
+
+    expect(onRecheck).toHaveBeenCalledOnce()
   })
 })

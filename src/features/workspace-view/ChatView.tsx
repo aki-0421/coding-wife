@@ -1,7 +1,6 @@
 import {
   AlertTriangleIcon,
   ArrowDownIcon,
-  InfoIcon,
   Volume2Icon,
   VolumeXIcon,
 } from "lucide-react"
@@ -374,30 +373,15 @@ export function ChatView({
           {copy.timelineTitle}
         </h1>
 
-        <div
-          className={cn(
-            "absolute inset-x-0 top-0 z-10 flex min-h-9 items-center gap-xs border-b border-divider bg-surface px-xl py-xs text-caption",
-            runtimeError ? "text-destructive" : "text-muted-foreground",
-          )}
-          role={runtimeError ? "alert" : "status"}
-        >
-          {runtimeError ? (
+        {runtimeError ? (
+          <div
+            className="absolute inset-x-0 top-0 z-10 flex min-h-9 items-center gap-xs border-b border-divider bg-surface px-xl py-xs text-caption text-destructive"
+            role="alert"
+          >
             <AlertTriangleIcon aria-hidden="true" className="size-3 shrink-0" />
-          ) : (
-            <InfoIcon aria-hidden="true" className="size-3 shrink-0" />
-          )}
-          <span className="min-w-0 flex-1 truncate">
-            {runtimeError
-              ? copy.runtimeErrorTitle
-              : history.mode === "ready"
-                ? copy.previewNoticeWithHistory
-                : history.mode === "ephemeral"
-                  ? connected
-                    ? copy.interactiveDemoNotice
-                    : copy.previewNoticeWithEphemeralHistory
-                  : copy.previewNotice}
-          </span>
-          {runtimeError ? (
+            <span className="min-w-0 flex-1 truncate">
+              {copy.runtimeErrorTitle}
+            </span>
             <Button
               onClick={onRetryRuntime}
               size="xs"
@@ -406,11 +390,11 @@ export function ChatView({
             >
               {copy.retry}
             </Button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         <ScrollArea
-          className="size-full pt-9"
+          className={cn("size-full", runtimeError && "pt-9")}
           data-scroll-locked={scrollLocked || undefined}
           ref={scrollRootRef}
         >

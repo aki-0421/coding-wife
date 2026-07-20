@@ -2213,25 +2213,37 @@ describe("WorkspaceShell", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("uses the persisted history mode consistently in chat and diagnostics", async () => {
+  it("replaces the entire native workspace shell when Codex is disconnected", async () => {
+    const codex: WorkspaceCodexState = {
+      activeWorkspaceId: "workspace-native",
+      generation: null,
+      phase: "failed",
+      connected: false,
+      readiness: {
+        ready: false,
+        fastAvailable: false,
+        maxAvailable: false,
+        reasonCode: "CODEX-NOT-CONNECTED",
+      },
+      pendingRequests: [],
+      timeline: [],
+      errorCode: "CODEX-NOT-CONNECTED",
+    }
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () => Promise.resolve(nativeWorkspaceState()),
+      codexSnapshot: () => codex,
     }
     renderWorkspace(adapter)
 
     expect(
-      await screen.findByText(
-        "Codex and Git are not connected. Local workspace history is persisted and available.",
-      ),
+      await screen.findByRole("heading", { name: "Finish the local setup" }),
     ).toBeVisible()
-    fireEvent.click(appSettingsButton())
-    fireEvent.click(screen.getByRole("button", { name: "Diagnostics" }))
-
-    const localHistory = await screen.findByRole("heading", {
-      name: "Workspace history",
-    })
-    expect(localHistory.closest("article")).toHaveTextContent("Ready")
+    expect(
+      screen.getByRole("heading", { name: "Prepare Codex CLI" }),
+    ).toBeVisible()
+    expect(screen.queryByRole("navigation", { name: "Workspaces" })).toBeNull()
+    expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
   })
 
   it("labels demo history as ephemeral in chat and diagnostics", async () => {
@@ -2246,12 +2258,8 @@ describe("WorkspaceShell", () => {
     const user = userEvent.setup()
     renderWorkspace(adapter)
 
-    expect(
-      await screen.findByText(
-        "Codex and Git are not connected. Demo workspace activity is kept in memory and resets when this preview restarts.",
-      ),
-    ).toBeVisible()
-    expect(screen.getByText("Demo memory")).toBeVisible()
+    expect(await screen.findByText("Demo memory")).toBeVisible()
+    expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
 
     await user.click(appSettingsButton())
     await user.click(screen.getByRole("button", { name: "Diagnostics" }))
