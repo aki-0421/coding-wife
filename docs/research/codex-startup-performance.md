@@ -96,6 +96,18 @@ full hashを省略できるのは、直前のfull verificationと同じ観測epo
 
 一つでも変化した場合、binaryとschemaのcacheを同時に捨て、discovery、full SHA-256、version、schema構造検証から再開する。spawn直後にもmetadata identityを照合し、差し替え時はprocess groupを終了する。初回full hash中もopen file descriptorのidentityを前後比較する既存境界を維持する。
 
+setup App Serverのstable initialize成功もexact verified binary identityへ束縛したin-memory evidenceとして保持する。同じidentityの繰り返しsetup診断は新しいprocessを起動せず、このevidenceからsetup用diagnosticを再構成する。通常接続のfull handshake成功も同じevidenceを更新する。identity再検証の失敗、binary/schema probe失敗、明示pathの実体変更ではevidenceを破棄する。
+
+## 実装後の構造検証
+
+- native workspace adapterは履歴snapshotだけを待ってshellを返し、Codex activationをbackground single-flightとして開始する。
+- 同一workspaceへのready connectは、既存runtime、generation、binary/schema evidenceを変更しない。
+- workspace切替はruntimeだけを置換し、同じbinary identityに束縛したversion/schema evidenceを再利用する。
+- setupを先に実行した後の通常connectは、version discoveryを繰り返さず、通常接続に必要なschemaだけを1回生成する。
+- 実Tauri + fake App Serverの新規app-data検証では、setupと通常sessionを通して`--version` 1回、schema生成1回、short-lived setup process 1件、long-lived session process 1件、各connectionのinitialize 1回ずつを観測した。
+
+回帰testはこれらの呼出回数とPromiseの依存関係だけを検証する。wall clock、CPU速度、disk cache状態を合否条件にしない。
+
 ## 非目標
 
 - timeout値を大きくして遅延を隠さない。
