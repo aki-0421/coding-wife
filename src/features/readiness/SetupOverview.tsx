@@ -12,7 +12,6 @@ import {
   WrenchIcon,
 } from "lucide-react"
 
-import { BrandMark } from "@/components/brand-mark"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -64,7 +63,6 @@ interface SetupOverviewProps {
 }
 
 interface SetupCopy {
-  readonly brandLabel: string
   readonly title: string
   readonly remaining: (count: number) => string
   readonly checkingTitle: string
@@ -97,7 +95,6 @@ interface SetupCopy {
 
 const setupCopy: Readonly<Record<SupportedLocale, SetupCopy>> = {
   en: {
-    brandLabel: "Coding Wife",
     title: "Finish the local setup",
     remaining: (count) => `${count} ${count === 1 ? "item" : "items"} left`,
     checkingTitle: "Checking this Mac",
@@ -165,7 +162,6 @@ const setupCopy: Readonly<Record<SupportedLocale, SetupCopy>> = {
     },
   },
   ja: {
-    brandLabel: "Coding Wife",
     title: "ローカル環境の準備を完了する",
     remaining: (count) => `残り${count}件`,
     checkingTitle: "このMacを確認しています",
@@ -316,6 +312,17 @@ function codexRecovery(
   return { description: copy.codex.reconnect, command: null }
 }
 
+function requirementCommand(
+  copy: SetupCopy,
+  requirement: SetupRequirement,
+): string | null {
+  if (requirement.key === "git") return gitInstallCommand
+  if (requirement.key === "codex") {
+    return codexRecovery(copy, requirement.check).command
+  }
+  return null
+}
+
 function requirementIcon(key: SetupRequirementKey): LucideIcon {
   if (key === "codex") return TerminalIcon
   if (key === "git") return GitBranchIcon
@@ -361,6 +368,11 @@ export function SetupOverview({
   const [copyErrorCommand, setCopyErrorCommand] = useState<string | null>(null)
   const snapshot = state.snapshot
   const requirements = unresolvedSetupRequirements(snapshot, projectCount)
+  const firstRequirement = requirements[0]
+  const focusGlobalRecheck =
+    firstRequirement !== undefined &&
+    firstRequirement.key !== "project" &&
+    requirementCommand(copy, firstRequirement) === null
   const gitReady = gitExecutableIsReady(checkById(snapshot, "git"))
   const rechecking =
     state.status === "loading" ||
@@ -392,13 +404,10 @@ export function SetupOverview({
       data-setup-state={state.status}
     >
       <div className="mx-auto flex min-h-[calc(100dvh-42px)] w-full max-w-[48rem] flex-col justify-center gap-xl py-xl">
-        <header className="flex items-center gap-md">
-          <BrandMark className="size-10 shrink-0" label={copy.brandLabel} />
-          <div className="min-w-0">
-            <h1 className="m-0 text-balance text-lg font-semibold text-text-strong">
-              {copy.title}
-            </h1>
-          </div>
+        <header>
+          <h1 className="m-0 text-balance text-lg font-semibold text-text-strong">
+            {copy.title}
+          </h1>
         </header>
 
         {snapshot === null && state.status === "loading" ? (
@@ -417,6 +426,7 @@ export function SetupOverview({
               </h2>
               <Button
                 aria-disabled={rechecking}
+                autoFocus={focusGlobalRecheck}
                 data-setup-recheck=""
                 onClick={recheck}
                 size="xs"
@@ -442,10 +452,7 @@ export function SetupOverview({
                   requirement.key === "codex"
                     ? codexRecovery(copy, requirement.check)
                     : null
-                const command =
-                  requirement.key === "git"
-                    ? gitInstallCommand
-                    : (codex?.command ?? null)
+                const command = requirementCommand(copy, requirement)
                 const description = codex?.description ?? itemCopy.description
                 const projectDisabled =
                   requirement.key === "project" && !gitReady
@@ -498,58 +505,37 @@ export function SetupOverview({
                           </span>
                         )}
                       </div>
-                      <div className="flex shrink-0 items-center gap-xs max-[640px]:col-start-2 max-[640px]:flex-wrap">
-                        {command === null ? null : (
-                          <Button
-                            autoFocus={index === 0}
-                            data-setup-copy-command={requirement.key}
-                            onClick={() => void copyToClipboard(command)}
-                            size="sm"
-                            type="button"
-                          >
-                            <CopyIcon data-icon="inline-start" />
-                            {copiedCommand === command
-                              ? copy.commandCopied
-                              : copy.copyCommand}
-                          </Button>
-                        )}
-                        {requirement.key === "project" ? (
-                          <Button
-                            autoFocus={index === 0}
-                            data-setup-add-project=""
-                            disabled={projectDisabled}
-                            onClick={onAddProject}
-                            size="sm"
-                            type="button"
-                          >
-                            <FolderPlusIcon data-icon="inline-start" />
-                            {copy.addProject}
-                          </Button>
-                        ) : command === null ? (
-                          <Button
-                            autoFocus={index === 0}
-                            aria-disabled={rechecking}
-                            data-setup-item-recheck={requirement.key}
-                            onClick={recheck}
-                            size="sm"
-                            type="button"
-                          >
-                            <RefreshCwIcon data-icon="inline-start" />
-                            {rechecking ? copy.rechecking : copy.recheck}
-                          </Button>
-                        ) : (
-                          <Button
-                            aria-disabled={rechecking}
-                            data-setup-item-recheck={requirement.key}
-                            onClick={recheck}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            {rechecking ? copy.rechecking : copy.recheck}
-                          </Button>
-                        )}
-                      </div>
+                      {command !== null || requirement.key === "project" ? (
+                        <div className="flex shrink-0 items-center gap-xs max-[640px]:col-start-2 max-[640px]:flex-wrap">
+                          {command === null ? null : (
+                            <Button
+                              autoFocus={index === 0}
+                              data-setup-copy-command={requirement.key}
+                              onClick={() => void copyToClipboard(command)}
+                              size="sm"
+                              type="button"
+                            >
+                              <CopyIcon data-icon="inline-start" />
+                              {copiedCommand === command
+                                ? copy.commandCopied
+                                : copy.copyCommand}
+                            </Button>
+                          )}
+                          {requirement.key === "project" ? (
+                            <Button
+                              autoFocus={index === 0}
+                              data-setup-add-project=""
+                              disabled={projectDisabled}
+                              onClick={onAddProject}
+                              size="sm"
+                              type="button"
+                            >
+                              <FolderPlusIcon data-icon="inline-start" />
+                              {copy.addProject}
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </article>
                     {index === requirements.length - 1 ? null : <Separator />}
                   </li>

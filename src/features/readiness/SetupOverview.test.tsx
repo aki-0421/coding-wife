@@ -111,6 +111,8 @@ describe("SetupOverview", () => {
       screen.getByRole("heading", { name: "Add your first project" }),
     ).toBeVisible()
     expect(screen.getByText("codex login")).toBeVisible()
+    expect(screen.getAllByRole("button", { name: "Recheck" })).toHaveLength(1)
+    expect(screen.queryByLabelText("Coding Wife")).not.toBeInTheDocument()
     expect(
       screen.queryByRole("heading", { name: "Install Git" }),
     ).not.toBeInTheDocument()
@@ -130,6 +132,7 @@ describe("SetupOverview", () => {
       }),
     )
     expect(onAddProject).toHaveBeenCalledOnce()
+    expect(screen.getAllByRole("button", { name: "再確認" })).toHaveLength(1)
     expect(
       screen.queryByRole("heading", { name: "Gitをインストール" }),
     ).not.toBeInTheDocument()
