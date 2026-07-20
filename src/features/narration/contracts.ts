@@ -1,4 +1,5 @@
 export const narrationSchemaVersion = 1 as const
+export const narrationSettingsSchemaVersion = 2 as const
 export const narrationMaxTextScalars = 240
 
 export const narrationCommands = {
@@ -42,18 +43,44 @@ export type NarrationCommitJobTrigger =
   | "user_request"
   | "user_retry"
 
-export interface NarrationVoiceSelectionV1 {
-  readonly ja: string | null
-  readonly en: string | null
-}
+export const narrationProviders = ["openai"] as const
+export type NarrationProvider = (typeof narrationProviders)[number]
 
-export interface NarrationSettingsV1 {
-  readonly schemaVersion: typeof narrationSchemaVersion
+export const openAiTtsModels = ["gpt-4o-mini-tts"] as const
+export type OpenAiTtsModel = (typeof openAiTtsModels)[number]
+
+export const openAiTtsVoices = [
+  "alloy",
+  "ash",
+  "ballad",
+  "coral",
+  "echo",
+  "fable",
+  "nova",
+  "onyx",
+  "sage",
+  "shimmer",
+  "verse",
+  "marin",
+  "cedar",
+] as const
+export type OpenAiTtsVoice = (typeof openAiTtsVoices)[number]
+
+export type NarrationApiKeyActionV2 =
+  | { readonly kind: "keep" }
+  | { readonly kind: "replace"; readonly value: string }
+  | { readonly kind: "clear" }
+
+export interface NarrationSettingsV2 {
+  readonly schemaVersion: typeof narrationSettingsSchemaVersion
   readonly version: number
   readonly enabled: boolean
   readonly muted: boolean
-  readonly voices: NarrationVoiceSelectionV1
-  readonly rate: number
+  readonly provider: NarrationProvider | null
+  readonly apiKeyConfigured: boolean
+  readonly model: OpenAiTtsModel
+  readonly voice: OpenAiTtsVoice
+  readonly speed: number
 }
 
 export interface NarrationRuntimeSnapshotV1 {
@@ -66,7 +93,7 @@ export interface NarrationRuntimeSnapshotV1 {
 
 export interface NarrationSettingsSnapshotV1 {
   readonly schemaVersion: typeof narrationSchemaVersion
-  readonly settings: NarrationSettingsV1
+  readonly settings: NarrationSettingsV2
   readonly runtime: NarrationRuntimeSnapshotV1
   readonly loadWarningCode: string | null
 }
@@ -81,13 +108,16 @@ export interface NarrationVoiceListV1 {
   readonly voices: readonly NarrationVoiceV1[]
 }
 
-export interface NarrationSettingsUpdateV1 {
-  readonly schemaVersion: typeof narrationSchemaVersion
+export interface NarrationSettingsUpdateV2 {
+  readonly schemaVersion: typeof narrationSettingsSchemaVersion
   readonly expectedVersion: number
   readonly enabled: boolean
   readonly muted: boolean
-  readonly voices: NarrationVoiceSelectionV1
-  readonly rate: number
+  readonly provider: NarrationProvider | null
+  readonly apiKeyAction: NarrationApiKeyActionV2
+  readonly model: OpenAiTtsModel
+  readonly voice: OpenAiTtsVoice
+  readonly speed: number
 }
 
 export interface NarrationMuteRequestV1 {
@@ -541,14 +571,7 @@ function invalid(code?: string): never {
   throw new NarrationContractError(code)
 }
 
-function parseVoices(value: unknown): NarrationVoiceSelectionV1 {
-  if (!isRecord(value) || !hasExactKeys(value, ["ja", "en"])) return invalid()
-  if (!isNullableString(value.ja) || !isNullableString(value.en))
-    return invalid()
-  return { ja: value.ja, en: value.en }
-}
-
-export function parseNarrationSettings(value: unknown): NarrationSettingsV1 {
+export function parseNarrationSettings(value: unknown): NarrationSettingsV2 {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
@@ -556,27 +579,39 @@ export function parseNarrationSettings(value: unknown): NarrationSettingsV1 {
       "version",
       "enabled",
       "muted",
-      "voices",
-      "rate",
+      "provider",
+      "apiKeyConfigured",
+      "model",
+      "voice",
+      "speed",
     ]) ||
-    value.schemaVersion !== narrationSchemaVersion ||
+    value.schemaVersion !== narrationSettingsSchemaVersion ||
     !isSafeInteger(value.version) ||
     typeof value.enabled !== "boolean" ||
     typeof value.muted !== "boolean" ||
-    typeof value.rate !== "number" ||
-    value.rate < 0.75 ||
-    value.rate > 1.25 ||
-    Math.abs(value.rate * 20 - Math.round(value.rate * 20)) > 1e-9
+    !(value.provider === null || value.provider === "openai") ||
+    typeof value.apiKeyConfigured !== "boolean" ||
+    !openAiTtsModels.includes(value.model as OpenAiTtsModel) ||
+    !openAiTtsVoices.includes(value.voice as OpenAiTtsVoice) ||
+    typeof value.speed !== "number" ||
+    value.speed < 0.75 ||
+    value.speed > 1.25 ||
+    Math.abs(value.speed * 20 - Math.round(value.speed * 20)) > 1e-9 ||
+    (value.provider !== null && !value.apiKeyConfigured) ||
+    (value.enabled && (!value.apiKeyConfigured || value.provider !== "openai"))
   ) {
     return invalid()
   }
   return {
-    schemaVersion: narrationSchemaVersion,
+    schemaVersion: narrationSettingsSchemaVersion,
     version: value.version,
     enabled: value.enabled,
     muted: value.muted,
-    voices: parseVoices(value.voices),
-    rate: value.rate,
+    provider: value.provider,
+    apiKeyConfigured: value.apiKeyConfigured,
+    model: value.model,
+    voice: value.voice,
+    speed: value.speed,
   }
 }
 
@@ -648,6 +683,7 @@ export function parseNarrationVoiceList(value: unknown): NarrationVoiceListV1 {
       !isRecord(voice) ||
       !hasExactKeys(voice, ["name", "locale"]) ||
       !isSafeString(voice.name) ||
+      !openAiTtsVoices.includes(voice.name as OpenAiTtsVoice) ||
       !isSafeString(voice.locale) ||
       !(voice.locale === "ja_JP" || /^en_[A-Z]{2}$/u.test(voice.locale))
     ) {

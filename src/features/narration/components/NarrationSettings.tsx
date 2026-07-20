@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
+  AudioLinesIcon,
   CircleAlertIcon,
-  ShieldCheckIcon,
+  KeyRoundIcon,
   Volume2Icon,
   VolumeXIcon,
 } from "lucide-react"
@@ -23,16 +24,22 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   isCaptionTargetFullyVisible,
   scheduleAfterCaptionPaint,
 } from "@/features/narration/components/caption-visibility"
-import type {
-  NarrationSettingsV1,
-  NarrationVoiceSelectionV1,
+import {
+  openAiTtsModels,
+  openAiTtsVoices,
+  type NarrationProvider,
+  type NarrationSettingsV2,
+  type OpenAiTtsModel,
+  type OpenAiTtsVoice,
 } from "@/features/narration/contracts"
 import { narrationCopy } from "@/features/narration/copy"
 import {
@@ -41,48 +48,55 @@ import {
 } from "@/features/narration/hooks"
 import { useI18n } from "@/features/localization"
 
-const rateOptions = Array.from(
+const speedOptions = Array.from(
   { length: 11 },
   (_, index) => 0.75 + index * 0.05,
 )
 
 interface NarrationDraft {
   readonly enabled: boolean
-  readonly voices: NarrationVoiceSelectionV1
-  readonly rate: number
+  readonly provider: NarrationProvider | null
+  readonly model: OpenAiTtsModel
+  readonly voice: OpenAiTtsVoice
+  readonly speed: number
+  readonly apiKey: string
+  readonly clearApiKey: boolean
 }
 
 export interface NarrationSettingsProps {
   readonly heading: string
-  readonly muted: boolean
   readonly workspaceId: string
-  readonly onMutedChange: (muted: boolean) => void
 }
 
-function draftFromSettings(settings: NarrationSettingsV1): NarrationDraft {
+function draftFromSettings(settings: NarrationSettingsV2): NarrationDraft {
   return {
     enabled: settings.enabled,
-    voices: settings.voices,
-    rate: settings.rate,
+    provider: settings.provider,
+    model: settings.model,
+    voice: settings.voice,
+    speed: settings.speed,
+    apiKey: "",
+    clearApiKey: false,
   }
 }
 
-function sameDraft(draft: NarrationDraft, settings: NarrationSettingsV1) {
+function sameDraft(draft: NarrationDraft, settings: NarrationSettingsV2) {
   return (
     draft.enabled === settings.enabled &&
-    draft.rate === settings.rate &&
-    draft.voices.ja === settings.voices.ja &&
-    draft.voices.en === settings.voices.en
+    draft.provider === settings.provider &&
+    draft.model === settings.model &&
+    draft.voice === settings.voice &&
+    draft.speed === settings.speed &&
+    draft.apiKey.length === 0 &&
+    !draft.clearApiKey
   )
 }
 
 function NarrationSettingsForm({
   heading,
-  muted,
   workspaceId,
-  onMutedChange,
   settings,
-}: NarrationSettingsProps & { readonly settings: NarrationSettingsV1 }) {
+}: NarrationSettingsProps & { readonly settings: NarrationSettingsV2 }) {
   const { locale } = useI18n()
   const copy = narrationCopy[locale]
   const controller = useNarrationController()
@@ -90,32 +104,22 @@ function NarrationSettingsForm({
   const [draft, setDraft] = useState(() => draftFromSettings(settings))
   const [resetOpen, setResetOpen] = useState(false)
   const testCaptionRef = useRef<HTMLDivElement>(null)
-  const voices = controller.voicesForLocale(locale)
-  const selectedVoice = draft.voices[locale]
   const dirty = !sameDraft(draft, settings)
   const saving = snapshot.settingsStatus === "saving"
-  const voiceUnavailable =
-    snapshot.voiceStatus === "error" || voices.length === 0
-  const currentVoiceIsValid =
-    selectedVoice !== null &&
-    voices.some((voice) => voice.name === selectedVoice)
-  const canSave =
-    dirty &&
-    !saving &&
-    (!draft.enabled || (currentVoiceIsValid && !voiceUnavailable))
+  const apiKeyValid =
+    draft.apiKey.length === 0 ||
+    (draft.apiKey.length <= 512 && /^[A-Za-z0-9._-]+$/u.test(draft.apiKey))
+  const providerAvailable =
+    !draft.clearApiKey &&
+    (settings.apiKeyConfigured || (draft.apiKey.length > 0 && apiKeyValid))
+  const canSave = dirty && !saving && apiKeyValid
   const canTest =
     !dirty &&
     settings.enabled &&
-    !settings.muted &&
-    currentVoiceIsValid &&
-    !voiceUnavailable &&
+    settings.apiKeyConfigured &&
+    settings.provider === "openai" &&
     snapshot.test.status !== "preparing" &&
     snapshot.test.status !== "playing"
-  const presentation = snapshot.presentation
-
-  useEffect(() => {
-    if (settings.muted !== muted) onMutedChange(settings.muted)
-  }, [muted, onMutedChange, settings.muted])
 
   useLayoutEffect(() => {
     const caption = testCaptionRef.current
@@ -133,38 +137,29 @@ function NarrationSettingsForm({
     return dirty ? copy.unsaved : copy.saved
   }, [copy.saved, copy.unsaved, dirty, snapshot.settingsStatus])
 
-  const setVoice = (voice: string | null) => {
-    setDraft((current) => ({
-      ...current,
-      voices: { ...current.voices, [locale]: voice },
-    }))
-  }
-
-  const setEnabled = (enabled: boolean) => {
-    setDraft((current) => {
-      const nextVoice =
-        enabled && current.voices[locale] === null
-          ? (voices[0]?.name ?? null)
-          : current.voices[locale]
-      return {
-        ...current,
-        enabled,
-        voices: { ...current.voices, [locale]: nextVoice },
-      }
-    })
-  }
-
   const save = async () => {
-    await controller.saveSettings({
-      enabled: draft.enabled,
+    const nextHasKey =
+      draft.apiKey.length > 0 ||
+      (settings.apiKeyConfigured && !draft.clearApiKey)
+    const saved = await controller.saveSettings({
+      enabled: nextHasKey ? draft.enabled : false,
       muted: settings.muted,
-      voices: draft.voices,
-      rate: draft.rate,
+      provider: nextHasKey ? (draft.provider ?? "openai") : null,
+      apiKeyAction: draft.clearApiKey
+        ? { kind: "clear" }
+        : draft.apiKey.length > 0
+          ? { kind: "replace", value: draft.apiKey }
+          : { kind: "keep" },
+      model: draft.model,
+      voice: draft.voice,
+      speed: draft.speed,
     })
-  }
-
-  const setMuted = async (nextMuted: boolean) => {
-    if (await controller.setMuted(nextMuted)) onMutedChange(nextMuted)
+    if (saved) {
+      const savedSettings = controller.getSnapshot().settingsSnapshot?.settings
+      if (savedSettings !== undefined) {
+        setDraft(draftFromSettings(savedSettings))
+      }
+    }
   }
 
   const playTest = async () => {
@@ -184,141 +179,258 @@ function NarrationSettingsForm({
       if (resetSettings !== undefined) {
         setDraft(draftFromSettings(resetSettings))
       }
-      onMutedChange(false)
       setResetOpen(false)
     }
   }
 
   return (
     <section
-      className="flex max-w-[780px] flex-col gap-lg"
+      className="flex max-w-[780px] flex-col gap-xl"
       data-narration-settings
     >
-      <div className="flex flex-wrap items-start justify-between gap-md">
-        <div className="min-w-0">
-          <h2 className="m-0 text-headline text-text-strong">{heading}</h2>
-          <p className="m-0 mt-xs max-w-[68ch] text-caption text-muted-foreground">
-            {copy.description}
-          </p>
-        </div>
-        <Badge className="shrink-0" variant="outline">
-          <ShieldCheckIcon aria-hidden="true" />
-          {copy.localOnly}
-        </Badge>
+      <div className="min-w-0">
+        <h2 className="m-0 text-headline text-text-strong">{heading}</h2>
+        <p className="m-0 mt-xs max-w-[68ch] text-caption text-muted-foreground">
+          {copy.description}
+        </p>
       </div>
 
-      {snapshot.settingsStatus === "error" || voiceUnavailable ? (
+      {snapshot.settingsStatus === "error" ? (
         <Alert>
           <CircleAlertIcon aria-hidden="true" />
           <AlertTitle>{copy.errorTitle}</AlertTitle>
           <AlertDescription>
             {copy.unavailableDescription}
             <span className="mt-xxs block font-mono text-label">
-              {snapshot.lastErrorCode ?? "NARRATION-VOICE-UNAVAILABLE"}
+              {snapshot.lastErrorCode ?? "NARRATION-SETTINGS-UNAVAILABLE"}
             </span>
-            {voiceUnavailable ? (
-              <Button
-                className="mt-sm"
-                disabled={snapshot.voiceStatus === "loading"}
-                onClick={() => void controller.refreshVoices()}
-                size="xs"
-                type="button"
-                variant="secondary"
-              >
-                {copy.retryVoices}
-              </Button>
-            ) : null}
           </AlertDescription>
         </Alert>
       ) : null}
 
-      <div className="rounded-panel border border-divider bg-surface px-lg py-md">
-        <p className="m-0 text-label text-muted-foreground">
-          {copy.sourceLabel}
-        </p>
-        <p className="m-0 mt-xxs font-mono text-caption text-text-strong">
-          {copy.sourceValue}
-        </p>
-        <p className="m-0 mt-xs text-caption text-muted-foreground">
-          {copy.sourceDescription}
-        </p>
-      </div>
-
       <FieldGroup>
-        <Field className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-lg">
+        <Field
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-lg"
+          data-disabled={!providerAvailable || undefined}
+        >
           <FieldLabel htmlFor="narration-enabled">{copy.enable}</FieldLabel>
           <Switch
             aria-label={copy.enable}
             checked={draft.enabled}
-            disabled={saving || voiceUnavailable}
+            disabled={saving || !providerAvailable}
             id="narration-enabled"
-            onCheckedChange={setEnabled}
+            onCheckedChange={(enabled) =>
+              setDraft((current) => ({ ...current, enabled }))
+            }
           />
           <FieldDescription className="col-start-1">
             {copy.enableDescription}
           </FieldDescription>
         </Field>
 
-        <Field className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-lg">
-          <FieldLabel htmlFor="narration-muted">{copy.mute}</FieldLabel>
-          <Switch
-            aria-label={copy.mute}
-            checked={settings.muted}
-            disabled={saving}
-            id="narration-muted"
-            onCheckedChange={(nextMuted) => void setMuted(nextMuted)}
-          />
-          <FieldDescription className="col-start-1">
-            {copy.muteDescription}
-          </FieldDescription>
-        </Field>
-
-        <Field>
-          <FieldLabel htmlFor="narration-voice">{copy.voice}</FieldLabel>
+        <Field data-disabled={!providerAvailable || undefined}>
+          <FieldLabel htmlFor="narration-provider">{copy.provider}</FieldLabel>
           <NativeSelect
             className="w-full max-w-72"
-            disabled={!draft.enabled || saving || voiceUnavailable}
-            id="narration-voice"
-            onChange={(event) => setVoice(event.currentTarget.value || null)}
-            value={selectedVoice ?? ""}
-          >
-            <NativeSelectOption value="">{copy.noVoice}</NativeSelectOption>
-            {voices.map((voice) => (
-              <NativeSelectOption
-                key={`${voice.locale}:${voice.name}`}
-                value={voice.name}
-              >
-                {voice.name} · {voice.locale}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <FieldDescription>{copy.voiceDescription}</FieldDescription>
-        </Field>
-
-        <Field>
-          <FieldLabel htmlFor="narration-rate">{copy.rate}</FieldLabel>
-          <NativeSelect
-            className="w-full max-w-44"
-            disabled={!draft.enabled || saving}
-            id="narration-rate"
+            disabled={saving || !providerAvailable}
+            id="narration-provider"
             onChange={(event) => {
-              const rate = Number(event.currentTarget.value)
+              const provider =
+                event.currentTarget.value === "openai" ? "openai" : null
               setDraft((current) => ({
                 ...current,
-                rate,
+                provider,
               }))
             }}
-            value={draft.rate.toFixed(2)}
+            value={providerAvailable ? (draft.provider ?? "openai") : ""}
           >
-            {rateOptions.map((rate) => (
-              <NativeSelectOption key={rate} value={rate.toFixed(2)}>
-                {rate.toFixed(2)}×
+            {!providerAvailable ? (
+              <NativeSelectOption value="">
+                {copy.noProvider}
               </NativeSelectOption>
-            ))}
+            ) : null}
+            {providerAvailable ? (
+              <NativeSelectOption value="openai">OpenAI</NativeSelectOption>
+            ) : null}
           </NativeSelect>
-          <FieldDescription>{copy.rateDescription}</FieldDescription>
+          <FieldDescription>{copy.providerDescription}</FieldDescription>
         </Field>
       </FieldGroup>
+
+      <Tabs defaultValue="openai">
+        <TabsList
+          aria-label={copy.providerTabsLabel}
+          className="min-h-10 gap-xl overflow-x-auto border-b border-divider"
+        >
+          <TabsTrigger
+            className="px-xxs after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-transparent data-[state=active]:after:bg-warm-active"
+            value="openai"
+          >
+            {copy.openAi}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent className="pt-lg" value="openai">
+          <FieldGroup>
+            <Field data-invalid={!apiKeyValid || undefined}>
+              <div className="flex flex-wrap items-center justify-between gap-sm">
+                <FieldLabel htmlFor="narration-openai-api-key">
+                  {copy.apiKey}
+                </FieldLabel>
+                <Badge
+                  variant={
+                    settings.apiKeyConfigured && !draft.clearApiKey
+                      ? "success"
+                      : "outline"
+                  }
+                >
+                  <KeyRoundIcon aria-hidden="true" className="size-3" />
+                  {settings.apiKeyConfigured && !draft.clearApiKey
+                    ? copy.apiKeyConfigured
+                    : copy.apiKeyNotConfigured}
+                </Badge>
+              </div>
+              <Input
+                aria-describedby={
+                  apiKeyValid
+                    ? "narration-openai-api-key-description"
+                    : "narration-openai-api-key-description narration-openai-api-key-error"
+                }
+                aria-invalid={!apiKeyValid}
+                autoComplete="off"
+                className="max-w-[28rem]"
+                disabled={saving || draft.clearApiKey}
+                id="narration-openai-api-key"
+                maxLength={512}
+                onChange={(event) => {
+                  const apiKey = event.currentTarget.value
+                  setDraft((current) => ({
+                    ...current,
+                    apiKey,
+                  }))
+                }}
+                placeholder={copy.apiKeyPlaceholder}
+                spellCheck={false}
+                type="password"
+                value={draft.apiKey}
+              />
+              <FieldDescription id="narration-openai-api-key-description">
+                {copy.apiKeyDescription}
+              </FieldDescription>
+              {!apiKeyValid ? (
+                <p
+                  className="m-0 text-caption text-destructive"
+                  id="narration-openai-api-key-error"
+                >
+                  {copy.apiKeyInvalid}
+                </p>
+              ) : null}
+              {settings.apiKeyConfigured ? (
+                <div className="flex flex-wrap items-center gap-sm">
+                  <Button
+                    disabled={saving}
+                    onClick={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        enabled: current.clearApiKey ? settings.enabled : false,
+                        provider: current.clearApiKey
+                          ? settings.provider
+                          : null,
+                        apiKey: "",
+                        clearApiKey: !current.clearApiKey,
+                      }))
+                    }
+                    size="xs"
+                    type="button"
+                    variant="outline"
+                  >
+                    {draft.clearApiKey ? copy.resetCancel : copy.clearApiKey}
+                  </Button>
+                  {draft.clearApiKey ? (
+                    <span className="text-caption text-destructive">
+                      {copy.apiKeyWillBeRemoved}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="narration-model">{copy.model}</FieldLabel>
+              <NativeSelect
+                className="w-full max-w-72"
+                disabled={saving}
+                id="narration-model"
+                onChange={(event) => {
+                  const model = event.currentTarget.value as OpenAiTtsModel
+                  setDraft((current) => ({
+                    ...current,
+                    model,
+                  }))
+                }}
+                value={draft.model}
+              >
+                {openAiTtsModels.map((model) => (
+                  <NativeSelectOption key={model} value={model}>
+                    {model}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <FieldDescription>{copy.modelDescription}</FieldDescription>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="narration-voice">{copy.voice}</FieldLabel>
+              <NativeSelect
+                className="w-full max-w-72"
+                disabled={saving}
+                id="narration-voice"
+                onChange={(event) => {
+                  const voice = event.currentTarget.value as OpenAiTtsVoice
+                  setDraft((current) => ({
+                    ...current,
+                    voice,
+                  }))
+                }}
+                value={draft.voice}
+              >
+                {openAiTtsVoices.map((voice) => (
+                  <NativeSelectOption key={voice} value={voice}>
+                    {voice}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <FieldDescription>{copy.voiceDescription}</FieldDescription>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="narration-speed">{copy.speed}</FieldLabel>
+              <NativeSelect
+                className="w-full max-w-44"
+                disabled={saving}
+                id="narration-speed"
+                onChange={(event) => {
+                  const speed = Number(event.currentTarget.value)
+                  setDraft((current) => ({ ...current, speed }))
+                }}
+                value={draft.speed.toFixed(2)}
+              >
+                {speedOptions.map((speed) => (
+                  <NativeSelectOption key={speed} value={speed.toFixed(2)}>
+                    {speed.toFixed(2)}×
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <FieldDescription>{copy.speedDescription}</FieldDescription>
+            </Field>
+          </FieldGroup>
+
+          <Alert className="mt-lg">
+            <AudioLinesIcon aria-hidden="true" />
+            <AlertTitle>{copy.openAi}</AlertTitle>
+            <AlertDescription>{copy.aiDisclosure}</AlertDescription>
+          </Alert>
+        </TabsContent>
+      </Tabs>
 
       <div className="flex flex-wrap items-center gap-sm border-t border-divider pt-md">
         <Button disabled={!canSave} onClick={() => void save()} type="button">
@@ -345,7 +457,7 @@ function NarrationSettingsForm({
             type="button"
             variant="secondary"
           >
-            <Volume2Icon aria-hidden="true" />
+            <Volume2Icon aria-hidden="true" data-icon="inline-start" />
             {copy.test}
           </Button>
           <Button
@@ -357,7 +469,7 @@ function NarrationSettingsForm({
             type="button"
             variant="outline"
           >
-            <VolumeXIcon aria-hidden="true" />
+            <VolumeXIcon aria-hidden="true" data-icon="inline-start" />
             {copy.cancelTest}
           </Button>
           <Button
@@ -389,34 +501,6 @@ function NarrationSettingsForm({
             ) : null}
           </div>
         ) : null}
-      </div>
-
-      <Separator />
-
-      <div aria-live="polite" className="text-caption" role="status">
-        <p className="m-0 text-title text-text-strong">
-          {copy.activePresentation}
-        </p>
-        {presentation ? (
-          <dl className="m-0 mt-xs grid grid-cols-[max-content_minmax(0,1fr)] gap-x-lg gap-y-xxs">
-            <dt className="text-muted-foreground">Commit</dt>
-            <dd className="m-0 font-mono">
-              {presentation.key.commitSha.slice(0, 8)}
-            </dd>
-            <dt className="text-muted-foreground">{copy.status}</dt>
-            <dd className="m-0">
-              {copy.presentationStatuses[presentation.status]}
-            </dd>
-            <dt className="text-muted-foreground">{copy.speech}</dt>
-            <dd className="m-0">
-              {copy.speechStatuses[presentation.speechStatus]}
-            </dd>
-          </dl>
-        ) : (
-          <p className="m-0 mt-xxs text-muted-foreground">
-            {copy.noPresentation}
-          </p>
-        )}
       </div>
 
       <Dialog onOpenChange={setResetOpen} open={resetOpen}>

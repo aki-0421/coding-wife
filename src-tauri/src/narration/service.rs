@@ -6,20 +6,21 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 
-use super::binary::{exact_voice_available, NarrationBinary, NarrationSpeech};
+use super::binary::{NarrationBinary, NarrationSpeech};
 use super::error::{narration_error, NarrationResult};
 use super::policy::{NarrationPolicy, PolicyRejection, ScopeRejection};
 use super::process::NarrationProcessControl;
 use super::settings::{
-    rate_to_words_per_minute, remap_settings_error, validate_settings, NarrationSettingsStore,
+    remap_settings_error, validate_api_key, validate_settings, NarrationSettingsStore,
 };
 use super::types::{
-    NarrationCancelRequestV1, NarrationDisposition, NarrationKind, NarrationLocale,
-    NarrationMuteRequestV1, NarrationPlaybackState, NarrationPriority, NarrationResetRequestV1,
-    NarrationRuntimeSnapshotV1, NarrationScopeRequestV1, NarrationSettingsSnapshotV1,
-    NarrationSettingsUpdateV1, NarrationSettingsV1, NarrationSpeakRequestV1,
-    NarrationSpeakResponseV1, NarrationVoiceListV1, NARRATION_MAX_QUEUE_DEPTH,
-    NARRATION_SCHEMA_VERSION,
+    NarrationApiKeyActionV2, NarrationCancelRequestV1, NarrationDisposition, NarrationKind,
+    NarrationMuteRequestV1, NarrationPlaybackState, NarrationPriority, NarrationProvider,
+    NarrationResetRequestV1, NarrationRuntimeSnapshotV1, NarrationScopeRequestV1,
+    NarrationSettingsSnapshotV1, NarrationSettingsUpdateV2, NarrationSettingsV2,
+    NarrationSpeakRequestV1, NarrationSpeakResponseV1, NarrationVoiceListV1, NarrationVoiceV1,
+    NARRATION_MAX_QUEUE_DEPTH, NARRATION_SCHEMA_VERSION, NARRATION_SETTINGS_SCHEMA_VERSION,
+    OPENAI_TTS_VOICES,
 };
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -49,10 +50,10 @@ struct QueuedNarration {
     epoch: u64,
 }
 
-#[derive(Debug)]
 struct SettingsState {
     store: Option<NarrationSettingsStore>,
-    settings: NarrationSettingsV1,
+    settings: NarrationSettingsV2,
+    api_key: Option<String>,
     load_warning_code: Option<String>,
 }
 
@@ -75,7 +76,6 @@ impl Default for RuntimeState {
     }
 }
 
-#[derive(Debug)]
 struct NarrationInner {
     settings: Mutex<SettingsState>,
     binary: NarrationBinary,
@@ -90,26 +90,29 @@ struct NarrationInner {
     shutdown: AtomicBool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct NarrationService {
     inner: Arc<NarrationInner>,
 }
 
 impl NarrationService {
     pub fn production(app_data_directory: impl AsRef<Path>) -> Self {
+        let app_data_directory = app_data_directory.as_ref();
         let settings = match NarrationSettingsStore::open(app_data_directory) {
             Ok(opened) => SettingsState {
                 store: Some(opened.store),
                 settings: opened.settings,
+                api_key: opened.api_key,
                 load_warning_code: opened.load_warning_code,
             },
             Err(error) => SettingsState {
                 store: None,
-                settings: NarrationSettingsV1::default(),
+                settings: NarrationSettingsV2::default(),
+                api_key: None,
                 load_warning_code: Some(error.code),
             },
         };
-        Self::new(settings, NarrationBinary::production())
+        Self::new(settings, NarrationBinary::production(app_data_directory))
     }
 
     #[cfg(test)]
@@ -122,6 +125,7 @@ impl NarrationService {
             SettingsState {
                 store: Some(opened.store),
                 settings: opened.settings,
+                api_key: opened.api_key,
                 load_warning_code: opened.load_warning_code,
             },
             NarrationBinary::fixture(binary, effective_uid()),
@@ -182,13 +186,15 @@ impl NarrationService {
     }
 
     pub async fn list_voices(&self) -> NarrationResult<NarrationVoiceListV1> {
-        let _operation = self.inner.operation_lock.lock().await;
-        let epoch = self.inner.process.epoch();
-        let voices = self
-            .inner
-            .binary
-            .list_voices(self.inner.process.clone(), epoch)
-            .await?;
+        let voices = OPENAI_TTS_VOICES
+            .iter()
+            .flat_map(|voice| {
+                ["ja_JP", "en_US"].map(|locale| NarrationVoiceV1 {
+                    name: (*voice).to_owned(),
+                    locale: locale.to_owned(),
+                })
+            })
+            .collect();
         Ok(NarrationVoiceListV1 {
             schema_version: NARRATION_SCHEMA_VERSION,
             voices,
@@ -197,9 +203,9 @@ impl NarrationService {
 
     pub async fn update_settings(
         &self,
-        request: NarrationSettingsUpdateV1,
+        request: NarrationSettingsUpdateV2,
     ) -> NarrationResult<NarrationSettingsSnapshotV1> {
-        if request.schema_version != NARRATION_SCHEMA_VERSION {
+        if request.schema_version != NARRATION_SETTINGS_SCHEMA_VERSION {
             return Err(narration_error(
                 "narration_update_settings",
                 "NARRATION-SCHEMA-VERSION",
@@ -213,36 +219,8 @@ impl NarrationService {
                 false,
             )
         })?;
-        let next = NarrationSettingsV1 {
-            schema_version: NARRATION_SCHEMA_VERSION,
-            version: next_version,
-            enabled: request.enabled,
-            muted: request.muted,
-            voices: request.voices,
-            rate: request.rate,
-        };
-        validate_settings(&next, "narration_update_settings")?;
-        let current_before_validation = self.snapshot()?.settings;
-        if next.enabled
-            && (!current_before_validation.enabled
-                || current_before_validation.voices != next.voices)
-        {
-            let voices = self.list_voices().await?.voices;
-            for (locale, selected) in [
-                (NarrationLocale::Ja, next.voices.ja.as_deref()),
-                (NarrationLocale::En, next.voices.en.as_deref()),
-            ] {
-                if selected.is_some_and(|voice| !exact_voice_available(&voices, locale, voice)) {
-                    return Err(narration_error(
-                        "narration_update_settings",
-                        "NARRATION-VOICE-UNAVAILABLE",
-                        true,
-                    ));
-                }
-            }
-        }
-
         let _admission = self.inner.admission_lock.lock().await;
+        let next;
         {
             let mut state = self.inner.settings.lock().map_err(|_| {
                 narration_error(
@@ -258,6 +236,26 @@ impl NarrationService {
                     true,
                 ));
             }
+            let api_key = match request.api_key_action {
+                NarrationApiKeyActionV2::Keep => state.api_key.clone(),
+                NarrationApiKeyActionV2::Replace { value } => {
+                    validate_api_key(&value, "narration_update_settings")?;
+                    Some(value)
+                }
+                NarrationApiKeyActionV2::Clear => None,
+            };
+            next = NarrationSettingsV2 {
+                schema_version: NARRATION_SETTINGS_SCHEMA_VERSION,
+                version: next_version,
+                enabled: request.enabled,
+                muted: request.muted,
+                provider: request.provider,
+                api_key_configured: api_key.is_some(),
+                model: request.model,
+                voice: request.voice,
+                speed: request.speed,
+            };
+            validate_settings(&next, api_key.as_deref(), "narration_update_settings")?;
             let store = state.store.as_ref().ok_or_else(|| {
                 narration_error(
                     "narration_update_settings",
@@ -266,9 +264,10 @@ impl NarrationService {
                 )
             })?;
             store
-                .save(&next)
+                .save(&next, api_key.as_deref())
                 .map_err(|error| remap_settings_error(error, "narration_update_settings"))?;
             state.settings = next.clone();
+            state.api_key = api_key;
             state.load_warning_code = None;
         }
         if !next.enabled || next.muted {
@@ -289,13 +288,16 @@ impl NarrationService {
             ));
         }
         let current = self.snapshot()?.settings;
-        self.update_settings(NarrationSettingsUpdateV1 {
-            schema_version: NARRATION_SCHEMA_VERSION,
+        self.update_settings(NarrationSettingsUpdateV2 {
+            schema_version: NARRATION_SETTINGS_SCHEMA_VERSION,
             expected_version: request.expected_version,
             enabled: current.enabled,
             muted: request.muted,
-            voices: current.voices,
-            rate: current.rate,
+            provider: current.provider,
+            api_key_action: NarrationApiKeyActionV2::Keep,
+            model: current.model,
+            voice: current.voice,
+            speed: current.speed,
         })
         .await
         .map_err(|error| error.with_operation("narration_set_muted"))
@@ -331,9 +333,9 @@ impl NarrationService {
                     true,
                 ));
             }
-            let reset = NarrationSettingsV1 {
+            let reset = NarrationSettingsV2 {
                 version: next_version,
-                ..NarrationSettingsV1::default()
+                ..NarrationSettingsV2::default()
             };
             let store = state.store.as_ref().ok_or_else(|| {
                 narration_error(
@@ -343,9 +345,10 @@ impl NarrationService {
                 )
             })?;
             store
-                .save(&reset)
+                .save(&reset, None)
                 .map_err(|error| remap_settings_error(error, "narration_reset_settings"))?;
             state.settings = reset;
+            state.api_key = None;
             state.load_warning_code = None;
         }
         self.cancel_admitted().await?;
@@ -403,10 +406,10 @@ impl NarrationService {
         if settings.muted {
             return Ok(self.response(NarrationDisposition::Muted, None));
         }
-        if settings.voices.for_locale(request.locale).is_none() {
+        if settings.provider != Some(NarrationProvider::OpenAi) || !settings.api_key_configured {
             return Ok(self.response(
                 NarrationDisposition::Unavailable,
-                Some("NARRATION-VOICE-UNAVAILABLE"),
+                Some("NARRATION-PROVIDER-UNAVAILABLE"),
             ));
         }
 
@@ -659,8 +662,8 @@ async fn worker_loop(inner: Arc<NarrationInner>) {
             finish_job(&inner, &job, None);
             continue;
         }
-        let settings = match inner.settings.lock() {
-            Ok(settings) => settings.settings.clone(),
+        let (settings, api_key) = match inner.settings.lock() {
+            Ok(settings) => (settings.settings.clone(), settings.api_key.clone()),
             Err(_) => {
                 finish_job(&inner, &job, Some("NARRATION-SETTINGS-STATE"));
                 continue;
@@ -670,16 +673,13 @@ async fn worker_loop(inner: Arc<NarrationInner>) {
             finish_job(&inner, &job, None);
             continue;
         }
-        let Some(voice) = settings.voices.for_locale(job.request.locale) else {
-            finish_job(&inner, &job, Some("NARRATION-VOICE-UNAVAILABLE"));
+        if settings.provider != Some(NarrationProvider::OpenAi) {
+            finish_job(&inner, &job, Some("NARRATION-PROVIDER-UNAVAILABLE"));
             continue;
         };
-        let words_per_minute = match rate_to_words_per_minute(settings.rate) {
-            Ok(rate) => rate,
-            Err(_) => {
-                finish_job(&inner, &job, Some("NARRATION-RATE-INVALID"));
-                continue;
-            }
+        let Some(api_key) = api_key else {
+            finish_job(&inner, &job, Some("NARRATION-API-KEY-REQUIRED"));
+            continue;
         };
         if let Ok(mut policy) = inner.policy.lock() {
             policy.record_start(Instant::now());
@@ -698,9 +698,10 @@ async fn worker_loop(inner: Arc<NarrationInner>) {
                     inner.process.clone(),
                     job.epoch,
                     NarrationSpeech {
-                        locale: job.request.locale,
-                        voice,
-                        words_per_minute,
+                        api_key: &api_key,
+                        model: &settings.model,
+                        voice: &settings.voice,
+                        speed: settings.speed,
                         text: &job.text,
                         timeout,
                     },

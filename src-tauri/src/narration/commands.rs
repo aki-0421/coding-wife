@@ -3,7 +3,7 @@ use tauri::State;
 use super::{
     NarrationCancelRequestV1, NarrationCommandError, NarrationMuteRequestV1,
     NarrationResetRequestV1, NarrationRuntimeSnapshotV1, NarrationScopeRequestV1, NarrationService,
-    NarrationSettingsSnapshotV1, NarrationSettingsUpdateV1, NarrationSpeakRequestV1,
+    NarrationSettingsSnapshotV1, NarrationSettingsUpdateV2, NarrationSpeakRequestV1,
     NarrationSpeakResponseV1, NarrationVoiceListV1,
 };
 
@@ -30,7 +30,7 @@ pub async fn narration_list_voices(
 
 #[tauri::command]
 pub async fn narration_update_settings(
-    request: NarrationSettingsUpdateV1,
+    request: NarrationSettingsUpdateV2,
     service: State<'_, NarrationService>,
 ) -> Result<NarrationSettingsSnapshotV1, NarrationCommandError> {
     public_operation(

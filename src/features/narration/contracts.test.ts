@@ -7,6 +7,7 @@ import {
   commitNarrationSourceKey,
   narrationMaxTextScalars,
   narrationSchemaVersion,
+  narrationSettingsSchemaVersion,
   parseCommitNarrationConsumerEvent,
   parseNarrationSettingsSnapshot,
   parseNarrationSpeakResponse,
@@ -20,12 +21,15 @@ const sha = "a".repeat(40)
 const settingsSnapshot = {
   schemaVersion: narrationSchemaVersion,
   settings: {
-    schemaVersion: narrationSchemaVersion,
+    schemaVersion: narrationSettingsSchemaVersion,
     version: 4,
     enabled: true,
     muted: false,
-    voices: { ja: "Kyoko", en: "Samantha" },
-    rate: 1.15,
+    provider: "openai",
+    apiKeyConfigured: true,
+    model: "gpt-4o-mini-tts",
+    voice: "marin",
+    speed: 1.15,
   },
   runtime: {
     schemaVersion: narrationSchemaVersion,
@@ -60,8 +64,8 @@ describe("narration contracts", () => {
       parseNarrationVoiceList({
         schemaVersion: narrationSchemaVersion,
         voices: [
-          { name: "Kyoko", locale: "ja_JP" },
-          { name: "Samantha", locale: "en_US" },
+          { name: "marin", locale: "ja_JP" },
+          { name: "cedar", locale: "en_US" },
         ],
       }).voices,
     ).toHaveLength(2)
@@ -98,11 +102,11 @@ describe("narration contracts", () => {
     ).toMatchObject({ kind: "chunk", sequence: 0 })
   })
 
-  it("rejects unknown fields, invalid rate steps, and malformed native values", () => {
+  it("rejects unknown fields, invalid speed steps, and malformed native values", () => {
     expect(() =>
       parseNarrationSettingsSnapshot({
         ...settingsSnapshot,
-        settings: { ...settingsSnapshot.settings, rate: 1.12 },
+        settings: { ...settingsSnapshot.settings, speed: 1.12 },
       }),
     ).toThrow(NarrationContractError)
     expect(() =>

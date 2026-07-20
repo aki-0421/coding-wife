@@ -427,18 +427,11 @@ function CompanionSettings({
 
 function AudioSettings({
   copy,
-  muted,
   workspaceId,
-  onMutedChange,
-}: Pick<
-  AppSettingsViewProps,
-  "copy" | "muted" | "workspaceId" | "onMutedChange"
->) {
+}: Pick<AppSettingsViewProps, "copy" | "workspaceId">) {
   return (
     <NarrationSettings
       heading={copy.settingsView.audioTitle}
-      muted={muted}
-      onMutedChange={onMutedChange}
       workspaceId={workspaceId}
     />
   )
