@@ -91,6 +91,11 @@ helperは`window.devicePixelRatio`を掛けた物理サイズをWebDriverへ渡�
   読み書きしない。
 - E2Eからprojectを登録する場合は`/tmp`またはrepositoryのignore済み`tmp/`に作った
   disposable repositoryだけを使う。利用者の実repositoryを使わない。
+- macOS folder pickerを介さずCodex接続を縦断検証するときは、`desktop-qa` featureと
+  `CODING_WIFE_DESKTOP_QA_DATA_DIR`の両方が有効なbinaryにだけcompileされる
+  `desktop_qa_register_workspace_fixture`を使ってよい。このcommandはabsolute pathをQA
+  process内だけで受け、productionと同じGit repository、owner、writable policyのvalidatorを
+  通す。production invoke handlerへcommandまたはraw path requestを含めない。
 - screenshot、log、一時specは`tmp/desktop-qa/`または`.context/`へ保存し、commitしない。
 
 QA pluginは任意JavaScript実行とIPC mockを提供するため、release binaryへ登録しないことを

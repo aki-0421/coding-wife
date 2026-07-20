@@ -1,5 +1,11 @@
 use tauri::State;
 
+#[cfg(feature = "desktop-qa")]
+use std::path::{Path, PathBuf};
+
+#[cfg(feature = "desktop-qa")]
+use serde::Deserialize;
+
 use super::attachment::{
     AttachmentPathRegistrationRequest, AttachmentRegistrationResponse, AttachmentSelectionRequest,
     AttachmentService, AttachmentWorkspaceContext,
@@ -13,6 +19,11 @@ use super::types::{
     ThreadResponse, TurnResponse,
 };
 use super::workspace::{WorkspaceRegistration, WorkspaceService};
+
+#[cfg(feature = "desktop-qa")]
+use crate::workspace_history::types::WorkspaceCommandError;
+#[cfg(feature = "desktop-qa")]
+use crate::workspace_history::WorkspaceHistoryService;
 
 async fn attachment_context(
     workspace_id: &str,
@@ -37,6 +48,82 @@ async fn attachment_context(
         root_device: identity.root_device,
         root_inode: identity.root_inode,
     })
+}
+
+#[cfg(feature = "desktop-qa")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DesktopQaRegisterWorkspaceFixtureRequest {
+    pub schema_version: u16,
+    pub workspace_id: String,
+    pub alias: String,
+    pub path: String,
+}
+
+#[cfg(feature = "desktop-qa")]
+async fn desktop_qa_fixture_path_allowed(path: &Path, app_data_path: &Path) -> bool {
+    let mut allowed_roots = Vec::new();
+    if let Ok(root) = tokio::fs::canonicalize(std::env::temp_dir()).await {
+        allowed_roots.push(root);
+    }
+    if let Some(parent) = app_data_path.parent() {
+        if let Ok(root) = tokio::fs::canonicalize(parent).await {
+            allowed_roots.push(root);
+        }
+    }
+    allowed_roots.iter().any(|root| path.starts_with(root))
+}
+
+#[cfg(feature = "desktop-qa")]
+#[tauri::command]
+pub async fn desktop_qa_register_workspace_fixture(
+    request: DesktopQaRegisterWorkspaceFixtureRequest,
+    history: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspaceRegistration, WorkspaceCommandError> {
+    const OPERATION: &str = "desktop_qa.register_workspace_fixture";
+    let Some(app_data_path) = std::env::var_os("CODING_WIFE_DESKTOP_QA_DATA_DIR")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    else {
+        return Err(WorkspaceCommandError::new(
+            "CODEX-DESKTOP-QA-UNAVAILABLE",
+            OPERATION,
+            false,
+        ));
+    };
+    if request.schema_version != 1
+        || request.path.is_empty()
+        || request.path.len() > 4_096
+        || request.path.trim() != request.path
+        || request.path.chars().any(char::is_control)
+    {
+        return Err(WorkspaceCommandError::new(
+            "CODEX-DESKTOP-QA-FIXTURE-INVALID",
+            OPERATION,
+            false,
+        ));
+    }
+    let raw_path = PathBuf::from(request.path);
+    if !raw_path.is_absolute() {
+        return Err(WorkspaceCommandError::new(
+            "CODEX-DESKTOP-QA-FIXTURE-INVALID",
+            OPERATION,
+            false,
+        ));
+    }
+    let canonical_path = tokio::fs::canonicalize(raw_path).await.map_err(|_| {
+        WorkspaceCommandError::new("CODEX-DESKTOP-QA-FIXTURE-MISSING", OPERATION, true)
+    })?;
+    if !desktop_qa_fixture_path_allowed(&canonical_path, &app_data_path).await {
+        return Err(WorkspaceCommandError::new(
+            "CODEX-DESKTOP-QA-FIXTURE-PATH-UNSAFE",
+            OPERATION,
+            false,
+        ));
+    }
+    history
+        .register_desktop_qa_workspace_fixture(canonical_path, request.workspace_id, request.alias)
+        .await
 }
 
 #[tauri::command]

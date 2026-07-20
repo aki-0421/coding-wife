@@ -11,6 +11,8 @@ use crate::character::manifest::BUILTIN_HIYORI_PACK_ID;
 use crate::character::CharacterService;
 use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
+#[cfg(feature = "desktop-qa")]
+use crate::codex::workspace::WorkspaceRegistration;
 use crate::codex::workspace::{
     matches_saved_git_repository, matches_saved_repository_identity, same_git_common_directory,
     validate_git_repository, AppPrivateBinaryRecord, AppPrivateProjectIdentity,
@@ -525,6 +527,39 @@ impl WorkspaceHistoryService {
 
     pub async fn shutdown(&self) -> Result<(), WorkspaceCommandError> {
         self.shutdown_completion().await.wait().await.map(|_| ())
+    }
+
+    #[cfg(feature = "desktop-qa")]
+    pub async fn register_desktop_qa_workspace_fixture(
+        &self,
+        root: PathBuf,
+        workspace_id: String,
+        alias: String,
+    ) -> Result<WorkspaceRegistration, WorkspaceCommandError> {
+        const OPERATION: &str = "desktop_qa_register_workspace_fixture";
+        self.ensure_startup_ready(OPERATION)?;
+        let _operation = self.operation_lock.lock().await;
+        let candidate = self
+            .workspace
+            .validate_workspace_root(root, workspace_id, alias)
+            .await
+            .map_err(|error| codex_error(OPERATION, error))?;
+        let registration = candidate.registration.clone();
+        self.workspace
+            .activate_candidate(candidate.clone())
+            .await
+            .map_err(|error| codex_error(OPERATION, error))?;
+        if let Err(error) = self
+            .register_validated_candidate(candidate, OPERATION)
+            .await
+        {
+            let _ = self
+                .workspace
+                .deactivate_workspace(&registration.workspace_id)
+                .await;
+            return Err(error);
+        }
+        Ok(registration)
     }
 
     pub async fn force_shutdown_now(&self) -> Result<usize, WorkspaceCommandError> {
