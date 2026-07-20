@@ -45,7 +45,9 @@ use super::types::{
 pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
 pub const DOMAIN_EVENT_CHANNEL: &str = "coding-wife://domain-event";
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(5);
-const SETUP_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+// Discovery and spawn intentionally re-hash the executable at each trust
+// boundary. Keep the outer deadline above those individual bounded checks.
+const SETUP_PROBE_TIMEOUT: Duration = Duration::from_secs(90);
 const READINESS_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const READINESS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERRUPT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
