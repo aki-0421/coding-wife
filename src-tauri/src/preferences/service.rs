@@ -4,9 +4,8 @@ use std::sync::{Arc, Mutex};
 use super::error::{preferences_error, AppPreferencesResult};
 use super::store::AppPreferencesStore;
 use super::types::{
-    AppLocale, AppPreferencesGetRequestV1, AppPreferencesPersistence, AppPreferencesResetRequestV1,
-    AppPreferencesSnapshotV1, AppPreferencesUpdateRequestV1, AppPreferencesV1, CharacterVisibility,
-    ReducedMotionPreference, APP_PREFERENCES_SCHEMA_VERSION,
+    AppLocale, AppPreferencesGetRequestV2, AppPreferencesPersistence, AppPreferencesSnapshotV2,
+    AppPreferencesUpdateRequestV2, AppPreferencesV2, APP_PREFERENCES_SCHEMA_VERSION,
 };
 
 const RECOVERY_UNAVAILABLE: &str = "APP-PREFERENCES-UNAVAILABLE";
@@ -21,7 +20,7 @@ pub(crate) struct AppPreferencesReadiness {
 #[derive(Debug)]
 struct AppPreferencesState {
     store: Option<AppPreferencesStore>,
-    preferences: Option<AppPreferencesV1>,
+    preferences: Option<AppPreferencesV2>,
     recovery_code: Option<String>,
 }
 
@@ -51,8 +50,8 @@ impl AppPreferencesService {
 
     pub fn get(
         &self,
-        request: AppPreferencesGetRequestV1,
-    ) -> AppPreferencesResult<AppPreferencesSnapshotV1> {
+        request: AppPreferencesGetRequestV2,
+    ) -> AppPreferencesResult<AppPreferencesSnapshotV2> {
         validate_schema(request.schema_version, "app_preferences_get")?;
         let state = self
             .state
@@ -63,44 +62,21 @@ impl AppPreferencesService {
 
     pub fn update(
         &self,
-        request: AppPreferencesUpdateRequestV1,
-    ) -> AppPreferencesResult<AppPreferencesSnapshotV1> {
+        request: AppPreferencesUpdateRequestV2,
+    ) -> AppPreferencesResult<AppPreferencesSnapshotV2> {
         validate_schema(request.schema_version, "app_preferences_update")?;
         let mut state = self.state.lock().map_err(|_| {
             preferences_error("app_preferences_update", "APP-PREFERENCES-STATE", true)
         })?;
         require_expected_version(&state, request.expected_version, "app_preferences_update")?;
-        let next = AppPreferencesV1 {
+        let next = AppPreferencesV2 {
             schema_version: APP_PREFERENCES_SCHEMA_VERSION,
             version: next_version(request.expected_version, "app_preferences_update")?,
             snapshot_id: uuid::Uuid::new_v4().to_string(),
             locale: request.locale,
-            reduced_motion: request.reduced_motion,
-            character_visibility: request.character_visibility,
         };
         persist(&mut state, &next, "app_preferences_update")?;
         Ok(snapshot(&state, request.locale))
-    }
-
-    pub fn reset(
-        &self,
-        request: AppPreferencesResetRequestV1,
-    ) -> AppPreferencesResult<AppPreferencesSnapshotV1> {
-        validate_schema(request.schema_version, "app_preferences_reset")?;
-        let mut state = self.state.lock().map_err(|_| {
-            preferences_error("app_preferences_reset", "APP-PREFERENCES-STATE", true)
-        })?;
-        require_expected_version(&state, request.expected_version, "app_preferences_reset")?;
-        let next = AppPreferencesV1 {
-            schema_version: APP_PREFERENCES_SCHEMA_VERSION,
-            version: next_version(request.expected_version, "app_preferences_reset")?,
-            snapshot_id: uuid::Uuid::new_v4().to_string(),
-            locale: request.default_locale,
-            reduced_motion: ReducedMotionPreference::System,
-            character_visibility: CharacterVisibility::Visible,
-        };
-        persist(&mut state, &next, "app_preferences_reset")?;
-        Ok(snapshot(&state, request.default_locale))
     }
 
     pub(crate) fn readiness(&self) -> AppPreferencesReadiness {
@@ -119,13 +95,13 @@ impl AppPreferencesService {
     }
 }
 
-fn snapshot(state: &AppPreferencesState, default_locale: AppLocale) -> AppPreferencesSnapshotV1 {
-    AppPreferencesSnapshotV1 {
+fn snapshot(state: &AppPreferencesState, default_locale: AppLocale) -> AppPreferencesSnapshotV2 {
+    AppPreferencesSnapshotV2 {
         schema_version: APP_PREFERENCES_SCHEMA_VERSION,
         preferences: state
             .preferences
             .clone()
-            .unwrap_or_else(|| AppPreferencesV1::safe_default(default_locale)),
+            .unwrap_or_else(|| AppPreferencesV2::safe_default(default_locale)),
         persistence: AppPreferencesPersistence::Native,
         recovery_code: state.recovery_code.clone(),
     }
@@ -133,7 +109,7 @@ fn snapshot(state: &AppPreferencesState, default_locale: AppLocale) -> AppPrefer
 
 fn persist(
     state: &mut AppPreferencesState,
-    next: &AppPreferencesV1,
+    next: &AppPreferencesV2,
     operation: &'static str,
 ) -> AppPreferencesResult<()> {
     let store = state

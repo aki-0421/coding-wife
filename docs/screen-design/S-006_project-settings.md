@@ -38,7 +38,8 @@ status: "Approved"
 | 非対象                                                      | 理由                                 | 扱う画面・文書                             |
 | ----------------------------------------------------------- | ------------------------------------ | ------------------------------------------ |
 | Project context                                             | registered Project ID単位のため      | [S-005](S-005_app-settings-diagnostics.md) |
-| Language、reduced motion、全workspaceのcharacter visibility | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
+| Language                                                    | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
+| reduced motion、character visibility control               | OS設定だけを尊重し、characterは常時表示するため | [APP要件](../requirements/desktop-shell.md)、[LIVE要件](../requirements/live2d-companion.md) |
 | Character context、Companion                                | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
 | Audio、native readiness                                     | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
 | Git commit/revert/reset                                     | read-only observer境界のため         | [S-003](S-003_session-evidence.md)         |

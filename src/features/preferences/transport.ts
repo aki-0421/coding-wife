@@ -9,11 +9,10 @@ import {
   parseAppPreferencesSnapshot,
   type AppLocale,
   type AppPreferencesCommandErrorEnvelope,
-  type AppPreferencesGetRequestV1,
-  type AppPreferencesResetRequestV1,
-  type AppPreferencesSnapshotV1,
-  type AppPreferencesUpdateRequestV1,
-  type AppPreferencesV1,
+  type AppPreferencesGetRequestV2,
+  type AppPreferencesSnapshotV2,
+  type AppPreferencesUpdateRequestV2,
+  type AppPreferencesV2,
 } from "@/features/preferences/contracts"
 
 type Invoke = (
@@ -25,13 +24,10 @@ export type AppPreferencesGatewayKind = "native" | "demo"
 
 export interface AppPreferencesGateway {
   readonly kind: AppPreferencesGatewayKind
-  get(defaultLocale: AppLocale): Promise<AppPreferencesSnapshotV1>
+  get(defaultLocale: AppLocale): Promise<AppPreferencesSnapshotV2>
   update(
-    request: AppPreferencesUpdateRequestV1,
-  ): Promise<AppPreferencesSnapshotV1>
-  reset(
-    request: AppPreferencesResetRequestV1,
-  ): Promise<AppPreferencesSnapshotV1>
+    request: AppPreferencesUpdateRequestV2,
+  ): Promise<AppPreferencesSnapshotV2>
 }
 
 export class AppPreferencesBoundaryError
@@ -50,7 +46,7 @@ export class AppPreferencesBoundaryError
       operation: "app_preferences_ipc",
       recoverable: true,
       userMessageKey: "preferences.error.generic",
-      detailRef: "app-preferences-v1",
+      detailRef: "app-preferences-v2",
     }
     super(envelope.code)
     this.name = "AppPreferencesBoundaryError"
@@ -70,7 +66,7 @@ function normalizeError(error: unknown): AppPreferencesBoundaryError {
       operation: "app_preferences_contract",
       recoverable: false,
       userMessageKey: "preferences.error.generic",
-      detailRef: "app-preferences-v1",
+      detailRef: "app-preferences-v2",
     })
   }
   return new AppPreferencesBoundaryError(
@@ -83,30 +79,24 @@ export class NativeAppPreferencesGateway implements AppPreferencesGateway {
 
   public constructor(private readonly invoke: Invoke = tauriInvoke) {}
 
-  public get(defaultLocale: AppLocale): Promise<AppPreferencesSnapshotV1> {
-    const request: AppPreferencesGetRequestV1 = {
+  public get(defaultLocale: AppLocale): Promise<AppPreferencesSnapshotV2> {
+    const request: AppPreferencesGetRequestV2 = {
       schemaVersion: appPreferencesSchemaVersion,
       defaultLocale,
     }
     return this.request(appPreferencesCommands.get, request)
   }
 
-  public async update(
-    request: AppPreferencesUpdateRequestV1,
-  ): Promise<AppPreferencesSnapshotV1> {
+  public update(
+    request: AppPreferencesUpdateRequestV2,
+  ): Promise<AppPreferencesSnapshotV2> {
     return this.request(appPreferencesCommands.update, request)
-  }
-
-  public reset(
-    request: AppPreferencesResetRequestV1,
-  ): Promise<AppPreferencesSnapshotV1> {
-    return this.request(appPreferencesCommands.reset, request)
   }
 
   private async request(
     command: string,
     request: unknown,
-  ): Promise<AppPreferencesSnapshotV1> {
+  ): Promise<AppPreferencesSnapshotV2> {
     try {
       return parseAppPreferencesSnapshot(
         await this.invoke(command, { request }),
@@ -125,16 +115,16 @@ function demoSnapshotId(version: number): string {
 }
 
 function cloneSnapshot(
-  snapshot: AppPreferencesSnapshotV1,
-): AppPreferencesSnapshotV1 {
+  snapshot: AppPreferencesSnapshotV2,
+): AppPreferencesSnapshotV2 {
   return structuredClone(snapshot)
 }
 
 export class DemoAppPreferencesGateway implements AppPreferencesGateway {
   public readonly kind = "demo" as const
-  #preferences: AppPreferencesV1 | null = null
+  #preferences: AppPreferencesV2 | null = null
 
-  public get(defaultLocale: AppLocale): Promise<AppPreferencesSnapshotV1> {
+  public get(defaultLocale: AppLocale): Promise<AppPreferencesSnapshotV2> {
     if (this.#preferences === null) {
       this.#preferences = {
         ...createSafeDefaultPreferences(defaultLocale),
@@ -145,8 +135,8 @@ export class DemoAppPreferencesGateway implements AppPreferencesGateway {
   }
 
   public update(
-    request: AppPreferencesUpdateRequestV1,
-  ): Promise<AppPreferencesSnapshotV1> {
+    request: AppPreferencesUpdateRequestV2,
+  ): Promise<AppPreferencesSnapshotV2> {
     return Promise.resolve().then(() => {
       this.requireCurrent(request.expectedVersion)
       const version = request.expectedVersion + 1
@@ -155,29 +145,12 @@ export class DemoAppPreferencesGateway implements AppPreferencesGateway {
         version,
         snapshotId: demoSnapshotId(version),
         locale: request.locale,
-        reducedMotion: request.reducedMotion,
-        characterVisibility: request.characterVisibility,
       }
       return cloneSnapshot(this.snapshot())
     })
   }
 
-  public reset(
-    request: AppPreferencesResetRequestV1,
-  ): Promise<AppPreferencesSnapshotV1> {
-    return Promise.resolve().then(() => {
-      this.requireCurrent(request.expectedVersion)
-      const version = request.expectedVersion + 1
-      this.#preferences = {
-        ...createSafeDefaultPreferences(request.defaultLocale),
-        version,
-        snapshotId: demoSnapshotId(version),
-      }
-      return cloneSnapshot(this.snapshot())
-    })
-  }
-
-  private snapshot(): AppPreferencesSnapshotV1 {
+  private snapshot(): AppPreferencesSnapshotV2 {
     if (this.#preferences === null) {
       throw new AppPreferencesBoundaryError()
     }
@@ -199,7 +172,7 @@ export class DemoAppPreferencesGateway implements AppPreferencesGateway {
         operation: "app_preferences_update",
         recoverable: true,
         userMessageKey: "preferences.error.generic",
-        detailRef: "app-preferences-v1",
+        detailRef: "app-preferences-v2",
       })
     }
   }

@@ -9,21 +9,19 @@ import {
 } from "@/features/preferences/contracts"
 
 const persistedFixture = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   preferences: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     version: 4,
     snapshotId: "123e4567-e89b-42d3-a456-426614174000",
     locale: "ja",
-    reducedMotion: "on",
-    characterVisibility: "hidden",
   },
   persistence: "native",
   recoveryCode: null,
 } as const
 
-describe("AppPreferencesV1 contracts", () => {
-  it("parses an exact versioned native snapshot", () => {
+describe("AppPreferencesV2 contracts", () => {
+  it("parses an exact locale-only native snapshot", () => {
     expect(parseAppPreferencesSnapshot(persistedFixture)).toEqual(
       persistedFixture,
     )
@@ -38,8 +36,6 @@ describe("AppPreferencesV1 contracts", () => {
           version: 0,
           snapshotId: safeDefaultSnapshotId,
           locale: "en",
-          reducedMotion: "system",
-          characterVisibility: "visible",
         },
         persistence: "native",
         recoveryCode: "APP-PREFERENCES-CORRUPT",
@@ -54,27 +50,17 @@ describe("AppPreferencesV1 contracts", () => {
     ).toThrow(AppPreferencesContractError)
   })
 
-  it("rejects unknown versions, enum drift, and extra raw fields", () => {
+  it("rejects legacy display fields, unknown versions, and raw extras", () => {
     for (const fixture of [
-      { ...persistedFixture, schemaVersion: 2 },
+      { ...persistedFixture, schemaVersion: 1 },
       {
         ...persistedFixture,
         preferences: {
           ...persistedFixture.preferences,
-          reducedMotion: "reduce",
+          reducedMotion: "system",
         },
       },
-      {
-        ...persistedFixture,
-        preferences: {
-          ...persistedFixture.preferences,
-          rawValue: "/\u0055sers/private/token=secret",
-        },
-      },
-      {
-        ...persistedFixture,
-        recoveryCode: "APP-PREFERENCES-RAW-ERROR",
-      },
+      { ...persistedFixture, raw: "opaque-private-value" },
     ]) {
       expect(() => parseAppPreferencesSnapshot(fixture)).toThrow(
         AppPreferencesContractError,
@@ -82,25 +68,17 @@ describe("AppPreferencesV1 contracts", () => {
     }
   })
 
-  it("parses only bounded native error envelopes", () => {
+  it("parses only exact sanitized command errors", () => {
+    const envelope = {
+      code: "APP-PREFERENCES-WRITE",
+      operation: "app_preferences_update",
+      recoverable: true,
+      userMessageKey: "preferences.error.generic",
+      detailRef: "app-preferences-v2",
+    }
+    expect(parseAppPreferencesCommandError(envelope)).toEqual(envelope)
     expect(
-      parseAppPreferencesCommandError({
-        code: "APP-PREFERENCES-CONFLICT",
-        operation: "app_preferences_update",
-        recoverable: true,
-        userMessageKey: "preferences.error.generic",
-        detailRef: "app-preferences-v1",
-      }),
-    ).toMatchObject({ code: "APP-PREFERENCES-CONFLICT" })
-    expect(
-      parseAppPreferencesCommandError({
-        code: "APP-PREFERENCES-CONFLICT",
-        operation: "app_preferences_update",
-        recoverable: true,
-        userMessageKey: "preferences.error.generic",
-        detailRef: "app-preferences-v1",
-        raw: "/\u0055sers/private/token=secret",
-      }),
-    ).toBeNull()
+      parseAppPreferencesCommandError({ ...envelope, raw: "secret" }),
+    ).toBe(null)
   })
 })
