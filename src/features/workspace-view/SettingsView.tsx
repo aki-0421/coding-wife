@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react"
 import {
   ActivityIcon,
   AlertTriangleIcon,
-  ArrowLeftIcon,
   BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -17,6 +16,13 @@ import {
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -83,7 +89,6 @@ interface AppSettingsViewProps extends CharacterRuntimeSettingsProps {
   readonly projects: readonly ProjectRecord[]
   readonly selectedProjectId: string | null
   readonly projectActionPending: boolean
-  readonly onBack: () => void
   readonly onMutedChange: (muted: boolean) => void
   readonly onResetUi: () => void
   readonly onSectionChange: (section: AppSettingsSection) => void
@@ -317,21 +322,26 @@ function SettingsSectionPicker<Section extends SettingsSection>({
   sections,
   section,
   onSectionChange,
+  triggerRef,
 }: {
   readonly copy: WorkspaceCopy
   readonly label: string
   readonly sections: readonly Section[]
   readonly section: Section
   readonly onSectionChange: (section: Section) => void
+  readonly triggerRef: React.Ref<HTMLButtonElement>
 }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          className="max-w-[45%] min-[1280px]:hidden"
+          aria-current="page"
+          className="-mx-xs max-w-[calc(100dvw-10rem)] px-xs text-display font-semibold text-text-strong min-[1280px]:hidden"
+          data-app-settings-current-section=""
+          ref={triggerRef}
           size="xs"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           <span className="truncate">
             {copy.settingsView.sections[section]}
@@ -864,11 +874,24 @@ function HistorySettings({
 }
 
 export function AppSettingsView(props: AppSettingsViewProps) {
-  const headingRef = useRef<HTMLHeadingElement>(null)
+  const desktopBreadcrumbRef = useRef<HTMLSpanElement>(null)
+  const compactBreadcrumbRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    headingRef.current?.focus()
-  }, [])
+    const target = [desktopBreadcrumbRef.current, compactBreadcrumbRef.current]
+      .filter((element): element is HTMLElement => element !== null)
+      .find((element) => element.getClientRects().length > 0)
+    const responsiveFallback =
+      window.innerWidth >= 1280
+        ? desktopBreadcrumbRef.current
+        : compactBreadcrumbRef.current
+    const focusTarget =
+      target ??
+      responsiveFallback ??
+      desktopBreadcrumbRef.current ??
+      compactBreadcrumbRef.current
+    focusTarget?.focus()
+  }, [props.section])
 
   const sectionContent = (() => {
     switch (props.section) {
@@ -911,35 +934,42 @@ export function AppSettingsView(props: AppSettingsViewProps) {
 
   return (
     <section
-      aria-labelledby="app-settings-title"
+      aria-label={props.copy.settingsView.appTitle}
       className="workspace-tabs"
       data-settings-scope="app"
     >
-      <header className="workspace-header flex min-w-0 items-center gap-md border-b border-divider bg-surface px-xl max-[700px]:px-md">
-        <Button onClick={props.onBack} size="xs" type="button" variant="ghost">
-          <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
-          {props.copy.settingsView.backToWorkspace}
-        </Button>
-        <div className="flex min-w-0 flex-1 flex-col gap-xxs">
-          <h1
-            className="m-0 text-balance text-headline text-text-strong"
-            id="app-settings-title"
-            ref={headingRef}
-            tabIndex={-1}
-          >
-            {props.copy.settingsView.appTitle}
-          </h1>
-          <p className="m-0 text-pretty text-caption text-muted-foreground">
-            {props.copy.settingsView.appDescription}
-          </p>
-        </div>
-        <SettingsSectionPicker
-          copy={props.copy}
-          label={props.copy.appSettings}
-          onSectionChange={props.onSectionChange}
-          section={props.section}
-          sections={appSectionOrder}
-        />
+      <header className="workspace-header flex min-w-0 items-center border-b border-divider bg-surface px-xl max-[700px]:px-md">
+        <Breadcrumb
+          aria-label={props.copy.settingsView.appBreadcrumbLabel}
+          className="min-w-0"
+        >
+          <BreadcrumbList className="min-w-0 flex-nowrap gap-sm text-display">
+            <BreadcrumbItem className="min-w-0 max-w-56 shrink">
+              <span className="truncate font-medium text-muted-foreground">
+                {props.copy.settingsView.appTitle}
+              </span>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator className="shrink-0 text-text-disabled" />
+            <BreadcrumbItem className="min-w-0">
+              <BreadcrumbPage
+                className="hidden truncate rounded-control font-semibold text-text-strong outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-[1280px]:block"
+                data-app-settings-current-section=""
+                ref={desktopBreadcrumbRef}
+                tabIndex={-1}
+              >
+                {props.copy.settingsView.sections[props.section]}
+              </BreadcrumbPage>
+              <SettingsSectionPicker
+                copy={props.copy}
+                label={props.copy.appSettings}
+                onSectionChange={props.onSectionChange}
+                section={props.section}
+                sections={appSectionOrder}
+                triggerRef={compactBreadcrumbRef}
+              />
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
       </header>
 
       <div className="workspace-view grid size-full min-h-0 min-w-0 grid-cols-[228px_minmax(0,1fr)] overflow-hidden bg-app-bg max-[1279px]:grid-cols-1">

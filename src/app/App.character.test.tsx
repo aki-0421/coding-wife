@@ -75,6 +75,12 @@ function latestLive2dProps(): Live2dCharacterProps | undefined {
   return live2dCalls.at(-1)
 }
 
+function selectedWorkspaceButton(): HTMLButtonElement {
+  return within(
+    screen.getByRole("navigation", { name: "Workspaces" }),
+  ).getByRole<HTMLButtonElement>("button", { current: "page" })
+}
+
 describe("default App character integration", () => {
   beforeEach(() => {
     live2dCalls.length = 0
@@ -178,7 +184,7 @@ describe("default App character integration", () => {
     await waitFor(() =>
       expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
     )
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    await user.click(selectedWorkspaceButton())
     await waitFor(() =>
       expect(screen.getByTestId("live2d-character")).not.toBeVisible(),
     )
@@ -414,7 +420,7 @@ describe("default App character integration", () => {
         screen.getByRole("switch", { name: "Character visible" }),
       ).not.toBeChecked(),
     )
-    fireEvent.click(screen.getByRole("button", { name: "Back to workspace" }))
+    fireEvent.click(selectedWorkspaceButton())
     await waitFor(() =>
       expect(screen.queryByTestId("live2d-character")).not.toBeInTheDocument(),
     )
@@ -426,7 +432,7 @@ describe("default App character integration", () => {
         screen.getByRole("switch", { name: "Character visible" }),
       ).toBeChecked(),
     )
-    fireEvent.click(screen.getByRole("button", { name: "Back to workspace" }))
+    fireEvent.click(selectedWorkspaceButton())
     await waitFor(() =>
       expect(live2dCalls.length).toBeGreaterThan(presentationsBeforeShow),
     )

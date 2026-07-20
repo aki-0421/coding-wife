@@ -220,6 +220,14 @@ function appSettingsButton(): HTMLButtonElement {
   return button
 }
 
+function selectedWorkspaceButton(): HTMLButtonElement {
+  const navigation = screen.getByRole("navigation", { name: "Workspaces" })
+  const button = within(navigation).getByRole<HTMLButtonElement>("button", {
+    current: "page",
+  })
+  return button
+}
+
 function expectFocusWithin(container: HTMLElement): void {
   const activeElement = document.activeElement
   if (!(activeElement instanceof HTMLElement)) {
@@ -1415,12 +1423,25 @@ describe("WorkspaceShell", () => {
     expect(screen.queryByRole("button", { name: "Diagnostics" })).toBeNull()
 
     await user.click(appSettingsButton())
-    const appHeading = screen.getByRole("heading", {
-      level: 1,
-      name: "App settings",
+    const appLocation = screen.getByRole("navigation", {
+      name: "App settings location",
     })
-    expect(appHeading).toBeVisible()
-    await waitFor(() => expect(appHeading).toHaveFocus())
+    expect(within(appLocation).getByText("App settings")).toBeVisible()
+    await waitFor(() => {
+      expect(document.activeElement).toHaveAttribute(
+        "data-app-settings-current-section",
+      )
+      expect(document.activeElement).toHaveAttribute("aria-current", "page")
+      expect(document.activeElement).toHaveTextContent("General")
+    })
+    expect(
+      screen.queryByRole("button", { name: "Back to workspace" }),
+    ).toBeNull()
+    expect(
+      screen.queryByText(
+        "Character, companion, preferences, and diagnostics shared by every project.",
+      ),
+    ).toBeNull()
     expect(appSettingsButton()).toHaveAttribute("aria-current", "page")
     expect(screen.getAllByRole("button", { name: "General" })[0]).toBeVisible()
     expect(
@@ -1448,13 +1469,11 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Back to projects" }))
 
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    await user.click(selectedWorkspaceButton())
     expect(
       screen.getByRole("heading", { level: 1, name: "Workspace settings" }),
     ).toBeVisible()
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /Settings/ })).toHaveFocus(),
-    )
+    expect(selectedWorkspaceButton()).toHaveFocus()
   })
 
   it("uses the persisted history mode consistently in chat and diagnostics", async () => {
@@ -1507,7 +1526,7 @@ describe("WorkspaceShell", () => {
     })
     expect(localHistory.closest("article")).toHaveTextContent("Unavailable")
 
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }))
+    await user.click(selectedWorkspaceButton())
     await user.click(screen.getByRole("tab", { name: "Settings" }))
     expect(screen.getByText("Stored in demo memory")).toBeVisible()
     expect(
@@ -2780,11 +2799,7 @@ describe("WorkspaceShell", () => {
         "fallback-repository",
       ),
     ).toBeVisible()
-    await user.click(
-      within(appSettings as HTMLElement).getByRole("button", {
-        name: "Back to workspace",
-      }),
-    )
+    await user.click(selectedWorkspaceButton())
     expect(await screen.findByText("preserved-workspace")).toBeVisible()
     expect(screen.queryByText("restored-workspace")).not.toBeInTheDocument()
   })

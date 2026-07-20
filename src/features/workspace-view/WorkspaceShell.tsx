@@ -667,16 +667,6 @@ export function WorkspaceShell({
     setAppSettingsOpen(true)
   }
 
-  const closeAppSettings = () => {
-    setAppSettingsProjectId(null)
-    setAppSettingsOpen(false)
-    window.requestAnimationFrame(() => {
-      document
-        .querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
-        ?.focus()
-    })
-  }
-
   const resetUiState = () => {
     view.resetUiState()
     setAppSettingsProjectId(null)
@@ -797,7 +787,6 @@ export function WorkspaceShell({
           contextModel={contextModel}
           copy={copy}
           muted={view.muted}
-          onBack={closeAppSettings}
           onMutedChange={view.setMuted}
           onRetryCharacter={() => {
             characterRuntimeStore.retry(
