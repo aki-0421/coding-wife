@@ -66,6 +66,11 @@ WebdriverIOがbinaryを起動・終了し、既に起動している`pnpm tauri:
 embedded providerの`browser.tauri.execute()`はこの環境変数からdirect-evalの接続先を読むため、
 設定を外すとDOM操作は成功してもRust IPCだけが`fetch failed`になる。
 
+app data directoryはportごとに再利用される。setup overviewを期待するstartup/window sizing
+specを手動で繰り返す場合は、未使用の`CODING_WIFE_WDIO_PORT`を指定してpristine stateを作る。
+過去のsetup済みdataを持つportでoverviewが出ない状態をUI退行として扱ってはならない。
+同じportの再利用は、workspace restoreや履歴復元を意図的に検証するときだけ行う。
+
 `@wdio/tauri-service@1.2.0`は`installMockSyncOverride`をimportするが、同packageが指定する
 `@wdio/native-utils@2.4.0`はそのexportを含まない。`package.json`のpnpm overrideで2.5.0へ
 固定しているのはこの公開package間の不整合を避けるためである。overrideを外すのは、上流の
