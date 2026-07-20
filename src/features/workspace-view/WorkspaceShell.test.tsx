@@ -2275,11 +2275,11 @@ describe("WorkspaceShell", () => {
         fastServiceTier: null,
         supportedReasoningEfforts: [],
         experimentalModesAvailable: false,
-        reasonCode: "CODEX-NOT-CONNECTED",
+        reasonCode: "CODEX-IPC-UNAVAILABLE",
       },
       pendingRequests: [],
       timeline: [],
-      errorCode: "CODEX-NOT-CONNECTED",
+      errorCode: "CODEX-IPC-UNAVAILABLE",
     }
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
@@ -2296,7 +2296,7 @@ describe("WorkspaceShell", () => {
       screen.queryByRole("heading", { name: "Finish the local setup" }),
     ).toBeNull()
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
-    expect(screen.getByText("CODEX-NOT-CONNECTED")).toBeVisible()
+    expect(screen.getByText("CODEX-IPC-UNAVAILABLE")).toBeVisible()
     await user.type(
       screen.getByPlaceholderText(
         "Ask Codex to plan, build, explain, or fix anything…",

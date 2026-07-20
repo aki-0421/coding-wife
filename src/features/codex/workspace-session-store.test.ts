@@ -110,4 +110,29 @@ describe("CodexWorkspaceSessionStore", () => {
     store.syncSession(session.snapshot())
     expect(store.snapshot().phase).toBe("interrupted")
   })
+
+  it("exposes operation and history failures as the current readiness reason", () => {
+    const store = new CodexWorkspaceSessionStore()
+    store.beginActivation("workspace-fixture", "ready")
+    store.markOperationError("CODEX-IPC-UNAVAILABLE")
+
+    expect(store.snapshot()).toMatchObject({
+      phase: "failed",
+      connected: false,
+      errorCode: "CODEX-IPC-UNAVAILABLE",
+      readiness: {
+        ready: false,
+        reasonCode: "CODEX-IPC-UNAVAILABLE",
+      },
+    })
+
+    store.markHistoryFailure("HIST-WRITER-NOT-READY")
+    expect(store.snapshot()).toMatchObject({
+      errorCode: "HIST-WRITER-NOT-READY",
+      readiness: {
+        ready: false,
+        reasonCode: "HIST-WRITER-NOT-READY",
+      },
+    })
+  })
 })

@@ -234,6 +234,11 @@ export class CodexWorkspaceSessionStore {
       ...this.current,
       phase: "failed",
       connected,
+      readiness: {
+        ...this.current.readiness,
+        ready: false,
+        reasonCode: errorCode,
+      },
       errorCode,
     })
   }
@@ -244,6 +249,11 @@ export class CodexWorkspaceSessionStore {
       phase: "failed",
       connected: false,
       historyWritable: false,
+      readiness: {
+        ...this.current.readiness,
+        ready: false,
+        reasonCode: errorCode,
+      },
       errorCode,
     })
   }
