@@ -18,7 +18,7 @@ describe("Coding Wife desktop startup", () => {
   it("executes the real Rust health check through Tauri IPC", async () => {
     const health = await browser.tauri.execute(
       async ({ core }): Promise<HealthCheckResponse> =>
-        core.invoke<HealthCheckResponse>("health_check"),
+        (await core.invoke("health_check")) as HealthCheckResponse,
     )
 
     expect(health).toEqual({

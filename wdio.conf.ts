@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
+import { createTauriCapabilities } from "@wdio/tauri-service"
 
 const appBinaryPath = path.resolve("src-tauri/target/debug/coding-wife")
 const resultsRoot = path.resolve("tmp/desktop-qa")
@@ -25,20 +26,14 @@ const embeddedPort =
 if (embeddedPort === null) {
   throw new Error("embedded WebDriver port is required")
 }
+process.env.TAURI_WEBDRIVER_PORT = String(embeddedPort)
 const appDataDirectory = path.join(resultsRoot, `app-data-${embeddedPort}`)
 
 export const config: WebdriverIO.Config = {
   runner: "local",
   specs: ["./e2e/desktop/**/*.spec.ts"],
   maxInstances: 1,
-  capabilities: [
-    {
-      browserName: "tauri",
-      "tauri:options": {
-        application: appBinaryPath,
-      },
-    },
-  ],
+  capabilities: [createTauriCapabilities(appBinaryPath)],
   services: [
     [
       "@wdio/tauri-service",

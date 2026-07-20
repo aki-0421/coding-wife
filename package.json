@@ -7,6 +7,11 @@
   "engines": {
     "node": ">=22.12.0"
   },
+  "pnpm": {
+    "overrides": {
+      "@wdio/native-utils": "2.5.0"
+    }
+  },
   "scripts": {
     "dev": "node scripts/live2d/verify-live2d.mjs && node scripts/live2d/build-framework.mjs && vite --host 127.0.0.1",
     "tauri:dev": "tauri dev",
