@@ -195,9 +195,7 @@ fn allow_opaque_preview_module_request<B>(
 }
 
 #[cfg(feature = "desktop-qa")]
-fn enable_desktop_qa(
-    builder: tauri::Builder<tauri::Wry>,
-) -> tauri::Builder<tauri::Wry> {
+fn enable_desktop_qa(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     if std::env::var_os("TAURI_WEBDRIVER_PORT").is_none() {
         return builder;
     }
