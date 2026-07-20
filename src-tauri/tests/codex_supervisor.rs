@@ -2222,12 +2222,7 @@ async fn failed_reprobe_clears_previous_identity_evidence_and_recovers_fresh() {
     assert!(ready.binary_hash_prefix.is_some());
 
     std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", "schema_malformed");
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect_err("schema failure");
+    supervisor.probe().await.expect_err("schema failure");
     let failed = supervisor.diagnostic().await;
     assert_eq!(failed.health, CodexHealth::SchemaUnsupported);
     assert!(failed.cli_version.is_none());
@@ -2279,6 +2274,211 @@ async fn setup_probe_only_discovers_and_initializes_a_short_lived_app_server() {
     assert!(!state.contains("setup_model_list"));
     let probe_pid = last_recorded_pid(&state, "setup_process_started:");
     wait_for_fixture_process_group_exit(probe_pid).await;
+}
+
+#[tokio::test]
+async fn repeated_setup_probe_reuses_successful_initialization_evidence() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("setup_probe");
+    let supervisor = test_supervisor();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+
+    let first = supervisor.setup_probe().await;
+    let second = supervisor.setup_probe().await;
+
+    assert_eq!(first.health, CodexHealth::Ready);
+    assert_eq!(second.health, CodexHealth::Ready);
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("setup_version").count(), 1);
+    assert_eq!(state.matches("setup_process_started:").count(), 1);
+    assert_eq!(state.matches("setup_initialize").count(), 1);
+    let probe_pid = last_recorded_pid(&state, "setup_process_started:");
+    wait_for_fixture_process_group_exit(probe_pid).await;
+}
+
+#[tokio::test]
+async fn repeated_connect_to_ready_workspace_reuses_runtime_and_probe_evidence() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("lifecycle_cache");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+
+    let first = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("first connect");
+    let second = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("idempotent connect");
+
+    assert_eq!(second, first);
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("version_requested").count(), 1);
+    assert_eq!(
+        state
+            .lines()
+            .filter(|line| *line == "schema_requested")
+            .count(),
+        1,
+    );
+    assert_eq!(state.matches("app_server_process_started:").count(), 1);
+    assert_eq!(state.matches("initialize_requested").count(), 1);
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn configured_binary_change_replaces_a_ready_runtime() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("lifecycle_cache");
+    let binary_directory = temporary_directory("configured-binary-change");
+    std::fs::create_dir_all(&binary_directory).expect("create private binary directory");
+    std::fs::set_permissions(&binary_directory, std::fs::Permissions::from_mode(0o700))
+        .expect("private binary directory mode");
+    let first_binary = binary_directory.join("codex-first");
+    let second_binary = binary_directory.join("codex-second");
+    std::fs::copy(fixture_binary(), &first_binary).expect("copy first fixture binary");
+    std::fs::copy(
+        fixture_binary().with_file_name("codex_schema_subset_v0_144_5.json"),
+        binary_directory.join("codex_schema_subset_v0_144_5.json"),
+    )
+    .expect("copy fixture schema");
+    let mut second_bytes = std::fs::read(fixture_binary()).expect("fixture binary bytes");
+    second_bytes.extend_from_slice(b"\n# configured binary change fixture\n");
+    std::fs::write(&second_binary, second_bytes).expect("write second fixture binary");
+    for binary in [&first_binary, &second_binary] {
+        std::fs::set_permissions(binary, std::fs::Permissions::from_mode(0o700))
+            .expect("fixture binary mode");
+    }
+
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor
+        .set_explicit_binary(Some(first_binary.clone()))
+        .await;
+    let first = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("connect first binary");
+
+    supervisor
+        .set_explicit_binary(Some(second_binary.clone()))
+        .await;
+    let second = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("connect replacement binary");
+
+    assert_ne!(first.binary_hash_prefix, second.binary_hash_prefix);
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("version_requested").count(), 2);
+    assert_eq!(state.matches("schema_requested").count(), 2);
+    assert_eq!(state.matches("app_server_process_started:").count(), 2);
+    assert_eq!(state.matches("initialize_requested").count(), 2);
+    supervisor.shutdown().await;
+    let _ = std::fs::remove_dir_all(binary_directory);
+}
+
+#[tokio::test]
+async fn workspace_switch_reuses_verified_binary_and_schema_evidence() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("lifecycle_cache");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace-a", &fixture.workspace)
+        .await
+        .expect("register first workspace");
+    supervisor
+        .register_workspace_root("workspace-b", &fixture.workspace)
+        .await
+        .expect("register second workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace-a".to_owned(),
+        })
+        .await
+        .expect("connect first workspace");
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace-b".to_owned(),
+        })
+        .await
+        .expect("connect second workspace");
+
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("version_requested").count(), 1);
+    assert_eq!(
+        state
+            .lines()
+            .filter(|line| *line == "schema_requested")
+            .count(),
+        1,
+    );
+    assert_eq!(state.matches("app_server_process_started:").count(), 2);
+    assert_eq!(state.matches("initialize_requested").count(), 2);
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn setup_probe_and_connect_share_binary_discovery_evidence() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("setup_probe");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+
+    assert_eq!(supervisor.setup_probe().await.health, CodexHealth::Ready);
+    assert_eq!(
+        supervisor
+            .connect(CodexConnectRequest {
+                workspace_id: "workspace".to_owned(),
+            })
+            .await
+            .expect("connect after setup")
+            .health,
+        CodexHealth::Ready,
+    );
+
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("version_requested").count(), 1);
+    assert_eq!(
+        state
+            .lines()
+            .filter(|line| *line == "schema_requested")
+            .count(),
+        1,
+    );
+    assert_eq!(state.matches("app_server_process_started:").count(), 2);
+    assert_eq!(state.matches("initialize_requested").count(), 2);
+    supervisor.shutdown().await;
 }
 
 #[tokio::test]

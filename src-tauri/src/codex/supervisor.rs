@@ -9,7 +9,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 
 use super::attachment::{AttachmentSnapshotLease, ResolvedAttachment, ResolvedAttachmentSet};
-use super::binary::{discover_binary, probe_schema, BinaryError, BinaryInfo, SchemaProbe};
+use super::binary::{
+    discover_binary, probe_schema, BinaryError, BinaryInfo, SchemaProbe, VerifiedBinaryIdentity,
+};
 use super::bundled_skill::{resolve_bundled_skill, ResolvedBundledSkill, COMMIT_SKILL_NAME};
 use super::decision::{
     fallback_continuation_input, FallbackDecisionClaim, FallbackDecisionContext,
@@ -100,6 +102,7 @@ struct SupervisorState {
     workspaces: HashMap<String, PathBuf>,
     explicit_binary: Option<PathBuf>,
     binary: Option<BinaryInfo>,
+    setup_identity: Option<VerifiedBinaryIdentity>,
     schema: Option<SchemaProbe>,
     runtime: Option<Arc<ProcessRuntime>>,
     active_workspace: Option<String>,
@@ -239,6 +242,39 @@ async fn expected_binary_for_configured_path(
     let binary = binary?;
     let canonical_path = tokio::fs::canonicalize(configured_binary).await.ok()?;
     (canonical_path == binary.canonical_path).then_some(binary)
+}
+
+fn cached_discovery_path(
+    explicit_binary: Option<PathBuf>,
+    cached_binary: Option<&BinaryInfo>,
+) -> Option<PathBuf> {
+    explicit_binary.or_else(|| {
+        cached_binary
+            .filter(|binary| binary.source != BinarySource::Explicit)
+            .map(|binary| binary.canonical_path.clone())
+    })
+}
+
+async fn resolve_lifecycle_binary(
+    configured_binary: Option<&Path>,
+    cached_binary: Option<BinaryInfo>,
+) -> Result<BinaryInfo, BinaryError> {
+    let expected =
+        expected_binary_for_configured_path(configured_binary, cached_binary.clone()).await;
+    if let Some(binary) = expected.as_ref() {
+        if binary.revalidate_metadata().await.is_ok() {
+            return Ok(binary.clone());
+        }
+    }
+
+    let observed = discover_binary(configured_binary).await?;
+    if expected.as_ref().is_some_and(|binary| {
+        binary.identity != observed.identity
+            || binary.canonical_path_hash != observed.canonical_path_hash
+    }) {
+        return Err(BinaryError::Untrusted);
+    }
+    Ok(observed)
 }
 
 impl Default for CodexSupervisor {
@@ -503,7 +539,19 @@ impl CodexSupervisor {
     /// Checks only the prerequisites required to leave the first-run setup:
     /// a trusted executable and a short-lived App Server that can initialize.
     pub async fn setup_probe(&self) -> CodexDiagnostic {
-        let (configured_binary, binary, workspace_root) = {
+        self.setup_probe_internal(None).await
+    }
+
+    pub(crate) async fn setup_probe_with_verified_binary(
+        &self,
+        binary: BinaryInfo,
+    ) -> CodexDiagnostic {
+        self.setup_probe_internal(Some(binary)).await
+    }
+
+    async fn setup_probe_internal(&self, supplied_binary: Option<BinaryInfo>) -> CodexDiagnostic {
+        let _lifecycle = self.inner.lifecycle.lock().await;
+        let (explicit_binary, cached_binary, setup_identity, workspace_root, ready_runtime) = {
             let state = self.inner.state.lock().await;
             let workspace_root = state
                 .active_workspace
@@ -512,48 +560,76 @@ impl CodexSupervisor {
                 .or_else(|| state.workspaces.values().next())
                 .cloned()
                 .or_else(|| std::env::current_dir().ok());
-            let configured_binary = state.explicit_binary.clone().or_else(|| {
-                state
-                    .binary
-                    .as_ref()
-                    .filter(|binary| binary.source != BinarySource::Explicit)
-                    .map(|binary| binary.canonical_path.clone())
-            });
-            (configured_binary, state.binary.clone(), workspace_root)
-        };
-        let expected_binary =
-            expected_binary_for_configured_path(configured_binary.as_deref(), binary).await;
-        let context = SetupProbeContext {
-            configured_binary,
-            expected_binary,
-            verified_binary: None,
-            workspace_root,
+            let ready_runtime =
+                if supplied_binary.is_none() && state.diagnostic.health == CodexHealth::Ready {
+                    state.runtime.clone().zip(state.binary.clone())
+                } else {
+                    None
+                };
+            (
+                state.explicit_binary.clone(),
+                state.binary.clone(),
+                state.setup_identity.clone(),
+                workspace_root,
+                ready_runtime,
+            )
         };
 
-        run_setup_probe(context).await
-    }
+        let configured_binary =
+            cached_discovery_path(explicit_binary.clone(), cached_binary.as_ref());
+        if let Some((runtime, binary)) = ready_runtime {
+            let configured_matches = expected_binary_for_configured_path(
+                configured_binary.as_deref(),
+                Some(binary.clone()),
+            )
+            .await
+            .is_some();
+            if configured_matches
+                && !runtime.has_exited().await
+                && binary.revalidate_metadata().await.is_ok()
+            {
+                return diagnostic_from_setup(&binary);
+            }
+        }
 
-    pub(crate) async fn setup_probe_with_verified_binary(
-        &self,
-        binary: BinaryInfo,
-    ) -> CodexDiagnostic {
-        let workspace_root = {
-            let state = self.inner.state.lock().await;
-            state
-                .active_workspace
-                .as_ref()
-                .and_then(|workspace_id| state.workspaces.get(workspace_id))
-                .or_else(|| state.workspaces.values().next())
-                .cloned()
-                .or_else(|| std::env::current_dir().ok())
+        let binary = match supplied_binary {
+            Some(binary) => binary,
+            None => {
+                match resolve_lifecycle_binary(configured_binary.as_deref(), cached_binary).await {
+                    Ok(binary) => binary,
+                    Err(error) => return setup_binary_failure_diagnostic(error),
+                }
+            }
         };
-        run_setup_probe(SetupProbeContext {
+        if setup_identity.as_ref() == Some(&binary.identity)
+            && binary.revalidate_metadata().await.is_ok()
+        {
+            return diagnostic_from_setup(&binary);
+        }
+        let diagnostic = run_setup_probe(SetupProbeContext {
             configured_binary: None,
             expected_binary: None,
-            verified_binary: Some(binary),
+            verified_binary: Some(binary.clone()),
             workspace_root,
         })
-        .await
+        .await;
+        let mut state = self.inner.state.lock().await;
+        if diagnostic.health == CodexHealth::Ready {
+            state.setup_identity = Some(binary.identity.clone());
+            if state.runtime.is_none() {
+                if state
+                    .binary
+                    .as_ref()
+                    .is_none_or(|cached| cached.identity != binary.identity)
+                {
+                    state.schema = None;
+                }
+                state.binary = Some(binary);
+            }
+        } else if state.setup_identity.as_ref() == Some(&binary.identity) {
+            state.setup_identity = None;
+        }
+        diagnostic
     }
 
     pub(crate) async fn support_release_identity_evidence(&self) -> SupportReleaseIdentityEvidence {
@@ -675,7 +751,63 @@ impl CodexSupervisor {
         reset_restart_budget: bool,
     ) -> Result<CodexDiagnostic, CodexCommandError> {
         let _lifecycle = self.inner.lifecycle.lock().await;
-        let (workspace_root, explicit, previous_runtime, previous_generation) = {
+        let ready_runtime = {
+            let mut state = self.inner.state.lock().await;
+            if !state.workspaces.contains_key(&workspace_id) {
+                return Err(command_error(
+                    "CODEX-WORKSPACE-NOT-REGISTERED",
+                    "codex.connect",
+                    false,
+                ));
+            }
+            if reset_restart_budget {
+                state.restart_times.clear();
+            }
+            if state.active_workspace.as_deref() == Some(&workspace_id)
+                && state.diagnostic.health == CodexHealth::Ready
+            {
+                state
+                    .runtime
+                    .clone()
+                    .zip(state.binary.clone())
+                    .map(|(runtime, binary)| {
+                        (
+                            runtime,
+                            binary,
+                            state.diagnostic.clone(),
+                            cached_discovery_path(
+                                state.explicit_binary.clone(),
+                                state.binary.as_ref(),
+                            ),
+                        )
+                    })
+            } else {
+                None
+            }
+        };
+        if let Some((runtime, binary, diagnostic, configured_binary)) = ready_runtime {
+            let configured_matches = expected_binary_for_configured_path(
+                configured_binary.as_deref(),
+                Some(binary.clone()),
+            )
+            .await
+            .is_some();
+            if configured_matches
+                && !runtime.has_exited().await
+                && binary.revalidate_metadata().await.is_ok()
+            {
+                return Ok(diagnostic);
+            }
+        }
+
+        let (
+            workspace_root,
+            configured_binary,
+            cached_binary,
+            cached_schema,
+            previous_runtime,
+            previous_generation,
+        ) = {
             let mut state = self.inner.state.lock().await;
             let workspace_root = state
                 .workspaces
@@ -684,14 +816,17 @@ impl CodexSupervisor {
                 .ok_or_else(|| {
                     command_error("CODEX-WORKSPACE-NOT-REGISTERED", "codex.connect", false)
                 })?;
-            if reset_restart_budget {
-                state.restart_times.clear();
-            }
             let previous_generation = state.generation;
-            clear_probe_evidence(&mut state, "codex.connect");
+            let configured_binary =
+                cached_discovery_path(state.explicit_binary.clone(), state.binary.as_ref());
+            let cached_binary = state.binary.clone();
+            let cached_schema = state.schema.clone();
+            begin_connection_attempt(&mut state, "codex.connect");
             (
                 workspace_root,
-                state.explicit_binary.clone(),
+                configured_binary,
+                cached_binary,
+                cached_schema,
                 state.runtime.take(),
                 previous_generation,
             )
@@ -702,18 +837,37 @@ impl CodexSupervisor {
             runtime.shutdown().await;
         }
 
-        let binary = match discover_binary(explicit.as_deref()).await {
-            Ok(binary) => binary,
-            Err(error) => {
-                self.set_probe_failure(error, "codex.binary").await;
-                return Err(binary_command_error(error, "codex.connect"));
+        let binary =
+            match resolve_lifecycle_binary(configured_binary.as_deref(), cached_binary.clone())
+                .await
+            {
+                Ok(binary) => binary,
+                Err(error) => {
+                    self.set_probe_failure(error, "codex.binary").await;
+                    return Err(binary_command_error(error, "codex.connect"));
+                }
+            };
+        let schema = if cached_binary
+            .as_ref()
+            .is_some_and(|cached| cached.identity == binary.identity)
+        {
+            match cached_schema {
+                Some(schema) => schema,
+                None => match probe_schema(&binary).await {
+                    Ok(schema) => schema,
+                    Err(error) => {
+                        self.set_probe_failure(error, "codex.schema").await;
+                        return Err(binary_command_error(error, "codex.connect"));
+                    }
+                },
             }
-        };
-        let schema = match probe_schema(&binary).await {
-            Ok(schema) => schema,
-            Err(error) => {
-                self.set_probe_failure(error, "codex.schema").await;
-                return Err(binary_command_error(error, "codex.connect"));
+        } else {
+            match probe_schema(&binary).await {
+                Ok(schema) => schema,
+                Err(error) => {
+                    self.set_probe_failure(error, "codex.schema").await;
+                    return Err(binary_command_error(error, "codex.connect"));
+                }
             }
         };
 
@@ -844,7 +998,9 @@ impl CodexSupervisor {
             ChildState::Ready,
             "codex.initialize",
         );
-        self.inner.state.lock().await.diagnostic = diagnostic.clone();
+        let mut state = self.inner.state.lock().await;
+        state.setup_identity = Some(binary.identity.clone());
+        state.diagnostic = diagnostic.clone();
         diagnostic
     }
 
@@ -2707,7 +2863,7 @@ async fn run_readiness_probe(context: ReadinessProbeContext) -> CodexDiagnostic 
         runtime_guard.disarm();
         match observed {
             Ok(Ok(handshake)) => {
-                if binary.revalidate().await.is_err() {
+                if binary.revalidate_metadata().await.is_err() {
                     return readiness_failure_diagnostic(
                         CodexHealth::BinaryUntrusted,
                         "CODEX-BINARY-IDENTITY-CHANGED",
@@ -3102,7 +3258,12 @@ fn bind_pending_main_work_unit(
 
 fn clear_probe_evidence(state: &mut SupervisorState, operation: &str) {
     state.binary = None;
+    state.setup_identity = None;
     state.schema = None;
+    begin_connection_attempt(state, operation);
+}
+
+fn begin_connection_attempt(state: &mut SupervisorState, operation: &str) {
     state.normalizer = None;
     state.thread_handles.clear();
     state.turn_handles.clear();

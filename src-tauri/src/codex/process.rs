@@ -390,7 +390,7 @@ async fn spawn_process_with_environment(
     environment: Vec<(OsString, OsString)>,
 ) -> Result<ProcessRuntime, ProcessError> {
     binary
-        .revalidate()
+        .revalidate_metadata()
         .await
         .map_err(|_| ProcessError::IdentityChanged)?;
     let mut command = Command::new(&binary.canonical_path);
@@ -411,7 +411,7 @@ async fn spawn_process_with_environment(
     let mut child = command.spawn().map_err(|_| ProcessError::Spawn)?;
     let pid = child.id().ok_or(ProcessError::Spawn)?;
     let mut process_group_guard = ProcessGroupDropGuard::new(pid);
-    if binary.revalidate().await.is_err() {
+    if binary.revalidate_metadata().await.is_err() {
         process_group_guard
             .terminate_child(&mut child, Duration::from_millis(200))
             .await;

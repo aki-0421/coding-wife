@@ -226,6 +226,8 @@ def send_support_item(item_type, text):
 def main():
     args = sys.argv[1:]
     if args == ["--version"]:
+        if MODE in ("lifecycle_cache", "setup_probe"):
+            record("version_requested")
         if MODE == "setup_probe":
             record("setup_version")
         sys.stdout.write("codex-cli 0.144.5\n")
@@ -247,6 +249,8 @@ def main():
             thread.join()
         return 0
     if len(args) >= 5 and args[:2] == ["app-server", "generate-json-schema"]:
+        if MODE in ("lifecycle_cache", "setup_probe"):
+            record("schema_requested")
         if MODE == "setup_probe":
             record("setup_schema_requested")
         output = pathlib.Path(args[args.index("--out") + 1])
@@ -262,6 +266,8 @@ def main():
     if not args or args[0] != "app-server":
         return 2
 
+    if MODE in ("lifecycle_cache", "setup_probe"):
+        record(f"app_server_process_started:{os.getpid()}")
     if MODE.startswith("readiness_"):
         record(f"readiness_process_started:{os.getpid()}")
     if MODE == "setup_probe":
@@ -281,6 +287,8 @@ def main():
         params = message.get("params") or {}
 
         if method == "initialize":
+            if MODE in ("lifecycle_cache", "setup_probe"):
+                record("initialize_requested")
             if MODE == "setup_probe":
                 record("setup_initialize")
             if MODE == "protocol_after_ready":
