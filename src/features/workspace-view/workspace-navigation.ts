@@ -16,25 +16,23 @@ export interface WorkspaceNavigationProjection {
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
 }
 
+export function workspaceProjectId(workspace: WorkspaceRecord): string {
+  return workspace.projectId ?? `legacy:${workspace.repository}`
+}
+
 export function projectWorkspaceNavigation(
   workspaces: readonly WorkspaceRecord[],
   selectedWorkspaceId: string,
-  filter: string,
+  projectFilterId: string,
 ): WorkspaceNavigationProjection {
   const selectedWorkspace =
     workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ??
     workspaces[0]
-  const query = filter.trim().toLocaleLowerCase()
   const filteredWorkspaces =
-    query.length === 0
+    projectFilterId.length === 0
       ? workspaces
-      : workspaces.filter((workspace) =>
-          [
-            workspace.repository,
-            workspace.githubRepository,
-            workspace.name,
-            workspace.branch,
-          ].some((value) => value?.toLocaleLowerCase().includes(query)),
+      : workspaces.filter(
+          (workspace) => workspaceProjectId(workspace) === projectFilterId,
         )
 
   return { filteredWorkspaces, selectedWorkspace }

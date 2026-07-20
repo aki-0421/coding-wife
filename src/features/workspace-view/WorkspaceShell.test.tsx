@@ -440,6 +440,11 @@ describe("WorkspaceShell", () => {
     expect(
       container.querySelectorAll("[data-linear-status-icon]"),
     ).toHaveLength(5)
+    expect(
+      screen.getByRole("button", {
+        name: "プロジェクトでワークスペースを絞り込む",
+      }),
+    ).toBeVisible()
     for (const lifecycle of [
       "done",
       "in_review",
@@ -587,6 +592,113 @@ describe("WorkspaceShell", () => {
     expect(archiveButton).toHaveClass("mr-xs", "size-6", "opacity-0")
     expect(archiveButton).not.toHaveClass("absolute")
     expect(archiveButton?.parentElement).toHaveClass("flex")
+  })
+
+  it("filters workspaces with the registered project select", async () => {
+    const user = userEvent.setup()
+    const state: WorkspaceAdapterState = {
+      projects: [
+        {
+          id: "project-alpha",
+          name: "alpha-local",
+          githubRepository: "team/alpha",
+          health: "ready",
+          workspaceCount: 1,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+        {
+          id: "project-beta",
+          name: "beta-local",
+          health: "ready",
+          workspaceCount: 1,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+        {
+          id: "project-empty",
+          name: "empty-local",
+          health: "ready",
+          workspaceCount: 0,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+      ],
+      workspaces: [
+        {
+          id: "workspace-alpha",
+          projectId: "project-alpha",
+          repository: "alpha-local",
+          githubRepository: "team/alpha",
+          name: "alpha-work",
+          branch: "feature/alpha",
+          lifecycle: "in_progress",
+        },
+        {
+          id: "workspace-beta",
+          projectId: "project-beta",
+          repository: "beta-local",
+          name: "beta-work",
+          branch: "feature/beta",
+          lifecycle: "in_progress",
+        },
+      ],
+      activeWorkspaceId: "workspace-alpha",
+      draft: null,
+      timeline: [],
+      history: { mode: "ready", errorCode: null, backupName: null },
+    }
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+    }
+
+    renderWorkspace(adapter)
+    const navigation = await screen.findByRole("navigation", {
+      name: "Workspaces",
+    })
+    expect(within(navigation).getByText("feature/alpha")).toBeVisible()
+    expect(within(navigation).getByText("feature/beta")).toBeVisible()
+
+    const filterButton = screen.getByRole("button", {
+      name: "Filter workspaces by project",
+    })
+    expect(filterButton).toHaveAttribute("aria-pressed", "false")
+    await user.click(filterButton)
+    const projectFilter = await screen.findByRole("combobox", {
+      name: "Project (repository)",
+    })
+    expect(
+      within(projectFilter).getByRole("option", { name: "All projects" }),
+    ).toHaveAttribute("value", "")
+    expect(
+      within(projectFilter).getByRole("option", { name: "team/alpha" }),
+    ).toHaveAttribute("value", "project-alpha")
+    expect(
+      within(projectFilter).getByRole("option", { name: "beta-local" }),
+    ).toHaveAttribute("value", "project-beta")
+
+    fireEvent.change(projectFilter, { target: { value: "project-beta" } })
+    expect(within(navigation).queryByText("feature/alpha")).toBeNull()
+    expect(within(navigation).getByText("feature/beta")).toBeVisible()
+    expect(filterButton).toHaveClass("bg-selected-row", "text-text-strong")
+    expect(filterButton).toHaveAttribute("aria-pressed", "true")
+
+    await user.click(filterButton)
+    fireEvent.change(
+      await screen.findByRole("combobox", {
+        name: "Project (repository)",
+      }),
+      { target: { value: "project-empty" } },
+    )
+    expect(
+      within(navigation).getByText(
+        "No workspaces are registered for this project.",
+      ),
+    ).toBeVisible()
+    await user.click(
+      within(navigation).getByRole("button", { name: "Clear filter" }),
+    )
+    expect(within(navigation).getByText("feature/alpha")).toBeVisible()
+    expect(within(navigation).getByText("feature/beta")).toBeVisible()
+    expect(filterButton).toHaveAttribute("aria-pressed", "false")
   })
 
   it("keeps duplicate native close requests behind one safe cancellation", async () => {
@@ -920,7 +1032,7 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
   })
 
-  it("supports keyboard tab cycling and the workspace filter shortcut", async () => {
+  it("supports keyboard tab cycling and the workspace project filter shortcut", async () => {
     renderWorkspace()
 
     const workspaceTabs = within(
@@ -937,8 +1049,8 @@ describe("WorkspaceShell", () => {
     expect(commitTab).toHaveAttribute("aria-selected", "true")
 
     fireEvent.keyDown(window, { key: "k", metaKey: true })
-    const filter = await screen.findByRole("textbox", {
-      name: "Filter workspaces",
+    const filter = await screen.findByRole("combobox", {
+      name: "Project (repository)",
     })
     await waitFor(() => expect(filter).toHaveFocus())
   })
@@ -982,8 +1094,8 @@ describe("WorkspaceShell", () => {
 
     fireEvent.keyDown(window, { key: "k", metaKey: true })
     const dialog = await screen.findByRole("dialog", { name: "Workspaces" })
-    const filter = await within(dialog).findByRole("textbox", {
-      name: "Filter workspaces",
+    const filter = await screen.findByRole("combobox", {
+      name: "Project (repository)",
     })
     await waitFor(() => expect(filter).toHaveFocus())
 

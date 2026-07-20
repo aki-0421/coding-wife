@@ -21,7 +21,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Tooltip,
@@ -61,8 +67,8 @@ const sidebarIconButtonClassName = "text-muted-foreground"
 interface WorkspaceSidebarProps {
   readonly appSettingsActive: boolean
   readonly copy: WorkspaceCopy
-  readonly filter: string
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
+  readonly projectFilterId: string
   readonly projects: readonly ProjectRecord[]
   readonly selectedProjectId?: string | undefined
   readonly selectedWorkspace?: WorkspaceRecord | undefined
@@ -73,7 +79,7 @@ interface WorkspaceSidebarProps {
     projectId: string,
     name: string,
   ) => Promise<boolean>
-  readonly onFilterChange: (value: string) => void
+  readonly onProjectFilterChange: (projectId: string) => void
   readonly onOpenSettings: () => void
   readonly onRequestArchive: (workspace: WorkspaceRecord) => void
   readonly onSelectWorkspace: (workspaceId: string) => void
@@ -256,8 +262,8 @@ function SidebarPanel({
   appSettingsActive,
   copy,
   expandedLifecycles,
-  filter,
   filteredWorkspaces,
+  projectFilterId,
   projects,
   selectedProjectId,
   selectedWorkspaceId,
@@ -265,14 +271,15 @@ function SidebarPanel({
   reserveTitlebarSpace,
   onAddProject,
   onCreateWorkspace,
-  onFilterChange,
+  onProjectFilterChange,
   onOpenSettings,
   onRequestArchive,
   onSelectWorkspace,
   onToggleLifecycle,
 }: SidebarPanelProps) {
-  const [filterVisible, setFilterVisible] = useState(false)
+  const [filterOpen, setFilterOpen] = useState(false)
   const lifecycleContentIdPrefix = useId()
+  const projectFilterSelectId = useId()
   const groups = useMemo(
     () =>
       lifecycleOrder.map((lifecycle) => ({
@@ -295,23 +302,58 @@ function SidebarPanel({
           {copy.workspaces}
         </h1>
         <div className="flex items-center gap-xxs">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label={copy.filterWorkspaces}
-                aria-pressed={filterVisible}
-                className={sidebarIconButtonClassName}
-                data-workspace-filter-toggle=""
-                onClick={() => setFilterVisible((current) => !current)}
-                size="icon-xs"
-                type="button"
-                variant="ghost"
-              >
-                <ListFilterIcon />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{copy.filterWorkspaces}</TooltipContent>
-          </Tooltip>
+          <Popover onOpenChange={setFilterOpen} open={filterOpen}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    aria-label={copy.filterWorkspaces}
+                    aria-pressed={projectFilterId.length > 0}
+                    className={cn(
+                      sidebarIconButtonClassName,
+                      projectFilterId.length > 0 &&
+                        "bg-selected-row text-text-strong",
+                    )}
+                    data-workspace-filter-toggle=""
+                    disabled={projects.length === 0}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <ListFilterIcon />
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{copy.filterWorkspaces}</TooltipContent>
+            </Tooltip>
+            <PopoverContent align="end" className="w-56 gap-xs p-sm">
+              <Field>
+                <FieldLabel htmlFor={projectFilterSelectId}>
+                  {copy.projectFilterLabel}
+                </FieldLabel>
+                <NativeSelect
+                  className="w-full"
+                  data-workspace-project-filter=""
+                  id={projectFilterSelectId}
+                  onChange={(event) => {
+                    onProjectFilterChange(event.currentTarget.value)
+                    setFilterOpen(false)
+                  }}
+                  size="sm"
+                  value={projectFilterId}
+                >
+                  <NativeSelectOption value="">
+                    {copy.allProjects}
+                  </NativeSelectOption>
+                  {projects.map((project) => (
+                    <NativeSelectOption key={project.id} value={project.id}>
+                      {project.githubRepository ?? project.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+            </PopoverContent>
+          </Popover>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -335,19 +377,6 @@ function SidebarPanel({
           />
         </div>
       </div>
-
-      {filterVisible ? (
-        <div className="shrink-0 px-xs pb-xs">
-          <Input
-            aria-label={copy.filterWorkspaces}
-            autoFocus
-            maxLength={200}
-            onChange={(event) => onFilterChange(event.currentTarget.value)}
-            placeholder={copy.filterWorkspaces}
-            value={filter}
-          />
-        </div>
-      ) : null}
 
       <ScrollArea className="min-h-0 flex-1 px-xs">
         <nav
@@ -412,13 +441,13 @@ function SidebarPanel({
             )
           })}
 
-          {filteredWorkspaces.length === 0 && filter.length > 0 ? (
+          {filteredWorkspaces.length === 0 && projectFilterId.length > 0 ? (
             <div className="flex flex-col items-start gap-xs px-sm py-lg">
               <p className="m-0 text-sidebar-helper text-muted-foreground">
                 {copy.noMatches}
               </p>
               <Button
-                onClick={() => onFilterChange("")}
+                onClick={() => onProjectFilterChange("")}
                 size="xs"
                 type="button"
                 variant="secondary"

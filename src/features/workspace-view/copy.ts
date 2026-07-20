@@ -2,7 +2,9 @@ import type { SupportedLocale } from "@/features/localization"
 
 const en = {
   workspaces: "Workspaces",
-  filterWorkspaces: "Filter workspaces",
+  filterWorkspaces: "Filter workspaces by project",
+  projectFilterLabel: "Project (repository)",
+  allProjects: "All projects",
   addProject: "Add project",
   addWorkspace: "Add workspace",
   archiveWorkspace: "Archive workspace",
@@ -84,7 +86,7 @@ const en = {
   repository: "Repository",
   branch: "Branch",
   active: "Active",
-  noMatches: "No workspaces match this filter.",
+  noMatches: "No workspaces are registered for this project.",
   loadingWorkspacesTitle: "Restoring workspace history",
   loadingWorkspacesDescription:
     "Checking local workspace records before enabling changes.",
@@ -562,7 +564,9 @@ const en = {
 const ja: typeof en = {
   ...en,
   workspaces: "ワークスペース",
-  filterWorkspaces: "ワークスペースを絞り込む",
+  filterWorkspaces: "プロジェクトでワークスペースを絞り込む",
+  projectFilterLabel: "プロジェクト（リポジトリ）",
+  allProjects: "すべてのプロジェクト",
   addProject: "プロジェクトを追加",
   addWorkspace: "ワークスペースを追加",
   archiveWorkspace: "ワークスペースをアーカイブ",
@@ -644,7 +648,7 @@ const ja: typeof en = {
   repository: "リポジトリ",
   branch: "ブランチ",
   active: "選択中",
-  noMatches: "条件に一致するワークスペースはありません。",
+  noMatches: "このプロジェクトにはワークスペースが登録されていません。",
   loadingWorkspacesTitle: "ワークスペース履歴を復元中",
   loadingWorkspacesDescription:
     "変更を有効にする前にローカルのワークスペース記録を確認しています。",

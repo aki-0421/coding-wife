@@ -576,15 +576,15 @@ export function WorkspaceShell({
         event.preventDefault()
         const visible = (element: HTMLElement) =>
           element.getClientRects().length > 0
-        const focusFilter = () => {
-          const inputs = Array.from(
-            document.querySelectorAll<HTMLInputElement>("input[aria-label]"),
-          ).filter(
-            (input) =>
-              input.getAttribute("aria-label") === copy.filterWorkspaces,
+        const focusProjectFilter = () => {
+          const selects = Array.from(
+            document.querySelectorAll<HTMLSelectElement>(
+              "select[data-workspace-project-filter]",
+            ),
           )
-          const filterInput = inputs.find(visible) ?? inputs[0]
-          filterInput?.focus()
+          const projectFilter = selects.find(visible) ?? selects[0]
+          projectFilter?.focus()
+          return projectFilter !== undefined
         }
 
         const filterToggles = Array.from(
@@ -594,10 +594,10 @@ export function WorkspaceShell({
         )
         const visibleFilterToggle = filterToggles.find(visible)
         if (visibleFilterToggle !== undefined) {
-          if (visibleFilterToggle.getAttribute("aria-pressed") !== "true") {
+          if (visibleFilterToggle.getAttribute("aria-expanded") !== "true") {
             visibleFilterToggle.click()
           }
-          window.requestAnimationFrame(focusFilter)
+          window.requestAnimationFrame(focusProjectFilter)
           return
         }
 
@@ -621,21 +621,12 @@ export function WorkspaceShell({
             const dialogFilterToggle = dialog?.querySelector<HTMLButtonElement>(
               "[data-workspace-filter-toggle]",
             )
-            if (dialogFilterToggle?.getAttribute("aria-pressed") !== "true") {
+            if (dialogFilterToggle?.getAttribute("aria-expanded") !== "true") {
               dialogFilterToggle?.click()
             }
             window.setTimeout(() => {
-              const dialogFilter = Array.from(
-                dialog?.querySelectorAll<HTMLInputElement>(
-                  "input[aria-label]",
-                ) ?? [],
-              ).find(
-                (input) =>
-                  input.getAttribute("aria-label") === copy.filterWorkspaces,
-              )
-              if (dialogFilter !== undefined) dialogFilter.focus()
-              else if (attempt < 4) prepareCompactFilter(attempt + 1)
-              else focusFilter()
+              if (focusProjectFilter()) return
+              if (attempt < 4) prepareCompactFilter(attempt + 1)
             }, 25)
           }
           window.setTimeout(() => prepareCompactFilter(0), 0)
@@ -643,16 +634,16 @@ export function WorkspaceShell({
         }
 
         const fallbackToggle = filterToggles[0]
-        if (fallbackToggle?.getAttribute("aria-pressed") !== "true") {
+        if (fallbackToggle?.getAttribute("aria-expanded") !== "true") {
           fallbackToggle?.click()
         }
-        window.requestAnimationFrame(focusFilter)
+        window.requestAnimationFrame(focusProjectFilter)
       }
     }
 
     window.addEventListener("keydown", handleKeyboard)
     return () => window.removeEventListener("keydown", handleKeyboard)
-  }, [appSettingsOpen, copy.filterWorkspaces, view])
+  }, [appSettingsOpen, view])
 
   const openAppSettings = (section: AppSettingsSection = "general") => {
     setAppSettingsProjectId(null)
@@ -749,15 +740,15 @@ export function WorkspaceShell({
       <WorkspaceSidebar
         appSettingsActive={appSettingsOpen}
         copy={copy}
-        filter={view.filter}
         filteredWorkspaces={view.filteredWorkspaces}
+        projectFilterId={view.projectFilterId}
         projects={view.projects}
         archiveDisabledWorkspaceId={
           turnActive ? selectedWorkspace?.id : undefined
         }
         onAddProject={() => void view.requestAddProject(copy.pickerUnavailable)}
         onCreateWorkspace={view.addWorkspace}
-        onFilterChange={view.setFilter}
+        onProjectFilterChange={view.setProjectFilterId}
         onOpenSettings={() =>
           openAppSettings(view.projects.length === 0 ? "projects" : "general")
         }

@@ -191,7 +191,7 @@ destructive/interrupt confirmationの共通DOM順はheading、対象、影響、
 |---|---|---|---|
 | turn送信 | `Command+Enter` | valid composer、online、decisionなし | 1 turnだけ開始。Enterは改行 |
 | tab移動 | `Control+Tab` / `Control+Shift+Tab` | main window active | Chat/Commit/Settingsを循環 |
-| workspace filter | `Command+K` | destructive dialogなし | sidebarを開きfilterへfocus |
+| workspace project filter | `Command+K` | destructive dialogなし | sidebarとPopoverを開きProject selectへfocus |
 | non-destructive overlay close | `Escape` | popover/drawer/preview表示中 | 入力を保持しtriggerへfocus |
 | decision answer | `Command+Enter` | optionと条件付きOtherがvalid | answerを1回送信 |
 | stop / restore | shortcutなし | buttonの条件を満たす | 誤操作を避けるため明示buttonだけ |

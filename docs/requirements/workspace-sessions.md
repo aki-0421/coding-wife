@@ -2,7 +2,7 @@
 title: "WORK ワークスペース・セッション要件定義"
 description: "ローカルGitプロジェクトの登録と、app管理Git worktreeであるworkspaceの作成・選択・復元・Archiveを定義する。"
 updated: 2026-07-20
-last_verified: 2026-07-19
+last_verified: 2026-07-20
 read_when:
   - "workspace sidebar、project picker、session lifecycleを実装するとき。"
   - "active workspace切替とdraft・audio分離を検証するとき。"
@@ -37,7 +37,7 @@ read_when:
 | 対象 | 内容 |
 |---|---|
 | Project registration | local Git repository選択、canonicalization、診断 |
-| Workspace list | filter、state grouping、repo/branch、active selection、empty state |
+| Workspace list | registered project filter、state grouping、repo/branch、active selection、empty state |
 | Lifecycle | Backlog、In Progress、In Review、Done、Canceledと別軸attention |
 | Session continuity | active workspace、draft、scroll、summaryのlocal persistence |
 | Preflight | Git、Codex、auth、Sol、characterの送信前診断 |
@@ -56,7 +56,7 @@ read_when:
 
 | アクター | 説明 | 許可する操作 | 拒否時の動作 |
 |---|---|---|---|
-| ローカル利用者 | project所有者 | folder選択、workspace作成・選択・filter・cancel・登録解除 | filesystem権限不足または無効repoなら登録せず理由を表示する |
+| ローカル利用者 | project所有者 | folder選択、workspace作成・選択・project filter・cancel・登録解除 | filesystem権限不足または無効repoなら登録せず理由を表示する |
 | Rust core | pathとGit状態の信頼境界 | canonical path検証、read-only Git診断、metadata保存 | root外参照、消失path、I/O失敗を構造化errorにする |
 | Codex main session | active workspaceで作業するprocess | 選択済みcwdで一つのthreadを開始 | inactive workspaceやpreflight失敗workspaceでは開始しない |
 
@@ -78,7 +78,7 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | `WORK-F-050` | 利用者は登録projectにworkspaceを作成できる | workspaceが0件ならmain surfaceのinline form、1件以上なら`+`のdialogで登録projectをselectし、任意nameを確定すると、projectの現在HEADを起点にapp-owned worktree root配下へ新branchとGit worktreeを作成する。作成したworktreeは固有のrootとper-worktree Git directoryを持つが、登録projectと同じGit common directory identityであることを照合する。name未編集時は`ws-MMDD-<random 4文字>`形式の短い既定値を使う。作成成功後だけBacklog groupへworkspace recordを追加・選択し、同じprojectに複数worktreeを持てる | Approved | 非該当 |
-| `WORK-F-051` | 利用者はworkspace一覧をfilterできる | repo、branch、workspace nameのcase-insensitive部分一致で200件を絞り込み、0件時はfilter解除操作を表示する | Approved | 非該当 |
+| `WORK-F-051` | 利用者はworkspace一覧を登録projectでfilterできる | ListFilterのPopoverに登録済みProject IDをGitHub `owner/repo`、取得できない時はproject名で列挙するselectを表示する。`すべて`または1件を選ぶとworkspaceのProject ID完全一致で200件を100ms以内に絞り込み、0件時はfilter解除操作を表示する。任意文字列input、repo/branch/workspace nameの部分一致は提供しない | Approved | 非該当 |
 | `WORK-F-052` | 利用者はlifecycle groupからworkspaceを選択できる | app localeにかかわらずLinearと同じ英語のDone/In Review/In Progress/Backlog/Canceledでgroupを表示し、各statusをcheck、half-filled progress、quarter-filled progress、dotted、xの円形iconで識別できる。各groupは初期展開され、heading行全体のclick、`Enter`、`Space`で他groupとselectionを変えず独立して開閉できる。toggleは`aria-expanded`と`aria-controls`を持ち、chevronはhoverまたはfocus-visible時だけ表示する。折り畳み中だけ対象workspaceの数値件数を0件を含めて表示し、accessible nameでは展開状態にかかわらず件数を1回だけ伝える。item選択でheader、Chat、Commit、Companionが同一workspaceへ100ms以内に切り替わる | Approved | 非該当 |
 | `WORK-F-053` | アプリはlifecycleとattentionを別に表示する | lifecycleを変えずにNeeds answer、Approval required、Test failed、High riskをbadgeとaccessible labelで併記できる | Approved | 非該当 |
 | `WORK-F-054` | アプリは現在のrepoとbranchを表示する | sidebar itemではowner avatarを先頭へ置き、実Gitのbranchまたはdetached HEAD短縮SHAを最も目立つtitle、GitHub `origin`がある場合はcredentialを除いた`owner/repo`を小さい補助文字で表示する。headerはGitHub `origin`がある場合にownerのGitHub avatar、`owner/repo`、workspace名をこの順のbreadcrumbとして表示し、branchを隣接表示する。sidebarとheaderのavatarはreferrerを送信せずGitHubの画像originだけから取得し、offline、画像取得失敗、またはGitHub `origin`がないlocal repositoryではapp iconを使わずrepositoryを示すneutral fallbackへ縮退する。GitHub `origin`がないlocal repositoryの文字列は保存済みrepo名へfallbackする。selected itemとheaderの長い値はellipsisと全文tooltipを持つ | Approved | 非該当 |
@@ -170,9 +170,9 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | 閉じる・アプリ終了 | active executionの停止判断はAPP要件に従う | `WORK-F-058`, `WORK-F-060` |
 | 未保存データ | composer draftはworkspace単位、Project context入力はProject ID単位、Character context入力はapp単位で保持 | `WORK-F-059`, `WORK-F-063`, `WORK-F-064` |
 | ローカルデータ | canonical pathはRust管理DBの目的限定project linkageへ保存し、normalized eventやUI storageを正本にしない | `WORK-F-060` |
-| オフライン | project一覧、filter、Project detailのProject Contextは利用可能 | `WORK-F-051`, `WORK-F-063` |
+| オフライン | project一覧、project filter、Project detailのProject Contextは利用可能 | `WORK-F-051`, `WORK-F-063` |
 | ファイル・OS操作 | picker cancel、権限不足、移動・削除、bounded context process失敗を区別 | `WORK-F-045`, `WORK-F-047`, `WORK-F-062`, `WORK-F-064` |
-| メニュー・ショートカット | FolderPlusとPlusへ24×24px hit areaとaccessible nameを与える | `WORK-F-044`, `WORK-F-050` |
+| メニュー・ショートカット | FolderPlusとPlusへ24×24px hit areaとaccessible nameを与える。`Command+K`はListFilterのPopoverを開きProject selectへfocusする | `WORK-F-044`, `WORK-F-050`, `WORK-F-051` |
 | Deep Link・ファイル関連付け | 非該当: MVPで登録しない | 非該当 |
 | 通知 | attentionはapp内sidebarとheaderに表示 | `WORK-F-053` |
 | Capability・認可 | pickerで選択したrootの診断だけをRustに許可 | `WORK-F-044`〜`WORK-F-049` |
@@ -195,7 +195,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | 権限 | project rootのread診断、app metadata write、app-owned root内のworktree add/removeだけを許可し、登録解除でsource/worktreeを削除しない |
 | プライバシー | repository path、goal、Contextはlocal保存のみ。支援agentへ送る場合は別要件のredactionを通す |
 | 監査・ログ | add、cancel、select、lifecycle、preflight resultをsecretなしで記録する |
-| 性能 | 200 workspaceのfilter・group更新p95 100ms、selection更新p95 100ms |
+| 性能 | 200 workspaceのProject ID filter・group更新p95 100ms、selection更新p95 100ms |
 | 信頼性・復旧 | DBまたはrepo消失時も他workspaceを開け、破損itemを明示する |
 | アクセシビリティ | statusを色だけで表さず、label、icon、stroke/fillを併用する |
 | 多言語・地域 | app labelはja/en。sidebarのlifecycle statusだけはLinearと同じ英語表記へ固定し、repo/branch/user contextも翻訳しない |

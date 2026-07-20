@@ -35,8 +35,8 @@ status: "Approved"
 | Project追加 | OS folder picker、canonicalization、Git worktree検証、重複選択 |
 | Preflight | Git、Codex executable、login、GPT-5.6 Sol、character packのready/warning/blocked |
 | Workspace作成 | project select、既定name、app-owned Git worktree作成、Backlog登録 |
-| Sidebar | lifecycle group、attention、repo、branch、filter、active selection |
-| Continuity | Project ID、group、active workspace、filter、draft、last summary、timeline anchor ID/sequence/offset、repository healthの復元 |
+| Sidebar | lifecycle group、attention、repo、branch、project filter、active selection |
+| Continuity | Project ID、group、active workspace、project filter、draft、last summary、timeline anchor ID/sequence/offset、repository healthの復元 |
 | Safe removal | workspace Archiveによる対象worktree削除、project metadata登録解除。Archive以外ではworktreeとGit refを削除しない |
 
 ### 含めない
@@ -56,15 +56,15 @@ status: "Approved"
 | 表示前提 | app-private DBをreadできること。読めない場合はrecovery stateを表示する |
 | 初期フォーカス | 0件時は`Projectを追加`、通常時はactive workspace item、error時は最初の回復操作 |
 | 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |
-| キャンセル | picker/dialog開始前の一覧、active selection、filter、入力を維持する |
+| キャンセル | picker/dialog開始前の一覧、active selection、project filter、入力を維持する |
 | 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う |
-| 再表示 | group、active selection、filter、sidebar scroll、last summary、timeline anchor ID/sequence/offset、repository identity/health snapshot、preflight結果をRust DBから復元する |
+| 再表示 | group、active selection、project filter、sidebar scroll、last summary、timeline anchor ID/sequence/offset、repository identity/health snapshot、preflight結果をRust DBから復元する |
 
 ## 利用者と権限
 
 | 利用者・ロール | 表示 | 操作 | 拒否時の動作 |
 |---|---|---|---|
-| ローカル利用者 | project、workspace、preflightの非秘密情報 | add、create、filter、select、cancel、登録解除、再診断 | 無効path・権限・実行中turnではmutationせず理由を表示 |
+| ローカル利用者 | project、workspace、preflightの非秘密情報 | add、create、project filter、select、cancel、登録解除、再診断 | 無効path・権限・実行中turnではmutationせず理由を表示 |
 | React WebView | pack ID、workspace ID、sanitized repo/branch | typed picker/create/select request | absolute home path、任意Git引数、任意shellを送れない |
 | Rust project service | canonical path、Git metadata、DB | picker result検証、read-only preflight、metadata transaction | 不正path、I/O、duplicateを構造化errorにする |
 | Codex supervisor | preflight statusだけ | executable/login/model capability診断 | blockedならSend不可のstatusを返しthreadを開始しない |
@@ -76,7 +76,7 @@ status: "Approved"
 | 領域 | 実装拘束値 | 表示内容 | 主な操作 |
 |---|---:|---|---|
 | native titlebar safe area | sidebar上40.5px | OS所有のnative traffic lights用余白。WebViewは赤・黄・緑の円を描画しない | close、minimize、zoomはmacOS native controlで行う |
-| workspace heading | sidebar内40.5px | `Workspaces`、ListFilter、FolderPlus、Plus | filter、project追加、workspace作成 |
+| workspace heading | sidebar内40.5px | `Workspaces`、ListFilter、FolderPlus、Plus | project filter、project追加、workspace作成 |
 | workspace list | sidebar幅255.04px、item 242.25×49.5px | owner avatar、branch、`owner/repo`、Done / In Review / In Progress / Backlog / Canceled | select、attention確認、overflow |
 | sidebar footer | 40.5px | App settings gear | [S-005](S-005_app-settings-diagnostics.md)へ移動 |
 | main header | sidebar右、81px | `Sessions` breadcrumb、preflight summary | current project切替、診断詳細 |
@@ -96,13 +96,15 @@ S-001のmain contentはChat/Companionを描画せず、main幅中央へ最大760
 
 sidebarのlifecycle statusは[LinearのIssue status](https://linear.app/docs/configuring-workflows)と同じ英語表記と進捗円形状を正本とし、app localeが日本語でも翻訳しない。この例外はgroup headingとworkspace itemのaccessible lifecycle labelだけに限定し、周辺control、attention、repository healthはja/en localeへ追従する。status colorは本appのsemantic tokenを維持する。
 
-各lifecycle groupはheading行全体をaccordion toggleとし、画面mount時はすべて展開する。heading行の任意位置をclickすると対象groupだけを開閉し、他group、active workspace、filterを変更しない。toggleは`aria-expanded`と`aria-controls`を持ち、折り畳みchevronはpointer hover時だけ表示する。keyboard操作ではaffordanceを失わないようfocus-visible時にも表示し、`Enter`または`Space`で同じ開閉を行う。展開状態は永続化せず、画面を再mountすると全groupを展開する。折り畳み中だけheading右端に対象workspaceの数値件数を表示し、0件も`0`として省略しない。読み上げ名には展開状態にかかわらず同じ件数を1回だけ含める。
+各lifecycle groupはheading行全体をaccordion toggleとし、画面mount時はすべて展開する。heading行の任意位置をclickすると対象groupだけを開閉し、他group、active workspace、project filterを変更しない。toggleは`aria-expanded`と`aria-controls`を持ち、折り畳みchevronはpointer hover時だけ表示する。keyboard操作ではaffordanceを失わないようfocus-visible時にも表示し、`Enter`または`Space`で同じ開閉を行う。展開状態は永続化せず、画面を再mountすると全groupを展開する。折り畳み中だけheading右端に対象workspaceの数値件数を表示し、0件も`0`として省略しない。読み上げ名には展開状態にかかわらず同じ件数を1回だけ含める。
 
 workspace navigation contentは242.25pxを上限として、右端の件数とchevronを255.04px sidebar内へ収める。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "expands lifecycle groups by default and toggles them independently"`で初期展開、独立開閉、1件・0件表示、ARIA、content幅を検証する。
 
-sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、branch titleを13px / 500 / 19.5px、GitHub repository full nameを11px / 400 / 16.5px、filter 0件helperを12px / 400 / 18pxとする。workspace itemの先頭にはheaderと同じ24px owner avatarを置き、GitHub metadataがない時はneutral Git worktree fallback、画像取得失敗時はneutral user fallbackを使う。workspace selectionでfont weight、文字幅、avatar geometryを変えず、selected background、strong text、branch violet iconだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。
+sidebar typographyは、`Workspaces` headingを14px / 600 / 21px、lifecycle statusを12px / 600 / 18px、branch titleを13px / 500 / 19.5px、GitHub repository full nameを11px / 400 / 16.5px、project filter 0件helperを12px / 400 / 18pxとする。workspace itemの先頭にはheaderと同じ24px owner avatarを置き、GitHub metadataがない時はneutral Git worktree fallback、画像取得失敗時はneutral user fallbackを使う。workspace selectionでfont weight、文字幅、avatar geometryを変えず、selected background、strong text、branch violet iconだけを切り替える。health metadataは11px / 500 / 16.5pxを維持する。
 
-sidebar内のicon-only buttonは、filter、project追加、workspace追加、Archive、App Settings、compact navigationを含め、静止時に`Workspaces` headingと同じ`text-muted-accessible`相当の色を使う。hover、focus-visible、active/current stateでは既存のforegroundまたはselected stateへ切り替え、操作可能性と現在地を示す。workspace rowはArchive buttonが透明な静止時も24pxのcontrol幅と右6px insetを通常flow内で確保し、branch、repository、healthのellipsis領域をその予約幅へ侵入させない。Archiveのhover/focus表示によってrow内の文字幅、折り返し、位置を変えない。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "mutes sidebar icon controls and reserves the archive action width"`でicon-only buttonの静止色とArchiveの通常flow内予約を検証する。
+sidebar内のicon-only buttonは、project filter、project追加、workspace追加、Archive、App Settings、compact navigationを含め、静止時に`Workspaces` headingと同じ`text-muted-accessible`相当の色を使う。hover、focus-visible、active/current stateでは既存のforegroundまたはselected stateへ切り替え、操作可能性と現在地を示す。workspace rowはArchive buttonが透明な静止時も24pxのcontrol幅と右6px insetを通常flow内で確保し、branch、repository、healthのellipsis領域をその予約幅へ侵入させない。Archiveのhover/focus表示によってrow内の文字幅、折り返し、位置を変えない。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "mutes sidebar icon controls and reserves the archive action width"`でicon-only buttonの静止色とArchiveの通常flow内予約を検証する。
+
+ListFilterは任意文字列inputを表示せず、押下するとportalされたPopover menuを開き、`Project（repository）`のnative selectへfocusを移す。selectの先頭は`すべてのプロジェクト / All projects`、以降は登録済みProject IDごとにGitHub `owner/repo`、取得できない時はproject名を表示する。選択値は空文字または登録済みProject IDだけを受け付け、workspaceの`projectId`と完全一致するrowだけをlifecycle group内へ残す。選択workspace自体はfilterで変更せず、project登録解除などで選択Project IDが無効になった時だけfilterを`すべて`へ戻す。filter有効中はListFilter buttonをselected stateと`aria-pressed="true"`で示し、Popoverを閉じても状態を識別できるようにする。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "filters workspaces with the registered project select"`でmenu、日英accessible name、Project ID完全一致、clearを検証する。
 
 `text-sidebar-*`のsize roleと`text-*` colorを同じ`cn` / Tailwind mergeへ渡すとsize roleが競合classとして除去されるため、両classをmergeしないかmerge設定を明示する。`pnpm exec vitest run src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false -t "uses branch titles and GitHub repository metadata with stable typography"`でbranch/repositoryの表示順、role classの保持、selection時の安定性を検証する。
 
@@ -142,17 +144,17 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 | 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
 |---|---|---|---|---|
 | 初期化中 | DB、workspace、Git linkageを読込中 | sidebar/list/project surfaceのskeleton、locale、Quit。demo workspaceを表示しない | Quitだけ。add/create/select/draft/context/deleteを開始しない | queryとmigrationがterminalになる |
-| 通常 | 1件以上のvalid workspace | group list、active project、preflight、primary action 1件 | filter、select、add、create、state action | 操作開始、offline、error |
+| 通常 | 1件以上のvalid workspace | group list、active project、preflight、primary action 1件 | project filter、select、add、create、state action | 操作開始、offline、error |
 | projectなし | registered project 0件、workspace 0件 | main surfaceのinline create form。Project fieldには`Projectを追加`、workspace nameには短い既定値を表示する。sidebarにはempty説明文を置かず、5つのlifecycle groupを常に表示する | picker、name編集、Settings、Quit | project登録またはrehydrate |
 | workspaceなし | registered project 1件以上、workspace 0件 | main surfaceのProject select、workspace name、`Workspaceを作成`を持つinline form。sidebarにはempty説明文を置かず、5つのlifecycle groupを常に表示する | inline create、project追加、Settings、Quit | worktree作成またはproject登録解除 |
 | 処理中 | picker後検証、preflight、create、cancel、remove | 対象stepとprogress、他workspaceは利用可能 | 可能なCancel、影響外select | success、cancel、error |
-| オフライン | network/Codex接続なし | local list、Git/DB status、Codex offline | filter、Context、local project操作可。Send不可 | 明示preflight成功 |
+| オフライン | network/Codex接続なし | local list、Git/DB status、Codex offline | project filter、Context、local project操作可。Send不可 | 明示preflight成功 |
 | エラー | Git I/O、DB write、Codex診断失敗 | code、対象、保持data、retry/reselect/details | 影響外workspaceを開ける | 明示回復または登録解除 |
 | 権限不足 | selected rootまたは`.git` read不可 | 拒否pathはbasenameだけ、OS権限案内、再選択 | 再選択、Settings、Quit | permission変更後の再診断 |
 | キャンセル後 | picker/create/remove確認をcancel | 開始前の一覧、selection、input、fingerprint | 元操作または別操作 | 次の明示操作 |
 | 再起動復旧 | crash、missing repo、migration rollback | active selection、Interrupted badge、last summary、timeline anchor、repository health、Missing/Recovery | reselect、open read-only、diagnostic、remove | linkage/preflight成功 |
 | native読込失敗 | DB open、contract、復元taskがterminal error | demo dataを使わないempty recovery surface、sanitized error code、再試行案内 | Retry、Settings、Quitだけ | native queryが成功する |
-| filter 0件 | queryに一致するworkspaceなし | queryと`Filterを解除` | query変更、clear | 1件以上一致 |
+| project filter 0件 | 選択projectにworkspaceなし | 選択projectと`Filterを解除` | project変更、clear | 1件以上一致 |
 | active execution競合 | active/pending turnを持つworkspaceから別workspaceを選択または別workspaceでSend | 新selectionを保留し、old workspaceをactive表示したまま`停止して切替 / Stop and Switch`、`戻る / Back`だけを表示 | 二つの明示操作だけ | exact old turnのterminal interruptとcleanup完了、またはBack |
 | repository repair | healthが`missing` / `changed` / `unreadable` | picker、identity照合、atomic updateのstepとCancel | Cancel、影響外workspace選択 | exact identity一致またはtyped error |
 
@@ -164,7 +166,7 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 | preflight再診断 | project rootが存在 | Git/Codex/login/Sol/characterを更新 | 非該当 | check単位でBlocked、既存履歴維持 | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
 | Workspace作成 | inline formまたはdialog、registered project 1件以上、project/name valid | 選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、workspace固有rootとprojectのGit common directory identityを照合して、成功後だけBacklogへ1件追加・選択する | dialog入力を破棄し、inline入力は維持する。一覧・filesystemは変更しない | 入力保持、field error。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
 | workspaceをArchive | sidebar rowのArchive、active/pending turnなし | 確認後、対象worktreeを削除してrowを一覧から外す。既にworktreeが消失済みなら成功扱い | workspace、worktree、selection不変 | 対象以外を変更せず、再試行可能なerror | `WORK-F-067` |
-| filter | query 0〜200文字 | repo/branch/nameの部分一致を100ms以内に表示 | Escapeで直前query維持 | 一覧維持、境界表示 | `WORK-F-051` |
+| project filter | 登録済みproject 1件以上 | Popoverのselectで選んだProject IDと完全一致するworkspaceを100ms以内に表示 | Escapeで選択値を維持 | 一覧維持、無効Project IDは`すべて`へ戻す | `WORK-F-051` |
 | workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Settings、Companionを同一IDへ100ms以内にatomic切替。App SettingsのProject / Character contextはworkspace tab状態へ含めない | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
 | active turn中のworkspace切替 | active/pending turnを持つold workspaceから別workspaceを選択または別workspaceでSend | selectionを保留し確認。`停止して切替`後、exact old turnのterminal interruptとcleanup完了時だけnew workspaceをactivateし、固有draft/summary/anchorを復元 | `戻る`でold selection、turn、draft、anchor、caption/TTSを完全維持 | old workspaceをactiveのままerrorとRetryを表示。rapid/duplicate/stale responseでnew workspaceをactivateしない | `WORK-F-058`, `WORK-F-059` |
 | workspaceをCanceledへ移動 | idle、またはactive/pending turnを停止可能 | idleは確認後、activeは`停止してキャンセル / Stop and Cancel`後のexact terminal interrupt、cleanup、履歴flush完了時だけ専用native cancel commandでCanceled groupへ移動 | `戻る`でselection、turn、lifecycle、draft、caption/TTS、Git fingerprint不変 | generic lifecycle commandのCanceled指定を含めて拒否し、元groupとturnを維持してretry。source、working tree、Git index/object/ref、履歴本文を変更しない | `WORK-F-056` |
@@ -179,7 +181,7 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 | repository folder | なし | project追加時必須 | regular Git worktree、canonical path、duplicate不可 | itemを作らず再選択 | 全preflight transaction成功 |
 | project | project 1件なら自動選択、複数なら直前値または先頭 | 必須 | registered Project IDのselect | field直下、入力保持 | Create成功 |
 | workspace name | `ws-MMDD-<random 4文字>` | 必須 | trim後1〜80 Unicode scalar、改行不可。path/branchはnativeが安全な別名を生成 | field直下、入力保持 | Create成功 |
-| filter query | 前回値 | 任意 | 0〜200 Unicode scalar、case-insensitive | query維持、検索未実行 | debounce後workspace単位 |
+| project filter | `すべて`または前回Project ID | 任意 | 空文字または登録済みProject ID。表示labelはGitHub `owner/repo`、なければproject名 | 無効IDは`すべて`へ戻す | select変更時 |
 
 ## ネイティブ連携
 
@@ -215,7 +217,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 
 | 操作 | macOS | Windows / Linux | 有効条件 | 実行結果 |
 |---|---|---|---|---|
-| filterへfocus | `Command+K` | 非対応 | destructive dialogなし | drawerを開きqueryへfocus |
+| project filterへfocus | `Command+K` | 非対応 | destructive dialogなし | 必要ならdrawerとPopoverを開きProject selectへfocus |
 | project追加 | toolbar/inline Project field | 非対応 | picker未起動 | native pickerを1回開く |
 | workspace開く | `Enter` | 非対応 | item focus、Missing以外 | S-002へ移動 |
 | drawer/menuを閉じる | `Escape` | 非対応 | non-destructive overlay | 入力維持、triggerへfocus |
@@ -226,7 +228,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 |---|---|---|---|---|---|
 | project canonical path/metadata | Rust SQLiteの目的限定project linkage | registration transaction | cold start |明示登録解除 | 前回transaction維持 |
 | workspace worktree linkage/lifecycle/attention | Rust SQLite + normalized event。worktree pathはapp-private | worktree作成成功後のtransaction、valid state transition | cold start/route return | workspace Archive | stale表示 |
-| active selection/filter/scroll | Rust SQLite | valid selection/query/scroll settle | route return/restart | record削除またはschema不整合 | safe default + notice |
+| active selection/project filter/scroll | Rust SQLite | valid selection/Project ID/scroll settle | route return/restart | Project登録解除またはschema不整合 | filterだけ`すべて`へ戻しselectionは維持 |
 | summary/timeline anchor | Rust SQLite | terminal summary、scroll settle | route return/restart | history削除契約 | 同workspaceの最寄りvalid sequenceだけへ補正 |
 | repository identity/health、HEAD/branch、GitHub `owner/repo` | Gitを観測正本、Rust DBはversioned last snapshot。GitHub full nameはlocal `origin` URLから抽出した非秘密値だけを保存する | 登録、window focus、selection、Send直前 | route return/restart後に再照合 | project登録解除 | GitHub `origin`なしではlocal repo名へfallbackし、health判定は変更しない |
 | create input | React transient state | 保存しない | dialog中だけ | success/cancel/route leave | input保持できる範囲で保持 |

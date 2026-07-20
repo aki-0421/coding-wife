@@ -7,7 +7,10 @@ import type {
 } from "@/lib/contracts"
 import type { WorkspaceTurnContextSnapshot } from "@/lib/contracts/workspace-context"
 
-import { projectWorkspaceNavigation } from "@/features/workspace-view/workspace-navigation"
+import {
+  projectWorkspaceNavigation,
+  workspaceProjectId,
+} from "@/features/workspace-view/workspace-navigation"
 import type {
   AttachmentItem,
   ContextSnapshotItem,
@@ -35,16 +38,12 @@ const defaultProjectHash =
 const defaultCharacterHash =
   "0ab87e72a74abd7bebaaf2b5c4e568e6e3e4bae7e21febca76a6b079f6d33c8c"
 
-function projectIdForWorkspace(workspace: WorkspaceRecord): string {
-  return workspace.projectId ?? `legacy:${workspace.repository}`
-}
-
 function projectsForWorkspaces(
   workspaces: readonly WorkspaceRecord[],
 ): readonly ProjectRecord[] {
   const grouped = new Map<string, WorkspaceRecord[]>()
   for (const workspace of workspaces) {
-    const projectId = projectIdForWorkspace(workspace)
+    const projectId = workspaceProjectId(workspace)
     grouped.set(projectId, [...(grouped.get(projectId) ?? []), workspace])
   }
   return [...grouped.entries()].map(([id, items]) => ({
@@ -216,7 +215,7 @@ export function useWorkspaceViewModel(
     )
   })
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat")
-  const [filter, setFilter] = useState("")
+  const [projectFilterId, setProjectFilterIdState] = useState("")
   const [drafts, setDrafts] = useState<
     Readonly<Record<string, WorkspaceDraft>>
   >({})
@@ -353,9 +352,35 @@ export function useWorkspaceViewModel(
 
   const adapterReady = adapterStatus === "ready"
 
+  useEffect(() => {
+    if (
+      projectFilterId.length > 0 &&
+      !projects.some((project) => project.id === projectFilterId)
+    ) {
+      setProjectFilterIdState("")
+    }
+  }, [projectFilterId, projects])
+
+  const setProjectFilterId = useCallback(
+    (projectId: string) => {
+      setProjectFilterIdState(
+        projectId.length === 0 ||
+          projects.some((project) => project.id === projectId)
+          ? projectId
+          : "",
+      )
+    },
+    [projects],
+  )
+
   const { filteredWorkspaces, selectedWorkspace } = useMemo(
-    () => projectWorkspaceNavigation(workspaces, selectedWorkspaceId, filter),
-    [filter, selectedWorkspaceId, workspaces],
+    () =>
+      projectWorkspaceNavigation(
+        workspaces,
+        selectedWorkspaceId,
+        projectFilterId,
+      ),
+    [projectFilterId, selectedWorkspaceId, workspaces],
   )
   const selectedDraft = selectedWorkspace
     ? draftFor(drafts, selectedWorkspace.id)
@@ -1298,7 +1323,7 @@ export function useWorkspaceViewModel(
     codex,
     deleteSelectedWorkspaceHistory,
     filteredWorkspaces,
-    filter,
+    projectFilterId,
     muted,
     notice,
     pendingWorkspaceTransition,
@@ -1321,7 +1346,7 @@ export function useWorkspaceViewModel(
     setActiveTab,
     setDraftText,
     setEffort,
-    setFilter,
+    setProjectFilterId,
     setMuted,
     setNotice,
     setSelectedWorkspaceId: selectWorkspace,
