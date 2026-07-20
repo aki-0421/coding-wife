@@ -26,7 +26,6 @@ export type NarrationDisposition =
   | "queued"
   | "disabled"
   | "muted"
-  | "dropped_duplicate"
   | "dropped_queue_full"
   | "dropped_sequence"
   | "stale"
@@ -285,7 +284,6 @@ function isDisposition(value: unknown): value is NarrationDisposition {
     value === "queued" ||
     value === "disabled" ||
     value === "muted" ||
-    value === "dropped_duplicate" ||
     value === "dropped_queue_full" ||
     value === "dropped_sequence" ||
     value === "stale" ||

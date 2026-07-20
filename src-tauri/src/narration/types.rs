@@ -61,7 +61,6 @@ pub enum NarrationDisposition {
     Queued,
     Disabled,
     Muted,
-    DroppedDuplicate,
     DroppedQueueFull,
     DroppedSequence,
     Stale,

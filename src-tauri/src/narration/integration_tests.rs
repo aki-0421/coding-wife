@@ -282,7 +282,7 @@ async fn persists_owner_only_settings_atomically_and_resets_to_off() {
 }
 
 #[tokio::test]
-async fn bounds_the_queue_preserves_fifo_within_priority_and_deduplicates() {
+async fn bounds_the_queue_and_preserves_fifo_within_priority() {
     let fixture = FakeSpeechFixture::new();
     fixture.block();
     let service = service_fixture(&fixture).await;
@@ -330,27 +330,36 @@ async fn bounds_the_queue_preserves_fifo_within_priority_and_deduplicates() {
         .map(|text| events.find(text).expect("ordered event"));
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
 
-    let first = service
-        .speak(request(
-            "request-dedupe-1",
-            "同じ説明です。",
-            NarrationPriority::High,
-        ))
-        .await
-        .expect("first duplicate candidate");
-    assert_eq!(first.disposition, NarrationDisposition::Queued);
-    let duplicate = service
-        .speak(request(
-            "request-dedupe-2",
-            "同じ説明です。",
-            NarrationPriority::High,
-        ))
-        .await
-        .expect("duplicate response");
-    assert_eq!(
-        duplicate.disposition,
-        NarrationDisposition::DroppedDuplicate
-    );
+    service.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
+async fn queues_repeated_text_as_independent_speech_requests() {
+    let fixture = FakeSpeechFixture::new();
+    fixture.block();
+    let service = service_fixture(&fixture).await;
+    enable(&service).await;
+
+    for id in ["request-repeat-1", "request-repeat-2"] {
+        let response = service
+            .speak(request(id, "同じ説明です。", NarrationPriority::High))
+            .await
+            .expect("repeated speech response");
+        assert_eq!(response.disposition, NarrationDisposition::Queued);
+        if id == "request-repeat-1" {
+            fixture.wait_for("playing").await;
+        }
+    }
+
+    fixture.unblock();
+    wait_until(Duration::from_secs(3), || {
+        fixture.events().matches("同じ説明です。").count() == 2
+            && service
+                .runtime_snapshot()
+                .is_ok_and(|runtime| runtime.playback_state == NarrationPlaybackState::Idle)
+    })
+    .await;
+    assert_eq!(fixture.events().matches("同じ説明です。").count(), 2);
     service.shutdown().await.expect("shutdown");
 }
 

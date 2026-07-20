@@ -121,6 +121,14 @@ describe("narration contracts", () => {
         voices: [{ name: "Daniel", locale: "fr_FR" }],
       }),
     ).toThrow(NarrationContractError)
+    expect(() =>
+      parseNarrationSpeakResponse({
+        schemaVersion: narrationSchemaVersion,
+        disposition: "dropped_duplicate",
+        queueDepth: 0,
+        code: "NARRATION-DUPLICATE",
+      }),
+    ).toThrow(NarrationContractError)
   })
 
   it("rejects non-background, unsafe, partial, and extended explanation events", () => {

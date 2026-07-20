@@ -437,7 +437,7 @@ impl NarrationService {
                 .policy
                 .lock()
                 .map_err(|_| narration_error("narration_speak", "NARRATION-POLICY-STATE", true))?
-                .validate_and_record(&request, Instant::now())
+                .validate_and_record(&request)
             {
                 Ok(validated) => validated,
                 Err(PolicyRejection::Stale) => {
@@ -451,13 +451,6 @@ impl NarrationService {
                     return Ok(self.response_with_depth(
                         NarrationDisposition::DroppedSequence,
                         Some("NARRATION-SEQUENCE"),
-                        queue.len(),
-                    ));
-                }
-                Err(PolicyRejection::Duplicate) => {
-                    return Ok(self.response_with_depth(
-                        NarrationDisposition::DroppedDuplicate,
-                        Some("NARRATION-DUPLICATE"),
                         queue.len(),
                     ));
                 }
