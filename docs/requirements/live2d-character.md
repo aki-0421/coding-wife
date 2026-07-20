@@ -115,8 +115,9 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | 要件ID       | 要件                                             | 受け入れ条件                                                                                                                                       | 状態     | 廃止理由・後継ID |
 | ------------ | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------- |
 | `LIVE-F-083` | app全体の対象機能をcharacterとして一意に表現する | 日本語UIは「キャラクター」、英語UIは「Character」を使い、accessible name、内部識別子、test、fixture、文書、ファイル名にも同じ語彙を一貫して用いる | Approved | 非該当           |
-| `LIVE-F-084` | Character sectionは一覧から個別設定へ遷移する   | section進入時はcharacter一覧を表示し、各行はmodel名と使用中状態だけを示す。行を選ぶと同section内の個別設定へ進み、個別設定はmodel名、選択・削除に必要な操作、motion設定だけを表示する。戻る操作は一覧へ戻り起点行へfocusを復元する | Approved | 非該当           |
+| `LIVE-F-084` | Character sectionは一覧から個別設定へ遷移する   | section進入時はcharacter一覧を表示し、各行はmodel名と使用中状態だけを示す。行を選ぶと同section内の個別設定へ進み、個別設定はmodel名、選択・削除に必要な操作、motion設定、編集可能なCharacter contextだけを表示する。戻る操作は一覧へ戻り起点行へfocusを復元する | Approved | 非該当           |
 | `LIVE-F-085` | 同梱Hiyoriは固定motion presetを使う             | neutral=`Idle[0]`、thinking=`Idle[1]`、working=`Tap@Body[0]`、asking=`FlickUp[0]`、success=`Tap[1]`、warning=`FlickDown[0]`、error=`Flick@Body[0]`を既定で実行し、個別設定では「モーション設定」として読み取り専用表示する。編集control、preview button、cue preview statusを表示しない | Approved | 非該当           |
+| `LIVE-F-086` | Character contextはpackごとに編集・適用できる   | 各個別設定はpack ID単位のname、tone、speech density、behavior、prohibited expressionsを読み書きする。bundled Hiyoriは桃瀬ひより用presetから始めるが編集可能とし、custom packとのdraft、version、hashを共有しない。turn開始時はnativeで選択packを解決し、そのpackの保存済みcontextだけを適用する | Approved | 非該当           |
 
 ## 入力項目要件
 

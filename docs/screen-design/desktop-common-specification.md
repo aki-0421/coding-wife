@@ -247,7 +247,7 @@ loading中に最終dataがある場合は前回dataを薄く残し、全画面sp
 | `AppPreferencesV1` (`locale` / `reducedMotion` / `characterVisibility`) | owner-only app-private native store | expected-version、fsync + atomic rename | exact snapshot/versionを全runtimeへ復元 | Reset Preferencesでrecordだけsafe defaultへ |
 | project/workspace/draft/last summary/timeline anchor ID/sequence/offset | Rust管理SQLite | field commit、terminal summary、scroll settle、route/workspace切替 | active workspaceと一緒にexact復元 | project登録解除または履歴削除の契約 |
 | Project context | Rust管理SQLiteのProject ID-scoped record | App settings project detailのexpected-version save | project detailまたは同Project IDのworkspace turn開始 | project登録解除契約 | optimistic conflict |
-| app-global Character context | Rust管理SQLite singleton record | App settingsのexpected-version save | 全workspaceへ同じversion/hashを復元 | app data reset契約 |
+| pack-scoped Character context | Rust管理SQLiteのopaque pack ID-scoped record | App settings > Character detailのexpected-version save | 選択packのversion/hashを全workspaceの次turnへ復元 | app data reset契約 |
 | repository identity/health snapshot | Rust管理SQLite + read-only Git再検査 | 登録、window focus、selection、Send直前 | row/headerへ復元後にfreshness再検査 | project登録解除 |
 | normalized event / review pack | append-only SQLite + hash artifact | redaction/schema合格後 | sequence順に再構築 | workspace history明示削除 |
 | Git object / source | repository | appはread-only観測だけを保存 | Gitを正本として再診断 | appから変更・自動削除しない |

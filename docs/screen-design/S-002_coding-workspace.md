@@ -48,7 +48,7 @@ status: "Approved"
 | support agentへの直接chat | coding identityと支援runtimeを分離する | commit説明はapp-owned controllerが管理し、main conversationへrequest/resultを注入しない |
 | model picker | MVPの固定契約は`GPT-5.6 Sol` | availabilityはpreflightで診断 |
 | microphone / speech input | MVPは音声出力だけ | [S-005](S-005_app-settings-diagnostics.md) |
-| character context / asset import | app-globalなpresentation設定のため | [S-005](S-005_app-settings-diagnostics.md) |
+| character context / asset import | character libraryとpackごとのpresentation設定のため | [S-005](S-005_app-settings-diagnostics.md) |
 
 ## 表示契機と終了
 
@@ -137,7 +137,7 @@ timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted 
 | Send | primary icon button、accessible label `Send / 送信` | instruction条件不成立 |
 | Stop | running時にSend位置へ表示。明示clickだけ | turn非実行時 |
 
-attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、App settings > Projects > project detailのProject Context編集やApp settingsのCharacter context編集とは別の送信時参照として扱う。
+attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、App settings > Projects > project detailのProject Context編集やApp settings > Character > character detailのCharacter Context編集とは別の送信時参照として扱う。
 
 送信時はworkspace、draft hash、context version、Git fingerprint、effort、attachmentをRustで再検証する。public instructionは32,000 Unicode scalar以下を維持し、開始時に固定したProject/Character context、version/hash metadata、JSON escaping、固定markerとの合成text全体を80,000 Unicode scalar以下にする。WebViewとRustはUTF-8 byte数ではなくUnicode scalar数で同じexact boundaryを検査し、80,001 scalar、NUL、その他controlをApp Server送信前に拒否してdraftとcontext versionを保持する。sourceはstable root dirfdからno-followで開き、descriptorから0700/0600のapp-private snapshotへcopy、fsync、hash再検証する。App Serverへはsnapshotだけを渡し、accepted/failed/terminal/expiryで削除する。二重操作は同じidempotency keyへ集約する。
 
@@ -193,7 +193,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | データなし | event 0件 |一文の開始案内、composerをprimaryにする | draft、context、send | first turn作成 |
 | 処理中 | turn running | live timeline、phase、Stop、`thinking` / `acting` caption | stop、inspect、read-only tab、mute | completed、failed、stopped、decision |
 | 意思決定待ち | structured decision受信 | decisionをtimelineとattentionへ表示、`waiting_for_user` caption | answer、hold、interrupt、read-only閲覧 | answer accepted、interrupt terminal |
-| オフライン | Codex disconnect/auth loss | persistent banner、last sequence、draft、Reconnect | local history、Commit、Workspace Settings、App SettingsのProject / Character context、Stop可能ならStop |明示reconnectとsequence照合成功 |
+| オフライン | Codex disconnect/auth loss | persistent banner、last sequence、draft、Reconnect | local history、Commit、Workspace Settings、App SettingsのProject detail / Character detail、Stop可能ならStop |明示reconnectとsequence照合成功 |
 | エラー | turn/tool/normalize/persist failure | code、operation、impact、保持data、retry/modify/stop/details |安全な回復操作、影響外閲覧 | terminal recovery event |
 | 権限不足 | filesystem/process/Git/attachment拒否 |拒否operation、scope、再選択/診断。raw path非表示 | modify、Settings、Stop | valid permissionで明示retry |
 | キャンセル後 | attachment picker、popover、App Settingsのcontext editをcancel |開始前のdraft、selection、event位置 |元操作または別操作 |次の明示操作 |
@@ -218,7 +218,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | decision回答 | unanswered、option valid | idempotent answer event、turn resume | Holdなら未回答維持 |重複送信せず選択を保持 | `CODE-F-062`〜`CODE-F-069` |
 | interrupt | decisionまたはrunning turn | main/support停止、completed/partial/unknownを分類 |確認cancelで継続 | Interruptedとしてreviewへ誘導 | `SUP-F-057`〜`SUP-F-061` |
 | attachment追加 | picker起動可能 | validated handleをdraftへ追加 | draft不変、errorなし | chipを追加せずreason表示 | `CODE-F-053`, `APP-F-066`〜`APP-F-069` |
-| workspace切替 | 別workspace選択、old active/pending turnなし、または確認済みinterrupt | old presentation/audio停止後、new workspaceのdraft、last summary、anchor ID/sequence/offsetをatomic復元。app-global character設定は維持 | `戻る`でold state完全維持 | old workspaceをactiveのままerror、new activation 0件 | `WORK-F-058`〜`WORK-F-060` |
+| workspace切替 | 別workspace選択、old active/pending turnなし、または確認済みinterrupt | old presentation/audio停止後、new workspaceのdraft、last summary、anchor ID/sequence/offsetをatomic復元。app-globalなcharacter選択とpack-scoped設定は維持 | `戻る`でold state完全維持 | old workspaceをactiveのままerror、new activation 0件 | `WORK-F-058`〜`WORK-F-060` |
 | mute切替 | audio/character利用可能 |即時再生停止または次eligible textから再開、設定保存 | 非該当 | text表示は継続 | `NARR-F-068`〜`NARR-F-075` |
 | Commit tabを開く | workspace valid | same workspaceの[S-003](S-003_session-evidence.md)を表示し、初回active表示時だけread-only observationを取得 | 非該当 | Chatを維持してerror | `GIT-F-072`〜`GIT-F-089` |
 
@@ -286,7 +286,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | normalized event | append-only SQLite + hash | versioned semantic schema/redaction合格後 | exact projectorでstable ID・sequence順にassistant/tool/file/diff/plan/completion/error/decision/approvalを復元 | workspace history明示削除 | unknown/invalidはUnsupportedへ隔離、raw event非保存 |
 | draft/attachment handle/effort | Rust SQLite | debounce、valid変更、route leave | workspace選択 | send成功または明示clear | UI入力保持とretry |
 | project context | Rust SQLite project row | App settingsのproject detailでexpected-version save | project detail/turn開始 | project登録解除契約 | expected version conflict |
-| character context | Rust SQLite app-global singleton row | App settingsのexpected-version save | App settings/turn開始 | app data reset契約 | expected version conflict |
+| character context | Rust SQLite opaque pack ID-scoped row | App settings > Character detailのexpected-version save | character detail/選択packのturn開始 | app data reset契約 | expected version conflict |
 | last summary/timeline anchor/tab | Rust SQLite | terminal summary、scroll settle/tab移動 | route return/restart | history削除契約 | 同workspaceのnearest valid sequenceだけへ補正 |
 | repository identity/health snapshot | Rust SQLite、Git read-only再検査 | window focus、selection、Send直前 | route return/restart | project登録解除 | stale status、Repair/Recheck |
 | selected character | app-global state → app-private library pack ID | App settingsのatomic選択成功 | startup/全workspaceへ即時同期 | 選択変更後だけ旧packを削除可 | invalid legacy値はbundled Hiyori、render失敗はstatic/text fallback |

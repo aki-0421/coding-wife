@@ -1,6 +1,6 @@
 ---
 title: "S-005 アプリ設定・診断"
-description: "登録projectごとのProject contextと、全projectへ共通適用するcharacter presentation、表示、音声、支援、診断を管理する画面仕様。"
+description: "登録projectごとのProject contextと、characterごとのpresentation、表示、音声、支援、診断を管理する画面仕様。"
 updated: 2026-07-20
 read_when:
   - "sidebar gear、project一覧とProject context詳細、アプリ全体の設定、音声、support、native diagnosticsを実装するとき。"
@@ -14,7 +14,7 @@ status: "Approved"
 | 項目                   | 内容                                                          |
 | ---------------------- | ------------------------------------------------------------- |
 | window label           | `main`                                                        |
-| React route / view key | `/app-settings/:section?`、`/app-settings/projects/:projectId` / `app-settings` |
+| React route / view key | `/app-settings/:section?`、`/app-settings/projects/:projectId`、`/app-settings/character/:packId` / `app-settings` |
 | 対象OS                 | macOS 14以降、Apple Silicon                                   |
 | デザイン               | [DESIGN.md](../../DESIGN.md)、Figma Desktop node `8:2`のshell |
 | 共通仕様               | [デスクトップ共通仕様](desktop-common-specification.md)       |
@@ -33,8 +33,7 @@ status: "Approved"
 | ----------- | -------------------------------------------------------------------------------------------------------- |
 | General           | ja/en、reduced motion、全workspaceのcharacter visibility、app version、Reset Preferences、Reset UI state |
 | Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
-| Character context | app-globalなname、tone、speech density、behavior、prohibited expressions                                |
-| Character         | character一覧、model名から開く個別設定、app-globalな選択、custom 1枠のimport/置換・motion編集・delete、bundled Hiyori固定motion preset |
+| Character         | character一覧、model名から開く個別設定、packごとのCharacter context、app-globalな選択、custom 1枠のimport/置換・motion編集・delete、bundled Hiyori固定motion preset |
 | Audio             | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
 | Support           | app共通のsupport role enable、readiness、capacity、usage、sanitized error                                |
 | Diagnostics       | OS/app、Codex、Git、DB、Live2D、audio、supportのnative readinessとrecheck                                |
@@ -51,7 +50,7 @@ status: "Approved"
 | 項目           | 内容                                                                                     |
 | -------------- | ---------------------------------------------------------------------------------------- |
 | 表示契機       | workspace sidebar最下部の`App settings / アプリ設定` gear、Chatのdiagnostics link        |
-| 表示前提       | workspace選択は不要。registered project/workspaceが0件でも7 sectionすべてを表示する                 |
+| 表示前提       | workspace選択は不要。registered project/workspaceが0件でも6 sectionすべてを表示する                 |
 | 初期フォーカス | app settings heading                                                                      |
 | 正常完了       | section単位の保存を即時反映し、画面を維持する                                            |
 | キャンセル     | section固有のdraftと保存済み値を各契約どおり維持する                                     |
@@ -72,7 +71,7 @@ status: "Approved"
 | ------------------- | ------------------------------------------------------------- | ------------------------------ |
 | workspace sidebar   | workspace一覧、activeなapp settings gear                      | workspaceへ戻る、project追加   |
 | app settings header | back action、`App settings / アプリ設定`、全project共通の説明 | 直前workspace tabへ戻る        |
-| section navigation  | General、Projects、Character context、Character、Audio、Support、Diagnosticsの7 section | section選択 |
+| section navigation  | General、Projects、Character、Audio、Support、Diagnosticsの6 section | section選択 |
 | settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
 
 app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示しない。これによりworkspace scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
@@ -82,7 +81,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | 状態       | 進入条件                          | 表示                                           | 操作可否               | 状態から抜ける条件      |
 | ---------- | --------------------------------- | ---------------------------------------------- | ---------------------- | ----------------------- |
 | 初期化中   | preference/readiness未取得        | field shape skeleton、loading status           | backのみ可             | snapshot取得またはerror |
-| 通常       | snapshot取得済み                  | 7 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
+| 通常       | snapshot取得済み                  | 6 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
 | データなし | voiceまたはdiagnostic resultが0件 | 理由とRetry                                    | 影響しないsectionは可  | 再取得成功              |
 | 処理中     | save、test、reset、recheck中      | 操作箇所のprocessing status                    | 同一操作の二重実行不可 | terminal result         |
 | オフライン | network/Codex unavailable         | local settingは表示、診断はBlocked/Unavailable | local saveとrecheck可  | readiness更新           |
@@ -97,8 +96,8 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | workspaceへ戻る       | S-005表示中           | 直前のactive tab、workspace、composer draftを復元 | 非該当                         | 同じ画面を維持                  | `APP-F-055`, `APP-F-083`              |
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
 | preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry/Reset | `APP-F-057`〜`APP-F-061`, `APP-F-076` |
-| Character contextを保存する | Character contextがready | global versionを更新し次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063` |
-| character個別設定を開く | Character一覧がready | 選択行のmodel名、必要な操作、motion設定だけを同sectionに表示 | 非該当 | 一覧を維持 | `LIVE-F-084` |
+| character個別設定を開く | Character一覧がready | 選択行のmodel名、必要な操作、motion設定、Character contextを同sectionに表示 | 非該当 | 一覧を維持 | `LIVE-F-084`, `LIVE-F-086` |
+| Character contextを保存する | character個別設定がready | 対象packのversionだけを更新し、そのpackを選択した次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063`, `LIVE-F-086` |
 | character一覧へ戻る | character個別設定を表示中 | 一覧を表示し、起点character行へfocusを戻す | 非該当 | 個別設定を維持 | `LIVE-F-084` |
 | modelを選択する       | verified pack preview成功 | 全workspaceへatomic適用                           | 前selection維持                | 前selection維持、safe error     | `APP-F-084`, `LIVE-F-075` |
 | custom modelを取り込む | custom slotが空、native picker利用可能 | 検証・preview成功後に1件を保存しapp-global選択へatomic適用 | 前selectionと空slotを維持 | localized reasonとsafe code、前selection維持 | `LIVE-F-068`〜`LIVE-F-076` |
@@ -116,7 +115,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | Language             | OS locale | 必須     | `ja` / `en`                           | field直下、前言語維持 | 選択時   |
 | Reduced motion       | `system`  | 必須     | `system` / `on` / `off`               | field直下、前値維持   | 選択時   |
 | Character visibility | `visible` | 必須     | `visible` / `hidden`                  | field直下、前値維持   | toggle時 |
-| Character context    | `Sol`と既定presentation | 任意 | display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
+| Character context    | bundled Hiyoriは桃瀬ひよりpreset、customはpack表示名と中立な既定値 | 任意 | opaque pack ID単位、display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
 | Project context      | 空       | 任意 | goal / constraints / notes各8,000、配列各20件、総量32,000 scalar、project-relative reference | field直下、draft維持 | Save |
 | Audio settings       | off       | 条件付き | verified local voice、rate 0.75〜1.25 | Audio内Alert          | Save     |
 | Support controls     | disabled  | 条件付き | approved role/policyだけ              | Support内Alert        | toggle時 |
@@ -126,7 +125,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | ユーザー操作                | 実行境界                 | Tauri plugin / Command             | 必要なCapability・認可                | キャンセル時      | 拒否・失敗時                          |
 | --------------------------- | ------------------------ | ---------------------------------- | ------------------------------------- | ----------------- | ------------------------------------- |
 | preference取得・更新・reset | Rust owner-only store    | `app_preferences_get/update/reset` | exact schema/version                  | 前record維持      | safe defaultまたは前record、safe code |
-| Character context load/save | Rust SQLite             | app character context commands     | global singleton、expected version    | draft維持         | conflictまたはsafe code                |
+| Character context load/save | Rust SQLite             | app character context commands     | opaque pack ID、expected version      | draft維持         | conflictまたはsafe code                |
 | Project context load/save | Rust SQLite | `project_context_get` / `project_context_save` | registered Project ID、expected version、canonical project-relative reference | draft維持 | conflictまたはsafe code |
 | model import/select/motion設定/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1。bundled Hiyoriのpreset保存要求は拒否 | quarantine cleanup、前selection維持 | bundled preset編集・delete拒否、置換/削除失敗時は前slotとselection維持 |
 | Audio取得・保存・test       | Rust local process/store | `narration_*`                      | fixed `/usr/bin/say`、voice allowlist | process group停止 | caption維持、TTS offへfail closed     |
@@ -147,7 +146,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 
 ## データ保持
 
-Project ID単位のProject context、AppPreferences、app-global Character context、character library selection/custom motion設定、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。Projects一覧と詳細の表示だけではworkspace history、Git state、他projectのdraftを変更しない。
+Project ID単位のProject context、pack ID単位のCharacter context、AppPreferences、character library selection/custom motion設定、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。一覧と詳細の表示だけではworkspace history、Git state、他projectまたは他packのdraftを変更しない。
 
 ## OS差分
 
@@ -171,13 +170,13 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | `SUP-F-062`〜`SUP-F-078`                                             | global support control/readiness                 | [support-agent-orchestration](../requirements/support-agent-orchestration.md) |
 | `GIT-F-077`, `GIT-F-079`〜`GIT-F-081`, `GIT-F-092`                   | read-only Git/skill diagnostics                  | [git-review-harness](../requirements/git-review-harness.md)                   |
 | `NARR-F-058`, `NARR-F-064`〜`NARR-F-077`, `NARR-F-088`, `NARR-F-089` | app共通Audio                                     | [audio-commentary](../requirements/audio-commentary.md)                       |
-| `LIVE-F-055`〜`LIVE-F-081`, `LIVE-F-083`〜`LIVE-F-085`              | global model library、motion設定、一覧・個別設定、固定Hiyori preset、character用語契約 | [live2d-character](../requirements/live2d-character.md)                       |
+| `LIVE-F-055`〜`LIVE-F-081`, `LIVE-F-083`〜`LIVE-F-086`              | global model library、motion設定、一覧・個別設定、固定Hiyori motion preset、pack別context、character用語契約 | [live2d-character](../requirements/live2d-character.md)                       |
 
 ## 未確定事項
 
 | 論点   | 初期判断                   | 確認事項 | 着手ブロック |
 | ------ | -------------------------- | -------- | ------------ |
-| 非該当 | 分離scopeはAPP-F-083で確定 | 非該当   | いいえ       |
+| 非該当 | pack別scopeはAPP-F-084で確定 | 非該当   | いいえ       |
 
 ## レビュー確認
 
@@ -186,7 +185,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 | レビュー結果 | Approved   |
 | レビュー日   | 2026-07-20 |
 
-- [x] app settingsの7 section、Projects内のproject-scoped詳細、workspace-scoped非対象が一意である。
+- [x] app settingsの6 section、Projects内のproject-scoped詳細、Character内のpack-scoped詳細、workspace-scoped非対象が一意である。
 - [x] heading、Back、workspace選択時の状態維持を定義した。
 - [x] loading、empty、processing、offline、error、permissionを定義した。
 - [x] native boundary、ja/en、keyboard、200% zoomを定義した。

@@ -39,7 +39,7 @@ status: "Approved"
 | ----------------------------------------------------------- | ------------------------------------ | ------------------------------------------ |
 | Project context                                             | registered Project ID単位のため      | [S-005](S-005_app-settings-diagnostics.md) |
 | Language、reduced motion、全workspaceのcharacter visibility | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
-| Character context、Character                                | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
+| Character context、Character                                | app-global library内のpack-scoped設定のため | [S-005](S-005_app-settings-diagnostics.md) |
 | Audio、Support、native readiness                            | app-globalのため                     | [S-005](S-005_app-settings-diagnostics.md) |
 | Git commit/revert/reset                                     | read-only observer境界のため         | [S-003](S-003_session-evidence.md)         |
 
@@ -106,7 +106,7 @@ Workspace Settings表示中はLive2D canvasとCharacter paneを表示せず、se
 
 ## データ保持
 
-workspace historyの正本と破棄条件は[activity history要件](../requirements/activity-history.md)に従う。履歴削除はProject context、app-global Character context、selected character、semantic mapping、AppPreferences、Narration settings、Support controls、repository、worktree、branchを変更しない。
+workspace historyの正本と破棄条件は[activity history要件](../requirements/activity-history.md)に従う。履歴削除はProject context、pack-scoped Character context、selected character、semantic mapping、AppPreferences、Narration settings、Support controls、repository、worktree、branchを変更しない。
 
 ## OS差分
 

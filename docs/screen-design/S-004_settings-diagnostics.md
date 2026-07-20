@@ -132,7 +132,7 @@ active project/workspaceを明示し、[S-002 Context subview](S-002_coding-work
 
 #### Context editor stateと競合復旧（廃止）
 
-旧workspace側editor entryと混在Settings間のcross-navigation契約は廃止した。現行UIではProject ContextをS-005のProjects detail、Character ContextをS-005のCharacter contextだけで編集し、S-006にはcontext入口、複製editor、focus遷移を置かない。以下の状態表は旧画面の履歴であり、現行実装の正本にはしない。
+旧workspace側editor entryと混在Settings間のcross-navigation契約は廃止した。現行UIではProject ContextをS-005のProjects detail、Character ContextをS-005のCharacter detailだけで編集し、S-006にはcontext入口、複製editor、focus遷移を置かない。以下の状態表は旧画面の履歴であり、現行実装の正本にはしない。
 
 | 状態 | 表示 | 操作・focus |
 |---|---|---|
