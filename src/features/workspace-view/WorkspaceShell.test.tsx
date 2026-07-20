@@ -1641,10 +1641,8 @@ describe("WorkspaceShell", () => {
     expect(
       document.querySelector('[data-slot="popover-content"]'),
     ).toBeInTheDocument()
-    const outsideTarget = screen.getByRole("heading", {
-      name: "App settings",
-    })
-    await user.click(outsideTarget)
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    await user.click(screen.getByRole("heading", { name: "Diagnostics" }))
     await waitFor(() =>
       expect(
         document.querySelector('[data-slot="popover-content"]'),

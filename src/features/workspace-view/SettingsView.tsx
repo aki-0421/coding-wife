@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import {
   ActivityIcon,
   AlertTriangleIcon,
+  ArrowLeftIcon,
   BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,

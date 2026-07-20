@@ -212,9 +212,10 @@ describe("App interactive commit explanation demo", () => {
     )
     await user.click(screen.getByRole("radio", { name: "English" }))
     await user.click(
-      within(
-        screen.getByRole("navigation", { name: "Workspaces" }),
-      ).getByRole("button", { current: "page" }),
+      within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole(
+        "button",
+        { current: "page" },
+      ),
     )
     expect(await screen.findByRole("tab", { name: /Commit/ })).toHaveAttribute(
       "aria-selected",
