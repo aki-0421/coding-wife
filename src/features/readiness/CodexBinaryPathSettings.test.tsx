@@ -25,14 +25,11 @@ function snapshot(source: "automatic" | "explicit"): NativeReadinessSnapshotV1 {
     source: "native",
     checks: readinessCheckIds.map((id) => ({
       id,
-      status: id === "codex" ? "blocked" : "ready",
+      status: "ready",
       checkedAt,
-      code:
-        id === "codex"
-          ? "READINESS-CODEX-AUTH-REQUIRED"
-          : `READINESS-${id.toUpperCase().replace("_", "-")}-READY`,
-      recoverable: id === "codex",
-      recoveryAction: id === "codex" ? "authenticate_codex" : "none",
+      code: `READINESS-${id.toUpperCase().replace("_", "-")}-READY`,
+      recoverable: false,
+      recoveryAction: "none",
       facts:
         id === "codex"
           ? ([
@@ -47,6 +44,7 @@ function snapshot(source: "automatic" | "explicit"): NativeReadinessSnapshotV1 {
 describe("CodexBinaryPathSettings", () => {
   it("verifies a custom path and can return to automatic detection", async () => {
     const user = userEvent.setup()
+    const onConfigurationApplied = vi.fn()
     const configureCodexBinary = vi.fn((path: string | null) =>
       Promise.resolve(snapshot(path === null ? "automatic" : "explicit")),
     )
@@ -64,7 +62,9 @@ describe("CodexBinaryPathSettings", () => {
         <NativeReadinessProvider
           controller={new NativeReadinessController(gateway)}
         >
-          <CodexBinaryPathSettings />
+          <CodexBinaryPathSettings
+            onConfigurationApplied={onConfigurationApplied}
+          />
         </NativeReadinessProvider>
       </I18nProvider>,
     )
@@ -77,6 +77,7 @@ describe("CodexBinaryPathSettings", () => {
     expect(configureCodexBinary).toHaveBeenLastCalledWith(
       "/Users/test/.local/bin/codex",
     )
+    expect(onConfigurationApplied).toHaveBeenCalledOnce()
     expect(
       await screen.findByText("A custom path is currently configured."),
     ).toBeVisible()
@@ -85,5 +86,6 @@ describe("CodexBinaryPathSettings", () => {
       screen.getByRole("button", { name: "Use automatic detection" }),
     )
     expect(configureCodexBinary).toHaveBeenLastCalledWith(null)
+    expect(onConfigurationApplied).toHaveBeenCalledTimes(2)
   })
 })

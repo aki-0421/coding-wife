@@ -8,7 +8,7 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::character::CharacterService;
-use crate::codex::binary::{discover_binary, probe_schema, BinaryError};
+use crate::codex::binary::{discover_binary, BinaryError};
 use crate::codex::process::run_bounded_command;
 use crate::codex::supervisor::CodexSupervisor;
 use crate::codex::types::{CodexDiagnostic, CodexHealth, CODEX_MODEL};
@@ -73,9 +73,13 @@ impl NativeReadinessService {
                 let binary = discover_binary(Some(&candidate))
                     .await
                     .map_err(configure_binary_error)?;
-                probe_schema(&binary)
-                    .await
-                    .map_err(configure_binary_error)?;
+                let diagnostic = self
+                    .codex
+                    .setup_probe_with_verified_binary(binary.clone())
+                    .await;
+                if diagnostic.health != CodexHealth::Ready {
+                    return Err(configure_setup_error(&diagnostic));
+                }
                 if binary.canonical_path.to_str().is_none() {
                     return Err(ReadinessCommandError::new(
                         "READINESS-CODEX-PATH-ENCODING",
@@ -83,14 +87,17 @@ impl NativeReadinessService {
                         false,
                     ));
                 }
-                Some(AppPrivateBinaryRecord {
-                    canonical_path: binary.canonical_path,
-                })
+                Some((
+                    AppPrivateBinaryRecord {
+                        canonical_path: binary.canonical_path,
+                    },
+                    diagnostic,
+                ))
             }
             None => None,
         };
         self.history
-            .save_private_binary_record(record.as_ref())
+            .save_private_binary_record(record.as_ref().map(|(record, _)| record))
             .map_err(|_| {
                 ReadinessCommandError::new(
                     "READINESS-CODEX-PATH-SAVE-FAILED",
@@ -99,19 +106,50 @@ impl NativeReadinessService {
                 )
             })?;
         self.codex
-            .set_explicit_binary(record.map(|record| record.canonical_path))
+            .set_explicit_binary(
+                record
+                    .as_ref()
+                    .map(|(record, _)| record.canonical_path.clone()),
+            )
             .await;
-        Ok(self.run_unlocked().await)
+        match record {
+            Some((_, diagnostic)) => Ok(self.snapshot_with_codex(diagnostic, true).await),
+            None => Ok(self.run_unlocked().await),
+        }
     }
 
     async fn run_unlocked(&self) -> NativeReadinessSnapshotV1 {
         let (os_version, codex, explicit_binary, repository, history) = tokio::join!(
             read_macos_version(),
-            self.codex.readiness_probe(),
+            self.codex.setup_probe(),
             self.codex.explicit_binary_configured(),
             self.history.repository_readiness(),
             self.history.history_readiness(),
         );
+        self.store_snapshot(os_version, codex, explicit_binary, repository, history)
+    }
+
+    async fn snapshot_with_codex(
+        &self,
+        codex: CodexDiagnostic,
+        explicit_binary: bool,
+    ) -> NativeReadinessSnapshotV1 {
+        let (os_version, repository, history) = tokio::join!(
+            read_macos_version(),
+            self.history.repository_readiness(),
+            self.history.history_readiness(),
+        );
+        self.store_snapshot(os_version, codex, explicit_binary, repository, history)
+    }
+
+    fn store_snapshot(
+        &self,
+        os_version: Option<String>,
+        codex: CodexDiagnostic,
+        explicit_binary: bool,
+        repository: RepositoryReadinessProbe,
+        history: HistoryReadinessProbe,
+    ) -> NativeReadinessSnapshotV1 {
         let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
         let checks = vec![
             os_app_check(&checked_at, os_version),
@@ -205,6 +243,24 @@ fn configure_binary_error(error: BinaryError) -> ReadinessCommandError {
         BinaryError::Io => ("READINESS-CODEX-PATH-IO", true),
     };
     ReadinessCommandError::new(code, "configure_codex_binary", recoverable)
+}
+
+fn configure_setup_error(diagnostic: &CodexDiagnostic) -> ReadinessCommandError {
+    let code = match diagnostic.error_code.as_deref() {
+        Some("CODEX-BINARY-MISSING") => "READINESS-CODEX-PATH-MISSING",
+        Some("CODEX-BINARY-UNTRUSTED" | "CODEX-BINARY-IDENTITY-CHANGED") => {
+            "READINESS-CODEX-PATH-UNTRUSTED"
+        }
+        Some("CODEX-SETUP-TIMEOUT" | "CODEX-SETUP-INITIALIZE-TIMEOUT") => {
+            "READINESS-CODEX-PATH-TIMEOUT"
+        }
+        Some("CODEX-SETUP-SPAWN-FAILED" | "CODEX-SETUP-CONNECTION-LOST") => {
+            "READINESS-CODEX-PATH-APP-SERVER-FAILED"
+        }
+        Some("CODEX-SETUP-PROTOCOL-MISMATCH") => "READINESS-CODEX-PATH-APP-SERVER-INCOMPATIBLE",
+        _ => "READINESS-CODEX-PATH-PROBE-FAILED",
+    };
+    ReadinessCommandError::new(code, "configure_codex_binary", diagnostic.recoverable)
 }
 
 fn fact(key: ReadinessFactKey, value: impl Into<String>) -> ReadinessFactV1 {
@@ -354,7 +410,10 @@ fn codex_check(
     diagnostic: &CodexDiagnostic,
     explicit_binary: bool,
 ) -> ReadinessCheckV1 {
-    let auth = if diagnostic.account_present {
+    let setup_probe = diagnostic.operation == "codex.setup";
+    let auth = if setup_probe {
+        "unverified"
+    } else if diagnostic.account_present {
         "authenticated"
     } else if diagnostic.requires_openai_auth || diagnostic.health == CodexHealth::AuthRequired {
         "required"
@@ -367,7 +426,9 @@ fn codex_check(
         _ if diagnostic.binary_hash_prefix.is_some() => "trusted",
         _ => "unavailable",
     };
-    let schema = if matches!(
+    let schema = if setup_probe {
+        "unverified"
+    } else if matches!(
         diagnostic.health,
         CodexHealth::SchemaUnsupported | CodexHealth::ProtocolMismatch
     ) {
@@ -392,7 +453,9 @@ fn codex_check(
         fact(ReadinessFactKey::CodexSchema, schema),
         fact(
             ReadinessFactKey::CodexEfforts,
-            if diagnostic.fast_available && diagnostic.max_available {
+            if setup_probe {
+                "unverified"
+            } else if diagnostic.fast_available && diagnostic.max_available {
                 "fast_max"
             } else {
                 "unavailable"
@@ -400,6 +463,12 @@ fn codex_check(
         ),
     ];
     let (status, code, recoverable, action) = match diagnostic.health {
+        CodexHealth::Ready if setup_probe && binary == "trusted" => (
+            ReadinessStatus::Ready,
+            "READINESS-CODEX-READY",
+            false,
+            ReadinessRecoveryAction::None,
+        ),
         CodexHealth::Ready
             if diagnostic.account_present
                 && diagnostic.model_available
@@ -896,7 +965,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_ready_requires_auth_model_efforts_and_compatible_schema() {
+    fn workspace_codex_ready_requires_auth_model_efforts_and_compatible_schema() {
         let mut ready = diagnostic(CodexHealth::Ready);
         ready.account_present = true;
         ready.model_available = true;
@@ -919,6 +988,28 @@ mod tests {
         let failed_closed = codex_check("2026-07-18T00:00:00.000Z", &ready, false);
         assert_eq!(failed_closed.status, ReadinessStatus::Unavailable);
         assert_eq!(failed_closed.code, "READINESS-CODEX-DISCONNECTED");
+    }
+
+    #[test]
+    fn setup_codex_ready_only_requires_a_trusted_initialized_binary() {
+        let mut ready = diagnostic(CodexHealth::Ready);
+        ready.operation = "codex.setup".to_owned();
+        ready.binary_hash_prefix = Some("0123456789abcdef".to_owned());
+
+        let check = codex_check("2026-07-18T00:00:00.000Z", &ready, true);
+
+        assert_eq!(check.status, ReadinessStatus::Ready);
+        assert_eq!(check.code, "READINESS-CODEX-READY");
+        for key in [
+            ReadinessFactKey::CodexAuth,
+            ReadinessFactKey::CodexSchema,
+            ReadinessFactKey::CodexEfforts,
+        ] {
+            assert!(check
+                .facts
+                .iter()
+                .any(|fact| fact.key == key && fact.value == "unverified"));
+        }
     }
 
     #[test]

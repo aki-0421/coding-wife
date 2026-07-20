@@ -160,29 +160,7 @@ export function WorkspaceShell({
     adapter?.hydrationMode === "native" &&
     (adapter.codexSnapshot !== undefined ||
       adapter.subscribeCodex !== undefined)
-  const [codexSetupRecoveryWorkspaceId, setCodexSetupRecoveryWorkspaceId] =
-    useState<string | null>(null)
   const [runtimeSetupRecovery, setRuntimeSetupRecovery] = useState(false)
-
-  useEffect(() => {
-    const workspaceId = view.selectedWorkspace?.id
-    if (
-      !observesCodexConnection ||
-      workspaceId === undefined ||
-      view.codex.connected
-    ) {
-      setCodexSetupRecoveryWorkspaceId(null)
-      return
-    }
-    if (view.codex.phase !== "connecting") {
-      setCodexSetupRecoveryWorkspaceId(workspaceId)
-    }
-  }, [
-    observesCodexConnection,
-    view.codex.connected,
-    view.codex.phase,
-    view.selectedWorkspace?.id,
-  ])
 
   useEffect(() => {
     if (adapter?.hydrationMode !== "native") {
@@ -752,6 +730,22 @@ export function WorkspaceShell({
     view.setActiveTab(value)
   }
 
+  const nativeStartupPending =
+    adapter?.hydrationMode === "native" &&
+    (view.adapterStatus === "loading" ||
+      (nativeReadiness.snapshot === null && nativeReadiness.status !== "error"))
+
+  if (nativeStartupPending) {
+    return (
+      <main
+        aria-busy="true"
+        className="min-h-dvh w-full bg-background"
+        data-native-startup="checking"
+        data-workspace-viewport={viewportLayout}
+      />
+    )
+  }
+
   if (view.adapterStatus === "loading") {
     return (
       <main
@@ -813,16 +807,15 @@ export function WorkspaceShell({
   }
 
   const selectedWorkspace = view.selectedWorkspace
-  const codexSetupRequired =
+  const codexReconnectRequired =
     observesCodexConnection &&
     selectedWorkspace !== undefined &&
-    ((!view.codex.connected && view.codex.phase !== "connecting") ||
-      codexSetupRecoveryWorkspaceId === selectedWorkspace.id)
+    !view.codex.connected &&
+    view.codex.phase !== "connecting"
   const runtimeSetupRequired =
     adapter?.hydrationMode === "native" &&
     (runtime.state.status === "error" || runtimeSetupRecovery)
   const setupRequirementOverrides = {
-    codexUnavailable: codexSetupRequired,
     runtimeUnavailable: runtimeSetupRequired,
   }
   const setupOverviewRequired = shouldShowSetupOverview(
@@ -833,7 +826,7 @@ export function WorkspaceShell({
   )
   const recheckSetup = async () => {
     if (runtimeSetupRequired) runtime.refresh()
-    if (codexSetupRequired) {
+    if (codexReconnectRequired) {
       reportWorkspaceAction(await view.recheckSelectedWorkspace())
     }
   }

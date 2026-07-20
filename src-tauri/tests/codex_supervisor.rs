@@ -2211,6 +2211,37 @@ async fn failed_reprobe_clears_previous_identity_evidence_and_recovers_fresh() {
 }
 
 #[tokio::test]
+async fn setup_probe_only_discovers_and_initializes_a_short_lived_app_server() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("setup_probe");
+    let supervisor = test_supervisor();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+
+    let setup = supervisor.setup_probe().await;
+
+    assert_eq!(setup.health, CodexHealth::Ready);
+    assert_eq!(setup.operation, "codex.setup");
+    assert!(setup.binary_hash_prefix.is_some());
+    assert!(!setup.generated_by_same_binary);
+    assert!(!setup.account_present);
+    assert!(!setup.model_available);
+    assert!(!setup.fast_available);
+    assert!(!setup.max_available);
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("setup_initialize"));
+    assert!(!state.contains("setup_schema_requested"));
+    assert!(!state.contains("setup_account_read"));
+    assert!(!state.contains("setup_config_read"));
+    assert!(!state.contains("setup_model_list"));
+    let probe_pid = last_recorded_pid(&state, "setup_process_started:");
+    wait_for_fixture_process_group_exit(probe_pid).await;
+}
+
+#[tokio::test]
 async fn readiness_probe_observes_auth_change_without_stopping_the_active_turn() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("default");

@@ -33,13 +33,11 @@ function readinessSnapshot(
       checkedAt,
       code:
         id === "codex" && codexStatus === "blocked"
-          ? "READINESS-CODEX-AUTH-REQUIRED"
+          ? "READINESS-CODEX-DISCONNECTED"
           : `READINESS-${id.toUpperCase().replace("_", "-")}-READY`,
       recoverable: id === "codex" && codexStatus === "blocked",
       recoveryAction:
-        id === "codex" && codexStatus === "blocked"
-          ? "authenticate_codex"
-          : "none",
+        id === "codex" && codexStatus === "blocked" ? "recheck" : "none",
       facts:
         id === "git"
           ? ([{ key: "git_executable", value: "available" }] as const)
@@ -108,14 +106,25 @@ describe("SetupOverview", () => {
     expect(shouldShowSetupOverview("demo", state, 0)).toBe(false)
 
     expect(
+      shouldShowSetupOverview(
+        "native",
+        {
+          ...state,
+          status: "loading",
+          snapshot: null,
+        },
+        0,
+      ),
+    ).toBe(false)
+
+    expect(
       unresolvedSetupRequirements(readinessSnapshot(), 1, {
-        codexUnavailable: true,
         runtimeUnavailable: true,
       }).map((item) => item.key),
-    ).toEqual(["codex", "diagnostics"])
+    ).toEqual(["diagnostics"])
     expect(
       shouldShowSetupOverview("native", state, 1, {
-        codexUnavailable: true,
+        runtimeUnavailable: true,
       }),
     ).toBe(true)
   })
@@ -129,7 +138,12 @@ describe("SetupOverview", () => {
     expect(
       screen.getByRole("heading", { name: "Add your first project" }),
     ).toBeVisible()
-    expect(screen.getByText("codex login")).toBeVisible()
+    expect(screen.queryByText("codex login")).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Codex was found, but its App Server could not start and initialize.",
+      ),
+    ).toBeVisible()
     expect(screen.getAllByRole("button", { name: "Recheck" })).toHaveLength(1)
     expect(screen.queryByLabelText("Coding Wife")).not.toBeInTheDocument()
     expect(
@@ -157,15 +171,15 @@ describe("SetupOverview", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("rechecks native readiness and the app-wide connection override from one action", async () => {
+  it("rechecks native setup readiness from the single global action", async () => {
     const user = userEvent.setup()
     const onRecheck = vi.fn().mockResolvedValue(undefined)
     renderOverview(
-      readinessSnapshot(),
+      readinessSnapshot("blocked"),
       1,
       "en",
       vi.fn(),
-      { codexUnavailable: true },
+      undefined,
       onRecheck,
     )
 
@@ -177,5 +191,29 @@ describe("SetupOverview", () => {
     await user.click(recheck)
 
     expect(onRecheck).toHaveBeenCalledOnce()
+  })
+
+  it("reconnects the selected workspace after a custom Codex path is accepted", async () => {
+    const user = userEvent.setup()
+    const onRecheck = vi.fn().mockResolvedValue(undefined)
+    renderOverview(
+      readinessSnapshot("blocked"),
+      1,
+      "en",
+      vi.fn(),
+      undefined,
+      onRecheck,
+    )
+
+    await user.type(
+      await screen.findByRole("textbox", {
+        name: "Custom Codex CLI path",
+      }),
+      "/opt/homebrew/bin/codex",
+    )
+    await user.click(screen.getByRole("button", { name: "Use this path" }))
+
+    expect(onRecheck).toHaveBeenCalledOnce()
+    expect(screen.getAllByRole("button", { name: "Recheck" })).toHaveLength(1)
   })
 })

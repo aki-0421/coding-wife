@@ -64,8 +64,10 @@ function explicitPathConfigured(
 
 export function CodexBinaryPathSettings({
   compact = false,
+  onConfigurationApplied,
 }: {
   readonly compact?: boolean
+  readonly onConfigurationApplied?: () => void
 }) {
   const { locale } = useI18n()
   const ui = copy[locale]
@@ -93,6 +95,7 @@ export function CodexBinaryPathSettings({
     if (succeeded) {
       setPath("")
       setAnnouncement(nextPath === null ? ui.automaticEnabled : ui.configured)
+      onConfigurationApplied?.()
       return
     }
     setErrorCode(

@@ -15,7 +15,6 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useI18n } from "@/features/localization"
 import type { SupportedLocale } from "@/features/localization/types"
 import type {
@@ -54,7 +53,6 @@ interface SetupRequirement {
 }
 
 export interface SetupRequirementOverrides {
-  readonly codexUnavailable?: boolean
   readonly runtimeUnavailable?: boolean
 }
 
@@ -72,8 +70,6 @@ interface SetupOverviewProps {
 interface SetupCopy {
   readonly title: string
   readonly remaining: (count: number) => string
-  readonly checkingTitle: string
-  readonly checkingDescription: string
   readonly unavailableTitle: string
   readonly unavailableDescription: string
   readonly recheck: string
@@ -104,9 +100,6 @@ const setupCopy: Readonly<Record<SupportedLocale, SetupCopy>> = {
   en: {
     title: "Finish the local setup",
     remaining: (count) => `${count} ${count === 1 ? "item" : "items"} left`,
-    checkingTitle: "Checking this Mac",
-    checkingDescription:
-      "Verifying Codex, Git, and local app resources without sending repository data.",
     unavailableTitle: "The local setup could not be checked",
     unavailableDescription:
       "Retry the native check. Existing files and repository data have not been changed.",
@@ -121,7 +114,7 @@ const setupCopy: Readonly<Record<SupportedLocale, SetupCopy>> = {
       codex: {
         title: "Prepare Codex CLI",
         description:
-          "Coding Wife uses your local Codex sign-in and a compatible App Server runtime.",
+          "Coding Wife needs a trusted Codex executable that can start its App Server.",
       },
       git: {
         title: "Install Git",
@@ -165,15 +158,12 @@ const setupCopy: Readonly<Record<SupportedLocale, SetupCopy>> = {
       update:
         "Install the current Codex CLI so the required model and protocol are available.",
       reconnect:
-        "Codex is installed but could not be verified. Run the check again.",
+        "Codex was found, but its App Server could not start and initialize.",
     },
   },
   ja: {
     title: "ローカル環境の準備を完了する",
     remaining: (count) => `残り${count}件`,
-    checkingTitle: "このMacを確認しています",
-    checkingDescription:
-      "リポジトリのデータを送信せず、Codex、Git、アプリ内リソースを確認します。",
     unavailableTitle: "ローカル環境を確認できませんでした",
     unavailableDescription:
       "ネイティブ診断を再実行してください。既存のファイルやリポジトリは変更されていません。",
@@ -188,7 +178,7 @@ const setupCopy: Readonly<Record<SupportedLocale, SetupCopy>> = {
       codex: {
         title: "Codex CLIを準備",
         description:
-          "Coding WifeはローカルのCodexログインと互換性のあるApp Serverを利用します。",
+          "Coding Wifeには、App Serverを起動できる信頼済みのCodex実行ファイルが必要です。",
       },
       git: {
         title: "Gitをインストール",
@@ -231,7 +221,7 @@ const setupCopy: Readonly<Record<SupportedLocale, SetupCopy>> = {
       update:
         "必要なモデルとプロトコルを利用できる最新のCodex CLIをインストールします。",
       reconnect:
-        "Codexは見つかりましたが確認できませんでした。診断を再実行してください。",
+        "Codexは見つかりましたが、App Serverを起動して初期化できませんでした。",
     },
   },
 }
@@ -269,17 +259,10 @@ export function unresolvedSetupRequirements(
   const requirements: SetupRequirement[] = []
   const codex = checkById(snapshot, "codex")
   const git = checkById(snapshot, "git")
-  if (
-    codex === null ||
-    codex.status !== "ready" ||
-    overrides.codexUnavailable === true
-  ) {
+  if (codex === null || codex.status !== "ready") {
     requirements.push({
       key: "codex",
-      check:
-        overrides.codexUnavailable === true && codex?.status === "ready"
-          ? null
-          : codex,
+      check: codex,
     })
   }
   if (!gitExecutableIsReady(git)) {
@@ -311,20 +294,14 @@ export function shouldShowSetupOverview(
 ): boolean {
   if (hydrationMode !== "native") return false
   if (state.snapshot?.source === "demo") return false
-  if (
-    projectCount === 0 ||
-    overrides.codexUnavailable === true ||
-    overrides.runtimeUnavailable === true
-  ) {
+  if (state.snapshot === null) return state.status === "error"
+  if (projectCount === 0 || overrides.runtimeUnavailable === true) {
     return true
   }
-  if (state.snapshot !== null) {
-    return (
-      unresolvedSetupRequirements(state.snapshot, projectCount, overrides)
-        .length > 0
-    )
-  }
-  return state.status === "error"
+  return (
+    unresolvedSetupRequirements(state.snapshot, projectCount, overrides)
+      .length > 0
+  )
 }
 
 function codexRecovery(
@@ -360,30 +337,6 @@ function requirementIcon(key: SetupRequirementKey): LucideIcon {
   if (key === "project") return FolderGit2Icon
   if (key === "diagnostics") return AlertCircleIcon
   return WrenchIcon
-}
-
-function SetupSkeleton({ copy }: { readonly copy: SetupCopy }) {
-  return (
-    <div
-      aria-live="polite"
-      className="flex flex-col gap-lg rounded-composer border border-divider bg-surface p-xl"
-      role="status"
-    >
-      <div className="flex items-start gap-md">
-        <Skeleton className="size-8 shrink-0 rounded-control" />
-        <div className="flex flex-1 flex-col gap-xs">
-          <span className="text-headline text-text-strong">
-            {copy.checkingTitle}
-          </span>
-          <span className="max-w-[70ch] text-pretty text-caption text-muted-foreground">
-            {copy.checkingDescription}
-          </span>
-        </div>
-      </div>
-      <Skeleton className="h-14 w-full" />
-      <Skeleton className="h-14 w-full" />
-    </div>
-  )
 }
 
 export function SetupOverview({
@@ -442,6 +395,8 @@ export function SetupOverview({
     }
   }
 
+  if (snapshot === null && state.status === "loading") return null
+
   return (
     <section
       aria-busy={rechecking}
@@ -456,9 +411,7 @@ export function SetupOverview({
           </h1>
         </header>
 
-        {snapshot === null && state.status === "loading" ? (
-          <SetupSkeleton copy={copy} />
-        ) : (
+        {snapshot === null && state.status === "loading" ? null : (
           <section
             aria-labelledby="setup-remaining-title"
             className="overflow-hidden rounded-composer border border-divider bg-surface"
@@ -523,7 +476,16 @@ export function SetupOverview({
                           {description}
                         </p>
                         {requirement.key === "codex" ? (
-                          <CodexBinaryPathSettings compact />
+                          <CodexBinaryPathSettings
+                            compact
+                            {...(onRecheck === undefined
+                              ? {}
+                              : {
+                                  onConfigurationApplied: () => {
+                                    void onRecheck()
+                                  },
+                                })}
+                          />
                         ) : null}
                         {command === null ? null : (
                           <>

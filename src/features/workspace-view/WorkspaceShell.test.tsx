@@ -202,13 +202,19 @@ function readyNativeReadinessController(): NativeReadinessController {
   return new NativeReadinessController(gateway)
 }
 
-function renderWorkspace(adapter?: WorkspaceViewAdapter) {
+function renderWorkspace(
+  adapter?: WorkspaceViewAdapter,
+  readinessController?: NativeReadinessController,
+) {
   return render(
     <App
       localeStore={englishLocaleStore}
       transport={new DemoTransport()}
       {...(adapter?.hydrationMode === "native"
-        ? { readinessController: readyNativeReadinessController() }
+        ? {
+            readinessController:
+              readinessController ?? readyNativeReadinessController(),
+          }
         : {})}
       {...(adapter ? { workspaceAdapter: adapter } : {})}
     />,
@@ -2213,7 +2219,7 @@ describe("WorkspaceShell", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("replaces the entire native workspace shell when Codex is disconnected", async () => {
+  it("keeps the native workspace shell when the workspace Codex handshake is disconnected", async () => {
     const codex: WorkspaceCodexState = {
       activeWorkspaceId: "workspace-native",
       generation: null,
@@ -2237,13 +2243,34 @@ describe("WorkspaceShell", () => {
     renderWorkspace(adapter)
 
     expect(
-      await screen.findByRole("heading", { name: "Finish the local setup" }),
+      await screen.findByRole("navigation", { name: "Workspaces" }),
     ).toBeVisible()
     expect(
-      screen.getByRole("heading", { name: "Prepare Codex CLI" }),
-    ).toBeVisible()
-    expect(screen.queryByRole("navigation", { name: "Workspaces" })).toBeNull()
+      screen.queryByRole("heading", { name: "Finish the local setup" }),
+    ).toBeNull()
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
+  })
+
+  it("renders no visible startup UI while native setup readiness is checking", () => {
+    const pendingReadiness = deferred<NativeReadinessSnapshotV1>()
+    const readinessController = new NativeReadinessController({
+      kind: "native",
+      run: () => pendingReadiness.promise,
+      configureCodexBinary: () => pendingReadiness.promise,
+      copy: () => Promise.reject(new Error("readiness is still checking")),
+    })
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+    }
+
+    const { container } = renderWorkspace(adapter, readinessController)
+
+    expect(
+      container.querySelector('[data-native-startup="checking"]'),
+    ).not.toBeNull()
+    expect(container.textContent).toBe("")
   })
 
   it("labels demo history as ephemeral in chat and diagnostics", async () => {

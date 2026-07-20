@@ -94,7 +94,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | app settingsを開く    | workspace shell表示中 | gearをactiveにしS-005のGeneralだけを表示          | 非該当                         | shellとworkspace stateを維持    | `APP-F-083`                           |
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
 | preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry       | `APP-F-057`, `APP-F-058`, `APP-F-076` |
-| Codex pathを設定する | Generalまたは初回setupがready | Rustがabsolute pathをcanonicalizeし、binary trust、version、schemaを検証してapp-private設定へ保存する。次のreadiness snapshotを返し、実行中sessionは変更しない | 入力と前設定を維持 | 入力を保持しfield直下にsafe code、前設定を維持 | `CODE-F-051` |
+| Codex pathを設定する | Generalまたは初回setupがready | Rustがabsolute pathをcanonicalizeし、binary trust、version、App Server起動とstable initializeを検証してapp-private設定へ保存する。schema、auth、config、modelは通常workspace接続まで確認しない。次のreadiness snapshotを返し、実行中sessionは変更しない。overview setupから成功した場合は未接続の選択workspace再接続を追加clickなしで開始するが、その完了をfieldのprocessingまたはoverview終了の条件にしない | 入力と前設定を維持 | 入力を保持しfield直下にsafe code、前設定を維持。後続のworkspace activation失敗はpathをinvalid扱いせず通常workspaceでSend不可のreasonを表示する | `CODE-F-051`, `WORK-F-048` |
 | Codex pathを自動検出へ戻す | 明示pathが設定済み | app-private設定を削除し、GUI `PATH`、default login shell、既知install位置の探索結果でreadinessを更新する | 前設定を維持 | 前設定とsnapshotを維持しsafe code | `CODE-F-051` |
 | character個別設定を開く | Character一覧がready | 選択行のmodel名、必要な操作、motion設定、Character contextを同sectionに表示 | 非該当 | 一覧を維持 | `LIVE-F-084`, `LIVE-F-086` |
 | Character contextを保存する | character個別設定がready | 対象packのversionだけを更新し、そのpackを選択した次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063`, `LIVE-F-086` |
@@ -114,7 +114,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | 項目                 | 初期値    | 必須     | 制約・境界                            | エラー表示            | 保存契機 |
 | -------------------- | --------- | -------- | ------------------------------------- | --------------------- | -------- |
 | Language             | OS locale | 必須     | `ja` / `en`                           | field直下、前言語維持 | 選択時   |
-| Codex executable path | 自動検出 | 任意 | UTF-8 absolute path、1〜4,096 byte、NUL/control不可。保存時にRustでcanonical trusted executableとApp Server schemaを検証 | field直下にsafe code、入力と前設定を維持 | `Use this path`。明示設定中は`Use automatic detection`も表示 |
+| Codex executable path | 自動検出 | 任意 | UTF-8 absolute path、1〜4,096 byte、NUL/control不可。保存時にRustでcanonical trusted executable、version、App Server spawnとstable initializeを検証 | field直下にsafe code、入力と前設定を維持 | `Use this path`。明示設定中は`Use automatic detection`も表示 |
 | Character context    | bundled Hiyoriは桃瀬ひよりpreset、customはpack表示名と中立な既定値 | 任意 | opaque pack ID単位、display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
 | Project context      | 空       | 任意 | goal / constraints / notes各8,000、配列各20件、総量32,000 scalar、project-relative reference | field直下、draft維持 | Save |
 | TTS enabled          | off       | 必須     | 保存済みAPI keyと選択可能providerがある時だけon | toggle直下、offへfail closed | 変更直後に自動保存 |
@@ -136,7 +136,7 @@ Audio sectionでは、通常時の見出し説明と各fieldの補助文を表�
 | model import/select/motion設定/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1。bundled Hiyoriのpreset保存要求は拒否 | quarantine cleanup、前selection維持 | bundled preset編集・delete拒否、置換/削除失敗時は前slotとselection維持 |
 | Audio取得・自動保存・test   | Rust provider adapter/private store | `narration_*`                 | fixed OpenAI Speech endpoint、Bearer secret、model/voice allowlist、owner-only secret、fixed audio player、expected version | request/playback停止 | 最後の保存済みsnapshotと入力、captionを維持 |
 | readiness recheck           | Rust readiness service   | `run_diagnostic_check`             | read-only check                       | 前snapshot維持    | stale snapshotとsafe code             |
-| Codex path保存・自動検出復帰 | Rust readiness / app-private workspace store | `configure_codex_binary` | exact schema、absolute path上限、binary trust、version/schema probe。responseはreadiness snapshotだけでpathを返さない | 入力と前record維持 | 前recordとsnapshotを維持しsafe code |
+| Codex path保存・自動検出復帰 | Rust readiness / app-private workspace store | `configure_codex_binary` | exact request schema、absolute path上限、binary trust、version、App Server spawn / stable initialize。responseはreadiness snapshotだけでpathを返さない | 入力と前record維持 | 前recordとsnapshotを維持しsafe code |
 | project一覧・登録解除       | Rust workspace store     | `workspace_list` / `workspace_unregister` | typed Project ID、metadata-only mutation | 一覧維持 | repository/worktreeを変更せずsafe code |
 
 ## ウィンドウ固有動作
