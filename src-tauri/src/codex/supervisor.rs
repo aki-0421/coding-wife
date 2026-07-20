@@ -45,7 +45,6 @@ use super::types::{
 pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
 pub const DOMAIN_EVENT_CHANNEL: &str = "coding-wife://domain-event";
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(5);
-const SETUP_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const READINESS_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const READINESS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERRUPT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -521,7 +520,7 @@ impl CodexSupervisor {
             workspace_root,
         };
 
-        bounded_setup_probe(context).await
+        run_setup_probe(context).await
     }
 
     pub(crate) async fn setup_probe_with_verified_binary(
@@ -538,7 +537,7 @@ impl CodexSupervisor {
                 .cloned()
                 .or_else(|| std::env::current_dir().ok())
         };
-        bounded_setup_probe(SetupProbeContext {
+        run_setup_probe(SetupProbeContext {
             configured_binary: None,
             expected_binary: None,
             verified_binary: Some(binary),
@@ -2511,13 +2510,6 @@ async fn initialize_app_server(
     Ok(())
 }
 
-async fn bounded_setup_probe(context: SetupProbeContext) -> CodexDiagnostic {
-    match tokio::time::timeout(SETUP_PROBE_TIMEOUT, run_setup_probe(context)).await {
-        Ok(diagnostic) => diagnostic,
-        Err(_) => setup_failure_diagnostic(CodexHealth::Disconnected, "CODEX-SETUP-TIMEOUT", true),
-    }
-}
-
 async fn run_setup_probe(context: SetupProbeContext) -> CodexDiagnostic {
     let Some(workspace_root) = context.workspace_root else {
         return setup_failure_diagnostic(
@@ -2576,13 +2568,6 @@ async fn run_setup_probe(context: SetupProbeContext) -> CodexDiagnostic {
             },
             setup_rpc_error_code(&error),
             !matches!(error, RpcRequestError::Protocol),
-        );
-    }
-    if binary.revalidate().await.is_err() {
-        return setup_failure_diagnostic(
-            CodexHealth::BinaryUntrusted,
-            "CODEX-BINARY-IDENTITY-CHANGED",
-            false,
         );
     }
     diagnostic_from_setup(&binary)

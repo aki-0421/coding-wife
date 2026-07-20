@@ -226,6 +226,8 @@ def send_support_item(item_type, text):
 def main():
     args = sys.argv[1:]
     if args == ["--version"]:
+        if MODE == "setup_probe":
+            record("setup_version")
         sys.stdout.write("codex-cli 0.144.5\n")
         return 0
     if args == ["fixture-record-concurrency"]:

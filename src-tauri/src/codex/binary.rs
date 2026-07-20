@@ -447,8 +447,11 @@ async fn run_bounded(
     identity: &VerifiedBinaryIdentity,
     args: &[OsString],
     schema_root: Option<&Path>,
+    revalidate_before_spawn: bool,
 ) -> Result<BoundedOutput, BinaryError> {
-    identity.revalidate().await?;
+    if revalidate_before_spawn {
+        identity.revalidate().await?;
+    }
     let mut command = Command::new(&identity.canonical_path);
     command
         .args(args)
@@ -583,14 +586,19 @@ async fn inspect_candidate(
         Err(_) if explicit => return Err(BinaryError::Io),
         Err(_) => return Ok(None),
     };
-    let output = run_bounded(&identity, &[OsString::from("--version")], None).await?;
+    let output = run_bounded(
+        &identity,
+        &[OsString::from("--version")],
+        None,
+        false,
+    )
+    .await?;
     let version_output = String::from_utf8(output.stdout).map_err(|_| BinaryError::ProbeFailed)?;
     let cli_version = version_output
         .trim()
         .strip_prefix("codex-cli ")
         .ok_or(BinaryError::ProbeFailed)?
         .to_owned();
-    identity.revalidate().await?;
     let canonical_path_hash = hex::encode(Sha256::digest(
         identity.canonical_path.to_string_lossy().as_bytes(),
     ));
@@ -1198,7 +1206,7 @@ pub async fn probe_schema(binary: &BinaryInfo) -> Result<SchemaProbe, BinaryErro
         OsString::from("--out"),
         output_dir.path.clone().into_os_string(),
     ];
-    run_bounded(&binary.identity, &args, Some(&output_dir.path)).await?;
+    run_bounded(&binary.identity, &args, Some(&output_dir.path), true).await?;
     binary.revalidate().await?;
 
     let root = output_dir.path.clone();
@@ -1367,6 +1375,7 @@ mod tests {
                 &identity,
                 &[OsString::from("-c"), OsString::from(script)],
                 None,
+                true,
             )
             .await;
             assert!(matches!(result, Err(BinaryError::ProbeFailed)));
