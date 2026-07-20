@@ -77,9 +77,11 @@ interface ChatViewProps {
     | undefined
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onRemoveContext: (snapshotId: string) => void
+  readonly onReconnect: () => void | Promise<void>
   readonly onRetryRuntime: () => void
   readonly onSend: () => Promise<boolean>
   readonly onStop: () => boolean | void | Promise<boolean | void>
+  readonly reconnecting: boolean
   readonly onTimelineAnchorChange?: (
     eventId: string,
     sequence: number,
@@ -196,9 +198,11 @@ export function ChatView({
   onRegisterAttachmentPaths,
   onRemoveAttachment,
   onRemoveContext,
+  onReconnect,
   onRetryRuntime,
   onSend,
   onStop,
+  reconnecting,
   onTimelineAnchorChange,
 }: ChatViewProps) {
   const narrationController = useNarrationController()
@@ -477,8 +481,10 @@ export function ChatView({
           onRegisterAttachmentPaths={onRegisterAttachmentPaths}
           onRemoveAttachment={onRemoveAttachment}
           onRemoveContext={onRemoveContext}
+          onReconnect={onReconnect}
           onSend={onSend}
           onStop={onStop}
+          reconnecting={reconnecting}
           readiness={readiness}
           repositoryHealth={repositoryHealth}
           turnState={turnState}

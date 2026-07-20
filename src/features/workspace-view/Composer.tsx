@@ -10,6 +10,7 @@ import {
   InfoIcon,
   MapIcon,
   PlusIcon,
+  RefreshCwIcon,
   SquareIcon,
   TargetIcon,
   TerminalSquareIcon,
@@ -63,8 +64,10 @@ interface ComposerProps {
     | undefined
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onRemoveContext: (snapshotId: string) => void
+  readonly onReconnect: () => void | Promise<void>
   readonly onSend: () => Promise<boolean>
   readonly onStop: () => boolean | void | Promise<boolean | void>
+  readonly reconnecting: boolean
 }
 
 const contextSources: readonly ContextSnapshotItem["source"][] = [
@@ -112,6 +115,13 @@ function clipboardFilePaths(data: DataTransfer): string[] {
   return [...new Set(paths)]
 }
 
+function safeConnectionReason(reasonCode: string | null): string {
+  return reasonCode !== null &&
+    /^(?:CODEX|HIST)-[A-Z0-9-]{1,96}$/u.test(reasonCode)
+    ? reasonCode
+    : "CODEX-NOT-CONNECTED"
+}
+
 export function Composer({
   connected,
   copy,
@@ -129,8 +139,10 @@ export function Composer({
   onRegisterAttachmentPaths,
   onRemoveAttachment,
   onRemoveContext,
+  onReconnect,
   onSend,
   onStop,
+  reconnecting,
 }: ComposerProps) {
   const [addOpen, setAddOpen] = useState(false)
   const attachmentCapabilitiesAvailable =
@@ -146,6 +158,7 @@ export function Composer({
     !draft.goalMode || (goalObjectiveLength > 0 && goalObjectiveLength <= 4_000)
   const repositoryReady =
     repositoryHealth === undefined || repositoryHealth === "ready"
+  const connectionReason = safeConnectionReason(readiness.reasonCode)
   const canSend =
     connected &&
     repositoryReady &&
@@ -332,6 +345,39 @@ export function Composer({
               : copy.pickerUnavailable}
           </span>
         </p>
+
+        {!connected ? (
+          <div
+            className="mt-xs flex min-h-8 items-center gap-sm rounded-control bg-muted/60 px-sm py-xs max-[520px]:items-start"
+            data-composer-connection-recovery=""
+            role="status"
+          >
+            <p className="m-0 min-w-0 flex-1 text-pretty text-caption text-muted-foreground">
+              {copy.sendUnavailable}{" "}
+              <code className="whitespace-nowrap font-mono text-label text-foreground">
+                {connectionReason}
+              </code>
+            </p>
+            <Button
+              className="shrink-0"
+              disabled={reconnecting}
+              onClick={() => void onReconnect()}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              <RefreshCwIcon
+                className={
+                  reconnecting
+                    ? "animate-spin motion-reduce:animate-none"
+                    : undefined
+                }
+                data-icon="inline-start"
+              />
+              {reconnecting ? copy.reconnectingCodex : copy.reconnectCodex}
+            </Button>
+          </div>
+        ) : null}
 
         <div className="flex min-h-7 items-center gap-xs pt-sm">
           <div className="flex shrink-0 items-center gap-xxs">

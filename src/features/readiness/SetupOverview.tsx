@@ -412,9 +412,12 @@ export function SetupOverview({
                           </p>
                         ) : null}
                         {requirement.check === null ? null : (
-                          <span className="sr-only">
+                          <code
+                            className="mt-xs inline-flex rounded-control bg-code-chip px-xs py-xxs font-mono text-label text-muted-foreground"
+                            data-setup-requirement-code={requirement.key}
+                          >
                             {requirement.check.code}
-                          </span>
+                          </code>
                         )}
                       </div>
                       {command !== null || requirement.key === "project" ? (

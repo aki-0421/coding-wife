@@ -2263,6 +2263,8 @@ describe("WorkspaceShell", () => {
   })
 
   it("keeps the native workspace shell when the workspace Codex handshake is disconnected", async () => {
+    const user = userEvent.setup()
+    const recheckWorkspace = vi.fn().mockResolvedValue(nativeWorkspaceState())
     const codex: WorkspaceCodexState = {
       activeWorkspaceId: "workspace-native",
       generation: null,
@@ -2283,6 +2285,7 @@ describe("WorkspaceShell", () => {
       hydrationMode: "native",
       loadState: () => Promise.resolve(nativeWorkspaceState()),
       codexSnapshot: () => codex,
+      recheckWorkspace,
     }
     renderWorkspace(adapter)
 
@@ -2293,6 +2296,20 @@ describe("WorkspaceShell", () => {
       screen.queryByRole("heading", { name: "Finish the local setup" }),
     ).toBeNull()
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+    expect(screen.getByText("CODEX-NOT-CONNECTED")).toBeVisible()
+    await user.type(
+      screen.getByPlaceholderText(
+        "Ask Codex to plan, build, explain, or fix anything…",
+      ),
+      "Keep this draft",
+    )
+    await user.click(screen.getByRole("button", { name: "Reconnect" }))
+    expect(recheckWorkspace).toHaveBeenCalledWith("workspace-native")
+    expect(
+      screen.getByPlaceholderText(
+        "Ask Codex to plan, build, explain, or fix anything…",
+      ),
+    ).toHaveValue("Keep this draft")
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
   })
 

@@ -287,6 +287,8 @@ const en = {
   removeAttachment: "Remove attachment",
   attachmentRejected: "Files over 25 MiB remain visible but cannot be sent.",
   sendUnavailable: "Codex is not connected. Your draft will be preserved.",
+  reconnectCodex: "Reconnect",
+  reconnectingCodex: "Reconnecting…",
   sendEmpty: "Enter an instruction or attach valid context.",
   sendBusy: "Wait for the current turn to finish or stop it.",
   pickerUnavailable:
@@ -767,6 +769,8 @@ const ja: typeof en = {
   attachmentRejected:
     "25 MiBを超えるファイルは表示を残しますが送信できません。",
   sendUnavailable: "Codexは未接続です。下書きは保持されます。",
+  reconnectCodex: "再接続",
+  reconnectingCodex: "再接続中…",
   sendEmpty: "指示を入力するか、有効なコンテキストを追加してください。",
   sendBusy: "現在のturnを完了するか、停止してください。",
   pickerUnavailable:

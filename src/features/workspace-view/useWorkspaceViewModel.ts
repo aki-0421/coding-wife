@@ -194,7 +194,12 @@ function durableTimelineIdentity(
 
 export type TurnUiState = "idle" | "sending" | "running" | "stopping"
 export type WorkspaceAdapterStatus = "loading" | "ready" | "error"
-export type WorkspaceAction = "archive" | "cancel" | "repair" | "unregister"
+export type WorkspaceAction =
+  | "archive"
+  | "cancel"
+  | "recheck"
+  | "repair"
+  | "unregister"
 
 export type WorkspaceActionResult =
   | { readonly ok: true }
@@ -1395,7 +1400,7 @@ export function useWorkspaceViewModel(
       ) {
         return { ok: false, errorCode: "WORKSPACE-RECHECK-UNAVAILABLE" }
       }
-      setWorkspaceAction("repair")
+      setWorkspaceAction("recheck")
       try {
         applyAdapterState(await adapter.recheckWorkspace(selectedWorkspace.id))
         setNotice(null)

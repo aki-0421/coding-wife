@@ -477,6 +477,10 @@ export function WorkspaceShell({
     [reportWorkspaceAction, view],
   )
 
+  const reconnectCodex = useCallback(async () => {
+    reportWorkspaceAction(await view.recheckSelectedWorkspace())
+  }, [reportWorkspaceAction, view])
+
   const executeArchiveWorkspace = useCallback(
     async (workspaceId: string, expectedGeneration: number | null) => {
       setArchivePendingWorkspaceId(workspaceId)
@@ -799,7 +803,7 @@ export function WorkspaceShell({
   const recheckSetup = async () => {
     if (runtimeSetupRequired) runtime.refresh()
     if (codexReconnectRequired) {
-      reportWorkspaceAction(await view.recheckSelectedWorkspace())
+      await reconnectCodex()
     }
   }
   const projectSetupDialog =
@@ -956,6 +960,7 @@ export function WorkspaceShell({
               }
               onRemoveAttachment={view.removeAttachment}
               onRemoveContext={view.removeContext}
+              onReconnect={reconnectCodex}
               onRetryRuntime={runtime.refresh}
               onSend={view.sendTurn}
               onStop={stopTurn}
@@ -969,6 +974,10 @@ export function WorkspaceShell({
               pendingRequestIds={view.codex.pendingRequests.map(
                 (request) => request.pendingId,
               )}
+              reconnecting={
+                view.workspaceAction === "recheck" ||
+                view.codex.phase === "connecting"
+              }
               turnState={view.turnState}
               workspaceId={selectedWorkspace.id}
             />
