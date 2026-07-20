@@ -95,6 +95,13 @@ UI/HISTへ渡すCodex eventは、少なくとも次へ分類する。
 - diagnostic/protocol/model violation: safe code、willRetry、detail refと復旧可否を使い、raw payloadへfallbackしない。
 - completion/error/interrupt: turn terminal authorityをstatus eventとして保存し、interrupt ackをcompletionへ変換しない。
 
+Codex 0.144.5が接続直後に送る`mcpServer/startupStatus/updated`と
+`remoteControl/status/changed`は、Coding Wifeのmain session、turn、model、approval状態を
+変更しない既知の補助notificationとして明示的に破棄する。この2 methodを
+`code.protocol.unsupported`へ投影して利用者へblocked errorを表示してはならない。その他の
+未知notification、未知item type、未知enumは従来どおりraw payloadを公開せず
+`CODEX-PROTOCOL-UNSUPPORTED`へfail closedする。
+
 同じCodex event IDの再配信は同内容なら履歴writerの冪等成功とし、内容差はconflictとしてingestionを停止する。history追記失敗を無視してlive表示だけ成功扱いにせず、turn中は安全なerrorを表示し、次turn開始前にwriter readinessを再確認する。
 
 ### UI操作契約

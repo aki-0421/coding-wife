@@ -391,6 +391,10 @@ impl EventNormalizer {
             | "item/reasoning/textDelta" => {
                 // Intentionally discard all raw reasoning payloads.
             }
+            "mcpServer/startupStatus/updated" | "remoteControl/status/changed" => {
+                // These auxiliary status notifications do not affect the
+                // Coding Wife session, turn, model, or approval state.
+            }
             _ => {
                 outcome.events.push(self.unsupported(method, byte_count)?);
                 outcome.unsupported_terminal = method.starts_with("turn/")
@@ -599,5 +603,21 @@ mod tests {
         assert!(outcome.unsupported_terminal);
         let encoded = serde_json::to_string(&outcome.events).expect("serialize");
         assert!(!encoded.contains("value"));
+    }
+
+    #[test]
+    fn known_auxiliary_status_notifications_are_ignored() {
+        let mut normalizer =
+            EventNormalizer::new("workspace-1".to_owned(), PathBuf::from("/workspace"), 1);
+        for method in [
+            "mcpServer/startupStatus/updated",
+            "remoteControl/status/changed",
+        ] {
+            let outcome = normalizer
+                .normalize(method, &json!({"private": "status"}), 42)
+                .expect("known auxiliary notification");
+            assert!(outcome.events.is_empty());
+            assert!(!outcome.unsupported_terminal);
+        }
     }
 }
