@@ -1242,52 +1242,6 @@ export function useWorkspaceViewModel(
     [adapter, adapterReady, applyAdapterState],
   )
 
-  const deleteSelectedWorkspaceHistory = useCallback(async () => {
-    if (
-      !adapterReady ||
-      !selectedWorkspace ||
-      !adapter?.deleteWorkspaceHistory
-    ) {
-      return false
-    }
-    const workspaceId = selectedWorkspace.id
-    const pendingDraft = pendingDraftSaves.current.get(workspaceId)
-    deletingWorkspaceIds.current.add(workspaceId)
-    pendingDraftSaves.current.delete(workspaceId)
-    const timer = draftSaveTimers.current.get(workspaceId)
-    if (timer !== undefined) window.clearTimeout(timer)
-    draftSaveTimers.current.delete(workspaceId)
-    try {
-      applyAdapterState(await adapter.deleteWorkspaceHistory(workspaceId))
-      setDrafts((current) => {
-        const next = { ...current }
-        delete next[workspaceId]
-        return next
-      })
-      setNotice(null)
-      return true
-    } catch (error) {
-      deletingWorkspaceIds.current.delete(workspaceId)
-      if (pendingDraft !== undefined) {
-        scheduleDraftSave(workspaceId, pendingDraft.text, pendingDraft.effort)
-      }
-      setNotice({
-        tone: "error",
-        message:
-          error instanceof Error ? error.message : "WORKSPACE-DELETE-FAILED",
-      })
-      return false
-    } finally {
-      deletingWorkspaceIds.current.delete(workspaceId)
-    }
-  }, [
-    adapter,
-    adapterReady,
-    applyAdapterState,
-    scheduleDraftSave,
-    selectedWorkspace,
-  ])
-
   const resetUiState = useCallback(() => {
     setFilter("")
     setActiveTab("chat")
@@ -1307,7 +1261,6 @@ export function useWorkspaceViewModel(
     cancelWorkspaceTransition,
     characterHidden,
     codex,
-    deleteSelectedWorkspaceHistory,
     filteredWorkspaces,
     filter,
     muted,

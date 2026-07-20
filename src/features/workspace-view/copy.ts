@@ -6,7 +6,6 @@ const en = {
   addProject: "Add project",
   addWorkspace: "Add workspace",
   archiveWorkspace: "Archive workspace",
-  settings: "Settings",
   appSettings: "App settings",
   repositoryBreadcrumb: "Repository location",
   workspaceActions: "Workspace actions",
@@ -108,7 +107,6 @@ const en = {
   tabs: {
     chat: "Chat",
     commit: "Commit",
-    settings: "Settings",
   },
   connection: {
     checking: "Checking runtime",
@@ -389,9 +387,6 @@ const en = {
       "Character, companion, preferences, and diagnostics shared by every project.",
     projectTitle: "Project settings",
     projectDescription: (project: string) => `Settings for ${project}.`,
-    workspaceTitle: "Workspace settings",
-    workspaceDescription: (workspace: string) =>
-      `History and privacy for ${workspace}.`,
     backToWorkspace: "Back to workspace",
     backToProjects: "Back to projects",
     sections: {
@@ -403,7 +398,6 @@ const en = {
       audio: "Audio",
       support: "Support",
       diagnostics: "Diagnostics",
-      history: "History & privacy",
     },
     generalTitle: "General",
     projectsTitle: "Registered projects",
@@ -539,34 +533,6 @@ const en = {
     localHistory: "Local history",
     historyReadOnly: "Read only",
     historyEphemeral: "Demo memory",
-    historyTitle: "History & privacy",
-    stored: "Stored locally",
-    storedBody:
-      "Workspace metadata, normalized events, drafts, context, and evidence packs.",
-    storedEphemeral: "Stored in demo memory",
-    storedEphemeralBody:
-      "Workspace metadata, activity, drafts, context, and evidence exist only for this preview. Reloading restores the bundled demo.",
-    neverStored: "Never stored",
-    neverStoredBody:
-      "Raw reasoning, generated audio, support prompt/response, and raw secrets.",
-    deleteHistory: "Delete workspace history",
-    deleteDisabled: "No connected history service; nothing was deleted.",
-    deleteReady:
-      "Deletes this workspace's app metadata and events. Repository files, commits, and branches are never changed.",
-    deleteConfirmTitle: "Delete this workspace history?",
-    deleteConfirmBody:
-      "This removes local app history for the selected workspace only. This action cannot be undone.",
-    deleteCancel: "Cancel",
-    deleteConfirm: "Delete history",
-    deleteInProgress: "Deleting…",
-    resetDemoHistory: "Reset demo history",
-    resetDemoReady:
-      "Clears only this preview's in-memory workspace activity. Reloading restores the demo. Repository files and Git are not connected or changed.",
-    resetDemoConfirmTitle: "Reset this preview's demo history?",
-    resetDemoConfirmBody:
-      "This clears only in-memory activity for the selected demo workspace. Reloading restores the bundled demo. No repository files, commits, or branches are connected or changed.",
-    resetDemoConfirm: "Reset demo",
-    resetDemoInProgress: "Resetting…",
     localPreview:
       "Preview preference · not persisted to the native settings service",
   },
@@ -591,7 +557,6 @@ const ja: typeof en = {
   addProject: "プロジェクトを追加",
   addWorkspace: "ワークスペースを追加",
   archiveWorkspace: "ワークスペースをアーカイブ",
-  settings: "設定",
   appSettings: "アプリ設定",
   repositoryBreadcrumb: "リポジトリの現在地",
   workspaceActions: "ワークスペース操作",
@@ -693,7 +658,6 @@ const ja: typeof en = {
   tabs: {
     chat: "チャット",
     commit: "コミット",
-    settings: "設定",
   },
   connection: {
     checking: "実行環境を確認中",
@@ -973,9 +937,6 @@ const ja: typeof en = {
       "すべてのプロジェクトに共通するキャラクター、コンパニオン、設定、診断です。",
     projectTitle: "プロジェクト設定",
     projectDescription: (project: string) => `${project} の設定です。`,
-    workspaceTitle: "ワークスペース設定",
-    workspaceDescription: (workspace: string) =>
-      `${workspace} の履歴とプライバシーを管理します。`,
     backToWorkspace: "ワークスペースへ戻る",
     backToProjects: "プロジェクト一覧へ戻る",
     sections: {
@@ -987,7 +948,6 @@ const ja: typeof en = {
       audio: "音声",
       support: "支援",
       diagnostics: "診断",
-      history: "履歴とプライバシー",
     },
     generalTitle: "一般",
     projectsTitle: "登録済みプロジェクト",
@@ -1123,34 +1083,6 @@ const ja: typeof en = {
     localHistory: "ローカル履歴",
     historyReadOnly: "読み取り専用",
     historyEphemeral: "デモ用メモリ",
-    historyTitle: "履歴とプライバシー",
-    stored: "ローカルに保存",
-    storedBody:
-      "ワークスペースのメタデータ、正規化済みイベント、下書き、コンテキスト、証拠パック。",
-    storedEphemeral: "デモ用メモリに保持",
-    storedEphemeralBody:
-      "ワークスペースのメタデータ、アクティビティ、下書き、コンテキスト、証拠はこのプレビューの間だけ保持されます。再読み込みすると同梱デモに戻ります。",
-    neverStored: "保存しない",
-    neverStoredBody:
-      "推論の生データ、生成音声、支援用の入出力、秘匿情報の生データ。",
-    deleteHistory: "ワークスペース履歴を削除",
-    deleteDisabled: "履歴サービスは未接続です。何も削除していません。",
-    deleteReady:
-      "このワークスペースのアプリ内メタデータとイベントを削除します。リポジトリのファイル、コミット、ブランチは変更しません。",
-    deleteConfirmTitle: "このワークスペースの履歴を削除しますか？",
-    deleteConfirmBody:
-      "選択中のワークスペースに属するローカルアプリ履歴だけを削除します。この操作は元に戻せません。",
-    deleteCancel: "キャンセル",
-    deleteConfirm: "履歴を削除",
-    deleteInProgress: "削除中…",
-    resetDemoHistory: "デモ履歴をリセット",
-    resetDemoReady:
-      "現在のプレビューにあるメモリ内アクティビティだけを消去します。再読み込みするとデモに戻ります。リポジトリとGitは未接続で、変更されません。",
-    resetDemoConfirmTitle: "このプレビューのデモ履歴をリセットしますか？",
-    resetDemoConfirmBody:
-      "選択中のデモ用ワークスペースにあるメモリ内アクティビティだけを消去します。再読み込みすると同梱デモに戻ります。リポジトリのファイル、コミット、ブランチは未接続で、変更されません。",
-    resetDemoConfirm: "デモをリセット",
-    resetDemoInProgress: "リセット中…",
     localPreview: "プレビュー設定 · native settings serviceには未保存",
   },
   createWorkspace: {
