@@ -4751,7 +4751,10 @@ mod tests {
             .expect("migrated editable context");
         assert_eq!(editable.project.version, 1);
         assert_eq!(editable.project.content_hash, DEFAULT_PROJECT_HASH);
-        assert_eq!(editable.character.context, CharacterContext::default());
+        assert_eq!(
+            editable.character.context,
+            CharacterContext::hiyori_preset()
+        );
         assert_eq!(
             reopened
                 .snapshot(None)
