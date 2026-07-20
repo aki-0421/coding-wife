@@ -2635,8 +2635,10 @@ describe("WorkspaceShell", () => {
       within(assistantEvent as HTMLElement).getByText("Codex"),
     ).toBeVisible()
     expect(within(toolEvent as HTMLElement).getByText("Tool run")).toBeVisible()
+    const toolSummary = (toolEvent as HTMLElement).querySelector("summary")
+    expect(toolSummary).not.toBeNull()
     expect(
-      within(toolEvent as HTMLElement).getByText("46 focused tests passed"),
+      within(toolSummary as HTMLElement).getByText("46 focused tests passed"),
     ).toBeVisible()
     const compactCharacter = container.querySelector<HTMLElement>(
       "[data-character-status-mobile]",
@@ -2893,7 +2895,7 @@ describe("WorkspaceShell", () => {
     )
   })
 
-  it("expands and copies only rendered safe timeline details", async () => {
+  it("separates messages from collapsible operation evidence", async () => {
     const snapshot = richCodexState()
     const writeText = vi.fn().mockResolvedValue(undefined)
     const adapter: WorkspaceViewAdapter = {
@@ -2913,19 +2915,38 @@ describe("WorkspaceShell", () => {
     const { container } = renderWorkspace(adapter)
 
     await screen.findByText("Your decision is needed")
+    expect(container.querySelector('[data-event-kind="user"]')).toHaveAttribute(
+      "data-event-layout",
+      "message",
+    )
+    expect(
+      container.querySelector('[data-event-kind="decision"]'),
+    ).toHaveAttribute("data-event-layout", "intervention")
     const assistant = container.querySelector<HTMLElement>(
       '[data-event-kind="assistant"]',
     )
     expect(assistant).not.toBeNull()
-    const details = within(assistant as HTMLElement)
-    const expand = details.getByRole("button", { name: "Show safe details" })
-    expect(expand).toHaveAttribute("aria-expanded", "false")
-    await user.click(expand)
-    expect(expand).toHaveAttribute("aria-expanded", "true")
+    expect(assistant).toHaveAttribute("data-event-layout", "message")
+    expect(assistant).toHaveTextContent("All checks passed.")
 
+    const tool = container.querySelector<HTMLElement>(
+      '[data-event-kind="tool"]',
+    )
+    expect(tool).not.toBeNull()
+    expect(tool).toHaveAttribute("data-event-layout", "operation")
+    const operationDetails = tool?.querySelector<HTMLDetailsElement>("details")
+    const operationSummary = tool?.querySelector<HTMLElement>("summary")
+    expect(operationDetails).not.toBeNull()
+    expect(operationSummary).not.toBeNull()
+    expect(operationDetails?.open).toBe(false)
+    expect(operationSummary).toHaveTextContent("46 focused tests passed")
+
+    await user.click(operationSummary as HTMLElement)
+    expect(operationDetails?.open).toBe(true)
+    const details = within(tool as HTMLElement)
     await user.click(details.getByRole("button", { name: "Copy safe details" }))
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce())
-    expect(writeText.mock.calls[0]?.[0]).toMatch(/All checks passed/u)
+    expect(writeText).toHaveBeenCalledWith("46 focused tests passed")
     expect(
       details.getByRole("button", { name: "Copy safe details" }),
     ).toHaveTextContent("Copied")

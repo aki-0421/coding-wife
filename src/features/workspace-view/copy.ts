@@ -155,6 +155,9 @@ const en = {
     interrupted: "Interrupted",
     effort: "Effort",
     attachments: "attachments",
+    steps: (count: number) =>
+      `${String(count)} ${count === 1 ? "step" : "steps"}`,
+    bytesChanged: (count: number) => `${String(count)} B changed`,
     decisionRequired: "Your decision is needed",
     approvalRequired: "Approval required",
     responseNeeded: "Codex is waiting for a bounded response.",
@@ -637,6 +640,8 @@ const ja: typeof en = {
     interrupted: "中断済み",
     effort: "推論強度",
     attachments: "件の添付",
+    steps: (count: number) => `${String(count)}ステップ`,
+    bytesChanged: (count: number) => `${String(count)} Bを変更`,
     decisionRequired: "判断が必要です",
     approvalRequired: "承認が必要です",
     responseNeeded: "Codexは範囲を限定した回答を待っています。",

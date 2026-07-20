@@ -370,6 +370,14 @@
   }
 }
 
+.timeline-operation > summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-operation > summary::marker {
+  content: "";
+}
+
 [data-reduced-motion="true"] *,
 [data-reduced-motion="true"] *::before,
 [data-reduced-motion="true"] *::after {

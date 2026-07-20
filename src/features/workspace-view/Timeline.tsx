@@ -1,17 +1,8 @@
 import {
-  useId,
-  useMemo,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react"
-import {
   ActivityIcon,
   AlertTriangleIcon,
-  BotIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
-  ChevronUpIcon,
   CircleXIcon,
   ClipboardCheckIcon,
   CopyIcon,
@@ -22,8 +13,14 @@ import {
   MessageSquareTextIcon,
   ShieldAlertIcon,
   TerminalSquareIcon,
-  UserIcon,
 } from "lucide-react"
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useId,
+  useMemo,
+  useState,
+} from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -126,24 +123,25 @@ function eventLabel(copy: WorkspaceCopy, event: WorkspaceTimelineItem): string {
   return copy.timelineEvent.kind[event.kind]
 }
 
-function eventDetail(event: WorkspaceTimelineItem): string | null {
+function eventDetail(
+  copy: WorkspaceCopy,
+  event: WorkspaceTimelineItem,
+): string | null {
   switch (event.kind) {
     case "history":
-      return event.domainKind
+      return event.errorCode ? `${event.domainKind} · ${event.errorCode}` : null
     case "user":
       return event.text
     case "assistant":
       return event.text
     case "plan":
-      return `${String(event.stepCount)} steps`
+      return null
     case "tool":
       return event.excerpt
     case "file":
-      return (
-        [event.changeKind, event.pathAlias].filter(Boolean).join(" · ") || null
-      )
+      return null
     case "diff":
-      return `${String(event.byteCount)} B · ${event.detailRef}`
+      return `${copy.timelineEvent.bytesChanged(event.byteCount)} · ${event.detailRef}`
     case "error":
       return [event.errorCode, event.detailRef].filter(Boolean).join(" · ")
     case "status":
@@ -157,12 +155,77 @@ function eventDetail(event: WorkspaceTimelineItem): string | null {
   }
 }
 
+function eventFailed(event: WorkspaceTimelineItem): boolean {
+  return event.status === "failed" || eventCode(event) !== undefined
+}
+
+function eventCompleted(event: WorkspaceTimelineItem): boolean {
+  return (
+    event.status === "completed" ||
+    event.status === "done" ||
+    event.kind === "completion" ||
+    event.kind === "request_resolved"
+  )
+}
+
+function eventInterrupted(event: WorkspaceTimelineItem): boolean {
+  return event.status === "interrupted" || event.status === "canceled"
+}
+
+function eventActive(event: WorkspaceTimelineItem): boolean {
+  return [
+    "active",
+    "inProgress",
+    "running",
+    "streaming",
+    "waiting",
+    "warning",
+  ].includes(event.status)
+}
+
+function eventTag(event: WorkspaceTimelineItem): string | null {
+  switch (event.kind) {
+    case "history":
+      return event.domainKind
+    case "tool":
+      return event.toolKind
+    case "file":
+      return event.changeKind
+    case "error":
+      return event.errorCode
+    case "status":
+      return event.itemType
+    default:
+      return null
+  }
+}
+
+function eventSummary(
+  copy: WorkspaceCopy,
+  event: WorkspaceTimelineItem,
+): string | null {
+  switch (event.kind) {
+    case "history":
+      return event.errorCode ?? null
+    case "plan":
+      return copy.timelineEvent.steps(event.stepCount)
+    case "tool":
+      return event.excerpt?.split("\n", 1)[0]?.trim() || null
+    case "file":
+      return event.pathAlias
+    case "diff":
+      return copy.timelineEvent.bytesChanged(event.byteCount)
+    case "error":
+      return event.detailRef
+    case "status":
+      return event.detailRef
+    default:
+      return null
+  }
+}
+
 function EventIcon({ event }: { readonly event: WorkspaceTimelineItem }) {
   switch (event.kind) {
-    case "user":
-      return <UserIcon aria-hidden="true" className="size-3" />
-    case "assistant":
-      return <BotIcon aria-hidden="true" className="size-3" />
     case "tool":
       return <TerminalSquareIcon aria-hidden="true" className="size-3" />
     case "file":
@@ -179,7 +242,7 @@ function EventIcon({ event }: { readonly event: WorkspaceTimelineItem }) {
     case "request_resolved":
       return <CheckCircle2Icon aria-hidden="true" className="size-3" />
     case "error":
-      return <CircleXIcon aria-hidden="true" className="size-3" />
+      return <AlertTriangleIcon aria-hidden="true" className="size-3" />
     case "history":
       return <ClipboardCheckIcon aria-hidden="true" className="size-3" />
     default:
@@ -301,7 +364,7 @@ function PendingRequestCard({
           : copy.timelineEvent.approvalRequired
       }
       className={cn(
-        "mt-sm rounded-panel border p-md",
+        "rounded-panel border p-md",
         isDecision
           ? "border-warm-active/40 bg-warm-active/5"
           : "border-destructive/30 bg-destructive/5",
@@ -584,6 +647,370 @@ function PendingRequestCard({
   )
 }
 
+type MessageTimelineEvent = Extract<
+  WorkspaceTimelineItem,
+  { readonly kind: "user" | "assistant" }
+>
+
+type OperationTimelineEvent = Extract<
+  WorkspaceTimelineItem,
+  {
+    readonly kind:
+      | "history"
+      | "plan"
+      | "tool"
+      | "file"
+      | "diff"
+      | "error"
+      | "status"
+  }
+>
+
+type BoundaryTimelineEvent = Extract<
+  WorkspaceTimelineItem,
+  {
+    readonly kind: "thread" | "turn" | "completion" | "request_resolved"
+  }
+>
+
+interface FormattedEventTime {
+  readonly accessible: string
+  readonly visible: string
+}
+
+function formatEventTime(
+  locale: string,
+  occurredAt: string,
+): FormattedEventTime {
+  const date = new Date(occurredAt)
+  return {
+    accessible: new Intl.DateTimeFormat(locale, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date),
+    visible: new Intl.DateTimeFormat(locale, {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date),
+  }
+}
+
+function EventTime({
+  occurredAt,
+  time,
+}: {
+  readonly occurredAt: string
+  readonly time: FormattedEventTime
+}) {
+  return (
+    <time
+      aria-label={time.accessible}
+      className="shrink-0 whitespace-nowrap text-label tabular-nums text-muted-foreground"
+      dateTime={occurredAt}
+    >
+      {time.visible}
+    </time>
+  )
+}
+
+function EventState({
+  copy,
+  event,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly event: WorkspaceTimelineItem
+}) {
+  const failed = eventFailed(event)
+  const completed = eventCompleted(event)
+  const interrupted = eventInterrupted(event)
+  const active = eventActive(event)
+
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-xxs text-label",
+        failed
+          ? "text-destructive"
+          : completed
+            ? "text-success"
+            : interrupted
+              ? "text-muted-foreground"
+              : active
+                ? "text-running"
+                : "text-muted-foreground",
+      )}
+    >
+      {failed ? (
+        <CircleXIcon aria-hidden="true" className="size-3" />
+      ) : completed ? (
+        <CheckCircle2Icon aria-hidden="true" className="size-3" />
+      ) : interrupted ? (
+        <AlertTriangleIcon aria-hidden="true" className="size-3" />
+      ) : (
+        <ActivityIcon aria-hidden="true" className="size-3" />
+      )}
+      <span>{eventStatus(copy, event)}</span>
+    </span>
+  )
+}
+
+function CopyDetailsButton({
+  copy,
+  detail,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly detail: string
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  )
+
+  const copyDetail = async () => {
+    if (navigator.clipboard?.writeText === undefined) {
+      setCopyState("failed")
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(detail)
+      setCopyState("copied")
+    } catch {
+      setCopyState("failed")
+    }
+  }
+
+  return (
+    <Button
+      aria-label={copy.timelineEvent.copyDetails}
+      className="text-muted-foreground"
+      onClick={() => void copyDetail()}
+      size="xs"
+      type="button"
+      variant="ghost"
+    >
+      <CopyIcon data-icon="inline-start" />
+      {copyState === "copied"
+        ? copy.timelineEvent.copied
+        : copyState === "failed"
+          ? copy.timelineEvent.copyFailed
+          : copy.timelineEvent.copy}
+    </Button>
+  )
+}
+
+function MessageEventRow({
+  copy,
+  event,
+  time,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly event: MessageTimelineEvent
+  readonly time: FormattedEventTime
+}) {
+  const showState =
+    eventFailed(event) || eventInterrupted(event) || eventActive(event)
+
+  return (
+    <article
+      aria-posinset={eventSequence(event)}
+      className={cn(
+        "group min-w-0",
+        event.kind === "user"
+          ? "my-sm rounded-composer bg-warm-active/5 px-md py-md"
+          : "px-sm py-lg",
+      )}
+      data-event-id={eventId(event) ?? undefined}
+      data-event-kind={event.kind}
+      data-event-layout="message"
+      data-event-sequence={eventSequence(event)}
+    >
+      <header className="flex min-w-0 items-center gap-xs">
+        <span className="text-title text-text-strong">
+          {eventLabel(copy, event)}
+        </span>
+        {showState ? <EventState copy={copy} event={event} /> : null}
+        <span className="ml-auto">
+          <EventTime occurredAt={event.occurredAt} time={time} />
+        </span>
+      </header>
+      <p className="m-0 mt-xs whitespace-pre-wrap break-words text-pretty text-body leading-relaxed text-foreground [overflow-wrap:anywhere]">
+        {event.text}
+      </p>
+      <footer className="mt-xs flex min-h-6 flex-wrap items-center gap-xs">
+        {event.kind === "user" ? (
+          <span className="min-w-0 text-label text-muted-foreground">
+            {copy.timelineEvent.effort}: {copy.reasoningLevels[event.effort]}
+            {event.attachmentCount > 0
+              ? ` · ${String(event.attachmentCount)} ${copy.timelineEvent.attachments}`
+              : null}
+          </span>
+        ) : null}
+        <span className="ml-auto">
+          <CopyDetailsButton copy={copy} detail={event.text} />
+        </span>
+      </footer>
+    </article>
+  )
+}
+
+function OperationSummary({
+  copy,
+  event,
+  expandable,
+  time,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly event: OperationTimelineEvent
+  readonly expandable: boolean
+  readonly time: FormattedEventTime
+}) {
+  const tag = eventTag(event)
+  const summary = eventSummary(copy, event)
+
+  return (
+    <div className="grid min-h-8 min-w-0 grid-cols-[12px_16px_minmax(0,1fr)_max-content_max-content] items-center gap-xs px-xs py-xxs">
+      <span className="flex size-3 items-center justify-center text-muted-foreground">
+        {expandable ? (
+          <ChevronDownIcon
+            aria-hidden="true"
+            className="size-3 group-open:rotate-180"
+          />
+        ) : null}
+      </span>
+      <span
+        className={cn(
+          "flex size-4 items-center justify-center",
+          eventFailed(event) ? "text-destructive" : "text-muted-foreground",
+        )}
+      >
+        <EventIcon event={event} />
+      </span>
+      <span className="flex min-w-0 items-center gap-xs">
+        <span className="shrink-0 text-title text-foreground">
+          {eventLabel(copy, event)}
+        </span>
+        {tag ? (
+          <code
+            className={cn(
+              "max-w-36 shrink truncate rounded-control bg-code-chip px-xs py-xxs font-mono text-label",
+              eventFailed(event) ? "text-destructive" : "text-text-secondary",
+            )}
+          >
+            {tag}
+          </code>
+        ) : null}
+        {summary ? (
+          <span className="min-w-0 truncate text-caption text-text-secondary">
+            {summary}
+          </span>
+        ) : null}
+      </span>
+      <EventState copy={copy} event={event} />
+      <EventTime occurredAt={event.occurredAt} time={time} />
+    </div>
+  )
+}
+
+function OperationEventRow({
+  copy,
+  event,
+  time,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly event: OperationTimelineEvent
+  readonly time: FormattedEventTime
+}) {
+  const detail = eventDetail(copy, event)
+  const openByDefault =
+    eventFailed(event) || eventInterrupted(event) || eventActive(event)
+
+  return (
+    <article
+      aria-posinset={eventSequence(event)}
+      className="min-w-0 border-b border-divider/60 last:border-b-0"
+      data-event-id={eventId(event) ?? undefined}
+      data-event-kind={event.kind}
+      data-event-layout="operation"
+      data-event-sequence={eventSequence(event)}
+    >
+      {detail ? (
+        <details className="timeline-operation group" open={openByDefault}>
+          <summary className="cursor-pointer list-none rounded-control outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+            <OperationSummary
+              copy={copy}
+              event={event}
+              expandable
+              time={time}
+            />
+          </summary>
+          <div className="pb-sm pl-[34px] pr-xs">
+            <p
+              className={cn(
+                "m-0 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-control bg-code-chip px-sm py-xs font-mono text-label leading-relaxed text-text-secondary [overflow-wrap:anywhere]",
+                eventFailed(event) && "text-destructive",
+              )}
+            >
+              {detail}
+            </p>
+            <div className="mt-xxs flex justify-end">
+              <CopyDetailsButton copy={copy} detail={detail} />
+            </div>
+          </div>
+        </details>
+      ) : (
+        <OperationSummary
+          copy={copy}
+          event={event}
+          expandable={false}
+          time={time}
+        />
+      )}
+    </article>
+  )
+}
+
+function BoundaryEventRow({
+  copy,
+  event,
+  time,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly event: BoundaryTimelineEvent
+  readonly time: FormattedEventTime
+}) {
+  return (
+    <article
+      aria-posinset={eventSequence(event)}
+      className="my-xs flex min-w-0 items-center gap-xs px-xs py-xs text-label"
+      data-event-id={eventId(event) ?? undefined}
+      data-event-kind={event.kind}
+      data-event-layout="boundary"
+      data-event-sequence={eventSequence(event)}
+    >
+      <span
+        className={cn(
+          "flex size-4 shrink-0 items-center justify-center",
+          eventFailed(event)
+            ? "text-destructive"
+            : eventCompleted(event)
+              ? "text-success"
+              : "text-muted-foreground",
+        )}
+      >
+        <EventIcon event={event} />
+      </span>
+      <span className="shrink-0 text-text-secondary">
+        {eventLabel(copy, event)}
+      </span>
+      {event.kind === "completion" ||
+      event.kind === "request_resolved" ? null : (
+        <EventState copy={copy} event={event} />
+      )}
+      <span aria-hidden="true" className="h-px min-w-sm flex-1 bg-divider/70" />
+      <EventTime occurredAt={event.occurredAt} time={time} />
+    </article>
+  )
+}
+
 function TimelineEventRow({
   activePendingIds,
   copy,
@@ -602,148 +1029,36 @@ function TimelineEventRow({
   readonly onInterrupt: TimelineProps["onInterrupt"]
 }) {
   const { locale } = useI18n()
-  const [expanded, setExpanded] = useState(false)
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
-    "idle",
-  )
-  const errorCode = eventCode(event)
-  const failed = event.status === "failed" || errorCode !== undefined
-  const completed =
-    event.status === "completed" ||
-    event.status === "done" ||
-    event.kind === "completion" ||
-    event.kind === "request_resolved"
-  const pending = event.kind === "decision" || event.kind === "approval"
-  const occurredAt = new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(event.occurredAt))
-  const detail = eventDetail(event)
-  const expandable =
-    detail !== null && (detail.length > 240 || detail.includes("\n"))
+  const time = formatEventTime(locale, event.occurredAt)
 
-  const copyDetail = async () => {
-    if (detail === null || navigator.clipboard?.writeText === undefined) {
-      setCopyState("failed")
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(detail)
-      setCopyState("copied")
-    } catch {
-      setCopyState("failed")
-    }
-  }
-
-  return (
-    <article
-      aria-posinset={eventSequence(event)}
-      className={cn(
-        "grid grid-cols-[24px_minmax(0,1fr)] items-start gap-sm rounded-panel px-sm py-md transition-colors hover:bg-muted/60",
-        event.kind === "user" && "bg-warm-active/5",
-        pending && "border border-divider bg-surface shadow-sm",
-      )}
-      data-event-kind={event.kind}
-      data-event-id={eventId(event) ?? undefined}
-      data-event-sequence={eventSequence(event)}
-    >
-      <span
-        className={cn(
-          "mt-xxs flex size-5 items-center justify-center rounded-circle border bg-surface",
-          failed
-            ? "border-destructive/40 text-destructive"
-            : completed
-              ? "border-success/40 text-success"
-              : pending
-                ? "border-warm-active/50 text-warm-active"
-                : "border-divider text-muted-foreground",
-        )}
-      >
-        <EventIcon event={event} />
-      </span>
-      <div className="min-w-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-xs">
-          <span className="text-title text-text-strong">
-            {eventLabel(copy, event)}
-          </span>
-          <Badge
-            variant={failed ? "destructive" : completed ? "success" : "outline"}
-          >
-            {eventStatus(copy, event)}
-          </Badge>
-          {event.kind === "tool" ? (
-            <code className="rounded-control bg-code-chip px-xs py-xxs font-mono text-label text-text-secondary">
-              {event.toolKind}
-            </code>
-          ) : null}
-          {event.kind === "user" ? (
-            <span className="text-label text-muted-foreground">
-              {copy.timelineEvent.effort}: {event.effort} ·{" "}
-              {event.attachmentCount} {copy.timelineEvent.attachments}
-            </span>
-          ) : null}
-          <time
-            className="ml-auto whitespace-nowrap text-label text-muted-foreground"
-            dateTime={event.occurredAt}
-          >
-            {occurredAt}
-          </time>
-        </div>
-
-        {detail !== null ? (
-          <div className="mt-xs">
-            <p
-              className={cn(
-                "m-0 whitespace-pre-wrap break-words text-caption leading-relaxed text-text-secondary",
-                expandable && !expanded && "line-clamp-3",
-                (event.kind === "tool" || event.kind === "history") &&
-                  "rounded-control bg-code-chip p-sm font-mono text-label",
-              )}
-            >
-              {detail}
-            </p>
-            <div className="mt-xs flex flex-wrap items-center gap-xxs">
-              {expandable ? (
-                <Button
-                  aria-expanded={expanded}
-                  onClick={() => setExpanded((value) => !value)}
-                  size="xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  {expanded ? (
-                    <ChevronUpIcon data-icon="inline-start" />
-                  ) : (
-                    <ChevronDownIcon data-icon="inline-start" />
-                  )}
-                  {expanded ? copy.collapseDetails : copy.expandDetails}
-                </Button>
-              ) : null}
-              <Button
-                aria-label={copy.timelineEvent.copyDetails}
-                onClick={() => void copyDetail()}
-                size="xs"
-                type="button"
-                variant="ghost"
-              >
-                <CopyIcon data-icon="inline-start" />
-                {copyState === "copied"
-                  ? copy.timelineEvent.copied
-                  : copyState === "failed"
-                    ? copy.timelineEvent.copyFailed
-                    : copy.timelineEvent.copy}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {errorCode && detail !== errorCode ? (
-          <p className="m-0 mt-xs font-mono text-label text-destructive">
-            {errorCode}
-          </p>
-        ) : null}
-
-        {pending ? (
+  switch (event.kind) {
+    case "user":
+    case "assistant":
+      return <MessageEventRow copy={copy} event={event} time={time} />
+    case "history":
+    case "plan":
+    case "tool":
+    case "file":
+    case "diff":
+    case "error":
+    case "status":
+      return <OperationEventRow copy={copy} event={event} time={time} />
+    case "thread":
+    case "turn":
+    case "completion":
+    case "request_resolved":
+      return <BoundaryEventRow copy={copy} event={event} time={time} />
+    case "decision":
+    case "approval":
+      return (
+        <article
+          aria-posinset={eventSequence(event)}
+          className="py-sm"
+          data-event-id={eventId(event) ?? undefined}
+          data-event-kind={event.kind}
+          data-event-layout="intervention"
+          data-event-sequence={eventSequence(event)}
+        >
           <PendingRequestCard
             active={activePendingIds.has(event.request.pendingId)}
             copy={copy}
@@ -753,10 +1068,9 @@ function TimelineEventRow({
             onAnswerDecision={onAnswerDecision}
             onInterrupt={onInterrupt}
           />
-        ) : null}
-      </div>
-    </article>
-  )
+        </article>
+      )
+  }
 }
 
 export function Timeline({
@@ -782,14 +1096,12 @@ export function Timeline({
   )
   return (
     <div className="timeline-content flex min-h-full flex-col pb-[162px] pt-lg">
-      <div className="mb-sm flex items-start justify-between gap-md">
-        <div className="flex flex-col gap-xxs">
-          <h2 className="m-0 text-headline text-text-strong">
+      <div className="mb-md flex items-center justify-between gap-md px-xs">
+        <div className="min-w-0">
+          <h2 className="m-0 text-balance text-headline text-text-strong">
             {copy.timelineTitle}
           </h2>
-          <p className="m-0 text-caption text-muted-foreground">
-            {copy.timelineDescription}
-          </p>
+          <p className="sr-only">{copy.timelineDescription}</p>
         </div>
         <div
           className="timeline-status-region flex shrink-0 flex-col items-end gap-xs"
@@ -869,7 +1181,7 @@ export function Timeline({
       ) : null}
 
       {events.length > 0 ? (
-        <div className="flex flex-col gap-xxs" role="feed">
+        <div className="flex flex-col" role="feed">
           {events.map((event) => (
             <TimelineEventRow
               activePendingIds={activePendingIds}
