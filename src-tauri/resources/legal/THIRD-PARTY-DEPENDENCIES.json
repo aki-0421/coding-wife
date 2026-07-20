@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "generatedFrom": {
     "pnpmLock": "pnpm-lock.yaml",
-    "pnpmLockSha256": "020ed455df4ba67368286dc207c3d4739200db6e61c6162fc7e6a3c267b28167",
+    "pnpmLockSha256": "9bfdf659e2f3c877b8df97abff0281043f7f03048df2d5df2d069f0129b23036",
     "cargoLock": "src-tauri/Cargo.lock",
-    "cargoLockSha256": "6e9f0afbd74299b9f6f11f4f23661536ff25ef16f675f06b2f3eb95ec29d28de",
+    "cargoLockSha256": "e76110259ad5a5f9a5bcd9480e192fcbbde3a345251348071169b1e0d7fccffc",
     "cargoTarget": "aarch64-apple-darwin",
     "cargoGraph": "cargo tree --locked --offline --target aarch64-apple-darwin --edges normal",
     "policyVersion": 2
   },
   "summary": {
-    "total": 630,
-    "npm": 395,
+    "total": 632,
+    "npm": 397,
     "cargo": 235,
     "unknown": 0,
     "forbidden": 0,
@@ -9262,6 +9262,25 @@
     },
     {
       "ecosystem": "npm",
+      "name": "has-flag",
+      "version": "4.0.0",
+      "source": "https://registry.npmjs.org/has-flag/-/has-flag-4.0.0.tgz",
+      "integrity": "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==",
+      "license": "MIT",
+      "attribution": [
+        "Sindre Sorhus <sindresorhus@gmail.com>"
+      ],
+      "repository": "sindresorhus/has-flag",
+      "evidence": [
+        {
+          "file": "license",
+          "bytes": 1109,
+          "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
       "name": "has-symbols",
       "version": "1.1.0",
       "source": "https://registry.npmjs.org/has-symbols/-/has-symbols-1.1.0.tgz",
@@ -12189,6 +12208,25 @@
         "Sindre Sorhus <sindresorhus@gmail.com>"
       ],
       "repository": "sindresorhus/strip-final-newline",
+      "evidence": [
+        {
+          "file": "license",
+          "bytes": 1117,
+          "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "name": "supports-color",
+      "version": "8.1.1",
+      "source": "https://registry.npmjs.org/supports-color/-/supports-color-8.1.1.tgz",
+      "integrity": "sha512-MpUEN2OodtUzxvKQl72cUF7RQ5EiHsGvSsVG0ia9c5RbWGL2CI4C7EpPS8UTBIplnlzZiNuV56w+FuNxy3ty2Q==",
+      "license": "MIT",
+      "attribution": [
+        "Sindre Sorhus <sindresorhus@gmail.com>"
+      ],
+      "repository": "chalk/supports-color",
       "evidence": [
         {
           "file": "license",
