@@ -48,6 +48,7 @@ class FakeCodexTransport implements CodexTransport {
   diagnostic = parseCodexDiagnostic(fixture.diagnostic)
   interrupt = Promise.resolve({ accepted: true })
   turnResponse: Promise<CodexResponseMap["codex_turn_start"]> | null = null
+  subscribeFailure: (Error & { readonly code?: string }) | null = null
   readonly connectResponses = new Map<
     string,
     Promise<CodexResponseMap["codex_connect"]>
@@ -102,6 +103,9 @@ class FakeCodexTransport implements CodexTransport {
   }
 
   subscribe(callbacks: CodexEventCallbacks): Promise<() => void> {
+    if (this.subscribeFailure !== null) {
+      return Promise.reject(this.subscribeFailure)
+    }
     this.callbacks = callbacks
     return Promise.resolve(() => {
       this.callbacks = null
@@ -138,6 +142,32 @@ function adapterFixture(
 }
 
 describe("CodexWorkspaceSessionAdapter", () => {
+  it("records event subscription failures against the activating workspace", async () => {
+    const { adapter, transport } = adapterFixture()
+    transport.subscribeFailure = Object.assign(
+      new Error("CODEX-IPC-UNAVAILABLE"),
+      { code: "CODEX-IPC-UNAVAILABLE" },
+    )
+
+    await expect(
+      adapter.activateWorkspace({
+        workspaceId: "workspace-fixture",
+        historyMode: "ready",
+      }),
+    ).rejects.toMatchObject({ code: "CODEX-IPC-UNAVAILABLE" })
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-fixture",
+      phase: "failed",
+      connected: false,
+      errorCode: "CODEX-IPC-UNAVAILABLE",
+      readiness: {
+        ready: false,
+        reasonCode: "CODEX-IPC-UNAVAILABLE",
+      },
+    })
+    expect(transport.calls).toEqual([])
+  })
+
   it("connects an opaque workspace, starts a thread, and accepts one turn before clear", async () => {
     const { adapter, history, transport } = adapterFixture()
     await expect(

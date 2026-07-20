@@ -269,11 +269,20 @@ export class CodexWorkspaceSessionAdapter {
     request: ActivateCodexWorkspaceRequest,
   ): Promise<CodexWorkspaceSessionSnapshot> {
     validateWorkspaceId(request.workspaceId)
-    await this.start()
     const activation = ++this.activation
     this.historyBlocked.delete(request.workspaceId)
     this.sessionStore.activateWorkspace(request.workspaceId)
     this.store.beginActivation(request.workspaceId, request.historyMode)
+    try {
+      await this.start()
+    } catch (error) {
+      if (activation === this.activation) {
+        this.store.markOperationError(
+          safeErrorCode(error, "CODEX-EVENT-SUBSCRIBE-FAILED"),
+        )
+      }
+      throw error
+    }
 
     let diagnostic: CodexDiagnostic
     try {
