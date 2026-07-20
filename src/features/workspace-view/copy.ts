@@ -581,13 +581,11 @@ const en = {
       "Preview preference · not persisted to the native settings service",
   },
   createWorkspace: {
-    title: "Create workspace",
     firstTitle: "Create your first workspace",
     description:
       "Creates a Git worktree for the selected project on a new app-managed branch.",
     project: "Project",
     name: "Workspace name",
-    cancel: "Cancel",
     create: "Create workspace",
     creating: "Creating…",
   },
@@ -1175,13 +1173,11 @@ const ja: typeof en = {
     localPreview: "プレビュー設定 · native settings serviceには未保存",
   },
   createWorkspace: {
-    title: "ワークスペースを作成",
     firstTitle: "最初のワークスペースを作成",
     description:
       "選択したプロジェクトに、アプリ管理の新しいブランチとGit worktreeを作成します。",
     project: "プロジェクト",
     name: "ワークスペース名",
-    cancel: "キャンセル",
     create: "ワークスペースを作成",
     creating: "作成中…",
   },

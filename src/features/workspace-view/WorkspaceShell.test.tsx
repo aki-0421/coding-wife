@@ -33,6 +33,7 @@ import type {
   SendTurnRequest,
   WorkspaceAdapterState,
   WorkspaceCodexState,
+  WorkspaceCreateRequest,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 
@@ -700,6 +701,107 @@ describe("WorkspaceShell", () => {
     expect(within(navigation).getByText("feature/alpha")).toBeVisible()
     expect(within(navigation).getByText("feature/beta")).toBeVisible()
     expect(filterButton).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("creates and opens a workspace immediately for the filtered project", async () => {
+    const user = userEvent.setup()
+    const state: WorkspaceAdapterState = {
+      projects: [
+        {
+          id: "project-alpha",
+          name: "alpha-local",
+          health: "ready",
+          workspaceCount: 1,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+        {
+          id: "project-beta",
+          name: "beta-local",
+          health: "ready",
+          workspaceCount: 1,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+      ],
+      workspaces: [
+        {
+          id: "workspace-alpha",
+          projectId: "project-alpha",
+          repository: "alpha-local",
+          name: "alpha-work",
+          branch: "feature/alpha",
+          lifecycle: "in_progress",
+        },
+        {
+          id: "workspace-beta",
+          projectId: "project-beta",
+          repository: "beta-local",
+          name: "beta-work",
+          branch: "feature/beta",
+          lifecycle: "in_progress",
+        },
+      ],
+      activeWorkspaceId: "workspace-alpha",
+      draft: null,
+      timeline: [],
+      history: { mode: "ready", errorCode: null, backupName: null },
+    }
+    const requestAddWorkspace = vi.fn(
+      (request: WorkspaceCreateRequest): Promise<WorkspaceAdapterState> =>
+        Promise.resolve({
+          ...state,
+          projects: (state.projects ?? []).map((project) =>
+            project.id === request.projectId
+              ? { ...project, workspaceCount: project.workspaceCount + 1 }
+              : project,
+          ),
+          workspaces: [
+            ...state.workspaces,
+            {
+              id: "workspace-created",
+              projectId: request.projectId,
+              repository: "beta-local",
+              name: request.name,
+              branch: "coding-wife/generated",
+              lifecycle: "backlog",
+            },
+          ],
+          activeWorkspaceId: "workspace-created",
+        }),
+    )
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      requestAddWorkspace,
+    }
+
+    renderWorkspace(adapter)
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Filter workspaces by project",
+      }),
+    )
+    fireEvent.change(
+      await screen.findByRole("combobox", {
+        name: "Project (repository)",
+      }),
+      { target: { value: "project-beta" } },
+    )
+    await user.click(screen.getByRole("button", { name: "Add workspace" }))
+
+    await waitFor(() => expect(requestAddWorkspace).toHaveBeenCalledOnce())
+    expect(requestAddWorkspace).toHaveBeenCalledWith({
+      projectId: "project-beta",
+      name: expect.stringMatching(/^ws-\d{4}-[a-z0-9]{4}$/),
+    })
+    expect(
+      screen.queryByRole("dialog", { name: "Create workspace" }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole(
+        "button",
+        { name: /coding-wife\/generated, beta-local, Backlog/ },
+      ),
+    ).toHaveAttribute("aria-current", "page")
   })
 
   it("sets up Git and GitHub before registering a selected project folder", async () => {

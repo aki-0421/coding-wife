@@ -13,14 +13,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import {
@@ -35,10 +28,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
-import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
 import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
 import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
 import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
+import { defaultWorkspaceName } from "@/features/workspace-view/workspace-name"
 import type {
   ProjectRecord,
   WorkspaceLifecycle,
@@ -201,60 +194,78 @@ function WorkspaceRow({
   )
 }
 
-function CreateWorkspaceDialog({
+function preferredWorkspaceProjectId(
+  projects: readonly ProjectRecord[],
+  projectFilterId: string,
+  selectedProjectId: string | undefined,
+): string {
+  if (projects.some((project) => project.id === projectFilterId)) {
+    return projectFilterId
+  }
+  if (projects.some((project) => project.id === selectedProjectId)) {
+    return selectedProjectId ?? ""
+  }
+  return projects[0]?.id ?? ""
+}
+
+function CreateWorkspaceButton({
   copy,
+  projectFilterId,
   projects,
   selectedProjectId,
   onCreate,
 }: {
   readonly copy: WorkspaceCopy
+  readonly projectFilterId: string
   readonly projects: readonly ProjectRecord[]
   readonly selectedProjectId?: string | undefined
   readonly onCreate: (projectId: string, name: string) => Promise<boolean>
 }) {
-  const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const creatingRef = useRef(false)
+  const projectId = preferredWorkspaceProjectId(
+    projects,
+    projectFilterId,
+    selectedProjectId,
+  )
+  const label = creating ? copy.createWorkspace.creating : copy.addWorkspace
+
+  const createWorkspace = async () => {
+    if (creatingRef.current || projectId.length === 0) return
+    creatingRef.current = true
+    setCreating(true)
+    try {
+      await onCreate(projectId, defaultWorkspaceName())
+    } finally {
+      creatingRef.current = false
+      setCreating(false)
+    }
+  }
 
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
+    <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <DialogTrigger asChild>
-            <Button
-              aria-label={copy.addWorkspace}
-              className={sidebarIconButtonClassName}
-              disabled={projects.length === 0}
-              size="icon-xs"
-              type="button"
-              variant="ghost"
-            >
-              <PlusIcon />
-            </Button>
-          </DialogTrigger>
+          <Button
+            aria-busy={creating}
+            aria-label={label}
+            className={sidebarIconButtonClassName}
+            data-workspace-create=""
+            disabled={creating || projectId.length === 0}
+            onClick={() => void createWorkspace()}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            <PlusIcon />
+          </Button>
         </TooltipTrigger>
-        <TooltipContent>{copy.addWorkspace}</TooltipContent>
+        <TooltipContent>{label}</TooltipContent>
       </Tooltip>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{copy.createWorkspace.title}</DialogTitle>
-          <DialogDescription>
-            {copy.createWorkspace.description}
-          </DialogDescription>
-        </DialogHeader>
-        <WorkspaceCreateForm
-          ariaLabel={copy.createWorkspace.title}
-          autoFocusName
-          copy={copy}
-          onCancel={() => setOpen(false)}
-          onCreate={async (projectId, name) => {
-            const created = await onCreate(projectId, name)
-            if (created) setOpen(false)
-            return created
-          }}
-          projects={projects}
-          selectedProjectId={selectedProjectId}
-        />
-      </DialogContent>
-    </Dialog>
+      <span className="sr-only" aria-live="polite">
+        {creating ? copy.createWorkspace.creating : ""}
+      </span>
+    </>
   )
 }
 
@@ -369,9 +380,10 @@ function SidebarPanel({
             </TooltipTrigger>
             <TooltipContent>{copy.addProject}</TooltipContent>
           </Tooltip>
-          <CreateWorkspaceDialog
+          <CreateWorkspaceButton
             copy={copy}
             onCreate={onCreateWorkspace}
+            projectFilterId={projectFilterId}
             projects={projects}
             selectedProjectId={selectedProjectId}
           />

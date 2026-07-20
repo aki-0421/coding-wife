@@ -47,7 +47,7 @@ read_when:
 | 非対象 | 理由 | 扱う機能・文書 |
 |---|---|---|
 | 初回からの並列実行 | MVPでは一つのactive executionへ集中する | 将来のmulti-workspace execution |
-| project root自体をworkspaceとして自動登録 | projectとworktreeの区別を保つ | 利用者がWorkspace作成dialogから明示作成する |
+| project root自体をworkspaceとして自動登録 | projectとworktreeの区別を保つ | 利用者がinline formまたはsidebarのWorkspace追加からapp-owned worktreeを明示作成する |
 | repository clone/fetch UI | network credentialと競合解決を今回含めない | 外部Git client |
 | repository file削除 | appからproject登録を外してもsourceを変更しない | 非対象 |
 
@@ -77,7 +77,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `WORK-F-050` | 利用者は登録projectにworkspaceを作成できる | workspaceが0件ならmain surfaceのinline form、1件以上なら`+`のdialogで登録projectをselectし、任意nameを確定すると、projectの現在HEADを起点にapp-owned worktree root配下へ新branchとGit worktreeを作成する。作成したworktreeは固有のrootとper-worktree Git directoryを持つが、登録projectと同じGit common directory identityであることを照合する。name未編集時は`ws-MMDD-<random 4文字>`形式の短い既定値を使う。作成成功後だけBacklog groupへworkspace recordを追加・選択し、同じprojectに複数worktreeを持てる | Approved | 非該当 |
+| `WORK-F-050` | 利用者は登録projectにworkspaceを作成できる | workspaceが0件ならmain surfaceのinline formからprojectとnameを指定する。1件以上ではsidebarの`+`を押すとdialogを表示せず、project filterが有効ならその登録project、そうでなければactive workspaceのproject、いずれもなければ先頭の登録projectを対象に`ws-MMDD-<random 4文字>`形式の既定nameを生成して直ちに作成する。projectの現在HEADを起点にapp-owned worktree root配下へ新branchとGit worktreeを作り、workspace固有rootとper-worktree Git directoryが登録projectと同じGit common directory identityであることを照合する。作成成功後だけBacklogへ追加・選択してそのworkspaceを開き、処理中の重複操作と失敗時のselection変更を行わない。同じprojectに複数worktreeを持てる | Approved | 非該当 |
 | `WORK-F-051` | 利用者はworkspace一覧を登録projectでfilterできる | ListFilterのPopoverに登録済みProject IDをGitHub `owner/repo`、取得できない時はproject名で列挙するselectを表示する。`すべて`または1件を選ぶとworkspaceのProject ID完全一致で200件を100ms以内に絞り込み、0件時はfilter解除操作を表示する。任意文字列input、repo/branch/workspace nameの部分一致は提供しない | Approved | 非該当 |
 | `WORK-F-052` | 利用者はlifecycle groupからworkspaceを選択できる | app localeにかかわらずLinearと同じ英語のDone/In Review/In Progress/Backlog/Canceledでgroupを表示し、各statusをcheck、half-filled progress、quarter-filled progress、dotted、xの円形iconで識別できる。各groupは初期展開され、heading行全体のclick、`Enter`、`Space`で他groupとselectionを変えず独立して開閉できる。toggleは`aria-expanded`と`aria-controls`を持ち、chevronはhoverまたはfocus-visible時だけ表示する。折り畳み中だけ対象workspaceの数値件数を0件を含めて表示し、accessible nameでは展開状態にかかわらず件数を1回だけ伝える。item選択でheader、Chat、Commit、Companionが同一workspaceへ100ms以内に切り替わる | Approved | 非該当 |
 | `WORK-F-053` | アプリはlifecycleとattentionを別に表示する | lifecycleを変えずにNeeds answer、Approval required、Test failed、High riskをbadgeとaccessible labelで併記できる | Approved | 非該当 |
@@ -87,7 +87,7 @@ read_when:
 | `WORK-F-057` | 利用者はproject登録を外せる | App SettingsのProjects一覧で対象project名を示す確認を完了するとprojectと配下workspaceをnavigationから外す。実行中turnがある場合は操作を拒否し、履歴本文の変更・削除は`HIST-F-049`の別操作に限定する。project repository、作成済みworktree directory、Git index/object/ref、branch、共有model libraryを変更・削除しない | Approved | 非該当 |
 | `WORK-F-067` | 利用者はworkspaceをArchiveしてworktreeを削除できる | sidebar rowのhoverまたはfocus-withinでArchive iconを表示し、確認後にactive/pending turnがない対象へapp-owned root境界を検証した`git worktree remove --force`を実行し、workspace recordをnavigationから削除する。worktree directoryまたはGit worktree registrationが既に存在しない場合も成功としてmetadataを収束させる。project repository、他worktree、branch、Git object/refを削除しない | Approved | 非該当 |
 | `WORK-F-068` | 利用者は登録project一覧を管理できる | App SettingsのProjects sectionで登録中projectをworkspace件数とともに一覧し、project登録解除を開始できる。workspaceが0件でもproject一覧とApp Settingsへ到達できる | Approved | 非該当 |
-| `WORK-F-069` | workspace UIの初期描画は空windowへ失敗しない | 0件を含むworkspace selectionを全viewportのsidebarでoptionalとして扱い、compact navigationも存在しないselectionを参照しない。inline create formの初期表示またはcreate dialogを開いた時にlocal timestampとrandom suffixを生成し、WebViewが`crypto.randomUUID`を提供しない場合もfallback suffixを生成して画面を維持する。application moduleの読込またはReact描画が失敗した場合はrootを空のままにせず、localeに合う回復案内と再読込操作を表示する | Approved | 非該当 |
+| `WORK-F-069` | workspace UIの初期描画は空windowへ失敗しない | 0件を含むworkspace selectionを全viewportのsidebarでoptionalとして扱い、compact navigationも存在しないselectionを参照しない。inline create formの初期表示またはsidebarのWorkspace追加を押した時にlocal timestampとrandom suffixを生成し、WebViewが`crypto.randomUUID`を提供しない場合もfallback suffixを生成して画面を維持する。application moduleの読込またはReact描画が失敗した場合はrootを空のままにせず、localeに合う回復案内と再読込操作を表示する | Approved | 非該当 |
 
 ### 継続性と境界
 
@@ -113,7 +113,7 @@ read_when:
 | persistence / migration | `src-tauri/src/workspace_history/store.rs` | `projects.registered`、workspace固有canonical root、`managed_worktree`、migration 8のnullable common Git directory identity、DB version、cross-language fixture |
 | Git mutation / trust | `src-tauri/src/workspace_history/service.rs`、`src-tauri/src/codex/workspace.rs` | project common Git identity、app-owned worktree path、固定Git引数、partial failure rollback |
 | frontend state | `src/features/workspace-persistence/adapter.ts`、`src/features/workspace-view/useWorkspaceViewModel.ts` | Project IDをworkspace作成まで維持し、workspace 0件でもproject一覧を失わない |
-| UI | `src/main.tsx`、`src/app/StartupFailure.tsx`、`WorkspaceCreateForm.tsx`、`WorkspaceSidebar.tsx`、`SettingsView.tsx`、`WorkspaceShell.tsx` | startup error boundary、inline/create dialog form、hover/focus Archive、zero-workspace shell、compact navigation、Projects登録解除確認 |
+| UI | `src/main.tsx`、`src/app/StartupFailure.tsx`、`WorkspaceCreateForm.tsx`、`WorkspaceSidebar.tsx`、`SettingsView.tsx`、`WorkspaceShell.tsx` | startup error boundary、zero-workspace inline form、sidebar即時作成、hover/focus Archive、compact navigation、Projects登録解除確認 |
 
 project登録解除は`projects.registered`とnavigationだけを変更し、workspace row、history、worktree、branchを物理削除しない。workspaceとして一覧・件数・active selection・起動時復元へ公開するのは`managed_worktree = 1`のapp管理worktreeだけとし、migration前のproject rootに対応するlegacy rowは保持したまま公開しない。project linkageはproject root identityとGit common directory identityを保存し、workspace preflightはworkspace固有root identityとそのcommon directory identityを照合する。migration 8以前のprojectはcommon identityをnullableで移行し、project rootの保存済みidentityとのexact一致を確認した最初のworkspace作成時にだけcommon identityを補完する。per-worktree Git directory identityやworkspace root identityをproject root identityと比較してはならない。workspace Archiveだけが`managed_worktree = 1`かつ保存rootがapp data配下の導出済みexact pathと一致する対象へ固定`git worktree remove --force`を実行する。legacy workspaceまたはroot不一致にGit削除を拡張してはならない。履歴削除はworkspace登録とworktreeを残し、履歴・draft・editable contextだけを初期化する。
 

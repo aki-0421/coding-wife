@@ -34,7 +34,7 @@ status: "Approved"
 |---|---|
 | Project追加 | OS folder picker、Git初期化、GitHub originセットアップ、canonicalization、Git worktree検証、重複選択 |
 | Preflight | Git、Codex executable、login、GPT-5.6 Sol、character packのready/warning/blocked |
-| Workspace作成 | project select、既定name、app-owned Git worktree作成、Backlog登録 |
+| Workspace作成 | 0件時のproject/name入力、通常時のsidebar即時作成、app-owned Git worktree作成、Backlog登録・選択 |
 | Sidebar | lifecycle group、attention、repo、branch、project filter、active selection |
 | Continuity | Project ID、group、active workspace、project filter、draft、last summary、timeline anchor ID/sequence/offset、repository healthの復元 |
 | Safe removal | workspace Archiveによる対象worktree削除、project metadata登録解除。Archive以外ではworktreeとGit refを削除しない |
@@ -170,7 +170,7 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 |---|---|---|---|---|---|
 | Projectを追加 | toolbar FolderPlusまたはinline formのProject field | native pickerの1 directoryをRust診断し、Gitとoriginがreadyならprojectだけを1件追加。不足時はSetup IDによるdialogへ進み、全check成功後に同じ登録処理を行う。workspaceは作成せず、inline formのProject selectへ反映する | 一覧、selection、inline入力を維持し、errorなし。確定済みGit/GitHub mutationは保持 | 登録せず該当stepで入力と再試行を保持 | `WORK-F-044`〜`WORK-F-049`, `WORK-F-070` |
 | preflight再診断 | project rootが存在 | Git/Codex/login/Sol/characterを更新 | 非該当 | check単位でBlocked、既存履歴維持 | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
-| Workspace作成 | inline formまたはdialog、registered project 1件以上、project/name valid | 選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、workspace固有rootとprojectのGit common directory identityを照合して、成功後だけBacklogへ1件追加・選択する | dialog入力を破棄し、inline入力は維持する。一覧・filesystemは変更しない | 入力保持、field error。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
+| Workspace作成 | 0件時はinline form、通常時はsidebarのPlus。registered project 1件以上 | inline formは指定project/nameを使う。sidebarはfilter対象、active workspaceのproject、先頭projectの順で対象を決め、押下時に既定nameを生成してdialogなしで直ちに作成する。選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、workspace固有rootとprojectのGit common directory identityを照合して、成功後だけBacklogへ1件追加・選択し、そのworkspaceを開く | inline入力は維持する。sidebar操作は作成開始前のselectionを維持する。一覧・filesystemは変更しない | inlineは入力保持。sidebarは元selectionを維持してerror noticeを表示する。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
 | workspaceをArchive | sidebar rowのArchive、active/pending turnなし | 確認後、対象worktreeを削除してrowを一覧から外す。既にworktreeが消失済みなら成功扱い | workspace、worktree、selection不変 | 対象以外を変更せず、再試行可能なerror | `WORK-F-067` |
 | project filter | 登録済みproject 1件以上 | Popoverのselectで選んだProject IDと完全一致するworkspaceを100ms以内に表示 | Escapeで選択値を維持 | 一覧維持、無効Project IDは`すべて`へ戻す | `WORK-F-051` |
 | workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Settings、Companionを同一IDへ100ms以内にatomic切替。App SettingsのProject / Character contextはworkspace tab状態へ含めない | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
@@ -211,7 +211,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 | repository repair | Tauri dialog → Rust project service | `repair_project_linkage` | target Project ID、saved `RepositoryIdentityV1`、canonical worktree exact identity、atomic transaction | linkage/selection不変 | source/Gitを変更せずtyped reason |
 | project登録解除 | Rust DB | `workspace_unregister` | typed Project ID、active/pending turn 0件、confirmation、metadata scope | 変更なし | source/Git/worktree/library/history本文を変更しない |
 
-ローカルUI検証では`?demoAppServer=1&projectSetup=git`でGit初期化からGitHub設定への遷移、`?demoAppServer=1&projectSetup=github`でorigin未設定のGit projectを直接再現する。いずれも実filesystem、GitHub repository、credentialを変更しないdemo transportだけで動作する。
+ローカルUI検証では`?demoAppServer=1`の通常一覧でsidebarのPlusを押し、create dialogが表示されずBacklogが1件増え、新workspaceのbranchとnameがsidebarのselected rowとheaderへ同時反映されることを確認する。`?demoAppServer=1&projectSetup=git`ではGit初期化からGitHub設定への遷移、`?demoAppServer=1&projectSetup=github`ではorigin未設定のGit projectを直接再現する。いずれも実filesystem、GitHub repository、credentialを変更しないdemo transportだけで動作する。
 
 ## ウィンドウ固有動作
 

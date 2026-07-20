@@ -7,19 +7,8 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type { ProjectRecord } from "@/features/workspace-view/types"
+import { defaultWorkspaceName } from "@/features/workspace-view/workspace-name"
 import { cn } from "@/lib/utils"
-
-function defaultWorkspaceName(): string {
-  const now = new Date()
-  const part = (value: number) => value.toString().padStart(2, "0")
-  const suffix =
-    typeof globalThis.crypto?.randomUUID === "function"
-      ? globalThis.crypto.randomUUID().slice(0, 4)
-      : Math.floor(Math.random() * 36 ** 4)
-          .toString(36)
-          .padStart(4, "0")
-  return `ws-${part(now.getMonth() + 1)}${part(now.getDate())}-${suffix}`
-}
 
 function preferredProjectId(
   projects: readonly ProjectRecord[],
@@ -32,11 +21,9 @@ function preferredProjectId(
 
 interface WorkspaceCreateFormProps {
   readonly ariaLabel: string
-  readonly autoFocusName?: boolean | undefined
   readonly className?: string | undefined
   readonly copy: WorkspaceCopy
   readonly onAddProject?: (() => void) | undefined
-  readonly onCancel?: (() => void) | undefined
   readonly onCreate: (projectId: string, name: string) => Promise<boolean>
   readonly prominent?: boolean | undefined
   readonly projects: readonly ProjectRecord[]
@@ -45,11 +32,9 @@ interface WorkspaceCreateFormProps {
 
 export function WorkspaceCreateForm({
   ariaLabel,
-  autoFocusName = false,
   className,
   copy,
   onAddProject,
-  onCancel,
   onCreate,
   prominent = false,
   projects,
@@ -137,7 +122,6 @@ export function WorkspaceCreateForm({
             {copy.createWorkspace.name}
           </FieldLabel>
           <Input
-            autoFocus={autoFocusName}
             className={cn(prominent && "h-9 rounded-lg px-md")}
             disabled={submitting}
             id={nameFieldId}
@@ -148,33 +132,21 @@ export function WorkspaceCreateForm({
         </Field>
       </FieldGroup>
 
-      {projects.length > 0 || onCancel !== undefined ? (
+      {projects.length > 0 ? (
         <div className="flex items-center justify-end gap-xs">
-          {onCancel !== undefined ? (
-            <Button
-              disabled={submitting}
-              onClick={onCancel}
-              type="button"
-              variant="ghost"
-            >
-              {copy.createWorkspace.cancel}
-            </Button>
-          ) : null}
-          {projects.length > 0 ? (
-            <Button
-              className={cn(prominent && "rounded-lg px-lg")}
-              disabled={
-                submitting || projectId.length === 0 || name.trim().length === 0
-              }
-              size={prominent ? "lg" : "default"}
-              type="submit"
-            >
-              <PlusIcon data-icon="inline-start" />
-              {submitting
-                ? copy.createWorkspace.creating
-                : copy.createWorkspace.create}
-            </Button>
-          ) : null}
+          <Button
+            className={cn(prominent && "rounded-lg px-lg")}
+            disabled={
+              submitting || projectId.length === 0 || name.trim().length === 0
+            }
+            size={prominent ? "lg" : "default"}
+            type="submit"
+          >
+            <PlusIcon data-icon="inline-start" />
+            {submitting
+              ? copy.createWorkspace.creating
+              : copy.createWorkspace.create}
+          </Button>
         </div>
       ) : null}
     </form>
