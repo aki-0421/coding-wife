@@ -1,7 +1,6 @@
 import { FolderGit2Icon, UserRoundIcon } from "lucide-react"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import type { WorkspaceRecord } from "@/features/workspace-view/types"
 
 const githubRepositoryPattern =
   /^([A-Za-z0-9_.-]{1,39})\/[A-Za-z0-9_.-]{1,100}$/
@@ -15,11 +14,11 @@ function githubAvatarUrl(owner: string): string {
 }
 
 export function RepositoryAvatar({
-  workspace,
+  githubRepository,
 }: {
-  readonly workspace: Pick<WorkspaceRecord, "githubRepository">
+  readonly githubRepository: string | undefined
 }) {
-  const owner = githubOwner(workspace.githubRepository)
+  const owner = githubOwner(githubRepository)
 
   return (
     <Avatar

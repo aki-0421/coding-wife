@@ -134,11 +134,14 @@ describe("final acceptance evidence harness", () => {
     let filteredCount = 0
     const evidence = measureAcceptanceBudget(100, 100, (sample) => {
       const targetId = `acceptance-workspace-${String((sample % 200) + 1).padStart(3, "0")}`
-      const projectFilterId = `acceptance-project-${String(sample % 8).padStart(2, "0")}`
+      const projectFilterIds = [
+        `acceptance-project-${String(sample % 8).padStart(2, "0")}`,
+        `acceptance-project-${String((sample + 1) % 8).padStart(2, "0")}`,
+      ]
       const projection = projectWorkspaceNavigation(
         workspaces,
         targetId,
-        projectFilterId,
+        projectFilterIds,
       )
       selectedId = projection.selectedWorkspace?.id ?? ""
       filteredCount = projection.filteredWorkspaces.length
@@ -146,7 +149,7 @@ describe("final acceptance evidence harness", () => {
 
     expect(workspaces).toHaveLength(200)
     expect(selectedId).toMatch(/^acceptance-workspace-/u)
-    expect(filteredCount).toBe(25)
+    expect(filteredCount).toBe(50)
     expect(evidence.sampleCount).toBe(100)
     expect(evidence.passed).toBe(true)
     expect(evidence.p95Ms).toBeLessThanOrEqual(100)

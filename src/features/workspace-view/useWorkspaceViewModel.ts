@@ -228,7 +228,9 @@ export function useWorkspaceViewModel(
     )
   })
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat")
-  const [projectFilterId, setProjectFilterIdState] = useState("")
+  const [projectFilterIds, setProjectFilterIdsState] = useState<
+    readonly string[]
+  >([])
   const [drafts, setDrafts] = useState<
     Readonly<Record<string, WorkspaceDraft>>
   >({})
@@ -369,21 +371,21 @@ export function useWorkspaceViewModel(
   const adapterReady = adapterStatus === "ready"
 
   useEffect(() => {
-    if (
-      projectFilterId.length > 0 &&
-      !projects.some((project) => project.id === projectFilterId)
-    ) {
-      setProjectFilterIdState("")
+    const validProjectIds = projectFilterIds.filter((projectId) =>
+      projects.some((project) => project.id === projectId),
+    )
+    if (validProjectIds.length !== projectFilterIds.length) {
+      setProjectFilterIdsState(validProjectIds)
     }
-  }, [projectFilterId, projects])
+  }, [projectFilterIds, projects])
 
-  const setProjectFilterId = useCallback(
-    (projectId: string) => {
-      setProjectFilterIdState(
-        projectId.length === 0 ||
-          projects.some((project) => project.id === projectId)
-          ? projectId
-          : "",
+  const setProjectFilterIds = useCallback(
+    (projectIds: readonly string[]) => {
+      const selectedProjectIds = new Set(projectIds)
+      setProjectFilterIdsState(
+        projects
+          .filter((project) => selectedProjectIds.has(project.id))
+          .map((project) => project.id),
       )
     },
     [projects],
@@ -394,9 +396,9 @@ export function useWorkspaceViewModel(
       projectWorkspaceNavigation(
         workspaces,
         selectedWorkspaceId,
-        projectFilterId,
+        projectFilterIds,
       ),
-    [projectFilterId, selectedWorkspaceId, workspaces],
+    [projectFilterIds, selectedWorkspaceId, workspaces],
   )
   const selectedDraft = selectedWorkspace
     ? draftFor(drafts, selectedWorkspace.id)
@@ -1459,7 +1461,7 @@ export function useWorkspaceViewModel(
     codex,
     deleteSelectedWorkspaceHistory,
     filteredWorkspaces,
-    projectFilterId,
+    projectFilterIds,
     projectSetup,
     muted,
     notice,
@@ -1485,7 +1487,7 @@ export function useWorkspaceViewModel(
     setActiveTab,
     setDraftText,
     setEffort,
-    setProjectFilterId,
+    setProjectFilterIds,
     setMuted,
     setNotice,
     setSelectedWorkspaceId: selectWorkspace,

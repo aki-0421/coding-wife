@@ -2,9 +2,10 @@ import type { SupportedLocale } from "@/features/localization"
 
 const en = {
   workspaces: "Workspaces",
-  filterWorkspaces: "Filter workspaces by project",
-  projectFilterLabel: "Project (repository)",
-  allProjects: "All projects",
+  filterWorkspaces: "Filter",
+  projectFilterLabel: "Project",
+  allProjects: "All",
+  selectedProjects: (count: number) => `${count} selected`,
   addProject: "Add project",
   addWorkspace: "Add workspace",
   archiveWorkspace: "Archive workspace",
@@ -119,14 +120,12 @@ const en = {
   repository: "Repository",
   branch: "Branch",
   active: "Active",
-  noMatches: "No workspaces are registered for this project.",
   loadingWorkspacesTitle: "Restoring workspace history",
   loadingWorkspacesDescription:
     "Checking local workspace records before enabling changes.",
   workspaceLoadFailedTitle: "Workspace history could not be restored",
   workspaceLoadFailedDescription:
     "Demo data was not substituted. Retry the local history check to continue safely.",
-  clearFilter: "Clear filter",
   lifecycle: {
     done: "Done",
     in_review: "In review",
@@ -595,9 +594,10 @@ const en = {
 const ja: typeof en = {
   ...en,
   workspaces: "ワークスペース",
-  filterWorkspaces: "プロジェクトでワークスペースを絞り込む",
-  projectFilterLabel: "プロジェクト（リポジトリ）",
-  allProjects: "すべてのプロジェクト",
+  filterWorkspaces: "フィルター",
+  projectFilterLabel: "プロジェクト",
+  allProjects: "すべて",
+  selectedProjects: (count: number) => `${count}件選択`,
   addProject: "プロジェクトを追加",
   addWorkspace: "ワークスペースを追加",
   archiveWorkspace: "ワークスペースをアーカイブ",
@@ -713,14 +713,12 @@ const ja: typeof en = {
   repository: "リポジトリ",
   branch: "ブランチ",
   active: "選択中",
-  noMatches: "このプロジェクトにはワークスペースが登録されていません。",
   loadingWorkspacesTitle: "ワークスペース履歴を復元中",
   loadingWorkspacesDescription:
     "変更を有効にする前にローカルのワークスペース記録を確認しています。",
   workspaceLoadFailedTitle: "ワークスペース履歴を復元できませんでした",
   workspaceLoadFailedDescription:
     "デモデータへの置き換えは行っていません。安全に続行するにはローカル履歴を再確認してください。",
-  clearFilter: "フィルターを解除",
   lifecycle: {
     done: "完了",
     in_review: "レビュー可能",

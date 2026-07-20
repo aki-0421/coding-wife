@@ -23,16 +23,16 @@ export function workspaceProjectId(workspace: WorkspaceRecord): string {
 export function projectWorkspaceNavigation(
   workspaces: readonly WorkspaceRecord[],
   selectedWorkspaceId: string,
-  projectFilterId: string,
+  projectFilterIds: readonly string[],
 ): WorkspaceNavigationProjection {
   const selectedWorkspace =
     workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ??
     workspaces[0]
   const filteredWorkspaces =
-    projectFilterId.length === 0
+    projectFilterIds.length === 0
       ? workspaces
-      : workspaces.filter(
-          (workspace) => workspaceProjectId(workspace) === projectFilterId,
+      : workspaces.filter((workspace) =>
+          projectFilterIds.includes(workspaceProjectId(workspace)),
         )
 
   return { filteredWorkspaces, selectedWorkspace }

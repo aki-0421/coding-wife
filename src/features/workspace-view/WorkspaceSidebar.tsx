@@ -12,10 +12,10 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import {
   Popover,
   PopoverContent,
@@ -28,6 +28,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
+import { ProjectFilterSelect } from "@/features/workspace-view/ProjectFilterSelect"
 import { RepositoryAvatar } from "@/features/workspace-view/RepositoryAvatar"
 import { WorkspaceLifecycleIcon } from "@/features/workspace-view/WorkspaceLifecycleStatus"
 import { linearWorkspaceStatusLabels } from "@/features/workspace-view/workspace-navigation"
@@ -61,7 +62,7 @@ interface WorkspaceSidebarProps {
   readonly appSettingsActive: boolean
   readonly copy: WorkspaceCopy
   readonly filteredWorkspaces: readonly WorkspaceRecord[]
-  readonly projectFilterId: string
+  readonly projectFilterIds: readonly string[]
   readonly projects: readonly ProjectRecord[]
   readonly selectedProjectId?: string | undefined
   readonly selectedWorkspace?: WorkspaceRecord | undefined
@@ -72,7 +73,7 @@ interface WorkspaceSidebarProps {
     projectId: string,
     name: string,
   ) => Promise<boolean>
-  readonly onProjectFilterChange: (projectId: string) => void
+  readonly onProjectFilterChange: (projectIds: readonly string[]) => void
   readonly onOpenSettings: () => void
   readonly onRequestArchive: (workspace: WorkspaceRecord) => void
   readonly onSelectWorkspace: (workspaceId: string) => void
@@ -121,7 +122,7 @@ function WorkspaceRow({
             onClick={onSelect}
             type="button"
           >
-            <RepositoryAvatar workspace={workspace} />
+            <RepositoryAvatar githubRepository={workspace.githubRepository} />
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="flex min-w-0 items-center gap-xxs">
                 <GitBranchIcon
@@ -196,11 +197,21 @@ function WorkspaceRow({
 
 function preferredWorkspaceProjectId(
   projects: readonly ProjectRecord[],
-  projectFilterId: string,
+  projectFilterIds: readonly string[],
   selectedProjectId: string | undefined,
 ): string {
-  if (projects.some((project) => project.id === projectFilterId)) {
-    return projectFilterId
+  if (
+    selectedProjectId !== undefined &&
+    projectFilterIds.includes(selectedProjectId) &&
+    projects.some((project) => project.id === selectedProjectId)
+  ) {
+    return selectedProjectId
+  }
+  const firstFilteredProject = projects.find((project) =>
+    projectFilterIds.includes(project.id),
+  )
+  if (firstFilteredProject !== undefined) {
+    return firstFilteredProject.id
   }
   if (projects.some((project) => project.id === selectedProjectId)) {
     return selectedProjectId ?? ""
@@ -210,13 +221,13 @@ function preferredWorkspaceProjectId(
 
 function CreateWorkspaceButton({
   copy,
-  projectFilterId,
+  projectFilterIds,
   projects,
   selectedProjectId,
   onCreate,
 }: {
   readonly copy: WorkspaceCopy
-  readonly projectFilterId: string
+  readonly projectFilterIds: readonly string[]
   readonly projects: readonly ProjectRecord[]
   readonly selectedProjectId?: string | undefined
   readonly onCreate: (projectId: string, name: string) => Promise<boolean>
@@ -225,7 +236,7 @@ function CreateWorkspaceButton({
   const creatingRef = useRef(false)
   const projectId = preferredWorkspaceProjectId(
     projects,
-    projectFilterId,
+    projectFilterIds,
     selectedProjectId,
   )
   const label = creating ? copy.createWorkspace.creating : copy.addWorkspace
@@ -274,7 +285,7 @@ function SidebarPanel({
   copy,
   expandedLifecycles,
   filteredWorkspaces,
-  projectFilterId,
+  projectFilterIds,
   projects,
   selectedProjectId,
   selectedWorkspaceId,
@@ -319,10 +330,11 @@ function SidebarPanel({
                 <PopoverTrigger asChild>
                   <Button
                     aria-label={copy.filterWorkspaces}
-                    aria-pressed={projectFilterId.length > 0}
+                    aria-pressed={projectFilterIds.length > 0}
                     className={cn(
+                      "relative",
                       sidebarIconButtonClassName,
-                      projectFilterId.length > 0 &&
+                      projectFilterIds.length > 0 &&
                         "bg-selected-row text-text-strong",
                     )}
                     data-workspace-filter-toggle=""
@@ -332,36 +344,36 @@ function SidebarPanel({
                     variant="ghost"
                   >
                     <ListFilterIcon />
+                    {projectFilterIds.length > 0 ? (
+                      <Badge
+                        aria-hidden="true"
+                        className="absolute -top-1 -right-1 h-4 min-w-4 px-1"
+                        data-workspace-filter-count=""
+                        variant="default"
+                      >
+                        {projectFilterIds.length}
+                      </Badge>
+                    ) : null}
                   </Button>
                 </PopoverTrigger>
               </TooltipTrigger>
               <TooltipContent>{copy.filterWorkspaces}</TooltipContent>
             </Tooltip>
-            <PopoverContent align="end" className="w-56 gap-xs p-sm">
-              <Field>
-                <FieldLabel htmlFor={projectFilterSelectId}>
+            <PopoverContent align="end" className="w-[270px] p-sm">
+              <Field className="flex-row items-center gap-sm">
+                <FieldLabel
+                  className="shrink-0 text-label font-medium text-foreground"
+                  htmlFor={projectFilterSelectId}
+                >
                   {copy.projectFilterLabel}
                 </FieldLabel>
-                <NativeSelect
-                  className="w-full"
-                  data-workspace-project-filter=""
+                <ProjectFilterSelect
+                  copy={copy}
                   id={projectFilterSelectId}
-                  onChange={(event) => {
-                    onProjectFilterChange(event.currentTarget.value)
-                    setFilterOpen(false)
-                  }}
-                  size="sm"
-                  value={projectFilterId}
-                >
-                  <NativeSelectOption value="">
-                    {copy.allProjects}
-                  </NativeSelectOption>
-                  {projects.map((project) => (
-                    <NativeSelectOption key={project.id} value={project.id}>
-                      {project.githubRepository ?? project.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                  onChange={onProjectFilterChange}
+                  projects={projects}
+                  selectedProjectIds={projectFilterIds}
+                />
               </Field>
             </PopoverContent>
           </Popover>
@@ -383,7 +395,7 @@ function SidebarPanel({
           <CreateWorkspaceButton
             copy={copy}
             onCreate={onCreateWorkspace}
-            projectFilterId={projectFilterId}
+            projectFilterIds={projectFilterIds}
             projects={projects}
             selectedProjectId={selectedProjectId}
           />
@@ -452,22 +464,6 @@ function SidebarPanel({
               </section>
             )
           })}
-
-          {filteredWorkspaces.length === 0 && projectFilterId.length > 0 ? (
-            <div className="flex flex-col items-start gap-xs px-sm py-lg">
-              <p className="m-0 text-sidebar-helper text-muted-foreground">
-                {copy.noMatches}
-              </p>
-              <Button
-                onClick={() => onProjectFilterChange("")}
-                size="xs"
-                type="button"
-                variant="secondary"
-              >
-                {copy.clearFilter}
-              </Button>
-            </div>
-          ) : null}
         </nav>
       </ScrollArea>
 

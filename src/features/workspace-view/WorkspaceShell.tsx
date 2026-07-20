@@ -578,12 +578,12 @@ export function WorkspaceShell({
         const visible = (element: HTMLElement) =>
           element.getClientRects().length > 0
         const focusProjectFilter = () => {
-          const selects = Array.from(
-            document.querySelectorAll<HTMLSelectElement>(
-              "select[data-workspace-project-filter]",
+          const controls = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "[data-workspace-project-filter]",
             ),
           )
-          const projectFilter = selects.find(visible) ?? selects[0]
+          const projectFilter = controls.find(visible) ?? controls[0]
           projectFilter?.focus()
           return projectFilter !== undefined
         }
@@ -742,14 +742,14 @@ export function WorkspaceShell({
         appSettingsActive={appSettingsOpen}
         copy={copy}
         filteredWorkspaces={view.filteredWorkspaces}
-        projectFilterId={view.projectFilterId}
+        projectFilterIds={view.projectFilterIds}
         projects={view.projects}
         archiveDisabledWorkspaceId={
           turnActive ? selectedWorkspace?.id : undefined
         }
         onAddProject={() => void view.requestAddProject(copy.pickerUnavailable)}
         onCreateWorkspace={view.addWorkspace}
-        onProjectFilterChange={view.setProjectFilterId}
+        onProjectFilterChange={view.setProjectFilterIds}
         onOpenSettings={() =>
           openAppSettings(view.projects.length === 0 ? "projects" : "general")
         }

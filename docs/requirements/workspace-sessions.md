@@ -77,8 +77,8 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `WORK-F-050` | 利用者は登録projectにworkspaceを作成できる | workspaceが0件ならmain surfaceのinline formからprojectとnameを指定する。1件以上ではsidebarの`+`を押すとdialogを表示せず、project filterが有効ならその登録project、そうでなければactive workspaceのproject、いずれもなければ先頭の登録projectを対象に`ws-MMDD-<random 4文字>`形式の既定nameを生成して直ちに作成する。projectの現在HEADを起点にapp-owned worktree root配下へ新branchとGit worktreeを作り、workspace固有rootとper-worktree Git directoryが登録projectと同じGit common directory identityであることを照合する。作成成功後だけBacklogへ追加・選択してそのworkspaceを開き、処理中の重複操作と失敗時のselection変更を行わない。同じprojectに複数worktreeを持てる | Approved | 非該当 |
-| `WORK-F-051` | 利用者はworkspace一覧を登録projectでfilterできる | ListFilterのPopoverに登録済みProject IDをGitHub `owner/repo`、取得できない時はproject名で列挙するselectを表示する。`すべて`または1件を選ぶとworkspaceのProject ID完全一致で200件を100ms以内に絞り込み、0件時はfilter解除操作を表示する。任意文字列input、repo/branch/workspace nameの部分一致は提供しない | Approved | 非該当 |
+| `WORK-F-050` | 利用者は登録projectにworkspaceを作成できる | workspaceが0件ならmain surfaceのinline formからprojectとnameを指定する。1件以上ではsidebarの`+`を押すとdialogを表示せず、active workspaceのprojectがfilter選択中ならそのproject、そうでなければ登録順で先頭のfilter選択project、filter未選択ならactive workspaceのproject、いずれもなければ先頭の登録projectを対象に`ws-MMDD-<random 4文字>`形式の既定nameを生成して直ちに作成する。projectの現在HEADを起点にapp-owned worktree root配下へ新branchとGit worktreeを作り、workspace固有rootとper-worktree Git directoryが登録projectと同じGit common directory identityであることを照合する。作成成功後だけBacklogへ追加・選択してそのworkspaceを開き、処理中の重複操作と失敗時のselection変更を行わない。同じprojectに複数worktreeを持てる | Approved | 非該当 |
+| `WORK-F-051` | 利用者はworkspace一覧を登録projectでfilterできる | tooltipが`フィルター / Filter`のListFilterを押すとPopoverを開き、`プロジェクト / Project` labelと横並びの非native複数選択controlへ登録済みProject IDをGitHub `owner/repo`、取得できない時はproject名とrepository iconで列挙する。未選択はすべて、1件以上は選択Project IDのいずれかと完全一致するworkspaceを200件・100ms以内で絞り込み、ListFilterのselected stateと選択件数で適用中をPopover外でも示す。一致0件でも専用empty説明やfilter解除buttonを表示しない。任意文字列input、repo/branch/workspace nameの部分一致は提供しない | Approved | 非該当 |
 | `WORK-F-052` | 利用者はlifecycle groupからworkspaceを選択できる | app localeにかかわらずLinearと同じ英語のDone/In Review/In Progress/Backlog/Canceledでgroupを表示し、各statusをcheck、half-filled progress、quarter-filled progress、dotted、xの円形iconで識別できる。各groupは初期展開され、heading行全体のclick、`Enter`、`Space`で他groupとselectionを変えず独立して開閉できる。toggleは`aria-expanded`と`aria-controls`を持ち、chevronはhoverまたはfocus-visible時だけ表示する。折り畳み中だけ対象workspaceの数値件数を0件を含めて表示し、accessible nameでは展開状態にかかわらず件数を1回だけ伝える。item選択でheader、Chat、Commit、Companionが同一workspaceへ100ms以内に切り替わる | Approved | 非該当 |
 | `WORK-F-053` | アプリはlifecycleとattentionを別に表示する | lifecycleを変えずにNeeds answer、Approval required、Test failed、High riskをbadgeとaccessible labelで併記できる | Approved | 非該当 |
 | `WORK-F-054` | アプリは現在のrepoとbranchを表示する | sidebar itemではowner avatarを先頭へ置き、実Gitのbranchまたはdetached HEAD短縮SHAを最も目立つtitle、GitHub `origin`がある場合はcredentialを除いた`owner/repo`を小さい補助文字で表示する。headerはGitHub `origin`がある場合にownerのGitHub avatar、`owner/repo`、workspace名をこの順のbreadcrumbとして表示し、branchを隣接表示する。sidebarとheaderのavatarはreferrerを送信せずGitHubの画像originだけから取得し、offline、画像取得失敗、またはGitHub `origin`がないlocal repositoryではapp iconを使わずrepositoryを示すneutral fallbackへ縮退する。GitHub `origin`がないlocal repositoryの文字列は保存済みrepo名へfallbackする。selected itemとheaderの長い値はellipsisと全文tooltipを持つ | Approved | 非該当 |
@@ -124,7 +124,7 @@ project登録解除は`projects.registered`とnavigationだけを変更し、wor
 | Project | repository folder | なし | 必須 | canonical regular directory、同一path重複不可。非Gitまたはorigin未設定はsetupへ進み、登録確定時にはGit worktreeかつorigin設定済みであること | 入力を登録せず、setup入力、再選択とcancelを残す |
 | Workspace | project | projectが1件ならそのproject、複数なら直前選択または先頭 | 必須 | 登録済みProject IDだけ | 入力保持、該当fieldへerror |
 | Workspace | name | `ws-MMDD-<random 4文字>` | 必須 | trim後1〜80 Unicode scalar、改行不可。Git branch/worktree pathへはnative側で安全なslugとopaque IDを使用し、表示nameをpathへ直接使用しない | 入力保持、該当fieldへerror |
-| Filter | query | 空 | 任意 | 0〜200 Unicode scalar | 200超を受け付けず一覧を維持 |
+| Project filter | registered Project ID list | 空 | 任意 | 重複のない登録済みProject IDを複数選択。空配列はすべてを表示 | 無効IDだけを除去し一覧を維持 |
 | Repair | repository folder | 現在のlinkage | 条件付き | canonical regular Git worktree、保存repository identityとのexact一致 | linkageを変更せず、再選択・cancel・新規project追加を残す |
 | App settings > Projects > project detail | project context | 空 | 任意 | Project ID-scoped。goal / constraints / user notesは各0〜8,000、Definition of doneは最大20項目・各1〜500、technical referencesは最大20項目・各1〜500、全field・全項目の総量32,000 Unicode scalar | 保存せず入力保持 |
 | App settings | character context | Display nameは`Sol`、他は既定値 | 任意 | app-global。display name 1〜40、tone補足0〜1,000、behavior 0〜4,000、prohibited expressions最大20項目・各1〜200、全field・全項目の総量12,000 Unicode scalar、technical policy key禁止 | 禁止内容を除いて再編集を求める |
@@ -172,7 +172,7 @@ nativeとdemoは同じcanonical JSON SHA-256およびsnapshot hash materialを�
 | ローカルデータ | canonical pathはRust管理DBの目的限定project linkageへ保存し、normalized eventやUI storageを正本にしない | `WORK-F-060` |
 | オフライン | project一覧、project filter、Project detailのProject Contextは利用可能 | `WORK-F-051`, `WORK-F-063` |
 | ファイル・OS操作 | picker cancel、権限不足、移動・削除、bounded context process失敗を区別 | `WORK-F-045`, `WORK-F-047`, `WORK-F-062`, `WORK-F-064` |
-| メニュー・ショートカット | FolderPlusとPlusへ24×24px hit areaとaccessible nameを与える。`Command+K`はListFilterのPopoverを開きProject selectへfocusする | `WORK-F-044`, `WORK-F-050`, `WORK-F-051` |
+| メニュー・ショートカット | FolderPlusとPlusへ24×24px hit areaとaccessible nameを与える。`Command+K`はListFilterのPopoverを開きProject複数選択controlへfocusする | `WORK-F-044`, `WORK-F-050`, `WORK-F-051` |
 | Deep Link・ファイル関連付け | 非該当: MVPで登録しない | 非該当 |
 | 通知 | attentionはapp内sidebarとheaderに表示 | `WORK-F-053` |
 | Capability・認可 | pickerで選択したrootの診断だけをRustに許可 | `WORK-F-044`〜`WORK-F-049` |
