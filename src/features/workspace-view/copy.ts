@@ -81,6 +81,39 @@ const en = {
     failed:
       "The turn could not be stopped and cleaned up. The current workspace remains active; no draft or selection was changed.",
   },
+  projectSetup: {
+    title: "Set up project",
+    description: (folder: string) =>
+      `Finish the required setup for ${folder} before registering it as a project.`,
+    gitTitle: "Initialize Git",
+    gitDescription:
+      "This creates Git metadata in the selected folder. If you cancel afterward, the Git initialization is kept.",
+    initializeGit: "Initialize Git",
+    initializingGit: "Initializing Git…",
+    githubTitle: "Connect GitHub",
+    githubDescription:
+      "An existing repository will be connected. If it does not exist, a new private repository will be created.",
+    ownerLabel: "Organization or user",
+    repositoryLabel: "Repository name",
+    repositoryHint: "Letters, numbers, periods, underscores, and hyphens only.",
+    setupGithub: "Set up GitHub",
+    settingUpGithub: "Setting up GitHub…",
+    retryGithub: "Retry GitHub connection",
+    checkingGithub: "Checking GitHub…",
+    cancel: "Cancel",
+    canceling: "Canceling…",
+    close: "Close project setup",
+    invalidRepository:
+      "Enter 1–100 characters using letters, numbers, periods, underscores, or hyphens. Do not use .git as a suffix.",
+    githubCliMissing:
+      "GitHub CLI is required. Install gh, sign in, then retry this check.",
+    githubAuthRequired:
+      "GitHub CLI is not signed in. Run gh auth login, then retry this check.",
+    githubUnavailable:
+      "GitHub owners could not be loaded. Check the network and GitHub CLI, then retry.",
+    genericError:
+      "Project setup could not be completed. The project has not been registered.",
+  },
   dismiss: "Dismiss",
   switchWorkspace: "Switch workspace",
   repository: "Repository",
@@ -642,6 +675,40 @@ const ja: typeof en = {
     stopping: "停止して切り替え中…",
     failed:
       "ターンの停止と後処理を完了できませんでした。現在のワークスペースを維持し、下書きと選択は変更していません。",
+  },
+  projectSetup: {
+    title: "プロジェクトをセットアップ",
+    description: (folder: string) =>
+      `${folder} をプロジェクトとして登録する前に、必要なセットアップを完了します。`,
+    gitTitle: "Gitを初期化",
+    gitDescription:
+      "選択したフォルダにGit管理情報を作成します。この後にキャンセルしても、Gitの初期化は保持されます。",
+    initializeGit: "Gitを初期化",
+    initializingGit: "Gitを初期化中…",
+    githubTitle: "GitHubに接続",
+    githubDescription:
+      "同名のリポジトリがあれば接続し、存在しなければ新しいprivateリポジトリを作成します。",
+    ownerLabel: "組織またはユーザー",
+    repositoryLabel: "リポジトリ名",
+    repositoryHint:
+      "英数字、ピリオド、アンダースコア、ハイフンを使用できます。",
+    setupGithub: "GitHubをセットアップ",
+    settingUpGithub: "GitHubをセットアップ中…",
+    retryGithub: "GitHub接続を再確認",
+    checkingGithub: "GitHub接続を確認中…",
+    cancel: "キャンセル",
+    canceling: "キャンセル中…",
+    close: "プロジェクトのセットアップを閉じる",
+    invalidRepository:
+      "英数字、ピリオド、アンダースコア、ハイフンで1〜100文字を入力し、末尾に.gitを付けないでください。",
+    githubCliMissing:
+      "GitHub CLIが必要です。ghをインストールしてサインインした後、再確認してください。",
+    githubAuthRequired:
+      "GitHub CLIにサインインしていません。gh auth loginを実行した後、再確認してください。",
+    githubUnavailable:
+      "GitHubのowner候補を取得できませんでした。ネットワークとGitHub CLIを確認して再試行してください。",
+    genericError:
+      "プロジェクトのセットアップを完了できませんでした。プロジェクトは登録していません。",
   },
   dismiss: "閉じる",
   switchWorkspace: "ワークスペースを切り替える",

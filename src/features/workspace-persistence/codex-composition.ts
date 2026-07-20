@@ -9,6 +9,7 @@ import { composeTurnInstruction } from "@/features/workspace-persistence/turn-co
 import type { WorkspaceHistoryTransport } from "@/features/workspace-persistence/transport"
 import type {
   AppQuitPreparationRequest,
+  ProjectRegistrationResult,
   SendTurnRequest,
   WorkspaceAdapterState,
   WorkspaceAdapterTimelinePage,
@@ -238,8 +239,24 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return this.history.loadTimelinePage(workspaceId, beforeSequence)
   }
 
-  async requestAddProject(): Promise<WorkspaceAdapterState> {
+  async requestAddProject(): Promise<ProjectRegistrationResult> {
     return this.history.requestAddProject()
+  }
+
+  initializeProjectGit(setupId: string): Promise<ProjectRegistrationResult> {
+    return this.history.initializeProjectGit(setupId)
+  }
+
+  setupProjectGithub(
+    setupId: string,
+    owner: string,
+    repository: string,
+  ): Promise<ProjectRegistrationResult> {
+    return this.history.setupProjectGithub(setupId, owner, repository)
+  }
+
+  cancelProjectSetup(setupId: string): Promise<void> {
+    return this.history.cancelProjectSetup(setupId)
   }
 
   async requestAddWorkspace(

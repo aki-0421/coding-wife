@@ -44,7 +44,7 @@ impl FolderPicker for NativeFolderPicker {
     fn pick_folder(&self) -> PickerFuture<'_> {
         Box::pin(async {
             rfd::AsyncFileDialog::new()
-                .set_title("Select a Git repository")
+                .set_title("Select a project folder")
                 .pick_folder()
                 .await
                 .map(|handle| handle.path().to_path_buf())
@@ -184,12 +184,15 @@ impl WorkspaceService {
         self.activate_candidate(candidate).await
     }
 
-    pub async fn pick_validated(&self) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
-        let selected = self
-            .picker
+    pub async fn pick_folder(&self) -> Result<PathBuf, CodexCommandError> {
+        self.picker
             .pick_folder()
             .await
-            .ok_or_else(|| workspace_error("CODEX-WORKSPACE-PICK-CANCELED", true))?;
+            .ok_or_else(|| workspace_error("CODEX-WORKSPACE-PICK-CANCELED", true))
+    }
+
+    pub async fn pick_validated(&self) -> Result<ValidatedWorkspaceCandidate, CodexCommandError> {
+        let selected = self.pick_folder().await?;
         self.validate_candidate(
             selected,
             format!("workspace-{}", uuid::Uuid::new_v4()),

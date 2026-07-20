@@ -15,6 +15,8 @@ import type {
   AttachmentItem,
   ContextSnapshotItem,
   ProjectRecord,
+  ProjectRegistrationResult,
+  ProjectSetupCandidate,
   ReasoningEffort,
   SendTurnRequest,
   WorkspaceAdapterState,
@@ -25,6 +27,17 @@ import type {
   WorkspaceTimelineItem,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
+
+export interface ProjectSetupState {
+  readonly candidate: ProjectSetupCandidate
+  readonly status:
+    | "idle"
+    | "initializing_git"
+    | "checking_github"
+    | "setting_up_github"
+    | "canceling"
+  readonly errorCode: string | null
+}
 
 const emptyDraft: WorkspaceDraft = {
   text: "",
@@ -224,6 +237,9 @@ export function useWorkspaceViewModel(
     initialCodexState(adapter),
   )
   const [notice, setNotice] = useState<WorkspaceViewNotice | null>(null)
+  const [projectSetup, setProjectSetup] = useState<ProjectSetupState | null>(
+    null,
+  )
   const [adapterStatus, setAdapterStatus] = useState<WorkspaceAdapterStatus>(
     nativeHydration ? "loading" : "ready",
   )
@@ -979,6 +995,23 @@ export function useWorkspaceViewModel(
     [adapter, adapterReady, applyAdapterState, projects],
   )
 
+  const applyProjectRegistrationResult = useCallback(
+    (result: ProjectRegistrationResult) => {
+      applyAdapterState(result.state)
+      if (result.outcome === "setup_required" && result.setup !== undefined) {
+        setProjectSetup({
+          candidate: result.setup,
+          status: "idle",
+          errorCode: null,
+        })
+      } else {
+        setProjectSetup(null)
+      }
+      setNotice(null)
+    },
+    [applyAdapterState],
+  )
+
   const requestAddProject = useCallback(
     async (unavailableCopy: string) => {
       if (!adapterReady) return
@@ -987,9 +1020,8 @@ export function useWorkspaceViewModel(
         return
       }
       try {
-        const state = await adapter.requestAddProject()
-        if (state !== undefined) applyAdapterState(state)
-        setNotice(null)
+        const result = await adapter.requestAddProject()
+        if (result !== undefined) applyProjectRegistrationResult(result)
       } catch (error) {
         setNotice({
           tone: "error",
@@ -997,8 +1029,111 @@ export function useWorkspaceViewModel(
         })
       }
     },
-    [adapter, adapterReady, applyAdapterState],
+    [adapter, adapterReady, applyProjectRegistrationResult],
   )
+
+  const initializeProjectGit = useCallback(async () => {
+    if (projectSetup === null || adapter?.initializeProjectGit === undefined) {
+      return
+    }
+    const setupId = projectSetup.candidate.setupId
+    setProjectSetup((current) =>
+      current?.candidate.setupId === setupId
+        ? {
+            ...current,
+            status:
+              current.candidate.gitStatus === "ready"
+                ? "checking_github"
+                : "initializing_git",
+            errorCode: null,
+          }
+        : current,
+    )
+    try {
+      applyProjectRegistrationResult(
+        await adapter.initializeProjectGit(setupId),
+      )
+    } catch (error) {
+      setProjectSetup((current) =>
+        current?.candidate.setupId === setupId
+          ? {
+              ...current,
+              status: "idle",
+              errorCode:
+                error instanceof Error
+                  ? error.message
+                  : "PROJECT-SETUP-GIT-FAILED",
+            }
+          : current,
+      )
+    }
+  }, [adapter, applyProjectRegistrationResult, projectSetup])
+
+  const setupProjectGithub = useCallback(
+    async (owner: string, repository: string) => {
+      if (projectSetup === null || adapter?.setupProjectGithub === undefined) {
+        return
+      }
+      const setupId = projectSetup.candidate.setupId
+      setProjectSetup((current) =>
+        current?.candidate.setupId === setupId
+          ? { ...current, status: "setting_up_github", errorCode: null }
+          : current,
+      )
+      try {
+        applyProjectRegistrationResult(
+          await adapter.setupProjectGithub(setupId, owner, repository),
+        )
+      } catch (error) {
+        setProjectSetup((current) =>
+          current?.candidate.setupId === setupId
+            ? {
+                ...current,
+                status: "idle",
+                errorCode:
+                  error instanceof Error
+                    ? error.message
+                    : "PROJECT-SETUP-GITHUB-FAILED",
+              }
+            : current,
+        )
+      }
+    },
+    [adapter, applyProjectRegistrationResult, projectSetup],
+  )
+
+  const cancelProjectSetup = useCallback(async () => {
+    if (projectSetup === null) return
+    const setupId = projectSetup.candidate.setupId
+    if (adapter?.cancelProjectSetup === undefined) {
+      setProjectSetup(null)
+      return
+    }
+    setProjectSetup((current) =>
+      current?.candidate.setupId === setupId
+        ? { ...current, status: "canceling", errorCode: null }
+        : current,
+    )
+    try {
+      await adapter.cancelProjectSetup(setupId)
+      setProjectSetup((current) =>
+        current?.candidate.setupId === setupId ? null : current,
+      )
+    } catch (error) {
+      setProjectSetup((current) =>
+        current?.candidate.setupId === setupId
+          ? {
+              ...current,
+              status: "idle",
+              errorCode:
+                error instanceof Error
+                  ? error.message
+                  : "PROJECT-SETUP-CANCEL-FAILED",
+            }
+          : current,
+      )
+    }
+  }, [adapter, projectSetup])
 
   const selectWorkspace = useCallback(
     (workspaceId: string) => {
@@ -1318,18 +1453,21 @@ export function useWorkspaceViewModel(
     answerDecision,
     archiveWorkspace,
     captureContext,
+    cancelProjectSetup,
     cancelSelectedWorkspace,
     cancelWorkspaceTransition,
     codex,
     deleteSelectedWorkspaceHistory,
     filteredWorkspaces,
     projectFilterId,
+    projectSetup,
     muted,
     notice,
     pendingWorkspaceTransition,
     pickAttachments,
     projects,
     history,
+    initializeProjectGit,
     lastSummary,
     repairSelectedWorkspace,
     confirmWorkspaceTransition,
@@ -1343,6 +1481,7 @@ export function useWorkspaceViewModel(
     selectedWorkspaceId,
     saveTimelineAnchor,
     sendTurn,
+    setupProjectGithub,
     setActiveTab,
     setDraftText,
     setEffort,

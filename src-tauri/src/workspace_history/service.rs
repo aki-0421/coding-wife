@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,10 +24,12 @@ use super::store::WorkspaceHistoryStore;
 use super::types::{
     AppSaveCharacterContextRequest, AppendDomainEventRequest, AppendDomainEventResponse,
     ContextSnapshotView, ContextSource, HistoryMode, HistoryStatus, NormalizedDomainEvent,
-    ProjectGetContextRequest, ProjectSaveContextRequest, ProjectSelectRequest, TimelinePage,
-    VersionedCharacterContext, VersionedProjectContext, WorkspaceArchiveRequest,
-    WorkspaceCancelRequest, WorkspaceCommandError, WorkspaceCreateSessionRequest,
-    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView, WorkspaceHealth,
+    ProjectGetContextRequest, ProjectSaveContextRequest, ProjectSelectRequest,
+    ProjectSetupGitStatus, ProjectSetupGithubOwnerStatus, ProjectSetupGithubRequest,
+    ProjectSetupRequest, ProjectSetupView, TimelinePage, VersionedCharacterContext,
+    VersionedProjectContext, WorkspaceArchiveRequest, WorkspaceCancelRequest,
+    WorkspaceCommandError, WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeView,
+    WorkspaceDeleteRequest, WorkspaceDraftView, WorkspaceHealth,
     WorkspaceLoadEditableContextRequest, WorkspacePickOutcome, WorkspacePickResponse,
     WorkspaceRecheckRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
     WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
@@ -42,6 +45,9 @@ const CONTEXT_STDERR_LIMIT: usize = 4 * 1024;
 const REPOSITORY_RECHECK_TIMEOUT: Duration = Duration::from_secs(1);
 const WORKTREE_MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
 const WORKTREE_OUTPUT_LIMIT: usize = 4 * 1024;
+const PROJECT_SETUP_GIT_TIMEOUT: Duration = Duration::from_secs(5);
+const PROJECT_SETUP_GITHUB_TIMEOUT: Duration = Duration::from_secs(30);
+const PROJECT_SETUP_OUTPUT_LIMIT: usize = 16 * 1024;
 const STARTUP_REPOSITORY_VALIDATION_CONCURRENCY: usize = 2;
 const STARTUP_PENDING: u8 = 0;
 const STARTUP_READY: u8 = 1;
@@ -111,6 +117,22 @@ struct HistoryShutdownState {
     current: Option<HistoryShutdownExecution>,
 }
 
+#[derive(Clone, Debug)]
+struct PendingProjectSetup {
+    root: PathBuf,
+    root_device: u64,
+    root_inode: u64,
+    folder_name: String,
+    suggested_repository_name: String,
+    git_initialized: bool,
+}
+
+#[derive(Clone, Debug)]
+struct GithubOwnerProbe {
+    status: ProjectSetupGithubOwnerStatus,
+    owners: Vec<String>,
+}
+
 impl StartupRestoreGuard {
     fn complete(mut self) {
         self.readiness.finish(STARTUP_READY);
@@ -174,6 +196,7 @@ pub struct WorkspaceHistoryService {
     accepting_writers: Arc<AtomicBool>,
     shutdown_state: Arc<Mutex<HistoryShutdownState>>,
     project_operations: Arc<Mutex<()>>,
+    pending_project_setups: Arc<Mutex<HashMap<String, PendingProjectSetup>>>,
     character: Option<CharacterService>,
     startup: Arc<StartupReadiness>,
 }
@@ -228,6 +251,7 @@ impl WorkspaceHistoryService {
             accepting_writers: Arc::new(AtomicBool::new(true)),
             shutdown_state: Arc::new(Mutex::new(HistoryShutdownState::default())),
             project_operations,
+            pending_project_setups: Arc::new(Mutex::new(HashMap::new())),
             character,
             startup: Arc::new(StartupReadiness::new(ready)),
         }
@@ -495,8 +519,8 @@ impl WorkspaceHistoryService {
     pub async fn pick_register(&self) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
         self.ensure_startup_ready("workspace_pick_register")?;
         let _operation = self.operation_lock.lock().await;
-        let candidate = match self.workspace.pick_validated().await {
-            Ok(candidate) => candidate,
+        let selected = match self.workspace.pick_folder().await {
+            Ok(selected) => selected,
             Err(error) if error.code == PICK_CANCELED_CODE => {
                 return Ok(WorkspacePickResponse {
                     schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
@@ -505,18 +529,308 @@ impl WorkspaceHistoryService {
                         .store
                         .snapshot(None)
                         .map_err(|error| history_error("workspace_pick_register", error))?,
+                    setup: None,
                 });
             }
             Err(error) => return Err(codex_error("workspace_pick_register", error)),
         };
+        let pending = inspect_project_setup_root(selected)
+            .await
+            .map_err(|error| setup_error("workspace_pick_register", error))?;
+        let marker_present = match tokio::fs::symlink_metadata(pending.root.join(".git")).await {
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(_) => {
+                return Err(WorkspaceCommandError::new(
+                    "PROJECT-SETUP-GIT-METADATA",
+                    "workspace_pick_register",
+                    true,
+                ));
+            }
+        };
+        if marker_present {
+            let candidate = self
+                .workspace
+                .validate_workspace_root(
+                    pending.root.clone(),
+                    format!("workspace-{}", uuid::Uuid::new_v4()),
+                    pending.folder_name.clone(),
+                )
+                .await
+                .map_err(|error| codex_error("workspace_pick_register", error))?;
+            if git_origin_configured(&pending.root, "workspace_pick_register").await? {
+                let state = self
+                    .register_validated_candidate(candidate, "workspace_pick_register")
+                    .await?;
+                return Ok(project_pick_response(
+                    WorkspacePickOutcome::Selected,
+                    state,
+                    None,
+                ));
+            }
+        }
+
+        let setup_id = format!("project-setup-{}", uuid::Uuid::new_v4());
+        let pending = PendingProjectSetup {
+            git_initialized: marker_present,
+            ..pending
+        };
+        let setup = self.project_setup_view(&setup_id, &pending).await;
+        self.pending_project_setups
+            .lock()
+            .await
+            .insert(setup_id, pending);
         let state = self
-            .register_validated_candidate(candidate, "workspace_pick_register")
-            .await?;
-        Ok(WorkspacePickResponse {
-            schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
-            outcome: WorkspacePickOutcome::Selected,
+            .store
+            .snapshot(None)
+            .map_err(|error| history_error("workspace_pick_register", error))?;
+        Ok(project_pick_response(
+            WorkspacePickOutcome::SetupRequired,
             state,
-        })
+            Some(setup),
+        ))
+    }
+
+    pub async fn initialize_project_git(
+        &self,
+        request: ProjectSetupRequest,
+    ) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
+        const OPERATION: &str = "workspace_project_setup_git_init";
+        self.ensure_startup_ready(OPERATION)?;
+        let _operation = self.operation_lock.lock().await;
+        let mut pending = self
+            .pending_project_setup(&request.setup_id, OPERATION)
+            .await?;
+        revalidate_project_setup_root(&pending, OPERATION).await?;
+        let marker_present = match tokio::fs::symlink_metadata(pending.root.join(".git")).await {
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(_) => {
+                return Err(WorkspaceCommandError::new(
+                    "PROJECT-SETUP-GIT-METADATA",
+                    OPERATION,
+                    true,
+                ));
+            }
+        };
+        if !marker_present {
+            run_project_setup_git(&pending.root, &["init"], OPERATION).await?;
+        }
+        self.workspace
+            .validate_workspace_root(
+                pending.root.clone(),
+                format!("workspace-{}", uuid::Uuid::new_v4()),
+                pending.folder_name.clone(),
+            )
+            .await
+            .map_err(|error| codex_error(OPERATION, error))?;
+        pending.git_initialized = true;
+
+        if git_origin_configured(&pending.root, OPERATION).await? {
+            let candidate = self
+                .workspace
+                .validate_workspace_root(
+                    pending.root.clone(),
+                    format!("workspace-{}", uuid::Uuid::new_v4()),
+                    pending.folder_name.clone(),
+                )
+                .await
+                .map_err(|error| codex_error(OPERATION, error))?;
+            let state = self
+                .register_validated_candidate(candidate, OPERATION)
+                .await?;
+            self.pending_project_setups
+                .lock()
+                .await
+                .remove(&request.setup_id);
+            return Ok(project_pick_response(
+                WorkspacePickOutcome::Selected,
+                state,
+                None,
+            ));
+        }
+
+        let setup = self.project_setup_view(&request.setup_id, &pending).await;
+        self.pending_project_setups
+            .lock()
+            .await
+            .insert(request.setup_id, pending);
+        let state = self
+            .store
+            .snapshot(None)
+            .map_err(|error| history_error(OPERATION, error))?;
+        Ok(project_pick_response(
+            WorkspacePickOutcome::SetupRequired,
+            state,
+            Some(setup),
+        ))
+    }
+
+    pub async fn setup_project_github(
+        &self,
+        request: ProjectSetupGithubRequest,
+    ) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
+        const OPERATION: &str = "workspace_project_setup_github";
+        self.ensure_startup_ready(OPERATION)?;
+        let _operation = self.operation_lock.lock().await;
+        let pending = self
+            .pending_project_setup(&request.setup_id, OPERATION)
+            .await?;
+        revalidate_project_setup_root(&pending, OPERATION).await?;
+        if !pending.git_initialized {
+            return Err(WorkspaceCommandError::new(
+                "PROJECT-SETUP-GIT-REQUIRED",
+                OPERATION,
+                true,
+            ));
+        }
+        let requested_repository = validate_github_repository_name(&request.repository)
+            .ok_or_else(|| {
+                WorkspaceCommandError::new("PROJECT-SETUP-REPOSITORY-NAME", OPERATION, true)
+            })?;
+        let owner_probe = probe_github_owners().await;
+        if owner_probe.status != ProjectSetupGithubOwnerStatus::Ready {
+            let setup = project_setup_view(&request.setup_id, &pending, owner_probe);
+            let state = self
+                .store
+                .snapshot(None)
+                .map_err(|error| history_error(OPERATION, error))?;
+            return Ok(project_pick_response(
+                WorkspacePickOutcome::SetupRequired,
+                state,
+                Some(setup),
+            ));
+        }
+        if !owner_probe
+            .owners
+            .iter()
+            .any(|owner| owner == &request.owner)
+        {
+            return Err(WorkspaceCommandError::new(
+                "PROJECT-SETUP-GITHUB-OWNER",
+                OPERATION,
+                true,
+            ));
+        }
+
+        let full_name = format!("{}/{}", request.owner, requested_repository);
+        let before = self
+            .workspace
+            .validate_workspace_root(
+                pending.root.clone(),
+                format!("workspace-{}", uuid::Uuid::new_v4()),
+                pending.folder_name.clone(),
+            )
+            .await
+            .map_err(|error| codex_error(OPERATION, error))?;
+        if git_origin_configured(&pending.root, OPERATION).await? {
+            if !before
+                .git
+                .github_repository
+                .as_deref()
+                .is_some_and(|value| value.eq_ignore_ascii_case(&full_name))
+            {
+                return Err(WorkspaceCommandError::new(
+                    "PROJECT-SETUP-ORIGIN-CONFLICT",
+                    OPERATION,
+                    true,
+                ));
+            }
+        } else {
+            setup_github_origin(&pending.root, &full_name, OPERATION).await?;
+        }
+
+        let candidate = self
+            .workspace
+            .validate_workspace_root(
+                pending.root.clone(),
+                format!("workspace-{}", uuid::Uuid::new_v4()),
+                pending.folder_name.clone(),
+            )
+            .await
+            .map_err(|error| codex_error(OPERATION, error))?;
+        if !candidate
+            .git
+            .github_repository
+            .as_deref()
+            .is_some_and(|value| value.eq_ignore_ascii_case(&full_name))
+        {
+            return Err(WorkspaceCommandError::new(
+                "PROJECT-SETUP-ORIGIN-VERIFY",
+                OPERATION,
+                true,
+            ));
+        }
+        let state = self
+            .register_validated_candidate(candidate, OPERATION)
+            .await?;
+        self.pending_project_setups
+            .lock()
+            .await
+            .remove(&request.setup_id);
+        Ok(project_pick_response(
+            WorkspacePickOutcome::Selected,
+            state,
+            None,
+        ))
+    }
+
+    pub async fn cancel_project_setup(
+        &self,
+        request: ProjectSetupRequest,
+    ) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
+        const OPERATION: &str = "workspace_project_setup_cancel";
+        self.ensure_startup_ready(OPERATION)?;
+        let _operation = self.operation_lock.lock().await;
+        self.pending_project_setups
+            .lock()
+            .await
+            .remove(&request.setup_id);
+        let state = self
+            .store
+            .snapshot(None)
+            .map_err(|error| history_error(OPERATION, error))?;
+        Ok(project_pick_response(
+            WorkspacePickOutcome::Canceled,
+            state,
+            None,
+        ))
+    }
+
+    async fn pending_project_setup(
+        &self,
+        setup_id: &str,
+        operation: &'static str,
+    ) -> Result<PendingProjectSetup, WorkspaceCommandError> {
+        if !is_setup_id(setup_id) {
+            return Err(WorkspaceCommandError::new(
+                "PROJECT-SETUP-ID-INVALID",
+                operation,
+                false,
+            ));
+        }
+        self.pending_project_setups
+            .lock()
+            .await
+            .get(setup_id)
+            .cloned()
+            .ok_or_else(|| WorkspaceCommandError::new("PROJECT-SETUP-NOT-FOUND", operation, true))
+    }
+
+    async fn project_setup_view(
+        &self,
+        setup_id: &str,
+        pending: &PendingProjectSetup,
+    ) -> ProjectSetupView {
+        let owner_probe = if pending.git_initialized {
+            probe_github_owners().await
+        } else {
+            GithubOwnerProbe {
+                status: ProjectSetupGithubOwnerStatus::NotChecked,
+                owners: Vec::new(),
+            }
+        };
+        project_setup_view(setup_id, pending, owner_probe)
     }
 
     pub async fn create_session(
@@ -1383,6 +1697,509 @@ async fn capture_context(
     }
 }
 
+fn project_pick_response(
+    outcome: WorkspacePickOutcome,
+    state: WorkspaceStateSnapshot,
+    setup: Option<ProjectSetupView>,
+) -> WorkspacePickResponse {
+    WorkspacePickResponse {
+        schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
+        outcome,
+        state,
+        setup,
+    }
+}
+
+fn project_setup_view(
+    setup_id: &str,
+    pending: &PendingProjectSetup,
+    owner_probe: GithubOwnerProbe,
+) -> ProjectSetupView {
+    ProjectSetupView {
+        schema_version: WORKSPACE_HISTORY_SCHEMA_VERSION,
+        setup_id: setup_id.to_owned(),
+        folder_name: pending.folder_name.clone(),
+        git_status: if pending.git_initialized {
+            ProjectSetupGitStatus::Ready
+        } else {
+            ProjectSetupGitStatus::NotInitialized
+        },
+        github_owner_status: owner_probe.status,
+        github_owners: owner_probe.owners,
+        suggested_repository_name: pending.suggested_repository_name.clone(),
+    }
+}
+
+fn setup_error(operation: &'static str, error: WorkspaceCommandError) -> WorkspaceCommandError {
+    WorkspaceCommandError::new(error.code, operation, error.recoverable)
+}
+
+fn is_setup_id(value: &str) -> bool {
+    value.len() <= 128
+        && value.starts_with("project-setup-")
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+}
+
+fn setup_folder_name(root: &Path) -> String {
+    let value = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Repository");
+    let value = value
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(80)
+        .collect::<String>();
+    if value.trim().is_empty() {
+        "Repository".to_owned()
+    } else {
+        value
+    }
+}
+
+fn suggested_repository_name(folder_name: &str) -> String {
+    let mut value = String::new();
+    let mut separator = false;
+    for character in folder_name.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+            value.push(character);
+            separator = false;
+        } else if !separator && !value.is_empty() {
+            value.push('-');
+            separator = true;
+        }
+        if value.len() >= 100 {
+            break;
+        }
+    }
+    let value = value.trim_matches('-').trim_end_matches(".git").to_owned();
+    if validate_github_repository_name(&value).is_some() {
+        value
+    } else {
+        "repository".to_owned()
+    }
+}
+
+async fn inspect_project_setup_root(
+    selected: PathBuf,
+) -> Result<PendingProjectSetup, WorkspaceCommandError> {
+    let root = tokio::fs::canonicalize(selected).await.map_err(|_| {
+        WorkspaceCommandError::new("PROJECT-SETUP-ROOT-MISSING", "project_setup.inspect", true)
+    })?;
+    let metadata = tokio::fs::symlink_metadata(&root).await.map_err(|_| {
+        WorkspaceCommandError::new("PROJECT-SETUP-ROOT-MISSING", "project_setup.inspect", true)
+    })?;
+    validate_project_setup_root_metadata(&metadata, "project_setup.inspect")?;
+    let folder_name = setup_folder_name(&root);
+
+    #[cfg(unix)]
+    let (root_device, root_inode) = {
+        use std::os::unix::fs::MetadataExt;
+        (metadata.dev(), metadata.ino())
+    };
+    #[cfg(not(unix))]
+    let (root_device, root_inode) = (0, metadata.len());
+
+    Ok(PendingProjectSetup {
+        root,
+        root_device,
+        root_inode,
+        suggested_repository_name: suggested_repository_name(&folder_name),
+        folder_name,
+        git_initialized: false,
+    })
+}
+
+fn validate_project_setup_root_metadata(
+    metadata: &std::fs::Metadata,
+    operation: &'static str,
+) -> Result<(), WorkspaceCommandError> {
+    if !metadata.is_dir() {
+        return Err(WorkspaceCommandError::new(
+            "PROJECT-SETUP-NOT-DIRECTORY",
+            operation,
+            false,
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let uid = unsafe { libc::geteuid() };
+        let mode = metadata.permissions().mode();
+        if metadata.uid() != uid || mode & 0o022 != 0 || mode & 0o200 == 0 {
+            return Err(WorkspaceCommandError::new(
+                "PROJECT-SETUP-ROOT-PERMISSION",
+                operation,
+                false,
+            ));
+        }
+    }
+    #[cfg(not(unix))]
+    if metadata.permissions().readonly() {
+        return Err(WorkspaceCommandError::new(
+            "PROJECT-SETUP-ROOT-PERMISSION",
+            operation,
+            false,
+        ));
+    }
+    Ok(())
+}
+
+async fn revalidate_project_setup_root(
+    pending: &PendingProjectSetup,
+    operation: &'static str,
+) -> Result<(), WorkspaceCommandError> {
+    let canonical = tokio::fs::canonicalize(&pending.root)
+        .await
+        .map_err(|_| WorkspaceCommandError::new("PROJECT-SETUP-ROOT-MISSING", operation, true))?;
+    if canonical != pending.root {
+        return Err(WorkspaceCommandError::new(
+            "PROJECT-SETUP-ROOT-CHANGED",
+            operation,
+            false,
+        ));
+    }
+    let metadata = tokio::fs::symlink_metadata(&canonical)
+        .await
+        .map_err(|_| WorkspaceCommandError::new("PROJECT-SETUP-ROOT-MISSING", operation, true))?;
+    validate_project_setup_root_metadata(&metadata, operation)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.dev() != pending.root_device || metadata.ino() != pending.root_inode {
+            return Err(WorkspaceCommandError::new(
+                "PROJECT-SETUP-ROOT-CHANGED",
+                operation,
+                false,
+            ));
+        }
+    }
+    #[cfg(not(unix))]
+    if metadata.len() != pending.root_inode {
+        return Err(WorkspaceCommandError::new(
+            "PROJECT-SETUP-ROOT-CHANGED",
+            operation,
+            false,
+        ));
+    }
+    Ok(())
+}
+
+async fn run_project_setup_git(
+    root: &Path,
+    arguments: &[&str],
+    operation: &'static str,
+) -> Result<crate::codex::process::BoundedCommandOutput, WorkspaceCommandError> {
+    let mut command = tokio::process::Command::new("/usr/bin/git");
+    command
+        .arg("-C")
+        .arg(root)
+        .args(arguments)
+        .env_clear()
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let output = run_bounded_command(
+        command,
+        PROJECT_SETUP_GIT_TIMEOUT,
+        PROJECT_SETUP_OUTPUT_LIMIT,
+        PROJECT_SETUP_OUTPUT_LIMIT,
+    )
+    .await
+    .map_err(|error| {
+        WorkspaceCommandError::new(
+            if error == BoundedCommandError::Timeout {
+                "PROJECT-SETUP-GIT-TIMEOUT"
+            } else {
+                "PROJECT-SETUP-GIT-UNAVAILABLE"
+            },
+            operation,
+            true,
+        )
+    })?;
+    if !output.status.success() {
+        return Err(WorkspaceCommandError::new(
+            "PROJECT-SETUP-GIT-FAILED",
+            operation,
+            true,
+        ));
+    }
+    Ok(output)
+}
+
+async fn git_origin_configured(
+    root: &Path,
+    operation: &'static str,
+) -> Result<bool, WorkspaceCommandError> {
+    let mut command = tokio::process::Command::new("/usr/bin/git");
+    command
+        .arg("-C")
+        .arg(root)
+        .args(["config", "--get", "remote.origin.url"])
+        .env_clear()
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let output = run_bounded_command(
+        command,
+        PROJECT_SETUP_GIT_TIMEOUT,
+        2_048,
+        PROJECT_SETUP_OUTPUT_LIMIT,
+    )
+    .await
+    .map_err(|error| {
+        WorkspaceCommandError::new(
+            if error == BoundedCommandError::Timeout {
+                "PROJECT-SETUP-GIT-TIMEOUT"
+            } else {
+                "PROJECT-SETUP-GIT-UNAVAILABLE"
+            },
+            operation,
+            true,
+        )
+    })?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let value = String::from_utf8(output.stdout).map_err(|_| {
+        WorkspaceCommandError::new("PROJECT-SETUP-ORIGIN-INVALID", operation, false)
+    })?;
+    Ok(!value.trim().is_empty() && !value.chars().any(char::is_control))
+}
+
+fn validate_github_slug_component(value: &str, maximum: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= maximum
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn validate_github_repository_name(value: &str) -> Option<String> {
+    let value = value.trim();
+    if matches!(value, "." | "..")
+        || value.to_ascii_lowercase().ends_with(".git")
+        || !validate_github_slug_component(value, 100)
+    {
+        return None;
+    }
+    Some(value.to_owned())
+}
+
+#[cfg(unix)]
+fn trusted_executable_metadata(path: &Path) -> bool {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    let uid = unsafe { libc::geteuid() };
+    let parent_chain_trusted = path.ancestors().skip(1).all(|directory| {
+        std::fs::symlink_metadata(directory).is_ok_and(|parent| {
+            parent.is_dir()
+                && !parent.file_type().is_symlink()
+                && matches!(parent.uid(), owner if owner == uid || owner == 0)
+                && parent.permissions().mode() & 0o002 == 0
+                && (parent.uid() == uid || parent.permissions().mode() & 0o020 == 0)
+        })
+    });
+    metadata.is_file()
+        && matches!(metadata.uid(), owner if owner == uid || owner == 0)
+        && metadata.permissions().mode() & 0o022 == 0
+        && metadata.permissions().mode() & 0o111 != 0
+        && parent_chain_trusted
+}
+
+#[cfg(not(unix))]
+fn trusted_executable_metadata(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+}
+
+fn trusted_gh_executable() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        candidates.extend(std::env::split_paths(&path).map(|directory| directory.join("gh")));
+    }
+    candidates.extend([
+        PathBuf::from("/opt/homebrew/bin/gh"),
+        PathBuf::from("/usr/local/bin/gh"),
+    ]);
+    let mut seen = HashSet::new();
+    for candidate in candidates {
+        let Ok(canonical) = std::fs::canonicalize(candidate) else {
+            continue;
+        };
+        if seen.insert(canonical.clone()) && trusted_executable_metadata(&canonical) {
+            return Some(canonical);
+        }
+    }
+    None
+}
+
+fn configure_gh_command(executable: &Path) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(executable);
+    command
+        .env_clear()
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    for name in [
+        "HOME",
+        "GH_CONFIG_DIR",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "XDG_CONFIG_HOME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "LANG",
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    command
+}
+
+async fn run_project_setup_gh(
+    command: tokio::process::Command,
+    operation: &'static str,
+) -> Result<crate::codex::process::BoundedCommandOutput, WorkspaceCommandError> {
+    run_bounded_command(
+        command,
+        PROJECT_SETUP_GITHUB_TIMEOUT,
+        PROJECT_SETUP_OUTPUT_LIMIT,
+        PROJECT_SETUP_OUTPUT_LIMIT,
+    )
+    .await
+    .map_err(|error| {
+        WorkspaceCommandError::new(
+            if error == BoundedCommandError::Timeout {
+                "PROJECT-SETUP-GITHUB-TIMEOUT"
+            } else {
+                "PROJECT-SETUP-GITHUB-UNAVAILABLE"
+            },
+            operation,
+            true,
+        )
+    })
+}
+
+async fn probe_github_owners() -> GithubOwnerProbe {
+    let Some(executable) = trusted_gh_executable() else {
+        return GithubOwnerProbe {
+            status: ProjectSetupGithubOwnerStatus::CliMissing,
+            owners: Vec::new(),
+        };
+    };
+    let mut auth = configure_gh_command(&executable);
+    auth.args(["auth", "status", "--hostname", "github.com"]);
+    let Ok(auth) = run_project_setup_gh(auth, "workspace_project_setup_github").await else {
+        return GithubOwnerProbe {
+            status: ProjectSetupGithubOwnerStatus::Unavailable,
+            owners: Vec::new(),
+        };
+    };
+    if !auth.status.success() {
+        return GithubOwnerProbe {
+            status: ProjectSetupGithubOwnerStatus::AuthRequired,
+            owners: Vec::new(),
+        };
+    }
+
+    let mut user = configure_gh_command(&executable);
+    user.args(["api", "user", "--jq", ".login"]);
+    let mut organizations = configure_gh_command(&executable);
+    organizations.args(["api", "--paginate", "user/orgs", "--jq", ".[].login"]);
+    let (user, organizations) = tokio::join!(
+        run_project_setup_gh(user, "workspace_project_setup_github"),
+        run_project_setup_gh(organizations, "workspace_project_setup_github")
+    );
+    let (Ok(user), Ok(organizations)) = (user, organizations) else {
+        return GithubOwnerProbe {
+            status: ProjectSetupGithubOwnerStatus::Unavailable,
+            owners: Vec::new(),
+        };
+    };
+    if !user.status.success() || !organizations.status.success() {
+        return GithubOwnerProbe {
+            status: ProjectSetupGithubOwnerStatus::Unavailable,
+            owners: Vec::new(),
+        };
+    }
+    let Ok(user) = String::from_utf8(user.stdout) else {
+        return GithubOwnerProbe {
+            status: ProjectSetupGithubOwnerStatus::Unavailable,
+            owners: Vec::new(),
+        };
+    };
+    let Ok(organizations) = String::from_utf8(organizations.stdout) else {
+        return GithubOwnerProbe {
+            status: ProjectSetupGithubOwnerStatus::Unavailable,
+            owners: Vec::new(),
+        };
+    };
+    let mut seen = HashSet::new();
+    let owners = user
+        .lines()
+        .chain(organizations.lines())
+        .map(str::trim)
+        .filter(|owner| validate_github_slug_component(owner, 39))
+        .filter(|owner| seen.insert((*owner).to_owned()))
+        .take(101)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    GithubOwnerProbe {
+        status: if owners.is_empty() {
+            ProjectSetupGithubOwnerStatus::Unavailable
+        } else {
+            ProjectSetupGithubOwnerStatus::Ready
+        },
+        owners,
+    }
+}
+
+async fn setup_github_origin(
+    root: &Path,
+    full_name: &str,
+    operation: &'static str,
+) -> Result<(), WorkspaceCommandError> {
+    let executable = trusted_gh_executable().ok_or_else(|| {
+        WorkspaceCommandError::new("PROJECT-SETUP-GITHUB-CLI-MISSING", operation, true)
+    })?;
+    let mut view = configure_gh_command(&executable);
+    view.args(["repo", "view", full_name, "--json", "nameWithOwner"]);
+    let view = run_project_setup_gh(view, operation).await?;
+    if view.status.success() {
+        let origin = format!("https://github.com/{full_name}.git");
+        if let Err(error) =
+            run_project_setup_git(root, &["remote", "add", "origin", &origin], operation).await
+        {
+            if !git_origin_configured(root, operation).await? {
+                return Err(error);
+            }
+        }
+        return Ok(());
+    }
+
+    let mut create = configure_gh_command(&executable);
+    create
+        .args(["repo", "create", full_name, "--private", "--source"])
+        .arg(root)
+        .args(["--remote", "origin"]);
+    let create = run_project_setup_gh(create, operation).await?;
+    if create.status.success() || git_origin_configured(root, operation).await? {
+        Ok(())
+    } else {
+        Err(WorkspaceCommandError::new(
+            "PROJECT-SETUP-GITHUB-FAILED",
+            operation,
+            true,
+        ))
+    }
+}
+
 async fn create_managed_worktree(
     project_root: &Path,
     worktree_root: &Path,
@@ -2042,6 +2859,32 @@ mod tests {
         storage
             .publish(&quarantine, &snapshot.manifest)
             .expect("publish unused custom pack")
+    }
+
+    #[test]
+    fn project_setup_repository_names_are_bounded_and_do_not_accept_git_suffixes() {
+        assert_eq!(
+            validate_github_repository_name("reviewable-tool"),
+            Some("reviewable-tool".to_owned())
+        );
+        for invalid in ["", ".", "..", "owner/repository", "repository.git"] {
+            assert_eq!(validate_github_repository_name(invalid), None);
+        }
+        assert_eq!(validate_github_repository_name(&"a".repeat(101)), None);
+    }
+
+    #[tokio::test]
+    async fn project_setup_inspection_keeps_non_git_folder_unmodified() {
+        let root = temp_directory("project-setup-inspection");
+        let setup = inspect_project_setup_root(root.clone())
+            .await
+            .expect("inspect setup root");
+
+        assert!(setup
+            .folder_name
+            .starts_with("coding-wife-project-setup-inspection-"));
+        assert!(!setup.git_initialized);
+        assert!(!root.join(".git").exists());
     }
 
     #[tokio::test]

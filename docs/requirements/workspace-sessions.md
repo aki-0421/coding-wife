@@ -1,6 +1,6 @@
 ---
 title: "WORK ワークスペース・セッション要件定義"
-description: "ローカルGitプロジェクトの登録と、app管理Git worktreeであるworkspaceの作成・選択・復元・Archiveを定義する。"
+description: "ローカルfolderのGit/GitHubセットアップ、project登録と、app管理Git worktreeであるworkspaceの作成・選択・復元・Archiveを定義する。"
 updated: 2026-07-20
 last_verified: 2026-07-20
 read_when:
@@ -26,7 +26,7 @@ read_when:
 
 | 目的 | 達成したと判断できる状態 |
 |---|---|
-| projectを安全に追加する | OS pickerで有効なローカルGit repositoryを追加し、cancel・権限不足・無効folderを破壊的変更なしで処理できる |
+| projectを安全に追加する | OS pickerで選んだfolderをGit/GitHub要件まで明示的にセットアップし、全check成功後だけprojectへ登録できる |
 | 状態を一目で選ぶ | sidebarでlifecycle、repo、branch、attentionを確認し、active workspaceを切り替えられる |
 | 再開可能にする | app再起動後に一覧、active selection、draft、scroll位置、session summaryが戻る |
 
@@ -36,7 +36,7 @@ read_when:
 
 | 対象 | 内容 |
 |---|---|
-| Project registration | local Git repository選択、canonicalization、診断 |
+| Project registration | local folder選択、Git初期化、GitHub originセットアップ、canonicalization、診断 |
 | Workspace list | registered project filter、state grouping、repo/branch、active selection、empty state |
 | Lifecycle | Backlog、In Progress、In Review、Done、Canceledと別軸attention |
 | Session continuity | active workspace、draft、scroll、summaryのlocal persistence |
@@ -48,7 +48,6 @@ read_when:
 |---|---|---|
 | 初回からの並列実行 | MVPでは一つのactive executionへ集中する | 将来のmulti-workspace execution |
 | project root自体をworkspaceとして自動登録 | projectとworktreeの区別を保つ | 利用者がWorkspace作成dialogから明示作成する |
-| GitHub origin必須 | local repositoryを第一級で扱う | 非対象 |
 | repository clone/fetch UI | network credentialと競合解決を今回含めない | 外部Git client |
 | repository file削除 | appからproject登録を外してもsourceを変更しない | 非対象 |
 
@@ -57,7 +56,7 @@ read_when:
 | アクター | 説明 | 許可する操作 | 拒否時の動作 |
 |---|---|---|---|
 | ローカル利用者 | project所有者 | folder選択、workspace作成・選択・project filter・cancel・登録解除 | filesystem権限不足または無効repoなら登録せず理由を表示する |
-| Rust core | pathとGit状態の信頼境界 | canonical path検証、read-only Git診断、metadata保存 | root外参照、消失path、I/O失敗を構造化errorにする |
+| Rust core | pathとGit/GitHub状態の信頼境界 | canonical path検証、固定引数のGit初期化・origin設定、GitHub CLI診断、metadata保存 | root外参照、候補置換、未認証、I/O失敗を構造化errorにする |
 | Codex main session | active workspaceで作業するprocess | 選択済みcwdで一つのthreadを開始 | inactive workspaceやpreflight失敗workspaceでは開始しない |
 
 ## 機能要件
@@ -66,12 +65,13 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `WORK-F-044` | 利用者はfolder pickerからlocal projectを追加できる | regular directory内のGit repository worktreeを選ぶとopaqueでstableなProject ID、canonical path、repository identity、repo名、branchをnative storeへ保存する。project追加だけではworkspaceを作成・選択・再activateせず、既存active selectionを維持する。migration前にproject rootをworkspaceとして保存したlegacy recordは、再登録時もworkspace一覧・件数・復元対象へ含めない。Project IDとcanonical pathは通常UI、support payload、logへ表示しない | Approved | 非該当 |
+| `WORK-F-044` | 利用者はfolder pickerからlocal projectを追加できる | regular directoryを選ぶとnativeがGit初期化とorigin有無を診断する。両方readyならopaqueでstableなProject ID、canonical path、repository identity、repo名、branchをnative storeへ保存し、不足時はpathをWebViewへ渡さない一時Setup IDとfolder basenameだけでセットアップdialogへ遷移する。project追加だけではworkspaceを作成・選択・再activateせず、既存active selectionを維持する。migration前にproject rootをworkspaceとして保存したlegacy recordは、再登録時もworkspace一覧・件数・復元対象へ含めない。Project ID、Setup IDとcanonical pathは通常UI、support payload、logへ表示しない | Approved | 非該当 |
 | `WORK-F-045` | 利用者はfolder選択をcancelできる | pickerをcancelすると既存一覧とactive selectionを維持し、errorを表示しない | Approved | 非該当 |
-| `WORK-F-046` | アプリは無効repositoryを拒否する | non-Git directory、bare repository、存在しないpathを選ぶと登録せず、原因と再選択を表示する | Approved | 非該当 |
+| `WORK-F-046` | アプリは無効folderまたはrepositoryを拒否する | non-Gitのregular writable directoryはセットアップへ進める一方、bare repository、壊れた`.git`、symlink Git marker、存在しないpathを選ぶと登録せず、原因と再選択を表示する | Approved | 非該当 |
 | `WORK-F-047` | アプリは読取権限不足を拒否する | repositoryまたは`.git` metadataを読めない場合は登録せず、権限不足をI/O errorと区別して表示する | Approved | 非該当 |
 | `WORK-F-048` | 利用者は送信前preflightを確認できる | Git、Codex executable、auth、`gpt-5.6-sol`、character packを`ready/warning/blocked`で表示し、blocked項目があればSendを無効にする | Approved | 非該当 |
 | `WORK-F-049` | 同じrepositoryの重複登録を防ぐ | symlink表記や`..`を含む同一canonical pathかつ保存済みrepository identityとexact一致するrepositoryを再選択すると新規作成せず、既存project登録を返す。登録中projectの同じpathが別identityへ置換されていればtyped changed errorで拒否し、登録解除済みprojectはidentity一致時だけ同じProject IDへ復帰する。identity不一致のrepositoryを追加する場合は新しいProject IDと履歴partitionを発行し、旧workspace/historyへ再linkしない | Approved | 非該当 |
+| `WORK-F-070` | 利用者は登録前にGitとGitHub originをセットアップできる | 非Git folderでは説明を確認して`git init`を明示実行する。origin未設定では認証済みGitHub CLIから得たcurrent userとorganizationのowner select、folder basenameを初期値とするrepository name inputを表示する。確定時に`owner/name`が存在すればHTTPS originへ接続し、存在しなければprivate repositoryを作成してoriginへ接続する。各mutation直前にSetup IDの保存root identityとlive root、Git、originを再検査し、Git初期化済みかつorigin設定済みの時だけproject登録へ進む。GitHub CLI未導入・未認証、owner不一致、invalid name、競合、network失敗では登録せず入力と候補を保持する。Cancelはapp登録と未実行mutationを行わないが、利用者が既に確定した`git init`またはGitHub repository作成は巻き戻さない | Approved | 非該当 |
 
 ### Workspace作成・一覧・切替
 
@@ -121,7 +121,7 @@ project登録解除は`projects.registered`とnavigationだけを変更し、wor
 
 | グループ | 項目 | 初期値 | 必須 | 制約・境界 | エラー時 |
 |---|---|---|---|---|---|
-| Project | repository folder | なし | 必須 | canonical regular directory、Git worktree、同一path重複不可 | 入力を登録せず、再選択とcancelを残す |
+| Project | repository folder | なし | 必須 | canonical regular directory、同一path重複不可。非Gitまたはorigin未設定はsetupへ進み、登録確定時にはGit worktreeかつorigin設定済みであること | 入力を登録せず、setup入力、再選択とcancelを残す |
 | Workspace | project | projectが1件ならそのproject、複数なら直前選択または先頭 | 必須 | 登録済みProject IDだけ | 入力保持、該当fieldへerror |
 | Workspace | name | `ws-MMDD-<random 4文字>` | 必須 | trim後1〜80 Unicode scalar、改行不可。Git branch/worktree pathへはnative側で安全なslugとopaque IDを使用し、表示nameをpathへ直接使用しない | 入力保持、該当fieldへerror |
 | Filter | query | 空 | 任意 | 0〜200 Unicode scalar | 200超を受け付けず一覧を維持 |

@@ -73,6 +73,26 @@ export interface ProjectRecord {
   readonly updatedAt: string
 }
 
+export interface ProjectSetupCandidate {
+  readonly setupId: string
+  readonly folderName: string
+  readonly gitStatus: "not_initialized" | "ready"
+  readonly githubOwnerStatus:
+    | "not_checked"
+    | "ready"
+    | "cli_missing"
+    | "auth_required"
+    | "unavailable"
+  readonly githubOwners: readonly string[]
+  readonly suggestedRepositoryName: string
+}
+
+export interface ProjectRegistrationResult {
+  readonly outcome: "selected" | "canceled" | "setup_required"
+  readonly state: WorkspaceAdapterState
+  readonly setup?: ProjectSetupCandidate
+}
+
 export interface AttachmentItem {
   readonly id: string
   readonly name: string
@@ -239,8 +259,17 @@ export interface WorkspaceViewAdapter {
   ) => Promise<WorkspaceAdapterTimelinePage>
   readonly requestAddProject?: () =>
     | void
-    | WorkspaceAdapterState
-    | Promise<void | WorkspaceAdapterState>
+    | ProjectRegistrationResult
+    | Promise<void | ProjectRegistrationResult>
+  readonly initializeProjectGit?: (
+    setupId: string,
+  ) => Promise<ProjectRegistrationResult>
+  readonly setupProjectGithub?: (
+    setupId: string,
+    owner: string,
+    repository: string,
+  ) => Promise<ProjectRegistrationResult>
+  readonly cancelProjectSetup?: (setupId: string) => Promise<void>
   readonly requestAddWorkspace?: (
     workspace: WorkspaceCreateRequest,
   ) => void | WorkspaceAdapterState | Promise<void | WorkspaceAdapterState>

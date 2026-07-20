@@ -29,6 +29,7 @@ import {
 } from "@/features/readiness"
 import { DemoTransport } from "@/features/runtime"
 import type {
+  ProjectRegistrationResult,
   SendTurnRequest,
   WorkspaceAdapterState,
   WorkspaceCodexState,
@@ -699,6 +700,93 @@ describe("WorkspaceShell", () => {
     expect(within(navigation).getByText("feature/alpha")).toBeVisible()
     expect(within(navigation).getByText("feature/beta")).toBeVisible()
     expect(filterButton).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("sets up Git and GitHub before registering a selected project folder", async () => {
+    const user = userEvent.setup()
+    const state = nativeWorkspaceState()
+    const setupRequired = (
+      gitStatus: "not_initialized" | "ready",
+    ): ProjectRegistrationResult => ({
+      outcome: "setup_required",
+      state,
+      setup: {
+        setupId: "project-setup-fixture",
+        folderName: "new-companion-tool",
+        gitStatus,
+        githubOwnerStatus: gitStatus === "ready" ? "ready" : "not_checked",
+        githubOwners:
+          gitStatus === "ready" ? ["fixture-user", "fixture-org"] : [],
+        suggestedRepositoryName: "new-companion-tool",
+      },
+    })
+    const requestAddProject = vi
+      .fn<() => Promise<ProjectRegistrationResult>>()
+      .mockResolvedValue(setupRequired("not_initialized"))
+    const initializeProjectGit = vi
+      .fn<(setupId: string) => Promise<ProjectRegistrationResult>>()
+      .mockResolvedValue(setupRequired("ready"))
+    const setupProjectGithub = vi
+      .fn<
+        (
+          setupId: string,
+          owner: string,
+          repository: string,
+        ) => Promise<ProjectRegistrationResult>
+      >()
+      .mockResolvedValue({ outcome: "selected", state })
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      requestAddProject,
+      initializeProjectGit,
+      setupProjectGithub,
+      cancelProjectSetup: () => Promise.resolve(),
+    }
+
+    renderWorkspace(adapter)
+    await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    await user.click(screen.getByRole("button", { name: "Add project" }))
+
+    const setupDialog = await screen.findByRole("dialog", {
+      name: "Set up project",
+    })
+    expect(
+      within(setupDialog).getByText(
+        "This creates Git metadata in the selected folder. If you cancel afterward, the Git initialization is kept.",
+      ),
+    ).toBeVisible()
+    await user.click(
+      within(setupDialog).getByRole("button", { name: "Initialize Git" }),
+    )
+    expect(initializeProjectGit).toHaveBeenCalledWith("project-setup-fixture")
+
+    const owner = await within(setupDialog).findByRole("combobox", {
+      name: "Organization or user",
+    })
+    fireEvent.change(owner, { target: { value: "fixture-org" } })
+    const repository = within(setupDialog).getByRole("textbox", {
+      name: "Repository name",
+    })
+    expect(repository).toHaveValue("new-companion-tool")
+    await user.clear(repository)
+    await user.type(repository, "reviewable-tool")
+    await user.click(
+      within(setupDialog).getByRole("button", { name: "Set up GitHub" }),
+    )
+
+    expect(setupProjectGithub).toHaveBeenCalledWith(
+      "project-setup-fixture",
+      "fixture-org",
+      "reviewable-tool",
+    )
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Set up project" }),
+      ).not.toBeInTheDocument(),
+    )
   })
 
   it("keeps duplicate native close requests behind one safe cancellation", async () => {

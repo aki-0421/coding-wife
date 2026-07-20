@@ -4,14 +4,14 @@ use super::service::WorkspaceHistoryService;
 use super::types::{
     AppSaveCharacterContextRequest, AppendDomainEventRequest, AppendDomainEventResponse,
     ContextSnapshotView, ProjectGetContextRequest, ProjectSaveContextRequest, ProjectSelectRequest,
-    TimelinePage, VersionedCharacterContext, VersionedProjectContext, WorkspaceArchiveRequest,
-    WorkspaceCancelRequest, WorkspaceCommandError, WorkspaceCreateSessionRequest,
-    WorkspaceDeleteChallengeRequest, WorkspaceDeleteChallengeView, WorkspaceDeleteRequest,
-    WorkspaceDraftView, WorkspaceLoadEditableContextRequest, WorkspacePickResponse,
-    WorkspaceRecheckRequest, WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest,
-    WorkspaceSaveTimelineAnchorRequest, WorkspaceSelectRequest, WorkspaceStateSnapshot,
-    WorkspaceSummary, WorkspaceTimelineAnchorView, WorkspaceTimelineRequest,
-    WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
+    ProjectSetupGithubRequest, ProjectSetupRequest, TimelinePage, VersionedCharacterContext,
+    VersionedProjectContext, WorkspaceArchiveRequest, WorkspaceCancelRequest,
+    WorkspaceCommandError, WorkspaceCreateSessionRequest, WorkspaceDeleteChallengeRequest,
+    WorkspaceDeleteChallengeView, WorkspaceDeleteRequest, WorkspaceDraftView,
+    WorkspaceLoadEditableContextRequest, WorkspacePickResponse, WorkspaceRecheckRequest,
+    WorkspaceSaveContextRequest, WorkspaceSaveDraftRequest, WorkspaceSaveTimelineAnchorRequest,
+    WorkspaceSelectRequest, WorkspaceStateSnapshot, WorkspaceSummary, WorkspaceTimelineAnchorView,
+    WorkspaceTimelineRequest, WorkspaceTurnContextSnapshot, WorkspaceUpdateLifecycleRequest,
 };
 
 #[tauri::command]
@@ -26,6 +26,30 @@ pub async fn workspace_pick_register(
     service: State<'_, WorkspaceHistoryService>,
 ) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
     service.pick_register().await
+}
+
+#[tauri::command]
+pub async fn workspace_project_setup_git_init(
+    request: ProjectSetupRequest,
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
+    service.initialize_project_git(request).await
+}
+
+#[tauri::command]
+pub async fn workspace_project_setup_github(
+    request: ProjectSetupGithubRequest,
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
+    service.setup_project_github(request).await
+}
+
+#[tauri::command]
+pub async fn workspace_project_setup_cancel(
+    request: ProjectSetupRequest,
+    service: State<'_, WorkspaceHistoryService>,
+) -> Result<WorkspacePickResponse, WorkspaceCommandError> {
+    service.cancel_project_setup(request).await
 }
 
 #[tauri::command]

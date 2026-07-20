@@ -59,6 +59,7 @@ import {
 import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceCreateForm } from "@/features/workspace-view/WorkspaceCreateForm"
+import { ProjectSetupDialog } from "@/features/workspace-view/ProjectSetupDialog"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
 import {
   workspaceTabs,
@@ -971,6 +972,19 @@ export function WorkspaceShell({
             />
           </Empty>
         </section>
+      )}
+
+      {view.projectSetup === null ? null : (
+        <ProjectSetupDialog
+          copy={copy}
+          key={view.projectSetup.candidate.setupId}
+          onCancel={() => void view.cancelProjectSetup()}
+          onInitializeGit={() => void view.initializeProjectGit()}
+          onSetupGithub={(owner, repository) =>
+            void view.setupProjectGithub(owner, repository)
+          }
+          setup={view.projectSetup}
+        />
       )}
 
       <Dialog

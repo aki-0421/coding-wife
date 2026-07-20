@@ -160,8 +160,15 @@ export class DemoWorkspaceHistoryTransport
   private contextCounter = 0
   private eventCounter = 0
   private requestQueue: Promise<void> = Promise.resolve()
+  private demoSetupActive = false
+  private demoSetupGitReady = false
 
-  constructor() {
+  constructor(
+    private readonly options: {
+      readonly projectSetup?: "git" | "github"
+    } = {},
+  ) {
+    this.demoSetupGitReady = options.projectSetup === "github"
     for (const workspace of this.workspaces) {
       if (!this.projectContexts.has(workspace.projectId)) {
         this.projectContexts.set(
@@ -212,6 +219,18 @@ export class DemoWorkspaceHistoryTransport
         return this.state()
       case workspaceHistoryCommands.pickRegister:
         return this.pickRegister()
+      case workspaceHistoryCommands.initializeProjectGit:
+        return this.initializeProjectGit(
+          request as WorkspaceHistoryRequestMap["workspace_project_setup_git_init"],
+        )
+      case workspaceHistoryCommands.setupProjectGithub:
+        return this.setupProjectGithub(
+          request as WorkspaceHistoryRequestMap["workspace_project_setup_github"],
+        )
+      case workspaceHistoryCommands.cancelProjectSetup:
+        return this.cancelProjectSetup(
+          request as WorkspaceHistoryRequestMap["workspace_project_setup_cancel"],
+        )
       case workspaceHistoryCommands.createSession:
         return this.createSession(
           request as WorkspaceHistoryRequestMap["workspace_create_session"],
@@ -357,6 +376,87 @@ export class DemoWorkspaceHistoryTransport
   }
 
   private pickRegister(): WorkspaceHistoryResponseMap["workspace_pick_register"] {
+    if (this.options.projectSetup !== undefined) {
+      this.demoSetupActive = true
+      return this.projectSetupResponse()
+    }
+    return this.completeProjectRegistration()
+  }
+
+  private projectSetupResponse(): WorkspaceHistoryResponseMap["workspace_pick_register"] {
+    return {
+      schemaVersion: 1,
+      outcome: "setup_required",
+      state: this.state(),
+      setup: {
+        schemaVersion: 1,
+        setupId: "project-setup-demo",
+        folderName: "new-companion-tool",
+        gitStatus: this.demoSetupGitReady ? "ready" : "not_initialized",
+        githubOwnerStatus: this.demoSetupGitReady ? "ready" : "not_checked",
+        githubOwners: this.demoSetupGitReady
+          ? ["aki-0421", "openai-build-week"]
+          : [],
+        suggestedRepositoryName: "new-companion-tool",
+      },
+    }
+  }
+
+  private initializeProjectGit(
+    request: WorkspaceHistoryRequestMap["workspace_project_setup_git_init"],
+  ): WorkspaceHistoryResponseMap["workspace_project_setup_git_init"] {
+    this.requireDemoSetup(request.setupId)
+    this.demoSetupGitReady = true
+    return this.projectSetupResponse()
+  }
+
+  private setupProjectGithub(
+    request: WorkspaceHistoryRequestMap["workspace_project_setup_github"],
+  ): WorkspaceHistoryResponseMap["workspace_project_setup_github"] {
+    this.requireDemoSetup(request.setupId)
+    if (
+      !this.demoSetupGitReady ||
+      !["aki-0421", "openai-build-week"].includes(request.owner) ||
+      request.repository.trim().length === 0
+    ) {
+      throw this.error(
+        "PROJECT-SETUP-INVALID",
+        workspaceHistoryCommands.setupProjectGithub,
+        true,
+      )
+    }
+    this.demoSetupActive = false
+    return this.completeProjectRegistration(
+      `${request.owner}/${request.repository.trim()}`,
+    )
+  }
+
+  private cancelProjectSetup(
+    request: WorkspaceHistoryRequestMap["workspace_project_setup_cancel"],
+  ): WorkspaceHistoryResponseMap["workspace_project_setup_cancel"] {
+    this.requireDemoSetup(request.setupId)
+    this.demoSetupActive = false
+    return {
+      schemaVersion: 1,
+      outcome: "canceled",
+      state: this.state(),
+      setup: null,
+    }
+  }
+
+  private requireDemoSetup(setupId: string): void {
+    if (!this.demoSetupActive || setupId !== "project-setup-demo") {
+      throw this.error(
+        "PROJECT-SETUP-NOT-FOUND",
+        workspaceHistoryCommands.cancelProjectSetup,
+        true,
+      )
+    }
+  }
+
+  private completeProjectRegistration(
+    githubRepository: string | null = null,
+  ): WorkspaceHistoryResponseMap["workspace_pick_register"] {
     const existing = this.projects.find(
       (project) => project.projectId === "project-demo-selected",
     )
@@ -372,7 +472,7 @@ export class DemoWorkspaceHistoryTransport
             schemaVersion: 1,
             projectId: "project-demo-selected",
             name: "selected-project",
-            githubRepository: null,
+            githubRepository,
             health: "ready",
             workspaceCount: 0,
             createdAt: timestamp,
@@ -408,7 +508,12 @@ export class DemoWorkspaceHistoryTransport
         }
       }
     }
-    return { schemaVersion: 1, outcome: "selected", state: this.state() }
+    return {
+      schemaVersion: 1,
+      outcome: "selected",
+      state: this.state(),
+      setup: null,
+    }
   }
 
   private createSession(
