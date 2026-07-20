@@ -227,7 +227,7 @@ describe("NarrationSettings", () => {
     setup()
 
     expect(
-      await screen.findByText("App-owned · background support"),
+      await screen.findByText("App-generated · commit explanation"),
     ).toBeVisible()
     expect(screen.getByRole("heading", { name: "音声" })).toBeVisible()
     expect(screen.getByText("ローカルのみ · macOS")).toBeVisible()

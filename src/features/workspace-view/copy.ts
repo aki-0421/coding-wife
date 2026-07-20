@@ -401,7 +401,6 @@ const en = {
       character_context: "Character context",
       companion: "Companion",
       audio: "Audio",
-      support: "Support",
       diagnostics: "Diagnostics",
       history: "History & privacy",
     },
@@ -524,12 +523,6 @@ const en = {
       "Off by default. No external request is made by this UI preview.",
     mute: "Mute",
     rate: "Speech rate",
-    supportTitle: "Support",
-    supportGlobal: "Enable isolated support",
-    supportDescription:
-      "Requires a proven ephemeral, tool-free runtime. It remains off in preview mode.",
-    presence: "Presence narration",
-    reviewer: "Commit explainer",
     diagnosticsTitle: "Diagnostics",
     recheck: "Recheck runtime",
     runtimeMode: "Runtime mode",
@@ -548,7 +541,7 @@ const en = {
       "Workspace metadata, activity, drafts, context, and evidence exist only for this preview. Reloading restores the bundled demo.",
     neverStored: "Never stored",
     neverStoredBody:
-      "Raw reasoning, generated audio, support prompt/response, and raw secrets.",
+      "Raw reasoning, generated audio, commit explanation input/output, and raw secrets.",
     deleteHistory: "Delete workspace history",
     deleteDisabled: "No connected history service; nothing was deleted.",
     deleteReady:
@@ -985,7 +978,6 @@ const ja: typeof en = {
       character_context: "キャラクターコンテキスト",
       companion: "コンパニオン",
       audio: "音声",
-      support: "支援",
       diagnostics: "診断",
       history: "履歴とプライバシー",
     },
@@ -1108,12 +1100,6 @@ const ja: typeof en = {
       "初期値はoffです。このUI previewから外部requestは行いません。",
     mute: "ミュート",
     rate: "読み上げ速度",
-    supportTitle: "支援",
-    supportGlobal: "分離支援を有効化",
-    supportDescription:
-      "toolなしのephemeral runtimeを証明する必要があるため、previewではoffを維持します。",
-    presence: "状況実況",
-    reviewer: "コミット説明",
     diagnosticsTitle: "診断",
     recheck: "実行環境を再確認",
     runtimeMode: "実行モード",
@@ -1132,7 +1118,7 @@ const ja: typeof en = {
       "ワークスペースのメタデータ、アクティビティ、下書き、コンテキスト、証拠はこのプレビューの間だけ保持されます。再読み込みすると同梱デモに戻ります。",
     neverStored: "保存しない",
     neverStoredBody:
-      "推論の生データ、生成音声、支援用の入出力、秘匿情報の生データ。",
+      "推論の生データ、生成音声、コミット説明の入出力、秘匿情報の生データ。",
     deleteHistory: "ワークスペース履歴を削除",
     deleteDisabled: "履歴サービスは未接続です。何も削除していません。",
     deleteReady:

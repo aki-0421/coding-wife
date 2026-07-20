@@ -1428,7 +1428,7 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
     expect(screen.getByRole("button", { name: "Companion" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Audio" })).toBeVisible()
-    expect(screen.getByRole("button", { name: "Support" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Support" })).toBeNull()
     expect(screen.getByRole("button", { name: "Diagnostics" })).toBeVisible()
     expect(screen.queryByRole("button", { name: "Project context" })).toBeNull()
     expect(

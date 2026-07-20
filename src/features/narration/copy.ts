@@ -58,7 +58,7 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
       "字幕を正本とし、音声は任意のローカル補助として使います。音声や説明文をネットワークへ送信しません。",
     localOnly: "ローカルのみ · macOS",
     sourceLabel: "コミット説明のソース",
-    sourceValue: "App-owned · background support",
+    sourceValue: "アプリ内生成 · コミット説明",
     sourceDescription:
       "main session や sub-agent の出力は読み上げません。説明は「詳しく教えて」の後だけ表示します。",
     enable: "TTSを有効にする",
@@ -122,7 +122,7 @@ export const narrationCopy: Readonly<Record<NarrationLocale, NarrationCopy>> = {
       "Captions are the source of truth. Optional speech stays on this Mac and never sends narration or explanations over the network.",
     localOnly: "Local only · macOS",
     sourceLabel: "Commit explanation source",
-    sourceValue: "App-owned · background support",
+    sourceValue: "App-generated · commit explanation",
     sourceDescription:
       "Main-session and sub-agent output is never narrated. Explanations appear only after “Tell me more.”",
     enable: "Enable TTS",
