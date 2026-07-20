@@ -35,7 +35,7 @@ status: "Approved"
 | Projects          | appへ登録しているGit project一覧、workspace件数、project詳細、Project context、登録解除                 |
 | Character context | app-globalなname、tone、speech density、behavior、prohibited expressions                                |
 | Companion         | app-globalなbundled Hiyoriとcustom 1枠、選択、import/置換、preview、semantic mapping、provenance、delete、runtime status |
-| Audio             | app共通のlocal TTS enable、voice、rate、mute、test、reset                                                |
+| Audio             | app共通のTTS enable、設定済みprovider選択、provider tab、API key、model、voice、speed、test、reset       |
 | Support           | app共通のsupport role enable、readiness、capacity、usage、sanitized error                                |
 | Diagnostics       | OS/app、Codex、Git、DB、Live2D、audio、supportのnative readinessとrecheck                                |
 
@@ -83,9 +83,9 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | ---------- | --------------------------------- | ---------------------------------------------- | ---------------------- | ----------------------- |
 | 初期化中   | preference/readiness未取得        | field shape skeleton、loading status           | backのみ可             | snapshot取得またはerror |
 | 通常       | snapshot取得済み                  | 7 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
-| データなし | voiceまたはdiagnostic resultが0件 | 理由とRetry                                    | 影響しないsectionは可  | 再取得成功              |
+| データなし | 設定済みTTS providerまたはdiagnostic resultが0件 | provider未設定理由と設定tab、またはRetry       | TTS toggle/provider select以外は可 | API key保存または再取得成功 |
 | 処理中     | save、test、reset、recheck中      | 操作箇所のprocessing status                    | 同一操作の二重実行不可 | terminal result         |
-| オフライン | network/Codex unavailable         | local settingは表示、診断はBlocked/Unavailable | local saveとrecheck可  | readiness更新           |
+| オフライン | network/Codex unavailable         | 保存済み設定は表示し、OpenAI testはUnavailable | 設定保存とrecheck可    | readiness更新           |
 | エラー     | storeまたはdiagnostic失敗         | safe code、前snapshot、Retry                   | 破壊的fallback不可     | retry成功               |
 | 権限不足   | native operation拒否              | localized reason、変更前値                     | scope外操作不可        | permission回復後のretry |
 
@@ -114,7 +114,12 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | Language             | OS locale | 必須     | `ja` / `en`                           | field直下、前言語維持 | 選択時   |
 | Character context    | `Sol`と既定presentation | 任意 | display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
 | Project context      | 空       | 任意 | goal / constraints / notes各8,000、配列各20件、総量32,000 scalar、project-relative reference | field直下、draft維持 | Save |
-| Audio settings       | off       | 条件付き | verified local voice、rate 0.75〜1.25 | Audio内Alert          | Save     |
+| TTS enabled          | off       | 必須     | 保存済みAPI keyと選択可能providerがある時だけon | toggle直下、offへfail closed | Save |
+| TTS provider         | なし      | 条件付き | 設定済みproviderだけを候補表示。0件ではselectをdisabledにして未設定表示 | provider select直下 | Save |
+| OpenAI API key       | 空        | 条件付き | password input、trim後1〜512文字。保存済み値はWebViewへ返さず、設定済み状態だけを返す | OpenAI tab内、入力値維持 | Save |
+| OpenAI model         | `gpt-4o-mini-tts` | 条件付き | app allowlist内のSpeech API対応model | OpenAI tab内 | Save |
+| OpenAI voice         | `marin`   | 条件付き | 選択modelで利用可能な組み込みvoice allowlist | OpenAI tab内 | Save |
+| Speech speed         | 1.0       | 必須     | 0.75〜1.25、0.05刻み | OpenAI tab内 | Save |
 | Support controls     | disabled  | 条件付き | approved role/policyだけ              | Support内Alert        | toggle時 |
 
 ## ネイティブ連携
@@ -125,7 +130,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 | Character context load/save | Rust SQLite             | app character context commands     | global singleton、expected version    | draft維持         | conflictまたはsafe code                |
 | Project context load/save | Rust SQLite | `project_context_get` / `project_context_save` | registered Project ID、expected version、canonical project-relative reference | draft維持 | conflictまたはsafe code |
 | model import/select/mapping/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1 | quarantine cleanup、前selection維持 | bundled delete拒否、置換/削除失敗時は前slotとselection維持 |
-| Audio取得・保存・test       | Rust local process/store | `narration_*`                      | fixed `/usr/bin/say`、voice allowlist | process group停止 | caption維持、TTS offへfail closed     |
+| Audio取得・保存・test       | Rust provider adapter/private store | `narration_*`                 | fixed OpenAI Speech endpoint、Bearer secret、model/voice allowlist、owner-only secret、fixed audio player | request/playback停止 | caption維持、TTS offへfail closed |
 | Support control             | Rust supervisor          | `configure/cancel_support`         | role allowlist、budget固定            | 前config維持      | disabled fallback                     |
 | readiness recheck           | Rust readiness service   | `run_diagnostic_check`             | read-only check                       | 前snapshot維持    | stale snapshotとsafe code             |
 | project一覧・登録解除       | Rust workspace store     | `workspace_list` / `workspace_unregister` | typed Project ID、metadata-only mutation | 一覧維持 | repository/worktreeを変更せずsafe code |
@@ -143,7 +148,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit/Settings tabを表示
 
 ## データ保持
 
-Project ID単位のProject context、言語だけを保持する`AppPreferencesV2`、app-global Character context、character library selection/mapping、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。`AppPreferencesV1`からはlocaleだけを移行し、廃止したreduced motion、character visibility、Reset Preferences、Reset UI stateを公開しない。Projects一覧と詳細の表示だけではworkspace history、Git state、他projectのdraftを変更しない。
+Project ID単位のProject context、言語だけを保持する`AppPreferencesV2`、app-global Character context、character library selection/mapping、Narration settings、Support metadata、readiness snapshotの正本と失敗契約は各要件定義書に従う。NarrationのAPI keyはowner-only native storeだけに保存し、WebView、diagnostics、logへ平文を返さない。`AppPreferencesV1`からはlocaleだけを移行し、廃止したreduced motion、character visibility、Reset Preferences、Reset UI stateを公開しない。Projects一覧と詳細の表示だけではworkspace history、Git state、他projectのdraftを変更しない。
 
 ## OS差分
 
@@ -152,6 +157,8 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 ## アクセシビリティ
 
 - gearは`App settings / アプリ設定`というscopeを含むaccessible nameと`aria-current`を持つ。
+- Audioのfocus順はTTS toggle、provider select、provider tabs、API key、model、voice、speed、test、save/resetとし、mute controlとcommit presentation statusを設定画面へ重複表示しない。
+- API keyは`type=password`とし、保存済み値の伏字文字数や末尾を再現せず、`設定済み / Configured`という状態だけをtextでも示す。
 - 画面進入時にapp settings headingへfocusし、Back後はactive workspace tabへfocusを戻す。
 - project行は名前、repository、workspace件数を含むaccessible nameを持ち、詳細から一覧へ戻ると起点projectへfocusを戻す。
 - section navigation、error、readinessを色だけで表現しない。
