@@ -1,22 +1,26 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ActivityIcon,
   AlertTriangleIcon,
   ArrowLeftIcon,
-  BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  DatabaseIcon,
   FolderIcon,
   Mic2Icon,
   Settings2Icon,
-  ShieldCheckIcon,
   SparklesIcon,
   type LucideIcon,
 } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -43,27 +47,25 @@ import {
   CharacterModelLibrarySettings,
   getCharacterErrorMessage,
   type CharacterRuntimeView,
+  type CharacterPackView,
 } from "@/features/character"
 import { useI18n } from "@/features/localization"
 import { NarrationSettings } from "@/features/narration"
-import {
-  checkById,
-  NativeReadinessDiagnostics,
-  ReadinessStatusBadge,
-  useNativeReadiness,
-} from "@/features/readiness"
-import { useAppPreferences } from "@/features/preferences"
-import { SupportControlsSettings } from "@/features/support-controls"
+import { NativeReadinessDiagnostics } from "@/features/readiness"
 import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
 import { EditableContextSection } from "@/features/workspace-view/EditableContextSection"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
-import type { EditableSettingsContextModel } from "@/features/workspace-view/useEditableSettingsContext"
+import {
+  useEditableSettingsContext,
+  type CharacterContextTarget,
+  type EditableSettingsContextModel,
+} from "@/features/workspace-view/useEditableSettingsContext"
 import type { RuntimeState } from "@/features/runtime"
 import type {
   AppSettingsSection,
   ProjectRecord,
   SettingsSection,
-  WorkspaceAdapterState,
+  WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 import { cn } from "@/lib/utils"
 
@@ -75,6 +77,7 @@ interface CharacterRuntimeSettingsProps {
 }
 
 interface AppSettingsViewProps extends CharacterRuntimeSettingsProps {
+  readonly adapter: WorkspaceViewAdapter | undefined
   readonly contextModel: EditableSettingsContextModel
   readonly runtimeState: RuntimeState
   readonly section: AppSettingsSection
@@ -83,126 +86,11 @@ interface AppSettingsViewProps extends CharacterRuntimeSettingsProps {
   readonly projects: readonly ProjectRecord[]
   readonly selectedProjectId: string | null
   readonly projectActionPending: boolean
-  readonly onBack: () => void
   readonly onMutedChange: (muted: boolean) => void
   readonly onSectionChange: (section: AppSettingsSection) => void
   readonly onOpenProject: (projectId: string) => void
   readonly onCloseProject: () => void
   readonly onUnregisterProject: (projectId: string) => Promise<boolean>
-}
-
-interface WorkspaceSettingsViewProps {
-  readonly copy: WorkspaceCopy
-  readonly history: WorkspaceAdapterState["history"]
-  readonly workspaceLabel: string
-  readonly onDeleteHistory: () => Promise<boolean>
-}
-
-function CharacterReadinessBadge({
-  copy,
-  runtime,
-}: Pick<CharacterRuntimeSettingsProps, "copy"> & {
-  readonly runtime: CharacterRuntimeView
-}) {
-  const label = {
-    loading: copy.settingsView.live2dLoading,
-    ready: copy.settingsView.live2dReady,
-    recovering: copy.settingsView.live2dRecovering,
-    degraded: copy.settingsView.live2dDegraded,
-    error: copy.settingsView.live2dError,
-    hidden: copy.settingsView.live2dHidden,
-    unknown: copy.settingsView.live2dUnknown,
-  }[runtime.readiness]
-  const variant =
-    runtime.readiness === "ready"
-      ? "success"
-      : runtime.readiness === "loading" || runtime.readiness === "recovering"
-        ? "running"
-        : runtime.readiness === "error"
-          ? "destructive"
-          : "outline"
-
-  return (
-    <Badge
-      data-character-runtime-readiness={runtime.readiness}
-      variant={variant}
-    >
-      {label}
-    </Badge>
-  )
-}
-
-function CharacterRuntimeDetails({
-  characterRuntime,
-  copy,
-  muted,
-}: Pick<CharacterRuntimeSettingsProps, "characterRuntime" | "copy" | "muted">) {
-  const rendererLabel =
-    characterRuntime.rendererKind === "builtin_hiyori"
-      ? copy.settingsView.builtinRenderer
-      : copy.settingsView.externalRenderer
-  return (
-    <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-lg gap-y-xs text-caption">
-      <dt className="text-muted-foreground">{copy.settingsView.renderer}</dt>
-      <dd className="m-0 text-foreground">{rendererLabel}</dd>
-      {characterRuntime.pack ? (
-        <>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.bundledModel}
-          </dt>
-          <dd className="m-0 text-foreground">
-            {characterRuntime.pack.displayName}
-          </dd>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.bundledVersion}
-          </dt>
-          <dd className="m-0 font-mono text-foreground">
-            {characterRuntime.pack.bundledVersion}
-          </dd>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.illustrationCredit}
-          </dt>
-          <dd className="m-0 text-foreground">
-            {characterRuntime.pack.illustration}
-          </dd>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.modelingCredit}
-          </dt>
-          <dd className="m-0 text-foreground">
-            {characterRuntime.pack.modeling}
-          </dd>
-          <dt className="text-muted-foreground">
-            {copy.settingsView.noticeHash}
-          </dt>
-          <dd className="m-0 truncate font-mono text-label text-foreground">
-            {characterRuntime.pack.noticeSha256}
-          </dd>
-        </>
-      ) : null}
-      <dt className="text-muted-foreground">{copy.settingsView.phase}</dt>
-      <dd className="m-0 text-foreground">
-        {copy.settingsView.characterPhases[characterRuntime.phase]}
-      </dd>
-      <dt className="text-muted-foreground">{copy.settingsView.fallback}</dt>
-      <dd className="m-0 text-foreground">
-        {copy.settingsView.characterFallbacks[characterRuntime.fallback]}
-      </dd>
-      <dt className="text-muted-foreground">
-        {copy.settingsView.motionPolicy}
-      </dt>
-      <dd className="m-0 text-foreground">
-        {copy.settingsView.characterPolicies[characterRuntime.motionPolicy]}
-      </dd>
-      <dt className="text-muted-foreground">{copy.settingsView.audioState}</dt>
-      <dd className="m-0 text-foreground">
-        {muted ? copy.character.muted : copy.character.unmuted}
-      </dd>
-      <dt className="text-muted-foreground">{copy.settingsView.lastError}</dt>
-      <dd className="m-0 font-mono text-label text-foreground">
-        {characterRuntime.lastErrorCode ?? copy.settingsView.noRecordedError}
-      </dd>
-    </dl>
-  )
 }
 
 function CharacterRuntimeErrorAlert({
@@ -246,20 +134,16 @@ function CharacterRuntimeErrorAlert({
 const appSectionOrder: readonly AppSettingsSection[] = [
   "general",
   "projects",
-  "character_context",
-  "companion",
+  "character",
   "audio",
-  "support",
   "diagnostics",
 ]
 
 const sectionIcons = {
   general: Settings2Icon,
   projects: FolderIcon,
-  character_context: BotIcon,
-  companion: SparklesIcon,
+  character: SparklesIcon,
   audio: Mic2Icon,
-  support: ShieldCheckIcon,
   diagnostics: ActivityIcon,
 } as const
 
@@ -316,21 +200,26 @@ function SettingsSectionPicker<Section extends SettingsSection>({
   sections,
   section,
   onSectionChange,
+  triggerRef,
 }: {
   readonly copy: WorkspaceCopy
   readonly label: string
   readonly sections: readonly Section[]
   readonly section: Section
   readonly onSectionChange: (section: Section) => void
+  readonly triggerRef: React.Ref<HTMLButtonElement>
 }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          className="max-w-[45%] min-[1280px]:hidden"
+          aria-current="page"
+          className="-mx-xs max-w-[calc(100dvw-10rem)] px-xs text-display font-semibold text-text-strong min-[1280px]:hidden"
+          data-app-settings-current-section=""
+          ref={triggerRef}
           size="xs"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           <span className="truncate">
             {copy.settingsView.sections[section]}
@@ -349,28 +238,6 @@ function SettingsSectionPicker<Section extends SettingsSection>({
         />
       </PopoverContent>
     </Popover>
-  )
-}
-
-function SettingRow({
-  action,
-  description,
-  label,
-}: {
-  readonly action: React.ReactNode
-  readonly description: string
-  readonly label: string
-}) {
-  return (
-    <div className="flex min-w-0 items-start justify-between gap-xl border-b border-divider py-md max-[700px]:flex-col max-[700px]:gap-sm">
-      <div className="flex min-w-0 max-w-[60ch] flex-col gap-xxs">
-        <span className="text-title text-text-strong">{label}</span>
-        <span className="break-words text-caption text-muted-foreground">
-          {description}
-        </span>
-      </div>
-      <div className="max-w-full shrink-0 max-[700px]:shrink">{action}</div>
-    </div>
   )
 }
 
@@ -396,32 +263,64 @@ function ContextSettings({
   )
 }
 
-function CompanionSettings({
+function CharacterSettings({
+  contextModel,
   characterRuntime,
   copy,
-  muted,
+  onContextTargetChange,
   onRetryCharacter,
-}: CharacterRuntimeSettingsProps) {
+  turnActive,
+}: CharacterRuntimeSettingsProps & {
+  readonly contextModel: EditableSettingsContextModel
+  readonly onContextTargetChange: (pack: CharacterPackView | null) => void
+  readonly turnActive: boolean
+}) {
   return (
     <section className="flex flex-col gap-lg">
-      <div className="flex items-center justify-between gap-md">
-        <h2 className="m-0 text-headline text-text-strong">
-          {copy.settingsView.companionTitle}
-        </h2>
-        <CharacterReadinessBadge copy={copy} runtime={characterRuntime} />
-      </div>
+      <h2 className="m-0 text-headline text-text-strong">
+        {copy.settingsView.characterTitle}
+      </h2>
       <CharacterRuntimeErrorAlert
         characterRuntime={characterRuntime}
         copy={copy}
         onRetryCharacter={onRetryCharacter}
       />
-      <CharacterRuntimeDetails
-        characterRuntime={characterRuntime}
-        copy={copy}
-        muted={muted}
+      <CharacterModelLibrarySettings
+        onDetailPackChange={onContextTargetChange}
+        renderCharacterContext={(pack) => (
+          <CharacterContextSettings
+            copy={copy}
+            model={contextModel}
+            pack={pack}
+            turnActive={turnActive}
+          />
+        )}
       />
-      <CharacterModelLibrarySettings />
     </section>
+  )
+}
+
+function CharacterContextSettings({
+  copy,
+  model,
+  pack,
+  turnActive,
+}: {
+  readonly copy: WorkspaceCopy
+  readonly model: EditableSettingsContextModel
+  readonly pack: CharacterPackView
+  readonly turnActive: boolean
+}) {
+  return (
+    <div className="border-t border-divider pt-xl">
+      <EditableContextSection
+        copy={copy}
+        instanceId={`settings-character-${pack.packId.replaceAll(":", "-")}`}
+        model={model}
+        section="character"
+        turnActive={turnActive}
+      />
+    </div>
   )
 }
 
@@ -433,17 +332,6 @@ function AudioSettings({
     <NarrationSettings
       heading={copy.settingsView.audioTitle}
       workspaceId={workspaceId}
-    />
-  )
-}
-
-function SupportSettings() {
-  const preferences = useAppPreferences()
-  return (
-    <SupportControlsSettings
-      gatewayKind={
-        preferences.snapshot.persistence === "native" ? "native" : "demo"
-      }
     />
   )
 }
@@ -686,181 +574,47 @@ function ProjectsSettings({
   )
 }
 
-function HistorySettings({
-  copy,
-  history,
-  onDeleteHistory,
-}: Pick<WorkspaceSettingsViewProps, "copy" | "history" | "onDeleteHistory">) {
-  const { locale } = useI18n()
-  const nativeReadiness = useNativeReadiness()
-  const nativeHistory = checkById(nativeReadiness.snapshot, "history")
-  const [confirmationOpen, setConfirmationOpen] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const historyActionRef = useRef<HTMLButtonElement>(null)
-  const ephemeral = history.mode === "ephemeral"
-  const nativePersistenceReady = nativeHistory?.status === "ready"
-  const canChangeHistory =
-    ephemeral || (history.mode === "ready" && nativePersistenceReady)
-  const persistenceUnavailable = {
-    en: {
-      title: "Local persistence unavailable",
-      body: "This readiness snapshot does not verify a writable history database. The app does not claim that history is persisted locally.",
-    },
-    ja: {
-      title: "ローカル保存を利用できません",
-      body: "この準備状況スナップショットでは、書き込み可能な履歴データベースを確認できていません。履歴をローカル保存済みとは表示しません。",
-    },
-  }[locale]
-
-  const confirmDelete = async () => {
-    setDeleting(true)
-    try {
-      if (await onDeleteHistory()) setConfirmationOpen(false)
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  return (
-    <section className="flex flex-col gap-xl">
-      <div className="flex flex-wrap items-center justify-between gap-md">
-        <h2 className="m-0 text-headline text-text-strong">
-          {copy.settingsView.historyTitle}
-        </h2>
-        <span
-          data-history-readiness-snapshot={
-            nativeReadiness.snapshot?.snapshotId ?? "pending"
-          }
-        >
-          {nativeHistory === null ? (
-            <Badge variant="running">{copy.settingsView.live2dLoading}</Badge>
-          ) : (
-            <ReadinessStatusBadge
-              locale={locale}
-              stale={
-                nativeReadiness.status === "rechecking" ||
-                nativeReadiness.status === "error"
-              }
-              status={nativeHistory.status}
-            />
-          )}
-        </span>
-      </div>
-      <div className="flex flex-col gap-xs">
-        <h3 className="m-0 flex items-center gap-xs text-title text-text-strong">
-          <DatabaseIcon aria-hidden="true" className="size-3" />
-          {ephemeral
-            ? copy.settingsView.storedEphemeral
-            : nativePersistenceReady
-              ? copy.settingsView.stored
-              : persistenceUnavailable.title}
-        </h3>
-        <p className="m-0 max-w-[70ch] text-caption text-muted-foreground">
-          {ephemeral
-            ? copy.settingsView.storedEphemeralBody
-            : nativePersistenceReady
-              ? copy.settingsView.storedBody
-              : persistenceUnavailable.body}
-        </p>
-      </div>
-      <div className="flex flex-col gap-xs">
-        <h3 className="m-0 flex items-center gap-xs text-title text-text-strong">
-          <ShieldCheckIcon aria-hidden="true" className="size-3" />
-          {copy.settingsView.neverStored}
-        </h3>
-        <p className="m-0 max-w-[70ch] text-caption text-muted-foreground">
-          {copy.settingsView.neverStoredBody}
-        </p>
-      </div>
-      <SettingRow
-        action={
-          <Button
-            disabled={!canChangeHistory}
-            onClick={() => setConfirmationOpen(true)}
-            ref={historyActionRef}
-            size="xs"
-            type="button"
-            variant="destructive"
-          >
-            {ephemeral
-              ? copy.settingsView.resetDemoHistory
-              : copy.settingsView.deleteHistory}
-          </Button>
-        }
-        description={
-          canChangeHistory
-            ? ephemeral
-              ? copy.settingsView.resetDemoReady
-              : copy.settingsView.deleteReady
-            : copy.settingsView.deleteDisabled
-        }
-        label={
-          ephemeral
-            ? copy.settingsView.resetDemoHistory
-            : copy.settingsView.deleteHistory
-        }
-      />
-      <Dialog
-        onOpenChange={(open) => {
-          if (!deleting) setConfirmationOpen(open)
-        }}
-        open={confirmationOpen}
-      >
-        <DialogContent
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            historyActionRef.current?.focus()
-          }}
-          showCloseButton={!deleting}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {ephemeral
-                ? copy.settingsView.resetDemoConfirmTitle
-                : copy.settingsView.deleteConfirmTitle}
-            </DialogTitle>
-            <DialogDescription>
-              {ephemeral
-                ? copy.settingsView.resetDemoConfirmBody
-                : copy.settingsView.deleteConfirmBody}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              disabled={deleting}
-              onClick={() => setConfirmationOpen(false)}
-              type="button"
-              variant="outline"
-            >
-              {copy.settingsView.deleteCancel}
-            </Button>
-            <Button
-              disabled={deleting}
-              onClick={() => void confirmDelete()}
-              type="button"
-              variant="destructive"
-            >
-              {deleting
-                ? ephemeral
-                  ? copy.settingsView.resetDemoInProgress
-                  : copy.settingsView.deleteInProgress
-                : ephemeral
-                  ? copy.settingsView.resetDemoConfirm
-                  : copy.settingsView.deleteConfirm}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
-  )
-}
-
 export function AppSettingsView(props: AppSettingsViewProps) {
-  const headingRef = useRef<HTMLHeadingElement>(null)
+  const desktopBreadcrumbRef = useRef<HTMLSpanElement>(null)
+  const compactBreadcrumbRef = useRef<HTMLButtonElement>(null)
+  const [characterContextTarget, setCharacterContextTarget] =
+    useState<CharacterContextTarget | null>(null)
+  const characterContextModel = useEditableSettingsContext(
+    props.adapter,
+    "__no_project__",
+    characterContextTarget,
+  )
+  const updateCharacterContextTarget = useCallback(
+    (pack: CharacterPackView | null) => {
+      setCharacterContextTarget((current) => {
+        if (pack === null) return null
+        if (
+          current?.packId === pack.packId &&
+          current.displayName === pack.displayName
+        ) {
+          return current
+        }
+        return { packId: pack.packId, displayName: pack.displayName }
+      })
+    },
+    [],
+  )
 
   useEffect(() => {
-    headingRef.current?.focus()
-  }, [])
+    const target = [desktopBreadcrumbRef.current, compactBreadcrumbRef.current]
+      .filter((element): element is HTMLElement => element !== null)
+      .find((element) => element.getClientRects().length > 0)
+    const responsiveFallback =
+      window.innerWidth >= 1280
+        ? desktopBreadcrumbRef.current
+        : compactBreadcrumbRef.current
+    const focusTarget =
+      target ??
+      responsiveFallback ??
+      desktopBreadcrumbRef.current ??
+      compactBreadcrumbRef.current
+    focusTarget?.focus()
+  }, [props.section])
 
   const sectionContent = (() => {
     switch (props.section) {
@@ -873,28 +627,20 @@ export function AppSettingsView(props: AppSettingsViewProps) {
         )
       case "projects":
         return <ProjectsSettings {...props} />
-      case "character_context":
+      case "character":
         return (
-          <ContextSettings
-            character
-            copy={props.copy}
-            contextModel={props.contextModel}
-            turnActive={props.turnActive}
-          />
-        )
-      case "companion":
-        return (
-          <CompanionSettings
+          <CharacterSettings
             characterRuntime={props.characterRuntime}
+            contextModel={characterContextModel}
             copy={props.copy}
             muted={props.muted}
+            onContextTargetChange={updateCharacterContextTarget}
             onRetryCharacter={props.onRetryCharacter}
+            turnActive={props.turnActive}
           />
         )
       case "audio":
         return <AudioSettings {...props} />
-      case "support":
-        return <SupportSettings />
       case "diagnostics":
         return <DiagnosticsSettings />
     }
@@ -902,35 +648,42 @@ export function AppSettingsView(props: AppSettingsViewProps) {
 
   return (
     <section
-      aria-labelledby="app-settings-title"
+      aria-label={props.copy.settingsView.appTitle}
       className="workspace-tabs"
       data-settings-scope="app"
     >
-      <header className="workspace-header flex min-w-0 items-center gap-md border-b border-divider bg-surface px-xl max-[700px]:px-md">
-        <Button onClick={props.onBack} size="xs" type="button" variant="ghost">
-          <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
-          {props.copy.settingsView.backToWorkspace}
-        </Button>
-        <div className="flex min-w-0 flex-1 flex-col gap-xxs">
-          <h1
-            className="m-0 text-balance text-headline text-text-strong"
-            id="app-settings-title"
-            ref={headingRef}
-            tabIndex={-1}
-          >
-            {props.copy.settingsView.appTitle}
-          </h1>
-          <p className="m-0 text-pretty text-caption text-muted-foreground">
-            {props.copy.settingsView.appDescription}
-          </p>
-        </div>
-        <SettingsSectionPicker
-          copy={props.copy}
-          label={props.copy.appSettings}
-          onSectionChange={props.onSectionChange}
-          section={props.section}
-          sections={appSectionOrder}
-        />
+      <header className="workspace-header flex min-w-0 items-center border-b border-divider bg-surface px-xl max-[700px]:px-md">
+        <Breadcrumb
+          aria-label={props.copy.settingsView.appBreadcrumbLabel}
+          className="min-w-0"
+        >
+          <BreadcrumbList className="min-w-0 flex-nowrap gap-sm text-display">
+            <BreadcrumbItem className="min-w-0 max-w-56 shrink">
+              <span className="truncate font-medium text-muted-foreground">
+                {props.copy.settingsView.appTitle}
+              </span>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator className="shrink-0 text-text-disabled" />
+            <BreadcrumbItem className="min-w-0">
+              <BreadcrumbPage
+                className="hidden truncate rounded-control font-semibold text-text-strong outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background min-[1280px]:block"
+                data-app-settings-current-section=""
+                ref={desktopBreadcrumbRef}
+                tabIndex={-1}
+              >
+                {props.copy.settingsView.sections[props.section]}
+              </BreadcrumbPage>
+              <SettingsSectionPicker
+                copy={props.copy}
+                label={props.copy.appSettings}
+                onSectionChange={props.onSectionChange}
+                section={props.section}
+                sections={appSectionOrder}
+                triggerRef={compactBreadcrumbRef}
+              />
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
       </header>
 
       <div className="workspace-view grid size-full min-h-0 min-w-0 grid-cols-[228px_minmax(0,1fr)] overflow-hidden bg-app-bg max-[1279px]:grid-cols-1">
@@ -952,35 +705,6 @@ export function AppSettingsView(props: AppSettingsViewProps) {
           </div>
         </ScrollArea>
       </div>
-    </section>
-  )
-}
-
-export function WorkspaceSettingsView(props: WorkspaceSettingsViewProps) {
-  return (
-    <section
-      aria-labelledby="workspace-settings-title"
-      className="grid size-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-app-bg"
-      data-settings-scope="workspace"
-    >
-      <header className="flex min-h-[58px] min-w-0 items-center border-b border-divider px-xl py-sm max-[700px]:px-md">
-        <div className="flex min-w-0 flex-col gap-xxs">
-          <h1
-            className="m-0 text-balance text-headline text-text-strong"
-            id="workspace-settings-title"
-          >
-            {props.copy.settingsView.workspaceTitle}
-          </h1>
-          <p className="m-0 text-pretty text-caption text-muted-foreground">
-            {props.copy.settingsView.workspaceDescription(props.workspaceLabel)}
-          </p>
-        </div>
-      </header>
-      <ScrollArea className="min-h-0 min-w-0">
-        <div className="mx-auto w-full min-w-0 max-w-[780px] px-2xl py-xl max-[700px]:px-md max-[700px]:py-lg">
-          <HistorySettings {...props} />
-        </div>
-      </ScrollArea>
     </section>
   )
 }

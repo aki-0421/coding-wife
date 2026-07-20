@@ -18,7 +18,7 @@ import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import { Timeline } from "@/features/workspace-view/Timeline"
 import type { TurnUiState } from "@/features/workspace-view/useWorkspaceViewModel"
 import type {
-  CompanionSemanticState,
+  CharacterSemanticState,
   ContextSnapshotItem,
   ReasoningEffort,
   WorkspaceAdapterState,
@@ -31,7 +31,7 @@ import type { ApprovalDecision, PendingRequestView } from "@/lib/contracts"
 import { cn } from "@/lib/utils"
 
 interface ChatViewProps {
-  readonly companionState: CompanionSemanticState
+  readonly characterState: CharacterSemanticState
   readonly connected: boolean
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
@@ -164,7 +164,7 @@ function restoreTimelineAnchor(
 }
 
 export function ChatView({
-  companionState,
+  characterState,
   connected,
   copy,
   draft,
@@ -228,9 +228,9 @@ export function ChatView({
   const timelineAnchorOffset = timelineAnchor?.offset
   const timelineAnchorSequence = timelineAnchor?.sequence
   const effectiveMuted = narration.settingsSnapshot?.settings.muted ?? muted
-  const companionStateLabel =
+  const characterStateLabel =
     copy.character.semanticState[
-      presentationActive ? "reviewing" : companionState
+      presentationActive ? "reviewing" : characterState
     ]
   const toggleMuted = async () => {
     const nextMuted = !effectiveMuted
@@ -418,14 +418,14 @@ export function ChatView({
             <Timeline
               compactStatus={
                 <div
-                  className="companion-status-mobile hidden max-w-full items-center gap-xs rounded-control bg-surface px-xs py-xxs text-caption text-muted-foreground"
-                  data-companion-status-mobile=""
+                  className="character-status-mobile hidden max-w-full items-center gap-xs rounded-control bg-surface px-xs py-xxs text-caption text-muted-foreground"
+                  data-character-status-mobile=""
                 >
                   <span
                     aria-hidden="true"
                     className="size-[7px] rotate-45 border border-muted-foreground"
                   />
-                  <span className="truncate">{companionStateLabel}</span>
+                  <span className="truncate">{characterStateLabel}</span>
                   <Button
                     aria-label={
                       effectiveMuted

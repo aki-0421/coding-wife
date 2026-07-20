@@ -72,7 +72,7 @@ read_when:
 | `CODE-F-052` | main sessionは`gpt-5.6-sol`だけを使用する | thread/start payloadとheader表示が`gpt-5.6-sol`になり、UIまたは保存設定から別modelへ変更できない | Approved | 非該当 |
 | `CODE-F-053` | 利用者は利用可能なreasoning effortを選べる | `gpt-5.6-sol`のmodel/listで`low`と`max`がsupportedReasoningEffortsにある時だけFast=`low`、Max=`max`として表示・送信し、model、service tier、`ultra`をこの操作で変更しない | Approved | 非該当 |
 | `CODE-F-054` | appはactive workspaceのcwdでmain threadを開始する | canonical project rootとselected effortを使ってthreadを1件開始し、別workspace pathを使用しない | Approved | 非該当 |
-| `CODE-F-055` | 利用者は有効なcomposer内容をturnとして送信できる | text、attachment、contextのいずれか1件以上が有効な時、Command+EnterまたはSendで1turnだけ開始する。public instructionは32,000 Unicode scalar以下を維持し、Project ID-scoped Project context、app-global Character context、各version/hash metadata、JSON escaping、固定markerを合成したApp Server向けtext全体は80,000 Unicode scalar以下とする。WebViewとRust supervisorの双方が同じscalar単位でexact 80,000を受理し、80,001、NUL、その他controlをtransport前に拒否する | Approved | 非該当 |
+| `CODE-F-055` | 利用者は有効なcomposer内容をturnとして送信できる | text、attachment、contextのいずれか1件以上が有効な時、Command+EnterまたはSendで1turnだけ開始する。public instructionは32,000 Unicode scalar以下を維持し、Project ID-scoped Project context、nativeで解決した選択pack ID-scoped Character context、pack IDと各version/hash metadata、JSON escaping、固定markerを合成したApp Server向けtext全体は80,000 Unicode scalar以下とする。WebViewとRust supervisorの双方が同じscalar単位でexact 80,000を受理し、80,001、NUL、その他controlをtransport前に拒否する | Approved | 非該当 |
 | `CODE-F-056` | 空composerは送信できない | trim後textが空かつattachmentとcontextが0件ならSendをdisabledにし、Command+Enterでturnを開始しない。attachmentまたはcontextがvalidならtext 0文字でも送信できる | Approved | 非該当 |
 | `CODE-F-057` | 送信成功時だけcomposerをclearする | App Serverがturn startedを受理した後にtextをclearし、validation/transport failureではtextとattachmentを保持する | Approved | 非該当 |
 

@@ -117,7 +117,15 @@ const emptyCharacter: CharacterContext = {
   prohibitedExpressions: [],
 }
 
-const globalCharacterKey = "__app_character__"
+export interface CharacterContextTarget {
+  readonly packId: string
+  readonly displayName: string
+}
+
+const defaultCharacterTarget: CharacterContextTarget = {
+  packId: "builtin:hiyori_pro",
+  displayName: "桃瀬ひより",
+}
 
 export function normalizeContextListDraft(value: string): readonly string[] {
   return value
@@ -260,8 +268,15 @@ function changedFields<T extends object>(local: T, remote: T): string[] {
 export function useEditableSettingsContext(
   adapter: WorkspaceViewAdapter | undefined,
   projectId: string,
+  characterTarget: CharacterContextTarget | null = defaultCharacterTarget,
 ): EditableSettingsContextModel {
   const workspaceId = projectId
+  const characterPackId = characterTarget?.packId ?? null
+  const characterDisplayName = characterTarget?.displayName ?? ""
+  const characterStateKey =
+    characterPackId === null
+      ? "__no_character__"
+      : `character:${characterPackId}`
   const [states, setStates] = useState<
     Readonly<Record<string, SettingsContextState>>
   >({})
@@ -294,24 +309,25 @@ export function useEditableSettingsContext(
       ) => SettingsContextState["character"],
     ) => {
       setStates((current) => {
-        const global = current[globalCharacterKey] ?? loadingState()
+        const characterState = current[characterStateKey] ?? loadingState()
         return {
           ...current,
-          [globalCharacterKey]: {
-            ...global,
-            character: update(global.character),
+          [characterStateKey]: {
+            ...characterState,
+            character: update(characterState.character),
           },
         }
       })
     },
-    [],
+    [characterStateKey],
   )
 
   const loadCharacter = useCallback(
     (force = false) => {
-      const token = (loadGenerations.current.get(globalCharacterKey) ?? 0) + 1
-      loadGenerations.current.set(globalCharacterKey, token)
-      const cached = statesRef.current[globalCharacterKey]?.character
+      if (characterPackId === null) return
+      const token = (loadGenerations.current.get(characterStateKey) ?? 0) + 1
+      loadGenerations.current.set(characterStateKey, token)
+      const cached = statesRef.current[characterStateKey]?.character
       if (!force && cached?.persisted !== null && cached !== undefined) return
       replaceCharacter((current) => ({ ...current, status: "loading" }))
       if (adapter?.loadCharacterContext === undefined) {
@@ -323,35 +339,48 @@ export function useEditableSettingsContext(
         }))
         return
       }
-      void adapter.loadCharacterContext().then(
-        (persisted) => {
-          if (token !== loadGenerations.current.get(globalCharacterKey)) return
-          replaceCharacter(() => ({
-            persisted,
-            draft: persisted.context,
-            listDrafts: characterListDrafts(persisted.context),
-            status: "ready",
-            dirty: false,
-            errorCode: null,
-            fieldError: null,
-            conflict: null,
-          }))
-        },
-        (error: unknown) => {
-          if (token !== loadGenerations.current.get(globalCharacterKey)) return
-          replaceCharacter((current) => ({
-            ...current,
-            status: "error",
-            errorCode: safeErrorCode(
-              error,
-              "APP-CHARACTER-CONTEXT-LOAD-FAILED",
-            ),
-            fieldError: null,
-          }))
-        },
-      )
+      void adapter
+        .loadCharacterContext(characterPackId, characterDisplayName)
+        .then(
+          (persisted) => {
+            if (
+              token !== loadGenerations.current.get(characterStateKey) ||
+              persisted.packId !== characterPackId
+            ) {
+              return
+            }
+            replaceCharacter(() => ({
+              persisted,
+              draft: persisted.context,
+              listDrafts: characterListDrafts(persisted.context),
+              status: "ready",
+              dirty: false,
+              errorCode: null,
+              fieldError: null,
+              conflict: null,
+            }))
+          },
+          (error: unknown) => {
+            if (token !== loadGenerations.current.get(characterStateKey)) return
+            replaceCharacter((current) => ({
+              ...current,
+              status: "error",
+              errorCode: safeErrorCode(
+                error,
+                "APP-CHARACTER-CONTEXT-LOAD-FAILED",
+              ),
+              fieldError: null,
+            }))
+          },
+        )
     },
-    [adapter, replaceCharacter],
+    [
+      adapter,
+      characterDisplayName,
+      characterPackId,
+      characterStateKey,
+      replaceCharacter,
+    ],
   )
 
   const load = useCallback(
@@ -651,7 +680,8 @@ export function useEditableSettingsContext(
   }, [adapter, replaceWorkspace, workspaceId])
 
   const saveCharacter = useCallback(async () => {
-    const current = statesRef.current[globalCharacterKey]?.character
+    if (characterPackId === null) return false
+    const current = statesRef.current[characterStateKey]?.character
     if (
       current?.persisted === null ||
       current === undefined ||
@@ -661,8 +691,8 @@ export function useEditableSettingsContext(
     }
     const expectedVersion = current.persisted.version
     const token =
-      (characterSaveGenerations.current.get(globalCharacterKey) ?? 0) + 1
-    characterSaveGenerations.current.set(globalCharacterKey, token)
+      (characterSaveGenerations.current.get(characterStateKey) ?? 0) + 1
+    characterSaveGenerations.current.set(characterStateKey, token)
     const candidate = characterContextWithLists(
       current.draft,
       current.listDrafts,
@@ -688,8 +718,15 @@ export function useEditableSettingsContext(
       fieldError: null,
     }))
     try {
-      const saved = await adapter.saveCharacterContext(expectedVersion, context)
-      if (token !== characterSaveGenerations.current.get(globalCharacterKey)) {
+      const saved = await adapter.saveCharacterContext(
+        characterPackId,
+        expectedVersion,
+        context,
+      )
+      if (
+        token !== characterSaveGenerations.current.get(characterStateKey) ||
+        saved.packId !== characterPackId
+      ) {
         return false
       }
       replaceCharacter(() => ({
@@ -704,7 +741,7 @@ export function useEditableSettingsContext(
       }))
       return true
     } catch (error) {
-      if (token !== characterSaveGenerations.current.get(globalCharacterKey)) {
+      if (token !== characterSaveGenerations.current.get(characterStateKey)) {
         return false
       }
       const code = safeErrorCode(error, "APP-CHARACTER-CONTEXT-SAVE-FAILED")
@@ -713,9 +750,13 @@ export function useEditableSettingsContext(
         adapter.loadCharacterContext !== undefined
       ) {
         try {
-          const remote = await adapter.loadCharacterContext()
+          const remote = await adapter.loadCharacterContext(
+            characterPackId,
+            characterDisplayName,
+          )
           if (
-            token !== characterSaveGenerations.current.get(globalCharacterKey)
+            token !== characterSaveGenerations.current.get(characterStateKey) ||
+            remote.packId !== characterPackId
           ) {
             return false
           }
@@ -744,7 +785,13 @@ export function useEditableSettingsContext(
       }))
       return false
     }
-  }, [adapter, replaceCharacter])
+  }, [
+    adapter,
+    characterDisplayName,
+    characterPackId,
+    characterStateKey,
+    replaceCharacter,
+  ])
 
   const discardProject = useCallback(() => {
     replaceWorkspace(workspaceId, (state) => ({
@@ -783,11 +830,11 @@ export function useEditableSettingsContext(
   }, [replaceCharacter])
 
   const project = states[workspaceId] ?? loadingState()
-  const globalCharacter =
-    states[globalCharacterKey]?.character ?? loadingState().character
+  const character =
+    states[characterStateKey]?.character ?? loadingState().character
   const current = useMemo(
-    () => ({ project: project.project, character: globalCharacter }),
-    [project.project, globalCharacter],
+    () => ({ project: project.project, character }),
+    [project.project, character],
   )
   return useMemo(
     () => ({

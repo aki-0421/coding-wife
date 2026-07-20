@@ -88,7 +88,7 @@ function createExplanationController(
 function renderEvidence(
   options: {
     readonly active?: boolean
-    readonly companionVisible?: boolean
+    readonly characterVisible?: boolean
     readonly locale?: "ja" | "en"
     readonly transport?: GitReviewTransport
     readonly explanationController?: CommitExplanationController
@@ -104,9 +104,9 @@ function renderEvidence(
       commitExplanationController={options.explanationController}
       locale={options.locale ?? "en"}
       onBackToChat={onBackToChat}
-      {...(options.companionVisible === undefined
+      {...(options.characterVisible === undefined
         ? {}
-        : { companionVisible: options.companionVisible })}
+        : { characterVisible: options.characterVisible })}
       {...(options.onExplanationPresentationTrigger === undefined
         ? {}
         : {
@@ -121,8 +121,8 @@ function renderEvidence(
 }
 
 describe("EvidenceView", () => {
-  it("uses the commit drawer when the companion shares the workspace body", async () => {
-    renderEvidence({ companionVisible: true })
+  it("uses the commit drawer when the character shares the workspace body", async () => {
+    renderEvidence({ characterVisible: true })
 
     expect(
       await screen.findByRole("heading", {
@@ -131,7 +131,7 @@ describe("EvidenceView", () => {
     ).toBeVisible()
     expect(
       screen.getByRole("main", { name: "Commit evidence" }),
-    ).toHaveAttribute("data-evidence-companion", "true")
+    ).toHaveAttribute("data-evidence-character", "true")
     expect(
       screen.getByRole("button", { name: "Open commit list" }),
     ).toBeVisible()

@@ -196,13 +196,13 @@
       "manifestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "mappingVersion": 0,
       "assignments": {
-        "neutral": { "kind": "neutral" },
-        "thinking": { "kind": "neutral" },
-        "working": { "kind": "neutral" },
-        "asking": { "kind": "neutral" },
-        "success": { "kind": "neutral" },
-        "warning": { "kind": "neutral" },
-        "error": { "kind": "neutral" }
+        "neutral": { "kind": "motion", "cueId": "Idle[0]" },
+        "thinking": { "kind": "motion", "cueId": "Idle[1]" },
+        "working": { "kind": "motion", "cueId": "Tap@Body[0]" },
+        "asking": { "kind": "motion", "cueId": "FlickUp[0]" },
+        "success": { "kind": "motion", "cueId": "Tap[1]" },
+        "warning": { "kind": "motion", "cueId": "FlickDown[0]" },
+        "error": { "kind": "motion", "cueId": "Flick@Body[0]" }
       }
     },
     "semanticMappingStatus": "default"

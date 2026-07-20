@@ -156,6 +156,7 @@ export {
 } from "@/lib/contracts/workspace-history"
 export {
   WorkspaceContextContractError,
+  bundledHiyoriCharacterContextPreset,
   parseCharacterContext,
   parseProjectContext,
   parseVersionedCharacterContext,
@@ -164,6 +165,7 @@ export {
   parseWorkspaceTurnContextSnapshot,
   workspaceContextSchemaVersion,
   type CharacterContext,
+  type CharacterGetContextRequest,
   type CharacterTone,
   type ProjectContext,
   type SpeechDensity,

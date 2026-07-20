@@ -11,6 +11,7 @@ const snapshot: WorkspaceTurnContextSnapshot = {
   workspaceId: "workspace-fixture",
   projectVersion: 4,
   projectHash: "a".repeat(64),
+  characterPackId: "builtin:hiyori_pro",
   characterVersion: 3,
   characterHash: "b".repeat(64),
   snapshotHash: "c".repeat(64),
@@ -42,7 +43,9 @@ describe("composeTurnInstruction", () => {
     expect(composed).toContain("BEGIN_UNTRUSTED_CONTEXT_JSON")
     expect(composed).toContain("END_UNTRUSTED_CONTEXT_JSON")
     expect(composed).toContain('"project":{"version":4,"hash":"aaa')
-    expect(composed).toContain('"character":{"version":3,"hash":"bbb')
+    expect(composed).toContain(
+      '"character":{"packId":"builtin:hiyori_pro","version":3,"hash":"bbb',
+    )
     expect(composed).toContain("CODING_WIFE_AUTHORITATIVE_USER_INSTRUCTION_V1")
     expect(composed.endsWith("Implement the slice")).toBe(true)
   })

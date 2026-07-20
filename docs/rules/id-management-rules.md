@@ -48,7 +48,7 @@ IDは並び順や実装場所ではなく、仕様上の同一性を表す。
 | `SUP` | support-agent-orchestration | [要件定義書](../requirements/support-agent-orchestration.md) | Approved | プロダクトオーナー |
 | `GIT` | git-review-harness | [要件定義書](../requirements/git-review-harness.md) | Approved | プロダクトオーナー |
 | `HIST` | activity-history | [要件定義書](../requirements/activity-history.md) | Approved | プロダクトオーナー |
-| `LIVE` | live2d-companion | [要件定義書](../requirements/live2d-companion.md) | Approved | プロダクトオーナー |
+| `LIVE` | live2d-character | [要件定義書](../requirements/live2d-character.md) | Approved | プロダクトオーナー |
 | `NARR` | audio-commentary | [要件定義書](../requirements/audio-commentary.md) | Approved | プロダクトオーナー |
 | `APP` | desktop-shell | [要件定義書](../requirements/desktop-shell.md) | Approved | プロダクトオーナー |
 

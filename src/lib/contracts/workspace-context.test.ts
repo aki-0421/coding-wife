@@ -120,7 +120,7 @@ describe("workspace context contract", () => {
     }
   })
 
-  it("binds project context to the workspace and accepts global character context", () => {
+  it("binds project context to the workspace and character context to its pack", () => {
     const bundle = {
       schemaVersion: 1,
       workspaceId: "workspace-fixture",
@@ -134,6 +134,7 @@ describe("workspace context contract", () => {
       },
       character: {
         schemaVersion: 1,
+        packId: "builtin:hiyori_pro",
         version: 3,
         contentHash: "b".repeat(64),
         updatedAt: "2026-07-18T00:00:01.000Z",
@@ -153,6 +154,7 @@ describe("workspace context contract", () => {
       workspaceId: "workspace-fixture",
       projectVersion: 2,
       projectHash: hash,
+      characterPackId: "builtin:hiyori_pro",
       characterVersion: 3,
       characterHash: "b".repeat(64),
       snapshotHash: "c".repeat(64),

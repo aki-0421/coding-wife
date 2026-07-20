@@ -57,7 +57,7 @@ export interface EvidenceViewProps {
   readonly workspaceGeneration?: number
   readonly active: boolean
   readonly locale: SupportedLocale
-  readonly companionVisible?: boolean
+  readonly characterVisible?: boolean
   readonly transport: GitReviewTransport
   readonly onBackToChat: () => void
   readonly onCommitSelectionChange?: () => void
@@ -114,17 +114,17 @@ function useCommitExplanationControllerState(
 }
 
 function CollectionLoading({
-  companionVisible,
+  characterVisible,
   loadingText,
 }: {
-  readonly companionVisible: boolean
+  readonly characterVisible: boolean
   readonly loadingText: string
 }) {
   return (
     <div
       className={cn(
         "grid min-h-0",
-        companionVisible
+        characterVisible
           ? "grid-cols-1"
           : "grid-cols-[280px_minmax(0,1fr)] min-[1280px]:grid-cols-[300px_minmax(0,1fr)] max-[840px]:grid-cols-1",
       )}
@@ -132,7 +132,7 @@ function CollectionLoading({
       <aside
         className={cn(
           "min-h-0 flex-col gap-sm border-r border-divider p-md",
-          companionVisible ? "hidden" : "flex max-[840px]:hidden",
+          characterVisible ? "hidden" : "flex max-[840px]:hidden",
         )}
       >
         <Skeleton className="h-6 w-1/2" />
@@ -178,7 +178,7 @@ export function EvidenceView({
   workspaceGeneration = 1,
   active,
   locale,
-  companionVisible = false,
+  characterVisible = false,
   transport,
   onBackToChat,
   onCommitSelectionChange,
@@ -300,7 +300,7 @@ export function EvidenceView({
       <main
         aria-label={copy.title}
         className="grid size-full min-h-0 grid-rows-[minmax(64px,auto)_minmax(0,1fr)] bg-app-bg"
-        data-evidence-companion={companionVisible || undefined}
+        data-evidence-character={characterVisible || undefined}
       >
         <header className="flex min-w-0 flex-wrap items-center gap-sm border-b border-divider bg-surface px-lg py-xs max-[680px]:px-md">
           <Tooltip>
@@ -310,7 +310,7 @@ export function EvidenceView({
                 aria-expanded={active && drawerOpen}
                 aria-label={copy.openCommitList}
                 className={cn(
-                  companionVisible
+                  characterVisible
                     ? "inline-flex"
                     : "hidden max-[840px]:inline-flex",
                 )}
@@ -429,7 +429,7 @@ export function EvidenceView({
         {review.collectionStatus === "idle" ||
         review.collectionStatus === "loading" ? (
           <CollectionLoading
-            companionVisible={companionVisible}
+            characterVisible={characterVisible}
             loadingText={copy.loading}
           />
         ) : null}
@@ -484,7 +484,7 @@ export function EvidenceView({
           <div
             className={cn(
               "relative grid min-h-0",
-              companionVisible
+              characterVisible
                 ? "grid-cols-1"
                 : "grid-cols-[280px_minmax(0,1fr)] min-[1280px]:grid-cols-[300px_minmax(0,1fr)] max-[840px]:grid-cols-1",
             )}
@@ -492,7 +492,7 @@ export function EvidenceView({
             <div
               className={cn(
                 "min-h-0",
-                companionVisible ? "hidden" : "max-[840px]:hidden",
+                characterVisible ? "hidden" : "max-[840px]:hidden",
               )}
             >
               {list}
@@ -502,7 +502,7 @@ export function EvidenceView({
                 aria-label={copy.openCommitList}
                 className={cn(
                   "absolute inset-y-0 left-0 z-20 w-[min(300px,86%)] min-h-0 bg-sidebar shadow-overlay",
-                  companionVisible ? "block" : "hidden max-[840px]:block",
+                  characterVisible ? "block" : "hidden max-[840px]:block",
                 )}
                 id="commit-list-drawer"
                 role="region"
@@ -564,7 +564,7 @@ export function EvidenceView({
                       aria-controls="commit-list-drawer"
                       aria-expanded={active && drawerOpen}
                       className={cn(
-                        companionVisible
+                        characterVisible
                           ? "inline-flex"
                           : "hidden max-[840px]:inline-flex",
                       )}

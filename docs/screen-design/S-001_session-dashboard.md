@@ -52,7 +52,7 @@ status: "Approved"
 
 | 項目 | 内容 |
 |---|---|
-| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、S-002〜S-006からSessionsへ戻る |
+| 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、現行S-002、S-003、S-005からSessionsへ戻る |
 | 表示前提 | app-private DBをreadできること。読めない場合はrecovery stateを表示する |
 | 初期フォーカス | 0件時は`Projectを追加`、通常時はactive workspace item、error時は最初の回復操作 |
 | 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |
@@ -82,7 +82,7 @@ status: "Approved"
 | main header | sidebar右、81px | `Sessions` breadcrumb、preflight summary | current project切替、診断詳細 |
 | project surface | main content | project概要、preflight、workspace create/empty/recovery | add、recheck、create、open |
 
-S-001のmain contentはChat/Companionを描画せず、main幅中央へ最大760pxの一続きの設定面を置く。projectごとに同型cardをgrid表示せず、選択project 1件の詳細とsidebar一覧を表示する。960〜1279pxでは64px rail + portal drawerを使い、project surfaceを残幅へ広げる。
+S-001のmain contentはChat/Characterを描画せず、main幅中央へ最大760pxの一続きの設定面を置く。projectごとに同型cardをgrid表示せず、選択project 1件の詳細とsidebar一覧を表示する。960〜1279pxでは64px rail + portal drawerを使い、project surfaceを残幅へ広げる。
 
 ### sidebar visual state
 
@@ -163,7 +163,7 @@ workspace cancel、project登録解除、active-turn切替の確認dialogは安�
 | Workspace作成 | inline formまたはdialog、registered project 1件以上、project/name valid | 選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、workspace固有rootとprojectのGit common directory identityを照合して、成功後だけBacklogへ1件追加・選択する | dialog入力を破棄し、inline入力は維持する。一覧・filesystemは変更しない | 入力保持、field error。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
 | workspaceをArchive | sidebar rowのArchive、active/pending turnなし | 確認後、対象worktreeを削除してrowを一覧から外す。既にworktreeが消失済みなら成功扱い | workspace、worktree、selection不変 | 対象以外を変更せず、再試行可能なerror | `WORK-F-067` |
 | filter | query 0〜200文字 | repo/branch/nameの部分一致を100ms以内に表示 | Escapeで直前query維持 | 一覧維持、境界表示 | `WORK-F-051` |
-| workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Settings、Companionを同一IDへ100ms以内にatomic切替。App SettingsのProject / Character contextはworkspace tab状態へ含めない | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
+| workspace選択 | itemがMissing以外、別workspaceにactive/pending turnなし | header、Chat、Commit、Settings、Characterを同一IDへ100ms以内にatomic切替。App SettingsのProject detail / Character detailはworkspace tab状態へ含めない | 非該当 | 元workspace維持 | `WORK-F-052`, `WORK-F-054`, `WORK-F-059` |
 | active turn中のworkspace切替 | active/pending turnを持つold workspaceから別workspaceを選択または別workspaceでSend | selectionを保留し確認。`停止して切替`後、exact old turnのterminal interruptとcleanup完了時だけnew workspaceをactivateし、固有draft/summary/anchorを復元 | `戻る`でold selection、turn、draft、anchor、caption/TTSを完全維持 | old workspaceをactiveのままerrorとRetryを表示。rapid/duplicate/stale responseでnew workspaceをactivateしない | `WORK-F-058`, `WORK-F-059` |
 | workspaceをCanceledへ移動 | idle、またはactive/pending turnを停止可能 | idleは確認後、activeは`停止してキャンセル / Stop and Cancel`後のexact terminal interrupt、cleanup、履歴flush完了時だけ専用native cancel commandでCanceled groupへ移動 | `戻る`でselection、turn、lifecycle、draft、caption/TTS、Git fingerprint不変 | generic lifecycle commandのCanceled指定を含めて拒否し、元groupとturnを維持してretry。source、working tree、Git index/object/ref、履歴本文を変更しない | `WORK-F-056` |
 | project登録解除 | App Settings Projects、対象project配下のactive/pending turn 0件 | project名を示す確認後、project/workspaceのapp registrationをnavigationから外す | DB/repo/worktree/file/library/history本文不変 | 完了表示せずretry。running時は拒否 | `WORK-F-057`, `WORK-F-068` |

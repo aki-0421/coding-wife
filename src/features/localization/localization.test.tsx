@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
 
@@ -62,9 +62,13 @@ describe("localization foundation", () => {
     )
     await user.click(screen.getByRole("radio", { name: "日本語" }))
 
+    const appLocation = screen.getByRole("navigation", {
+      name: "アプリ設定の現在地",
+    })
+    expect(within(appLocation).getByText("アプリ設定")).toBeVisible()
     expect(
-      screen.getByRole("heading", { level: 1, name: "アプリ設定" }),
-    ).toBeInTheDocument()
+      appLocation.querySelector('[data-app-settings-current-section=""]'),
+    ).toHaveTextContent("一般")
     expect(document.documentElement).toHaveAttribute("lang", "ja")
   })
 
@@ -84,10 +88,7 @@ describe("localization foundation", () => {
     await user.click(japaneseButton)
 
     expect(
-      screen.getByRole("heading", {
-        level: 1,
-        name: "App settings",
-      }),
+      screen.getByRole("navigation", { name: "App settings location" }),
     ).toBeVisible()
     expect(document.documentElement).toHaveAttribute("lang", "en")
     expect(englishButton).toHaveAttribute("aria-checked", "true")
@@ -101,7 +102,7 @@ describe("localization foundation", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }))
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "アプリ設定" }),
+      screen.getByRole("navigation", { name: "アプリ設定の現在地" }),
     ).toBeVisible()
     expect(document.documentElement).toHaveAttribute("lang", "ja")
     expect(japaneseButton).toHaveAttribute("aria-checked", "true")

@@ -164,7 +164,8 @@ const currentDetail: CommitEvidenceDetail = {
       category: "support_runtime",
       level: "low",
       summary: "Commit explanation may be unavailable while offline.",
-      mitigation: "Keep all local commit evidence readable without support.",
+      mitigation:
+        "Keep all local commit evidence readable when explanations are unavailable.",
       resolved: false,
     },
   ],

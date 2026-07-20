@@ -19,7 +19,7 @@ Developers supervising an autonomous coding session must correlate chat, tool ou
 
 ## Solution
 
-Coding Wife brings that workflow into one bilingual desktop workspace. A local Codex App Server runs `gpt-5.6-sol`; the app converts its activity into a structured, redacted timeline, persists recoverable workspace context in SQLite, presents bounded decisions, and exposes read-only commit evidence. A Live2D companion communicates status and optional OpenAI text-to-speech without becoming a source of technical or safety authority.
+Coding Wife brings that workflow into one bilingual desktop workspace. A local Codex App Server runs `gpt-5.6-sol`; the app converts its activity into a structured, redacted timeline, persists recoverable workspace context in SQLite, presents bounded decisions, and exposes read-only commit evidence. A Live2D character communicates status and optional OpenAI text-to-speech without becoming a source of technical or safety authority.
 
 ## What it does
 
@@ -131,7 +131,7 @@ The release-approved support runtime identity is `codex-cli 0.144.5` for Apple S
 
 Any other support binary, version, executable hash, schema fingerprint, or failed isolation proof is unapproved. In that state Coding Wife does not enqueue a support job, start a support process, or invoke the support model; it reports support as unavailable and retains the deterministic local commit-evidence fallback. This support gate is separate from main-session readiness, which still fails closed when its own authenticated App Server or model contract is unavailable.
 
-Settings exposes exactly two implemented desired-state controls: **Enable isolated support** and **Commit explainer**. Native mode reads and updates the owner-only, versioned setting through `support_settings_get` and `support_settings_update`; an enabled preference records intent but never overrides release readiness. A disable update is persisted before it blocks new admission, cancels queued and active explanation work, and returns only after support capacity converges to zero. The browser demo keeps this setting in ephemeral memory and never starts a support model.
+Commit explanation generation has no user-facing runtime, role, or model settings. The app-owned policy always keeps the required explainer role enabled, migrates legacy disabled preferences back to that policy at startup, and exposes only explanation-level actions such as request, retry, and cancel. Release readiness still has final authority: an unapproved or unavailable runtime produces a deterministic explanation fallback without changing the saved policy.
 
 ## How we used Codex to build Coding Wife
 
@@ -293,7 +293,7 @@ The release workflow applies an ad-hoc integrity seal and verifies every resourc
 | OpenAI Speech API                 | Optional caption-matched text-to-speech           | User-supplied key stays in owner-readable native settings; generated audio is temporary              |
 | Locked npm and Cargo dependencies | Conservative declared production/native closure  | [Generated inventory and attribution notice](src-tauri/resources/legal/THIRD-PARTY-DEPENDENCIES.md) |
 | Live2D Cubism SDK for Web 5-r.5   | Character rendering                              | [Packaged Live2D third-party notice index](src-tauri/resources/legal/THIRD-PARTY-NOTICES.md)        |
-| Bundled Hiyori model              | Default companion                                | [Byte-preserved model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)             |
+| Bundled Hiyori model              | Default character                                | [Byte-preserved model notice](src-tauri/resources/characters/builtin-hiyori/NOTICE.txt)             |
 
 The generated inventory conservatively covers all 395 packages in the pnpm declared production closure and the 235 effective Cargo normal dependencies reported for `aarch64-apple-darwin`; it is not a claim that every npm package contributed bytes to the final Vite bundle. Generation is offline, resolves every Cargo tree display to one exact metadata package ID, parses license expressions with a strict SPDX grammar, and fails when either lock changes, a committed notice is stale, a Cargo identity is ambiguous, an expression is malformed, or required source, integrity/checksum, license, or attribution metadata is missing, unknown, or forbidden. The existing Live2D and Hiyori terms remain byte-verified and linked from the same packaged index.
 
