@@ -311,7 +311,6 @@ export type AppSettingsSection =
   | "character_context"
   | "companion"
   | "audio"
-  | "support"
   | "diagnostics"
 
 export type SettingsSection = AppSettingsSection

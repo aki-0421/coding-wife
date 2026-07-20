@@ -9,7 +9,6 @@ import {
   FolderIcon,
   Mic2Icon,
   Settings2Icon,
-  ShieldCheckIcon,
   SparklesIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -53,8 +52,6 @@ import {
 import { useI18n } from "@/features/localization"
 import { NarrationSettings } from "@/features/narration"
 import { NativeReadinessDiagnostics } from "@/features/readiness"
-import { useAppPreferences } from "@/features/preferences"
-import { SupportControlsSettings } from "@/features/support-controls"
 import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
 import { EditableContextSection } from "@/features/workspace-view/EditableContextSection"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
@@ -241,7 +238,6 @@ const appSectionOrder: readonly AppSettingsSection[] = [
   "character_context",
   "companion",
   "audio",
-  "support",
   "diagnostics",
 ]
 
@@ -251,7 +247,6 @@ const sectionIcons = {
   character_context: BotIcon,
   companion: SparklesIcon,
   audio: Mic2Icon,
-  support: ShieldCheckIcon,
   diagnostics: ActivityIcon,
 } as const
 
@@ -415,17 +410,6 @@ function AudioSettings({
       muted={muted}
       onMutedChange={onMutedChange}
       workspaceId={workspaceId}
-    />
-  )
-}
-
-function SupportSettings() {
-  const preferences = useAppPreferences()
-  return (
-    <SupportControlsSettings
-      gatewayKind={
-        preferences.snapshot.persistence === "native" ? "native" : "demo"
-      }
     />
   )
 }
@@ -719,8 +703,6 @@ export function AppSettingsView(props: AppSettingsViewProps) {
         )
       case "audio":
         return <AudioSettings {...props} />
-      case "support":
-        return <SupportSettings />
       case "diagnostics":
         return <DiagnosticsSettings />
     }
