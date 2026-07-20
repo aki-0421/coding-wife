@@ -135,9 +135,25 @@ describe("AppPreferencesSettings", () => {
     expect(screen.queryByText("Reduced motion")).toBeNull()
     expect(screen.queryByText("Character visibility")).toBeNull()
     expect(
+      screen.queryByText("Demo memory · resets when this preview restarts"),
+    ).toBeNull()
+    expect(
       screen.queryByRole("button", { name: "Reset preferences" }),
     ).toBeNull()
     expect(screen.queryByRole("button", { name: "Reset UI state" })).toBeNull()
+  })
+
+  it("does not expose native persistence or preference record versions", async () => {
+    const gateway = new DeferredNativePreferencesGateway()
+    gateway.durable = nativeSnapshot(9, "ja")
+    renderSettings(new AppPreferencesController(gateway, "ja"))
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "一般" }),
+    ).toBeVisible()
+    expect(screen.queryByText("ネイティブ設定 · バージョン 9")).toBeNull()
+    expect(screen.getByText("アプリバージョン")).toBeVisible()
+    expect(screen.getByText("0.1.0")).toBeVisible()
   })
 
   it("applies locale copy only after the native save succeeds", async () => {

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react"
 import { AlertTriangleIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Field,
@@ -23,33 +22,6 @@ import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 export interface AppPreferencesSettingsProps {
   readonly copy: WorkspaceCopy
   readonly runtimeState: RuntimeState
-}
-
-function PreferencesStatus({
-  copy,
-}: Pick<AppPreferencesSettingsProps, "copy">) {
-  const state = useAppPreferences()
-  const { persistence, preferences } = state.snapshot
-  const label =
-    persistence === "demo_memory"
-      ? copy.settingsView.preferenceStatusDemo
-      : `${copy.settingsView.preferenceStatusNative} · ${copy.settingsView.preferenceVersion} ${preferences.version}`
-
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-xs">
-      <Badge
-        className="h-auto max-w-full shrink self-start break-words whitespace-normal py-xxs leading-snug"
-        variant={state.status === "recovery" ? "destructive" : "outline"}
-      >
-        {label}
-      </Badge>
-      {state.status === "saving" ? (
-        <span aria-live="polite" className="text-caption text-muted-foreground">
-          {copy.settingsView.preferenceSaving}
-        </span>
-      ) : null}
-    </div>
-  )
 }
 
 function PreferenceAlert({
@@ -131,7 +103,14 @@ export function AppPreferencesSettings({
         >
           {copy.settingsView.generalTitle}
         </h2>
-        <PreferencesStatus copy={copy} />
+        {state.status === "saving" ? (
+          <span
+            aria-live="polite"
+            className="text-caption text-muted-foreground"
+          >
+            {copy.settingsView.preferenceSaving}
+          </span>
+        ) : null}
       </div>
 
       <PreferenceAlert

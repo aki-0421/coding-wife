@@ -428,9 +428,6 @@ const en = {
       "Applies to all app-owned copy as soon as the preference store accepts the change.",
     languageSaveError:
       "The language could not be saved. The previous language is unchanged.",
-    preferenceStatusNative: "Native preferences",
-    preferenceStatusDemo: "Demo memory · resets when this preview restarts",
-    preferenceVersion: "Version",
     preferenceSaving: "Saving preferences…",
     preferenceRecoveryTitle: "Preferences need recovery",
     preferenceRecoveryBody:
@@ -990,10 +987,6 @@ const ja: typeof en = {
       "設定ストアが変更を受理すると、すべてのアプリ管理文言へ即時に反映します。",
     languageSaveError:
       "言語を保存できませんでした。以前の言語を維持しています。",
-    preferenceStatusNative: "ネイティブ設定",
-    preferenceStatusDemo:
-      "デモ用メモリ · このプレビューを再起動すると初期値に戻ります",
-    preferenceVersion: "バージョン",
     preferenceSaving: "設定を保存中…",
     preferenceRecoveryTitle: "設定の復旧が必要です",
     preferenceRecoveryBody:
