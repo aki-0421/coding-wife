@@ -74,7 +74,7 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 | 責務             | 正本                                      | composition層の動作                                                                                                                                          |
 | ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | active workspace | workspace historyのopaque workspace ID    | 選択確定後だけ`codex_connect`へ同じIDを渡す。pathを要求・保持しない                                                                                          |
-| 接続可否         | `CodexDiagnostic`                         | `health=ready`、core lifecycle/model discovery supported、Sol/Fast/Max/accountが全てtrueの場合だけSend可能にする                                             |
+| 接続可否         | `CodexDiagnostic`                         | `health=ready`、core lifecycle/model discovery supported、Sol、1件以上の広告済みreasoning effort、accountが揃う場合だけSend可能にする                         |
 | thread           | Codex supervisor                          | workspace activationごとにconnect後、compositionが開始した所有threadを再利用し、所有handleが無い時だけ1件開始する。他clientの一覧結果を自動採用しない        |
 | turn受理         | `codex_turn_start` response               | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport失敗ではdraftとattachmentを保持する                                   |
 | live state       | generation別`CodexSessionStore`           | workspace ID、generation、sequenceを全て照合し、旧workspaceまたは旧generation eventを現在表示へ混ぜない                                                      |
@@ -82,7 +82,7 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 | pending response | `CodexSessionClient`のsingle-claim ledger | approval、native user input、fallback decisionをkind一致で1回だけ応答する。unknown/invalidは操作UIを出さずfail closedにする                                  |
 | stop/recovery    | supervisorのinterruptとterminal event     | Stop操作から1秒以内にinterrupt requestを開始し、5秒でackが無ければ明示errorにする。ackだけでterminalにせず、crash/EOFはInterruptedとして保持し自動再送しない |
 
-接続状態と履歴状態は別軸である。履歴が`ready`でもCodex診断がblockedならtimeline閲覧とdraft保存だけを許可し、Sendは無効にする。逆にCodexがreadyでも履歴writerがread-only/recoveryなら新しいturnを開始しない。`connected=false`の固定値、demo successへのnative fallback、model/listを確認しないFast/Max表示は禁止する。
+接続状態と履歴状態は別軸である。履歴が`ready`でもCodex診断がblockedならtimeline閲覧とdraft保存だけを許可し、Sendは無効にする。逆にCodexがreadyでも履歴writerがread-only/recoveryなら新しいturnを開始しない。`connected=false`の固定値、demo successへのnative fallback、model/listを確認しないreasoning levelやFast service tier表示は禁止する。
 
 ### semantic event投影
 
@@ -126,7 +126,7 @@ Contextの編集・保存は既存のnative snapshotを正本とし、turn開始
 5. approval/native input/fallbackを同時二重応答し、wire requestが1件だけであること、unknown requestが許可されないことを確認する。
 6. Stop開始が1秒以内、ack boundaryが5秒以内で、ackだけではterminalにならないことをfake clockで確認する。
 7. child crash後に受信済みevent、draft、Interruptedが残り、turn/startが自動再送されないことを確認する。
-8. Sol、low、maxのいずれかをmodel/list fixtureから欠落させ、Sendと対応表示がfail closedになることを確認する。
+8. Solまたは全reasoning effortをmodel/list fixtureから欠落させ、Sendがfail closedになることを確認する。Fast tier欠落時はSend自体でなくFast flagだけがdisabledになることを確認する。
 9. attachmentのroot外、symlink、directory、executable、permission、size/count/total、stale handleをRust integrationで拒否し、有効なimage/fileだけがapp-private snapshotのlocalImage/mentionになることを確認する。検証後にleafとancestorを差し替えるfake App Server raceでexact validated bytesだけを観測し、accepted/failed/terminal/expiry cleanupと0700/0600を確認する。
 10. main turn textの80,000/80,001 Unicode scalar、multibyte scalar、NUL、empty-without-attachmentをnative境界で検証し、public draft/instructionの32,000 scalarとsupportの64KiB byte上限が変わらないことを確認する。
 11. agent-browserで1470/960/480 CSS px、200% zoom、ja/en、keyboard、reduced motion、scroll lock、decision回答、Stopを実操作する。

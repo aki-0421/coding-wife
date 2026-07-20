@@ -367,7 +367,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 - [x] front matter、title、filenameの`S-002`が一致する。
 - [x] `status: Approved`である。
 - [x] demo/Figmaのsidebar、81px header、Chat、Character、composer寸法を定義した。
-- [x] modelは`GPT-5.6 Sol`固定で、`Fast` / `Max`はreasoning effortとして定義した。
+- [x] modelは`GPT-5.6 Sol`固定で、Reasoning、Fast service tier、Plan、Goalsを独立したcomposer controlとして定義した。
 - [x] composerをdraft item、instruction、補助操作、実行操作の優先順位で整理し、狭幅でもSend/Stopと無効理由を維持する。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] timeline、decision、Context、Live2D、audio、native boundary、data retentionを定義した。

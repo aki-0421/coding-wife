@@ -264,7 +264,7 @@ Reasoning UIは`Off`と広告済みeffortだけを既知の低い順に循環す
 - thread/start / resume response の model が一致しなければ turn を開始しない。
 - model/rerouted で toModel が gpt-5.6-sol 以外になったら即座に turn/interrupt し、model_unavailable として終える。
 
-ローカル probe では ephemeral thread/start response の reasoningEffort がユーザー既定の xhigh だった。thread 作成だけでは Fast / Max を固定できないため、effort は各 turn/start で必須にする。
+ローカル probe では ephemeral thread/start response の reasoningEffort がユーザー既定の xhigh だった。thread作成だけではcomposerの選択を反映できないため、各turn/startで選択effortまたは既定へ戻す`null`を明示する。
 
 ## thread 管理
 
@@ -472,7 +472,7 @@ ready 条件:
 - canonical binary が検証済み。
 - initialize / initialized が成功。
 - account/read が利用可能。
-- model/list に Sol、low、max が存在。
+- model/list にSolと1件以上のsupportedReasoningEffortsが存在。
 - core lifecycle method が schema probe に存在。
 - stdout reader と stdin writer が稼働。
 
@@ -516,7 +516,8 @@ config/read は effective config と origins / layers を含み得る。Rust 内
 | experimental rejection | -32600 分類 | process 再起動、stable core。advanced capability unavailable |
 | auth 無し / unauthorized | account/read または TurnError | auth_required。login guidance |
 | Sol 無し | model/list | model_unavailable。別 model へ変更しない |
-| low / max 無し | model/list | effort_unavailable。該当 preset を隠すのでなく session を開始しない |
+| reasoning effort 0件 | model/list | effort_unavailable。sessionを開始しない |
+| Fast service tier無し | model/list | Sendは維持し、Fast flagだけをdisabledにする |
 | model reroute | model/rerouted | interrupt、model_unavailable |
 | malformed / oversized JSONL | parser / limit | protocol_mismatch、raw payload 破棄、child 再起動 |
 | unknown server request | request allowlist | fail-closed error、turn interrupt |
@@ -547,7 +548,7 @@ restart loop は指数 backoff と jitter を使い、短時間の連続 crash 3
 ## 採用判断
 
 - 主 Codex セッション: Go。0.144.1 / 0.144.5 の今回の schema と実接続で必要 core を確認した。
-- gpt-5.6-sol + Fast(low) / Max(max): Go。ただし起動ごとの model/list gate が必須。
+- gpt-5.6-sol + capability-driven reasoning / Fast tier: Go。ただし起動ごとのmodel/list gateが必須。
 - native requestUserInput: Conditional Go。experimentalApi、schema、厳密 validator、fail-closed が条件。
 - dynamic tools: Mechanism only。汎用 tool は登録せず、具体的な意味 API ごとに追加審査する。
 - detached review: Go。main thread と reviewThreadId を分離して追跡する。
