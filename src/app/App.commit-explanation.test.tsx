@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
@@ -157,7 +164,9 @@ describe("App commit explanation composition", () => {
     )
     expect(dismissPresentation).toHaveBeenCalledWith("workspace_switch")
     fireEvent.click(
-      screen.getByRole("button", { name: "ワークスペースへ戻る" }),
+      within(
+        screen.getByRole("navigation", { name: "ワークスペース" }),
+      ).getByRole("button", { current: "page" }),
     )
 
     dismissPresentation.mockClear()
