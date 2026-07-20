@@ -13,6 +13,11 @@ import {
   type AppPreferencesUpdateRequestV2,
 } from "@/features/preferences"
 import type { RuntimeState } from "@/features/runtime"
+import {
+  DemoNativeReadinessGateway,
+  NativeReadinessController,
+  NativeReadinessProvider,
+} from "@/features/readiness"
 import { AppPreferencesSettings } from "@/features/workspace-view/AppPreferencesSettings"
 import { getWorkspaceCopy } from "@/features/workspace-view/copy"
 
@@ -50,11 +55,17 @@ function SettingsHarness() {
 
 function renderSettings(controller: AppPreferencesController) {
   return render(
-    <AppPreferencesProvider controller={controller}>
-      <I18nProvider preferencesController={controller}>
-        <SettingsHarness />
-      </I18nProvider>
-    </AppPreferencesProvider>,
+    <NativeReadinessProvider
+      controller={
+        new NativeReadinessController(new DemoNativeReadinessGateway())
+      }
+    >
+      <AppPreferencesProvider controller={controller}>
+        <I18nProvider preferencesController={controller}>
+          <SettingsHarness />
+        </I18nProvider>
+      </AppPreferencesProvider>
+    </NativeReadinessProvider>,
   )
 }
 

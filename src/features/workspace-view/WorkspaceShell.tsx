@@ -41,6 +41,11 @@ import {
   type NarrationController,
   useNarrationSnapshot,
 } from "@/features/narration"
+import {
+  SetupOverview,
+  shouldShowSetupOverview,
+  useNativeReadiness,
+} from "@/features/readiness"
 import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { ChatView } from "@/features/workspace-view/ChatView"
 import {
@@ -122,6 +127,7 @@ export function WorkspaceShell({
   const safeQuitCopy = getSafeQuitCopy(locale)
   const runtime = useRuntime()
   const narration = useNarrationSnapshot()
+  const nativeReadiness = useNativeReadiness()
   const view = useWorkspaceViewModel(adapter, initialWorkspaces)
   const [appSettingsProjectId, setAppSettingsProjectId] = useState<
     string | null
@@ -150,6 +156,23 @@ export function WorkspaceShell({
   const [systemReducedMotion, setSystemReducedMotion] = useState(
     getSystemReducedMotion,
   )
+  const observesCodexConnection =
+    adapter?.hydrationMode === "native" &&
+    (adapter.codexSnapshot !== undefined ||
+      adapter.subscribeCodex !== undefined)
+  const [runtimeSetupRecovery, setRuntimeSetupRecovery] = useState(false)
+
+  useEffect(() => {
+    if (adapter?.hydrationMode !== "native") {
+      setRuntimeSetupRecovery(false)
+      return
+    }
+    if (runtime.state.status === "error") {
+      setRuntimeSetupRecovery(true)
+    } else if (runtime.state.status === "ready") {
+      setRuntimeSetupRecovery(false)
+    }
+  }, [adapter?.hydrationMode, runtime.state.status])
 
   const connected = view.codex.connected && runtime.state.status === "ready"
   const connection: HeaderConnectionState =
@@ -679,6 +702,22 @@ export function WorkspaceShell({
     view.setActiveTab(value)
   }
 
+  const nativeStartupPending =
+    adapter?.hydrationMode === "native" &&
+    (view.adapterStatus === "loading" ||
+      (nativeReadiness.snapshot === null && nativeReadiness.status !== "error"))
+
+  if (nativeStartupPending) {
+    return (
+      <main
+        aria-busy="true"
+        className="min-h-dvh w-full bg-background"
+        data-native-startup="checking"
+        data-workspace-viewport={viewportLayout}
+      />
+    )
+  }
+
   if (view.adapterStatus === "loading") {
     return (
       <main
@@ -740,6 +779,67 @@ export function WorkspaceShell({
   }
 
   const selectedWorkspace = view.selectedWorkspace
+  const codexReconnectRequired =
+    observesCodexConnection &&
+    selectedWorkspace !== undefined &&
+    !view.codex.connected &&
+    view.codex.phase !== "connecting"
+  const runtimeSetupRequired =
+    adapter?.hydrationMode === "native" &&
+    (runtime.state.status === "error" || runtimeSetupRecovery)
+  const setupRequirementOverrides = {
+    runtimeUnavailable: runtimeSetupRequired,
+  }
+  const setupOverviewRequired = shouldShowSetupOverview(
+    adapter?.hydrationMode,
+    nativeReadiness,
+    view.projects.length,
+    setupRequirementOverrides,
+  )
+  const recheckSetup = async () => {
+    if (runtimeSetupRequired) runtime.refresh()
+    if (codexReconnectRequired) {
+      reportWorkspaceAction(await view.recheckSelectedWorkspace())
+    }
+  }
+  const projectSetupDialog =
+    view.projectSetup === null ? null : (
+      <ProjectSetupDialog
+        copy={copy}
+        key={view.projectSetup.candidate.setupId}
+        onCancel={() => void view.cancelProjectSetup()}
+        onInitializeGit={() => void view.initializeProjectGit()}
+        onSetupGithub={(owner, repository) =>
+          void view.setupProjectGithub(owner, repository)
+        }
+        setup={view.projectSetup}
+      />
+    )
+
+  if (setupOverviewRequired) {
+    return (
+      <main data-workspace-viewport={viewportLayout}>
+        <SetupOverview
+          notice={view.notice}
+          onAddProject={() =>
+            void view.requestAddProject(copy.pickerUnavailable)
+          }
+          onRecheck={recheckSetup}
+          projectCount={view.projects.length}
+          requirementOverrides={setupRequirementOverrides}
+        />
+        {projectSetupDialog}
+        <SafeQuitDialog
+          copy={safeQuitCopy}
+          onDontQuit={keepAppOpen}
+          onRetryCleanup={retryCleanup}
+          onStopAndQuit={stopAndQuit}
+          open={safeQuitRequest !== null || cleanupFailure !== null}
+          status={safeQuitStatus}
+        />
+      </main>
+    )
+  }
 
   return (
     <main
@@ -950,18 +1050,7 @@ export function WorkspaceShell({
         </section>
       )}
 
-      {view.projectSetup === null ? null : (
-        <ProjectSetupDialog
-          copy={copy}
-          key={view.projectSetup.candidate.setupId}
-          onCancel={() => void view.cancelProjectSetup()}
-          onInitializeGit={() => void view.initializeProjectGit()}
-          onSetupGithub={(owner, repository) =>
-            void view.setupProjectGithub(owner, repository)
-          }
-          setup={view.projectSetup}
-        />
-      )}
+      {projectSetupDialog}
 
       <Dialog
         onOpenChange={(open) => {

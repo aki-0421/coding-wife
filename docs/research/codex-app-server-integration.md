@@ -161,7 +161,7 @@ capabilities:
 ### バイナリ選択
 
 1. ユーザーが保存した明示パスがあればそれだけを候補にする。
-2. 無ければ Rust 側で PATH と既知の安全なインストール位置を列挙する。GUI アプリの PATH とログイン shell の PATH が異なることを前提にする。
+2. 無ければ Rust 側でGUI processのPATH、利用者accountのdefault shell、既知の安全なインストール位置を順に探索する。default shellはinteractive login modeで`command -v codex`だけを時間・stdout/stderr・process group上限付きで実行し、出力中の単一absolute path以外を破棄する。shell profileの任意出力や相対pathを候補にせず、得たpathにも通常のbinary trust検証を適用する。GUI アプリの PATH とログイン shell の PATH が異なることを前提にする。
 3. symlink を canonicalize し、通常ファイル、実行可能性、所有・書き込み権限、版、hash を確認する。
 4. 同名の別バイナリへ黙って切り替えない。選択実体が消えた場合は診断状態を unavailable にする。
 5. hash や schema fingerprint が変わったら capability cache を破棄し、再 probe する。
@@ -178,7 +178,7 @@ capabilities:
 - workspace 切替時は進行中 turn を止め、旧 generation の通知を UI と履歴へ流さない。
 - schema に shutdown method は無い。終了は stdin close、最大 2 秒待機、SIGTERM、残り時間で待機、起動から 5 秒以内に process tree を強制終了する。
 
-子プロセスへ渡す環境変数は allowlist 化する。ただし主 Codex がユーザーの開発ツールを実行できるよう、PATH、HOME、SHELL、locale、temporary directory、明示された CODEX_HOME と必要な proxy / certificate 変数は保持できる設計にする。値はログへ出さず、shell profile を暗黙 source しない。CODEX_ACCESS_TOKEN 等を許可する場合も名称だけを診断し、値は絶対に保持・表示しない。
+子プロセスへ渡す環境変数は allowlist 化する。ただし主 Codex がユーザーの開発ツールを実行できるよう、PATH、HOME、SHELL、locale、temporary directory、明示された CODEX_HOME と必要な proxy / certificate 変数は保持できる設計にする。値はログへ出さない。binary自動探索時だけ、利用者がterminalで利用するPATHを復元する目的でdefault shell profileをbounded実行できるが、その環境とprofile出力をCodex child、WebView、履歴、通常logへ転用しない。CODEX_ACCESS_TOKEN 等を許可する場合も名称だけを診断し、値は絶対に保持・表示しない。
 
 ### framing と resource limit
 

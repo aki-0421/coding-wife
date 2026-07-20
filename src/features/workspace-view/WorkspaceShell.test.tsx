@@ -191,6 +191,7 @@ function readyNativeReadinessController(): NativeReadinessController {
   const gateway: NativeReadinessGateway = {
     kind: "native",
     run: () => Promise.resolve(snapshot),
+    configureCodexBinary: () => Promise.resolve(snapshot),
     copy: (snapshotId) =>
       Promise.resolve({
         schemaVersion: 1,
@@ -201,13 +202,19 @@ function readyNativeReadinessController(): NativeReadinessController {
   return new NativeReadinessController(gateway)
 }
 
-function renderWorkspace(adapter?: WorkspaceViewAdapter) {
+function renderWorkspace(
+  adapter?: WorkspaceViewAdapter,
+  readinessController?: NativeReadinessController,
+) {
   return render(
     <App
       localeStore={englishLocaleStore}
       transport={new DemoTransport()}
       {...(adapter?.hydrationMode === "native"
-        ? { readinessController: readyNativeReadinessController() }
+        ? {
+            readinessController:
+              readinessController ?? readyNativeReadinessController(),
+          }
         : {})}
       {...(adapter ? { workspaceAdapter: adapter } : {})}
     />,
@@ -1085,6 +1092,65 @@ describe("WorkspaceShell", () => {
     ).toHaveAttribute("aria-current", "page")
   })
 
+  it("registers the first native project from the full-screen setup overview", async () => {
+    const user = userEvent.setup()
+    const state: WorkspaceAdapterState = {
+      projects: [],
+      workspaces: [],
+      activeWorkspaceId: null,
+      draft: null,
+      timeline: [],
+      history: { mode: "ready", errorCode: null, backupName: null },
+    }
+    const registeredState: WorkspaceAdapterState = {
+      ...state,
+      projects: [
+        {
+          id: "project-first",
+          name: "first-local",
+          githubRepository: "fixture/first",
+          health: "ready",
+          workspaceCount: 0,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+      ],
+    }
+    const requestAddProject = vi
+      .fn<() => Promise<ProjectRegistrationResult>>()
+      .mockResolvedValue({ outcome: "selected", state: registeredState })
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      requestAddProject,
+    }
+
+    renderWorkspace(adapter)
+
+    expect(
+      await screen.findByRole("heading", { name: "Finish the local setup" }),
+    ).toBeVisible()
+    const addProjectButton = await screen.findByRole("button", {
+      name: "Choose project folder…",
+    })
+    expect(
+      screen.queryByRole("navigation", { name: "Workspaces" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Prepare Codex CLI" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Install Git" }),
+    ).not.toBeInTheDocument()
+
+    await user.click(addProjectButton)
+
+    expect(requestAddProject).toHaveBeenCalledOnce()
+    expect(
+      await screen.findByRole("heading", { name: "Select a project" }),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "fixture/first" })).toBeVisible()
+  })
+
   it("sets up Git and GitHub before registering a selected project folder", async () => {
     const user = userEvent.setup()
     const state = nativeWorkspaceState()
@@ -1429,7 +1495,7 @@ describe("WorkspaceShell", () => {
     ).toBeEnabled()
   })
 
-  it("shows only a non-mutating skeleton while native history is pending", async () => {
+  it("shows no visible startup UI while native history is pending", async () => {
     let resolveState!: (state: WorkspaceAdapterState) => void
     const requestAddProject = vi.fn()
     const adapter: WorkspaceViewAdapter = {
@@ -1441,9 +1507,12 @@ describe("WorkspaceShell", () => {
       requestAddProject,
     }
 
-    renderWorkspace(adapter)
+    const { container } = renderWorkspace(adapter)
 
-    expect(screen.getByText("Restoring workspace history")).toBeVisible()
+    expect(
+      container.querySelector('[data-native-startup="checking"]'),
+    ).not.toBeNull()
+    expect(container.textContent).toBe("")
     expect(
       screen.queryByText(/build-live2d-desktop-app/),
     ).not.toBeInTheDocument()
@@ -2192,25 +2261,58 @@ describe("WorkspaceShell", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("uses the persisted history mode consistently in chat and diagnostics", async () => {
+  it("keeps the native workspace shell when the workspace Codex handshake is disconnected", async () => {
+    const codex: WorkspaceCodexState = {
+      activeWorkspaceId: "workspace-native",
+      generation: null,
+      phase: "failed",
+      connected: false,
+      readiness: {
+        ready: false,
+        fastAvailable: false,
+        maxAvailable: false,
+        reasonCode: "CODEX-NOT-CONNECTED",
+      },
+      pendingRequests: [],
+      timeline: [],
+      errorCode: "CODEX-NOT-CONNECTED",
+    }
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () => Promise.resolve(nativeWorkspaceState()),
+      codexSnapshot: () => codex,
     }
     renderWorkspace(adapter)
 
     expect(
-      await screen.findByText(
-        "Codex and Git are not connected. Local workspace history is persisted and available.",
-      ),
+      await screen.findByRole("navigation", { name: "Workspaces" }),
     ).toBeVisible()
-    fireEvent.click(appSettingsButton())
-    fireEvent.click(screen.getByRole("button", { name: "Diagnostics" }))
+    expect(
+      screen.queryByRole("heading", { name: "Finish the local setup" }),
+    ).toBeNull()
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+    expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
+  })
 
-    const localHistory = await screen.findByRole("heading", {
-      name: "Workspace history",
+  it("renders no visible startup UI while native setup readiness is checking", () => {
+    const pendingReadiness = deferred<NativeReadinessSnapshotV1>()
+    const readinessController = new NativeReadinessController({
+      kind: "native",
+      run: () => pendingReadiness.promise,
+      configureCodexBinary: () => pendingReadiness.promise,
+      copy: () => Promise.reject(new Error("readiness is still checking")),
     })
-    expect(localHistory.closest("article")).toHaveTextContent("Ready")
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+    }
+
+    const { container } = renderWorkspace(adapter, readinessController)
+
+    expect(
+      container.querySelector('[data-native-startup="checking"]'),
+    ).not.toBeNull()
+    expect(container.textContent).toBe("")
   })
 
   it("labels demo history as ephemeral in chat and diagnostics", async () => {
@@ -2225,12 +2327,8 @@ describe("WorkspaceShell", () => {
     const user = userEvent.setup()
     renderWorkspace(adapter)
 
-    expect(
-      await screen.findByText(
-        "Codex and Git are not connected. Demo workspace activity is kept in memory and resets when this preview restarts.",
-      ),
-    ).toBeVisible()
-    expect(screen.getByText("Demo memory")).toBeVisible()
+    expect(await screen.findByText("Demo memory")).toBeVisible()
+    expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
 
     await user.click(appSettingsButton())
     await user.click(screen.getByRole("button", { name: "Diagnostics" }))

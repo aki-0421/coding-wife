@@ -61,7 +61,7 @@ status: "Approved"
 | 利用者・ロール | 表示                                                                 | 操作                            | 拒否時の動作                                       |
 | -------------- | -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------- |
 | ローカル利用者 | non-secret global setting、character metadata、sanitized readiness   | edit、import、select、test、retry、reset | 保存済み値を維持し、操作箇所にsafe errorを表示する |
-| React WebView  | typed snapshot、status、safe code                                    | render、input、typed IPC        | raw path、secret、arbitrary commandを保持しない    |
+| React WebView  | typed snapshot、status、safe code                                    | render、input、typed IPC        | Codex pathは利用者が編集中の設定requestにだけ保持し、response、履歴、通常logへ残さない。その他のraw path、secret、arbitrary commandを保持しない    |
 | Rust service   | owner-only preference/context/character/narration store、readiness | validate、atomic save、diagnose | scope外payloadを拒否し、前snapshotを維持する |
 
 ## 画面構成
@@ -71,7 +71,7 @@ status: "Approved"
 | workspace sidebar   | workspace一覧、activeなapp settings gear                      | workspaceへ戻る、project追加   |
 | app settings header | `App settings / アプリ設定` > 現在sectionのbreadcrumbだけを表示する | compact幅では現在sectionからsection pickerを開く |
 | section navigation  | General、Projects、Character、Audio、Diagnosticsの5 section | section選択 |
-| settings main       | 選択sectionのform、status、error、recovery                    | edit、save、test、retry、reset |
+| settings main       | 選択sectionのform、status、error、recovery。GeneralにはLanguageとCodex CLI pathを表示する | edit、save、test、retry、reset |
 
 app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない。これによりworkspace scopeを示すheaderとglobal scopeを同時にactive表示しない。960〜1279pxではsection navigationをpopoverへ移し、mainを単一columnで表示する。
 
@@ -94,6 +94,8 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | app settingsを開く    | workspace shell表示中 | gearをactiveにしS-005のGeneralだけを表示          | 非該当                         | shellとworkspace stateを維持    | `APP-F-083`                           |
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
 | preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry       | `APP-F-057`, `APP-F-058`, `APP-F-076` |
+| Codex pathを設定する | Generalまたは初回setupがready | Rustがabsolute pathをcanonicalizeし、binary trust、version、App Server起動とstable initializeを検証してapp-private設定へ保存する。schema、auth、config、modelは通常workspace接続まで確認しない。次のreadiness snapshotを返し、実行中sessionは変更しない。overview setupから成功した場合は未接続の選択workspace再接続を追加clickなしで開始するが、その完了をfieldのprocessingまたはoverview終了の条件にしない | 入力と前設定を維持 | 入力を保持しfield直下にsafe code、前設定を維持。後続のworkspace activation失敗はpathをinvalid扱いせず通常workspaceでSend不可のreasonを表示する | `CODE-F-051`, `WORK-F-048` |
+| Codex pathを自動検出へ戻す | 明示pathが設定済み | app-private設定を削除し、GUI `PATH`、default login shell、既知install位置の探索結果でreadinessを更新する | 前設定を維持 | 前設定とsnapshotを維持しsafe code | `CODE-F-051` |
 | character個別設定を開く | Character一覧がready | 選択行のmodel名、必要な操作、motion設定、Character contextを同sectionに表示 | 非該当 | 一覧を維持 | `LIVE-F-084`, `LIVE-F-086` |
 | Character contextを保存する | character個別設定がready | 対象packのversionだけを更新し、そのpackを選択した次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063`, `LIVE-F-086` |
 | character一覧へ戻る | character個別設定を表示中 | 一覧を表示し、起点character行へfocusを戻す | 非該当 | 個別設定を維持 | `LIVE-F-084` |
@@ -112,6 +114,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | 項目                 | 初期値    | 必須     | 制約・境界                            | エラー表示            | 保存契機 |
 | -------------------- | --------- | -------- | ------------------------------------- | --------------------- | -------- |
 | Language             | OS locale | 必須     | `ja` / `en`                           | field直下、前言語維持 | 選択時   |
+| Codex executable path | 自動検出 | 任意 | UTF-8 absolute path、1〜4,096 byte、NUL/control不可。保存時にRustでcanonical trusted executable、version、App Server spawnとstable initializeを検証 | field直下にsafe code、入力と前設定を維持 | `Use this path`。明示設定中は`Use automatic detection`も表示 |
 | Character context    | bundled Hiyoriは桃瀬ひよりpreset、customはpack表示名と中立な既定値 | 任意 | opaque pack ID単位、display name 1〜40、全体12,000 scalar、technical policy禁止 | field直下、draft維持 | Save |
 | Project context      | 空       | 任意 | goal / constraints / notes各8,000、配列各20件、総量32,000 scalar、project-relative reference | field直下、draft維持 | Save |
 | TTS enabled          | off       | 必須     | 保存済みAPI keyと選択可能providerがある時だけon | toggle直下、offへfail closed | 変更直後に自動保存 |
@@ -133,6 +136,7 @@ Audio sectionでは、通常時の見出し説明と各fieldの補助文を表�
 | model import/select/motion設定/delete | Rust asset/settings service | character library commands | app-global scope、pack ID、manifest hash、custom slot上限1。bundled Hiyoriのpreset保存要求は拒否 | quarantine cleanup、前selection維持 | bundled preset編集・delete拒否、置換/削除失敗時は前slotとselection維持 |
 | Audio取得・自動保存・test   | Rust provider adapter/private store | `narration_*`                 | fixed OpenAI Speech endpoint、Bearer secret、model/voice allowlist、owner-only secret、fixed audio player、expected version | request/playback停止 | 最後の保存済みsnapshotと入力、captionを維持 |
 | readiness recheck           | Rust readiness service   | `run_diagnostic_check`             | read-only check                       | 前snapshot維持    | stale snapshotとsafe code             |
+| Codex path保存・自動検出復帰 | Rust readiness / app-private workspace store | `configure_codex_binary` | exact request schema、absolute path上限、binary trust、version、App Server spawn / stable initialize。responseはreadiness snapshotだけでpathを返さない | 入力と前record維持 | 前recordとsnapshotを維持しsafe code |
 | project一覧・登録解除       | Rust workspace store     | `workspace_list` / `workspace_unregister` | typed Project ID、metadata-only mutation | 一覧維持 | repository/worktreeを変更せずsafe code |
 
 ## ウィンドウ固有動作
@@ -148,7 +152,7 @@ Audio sectionでは、通常時の見出し説明と各fieldの補助文を表�
 
 ## データ保持
 
-Project ID単位のProject context、言語だけを保持する`AppPreferencesV2`、pack ID単位のCharacter context、character library selection/custom motion設定、Narration settings、readiness snapshotの正本と失敗契約は各要件定義書に従う。NarrationのAPI keyはowner-only native storeだけに保存し、WebView、diagnostics、logへ平文を返さない。`AppPreferencesV1`からはlocaleだけを移行し、廃止したreduced motion、character visibility、Reset Preferences、Reset UI stateを公開しない。コミット説明の内部実行単位、model policy、利用量、監査metadataはS-005に表示しない。一覧と詳細の表示だけではworkspace history、Git state、他projectまたは他packのdraftを変更しない。
+Project ID単位のProject context、言語だけを保持する`AppPreferencesV2`、app-private settingsに保存する検証済みCodex canonical path、pack ID単位のCharacter context、character library selection/custom motion設定、Narration settings、readiness snapshotの正本と失敗契約は各要件定義書に従う。Codex pathは設定済みかどうかだけをreadiness factで返し、canonical valueはWebView、diagnostics、履歴本文、通常logへ返さない。NarrationのAPI keyはowner-only native storeだけに保存し、WebView、diagnostics、logへ平文を返さない。`AppPreferencesV1`からはlocaleだけを移行し、廃止したreduced motion、character visibility、Reset Preferences、Reset UI stateを公開しない。コミット説明の内部実行単位、model policy、利用量、監査metadataはS-005に表示しない。一覧と詳細の表示だけではworkspace history、Git state、他projectまたは他packのdraftを変更しない。
 
 ## OS差分
 
@@ -163,6 +167,7 @@ MVPはmacOS 14以降のApple Siliconだけを検証する。Windows/Linuxを対�
 - project行は名前、repository、workspace件数を含むaccessible nameを持ち、詳細から一覧へ戻ると起点projectへfocusを戻す。
 - character行はmodel名と使用中状態を含むaccessible nameを持ち、個別設定から一覧へ戻ると起点character行へfocusを戻す。
 - section navigation、error、readinessを色だけで表現しない。
+- Codex path fieldはvisible label、補助説明、入力単位のerror live regionを持ち、保存成功後はpath自体ではなく`Custom path configured / カスタムパス設定済み`を通知する。
 - 200% text zoomではsection navigationをpopover化し、全fieldとactionへ到達できる。
 
 ## 関連要件

@@ -13,8 +13,8 @@ use crate::codex::process::{run_bounded_command, BoundedCommandError};
 use crate::codex::types::CodexCommandError;
 use crate::codex::workspace::{
     matches_saved_git_repository, matches_saved_repository_identity, same_git_common_directory,
-    validate_git_repository, AppPrivateProjectIdentity, ValidatedWorkspaceCandidate,
-    WorkspaceService,
+    validate_git_repository, AppPrivateBinaryRecord, AppPrivateProjectIdentity,
+    ValidatedWorkspaceCandidate, WorkspaceService,
 };
 
 use super::editable_context::{
@@ -271,6 +271,15 @@ impl WorkspaceHistoryService {
 
     pub fn history_status(&self) -> HistoryStatus {
         self.store.status()
+    }
+
+    pub(crate) fn save_private_binary_record(
+        &self,
+        record: Option<&AppPrivateBinaryRecord>,
+    ) -> Result<(), WorkspaceCommandError> {
+        self.store
+            .save_private_binary_record(record)
+            .map_err(|error| history_error("codex_binary_save", error))
     }
 
     pub(crate) async fn repository_readiness(&self) -> RepositoryReadinessProbe {

@@ -14,8 +14,8 @@ use crate::character::manifest::{is_opaque_pack_id, BUILTIN_HIYORI_PACK_ID};
 use crate::codex::redaction::redact_text;
 use crate::codex::types::{ApprovalDecision, PendingKind, PendingRequestView, PendingResponseKind};
 use crate::codex::workspace::{
-    matches_saved_repository_identity, AppPrivateProjectIdentity, AppPrivateWorkspaceRecord,
-    GitRepositoryIdentity, ValidatedWorkspaceCandidate,
+    matches_saved_repository_identity, AppPrivateBinaryRecord, AppPrivateProjectIdentity,
+    AppPrivateWorkspaceRecord, GitRepositoryIdentity, ValidatedWorkspaceCandidate,
 };
 #[cfg(test)]
 use crate::codex::workspace::{WorkspacePreflight, WorkspaceRegistration};
@@ -51,6 +51,8 @@ use super::types::{
     WorkspaceTurnContextSnapshot, DOMAIN_EVENT_SCHEMA_VERSION, WORKSPACE_CONTEXT_SCHEMA_VERSION,
     WORKSPACE_HISTORY_SCHEMA_VERSION, WORKSPACE_RESUME_STATE_SCHEMA_VERSION,
 };
+
+const CODEX_BINARY_SETTING_KEY: &str = "codex_binary_path_v1";
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
 const CURRENT_DATABASE_VERSION: i64 = 11;
@@ -1005,6 +1007,58 @@ impl WorkspaceHistoryStore {
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|_| history_error("HIST-WORKSPACE-DECODE", false))
+    }
+
+    pub(crate) fn private_binary_record(
+        &self,
+    ) -> Result<Option<AppPrivateBinaryRecord>, WorkspaceHistoryError> {
+        let inner = self.lock();
+        inner
+            .connection
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![CODEX_BINARY_SETTING_KEY],
+                |row| {
+                    Ok(AppPrivateBinaryRecord {
+                        canonical_path: PathBuf::from(row.get::<_, String>(0)?),
+                    })
+                },
+            )
+            .optional()
+            .map_err(|_| history_error("HIST-SETTING-READ", true))
+    }
+
+    pub(crate) fn save_private_binary_record(
+        &self,
+        record: Option<&AppPrivateBinaryRecord>,
+    ) -> Result<(), WorkspaceHistoryError> {
+        self.ensure_writable("codex.binary.configure")?;
+        let inner = self.lock();
+        if let Some(record) = record {
+            let path = record
+                .canonical_path
+                .to_str()
+                .ok_or_else(|| history_error("HIST-CODEX-BINARY-PATH-ENCODING", false))?;
+            inner
+                .connection
+                .execute(
+                    "INSERT INTO settings (key, value, version, updated_at)
+                     VALUES (?1, ?2, 1, ?3)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                       version = settings.version + 1, updated_at = excluded.updated_at",
+                    params![CODEX_BINARY_SETTING_KEY, path, now()],
+                )
+                .map_err(|_| history_error("HIST-SETTING-WRITE", true))?;
+        } else {
+            inner
+                .connection
+                .execute(
+                    "DELETE FROM settings WHERE key = ?1",
+                    params![CODEX_BINARY_SETTING_KEY],
+                )
+                .map_err(|_| history_error("HIST-SETTING-WRITE", true))?;
+        }
+        Ok(())
     }
 
     pub fn private_workspace_record(
@@ -4555,6 +4609,41 @@ mod tests {
             std::env::temp_dir().join(format!("coding-wife-{label}-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&path).expect("temp directory");
         path
+    }
+
+    #[test]
+    fn private_codex_binary_setting_survives_restart_and_can_be_cleared() {
+        let data = temp_directory("codex-binary-setting");
+        let expected = AppPrivateBinaryRecord {
+            canonical_path: PathBuf::from("/opt/coding-wife-fixture/bin/codex"),
+        };
+        let store = WorkspaceHistoryStore::open(&data).expect("open store");
+        store
+            .save_private_binary_record(Some(&expected))
+            .expect("save binary setting");
+        assert_eq!(
+            store.private_binary_record().expect("read binary setting"),
+            Some(expected.clone())
+        );
+        drop(store);
+
+        let reopened = WorkspaceHistoryStore::open(&data).expect("reopen store");
+        assert_eq!(
+            reopened
+                .private_binary_record()
+                .expect("read reopened binary setting"),
+            Some(expected)
+        );
+        reopened
+            .save_private_binary_record(None)
+            .expect("clear binary setting");
+        assert_eq!(
+            reopened
+                .private_binary_record()
+                .expect("read cleared binary setting"),
+            None
+        );
+        fs::remove_dir_all(data).expect("cleanup");
     }
 
     fn git_repository() -> PathBuf {

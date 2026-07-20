@@ -2,8 +2,9 @@ use tauri::State;
 
 use super::service::NativeReadinessService;
 use super::types::{
-    CopySanitizedDiagnosticsRequestV1, NativeReadinessSnapshotV1, ReadinessCommandError,
-    RunDiagnosticCheckRequestV1, SanitizedDiagnosticsSummaryV1, NATIVE_READINESS_SCHEMA_VERSION,
+    ConfigureCodexBinaryRequestV1, CopySanitizedDiagnosticsRequestV1, NativeReadinessSnapshotV1,
+    ReadinessCommandError, RunDiagnosticCheckRequestV1, SanitizedDiagnosticsSummaryV1,
+    NATIVE_READINESS_SCHEMA_VERSION,
 };
 
 #[tauri::command]
@@ -19,6 +20,21 @@ pub async fn run_diagnostic_check(
         ));
     }
     Ok(service.run().await)
+}
+
+#[tauri::command]
+pub async fn configure_codex_binary(
+    service: State<'_, NativeReadinessService>,
+    request: ConfigureCodexBinaryRequestV1,
+) -> Result<NativeReadinessSnapshotV1, ReadinessCommandError> {
+    if request.schema_version != NATIVE_READINESS_SCHEMA_VERSION {
+        return Err(ReadinessCommandError::new(
+            "READINESS-SCHEMA-UNSUPPORTED",
+            "configure_codex_binary",
+            false,
+        ));
+    }
+    service.configure_codex_binary(request.path).await
 }
 
 #[tauri::command]

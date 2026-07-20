@@ -118,18 +118,7 @@ const en = {
     offline: "Offline",
     ready: "Ready",
   },
-  previewNoticeTitle: "Design preview",
-  previewNotice:
-    "Codex, Git, and local history are not connected. The bundled Live2D character reports its renderer state separately.",
-  previewNoticeWithHistory:
-    "Codex and Git are not connected. Local workspace history is persisted and available.",
-  previewNoticeWithEphemeralHistory:
-    "Codex and Git are not connected. Demo workspace activity is kept in memory and resets when this preview restarts.",
-  interactiveDemoNotice:
-    "The deterministic Codex App Server demo is connected. Git remains disconnected; activity stays in memory and resets when this preview restarts.",
   runtimeErrorTitle: "The local runtime could not be reached",
-  runtimeErrorDescription:
-    "Your draft and local view state are preserved. Retry the runtime check or review Diagnostics.",
   retry: "Retry",
   diagnostics: "Diagnostics",
   timelineTitle: "Activity",
@@ -137,7 +126,6 @@ const en = {
   lastSummaryTitle: "Last session summary",
   lastSummaryDescription:
     "Restored from this workspace's redacted local history.",
-  previewBadge: "Reference preview",
   persistedBadge: "Persisted locally",
   ephemeralHistoryBadge: "Demo memory",
   historyUnavailable: "History requires recovery",
@@ -598,18 +586,7 @@ const ja: typeof en = {
     offline: "オフライン",
     ready: "準備完了",
   },
-  previewNoticeTitle: "デザインプレビュー",
-  previewNotice:
-    "Codex、Git、ローカル履歴は未接続です。同梱Live2Dの描画状態は別に実測表示します。",
-  previewNoticeWithHistory:
-    "CodexとGitは未接続です。ローカルのワークスペース履歴は永続化され、利用できます。",
-  previewNoticeWithEphemeralHistory:
-    "CodexとGitは未接続です。デモ用ワークスペースのアクティビティはメモリ内だけに保持され、このプレビューを再起動するとリセットされます。",
-  interactiveDemoNotice:
-    "決定論的Codex App Serverデモへ接続中です。Gitは未接続で、アクティビティはメモリ内だけに保持され、プレビュー再起動時にリセットされます。",
   runtimeErrorTitle: "ローカル実行環境へ接続できませんでした",
-  runtimeErrorDescription:
-    "下書きとローカル表示状態は保持されています。実行環境を再確認するか、診断を確認してください。",
   retry: "再試行",
   diagnostics: "診断",
   timelineTitle: "アクティビティ",
@@ -617,7 +594,6 @@ const ja: typeof en = {
   lastSummaryTitle: "前回セッションの要約",
   lastSummaryDescription:
     "このワークスペースの秘匿化済みローカル履歴から復元しました。",
-  previewBadge: "参照プレビュー",
   persistedBadge: "ローカルに永続化済み",
   ephemeralHistoryBadge: "デモ用メモリ",
   historyUnavailable: "履歴の復旧が必要です",

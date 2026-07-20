@@ -8,6 +8,7 @@ export type NativeReadinessControllerStatus =
   | "loading"
   | "ready"
   | "rechecking"
+  | "configuring"
   | "error"
 export type NativeReadinessCopyStatus = "idle" | "copying" | "copied" | "error"
 export type NativeReadinessRecheckOutcome =
@@ -89,6 +90,10 @@ export class NativeReadinessController {
     return this.run(true)
   }
 
+  public configureCodexBinary(path: string | null): Promise<boolean> {
+    return this.configure(path)
+  }
+
   public async copy(): Promise<boolean> {
     const snapshot = this.#state.snapshot
     if (snapshot === null || this.#state.copyStatus === "copying") return false
@@ -157,6 +162,48 @@ export class NativeReadinessController {
           copyStatus: "idle",
           recheckSequence: this.#state.recheckSequence + (rechecking ? 1 : 0),
           recheckOutcome: rechecking ? "failed" : this.#state.recheckOutcome,
+        })
+      }
+      return false
+    }
+  }
+
+  private async configure(path: string | null): Promise<boolean> {
+    const sequence = this.#runSequence + 1
+    this.#runSequence = sequence
+    this.publish({
+      ...this.#state,
+      status: "configuring",
+      errorCode: null,
+      copyStatus: "idle",
+      recheckOutcome: "idle",
+    })
+    try {
+      const snapshot = await this.#gateway.configureCodexBinary(path)
+      if (this.#disposed || sequence !== this.#runSequence) return false
+      this.publish({
+        status: "ready",
+        snapshot,
+        errorCode: null,
+        copyStatus: "idle",
+        recheckSequence: this.#state.recheckSequence + 1,
+        recheckOutcome: snapshot.checks.some(
+          (check) =>
+            check.status === "blocked" || check.status === "unavailable",
+        )
+          ? "attention"
+          : "complete",
+      })
+      return true
+    } catch (error) {
+      if (!this.#disposed && sequence === this.#runSequence) {
+        this.publish({
+          ...this.#state,
+          status: "error",
+          errorCode: safeErrorCode(error),
+          copyStatus: "idle",
+          recheckSequence: this.#state.recheckSequence + 1,
+          recheckOutcome: "failed",
         })
       }
       return false

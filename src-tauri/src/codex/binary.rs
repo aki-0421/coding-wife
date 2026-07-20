@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::ffi::{CStr, OsString};
 use std::fs::File;
 use std::io::{BufReader, Read};
+use std::mem::MaybeUninit;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -16,7 +17,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
-use super::process::{process_group_exists, ProcessGroupDropGuard};
+use super::process::{process_group_exists, run_bounded_command, ProcessGroupDropGuard};
 use super::types::{BinarySource, CapabilityState, CodexCapabilities};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -27,6 +28,8 @@ const MAX_SCHEMA_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_SCHEMA_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_VERIFIED_BINARY_BYTES: u64 = 512 * 1024 * 1024;
 const BINARY_HASH_TIMEOUT: Duration = Duration::from_secs(20);
+const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_LOGIN_SHELL_OUTPUT_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedBinaryIdentity {
@@ -122,16 +125,20 @@ fn current_uid() -> u32 {
     unsafe { getuid() }
 }
 
-fn candidate_paths(explicit_path: Option<&Path>) -> Vec<(PathBuf, BinarySource)> {
-    if let Some(path) = explicit_path {
-        return vec![(path.to_path_buf(), BinarySource::Explicit)];
-    }
-
+fn inherited_path_candidates() -> Vec<(PathBuf, BinarySource)> {
     let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("PATH") {
         for directory in std::env::split_paths(&path) {
             candidates.push((directory.join("codex"), BinarySource::Path));
         }
+    }
+    candidates
+}
+
+fn fallback_candidates(shell_candidate: Option<&Path>) -> Vec<(PathBuf, BinarySource)> {
+    let mut candidates = Vec::new();
+    if let Some(path) = shell_candidate {
+        candidates.push((path.to_path_buf(), BinarySource::Path));
     }
 
     candidates.push((
@@ -144,12 +151,88 @@ fn candidate_paths(explicit_path: Option<&Path>) -> Vec<(PathBuf, BinarySource)>
     ));
     if let Some(home) = std::env::var_os("HOME") {
         candidates.push((
+            PathBuf::from(&home).join(".local/bin/codex"),
+            BinarySource::KnownInstall,
+        ));
+        candidates.push((
             PathBuf::from(home).join("Library/Application Support/com.conductor.app/bin/codex"),
             BinarySource::KnownInstall,
         ));
     }
 
     candidates
+}
+
+fn account_login_shell() -> Option<PathBuf> {
+    let mut record = MaybeUninit::<libc::passwd>::uninit();
+    let mut result = std::ptr::null_mut();
+    let mut buffer = vec![0_u8; 16 * 1024];
+    // SAFETY: all pointers reference writable storage for the duration of the
+    // call, and the returned passwd record is read only when result is non-null.
+    let status = unsafe {
+        libc::getpwuid_r(
+            current_uid(),
+            record.as_mut_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &mut result,
+        )
+    };
+    if status != 0 || result.is_null() {
+        return None;
+    }
+    // SAFETY: getpwuid_r succeeded and returned a record backed by the live
+    // buffer above. A non-null pw_shell is NUL-terminated by the C contract.
+    let shell_pointer = unsafe { (*result).pw_shell };
+    if shell_pointer.is_null() {
+        return None;
+    }
+    // SAFETY: the pointer check above and getpwuid_r contract make this a live,
+    // NUL-terminated string for the lifetime of buffer.
+    let shell = unsafe { CStr::from_ptr(shell_pointer) };
+    let path = PathBuf::from(OsString::from(shell.to_string_lossy().as_ref()));
+    path.is_absolute().then_some(path)
+}
+
+fn default_login_shell() -> Option<PathBuf> {
+    account_login_shell().or_else(|| {
+        std::env::var_os("SHELL")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    })
+}
+
+fn parse_login_shell_candidate(stdout: &[u8]) -> Option<PathBuf> {
+    let output = std::str::from_utf8(stdout).ok()?;
+    let mut candidates = output.lines().filter_map(|line| {
+        let value = line.trim();
+        if value.is_empty() || value.len() > 4_096 || value.chars().any(char::is_control) {
+            return None;
+        }
+        let path = PathBuf::from(value);
+        path.is_absolute().then_some(path)
+    });
+    let candidate = candidates.next()?;
+    candidates.next().is_none().then_some(candidate)
+}
+
+async fn login_shell_codex_candidate() -> Option<PathBuf> {
+    let shell = default_login_shell()?;
+    let identity = inspect_trusted_identity(&shell).await.ok()?;
+    let mut command = Command::new(&identity.canonical_path);
+    command.args(["-i", "-l", "-c", "command -v codex"]);
+    let output = run_bounded_command(
+        command,
+        LOGIN_SHELL_TIMEOUT,
+        MAX_LOGIN_SHELL_OUTPUT_BYTES,
+        MAX_LOGIN_SHELL_OUTPUT_BYTES,
+    )
+    .await
+    .ok()?;
+    if !output.status.success() || identity.revalidate().await.is_err() {
+        return None;
+    }
+    parse_login_shell_candidate(&output.stdout)
 }
 
 fn owner_is_trusted(owner_uid: u32, user_uid: u32) -> bool {
@@ -488,39 +571,58 @@ async fn run_bounded(
     Ok(BoundedOutput { stdout, stderr })
 }
 
-pub async fn discover_binary(explicit_path: Option<&Path>) -> Result<BinaryInfo, BinaryError> {
-    let explicit = explicit_path.is_some();
-    for (candidate, source) in candidate_paths(explicit_path) {
-        let identity = match inspect_trusted_identity(&candidate).await {
-            Ok(identity) => identity,
-            Err(BinaryError::Missing) if explicit => return Err(BinaryError::Missing),
-            Err(BinaryError::Untrusted) if explicit => return Err(BinaryError::Untrusted),
-            Err(_) if explicit => return Err(BinaryError::Io),
-            Err(_) => continue,
-        };
-        let output = run_bounded(&identity, &[OsString::from("--version")], None).await?;
-        let version_output =
-            String::from_utf8(output.stdout).map_err(|_| BinaryError::ProbeFailed)?;
-        let cli_version = version_output
-            .trim()
-            .strip_prefix("codex-cli ")
-            .ok_or(BinaryError::ProbeFailed)?
-            .to_owned();
-        identity.revalidate().await?;
-        let canonical_path_hash = hex::encode(Sha256::digest(
-            identity.canonical_path.to_string_lossy().as_bytes(),
-        ));
+async fn inspect_candidate(
+    candidate: &Path,
+    source: BinarySource,
+    explicit: bool,
+) -> Result<Option<BinaryInfo>, BinaryError> {
+    let identity = match inspect_trusted_identity(candidate).await {
+        Ok(identity) => identity,
+        Err(BinaryError::Missing) if explicit => return Err(BinaryError::Missing),
+        Err(BinaryError::Untrusted) if explicit => return Err(BinaryError::Untrusted),
+        Err(_) if explicit => return Err(BinaryError::Io),
+        Err(_) => return Ok(None),
+    };
+    let output = run_bounded(&identity, &[OsString::from("--version")], None).await?;
+    let version_output = String::from_utf8(output.stdout).map_err(|_| BinaryError::ProbeFailed)?;
+    let cli_version = version_output
+        .trim()
+        .strip_prefix("codex-cli ")
+        .ok_or(BinaryError::ProbeFailed)?
+        .to_owned();
+    identity.revalidate().await?;
+    let canonical_path_hash = hex::encode(Sha256::digest(
+        identity.canonical_path.to_string_lossy().as_bytes(),
+    ));
 
-        return Ok(BinaryInfo {
-            canonical_path: identity.canonical_path.clone(),
-            canonical_path_hash,
-            executable_sha256: identity.executable_sha256.clone(),
-            cli_version,
-            source,
-            identity,
-        });
+    Ok(Some(BinaryInfo {
+        canonical_path: identity.canonical_path.clone(),
+        canonical_path_hash,
+        executable_sha256: identity.executable_sha256.clone(),
+        cli_version,
+        source,
+        identity,
+    }))
+}
+
+pub async fn discover_binary(explicit_path: Option<&Path>) -> Result<BinaryInfo, BinaryError> {
+    if let Some(path) = explicit_path {
+        return inspect_candidate(path, BinarySource::Explicit, true)
+            .await?
+            .ok_or(BinaryError::Missing);
+    }
+    for (candidate, source) in inherited_path_candidates() {
+        if let Some(binary) = inspect_candidate(&candidate, source, false).await? {
+            return Ok(binary);
+        }
     }
 
+    let shell_candidate = login_shell_codex_candidate().await;
+    for (candidate, source) in fallback_candidates(shell_candidate.as_deref()) {
+        if let Some(binary) = inspect_candidate(&candidate, source, false).await? {
+            return Ok(binary);
+        }
+    }
     Err(BinaryError::Missing)
 }
 
@@ -1146,11 +1248,23 @@ mod tests {
     }
 
     #[test]
-    fn explicit_path_is_the_only_candidate() {
-        let candidates = candidate_paths(Some(Path::new("/fixture/codex")));
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].0, Path::new("/fixture/codex"));
-        assert_eq!(candidates[0].1, BinarySource::Explicit);
+    fn login_shell_candidate_precedes_known_fallbacks() {
+        let fallbacks = fallback_candidates(Some(Path::new("/shell/codex")));
+        assert_eq!(fallbacks[0].0, Path::new("/shell/codex"));
+        assert_eq!(fallbacks[0].1, BinarySource::Path);
+    }
+
+    #[test]
+    fn login_shell_candidate_requires_one_absolute_control_free_path() {
+        assert_eq!(
+            parse_login_shell_candidate(b"profile message\n/opt/coding-wife-fixture/bin/codex\n"),
+            Some(PathBuf::from("/opt/coding-wife-fixture/bin/codex"))
+        );
+        assert_eq!(
+            parse_login_shell_candidate(b"/first/codex\n/second/codex\n"),
+            None
+        );
+        assert_eq!(parse_login_shell_candidate(b"relative/codex\n"), None);
     }
 
     #[test]

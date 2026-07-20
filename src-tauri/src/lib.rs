@@ -52,7 +52,9 @@ use narration::commands::{
 use narration::NarrationService;
 use preferences::commands::{app_preferences_get, app_preferences_update};
 use preferences::AppPreferencesService;
-use readiness::commands::{copy_sanitized_diagnostics, run_diagnostic_check};
+use readiness::commands::{
+    configure_codex_binary, copy_sanitized_diagnostics, run_diagnostic_check,
+};
 use readiness::NativeReadinessService;
 use window_state::MainWindowStateController;
 use workspace_history::commands::{
@@ -218,6 +220,11 @@ pub fn run() {
             app.manage(attachment_service);
             app.manage(NarrationService::production(&app_data_directory));
             let history_store = WorkspaceHistoryStore::open(&app_data_directory)?;
+            if let Some(record) = history_store.private_binary_record()? {
+                tauri::async_runtime::block_on(
+                    setup_supervisor.set_explicit_binary(Some(record.canonical_path)),
+                );
+            }
             let window_state_controller = MainWindowStateController::new(history_store.clone());
             let resource_directory = app.path().resource_dir()?;
             let character_storage = CharacterStorage::open(&app_data_directory)?;
@@ -298,6 +305,7 @@ pub fn run() {
             app_preferences_get,
             app_preferences_update,
             run_diagnostic_check,
+            configure_codex_binary,
             copy_sanitized_diagnostics,
             app_quit_cancel,
             app_quit_confirm,

@@ -9,6 +9,7 @@ import {
   parseSanitizedDiagnosticsSummary,
   readinessCheckIds,
   type NativeReadinessSnapshotV1,
+  type ConfigureCodexBinaryRequestV1,
   type ReadinessCheckV1,
   type ReadinessCommandErrorEnvelope,
   type SanitizedDiagnosticsSummaryV1,
@@ -24,6 +25,7 @@ export type NativeReadinessGatewayKind = "native" | "demo"
 export interface NativeReadinessGateway {
   readonly kind: NativeReadinessGatewayKind
   run(): Promise<NativeReadinessSnapshotV1>
+  configureCodexBinary(path: string | null): Promise<NativeReadinessSnapshotV1>
   copy(snapshotId: string): Promise<SanitizedDiagnosticsSummaryV1>
 }
 
@@ -88,6 +90,24 @@ export class TauriNativeReadinessGateway implements NativeReadinessGateway {
     }
   }
 
+  public async configureCodexBinary(
+    path: string | null,
+  ): Promise<NativeReadinessSnapshotV1> {
+    const request: ConfigureCodexBinaryRequestV1 = {
+      schemaVersion: nativeReadinessSchemaVersion,
+      path,
+    }
+    try {
+      return parseNativeReadinessSnapshot(
+        await this.invoke(nativeReadinessCommands.configureCodexBinary, {
+          request,
+        }),
+      )
+    } catch (error) {
+      throw normalizeError(error)
+    }
+  }
+
   public async copy(
     snapshotId: string,
   ): Promise<SanitizedDiagnosticsSummaryV1> {
@@ -142,6 +162,12 @@ export class DemoNativeReadinessGateway implements NativeReadinessGateway {
       checks: readinessCheckIds.map((id) => demoCheck(id, checkedAt)),
     }
     return Promise.resolve(structuredClone(this.#latest))
+  }
+
+  public configureCodexBinary(
+    _path: string | null,
+  ): Promise<NativeReadinessSnapshotV1> {
+    return this.run()
   }
 
   public copy(snapshotId: string): Promise<SanitizedDiagnosticsSummaryV1> {

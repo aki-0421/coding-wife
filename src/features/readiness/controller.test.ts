@@ -55,6 +55,10 @@ class ControlledGateway implements NativeReadinessGateway {
     return result.promise
   }
 
+  configureCodexBinary(): Promise<NativeReadinessSnapshotV1> {
+    return this.run()
+  }
+
   copy(snapshotId: string) {
     return Promise.resolve({
       schemaVersion: 1 as const,
@@ -84,6 +88,29 @@ describe("NativeReadinessController", () => {
       snapshot: { snapshotId: snapshot(2).snapshotId },
       recheckSequence: 1,
       recheckOutcome: "complete",
+    })
+  })
+
+  it("publishes the configured Codex path snapshot atomically", async () => {
+    const gateway = new ControlledGateway()
+    const controller = new NativeReadinessController(gateway)
+    const initial = controller.initialize()
+    gateway.runs[0]!.resolve(snapshot(1))
+    await initial
+
+    const configuring = controller.configureCodexBinary(
+      "/opt/coding-wife-fixture/bin/codex",
+    )
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "configuring",
+      snapshot: { snapshotId: snapshot(1).snapshotId },
+    })
+    gateway.runs[1]!.resolve(snapshot(2))
+    await expect(configuring).resolves.toBe(true)
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "ready",
+      snapshot: { snapshotId: snapshot(2).snapshotId },
+      recheckSequence: 1,
     })
   })
 

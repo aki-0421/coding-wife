@@ -33,7 +33,7 @@ status: "Approved"
 | 対象 | 内容 |
 |---|---|
 | Project追加 | OS folder picker、Git初期化、GitHub originセットアップ、canonicalization、Git worktree検証、重複選択 |
-| Preflight | Git、Codex executable、login、GPT-5.6 Sol、character packのready/warning/blocked |
+| Initial setup / Preflight | 初回project登録、Git、Codex executableとApp Server初期化のsetup readiness、通常workspaceでのlogin、GPT-5.6 Sol、character packの送信前診断と回復操作 |
 | Workspace作成 | 0件時のproject/name入力、通常時のsidebar project card選択、app-owned Git worktree作成、Backlog登録・選択 |
 | Sidebar | lifecycle group、attention、repo、branch、project filter、active selection |
 | Continuity | Project ID、group、active workspace、project filter、draft、last summary、timeline anchor ID/sequence/offset、repository healthの復元 |
@@ -54,7 +54,7 @@ status: "Approved"
 |---|---|
 | 表示契機 | 初回起動、workspace 0件、sidebarのFolderPlus/Plus、missing project、現行S-002、S-003、S-005からSessionsへ戻る |
 | 表示前提 | app-private DBをreadできること。読めない場合はrecovery stateを表示する |
-| 初期フォーカス | 0件時は`Projectを追加`、通常時はactive workspace item、error時は最初の回復操作 |
+| 初期フォーカス | overview setup guideでは最初の未完了項目のprimary action、workspace 0件時は最初のproject card、通常時はactive workspace item、error時は最初の回復操作 |
 | 正常完了 | workspace選択後、同じIDの[S-002](S-002_coding-workspace.md)へ移動する |
 | キャンセル | picker/dialog開始前の一覧、active selection、project filter、入力を維持する |
 | 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う |
@@ -67,7 +67,7 @@ status: "Approved"
 | ローカル利用者 | project、workspace、preflightの非秘密情報 | add、create、project filter、select、cancel、登録解除、再診断 | 無効path・権限・実行中turnではmutationせず理由を表示 |
 | React WebView | pack ID、workspace ID、sanitized repo/branch | typed picker/create/select request | absolute home path、任意Git引数、任意shellを送れない |
 | Rust project service | canonical path、Git metadata、DB | picker result検証、read-only preflight、metadata transaction | 不正path、I/O、duplicateを構造化errorにする |
-| Codex supervisor | preflight statusだけ | executable/login/model capability診断 | blockedならSend不可のstatusを返しthreadを開始しない |
+| Codex supervisor | setup readinessとworkspace preflight statusだけ | setupではexecutable/App Server初期化、workspaceではschema/login/model capabilityを診断 | setup失敗ならoverview、workspace preflight失敗なら通常shellを維持してSend不可のstatusを返しthreadを開始しない |
 
 ## 画面構成
 
@@ -150,8 +150,9 @@ workspace cancel、project登録解除、active-turn切替、active/pending main
 | 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
 |---|---|---|---|---|
 | 初期化中 | DB、workspace、Git linkageを読込中 | sidebar/list/project surfaceのskeleton、locale、Quit。demo workspaceを表示しない | Quitだけ。add/create/select/draft/context/deleteを開始しない | queryとmigrationがterminalになる |
+| overview setup | native workspace読込完了後のsetup readinessでCodex CLIを検出できない、App Serverのstable initializeに失敗、Git executableが未準備、registered projectが0件、OS/history/Live2D/preferencesに`blocked` / `unavailable`、またはnative runtimeがerror | setup readinessが未完了の間は背景以外を描画しない。問題判明後だけsidebar、header、Chat、character、app logoを表示しない全viewportの一面に、画面title、未完了件数、未完了項目だけを縦に表示し、title直下の導入説明は置かない。未完了一覧headerには全項目を再診断する`再確認 / Recheck`を1個だけ置き、各項目には再確認buttonを置かない。Codexはcopy可能な公式install command、自動検出で見つからない場合の任意absolute path入力、自動検出へ戻す操作を、Gitは設定理由と公式commandを、最初のprojectはnative folder pickerをprimary actionとして表示する。ready項目と内部診断のwarningは表示しない。workspaceのschema、login、model、effort失敗はこの状態へ進入させない | 全体再確認、command copy、検証済みCodex path保存・自動検出復帰、Project追加、native Project setup dialog、Quit。overviewでCodex path保存または自動検出復帰に成功した場合は選択workspaceの再接続を開始するが、その完了までfieldまたはoverviewをprocessingに保たない。利用者のdefault shellを探索用にbounded実行する以外の任意shell実行とworkspace操作は不可 | Codex executableとApp Server初期化を含む必須setup check、native runtime、重大な内部診断が解消し、registered projectが1件以上になった時。解消した行はsnapshot、runtime、project state更新と同時に消す |
 | 通常 | 1件以上のvalid workspace | group list。各group内はworkspace作成日時の新しい順、同時刻はWorkspace IDの昇順で固定する。active project、preflight、primary action 1件 | project filter、select、add、create、state action | 操作開始、offline、error |
-| projectなし | registered project 0件、workspace 0件 | main surfaceに`プロジェクトを選択 / Select a project`と`プロジェクトを追加 / Add project` buttonだけを表示する。sidebarにはempty説明文を置かず、5つのlifecycle groupを常に表示する | picker、Settings、Quit | project登録またはrehydrate |
+| projectなし | registered project 0件、workspace 0件 | nativeではoverview setupの`最初のプロジェクト`だけを表示する。demo previewでは従来どおりmain surfaceにProject追加buttonを表示する | picker、Project setup、Quit | project登録またはrehydrate |
 | project setup: Git未初期化 | pickerでregular writable non-Git folderを選択 | dialog title、`Gitを初期化`、Cancel。通常時の説明文は表示しない | 明示Git初期化、Cancel | Git初期化成功、Cancel、typed error |
 | project setup: origin自動接続不可 | valid Git repositoryにoriginがなく、同名の既存GitHub repositoryが0件または複数件 | visible labelなしの`owner / repository`横並びcontrol、`GitHubをセットアップ`、Cancel。通常時のhelperは表示しない | owner/name編集、確定、Cancel、owner再取得 | origin設定と最終診断成功、Cancel、typed error |
 | workspace project選択 | registered project 1件以上でsidebarのWorkspace追加を押す | repository icon画像とrepository名を持つ3columnのproject card grid | card選択、Escape、close | 作成成功、Cancel、typed error |
@@ -170,8 +171,8 @@ workspace cancel、project登録解除、active-turn切替、active/pending main
 
 | 操作 | 事前条件 | 正常結果 | キャンセル時 | 失敗時 | 関連要件ID |
 |---|---|---|---|---|---|
-| Projectを追加 | toolbar FolderPlusまたはworkspace 0件時のProject追加button | native pickerの1 directoryをRust診断し、Gitとoriginがreadyならdialogを描画せずprojectだけを1件追加する。Git readyかつoriginなしでも、認証済みownerに同名GitHub repositoryが一意に存在すればoriginへ自動接続して直接登録する。非Git、既存repositoryなし、または複数owner競合時だけSetup IDによるdialogへ進み、全check成功後に同じ登録処理を行う。workspaceは作成せず、main surfaceのproject card一覧へ反映する | 一覧とselectionを維持し、errorなし。確定済みGit/GitHub mutationは保持 | 登録せず該当stepで入力と再試行を保持 | `WORK-F-044`〜`WORK-F-049`, `WORK-F-070` |
-| preflight再診断 | project rootが存在 | Git/Codex/login/Sol/characterを更新 | 非該当 | check単位でBlocked、既存履歴維持 | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
+| Projectを追加 | overview setup、toolbar FolderPlusまたはworkspace 0件時のProject追加button | native pickerの1 directoryをRust診断し、Gitとoriginがreadyならdialogを描画せずprojectだけを1件追加する。Git readyかつoriginなしでも、認証済みownerに同名GitHub repositoryが一意に存在すればoriginへ自動接続して直接登録する。非Git、既存repositoryなし、または複数owner競合時だけSetup IDによるdialogへ進み、全check成功後に同じ登録処理を行う。workspaceは作成せず、overviewの該当項目またはmain surfaceのproject card一覧へ反映する | 一覧とselectionを維持し、errorなし。確定済みGit/GitHub mutationは保持 | 登録せず該当stepで入力と再試行を保持 | `WORK-F-044`〜`WORK-F-049`, `WORK-F-055`, `WORK-F-070` |
+| preflight再診断 | native readiness serviceが利用可能 | setup snapshotではGit、Codex executable/App Server initializeと内部診断だけを更新し、readyになった項目を除去する。選択workspace再接続は非同期に開始し、schema/login/Sol/effortは通常workspaceの送信前診断で更新する | 非該当 | 直前snapshotを保持して対象項目に再試行を示す | `WORK-F-048`, `CODE-F-051`, `CODE-F-075` |
 | Workspace作成 | 0件時はmain surface、通常時はsidebarのPlus。registered project 1件以上 | どちらも同じ3column project card contentを使い、cardで選んだProject IDと生成した既定nameを使う。選択projectの現在HEADからapp-owned root配下へ新branchとworktreeを作り、workspace固有rootとprojectのGit common directory identityを照合して、成功後だけBacklogへ1件追加・選択してそのworkspaceを開く。dialog経由ならdialogも閉じる | dialogは閉じ、作成開始前のselectionを維持する。一覧・filesystemは変更しない | project card一覧を維持してerror noticeを表示する。Git/DBの片方だけを残さずrollback | `WORK-F-050` |
 | workspaceをArchive | sidebar rowのArchive | idleなら確認なしで対象worktreeを削除してrowを一覧から外す。active/pending main turnがあれば停止確認を表示し、確定後のexact terminal interrupt、cleanup、履歴flush完了後だけ同じ削除へ進む。既にworktreeが消失済みなら成功扱い | 停止確認の`戻る`ではworkspace、worktree、selection、turn、draft、履歴不変 | 停止失敗時はArchive commandを呼ばず全状態を保持する。削除失敗時は対象以外を変更せず再試行可能なerror | `WORK-F-067` |
 | project filter | 登録済みproject 1件以上 | Popoverの非native複数選択controlで選んだProject IDのいずれかと完全一致するworkspaceを100ms以内に表示し、ListFilterに選択件数を示す | Escapeで選択値を維持 | 一覧維持、無効Project IDだけを除去 | `WORK-F-051` |
@@ -197,6 +198,8 @@ workspace cancel、project登録解除、active-turn切替、active/pending main
 
 実際のCapability設定は`src-tauri/capabilities/`を正本とする。
 
+初回overviewの判定正本は`NativeReadinessProvider`が保持する一つの`NativeReadinessSnapshotV1`、workspace adapterが復元したregistered project件数、native runtime状態である。`src/features/readiness/SetupOverview.tsx`はCodex setup check、Git check内の`git_executable` fact、重大なinternal check、project件数と、`WorkspaceShell.tsx`が渡すruntime未接続overrideを未完了項目へ射影する。Git check全体の`warning`はactive repository未選択でも発生するため、overviewでGit導入済みかを判定する時はcheck statusではなく`git_executable=available`を使う。`WorkspaceShell.tsx`は`hydrationMode=native`かつreadiness snapshotが未確定の間は可視UIを描画せず、snapshot sourceが`native`で未解決項目が判明した時だけsidebar、header、各tab、Settingsを含む通常shell全体を置き換える。選択workspaceのCodex接続失敗だけではoverviewを表示せず、通常shell内のSend可否へ反映する。全体再確認またはpath設定成功後は必要な選択workspaceのCodex activationを非同期に開始し、native runtime refreshも再試行する。アプリ内ではCodex、Git、履歴の接続状態をまとめた個別の汎用noticeを描画しない。判定、日英copy、ready項目の非表示、最初のproject登録からworkspace project選択への復帰を変更した場合は`pnpm exec vitest run src/features/readiness/SetupOverview.test.tsx src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`で同じ境界を確認する。
+
 GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/workspace.rs`がtrusted worktreeで`git config --get remote.origin.url`をread-only実行し、`github.com`のHTTPS / SSH / SCP形式だけを`owner/repo`へ正規化する。remote URL全体とcredentialは破棄し、nullableな`projects.github_repository`（workspace history DB migration 6）だけを保存する。HEADとremoteのGit processは同時観測し、20 repositoryの起動復元を5秒未満に保つ。`src/features/workspace-persistence/adapter.ts`がこの値をoptionalなview metadataへ変換し、値がない場合は`WorkspaceSidebar.tsx`がlocal repository aliasへfallbackする。parser、Git読取、migration、cross-language contractを変更した場合は`cargo test github_repository`、`cargo test repository_identity_reads_github_origin_without_network_access`、`cargo test legacy_versions_migrate_resume_state_and_registration_columns`、`cargo test serialized_contracts_match_the_cross_language_fixture`、`cargo test startup_restore_of_twenty_repositories_stays_within_the_budget`を実行する。
 
 | ユーザー操作 | 実行境界 | Tauri plugin / Command | 必要なCapability・認可 | キャンセル時 | 拒否・失敗時 |
@@ -205,7 +208,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 | project Git初期化 | Rust Git process | `workspace_project_setup_git_init` | opaque Setup ID、保存root identity、固定`git -C <root> init`、5秒timeout | 未実行なら変更なし | project未登録、`.git`作成済みなら再診断へ収束 |
 | GitHub owner取得・origin設定 | Rust GitHub CLI + Git process | `workspace_project_setup_github` | trusted `gh` executable、authenticated user/org allowlist、validated repository name、private createまたはexisting view、固定origin URL、保存root identity | 未実行なら変更なし | project未登録、入力保持、GitHub側成功後のlocal失敗は再試行で収束 |
 | Git preflight | Rust child process | `diagnose_project` | canonical root、read-only allowlist Git command | running checkをsafe abort | check別Blocked |
-| Codex preflight | Rust supervisor | `diagnose_codex` | executable/stdio capability、auth内容非読取 | 前回結果維持 | failure stageを表示 |
+| Codex setup / workspace preflight | Rust supervisor | `run_diagnostic_check` / workspace Codex commands | setupはexecutable trust、version、App Server spawn、stable initializeだけ。workspace接続はschema、capability、auth、config、model/listを追加確認しauth内容はWebViewへ返さない | 前回結果維持 | setup failureはoverview、workspace failureは通常shellでSend不可のreasonを表示 |
 | create/select | Rust Git process + DB + Codex supervisor | `workspace_create_session` / `workspace_select` | typed Project ID/workspace name、app-owned worktree root、固定Git引数、expected generation | worktree/DBを作らない | partial worktree/DBをrollbackし、元selection/turn/lifecycle維持 |
 | workspace Archive | App-owned Codex controller → Rust Git process + DB | active/pending時はexact generationの`turn/interrupt`とterminal cleanup、続いて`workspace_archive` | typed workspace ID、active時のexpected generationとterminal history flush、app-owned root containment、固定`git worktree remove --force`。idleはinterruptなし、missing targetは成功扱い | active時の確認前または`戻る`では変更なし | stale/interrupt/cleanup/flush失敗では`workspace_archive`を呼ばない。削除失敗でも他worktree/project/refを変更しない |
 | workspace cancel | Rust DB + Codex supervisor | `workspace_cancel` | typed workspace ID、expected DB version。supervisor gateはactive/pending turnとcancel中のturn開始をatomicに拒否し、active cancelはexact terminal、cleanup、履歴flush proof後だけ呼ぶ | transaction前なら変更なし | `workspace_update_lifecycle`によるCanceled指定を拒否し、元selection/turn/lifecycle維持 |
@@ -266,6 +269,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 - repository healthはja/en textとiconで示し、rowとheaderを同じaccessible statusへ関連付ける。切替保留、Archive、登録解除の状態は操作を開始したsidebarまたはApp Settingsとdialogへ関連付け、Cancel/Repair actionをheaderへ表示しない。
 - destructive/interrupt dialogはDOM順を説明、対象、保持data、`戻る`、実行actionとし、`戻る`へ初期focus、close後はtriggerへfocusを返す。
 - processing updateはpolite、blocked/errorはassertive live regionへ1回だけ通知する。
+- overview setupは`main` landmarkと一つの`h1`を持ち、未完了項目を見出し付きlistとしてDOM順に読み上げる。command copy結果と再確認結果はpolite live regionで通知する。
 - 200% text zoomではdrawer内itemを2行のまま保ち、primary actionを欠落させない。
 
 ## 関連要件
@@ -273,7 +277,7 @@ GitHub repository補助表示はnetwork APIを呼ばず、`src-tauri/src/codex/w
 | 要件ID | この画面での扱い | 要件定義書 |
 |---|---|---|
 | `WORK-F-044`〜`WORK-F-070` | project追加・Git/GitHub setup、preflight、workspace lifecycle、active-turn confirmation、repository health/repair、persistence、native初期化境界 | [workspace-sessions](../requirements/workspace-sessions.md) |
-| `CODE-F-051`, `CODE-F-075` | Codex/login/Sol preflightとblocked reason | [codex-main-session](../requirements/codex-main-session.md) |
+| `CODE-F-051`, `CODE-F-075` | Codex setup probeとworkspace login/Sol preflightの分離、blocked reason | [codex-main-session](../requirements/codex-main-session.md) |
 | `HIST-F-040`, `HIST-F-045`, `HIST-F-051` | rehydrateとempty history導線 | [activity-history](../requirements/activity-history.md) |
 | `APP-F-052`〜`APP-F-062` | single window、layout、navigation、language、a11y | [desktop-shell](../requirements/desktop-shell.md) |
 

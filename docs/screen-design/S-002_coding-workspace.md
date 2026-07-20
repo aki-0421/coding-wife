@@ -123,7 +123,7 @@ commit explainerのrequest、status、delta、result、failureはChat timeline�
 
 timeline最下部から48px以内なら新eventで追従する。48pxを超えて離れた場合は位置を固定し、`新しい更新 N件 / 最新へ`をcomposer上へ表示する。復元時はevent anchor IDとoffsetを使い、消失時だけ最寄りsequenceへ補正する。
 
-timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted locally / ローカルに永続化済み`とする。browser demoは`Demo memory / デモ用メモリ`を表示し、preview再起動でfixtureへ戻ることをChat noticeでも明示する。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
+timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted locally / ローカルに永続化済み`とする。browser demoは`Demo memory / デモ用メモリ`をbadgeで示す。Chat上端にはCodex、Git、履歴の接続状態をまとめた汎用noticeを表示しない。nativeでCodex activationまたはruntimeが利用不能な場合はChatを描画せず、[S-001](S-001_session-dashboard.md)の全viewport overview setupへ戻す。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
 
 ### Composer
 
@@ -205,7 +205,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | workspace切替確認 | old workspaceにactive/pending turnがあり別workspaceを選択/Send | new selectionを保留し、old workspaceをactive表示したまま`停止して切替 / Stop and Switch`、`戻る / Back`だけ | 明示2操作だけ | exact old terminal interrupt + cleanup、またはBack |
 | commit説明準備中 | app controllerがverified commitを`queued` / `running`としているが明示presentation intentはない | background生成status、「詳しく教えて」、`Cancel explanation generation`。caption/live region/TTSは0件でmain timelineへmessageを追加しない | read-only tab、詳しく教えて、生成cancel | 明示intent、generated/canceled/failed/unavailable/selection変更 |
 | commit説明表示中 | `user_request` / `user_retry` / 明示Showのintentとcontroller stateがexact一致する | semantic `working`、streamed HTML caption、`Close explanation`、queued/running時だけ`Cancel explanation generation`、mute。active tabは維持 | read-only tab、Close、条件付き生成Cancel、mute | generated/canceled/failed/unavailable/selection/locale/workspace変更、Stop、Close |
-| demo memory | browser previewの決定的memory adapter | Codex/Git未接続、`Demo memory` badge、再起動で戻る説明。`Persisted locally`を表示しない | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
+| demo memory | browser previewの決定的memory adapter | `Demo memory` badgeを表示し、Codex/Git/履歴の汎用noticeと`Persisted locally`は表示しない | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
 
 ## 操作
 

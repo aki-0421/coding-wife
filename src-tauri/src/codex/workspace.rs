@@ -95,7 +95,7 @@ pub struct AppPrivateProjectIdentity {
 
 /// This record belongs to app-private settings and is deliberately not a
 /// serializable IPC type.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppPrivateBinaryRecord {
     pub canonical_path: PathBuf,
 }

@@ -2,6 +2,7 @@ export const nativeReadinessSchemaVersion = 1 as const
 
 export const nativeReadinessCommands = {
   run: "run_diagnostic_check",
+  configureCodexBinary: "configure_codex_binary",
   copy: "copy_sanitized_diagnostics",
 } as const
 
@@ -42,6 +43,7 @@ export const readinessFactKeys = [
   "build_profile",
   "readiness_schema",
   "codex_binary",
+  "codex_binary_source",
   "codex_model",
   "codex_auth",
   "codex_schema",
@@ -92,6 +94,11 @@ export interface NativeReadinessSnapshotV1 {
   readonly checkedAt: string
   readonly source: ReadinessSource
   readonly checks: readonly ReadinessCheckV1[]
+}
+
+export interface ConfigureCodexBinaryRequestV1 {
+  readonly schemaVersion: typeof nativeReadinessSchemaVersion
+  readonly path: string | null
 }
 
 export interface SanitizedDiagnosticsSummaryV1 {

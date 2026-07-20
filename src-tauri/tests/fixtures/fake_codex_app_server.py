@@ -245,6 +245,8 @@ def main():
             thread.join()
         return 0
     if len(args) >= 5 and args[:2] == ["app-server", "generate-json-schema"]:
+        if MODE == "setup_probe":
+            record("setup_schema_requested")
         output = pathlib.Path(args[args.index("--out") + 1])
         if MODE == "schema_malformed":
             output.mkdir(parents=True, exist_ok=True)
@@ -260,6 +262,8 @@ def main():
 
     if MODE.startswith("readiness_"):
         record(f"readiness_process_started:{os.getpid()}")
+    if MODE == "setup_probe":
+        record(f"setup_process_started:{os.getpid()}")
     if EXECUTION_CLASS == "support":
         record(f"support_process_started:{os.getpid()}")
         if MODE == "support_drop_grandchild":
@@ -275,6 +279,8 @@ def main():
         params = message.get("params") or {}
 
         if method == "initialize":
+            if MODE == "setup_probe":
+                record("setup_initialize")
             if MODE == "protocol_after_ready":
                 record("initialize")
             if (
@@ -310,6 +316,8 @@ def main():
         if method == "initialized":
             continue
         if method == "account/read":
+            if MODE == "setup_probe":
+                record("setup_account_read")
             if MODE == "readiness_handshake_timeout":
                 record("readiness_account_read_ignored")
                 continue
@@ -348,9 +356,13 @@ def main():
             )
             continue
         if method == "config/read":
+            if MODE == "setup_probe":
+                record("setup_config_read")
             result(message_id, {"config": {"model": "gpt-5.6-sol"}, "origins": {}})
             continue
         if method == "model/list":
+            if MODE == "setup_probe":
+                record("setup_model_list")
             efforts = (
                 [{"reasoningEffort": "low"}]
                 if MODE == "readiness_effort_unavailable"

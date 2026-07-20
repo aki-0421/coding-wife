@@ -33,8 +33,8 @@ use super::requests::{
 };
 use super::rpc::{RpcConnection, RpcRequestError, RuntimeSignal};
 use super::types::{
-    AcceptedResponse, CapabilityState, ChildState, CodexCommandError, CodexConnectRequest,
-    CodexDiagnostic, CodexEvent, CodexFallbackDecisionRequest, CodexHealth,
+    AcceptedResponse, BinarySource, CapabilityState, ChildState, CodexCommandError,
+    CodexConnectRequest, CodexDiagnostic, CodexEvent, CodexFallbackDecisionRequest, CodexHealth,
     CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadListRequest,
     CodexThreadResumeRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
     CodexTurnStartRequest, MainSkillInjectionAudit, PendingResolutionStatus, ReasoningPreset,
@@ -45,6 +45,7 @@ use super::types::{
 pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
 pub const DOMAIN_EVENT_CHANNEL: &str = "coding-wife://domain-event";
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(5);
+const SETUP_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const READINESS_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const READINESS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERRUPT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -212,6 +213,23 @@ struct ReadinessProbeContext {
     expected_binary: Option<BinaryInfo>,
     expected_schema: Option<SchemaProbe>,
     workspace_root: Option<PathBuf>,
+}
+
+struct SetupProbeContext {
+    configured_binary: Option<PathBuf>,
+    expected_binary: Option<BinaryInfo>,
+    verified_binary: Option<BinaryInfo>,
+    workspace_root: Option<PathBuf>,
+}
+
+async fn expected_binary_for_configured_path(
+    configured_binary: Option<&Path>,
+    binary: Option<BinaryInfo>,
+) -> Option<BinaryInfo> {
+    let configured_binary = configured_binary?;
+    let binary = binary?;
+    let canonical_path = tokio::fs::canonicalize(configured_binary).await.ok()?;
+    (canonical_path == binary.canonical_path).then_some(binary)
 }
 
 impl Default for CodexSupervisor {
@@ -465,8 +483,68 @@ impl CodexSupervisor {
         self.inner.state.lock().await.explicit_binary = path;
     }
 
+    pub async fn explicit_binary_configured(&self) -> bool {
+        self.inner.state.lock().await.explicit_binary.is_some()
+    }
+
     pub async fn diagnostic(&self) -> CodexDiagnostic {
         self.inner.state.lock().await.diagnostic.clone()
+    }
+
+    /// Checks only the prerequisites required to leave the first-run setup:
+    /// a trusted executable and a short-lived App Server that can initialize.
+    pub async fn setup_probe(&self) -> CodexDiagnostic {
+        let (configured_binary, binary, workspace_root) = {
+            let state = self.inner.state.lock().await;
+            let workspace_root = state
+                .active_workspace
+                .as_ref()
+                .and_then(|workspace_id| state.workspaces.get(workspace_id))
+                .or_else(|| state.workspaces.values().next())
+                .cloned()
+                .or_else(|| std::env::current_dir().ok());
+            let configured_binary = state.explicit_binary.clone().or_else(|| {
+                state
+                    .binary
+                    .as_ref()
+                    .filter(|binary| binary.source != BinarySource::Explicit)
+                    .map(|binary| binary.canonical_path.clone())
+            });
+            (configured_binary, state.binary.clone(), workspace_root)
+        };
+        let expected_binary =
+            expected_binary_for_configured_path(configured_binary.as_deref(), binary).await;
+        let context = SetupProbeContext {
+            configured_binary,
+            expected_binary,
+            verified_binary: None,
+            workspace_root,
+        };
+
+        bounded_setup_probe(context).await
+    }
+
+    pub(crate) async fn setup_probe_with_verified_binary(
+        &self,
+        binary: BinaryInfo,
+    ) -> CodexDiagnostic {
+        let workspace_root = {
+            let state = self.inner.state.lock().await;
+            state
+                .active_workspace
+                .as_ref()
+                .and_then(|workspace_id| state.workspaces.get(workspace_id))
+                .or_else(|| state.workspaces.values().next())
+                .cloned()
+                .or_else(|| std::env::current_dir().ok())
+        };
+        bounded_setup_probe(SetupProbeContext {
+            configured_binary: None,
+            expected_binary: None,
+            verified_binary: Some(binary),
+            workspace_root,
+        })
+        .await
     }
 
     pub(crate) async fn support_release_identity_evidence(&self) -> SupportReleaseIdentityEvidence {
@@ -496,7 +574,7 @@ impl CodexSupervisor {
     /// the app-owned runtime. Diagnostics must never stop or replace an active
     /// turn, so this probe uses an isolated short-lived app-server process.
     pub async fn readiness_probe(&self) -> CodexDiagnostic {
-        let context = {
+        let (configured_binary, binary, schema, workspace_root) = {
             let state = self.inner.state.lock().await;
             let workspace_root = state
                 .active_workspace
@@ -505,17 +583,27 @@ impl CodexSupervisor {
                 .or_else(|| state.workspaces.values().next())
                 .cloned()
                 .or_else(|| std::env::current_dir().ok());
-            ReadinessProbeContext {
-                configured_binary: state.explicit_binary.clone().or_else(|| {
-                    state
-                        .binary
-                        .as_ref()
-                        .map(|binary| binary.canonical_path.clone())
-                }),
-                expected_binary: state.binary.clone(),
-                expected_schema: state.schema.clone(),
+            let configured_binary = state.explicit_binary.clone().or_else(|| {
+                state
+                    .binary
+                    .as_ref()
+                    .filter(|binary| binary.source != BinarySource::Explicit)
+                    .map(|binary| binary.canonical_path.clone())
+            });
+            (
+                configured_binary,
+                state.binary.clone(),
+                state.schema.clone(),
                 workspace_root,
-            }
+            )
+        };
+        let expected_binary =
+            expected_binary_for_configured_path(configured_binary.as_deref(), binary).await;
+        let context = ReadinessProbeContext {
+            configured_binary,
+            expected_schema: expected_binary.as_ref().and(schema),
+            expected_binary,
+            workspace_root,
         };
 
         match tokio::time::timeout(READINESS_PROBE_TIMEOUT, run_readiness_probe(context)).await {
@@ -2329,33 +2417,7 @@ async fn handshake(
     workspace_root: &Path,
     experimental: bool,
 ) -> Result<HandshakeResult, RpcRequestError> {
-    let initialized = connection
-        .request(
-            "initialize",
-            initialize_params(env!("CARGO_PKG_VERSION"), experimental),
-            INITIALIZE_TIMEOUT,
-        )
-        .await?;
-    if initialized
-        .get("userAgent")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-        || initialized
-            .get("platformFamily")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        || initialized
-            .get("platformOs")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        || !initialized
-            .get("codexHome")
-            .and_then(Value::as_str)
-            .is_some_and(|value| Path::new(value).is_absolute())
-    {
-        return Err(RpcRequestError::Protocol);
-    }
-    connection.send(client_notification("initialized"))?;
+    initialize_app_server(connection, experimental).await?;
 
     let account = connection
         .request_default("account/read", account_read_params())
@@ -2413,6 +2475,117 @@ async fn handshake(
         max_available,
         config_model_present,
     })
+}
+
+async fn initialize_app_server(
+    connection: &RpcConnection,
+    experimental: bool,
+) -> Result<(), RpcRequestError> {
+    let initialized = connection
+        .request(
+            "initialize",
+            initialize_params(env!("CARGO_PKG_VERSION"), experimental),
+            INITIALIZE_TIMEOUT,
+        )
+        .await?;
+    if initialized
+        .get("userAgent")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+        || initialized
+            .get("platformFamily")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || initialized
+            .get("platformOs")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || !initialized
+            .get("codexHome")
+            .and_then(Value::as_str)
+            .is_some_and(|value| Path::new(value).is_absolute())
+    {
+        return Err(RpcRequestError::Protocol);
+    }
+    connection.send(client_notification("initialized"))?;
+    Ok(())
+}
+
+async fn bounded_setup_probe(context: SetupProbeContext) -> CodexDiagnostic {
+    match tokio::time::timeout(SETUP_PROBE_TIMEOUT, run_setup_probe(context)).await {
+        Ok(diagnostic) => diagnostic,
+        Err(_) => setup_failure_diagnostic(CodexHealth::Disconnected, "CODEX-SETUP-TIMEOUT", true),
+    }
+}
+
+async fn run_setup_probe(context: SetupProbeContext) -> CodexDiagnostic {
+    let Some(workspace_root) = context.workspace_root else {
+        return setup_failure_diagnostic(
+            CodexHealth::Disconnected,
+            "CODEX-SETUP-WORKSPACE-UNAVAILABLE",
+            true,
+        );
+    };
+    let binary = match context.verified_binary {
+        Some(binary) => binary,
+        None => match discover_binary(context.configured_binary.as_deref()).await {
+            Ok(binary) => binary,
+            Err(error) => return setup_binary_failure_diagnostic(error),
+        },
+    };
+    if context.expected_binary.as_ref().is_some_and(|expected| {
+        expected.identity != binary.identity
+            || expected.canonical_path_hash != binary.canonical_path_hash
+    }) {
+        return setup_failure_diagnostic(
+            CodexHealth::BinaryUntrusted,
+            "CODEX-BINARY-IDENTITY-CHANGED",
+            false,
+        );
+    }
+
+    let (signals, _receiver) = mpsc::channel(16);
+    let runtime = match spawn_process(&binary, &workspace_root, 0, signals).await {
+        Ok(runtime) => Arc::new(runtime),
+        Err(ProcessError::IdentityChanged) => {
+            return setup_failure_diagnostic(
+                CodexHealth::BinaryUntrusted,
+                "CODEX-BINARY-IDENTITY-CHANGED",
+                false,
+            );
+        }
+        Err(ProcessError::Spawn | ProcessError::MissingStdio) => {
+            return setup_failure_diagnostic(
+                CodexHealth::Disconnected,
+                "CODEX-SETUP-SPAWN-FAILED",
+                true,
+            );
+        }
+    };
+    let mut runtime_guard = ReadinessRuntimeGuard(Some(runtime.clone()));
+    let initialized = initialize_app_server(&runtime.connection, false).await;
+    runtime.shutdown().await;
+    runtime_guard.disarm();
+
+    if let Err(error) = initialized {
+        return setup_failure_diagnostic(
+            if matches!(error, RpcRequestError::Protocol) {
+                CodexHealth::ProtocolMismatch
+            } else {
+                CodexHealth::Disconnected
+            },
+            setup_rpc_error_code(&error),
+            !matches!(error, RpcRequestError::Protocol),
+        );
+    }
+    if binary.revalidate().await.is_err() {
+        return setup_failure_diagnostic(
+            CodexHealth::BinaryUntrusted,
+            "CODEX-BINARY-IDENTITY-CHANGED",
+            false,
+        );
+    }
+    diagnostic_from_setup(&binary)
 }
 
 async fn run_readiness_probe(context: ReadinessProbeContext) -> CodexDiagnostic {
@@ -2615,6 +2788,66 @@ fn diagnostic_from_handshake(
             _ => None,
         },
         detail_ref: None,
+    }
+}
+
+fn diagnostic_from_setup(binary: &BinaryInfo) -> CodexDiagnostic {
+    let now = chrono::Utc::now().to_rfc3339();
+    CodexDiagnostic {
+        adapter_version: super::types::CODEX_ADAPTER_VERSION,
+        health: CodexHealth::Ready,
+        checked_at: now.clone(),
+        operation: "codex.setup".to_owned(),
+        recoverable: false,
+        cli_version: Some(binary.cli_version.clone()),
+        binary_source: Some(binary.source),
+        binary_hash_prefix: Some(binary.executable_sha256[..16].to_owned()),
+        experimental_api_requested: false,
+        experimental_api_accepted: false,
+        child_state: ChildState::Stopped,
+        last_successful_handshake_at: Some(now),
+        error_code: None,
+        ..CodexDiagnostic::default()
+    }
+}
+
+fn setup_rpc_error_code(error: &RpcRequestError) -> &'static str {
+    match error {
+        RpcRequestError::Timeout => "CODEX-SETUP-INITIALIZE-TIMEOUT",
+        RpcRequestError::ConnectionLost => "CODEX-SETUP-CONNECTION-LOST",
+        RpcRequestError::Protocol => "CODEX-SETUP-PROTOCOL-MISMATCH",
+        RpcRequestError::Overloaded | RpcRequestError::Server { .. } => {
+            "CODEX-SETUP-INITIALIZE-FAILED"
+        }
+    }
+}
+
+fn setup_binary_failure_diagnostic(error: BinaryError) -> CodexDiagnostic {
+    let (health, code, recoverable) = match error {
+        BinaryError::Missing => (CodexHealth::BinaryMissing, "CODEX-BINARY-MISSING", true),
+        BinaryError::Untrusted => (
+            CodexHealth::BinaryUntrusted,
+            "CODEX-BINARY-UNTRUSTED",
+            false,
+        ),
+        BinaryError::Timeout => (CodexHealth::Disconnected, "CODEX-SETUP-TIMEOUT", true),
+        BinaryError::ProbeFailed | BinaryError::SchemaUnsupported | BinaryError::Io => {
+            (CodexHealth::Disconnected, "CODEX-SETUP-PROBE-FAILED", true)
+        }
+    };
+    setup_failure_diagnostic(health, code, recoverable)
+}
+
+fn setup_failure_diagnostic(health: CodexHealth, code: &str, recoverable: bool) -> CodexDiagnostic {
+    CodexDiagnostic {
+        health,
+        checked_at: chrono::Utc::now().to_rfc3339(),
+        operation: "codex.setup".to_owned(),
+        recoverable,
+        child_state: ChildState::Stopped,
+        experimental_api_requested: false,
+        error_code: Some(code.to_owned()),
+        ..CodexDiagnostic::default()
     }
 }
 
