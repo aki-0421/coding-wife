@@ -4283,9 +4283,7 @@ mod tests {
             .expect("state")
             .workspaces
             .is_empty());
-        readiness_task
-            .await
-            .expect("startup restore barrier");
+        readiness_task.await.expect("startup restore barrier");
         let _ = fs::remove_dir_all(data);
     }
 

@@ -586,13 +586,7 @@ async fn inspect_candidate(
         Err(_) if explicit => return Err(BinaryError::Io),
         Err(_) => return Ok(None),
     };
-    let output = run_bounded(
-        &identity,
-        &[OsString::from("--version")],
-        None,
-        false,
-    )
-    .await?;
+    let output = run_bounded(&identity, &[OsString::from("--version")], None, false).await?;
     let version_output = String::from_utf8(output.stdout).map_err(|_| BinaryError::ProbeFailed)?;
     let cli_version = version_output
         .trim()
