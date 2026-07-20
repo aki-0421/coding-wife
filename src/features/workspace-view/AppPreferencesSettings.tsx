@@ -16,6 +16,7 @@ import {
   useAppPreferences,
   useAppPreferencesController,
 } from "@/features/preferences"
+import { CodexBinaryPathSettings } from "@/features/readiness"
 import type { RuntimeState } from "@/features/runtime"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 
@@ -162,6 +163,8 @@ export function AppPreferencesSettings({
         </Field>
       </FieldGroup>
 
+      <Separator />
+      <CodexBinaryPathSettings />
       <Separator />
       <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-lg gap-y-xs text-caption">
         <dt className="text-muted-foreground">

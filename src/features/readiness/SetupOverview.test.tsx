@@ -56,6 +56,7 @@ function renderOverview(
   const gateway: NativeReadinessGateway = {
     kind: "native",
     run: () => Promise.resolve(snapshot),
+    configureCodexBinary: () => Promise.resolve(snapshot),
     copy: (snapshotId) =>
       Promise.resolve({
         schemaVersion: 1,

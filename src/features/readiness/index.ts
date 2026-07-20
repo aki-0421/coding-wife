@@ -1,4 +1,5 @@
 export * from "@/features/readiness/contracts"
+export * from "@/features/readiness/CodexBinaryPathSettings"
 export * from "@/features/readiness/controller"
 export * from "@/features/readiness/hooks"
 export * from "@/features/readiness/NativeReadinessDiagnostics"

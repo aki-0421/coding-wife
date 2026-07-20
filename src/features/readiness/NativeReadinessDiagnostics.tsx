@@ -70,6 +70,7 @@ const diagnosticsCopy = {
       build_profile: "Build",
       readiness_schema: "Readiness schema",
       codex_binary: "Trusted Codex binary",
+      codex_binary_source: "Codex path selection",
       codex_model: "Fixed model",
       codex_auth: "Authentication",
       codex_schema: "Protocol schema",
@@ -155,6 +156,7 @@ const diagnosticsCopy = {
       build_profile: "ビルド",
       readiness_schema: "診断スキーマ",
       codex_binary: "信頼済みCodexバイナリ",
+      codex_binary_source: "Codexパス選択",
       codex_model: "固定モデル",
       codex_auth: "認証",
       codex_schema: "プロトコルスキーマ",
@@ -266,8 +268,14 @@ export function NativeReadinessDiagnostics() {
   const state = useNativeReadiness()
   const controller = useNativeReadinessController()
   const snapshot = state.snapshot
-  const busy = state.status === "loading" || state.status === "rechecking"
-  const stale = state.status === "rechecking" || state.status === "error"
+  const busy =
+    state.status === "loading" ||
+    state.status === "rechecking" ||
+    state.status === "configuring"
+  const stale =
+    state.status === "rechecking" ||
+    state.status === "configuring" ||
+    state.status === "error"
   const critical =
     snapshot?.checks.some(
       (check) => check.status === "blocked" || check.status === "unavailable",

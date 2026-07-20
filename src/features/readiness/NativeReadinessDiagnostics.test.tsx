@@ -46,6 +46,10 @@ class DeferredGateway implements NativeReadinessGateway {
     return new Promise((resolve) => this.resolvers.push(resolve))
   }
 
+  configureCodexBinary(): Promise<NativeReadinessSnapshotV1> {
+    return this.run()
+  }
+
   copy(snapshotId: string) {
     return Promise.resolve({
       schemaVersion: 1 as const,

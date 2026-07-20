@@ -25,6 +25,7 @@ import type {
   ReadinessCheckV1,
 } from "@/features/readiness/contracts"
 import type { NativeReadinessControllerState } from "@/features/readiness/controller"
+import { CodexBinaryPathSettings } from "@/features/readiness/CodexBinaryPathSettings"
 import {
   useNativeReadiness,
   useNativeReadinessController,
@@ -366,7 +367,10 @@ export function SetupOverview({
   const snapshot = state.snapshot
   const requirements = unresolvedSetupRequirements(snapshot, projectCount)
   const gitReady = gitExecutableIsReady(checkById(snapshot, "git"))
-  const rechecking = state.status === "loading" || state.status === "rechecking"
+  const rechecking =
+    state.status === "loading" ||
+    state.status === "rechecking" ||
+    state.status === "configuring"
 
   const copyToClipboard = async (command: string) => {
     setCopyErrorCommand(null)
@@ -473,6 +477,9 @@ export function SetupOverview({
                         <p className="m-0 mt-xxs max-w-[65ch] text-pretty text-caption text-muted-foreground">
                           {description}
                         </p>
+                        {requirement.key === "codex" ? (
+                          <CodexBinaryPathSettings compact />
+                        ) : null}
                         {command === null ? null : (
                           <>
                             <code className="mt-sm block w-fit max-w-full overflow-x-auto rounded-control bg-code-chip px-sm py-xs font-mono text-label text-foreground">

@@ -33,8 +33,8 @@ use super::requests::{
 };
 use super::rpc::{RpcConnection, RpcRequestError, RuntimeSignal};
 use super::types::{
-    AcceptedResponse, CapabilityState, ChildState, CodexCommandError, CodexConnectRequest,
-    CodexDiagnostic, CodexEvent, CodexFallbackDecisionRequest, CodexHealth,
+    AcceptedResponse, BinarySource, CapabilityState, ChildState, CodexCommandError,
+    CodexConnectRequest, CodexDiagnostic, CodexEvent, CodexFallbackDecisionRequest, CodexHealth,
     CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadListRequest,
     CodexThreadResumeRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
     CodexTurnStartRequest, MainSkillInjectionAudit, PendingResolutionStatus, ReasoningPreset,
@@ -465,6 +465,10 @@ impl CodexSupervisor {
         self.inner.state.lock().await.explicit_binary = path;
     }
 
+    pub async fn explicit_binary_configured(&self) -> bool {
+        self.inner.state.lock().await.explicit_binary.is_some()
+    }
+
     pub async fn diagnostic(&self) -> CodexDiagnostic {
         self.inner.state.lock().await.diagnostic.clone()
     }
@@ -505,15 +509,20 @@ impl CodexSupervisor {
                 .or_else(|| state.workspaces.values().next())
                 .cloned()
                 .or_else(|| std::env::current_dir().ok());
+            let configured_binary = state.explicit_binary.clone().or_else(|| {
+                state
+                    .binary
+                    .as_ref()
+                    .filter(|binary| binary.source != BinarySource::Explicit)
+                    .map(|binary| binary.canonical_path.clone())
+            });
+            let expected_binary = state.binary.clone().filter(|binary| {
+                configured_binary.as_deref() == Some(binary.canonical_path.as_path())
+            });
             ReadinessProbeContext {
-                configured_binary: state.explicit_binary.clone().or_else(|| {
-                    state
-                        .binary
-                        .as_ref()
-                        .map(|binary| binary.canonical_path.clone())
-                }),
-                expected_binary: state.binary.clone(),
-                expected_schema: state.schema.clone(),
+                configured_binary,
+                expected_schema: expected_binary.as_ref().and(state.schema.clone()),
+                expected_binary,
                 workspace_root,
             }
         };

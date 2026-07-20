@@ -77,6 +77,7 @@ pub enum ReadinessFactKey {
     BuildProfile,
     ReadinessSchema,
     CodexBinary,
+    CodexBinarySource,
     CodexModel,
     CodexAuth,
     CodexSchema,
@@ -110,6 +111,7 @@ impl ReadinessFactKey {
             Self::BuildProfile => "build_profile",
             Self::ReadinessSchema => "readiness_schema",
             Self::CodexBinary => "codex_binary",
+            Self::CodexBinarySource => "codex_binary_source",
             Self::CodexModel => "codex_model",
             Self::CodexAuth => "codex_auth",
             Self::CodexSchema => "codex_schema",
@@ -152,6 +154,13 @@ pub struct ReadinessCheckV1 {
     pub recoverable: bool,
     pub recovery_action: ReadinessRecoveryAction,
     pub facts: Vec<ReadinessFactV1>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ConfigureCodexBinaryRequestV1 {
+    pub schema_version: u16,
+    pub path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
