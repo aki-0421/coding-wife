@@ -15,7 +15,6 @@ export type CharacterRuntimeViewPhase =
   | "recovering"
   | "error"
   | "disposed"
-  | "hidden"
   | "unknown"
 
 export type CharacterRuntimeReadiness =
@@ -24,7 +23,6 @@ export type CharacterRuntimeReadiness =
   | "recovering"
   | "degraded"
   | "error"
-  | "hidden"
   | "unknown"
 
 export interface CharacterRuntimeView {
@@ -41,23 +39,7 @@ export interface CharacterRuntimeView {
 
 export function projectCharacterRuntime(
   snapshot: CharacterRuntimeSnapshot,
-  hidden: boolean,
 ): CharacterRuntimeView {
-  if (hidden) {
-    return {
-      rendererKind: snapshot.rendererKind,
-      phase: "hidden",
-      fallback: "text_only",
-      motionPolicy: "hidden",
-      readiness: "hidden",
-      pack:
-        snapshot.rendererKind === "builtin_hiyori" ? BUILTIN_HIYORI_PACK : null,
-      currentErrorCode: null,
-      lastErrorCode: snapshot.lastErrorCode,
-      canRetry: false,
-    }
-  }
-
   if (snapshot.rendererKind === "external") {
     return {
       rendererKind: "external",

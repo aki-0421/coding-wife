@@ -32,7 +32,6 @@ export const readinessRecoveryActions = [
   "repair_history",
   "restore_live2d",
   "save_preferences",
-  "reset_preferences",
 ] as const
 
 export const readinessFactKeys = [

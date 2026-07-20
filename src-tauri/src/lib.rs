@@ -49,7 +49,7 @@ use narration::commands::{
     narration_update_settings,
 };
 use narration::NarrationService;
-use preferences::commands::{app_preferences_get, app_preferences_reset, app_preferences_update};
+use preferences::commands::{app_preferences_get, app_preferences_update};
 use preferences::AppPreferencesService;
 use readiness::commands::{copy_sanitized_diagnostics, run_diagnostic_check};
 use readiness::NativeReadinessService;
@@ -286,7 +286,6 @@ pub fn run() {
             get_runtime_metadata,
             app_preferences_get,
             app_preferences_update,
-            app_preferences_reset,
             run_diagnostic_check,
             copy_sanitized_diagnostics,
             app_quit_cancel,

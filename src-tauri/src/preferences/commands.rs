@@ -1,32 +1,24 @@
 use tauri::State;
 
 use super::{
-    AppPreferencesCommandError, AppPreferencesGetRequestV1, AppPreferencesResetRequestV1,
-    AppPreferencesService, AppPreferencesSnapshotV1, AppPreferencesUpdateRequestV1,
+    AppPreferencesCommandError, AppPreferencesGetRequestV2, AppPreferencesService,
+    AppPreferencesSnapshotV2, AppPreferencesUpdateRequestV2,
 };
 
 #[tauri::command]
 pub fn app_preferences_get(
-    request: AppPreferencesGetRequestV1,
+    request: AppPreferencesGetRequestV2,
     service: State<'_, AppPreferencesService>,
-) -> Result<AppPreferencesSnapshotV1, AppPreferencesCommandError> {
+) -> Result<AppPreferencesSnapshotV2, AppPreferencesCommandError> {
     public_operation(service.get(request), "app_preferences_get")
 }
 
 #[tauri::command]
 pub fn app_preferences_update(
-    request: AppPreferencesUpdateRequestV1,
+    request: AppPreferencesUpdateRequestV2,
     service: State<'_, AppPreferencesService>,
-) -> Result<AppPreferencesSnapshotV1, AppPreferencesCommandError> {
+) -> Result<AppPreferencesSnapshotV2, AppPreferencesCommandError> {
     public_operation(service.update(request), "app_preferences_update")
-}
-
-#[tauri::command]
-pub fn app_preferences_reset(
-    request: AppPreferencesResetRequestV1,
-    service: State<'_, AppPreferencesService>,
-) -> Result<AppPreferencesSnapshotV1, AppPreferencesCommandError> {
-    public_operation(service.reset(request), "app_preferences_reset")
 }
 
 fn public_operation<T>(
@@ -43,11 +35,7 @@ mod tests {
 
     #[test]
     fn lower_layer_errors_are_remapped_to_the_public_command_boundary() {
-        for operation in [
-            "app_preferences_get",
-            "app_preferences_update",
-            "app_preferences_reset",
-        ] {
+        for operation in ["app_preferences_get", "app_preferences_update"] {
             let result: Result<(), AppPreferencesCommandError> = Err(preferences_error(
                 "preferences_internal",
                 "APP-PREFERENCES-BOUNDARY-FIXTURE",

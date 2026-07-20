@@ -249,10 +249,6 @@ export function useWorkspaceViewModel(
     backupName: null,
   })
   const [muted, setMuted] = useState(false)
-  const [characterHidden, setCharacterHidden] = useState(false)
-  const [reducedMotion, setReducedMotion] = useState<
-    "system" | "reduce" | "allow"
-  >("system")
   const selectionVersion = useRef(0)
   const transitionVersion = useRef(0)
   const transitionOperation = useRef<Promise<boolean> | null>(null)
@@ -1288,12 +1284,6 @@ export function useWorkspaceViewModel(
     selectedWorkspace,
   ])
 
-  const resetUiState = useCallback(() => {
-    setFilter("")
-    setActiveTab("chat")
-    setNotice(null)
-  }, [])
-
   return {
     activeTab,
     adapter,
@@ -1305,7 +1295,6 @@ export function useWorkspaceViewModel(
     captureContext,
     cancelSelectedWorkspace,
     cancelWorkspaceTransition,
-    characterHidden,
     codex,
     deleteSelectedWorkspaceHistory,
     filteredWorkspaces,
@@ -1317,7 +1306,6 @@ export function useWorkspaceViewModel(
     projects,
     history,
     lastSummary,
-    reducedMotion,
     repairSelectedWorkspace,
     confirmWorkspaceTransition,
     registerAttachmentPaths,
@@ -1325,20 +1313,17 @@ export function useWorkspaceViewModel(
     removeContext,
     requestAddProject,
     retryAdapterLoad,
-    resetUiState,
     selectedDraft,
     selectedWorkspace,
     selectedWorkspaceId,
     saveTimelineAnchor,
     sendTurn,
     setActiveTab,
-    setCharacterHidden,
     setDraftText,
     setEffort,
     setFilter,
     setMuted,
     setNotice,
-    setReducedMotion,
     setSelectedWorkspaceId: selectWorkspace,
     stopTurn,
     timeline: combinedTimeline,
