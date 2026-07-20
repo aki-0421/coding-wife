@@ -41,6 +41,11 @@ import {
   type NarrationController,
   useNarrationSnapshot,
 } from "@/features/narration"
+import {
+  SetupOverview,
+  shouldShowSetupOverview,
+  useNativeReadiness,
+} from "@/features/readiness"
 import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { ChatView } from "@/features/workspace-view/ChatView"
 import {
@@ -122,6 +127,7 @@ export function WorkspaceShell({
   const safeQuitCopy = getSafeQuitCopy(locale)
   const runtime = useRuntime()
   const narration = useNarrationSnapshot()
+  const nativeReadiness = useNativeReadiness()
   const view = useWorkspaceViewModel(adapter, initialWorkspaces)
   const [appSettingsProjectId, setAppSettingsProjectId] = useState<
     string | null
@@ -768,6 +774,47 @@ export function WorkspaceShell({
   }
 
   const selectedWorkspace = view.selectedWorkspace
+  const setupOverviewRequired = shouldShowSetupOverview(
+    adapter?.hydrationMode,
+    nativeReadiness,
+    view.projects.length,
+  )
+  const projectSetupDialog =
+    view.projectSetup === null ? null : (
+      <ProjectSetupDialog
+        copy={copy}
+        key={view.projectSetup.candidate.setupId}
+        onCancel={() => void view.cancelProjectSetup()}
+        onInitializeGit={() => void view.initializeProjectGit()}
+        onSetupGithub={(owner, repository) =>
+          void view.setupProjectGithub(owner, repository)
+        }
+        setup={view.projectSetup}
+      />
+    )
+
+  if (setupOverviewRequired) {
+    return (
+      <main data-workspace-viewport={viewportLayout}>
+        <SetupOverview
+          notice={view.notice}
+          onAddProject={() =>
+            void view.requestAddProject(copy.pickerUnavailable)
+          }
+          projectCount={view.projects.length}
+        />
+        {projectSetupDialog}
+        <SafeQuitDialog
+          copy={safeQuitCopy}
+          onDontQuit={keepAppOpen}
+          onRetryCleanup={retryCleanup}
+          onStopAndQuit={stopAndQuit}
+          open={safeQuitRequest !== null || cleanupFailure !== null}
+          status={safeQuitStatus}
+        />
+      </main>
+    )
+  }
 
   return (
     <main
@@ -987,18 +1034,7 @@ export function WorkspaceShell({
         </section>
       )}
 
-      {view.projectSetup === null ? null : (
-        <ProjectSetupDialog
-          copy={copy}
-          key={view.projectSetup.candidate.setupId}
-          onCancel={() => void view.cancelProjectSetup()}
-          onInitializeGit={() => void view.initializeProjectGit()}
-          onSetupGithub={(owner, repository) =>
-            void view.setupProjectGithub(owner, repository)
-          }
-          setup={view.projectSetup}
-        />
-      )}
+      {projectSetupDialog}
 
       <Dialog
         onOpenChange={(open) => {

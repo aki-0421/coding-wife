@@ -1085,6 +1085,65 @@ describe("WorkspaceShell", () => {
     ).toHaveAttribute("aria-current", "page")
   })
 
+  it("registers the first native project from the full-screen setup overview", async () => {
+    const user = userEvent.setup()
+    const state: WorkspaceAdapterState = {
+      projects: [],
+      workspaces: [],
+      activeWorkspaceId: null,
+      draft: null,
+      timeline: [],
+      history: { mode: "ready", errorCode: null, backupName: null },
+    }
+    const registeredState: WorkspaceAdapterState = {
+      ...state,
+      projects: [
+        {
+          id: "project-first",
+          name: "first-local",
+          githubRepository: "fixture/first",
+          health: "ready",
+          workspaceCount: 0,
+          updatedAt: "2026-07-20T00:00:00.000Z",
+        },
+      ],
+    }
+    const requestAddProject = vi
+      .fn<() => Promise<ProjectRegistrationResult>>()
+      .mockResolvedValue({ outcome: "selected", state: registeredState })
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      requestAddProject,
+    }
+
+    renderWorkspace(adapter)
+
+    expect(
+      await screen.findByRole("heading", { name: "Finish the local setup" }),
+    ).toBeVisible()
+    const addProjectButton = await screen.findByRole("button", {
+      name: "Choose project folder…",
+    })
+    expect(
+      screen.queryByRole("navigation", { name: "Workspaces" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Prepare Codex CLI" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Install Git" }),
+    ).not.toBeInTheDocument()
+
+    await user.click(addProjectButton)
+
+    expect(requestAddProject).toHaveBeenCalledOnce()
+    expect(
+      await screen.findByRole("heading", { name: "Select a project" }),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "fixture/first" })).toBeVisible()
+  })
+
   it("sets up Git and GitHub before registering a selected project folder", async () => {
     const user = userEvent.setup()
     const state = nativeWorkspaceState()
