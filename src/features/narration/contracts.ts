@@ -44,7 +44,7 @@ export type NarrationCommitJobTrigger =
   | "user_retry"
 
 export const narrationProviders = ["openai"] as const
-export type NarrationProvider = (typeof narrationProviders)[number]
+export type NarrationTtsProvider = (typeof narrationProviders)[number]
 
 export const openAiTtsModels = ["gpt-4o-mini-tts"] as const
 export type OpenAiTtsModel = (typeof openAiTtsModels)[number]
@@ -76,7 +76,7 @@ export interface NarrationSettingsV2 {
   readonly version: number
   readonly enabled: boolean
   readonly muted: boolean
-  readonly provider: NarrationProvider | null
+  readonly provider: NarrationTtsProvider | null
   readonly apiKeyConfigured: boolean
   readonly model: OpenAiTtsModel
   readonly voice: OpenAiTtsVoice
@@ -113,7 +113,7 @@ export interface NarrationSettingsUpdateV2 {
   readonly expectedVersion: number
   readonly enabled: boolean
   readonly muted: boolean
-  readonly provider: NarrationProvider | null
+  readonly provider: NarrationTtsProvider | null
   readonly apiKeyAction: NarrationApiKeyActionV2
   readonly model: OpenAiTtsModel
   readonly voice: OpenAiTtsVoice
@@ -609,8 +609,8 @@ export function parseNarrationSettings(value: unknown): NarrationSettingsV2 {
     muted: value.muted,
     provider: value.provider,
     apiKeyConfigured: value.apiKeyConfigured,
-    model: value.model,
-    voice: value.voice,
+    model: value.model as OpenAiTtsModel,
+    voice: value.voice as OpenAiTtsVoice,
     speed: value.speed,
   }
 }

@@ -333,9 +333,10 @@ impl SpeechFiles {
     fn create(runtime_directory: &Path, speech: &NarrationSpeech<'_>) -> NarrationResult<Self> {
         let request = runtime_directory.join(format!("request-{}.json", uuid::Uuid::new_v4()));
         let audio = runtime_directory.join(format!("speech-{}.wav", uuid::Uuid::new_v4()));
-        let result = (|| {
-            let mut request_file = private_new_file(&request)?;
-            let _audio_file = private_new_file(&audio)?;
+        let files = Self { request, audio };
+        (|| {
+            let mut request_file = private_new_file(&files.request)?;
+            let _audio_file = private_new_file(&files.audio)?;
             let body = serde_json::to_vec(&serde_json::json!({
                 "model": speech.model,
                 "input": speech.text,
@@ -352,13 +353,9 @@ impl SpeechFiles {
             request_file
                 .sync_all()
                 .map_err(|_| narration_error("narration_speak", "NARRATION-REQUEST-WRITE", true))?;
-            Ok(Self { request, audio })
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&request);
-            let _ = fs::remove_file(&audio);
-        }
-        result
+            Ok(())
+        })()?;
+        Ok(files)
     }
 }
 

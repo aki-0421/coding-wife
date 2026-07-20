@@ -36,7 +36,7 @@ import {
 import {
   openAiTtsModels,
   openAiTtsVoices,
-  type NarrationProvider,
+  type NarrationTtsProvider,
   type NarrationSettingsV2,
   type OpenAiTtsModel,
   type OpenAiTtsVoice,
@@ -55,7 +55,7 @@ const speedOptions = Array.from(
 
 interface NarrationDraft {
   readonly enabled: boolean
-  readonly provider: NarrationProvider | null
+  readonly provider: NarrationTtsProvider | null
   readonly model: OpenAiTtsModel
   readonly voice: OpenAiTtsVoice
   readonly speed: number
