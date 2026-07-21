@@ -29,6 +29,7 @@ use super::protocol::{
     model_list_params, parse_thread_policy_response, review_start_params, server_error,
     server_result, thread_goal_set_params, thread_list_params, thread_resume_params,
     thread_start_params, turn_interrupt_params, turn_start_params, InboundMessage, OutboundProfile,
+    TurnStartRequest,
 };
 use super::requests::{
     ActiveWireContext, RegisterOutcome, RequestValidationError, ServerRequestLedger,
@@ -1440,17 +1441,17 @@ impl CodexSupervisor {
         let result = match connection
             .request_default(
                 "turn/start",
-                turn_start_params(
-                    &raw_thread,
-                    &request.client_user_message_id,
-                    &request.text,
-                    request.effort,
-                    request.service_tier.as_deref(),
-                    request.plan_mode,
-                    &attachments,
-                    &commit_skill,
-                    TurnExecutionClass::Main,
-                )
+                turn_start_params(TurnStartRequest {
+                    thread_id: &raw_thread,
+                    client_user_message_id: &request.client_user_message_id,
+                    text: &request.text,
+                    effort: request.effort,
+                    service_tier: request.service_tier.as_deref(),
+                    plan_mode: request.plan_mode,
+                    attachments: &attachments,
+                    commit_skill: &commit_skill,
+                    execution_class: TurnExecutionClass::Main,
+                })
                 .map_err(|_| command_error("CODEX-TURN-SKILL-CLASS", "turn/start", false))?,
             )
             .await
@@ -1735,17 +1736,17 @@ impl CodexSupervisor {
         let result = match connection
             .request_default(
                 "turn/start",
-                turn_start_params(
-                    &claim.thread_id,
-                    &client_message_id,
-                    &input,
-                    claim.effort,
-                    None,
-                    false,
-                    &[],
-                    &commit_skill,
-                    TurnExecutionClass::Main,
-                )
+                turn_start_params(TurnStartRequest {
+                    thread_id: &claim.thread_id,
+                    client_user_message_id: &client_message_id,
+                    text: &input,
+                    effort: claim.effort,
+                    service_tier: None,
+                    plan_mode: false,
+                    attachments: &[],
+                    commit_skill: &commit_skill,
+                    execution_class: TurnExecutionClass::Main,
+                })
                 .map_err(|_| {
                     command_error("CODEX-TURN-SKILL-CLASS", "codex.decision.answer", false)
                 })?,

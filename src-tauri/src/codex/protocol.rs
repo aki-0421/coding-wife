@@ -615,17 +615,30 @@ pub(crate) fn support_turn_start_params(
     }))
 }
 
-pub(crate) fn turn_start_params(
-    thread_id: &str,
-    client_user_message_id: &str,
-    text: &str,
-    effort: Option<ReasoningPreset>,
-    service_tier: Option<&str>,
-    plan_mode: bool,
-    attachments: &[ResolvedAttachment],
-    commit_skill: &ResolvedBundledSkill,
-    execution_class: TurnExecutionClass,
-) -> Result<Value, TurnContractError> {
+pub(crate) struct TurnStartRequest<'a> {
+    pub thread_id: &'a str,
+    pub client_user_message_id: &'a str,
+    pub text: &'a str,
+    pub effort: Option<ReasoningPreset>,
+    pub service_tier: Option<&'a str>,
+    pub plan_mode: bool,
+    pub attachments: &'a [ResolvedAttachment],
+    pub commit_skill: &'a ResolvedBundledSkill,
+    pub execution_class: TurnExecutionClass,
+}
+
+pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, TurnContractError> {
+    let TurnStartRequest {
+        thread_id,
+        client_user_message_id,
+        text,
+        effort,
+        service_tier,
+        plan_mode,
+        attachments,
+        commit_skill,
+        execution_class,
+    } = request;
     if !execution_skill_matches(execution_class, commit_skill)
         || (execution_class == TurnExecutionClass::Support && !attachments.is_empty())
     {
@@ -863,29 +876,29 @@ mod tests {
     #[test]
     fn turn_sets_reasoning_service_tier_and_plan_mode_independently() {
         let skill = commit_skill();
-        let fast = turn_start_params(
-            "thread",
-            "message",
-            "hello",
-            Some(ReasoningPreset::Low),
-            Some("priority"),
-            true,
-            &[],
-            &skill,
-            TurnExecutionClass::Main,
-        )
+        let fast = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "hello",
+            effort: Some(ReasoningPreset::Low),
+            service_tier: Some("priority"),
+            plan_mode: true,
+            attachments: &[],
+            commit_skill: &skill,
+            execution_class: TurnExecutionClass::Main,
+        })
         .expect("main turn contract");
-        let max = turn_start_params(
-            "thread",
-            "message",
-            "hello",
-            Some(ReasoningPreset::Max),
-            None,
-            false,
-            &[],
-            &skill,
-            TurnExecutionClass::Main,
-        )
+        let max = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "hello",
+            effort: Some(ReasoningPreset::Max),
+            service_tier: None,
+            plan_mode: false,
+            attachments: &[],
+            commit_skill: &skill,
+            execution_class: TurnExecutionClass::Main,
+        })
         .expect("main turn contract");
 
         assert_eq!(fast["model"], CODEX_MODEL);
@@ -930,17 +943,17 @@ mod tests {
     #[test]
     fn main_and_support_turns_reject_each_others_skill() {
         assert_eq!(
-            turn_start_params(
-                "thread",
-                "message",
-                "hello",
-                Some(ReasoningPreset::Low),
-                None,
-                false,
-                &[],
-                &explain_skill(),
-                TurnExecutionClass::Main,
-            ),
+            turn_start_params(TurnStartRequest {
+                thread_id: "thread",
+                client_user_message_id: "message",
+                text: "hello",
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                attachments: &[],
+                commit_skill: &explain_skill(),
+                execution_class: TurnExecutionClass::Main,
+            }),
             Err(TurnContractError::SkillClass)
         );
         assert_eq!(
@@ -1023,17 +1036,17 @@ mod tests {
                 path: "/app-private/attachment-snapshots/lease/01.snapshot".to_owned(),
             },
         ];
-        let params = turn_start_params(
-            "thread",
-            "message",
-            "  ",
-            Some(ReasoningPreset::Low),
-            None,
-            false,
-            &attachments,
-            &commit_skill(),
-            TurnExecutionClass::Main,
-        )
+        let params = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "  ",
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            attachments: &attachments,
+            commit_skill: &commit_skill(),
+            execution_class: TurnExecutionClass::Main,
+        })
         .expect("main turn contract");
 
         assert_eq!(
