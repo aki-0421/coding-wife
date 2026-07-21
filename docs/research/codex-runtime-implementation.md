@@ -1,7 +1,7 @@
 ---
 title: "Codex runtime実装ガイド"
 description: "Codex App Server adapterのファイル責務、不変条件、fake process試験、共有契約、live smokeの実行方法を記録する。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "Codex runtimeのprocess監督、IPC、event parser、session storeを変更するとき。"
   - "Codex CLI更新後の互換性、障害復旧、privacy gateを検証するとき。"
@@ -27,25 +27,30 @@ read_when:
 8. workspaceの絶対pathと明示Codex binary pathはapp-private recordにだけ保存する。WebViewはworkspaceについてnative folder pickerが返すopaque workspace ID、alias、boolean preflightだけを受け取る。Codex pathだけは利用者が設定formへ入力した値をbounded requestとしてRustへ渡せるが、canonical pathをresponse、snapshot、history、通常logへ返さない。
 9. thread開始・再開はresponseのmodel、canonical cwd、thread cwd、approval policy、sandbox type、ephemeral=falseを全て照合する。不足・不一致時はhandleを保存せずchildを停止する。
 10. pending responseはresponse variantと値をimmutable recordに対して検証してからatomicに消費する。invalid responseはpendingを残し、TypeScript側もpending kindとresponse typeを一致させてからsingle-claimする。
-11. native RUIが使えない場合のassistant完了文は`result`または`decision_request`のJSON全体だけを受理する。自由文、freeform、approval代替、不正optionは表示せずactive turnをinterruptする。
+11. native RUIが使えない場合のassistant最終完了文は`result`または`decision_request`のJSON全体だけを受理する。Codexへ渡す`outputSchema`はStructured Outputsが受理する単一root objectとし、全fieldをrequiredにしたうえでvariant固有fieldをnullableにする。`result`では`decisionId`、`question`、`options`、`context`をnullに限定し、booleanまたはnullの`allowFreeform`はdecisionへ影響しない互換fieldとして無視する。`decision_request`では必要な値がすべてnon-nullかつ`allowFreeform=false`であることをRustでも再検証する。Structured Outputのassistant deltaはJSON envelopeのtransport断片なのでWebView eventへ出さない。完了itemはApp Serverの`phase`を確認し、`commentary`ならredact・長さ制限した途中経過、`final_answer`またはphaseなしなら厳格検証した最終出力として扱う。commentaryがexact `result` envelopeの場合は`message`だけを取り出し、commentaryのplain textまたはJSON envelopeを最終回答違反としてinterruptしない。root `oneOf`、最終回答の自由文、freeform decision、approval代替、不正optionは受理せずactive turnをinterruptする。
 12. fallback decisionはnative server request ledgerへ入れず、workspace、generation、source thread/turn、元のreasoning effortへ束縛した専用ledgerで管理する。source turnの正常完了後だけ、opaque decision handleとoption IDだけを含む固定JSONを同じthreadの新しいturnへ送る。invalid optionはcardを残し、同時応答は1件だけを開始し、開始失敗やchild crash後に自動再送しない。
-13. binary discovery、version、schema、identity、capability probeのいずれかが失敗した時点で、以前のbinary/schema cacheとdiagnostic上のversion、hash、fingerprint、capability/account証跡を一括消去し、active childを停止する。次のconnectは必ず新しいdiscoveryとprobeから始める。
+13. binary discovery、version、schema、identity、capability probeのいずれかが失敗した時点で、以前のbinary/schema cacheとdiagnostic上のversion、hash、fingerprint、capability/account証跡を一括消去し、active childを停止する。次のconnectは必ず新しいdiscoveryとprobeから始める。connectionまたはauth/model handshakeだけの失敗では、metadata identityが一致するbinary/schema evidenceを再利用できる。
 14. public textはfield別に検証する。identifier/aliasはsingle-line、prompt/assistant/tool excerpt/effect/evidenceは正規化済み`\n`と`\t`だけをcontrol例外として許可し、NUL、その他control、secret、private pathを拒否する。RustとTypeScriptはUnicode scalarで同じ上限を数える。
 15. HISTのversioned CODE payloadはlive semantic eventと同じexact projectorで復元する。pending decision/approvalはsupervisor ownership照合成功時だけactionableにし、unknown/invalid payloadはraw/generic行へfallbackしない。
 16. `DecisionContext`はnative RUI、fallback、normalizer、HIST、WebViewを通じてversion、effect、scope、risk、reversibility、recommendation、evidence、uncertaintyを保持する。不正contextを回答可能cardへ近似しない。
 17. main turnのpublic instruction上限32,000 Unicode scalarと、contextを含む合成text上限80,000 Unicode scalarを分離する。Rust supervisorは後者をApp Server送信前に再検証し、exact 80,000を受理、80,001、NUL、空textかつattachmentなしを拒否する。multibyte文字もUTF-8 byte数ではなく1 scalarとして数える。この変更はsupport専用input/outputの64KiB byte上限を変更しない。
+18. repositoryのfocus recheckとSend直前recheckが同じworkspaceのCodex activationを同時に要求した場合は、同じworkspace・history modeの1件へsingle-flight化する。readyな同一sessionをrepository recheckだけで再生成せず、送信前activationの競合で接続済みgenerationをstaleにしない。
+19. Sendは`codex_turn_start`の受理後だけdraftを消去する。context取得、repository recheck、activation、preflight、transport、受理拒否のいずれで失敗してもworkspace固有draftとattachmentを保持し、raw例外ではなく安全なerror codeをComposer noticeへ表示する。
+20. workspace履歴のhydrationはCodex activationを待たない。履歴snapshot適用後に通常shellを描画し、選択workspaceのconnectとthread start/resumeをbackground single-flightとして開始する。接続中はSendだけを無効にし、timeline、draft、navigationを利用可能に保つ。
+21. 同じworkspace、現在の設定pathと一致するverified binary identity、`health=ready`のactive runtimeに対する重複connectはprocess、generation、thread ownershipを変更せず現在のdiagnosticを返す。明示pathの変更・解除ではready runtimeを再利用しない。workspace切替ではruntimeを置換するが、metadata identityが一致するbinaryとschema evidenceは再利用する。
+22. stable initializeに成功したsetup evidenceはexact verified binary identityへ束縛する。同じidentityに対する繰り返しsetup診断は短命processを追加起動せず、通常connectionのfull handshake成功もsetup evidenceを更新する。identityまたはtrust metadataが変わったevidenceを再利用しない。
 
 ## Binary trustとprobe境界
 
-`VerifiedBinaryIdentity`はcanonical path、owner UID、device、inode、size、mtime秒・ナノ秒、SHA-256を一組として保持する。binaryはcurrent userまたはroot所有だけを許し、対象fileと親directory chainのsymlink・writable policyを検査する。version取得、schema生成、spawnの各境界で同じtupleを再検証し、spawn直後にも再検証する。差し替えを検知した場合はprocess groupを停止し、supervisorのbinary、schema、runtime cacheを全て破棄する。
+`VerifiedBinaryIdentity`はcanonical path、owner UID、device、inode、size、mode、mtime秒・ナノ秒、ctime秒・ナノ秒、SHA-256を一組として保持する。binaryはcurrent userまたはroot所有だけを許し、対象fileと親directory chainのsymlink・writable policyを検査する。observation epochの開始時にfull SHA-256を取得し、version取得、schema生成、spawnの直前・直後では同じmetadata tupleとtrust policyを再検証する。metadataが変化した場合はprocess groupを停止し、supervisorのbinary、schema、setup evidence、runtime cacheを全て破棄してfull verificationへ戻る。同じmetadata tupleに対して連続して実行ファイル全体を読み直してはならない。詳細は[Codex App Server起動性能の設計監査](codex-startup-performance.md)を参照する。
 
 自動探索は明示app-private path、GUI processの`PATH`、default shellの`command -v codex`、`~/.local/bin`を含む既知install位置の順で行う。default shellはaccount情報または`SHELL`からabsolute executableを得て同じtrust検証を通し、interactive login commandを3秒以内、stdout/stderr各64KiB以内でprocess groupごと終了する。結果はtrim済みの単一absolute pathだけを受理する。初回setupまたはGeneralから受けたpathはUTF-8 absolute path 4,096 byte以下として一時的にIPC requestへ入るが、binary trust、version、App Server spawnとstableな`initialize` / `initialized`に成功したcanonical pathだけをSQLite `settings`のapp-private recordへ保存し、response、diagnostics、domain event、通常logへ返さない。設定解除はrecordを削除して自動探索へ戻し、実行中sessionには適用せず次のconnectから使う。
 
 supervisorが設定pathを既存binary identityへ束縛する時は、入力表記ではなくcanonical pathを比較する。macOSの`/var`と`/private/var`のように同じ実体へ解決される表記では以前のidentityをexpected evidenceとして維持し、同一path上の差し替えをfail closedで検知する。異なるcanonical pathへの明示変更だけは以前のidentityへ束縛せず、新しいbinaryとして検証する。
 
-Native readinessのCodex setup probeはbinary discoveryと上記App Server初期化だけを実行する。schema生成、account/read、config/read、model/list、experimental initializeはsetup probeで呼ばない。起動時は`NativeReadinessService`が`WorkspaceHistoryService`のstartup restore barrierを待ってからprobeを開始し、保存済み明示pathを復元済みtrusted workspace rootで検証する。復元前のprocess cwdによる失敗snapshotを公開してはならない。binary discoveryはcanonical path、version、最大512 MiBのbinary hashを複数のidentity境界で再検証するため、App Server spawnとstable initializeを含むsetup flow全体へaggregate timeoutを設けない。各binary command、identity hash、RPC requestが持つ既存の個別結果からsetup診断を確定する。`inspect_trusted_identity`直後のversion processではそのfresh identityをprocess起動前まで再利用し、process起動直後と完了後のfull identity検証を残す。`run_bounded`完了直後とsetup initialize完了後に同じidentityを重ねてfull hashしない。setup probe成功後はoverviewを直ちに終了し、選択workspaceの通常接続を非同期に開始する。通常接続は従来どおりschemaと全handshakeをfail closedで確認し、auth、model、effort、capability不足をSend不可へ反映するがoverviewへ戻さない。
+Native readinessのCodex setup probeはbinary discoveryと上記App Server初期化だけを実行する。schema生成、account/read、config/read、model/list、experimental initializeはsetup probeで呼ばない。起動時は`NativeReadinessService`が`WorkspaceHistoryService`のstartup restore barrierを待ってからprobeを開始し、保存済み明示pathを復元済みtrusted workspace rootで検証する。復元前のprocess cwdによる失敗snapshotを公開してはならない。setup probeと通常connectは同じsupervisor lifecycle lockへ入れ、競合時は直前にfull verification済みのbinary evidenceを共有する。main runtimeが既にreadyならsetup用processを追加起動しない。App Server spawnとstable initializeを含むsetup flow全体へaggregate timeoutを設けず、各binary command、identity検査、RPC requestが持つ既存の個別結果からsetup診断を確定する。setup probe成功後はoverviewを直ちに終了し、選択workspaceの通常接続を非同期に開始する。通常接続は従来どおりschemaと全handshakeをfail closedで確認し、auth、model、effort、capability不足をSend不可へ反映するがoverviewへ戻さない。通常接続に失敗したComposerは安全なreason codeと明示的な再接続操作を表示し、再試行の成否にかかわらずworkspace固有draftを保持する。
 
-この境界を変更した時は`cargo test --manifest-path src-tauri/Cargo.toml --test codex_supervisor setup_probe_only_discovers_and_initializes_a_short_lived_app_server -- --test-threads=1`でsetup processがschema、account、config、modelを呼ばないことを確認する。起動順序を変更した時は`cargo test --manifest-path src-tauri/Cargo.toml workspace_history::service::tests::native_consumers_wait_for_restore_and_mutations_fail_while_pending`でnative listとreadinessの両方がrestore中に完了しないことを確認する。設定pathとidentityの束縛を変更した時は`cargo test --locked --manifest-path src-tauri/Cargo.toml --test codex_supervisor readiness_probe_blocks_a_changed_configured_binary_without_turn_mutation -- --test-threads=1`でcanonical aliasを経由しても差し替えを拒否することを確認する。UI側は`pnpm exec vitest run src/features/readiness/SetupOverview.test.tsx src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`でchecking中の空画面、問題時だけのoverview、workspace handshake失敗時の通常shell維持を確認する。
+この境界を変更した時は`cargo test --manifest-path src-tauri/Cargo.toml --test codex_supervisor setup_probe_only_discovers_and_initializes_a_short_lived_app_server -- --test-threads=1`でsetup processがschema、account、config、modelを呼ばないことを確認し、`repeated_setup_probe_reuses_successful_initialization_evidence`で同じidentityへのversion、process、initializeが各1回に留まることを確認する。起動順序を変更した時は`cargo test --manifest-path src-tauri/Cargo.toml workspace_history::service::tests::native_consumers_wait_for_restore_and_mutations_fail_while_pending`でnative listとreadinessの両方がrestore中に完了しないことを確認する。設定pathとidentityの束縛を変更した時は`cargo test --locked --manifest-path src-tauri/Cargo.toml --test codex_supervisor readiness_probe_blocks_a_changed_configured_binary_without_turn_mutation -- --test-threads=1`でcanonical aliasを経由しても差し替えを拒否することを確認する。UI側は`pnpm exec vitest run src/features/workspace-persistence/codex-composition.test.ts src/features/readiness/SetupOverview.test.tsx src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`で履歴hydrationが未完了activationを待たないこと、readiness確認中も履歴loading UIまたは通常shellを表示すること、問題判明時だけoverviewへ移ること、workspace handshake失敗時も通常shellを維持することを確認する。wall clockの秒数を合否条件にしない。
 
 probeの上限はstdout/stderr各1 MiB、絶対deadline 10秒、schema depth 16、file数2,048、1 file 8 MiB、合計64 MiBである。schema tree内のfile/directory symlinkとnon-regular fileは拒否する。capabilityはmethod文字列の存在ではなく、request/notification unionのsingleton method discriminant、params `$ref`、required field、response object shapeをJSONとして構造照合した場合だけ`Supported`にする。
 
@@ -74,26 +79,42 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 | 責務             | 正本                                      | composition層の動作                                                                                                                                          |
 | ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | active workspace | workspace historyのopaque workspace ID    | 選択確定後だけ`codex_connect`へ同じIDを渡す。pathを要求・保持しない                                                                                          |
-| 接続可否         | `CodexDiagnostic`                         | `health=ready`、core lifecycle/model discovery supported、Sol/Fast/Max/accountが全てtrueの場合だけSend可能にする                                             |
+| 接続可否         | `CodexDiagnostic`                         | `health=ready`、core lifecycle/model discovery supported、Sol、1件以上の広告済みreasoning effort、accountが揃う場合だけSend可能にする                         |
 | thread           | Codex supervisor                          | workspace activationごとにconnect後、compositionが開始した所有threadを再利用し、所有handleが無い時だけ1件開始する。他clientの一覧結果を自動採用しない        |
-| turn受理         | `codex_turn_start` response               | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport失敗ではdraftとattachmentを保持する                                   |
+| turn受理         | `codex_turn_start` response               | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport、受理拒否ではdraftとattachmentを保持し、安全なerror codeを表示する      |
 | live state       | generation別`CodexSessionStore`           | workspace ID、generation、sequenceを全て照合し、旧workspaceまたは旧generation eventを現在表示へ混ぜない                                                      |
-| durable timeline | workspace history writer                  | CodexEventをallowlist済みsemantic eventへ投影してから追記する。deltaは表示用にcoalesceし、completed/error/decision/approval/terminalを永続正本にする         |
+| durable timeline | workspace history writer                  | CodexEventをallowlist済みsemantic eventへ投影してから追記する。Structured Outputのassistant deltaは破棄し、検証済みcompleted message、error、decision、approval、terminalを永続正本にする |
 | pending response | `CodexSessionClient`のsingle-claim ledger | approval、native user input、fallback decisionをkind一致で1回だけ応答する。unknown/invalidは操作UIを出さずfail closedにする                                  |
 | stop/recovery    | supervisorのinterruptとterminal event     | Stop操作から1秒以内にinterrupt requestを開始し、5秒でackが無ければ明示errorにする。ackだけでterminalにせず、crash/EOFはInterruptedとして保持し自動再送しない |
 
-接続状態と履歴状態は別軸である。履歴が`ready`でもCodex診断がblockedならtimeline閲覧とdraft保存だけを許可し、Sendは無効にする。逆にCodexがreadyでも履歴writerがread-only/recoveryなら新しいturnを開始しない。`connected=false`の固定値、demo successへのnative fallback、model/listを確認しないFast/Max表示は禁止する。
+接続状態と履歴状態は別軸である。履歴が`ready`でもCodex診断がblockedならtimeline閲覧とdraft保存だけを許可し、Sendは無効にする。逆にCodexがreadyでも履歴writerがread-only/recoveryなら新しいturnを開始しない。`connected=false`の固定値、demo successへのnative fallback、model/listを確認しないreasoning levelやFast service tier表示は禁止する。
+
+window focusとSendはどちらもrepository healthを再確認できるが、同じworkspace・history modeへ向くCodex activationはcomposition層でsingle-flightにする。すでに同条件で接続済みの所有threadがある場合はそのsessionを再利用する。Send中に別のrecheckが`beginActivation`してgenerationとthread handleを一時消去する競合を許してはならない。
 
 ### semantic event投影
 
 UI/HISTへ渡すCodex eventは、少なくとも次へ分類する。
 
 - thread/turn status: idle、running、waiting、completed、failed、interrupted。
-- assistant: streaming deltaはmemory上でitem単位に連結し、completed textを永続化する。
-- plan、tool、file、diff: raw command/stdout/stderr/pathを出さず、件数、sanitized excerpt、path alias、change kind、detail refだけを使う。
+- assistant: Structured Outputのstreaming deltaはJSON envelope断片として破棄する。completed itemの`phase=commentary`はredact・長さ制限した途中経過として表示・永続化し、exact `result` envelopeなら`message`だけを表示する。`phase=final_answer`またはphaseなしだけを最終Structured Outputとして検証し、検証・redact済み`result.message`を表示・永続化する。decision requestはassistant本文を作らずdecision cardだけを作る。
+- `userMessage`と`agentMessage`の内部item lifecycleは監査用HISTへ保存するが、accepted user行とassistant行に加えて重複するアクティビティ行を表示しない。特にturn完了後に内部`agentMessage: running`を残してはならない。
+- plan、tool、file、diff: raw command/stdout/stderr/pathを出さず、件数、sanitized excerpt、path alias、change kind、detail refだけを使う。tool lifecycleは`tool_status`へ分離し、MCPではredact・長さ制限済みprovider/tool name、credential値を除く最大4件のtop-level引数要約、durationだけを公開する。人向けの`title`、`query`、`ref_id`等を優先し、`code`、`script`、`expression`等のsource bodyは本文を公開せずUnicode scalar数だけを示す。commandとweb searchも同じfieldへ正規化し、App Server内部型`mcpToolCall`を実tool名として表示しない。永続化は`code.tool.status.changed`を新規正本とし、旧`code.item.status.changed` tool rowは読込互換だけを維持する。
 - decision/approval: 検証済みquestion/optionsまたはversioned approval contextとpending handleだけを使う。
 - diagnostic/protocol/model violation: safe code、willRetry、detail refと復旧可否を使い、raw payloadへfallbackしない。
 - completion/error/interrupt: turn terminal authorityをstatus eventとして保存し、interrupt ackをcompletionへ変換しない。
+
+App Serverの`warning` notificationは`CODEX-WARNING` diagnosticとして永続化するが、turn失敗を
+意味しない。live projectionとHIST復元ではnon-terminalな`status: warning`として表示し、
+`Action failed`または`status: failed`へ投影してはならない。`error` notificationは従来どおり
+`CODEX-TURN-ERROR`として失敗表示する。
+
+Codex 0.144.5が接続直後またはturn実行中に送る`mcpServer/startupStatus/updated`、
+`remoteControl/status/changed`、`account/rateLimits/updated`、
+`thread/tokenUsage/updated`は、Coding Wifeのmain session、turn、model、approval状態を
+変更しない既知の補助notificationとして明示的に破棄する。これらのmethodを
+`code.protocol.unsupported`へ投影して利用者へblocked errorを表示してはならない。その他の
+未知notification、未知item type、未知enumは従来どおりraw payloadを公開せず
+`CODEX-PROTOCOL-UNSUPPORTED`へfail closedする。
 
 同じCodex event IDの再配信は同内容なら履歴writerの冪等成功とし、内容差はconflictとしてingestionを停止する。history追記失敗を無視してlive表示だけ成功扱いにせず、turn中は安全なerrorを表示し、次turn開始前にwriter readinessを再確認する。
 
@@ -126,7 +147,7 @@ Contextの編集・保存は既存のnative snapshotを正本とし、turn開始
 5. approval/native input/fallbackを同時二重応答し、wire requestが1件だけであること、unknown requestが許可されないことを確認する。
 6. Stop開始が1秒以内、ack boundaryが5秒以内で、ackだけではterminalにならないことをfake clockで確認する。
 7. child crash後に受信済みevent、draft、Interruptedが残り、turn/startが自動再送されないことを確認する。
-8. Sol、low、maxのいずれかをmodel/list fixtureから欠落させ、Sendと対応表示がfail closedになることを確認する。
+8. Solまたは全reasoning effortをmodel/list fixtureから欠落させ、Sendがfail closedになることを確認する。Fast tier欠落時はSend自体でなくFast flagだけがdisabledになることを確認する。
 9. attachmentのroot外、symlink、directory、executable、permission、size/count/total、stale handleをRust integrationで拒否し、有効なimage/fileだけがapp-private snapshotのlocalImage/mentionになることを確認する。検証後にleafとancestorを差し替えるfake App Server raceでexact validated bytesだけを観測し、accepted/failed/terminal/expiry cleanupと0700/0600を確認する。
 10. main turn textの80,000/80,001 Unicode scalar、multibyte scalar、NUL、empty-without-attachmentをnative境界で検証し、public draft/instructionの32,000 scalarとsupportの64KiB byte上限が変わらないことを確認する。
 11. WebdriverIOで実Tauri windowを1470×836、1280×800、960×640にして、200% zoom、ja/en、keyboard、reduced motion、scroll lock、decision回答、Stopを実操作する。
@@ -150,11 +171,11 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | `src-tauri/src/codex/binary.rs`       | binary discovery、canonical実体検査、hash、同じbinaryによるschema probe                 |
 | `jsonl.rs`                            | incremental framing、UTF-8、line/buffer上限                                             |
 | `rpc.rs`                              | request ID相関、timeout、server request/notification signal                             |
-| `protocol.rs`                         | 使用するApp Server subset、固定outbound parameter、model gate                           |
-| `decision.rs`                         | 完了assistant JSONのexact parse、context-bound fallback decision ledgerとsingle-claim   |
+| `protocol.rs`                         | 使用するApp Server subset、固定outbound parameter、decision output schema、model gate   |
+| `decision.rs`                         | 完了assistant JSONのvariant検証、context-bound fallback decision ledgerとsingle-claim    |
 | `process.rs`                          | 子process、環境allowlist、redacted stderr ring、5秒以内の段階的終了                     |
 | `requests.rs`                         | approval/RUI exact validation、duplicate request ledger                                 |
-| `normalizer.rs`                       | opaque handle、redaction済みCodexEventとDomainEvent                                     |
+| `normalizer.rs`                       | Structured Output deltaの破棄、opaque handle、tool identity/summaryを含むredaction済みCodexEvent |
 | `supervisor.rs`                       | handshake、thread/turn/review、single active turn、restart budget                       |
 | `support.rs`                          | support公開contract、single-use explain turn、strict output/event policy、fallback      |
 | `support_isolation.rs`                | exact release/schema検証、native sandbox・mock wire・malicious canary preflight         |
@@ -164,6 +185,7 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | `commands.rs`                         | WebViewへ公開するtyped Tauri command                                                    |
 | `types.rs`                            | adapter v1のpublic DTOとserde contract                                                  |
 | `workspace.rs`                        | native folder picker、Git/owner preflight、opaque workspace登録、app-private record復元 |
+| `src-tauri/src/workspace_history/store.rs` | `code.tool.status.changed`を含む永続eventのexact allowlistとpublic text検証          |
 | `src-tauri/tests/codex_supervisor.rs` | fake process integrationとopt-in live smoke                                             |
 
 ### TypeScript
@@ -171,10 +193,13 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | ファイル                                                  | 責務                                                                 |
 | --------------------------------------------------------- | -------------------------------------------------------------------- |
 | `src/lib/contracts/codex.ts`                              | response/eventのexact-key parserとpublic DTO                         |
+| `src/lib/contracts/workspace-history.ts`                  | 永続semantic eventのexact-key parserとpublic text検証                |
 | `src/features/codex/transport.ts`                         | Tauri invoke/listen境界と決定的demo transport                        |
+| `src/features/codex/event-projection.ts`                  | live CodexEventを表示行と永続semantic eventへ投影                    |
 | `src/features/codex/session-store.ts`                     | generation、sequence、duplicate、pending response state              |
 | `src/features/codex/workspace-session-adapter.ts`         | workspace activation、turn受理、terminal Stop、HIST追記のcomposition |
 | `src/features/workspace-persistence/codex-composition.ts` | historyとCodex sessionをS-002用`WorkspaceViewAdapter`へ束ねる        |
+| `src/features/workspace-persistence/codex-event-projector.ts` | 永続semantic eventからliveと同じ表示行を復元                     |
 | `src/features/workspace-view/Timeline.tsx`                | semantic row、decision/approval、Other/Hold、safe detail操作         |
 | `src/features/workspace-view/ChatView.tsx`                | 48px scroll lock、未読更新、composerとLive2D stageの配置             |
 | `src/features/codex/workspace-store.ts`                   | native pickerのsingle-flight、opaque registration、safe error state  |
@@ -184,6 +209,10 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | `src/test/fixtures/codex-attachments.v1.json`             | absolute pathを含まないattachment public contract fixture            |
 
 `CodexEvent`はbase fieldだけでなくvariant payloadもcamelCaseでserializeする。Rust round-tripとTypeScript parser testが同じfixtureを読むため、一方だけのfield名変更はgateで失敗する。
+
+decision envelopeまたはassistant event正規化を変更した時は、`cargo test --manifest-path src-tauri/Cargo.toml codex::decision::tests`と`cargo test --manifest-path src-tauri/Cargo.toml codex::normalizer::tests`を実行する。前者は`result`互換fieldとdecision requestのfail-closed検証、後者はJSON delta非公開、commentaryのplain textまたはexact `result.message`だけがredact済みで表示されturnをinterruptしないこと、最終完了messageのredaction、invalid final outputのinterrupt要求を確認する。output schemaを変更した時は`cargo test --manifest-path src-tauri/Cargo.toml codex::protocol::tests::decision_output_schema_uses_a_structured_outputs_root_object`も実行し、単一root objectとrequired field契約を確認する。
+
+tool eventの正規化、表示field、永続payloadを変更した時は、`cargo test --manifest-path src-tauri/Cargo.toml codex::normalizer::tests`と`cargo test --manifest-path src-tauri/Cargo.toml workspace_history::store::tests::rich_codex_events_use_an_exact_bounded_allowlist_and_are_redacted`でApp Server itemからraw ID・result・credential・private pathが漏れず、HISTがexact allowlistだけを受理することを確認する。続けて`pnpm exec vitest run src/lib/contracts/codex.test.ts src/lib/contracts/workspace-history.test.ts src/features/codex/event-projection.test.ts src/features/workspace-persistence/adapter.test.ts src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`でlive/HISTのprovider、実tool名、summary、duration、safe detailが同じ表示へ収束し、旧`mcpToolCall` item typeが実tool名として描画されないことを確認する。
 
 ## Fake App Server
 
@@ -214,6 +243,7 @@ Addはabsolute pathを持たない固定opaque attachment handleを返す。demo
 | mode                                     | 検証内容                                                                                        |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `setup_probe`                            | setup probeがschema/account/config/modelを呼ばずstable initializeだけで完了する                 |
+| `lifecycle_cache`                        | 重複connect、workspace切替でversion/schema/process/initialize回数を構造検証する                 |
 | `fragmented`                             | 分割JSONL、handshake、固定turn contract、interrupt                                              |
 | `out_of_order`                           | 応答順変更、ID相関、timeout後の非再送                                                           |
 | `malformed`                              | 正常応答と同じreadへ入る不正frame、duplicate response                                           |

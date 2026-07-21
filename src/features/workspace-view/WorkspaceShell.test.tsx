@@ -263,7 +263,7 @@ function nativeWorkspaceState(
     activeWorkspaceId: "workspace-native",
     draft: {
       text: "",
-      effort: "fast",
+      effort: "off",
       revision: 0,
       contextSnapshots,
     },
@@ -351,8 +351,9 @@ function richCodexState(): WorkspaceCodexState {
     connected: true,
     readiness: {
       ready: true,
-      fastAvailable: true,
-      maxAvailable: true,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: ["low", "max"],
+      experimentalModesAvailable: true,
       reasonCode: null,
     },
     pendingRequests: [decision, approval],
@@ -389,7 +390,11 @@ function richCodexState(): WorkspaceCodexState {
         kind: "tool",
         status: "completed",
         itemHandle: "item-tool",
-        toolKind: "commandExecution",
+        toolKind: "mcpToolCall",
+        providerName: "browser",
+        toolName: "open",
+        summary: "ref_id=page-safe",
+        durationMs: 840,
         excerpt: "46 focused tests passed",
       },
       {
@@ -585,6 +590,76 @@ describe("WorkspaceShell", () => {
       within(selectedWorkspace).getByText("feature/live2d-character"),
     ).toHaveClass("text-sidebar-item", "text-text-strong")
     expect(within(doneWorkspace).queryByText("sol-desktop")).toBeNull()
+  })
+
+  it("replaces the active workspace repository icon while its session is running", async () => {
+    const state = nativeWorkspaceState()
+    const codex: WorkspaceCodexState = {
+      ...richCodexState(),
+      activeWorkspaceId: "workspace-native",
+      phase: "running",
+      pendingRequests: [],
+      timeline: [],
+    }
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex: (listener) => {
+        listener(codex)
+        return () => undefined
+      },
+    }
+
+    renderWorkspace(adapter)
+
+    const workspace = await screen.findByRole("button", {
+      name: "main, native-repository, In Progress, Session running",
+    })
+    const spinner = workspace.querySelector(
+      '[data-workspace-session="running"]',
+    )
+    expect(spinner).toHaveClass("size-6", "text-running")
+    expect(spinner?.querySelector("svg")).toHaveClass(
+      "animate-spin",
+      "motion-reduce:animate-none",
+    )
+    expect(
+      workspace.querySelector('[data-repository-avatar="local"]'),
+    ).toBeNull()
+    const compactWorkspace = screen.getByRole("button", {
+      name: "Switch workspace: native-repository/restored-workspace, Session running",
+    })
+    expect(
+      compactWorkspace.querySelector('[data-workspace-session="running"]'),
+    ).not.toBeNull()
+  })
+
+  it("restores the repository icon while the active session waits for an answer", async () => {
+    const state = nativeWorkspaceState()
+    const codex = richCodexState()
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(state),
+      codexSnapshot: () => codex,
+      subscribeCodex: (listener) => {
+        listener(codex)
+        return () => undefined
+      },
+    }
+
+    renderWorkspace(adapter)
+
+    const workspace = await screen.findByRole("button", {
+      name: /main, native-repository, In Progress/,
+    })
+    expect(workspace).not.toHaveAccessibleName(/Session running/)
+    expect(
+      workspace.querySelector('[data-workspace-session="running"]'),
+    ).toBeNull()
+    expect(
+      workspace.querySelector('[data-repository-avatar="local"]'),
+    ).not.toBeNull()
   })
 
   it("mutes sidebar icon controls and reserves the archive action width", () => {
@@ -1496,7 +1571,7 @@ describe("WorkspaceShell", () => {
     ).toBeEnabled()
   })
 
-  it("shows no visible startup UI while native history is pending", async () => {
+  it("shows workspace loading UI while native history is pending", async () => {
     let resolveState!: (state: WorkspaceAdapterState) => void
     const requestAddProject = vi.fn()
     const adapter: WorkspaceViewAdapter = {
@@ -1511,9 +1586,9 @@ describe("WorkspaceShell", () => {
     const { container } = renderWorkspace(adapter)
 
     expect(
-      container.querySelector('[data-native-startup="checking"]'),
+      container.querySelector('[data-workspace-hydration="loading"]'),
     ).not.toBeNull()
-    expect(container.textContent).toBe("")
+    expect(screen.getByText("Restoring workspace history")).toBeVisible()
     expect(
       screen.queryByText(/build-live2d-desktop-app/),
     ).not.toBeInTheDocument()
@@ -1807,7 +1882,7 @@ describe("WorkspaceShell", () => {
       activeWorkspaceId,
       draft: {
         text: "",
-        effort: "fast",
+        effort: "off",
         revision: 0,
         contextSnapshots: [],
       },
@@ -1845,13 +1920,13 @@ describe("WorkspaceShell", () => {
       expect(saveDraft).toHaveBeenCalledWith(
         "workspace-a",
         "Keep draft A",
-        "fast",
+        "off",
       ),
     )
-    expect(saveDraft).not.toHaveBeenCalledWith("workspace-b", "", "fast")
+    expect(saveDraft).not.toHaveBeenCalledWith("workspace-b", "", "off")
   })
 
-  it("hydrates the persisted draft and timeline before saving later edits", async () => {
+  it("hydrates the persisted draft before saving later edits", async () => {
     const restoredState: WorkspaceAdapterState = {
       workspaces: [
         {
@@ -1871,24 +1946,7 @@ describe("WorkspaceShell", () => {
         revision: 4,
         contextSnapshots: [],
       },
-      timeline: [
-        {
-          id: "event-restored",
-          sequence: 9,
-          producer: "code",
-          kind: "history",
-          domainKind: "code.session.status.changed",
-          occurredAt: "2026-07-18T00:00:45.000Z",
-          status: "failed",
-          errorCode: "CODEX-TURN-FAILED",
-        },
-      ],
-      lastSummary: {
-        eventId: "event-summary",
-        sequence: 8,
-        text: "Restored summary after restart.",
-        updatedAt: "2026-07-18T00:00:40.000Z",
-      },
+      timeline: [],
       history: { mode: "ready", errorCode: null, backupName: null },
     }
     const saveDraft = vi.fn().mockResolvedValue(undefined)
@@ -1900,7 +1958,7 @@ describe("WorkspaceShell", () => {
       byteCount: 42,
     })
     const adapter: WorkspaceViewAdapter = {
-      connected: false,
+      connected: true,
       loadState: () => Promise.resolve(restoredState),
       saveDraft,
       captureContext,
@@ -1912,11 +1970,6 @@ describe("WorkspaceShell", () => {
       "Ask Codex to plan, build, explain, or fix anything…",
     )
     await waitFor(() => expect(composer).toHaveValue("Restored after reload"))
-    expect(
-      screen.getByRole("region", { name: "Last session summary" }),
-    ).toHaveTextContent("Restored summary after restart.")
-    expect(screen.getByText("code.session.status.changed")).toBeVisible()
-    expect(screen.getByText("CODEX-TURN-FAILED")).toBeVisible()
 
     fireEvent.change(composer, { target: { value: "Persist this edit" } })
     await waitFor(() =>
@@ -1927,7 +1980,7 @@ describe("WorkspaceShell", () => {
       ),
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Context" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
     fireEvent.click(screen.getByRole("button", { name: "Git diff" }))
     await waitFor(() =>
       expect(captureContext).toHaveBeenCalledWith(
@@ -1945,8 +1998,8 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
   })
 
-  it("renders a restored summary as text in an accessible English recovery region", async () => {
-    const unsafeMarkup = '<img src="x" alt="private-probe">'
+  it("does not render a persisted last summary in Chat", async () => {
+    const persistedSummary = "Legacy persisted summary must stay hidden."
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () =>
@@ -1955,175 +2008,21 @@ describe("WorkspaceShell", () => {
           lastSummary: {
             eventId: "event-safe-summary",
             sequence: 4,
-            text: `Completed safely.\n${unsafeMarkup}`,
+            text: persistedSummary,
             updatedAt: "2026-07-18T00:00:04.000Z",
           },
         }),
     }
 
     renderWorkspace(adapter)
-
-    const summary = await screen.findByRole("region", {
-      name: "Last session summary",
-    })
-    expect(summary).toHaveTextContent("Completed safely.")
-    expect(summary.textContent).toContain(unsafeMarkup)
-    expect(screen.queryByAltText("private-probe")).not.toBeInTheDocument()
-    expect(summary).toHaveTextContent(
-      "Restored from this workspace's redacted local history.",
+    await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
     )
-  })
-
-  it("localizes the restored summary region in Japanese", async () => {
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () =>
-        Promise.resolve({
-          ...nativeWorkspaceState(),
-          lastSummary: {
-            eventId: "event-ja-summary",
-            sequence: 3,
-            text: "再起動後も要約を復元しました。",
-            updatedAt: "2026-07-18T00:00:03.000Z",
-          },
-        }),
-    }
-
-    render(
-      <App
-        localeStore={japaneseLocaleStore}
-        readinessController={readyNativeReadinessController()}
-        transport={new DemoTransport()}
-        workspaceAdapter={adapter}
-      />,
-    )
-
-    const summary = await screen.findByRole("region", {
-      name: "前回セッションの要約",
-    })
-    expect(summary).toHaveTextContent("再起動後も要約を復元しました。")
-    expect(summary).toHaveTextContent(
-      "このワークスペースの秘匿化済みローカル履歴から復元しました。",
-    )
-  })
-
-  it.each([
-    ["missing repository", "missing", "ready"],
-    ["read-only recovery", "read_only", "read_only"],
-  ] as const)(
-    "keeps the last summary visible during %s",
-    async (_label, health, historyMode) => {
-      const adapter: WorkspaceViewAdapter = {
-        hydrationMode: "native",
-        loadState: () =>
-          Promise.resolve({
-            ...nativeWorkspaceState(),
-            workspaces: nativeWorkspaceState().workspaces.map((workspace) => ({
-              ...workspace,
-              health,
-            })),
-            lastSummary: {
-              eventId: `event-${health}-summary`,
-              sequence: 2,
-              text: "Recovery keeps this workspace summary available.",
-              updatedAt: "2026-07-18T00:00:02.000Z",
-            },
-            history: {
-              mode: historyMode,
-              errorCode: historyMode === "read_only" ? "HIST-READ-ONLY" : null,
-              backupName: null,
-            },
-          }),
-      }
-
-      renderWorkspace(adapter)
-
-      expect(
-        await screen.findByRole("region", { name: "Last session summary" }),
-      ).toHaveTextContent("Recovery keeps this workspace summary available.")
-    },
-  )
-
-  it("clears a workspace-local summary when switching to a workspace without one", async () => {
-    const stateFor = (activeWorkspaceId: string): WorkspaceAdapterState => ({
-      ...nativeWorkspaceState(),
-      workspaces: [
-        {
-          id: "workspace-native",
-          repository: "fixture",
-          name: "workspace-a",
-          branch: "main",
-          lifecycle: "in_progress",
-          health: "ready",
-        },
-        {
-          id: "workspace-b",
-          repository: "fixture",
-          name: "workspace-b",
-          branch: "main",
-          lifecycle: "backlog",
-          health: "ready",
-        },
-      ],
-      activeWorkspaceId,
-      lastSummary:
-        activeWorkspaceId === "workspace-native"
-          ? {
-              eventId: "event-workspace-a-summary",
-              sequence: 2,
-              text: "Workspace A private recovery summary.",
-              updatedAt: "2026-07-18T00:00:02.000Z",
-            }
-          : null,
-    })
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(stateFor("workspace-native")),
-      selectWorkspace: (workspaceId) => Promise.resolve(stateFor(workspaceId)),
-    }
-
-    renderWorkspace(adapter)
-    expect(
-      await screen.findByRole("region", { name: "Last session summary" }),
-    ).toHaveTextContent("Workspace A private recovery summary.")
-
-    const navigation = screen.getByRole("navigation", { name: "Workspaces" })
-    fireEvent.click(
-      within(navigation).getByRole("button", {
-        name: /main, fixture, Backlog/u,
-      }),
-    )
-
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("region", { name: "Last session summary" }),
-      ).not.toBeInTheDocument(),
-    )
-    expect(
-      screen.queryByText("Workspace A private recovery summary."),
-    ).not.toBeInTheDocument()
-  })
-
-  it("omits the recovery region when the summary is empty", async () => {
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () =>
-        Promise.resolve({
-          ...nativeWorkspaceState(),
-          lastSummary: {
-            eventId: "event-empty-summary",
-            sequence: 1,
-            text: "   \n\t",
-            updatedAt: "2026-07-18T00:00:01.000Z",
-          },
-        }),
-    }
-
-    renderWorkspace(adapter)
-    await screen.findByRole("heading", { name: "No persisted activity yet" })
     expect(
       screen.queryByRole("region", { name: "Last session summary" }),
     ).not.toBeInTheDocument()
+    expect(screen.queryByText(persistedSummary)).not.toBeInTheDocument()
+    expect(screen.queryByRole("feed")).not.toBeInTheDocument()
   })
 
   it("keeps the latest ten captured context items in the UI", async () => {
@@ -2153,7 +2052,7 @@ describe("WorkspaceShell", () => {
         name: "Remove attachment: Snapshot 0",
       }),
     ).toBeVisible()
-    fireEvent.click(screen.getByRole("button", { name: "Context" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
     fireEvent.click(screen.getByRole("button", { name: "Git diff" }))
 
     expect(
@@ -2263,6 +2162,8 @@ describe("WorkspaceShell", () => {
   })
 
   it("keeps the native workspace shell when the workspace Codex handshake is disconnected", async () => {
+    const user = userEvent.setup()
+    const recheckWorkspace = vi.fn().mockResolvedValue(nativeWorkspaceState())
     const codex: WorkspaceCodexState = {
       activeWorkspaceId: "workspace-native",
       generation: null,
@@ -2270,18 +2171,20 @@ describe("WorkspaceShell", () => {
       connected: false,
       readiness: {
         ready: false,
-        fastAvailable: false,
-        maxAvailable: false,
-        reasonCode: "CODEX-NOT-CONNECTED",
+        fastServiceTier: null,
+        supportedReasoningEfforts: [],
+        experimentalModesAvailable: false,
+        reasonCode: "CODEX-IPC-UNAVAILABLE",
       },
       pendingRequests: [],
       timeline: [],
-      errorCode: "CODEX-NOT-CONNECTED",
+      errorCode: "CODEX-IPC-UNAVAILABLE",
     }
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () => Promise.resolve(nativeWorkspaceState()),
       codexSnapshot: () => codex,
+      recheckWorkspace,
     }
     renderWorkspace(adapter)
 
@@ -2292,10 +2195,24 @@ describe("WorkspaceShell", () => {
       screen.queryByRole("heading", { name: "Finish the local setup" }),
     ).toBeNull()
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+    expect(screen.getByText("CODEX-IPC-UNAVAILABLE")).toBeVisible()
+    await user.type(
+      screen.getByPlaceholderText(
+        "Ask Codex to plan, build, explain, or fix anything…",
+      ),
+      "Keep this draft",
+    )
+    await user.click(screen.getByRole("button", { name: "Reconnect" }))
+    expect(recheckWorkspace).toHaveBeenCalledWith("workspace-native")
+    expect(
+      screen.getByPlaceholderText(
+        "Ask Codex to plan, build, explain, or fix anything…",
+      ),
+    ).toHaveValue("Keep this draft")
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
   })
 
-  it("renders no visible startup UI while native setup readiness is checking", () => {
+  it("renders the workspace while native setup readiness is checking", async () => {
     const pendingReadiness = deferred<NativeReadinessSnapshotV1>()
     const readinessController = new NativeReadinessController({
       kind: "native",
@@ -2308,15 +2225,17 @@ describe("WorkspaceShell", () => {
       loadState: () => Promise.resolve(nativeWorkspaceState()),
     }
 
-    const { container } = renderWorkspace(adapter, readinessController)
+    renderWorkspace(adapter, readinessController)
 
     expect(
-      container.querySelector('[data-native-startup="checking"]'),
-    ).not.toBeNull()
-    expect(container.textContent).toBe("")
+      await screen.findByPlaceholderText(
+        "Ask Codex to plan, build, explain, or fix anything…",
+      ),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
   })
 
-  it("labels demo history as ephemeral in chat and diagnostics", async () => {
+  it("keeps demo durability out of chat and exposes it through diagnostics", async () => {
     const ephemeralState: WorkspaceAdapterState = {
       ...nativeWorkspaceState(),
       history: { mode: "ephemeral", errorCode: null, backupName: null },
@@ -2328,7 +2247,10 @@ describe("WorkspaceShell", () => {
     const user = userEvent.setup()
     renderWorkspace(adapter)
 
-    expect(await screen.findByText("Demo memory")).toBeVisible()
+    await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    expect(screen.queryByText("Demo memory")).not.toBeInTheDocument()
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
 
     await user.click(appSettingsButton())
@@ -2446,11 +2368,11 @@ describe("WorkspaceShell", () => {
     ).toHaveFocus()
   })
 
-  it("groups compact persistence and character status without removing controls", async () => {
+  it("keeps compact character status without adding a chat masthead", async () => {
     const user = userEvent.setup()
     const { container } = renderWorkspace()
     const statusRegion = container.querySelector<HTMLElement>(
-      "[data-chat-status-region]",
+      "[data-chat-compact-status-region]",
     )
     const persistenceStatus = container.querySelector<HTMLElement>(
       "[data-persistence-status]",
@@ -2459,9 +2381,11 @@ describe("WorkspaceShell", () => {
       "[data-character-status-mobile]",
     )
 
-    expect(statusRegion).toContainElement(persistenceStatus)
     expect(statusRegion).toContainElement(characterStatus)
-    expect(persistenceStatus).toHaveTextContent("Persisted locally")
+    expect(persistenceStatus).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Activity" }),
+    ).not.toBeInTheDocument()
     expect(characterStatus).toHaveTextContent("Disconnected")
 
     const mute = within(characterStatus as HTMLElement).getByRole("button", {
@@ -2477,7 +2401,7 @@ describe("WorkspaceShell", () => {
     ).toBeInTheDocument()
   })
 
-  it("disables unavailable effort choices and falls back from a persisted choice", async () => {
+  it("falls back to Off when a persisted reasoning level is unavailable", async () => {
     const state = nativeWorkspaceState()
     const persistedMax: WorkspaceAdapterState = {
       ...state,
@@ -2489,8 +2413,9 @@ describe("WorkspaceShell", () => {
       connected: false,
       readiness: {
         ready: false,
-        fastAvailable: true,
-        maxAvailable: false,
+        fastServiceTier: "priority",
+        supportedReasoningEfforts: [],
+        experimentalModesAvailable: true,
         reasonCode: "CODEX-EFFORT-UNAVAILABLE",
       },
       pendingRequests: [],
@@ -2508,14 +2433,9 @@ describe("WorkspaceShell", () => {
     }
     renderWorkspace(adapter)
 
-    const maximum = await screen.findByRole("radio", { name: "Max" })
-    const fast = screen.getByRole("radio", { name: "Fast" })
-    expect(maximum).toBeDisabled()
-    expect(fast).toBeEnabled()
-    await waitFor(() => expect(fast).toHaveAttribute("aria-checked", "true"))
     expect(
-      screen.getByText("Maximum reasoning is not available in this runtime."),
-    ).toBeVisible()
+      await screen.findByRole("button", { name: "Reasoning effort: Off" }),
+    ).toBeEnabled()
   })
 
   it("bounds composer input by Unicode scalar values", () => {
@@ -2565,7 +2485,7 @@ describe("WorkspaceShell", () => {
     expect(requests[0]).toMatchObject({
       attachments: [],
       contextSnapshots: [],
-      effort: "fast",
+      effort: "off",
       instruction: "Run the bounded implementation",
       workspaceId: "build-live2d-desktop-app",
       editableContextSnapshot: {
@@ -2620,10 +2540,11 @@ describe("WorkspaceShell", () => {
     expect(
       within(assistantEvent as HTMLElement).getByText("Codex"),
     ).toBeVisible()
-    expect(within(toolEvent as HTMLElement).getByText("Tool run")).toBeVisible()
-    expect(
-      within(toolEvent as HTMLElement).getByText("46 focused tests passed"),
-    ).toBeVisible()
+    expect(within(toolEvent as HTMLElement).getByText("browser")).toBeVisible()
+    const toolSummary = (toolEvent as HTMLElement).querySelector("summary")
+    expect(toolSummary).not.toBeNull()
+    expect(within(toolSummary as HTMLElement).getByText("open")).toBeVisible()
+    expect(toolSummary).toHaveTextContent("ref_id=page-safe · 840 ms")
     const compactCharacter = container.querySelector<HTMLElement>(
       "[data-character-status-mobile]",
     )
@@ -2822,7 +2743,7 @@ describe("WorkspaceShell", () => {
     expect(
       card.getByText("One bounded unit keeps the next change reviewable."),
     ).toBeVisible()
-    expect(screen.getByLabelText("推論強度")).toBeVisible()
+    expect(screen.getByRole("button", { name: "推論強度: オフ" })).toBeVisible()
     expect(screen.getByLabelText("GPT-5.6 Sol, 固定モデル")).toBeVisible()
     expect(screen.getByLabelText("下書き項目")).toBeVisible()
     const compactCharacter = container.querySelector<HTMLElement>(
@@ -2879,12 +2800,93 @@ describe("WorkspaceShell", () => {
     )
   })
 
-  it("expands and copies only rendered safe timeline details", async () => {
-    const snapshot = richCodexState()
+  it("keeps the assistant result visible without rendering internal activity", async () => {
+    const baseSnapshot = richCodexState()
+    const internalBase = {
+      workspaceId: "workspace-native",
+      generation: 1,
+      occurredAt: "2026-07-18T00:00:01.000Z",
+      durable: true,
+    }
+    const snapshot: WorkspaceCodexState = {
+      ...baseSnapshot,
+      timeline: [
+        ...baseSnapshot.timeline,
+        {
+          ...internalBase,
+          id: "event-status",
+          stableId: "internal-status",
+          sourceEventId: "event-status",
+          sourceSequence: 6,
+          kind: "status",
+          status: "warning",
+          itemHandle: null,
+          itemType: "warning",
+          detailRef: "internal-status-detail",
+        },
+        {
+          ...internalBase,
+          id: "event-thread",
+          stableId: "internal-thread",
+          sourceEventId: "event-thread",
+          sourceSequence: 7,
+          kind: "thread",
+          status: "active",
+          threadHandle: "thread-fixture",
+        },
+        {
+          ...internalBase,
+          id: "event-turn",
+          stableId: "internal-turn",
+          sourceEventId: "event-turn",
+          sourceSequence: 8,
+          kind: "turn",
+          status: "active",
+          threadHandle: "thread-fixture",
+          turnHandle: "turn-fixture",
+        },
+        {
+          ...internalBase,
+          id: "event-request-resolved",
+          stableId: "internal-request-resolved",
+          sourceEventId: "event-request-resolved",
+          sourceSequence: 9,
+          kind: "request_resolved",
+          status: "completed",
+          pendingId: "pending-resolved",
+        },
+        {
+          ...internalBase,
+          id: "event-completion",
+          stableId: "turn-completion",
+          sourceEventId: "event-completion",
+          sourceSequence: 10,
+          kind: "completion",
+          status: "completed",
+          threadHandle: "thread-fixture",
+          turnHandle: "turn-fixture",
+        },
+      ],
+    }
     const writeText = vi.fn().mockResolvedValue(undefined)
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
-      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      loadState: () =>
+        Promise.resolve({
+          ...nativeWorkspaceState(),
+          timeline: [
+            {
+              id: "event-history",
+              sequence: 11,
+              producer: "code" as const,
+              kind: "history" as const,
+              domainKind: "code.session.status.changed",
+              occurredAt: "2026-07-18T00:00:02.000Z",
+              status: "failed",
+              errorCode: "CODEX-INTERNAL-HISTORY",
+            },
+          ],
+        }),
       codexSnapshot: () => snapshot,
       subscribeCodex(listener) {
         listener(snapshot)
@@ -2899,19 +2901,57 @@ describe("WorkspaceShell", () => {
     const { container } = renderWorkspace(adapter)
 
     await screen.findByText("Your decision is needed")
+    expect(container.querySelector('[data-event-kind="user"]')).toHaveAttribute(
+      "data-event-layout",
+      "message",
+    )
+    expect(
+      container.querySelector('[data-event-kind="decision"]'),
+    ).toHaveAttribute("data-event-layout", "intervention")
     const assistant = container.querySelector<HTMLElement>(
       '[data-event-kind="assistant"]',
     )
     expect(assistant).not.toBeNull()
-    const details = within(assistant as HTMLElement)
-    const expand = details.getByRole("button", { name: "Show safe details" })
-    expect(expand).toHaveAttribute("aria-expanded", "false")
-    await user.click(expand)
-    expect(expand).toHaveAttribute("aria-expanded", "true")
+    expect(assistant).toHaveAttribute("data-event-layout", "message")
+    expect(assistant).toHaveTextContent("All checks passed.")
+    for (const hiddenKind of [
+      "history",
+      "status",
+      "thread",
+      "turn",
+      "completion",
+      "request_resolved",
+    ]) {
+      expect(
+        container.querySelector(`[data-event-kind="${hiddenKind}"]`),
+      ).not.toBeInTheDocument()
+    }
+    expect(screen.queryByText("Turn completed")).not.toBeInTheDocument()
+    expect(screen.queryByText("internal-status-detail")).not.toBeInTheDocument()
+    expect(screen.queryByText("CODEX-INTERNAL-HISTORY")).not.toBeInTheDocument()
 
+    const tool = container.querySelector<HTMLElement>(
+      '[data-event-kind="tool"]',
+    )
+    expect(tool).not.toBeNull()
+    expect(tool).toHaveAttribute("data-event-layout", "operation")
+    const operationDetails = tool?.querySelector<HTMLDetailsElement>("details")
+    const operationSummary = tool?.querySelector<HTMLElement>("summary")
+    expect(operationDetails).not.toBeNull()
+    expect(operationSummary).not.toBeNull()
+    expect(operationDetails?.open).toBe(false)
+    expect(operationSummary).toHaveTextContent("browser")
+    expect(operationSummary).toHaveTextContent("open")
+    expect(operationSummary).toHaveTextContent("ref_id=page-safe · 840 ms")
+
+    await user.click(operationSummary as HTMLElement)
+    expect(operationDetails?.open).toBe(true)
+    const details = within(tool as HTMLElement)
     await user.click(details.getByRole("button", { name: "Copy safe details" }))
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce())
-    expect(writeText.mock.calls[0]?.[0]).toMatch(/All checks passed/u)
+    expect(writeText).toHaveBeenCalledWith(
+      "ref_id=page-safe\n46 focused tests passed",
+    )
     expect(
       details.getByRole("button", { name: "Copy safe details" }),
     ).toHaveTextContent("Copied")
@@ -2952,15 +2992,54 @@ describe("WorkspaceShell", () => {
     fireEvent.scroll(viewport as HTMLElement)
     expect(await screen.findByRole("button", { name: "Latest" })).toBeVisible()
 
-    const completion = {
+    const internalStatus = {
+      workspaceId: "workspace-native",
+      generation: 1,
+      occurredAt: "2026-07-18T00:00:59.000Z",
+      durable: true,
+      id: "event-internal-status",
+      stableId: "internal-status",
+      sourceEventId: "event-internal-status",
+      sourceSequence: 6,
+      kind: "status" as const,
+      status: "warning",
+      itemHandle: null,
+      itemType: "warning",
+      detailRef: "internal-status-detail",
+    }
+    act(() =>
+      publish({
+        ...snapshot,
+        timeline: [...snapshot.timeline, internalStatus],
+      }),
+    )
+    expect(
+      screen.queryByRole("button", { name: /New updates/u }),
+    ).not.toBeInTheDocument()
+
+    const assistant = {
       workspaceId: "workspace-native",
       generation: 1,
       occurredAt: "2026-07-18T00:01:00.000Z",
       durable: true,
+      id: "event-final-assistant",
+      stableId: "final-assistant-message",
+      sourceEventId: "event-final-assistant",
+      sourceSequence: 7,
+      kind: "assistant" as const,
+      status: "completed",
+      itemHandle: "item-final-assistant",
+      text: "Final verified response.",
+    }
+    const completion = {
+      workspaceId: "workspace-native",
+      generation: 1,
+      occurredAt: "2026-07-18T00:01:01.000Z",
+      durable: true,
       id: "event-completion",
       stableId: "turn-completion",
       sourceEventId: "event-completion",
-      sourceSequence: 6,
+      sourceSequence: 8,
       kind: "completion" as const,
       status: "completed",
       threadHandle: "thread-fixture",
@@ -2969,7 +3048,7 @@ describe("WorkspaceShell", () => {
     act(() =>
       publish({
         ...snapshot,
-        timeline: [...snapshot.timeline, completion],
+        timeline: [...snapshot.timeline, internalStatus, assistant, completion],
       }),
     )
 
@@ -3008,18 +3087,23 @@ describe("WorkspaceShell", () => {
       activeWorkspaceId: workspaceId,
       draft: {
         text: "",
-        effort: "fast",
+        effort: "off",
         revision: 0,
         contextSnapshots: [],
       },
       timeline: sequences.map((sequence) => ({
         id: `event-${workspaceId}-${String(sequence)}`,
-        sequence,
-        producer: "code" as const,
-        kind: "history" as const,
-        domainKind: `code.fixture.${String(sequence)}`,
+        stableId: `assistant-${workspaceId}-${String(sequence)}`,
+        sourceEventId: `event-${workspaceId}-${String(sequence)}`,
+        workspaceId,
+        generation: 1,
+        sourceSequence: sequence,
         occurredAt: "2026-07-18T00:00:00.000Z",
+        kind: "assistant" as const,
         status: "completed",
+        durable: true,
+        itemHandle: `item-${workspaceId}-${String(sequence)}`,
+        text: `Response fixture ${String(sequence)}`,
       })),
       history: { mode: "ready", errorCode: null, backupName: null },
     })
@@ -3043,7 +3127,7 @@ describe("WorkspaceShell", () => {
 
     try {
       const { container } = renderWorkspace(adapter)
-      expect(await screen.findByText("code.fixture.4")).toBeVisible()
+      expect(await screen.findByText("Response fixture 4")).toBeVisible()
       const viewport = container.querySelector<HTMLElement>(
         '.chat-pane [data-slot="scroll-area-viewport"]',
       )
@@ -3061,13 +3145,13 @@ describe("WorkspaceShell", () => {
           name: /main, fixture, Backlog/u,
         }),
       )
-      expect(await screen.findByText("code.fixture.11")).toBeVisible()
+      expect(await screen.findByText("Response fixture 11")).toBeVisible()
       fireEvent.click(
         within(navigation).getByRole("button", {
           name: /main, fixture, In Progress/u,
         }),
       )
-      expect(await screen.findByText("code.fixture.4")).toBeVisible()
+      expect(await screen.findByText("Response fixture 4")).toBeVisible()
       const restoredViewport = container.querySelector<HTMLElement>(
         '.chat-pane [data-slot="scroll-area-viewport"]',
       )
@@ -3168,6 +3252,9 @@ describe("WorkspaceShell", () => {
     )
 
     await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(
+      screen.getByRole("button", { name: "Attach files & images" }),
+    )
     await waitFor(() =>
       expect(pickAttachments).toHaveBeenCalledWith("workspace-native", []),
     )
@@ -3503,7 +3590,7 @@ describe("WorkspaceShell", () => {
       activeWorkspaceId: target.id,
       draft: {
         text: "",
-        effort: "fast",
+        effort: "off",
         revision: 0,
         contextSnapshots: [],
       },

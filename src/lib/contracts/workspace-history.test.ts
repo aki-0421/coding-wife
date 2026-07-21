@@ -452,6 +452,43 @@ describe("workspace history contract", () => {
         payload: { ...event.payload, excerpt: "x".repeat(16 * 1024 + 1) },
       }),
     ).toMatchObject({ kind: "code.unsupported" })
+
+    const toolStatus = {
+      ...event,
+      eventId: "event-codex-tool-status",
+      kind: "code.tool.status.changed" as const,
+      payload: {
+        semanticVersion: 1,
+        generation: 7,
+        sourceSequence: 13,
+        itemHandle: "item-safe",
+        toolKind: "mcpToolCall",
+        providerName: "browser",
+        toolName: "open",
+        summary: "ref_id=page-safe",
+        durationMs: 240,
+        status: "completed",
+      },
+    }
+    expect(parsePersistedTimelineEvent(toolStatus)).toEqual(toolStatus)
+    expect(
+      parsePersistedTimelineEvent({
+        ...toolStatus,
+        payload: {
+          ...toolStatus.payload,
+          summary: "authorization=[redacted] · ref_id=page-safe",
+        },
+      }),
+    ).toMatchObject({
+      kind: "code.tool.status.changed",
+      payload: { summary: "authorization=[redacted] · ref_id=page-safe" },
+    })
+    expect(
+      parsePersistedTimelineEvent({
+        ...toolStatus,
+        payload: { ...toolStatus.payload, rawArguments: { token: "hidden" } },
+      }),
+    ).toMatchObject({ kind: "code.unsupported" })
   })
 
   it("uses Unicode scalar limits and normalized multiline public text", () => {

@@ -1,8 +1,8 @@
 ---
 title: "Codex App Server 接続契約と実装設計"
 description: "Coding Wife がローカル Codex App Server を安全に起動し、固定モデルの主セッション、承認、構造化意思決定、レビュー、診断を扱うための版管理された接続契約を定義する。"
-updated: 2026-07-19
-last_verified: 2026-07-18
+updated: 2026-07-21
+last_verified: 2026-07-21
 read_when:
   - "Codex App Server のプロセス管理、JSON-RPC、スレッド、ターン、承認、レビュー、診断を実装または変更するとき。"
   - "Codex CLI を更新し、プロトコル互換性とサポートセッションの隔離可否を再検証するとき。"
@@ -15,7 +15,7 @@ read_when:
 2026-07-18 時点のローカル Codex CLI では、Coding Wife の主セッションに必要な次の経路を実装できる。
 
 - stdio 上の JSONL による initialize / initialized。
-- model/list による gpt-5.6-sol と low / max の実行時確認。
+- model/list による gpt-5.6-sol、reasoning effort、service tier の実行時確認。
 - thread/list、thread/start、thread/resume によるワークスペース単位の会話管理。
 - turn/start、turn/interrupt と、turn / item 通知による実行制御。
 - 3 種類の現行承認要求、実験的な requestUserInput、動的ツール要求への双方向応答。
@@ -46,7 +46,7 @@ read_when:
 
 ### 公式資料
 
-最終確認日はすべて 2026-07-18 である。
+最終確認日はすべて 2026-07-21 である。
 
 | 資料 | 確認した内容 |
 | --- | --- |
@@ -242,29 +242,29 @@ initialize response は accepted capability 一覧を返さない。experimental
 - 同じ server request id の再送には、処理中なら同じ UI request を共有し、解決済みなら保存した同一応答を返す。異なる params なら protocol violation とする。
 - JSON-RPC error の message と data は UI へそのまま出さず、code と method から内部 error code へ写像する。
 
-## 固定モデルと reasoning preset
+## 固定モデル、reasoning、service tier、collaboration mode、goal
 
 ### preflight
 
 model/list を全ページ取得し、id または model が厳密に gpt-5.6-sol の 1 件を選ぶ。次をすべて満たさなければ新しい turn を開始しない。
 
 - gpt-5.6-sol が存在する。
-- supportedReasoningEfforts に low が存在する。
-- supportedReasoningEfforts に max が存在する。
+- supportedReasoningEfforts が1件以上存在する。
 
-UI の Fast は effort=low、Max は effort=max である。OpenAI 製品の Fast mode は service tier を変える別機能なので混同しない。Coding Wife は model、service tier、Ultra を切り替えない。
+Reasoning UIは`Off`と広告済みeffortだけを既知の低い順に循環する。`Off`は空文字などの疑似値ではなく`turn/start.effort=null`で既定へ戻す。Fastはreasoningとは別のservice tierであり、`serviceTiers`のIDまたはnameがFastを示すentryのexact IDを保持する。PlanとGoalsはexperimental APIが受理されたsessionでだけ有効にする。
 
 ### outbound rule
 
 - thread/start では model=gpt-5.6-sol を送る。
 - experimental field が使える場合は allowProviderModelFallback=false を送る。
-- turn/start でも model=gpt-5.6-sol と、選択 preset に対応する effort を毎回送る。
-- serviceTier は thread/start と turn/start の双方で省略し、ユーザー設定を変更しない。
-- collaborationMode と multiAgentMode は送らない。
+- turn/start でも model=gpt-5.6-sol と、選択reasoningまたは`null`を毎回送る。
+- serviceTierはFast onで広告されたexact tier ID、offで`null`を毎回送り、stickyな前turn設定を残さない。
+- collaborationModeはPlan onで`mode=plan`、固定model、現在reasoning、built-in developer instructionsを表す`null`を送り、offで`null`を毎回送る。multiAgentModeは送らない。
+- Goals flagがonなら、public instructionを`thread/goal/set.objective`へ設定して成功した後にturn/startを送る。composed context envelopeをgoal objectiveに使わない。
 - thread/start / resume response の model が一致しなければ turn を開始しない。
 - model/rerouted で toModel が gpt-5.6-sol 以外になったら即座に turn/interrupt し、model_unavailable として終える。
 
-ローカル probe では ephemeral thread/start response の reasoningEffort がユーザー既定の xhigh だった。thread 作成だけでは Fast / Max を固定できないため、effort は各 turn/start で必須にする。
+ローカル probe では ephemeral thread/start response の reasoningEffort がユーザー既定の xhigh だった。thread作成だけではcomposerの選択を反映できないため、各turn/startで選択effortまたは既定へ戻す`null`を明示する。
 
 ## thread 管理
 
@@ -383,6 +383,12 @@ native requestUserInput が unavailable の場合は、turn/start の outputSche
 schemaVersion: 1
 kind: result | decision_request
 message: string
+result の場合:
+  decisionId: null
+  question: null
+  options: null
+  context: null
+  allowFreeform: null | boolean（互換fieldとして無視）
 decision_request の場合:
   decisionId: string
   question: string
@@ -393,7 +399,7 @@ decision_request の場合:
   allowFreeform: false
 ~~~
 
-assistant の最終出力がこの schema を完全に満たす場合だけ decision UI を出す。Markdown、コードブロック、自然文から JSON らしき部分を抽出しない。approval はこの envelope で代替しない。
+assistant のStructured Output deltaはJSON envelopeのtransport断片なのでWebViewへ表示・保存しない。最終出力を検証し、`result`ならredact済み`message`だけを会話へ出し、`decision_request`なら全decision fieldと`allowFreeform=false`を満たす場合だけdecision UIを出す。Markdown、コードブロック、自然文からJSONらしき部分を抽出しない。approvalはこのenvelopeで代替しない。
 
 ### dynamic tools
 
@@ -472,7 +478,7 @@ ready 条件:
 - canonical binary が検証済み。
 - initialize / initialized が成功。
 - account/read が利用可能。
-- model/list に Sol、low、max が存在。
+- model/list にSolと1件以上のsupportedReasoningEffortsが存在。
 - core lifecycle method が schema probe に存在。
 - stdout reader と stdin writer が稼働。
 
@@ -516,7 +522,8 @@ config/read は effective config と origins / layers を含み得る。Rust 内
 | experimental rejection | -32600 分類 | process 再起動、stable core。advanced capability unavailable |
 | auth 無し / unauthorized | account/read または TurnError | auth_required。login guidance |
 | Sol 無し | model/list | model_unavailable。別 model へ変更しない |
-| low / max 無し | model/list | effort_unavailable。該当 preset を隠すのでなく session を開始しない |
+| reasoning effort 0件 | model/list | effort_unavailable。sessionを開始しない |
+| Fast service tier無し | model/list | Sendは維持し、Fast flagだけをdisabledにする |
 | model reroute | model/rerouted | interrupt、model_unavailable |
 | malformed / oversized JSONL | parser / limit | protocol_mismatch、raw payload 破棄、child 再起動 |
 | unknown server request | request allowlist | fail-closed error、turn interrupt |
@@ -547,7 +554,7 @@ restart loop は指数 backoff と jitter を使い、短時間の連続 crash 3
 ## 採用判断
 
 - 主 Codex セッション: Go。0.144.1 / 0.144.5 の今回の schema と実接続で必要 core を確認した。
-- gpt-5.6-sol + Fast(low) / Max(max): Go。ただし起動ごとの model/list gate が必須。
+- gpt-5.6-sol + capability-driven reasoning / Fast tier: Go。ただし起動ごとのmodel/list gateが必須。
 - native requestUserInput: Conditional Go。experimentalApi、schema、厳密 validator、fail-closed が条件。
 - dynamic tools: Mechanism only。汎用 tool は登録せず、具体的な意味 API ごとに追加審査する。
 - detached review: Go。main thread と reviewThreadId を分離して追跡する。

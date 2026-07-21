@@ -30,6 +30,8 @@ use character::commands::{
 use character::service::resolve_builtin_directory;
 use character::{CharacterService, CharacterStorage};
 use codex::attachment::AttachmentService;
+#[cfg(feature = "desktop-qa")]
+use codex::commands::desktop_qa_register_workspace_fixture;
 use codex::commands::{
     codex_answer_fallback_decision, codex_connect, codex_get_diagnostic, codex_pick_attachments,
     codex_pick_workspace, codex_probe, codex_register_attachment_paths, codex_respond_pending,
@@ -366,6 +368,8 @@ pub fn run() {
             codex_review_start,
             codex_respond_pending,
             codex_answer_fallback_decision,
+            #[cfg(feature = "desktop-qa")]
+            desktop_qa_register_workspace_fixture,
             workspace_list,
             workspace_pick_register,
             workspace_project_setup_git_init,

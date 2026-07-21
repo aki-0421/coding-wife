@@ -17,21 +17,29 @@ import {
 const readyDiagnostic = parseCodexDiagnostic(fixture.diagnostic)
 
 describe("evaluateCodexReadiness", () => {
-  it("requires history, Sol, both efforts, account, and core capabilities", () => {
+  it("requires history, Sol, advertised reasoning, account, and core capabilities", () => {
     expect(evaluateCodexReadiness(readyDiagnostic, "ready")).toEqual({
       ready: true,
-      fastAvailable: true,
-      maxAvailable: true,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra",
+      ],
+      experimentalModesAvailable: true,
       reasonCode: null,
     })
-    const withoutMax = {
+    const withoutReasoning = {
       ...readyDiagnostic,
-      maxAvailable: false,
+      supportedReasoningEfforts: [],
     } satisfies CodexDiagnostic
-    expect(evaluateCodexReadiness(withoutMax, "ready")).toMatchObject({
+    expect(evaluateCodexReadiness(withoutReasoning, "ready")).toMatchObject({
       ready: false,
-      fastAvailable: true,
-      maxAvailable: false,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: [],
       reasonCode: "CODEX-EFFORT-UNAVAILABLE",
     })
     expect(evaluateCodexReadiness(readyDiagnostic, "read_only")).toMatchObject({
@@ -101,5 +109,30 @@ describe("CodexWorkspaceSessionStore", () => {
     ).toBe("applied")
     store.syncSession(session.snapshot())
     expect(store.snapshot().phase).toBe("interrupted")
+  })
+
+  it("exposes operation and history failures as the current readiness reason", () => {
+    const store = new CodexWorkspaceSessionStore()
+    store.beginActivation("workspace-fixture", "ready")
+    store.markOperationError("CODEX-IPC-UNAVAILABLE")
+
+    expect(store.snapshot()).toMatchObject({
+      phase: "failed",
+      connected: false,
+      errorCode: "CODEX-IPC-UNAVAILABLE",
+      readiness: {
+        ready: false,
+        reasonCode: "CODEX-IPC-UNAVAILABLE",
+      },
+    })
+
+    store.markHistoryFailure("HIST-WRITER-NOT-READY")
+    expect(store.snapshot()).toMatchObject({
+      errorCode: "HIST-WRITER-NOT-READY",
+      readiness: {
+        ready: false,
+        reasonCode: "HIST-WRITER-NOT-READY",
+      },
+    })
   })
 })

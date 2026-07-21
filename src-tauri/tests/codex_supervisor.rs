@@ -356,7 +356,10 @@ async fn start_active_turn(
             thread_handle: thread.thread_handle.clone(),
             client_user_message_id: "readiness-message".to_owned(),
             text: "Keep this turn active during diagnostics.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -603,7 +606,10 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
             thread_handle: thread.thread_handle.clone(),
             client_user_message_id: "message-1".to_owned(),
             text: "Inspect the fixture.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::High),
+            service_tier: Some("priority".to_owned()),
+            plan_mode: true,
+            goal_objective: Some("Inspect the fixture.".to_owned()),
             attachment_handles: vec![],
         })
         .await
@@ -628,6 +634,7 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
         .expect("interrupt ack");
     tokio::time::sleep(Duration::from_millis(100)).await;
     let state = read_state(&fixture.state).await;
+    assert!(state.contains("goal_set_ok"));
     assert!(state.contains("turn_contract_ok"));
     assert_eq!(state.matches("commit_skill_exactly_once_ok").count(), 1);
     assert_eq!(state.matches("commit_skill_audit:").count(), 1);
@@ -666,7 +673,10 @@ async fn main_turn_text_accepts_exact_scalar_boundary_and_rejects_invalid_input_
         thread_handle: thread.thread_handle.clone(),
         client_user_message_id: client_user_message_id.to_owned(),
         text,
-        effort: ReasoningPreset::Low,
+        effort: Some(ReasoningPreset::Low),
+        service_tier: None,
+        plan_mode: false,
+        goal_objective: None,
         attachment_handles: vec![],
     };
     let oversized = format!("{}😀", "x".repeat(80_000));
@@ -1447,7 +1457,10 @@ async fn missing_or_tampered_main_skill_blocks_turn_before_wire() {
                 thread_handle: thread.thread_handle,
                 client_user_message_id: format!("message-{case}"),
                 text: "Do not send this turn.".to_owned(),
-                effort: ReasoningPreset::Low,
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
                 attachment_handles: vec![],
             })
             .await
@@ -1598,7 +1611,10 @@ async fn validated_opaque_attachments_reach_the_fake_server_as_local_image_and_m
                 thread_handle: thread.thread_handle.clone(),
                 client_user_message_id: "message-attachments".to_owned(),
                 text: String::new(),
-                effort: ReasoningPreset::Low,
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
                 attachment_handles: handles.clone(),
             },
             resolved,
@@ -1664,7 +1680,10 @@ async fn snapshot_bytes_survive_leaf_and_ancestor_namespace_replacement() {
                 thread_handle,
                 client_user_message_id: "message-attachment-race".to_owned(),
                 text: String::new(),
-                effort: ReasoningPreset::Low,
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
                 attachment_handles: handles.clone(),
             },
             resolved,
@@ -1709,7 +1728,10 @@ async fn snapshot_cleanup_covers_rejection_terminal_before_response_and_child_cr
                     thread_handle,
                     client_user_message_id: format!("message-{mode}"),
                     text: String::new(),
-                    effort: ReasoningPreset::Low,
+                    effort: Some(ReasoningPreset::Low),
+                    service_tier: None,
+                    plan_mode: false,
+                    goal_objective: None,
                     attachment_handles: handles.clone(),
                 },
                 resolved,
@@ -1859,7 +1881,10 @@ async fn native_rui_round_trips_one_strict_answer() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-rui".to_owned(),
             text: "Request a choice.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -1949,7 +1974,10 @@ async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
                 thread_handle: thread.thread_handle,
                 client_user_message_id: format!("message-{mode}"),
                 text: "Produce a decision.".to_owned(),
-                effort: ReasoningPreset::Max,
+                effort: Some(ReasoningPreset::Max),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
                 attachment_handles: vec![],
             })
             .await
@@ -1996,7 +2024,10 @@ async fn fallback_decision_validates_then_starts_exactly_one_structured_continua
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-decision".to_owned(),
             text: "Produce a decision.".to_owned(),
-            effort: ReasoningPreset::Max,
+            effort: Some(ReasoningPreset::Max),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -2070,7 +2101,10 @@ async fn notification_first_turn_start_preserves_fallback_display_and_answer() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-notification-first".to_owned(),
             text: "Produce a decision.".to_owned(),
-            effort: ReasoningPreset::Max,
+            effort: Some(ReasoningPreset::Max),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -2126,7 +2160,10 @@ async fn failed_fallback_continuation_is_terminal_and_never_replayed() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-crash-decision".to_owned(),
             text: "Produce a decision.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -2185,12 +2222,7 @@ async fn failed_reprobe_clears_previous_identity_evidence_and_recovers_fresh() {
     assert!(ready.binary_hash_prefix.is_some());
 
     std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", "schema_malformed");
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect_err("schema failure");
+    supervisor.probe().await.expect_err("schema failure");
     let failed = supervisor.diagnostic().await;
     assert_eq!(failed.health, CodexHealth::SchemaUnsupported);
     assert!(failed.cli_version.is_none());
@@ -2229,8 +2261,8 @@ async fn setup_probe_only_discovers_and_initializes_a_short_lived_app_server() {
     assert!(!setup.generated_by_same_binary);
     assert!(!setup.account_present);
     assert!(!setup.model_available);
-    assert!(!setup.fast_available);
-    assert!(!setup.max_available);
+    assert!(setup.fast_service_tier.is_none());
+    assert!(setup.supported_reasoning_efforts.is_empty());
     let state = read_state(&fixture.state).await;
     let version = state.find("setup_version").expect("setup version probe");
     let initialize = state.find("setup_initialize").expect("setup initialize");
@@ -2242,6 +2274,211 @@ async fn setup_probe_only_discovers_and_initializes_a_short_lived_app_server() {
     assert!(!state.contains("setup_model_list"));
     let probe_pid = last_recorded_pid(&state, "setup_process_started:");
     wait_for_fixture_process_group_exit(probe_pid).await;
+}
+
+#[tokio::test]
+async fn repeated_setup_probe_reuses_successful_initialization_evidence() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("setup_probe");
+    let supervisor = test_supervisor();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+
+    let first = supervisor.setup_probe().await;
+    let second = supervisor.setup_probe().await;
+
+    assert_eq!(first.health, CodexHealth::Ready);
+    assert_eq!(second.health, CodexHealth::Ready);
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("setup_version").count(), 1);
+    assert_eq!(state.matches("setup_process_started:").count(), 1);
+    assert_eq!(state.matches("setup_initialize").count(), 1);
+    let probe_pid = last_recorded_pid(&state, "setup_process_started:");
+    wait_for_fixture_process_group_exit(probe_pid).await;
+}
+
+#[tokio::test]
+async fn repeated_connect_to_ready_workspace_reuses_runtime_and_probe_evidence() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("lifecycle_cache");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+
+    let first = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("first connect");
+    let second = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("idempotent connect");
+
+    assert_eq!(second, first);
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("version_requested").count(), 1);
+    assert_eq!(
+        state
+            .lines()
+            .filter(|line| *line == "schema_requested")
+            .count(),
+        1,
+    );
+    assert_eq!(state.matches("app_server_process_started:").count(), 1);
+    assert_eq!(state.matches("initialize_requested").count(), 1);
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn configured_binary_change_replaces_a_ready_runtime() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("lifecycle_cache");
+    let binary_directory = temporary_directory("configured-binary-change");
+    std::fs::create_dir_all(&binary_directory).expect("create private binary directory");
+    std::fs::set_permissions(&binary_directory, std::fs::Permissions::from_mode(0o700))
+        .expect("private binary directory mode");
+    let first_binary = binary_directory.join("codex-first");
+    let second_binary = binary_directory.join("codex-second");
+    std::fs::copy(fixture_binary(), &first_binary).expect("copy first fixture binary");
+    std::fs::copy(
+        fixture_binary().with_file_name("codex_schema_subset_v0_144_5.json"),
+        binary_directory.join("codex_schema_subset_v0_144_5.json"),
+    )
+    .expect("copy fixture schema");
+    let mut second_bytes = std::fs::read(fixture_binary()).expect("fixture binary bytes");
+    second_bytes.extend_from_slice(b"\n# configured binary change fixture\n");
+    std::fs::write(&second_binary, second_bytes).expect("write second fixture binary");
+    for binary in [&first_binary, &second_binary] {
+        std::fs::set_permissions(binary, std::fs::Permissions::from_mode(0o700))
+            .expect("fixture binary mode");
+    }
+
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor
+        .set_explicit_binary(Some(first_binary.clone()))
+        .await;
+    let first = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("connect first binary");
+
+    supervisor
+        .set_explicit_binary(Some(second_binary.clone()))
+        .await;
+    let second = supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("connect replacement binary");
+
+    assert_ne!(first.binary_hash_prefix, second.binary_hash_prefix);
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("version_requested").count(), 2);
+    assert_eq!(state.matches("schema_requested").count(), 2);
+    assert_eq!(state.matches("app_server_process_started:").count(), 2);
+    assert_eq!(state.matches("initialize_requested").count(), 2);
+    supervisor.shutdown().await;
+    let _ = std::fs::remove_dir_all(binary_directory);
+}
+
+#[tokio::test]
+async fn workspace_switch_reuses_verified_binary_and_schema_evidence() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("lifecycle_cache");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace-a", &fixture.workspace)
+        .await
+        .expect("register first workspace");
+    supervisor
+        .register_workspace_root("workspace-b", &fixture.workspace)
+        .await
+        .expect("register second workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace-a".to_owned(),
+        })
+        .await
+        .expect("connect first workspace");
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace-b".to_owned(),
+        })
+        .await
+        .expect("connect second workspace");
+
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("version_requested").count(), 1);
+    assert_eq!(
+        state
+            .lines()
+            .filter(|line| *line == "schema_requested")
+            .count(),
+        1,
+    );
+    assert_eq!(state.matches("app_server_process_started:").count(), 2);
+    assert_eq!(state.matches("initialize_requested").count(), 2);
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn setup_probe_and_connect_share_binary_discovery_evidence() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("setup_probe");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+
+    assert_eq!(supervisor.setup_probe().await.health, CodexHealth::Ready);
+    assert_eq!(
+        supervisor
+            .connect(CodexConnectRequest {
+                workspace_id: "workspace".to_owned(),
+            })
+            .await
+            .expect("connect after setup")
+            .health,
+        CodexHealth::Ready,
+    );
+
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("version_requested").count(), 1);
+    assert_eq!(
+        state
+            .lines()
+            .filter(|line| *line == "schema_requested")
+            .count(),
+        1,
+    );
+    assert_eq!(state.matches("app_server_process_started:").count(), 2);
+    assert_eq!(state.matches("initialize_requested").count(), 2);
+    supervisor.shutdown().await;
 }
 
 #[tokio::test]
@@ -2258,8 +2495,13 @@ async fn readiness_probe_observes_auth_change_without_stopping_the_active_turn()
     assert_eq!(readiness.health, CodexHealth::AuthRequired);
     assert!(!readiness.account_present);
     assert!(readiness.model_available);
-    assert!(readiness.fast_available);
-    assert!(readiness.max_available);
+    assert_eq!(readiness.fast_service_tier.as_deref(), Some("priority"));
+    assert!(readiness
+        .supported_reasoning_efforts
+        .contains(&ReasoningPreset::Low));
+    assert!(readiness
+        .supported_reasoning_efforts
+        .contains(&ReasoningPreset::Max));
     assert!(readiness.generated_by_same_binary);
     assert_eq!(supervisor.diagnostic().await, runtime_before);
 
@@ -2484,7 +2726,10 @@ async fn unknown_server_request_is_rejected_and_turn_is_interrupted() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-unknown".to_owned(),
             text: "Trigger the request.".to_owned(),
-            effort: ReasoningPreset::Max,
+            effort: Some(ReasoningPreset::Max),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await
@@ -2561,7 +2806,10 @@ async fn crash_after_ready_restarts_once_without_replaying_a_turn() {
             thread_handle: thread.thread_handle,
             client_user_message_id: "message-after-restart".to_owned(),
             text: "Verify skill injection after restart.".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         })
         .await

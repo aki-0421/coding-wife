@@ -72,8 +72,9 @@ function codexState(
     connected: true,
     readiness: {
       ready: true,
-      fastAvailable: true,
-      maxAvailable: true,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: ["low", "max"],
+      experimentalModesAvailable: true,
       reasonCode: null,
     },
     pendingRequests: [],
@@ -220,15 +221,47 @@ describe("useWorkspaceViewModel workspace transitions", () => {
     )
   })
 
+  it("preserves the draft and exposes a safe error when turn start fails", async () => {
+    const fixture = adapterFixture()
+    fixture.sendTurn.mockRejectedValueOnce(
+      Object.assign(new Error("raw transport detail"), {
+        code: "CODEX-TURN-PREFLIGHT-BLOCKED",
+      }),
+    )
+    const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
+    await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
+
+    await act(async () => {
+      await expect(result.current.sendTurn()).resolves.toBe(false)
+    })
+
+    expect(result.current.turnState).toBe("idle")
+    expect(result.current.selectedDraft.text).toBe("Preserve this draft.")
+    expect(result.current.notice).toEqual({
+      tone: "error",
+      message: "CODEX-TURN-PREFLIGHT-BLOCKED",
+    })
+  })
+
+  it("does not expose an unsafe turn start error", async () => {
+    const fixture = adapterFixture()
+    fixture.sendTurn.mockRejectedValueOnce(
+      new Error("/\u0055sers/private/.codex/auth.json"),
+    )
+    const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
+    await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
+
+    await act(async () => {
+      await expect(result.current.sendTurn()).resolves.toBe(false)
+    })
+
+    expect(result.current.selectedDraft.text).toBe("Preserve this draft.")
+    expect(result.current.notice?.message).toBe("CODEX-TURN-START-FAILED")
+  })
+
   it("rechecks the active repository on window focus and restores native anchor state", async () => {
     const initial: WorkspaceAdapterState = {
       ...state(),
-      lastSummary: {
-        eventId: "event-summary",
-        sequence: 8,
-        text: "Workspace summary",
-        updatedAt: "2026-07-18T00:01:00.000Z",
-      },
       timelineAnchor: {
         eventId: "event-anchor",
         sequence: 7,
@@ -257,7 +290,6 @@ describe("useWorkspaceViewModel workspace transitions", () => {
     }
     const { result } = renderHook(() => useWorkspaceViewModel(adapter))
     await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
-    expect(result.current.lastSummary?.text).toBe("Workspace summary")
     expect(result.current.timelineAnchor).toMatchObject({
       eventId: "event-anchor",
       sequence: 7,

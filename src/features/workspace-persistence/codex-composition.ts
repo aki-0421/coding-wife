@@ -1,15 +1,14 @@
-import { workspaceHistoryCommands } from "@/lib/contracts"
-
 import type { CodexHistoryEvent } from "@/features/codex/event-projection"
 import type { CodexTransport } from "@/features/codex/transport"
 import { CodexWorkspaceSessionAdapter } from "@/features/codex/workspace-session-adapter"
 import type { CodexWorkspaceSessionSnapshot } from "@/features/codex/workspace-session-store"
 import { PersistentWorkspaceViewAdapter } from "@/features/workspace-persistence/adapter"
-import { composeTurnInstruction } from "@/features/workspace-persistence/turn-context"
 import type { WorkspaceHistoryTransport } from "@/features/workspace-persistence/transport"
+import { composeTurnInstruction } from "@/features/workspace-persistence/turn-context"
 import type {
   AppQuitPreparationRequest,
   ProjectRegistrationResult,
+  ReasoningEffort,
   SendTurnRequest,
   WorkspaceAdapterState,
   WorkspaceAdapterTimelinePage,
@@ -18,6 +17,7 @@ import type {
   WorkspaceTransitionRequest,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
+import { workspaceHistoryCommands } from "@/lib/contracts"
 
 function publicCodexState(
   snapshot: CodexWorkspaceSessionSnapshot,
@@ -84,6 +84,10 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     readonly key: string
     readonly operation: Promise<void>
   } | null = null
+  private codexActivation: {
+    readonly key: string
+    readonly operation: Promise<void>
+  } | null = null
 
   constructor(
     historyTransport: WorkspaceHistoryTransport,
@@ -107,7 +111,11 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
 
   async loadState(): Promise<WorkspaceAdapterState> {
     const state = await this.history.loadState()
-    await this.activateCodex(state)
+    if (this.hydrationMode === "native") {
+      void this.activateCodex(state)
+    } else {
+      await this.activateCodex(state)
+    }
     return state
   }
 
@@ -253,7 +261,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   saveDraft(
     workspaceId: string,
     text: string,
-    effort: "fast" | "max",
+    effort: ReasoningEffort,
   ): Promise<void> {
     return this.history.saveDraft(workspaceId, text, effort)
   }
@@ -349,6 +357,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   async sendTurn(
     request: SendTurnRequest,
   ): Promise<{ readonly accepted: boolean }> {
+    const readiness = this.codex.snapshot().readiness
     await this.codex.sendTurn({
       workspaceId: request.workspaceId,
       text: composeTurnInstruction(
@@ -356,7 +365,10 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
         request.editableContextSnapshot,
       ),
       publicText: request.instruction,
-      effort: request.effort === "fast" ? "low" : "max",
+      effort: request.effort === "off" ? null : request.effort,
+      serviceTier: request.fastMode ? readiness.fastServiceTier : null,
+      planMode: request.planMode ?? false,
+      goalObjective: request.goalMode ? request.instruction.trim() : null,
       attachmentHandles: request.attachments
         .filter((attachment) => attachment.valid)
         .map((attachment) => attachment.id),
@@ -417,14 +429,37 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
         : state.history.mode === "recovery_required"
           ? "recovery_required"
           : "read_only"
-    try {
-      await this.codex.activateWorkspace({
+    const current = this.codex.snapshot()
+    if (
+      current.activeWorkspaceId === state.activeWorkspaceId &&
+      current.historyMode === historyMode &&
+      current.connected &&
+      current.readiness.ready &&
+      current.threadHandle !== null
+    ) {
+      return
+    }
+    const key = `${state.activeWorkspaceId}:${historyMode}`
+    if (this.codexActivation?.key === key) {
+      await this.codexActivation.operation
+      return
+    }
+    const operation = this.codex
+      .activateWorkspace({
         workspaceId: state.activeWorkspaceId,
         historyMode,
       })
-    } catch {
-      // The Codex store already exposes a safe error code through subscribeCodex.
-    }
+      .then(() => undefined)
+      .catch(() => {
+        // The Codex store already exposes a safe error code through subscribeCodex.
+      })
+      .finally(() => {
+        if (this.codexActivation?.operation === operation) {
+          this.codexActivation = null
+        }
+      })
+    this.codexActivation = { key, operation }
+    await operation
   }
 
   private async performWorkspaceTransition(

@@ -1,7 +1,10 @@
 import type { PendingRequestView } from "@/lib/contracts"
 import type { PersistedTimelineEvent } from "@/lib/contracts/workspace-history"
 import { unicodeScalarCount } from "@/lib/public-text"
-import type { CodexSemanticTimelineEvent } from "@/features/codex/event-projection"
+import {
+  sanitizeToolSummary,
+  type CodexSemanticTimelineEvent,
+} from "@/features/codex/event-projection"
 
 const maxToolTextScalars = 16 * 1024
 
@@ -93,9 +96,46 @@ function turnKind(status: string): "turn" | "completion" | "error" {
   return "error"
 }
 
+export function isHiddenCodexHistoryEvent(
+  event: PersistedTimelineEvent,
+): boolean {
+  return (
+    event.producer === "code" &&
+    event.kind === "code.item.status.changed" &&
+    event.payload.semanticVersion === 1 &&
+    ["userMessage", "agentMessage"].includes(
+      stringField(event.payload, "itemType"),
+    )
+  )
+}
+
+function legacyToolMetadata(toolKind: string) {
+  return {
+    toolKind,
+    providerName: null,
+    toolName:
+      toolKind === "commandExecution"
+        ? "shell"
+        : toolKind === "webSearch"
+          ? "search"
+          : "MCP",
+    summary: null,
+    durationMs: null,
+  } as const
+}
+
 export class PersistedCodexEventProjector {
   private readonly toolText = new Map<string, string>()
-  private readonly toolKinds = new Map<string, string>()
+  private readonly toolMetadata = new Map<
+    string,
+    {
+      readonly toolKind: string
+      readonly providerName: string | null
+      readonly toolName: string
+      readonly summary: string | null
+      readonly durationMs: number | null
+    }
+  >()
   private readonly fileChanges = new Map<
     string,
     { readonly pathAlias: string; readonly changeKind: string }
@@ -170,15 +210,17 @@ export class PersistedCodexEventProjector {
         const itemType = stringField(payload, "itemType")
         const status = stringField(payload, "status")
         const stable = stableId(event, generation, "item", itemHandle)
+        if (isHiddenCodexHistoryEvent(event)) return null
         if (
           ["commandExecution", "mcpToolCall", "webSearch"].includes(itemType)
         ) {
-          this.toolKinds.set(stable, itemType)
+          const metadata = legacyToolMetadata(itemType)
+          this.toolMetadata.set(stable, metadata)
           return {
             ...base(event, generation, sourceSequence, status, stable),
             kind: "tool",
             itemHandle,
-            toolKind: itemType,
+            ...metadata,
             excerpt: this.toolText.get(stable) ?? null,
           }
         }
@@ -198,6 +240,31 @@ export class PersistedCodexEventProjector {
           itemHandle,
           itemType,
           detailRef: null,
+        }
+      }
+      case "code.tool.status.changed": {
+        const itemHandle = stringField(payload, "itemHandle")
+        const stable = stableId(event, generation, "item", itemHandle)
+        const metadata = {
+          toolKind: stringField(payload, "toolKind"),
+          providerName: payload.providerName as string | null,
+          toolName: stringField(payload, "toolName"),
+          summary: sanitizeToolSummary(payload.summary as string | null),
+          durationMs: payload.durationMs as number | null,
+        }
+        this.toolMetadata.set(stable, metadata)
+        return {
+          ...base(
+            event,
+            generation,
+            sourceSequence,
+            stringField(payload, "status"),
+            stable,
+          ),
+          kind: "tool",
+          itemHandle,
+          ...metadata,
+          excerpt: this.toolText.get(stable) ?? null,
         }
       }
       case "code.message.completed": {
@@ -249,11 +316,18 @@ export class PersistedCodexEventProjector {
           maxToolTextScalars,
         )
         this.toolText.set(stable, excerpt)
+        const metadata = this.toolMetadata.get(stable) ?? {
+          toolKind: "commandExecution",
+          providerName: null,
+          toolName: "shell",
+          summary: null,
+          durationMs: null,
+        }
         return {
           ...base(event, generation, sourceSequence, "streaming", stable),
           kind: "tool",
           itemHandle,
-          toolKind: this.toolKinds.get(stable) ?? "commandExecution",
+          ...metadata,
           excerpt,
         }
       }
@@ -306,6 +380,22 @@ export class PersistedCodexEventProjector {
       case "code.session.diagnostic": {
         const detailRef = stringField(payload, "detailRef")
         const willRetry = payload.willRetry as boolean
+        const code = stringField(payload, "code")
+        if (code === "CODEX-WARNING") {
+          return {
+            ...base(
+              event,
+              generation,
+              sourceSequence,
+              "warning",
+              stableId(event, generation, "diagnostic", detailRef),
+            ),
+            kind: "status",
+            itemHandle: null,
+            itemType: "warning",
+            detailRef,
+          }
+        }
         return {
           ...base(
             event,
@@ -315,7 +405,7 @@ export class PersistedCodexEventProjector {
             stableId(event, generation, "diagnostic", detailRef),
           ),
           kind: "error",
-          errorCode: stringField(payload, "code"),
+          errorCode: code,
           detailRef,
           willRetry,
         }

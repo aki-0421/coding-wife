@@ -1,7 +1,7 @@
 ---
 title: "S-002 コーディングワークスペース"
 description: "Codex main session、構造化tool event、意思決定、read-only Context、Live2D characterを一つの安全な作業面で扱う画面仕様。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "Chat tab、composer、Codex event timeline、decision、Live2D characterを実装するとき。"
   - "S-002とWORK、CODE、SUP、GIT、HIST、LIVE、NARR、APP要件の対応を確認するとき。"
@@ -33,7 +33,7 @@ status: "Approved"
 | 対象 | 内容 |
 |---|---|
 | Main session | Codex App Serverのinitialize、thread、turn、stop、reconnect、resume |
-| Timeline | user/assistant text、tool開始・結果、file変更、test、Git、support、decision、errorの正規化event |
+| Timeline | user/assistant text、plan/tool、file/diff、decision/approval、errorの会話向けprojection |
 | Composer | multiline指示、attachment、project context参照、reasoning effort、send、stop |
 | Decision | 選択肢、自由入力、保留、中断、明示承認、理由・影響・可逆性 |
 | Character | default/custom Live2D、状態表現、mute、visible caption、static/text fallback |
@@ -60,7 +60,7 @@ status: "Approved"
 | 正常完了 | validated terminal work-unit eventを1回だけread-only Git observerへ渡し、before/after HEAD、new commit、verification/decision/risk相関をHISTへ追記する。success commit commandと新しいSHAを検証できた時はapp-owned explanation controllerへ`auto_verified_commit`を渡し、main conversationを変更しない |
 | キャンセル |未送信draftとtimeline位置を維持する。running turnのStopは別操作として確認する |
 | 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う |
-| 再表示 | Project ID、workspace、tab、draft、last summary、timeline anchor ID/sequence/offset、repository health、unanswered decisionをworkspace storeから、app-global character選択をcharacter library storeから復元する |
+| 再表示 | Project ID、workspace、tab、draft、timeline anchor ID/sequence/offset、repository health、unanswered decisionをworkspace storeから、app-global character選択をcharacter library storeから復元する。互換性のため保存済みlast summaryを読込結果に含めても、Chatでは消費・表示しない |
 
 ## 利用者と権限
 
@@ -79,12 +79,12 @@ status: "Approved"
 
 | 領域 | 実装拘束値 | 表示内容 | 主な操作 |
 |---|---:|---|---|
-| workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、App settings gear | filter、workspace選択、App settings |
+| workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、main turn送信開始・実行・停止処理中だけ対象rowのrepository avatarと置き換わるspinner、App settings gear | filter、workspace選択、App settings |
 | breadcrumb row | main上段40.5px | owner avatar、`owner/repo` / workspace、branch、connection、attention | repository / workspace / branchの値をcopy |
 | tab row | main下段40.5px | Chat / Commit / Settings | view切替 |
 | Chat pane | 607.11×754.99px | event timeline、decision、composer | inspect、copy、send、stop、answer |
 | Character pane | 607.84×754.99px | Live2D canvas、visible caption、mute | mute、fallback詳細 |
-| composer | Chat内571.11×128.25px、left/right 18px、bottom 15px | input、attachment、context、Sol、effort、send/stop | draft編集、popover、turn操作 |
+| composer | Chat内571.11×128.25px、left/right 18px、bottom 15px | input、draft item、補助操作、実行操作 | draft編集、attachment/context追加、effort選択、send/stop |
 
 標準geometryではsidebar、81px header、primary work surface/Character境界、composerをFigma node `8:2`の±2 CSS px以内に合わせる。ChatとCommitは同じCharacter instanceを右paneへ継続表示し、tab切替でcanvasを再生成しない。Settingsでは同じrenderer instanceを非表示のまま保持する。primary work surfaceとCharacterの間へcard、rail、shadow、visible dividerを追加しない。Character背景は大きなdecorative gradientやparticleを使わず、Live2Dと状態captionの可読性を優先する。
 
@@ -103,41 +103,55 @@ status: "Approved"
 
 ### Chat timeline
 
-eventはworkspace内のvalidated `sequence`順に表示する。live/HISTは共通のversioned projectorでstable IDとsemantic cardを復元する。pending actionはsupervisorが同じworkspace/thread/generationを所有する時だけ操作可能にする。unknown/invalid payloadは生値やgeneric成功行へ落とさず`未対応のイベント`、event ID、診断linkにする。
+eventはworkspace内のvalidated `sequence`順に表示する。live/HISTは共通のversioned projectorでstable IDとsemantic cardを復元する。pending actionはsupervisorが同じworkspace/thread/generationを所有する時だけ操作可能にする。unknown/invalid payloadは生値やgeneric成功行へ落とさずChatでは描画せずに診断へ隔離する。
+
+Chatは保存済みeventの監査一覧ではなく、現在の会話を理解して次の操作を決めるためのprojectionとする。tab名が領域名を担うため、本文上端に`Activity / アクティビティ`見出しと説明を置かない。Chatへ表示するのは`user`、`assistant`、`plan`、`tool`、`file`、`diff`、`decision`、`approval`、`error`だけとし、raw `history`、generic `status`、`thread` / `turn` lifecycle、`completion`、`request_resolved`は永続化しても描画しない。成功した同一tool itemの開始・終了更新はstable IDで一行へ統合し、異なるtool itemはcompact rowのまま保持する。検証結果は対応するtool/error、Git evidenceはCommit tab、support状態は専用controller surfaceを正本にする。turnの正常終了では検証・redact済み`result.message`のAssistant本文を会話の最後に表示し、`completion`を最終出力の代替にしない。
 
 | event kind | compact表示 | 展開表示 | 主要action |
 |---|---|---|---|
 | User instruction | avatarなしのtext block、送信時刻 | attachment名、参照context version | copy |
 | Assistant commentary | plain text、phase label | related work unit / support result | copy |
-| Tool activity | icon、approved verb、target basename、running/result | sanitized args summary、duration、exit category、detail ref | expand、copy summary |
+| Tool activity | icon、利用者が識別できる提供元と実tool名、目的またはtarget、running/result、duration | sanitized args summary、result/error category、detail ref | expand、copy summary |
 | File change | create/update/delete、relative path、line count | redacted patch summary、ownership | Commit tabで確認 |
-| Verification | test/lint/build名、pass/fail、duration | command allowlist名、failure excerpt、artifact ref | evidenceを開く |
-| Git event | observation/new commit/commit unavailable、short SHA | before/after HEAD、commit count、verification/risk相関 | Commit tabで確認 |
-| Support work | agent label、bounded task、status | request、result summary、verification、ownership | related eventへ移動 |
-| Decision | question、reason、impact、reversibility | options、Other、hold/interrupt/approve条件 | answer |
+| Verification | tool rowのtest/lint/build名、pass/fail、duration | command allowlist名、failure excerpt、artifact ref | evidenceを開く |
+| Decision / Approval | question、reason、impact、reversibility | options、Other、hold/interrupt/approve条件 | answer |
 | Error / Interrupted | code、影響、保持data、回復操作 | safe detail、retry condition、diagnostic ref | retry、modify、stop、diagnostic |
 
+MCP toolはApp Server itemの`server`と`tool`をredact・長さ制限したsemantic fieldへ分離し、compact rowを`提供元 · 実tool名 · 安全な対象要約 · 状態 · 所要時間 · 時刻`の順に構成する。内部item typeの`mcpToolCall`をtool名として表示しない。引数はtop-level scalarを最大4件まで一行要約し、`title`、`query`、`ref_id`等の人向けtargetを優先する。credential相当keyは値を常に`[redacted]`へ置換し、`code`、`script`、`expression`等のsource bodyは本文でなく文字数だけを示す。array/objectは内容を展開せず件数だけを示し、raw JSON、MCP result content、secret、absolute private pathをWebViewまたは履歴へ渡さない。commandとweb searchも同じsemantic tool statusへ正規化し、commandはredact済み一行command、web searchはredact済みqueryをtarget summaryにする。旧`code.item.status.changed` tool履歴は互換表示できるが、新規tool statusはprovider/tool/summary/durationを持つ`code.tool.status.changed`を正本にする。
+
+App Serverの`agentMessage.phase=commentary`はturn途中のassistant messageとして会話へ表示し、後続toolまたは最終回答を待つ。commentary itemの完了を最終Structured Output違反として`CODEX-TURN-INTERRUPTED`へ変換してはならない。`phase=final_answer`またはphaseなしの完了itemだけを最終回答として扱い、厳格検証済み`result.message`を会話の最後へ表示する。
+
 連続する同種tool eventは同一work unit内だけgroup化し、running数とterminal数を見出しへ出す。groupを閉じてもerror、decision、verification failureを隠さない。toolのstdout/stderr全文、hidden reasoning、secret、home directory、unredacted promptは表示・保存しない。
+
+timeline rendererは表示対象を`message`、`operation`、`intervention`の三つへ分類する。User / Assistantは会話本文を主役にし、tool / file / diff / plan / errorは一行summaryと展開可能なsanitized detail、decision / approvalは単独の介入surfaceとして描画する。completed operationは初期状態で閉じ、running、failed、interruptedは開く。展開前もkind、targetまたは結果、terminal state、error code、時刻を確認できなければならない。
+
+表示対象eventが0件で回復alertもない場合、timeline領域にはplaceholder、見出し、説明、icon、枠、CTAを一切描画しない。last summaryのcard、見出し、説明、本文も描画しない。composerは通常位置に残し、初期focusもcomposerとする。
 
 commit explainerのrequest、status、delta、result、failureはChat timelineとmain conversationへ追加しない。これらはapp-owned explanation controller、S-003の状態表示、Character captionだけで扱う。
 
 timeline最下部から48px以内なら新eventで追従する。48pxを超えて離れた場合は位置を固定し、`新しい更新 N件 / 最新へ`をcomposer上へ表示する。復元時はevent anchor IDとoffsetを使い、消失時だけ最寄りsequenceへ補正する。
 
-timelineのdurability badgeはnative SQLiteがwrite-readyの時だけ`Persisted locally / ローカルに永続化済み`とする。browser demoは`Demo memory / デモ用メモリ`をbadgeで示す。Chat上端にはCodex、Git、履歴の接続状態をまとめた汎用noticeを表示しない。nativeでCodex activationまたはruntimeが利用不能な場合はChatを描画せず、[S-001](S-001_session-dashboard.md)の全viewport overview setupへ戻す。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
+Chatには正常時のdurability badgeを表示しない。native SQLiteの`read_only` / `recovery_required`だけを回復alertとして表示し、browser demoはheaderの`Preview only / プレビューのみ`、詳細な履歴状態はDiagnosticsを正本とする。Chat上端にはCodex、Git、履歴の接続状態をまとめた汎用noticeを表示しない。nativeでCodex activationまたはruntimeが利用不能な場合はChatを描画せず、[S-001](S-001_session-dashboard.md)の全viewport overview setupへ戻す。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
 
 ### Composer
 
 | control | 表示・動作 | 無効条件 |
 |---|---|---|
 | instruction | 1〜8行auto-grow。Enterは改行、`Command+Enter`で送信 | text、attachment、read-only contextがすべて空またはinvalid、offline、blocked preflight、decision未回答、別workspace実行競合 |
-| attachment | paperclip。native pickerでworkspace root内の許可fileを選択 | turn開始中、permission不足 |
-| Context | `Files & folders` / `Git diff` / `Terminal output`のread-only snapshotを選ぶpopover。portalで描画 | snapshot取得または検証不可 |
+| Add | icon-onlyの`+`からattachment、`Files & folders`、`Git diff`、`Terminal output`を一つのmenuで選ぶ。menuはportalで描画し、項目をattachmentとContextのgroupへ分ける | turn開始中。attachmentはpermission不足、Contextはsnapshot取得または検証不可 |
 | model | `GPT-5.6 Sol`固定label。picker chevronを出さない | 常時read-only |
-| effort | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけをselect。unsupported optionは理由付きでdisabledにし、最後のvalid値を保持する。modelやservice tierは変更しない | 対応値未確認、選択中値未対応、valid optionなしではSend不可 |
+| reasoning | bar iconと現在levelの短いlabelを一つのbuttonにする。clickごとに`Off`から`model/list`が広告したlevelを低い順に一段上げ、最高levelの次は`Off`へ戻る。`Off`は`turn/start.effort=null`でsession既定へ戻す | turn実行中。広告済みlevelがない時は`Off`だけを表示 |
+| Fast | 稲妻だけのflag button。選択時は`model/list.serviceTiers`が広告したFast tier IDを`turn/start.serviceTier`へ渡し、解除時は`null`で明示解除する | turn実行中、Fast tier未広告 |
+| Plan | map iconのflag button。選択中は`turn/start.collaborationMode`へ固定modelと選択reasoningを含む`plan` presetを渡し、解除時は`null`で明示解除する | turn実行中、experimental API未受理 |
+| Goals | target iconの一回性flag button。選択して送信すると、trim済みinstructionを`thread/goal/set.objective`へ設定してから同じinstructionのturnを開始し、turn受理後にflagだけ解除する | turn実行中、experimental API未受理、instructionが空、または4,000 scalar超 |
 | Send | primary icon button、accessible label `Send / 送信` | instruction条件不成立 |
 | Stop | running時にSend位置へ表示。明示clickだけ | turn非実行時 |
 
-attachment/Context/effort menuはpaneの`overflow`にclipされないbody-level portalとし、triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、App settings > Projects > project detailのProject Context編集やApp settings > Character > character detailのCharacter Context編集とは別の送信時参照として扱う。
+composerは一つの入力surfaceとして、上から`draft item`、instruction、footerの順に積む。footerは左の`+`、中央の固定model・Reasoning・Fast・Goals・Plan flags、右のkeyboard hintとSend/Stopへ視線が流れる三群構成にする。Fast、Goals、Planはicon-onlyにして選択状態をfill、`aria-pressed`、tooltipで伝え、Send/Stopはfooter末尾の円形icon buttonにする。固定modelとReasoningは実行条件のため残すが、primary actionと競合するborderやfillを持たせない。
+
+通常時はpaste/drop/@の長い説明文をsurface内へ常設せず、Addのtooltipとinstructionのaccessible descriptionへまとめる。native pickerが利用不能な時だけ、理由とdraft保持をinstruction直下へvisible statusとして表示する。`Command+Enter` hintはSendの直前へ置き、狭幅ではvisual textを省略してもaccessible descriptionとshortcut動作を維持する。draft itemはinstructionより上で横scrollし、basenameまたはsnapshot label、種別icon、削除操作を24pxの同一行へ収める。invalid attachmentは色だけでなく`!`と送信不可説明を残す。
+
+Add menuはpaneの`overflow`にclipされないbody-level portalとし、`+` triggerへanchorする。viewport外では上下反転し、Escape、outside click、route変更で閉じる。attachmentはfile内容をcomposerへ貼らず、basename、relative path、size、validation statusだけをchip表示する。Context snapshotはsource、capture時刻、byte数を表示し、App settings > Projects > project detailのProject Context編集やApp settings > Character > character detailのCharacter Context編集とは別の送信時参照として扱う。
 
 送信時はworkspace、draft hash、context version、Git fingerprint、effort、attachmentをRustで再検証する。public instructionは32,000 Unicode scalar以下を維持し、開始時に固定したProject/Character context、version/hash metadata、JSON escaping、固定markerとの合成text全体を80,000 Unicode scalar以下にする。WebViewとRustはUTF-8 byte数ではなくUnicode scalar数で同じexact boundaryを検査し、80,001 scalar、NUL、その他controlをApp Server送信前に拒否してdraftとcontext versionを保持する。sourceはstable root dirfdからno-followで開き、descriptorから0700/0600のapp-private snapshotへcopy、fsync、hash再検証する。App Serverへはsnapshotだけを渡し、accepted/failed/terminal/expiryで削除する。二重操作は同じidempotency keyへ集約する。
 
@@ -205,7 +219,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | workspace切替確認 | old workspaceにactive/pending turnがあり別workspaceを選択/Send | new selectionを保留し、old workspaceをactive表示したまま`停止して切替 / Stop and Switch`、`戻る / Back`だけ | 明示2操作だけ | exact old terminal interrupt + cleanup、またはBack |
 | commit説明準備中 | app controllerがverified commitを`queued` / `running`としているが明示presentation intentはない | background生成status、「詳しく教えて」、`Cancel explanation generation`。caption/live region/TTSは0件でmain timelineへmessageを追加しない | read-only tab、詳しく教えて、生成cancel | 明示intent、generated/canceled/failed/unavailable/selection変更 |
 | commit説明表示中 | `user_request` / `user_retry` / 明示Showのintentとcontroller stateがexact一致する | semantic `working`、streamed HTML caption、`Close explanation`、queued/running時だけ`Cancel explanation generation`、mute。active tabは維持 | read-only tab、Close、条件付き生成Cancel、mute | generated/canceled/failed/unavailable/selection/locale/workspace変更、Stop、Close |
-| demo memory | browser previewの決定的memory adapter | `Demo memory` badgeを表示し、Codex/Git/履歴の汎用noticeと`Persisted locally`は表示しない | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
+| demo memory | browser previewの決定的memory adapter | Chatには履歴badgeを表示せず、headerの`Preview only`とDiagnosticsでruntime/durabilityを識別する | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
 
 ## 操作
 
@@ -218,7 +232,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | decision回答 | unanswered、option valid | idempotent answer event、turn resume | Holdなら未回答維持 |重複送信せず選択を保持 | `CODE-F-062`〜`CODE-F-069` |
 | interrupt | decisionまたはrunning turn | main/support停止、completed/partial/unknownを分類 |確認cancelで継続 | Interruptedとしてreviewへ誘導 | `SUP-F-057`〜`SUP-F-061` |
 | attachment追加 | picker起動可能 | validated handleをdraftへ追加 | draft不変、errorなし | chipを追加せずreason表示 | `CODE-F-053`, `APP-F-066`〜`APP-F-069` |
-| workspace切替 | 別workspace選択、old active/pending turnなし、または確認済みinterrupt | old presentation/audio停止後、new workspaceのdraft、last summary、anchor ID/sequence/offsetをatomic復元。app-globalなcharacter選択とpack-scoped設定は維持 | `戻る`でold state完全維持 | old workspaceをactiveのままerror、new activation 0件 | `WORK-F-058`〜`WORK-F-060` |
+| workspace切替 | 別workspace選択、old active/pending turnなし、または確認済みinterrupt | old presentation/audio停止後、new workspaceのdraft、anchor ID/sequence/offsetをatomic復元。app-globalなcharacter選択とpack-scoped設定は維持 | `戻る`でold state完全維持 | old workspaceをactiveのままerror、new activation 0件 | `WORK-F-058`〜`WORK-F-060` |
 | mute切替 | audio/character利用可能 |即時再生停止または次eligible textから再開、設定保存 | 非該当 | text表示は継続 | `NARR-F-068`〜`NARR-F-075` |
 | Commit tabを開く | workspace valid | same workspaceの[S-003](S-003_session-evidence.md)を表示し、初回active表示時だけread-only observationを取得 | 非該当 | Chatを維持してerror | `GIT-F-072`〜`GIT-F-089` |
 
@@ -230,7 +244,10 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | composed turn text | instructionと開始時context snapshotから生成 | 条件付き | 固定marker、Project最大32,000 scalar、Character最大12,000 scalar、version/hash metadata、JSON escapingを含む全体で0〜80,000 Unicode scalar。multibyte文字も1 scalarとして数える | composer上の送信error、instruction/contextを保持 | 保存しない。App Serverへの当該turn inputだけに使用 |
 | attachment | なし | 任意 | 10件、各25MiB、合計50MiB、workspace root内のregular readable file。directory/symlink/executable不可 | chip単位、無効handleは除外 | draftにはhandle metadataだけ |
 | read-only context | なし | 任意 | Files & folders / Git diffを各1MiB、workspaceごとにcapture順の最新10件。sourceとcapture時刻必須。Terminal outputはtrusted producer実装までunavailable | 無効snapshotを追加せず理由表示 | redacted snapshot metadataとcontent hash |
-| effort |前回valid値、初回`Fast` | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | Send不可理由 | valid変更時workspace preference |
+| reasoning | 前回valid値、初回`Off` | 任意 | `Off`、または`gpt-5.6-sol`の`model/list.supportedReasoningEfforts`が広告した値。未知値は選択・送信しない | capability更新で選択値が消えた時は`Off`へ戻して理由表示 | valid変更時workspace preference |
+| Fast flag | off | 任意 | `model/list.serviceTiers`でFastとして広告されたexact tier IDだけ | 未広告時はoffへ戻してdisabled理由をtooltip表示 | WebView session内。turnへ明示送信 |
+| Plan flag | off | 任意 | `collaborationMode.mode=plan`、固定model、現在reasoning。offでは`null` | experimental API未受理時はoffへ戻してdisabled理由をtooltip表示 | WebView session内。turnへ明示送信 |
+| Goals flag | off | 任意 | 選択時はtrim済みinstruction 1〜4,000 scalarをobjectiveにする。attachment/contextだけの送信では選択不可 | instructionを保持し、goal未設定のままSend不可理由 | turn受理後だけoffへ戻す |
 | decision option | 未選択 |回答時必須 | server提示IDの1件 | decision surface | answer accepted時event |
 | Other text |空 | Other選択時必須 | trim後1〜2,000 Unicode scalar | field直下、入力保持 | answer accepted時event |
 
@@ -283,11 +300,11 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | データ | 正本・保存先 | 保存契機 | 復元契機 | 破棄条件 | 失敗時 |
 |---|---|---|---|---|---|
 | thread/turn/work unit | Codex + Rust SQLite mapping | validated lifecycle event | route return/restart | history明示削除 | Interrupted/read-only |
-| normalized event | append-only SQLite + hash | versioned semantic schema/redaction合格後 | exact projectorでstable ID・sequence順にassistant/tool/file/diff/plan/completion/error/decision/approvalを復元 | workspace history明示削除 | unknown/invalidはUnsupportedへ隔離、raw event非保存 |
+| normalized event | append-only SQLite + hash | versioned semantic schema/redaction合格後 | exact projectorでstable ID・sequence順にassistant/tool/file/diff/plan/completion/error/decision/approvalを復元し、completionはChatへ描画しない | workspace history明示削除 | unknown/invalidはUnsupportedへ隔離、raw event非保存 |
 | draft/attachment handle/effort | Rust SQLite | debounce、valid変更、route leave | workspace選択 | send成功または明示clear | UI入力保持とretry |
 | project context | Rust SQLite project row | App settingsのproject detailでexpected-version save | project detail/turn開始 | project登録解除契約 | expected version conflict |
 | character context | Rust SQLite opaque pack ID-scoped row | App settings > Character detailのexpected-version save | character detail/選択packのturn開始 | app data reset契約 | expected version conflict |
-| last summary/timeline anchor/tab | Rust SQLite | terminal summary、scroll settle/tab移動 | route return/restart | history削除契約 | 同workspaceのnearest valid sequenceだけへ補正 |
+| last summary/timeline anchor/tab | Rust SQLite | terminal summary、scroll settle/tab移動 | route return/restart。last summaryはschema互換のため保持するがChatでは消費しない | history削除契約 | 同workspaceのnearest valid sequenceだけへ補正 |
 | repository identity/health snapshot | Rust SQLite、Git read-only再検査 | window focus、selection、Send直前 | route return/restart | project登録解除 | stale status、Repair/Recheck |
 | selected character | app-global state → app-private library pack ID | App settingsのatomic選択成功 | startup/全workspaceへ即時同期 | 選択変更後だけ旧packを削除可 | invalid legacy値はbundled Hiyori、render失敗はstatic/text fallback |
 | audio byte | owner-only temporary file | provider response完了後から再生中だけ |復元しない | playback/stop/route/quitの全terminal path | textは保持 |
@@ -304,7 +321,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 ## アクセシビリティ
 
-- focus順はheaderのrepository / workspace / branch copy control、header tabs、timeline heading、new updates、events、decision、composer controls、Character controlsとする。
+- focus順はheaderのrepository / workspace / branch copy control、header tabs、new updates、events、decision、composer controls、Character controlsとする。空のChat timelineはfocus targetを追加しない。
 - timelineは`role=feed`相当を使う場合も追加eventごとに読み上げず、完了、decision、errorだけをlive regionへ要約する。
 - tool groupのcollapsed/expanded、running/failed、file create/update/deleteをtextでも示す。
 - decisionはheading、説明、option、Other、Hold/Interrupt/Approve、submitのDOM順とし、keyboardだけで完結する。
@@ -353,15 +370,16 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | 項目 | 内容 |
 |---|---|
 | レビュー結果 | Approved |
-| レビュー日 | 2026-07-18 |
+| レビュー日 | 2026-07-21 |
 
 - [x] front matter、title、filenameの`S-002`が一致する。
 - [x] `status: Approved`である。
 - [x] demo/Figmaのsidebar、81px header、Chat、Character、composer寸法を定義した。
-- [x] modelは`GPT-5.6 Sol`固定で、`Fast` / `Max`はreasoning effortとして定義した。
+- [x] modelは`GPT-5.6 Sol`固定で、Reasoning、Fast service tier、Plan、Goalsを独立したcomposer controlとして定義した。
+- [x] composerをdraft item、instruction、補助操作、実行操作の優先順位で整理し、狭幅でもSend/Stopと無効理由を維持する。
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] timeline、decision、Context、Live2D、audio、native boundary、data retentionを定義した。
 - [x] verified commitからapp-owned explanation controllerへのbackground handoffとmain conversation非介入を定義した。
-- [x] App SettingsのContext conflict/next-turn、repository health、active-turn切替、summary/anchor、app-global semantic mappingの状態とfocusを定義した。
+- [x] App SettingsのContext conflict/next-turn、repository health、active-turn切替、timeline anchor、app-global semantic mappingの状態とfocusを定義した。
 - [x] 関連要件IDを要件定義書のS-002対応と一致させた。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。

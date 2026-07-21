@@ -13,7 +13,10 @@ import type {
   VersionedProjectContext,
   WorkspaceTurnContextSnapshot,
 } from "@/lib/contracts/workspace-context"
-import { PersistedCodexEventProjector } from "@/features/workspace-persistence/codex-event-projector"
+import {
+  isHiddenCodexHistoryEvent,
+  PersistedCodexEventProjector,
+} from "@/features/workspace-persistence/codex-event-projector"
 import {
   WorkspaceHistoryBoundaryError,
   type WorkspaceHistoryTransport,
@@ -140,6 +143,7 @@ export function projectTimelinePage(
       projectedTimeline.set(`semantic:${semantic.stableId}`, semantic)
       continue
     }
+    if (isHiddenCodexHistoryEvent(event)) continue
     projectedTimeline.set(`history:${event.eventId}`, {
       id: event.eventId,
       sequence: event.sequence,

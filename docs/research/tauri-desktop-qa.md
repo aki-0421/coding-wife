@@ -54,12 +54,22 @@ pnpm test:desktop
 `e2e/desktop/**/*.spec.ts`を実行する。調査中に一つのspecだけを再実行するときは、先に
 同じQA buildを作ったうえでWebdriverIOへ`--spec`を渡してよい。
 
+通常featureの`cargo test`、`cargo build`または別のTauri buildは、同じ
+`src-tauri/target/debug/coding-wife`をQA pluginなしのbinaryで上書きできる。Rustの検証を
+QA build後に実行した場合は、WebdriverIOを再実行する前に必ずQA専用Tauri buildを作り直す。
+embedded WebDriverへ接続できない状態をUI不具合として調査してはならない。
+
 WebdriverIOがbinaryを起動・終了し、既に起動している`pnpm tauri:dev`へ後付け接続しない。
 同時実行数は1とする。embedded WebDriver portは
 `CODING_WIFE_WDIO_PORT`、次にConductorの`CONDUCTOR_PORT + 5`、最後に4445の順で決める。
 `wdio.conf.ts`は決定したportを`TAURI_WEBDRIVER_PORT`にも設定する。
 embedded providerの`browser.tauri.execute()`はこの環境変数からdirect-evalの接続先を読むため、
 設定を外すとDOM操作は成功してもRust IPCだけが`fetch failed`になる。
+
+app data directoryはportごとに再利用される。setup overviewを期待するstartup/window sizing
+specを手動で繰り返す場合は、未使用の`CODING_WIFE_WDIO_PORT`を指定してpristine stateを作る。
+過去のsetup済みdataを持つportでoverviewが出ない状態をUI退行として扱ってはならない。
+同じportの再利用は、workspace restoreや履歴復元を意図的に検証するときだけ行う。
 
 `@wdio/tauri-service@1.2.0`は`installMockSyncOverride`をimportするが、同packageが指定する
 `@wdio/native-utils@2.4.0`はそのexportを含まない。`package.json`のpnpm overrideで2.5.0へ
@@ -91,6 +101,11 @@ helperは`window.devicePixelRatio`を掛けた物理サイズをWebDriverへ渡�
   読み書きしない。
 - E2Eからprojectを登録する場合は`/tmp`またはrepositoryのignore済み`tmp/`に作った
   disposable repositoryだけを使う。利用者の実repositoryを使わない。
+- macOS folder pickerを介さずCodex接続を縦断検証するときは、`desktop-qa` featureと
+  `CODING_WIFE_DESKTOP_QA_DATA_DIR`の両方が有効なbinaryにだけcompileされる
+  `desktop_qa_register_workspace_fixture`を使ってよい。このcommandはabsolute pathをQA
+  process内だけで受け、productionと同じGit repository、owner、writable policyのvalidatorを
+  通す。production invoke handlerへcommandまたはraw path requestを含めない。
 - screenshot、log、一時specは`tmp/desktop-qa/`または`.context/`へ保存し、commitしない。
 
 QA pluginは任意JavaScript実行とIPC mockを提供するため、release binaryへ登録しないことを

@@ -418,53 +418,46 @@ pub(crate) fn parse_support_thread_policy_response(
 
 pub fn decision_output_schema() -> Value {
     json!({
-        "oneOf": [
-            {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["schemaVersion", "kind", "message"],
-                "properties": {
-                    "schemaVersion": {"const": 1},
-                    "kind": {"const": "result"},
-                    "message": {"type": "string", "minLength": 1, "maxLength": 65536}
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "schemaVersion",
+            "kind",
+            "message",
+            "decisionId",
+            "question",
+            "options",
+            "context",
+            "allowFreeform"
+        ],
+        "properties": {
+            "schemaVersion": {"type": "integer", "enum": [1]},
+            "kind": {"type": "string", "enum": ["result", "decision_request"]},
+            "message": {"type": "string"},
+            "decisionId": {
+                "type": ["string", "null"],
+                "description": "Use null for result; provide a stable ID for decision_request."
+            },
+            "question": {
+                "type": ["string", "null"],
+                "description": "Use null for result; provide the user question for decision_request."
+            },
+            "options": {
+                "type": ["array", "null"],
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["id", "label", "description"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "label": {"type": "string"},
+                        "description": {"type": "string"}
+                    }
                 }
             },
-            {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                    "schemaVersion",
-                    "kind",
-                    "message",
-                    "decisionId",
-                    "question",
-                    "options",
-                    "context",
-                    "allowFreeform"
-                ],
-                "properties": {
-                    "schemaVersion": {"const": 1},
-                    "kind": {"const": "decision_request"},
-                    "message": {"type": "string", "minLength": 1, "maxLength": 4096},
-                    "decisionId": {"type": "string", "minLength": 1, "maxLength": 128},
-                    "question": {"type": "string", "minLength": 1, "maxLength": 4096},
-                    "options": {
-                        "type": "array",
-                        "minItems": 2,
-                        "maxItems": 3,
-                        "uniqueItems": true,
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": ["id", "label", "description"],
-                            "properties": {
-                                "id": {"type": "string", "minLength": 1, "maxLength": 128},
-                                "label": {"type": "string", "minLength": 1, "maxLength": 256},
-                                "description": {"type": "string", "maxLength": 1024}
-                            }
-                        }
-                    },
-                    "context": {
+            "context": {
+                "anyOf": [
+                    {
                         "type": "object",
                         "additionalProperties": false,
                         "required": [
@@ -481,14 +474,15 @@ pub fn decision_output_schema() -> Value {
                             "uncertainty"
                         ],
                         "properties": {
-                            "schemaVersion": {"const": 1},
-                            "category": {"const": "user_decision"},
-                            "targetKind": {"const": "active_turn"},
-                            "targetAlias": {"const": "active_turn"},
-                            "effect": {"const": "continue_turn"},
-                            "scope": {"const": "turn"},
-                            "risk": {"enum": ["low", "medium", "high"]},
+                            "schemaVersion": {"type": "integer", "enum": [1]},
+                            "category": {"type": "string", "enum": ["user_decision"]},
+                            "targetKind": {"type": "string", "enum": ["active_turn"]},
+                            "targetAlias": {"type": "string", "enum": ["active_turn"]},
+                            "effect": {"type": "string", "enum": ["continue_turn"]},
+                            "scope": {"type": "string", "enum": ["turn"]},
+                            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
                             "reversibility": {
+                                "type": "string",
                                 "enum": [
                                     "reversible",
                                     "partially_reversible",
@@ -496,28 +490,22 @@ pub fn decision_output_schema() -> Value {
                                     "unknown"
                                 ]
                             },
-                            "recommendation": {
-                                "oneOf": [
-                                    {"type": "string", "minLength": 1, "maxLength": 128},
-                                    {"type": "null"}
-                                ]
-                            },
-                            "evidence": {
-                                "type": "array",
-                                "minItems": 1,
-                                "maxItems": 8,
-                                "uniqueItems": true,
-                                "items": {"type": "string", "minLength": 1, "maxLength": 512}
-                            },
+                            "recommendation": {"type": ["string", "null"]},
+                            "evidence": {"type": "array", "items": {"type": "string"}},
                             "uncertainty": {
+                                "type": "string",
                                 "enum": ["none", "limited_context", "unknown_effects"]
                             }
                         }
                     },
-                    "allowFreeform": {"const": false}
-                }
+                    {"type": "null"}
+                ]
+            },
+            "allowFreeform": {
+                "type": ["boolean", "null"],
+                "description": "Use null for result and false for decision_request."
             }
-        ]
+        }
     })
 }
 
@@ -627,15 +615,30 @@ pub(crate) fn support_turn_start_params(
     }))
 }
 
-pub(crate) fn turn_start_params(
-    thread_id: &str,
-    client_user_message_id: &str,
-    text: &str,
-    effort: ReasoningPreset,
-    attachments: &[ResolvedAttachment],
-    commit_skill: &ResolvedBundledSkill,
-    execution_class: TurnExecutionClass,
-) -> Result<Value, TurnContractError> {
+pub(crate) struct TurnStartRequest<'a> {
+    pub thread_id: &'a str,
+    pub client_user_message_id: &'a str,
+    pub text: &'a str,
+    pub effort: Option<ReasoningPreset>,
+    pub service_tier: Option<&'a str>,
+    pub plan_mode: bool,
+    pub attachments: &'a [ResolvedAttachment],
+    pub commit_skill: &'a ResolvedBundledSkill,
+    pub execution_class: TurnExecutionClass,
+}
+
+pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, TurnContractError> {
+    let TurnStartRequest {
+        thread_id,
+        client_user_message_id,
+        text,
+        effort,
+        service_tier,
+        plan_mode,
+        attachments,
+        commit_skill,
+        execution_class,
+    } = request;
     if !execution_skill_matches(execution_class, commit_skill)
         || (execution_class == TurnExecutionClass::Support && !attachments.is_empty())
     {
@@ -658,14 +661,32 @@ pub(crate) fn turn_start_params(
         "name": commit_skill.name,
         "path": commit_skill.path,
     }));
+    let collaboration_mode = if plan_mode {
+        json!({
+            "mode": "plan",
+            "settings": {
+                "model": CODEX_MODEL,
+                "reasoning_effort": effort.map(ReasoningPreset::as_wire),
+                "developer_instructions": null,
+            }
+        })
+    } else {
+        Value::Null
+    };
     Ok(json!({
         "threadId": thread_id,
         "clientUserMessageId": client_user_message_id,
         "input": input,
         "model": CODEX_MODEL,
-        "effort": effort.as_wire(),
+        "effort": effort.map(ReasoningPreset::as_wire),
+        "serviceTier": service_tier,
+        "collaborationMode": collaboration_mode,
         "outputSchema": decision_output_schema(),
     }))
+}
+
+pub fn thread_goal_set_params(thread_id: &str, objective: &str) -> Value {
+    json!({"threadId": thread_id, "objective": objective})
 }
 
 pub fn turn_interrupt_params(thread_id: &str, turn_id: &str) -> Value {
@@ -735,10 +756,12 @@ pub fn parse_thread_policy_response(
     })
 }
 
-pub fn validate_model_page(result: &Value) -> (bool, bool, bool, Option<String>) {
+pub fn validate_model_page(
+    result: &Value,
+) -> (bool, Vec<ReasoningPreset>, Option<String>, Option<String>) {
     let mut model_available = false;
-    let mut fast_available = false;
-    let mut max_available = false;
+    let mut supported_reasoning_efforts = Vec::new();
+    let mut fast_service_tier = None;
     if let Some(models) = result.get("data").and_then(Value::as_array) {
         for model in models {
             let exact = model.get("id").and_then(Value::as_str) == Some(CODEX_MODEL)
@@ -752,10 +775,28 @@ pub fn validate_model_page(result: &Value) -> (bool, bool, bool, Option<String>)
                 .and_then(Value::as_array)
             {
                 for effort in efforts {
-                    match effort.get("reasoningEffort").and_then(Value::as_str) {
-                        Some("low") => fast_available = true,
-                        Some("max") => max_available = true,
-                        _ => {}
+                    if let Some(effort) = effort
+                        .get("reasoningEffort")
+                        .and_then(Value::as_str)
+                        .and_then(ReasoningPreset::from_wire)
+                    {
+                        if !supported_reasoning_efforts.contains(&effort) {
+                            supported_reasoning_efforts.push(effort);
+                        }
+                    }
+                }
+            }
+            if let Some(tiers) = model.get("serviceTiers").and_then(Value::as_array) {
+                for tier in tiers {
+                    let id = tier.get("id").and_then(Value::as_str);
+                    let name = tier.get("name").and_then(Value::as_str);
+                    let is_fast = id.is_some_and(|value| {
+                        value.eq_ignore_ascii_case("fast") || value.eq_ignore_ascii_case("priority")
+                    }) || name
+                        .is_some_and(|value| value.eq_ignore_ascii_case("fast"));
+                    if is_fast {
+                        fast_service_tier = id.map(str::to_owned);
+                        break;
                     }
                 }
             }
@@ -765,7 +806,12 @@ pub fn validate_model_page(result: &Value) -> (bool, bool, bool, Option<String>)
         .get("nextCursor")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    (model_available, fast_available, max_available, next_cursor)
+    (
+        model_available,
+        supported_reasoning_efforts,
+        fast_service_tier,
+        next_cursor,
+    )
 }
 
 #[cfg(test)]
@@ -828,34 +874,41 @@ mod tests {
     }
 
     #[test]
-    fn turn_always_sets_exact_model_effort_and_omits_service_tier() {
+    fn turn_sets_reasoning_service_tier_and_plan_mode_independently() {
         let skill = commit_skill();
-        let fast = turn_start_params(
-            "thread",
-            "message",
-            "hello",
-            ReasoningPreset::Low,
-            &[],
-            &skill,
-            TurnExecutionClass::Main,
-        )
+        let fast = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "hello",
+            effort: Some(ReasoningPreset::Low),
+            service_tier: Some("priority"),
+            plan_mode: true,
+            attachments: &[],
+            commit_skill: &skill,
+            execution_class: TurnExecutionClass::Main,
+        })
         .expect("main turn contract");
-        let max = turn_start_params(
-            "thread",
-            "message",
-            "hello",
-            ReasoningPreset::Max,
-            &[],
-            &skill,
-            TurnExecutionClass::Main,
-        )
+        let max = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "hello",
+            effort: Some(ReasoningPreset::Max),
+            service_tier: None,
+            plan_mode: false,
+            attachments: &[],
+            commit_skill: &skill,
+            execution_class: TurnExecutionClass::Main,
+        })
         .expect("main turn contract");
 
         assert_eq!(fast["model"], CODEX_MODEL);
         assert_eq!(fast["effort"], "low");
         assert_eq!(max["effort"], "max");
-        assert!(fast.get("serviceTier").is_none());
-        assert!(fast.get("collaborationMode").is_none());
+        assert_eq!(fast["serviceTier"], "priority");
+        assert_eq!(fast["collaborationMode"]["mode"], "plan");
+        assert_eq!(fast["collaborationMode"]["settings"]["model"], CODEX_MODEL);
+        assert_eq!(max["serviceTier"], Value::Null);
+        assert_eq!(max["collaborationMode"], Value::Null);
         assert!(fast.get("multiAgentMode").is_none());
         let skills = fast["input"]
             .as_array()
@@ -868,17 +921,39 @@ mod tests {
     }
 
     #[test]
+    fn decision_output_schema_uses_a_structured_outputs_root_object() {
+        let schema = decision_output_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema.get("oneOf").is_none());
+        assert_eq!(
+            schema["properties"]["kind"]["enum"],
+            json!(["result", "decision_request"])
+        );
+        assert_eq!(
+            schema["properties"]["decisionId"]["type"],
+            json!(["string", "null"])
+        );
+        assert_eq!(
+            schema["properties"]["allowFreeform"]["description"],
+            "Use null for result and false for decision_request."
+        );
+        assert_eq!(schema["required"].as_array().map(Vec::len), Some(8));
+    }
+
+    #[test]
     fn main_and_support_turns_reject_each_others_skill() {
         assert_eq!(
-            turn_start_params(
-                "thread",
-                "message",
-                "hello",
-                ReasoningPreset::Low,
-                &[],
-                &explain_skill(),
-                TurnExecutionClass::Main,
-            ),
+            turn_start_params(TurnStartRequest {
+                thread_id: "thread",
+                client_user_message_id: "message",
+                text: "hello",
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                attachments: &[],
+                commit_skill: &explain_skill(),
+                execution_class: TurnExecutionClass::Main,
+            }),
             Err(TurnContractError::SkillClass)
         );
         assert_eq!(
@@ -961,15 +1036,17 @@ mod tests {
                 path: "/app-private/attachment-snapshots/lease/01.snapshot".to_owned(),
             },
         ];
-        let params = turn_start_params(
-            "thread",
-            "message",
-            "  ",
-            ReasoningPreset::Low,
-            &attachments,
-            &commit_skill(),
-            TurnExecutionClass::Main,
-        )
+        let params = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "  ",
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            attachments: &attachments,
+            commit_skill: &commit_skill(),
+            execution_class: TurnExecutionClass::Main,
+        })
         .expect("main turn contract");
 
         assert_eq!(
@@ -1104,18 +1181,30 @@ mod tests {
     }
 
     #[test]
-    fn model_gate_requires_exact_sol_low_and_max() {
+    fn model_gate_returns_exact_sol_efforts_and_fast_tier() {
         let page = json!({
             "data": [{
                 "id": CODEX_MODEL,
                 "model": CODEX_MODEL,
                 "supportedReasoningEfforts": [
                     {"reasoningEffort": "low"},
-                    {"reasoningEffort": "max"}
+                    {"reasoningEffort": "max"},
+                    {"reasoningEffort": "future"}
+                ],
+                "serviceTiers": [
+                    {"id": "priority", "name": "Fast", "description": "Faster"}
                 ]
             }],
             "nextCursor": null
         });
-        assert_eq!(validate_model_page(&page), (true, true, true, None));
+        assert_eq!(
+            validate_model_page(&page),
+            (
+                true,
+                vec![ReasoningPreset::Low, ReasoningPreset::Max],
+                Some("priority".to_owned()),
+                None,
+            )
+        );
     }
 }

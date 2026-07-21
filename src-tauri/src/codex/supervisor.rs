@@ -9,7 +9,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex};
 
 use super::attachment::{AttachmentSnapshotLease, ResolvedAttachment, ResolvedAttachmentSet};
-use super::binary::{discover_binary, probe_schema, BinaryError, BinaryInfo, SchemaProbe};
+use super::binary::{
+    discover_binary, probe_schema, BinaryError, BinaryInfo, SchemaProbe, VerifiedBinaryIdentity,
+};
 use super::bundled_skill::{resolve_bundled_skill, ResolvedBundledSkill, COMMIT_SKILL_NAME};
 use super::decision::{
     fallback_continuation_input, FallbackDecisionClaim, FallbackDecisionContext,
@@ -25,8 +27,9 @@ use super::process::{spawn_process, ProcessError, ProcessRuntime};
 use super::protocol::{
     account_read_params, client_notification, config_read_params, initialize_params,
     model_list_params, parse_thread_policy_response, review_start_params, server_error,
-    server_result, thread_list_params, thread_resume_params, thread_start_params,
-    turn_interrupt_params, turn_start_params, InboundMessage, OutboundProfile,
+    server_result, thread_goal_set_params, thread_list_params, thread_resume_params,
+    thread_start_params, turn_interrupt_params, turn_start_params, InboundMessage, OutboundProfile,
+    TurnStartRequest,
 };
 use super::requests::{
     ActiveWireContext, RegisterOutcome, RequestValidationError, ServerRequestLedger,
@@ -49,6 +52,7 @@ const READINESS_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const READINESS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERRUPT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CODEX_TURN_TEXT_SCALARS: usize = 80_000;
+const MAX_GOAL_OBJECTIVE_SCALARS: usize = 4_000;
 
 fn is_valid_main_turn_text(value: &str, has_attachments: bool) -> bool {
     value.chars().count() <= MAX_CODEX_TURN_TEXT_SCALARS
@@ -56,6 +60,15 @@ fn is_valid_main_turn_text(value: &str, has_attachments: bool) -> bool {
         && !value
             .chars()
             .any(|character| character.is_control() && character != '\n' && character != '\t')
+}
+
+fn is_valid_goal_objective(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed.chars().count() <= MAX_GOAL_OBJECTIVE_SCALARS
+        && trimmed
+            .chars()
+            .all(|character| character == '\n' || character == '\t' || !character.is_control())
 }
 const MAX_MODEL_PAGES: usize = 20;
 const MAX_RESTARTS: usize = 3;
@@ -74,7 +87,7 @@ struct PendingTurnStart {
     workspace_id: String,
     raw_thread_id: String,
     thread_handle: String,
-    effort: ReasoningPreset,
+    effort: Option<ReasoningPreset>,
     client_message_id: String,
     raw_turn_id: Option<String>,
     turn_handle: Option<String>,
@@ -90,6 +103,7 @@ struct SupervisorState {
     workspaces: HashMap<String, PathBuf>,
     explicit_binary: Option<PathBuf>,
     binary: Option<BinaryInfo>,
+    setup_identity: Option<VerifiedBinaryIdentity>,
     schema: Option<SchemaProbe>,
     runtime: Option<Arc<ProcessRuntime>>,
     active_workspace: Option<String>,
@@ -100,7 +114,7 @@ struct SupervisorState {
     turn_handles: HashMap<String, String>,
     active_thread_id: Option<String>,
     active_turn_id: Option<String>,
-    active_turn_effort: Option<ReasoningPreset>,
+    active_turn_effort: Option<Option<ReasoningPreset>>,
     pending_turn_start: Option<PendingTurnStart>,
     workspace_cancellation_gates: HashSet<String>,
     main_work_units: HashMap<(String, String), MainWorkUnitLease>,
@@ -202,8 +216,8 @@ struct HandshakeResult {
     auth_kind: Option<String>,
     requires_openai_auth: bool,
     model_available: bool,
-    fast_available: bool,
-    max_available: bool,
+    fast_service_tier: Option<String>,
+    supported_reasoning_efforts: Vec<ReasoningPreset>,
     config_model_present: bool,
 }
 
@@ -229,6 +243,39 @@ async fn expected_binary_for_configured_path(
     let binary = binary?;
     let canonical_path = tokio::fs::canonicalize(configured_binary).await.ok()?;
     (canonical_path == binary.canonical_path).then_some(binary)
+}
+
+fn cached_discovery_path(
+    explicit_binary: Option<PathBuf>,
+    cached_binary: Option<&BinaryInfo>,
+) -> Option<PathBuf> {
+    explicit_binary.or_else(|| {
+        cached_binary
+            .filter(|binary| binary.source != BinarySource::Explicit)
+            .map(|binary| binary.canonical_path.clone())
+    })
+}
+
+async fn resolve_lifecycle_binary(
+    configured_binary: Option<&Path>,
+    cached_binary: Option<BinaryInfo>,
+) -> Result<BinaryInfo, BinaryError> {
+    let expected =
+        expected_binary_for_configured_path(configured_binary, cached_binary.clone()).await;
+    if let Some(binary) = expected.as_ref() {
+        if binary.revalidate_metadata().await.is_ok() {
+            return Ok(binary.clone());
+        }
+    }
+
+    let observed = discover_binary(configured_binary).await?;
+    if expected.as_ref().is_some_and(|binary| {
+        binary.identity != observed.identity
+            || binary.canonical_path_hash != observed.canonical_path_hash
+    }) {
+        return Err(BinaryError::Untrusted);
+    }
+    Ok(observed)
 }
 
 impl Default for CodexSupervisor {
@@ -493,7 +540,19 @@ impl CodexSupervisor {
     /// Checks only the prerequisites required to leave the first-run setup:
     /// a trusted executable and a short-lived App Server that can initialize.
     pub async fn setup_probe(&self) -> CodexDiagnostic {
-        let (configured_binary, binary, workspace_root) = {
+        self.setup_probe_internal(None).await
+    }
+
+    pub(crate) async fn setup_probe_with_verified_binary(
+        &self,
+        binary: BinaryInfo,
+    ) -> CodexDiagnostic {
+        self.setup_probe_internal(Some(binary)).await
+    }
+
+    async fn setup_probe_internal(&self, supplied_binary: Option<BinaryInfo>) -> CodexDiagnostic {
+        let _lifecycle = self.inner.lifecycle.lock().await;
+        let (explicit_binary, cached_binary, setup_identity, workspace_root, ready_runtime) = {
             let state = self.inner.state.lock().await;
             let workspace_root = state
                 .active_workspace
@@ -502,48 +561,76 @@ impl CodexSupervisor {
                 .or_else(|| state.workspaces.values().next())
                 .cloned()
                 .or_else(|| std::env::current_dir().ok());
-            let configured_binary = state.explicit_binary.clone().or_else(|| {
-                state
-                    .binary
-                    .as_ref()
-                    .filter(|binary| binary.source != BinarySource::Explicit)
-                    .map(|binary| binary.canonical_path.clone())
-            });
-            (configured_binary, state.binary.clone(), workspace_root)
-        };
-        let expected_binary =
-            expected_binary_for_configured_path(configured_binary.as_deref(), binary).await;
-        let context = SetupProbeContext {
-            configured_binary,
-            expected_binary,
-            verified_binary: None,
-            workspace_root,
+            let ready_runtime =
+                if supplied_binary.is_none() && state.diagnostic.health == CodexHealth::Ready {
+                    state.runtime.clone().zip(state.binary.clone())
+                } else {
+                    None
+                };
+            (
+                state.explicit_binary.clone(),
+                state.binary.clone(),
+                state.setup_identity.clone(),
+                workspace_root,
+                ready_runtime,
+            )
         };
 
-        run_setup_probe(context).await
-    }
+        let configured_binary =
+            cached_discovery_path(explicit_binary.clone(), cached_binary.as_ref());
+        if let Some((runtime, binary)) = ready_runtime {
+            let configured_matches = expected_binary_for_configured_path(
+                configured_binary.as_deref(),
+                Some(binary.clone()),
+            )
+            .await
+            .is_some();
+            if configured_matches
+                && !runtime.has_exited().await
+                && binary.revalidate_metadata().await.is_ok()
+            {
+                return diagnostic_from_setup(&binary);
+            }
+        }
 
-    pub(crate) async fn setup_probe_with_verified_binary(
-        &self,
-        binary: BinaryInfo,
-    ) -> CodexDiagnostic {
-        let workspace_root = {
-            let state = self.inner.state.lock().await;
-            state
-                .active_workspace
-                .as_ref()
-                .and_then(|workspace_id| state.workspaces.get(workspace_id))
-                .or_else(|| state.workspaces.values().next())
-                .cloned()
-                .or_else(|| std::env::current_dir().ok())
+        let binary = match supplied_binary {
+            Some(binary) => binary,
+            None => {
+                match resolve_lifecycle_binary(configured_binary.as_deref(), cached_binary).await {
+                    Ok(binary) => binary,
+                    Err(error) => return setup_binary_failure_diagnostic(error),
+                }
+            }
         };
-        run_setup_probe(SetupProbeContext {
+        if setup_identity.as_ref() == Some(&binary.identity)
+            && binary.revalidate_metadata().await.is_ok()
+        {
+            return diagnostic_from_setup(&binary);
+        }
+        let diagnostic = run_setup_probe(SetupProbeContext {
             configured_binary: None,
             expected_binary: None,
-            verified_binary: Some(binary),
+            verified_binary: Some(binary.clone()),
             workspace_root,
         })
-        .await
+        .await;
+        let mut state = self.inner.state.lock().await;
+        if diagnostic.health == CodexHealth::Ready {
+            state.setup_identity = Some(binary.identity.clone());
+            if state.runtime.is_none() {
+                if state
+                    .binary
+                    .as_ref()
+                    .is_none_or(|cached| cached.identity != binary.identity)
+                {
+                    state.schema = None;
+                }
+                state.binary = Some(binary);
+            }
+        } else if state.setup_identity.as_ref() == Some(&binary.identity) {
+            state.setup_identity = None;
+        }
+        diagnostic
     }
 
     pub(crate) async fn support_release_identity_evidence(&self) -> SupportReleaseIdentityEvidence {
@@ -665,7 +752,63 @@ impl CodexSupervisor {
         reset_restart_budget: bool,
     ) -> Result<CodexDiagnostic, CodexCommandError> {
         let _lifecycle = self.inner.lifecycle.lock().await;
-        let (workspace_root, explicit, previous_runtime, previous_generation) = {
+        let ready_runtime = {
+            let mut state = self.inner.state.lock().await;
+            if !state.workspaces.contains_key(&workspace_id) {
+                return Err(command_error(
+                    "CODEX-WORKSPACE-NOT-REGISTERED",
+                    "codex.connect",
+                    false,
+                ));
+            }
+            if reset_restart_budget {
+                state.restart_times.clear();
+            }
+            if state.active_workspace.as_deref() == Some(&workspace_id)
+                && state.diagnostic.health == CodexHealth::Ready
+            {
+                state
+                    .runtime
+                    .clone()
+                    .zip(state.binary.clone())
+                    .map(|(runtime, binary)| {
+                        (
+                            runtime,
+                            binary,
+                            state.diagnostic.clone(),
+                            cached_discovery_path(
+                                state.explicit_binary.clone(),
+                                state.binary.as_ref(),
+                            ),
+                        )
+                    })
+            } else {
+                None
+            }
+        };
+        if let Some((runtime, binary, diagnostic, configured_binary)) = ready_runtime {
+            let configured_matches = expected_binary_for_configured_path(
+                configured_binary.as_deref(),
+                Some(binary.clone()),
+            )
+            .await
+            .is_some();
+            if configured_matches
+                && !runtime.has_exited().await
+                && binary.revalidate_metadata().await.is_ok()
+            {
+                return Ok(diagnostic);
+            }
+        }
+
+        let (
+            workspace_root,
+            configured_binary,
+            cached_binary,
+            cached_schema,
+            previous_runtime,
+            previous_generation,
+        ) = {
             let mut state = self.inner.state.lock().await;
             let workspace_root = state
                 .workspaces
@@ -674,14 +817,17 @@ impl CodexSupervisor {
                 .ok_or_else(|| {
                     command_error("CODEX-WORKSPACE-NOT-REGISTERED", "codex.connect", false)
                 })?;
-            if reset_restart_budget {
-                state.restart_times.clear();
-            }
             let previous_generation = state.generation;
-            clear_probe_evidence(&mut state, "codex.connect");
+            let configured_binary =
+                cached_discovery_path(state.explicit_binary.clone(), state.binary.as_ref());
+            let cached_binary = state.binary.clone();
+            let cached_schema = state.schema.clone();
+            begin_connection_attempt(&mut state, "codex.connect");
             (
                 workspace_root,
-                state.explicit_binary.clone(),
+                configured_binary,
+                cached_binary,
+                cached_schema,
                 state.runtime.take(),
                 previous_generation,
             )
@@ -692,18 +838,37 @@ impl CodexSupervisor {
             runtime.shutdown().await;
         }
 
-        let binary = match discover_binary(explicit.as_deref()).await {
-            Ok(binary) => binary,
-            Err(error) => {
-                self.set_probe_failure(error, "codex.binary").await;
-                return Err(binary_command_error(error, "codex.connect"));
+        let binary =
+            match resolve_lifecycle_binary(configured_binary.as_deref(), cached_binary.clone())
+                .await
+            {
+                Ok(binary) => binary,
+                Err(error) => {
+                    self.set_probe_failure(error, "codex.binary").await;
+                    return Err(binary_command_error(error, "codex.connect"));
+                }
+            };
+        let schema = if cached_binary
+            .as_ref()
+            .is_some_and(|cached| cached.identity == binary.identity)
+        {
+            match cached_schema {
+                Some(schema) => schema,
+                None => match probe_schema(&binary).await {
+                    Ok(schema) => schema,
+                    Err(error) => {
+                        self.set_probe_failure(error, "codex.schema").await;
+                        return Err(binary_command_error(error, "codex.connect"));
+                    }
+                },
             }
-        };
-        let schema = match probe_schema(&binary).await {
-            Ok(schema) => schema,
-            Err(error) => {
-                self.set_probe_failure(error, "codex.schema").await;
-                return Err(binary_command_error(error, "codex.connect"));
+        } else {
+            match probe_schema(&binary).await {
+                Ok(schema) => schema,
+                Err(error) => {
+                    self.set_probe_failure(error, "codex.schema").await;
+                    return Err(binary_command_error(error, "codex.connect"));
+                }
             }
         };
 
@@ -834,7 +999,9 @@ impl CodexSupervisor {
             ChildState::Ready,
             "codex.initialize",
         );
-        self.inner.state.lock().await.diagnostic = diagnostic.clone();
+        let mut state = self.inner.state.lock().await;
+        state.setup_identity = Some(binary.identity.clone());
+        state.diagnostic = diagnostic.clone();
         diagnostic
     }
 
@@ -1153,6 +1320,17 @@ impl CodexSupervisor {
         {
             return Err(command_error("CODEX-TURN-INVALID", "turn/start", false));
         }
+        if request
+            .goal_objective
+            .as_deref()
+            .is_some_and(|objective| !is_valid_goal_objective(objective))
+        {
+            return Err(command_error(
+                "CODEX-GOAL-INVALID",
+                "thread/goal/set",
+                false,
+            ));
+        }
         let commit_skill = self.resolve_main_skill("turn/start")?;
         let skill_injection = commit_skill.audit();
         let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
@@ -1169,6 +1347,25 @@ impl CodexSupervisor {
             ensure_workspace_turn_start_allowed(&state, &request.workspace_id, "turn/start")?;
             if state.active_turn_id.is_some() || state.pending_turn_start.is_some() {
                 return Err(command_error("CODEX-TURN-ACTIVE", "turn/start", false));
+            }
+            if request.effort.is_some_and(|effort| {
+                !state
+                    .diagnostic
+                    .supported_reasoning_efforts
+                    .contains(&effort)
+            }) || request.service_tier.as_deref()
+                != request
+                    .service_tier
+                    .as_deref()
+                    .filter(|tier| state.diagnostic.fast_service_tier.as_deref() == Some(*tier))
+                || (request.plan_mode || request.goal_objective.is_some())
+                    && !state.diagnostic.experimental_api_accepted
+            {
+                return Err(command_error(
+                    "CODEX-TURN-CAPABILITY-UNAVAILABLE",
+                    "turn/start",
+                    false,
+                ));
             }
             let raw_thread = state
                 .thread_handles
@@ -1222,6 +1419,19 @@ impl CodexSupervisor {
                 }
             }
         }
+        if let Some(objective) = request.goal_objective.as_deref() {
+            if let Err(error) = connection
+                .request_default(
+                    "thread/goal/set",
+                    thread_goal_set_params(&raw_thread, objective.trim()),
+                )
+                .await
+            {
+                self.rollback_pending_turn_start(generation, token, true)
+                    .await;
+                return Err(rpc_command_error(error, "thread/goal/set"));
+            }
+        }
         let mut guard = PendingTurnStartGuard {
             supervisor: self.clone(),
             generation,
@@ -1231,15 +1441,17 @@ impl CodexSupervisor {
         let result = match connection
             .request_default(
                 "turn/start",
-                turn_start_params(
-                    &raw_thread,
-                    &request.client_user_message_id,
-                    &request.text,
-                    request.effort,
-                    &attachments,
-                    &commit_skill,
-                    TurnExecutionClass::Main,
-                )
+                turn_start_params(TurnStartRequest {
+                    thread_id: &raw_thread,
+                    client_user_message_id: &request.client_user_message_id,
+                    text: &request.text,
+                    effort: request.effort,
+                    service_tier: request.service_tier.as_deref(),
+                    plan_mode: request.plan_mode,
+                    attachments: &attachments,
+                    commit_skill: &commit_skill,
+                    execution_class: TurnExecutionClass::Main,
+                })
                 .map_err(|_| command_error("CODEX-TURN-SKILL-CLASS", "turn/start", false))?,
             )
             .await
@@ -1524,15 +1736,17 @@ impl CodexSupervisor {
         let result = match connection
             .request_default(
                 "turn/start",
-                turn_start_params(
-                    &claim.thread_id,
-                    &client_message_id,
-                    &input,
-                    claim.effort,
-                    &[],
-                    &commit_skill,
-                    TurnExecutionClass::Main,
-                )
+                turn_start_params(TurnStartRequest {
+                    thread_id: &claim.thread_id,
+                    client_user_message_id: &client_message_id,
+                    text: &input,
+                    effort: claim.effort,
+                    service_tier: None,
+                    plan_mode: false,
+                    attachments: &[],
+                    commit_skill: &commit_skill,
+                    execution_class: TurnExecutionClass::Main,
+                })
                 .map_err(|_| {
                     command_error("CODEX-TURN-SKILL-CLASS", "codex.decision.answer", false)
                 })?,
@@ -2447,16 +2661,22 @@ async fn handshake(
     let mut cursor = None;
     let mut seen_cursors = std::collections::HashSet::new();
     let mut model_available = false;
-    let mut fast_available = false;
-    let mut max_available = false;
+    let mut fast_service_tier = None;
+    let mut supported_reasoning_efforts = Vec::new();
     for _ in 0..MAX_MODEL_PAGES {
         let page = connection
             .request_default("model/list", model_list_params(cursor.as_deref()))
             .await?;
-        let (model, fast, max, next) = super::protocol::validate_model_page(&page);
+        let (model, efforts, fast_tier, next) = super::protocol::validate_model_page(&page);
         model_available |= model;
-        fast_available |= fast;
-        max_available |= max;
+        for effort in efforts {
+            if !supported_reasoning_efforts.contains(&effort) {
+                supported_reasoning_efforts.push(effort);
+            }
+        }
+        if fast_service_tier.is_none() {
+            fast_service_tier = fast_tier;
+        }
         match next {
             Some(next) if seen_cursors.insert(next.clone()) => cursor = Some(next),
             Some(_) => return Err(RpcRequestError::Protocol),
@@ -2470,8 +2690,8 @@ async fn handshake(
         auth_kind,
         requires_openai_auth,
         model_available,
-        fast_available,
-        max_available,
+        fast_service_tier,
+        supported_reasoning_efforts,
         config_model_present,
     })
 }
@@ -2644,7 +2864,7 @@ async fn run_readiness_probe(context: ReadinessProbeContext) -> CodexDiagnostic 
         runtime_guard.disarm();
         match observed {
             Ok(Ok(handshake)) => {
-                if binary.revalidate().await.is_err() {
+                if binary.revalidate_metadata().await.is_err() {
                     return readiness_failure_diagnostic(
                         CodexHealth::BinaryUntrusted,
                         "CODEX-BINARY-IDENTITY-CHANGED",
@@ -2737,7 +2957,7 @@ fn diagnostic_from_handshake(
         CodexHealth::AuthRequired
     } else if !handshake.model_available {
         CodexHealth::ModelUnavailable
-    } else if !handshake.fast_available || !handshake.max_available {
+    } else if handshake.supported_reasoning_efforts.is_empty() {
         CodexHealth::EffortUnavailable
     } else {
         CodexHealth::Ready
@@ -2760,8 +2980,8 @@ fn diagnostic_from_handshake(
         auth_kind: handshake.auth_kind,
         requires_openai_auth: handshake.requires_openai_auth,
         model_available: handshake.model_available,
-        fast_available: handshake.fast_available,
-        max_available: handshake.max_available,
+        fast_service_tier: handshake.fast_service_tier,
+        supported_reasoning_efforts: handshake.supported_reasoning_efforts,
         config_model_present: handshake.config_model_present,
         child_state,
         last_successful_handshake_at: Some(now),
@@ -2891,8 +3111,8 @@ fn diagnostic_from_probe(binary: &BinaryInfo, schema: &SchemaProbe) -> CodexDiag
         auth_kind: None,
         requires_openai_auth: false,
         model_available: false,
-        fast_available: false,
-        max_available: false,
+        fast_service_tier: None,
+        supported_reasoning_efforts: Vec::new(),
         config_model_present: false,
         child_state: ChildState::Stopped,
         last_successful_handshake_at: None,
@@ -3039,7 +3259,12 @@ fn bind_pending_main_work_unit(
 
 fn clear_probe_evidence(state: &mut SupervisorState, operation: &str) {
     state.binary = None;
+    state.setup_identity = None;
     state.schema = None;
+    begin_connection_attempt(state, operation);
+}
+
+fn begin_connection_attempt(state: &mut SupervisorState, operation: &str) {
     state.normalizer = None;
     state.thread_handles.clear();
     state.turn_handles.clear();
@@ -3150,7 +3375,7 @@ mod tests {
             workspace_id: workspace_id.to_owned(),
             raw_thread_id: "thread-raw".to_owned(),
             thread_handle: "thread-handle".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
             client_message_id: "message".to_owned(),
             raw_turn_id: None,
             turn_handle: None,
@@ -3241,10 +3466,13 @@ mod tests {
             thread_handle: "thread".to_owned(),
             client_user_message_id: "message".to_owned(),
             text: "Implement it".to_owned(),
-            effort: ReasoningPreset::Low,
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
             attachment_handles: vec![],
         };
-        assert_eq!(turn.effort.as_wire(), "low");
+        assert_eq!(turn.effort.map(ReasoningPreset::as_wire), Some("low"));
     }
 
     #[test]
@@ -3282,7 +3510,7 @@ mod tests {
                 workspace_id: "workspace".to_owned(),
                 raw_thread_id: "thread-raw".to_owned(),
                 thread_handle: "thread-handle".to_owned(),
-                effort: ReasoningPreset::Max,
+                effort: Some(ReasoningPreset::Max),
                 client_message_id: "message-1".to_owned(),
                 raw_turn_id: None,
                 turn_handle: None,
@@ -3303,7 +3531,7 @@ mod tests {
                 .expect("response confirms the same reservation");
         assert_eq!(first, second);
         assert_eq!(state.active_turn_id.as_deref(), Some("turn-raw"));
-        assert_eq!(state.active_turn_effort, Some(ReasoningPreset::Max));
+        assert_eq!(state.active_turn_effort, Some(Some(ReasoningPreset::Max)));
 
         assert_eq!(
             confirm_pending_turn_start(
@@ -3353,7 +3581,7 @@ mod tests {
                 workspace_id: "workspace".to_owned(),
                 raw_thread_id: "thread-raw".to_owned(),
                 thread_handle: "thread-handle".to_owned(),
-                effort: ReasoningPreset::Low,
+                effort: Some(ReasoningPreset::Low),
                 client_message_id: "message".to_owned(),
                 raw_turn_id: Some("turn-raw".to_owned()),
                 turn_handle: Some("turn-handle".to_owned()),

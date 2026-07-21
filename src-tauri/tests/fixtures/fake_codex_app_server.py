@@ -226,6 +226,8 @@ def send_support_item(item_type, text):
 def main():
     args = sys.argv[1:]
     if args == ["--version"]:
+        if MODE in ("lifecycle_cache", "setup_probe"):
+            record("version_requested")
         if MODE == "setup_probe":
             record("setup_version")
         sys.stdout.write("codex-cli 0.144.5\n")
@@ -247,6 +249,8 @@ def main():
             thread.join()
         return 0
     if len(args) >= 5 and args[:2] == ["app-server", "generate-json-schema"]:
+        if MODE in ("lifecycle_cache", "setup_probe"):
+            record("schema_requested")
         if MODE == "setup_probe":
             record("setup_schema_requested")
         output = pathlib.Path(args[args.index("--out") + 1])
@@ -262,6 +266,8 @@ def main():
     if not args or args[0] != "app-server":
         return 2
 
+    if MODE in ("lifecycle_cache", "setup_probe"):
+        record(f"app_server_process_started:{os.getpid()}")
     if MODE.startswith("readiness_"):
         record(f"readiness_process_started:{os.getpid()}")
     if MODE == "setup_probe":
@@ -281,6 +287,8 @@ def main():
         params = message.get("params") or {}
 
         if method == "initialize":
+            if MODE in ("lifecycle_cache", "setup_probe"):
+                record("initialize_requested")
             if MODE == "setup_probe":
                 record("setup_initialize")
             if MODE == "protocol_after_ready":
@@ -366,11 +374,15 @@ def main():
             if MODE == "setup_probe":
                 record("setup_model_list")
             efforts = (
-                [{"reasoningEffort": "low"}]
+                []
                 if MODE == "readiness_effort_unavailable"
                 else [
                     {"reasoningEffort": "low"},
+                    {"reasoningEffort": "medium"},
+                    {"reasoningEffort": "high"},
+                    {"reasoningEffort": "xhigh"},
                     {"reasoningEffort": "max"},
+                    {"reasoningEffort": "ultra"},
                 ]
             )
             result(
@@ -383,6 +395,13 @@ def main():
                             "id": "gpt-5.6-sol",
                             "model": "gpt-5.6-sol",
                             "supportedReasoningEfforts": efforts,
+                            "serviceTiers": [
+                                {
+                                    "id": "priority",
+                                    "name": "Fast",
+                                    "description": "Faster responses",
+                                }
+                            ],
                         }
                     ],
                     "nextCursor": None,
@@ -404,6 +423,32 @@ def main():
             continue
         if method == "thread/list":
             result(message_id, {"data": [], "nextCursor": None})
+            continue
+        if method == "thread/goal/set":
+            objective = params.get("objective")
+            valid = (
+                params.get("threadId") == "thread-fixture"
+                and isinstance(objective, str)
+                and 0 < len(objective) <= 4_000
+            )
+            record("goal_set_ok" if valid else "goal_set_invalid")
+            if not valid:
+                send({"id": message_id, "error": {"code": -32602, "message": "Invalid params"}})
+                continue
+            result(
+                message_id,
+                {
+                    "goal": {
+                        "threadId": "thread-fixture",
+                        "objective": objective,
+                        "status": "active",
+                        "createdAt": 0,
+                        "updatedAt": 0,
+                        "tokensUsed": 0,
+                        "timeUsedSeconds": 0,
+                    }
+                },
+            )
             continue
         if method in ("thread/start", "thread/resume"):
             thread_id = params.get("threadId", "thread-fixture")
@@ -574,11 +619,22 @@ def main():
                     and "multiAgentMode" not in params
                 )
             else:
+                collaboration_mode = params.get("collaborationMode")
+                collaboration_valid = collaboration_mode is None or (
+                    isinstance(collaboration_mode, dict)
+                    and collaboration_mode.get("mode") == "plan"
+                    and collaboration_mode.get("settings", {}).get("model")
+                    == "gpt-5.6-sol"
+                )
                 valid = (
                     params.get("model") == "gpt-5.6-sol"
-                    and params.get("effort") in ("low", "max")
-                    and "serviceTier" not in params
-                    and "collaborationMode" not in params
+                    and "effort" in params
+                    and params.get("effort")
+                    in (None, "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+                    and "serviceTier" in params
+                    and params.get("serviceTier") in (None, "priority")
+                    and "collaborationMode" in params
+                    and collaboration_valid
                     and "multiAgentMode" not in params
                 )
             expected_skill = (

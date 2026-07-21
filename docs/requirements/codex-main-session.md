@@ -1,7 +1,7 @@
 ---
 title: "CODE Codexメインセッション要件定義"
 description: "固定GPT-5.6 SolによるApp Server会話、構造化イベント、判断・承認、停止・復旧を定義する。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "Codex App Server supervisor、protocol adapter、Chat composerを実装するとき。"
   - "判断カード、approval、attachment、stop、reconnectを検証するとき。"
@@ -15,7 +15,7 @@ read_when:
 | 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 2026-07-18 |
+| 最終レビュー日 | 2026-07-21 |
 
 ## 背景
 
@@ -38,7 +38,7 @@ read_when:
 | App Server | user-installed Codexのstdio lifecycle、initialize、capability detection |
 | Main model | `gpt-5.6-sol`固定、supported reasoning effort |
 | Composer | multiline prompt、file/image、read-only context、Command+Enter、stop |
-| Timeline | plan、assistant、tool、file、error、decision、completion event |
+| Timeline | plan、assistant、tool、file、error、decision eventの会話向けprojection |
 | Commit interception | normalized Git commit command terminal、read-only SHA verification、app-owned explanation handoff |
 | Human input | structured decision、approval、Other、hold、interrupt、fallback |
 | Recovery | auth/model/process failure、reconnect、no automatic replay |
@@ -68,9 +68,12 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `CODE-F-051` | アプリはCodex App Serverの利用可否を診断する | executableは明示設定、GUI processの`PATH`、時間・出力上限を持つ利用者のdefault login shell、既知の安全なinstall位置の順で探索し、候補のcanonical path、所有者、書込権限、実行権限、version、hashをRustで検証する。初回setupのbounded probeは同binaryからApp Serverを起動し、stableな`initialize` / `initialized`が成功した時点でreadyとし、schema生成、account/read、config/read、model/listを実行しない。通常workspaceの接続時にはschema、initialize、protocol capability、login、config、model/listを順に確認し、失敗段階と回復操作をSend可否へ反映する。通常workspace側の失敗だけでは初回setupへ戻さない。利用者は初回setupとGeneral settingsでCodex executableの絶対pathを任意指定または自動検出へ戻すことができ、setup probeに成功したcanonical pathだけをapp-private設定へ保存する | Approved | 非該当 |
+| `CODE-F-051` | アプリはCodex App Serverの利用可否を診断する | executableは明示設定、GUI processの`PATH`、時間・出力上限を持つ利用者のdefault login shell、既知の安全なinstall位置の順で探索し、候補のcanonical path、所有者、書込権限、実行権限、version、hashをRustで検証する。default login shellは実行ファイルの探索だけに使用し、検証後のApp Serverはexact canonical binaryを直接起動してCodex管理のloginを利用する。初回setupのbounded probeは同binaryからApp Serverを起動し、stableな`initialize` / `initialized`が成功した時点でreadyとし、schema生成、account/read、config/read、model/listを実行しない。probe全体のdeadlineはbinary hashの再検証と安全なprocess終了に許可した個別上限を包含し、正常なidentity検証中をApp Server初期化失敗として扱わない。通常workspaceの接続時にはschema、initialize、protocol capability、login、config、model/listを順に確認し、失敗段階の安全なcodeと回復操作をSend可否へ反映する。通常workspace側の失敗だけでは初回setupへ戻さず、Composerから下書きを保持したまま選択workspaceの再接続を明示的に再試行できる。利用者は初回setupとGeneral settingsでCodex executableの絶対pathを任意指定または自動検出へ戻すことができ、setup probeに成功したcanonical pathだけをapp-private設定へ保存する | Approved | 非該当 |
 | `CODE-F-052` | main sessionは`gpt-5.6-sol`だけを使用する | thread/start payloadとheader表示が`gpt-5.6-sol`になり、UIまたは保存設定から別modelへ変更できない | Approved | 非該当 |
-| `CODE-F-053` | 利用者は利用可能なreasoning effortを選べる | `gpt-5.6-sol`のmodel/listで`low`と`max`がsupportedReasoningEffortsにある時だけFast=`low`、Max=`max`として表示・送信し、model、service tier、`ultra`をこの操作で変更しない | Approved | 非該当 |
+| `CODE-F-053` | 利用者は利用可能なreasoning effortを段階的に選べる | ComposerのReasoning buttonを押すたびに`Off`から`gpt-5.6-sol`の`model/list.supportedReasoningEfforts`が広告した値を低い順に一段上げ、最高値の次は`Off`へ戻る。広告されない値を表示・送信せず、`Off`は`turn/start.effort=null`としてsession既定へ戻す | Approved | 非該当 |
+| `CODE-F-053A` | 利用者はFast service tierを独立して切り替えられる | model catalogがFastとして広告したexact service tier IDだけを稲妻のicon-only flagからon/offし、onはそのID、offは`null`を`turn/start.serviceTier`へ毎回明示する。reasoning effortは変更しない | Approved | 非該当 |
+| `CODE-F-053B` | 利用者は次のturnをPlan modeにできる | map icon flagのon時は固定modelと現在reasoningを含む`collaborationMode.mode=plan`を送り、off時は`collaborationMode=null`を送る。experimental API未受理時は選択不可にする | Approved | 非該当 |
+| `CODE-F-053C` | 利用者はcomposerのinstructionをpersistent Goalとして開始できる | target icon flagのon時はtrim済みinstruction 1〜4,000 scalarを`thread/goal/set.objective`へ設定してから同じturnを開始し、turn受理後だけflagをoffへ戻す。goal設定またはturn開始失敗時はinstructionとflagを保持する | Approved | 非該当 |
 | `CODE-F-054` | appはactive workspaceのcwdでmain threadを開始する | canonical project rootとselected effortを使ってthreadを1件開始し、別workspace pathを使用しない | Approved | 非該当 |
 | `CODE-F-055` | 利用者は有効なcomposer内容をturnとして送信できる | text、attachment、contextのいずれか1件以上が有効な時、Command+EnterまたはSendで1turnだけ開始する。public instructionは32,000 Unicode scalar以下を維持し、Project ID-scoped Project context、nativeで解決した選択pack ID-scoped Character context、pack IDと各version/hash metadata、JSON escaping、固定markerを合成したApp Server向けtext全体は80,000 Unicode scalar以下とする。WebViewとRust supervisorの双方が同じscalar単位でexact 80,000を受理し、80,001、NUL、その他controlをtransport前に拒否する | Approved | 非該当 |
 | `CODE-F-056` | 空composerは送信できない | trim後textが空かつattachmentとcontextが0件ならSendをdisabledにし、Command+Enterでturnを開始しない。attachmentまたはcontextがvalidならtext 0文字でも送信できる | Approved | 非該当 |
@@ -80,8 +83,8 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `CODE-F-058` | 利用者はstreaming進捗を構造化eventで確認できる | plan、assistant text、tool start/result、file change、diff、error、decision、approval、completionをversion付きpayloadとしてsequence順に表示・保存し、再起動後も同じsemantic card、stable ID、順序へexactに再構築する。unknown versionまたはinvalid payloadはgeneric成功表示へ落とさずUnsupportedとしてfail closedにする | Approved | 非該当 |
-| `CODE-F-059` | tool実行はread-only eventとして表示される | command summaryをBash/tool rowとcode chipで表示し、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
+| `CODE-F-058` | 利用者はstreaming進捗を構造化eventで確認できる | plan、tool start/result、file change、diff、error、decision、approvalをversion付きpayloadとしてsequence順に表示する。`agentMessage.phase=commentary`の完了itemは途中経過としてredact・長さ制限して表示・保存し、Structured Output envelopeなら検証済み`result.message`だけを取り出す。commentaryを最終回答違反としてturn interruptしてはならない。`final_answer`またはphaseなしの完了itemだけを最終Structured Outputとして厳格検証し、検証・redactした`result.message`を会話の最後の可視出力にする。assistant deltaのJSON断片は表示・保存しない。terminal `completion`は順序と復旧の正本として保存してもChatへ描画せず、最終出力の代替にしない。再起動後も同じsemantic card、stable ID、順序へexactに再構築し、unknown versionまたはinvalid payloadはgeneric成功表示へ落とさずUnsupportedとしてfail closedにする | Approved | 非該当 |
+| `CODE-F-059` | tool実行はread-only eventとして表示される | MCPはredact済み`server`と実`tool`名、最大4件の安全なtop-level引数要約、状態、所要時間を表示し、内部型`mcpToolCall`をtool名として表示しない。`title`、`query`、`ref_id`など人が識別できるtargetを優先し、`code`、`script`、`expression`などのsource bodyは本文でなく文字数だけを表示する。commandはredact済み一行command、web searchはredact済みqueryを同じsemantic tool statusへ正規化する。raw引数JSON、MCP result content、credential値、absolute private pathをWebViewまたは履歴へ渡さず、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
 | `CODE-F-060` | 利用者は長いtool eventを展開・copyできる | 120文字超を一行ellipsisにし、keyboardで全文展開とcopyへ到達し、copy内容が表示全文と一致する | Approved | 非該当 |
 | `CODE-F-061` | scroll中の利用者を自動で最下部へ戻さない | 利用者がbottomから48px超上へ移動中にeventが届いてもscroll位置を維持し、「最新へ」を表示する | Approved | 非該当 |
 | `CODE-F-062` | errorは成功と区別して回復操作を示す | error rowにcode、短い原因、影響、retry/modify/stop/detailsの利用可能操作を表示し、completionへ自動変換しない | Approved | 非該当 |
@@ -94,7 +97,7 @@ read_when:
 | `CODE-F-064` | 利用者は既定選択肢以外を入力できる | Otherを選ぶと1〜2,000文字の入力欄が開き、送信またはcancelまでcardと入力を保持する | Approved | 非該当 |
 | `CODE-F-065` | 利用者はdecisionを保留またはturnを中断できる | Holdは回答を送らずwaiting状態を維持し、Interruptは確認後にturn interruptを要求する | Approved | 非該当 |
 | `CODE-F-066` | 利用者はapproval対象を確認して許可・拒否できる | `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/permissions/requestApproval`だけをoperation、scope、対象path/host、risk、可逆性、推奨付きcardへ正規化し、Approve once、Reject、Stopを元request IDへ1回だけ返す。未知methodは許可せずBlockedにする | Approved | 非該当 |
-| `CODE-F-067` | experimental user-input APIがない時も質問を失わない | initializeでexperimental APIを明示交渉し、`item/tool/requestUserInput`がない場合は通常assistant出力のversion付きdecision schemaだけを同じcardへ正規化し、schema不正や自由文だけの曖昧なapprovalは回答UIにせず安全に停止する | Approved | 非該当 |
+| `CODE-F-067` | experimental user-input APIがない時も質問を失わない | initializeでexperimental APIを明示交渉し、`item/tool/requestUserInput`がない場合は通常assistant出力のversion付きdecision schemaだけを同じcardへ正規化する。`result`では`decisionId`、`question`、`options`、`context`をnullに限定し、decisionに影響しないbooleanの`allowFreeform`は無視して`message`を受理する。`decision_request`では全decision fieldと`allowFreeform=false`を厳格検証し、schema不正や自由文だけの曖昧なapprovalは回答UIにせず安全に停止する | Approved | 非該当 |
 | `CODE-F-068` | UIはキャラクターの感情で回答を誘導しない | option順、推奨根拠、riskを文字で示し、Live2D表情・音声を選択肢の有利不利に対応させない | Approved | 非該当 |
 
 ### Attachment・context・停止・復旧
@@ -126,7 +129,10 @@ read_when:
 | Turn transport | composed text envelope | promptと開始時context snapshotから生成 | 条件付き | 固定marker、Project Context最大32,000 scalar、Character Context最大12,000 scalar、version/hash metadata、JSON escaping、public instructionを含む全体で0〜80,000 Unicode scalar。UTF-8 byte数では数えず、NUL/その他control不可 | draft、context version、attachmentを保持し、WebViewは`WORKSPACE-CONTEXT-TURN-TOO-LARGE`、Rustは`CODEX-TURN-INVALID`でApp Server送信前に拒否 |
 | Composer | attachment | なし | 任意 | 10件、各25MiB、合計50MiB、regular readable file | 無効itemだけ拒否し他を保持 |
 | Composer | context | なし | 任意 | 10件、各1MiB text snapshot、sourceとtimestamp必須 | 無効snapshotを送信しない |
-| Composer | effort | Fast（`low`） | 必須 | `gpt-5.6-sol`でsupportedなFast=`low` / Max=`max`だけ | 対応値がなければSendを無効にし診断理由を表示 |
+| Composer | reasoning | Off | 任意 | `Off`または`gpt-5.6-sol`が広告したreasoning effort。button clickで昇順循環 | 未広告値は選択せず、capability変更時はOffへ戻す |
+| Composer | Fast flag | off | 任意 | 広告済みFast service tierのexact IDだけ | 未広告またはturn実行中はdisabled |
+| Composer | Plan flag | off | 任意 | experimental `collaborationMode.mode=plan`だけ | experimental API未受理またはturn実行中はdisabled |
+| Composer | Goals flag | off | 任意 | 選択時はtrim済みprompt 1〜4,000 Unicode scalar | 無効時はdraftとflagを保持しgoalを設定しない |
 | App setting | Codex executable path | 自動検出 | 任意 | UTF-8の絶対path、1〜4,096 byte、NULとcontrol不可。Rustでcanonicalize後にtrusted executable、`codex-cli` version、App Server起動とstable initializeを検証し、成功時だけ保存する | 入力を保持し、safe codeをfield直下へ表示。以前の設定と実行中sessionは変更しない |
 | Decision | selected option | なし | 必須 | schema内optionまたはOther | card保持、回答未送信 |
 | Decision | Other text | 空 | 条件付き | trim後1〜2,000 Unicode scalar、NUL/その他control不可 | 入力保持、共通scalar countで送信無効 |

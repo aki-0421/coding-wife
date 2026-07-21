@@ -81,7 +81,7 @@ function emptyDraft(
     schemaVersion: 1,
     workspaceId,
     text: "",
-    effort: "fast",
+    effort: "off",
     revision: 0,
     updatedAt,
   }

@@ -108,8 +108,9 @@ function initialCodexState(workspaceId: string): WorkspaceCodexState {
     connected: true,
     readiness: {
       ready: true,
-      fastAvailable: true,
-      maxAvailable: true,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: ["low", "max"],
+      experimentalModesAvailable: true,
       reasonCode: null,
     },
     pendingRequests: [],
@@ -209,7 +210,7 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
     for (const workspace of this.#workspaces) {
       this.#drafts.set(workspace.id, {
         text: "",
-        effort: "fast",
+        effort: "off",
         revision: 1,
         contextSnapshots: [],
       })
@@ -285,7 +286,7 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
     ]
     this.#drafts.set(workspaceId, {
       text: "",
-      effort: "fast",
+      effort: "off",
       revision: 1,
       contextSnapshots: [],
     })

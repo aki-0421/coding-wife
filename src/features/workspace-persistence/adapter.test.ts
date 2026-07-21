@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   parseWorkspaceStateSnapshot,
   workspaceHistoryCommands,
+  type PersistedTimelineEvent,
+  type WorkspaceReasoningEffort,
   type WorkspaceStateSnapshot,
 } from "@/lib/contracts/workspace-history"
 import { parseCodexEvent } from "@/lib/contracts/codex"
@@ -14,9 +16,34 @@ import {
   projectWorkspaceState,
 } from "@/features/workspace-persistence/adapter"
 import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
+import { PersistedCodexEventProjector } from "@/features/workspace-persistence/codex-event-projector"
 import { TauriWorkspaceHistoryTransport } from "@/features/workspace-persistence/transport"
 
 describe("PersistentWorkspaceViewAdapter", () => {
+  it("restores Codex warnings as non-terminal status rows", () => {
+    const warning = new PersistedCodexEventProjector().project({
+      ...(fixture.timeline.items[0] as PersistedTimelineEvent),
+      eventId: "event-warning-restart",
+      producer: "code",
+      kind: "code.session.diagnostic",
+      payload: {
+        semanticVersion: 1,
+        generation: 7,
+        sourceSequence: 4,
+        code: "CODEX-WARNING",
+        willRetry: false,
+        detailRef: "diagnostic-warning-restart",
+      },
+    })
+
+    expect(warning).toMatchObject({
+      kind: "status",
+      status: "warning",
+      itemType: "warning",
+      detailRef: "diagnostic-warning-restart",
+    })
+  })
+
   it("projects strict native state without exposing project linkage paths", () => {
     const projected = projectWorkspaceState(
       fixture.state as WorkspaceStateSnapshot,
@@ -113,9 +140,14 @@ describe("PersistentWorkspaceViewAdapter", () => {
         schemaVersion: 1,
         nextBeforeSequence: null,
         items: [
-          codeEvent(1, "code.item.status.changed", {
+          codeEvent(1, "code.tool.status.changed", {
             itemHandle: "item-tool",
-            itemType: "mcpToolCall",
+            toolKind: "mcpToolCall",
+            providerName: "browser",
+            toolName: "open",
+            summary:
+              "code=var fs = await import('node:fs/promises') · ref_id=page-safe",
+            durationMs: null,
             status: "running",
           }),
           codeEvent(2, "code.tool.output", {
@@ -126,9 +158,14 @@ describe("PersistentWorkspaceViewAdapter", () => {
             itemHandle: "item-tool",
             excerpt: "second 😀",
           }),
-          codeEvent(4, "code.item.status.changed", {
+          codeEvent(4, "code.tool.status.changed", {
             itemHandle: "item-tool",
-            itemType: "mcpToolCall",
+            toolKind: "mcpToolCall",
+            providerName: "browser",
+            toolName: "open",
+            summary:
+              "code=var fs = await import('node:fs/promises') · ref_id=page-safe",
+            durationMs: 240,
             status: "completed",
           }),
           codeEvent(5, "code.file_change.updated", {
@@ -166,6 +203,11 @@ describe("PersistentWorkspaceViewAdapter", () => {
           codeEvent(13, "code.approval.requested", {
             request: approvalRequest,
           }),
+          codeEvent(14, "code.item.status.changed", {
+            itemHandle: "item-assistant-internal",
+            itemType: "agentMessage",
+            status: "running",
+          }),
         ],
       },
     })
@@ -187,9 +229,14 @@ describe("PersistentWorkspaceViewAdapter", () => {
       kind: "tool",
       status: "completed",
       toolKind: "mcpToolCall",
+      providerName: "browser",
+      toolName: "open",
+      summary: "ref_id=page-safe · code=<source hidden>",
+      durationMs: 240,
       excerpt: "first line\nsecond 😀",
       sourceSequence: 4,
     })
+    expect(JSON.stringify(projected.timeline)).not.toContain("node:fs/promises")
     expect(projected.timeline[1]).toMatchObject({
       kind: "file",
       status: "completed",
@@ -217,6 +264,11 @@ describe("PersistentWorkspaceViewAdapter", () => {
     expect(JSON.stringify(projected)).not.toMatch(
       /rawStderr|chain-of-thought|\/Users\//iu,
     )
+    expect(projected.timeline).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ itemType: "agentMessage" }),
+      ]),
+    )
   })
 
   it("serializes rapid draft writes and restores the latest workspace-local value", async () => {
@@ -233,7 +285,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
     if (workspaceId === null) throw new Error("demo fixture")
 
     await Promise.all([
-      adapter.saveDraft(workspaceId, "first", "fast"),
+      adapter.saveDraft(workspaceId, "first", "off"),
       adapter.saveDraft(workspaceId, "second", "max"),
       adapter.saveDraft(workspaceId, "latest", "max"),
     ])
@@ -329,7 +381,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
         const draftRequest = request as {
           readonly workspaceId: string
           readonly text: string
-          readonly effort: "fast" | "max"
+          readonly effort: WorkspaceReasoningEffort
           readonly expectedRevision: number
         }
         const updated = {
@@ -407,7 +459,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
 
     const deletion = adapter.deleteWorkspaceHistory("workspace-fixture")
     await expect(
-      adapter.saveDraft("workspace-fixture", "must not race", "fast"),
+      adapter.saveDraft("workspace-fixture", "must not race", "off"),
     ).resolves.toBeUndefined()
     expect(commands).not.toContain(
       workspaceHistoryCommands.issueDeleteChallenge,
@@ -428,7 +480,7 @@ describe("PersistentWorkspaceViewAdapter", () => {
     ])
 
     await expect(
-      adapter.saveDraft("workspace-fixture", "after deletion", "fast"),
+      adapter.saveDraft("workspace-fixture", "after deletion", "off"),
     ).rejects.toMatchObject({ code: "WORKSPACE-NOT-FOUND" })
     expect(commands.at(-1)).toBe(workspaceHistoryCommands.select)
   })

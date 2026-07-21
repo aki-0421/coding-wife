@@ -33,7 +33,7 @@ pub struct FallbackDecisionContext {
     pub generation: u64,
     pub thread_id: String,
     pub source_turn_id: String,
-    pub effort: ReasoningPreset,
+    pub effort: Option<ReasoningPreset>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,7 +65,7 @@ pub struct FallbackDecisionClaim {
     pub generation: u64,
     pub thread_id: String,
     pub source_turn_id: String,
-    pub effort: ReasoningPreset,
+    pub effort: Option<ReasoningPreset>,
     token: u64,
 }
 
@@ -301,27 +301,16 @@ pub fn fallback_continuation_input(decision_handle: &str, option_id: &str) -> St
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "kind", deny_unknown_fields)]
-enum WireDecisionOutput {
-    #[serde(rename = "result")]
-    Result {
-        #[serde(rename = "schemaVersion")]
-        schema_version: u16,
-        message: String,
-    },
-    #[serde(rename = "decision_request")]
-    DecisionRequest {
-        #[serde(rename = "schemaVersion")]
-        schema_version: u16,
-        message: String,
-        #[serde(rename = "decisionId")]
-        decision_id: String,
-        question: String,
-        options: Vec<WireOption>,
-        context: Box<WireDecisionContext>,
-        #[serde(rename = "allowFreeform")]
-        allow_freeform: bool,
-    },
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct WireDecisionOutput {
+    schema_version: u16,
+    kind: String,
+    message: String,
+    decision_id: Value,
+    question: Value,
+    options: Value,
+    context: Value,
+    allow_freeform: Value,
 }
 
 #[derive(Deserialize)]
@@ -357,32 +346,44 @@ pub fn parse_completed_output(
     }
     let output: WireDecisionOutput =
         serde_json::from_str(text).map_err(|_| DecisionOutputError::Invalid)?;
-    match output {
-        WireDecisionOutput::Result {
-            schema_version,
-            message,
-        } => {
-            if schema_version != 1 || !bounded(&message, 1, 65_536) {
+    match output.kind.as_str() {
+        "result" => {
+            if output.schema_version != 1
+                || !bounded(&output.message, 1, 65_536)
+                || !output.decision_id.is_null()
+                || !output.question.is_null()
+                || !output.options.is_null()
+                || !output.context.is_null()
+                || !(output.allow_freeform.is_null() || output.allow_freeform.is_boolean())
+            {
                 return Err(DecisionOutputError::Invalid);
             }
             Ok(DecisionOutput::Result {
-                message: redact_text(&message, Some(workspace_root), 65_536),
+                message: redact_text(&output.message, Some(workspace_root), 65_536),
             })
         }
-        WireDecisionOutput::DecisionRequest {
-            schema_version,
-            message,
-            decision_id,
-            question,
-            options,
-            context,
-            allow_freeform,
-        } => {
-            if schema_version != 1
+        "decision_request" => {
+            let decision_id = output
+                .decision_id
+                .as_str()
+                .ok_or(DecisionOutputError::Invalid)?;
+            let question = output
+                .question
+                .as_str()
+                .ok_or(DecisionOutputError::Invalid)?;
+            let options: Vec<WireOption> =
+                serde_json::from_value(output.options).map_err(|_| DecisionOutputError::Invalid)?;
+            let context: WireDecisionContext =
+                serde_json::from_value(output.context).map_err(|_| DecisionOutputError::Invalid)?;
+            let allow_freeform = output
+                .allow_freeform
+                .as_bool()
+                .ok_or(DecisionOutputError::Invalid)?;
+            if output.schema_version != 1
                 || allow_freeform
-                || !bounded(&message, 1, 4_096)
-                || !bounded(&decision_id, 1, 128)
-                || !bounded(&question, 1, 4_096)
+                || !bounded(&output.message, 1, 4_096)
+                || !bounded(decision_id, 1, 128)
+                || !bounded(question, 1, 4_096)
                 || !(2..=3).contains(&options.len())
             {
                 return Err(DecisionOutputError::Invalid);
@@ -409,19 +410,19 @@ pub fn parse_completed_output(
                 });
             }
             let decision_context =
-                validate_wire_decision_context(*context, &mapped_option_ids, workspace_root)?;
+                validate_wire_decision_context(context, &mapped_option_ids, workspace_root)?;
             Ok(DecisionOutput::Request {
                 view: Box::new(PendingRequestView {
-                    pending_id: opaque_id("decision", &decision_id),
+                    pending_id: opaque_id("decision", decision_id),
                     kind: PendingKind::UserInput,
                     response_kind: PendingResponseKind::FallbackDecision,
                     operation: "decision_fallback".to_owned(),
                     target_alias: "active_turn".to_owned(),
-                    reason: Some(redact_text(&message, Some(workspace_root), 4_096)),
+                    reason: Some(redact_text(&output.message, Some(workspace_root), 4_096)),
                     questions: vec![PendingQuestion {
                         id: "decision".to_owned(),
                         header: "Decision".to_owned(),
-                        question: redact_text(&question, Some(workspace_root), 4_096),
+                        question: redact_text(question, Some(workspace_root), 4_096),
                         options: views,
                     }],
                     allowed_decisions: Vec::new(),
@@ -429,6 +430,7 @@ pub fn parse_completed_output(
                 }),
             })
         }
+        _ => Err(DecisionOutputError::Invalid),
     }
 }
 
@@ -620,23 +622,27 @@ mod tests {
             generation: 7,
             thread_id: "thread-1".to_owned(),
             source_turn_id: "turn-1".to_owned(),
-            effort: ReasoningPreset::Max,
+            effort: Some(ReasoningPreset::Max),
         }
     }
 
     #[test]
     fn exact_result_and_decision_are_accepted() {
-        let result = parse_completed_output(
-            r#"{"schemaVersion":1,"kind":"result","message":"Done"}"#,
-            Path::new("/workspace"),
-        )
-        .expect("result");
-        assert_eq!(
-            result,
-            DecisionOutput::Result {
-                message: "Done".to_owned()
-            }
-        );
+        for allow_freeform in ["null", "false", "true"] {
+            let result = parse_completed_output(
+                &format!(
+                    r#"{{"schemaVersion":1,"kind":"result","message":"Done","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":{allow_freeform}}}"#
+                ),
+                Path::new("/workspace"),
+            )
+            .expect("result");
+            assert_eq!(
+                result,
+                DecisionOutput::Result {
+                    message: "Done".to_owned()
+                }
+            );
+        }
 
         let decision =
             parse_completed_output(&decision_json(), Path::new("/workspace")).expect("decision");
@@ -709,6 +715,7 @@ mod tests {
         for invalid in [
             "free text",
             r#"{"schemaVersion":1,"kind":"approval","message":"approve"}"#,
+            r#"{"schemaVersion":1,"kind":"result","message":"Done","decisionId":"unexpected","question":null,"options":null,"context":null,"allowFreeform":null}"#,
             r#"{"schemaVersion":1,"kind":"decision_request","message":"Choose","decisionId":"d1","question":"Continue?","options":[{"id":"same","label":"A","description":"A"},{"id":"same","label":"B","description":"B"}],"allowFreeform":false}"#,
             r#"{"schemaVersion":1,"kind":"decision_request","message":"Choose","decisionId":"d1","question":"Continue?","options":[{"id":"a","label":"A","description":"A"},{"id":"b","label":"B","description":"B"}],"allowFreeform":true}"#,
         ] {

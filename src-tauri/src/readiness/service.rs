@@ -459,8 +459,8 @@ fn codex_check(
             ReadinessFactKey::CodexEfforts,
             if setup_probe {
                 "unverified"
-            } else if diagnostic.fast_available && diagnostic.max_available {
-                "fast_max"
+            } else if !diagnostic.supported_reasoning_efforts.is_empty() {
+                "available"
             } else {
                 "unavailable"
             },
@@ -476,8 +476,7 @@ fn codex_check(
         CodexHealth::Ready
             if diagnostic.account_present
                 && diagnostic.model_available
-                && diagnostic.fast_available
-                && diagnostic.max_available
+                && !diagnostic.supported_reasoning_efforts.is_empty()
                 && schema == "compatible" =>
         {
             (
@@ -955,7 +954,7 @@ fn build_sanitized_summary(snapshot: &NativeReadinessSnapshotV1) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codex::types::{ChildState, CodexCapabilities};
+    use crate::codex::types::{ChildState, CodexCapabilities, ReasoningPreset};
 
     fn diagnostic(health: CodexHealth) -> CodexDiagnostic {
         CodexDiagnostic {
@@ -973,8 +972,8 @@ mod tests {
         let mut ready = diagnostic(CodexHealth::Ready);
         ready.account_present = true;
         ready.model_available = true;
-        ready.fast_available = true;
-        ready.max_available = true;
+        ready.fast_service_tier = Some("priority".to_owned());
+        ready.supported_reasoning_efforts = vec![ReasoningPreset::Low, ReasoningPreset::Max];
         ready.generated_by_same_binary = true;
         ready.experimental_api_accepted = true;
         assert_eq!(

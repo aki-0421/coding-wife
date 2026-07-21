@@ -16,8 +16,15 @@
     "authKind": "chatgpt",
     "requiresOpenaiAuth": true,
     "modelAvailable": true,
-    "fastAvailable": true,
-    "maxAvailable": true,
+    "fastServiceTier": "priority",
+    "supportedReasoningEfforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
     "configModelPresent": true,
     "childState": "ready",
     "lastSuccessfulHandshakeAt": "2026-07-18T00:00:00Z",
@@ -140,6 +147,24 @@
       "payload": {
         "pendingId": "pending_handle_fixture",
         "status": "accepted"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "event-5",
+      "workspaceId": "workspace-fixture",
+      "generation": 7,
+      "sequence": 5,
+      "occurredAt": "2026-07-18T00:00:05Z",
+      "kind": "tool_status",
+      "payload": {
+        "itemHandle": "item_tool_fixture",
+        "toolKind": "mcpToolCall",
+        "providerName": "browser",
+        "toolName": "open",
+        "summary": "ref_id=page-fixture",
+        "durationMs": 240,
+        "status": "completed"
       }
     }
   ]

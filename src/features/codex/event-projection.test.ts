@@ -66,6 +66,70 @@ describe("CodexEventProjector", () => {
     })
   })
 
+  it("keeps Codex warnings non-terminal while preserving the diagnostic history", () => {
+    const projected = new CodexEventProjector().project(
+      event(4, {
+        kind: "diagnostic",
+        payload: {
+          code: "CODEX-WARNING",
+          willRetry: false,
+          detailRef: "diagnostic-warning-1",
+        },
+      }),
+    )
+
+    expect(projected.timeline).toMatchObject({
+      kind: "status",
+      status: "warning",
+      itemType: "warning",
+      detailRef: "diagnostic-warning-1",
+    })
+    expect(projected.history).toMatchObject({
+      kind: "code.session.diagnostic",
+      payload: { code: "CODEX-WARNING", willRetry: false },
+    })
+  })
+
+  it("persists message item lifecycle without rendering duplicate status rows", () => {
+    const projected = new CodexEventProjector().project(
+      event(5, {
+        kind: "item_status",
+        payload: {
+          itemHandle: "item-assistant",
+          itemType: "agentMessage",
+          status: "running",
+        },
+      }),
+    )
+
+    expect(projected.timeline).toBeNull()
+    expect(projected.history).toMatchObject({
+      kind: "code.item.status.changed",
+      payload: { itemType: "agentMessage", status: "running" },
+    })
+  })
+
+  it("keeps legacy MCP rows readable without presenting the protocol type as a tool name", () => {
+    const projected = new CodexEventProjector().project(
+      event(1, {
+        kind: "item_status",
+        payload: {
+          itemHandle: "item-tool",
+          itemType: "mcpToolCall",
+          status: "completed",
+        },
+      }),
+    )
+
+    expect(projected.timeline).toMatchObject({
+      kind: "tool",
+      toolKind: "mcpToolCall",
+      providerName: null,
+      toolName: "MCP",
+      summary: null,
+    })
+  })
+
   it("projects tool, file, plan, diff, approval, error, and completion semantics", () => {
     const projector = new CodexEventProjector()
     const approval = parseCodexEvent(fixture.events[1])
@@ -73,10 +137,14 @@ describe("CodexEventProjector", () => {
     const projections = [
       projector.project(
         event(1, {
-          kind: "item_status",
+          kind: "tool_status",
           payload: {
             itemHandle: "item-tool",
-            itemType: "commandExecution",
+            toolKind: "mcpToolCall",
+            providerName: "browser",
+            toolName: "open",
+            summary: "ref_id=page-safe",
+            durationMs: null,
             status: "running",
           },
         }),
@@ -140,7 +208,7 @@ describe("CodexEventProjector", () => {
       "completion",
     ])
     expect(projections.map(({ history }) => history?.kind)).toEqual([
-      "code.item.status.changed",
+      "code.tool.status.changed",
       "code.tool.output",
       "code.file_change.updated",
       "code.plan.updated",
@@ -149,6 +217,14 @@ describe("CodexEventProjector", () => {
       "code.session.diagnostic",
       "code.session.status.changed",
     ])
+    expect(projections[1]?.timeline).toMatchObject({
+      kind: "tool",
+      toolKind: "mcpToolCall",
+      providerName: "browser",
+      toolName: "open",
+      summary: "ref_id=page-safe",
+      excerpt: "8 tests passed",
+    })
     expect(projections[5]?.history?.payload).toEqual({
       semanticVersion: 1,
       generation: approval.generation,
@@ -158,6 +234,36 @@ describe("CodexEventProjector", () => {
     expect(JSON.stringify(projections)).not.toMatch(
       /chain[-_ ]?of[-_ ]?thought|rawReasoning|\/Users\//iu,
     )
+  })
+
+  it("does not project or persist inline source bodies from tool summaries", () => {
+    const projected = new CodexEventProjector().project(
+      event(1, {
+        kind: "tool_status",
+        payload: {
+          itemHandle: "item-tool",
+          toolKind: "mcpToolCall",
+          providerName: "node-repl",
+          toolName: "run",
+          summary:
+            "code=var fs = await import('node:fs/promises') · title=依存関係ファイルを確認",
+          durationMs: null,
+          status: "running",
+        },
+      }),
+    )
+
+    expect(projected.timeline).toMatchObject({
+      kind: "tool",
+      summary: "title=依存関係ファイルを確認 · code=<source hidden>",
+    })
+    expect(projected.history).toMatchObject({
+      kind: "code.tool.status.changed",
+      payload: {
+        summary: "title=依存関係ファイルを確認 · code=<source hidden>",
+      },
+    })
+    expect(JSON.stringify(projected)).not.toContain("node:fs/promises")
   })
 
   it("creates one durable user instruction only after turn acceptance", () => {

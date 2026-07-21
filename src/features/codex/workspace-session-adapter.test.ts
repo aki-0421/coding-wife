@@ -48,6 +48,7 @@ class FakeCodexTransport implements CodexTransport {
   diagnostic = parseCodexDiagnostic(fixture.diagnostic)
   interrupt = Promise.resolve({ accepted: true })
   turnResponse: Promise<CodexResponseMap["codex_turn_start"]> | null = null
+  subscribeFailure: (Error & { readonly code?: string }) | null = null
   readonly connectResponses = new Map<
     string,
     Promise<CodexResponseMap["codex_connect"]>
@@ -102,6 +103,9 @@ class FakeCodexTransport implements CodexTransport {
   }
 
   subscribe(callbacks: CodexEventCallbacks): Promise<() => void> {
+    if (this.subscribeFailure !== null) {
+      return Promise.reject(this.subscribeFailure)
+    }
     this.callbacks = callbacks
     return Promise.resolve(() => {
       this.callbacks = null
@@ -138,6 +142,32 @@ function adapterFixture(
 }
 
 describe("CodexWorkspaceSessionAdapter", () => {
+  it("records event subscription failures against the activating workspace", async () => {
+    const { adapter, transport } = adapterFixture()
+    transport.subscribeFailure = Object.assign(
+      new Error("CODEX-IPC-UNAVAILABLE"),
+      { code: "CODEX-IPC-UNAVAILABLE" },
+    )
+
+    await expect(
+      adapter.activateWorkspace({
+        workspaceId: "workspace-fixture",
+        historyMode: "ready",
+      }),
+    ).rejects.toMatchObject({ code: "CODEX-IPC-UNAVAILABLE" })
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-fixture",
+      phase: "failed",
+      connected: false,
+      errorCode: "CODEX-IPC-UNAVAILABLE",
+      readiness: {
+        ready: false,
+        reasonCode: "CODEX-IPC-UNAVAILABLE",
+      },
+    })
+    expect(transport.calls).toEqual([])
+  })
+
   it("connects an opaque workspace, starts a thread, and accepts one turn before clear", async () => {
     const { adapter, history, transport } = adapterFixture()
     await expect(
@@ -149,7 +179,11 @@ describe("CodexWorkspaceSessionAdapter", () => {
       activeWorkspaceId: "workspace-fixture",
       connected: true,
       phase: "ready",
-      readiness: { fastAvailable: true, maxAvailable: true },
+      readiness: {
+        fastServiceTier: "priority",
+        supportedReasoningEfforts: expect.arrayContaining(["low", "max"]),
+        experimentalModesAvailable: true,
+      },
     })
 
     await expect(
@@ -177,6 +211,9 @@ describe("CodexWorkspaceSessionAdapter", () => {
       clientUserMessageId: "message-fixture-id",
       text: "Run the focused tests.",
       effort: "max",
+      serviceTier: null,
+      planMode: false,
+      goalObjective: null,
       attachmentHandles: [],
     })
     expect(history.events).toHaveLength(1)
@@ -184,6 +221,31 @@ describe("CodexWorkspaceSessionAdapter", () => {
       eventId: "message-fixture-id",
       kind: "code.user.instruction.accepted",
       payload: { generation: 7 },
+    })
+  })
+
+  it("sends reasoning, Fast, Plan, and Goals as independent turn controls", async () => {
+    const { adapter, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-fixture",
+      historyMode: "ready",
+    })
+
+    await adapter.sendTurn({
+      workspaceId: "workspace-fixture",
+      text: "Deliver the bounded release task.",
+      effort: "high",
+      serviceTier: "priority",
+      planMode: true,
+      goalObjective: "Deliver the bounded release task.",
+      attachmentHandles: [],
+    })
+
+    expect(transport.calls.at(-1)?.request).toMatchObject({
+      effort: "high",
+      serviceTier: "priority",
+      planMode: true,
+      goalObjective: "Deliver the bounded release task.",
     })
   })
 
@@ -383,6 +445,9 @@ describe("CodexWorkspaceSessionAdapter", () => {
         clientUserMessageId: "message-fixture-id",
         text: "",
         effort: "low",
+        serviceTier: null,
+        planMode: false,
+        goalObjective: null,
         attachmentHandles: [attachmentHandle],
       },
     })
@@ -458,11 +523,11 @@ describe("CodexWorkspaceSessionAdapter", () => {
     })
   })
 
-  it("fails closed when model/list does not provide both Fast and Max", async () => {
+  it("fails closed when model/list does not provide reasoning levels", async () => {
     const { adapter, transport } = adapterFixture()
     transport.diagnostic = {
       ...transport.diagnostic,
-      maxAvailable: false,
+      supportedReasoningEfforts: [],
       health: "effort_unavailable",
       errorCode: "CODEX-EFFORT-UNAVAILABLE",
     }
@@ -476,7 +541,10 @@ describe("CodexWorkspaceSessionAdapter", () => {
       connected: false,
       phase: "blocked",
       errorCode: "CODEX-EFFORT-UNAVAILABLE",
-      readiness: { fastAvailable: true, maxAvailable: false },
+      readiness: {
+        fastServiceTier: "priority",
+        supportedReasoningEfforts: [],
+      },
     })
     expect(transport.calls.map(({ command }) => command)).toEqual([
       codexCommands.connect,

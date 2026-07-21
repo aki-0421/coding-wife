@@ -225,14 +225,14 @@ describe("DemoWorkspaceHistoryTransport", () => {
     await transport.request(workspaceHistoryCommands.saveDraft, {
       workspaceId,
       text: "first write",
-      effort: "fast",
+      effort: "off",
       expectedRevision: initial.draft.revision,
     })
     await expect(
       transport.request(workspaceHistoryCommands.saveDraft, {
         workspaceId,
         text: "stale write",
-        effort: "fast",
+        effort: "off",
         expectedRevision: initial.draft.revision,
       }),
     ).rejects.toMatchObject({ code: "WORKSPACE-DRAFT-CONFLICT" })

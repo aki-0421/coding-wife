@@ -75,7 +75,18 @@ export type WorkspaceHealth =
   | "unreadable"
   | "read_only"
   | "stale_branch"
-export type WorkspaceReasoningEffort = "fast" | "max"
+export const workspaceReasoningEfforts = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+] as const
+export type WorkspaceReasoningEffort =
+  (typeof workspaceReasoningEfforts)[number]
 export type WorkspaceContextSource = "files" | "git_diff" | "terminal_output"
 
 export interface WorkspaceHistoryStatus {
@@ -148,6 +159,7 @@ export interface PersistedTimelineEvent {
     | "code.session.status.changed"
     | "code.user.instruction.accepted"
     | "code.item.status.changed"
+    | "code.tool.status.changed"
     | "code.message.completed"
     | "code.plan.updated"
     | "code.diff.updated"
@@ -671,7 +683,7 @@ export function parsePersistedWorkspaceDraft(
     value.schemaVersion !== workspaceHistorySchemaVersion ||
     !validatePublicString(value.workspaceId, 128) ||
     !isPublicMultilineText(value.text, 128_000, true) ||
-    !oneOf(value.effort, ["fast", "max"] as const) ||
+    !oneOf(value.effort, [...workspaceReasoningEfforts, "fast"] as const) ||
     !isSafeUnsignedInteger(value.revision) ||
     !isTimestamp(value.updatedAt)
   ) {
@@ -681,7 +693,7 @@ export function parsePersistedWorkspaceDraft(
     schemaVersion: 1,
     workspaceId: value.workspaceId,
     text: value.text,
-    effort: value.effort,
+    effort: value.effort === "fast" ? "low" : value.effort,
     revision: value.revision,
     updatedAt: value.updatedAt,
   }
@@ -826,7 +838,7 @@ function parseCodexHistoryPayload(
     kind === "code.user.instruction.accepted" &&
     hasCodexHistoryShape(payload, ["text", "effort", "attachmentCount"]) &&
     isPublicText(payload.text, 64 * 1024) &&
-    oneOf(payload.effort, ["low", "max"] as const) &&
+    oneOf(payload.effort, workspaceReasoningEfforts) &&
     isSafeUnsignedInteger(payload.attachmentCount) &&
     payload.attachmentCount <= 10
   ) {
@@ -849,6 +861,34 @@ function parseCodexHistoryPayload(
       "contextCompaction",
     ] as const) &&
     oneOf(payload.status, ["running", "completed"] as const)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.tool.status.changed" &&
+    hasCodexHistoryShape(payload, [
+      "itemHandle",
+      "toolKind",
+      "providerName",
+      "toolName",
+      "summary",
+      "durationMs",
+      "status",
+    ]) &&
+    validatePublicString(payload.itemHandle, 128) &&
+    oneOf(payload.toolKind, [
+      "commandExecution",
+      "mcpToolCall",
+      "webSearch",
+    ] as const) &&
+    (payload.providerName === null ||
+      validatePublicString(payload.providerName, 128)) &&
+    validatePublicString(payload.toolName, 128) &&
+    (payload.summary === null || validatePublicString(payload.summary, 512)) &&
+    (payload.durationMs === null ||
+      (isSafeUnsignedInteger(payload.durationMs) &&
+        payload.durationMs <= 24 * 60 * 60 * 1_000)) &&
+    oneOf(payload.status, ["running", "completed", "failed"] as const)
   ) {
     return { ...payload }
   }

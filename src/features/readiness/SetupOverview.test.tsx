@@ -144,6 +144,7 @@ describe("SetupOverview", () => {
         "Codex was found, but its App Server could not start and initialize.",
       ),
     ).toBeVisible()
+    expect(screen.getByText("READINESS-CODEX-DISCONNECTED")).toBeVisible()
     expect(screen.getAllByRole("button", { name: "Recheck" })).toHaveLength(1)
     expect(screen.queryByLabelText("Coding Wife")).not.toBeInTheDocument()
     expect(

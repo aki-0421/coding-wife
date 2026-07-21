@@ -38,15 +38,28 @@ pub struct VerifiedBinaryIdentity {
     pub device: u64,
     pub inode: u64,
     pub size: u64,
+    pub mode: u32,
     pub modified_seconds: i64,
     pub modified_nanoseconds: i64,
+    pub changed_seconds: i64,
+    pub changed_nanoseconds: i64,
     pub executable_sha256: String,
 }
 
 impl VerifiedBinaryIdentity {
-    pub async fn revalidate(&self) -> Result<(), BinaryError> {
-        let observed = inspect_trusted_identity(&self.canonical_path).await?;
-        if observed == *self {
+    pub async fn revalidate_metadata(&self) -> Result<(), BinaryError> {
+        let (canonical_path, observed) = inspect_trusted_metadata(&self.canonical_path).await?;
+        if canonical_path == self.canonical_path
+            && observed.owner_uid == self.owner_uid
+            && observed.device == self.device
+            && observed.inode == self.inode
+            && observed.size == self.size
+            && observed.mode == self.mode
+            && observed.modified_seconds == self.modified_seconds
+            && observed.modified_nanoseconds == self.modified_nanoseconds
+            && observed.changed_seconds == self.changed_seconds
+            && observed.changed_nanoseconds == self.changed_nanoseconds
+        {
             Ok(())
         } else {
             Err(BinaryError::Untrusted)
@@ -65,8 +78,8 @@ pub struct BinaryInfo {
 }
 
 impl BinaryInfo {
-    pub async fn revalidate(&self) -> Result<(), BinaryError> {
-        self.identity.revalidate().await
+    pub async fn revalidate_metadata(&self) -> Result<(), BinaryError> {
+        self.identity.revalidate_metadata().await
     }
 }
 
@@ -99,8 +112,11 @@ struct FileIdentity {
     device: u64,
     inode: u64,
     size: u64,
+    mode: u32,
     modified_seconds: i64,
     modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
 }
 
 impl FileIdentity {
@@ -110,8 +126,11 @@ impl FileIdentity {
             device: metadata.dev(),
             inode: metadata.ino(),
             size: metadata.size(),
+            mode: metadata.permissions().mode(),
             modified_seconds: metadata.mtime(),
             modified_nanoseconds: metadata.mtime_nsec(),
+            changed_seconds: metadata.ctime(),
+            changed_nanoseconds: metadata.ctime_nsec(),
         }
     }
 }
@@ -229,7 +248,7 @@ async fn login_shell_codex_candidate() -> Option<PathBuf> {
     )
     .await
     .ok()?;
-    if !output.status.success() || identity.revalidate().await.is_err() {
+    if !output.status.success() || identity.revalidate_metadata().await.is_err() {
         return None;
     }
     parse_login_shell_candidate(&output.stdout)
@@ -305,7 +324,7 @@ async fn sha256_file(path: &Path) -> Result<String, BinaryError> {
     .map_err(|_| BinaryError::Timeout)?
 }
 
-async fn inspect_trusted_identity(path: &Path) -> Result<VerifiedBinaryIdentity, BinaryError> {
+async fn inspect_trusted_metadata(path: &Path) -> Result<(PathBuf, FileIdentity), BinaryError> {
     let canonical_path = tokio::fs::canonicalize(path)
         .await
         .map_err(|_| BinaryError::Missing)?;
@@ -320,26 +339,29 @@ async fn inspect_trusted_identity(path: &Path) -> Result<VerifiedBinaryIdentity,
 
     let user_uid = current_uid();
     validate_parent_chain(&canonical_path, user_uid)?;
-    let before_metadata = tokio::fs::symlink_metadata(&canonical_path)
+    let metadata = tokio::fs::symlink_metadata(&canonical_path)
         .await
         .map_err(|_| BinaryError::Io)?;
-    let before = FileIdentity::from_metadata(&before_metadata);
-    let mode = before_metadata.permissions().mode();
-    if before_metadata.file_type().is_symlink()
-        || !before_metadata.is_file()
-        || mode & 0o111 == 0
-        || mode & 0o022 != 0
-        || !owner_is_trusted(before.owner_uid, user_uid)
+    let identity = FileIdentity::from_metadata(&metadata);
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || identity.size == 0
+        || identity.size > MAX_VERIFIED_BINARY_BYTES
+        || identity.mode & 0o111 == 0
+        || identity.mode & 0o022 != 0
+        || !owner_is_trusted(identity.owner_uid, user_uid)
     {
         return Err(BinaryError::Untrusted);
     }
+    Ok((canonical_path, identity))
+}
+
+async fn inspect_trusted_identity(path: &Path) -> Result<VerifiedBinaryIdentity, BinaryError> {
+    let (canonical_path, before) = inspect_trusted_metadata(path).await?;
 
     let executable_sha256 = sha256_file(&canonical_path).await?;
-    let after_metadata = tokio::fs::symlink_metadata(&canonical_path)
-        .await
-        .map_err(|_| BinaryError::Io)?;
-    let after = FileIdentity::from_metadata(&after_metadata);
-    if before != after || after_metadata.file_type().is_symlink() || !after_metadata.is_file() {
+    let (after_path, after) = inspect_trusted_metadata(&canonical_path).await?;
+    if canonical_path != after_path || before != after {
         return Err(BinaryError::Untrusted);
     }
 
@@ -349,8 +371,11 @@ async fn inspect_trusted_identity(path: &Path) -> Result<VerifiedBinaryIdentity,
         device: after.device,
         inode: after.inode,
         size: after.size,
+        mode: after.mode,
         modified_seconds: after.modified_seconds,
         modified_nanoseconds: after.modified_nanoseconds,
+        changed_seconds: after.changed_seconds,
+        changed_nanoseconds: after.changed_nanoseconds,
         executable_sha256,
     })
 }
@@ -450,7 +475,7 @@ async fn run_bounded(
     revalidate_before_spawn: bool,
 ) -> Result<BoundedOutput, BinaryError> {
     if revalidate_before_spawn {
-        identity.revalidate().await?;
+        identity.revalidate_metadata().await?;
     }
     let mut command = Command::new(&identity.canonical_path);
     command
@@ -473,7 +498,7 @@ async fn run_bounded(
     let schema_monitor = schema_root
         .map(|root| tokio::spawn(monitor_schema_tree(root.to_path_buf(), abort_tx.clone())));
 
-    if let Err(error) = identity.revalidate().await {
+    if let Err(error) = identity.revalidate_metadata().await {
         process_group_guard
             .terminate_child(&mut child, Duration::from_millis(200))
             .await;
@@ -567,7 +592,7 @@ async fn run_bounded(
         return Err(BinaryError::ProbeFailed);
     }
     process_group_guard.disarm();
-    identity.revalidate().await?;
+    identity.revalidate_metadata().await?;
     if !status.success() {
         return Err(BinaryError::ProbeFailed);
     }
@@ -1191,7 +1216,7 @@ impl Drop for SchemaTempDir {
 }
 
 pub async fn probe_schema(binary: &BinaryInfo) -> Result<SchemaProbe, BinaryError> {
-    binary.revalidate().await?;
+    binary.revalidate_metadata().await?;
     let output_dir = SchemaTempDir::create().await?;
     let args = [
         OsString::from("app-server"),
@@ -1201,13 +1226,13 @@ pub async fn probe_schema(binary: &BinaryInfo) -> Result<SchemaProbe, BinaryErro
         output_dir.path.clone().into_os_string(),
     ];
     run_bounded(&binary.identity, &args, Some(&output_dir.path), true).await?;
-    binary.revalidate().await?;
+    binary.revalidate_metadata().await?;
 
     let root = output_dir.path.clone();
     let schema = tokio::task::spawn_blocking(move || load_schema_set(&root))
         .await
         .map_err(|_| BinaryError::Io)??;
-    binary.revalidate().await?;
+    binary.revalidate_metadata().await?;
     let capabilities =
         structural_capabilities(&schema.documents).ok_or(BinaryError::SchemaUnsupported)?;
 
@@ -1300,7 +1325,7 @@ mod tests {
         std::fs::rename(&replacement, &binary).expect("atomic replacement");
 
         assert!(matches!(
-            identity.revalidate().await,
+            identity.revalidate_metadata().await,
             Err(BinaryError::Untrusted)
         ));
         let _ = std::fs::remove_dir_all(directory);

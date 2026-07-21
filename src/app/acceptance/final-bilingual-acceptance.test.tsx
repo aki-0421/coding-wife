@@ -36,6 +36,7 @@ const copy: Readonly<
       readonly addWorkspace: string
       readonly selectProject: string
       readonly add: string
+      readonly attachFiles: string
       readonly composer: string
       readonly stop: string
       readonly chatTab: string
@@ -65,6 +66,7 @@ const copy: Readonly<
     addWorkspace: "Add workspace",
     selectProject: "Select a project",
     add: "Add",
+    attachFiles: "Attach files & images",
     composer: "Ask Codex to plan, build, explain, or fix anything…",
     stop: "Stop",
     chatTab: "Chat",
@@ -93,6 +95,7 @@ const copy: Readonly<
     addWorkspace: "ワークスペースを追加",
     selectProject: "プロジェクトを選択",
     add: "追加",
+    attachFiles: "ファイル・画像を添付",
     composer: "Codexに計画、実装、説明、修正を依頼…",
     stop: "停止",
     chatTab: "チャット",
@@ -214,6 +217,9 @@ describe("final bilingual App acceptance", () => {
       const addAttachment = screen.getByRole("button", { name: localized.add })
       addAttachment.focus()
       await user.keyboard("{Enter}")
+      await user.click(
+        await screen.findByRole("button", { name: localized.attachFiles }),
+      )
       const acceptedAttachment = await screen.findByText("acceptance.png")
       expect(acceptedAttachment).toBeVisible()
       expect(acceptedAttachment.closest("span[title]")).toHaveAttribute(
@@ -234,6 +240,9 @@ describe("final bilingual App acceptance", () => {
       })
       addAttachment.focus()
       await user.keyboard("{Enter}")
+      await user.click(
+        await screen.findByRole("button", { name: localized.attachFiles }),
+      )
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "CODEX-ATTACHMENT-FILE-TOO-LARGE",
       )
@@ -251,6 +260,9 @@ describe("final bilingual App acceptance", () => {
       })
       addAttachment.focus()
       await user.keyboard("{Enter}")
+      await user.click(
+        await screen.findByRole("button", { name: localized.attachFiles }),
+      )
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "CODEX-ATTACHMENT-EXECUTABLE",
       )
@@ -265,7 +277,7 @@ describe("final bilingual App acceptance", () => {
       expect(workspace.sentTurns[0]).toMatchObject({
         workspaceId: workspace.activeWorkspaceId,
         instruction: "Complete the final acceptance flow",
-        effort: "fast",
+        effort: "off",
         attachments: [
           {
             kind: "image",
@@ -525,12 +537,17 @@ describe("final bilingual App acceptance", () => {
       const addAttachment = screen.getByRole("button", {
         name: localized.add,
       })
-      expect(addAttachment).toBeDisabled()
+      expect(addAttachment).toBeEnabled()
       expect(screen.getByText(localized.pickerUnavailable)).toBeVisible()
       expect(container.querySelector('input[type="file"]')).toBeNull()
 
       addAttachment.focus()
       await user.keyboard("{Enter}")
+      const attachFiles = await screen.findByRole("button", {
+        name: localized.attachFiles,
+      })
+      expect(attachFiles).toBeDisabled()
+      await user.keyboard("{Escape}")
       expect(screen.queryByLabelText(/draft items|下書き項目/iu)).toBeNull()
       expect(document.body).not.toHaveTextContent(/\/(?:Users|home)\//iu)
 
@@ -540,7 +557,7 @@ describe("final bilingual App acceptance", () => {
         viewport: "zoom-200",
         assertions: [
           "The browser demo exposed no native file input or synthetic attachment handle path.",
-          "The disabled attachment action named the native-only boundary in visible localized copy.",
+          "The disabled attachment menu item named the native-only boundary in visible localized copy.",
           "Keyboard activation made no draft or private-path change.",
         ],
       })

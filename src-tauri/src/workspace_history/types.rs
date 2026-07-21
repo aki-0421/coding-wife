@@ -128,15 +128,27 @@ pub enum HistoryMode {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
-    Fast,
+    Off,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
     Max,
+    Ultra,
 }
 
 impl ReasoningEffort {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Fast => "fast",
+            Self::Off => "off",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
             Self::Max => "max",
+            Self::Ultra => "ultra",
         }
     }
 }
@@ -146,8 +158,14 @@ impl TryFrom<&str> for ReasoningEffort {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-            "fast" => Ok(Self::Fast),
+            "off" => Ok(Self::Off),
+            "minimal" => Ok(Self::Minimal),
+            "fast" | "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            "xhigh" => Ok(Self::Xhigh),
             "max" => Ok(Self::Max),
+            "ultra" => Ok(Self::Ultra),
             _ => Err(()),
         }
     }

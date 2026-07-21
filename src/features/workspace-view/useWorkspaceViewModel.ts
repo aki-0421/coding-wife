@@ -44,7 +44,10 @@ export interface ProjectSetupState {
 
 const emptyDraft: WorkspaceDraft = {
   text: "",
-  effort: "fast",
+  effort: "off",
+  fastMode: false,
+  planMode: false,
+  goalMode: false,
   attachments: [],
   contextSnapshots: [],
 }
@@ -53,6 +56,26 @@ const defaultProjectHash =
   "e0da727f2381a1c290ddcb74bdb52b44b0ec890559443d795f29731d68fe1323"
 const defaultCharacterHash =
   "7607f6f22a12f0abed924b078a0e1b202c87e993d67f4346a0c0a2682a1004af"
+const safeErrorCodePattern = /^[A-Z][A-Z0-9-]{2,127}$/u
+
+function safeErrorCode(error: unknown, fallback: string): string {
+  if (typeof error === "string" && safeErrorCodePattern.test(error)) {
+    return error
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    safeErrorCodePattern.test(error.code)
+  ) {
+    return error.code
+  }
+  if (error instanceof Error && safeErrorCodePattern.test(error.message)) {
+    return error.message
+  }
+  return fallback
+}
 
 function projectsForWorkspaces(
   workspaces: readonly WorkspaceRecord[],
@@ -106,8 +129,9 @@ const disconnectedCodexState: WorkspaceCodexState = {
   connected: false,
   readiness: {
     ready: false,
-    fastAvailable: false,
-    maxAvailable: false,
+    fastServiceTier: null,
+    supportedReasoningEfforts: [],
+    experimentalModesAvailable: false,
     reasonCode: "CODEX-NOT-CONNECTED",
   },
   pendingRequests: [],
@@ -127,8 +151,16 @@ function initialCodexState(
     connected: true,
     readiness: {
       ready: true,
-      fastAvailable: true,
-      maxAvailable: true,
+      fastServiceTier: "priority",
+      supportedReasoningEfforts: [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra",
+      ],
+      experimentalModesAvailable: true,
       reasonCode: null,
     },
   }
@@ -182,7 +214,12 @@ function durableTimelineIdentity(
 
 export type TurnUiState = "idle" | "sending" | "running" | "stopping"
 export type WorkspaceAdapterStatus = "loading" | "ready" | "error"
-export type WorkspaceAction = "archive" | "cancel" | "repair" | "unregister"
+export type WorkspaceAction =
+  | "archive"
+  | "cancel"
+  | "recheck"
+  | "repair"
+  | "unregister"
 
 export type WorkspaceActionResult =
   | { readonly ok: true }
@@ -248,9 +285,6 @@ export function useWorkspaceViewModel(
   const [pendingWorkspaceTransition, setPendingWorkspaceTransition] =
     useState<PendingWorkspaceTransition | null>(null)
   const [timeline, setTimeline] = useState<readonly WorkspaceTimelineItem[]>([])
-  const [lastSummary, setLastSummary] = useState<NonNullable<
-    WorkspaceAdapterState["lastSummary"]
-  > | null>(null)
   const [timelineAnchor, setTimelineAnchor] = useState<NonNullable<
     WorkspaceAdapterState["timelineAnchor"]
   > | null>(null)
@@ -291,7 +325,6 @@ export function useWorkspaceViewModel(
     setProjects(state.projects ?? projectsForWorkspaces(state.workspaces))
     setWorkspaces(state.workspaces)
     setTimeline(state.timeline)
-    setLastSummary(state.lastSummary ?? null)
     setTimelineAnchor(state.timelineAnchor ?? null)
     setNextBeforeSequence(state.nextBeforeSequence ?? null)
     setHistory(state.history)
@@ -311,6 +344,9 @@ export function useWorkspaceViewModel(
           [activeWorkspaceId]: {
             text: pendingDraft?.text ?? adapterDraft.text,
             effort: pendingDraft?.effort ?? adapterDraft.effort,
+            fastMode: existing.fastMode ?? false,
+            planMode: existing.planMode ?? false,
+            goalMode: existing.goalMode ?? false,
             attachments: existing.attachments,
             contextSnapshots: adapterDraft.contextSnapshots,
           },
@@ -331,7 +367,6 @@ export function useWorkspaceViewModel(
         setSelectedWorkspaceId("")
         setDrafts({})
         setTimeline([])
-        setLastSummary(null)
         setTimelineAnchor(null)
         setNextBeforeSequence(null)
         setNotice(null)
@@ -586,6 +621,39 @@ export function useWorkspaceViewModel(
     ],
   )
 
+  const setFastMode = useCallback(
+    (fastMode: boolean) => {
+      if (!adapterReady || !selectedWorkspace) return
+      updateDraft(selectedWorkspace.id, (current) => ({
+        ...current,
+        fastMode,
+      }))
+    },
+    [adapterReady, selectedWorkspace, updateDraft],
+  )
+
+  const setPlanMode = useCallback(
+    (planMode: boolean) => {
+      if (!adapterReady || !selectedWorkspace) return
+      updateDraft(selectedWorkspace.id, (current) => ({
+        ...current,
+        planMode,
+      }))
+    },
+    [adapterReady, selectedWorkspace, updateDraft],
+  )
+
+  const setGoalMode = useCallback(
+    (goalMode: boolean) => {
+      if (!adapterReady || !selectedWorkspace) return
+      updateDraft(selectedWorkspace.id, (current) => ({
+        ...current,
+        goalMode,
+      }))
+    },
+    [adapterReady, selectedWorkspace, updateDraft],
+  )
+
   const applyAttachmentRegistration = useCallback(
     (workspaceId: string, response: AttachmentRegistrationResponse) => {
       const additions = attachmentItems(response)
@@ -731,6 +799,10 @@ export function useWorkspaceViewModel(
         editableContextSnapshot.workspaceId !== selectedWorkspace.id
       ) {
         setTurnState("idle")
+        setNotice({
+          tone: "error",
+          message: "CODEX-TURN-CONTEXT-UNAVAILABLE",
+        })
         return false
       }
       if (adapter.recheckWorkspace !== undefined) {
@@ -753,12 +825,19 @@ export function useWorkspaceViewModel(
         selectedWorkspace.health !== "ready"
       ) {
         setTurnState("idle")
+        setNotice({
+          tone: "error",
+          message: `WORKSPACE-REPOSITORY-${selectedWorkspace.health}`,
+        })
         return false
       }
       const request: SendTurnRequest = {
         workspaceId: selectedWorkspace.id,
         instruction: draft.text,
         effort: draft.effort,
+        fastMode: draft.fastMode ?? false,
+        planMode: draft.planMode ?? false,
+        goalMode: draft.goalMode ?? false,
         attachments: draft.attachments,
         contextSnapshots: draft.contextSnapshots,
         editableContextSnapshot,
@@ -767,12 +846,14 @@ export function useWorkspaceViewModel(
       if (sendVersion.current !== version) return false
       if (!result.accepted) {
         setTurnState("idle")
+        setNotice({ tone: "error", message: "CODEX-TURN-NOT-ACCEPTED" })
         return false
       }
 
       updateDraft(selectedWorkspace.id, (current) => ({
         ...current,
         text: "",
+        goalMode: false,
         attachments: [],
         contextSnapshots: [],
       }))
@@ -780,8 +861,14 @@ export function useWorkspaceViewModel(
       setTurnState("running")
       setNotice(null)
       return true
-    } catch {
-      if (sendVersion.current === version) setTurnState("idle")
+    } catch (error) {
+      if (sendVersion.current === version) {
+        setTurnState("idle")
+        setNotice({
+          tone: "error",
+          message: safeErrorCode(error, "CODEX-TURN-START-FAILED"),
+        })
+      }
       return false
     }
   }, [
@@ -1343,7 +1430,7 @@ export function useWorkspaceViewModel(
       ) {
         return { ok: false, errorCode: "WORKSPACE-RECHECK-UNAVAILABLE" }
       }
-      setWorkspaceAction("repair")
+      setWorkspaceAction("recheck")
       try {
         applyAdapterState(await adapter.recheckWorkspace(selectedWorkspace.id))
         setNotice(null)
@@ -1454,7 +1541,6 @@ export function useWorkspaceViewModel(
     projects,
     history,
     initializeProjectGit,
-    lastSummary,
     recheckSelectedWorkspace,
     repairSelectedWorkspace,
     confirmWorkspaceTransition,
@@ -1472,6 +1558,9 @@ export function useWorkspaceViewModel(
     setActiveTab,
     setDraftText,
     setEffort,
+    setFastMode,
+    setPlanMode,
+    setGoalMode,
     setProjectFilterIds,
     setMuted,
     setNotice,

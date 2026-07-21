@@ -1,23 +1,21 @@
 import { describe, expect, it, vi } from "vitest"
-
 import {
-  codexCommands,
-  parseCodexDiagnostic,
-  parseCodexEvent,
+  type CodexEventCallbacks,
+  type CodexTransport,
+  DemoCodexTransport,
+} from "@/features/codex"
+import { CodexComposedWorkspaceViewAdapter } from "@/features/workspace-persistence/codex-composition"
+import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
+import {
   type CodexCommand,
   type CodexEvent,
   type CodexRequestMap,
   type CodexResponseMap,
+  codexCommands,
+  parseCodexDiagnostic,
+  parseCodexEvent,
 } from "@/lib/contracts"
 import fixture from "@/test/fixtures/codex-runtime.v1.json"
-
-import {
-  DemoCodexTransport,
-  type CodexEventCallbacks,
-  type CodexTransport,
-} from "@/features/codex"
-import { CodexComposedWorkspaceViewAdapter } from "@/features/workspace-persistence/codex-composition"
-import { DemoWorkspaceHistoryTransport } from "@/features/workspace-persistence/demo-transport"
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -30,6 +28,7 @@ class CompositionCodexTransport implements CodexTransport {
     readonly request: unknown
   }[] = []
   readonly connectFailures = new Map<string, Error>()
+  connectGate: Promise<void> | null = null
   interruptFailure: Error | null = null
   private callbacks: CodexEventCallbacks | null = null
 
@@ -45,6 +44,12 @@ class CompositionCodexTransport implements CodexTransport {
             (request as CodexRequestMap["codex_connect"]).workspaceId,
           )
           if (failure !== undefined) return Promise.reject(failure)
+          if (this.connectGate !== null) {
+            return this.connectGate.then(
+              () =>
+                parseCodexDiagnostic(fixture.diagnostic) as CodexResponseMap[K],
+            )
+          }
         }
         return Promise.resolve(
           parseCodexDiagnostic(fixture.diagnostic) as CodexResponseMap[K],
@@ -102,6 +107,87 @@ class CompositionCodexTransport implements CodexTransport {
 }
 
 describe("CodexComposedWorkspaceViewAdapter", () => {
+  it("hydrates native workspace state before Codex activation completes", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const codex = new CompositionCodexTransport()
+    let releaseConnect!: () => void
+    codex.connectGate = new Promise<void>((resolve) => {
+      releaseConnect = resolve
+    })
+    const adapter = new CodexComposedWorkspaceViewAdapter(
+      {
+        kind: "tauri",
+        request: (command, request) => history.request(command, request),
+      },
+      codex,
+    )
+
+    const state = await adapter.loadState()
+
+    expect(state.activeWorkspaceId).not.toBeNull()
+    expect(adapter.codexSnapshot()).toMatchObject({
+      activeWorkspaceId: state.activeWorkspaceId,
+      connected: false,
+      phase: "connecting",
+    })
+    await vi.waitFor(() => {
+      expect(
+        codex.calls.filter((call) => call.command === codexCommands.connect),
+      ).toHaveLength(1)
+    })
+
+    releaseConnect()
+    await vi.waitFor(() => {
+      expect(adapter.codexSnapshot()).toMatchObject({
+        activeWorkspaceId: state.activeWorkspaceId,
+        connected: false,
+        phase: "blocked",
+      })
+    })
+  })
+
+  it("single-flights concurrent activation for the same workspace", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const codex = new CompositionCodexTransport()
+    let releaseConnect!: () => void
+    codex.connectGate = new Promise<void>((resolve) => {
+      releaseConnect = resolve
+    })
+    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const loading = adapter.loadState()
+
+    await vi.waitFor(() => {
+      expect(
+        codex.calls.filter((call) => call.command === codexCommands.connect),
+      ).toHaveLength(1)
+    })
+    const connectRequest = codex.calls.find(
+      (call) => call.command === codexCommands.connect,
+    )?.request
+    if (
+      !isRecord(connectRequest) ||
+      typeof connectRequest.workspaceId !== "string"
+    ) {
+      throw new Error("Expected an activation workspace")
+    }
+
+    const firstRecheck = adapter.recheckWorkspace(connectRequest.workspaceId)
+    const secondRecheck = adapter.recheckWorkspace(connectRequest.workspaceId)
+    await vi.waitFor(() => {
+      expect(
+        codex.calls.filter((call) => call.command === codexCommands.connect),
+      ).toHaveLength(1)
+    })
+
+    releaseConnect()
+    await expect(
+      Promise.all([loading, firstRecheck, secondRecheck]),
+    ).resolves.toHaveLength(3)
+    expect(
+      codex.calls.filter((call) => call.command === codexCommands.connect),
+    ).toHaveLength(1)
+  })
+
   it("activates the selected workspace and composes send, attachment, live, and HIST state", async () => {
     const history = new DemoWorkspaceHistoryTransport()
     const codex = new CompositionCodexTransport()
@@ -115,7 +201,11 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       connected: true,
       generation: fixture.thread.generation,
       phase: "ready",
-      readiness: { fastAvailable: true, maxAvailable: true },
+      readiness: {
+        fastServiceTier: "priority",
+        supportedReasoningEfforts: expect.arrayContaining(["low", "max"]),
+        experimentalModesAvailable: true,
+      },
     })
     await expect(
       adapter.pickAttachments(workspaceId, []),
@@ -128,7 +218,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       adapter.sendTurn({
         workspaceId,
         instruction: "Run the focused checks.",
-        effort: "fast",
+        effort: "off",
         attachments: [],
         contextSnapshots: [],
         editableContextSnapshot,
@@ -143,7 +233,10 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     ) {
       throw new Error("Expected a typed turn start request")
     }
-    expect(turnStartRequest.effort).toBe("low")
+    expect(turnStartRequest.effort).toBeNull()
+    expect(turnStartRequest.serviceTier).toBeNull()
+    expect(turnStartRequest.planMode).toBe(false)
+    expect(turnStartRequest.goalObjective).toBeNull()
     expect(turnStartRequest.attachmentHandles).toEqual([])
     expect(turnStartRequest.text).toContain("CODING_WIFE_UNTRUSTED_CONTEXT_V1")
     expect(turnStartRequest.text).toContain(
@@ -203,15 +296,17 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       codex,
     )
     await nativeReadOnly.loadState()
-    expect(nativeReadOnly.codexSnapshot()).toMatchObject({
-      connected: false,
-      phase: "blocked",
+    await vi.waitFor(() => {
+      expect(nativeReadOnly.codexSnapshot()).toMatchObject({
+        connected: false,
+        phase: "blocked",
+      })
     })
     await expect(
       nativeReadOnly.sendTurn({
         workspaceId,
         instruction: "Must remain blocked",
-        effort: "fast",
+        effort: "off",
         attachments: [],
         contextSnapshots: [],
         editableContextSnapshot:
@@ -308,7 +403,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId: fromWorkspaceId,
       instruction: "Finish the owned turn before switching.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -387,7 +482,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId: fromWorkspaceId,
       instruction: "Deduplicate the transition.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -445,7 +540,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Cancel only after terminal cleanup.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -515,7 +610,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Archive only after the exact turn stops.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -594,7 +689,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Keep this workspace if stopping fails.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -637,7 +732,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Preserve lifecycle on interrupt failure.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -757,7 +852,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Finish before quitting.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -826,7 +921,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await adapter.sendTurn({
       workspaceId,
       instruction: "Keep running on interrupt failure.",
-      effort: "fast",
+      effort: "off",
       attachments: [],
       contextSnapshots: [],
       editableContextSnapshot:
@@ -842,7 +937,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         workspaceId,
         expectedGeneration: fixture.thread.generation,
         draftText: "Must not persist after failure",
-        draftEffort: "fast",
+        draftEffort: "off",
       }),
     ).rejects.toThrow("interrupt unavailable")
     expect(

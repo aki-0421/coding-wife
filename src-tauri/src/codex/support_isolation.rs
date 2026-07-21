@@ -40,7 +40,7 @@ pub(super) async fn verify_release(
     schema: &SchemaProbe,
 ) -> Result<(), SupportRuntimeError> {
     binary
-        .revalidate()
+        .revalidate_metadata()
         .await
         .map_err(|_| SupportRuntimeError::UnsupportedRelease)?;
     let observed_schema = probe_schema(binary)

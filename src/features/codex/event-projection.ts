@@ -3,6 +3,7 @@ import type {
   CodexEvent,
   PendingRequestView,
 } from "@/lib/contracts"
+import type { WorkspaceReasoningEffort } from "@/lib/contracts/workspace-history"
 import { unicodeScalarCount } from "@/lib/public-text"
 
 const maxStreamingText = 64 * 1024
@@ -51,7 +52,7 @@ export type CodexSemanticTimelineEvent = CodexTimelineEventBase &
     | {
         readonly kind: "user"
         readonly text: string
-        readonly effort: "low" | "max"
+        readonly effort: WorkspaceReasoningEffort
         readonly attachmentCount: number
       }
     | {
@@ -67,6 +68,10 @@ export type CodexSemanticTimelineEvent = CodexTimelineEventBase &
         readonly kind: "tool"
         readonly itemHandle: string
         readonly toolKind: string
+        readonly providerName: string | null
+        readonly toolName: string
+        readonly summary: string | null
+        readonly durationMs: number | null
         readonly excerpt: string | null
       }
     | {
@@ -107,6 +112,7 @@ export type CodexHistoryEventKind =
   | "code.session.status.changed"
   | "code.user.instruction.accepted"
   | "code.item.status.changed"
+  | "code.tool.status.changed"
   | "code.message.completed"
   | "code.plan.updated"
   | "code.diff.updated"
@@ -142,7 +148,7 @@ export interface AcceptedUserTurn {
   readonly sourceSequence: number
   readonly occurredAt: string
   readonly text: string
-  readonly effort: "low" | "max"
+  readonly effort: WorkspaceReasoningEffort
   readonly attachmentCount: number
 }
 
@@ -216,9 +222,53 @@ function turnKind(status: string): "turn" | "completion" | "error" {
   return "error"
 }
 
+function legacyToolMetadata(toolKind: string) {
+  return {
+    toolKind,
+    providerName: null,
+    toolName:
+      toolKind === "commandExecution"
+        ? "shell"
+        : toolKind === "webSearch"
+          ? "search"
+          : "MCP",
+    summary: null,
+    durationMs: null,
+  } as const
+}
+
+export function sanitizeToolSummary(summary: string | null): string | null {
+  if (summary === null) return null
+  const parts = summary.split(" · ").map((part) => {
+    const match = /^(code|script|expression|source|sourcecode)=(.*)$/iu.exec(
+      part,
+    )
+    if (match === null) return part
+    const value = match[2]?.trim() ?? ""
+    if (/^<\d+ chars>$/u.test(value)) return part
+    return `${match[1]}=<source hidden>`
+  })
+  parts.sort((left, right) => {
+    const target =
+      /^(title|query|ref_?id|url|path|name|file|filename|target)=/iu
+    return Number(target.test(right)) - Number(target.test(left))
+  })
+  return parts.join(" · ")
+}
+
 export class CodexEventProjector {
   private readonly assistantText = new Map<string, string>()
   private readonly toolText = new Map<string, string>()
+  private readonly toolMetadata = new Map<
+    string,
+    {
+      readonly toolKind: string
+      readonly providerName: string | null
+      readonly toolName: string
+      readonly summary: string | null
+      readonly durationMs: number | null
+    }
+  >()
 
   project(event: CodexEvent): CodexEventProjection {
     switch (event.kind) {
@@ -269,15 +319,17 @@ export class CodexEventProjector {
       case "item_status": {
         const stable = stableId(event, "item", event.payload.itemHandle)
         const itemType = event.payload.itemType
-        let timeline: CodexSemanticTimelineEvent
+        let timeline: CodexSemanticTimelineEvent | null
         if (
           ["commandExecution", "mcpToolCall", "webSearch"].includes(itemType)
         ) {
+          const metadata = legacyToolMetadata(itemType)
+          this.toolMetadata.set(stable, metadata)
           timeline = {
             ...base(event, "tool", event.payload.status, stable, true),
             kind: "tool",
             itemHandle: event.payload.itemHandle,
-            toolKind: itemType,
+            ...metadata,
             excerpt: this.toolText.get(stable) ?? null,
           }
         } else if (itemType === "fileChange") {
@@ -288,6 +340,8 @@ export class CodexEventProjector {
             pathAlias: null,
             changeKind: null,
           }
+        } else if (["userMessage", "agentMessage"].includes(itemType)) {
+          timeline = null
         } else {
           timeline = {
             ...base(event, "status", event.payload.status, stable, true),
@@ -302,6 +356,31 @@ export class CodexEventProjector {
           history: history(event, "code.item.status.changed", {
             itemHandle: event.payload.itemHandle,
             itemType,
+            status: event.payload.status,
+          }),
+        }
+      }
+      case "tool_status": {
+        const stable = stableId(event, "item", event.payload.itemHandle)
+        const metadata = {
+          toolKind: event.payload.toolKind,
+          providerName: event.payload.providerName,
+          toolName: event.payload.toolName,
+          summary: sanitizeToolSummary(event.payload.summary),
+          durationMs: event.payload.durationMs,
+        }
+        this.toolMetadata.set(stable, metadata)
+        return {
+          timeline: {
+            ...base(event, "tool", event.payload.status, stable, true),
+            kind: "tool",
+            itemHandle: event.payload.itemHandle,
+            ...metadata,
+            excerpt: this.toolText.get(stable) ?? null,
+          },
+          history: history(event, "code.tool.status.changed", {
+            itemHandle: event.payload.itemHandle,
+            ...metadata,
             status: event.payload.status,
           }),
         }
@@ -373,12 +452,19 @@ export class CodexEventProjector {
           maxToolText,
         )
         this.toolText.set(stable, excerpt)
+        const metadata = this.toolMetadata.get(stable) ?? {
+          toolKind: "commandExecution",
+          providerName: null,
+          toolName: "shell",
+          summary: null,
+          durationMs: null,
+        }
         return {
           timeline: {
             ...base(event, "tool", "streaming", stable, true),
             kind: "tool",
             itemHandle: event.payload.itemHandle,
-            toolKind: "commandExecution",
+            ...metadata,
             excerpt,
           },
           history: history(event, "code.tool.output", {
@@ -442,20 +528,29 @@ export class CodexEventProjector {
       }
       case "diagnostic": {
         const stable = stableId(event, "diagnostic", event.payload.detailRef)
+        const warning = event.payload.code === "CODEX-WARNING"
         return {
-          timeline: {
-            ...base(
-              event,
-              "error",
-              event.payload.willRetry ? "retrying" : "failed",
-              stable,
-              true,
-            ),
-            kind: "error",
-            errorCode: event.payload.code,
-            detailRef: event.payload.detailRef,
-            willRetry: event.payload.willRetry,
-          },
+          timeline: warning
+            ? {
+                ...base(event, "status", "warning", stable, true),
+                kind: "status",
+                itemHandle: null,
+                itemType: "warning",
+                detailRef: event.payload.detailRef,
+              }
+            : {
+                ...base(
+                  event,
+                  "error",
+                  event.payload.willRetry ? "retrying" : "failed",
+                  stable,
+                  true,
+                ),
+                kind: "error",
+                errorCode: event.payload.code,
+                detailRef: event.payload.detailRef,
+                willRetry: event.payload.willRetry,
+              },
           history: history(event, "code.session.diagnostic", event.payload),
         }
       }

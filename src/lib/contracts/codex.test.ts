@@ -144,6 +144,29 @@ describe("Codex runtime contract", () => {
         }),
       ).toThrow(CodexContractError)
     }
+
+    const toolStatus = fixture.events[4]
+    expect(
+      parseCodexEvent({
+        ...toolStatus,
+        payload: {
+          ...toolStatus?.payload,
+          summary: "authorization=[redacted] · ref_id=page-safe",
+        },
+      }),
+    ).toMatchObject({
+      kind: "tool_status",
+      payload: { summary: "authorization=[redacted] · ref_id=page-safe" },
+    })
+    expect(() =>
+      parseCodexEvent({
+        ...toolStatus,
+        payload: {
+          ...toolStatus?.payload,
+          summary: "token=private-value",
+        },
+      }),
+    ).toThrow(CodexContractError)
   })
 
   it("enforces discriminated pending request invariants", () => {

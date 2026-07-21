@@ -1,4 +1,8 @@
-import type { CodexDiagnostic, PendingRequestView } from "@/lib/contracts"
+import type {
+  CodexDiagnostic,
+  PendingRequestView,
+  ReasoningPreset,
+} from "@/lib/contracts"
 
 import type { CodexSemanticTimelineEvent } from "@/features/codex/event-projection"
 import type { CodexSessionSnapshot } from "@/features/codex/session-store"
@@ -19,8 +23,9 @@ export type CodexHistoryMode = "ready" | "read_only" | "recovery_required"
 
 export interface CodexReadiness {
   readonly ready: boolean
-  readonly fastAvailable: boolean
-  readonly maxAvailable: boolean
+  readonly fastServiceTier: string | null
+  readonly supportedReasoningEfforts: readonly ReasoningPreset[]
+  readonly experimentalModesAvailable: boolean
   readonly reasonCode: string | null
 }
 
@@ -45,8 +50,9 @@ type StoreListener = (snapshot: CodexWorkspaceSessionSnapshot) => void
 
 const unavailableReadiness: CodexReadiness = {
   ready: false,
-  fastAvailable: false,
-  maxAvailable: false,
+  fastServiceTier: null,
+  supportedReasoningEfforts: [],
+  experimentalModesAvailable: false,
   reasonCode: "CODEX-NOT-CONNECTED",
 }
 
@@ -54,16 +60,20 @@ export function evaluateCodexReadiness(
   diagnostic: CodexDiagnostic,
   historyMode: CodexHistoryMode,
 ): CodexReadiness {
-  const fastAvailable = diagnostic.modelAvailable && diagnostic.fastAvailable
-  const maxAvailable = diagnostic.modelAvailable && diagnostic.maxAvailable
+  const supportedReasoningEfforts = diagnostic.modelAvailable
+    ? diagnostic.supportedReasoningEfforts
+    : []
+  const fastServiceTier = diagnostic.modelAvailable
+    ? diagnostic.fastServiceTier
+    : null
+  const experimentalModesAvailable = diagnostic.experimentalApiAccepted
   const ready =
     historyMode === "ready" &&
     diagnostic.health === "ready" &&
     diagnostic.childState === "ready" &&
     diagnostic.accountPresent &&
     diagnostic.modelAvailable &&
-    fastAvailable &&
-    maxAvailable &&
+    supportedReasoningEfforts.length > 0 &&
     diagnostic.capabilities.coreLifecycle === "supported" &&
     diagnostic.capabilities.modelDiscovery === "supported"
 
@@ -77,7 +87,7 @@ export function evaluateCodexReadiness(
     reasonCode = "CODEX-AUTH-REQUIRED"
   } else if (!diagnostic.modelAvailable) {
     reasonCode = "CODEX-SOL-UNAVAILABLE"
-  } else if (!fastAvailable || !maxAvailable) {
+  } else if (supportedReasoningEfforts.length === 0) {
     reasonCode = "CODEX-EFFORT-UNAVAILABLE"
   } else if (
     diagnostic.capabilities.coreLifecycle !== "supported" ||
@@ -88,7 +98,13 @@ export function evaluateCodexReadiness(
     reasonCode = "CODEX-CHILD-NOT-READY"
   }
 
-  return { ready, fastAvailable, maxAvailable, reasonCode }
+  return {
+    ready,
+    fastServiceTier,
+    supportedReasoningEfforts,
+    experimentalModesAvailable,
+    reasonCode,
+  }
 }
 
 function phaseFromSession(
@@ -218,6 +234,11 @@ export class CodexWorkspaceSessionStore {
       ...this.current,
       phase: "failed",
       connected,
+      readiness: {
+        ...this.current.readiness,
+        ready: false,
+        reasonCode: errorCode,
+      },
       errorCode,
     })
   }
@@ -228,6 +249,11 @@ export class CodexWorkspaceSessionStore {
       phase: "failed",
       connected: false,
       historyWritable: false,
+      readiness: {
+        ...this.current.readiness,
+        ready: false,
+        reasonCode: errorCode,
+      },
       errorCode,
     })
   }

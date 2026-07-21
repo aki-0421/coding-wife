@@ -30,7 +30,15 @@ export type WorkspaceLifecycle =
   | "backlog"
   | "canceled"
 
-export type ReasoningEffort = "fast" | "max"
+export type ReasoningEffort =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "ultra"
 export type CharacterSemanticState =
   | "idle"
   | "thinking"
@@ -116,6 +124,9 @@ export interface ContextSnapshotItem {
 export interface WorkspaceDraft {
   readonly text: string
   readonly effort: ReasoningEffort
+  readonly fastMode?: boolean
+  readonly planMode?: boolean
+  readonly goalMode?: boolean
   readonly attachments: readonly AttachmentItem[]
   readonly contextSnapshots: readonly ContextSnapshotItem[]
 }
@@ -207,6 +218,9 @@ export interface SendTurnRequest {
   readonly workspaceId: string
   readonly instruction: string
   readonly effort: ReasoningEffort
+  readonly fastMode?: boolean
+  readonly planMode?: boolean
+  readonly goalMode?: boolean
   readonly attachments: readonly AttachmentItem[]
   readonly contextSnapshots: readonly ContextSnapshotItem[]
   readonly editableContextSnapshot: WorkspaceTurnContextSnapshot

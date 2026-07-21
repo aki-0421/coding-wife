@@ -1,15 +1,15 @@
 ---
 title: "出典台帳"
 description: "調査資料で参照するOpenAI、Tauri、Live2D、Git、セキュリティ、Human-AI Interactionの出典と確認論点を管理する。"
-updated: 2026-07-18
-last_verified: 2026-07-18
+updated: 2026-07-21
+last_verified: 2026-07-21
 read_when:
   - "調査結論の根拠を確認する、または公開情報を再検証して出典を更新するとき。"
 ---
 
 # 出典台帳
 
-- 最終確認日: 2026-07-18（JST）
+- 最終確認日: 2026-07-21（JST）
 - 方針: 公式ドキュメント、仕様、標準、一次研究、公式ソースコードを優先した。
 - 注意: 製品・モデル・SDKの仕様は更新される。要件確定時、実装開始時、リリース候補作成時に再確認すること。
 
@@ -22,6 +22,8 @@ read_when:
 **Codex App Server — 公式プロトコル資料および公式ソースコード**
 
 - Codex App Server: <https://developers.openai.com/codex/app-server>
+- Codex App Server README: <https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md>
+- Codex App Server client: <https://github.com/openai/codex/tree/main/codex-rs/app-server-client>
 - App Server protocol `ThreadStartParams`: <https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2/thread.rs>
 - Codex CLIからApp Serverへ開始パラメータを渡す公式実装: <https://github.com/openai/codex/blob/main/codex-rs/exec/src/lib.rs>
 
