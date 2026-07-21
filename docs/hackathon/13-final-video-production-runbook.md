@@ -65,10 +65,10 @@ Required final files:
 | TTS manifest | `tmp/submission-video/evidence/tts-manifest.json` |
 | Media inspection report | `tmp/submission-video/evidence/media-inspection.md` |
 | Every-frame OCR result | `tmp/submission-video/evidence/privacy-ocr.ndjson` |
-| Screenshot 1 | `tmp/submission-video/evidence/screenshot-01-workspace.png` |
-| Screenshot 2 | `tmp/submission-video/evidence/screenshot-02-luna-presence.png` |
-| Screenshot 3 | `tmp/submission-video/evidence/screenshot-03-commit-changes.png` |
-| Screenshot 4 | `tmp/submission-video/evidence/screenshot-04-terra-fail-closed.png` |
+| Screenshot 1 | `tmp/submission-video/evidence/screenshots/screenshot-01-workspace.png` |
+| Screenshot 2 | `tmp/submission-video/evidence/screenshots/screenshot-02-luna-presence.png` |
+| Screenshot 3 | `tmp/submission-video/evidence/screenshots/screenshot-03-commit-changes.png` |
+| Screenshot 4 | `tmp/submission-video/evidence/screenshots/screenshot-04-terra-fail-closed.png` |
 | Final checksums | `tmp/submission-video/evidence/checksums.sha256` |
 
 Before any key or recording work, `git check-ignore -q tmp/.env` and `git check-ignore -q tmp/submission-video` must both succeed. Never stage anything below `tmp/`.
