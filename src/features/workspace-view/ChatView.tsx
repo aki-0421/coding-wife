@@ -31,6 +31,7 @@ import type { ApprovalDecision, PendingRequestView } from "@/lib/contracts"
 import { cn } from "@/lib/utils"
 
 interface ChatViewProps {
+  readonly backgroundExecutionWorkspaceLabel?: string
   readonly characterState: CharacterSemanticState
   readonly connected: boolean
   readonly copy: WorkspaceCopy
@@ -168,6 +169,7 @@ function restoreTimelineAnchor(
 }
 
 export function ChatView({
+  backgroundExecutionWorkspaceLabel,
   characterState,
   connected,
   copy,
@@ -469,6 +471,7 @@ export function ChatView({
         ) : null}
 
         <Composer
+          backgroundExecutionWorkspaceLabel={backgroundExecutionWorkspaceLabel}
           connected={connected}
           copy={copy}
           draft={draft}

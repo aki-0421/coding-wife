@@ -208,7 +208,6 @@ macOS予約shortcutを上書きしない。icon-only操作にはaccessible name�
 
 | key | 日本語 | English |
 |---|---|---|
-| `workspace.switch.stop` | 停止して切替 | Stop and Switch |
 | `workspace.cancel.stop` | 停止してキャンセル | Stop and Cancel |
 | `common.back` | 戻る | Back |
 | `repository.repair` | 再選択して修復 | Repair Location |

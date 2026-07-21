@@ -48,18 +48,6 @@ const en = {
     confirm: "Stop and archive",
     working: "Stopping and archiving…",
   },
-  workspaceSwitch: {
-    title: "Stop and switch workspaces?",
-    description:
-      "The current workspace stays active until its exact turn is interrupted, reaches a terminal state, and finishes local cleanup.",
-    from: "Current workspace",
-    to: "Switch to",
-    goBack: "Go back",
-    confirm: "Stop and switch",
-    stopping: "Stopping and switching…",
-    failed:
-      "The turn could not be stopped and cleaned up. The current workspace remains active; no draft or selection was changed.",
-  },
   projectSetup: {
     title: "Set up project",
     initializeGit: "Initialize Git",
@@ -290,6 +278,8 @@ const en = {
   reconnectingCodex: "Reconnecting…",
   sendEmpty: "Enter an instruction or attach valid context.",
   sendBusy: "Wait for the current turn to finish or stop it.",
+  sendBusyOtherWorkspace: (workspace: string) =>
+    `${workspace} is still running. You can review this workspace now; Send becomes available when that turn finishes.`,
   pickerUnavailable:
     "The native operation is not connected in this preview. No local project state changed.",
   contextUnavailable:
@@ -529,18 +519,6 @@ const ja: typeof en = {
     confirm: "停止してアーカイブ",
     working: "停止してアーカイブ中…",
   },
-  workspaceSwitch: {
-    title: "停止してワークスペースを切り替えますか？",
-    description:
-      "現在のワークスペースは、対象ターンの中断、終了状態の確認、ローカル後処理が完了するまで選択中のままです。",
-    from: "現在のワークスペース",
-    to: "切り替え先",
-    goBack: "戻る",
-    confirm: "停止して切り替え",
-    stopping: "停止して切り替え中…",
-    failed:
-      "ターンの停止と後処理を完了できませんでした。現在のワークスペースを維持し、下書きと選択は変更していません。",
-  },
   projectSetup: {
     title: "プロジェクトをセットアップ",
     initializeGit: "Gitを初期化",
@@ -770,6 +748,8 @@ const ja: typeof en = {
   reconnectingCodex: "再接続中…",
   sendEmpty: "指示を入力するか、有効なコンテキストを追加してください。",
   sendBusy: "現在のturnを完了するか、停止してください。",
+  sendBusyOtherWorkspace: (workspace: string) =>
+    `${workspace} は実行を継続しています。このワークスペースは閲覧でき、対象turnの完了後に送信できます。`,
   pickerUnavailable:
     "このプレビューではnative操作が未接続です。ローカルproject状態は変更していません。",
   contextUnavailable:

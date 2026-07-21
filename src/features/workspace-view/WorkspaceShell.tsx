@@ -201,32 +201,21 @@ export function WorkspaceShell({
   const runningWorkspaceId = sessionInMotion
     ? (view.codex.activeWorkspaceId ?? view.selectedWorkspace?.id ?? null)
     : null
+  const selectedWorkspaceId = view.selectedWorkspace?.id ?? null
+  const selectedOwnsExecution =
+    selectedWorkspaceId !== null &&
+    view.codex.activeWorkspaceId === selectedWorkspaceId
   const characterState = !connected
     ? "disconnected"
-    : view.codex.pendingRequests.length > 0
+    : selectedOwnsExecution && view.codex.pendingRequests.length > 0
       ? "waiting_for_user"
       : view.turnState === "sending"
         ? "thinking"
-        : turnActive
+        : selectedOwnsExecution && turnActive
           ? "acting"
           : "idle"
   const activeTab = view.activeTab
   const registerAttachmentPaths = view.registerAttachmentPaths
-  const selectedWorkspaceId = view.selectedWorkspace?.id ?? null
-  const pendingWorkspaceTransition = view.pendingWorkspaceTransition
-  const transitionFromWorkspace = pendingWorkspaceTransition
-    ? view.workspaces.find(
-        (workspace) =>
-          workspace.id === pendingWorkspaceTransition.fromWorkspaceId,
-      )
-    : undefined
-  const transitionToWorkspace = pendingWorkspaceTransition
-    ? view.workspaces.find(
-        (workspace) =>
-          workspace.id === pendingWorkspaceTransition.toWorkspaceId,
-      )
-    : undefined
-  const transitionStopping = pendingWorkspaceTransition?.status === "stopping"
   const codexGeneration = view.codex.generation
   const workspaceGeneration =
     selectedWorkspaceId !== null &&
@@ -248,12 +237,10 @@ export function WorkspaceShell({
     readonly workspaceGeneration: number
     readonly locale: typeof locale
   } | null>(null)
-  const transitionOriginRef = useRef<HTMLElement | null>(null)
   const explanationPresentationTriggerRef = useRef<HTMLButtonElement | null>(
     null,
   )
   const explanationFocusRestoreVersionRef = useRef(0)
-  const transitionSafeActionRef = useRef<HTMLButtonElement | null>(null)
   const safeQuitRequestRef = useRef<AppCloseRequestedV1 | null>(null)
   const cleanupFailureRef = useRef<AppCleanupFailedV1 | null>(null)
   const safeQuitOperationRef = useRef<Promise<void> | null>(null)
@@ -923,6 +910,11 @@ export function WorkspaceShell({
             value="chat"
           >
             <ChatView
+              backgroundExecutionWorkspaceLabel={
+                view.backgroundExecutionWorkspace === null
+                  ? undefined
+                  : `${view.backgroundExecutionWorkspace.repository}/${view.backgroundExecutionWorkspace.name}`
+              }
               characterState={characterState}
               connected={connected}
               copy={copy}
@@ -964,9 +956,13 @@ export function WorkspaceShell({
               runtimeError={runtime.state.status === "error"}
               timeline={view.timeline}
               timelineAnchor={view.timelineAnchor}
-              pendingRequestIds={view.codex.pendingRequests.map(
-                (request) => request.pendingId,
-              )}
+              pendingRequestIds={
+                selectedOwnsExecution
+                  ? view.codex.pendingRequests.map(
+                      (request) => request.pendingId,
+                    )
+                  : []
+              }
               reconnecting={
                 view.workspaceAction === "recheck" ||
                 view.codex.phase === "connecting"
@@ -1111,90 +1107,6 @@ export function WorkspaceShell({
               {archivePendingWorkspaceId !== null
                 ? copy.archiveDialog.working
                 : copy.archiveDialog.confirm}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open && !transitionStopping) view.cancelWorkspaceTransition()
-        }}
-        open={pendingWorkspaceTransition !== null}
-      >
-        <DialogContent
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            const origin = transitionOriginRef.current
-            transitionOriginRef.current = null
-            window.requestAnimationFrame(() => origin?.focus())
-          }}
-          onEscapeKeyDown={(event) => {
-            event.preventDefault()
-            if (!transitionStopping) view.cancelWorkspaceTransition()
-          }}
-          onOpenAutoFocus={(event) => {
-            event.preventDefault()
-            if (document.activeElement instanceof HTMLElement) {
-              transitionOriginRef.current = document.activeElement
-            }
-            transitionSafeActionRef.current?.focus()
-          }}
-          showCloseButton={false}
-        >
-          <DialogHeader>
-            <DialogTitle>{copy.workspaceSwitch.title}</DialogTitle>
-            <DialogDescription>
-              {copy.workspaceSwitch.description}
-            </DialogDescription>
-          </DialogHeader>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-md gap-y-sm rounded-control border border-divider bg-muted/40 p-md text-caption">
-            <dt className="text-muted-foreground">
-              {copy.workspaceSwitch.from}
-            </dt>
-            <dd className="m-0 truncate font-medium text-text-strong">
-              {transitionFromWorkspace
-                ? `${transitionFromWorkspace.repository}/${transitionFromWorkspace.name}`
-                : pendingWorkspaceTransition?.fromWorkspaceId}
-            </dd>
-            <dt className="text-muted-foreground">{copy.workspaceSwitch.to}</dt>
-            <dd className="m-0 truncate font-medium text-text-strong">
-              {transitionToWorkspace
-                ? `${transitionToWorkspace.repository}/${transitionToWorkspace.name}`
-                : pendingWorkspaceTransition?.toWorkspaceId}
-            </dd>
-          </dl>
-          {transitionStopping ? (
-            <p
-              aria-live="polite"
-              className="m-0 text-caption text-muted-foreground"
-              role="status"
-            >
-              {copy.workspaceSwitch.stopping}
-            </p>
-          ) : null}
-          <DialogFooter>
-            <Button
-              disabled={transitionStopping}
-              onClick={view.cancelWorkspaceTransition}
-              ref={transitionSafeActionRef}
-              type="button"
-              variant="ghost"
-            >
-              {copy.workspaceSwitch.goBack}
-            </Button>
-            <Button
-              disabled={transitionStopping}
-              onClick={() =>
-                void view.confirmWorkspaceTransition(
-                  copy.workspaceSwitch.failed,
-                )
-              }
-              type="button"
-            >
-              {transitionStopping
-                ? copy.workspaceSwitch.stopping
-                : copy.workspaceSwitch.confirm}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -41,6 +41,7 @@ import type {
 } from "@/features/workspace-view/types"
 
 interface ComposerProps {
+  readonly backgroundExecutionWorkspaceLabel?: string
   readonly connected: boolean
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
@@ -123,6 +124,7 @@ function safeConnectionReason(reasonCode: string | null): string {
 }
 
 export function Composer({
+  backgroundExecutionWorkspaceLabel,
   connected,
   copy,
   draft,
@@ -153,6 +155,8 @@ export function Composer({
     validAttachments.length > 0 ||
     draft.contextSnapshots.length > 0
   const isBusy = turnState !== "idle"
+  const backgroundExecutionActive =
+    backgroundExecutionWorkspaceLabel !== undefined
   const goalObjectiveLength = Array.from(draft.text.trim()).length
   const goalObjectiveValid =
     !draft.goalMode || (goalObjectiveLength > 0 && goalObjectiveLength <= 4_000)
@@ -164,18 +168,21 @@ export function Composer({
     repositoryReady &&
     hasContent &&
     goalObjectiveValid &&
+    !backgroundExecutionActive &&
     turnState === "idle"
   const disabledReason = !connected
     ? copy.sendUnavailable
     : repositoryHealth !== undefined && repositoryHealth !== "ready"
       ? copy.workspaceHealth[repositoryHealth]
-      : isBusy
-        ? copy.sendBusy
-        : !goalObjectiveValid
-          ? copy.goalInstructionRequired
-          : !hasContent
-            ? copy.sendEmpty
-            : ""
+      : backgroundExecutionWorkspaceLabel !== undefined
+        ? copy.sendBusyOtherWorkspace(backgroundExecutionWorkspaceLabel)
+        : isBusy
+          ? copy.sendBusy
+          : !goalObjectiveValid
+            ? copy.goalInstructionRequired
+            : !hasContent
+              ? copy.sendEmpty
+              : ""
   const availableReasoningLevels = reasoningOrder.filter(
     (effort) =>
       effort === "off" ||
@@ -309,7 +316,10 @@ export function Composer({
               }
             }}
             onPaste={(event) => {
-              if (onRegisterAttachmentPaths !== undefined) {
+              if (
+                !backgroundExecutionActive &&
+                onRegisterAttachmentPaths !== undefined
+              ) {
                 const paths = clipboardFilePaths(event.clipboardData)
                 if (paths.length > 0) {
                   event.preventDefault()
@@ -379,6 +389,16 @@ export function Composer({
           </div>
         ) : null}
 
+        {backgroundExecutionWorkspaceLabel !== undefined ? (
+          <p
+            className="m-0 mt-xs text-pretty text-caption text-muted-foreground"
+            data-background-execution-status=""
+            role="status"
+          >
+            {copy.sendBusyOtherWorkspace(backgroundExecutionWorkspaceLabel)}
+          </p>
+        ) : null}
+
         <div className="flex min-h-7 items-center gap-xs pt-sm">
           <div className="flex shrink-0 items-center gap-xxs">
             <Popover onOpenChange={setAddOpen} open={addOpen}>
@@ -405,7 +425,9 @@ export function Composer({
                 </p>
                 <Button
                   className="w-full justify-start"
-                  disabled={onPickAttachments === undefined}
+                  disabled={
+                    backgroundExecutionActive || onPickAttachments === undefined
+                  }
                   onClick={() => {
                     setAddOpen(false)
                     if (onPickAttachments !== undefined)

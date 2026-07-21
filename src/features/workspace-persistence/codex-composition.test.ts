@@ -391,7 +391,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     }
   })
 
-  it("selects the target only after the exact old turn is terminal and cleaned up", async () => {
+  it("selects the target immediately and activates it after the old turn is terminal", async () => {
     const history = new DemoWorkspaceHistoryTransport()
     const historyRequest = vi.spyOn(history, "request")
     const codex = new CompositionCodexTransport()
@@ -417,22 +417,19 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     codex.emit({ ...running, workspaceId: fromWorkspaceId })
     codex.emit({ ...pending, workspaceId: fromWorkspaceId })
 
-    const switching = adapter.stopAndSwitchWorkspace({
-      fromWorkspaceId,
-      toWorkspaceId,
-      expectedGeneration: fixture.thread.generation,
-    })
-    await vi.waitFor(() =>
-      expect(codex.calls.at(-1)?.command).toBe(codexCommands.turnInterrupt),
+    await expect(adapter.selectWorkspace(toWorkspaceId)).resolves.toMatchObject(
+      {
+        activeWorkspaceId: toWorkspaceId,
+      },
     )
     expect(
-      historyRequest.mock.calls.filter(
-        ([command]) => command === "workspace_select",
+      codex.calls.filter(
+        ({ command }) => command === codexCommands.turnInterrupt,
       ),
     ).toHaveLength(0)
     expect(adapter.codexSnapshot()).toMatchObject({
       activeWorkspaceId: fromWorkspaceId,
-      phase: "stopping",
+      phase: "waiting",
       pendingRequests: [
         expect.objectContaining({ pendingId: "pending_handle_fixture" }),
       ],
@@ -445,15 +442,13 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       sequence: 3,
       payload: { ...running.payload, status: "interrupted" },
     })
-    await expect(switching).resolves.toMatchObject({
-      activeWorkspaceId: toWorkspaceId,
-    })
-
-    expect(adapter.codexSnapshot()).toMatchObject({
-      activeWorkspaceId: toWorkspaceId,
-      phase: "ready",
-      pendingRequests: [],
-    })
+    await vi.waitFor(() =>
+      expect(adapter.codexSnapshot()).toMatchObject({
+        activeWorkspaceId: toWorkspaceId,
+        phase: "ready",
+        pendingRequests: [],
+      }),
+    )
     const historyCalls = historyRequest.mock.calls
     const terminalAppendIndex = historyCalls.findIndex(
       ([command, request]) =>
@@ -468,61 +463,8 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         request.workspaceId === toWorkspaceId,
     )
     expect(terminalAppendIndex).toBeGreaterThanOrEqual(0)
-    expect(targetSelectIndex).toBeGreaterThan(terminalAppendIndex)
-  })
-
-  it("deduplicates an identical stop-and-switch request", async () => {
-    const history = new DemoWorkspaceHistoryTransport()
-    const historyRequest = vi.spyOn(history, "request")
-    const codex = new CompositionCodexTransport()
-    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
-    const state = await adapter.loadState()
-    const fromWorkspaceId = state.activeWorkspaceId
-    if (fromWorkspaceId === null) throw new Error("active fixture workspace")
-    await adapter.sendTurn({
-      workspaceId: fromWorkspaceId,
-      instruction: "Deduplicate the transition.",
-      effort: "off",
-      attachments: [],
-      contextSnapshots: [],
-      editableContextSnapshot:
-        await adapter.getTurnContextSnapshot(fromWorkspaceId),
-    })
-    const running = parseCodexEvent(fixture.events[0])
-    if (running.kind !== "turn_status") throw new Error("turn fixture")
-    codex.emit({ ...running, workspaceId: fromWorkspaceId })
-    const request = {
-      fromWorkspaceId,
-      toWorkspaceId: "sol-desktop",
-      expectedGeneration: fixture.thread.generation,
-    } as const
-
-    const first = adapter.stopAndSwitchWorkspace(request)
-    const duplicate = adapter.stopAndSwitchWorkspace(request)
-    expect(duplicate).toBe(first)
-    codex.emit({
-      ...running,
-      workspaceId: fromWorkspaceId,
-      eventId: "event-deduplicated-terminal",
-      sequence: 2,
-      payload: { ...running.payload, status: "interrupted" },
-    })
-    await expect(first).resolves.toMatchObject({
-      activeWorkspaceId: "sol-desktop",
-    })
-    expect(
-      historyRequest.mock.calls.filter(
-        ([command, request]) =>
-          command === "workspace_select" &&
-          isRecord(request) &&
-          request.workspaceId === "sol-desktop",
-      ),
-    ).toHaveLength(1)
-    expect(
-      codex.calls.filter(
-        ({ command }) => command === codexCommands.turnInterrupt,
-      ),
-    ).toHaveLength(1)
+    expect(targetSelectIndex).toBeGreaterThanOrEqual(0)
+    expect(targetSelectIndex).toBeLessThan(terminalAppendIndex)
   })
 
   it("waits for exact terminal cleanup and history flush before canceling once", async () => {
@@ -763,7 +705,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     ).toMatchObject({ workspaceId, lifecycle: workspace.lifecycle })
   })
 
-  it("rejects stale transitions and restores the old workspace after target activation failure", async () => {
+  it("keeps the selected workspace when delayed Codex activation fails", async () => {
     const history = new DemoWorkspaceHistoryTransport()
     const historyRequest = vi.spyOn(history, "request")
     const codex = new CompositionCodexTransport()
@@ -785,37 +727,16 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     if (running.kind !== "turn_status") throw new Error("turn fixture")
     codex.emit({ ...running, workspaceId: fromWorkspaceId })
 
-    await expect(
-      adapter.stopAndSwitchWorkspace({
-        fromWorkspaceId,
-        toWorkspaceId,
-        expectedGeneration: fixture.thread.generation + 1,
-      }),
-    ).rejects.toThrow("WORKSPACE-TRANSITION-STALE")
-    expect(
-      codex.calls.filter(
-        ({ command }) => command === codexCommands.turnInterrupt,
-      ),
-    ).toHaveLength(0)
-    expect(
-      historyRequest.mock.calls.filter(
-        ([command]) => command === "workspace_select",
-      ),
-    ).toHaveLength(0)
-
     codex.connectFailures.set(
       toWorkspaceId,
       Object.assign(new Error("target unavailable"), {
         code: "CODEX-TARGET-UNAVAILABLE",
       }),
     )
-    const switching = adapter.stopAndSwitchWorkspace({
-      fromWorkspaceId,
-      toWorkspaceId,
-      expectedGeneration: fixture.thread.generation,
-    })
-    await vi.waitFor(() =>
-      expect(codex.calls.at(-1)?.command).toBe(codexCommands.turnInterrupt),
+    await expect(adapter.selectWorkspace(toWorkspaceId)).resolves.toMatchObject(
+      {
+        activeWorkspaceId: toWorkspaceId,
+      },
     )
     codex.emit({
       ...running,
@@ -825,20 +746,23 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       payload: { ...running.payload, status: "interrupted" },
     })
 
-    await expect(switching).rejects.toMatchObject({
-      code: "CODEX-TARGET-UNAVAILABLE",
-    })
-    expect(adapter.codexSnapshot()).toMatchObject({
-      activeWorkspaceId: fromWorkspaceId,
-      phase: "ready",
-    })
+    await vi.waitFor(() =>
+      expect(
+        codex.calls.some(
+          ({ command, request }) =>
+            command === codexCommands.connect &&
+            isRecord(request) &&
+            request.workspaceId === toWorkspaceId,
+        ),
+      ).toBe(true),
+    )
     const selected = await history.request("workspace_list", undefined)
-    expect(selected.activeWorkspaceId).toBe(fromWorkspaceId)
+    expect(selected.activeWorkspaceId).toBe(toWorkspaceId)
     expect(
       historyRequest.mock.calls
         .filter(([command]) => command === "workspace_select")
         .map(([, request]) => (isRecord(request) ? request.workspaceId : null)),
-    ).toEqual([toWorkspaceId, fromWorkspaceId])
+    ).toEqual([toWorkspaceId])
   })
 
   it("deduplicates safe quit and flushes the exact terminal event before the draft", async () => {

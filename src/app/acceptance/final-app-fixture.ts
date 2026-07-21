@@ -31,7 +31,6 @@ import type {
   WorkspaceCodexState,
   WorkspaceCreateRequest,
   WorkspaceRecord,
-  WorkspaceTransitionRequest,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 import type { AcceptanceResourceSnapshot } from "@/app/acceptance/final-acceptance-harness"
@@ -301,15 +300,6 @@ export class FinalAcceptanceWorkspaceFixture implements WorkspaceViewAdapter {
   selectWorkspace = (workspaceId: string): Promise<WorkspaceAdapterState> => {
     this.requireWorkspace(workspaceId)
     this.activate(workspaceId)
-    return Promise.resolve(this.snapshot())
-  }
-
-  stopAndSwitchWorkspace = (
-    request: WorkspaceTransitionRequest,
-  ): Promise<WorkspaceAdapterState> => {
-    this.requireWorkspace(request.fromWorkspaceId)
-    this.requireWorkspace(request.toWorkspaceId)
-    this.activate(request.toWorkspaceId)
     return Promise.resolve(this.snapshot())
   }
 

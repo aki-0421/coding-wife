@@ -232,6 +232,16 @@ export class CodexWorkspaceSessionAdapter {
     listener: (snapshot: CodexWorkspaceSessionSnapshot) => void,
   ): (() => void) => this.store.subscribe(listener)
 
+  isExecutionActive(workspaceId: string): boolean {
+    const snapshot = this.store.snapshot()
+    return (
+      snapshot.activeWorkspaceId === workspaceId &&
+      (this.turnStart !== null ||
+        ["running", "waiting", "stopping"].includes(snapshot.phase) ||
+        snapshot.pendingRequests.length > 0)
+    )
+  }
+
   async start(): Promise<void> {
     if (this.started) return
     if (this.startPromise !== null) return this.startPromise
