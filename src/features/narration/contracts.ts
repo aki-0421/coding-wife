@@ -398,6 +398,29 @@ const privateTextPatterns = [
   /(?:^|[^a-z0-9])(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|aws[_-]?session[_-]?token|cookie|session(?:[_-]?id)?)\s*[:=]\s*["']?\S+/iu,
 ] as const
 
+const presenceDirectionBareFilenamePattern =
+  /(?:^|[^A-Za-z0-9._@+-])(?:Dockerfile|Makefile|\.[A-Za-z][A-Za-z0-9_-]*|[A-Za-z0-9][A-Za-z0-9._@+-]*\.(?:bash|c|cc|conf|config|cpp|css|csv|env|fish|go|graphql|h|hpp|html?|ini|java|js|json|jsonl|jsx|key|kt|kts|less|lock|log|markdown|md|pem|php|proto|py|rb|rs|sass|scss|sh|sql|swift|toml|ts|tsv|tsx|txt|xml|ya?ml|zsh))(?=$|[^A-Za-z0-9_])/iu
+
+const presenceDirectionCodeOrDiffPatterns = [
+  /```|~~~/u,
+  /(?:^| )diff --git(?: |$)/iu,
+  /(?:^| )index [a-f0-9]+\.\.[a-f0-9]+(?: |$)/iu,
+  /(?:^| )@@(?: |[-+]\d)/u,
+  /(?:^| )(?:---|\+\+\+)(?: |$)/u,
+  /(?:^|[^\p{L}\p{N}_])(?:fn|function)\s+[\p{L}_][\p{L}\p{N}_]*\s*\([^)]*\)\s*\{/iu,
+  /(?:^|[^\p{L}\p{N}_])(?:const|let|var)\s+(?:mut\s+)?[\p{L}_][\p{L}\p{N}_]*\s*=/iu,
+  /(?:^|[^\p{L}\p{N}_])(?:class|enum|impl|interface|struct)\s+[\p{L}_][\p{L}\p{N}_]*\s*(?:\{|<)/iu,
+  /(?:^|[^\p{L}\p{N}_])[\p{L}_][\p{L}\p{N}_]*\s*\([^)]*\)\s*=>/u,
+  /(?:^|[^\p{L}\p{N}_])console\.log\s*\(/iu,
+  /(?:^|[^\p{L}\p{N}_])[\p{L}_][\p{L}\p{N}_.]*\s*\([^)]*\)\s*(?:[;{}])/u,
+  /(?:^| )[+-](?:return\b|\s*(?:class|const|fn|function|let|var)\b|\s*[{}])/iu,
+  /\{[^{}]*:[^{}]*\}/u,
+  /<\/?[A-Za-z][^>]*>/u,
+] as const
+
+const presenceDirectionOpaqueTokenPattern =
+  /\b(?:[a-f0-9]{32,}|[a-z0-9_+=-]{40,})\b/iu
+
 const unicodeWhitespacePattern = /^\p{White_Space}$/u
 const unicodePathBoundaryPattern = /^(?:\p{White_Space}|\p{P}|\p{S})$/u
 
@@ -669,6 +692,21 @@ const presencePriorityByTrigger: Readonly<
   turn_completed: "normal",
 }
 
+function hasSingleSpaceCanonicalWhitespace(
+  characters: readonly string[],
+): boolean {
+  let previousWasSpace = false
+  for (const character of characters) {
+    if (!unicodeWhitespacePattern.test(character)) {
+      previousWasSpace = false
+      continue
+    }
+    if (character !== " " || previousWasSpace) return false
+    previousWasSpace = true
+  }
+  return true
+}
+
 function isPresenceDirectionUtterance(value: unknown): value is string {
   if (typeof value !== "string") return false
   const characters: string[] = []
@@ -679,6 +717,7 @@ function isPresenceDirectionUtterance(value: unknown): value is string {
   return (
     characters.length >= 1 &&
     value.trim() === value &&
+    hasSingleSpaceCanonicalWhitespace(characters) &&
     !characters.some(
       (character) =>
         /\p{Cc}|\p{Cf}|\p{Zl}|\p{Zp}/u.test(character) ||
@@ -687,7 +726,12 @@ function isPresenceDirectionUtterance(value: unknown): value is string {
     ) &&
     !privateTextPatterns.some((pattern) => pattern.test(value)) &&
     !/(?:https?|file|ftp):|www\./iu.test(value) &&
-    !/(?:^|\s)(?:diff\s+--git|@@|---\s|\+\+\+\s|```)/u.test(value)
+    !value.includes("<external>") &&
+    !presenceDirectionBareFilenamePattern.test(value) &&
+    !presenceDirectionCodeOrDiffPatterns.some((pattern) =>
+      pattern.test(value),
+    ) &&
+    !presenceDirectionOpaqueTokenPattern.test(value)
   )
 }
 

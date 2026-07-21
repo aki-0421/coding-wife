@@ -142,6 +142,46 @@ describe("narration contracts", () => {
     }
   })
 
+  it("accepts ordinary Japanese and English Luna reactions", () => {
+    for (const [locale, utterance] of [
+      ["ja", "実装の要点がきれいにまとまりましたね。"],
+      ["en", "That is a clear step forward."],
+    ] as const) {
+      expect(
+        parsePresenceDirectionEvent(presenceDirection({ locale, utterance })),
+      ).toMatchObject({ locale, utterance })
+    }
+  })
+
+  it("rejects non-canonical, code, diff, and file-like Luna utterances", () => {
+    const unsafeUtterances = [
+      "空白が  二つあります。",
+      "This contains\u00a0a non-breaking space.",
+      "```ts const ready = true; ```",
+      "diff --git old new",
+      "@@ -1 +1 @@",
+      "--- previous +++ current",
+      "+return true;",
+      "-return false;",
+      "fn main(){}",
+      "const ready = true;",
+      'console.log("ready");',
+      "<main>Ready</main>",
+      "README.md を確認しました。",
+      "secret-config.yaml is ready.",
+      "private.pem secret.key Dockerfile Makefile",
+      "diff --git old new @@ -1 +1 @@ -return false; +return true;",
+      "console.log('secret') <div>secret</div>",
+    ]
+
+    for (const utterance of unsafeUtterances) {
+      expect(
+        () => parsePresenceDirectionEvent(presenceDirection({ utterance })),
+        `unsafe utterance accepted: ${utterance}`,
+      ).toThrowError("PRESENCE-DIRECTION-ENVELOPE")
+    }
+  })
+
   it("rejects unsafe, extended, cross-role, and mismatched presence events", () => {
     const invalidEvents = [
       presenceDirection({ extra: true }),

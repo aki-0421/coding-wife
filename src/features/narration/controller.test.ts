@@ -555,6 +555,42 @@ describe("NarrationController", () => {
     )
   })
 
+  it("drops privacy-invalid Luna text before caption state or TTS", async () => {
+    const { controller, gateway } = await ready(true)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+
+    for (const [index, utterance] of [
+      "空白が  二つあります。",
+      "```ts const ready = true; ```",
+      "diff --git old new",
+      "@@ -1 +1 @@",
+      "+return true;",
+      "-return false;",
+      "fn main(){}",
+      "README.md を確認しました。",
+      "secret-config.yaml is ready.",
+      "private.pem secret.key Dockerfile Makefile",
+      "console.log('secret') <div>secret</div>",
+    ].entries()) {
+      expect(
+        controller.consumePresence(
+          presenceEvent({
+            requestId: `privacy-invalid-${index}`,
+            sourceEventId: `privacy-invalid-source-${index}`,
+            utterance,
+          }),
+        ),
+      ).toBe(false)
+    }
+
+    expect(controller.getSnapshot().presence).toBeNull()
+    expect(gateway.speech).toHaveLength(0)
+  })
+
   it("rejects stale, duplicate, locale-mismatched, and lower-priority Luna captions", async () => {
     const { controller } = await ready(true)
     await controller.setScope({
