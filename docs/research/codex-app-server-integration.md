@@ -412,8 +412,24 @@ decision_request の場合:
     - id: string
       label: string
       description: string
+  context:
+    schemaVersion: 1
+    category: user_decision
+    targetKind: active_turn
+    targetAlias: active_turn
+    effect: continue_turn
+    scope: turn
+    risk: low | medium | high
+    reversibility: reversible | partially_reversible | not_reversible | unknown
+    recommendation: option id | null
+    evidence: string[]
+    uncertainty: none | limited_context | unknown_effects
   allowFreeform: false
 ~~~
+
+`outputSchema`とRust parserは、選択binaryのStructured Output backendが受理するJSON Schema subsetの範囲で同じ制約を持つ。共通rootは`additionalProperties=false`かつ全8 fieldをrequiredにし、各nested objectもunknown fieldを拒否する。`schemaVersion`は1固定で、`kind`は`result`または`decision_request`だけを許可する。`result.message`は1〜65,536 scalar、`decision_request`のmessageとquestionは1〜4,096 scalar、decision IDとoption IDは1〜128 scalar、option labelは1〜256 scalar、descriptionは0〜1,024 scalar、optionsは2〜3件、evidenceは1〜8件かつ各1〜512 scalarとする。
+
+variant間のnull/non-null関係を表すroot `oneOf`等のkeywordは、0.144.5のproduction dataを使わない最小turn probeで受理を確認できた場合だけ採用する。backendが拒否するkeywordを送ってturn自体を失敗させず、未表現のvariant制約はRust parserでfail closedにする。option IDとlabelの横断unique、recommendationが同じoptionsに属すること、evidenceのunique、control character・secret・private pathを含むprivacy判定、表示前redactionはJSON Schemaだけへ委ねずparserを最終正本とする。
 
 assistant のStructured Output deltaはJSON envelopeのtransport断片なのでWebViewへ表示・保存しない。最終出力を検証し、`result`ならredact済み`message`だけを会話へ出し、`decision_request`なら全decision fieldと`allowFreeform=false`を満たす場合だけdecision UIを出す。Markdown、コードブロック、自然文からJSONらしき部分を抽出しない。approvalはこのenvelopeで代替しない。
 

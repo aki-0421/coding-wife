@@ -97,7 +97,7 @@ read_when:
 | `CODE-F-064` | 利用者は既定選択肢以外を入力できる | Otherを選ぶと1〜2,000文字の入力欄が開き、送信またはcancelまでcardと入力を保持する | Approved | 非該当 |
 | `CODE-F-065` | 利用者はdecisionを保留またはturnを中断できる | Holdは回答を送らずwaiting状態を維持し、Interruptは確認後にturn interruptを要求する | Approved | 非該当 |
 | `CODE-F-066` | 利用者はapproval対象を確認して許可・拒否できる | `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/permissions/requestApproval`だけをoperation、scope、対象path/host、risk、可逆性、推奨付きcardへ正規化し、Approve once、Reject、Stopを元request IDへ1回だけ返す。未知methodは許可せずBlockedにする | Approved | 非該当 |
-| `CODE-F-067` | experimental user-input APIがない時も質問を失わない | initializeでexperimental APIを明示交渉し、`item/tool/requestUserInput`がない場合は通常assistant出力のversion付きdecision schemaだけを同じcardへ正規化する。`result`では`decisionId`、`question`、`options`、`context`をnullに限定し、decisionに影響しないbooleanの`allowFreeform`は無視して`message`を受理する。`decision_request`では全decision fieldと`allowFreeform=false`を厳格検証し、schema不正や自由文だけの曖昧なapprovalは回答UIにせず安全に停止する | Approved | 非該当 |
+| `CODE-F-067` | experimental user-input APIがない時も質問を失わない | initializeでexperimental APIを明示交渉し、`item/tool/requestUserInput`がない場合は通常assistant出力のversion付きdecision schemaだけを同じcardへ正規化する。`result`ではbounded `message`以外のdecision fieldをnullに限定し、decisionに影響しないbooleanの`allowFreeform`は無視する。`decision_request`ではbounded message、decision ID、question、2〜3 options、exact `DecisionContext`、`allowFreeform=false`を要求する。JSON Schemaで表現でき、選択binaryのStructured Output backendが受理する制約は`outputSchema`とRust parserの両方で同じにし、option間unique、recommendation membership、privacyはparserを最終正本とする。schema不正や自由文だけの曖昧なapprovalは回答UIにせず安全に停止する | Approved | 非該当 |
 | `CODE-F-068` | UIはキャラクターの感情で回答を誘導しない | option順、推奨根拠、riskを文字で示し、Live2D表情・音声を選択肢の有利不利に対応させない | Approved | 非該当 |
 
 ### Attachment・context・停止・復旧
