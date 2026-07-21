@@ -28,6 +28,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
 import type { CodexSemanticTimelineEvent } from "@/features/codex"
 import { useI18n } from "@/features/localization"
+import type { ChatTimelineEvent } from "@/features/workspace-view/chat-timeline"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type {
   WorkspaceAdapterState,
@@ -61,46 +62,6 @@ type PendingTimelineEvent = Extract<
   CodexSemanticTimelineEvent,
   { readonly kind: "decision" | "approval" }
 >
-
-export type ChatTimelineEvent = Extract<
-  WorkspaceTimelineItem,
-  {
-    readonly kind:
-      | "user"
-      | "assistant"
-      | "plan"
-      | "tool"
-      | "file"
-      | "diff"
-      | "decision"
-      | "approval"
-      | "error"
-  }
->
-
-export function isChatTimelineEvent(
-  event: WorkspaceTimelineItem,
-): event is ChatTimelineEvent {
-  switch (event.kind) {
-    case "user":
-    case "assistant":
-    case "plan":
-    case "tool":
-    case "file":
-    case "diff":
-    case "decision":
-    case "approval":
-    case "error":
-      return true
-    case "history":
-    case "status":
-    case "thread":
-    case "turn":
-    case "completion":
-    case "request_resolved":
-      return false
-  }
-}
 
 const otherAnswerId = "__coding_wife_other__"
 

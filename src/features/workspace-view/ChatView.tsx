@@ -13,11 +13,9 @@ import {
   useNarrationSnapshot,
 } from "@/features/narration"
 import { Composer } from "@/features/workspace-view/Composer"
+import { isChatTimelineEvent } from "@/features/workspace-view/chat-timeline"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
-import {
-  isChatTimelineEvent,
-  Timeline,
-} from "@/features/workspace-view/Timeline"
+import { Timeline } from "@/features/workspace-view/Timeline"
 import type { TurnUiState } from "@/features/workspace-view/useWorkspaceViewModel"
 import type {
   CharacterSemanticState,
