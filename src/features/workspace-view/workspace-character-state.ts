@@ -36,20 +36,24 @@ function completionCueMatches(
 }
 
 function snapshotCompletionSource(
-  codex: WorkspaceCodexState,
+  activeWorkspaceId: string | null,
+  generation: number | null,
+  phase: WorkspaceCodexState["phase"],
 ): CompletionSourceSnapshot | null {
-  if (codex.activeWorkspaceId === null) return null
+  if (activeWorkspaceId === null) return null
   return {
-    workspaceId: codex.activeWorkspaceId,
-    generation: codex.generation,
-    phase: codex.phase,
+    workspaceId: activeWorkspaceId,
+    generation,
+    phase,
   }
 }
 
 function cueFromCompletionTransition(
   previous: CompletionSourceSnapshot | null,
   current: CompletionSourceSnapshot | null,
-  codex: WorkspaceCodexState,
+  connected: boolean,
+  errorCode: string | null,
+  pendingRequestCount: number,
 ): CharacterCompletionCue | null {
   if (
     current === null ||
@@ -58,9 +62,9 @@ function cueFromCompletionTransition(
     !isCompletionSourcePhase(previous.phase) ||
     previous.workspaceId !== current.workspaceId ||
     previous.generation !== current.generation ||
-    !codex.connected ||
-    codex.errorCode !== null ||
-    codex.pendingRequests.length > 0
+    !connected ||
+    errorCode !== null ||
+    pendingRequestCount > 0
   ) {
     return null
   }
@@ -73,23 +77,41 @@ function cueFromCompletionTransition(
 export function useCompletedCharacterCue(
   codex: WorkspaceCodexState,
 ): CharacterCompletionCue | null {
+  const { activeWorkspaceId, connected, errorCode, generation, phase } = codex
+  const pendingRequestCount = codex.pendingRequests.length
   const previousSourceRef = useRef<CompletionSourceSnapshot | null>(
-    snapshotCompletionSource(codex),
+    snapshotCompletionSource(activeWorkspaceId, generation, phase),
   )
   const [cue, setCue] = useState<CharacterCompletionCue | null>(null)
-  const currentSource = snapshotCompletionSource(codex)
+  const currentSource = snapshotCompletionSource(
+    activeWorkspaceId,
+    generation,
+    phase,
+  )
   const transitionCue = cueFromCompletionTransition(
     previousSourceRef.current,
     currentSource,
-    codex,
+    connected,
+    errorCode,
+    pendingRequestCount,
   )
 
   useEffect(() => {
     const previous = previousSourceRef.current
-    const current = snapshotCompletionSource(codex)
+    const current = snapshotCompletionSource(
+      activeWorkspaceId,
+      generation,
+      phase,
+    )
     previousSourceRef.current = current
 
-    const completedCue = cueFromCompletionTransition(previous, current, codex)
+    const completedCue = cueFromCompletionTransition(
+      previous,
+      current,
+      connected,
+      errorCode,
+      pendingRequestCount,
+    )
     const completionIdentityChanged =
       current !== null &&
       previous !== null &&
@@ -99,9 +121,9 @@ export function useCompletedCharacterCue(
       if (
         current?.phase !== "completed" ||
         completionIdentityChanged ||
-        !codex.connected ||
-        codex.errorCode !== null ||
-        codex.pendingRequests.length > 0
+        !connected ||
+        errorCode !== null ||
+        pendingRequestCount > 0
       ) {
         setCue(null)
       }
@@ -124,19 +146,19 @@ export function useCompletedCharacterCue(
 
     return () => window.clearTimeout(timeout)
   }, [
-    codex.activeWorkspaceId,
-    codex.connected,
-    codex.errorCode,
-    codex.generation,
-    codex.pendingRequests.length,
-    codex.phase,
+    activeWorkspaceId,
+    connected,
+    errorCode,
+    generation,
+    pendingRequestCount,
+    phase,
   ])
 
   const activeCue =
     currentSource?.phase === "completed" &&
-    codex.connected &&
-    codex.errorCode === null &&
-    codex.pendingRequests.length === 0 &&
+    connected &&
+    errorCode === null &&
+    pendingRequestCount === 0 &&
     completionCueMatches(
       cue,
       currentSource.workspaceId,
