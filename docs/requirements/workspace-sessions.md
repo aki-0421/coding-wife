@@ -105,6 +105,8 @@ read_when:
 
 `RepositoryIdentityV1`は、symlinkをたどらず検証したGit common directoryのfilesystem device/inodeとGit object formatをnativeだけで保持する。通常のpath renameでは同一identityを維持し、copy、別volumeへの移動、Git directory置換、object format変更はidentity不一致としてrepairせず新規project追加を要求する。Project IDはappが一度だけ発行するopaque UUIDであり、path、workspace、branch、character selectionのいずれからも再生成しない。
 
+app管理linked worktreeのmain Codex write authorityはworkspace rootを既定境界とし、Gitのstage・commitに必要なworkspace固有per-worktree Git directoryと同一repositoryのcommon Git directoryだけを例外として扱う。例外pathは保存値をそのまま信用せず、Send直前にworkspaceのnon-symlink `.git` marker、Git plumbing、保存済みfilesystem identityからnativeで再導出・canonicalizeし、current user所有、ancestorを含むnon-group/world-writable、writeable、同一repository identityを全て満たす時だけApp Serverへ渡す。project working tree、他worktreeのper-worktree Git directory、markerから導出されないdirectory、symlinkまたは`..`によるescapeは許可しない。通常のin-tree `.git` repositoryはworkspace rootだけで完結させ、追加rootを持たせない。検証失敗または利用中App Serverの契約で限定追加rootを表現できない場合はwrite authorityを広げずturn開始をfail closedにする。
+
 ## 実装参照と変更時の不変条件
 
 | 境界 | 正本 | 変更時に同時確認する範囲 |
