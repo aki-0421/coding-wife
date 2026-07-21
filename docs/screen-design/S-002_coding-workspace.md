@@ -131,7 +131,7 @@ commit explainerのrequest、status、delta、result、failureはChat timeline�
 
 timeline最下部から48px以内なら新eventで追従する。48pxを超えて離れた場合は位置を固定し、`新しい更新 N件 / 最新へ`をcomposer上へ表示する。復元時はevent anchor IDとoffsetを使い、消失時だけ最寄りsequenceへ補正する。
 
-Chatには正常時のdurability badgeを表示しない。native SQLiteの`read_only` / `recovery_required`だけを回復alertとして表示し、browser demoはheaderの`Preview only / プレビューのみ`、詳細な履歴状態はDiagnosticsを正本とする。Chat上端にはCodex、Git、履歴の接続状態をまとめた汎用noticeを表示しない。nativeでCodex activationまたはruntimeが利用不能な場合はChatを描画せず、[S-001](S-001_session-dashboard.md)の全viewport overview setupへ戻す。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
+Chatには正常時のdurability badgeを表示しない。native SQLiteの`read_only` / `recovery_required`だけを回復alertとして表示し、browser demoはheaderの`Preview only / プレビューのみ`、詳細な履歴状態はDiagnosticsを正本とする。Chat上端にはCodex、Git、履歴の接続状態をまとめた汎用noticeを表示しない。app-wide App Server connectionが利用不能な場合だけComposerへ接続回復UIを表示する。個別workspaceのthread開始・再開が失敗した場合はdraftとapp-wide接続表示を維持し、対象workspaceのComposerへthread error codeと再試行だけを表示する。`Codex is not connected`、`Codexに接続されていません`または同等のglobal connection copyをworkspace errorへ使用しない。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
 
 ### Composer
 

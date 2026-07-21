@@ -17,7 +17,7 @@ read_when:
 
 ## 実装上の不変条件
 
-1. main App Server processはstartup restore後に1件だけ起動してアプリ終了まで全workspaceで共有し、turn開始と全mutationをactivation token、workspace、thread、process generationへ束縛する。workspace selectionはprocess lifecycleと独立させ、stale response/event/errorを選択中storeへ適用せず、accepted stale turnはexact旧turnをinterruptして旧workspaceへだけterminalを保存する。
+1. main App Server processはstartup restore後にworkspace非依存のapp-private runtime rootから1件だけ起動してアプリ終了まで全workspaceで共有し、turn開始と全mutationをactivation token、workspace、thread、process generationへ束縛する。App Server connection requestとdiagnosticはworkspace IDを受け取らない。workspace selectionはprocess lifecycleと独立させ、stale response/event/errorを選択中storeへ適用せず、accepted stale turnはexact旧turnをinterruptして旧workspaceへだけterminalを保存する。
 2. `gpt-5.6-sol`だけを許可し、各turnでmodelと`low`または`max`を明示する。service tierは送らない。
 3. 切断後にuser turnを自動再送しない。interrupt responseはterminal eventとして扱わない。
 4. command approval、file change approval、permissions approvalの3 methodだけを受け付ける。未知request、invalid RUI、未登録dynamic toolはfail closedにしてactive turnをinterruptする。
@@ -36,9 +36,10 @@ read_when:
 17. main turnのpublic instruction上限32,000 Unicode scalarと、contextを含む合成text上限80,000 Unicode scalarを分離する。Rust supervisorは後者をApp Server送信前に再検証し、exact 80,000を受理、80,001、NUL、空textかつattachmentなしを拒否する。multibyte文字もUTF-8 byte数ではなく1 scalarとして数える。この変更はsupport専用input/outputの64KiB byte上限を変更しない。
 18. repositoryのfocus recheckとSend直前recheckが同じworkspaceのCodex activationを同時に要求した場合は、同じworkspace・history modeの1件へsingle-flight化する。readyな同一sessionをrepository recheckだけで再生成せず、送信前activationの競合で接続済みgenerationをstaleにしない。
 19. Sendは`codex_turn_start`の受理後だけdraftを消去する。context取得、repository recheck、activation、preflight、transport、受理拒否のいずれで失敗してもworkspace固有draftとattachmentを保持し、raw例外ではなく安全なerror codeをComposer noticeへ表示する。
-20. workspace履歴のhydrationはCodex activationを待たない。履歴snapshot適用後に通常shellを描画し、選択workspaceのconnectとthread start/resumeをbackground single-flightとして開始する。接続中はSendだけを無効にし、timeline、draft、navigationを利用可能に保つ。
-21. 現在の設定pathと一致するverified binary identity、`health=ready`のactive runtimeに対する重複connectとidle workspace切替はprocessとgenerationを変更せず現在のdiagnosticを返す。workspaceごとのnormalizer、opaque thread handle、sequenceはprocess内contextとして退避・復元する。active/pending turn中はruntime contextを切り替えず、view selectionだけを変更する。明示pathの変更・解除、process crash、protocol violationではready runtimeを再利用せず、旧process treeの終了収束後にreplacementを1件だけ起動する。
-22. stable initializeに成功したsetup evidenceはexact verified binary identityへ束縛する。同じidentityに対する繰り返しsetup診断は短命processを追加起動せず、通常connectionのfull handshake成功もsetup evidenceを更新する。identityまたはtrust metadataが変わったevidenceを再利用しない。
+20. workspace履歴のhydrationはCodex thread activationを待たない。履歴snapshot適用後に通常shellを描画し、app-wide connectionの現在diagnosticを参照して選択workspaceのthread start/resumeだけをbackground single-flightとして開始する。thread準備中はSendだけを無効にし、timeline、draft、navigationを利用可能に保つ。
+21. 現在の設定pathと一致するverified binary identity、`health=ready`のactive runtimeはアプリ全体で1件だけ所有する。workspace選択・作成・recheckはconnectを呼ばず、processとgenerationを変更しない。workspaceごとのnormalizer、opaque thread handle、sequenceは同じprocess内contextとして退避・復元する。active/pending turn中はruntime contextを切り替えず、view selectionだけを変更する。明示pathの変更・解除、process crash、protocol violationではready runtimeを再利用せず、旧process treeの終了収束後にreplacementを1件だけ起動する。
+22. `CodexWorkspaceSessionAdapter`はevent subscriptionとapp-wide connectをapp lifecycle中に各1回だけ開始する。workspace activationはcached global diagnosticを読み、thread start/resumeだけを呼ぶ。thread commandのserver error、stale handle、policy mismatchはworkspace storeのthread errorにし、global `connected`とreadinessを変更しない。connection lost、process exit、protocol violationだけがglobal connection errorを発行する。
+23. stable initializeに成功したsetup evidenceはexact verified binary identityへ束縛する。同じidentityに対する繰り返しsetup診断は短命processを追加起動せず、通常connectionのfull handshake成功もsetup evidenceを更新する。identityまたはtrust metadataが変わったevidenceを再利用しない。
 
 ## Binary trustとprobe境界
 
@@ -48,7 +49,7 @@ read_when:
 
 supervisorが設定pathを既存binary identityへ束縛する時は、入力表記ではなくcanonical pathを比較する。macOSの`/var`と`/private/var`のように同じ実体へ解決される表記では以前のidentityをexpected evidenceとして維持し、同一path上の差し替えをfail closedで検知する。異なるcanonical pathへの明示変更だけは以前のidentityへ束縛せず、新しいbinaryとして検証する。
 
-起動時は`NativeReadinessService`が`WorkspaceHistoryService`のstartup restore barrierを待ち、保存済みactive workspaceを取得してから`CodexSupervisor.connect`を開始する。これがverified binaryのdiscovery、schema生成、experimental initialize、account/read、config/read、model/listとmain App Serverの長寿命runtime確立を一度だけ行う。復元前のprocess cwdによる失敗snapshotを公開してはならない。WebViewのworkspace hydrationとNative readinessが同時にconnectしても同じsupervisor lifecycle lockへ入り、後続はready runtimeを再利用する。active workspaceがまだ無い初回setupだけはbounded setup probeを許すが、workspace作成後の最初のconnectから同じ長寿命runtimeを使う。通常接続失敗はoverviewへ戻さず、Composerに安全なreason codeと明示的な再接続操作を表示し、再試行の成否にかかわらずworkspace固有draftを保持する。
+起動時は`NativeReadinessService`が`WorkspaceHistoryService`のstartup restore barrierを待ち、workspace selectionとは無関係に`CodexSupervisor.connect`を開始する。production setupがsupervisorへowner-only app-private runtime rootを渡し、これをprocess cwdと`config/read`の初期参照に使う。connectはrequest bodyを持たず、verified binaryのdiscovery、schema生成、experimental initialize、account/read、config/read、model/listとmain App Serverの長寿命runtime確立を一度だけ行う。WebViewのworkspace hydrationはconnectを呼ばず、global diagnosticがreadyになった後にthread start/resumeだけを開始する。通常接続失敗はoverviewへ戻さず、Composerに安全なreason codeと明示的な再接続操作を表示し、再試行の成否にかかわらずworkspace固有draftを保持する。workspace threadだけの失敗ではこの接続回復UIを表示しない。
 
 この境界を変更した時は`cargo test --manifest-path src-tauri/Cargo.toml --test codex_supervisor workspace_switch_reuses_app_server_process_and_workspace_context -- --test-threads=1`で二つのworkspaceがversion、schema、process、initializeを各1回だけ共有し、thread contextを復元することを確認する。起動順序を変更した時は`cargo test --manifest-path src-tauri/Cargo.toml workspace_history::service::tests::native_consumers_wait_for_restore_and_mutations_fail_while_pending`でnative listとreadinessの両方がrestore中に完了しないことを確認する。設定pathとidentityの束縛を変更した時は`cargo test --locked --manifest-path src-tauri/Cargo.toml --test codex_supervisor readiness_probe_blocks_a_changed_configured_binary_without_turn_mutation -- --test-threads=1`でcanonical aliasを経由しても差し替えを拒否することを確認する。UI側は`pnpm exec vitest run src/features/workspace-persistence/codex-composition.test.ts src/features/readiness/SetupOverview.test.tsx src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`で実行中workspaceを止めずに別workspaceへ移動できること、旧event/pending requestを新viewへ混在させないこと、旧turn terminal後に現在selectionを同じruntimeへactivateすることを確認する。wall clockの秒数を合否条件にしない。
 
@@ -78,9 +79,10 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 
 | 責務             | 正本                                      | composition層の動作                                                                                                                                          |
 | ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| active workspace | workspace historyのopaque workspace ID    | 選択確定後だけ`codex_connect`へ同じIDを渡す。pathを要求・保持しない                                                                                          |
-| 接続可否         | `CodexDiagnostic`                         | `health=ready`、core lifecycle/model discovery supported、Sol、1件以上の広告済みreasoning effort、accountが揃う場合だけSend可能にする                         |
-| thread           | Codex supervisor                          | workspace activationごとにconnect後、compositionが開始した所有threadを再利用し、所有handleが無い時だけ1件開始する。他clientの一覧結果を自動採用しない        |
+| App Server connection | `CodexDiagnostic`                    | app lifecycleでrequest bodyのない`codex_connect`を1回だけ行う。workspace ID、selection、threadを接続判定へ渡さない                                            |
+| active workspace | workspace historyのopaque workspace ID    | selectionをReact viewへ即時適用し、App Server connectionを変更せずthread commandのworkspace IDだけでnative contextをactivateする                                |
+| 接続可否         | app-wide `CodexDiagnostic`                | `health=ready`、core lifecycle/model discovery supported、Sol、1件以上の広告済みreasoning effort、accountが揃う場合だけthread activationへ進む                 |
+| thread           | Codex supervisor                          | workspace activationごとに所有threadを再利用し、所有handleが無い時だけ1件開始する。他clientの一覧結果を自動採用せず、失敗をglobal connectionへ昇格しない      |
 | turn受理         | `codex_turn_start` response               | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport、受理拒否ではdraftとattachmentを保持し、安全なerror codeを表示する      |
 | live state       | generation別`CodexSessionStore`           | workspace ID、generation、sequenceを全て照合し、旧workspaceまたは旧generation eventを現在表示へ混ぜない                                                      |
 | durable timeline | workspace history writer                  | CodexEventをallowlist済みsemantic eventへ投影してから追記する。Structured Outputのassistant deltaは破棄し、検証済みcompleted message、error、decision、approval、terminalを永続正本にする |

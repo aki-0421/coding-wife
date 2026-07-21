@@ -171,7 +171,7 @@ capabilities:
 ### プロセス所有
 
 - Rust が codex app-server --listen stdio:// を直接 spawn する。
-- startup restore後にtrusted active workspaceとverified binaryが揃った時点でmain App Serverを1件起動し、workspaceごとのthreadを同じstdio connection上で管理する。workspace選択ではprocessを停止・再spawn・再initializeしない。
+- startup restore後にworkspace非依存のapp-private runtime rootとverified binaryでmain App Serverを1件起動し、workspaceごとのthreadを同じstdio connection上で管理する。connect requestとdiagnosticへworkspace IDを渡さず、workspace選択・作成ではprocessを停止・再spawn・再initialize・再connectしない。
 - active/pending turn中のworkspaceと表示中workspaceは異なってよい。process supervisorはactive turnのworkspace contextをterminalまで保持し、UI selectionだけを切り替える。terminal後に現在selectionのcontextへ移る。
 - analytics-default-enabled は指定せず、App Server の既定 off を維持する。
 - stdout は JSONL protocol 専用、stderr は診断専用として別 task で読む。
