@@ -574,25 +574,27 @@ test("CLI rejects unsafe or contradictory options without echoing them", async (
 })
 
 test("README, testing instructions, package commands, and CI separate PR and release gates", async () => {
-  const [packageText, readme, testingInstructions, workflow, qualityRunner] =
-    await Promise.all([
-      readFile(path.join(repositoryRoot, "package.json"), "utf8"),
-      readFile(path.join(repositoryRoot, "README.md"), "utf8"),
-      readFile(path.join(repositoryRoot, "docs", "testing.md"), "utf8"),
-      readFile(
-        path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
-        "utf8",
-      ),
-      readFile(
-        path.join(
-          repositoryRoot,
-          "scripts",
-          "quality",
-          "run-quality-gates.mjs",
-        ),
-        "utf8",
-      ),
-    ])
+  const [
+    packageText,
+    readme,
+    testingInstructions,
+    workflow,
+    qualityRunner,
+    attributes,
+  ] = await Promise.all([
+    readFile(path.join(repositoryRoot, "package.json"), "utf8"),
+    readFile(path.join(repositoryRoot, "README.md"), "utf8"),
+    readFile(path.join(repositoryRoot, "docs", "testing.md"), "utf8"),
+    readFile(
+      path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
+      "utf8",
+    ),
+    readFile(
+      path.join(repositoryRoot, "scripts", "quality", "run-quality-gates.mjs"),
+      "utf8",
+    ),
+    readFile(path.join(repositoryRoot, ".gitattributes"), "utf8"),
+  ])
   const packageJson = JSON.parse(packageText)
 
   assert.deepEqual(Object.keys(packageJson.scripts), [
@@ -649,6 +651,11 @@ test("README, testing instructions, package commands, and CI separate PR and rel
     /actions\/setup-node@[a-f0-9]{40} # v[0-9]+\.[0-9]+\.[0-9]+/u,
   )
   assert.doesNotMatch(workflow, /uses: [^\n]+@v[0-9]+(?:\s|$)/u)
+  assert.match(attributes, /^\* text=auto eol=lf$/mu)
+  assert.match(
+    attributes,
+    /^src-tauri\/resources\/characters\/builtin-hiyori\/NOTICE\.txt -text$/mu,
+  )
   assert.doesNotMatch(workflow, /pnpm quality:check/u)
   assert.doesNotMatch(workflow, /pnpm test:release(?:\s|$)/u)
   assert.doesNotMatch(workflow, /pnpm tauri:build/u)

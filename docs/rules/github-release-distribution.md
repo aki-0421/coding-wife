@@ -82,7 +82,7 @@ Coding-Wife-v<version>-Linux-x64.AppImage.sha256
 
 automatic updater signatureと`latest.json`は生成しない。root `LICENSE`はproject-owned codeのMIT再配布条件を定め、`pnpm licenses:generate`はrootとbyte一致する`CODING-WIFE-LICENSE.txt`を第三者通知と同じlegal resource treeへ同期する。全platform bundleはproject license、依存台帳、Live2D/Hiyoriの原文NOTICE・termsを保持する。
 
-macOS jobは正本であるApple Silicon依存graphを再計算して`pnpm licenses:check`を通す。Windows/Linux jobはhost固有の依存解決を正本へ混ぜず、`pnpm licenses:check:packaged`でcommitted inventoryのlock hash、license policy summary、packaged legal treeのbyte一致を検証してからbundleする。Windows checkoutのCRLFも同じlock parserで受理する。
+macOS jobは正本であるApple Silicon依存graphを再計算して`pnpm licenses:check`を通す。Windows/Linux jobはhost固有の依存解決を正本へ混ぜず、`pnpm licenses:check:packaged`でcommitted inventoryのlock hash、license policy summary、packaged legal treeのbyte一致を検証してからbundleする。`.gitattributes`はtext checkoutをLFへ固定し、lock hashとpackaged notice bytesを全runnerで一致させる。byte固定のHiyori noticeだけは`-text`を維持する。
 
 ## 公開前gate
 
