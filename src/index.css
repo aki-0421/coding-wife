@@ -281,6 +281,11 @@
     container-type: inline-size;
   }
 
+  .git-changes-panel {
+    container-name: git-changes;
+    container-type: inline-size;
+  }
+
   .character-pane {
     grid-row: 2;
     grid-column: 2;
@@ -306,6 +311,20 @@
 
   [data-slot="scroll-area-viewport"] > div {
     min-width: 0;
+  }
+}
+
+@container git-changes (max-width: 760px) {
+  .git-file-compact-selector {
+    display: flex;
+  }
+
+  .git-changes-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .git-file-navigator {
+    display: none;
   }
 }
 

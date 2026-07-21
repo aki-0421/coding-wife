@@ -9,14 +9,12 @@ import {
 } from "react"
 import {
   AlertCircleIcon,
-  GitBranchIcon,
-  PanelLeftOpenIcon,
+  GitCommitHorizontalIcon,
   RefreshCwIcon,
   XIcon,
 } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -25,9 +23,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   Tooltip,
   TooltipContent,
@@ -45,12 +41,10 @@ import type { GitReviewTransport } from "@/features/git-review/transport"
 import { useGitReview } from "@/features/git-review/use-git-review"
 import type { SupportedLocale } from "@/features/localization/types"
 import type {
-  CommitEvidenceFilter,
   CommitExplanationController,
   CommitExplanationControllerStateV1,
 } from "@/lib/contracts/git-review"
 import { parseCommitExplanationControllerState } from "@/lib/contracts/git-review"
-import { cn } from "@/lib/utils"
 
 export interface EvidenceViewProps {
   readonly workspaceId: string
@@ -113,39 +107,13 @@ function useCommitExplanationControllerState(
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-function CollectionLoading({
-  characterVisible,
-  loadingText,
-}: {
-  readonly characterVisible: boolean
-  readonly loadingText: string
-}) {
+function CollectionLoading({ loadingText }: { readonly loadingText: string }) {
   return (
-    <div
-      className={cn(
-        "grid min-h-0",
-        characterVisible
-          ? "grid-cols-1"
-          : "grid-cols-[280px_minmax(0,1fr)] min-[1280px]:grid-cols-[300px_minmax(0,1fr)] max-[840px]:grid-cols-1",
-      )}
-    >
-      <aside
-        className={cn(
-          "min-h-0 flex-col gap-sm border-r border-divider p-md",
-          characterVisible ? "hidden" : "flex max-[840px]:hidden",
-        )}
-      >
-        <Skeleton className="h-6 w-1/2" />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-24 w-full" />
-      </aside>
-      <div className="flex min-h-0 flex-col gap-lg p-xl" aria-live="polite">
-        <span className="sr-only">{loadingText}</span>
-        <Skeleton className="h-6 w-2/3" />
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-48 w-full" />
-      </div>
+    <div className="flex min-h-0 flex-col gap-lg p-xl" aria-live="polite">
+      <span className="sr-only">{loadingText}</span>
+      <Skeleton className="h-6 w-2/3" />
+      <Skeleton className="h-12 w-full" />
+      <Skeleton className="h-48 w-full" />
     </div>
   )
 }
@@ -153,22 +121,15 @@ function CollectionLoading({
 function ErrorAlert({
   title,
   description,
-  code,
-  errorCodeLabel,
 }: {
   readonly title: string
   readonly description: string
-  readonly code: string
-  readonly errorCodeLabel: string
 }) {
   return (
     <Alert>
       <AlertCircleIcon aria-hidden="true" />
       <AlertTitle>{title}</AlertTitle>
-      <AlertDescription>
-        {description} {errorCodeLabel}:{" "}
-        <code className="font-mono">{code}</code>
-      </AlertDescription>
+      <AlertDescription>{description}</AlertDescription>
     </Alert>
   )
 }
@@ -265,16 +226,14 @@ export function EvidenceView({
       window.cancelAnimationFrame(focusFrame)
       document.removeEventListener("keydown", handleKeyDown)
     }
-  }, [active, closeDrawer, drawerOpen, review.collectionStatus])
+  }, [active, closeDrawer, drawerOpen])
 
-  const observation = review.observation
   const refreshing = review.observationStatus === "loading"
-  const selectedWorkUnitId = review.detail?.workUnitId ?? null
   const explanationContextReady =
     active &&
     commitExplanationController !== undefined &&
     review.observationStatus === "ready" &&
-    observation?.supportState === "ready" &&
+    review.observation?.supportState === "ready" &&
     review.detailStatus === "ready"
 
   const selectCommit = (commitEvidenceId: string) => {
@@ -299,139 +258,46 @@ export function EvidenceView({
     <TooltipProvider>
       <main
         aria-label={copy.title}
-        className="grid size-full min-h-0 grid-rows-[minmax(64px,auto)_minmax(0,1fr)] bg-app-bg"
+        className="grid size-full min-h-0 grid-rows-[40px_minmax(0,1fr)] bg-app-bg"
         data-evidence-character={characterVisible || undefined}
       >
-        <header className="flex min-w-0 flex-wrap items-center gap-sm border-b border-divider bg-surface px-lg py-xs max-[680px]:px-md">
+        <header className="flex min-w-0 items-center gap-xs border-b border-divider bg-surface px-sm">
+          <Button
+            aria-controls="commit-list-drawer"
+            aria-expanded={active && drawerOpen}
+            aria-label={copy.openCommitList}
+            className="min-w-0"
+            onClick={openDrawer}
+            type="button"
+            variant="ghost"
+          >
+            <GitCommitHorizontalIcon data-icon="inline-start" />
+            <span className="truncate">
+              {copy.commitCount(review.items.length)}
+            </span>
+          </Button>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-controls="commit-list-drawer"
-                aria-expanded={active && drawerOpen}
-                aria-label={copy.openCommitList}
-                className={cn(
-                  characterVisible
-                    ? "inline-flex"
-                    : "hidden max-[840px]:inline-flex",
-                )}
-                onClick={openDrawer}
+                aria-label={copy.refreshAccessible}
+                aria-busy={refreshing}
+                className="ml-auto"
+                disabled={!active || refreshing}
+                onClick={() => void review.refresh()}
                 size="icon-xs"
                 type="button"
                 variant="ghost"
               >
-                <PanelLeftOpenIcon />
+                <RefreshCwIcon />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{copy.openCommitList}</TooltipContent>
+            <TooltipContent>{copy.refreshAccessible}</TooltipContent>
           </Tooltip>
-
-          <div className="flex min-w-0 items-center gap-xs">
-            <GitBranchIcon
-              aria-hidden="true"
-              className="size-3 text-branch-selected"
-            />
-            <span className="truncate text-title text-text-strong">
-              {observation === null
-                ? copy.repository
-                : observation.detached
-                  ? "Detached"
-                  : observation.branch}
-            </span>
-            {observation !== null ? (
-              <code className="font-mono text-caption text-muted-foreground">
-                {observation.headSha.slice(0, 8)}
-              </code>
-            ) : null}
-            <Badge
-              variant={
-                review.observationStatus === "ready" &&
-                observation?.supportState === "ready"
-                  ? "success"
-                  : review.observationStatus === "loading"
-                    ? "running"
-                    : "outline"
-              }
-            >
-              {review.observationStatus === "loading"
-                ? copy.refreshing
-                : review.observationStatus === "ready" &&
-                    observation?.supportState === "ready"
-                  ? copy.fresh
-                  : copy.unavailable}
-            </Badge>
-          </div>
-
-          {observation !== null ? (
-            <div className="min-w-0 text-caption text-muted-foreground max-[1120px]:hidden">
-              <span>{copy.lastObserved}: </span>
-              <time dateTime={observation.capturedAt}>
-                {new Intl.DateTimeFormat(locale, {
-                  dateStyle: "short",
-                  timeStyle: "medium",
-                }).format(new Date(observation.capturedAt))}
-              </time>
-              <span aria-hidden="true"> · </span>
-              <span>{copy.observationReasons[observation.reason]}</span>
-              {observation.preExisting.length > 0 ? (
-                <>
-                  <span aria-hidden="true"> · </span>
-                  <span>
-                    {observation.preExisting.length} {copy.protectedChanges}
-                  </span>
-                </>
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="ml-auto flex shrink-0 items-center gap-sm">
-            <ToggleGroup
-              aria-label={copy.title}
-              onValueChange={(value) => {
-                if (value !== "") {
-                  void review.setFilter(value as CommitEvidenceFilter)
-                }
-              }}
-              type="single"
-              value={review.filter}
-            >
-              <ToggleGroupItem value="all">{copy.filters.all}</ToggleGroupItem>
-              <ToggleGroupItem
-                disabled={selectedWorkUnitId === null}
-                value="this_work_unit"
-              >
-                {copy.filters.this_work_unit}
-              </ToggleGroupItem>
-              <ToggleGroupItem value="needs_attention">
-                {copy.filters.needs_attention}
-              </ToggleGroupItem>
-            </ToggleGroup>
-            <Separator orientation="vertical" />
-            <Badge variant="outline">{copy.readOnly}</Badge>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label={copy.refreshAccessible}
-                  aria-busy={refreshing}
-                  disabled={!active || refreshing}
-                  onClick={() => void review.refresh()}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  <RefreshCwIcon />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{copy.refreshAccessible}</TooltipContent>
-            </Tooltip>
-          </div>
         </header>
 
         {review.collectionStatus === "idle" ||
         review.collectionStatus === "loading" ? (
-          <CollectionLoading
-            characterVisible={characterVisible}
-            loadingText={copy.loading}
-          />
+          <CollectionLoading loadingText={copy.loading} />
         ) : null}
 
         {review.collectionStatus === "empty" ? (
@@ -444,15 +310,21 @@ export function EvidenceView({
               <Button onClick={onBackToChat} type="button" variant="secondary">
                 {copy.backToChat}
               </Button>
-              <Button
-                disabled={!active || refreshing}
-                onClick={() => void review.refresh()}
-                type="button"
-                variant="ghost"
-              >
-                <RefreshCwIcon data-icon="inline-start" />
-                {copy.refresh}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={copy.refreshAccessible}
+                    disabled={!active || refreshing}
+                    onClick={() => void review.refresh()}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <RefreshCwIcon />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{copy.refreshAccessible}</TooltipContent>
+              </Tooltip>
             </EmptyContent>
           </Empty>
         ) : null}
@@ -460,9 +332,7 @@ export function EvidenceView({
         {review.collectionStatus === "error" ? (
           <Empty className="min-h-0 px-xl">
             <ErrorAlert
-              code={review.collectionError?.code ?? "GIT-EVIDENCE-LIST-FAILED"}
               description={copy.listErrorDescription}
-              errorCodeLabel={copy.errorCode}
               title={copy.listErrorTitle}
             />
             <EmptyContent>
@@ -481,29 +351,11 @@ export function EvidenceView({
         ) : null}
 
         {review.collectionStatus === "ready" ? (
-          <div
-            className={cn(
-              "relative grid min-h-0",
-              characterVisible
-                ? "grid-cols-1"
-                : "grid-cols-[280px_minmax(0,1fr)] min-[1280px]:grid-cols-[300px_minmax(0,1fr)] max-[840px]:grid-cols-1",
-            )}
-          >
-            <div
-              className={cn(
-                "min-h-0",
-                characterVisible ? "hidden" : "max-[840px]:hidden",
-              )}
-            >
-              {list}
-            </div>
+          <div className="relative flex min-h-0 min-w-0 flex-col">
             {active && drawerOpen ? (
               <aside
                 aria-label={copy.openCommitList}
-                className={cn(
-                  "absolute inset-y-0 left-0 z-20 w-[min(300px,86%)] min-h-0 bg-sidebar shadow-overlay",
-                  characterVisible ? "block" : "hidden max-[840px]:block",
-                )}
+                className="absolute inset-y-0 left-0 z-20 w-[min(300px,86%)] min-h-0 bg-sidebar shadow-overlay"
                 id="commit-list-drawer"
                 role="region"
               >
@@ -512,7 +364,7 @@ export function EvidenceView({
                   <TooltipTrigger asChild>
                     <Button
                       aria-label={copy.close}
-                      className="absolute top-xs right-10"
+                      className="absolute top-xs right-xs"
                       onClick={() => closeDrawer()}
                       ref={drawerCloseRef}
                       size="icon-xs"
@@ -527,113 +379,96 @@ export function EvidenceView({
               </aside>
             ) : null}
 
-            <section className="flex min-h-0 min-w-0 flex-col">
-              {review.observationStatus === "error" ? (
-                <div className="p-sm">
-                  <ErrorAlert
-                    code={
-                      review.observationError?.code ?? "GIT-OBSERVATION-FAILED"
-                    }
-                    description={copy.observerErrorDescription}
-                    errorCodeLabel={copy.errorCode}
-                    title={copy.observerErrorTitle}
-                  />
-                </div>
-              ) : null}
-              {review.collectionError !== null ? (
-                <div className="px-sm pb-sm">
-                  <ErrorAlert
-                    code={review.collectionError.code}
-                    description={copy.listErrorDescription}
-                    errorCodeLabel={copy.errorCode}
-                    title={copy.listErrorTitle}
-                  />
-                </div>
-              ) : null}
-
-              {review.selectedCommitEvidenceId === null ? (
-                <Empty className="min-h-0 flex-1">
-                  <EmptyHeader>
-                    <EmptyTitle>{copy.noSelectionTitle}</EmptyTitle>
-                    <EmptyDescription>
-                      {copy.noSelectionDescription}
-                    </EmptyDescription>
-                  </EmptyHeader>
-                  <EmptyContent>
-                    <Button
-                      aria-controls="commit-list-drawer"
-                      aria-expanded={active && drawerOpen}
-                      className={cn(
-                        characterVisible
-                          ? "inline-flex"
-                          : "hidden max-[840px]:inline-flex",
-                      )}
-                      onClick={openDrawer}
-                      type="button"
-                      variant="secondary"
-                    >
-                      {copy.openCommitList}
-                    </Button>
-                  </EmptyContent>
-                </Empty>
-              ) : null}
-
-              {review.detailStatus === "loading" ? (
-                <div
-                  className="flex flex-1 flex-col gap-lg p-xl"
-                  aria-live="polite"
-                >
-                  <span className="sr-only">{copy.loading}</span>
-                  <Skeleton className="h-6 w-3/4" />
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-48 w-full" />
-                </div>
-              ) : null}
-
-              {review.detailStatus === "error" ? (
-                <div className="p-xl">
-                  <ErrorAlert
-                    code={
-                      review.detailError?.code ?? "GIT-EVIDENCE-DETAIL-FAILED"
-                    }
-                    description={copy.listErrorDescription}
-                    errorCodeLabel={copy.errorCode}
-                    title={copy.listErrorTitle}
-                  />
-                </div>
-              ) : null}
-
-              {review.detailStatus === "ready" && review.detail !== null ? (
-                <CommitDetail
-                  copy={copy}
-                  detail={review.detail}
-                  diff={review.diff}
-                  diffStatus={review.diffStatus}
-                  explanationContextReady={explanationContextReady}
-                  explanationControllerAvailable={
-                    commitExplanationController !== undefined
-                  }
-                  explanationControllerState={explanationControllerState}
-                  explanationIntent={review.explanation}
-                  locale={locale}
-                  onCancelExplanation={(state) =>
-                    void review.cancelExplanation(state)
-                  }
-                  onPresentExplanation={(state, mode, trigger) => {
-                    onExplanationPresentationTrigger?.(trigger)
-                    void review.presentExplanation(state, mode)
-                  }}
-                  onRequestExplanation={(trigger, presentationTrigger) => {
-                    onExplanationPresentationTrigger?.(presentationTrigger)
-                    void review.requestExplanation(locale, trigger)
-                  }}
-                  onSelectFile={(fileEvidenceId) =>
-                    void review.selectFile(fileEvidenceId)
-                  }
-                  selectedFileEvidenceId={review.selectedFileEvidenceId}
+            {review.observationStatus === "error" ? (
+              <div className="p-sm">
+                <ErrorAlert
+                  description={copy.observerErrorDescription}
+                  title={copy.observerErrorTitle}
                 />
-              ) : null}
-            </section>
+              </div>
+            ) : null}
+            {review.collectionError !== null ? (
+              <div className="px-sm pb-sm">
+                <ErrorAlert
+                  description={copy.listErrorDescription}
+                  title={copy.listErrorTitle}
+                />
+              </div>
+            ) : null}
+
+            {review.selectedCommitEvidenceId === null ? (
+              <Empty className="min-h-0 flex-1">
+                <EmptyHeader>
+                  <EmptyTitle>{copy.noSelectionTitle}</EmptyTitle>
+                  <EmptyDescription>
+                    {copy.noSelectionDescription}
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button
+                    aria-controls="commit-list-drawer"
+                    aria-expanded={active && drawerOpen}
+                    onClick={openDrawer}
+                    type="button"
+                    variant="secondary"
+                  >
+                    {copy.openCommitList}
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            ) : null}
+
+            {review.detailStatus === "loading" ? (
+              <div
+                className="flex flex-1 flex-col gap-lg p-xl"
+                aria-live="polite"
+              >
+                <span className="sr-only">{copy.loading}</span>
+                <Skeleton className="h-6 w-3/4" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-48 w-full" />
+              </div>
+            ) : null}
+
+            {review.detailStatus === "error" ? (
+              <div className="p-xl">
+                <ErrorAlert
+                  description={copy.listErrorDescription}
+                  title={copy.listErrorTitle}
+                />
+              </div>
+            ) : null}
+
+            {review.detailStatus === "ready" && review.detail !== null ? (
+              <CommitDetail
+                copy={copy}
+                detail={review.detail}
+                diff={review.diff}
+                diffStatus={review.diffStatus}
+                explanationContextReady={explanationContextReady}
+                explanationControllerAvailable={
+                  commitExplanationController !== undefined
+                }
+                explanationControllerState={explanationControllerState}
+                explanationIntent={review.explanation}
+                locale={locale}
+                onCancelExplanation={(state) =>
+                  void review.cancelExplanation(state)
+                }
+                onPresentExplanation={(state, mode, trigger) => {
+                  onExplanationPresentationTrigger?.(trigger)
+                  void review.presentExplanation(state, mode)
+                }}
+                onRequestExplanation={(trigger, presentationTrigger) => {
+                  onExplanationPresentationTrigger?.(presentationTrigger)
+                  void review.requestExplanation(locale, trigger)
+                }}
+                onSelectFile={(fileEvidenceId) =>
+                  void review.selectFile(fileEvidenceId)
+                }
+                selectedFileEvidenceId={review.selectedFileEvidenceId}
+              />
+            ) : null}
           </div>
         ) : null}
       </main>

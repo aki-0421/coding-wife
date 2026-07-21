@@ -1779,7 +1779,7 @@ describe("WorkspaceShell", () => {
     await waitFor(() => expect(filter).toHaveFocus())
   })
 
-  it("opens read-only commit evidence without exposing a mutation action", async () => {
+  it("opens GitHub-style commit changes without exposing internal properties or mutation actions", async () => {
     const user = userEvent.setup()
     renderWorkspace()
 
@@ -1794,16 +1794,30 @@ describe("WorkspaceShell", () => {
         name: "feat(git): add read-only commit evidence",
       }),
     ).toBeVisible()
-    await user.click(screen.getByRole("tab", { name: "Evidence" }))
-    await screen.findByText("Observed gates")
-    for (const gate of ["Scope", "Ownership", "Verification", "Risk"]) {
-      expect(screen.getAllByText(gate).length).toBeGreaterThan(0)
-    }
+    const changes = screen.getByRole("main", { name: "Commit changes" })
+    expect(changes.querySelector("[data-git-review-header]")).not.toBeNull()
+    expect(changes.querySelector("[data-git-file-section]")).not.toBeNull()
+    expect(changes.querySelector("[data-git-diff-scroll]")).not.toBeNull()
     expect(
-      within(screen.getByRole("main", { name: "Commit evidence" })).queryByRole(
-        "textbox",
-      ),
-    ).not.toBeInTheDocument()
+      within(changes).getByRole("searchbox", {
+        name: "Filter changed files",
+      }),
+    ).toBeVisible()
+    for (const hiddenText of [
+      "Read only",
+      "Fresh",
+      "Observed gates",
+      "Scope",
+      "Ownership",
+      "Verification",
+      "Risk",
+      "Persisted",
+      "Main Codex",
+    ]) {
+      expect(within(changes).queryByText(hiddenText)).not.toBeInTheDocument()
+    }
+    expect(within(changes).queryByRole("tab")).not.toBeInTheDocument()
+    expect(within(changes).queryByRole("textbox")).not.toBeInTheDocument()
   })
 
   it("opens the compact filter with Command+K and restores its opener", async () => {
