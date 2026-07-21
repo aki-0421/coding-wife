@@ -167,7 +167,7 @@ jobs:
 
           $install = Start-Process -FilePath $installers[0].FullName -ArgumentList @("/S", "/D=$installRoot") -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "WINDOWS_RELEASE_INSTALL_FAILED" }
-          $executable = Join-Path $installRoot "Coding Wife.exe"
+          $executable = Join-Path $installRoot "coding-wife.exe"
           if (-not (Test-Path $executable -PathType Leaf)) { throw "WINDOWS_RELEASE_EXECUTABLE_MISSING" }
           $licenses = @(Get-ChildItem $installRoot -Recurse -File -Filter "CODING-WIFE-LICENSE.txt")
           if ($licenses.Count -ne 1) { throw "WINDOWS_RELEASE_LEGAL_RESOURCE_INVALID" }
