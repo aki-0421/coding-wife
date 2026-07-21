@@ -367,7 +367,6 @@ export function useWorkspaceViewModel(
         setSelectedWorkspaceId("")
         setDrafts({})
         setTimeline([])
-        setLastSummary(null)
         setTimelineAnchor(null)
         setNextBeforeSequence(null)
         setNotice(null)
