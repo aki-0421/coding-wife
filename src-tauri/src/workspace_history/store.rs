@@ -14,11 +14,14 @@ use crate::character::manifest::{is_opaque_pack_id, BUILTIN_HIYORI_PACK_ID};
 use crate::codex::redaction::redact_text;
 use crate::codex::types::{ApprovalDecision, PendingKind, PendingRequestView, PendingResponseKind};
 use crate::codex::workspace::{
-    matches_saved_repository_identity, AppPrivateBinaryRecord, AppPrivateProjectIdentity,
-    AppPrivateWorkspaceRecord, GitRepositoryIdentity, ValidatedWorkspaceCandidate,
+    matches_saved_repository_identity, AppPrivateBinaryRecord, AppPrivateManagedWorktreeIdentity,
+    AppPrivateProjectIdentity, AppPrivateWorkspaceRecord, GitRepositoryIdentity,
+    ValidatedWorkspaceCandidate, MANAGED_WORKTREE_PROVENANCE_VERSION,
 };
 #[cfg(test)]
-use crate::codex::workspace::{WorkspacePreflight, WorkspaceRegistration};
+use crate::codex::workspace::{
+    WorkspacePreflight, WorkspaceRegistration, WorkspaceWriteProvenance,
+};
 use crate::git_review::repository::{
     is_object_id, validate_opaque_id as validate_git_opaque_id, validate_relative_path,
 };
@@ -55,7 +58,7 @@ use super::types::{
 const CODEX_BINARY_SETTING_KEY: &str = "codex_binary_path_v1";
 
 const DATABASE_FILE_NAME: &str = "workspace-history.sqlite3";
-const CURRENT_DATABASE_VERSION: i64 = 11;
+const CURRENT_DATABASE_VERSION: i64 = 12;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
@@ -72,6 +75,18 @@ SELECT
   p.github_repository
 FROM workspaces w
 JOIN projects p ON p.id = w.project_id
+"#;
+
+const PRIVATE_WORKSPACE_SELECT: &str = r#"
+SELECT
+  w.id, w.name, w.canonical_root, w.root_device, w.root_inode, w.project_id,
+  managed.provenance_version, managed.canonical_git_dir,
+  managed.git_device, managed.git_inode, managed.canonical_common_git_dir,
+  managed.common_git_device, managed.common_git_inode,
+  managed.marker_device, managed.marker_inode
+FROM workspaces w
+JOIN projects p ON p.id = w.project_id
+LEFT JOIN workspace_managed_git_identities managed ON managed.workspace_id = w.id
 "#;
 
 const MIGRATION_1: &str = r#"
@@ -394,6 +409,21 @@ FROM app_character_context
 WHERE singleton_id = 1;
 "#;
 
+const MIGRATION_12: &str = r#"
+CREATE TABLE IF NOT EXISTS workspace_managed_git_identities (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  provenance_version INTEGER NOT NULL CHECK (provenance_version = 1),
+  canonical_git_dir BLOB NOT NULL,
+  git_device INTEGER NOT NULL,
+  git_inode INTEGER NOT NULL,
+  canonical_common_git_dir BLOB NOT NULL,
+  common_git_device INTEGER NOT NULL,
+  common_git_inode INTEGER NOT NULL,
+  marker_device INTEGER NOT NULL,
+  marker_inode INTEGER NOT NULL
+);
+"#;
+
 #[derive(Debug)]
 struct StoreInner {
     connection: Connection,
@@ -539,6 +569,7 @@ impl WorkspaceHistoryStore {
                         (9, MIGRATION_9),
                         (10, MIGRATION_10),
                         (11, MIGRATION_11),
+                        (12, MIGRATION_12),
                     ],
                 )
                 .map_err(|_| history_error("HIST-RECOVERY-SCHEMA", false))?;
@@ -987,24 +1018,18 @@ impl WorkspaceHistoryStore {
         &self,
     ) -> Result<Vec<AppPrivateWorkspaceRecord>, WorkspaceHistoryError> {
         let inner = self.lock();
+        let app_data_root = inner.database_path.as_deref().and_then(Path::parent);
+        let query = format!(
+            "{PRIVATE_WORKSPACE_SELECT}
+             WHERE p.registered = 1 AND w.managed_worktree = 1
+             ORDER BY w.created_at ASC"
+        );
         let mut statement = inner
             .connection
-            .prepare(
-                "SELECT w.id, w.name, w.canonical_root
-                 FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE p.registered = 1 AND w.managed_worktree = 1
-                 ORDER BY w.created_at ASC",
-            )
+            .prepare(&query)
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
         let rows = statement
-            .query_map([], |row| {
-                let bytes = row.get::<_, Vec<u8>>(2)?;
-                Ok(AppPrivateWorkspaceRecord {
-                    workspace_id: row.get(0)?,
-                    alias: row.get(1)?,
-                    canonical_root: path_from_bytes(bytes),
-                })
-            })
+            .query_map([], |row| decode_private_workspace_row(row, app_data_root))
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|_| history_error("HIST-WORKSPACE-DECODE", false))
@@ -1068,7 +1093,11 @@ impl WorkspaceHistoryStore {
     ) -> Result<AppPrivateWorkspaceRecord, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
         let inner = self.lock();
-        private_workspace_by_id(&inner.connection, workspace_id)
+        private_workspace_by_id(
+            &inner.connection,
+            workspace_id,
+            inner.database_path.as_deref().and_then(Path::parent),
+        )
     }
 
     pub fn managed_worktree_path(
@@ -1096,29 +1125,33 @@ impl WorkspaceHistoryStore {
     ) -> Result<WorkspaceArchiveRecord, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
         let inner = self.lock();
-        inner
+        let app_data_root = inner.database_path.as_deref().and_then(Path::parent);
+        let private_record =
+            private_workspace_by_id(&inner.connection, workspace_id, app_data_root)?;
+        let (project_id, project_root, managed_worktree) = inner
             .connection
             .query_row(
-                "SELECT w.project_id, w.id, w.name, w.canonical_root, p.canonical_root, w.managed_worktree
+                "SELECT w.project_id, p.canonical_root, w.managed_worktree
                  FROM workspaces w JOIN projects p ON p.id = w.project_id
                  WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
                 params![workspace_id],
                 |row| {
-                    Ok(WorkspaceArchiveRecord {
-                        project_id: row.get(0)?,
-                        private_record: AppPrivateWorkspaceRecord {
-                            workspace_id: row.get(1)?,
-                            alias: row.get(2)?,
-                            canonical_root: path_from_bytes(row.get::<_, Vec<u8>>(3)?),
-                        },
-                        project_root: path_from_bytes(row.get::<_, Vec<u8>>(4)?),
-                        managed_worktree: row.get::<_, i64>(5)? != 0,
-                    })
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        path_from_bytes(row.get::<_, Vec<u8>>(1)?),
+                        row.get::<_, i64>(2)? != 0,
+                    ))
                 },
             )
             .optional()
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?
-            .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))
+            .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))?;
+        Ok(WorkspaceArchiveRecord {
+            project_id,
+            private_record,
+            project_root,
+            managed_worktree,
+        })
     }
 
     pub fn archive_workspace(
@@ -1135,22 +1168,19 @@ impl WorkspaceHistoryStore {
     ) -> Result<Vec<AppPrivateWorkspaceRecord>, WorkspaceHistoryError> {
         validate_project_id(project_id)?;
         let inner = self.lock();
+        let app_data_root = inner.database_path.as_deref().and_then(Path::parent);
+        let query = format!(
+            "{PRIVATE_WORKSPACE_SELECT}
+             WHERE w.project_id = ?1 AND p.registered = 1 AND w.managed_worktree = 1
+             ORDER BY w.created_at ASC"
+        );
         let mut statement = inner
             .connection
-            .prepare(
-                "SELECT w.id, w.name, w.canonical_root
-                 FROM workspaces w JOIN projects p ON p.id = w.project_id
-                 WHERE w.project_id = ?1 AND p.registered = 1 AND w.managed_worktree = 1
-                 ORDER BY w.created_at ASC",
-            )
+            .prepare(&query)
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
         let rows = statement
             .query_map(params![project_id], |row| {
-                Ok(AppPrivateWorkspaceRecord {
-                    workspace_id: row.get(0)?,
-                    alias: row.get(1)?,
-                    canonical_root: path_from_bytes(row.get::<_, Vec<u8>>(2)?),
-                })
+                decode_private_workspace_row(row, app_data_root)
             })
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
         let records = rows
@@ -1165,25 +1195,21 @@ impl WorkspaceHistoryStore {
     ) -> Result<Vec<AppPrivateWorkspaceRecord>, WorkspaceHistoryError> {
         validate_workspace_id(workspace_id)?;
         let inner = self.lock();
+        let app_data_root = inner.database_path.as_deref().and_then(Path::parent);
+        let query = format!(
+            "{PRIVATE_WORKSPACE_SELECT}
+             JOIN workspaces selected ON selected.project_id = p.id
+             WHERE selected.id = ?1 AND p.registered = 1
+               AND selected.managed_worktree = 1 AND w.managed_worktree = 1
+             ORDER BY w.created_at ASC"
+        );
         let mut statement = inner
             .connection
-            .prepare(
-                "SELECT sibling.id, sibling.name, sibling.canonical_root
-                 FROM workspaces selected
-                 JOIN projects p ON p.id = selected.project_id
-                 JOIN workspaces sibling ON sibling.project_id = p.id
-                 WHERE selected.id = ?1 AND p.registered = 1
-                   AND selected.managed_worktree = 1 AND sibling.managed_worktree = 1
-                 ORDER BY sibling.created_at ASC",
-            )
+            .prepare(&query)
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
         let rows = statement
             .query_map(params![workspace_id], |row| {
-                Ok(AppPrivateWorkspaceRecord {
-                    workspace_id: row.get(0)?,
-                    alias: row.get(1)?,
-                    canonical_root: path_from_bytes(row.get::<_, Vec<u8>>(2)?),
-                })
+                decode_private_workspace_row(row, app_data_root)
             })
             .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?;
         let records = rows
@@ -1439,6 +1465,17 @@ impl WorkspaceHistoryStore {
         let name = validate_workspace_name(name)?;
         self.ensure_writable("workspace.create_session")?;
         let mut inner = self.lock();
+        let app_data_root = inner
+            .database_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
+        let expected_managed_root = app_data_root
+            .as_deref()
+            .map(|root| root.join("worktrees").join(project_id).join(workspace_id));
+        let persist_managed_identity = expected_managed_root
+            .and_then(|root| fs::canonicalize(root).ok())
+            .is_some_and(|root| root == candidate.git.canonical_root);
         let transaction = inner
             .connection
             .transaction()
@@ -1454,7 +1491,11 @@ impl WorkspaceHistoryStore {
             .map_err(|_| history_error("HIST-SESSION-LOOKUP", true))?
         {
             let workspace = workspace_by_id(&transaction, &existing_workspace_id)?;
-            let private_record = private_workspace_by_id(&transaction, &existing_workspace_id)?;
+            let private_record = private_workspace_by_id(
+                &transaction,
+                &existing_workspace_id,
+                app_data_root.as_deref(),
+            )?;
             return Ok(PersistedSessionWorkspace {
                 workspace,
                 private_record,
@@ -1508,6 +1549,30 @@ impl WorkspaceHistoryStore {
                 ],
             )
             .map_err(|_| history_error("HIST-WORKSPACE-INSERT", true))?;
+        if persist_managed_identity {
+            let identity = AppPrivateManagedWorktreeIdentity::from_repository(&candidate.git);
+            transaction
+                .execute(
+                    "INSERT INTO workspace_managed_git_identities (
+                   workspace_id, provenance_version, canonical_git_dir,
+                   git_device, git_inode, canonical_common_git_dir,
+                   common_git_device, common_git_inode, marker_device, marker_inode
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        workspace_id,
+                        i64::from(identity.provenance_version),
+                        path_to_bytes(&identity.canonical_git_dir),
+                        identity.git_device as i64,
+                        identity.git_inode as i64,
+                        path_to_bytes(&identity.canonical_common_git_dir),
+                        identity.common_git_device as i64,
+                        identity.common_git_inode as i64,
+                        identity.marker_device as i64,
+                        identity.marker_inode as i64,
+                    ],
+                )
+                .map_err(|_| history_error("HIST-WORKSPACE-GIT-IDENTITY-INSERT", true))?;
+        }
         transaction
             .execute(
                 "INSERT INTO sessions (id, workspace_id, client_request_id, status, created_at, updated_at)
@@ -1538,7 +1603,8 @@ impl WorkspaceHistoryStore {
             Some(&candidate.git.canonical_root),
         )?;
         let workspace = workspace_by_id(&transaction, workspace_id)?;
-        let private_record = private_workspace_by_id(&transaction, workspace_id)?;
+        let private_record =
+            private_workspace_by_id(&transaction, workspace_id, app_data_root.as_deref())?;
         transaction
             .commit()
             .map_err(|_| history_error("HIST-TRANSACTION-COMMIT", true))?;
@@ -1557,6 +1623,7 @@ impl WorkspaceHistoryStore {
         let registration = self.register_project_candidate(candidate)?;
         if let Some((workspace, private_record)) = {
             let inner = self.lock();
+            let app_data_root = inner.database_path.as_deref().and_then(Path::parent);
             inner
                 .connection
                 .query_row(
@@ -1570,7 +1637,7 @@ impl WorkspaceHistoryStore {
                 .map(|workspace_id| {
                     Ok((
                         workspace_by_id(&inner.connection, &workspace_id)?,
-                        private_workspace_by_id(&inner.connection, &workspace_id)?,
+                        private_workspace_by_id(&inner.connection, &workspace_id, app_data_root)?,
                     ))
                 })
                 .transpose()?
@@ -1623,12 +1690,15 @@ impl WorkspaceHistoryStore {
                             GitRepositoryIdentity {
                                 canonical_root: workspace_root,
                                 canonical_git_dir: project_root.join(".git"),
+                                canonical_common_git_dir: project_root.join(".git"),
                                 root_device: row.get::<_, i64>(2)? as u64,
                                 root_inode: row.get::<_, i64>(3)? as u64,
                                 git_device: row.get::<_, i64>(5)? as u64,
                                 git_inode: row.get::<_, i64>(6)? as u64,
                                 common_git_device: row.get::<_, i64>(5)? as u64,
                                 common_git_inode: row.get::<_, i64>(6)? as u64,
+                                marker_device: row.get::<_, i64>(5)? as u64,
+                                marker_inode: row.get::<_, i64>(6)? as u64,
                                 project_identity: row.get(7)?,
                                 github_repository: row.get(8)?,
                                 branch: row.get(9)?,
@@ -1655,6 +1725,7 @@ impl WorkspaceHistoryStore {
                 },
             },
             git,
+            write_provenance: WorkspaceWriteProvenance::Unmanaged,
         };
         let persisted = self.create_managed_session_workspace(
             &project_id,
@@ -1679,6 +1750,7 @@ impl WorkspaceHistoryStore {
     ) -> Result<Option<PersistedSessionWorkspace>, WorkspaceHistoryError> {
         validate_client_request_id(client_request_id)?;
         let inner = self.lock();
+        let app_data_root = inner.database_path.as_deref().and_then(Path::parent);
         let workspace_id = inner
             .connection
             .query_row(
@@ -1692,7 +1764,11 @@ impl WorkspaceHistoryStore {
             .map(|workspace_id| {
                 Ok(PersistedSessionWorkspace {
                     workspace: workspace_by_id(&inner.connection, &workspace_id)?,
-                    private_record: private_workspace_by_id(&inner.connection, &workspace_id)?,
+                    private_record: private_workspace_by_id(
+                        &inner.connection,
+                        &workspace_id,
+                        app_data_root,
+                    )?,
                     created: false,
                 })
             })
@@ -2306,6 +2382,11 @@ impl WorkspaceHistoryStore {
         validate_workspace_id(workspace_id)?;
         self.ensure_writable("workspace.restore_preflight")?;
         let mut inner = self.lock();
+        let app_data_root = inner
+            .database_path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
         let transaction = inner
             .connection
             .transaction()
@@ -2313,40 +2394,28 @@ impl WorkspaceHistoryStore {
         let now = now();
         let health = match result {
             Ok(git) => {
-                let (
-                    prior_root_device,
-                    prior_root_inode,
-                    prior_common_git_device,
-                    prior_common_git_inode,
-                    prior_branch,
-                    prior_head,
-                    prior_detached,
-                ) = transaction
+                let prior =
+                    private_workspace_by_id(&transaction, workspace_id, app_data_root.as_deref())?;
+                let (prior_branch, prior_head, prior_detached) = transaction
                     .query_row(
-                        "SELECT w.root_device, w.root_inode,
-                                COALESCE(p.common_git_device, p.git_device),
-                                COALESCE(p.common_git_inode, p.git_inode),
-                                w.branch, w.head, w.detached
+                        "SELECT w.branch, w.head, w.detached
                          FROM workspaces w JOIN projects p ON p.id = w.project_id
                          WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
                         params![workspace_id],
                         |row| {
                             Ok((
-                                row.get::<_, i64>(0)? as u64,
-                                row.get::<_, i64>(1)? as u64,
-                                row.get::<_, i64>(2)? as u64,
-                                row.get::<_, i64>(3)? as u64,
-                                row.get::<_, String>(4)?,
-                                row.get::<_, String>(5)?,
-                                row.get::<_, i64>(6)? != 0,
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, i64>(2)? != 0,
                             ))
                         },
                     )
                     .map_err(|_| history_error("HIST-WORKSPACE-LOOKUP", true))?;
-                let health = if prior_root_device != git.root_device
-                    || prior_root_inode != git.root_inode
-                    || prior_common_git_device != git.common_git_device
-                    || prior_common_git_inode != git.common_git_inode
+                let health = if prior.canonical_root != git.canonical_root
+                    || prior
+                        .managed_worktree_identity
+                        .as_ref()
+                        .is_none_or(|identity| !identity.matches(git))
                 {
                     WorkspaceHealth::Changed
                 } else if !accept_observed_head
@@ -2538,6 +2607,7 @@ fn open_configured_connection(
             (9, MIGRATION_9),
             (10, MIGRATION_10),
             (11, MIGRATION_11),
+            (12, MIGRATION_12),
         ],
     )?;
     if status.mode == HistoryMode::Ready {
@@ -4145,24 +4215,94 @@ fn move_unregistered_project_to_private_root(
 fn private_workspace_by_id(
     connection: &Connection,
     workspace_id: &str,
+    app_data_root: Option<&Path>,
 ) -> Result<AppPrivateWorkspaceRecord, WorkspaceHistoryError> {
     connection
         .query_row(
-            "SELECT w.id, w.name, w.canonical_root
-             FROM workspaces w JOIN projects p ON p.id = w.project_id
-             WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1",
+            &format!(
+                "{PRIVATE_WORKSPACE_SELECT}
+                 WHERE w.id = ?1 AND p.registered = 1 AND w.managed_worktree = 1"
+            ),
             params![workspace_id],
-            |row| {
-                Ok(AppPrivateWorkspaceRecord {
-                    workspace_id: row.get(0)?,
-                    alias: row.get(1)?,
-                    canonical_root: path_from_bytes(row.get::<_, Vec<u8>>(2)?),
-                })
-            },
+            |row| decode_private_workspace_row(row, app_data_root),
         )
         .optional()
         .map_err(|_| history_error("HIST-WORKSPACE-QUERY", true))?
         .ok_or_else(|| history_error("WORKSPACE-NOT-FOUND", false))
+}
+
+fn decode_private_workspace_row(
+    row: &rusqlite::Row<'_>,
+    app_data_root: Option<&Path>,
+) -> rusqlite::Result<AppPrivateWorkspaceRecord> {
+    let workspace_id = row.get::<_, String>(0)?;
+    let canonical_root = path_from_bytes(row.get::<_, Vec<u8>>(2)?);
+    let project_id = row.get::<_, String>(5)?;
+    let placement_matches = app_data_root
+        .and_then(|root| fs::canonicalize(root).ok())
+        .map(|root| root.join("worktrees").join(&project_id).join(&workspace_id))
+        .is_some_and(|expected| expected == canonical_root);
+    let provenance_version = row.get::<_, Option<i64>>(6)?;
+    let root_device = row.get::<_, Option<i64>>(3)?;
+    let root_inode = row.get::<_, Option<i64>>(4)?;
+    let canonical_git_dir = row.get::<_, Option<Vec<u8>>>(7)?.map(path_from_bytes);
+    let git_device = row.get::<_, Option<i64>>(8)?;
+    let git_inode = row.get::<_, Option<i64>>(9)?;
+    let canonical_common_git_dir = row.get::<_, Option<Vec<u8>>>(10)?.map(path_from_bytes);
+    let common_git_device = row.get::<_, Option<i64>>(11)?;
+    let common_git_inode = row.get::<_, Option<i64>>(12)?;
+    let marker_device = row.get::<_, Option<i64>>(13)?;
+    let marker_inode = row.get::<_, Option<i64>>(14)?;
+    let managed_worktree_identity = match (
+        placement_matches,
+        provenance_version,
+        root_device,
+        root_inode,
+        canonical_git_dir,
+        git_device,
+        git_inode,
+        canonical_common_git_dir,
+        common_git_device,
+        common_git_inode,
+        marker_device,
+        marker_inode,
+    ) {
+        (
+            true,
+            Some(version),
+            Some(root_device),
+            Some(root_inode),
+            Some(canonical_git_dir),
+            Some(git_device),
+            Some(git_inode),
+            Some(canonical_common_git_dir),
+            Some(common_git_device),
+            Some(common_git_inode),
+            Some(marker_device),
+            Some(marker_inode),
+        ) if version == i64::from(MANAGED_WORKTREE_PROVENANCE_VERSION) => {
+            Some(AppPrivateManagedWorktreeIdentity {
+                provenance_version: version as u16,
+                root_device: root_device as u64,
+                root_inode: root_inode as u64,
+                canonical_git_dir,
+                git_device: git_device as u64,
+                git_inode: git_inode as u64,
+                canonical_common_git_dir,
+                common_git_device: common_git_device as u64,
+                common_git_inode: common_git_inode as u64,
+                marker_device: marker_device as u64,
+                marker_inode: marker_inode as u64,
+            })
+        }
+        _ => None,
+    };
+    Ok(AppPrivateWorkspaceRecord {
+        workspace_id,
+        alias: row.get(1)?,
+        canonical_root,
+        managed_worktree_identity,
+    })
 }
 
 fn private_root_by_workspace(
@@ -4732,15 +4872,67 @@ mod tests {
     }
 
     async fn candidate(root: &Path) -> ValidatedWorkspaceCandidate {
-        let record = AppPrivateWorkspaceRecord {
-            workspace_id: format!("workspace-{}", uuid::Uuid::new_v4()),
-            alias: "Fixture repository".to_owned(),
-            canonical_root: root.to_path_buf(),
-        };
         WorkspaceService::production(CodexSupervisor::new())
-            .validate_private_candidate(&record)
+            .validate_workspace_root(
+                root.to_path_buf(),
+                format!("workspace-{}", uuid::Uuid::new_v4()),
+                "Fixture repository".to_owned(),
+            )
             .await
             .expect("validated candidate")
+    }
+
+    async fn register_managed_workspace(
+        store: &WorkspaceHistoryStore,
+        project_root: &Path,
+        label: &str,
+    ) -> PersistedSessionWorkspace {
+        let commit = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(project_root)
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "fixture",
+            ])
+            .status()
+            .expect("create fixture HEAD");
+        assert!(commit.success());
+        let project = store
+            .register_project_candidate(&candidate(project_root).await)
+            .expect("register project")
+            .project;
+        let workspace_id = format!("workspace-{}", uuid::Uuid::new_v4());
+        let worktree_root = store
+            .managed_worktree_path(&project.project_id, &workspace_id)
+            .expect("managed worktree path");
+        let branch = format!("fixture-{}", uuid::Uuid::new_v4());
+        let add = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(project_root)
+            .args(["worktree", "add", "-q", "-b", &branch])
+            .arg(&worktree_root)
+            .status()
+            .expect("create managed worktree");
+        assert!(add.success());
+        let managed = WorkspaceService::production(CodexSupervisor::new())
+            .validate_workspace_root(worktree_root, workspace_id.clone(), label.to_owned())
+            .await
+            .expect("validate managed worktree");
+        store
+            .create_managed_session_workspace(
+                &project.project_id,
+                &workspace_id,
+                label,
+                &format!("request-{workspace_id}"),
+                &managed,
+            )
+            .expect("persist managed worktree")
     }
 
     fn git_observation_payload(workspace_id: &str) -> Value {
@@ -5317,13 +5509,12 @@ mod tests {
     #[tokio::test]
     async fn preflight_reports_a_branch_changed_outside_the_app() {
         let data = temp_directory("history-stale-branch");
-        let root = git_repository();
+        let project_root = git_repository();
         let store = WorkspaceHistoryStore::open(&data).expect("open store");
-        let workspace_id = store
-            .register_candidate(&candidate(&root).await)
-            .expect("registration")
-            .workspace
-            .workspace_id;
+        let registration =
+            register_managed_workspace(&store, &project_root, "Branch fixture").await;
+        let workspace_id = registration.workspace.workspace_id;
+        let root = registration.private_record.canonical_root;
         let status = std::process::Command::new("/usr/bin/git")
             .args([
                 "-C",
@@ -5364,19 +5555,18 @@ mod tests {
         assert_eq!(accepted.workspaces[0].health, WorkspaceHealth::Ready);
 
         let _ = fs::remove_dir_all(data);
-        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(project_root);
     }
 
     #[tokio::test]
     async fn preflight_reports_a_head_change_on_the_same_branch_without_mutating_git() {
         let data = temp_directory("history-stale-head");
-        let root = git_repository();
+        let project_root = git_repository();
         let store = WorkspaceHistoryStore::open(&data).expect("open store");
-        let workspace_id = store
-            .register_candidate(&candidate(&root).await)
-            .expect("registration")
-            .workspace
-            .workspace_id;
+        let registration = register_managed_workspace(&store, &project_root, "Head fixture").await;
+        let initial_head = registration.workspace.head.clone();
+        let workspace_id = registration.workspace.workspace_id;
+        let root = registration.private_record.canonical_root;
         fs::write(root.join("README.md"), "external commit\n").expect("source fixture");
         for arguments in [
             vec!["-C", root.to_str().expect("root"), "add", "README.md"],
@@ -5400,7 +5590,8 @@ mod tests {
                 .success());
         }
         let changed = candidate(&root).await;
-        let head_before = fs::read(root.join(".git/HEAD")).expect("HEAD before observation");
+        let head_path = changed.git.canonical_git_dir.join("HEAD");
+        let head_before = fs::read(&head_path).expect("HEAD before observation");
         let status_before = git_status(&root);
 
         assert_eq!(
@@ -5410,7 +5601,7 @@ mod tests {
             WorkspaceHealth::StaleBranch
         );
         let stale = store.snapshot(Some(&workspace_id)).expect("stale snapshot");
-        assert_eq!(stale.workspaces[0].head, "unborn");
+        assert_eq!(stale.workspaces[0].head, initial_head);
         assert_eq!(stale.workspaces[0].health, WorkspaceHealth::StaleBranch);
         assert_eq!(
             store
@@ -5427,13 +5618,13 @@ mod tests {
             changed.git.head
         );
         assert_eq!(
-            fs::read(root.join(".git/HEAD")).expect("HEAD after observation"),
+            fs::read(head_path).expect("HEAD after observation"),
             head_before
         );
         assert_eq!(git_status(&root), status_before);
 
         let _ = fs::remove_dir_all(data);
-        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(project_root);
     }
 
     #[tokio::test]
@@ -7046,6 +7237,41 @@ mod tests {
         assert_eq!(migrated_character.0, BUILTIN_HIYORI_PACK_ID);
         assert_eq!(migrated_character.1, recent_character_json);
         assert_eq!(migrated_character.2, 7);
+
+        apply_migrations(
+            &connection,
+            &[
+                (1, MIGRATION_1),
+                (2, MIGRATION_2),
+                (3, MIGRATION_3),
+                (4, MIGRATION_4),
+                (5, MIGRATION_5),
+                (6, MIGRATION_6),
+                (7, MIGRATION_7),
+                (8, MIGRATION_8),
+                (9, MIGRATION_9),
+                (10, MIGRATION_10),
+                (11, MIGRATION_11),
+                (12, MIGRATION_12),
+            ],
+        )
+        .expect("version twelve schema");
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("version twelve"),
+            12
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM workspace_managed_git_identities",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("legacy rows are not implicitly attested"),
+            0
+        );
     }
 
     #[test]

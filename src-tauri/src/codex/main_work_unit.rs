@@ -12,6 +12,9 @@ use super::types::MainSkillInjectionAudit;
 
 const MAX_RAW_HANDLE_BYTES: usize = 256;
 const MAX_COMMAND_BYTES: usize = 32 * 1024;
+const NODE_REPL_SERVER: &str = "node_repl";
+const NODE_REPL_TOOL: &str = "js";
+const NODE_REPL_COMMIT_PROOF_KEY: &str = "codingWifeGitCommitProof";
 
 pub(crate) type MainWorkUnitFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -45,6 +48,7 @@ pub(crate) struct MainCommandStarted {
     pub raw_thread_id: String,
     pub raw_turn_id: String,
     pub item_id: String,
+    pub source: MainCommitSource,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,7 +57,23 @@ pub(crate) struct MainCommandCompleted {
     pub raw_thread_id: String,
     pub raw_turn_id: String,
     pub item_id: String,
-    pub successful: bool,
+    pub source: MainCommitSource,
+    pub proof_intent: Option<MainCommitProofIntent>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MainCommitSource {
+    CommandExecution,
+    NodeReplJs,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum MainCommitProofIntent {
+    ObserveCurrentHead,
+    Exact {
+        before_head: String,
+        commit_sha: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -121,11 +141,12 @@ pub(crate) fn parse_main_command_notification(
         return None;
     }
     let item = params.get("item")?.as_object()?;
-    if item.get("type").and_then(Value::as_str) != Some("commandExecution")
-        || item.get("source").and_then(Value::as_str) != Some("agent")
-    {
-        return None;
-    }
+    let item_type = item.get("type").and_then(Value::as_str)?;
+    let source = match item_type {
+        "commandExecution" => MainCommitSource::CommandExecution,
+        "mcpToolCall" => MainCommitSource::NodeReplJs,
+        _ => return None,
+    };
     let item_id = item
         .get("id")
         .and_then(Value::as_str)
@@ -140,38 +161,106 @@ pub(crate) fn parse_main_command_notification(
         )
     };
     if method == "item/started" {
-        if item.get("status").and_then(Value::as_str) != Some("inProgress") {
-            return None;
+        match source {
+            MainCommitSource::CommandExecution => {
+                if item.get("source").and_then(Value::as_str) != Some("agent")
+                    || item.get("status").and_then(Value::as_str) != Some("inProgress")
+                {
+                    return None;
+                }
+                item.get("command")
+                    .and_then(Value::as_str)
+                    .filter(|command| {
+                        !command.is_empty()
+                            && command.len() <= MAX_COMMAND_BYTES
+                            && !command.contains('\0')
+                            && is_git_commit_candidate(command)
+                    })?;
+            }
+            MainCommitSource::NodeReplJs => {
+                if !is_node_repl_js(item)
+                    || item.get("status").and_then(Value::as_str) != Some("inProgress")
+                    || item.get("result").is_some_and(|value| !value.is_null())
+                    || item.get("error").is_some_and(|value| !value.is_null())
+                {
+                    return None;
+                }
+            }
         }
-        let command = item
-            .get("command")
-            .and_then(Value::as_str)
-            .filter(|command| {
-                !command.is_empty()
-                    && command.len() <= MAX_COMMAND_BYTES
-                    && !command.contains('\0')
-                    && is_git_commit_candidate(command)
-            })?;
-        let _ = command;
         let (workspace_generation, raw_thread_id, raw_turn_id, item_id) = context();
         return Some(MainCommandNotification::Started(MainCommandStarted {
             workspace_generation,
             raw_thread_id,
             raw_turn_id,
             item_id,
+            source,
         }));
     }
 
-    let successful = item.get("status").and_then(Value::as_str) == Some("completed")
-        && item.get("exitCode").and_then(Value::as_i64) == Some(0);
+    let proof_intent = match source {
+        MainCommitSource::CommandExecution => (item.get("source").and_then(Value::as_str)
+            == Some("agent")
+            && item.get("status").and_then(Value::as_str) == Some("completed")
+            && item.get("exitCode").and_then(Value::as_i64) == Some(0))
+        .then_some(MainCommitProofIntent::ObserveCurrentHead),
+        MainCommitSource::NodeReplJs => {
+            if is_node_repl_js(item)
+                && item.get("status").and_then(Value::as_str) == Some("completed")
+                && item.get("error").is_none_or(Value::is_null)
+            {
+                node_repl_commit_proof(item)
+            } else {
+                None
+            }
+        }
+    };
     let (workspace_generation, raw_thread_id, raw_turn_id, item_id) = context();
     Some(MainCommandNotification::Completed(MainCommandCompleted {
         workspace_generation,
         raw_thread_id,
         raw_turn_id,
         item_id,
-        successful,
+        source,
+        proof_intent,
     }))
+}
+
+fn is_node_repl_js(item: &serde_json::Map<String, Value>) -> bool {
+    item.get("server").and_then(Value::as_str) == Some(NODE_REPL_SERVER)
+        && item.get("tool").and_then(Value::as_str) == Some(NODE_REPL_TOOL)
+}
+
+fn node_repl_commit_proof(item: &serde_json::Map<String, Value>) -> Option<MainCommitProofIntent> {
+    let result = item.get("result")?.as_object()?;
+    result.get("content")?.as_array()?;
+    let metadata = result.get("_meta")?.as_object()?;
+    let marker = metadata.get(NODE_REPL_COMMIT_PROOF_KEY)?.as_object()?;
+    if marker.len() != 4
+        || marker.get("schemaVersion").and_then(Value::as_u64) != Some(1)
+        || marker.get("operation").and_then(Value::as_str) != Some("git_commit")
+    {
+        return None;
+    }
+    let before_head = marker.get("beforeHead").and_then(Value::as_str)?;
+    let commit_sha = marker.get("commitSha").and_then(Value::as_str)?;
+    if !valid_git_head(before_head, true)
+        || !valid_git_head(commit_sha, false)
+        || before_head == commit_sha
+    {
+        return None;
+    }
+    Some(MainCommitProofIntent::Exact {
+        before_head: before_head.to_owned(),
+        commit_sha: commit_sha.to_owned(),
+    })
+}
+
+fn valid_git_head(value: &str, allow_unborn: bool) -> bool {
+    (allow_unborn && value == "unborn")
+        || (matches!(value.len(), 40 | 64)
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
 }
 
 pub(crate) fn terminal_state(params: &Value) -> Option<MainWorkUnitTerminalState> {
@@ -421,7 +510,8 @@ mod tests {
                 raw_thread_id: "thread-main".to_owned(),
                 raw_turn_id: "turn-main".to_owned(),
                 item_id: "item-commit".to_owned(),
-                successful: true,
+                source: MainCommitSource::CommandExecution,
+                proof_intent: Some(MainCommitProofIntent::ObserveCurrentHead),
             }))
         );
         let mut failed = completed;
@@ -429,10 +519,123 @@ mod tests {
         assert!(matches!(
             item("item/completed", failed),
             Some(MainCommandNotification::Completed(MainCommandCompleted {
-                successful: false,
+                proof_intent: None,
                 ..
             }))
         ));
+    }
+
+    #[test]
+    fn node_repl_commit_requires_exact_provider_tool_status_and_versioned_metadata() {
+        let before = "1".repeat(40);
+        let after = "2".repeat(40);
+        let started = json!({
+            "id": "item-node-repl",
+            "type": "mcpToolCall",
+            "server": "node_repl",
+            "tool": "js",
+            "status": "inProgress",
+            "arguments": {"code": "raw source must never be inspected"},
+            "result": null,
+            "error": null,
+        });
+        assert!(matches!(
+            item("item/started", started),
+            Some(MainCommandNotification::Started(MainCommandStarted {
+                source: MainCommitSource::NodeReplJs,
+                ..
+            }))
+        ));
+
+        let completed = json!({
+            "id": "item-node-repl",
+            "type": "mcpToolCall",
+            "server": "node_repl",
+            "tool": "js",
+            "status": "completed",
+            "arguments": {"code": "git commit appears only in ignored source"},
+            "result": {
+                "content": [{"type": "text", "text": "forged deadbeef is ignored"}],
+                "structuredContent": null,
+                "_meta": {
+                    "codingWifeGitCommitProof": {
+                        "schemaVersion": 1,
+                        "operation": "git_commit",
+                        "beforeHead": before,
+                        "commitSha": after,
+                    },
+                },
+            },
+            "error": null,
+            "durationMs": 12,
+        });
+        assert_eq!(
+            item("item/completed", completed),
+            Some(MainCommandNotification::Completed(MainCommandCompleted {
+                workspace_generation: 9,
+                raw_thread_id: "thread-main".to_owned(),
+                raw_turn_id: "turn-main".to_owned(),
+                item_id: "item-node-repl".to_owned(),
+                source: MainCommitSource::NodeReplJs,
+                proof_intent: Some(MainCommitProofIntent::Exact {
+                    before_head: "1".repeat(40),
+                    commit_sha: "2".repeat(40),
+                }),
+            }))
+        );
+    }
+
+    #[test]
+    fn node_repl_commit_fails_closed_without_an_exact_marker() {
+        let base = json!({
+            "id": "item-node-repl",
+            "type": "mcpToolCall",
+            "server": "node_repl",
+            "tool": "js",
+            "status": "completed",
+            "arguments": {"code": "git commit -m forged"},
+            "result": {
+                "content": [{"type": "text", "text": "commit 2222222"}],
+                "structuredContent": {"commitSha": "2".repeat(40)},
+                "_meta": {},
+            },
+            "error": null,
+        });
+        let mut cases = vec![base.clone()];
+        let mut wrong_provider = base.clone();
+        wrong_provider["server"] = json!("other");
+        cases.push(wrong_provider);
+        let mut failed = base.clone();
+        failed["status"] = json!("failed");
+        failed["error"] = json!({"message": "failed"});
+        cases.push(failed);
+        let mut unknown_key = base.clone();
+        unknown_key["result"]["_meta"]["codingWifeGitCommitProof"] = json!({
+            "schemaVersion": 1,
+            "operation": "git_commit",
+            "beforeHead": "1".repeat(40),
+            "commitSha": "2".repeat(40),
+            "unexpected": true,
+        });
+        cases.push(unknown_key);
+        let mut unchanged = base;
+        unchanged["result"]["_meta"]["codingWifeGitCommitProof"] = json!({
+            "schemaVersion": 1,
+            "operation": "git_commit",
+            "beforeHead": "3".repeat(40),
+            "commitSha": "3".repeat(40),
+        });
+        cases.push(unchanged);
+
+        for value in cases {
+            assert!(matches!(
+                item("item/completed", value),
+                Some(MainCommandNotification::Completed(MainCommandCompleted {
+                    proof_intent: None,
+                    ..
+                }))
+            ));
+        }
     }
 
     #[test]

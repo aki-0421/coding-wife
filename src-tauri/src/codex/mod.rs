@@ -8,6 +8,7 @@ pub mod dynamic_tools;
 pub mod jsonl;
 pub(crate) mod main_work_unit;
 pub mod normalizer;
+pub mod presence;
 pub mod process;
 pub mod protocol;
 pub mod redaction;

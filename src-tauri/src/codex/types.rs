@@ -4,7 +4,13 @@ use serde::{Deserialize, Serialize};
 
 pub const CODEX_ADAPTER_VERSION: u16 = 1;
 pub const CODEX_EVENT_SCHEMA_VERSION: u16 = 1;
-pub const CODEX_MODEL: &str = "gpt-5.6-sol";
+pub const CODEX_MAIN_MODEL: &str = "gpt-5.6-sol";
+pub const CODEX_COMMIT_EXPLAINER_MODEL: &str = "gpt-5.6-terra";
+pub const CODEX_PRESENCE_DIRECTOR_MODEL: &str = "gpt-5.6-luna";
+
+// Preserve the established main-session name while role-specific support
+// runtimes use their own exact model constants.
+pub const CODEX_MODEL: &str = CODEX_MAIN_MODEL;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -295,13 +301,25 @@ pub enum ApprovalDecision {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, tag = "type", rename_all = "snake_case")]
+pub enum PendingUserInputAnswer {
+    Option {
+        #[serde(rename = "optionId")]
+        option_id: String,
+    },
+    Other {
+        text: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PendingResponse {
     Approval {
         decision: ApprovalDecision,
     },
     UserInput {
-        answers: BTreeMap<String, Vec<String>>,
+        answers: BTreeMap<String, PendingUserInputAnswer>,
     },
 }
 
@@ -534,7 +552,8 @@ mod contract_fixture_tests {
     use serde_json::Value;
 
     use super::{
-        AcceptedResponse, CodexCommandError, CodexDiagnostic, CodexEvent, ReviewResponse,
+        AcceptedResponse, CodexCommandError, CodexDiagnostic, CodexEvent,
+        CodexPendingResponseRequest, PendingResponse, PendingUserInputAnswer, ReviewResponse,
         ThreadListResponse, ThreadResponse, TurnResponse,
     };
 
@@ -575,5 +594,54 @@ mod contract_fixture_tests {
                 *expected
             );
         }
+    }
+
+    #[test]
+    fn pending_user_input_contract_uses_one_explicit_answer_variant_per_question() {
+        let option_request: CodexPendingResponseRequest =
+            serde_json::from_value(serde_json::json!({
+                "workspaceId": "workspace-1",
+                "pendingId": "pending-1",
+                "response": {
+                    "type": "user_input",
+                    "answers": {"choice": {"type": "option", "optionId": "option-opaque"}}
+                }
+            }))
+            .expect("frontend option response");
+        assert!(matches!(
+            option_request.response,
+            PendingResponse::UserInput { answers }
+                if answers.get("choice") == Some(&PendingUserInputAnswer::Option {
+                    option_id: "option-opaque".to_owned(),
+                })
+        ));
+
+        let other_request: CodexPendingResponseRequest =
+            serde_json::from_value(serde_json::json!({
+                "workspaceId": "workspace-1",
+                "pendingId": "pending-1",
+                "response": {
+                    "type": "user_input",
+                    "answers": {"choice": {"type": "other", "text": "Another safe path"}}
+                }
+            }))
+            .expect("frontend Other response");
+        assert!(matches!(
+            other_request.response,
+            PendingResponse::UserInput { answers }
+                if answers.get("choice") == Some(&PendingUserInputAnswer::Other {
+                    text: "Another safe path".to_owned(),
+                })
+        ));
+
+        let multiple = serde_json::json!({
+            "workspaceId": "workspace-1",
+            "pendingId": "pending-1",
+            "response": {
+                "type": "user_input",
+                "answers": {"choice": ["option-a", "option-b"]}
+            }
+        });
+        assert!(serde_json::from_value::<CodexPendingResponseRequest>(multiple).is_err());
     }
 }

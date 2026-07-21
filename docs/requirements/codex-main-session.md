@@ -1,7 +1,7 @@
 ---
 title: "CODE Codexメインセッション要件定義"
 description: "固定GPT-5.6 SolによるApp Server会話、構造化イベント、判断・承認、停止・復旧を定義する。"
-updated: 2026-07-21
+updated: 2026-07-22
 read_when:
   - "Codex App Server supervisor、protocol adapter、Chat composerを実装するとき。"
   - "判断カード、approval、attachment、stop、reconnectを検証するとき。"
@@ -39,7 +39,7 @@ read_when:
 | Main model | `gpt-5.6-sol`固定、supported reasoning effort |
 | Composer | multiline prompt、file/image、read-only context、Command+Enter、stop |
 | Timeline | plan、assistant、tool、file、error、decision eventの会話向けprojection |
-| Commit interception | normalized Git commit command terminal、read-only SHA verification、app-owned explanation handoff |
+| Commit interception | normalized Git commit command、versioned `node_repl/js` commit proof、read-only SHA verification、app-owned explanation handoff |
 | Human input | structured decision、approval、Other、hold、interrupt、fallback |
 | Recovery | auth/model/process failure、reconnect、no automatic replay |
 
@@ -60,7 +60,7 @@ read_when:
 | ローカル利用者 | turnを開始・判断・停止する本人 | prompt、attachment、context、effort、decision、approval、interrupt | validation error時はdraftを保持し、送信しない |
 | Codex main session | active workspaceで実装する唯一のcoding identity | App Server契約内のturnと通常subagent | unavailable capabilityは呼ばずfallbackまたはblocked表示にする |
 | Rust supervisor | child processとprotocolの信頼境界 | executable検証、stdio、event normalization、interrupt、shutdown | malformed frame、crash、timeoutを構造化errorへ変換する |
-| App-side commit interceptor | normalized command terminalとread-only Git observationを相関する | success commit commandの新しいSHAを検証し、app-owned explanation controllerへ通知する | SHA未検証、duplicate、stale generationを起動条件にせず、main conversationへ通知を注入しない |
+| App-side commit interceptor | normalized command terminalまたはexact `node_repl/js` commit proofとread-only Git observationを相関する | success commit intentの新しいSHAを検証し、app-owned explanation controllerへ通知する | SHA未検証、raw JavaScript・result text推測、duplicate、stale generationを起動条件にせず、main conversationへ通知を注入しない |
 
 ## 機能要件
 
@@ -74,7 +74,7 @@ read_when:
 | `CODE-F-053A` | 利用者はFast service tierを独立して切り替えられる | model catalogがFastとして広告したexact service tier IDだけを稲妻のicon-only flagからon/offし、onはそのID、offは`null`を`turn/start.serviceTier`へ毎回明示する。reasoning effortは変更しない | Approved | 非該当 |
 | `CODE-F-053B` | 利用者は次のturnをPlan modeにできる | map icon flagのon時は固定modelと現在reasoningを含む`collaborationMode.mode=plan`を送り、off時は`collaborationMode=null`を送る。experimental API未受理時は選択不可にする | Approved | 非該当 |
 | `CODE-F-053C` | 利用者はcomposerのinstructionをpersistent Goalとして開始できる | target icon flagのon時はtrim済みinstruction 1〜4,000 scalarを`thread/goal/set.objective`へ設定してから同じturnを開始し、turn受理後だけflagをoffへ戻す。goal設定またはturn開始失敗時はinstructionとflagを保持する | Approved | 非該当 |
-| `CODE-F-054` | appはactive workspaceのcwdでmain threadを開始する | canonical project rootとselected effortを使ってthreadを1件開始し、別workspace pathを使用しない | Approved | 非該当 |
+| `CODE-F-054` | appはactive workspaceのcwdと最小write authorityでmain threadを開始する | canonical workspace rootとselected effortを使ってthreadを1件開始し、別workspace pathを使用しない。`workspace-write`の既定write rootはworkspace rootだけとする。追加write rootを許可するapp管理linked worktreeは、app-owned worktree rootでの作成成功と同じtransactionに保存したversioned provenanceを持つworkspaceだけとし、Git directoryがroot外にあることから管理対象と推測しない。provenanceにはworkspace root device/inode、non-symlink `.git` marker device/inode、canonical per-worktree Git directory path/device/inode、canonical common Git directory path/device/inodeを含める。起動復元、thread start/resume、turn、fallback continuationの直前に保存済み全identity、app data配下のexact managed root、Git plumbing、current user ownership、ancestorを含むnon-group/world-writable policy、writeabilityをlive値と完全一致させた時だけ、per-worktree Git directoryとcommon Git directoryを追加する。project working tree全体、他worktreeのper-worktree Git directory、任意pathを追加せず、通常のin-tree `.git` repository、手動linked worktree、`--separate-git-dir` repositoryには追加rootを送らない。offline retarget、identity・symlink・escape・owner・mode・writeability不一致、provenanceなしのlegacy row、App Serverが追加rootを表現できない場合は保存identityをlive値で上書きせずfail closedにする | Approved | 非該当 |
 | `CODE-F-055` | 利用者は有効なcomposer内容をturnとして送信できる | text、attachment、contextのいずれか1件以上が有効な時、Command+EnterまたはSendで1turnだけ開始する。public instructionは32,000 Unicode scalar以下を維持し、Project ID-scoped Project context、nativeで解決した選択pack ID-scoped Character context、pack IDと各version/hash metadata、JSON escaping、固定markerを合成したApp Server向けtext全体は80,000 Unicode scalar以下とする。WebViewとRust supervisorの双方が同じscalar単位でexact 80,000を受理し、80,001、NUL、その他controlをtransport前に拒否する | Approved | 非該当 |
 | `CODE-F-056` | 空composerは送信できない | trim後textが空かつattachmentとcontextが0件ならSendをdisabledにし、Command+Enterでturnを開始しない。attachmentまたはcontextがvalidならtext 0文字でも送信できる | Approved | 非該当 |
 | `CODE-F-057` | 送信成功時だけcomposerをclearする | App Serverがturn startedを受理した後にtextをclearし、validation/transport failureではtextとattachmentを保持する | Approved | 非該当 |
@@ -84,8 +84,8 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | `CODE-F-058` | 利用者はstreaming進捗を構造化eventで確認できる | plan、tool start/result、file change、diff、error、decision、approvalをversion付きpayloadとしてsequence順に表示する。`agentMessage.phase=commentary`の完了itemは途中経過としてredact・長さ制限して表示・保存し、Structured Output envelopeなら検証済み`result.message`だけを取り出す。commentaryを最終回答違反としてturn interruptしてはならない。`final_answer`またはphaseなしの完了itemだけを最終Structured Outputとして厳格検証し、検証・redactした`result.message`を会話の最後の可視出力にする。assistant deltaのJSON断片は表示・保存しない。terminal `completion`は順序と復旧の正本として保存してもChatへ描画せず、最終出力の代替にしない。再起動後も同じsemantic card、stable ID、順序へexactに再構築し、unknown versionまたはinvalid payloadはgeneric成功表示へ落とさずUnsupportedとしてfail closedにする | Approved | 非該当 |
-| `CODE-F-059` | tool実行はread-only eventとして表示される | MCPはredact済み`server`と実`tool`名、最大4件の安全なtop-level引数要約、状態、所要時間を表示し、内部型`mcpToolCall`をtool名として表示しない。`title`、`query`、`ref_id`など人が識別できるtargetを優先し、`code`、`script`、`expression`などのsource bodyは本文でなく文字数だけを表示する。commandはredact済み一行command、web searchはredact済みqueryを同じsemantic tool statusへ正規化する。raw引数JSON、MCP result content、credential値、absolute private pathをWebViewまたは履歴へ渡さず、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
-| `CODE-F-060` | 利用者は長いtool eventを展開・copyできる | 120文字超を一行ellipsisにし、keyboardで全文展開とcopyへ到達し、copy内容が表示全文と一致する | Approved | 非該当 |
+| `CODE-F-059` | tool実行はread-only eventとして表示される | compact rowはcommand/shell、file/read-write、web/browser、search、generic toolを区別するiconと実行名だけを表示する。command executionはredact済み一行command summaryを優先し欠落時だけcommand名へfallbackし、MCP/webは実`tool`名を表示する。provider、引数要約、result、status、所要時間、時刻はcompact rowへ描画せずsanitized detailへ保持し、内部型`mcpToolCall`をtool名として表示しない。成功時はcheck、success色、`Completed / 完了`を表示せずneutralに戻し、失敗時だけrow全体を薄いdestructive背景にしてiconとaccessible textでも伝える。raw引数JSON、MCP result content、credential値、absolute private pathをWebViewまたは履歴へ渡さず、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
+| `CODE-F-060` | 利用者は長いtool eventを展開・copyできる | 長い実行名を一行ellipsisにしてtooltipで全文へ到達でき、keyboardでsanitized detailの展開とcopyへ到達する。copyは文字labelを描画しないicon-only actionとし、通常は視覚的に隠すがrow hover、focus-within、button自身のfocus-visibleで表示し、ja/enの`aria-label`とtooltip、accessibleな成功・失敗通知を持つ。copy内容は展開した表示全文と一致する | Approved | 非該当 |
 | `CODE-F-061` | scroll中の利用者を自動で最下部へ戻さない | 利用者がbottomから48px超上へ移動中にeventが届いてもscroll位置を維持し、「最新へ」を表示する | Approved | 非該当 |
 | `CODE-F-062` | errorは成功と区別して回復操作を示す | error rowにcode、短い原因、影響、retry/modify/stop/detailsの利用可能操作を表示し、completionへ自動変換しない | Approved | 非該当 |
 
@@ -97,7 +97,7 @@ read_when:
 | `CODE-F-064` | 利用者は既定選択肢以外を入力できる | Otherを選ぶと1〜2,000文字の入力欄が開き、送信またはcancelまでcardと入力を保持する | Approved | 非該当 |
 | `CODE-F-065` | 利用者はdecisionを保留またはturnを中断できる | Holdは回答を送らずwaiting状態を維持し、Interruptは確認後にturn interruptを要求する | Approved | 非該当 |
 | `CODE-F-066` | 利用者はapproval対象を確認して許可・拒否できる | `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/permissions/requestApproval`だけをoperation、scope、対象path/host、risk、可逆性、推奨付きcardへ正規化し、Approve once、Reject、Stopを元request IDへ1回だけ返す。未知methodは許可せずBlockedにする | Approved | 非該当 |
-| `CODE-F-067` | experimental user-input APIがない時も質問を失わない | initializeでexperimental APIを明示交渉し、`item/tool/requestUserInput`がない場合は通常assistant出力のversion付きdecision schemaだけを同じcardへ正規化する。`result`では`decisionId`、`question`、`options`、`context`をnullに限定し、decisionに影響しないbooleanの`allowFreeform`は無視して`message`を受理する。`decision_request`では全decision fieldと`allowFreeform=false`を厳格検証し、schema不正や自由文だけの曖昧なapprovalは回答UIにせず安全に停止する | Approved | 非該当 |
+| `CODE-F-067` | experimental user-input APIがない時も質問を失わない | initializeでexperimental APIを明示交渉し、`item/tool/requestUserInput`がない場合は通常assistant出力のversion付きdecision schemaだけを同じcardへ正規化する。`result`ではbounded `message`以外のdecision fieldをnullに限定し、decisionに影響しないbooleanの`allowFreeform`は無視する。`decision_request`ではbounded message、decision ID、question、2〜3 options、exact `DecisionContext`、`allowFreeform=false`を要求する。JSON Schemaで表現でき、選択binaryのStructured Output backendが受理する制約は`outputSchema`とRust parserの両方で同じにし、option間unique、recommendation membership、privacyはparserを最終正本とする。schema不正や自由文だけの曖昧なapprovalは回答UIにせず安全に停止する | Approved | 非該当 |
 | `CODE-F-068` | UIはキャラクターの感情で回答を誘導しない | option順、推奨根拠、riskを文字で示し、Live2D表情・音声を選択肢の有利不利に対応させない | Approved | 非該当 |
 
 ### Attachment・context・停止・復旧
@@ -117,8 +117,8 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `CODE-F-077` | appはmain sessionのGit commit command成功をtyped eventとして検出する | App Serverのnormalized command terminalがGit commit、exit success、active workspace generation一致の時だけcandidateを1件作り、assistant text、一般tool success、失敗command、raw文字列の部分一致では作らない | Approved | 非該当 |
-| `CODE-F-078` | candidate commitはread-only observerでSHAを検証する | command前後のHEADと到達可能commitを相関し、新しいvalid SHAと`commitEvidenceId`を確定できた時だけ`auto_verified_commit`をapp-owned explanation controllerへ渡す。0件、複数件、detached/race、HIST失敗をtyped resultにし、Gitを変更しない | Approved | 非該当 |
+| `CODE-F-077` | appはmain sessionのGit commit成功意図をtyped eventとして検出する | App Serverのnormalized `commandExecution`がGit commitかつexit success、または`mcpToolCall`がexact `server=node_repl`・`tool=js`・completed・errorなしで、result `_meta.codingWifeGitCommitProof`がexact `{schemaVersion:1, operation:"git_commit", beforeHead, commitSha}`の時だけcandidate completionを作る。`node_repl/js`はstarted時にcandidateを固定し、raw JavaScript、arguments、content text、assistant text、一般tool success、失敗tool、文字列の部分一致からcommitを推測しない | Approved | 非該当 |
+| `CODE-F-078` | candidate commitはread-only observerでSHAを検証する | active workspace generation・workspace repository identity・thread・turn・itemとcandidate開始時HEADを固定し、command completionではnative current HEAD、`node_repl/js`ではmarkerのfull `beforeHead` / `commitSha`とnative before/current HEADをexact照合する。到達可能な新しいvalid SHAと`commitEvidenceId`を確定できた時だけ`auto_verified_commit`をapp-owned explanation controllerへ渡す。marker欠落・未知key、0件、複数件、HEAD不変、external/stale、detached/race、HIST失敗をtyped resultにし、Gitを変更しない | Approved | 非該当 |
 | `CODE-F-079` | commit説明runtimeをmain conversationから完全に分離する | `auto_verified_commit`受理後のsupport root作成、status、delta、terminal、retryがmain thread/turn/subagent/event/command countを変えず、main sessionへ説明request/result/failureを1件も送らない。同じworkspace generation・commit evidence IDはidempotentに1件へ集約する | Approved | 非該当 |
 
 ## 入力項目要件

@@ -198,11 +198,15 @@ export interface CodexReviewStartRequest {
   readonly target: ReviewTarget
 }
 
+export type PendingUserInputAnswer =
+  | { readonly type: "option"; readonly optionId: string }
+  | { readonly type: "other"; readonly text: string }
+
 export type PendingResponse =
   | { readonly type: "approval"; readonly decision: ApprovalDecision }
   | {
       readonly type: "user_input"
-      readonly answers: Readonly<Record<string, readonly string[]>>
+      readonly answers: Readonly<Record<string, PendingUserInputAnswer>>
     }
 
 export interface CodexPendingResponseRequest {

@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, RwLock};
+use std::sync::{Arc, Mutex as StdMutex, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -23,6 +24,7 @@ use super::main_work_unit::{
     MainWorkUnitRuntime, MainWorkUnitStart, MainWorkUnitTerminal, MainWorkUnitTerminalState,
 };
 use super::normalizer::EventNormalizer;
+use super::presence::PresenceEventObserver;
 use super::process::{spawn_process, ProcessError, ProcessRuntime};
 use super::protocol::{
     account_read_params, client_notification, config_read_params, initialize_params,
@@ -43,6 +45,10 @@ use super::types::{
     CodexTurnStartRequest, MainSkillInjectionAudit, PendingResolutionStatus, ReasoningPreset,
     ReviewResponse, ThreadListResponse, ThreadResponse, ThreadSummary, TurnExecutionClass,
     TurnResponse,
+};
+use super::workspace::{
+    same_repository_identity, validate_git_repository, validate_workspace_write_authority,
+    GitRepositoryIdentity, WorkspaceWriteAuthority, WorkspaceWriteProvenance,
 };
 
 pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
@@ -75,6 +81,20 @@ const RESTART_WINDOW: Duration = Duration::from_secs(60);
 const MAX_RESTART_EXPONENT: usize = 6;
 const MAX_RESTART_DELAY: Duration = Duration::from_secs(30);
 
+async fn join_force_shutdown_components<Invalidate, Runtime, Presence>(
+    invalidate: Invalidate,
+    runtime: Runtime,
+    presence: Presence,
+) -> bool
+where
+    Invalidate: Future<Output = ()>,
+    Runtime: Future<Output = bool>,
+    Presence: Future<Output = bool>,
+{
+    let (_, runtime_converged, presence_converged) = tokio::join!(invalidate, runtime, presence);
+    runtime_converged && presence_converged
+}
+
 #[derive(Clone, Debug)]
 enum PendingTurnStartPurpose {
     User,
@@ -102,6 +122,7 @@ struct PendingTurnStart {
 #[derive(Default)]
 struct SupervisorState {
     workspaces: HashMap<String, PathBuf>,
+    workspace_repositories: HashMap<String, RegisteredWorkspaceRepository>,
     runtime_root: Option<PathBuf>,
     explicit_binary: Option<PathBuf>,
     binary: Option<BinaryInfo>,
@@ -129,6 +150,12 @@ struct SupervisorState {
     shutdown_requested: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RegisteredWorkspaceRepository {
+    identity: GitRepositoryIdentity,
+    write_provenance: WorkspaceWriteProvenance,
+}
+
 struct WorkspaceRuntimeContext {
     normalizer: EventNormalizer,
     thread_handles: HashMap<String, String>,
@@ -145,6 +172,7 @@ struct SupervisorInner {
     app_handle: RwLock<Option<AppHandle>>,
     resource_directory: RwLock<Option<PathBuf>>,
     main_work_unit_runtime: RwLock<Option<Arc<dyn MainWorkUnitRuntime>>>,
+    presence_observer: RwLock<Option<Weak<dyn PresenceEventObserver>>>,
     dynamic_tools: DynamicToolRegistry,
 }
 
@@ -308,6 +336,7 @@ impl CodexSupervisor {
                 app_handle: RwLock::new(None),
                 resource_directory: RwLock::new(None),
                 main_work_unit_runtime: RwLock::new(None),
+                presence_observer: RwLock::new(None),
                 dynamic_tools: DynamicToolRegistry,
             }),
         }
@@ -334,6 +363,23 @@ impl CodexSupervisor {
             .main_work_unit_runtime
             .write()
             .expect("main work unit runtime lock poisoned") = Some(runtime);
+    }
+
+    pub(crate) fn attach_presence_observer(&self, observer: &Arc<dyn PresenceEventObserver>) {
+        *self
+            .inner
+            .presence_observer
+            .write()
+            .expect("presence observer lock poisoned") = Some(Arc::downgrade(observer));
+    }
+
+    fn presence_observer(&self) -> Option<Arc<dyn PresenceEventObserver>> {
+        self.inner
+            .presence_observer
+            .read()
+            .expect("presence observer lock poisoned")
+            .as_ref()
+            .and_then(Weak::upgrade)
     }
 
     fn main_work_unit_runtime(&self) -> Option<Arc<dyn MainWorkUnitRuntime>> {
@@ -373,6 +419,9 @@ impl CodexSupervisor {
     async fn invalidate_main_work_unit_generation(&self, generation: u64) {
         if let Some(runtime) = self.main_work_unit_runtime() {
             runtime.invalidate_generation(generation).await;
+        }
+        if let Some(observer) = self.presence_observer() {
+            observer.invalidate_generation(generation).await;
         }
     }
 
@@ -455,12 +504,62 @@ impl CodexSupervisor {
                 false,
             ));
         }
-        self.inner
-            .state
-            .lock()
-            .await
+        let repository = validate_git_repository(&root).await?;
+        if repository.canonical_root != root {
+            return Err(command_error(
+                "CODEX-WORKSPACE-IDENTITY-CHANGED",
+                "codex.register",
+                false,
+            ));
+        }
+        let mut state = self.inner.state.lock().await;
+        state.workspaces.insert(workspace_id.clone(), root);
+        state.workspace_repositories.insert(
+            workspace_id,
+            RegisteredWorkspaceRepository {
+                identity: repository,
+                write_provenance: WorkspaceWriteProvenance::Unmanaged,
+            },
+        );
+        Ok(())
+    }
+
+    pub(crate) async fn register_validated_workspace(
+        &self,
+        workspace_id: impl Into<String>,
+        expected: &GitRepositoryIdentity,
+        write_provenance: WorkspaceWriteProvenance,
+    ) -> Result<(), CodexCommandError> {
+        let workspace_id = workspace_id.into();
+        if workspace_id.trim().is_empty() || workspace_id.len() > 128 {
+            return Err(command_error("CODEX-WORKSPACE-ID", "codex.register", false));
+        }
+        let live = validate_git_repository(&expected.canonical_root).await?;
+        if live.canonical_root != expected.canonical_root
+            || live.canonical_git_dir != expected.canonical_git_dir
+            || live.canonical_common_git_dir != expected.canonical_common_git_dir
+            || !same_repository_identity(&live, expected)
+            || write_provenance
+                .managed_identity()
+                .is_some_and(|identity| !identity.matches(&live))
+        {
+            return Err(command_error(
+                "CODEX-WORKSPACE-IDENTITY-CHANGED",
+                "codex.register",
+                false,
+            ));
+        }
+        let mut state = self.inner.state.lock().await;
+        state
             .workspaces
-            .insert(workspace_id, root);
+            .insert(workspace_id.clone(), live.canonical_root.clone());
+        state.workspace_repositories.insert(
+            workspace_id,
+            RegisteredWorkspaceRepository {
+                identity: live,
+                write_provenance,
+            },
+        );
         Ok(())
     }
 
@@ -479,6 +578,7 @@ impl CodexSupervisor {
             ));
         }
         state.workspaces.remove(workspace_id);
+        state.workspace_repositories.remove(workspace_id);
         state.workspace_contexts.remove(workspace_id);
         if state.active_workspace.as_deref() == Some(workspace_id) {
             state.active_workspace = None;
@@ -1095,6 +1195,59 @@ impl CodexSupervisor {
         Ok((runtime.connection.clone(), root, state.generation))
     }
 
+    async fn workspace_write_authority(
+        &self,
+        workspace_id: &str,
+        generation: u64,
+        operation: &str,
+    ) -> Result<(WorkspaceWriteAuthority, bool), CodexCommandError> {
+        let (expected, protocol_supported, experimental_api_accepted) = {
+            let state = self.inner.state.lock().await;
+            ensure_generation(&state, generation, operation)?;
+            let expected = state
+                .workspace_repositories
+                .get(workspace_id)
+                .cloned()
+                .ok_or_else(|| command_error("CODEX-WORKSPACE-MISSING", operation, false))?;
+            (
+                expected,
+                state
+                    .schema
+                    .as_ref()
+                    .is_some_and(|schema| schema.managed_worktree_write_roots),
+                state.diagnostic.experimental_api_accepted,
+            )
+        };
+        let authority = validate_workspace_write_authority(
+            &expected.identity,
+            expected.write_provenance.managed_identity(),
+        )
+        .await?;
+        if !authority.additional_writable_roots.is_empty()
+            && (!protocol_supported || !experimental_api_accepted)
+        {
+            return Err(command_error(
+                "CODEX-WORKSPACE-WRITE-ROOTS-UNSUPPORTED",
+                operation,
+                false,
+            ));
+        }
+        let state = self.inner.state.lock().await;
+        ensure_generation(&state, generation, operation)?;
+        let current = state
+            .workspace_repositories
+            .get(workspace_id)
+            .ok_or_else(|| command_error("CODEX-WORKSPACE-MISSING", operation, false))?;
+        if current != &expected {
+            return Err(command_error(
+                "CODEX-WORKSPACE-IDENTITY-CHANGED",
+                operation,
+                false,
+            ));
+        }
+        Ok((authority, protocol_supported))
+    }
+
     pub async fn active_generation(&self, workspace_id: &str) -> Result<u64, CodexCommandError> {
         let (_, _, generation) = self.ready_context(workspace_id).await?;
         Ok(generation)
@@ -1182,8 +1335,17 @@ impl CodexSupervisor {
     ) -> Result<ThreadResponse, CodexCommandError> {
         let (connection, root, generation) = self.ready_context(&request.workspace_id).await?;
         let profile = self.outbound_profile(generation, "thread/start").await?;
+        let (authority, protocol_supported) = self
+            .workspace_write_authority(&request.workspace_id, generation, "thread/start")
+            .await?;
+        let runtime_workspace_roots = authority.runtime_workspace_roots();
+        let runtime_workspace_roots =
+            protocol_supported.then_some(runtime_workspace_roots.as_slice());
         let result = connection
-            .request_default("thread/start", thread_start_params(&root, profile))
+            .request_default(
+                "thread/start",
+                thread_start_params(&root, runtime_workspace_roots, profile),
+            )
             .await
             .map_err(|error| rpc_command_error(error, "thread/start"))?;
         self.accept_thread_response(result, &root, generation, "thread/start")
@@ -1196,6 +1358,12 @@ impl CodexSupervisor {
     ) -> Result<ThreadResponse, CodexCommandError> {
         let (connection, root, generation) = self.ready_context(&request.workspace_id).await?;
         let profile = self.outbound_profile(generation, "thread/resume").await?;
+        let (authority, protocol_supported) = self
+            .workspace_write_authority(&request.workspace_id, generation, "thread/resume")
+            .await?;
+        let runtime_workspace_roots = authority.runtime_workspace_roots();
+        let runtime_workspace_roots =
+            protocol_supported.then_some(runtime_workspace_roots.as_slice());
         let raw_thread = {
             let state = self.inner.state.lock().await;
             state
@@ -1207,7 +1375,7 @@ impl CodexSupervisor {
         let result = connection
             .request_default(
                 "thread/resume",
-                thread_resume_params(&root, &raw_thread, profile),
+                thread_resume_params(&root, &raw_thread, runtime_workspace_roots, profile),
             )
             .await
             .map_err(|error| rpc_command_error(error, "thread/resume"))?;
@@ -1363,6 +1531,16 @@ impl CodexSupervisor {
                 true,
             ));
         }
+        let profile = self.outbound_profile(generation, "turn/start").await?;
+        let (authority, protocol_supported) = self
+            .workspace_write_authority(&request.workspace_id, generation, "turn/start")
+            .await?;
+        let runtime_workspace_roots = authority.runtime_workspace_roots();
+        let runtime_workspace_roots = (protocol_supported
+            && profile == OutboundProfile::Experimental)
+            .then_some(runtime_workspace_roots.as_slice());
+        let additional_writable_roots =
+            protocol_supported.then_some(authority.additional_writable_roots.as_slice());
         let (raw_thread, token) = {
             let mut state = self.inner.state.lock().await;
             ensure_generation(&state, generation, "turn/start")?;
@@ -1473,6 +1651,8 @@ impl CodexSupervisor {
                     attachments: &attachments,
                     commit_skill: &commit_skill,
                     execution_class: TurnExecutionClass::Main,
+                    runtime_workspace_roots,
+                    additional_writable_roots,
                 })
                 .map_err(|_| command_error("CODEX-TURN-SKILL-CLASS", "turn/start", false))?,
             )
@@ -1691,6 +1871,18 @@ impl CodexSupervisor {
         let commit_skill = self.resolve_main_skill("codex.decision.answer")?;
         let skill_injection = commit_skill.audit();
         let (connection, _root, generation) = self.ready_context(&request.workspace_id).await?;
+        let profile = self
+            .outbound_profile(generation, "codex.decision.answer")
+            .await?;
+        let (authority, protocol_supported) = self
+            .workspace_write_authority(&request.workspace_id, generation, "codex.decision.answer")
+            .await?;
+        let runtime_workspace_roots = authority.runtime_workspace_roots();
+        let runtime_workspace_roots = (protocol_supported
+            && profile == OutboundProfile::Experimental)
+            .then_some(runtime_workspace_roots.as_slice());
+        let additional_writable_roots =
+            protocol_supported.then_some(authority.additional_writable_roots.as_slice());
         let client_message_id = format!("decision-continuation-{}", uuid::Uuid::new_v4());
         let (claim, token) = {
             let mut state = self.inner.state.lock().await;
@@ -1768,6 +1960,8 @@ impl CodexSupervisor {
                     attachments: &[],
                     commit_skill: &commit_skill,
                     execution_class: TurnExecutionClass::Main,
+                    runtime_workspace_roots,
+                    additional_writable_roots,
                 })
                 .map_err(|_| {
                     command_error("CODEX-TURN-SKILL-CLASS", "codex.decision.answer", false)
@@ -1988,10 +2182,14 @@ impl CodexSupervisor {
             (state.runtime.clone(), state.generation)
         };
         self.invalidate_main_work_unit_generation(generation).await;
-        let converged = if let Some(runtime) = runtime.as_ref() {
+        let runtime_converged = if let Some(runtime) = runtime.as_ref() {
             runtime.shutdown_checked().await.is_ok()
         } else {
             true
+        };
+        let presence_converged = match self.presence_observer() {
+            Some(observer) => observer.shutdown().await,
+            None => true,
         };
         let mut state = self.inner.state.lock().await;
         if let (Some(current), Some(stopped)) = (state.runtime.as_ref(), runtime.as_ref()) {
@@ -2001,11 +2199,11 @@ impl CodexSupervisor {
         }
         state.diagnostic.child_state = ChildState::Stopped;
         state.diagnostic.health = CodexHealth::Disconnected;
-        converged
+        runtime_converged && presence_converged
     }
 
     pub async fn force_shutdown_now(&self) -> bool {
-        let runtime = {
+        let (runtime, generation) = {
             let mut state = self.inner.state.lock().await;
             state.shutdown_requested = true;
             state.restart_times.clear();
@@ -2017,15 +2215,34 @@ impl CodexSupervisor {
             state.main_work_units.clear();
             state.diagnostic.child_state = ChildState::Stopped;
             state.diagnostic.health = CodexHealth::Disconnected;
-            state.runtime.take()
+            (state.runtime.take(), state.generation)
         };
-        if let Some(runtime) = runtime {
-            runtime
-                .force_shutdown_and_wait(Duration::from_millis(400))
-                .await
-        } else {
-            true
-        }
+        let main_work_unit = self.main_work_unit_runtime();
+        let presence = self.presence_observer();
+        join_force_shutdown_components(
+            async move {
+                if let Some(main_work_unit) = main_work_unit {
+                    main_work_unit.invalidate_generation(generation).await;
+                }
+            },
+            async move {
+                match runtime {
+                    Some(runtime) => {
+                        runtime
+                            .force_shutdown_and_wait(Duration::from_millis(400))
+                            .await
+                    }
+                    None => true,
+                }
+            },
+            async move {
+                match presence {
+                    Some(observer) => observer.force_shutdown_now().await,
+                    None => true,
+                }
+            },
+        )
+        .await
     }
 
     async fn run_signal_loop(&self, mut receiver: mpsc::Receiver<RuntimeSignal>) {
@@ -2639,6 +2856,9 @@ impl CodexSupervisor {
     }
 
     fn emit_event(&self, event: &CodexEvent) {
+        if let Some(observer) = self.presence_observer() {
+            observer.observe(event);
+        }
         let app = self
             .inner
             .app_handle
@@ -2852,6 +3072,7 @@ async fn run_readiness_probe(context: ReadinessProbeContext) -> CodexDiagnostic 
         || context.expected_schema.as_ref().is_some_and(|expected| {
             expected.fingerprint != schema.fingerprint
                 || expected.capabilities != schema.capabilities
+                || expected.managed_worktree_write_roots != schema.managed_worktree_write_roots
                 || !expected.generated_by_same_binary
         })
     {
@@ -3686,5 +3907,44 @@ mod tests {
 
         assert!(!directory.exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn production_force_components_share_the_single_app_deadline() {
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let invalidation_barrier = barrier.clone();
+        let runtime_barrier = barrier.clone();
+        let presence_barrier = barrier;
+        let converged = tokio::time::timeout(
+            Duration::from_millis(500),
+            join_force_shutdown_components(
+                async move {
+                    invalidation_barrier.wait().await;
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                },
+                async move {
+                    runtime_barrier.wait().await;
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    false
+                },
+                async move {
+                    presence_barrier.wait().await;
+                    tokio::time::sleep(Duration::from_millis(450)).await;
+                    true
+                },
+            ),
+        )
+        .await
+        .expect("parallel force composition must fit the app deadline");
+        assert!(!converged, "one component failure must remain visible");
+
+        assert!(
+            join_force_shutdown_components(async {}, async { true }, async { true }).await,
+            "all components must converge"
+        );
+        assert!(
+            !join_force_shutdown_components(async {}, async { true }, async { false }).await,
+            "presence failure must remain visible"
+        );
     }
 }

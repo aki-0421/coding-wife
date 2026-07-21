@@ -302,8 +302,14 @@ pub fn fallback_continuation_input(decision_handle: &str, option_id: &str) -> St
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct WireDecisionOutput {
+struct WireDecisionEnvelope {
     schema_version: u16,
+    response: WireDecisionOutput,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct WireDecisionOutput {
     kind: String,
     message: String,
     decision_id: Value,
@@ -344,12 +350,15 @@ pub fn parse_completed_output(
     if text.len() > 128 * 1024 {
         return Err(DecisionOutputError::Invalid);
     }
-    let output: WireDecisionOutput =
+    let envelope: WireDecisionEnvelope =
         serde_json::from_str(text).map_err(|_| DecisionOutputError::Invalid)?;
+    if envelope.schema_version != 1 {
+        return Err(DecisionOutputError::Invalid);
+    }
+    let output = envelope.response;
     match output.kind.as_str() {
         "result" => {
-            if output.schema_version != 1
-                || !bounded(&output.message, 1, 65_536)
+            if !bounded(&output.message, 1, 65_536)
                 || !output.decision_id.is_null()
                 || !output.question.is_null()
                 || !output.options.is_null()
@@ -379,8 +388,7 @@ pub fn parse_completed_output(
                 .allow_freeform
                 .as_bool()
                 .ok_or(DecisionOutputError::Invalid)?;
-            if output.schema_version != 1
-                || allow_freeform
+            if allow_freeform
                 || !bounded(&output.message, 1, 4_096)
                 || !bounded(decision_id, 1, 128)
                 || !bounded(question, 1, 4_096)
@@ -581,28 +589,30 @@ mod tests {
     fn decision_json() -> String {
         json!({
             "schemaVersion": 1,
-            "kind": "decision_request",
-            "message": "Choose",
-            "decisionId": "d1",
-            "question": "Continue?",
-            "options": [
-                {"id": "yes", "label": "Yes", "description": "Continue"},
-                {"id": "no", "label": "No", "description": "Stop"}
-            ],
-            "context": {
-                "schemaVersion": 1,
-                "category": "user_decision",
-                "targetKind": "active_turn",
-                "targetAlias": "active_turn",
-                "effect": "continue_turn",
-                "scope": "turn",
-                "risk": "medium",
-                "reversibility": "unknown",
-                "recommendation": "yes",
-                "evidence": ["The next step is bounded and reviewable."],
-                "uncertainty": "limited_context"
-            },
-            "allowFreeform": false
+            "response": {
+                "kind": "decision_request",
+                "message": "Choose",
+                "decisionId": "d1",
+                "question": "Continue?",
+                "options": [
+                    {"id": "yes", "label": "Yes", "description": "Continue"},
+                    {"id": "no", "label": "No", "description": "Stop"}
+                ],
+                "context": {
+                    "schemaVersion": 1,
+                    "category": "user_decision",
+                    "targetKind": "active_turn",
+                    "targetAlias": "active_turn",
+                    "effect": "continue_turn",
+                    "scope": "turn",
+                    "risk": "medium",
+                    "reversibility": "unknown",
+                    "recommendation": "yes",
+                    "evidence": ["The next step is bounded and reviewable."],
+                    "uncertainty": "limited_context"
+                },
+                "allowFreeform": false
+            }
         })
         .to_string()
     }
@@ -631,7 +641,7 @@ mod tests {
         for allow_freeform in ["null", "false", "true"] {
             let result = parse_completed_output(
                 &format!(
-                    r#"{{"schemaVersion":1,"kind":"result","message":"Done","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":{allow_freeform}}}"#
+                    r#"{{"schemaVersion":1,"response":{{"kind":"result","message":"Done","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":{allow_freeform}}}}}"#
                 ),
                 Path::new("/workspace"),
             )
@@ -664,42 +674,44 @@ mod tests {
         for invalid in [
             json!({
                 "schemaVersion": 1,
-                "kind": "decision_request",
-                "message": "Choose",
-                "decisionId": "d1",
-                "question": "Continue?",
-                "options": [
-                    {"id": "yes", "label": "Yes", "description": "Continue"},
-                    {"id": "no", "label": "No", "description": "Stop"}
-                ],
-                "context": {
-                    "schemaVersion": 2,
-                    "category": "user_decision",
-                    "targetKind": "active_turn",
-                    "targetAlias": "active_turn",
-                    "effect": "continue_turn",
-                    "scope": "turn",
-                    "risk": "medium",
-                    "reversibility": "unknown",
-                    "recommendation": "yes",
-                    "evidence": ["bounded"],
-                    "uncertainty": "limited_context"
-                },
-                "allowFreeform": false
+                "response": {
+                    "kind": "decision_request",
+                    "message": "Choose",
+                    "decisionId": "d1",
+                    "question": "Continue?",
+                    "options": [
+                        {"id": "yes", "label": "Yes", "description": "Continue"},
+                        {"id": "no", "label": "No", "description": "Stop"}
+                    ],
+                    "context": {
+                        "schemaVersion": 2,
+                        "category": "user_decision",
+                        "targetKind": "active_turn",
+                        "targetAlias": "active_turn",
+                        "effect": "continue_turn",
+                        "scope": "turn",
+                        "risk": "medium",
+                        "reversibility": "unknown",
+                        "recommendation": "yes",
+                        "evidence": ["bounded"],
+                        "uncertainty": "limited_context"
+                    },
+                    "allowFreeform": false
+                }
             }),
             {
                 let mut value = valid.clone();
-                value["context"]["recommendation"] = json!("missing-option");
+                value["response"]["context"]["recommendation"] = json!("missing-option");
                 value
             },
             {
                 let mut value = valid.clone();
-                value["context"]["evidence"] = json!(["Bearer private-secret-value"]);
+                value["response"]["context"]["evidence"] = json!(["Bearer private-secret-value"]);
                 value
             },
             {
                 let mut value = valid.clone();
-                value["context"]["unknownField"] = json!(true);
+                value["response"]["context"]["unknownField"] = json!(true);
                 value
             },
         ] {
@@ -711,19 +723,38 @@ mod tests {
     }
 
     #[test]
-    fn free_text_approval_substitute_and_duplicate_options_are_rejected() {
+    fn old_flat_branch_mismatch_and_free_text_outputs_are_rejected() {
         for invalid in [
             "free text",
-            r#"{"schemaVersion":1,"kind":"approval","message":"approve"}"#,
-            r#"{"schemaVersion":1,"kind":"result","message":"Done","decisionId":"unexpected","question":null,"options":null,"context":null,"allowFreeform":null}"#,
-            r#"{"schemaVersion":1,"kind":"decision_request","message":"Choose","decisionId":"d1","question":"Continue?","options":[{"id":"same","label":"A","description":"A"},{"id":"same","label":"B","description":"B"}],"allowFreeform":false}"#,
-            r#"{"schemaVersion":1,"kind":"decision_request","message":"Choose","decisionId":"d1","question":"Continue?","options":[{"id":"a","label":"A","description":"A"},{"id":"b","label":"B","description":"B"}],"allowFreeform":true}"#,
+            r#"{"schemaVersion":1,"kind":"result","message":"old flat","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":null}"#,
+            r#"{"schemaVersion":1,"response":{"kind":"approval","message":"approve"}}"#,
+            r#"{"schemaVersion":1,"response":{"kind":"result","message":"Done","decisionId":"unexpected","question":null,"options":null,"context":null,"allowFreeform":null}}"#,
         ] {
             assert_eq!(
                 parse_completed_output(invalid, Path::new("/workspace")),
                 Err(DecisionOutputError::Invalid)
             );
         }
+    }
+
+    #[test]
+    fn schema_valid_duplicate_options_remain_parser_invalid() {
+        let mut duplicate: Value = serde_json::from_str(&decision_json()).expect("valid json");
+        duplicate["response"]["options"][1]["id"] = json!("yes");
+        assert_eq!(
+            parse_completed_output(&duplicate.to_string(), Path::new("/workspace")),
+            Err(DecisionOutputError::Invalid)
+        );
+    }
+
+    #[test]
+    fn schema_branch_constraints_are_rechecked_by_the_parser() {
+        let mut freeform: Value = serde_json::from_str(&decision_json()).expect("valid json");
+        freeform["response"]["allowFreeform"] = json!(true);
+        assert_eq!(
+            parse_completed_output(&freeform.to_string(), Path::new("/workspace")),
+            Err(DecisionOutputError::Invalid)
+        );
     }
 
     #[test]

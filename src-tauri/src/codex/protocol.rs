@@ -4,8 +4,14 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 
 use super::attachment::ResolvedAttachment;
-use super::bundled_skill::{ResolvedBundledSkill, COMMIT_SKILL_NAME, EXPLAIN_COMMIT_SKILL_NAME};
-use super::types::{ReasoningPreset, ReviewTarget, TurnExecutionClass, CODEX_MODEL};
+use super::bundled_skill::{
+    ResolvedBundledSkill, COMMIT_SKILL_NAME, DIRECT_PRESENCE_SKILL_NAME, EXPLAIN_COMMIT_SKILL_NAME,
+};
+#[cfg(test)]
+use super::types::CODEX_COMMIT_EXPLAINER_MODEL;
+use super::types::{
+    ReasoningPreset, ReviewTarget, TurnExecutionClass, CODEX_MODEL, CODEX_PRESENCE_DIRECTOR_MODEL,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutboundProfile {
@@ -269,7 +275,11 @@ pub fn thread_list_params(cwd: &Path, cursor: Option<&str>) -> Value {
     })
 }
 
-pub fn thread_start_params(cwd: &Path, profile: OutboundProfile) -> Value {
+pub fn thread_start_params(
+    cwd: &Path,
+    runtime_workspace_roots: Option<&[PathBuf]>,
+    profile: OutboundProfile,
+) -> Value {
     let mut params = json!({
         "model": CODEX_MODEL,
         "cwd": cwd.to_string_lossy(),
@@ -280,10 +290,15 @@ pub fn thread_start_params(cwd: &Path, profile: OutboundProfile) -> Value {
     if profile == OutboundProfile::Experimental {
         let object = params.as_object_mut().expect("thread params object");
         object.insert("allowProviderModelFallback".to_owned(), Value::Bool(false));
-        object.insert(
-            "runtimeWorkspaceRoots".to_owned(),
-            json!([cwd.to_string_lossy()]),
-        );
+        if let Some(runtime_workspace_roots) = runtime_workspace_roots {
+            object.insert(
+                "runtimeWorkspaceRoots".to_owned(),
+                json!(runtime_workspace_roots
+                    .iter()
+                    .map(|root| root.to_string_lossy())
+                    .collect::<Vec<_>>()),
+            );
+        }
         object.insert("experimentalRawEvents".to_owned(), Value::Bool(false));
         object.insert("dynamicTools".to_owned(), json!([]));
         object.insert("environments".to_owned(), json!([]));
@@ -291,7 +306,12 @@ pub fn thread_start_params(cwd: &Path, profile: OutboundProfile) -> Value {
     params
 }
 
-pub fn thread_resume_params(cwd: &Path, thread_id: &str, profile: OutboundProfile) -> Value {
+pub fn thread_resume_params(
+    cwd: &Path,
+    thread_id: &str,
+    runtime_workspace_roots: Option<&[PathBuf]>,
+    profile: OutboundProfile,
+) -> Value {
     let mut params = json!({
         "threadId": thread_id,
         "model": CODEX_MODEL,
@@ -301,13 +321,18 @@ pub fn thread_resume_params(cwd: &Path, thread_id: &str, profile: OutboundProfil
         "excludeTurns": true,
     });
     if profile == OutboundProfile::Experimental {
-        params
-            .as_object_mut()
-            .expect("thread params object")
-            .insert(
-                "runtimeWorkspaceRoots".to_owned(),
-                json!([cwd.to_string_lossy()]),
-            );
+        if let Some(runtime_workspace_roots) = runtime_workspace_roots {
+            params
+                .as_object_mut()
+                .expect("thread params object")
+                .insert(
+                    "runtimeWorkspaceRoots".to_owned(),
+                    json!(runtime_workspace_roots
+                        .iter()
+                        .map(|root| root.to_string_lossy())
+                        .collect::<Vec<_>>()),
+                );
+        }
     }
     params
 }
@@ -416,12 +441,122 @@ pub(crate) fn parse_support_thread_policy_response(
     Ok(SupportThreadPolicyResponse { thread_id })
 }
 
+pub(crate) fn validate_support_thread_settings_notification(
+    params: &Value,
+    thread_id: &str,
+    cwd: &Path,
+    model: &str,
+    model_provider: Option<&str>,
+) -> Result<(), SupportThreadPolicyError> {
+    const PARAM_KEYS: &[&str] = &["threadId", "threadSettings"];
+    const SETTINGS_KEYS: &[&str] = &[
+        "activePermissionProfile",
+        "approvalPolicy",
+        "approvalsReviewer",
+        "collaborationMode",
+        "cwd",
+        "effort",
+        "model",
+        "modelProvider",
+        "multiAgentMode",
+        "personality",
+        "sandboxPolicy",
+        "serviceTier",
+        "summary",
+    ];
+    const COLLABORATION_KEYS: &[&str] = &["mode", "settings"];
+    const COLLABORATION_SETTINGS_KEYS: &[&str] =
+        &["developer_instructions", "model", "reasoning_effort"];
+    const PERMISSION_PROFILE_KEYS: &[&str] = &["extends", "id"];
+    const SANDBOX_KEYS: &[&str] = &["networkAccess", "type"];
+
+    let settings = params
+        .get("threadSettings")
+        .and_then(Value::as_object)
+        .ok_or(SupportThreadPolicyError::MissingField)?;
+    if !value_has_exact_keys(params, PARAM_KEYS)
+        || !value_has_exact_keys(&params["threadSettings"], SETTINGS_KEYS)
+        || !value_has_exact_keys(
+            &params["threadSettings"]["activePermissionProfile"],
+            PERMISSION_PROFILE_KEYS,
+        )
+        || !value_has_exact_keys(&params["threadSettings"]["sandboxPolicy"], SANDBOX_KEYS)
+        || !value_has_exact_keys(
+            &params["threadSettings"]["collaborationMode"],
+            COLLABORATION_KEYS,
+        )
+        || !value_has_exact_keys(
+            &params["threadSettings"]["collaborationMode"]["settings"],
+            COLLABORATION_SETTINGS_KEYS,
+        )
+        || params.get("threadId").and_then(Value::as_str) != Some(thread_id)
+        || settings.get("model").and_then(Value::as_str) != Some(model)
+        || settings.get("approvalPolicy").and_then(Value::as_str) != Some("never")
+        || settings.get("approvalsReviewer").and_then(Value::as_str) != Some("user")
+        || params
+            .pointer("/threadSettings/activePermissionProfile/id")
+            .and_then(Value::as_str)
+            != Some("coding-wife-support-zero")
+        || !params
+            .pointer("/threadSettings/activePermissionProfile/extends")
+            .is_some_and(Value::is_null)
+        || params
+            .pointer("/threadSettings/sandboxPolicy/type")
+            .and_then(Value::as_str)
+            != Some("readOnly")
+        || params
+            .pointer("/threadSettings/sandboxPolicy/networkAccess")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || settings.get("effort").and_then(Value::as_str) != Some("low")
+        || settings.get("multiAgentMode").and_then(Value::as_str) != Some("explicitRequestOnly")
+        || params
+            .pointer("/threadSettings/collaborationMode/mode")
+            .and_then(Value::as_str)
+            != Some("default")
+        || params
+            .pointer("/threadSettings/collaborationMode/settings/model")
+            .and_then(Value::as_str)
+            != Some(model)
+        || params
+            .pointer("/threadSettings/collaborationMode/settings/reasoning_effort")
+            .and_then(Value::as_str)
+            != Some("low")
+        || !params
+            .pointer("/threadSettings/collaborationMode/settings/developer_instructions")
+            .is_some_and(Value::is_null)
+        || settings.get("personality").and_then(Value::as_str) != Some("pragmatic")
+        || !settings.get("serviceTier").is_some_and(Value::is_null)
+        || !settings.get("summary").is_some_and(Value::is_null)
+        || model_provider.is_some_and(|expected| {
+            settings.get("modelProvider").and_then(Value::as_str) != Some(expected)
+        })
+    {
+        return Err(SupportThreadPolicyError::Policy);
+    }
+    let expected_cwd = std::fs::canonicalize(cwd).map_err(|_| SupportThreadPolicyError::Path)?;
+    let actual_cwd = settings
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|value| Path::new(value).is_absolute())
+        .and_then(|value| std::fs::canonicalize(value).ok())
+        .ok_or(SupportThreadPolicyError::Path)?;
+    (actual_cwd == expected_cwd)
+        .then_some(())
+        .ok_or(SupportThreadPolicyError::Policy)
+}
+
+fn value_has_exact_keys(value: &Value, expected: &[&str]) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.len() == expected.len() && expected.iter().all(|key| object.contains_key(*key))
+    })
+}
+
 pub fn decision_output_schema() -> Value {
-    json!({
+    let result = json!({
         "type": "object",
         "additionalProperties": false,
         "required": [
-            "schemaVersion",
             "kind",
             "message",
             "decisionId",
@@ -431,80 +566,108 @@ pub fn decision_output_schema() -> Value {
             "allowFreeform"
         ],
         "properties": {
-            "schemaVersion": {"type": "integer", "enum": [1]},
-            "kind": {"type": "string", "enum": ["result", "decision_request"]},
-            "message": {"type": "string"},
-            "decisionId": {
-                "type": ["string", "null"],
-                "description": "Use null for result; provide a stable ID for decision_request."
-            },
-            "question": {
-                "type": ["string", "null"],
-                "description": "Use null for result; provide the user question for decision_request."
-            },
+            "kind": {"type": "string", "const": "result"},
+            "message": {"type": "string", "minLength": 1, "maxLength": 65_536},
+            "decisionId": {"type": "null"},
+            "question": {"type": "null"},
+            "options": {"type": "null"},
+            "context": {"type": "null"},
+            "allowFreeform": {"type": ["boolean", "null"]}
+        }
+    });
+    let decision_request = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "kind",
+            "message",
+            "decisionId",
+            "question",
+            "options",
+            "context",
+            "allowFreeform"
+        ],
+        "properties": {
+            "kind": {"type": "string", "const": "decision_request"},
+            "message": {"type": "string", "minLength": 1, "maxLength": 4_096},
+            "decisionId": {"type": "string", "minLength": 1, "maxLength": 128},
+            "question": {"type": "string", "minLength": 1, "maxLength": 4_096},
             "options": {
-                "type": ["array", "null"],
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 3,
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["id", "label", "description"],
                     "properties": {
-                        "id": {"type": "string"},
-                        "label": {"type": "string"},
-                        "description": {"type": "string"}
+                        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+                        "label": {"type": "string", "minLength": 1, "maxLength": 256},
+                        "description": {"type": "string", "maxLength": 1_024}
                     }
                 }
             },
             "context": {
-                "anyOf": [
-                    {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                            "schemaVersion",
-                            "category",
-                            "targetKind",
-                            "targetAlias",
-                            "effect",
-                            "scope",
-                            "risk",
-                            "reversibility",
-                            "recommendation",
-                            "evidence",
-                            "uncertainty"
-                        ],
-                        "properties": {
-                            "schemaVersion": {"type": "integer", "enum": [1]},
-                            "category": {"type": "string", "enum": ["user_decision"]},
-                            "targetKind": {"type": "string", "enum": ["active_turn"]},
-                            "targetAlias": {"type": "string", "enum": ["active_turn"]},
-                            "effect": {"type": "string", "enum": ["continue_turn"]},
-                            "scope": {"type": "string", "enum": ["turn"]},
-                            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
-                            "reversibility": {
-                                "type": "string",
-                                "enum": [
-                                    "reversible",
-                                    "partially_reversible",
-                                    "not_reversible",
-                                    "unknown"
-                                ]
-                            },
-                            "recommendation": {"type": ["string", "null"]},
-                            "evidence": {"type": "array", "items": {"type": "string"}},
-                            "uncertainty": {
-                                "type": "string",
-                                "enum": ["none", "limited_context", "unknown_effects"]
-                            }
-                        }
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "schemaVersion",
+                    "category",
+                    "targetKind",
+                    "targetAlias",
+                    "effect",
+                    "scope",
+                    "risk",
+                    "reversibility",
+                    "recommendation",
+                    "evidence",
+                    "uncertainty"
+                ],
+                "properties": {
+                    "schemaVersion": {"type": "integer", "const": 1},
+                    "category": {"type": "string", "const": "user_decision"},
+                    "targetKind": {"type": "string", "const": "active_turn"},
+                    "targetAlias": {"type": "string", "const": "active_turn"},
+                    "effect": {"type": "string", "const": "continue_turn"},
+                    "scope": {"type": "string", "const": "turn"},
+                    "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+                    "reversibility": {
+                        "type": "string",
+                        "enum": [
+                            "reversible",
+                            "partially_reversible",
+                            "not_reversible",
+                            "unknown"
+                        ]
                     },
-                    {"type": "null"}
-                ]
+                    "recommendation": {
+                        "anyOf": [
+                            {"type": "string", "minLength": 1, "maxLength": 128},
+                            {"type": "null"}
+                        ]
+                    },
+                    "evidence": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "items": {"type": "string", "minLength": 1, "maxLength": 512}
+                    },
+                    "uncertainty": {
+                        "type": "string",
+                        "enum": ["none", "limited_context", "unknown_effects"]
+                    }
+                }
             },
-            "allowFreeform": {
-                "type": ["boolean", "null"],
-                "description": "Use null for result and false for decision_request."
-            }
+            "allowFreeform": {"type": "boolean", "const": false}
+        }
+    });
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "response"],
+        "properties": {
+            "schemaVersion": {"type": "integer", "const": 1},
+            "response": {"anyOf": [result, decision_request]}
         }
     })
 }
@@ -576,6 +739,23 @@ pub(crate) fn commit_explanation_output_schema(locale: &str) -> Value {
     })
 }
 
+pub(crate) fn presence_direction_output_schema(locale: &str) -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "locale", "utterance", "cue"],
+        "properties": {
+            "schemaVersion": {"type": "integer", "const": 1},
+            "locale": {"type": "string", "const": locale},
+            "utterance": {"type": "string", "minLength": 1, "maxLength": 160},
+            "cue": {
+                "type": "string",
+                "enum": ["neutral", "working", "asking", "success", "warning", "error"]
+            }
+        }
+    })
+}
+
 fn bounded_string_array_schema() -> Value {
     json!({
         "type": "array",
@@ -615,6 +795,35 @@ pub(crate) fn support_turn_start_params(
     }))
 }
 
+pub(crate) fn presence_turn_start_params(
+    thread_id: &str,
+    cwd: &Path,
+    client_user_message_id: &str,
+    input_text: &str,
+    locale: &str,
+    support_skill: &ResolvedBundledSkill,
+) -> Result<Value, TurnContractError> {
+    if support_skill.name != DIRECT_PRESENCE_SKILL_NAME {
+        return Err(TurnContractError::SkillClass);
+    }
+    Ok(json!({
+        "threadId": thread_id,
+        "clientUserMessageId": client_user_message_id,
+        "input": [
+            {"type": "text", "text": input_text, "text_elements": []},
+            {"type": "skill", "name": support_skill.name, "path": support_skill.path}
+        ],
+        "model": CODEX_PRESENCE_DIRECTOR_MODEL,
+        "effort": "low",
+        "cwd": cwd.to_string_lossy(),
+        "approvalPolicy": "never",
+        "permissions": "coding-wife-support-zero",
+        "environments": [],
+        "runtimeWorkspaceRoots": [],
+        "outputSchema": presence_direction_output_schema(locale),
+    }))
+}
+
 pub(crate) struct TurnStartRequest<'a> {
     pub thread_id: &'a str,
     pub client_user_message_id: &'a str,
@@ -625,6 +834,8 @@ pub(crate) struct TurnStartRequest<'a> {
     pub attachments: &'a [ResolvedAttachment],
     pub commit_skill: &'a ResolvedBundledSkill,
     pub execution_class: TurnExecutionClass,
+    pub runtime_workspace_roots: Option<&'a [PathBuf]>,
+    pub additional_writable_roots: Option<&'a [PathBuf]>,
 }
 
 pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, TurnContractError> {
@@ -638,6 +849,8 @@ pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, 
         attachments,
         commit_skill,
         execution_class,
+        runtime_workspace_roots,
+        additional_writable_roots,
     } = request;
     if !execution_skill_matches(execution_class, commit_skill)
         || (execution_class == TurnExecutionClass::Support && !attachments.is_empty())
@@ -673,7 +886,7 @@ pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, 
     } else {
         Value::Null
     };
-    Ok(json!({
+    let mut params = json!({
         "threadId": thread_id,
         "clientUserMessageId": client_user_message_id,
         "input": input,
@@ -682,7 +895,30 @@ pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, 
         "serviceTier": service_tier,
         "collaborationMode": collaboration_mode,
         "outputSchema": decision_output_schema(),
-    }))
+    });
+    if let Some(additional_writable_roots) = additional_writable_roots {
+        params.as_object_mut().expect("turn params object").insert(
+            "sandboxPolicy".to_owned(),
+            json!({
+                "type": "workspaceWrite",
+                "writableRoots": additional_writable_roots
+                    .iter()
+                    .map(|root| root.to_string_lossy())
+                    .collect::<Vec<_>>(),
+                "networkAccess": false,
+            }),
+        );
+    }
+    if let Some(runtime_workspace_roots) = runtime_workspace_roots {
+        params.as_object_mut().expect("turn params object").insert(
+            "runtimeWorkspaceRoots".to_owned(),
+            json!(runtime_workspace_roots
+                .iter()
+                .map(|root| root.to_string_lossy())
+                .collect::<Vec<_>>()),
+        );
+    }
+    Ok(params)
 }
 
 pub fn thread_goal_set_params(thread_id: &str, objective: &str) -> Value {
@@ -838,6 +1074,52 @@ mod tests {
         }
     }
 
+    fn presence_skill() -> ResolvedBundledSkill {
+        ResolvedBundledSkill {
+            name: DIRECT_PRESENCE_SKILL_NAME.to_owned(),
+            version: "1.0.0".to_owned(),
+            content_digest: format!("sha256:{}", "c".repeat(64)),
+            path: PathBuf::from(
+                "/app-bundle/resources/skills/coding-wife-direct-presence/SKILL.md",
+            ),
+            verified_entrypoint: std::sync::Arc::from([]),
+        }
+    }
+
+    fn support_settings_notification(cwd: &Path, model: &str) -> Value {
+        json!({
+            "threadId": "support-thread",
+            "threadSettings": {
+                "activePermissionProfile": {
+                    "id": "coding-wife-support-zero",
+                    "extends": null
+                },
+                "approvalPolicy": "never",
+                "approvalsReviewer": "user",
+                "collaborationMode": {
+                    "mode": "default",
+                    "settings": {
+                        "developer_instructions": null,
+                        "model": model,
+                        "reasoning_effort": "low"
+                    }
+                },
+                "cwd": cwd.to_string_lossy(),
+                "effort": "low",
+                "model": model,
+                "modelProvider": "openai",
+                "multiAgentMode": "explicitRequestOnly",
+                "personality": "pragmatic",
+                "sandboxPolicy": {
+                    "type": "readOnly",
+                    "networkAccess": false
+                },
+                "serviceTier": null,
+                "summary": null
+            }
+        })
+    }
+
     #[test]
     fn classifies_out_of_order_responses_by_id() {
         let second = classify_message(json!({"id": 2, "result": {"ok": true}}), 20)
@@ -886,6 +1168,8 @@ mod tests {
             attachments: &[],
             commit_skill: &skill,
             execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: None,
+            additional_writable_roots: Some(&[]),
         })
         .expect("main turn contract");
         let max = turn_start_params(TurnStartRequest {
@@ -898,6 +1182,8 @@ mod tests {
             attachments: &[],
             commit_skill: &skill,
             execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: None,
+            additional_writable_roots: Some(&[]),
         })
         .expect("main turn contract");
 
@@ -921,23 +1207,151 @@ mod tests {
     }
 
     #[test]
-    fn decision_output_schema_uses_a_structured_outputs_root_object() {
+    fn main_turn_scopes_runtime_and_write_roots_to_validated_git_metadata() {
+        let runtime_roots = [
+            PathBuf::from("/workspace"),
+            PathBuf::from("/project/.git/worktrees/workspace"),
+            PathBuf::from("/project/.git"),
+        ];
+        let writable_roots = [
+            PathBuf::from("/project/.git/worktrees/workspace"),
+            PathBuf::from("/project/.git"),
+        ];
+        let params = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "stage and commit",
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            attachments: &[],
+            commit_skill: &commit_skill(),
+            execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: Some(&runtime_roots),
+            additional_writable_roots: Some(&writable_roots),
+        })
+        .expect("managed worktree turn contract");
+
+        assert_eq!(params["runtimeWorkspaceRoots"], json!(runtime_roots));
+        assert_eq!(
+            params["sandboxPolicy"],
+            json!({
+                "type": "workspaceWrite",
+                "writableRoots": writable_roots,
+                "networkAccess": false,
+            })
+        );
+    }
+
+    #[test]
+    fn main_turn_omits_unverified_workspace_root_extensions() {
+        let params = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "inspect",
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            attachments: &[],
+            commit_skill: &commit_skill(),
+            execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: None,
+            additional_writable_roots: None,
+        })
+        .expect("legacy main turn contract");
+
+        assert!(params.get("runtimeWorkspaceRoots").is_none());
+        assert!(params.get("sandboxPolicy").is_none());
+    }
+
+    #[test]
+    fn decision_output_schema_matches_the_strict_parser_shape_and_bounds() {
         let schema = decision_output_schema();
         assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["required"], json!(["schemaVersion", "response"]));
+        assert_eq!(
+            schema["properties"].as_object().map(|value| value.len()),
+            Some(2)
+        );
+        assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
         assert!(schema.get("oneOf").is_none());
+
+        let branches = schema["properties"]["response"]["anyOf"]
+            .as_array()
+            .expect("response union");
+        assert_eq!(branches.len(), 2);
+        let result = branches
+            .iter()
+            .find(|branch| branch["properties"]["kind"]["const"] == "result")
+            .expect("result branch");
+        let decision = branches
+            .iter()
+            .find(|branch| branch["properties"]["kind"]["const"] == "decision_request")
+            .expect("decision branch");
+
+        assert_eq!(result["additionalProperties"], false);
         assert_eq!(
-            schema["properties"]["kind"]["enum"],
-            json!(["result", "decision_request"])
+            result["required"],
+            json!([
+                "kind",
+                "message",
+                "decisionId",
+                "question",
+                "options",
+                "context",
+                "allowFreeform"
+            ])
         );
+        assert_eq!(result["properties"]["message"]["minLength"], 1);
+        assert_eq!(result["properties"]["message"]["maxLength"], 65_536);
+        for field in ["decisionId", "question", "options", "context"] {
+            assert_eq!(result["properties"][field]["type"], "null", "{field}");
+        }
         assert_eq!(
-            schema["properties"]["decisionId"]["type"],
-            json!(["string", "null"])
+            result["properties"]["allowFreeform"]["type"],
+            json!(["boolean", "null"])
         );
+
+        assert_eq!(decision["additionalProperties"], false);
+        assert_eq!(decision["required"], result["required"]);
+        assert_eq!(decision["properties"]["message"]["maxLength"], 4_096);
+        assert_eq!(decision["properties"]["decisionId"]["minLength"], 1);
+        assert_eq!(decision["properties"]["decisionId"]["maxLength"], 128);
+        assert_eq!(decision["properties"]["question"]["maxLength"], 4_096);
+        let options = &decision["properties"]["options"];
+        assert_eq!(options["minItems"], 2);
+        assert_eq!(options["maxItems"], 3);
+        assert_eq!(options["items"]["additionalProperties"], false);
         assert_eq!(
-            schema["properties"]["allowFreeform"]["description"],
-            "Use null for result and false for decision_request."
+            options["items"]["required"],
+            json!(["id", "label", "description"])
         );
-        assert_eq!(schema["required"].as_array().map(Vec::len), Some(8));
+        assert_eq!(options["items"]["properties"]["id"]["maxLength"], 128);
+        assert_eq!(options["items"]["properties"]["label"]["maxLength"], 256);
+        assert_eq!(
+            options["items"]["properties"]["description"]["maxLength"],
+            1_024
+        );
+        let context = &decision["properties"]["context"];
+        assert_eq!(context["additionalProperties"], false);
+        assert_eq!(context["required"].as_array().map(Vec::len), Some(11));
+        assert_eq!(context["properties"]["schemaVersion"]["const"], 1);
+        assert_eq!(context["properties"]["category"]["const"], "user_decision");
+        assert_eq!(context["properties"]["targetKind"]["const"], "active_turn");
+        assert_eq!(context["properties"]["targetAlias"]["const"], "active_turn");
+        assert_eq!(context["properties"]["effect"]["const"], "continue_turn");
+        assert_eq!(context["properties"]["scope"]["const"], "turn");
+        assert_eq!(
+            context["properties"]["recommendation"]["anyOf"]
+                .as_array()
+                .map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(context["properties"]["evidence"]["minItems"], 1);
+        assert_eq!(context["properties"]["evidence"]["maxItems"], 8);
+        assert_eq!(context["properties"]["evidence"]["items"]["maxLength"], 512);
+        assert_eq!(decision["properties"]["allowFreeform"]["const"], false);
     }
 
     #[test]
@@ -953,6 +1367,8 @@ mod tests {
                 attachments: &[],
                 commit_skill: &explain_skill(),
                 execution_class: TurnExecutionClass::Main,
+                runtime_workspace_roots: None,
+                additional_writable_roots: Some(&[]),
             }),
             Err(TurnContractError::SkillClass)
         );
@@ -963,7 +1379,7 @@ mod tests {
                 "message",
                 "{}",
                 "ja",
-                CODEX_MODEL,
+                CODEX_COMMIT_EXPLAINER_MODEL,
                 &commit_skill(),
             ),
             Err(TurnContractError::SkillClass)
@@ -978,7 +1394,7 @@ mod tests {
             "message",
             "{}",
             "ja",
-            CODEX_MODEL,
+            CODEX_COMMIT_EXPLAINER_MODEL,
             &explain_skill(),
         )
         .expect("support turn contract");
@@ -995,6 +1411,15 @@ mod tests {
         assert_eq!(params["permissions"], "coding-wife-support-zero");
         assert_eq!(params["environments"], json!([]));
         assert_eq!(params["runtimeWorkspaceRoots"], json!([]));
+        assert_eq!(params["model"], CODEX_COMMIT_EXPLAINER_MODEL);
+
+        let thread = support_thread_start_params(
+            Path::new("/private/support"),
+            CODEX_COMMIT_EXPLAINER_MODEL,
+            Some("openai"),
+        );
+        assert_eq!(thread["model"], CODEX_COMMIT_EXPLAINER_MODEL);
+        assert_eq!(thread["allowProviderModelFallback"], false);
     }
 
     #[test]
@@ -1026,6 +1451,69 @@ mod tests {
     }
 
     #[test]
+    fn presence_turn_pins_luna_and_the_strict_direction_schema() {
+        let params = presence_turn_start_params(
+            "thread",
+            Path::new("/private/support"),
+            "presence-request",
+            r#"{"schemaVersion":1,"locale":"ja","trigger":"decision_wait","semanticState":"asking","retrying":false,"elapsedBucket":"none"}"#,
+            "ja",
+            &presence_skill(),
+        )
+        .expect("presence turn contract");
+        let input = params["input"].as_array().expect("presence input");
+        let skills = input
+            .iter()
+            .filter(|item| item["type"] == "skill")
+            .collect::<Vec<_>>();
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0]["name"], DIRECT_PRESENCE_SKILL_NAME);
+        assert_eq!(params["model"], CODEX_PRESENCE_DIRECTOR_MODEL);
+        assert_eq!(params["effort"], "low");
+        assert_eq!(params["approvalPolicy"], "never");
+        assert_eq!(params["permissions"], "coding-wife-support-zero");
+        assert_eq!(params["environments"], json!([]));
+        assert_eq!(params["runtimeWorkspaceRoots"], json!([]));
+        assert_eq!(
+            params["outputSchema"],
+            presence_direction_output_schema("ja")
+        );
+        assert!(params.get("tools").is_none());
+
+        assert_eq!(
+            presence_turn_start_params(
+                "thread",
+                Path::new("/private/support"),
+                "presence-request",
+                "{}",
+                "ja",
+                &explain_skill(),
+            ),
+            Err(TurnContractError::SkillClass)
+        );
+    }
+
+    #[test]
+    fn presence_direction_schema_is_closed_and_bounded() {
+        let schema = presence_direction_output_schema("en");
+
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(
+            schema["required"],
+            json!(["schemaVersion", "locale", "utterance", "cue"])
+        );
+        assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
+        assert_eq!(schema["properties"]["locale"]["const"], "en");
+        assert_eq!(schema["properties"]["utterance"]["minLength"], 1);
+        assert_eq!(schema["properties"]["utterance"]["maxLength"], 160);
+        assert_eq!(
+            schema["properties"]["cue"]["enum"],
+            json!(["neutral", "working", "asking", "success", "warning", "error"])
+        );
+    }
+
+    #[test]
     fn turn_projects_validated_images_and_files_without_an_empty_text_item() {
         let attachments = [
             ResolvedAttachment::LocalImage {
@@ -1046,6 +1534,8 @@ mod tests {
             attachments: &attachments,
             commit_skill: &commit_skill(),
             execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: None,
+            additional_writable_roots: Some(&[]),
         })
         .expect("main turn contract");
 
@@ -1061,7 +1551,11 @@ mod tests {
 
     #[test]
     fn thread_disables_provider_fallback_and_raw_events() {
-        let params = thread_start_params(Path::new("/workspace"), OutboundProfile::Experimental);
+        let params = thread_start_params(
+            Path::new("/workspace"),
+            Some(&[PathBuf::from("/workspace")]),
+            OutboundProfile::Experimental,
+        );
 
         assert_eq!(params["model"], CODEX_MODEL);
         assert_eq!(params["allowProviderModelFallback"], false);
@@ -1071,7 +1565,11 @@ mod tests {
 
     #[test]
     fn stable_profile_omits_every_experimental_thread_field() {
-        let params = thread_start_params(Path::new("/workspace"), OutboundProfile::Stable);
+        let params = thread_start_params(
+            Path::new("/workspace"),
+            Some(&[PathBuf::from("/workspace")]),
+            OutboundProfile::Stable,
+        );
         for field in [
             "allowProviderModelFallback",
             "runtimeWorkspaceRoots",
@@ -1124,7 +1622,7 @@ mod tests {
                 "ephemeral": true,
                 "modelProvider": "openai"
             },
-            "model": CODEX_MODEL,
+            "model": CODEX_COMMIT_EXPLAINER_MODEL,
             "modelProvider": "openai",
             "cwd": cwd_text,
             "runtimeWorkspaceRoots": [],
@@ -1137,11 +1635,36 @@ mod tests {
             }
         });
         assert_eq!(
-            parse_support_thread_policy_response(&response, &cwd, CODEX_MODEL, Some("openai")),
+            parse_support_thread_policy_response(
+                &response,
+                &cwd,
+                CODEX_COMMIT_EXPLAINER_MODEL,
+                Some("openai"),
+            ),
             Ok(SupportThreadPolicyResponse {
                 thread_id: "support-thread".to_owned()
             })
         );
+        let mut luna_response = response.clone();
+        luna_response["model"] = json!(CODEX_PRESENCE_DIRECTOR_MODEL);
+        assert_eq!(
+            parse_support_thread_policy_response(
+                &luna_response,
+                &cwd,
+                CODEX_PRESENCE_DIRECTOR_MODEL,
+                Some("openai"),
+            ),
+            Ok(SupportThreadPolicyResponse {
+                thread_id: "support-thread".to_owned()
+            })
+        );
+        assert!(parse_support_thread_policy_response(
+            &luna_response,
+            &cwd,
+            CODEX_COMMIT_EXPLAINER_MODEL,
+            Some("openai"),
+        )
+        .is_err());
 
         for pointer in [
             "/model",
@@ -1173,11 +1696,116 @@ mod tests {
                 _ => json!("unexpected"),
             };
             assert!(
-                parse_support_thread_policy_response(&mutated, &cwd, CODEX_MODEL, Some("openai"))
-                    .is_err(),
+                parse_support_thread_policy_response(
+                    &mutated,
+                    &cwd,
+                    CODEX_COMMIT_EXPLAINER_MODEL,
+                    Some("openai"),
+                )
+                .is_err(),
                 "{pointer}"
             );
         }
+        assert!(
+            parse_support_thread_policy_response(&response, &cwd, CODEX_MODEL, Some("openai"),)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn support_settings_update_requires_the_exact_effective_policy_and_shape() {
+        let cwd = std::fs::canonicalize(env!("CARGO_MANIFEST_DIR")).expect("fixture cwd");
+        let notification = support_settings_notification(&cwd, CODEX_COMMIT_EXPLAINER_MODEL);
+        assert_eq!(
+            validate_support_thread_settings_notification(
+                &notification,
+                "support-thread",
+                &cwd,
+                CODEX_COMMIT_EXPLAINER_MODEL,
+                Some("openai"),
+            ),
+            Ok(())
+        );
+
+        let luna = support_settings_notification(&cwd, CODEX_PRESENCE_DIRECTOR_MODEL);
+        assert_eq!(
+            validate_support_thread_settings_notification(
+                &luna,
+                "support-thread",
+                &cwd,
+                CODEX_PRESENCE_DIRECTOR_MODEL,
+                Some("openai"),
+            ),
+            Ok(())
+        );
+
+        for pointer in [
+            "/threadId",
+            "/threadSettings/model",
+            "/threadSettings/modelProvider",
+            "/threadSettings/approvalPolicy",
+            "/threadSettings/approvalsReviewer",
+            "/threadSettings/activePermissionProfile/id",
+            "/threadSettings/activePermissionProfile/extends",
+            "/threadSettings/sandboxPolicy/type",
+            "/threadSettings/sandboxPolicy/networkAccess",
+            "/threadSettings/cwd",
+            "/threadSettings/effort",
+            "/threadSettings/multiAgentMode",
+            "/threadSettings/collaborationMode/mode",
+            "/threadSettings/collaborationMode/settings/model",
+            "/threadSettings/collaborationMode/settings/reasoning_effort",
+            "/threadSettings/collaborationMode/settings/developer_instructions",
+            "/threadSettings/personality",
+            "/threadSettings/serviceTier",
+            "/threadSettings/summary",
+        ] {
+            let mut mutated = notification.clone();
+            *mutated
+                .pointer_mut(pointer)
+                .expect("support settings field") = match pointer {
+                "/threadSettings/activePermissionProfile/extends"
+                | "/threadSettings/collaborationMode/settings/developer_instructions"
+                | "/threadSettings/serviceTier"
+                | "/threadSettings/summary" => json!("unexpected"),
+                "/threadSettings/sandboxPolicy/networkAccess" => json!(true),
+                "/threadSettings/cwd" => json!("relative/path"),
+                _ => json!("unexpected"),
+            };
+            assert!(
+                validate_support_thread_settings_notification(
+                    &mutated,
+                    "support-thread",
+                    &cwd,
+                    CODEX_COMMIT_EXPLAINER_MODEL,
+                    Some("openai"),
+                )
+                .is_err(),
+                "{pointer}"
+            );
+        }
+
+        let mut unknown_top_level = notification.clone();
+        unknown_top_level["turnId"] = json!("support-turn");
+        assert!(validate_support_thread_settings_notification(
+            &unknown_top_level,
+            "support-thread",
+            &cwd,
+            CODEX_COMMIT_EXPLAINER_MODEL,
+            Some("openai"),
+        )
+        .is_err());
+
+        let mut unknown_nested = notification;
+        unknown_nested["threadSettings"]["unexpectedAuthority"] = json!(false);
+        assert!(validate_support_thread_settings_notification(
+            &unknown_nested,
+            "support-thread",
+            &cwd,
+            CODEX_COMMIT_EXPLAINER_MODEL,
+            Some("openai"),
+        )
+        .is_err());
     }
 
     #[test]

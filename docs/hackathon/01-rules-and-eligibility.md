@@ -1,11 +1,11 @@
 ---
 title: Rules and Eligibility
 description: "OpenAI Build Week 2026の参加資格、必須技術、プロジェクト要件、失格リスクを整理する。"
-updated: 2026-07-18
+updated: 2026-07-22
 read_when:
   - "参加資格やプロジェクト要件を判断するとき。"
   - "Codex、GPT-5.6、第三者素材の利用条件を確認するとき。"
-last_verified: 2026-07-18 JST
+last_verified: 2026-07-22 JST
 ---
 
 # ルール・参加資格・プロジェクト要件
@@ -65,12 +65,15 @@ last_verified: 2026-07-18 JST
 - GPT-5.6 の利用も必須。
 - 他モデル、他社サービス、標準ライブラリ、SDK を併用できるが、Codex と GPT-5.6 が付随的・装飾的であってはならない。
 - 現行 FAQ は、他モデルを併用しながら project の一部で GPT-5.6 を使うことを認め、Free plan の Codex では GPT-5.6 Terra を利用できると明記している。OpenAI の現行 model catalog は Sol、Terra、Luna をいずれも GPT-5.6 family として掲載している。
+- 現行 FAQ は、要件を満たすために OpenAI API または API credits 自体は必須ではないと明記している。ただし、Codex と GPT-5.6 の実質的な利用を README、コード、動画で証明する要件は変わらない。
 - README、説明文、デモ動画、コードから、両者をどのように使ったか確認できるようにする。
 - 中核機能の大部分を作った主要 Codex スレッドで `/feedback` を実行し、Session ID を提出する。
 
 ### 安全側の解釈
 
 FAQ は「GPT-5.6 がコードリポジトリとデモから確認できること」を求めているため、**Codex の内部モデルとして GPT-5.6 を選んだだけで済ませず、製品の主要フローでも GPT-5.6 を明示的・実質的に使う**のが安全です。
+
+複数の GPT-5.6 family model を使う場合は、model名を列挙するだけでなく、それぞれの入力、出力、権限、主要価値への寄与を README と動画で説明します。
 
 例:
 
@@ -178,3 +181,4 @@ Sponsor または Administrator から、ハッカソン終了前に資金・投
 - https://openai.devpost.com/rules
 - https://openai.devpost.com/details/faqs
 - https://openai.devpost.com/
+- https://openai.devpost.com/updates/45371-tuesday-last-minute-tips

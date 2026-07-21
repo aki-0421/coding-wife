@@ -449,6 +449,14 @@ impl EventNormalizer {
                 // These auxiliary status notifications do not affect the
                 // Coding Wife session, turn, model, or approval state.
             }
+            "serverRequest/resolved" => {
+                if !valid_server_request_resolved(params) {
+                    return Err(NormalizeError::InvalidParams);
+                }
+                // The pending card is completed by the exact response command.
+                // This notification contains no answer and is only lifecycle
+                // confirmation from the current App Server.
+            }
             _ => {
                 outcome.events.push(self.unsupported(method, byte_count)?);
                 outcome.unsupported_terminal = method.starts_with("turn/")
@@ -544,6 +552,25 @@ fn string_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
         current = current.get(*key)?;
     }
     current.as_str()
+}
+
+fn valid_server_request_resolved(params: &Value) -> bool {
+    let Some(object) = params.as_object() else {
+        return false;
+    };
+    if object.len() != 2 || !object.contains_key("requestId") || !object.contains_key("threadId") {
+        return false;
+    }
+    let valid_request_id = match object.get("requestId") {
+        Some(Value::String(value)) => !value.is_empty() && value.len() <= 256,
+        Some(Value::Number(value)) => value.as_i64().is_some(),
+        _ => false,
+    };
+    let valid_thread_id = object
+        .get("threadId")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.is_empty() && value.len() <= 256);
+    valid_request_id && valid_thread_id
 }
 
 struct ToolMetadata {
@@ -825,9 +852,9 @@ mod tests {
                     "id": "raw-item-id",
                     "type": "agentMessage",
                     "text": concat!(
-                        r#"{"schemaVersion":1,"kind":"result","message":"Bearer abc /"#,
+                        r#"{"schemaVersion":1,"response":{"kind":"result","message":"Bearer abc /"#,
                         "Users/alice/project/src/main.rs",
-                        r#"","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":null}"#
+                        r#"","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":null}}"#
                     )
                 }}),
                 100,
@@ -895,7 +922,7 @@ mod tests {
                     "id": "commentary-structured",
                     "type": "agentMessage",
                     "phase": "commentary",
-                    "text": r#"{"schemaVersion":1,"kind":"result","message":"READMEと設定を確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}"#
+                    "text": r#"{"schemaVersion":1,"response":{"kind":"result","message":"READMEと設定を確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}}"#
                 }}),
                 300,
             )
@@ -916,7 +943,7 @@ mod tests {
                 "item/agentMessage/delta",
                 &json!({
                     "itemId": "raw-item-id",
-                    "delta": r#"{"allowFreeform":true,"kind":"result""#
+                    "delta": r#"{"schemaVersion":1,"response":{"allowFreeform":true,"kind":"result""#
                 }),
                 100,
             )
@@ -929,7 +956,7 @@ mod tests {
                 &json!({"item": {
                     "id": "raw-item-id",
                     "type": "agentMessage",
-                    "text": r#"{"schemaVersion":1,"kind":"result","message":"リポジトリを確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}"#
+                    "text": r#"{"schemaVersion":1,"response":{"kind":"result","message":"リポジトリを確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}}"#
                 }}),
                 200,
             )
@@ -939,6 +966,47 @@ mod tests {
         let encoded = serde_json::to_string(&completed.events).expect("serialize");
         assert!(encoded.contains("リポジトリを確認します。"));
         assert!(!encoded.contains("allowFreeform"));
+    }
+
+    #[test]
+    fn replayed_completed_agent_message_keeps_the_same_opaque_item_handle() {
+        let mut normalizer =
+            EventNormalizer::new("workspace-1".to_owned(), PathBuf::from("/workspace"), 1);
+        let params = json!({"item": {
+            "id": "raw-replayed-item",
+            "type": "agentMessage",
+            "phase": "commentary",
+            "text": "完了したメッセージです。"
+        }});
+        let first = normalizer
+            .normalize("item/completed", &params, 100)
+            .expect("first completion");
+        let replay = normalizer
+            .normalize("item/completed", &params, 100)
+            .expect("replayed completion");
+
+        let [first] = first.events.as_slice() else {
+            panic!("first completion must emit exactly one event");
+        };
+        let [replay] = replay.events.as_slice() else {
+            panic!("replayed completion must emit exactly one event");
+        };
+        let CodexEventPayload::AgentMessageCompleted {
+            item_handle: first_handle,
+            ..
+        } = &first.payload
+        else {
+            panic!("first event must be a completed agent message");
+        };
+        let CodexEventPayload::AgentMessageCompleted {
+            item_handle: replay_handle,
+            ..
+        } = &replay.payload
+        else {
+            panic!("replayed event must be a completed agent message");
+        };
+        assert_eq!(first_handle, replay_handle);
+        assert_ne!(first.event_id, replay.event_id);
     }
 
     #[test]
@@ -986,6 +1054,34 @@ mod tests {
                 .expect("known auxiliary notification");
             assert!(outcome.events.is_empty());
             assert!(!outcome.unsupported_terminal);
+        }
+    }
+
+    #[test]
+    fn current_server_request_resolved_is_consumed_but_invalid_shapes_fail_closed() {
+        let mut normalizer =
+            EventNormalizer::new("workspace-1".to_owned(), PathBuf::from("/workspace"), 1);
+        for request_id in [json!("server-rui"), json!(7)] {
+            let outcome = normalizer
+                .normalize(
+                    "serverRequest/resolved",
+                    &json!({"requestId": request_id, "threadId": "thread-1"}),
+                    110,
+                )
+                .expect("current resolved notification");
+            assert!(outcome.events.is_empty());
+            assert!(!outcome.unsupported_terminal);
+        }
+
+        for invalid in [
+            json!({"requestId": "server-rui"}),
+            json!({"requestId": null, "threadId": "thread-1"}),
+            json!({"requestId": "server-rui", "threadId": "thread-1", "future": true}),
+        ] {
+            assert!(matches!(
+                normalizer.normalize("serverRequest/resolved", &invalid, 110),
+                Err(NormalizeError::InvalidParams)
+            ));
         }
     }
 

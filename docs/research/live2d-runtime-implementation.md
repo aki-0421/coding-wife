@@ -1,7 +1,7 @@
 ---
 title: "Live2Dランタイム実装・検証ガイド"
 description: "同梱Hiyoriとユーザー提供Live2Dモデルのrenderer、隔離preview、native quarantineを再現、診断、更新するための実装・検証ガイド。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "同梱HiyoriのLive2D描画、resize、motion policy、context recoveryを変更または検証するとき。"
   - "任意Live2Dモデルの取り込み、隔離preview、app-globalな選択、削除を変更または検証するとき。"
@@ -12,7 +12,7 @@ read_when:
 
 ## 現在の完了範囲
 
-2026-07-20 時点で、同梱 Hiyori を通常 App の既定 character として使う実ランタイムに加え、ユーザーがローカルのLive2D `.model3.json`を1ファイルだけ選び、隔離previewで実描画を確認してからapp-globalに選択・永続化・削除するmodel libraryを実装した。公式 Cubism SDK for Web 5-r.5 の Core、Framework、13 shaders と、`tmp/hiyori_pro` から固定した17 runtime filesだけを同梱モデルに使う。rendererは透明な1 canvasを所有し、Idle[0]、semantic stateのHTML caption、animated/reduced/hidden、static/text fallback、resize、WebGL context recoveryを扱う。
+2026-07-21 時点で、同梱 Hiyori を通常 App の既定 character として使う実ランタイムに加え、ユーザーがローカルのLive2D `.model3.json`を1ファイルだけ選び、隔離previewで実描画を確認してからapp-globalに選択・永続化・削除するmodel libraryを実装した。公式 Cubism SDK for Web 5-r.5 の Core、Framework、13 shaders と、`tmp/hiyori_pro` から固定した17 runtime filesだけを同梱モデルに使う。rendererは透明な1 canvasを所有し、Idle[0]、semantic stateのHTML caption、animated/reduced/hidden、static/text fallback、resize、WebGL context recoveryを扱う。
 
 `live2d-preview.html` はproduction Appのrouteへ依存しない診断用entry pointである。`pnpm dev` の後に `/live2d-preview.html` を開くと、semantic state、motion policy、WebGL context loss/restore、frame metricsを同じ画面で確認できる。診断画面はS-002の255 px sidebar、81 px header、Chat/Characterの連続面を再現する。検証スクリーンショットは `/tmp` へだけ保存し、commitしない。
 
@@ -38,7 +38,7 @@ previewは`character-import-preview.html`を`<iframe sandbox="allow-scripts">`�
 
 Settingsのpreview所有権はapp-globalなCharacter library scopeのsession leaseで管理する。Character sectionまたはApp settingsから離れた場合は、picker loading中、描画中、attestation中のいずれでも確定した同一tokenを1回だけcancelする。React Strict Modeの即時再mountはlease再取得を確認してcancelしない。取消失敗でpreviewが残った場合は次のmountでdialogを再開し、戻ったときはimport triggerへfocusを復元する。
 
-opaque originのmodule graphを読み込ませるため、development serverは`Origin: null`へ`Access-Control-Allow-Origin: null`を返す。productionはmain windowを設定から自動生成せず、`WebviewWindowBuilder`のresponse hookが`tauri:` requestかつrequest Originが正確に`null`の場合だけ同headerを上書きする。通常origin、HTTP(S)、attacker originには適用しない。child CSPはViteのmode-specific HTML transformで生成し、developmentでは`http://localhost:1420`だけ、productionでは`tauri://localhost`だけをscript/style/font/img sourceへ許可する。production出力へHTTP development originを残してはならない。inline script/style、`unsafe-eval`、wildcard、connect、form、popup、top navigationを許可せず、CSSは外部fileとして読み込む。このwindow生成とCORS hookは隔離previewのsecurity requirementなので、Tauriのwindow `create`を`true`へ戻す場合は同等のresponse hookを必ず維持する。
+opaque originのmodule graphを読み込ませるため、development serverは`Origin: null`へ`Access-Control-Allow-Origin: null`を返す。productionはmain windowを設定から自動生成せず、`WebviewWindowBuilder`のresponse hookを通す。このhookは二つの独立した境界を持つ。隔離preview用CORSは`tauri:` requestかつrequest Originが正確に`null`の場合だけ同headerを上書きし、通常origin、HTTP(S)、attacker originには適用しない。Live2D asset MIME補正はTauri app asset origin、HTTP 200、exact path allowlist、正本SHA-256がすべて一致したmoc3と13 shaderだけへ適用し、HTML fallbackやbyte driftを再分類しない。child CSPはViteのmode-specific HTML transformで生成し、developmentでは`http://localhost:1420`だけ、productionでは`tauri://localhost`だけをscript/style/font/img sourceへ許可する。production出力へHTTP development originを残してはならない。inline script/style、`unsafe-eval`、wildcard、connect、form、popup、top navigationを許可せず、CSSは外部fileとして読み込む。このwindow生成とresponse hookは隔離previewとasset配信のsecurity requirementなので、Tauriのwindow `create`を`true`へ戻す場合は同等のhookを必ず維持する。
 
 ## 通常の検証順序
 
@@ -49,6 +49,8 @@ opaque originのmodule graphを読み込ませるため、development serverは`
 5. `pnpm build` でCore/shader、`pack.json`、Hiyori 17 files、通常Appと診断entry pointが配布物へ入ることを確認する。
 6. WebdriverIOで通常Appと診断画面を実Tauri windowの1470×836と960×640で開き、非透明pixel、motion signature、canvas backing size、visible caption、reduced/hidden、tab復帰、workspace切替、context restoreを確認する。
 7. native IPCを使う任意モデル検証では、pickerから`tmp/hiyori_pro/hiyori_pro_t11.model3.json`を選び、隔離previewが`verified`になるまで待つ。明示名で確定後にstageのpack ID、settingsの選択状態、再読込後の永続化とtrusted static frameを確認する。先に同梱Hiyoriへ戻してからcustom packを削除し、確認dialog、library、stage、trusted frame cleanupの整合を確認する。
+
+埋め込みassetのMIME配信境界だけを変更した場合は、`cargo test --manifest-path src-tauri/Cargo.toml --lib character::webview_assets::tests`でmoc3と13 shaderの正本hash、macOS/LinuxとWindowsのTauri asset origin、HTML fallbackの非補正を確認する。frontend側は`pnpm exec vitest run src/features/character/runtime/character-pack-client.test.ts src/features/character/runtime/shader-source-preflight.test.ts --fileParallelism=false`でunexpected MIME、hash差分、same-origin違反が引き続きfail closedになることを確認する。
 
 ## 実描画の基準値
 
@@ -63,9 +65,9 @@ reducedはneutral frame後の500 msでframe countとsignature changeが不変だ
 
 通常Appのproduction previewでは1470×836でCSS 607.86×755、backing 608×755、非透明sample 2,410、16.7 ms、960×640でCSS/backing 376×559、非透明sample 2,562を確認した。頭頂、両手、裾はcanvas内に収まった。Commit tabではCSS 0×0、backing 1×1となり750 msのframe countが2,744のまま停止し、Chat復帰後は同じcanvas、asset request 8件のまま2,792へ再開した。workspace切替でもgeneration 1→2、同じcanvas、asset request 8→8だった。mute中はanimatedのままframeが1,408→1,464、generationは1のまま、reducedは750 msでframe 5,696とsignature change 712が不変だった。
 
-pack manifestはsame-originかつ`application/json`（charset parameterは許可）を必須とし、missing、HTML、plain textをfail closedで拒否する。manifest内assetはroleごとにJSON=`application/json`、texture=`image/png`、MOC=`application/octet-stream`だけを受理する。Vite production previewが`.moc3`へ空の`Content-Type`を返す場合に限り、same-origin、manifest allowlist、role別suffix、body byte length、SHA-256の全照合を代替証跡としてmissing MIMEを受理する。
+pack manifestはsame-originかつ`application/json`（charset parameterは許可）を必須とし、missing、HTML、plain textをfail closedで拒否する。manifest内assetはroleごとにJSON=`application/json`、texture=`image/png`、MOC=`application/octet-stream`だけを受理する。Tauri 2.11の埋め込みasset MIME推論は未知拡張子を`text/html`へfallbackするため、`src-tauri/src/character/webview_assets.rs`が同梱moc3のexact pathとSHA-256を照合した応答だけ`application/octet-stream`へ補正する。URL runtimeが`.moc3`へ空の`Content-Type`を返す場合に限り、same-origin、manifest allowlist、role別suffix、body byte length、SHA-256の全照合を代替証跡としてmissing MIMEを受理する。
 
-shaderは`text/plain`（charset parameterは許可）を期待する。production previewでMIMEが欠落する場合を含め、読み込み前preflightで13 filesすべてをsame-originのbundled canonical Framework sourceとbyte-for-byte照合する。明示されたunexpected MIMEまたはcanonical sourceとの差分は、Framework rendererへ渡す前に拒否する。
+shaderは`text/plain`（charset parameterは許可）を期待する。同じnative response hookがexact pathと固定SHA-256に一致する13 filesだけを`text/plain`へ補正し、読み込み前preflightでもsame-originのbundled canonical Framework sourceとbyte-for-byte照合する。MIMEが欠落する場合も正本照合を必須とし、明示されたunexpected MIME、HTML fallback、canonical sourceとの差分はFramework rendererへ渡す前に拒否する。
 
 配布時の第三者通知は`src-tauri/resources/legal/THIRD-PARTY-NOTICES.md`を単一entry pointとする。ここからCubism SDK/Core/Frameworkの原文LICENSE、`RedistributableFiles.txt`、固定した`UPSTREAM.json`と`checksums.sha256`、Hiyoriの原文NOTICEへ辿れる。各コピーはcanonical vendor/resource sourceとbyte-for-byte一致しなければ`sync`後のverify、Vite build、Tauri resource packagingを通過しない。
 
@@ -77,7 +79,7 @@ shaderは`text/plain`（charset parameterは許可）を期待する。productio
 | shader requestは成功するが空canvas | shader managerのloaded/link、WebGL error、非透明sample | model projection、shader compile、texture binding |
 | resize後にぼやける | CSS sizeとbacking size | `ResizeObserver`、device pixel ratio上限 |
 | reducedでもframeが増える | policy、frame count | neutral frame後のRAF停止漏れ |
-| production previewだけMOCでerror | response MIME、manifest length/hash | missing MIMEの限定受理またはasset protocolのMIME設定 |
+| production / desktop QAだけMOCまたはshaderでerror | response MIME、request path、response hash | response hookの未適用、allowlist/hash drift、index HTML fallback |
 | context restore後だけ空になる | shader/offscreen再生成 | contextに紐づいた失効済みGPU resourceの再利用 |
 | isolated previewが`starting_renderer`で停止 | child document/moduleのOrigin、CSP、CORS | opaque originに対するmoduleまたはCSS responseのCORS不足 |
 | custom packが再起動後にHiyoriへ戻る | library diagnostics、published manifest/hash/trusted frame hash | runtime assetまたはtrusted PNGの破損・欠損、workspace selectionのfail-closed fallback |

@@ -375,31 +375,66 @@ wire method は item/tool/requestUserInput で、型は EXPERIMENTAL である�
 3. active thread / turn / item と request id を照合できる。
 4. question schema が Coding Wife の UI 制約を満たす。
 
-v1 は 1〜3 問、重複しない id、非空の header / question、2〜3 個の選択肢だけを受理する。secret input、選択肢の無い自由入力、未知 field に依存する質問、曖昧な Other は fail-closed にする。回答は question id から answers 配列への exact map とし、表示ラベル以外の値を合成しない。
+v1 は 1〜3 問、重複しない id、非空の header / question、2〜3 個の選択肢だけを受理する。secret input、選択肢の無い自由入力、未知 field に依存する質問、曖昧な Other は fail-closed にする。App Serverへ返す回答はquestion idから単一要素のanswers配列へのexact mapとし、表示ラベルまたは利用者が明示したOther本文以外の値を合成しない。
 
 不正 request では回答 UI を出さず、同じ id へ invalid params error を返して turn を interrupt する。autoResolutionMs があっても、v1 はユーザー選択を勝手に推定しない。
+
+0.144.5 の実 App Server / ChatGPT 認証接続では、モデルの `request_user_input` arguments に `questions` しかなくても、server request は次の現行 wire shapeへ展開された。調査では prompt、質問本文、option本文、raw IDを記録せず、method、field名、型、件数、active contextとの一致だけを確認した。
+
+- envelopeは`id`、`method=item/tool/requestUserInput`、`params`。
+- paramsは`threadId`、`turnId`、`itemId`、`questions`、`autoResolutionMs=null`。thread / turnはactive contextと一致した。
+- questionは`id`、`header`、`question`、2〜3件の`options`に加え、`isOther=true`、`isSecret=false`を明示する。optionは`label`と`description`だけである。
+- responseはquestion idごとの`{"answers":[value]}`を`answers` mapへ格納する。
+- response受理後、`serverRequest/resolved` notificationが`requestId`と`threadId`だけで届く。
+
+正規化契約はこの明示shapeに限定する。`isOther=true`は曖昧な自由入力要求ではなく、既存optionと同じcardへ製品定義のOther入力を追加する合図として扱う。WebViewからRustへの回答はquestionごとのdiscriminated unionにし、通常選択を`{type: "option", optionId}`、Otherを`{type: "other", text}`として送る。Rust ledgerだけがquestionごとのopaque option IDからraw labelへの対応を保持し、option branchのknown IDをexact labelへ変換する。unknown option ID、別questionのoption ID、重複question、複数回答をOtherへ丸めず拒否する。
+
+Other branchはtrim済みの1〜2,000 Unicode scalarだけを元question idの単一answerとして返し、adapterが本文を生成・補完しない。通常option branchとOther branchは相互変換しない。`isSecret=true`、`isOther`がtrue以外、option不足、未知field、未知answer variantは従来どおりfail-closedにする。
+
+`serverRequest/resolved`は回答内容を含まない補助lifecycle通知である。`requestId`がstringまたはsigned integer、`threadId`が非空string、field集合がexactである場合だけ安全に消費し、独立したdecisionや`code.protocol.unsupported`を生成しない。shape不正または未知のserver request / notificationはfail-closedを維持する。
 
 native requestUserInput が unavailable の場合は、turn/start の outputSchema に CodingWifeDecisionEnvelopeV1 の discriminated union を設定する。
 
 ~~~text
 schemaVersion: 1
-kind: result | decision_request
-message: string
-result の場合:
-  decisionId: null
-  question: null
-  options: null
-  context: null
-  allowFreeform: null | boolean（互換fieldとして無視）
-decision_request の場合:
-  decisionId: string
-  question: string
-  options:
-    - id: string
-      label: string
-      description: string
-  allowFreeform: false
+response:
+  kind: result | decision_request
+  message: string
+  result の場合:
+    decisionId: null
+    question: null
+    options: null
+    context: null
+    allowFreeform: null | boolean（互換fieldとして無視）
+  decision_request の場合:
+    decisionId: string
+    question: string
+    options:
+      - id: string
+        label: string
+        description: string
+    context:
+      schemaVersion: 1
+      category: user_decision
+      targetKind: active_turn
+      targetAlias: active_turn
+      effect: continue_turn
+      scope: turn
+      risk: low | medium | high
+      reversibility: reversible | partially_reversible | not_reversible | unknown
+      recommendation: option id | null
+      evidence: string[]
+      uncertainty: none | limited_context | unknown_effects
+    allowFreeform: false
 ~~~
+
+`outputSchema`とRust parserは、選択binaryのStructured Output backendが受理するJSON Schema subsetの範囲で同じ制約を持つ。rootは`additionalProperties=false`かつ`schemaVersion`と`response`をrequiredにする。`schemaVersion`は1固定で、`response`内のnested `anyOf`が`result`と`decision_request`のexact objectを分離し、各branchとnested objectもunknown fieldを拒否する。`result.message`は1〜65,536 scalar、`decision_request`のmessageとquestionは1〜4,096 scalar、decision IDとoption IDは1〜128 scalar、option labelは1〜256 scalar、descriptionは0〜1,024 scalar、optionsは2〜3件、evidenceは1〜8件かつ各1〜512 scalarとする。
+
+このwrapperはApp Serverへ渡す生成schemaとRust内のraw final parserだけのtransport契約である。raw final JSONは永続化せず、検証後のassistant message、decision card、履歴のpublic DTOは変更しない。旧flat shapeを互換入力として黙って受理せず、schemaとparserが同じ新shapeだけを正本にする。
+
+0.144.5のproduction dataを使わないephemeral・read-only最小turn probeでは、`const`、`minLength`、`maxLength`、`minItems`、`maxItems`、nested exact objectを含むschemaと、root exact objectのrequired property内に置いた`anyOf` unionが受理された。root `oneOf`は`invalid_json_schema`としてHTTP 400で拒否されたため採用しない。このprobeは空workspaceと固定文字列だけをmodelへ渡し、repository、account、prompt等のproduction dataを入力または記録しない。Codex binary versionまたはmodel backendが変わるまで、未確認keywordを追加してturn自体を失敗させない。
+
+option IDとlabelの横断unique、recommendationが同じoptionsに属すること、evidenceのunique、control character・secret・private pathを含むprivacy判定、表示前redactionはJSON Schemaだけへ委ねずparserを最終正本とする。
 
 assistant のStructured Output deltaはJSON envelopeのtransport断片なのでWebViewへ表示・保存しない。最終出力を検証し、`result`ならredact済み`message`だけを会話へ出し、`decision_request`なら全decision fieldと`allowFreeform=false`を満たす場合だけdecision UIを出す。Markdown、コードブロック、自然文からJSONらしき部分を抽出しない。approvalはこのenvelopeで代替しない。
 

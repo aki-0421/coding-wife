@@ -237,7 +237,7 @@ cp "$icon_output/32x32.png" "$icon_output/128x128.png" "$icon_output/128x128@2x.
 
 **The Ten Percent Rule.** warm active、branch violet、semantic status を合わせても一画面の 10% を超えさせない。色の希少性が意味を守る。
 
-**The Evidence Is Not Color Rule.** error、success、running、canceled は label、icon、fill/outline/dash の形と併用し、色だけで区別しない。
+**The Evidence Is Not Color Rule.** error、running、canceled は accessible text、icon、fill/outline/dash の形と併用し、色だけで区別しない。成功したoperationは例外としてneutral rowに戻し、check、success色、`Completed / 完了` labelを追加しない。
 
 ## Typography
 
@@ -316,11 +316,11 @@ timeline は一続きの transcript とし、すべての event を同じ card t
 
 Chat は永続化eventの監査一覧ではなく会話向けprojectionとする。tab名が領域名を担うため本文上端へ`Activity / アクティビティ`見出し、説明、正常時の永続化badge、last summary cardを置かない。`user`、`assistant`、`plan`、`tool`、`file`、`diff`、`decision`、`approval`、`error`だけを表示し、raw `history`、generic `status`、`thread` / `turn`、`completion`、`request_resolved`は保存されていてもChatへ描画しない。turnの最後は検証済みAssistant本文とし、`Turn completed`を最終出力の代替にしない。表示対象が0件ならplaceholder、icon、枠、CTAを一切描画しない。
 
-- **Conversation:** User instruction は送信単位が一目で分かる restrained warm tint の block、Assistant commentary は Continuous Desk 上の plain prose とする。名前と時刻は小さな header にまとめ、完了 badge、丸い avatar、tool chip、常設 copy action を本文と競合させない。長文を途中で切らず、copy は本文末尾の控えめな action から到達できる。
-- **Operation:** tool、file、diff、plan、error は 30px 前後の一行 summary を正本とする。kind icon、承認済み verb、target または結果、terminal state、時刻を一行に置き、sanitized detail は native `details` / `summary` で展開する。completed は初期状態で閉じ、running、failed、interrupted は開く。error code と failed result は閉じても summary から隠さない。
+- **Conversation:** User instruction は右寄せの restrained warm tint block、Assistant commentary は Continuous Desk 上の左寄せplain proseとする。本文の近くへ`You / あなた`、`Codex`等の名前、avatar、時刻、完了badgeを描画しない。message種別はsemantic roleとaccessible nameで保つ。長文を途中で切らず、copyは文字labelを描画しないicon-only actionとしてrow hoverまたはfocus-within時だけ表示する。
+- **Operation:** tool、file、diff、plan、error は30px前後の一行summaryを正本とする。summaryは種類別iconと、command executionなら安全なcommand summaryまたはcommand名、MCP/webなら実tool名だけで構成し、provider、目的要約、status、duration、時刻を描画しない。長い実行名は一行ellipsisとtooltipで全文へ到達させ、sanitized detailとcopyはnative `details` / `summary`内へ保持する。completedはneutralかつ初期状態で閉じ、check、success色、`Completed / 完了`を出さない。running、failed、interruptedは開き、failedだけはrow全体をdestructive tokenの薄い背景にして種類iconとaccessible textでも失敗を伝える。
 - **Intervention:** decision と approval だけは強い outline surface を使い、質問、根拠、影響、可逆性、選択肢を一面で保持する。前後に重複した generic event header を置かない。
 
-同じ視覚的役割は `message`、`operation`、`intervention` の semantic layout としてDOMにも残す。keyboard利用者は operation summary を Enter / Space で開閉でき、展開状態は chevron と `open` semanticsの両方で伝える。hoverだけで情報や操作を出現させず、24×24px以上のhit target、focus-visible、statusのtext parityを維持する。
+同じ視覚的役割は `message`、`operation`、`intervention` のsemantic layoutとしてDOMにも残す。keyboard利用者はoperation summaryをEnter / Spaceで開閉でき、展開状態はchevronと`open` semanticsの両方で伝える。copy actionは通常視覚的に隠してもtab順へ残し、button自身のfocus-visibleまたはrowのfocus-withinで表示する。24×24px以上のhit target、visible focus、ja/enの`aria-label`とtooltip、politeなcopy結果を維持する。
 
 ### Navigation
 
@@ -328,9 +328,11 @@ Sidebar は 255.04px、workspace footer は 40.5px で固定し、その間の l
 
 ### Commit Evidence
 
-Commit tab は main Codex が作成したコミットを確認する読み取り専用面とし、上 64px の observer bar、300px の commit list、残幅の detail を連続した作業面として構成する。list row は subject、SHA、time、work unit相関、Verification / Risk、change summaryのsingle selection controlとし、detailは Overview / Changes / Evidence の3 tabだけを持つ。Commit、Stage、Restore、Revert、Branch等のGit mutation actionを置かない。
+Commit tab は GitHub の commit `Files changed` と同じ順序で、選択commitのidentity、変更量、file tree、1 fileのunified diffだけを通常表示する読み取り専用面とする。branch、HEAD、Fresh/Stale、観測理由・時刻、pre-existing change、filter、read-only badge、producer、Persisted、work unit、internal ID、4 gate、verification、decision、risk、skill auditはnative/HISTで収集・保持しても通常UIへ描画しない。Overview / Changes / Evidenceの3 tabを廃止し、changesを唯一のprimary surfaceにする。Commit、Stage、Restore、Revert、Branch等のGit mutation actionを置かない。
 
-file summaryを先に表示し、sanitized diffはfile selection後に1件ずつlazy loadする。binary、oversize、invalid UTF-8は本文を表示せず、text付きtyped stateを残す。960px未満または200% text zoom時はlistをmodalでないdrawerへ移し、detailとerror reasonを隠さない。
+commit選択は常設sidebarではなくcompact triggerから開くdrawerとし、rowはsubject、short SHA、author、relative authored timeだけを持つ。selected commit headerはsubject、author、relative authored time、short SHA、`N files changed +A −D`だけを表示する。SHAとpathのcopyはicon-onlyでhover / focus時だけ見せ、tooltip、JA/ENのaccessible name、politeな結果通知を維持する。アプリ固有の「詳しく教えて」は単一の控えめなaction位置だけに残し、internal controller statusやerror codeは表示しない。
+
+desktopはlocal path filter付きfile navigatorとselected-file diffの二列、primary surfaceが760px以下または200% text zoom時はfile navigatorをcompact selectorへ畳んでdiffを全幅にする。detail取得後は先頭fileを自動選択し、その1 fileだけをlazy loadする。file headerはcollapse、relative path、局所`+/-`、copy pathを持つ。unified diffは`@@`からold/new line numberを採番し、hunkは淡いinfo、additionは薄緑、deletionは薄赤、contextはneutralにする。`+/-` markerと二つのline gutterを残して色だけへ依存せず、`diff --git`、`index`、`---`、`+++` metadataはbodyへ描画しない。長行はdiff内だけ横scrollさせる。binary、oversize、invalid UTF-8、empty、errorは必要最小限のtextで安全に縮退する。
 
 新しいcommitは、App Serverのsuccess commit commandとread-only observerのSHA検証後にapp-owned explanation controllerが`not_generated`から`queued`へ自動遷移する。起動前から存在するcommitなど本当に`not_generated`の選択には「詳しく教えて」を表示し、mainではなくapp controllerへ`user_request`を送る。`queued` / `running`はpresentation表示とCancel、`generated`はcached presentation表示と任意の同一transcript再読上げ、`failed` / `canceled`は`user_retry`、`unavailable`は理由とretryableな場合だけ`user_retry`を示す。path、raw diff、secretを除去したevidenceだけをisolated supportへ渡し、説明はcanvasに依存しないvisible HTML captionへstreamする。isolated supportはmain非継承のclean runtime、external-authority tool 0件、wire上のexact inert `update_plan` 1件、permission profile、release proofが揃う時だけcapacity 1とし、`update_plan`の実callやtool schema/hash不一致では当該説明をfailedとして非表示にする。TTSを使う場合もcaptionと同じ確定文だけを読み、selection変更、Cancel、stale response後のchunkを適用しない。commit説明のrequest、status、result、failureをmain conversationへ入れない。
 
@@ -348,7 +350,7 @@ file summaryを先に表示し、sanitized diffはfile selection後に1件ずつ
 
 - **Do** 1470×836 で sidebar 255.04px、header 81px、Chat 607.11px、character 607.84px を基準にし、主要 boundary を Figma node `8:2` の ±2 CSS px に収める。
 - **Do** card を selected workspace、code chip、composer、必要な overlay へ限定し、通常 message と tool event は連続面へ置く。
-- **Do** status を色、label、icon、fill/outline/dash の少なくとも三つで示す。
+- **Do** error、running、canceled、decisionのように判断へ影響するstateを、accessible textとiconまたはfill/outline/dashで示す。成功したoperationはneutralへ戻し、追加statusを表示しない。
 - **Do** normal text contrast 4.5:1、visible focus、24×24px 以上の hit target、200% text zoom を検証する。
 - **Do** shadcn を interaction primitive に限定し、この文書の density、radius、color、type で theme する。
 - **Do** すべての motion に reduced-motion の静止または短い crossfade 代替を用意する。

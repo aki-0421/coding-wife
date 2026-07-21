@@ -104,7 +104,9 @@ describe("CodexSessionStore", () => {
         ...request,
         response: {
           type: "user_input",
-          answers: { choice: ["Continue"] },
+          answers: {
+            choice: { type: "option", optionId: "option-continue" },
+          },
         },
       }),
     ).resolves.toBe(false)

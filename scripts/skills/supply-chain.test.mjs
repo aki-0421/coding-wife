@@ -9,8 +9,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const skillsRoot = path.join(root, "src-tauri/resources/skills")
 const manifestPath = path.join(skillsRoot, "manifest.json")
 const expectedSkills = new Map([
-  ["coding-wife-commit-work", "1.1.0"],
+  ["coding-wife-commit-work", "1.2.0"],
   ["coding-wife-explain-commit", "1.1.0"],
+  ["coding-wife-direct-presence", "1.1.0"],
 ])
 
 function sha256(file) {

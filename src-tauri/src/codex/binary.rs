@@ -92,6 +92,7 @@ pub struct SchemaProbe {
     pub fingerprint: String,
     pub generated_by_same_binary: bool,
     pub capabilities: CodexCapabilities,
+    pub managed_worktree_write_roots: bool,
 }
 
 #[derive(Clone, Copy, Debug, Error)]
@@ -991,6 +992,84 @@ fn supports_explicit_skill_input(document: Option<&Value>) -> bool {
             == Some("string")
 }
 
+fn supports_managed_worktree_write_roots(documents: &BTreeMap<String, Value>) -> bool {
+    let absolute_path_ref = Some("#/definitions/AbsolutePathBuf");
+    let has_runtime_roots = |name: &str| {
+        let Some(document) = documents.get(name) else {
+            return false;
+        };
+        string_array(document.pointer("/properties/runtimeWorkspaceRoots/type"))
+            == Some(vec!["array", "null"])
+            && document
+                .pointer("/properties/runtimeWorkspaceRoots/items/$ref")
+                .and_then(Value::as_str)
+                == absolute_path_ref
+            && document
+                .pointer("/definitions/AbsolutePathBuf/type")
+                .and_then(Value::as_str)
+                == Some("string")
+    };
+    let Some(turn) = documents.get("v2/TurnStartParams.json") else {
+        return false;
+    };
+    let sandbox_policy_ref = turn
+        .pointer("/properties/sandboxPolicy/anyOf")
+        .and_then(Value::as_array)
+        .is_some_and(|variants| {
+            variants.len() == 2
+                && variants.iter().any(|variant| {
+                    variant.get("$ref").and_then(Value::as_str)
+                        == Some("#/definitions/SandboxPolicy")
+                })
+                && variants
+                    .iter()
+                    .any(|variant| variant.get("type").and_then(Value::as_str) == Some("null"))
+        });
+    let workspace_write = turn
+        .pointer("/definitions/SandboxPolicy/oneOf")
+        .and_then(Value::as_array)
+        .and_then(|variants| {
+            let matches = variants
+                .iter()
+                .filter(|variant| {
+                    variant.get("title").and_then(Value::as_str)
+                        == Some("WorkspaceWriteSandboxPolicy")
+                })
+                .collect::<Vec<_>>();
+            (matches.len() == 1).then_some(matches[0])
+        })
+        .is_some_and(|variant| {
+            variant.get("type").and_then(Value::as_str) == Some("object")
+                && required_is(variant, &["type"])
+                && has_properties(variant, &["networkAccess", "type", "writableRoots"])
+                && variant
+                    .pointer("/properties/type/enum")
+                    .and_then(Value::as_array)
+                    .is_some_and(|values| {
+                        values.len() == 1
+                            && values.first().and_then(Value::as_str) == Some("workspaceWrite")
+                    })
+                && variant
+                    .pointer("/properties/writableRoots/type")
+                    .and_then(Value::as_str)
+                    == Some("array")
+                && variant
+                    .pointer("/properties/writableRoots/items/$ref")
+                    .and_then(Value::as_str)
+                    == absolute_path_ref
+                && variant
+                    .pointer("/properties/networkAccess/type")
+                    .and_then(Value::as_str)
+                    == Some("boolean")
+        });
+
+    has_runtime_roots("v2/ThreadStartParams.json")
+        && has_runtime_roots("v2/ThreadResumeParams.json")
+        && has_runtime_roots("v2/TurnStartParams.json")
+        && sandbox_policy_ref
+        && workspace_write
+}
+
 fn structural_capabilities(documents: &BTreeMap<String, Value>) -> Option<CodexCapabilities> {
     let document = |name: &str| documents.get(name);
     let client = document("ClientRequest.json");
@@ -1276,11 +1355,13 @@ pub async fn probe_schema(binary: &BinaryInfo) -> Result<SchemaProbe, BinaryErro
     binary.revalidate_metadata().await?;
     let capabilities =
         structural_capabilities(&schema.documents).ok_or(BinaryError::SchemaUnsupported)?;
+    let managed_worktree_write_roots = supports_managed_worktree_write_roots(&schema.documents);
 
     Ok(SchemaProbe {
         fingerprint: schema.fingerprint,
         generated_by_same_binary: true,
         capabilities,
+        managed_worktree_write_roots,
     })
 }
 
@@ -1532,6 +1613,29 @@ mod tests {
         );
         assert_eq!(capabilities.detached_review, CapabilityState::Supported);
         assert_eq!(capabilities.ephemeral_thread, CapabilityState::Supported);
+        assert!(supports_managed_worktree_write_roots(&fixture_documents()));
+    }
+
+    #[test]
+    fn managed_worktree_roots_require_every_exact_schema_boundary() {
+        let mut documents = fixture_documents();
+        documents
+            .get_mut("v2/ThreadResumeParams.json")
+            .expect("thread resume fixture")["properties"]
+            .as_object_mut()
+            .expect("thread resume properties")
+            .remove("runtimeWorkspaceRoots");
+        assert!(!supports_managed_worktree_write_roots(&documents));
+
+        let mut documents = fixture_documents();
+        documents
+            .get_mut("v2/TurnStartParams.json")
+            .and_then(|document| {
+                document.pointer_mut("/definitions/SandboxPolicy/oneOf/0/properties/writableRoots")
+            })
+            .expect("workspace-write writable roots")
+            .take();
+        assert!(!supports_managed_worktree_write_roots(&documents));
     }
 
     #[test]

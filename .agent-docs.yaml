@@ -6,5 +6,6 @@ documents:
     - docs/
   exclude:
     - node_modules/**
+    - tmp/**
   ignoreReserved: false
   maxSize: 64 KiB

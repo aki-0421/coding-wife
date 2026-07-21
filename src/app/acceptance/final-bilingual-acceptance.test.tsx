@@ -47,7 +47,6 @@ const copy: Readonly<
       readonly goal: string
       readonly saveProject: string
       readonly saved: string
-      readonly explanationReady: string
       readonly showExplanation: string
       readonly caption: string
       readonly closeCaption: string
@@ -76,7 +75,6 @@ const copy: Readonly<
     goal: "Goal",
     saveProject: "Save project context",
     saved: "Saved. This version will be used from the next turn.",
-    explanationReady: "Explanation ready",
     showExplanation: "Show explanation",
     caption: "Commit explanation",
     closeCaption: "Close explanation",
@@ -104,7 +102,6 @@ const copy: Readonly<
     goal: "目標",
     saveProject: "プロジェクトコンテキストを保存",
     saved: "保存しました。次のturnからこのバージョンを使います。",
-    explanationReady: "説明を生成済み",
     showExplanation: "説明を表示",
     caption: "コミットの説明",
     closeCaption: "説明を閉じる",
@@ -323,21 +320,17 @@ describe("final bilingual App acceptance", () => {
           { timeout: 3_000 },
         ),
       ).toBeVisible()
-      expect(
-        await screen.findByText(
-          localized.explanationReady,
-          {},
-          { timeout: 3_000 },
-        ),
-      ).toBeVisible()
+      const showExplanation = await screen.findByRole(
+        "button",
+        { name: localized.showExplanation },
+        { timeout: 3_000 },
+      )
+      expect(showExplanation).toBeVisible()
       expect(
         screen.queryByRole("region", { name: localized.caption }),
       ).toBeNull()
       expect(speak).not.toHaveBeenCalled()
 
-      const showExplanation = screen.getByRole("button", {
-        name: localized.showExplanation,
-      })
       showExplanation.focus()
       await user.keyboard("{Enter}")
       const caption = await screen.findByRole("region", {

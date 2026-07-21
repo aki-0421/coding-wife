@@ -1,16 +1,19 @@
 ---
 title: Timeline in PDT and JST
 description: "OpenAI Build Week 2026の日程をPDTとJSTで整理し、公開ページ間の差異を記録する。"
-updated: 2026-07-18
+updated: 2026-07-22
 read_when:
   - "開発、提出、審査の日程をJSTで計画するとき。"
   - "締切や公開日程の不一致を確認するとき。"
-last_verified: 2026-07-18 JST
+last_verified: 2026-07-22 JST
 ---
 
 # 日程 — PDT / JST
 
 2026年7月の Pacific Time は PDT（UTC-7）、日本時間は JST（UTC+9）です。JST は PDT より16時間進んでいます。
+
+> [!IMPORTANT]
+> 提出期限は **2026-07-22 09:00 JST** です。公開ページ間の不一致は Official Rules を優先します。
 
 ## 1. Official Rules の日程
 
@@ -26,7 +29,7 @@ last_verified: 2026-07-18 JST
 | Winners announced, around | 2026-08-12 14:00 PDT | 2026-08-13 06:00 JST |
 | DevDay | 2026-09-29, time unspecified | 2026-09-29/30 JST, exact time TBD |
 
-現行 Official Rules は、配布済み Codex credits の使用期限を Submission Period と同じ **2026-07-21 17:00 PDT / 2026-07-22 09:00 JST** としています。2026-07-18 時点で request form は終了し、Resources と最新 Update は全 credits 配布済みと案内しています。
+現行 Official Rules は、配布済み Codex credits の使用期限を Submission Period と同じ **2026-07-21 17:00 PDT / 2026-07-22 09:00 JST** としています。2026-07-22の再確認でもrequest formは終了し、Resourcesと最新Updateは全credits配布済みと案内しています。
 
 ## 2. 公式ページ間の不一致
 
@@ -54,9 +57,9 @@ last_verified: 2026-07-18 JST
 
 **判断:** より厳しい Official Rules に合わせ、3:00 ちょうどを避けて 2:40〜2:50 にします。
 
-## 3. 今後の公式セッション — JST 換算
+## 3. 公式セッション — JST 換算
 
-OpenAI Build Week page に掲載されていた予定です。2026-07-18 の再確認では同ページが Cloudflare challenge を返し、本文を独立取得できませんでした。変更される可能性があるため、参加前に公式ページまたは Devpost Resources を再確認してください。
+OpenAI Build Week page は **2026-07-22 JST に取得可能**で、以下の日程を再確認しました。すべて提出期限前の開催履歴です。
 
 | セッション | Pacific Time | Japan Time |
 |---|---|---|
@@ -74,21 +77,17 @@ Support / announcements:
 - `#office-hours`
 - Devpost Discussion Board
 
-## 4. 推奨内部締切
+## 4. 提出当日の critical path
 
-公式締切当日の障害を避けるため、次を内部締切にします。
+次の表は締切事故を避けるための内部運用です。残り時間が3時間未満なら、順番を保ったまま即時に進めます。
 
-| JST | 完了状態 |
+| Deadline まで | 完了状態 |
 |---|---|
-| Jul 15 | track、problem statement、architecture、Codex primary thread、baseline commit |
-| Jul 16 | end-to-end vertical slice がローカルで動く |
-| Jul 17 | GPT-5.6 core integration、主要 test、demo data |
-| Jul 18 | hosted demo / sandbox、README 初稿、credits 申請済み |
-| Jul 19 | UX・error handling、security / license review |
-| Jul 20 | feature freeze、動画収録、Devpost draft 作成 |
-| **Jul 21 23:00** | 内部 submission deadline。リンクと private sharing を検証 |
-| Jul 22 07:00 | 最終 smoke test のみ。新機能は入れない |
-| **Jul 22 09:00** | 公式締切 |
+| T-3h 以前 | source freeze、現行 no-rebuild release 公開、動画 upload、Devpost form 入力 |
+| T-2h | fresh environment で project / release を確認し、logged-out 状態で public links を確認 |
+| T-1h | 新機能を止め、Session ID・commit・動画・repo・release の対応を最終照合 |
+| T-30m | Devpost を submit。My Projects で緑の **Submitted** 表示を確認し、記録を保存 |
+| **2026-07-22 09:00 JST** | 公式締切。draft、team invitation pending、未共有 private repo を残さない |
 
 ## 5. 最終24時間の禁止事項
 
@@ -103,5 +102,5 @@ Support / announcements:
 
 - https://openai.devpost.com/rules
 - https://openai.devpost.com/details/dates
-- https://openai.devpost.com/updates
+- https://openai.devpost.com/updates/45371-tuesday-last-minute-tips
 - https://openai.com/build-week/

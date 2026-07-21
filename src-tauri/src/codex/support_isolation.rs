@@ -6,21 +6,28 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 
 use super::binary::{probe_schema, BinaryInfo, SchemaProbe};
-use super::bundled_skill::ResolvedBundledSkill;
+use super::bundled_skill::{
+    ResolvedBundledSkill, DIRECT_PRESENCE_SKILL_NAME, EXPLAIN_COMMIT_SKILL_NAME,
+};
 use super::process::{run_bounded_command, spawn_support_process, ProcessRuntime};
 use super::protocol::{
     client_notification, commit_explanation_output_schema, initialize_params,
-    parse_support_thread_policy_response, server_error, support_thread_start_params,
-    support_turn_start_params, InboundMessage,
+    parse_support_thread_policy_response, presence_direction_output_schema,
+    presence_turn_start_params, server_error, support_thread_start_params,
+    support_turn_start_params, InboundMessage, TurnContractError,
 };
 use super::rpc::{RpcRequestError, RuntimeSignal};
 use super::support::{
-    parse_explanation, SupportRuntimeError, SUPPORT_PERMISSION_PROFILE,
+    parse_explanation, parse_presence_direction, PresenceDirectorInputV1, PresenceElapsedBucket,
+    PresenceLocale, PresenceSemanticState, PresenceTrigger, SupportConstructionControl,
+    SupportModelRole, SupportRuntimeCleanup, SupportRuntimeError, SUPPORT_PERMISSION_PROFILE,
     SUPPORT_SIGNAL_QUEUE_CAPACITY,
 };
 use super::support_private::{support_config, write_private_file, PrivateRunDirectory};
 use super::support_probe::{canonical_json_hash, ProbeCaptureServer};
-use super::types::{BinarySource, CapabilityState, CODEX_MODEL};
+use super::types::{BinarySource, CapabilityState, CODEX_COMMIT_EXPLAINER_MODEL};
+#[cfg(test)]
+use super::types::{CODEX_MAIN_MODEL, CODEX_PRESENCE_DIRECTOR_MODEL};
 
 pub(crate) const SUPPORTED_CLI_VERSION: &str = "0.144.5";
 pub(crate) const SUPPORTED_ARM64_BINARY_SHA256: &str =
@@ -30,8 +37,13 @@ pub(crate) const SUPPORTED_SCHEMA_FINGERPRINT: &str =
 pub(crate) const SUPPORTED_EXPLAIN_SKILL_VERSION: &str = "1.1.0";
 pub(crate) const SUPPORTED_EXPLAIN_SKILL_SHA256: &str =
     "a11cfddff346e37be4431add626535175931cd2212f76e088a7c3f9305d0207f";
-const EXPECTED_SUPPORT_OUTPUT_SCHEMA_HASH: &str =
+pub(crate) const SUPPORTED_PRESENCE_SKILL_VERSION: &str = "1.1.0";
+pub(crate) const SUPPORTED_PRESENCE_SKILL_SHA256: &str =
+    "a38a92217752a5186cc25ac49c0329ced2286011743550cb98489df92084c5ee";
+const EXPECTED_EXPLANATION_OUTPUT_SCHEMA_HASH: &str =
     "c01cb830b87c827b22842342f0410657b259ccbd113e3db05bd988ff48e4f3c9";
+const EXPECTED_PRESENCE_OUTPUT_SCHEMA_HASH: &str =
+    "173ce05ff7f52f18bb9f76dc766c098b31369dceb6ca7052cba35b3ee62a44d9";
 const SUPPORT_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const SUPPORT_PROTOCOL_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -66,20 +78,33 @@ pub(super) async fn verify_release(
     Ok(())
 }
 
-pub(super) async fn run_isolation_probe(
+pub(super) async fn run_isolation_probe_controlled(
     binary: &BinaryInfo,
     support_skill: &ResolvedBundledSkill,
+    model_role: SupportModelRole,
+    control: &SupportConstructionControl,
 ) -> Result<(), SupportRuntimeError> {
-    let run_directory = PrivateRunDirectory::create("probe")?;
+    if !support_skill_matches_role(support_skill, model_role) {
+        return Err(SupportRuntimeError::Skill);
+    }
+    let run_directory = Arc::new(PrivateRunDirectory::create("probe")?);
     let support_skill = run_directory.snapshot_support_skill(support_skill)?;
     let repository_canary = run_directory.root.join("repository-canary.txt");
     let auth_canary = run_directory.codex_home.join("auth-canary.json");
     let execution_marker = run_directory.workspace.join("unexpected-execution");
     write_private_file(&repository_canary, b"REPOSITORY-CANARY-MUST-NOT-LEAK")?;
     write_private_file(&auth_canary, b"AUTH-CANARY-MUST-NOT-LEAK")?;
-    let mut server = ProbeCaptureServer::start(&repository_canary, &auth_canary, &execution_marker)
-        .map_err(|_| SupportRuntimeError::IsolationProbe)?;
-    run_directory.write_config(&support_config(Some(&server.base_url())))?;
+    let mut server = ProbeCaptureServer::start(
+        &repository_canary,
+        &auth_canary,
+        &execution_marker,
+        support_probe_output(model_role),
+    )
+    .map_err(|_| SupportRuntimeError::IsolationProbe)?;
+    run_directory.write_config(&support_config(
+        model_role.exact_model(),
+        Some(&server.base_url()),
+    ))?;
 
     let sandbox = sandbox_probe(binary, &run_directory, server.malicious_command()).await?;
     if sandbox.status.success()
@@ -104,6 +129,8 @@ pub(super) async fn run_isolation_probe(
         .await
         .map_err(|_| SupportRuntimeError::IsolationProbe)?,
     );
+    let cleanup = SupportRuntimeCleanup::new(runtime.clone(), run_directory.clone(), false);
+    control.register_cleanup(cleanup.clone())?;
     let protocol_probe = tokio::time::timeout(SUPPORT_PROTOCOL_PROBE_TIMEOUT, async {
         initialize_support_process(&runtime).await?;
         let thread = runtime
@@ -112,7 +139,7 @@ pub(super) async fn run_isolation_probe(
                 "thread/start",
                 support_thread_start_params(
                     &run_directory.workspace,
-                    CODEX_MODEL,
+                    model_role.exact_model(),
                     Some("mock_provider"),
                 ),
                 Duration::from_secs(5),
@@ -122,7 +149,7 @@ pub(super) async fn run_isolation_probe(
         let thread = parse_support_thread_policy_response(
             &thread,
             &run_directory.workspace,
-            CODEX_MODEL,
+            model_role.exact_model(),
             Some("mock_provider"),
         )
         .map_err(|_| SupportRuntimeError::IsolationProbe)?;
@@ -130,14 +157,12 @@ pub(super) async fn run_isolation_probe(
             .connection
             .request(
                 "turn/start",
-                support_turn_start_params(
+                support_probe_turn_start_params(
                     &thread.thread_id,
                     &run_directory.workspace,
                     "support-release-probe",
-                    &support_probe_input("support-release-probe"),
-                    "ja",
-                    CODEX_MODEL,
                     &support_skill,
+                    model_role,
                 )
                 .map_err(|_| SupportRuntimeError::Skill)?,
                 SUPPORT_PROBE_TIMEOUT,
@@ -150,20 +175,25 @@ pub(super) async fn run_isolation_probe(
             .filter(|value| !value.is_empty() && value.len() <= 256)
             .map(str::to_owned)
             .ok_or(SupportRuntimeError::IsolationProbe)?;
-        wait_for_probe_terminal(&runtime, &mut receiver, &thread.thread_id, &turn_id).await?;
+        wait_for_probe_terminal(
+            &runtime,
+            &mut receiver,
+            &thread.thread_id,
+            &turn_id,
+            model_role,
+        )
+        .await?;
 
         let policy_turn = runtime
             .connection
             .request(
                 "turn/start",
-                support_turn_start_params(
+                support_probe_turn_start_params(
                     &thread.thread_id,
                     &run_directory.workspace,
                     "support-release-policy-probe",
-                    &support_probe_input("support-release-policy-probe"),
-                    "ja",
-                    CODEX_MODEL,
                     &support_skill,
+                    model_role,
                 )
                 .map_err(|_| SupportRuntimeError::Skill)?,
                 SUPPORT_PROBE_TIMEOUT,
@@ -182,7 +212,10 @@ pub(super) async fn run_isolation_probe(
     .await
     .map_err(|_| SupportRuntimeError::IsolationProbe)
     .and_then(|result| result);
-    runtime.shutdown().await;
+    runtime
+        .shutdown_checked()
+        .await
+        .map_err(|_| SupportRuntimeError::IsolationProbe)?;
     let process_exited = runtime.has_exited().await;
     if !process_exited {
         return Err(SupportRuntimeError::IsolationProbe);
@@ -195,12 +228,13 @@ pub(super) async fn run_isolation_probe(
         if execution_marker.exists() || server.tool_canary_requests() != 0 {
             return Err(SupportRuntimeError::IsolationProbe);
         }
-        return run_directory.cleanup();
+        cleanup.shutdown().await?;
+        return control.unregister_cleanup(&cleanup);
     }
     if captured.len() != 3
         || captured
             .iter()
-            .any(|request| !production_request_envelope_is_exact(request))
+            .any(|request| !production_request_envelope_is_exact(request, model_role))
     {
         return Err(SupportRuntimeError::IsolationProbe);
     }
@@ -231,7 +265,8 @@ pub(super) async fn run_isolation_probe(
     {
         return Err(SupportRuntimeError::IsolationProbe);
     }
-    run_directory.cleanup()
+    cleanup.shutdown().await?;
+    control.unregister_cleanup(&cleanup)
 }
 
 fn support_probe_input(request_id: &str) -> String {
@@ -262,6 +297,99 @@ fn support_probe_input(request_id: &str) -> String {
     .expect("support probe input is static JSON")
 }
 
+fn presence_probe_input() -> PresenceDirectorInputV1 {
+    PresenceDirectorInputV1 {
+        schema_version: 1,
+        locale: PresenceLocale::Ja,
+        trigger: PresenceTrigger::DecisionWait,
+        semantic_state: PresenceSemanticState::Asking,
+        retrying: false,
+        elapsed_bucket: PresenceElapsedBucket::None,
+        message_excerpt: None,
+    }
+}
+
+fn support_probe_turn_start_params(
+    thread_id: &str,
+    cwd: &std::path::Path,
+    client_user_message_id: &str,
+    support_skill: &ResolvedBundledSkill,
+    model_role: SupportModelRole,
+) -> Result<Value, TurnContractError> {
+    match model_role {
+        SupportModelRole::CommitExplainer => support_turn_start_params(
+            thread_id,
+            cwd,
+            client_user_message_id,
+            &support_probe_input(client_user_message_id),
+            "ja",
+            CODEX_COMMIT_EXPLAINER_MODEL,
+            support_skill,
+        ),
+        SupportModelRole::PresenceDirector => {
+            let input = serde_json::to_string(&presence_probe_input())
+                .expect("presence support probe input is static JSON");
+            presence_turn_start_params(
+                thread_id,
+                cwd,
+                client_user_message_id,
+                &input,
+                "ja",
+                support_skill,
+            )
+        }
+    }
+}
+
+fn support_probe_output(model_role: SupportModelRole) -> String {
+    let value = match model_role {
+        SupportModelRole::CommitExplainer => json!({
+            "schemaVersion": 1,
+            "locale": "ja",
+            "summary": "隔離された説明実行のリリース境界を確認しました。",
+            "changes": ["本番と同一の出力契約を検証しました。"],
+            "reasons": ["support runtime の権限を固定するためです。"],
+            "verification": ["本番モデル、低 effort、完全な schema を確認しました。"],
+            "impact": ["外部ツール権限は追加されません。"],
+            "cautions": ["実リポジトリの内容は使用していません。"],
+            "howToReadNext": ["検証済み evidence を確認してください。"],
+            "narrationChunks": [{
+                "sequence": 1,
+                "section": "summary",
+                "text": "隔離された説明実行のリリース境界を確認しました。"
+            }]
+        }),
+        SupportModelRole::PresenceDirector => json!({
+            "schemaVersion": 1,
+            "locale": "ja",
+            "utterance": "確認が必要なところで待っています。",
+            "cue": "asking"
+        }),
+    };
+    serde_json::to_string(&value).expect("static support probe output")
+}
+
+fn support_skill_matches_role(
+    support_skill: &ResolvedBundledSkill,
+    model_role: SupportModelRole,
+) -> bool {
+    let (name, version, sha256) = match model_role {
+        SupportModelRole::CommitExplainer => (
+            EXPLAIN_COMMIT_SKILL_NAME,
+            SUPPORTED_EXPLAIN_SKILL_VERSION,
+            SUPPORTED_EXPLAIN_SKILL_SHA256,
+        ),
+        SupportModelRole::PresenceDirector => (
+            DIRECT_PRESENCE_SKILL_NAME,
+            SUPPORTED_PRESENCE_SKILL_VERSION,
+            SUPPORTED_PRESENCE_SKILL_SHA256,
+        ),
+    };
+    support_skill.name == name
+        && support_skill.version == version
+        && support_skill.content_digest == format!("sha256:{sha256}")
+}
+
 fn captured_output_schema(request: &Value) -> Option<&Value> {
     request
         .pointer("/text/format/schema")
@@ -269,18 +397,28 @@ fn captured_output_schema(request: &Value) -> Option<&Value> {
         .or_else(|| request.pointer("/response_format/schema"))
 }
 
-fn production_request_envelope_is_exact(request: &Value) -> bool {
+fn production_request_envelope_is_exact(request: &Value, model_role: SupportModelRole) -> bool {
     let output_schema = captured_output_schema(request);
+    let (expected_schema, expected_schema_hash) = match model_role {
+        SupportModelRole::CommitExplainer => (
+            commit_explanation_output_schema("ja"),
+            EXPECTED_EXPLANATION_OUTPUT_SCHEMA_HASH,
+        ),
+        SupportModelRole::PresenceDirector => (
+            presence_direction_output_schema("ja"),
+            EXPECTED_PRESENCE_OUTPUT_SCHEMA_HASH,
+        ),
+    };
     request.get("tools").is_none()
         && request.get("tool_choice").and_then(Value::as_str) == Some("auto")
         && request.get("parallel_tool_calls").and_then(Value::as_bool) == Some(false)
-        && request.get("model").and_then(Value::as_str) == Some(CODEX_MODEL)
+        && request.get("model").and_then(Value::as_str) == Some(model_role.exact_model())
         && request.pointer("/reasoning/effort").and_then(Value::as_str) == Some("low")
-        && output_schema == Some(&commit_explanation_output_schema("ja"))
+        && output_schema == Some(&expected_schema)
         && output_schema
             .and_then(|schema| canonical_json_hash(schema).ok())
             .as_deref()
-            == Some(EXPECTED_SUPPORT_OUTPUT_SCHEMA_HASH)
+            == Some(expected_schema_hash)
 }
 
 async fn sandbox_probe(
@@ -329,6 +467,7 @@ async fn wait_for_probe_terminal(
     receiver: &mut mpsc::Receiver<RuntimeSignal>,
     thread_id: &str,
     turn_id: &str,
+    model_role: SupportModelRole,
 ) -> Result<(), SupportRuntimeError> {
     let deadline = tokio::time::Instant::now() + SUPPORT_PROBE_TIMEOUT;
     let mut valid_explanation = false;
@@ -362,7 +501,15 @@ async fn wait_for_probe_terminal(
                             .pointer("/item/text")
                             .and_then(Value::as_str)
                             .ok_or(SupportRuntimeError::IsolationProbe)?;
-                        if valid_explanation || parse_explanation(text, "ja").is_err() {
+                        let valid_output = match model_role {
+                            SupportModelRole::CommitExplainer => {
+                                parse_explanation(text, "ja").is_ok()
+                            }
+                            SupportModelRole::PresenceDirector => {
+                                parse_presence_direction(text, &presence_probe_input()).is_ok()
+                            }
+                        };
+                        if valid_explanation || !valid_output {
                             return Err(SupportRuntimeError::IsolationProbe);
                         }
                         valid_explanation = true;
@@ -453,27 +600,37 @@ pub(super) fn map_rpc_error(error: RpcRequestError) -> SupportRuntimeError {
 mod tests {
     use super::*;
 
-    fn exact_request() -> Value {
+    fn exact_request(model_role: SupportModelRole) -> Value {
+        let schema = match model_role {
+            SupportModelRole::CommitExplainer => commit_explanation_output_schema("ja"),
+            SupportModelRole::PresenceDirector => presence_direction_output_schema("ja"),
+        };
         json!({
-            "model": CODEX_MODEL,
+            "model": model_role.exact_model(),
             "parallel_tool_calls": false,
             "reasoning": {"effort": "low"},
             "tool_choice": "auto",
-            "text": {"format": {"schema": commit_explanation_output_schema("ja")}}
+            "text": {"format": {"schema": schema}}
         })
     }
 
     #[test]
     fn production_envelope_requires_exact_low_reasoning_effort() {
-        let request = exact_request();
-        assert!(production_request_envelope_is_exact(&request));
+        let request = exact_request(SupportModelRole::CommitExplainer);
+        assert!(production_request_envelope_is_exact(
+            &request,
+            SupportModelRole::CommitExplainer
+        ));
 
         let mut missing = request.clone();
         missing
             .as_object_mut()
             .expect("request object")
             .remove("reasoning");
-        assert!(!production_request_envelope_is_exact(&missing));
+        assert!(!production_request_envelope_is_exact(
+            &missing,
+            SupportModelRole::CommitExplainer
+        ));
 
         for effort in [
             Value::Null,
@@ -484,35 +641,103 @@ mod tests {
         ] {
             let mut changed = request.clone();
             changed["reasoning"]["effort"] = effort;
-            assert!(!production_request_envelope_is_exact(&changed));
+            assert!(!production_request_envelope_is_exact(
+                &changed,
+                SupportModelRole::CommitExplainer
+            ));
         }
 
         for reasoning in [json!("low"), json!([{"effort": "low"}]), json!({})] {
             let mut changed = request.clone();
             changed["reasoning"] = reasoning;
-            assert!(!production_request_envelope_is_exact(&changed));
+            assert!(!production_request_envelope_is_exact(
+                &changed,
+                SupportModelRole::CommitExplainer
+            ));
         }
     }
 
     #[test]
     fn production_envelope_requires_the_tools_field_to_be_absent() {
-        let request = exact_request();
-        assert!(production_request_envelope_is_exact(&request));
+        let request = exact_request(SupportModelRole::CommitExplainer);
+        assert!(production_request_envelope_is_exact(
+            &request,
+            SupportModelRole::CommitExplainer
+        ));
 
         let mut empty_tools = request.clone();
         empty_tools["tools"] = json!([]);
-        assert!(!production_request_envelope_is_exact(&empty_tools));
+        assert!(!production_request_envelope_is_exact(
+            &empty_tools,
+            SupportModelRole::CommitExplainer
+        ));
 
         let mut added_tool = request.clone();
         added_tool["tools"] = json!([{"type": "function", "name": "update_plan"}]);
-        assert!(!production_request_envelope_is_exact(&added_tool));
+        assert!(!production_request_envelope_is_exact(
+            &added_tool,
+            SupportModelRole::CommitExplainer
+        ));
 
         let mut changed_choice = request.clone();
         changed_choice["tool_choice"] = json!("none");
-        assert!(!production_request_envelope_is_exact(&changed_choice));
+        assert!(!production_request_envelope_is_exact(
+            &changed_choice,
+            SupportModelRole::CommitExplainer
+        ));
 
         let mut changed_parallel = request;
         changed_parallel["parallel_tool_calls"] = json!(true);
-        assert!(!production_request_envelope_is_exact(&changed_parallel));
+        assert!(!production_request_envelope_is_exact(
+            &changed_parallel,
+            SupportModelRole::CommitExplainer
+        ));
+    }
+
+    #[test]
+    fn production_commit_explainer_envelope_rejects_cross_role_models() {
+        let request = exact_request(SupportModelRole::CommitExplainer);
+        assert!(production_request_envelope_is_exact(
+            &request,
+            SupportModelRole::CommitExplainer
+        ));
+
+        for model in [CODEX_MAIN_MODEL, CODEX_PRESENCE_DIRECTOR_MODEL] {
+            let mut changed = request.clone();
+            changed["model"] = json!(model);
+            assert!(
+                !production_request_envelope_is_exact(&changed, SupportModelRole::CommitExplainer),
+                "accepted cross-role model {model}"
+            );
+        }
+    }
+
+    #[test]
+    fn production_presence_envelope_requires_luna_and_its_exact_schema() {
+        let request = exact_request(SupportModelRole::PresenceDirector);
+        assert!(production_request_envelope_is_exact(
+            &request,
+            SupportModelRole::PresenceDirector
+        ));
+        assert!(!production_request_envelope_is_exact(
+            &request,
+            SupportModelRole::CommitExplainer
+        ));
+
+        for model in [CODEX_MAIN_MODEL, CODEX_COMMIT_EXPLAINER_MODEL] {
+            let mut changed = request.clone();
+            changed["model"] = json!(model);
+            assert!(
+                !production_request_envelope_is_exact(&changed, SupportModelRole::PresenceDirector),
+                "accepted cross-role model {model}"
+            );
+        }
+
+        let mut explanation_schema = request;
+        explanation_schema["text"]["format"]["schema"] = commit_explanation_output_schema("ja");
+        assert!(!production_request_envelope_is_exact(
+            &explanation_schema,
+            SupportModelRole::PresenceDirector
+        ));
     }
 }

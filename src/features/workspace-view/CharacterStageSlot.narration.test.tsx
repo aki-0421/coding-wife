@@ -9,13 +9,14 @@ import {
   type LocalePreferenceStore,
 } from "@/features/localization"
 import {
+  type CommitNarrationStartedV1,
+  DemoNarrationGateway,
   NarrationController,
   NarrationProvider,
-  DemoNarrationGateway,
   narrationSchemaVersion,
   narrationSettingsSchemaVersion,
+  type PresenceDirectionEventV1,
   sourceKeyFromCommitNarrationEvent,
-  type CommitNarrationStartedV1,
 } from "@/features/narration"
 import { CharacterStageSlot } from "@/features/workspace-view/CharacterStageSlot"
 import { getWorkspaceCopy } from "@/features/workspace-view/copy"
@@ -66,6 +67,23 @@ const started: CommitNarrationStartedV1 = {
   locale: "ja",
 }
 
+const presence: PresenceDirectionEventV1 = {
+  schemaVersion: narrationSchemaVersion,
+  requestId: "presence-1",
+  workspaceId: "workspace-1",
+  workspaceGeneration: 2,
+  sourceEventId: "event-1",
+  decisionId: "pending-1",
+  trigger: "decision_wait",
+  locale: "ja",
+  utterance: "確認が必要なところで待っています。",
+  cue: "asking",
+  priority: "high",
+  modelRole: "presence_director",
+  model: "gpt-5.6-luna",
+  occurredAt: "2026-07-21T10:00:00.000Z",
+}
+
 function prepare(controller: NarrationController) {
   controller.consume(started)
   controller.consume({
@@ -82,11 +100,15 @@ function renderStage({
   gateway,
   renderer,
   onMutedChange = () => undefined,
+  reducedMotion = false,
+  workspaceGeneration = 2,
 }: {
   readonly controller: NarrationController
   readonly gateway: DemoNarrationGateway
   readonly renderer: CharacterStageRenderer
   readonly onMutedChange?: (muted: boolean) => void
+  readonly reducedMotion?: boolean
+  readonly workspaceGeneration?: number | null
 }) {
   return render(
     <I18nProvider store={jaStore}>
@@ -98,10 +120,11 @@ function renderStage({
             muted={false}
             onMutedChange={onMutedChange}
             onRetryCharacter={() => undefined}
-            reducedMotion={false}
+            reducedMotion={reducedMotion}
             renderer={renderer}
             state="idle"
             visible
+            workspaceGeneration={workspaceGeneration}
             workspaceId="workspace-1"
           />
         </TooltipProvider>
@@ -111,6 +134,133 @@ function renderStage({
 }
 
 describe("CharacterStageSlot narration", () => {
+  it("renders a matching Luna caption as polite wrapping semantic presence", async () => {
+    const gateway = new DemoNarrationGateway()
+    const controller = new NarrationController(gateway)
+    await controller.initialize()
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 2,
+      locale: "ja",
+    })
+    expect(controller.consumePresence(presence)).toBe(true)
+    const renderer: CharacterStageRenderer = (props) => (
+      <div
+        data-reduced-motion={String(props.reducedMotion)}
+        data-state={props.state}
+        data-testid="renderer"
+      />
+    )
+
+    renderStage({ controller, gateway, renderer, reducedMotion: true })
+
+    const caption = screen.getByText("確認が必要なところで待っています。")
+    expect(caption).toHaveAttribute("aria-live", "polite")
+    expect(caption).toHaveAttribute("role", "status")
+    expect(caption).toHaveClass("whitespace-normal", "break-words")
+    expect(caption).not.toHaveClass("whitespace-nowrap")
+    expect(caption).not.toHaveAttribute("role", "alert")
+    expect(screen.getByTestId("renderer")).toHaveAttribute(
+      "data-state",
+      "waiting_for_user",
+    )
+    expect(screen.getByTestId("renderer")).toHaveAttribute(
+      "data-reduced-motion",
+      "true",
+    )
+  })
+
+  it("does not render or cue a Luna event outside the current generation", async () => {
+    const gateway = new DemoNarrationGateway()
+    const controller = new NarrationController(gateway)
+    await controller.initialize()
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 2,
+      locale: "ja",
+    })
+    expect(controller.consumePresence(presence)).toBe(true)
+    const renderer: CharacterStageRenderer = (props) => (
+      <div data-state={props.state} data-testid="renderer" />
+    )
+
+    renderStage({
+      controller,
+      gateway,
+      renderer,
+      workspaceGeneration: 3,
+    })
+
+    expect(
+      screen.queryByText("確認が必要なところで待っています。"),
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("renderer")).toHaveAttribute("data-state", "idle")
+  })
+
+  it("removes Luna presence when an explicit commit explanation starts", async () => {
+    const gateway = new DemoNarrationGateway()
+    const controller = new NarrationController(gateway)
+    await controller.initialize()
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 2,
+      locale: "ja",
+    })
+    expect(controller.consumePresence(presence)).toBe(true)
+    const key = prepare(controller)
+    const renderer: CharacterStageRenderer = (props) => (
+      <div data-state={props.state} data-testid="renderer" />
+    )
+    renderStage({ controller, gateway, renderer })
+    expect(screen.getByText("確認が必要なところで待っています。")).toBeVisible()
+
+    await act(() => controller.activatePresentation(key))
+
+    expect(
+      screen.queryByText("確認が必要なところで待っています。"),
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("renderer")).toHaveAttribute(
+      "data-state",
+      "reviewing",
+    )
+  })
+
+  it("keeps Luna visible when an unavailable Terra activation leaves a tombstone", async () => {
+    const gateway = new DemoNarrationGateway()
+    const controller = new NarrationController(gateway)
+    await controller.initialize()
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 2,
+      locale: "ja",
+    })
+    expect(controller.consume(started)).toBe(true)
+    expect(
+      controller.consume({
+        ...started,
+        kind: "terminal",
+        status: "completed",
+        errorCode: null,
+      }),
+    ).toBe(true)
+    expect(controller.consumePresence(presence)).toBe(true)
+    await controller.activatePresentation(
+      sourceKeyFromCommitNarrationEvent(started),
+    )
+    expect(controller.getSnapshot().presentation?.status).toBe("unavailable")
+    const renderer: CharacterStageRenderer = (props) => (
+      <div data-state={props.state} data-testid="renderer" />
+    )
+
+    renderStage({ controller, gateway, renderer })
+
+    expect(screen.getByText(presence.utterance)).toBeVisible()
+    expect(screen.getByTestId("renderer")).toHaveAttribute(
+      "data-state",
+      "waiting_for_user",
+    )
+  })
+
   it("projects presentation state without owning the shared caption", async () => {
     const gateway = new DemoNarrationGateway()
     const controller = new NarrationController(gateway)

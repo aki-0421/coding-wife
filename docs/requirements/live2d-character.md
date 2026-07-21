@@ -1,7 +1,7 @@
 ---
 title: "LIVE Live2Dキャラクター要件定義"
 description: "同梱Hiyori、semantic state、縮退、ユーザーmodelの安全なimport・選択を定義する。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "Live2D renderer、character pack、state mappingを実装するとき。"
   - "ユーザーmodel importのsecurity、boundary、fallbackを検証するとき。"
@@ -15,7 +15,7 @@ read_when:
 | 状態           | Approved           |
 | 仕様責任者     | プロダクトオーナー |
 | 作成日         | 2026-07-18         |
-| 最終レビュー日 | 2026-07-20         |
+| 最終レビュー日 | 2026-07-21         |
 
 ## 背景
 
@@ -71,6 +71,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | `LIVE-F-057` | characterはworkspaceの作業tabで同じ幅を継続表示する | 1470×836のChat、Commitで607.84×754.99px paneへbottom-containし、同じwindow geometryでtabを切り替えた時のpane幅差が1 CSS px以内で、頭頂、両手、裾がcanvas外へ切れない。App Settingsでは表示しない | Approved | 非該当           |
 | `LIVE-F-058` | rendererはwindow resizeへ追従する           | 1470×836、1280×800、960×640の各resize後500ms以内にcontain scaleを再計算し、composerまたはdecisionを覆わない              | Approved | 非該当           |
 | `LIVE-F-059` | rendererは一つのactive canvasだけを保持する | Chat、Commitのtabとworkspace/modelを20回切り替えても描画canvasが1枚で、Chat / Commit間では同じDOM canvasを再利用する。App Settingsでは同じrenderer instanceを非表示のまま保持し、旧texture/motion/WebGL resourceを参照しない | Approved | 非該当           |
+| `LIVE-F-087` | appはLive2D assetをreview済みmedia typeで配信する | production buildとdesktop QA buildのTauri WebViewで、同梱Hiyoriのmanifest・model JSON・moc3・PNG textureと同梱Cubism shaderを正本と同じbyte列で取得できる。JSONは`application/json`、moc3は`application/octet-stream`、PNGは`image/png`、`.frag` / `.vert`は`text/plain`を返す。未知path、index HTML fallback、許可外origin、asset ID・byte length・SHA-256・shader正本の不一致は正しいassetとして扱わず、既存の段階的fallbackへ移行する | Approved | 非該当           |
 | `LIVE-F-060` | appは同梱assetのprovenanceを表示する        | 非該当                                                                                                                   | Deprecated | 個別設定をmodel名とmotionへ限定する`LIVE-F-084`へ移行 |
 
 ### Semantic stateと縮退
@@ -142,7 +143,7 @@ Live2DはSolの状態を周辺視野で楽しく把握する中心体験だが�
 | メニュー・ショートカット    | muteにaccessible toggle、importに標準picker                        | `LIVE-F-068`, `LIVE-F-083` |
 | Deep Link・ファイル関連付け | 非該当: model file associationを登録しない                         | 非該当                     |
 | 通知                        | renderer/import errorはApp settings > Characterとtext statusへ表示 | `LIVE-F-067`, `LIVE-F-076` |
-| Capability・認可            | character libraryと限定asset protocolだけを許可                    | `LIVE-F-071`〜`LIVE-F-074` |
+| Capability・認可            | character libraryと限定asset protocolだけを許可                    | `LIVE-F-071`〜`LIVE-F-074`, `LIVE-F-087` |
 | アップデート・互換性        | unsupported model/MOC versionを拒否し、既存packを維持              | `LIVE-F-076`               |
 
 ## 画面・UI

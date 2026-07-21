@@ -8,6 +8,7 @@ import { TauriCommitExplanationAdapter } from "@/features/git-review/commit-expl
 import { TauriGitReviewTransport } from "@/features/git-review/transport"
 import { detectSystemLocale } from "@/features/localization"
 import { NarrationController } from "@/features/narration/controller"
+import { TauriPresenceDirectionSource } from "@/features/narration/presence-source"
 import { NativeNarrationGateway } from "@/features/narration/transport"
 import { AppPreferencesController } from "@/features/preferences/controller"
 import { NativeAppPreferencesGateway } from "@/features/preferences/transport"
@@ -31,6 +32,7 @@ function createProductionDependencies() {
     gitReviewTransport: new TauriGitReviewTransport(),
     narrationController: new NarrationController(narrationGateway),
     narrationGateway,
+    presenceDirectionSource: new TauriPresenceDirectionSource(),
     readinessController: new NativeReadinessController(
       new TauriNativeReadinessGateway(),
     ),

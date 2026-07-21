@@ -14,8 +14,9 @@ use super::types::MainSkillInjectionAudit;
 
 pub const COMMIT_SKILL_NAME: &str = "coding-wife-commit-work";
 pub const EXPLAIN_COMMIT_SKILL_NAME: &str = "coding-wife-explain-commit";
+pub const DIRECT_PRESENCE_SKILL_NAME: &str = "coding-wife-direct-presence";
 const EXPECTED_MANIFEST_SHA256: &str =
-    "680aa60c1d5e6e774c8cbbcfbecbf2f45c743b44e1ffa7a463ec26bee9210f0f";
+    "f05bbffa3731b88388db84cfc207b117fe9981e750d9f42a4bb3bd09b231537a";
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024;
 const MAX_SKILL_FILE_BYTES: u64 = 128 * 1024;
 const MAX_SKILLS: usize = 16;
@@ -104,7 +105,10 @@ pub fn resolve_bundled_skill(
     resource_directory: &Path,
     expected_name: &str,
 ) -> Result<ResolvedBundledSkill, BundledSkillError> {
-    if !matches!(expected_name, COMMIT_SKILL_NAME | EXPLAIN_COMMIT_SKILL_NAME) {
+    if !matches!(
+        expected_name,
+        COMMIT_SKILL_NAME | EXPLAIN_COMMIT_SKILL_NAME | DIRECT_PRESENCE_SKILL_NAME
+    ) {
         return Err(BundledSkillError::Invalid);
     }
     let resource_root =
@@ -456,7 +460,7 @@ mod tests {
         let audit = serde_json::to_value(skill.audit()).expect("serialize audit");
 
         assert_eq!(skill.name, COMMIT_SKILL_NAME);
-        assert_eq!(skill.version, "1.1.0");
+        assert_eq!(skill.version, "1.2.0");
         assert!(skill.path.is_absolute());
         assert_eq!(audit.as_object().expect("audit object").len(), 3);
         assert!(audit.get("name").is_some());
@@ -467,16 +471,20 @@ mod tests {
     }
 
     #[test]
-    fn resolves_exactly_the_two_execution_class_skills() {
+    fn resolves_exactly_the_three_role_skills() {
         let resource_directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let main = resolve_bundled_skill(&resource_directory, COMMIT_SKILL_NAME)
             .expect("resolve main skill");
         let support = resolve_bundled_skill(&resource_directory, EXPLAIN_COMMIT_SKILL_NAME)
             .expect("resolve support skill");
+        let presence = resolve_bundled_skill(&resource_directory, DIRECT_PRESENCE_SKILL_NAME)
+            .expect("resolve presence skill");
 
         assert_eq!(main.name, COMMIT_SKILL_NAME);
         assert_eq!(support.name, EXPLAIN_COMMIT_SKILL_NAME);
+        assert_eq!(presence.name, DIRECT_PRESENCE_SKILL_NAME);
         assert_ne!(main.path, support.path);
+        assert_ne!(support.path, presence.path);
         assert!(matches!(
             resolve_bundled_skill(&resource_directory, "unknown-skill"),
             Err(BundledSkillError::Invalid)
@@ -495,6 +503,10 @@ mod tests {
             "multiple `git commit -m` arguments",
             "git log -1 --format=%B",
             "subject, blank separator, and body bullets occupy distinct physical lines",
+            "nodeRepl.setResponseMeta",
+            "codingWifeGitCommitProof",
+            "beforeHead",
+            "commitSha",
         ] {
             assert!(
                 commit.contains(required),
@@ -517,6 +529,23 @@ mod tests {
             assert!(
                 explain.contains(required),
                 "missing explanation contract: {required}"
+            );
+        }
+
+        let presence = fs::read_to_string(root.join("coding-wife-direct-presence/SKILL.md"))
+            .expect("presence skill document");
+        for required in [
+            "PresenceDirectorInputV1",
+            "PresenceDirectionV1",
+            "Never request a tool, plan update, approval, user input, or writeback",
+            "1 and 160 Unicode scalar values",
+            "decision_wait",
+            "terminal_failure",
+            "120s_plus",
+        ] {
+            assert!(
+                presence.contains(required),
+                "missing presence contract: {required}"
             );
         }
     }

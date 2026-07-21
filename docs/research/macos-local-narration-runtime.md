@@ -1,7 +1,7 @@
 ---
 title: "macOS local narration runtime 実測"
-description: "外部TTS providerを使わず、macOS同梱の/usr/bin/sayを安全なoptional narration adapterとして使うための実測と境界を記録する。"
-updated: 2026-07-18
+description: "未採用となったmacOS /usr/bin/say案のhistorical researchと、当時確認したprocess境界を保存する。"
+updated: 2026-07-22
 last_verified: 2026-07-18
 read_when:
   - "native narration process、voice allowlist、cancel、privacyを実装するとき。"
@@ -10,7 +10,9 @@ read_when:
 
 # macOS local narration runtime 実測
 
-## 結論
+> **Historical research — not adopted.** この文書のmacOS local say adapterは現行製品に採用していない。現在のTTSはnative境界からOpenAI Speech APIを任意利用し、captionを常に正本とする。[音声実況要件定義](../requirements/audio-commentary.md)と[GPT-5.6 役割別オーケストレーション実装契約](gpt-5-6-role-orchestration.md)を実装契約として使用する。
+
+## 当時の結論（未採用）
 
 Coding Wifeのoptional TTSは外部provider/API keyへ依存せず、macOS同梱のexact `/usr/bin/say`だけをnative adapterから起動する。captionを正本とし、TTSはfresh profileとreset後にoff、network/microphone/audio fileは常に0件にする。
 

@@ -1779,7 +1779,7 @@ describe("WorkspaceShell", () => {
     await waitFor(() => expect(filter).toHaveFocus())
   })
 
-  it("opens read-only commit evidence without exposing a mutation action", async () => {
+  it("opens GitHub-style commit changes without exposing internal properties or mutation actions", async () => {
     const user = userEvent.setup()
     renderWorkspace()
 
@@ -1794,16 +1794,30 @@ describe("WorkspaceShell", () => {
         name: "feat(git): add read-only commit evidence",
       }),
     ).toBeVisible()
-    await user.click(screen.getByRole("tab", { name: "Evidence" }))
-    await screen.findByText("Observed gates")
-    for (const gate of ["Scope", "Ownership", "Verification", "Risk"]) {
-      expect(screen.getAllByText(gate).length).toBeGreaterThan(0)
-    }
+    const changes = screen.getByRole("main", { name: "Commit changes" })
+    expect(changes.querySelector("[data-git-review-header]")).not.toBeNull()
+    expect(changes.querySelector("[data-git-file-section]")).not.toBeNull()
+    expect(changes.querySelector("[data-git-diff-scroll]")).not.toBeNull()
     expect(
-      within(screen.getByRole("main", { name: "Commit evidence" })).queryByRole(
-        "textbox",
-      ),
-    ).not.toBeInTheDocument()
+      within(changes).getByRole("searchbox", {
+        name: "Filter changed files",
+      }),
+    ).toBeVisible()
+    for (const hiddenText of [
+      "Read only",
+      "Fresh",
+      "Observed gates",
+      "Scope",
+      "Ownership",
+      "Verification",
+      "Risk",
+      "Persisted",
+      "Main Codex",
+    ]) {
+      expect(within(changes).queryByText(hiddenText)).not.toBeInTheDocument()
+    }
+    expect(within(changes).queryByRole("tab")).not.toBeInTheDocument()
+    expect(within(changes).queryByRole("textbox")).not.toBeInTheDocument()
   })
 
   it("opens the compact filter with Command+K and restores its opener", async () => {
@@ -2578,15 +2592,36 @@ describe("WorkspaceShell", () => {
     )
     expect(assistantEvent).not.toBeNull()
     expect(toolEvent).not.toBeNull()
-    expect(within(userEventRow).getByText("You")).toBeVisible()
+    expect(userEventRow).toHaveAttribute("aria-label", "User message")
+    expect(assistantEvent).toHaveAttribute("aria-label", "Assistant response")
+    expect(within(userEventRow).queryByText("You")).not.toBeInTheDocument()
     expect(
-      within(assistantEvent as HTMLElement).getByText("Codex"),
-    ).toBeVisible()
-    expect(within(toolEvent as HTMLElement).getByText("browser")).toBeVisible()
+      within(assistantEvent as HTMLElement).queryByText("Codex"),
+    ).not.toBeInTheDocument()
+    expect(userEventRow.querySelector("time")).not.toBeInTheDocument()
+    expect(
+      (assistantEvent as HTMLElement).querySelector("time"),
+    ).not.toBeInTheDocument()
+    const messageCopy = within(userEventRow).getByRole("button", {
+      name: "Copy safe details",
+    })
+    expect(messageCopy).toHaveAttribute("data-copy-action")
+    expect(messageCopy).toHaveClass(
+      "opacity-0",
+      "group-hover/timeline-row:opacity-100",
+      "group-focus-within/timeline-row:opacity-100",
+      "focus-visible:opacity-100",
+    )
+    expect(messageCopy).toHaveTextContent("")
+    expect(toolEvent).toHaveAttribute("data-operation-category", "web")
     const toolSummary = (toolEvent as HTMLElement).querySelector("summary")
     expect(toolSummary).not.toBeNull()
     expect(within(toolSummary as HTMLElement).getByText("open")).toBeVisible()
-    expect(toolSummary).toHaveTextContent("ref_id=page-safe · 840 ms")
+    expect(toolSummary).not.toHaveTextContent("browser")
+    expect(toolSummary).not.toHaveTextContent("ref_id=page-safe")
+    expect(toolSummary).not.toHaveTextContent("840 ms")
+    expect(toolSummary).not.toHaveTextContent("Completed")
+    expect((toolEvent as HTMLElement).querySelector("time")).toBeNull()
     const compactCharacter = container.querySelector<HTMLElement>(
       "[data-character-status-mobile]",
     )
@@ -2643,7 +2678,9 @@ describe("WorkspaceShell", () => {
         pendingId: "pending-decision",
         response: {
           type: "user_input",
-          answers: { scope: ["bounded"] },
+          answers: {
+            scope: { type: "option", optionId: "bounded" },
+          },
         },
       }),
     )
@@ -2836,7 +2873,9 @@ describe("WorkspaceShell", () => {
         pendingId: "pending-decision",
         response: {
           type: "user_input",
-          answers: { scope: ["Keep the public API unchanged"] },
+          answers: {
+            scope: { type: "other", text: "Keep the public API unchanged" },
+          },
         },
       }),
     )
@@ -2982,9 +3021,13 @@ describe("WorkspaceShell", () => {
     expect(operationDetails).not.toBeNull()
     expect(operationSummary).not.toBeNull()
     expect(operationDetails?.open).toBe(false)
-    expect(operationSummary).toHaveTextContent("browser")
     expect(operationSummary).toHaveTextContent("open")
-    expect(operationSummary).toHaveTextContent("ref_id=page-safe · 840 ms")
+    expect(operationSummary).not.toHaveTextContent("browser")
+    expect(operationSummary).not.toHaveTextContent("ref_id=page-safe")
+    expect(operationSummary).not.toHaveTextContent("840 ms")
+    expect(operationSummary).not.toHaveTextContent("Completed")
+    expect(tool).toHaveAttribute("data-operation-category", "web")
+    expect(tool?.querySelector("time")).toBeNull()
 
     await user.click(operationSummary as HTMLElement)
     expect(operationDetails?.open).toBe(true)
@@ -2992,11 +3035,243 @@ describe("WorkspaceShell", () => {
     await user.click(details.getByRole("button", { name: "Copy safe details" }))
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce())
     expect(writeText).toHaveBeenCalledWith(
-      "ref_id=page-safe\n46 focused tests passed",
+      "Provider: browser\nref_id=page-safe\n46 focused tests passed\nDuration: 840 ms",
     )
     expect(
       details.getByRole("button", { name: "Copy safe details" }),
-    ).toHaveTextContent("Copied")
+    ).toHaveTextContent("")
+    expect(details.getByText("Copied")).toHaveClass("sr-only")
+  })
+
+  it("distills operation rows by category and reserves failure tint for failures", async () => {
+    const operationBase = {
+      workspaceId: "workspace-native",
+      generation: 1,
+      occurredAt: "2026-07-18T00:00:01.000Z",
+      durable: true,
+    }
+    const command =
+      "pnpm --filter @coding-wife/desktop test -- WorkspaceShell.test.tsx"
+    const snapshot: WorkspaceCodexState = {
+      ...richCodexState(),
+      phase: "running",
+      pendingRequests: [],
+      timeline: [
+        {
+          ...operationBase,
+          id: "event-command-failed",
+          stableId: "command-failed",
+          sourceEventId: "event-command-failed",
+          sourceSequence: 1,
+          kind: "tool",
+          status: "failed",
+          itemHandle: "item-command-failed",
+          toolKind: "commandExecution",
+          providerName: null,
+          toolName: "shell",
+          summary: command,
+          durationMs: 420,
+          excerpt: "2 tests failed",
+        },
+        {
+          ...operationBase,
+          id: "event-file-tool",
+          stableId: "file-tool",
+          sourceEventId: "event-file-tool",
+          sourceSequence: 2,
+          kind: "tool",
+          status: "completed",
+          itemHandle: "item-file-tool",
+          toolKind: "mcpToolCall",
+          providerName: "filesystem",
+          toolName: "read_file",
+          summary: "path=src/app.ts",
+          durationMs: 80,
+          excerpt: null,
+        },
+        {
+          ...operationBase,
+          id: "event-browser-tool",
+          stableId: "browser-tool",
+          sourceEventId: "event-browser-tool",
+          sourceSequence: 3,
+          kind: "tool",
+          status: "completed",
+          itemHandle: "item-browser-tool",
+          toolKind: "mcpToolCall",
+          providerName: "browser",
+          toolName: "click",
+          summary: "ref_id=button-safe",
+          durationMs: 120,
+          excerpt: null,
+        },
+        {
+          ...operationBase,
+          id: "event-search-tool",
+          stableId: "search-tool",
+          sourceEventId: "event-search-tool",
+          sourceSequence: 4,
+          kind: "tool",
+          status: "running",
+          itemHandle: "item-search-tool",
+          toolKind: "webSearch",
+          providerName: null,
+          toolName: "search",
+          summary: "query=Codex desktop UI",
+          durationMs: null,
+          excerpt: null,
+        },
+        {
+          ...operationBase,
+          id: "event-generic-tool",
+          stableId: "generic-tool",
+          sourceEventId: "event-generic-tool",
+          sourceSequence: 5,
+          kind: "tool",
+          status: "completed",
+          itemHandle: "item-generic-tool",
+          toolKind: "mcpToolCall",
+          providerName: "linear",
+          toolName: "create_issue",
+          summary: "title=Review timeline",
+          durationMs: 60,
+          excerpt: null,
+        },
+      ],
+    }
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      codexSnapshot: () => snapshot,
+      subscribeCodex(listener) {
+        listener(snapshot)
+        return () => undefined
+      },
+    }
+    const user = userEvent.setup()
+    const { container } = renderWorkspace(adapter)
+
+    const failedCommand = await waitFor(() => {
+      const row = container.querySelector<HTMLElement>(
+        '[data-event-id="event-command-failed"]',
+      )
+      expect(row).not.toBeNull()
+      return row as HTMLElement
+    })
+    const fileTool = container.querySelector<HTMLElement>(
+      '[data-event-id="event-file-tool"]',
+    )
+    const browserTool = container.querySelector<HTMLElement>(
+      '[data-event-id="event-browser-tool"]',
+    )
+    const searchTool = container.querySelector<HTMLElement>(
+      '[data-event-id="event-search-tool"]',
+    )
+    const genericTool = container.querySelector<HTMLElement>(
+      '[data-event-id="event-generic-tool"]',
+    )
+
+    expect(failedCommand).toHaveAttribute("data-operation-category", "command")
+    expect(fileTool).toHaveAttribute("data-operation-category", "file")
+    expect(browserTool).toHaveAttribute("data-operation-category", "web")
+    expect(searchTool).toHaveAttribute("data-operation-category", "search")
+    expect(genericTool).toHaveAttribute("data-operation-category", "generic")
+
+    const commandName = failedCommand.querySelector<HTMLElement>(
+      "[data-operation-name]",
+    )
+    expect(commandName).toHaveTextContent(command)
+    expect(commandName).toHaveClass("truncate")
+    expect(commandName).toHaveAttribute("title", command)
+    expect(failedCommand).toHaveClass("bg-destructive/10")
+    expect(failedCommand.querySelector("details")?.open).toBe(true)
+    expect(within(failedCommand).getByText("Failed")).toHaveClass("sr-only")
+
+    const fileSummary = fileTool?.querySelector<HTMLElement>("summary")
+    expect(fileSummary).not.toBeNull()
+    expect(fileTool).not.toHaveClass("bg-destructive/10")
+    expect(fileTool).not.toHaveTextContent("Completed")
+    expect(fileSummary).not.toHaveTextContent("filesystem")
+    expect(fileSummary).not.toHaveTextContent("80 ms")
+    expect(
+      fileTool?.querySelector('[class*="text-success"]'),
+    ).not.toBeInTheDocument()
+    expect(
+      fileTool?.querySelector('[class*="lucide-circle-check"]'),
+    ).not.toBeInTheDocument()
+    expect(within(fileTool as HTMLElement).getByText("read_file")).toBeVisible()
+    expect(searchTool).toHaveAttribute("aria-busy", "true")
+    expect(searchTool?.querySelector("details")?.open).toBe(true)
+    expect(searchTool?.querySelector("summary")).not.toHaveTextContent(
+      "query=Codex desktop UI",
+    )
+    expect(genericTool?.querySelector("summary")).not.toHaveTextContent(
+      "linear",
+    )
+
+    await user.click(fileSummary as HTMLElement)
+    expect(fileTool).toHaveTextContent("Provider: filesystem")
+    expect(fileTool).toHaveTextContent("path=src/app.ts")
+    expect(fileTool).toHaveTextContent("Duration: 80 ms")
+    const detailCopy = within(fileTool as HTMLElement).getByRole("button", {
+      name: "Copy safe details",
+    })
+    expect(detailCopy).toHaveTextContent("")
+    expect(detailCopy).toHaveClass(
+      "opacity-0",
+      "group-hover/timeline-row:opacity-100",
+      "group-focus-within/timeline-row:opacity-100",
+    )
+  })
+
+  it("localizes distilled message semantics and icon-only copy in Japanese", async () => {
+    const baseSnapshot = richCodexState()
+    const snapshot: WorkspaceCodexState = {
+      ...baseSnapshot,
+      pendingRequests: [],
+      timeline: baseSnapshot.timeline.filter(
+        (event) => event.kind === "user" || event.kind === "assistant",
+      ),
+    }
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      codexSnapshot: () => snapshot,
+      subscribeCodex(listener) {
+        listener(snapshot)
+        return () => undefined
+      },
+    }
+    const { container } = render(
+      <App
+        localeStore={japaneseLocaleStore}
+        readinessController={readyNativeReadinessController()}
+        transport={new DemoTransport()}
+        workspaceAdapter={adapter}
+      />,
+    )
+
+    const userMessage = await waitFor(() => {
+      const row = container.querySelector<HTMLElement>(
+        '[data-event-kind="user"]',
+      )
+      expect(row).not.toBeNull()
+      return row as HTMLElement
+    })
+    const assistantMessage = container.querySelector<HTMLElement>(
+      '[data-event-kind="assistant"]',
+    )
+    expect(userMessage).toHaveAttribute("aria-label", "ユーザーのメッセージ")
+    expect(assistantMessage).toHaveAttribute("aria-label", "アシスタントの応答")
+    expect(within(userMessage).queryByText("あなた")).not.toBeInTheDocument()
+    expect(
+      within(assistantMessage as HTMLElement).queryByText("Codex"),
+    ).not.toBeInTheDocument()
+    expect(
+      within(userMessage).getByRole("button", {
+        name: "安全な詳細をコピー",
+      }),
+    ).toHaveTextContent("")
   })
 
   it("locks auto-scroll beyond 48px and counts new timeline updates", async () => {

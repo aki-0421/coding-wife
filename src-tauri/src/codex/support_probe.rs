@@ -38,6 +38,7 @@ impl ProbeCaptureServer {
         repository_canary: &Path,
         auth_canary: &Path,
         execution_marker: &Path,
+        valid_output: String,
     ) -> Result<Self, std::io::Error> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let address = listener.local_addr()?;
@@ -55,6 +56,7 @@ impl ProbeCaptureServer {
         let thread_canary = tool_canary_requests.clone();
         let thread_stopping = stopping.clone();
         let thread_command = malicious_command.clone();
+        let thread_valid_output = valid_output;
         let thread = std::thread::spawn(move || {
             while let Ok((mut stream, _)) = listener.accept() {
                 if thread_stopping.load(Ordering::Acquire) {
@@ -127,7 +129,7 @@ impl ProbeCaptureServer {
                             "type": "message",
                             "role": "assistant",
                             "id": format!("msg-{ordinal}"),
-                            "content": [{"type": "output_text", "text": probe_explanation()}]
+                            "content": [{"type": "output_text", "text": thread_valid_output}]
                         }
                     }),
                     3 => json!({
@@ -147,7 +149,7 @@ impl ProbeCaptureServer {
                             "type": "message",
                             "role": "assistant",
                             "id": format!("msg-{ordinal}"),
-                            "content": [{"type": "output_text", "text": probe_explanation()}]
+                            "content": [{"type": "output_text", "text": thread_valid_output}]
                         }
                     }),
                 };
@@ -221,26 +223,6 @@ impl ProbeCaptureServer {
             let _ = thread.join();
         }
     }
-}
-
-fn probe_explanation() -> String {
-    serde_json::to_string(&json!({
-        "schemaVersion": 1,
-        "locale": "ja",
-        "summary": "隔離された説明実行のリリース境界を確認しました。",
-        "changes": ["本番と同一の出力契約を検証しました。"],
-        "reasons": ["support runtime の権限を固定するためです。"],
-        "verification": ["本番モデル、低 effort、完全な schema を確認しました。"],
-        "impact": ["外部ツール権限は追加されません。"],
-        "cautions": ["実リポジトリの内容は使用していません。"],
-        "howToReadNext": ["検証済み evidence を確認してください。"],
-        "narrationChunks": [{
-            "sequence": 1,
-            "section": "summary",
-            "text": "隔離された説明実行のリリース境界を確認しました。"
-        }]
-    }))
-    .expect("static probe explanation")
 }
 
 fn shell_quote(value: impl AsRef<std::ffi::OsStr>) -> String {

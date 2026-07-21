@@ -1,6 +1,10 @@
 export const narrationSchemaVersion = 1 as const
 export const narrationSettingsSchemaVersion = 2 as const
 export const narrationMaxTextScalars = 240
+export const presenceDirectionMaxUtteranceScalars = 160
+export const presenceDirectionEventChannel =
+  "coding-wife://presence-direction" as const
+export const presenceDirectionScopeCommand = "presence_set_scope" as const
 
 export const narrationCommands = {
   getSettings: "narration_get_settings",
@@ -41,6 +45,23 @@ export type NarrationCommitJobTrigger =
   | "auto_verified_commit"
   | "user_request"
   | "user_retry"
+
+export type PresenceDirectionTrigger =
+  | "decision_wait"
+  | "recoverable_failure"
+  | "terminal_failure"
+  | "long_milestone"
+  | "main_message"
+  | "commit_ready"
+  | "turn_completed"
+export type PresenceDirectionCue =
+  | "neutral"
+  | "working"
+  | "asking"
+  | "success"
+  | "warning"
+  | "error"
+export type PresenceDirectionPriority = "low" | "normal" | "high"
 
 export const narrationProviders = ["openai"] as const
 export type NarrationTtsProvider = (typeof narrationProviders)[number]
@@ -210,6 +231,35 @@ export interface CommitNarrationConsumerPort {
   subscribe(listener: (event: unknown) => void): () => void
 }
 
+export interface PresenceDirectionEventV1 {
+  readonly schemaVersion: typeof narrationSchemaVersion
+  readonly requestId: string
+  readonly workspaceId: string
+  readonly workspaceGeneration: number
+  readonly sourceEventId: string
+  readonly decisionId: string | null
+  readonly trigger: PresenceDirectionTrigger
+  readonly locale: NarrationLocale
+  readonly utterance: string
+  readonly cue: PresenceDirectionCue
+  readonly priority: PresenceDirectionPriority
+  readonly modelRole: "presence_director"
+  readonly model: "gpt-5.6-luna"
+  readonly occurredAt: string
+}
+
+export interface PresenceDirectionScopeRequestV1 {
+  readonly schemaVersion: typeof narrationSchemaVersion
+  readonly workspaceId: string
+  readonly workspaceGeneration: number
+  readonly locale: NarrationLocale
+}
+
+export interface PresenceDirectionConsumerPort {
+  subscribe(listener: (event: unknown) => void): () => void
+  setScope?(request: PresenceDirectionScopeRequestV1): Promise<void>
+}
+
 export class NarrationContractError extends Error {
   public readonly code: string
 
@@ -301,6 +351,37 @@ function isCommitJobTrigger(
   )
 }
 
+function isPresenceDirectionTrigger(
+  value: unknown,
+): value is PresenceDirectionTrigger {
+  return (
+    value === "decision_wait" ||
+    value === "recoverable_failure" ||
+    value === "terminal_failure" ||
+    value === "long_milestone" ||
+    value === "main_message" ||
+    value === "commit_ready" ||
+    value === "turn_completed"
+  )
+}
+
+function isPresenceDirectionCue(value: unknown): value is PresenceDirectionCue {
+  return (
+    value === "neutral" ||
+    value === "working" ||
+    value === "asking" ||
+    value === "success" ||
+    value === "warning" ||
+    value === "error"
+  )
+}
+
+function isPresenceDirectionPriority(
+  value: unknown,
+): value is PresenceDirectionPriority {
+  return value === "low" || value === "normal" || value === "high"
+}
+
 function isFullCommitSha(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -317,6 +398,29 @@ const privateTextPatterns = [
   /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----/iu,
   /(?:^|[^a-z0-9])(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|aws[_-]?session[_-]?token|cookie|session(?:[_-]?id)?)\s*[:=]\s*["']?\S+/iu,
 ] as const
+
+const presenceDirectionBareFilenamePattern =
+  /(?:^|[^A-Za-z0-9._@+-])(?:Dockerfile|Makefile|\.[A-Za-z][A-Za-z0-9_-]*|[A-Za-z0-9][A-Za-z0-9._@+-]*\.(?:bash|c|cc|conf|config|cpp|css|csv|env|fish|go|graphql|h|hpp|html?|ini|java|js|json|jsonl|jsx|key|kt|kts|less|lock|log|markdown|md|pem|php|proto|py|rb|rs|sass|scss|sh|sql|swift|toml|ts|tsv|tsx|txt|xml|ya?ml|zsh))(?=$|[^A-Za-z0-9_])/iu
+
+const presenceDirectionCodeOrDiffPatterns = [
+  /```|~~~/u,
+  /(?:^| )diff --git(?: |$)/iu,
+  /(?:^| )index [a-f0-9]+\.\.[a-f0-9]+(?: |$)/iu,
+  /(?:^| )@@(?: |[-+]\d)/u,
+  /(?:^| )(?:---|\+\+\+)(?: |$)/u,
+  /(?:^|[^\p{L}\p{N}_])(?:fn|function)\s+[\p{L}_][\p{L}\p{N}_]*\s*\([^)]*\)\s*\{/iu,
+  /(?:^|[^\p{L}\p{N}_])(?:const|let|var)\s+(?:mut\s+)?[\p{L}_][\p{L}\p{N}_]*\s*=/iu,
+  /(?:^|[^\p{L}\p{N}_])(?:class|enum|impl|interface|struct)\s+[\p{L}_][\p{L}\p{N}_]*\s*(?:\{|<)/iu,
+  /(?:^|[^\p{L}\p{N}_])[\p{L}_][\p{L}\p{N}_]*\s*\([^)]*\)\s*=>/u,
+  /(?:^|[^\p{L}\p{N}_])console\.log\s*\(/iu,
+  /(?:^|[^\p{L}\p{N}_])[\p{L}_][\p{L}\p{N}_.]*\s*\([^)]*\)\s*(?:[;{}])/u,
+  /(?:^| )[+-](?:return\b|\s*(?:class|const|fn|function|let|var)\b|\s*[{}])/iu,
+  /\{[^{}]*:[^{}]*\}/u,
+  /<\/?[A-Za-z][^>]*>/u,
+] as const
+
+const presenceDirectionOpaqueTokenPattern =
+  /\b(?:[a-f0-9]{32,}|[a-z0-9_+=-]{40,})\b/iu
 
 const unicodeWhitespacePattern = /^\p{White_Space}$/u
 const unicodePathBoundaryPattern = /^(?:\p{White_Space}|\p{P}|\p{S})$/u
@@ -562,6 +666,84 @@ function isRedactedText(value: unknown): value is string {
     ) &&
     !privateTextPatterns.some((pattern) => pattern.test(value)) &&
     !containsPrivateAbsolutePath(characters)
+  )
+}
+
+const presenceCueAllowlist: Readonly<
+  Record<PresenceDirectionTrigger, readonly PresenceDirectionCue[]>
+> = {
+  decision_wait: ["asking", "neutral"],
+  recoverable_failure: ["warning", "neutral"],
+  terminal_failure: ["error", "warning", "neutral"],
+  long_milestone: ["working", "neutral"],
+  main_message: ["working", "neutral"],
+  commit_ready: ["success", "neutral"],
+  turn_completed: ["success", "neutral"],
+}
+
+const presencePriorityByTrigger: Readonly<
+  Record<PresenceDirectionTrigger, PresenceDirectionPriority>
+> = {
+  decision_wait: "high",
+  recoverable_failure: "high",
+  terminal_failure: "high",
+  long_milestone: "low",
+  main_message: "normal",
+  commit_ready: "normal",
+  turn_completed: "normal",
+}
+
+function hasSingleSpaceCanonicalWhitespace(
+  characters: readonly string[],
+): boolean {
+  let previousWasSpace = false
+  for (const character of characters) {
+    if (!unicodeWhitespacePattern.test(character)) {
+      previousWasSpace = false
+      continue
+    }
+    if (character !== " " || previousWasSpace) return false
+    previousWasSpace = true
+  }
+  return true
+}
+
+function isPresenceDirectionUtterance(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  const characters: string[] = []
+  for (const character of value) {
+    characters.push(character)
+    if (characters.length > presenceDirectionMaxUtteranceScalars) return false
+  }
+  return (
+    characters.length >= 1 &&
+    value.trim() === value &&
+    hasSingleSpaceCanonicalWhitespace(characters) &&
+    !characters.some(
+      (character) =>
+        /\p{Cc}|\p{Cf}|\p{Zl}|\p{Zp}/u.test(character) ||
+        character === "/" ||
+        character === "\\",
+    ) &&
+    !privateTextPatterns.some((pattern) => pattern.test(value)) &&
+    !/(?:https?|file|ftp):|www\./iu.test(value) &&
+    !value.includes("<external>") &&
+    !/\[redacted\]/iu.test(value) &&
+    !presenceDirectionBareFilenamePattern.test(value) &&
+    !presenceDirectionCodeOrDiffPatterns.some((pattern) =>
+      pattern.test(value),
+    ) &&
+    !presenceDirectionOpaqueTokenPattern.test(value)
+  )
+}
+
+function isRfc3339Timestamp(value: unknown): value is string {
+  return (
+    isSafeString(value, 64) &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(
+      value,
+    ) &&
+    Number.isFinite(Date.parse(value))
   )
 }
 
@@ -821,6 +1003,69 @@ export function parseCommitNarrationConsumerEvent(
     }
   }
   return invalid("NARRATION-PRESENTATION-ENVELOPE")
+}
+
+const presenceDirectionEventKeys = [
+  "schemaVersion",
+  "requestId",
+  "workspaceId",
+  "workspaceGeneration",
+  "sourceEventId",
+  "decisionId",
+  "trigger",
+  "locale",
+  "utterance",
+  "cue",
+  "priority",
+  "modelRole",
+  "model",
+  "occurredAt",
+] as const
+
+export function parsePresenceDirectionEvent(
+  value: unknown,
+): PresenceDirectionEventV1 {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, presenceDirectionEventKeys) ||
+    value.schemaVersion !== narrationSchemaVersion ||
+    !isOpaqueId(value.requestId) ||
+    !isOpaqueId(value.workspaceId) ||
+    !isSafeInteger(value.workspaceGeneration) ||
+    value.workspaceGeneration < 1 ||
+    !isOpaqueId(value.sourceEventId) ||
+    !isPresenceDirectionTrigger(value.trigger) ||
+    (value.trigger === "decision_wait"
+      ? !isOpaqueId(value.decisionId)
+      : value.decisionId !== null) ||
+    !isLocale(value.locale) ||
+    !isPresenceDirectionUtterance(value.utterance) ||
+    !isPresenceDirectionCue(value.cue) ||
+    !presenceCueAllowlist[value.trigger].includes(value.cue) ||
+    !isPresenceDirectionPriority(value.priority) ||
+    value.priority !== presencePriorityByTrigger[value.trigger] ||
+    value.modelRole !== "presence_director" ||
+    value.model !== "gpt-5.6-luna" ||
+    !isRfc3339Timestamp(value.occurredAt)
+  ) {
+    return invalid("PRESENCE-DIRECTION-ENVELOPE")
+  }
+  return {
+    schemaVersion: narrationSchemaVersion,
+    requestId: value.requestId,
+    workspaceId: value.workspaceId,
+    workspaceGeneration: value.workspaceGeneration,
+    sourceEventId: value.sourceEventId,
+    decisionId: value.decisionId as string | null,
+    trigger: value.trigger,
+    locale: value.locale,
+    utterance: value.utterance,
+    cue: value.cue,
+    priority: value.priority,
+    modelRole: "presence_director",
+    model: "gpt-5.6-luna",
+    occurredAt: value.occurredAt,
+  }
 }
 
 export function commitNarrationSourceKey(

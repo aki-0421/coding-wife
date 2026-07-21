@@ -485,7 +485,11 @@ impl WorkspaceHistoryService {
                     let _ = self
                         .store
                         .update_preflight(&record.workspace_id, Err(health));
-                    report.unavailable += 1;
+                    if health == WorkspaceHealth::Changed {
+                        report.changed += 1;
+                    } else {
+                        report.unavailable += 1;
+                    }
                 }
             }
         }
@@ -2584,6 +2588,7 @@ fn health_for_preflight_error(error: &CodexCommandError) -> WorkspaceHealth {
             WorkspaceHealth::ReadOnly
         }
         "CODEX-WORKSPACE-IDENTITY-CHANGED"
+        | "CODEX-WORKSPACE-MANAGED-PROVENANCE-MISSING"
         | "CODEX-WORKSPACE-NOT-DIRECTORY"
         | "CODEX-WORKSPACE-NOT-GIT"
         | "CODEX-WORKSPACE-GIT-SYMLINK"
@@ -2651,8 +2656,8 @@ mod tests {
     use crate::character::CharacterStorage;
     use crate::codex::supervisor::CodexSupervisor;
     use crate::codex::workspace::{
-        AppPrivateWorkspaceRecord, FolderPicker, GitRepositoryIdentity, NativeFolderPicker,
-        PickerFuture, RepositoryValidationFuture, RepositoryValidator, WorkspaceService,
+        FolderPicker, NativeFolderPicker, PickerFuture, RepositoryValidationFuture,
+        RepositoryValidator, WorkspaceService,
     };
     use crate::workspace_history::types::{
         CharacterContext, CharacterTone, ProjectContext, SpeechDensity,
@@ -2744,7 +2749,7 @@ mod tests {
                     CodexCommandError::new("CODEX-WORKSPACE-MISSING", "codex.workspace.pick", true)
                 })?;
                 if !validator.armed.load(Ordering::SeqCst) {
-                    return Ok(fake_repository_identity(canonical_root));
+                    return validate_git_repository(&canonical_root).await;
                 }
 
                 let call = {
@@ -2774,39 +2779,18 @@ mod tests {
                         .expect("activation order lock")
                         .push(canonical_root.clone());
                 }
-                Ok(fake_repository_identity(canonical_root))
+                validate_git_repository(&canonical_root).await
             })
-        }
-    }
-
-    fn fake_repository_identity(canonical_root: PathBuf) -> GitRepositoryIdentity {
-        let digest = Sha256::digest(canonical_root.to_string_lossy().as_bytes());
-        let root_inode = u64::from_le_bytes(digest[..8].try_into().expect("root identity bytes"));
-        let git_inode = u64::from_le_bytes(digest[8..16].try_into().expect("git identity bytes"));
-        GitRepositoryIdentity {
-            canonical_git_dir: canonical_root.join(".git"),
-            canonical_root,
-            root_device: 1,
-            root_inode,
-            git_device: 1,
-            git_inode,
-            common_git_device: 1,
-            common_git_inode: git_inode,
-            project_identity: hex::encode(digest),
-            github_repository: Some("fixture-owner/fixture-repository".to_owned()),
-            branch: "main".to_owned(),
-            head: "unborn".to_owned(),
-            detached: false,
         }
     }
 
     async fn candidate(workspace: &WorkspaceService, root: &Path) -> ValidatedWorkspaceCandidate {
         workspace
-            .validate_private_candidate(&AppPrivateWorkspaceRecord {
-                workspace_id: format!("workspace-{}", uuid::Uuid::new_v4()),
-                alias: "Fixture repository".to_owned(),
-                canonical_root: root.to_owned(),
-            })
+            .validate_workspace_root(
+                root.to_path_buf(),
+                format!("workspace-{}", uuid::Uuid::new_v4()),
+                "Fixture repository".to_owned(),
+            )
             .await
             .expect("candidate")
     }
@@ -2876,6 +2860,31 @@ mod tests {
             })
             .await
             .expect("create project worktree")
+    }
+
+    async fn register_project_workspaces(
+        service: &WorkspaceHistoryService,
+        project_root: &Path,
+        label: &str,
+        count: usize,
+    ) -> Vec<String> {
+        assert!(count > 0);
+        let first = register_project_workspace(service, project_root, label).await;
+        let first_workspace_id = first.active_workspace_id.expect("first active workspace");
+        let project_id = project_id_for_workspace(service, &first_workspace_id);
+        let mut workspace_ids = vec![first_workspace_id];
+        for index in 1..count {
+            let state = service
+                .create_session(WorkspaceCreateSessionRequest {
+                    project_id: project_id.clone(),
+                    name: format!("Fixture {label} {index}"),
+                    client_request_id: format!("request-{label}-{index}-{}", uuid::Uuid::new_v4()),
+                })
+                .await
+                .expect("create project worktree");
+            workspace_ids.push(state.active_workspace_id.expect("active workspace"));
+        }
+        workspace_ids
     }
 
     async fn registered_context_service(
@@ -3824,19 +3833,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn managed_worktree_restores_with_persisted_provenance_after_restart() {
+        let (service, root, data, workspace_id) = registered_context_service("restart").await;
+        let private = service
+            .store
+            .private_workspace_record(&workspace_id)
+            .expect("persisted managed workspace");
+        assert!(private.managed_worktree_identity.is_some());
+        let project_id = project_id_for_workspace(&service, &workspace_id);
+        assert!(service
+            .store
+            .private_project_workspace_records_by_project(&project_id)
+            .expect("project restore records")
+            .iter()
+            .all(|record| record.managed_worktree_identity.is_some()));
+        assert!(service
+            .store
+            .private_project_workspace_records(&workspace_id)
+            .expect("sibling restore records")
+            .iter()
+            .all(|record| record.managed_worktree_identity.is_some()));
+        assert!(service
+            .store
+            .workspace_archive_record(&workspace_id)
+            .expect("archive restore record")
+            .private_record
+            .managed_worktree_identity
+            .is_some());
+        drop(service);
+
+        let restarted = WorkspaceHistoryService::new_pending_restore(
+            WorkspaceHistoryStore::open(&data).expect("reopen store"),
+            WorkspaceService::production(CodexSupervisor::new()),
+        );
+        let report = restarted.restore_startup().await;
+
+        assert_eq!(report.ready, 1);
+        assert_eq!(report.changed, 0);
+        assert_eq!(report.unavailable, 0);
+        assert_eq!(
+            restarted.workspace.trusted_root(&workspace_id).await,
+            Some(root.clone())
+        );
+
+        drop(restarted);
+        let _ = fs::remove_dir_all(data);
+    }
+
+    #[tokio::test]
     async fn startup_restore_marks_missing_repository_without_dropping_history() {
-        let data = temp_directory("history-service-restore");
-        let root = git_repository();
-        let workspace = WorkspaceService::production(CodexSupervisor::new());
-        let store = WorkspaceHistoryStore::open(&data).expect("store");
-        let candidate = candidate(&workspace, &root).await;
-        let workspace_id = store
-            .register_candidate(&candidate)
-            .expect("register")
-            .workspace
-            .workspace_id;
+        let (service, root, data, workspace_id) = registered_context_service("missing").await;
+        drop(service);
         fs::remove_dir_all(&root).expect("remove repository");
-        let service = WorkspaceHistoryService::new(store, workspace);
+        let service = WorkspaceHistoryService::new(
+            WorkspaceHistoryStore::open(&data).expect("reopen store"),
+            WorkspaceService::production(CodexSupervisor::new()),
+        );
 
         let report = service.restore_startup().await;
         let state = service.list().expect("state");
@@ -3845,6 +3897,8 @@ mod tests {
         assert_eq!(state.workspaces.len(), 1);
         assert_eq!(state.workspaces[0].workspace_id, workspace_id);
         assert_eq!(state.workspaces[0].health, WorkspaceHealth::Missing);
+        drop(service);
+        let _ = fs::remove_dir_all(data);
     }
 
     #[tokio::test]
@@ -4152,21 +4206,108 @@ mod tests {
 
     #[tokio::test]
     async fn changed_repository_identity_remains_blocked_across_restore_attempts() {
-        let data = temp_directory("history-service-changed");
+        let (service, first_root, data, first_workspace_id) =
+            registered_context_service("offline-retarget").await;
+        let project_id = project_id_for_workspace(&service, &first_workspace_id);
+        let second = service
+            .create_session(WorkspaceCreateSessionRequest {
+                project_id,
+                name: "Retarget source".to_owned(),
+                client_request_id: format!("request-retarget-{}", uuid::Uuid::new_v4()),
+            })
+            .await
+            .expect("create second managed worktree");
+        let second_workspace_id = second.active_workspace_id.expect("second active workspace");
+        let second_root = service
+            .store
+            .private_workspace_record(&second_workspace_id)
+            .expect("second private workspace")
+            .canonical_root;
+        let persisted_before = service
+            .store
+            .private_workspace_record(&first_workspace_id)
+            .expect("first persisted identity")
+            .managed_worktree_identity
+            .expect("first managed provenance");
+        let replacement_marker = fs::read(second_root.join(".git")).expect("replacement marker");
+        drop(service);
+        fs::write(first_root.join(".git"), replacement_marker).expect("retarget marker offline");
+
+        let service = WorkspaceHistoryService::new_pending_restore(
+            WorkspaceHistoryStore::open(&data).expect("reopen store"),
+            WorkspaceService::production(CodexSupervisor::new()),
+        );
+
+        let report = service.restore_startup().await;
+        assert_eq!(report.ready, 1);
+        assert_eq!(report.changed, 1);
+        assert_eq!(report.unavailable, 0);
+        let repeated = service.restore_startup().await;
+        assert_eq!(repeated.ready, 1);
+        assert_eq!(repeated.changed, 1);
+        assert_eq!(repeated.unavailable, 0);
+        assert_eq!(
+            service
+                .list()
+                .expect("state")
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == first_workspace_id)
+                .expect("retargeted workspace")
+                .health,
+            WorkspaceHealth::Changed
+        );
+        assert_eq!(
+            service
+                .store
+                .private_workspace_record(&first_workspace_id)
+                .expect("persisted identity after rejection")
+                .managed_worktree_identity
+                .expect("managed provenance after rejection"),
+            persisted_before
+        );
+
+        drop(service);
+        let _ = fs::remove_dir_all(data);
+    }
+
+    #[tokio::test]
+    async fn legacy_managed_workspace_without_provenance_is_changed_on_startup() {
+        let data = temp_directory("history-service-legacy-provenance");
         let root = git_repository();
         let workspace = WorkspaceService::production(CodexSupervisor::new());
         let store = WorkspaceHistoryStore::open(&data).expect("store");
-        let mut original = candidate(&workspace, &root).await;
-        original.git.common_git_inode = original.git.common_git_inode.saturating_add(1);
-        store.register_candidate(&original).expect("register");
-        let service = WorkspaceHistoryService::new(store, workspace);
+        let registration = store
+            .register_candidate(&candidate(&workspace, &root).await)
+            .expect("register legacy-style fixture");
+        assert!(registration
+            .private_record
+            .managed_worktree_identity
+            .is_none());
+        let workspace_id = registration.workspace.workspace_id;
+        let service = WorkspaceHistoryService::new_pending_restore(store, workspace.clone());
 
-        assert_eq!(service.restore_startup().await.changed, 1);
-        assert_eq!(service.restore_startup().await.changed, 1);
+        let report = service.restore_startup().await;
+
+        assert_eq!(report.ready, 0);
+        assert_eq!(report.changed, 1);
+        assert_eq!(report.unavailable, 0);
         assert_eq!(
-            service.list().expect("state").workspaces[0].health,
+            service
+                .list()
+                .expect("state")
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == workspace_id)
+                .expect("legacy workspace")
+                .health,
             WorkspaceHealth::Changed
         );
+        assert!(workspace.trusted_root(&workspace_id).await.is_none());
+
+        drop(service);
+        let _ = fs::remove_dir_all(data);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]
@@ -4199,17 +4340,19 @@ mod tests {
     #[tokio::test]
     async fn startup_restore_of_twenty_repositories_stays_within_the_budget() {
         let data = temp_directory("history-service-restore-budget");
-        let workspace = WorkspaceService::production(CodexSupervisor::new());
         let store = WorkspaceHistoryStore::open(&data).expect("store");
-        let mut roots = Vec::new();
-        for _ in 0..20 {
-            let root = git_repository();
-            store
-                .register_candidate(&candidate(&workspace, &root).await)
-                .expect("register fixture");
-            roots.push(root);
-        }
-        let service = WorkspaceHistoryService::new(store, workspace);
+        let provisioning = WorkspaceHistoryService::new(
+            store.clone(),
+            WorkspaceService::production(CodexSupervisor::new()),
+        );
+        let project_root = git_repository();
+        register_project_workspaces(&provisioning, &project_root, "restore-budget", 20).await;
+        drop(provisioning);
+        drop(store);
+        let service = WorkspaceHistoryService::new(
+            WorkspaceHistoryStore::open(&data).expect("reopen store"),
+            WorkspaceService::production(CodexSupervisor::new()),
+        );
 
         let started = Instant::now();
         let report = service.restore_startup().await;
@@ -4222,15 +4365,24 @@ mod tests {
             elapsed < Duration::from_secs(5),
             "real startup restore exceeded its five-second budget: {elapsed:?}"
         );
+        drop(service);
         let _ = fs::remove_dir_all(data);
-        for root in roots {
-            let _ = fs::remove_dir_all(root);
-        }
+        let _ = fs::remove_dir_all(project_root);
     }
 
     #[tokio::test]
     async fn startup_restore_bounds_validation_and_applies_results_in_input_order() {
         let data = temp_directory("history-service-restore-concurrency");
+        let store = WorkspaceHistoryStore::open(&data).expect("store");
+        let provisioning = WorkspaceHistoryService::new(
+            store.clone(),
+            WorkspaceService::production(CodexSupervisor::new()),
+        );
+        let project_root = git_repository();
+        register_project_workspaces(&provisioning, &project_root, "bounded", 20).await;
+        drop(provisioning);
+        drop(store);
+
         let validator = InstrumentedRepositoryValidator::new(Duration::from_millis(25));
         let workspace = WorkspaceService::new_with_repository_validator(
             CodexSupervisor::new(),
@@ -4238,14 +4390,6 @@ mod tests {
             Arc::new(validator.clone()),
         );
         let store = WorkspaceHistoryStore::open(&data).expect("store");
-        let mut roots = Vec::new();
-        for index in 0..20 {
-            let root = temp_directory(&format!("history-service-bounded-{index:02}"));
-            store
-                .register_candidate(&candidate(&workspace, &root).await)
-                .expect("register fixture");
-            roots.push(root);
-        }
         let records = store.private_workspace_records().expect("restore records");
         let initial_selection = store
             .snapshot(None)
@@ -4280,9 +4424,7 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(data);
-        for root in roots {
-            let _ = fs::remove_dir_all(root);
-        }
+        let _ = fs::remove_dir_all(project_root);
     }
 
     #[tokio::test]

@@ -84,6 +84,7 @@ export {
   type PendingQuestion,
   type PendingRequestView,
   type PendingResponse,
+  type PendingUserInputAnswer,
   type ReasoningPreset,
   type ReviewResponse,
   type ReviewTarget,

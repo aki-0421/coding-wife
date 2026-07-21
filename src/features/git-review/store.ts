@@ -320,6 +320,10 @@ export class GitReviewStore {
         detail,
         detailError: null,
       })
+      const firstFile = detail.files[0]
+      if (firstFile !== undefined) {
+        await this.selectFile(firstFile.fileEvidenceId)
+      }
     } catch (error) {
       if (generation !== this.detailGeneration) return
       this.setSnapshot({

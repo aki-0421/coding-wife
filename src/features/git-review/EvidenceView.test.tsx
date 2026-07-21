@@ -6,18 +6,34 @@ import { DemoGitReviewTransport } from "@/features/git-review/demo-transport"
 import { EvidenceView } from "@/features/git-review/EvidenceView"
 import type { GitReviewTransport } from "@/features/git-review/transport"
 import type {
+  CommitExplanationCancelRequestedV1,
   CommitExplanationController,
   CommitExplanationControllerStateV1,
   CommitExplanationDispatchV1,
-  CommitExplanationCancelRequestedV1,
   CommitExplanationPresentationRequestedV1,
   GitReviewCommand,
   GitReviewRequestMap,
   GitReviewResponseMap,
   ListCommitEvidenceRequest,
+  ReadCommitDiffRequest,
 } from "@/lib/contracts/git-review"
 
 const currentCommitEvidenceId = `commit-${"a".repeat(40)}`
+
+class RecordingTransport implements GitReviewTransport {
+  readonly kind = "demo"
+  readonly calls: Array<{ command: GitReviewCommand; request: unknown }> = []
+
+  constructor(readonly delegate = new DemoGitReviewTransport(0)) {}
+
+  request<K extends GitReviewCommand>(
+    command: K,
+    request: GitReviewRequestMap[K],
+  ): Promise<GitReviewResponseMap[K]> {
+    this.calls.push({ command, request })
+    return this.delegate.request(command, request)
+  }
+}
 
 function createExplanationController(
   initialState: CommitExplanationControllerStateV1 | null = null,
@@ -121,8 +137,8 @@ function renderEvidence(
 }
 
 describe("EvidenceView", () => {
-  it("uses the commit drawer when the character shares the workspace body", async () => {
-    renderEvidence({ characterVisible: true })
+  it("shows only GitHub-style commit identity and change summary", async () => {
+    const { container } = renderEvidence({ characterVisible: true })
 
     expect(
       await screen.findByRole("heading", {
@@ -130,46 +146,289 @@ describe("EvidenceView", () => {
       }),
     ).toBeVisible()
     expect(
-      screen.getByRole("main", { name: "Commit evidence" }),
+      screen.getByRole("main", { name: "Commit changes" }),
     ).toHaveAttribute("data-evidence-character", "true")
-    expect(
-      screen.getByRole("button", { name: "Open commit list" }),
-    ).toBeVisible()
-  })
+    expect(container.querySelector("[data-git-review-header]")).not.toBeNull()
+    expect(screen.getByText("Coding Wife")).toBeVisible()
+    expect(screen.getByText("3 files changed")).toBeVisible()
+    expect(screen.getByText("+630")).toBeVisible()
+    expect(screen.getByText("−753")).toBeVisible()
+    expect(screen.getByText("aaaaaaa")).toBeVisible()
 
-  it("shows read-only commit identity and all four observed gates", async () => {
-    const user = userEvent.setup()
-    renderEvidence()
-
-    expect(
-      await screen.findByRole("heading", {
-        name: "feat(git): add read-only commit evidence",
-      }),
-    ).toBeVisible()
-    expect(screen.getByText("Read only")).toBeVisible()
-    await user.click(screen.getByRole("tab", { name: "Evidence" }))
-    for (const gate of ["Scope", "Ownership", "Verification", "Risk"]) {
-      expect(screen.getAllByText(gate).length).toBeGreaterThan(0)
+    for (const hiddenText of [
+      "Read only",
+      "Fresh",
+      "Main Codex",
+      "Persisted",
+      "Scope",
+      "Ownership",
+      "Verification",
+      "Risk",
+      "coding-wife@example.invalid",
+      "work-unit-read-only-git",
+      "event-terminal-read-only-git",
+      "observation-before-read-only-git",
+      "Overview",
+      "Evidence",
+    ]) {
+      expect(screen.queryByText(hiddenText)).not.toBeInTheDocument()
     }
+    expect(screen.queryByText("a".repeat(40))).not.toBeInTheDocument()
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
 
-  it("loads only the explicitly selected file diff", async () => {
-    const user = userEvent.setup()
-    renderEvidence()
-    await screen.findByRole("tab", { name: "Changes" })
+  it("automatically loads only the first file and renders numbered unified rows", async () => {
+    const transport = new RecordingTransport()
+    const { container } = renderEvidence({ transport })
 
-    expect(screen.queryByText(/async activate/)).not.toBeInTheDocument()
-    await user.click(screen.getByRole("tab", { name: "Changes" }))
-    await user.click(
-      screen.getByRole("button", {
-        name: /src\/features\/git-review\/store\.ts/,
-      }),
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll("[data-git-diff-line]").length,
+      ).toBeGreaterThan(0),
     )
-    expect(await screen.findByText(/async activate/)).toBeVisible()
+    const diffCalls = transport.calls.filter(
+      (call) => call.command === "read_commit_diff_file",
+    )
+    expect(diffCalls).toHaveLength(1)
+    expect(diffCalls[0]?.request).toMatchObject({
+      fileEvidenceId: "file-store",
+    })
+
+    const hunk = container.querySelector('[data-diff-kind="hunk"]')
+    const deletion = container.querySelector('[data-diff-kind="deletion"]')
+    const additions = container.querySelectorAll('[data-diff-kind="addition"]')
+    const context = container.querySelector('[data-diff-kind="context"]')
+    expect(
+      screen.getByRole("option", {
+        name: "src/features/git-review/store.ts 286 additions, 451 deletions",
+      }),
+    ).toBeVisible()
+    expect(hunk).toHaveAttribute("data-old-line", "")
+    expect(deletion).toHaveAttribute("data-old-line", "21")
+    expect(deletion).toHaveAttribute("data-new-line", "")
+    expect(deletion).toHaveClass("bg-destructive/10")
+    expect(deletion).toHaveTextContent("Deleted line, old line 21:")
+    expect(additions[0]).toHaveAttribute("data-new-line", "21")
+    expect(additions[1]).toHaveAttribute("data-new-line", "22")
+    expect(additions[0]).toHaveClass("bg-success/10")
+    expect(additions[0]).toHaveTextContent("Added line, new line 21:")
+    expect(context).toHaveTextContent("Context line, old line 22, new line 23:")
+    expect(
+      container.querySelector("[data-git-file-header] .sr-only"),
+    ).toHaveTextContent("286 additions, 451 deletions")
+    expect(container.querySelector("[data-git-diff-scroll]")).not.toBeNull()
   })
 
-  it("offers earlier commits when a filtered page is empty but pageable", async () => {
+  it("localizes accessible file stats and diff line positions", async () => {
+    const { container } = renderEvidence({ locale: "ja" })
+
+    expect(
+      await screen.findByRole("option", {
+        name: "src/features/git-review/store.ts 追加286行、削除451行",
+      }),
+    ).toBeVisible()
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-diff-kind="deletion"]'),
+      ).toHaveTextContent("削除された行、変更前21行目:"),
+    )
+    expect(
+      container.querySelector('[data-diff-kind="addition"]'),
+    ).toHaveTextContent("追加された行、変更後21行目:")
+    expect(
+      container.querySelector('[data-diff-kind="context"]'),
+    ).toHaveTextContent("前後の行、変更前22行目、変更後23行目:")
+  })
+
+  it("filters files locally and supports keyboard file navigation", async () => {
+    const user = userEvent.setup()
+    const transport = new RecordingTransport()
+    renderEvidence({ transport })
+    await screen.findByText(/async activate/)
+
+    const filter = screen.getByRole("searchbox", {
+      name: "Filter changed files",
+    })
+    await user.type(filter, "EvidenceView")
+    expect(
+      screen.getByRole("option", {
+        name: /^src\/features\/git-review\/EvidenceView\.tsx /,
+      }),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("option", {
+        name: /^src\/features\/git-review\/store\.ts /,
+      }),
+    ).not.toBeInTheDocument()
+
+    await user.clear(filter)
+    const first = screen.getByRole("option", {
+      name: /^src\/features\/git-review\/store\.ts /,
+    })
+    first.focus()
+    await user.keyboard("{ArrowDown}")
+    const second = screen.getByRole("option", {
+      name: /^src\/features\/git-review\/EvidenceView\.tsx /,
+    })
+    await waitFor(() => expect(second).toHaveAttribute("aria-selected", "true"))
+    await waitFor(() =>
+      expect(
+        transport.calls.filter(
+          (call) => call.command === "read_commit_diff_file",
+        ),
+      ).toHaveLength(2),
+    )
+  })
+
+  it("shows binary state and file navigation without property badges", async () => {
+    const user = userEvent.setup()
+    renderEvidence()
+
+    await user.click(
+      await screen.findByRole("option", {
+        name: /^docs\/thinking\/demo\.png /,
+      }),
+    )
+    expect(
+      await screen.findByText("Binary file — preview unavailable."),
+    ).toBeVisible()
+    expect(screen.queryByText("BIN")).not.toBeInTheDocument()
+    expect(screen.queryByText("Modified")).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Previous changed file" }),
+    ).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Next changed file" }),
+    ).toBeDisabled()
+  })
+
+  it.each([
+    ["oversize", "Diff is too large to display safely."],
+    ["invalid_utf8", "Text preview is unavailable for this encoding."],
+  ] as const)(
+    "shows the typed %s state without raw details",
+    async (state, text) => {
+      const user = userEvent.setup()
+      const delegate = new DemoGitReviewTransport(0)
+      const transport: GitReviewTransport = {
+        kind: "demo",
+        async request<K extends GitReviewCommand>(
+          command: K,
+          request: GitReviewRequestMap[K],
+        ): Promise<GitReviewResponseMap[K]> {
+          const response = await delegate.request(command, request)
+          if (command !== "read_commit_diff_file") return response
+          const input = request as ReadCommitDiffRequest
+          if (input.fileEvidenceId !== "file-demo-image") return response
+          return {
+            ...(response as GitReviewResponseMap["read_commit_diff_file"]),
+            state,
+            content: "",
+          } as GitReviewResponseMap[K]
+        },
+      }
+      renderEvidence({ transport })
+
+      await user.click(
+        await screen.findByRole("option", {
+          name: /^docs\/thinking\/demo\.png /,
+        }),
+      )
+      expect(await screen.findByText(text)).toBeVisible()
+      expect(screen.queryByText(/824,018 bytes/)).not.toBeInTheDocument()
+    },
+  )
+
+  it("shows a safe file error while keeping the remaining file list", async () => {
+    const user = userEvent.setup()
+    const delegate = new DemoGitReviewTransport(0)
+    const transport: GitReviewTransport = {
+      kind: "demo",
+      request<K extends GitReviewCommand>(
+        command: K,
+        request: GitReviewRequestMap[K],
+      ): Promise<GitReviewResponseMap[K]> {
+        if (
+          command === "read_commit_diff_file" &&
+          (request as ReadCommitDiffRequest).fileEvidenceId ===
+            "file-demo-image"
+        ) {
+          return Promise.reject(new Error("PRIVATE_NATIVE_DETAIL"))
+        }
+        return delegate.request(command, request)
+      },
+    }
+    renderEvidence({ transport })
+
+    await user.click(
+      await screen.findByRole("option", {
+        name: /^docs\/thinking\/demo\.png /,
+      }),
+    )
+    expect(
+      await screen.findByText("This file diff could not be loaded."),
+    ).toBeVisible()
+    expect(screen.queryByText("PRIVATE_NATIVE_DETAIL")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("option")).toHaveLength(3)
+  })
+
+  it("exposes desktop and compact path navigation, collapse, and copy semantics", async () => {
+    const user = userEvent.setup()
+    const { container } = renderEvidence()
+    await screen.findByText(/async activate/)
+
+    expect(
+      container.querySelector('[data-git-path-navigation="desktop"]'),
+    ).not.toBeNull()
+    expect(
+      container.querySelector('[data-git-path-navigation="compact"]'),
+    ).not.toBeNull()
+    expect(container.querySelector("[data-git-file-section]")).not.toBeNull()
+    expect(container.querySelector("[data-git-file-header]")).not.toBeNull()
+
+    const copySha = screen.getByRole("button", { name: "Copy commit SHA" })
+    const copyPath = screen.getByRole("button", { name: "Copy file path" })
+    expect(copySha).toHaveClass("opacity-0")
+    expect(copyPath).toHaveClass("opacity-0")
+
+    const collapse = screen.getByRole("button", { name: "Collapse file diff" })
+    expect(collapse).toHaveAttribute("aria-expanded", "true")
+    await user.click(collapse)
+    expect(
+      screen.getByRole("button", { name: "Expand file diff" }),
+    ).toHaveAttribute("aria-expanded", "false")
+    expect(container.querySelector("[data-git-diff-scroll]")).toBeNull()
+  })
+
+  it("opens the compact commit drawer and restores focus after Escape", async () => {
+    const user = userEvent.setup()
+    renderEvidence()
+    await screen.findByRole("heading", {
+      name: "feat(git): add read-only commit evidence",
+    })
+    const trigger = screen.getByRole("button", { name: "Open commit list" })
+
+    trigger.focus()
+    await user.click(trigger)
+    const drawer = screen.getByRole("region", { name: "Open commit list" })
+    const close = within(drawer).getByRole("button", { name: "Close" })
+    await waitFor(() => expect(close).toHaveFocus())
+    const current = within(drawer).getByRole("option", {
+      name: /feat\(git\): add read-only commit evidence/,
+    })
+    expect(current).toHaveTextContent("aaaaaaa")
+    expect(current).toHaveTextContent("Coding Wife")
+    expect(current).not.toHaveTextContent("work-unit-read-only-git")
+    expect(current).not.toHaveTextContent("Verification")
+
+    await user.keyboard("{Escape}")
+    expect(
+      screen.queryByRole("region", { name: "Open commit list" }),
+    ).not.toBeInTheDocument()
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it("keeps pagination in the commit drawer", async () => {
     const user = userEvent.setup()
     const delegate = new DemoGitReviewTransport(0)
     const transport: GitReviewTransport = {
@@ -179,8 +438,8 @@ describe("EvidenceView", () => {
         request: GitReviewRequestMap[K],
       ): Promise<GitReviewResponseMap[K]> {
         if (command === "list_commit_evidence") {
-          const listRequest = request as ListCommitEvidenceRequest
-          if (listRequest.cursor === null) {
+          const input = request as ListCommitEvidenceRequest
+          if (input.cursor === null) {
             return {
               schemaVersion: 1,
               items: [],
@@ -194,7 +453,10 @@ describe("EvidenceView", () => {
     renderEvidence({ transport })
 
     await user.click(
-      await screen.findByRole("button", { name: "Load earlier commits" }),
+      await screen.findByRole("button", { name: "Open commit list" }),
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Load earlier commits" }),
     )
     expect(
       await screen.findByRole("option", {
@@ -203,70 +465,7 @@ describe("EvidenceView", () => {
     ).toBeVisible()
   })
 
-  it("exposes the compact commit drawer and restores focus after Escape", async () => {
-    const user = userEvent.setup()
-    renderEvidence()
-    await screen.findByRole("heading", {
-      name: "feat(git): add read-only commit evidence",
-    })
-    const trigger = screen.getByRole("button", { name: "Open commit list" })
-
-    trigger.focus()
-    await user.click(trigger)
-    const drawer = screen.getByRole("region", { name: "Open commit list" })
-    const close = within(drawer).getByRole("button", { name: "Close" })
-    await waitFor(() => expect(close).toHaveFocus())
-    expect(trigger).toHaveAttribute("aria-controls", "commit-list-drawer")
-    expect(trigger).toHaveAttribute("aria-expanded", "true")
-
-    await user.keyboard("{Escape}")
-    expect(
-      screen.queryByRole("region", { name: "Open commit list" }),
-    ).not.toBeInTheDocument()
-    await waitFor(() => expect(trigger).toHaveFocus())
-    expect(trigger).toHaveAttribute("aria-expanded", "false")
-  })
-
-  it("routes a not-generated explanation through app-owned user_request", async () => {
-    const user = userEvent.setup()
-    const explanation = createExplanationController()
-    const onExplanationPresentationTrigger = vi.fn()
-    renderEvidence({
-      explanationController: explanation.controller,
-      onExplanationPresentationTrigger,
-    })
-    await screen.findByRole("heading", {
-      name: "feat(git): add read-only commit evidence",
-    })
-
-    expect(explanation.request).not.toHaveBeenCalled()
-    const initialTrigger = screen.getByRole("button", {
-      name: "Explain this commit",
-    })
-    initialTrigger.focus()
-    await user.keyboard("{Enter}")
-    await waitFor(() => expect(explanation.request).toHaveBeenCalledOnce())
-    expect(onExplanationPresentationTrigger).toHaveBeenCalledWith(
-      initialTrigger,
-    )
-    expect(explanation.request.mock.calls[0]?.[0]?.request.trigger).toBe(
-      "user_request",
-    )
-    const serialized = JSON.stringify(
-      explanation.request.mock.calls[0]?.[0]?.evidence,
-    )
-    expect(serialized).not.toContain("relativePath")
-    expect(serialized).not.toContain('"content"')
-
-    await user.click(
-      screen.getByRole("option", {
-        name: /chore: update local project metadata/,
-      }),
-    )
-    expect(explanation.cancel).not.toHaveBeenCalled()
-  })
-
-  it("joins automatic running state from one explicit action and cancels only from its action", async () => {
+  it("routes explanation lifecycle through the single action position", async () => {
     const user = userEvent.setup()
     const explanation = createExplanationController({
       schemaVersion: 1,
@@ -285,60 +484,26 @@ describe("EvidenceView", () => {
     })
     renderEvidence({ explanationController: explanation.controller })
 
-    expect(await screen.findByText("Generating explanation")).toBeVisible()
-    expect(explanation.request).not.toHaveBeenCalled()
-    await user.click(
-      screen.getByRole("button", { name: "Explain this commit" }),
-    )
+    expect(
+      await screen.findByRole("button", { name: "Explain changes" }),
+    ).toBeVisible()
+    expect(screen.queryByText("Generating explanation")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Explain changes" }))
     await waitFor(() => expect(explanation.request).toHaveBeenCalledOnce())
     expect(explanation.request.mock.calls[0]?.[0]?.request.trigger).toBe(
       "user_request",
     )
-    const explicitRequestId =
-      explanation.request.mock.calls[0]?.[0]?.request.requestId
-    await user.click(screen.getByRole("button", { name: "Cancel explanation" }))
+
+    await user.click(
+      await screen.findByRole("button", { name: "Cancel explanation" }),
+    )
     await waitFor(() => expect(explanation.cancel).toHaveBeenCalledOnce())
-    expect(explanation.cancel.mock.calls[0]?.[0]).toMatchObject({
-      requestId: explicitRequestId,
-      reason: "user",
-    })
+    expect(screen.queryByText("CODEX-SUPPORT-CANCELED")).not.toBeInTheDocument()
   })
 
-  it.each([
-    ["queued", false, "Explanation queued"],
-    ["running", false, "Generating explanation"],
-    ["generated", true, "Explanation ready"],
-  ] as const)(
-    "keeps automatic %s state visible without creating a live region",
-    async (status, presentationAvailable, statusText) => {
-      const explanation = createExplanationController({
-        schemaVersion: 1,
-        workspaceId: "workspace-demo",
-        workspaceGeneration: 1,
-        commitEvidenceId: currentCommitEvidenceId,
-        requestId: `auto-${status}`,
-        locale: "en",
-        selectionVersion: 1,
-        status,
-        trigger: "auto_verified_commit",
-        retryable: false,
-        presentationAvailable,
-        errorCode: null,
-        updatedAt: "2026-07-18T09:00:00.000Z",
-      })
-      const { container } = renderEvidence({
-        explanationController: explanation.controller,
-      })
-
-      expect(await screen.findByText(statusText)).toBeVisible()
-      expect(screen.queryAllByRole("status")).toHaveLength(0)
-      expect(container.querySelectorAll("[aria-live]")).toHaveLength(0)
-    },
-  )
-
-  it("creates a live terminal fallback only after an explicit presentation fails", async () => {
+  it("shows a presentation failure only after explicit action and rejects stale state", async () => {
     const user = userEvent.setup()
-    const explanation = createExplanationController(
+    const generated = createExplanationController(
       {
         schemaVersion: 1,
         workspaceId: "workspace-demo",
@@ -356,25 +521,19 @@ describe("EvidenceView", () => {
       },
       () => Promise.reject(new Error("presentation unavailable")),
     )
-    const { container } = renderEvidence({
-      explanationController: explanation.controller,
-    })
+    const view = renderEvidence({ explanationController: generated.controller })
 
-    await screen.findByText("Explanation ready")
-    expect(screen.queryAllByRole("status")).toHaveLength(0)
-
+    expect(
+      await screen.findByRole("button", { name: "Show explanation" }),
+    ).toBeVisible()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Show explanation" }))
-
-    const terminalFallback = await screen.findByRole("status")
-    expect(terminalFallback).toHaveAttribute("aria-live", "polite")
-    expect(terminalFallback).toHaveTextContent(
-      "The app-owned isolated explainer is unavailable",
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Explanation is unavailable",
     )
-    expect(container.querySelectorAll("[aria-live]")).toHaveLength(1)
-  })
+    view.unmount()
 
-  it("ignores explanation state from another locale or commit selection", async () => {
-    const staleLocale = createExplanationController({
+    const stale = createExplanationController({
       schemaVersion: 1,
       workspaceId: "workspace-demo",
       workspaceGeneration: 1,
@@ -389,119 +548,20 @@ describe("EvidenceView", () => {
       errorCode: null,
       updatedAt: "2026-07-18T09:00:00.000Z",
     })
-    const localeView = renderEvidence({
-      explanationController: staleLocale.controller,
-      locale: "en",
-    })
+    renderEvidence({ explanationController: stale.controller })
     expect(
-      await screen.findByRole("button", { name: "Explain this commit" }),
+      await screen.findByRole("button", { name: "Explain changes" }),
     ).toBeVisible()
-    expect(screen.queryByText("Explanation ready")).not.toBeInTheDocument()
-    localeView.unmount()
-
-    const staleSelection = createExplanationController({
-      schemaVersion: 1,
-      workspaceId: "workspace-demo",
-      workspaceGeneration: 1,
-      commitEvidenceId: currentCommitEvidenceId,
-      requestId: "stale-selection",
-      locale: "en",
-      selectionVersion: 2,
-      status: "generated",
-      trigger: "auto_verified_commit",
-      retryable: false,
-      presentationAvailable: true,
-      errorCode: null,
-      updatedAt: "2026-07-18T09:00:00.000Z",
-    })
-    renderEvidence({ explanationController: staleSelection.controller })
     expect(
-      await screen.findByRole("button", { name: "Explain this commit" }),
-    ).toBeVisible()
-    expect(screen.queryByText("Explanation ready")).not.toBeInTheDocument()
-  })
-
-  it("presents a generated explanation and retries a failed one", async () => {
-    const user = userEvent.setup()
-    const generated = createExplanationController({
-      schemaVersion: 1,
-      workspaceId: "workspace-demo",
-      workspaceGeneration: 1,
-      commitEvidenceId: currentCommitEvidenceId,
-      requestId: "generated-request-one",
-      locale: "en",
-      selectionVersion: 1,
-      status: "generated",
-      trigger: "auto_verified_commit",
-      retryable: false,
-      presentationAvailable: true,
-      errorCode: null,
-      updatedAt: "2026-07-18T09:00:00.000Z",
-    })
-    const view = renderEvidence({ explanationController: generated.controller })
-    await screen.findByText("Explanation ready")
-    await user.click(screen.getByRole("button", { name: "Show explanation" }))
-    await user.click(screen.getByRole("button", { name: "Read aloud again" }))
-    expect(generated.present.mock.calls.map(([event]) => event.mode)).toEqual([
-      "show",
-      "replay_narration",
-    ])
-
-    const failed = createExplanationController({
-      schemaVersion: 1,
-      workspaceId: "workspace-demo",
-      workspaceGeneration: 1,
-      commitEvidenceId: currentCommitEvidenceId,
-      requestId: "failed-request-one",
-      locale: "en",
-      selectionVersion: 1,
-      status: "failed",
-      trigger: "auto_verified_commit",
-      retryable: true,
-      presentationAvailable: false,
-      errorCode: "SUPPORT_TIMEOUT",
-      updatedAt: "2026-07-18T09:01:00.000Z",
-    })
-    const onRetryPresentationTrigger = vi.fn()
-    view.rerender(
-      <EvidenceView
-        active
-        commitExplanationController={failed.controller}
-        locale="en"
-        onBackToChat={vi.fn()}
-        onExplanationPresentationTrigger={onRetryPresentationTrigger}
-        transport={new DemoGitReviewTransport(0)}
-        workspaceId="workspace-demo"
-      />,
-    )
-    await screen.findByText("Explanation failed")
-    const retryTrigger = screen.getByRole("button", {
-      name: "Retry explanation",
-    })
-    await user.click(retryTrigger)
-    await waitFor(() => expect(failed.request).toHaveBeenCalledOnce())
-    expect(onRetryPresentationTrigger).toHaveBeenCalledWith(retryTrigger)
-    expect(failed.request.mock.calls[0]?.[0]?.request.trigger).toBe(
-      "user_retry",
-    )
+      screen.queryByRole("button", { name: "Show explanation" }),
+    ).not.toBeInTheDocument()
   })
 
   it("does not call the native transport while the force-mounted tab is hidden", async () => {
-    const calls: GitReviewCommand[] = []
-    const delegate = new DemoGitReviewTransport(0)
-    const transport: GitReviewTransport = {
-      kind: "demo",
-      request<K extends GitReviewCommand>(
-        command: K,
-        request: GitReviewRequestMap[K],
-      ): Promise<GitReviewResponseMap[K]> {
-        calls.push(command)
-        return delegate.request(command, request)
-      },
-    }
+    const transport = new RecordingTransport()
     const view = renderEvidence({ active: false, transport })
     await Promise.resolve()
-    expect(calls).toHaveLength(0)
+    expect(transport.calls).toHaveLength(0)
 
     view.rerender(
       <EvidenceView
@@ -512,11 +572,10 @@ describe("EvidenceView", () => {
         workspaceId="workspace-demo"
       />,
     )
-    await waitFor(() => expect(calls.length).toBeGreaterThan(0))
+    await waitFor(() => expect(transport.calls.length).toBeGreaterThan(0))
   })
 
-  it("uses Japanese controls without translating the commit message", async () => {
-    const user = userEvent.setup()
+  it("uses Japanese controls without translating commit content", async () => {
     renderEvidence({ locale: "ja" })
 
     expect(
@@ -524,8 +583,17 @@ describe("EvidenceView", () => {
         name: "feat(git): add read-only commit evidence",
       }),
     ).toBeVisible()
-    expect(screen.getByText("読み取り専用")).toBeVisible()
-    await user.click(screen.getByRole("tab", { name: "証拠" }))
-    expect(screen.getByText("観測されたゲート")).toBeVisible()
+    expect(screen.getByRole("main", { name: "コミットの変更" })).toBeVisible()
+    expect(
+      screen.getByRole("searchbox", { name: "変更ファイルを絞り込む" }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "コミット SHA をコピー" }),
+    ).toHaveClass("opacity-0")
+    expect(
+      screen.getByRole("button", { name: "ファイルパスをコピー" }),
+    ).toHaveClass("opacity-0")
+    expect(screen.queryByText("保存済み")).not.toBeInTheDocument()
+    expect(screen.queryByText("観測されたゲート")).not.toBeInTheDocument()
   })
 })

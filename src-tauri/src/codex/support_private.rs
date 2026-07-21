@@ -21,9 +21,10 @@ use crate::platform_fs::{
     O_NOFOLLOW,
 };
 
-use super::bundled_skill::{ResolvedBundledSkill, EXPLAIN_COMMIT_SKILL_NAME};
+use super::bundled_skill::{
+    ResolvedBundledSkill, DIRECT_PRESENCE_SKILL_NAME, EXPLAIN_COMMIT_SKILL_NAME,
+};
 use super::support::{SupportRuntimeError, SUPPORT_PERMISSION_PROFILE};
-use super::types::CODEX_MODEL;
 
 const MAX_AUTH_BYTES: u64 = 1024 * 1024;
 const RUN_DIRECTORY_PREFIX: &str = "coding-wife-support-";
@@ -125,12 +126,14 @@ impl PrivateRunDirectory {
         &self,
         skill: &ResolvedBundledSkill,
     ) -> Result<ResolvedBundledSkill, SupportRuntimeError> {
-        if skill.name != EXPLAIN_COMMIT_SKILL_NAME
-            || skill.content_digest
-                != format!(
-                    "sha256:{}",
-                    hex::encode(Sha256::digest(skill.verified_entrypoint()))
-                )
+        if !matches!(
+            skill.name.as_str(),
+            EXPLAIN_COMMIT_SKILL_NAME | DIRECT_PRESENCE_SKILL_NAME
+        ) || skill.content_digest
+            != format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(skill.verified_entrypoint()))
+            )
         {
             return Err(SupportRuntimeError::Skill);
         }
@@ -738,13 +741,12 @@ fn current_uid() -> u32 {
     current_user_id()
 }
 
-pub(super) fn support_config(mock_base_url: Option<&str>) -> String {
+pub(super) fn support_config(model: &str, mock_base_url: Option<&str>) -> String {
     let provider = mock_base_url.map_or_else(String::new, |base_url| {
         format!(
             "\n[model_providers.mock_provider]\nname = \"Support probe\"\nbase_url = \"{base_url}\"\nwire_api = \"responses\"\nrequest_max_retries = 0\nstream_max_retries = 0\nsupports_websockets = false\n"
         )
     });
-    let model = CODEX_MODEL;
     let model_provider = if mock_base_url.is_some() {
         "model_provider = \"mock_provider\"\n"
     } else {
@@ -758,6 +760,22 @@ pub(super) fn support_config(mock_base_url: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn support_config_pins_the_requested_role_model_and_zero_authority() {
+        let terra = support_config(crate::codex::types::CODEX_COMMIT_EXPLAINER_MODEL, None);
+
+        assert!(terra.contains("model = \"gpt-5.6-terra\""));
+        assert!(!terra.contains("gpt-5.6-sol"));
+        assert!(!terra.contains("gpt-5.6-luna"));
+        assert!(terra.contains("default_permissions = \"coding-wife-support-zero\""));
+
+        let luna = support_config(crate::codex::types::CODEX_PRESENCE_DIRECTOR_MODEL, None);
+        assert!(luna.contains("model = \"gpt-5.6-luna\""));
+        assert!(!luna.contains("gpt-5.6-sol"));
+        assert!(!luna.contains("gpt-5.6-terra"));
+        assert!(luna.contains("default_permissions = \"coding-wife-support-zero\""));
+    }
 
     fn write_auth_copy(run: &PrivateRunDirectory) -> PathBuf {
         let auth = run.codex_home.join("auth.json");

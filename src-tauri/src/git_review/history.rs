@@ -434,7 +434,7 @@ mod tests {
     use std::process::Command;
 
     use crate::codex::supervisor::CodexSupervisor;
-    use crate::codex::workspace::{AppPrivateWorkspaceRecord, WorkspaceService};
+    use crate::codex::workspace::WorkspaceService;
     use crate::workspace_history::store::WorkspaceHistoryStore;
 
     use super::*;
@@ -520,11 +520,11 @@ mod tests {
     async fn register_workspace(store: &WorkspaceHistoryStore, root: &Path) -> String {
         let workspace = WorkspaceService::production(CodexSupervisor::new());
         let candidate = workspace
-            .validate_private_candidate(&AppPrivateWorkspaceRecord {
-                workspace_id: format!("workspace-{}", uuid::Uuid::new_v4()),
-                alias: "Git history fixture".to_owned(),
-                canonical_root: root.to_owned(),
-            })
+            .validate_workspace_root(
+                root.to_path_buf(),
+                format!("workspace-{}", uuid::Uuid::new_v4()),
+                "Git history fixture".to_owned(),
+            )
             .await
             .expect("validated workspace");
         store

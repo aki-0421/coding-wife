@@ -83,6 +83,104 @@ def result(message_id, value):
     send({"id": message_id, "result": value})
 
 
+def expected_runtime_workspace_roots(cwd_value):
+    try:
+        cwd = pathlib.Path(cwd_value)
+        if not cwd.is_absolute():
+            return None
+        cwd = cwd.resolve(strict=True)
+        completed = subprocess.run(
+            [
+                "/usr/bin/git",
+                "-C",
+                str(cwd),
+                "rev-parse",
+                "--absolute-git-dir",
+                "--git-common-dir",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        lines = completed.stdout.splitlines()
+        if len(lines) != 2:
+            return None
+        git_directory = pathlib.Path(lines[0])
+        common_directory = pathlib.Path(lines[1])
+        git_directory = git_directory.resolve(strict=True)
+        common_directory = (
+            common_directory if common_directory.is_absolute() else cwd / common_directory
+        ).resolve(strict=True)
+        roots = [str(cwd)]
+        if git_directory != cwd / ".git":
+            roots.append(str(git_directory))
+            if common_directory != git_directory:
+                roots.append(str(common_directory))
+        return roots
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        return None
+
+
+def validate_decision_output_schema(schema):
+    try:
+        if not (
+            isinstance(schema, dict)
+            and schema.get("type") == "object"
+            and schema.get("additionalProperties") is False
+            and schema.get("required") == ["schemaVersion", "response"]
+            and set(schema.get("properties", {})) == {"schemaVersion", "response"}
+            and schema["properties"]["schemaVersion"].get("const") == 1
+            and "oneOf" not in schema
+        ):
+            return False
+        branches = schema["properties"]["response"].get("anyOf")
+        if not isinstance(branches, list) or len(branches) != 2:
+            return False
+        by_kind = {
+            branch.get("properties", {}).get("kind", {}).get("const"): branch
+            for branch in branches
+        }
+        result_branch = by_kind.get("result")
+        decision_branch = by_kind.get("decision_request")
+        if not (
+            isinstance(result_branch, dict)
+            and result_branch.get("additionalProperties") is False
+            and result_branch["properties"]["message"].get("minLength") == 1
+            and result_branch["properties"]["message"].get("maxLength") == 65536
+            and all(
+                result_branch["properties"][field].get("type") == "null"
+                for field in ("decisionId", "question", "options", "context")
+            )
+        ):
+            return False
+        options = decision_branch["properties"]["options"]
+        option_item = options["items"]
+        context = decision_branch["properties"]["context"]
+        evidence = context["properties"]["evidence"]
+        return (
+            decision_branch.get("additionalProperties") is False
+            and decision_branch["properties"]["message"].get("maxLength") == 4096
+            and decision_branch["properties"]["decisionId"].get("maxLength") == 128
+            and decision_branch["properties"]["question"].get("maxLength") == 4096
+            and options.get("minItems") == 2
+            and options.get("maxItems") == 3
+            and option_item.get("additionalProperties") is False
+            and option_item["properties"]["id"].get("maxLength") == 128
+            and option_item["properties"]["label"].get("maxLength") == 256
+            and option_item["properties"]["description"].get("maxLength") == 1024
+            and context.get("additionalProperties") is False
+            and context["properties"]["schemaVersion"].get("const") == 1
+            and context["properties"]["effect"].get("const") == "continue_turn"
+            and evidence.get("minItems") == 1
+            and evidence.get("maxItems") == 8
+            and evidence["items"].get("maxLength") == 512
+            and decision_branch["properties"]["allowFreeform"].get("const") is False
+        )
+    except (KeyError, TypeError):
+        return False
+
+
 def validate_attachment_inputs(inputs, expected_image, expected_notes):
     try:
         if not isinstance(inputs, list):
@@ -134,7 +232,10 @@ def validate_skill(inputs, expected_name):
             return False, None
         if skill_path.parent.name != expected_name:
             return False, None
-        if expected_name == "coding-wife-explain-commit":
+        if expected_name in (
+            "coding-wife-explain-commit",
+            "coding-wife-direct-presence",
+        ):
             private_shape = (
                 skill_path.parent.parent.name == "skills"
                 and skill_path.parent.parent.parent.name.startswith(
@@ -145,7 +246,13 @@ def validate_skill(inputs, expected_name):
                 and stat.S_IMODE(skill_path.parent.parent.stat().st_mode) == 0o700
             )
             digest = "sha256:" + hashlib.sha256(skill_path.read_bytes()).hexdigest()
-            return private_shape, (skill.get("name"), "1.1.0", digest)
+            version = (
+                "1.1.0"
+                if expected_name
+                in ("coding-wife-explain-commit", "coding-wife-direct-presence")
+                else "1.0.0"
+            )
+            return private_shape, (skill.get("name"), version, digest)
         manifest_path = skill_path.parents[1] / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         entries = [
@@ -157,9 +264,12 @@ def validate_skill(inputs, expected_name):
             return False, None
         entry = entries[0]
         digest = "sha256:" + hashlib.sha256(skill_path.read_bytes()).hexdigest()
+        expected_version = (
+            "1.2.0" if expected_name == "coding-wife-commit-work" else "1.1.0"
+        )
         valid = (
             manifest.get("authority") == "app_bundle"
-            and entry.get("version") == "1.1.0"
+            and entry.get("version") == expected_version
             and entry.get("entrypoint")
             == f"{expected_name}/SKILL.md"
             and entry.get("contentDigest") == digest
@@ -204,6 +314,39 @@ def support_explanation(locale):
     )
 
 
+def support_presence_direction(locale, trigger):
+    if trigger == "main_message":
+        utterance = (
+            "一緒に次の確認へ進めそうです。"
+            if locale == "ja"
+            else "We can move to the next check together."
+        )
+    else:
+        utterance = (
+            "確認が必要なところで待っています。"
+            if locale == "ja"
+            else "Waiting where your decision is needed."
+        )
+    cue = {
+        "main_message": "working",
+        "decision_wait": "asking",
+        "recoverable_failure": "warning",
+        "terminal_failure": "error",
+        "long_milestone": "working",
+        "commit_ready": "success",
+        "turn_completed": "success",
+    }.get(trigger, "neutral")
+    return json.dumps(
+        {
+            "schemaVersion": 1,
+            "locale": locale,
+            "utterance": utterance,
+            "cue": cue,
+        },
+        separators=(",", ":"),
+    )
+
+
 def send_support_item(item_type, text):
     item = {"id": f"item-{item_type}", "type": item_type}
     if item_type == "agentMessage":
@@ -221,6 +364,145 @@ def send_support_item(item_type, text):
                 },
             }
         )
+
+
+def send_support_thread_settings(model):
+    settings = {
+        "activePermissionProfile": {
+            "id": "coding-wife-support-zero",
+            "extends": None,
+        },
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "collaborationMode": {
+            "mode": "default",
+            "settings": {
+                "developer_instructions": None,
+                "model": model,
+                "reasoning_effort": "low",
+            },
+        },
+        "cwd": str(pathlib.Path.cwd()),
+        "effort": "low",
+        "model": model,
+        "modelProvider": "openai",
+        "multiAgentMode": "explicitRequestOnly",
+        "personality": "pragmatic",
+        "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
+        "serviceTier": None,
+        "summary": None,
+    }
+    if MODE == "support_settings_policy_changed":
+        settings["sandboxPolicy"]["networkAccess"] = True
+    elif MODE == "support_settings_unknown_field":
+        settings["unexpectedAuthority"] = False
+    send(
+        {
+            "method": "thread/settings/updated",
+            "params": {
+                "threadId": "support-thread-fixture",
+                "threadSettings": settings,
+            },
+        }
+    )
+
+
+def git_text(workspace, arguments):
+    completed = subprocess.run(
+        ["/usr/bin/git", "-C", str(workspace), *arguments],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(workspace), "LC_ALL": "C"},
+    )
+    return completed.stdout.strip()
+
+
+def send_node_repl_commit(thread_id, turn_id, workspace):
+    item_id = "item-node-repl-commit"
+    common = {
+        "id": item_id,
+        "type": "mcpToolCall",
+        "server": "node_repl",
+        "tool": "js",
+        "arguments": {
+            "code": "nodeRepl.write('raw Git source is not a proof')",
+            "title": "Create reviewable commit",
+        },
+        "appContext": None,
+        "pluginId": None,
+        "mcpAppResourceUri": None,
+    }
+    send(
+        {
+            "method": "item/started",
+            "params": {
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "item": {
+                    **common,
+                    "status": "inProgress",
+                    "result": None,
+                    "error": None,
+                    "durationMs": None,
+                },
+            },
+        }
+    )
+    try:
+        before_head = git_text(workspace, ["rev-parse", "--verify", "HEAD"])
+    except subprocess.CalledProcessError:
+        before_head = "unborn"
+    fixture_path = workspace / "node-repl-proof.txt"
+    fixture_path.write_text("exact node repl commit proof\n", encoding="utf-8")
+    git_text(workspace, ["add", "--", "node-repl-proof.txt"])
+    git_text(
+        workspace,
+        [
+            "-c",
+            "user.name=Coding Wife Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "feat: record node repl commit proof",
+        ],
+    )
+    commit_sha = git_text(workspace, ["rev-parse", "--verify", "HEAD"])
+    send(
+        {
+            "method": "item/completed",
+            "params": {
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "item": {
+                    **common,
+                    "status": "completed",
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{ ok: true, kind: 'git_commit' }",
+                            }
+                        ],
+                        "structuredContent": None,
+                        "_meta": {
+                            "codingWifeGitCommitProof": {
+                                "schemaVersion": 1,
+                                "operation": "git_commit",
+                                "beforeHead": before_head,
+                                "commitSha": commit_sha,
+                            }
+                        },
+                    },
+                    "error": None,
+                    "durationMs": 12,
+                },
+            },
+        }
+    )
+    record("node_repl_commit_result_shape_emitted")
 
 
 def main():
@@ -262,6 +544,9 @@ def main():
         return 0
     if args and args[0] == "sandbox":
         record("support_sandbox_denied")
+        if MODE == "support_sandbox_slow_grandchild":
+            spawn_support_grandchild()
+            time.sleep(120)
         return 1
     if not args or args[0] != "app-server":
         return 2
@@ -277,6 +562,9 @@ def main():
         if MODE == "support_drop_grandchild":
             spawn_support_grandchild()
     pending_fixture = []
+    main_runtime_workspace_roots = None
+    main_additional_writable_roots = []
+    thread_workspaces = {}
     for raw_line in sys.stdin.buffer:
         try:
             message = json.loads(raw_line)
@@ -332,6 +620,9 @@ def main():
                 record("readiness_account_read_ignored")
                 continue
             if EXECUTION_CLASS == "support":
+                if MODE == "support_initialization_slow_grandchild":
+                    spawn_support_grandchild()
+                    continue
                 auth = pathlib.Path(os.environ.get("CODEX_HOME", "")) / "auth.json"
                 try:
                     auth_valid = (
@@ -456,7 +747,8 @@ def main():
                 cwd = pathlib.Path(params.get("cwd", ""))
                 support_valid = (
                     method == "thread/start"
-                    and params.get("model") == "gpt-5.6-sol"
+                    and params.get("model")
+                    in ("gpt-5.6-terra", "gpt-5.6-luna")
                     and params.get("approvalPolicy") == "never"
                     and params.get("permissions") == "coding-wife-support-zero"
                     and params.get("ephemeral") is True
@@ -540,6 +832,30 @@ def main():
                         }
                     )
                     continue
+                main_runtime_workspace_roots = None
+                main_additional_writable_roots = []
+            else:
+                expected_roots = expected_runtime_workspace_roots(params.get("cwd"))
+                runtime_roots_valid = (
+                    expected_roots is not None
+                    and params.get("runtimeWorkspaceRoots") == expected_roots
+                )
+                if MODE == "managed_worktree_roots":
+                    record(
+                        "managed_write_roots_thread_ok"
+                        if runtime_roots_valid and len(expected_roots) == 3
+                        else "managed_write_roots_thread_invalid"
+                    )
+                if not runtime_roots_valid:
+                    send(
+                        {
+                            "id": message_id,
+                            "error": {"code": -32602, "message": "Invalid params"},
+                        }
+                    )
+                    continue
+                main_runtime_workspace_roots = expected_roots
+                main_additional_writable_roots = expected_roots[1:]
             response = {
                 "thread": {
                     "id": thread_id,
@@ -571,6 +887,7 @@ def main():
                 message_id,
                 response,
             )
+            thread_workspaces[thread_id] = pathlib.Path(params.get("cwd", ""))
             continue
         if method == "turn/start":
             input_text = ""
@@ -590,19 +907,12 @@ def main():
                 continuation = None
             if EXECUTION_CLASS == "support":
                 required_output = params.get("outputSchema", {}).get("required")
-                valid = (
-                    params.get("threadId") == "support-thread-fixture"
-                    and params.get("model") == "gpt-5.6-sol"
-                    and params.get("effort") == "low"
-                    and isinstance(params.get("clientUserMessageId"), str)
-                    and params.get("approvalPolicy") == "never"
-                    and params.get("permissions") == "coding-wife-support-zero"
-                    and params.get("environments") == []
-                    and params.get("runtimeWorkspaceRoots") == []
-                    and isinstance(params.get("outputSchema"), dict)
-                    and params["outputSchema"].get("additionalProperties") is False
-                    and required_output
-                    == [
+                support_model = params.get("model")
+                presence_support = support_model == "gpt-5.6-luna"
+                expected_output = (
+                    ["schemaVersion", "locale", "utterance", "cue"]
+                    if presence_support
+                    else [
                         "schemaVersion",
                         "locale",
                         "summary",
@@ -614,6 +924,19 @@ def main():
                         "howToReadNext",
                         "narrationChunks",
                     ]
+                )
+                valid = (
+                    params.get("threadId") == "support-thread-fixture"
+                    and support_model in ("gpt-5.6-terra", "gpt-5.6-luna")
+                    and params.get("effort") == "low"
+                    and isinstance(params.get("clientUserMessageId"), str)
+                    and params.get("approvalPolicy") == "never"
+                    and params.get("permissions") == "coding-wife-support-zero"
+                    and params.get("environments") == []
+                    and params.get("runtimeWorkspaceRoots") == []
+                    and isinstance(params.get("outputSchema"), dict)
+                    and params["outputSchema"].get("additionalProperties") is False
+                    and required_output == expected_output
                     and "serviceTier" not in params
                     and "collaborationMode" not in params
                     and "multiAgentMode" not in params
@@ -626,6 +949,9 @@ def main():
                     and collaboration_mode.get("settings", {}).get("model")
                     == "gpt-5.6-sol"
                 )
+                decision_schema_valid = validate_decision_output_schema(
+                    params.get("outputSchema")
+                )
                 valid = (
                     params.get("model") == "gpt-5.6-sol"
                     and "effort" in params
@@ -636,9 +962,44 @@ def main():
                     and "collaborationMode" in params
                     and collaboration_valid
                     and "multiAgentMode" not in params
+                    and decision_schema_valid
                 )
+                record(
+                    "decision_output_schema_ok"
+                    if decision_schema_valid
+                    else "decision_output_schema_invalid"
+                )
+                sandbox_policy = params.get("sandboxPolicy")
+                workspace_roots_valid = (
+                    (
+                        main_runtime_workspace_roots is None
+                        and "runtimeWorkspaceRoots" not in params
+                    )
+                    or params.get("runtimeWorkspaceRoots")
+                    == main_runtime_workspace_roots
+                )
+                write_policy_valid = (
+                    isinstance(sandbox_policy, dict)
+                    and sandbox_policy.get("type") == "workspaceWrite"
+                    and sandbox_policy.get("writableRoots")
+                    == main_additional_writable_roots
+                    and sandbox_policy.get("networkAccess") is False
+                )
+                if MODE == "managed_worktree_roots":
+                    record(
+                        "managed_write_roots_turn_ok"
+                        if workspace_roots_valid
+                        and write_policy_valid
+                        and len(main_additional_writable_roots) == 2
+                        else "managed_write_roots_turn_invalid"
+                    )
+                valid = valid and workspace_roots_valid and write_policy_valid
             expected_skill = (
-                "coding-wife-explain-commit"
+                (
+                    "coding-wife-direct-presence"
+                    if presence_support
+                    else "coding-wife-explain-commit"
+                )
                 if EXECUTION_CLASS == "support"
                 else "coding-wife-commit-work"
             )
@@ -689,19 +1050,34 @@ def main():
                     envelope = json.loads(input_text)
                 except (json.JSONDecodeError, TypeError):
                     envelope = {}
-                probe_turn = envelope.get("requestId") == "support-release-probe"
-                policy_probe_turn = (
-                    envelope.get("requestId") == "support-release-policy-probe"
-                )
+                client_message_id = params.get("clientUserMessageId")
+                probe_turn = client_message_id == "support-release-probe"
+                policy_probe_turn = client_message_id == "support-release-policy-probe"
                 if probe_turn:
                     record("support_probe_production_envelope_ok")
-                    output = support_explanation("ja")
+                    output = (
+                        support_presence_direction("ja", envelope.get("trigger"))
+                        if presence_support
+                        else support_explanation("ja")
+                    )
                 elif policy_probe_turn:
                     record("support_probe_plan_policy_event")
-                    output = support_explanation("ja")
+                    output = (
+                        support_presence_direction("ja", envelope.get("trigger"))
+                        if presence_support
+                        else support_explanation("ja")
+                    )
                 else:
-                    locale = envelope.get("evidence", {}).get("locale", "ja")
-                    output = support_explanation(locale)
+                    locale = (
+                        envelope.get("locale", "ja")
+                        if presence_support
+                        else envelope.get("evidence", {}).get("locale", "ja")
+                    )
+                    output = (
+                        support_presence_direction(locale, envelope.get("trigger"))
+                        if presence_support
+                        else support_explanation(locale)
+                    )
                     if MODE == "support_invalid_output":
                         output = '{"schemaVersion":1,"locale":"ja"}'
                 turn_result = {"turn": {"id": "support-turn-fixture", "status": "inProgress"}}
@@ -717,6 +1093,11 @@ def main():
                         },
                     }
                 )
+                if not probe_turn and not policy_probe_turn:
+                    send_support_thread_settings(support_model)
+                if MODE == "support_probe_slow_grandchild" and probe_turn:
+                    spawn_support_grandchild()
+                    continue
                 if (
                     MODE == "support_ignore_interrupt_grandchild"
                     and not probe_turn
@@ -902,6 +1283,52 @@ def main():
                     {"turn": {"id": "turn-fixture", "status": "inProgress"}},
                 )
                 continue
+            if MODE == "node_repl_commit":
+                workspace = thread_workspaces.get(params["threadId"])
+                if workspace is None or not workspace.is_absolute():
+                    record("node_repl_commit_workspace_invalid")
+                    continue
+                send_node_repl_commit(params["threadId"], "turn-fixture", workspace)
+                output = json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "response": {
+                            "kind": "result",
+                            "message": "The reviewable commit is ready.",
+                            "decisionId": None,
+                            "question": None,
+                            "options": None,
+                            "context": None,
+                            "allowFreeform": None,
+                        },
+                    },
+                    separators=(",", ":"),
+                )
+                send(
+                    {
+                        "method": "item/completed",
+                        "params": {
+                            "threadId": params["threadId"],
+                            "turnId": "turn-fixture",
+                            "item": {
+                                "id": "item-node-repl-result",
+                                "type": "agentMessage",
+                                "text": output,
+                                "phase": "final_answer",
+                            },
+                        },
+                    }
+                )
+                send(
+                    {
+                        "method": "turn/completed",
+                        "params": {
+                            "threadId": params["threadId"],
+                            "turn": {"id": "turn-fixture", "status": "completed"},
+                        },
+                    }
+                )
+                continue
             if MODE == "unknown_request":
                 send(
                     {
@@ -914,7 +1341,7 @@ def main():
                         },
                     }
                 )
-            if MODE == "native_rui":
+            if MODE in ("native_rui", "native_rui_other"):
                 send(
                     {
                         "id": "server-rui",
@@ -928,16 +1355,20 @@ def main():
                                     "id": "choice",
                                     "header": "Choice",
                                     "question": "Choose a safe option",
+                                    "isOther": True,
+                                    "isSecret": False,
                                     "options": [
                                         {"label": "Continue", "description": "Continue safely"},
                                         {"label": "Stop", "description": "Stop this turn"},
                                     ],
                                 }
                             ],
+                            "autoResolutionMs": None,
                         },
                     }
                 )
             if MODE in (
+                "decision_result",
                 "decision_fallback",
                 "decision_invalid",
                 "decision_continuation_crash",
@@ -947,38 +1378,56 @@ def main():
                     json.dumps(
                         {
                             "schemaVersion": 1,
-                            "kind": "decision_request",
-                            "message": "A choice is required",
-                            "decisionId": "fixture-decision",
-                            "question": "Choose a safe option",
-                            "options": [
-                                {
-                                    "id": "continue",
-                                    "label": "Continue",
-                                    "description": "Continue safely",
-                                },
-                                {
-                                    "id": "stop",
-                                    "label": "Stop",
-                                    "description": "Stop this turn",
-                                },
-                            ],
-                            "context": {
-                                "schemaVersion": 1,
-                                "category": "user_decision",
-                                "targetKind": "active_turn",
-                                "targetAlias": "active_turn",
-                                "effect": "continue_turn",
-                                "scope": "turn",
-                                "risk": "medium",
-                                "reversibility": "unknown",
-                                "recommendation": "continue",
-                                "evidence": [
-                                    "The continuation is bounded to the active turn."
-                                ],
-                                "uncertainty": "limited_context",
+                            "response": {
+                                "kind": "result",
+                                "message": "The bounded work is complete.",
+                                "decisionId": None,
+                                "question": None,
+                                "options": None,
+                                "context": None,
+                                "allowFreeform": None,
                             },
-                            "allowFreeform": False,
+                        },
+                        separators=(",", ":"),
+                    )
+                    if MODE == "decision_result"
+                    else json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "response": {
+                                "kind": "decision_request",
+                                "message": "A choice is required",
+                                "decisionId": "fixture-decision",
+                                "question": "Choose a safe option",
+                                "options": [
+                                    {
+                                        "id": "continue",
+                                        "label": "Continue",
+                                        "description": "Continue safely",
+                                    },
+                                    {
+                                        "id": "stop",
+                                        "label": "Stop",
+                                        "description": "Stop this turn",
+                                    },
+                                ],
+                                "context": {
+                                    "schemaVersion": 1,
+                                    "category": "user_decision",
+                                    "targetKind": "active_turn",
+                                    "targetAlias": "active_turn",
+                                    "effect": "continue_turn",
+                                    "scope": "turn",
+                                    "risk": "medium",
+                                    "reversibility": "unknown",
+                                    "recommendation": "continue",
+                                    "evidence": [
+                                        "The continuation is bounded to the active turn."
+                                    ],
+                                    "uncertainty": "limited_context",
+                                },
+                                "allowFreeform": False,
+                            },
                         },
                         separators=(",", ":"),
                     )
@@ -1060,10 +1509,27 @@ def main():
                 record("unknown_request_rejected")
             continue
         if message_id == "server-rui":
+            expected_answer = (
+                "Another safe path" if MODE == "native_rui_other" else "Continue"
+            )
             if message.get("result", {}).get("answers", {}).get("choice") == {
-                "answers": ["Continue"]
+                "answers": [expected_answer]
             }:
-                record("native_rui_answered")
+                record(
+                    "native_rui_other_answered"
+                    if MODE == "native_rui_other"
+                    else "native_rui_option_answered"
+                )
+                send(
+                    {
+                        "method": "serverRequest/resolved",
+                        "params": {
+                            "requestId": "server-rui",
+                            "threadId": "thread-fixture",
+                        },
+                    }
+                )
+                record("native_rui_resolved_sent")
             continue
         if message_id is not None:
             result(message_id, {})

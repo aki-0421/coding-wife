@@ -37,6 +37,7 @@ import type { GitReviewTransport } from "@/features/git-review/transport"
 import { useI18n } from "@/features/localization"
 import {
   CommitNarrationCaption,
+  isActiveCommitNarrationPresentation,
   type NarrationController,
   useNarrationSnapshot,
 } from "@/features/narration"
@@ -67,6 +68,10 @@ import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceVie
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
+import {
+  deriveWorkspaceCharacterState,
+  useCompletedCharacterCue,
+} from "@/features/workspace-view/workspace-character-state"
 import { useWorkspaceViewportLayout } from "@/features/workspace-view/workspace-viewport"
 import { gitReviewSchemaVersion } from "@/lib/contracts/git-review"
 
@@ -194,14 +199,14 @@ export function WorkspaceShell({
   const selectedOwnsExecution =
     selectedWorkspaceId !== null &&
     view.codex.activeWorkspaceId === selectedWorkspaceId
-  const characterState =
-    selectedOwnsExecution && view.codex.pendingRequests.length > 0
-      ? "waiting_for_user"
-      : view.turnState === "sending"
-        ? "thinking"
-        : selectedOwnsExecution && turnActive
-          ? "acting"
-          : "idle"
+  const completedCharacterCue = useCompletedCharacterCue(view.codex)
+  const characterState = deriveWorkspaceCharacterState({
+    codex: view.codex,
+    completedCue: completedCharacterCue,
+    selectedWorkspaceId,
+    turnActive,
+    turnState: view.turnState,
+  })
   const activeTab = view.activeTab
   const registerAttachmentPaths = view.registerAttachmentPaths
   const codexGeneration = view.codex.generation
@@ -218,7 +223,7 @@ export function WorkspaceShell({
     narration.presentation?.key.workspaceId === selectedWorkspaceId &&
     narration.presentation.key.workspaceGeneration === workspaceGeneration &&
     narration.presentation.key.locale === locale &&
-    narration.presentation.status !== "canceled"
+    isActiveCommitNarrationPresentation(narration.presentation)
       ? narration.presentation
       : null
   const previousSelectedWorkspaceId = useRef<string | null>(null)
@@ -343,7 +348,10 @@ export function WorkspaceShell({
       })
       .then(async () => {
         commitExplanationController?.revokePresentationIntent("close")
-        await narrationController.dismissPresentation("app_close")
+        await Promise.all([
+          narrationController.dismissPresentation("app_close"),
+          narrationController.dismissPresence("app_close"),
+        ])
         await appLifecycleGateway.confirmQuit(request.requestId)
       })
       .catch(() => {
@@ -418,6 +426,7 @@ export function WorkspaceShell({
     void narrationController.setScope({
       workspaceId: scope.workspaceId,
       generation: scope.workspaceGeneration,
+      locale: scope.locale,
     })
     void commitExplanationController
       ?.setScope({
@@ -435,11 +444,23 @@ export function WorkspaceShell({
     workspaceGeneration,
   ])
 
+  useEffect(() => {
+    for (const event of view.codex.timeline) {
+      if (event.kind !== "request_resolved") continue
+      narrationController.consumePendingRequestResolved({
+        workspaceId: event.workspaceId,
+        workspaceGeneration: event.generation,
+        pendingId: event.pendingId,
+      })
+    }
+  }, [narrationController, view.codex.timeline])
+
   const stopTurn = useCallback(async () => {
     commitExplanationController?.revokePresentationIntent("turn_stop")
     const [mainTurn] = await Promise.allSettled([
       view.stopTurn(),
       narrationController.dismissPresentation("turn_stop"),
+      narrationController.dismissPresence("turn_stop"),
     ])
     return mainTurn.status === "fulfilled" ? mainTurn.value : false
   }, [commitExplanationController, narrationController, view])
@@ -475,7 +496,10 @@ export function WorkspaceShell({
         commitExplanationController?.revokePresentationIntent(
           "selection_change",
         )
-        await narrationController.dismissPresentation("explicit_cancel")
+        await Promise.all([
+          narrationController.dismissPresentation("explicit_cancel"),
+          narrationController.dismissPresence("explicit_cancel"),
+        ])
         return true
       } finally {
         setArchivePendingWorkspaceId((current) =>
@@ -981,6 +1005,7 @@ export function WorkspaceShell({
             reducedMotion={reducedMotion}
             state={characterState}
             visible={!appSettingsOpen}
+            workspaceGeneration={workspaceGeneration}
             workspaceId={selectedWorkspace.id}
             {...(characterRenderer ? { renderer: characterRenderer } : {})}
           />

@@ -12,18 +12,23 @@ use coding_wife_lib::codex::protocol::{client_notification, initialize_params};
 use coding_wife_lib::codex::rpc::{RpcRequestError, RuntimeSignal};
 use coding_wife_lib::codex::supervisor::CodexSupervisor;
 use coding_wife_lib::codex::support::{
-    CommitExplanationTrigger, SupportExplainRequest, SupportRuntime, SupportRuntimeError,
-    SUPPORT_MAX_SESSION_CAPACITY,
+    CommitExplanationTrigger, PresenceDirectorInputV1, PresenceElapsedBucket, PresenceLocale,
+    PresenceSemanticState, PresenceTrigger, SupportExplainRequest, SupportModelRole,
+    SupportPresenceRequest, SupportRuntime, SupportRuntimeError, SUPPORT_MAX_SESSION_CAPACITY,
 };
 use coding_wife_lib::codex::types::{
     BinarySource, CapabilityState, ChildState, CodexFallbackDecisionRequest, CodexHealth,
     CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadResumeRequest,
     CodexThreadStartRequest, CodexTurnInterruptRequest, CodexTurnStartRequest, PendingResponse,
-    ReasoningPreset, ReviewTarget,
+    PendingUserInputAnswer, ReasoningPreset, ReviewTarget,
 };
 use coding_wife_lib::codex::workspace::{
     AppPrivateBinaryRecord, FolderPicker, PickerFuture, WorkspaceService,
 };
+use coding_wife_lib::workspace_history::types::{
+    WorkspaceCreateSessionRequest, WorkspacePickOutcome,
+};
+use coding_wife_lib::workspace_history::{WorkspaceHistoryService, WorkspaceHistoryStore};
 use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, Mutex};
 
@@ -217,6 +222,19 @@ fn pending_id(rpc_id: &str, params: &serde_json::Value) -> String {
     format!("pending-{}", &hex::encode(digest)[..20])
 }
 
+fn user_input_option_id(params: &serde_json::Value, question_id: &str, index: usize) -> String {
+    let params_hash = hex::encode(Sha256::digest(
+        serde_json::to_vec(params).expect("serialize params"),
+    ));
+    let mut digest = Sha256::new();
+    for component in [params_hash.as_bytes(), question_id.as_bytes()] {
+        digest.update((component.len() as u64).to_be_bytes());
+        digest.update(component);
+    }
+    digest.update((index as u64).to_be_bytes());
+    format!("option-{}", &hex::encode(digest.finalize())[..20])
+}
+
 fn contextual_handle(prefix: &str, components: &[&str]) -> String {
     let mut hasher = Sha256::new();
     for component in components {
@@ -253,6 +271,65 @@ impl Drop for FixtureEnvironment {
         let _ = std::fs::remove_dir_all(&self.workspace);
         let _ = std::fs::remove_file(&self.state);
         let _ = std::fs::remove_dir_all(&self.app_data);
+    }
+}
+
+struct ManagedProjectFixture {
+    root: PathBuf,
+    project: PathBuf,
+}
+
+impl ManagedProjectFixture {
+    fn new() -> Self {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root")
+            .join(".context")
+            .join(format!("test-managed-worktree-{}", uuid::Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).expect("managed project directory");
+        let initialized = std::process::Command::new("/usr/bin/git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(&project)
+            .status()
+            .expect("initialize managed project");
+        assert!(initialized.success());
+        let committed = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&project)
+            .args([
+                "-c",
+                "user.name=Coding Wife Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                "fixture",
+            ])
+            .status()
+            .expect("commit managed project fixture");
+        assert!(committed.success());
+        let remote = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&project)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/coding-wife/managed-fixture.git",
+            ])
+            .status()
+            .expect("configure fixture origin");
+        assert!(remote.success());
+        Self { root, project }
+    }
+}
+
+impl Drop for ManagedProjectFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 
@@ -427,6 +504,23 @@ fn support_request(
         full_commit_sha: "a".repeat(40),
         trigger: CommitExplanationTrigger::AutoVerifiedCommit,
         evidence,
+    }
+}
+
+fn support_presence_request(request_id: &str) -> SupportPresenceRequest {
+    SupportPresenceRequest {
+        request_id: request_id.to_owned(),
+        workspace_id: "workspace".to_owned(),
+        workspace_generation: 1,
+        input: PresenceDirectorInputV1 {
+            schema_version: 1,
+            locale: PresenceLocale::Ja,
+            trigger: PresenceTrigger::MainMessage,
+            semantic_state: PresenceSemanticState::Working,
+            retrying: false,
+            elapsed_bucket: PresenceElapsedBucket::None,
+            message_excerpt: Some("実装の要点を整理しました。".to_owned()),
+        },
     }
 }
 
@@ -608,7 +702,7 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
         .expect("main skill audit");
     let encoded_audit = serde_json::to_string(&audit).expect("serialize skill audit");
     assert_eq!(audit.name, "coding-wife-commit-work");
-    assert_eq!(audit.version, "1.1.0");
+    assert_eq!(audit.version, "1.2.0");
     assert!(audit.content_digest.starts_with("sha256:"));
     assert!(!encoded_audit.contains("SKILL.md"));
     assert!(!encoded_audit.contains("resources"));
@@ -630,6 +724,150 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
     assert!(!state.contains("SKILL.md"));
     assert!(state.contains("interrupt_received"));
     supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn node_repl_commit_result_shape_completes_through_the_app_server_boundary() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("node_repl_commit");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor.connect().await.expect("connect fixture");
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("thread start");
+    let turn = supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            client_user_message_id: "node-repl-message".to_owned(),
+            text: "Create one reviewable fixture commit.".to_owned(),
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
+            attachment_handles: vec![],
+        })
+        .await;
+    assert!(
+        turn.is_ok(),
+        "turn start failed: {turn:?}; fixture state: {}",
+        read_state(&fixture.state).await
+    );
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let state = loop {
+        let state = read_state(&fixture.state).await;
+        if state.contains("node_repl_commit_result_shape_emitted") {
+            break state;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "node repl result shape was not emitted: {state}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert!(state.contains("turn_contract_ok"));
+    assert!(!state.contains("node_repl_commit_workspace_invalid"));
+    assert_eq!(supervisor.diagnostic().await.health, CodexHealth::Ready);
+    let commit_sha = std::process::Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(&fixture.workspace)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .expect("read fixture HEAD");
+    assert!(commit_sha.status.success());
+    assert_eq!(String::from_utf8_lossy(&commit_sha.stdout).trim().len(), 40);
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn managed_worktree_turn_sends_only_verified_git_metadata_roots() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("managed_worktree_roots");
+    let managed = ManagedProjectFixture::new();
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    let history = WorkspaceHistoryService::new(
+        WorkspaceHistoryStore::open(&fixture.app_data).expect("workspace history store"),
+        WorkspaceService::new(
+            supervisor.clone(),
+            Arc::new(FixedPicker(managed.project.clone())),
+        ),
+    );
+    let picked = history
+        .pick_register()
+        .await
+        .expect("register managed project");
+    assert_eq!(picked.outcome, WorkspacePickOutcome::Selected);
+    let project_id = picked
+        .state
+        .projects
+        .first()
+        .expect("registered project")
+        .project_id
+        .clone();
+    let created = history
+        .create_session(WorkspaceCreateSessionRequest {
+            project_id,
+            name: "Managed fixture".to_owned(),
+            client_request_id: format!("managed-fixture-{}", uuid::Uuid::new_v4()),
+        })
+        .await
+        .expect("create app-managed worktree");
+    let workspace_id = created
+        .active_workspace_id
+        .expect("active app-managed workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor.connect().await.expect("connect fixture");
+
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: workspace_id.clone(),
+        })
+        .await
+        .expect("managed worktree thread start");
+    let turn = supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: workspace_id.clone(),
+            thread_handle: thread.thread_handle.clone(),
+            client_user_message_id: "managed-worktree-message".to_owned(),
+            text: "Stage the managed worktree change.".to_owned(),
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
+            attachment_handles: vec![],
+        })
+        .await
+        .expect("managed worktree turn start");
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("managed_write_roots_thread_ok"));
+    assert!(state.contains("managed_write_roots_turn_ok"));
+    assert!(!state.contains("managed_write_roots_thread_invalid"));
+    assert!(!state.contains("managed_write_roots_turn_invalid"));
+    assert!(state.contains("turn_contract_ok"));
+
+    supervisor
+        .turn_interrupt(CodexTurnInterruptRequest {
+            workspace_id,
+            thread_handle: thread.thread_handle,
+            turn_handle: turn.turn_handle,
+        })
+        .await
+        .expect("interrupt managed worktree turn");
+    supervisor.shutdown().await;
+    drop(history);
 }
 
 #[tokio::test]
@@ -725,6 +963,11 @@ async fn dedicated_support_runtime_proves_authority_and_injects_only_the_explain
     };
 
     assert_eq!(runtime.audit().capacity, SUPPORT_MAX_SESSION_CAPACITY);
+    assert_eq!(
+        runtime.audit().model_role,
+        SupportModelRole::CommitExplainer
+    );
+    assert_eq!(runtime.audit().model, "gpt-5.6-terra");
     assert_eq!(runtime.audit().skill_name, "coding-wife-explain-commit");
     assert_eq!(runtime.audit().skill_version, "1.1.0");
     assert_eq!(
@@ -754,6 +997,65 @@ async fn dedicated_support_runtime_proves_authority_and_injects_only_the_explain
     assert_eq!(state.matches("support_probe_plan_policy_event").count(), 1);
     assert!(!state.contains("support_skill_exactly_once_invalid"));
     assert!(!state.contains("commit_skill_exactly_once_ok"));
+    assert!(!state.contains("coding-wife-commit-work"));
+}
+
+#[tokio::test]
+async fn dedicated_presence_runtime_proves_luna_and_returns_strict_direction() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("default");
+    let binary = support_fixture_binary().await;
+    let schema = probe_schema(&binary).await.expect("fixture schema");
+    let auth = fixture.auth_source();
+    let runtime = SupportRuntime::construct_presence(
+        &binary,
+        &schema,
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        Some(&auth),
+    )
+    .await
+    .unwrap_or_else(|error| {
+        panic!(
+            "isolated presence runtime: {error:?}; state={}",
+            std::fs::read_to_string(&fixture.state).unwrap_or_default()
+        )
+    });
+
+    assert_eq!(runtime.audit().capacity, SUPPORT_MAX_SESSION_CAPACITY);
+    assert_eq!(
+        runtime.audit().model_role,
+        SupportModelRole::PresenceDirector
+    );
+    assert_eq!(runtime.audit().model, "gpt-5.6-luna");
+    assert_eq!(runtime.audit().skill_name, "coding-wife-direct-presence");
+    assert_eq!(runtime.audit().skill_version, "1.1.0");
+    assert!(runtime.audit().malicious_canary_passed);
+
+    let result = runtime
+        .direct_presence(support_presence_request("presence-request-1"))
+        .await
+        .expect("strict presence result");
+    assert_eq!(result.direction.locale, PresenceLocale::Ja);
+    assert_eq!(
+        result.direction.cue,
+        coding_wife_lib::codex::support::PresenceCue::Working
+    );
+    assert_eq!(result.usage.total_tokens, 30);
+    runtime.shutdown().await.expect("presence support cleanup");
+
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("support_sandbox_denied"));
+    assert_eq!(state.matches("support_thread_contract_ok").count(), 2);
+    assert_eq!(state.matches("support_skill_exactly_once_ok").count(), 3);
+    assert_eq!(
+        state
+            .matches("support_probe_production_envelope_ok")
+            .count(),
+        1
+    );
+    assert_eq!(state.matches("support_probe_plan_policy_event").count(), 1);
+    assert!(!state.contains("support_skill_exactly_once_invalid"));
+    assert!(!state.contains("coding-wife-explain-commit"));
     assert!(!state.contains("coding-wife-commit-work"));
 }
 
@@ -820,7 +1122,44 @@ async fn real_support_release_probe_uses_the_production_turn_envelope() {
     .await
     .expect("production-equivalent release probe");
     assert_eq!(runtime.audit().skill_name, "coding-wife-explain-commit");
+    assert_eq!(
+        runtime.audit().model_role,
+        SupportModelRole::CommitExplainer
+    );
+    assert_eq!(runtime.audit().model, "gpt-5.6-terra");
     runtime.shutdown().await.expect("real probe cleanup");
+    assert_eq!(current_support_run_directories(), before);
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned local Codex release and a configured local account"]
+async fn real_presence_release_probe_uses_the_production_turn_envelope() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let binary = discover_binary(Some(Path::new("/opt/homebrew/bin/codex")))
+        .await
+        .expect("installed Codex binary");
+    let schema = probe_schema(&binary).await.expect("installed Codex schema");
+    let before = current_support_run_directories();
+    let runtime = SupportRuntime::construct_presence(
+        &binary,
+        &schema,
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug"),
+        None,
+    )
+    .await
+    .expect("production-equivalent presence release probe");
+    assert_eq!(runtime.audit().skill_name, "coding-wife-direct-presence");
+    assert_eq!(
+        runtime.audit().model_role,
+        SupportModelRole::PresenceDirector
+    );
+    assert_eq!(runtime.audit().model, "gpt-5.6-luna");
+    let result = runtime
+        .direct_presence(support_presence_request("real-presence-request"))
+        .await
+        .unwrap_or_else(|error| panic!("real presence turn failed: {}", error.code()));
+    assert_eq!(result.direction.schema_version, 1);
+    assert_eq!(result.direction.locale, PresenceLocale::Ja);
     assert_eq!(current_support_run_directories(), before);
 }
 
@@ -1087,6 +1426,14 @@ async fn invalid_support_output_and_plan_events_publish_no_result() {
     for (mode, expected) in [
         ("support_invalid_output", SupportRuntimeError::Output),
         ("support_plan_call", SupportRuntimeError::Policy),
+        (
+            "support_settings_policy_changed",
+            SupportRuntimeError::Policy,
+        ),
+        (
+            "support_settings_unknown_field",
+            SupportRuntimeError::Policy,
+        ),
     ] {
         let fixture = FixtureEnvironment::new(mode);
         let binary = support_fixture_binary().await;
@@ -1814,37 +2161,8 @@ async fn each_thread_policy_mismatch_stops_without_storing_a_handle() {
 }
 
 #[tokio::test]
-async fn native_rui_round_trips_one_strict_answer() {
+async fn native_rui_round_trips_option_label_and_bounded_other_answer() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
-    let fixture = FixtureEnvironment::new("native_rui");
-    let supervisor = test_supervisor();
-    supervisor.start_signal_loop();
-    supervisor
-        .register_workspace_root("workspace", &fixture.workspace)
-        .await
-        .expect("register workspace");
-    supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    supervisor.connect().await.expect("connect");
-    let thread = supervisor
-        .thread_start(CodexThreadStartRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("thread");
-    supervisor
-        .turn_start(CodexTurnStartRequest {
-            workspace_id: "workspace".to_owned(),
-            thread_handle: thread.thread_handle,
-            client_user_message_id: "message-rui".to_owned(),
-            text: "Request a choice.".to_owned(),
-            effort: Some(ReasoningPreset::Low),
-            service_tier: None,
-            plan_mode: false,
-            goal_objective: None,
-            attachment_handles: vec![],
-        })
-        .await
-        .expect("turn");
     let params = serde_json::json!({
         "threadId": "thread-fixture",
         "turnId": "turn-fixture",
@@ -1853,57 +2171,107 @@ async fn native_rui_round_trips_one_strict_answer() {
             "id": "choice",
             "header": "Choice",
             "question": "Choose a safe option",
+            "isOther": true,
+            "isSecret": false,
             "options": [
                 {"label": "Continue", "description": "Continue safely"},
                 {"label": "Stop", "description": "Stop this turn"}
             ]
-        }]
+        }],
+        "autoResolutionMs": null
     });
-    let pending_id = pending_id("server-rui", &params);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        match supervisor
-            .respond_pending(CodexPendingResponseRequest {
+    for (mode, marker) in [
+        ("native_rui", "native_rui_option_answered"),
+        ("native_rui_other", "native_rui_other_answered"),
+    ] {
+        let fixture = FixtureEnvironment::new(mode);
+        let supervisor = test_supervisor();
+        supervisor.start_signal_loop();
+        supervisor
+            .register_workspace_root("workspace", &fixture.workspace)
+            .await
+            .expect("register workspace");
+        supervisor.set_explicit_binary(Some(fixture_binary())).await;
+        supervisor.connect().await.expect("connect");
+        let thread = supervisor
+            .thread_start(CodexThreadStartRequest {
                 workspace_id: "workspace".to_owned(),
-                pending_id: pending_id.clone(),
-                response: PendingResponse::UserInput {
-                    answers: std::collections::BTreeMap::from([(
-                        "choice".to_owned(),
-                        vec!["Continue".to_owned()],
-                    )]),
-                },
             })
             .await
-        {
-            Ok(_) => break,
-            Err(error) if error.code == "CODEX-PENDING-INVALID" => {
-                assert!(
-                    tokio::time::Instant::now() < deadline,
-                    "pending RUI missing"
-                );
-                tokio::time::sleep(Duration::from_millis(20)).await;
+            .expect("thread");
+        supervisor
+            .turn_start(CodexTurnStartRequest {
+                workspace_id: "workspace".to_owned(),
+                thread_handle: thread.thread_handle,
+                client_user_message_id: format!("message-rui-{mode}"),
+                text: "Request a choice.".to_owned(),
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
+                attachment_handles: vec![],
+            })
+            .await
+            .expect("turn");
+        let pending_id = pending_id("server-rui", &params);
+        let answer = if mode == "native_rui" {
+            PendingUserInputAnswer::Option {
+                option_id: user_input_option_id(&params, "choice", 0),
             }
-            Err(error) => panic!("unexpected RUI error: {}", error.code),
+        } else {
+            PendingUserInputAnswer::Other {
+                text: "Another safe path".to_owned(),
+            }
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match supervisor
+                .respond_pending(CodexPendingResponseRequest {
+                    workspace_id: "workspace".to_owned(),
+                    pending_id: pending_id.clone(),
+                    response: PendingResponse::UserInput {
+                        answers: std::collections::BTreeMap::from([(
+                            "choice".to_owned(),
+                            answer.clone(),
+                        )]),
+                    },
+                })
+                .await
+            {
+                Ok(_) => break,
+                Err(error) if error.code == "CODEX-PENDING-INVALID" => {
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "pending RUI missing for {mode}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("unexpected RUI error for {mode}: {}", error.code),
+            }
         }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while {
+            let state = read_state(&fixture.state).await;
+            !(state.contains(marker) && state.contains("native_rui_resolved_sent"))
+        } {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "RUI response missing for {mode}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        supervisor.shutdown().await;
     }
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while !read_state(&fixture.state)
-        .await
-        .contains("native_rui_answered")
-    {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "RUI response missing"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    supervisor.shutdown().await;
 }
 
 #[tokio::test]
-async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
+async fn exact_result_and_fallback_are_accepted_while_invalid_output_interrupts() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
-    for (mode, interrupted) in [("decision_fallback", false), ("decision_invalid", true)] {
+    for (mode, interrupted) in [
+        ("decision_result", false),
+        ("decision_fallback", false),
+        ("decision_invalid", true),
+    ] {
         let fixture = FixtureEnvironment::new(mode);
         let supervisor = test_supervisor();
         supervisor.start_signal_loop();
@@ -1934,13 +2302,10 @@ async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
             .await
             .expect("turn");
         tokio::time::sleep(Duration::from_millis(150)).await;
-        assert_eq!(
-            read_state(&fixture.state)
-                .await
-                .contains("interrupt_received"),
-            interrupted,
-            "{mode}"
-        );
+        let state = read_state(&fixture.state).await;
+        assert!(state.contains("decision_output_schema_ok"), "{mode}");
+        assert!(!state.contains("decision_output_schema_invalid"), "{mode}");
+        assert_eq!(state.contains("interrupt_received"), interrupted, "{mode}");
         supervisor.shutdown().await;
         drop(fixture);
     }

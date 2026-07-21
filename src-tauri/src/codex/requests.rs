@@ -10,9 +10,11 @@ use super::protocol::{server_error, server_result, RpcId};
 use super::types::{
     ApprovalDecision, CapabilityState, CodexCapabilities, DecisionContext, PendingKind,
     PendingOption, PendingQuestion, PendingRequestView, PendingResponse, PendingResponseKind,
+    PendingUserInputAnswer,
 };
 
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+const MAX_OTHER_ANSWER_SCALARS: usize = 2_000;
 const MAX_RESOLVED_REQUESTS: usize = 256;
 pub const PENDING_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -46,8 +48,14 @@ enum ResponseShape {
         requested: Value,
     },
     UserInput {
-        answers: BTreeMap<String, HashSet<String>>,
+        answers: BTreeMap<String, UserInputAnswerSpec>,
     },
+}
+
+#[derive(Clone, Debug)]
+struct UserInputAnswerSpec {
+    option_labels: HashMap<String, String>,
+    allows_other: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -155,6 +163,16 @@ fn params_hash(params: &Value) -> Result<String, RequestValidationError> {
 fn pending_id(rpc_id: &RpcId, params_hash: &str) -> String {
     let digest = Sha256::digest(format!("{}:{params_hash}", rpc_id.stable_key()).as_bytes());
     format!("pending-{}", &hex::encode(digest)[..20])
+}
+
+fn user_input_option_id(params_hash: &str, question_id: &str, index: usize) -> String {
+    let mut digest = Sha256::new();
+    for component in [params_hash.as_bytes(), question_id.as_bytes()] {
+        digest.update((component.len() as u64).to_be_bytes());
+        digest.update(component);
+    }
+    digest.update((index as u64).to_be_bytes());
+    format!("option-{}", &hex::encode(digest.finalize())[..20])
 }
 
 fn allowed_approval_decisions(
@@ -303,8 +321,14 @@ fn user_input_record(
     let params_object = object(params)?;
     if !exact_keys(
         params_object,
-        &["threadId", "turnId", "itemId", "questions"],
-        &["autoResolutionMs"],
+        &[
+            "threadId",
+            "turnId",
+            "itemId",
+            "questions",
+            "autoResolutionMs",
+        ],
+        &[],
     ) {
         return Err(RequestValidationError::InvalidParams);
     }
@@ -323,6 +347,7 @@ fn user_input_record(
         .and_then(Value::as_array)
         .filter(|questions| (1..=3).contains(&questions.len()))
         .ok_or(RequestValidationError::InvalidParams)?;
+    let hash = params_hash(params)?;
     let mut question_ids = HashSet::new();
     let mut answer_options = BTreeMap::new();
     let mut views = Vec::new();
@@ -330,10 +355,10 @@ fn user_input_record(
         let question = object(question)?;
         if !exact_keys(
             question,
-            &["id", "header", "question"],
-            &["isOther", "isSecret", "options"],
-        ) || question.get("isSecret").and_then(Value::as_bool) == Some(true)
-            || question.get("isOther").and_then(Value::as_bool) == Some(true)
+            &["id", "header", "question", "isOther", "isSecret", "options"],
+            &[],
+        ) || question.get("isSecret").and_then(Value::as_bool) != Some(false)
+            || question.get("isOther").and_then(Value::as_bool) != Some(true)
         {
             return Err(RequestValidationError::InvalidParams);
         }
@@ -349,6 +374,7 @@ fn user_input_record(
             .filter(|options| (2..=3).contains(&options.len()))
             .ok_or(RequestValidationError::InvalidParams)?;
         let mut labels = HashSet::new();
+        let mut option_labels = HashMap::new();
         let mut option_views = Vec::new();
         for (index, option) in options.iter().enumerate() {
             let option = object(option)?;
@@ -359,13 +385,21 @@ fn user_input_record(
             if !labels.insert(label.clone()) {
                 return Err(RequestValidationError::InvalidParams);
             }
+            let option_id = user_input_option_id(&hash, &id, index);
+            option_labels.insert(option_id.clone(), label.clone());
             option_views.push(PendingOption {
-                id: format!("option-{index}"),
+                id: option_id,
                 label,
                 description: non_empty_string(option, "description")?.to_owned(),
             });
         }
-        answer_options.insert(id.clone(), labels);
+        answer_options.insert(
+            id.clone(),
+            UserInputAnswerSpec {
+                option_labels,
+                allows_other: true,
+            },
+        );
         views.push(PendingQuestion {
             id,
             header,
@@ -374,7 +408,6 @@ fn user_input_record(
         });
     }
 
-    let hash = params_hash(params)?;
     let id = pending_id(&rpc_id, &hash);
     let view = PendingRequestView {
         pending_id: id,
@@ -576,26 +609,39 @@ fn build_resolution(
             if expected.len() != answers.len() {
                 return Err(RequestValidationError::InvalidResponse);
             }
-            for (question_id, allowed) in expected {
-                let selected = answers
+            let mut wire_answers = BTreeMap::new();
+            for (question_id, spec) in expected {
+                let answer = answers
                     .get(question_id)
-                    .filter(|selected| selected.len() == 1)
                     .ok_or(RequestValidationError::InvalidResponse)?;
-                if !allowed.contains(&selected[0]) {
-                    return Err(RequestValidationError::InvalidResponse);
-                }
+                let wire_value = match answer {
+                    PendingUserInputAnswer::Option { option_id } => spec
+                        .option_labels
+                        .get(option_id)
+                        .cloned()
+                        .ok_or(RequestValidationError::InvalidResponse)?,
+                    PendingUserInputAnswer::Other { text }
+                        if spec.allows_other && valid_other_answer(text) =>
+                    {
+                        text.clone()
+                    }
+                    PendingUserInputAnswer::Other { .. } => {
+                        return Err(RequestValidationError::InvalidResponse)
+                    }
+                };
+                wire_answers.insert(question_id.clone(), json!({"answers": [wire_value]}));
             }
-            let answers = answers
-                .iter()
-                .map(|(id, values)| (id.clone(), json!({"answers": values})))
-                .collect::<serde_json::Map<_, _>>();
             Ok((
-                server_result(&record.rpc_id, json!({"answers": answers})),
+                server_result(&record.rpc_id, json!({"answers": wire_answers})),
                 false,
             ))
         }
         _ => Err(RequestValidationError::InvalidResponse),
     }
+}
+
+fn valid_other_answer(value: &str) -> bool {
+    value == value.trim() && (1..=MAX_OTHER_ANSWER_SCALARS).contains(&value.chars().count())
 }
 
 fn approval_decision_context(
@@ -795,6 +841,26 @@ mod tests {
         }
     }
 
+    fn current_user_input_params() -> Value {
+        json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "questions": [{
+                "id": "q1",
+                "header": "Choice",
+                "question": "Choose one",
+                "isOther": true,
+                "isSecret": false,
+                "options": [
+                    {"label": "A", "description": "First"},
+                    {"label": "B", "description": "Second"}
+                ]
+            }],
+            "autoResolutionMs": null
+        })
+    }
+
     #[test]
     fn allows_only_the_three_current_approval_methods() {
         let mut ledger = ServerRequestLedger::default();
@@ -897,35 +963,32 @@ mod tests {
     }
 
     #[test]
-    fn user_input_rejects_secret_freeform_and_out_of_schema_answers() {
-        let mut ledger = ServerRequestLedger::default();
+    fn user_input_rejects_secret_non_other_and_unknown_fields() {
         let capabilities = CodexCapabilities {
             native_request_user_input: CapabilityState::Supported,
             ..CodexCapabilities::default()
         };
-        let invalid = json!({
-            "threadId": "thread-1",
-            "turnId": "turn-1",
-            "itemId": "item-1",
-            "questions": [{
-                "id": "q1",
-                "header": "Secret",
-                "question": "Enter it",
-                "isSecret": true,
-                "options": [{"label": "A", "description": "A"}, {"label": "B", "description": "B"}]
-            }]
-        });
-        assert_eq!(
-            ledger.register(
-                RpcId::Unsigned(1),
-                "item/tool/requestUserInput",
-                &invalid,
-                &active(),
-                Path::new("/workspace"),
-                &capabilities,
-            ),
-            Err(RequestValidationError::InvalidParams)
-        );
+        let mut secret = current_user_input_params();
+        secret["questions"][0]["isSecret"] = Value::Bool(true);
+        let mut non_other = current_user_input_params();
+        non_other["questions"][0]["isOther"] = Value::Bool(false);
+        let mut unknown = current_user_input_params();
+        unknown["questions"][0]["futureField"] = Value::Bool(true);
+
+        for (index, invalid) in [secret, non_other, unknown].iter().enumerate() {
+            let mut ledger = ServerRequestLedger::default();
+            assert_eq!(
+                ledger.register(
+                    RpcId::Unsigned(index as u64 + 1),
+                    "item/tool/requestUserInput",
+                    invalid,
+                    &active(),
+                    Path::new("/workspace"),
+                    &capabilities,
+                ),
+                Err(RequestValidationError::InvalidParams)
+            );
+        }
     }
 
     #[test]
@@ -972,26 +1035,56 @@ mod tests {
     }
 
     #[test]
-    fn invalid_user_input_answer_remains_pending_until_a_valid_answer() {
+    fn current_user_input_translates_opaque_option_id_to_exact_label() {
         let mut ledger = ServerRequestLedger::default();
         let capabilities = CodexCapabilities {
             native_request_user_input: CapabilityState::Supported,
             ..CodexCapabilities::default()
         };
-        let params = json!({
-            "threadId": "thread-1",
-            "turnId": "turn-1",
-            "itemId": "item-1",
-            "questions": [{
-                "id": "q1",
-                "header": "Choice",
-                "question": "Choose one",
-                "options": [
-                    {"label": "A", "description": "First"},
-                    {"label": "B", "description": "Second"}
-                ]
-            }]
-        });
+        let mut params = current_user_input_params();
+        params["questions"][0]["options"][0]["label"] = json!(" Continue exactly ");
+        let RegisterOutcome::New(view) = ledger
+            .register(
+                RpcId::Unsigned(12),
+                "item/tool/requestUserInput",
+                &params,
+                &active(),
+                Path::new("/workspace"),
+                &capabilities,
+            )
+            .expect("register")
+        else {
+            panic!("new request expected");
+        };
+        let option_id = view.questions[0].options[0].id.clone();
+        assert!(option_id.starts_with("option-"));
+        assert_ne!(option_id, " Continue exactly ");
+
+        let resolution = ledger
+            .resolve(
+                &view.pending_id,
+                &PendingResponse::UserInput {
+                    answers: BTreeMap::from([(
+                        "q1".to_owned(),
+                        PendingUserInputAnswer::Option { option_id },
+                    )]),
+                },
+            )
+            .expect("known option ID");
+        assert_eq!(
+            resolution.message["result"]["answers"]["q1"]["answers"][0],
+            " Continue exactly "
+        );
+    }
+
+    #[test]
+    fn current_user_input_accepts_only_explicit_bounded_other_answers() {
+        let mut ledger = ServerRequestLedger::default();
+        let capabilities = CodexCapabilities {
+            native_request_user_input: CapabilityState::Supported,
+            ..CodexCapabilities::default()
+        };
+        let params = current_user_input_params();
         let RegisterOutcome::New(view) = ledger
             .register(
                 RpcId::Unsigned(12),
@@ -1006,21 +1099,149 @@ mod tests {
             panic!("new request expected");
         };
 
-        let invalid = BTreeMap::from([("q1".to_owned(), vec!["C".to_owned()])]);
+        for invalid_value in ["".to_owned(), " padded ".to_owned(), "x".repeat(2_001)] {
+            let invalid = BTreeMap::from([(
+                "q1".to_owned(),
+                PendingUserInputAnswer::Other {
+                    text: invalid_value,
+                },
+            )]);
+            assert!(matches!(
+                ledger.resolve(
+                    &view.pending_id,
+                    &PendingResponse::UserInput { answers: invalid },
+                ),
+                Err(RequestValidationError::InvalidResponse)
+            ));
+        }
+        let other = BTreeMap::from([(
+            "q1".to_owned(),
+            PendingUserInputAnswer::Other {
+                text: "Another safe path".to_owned(),
+            },
+        )]);
+        let resolution = ledger
+            .resolve(
+                &view.pending_id,
+                &PendingResponse::UserInput { answers: other },
+            )
+            .expect("bounded Other answer");
+        assert_eq!(
+            resolution.message["result"]["answers"]["q1"]["answers"][0],
+            "Another safe path"
+        );
+    }
+
+    #[test]
+    fn current_user_input_rejects_unknown_option_id_without_consuming_request() {
+        let mut ledger = ServerRequestLedger::default();
+        let capabilities = CodexCapabilities {
+            native_request_user_input: CapabilityState::Supported,
+            ..CodexCapabilities::default()
+        };
+        let RegisterOutcome::New(view) = ledger
+            .register(
+                RpcId::Unsigned(14),
+                "item/tool/requestUserInput",
+                &current_user_input_params(),
+                &active(),
+                Path::new("/workspace"),
+                &capabilities,
+            )
+            .expect("register")
+        else {
+            panic!("new request expected");
+        };
+        let unknown = BTreeMap::from([(
+            "q1".to_owned(),
+            PendingUserInputAnswer::Option {
+                option_id: "option-unknown".to_owned(),
+            },
+        )]);
         assert!(matches!(
             ledger.resolve(
                 &view.pending_id,
-                &PendingResponse::UserInput { answers: invalid },
+                &PendingResponse::UserInput { answers: unknown },
             ),
             Err(RequestValidationError::InvalidResponse)
         ));
-        let valid = BTreeMap::from([("q1".to_owned(), vec!["A".to_owned()])]);
+
+        let known_option_id = view.questions[0].options[1].id.clone();
         assert!(ledger
             .resolve(
                 &view.pending_id,
-                &PendingResponse::UserInput { answers: valid },
+                &PendingResponse::UserInput {
+                    answers: BTreeMap::from([(
+                        "q1".to_owned(),
+                        PendingUserInputAnswer::Option {
+                            option_id: known_option_id,
+                        },
+                    )]),
+                },
             )
             .is_ok());
+    }
+
+    #[test]
+    fn current_user_input_rejects_option_ids_swapped_between_questions() {
+        let mut ledger = ServerRequestLedger::default();
+        let capabilities = CodexCapabilities {
+            native_request_user_input: CapabilityState::Supported,
+            ..CodexCapabilities::default()
+        };
+        let mut params = current_user_input_params();
+        params["questions"]
+            .as_array_mut()
+            .expect("questions")
+            .push(json!({
+                "id": "q2",
+                "header": "Scope",
+                "question": "Choose a scope",
+                "isOther": true,
+                "isSecret": false,
+                "options": [
+                    {"label": "Current file", "description": "Change one file"},
+                    {"label": "Workspace", "description": "Change the workspace"}
+                ]
+            }));
+        let RegisterOutcome::New(view) = ledger
+            .register(
+                RpcId::Unsigned(15),
+                "item/tool/requestUserInput",
+                &params,
+                &active(),
+                Path::new("/workspace"),
+                &capabilities,
+            )
+            .expect("register")
+        else {
+            panic!("new request expected");
+        };
+        let first_id = view.questions[0].options[0].id.clone();
+        let second_id = view.questions[1].options[0].id.clone();
+        assert_ne!(first_id, second_id);
+
+        let swapped = BTreeMap::from([
+            (
+                "q1".to_owned(),
+                PendingUserInputAnswer::Option {
+                    option_id: second_id,
+                },
+            ),
+            (
+                "q2".to_owned(),
+                PendingUserInputAnswer::Option {
+                    option_id: first_id,
+                },
+            ),
+        ]);
+        assert!(matches!(
+            ledger.resolve(
+                &view.pending_id,
+                &PendingResponse::UserInput { answers: swapped },
+            ),
+            Err(RequestValidationError::InvalidResponse)
+        ));
     }
 
     #[test]

@@ -35,7 +35,7 @@ class RecordingTransport implements GitReviewTransport {
 }
 
 describe("GitReviewStore", () => {
-  it("does not observe while hidden and lazily loads only the selected diff", async () => {
+  it("does not observe while hidden and lazily loads only the first selected diff", async () => {
     const transport = new RecordingTransport()
     const store = new GitReviewStore("workspace-demo", transport)
 
@@ -50,21 +50,32 @@ describe("GitReviewStore", () => {
       observationStatus: "ready",
       collectionStatus: "ready",
       detailStatus: "ready",
-      diffStatus: "idle",
+      diffStatus: "ready",
     })
     expect(transport.calls.map((call) => call.command)).toEqual([
       gitReviewCommands.observeRepository,
       gitReviewCommands.listCommitEvidence,
       gitReviewCommands.readCommitEvidence,
+      gitReviewCommands.readCommitDiffFile,
     ])
 
-    const firstFile = store.snapshot().detail?.files[0]
-    if (firstFile === undefined) throw new Error("Demo file is missing")
-    await store.selectFile(firstFile.fileEvidenceId)
+    const files = store.snapshot().detail?.files
+    const firstFile = files?.[0]
+    const secondFile = files?.[1]
+    if (firstFile === undefined || secondFile === undefined) {
+      throw new Error("Demo files are missing")
+    }
     expect(store.snapshot()).toMatchObject({
       selectedFileEvidenceId: firstFile.fileEvidenceId,
       diffStatus: "ready",
     })
+    expect(
+      transport.calls.filter(
+        (call) => call.command === gitReviewCommands.readCommitDiffFile,
+      ),
+    ).toHaveLength(1)
+
+    await store.selectFile(secondFile.fileEvidenceId)
     expect(transport.calls.at(-1)?.command).toBe(
       gitReviewCommands.readCommitDiffFile,
     )

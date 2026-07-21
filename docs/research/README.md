@@ -1,12 +1,14 @@
 ---
 title: "AIコーディング・キャラクターエディター 調査資料"
-description: "要件定義前に確認する技術成立性、体験設計、リスク、MVP境界をまとめた調査資料の入口。"
-updated: 2026-07-21
+description: "実装前に検討した技術成立性、体験設計、リスク、MVP境界を保存するhistorical researchの入口。"
+updated: 2026-07-22
 read_when:
   - "Coding Wifeの要件定義前に、調査全体の結論と各資料への入口を確認するとき。"
 ---
 
 # AIコーディング・キャラクターエディター 調査資料
+
+> **Historical research — current implementation contractではない。** このdirectoryは要件確定前の候補、仮説、未採用案を保存する。現行の三モデル構成は[GPT-5.6 役割別オーケストレーション実装契約](gpt-5-6-role-orchestration.md)、音声とcaptionの正本は[音声実況要件定義](../requirements/audio-commentary.md)を参照する。特にmacOS local say adapter案は採用していない。
 
 - 調査基準日: 2026-07-16（JST）
 - 対象: Tauri（Rust）+ React + TypeScript + Viteによるローカルデスクトップアプリ

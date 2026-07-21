@@ -4,6 +4,7 @@ import type {
   ApprovalDecision,
   AttachmentRegistrationResponse,
   PendingRequestView,
+  PendingUserInputAnswer,
 } from "@/lib/contracts"
 import {
   bundledHiyoriCharacterContextPreset,
@@ -986,7 +987,7 @@ export function useWorkspaceViewModel(
   const answerDecision = useCallback(
     async (
       request: PendingRequestView,
-      answers: Readonly<Record<string, readonly string[]>>,
+      answers: Readonly<Record<string, PendingUserInputAnswer>>,
     ) => {
       if (
         !selectedWorkspace ||
@@ -994,13 +995,17 @@ export function useWorkspaceViewModel(
         request.kind !== "user_input"
       )
         return false
+      const fallbackAnswer = answers[request.questions[0].id]
       try {
         const accepted =
           request.responseKind === "fallback_decision"
             ? await adapter?.answerFallbackDecision?.({
                 workspaceId: selectedWorkspace.id,
                 decisionHandle: request.pendingId,
-                optionId: answers[request.questions[0].id]?.[0] ?? "",
+                optionId:
+                  fallbackAnswer?.type === "option"
+                    ? fallbackAnswer.optionId
+                    : "",
               })
             : await adapter?.respondPending?.({
                 workspaceId: selectedWorkspace.id,

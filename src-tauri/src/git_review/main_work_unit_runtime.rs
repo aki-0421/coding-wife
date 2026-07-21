@@ -10,9 +10,11 @@ use tokio::sync::Mutex;
 
 use crate::codex::commit_explanation::CommitExplanationTrustedEnqueuer;
 use crate::codex::main_work_unit::{
-    MainCommandCompleted, MainCommandStarted, MainWorkUnitFuture, MainWorkUnitLease,
-    MainWorkUnitRuntime, MainWorkUnitStart, MainWorkUnitTerminal, MainWorkUnitTerminalState,
+    MainCommandCompleted, MainCommandStarted, MainCommitProofIntent, MainCommitSource,
+    MainWorkUnitFuture, MainWorkUnitLease, MainWorkUnitRuntime, MainWorkUnitStart,
+    MainWorkUnitTerminal, MainWorkUnitTerminalState,
 };
+use crate::codex::presence::VerifiedCommitPresenceSink;
 
 use super::service::GitReviewService;
 use super::trusted::{TrustedCommitCandidate, TrustedCommitCandidateInput, TrustedCommitProof};
@@ -38,6 +40,22 @@ pub(crate) trait VerifiedCommitExplanationSink: Send + Sync {
         commit_evidence_id: String,
         evidence: CommitEvidenceV1,
     ) -> ExplanationSinkFuture<'a, Result<(), ()>>;
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct NoopVerifiedCommitPresenceSink;
+
+#[cfg(test)]
+impl VerifiedCommitPresenceSink for NoopVerifiedCommitPresenceSink {
+    fn verified_commit<'a>(
+        &'a self,
+        _workspace_id: String,
+        _workspace_generation: u64,
+        _source_event_id: String,
+    ) -> ExplanationSinkFuture<'a, ()> {
+        Box::pin(async move {})
+    }
 }
 
 impl VerifiedCommitExplanationSink for CommitExplanationTrustedEnqueuer {
@@ -78,8 +96,13 @@ struct WorkUnitContext {
     work_unit_id: String,
     before_observation_id: String,
     injected_at: String,
-    candidates: HashMap<String, TrustedCommitCandidate>,
+    candidates: HashMap<String, PendingCommitCandidate>,
     proofs: Vec<TrustedCommitProof>,
+}
+
+struct PendingCommitCandidate {
+    source: MainCommitSource,
+    candidate: TrustedCommitCandidate,
 }
 
 #[derive(Default)]
@@ -91,6 +114,7 @@ struct RuntimeData {
 pub(crate) struct GitReviewMainWorkUnitRuntime {
     git_review: GitReviewService,
     explanation: Arc<dyn VerifiedCommitExplanationSink>,
+    presence: Arc<dyn VerifiedCommitPresenceSink>,
     data: Mutex<RuntimeData>,
 }
 
@@ -98,17 +122,32 @@ impl GitReviewMainWorkUnitRuntime {
     pub(crate) fn production(
         git_review: GitReviewService,
         explanation: CommitExplanationTrustedEnqueuer,
+        presence: Arc<dyn VerifiedCommitPresenceSink>,
     ) -> Self {
-        Self::with_dependencies(git_review, Arc::new(explanation))
+        Self::with_all_dependencies(git_review, Arc::new(explanation), presence)
     }
 
+    #[cfg(test)]
     pub(crate) fn with_dependencies(
         git_review: GitReviewService,
         explanation: Arc<dyn VerifiedCommitExplanationSink>,
     ) -> Self {
+        Self::with_all_dependencies(
+            git_review,
+            explanation,
+            Arc::new(NoopVerifiedCommitPresenceSink),
+        )
+    }
+
+    pub(crate) fn with_all_dependencies(
+        git_review: GitReviewService,
+        explanation: Arc<dyn VerifiedCommitExplanationSink>,
+        presence: Arc<dyn VerifiedCommitPresenceSink>,
+    ) -> Self {
         Self {
             git_review,
             explanation,
+            presence,
             data: Mutex::new(RuntimeData::default()),
         }
     }
@@ -182,7 +221,13 @@ impl GitReviewMainWorkUnitRuntime {
         if context.start.workspace_generation == event.workspace_generation
             && context.start.raw_thread_id == event.raw_thread_id
         {
-            context.candidates.entry(event.item_id).or_insert(candidate);
+            context
+                .candidates
+                .entry(event.item_id)
+                .or_insert(PendingCommitCandidate {
+                    source: event.source,
+                    candidate,
+                });
         }
     }
 
@@ -203,20 +248,42 @@ impl GitReviewMainWorkUnitRuntime {
             }
             context.candidates.remove(&event.item_id)
         };
-        let Some(candidate) = candidate.filter(|_| event.successful) else {
+        let Some(candidate) = candidate.filter(|candidate| candidate.source == event.source) else {
             return;
         };
-        let Ok(Some(proof)) = self
-            .git_review
-            .complete_trusted_commit_candidate(
-                candidate,
-                event.workspace_generation,
-                &event.raw_thread_id,
-                &event.raw_turn_id,
-                &event.item_id,
-            )
-            .await
-        else {
+        let Some(intent) = event.proof_intent else {
+            return;
+        };
+        let proof = match intent {
+            MainCommitProofIntent::ObserveCurrentHead => {
+                self.git_review
+                    .complete_trusted_commit_candidate(
+                        candidate.candidate,
+                        event.workspace_generation,
+                        &event.raw_thread_id,
+                        &event.raw_turn_id,
+                        &event.item_id,
+                    )
+                    .await
+            }
+            MainCommitProofIntent::Exact {
+                before_head,
+                commit_sha,
+            } => {
+                self.git_review
+                    .complete_trusted_commit_candidate_exact(
+                        candidate.candidate,
+                        event.workspace_generation,
+                        &event.raw_thread_id,
+                        &event.raw_turn_id,
+                        &event.item_id,
+                        &before_head,
+                        &commit_sha,
+                    )
+                    .await
+            }
+        };
+        let Ok(Some(proof)) = proof else {
             return;
         };
         if let Some(context) = self.data.lock().await.contexts.get_mut(lease.token()) {
@@ -225,6 +292,7 @@ impl GitReviewMainWorkUnitRuntime {
     }
 
     async fn finish_work_unit(&self, lease: MainWorkUnitLease, event: MainWorkUnitTerminal) {
+        let presence_commit_ready = event.state == MainWorkUnitTerminalState::Completed;
         let context = self.data.lock().await.contexts.remove(lease.token());
         let Some(context) = context else {
             return;
@@ -274,6 +342,18 @@ impl GitReviewMainWorkUnitRuntime {
             return;
         };
         let _ = result.response;
+        let verified_commits = result.verified_commits;
+        if presence_commit_ready {
+            for verified in &verified_commits {
+                self.presence
+                    .verified_commit(
+                        context.start.workspace_id.clone(),
+                        context.start.workspace_generation,
+                        verified.commit_evidence_id.clone(),
+                    )
+                    .await;
+            }
+        }
         let Some(locale) = self
             .explanation
             .locale_for_scope(
@@ -284,7 +364,7 @@ impl GitReviewMainWorkUnitRuntime {
         else {
             return;
         };
-        for verified in result.verified_commits {
+        for verified in verified_commits {
             let evidence = self
                 .git_review
                 .prepare_explanation_evidence(PrepareCommitExplanationEvidenceRequest {

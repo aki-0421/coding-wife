@@ -140,6 +140,16 @@
         "type": "object",
         "required": ["method", "params"],
         "properties": {
+          "method": { "type": "string", "enum": ["serverRequest/resolved"] },
+          "params": {
+            "$ref": "#/definitions/ServerRequestResolvedNotification"
+          }
+        }
+      },
+      {
+        "type": "object",
+        "required": ["method", "params"],
+        "properties": {
           "method": { "type": "string", "enum": ["model/rerouted"] },
           "params": { "$ref": "#/definitions/ModelReroutedNotification" }
         }
@@ -283,10 +293,39 @@
     "type": "object",
     "required": ["itemId", "questions", "threadId", "turnId"],
     "properties": {
-      "itemId": {},
-      "questions": {},
-      "threadId": {},
-      "turnId": {}
+      "autoResolutionMs": { "type": ["integer", "null"], "format": "uint64" },
+      "itemId": { "type": "string" },
+      "questions": {
+        "type": "array",
+        "items": { "$ref": "#/definitions/ToolRequestUserInputQuestion" }
+      },
+      "threadId": { "type": "string" },
+      "turnId": { "type": "string" }
+    },
+    "definitions": {
+      "ToolRequestUserInputOption": {
+        "type": "object",
+        "required": ["description", "label"],
+        "properties": {
+          "description": { "type": "string" },
+          "label": { "type": "string" }
+        }
+      },
+      "ToolRequestUserInputQuestion": {
+        "type": "object",
+        "required": ["header", "id", "question"],
+        "properties": {
+          "header": { "type": "string" },
+          "id": { "type": "string" },
+          "isOther": { "type": "boolean", "default": false },
+          "isSecret": { "type": "boolean", "default": false },
+          "options": {
+            "type": ["array", "null"],
+            "items": { "$ref": "#/definitions/ToolRequestUserInputOption" }
+          },
+          "question": { "type": "string" }
+        }
+      }
     }
   },
   "ToolRequestUserInputResponse.json": {
@@ -294,6 +333,15 @@
     "type": "object",
     "required": ["answers"],
     "properties": { "answers": {} }
+  },
+  "v2/ServerRequestResolvedNotification.json": {
+    "title": "ServerRequestResolvedNotification",
+    "type": "object",
+    "required": ["requestId", "threadId"],
+    "properties": {
+      "requestId": {},
+      "threadId": { "type": "string" }
+    }
   },
   "DynamicToolCallParams.json": {
     "title": "DynamicToolCallParams",
@@ -347,7 +395,27 @@
         "type": ["array", "null"],
         "items": { "$ref": "#/definitions/DynamicToolSpec" }
       },
-      "ephemeral": { "type": ["boolean", "null"] }
+      "ephemeral": { "type": ["boolean", "null"] },
+      "runtimeWorkspaceRoots": {
+        "type": ["array", "null"],
+        "items": { "$ref": "#/definitions/AbsolutePathBuf" }
+      }
+    },
+    "definitions": {
+      "AbsolutePathBuf": { "type": "string" }
+    }
+  },
+  "v2/ThreadResumeParams.json": {
+    "title": "ThreadResumeParams",
+    "type": "object",
+    "properties": {
+      "runtimeWorkspaceRoots": {
+        "type": ["array", "null"],
+        "items": { "$ref": "#/definitions/AbsolutePathBuf" }
+      }
+    },
+    "definitions": {
+      "AbsolutePathBuf": { "type": "string" }
     }
   },
   "v2/TurnStartParams.json": {
@@ -359,9 +427,37 @@
         "type": "array",
         "items": { "$ref": "#/definitions/UserInput" }
       },
+      "runtimeWorkspaceRoots": {
+        "type": ["array", "null"],
+        "items": { "$ref": "#/definitions/AbsolutePathBuf" }
+      },
+      "sandboxPolicy": {
+        "anyOf": [{ "$ref": "#/definitions/SandboxPolicy" }, { "type": "null" }]
+      },
       "threadId": { "type": "string" }
     },
     "definitions": {
+      "AbsolutePathBuf": { "type": "string" },
+      "SandboxPolicy": {
+        "oneOf": [
+          {
+            "title": "WorkspaceWriteSandboxPolicy",
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "networkAccess": { "type": "boolean" },
+              "type": {
+                "type": "string",
+                "enum": ["workspaceWrite"]
+              },
+              "writableRoots": {
+                "type": "array",
+                "items": { "$ref": "#/definitions/AbsolutePathBuf" }
+              }
+            }
+          }
+        ]
+      },
       "UserInput": {
         "oneOf": [
           {
