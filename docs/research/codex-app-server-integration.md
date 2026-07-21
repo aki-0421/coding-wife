@@ -375,7 +375,7 @@ wire method は item/tool/requestUserInput で、型は EXPERIMENTAL である�
 3. active thread / turn / item と request id を照合できる。
 4. question schema が Coding Wife の UI 制約を満たす。
 
-v1 は 1〜3 問、重複しない id、非空の header / question、2〜3 個の選択肢だけを受理する。secret input、選択肢の無い自由入力、未知 field に依存する質問、曖昧な Other は fail-closed にする。回答は question id から answers 配列への exact map とし、表示ラベル以外の値を合成しない。
+v1 は 1〜3 問、重複しない id、非空の header / question、2〜3 個の選択肢だけを受理する。secret input、選択肢の無い自由入力、未知 field に依存する質問、曖昧な Other は fail-closed にする。App Serverへ返す回答はquestion idから単一要素のanswers配列へのexact mapとし、表示ラベルまたは利用者が明示したOther本文以外の値を合成しない。
 
 不正 request では回答 UI を出さず、同じ id へ invalid params error を返して turn を interrupt する。autoResolutionMs があっても、v1 はユーザー選択を勝手に推定しない。
 
@@ -387,7 +387,9 @@ v1 は 1〜3 問、重複しない id、非空の header / question、2〜3 個�
 - responseはquestion idごとの`{"answers":[value]}`を`answers` mapへ格納する。
 - response受理後、`serverRequest/resolved` notificationが`requestId`と`threadId`だけで届く。
 
-正規化契約はこの明示shapeに限定する。`isOther=true`は曖昧な自由入力要求ではなく、既存optionと同じcardへ製品定義のOther入力を追加する合図として扱う。Other回答はtrim済みの1〜2,000 Unicode scalarだけを元question idの単一answerとして返し、adapterが本文を生成・補完しない。既存labelとのexact一致またはこのbounded Otherだけを許可する。`isSecret=true`、`isOther`がtrue以外、option不足、未知field、複数answerは従来どおりfail-closedにする。
+正規化契約はこの明示shapeに限定する。`isOther=true`は曖昧な自由入力要求ではなく、既存optionと同じcardへ製品定義のOther入力を追加する合図として扱う。WebViewからRustへの回答はquestionごとのdiscriminated unionにし、通常選択を`{type: "option", optionId}`、Otherを`{type: "other", text}`として送る。Rust ledgerだけがquestionごとのopaque option IDからraw labelへの対応を保持し、option branchのknown IDをexact labelへ変換する。unknown option ID、別questionのoption ID、重複question、複数回答をOtherへ丸めず拒否する。
+
+Other branchはtrim済みの1〜2,000 Unicode scalarだけを元question idの単一answerとして返し、adapterが本文を生成・補完しない。通常option branchとOther branchは相互変換しない。`isSecret=true`、`isOther`がtrue以外、option不足、未知field、未知answer variantは従来どおりfail-closedにする。
 
 `serverRequest/resolved`は回答内容を含まない補助lifecycle通知である。`requestId`がstringまたはsigned integer、`threadId`が非空string、field集合がexactである場合だけ安全に消費し、独立したdecisionや`code.protocol.unsupported`を生成しない。shape不正または未知のserver request / notificationはfail-closedを維持する。
 
