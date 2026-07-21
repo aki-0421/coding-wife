@@ -35,7 +35,7 @@ read_when:
 16. `DecisionContext`はnative RUI、fallback、normalizer、HIST、WebViewを通じてversion、effect、scope、risk、reversibility、recommendation、evidence、uncertaintyを保持する。不正contextを回答可能cardへ近似しない。
 17. main turnのpublic instruction上限32,000 Unicode scalarと、contextを含む合成text上限80,000 Unicode scalarを分離する。Rust supervisorは後者をApp Server送信前に再検証し、exact 80,000を受理、80,001、NUL、空textかつattachmentなしを拒否する。multibyte文字もUTF-8 byte数ではなく1 scalarとして数える。この変更はsupport専用input/outputの64KiB byte上限を変更しない。
 18. repositoryのfocus recheckとSend直前recheckが同じworkspaceのCodex activationを同時に要求した場合は、同じworkspace・history modeの1件へsingle-flight化する。readyな同一sessionをrepository recheckだけで再生成せず、送信前activationの競合で接続済みgenerationをstaleにしない。
-19. Sendは`codex_turn_start`の受理後だけdraftを消去する。context取得、repository recheck、activation、preflight、transport、受理拒否のいずれで失敗してもworkspace固有draftとattachmentを保持し、raw例外ではなく安全なerror codeをComposer noticeへ表示する。
+19. Sendは`codex_turn_start`の受理後だけdraftを消去する。context取得、repository recheck、activation、preflight、transport、受理拒否のいずれで失敗してもworkspace固有draftとattachmentを保持する。repository、入力、permissionなど接続以外の利用者対応可能なfailureだけを安全なerror codeのComposer noticeへ表示し、App Server connectionと一時的なthread activation failureはUIへ投影せず自動復旧する。
 20. workspace履歴のhydrationはCodex thread activationを待たない。履歴snapshot適用後に通常shellを描画し、app-wide connectionの現在diagnosticを参照して選択workspaceのthread start/resumeだけをbackground single-flightとして開始する。thread準備中はSendだけを無効にし、timeline、draft、navigationを利用可能に保つ。
 21. 現在の設定pathと一致するverified binary identity、`health=ready`のactive runtimeはアプリ全体で1件だけ所有する。workspace選択・作成・recheckはconnectを呼ばず、processとgenerationを変更しない。workspaceごとのnormalizer、opaque thread handle、sequenceは同じprocess内contextとして退避・復元する。active/pending turn中はruntime contextを切り替えず、view selectionだけを変更する。明示pathの変更・解除、process crash、protocol violationではready runtimeを再利用せず、旧process treeの終了収束後にreplacementを1件だけ起動する。
 22. `CodexWorkspaceSessionAdapter`はevent subscriptionとapp-wide connectをapp lifecycle中に各1回だけ開始する。workspace activationはcached global diagnosticを読み、thread start/resumeだけを呼ぶ。通常のthread server errorとstale handleはworkspace storeのthread errorにし、global `connected`とreadinessを変更しない。connection lost、process exit、IPC contract failure、thread policyを含むprotocol violationだけがglobal connection errorを発行する。
@@ -178,7 +178,7 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | `process.rs`                          | 子process、環境allowlist、redacted stderr ring、5秒以内の段階的終了                     |
 | `requests.rs`                         | approval/RUI exact validation、duplicate request ledger                                 |
 | `normalizer.rs`                       | Structured Output deltaの破棄、opaque handle、tool identity/summaryを含むredaction済みCodexEvent |
-| `supervisor.rs`                       | handshake、thread/turn/review、single active turn、restart budget                       |
+| `supervisor.rs`                       | handshake、thread/turn/review、single active turn、上限付き連続restart backoff          |
 | `support.rs`                          | support公開contract、single-use explain turn、strict output/event policy、fallback      |
 | `support_isolation.rs`                | exact release/schema検証、native sandbox・mock wire・malicious canary preflight         |
 | `support_private.rs`                  | owner-only clean runtime、env allowlist、no-follow auth bridge、確実なcleanup           |

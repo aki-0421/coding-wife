@@ -227,7 +227,7 @@ macOS予約shortcutを上書きしない。icon-only操作にはaccessible name�
 | 通常 | active route、current workspace、同期済みlocal state | 画面固有操作 | processing、offline、errorへ遷移 |
 | データなし | 一文の理由と一つの次操作。空table/card gridは出さない | add、diagnostic、戻る | 対象data作成または選択 |
 | 処理中 | 対象row/sectionのprogress、重複操作disabled | cancel可能操作、影響外navigation | success、cancel、error |
-| オフライン | persistent banner、local evidence、送信不可理由 | local閲覧、filter、Context、Settings | 接続回復後の明示Reconnect/preflight |
+| オフライン | TTSなど対象feature固有の外部network unavailableとlocal evidence。App Server transportはこの共通可視状態へ射影しない | local閲覧、filter、Context、Settings | 対象featureの自動回復または明示test。App Serverはアプリが自動復旧する |
 | エラー | code、原因、影響、保持data、retry/modify/stop/details | 影響外操作と明示回復 | retry成功または別routeへ移動 |
 | 権限不足 | 拒否したoperation、必要なOS権限、再選択/再診断 | read-only閲覧、Settings、Quit | 権限変更後の明示再試行 |
 | キャンセル後 | errorを表示せず開始前の入力、選択、fingerprintを維持 | 元操作または別操作 | 次の明示操作 |
@@ -275,7 +275,7 @@ Web Storageを永続正本にしない。preferenceのmissing/corrupt/unknown ve
 - すべてのinteractive elementへvisible `:focus-visible`、accessible name、keyboard activationを付ける。
 - statusはtext、icon、fill/outline/dashのうち最低三つを併用する。
 - Live2D canvasは`aria-hidden`かpresentation扱いとし、state、uncertainty、waiting、verificationをHTML textでも表示する。
-- polite live regionは完了と通常status、assertiveはblocking decision、error、disconnectに限定する。tool streamを逐次読み上げない。
+- polite live regionは完了と通常status、assertiveはblocking decisionと利用者対応可能なerrorに限定する。App Server disconnectは可視状態またはlive regionへ投影しない。tool streamを逐次読み上げない。
 - background commit explanationはpresentation intentがない限りlive regionへ流さない。明示presentation後のvisible captionを正本とし、通常chunk/completionはpolite、terminal errorはassertiveへ1回だけ通知する。
 - loading regionは`aria-busy`とheading/statusを関連付け、empty/error/disabled/recoveryは理由、保持data、次actionをvisible textで示す。
 - ja/enを同じ機能範囲で提供する。初回はOS localeが`ja`で始まればja、それ以外はen。user content、path、branch、SHA、model名は翻訳しない。

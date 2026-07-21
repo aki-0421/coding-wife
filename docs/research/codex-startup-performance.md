@@ -82,7 +82,7 @@ workspace restore barrier
             └─ all workspace thread contexts share the connection
 ```
 
-通常接続の完了前はSendだけを無効にし、timeline、draft、workspace navigationは利用可能にする。接続失敗はsetup overviewへ巻き戻さず、Composerの安全なerror codeとReconnectに反映する。
+通常接続の完了前はSendだけを無効にし、timeline、draft、workspace navigationは利用可能にする。接続失敗はsetup overviewへ巻き戻さず、接続状態、error code、ReconnectをUIへ表示しない。native supervisorがApp Serverを自動再起動し、composition層が選択workspace threadを自動再開する。
 
 ## Binary trustとcache失効
 
