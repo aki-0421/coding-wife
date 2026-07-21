@@ -75,11 +75,13 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 
 Codex CLI 0.144.5の同一binaryから生成したexperimental schemaで、`thread/start`・`thread/resume`・`turn/start`の`runtimeWorkspaceRoots`と、`turn/start.sandboxPolicy.workspaceWrite.writableRoots`を構造検証する。いずれかが欠けるschemaまたはstable initialize fallbackでは、通常のin-tree `.git` repositoryをworkspace rootだけで使えるが、root外Git metadataを必要とするlinked worktreeのthread/turnを開始しない。
 
-`workspace.rs`は登録時と各wire call直前にnon-symlink `.git` marker、Git plumbing、canonical root、per-worktree Git directory、common Git directory、filesystem identity、owner、mode、writeability、directory ancestryを再検証する。登録時identityとlive identityが一致するapp管理linked worktreeだけが、per-worktree Git directoryと重複排除したcommon Git directoryを`additional_writable_roots`として返す。通常repositoryは空配列を返す。project working tree、他worktreeのroot、保存pathだけから復元したdirectoryを追加してはならない。
+`workspace_history` database version 12は、app-data配下のexact `worktrees/<project-id>/<workspace-id>`へ作成できたworkspaceだけについて、workspace rowと同じtransactionで`workspace_managed_git_identities`へprovenance version、per-worktree Git directoryとcommon Git directoryのcanonical path/device/inode、`.git` markerのdevice/inodeを保存する。root device/inodeはworkspace rowを正本とする。起動時と各wire call直前に、保存したroot、marker、per-worktree Git directory、common Git directoryのpath/device/inodeがlive observationと全て一致した時だけ、per-worktree Git directoryと重複排除したcommon Git directoryを`additional_writable_roots`として返す。
+
+通常repository、利用者が手動で作ったlinked worktree、`git init --separate-git-dir` repositoryは、外部Git metadataを検出してもprovenanceを推論せず追加rootを0件にする。version 11以前から移行したworkspaceには証跡をbackfillしない。履歴rowは保持するがhealthを`changed`としてactivationを拒否し、live pathから暗黙に再証明してはならない。offline中に`.git` markerを別gitdirへ向けても、保存identityは更新せず起動時に拒否する。project working tree、他worktreeのroot、保存pathだけから復元したdirectoryを追加してはならない。
 
 `supervisor.rs`はapp-private `GitRepositoryIdentity`をworkspace登録と同時に保持し、thread start/resume、main turn、fallback decision continuationの直前に同じauthorityを再取得する。`protocol.rs`はworkspace rootと追加Git metadata rootを`runtimeWorkspaceRoots`へ、追加rootだけをnetwork disabledの`sandboxPolicy.writableRoots`へ送る。pathはpublic DTO、semantic event、履歴、logへ投影しない。
 
-`cargo test --manifest-path src-tauri/Cargo.toml write_authority_`は通常repositoryに追加rootがないこと、linked worktreeがexact gitdir/common-dirだけを得ること、`.git` markerの外部retargetをwire前に拒否することを確認する。`cargo test --manifest-path src-tauri/Cargo.toml codex::protocol::tests`はApp Server payloadが同じroot集合を保持することを確認する。
+`cargo test --manifest-path src-tauri/Cargo.toml --lib write_authority`と`cargo test --manifest-path src-tauri/Cargo.toml --lib manual_separate_git_directory_gets_no_additional_write_roots`は、手動repositoryに追加rootがないこと、証跡付きapp管理worktreeだけがexact gitdir/common-dirを得ること、`.git` markerの外部retargetをwire前に拒否することを確認する。永続化境界を変えた時は同じtest binaryの`managed_worktree_restores_with_persisted_provenance_after_restart`、`changed_repository_identity_remains_blocked_across_restore_attempts`、`legacy_managed_workspace_without_provenance_is_changed_on_startup`、`legacy_versions_migrate_resume_registration_and_global_contexts`を実行する。`cargo test --manifest-path src-tauri/Cargo.toml codex::protocol::tests`はApp Server payloadが同じroot集合を保持することを確認する。
 
 ## 通常Workspaceへのcomposition契約
 
