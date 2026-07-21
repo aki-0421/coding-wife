@@ -1,6 +1,9 @@
 export const narrationSchemaVersion = 1 as const
 export const narrationSettingsSchemaVersion = 2 as const
 export const narrationMaxTextScalars = 240
+export const presenceDirectionMaxUtteranceScalars = 160
+export const presenceDirectionEventChannel =
+  "coding-wife://presence-direction" as const
 
 export const narrationCommands = {
   getSettings: "narration_get_settings",
@@ -41,6 +44,22 @@ export type NarrationCommitJobTrigger =
   | "auto_verified_commit"
   | "user_request"
   | "user_retry"
+
+export type PresenceDirectionTrigger =
+  | "decision_wait"
+  | "recoverable_failure"
+  | "terminal_failure"
+  | "long_milestone"
+  | "commit_ready"
+  | "turn_completed"
+export type PresenceDirectionCue =
+  | "neutral"
+  | "working"
+  | "asking"
+  | "success"
+  | "warning"
+  | "error"
+export type PresenceDirectionPriority = "low" | "normal" | "high"
 
 export const narrationProviders = ["openai"] as const
 export type NarrationTtsProvider = (typeof narrationProviders)[number]
@@ -210,6 +229,26 @@ export interface CommitNarrationConsumerPort {
   subscribe(listener: (event: unknown) => void): () => void
 }
 
+export interface PresenceDirectionEventV1 {
+  readonly schemaVersion: typeof narrationSchemaVersion
+  readonly requestId: string
+  readonly workspaceId: string
+  readonly workspaceGeneration: number
+  readonly sourceEventId: string
+  readonly trigger: PresenceDirectionTrigger
+  readonly locale: NarrationLocale
+  readonly utterance: string
+  readonly cue: PresenceDirectionCue
+  readonly priority: PresenceDirectionPriority
+  readonly modelRole: "presence_director"
+  readonly model: "gpt-5.6-luna"
+  readonly occurredAt: string
+}
+
+export interface PresenceDirectionConsumerPort {
+  subscribe(listener: (event: unknown) => void): () => void
+}
+
 export class NarrationContractError extends Error {
   public readonly code: string
 
@@ -299,6 +338,36 @@ function isCommitJobTrigger(
     value === "user_request" ||
     value === "user_retry"
   )
+}
+
+function isPresenceDirectionTrigger(
+  value: unknown,
+): value is PresenceDirectionTrigger {
+  return (
+    value === "decision_wait" ||
+    value === "recoverable_failure" ||
+    value === "terminal_failure" ||
+    value === "long_milestone" ||
+    value === "commit_ready" ||
+    value === "turn_completed"
+  )
+}
+
+function isPresenceDirectionCue(value: unknown): value is PresenceDirectionCue {
+  return (
+    value === "neutral" ||
+    value === "working" ||
+    value === "asking" ||
+    value === "success" ||
+    value === "warning" ||
+    value === "error"
+  )
+}
+
+function isPresenceDirectionPriority(
+  value: unknown,
+): value is PresenceDirectionPriority {
+  return value === "low" || value === "normal" || value === "high"
 }
 
 function isFullCommitSha(value: unknown): value is string {
@@ -565,6 +634,49 @@ function isRedactedText(value: unknown): value is string {
   )
 }
 
+const presenceCueAllowlist: Readonly<
+  Record<PresenceDirectionTrigger, readonly PresenceDirectionCue[]>
+> = {
+  decision_wait: ["asking", "neutral"],
+  recoverable_failure: ["warning", "neutral"],
+  terminal_failure: ["error", "warning", "neutral"],
+  long_milestone: ["working", "neutral"],
+  commit_ready: ["success", "neutral"],
+  turn_completed: ["success", "neutral"],
+}
+
+function isPresenceDirectionUtterance(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  const characters: string[] = []
+  for (const character of value) {
+    characters.push(character)
+    if (characters.length > presenceDirectionMaxUtteranceScalars) return false
+  }
+  return (
+    characters.length >= 1 &&
+    value.trim() === value &&
+    !characters.some(
+      (character) =>
+        /\p{Cc}|\p{Cf}|\p{Zl}|\p{Zp}/u.test(character) ||
+        character === "/" ||
+        character === "\\",
+    ) &&
+    !privateTextPatterns.some((pattern) => pattern.test(value)) &&
+    !/(?:https?|file|ftp):|www\./iu.test(value) &&
+    !/(?:^|\s)(?:diff\s+--git|@@|---\s|\+\+\+\s|```)/u.test(value)
+  )
+}
+
+function isRfc3339Timestamp(value: unknown): value is string {
+  return (
+    isSafeString(value, 64) &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(
+      value,
+    ) &&
+    Number.isFinite(Date.parse(value))
+  )
+}
+
 function invalid(code?: string): never {
   throw new NarrationContractError(code)
 }
@@ -821,6 +933,63 @@ export function parseCommitNarrationConsumerEvent(
     }
   }
   return invalid("NARRATION-PRESENTATION-ENVELOPE")
+}
+
+const presenceDirectionEventKeys = [
+  "schemaVersion",
+  "requestId",
+  "workspaceId",
+  "workspaceGeneration",
+  "sourceEventId",
+  "trigger",
+  "locale",
+  "utterance",
+  "cue",
+  "priority",
+  "modelRole",
+  "model",
+  "occurredAt",
+] as const
+
+export function parsePresenceDirectionEvent(
+  value: unknown,
+): PresenceDirectionEventV1 {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, presenceDirectionEventKeys) ||
+    value.schemaVersion !== narrationSchemaVersion ||
+    !isOpaqueId(value.requestId) ||
+    !isOpaqueId(value.workspaceId) ||
+    !isSafeInteger(value.workspaceGeneration) ||
+    value.workspaceGeneration < 1 ||
+    !isOpaqueId(value.sourceEventId) ||
+    !isPresenceDirectionTrigger(value.trigger) ||
+    !isLocale(value.locale) ||
+    !isPresenceDirectionUtterance(value.utterance) ||
+    !isPresenceDirectionCue(value.cue) ||
+    !presenceCueAllowlist[value.trigger].includes(value.cue) ||
+    !isPresenceDirectionPriority(value.priority) ||
+    value.modelRole !== "presence_director" ||
+    value.model !== "gpt-5.6-luna" ||
+    !isRfc3339Timestamp(value.occurredAt)
+  ) {
+    return invalid("PRESENCE-DIRECTION-ENVELOPE")
+  }
+  return {
+    schemaVersion: narrationSchemaVersion,
+    requestId: value.requestId,
+    workspaceId: value.workspaceId,
+    workspaceGeneration: value.workspaceGeneration,
+    sourceEventId: value.sourceEventId,
+    trigger: value.trigger,
+    locale: value.locale,
+    utterance: value.utterance,
+    cue: value.cue,
+    priority: value.priority,
+    modelRole: "presence_director",
+    model: "gpt-5.6-luna",
+    occurredAt: value.occurredAt,
+  }
 }
 
 export function commitNarrationSourceKey(

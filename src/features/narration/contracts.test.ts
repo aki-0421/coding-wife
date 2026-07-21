@@ -9,6 +9,7 @@ import {
   narrationSchemaVersion,
   narrationSettingsSchemaVersion,
   parseCommitNarrationConsumerEvent,
+  parsePresenceDirectionEvent,
   parseNarrationSettingsSnapshot,
   parseNarrationSpeakResponse,
   parseNarrationVoiceList,
@@ -52,6 +53,25 @@ function started(trigger = "auto_verified_commit") {
     commitSha: sha,
     requestId: "support-request-1",
     locale: "ja",
+  }
+}
+
+function presenceDirection(overrides: Readonly<Record<string, unknown>> = {}) {
+  return {
+    schemaVersion: narrationSchemaVersion,
+    requestId: "presence-request-1",
+    workspaceId: "workspace-1",
+    workspaceGeneration: 7,
+    sourceEventId: "event-42",
+    trigger: "decision_wait",
+    locale: "ja",
+    utterance: "確認が必要なところで待っています。",
+    cue: "asking",
+    priority: "high",
+    modelRole: "presence_director",
+    model: "gpt-5.6-luna",
+    occurredAt: "2026-07-21T10:00:00.000Z",
+    ...overrides,
   }
 }
 
@@ -100,6 +120,48 @@ describe("narration contracts", () => {
         text: "検証済みの変更を説明します。",
       }),
     ).toMatchObject({ kind: "chunk", sequence: 0 })
+  })
+
+  it("accepts exact Luna presence events and trigger-specific semantic cues", () => {
+    const cases = [
+      ["decision_wait", "asking"],
+      ["recoverable_failure", "warning"],
+      ["terminal_failure", "error"],
+      ["long_milestone", "working"],
+      ["commit_ready", "success"],
+      ["turn_completed", "neutral"],
+    ] as const
+
+    for (const [trigger, cue] of cases) {
+      expect(
+        parsePresenceDirectionEvent(presenceDirection({ trigger, cue })),
+      ).toMatchObject({ trigger, cue, model: "gpt-5.6-luna" })
+    }
+  })
+
+  it("rejects unsafe, extended, cross-role, and mismatched presence events", () => {
+    const invalidEvents = [
+      presenceDirection({ extra: true }),
+      presenceDirection({ schemaVersion: 2 }),
+      presenceDirection({ workspaceGeneration: 0 }),
+      presenceDirection({ trigger: "routine_tool" }),
+      presenceDirection({ trigger: "decision_wait", cue: "success" }),
+      presenceDirection({ modelRole: "main_session" }),
+      presenceDirection({ model: "gpt-5.6" }),
+      presenceDirection({ locale: "fr" }),
+      presenceDirection({ utterance: "password=private-value" }),
+      presenceDirection({ utterance: "See src/private/file.ts" }),
+      presenceDirection({ utterance: "See https://example.com" }),
+      presenceDirection({ utterance: "first line\nsecond line" }),
+      presenceDirection({ utterance: "🦀".repeat(161) }),
+      presenceDirection({ occurredAt: "not-a-time" }),
+    ]
+
+    for (const event of invalidEvents) {
+      expect(() => parsePresenceDirectionEvent(event)).toThrowError(
+        "PRESENCE-DIRECTION-ENVELOPE",
+      )
+    }
   })
 
   it("rejects unknown fields, invalid speed steps, and malformed native values", () => {
