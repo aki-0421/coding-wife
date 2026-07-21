@@ -141,7 +141,9 @@
         "required": ["method", "params"],
         "properties": {
           "method": { "type": "string", "enum": ["serverRequest/resolved"] },
-          "params": { "$ref": "#/definitions/ServerRequestResolvedNotification" }
+          "params": {
+            "$ref": "#/definitions/ServerRequestResolvedNotification"
+          }
         }
       },
       {
@@ -430,10 +432,7 @@
         "items": { "$ref": "#/definitions/AbsolutePathBuf" }
       },
       "sandboxPolicy": {
-        "anyOf": [
-          { "$ref": "#/definitions/SandboxPolicy" },
-          { "type": "null" }
-        ]
+        "anyOf": [{ "$ref": "#/definitions/SandboxPolicy" }, { "type": "null" }]
       },
       "threadId": { "type": "string" }
     },
