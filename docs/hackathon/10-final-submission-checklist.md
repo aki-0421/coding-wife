@@ -23,9 +23,13 @@ last_verified: 2026-07-22 JST
 - [x] `v0.1.5` は現行3-model/UIの証拠ではなく、older previewとして区別する
 - [x] `gpt-5.6-sol` がmain coding sessionを担う
 - [x] `gpt-5.6-luna` がprivacy checkを通るlive completed main messageからcaption・Live2D expression/motion・任意TTSを作る
-- [x] `gpt-5.6-terra` が**Explain changes**からread-only commit evidenceを説明する
+- [x] Reachable commit verification後、native controllerが`gpt-5.6-terra`をbounded read-only evidenceでsilent background startする
+- [x] **Explain changes**はcached explanationをpresentするか同じrunning Terra jobをreuseし、最初のhandoffを開始しない
 - [x] Chat UIは名前・時刻・成功checkを省き、failureだけを控えめな赤背景で示す
 - [x] Git UIはGitHub-style **Commit changes**としてcommit・file・`+/-`・unified diffへ情報を絞る
+- [x] Primary current full three-model judge targetはmacOS 14+ Apple Silicon
+- [x] Windows 11 x64とUbuntu 22.04 / Debian 12-compatible Linux x64はinstall-smoked packaging previewで、production Luna/Terra parityを保証しない
+- [x] Optional OpenAI TTS playbackはmacOS-only
 - [x] Hosted demoとjudge accountは必須の構成要素ではない
 
 ## 2. Source freezeとcurrent release — 最優先
@@ -34,13 +38,13 @@ last_verified: 2026-07-22 JST
 - [ ] `git status --short` で意図しない変更がないことを確認する
 - [ ] 最終source commitをpushし、公開repositoryから取得できることを確認する
 - [ ] Frozen source SHAを記録する
-- [ ] Frozen sourceから**現行機能を含む新しいrelease**を作る
+- [ ] Frozen sourceから**現行full-flowを含むmacOS 14+ Apple Silicon release**を作る
 - [ ] Release artifactのSHA-256を計算し、download後のSHA-256と一致させる
-- [ ] Release notesへsupported platformsと、署名・notarization・既知制約の正確な状態を書く
-- [ ] Fresh installでSol → Luna → Commit changes → Terraの流れを確認する
-- [ ] Current release URLとSHA-256を最終提出資料へ記録する
+- [ ] Release notesへmacOS full-flow scope、Windows/Linux preview scope、TTS macOS-only、署名・notarization・既知制約を書く
+- [ ] macOS 14+ Apple Siliconのfresh installでSol → Luna → reachable commit verification → silent Terra background generation → Commit changes → explicit explanation presentationを確認する
+- [ ] Current macOS Apple Silicon judge release URLとSHA-256を最終提出資料へ記録する
 
-`v0.1.5`だけで提出を閉じないでください。Developer Toolsはjudgeがゼロからrebuildせず試せるpathを必要とするため、現行releaseがsource-only説明より優先です。
+`v0.1.5`だけで提出を閉じないでください。Developer Toolsはjudgeがゼロからrebuildせず試せるpathを必要とするため、現行macOS 14+ Apple Silicon full-flow releaseがsource-only説明より優先です。Windows/Linux previewをfull three-model judge pathの代替にしません。
 
 ## 3. 3分未満のデモ動画
 
@@ -48,9 +52,10 @@ last_verified: 2026-07-22 JST
 - [ ] 実native appとdisposable repositoryを使う
 - [ ] Solがmain taskを実行する場面を見せる
 - [ ] 少なくとも2回、eligible completed main messageごとのLuna captionとLive2D expression/motionを見せる
-- [ ] TTSを見せる場合、設定済みにしてkey画面は録画しない
+- [ ] macOS-only TTSを見せる場合、設定済みにしてkey画面は録画しない
 - [ ] GitHub-style **Commit changes**でcommit、file、`+/-`、diffを見せる
-- [ ] **Explain changes**を押し、Terraの結果を見せる
+- [ ] Reachable commit verification後にTerraがsilent background startすることを説明する
+- [ ] **Explain changes**を押し、cached resultのpresentationまたは同じrunning jobのreuseを見せる。最初のTerra handoffとして説明しない
 - [ ] Codexをどう使って構築したかとhuman decisionsを音声で具体的に説明する
 - [ ] English audioが明瞭で、最終尺が**3:00未満**である
 - [ ] key、token、email、notification、personal path、private URLが映っていない
@@ -78,7 +83,7 @@ Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updat
 - [ ] Track: **Developer Tools**
 - [ ] English descriptionを本人の声として読み直して入力する
 - [ ] Repository URL: https://github.com/aki-0421/coding-wife
-- [ ] Current release URLとtesting instructionsを入力する
+- [ ] Current macOS Apple Silicon full-flow release URLとtesting instructionsを入力する
 - [ ] Public YouTube URLを入力する
 - [ ] Primary Codex Session IDを入力する
 - [ ] Entrant情報、または全team memberとRepresentativeを確定する
@@ -96,12 +101,13 @@ Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updat
 
 - [ ] Devpost projectが開き、Submitted状態と全リンクを確認できる
 - [ ] Public repositoryが開き、frozen commit、README、MIT license、noticesが確認できる
-- [ ] Current releaseを認証なしでdownloadできる
+- [ ] Current macOS Apple Silicon judge releaseを認証なしでdownloadできる
 - [ ] Downloaded artifactのSHA-256が公開値と一致する
-- [ ] Fresh installから主要flowを完了できる
+- [ ] macOS 14+ Apple Siliconのfresh installからfull three-model flowを完了できる
 - [ ] Videoをログアウト状態で再生でき、3分未満・English audio・privacyを確認できる
 - [ ] Session IDがprimary threadの記録と一致する
-- [ ] Description、video、README、releaseが同じmodel rolesとUIを説明している
+- [ ] Description、video、README、current macOS releaseが同じmodel rolesとUIを説明している
+- [ ] Windows/Linux artifactはpackaging previewと表示され、production Luna/Terra parityの証拠に使われていない
 - [ ] Anonymous smokeの実施者・時刻・結果を保存する
 
 ## 7. Conditional — 未該当ならblockerにしない
@@ -116,8 +122,8 @@ Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updat
 
 次がすべてYesなら提出完了です。
 
-- [ ] Current frozen releaseをjudgeがrebuildせず試せる
-- [ ] VideoでSol、Luna、Terraの役割とworking flowが分かる
+- [ ] Current frozen macOS 14+ Apple Silicon releaseをjudgeがrebuildせず試せる
+- [ ] VideoでSol、Luna、silent automatic Terra generation、explicit presentationの役割とworking flowが分かる
 - [ ] Root READMEだけでsetup、testing、model integration、Codex contribution、limitationsが分かる
 - [ ] Session IDがformへ入っている
 - [ ] DevpostがSubmittedになっている

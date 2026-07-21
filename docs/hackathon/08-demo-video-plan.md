@@ -15,9 +15,9 @@ last_verified: 2026-07-22 JST
 - **Target:** 2:50
 - **Hard limit:** 3:00未満。Official Rulesの “less than three minutes” を採用する
 - **Audio:** 明瞭なEnglish voiceover必須
-- **Build:** Frozen sourceから作ったcurrent native build
+- **Build:** Frozen sourceから作ったmacOS 14+ Apple Silicon current native build
 - **Data:** 個人情報を含まないdisposable Git repository
-- **Story:** Sol main session → privacy checkを通るcompleted messageごとのLuna/Live2D → GitHub-style Commit changes → Terra Explain changes
+- **Story:** Sol main session → privacy checkを通るcompleted messageごとのLuna/Live2D → reachable commit verification後のsilent Terra background generation → GitHub-style Commit changes → explicit explanation presentation
 
 2026-07-22の最新UpdateはYouTubeのUnlistedを許容しますが、Official Rulesはpublicly visible、FAQはpublicと記載します。矛盾を避ける安全側の設定は **Public** です。
 
@@ -31,9 +31,9 @@ last_verified: 2026-07-22 JST
 | 0:58–1:22 | 2つのeligible completed progress messageと、それぞれのLuna caption・expression/motionを見せる。任意TTSは1回だけ聞かせる。 | “Each safe completed Sol message triggers a separate GPT-5.6 Luna turn. Luna sees only a bounded sanitized excerpt, has no tools, and returns a short reaction that drives the caption, Live2D expression, motion, and optional speech.” |
 | 1:22–1:35 | Tool kindとcommand nameだけのrowを見せる。可能ならrehearsed failureの薄い赤背景を短く見せる。 | “Tool activity is reduced to its type and command. Successful execution stays quiet; a failure is the only state that receives a warning background.” |
 | 1:35–2:00 | **Commit changes**を開き、commitとfileを選び、`+/-`とline-number付きunified diffを見せる。 | “After Sol commits, the Git tab uses the information density of GitHub’s commit changes view: commit summary, changed files, additions and deletions, and a unified diff with old and new line numbers.” |
-| 2:00–2:18 | **Explain changes**を押し、Terraの説明を見せる。 | “When I choose Explain changes, GPT-5.6 Terra receives bounded read-only Git evidence and explains the patch. Terra is isolated from the write-capable session and cannot change the repository.” |
+| 2:00–2:18 | Reachable commit verificationでTerraが既にsilent background startしたことを示し、**Explain changes**でcached/running resultをpresentする。 | “When this commit became reachable and verified, the native controller started Terra silently in the background. Explain changes presents that cache, or waits for the same running job; it never starts the first handoff or grants write access.” |
 | 2:18–2:36 | Sol/Luna/Terraの3-role図、または3つのexact model IDを含む読みやすいcodeを見せる。 | “Sol builds, Luna maintains presence, and Terra reduces review effort. Typed TypeScript and Rust contracts pin all three models, validate their inputs and outputs, redact unsafe text, and fail closed.” |
-| 2:36–2:50 | Codex implementation/test/QAの短いmontageからclosing cardへ。 | “We used Codex to implement, debug, test, and QA this pipeline. Humans chose the trust boundaries and review experience. The repository, release, and testing instructions are included in the submission.” |
+| 2:36–2:50 | Codex implementation/test/QAの短いmontageからplatform-accurate closing cardへ。 | “We used Codex to implement, debug, test, and QA this pipeline, while humans chose its trust boundaries. The full judge path targets macOS 14 on Apple Silicon; Windows and Linux packages are install-smoked previews.” |
 
 ## 3. Rehearsal setup
 
@@ -48,11 +48,13 @@ last_verified: 2026-07-22 JST
 ### Prepare the app
 
 - English localeを選ぶ。
+- Full three-model demoはmacOS 14+ Apple Siliconで行う。Windows/Linux packageはinstall smoke済みpreviewであり、同等のproduction Luna/Terra動作をclaimしない。
 - Live2Dが確実にrenderされることを確認する。
 - Luna caption、expression、motionを確認する。
-- TTSを使う場合だけ録画前に設定し、key入力画面は閉じる。
+- macOS-only TTSを使う場合だけ録画前に設定し、key入力画面は閉じる。
 - **Commit changes**でcommit selector、file selector/search、diffが読みやすいwindow sizeを選ぶ。
-- **Explain changes**がTerraを呼び、current commitの説明を返すことを確認する。
+- Reachable commit verification後、native controllerがTerraをsilent background startすることを確認する。
+- **Explain changes**がcached explanationをpresentするか、同じrunning jobへpresentation intentを結び付けることを確認する。最初のTerra handoffをこの操作から開始しない。
 
 ### Prepare the desktop
 
@@ -67,20 +69,22 @@ last_verified: 2026-07-22 JST
 - [ ] Solがreal repository taskを実行する
 - [ ] Lunaがprivacy checkを通る**completed message**ごとに反応し、token streamごとの雑音になっていない
 - [ ] LunaのcaptionとLive2D expression/motionが対応する
-- [ ] Optional TTSを使う場合、captionと同じ安全な内容だけを読む
+- [ ] Optional macOS-only TTSを使う場合、captionと同じ安全な内容だけを読む
 - [ ] Chatにspeaker name、timestamp、成功checkがない
 - [ ] Toolはkind iconとcommand nameに絞られている
 - [ ] **Commit changes**にcommit、file、`+/-`、line numbers、unified diffがある
-- [ ] **Explain changes**の結果がTerraである
+- [ ] Reachable commit verification後にTerraがsilent background startしている
+- [ ] **Explain changes**はcached resultをpresentするか同じrunning jobをreuseし、最初のTerra handoffを開始しない
 - [ ] Sol/Luna/Terraのexact model IDを音声または画面で確認できる
 - [ ] Codexが実装・debug・test・QAへどう寄与したか説明する
 - [ ] Humanがauthority separationとreview UXを決めたと説明する
-- [ ] Repository、current release、supported platformsをclosing cardに載せる
+- [ ] Repository、current macOS Apple Silicon release、Windows/Linux preview scopeをclosing cardに載せる
 
 ## 5. Do not show or say
 
 - Older `v0.1.5` previewをcurrent feature buildとして見せない
 - Solがcommit explanationを行うとは言わない
+- **Explain changes**が最初のTerra generationをtriggerするとは言わない
 - Lunaがraw code、diff、path、secretを読むとは言わない
 - Internal observer、gate、producer、persisted property、risk tableをGit UIの価値として説明しない
 - Speaker name、timestamp、success badgeがある旧Chat UIを使わない
@@ -108,7 +112,10 @@ last_verified: 2026-07-22 JST
 | Duration is below 3:00 | Record after export |
 | English narration is audible | Record after playback |
 | Sol/Luna/Terra roles are accurate | Record after content review |
-| Current UI and current release match | Record after freeze |
+| Terra auto-generation and explicit presentation are distinct | Record after content review |
+| Full-flow platform is macOS 14+ Apple Silicon | Record after release review |
+| Windows/Linux are labeled packaging previews | Record after release review |
+| Current macOS UI and full-flow release match | Record after freeze |
 | No secret or private data appears | Record after frame review |
 | YouTube plays while logged out | Record after publication |
 
