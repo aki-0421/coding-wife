@@ -1,7 +1,10 @@
 import type { PendingRequestView } from "@/lib/contracts"
 import type { PersistedTimelineEvent } from "@/lib/contracts/workspace-history"
 import { unicodeScalarCount } from "@/lib/public-text"
-import type { CodexSemanticTimelineEvent } from "@/features/codex/event-projection"
+import {
+  sanitizeToolSummary,
+  type CodexSemanticTimelineEvent,
+} from "@/features/codex/event-projection"
 
 const maxToolTextScalars = 16 * 1024
 
@@ -246,7 +249,7 @@ export class PersistedCodexEventProjector {
           toolKind: stringField(payload, "toolKind"),
           providerName: payload.providerName as string | null,
           toolName: stringField(payload, "toolName"),
-          summary: payload.summary as string | null,
+          summary: sanitizeToolSummary(payload.summary as string | null),
           durationMs: payload.durationMs as number | null,
         }
         this.toolMetadata.set(stable, metadata)

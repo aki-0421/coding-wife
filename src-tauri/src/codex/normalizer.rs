@@ -13,6 +13,7 @@ use super::types::{
 };
 
 const MAX_EVENT_BYTES: usize = 256 * 1024;
+const MAX_ASSISTANT_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_TOOL_EXCERPT_BYTES: usize = 4 * 1024;
 const MAX_TOOL_NAME_BYTES: usize = 128;
 const MAX_TOOL_SUMMARY_BYTES: usize = 512;
@@ -251,9 +252,18 @@ impl EventNormalizer {
                 }
                 let item_handle = self.item_handle(item_id);
                 if method == "item/completed" && item_type == "agentMessage" {
-                    let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
-                    match parse_completed_output(text, &self.workspace_root) {
-                        Ok(DecisionOutput::Result { message }) => {
+                    let text = item
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .ok_or(NormalizeError::InvalidParams)?;
+                    let commentary = match item.get("phase") {
+                        None | Some(Value::Null) => false,
+                        Some(Value::String(phase)) if phase == "commentary" => true,
+                        Some(Value::String(phase)) if phase == "final_answer" => false,
+                        _ => return Err(NormalizeError::InvalidParams),
+                    };
+                    if commentary {
+                        if let Some(message) = commentary_message(text, &self.workspace_root) {
                             outcome.events.push(self.event(
                                 CodexEventPayload::AgentMessageCompleted {
                                     item_handle,
@@ -261,14 +271,25 @@ impl EventNormalizer {
                                 },
                             )?);
                         }
-                        Ok(DecisionOutput::Request { view }) => {
-                            outcome.fallback_decision = Some(*view);
-                        }
-                        Err(_) => {
-                            outcome.decision_violation = true;
-                            outcome.events.push(
-                                self.diagnostic_event("CODEX-DECISION-OUTPUT-INVALID", false)?,
-                            );
+                    } else {
+                        match parse_completed_output(text, &self.workspace_root) {
+                            Ok(DecisionOutput::Result { message }) => {
+                                outcome.events.push(self.event(
+                                    CodexEventPayload::AgentMessageCompleted {
+                                        item_handle,
+                                        text: message,
+                                    },
+                                )?);
+                            }
+                            Ok(DecisionOutput::Request { view }) => {
+                                outcome.fallback_decision = Some(*view);
+                            }
+                            Err(_) => {
+                                outcome.decision_violation = true;
+                                outcome.events.push(
+                                    self.diagnostic_event("CODEX-DECISION-OUTPUT-INVALID", false)?,
+                                );
+                            }
                         }
                     }
                 } else if ["commandExecution", "mcpToolCall", "webSearch"].contains(&item_type) {
@@ -531,8 +552,35 @@ struct ToolMetadata {
     summary: Option<String>,
 }
 
+fn safe_multiline(value: &str, workspace_root: &Path, maximum: usize) -> Option<String> {
+    let redaction_limit = maximum.saturating_sub('…'.len_utf8());
+    let sanitized = redact_text(value, Some(workspace_root), redaction_limit)
+        .chars()
+        .map(|character| match character {
+            '\n' | '\t' => character,
+            '\r' => '\n',
+            value if value.is_control() => ' ',
+            value => value,
+        })
+        .collect::<String>();
+    let sanitized = sanitized.trim();
+    (!sanitized.is_empty()).then(|| sanitized.to_owned())
+}
+
+fn commentary_message(text: &str, workspace_root: &Path) -> Option<String> {
+    match parse_completed_output(text, workspace_root) {
+        Ok(DecisionOutput::Result { message }) => {
+            safe_multiline(&message, workspace_root, MAX_ASSISTANT_MESSAGE_BYTES)
+        }
+        Ok(DecisionOutput::Request { .. }) => None,
+        Err(_) if serde_json::from_str::<Value>(text).is_ok() => None,
+        Err(_) => safe_multiline(text, workspace_root, MAX_ASSISTANT_MESSAGE_BYTES),
+    }
+}
+
 fn safe_single_line(value: &str, workspace_root: &Path, maximum: usize) -> Option<String> {
-    let sanitized = redact_text(value, Some(workspace_root), maximum)
+    let redaction_limit = maximum.saturating_sub('…'.len_utf8());
+    let sanitized = redact_text(value, Some(workspace_root), redaction_limit)
         .chars()
         .map(|character| {
             if character.is_control() {
@@ -548,12 +596,15 @@ fn safe_single_line(value: &str, workspace_root: &Path, maximum: usize) -> Optio
     (!sanitized.is_empty()).then_some(sanitized)
 }
 
-fn credential_argument_key(key: &str) -> bool {
-    let normalized = key
-        .chars()
+fn normalized_argument_key(key: &str) -> String {
+    key.chars()
         .filter(|character| character.is_ascii_alphanumeric())
         .flat_map(|character| character.to_lowercase())
-        .collect::<String>();
+        .collect::<String>()
+}
+
+fn credential_argument_key(key: &str) -> bool {
+    let normalized = normalized_argument_key(key);
     [
         "authorization",
         "apikey",
@@ -575,6 +626,37 @@ fn credential_argument_key(key: &str) -> bool {
     .any(|sensitive| normalized == *sensitive || normalized.ends_with(sensitive))
 }
 
+fn source_body_argument_key(key: &str) -> bool {
+    matches!(
+        normalized_argument_key(key).as_str(),
+        "code" | "script" | "expression" | "source" | "sourcecode"
+    )
+}
+
+fn target_argument_key(key: &str) -> bool {
+    matches!(
+        normalized_argument_key(key).as_str(),
+        "title" | "query" | "refid" | "url" | "path" | "name" | "file" | "filename" | "target"
+    )
+}
+
+fn argument_summary_priority(key: &str) -> u8 {
+    if target_argument_key(key) {
+        0
+    } else if credential_argument_key(key) || source_body_argument_key(key) {
+        2
+    } else {
+        1
+    }
+}
+
+fn summarize_source_body(value: &Value, workspace_root: &Path) -> String {
+    match value {
+        Value::String(text) => format!("<{} chars>", text.chars().count()),
+        value => summarize_argument_value(value, workspace_root),
+    }
+}
+
 fn summarize_argument_value(value: &Value, workspace_root: &Path) -> String {
     match value {
         Value::String(text) => {
@@ -590,20 +672,26 @@ fn summarize_argument_value(value: &Value, workspace_root: &Path) -> String {
 
 fn summarize_arguments(arguments: &Value, workspace_root: &Path) -> Option<String> {
     let summary = match arguments {
-        Value::Object(fields) => fields
-            .iter()
-            .take(4)
-            .filter_map(|(key, value)| {
-                let safe_key = safe_single_line(key, workspace_root, 64)?;
-                let safe_value = if credential_argument_key(key) {
-                    "[redacted]".to_owned()
-                } else {
-                    summarize_argument_value(value, workspace_root)
-                };
-                Some(format!("{safe_key}={safe_value}"))
-            })
-            .collect::<Vec<_>>()
-            .join(" · "),
+        Value::Object(fields) => {
+            let mut fields = fields.iter().collect::<Vec<_>>();
+            fields.sort_by_key(|(key, _)| argument_summary_priority(key));
+            fields
+                .into_iter()
+                .take(4)
+                .filter_map(|(key, value)| {
+                    let safe_key = safe_single_line(key, workspace_root, 64)?;
+                    let safe_value = if credential_argument_key(key) {
+                        "[redacted]".to_owned()
+                    } else if source_body_argument_key(key) {
+                        summarize_source_body(value, workspace_root)
+                    } else {
+                        summarize_argument_value(value, workspace_root)
+                    };
+                    Some(format!("{safe_key}={safe_value}"))
+                })
+                .collect::<Vec<_>>()
+                .join(" · ")
+        }
         value => summarize_argument_value(value, workspace_root),
     };
     safe_single_line(&summary, workspace_root, MAX_TOOL_SUMMARY_BYTES)
@@ -762,6 +850,7 @@ mod tests {
                 &json!({"item": {
                     "id": "raw-item-id",
                     "type": "agentMessage",
+                    "phase": "final_answer",
                     "text": "Approve this request"
                 }}),
                 100,
@@ -772,6 +861,50 @@ mod tests {
         assert!(outcome.decision_violation);
         assert!(encoded.contains("CODEX-DECISION-OUTPUT-INVALID"));
         assert!(!encoded.contains("Approve this request"));
+    }
+
+    #[test]
+    fn completed_commentary_is_rendered_without_interrupting_the_turn() {
+        let mut normalizer = EventNormalizer::new(
+            "workspace-1".to_owned(),
+            PathBuf::from("/\u{0055}sers/alice/project"),
+            1,
+        );
+        let plain = normalizer
+            .normalize(
+                "item/completed",
+                &json!({"item": {
+                    "id": "commentary-plain",
+                    "type": "agentMessage",
+                    "phase": "commentary",
+                    "text": "依存関係ファイルを確認します。 Bearer private-token /\u{0055}sers/alice/project/package.json"
+                }}),
+                200,
+            )
+            .expect("plain commentary");
+        let plain_encoded = serde_json::to_string(&plain.events).expect("plain JSON");
+        assert!(!plain.decision_violation);
+        assert!(plain_encoded.contains("依存関係ファイルを確認します。"));
+        assert!(!plain_encoded.contains("private-token"));
+        assert!(!plain_encoded.contains("/\u{0055}sers/alice"));
+
+        let structured = normalizer
+            .normalize(
+                "item/completed",
+                &json!({"item": {
+                    "id": "commentary-structured",
+                    "type": "agentMessage",
+                    "phase": "commentary",
+                    "text": r#"{"schemaVersion":1,"kind":"result","message":"READMEと設定を確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}"#
+                }}),
+                300,
+            )
+            .expect("structured commentary");
+        let structured_encoded =
+            serde_json::to_string(&structured.events).expect("structured JSON");
+        assert!(!structured.decision_violation);
+        assert!(structured_encoded.contains("READMEと設定を確認します。"));
+        assert!(!structured_encoded.contains("allowFreeform"));
     }
 
     #[test]
@@ -914,6 +1047,39 @@ mod tests {
         let completed = serde_json::to_value(&completed.events[0]).expect("completion JSON");
         assert_eq!(completed["payload"]["status"], "failed");
         assert_eq!(completed["payload"]["durationMs"], 240);
+    }
+
+    #[test]
+    fn mcp_tool_summary_prioritizes_title_and_does_not_inline_source_code() {
+        let mut normalizer =
+            EventNormalizer::new("workspace-1".to_owned(), PathBuf::from("/workspace"), 1);
+        let outcome = normalizer
+            .normalize(
+                "item/started",
+                &json!({"item": {
+                    "id": "raw-mcp-item",
+                    "type": "mcpToolCall",
+                    "server": "node-repl",
+                    "tool": "run",
+                    "arguments": {
+                        "code": "var fs = await import('node:fs/promises'); nodeRepl.write('private source');",
+                        "title": "依存関係ファイルを確認"
+                    },
+                    "status": "inProgress"
+                }}),
+                300,
+            )
+            .expect("MCP code summary");
+        let summary = serde_json::to_value(&outcome.events[0]).expect("event JSON");
+        let summary = summary["payload"]["summary"]
+            .as_str()
+            .expect("tool summary");
+
+        assert!(summary.starts_with("title=依存関係ファイルを確認"));
+        assert!(summary.contains("code=<"));
+        assert!(summary.contains(" chars>"));
+        assert!(!summary.contains("node:fs"));
+        assert!(!summary.contains("private source"));
     }
 
     #[test]

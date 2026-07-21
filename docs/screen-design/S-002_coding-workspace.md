@@ -117,7 +117,9 @@ Chatは保存済みeventの監査一覧ではなく、現在の会話を理解�
 | Decision / Approval | question、reason、impact、reversibility | options、Other、hold/interrupt/approve条件 | answer |
 | Error / Interrupted | code、影響、保持data、回復操作 | safe detail、retry condition、diagnostic ref | retry、modify、stop、diagnostic |
 
-MCP toolはApp Server itemの`server`と`tool`をredact・長さ制限したsemantic fieldへ分離し、compact rowを`提供元 · 実tool名 · 安全な対象要約 · 状態 · 所要時間 · 時刻`の順に構成する。内部item typeの`mcpToolCall`をtool名として表示しない。引数はtop-level scalarを最大4件まで一行要約し、credential相当keyは値を常に`[redacted]`へ置換する。array/objectは内容を展開せず件数だけを示し、raw JSON、MCP result content、secret、absolute private pathをWebViewまたは履歴へ渡さない。commandとweb searchも同じsemantic tool statusへ正規化し、commandはredact済み一行command、web searchはredact済みqueryをtarget summaryにする。旧`code.item.status.changed` tool履歴は互換表示できるが、新規tool statusはprovider/tool/summary/durationを持つ`code.tool.status.changed`を正本にする。
+MCP toolはApp Server itemの`server`と`tool`をredact・長さ制限したsemantic fieldへ分離し、compact rowを`提供元 · 実tool名 · 安全な対象要約 · 状態 · 所要時間 · 時刻`の順に構成する。内部item typeの`mcpToolCall`をtool名として表示しない。引数はtop-level scalarを最大4件まで一行要約し、`title`、`query`、`ref_id`等の人向けtargetを優先する。credential相当keyは値を常に`[redacted]`へ置換し、`code`、`script`、`expression`等のsource bodyは本文でなく文字数だけを示す。array/objectは内容を展開せず件数だけを示し、raw JSON、MCP result content、secret、absolute private pathをWebViewまたは履歴へ渡さない。commandとweb searchも同じsemantic tool statusへ正規化し、commandはredact済み一行command、web searchはredact済みqueryをtarget summaryにする。旧`code.item.status.changed` tool履歴は互換表示できるが、新規tool statusはprovider/tool/summary/durationを持つ`code.tool.status.changed`を正本にする。
+
+App Serverの`agentMessage.phase=commentary`はturn途中のassistant messageとして会話へ表示し、後続toolまたは最終回答を待つ。commentary itemの完了を最終Structured Output違反として`CODEX-TURN-INTERRUPTED`へ変換してはならない。`phase=final_answer`またはphaseなしの完了itemだけを最終回答として扱い、厳格検証済み`result.message`を会話の最後へ表示する。
 
 連続する同種tool eventは同一work unit内だけgroup化し、running数とterminal数を見出しへ出す。groupを閉じてもerror、decision、verification failureを隠さない。toolのstdout/stderr全文、hidden reasoning、secret、home directory、unredacted promptは表示・保存しない。
 

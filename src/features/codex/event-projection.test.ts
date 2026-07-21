@@ -236,6 +236,36 @@ describe("CodexEventProjector", () => {
     )
   })
 
+  it("does not project or persist inline source bodies from tool summaries", () => {
+    const projected = new CodexEventProjector().project(
+      event(1, {
+        kind: "tool_status",
+        payload: {
+          itemHandle: "item-tool",
+          toolKind: "mcpToolCall",
+          providerName: "node-repl",
+          toolName: "run",
+          summary:
+            "code=var fs = await import('node:fs/promises') · title=依存関係ファイルを確認",
+          durationMs: null,
+          status: "running",
+        },
+      }),
+    )
+
+    expect(projected.timeline).toMatchObject({
+      kind: "tool",
+      summary: "title=依存関係ファイルを確認 · code=<source hidden>",
+    })
+    expect(projected.history).toMatchObject({
+      kind: "code.tool.status.changed",
+      payload: {
+        summary: "title=依存関係ファイルを確認 · code=<source hidden>",
+      },
+    })
+    expect(JSON.stringify(projected)).not.toContain("node:fs/promises")
+  })
+
   it("creates one durable user instruction only after turn acceptance", () => {
     const projection = projectAcceptedUserTurn({
       eventId: "message-fixture",

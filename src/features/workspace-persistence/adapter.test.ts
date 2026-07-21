@@ -145,7 +145,8 @@ describe("PersistentWorkspaceViewAdapter", () => {
             toolKind: "mcpToolCall",
             providerName: "browser",
             toolName: "open",
-            summary: "ref_id=page-safe",
+            summary:
+              "code=var fs = await import('node:fs/promises') · ref_id=page-safe",
             durationMs: null,
             status: "running",
           }),
@@ -162,7 +163,8 @@ describe("PersistentWorkspaceViewAdapter", () => {
             toolKind: "mcpToolCall",
             providerName: "browser",
             toolName: "open",
-            summary: "ref_id=page-safe",
+            summary:
+              "code=var fs = await import('node:fs/promises') · ref_id=page-safe",
             durationMs: 240,
             status: "completed",
           }),
@@ -229,11 +231,12 @@ describe("PersistentWorkspaceViewAdapter", () => {
       toolKind: "mcpToolCall",
       providerName: "browser",
       toolName: "open",
-      summary: "ref_id=page-safe",
+      summary: "ref_id=page-safe · code=<source hidden>",
       durationMs: 240,
       excerpt: "first line\nsecond 😀",
       sourceSequence: 4,
     })
+    expect(JSON.stringify(projected.timeline)).not.toContain("node:fs/promises")
     expect(projected.timeline[1]).toMatchObject({
       kind: "file",
       status: "completed",

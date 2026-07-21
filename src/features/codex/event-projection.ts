@@ -237,6 +237,25 @@ function legacyToolMetadata(toolKind: string) {
   } as const
 }
 
+export function sanitizeToolSummary(summary: string | null): string | null {
+  if (summary === null) return null
+  const parts = summary.split(" · ").map((part) => {
+    const match = /^(code|script|expression|source|sourcecode)=(.*)$/iu.exec(
+      part,
+    )
+    if (match === null) return part
+    const value = match[2]?.trim() ?? ""
+    if (/^<\d+ chars>$/u.test(value)) return part
+    return `${match[1]}=<source hidden>`
+  })
+  parts.sort((left, right) => {
+    const target =
+      /^(title|query|ref_?id|url|path|name|file|filename|target)=/iu
+    return Number(target.test(right)) - Number(target.test(left))
+  })
+  return parts.join(" · ")
+}
+
 export class CodexEventProjector {
   private readonly assistantText = new Map<string, string>()
   private readonly toolText = new Map<string, string>()
@@ -347,7 +366,7 @@ export class CodexEventProjector {
           toolKind: event.payload.toolKind,
           providerName: event.payload.providerName,
           toolName: event.payload.toolName,
-          summary: event.payload.summary,
+          summary: sanitizeToolSummary(event.payload.summary),
           durationMs: event.payload.durationMs,
         }
         this.toolMetadata.set(stable, metadata)
