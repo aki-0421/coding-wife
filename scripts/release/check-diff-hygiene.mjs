@@ -25,6 +25,7 @@ const ALLOWED_BINARY_PATHS = new Set([
   "src-tauri/icons/128x128.png",
   "src-tauri/icons/128x128@2x.png",
   "src-tauri/icons/icon.icns",
+  "src-tauri/icons/icon.ico",
   "src-tauri/resources/characters/builtin-hiyori/runtime/hiyori_pro_t11.moc3",
   "src-tauri/resources/characters/builtin-hiyori/runtime/hiyori_pro_t11.2048/texture_00.png",
   "src-tauri/resources/characters/builtin-hiyori/runtime/hiyori_pro_t11.2048/texture_01.png",

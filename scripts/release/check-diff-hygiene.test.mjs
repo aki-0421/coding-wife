@@ -338,6 +338,11 @@ test("only explicit application binary assets and env examples pass policy", asy
     "src-tauri/icons/32x32.png",
     Buffer.from([0, 1, 2, 3]),
   )
+  await writeRelative(
+    root,
+    "src-tauri/icons/icon.ico",
+    Buffer.from([0, 1, 2, 3]),
+  )
   await writeRelative(root, ".env.example", "SAFE_EXAMPLE=value\n")
   git(root, ["add", "--all"])
   git(root, ["commit", "-q", "-m", "test: add explicit assets"])
