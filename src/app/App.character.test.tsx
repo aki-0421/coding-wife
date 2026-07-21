@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { App } from "@/app/App"
 import {
@@ -27,6 +27,7 @@ import type {
   WorkspaceCodexState,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
+import { characterCompletionDwellMs } from "@/features/workspace-view/workspace-character-state"
 
 const live2dCalls = vi.hoisted(() => [] as Live2dCharacterProps[])
 const reportedPresentations = vi.hoisted(() => new Set<string>())
@@ -86,6 +87,8 @@ describe("default App character integration", () => {
     live2dCalls.length = 0
     reportedPresentations.clear()
   })
+
+  afterEach(() => vi.useRealTimers())
 
   it("updates state generations without remounting for turns and workspaces", async () => {
     const user = userEvent.setup()
@@ -172,10 +175,25 @@ describe("default App character integration", () => {
     expect(actingGeneration).toBeGreaterThan(initialGeneration)
     expect(screen.getByTestId("live2d-character")).toBe(initialNode)
 
-    fireEvent.click(await screen.findByRole("button", { name: "Stop" }))
-    await waitFor(() => expect(latestLive2dProps()?.state).toBe("idle"))
+    const stop = await screen.findByRole("button", { name: "Stop" })
+    vi.useFakeTimers()
+    fireEvent.click(stop)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(latestLive2dProps()?.state).toBe("completed")
+    const completedGeneration = latestLive2dProps()?.stateGeneration ?? 0
+    expect(completedGeneration).toBe(actingGeneration + 1)
+
+    act(() => vi.advanceTimersByTime(characterCompletionDwellMs - 1))
+    expect(latestLive2dProps()?.state).toBe("completed")
+    expect(latestLive2dProps()?.stateGeneration).toBe(completedGeneration)
+
+    act(() => vi.advanceTimersByTime(1))
+    expect(latestLive2dProps()?.state).toBe("idle")
     const idleGeneration = latestLive2dProps()?.stateGeneration ?? 0
-    expect(idleGeneration).toBe(actingGeneration + 1)
+    expect(idleGeneration).toBe(completedGeneration + 1)
+    vi.useRealTimers()
 
     fireEvent.click(
       within(characterPane as HTMLElement).getByRole("button", {

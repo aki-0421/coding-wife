@@ -61,6 +61,7 @@ describe("workspace character state", () => {
   afterEach(() => {
     vi.clearAllTimers()
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it("shows a completed cue for one bounded dwell after the active session completes", () => {
@@ -127,6 +128,56 @@ describe("workspace character state", () => {
       }),
     })
     expect(result.current).toBeNull()
+  })
+
+  it("clears the active cue and timeout when its session identity changes", () => {
+    const clearTimeout = vi.spyOn(window, "clearTimeout")
+    const { result, rerender } = renderHook(
+      ({ codex }) => useCompletedCharacterCue(codex),
+      { initialProps: { codex: codexState() } },
+    )
+
+    rerender({ codex: codexState({ phase: "completed" }) })
+    expect(result.current).not.toBeNull()
+    expect(vi.getTimerCount()).toBe(1)
+
+    rerender({
+      codex: codexState({
+        activeWorkspaceId: "workspace-b",
+        phase: "completed",
+      }),
+    })
+    expect(result.current).toBeNull()
+    expect(clearTimeout).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+
+    rerender({
+      codex: codexState({
+        activeWorkspaceId: "workspace-b",
+        generation: 8,
+        phase: "running",
+      }),
+    })
+    rerender({
+      codex: codexState({
+        activeWorkspaceId: "workspace-b",
+        generation: 8,
+        phase: "completed",
+      }),
+    })
+    expect(result.current).not.toBeNull()
+    expect(vi.getTimerCount()).toBe(1)
+
+    rerender({
+      codex: codexState({
+        activeWorkspaceId: "workspace-b",
+        generation: 9,
+        phase: "completed",
+      }),
+    })
+    expect(result.current).toBeNull()
+    expect(clearTimeout).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it("preserves pending-input and active-turn precedence around completion", () => {
