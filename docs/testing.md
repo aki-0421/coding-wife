@@ -1,17 +1,17 @@
 ---
 title: "Testing Coding Wife"
-description: "Judge-facing setup, CI, release-candidate verification, macOS packaging, installation, and Gatekeeper instructions for Coding Wife."
+description: "Judge-facing setup, CI, three-platform release verification, installation, and unsigned-distribution instructions for Coding Wife."
 updated: 2026-07-21
 read_when:
-  - "Reproducing the hackathon build or verifying Coding Wife on macOS."
-  - "Changing release commands, the DMG layout, or repository quality gates."
+  - "Reproducing the hackathon build or verifying Coding Wife on a supported desktop platform."
+  - "Changing release commands, installer layouts, or repository quality gates."
 ---
 
 # Testing Coding Wife
 
 ## Supported release target
 
-The verified MVP target is macOS 14 or later on Apple Silicon. Windows, Linux, and Intel Mac artifacts are not claimed as supported. The current hackathon artifact uses an ad-hoc signature to seal its complete app resources, but it is not Developer ID signed or Apple-notarized; build it from the reviewed source whenever possible.
+The verified release targets are macOS 14 or later on Apple Silicon, Windows 11 x64, and Ubuntu 22.04 / Debian 12-compatible Linux x64. Intel Mac, Windows Arm, Linux Arm, store packages, and automatic updates are not claimed as supported. The free artifacts do not use paid distribution identities: macOS is ad-hoc signed and not notarized, while Windows and Linux packages are unsigned. Verify the matching SHA-256 sidecar and reviewed source before running a downloaded artifact.
 
 ## Install dependencies
 
@@ -29,7 +29,7 @@ GitHub Actions runs the repository CI for every Pull Request into `develop`, eve
 
 PR CI intentionally does not run `pnpm quality:check`, clean-checkout reconstruction, any test behind `pnpm test:release`, a Tauri bundle, or DMG packaging. Release tests remain together because filesystem semantics such as symlink modes vary by runner OS. Those release-candidate checks remain in the canonical quality sequence below. CI has read-only repository permission and does not publish an app or DMG. See the [continuous integration specification](rules/continuous-integration.md) for the exact triggers, versions, cache policy, and release boundary.
 
-The separate `Release macOS / Package and draft` workflow runs only for a `v<version>` tag. It requires the tag commit to be in `develop` history and the tag to match the versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`. On a macOS 14 Apple Silicon runner it runs `pnpm test:release`, builds and verifies the real DMG with `pnpm release:macos`, and uploads only that DMG and its SHA-256 sidecar to a draft GitHub Release. It uses no Apple signing or notarization credential and will not overwrite assets in a public release. See the [free GitHub Release distribution specification](rules/github-release-distribution.md) for the publication boundary.
+The separate `Release installers` workflow runs only for a `v<version>` tag. Every platform job requires the tag commit to be in `develop` history and the tag to match the versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`. macOS runs the repository-owned DMG tests and seal verification; Windows silently installs and uninstalls the current-user NSIS setup; Linux installs and purges the Debian package and extracts the AppImage. Read-only jobs retain their verified artifacts for one day, and only the final aggregation job receives release write permission. It verifies the exact four artifacts and four SHA-256 sidecars before creating a draft and never makes the release public. See the [free GitHub Release distribution specification](rules/github-release-distribution.md) for the publication boundary.
 
 ## Run the development build
 
@@ -137,39 +137,52 @@ This creates a minimal real arm64 Mach-O product fixture, feeds it through a con
 
 ## Create a draft GitHub Release
 
-First update all three application versions to the same SemVer value and merge that change into `develop`. After the required CI checks pass for the exact commit, create and push the matching tag:
+First update all three application versions to the same SemVer value on `develop`. After the required CI checks pass for the exact commit, create and push the matching tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-Do not reuse an existing public tag or move a published tag. The version-tag workflow creates or refreshes a draft named `Coding Wife v0.1.0` with these assets:
+Do not reuse or move an existing tag. The version-tag workflow creates or refreshes a draft named `Coding Wife v0.1.1` with exactly these assets:
 
 ```text
-Coding-Wife-v0.1.0-macOS-arm64.dmg
-Coding-Wife-v0.1.0-macOS-arm64.dmg.sha256
+Coding-Wife-v0.1.1-macOS-arm64.dmg
+Coding-Wife-v0.1.1-macOS-arm64.dmg.sha256
+Coding-Wife-v0.1.1-Windows-x64-setup.exe
+Coding-Wife-v0.1.1-Windows-x64-setup.exe.sha256
+Coding-Wife-v0.1.1-Linux-x64.deb
+Coding-Wife-v0.1.1-Linux-x64.deb.sha256
+Coding-Wife-v0.1.1-Linux-x64.AppImage
+Coding-Wife-v0.1.1-Linux-x64.AppImage.sha256
 ```
 
-Download both draft assets into a clean directory and verify the exact bytes:
+Download all eight draft assets into a clean directory and verify the exact bytes:
 
 ```bash
-shasum -a 256 --check Coding-Wife-v0.1.0-macOS-arm64.dmg.sha256
+shasum -a 256 --check Coding-Wife-v0.1.1-*.sha256
 ```
 
-Before changing the draft to public, complete the install and launch steps below on a fresh profile or a second Apple Silicon Mac, review the bilingual release notes, and record the final URL and checksum in the submission ledger. A successful Actions run proves packaging and repository-owned artifact verification; it does not prove that the downloaded artifact was installed or that Gatekeeper allowed first launch without the documented exception.
+Before changing the draft to public, review the bilingual release notes and complete a downloaded-artifact smoke on every available target. CI already performs package install/removal on each native runner, but it does not prove that Gatekeeper or SmartScreen allowed a human first launch without the documented bounded exception.
 
 ## Install and launch
 
-1. Open `Coding-Wife.dmg` on a macOS 14+ test Mac.
-2. Drag `Coding Wife.app` to Applications.
-3. Launch Coding Wife from Applications.
-4. Confirm the bundled Hiyori model renders, add or create a Git project, pass the Codex preflight, complete one primary turn, inspect its commit, and quit the app.
+### macOS
+
+Open the DMG, drag `Coding Wife.app` to Applications, and launch it there. Confirm the bundled Hiyori model renders, add or create a Git project, pass the Codex preflight, complete one primary turn, inspect its commit, and quit the app.
 
 The hackathon artifact is ad-hoc signed for resource integrity, but it is not Developer ID signed or notarized. The ad-hoc signature does not identify a trusted distributor. This limitation applies equally to a local build and the free GitHub Release asset. Apple warns that running software without a trusted signature and notarization can expose the computer and personal information to malware. Proceed only after verifying the repository source, commit, frozen artifact SHA-256, and artifact provenance.
 
 If Gatekeeper blocks this reviewed local or downloaded artifact, first try to open the app once. Then open **System Settings > Privacy & Security**, scroll down, choose **Open Anyway**, and confirm **Open** in the warning. This creates an exception for that app. Do not disable Gatekeeper or remove quarantine attributes globally. See Apple's [current safety guidance](https://support.apple.com/en-us/102445).
 
+### Windows
+
+Run `Coding-Wife-v0.1.1-Windows-x64-setup.exe`; the NSIS package installs for the current user without administrator rights. If SmartScreen warns, first verify the release URL and SHA-256, then choose **More info > Run anyway** for this installer only. Do not disable SmartScreen globally. Launch Coding Wife from the installed shortcut and uninstall it through Windows Settings after the smoke.
+
+### Linux
+
+Open the `.deb` with the system software installer on a compatible Ubuntu/Debian desktop. The AppImage is a portable fallback rather than an installer; set its executable bit and run it. Both are unsigned, so verify the SHA-256 sidecar first. Confirm the installed or extracted app starts, then remove the Debian package through the system package manager.
+
 ## Release evidence still required
 
-Before external judging, publish the reviewed draft URL and checksum and record a fresh-profile or second-Mac install and first-launch smoke. Developer ID signing, notarization, stapling, Intel/universal packaging, and automatic updates are outside the current MVP artifact and must not be claimed as complete.
+Before external judging, publish the reviewed draft URL and four checksums and record the available fresh-profile install and first-launch smokes. Developer ID signing, notarization, stapling, Windows code signing, Linux repository signing, unsupported architectures, and automatic updates are outside the current artifact and must not be claimed as complete.
