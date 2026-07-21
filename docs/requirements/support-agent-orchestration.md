@@ -1,7 +1,7 @@
 ---
 title: "SUP 支援エージェント調停要件定義"
 description: "UIから隠蔽した短命説明生成root、commit説明skill、redacted context、stream出力、停止・監査を定義する。"
-updated: 2026-07-20
+updated: 2026-07-22
 read_when:
   - "support session trigger、ephemeral root、schema outputを実装するとき。"
   - "repo非アクセス、非永続化、stale discard、usage透明性を検証するとき。"
@@ -15,7 +15,7 @@ read_when:
 | 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 2026-07-19 |
+| 最終レビュー日 | 2026-07-22 |
 
 ## 背景
 
@@ -78,7 +78,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `SUP-F-056` | supportはrole別schemaへ適合するbounded outputだけを返す | support専用JSONL readerは1 frame 96KiB、未完了buffer 128KiB、signal queue 8件（最大768KiB）を上限とする。1 turnはnotification 256件・serialized notification合計512KiB・agent delta合計64KiB・reasoning frame合計64KiBを上限とし、exact boundaryは受理、1byte/1件超過はvalid terminalが後続しても即時rejectする。最終JSONはraw/compact serializedの双方を64KiB以下、role別schemaのunknown/oversize fieldをrejectし、全stringを再帰走査してabsolute/relative/tokenized path、URL、credential、redaction marker、raw reasoning marker、control characterを含む結果を公開しない | Approved | 非該当 |
+| `SUP-F-056` | supportはrole別schemaへ適合するbounded outputだけを返す | support専用JSONL readerは1 frame 96KiB、未完了buffer 128KiB、signal queue 8件（最大768KiB）を上限とする。1 turnはnotification 256件・serialized notification合計512KiB・agent delta合計64KiB・reasoning frame合計64KiBを上限とし、exact boundaryは受理、1byte/1件超過はvalid terminalが後続しても即時rejectする。App Serverの`thread/settings/updated`はschemaに存在するexact key setだけを持ち、current support thread IDに一致し、model、provider、private cwd、approvalとreviewer、permission profile、read-only sandbox、network denial、low effort、default collaboration mode、multi-agent禁止の全policyが構築時の検証済み値を保持する場合だけinformational eventとして受理する。schema外field、`turnId`、必須field欠落、値不一致はpolicy violationとして結果を破棄する。最終JSONはraw/compact serializedの双方を64KiB以下、role別schemaのunknown/oversize fieldをrejectし、全stringを再帰走査してabsolute/relative/tokenized path、URL、credential、redaction marker、raw reasoning marker、control characterを含む結果を公開しない | Approved | 非該当 |
 | `SUP-F-057` | stale support outputを表示しない | output generationがactive workspace generationと一致しない場合、timeline/Live2D/narrationへ適用せずStale metadataだけを記録する | Approved | 非該当 |
 | `SUP-F-058` | support failureはmain turnを停止しない | timeout、model error、schema errorの各fixtureでmain turn statusとconversation event数が変わらず、app controllerを`failed`または`unavailable`へ遷移する。commit explanationはexplicit presentation intentがactiveの場合だけdeterministic text fallbackを500ms以内に表示し、`auto_verified_commit`だけの場合はstate更新に限定してcaption/live region/TTSを開始しない | Approved | 非該当 |
 | `SUP-F-059` | supportは利用者へ直接質問しない | question/tool-request outputをrejectし、main sessionへ新規decision、message、commandを捏造せずapp controllerへtyped failureを返す | Approved | 非該当 |
