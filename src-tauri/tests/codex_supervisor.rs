@@ -17,9 +17,9 @@ use coding_wife_lib::codex::support::{
 };
 use coding_wife_lib::codex::types::{
     BinarySource, CapabilityState, ChildState, CodexConnectRequest, CodexFallbackDecisionRequest,
-    CodexHealth, CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadStartRequest,
-    CodexTurnInterruptRequest, CodexTurnStartRequest, PendingResponse, ReasoningPreset,
-    ReviewTarget,
+    CodexHealth, CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadResumeRequest,
+    CodexThreadStartRequest, CodexTurnInterruptRequest, CodexTurnStartRequest, PendingResponse,
+    ReasoningPreset, ReviewTarget,
 };
 use coding_wife_lib::codex::workspace::{
     AppPrivateBinaryRecord, FolderPicker, PickerFuture, WorkspaceService,
@@ -2401,7 +2401,7 @@ async fn configured_binary_change_replaces_a_ready_runtime() {
 }
 
 #[tokio::test]
-async fn workspace_switch_reuses_verified_binary_and_schema_evidence() {
+async fn workspace_switch_reuses_app_server_process_and_workspace_context() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("lifecycle_cache");
     let supervisor = test_supervisor();
@@ -2422,12 +2422,37 @@ async fn workspace_switch_reuses_verified_binary_and_schema_evidence() {
         })
         .await
         .expect("connect first workspace");
+    let first_thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace-a".to_owned(),
+        })
+        .await
+        .expect("start first workspace thread");
     supervisor
         .connect(CodexConnectRequest {
             workspace_id: "workspace-b".to_owned(),
         })
         .await
         .expect("connect second workspace");
+    supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace-b".to_owned(),
+        })
+        .await
+        .expect("start second workspace thread");
+    supervisor
+        .connect(CodexConnectRequest {
+            workspace_id: "workspace-a".to_owned(),
+        })
+        .await
+        .expect("restore first workspace context");
+    supervisor
+        .thread_resume(CodexThreadResumeRequest {
+            workspace_id: "workspace-a".to_owned(),
+            thread_handle: first_thread.thread_handle,
+        })
+        .await
+        .expect("resume first workspace opaque thread handle");
 
     let state = read_state(&fixture.state).await;
     assert_eq!(state.matches("version_requested").count(), 1);
@@ -2438,8 +2463,8 @@ async fn workspace_switch_reuses_verified_binary_and_schema_evidence() {
             .count(),
         1,
     );
-    assert_eq!(state.matches("app_server_process_started:").count(), 2);
-    assert_eq!(state.matches("initialize_requested").count(), 2);
+    assert_eq!(state.matches("app_server_process_started:").count(), 1);
+    assert_eq!(state.matches("initialize_requested").count(), 1);
     supervisor.shutdown().await;
 }
 

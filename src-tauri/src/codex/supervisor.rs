@@ -113,6 +113,7 @@ struct SupervisorState {
     thread_handles: HashMap<String, String>,
     turn_handles: HashMap<String, String>,
     active_thread_id: Option<String>,
+    workspace_contexts: HashMap<String, WorkspaceRuntimeContext>,
     active_turn_id: Option<String>,
     active_turn_effort: Option<Option<ReasoningPreset>>,
     pending_turn_start: Option<PendingTurnStart>,
@@ -123,6 +124,13 @@ struct SupervisorState {
     requests: ServerRequestLedger,
     fallback_decisions: FallbackDecisionLedger,
     restart_times: VecDeque<Instant>,
+}
+
+struct WorkspaceRuntimeContext {
+    normalizer: EventNormalizer,
+    thread_handles: HashMap<String, String>,
+    turn_handles: HashMap<String, String>,
+    active_thread_id: Option<String>,
 }
 
 struct SupervisorInner {
@@ -345,10 +353,10 @@ impl CodexSupervisor {
             .expect("resource directory lock poisoned")
             .clone()?;
         let state = self.inner.state.lock().await;
-        if state.active_workspace.as_deref() != Some(workspace_id)
-            || state.generation != workspace_generation
+        if state.generation != workspace_generation
             || state.diagnostic.health != CodexHealth::Ready
             || state.runtime.is_none()
+            || !state.workspaces.contains_key(workspace_id)
         {
             return None;
         }
@@ -468,8 +476,13 @@ impl CodexSupervisor {
             ));
         }
         state.workspaces.remove(workspace_id);
+        state.workspace_contexts.remove(workspace_id);
         if state.active_workspace.as_deref() == Some(workspace_id) {
             state.active_workspace = None;
+            state.normalizer = None;
+            state.thread_handles.clear();
+            state.turn_handles.clear();
+            state.active_thread_id = None;
         }
         Ok(())
     }
@@ -754,7 +767,8 @@ impl CodexSupervisor {
         let _lifecycle = self.inner.lifecycle.lock().await;
         let ready_runtime = {
             let mut state = self.inner.state.lock().await;
-            if !state.workspaces.contains_key(&workspace_id) {
+            let workspace_root = state.workspaces.get(&workspace_id).cloned();
+            if workspace_root.is_none() {
                 return Err(command_error(
                     "CODEX-WORKSPACE-NOT-REGISTERED",
                     "codex.connect",
@@ -764,9 +778,7 @@ impl CodexSupervisor {
             if reset_restart_budget {
                 state.restart_times.clear();
             }
-            if state.active_workspace.as_deref() == Some(&workspace_id)
-                && state.diagnostic.health == CodexHealth::Ready
-            {
+            if state.diagnostic.health == CodexHealth::Ready {
                 state
                     .runtime
                     .clone()
@@ -780,13 +792,16 @@ impl CodexSupervisor {
                                 state.explicit_binary.clone(),
                                 state.binary.as_ref(),
                             ),
+                            workspace_root.expect("registered workspace root"),
                         )
                     })
             } else {
                 None
             }
         };
-        if let Some((runtime, binary, diagnostic, configured_binary)) = ready_runtime {
+        if let Some((runtime, binary, diagnostic, configured_binary, workspace_root)) =
+            ready_runtime
+        {
             let configured_matches = expected_binary_for_configured_path(
                 configured_binary.as_deref(),
                 Some(binary.clone()),
@@ -797,6 +812,26 @@ impl CodexSupervisor {
                 && !runtime.has_exited().await
                 && binary.revalidate_metadata().await.is_ok()
             {
+                let mut state = self.inner.state.lock().await;
+                if state
+                    .runtime
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &runtime))
+                    && state.diagnostic.health == CodexHealth::Ready
+                {
+                    activate_workspace_context(
+                        &mut state,
+                        &workspace_id,
+                        workspace_root,
+                        "codex.connect",
+                    )?;
+                } else {
+                    return Err(command_error(
+                        "CODEX-CONNECTION-STALE",
+                        "codex.connect",
+                        true,
+                    ));
+                }
                 return Ok(diagnostic);
             }
         }
@@ -964,22 +999,12 @@ impl CodexSupervisor {
         state.binary = Some(binary);
         state.schema = Some(schema);
         state.runtime = Some(runtime.clone());
-        state.active_workspace = Some(workspace_id.to_owned());
-        state.normalizer = Some(EventNormalizer::new(
-            workspace_id.to_owned(),
+        activate_workspace_context(
+            &mut state,
+            workspace_id,
             workspace_root.to_path_buf(),
-            generation,
-        ));
-        state.thread_handles.clear();
-        state.turn_handles.clear();
-        state.active_thread_id = None;
-        state.active_turn_id = None;
-        state.active_turn_effort = None;
-        state.pending_turn_start = None;
-        state.main_work_units.clear();
-        state.skill_injection_audits.clear();
-        state.requests.clear_pending();
-        state.fallback_decisions.clear();
+            "codex.connect",
+        )?;
         state.diagnostic.child_state = ChildState::Initializing;
         Ok((runtime, generation))
     }
@@ -3269,6 +3294,7 @@ fn begin_connection_attempt(state: &mut SupervisorState, operation: &str) {
     state.thread_handles.clear();
     state.turn_handles.clear();
     state.active_thread_id = None;
+    state.workspace_contexts.clear();
     state.active_turn_id = None;
     state.active_turn_effort = None;
     state.pending_turn_start = None;
@@ -3284,6 +3310,62 @@ fn begin_connection_attempt(state: &mut SupervisorState, operation: &str) {
         recoverable: true,
         ..CodexDiagnostic::default()
     };
+}
+
+fn activate_workspace_context(
+    state: &mut SupervisorState,
+    workspace_id: &str,
+    workspace_root: PathBuf,
+    operation: &str,
+) -> Result<(), CodexCommandError> {
+    if state.active_workspace.as_deref() == Some(workspace_id) && state.normalizer.is_some() {
+        return Ok(());
+    }
+    if state.active_turn_id.is_some() || state.pending_turn_start.is_some() {
+        return Err(command_error("CODEX-TURN-ACTIVE", operation, true));
+    }
+
+    if let Some(current_workspace) = state.active_workspace.take() {
+        if let Some(normalizer) = state.normalizer.take() {
+            state.workspace_contexts.insert(
+                current_workspace,
+                WorkspaceRuntimeContext {
+                    normalizer,
+                    thread_handles: std::mem::take(&mut state.thread_handles),
+                    turn_handles: std::mem::take(&mut state.turn_handles),
+                    active_thread_id: state.active_thread_id.take(),
+                },
+            );
+        }
+    }
+
+    match state.workspace_contexts.remove(workspace_id) {
+        Some(context) => {
+            state.normalizer = Some(context.normalizer);
+            state.thread_handles = context.thread_handles;
+            state.turn_handles = context.turn_handles;
+            state.active_thread_id = context.active_thread_id;
+        }
+        None => {
+            state.normalizer = Some(EventNormalizer::new(
+                workspace_id.to_owned(),
+                workspace_root,
+                state.generation,
+            ));
+            state.thread_handles.clear();
+            state.turn_handles.clear();
+            state.active_thread_id = None;
+        }
+    }
+    state.active_workspace = Some(workspace_id.to_owned());
+    state.active_turn_id = None;
+    state.active_turn_effort = None;
+    state.pending_turn_start = None;
+    state.main_work_units.clear();
+    state.skill_injection_audits.clear();
+    state.requests.clear_pending();
+    state.fallback_decisions.clear();
+    Ok(())
 }
 
 fn reserve_restart(state: &mut SupervisorState) -> Option<usize> {
