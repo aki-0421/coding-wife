@@ -2257,6 +2257,30 @@ async fn app_wide_connect_without_a_workspace_reuses_runtime_and_probe_evidence(
 }
 
 #[tokio::test]
+async fn app_shutdown_prevents_a_late_reconnect_from_starting_another_process() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("lifecycle_cache");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .set_runtime_root(&fixture.workspace)
+        .await
+        .expect("set app-wide runtime root");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor.connect().await.expect("initial connect");
+    assert!(supervisor.shutdown().await);
+
+    let error = supervisor
+        .connect()
+        .await
+        .expect_err("shutdown is terminal for the app-owned supervisor");
+    assert_eq!(error.code, "CODEX-SHUTDOWN");
+
+    let state = read_state(&fixture.state).await;
+    assert_eq!(state.matches("app_server_process_started:").count(), 1);
+}
+
+#[tokio::test]
 async fn configured_binary_change_replaces_a_ready_runtime() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("lifecycle_cache");
@@ -2505,7 +2529,7 @@ async fn readiness_probe_blocks_a_changed_configured_binary_without_turn_mutatio
 }
 
 #[tokio::test]
-async fn protocol_violations_use_the_bounded_restart_budget_without_turn_replay() {
+async fn protocol_violations_keep_reconnecting_with_bounded_backoff_without_turn_replay() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("protocol_after_ready");
     let supervisor = test_supervisor();
@@ -2522,16 +2546,15 @@ async fn protocol_violations_use_the_bounded_restart_budget_without_turn_replay(
         let state = read_state(&fixture.state).await;
         let violations = state.matches("protocol_violation_emitted").count();
         let diagnostic = supervisor.diagnostic().await;
-        if violations >= 4
-            && diagnostic.health == CodexHealth::ProtocolMismatch
-            && diagnostic.child_state == ChildState::Stopped
-        {
+        if violations >= 4 && diagnostic.health == CodexHealth::ProtocolMismatch {
+            assert_eq!(diagnostic.child_state, ChildState::Restarting);
+            assert!(diagnostic.recoverable);
             assert!(!state.contains("turn_contract_ok"));
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "protocol restart budget did not stop: {violations:?} {diagnostic:?}"
+            "protocol recovery did not continue: {violations:?} {diagnostic:?}"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
