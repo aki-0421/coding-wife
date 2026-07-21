@@ -379,6 +379,18 @@ v1 は 1〜3 問、重複しない id、非空の header / question、2〜3 個�
 
 不正 request では回答 UI を出さず、同じ id へ invalid params error を返して turn を interrupt する。autoResolutionMs があっても、v1 はユーザー選択を勝手に推定しない。
 
+0.144.5 の実 App Server / ChatGPT 認証接続では、モデルの `request_user_input` arguments に `questions` しかなくても、server request は次の現行 wire shapeへ展開された。調査では prompt、質問本文、option本文、raw IDを記録せず、method、field名、型、件数、active contextとの一致だけを確認した。
+
+- envelopeは`id`、`method=item/tool/requestUserInput`、`params`。
+- paramsは`threadId`、`turnId`、`itemId`、`questions`、`autoResolutionMs=null`。thread / turnはactive contextと一致した。
+- questionは`id`、`header`、`question`、2〜3件の`options`に加え、`isOther=true`、`isSecret=false`を明示する。optionは`label`と`description`だけである。
+- responseはquestion idごとの`{"answers":[value]}`を`answers` mapへ格納する。
+- response受理後、`serverRequest/resolved` notificationが`requestId`と`threadId`だけで届く。
+
+正規化契約はこの明示shapeに限定する。`isOther=true`は曖昧な自由入力要求ではなく、既存optionと同じcardへ製品定義のOther入力を追加する合図として扱う。Other回答はtrim済みの1〜2,000 Unicode scalarだけを元question idの単一answerとして返し、adapterが本文を生成・補完しない。既存labelとのexact一致またはこのbounded Otherだけを許可する。`isSecret=true`、`isOther`がtrue以外、option不足、未知field、複数answerは従来どおりfail-closedにする。
+
+`serverRequest/resolved`は回答内容を含まない補助lifecycle通知である。`requestId`がstringまたはsigned integer、`threadId`が非空string、field集合がexactである場合だけ安全に消費し、独立したdecisionや`code.protocol.unsupported`を生成しない。shape不正または未知のserver request / notificationはfail-closedを維持する。
+
 native requestUserInput が unavailable の場合は、turn/start の outputSchema に CodingWifeDecisionEnvelopeV1 の discriminated union を設定する。
 
 ~~~text
