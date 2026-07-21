@@ -41,10 +41,13 @@ const canonicalLegalRoot = path.join(
   "resources",
   "legal",
 )
+const projectLicensePath = path.join(projectRoot, "LICENSE")
+const packagedProjectLicenseName = "CODING-WIFE-LICENSE.txt"
 
 const requiredResourceFiles = Object.freeze([
   "Contents/Resources/resources/characters/builtin-hiyori/NOTICE.txt",
   "Contents/Resources/resources/characters/builtin-hiyori/pack.json",
+  `Contents/Resources/resources/legal/${packagedProjectLicenseName}`,
   "Contents/Resources/resources/legal/THIRD-PARTY-NOTICES.md",
   "Contents/Resources/resources/legal/THIRD-PARTY-DEPENDENCIES.json",
   "Contents/Resources/resources/legal/THIRD-PARTY-DEPENDENCIES.md",
@@ -409,12 +412,23 @@ export async function verifyPackagedLegalResources(appPath) {
     "resources",
     "legal",
   )
-  const [canonical, packaged] = await Promise.all([
-    collectLegalTree(canonicalLegalRoot),
-    collectLegalTree(packagedRoot),
-  ])
-  if (!isDeepStrictEqual(canonical, packaged)) {
-    fail("APP_LEGAL_RESOURCES_MISMATCH")
+  try {
+    const [canonical, packaged, projectLicense, packagedProjectLicense] =
+      await Promise.all([
+        collectLegalTree(canonicalLegalRoot),
+        collectLegalTree(packagedRoot),
+        readFile(projectLicensePath),
+        readFile(path.join(canonicalLegalRoot, packagedProjectLicenseName)),
+      ])
+    if (
+      !isDeepStrictEqual(canonical, packaged) ||
+      !projectLicense.equals(packagedProjectLicense)
+    ) {
+      fail("APP_LEGAL_RESOURCES_MISMATCH")
+    }
+  } catch (error) {
+    if (error instanceof MacOSReleaseError) throw error
+    fail("APP_LEGAL_RESOURCES_INVALID")
   }
 }
 

@@ -485,9 +485,9 @@ test("real release verifier fails closed for product, content, seal, and quarant
         "Resources",
         "resources",
         "legal",
-        "THIRD-PARTY-DEPENDENCIES.json",
+        "CODING-WIFE-LICENSE.txt",
       ),
-      "{}\n",
+      "tampered project license\n",
     )
     await sealProductFixture(item.appPath)
     await assert.rejects(
