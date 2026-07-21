@@ -8,6 +8,7 @@ import {
   assertArtifactMatches,
   cargoPackageIdentityKey,
   checkDependencyNotices,
+  checkPackagedDependencyNotices,
   classifyLicense,
   DEPENDENCY_INVENTORY_FILE,
   DEPENDENCY_NOTICE_FILE,
@@ -35,6 +36,16 @@ snapshots:
 `)
   assert.deepEqual(packages.get("@scope/example@1.2.3"), {
     key: "@scope/example@1.2.3",
+    integrity: "sha512-YWJjZA==",
+  })
+})
+
+test("pnpm lock parser accepts Windows CRLF without changing keys", () => {
+  const packages = parsePnpmLockPackages(
+    "lockfileVersion: '9.0'\r\n\r\npackages:\r\n\r\n  example@1.2.3:\r\n    resolution: {integrity: sha512-YWJjZA==}\r\n\r\nsnapshots:\r\n",
+  )
+  assert.deepEqual(packages.get("example@1.2.3"), {
+    key: "example@1.2.3",
     integrity: "sha512-YWJjZA==",
   })
 })
@@ -344,4 +355,15 @@ test("committed and packaged dependency notices match the offline locks", () => 
   )
   assert.match(index, /THIRD-PARTY-DEPENDENCIES\.json/u)
   assert.match(index, /THIRD-PARTY-DEPENDENCIES\.md/u)
+})
+
+test("packaged dependency inventory is host-independent and lock-bound", () => {
+  assert.deepEqual(checkPackagedDependencyNotices(), {
+    total: 632,
+    npm: 397,
+    cargo: 235,
+    unknown: 0,
+    forbidden: 0,
+    missing: 0,
+  })
 })

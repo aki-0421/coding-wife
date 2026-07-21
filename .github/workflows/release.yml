@@ -149,7 +149,7 @@ jobs:
         run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
 
       - name: Check packaged legal inventory
-        run: pnpm licenses:check
+        run: pnpm licenses:check:packaged
 
       - name: Build unsigned current-user NSIS installer
         run: pnpm exec tauri build --ci --bundles nsis
@@ -271,7 +271,7 @@ jobs:
         run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu
 
       - name: Check packaged legal inventory
-        run: pnpm licenses:check
+        run: pnpm licenses:check:packaged
 
       - name: Build Debian package and AppImage
         run: pnpm exec tauri build --ci --bundles deb,appimage

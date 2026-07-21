@@ -29,6 +29,7 @@
     "check:diff": "node scripts/release/check-diff-hygiene.mjs",
     "licenses:generate": "node scripts/licenses/dependency-notices.mjs --write",
     "licenses:check": "node scripts/licenses/dependency-notices.mjs --check",
+    "licenses:check:packaged": "node scripts/licenses/dependency-notices.mjs --check-packaged",
     "quality:check": "node scripts/quality/run-quality-gates.mjs",
     "release:macos": "bash scripts/release/run-macos-release.sh"
   },

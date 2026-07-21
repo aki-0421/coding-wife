@@ -137,7 +137,7 @@ export function parsePnpmLockPackages(contents) {
   let inPackages = false
   let current
 
-  for (const line of contents.split("\n")) {
+  for (const line of contents.split(/\r?\n/u)) {
     if (line === "packages:") {
       inPackages = true
       continue
@@ -830,6 +830,69 @@ export function checkDependencyNotices(precomputed) {
   return artifacts.summary
 }
 
+export function checkPackagedDependencyNotices() {
+  let inventory
+  try {
+    inventory = JSON.parse(
+      readFileSync(canonicalFile(DEPENDENCY_INVENTORY_FILE), "utf8"),
+    )
+  } catch {
+    fail("LICENSE_PACKAGED_INVENTORY_INVALID")
+  }
+
+  const generatedFrom = inventory?.generatedFrom
+  const dependencies = inventory?.dependencies
+  const recordedSummary = inventory?.summary
+  const summaryKeys = [
+    "total",
+    "npm",
+    "cargo",
+    "unknown",
+    "forbidden",
+    "missing",
+  ]
+  if (
+    inventory?.schemaVersion !== 1 ||
+    generatedFrom?.pnpmLock !== "pnpm-lock.yaml" ||
+    generatedFrom?.cargoLock !== "src-tauri/Cargo.lock" ||
+    generatedFrom?.cargoTarget !== CARGO_TARGET ||
+    generatedFrom?.policyVersion !== 2 ||
+    !Array.isArray(dependencies) ||
+    dependencies.length === 0 ||
+    recordedSummary === null ||
+    typeof recordedSummary !== "object" ||
+    Array.isArray(recordedSummary) ||
+    Object.keys(recordedSummary).sort().join("\n") !==
+      [...summaryKeys].sort().join("\n")
+  ) {
+    fail("LICENSE_PACKAGED_INVENTORY_INVALID")
+  }
+
+  const pnpmLockContents = readUtf8("pnpm-lock.yaml")
+  const cargoLockContents = readUtf8("src-tauri/Cargo.lock")
+  if (
+    generatedFrom.pnpmLockSha256 !== sha256(pnpmLockContents) ||
+    generatedFrom.cargoLockSha256 !== sha256(cargoLockContents)
+  ) {
+    fail("LICENSE_PACKAGED_LOCK_HASH_MISMATCH")
+  }
+
+  const summary = summarizeDependencies(dependencies)
+  if (
+    summary.total !== summary.npm + summary.cargo ||
+    summaryKeys.some(
+      (key) =>
+        !Number.isSafeInteger(recordedSummary[key]) ||
+        recordedSummary[key] !== summary[key],
+    )
+  ) {
+    fail("LICENSE_PACKAGED_SUMMARY_MISMATCH")
+  }
+
+  verifyReleaseNotices(projectRoot)
+  return summary
+}
+
 const invokedDirectly =
   process.argv[1] !== undefined &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
@@ -842,7 +905,9 @@ if (invokedDirectly) {
         ? writeDependencyNotices()
         : action === "--check"
           ? checkDependencyNotices()
-          : fail("LICENSE_ARGUMENT_INVALID")
+          : action === "--check-packaged"
+            ? checkPackagedDependencyNotices()
+            : fail("LICENSE_ARGUMENT_INVALID")
     process.stdout.write(
       `[licenses] verified ${summary.total} dependencies (npm production closure ${summary.npm}, Cargo runtime ${summary.cargo}); unknown ${summary.unknown}, forbidden ${summary.forbidden}, missing ${summary.missing}\n`,
     )

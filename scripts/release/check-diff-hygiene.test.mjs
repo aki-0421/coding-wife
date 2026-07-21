@@ -611,6 +611,7 @@ test("README, testing instructions, package commands, and CI separate PR and rel
     "check:diff",
     "licenses:generate",
     "licenses:check",
+    "licenses:check:packaged",
     "quality:check",
     "release:macos",
   ])
