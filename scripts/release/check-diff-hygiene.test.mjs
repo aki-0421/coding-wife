@@ -579,6 +579,7 @@ test("README, testing instructions, package commands, and CI separate PR and rel
     readme,
     testingInstructions,
     workflow,
+    releaseWorkflow,
     qualityRunner,
     attributes,
   ] = await Promise.all([
@@ -587,6 +588,10 @@ test("README, testing instructions, package commands, and CI separate PR and rel
     readFile(path.join(repositoryRoot, "docs", "testing.md"), "utf8"),
     readFile(
       path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
+      "utf8",
+    ),
+    readFile(
+      path.join(repositoryRoot, ".github", "workflows", "release.yml"),
       "utf8",
     ),
     readFile(
@@ -659,6 +664,14 @@ test("README, testing instructions, package commands, and CI separate PR and rel
   assert.doesNotMatch(workflow, /pnpm quality:check/u)
   assert.doesNotMatch(workflow, /pnpm test:release(?:\s|$)/u)
   assert.doesNotMatch(workflow, /pnpm tauri:build/u)
+  assert.match(releaseWorkflow, /node scripts\/live2d\/verify-live2d\.mjs/u)
+  assert.match(releaseWorkflow, /node scripts\/live2d\/build-framework\.mjs/u)
+  assert.match(releaseWorkflow, /pnpm release:macos/u)
+  assert.doesNotMatch(releaseWorkflow, /pnpm test:release(?:\s|$)/u)
+  assert.ok(
+    releaseWorkflow.indexOf("node scripts/live2d/verify-live2d.mjs") <
+      releaseWorkflow.indexOf("pnpm release:macos"),
+  )
   assert.match(qualityRunner, /--all-targets/u)
   assert.match(qualityRunner, /pnpm.*tauri/u)
 })

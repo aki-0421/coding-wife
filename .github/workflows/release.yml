@@ -66,8 +66,10 @@ jobs:
       - name: Fetch locked Apple Silicon Rust dependencies
         run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin
 
-      - name: Test macOS packaging boundary
-        run: pnpm test:release
+      - name: Prepare verified macOS packaging inputs
+        run: |
+          node scripts/live2d/verify-live2d.mjs
+          node scripts/live2d/build-framework.mjs
 
       - name: Build and verify ad-hoc signed DMG
         run: pnpm release:macos

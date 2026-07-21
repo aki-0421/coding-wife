@@ -54,7 +54,7 @@ Apple公式の[Safely open apps on your Mac](https://support.apple.com/en-us/102
 11. `scripts/release/verify-macos-release.sh`はlock内でfinal DMGをprivate regular-file snapshotへcopyする。copy前後と検証終了時にfinal pathのdevice/inode/size/SHA-256が一致し、snapshot hashも一致することを要求する。`hdiutil verify`と独立read-only mountはsnapshotだけを入力にし、consoleへ報告するsize/SHA-256も検証済みsnapshot bytesだけから得る。path swap、in-place tamper、symlink置換は失敗する。
 12. raw command stderr、input/output/tempのabsolute pathはconsoleへ返さない。失敗はstep単位のsafe codeと非0 exitで表す。trapはmountを先に確実にdetachし、今回runのprivate workを安全なprefix確認後に削除し、combined backup/journalを復元してからlockを解放する。publish commitはcanonical verifier成功後にjournal/backupを削除した時点だけとする。
 13. `.github/workflows/release.yml`は`v<version>` tagだけで起動し、`scripts/release/validate-release-tag.mjs`でroot package、Tauri、Cargoのversion一致と`origin/develop` ancestryを検査する。version parserの境界は`validate-release-tag.test.mjs`を通常の`pnpm test`から実行する。
-14. release jobは`pnpm test:release`成功後に同じ`pnpm release:macos`を実行し、canonical DMGとmanifestがregular fileとして存在する場合だけtag付き安定名へbyte copyする。copy後のSHA-256 sidecarを同じdirectoryから自己検証する。
+14. immutable tagの作成前に`pnpm test:release`をrelease candidate gateとして成功させる。tag jobはclean runnerでLive2D入力を検証・生成した後に`pnpm release:macos`を実行し、canonical DMGとmanifestがregular fileとして存在する場合だけtag付き安定名へbyte copyする。copy後のSHA-256 sidecarを同じdirectoryから自己検証する。実DMGのfault injection stressを製品buildと同じhostで直前に繰り返さない。
 15. GitHub Release操作は最後のstepだけが持つjob-level `contents: write`で行う。新規releaseはdraftとし、同tagのdraftだけを`--clobber`できる。既存public releaseでは失敗し、公開済みbyte列を暗黙置換しない。
 16. 無料配布workflowはApple certificateとnotarization credentialを持たない。release notesはad-hoc署名・未公証、macOS 14+ Apple Silicon、local Codex prerequisite、bounded Open Anywayを日本語・英語で示す。
 

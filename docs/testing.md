@@ -135,6 +135,8 @@ pnpm test:release
 
 This creates a minimal real arm64 Mach-O product fixture, feeds it through a controlled Tauri-builder boundary, applies the ad-hoc seal, exercises the real app verifier and top-level release scripts, builds and independently mounts a real DMG twice, injects build/license/legal/publish failures and repeated signals, attempts path swaps and private-path fixtures, verifies exact four-path rollback and crash-stale recovery, and checks lock, process, mount, temporary-prefix, and transaction cleanup.
 
+Run this stress suite before creating the immutable tag. The tag workflow starts from a clean macOS runner, verifies and generates the Live2D framework input, then builds and independently verifies the actual app and DMG. It deliberately does not repeat the fault-injection DMG stress immediately before the production build, because those tests exercise and terminate DiskImages helpers many times on the same host.
+
 ## Create a draft GitHub Release
 
 First update all three application versions to the same SemVer value on `develop`. After the required CI checks pass for the exact commit, create and push the matching tag:

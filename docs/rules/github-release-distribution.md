@@ -48,7 +48,7 @@ production conversationには対応OSへinstall済みで認証済みのCodex CLI
 - `.github/workflows/release.yml`を外部配布workflowの正本とする。
 - workflow-level permissionは`contents: read`とし、各platform build jobはrepository write tokenを持たない。
 - platform jobは同じtag/version/develop ancestryを検証し、locked dependency、production frontend、native bundleを固定runnerで生成する。
-- macOS jobは既存の`pnpm test:release`と`pnpm release:macos`を正本とする。
+- macOSのrelease candidate gateは既存の`pnpm test:release`、tag jobのartifact buildは`pnpm release:macos`を正本とする。
 - Windows/Linux jobはTauri CLIのnative bundleを生成し、installer/packageをrunner上で導入・除去してから安定名とSHA-256をstageする。
 - platform間の受け渡しはretention 1日のGitHub Actions artifactだけを使う。
 - 全platform job成功後にだけpublish jobへ`contents: write`を与え、artifact名、件数、SHA-256を再検証してdraft Releaseを作成または更新する。
@@ -83,6 +83,8 @@ Coding-Wife-v<version>-Linux-x64.AppImage.sha256
 automatic updater signatureと`latest.json`は生成しない。root `LICENSE`はproject-owned codeのMIT再配布条件を定め、`pnpm licenses:generate`はrootとbyte一致する`CODING-WIFE-LICENSE.txt`を第三者通知と同じlegal resource treeへ同期する。全platform bundleはproject license、依存台帳、Live2D/Hiyoriの原文NOTICE・termsを保持する。
 
 macOS jobは正本であるApple Silicon依存graphを再計算して`pnpm licenses:check`を通す。Windows/Linux jobはhost固有の依存解決を正本へ混ぜず、`pnpm licenses:check:packaged`でcommitted inventoryのlock hash、license policy summary、packaged legal treeのbyte一致を検証してからbundleする。`.gitattributes`はtext checkoutをLFへ固定し、lock hashとpackaged notice bytesを全runnerで一致させる。byte固定のHiyori noticeだけは`-text`を維持する。
+
+`pnpm test:release`の実DMG stress、signal、rollback検証はtag作成前のrelease candidate gateとして実行する。macOS tag jobでは同じhost上で多数の`hdiutil` fault injectionを再実行せず、Live2D入力を検証・生成したclean runnerで実製品のapp/DMG buildと独立したread-only mount検証を行う。これによりstress testが残したDiskImages helperの影響を製品artifactへ持ち込まず、tag job自体は公開対象byteの検証に専念する。
 
 ## 公開前gate
 
