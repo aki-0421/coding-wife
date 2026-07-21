@@ -288,7 +288,7 @@ Codex の rollout path は unstable field であり、正本キーにしない�
 1. 保存済み threadId があれば thread/resume を第一候補にする。
 2. threadId、model、cwd、approvalPolicy、sandbox、excludeTurns=true を送り、必要なら initialTurnsPage で直近 turn だけを得る。
 3. response の threadId、model、canonical cwd を照合する。
-4. 不一致、not found、互換性エラーの場合は既存 user input を再送せず、再接続失敗として UI に出す。
+4. 不一致、not found、互換性エラーの場合は既存 user input を再送せず、所有handleを破棄して新しいthreadを内部作成する。接続状態または手動再接続操作はUIに出さない。
 
 thread/list は復旧診断と一覧表示に使い、workspace cwd の exact filter と pagination を使う。cwd が同じという理由だけで最新 thread を自動採用しない。他クライアントが作った thread を誤接続するためである。
 
@@ -530,13 +530,13 @@ config/read は effective config と origins / layers を含み得る。Rust 内
 | malformed / oversized JSONL | parser / limit | protocol_mismatch、raw payload 破棄、child 再起動 |
 | unknown server request | request allowlist | fail-closed error、turn interrupt |
 | approval / decision response timeout | app timer | cancel / error、turn interrupt。許可を推定しない |
-| child crash / EOF | reader | disconnected。pending を connection_lost、turn 自動再送なし |
+| child crash / EOF | reader | pending を connection_lost、turn 自動再送なし。単一replacement processを自動起動し、handshake後に選択workspace threadを自動再開 |
 | duplicate response / request | id map | 同一なら idempotent、内容差なら protocol_mismatch |
 | interrupt ack のみ | response | terminal と扱わず turn/completed を待つ |
 | review 失敗 | review turn terminal | main turn と gate を変更せず review_failed |
 | support isolation 証明失敗 | native wire / canary / profile / auth bridge probe | support session 0、決定的 fallback |
 
-restart loop は指数 backoff と jitter を使い、短時間の連続 crash 3 回で自動 restart を止める。ユーザーが再確認を選ぶまで無限再起動しない。
+restart loop は指数 backoff と jitterを上限まで増やし、短時間の連続crashでもUI操作を要求せず自動再試行を継続する。各attemptは旧process treeの終了とgeneration一致を確認し、liveなmain App Serverを常に最大1件にする。明示shutdownまたはアプリ終了時は予約済みretryを無効化する。
 
 ## privacy と隔離
 

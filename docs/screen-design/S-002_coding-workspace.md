@@ -32,7 +32,7 @@ status: "Approved"
 
 | 対象 | 内容 |
 |---|---|
-| Main session | Codex App Serverのinitialize、thread、turn、stop、reconnect、resume |
+| Main session | Codex App Serverのinitialize、自動再接続、thread、turn、stop、resume |
 | Timeline | user/assistant text、plan/tool、file/diff、decision/approval、errorの会話向けprojection |
 | Composer | multiline指示、attachment、project context参照、reasoning effort、send、stop |
 | Decision | 選択肢、自由入力、保留、中断、明示承認、理由・影響・可逆性 |
@@ -80,7 +80,7 @@ status: "Approved"
 | 領域 | 実装拘束値 | 表示内容 | 主な操作 |
 |---|---:|---|---|
 | workspace sidebar | 255.04×836px | [S-001](S-001_session-dashboard.md)と同じlifecycle一覧、main turn送信開始・実行・停止処理中だけ対象rowのrepository avatarと置き換わるspinner、App settings gear | filter、workspace選択、App settings |
-| breadcrumb row | main上段40.5px | owner avatar、`owner/repo` / workspace、branch、connection、attention | repository / workspace / branchの値をcopy |
+| breadcrumb row | main上段40.5px | owner avatar、`owner/repo` / workspace、branch、repository health、attention | repository / workspace / branchの値をcopy |
 | tab row | main下段40.5px | Chat / Commit / Settings | view切替 |
 | Chat pane | 607.11×754.99px | event timeline、decision、composer | inspect、copy、send、stop、answer |
 | Character pane | 607.84×754.99px | Live2D canvas、visible caption、mute | mute、fallback詳細 |
@@ -96,7 +96,7 @@ status: "Approved"
 | breadcrumb | avatarの次にGitHub `origin`由来の`owner/repo`、workspace名をこの順で一行表示する。GitHub metadataがない時は保存済みlocal repo名へfallbackする。repositoryとworkspace名は長い時も一行ellipsisを維持し、hover / focus-visibleで背景と文字色を変えて操作可能性を示す。pointer clickまたはkeyboard activationで省略前のexact valueをclipboardへcopyし、tooltipとnative `title`は表示しない。copy icon、成功check icon、その予約領域は表示せず、hoverとcopy成功でtext buttonのinline幅を変えない |
 | branch | Git観測値をbranch iconとmono textで表示する。長い時は一行ellipsisを維持し、repository / workspace名と同じhover、focus-visible、clipboard copy、幅不変の契約を使う。stale時の状態説明はrepository healthへ分離し、branch値のtooltipやcopy結果iconは表示しない |
 | repository health | `healthy` / `missing` / `changed` / `unreadable` / `read_only` / `stale_branch`をja/en text、icon、shapeで表示し、色だけにしない。`healthy`以外はSend不可理由とRepair/Recheckを関連付ける |
-| connection | Ready / Working / Needs answer / Interruptedをtextとshapeで表示する。offline時はpersistent bannerとSend不可理由を正本とし、breadcrumb rowへ`Offline / オフライン`のicon、text、空のplaceholderを表示しない |
+| App Server connection | header、Composer、Character、workspace固有surfaceへ状態、badge、banner、reason code、Reconnect/Retry、空のplaceholderを表示しない。復旧中のSend可否だけを内部状態から安全側へ反映する |
 | workspace action | breadcrumb rowへ3点actionを表示しない。Cancel / Repair / Recheck / Archiveをこのrowへ置かず、workspace Archiveはsidebar rowからだけ開始する |
 | Chat | 本画面のmain route。unread error/decision countをbadge表示する |
 | Commit | [S-003](S-003_session-evidence.md)へ遷移する。manual commit buttonではない |
@@ -131,13 +131,13 @@ commit explainerのrequest、status、delta、result、failureはChat timeline�
 
 timeline最下部から48px以内なら新eventで追従する。48pxを超えて離れた場合は位置を固定し、`新しい更新 N件 / 最新へ`をcomposer上へ表示する。復元時はevent anchor IDとoffsetを使い、消失時だけ最寄りsequenceへ補正する。
 
-Chatには正常時のdurability badgeを表示しない。native SQLiteの`read_only` / `recovery_required`だけを回復alertとして表示し、browser demoはheaderの`Preview only / プレビューのみ`、詳細な履歴状態はDiagnosticsを正本とする。Chat上端にはCodex、Git、履歴の接続状態をまとめた汎用noticeを表示しない。app-wide App Server connectionが利用不能な場合だけComposerへ接続回復UIを表示する。個別workspaceのthread開始・再開が失敗した場合はdraftとapp-wide接続表示を維持し、対象workspaceのComposerへthread error codeと再試行だけを表示する。`Codex is not connected`、`Codexに接続されていません`または同等のglobal connection copyをworkspace errorへ使用しない。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
+Chatには正常時のdurability badgeを表示しない。native SQLiteの`read_only` / `recovery_required`だけを回復alertとして表示し、詳細な履歴状態はDiagnosticsを正本とする。Chat上端にはCodex、Git、履歴の接続状態をまとめた汎用noticeを表示しない。app-wide App Server connectionが利用不能でもComposerへ状態、error code、接続回復UIを表示せず、native supervisorが単一processを自動再起動し、handshake後に選択workspace threadを自動再開する。個別workspaceのthread開始・再開が一時失敗した場合もdraftを維持して自動再試行し、raw error codeや手動Retryを表示しない。`Codex is not connected`、`Codexに接続されていません`または同等のconnection copyをworkspace UIへ使用しない。`ephemeral`は利用可能なpreview timelineであり、nativeのread-only/recovery alertとして扱わない。
 
 ### Composer
 
 | control | 表示・動作 | 無効条件 |
 |---|---|---|
-| instruction | 1〜8行auto-grow。Enterは改行、`Command+Enter`で送信 | text、attachment、read-only contextがすべて空またはinvalid、offline、blocked preflight、decision未回答、別workspace実行競合 |
+| instruction | 1〜8行auto-grow。Enterは改行、`Command+Enter`で送信 | text、attachment、read-only contextがすべて空またはinvalid、App Serverまたはthread復旧中、blocked preflight、decision未回答、別workspace実行競合 |
 | Add | icon-onlyの`+`からattachment、`Files & folders`、`Git diff`、`Terminal output`を一つのmenuで選ぶ。menuはportalで描画し、項目をattachmentとContextのgroupへ分ける | turn開始中。attachmentはpermission不足、Contextはsnapshot取得または検証不可 |
 | model | `GPT-5.6 Sol`固定label。picker chevronを出さない | 常時read-only |
 | reasoning | bar iconと現在levelの短いlabelを一つのbuttonにする。clickごとに`Off`から`model/list`が広告したlevelを低い順に一段上げ、最高levelの次は`Off`へ戻る。`Off`は`turn/start.effort=null`でsession既定へ戻す | turn実行中。広告済みlevelがない時は`Off`だけを表示 |
@@ -203,11 +203,11 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | 状態 | 進入条件 | 表示 | 操作可否 | 状態から抜ける条件 |
 |---|---|---|---|---|
 | 初期化中 | workspace、event、Codex、characterを読込中 | shell、timeline/composer/characterのshape skeleton。demo workspace、draft、timelineを表示しない | tab read-only、Quit。workspace mutationとSendは開始しない | 全queryがterminalになる |
-| 通常 | connected、turnなし、decisionなし | timeline、enabled composer、idle character | send、inspect、read-only context snapshot、Chat/Commit tab移動 | send、offline、error |
+| 通常 | App Serverと選択workspace threadが内部ready、turnなし、decisionなし | timeline、enabled composer、idle character | send、inspect、read-only context snapshot、Chat/Commit tab移動 | send、内部復旧、error |
 | データなし | event 0件 |一文の開始案内、composerをprimaryにする | draft、context、send | first turn作成 |
 | 処理中 | turn running | live timeline、phase、Stop、`thinking` / `acting` caption | stop、inspect、read-only tab、mute | completed、failed、stopped、decision |
 | 意思決定待ち | structured decision受信 | decisionをtimelineとattentionへ表示、`waiting_for_user` caption | answer、hold、interrupt、read-only閲覧 | answer accepted、interrupt terminal |
-| オフライン | Codex disconnect/auth loss | persistent banner、last sequence、draft、Reconnect | local history、Commit、App SettingsのProject detail / Character detail、Stop可能ならStop |明示reconnectとsequence照合成功 |
+| App Server復旧中 | crash、EOF、protocol違反または一時handshake失敗 | 通常layout、last sequence、draftを維持し、接続状態、banner、code、Reconnect/Retry、Characterの接続表現を表示しない | local history、Commit、App SettingsのProject detail / Character detail。Sendと新規turn mutationは不可 | App Server handshakeと選択workspace thread activationを自動完了 |
 | エラー | turn/tool/normalize/persist failure | code、operation、impact、保持data、retry/modify/stop/details |安全な回復操作、影響外閲覧 | terminal recovery event |
 | 権限不足 | filesystem/process/Git/attachment拒否 |拒否operation、scope、再選択/診断。raw path非表示 | modify、Settings、Stop | valid permissionで明示retry |
 | キャンセル後 | attachment picker、popover、App Settingsのcontext editをcancel |開始前のdraft、selection、event位置 |元操作または別操作 |次の明示操作 |
@@ -219,7 +219,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | background execution閲覧 | old workspaceにactive/pending turnがある状態で別workspaceを選択 | dialogを出さずnew workspaceへ移動し、old rowのrunning表示を維持する。new viewはworkspace固有timeline/draftだけを表示し、Composerはold workspace名を伴うbusy理由でSendをdisabledにする | read-only閲覧、draft/context編集、old workspaceへ戻る | old turn terminal後にcurrent selectionを同じApp Serverへactivate |
 | commit説明準備中 | app controllerがverified commitを`queued` / `running`としているが明示presentation intentはない | background生成status、「詳しく教えて」、`Cancel explanation generation`。caption/live region/TTSは0件でmain timelineへmessageを追加しない | read-only tab、詳しく教えて、生成cancel | 明示intent、generated/canceled/failed/unavailable/selection変更 |
 | commit説明表示中 | `user_request` / `user_retry` / 明示Showのintentとcontroller stateがexact一致する | semantic `working`、streamed HTML caption、`Close explanation`、queued/running時だけ`Cancel explanation generation`、mute。active tabは維持 | read-only tab、Close、条件付き生成Cancel、mute | generated/canceled/failed/unavailable/selection/locale/workspace変更、Stop、Close |
-| demo memory | browser previewの決定的memory adapter | Chatには履歴badgeを表示せず、headerの`Preview only`とDiagnosticsでruntime/durabilityを識別する | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
+| demo memory | browser previewの決定的memory adapter | Chatとheaderには接続・履歴badgeを表示せず、Diagnosticsでruntime/durabilityを識別する | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
 
 ## 操作
 
@@ -262,7 +262,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | session開始/turn送信 | Rust → Codex stdio | `start_or_send_main_turn` | active workspace、Codex executable、typed payload、1 active execution。public instruction 32,000 scalarとcomposed text 80,000 scalarを別々に検証し、imageは`localImage`、fileは`mention`へRust内で変換し、`coding-wife-commit-work`を各turnのexplicit skill inputへ1件注入する | spawn前ならdraft維持 | 上限/NUL/control違反またはskill version/digest/注入を証明できなければturnを開始せず、thread自動重複作成なし |
 | Stop | WorkspaceShell → Rust supervisor / NarrationController | `codex_turn_interrupt` + narration `turn_stop` dismiss | owned process/thread/turn ID、active narration presentation generation。support explanation controller cancelへは転送しない | confirmation cancelは継続 | timeout後process tree停止、Interrupted。caption/TTS失敗でもmain interruptを妨げない |
 | event購読 | Rust event bridge | `subscribe_workspace_events` | workspace ID、monotonic sequence、schema allowlist | route leaveでUI購読だけ解除 | gapでpauseし診断表示 |
-| workspace切替 | WorkspaceShell → history selection / Rust supervisor | `workspace_select` + `codex_thread_start` / `codex_thread_resume` | new workspace ID。app-wide connectionは変更しない。active turn中はhistory selectionだけ、terminal後は同じApp Server processのworkspace contextをactivate | selection失敗時だけold viewへ戻す | old executionとglobal connectionを変更せずworkspace-scoped thread error |
+| workspace切替 | WorkspaceShell → history selection / Rust supervisor | `workspace_select` + `codex_thread_start` / `codex_thread_resume` | new workspace ID。app-wide connectionは変更しない。active turn中はhistory selectionだけ、terminal後は同じApp Server processのworkspace contextをactivate | selection失敗時だけold viewへ戻す | old executionを変更せずthread activationを自動再試行し、接続状態または手動Retryをworkspace UIへ表示しない |
 | terminal Git observation handoff | Codex composition → Rust Git observer | `observe_terminal_work_unit` | validated terminal authority、work unit ID、workspace ID/generation、source event ID/sequence/time。observerがbefore/after HEAD、status、new commitとverification/decision/risk evidenceをread-onlyで相関し、同一eventをexact replayだけに制限 | terminal前は開始しない | observation/HIST失敗をUnavailable/Unknownにし、main resultとGit状態を変更しない |
 | verified commit explanation handoff | App Server event bridge → Rust Git observer → app-owned explanation controller | `intercept_auto_verified_commit_for_explanation` | normalized Git commit command success、workspace generation、before/after HEAD、新しい到達可能SHA、commit evidence ID。`CommitExplanationRequestedV1(trigger=auto_verified_commit)`をmain session外で1件だけ作る | SHA検証前は開始しない | controllerを`failed` / `unavailable`にし、main conversationへrequest/result/failureを注入しない |
 | attachment選択 | Tauri dialog → Rust | `select_workspace_attachments` | file picker、canonical workspace root、size/type |変更なし | invalid fileをhandle化しない |
