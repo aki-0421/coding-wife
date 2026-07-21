@@ -68,6 +68,10 @@ import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
 import { useWorkspaceViewportLayout } from "@/features/workspace-view/workspace-viewport"
+import {
+  deriveWorkspaceCharacterState,
+  useCompletedCharacterCue,
+} from "@/features/workspace-view/workspace-character-state"
 import { gitReviewSchemaVersion } from "@/lib/contracts/git-review"
 
 export interface WorkspaceShellProps {
@@ -194,14 +198,14 @@ export function WorkspaceShell({
   const selectedOwnsExecution =
     selectedWorkspaceId !== null &&
     view.codex.activeWorkspaceId === selectedWorkspaceId
-  const characterState =
-    selectedOwnsExecution && view.codex.pendingRequests.length > 0
-      ? "waiting_for_user"
-      : view.turnState === "sending"
-        ? "thinking"
-        : selectedOwnsExecution && turnActive
-          ? "acting"
-          : "idle"
+  const completedCharacterCue = useCompletedCharacterCue(view.codex)
+  const characterState = deriveWorkspaceCharacterState({
+    codex: view.codex,
+    completedCue: completedCharacterCue,
+    selectedWorkspaceId,
+    turnActive,
+    turnState: view.turnState,
+  })
   const activeTab = view.activeTab
   const registerAttachmentPaths = view.registerAttachmentPaths
   const codexGeneration = view.codex.generation
