@@ -15,7 +15,7 @@ Packaging workflows target macOS 14 or later on Apple Silicon, Windows 11 x64, a
 
 The primary manual and automated app workflow QA runs on macOS Apple Silicon against the real Tauri window, WKWebView, IPC, Rust backend, local Codex process, Live2D renderer, and native audio playback. Windows and Linux workflows verify their native package installation or extraction and removal; they do not currently duplicate that full product E2E. Captions remain the cross-platform fallback, while optional TTS playback is macOS-only.
 
-[Coding Wife v0.1.5](https://github.com/aki-0421/coding-wife/releases/tag/v0.1.5) is public with macOS Arm64, Windows x64, and Linux x64 artifacts plus matching SHA-256 sidecars. It is an older preview: it predates 48 subsequent implementation commits containing Terra/Luna orchestration and the latest Chat and Commit interfaces. For the exact Build Week workflow, test the current repository source.
+[Coding Wife v0.1.6](https://github.com/aki-0421/coding-wife/releases/tag/v0.1.6) is the current public release, with macOS Arm64, Windows x64, and Linux x64 artifacts plus matching SHA-256 sidecars. It contains the current Terra/Luna orchestration and Chat and Commit interfaces. Full real-app workflow QA remains scoped to macOS Apple Silicon; Windows and Linux have native package installation or extraction and removal evidence, not equivalent product E2E evidence. The older public v0.1.5 release is retained as a historical packaging preview.
 
 The free artifacts do not use paid distribution identities: macOS is ad-hoc signed and not notarized, while Windows and Linux packages are unsigned. Verify the matching SHA-256 sidecar and reviewed source before running a downloaded artifact.
 
@@ -35,7 +35,7 @@ GitHub Actions runs the repository CI for every Pull Request into `develop`, eve
 
 PR CI intentionally does not run `pnpm quality:check`, clean-checkout reconstruction, any test behind `pnpm test:release`, a Tauri bundle, or DMG packaging. Release tests remain together because filesystem semantics such as symlink modes vary by runner OS. Those release-candidate checks remain in the canonical quality sequence below. CI has read-only repository permission and does not publish an app or DMG. See the [continuous integration specification](rules/continuous-integration.md) for the exact triggers, versions, cache policy, and release boundary.
 
-The separate `Release installers` workflow runs only for a `v<version>` tag. Every platform job requires the tag commit to be in `develop` history and the tag to match the versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`. macOS runs the repository-owned DMG tests and seal verification; Windows silently installs and uninstalls the current-user NSIS setup; Linux installs and purges the Debian package and extracts the AppImage. Read-only jobs retain their verified artifacts for one day, and only the final aggregation job receives release write permission. It verifies the exact four artifacts and four SHA-256 sidecars before creating a draft. Publication is a separate manual action after release notes, downloaded checksums, and available install smokes are reviewed. Public v0.1.5 followed that boundary; future tags remain drafts until explicitly published. See the [free GitHub Release distribution specification](rules/github-release-distribution.md) for the publication boundary.
+The separate `Release installers` workflow runs only for a `v<version>` tag. Every platform job requires the tag commit to be in `develop` history and the tag to match the versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`. macOS runs the repository-owned DMG tests and seal verification; Windows silently installs and uninstalls the current-user NSIS setup; Linux installs and purges the Debian package and extracts the AppImage. Read-only jobs retain their verified artifacts for one day, and only the final aggregation job receives release write permission. It verifies the exact four artifacts and four SHA-256 sidecars before creating a draft. Publication is a separate manual action after release notes, downloaded checksums, and available install smokes are reviewed. Public v0.1.6 followed that boundary; future tags remain drafts until explicitly published. See the [free GitHub Release distribution specification](rules/github-release-distribution.md) for the publication boundary.
 
 ## Run the development build
 
@@ -145,7 +145,7 @@ Run this stress suite before creating the immutable tag. The tag workflow starts
 
 ## Create and publish a GitHub Release
 
-Release automation deliberately stops at a draft. A maintainer publishes only after reviewing the assets and release notes, verifying downloaded checksums, and completing the available installation smokes. Version 0.1.5 has completed that manual publication step and is public; creating a future tag does not publish it automatically.
+Release automation deliberately stops at a draft. A maintainer publishes only after reviewing the assets and release notes, verifying downloaded checksums, and completing the available installation smokes. Version 0.1.6 has completed that manual publication step and is public; creating a future tag does not publish it automatically.
 
 For a future release, replace X.Y.Z with a new SemVer, update all three application versions to that value on `develop`, and wait for the required CI checks on the exact commit. Then create and push the matching unused tag:
 
@@ -154,17 +154,17 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-Do not reuse or move an existing tag. A future version-tag workflow creates or refreshes a draft with the same naming pattern. The published v0.1.5 release contains exactly these assets:
+Do not reuse or move an existing tag. A future version-tag workflow creates or refreshes a draft with the same naming pattern. The published v0.1.6 release contains exactly these assets:
 
 ```text
-Coding-Wife-v0.1.5-macOS-arm64.dmg
-Coding-Wife-v0.1.5-macOS-arm64.dmg.sha256
-Coding-Wife-v0.1.5-Windows-x64-setup.exe
-Coding-Wife-v0.1.5-Windows-x64-setup.exe.sha256
-Coding-Wife-v0.1.5-Linux-x64.deb
-Coding-Wife-v0.1.5-Linux-x64.deb.sha256
-Coding-Wife-v0.1.5-Linux-x64.AppImage
-Coding-Wife-v0.1.5-Linux-x64.AppImage.sha256
+Coding-Wife-v0.1.6-macOS-arm64.dmg
+Coding-Wife-v0.1.6-macOS-arm64.dmg.sha256
+Coding-Wife-v0.1.6-Windows-x64-setup.exe
+Coding-Wife-v0.1.6-Windows-x64-setup.exe.sha256
+Coding-Wife-v0.1.6-Linux-x64.deb
+Coding-Wife-v0.1.6-Linux-x64.deb.sha256
+Coding-Wife-v0.1.6-Linux-x64.AppImage
+Coding-Wife-v0.1.6-Linux-x64.AppImage.sha256
 ```
 
 Download all eight draft assets into a clean directory and verify the exact bytes:
@@ -187,7 +187,7 @@ If Gatekeeper blocks this reviewed local or downloaded artifact, first try to op
 
 ### Windows
 
-Run `Coding-Wife-v0.1.5-Windows-x64-setup.exe`; the NSIS package installs for the current user without administrator rights. If SmartScreen warns, first verify the release URL and SHA-256, then choose **More info > Run anyway** for this installer only. Do not disable SmartScreen globally. Launch Coding Wife from the installed shortcut and uninstall it through Windows Settings after the smoke.
+Run `Coding-Wife-v0.1.6-Windows-x64-setup.exe`; the NSIS package installs for the current user without administrator rights. If SmartScreen warns, first verify the release URL and SHA-256, then choose **More info > Run anyway** for this installer only. Do not disable SmartScreen globally. Launch Coding Wife from the installed shortcut and uninstall it through Windows Settings after the smoke.
 
 ### Linux
 
@@ -195,6 +195,6 @@ Open the `.deb` with the system software installer on a compatible Ubuntu/Debian
 
 ## Current release status and next source release
 
-Public v0.1.5 already provides the four installers and four matching checksums described above. It remains an older preview and must not be presented as evidence for the current Terra/Luna orchestration or latest Chat and Commit UI.
+Public v0.1.6 provides the four installers and four matching checksums described above. It packages the current Terra/Luna orchestration and latest Chat and Commit UI. The macOS Apple Silicon artifact has full current product QA; Windows and Linux artifacts retain the narrower native packaging boundary described above.
 
 If the current Build Week source is distributed as a new binary, create a new immutable version tag, let the workflow create its draft, verify all downloaded checksums, repeat the available install and first-launch smokes, and publish that reviewed draft manually. Developer ID signing, notarization, stapling, Windows code signing, Linux repository signing, unsupported architectures, and automatic updates remain outside the current artifacts and must not be claimed as complete.
