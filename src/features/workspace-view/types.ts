@@ -201,12 +201,6 @@ export interface WorkspaceCreateRequest {
   readonly name: string
 }
 
-export interface WorkspaceTransitionRequest {
-  readonly fromWorkspaceId: string
-  readonly toWorkspaceId: string
-  readonly expectedGeneration: number | null
-}
-
 export interface AppQuitPreparationRequest {
   readonly workspaceId: string
   readonly expectedGeneration: number
@@ -236,9 +230,6 @@ export interface WorkspaceViewAdapter {
   readonly recheckWorkspace?: (
     workspaceId: string,
     acceptObservedHead?: boolean,
-  ) => Promise<WorkspaceAdapterState>
-  readonly stopAndSwitchWorkspace?: (
-    request: WorkspaceTransitionRequest,
   ) => Promise<WorkspaceAdapterState>
   readonly prepareAppQuit?: (
     request: AppQuitPreparationRequest,

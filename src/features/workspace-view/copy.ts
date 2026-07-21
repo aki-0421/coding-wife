@@ -48,18 +48,6 @@ const en = {
     confirm: "Stop and archive",
     working: "Stopping and archiving…",
   },
-  workspaceSwitch: {
-    title: "Stop and switch workspaces?",
-    description:
-      "The current workspace stays active until its exact turn is interrupted, reaches a terminal state, and finishes local cleanup.",
-    from: "Current workspace",
-    to: "Switch to",
-    goBack: "Go back",
-    confirm: "Stop and switch",
-    stopping: "Stopping and switching…",
-    failed:
-      "The turn could not be stopped and cleaned up. The current workspace remains active; no draft or selection was changed.",
-  },
   projectSetup: {
     title: "Set up project",
     initializeGit: "Initialize Git",
@@ -112,12 +100,6 @@ const en = {
   tabs: {
     chat: "Chat",
     commit: "Commit",
-  },
-  connection: {
-    checking: "Checking runtime",
-    preview: "Preview only",
-    offline: "Offline",
-    ready: "Ready",
   },
   runtimeErrorTitle: "The local runtime could not be reached",
   retry: "Retry",
@@ -285,11 +267,11 @@ const en = {
   commandSend: "⌘↵ send",
   removeAttachment: "Remove attachment",
   attachmentRejected: "Files over 25 MiB remain visible but cannot be sent.",
-  sendUnavailable: "Codex is not connected. Your draft will be preserved.",
-  reconnectCodex: "Reconnect",
-  reconnectingCodex: "Reconnecting…",
+  sendNotReady: "Sending is temporarily unavailable. Your draft is preserved.",
   sendEmpty: "Enter an instruction or attach valid context.",
   sendBusy: "Wait for the current turn to finish or stop it.",
+  sendBusyOtherWorkspace: (workspace: string) =>
+    `${workspace} is still running. You can review this workspace now; Send becomes available when that turn finishes.`,
   pickerUnavailable:
     "The native operation is not connected in this preview. No local project state changed.",
   contextUnavailable:
@@ -529,18 +511,6 @@ const ja: typeof en = {
     confirm: "停止してアーカイブ",
     working: "停止してアーカイブ中…",
   },
-  workspaceSwitch: {
-    title: "停止してワークスペースを切り替えますか？",
-    description:
-      "現在のワークスペースは、対象ターンの中断、終了状態の確認、ローカル後処理が完了するまで選択中のままです。",
-    from: "現在のワークスペース",
-    to: "切り替え先",
-    goBack: "戻る",
-    confirm: "停止して切り替え",
-    stopping: "停止して切り替え中…",
-    failed:
-      "ターンの停止と後処理を完了できませんでした。現在のワークスペースを維持し、下書きと選択は変更していません。",
-  },
   projectSetup: {
     title: "プロジェクトをセットアップ",
     initializeGit: "Gitを初期化",
@@ -593,12 +563,6 @@ const ja: typeof en = {
   tabs: {
     chat: "チャット",
     commit: "コミット",
-  },
-  connection: {
-    checking: "実行環境を確認中",
-    preview: "プレビューのみ",
-    offline: "オフライン",
-    ready: "準備完了",
   },
   runtimeErrorTitle: "ローカル実行環境へ接続できませんでした",
   retry: "再試行",
@@ -765,11 +729,11 @@ const ja: typeof en = {
   removeAttachment: "添付を削除",
   attachmentRejected:
     "25 MiBを超えるファイルは表示を残しますが送信できません。",
-  sendUnavailable: "Codexは未接続です。下書きは保持されます。",
-  reconnectCodex: "再接続",
-  reconnectingCodex: "再接続中…",
+  sendNotReady: "現在は送信できません。下書きは保持されます。",
   sendEmpty: "指示を入力するか、有効なコンテキストを追加してください。",
   sendBusy: "現在のturnを完了するか、停止してください。",
+  sendBusyOtherWorkspace: (workspace: string) =>
+    `${workspace} は実行を継続しています。このワークスペースは閲覧でき、対象turnの完了後に送信できます。`,
   pickerUnavailable:
     "このプレビューではnative操作が未接続です。ローカルproject状態は変更していません。",
   contextUnavailable:

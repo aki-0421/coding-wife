@@ -44,6 +44,25 @@ describe("PersistentWorkspaceViewAdapter", () => {
     })
   })
 
+  it("does not restore App Server connection recovery into the visible timeline", () => {
+    const recovery = new PersistedCodexEventProjector().project({
+      ...(fixture.timeline.items[0] as PersistedTimelineEvent),
+      eventId: "event-connection-recovery",
+      producer: "code",
+      kind: "code.session.diagnostic",
+      payload: {
+        semanticVersion: 1,
+        generation: 7,
+        sourceSequence: 5,
+        code: "CODEX-CONNECTION-LOST",
+        willRetry: true,
+        detailRef: "diagnostic-connection-recovery",
+      },
+    })
+
+    expect(recovery).toBeNull()
+  })
+
   it("projects strict native state without exposing project linkage paths", () => {
     const projected = projectWorkspaceState(
       fixture.state as WorkspaceStateSnapshot,

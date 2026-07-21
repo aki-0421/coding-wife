@@ -92,7 +92,27 @@ describe("default App character integration", () => {
     const codexListeners = new Set<(state: WorkspaceCodexState) => void>()
     const adapter: WorkspaceViewAdapter = {
       connected: true,
-      sendTurn: () => Promise.resolve({ accepted: true }),
+      sendTurn: (request) => {
+        for (const listener of codexListeners) {
+          listener({
+            activeWorkspaceId: request.workspaceId,
+            generation: 1,
+            phase: "running",
+            connected: true,
+            readiness: {
+              ready: true,
+              fastServiceTier: "priority",
+              supportedReasoningEfforts: ["low", "max"],
+              experimentalModesAvailable: true,
+              reasonCode: null,
+            },
+            pendingRequests: [],
+            timeline: [],
+            errorCode: null,
+          })
+        }
+        return Promise.resolve({ accepted: true })
+      },
       stopTurn: () => {
         for (const listener of codexListeners) {
           listener({
@@ -148,13 +168,14 @@ describe("default App character integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
 
     await waitFor(() => expect(latestLive2dProps()?.state).toBe("acting"))
-    expect(latestLive2dProps()?.stateGeneration).toBe(initialGeneration + 2)
+    const actingGeneration = latestLive2dProps()?.stateGeneration ?? 0
+    expect(actingGeneration).toBeGreaterThan(initialGeneration)
     expect(screen.getByTestId("live2d-character")).toBe(initialNode)
 
     fireEvent.click(await screen.findByRole("button", { name: "Stop" }))
     await waitFor(() => expect(latestLive2dProps()?.state).toBe("idle"))
     const idleGeneration = latestLive2dProps()?.stateGeneration ?? 0
-    expect(idleGeneration).toBe(initialGeneration + 3)
+    expect(idleGeneration).toBe(actingGeneration + 1)
 
     fireEvent.click(
       within(characterPane as HTMLElement).getByRole("button", {

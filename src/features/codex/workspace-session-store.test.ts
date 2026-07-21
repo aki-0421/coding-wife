@@ -135,4 +135,48 @@ describe("CodexWorkspaceSessionStore", () => {
       },
     })
   })
+
+  it("keeps app connectivity when only the selected workspace thread fails", () => {
+    const store = new CodexWorkspaceSessionStore()
+    store.beginActivation("workspace-a", "ready")
+    store.applyDiagnostic(readyDiagnostic)
+    store.markThreadReady("thread-a", 7)
+
+    store.beginActivation("workspace-b", "ready")
+    store.markWorkspaceThreadError("CODEX-SERVER-ERROR")
+
+    expect(store.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-b",
+      phase: "failed",
+      connected: true,
+      generation: null,
+      errorCode: "CODEX-SERVER-ERROR",
+      readiness: {
+        ready: true,
+        reasonCode: null,
+      },
+    })
+  })
+
+  it("preserves the selected workspace timeline during automatic recovery", () => {
+    const store = new CodexWorkspaceSessionStore()
+    const projector = new CodexEventProjector()
+    store.beginActivation("workspace-fixture", "ready")
+    store.applyDiagnostic(readyDiagnostic)
+    store.markThreadReady("thread_handle_fixture", 7)
+    const projection = projector.project(parseCodexEvent(fixture.events[0]))
+    if (projection.timeline === null) throw new Error("timeline fixture")
+    store.applyTimeline(projection.timeline)
+
+    store.beginRecovery("workspace-fixture", "ready")
+
+    expect(store.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-fixture",
+      phase: "connecting",
+      connected: false,
+      generation: null,
+      threadHandle: null,
+      timeline: [{ sourceEventId: projection.timeline.sourceEventId }],
+    })
+  })
 })

@@ -12,11 +12,10 @@ use super::attachment::{
 };
 use super::supervisor::CodexSupervisor;
 use super::types::{
-    AcceptedResponse, CodexCommandError, CodexConnectRequest, CodexDiagnostic,
-    CodexFallbackDecisionRequest, CodexPendingResponseRequest, CodexReviewStartRequest,
-    CodexThreadListRequest, CodexThreadResumeRequest, CodexThreadStartRequest,
-    CodexTurnInterruptRequest, CodexTurnStartRequest, ReviewResponse, ThreadListResponse,
-    ThreadResponse, TurnResponse,
+    AcceptedResponse, CodexCommandError, CodexDiagnostic, CodexFallbackDecisionRequest,
+    CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadListRequest,
+    CodexThreadResumeRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
+    CodexTurnStartRequest, ReviewResponse, ThreadListResponse, ThreadResponse, TurnResponse,
 };
 use super::workspace::{WorkspaceRegistration, WorkspaceService};
 
@@ -149,10 +148,9 @@ pub async fn codex_probe(
 
 #[tauri::command]
 pub async fn codex_connect(
-    request: CodexConnectRequest,
     supervisor: State<'_, CodexSupervisor>,
 ) -> Result<CodexDiagnostic, CodexCommandError> {
-    supervisor.connect(request).await
+    supervisor.connect().await
 }
 
 #[tauri::command]

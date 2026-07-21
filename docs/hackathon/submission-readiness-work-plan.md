@@ -1,7 +1,7 @@
 ---
 title: "Coding Wife 提出準備完了までの作業計画"
 description: "現行実装から全デモ機能、macOS配布物、審査導線、Devpost提出証跡までを依存順に完了させる実行計画。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "残存するアプリ機能の実装順、コミット単位、完了条件を確認するとき。"
   - "OpenAI Build Week提出前のGo/No-Go判断、配布物、審査導線、外部依存を確認するとき。"
@@ -118,8 +118,9 @@ read_when:
 - Cancelは必要ならactive turn停止を確認してからCanceled groupへ移す。source、working tree、Git ref、history本文を変更しない。
 - unregisterはrunning turn中に実行せず、二段階確認後にapp metadataだけを削除する。
 - missing、changed、unreadable、read-only、stale branchをtextとiconでrow/headerへ表示し、repair導線を置く。
-- active/pending turnを持つworkspaceからの切替は、「停止して切替」と「戻る」の確認を必須にする。
-- 「戻る」はselection、turn、draft、caption/TTSを不変にする。「停止して切替」はterminal interruptとcleanup完了後だけ次workspaceをactivateする。
+- active/pending turnがあっても別workspaceの閲覧へ即時移動できる。実行中workspaceはsidebarで識別でき、turnは停止せず継続する。
+- 実行中workspace以外では固有draft、summary、anchorだけを表示し、旧workspaceのlive eventやpending requestを混在させない。単一実行枠が空くまで新しいSendは無効にする。
+- Codex App Serverはapp起動中に1 processだけを共有し、workspace選択で再起動しない。終了cleanupでそのprocessを停止する。
 - single-instanceを実装し、二重起動時は新規runtime/windowを増やさず既存windowをfocus/raiseする。
 - idle closeは通常終了する。running closeは「停止して終了」と「終了しない」を提示し、後者はwindow/turnを保持する。
 - 終了時はCodex process group、audio、support controller、pending DB writer/transactionを期限内に閉じる。crash後のunfinished turnはInterruptedとして復元し、自動再送しない。
@@ -209,10 +210,10 @@ read_when:
   - Parallel: Commit/Settings系列と可。
   - Done: state-aware menu、二段階確認、health表示、repair、focus restorationが動き、source/Git ref/history本文を変更しないnative integration testがgreen。
 
-- [ ] **C08 `feat(workspaces): confirm active-turn transitions`**
+- [ ] **C08 `feat(workspaces): allow background workspace navigation`**
   - Depends on: C07
   - Parallel: C10/C11と可。
-  - Done: switch保留、戻るの完全不変、interrupt terminalization後の切替、rapid/stale/failure race、caption/audio isolationがgreen。
+  - Done: active turnを止めずに別workspaceへ即時移動でき、旧workspaceの実行表示、selected workspaceの履歴分離、単一Send枠、terminal後のlatest selection activation、単一App Server process、caption/audio isolationがgreen。
 
 - [ ] **C09 `feat(app): enforce single instance and safe quit`**
   - Depends on: C08

@@ -206,11 +206,7 @@ export class DemoCodexTransport implements CodexTransport {
         } as CodexResponseMap[K])
       case codexCommands.getDiagnostic:
       case codexCommands.probe:
-        return Promise.resolve(demoDiagnostic as CodexResponseMap[K])
       case codexCommands.connect:
-        this.activeWorkspaceId = (
-          request as CodexRequestMap["codex_connect"]
-        ).workspaceId
         return Promise.resolve(demoDiagnostic as CodexResponseMap[K])
       case codexCommands.threadList:
         return Promise.resolve({

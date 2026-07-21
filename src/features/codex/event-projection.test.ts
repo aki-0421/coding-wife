@@ -90,6 +90,25 @@ describe("CodexEventProjector", () => {
     })
   })
 
+  it("keeps automatic connection recovery out of the visible timeline", () => {
+    const projected = new CodexEventProjector().project(
+      event(5, {
+        kind: "diagnostic",
+        payload: {
+          code: "CODEX-CONNECTION-LOST",
+          willRetry: true,
+          detailRef: "diagnostic-recovery-1",
+        },
+      }),
+    )
+
+    expect(projected.timeline).toBeNull()
+    expect(projected.history).toMatchObject({
+      kind: "code.session.diagnostic",
+      payload: { code: "CODEX-CONNECTION-LOST", willRetry: true },
+    })
+  })
+
   it("persists message item lifecycle without rendering duplicate status rows", () => {
     const projected = new CodexEventProjector().project(
       event(5, {

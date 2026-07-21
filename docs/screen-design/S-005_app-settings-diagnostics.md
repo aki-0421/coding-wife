@@ -83,7 +83,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | 通常       | snapshot取得済み                  | 5 sectionと保存済み値                          | 契約済み操作が可       | save/test/recheck開始   |
 | データなし | 設定済みTTS providerまたはdiagnostic resultが0件 | provider未設定理由と設定tab、またはRetry       | TTS toggle/provider select以外は可 | API key保存または再取得成功 |
 | 処理中     | save、自動保存、test、recheck中   | 操作箇所のprocessing status                    | 同一操作の二重実行不可 | terminal result         |
-| オフライン | network/Codex unavailable         | 保存済み設定は表示し、OpenAI testはUnavailable | 設定保存とrecheck可    | readiness更新           |
+| オフライン | TTSなど外部network機能がunavailable。App Server transportはこの可視状態へ射影しない | 保存済み設定は表示し、対象featureのtestだけをUnavailable | 設定保存とrecheck可 | 対象featureのreadiness更新 |
 | エラー     | storeまたはdiagnostic失敗         | safe code、前snapshot、Retry                   | 破壊的fallback不可     | retry成功               |
 | 権限不足   | native operation拒否              | localized reason、変更前値                     | scope外操作不可        | permission回復後のretry |
 
@@ -94,7 +94,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | app settingsを開く    | workspace shell表示中 | gearをactiveにしS-005のGeneralだけを表示          | 非該当                         | shellとworkspace stateを維持    | `APP-F-083`                           |
 | workspaceを選ぶ       | S-005表示中           | app settingsを閉じ、現在のactive tabで選択workspaceへ切り替える | running turn時は既存switch確認 | 選択前workspaceを維持           | `APP-F-055`                           |
 | preferenceを変更する  | Generalがready        | 全workspaceへ即時反映しatomic保存                 | 前値維持                       | 前durable snapshot、Retry       | `APP-F-057`, `APP-F-058`, `APP-F-076` |
-| Codex pathを設定する | Generalまたは初回setupがready | Rustがabsolute pathをcanonicalizeし、binary trust、version、App Server起動とstable initializeを検証してapp-private設定へ保存する。schema、auth、config、modelは通常workspace接続まで確認しない。次のreadiness snapshotを返し、実行中sessionは変更しない。overview setupから成功した場合は未接続の選択workspace再接続を追加clickなしで開始するが、その完了をfieldのprocessingまたはoverview終了の条件にしない | 入力と前設定を維持 | 入力を保持しfield直下にsafe code、前設定を維持。後続のworkspace activation失敗はpathをinvalid扱いせず通常workspaceでSend不可のreasonを表示する | `CODE-F-051`, `WORK-F-048` |
+| Codex pathを設定する | Generalまたは初回setupがready | Rustがabsolute pathをcanonicalizeし、binary trust、version、App Server起動とstable initializeを検証してapp-private設定へ保存する。schema、auth、config、modelは通常workspace接続まで確認しない。次のreadiness snapshotを返し、実行中sessionは変更しない。overview setupから成功した場合は未接続の選択workspace再接続を追加clickなしで開始するが、その完了をfieldのprocessingまたはoverview終了の条件にしない | 入力と前設定を維持 | 入力を保持しfield直下にsafe code、前設定を維持。後続のworkspace activation失敗はpathをinvalid扱いせず、draftを維持して自動再試行し、接続状態またはreasonをworkspace UIへ表示しない | `CODE-F-051`, `WORK-F-048` |
 | Codex pathを自動検出へ戻す | 明示pathが設定済み | app-private設定を削除し、GUI `PATH`、default login shell、既知install位置の探索結果でreadinessを更新する | 前設定を維持 | 前設定とsnapshotを維持しsafe code | `CODE-F-051` |
 | character個別設定を開く | Character一覧がready | 選択行のmodel名、必要な操作、motion設定、Character contextを同sectionに表示 | 非該当 | 一覧を維持 | `LIVE-F-084`, `LIVE-F-086` |
 | Character contextを保存する | character個別設定がready | 対象packのversionだけを更新し、そのpackを選択した次の全workspace turnから適用 | draft維持 | field errorまたはconflict、draft維持 | `APP-F-084`, `WORK-F-063`, `LIVE-F-086` |

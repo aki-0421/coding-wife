@@ -1,9 +1,5 @@
 import { useState, type ReactNode } from "react"
-import {
-  GitBranchIcon,
-  LoaderCircleIcon,
-  TriangleAlertIcon,
-} from "lucide-react"
+import { GitBranchIcon, TriangleAlertIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import {
@@ -23,50 +19,10 @@ import {
 } from "@/features/workspace-view/types"
 import { cn } from "@/lib/utils"
 
-export type HeaderConnectionState = "checking" | "preview" | "offline" | "ready"
-
 interface WorkspaceHeaderProps {
   readonly activeTab: WorkspaceTab
-  readonly connection: HeaderConnectionState
   readonly copy: WorkspaceCopy
   readonly workspace: WorkspaceRecord
-}
-
-function ConnectionStatus({
-  connection,
-  copy,
-}: Pick<WorkspaceHeaderProps, "connection" | "copy">) {
-  if (connection === "offline") return null
-
-  return (
-    <span
-      className={cn(
-        "ml-auto flex shrink-0 items-center gap-xs text-label",
-        connection === "ready" && "text-success",
-        connection === "checking" && "text-running",
-        connection === "preview" && "text-muted-foreground",
-      )}
-      role="status"
-    >
-      {connection === "checking" ? (
-        <LoaderCircleIcon
-          aria-hidden="true"
-          className="size-3 animate-spin motion-reduce:animate-none"
-        />
-      ) : (
-        <span
-          aria-hidden="true"
-          className={cn(
-            "size-[7px] rounded-circle border",
-            connection === "ready"
-              ? "border-success bg-success/20"
-              : "rotate-45 rounded-[1px] border-muted-foreground",
-          )}
-        />
-      )}
-      <span>{copy.connection[connection]}</span>
-    </span>
-  )
 }
 
 function WorkspaceHealthStatus({
@@ -122,7 +78,6 @@ function HeaderValueButton({
 
 export function WorkspaceHeader({
   activeTab,
-  connection,
   copy,
   workspace,
 }: WorkspaceHeaderProps) {
@@ -177,7 +132,6 @@ export function WorkspaceHeader({
         </HeaderValueButton>
         <WorkspaceHealthStatus copy={copy} workspace={workspace} />
         <span aria-hidden="true" className="h-full min-w-12 flex-1" />
-        <ConnectionStatus connection={connection} copy={copy} />
         <span aria-live="polite" className="sr-only" role="status">
           {copyAnnouncement}
         </span>

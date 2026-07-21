@@ -8,6 +8,18 @@ import { unicodeScalarCount } from "@/lib/public-text"
 
 const maxStreamingText = 64 * 1024
 const maxToolText = 16 * 1024
+const hiddenConnectionDiagnosticCodes = new Set([
+  "CODEX-CONNECTION-LOST",
+  "CODEX-CONNECTION-STALE",
+  "CODEX-DISCONNECTED",
+  "CODEX-IPC-UNAVAILABLE",
+  "CODEX-NOT-READY",
+  "CODEX-PROTOCOL-MISMATCH",
+])
+
+export function isInternalConnectionDiagnosticCode(code: string): boolean {
+  return hiddenConnectionDiagnosticCodes.has(code)
+}
 
 export type CodexSemanticKind =
   | "thread"
@@ -530,27 +542,29 @@ export class CodexEventProjector {
         const stable = stableId(event, "diagnostic", event.payload.detailRef)
         const warning = event.payload.code === "CODEX-WARNING"
         return {
-          timeline: warning
-            ? {
-                ...base(event, "status", "warning", stable, true),
-                kind: "status",
-                itemHandle: null,
-                itemType: "warning",
-                detailRef: event.payload.detailRef,
-              }
-            : {
-                ...base(
-                  event,
-                  "error",
-                  event.payload.willRetry ? "retrying" : "failed",
-                  stable,
-                  true,
-                ),
-                kind: "error",
-                errorCode: event.payload.code,
-                detailRef: event.payload.detailRef,
-                willRetry: event.payload.willRetry,
-              },
+          timeline: isInternalConnectionDiagnosticCode(event.payload.code)
+            ? null
+            : warning
+              ? {
+                  ...base(event, "status", "warning", stable, true),
+                  kind: "status",
+                  itemHandle: null,
+                  itemType: "warning",
+                  detailRef: event.payload.detailRef,
+                }
+              : {
+                  ...base(
+                    event,
+                    "error",
+                    event.payload.willRetry ? "retrying" : "failed",
+                    stable,
+                    true,
+                  ),
+                  kind: "error",
+                  errorCode: event.payload.code,
+                  detailRef: event.payload.detailRef,
+                  willRetry: event.payload.willRetry,
+                },
           history: history(event, "code.session.diagnostic", event.payload),
         }
       }

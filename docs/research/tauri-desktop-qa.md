@@ -66,6 +66,12 @@ WebdriverIOがbinaryを起動・終了し、既に起動している`pnpm tauri:
 embedded providerの`browser.tauri.execute()`はこの環境変数からdirect-evalの接続先を読むため、
 設定を外すとDOM操作は成功してもRust IPCだけが`fetch failed`になる。
 
+標準のWebdriverIO実行は`CODING_WIFE_DESKTOP_QA_HIDDEN=1`をQA processだけへ渡す。
+このmarkerがあるとき、frontendのready通知を受けてもnative windowを表示せず、focusも取得しない。
+embedded WebDriverは非表示の実WKWebViewを引き続き操作し、screenshotも保存できるため、
+自動QAは利用者の画面やkeyboard操作を妨げない。markerなしでQA binaryを手動起動した場合は、
+従来どおりready後にwindowを表示して対話調査できる。
+
 app data directoryはportごとに再利用される。setup overviewを期待するstartup/window sizing
 specを手動で繰り返す場合は、未使用の`CODING_WIFE_WDIO_PORT`を指定してpristine stateを作る。
 過去のsetup済みdataを持つportでoverviewが出ない状態をUI退行として扱ってはならない。
@@ -97,6 +103,7 @@ helperは`window.devicePixelRatio`を掛けた物理サイズをWebDriverへ渡�
 - global Tauri APIと`wdio:*` capabilityはQA専用Tauri設定だけへ追加する。
 - frontend bridgeは`VITE_DESKTOP_QA=true`のQA buildだけへ含める。
 - app processは`TAURI_WEBDRIVER_PORT`がある場合だけQA pluginを登録する。
+- 自動QAの非表示markerは`desktop-qa` featureでだけ解釈し、productionのwindow表示契約を変えない。
 - QAのapp dataは`tmp/desktop-qa/app-data-<port>`へ隔離し、通常のCoding Wifeデータを
   読み書きしない。
 - E2Eからprojectを登録する場合は`/tmp`またはrepositoryのignore済み`tmp/`に作った

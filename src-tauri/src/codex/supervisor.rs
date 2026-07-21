@@ -37,7 +37,7 @@ use super::requests::{
 use super::rpc::{RpcConnection, RpcRequestError, RuntimeSignal};
 use super::types::{
     AcceptedResponse, BinarySource, CapabilityState, ChildState, CodexCommandError,
-    CodexConnectRequest, CodexDiagnostic, CodexEvent, CodexFallbackDecisionRequest, CodexHealth,
+    CodexDiagnostic, CodexEvent, CodexFallbackDecisionRequest, CodexHealth,
     CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadListRequest,
     CodexThreadResumeRequest, CodexThreadStartRequest, CodexTurnInterruptRequest,
     CodexTurnStartRequest, MainSkillInjectionAudit, PendingResolutionStatus, ReasoningPreset,
@@ -71,8 +71,9 @@ fn is_valid_goal_objective(value: &str) -> bool {
             .all(|character| character == '\n' || character == '\t' || !character.is_control())
 }
 const MAX_MODEL_PAGES: usize = 20;
-const MAX_RESTARTS: usize = 3;
 const RESTART_WINDOW: Duration = Duration::from_secs(60);
+const MAX_RESTART_EXPONENT: usize = 6;
+const MAX_RESTART_DELAY: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 enum PendingTurnStartPurpose {
@@ -101,6 +102,7 @@ struct PendingTurnStart {
 #[derive(Default)]
 struct SupervisorState {
     workspaces: HashMap<String, PathBuf>,
+    runtime_root: Option<PathBuf>,
     explicit_binary: Option<PathBuf>,
     binary: Option<BinaryInfo>,
     setup_identity: Option<VerifiedBinaryIdentity>,
@@ -113,6 +115,7 @@ struct SupervisorState {
     thread_handles: HashMap<String, String>,
     turn_handles: HashMap<String, String>,
     active_thread_id: Option<String>,
+    workspace_contexts: HashMap<String, WorkspaceRuntimeContext>,
     active_turn_id: Option<String>,
     active_turn_effort: Option<Option<ReasoningPreset>>,
     pending_turn_start: Option<PendingTurnStart>,
@@ -123,6 +126,14 @@ struct SupervisorState {
     requests: ServerRequestLedger,
     fallback_decisions: FallbackDecisionLedger,
     restart_times: VecDeque<Instant>,
+    shutdown_requested: bool,
+}
+
+struct WorkspaceRuntimeContext {
+    normalizer: EventNormalizer,
+    thread_handles: HashMap<String, String>,
+    turn_handles: HashMap<String, String>,
+    active_thread_id: Option<String>,
 }
 
 struct SupervisorInner {
@@ -345,10 +356,10 @@ impl CodexSupervisor {
             .expect("resource directory lock poisoned")
             .clone()?;
         let state = self.inner.state.lock().await;
-        if state.active_workspace.as_deref() != Some(workspace_id)
-            || state.generation != workspace_generation
+        if state.generation != workspace_generation
             || state.diagnostic.health != CodexHealth::Ready
             || state.runtime.is_none()
+            || !state.workspaces.contains_key(workspace_id)
         {
             return None;
         }
@@ -468,8 +479,13 @@ impl CodexSupervisor {
             ));
         }
         state.workspaces.remove(workspace_id);
+        state.workspace_contexts.remove(workspace_id);
         if state.active_workspace.as_deref() == Some(workspace_id) {
             state.active_workspace = None;
+            state.normalizer = None;
+            state.thread_handles.clear();
+            state.turn_handles.clear();
+            state.active_thread_id = None;
         }
         Ok(())
     }
@@ -529,6 +545,24 @@ impl CodexSupervisor {
         self.inner.state.lock().await.explicit_binary = path;
     }
 
+    pub async fn set_runtime_root(&self, root: impl AsRef<Path>) -> Result<(), CodexCommandError> {
+        let root = tokio::fs::canonicalize(root)
+            .await
+            .map_err(|_| command_error("CODEX-RUNTIME-ROOT-MISSING", "codex.runtime", false))?;
+        if !tokio::fs::metadata(&root)
+            .await
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
+            return Err(command_error(
+                "CODEX-RUNTIME-ROOT-INVALID",
+                "codex.runtime",
+                false,
+            ));
+        }
+        self.inner.state.lock().await.runtime_root = Some(root);
+        Ok(())
+    }
+
     pub async fn explicit_binary_configured(&self) -> bool {
         self.inner.state.lock().await.explicit_binary.is_some()
     }
@@ -555,9 +589,8 @@ impl CodexSupervisor {
         let (explicit_binary, cached_binary, setup_identity, workspace_root, ready_runtime) = {
             let state = self.inner.state.lock().await;
             let workspace_root = state
-                .active_workspace
+                .runtime_root
                 .as_ref()
-                .and_then(|workspace_id| state.workspaces.get(workspace_id))
                 .or_else(|| state.workspaces.values().next())
                 .cloned()
                 .or_else(|| std::env::current_dir().ok());
@@ -663,9 +696,8 @@ impl CodexSupervisor {
         let (configured_binary, binary, schema, workspace_root) = {
             let state = self.inner.state.lock().await;
             let workspace_root = state
-                .active_workspace
+                .runtime_root
                 .as_ref()
-                .and_then(|workspace_id| state.workspaces.get(workspace_id))
                 .or_else(|| state.workspaces.values().next())
                 .cloned()
                 .or_else(|| std::env::current_dir().ok());
@@ -739,34 +771,32 @@ impl CodexSupervisor {
         Ok(diagnostic)
     }
 
-    pub async fn connect(
-        &self,
-        request: CodexConnectRequest,
-    ) -> Result<CodexDiagnostic, CodexCommandError> {
-        self.connect_internal(request.workspace_id, true).await
+    pub async fn connect(&self) -> Result<CodexDiagnostic, CodexCommandError> {
+        match self.connect_internal(true).await {
+            Ok(diagnostic) => Ok(diagnostic),
+            Err(error) => {
+                if error.recoverable {
+                    self.schedule_retry_after_failed_connect().await;
+                }
+                Err(error)
+            }
+        }
     }
 
     async fn connect_internal(
         &self,
-        workspace_id: String,
         reset_restart_budget: bool,
     ) -> Result<CodexDiagnostic, CodexCommandError> {
         let _lifecycle = self.inner.lifecycle.lock().await;
         let ready_runtime = {
             let mut state = self.inner.state.lock().await;
-            if !state.workspaces.contains_key(&workspace_id) {
-                return Err(command_error(
-                    "CODEX-WORKSPACE-NOT-REGISTERED",
-                    "codex.connect",
-                    false,
-                ));
+            if state.shutdown_requested {
+                return Err(command_error("CODEX-SHUTDOWN", "codex.connect", false));
             }
             if reset_restart_budget {
                 state.restart_times.clear();
             }
-            if state.active_workspace.as_deref() == Some(&workspace_id)
-                && state.diagnostic.health == CodexHealth::Ready
-            {
+            if state.diagnostic.health == CodexHealth::Ready {
                 state
                     .runtime
                     .clone()
@@ -797,6 +827,19 @@ impl CodexSupervisor {
                 && !runtime.has_exited().await
                 && binary.revalidate_metadata().await.is_ok()
             {
+                let state = self.inner.state.lock().await;
+                if !state
+                    .runtime
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &runtime))
+                    || state.diagnostic.health != CodexHealth::Ready
+                {
+                    return Err(command_error(
+                        "CODEX-CONNECTION-STALE",
+                        "codex.connect",
+                        true,
+                    ));
+                }
                 return Ok(diagnostic);
             }
         }
@@ -810,12 +853,19 @@ impl CodexSupervisor {
             previous_generation,
         ) = {
             let mut state = self.inner.state.lock().await;
-            let workspace_root = state
-                .workspaces
-                .get(&workspace_id)
-                .cloned()
+            let runtime_root = state
+                .runtime_root
+                .clone()
+                .or_else(|| {
+                    state
+                        .workspaces
+                        .iter()
+                        .min_by(|left, right| left.0.cmp(right.0))
+                        .map(|(_, root)| root.clone())
+                })
+                .or_else(|| std::env::current_dir().ok())
                 .ok_or_else(|| {
-                    command_error("CODEX-WORKSPACE-NOT-REGISTERED", "codex.connect", false)
+                    command_error("CODEX-RUNTIME-ROOT-MISSING", "codex.connect", false)
                 })?;
             let previous_generation = state.generation;
             let configured_binary =
@@ -824,7 +874,7 @@ impl CodexSupervisor {
             let cached_schema = state.schema.clone();
             begin_connection_attempt(&mut state, "codex.connect");
             (
-                workspace_root,
+                runtime_root,
                 configured_binary,
                 cached_binary,
                 cached_schema,
@@ -876,12 +926,7 @@ impl CodexSupervisor {
         let mut last_error = None;
         for attempt in 0..2 {
             let (runtime, generation) = self
-                .spawn_and_install(
-                    &workspace_id,
-                    &workspace_root,
-                    binary.clone(),
-                    schema.clone(),
-                )
+                .spawn_and_install(&workspace_root, binary.clone(), schema.clone())
                 .await?;
             match handshake(&runtime.connection, &workspace_root, experimental).await {
                 Ok(handshake) => {
@@ -924,7 +969,6 @@ impl CodexSupervisor {
 
     async fn spawn_and_install(
         &self,
-        workspace_id: &str,
         workspace_root: &Path,
         binary: BinaryInfo,
         schema: SchemaProbe,
@@ -964,22 +1008,6 @@ impl CodexSupervisor {
         state.binary = Some(binary);
         state.schema = Some(schema);
         state.runtime = Some(runtime.clone());
-        state.active_workspace = Some(workspace_id.to_owned());
-        state.normalizer = Some(EventNormalizer::new(
-            workspace_id.to_owned(),
-            workspace_root.to_path_buf(),
-            generation,
-        ));
-        state.thread_handles.clear();
-        state.turn_handles.clear();
-        state.active_thread_id = None;
-        state.active_turn_id = None;
-        state.active_turn_effort = None;
-        state.pending_turn_start = None;
-        state.main_work_units.clear();
-        state.skill_injection_audits.clear();
-        state.requests.clear_pending();
-        state.fallback_decisions.clear();
         state.diagnostic.child_state = ChildState::Initializing;
         Ok((runtime, generation))
     }
@@ -1050,26 +1078,20 @@ impl CodexSupervisor {
         &self,
         workspace_id: &str,
     ) -> Result<(RpcConnection, PathBuf, u64), CodexCommandError> {
-        let state = self.inner.state.lock().await;
-        if state.active_workspace.as_deref() != Some(workspace_id) {
-            return Err(command_error(
-                "CODEX-WORKSPACE-STALE",
-                "codex.session",
-                false,
-            ));
-        }
+        let mut state = self.inner.state.lock().await;
         if state.diagnostic.health != CodexHealth::Ready {
             return Err(command_error("CODEX-NOT-READY", "codex.session", true));
         }
-        let runtime = state
-            .runtime
-            .as_ref()
-            .ok_or_else(|| command_error("CODEX-DISCONNECTED", "codex.session", true))?;
         let root = state
             .workspaces
             .get(workspace_id)
             .cloned()
             .ok_or_else(|| command_error("CODEX-WORKSPACE-MISSING", "codex.session", false))?;
+        activate_workspace_context(&mut state, workspace_id, root.clone(), "codex.session")?;
+        let runtime = state
+            .runtime
+            .as_ref()
+            .ok_or_else(|| command_error("CODEX-DISCONNECTED", "codex.session", true))?;
         Ok((runtime.connection.clone(), root, state.generation))
     }
 
@@ -1954,6 +1976,8 @@ impl CodexSupervisor {
         let _lifecycle = self.inner.lifecycle.lock().await;
         let (runtime, generation) = {
             let mut state = self.inner.state.lock().await;
+            state.shutdown_requested = true;
+            state.restart_times.clear();
             state.diagnostic.child_state = ChildState::Stopping;
             state.requests.clear_pending();
             state.fallback_decisions.clear();
@@ -1983,6 +2007,8 @@ impl CodexSupervisor {
     pub async fn force_shutdown_now(&self) -> bool {
         let runtime = {
             let mut state = self.inner.state.lock().await;
+            state.shutdown_requested = true;
+            state.restart_times.clear();
             state.requests.clear_pending();
             state.fallback_decisions.clear();
             state.active_turn_id = None;
@@ -2443,12 +2469,15 @@ impl CodexSupervisor {
 
     async fn handle_protocol_violation(&self, generation: u64) {
         let mut events = Vec::new();
-        let (runtime, workspace, restart_attempt) = {
+        let (runtime, restart_attempt) = {
             let mut state = self.inner.state.lock().await;
             if state.generation != generation {
                 return;
             }
             if state.runtime.is_none() {
+                return;
+            }
+            if state.shutdown_requested {
                 return;
             }
             state.diagnostic.health = CodexHealth::ProtocolMismatch;
@@ -2460,24 +2489,14 @@ impl CodexSupervisor {
             state.pending_turn_start = None;
             state.main_work_units.clear();
             let restart_attempt = reserve_restart(&mut state);
-            state.diagnostic.child_state = if restart_attempt.is_some() {
-                ChildState::Restarting
-            } else {
-                ChildState::Stopped
-            };
-            state.diagnostic.recoverable = restart_attempt.is_some();
+            state.diagnostic.child_state = ChildState::Restarting;
+            state.diagnostic.recoverable = true;
             if let Some(normalizer) = state.normalizer.as_mut() {
-                if let Ok(event) = normalizer
-                    .diagnostic_event("CODEX-PROTOCOL-MISMATCH", restart_attempt.is_some())
-                {
+                if let Ok(event) = normalizer.diagnostic_event("CODEX-PROTOCOL-MISMATCH", true) {
                     events.push(event);
                 }
             }
-            (
-                state.runtime.take(),
-                state.active_workspace.clone(),
-                restart_attempt,
-            )
+            (state.runtime.take(), restart_attempt)
         };
         self.invalidate_main_work_unit_generation(generation).await;
         for event in events {
@@ -2486,19 +2505,20 @@ impl CodexSupervisor {
         if let Some(runtime) = runtime {
             runtime.shutdown().await;
         }
-        if let (Some(workspace), Some(attempt)) = (workspace, restart_attempt) {
-            self.schedule_restart(generation, workspace, attempt);
-        }
+        self.schedule_restart(generation, restart_attempt);
     }
 
     async fn handle_disconnect(&self, generation: u64) {
         let mut events = Vec::new();
-        let (workspace, restart_attempt) = {
+        let restart_attempt = {
             let mut state = self.inner.state.lock().await;
             if state.generation != generation {
                 return;
             }
             if state.runtime.is_none() {
+                return;
+            }
+            if state.shutdown_requested {
                 return;
             }
             if state
@@ -2532,44 +2552,53 @@ impl CodexSupervisor {
             state.active_turn_effort = None;
             state.pending_turn_start = None;
             state.main_work_units.clear();
-            let restart_attempt = reserve_restart(&mut state);
-            (
-                state.active_workspace.clone(),
-                if restart_attempt.is_some() {
-                    restart_attempt
-                } else {
-                    state.diagnostic.child_state = ChildState::Stopped;
-                    state.diagnostic.recoverable = true;
-                    None
-                },
-            )
+            reserve_restart(&mut state)
         };
         self.invalidate_main_work_unit_generation(generation).await;
         for event in events {
             self.emit_event(&event);
         }
-        if let (Some(workspace), Some(attempt)) = (workspace, restart_attempt) {
-            self.schedule_restart(generation, workspace, attempt);
-        }
+        self.schedule_restart(generation, restart_attempt);
     }
 
-    fn schedule_restart(&self, generation: u64, workspace: String, attempt: usize) {
+    fn schedule_restart(&self, generation: u64, attempt: usize) {
         let supervisor = self.clone();
+        let exponent = attempt.saturating_sub(1).min(MAX_RESTART_EXPONENT) as u32;
         let delay = Duration::from_millis(
-            250_u64.saturating_mul(1_u64 << (attempt.saturating_sub(1) as u32)) + generation % 97,
-        );
+            250_u64
+                .saturating_mul(1_u64 << exponent)
+                .saturating_add(generation % 97),
+        )
+        .min(MAX_RESTART_DELAY);
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(delay).await;
             let should_restart = {
                 let state = supervisor.inner.state.lock().await;
                 state.generation == generation
                     && state.runtime.is_none()
-                    && state.active_workspace.as_deref() == Some(&workspace)
+                    && !state.shutdown_requested
             };
             if should_restart {
-                let _ = supervisor.connect_internal(workspace, false).await;
+                if let Err(error) = supervisor.connect_internal(false).await {
+                    if error.recoverable {
+                        supervisor.schedule_retry_after_failed_connect().await;
+                    }
+                }
             }
         });
+    }
+
+    async fn schedule_retry_after_failed_connect(&self) {
+        let restart = {
+            let mut state = self.inner.state.lock().await;
+            if state.shutdown_requested || state.runtime.is_some() {
+                return;
+            }
+            state.diagnostic.child_state = ChildState::Restarting;
+            state.diagnostic.recoverable = true;
+            (state.generation, reserve_restart(&mut state))
+        };
+        self.schedule_restart(restart.0, restart.1);
     }
 
     async fn expire_pending(&self) {
@@ -3269,6 +3298,7 @@ fn begin_connection_attempt(state: &mut SupervisorState, operation: &str) {
     state.thread_handles.clear();
     state.turn_handles.clear();
     state.active_thread_id = None;
+    state.workspace_contexts.clear();
     state.active_turn_id = None;
     state.active_turn_effort = None;
     state.pending_turn_start = None;
@@ -3286,7 +3316,63 @@ fn begin_connection_attempt(state: &mut SupervisorState, operation: &str) {
     };
 }
 
-fn reserve_restart(state: &mut SupervisorState) -> Option<usize> {
+fn activate_workspace_context(
+    state: &mut SupervisorState,
+    workspace_id: &str,
+    workspace_root: PathBuf,
+    operation: &str,
+) -> Result<(), CodexCommandError> {
+    if state.active_workspace.as_deref() == Some(workspace_id) && state.normalizer.is_some() {
+        return Ok(());
+    }
+    if state.active_turn_id.is_some() || state.pending_turn_start.is_some() {
+        return Err(command_error("CODEX-TURN-ACTIVE", operation, true));
+    }
+
+    if let Some(current_workspace) = state.active_workspace.take() {
+        if let Some(normalizer) = state.normalizer.take() {
+            state.workspace_contexts.insert(
+                current_workspace,
+                WorkspaceRuntimeContext {
+                    normalizer,
+                    thread_handles: std::mem::take(&mut state.thread_handles),
+                    turn_handles: std::mem::take(&mut state.turn_handles),
+                    active_thread_id: state.active_thread_id.take(),
+                },
+            );
+        }
+    }
+
+    match state.workspace_contexts.remove(workspace_id) {
+        Some(context) => {
+            state.normalizer = Some(context.normalizer);
+            state.thread_handles = context.thread_handles;
+            state.turn_handles = context.turn_handles;
+            state.active_thread_id = context.active_thread_id;
+        }
+        None => {
+            state.normalizer = Some(EventNormalizer::new(
+                workspace_id.to_owned(),
+                workspace_root,
+                state.generation,
+            ));
+            state.thread_handles.clear();
+            state.turn_handles.clear();
+            state.active_thread_id = None;
+        }
+    }
+    state.active_workspace = Some(workspace_id.to_owned());
+    state.active_turn_id = None;
+    state.active_turn_effort = None;
+    state.pending_turn_start = None;
+    state.main_work_units.clear();
+    state.skill_injection_audits.clear();
+    state.requests.clear_pending();
+    state.fallback_decisions.clear();
+    Ok(())
+}
+
+fn reserve_restart(state: &mut SupervisorState) -> usize {
     let now = Instant::now();
     while state
         .restart_times
@@ -3296,7 +3382,7 @@ fn reserve_restart(state: &mut SupervisorState) -> Option<usize> {
         state.restart_times.pop_front();
     }
     state.restart_times.push_back(now);
-    (state.restart_times.len() <= MAX_RESTARTS).then_some(state.restart_times.len())
+    state.restart_times.len()
 }
 
 fn command_error(code: &str, operation: &str, recoverable: bool) -> CodexCommandError {

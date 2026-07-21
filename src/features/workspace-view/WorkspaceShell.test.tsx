@@ -2161,9 +2161,8 @@ describe("WorkspaceShell", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("keeps the native workspace shell when the workspace Codex handshake is disconnected", async () => {
+  it("keeps the native workspace shell without exposing App Server connection state", async () => {
     const user = userEvent.setup()
-    const recheckWorkspace = vi.fn().mockResolvedValue(nativeWorkspaceState())
     const codex: WorkspaceCodexState = {
       activeWorkspaceId: "workspace-native",
       generation: null,
@@ -2184,7 +2183,6 @@ describe("WorkspaceShell", () => {
       hydrationMode: "native",
       loadState: () => Promise.resolve(nativeWorkspaceState()),
       codexSnapshot: () => codex,
-      recheckWorkspace,
     }
     renderWorkspace(adapter)
 
@@ -2195,21 +2193,65 @@ describe("WorkspaceShell", () => {
       screen.queryByRole("heading", { name: "Finish the local setup" }),
     ).toBeNull()
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
-    expect(screen.getByText("CODEX-IPC-UNAVAILABLE")).toBeVisible()
+    expect(screen.queryByText("CODEX-IPC-UNAVAILABLE")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull()
     await user.type(
       screen.getByPlaceholderText(
         "Ask Codex to plan, build, explain, or fix anything…",
       ),
       "Keep this draft",
     )
-    await user.click(screen.getByRole("button", { name: "Reconnect" }))
-    expect(recheckWorkspace).toHaveBeenCalledWith("workspace-native")
     expect(
       screen.getByPlaceholderText(
         "Ask Codex to plan, build, explain, or fix anything…",
       ),
     ).toHaveValue("Keep this draft")
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
+  })
+
+  it("keeps workspace thread recovery internal and preserves its draft", async () => {
+    const user = userEvent.setup()
+    const codex: WorkspaceCodexState = {
+      activeWorkspaceId: "workspace-native",
+      generation: null,
+      phase: "failed",
+      connected: true,
+      readiness: {
+        ready: true,
+        fastServiceTier: "priority",
+        supportedReasoningEfforts: ["low", "max"],
+        experimentalModesAvailable: true,
+        reasonCode: null,
+      },
+      pendingRequests: [],
+      timeline: [],
+      errorCode: "CODEX-SERVER-ERROR",
+    }
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      codexSnapshot: () => codex,
+    }
+    renderWorkspace(adapter)
+
+    await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    expect(screen.queryByText("CODEX-SERVER-ERROR")).toBeNull()
+    expect(
+      screen.queryByText(
+        "Codex is not connected. Your draft will be preserved.",
+      ),
+    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Retry thread" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+
+    const composer = screen.getByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    await user.type(composer, "Keep this workspace draft")
+    expect(composer).toHaveValue("Keep this workspace draft")
   })
 
   it("renders the workspace while native setup readiness is checking", async () => {
@@ -2386,7 +2428,7 @@ describe("WorkspaceShell", () => {
     expect(
       screen.queryByRole("heading", { name: "Activity" }),
     ).not.toBeInTheDocument()
-    expect(characterStatus).toHaveTextContent("Disconnected")
+    expect(characterStatus).toHaveTextContent("Idle")
 
     const mute = within(characterStatus as HTMLElement).getByRole("button", {
       name: "Mute character",
@@ -3431,7 +3473,7 @@ describe("WorkspaceShell", () => {
     expect(screen.queryByText("restored-workspace")).not.toBeInTheDocument()
   })
 
-  it("holds an active workspace selection and Go back preserves draft and narration", async () => {
+  it("navigates immediately while the previous workspace keeps running", async () => {
     const target = {
       id: "workspace-target",
       repository: "native-repository",
@@ -3447,8 +3489,23 @@ describe("WorkspaceShell", () => {
         text: "Keep this exact draft.",
       },
     }
-    const codex = richCodexState()
-    const stopAndSwitchWorkspace = vi.fn()
+    const codex: WorkspaceCodexState = {
+      ...richCodexState(),
+      phase: "running",
+      pendingRequests: [],
+    }
+    const selectWorkspace = vi.fn((workspaceId: string) =>
+      Promise.resolve<WorkspaceAdapterState>({
+        ...state,
+        activeWorkspaceId: workspaceId,
+        draft: {
+          text: "Review the target workspace.",
+          effort: "off",
+          revision: 0,
+          contextSnapshots: [],
+        },
+      }),
+    )
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () => Promise.resolve(state),
@@ -3457,21 +3514,12 @@ describe("WorkspaceShell", () => {
         listener(codex)
         return () => undefined
       },
-      stopAndSwitchWorkspace,
+      selectWorkspace,
     }
-    const narrationGateway = new DemoNarrationGateway()
-    const narrationController = new NarrationController(narrationGateway)
-    const dismissPresentation = vi.spyOn(
-      narrationController,
-      "dismissPresentation",
-    )
-    const cancelSpeech = vi.spyOn(narrationGateway, "cancel")
     const user = userEvent.setup()
     const { container } = render(
       <App
         localeStore={englishLocaleStore}
-        narrationController={narrationController}
-        narrationGateway={narrationGateway}
         transport={new DemoTransport()}
         workspaceAdapter={adapter}
       />,
@@ -3491,177 +3539,23 @@ describe("WorkspaceShell", () => {
     const composer = screen.getByPlaceholderText(
       "Ask Codex to plan, build, explain, or fix anything…",
     )
-    await waitFor(() =>
-      expect(narrationController.getSnapshot().scope).toMatchObject({
-        workspaceId: "workspace-native",
-        generation: 1,
-      }),
-    )
-    dismissPresentation.mockClear()
-    cancelSpeech.mockClear()
     expect(composer).toHaveValue("Keep this exact draft.")
     await user.click(targetRow as HTMLButtonElement)
 
-    const dialog = screen.getByRole("dialog", {
-      name: "Stop and switch workspaces?",
-    })
-    await waitFor(() =>
-      expect(
-        within(dialog).getByRole("button", { name: "Go back" }),
-      ).toHaveFocus(),
-    )
-    expect(within(dialog).getByText("Current workspace")).toBeVisible()
-    expect(
-      within(dialog).getByText("native-repository/restored-workspace"),
-    ).toBeVisible()
-    expect(within(dialog).getByText("Switch to")).toBeVisible()
-    expect(
-      within(dialog).getByText("native-repository/target-workspace"),
-    ).toBeVisible()
-    expect(current).toHaveAttribute("aria-current", "page")
-    expect(targetRow).not.toHaveAttribute("aria-current")
-
-    await user.click(within(dialog).getByRole("button", { name: "Go back" }))
-    expect(
-      screen.queryByRole("dialog", { name: "Stop and switch workspaces?" }),
-    ).not.toBeInTheDocument()
-    expect(current).toHaveAttribute("aria-current", "page")
-    expect(composer).toHaveValue("Keep this exact draft.")
-    expect(stopAndSwitchWorkspace).not.toHaveBeenCalled()
-    expect(dismissPresentation).not.toHaveBeenCalled()
-    expect(cancelSpeech).not.toHaveBeenCalled()
-  })
-
-  it("closes an active workspace selection with Escape and restores its row", async () => {
-    const target = {
-      id: "workspace-target",
-      repository: "native-repository",
-      name: "target-workspace",
-      branch: "feature/target",
-      lifecycle: "backlog" as const,
-    }
-    const state: WorkspaceAdapterState = {
-      ...nativeWorkspaceState(),
-      workspaces: [...nativeWorkspaceState().workspaces, target],
-    }
-    const codex = richCodexState()
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(state),
-      codexSnapshot: () => codex,
-      subscribeCodex(listener) {
-        listener(codex)
-        return () => undefined
-      },
-      stopAndSwitchWorkspace: vi.fn(),
-    }
-    const user = userEvent.setup()
-    const { container } = renderWorkspace(adapter)
-    const targetRow = await waitFor(() => {
-      const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label^="feature/target, native-repository,"]',
-      )
-      expect(button).not.toBeNull()
-      return button as HTMLButtonElement
-    })
-    await user.click(targetRow)
-    const escapeDialog = screen.getByRole("dialog", {
-      name: "Stop and switch workspaces?",
-    })
-    fireEvent.keyDown(escapeDialog, { code: "Escape", key: "Escape" })
-    await waitFor(() => expect(escapeDialog).not.toBeInTheDocument())
-    await waitFor(() => expect(targetRow).toHaveFocus())
-  })
-
-  it("keeps the old workspace selected until Stop and switch finishes", async () => {
-    const target = {
-      id: "workspace-target",
-      repository: "native-repository",
-      name: "target-workspace",
-      branch: "feature/target",
-      lifecycle: "backlog" as const,
-    }
-    const state: WorkspaceAdapterState = {
-      ...nativeWorkspaceState(),
-      workspaces: [...nativeWorkspaceState().workspaces, target],
-    }
-    const targetState: WorkspaceAdapterState = {
-      ...state,
-      activeWorkspaceId: target.id,
-      draft: {
-        text: "",
-        effort: "off",
-        revision: 0,
-        contextSnapshots: [],
-      },
-    }
-    const codex = richCodexState()
-    const transition = deferred<WorkspaceAdapterState>()
-    const stopAndSwitchWorkspace = vi.fn(() => transition.promise)
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(state),
-      codexSnapshot: () => codex,
-      subscribeCodex(listener) {
-        listener(codex)
-        return () => undefined
-      },
-      stopAndSwitchWorkspace,
-    }
-    const user = userEvent.setup()
-    const { container } = renderWorkspace(adapter)
-
-    const current = await waitFor(() => {
-      const button = container.querySelector<HTMLButtonElement>(
-        'button[aria-label^="main, native-repository,"]',
-      )
-      expect(button).not.toBeNull()
-      return button as HTMLButtonElement
-    })
-    const targetRow = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="feature/target, native-repository,"]',
-    )
-    expect(targetRow).not.toBeNull()
-    await user.click(targetRow as HTMLButtonElement)
-    const dialog = screen
-      .getByText("Stop and switch workspaces?")
-      .closest('[role="dialog"]')
-    expect(dialog).not.toBeNull()
-    const switchAction = within(dialog as HTMLElement)
-      .getByText("Stop and switch")
-      .closest("button")
-    expect(switchAction).not.toBeNull()
-    await user.click(switchAction as HTMLButtonElement)
-
-    expect(stopAndSwitchWorkspace).toHaveBeenCalledWith({
-      fromWorkspaceId: "workspace-native",
-      toWorkspaceId: "workspace-target",
-      expectedGeneration: 1,
-    })
-    expect(current).toHaveAttribute("aria-current", "page")
-    expect(targetRow).not.toHaveAttribute("aria-current")
-    const status = (dialog as HTMLElement).querySelector('[role="status"]')
-    expect(status).not.toBeNull()
-    expect(status).toHaveTextContent("Stopping and switching…")
-    const pendingAction = within(dialog as HTMLElement).getByRole("button", {
-      name: "Stopping and switching…",
-    })
-    expect(pendingAction).toBeDisabled()
-    const goBack = within(dialog as HTMLElement)
-      .getByText("Go back")
-      .closest("button")
-    expect(goBack).toBeDisabled()
-
-    await act(async () => {
-      transition.resolve(targetState)
-      await transition.promise
-    })
     await waitFor(() =>
       expect(targetRow).toHaveAttribute("aria-current", "page"),
     )
     expect(current).not.toHaveAttribute("aria-current")
+    expect(selectWorkspace).toHaveBeenCalledWith("workspace-target")
+    expect(composer).toHaveValue("Review the target workspace.")
     expect(
-      screen.queryByRole("dialog", { name: "Stop and switch workspaces?" }),
-    ).not.toBeInTheDocument()
+      document.querySelector("[data-background-execution-status]"),
+    ).toHaveTextContent(
+      "native-repository/restored-workspace is still running. You can review this workspace now; Send becomes available when that turn finishes.",
+    )
+    expect(current).toHaveAccessibleName(
+      expect.stringContaining("Session running"),
+    )
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull()
   })
 })

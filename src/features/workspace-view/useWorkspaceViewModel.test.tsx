@@ -118,15 +118,15 @@ function contextSnapshot(): WorkspaceTurnContextSnapshot {
 function adapterFixture(
   options: {
     readonly snapshot?: WorkspaceCodexState
-    readonly transition?: Promise<WorkspaceAdapterState>
+    readonly selection?: Promise<WorkspaceAdapterState>
     readonly context?: Promise<WorkspaceTurnContextSnapshot>
   } = {},
 ) {
   const snapshot = options.snapshot ?? codexState()
-  const stopAndSwitchWorkspace = vi.fn(() =>
-    options.transition === undefined
-      ? Promise.resolve(state("workspace-c"))
-      : options.transition,
+  const selectWorkspace = vi.fn((workspaceId: string) =>
+    options.selection === undefined
+      ? Promise.resolve(state(workspaceId))
+      : options.selection,
   )
   const sendTurn = vi.fn(() => Promise.resolve({ accepted: true }))
   const adapter: WorkspaceViewAdapter = {
@@ -137,42 +137,38 @@ function adapterFixture(
       listener(snapshot)
       return () => undefined
     },
-    stopAndSwitchWorkspace,
+    selectWorkspace,
     sendTurn,
     getTurnContextSnapshot: () =>
       options.context === undefined
         ? Promise.resolve(contextSnapshot())
         : options.context,
   }
-  return { adapter, sendTurn, stopAndSwitchWorkspace }
+  return { adapter, selectWorkspace, sendTurn }
 }
 
 describe("useWorkspaceViewModel workspace transitions", () => {
-  it("holds an active-turn selection and Go back preserves selection, turn, and draft", async () => {
+  it("switches the view immediately while the old workspace keeps running", async () => {
     const fixture = adapterFixture()
     const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
     await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
     expect(result.current.turnState).toBe("running")
 
-    act(() => result.current.setSelectedWorkspaceId("workspace-b"))
-    expect(result.current.pendingWorkspaceTransition).toMatchObject({
-      fromWorkspaceId: "workspace-a",
-      toWorkspaceId: "workspace-b",
-      expectedGeneration: 7,
-      status: "confirming",
+    await act(async () => {
+      result.current.setSelectedWorkspaceId("workspace-b")
+      await Promise.resolve()
     })
-    expect(result.current.selectedWorkspaceId).toBe("workspace-a")
+    expect(fixture.selectWorkspace).toHaveBeenCalledWith("workspace-b")
+    expect(result.current.selectedWorkspaceId).toBe("workspace-b")
+    expect(result.current.turnState).toBe("idle")
+    expect(result.current.backgroundExecutionWorkspace).toMatchObject({
+      id: "workspace-a",
+      name: "workspace-a",
+    })
     expect(result.current.selectedDraft).toMatchObject({
-      text: "Preserve this draft.",
+      text: "",
       effort: "max",
     })
-
-    act(() => result.current.cancelWorkspaceTransition())
-    expect(result.current.pendingWorkspaceTransition).toBeNull()
-    expect(result.current.selectedWorkspaceId).toBe("workspace-a")
-    expect(result.current.turnState).toBe("running")
-    expect(result.current.selectedDraft.text).toBe("Preserve this draft.")
-    expect(fixture.stopAndSwitchWorkspace).not.toHaveBeenCalled()
   })
 
   it("rechecks repository health immediately before Send and preserves a blocked draft", async () => {
@@ -406,9 +402,9 @@ describe("useWorkspaceViewModel workspace transitions", () => {
     expect(result.current.selectedWorkspace?.health).toBe("ready")
   })
 
-  it("uses the latest rapid target and deduplicates confirm while the old workspace stays selected", async () => {
-    const transition = deferred<WorkspaceAdapterState>()
-    const fixture = adapterFixture({ transition: transition.promise })
+  it("keeps the latest rapid target while older selection results are stale", async () => {
+    const selection = deferred<WorkspaceAdapterState>()
+    const fixture = adapterFixture({ selection: selection.promise })
     const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
     await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
 
@@ -416,72 +412,42 @@ describe("useWorkspaceViewModel workspace transitions", () => {
       result.current.setSelectedWorkspaceId("workspace-b")
       result.current.setSelectedWorkspaceId("workspace-c")
     })
-    expect(result.current.pendingWorkspaceTransition).toMatchObject({
-      toWorkspaceId: "workspace-c",
-      status: "confirming",
-    })
-
-    let first!: Promise<boolean>
-    let duplicate!: Promise<boolean>
-    act(() => {
-      first = result.current.confirmWorkspaceTransition("Switch failed")
-      duplicate = result.current.confirmWorkspaceTransition("Switch failed")
-    })
-    expect(duplicate).toBe(first)
-    expect(fixture.stopAndSwitchWorkspace).toHaveBeenCalledTimes(1)
-    expect(fixture.stopAndSwitchWorkspace).toHaveBeenCalledWith({
-      fromWorkspaceId: "workspace-a",
-      toWorkspaceId: "workspace-c",
-      expectedGeneration: 7,
-    })
-    expect(result.current.selectedWorkspaceId).toBe("workspace-a")
-    expect(result.current.pendingWorkspaceTransition?.status).toBe("stopping")
+    expect(fixture.selectWorkspace).toHaveBeenNthCalledWith(1, "workspace-b")
+    expect(fixture.selectWorkspace).toHaveBeenNthCalledWith(2, "workspace-c")
+    expect(result.current.selectedWorkspaceId).toBe("workspace-c")
 
     await act(async () => {
-      transition.resolve(state("workspace-c"))
-      await first
+      selection.resolve(state("workspace-c"))
+      await selection.promise
     })
     expect(result.current.selectedWorkspaceId).toBe("workspace-c")
-    expect(result.current.pendingWorkspaceTransition).toBeNull()
   })
 
-  it("keeps the old workspace and draft when stopping or activation fails", async () => {
-    const transition = deferred<WorkspaceAdapterState>()
-    const fixture = adapterFixture({ transition: transition.promise })
+  it("rolls the view back when selection persistence fails", async () => {
+    const selection = deferred<WorkspaceAdapterState>()
+    const fixture = adapterFixture({ selection: selection.promise })
     const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
     await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
     act(() => result.current.setSelectedWorkspaceId("workspace-b"))
+    expect(result.current.selectedWorkspaceId).toBe("workspace-b")
 
-    let switching!: Promise<boolean>
-    act(() => {
-      switching = result.current.confirmWorkspaceTransition(
-        "The original workspace remains active.",
-      )
-    })
     await act(async () => {
-      transition.reject(new Error("terminal cleanup failed"))
-      await switching
+      selection.reject(new Error("WORKSPACE-SELECT-FAILED"))
+      await selection.promise.catch(() => undefined)
     })
 
     expect(result.current.selectedWorkspaceId).toBe("workspace-a")
     expect(result.current.selectedDraft.text).toBe("Preserve this draft.")
-    expect(result.current.pendingWorkspaceTransition).toMatchObject({
-      fromWorkspaceId: "workspace-a",
-      toWorkspaceId: "workspace-b",
-      status: "confirming",
-    })
     expect(result.current.notice).toEqual({
       tone: "error",
-      message: "The original workspace remains active.",
+      message: "WORKSPACE-SELECT-FAILED",
     })
   })
 
-  it("holds selection during pending context capture and invalidates the stale send on confirm", async () => {
+  it("switches during context capture and invalidates the stale send", async () => {
     const context = deferred<WorkspaceTurnContextSnapshot>()
-    const transition = deferred<WorkspaceAdapterState>()
     const fixture = adapterFixture({
       snapshot: codexState("ready"),
-      transition: transition.promise,
       context: context.promise,
     })
     const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
@@ -493,28 +459,32 @@ describe("useWorkspaceViewModel workspace transitions", () => {
     })
     expect(result.current.turnState).toBe("sending")
     act(() => result.current.setSelectedWorkspaceId("workspace-b"))
-    expect(result.current.selectedWorkspaceId).toBe("workspace-a")
-    expect(result.current.pendingWorkspaceTransition).toMatchObject({
-      fromWorkspaceId: "workspace-a",
-      toWorkspaceId: "workspace-b",
-      status: "confirming",
-    })
-
-    let switching!: Promise<boolean>
-    act(() => {
-      switching = result.current.confirmWorkspaceTransition("Switch failed")
-    })
+    expect(result.current.selectedWorkspaceId).toBe("workspace-b")
+    expect(result.current.turnState).toBe("idle")
     await act(async () => {
       context.resolve(contextSnapshot())
       await expect(sending).resolves.toBe(false)
     })
     expect(fixture.sendTurn).not.toHaveBeenCalled()
-    expect(result.current.selectedDraft.text).toBe("Preserve this draft.")
+    expect(result.current.selectedDraft.text).toBe("")
+  })
+
+  it("blocks a second turn while another workspace owns the active execution", async () => {
+    const fixture = adapterFixture()
+    const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
+    await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
+    await act(async () => {
+      result.current.setSelectedWorkspaceId("workspace-b")
+      await Promise.resolve()
+    })
 
     await act(async () => {
-      transition.resolve(state("workspace-b"))
-      await switching
+      await expect(result.current.sendTurn()).resolves.toBe(false)
     })
-    expect(result.current.selectedWorkspaceId).toBe("workspace-b")
+    expect(fixture.sendTurn).not.toHaveBeenCalled()
+    expect(result.current.notice).toEqual({
+      tone: "neutral",
+      message: "CODEX-OTHER-WORKSPACE-ACTIVE",
+    })
   })
 })

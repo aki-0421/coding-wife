@@ -2,12 +2,12 @@ import type { PendingRequestView } from "@/lib/contracts"
 import type { PersistedTimelineEvent } from "@/lib/contracts/workspace-history"
 import { unicodeScalarCount } from "@/lib/public-text"
 import {
+  isInternalConnectionDiagnosticCode,
   sanitizeToolSummary,
   type CodexSemanticTimelineEvent,
 } from "@/features/codex/event-projection"
 
 const maxToolTextScalars = 16 * 1024
-
 function appendBoundedScalars(
   previous: string,
   next: string,
@@ -381,6 +381,7 @@ export class PersistedCodexEventProjector {
         const detailRef = stringField(payload, "detailRef")
         const willRetry = payload.willRetry as boolean
         const code = stringField(payload, "code")
+        if (isInternalConnectionDiagnosticCode(code)) return null
         if (code === "CODEX-WARNING") {
           return {
             ...base(

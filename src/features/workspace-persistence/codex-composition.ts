@@ -14,7 +14,6 @@ import type {
   WorkspaceAdapterTimelinePage,
   WorkspaceCodexState,
   WorkspaceCreateRequest,
-  WorkspaceTransitionRequest,
   WorkspaceViewAdapter,
 } from "@/features/workspace-view/types"
 import { workspaceHistoryCommands } from "@/lib/contracts"
@@ -68,10 +67,6 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
 
   private readonly history: PersistentWorkspaceViewAdapter
   private readonly codex: CodexWorkspaceSessionAdapter
-  private workspaceTransition: {
-    readonly key: string
-    readonly operation: Promise<WorkspaceAdapterState>
-  } | null = null
   private workspaceCancellation: {
     readonly key: string
     readonly operation: Promise<WorkspaceAdapterState>
@@ -88,6 +83,8 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     readonly key: string
     readonly operation: Promise<void>
   } | null = null
+  private desiredCodexState: WorkspaceAdapterState | null = null
+  private activeExecutionWorkspaceId: string | null = null
 
   constructor(
     historyTransport: WorkspaceHistoryTransport,
@@ -99,6 +96,26 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       codexTransport,
       new WorkspaceHistoryCodexSink(historyTransport),
     )
+    this.codex.subscribe((snapshot) => {
+      if (
+        this.activeExecutionWorkspaceId !== null &&
+        snapshot.activeWorkspaceId === this.activeExecutionWorkspaceId &&
+        ["completed", "interrupted"].includes(snapshot.phase)
+      ) {
+        this.activeExecutionWorkspaceId = null
+      }
+      const desired = this.desiredCodexState
+      if (
+        desired?.activeWorkspaceId === null ||
+        desired?.activeWorkspaceId === undefined ||
+        snapshot.activeWorkspaceId === desired.activeWorkspaceId ||
+        (snapshot.activeWorkspaceId !== null &&
+          this.codex.isExecutionActive(snapshot.activeWorkspaceId))
+      ) {
+        return
+      }
+      void this.activateCodex(desired)
+    })
   }
 
   codexSnapshot = (): WorkspaceCodexState =>
@@ -140,28 +157,6 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     return state
   }
 
-  stopAndSwitchWorkspace(
-    request: WorkspaceTransitionRequest,
-  ): Promise<WorkspaceAdapterState> {
-    if (this.workspaceCancellation !== null || this.workspaceArchive !== null) {
-      return Promise.reject(new Error("WORKSPACE-CANCEL-IN-PROGRESS"))
-    }
-    const key = `${request.fromWorkspaceId}:${request.toWorkspaceId}:${String(request.expectedGeneration)}`
-    if (this.workspaceTransition !== null) {
-      if (this.workspaceTransition.key === key) {
-        return this.workspaceTransition.operation
-      }
-      return Promise.reject(new Error("WORKSPACE-TRANSITION-IN-PROGRESS"))
-    }
-    const operation = this.performWorkspaceTransition(request).finally(() => {
-      if (this.workspaceTransition?.operation === operation) {
-        this.workspaceTransition = null
-      }
-    })
-    this.workspaceTransition = { key, operation }
-    return operation
-  }
-
   prepareAppQuit(request: AppQuitPreparationRequest): Promise<void> {
     const key = `${request.workspaceId}:${String(request.expectedGeneration)}`
     if (this.appQuitPreparation !== null) {
@@ -170,11 +165,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       }
       return Promise.reject(new Error("APP-QUIT-PREPARATION-IN-PROGRESS"))
     }
-    if (
-      this.workspaceTransition !== null ||
-      this.workspaceCancellation !== null ||
-      this.workspaceArchive !== null
-    ) {
+    if (this.workspaceCancellation !== null || this.workspaceArchive !== null) {
       return Promise.reject(
         new Error("APP-QUIT-WORKSPACE-MUTATION-IN-PROGRESS"),
       )
@@ -193,7 +184,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     expectedUpdatedAt: string,
     expectedGeneration: number | null = null,
   ): Promise<WorkspaceAdapterState> {
-    if (this.workspaceTransition !== null || this.workspaceArchive !== null) {
+    if (this.workspaceArchive !== null) {
       return Promise.reject(new Error("WORKSPACE-TRANSITION-IN-PROGRESS"))
     }
     const key = `${workspaceId}:${expectedUpdatedAt}:${String(expectedGeneration)}`
@@ -233,7 +224,6 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     expectedGeneration: number | null = null,
   ): Promise<WorkspaceAdapterState> {
     if (
-      this.workspaceTransition !== null ||
       this.workspaceCancellation !== null ||
       this.appQuitPreparation !== null
     ) {
@@ -358,21 +348,30 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     request: SendTurnRequest,
   ): Promise<{ readonly accepted: boolean }> {
     const readiness = this.codex.snapshot().readiness
-    await this.codex.sendTurn({
-      workspaceId: request.workspaceId,
-      text: composeTurnInstruction(
-        request.instruction,
-        request.editableContextSnapshot,
-      ),
-      publicText: request.instruction,
-      effort: request.effort === "off" ? null : request.effort,
-      serviceTier: request.fastMode ? readiness.fastServiceTier : null,
-      planMode: request.planMode ?? false,
-      goalObjective: request.goalMode ? request.instruction.trim() : null,
-      attachmentHandles: request.attachments
-        .filter((attachment) => attachment.valid)
-        .map((attachment) => attachment.id),
-    })
+    const previousExecutionWorkspaceId = this.activeExecutionWorkspaceId
+    this.activeExecutionWorkspaceId = request.workspaceId
+    try {
+      await this.codex.sendTurn({
+        workspaceId: request.workspaceId,
+        text: composeTurnInstruction(
+          request.instruction,
+          request.editableContextSnapshot,
+        ),
+        publicText: request.instruction,
+        effort: request.effort === "off" ? null : request.effort,
+        serviceTier: request.fastMode ? readiness.fastServiceTier : null,
+        planMode: request.planMode ?? false,
+        goalObjective: request.goalMode ? request.instruction.trim() : null,
+        attachmentHandles: request.attachments
+          .filter((attachment) => attachment.valid)
+          .map((attachment) => attachment.id),
+      })
+    } catch (error) {
+      if (this.activeExecutionWorkspaceId === request.workspaceId) {
+        this.activeExecutionWorkspaceId = previousExecutionWorkspaceId
+      }
+      throw error
+    }
     return { accepted: true }
   }
 
@@ -421,6 +420,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
   }
 
   private async activateCodex(state: WorkspaceAdapterState): Promise<void> {
+    this.desiredCodexState = state
     if (state.activeWorkspaceId === null) return
     const historyMode =
       state.history.mode === "ready" ||
@@ -430,6 +430,19 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
           ? "recovery_required"
           : "read_only"
     const current = this.codex.snapshot()
+    if (
+      this.activeExecutionWorkspaceId !== null &&
+      this.activeExecutionWorkspaceId !== state.activeWorkspaceId
+    ) {
+      return
+    }
+    if (
+      current.activeWorkspaceId !== null &&
+      current.activeWorkspaceId !== state.activeWorkspaceId &&
+      this.codex.isExecutionActive(current.activeWorkspaceId)
+    ) {
+      return
+    }
     if (
       current.activeWorkspaceId === state.activeWorkspaceId &&
       current.historyMode === historyMode &&
@@ -460,43 +473,6 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       })
     this.codexActivation = { key, operation }
     await operation
-  }
-
-  private async performWorkspaceTransition(
-    request: WorkspaceTransitionRequest,
-  ): Promise<WorkspaceAdapterState> {
-    const before = this.codex.snapshot()
-    if (
-      before.activeWorkspaceId !== request.fromWorkspaceId ||
-      before.generation !== request.expectedGeneration ||
-      request.fromWorkspaceId === request.toWorkspaceId
-    ) {
-      throw new Error("WORKSPACE-TRANSITION-STALE")
-    }
-    await this.codex.stopTurnAndWaitForTerminal({
-      workspaceId: request.fromWorkspaceId,
-      expectedGeneration: request.expectedGeneration,
-    })
-
-    let targetSelected = false
-    try {
-      const target = await this.history.selectWorkspace(request.toWorkspaceId)
-      targetSelected = true
-      await this.activateCodexStrict(target)
-      return target
-    } catch (error) {
-      if (targetSelected) {
-        try {
-          const restored = await this.history.selectWorkspace(
-            request.fromWorkspaceId,
-          )
-          await this.activateCodexStrict(restored)
-        } catch {
-          // Preserve the original transition failure; the next hydration retries restoration.
-        }
-      }
-      throw error
-    }
   }
 
   private async performWorkspaceCancellation(
@@ -568,24 +544,5 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       request.draftText,
       request.draftEffort,
     )
-  }
-
-  private async activateCodexStrict(
-    state: WorkspaceAdapterState,
-  ): Promise<void> {
-    if (state.activeWorkspaceId === null) {
-      throw new Error("WORKSPACE-ACTIVATION-MISSING")
-    }
-    const historyMode =
-      state.history.mode === "ready" ||
-      (this.hydrationMode === "demo" && state.history.mode === "ephemeral")
-        ? "ready"
-        : state.history.mode === "recovery_required"
-          ? "recovery_required"
-          : "read_only"
-    await this.codex.activateWorkspace({
-      workspaceId: state.activeWorkspaceId,
-      historyMode,
-    })
   }
 }
