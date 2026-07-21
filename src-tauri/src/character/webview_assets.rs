@@ -82,10 +82,11 @@ const REVIEWED_ASSETS: &[ReviewedAsset] = &[
 ];
 
 fn is_tauri_asset_origin(uri: &http::Uri) -> bool {
-    matches!(
-        (uri.scheme_str(), uri.host()),
-        (Some("tauri"), Some("localhost")) | (Some("http" | "https"), Some("tauri.localhost"))
-    )
+    uri.port().is_none()
+        && matches!(
+            (uri.scheme_str(), uri.host()),
+            (Some("tauri"), Some("localhost")) | (Some("http"), Some("tauri.localhost"))
+        )
 }
 
 pub(crate) fn correct_reviewed_live2d_content_type<B: AsRef<[u8]>>(
@@ -154,6 +155,31 @@ mod tests {
     }
 
     #[test]
+    fn accepts_only_supported_url_origins_without_explicit_ports() {
+        let accepted = [
+            "tauri://localhost/reviewed.asset",
+            "http://tauri.localhost/reviewed.asset",
+        ];
+        for uri in accepted {
+            assert!(is_tauri_asset_origin(request(uri).uri()), "{uri}");
+        }
+
+        let rejected = [
+            "tauri://localhost:1420/reviewed.asset",
+            "http://tauri.localhost:80/reviewed.asset",
+            "http://tauri.localhost:1420/reviewed.asset",
+            "https://tauri.localhost/reviewed.asset",
+            "tauri://localhost.attacker.test/reviewed.asset",
+            "http://tauri.localhost.attacker.test/reviewed.asset",
+            "tauri://tauri.localhost/reviewed.asset",
+            "http://localhost/reviewed.asset",
+        ];
+        for uri in rejected {
+            assert!(!is_tauri_asset_origin(request(uri).uri()), "{uri}");
+        }
+    }
+
+    #[test]
     fn corrects_every_byte_exact_reviewed_asset() {
         for asset in REVIEWED_ASSETS {
             let mut response = response(canonical_asset_bytes(*asset));
@@ -187,6 +213,31 @@ mod tests {
     }
 
     #[test]
+    fn preserves_the_existing_header_for_non_get_or_non_ok_responses() {
+        let asset = REVIEWED_ASSETS[0];
+        let uri = format!("tauri://localhost{}", asset.path);
+        let canonical = canonical_asset_bytes(asset);
+
+        let post = http::Request::post(&uri)
+            .body(Vec::new())
+            .expect("POST asset request must build");
+        let mut post_response = response(canonical.clone());
+        correct_reviewed_live2d_content_type(&post, &mut post_response);
+        assert_eq!(
+            post_response.headers().get(CONTENT_TYPE),
+            Some(&http::HeaderValue::from_static("text/html"))
+        );
+
+        let mut non_ok_response = response(canonical);
+        *non_ok_response.status_mut() = http::StatusCode::NOT_FOUND;
+        correct_reviewed_live2d_content_type(&request(&uri), &mut non_ok_response);
+        assert_eq!(
+            non_ok_response.headers().get(CONTENT_TYPE),
+            Some(&http::HeaderValue::from_static("text/html"))
+        );
+    }
+
+    #[test]
     fn does_not_retype_html_fallbacks_or_unreviewed_requests() {
         let asset = REVIEWED_ASSETS[0];
         let canonical = canonical_asset_bytes(asset);
@@ -197,6 +248,31 @@ mod tests {
             ),
             (
                 format!("https://attacker.test{}", asset.path),
+                canonical.clone(),
+            ),
+            (
+                format!("https://tauri.localhost{}", asset.path),
+                canonical.clone(),
+            ),
+            (
+                format!("tauri://localhost:1420{}", asset.path),
+                canonical.clone(),
+            ),
+            (
+                format!("http://tauri.localhost:80{}", asset.path),
+                canonical.clone(),
+            ),
+            (
+                format!("http://tauri.localhost:1420{}", asset.path),
+                canonical.clone(),
+            ),
+            (
+                format!("tauri://localhost.attacker.test{}", asset.path),
+                canonical.clone(),
+            ),
+            (
+                "tauri://localhost/characters/builtin-hiyori/runtime/%2e%2e/runtime/hiyori_pro_t11.moc3"
+                    .to_owned(),
                 canonical.clone(),
             ),
             (
