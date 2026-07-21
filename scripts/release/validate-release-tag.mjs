@@ -25,9 +25,7 @@ export function parseCargoPackageVersion(contents) {
       continue
     }
     if (inPackageSection) {
-      const version = line.match(
-        /^version[ \t]*=[ \t]*"([^"]+)"[ \t]*$/u,
-      )?.[1]
+      const version = line.match(/^version[ \t]*=[ \t]*"([^"]+)"[ \t]*$/u)?.[1]
       if (version !== undefined) {
         return version
       }
@@ -96,7 +94,11 @@ function assertDevelopAncestry() {
       stdio: "ignore",
     },
   )
-  if (result.error !== undefined || result.status === null || result.status > 1) {
+  if (
+    result.error !== undefined ||
+    result.status === null ||
+    result.status > 1
+  ) {
     fail("RELEASE_TAG_DEVELOP_REF_UNAVAILABLE")
   }
   if (result.status !== 0) {
