@@ -1,7 +1,7 @@
 ---
 title: "デスクトップ共通仕様"
 description: "Coding Wifeの単一macOSウィンドウ、共通レイアウト、状態、操作、信頼境界、復旧、アクセシビリティを定義する。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "現行S-001〜S-003、S-005の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
   - "個別画面仕様とdesktop-shell要件の整合を確認するとき。"
@@ -84,7 +84,7 @@ App settingsのproject detailはS-005内の`/app-settings/projects/:projectId` s
 | minimum geometry | 960×640 CSS px。これ未満へのresizeをOSへ許可しない |
 | maximum / fullscreen | macOS標準zoomとfullscreenを許可する。zoom状態は通常windowサイズと一緒に保存するが、fullscreen中の寸法とfullscreen状態は保存値へ反映しない |
 | titlebar | macOS native overlay。close / minimize / zoomのtraffic lightsはOSが描画し、WebViewは赤・黄・緑の代替要素を描画しない。sidebarは見出しがnative controlに重ならない40.5pxのsafe areaだけを予約する |
-| titlebar hit band | main window上端40.5 CSS pxをdocument captureの一続きのhit bandとし、React componentや子要素の境界へ依存させない。primary `mousedown`の`detail=1`でdrag、`detail=2`でzoomを開始する。button、link、tab、input、select、textarea、summary、contenteditableと明示opt-out targetは除外し、透明overlayでpointer/focusを奪わない。`main` capabilityは`core:window:allow-start-dragging`と`core:window:allow-toggle-maximize`だけをwindow操作権限として持つ |
+| titlebar hit band | main window上端40.5 CSS pxをdocument captureの一続きのhit bandとし、React componentや子要素の境界へ依存させない。primary `mousedown`の`detail=1`でdrag、`detail=2`でzoomを開始する。button、link、tab、input、textarea、summary、contenteditableと、`combobox`、`option`を含むinteractive role、明示opt-out targetは除外し、透明overlayでpointer/focusを奪わない。`main` capabilityは`core:window:allow-start-dragging`と`core:window:allow-toggle-maximize`だけをwindow操作権限として持つ |
 | radius | window 7.5px、compact control 4.5px、composer/decision 9px |
 | close | active/pending turn 0件ならorderly shutdown。1件以上ならnative closeを保留し、`停止して終了 / Stop and Quit`と`終了しない / Don’t Quit`だけを表示する |
 
@@ -150,6 +150,7 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 | main tabs | `Tabs` | 二段header、81px寸法、active underline、route同期 |
 | action | `Button` | compact density、warm active、icon hit area、loading policy |
 | composer / Other | `Textarea` | auto-grow、Send/decision validation、draft persistence |
+| finite single selection | `Select` | compact trigger、body-level portal、group label、viewport collision、trigger focus復帰 |
 | timeline / list / setting | `ScrollArea` | scroll owner、virtualization、anchor復元、new-event threshold |
 | Context / effort / filter | `Popover` | body-level portal、viewport collision、trigger focus復帰 |
 | confirmation / destructive action | `Dialog` | typed native operation、fingerprint、cancel invariants |
@@ -158,6 +159,8 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 | loading | `Skeleton` | 各領域の最終形に合わせ、全画面spinnerを避ける |
 
 shadcnはinteractionとkeyboard behaviorだけに使う。shell、sidebar、event row、evidence/diff、Live2D canvasはcustom componentとし、shadcn既定のlayout、色、大きなradius、shadow、typographyを持ち込まない。
+
+有限の単一選択はowner、TTS provider / model / voice、character semantic cue、開発用previewを含めて共通`Select`へ統一し、native `<select>`と`NativeSelect`を使わない。triggerは現在値を表示する`combobox`としてvisible labelまたはaccessible nameと結び、`Enter` / `Space` / `ArrowDown`で候補を開き、矢印keyで移動、`Enter`で確定、`Escape`で入力を変えず閉じてtriggerへfocusを戻す。候補は`SelectGroup`内へ置き、contentはoverflow containerにclipされないbody-level portalとする。disabled / invalidはcontrolと`Field`の両方へ伝え、値変更契機と永続化契約は各画面仕様を維持する。
 
 ## scroll ownership
 

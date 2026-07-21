@@ -1,7 +1,7 @@
 ---
 title: "S-005 アプリ設定・診断"
 description: "登録projectごとのProject contextと、characterごとのpresentation、表示、音声、診断を管理する画面仕様。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "sidebar gear、project一覧とProject context詳細、アプリ全体の設定、音声、native diagnosticsを実装するとき。"
   - "S-005とAPP、CODE、GIT、LIVE、NARR要件の対応を確認するとき。"
@@ -124,7 +124,7 @@ app settings表示中はworkspace breadcrumbとChat/Commit tabを表示しない
 | OpenAI voice         | `marin`   | 条件付き | 選択modelで利用可能な組み込みvoice allowlist | OpenAI tab内 | 変更直後に自動保存 |
 | Speech speed         | 1.0       | 必須     | 0.75〜1.25、0.05刻みのslider | OpenAI tab内 | value commit時に自動保存 |
 
-Audio sectionでは、通常時の見出し説明と各fieldの補助文を表示せず、validation errorや保存状態など操作結果に必要な動的feedbackだけを残す。OpenAI tab内のmodelとvoiceは同幅の2カラムへ配置し、selectはfield幅へ引き伸ばさず内容に必要なcompact幅とする。speed sliderとTest voice操作も2カラムへ並べ、狭いviewportと200% text zoomではfocus順を保った1カラムへ戻す。AI生成音声に関する静的calloutと、Save、Discard、Resetのbuttonは表示しない。
+Audio sectionでは、通常時の見出し説明と各fieldの補助文を表示せず、validation errorや保存状態など操作結果に必要な動的feedbackだけを残す。provider、OpenAI model、voiceは共通の非native `Select`を使い、候補をportalへ表示する。OpenAI tab内のmodelとvoiceは同幅の2カラムへ配置し、triggerはfield幅へ引き伸ばさず内容に必要なcompact幅とする。speed sliderとTest voice操作も2カラムへ並べ、狭いviewportと200% text zoomではfocus順を保った1カラムへ戻す。AI生成音声に関する静的calloutと、Save、Discard、Resetのbuttonは表示しない。
 
 ## ネイティブ連携
 

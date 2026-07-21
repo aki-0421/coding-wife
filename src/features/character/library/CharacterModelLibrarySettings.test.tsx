@@ -495,10 +495,11 @@ describe("CharacterModelLibrarySettings", () => {
     await waitFor(() =>
       expect(gateway.selectionRequests).toEqual([customPack.packId]),
     )
-    const successCue = await screen.findByRole<HTMLSelectElement>("combobox", {
+    const successCue = await screen.findByRole("combobox", {
       name: "Success",
     })
-    await user.selectOptions(successCue, "motion:FlickUp[0]")
+    await user.click(successCue)
+    await user.click(await screen.findByRole("option", { name: "FlickUp[0]" }))
     expect(
       screen.queryByRole("button", { name: "Preview" }),
     ).not.toBeInTheDocument()
@@ -520,14 +521,15 @@ describe("CharacterModelLibrarySettings", () => {
 
     await user.click(await screen.findByRole("button", { name: /Local model/ }))
     await user.click(screen.getByRole("button", { name: "Use this character" }))
-    const successCue = await screen.findByRole<HTMLSelectElement>("combobox", {
+    const successCue = await screen.findByRole("combobox", {
       name: "Success",
     })
-    await user.selectOptions(successCue, "motion:FlickUp[0]")
+    await user.click(successCue)
+    await user.click(await screen.findByRole("option", { name: "FlickUp[0]" }))
     await user.click(screen.getByRole("button", { name: "Save settings" }))
 
     await waitFor(() => expect(gateway.semanticMappingRequests).toHaveLength(1))
-    expect(successCue.value).toBe("motion:FlickUp[0]")
+    expect(successCue).toHaveTextContent("FlickUp[0]")
     await user.click(screen.getByRole("button", { name: "Save settings" }))
     await waitFor(() => expect(gateway.semanticMappingRequests).toHaveLength(2))
     expect(gateway.semanticMappingRequests[1]).toMatchObject({

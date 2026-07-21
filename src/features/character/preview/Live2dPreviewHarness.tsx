@@ -9,6 +9,14 @@ import {
 import { useEffect, useRef, useState } from "react"
 
 import { BrandMark } from "@/components/brand-mark"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Live2dCharacter } from "@/features/character/components/Live2dCharacter"
 import type {
   CharacterControllerStatus,
@@ -140,19 +148,27 @@ export function Live2dPreviewHarness() {
               </button>
             ))}
           </div>
-          <select
-            aria-label="Character state"
-            onChange={(event) =>
-              selectState(event.currentTarget.value as CharacterState)
-            }
+          <Select
+            onValueChange={(value) => selectState(value as CharacterState)}
             value={state}
           >
-            {states.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger
+              aria-label="Character state"
+              className="w-full"
+              size="sm"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {states.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <div className="preview-context-controls">
             <button
               onClick={() => controllerRef.current?.loseContextForDiagnostics()}

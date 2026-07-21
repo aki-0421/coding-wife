@@ -1215,7 +1215,8 @@ describe("WorkspaceShell", () => {
     const owner = await within(setupDialog).findByRole("combobox", {
       name: "GitHub owner",
     })
-    fireEvent.change(owner, { target: { value: "fixture-org" } })
+    await user.click(owner)
+    await user.click(await screen.findByRole("option", { name: "fixture-org" }))
     const repository = within(setupDialog).getByRole("textbox", {
       name: "GitHub repository",
     })

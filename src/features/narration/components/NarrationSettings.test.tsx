@@ -88,7 +88,7 @@ describe("NarrationSettings", () => {
 
     expect(enabled).toBeDisabled()
     expect(provider).toBeDisabled()
-    expect(provider).toHaveValue("")
+    expect(provider).toHaveTextContent("設定済みのプロバイダーがありません")
     expect(screen.getByRole("tab", { name: "OpenAI" })).toBeVisible()
     expect(apiKey).toHaveAttribute("type", "password")
     expect(
@@ -115,7 +115,7 @@ describe("NarrationSettings", () => {
 
     const enabled = screen.getByRole("switch", { name: "TTSを有効にする" })
     await waitFor(() => expect(enabled).toBeEnabled())
-    expect(screen.getByLabelText("TTSプロバイダー")).toHaveValue("openai")
+    expect(screen.getByLabelText("TTSプロバイダー")).toHaveTextContent("OpenAI")
     expect(apiKey).toHaveValue("")
     await user.click(enabled)
 
@@ -130,7 +130,8 @@ describe("NarrationSettings", () => {
       ),
     )
 
-    await user.selectOptions(screen.getByLabelText("ボイス"), "cedar")
+    await user.click(screen.getByLabelText("ボイス"))
+    await user.click(await screen.findByRole("option", { name: "cedar" }))
     await waitFor(() =>
       expect(controller.getSnapshot().settingsSnapshot?.settings.voice).toBe(
         "cedar",

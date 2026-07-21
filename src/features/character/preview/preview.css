@@ -125,8 +125,8 @@
   gap: 4px;
 }
 
-.preview-diagnostics button,
-.preview-diagnostics select {
+.preview-policy-controls > button,
+.preview-context-controls > button {
   min-height: 24px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -134,21 +134,13 @@
   color: var(--text-secondary);
   font: inherit;
   font-size: var(--text-label);
-}
-
-.preview-diagnostics button {
   flex: 1;
   padding: 2px 5px;
 }
 
-.preview-diagnostics button[aria-pressed="true"] {
+.preview-policy-controls > button[aria-pressed="true"] {
   border-color: var(--warm-active);
   color: var(--text-strong);
-}
-
-.preview-diagnostics select {
-  width: 100%;
-  padding-inline: 5px;
 }
 
 #live2d-metrics {

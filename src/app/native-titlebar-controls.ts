@@ -14,7 +14,6 @@ const interactiveTargetSelector = [
   "a",
   "button",
   "input",
-  "select",
   "textarea",
   "summary",
   "[contenteditable='true']",

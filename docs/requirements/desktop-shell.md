@@ -1,7 +1,7 @@
 ---
 title: "APP デスクトップシェル要件定義"
 description: "Coding Wifeの単一Tauriウィンドウ、言語、アクセシビリティ、ライフサイクル、信頼境界、macOS配布物を定義する。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "デスクトップシェル、共通ナビゲーション、言語、アクセシビリティを実装するとき。"
   - "TauriのCapability、CSP、終了、復旧の契約を確認するとき。"
@@ -74,7 +74,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-053` | 利用者はFigma基準の三領域を表示できる | 1470×836 CSS pxでsidebar 255.04px、header 81px、Chat 607.11px、Character 607.84pxとなり、主要境界が各基準値の±2px以内になる。起動画面の利用可能領域が標準geometryより小さい場合はwindow全体をwork area内へ収め、native resize edgeとtraffic lightsを画面外へ出さない | Approved | 非該当 |
 | `APP-F-054` | 利用者はminimum window sizeでも主要操作を継続できる | windowは960×640 CSS px未満へ縮小できず、960×640でtab、timeline、composer、Send、停止操作が欠落しない | Approved | 非該当 |
 | `APP-F-055` | 利用者は現行画面へ同じwindow内で移動できる | sidebar、Chat/Commit tab、app settings gearからS-001〜S-003、S-005へ移動し、戻った時にworkspace選択とcomposer draftが保たれる。workspace tabのallowlistは`chat` / `commit`だけとし、旧`context` / `settings`値、表示trigger、subview、keyboard順、route aliasを公開しない | Approved | 非該当 |
-| `APP-F-056` | 利用者はmacOS native titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になる。WebViewは赤・黄・緑のtraffic-light代替要素を描画しない。main window上端40.5 CSS pxはReact component境界と無関係な一続きのnative titlebar hit bandとし、primary single mousedownでdrag、primary second mousedownでzoomを開始する。button、link、tab、input、select、textarea、contenteditable等のinteractive targetだけを除外し、native control用safe areaとdrag判定が操作を奪わない。`main` WebViewにはdrag開始と明示toggle maximizeに必要なTauri window permissionだけを許可し、任意のwindow操作権限は追加しない | Approved | 非該当 |
+| `APP-F-056` | 利用者はmacOS native titlebarから標準window操作を実行できる | close、minimize、zoomがmacOS標準結果になる。WebViewは赤・黄・緑のtraffic-light代替要素を描画しない。main window上端40.5 CSS pxはReact component境界と無関係な一続きのnative titlebar hit bandとし、primary single mousedownでdrag、primary second mousedownでzoomを開始する。button、link、tab、input、textarea、contenteditableと、`combobox`、`option`を含むinteractive roleだけを除外し、native control用safe areaとdrag判定が操作を奪わない。`main` WebViewにはdrag開始と明示toggle maximizeに必要なTauri window permissionだけを許可し、任意のwindow操作権限は追加しない | Approved | 非該当 |
 | `APP-F-085` | 利用者は前回終了時と同じmain windowの大きさで作業を再開できる | 有効な保存状態がない初回起動では、main windowをReact shell表示前にmacOS標準zoomでwork area内の最大へ広げ、fullscreenにはしない。通常windowのresize settle時とorderly close受付時にlogical width / heightとzoom状態をversion付きRust管理SQLiteへ保存し、次のcold startではwindowを表示する前に復元する。fullscreen中の寸法は最後の通常window状態を上書きしない。missing、破損、未知schema、960×640未満、非有限値、または現画面のwork areaを超える保存値はraw値を表示せず、minimum geometryとwork areaへ補正できるTauri window configを通した初回起動動作へfail closedする | Approved | 非該当 |
 | `APP-F-084` | appはcharacter presentation設定を選択中characterとして全workspaceへ共通適用する | Character contextはopaque pack IDごとに独立version/hashを持つnative record、selected character packとsemantic mappingはowner-only character library stateを正本とし、workspace IDまたはProject IDでpartitionしない。個別設定でのCharacter context保存はそのpackだけを更新し、そのpackを選択した次の全workspaceのturnから適用する。pack選択とmapping保存は全workspaceのcharacterへ反映する。旧app-global Character contextはmigration時にbundled Hiyoriのrecordへ一度だけ移し、以後ほかのpackの値と混在させない | Approved | 非該当 |
 | `APP-F-083` | 利用者はアプリ全体設定とworkspace設定を別画面で識別できる | sidebarのapp settings gearはS-005、workspaceのSettings tabはS-006を開く | Deprecated | workspace側に設定項目がなく独立画面を維持する理由がないためS-006と同時に廃止。後継IDなし |

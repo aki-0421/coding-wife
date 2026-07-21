@@ -6,10 +6,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import {
-  NativeSelect,
-  NativeSelectOptGroup,
-  NativeSelectOption,
-} from "@/components/ui/native-select"
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   builtinHiyoriPackId,
   semanticStates,
@@ -190,7 +194,7 @@ function SemanticMappingEditor({
   const [draft, setDraft] = useState<SemanticAssignmentsV1>(
     () => initialAssignments,
   )
-  const firstCueRef = useRef<HTMLSelectElement>(null)
+  const firstCueRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (snapshot.semanticMappingStatus !== "invalid") return
@@ -244,44 +248,49 @@ function SemanticMappingEditor({
               <FieldLabel className="text-caption" htmlFor={inputId}>
                 {copy[state]}
               </FieldLabel>
-              <NativeSelect
-                aria-label={copy[state]}
-                className="w-full"
+              <Select
                 disabled={busy}
-                id={inputId}
-                onChange={(event) => {
-                  const cue = decodeCue(event.currentTarget.value)
+                onValueChange={(value) => {
+                  const cue = decodeCue(value)
                   setDraft((current) => ({ ...current, [state]: cue }))
                 }}
-                ref={state === "neutral" ? firstCueRef : undefined}
-                size="sm"
                 value={encodeCue(draft[state])}
               >
-                <NativeSelectOption value="neutral">
-                  {copy.neutralCue}
-                </NativeSelectOption>
-                {cueOptions.motions.length > 0 ? (
-                  <NativeSelectOptGroup label={copy.motionGroup}>
-                    {cueOptions.motions.map((cueId) => (
-                      <NativeSelectOption key={cueId} value={`motion:${cueId}`}>
-                        {cueId}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelectOptGroup>
-                ) : null}
-                {cueOptions.expressions.length > 0 ? (
-                  <NativeSelectOptGroup label={copy.expressionGroup}>
-                    {cueOptions.expressions.map((cueId) => (
-                      <NativeSelectOption
-                        key={cueId}
-                        value={`expression:${cueId}`}
-                      >
-                        {cueId}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelectOptGroup>
-                ) : null}
-              </NativeSelect>
+                <SelectTrigger
+                  aria-label={copy[state]}
+                  className="w-full"
+                  id={inputId}
+                  ref={state === "neutral" ? firstCueRef : undefined}
+                  size="sm"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="neutral">{copy.neutralCue}</SelectItem>
+                  </SelectGroup>
+                  {cueOptions.motions.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>{copy.motionGroup}</SelectLabel>
+                      {cueOptions.motions.map((cueId) => (
+                        <SelectItem key={cueId} value={`motion:${cueId}`}>
+                          {cueId}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
+                  {cueOptions.expressions.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>{copy.expressionGroup}</SelectLabel>
+                      {cueOptions.expressions.map((cueId) => (
+                        <SelectItem key={cueId} value={`expression:${cueId}`}>
+                          {cueId}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
+                </SelectContent>
+              </Select>
             </Field>
           )
         })}
