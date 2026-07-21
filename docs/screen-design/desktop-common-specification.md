@@ -84,7 +84,7 @@ App settingsのproject detailはS-005内の`/app-settings/projects/:projectId` s
 | minimum geometry | 960×640 CSS px。これ未満へのresizeをOSへ許可しない |
 | maximum / fullscreen | macOS標準zoomとfullscreenを許可する。zoom状態は通常windowサイズと一緒に保存するが、fullscreen中の寸法とfullscreen状態は保存値へ反映しない |
 | titlebar | macOS native overlay。close / minimize / zoomのtraffic lightsはOSが描画し、WebViewは赤・黄・緑の代替要素を描画しない。sidebarは見出しがnative controlに重ならない40.5pxのsafe areaだけを予約する |
-| titlebar hit band | main window上端40.5 CSS pxをdocument captureの一続きのhit bandとし、React componentや子要素の境界へ依存させない。primary `mousedown`の`detail=1`でdrag、`detail=2`でzoomを開始する。button、link、tab、input、select、textarea、summary、contenteditableと明示opt-out targetは除外し、透明overlayでpointer/focusを奪わない。`main` capabilityは`core:window:allow-start-dragging`と`core:window:allow-toggle-maximize`だけをwindow操作権限として持つ |
+| titlebar hit band | main window上端40.5 CSS pxをdocument captureの一続きのhit bandとし、React componentや子要素の境界へ依存させない。primary `mousedown`の`detail=1`でdrag、`detail=2`でzoomを開始する。button、link、tab、input、textarea、summary、contenteditableと、`combobox`、`option`を含むinteractive role、明示opt-out targetは除外し、透明overlayでpointer/focusを奪わない。`main` capabilityは`core:window:allow-start-dragging`と`core:window:allow-toggle-maximize`だけをwindow操作権限として持つ |
 | radius | window 7.5px、compact control 4.5px、composer/decision 9px |
 | close | active/pending turn 0件ならorderly shutdown。1件以上ならnative closeを保留し、`停止して終了 / Stop and Quit`と`終了しない / Don’t Quit`だけを表示する |
 
