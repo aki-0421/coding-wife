@@ -46,7 +46,7 @@ use super::types::{
 };
 use super::workspace::{
     same_repository_identity, validate_git_repository, validate_workspace_write_authority,
-    GitRepositoryIdentity, WorkspaceWriteAuthority,
+    GitRepositoryIdentity, WorkspaceWriteAuthority, WorkspaceWriteProvenance,
 };
 
 pub const CODEX_EVENT_CHANNEL: &str = "coding-wife://codex-event";
@@ -106,7 +106,7 @@ struct PendingTurnStart {
 #[derive(Default)]
 struct SupervisorState {
     workspaces: HashMap<String, PathBuf>,
-    workspace_repositories: HashMap<String, GitRepositoryIdentity>,
+    workspace_repositories: HashMap<String, RegisteredWorkspaceRepository>,
     runtime_root: Option<PathBuf>,
     explicit_binary: Option<PathBuf>,
     binary: Option<BinaryInfo>,
@@ -132,6 +132,12 @@ struct SupervisorState {
     fallback_decisions: FallbackDecisionLedger,
     restart_times: VecDeque<Instant>,
     shutdown_requested: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RegisteredWorkspaceRepository {
+    identity: GitRepositoryIdentity,
+    write_provenance: WorkspaceWriteProvenance,
 }
 
 struct WorkspaceRuntimeContext {
@@ -470,9 +476,52 @@ impl CodexSupervisor {
         }
         let mut state = self.inner.state.lock().await;
         state.workspaces.insert(workspace_id.clone(), root);
+        state.workspace_repositories.insert(
+            workspace_id,
+            RegisteredWorkspaceRepository {
+                identity: repository,
+                write_provenance: WorkspaceWriteProvenance::Unmanaged,
+            },
+        );
+        Ok(())
+    }
+
+    pub(crate) async fn register_validated_workspace(
+        &self,
+        workspace_id: impl Into<String>,
+        expected: &GitRepositoryIdentity,
+        write_provenance: WorkspaceWriteProvenance,
+    ) -> Result<(), CodexCommandError> {
+        let workspace_id = workspace_id.into();
+        if workspace_id.trim().is_empty() || workspace_id.len() > 128 {
+            return Err(command_error("CODEX-WORKSPACE-ID", "codex.register", false));
+        }
+        let live = validate_git_repository(&expected.canonical_root).await?;
+        if live.canonical_root != expected.canonical_root
+            || live.canonical_git_dir != expected.canonical_git_dir
+            || live.canonical_common_git_dir != expected.canonical_common_git_dir
+            || !same_repository_identity(&live, expected)
+            || write_provenance
+                .managed_identity()
+                .is_some_and(|identity| !identity.matches(&live))
+        {
+            return Err(command_error(
+                "CODEX-WORKSPACE-IDENTITY-CHANGED",
+                "codex.register",
+                false,
+            ));
+        }
+        let mut state = self.inner.state.lock().await;
         state
-            .workspace_repositories
-            .insert(workspace_id, repository);
+            .workspaces
+            .insert(workspace_id.clone(), live.canonical_root.clone());
+        state.workspace_repositories.insert(
+            workspace_id,
+            RegisteredWorkspaceRepository {
+                identity: live,
+                write_provenance,
+            },
+        );
         Ok(())
     }
 
@@ -1131,7 +1180,11 @@ impl CodexSupervisor {
                 state.diagnostic.experimental_api_accepted,
             )
         };
-        let authority = validate_workspace_write_authority(&expected).await?;
+        let authority = validate_workspace_write_authority(
+            &expected.identity,
+            expected.write_provenance.managed_identity(),
+        )
+        .await?;
         if !authority.additional_writable_roots.is_empty()
             && (!protocol_supported || !experimental_api_accepted)
         {
@@ -1147,11 +1200,7 @@ impl CodexSupervisor {
             .workspace_repositories
             .get(workspace_id)
             .ok_or_else(|| command_error("CODEX-WORKSPACE-MISSING", operation, false))?;
-        if current.canonical_root != expected.canonical_root
-            || current.canonical_git_dir != expected.canonical_git_dir
-            || current.canonical_common_git_dir != expected.canonical_common_git_dir
-            || !same_repository_identity(current, &expected)
-        {
+        if current != &expected {
             return Err(command_error(
                 "CODEX-WORKSPACE-IDENTITY-CHANGED",
                 operation,

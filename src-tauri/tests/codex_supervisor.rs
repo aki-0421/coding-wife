@@ -24,6 +24,10 @@ use coding_wife_lib::codex::types::{
 use coding_wife_lib::codex::workspace::{
     AppPrivateBinaryRecord, FolderPicker, PickerFuture, WorkspaceService,
 };
+use coding_wife_lib::workspace_history::types::{
+    WorkspaceCreateSessionRequest, WorkspacePickOutcome,
+};
+use coding_wife_lib::workspace_history::{WorkspaceHistoryService, WorkspaceHistoryStore};
 use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, Mutex};
 
@@ -269,12 +273,12 @@ impl Drop for FixtureEnvironment {
     }
 }
 
-struct ManagedWorktreeFixture {
+struct ManagedProjectFixture {
     root: PathBuf,
-    worktree: PathBuf,
+    project: PathBuf,
 }
 
-impl ManagedWorktreeFixture {
+impl ManagedProjectFixture {
     fn new() -> Self {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -282,7 +286,6 @@ impl ManagedWorktreeFixture {
             .join(".context")
             .join(format!("test-managed-worktree-{}", uuid::Uuid::new_v4()));
         let project = root.join("project");
-        let worktree = root.join("managed");
         std::fs::create_dir_all(&project).expect("managed project directory");
         let initialized = std::process::Command::new("/usr/bin/git")
             .args(["init", "-q", "-b", "main"])
@@ -307,19 +310,23 @@ impl ManagedWorktreeFixture {
             .status()
             .expect("commit managed project fixture");
         assert!(committed.success());
-        let added = std::process::Command::new("/usr/bin/git")
+        let remote = std::process::Command::new("/usr/bin/git")
             .arg("-C")
             .arg(&project)
-            .args(["worktree", "add", "-q", "-b", "managed-fixture"])
-            .arg(&worktree)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/coding-wife/managed-fixture.git",
+            ])
             .status()
-            .expect("create managed linked worktree");
-        assert!(added.success());
-        Self { root, worktree }
+            .expect("configure fixture origin");
+        assert!(remote.success());
+        Self { root, project }
     }
 }
 
-impl Drop for ManagedWorktreeFixture {
+impl Drop for ManagedProjectFixture {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
     }
@@ -770,25 +777,51 @@ async fn node_repl_commit_result_shape_completes_through_the_app_server_boundary
 async fn managed_worktree_turn_sends_only_verified_git_metadata_roots() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("managed_worktree_roots");
-    let managed = ManagedWorktreeFixture::new();
+    let managed = ManagedProjectFixture::new();
     let supervisor = test_supervisor();
     supervisor.start_signal_loop();
-    supervisor
-        .register_workspace_root("workspace", &managed.worktree)
+    let history = WorkspaceHistoryService::new(
+        WorkspaceHistoryStore::open(&fixture.app_data).expect("workspace history store"),
+        WorkspaceService::new(
+            supervisor.clone(),
+            Arc::new(FixedPicker(managed.project.clone())),
+        ),
+    );
+    let picked = history
+        .pick_register()
         .await
-        .expect("register managed linked worktree");
+        .expect("register managed project");
+    assert_eq!(picked.outcome, WorkspacePickOutcome::Selected);
+    let project_id = picked
+        .state
+        .projects
+        .first()
+        .expect("registered project")
+        .project_id
+        .clone();
+    let created = history
+        .create_session(WorkspaceCreateSessionRequest {
+            project_id,
+            name: "Managed fixture".to_owned(),
+            client_request_id: format!("managed-fixture-{}", uuid::Uuid::new_v4()),
+        })
+        .await
+        .expect("create app-managed worktree");
+    let workspace_id = created
+        .active_workspace_id
+        .expect("active app-managed workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
     supervisor.connect().await.expect("connect fixture");
 
     let thread = supervisor
         .thread_start(CodexThreadStartRequest {
-            workspace_id: "workspace".to_owned(),
+            workspace_id: workspace_id.clone(),
         })
         .await
         .expect("managed worktree thread start");
     let turn = supervisor
         .turn_start(CodexTurnStartRequest {
-            workspace_id: "workspace".to_owned(),
+            workspace_id: workspace_id.clone(),
             thread_handle: thread.thread_handle.clone(),
             client_user_message_id: "managed-worktree-message".to_owned(),
             text: "Stage the managed worktree change.".to_owned(),
@@ -809,13 +842,14 @@ async fn managed_worktree_turn_sends_only_verified_git_metadata_roots() {
 
     supervisor
         .turn_interrupt(CodexTurnInterruptRequest {
-            workspace_id: "workspace".to_owned(),
+            workspace_id,
             thread_handle: thread.thread_handle,
             turn_handle: turn.turn_handle,
         })
         .await
         .expect("interrupt managed worktree turn");
     supervisor.shutdown().await;
+    drop(history);
 }
 
 #[tokio::test]
