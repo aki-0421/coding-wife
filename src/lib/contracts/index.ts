@@ -65,7 +65,6 @@ export {
   type CodexChildState,
   type CodexCommand,
   type CodexCommandErrorEnvelope,
-  type CodexConnectRequest,
   type CodexDiagnostic,
   type CodexEvent,
   type CodexFallbackDecisionRequest,

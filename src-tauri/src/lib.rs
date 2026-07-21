@@ -12,6 +12,8 @@ mod window_state;
 #[cfg(all(feature = "desktop-qa", not(debug_assertions)))]
 compile_error!("the desktop-qa feature is restricted to debug builds");
 
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -257,6 +259,13 @@ pub fn run() {
                 Some(path) => path,
                 None => app.path().app_data_dir()?,
             };
+            let codex_runtime_directory = app_data_directory.join("codex").join("runtime");
+            fs::create_dir_all(&codex_runtime_directory)?;
+            fs::set_permissions(&codex_runtime_directory, fs::Permissions::from_mode(0o700))?;
+            tauri::async_runtime::block_on(
+                setup_supervisor.set_runtime_root(&codex_runtime_directory),
+            )
+            .map_err(|error| std::io::Error::other(error.code))?;
             let preferences_service = AppPreferencesService::production(&app_data_directory);
             app.manage(preferences_service.clone());
             let attachment_service = AttachmentService::production(&app_data_directory)

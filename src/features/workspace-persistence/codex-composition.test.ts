@@ -27,7 +27,7 @@ class CompositionCodexTransport implements CodexTransport {
     readonly command: CodexCommand
     readonly request: unknown
   }[] = []
-  readonly connectFailures = new Map<string, Error>()
+  readonly threadFailures = new Map<string, Error>()
   connectGate: Promise<void> | null = null
   turnStartGate: Promise<void> | null = null
   interruptFailure: Error | null = null
@@ -41,10 +41,6 @@ class CompositionCodexTransport implements CodexTransport {
     switch (command) {
       case codexCommands.connect:
         {
-          const failure = this.connectFailures.get(
-            (request as CodexRequestMap["codex_connect"]).workspaceId,
-          )
-          if (failure !== undefined) return Promise.reject(failure)
           if (this.connectGate !== null) {
             return this.connectGate.then(
               () =>
@@ -57,6 +53,16 @@ class CompositionCodexTransport implements CodexTransport {
         )
       case codexCommands.threadStart:
       case codexCommands.threadResume:
+        {
+          const failure = this.threadFailures.get(
+            (
+              request as
+                | CodexRequestMap["codex_thread_start"]
+                | CodexRequestMap["codex_thread_resume"]
+            ).workspaceId,
+          )
+          if (failure !== undefined) return Promise.reject(failure)
+        }
         return Promise.resolve(fixture.thread as CodexResponseMap[K])
       case codexCommands.turnStart:
         return this.turnStartGate === null
@@ -143,7 +149,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await vi.waitFor(() => {
       expect(adapter.codexSnapshot()).toMatchObject({
         activeWorkspaceId: state.activeWorkspaceId,
-        connected: false,
+        connected: true,
         phase: "blocked",
       })
     })
@@ -157,6 +163,9 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       releaseConnect = resolve
     })
     const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const initial = await history.request("workspace_list", undefined)
+    const workspaceId = initial.activeWorkspaceId
+    if (workspaceId === null) throw new Error("active fixture workspace")
     const loading = adapter.loadState()
 
     await vi.waitFor(() => {
@@ -164,18 +173,8 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         codex.calls.filter((call) => call.command === codexCommands.connect),
       ).toHaveLength(1)
     })
-    const connectRequest = codex.calls.find(
-      (call) => call.command === codexCommands.connect,
-    )?.request
-    if (
-      !isRecord(connectRequest) ||
-      typeof connectRequest.workspaceId !== "string"
-    ) {
-      throw new Error("Expected an activation workspace")
-    }
-
-    const firstRecheck = adapter.recheckWorkspace(connectRequest.workspaceId)
-    const secondRecheck = adapter.recheckWorkspace(connectRequest.workspaceId)
+    const firstRecheck = adapter.recheckWorkspace(workspaceId)
+    const secondRecheck = adapter.recheckWorkspace(workspaceId)
     await vi.waitFor(() => {
       expect(
         codex.calls.filter((call) => call.command === codexCommands.connect),
@@ -301,7 +300,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     await nativeReadOnly.loadState()
     await vi.waitFor(() => {
       expect(nativeReadOnly.codexSnapshot()).toMatchObject({
-        connected: false,
+        connected: true,
         phase: "blocked",
       })
     })
@@ -509,13 +508,8 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       { activeWorkspaceId: toWorkspaceId },
     )
     expect(
-      codex.calls.some(
-        ({ command, request }) =>
-          command === codexCommands.connect &&
-          isRecord(request) &&
-          request.workspaceId === toWorkspaceId,
-      ),
-    ).toBe(false)
+      codex.calls.filter(({ command }) => command === codexCommands.connect),
+    ).toHaveLength(1)
 
     releaseTurnStart()
     await expect(sending).resolves.toEqual({ accepted: true })
@@ -800,7 +794,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     if (running.kind !== "turn_status") throw new Error("turn fixture")
     codex.emit({ ...running, workspaceId: fromWorkspaceId })
 
-    codex.connectFailures.set(
+    codex.threadFailures.set(
       toWorkspaceId,
       Object.assign(new Error("target unavailable"), {
         code: "CODEX-TARGET-UNAVAILABLE",
@@ -823,7 +817,7 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
       expect(
         codex.calls.some(
           ({ command, request }) =>
-            command === codexCommands.connect &&
+            command === codexCommands.threadStart &&
             isRecord(request) &&
             request.workspaceId === toWorkspaceId,
         ),

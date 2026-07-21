@@ -176,7 +176,8 @@ export function WorkspaceShell({
 
   const connected = view.codex.connected && runtime.state.status === "ready"
   const connection: HeaderConnectionState =
-    runtime.state.status === "loading" || view.codex.phase === "connecting"
+    runtime.state.status === "loading" ||
+    (!view.codex.connected && view.codex.phase === "connecting")
       ? "checking"
       : runtime.state.status === "error"
         ? "offline"
@@ -224,6 +225,16 @@ export function WorkspaceShell({
     Number(codexGeneration) > 0
       ? codexGeneration
       : null
+  const workspaceThreadReady =
+    !observesCodexConnection || workspaceGeneration !== null
+  const workspaceThreadErrorCode =
+    selectedOwnsExecution &&
+    workspaceGeneration === null &&
+    view.codex.phase === "failed" &&
+    view.codex.connected &&
+    view.codex.errorCode !== null
+      ? view.codex.errorCode
+      : undefined
   const commitPresentation =
     narration.presentation?.key.workspaceId === selectedWorkspaceId &&
     narration.presentation.key.workspaceGeneration === workspaceGeneration &&
@@ -968,6 +979,10 @@ export function WorkspaceShell({
                 view.codex.phase === "connecting"
               }
               turnState={view.turnState}
+              {...(workspaceThreadErrorCode === undefined
+                ? {}
+                : { workspaceThreadErrorCode })}
+              workspaceThreadReady={workspaceThreadReady}
               workspaceId={selectedWorkspace.id}
             />
           </TabsContent>

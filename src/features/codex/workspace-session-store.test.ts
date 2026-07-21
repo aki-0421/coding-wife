@@ -135,4 +135,26 @@ describe("CodexWorkspaceSessionStore", () => {
       },
     })
   })
+
+  it("keeps app connectivity when only the selected workspace thread fails", () => {
+    const store = new CodexWorkspaceSessionStore()
+    store.beginActivation("workspace-a", "ready")
+    store.applyDiagnostic(readyDiagnostic)
+    store.markThreadReady("thread-a", 7)
+
+    store.beginActivation("workspace-b", "ready")
+    store.markWorkspaceThreadError("CODEX-SERVER-ERROR")
+
+    expect(store.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-b",
+      phase: "failed",
+      connected: true,
+      generation: null,
+      errorCode: "CODEX-SERVER-ERROR",
+      readiness: {
+        ready: true,
+        reasonCode: null,
+      },
+    })
+  })
 })

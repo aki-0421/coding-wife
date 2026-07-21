@@ -103,6 +103,20 @@ const terminalTurnStatuses = new Set([
   "canceled",
 ])
 
+const globalConnectionErrorCodes = new Set([
+  "CODEX-BINARY-IDENTITY-CHANGED",
+  "CODEX-BINARY-MISSING",
+  "CODEX-BINARY-UNTRUSTED",
+  "CODEX-CONNECTION-STALE",
+  "CODEX-DISCONNECTED",
+  "CODEX-IPC-CONTRACT-MISMATCH",
+  "CODEX-IPC-UNAVAILABLE",
+  "CODEX-NOT-READY",
+  "CODEX-PROTOCOL-MISMATCH",
+  "CODEX-SCHEMA-UNSUPPORTED",
+  "CODEX-THREAD-POLICY-MISMATCH",
+])
+
 interface ActivationIdentity {
   readonly token: number
   readonly workspaceId: string
@@ -195,7 +209,8 @@ export class CodexWorkspaceSessionAdapter {
   private readonly historyBlocked = new Set<string>()
   private readonly ownedThreadHandles = new Map<string, string>()
   private started = false
-  private startPromise: Promise<void> | null = null
+  private appDiagnostic: CodexDiagnostic | null = null
+  private startPromise: Promise<CodexDiagnostic> | null = null
   private activation = 0
   private turnStart: Promise<StartCodexTurnResult> | null = null
   private readonly staleExecutions = new Set<string>()
@@ -242,8 +257,8 @@ export class CodexWorkspaceSessionAdapter {
     )
   }
 
-  async start(): Promise<void> {
-    if (this.started) return
+  async start(): Promise<CodexDiagnostic> {
+    if (this.started && this.appDiagnostic !== null) return this.appDiagnostic
     if (this.startPromise !== null) return this.startPromise
     const operation = this.client
       .start(
@@ -257,6 +272,11 @@ export class CodexWorkspaceSessionAdapter {
       )
       .then(() => {
         this.started = true
+        return this.transport.request(codexCommands.connect, undefined)
+      })
+      .then((diagnostic) => {
+        this.appDiagnostic = diagnostic
+        return diagnostic
       })
       .finally(() => {
         this.startPromise = null
@@ -269,6 +289,7 @@ export class CodexWorkspaceSessionAdapter {
     this.activation += 1
     this.client.stop()
     this.started = false
+    this.appDiagnostic = null
     this.staleExecutions.clear()
     this.acceptedWorkUnits.clear()
     this.observedTerminalEvents.clear()
@@ -283,22 +304,9 @@ export class CodexWorkspaceSessionAdapter {
     this.historyBlocked.delete(request.workspaceId)
     this.sessionStore.activateWorkspace(request.workspaceId)
     this.store.beginActivation(request.workspaceId, request.historyMode)
-    try {
-      await this.start()
-    } catch (error) {
-      if (activation === this.activation) {
-        this.store.markOperationError(
-          safeErrorCode(error, "CODEX-EVENT-SUBSCRIBE-FAILED"),
-        )
-      }
-      throw error
-    }
-
     let diagnostic: CodexDiagnostic
     try {
-      diagnostic = await this.transport.request(codexCommands.connect, {
-        workspaceId: request.workspaceId,
-      })
+      diagnostic = await this.start()
     } catch (error) {
       if (activation === this.activation) {
         this.store.markOperationError(
@@ -348,9 +356,12 @@ export class CodexWorkspaceSessionAdapter {
       return this.store.snapshot()
     } catch (error) {
       if (activation === this.activation) {
-        this.store.markOperationError(
-          safeErrorCode(error, "CODEX-THREAD-START-FAILED"),
-        )
+        const errorCode = safeErrorCode(error, "CODEX-THREAD-START-FAILED")
+        if (globalConnectionErrorCodes.has(errorCode)) {
+          this.store.markOperationError(errorCode)
+        } else {
+          this.store.markWorkspaceThreadError(errorCode)
+        }
       }
       throw error
     }

@@ -274,8 +274,13 @@ const en = {
   removeAttachment: "Remove attachment",
   attachmentRejected: "Files over 25 MiB remain visible but cannot be sent.",
   sendUnavailable: "Codex is not connected. Your draft will be preserved.",
+  sendNotReady: "Sending is unavailable until the app readiness checks pass.",
   reconnectCodex: "Reconnect",
   reconnectingCodex: "Reconnecting…",
+  threadUnavailable:
+    "Codex could not open this workspace thread. Your draft is preserved.",
+  retryThread: "Retry thread",
+  reopeningThread: "Opening thread…",
   sendEmpty: "Enter an instruction or attach valid context.",
   sendBusy: "Wait for the current turn to finish or stop it.",
   sendBusyOtherWorkspace: (workspace: string) =>
@@ -744,8 +749,13 @@ const ja: typeof en = {
   attachmentRejected:
     "25 MiBを超えるファイルは表示を残しますが送信できません。",
   sendUnavailable: "Codexは未接続です。下書きは保持されます。",
+  sendNotReady: "アプリの準備確認が完了するまで送信できません。",
   reconnectCodex: "再接続",
   reconnectingCodex: "再接続中…",
+  threadUnavailable:
+    "このワークスペースのCodex threadを開けませんでした。下書きは保持されます。",
+  retryThread: "threadを再試行",
+  reopeningThread: "threadを開いています…",
   sendEmpty: "指示を入力するか、有効なコンテキストを追加してください。",
   sendBusy: "現在のturnを完了するか、停止してください。",
   sendBusyOtherWorkspace: (workspace: string) =>

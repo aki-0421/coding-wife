@@ -2212,6 +2212,56 @@ describe("WorkspaceShell", () => {
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
   })
 
+  it("reports a workspace thread failure without disconnecting the app server", async () => {
+    const user = userEvent.setup()
+    const recheckWorkspace = vi.fn().mockResolvedValue(nativeWorkspaceState())
+    const codex: WorkspaceCodexState = {
+      activeWorkspaceId: "workspace-native",
+      generation: null,
+      phase: "failed",
+      connected: true,
+      readiness: {
+        ready: true,
+        fastServiceTier: "priority",
+        supportedReasoningEfforts: ["low", "max"],
+        experimentalModesAvailable: true,
+        reasonCode: null,
+      },
+      pendingRequests: [],
+      timeline: [],
+      errorCode: "CODEX-SERVER-ERROR",
+    }
+    const adapter: WorkspaceViewAdapter = {
+      hydrationMode: "native",
+      loadState: () => Promise.resolve(nativeWorkspaceState()),
+      codexSnapshot: () => codex,
+      recheckWorkspace,
+    }
+    renderWorkspace(adapter)
+
+    const [threadRecovery] = await screen.findAllByText(
+      "Codex could not open this workspace thread. Your draft is preserved.",
+    )
+    expect(threadRecovery).toBeVisible()
+    expect(screen.getByText("CODEX-SERVER-ERROR")).toBeVisible()
+    expect(
+      screen.queryByText(
+        "Codex is not connected. Your draft will be preserved.",
+      ),
+    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+
+    const composer = screen.getByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    await user.type(composer, "Keep this workspace draft")
+    await user.click(screen.getByRole("button", { name: "Retry thread" }))
+
+    expect(recheckWorkspace).toHaveBeenCalledWith("workspace-native")
+    expect(composer).toHaveValue("Keep this workspace draft")
+  })
+
   it("renders the workspace while native setup readiness is checking", async () => {
     const pendingReadiness = deferred<NativeReadinessSnapshotV1>()
     const readinessController = new NativeReadinessController({

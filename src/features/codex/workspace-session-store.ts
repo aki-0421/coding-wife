@@ -107,6 +107,10 @@ export function evaluateCodexReadiness(
   }
 }
 
+export function isCodexAppConnected(diagnostic: CodexDiagnostic): boolean {
+  return diagnostic.childState === "ready"
+}
+
 function phaseFromSession(
   session: CodexSessionSnapshot,
   current: CodexWorkspacePhase,
@@ -164,14 +168,18 @@ export class CodexWorkspaceSessionStore {
 
   beginActivation(workspaceId: string, historyMode: CodexHistoryMode): void {
     this.timeline.clear()
+    const readiness =
+      this.current.diagnostic === null
+        ? unavailableReadiness
+        : evaluateCodexReadiness(this.current.diagnostic, historyMode)
     this.update({
       activeWorkspaceId: workspaceId,
       phase: "connecting",
-      connected: false,
+      connected: this.current.connected,
       historyMode,
       historyWritable: historyMode === "ready",
-      diagnostic: null,
-      readiness: unavailableReadiness,
+      diagnostic: this.current.diagnostic,
+      readiness,
       generation: null,
       lastSequence: 0,
       threadHandle: null,
@@ -192,7 +200,7 @@ export class CodexWorkspaceSessionStore {
       diagnostic,
       readiness,
       phase: readiness.ready ? "connecting" : "blocked",
-      connected: false,
+      connected: isCodexAppConnected(diagnostic),
       errorCode: readiness.reasonCode,
     })
     return readiness
@@ -211,7 +219,7 @@ export class CodexWorkspaceSessionStore {
       generation,
       threadHandle,
       phase: "ready",
-      connected: this.current.readiness.ready && this.current.historyWritable,
+      connected: this.current.connected,
       errorCode: null,
     })
   }
@@ -243,11 +251,18 @@ export class CodexWorkspaceSessionStore {
     })
   }
 
+  markWorkspaceThreadError(errorCode: string): void {
+    this.update({
+      ...this.current,
+      phase: "failed",
+      errorCode,
+    })
+  }
+
   markHistoryFailure(errorCode: string): void {
     this.update({
       ...this.current,
       phase: "failed",
-      connected: false,
       historyWritable: false,
       readiness: {
         ...this.current.readiness,

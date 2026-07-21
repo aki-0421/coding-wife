@@ -100,10 +100,6 @@ export interface CodexDiagnostic {
   readonly detailRef: string | null
 }
 
-export interface CodexConnectRequest {
-  readonly workspaceId: string
-}
-
 export interface WorkspacePreflight {
   readonly gitRepository: true
   readonly ownedByCurrentUser: true
@@ -462,7 +458,7 @@ export interface CodexRequestMap {
   codex_pick_workspace: undefined
   codex_get_diagnostic: undefined
   codex_probe: undefined
-  codex_connect: CodexConnectRequest
+  codex_connect: undefined
   codex_thread_list: CodexThreadListRequest
   codex_thread_start: CodexThreadStartRequest
   codex_thread_resume: CodexThreadResumeRequest

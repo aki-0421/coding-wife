@@ -176,12 +176,6 @@ impl CodexCommandError {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct CodexConnectRequest {
-    pub workspace_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CodexDiagnoseRequest {
     pub workspace_id: Option<String>,
 }

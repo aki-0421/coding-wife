@@ -43,6 +43,8 @@ interface ChatViewProps {
   readonly repositoryHealth?: WorkspaceRecord["health"]
   readonly runtimeError: boolean
   readonly turnState: TurnUiState
+  readonly workspaceThreadErrorCode?: string
+  readonly workspaceThreadReady: boolean
   readonly timeline: readonly WorkspaceTimelineItem[]
   readonly timelineAnchor?: {
     readonly eventId: string
@@ -181,6 +183,8 @@ export function ChatView({
   repositoryHealth,
   runtimeError,
   turnState,
+  workspaceThreadErrorCode,
+  workspaceThreadReady,
   timeline,
   timelineAnchor,
   pendingRequestIds,
@@ -494,6 +498,10 @@ export function ChatView({
           readiness={readiness}
           repositoryHealth={repositoryHealth}
           turnState={turnState}
+          {...(workspaceThreadErrorCode === undefined
+            ? {}
+            : { workspaceThreadErrorCode })}
+          workspaceThreadReady={workspaceThreadReady}
         />
       </section>
     </div>

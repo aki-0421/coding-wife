@@ -48,6 +48,8 @@ interface ComposerProps {
   readonly readiness: WorkspaceCodexState["readiness"]
   readonly repositoryHealth?: WorkspaceRecord["health"]
   readonly turnState: TurnUiState
+  readonly workspaceThreadErrorCode?: string
+  readonly workspaceThreadReady: boolean
   readonly onCaptureContext: (
     source: ContextSnapshotItem["source"],
   ) => void | Promise<void>
@@ -131,6 +133,8 @@ export function Composer({
   readiness,
   repositoryHealth,
   turnState,
+  workspaceThreadErrorCode,
+  workspaceThreadReady,
   onCaptureContext,
   onDraftChange,
   onEffortChange,
@@ -165,6 +169,8 @@ export function Composer({
   const connectionReason = safeConnectionReason(readiness.reasonCode)
   const canSend =
     connected &&
+    readiness.ready &&
+    workspaceThreadReady &&
     repositoryReady &&
     hasContent &&
     goalObjectiveValid &&
@@ -172,17 +178,21 @@ export function Composer({
     turnState === "idle"
   const disabledReason = !connected
     ? copy.sendUnavailable
-    : repositoryHealth !== undefined && repositoryHealth !== "ready"
-      ? copy.workspaceHealth[repositoryHealth]
-      : backgroundExecutionWorkspaceLabel !== undefined
-        ? copy.sendBusyOtherWorkspace(backgroundExecutionWorkspaceLabel)
-        : isBusy
-          ? copy.sendBusy
-          : !goalObjectiveValid
-            ? copy.goalInstructionRequired
-            : !hasContent
-              ? copy.sendEmpty
-              : ""
+    : !workspaceThreadReady
+      ? copy.threadUnavailable
+      : !readiness.ready
+        ? copy.sendNotReady
+        : repositoryHealth !== undefined && repositoryHealth !== "ready"
+          ? copy.workspaceHealth[repositoryHealth]
+          : backgroundExecutionWorkspaceLabel !== undefined
+            ? copy.sendBusyOtherWorkspace(backgroundExecutionWorkspaceLabel)
+            : isBusy
+              ? copy.sendBusy
+              : !goalObjectiveValid
+                ? copy.goalInstructionRequired
+                : !hasContent
+                  ? copy.sendEmpty
+                  : ""
   const availableReasoningLevels = reasoningOrder.filter(
     (effort) =>
       effort === "off" ||
@@ -385,6 +395,39 @@ export function Composer({
                 data-icon="inline-start"
               />
               {reconnecting ? copy.reconnectingCodex : copy.reconnectCodex}
+            </Button>
+          </div>
+        ) : null}
+
+        {connected && workspaceThreadErrorCode !== undefined ? (
+          <div
+            className="mt-xs flex min-h-8 items-center gap-sm rounded-control bg-muted/60 px-sm py-xs max-[520px]:items-start"
+            data-composer-thread-recovery=""
+            role="status"
+          >
+            <p className="m-0 min-w-0 flex-1 text-pretty text-caption text-muted-foreground">
+              {copy.threadUnavailable}{" "}
+              <code className="whitespace-nowrap font-mono text-label text-foreground">
+                {workspaceThreadErrorCode}
+              </code>
+            </p>
+            <Button
+              className="shrink-0"
+              disabled={reconnecting}
+              onClick={() => void onReconnect()}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              <RefreshCwIcon
+                className={
+                  reconnecting
+                    ? "animate-spin motion-reduce:animate-none"
+                    : undefined
+                }
+                data-icon="inline-start"
+              />
+              {reconnecting ? copy.reopeningThread : copy.retryThread}
             </Button>
           </div>
         ) : null}

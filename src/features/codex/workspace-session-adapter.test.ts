@@ -49,10 +49,7 @@ class FakeCodexTransport implements CodexTransport {
   interrupt = Promise.resolve({ accepted: true })
   turnResponse: Promise<CodexResponseMap["codex_turn_start"]> | null = null
   subscribeFailure: (Error & { readonly code?: string }) | null = null
-  readonly connectResponses = new Map<
-    string,
-    Promise<CodexResponseMap["codex_connect"]>
-  >()
+  connectResponse: Promise<CodexResponseMap["codex_connect"]> | null = null
   readonly threadResponses = new Map<
     string,
     Promise<CodexResponseMap["codex_thread_start"]>
@@ -67,9 +64,8 @@ class FakeCodexTransport implements CodexTransport {
     this.calls.push({ command, request })
     switch (command) {
       case codexCommands.connect:
-        return (this.connectResponses.get(
-          (request as CodexRequestMap["codex_connect"]).workspaceId,
-        ) ?? Promise.resolve(this.diagnostic)) as Promise<CodexResponseMap[K]>
+        return (this.connectResponse ??
+          Promise.resolve(this.diagnostic)) as Promise<CodexResponseMap[K]>
       case codexCommands.threadStart:
       case codexCommands.threadResume:
         return (this.threadResponses.get(
@@ -412,12 +408,79 @@ describe("CodexWorkspaceSessionAdapter", () => {
     expect(transport.calls.map(({ command }) => command)).toEqual([
       codexCommands.connect,
       codexCommands.threadStart,
-      codexCommands.connect,
       codexCommands.threadResume,
     ])
     expect(transport.calls.at(-1)?.request).toEqual({
       workspaceId: "workspace-fixture",
       threadHandle: "thread_handle_fixture",
+    })
+  })
+
+  it("keeps the app connected when another workspace thread cannot open", async () => {
+    const { adapter, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-a",
+      historyMode: "ready",
+    })
+    transport.threadResponses.set(
+      "workspace-b",
+      Promise.reject(
+        Object.assign(new Error("workspace thread failed"), {
+          code: "CODEX-SERVER-ERROR",
+        }),
+      ),
+    )
+
+    await expect(
+      adapter.activateWorkspace({
+        workspaceId: "workspace-b",
+        historyMode: "ready",
+      }),
+    ).rejects.toMatchObject({ code: "CODEX-SERVER-ERROR" })
+
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-b",
+      phase: "failed",
+      connected: true,
+      generation: null,
+      errorCode: "CODEX-SERVER-ERROR",
+      readiness: { ready: true, reasonCode: null },
+    })
+    expect(
+      transport.calls.filter(
+        ({ command }) => command === codexCommands.connect,
+      ),
+    ).toHaveLength(1)
+  })
+
+  it("marks an actual App Server disconnect as a global connection error", async () => {
+    const { adapter, transport } = adapterFixture()
+    await adapter.activateWorkspace({
+      workspaceId: "workspace-a",
+      historyMode: "ready",
+    })
+    transport.threadResponses.set(
+      "workspace-b",
+      Promise.reject(
+        Object.assign(new Error("App Server disconnected"), {
+          code: "CODEX-DISCONNECTED",
+        }),
+      ),
+    )
+
+    await expect(
+      adapter.activateWorkspace({
+        workspaceId: "workspace-b",
+        historyMode: "ready",
+      }),
+    ).rejects.toMatchObject({ code: "CODEX-DISCONNECTED" })
+
+    expect(adapter.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-b",
+      phase: "failed",
+      connected: false,
+      errorCode: "CODEX-DISCONNECTED",
+      readiness: { ready: false, reasonCode: "CODEX-DISCONNECTED" },
     })
   })
 
@@ -538,7 +601,7 @@ describe("CodexWorkspaceSessionAdapter", () => {
         historyMode: "ready",
       }),
     ).resolves.toMatchObject({
-      connected: false,
+      connected: true,
       phase: "blocked",
       errorCode: "CODEX-EFFORT-UNAVAILABLE",
       readiness: {
@@ -716,15 +779,15 @@ describe("CodexWorkspaceSessionAdapter", () => {
       workspaceId: "workspace-a",
       historyMode: "ready",
     })
-    const delayedConnect = deferred<CodexResponseMap["codex_connect"]>()
-    transport.connectResponses.set("workspace-b", delayedConnect.promise)
+    const delayedThread = deferred<CodexResponseMap["codex_thread_start"]>()
+    transport.threadResponses.set("workspace-b", delayedThread.promise)
     const switchingToB = adapter.activateWorkspace({
       workspaceId: "workspace-b",
       historyMode: "ready",
     })
     await vi.waitFor(() =>
       expect(transport.calls).toContainEqual({
-        command: codexCommands.connect,
+        command: codexCommands.threadStart,
         request: { workspaceId: "workspace-b" },
       }),
     )
@@ -744,7 +807,7 @@ describe("CodexWorkspaceSessionAdapter", () => {
       workspaceId: "workspace-d",
       historyMode: "ready",
     })
-    delayedConnect.resolve(transport.diagnostic)
+    delayedThread.resolve(threadFixture)
     await switchingToB
 
     expect(adapter.snapshot()).toMatchObject({

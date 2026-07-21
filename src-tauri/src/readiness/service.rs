@@ -11,7 +11,7 @@ use crate::character::CharacterService;
 use crate::codex::binary::{discover_binary, BinaryError};
 use crate::codex::process::run_bounded_command;
 use crate::codex::supervisor::CodexSupervisor;
-use crate::codex::types::{CodexConnectRequest, CodexDiagnostic, CodexHealth, CODEX_MODEL};
+use crate::codex::types::{CodexDiagnostic, CodexHealth, CODEX_MODEL};
 use crate::codex::workspace::AppPrivateBinaryRecord;
 use crate::git_review::runner::GitRunner;
 use crate::preferences::AppPreferencesService;
@@ -119,26 +119,13 @@ impl NativeReadinessService {
     }
 
     async fn run_unlocked(&self) -> NativeReadinessSnapshotV1 {
-        // Startup restoration registers the trusted workspace roots used by
-        // the Codex setup probe. Do not publish a fallback-cwd failure that
-        // would remain stale after those roots become available.
+        // Publish one startup snapshot after history restoration while the
+        // app-wide Codex connection starts from its private runtime root.
         self.history.wait_for_startup_restore().await;
-        let active_workspace_id = self
-            .history
-            .list()
-            .ok()
-            .and_then(|snapshot| snapshot.active_workspace_id);
         let codex = async {
-            match active_workspace_id {
-                Some(workspace_id) => match self
-                    .codex
-                    .connect(CodexConnectRequest { workspace_id })
-                    .await
-                {
-                    Ok(diagnostic) => diagnostic,
-                    Err(_) => self.codex.diagnostic().await,
-                },
-                None => self.codex.setup_probe().await,
+            match self.codex.connect().await {
+                Ok(diagnostic) => diagnostic,
+                Err(_) => self.codex.diagnostic().await,
             }
         };
         let (os_version, codex, explicit_binary, repository, history) = tokio::join!(

@@ -16,8 +16,8 @@ use coding_wife_lib::codex::support::{
     SUPPORT_MAX_SESSION_CAPACITY,
 };
 use coding_wife_lib::codex::types::{
-    BinarySource, CapabilityState, ChildState, CodexConnectRequest, CodexFallbackDecisionRequest,
-    CodexHealth, CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadResumeRequest,
+    BinarySource, CapabilityState, ChildState, CodexFallbackDecisionRequest, CodexHealth,
+    CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadResumeRequest,
     CodexThreadStartRequest, CodexTurnInterruptRequest, CodexTurnStartRequest, PendingResponse,
     ReasoningPreset, ReviewTarget,
 };
@@ -336,9 +336,7 @@ async fn start_active_turn(
         .await;
     assert_eq!(
         supervisor
-            .connect(CodexConnectRequest {
-                workspace_id: "workspace".to_owned(),
-            })
+            .connect()
             .await
             .expect("connect readiness fixture")
             .health,
@@ -488,12 +486,7 @@ async fn prepare_attachment_fixture(
         .pick_and_register()
         .await
         .expect("workspace registration");
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: registration.workspace_id.clone(),
-        })
-        .await
-        .expect("connect");
+    supervisor.connect().await.expect("connect");
     let thread = supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: registration.workspace_id.clone(),
@@ -581,12 +574,7 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
 
-    let diagnostic = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("connect fixture");
+    let diagnostic = supervisor.connect().await.expect("connect fixture");
     assert_eq!(diagnostic.health, CodexHealth::Ready);
     assert!(diagnostic.experimental_api_accepted);
     assert_eq!(
@@ -655,12 +643,7 @@ async fn main_turn_text_accepts_exact_scalar_boundary_and_rejects_invalid_input_
         .await
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("connect fixture");
+    supervisor.connect().await.expect("connect fixture");
     let thread = supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: "workspace".to_owned(),
@@ -1439,12 +1422,7 @@ async fn missing_or_tampered_main_skill_blocks_turn_before_wire() {
             .await
             .expect("register workspace");
         supervisor.set_explicit_binary(Some(fixture_binary())).await;
-        supervisor
-            .connect(CodexConnectRequest {
-                workspace_id: "workspace".to_owned(),
-            })
-            .await
-            .expect("connect fixture");
+        supervisor.connect().await.expect("connect fixture");
         let thread = supervisor
             .thread_start(CodexThreadStartRequest {
                 workspace_id: "workspace".to_owned(),
@@ -1508,9 +1486,7 @@ async fn native_picker_registers_private_paths_before_connect_and_thread_start()
         .contains(&fixture.workspace.to_string_lossy().to_string()));
 
     let diagnostic = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: registration.workspace_id.clone(),
-        })
+        .connect()
         .await
         .expect("connect registered workspace");
     assert_eq!(diagnostic.health, CodexHealth::Ready);
@@ -1549,12 +1525,7 @@ async fn validated_opaque_attachments_reach_the_fake_server_as_local_image_and_m
         .pick_and_register()
         .await
         .expect("workspace registration");
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: registration.workspace_id.clone(),
-        })
-        .await
-        .expect("connect");
+    supervisor.connect().await.expect("connect");
     let thread = supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: registration.workspace_id.clone(),
@@ -1779,12 +1750,7 @@ async fn stable_initialize_fallback_omits_experimental_fields_and_blocks_review(
         .await
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    let diagnostic = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("stable connect");
+    let diagnostic = supervisor.connect().await.expect("stable connect");
     assert!(!diagnostic.experimental_api_accepted);
     assert_eq!(
         diagnostic.capabilities.detached_review,
@@ -1831,12 +1797,7 @@ async fn each_thread_policy_mismatch_stops_without_storing_a_handle() {
             .await
             .expect("register workspace");
         supervisor.set_explicit_binary(Some(fixture_binary())).await;
-        supervisor
-            .connect(CodexConnectRequest {
-                workspace_id: "workspace".to_owned(),
-            })
-            .await
-            .expect("connect");
+        supervisor.connect().await.expect("connect");
         let error = supervisor
             .thread_start(CodexThreadStartRequest {
                 workspace_id: "workspace".to_owned(),
@@ -1863,12 +1824,7 @@ async fn native_rui_round_trips_one_strict_answer() {
         .await
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("connect");
+    supervisor.connect().await.expect("connect");
     let thread = supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: "workspace".to_owned(),
@@ -1956,12 +1912,7 @@ async fn invalid_decision_output_interrupts_while_exact_fallback_does_not() {
             .await
             .expect("register workspace");
         supervisor.set_explicit_binary(Some(fixture_binary())).await;
-        supervisor
-            .connect(CodexConnectRequest {
-                workspace_id: "workspace".to_owned(),
-            })
-            .await
-            .expect("connect");
+        supervisor.connect().await.expect("connect");
         let thread = supervisor
             .thread_start(CodexThreadStartRequest {
                 workspace_id: "workspace".to_owned(),
@@ -2006,12 +1957,7 @@ async fn fallback_decision_validates_then_starts_exactly_one_structured_continua
         .await
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("connect");
+    supervisor.connect().await.expect("connect");
     let thread = supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: "workspace".to_owned(),
@@ -2083,12 +2029,7 @@ async fn notification_first_turn_start_preserves_fallback_display_and_answer() {
         .await
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("connect");
+    supervisor.connect().await.expect("connect");
     let thread = supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: "workspace".to_owned(),
@@ -2142,12 +2083,7 @@ async fn failed_fallback_continuation_is_terminal_and_never_replayed() {
         .await
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("connect");
+    supervisor.connect().await.expect("connect");
     let thread = supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: "workspace".to_owned(),
@@ -2213,12 +2149,7 @@ async fn failed_reprobe_clears_previous_identity_evidence_and_recovers_fresh() {
         .await
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    let ready = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("ready");
+    let ready = supervisor.connect().await.expect("ready");
     assert!(ready.binary_hash_prefix.is_some());
 
     std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", "schema_malformed");
@@ -2231,12 +2162,7 @@ async fn failed_reprobe_clears_previous_identity_evidence_and_recovers_fresh() {
     assert!(!failed.generated_by_same_binary);
 
     std::env::set_var("CODING_WIFE_CODEX_FAKE_MODE", "default");
-    let recovered = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("fresh recovery");
+    let recovered = supervisor.connect().await.expect("fresh recovery");
     assert_eq!(recovered.health, CodexHealth::Ready);
     assert!(recovered.binary_hash_prefix.is_some());
     supervisor.shutdown().await;
@@ -2301,29 +2227,19 @@ async fn repeated_setup_probe_reuses_successful_initialization_evidence() {
 }
 
 #[tokio::test]
-async fn repeated_connect_to_ready_workspace_reuses_runtime_and_probe_evidence() {
+async fn app_wide_connect_without_a_workspace_reuses_runtime_and_probe_evidence() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("lifecycle_cache");
     let supervisor = test_supervisor();
     supervisor.start_signal_loop();
     supervisor
-        .register_workspace_root("workspace", &fixture.workspace)
+        .set_runtime_root(&fixture.workspace)
         .await
-        .expect("register workspace");
+        .expect("set app-wide runtime root");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
 
-    let first = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("first connect");
-    let second = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("idempotent connect");
+    let first = supervisor.connect().await.expect("first connect");
+    let second = supervisor.connect().await.expect("idempotent connect");
 
     assert_eq!(second, first);
     let state = read_state(&fixture.state).await;
@@ -2373,20 +2289,13 @@ async fn configured_binary_change_replaces_a_ready_runtime() {
     supervisor
         .set_explicit_binary(Some(first_binary.clone()))
         .await;
-    let first = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("connect first binary");
+    let first = supervisor.connect().await.expect("connect first binary");
 
     supervisor
         .set_explicit_binary(Some(second_binary.clone()))
         .await;
     let second = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
+        .connect()
         .await
         .expect("connect replacement binary");
 
@@ -2401,7 +2310,7 @@ async fn configured_binary_change_replaces_a_ready_runtime() {
 }
 
 #[tokio::test]
-async fn workspace_switch_reuses_app_server_process_and_workspace_context() {
+async fn workspace_threads_share_one_app_server_process_and_restore_context() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("lifecycle_cache");
     let supervisor = test_supervisor();
@@ -2416,12 +2325,7 @@ async fn workspace_switch_reuses_app_server_process_and_workspace_context() {
         .expect("register second workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
 
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace-a".to_owned(),
-        })
-        .await
-        .expect("connect first workspace");
+    supervisor.connect().await.expect("connect first workspace");
     let first_thread = supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: "workspace-a".to_owned(),
@@ -2429,23 +2333,11 @@ async fn workspace_switch_reuses_app_server_process_and_workspace_context() {
         .await
         .expect("start first workspace thread");
     supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace-b".to_owned(),
-        })
-        .await
-        .expect("connect second workspace");
-    supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: "workspace-b".to_owned(),
         })
         .await
         .expect("start second workspace thread");
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace-a".to_owned(),
-        })
-        .await
-        .expect("restore first workspace context");
     supervisor
         .thread_resume(CodexThreadResumeRequest {
             workspace_id: "workspace-a".to_owned(),
@@ -2483,9 +2375,7 @@ async fn setup_probe_and_connect_share_binary_discovery_evidence() {
     assert_eq!(supervisor.setup_probe().await.health, CodexHealth::Ready);
     assert_eq!(
         supervisor
-            .connect(CodexConnectRequest {
-                workspace_id: "workspace".to_owned(),
-            })
+            .connect()
             .await
             .expect("connect after setup")
             .health,
@@ -2625,12 +2515,7 @@ async fn protocol_violations_use_the_bounded_restart_budget_without_turn_replay(
         .await
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("initial connect");
+    supervisor.connect().await.expect("initial connect");
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
     loop {
@@ -2733,12 +2618,7 @@ async fn unknown_server_request_is_rejected_and_turn_is_interrupted() {
         .await
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("connect");
+    supervisor.connect().await.expect("connect");
     let thread = supervisor
         .thread_start(CodexThreadStartRequest {
             workspace_id: "workspace".to_owned(),
@@ -2792,13 +2672,7 @@ async fn crash_after_ready_restarts_once_without_replaying_a_turn() {
         .expect("register workspace");
     supervisor.set_explicit_binary(Some(fixture_binary())).await;
     assert_eq!(
-        supervisor
-            .connect(CodexConnectRequest {
-                workspace_id: "workspace".to_owned(),
-            })
-            .await
-            .expect("initial connect")
-            .health,
+        supervisor.connect().await.expect("initial connect").health,
         CodexHealth::Ready
     );
 
@@ -2871,9 +2745,7 @@ async fn live_installed_codex_completes_read_only_handshake() {
         .expect("register live workspace");
 
     let diagnostic = supervisor
-        .connect(CodexConnectRequest {
-            workspace_id: "live-smoke".to_owned(),
-        })
+        .connect()
         .await
         .expect("initialize/account/config/model read-only handshake");
     assert!(diagnostic.generated_by_same_binary);

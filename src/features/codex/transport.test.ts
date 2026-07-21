@@ -12,15 +12,13 @@ import fixture from "@/test/fixtures/codex-runtime.v1.json"
 describe("TauriCodexTransport", () => {
   it("parses native responses and passes only the typed request", async () => {
     const invoker = vi.fn((_command, request) => {
-      expect(request).toEqual({ workspaceId: "workspace-fixture" })
+      expect(request).toBeUndefined()
       return Promise.resolve(fixture.diagnostic)
     })
     const transport = new TauriCodexTransport(invoker)
 
     await expect(
-      transport.request(codexCommands.connect, {
-        workspaceId: "workspace-fixture",
-      }),
+      transport.request(codexCommands.connect, undefined),
     ).resolves.toEqual(fixture.diagnostic)
     expect(invoker).toHaveBeenCalledOnce()
   })
