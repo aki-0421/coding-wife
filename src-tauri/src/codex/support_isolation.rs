@@ -37,9 +37,9 @@ pub(crate) const SUPPORTED_SCHEMA_FINGERPRINT: &str =
 pub(crate) const SUPPORTED_EXPLAIN_SKILL_VERSION: &str = "1.1.0";
 pub(crate) const SUPPORTED_EXPLAIN_SKILL_SHA256: &str =
     "a11cfddff346e37be4431add626535175931cd2212f76e088a7c3f9305d0207f";
-pub(crate) const SUPPORTED_PRESENCE_SKILL_VERSION: &str = "1.0.0";
+pub(crate) const SUPPORTED_PRESENCE_SKILL_VERSION: &str = "1.1.0";
 pub(crate) const SUPPORTED_PRESENCE_SKILL_SHA256: &str =
-    "2b7468f2e12d15fbaf400199a806c0a65838b727474e3a9458d04a948ad99ac9";
+    "a38a92217752a5186cc25ac49c0329ced2286011743550cb98489df92084c5ee";
 const EXPECTED_EXPLANATION_OUTPUT_SCHEMA_HASH: &str =
     "c01cb830b87c827b22842342f0410657b259ccbd113e3db05bd988ff48e4f3c9";
 const EXPECTED_PRESENCE_OUTPUT_SCHEMA_HASH: &str =
@@ -305,6 +305,7 @@ fn presence_probe_input() -> PresenceDirectorInputV1 {
         semantic_state: PresenceSemanticState::Asking,
         retrying: false,
         elapsed_bucket: PresenceElapsedBucket::None,
+        message_excerpt: None,
     }
 }
 

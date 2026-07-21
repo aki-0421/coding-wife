@@ -38,14 +38,14 @@
     },
     {
       "name": "coding-wife-direct-presence",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "entrypoint": "coding-wife-direct-presence/SKILL.md",
-      "contentDigest": "sha256:2b7468f2e12d15fbaf400199a806c0a65838b727474e3a9458d04a948ad99ac9",
+      "contentDigest": "sha256:a38a92217752a5186cc25ac49c0329ced2286011743550cb98489df92084c5ee",
       "implicitInvocation": false,
       "files": [
         {
           "path": "coding-wife-direct-presence/SKILL.md",
-          "sha256": "2b7468f2e12d15fbaf400199a806c0a65838b727474e3a9458d04a948ad99ac9"
+          "sha256": "a38a92217752a5186cc25ac49c0329ced2286011743550cb98489df92084c5ee"
         },
         {
           "path": "coding-wife-direct-presence/agents/openai.yaml",

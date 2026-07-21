@@ -969,6 +969,47 @@ mod tests {
     }
 
     #[test]
+    fn replayed_completed_agent_message_keeps_the_same_opaque_item_handle() {
+        let mut normalizer =
+            EventNormalizer::new("workspace-1".to_owned(), PathBuf::from("/workspace"), 1);
+        let params = json!({"item": {
+            "id": "raw-replayed-item",
+            "type": "agentMessage",
+            "phase": "commentary",
+            "text": "完了したメッセージです。"
+        }});
+        let first = normalizer
+            .normalize("item/completed", &params, 100)
+            .expect("first completion");
+        let replay = normalizer
+            .normalize("item/completed", &params, 100)
+            .expect("replayed completion");
+
+        let [first] = first.events.as_slice() else {
+            panic!("first completion must emit exactly one event");
+        };
+        let [replay] = replay.events.as_slice() else {
+            panic!("replayed completion must emit exactly one event");
+        };
+        let CodexEventPayload::AgentMessageCompleted {
+            item_handle: first_handle,
+            ..
+        } = &first.payload
+        else {
+            panic!("first event must be a completed agent message");
+        };
+        let CodexEventPayload::AgentMessageCompleted {
+            item_handle: replay_handle,
+            ..
+        } = &replay.payload
+        else {
+            panic!("replayed event must be a completed agent message");
+        };
+        assert_eq!(first_handle, replay_handle);
+        assert_ne!(first.event_id, replay.event_id);
+    }
+
+    #[test]
     fn turn_completed_is_the_terminal_domain_authority() {
         let mut normalizer =
             EventNormalizer::new("workspace-1".to_owned(), PathBuf::from("/workspace"), 1);

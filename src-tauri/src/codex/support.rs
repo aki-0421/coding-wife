@@ -98,6 +98,7 @@ impl PresenceLocale {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PresenceTrigger {
+    MainMessage,
     DecisionWait,
     RecoverableFailure,
     TerminalFailure,
@@ -147,6 +148,8 @@ pub struct PresenceDirectorInputV1 {
     pub semantic_state: PresenceSemanticState,
     pub retrying: bool,
     pub elapsed_bucket: PresenceElapsedBucket,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_excerpt: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1819,6 +1822,46 @@ fn private_evidence_string(value: &str) -> bool {
     redacted != value
 }
 
+pub(crate) fn presence_public_text_is_safe(value: &str) -> bool {
+    static CODE_OR_DIFF: OnceLock<Regex> = OnceLock::new();
+    static BARE_FILENAME: OnceLock<Regex> = OnceLock::new();
+    static OPAQUE_TOKEN: OnceLock<Regex> = OnceLock::new();
+    let code_or_diff = CODE_OR_DIFF.get_or_init(|| {
+        Regex::new(
+            r#"(?ix)
+            (?:^|\s)(?:diff\s+--git|index\s+[a-f0-9]+\.\.[a-f0-9]+|@@(?:\s|$)|---\s|\+\+\+\s)
+            |```|~~~
+            |\b(?:fn|function|class|struct|enum|impl)\s+[a-z_$][a-z0-9_$]*\s*(?:\([^)]*\))?\s*\{
+            |\b(?:const|let|var)\s+[a-z_$][a-z0-9_$]*\s*=
+            |\b[a-z_$][a-z0-9_$]*\s*\([^)]*\)\s*=>
+            |\bconsole\.log\s*\(
+            |<\/?[a-z][^>]*>
+            |(?:^|\s)[+-](?:return\b|\s*(?:fn|function|const|let|var|class)\b|\s*[{}])
+            "#,
+        )
+        .expect("presence code and diff regex")
+    });
+    let bare_filename = BARE_FILENAME.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?:^|[^a-z0-9_.@+-])(?:dockerfile|makefile|[a-z0-9_.@+-]+\.(?:rs|ts|tsx|js|jsx|json|toml|ya?ml|md|py|go|java|kt|swift|c|cc|cpp|h|hpp|css|scss|html|sh|zsh|fish|sql|pem|key|env|log))(?:$|[^a-z0-9_])",
+        )
+        .expect("presence bare filename regex")
+    });
+    let opaque_token = OPAQUE_TOKEN.get_or_init(|| {
+        Regex::new(r"(?i)\b(?:[a-f0-9]{32,}|[a-z0-9_+=-]{40,})\b")
+            .expect("presence opaque token regex")
+    });
+    let canonical = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    canonical == value
+        && !value.is_empty()
+        && !value.chars().any(char::is_control)
+        && !value_contains_private_string(&Value::String(value.to_owned()))
+        && !value.contains("<external>")
+        && !code_or_diff.is_match(value)
+        && !bare_filename.is_match(value)
+        && !opaque_token.is_match(value)
+}
+
 fn value_contains_control_character(value: &Value) -> bool {
     match value {
         Value::String(value) => value.chars().any(char::is_control),
@@ -1855,28 +1898,38 @@ fn validate_presence_request(request: &SupportPresenceRequest) -> Result<(), Sup
 pub(crate) fn validate_presence_input(
     input: &PresenceDirectorInputV1,
 ) -> Result<(), SupportRuntimeError> {
-    use PresenceElapsedBucket::{None, Seconds120Plus, Seconds45Plus};
+    use PresenceElapsedBucket::{Seconds120Plus, Seconds45Plus};
     use PresenceSemanticState::{Asking, Error, Success, Warning, Working};
     use PresenceTrigger::{
-        CommitReady, DecisionWait, LongMilestone, RecoverableFailure, TerminalFailure,
+        CommitReady, DecisionWait, LongMilestone, MainMessage, RecoverableFailure, TerminalFailure,
         TurnCompleted,
     };
 
-    let valid = input.schema_version == 1
-        && match (
-            input.trigger,
-            input.semantic_state,
-            input.retrying,
-            input.elapsed_bucket,
-        ) {
-            (DecisionWait, Asking, false, None)
-            | (RecoverableFailure, Warning, _, None)
-            | (TerminalFailure, Error, false, None)
-            | (LongMilestone, Working, false, Seconds45Plus | Seconds120Plus)
-            | (CommitReady | TurnCompleted, Success, false, None) => true,
-            _ => false,
-        };
-    valid.then_some(()).ok_or(SupportRuntimeError::Output)
+    let valid_shape = match (
+        input.trigger,
+        input.semantic_state,
+        input.retrying,
+        input.elapsed_bucket,
+    ) {
+        (MainMessage, Working, false, PresenceElapsedBucket::None)
+        | (DecisionWait, Asking, false, PresenceElapsedBucket::None)
+        | (RecoverableFailure, Warning, _, PresenceElapsedBucket::None)
+        | (TerminalFailure, Error, false, PresenceElapsedBucket::None)
+        | (LongMilestone, Working, false, Seconds45Plus | Seconds120Plus)
+        | (CommitReady | TurnCompleted, Success, false, PresenceElapsedBucket::None) => true,
+        _ => false,
+    };
+    let valid_excerpt = match (input.trigger, input.message_excerpt.as_deref()) {
+        (MainMessage, Some(excerpt)) => {
+            excerpt.chars().count() <= 240 && presence_public_text_is_safe(excerpt)
+        }
+        (MainMessage, None) => false,
+        (_, None) => true,
+        (_, Some(_)) => false,
+    };
+    (input.schema_version == 1 && valid_shape && valid_excerpt)
+        .then_some(())
+        .ok_or(SupportRuntimeError::Output)
 }
 
 pub(crate) fn validate_presence_direction(
@@ -1893,6 +1946,7 @@ pub(crate) fn validate_presence_direction(
         || direction.utterance.trim() != direction.utterance
         || direction.utterance.chars().count() > 160
         || value_contains_private_string(&public_value)
+        || !presence_public_text_is_safe(&direction.utterance)
         || value_contains_control_character(&public_value)
         || !presence_cue_allowed(input.trigger, direction.cue)
     {
@@ -1904,13 +1958,14 @@ pub(crate) fn validate_presence_direction(
 fn presence_cue_allowed(trigger: PresenceTrigger, cue: PresenceCue) -> bool {
     use PresenceCue::{Asking, Error, Neutral, Success, Warning, Working};
     use PresenceTrigger::{
-        CommitReady, DecisionWait, LongMilestone, RecoverableFailure, TerminalFailure,
+        CommitReady, DecisionWait, LongMilestone, MainMessage, RecoverableFailure, TerminalFailure,
         TurnCompleted,
     };
 
     matches!(
         (trigger, cue),
-        (DecisionWait, Asking | Neutral)
+        (MainMessage, Working | Neutral)
+            | (DecisionWait, Asking | Neutral)
             | (RecoverableFailure, Warning | Neutral)
             | (TerminalFailure, Error | Warning | Neutral)
             | (LongMilestone, Working | Neutral)
@@ -2057,6 +2112,7 @@ mod tests {
             semantic_state,
             retrying,
             elapsed_bucket,
+            message_excerpt: None,
         }
     }
 
@@ -2067,6 +2123,17 @@ mod tests {
             utterance: utterance.to_owned(),
             cue,
         }
+    }
+
+    fn main_message_input(excerpt: &str) -> PresenceDirectorInputV1 {
+        let mut input = presence_input(
+            PresenceTrigger::MainMessage,
+            PresenceSemanticState::Working,
+            false,
+            PresenceElapsedBucket::None,
+        );
+        input.message_excerpt = Some(excerpt.to_owned());
+        input
     }
 
     #[test]
@@ -2105,6 +2172,25 @@ mod tests {
     }
 
     #[test]
+    fn main_message_input_serializes_only_the_bounded_excerpt_extension() {
+        let value = serde_json::to_value(main_message_input("実装の要点を整理しました。"))
+            .expect("main message input");
+
+        assert_eq!(
+            value,
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "trigger": "main_message",
+                "semanticState": "working",
+                "retrying": false,
+                "elapsedBucket": "none",
+                "messageExcerpt": "実装の要点を整理しました。"
+            })
+        );
+    }
+
+    #[test]
     fn presence_input_accepts_only_documented_trigger_state_combinations() {
         use PresenceElapsedBucket::{None, Seconds120Plus, Seconds45Plus};
         use PresenceSemanticState::{Asking, Error, Success, Warning, Working};
@@ -2124,6 +2210,8 @@ mod tests {
         ] {
             validate_presence_input(&input).expect("documented presence input");
         }
+        validate_presence_input(&main_message_input("次の確認点を整理しました。"))
+            .expect("documented main message input");
 
         for input in [
             presence_input(DecisionWait, Asking, true, None),
@@ -2141,6 +2229,34 @@ mod tests {
         wrong_version.schema_version = 2;
         assert_eq!(
             validate_presence_input(&wrong_version),
+            Err(SupportRuntimeError::Output)
+        );
+
+        for unsafe_excerpt in [
+            "二重  spaceは拒否します。",
+            "改行\nは拒否します。",
+            "```rust fn main() {} ```",
+            "diff --git old new @@ -1 +1 @@ -return false; +return true;",
+            "fn main() {}",
+            "console.log('secret')",
+            "<div>secret</div>",
+            "README.md を確認しました。",
+            "secret-config.yaml を確認しました。",
+            "private.pem secret.key Dockerfile Makefile",
+            "https://example.com を確認しました。",
+            "token=credential-value を確認しました。",
+        ] {
+            assert_eq!(
+                validate_presence_input(&main_message_input(unsafe_excerpt)),
+                Err(SupportRuntimeError::Output),
+                "accepted {unsafe_excerpt:?}"
+            );
+        }
+
+        let mut excerpt_on_other_trigger = presence_input(DecisionWait, Asking, false, None);
+        excerpt_on_other_trigger.message_excerpt = Some("許可しません。".to_owned());
+        assert_eq!(
+            validate_presence_input(&excerpt_on_other_trigger),
             Err(SupportRuntimeError::Output)
         );
     }
@@ -2202,6 +2318,30 @@ mod tests {
                 "schemaVersion": 1,
                 "locale": "ja",
                 "utterance": "https://example.com を確認しています。",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "README.md private.pem secret.key Dockerfile Makefile",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "diff --git old new @@ -1 +1 @@ -return false; +return true;",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "console.log('secret') <div>secret</div>",
+                "cue": "asking"
+            }),
+            json!({
+                "schemaVersion": 1,
+                "locale": "ja",
+                "utterance": "二重  spaceは拒否します。",
                 "cue": "asking"
             }),
             json!({

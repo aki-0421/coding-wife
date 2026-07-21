@@ -16,7 +16,7 @@ pub const COMMIT_SKILL_NAME: &str = "coding-wife-commit-work";
 pub const EXPLAIN_COMMIT_SKILL_NAME: &str = "coding-wife-explain-commit";
 pub const DIRECT_PRESENCE_SKILL_NAME: &str = "coding-wife-direct-presence";
 const EXPECTED_MANIFEST_SHA256: &str =
-    "40d1fb0a72126984e057c1b283b3e5fbdd8cca02348583ef6f6986bc333a3fbb";
+    "f05bbffa3731b88388db84cfc207b117fe9981e750d9f42a4bb3bd09b231537a";
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024;
 const MAX_SKILL_FILE_BYTES: u64 = 128 * 1024;
 const MAX_SKILLS: usize = 16;

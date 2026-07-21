@@ -248,7 +248,8 @@ def validate_skill(inputs, expected_name):
             digest = "sha256:" + hashlib.sha256(skill_path.read_bytes()).hexdigest()
             version = (
                 "1.1.0"
-                if expected_name == "coding-wife-explain-commit"
+                if expected_name
+                in ("coding-wife-explain-commit", "coding-wife-direct-presence")
                 else "1.0.0"
             )
             return private_shape, (skill.get("name"), version, digest)
@@ -314,12 +315,20 @@ def support_explanation(locale):
 
 
 def support_presence_direction(locale, trigger):
-    utterance = (
-        "確認が必要なところで待っています。"
-        if locale == "ja"
-        else "Waiting where your decision is needed."
-    )
+    if trigger == "main_message":
+        utterance = (
+            "一緒に次の確認へ進めそうです。"
+            if locale == "ja"
+            else "We can move to the next check together."
+        )
+    else:
+        utterance = (
+            "確認が必要なところで待っています。"
+            if locale == "ja"
+            else "Waiting where your decision is needed."
+        )
     cue = {
+        "main_message": "working",
         "decision_wait": "asking",
         "recoverable_failure": "warning",
         "terminal_failure": "error",

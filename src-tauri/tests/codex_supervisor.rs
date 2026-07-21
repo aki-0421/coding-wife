@@ -515,10 +515,11 @@ fn support_presence_request(request_id: &str) -> SupportPresenceRequest {
         input: PresenceDirectorInputV1 {
             schema_version: 1,
             locale: PresenceLocale::Ja,
-            trigger: PresenceTrigger::DecisionWait,
-            semantic_state: PresenceSemanticState::Asking,
+            trigger: PresenceTrigger::MainMessage,
+            semantic_state: PresenceSemanticState::Working,
             retrying: false,
             elapsed_bucket: PresenceElapsedBucket::None,
+            message_excerpt: Some("実装の要点を整理しました。".to_owned()),
         },
     }
 }
@@ -1027,7 +1028,7 @@ async fn dedicated_presence_runtime_proves_luna_and_returns_strict_direction() {
     );
     assert_eq!(runtime.audit().model, "gpt-5.6-luna");
     assert_eq!(runtime.audit().skill_name, "coding-wife-direct-presence");
-    assert_eq!(runtime.audit().skill_version, "1.0.0");
+    assert_eq!(runtime.audit().skill_version, "1.1.0");
     assert!(runtime.audit().malicious_canary_passed);
 
     let result = runtime
@@ -1037,7 +1038,7 @@ async fn dedicated_presence_runtime_proves_luna_and_returns_strict_direction() {
     assert_eq!(result.direction.locale, PresenceLocale::Ja);
     assert_eq!(
         result.direction.cue,
-        coding_wife_lib::codex::support::PresenceCue::Asking
+        coding_wife_lib::codex::support::PresenceCue::Working
     );
     assert_eq!(result.usage.total_tokens, 30);
     runtime.shutdown().await.expect("presence support cleanup");

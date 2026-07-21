@@ -4,23 +4,26 @@
 //! boundary. Correlation identifiers remain in this scheduler and are attached
 //! only after a strict Luna response has been validated.
 
+use std::collections::{HashSet, VecDeque};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 
+use super::redaction::redact_text;
 use super::supervisor::CodexSupervisor;
 use super::support::{
-    validate_presence_direction, PresenceCue, PresenceDirectionV1, PresenceDirectorInputV1,
-    PresenceElapsedBucket, PresenceLocale, PresenceSemanticState, PresenceTrigger,
-    SupportConstructionControl, SupportPresenceRequest, SupportPresenceResult, SupportRuntime,
-    SupportRuntimeError,
+    presence_public_text_is_safe, validate_presence_direction, validate_presence_input,
+    PresenceCue, PresenceDirectionV1, PresenceDirectorInputV1, PresenceElapsedBucket,
+    PresenceLocale, PresenceSemanticState, PresenceTrigger, SupportConstructionControl,
+    SupportPresenceRequest, SupportPresenceResult, SupportRuntime, SupportRuntimeError,
 };
 use super::types::{CodexEvent, CodexEventPayload, CODEX_PRESENCE_DIRECTOR_MODEL};
 
@@ -32,6 +35,11 @@ const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
 const DEFAULT_FIRST_MILESTONE: Duration = Duration::from_secs(45);
 const DEFAULT_SECOND_MILESTONE: Duration = Duration::from_secs(120);
 const EXECUTOR_SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
+const MAIN_MESSAGE_QUEUE_CAPACITY: usize = 16;
+const MAIN_MESSAGE_SEEN_CAPACITY: usize = 256;
+const MAIN_MESSAGE_EXCERPT_SCALARS: usize = 240;
+const MAIN_MESSAGE_SANITIZER_BYTES: usize = 64 * 1024;
+const PRESENCE_QUEUE_FULL_CODE: &str = "CODEX-PRESENCE-QUEUE-FULL";
 
 type PresenceFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -97,6 +105,7 @@ pub(crate) struct PresenceAuditSnapshot {
     pub failures: u64,
     pub canceled: u64,
     pub unavailable: u64,
+    pub queue_overflow: u64,
     pub last_latency_ms: u64,
     pub last_input_tokens: u64,
     pub last_output_tokens: u64,
@@ -161,7 +170,9 @@ impl PresenceCandidate {
     fn bypasses_cooldown(&self) -> bool {
         matches!(
             self.request.input.trigger,
-            PresenceTrigger::DecisionWait | PresenceTrigger::TerminalFailure
+            PresenceTrigger::MainMessage
+                | PresenceTrigger::DecisionWait
+                | PresenceTrigger::TerminalFailure
         )
     }
 
@@ -185,6 +196,9 @@ struct PresenceData {
     scope: Option<PresenceScope>,
     active: Option<PresenceCandidate>,
     queued: Option<PresenceCandidate>,
+    main_messages: VecDeque<PresenceCandidate>,
+    seen_main_message_handles: HashSet<String>,
+    seen_main_message_order: VecDeque<String>,
     active_turn: Option<ActiveTurn>,
     next_turn_epoch: u64,
     worker_running: bool,
@@ -288,6 +302,8 @@ impl PresenceDirector {
             data.scope = Some(next);
             data.active_turn = None;
             data.queued = None;
+            data.main_messages.clear();
+            clear_seen_main_messages(&mut data);
             cancel_active_locked(&mut data)
         };
         self.cancel_executor(active_to_cancel);
@@ -341,6 +357,9 @@ impl PresenceDirector {
             CodexEventPayload::PendingRequestResolved { pending_id, .. } => {
                 self.cancel_decision(event.generation, pending_id)
             }
+            CodexEventPayload::AgentMessageCompleted {
+                item_handle, text, ..
+            } => self.submit_main_message(event, item_handle, text),
             CodexEventPayload::Diagnostic {
                 will_retry: true, ..
             } => self.submit_from_event(
@@ -373,6 +392,7 @@ impl PresenceDirector {
             None,
             PresenceElapsedBucket::None,
             false,
+            None,
         );
         if let Some(candidate) = candidate {
             self.admit(candidate);
@@ -401,6 +421,8 @@ impl PresenceDirector {
             data.scope = None;
             data.active_turn = None;
             data.queued = None;
+            data.main_messages.clear();
+            clear_seen_main_messages(&mut data);
             cancel_active_locked(&mut data)
         };
         if let Some(request_id) = active_to_cancel {
@@ -419,6 +441,8 @@ impl PresenceDirector {
             data.scope = None;
             data.active_turn = None;
             data.queued = None;
+            data.main_messages.clear();
+            clear_seen_main_messages(&mut data);
             cancel_active_locked(&mut data)
         };
         if let Some(request_id) = active_to_cancel {
@@ -456,6 +480,10 @@ impl PresenceDirector {
             }) {
                 data.queued = None;
             }
+            data.main_messages.retain(|candidate| {
+                candidate.request.workspace_generation != event.generation
+                    || candidate.turn_handle.as_deref() == Some(turn_handle.as_str())
+            });
             let active_to_cancel = if data.active.as_ref().is_some_and(|candidate| {
                 candidate.request.workspace_generation == event.generation
                     && candidate
@@ -490,7 +518,7 @@ impl PresenceDirector {
         );
     }
 
-    fn stop_turn(&self, event: &CodexEvent, turn_handle: &str, preserve_verified_commit: bool) {
+    fn stop_turn(&self, event: &CodexEvent, turn_handle: &str, preserve_success: bool) {
         let active_to_cancel = {
             let mut data = self.inner.data.lock().expect("presence data lock poisoned");
             if data.active_turn.as_ref().is_some_and(|active| {
@@ -503,16 +531,24 @@ impl PresenceDirector {
             if data.queued.as_ref().is_some_and(|candidate| {
                 candidate.request.workspace_generation == event.generation
                     && candidate.turn_handle.as_deref() == Some(turn_handle)
-                    && !(preserve_verified_commit
+                    && !(preserve_success
                         && candidate.request.input.trigger == PresenceTrigger::CommitReady)
             }) {
                 data.queued = None;
             }
+            if !preserve_success {
+                data.main_messages
+                    .retain(|candidate| candidate.request.workspace_generation != event.generation);
+                clear_seen_main_messages(&mut data);
+            }
             if data.active.as_ref().is_some_and(|candidate| {
                 candidate.request.workspace_generation == event.generation
                     && candidate.turn_handle.as_deref() == Some(turn_handle)
-                    && !(preserve_verified_commit
-                        && candidate.request.input.trigger == PresenceTrigger::CommitReady)
+                    && !(preserve_success
+                        && matches!(
+                            candidate.request.input.trigger,
+                            PresenceTrigger::CommitReady | PresenceTrigger::MainMessage
+                        ))
             }) {
                 cancel_active_locked(&mut data)
             } else {
@@ -588,6 +624,7 @@ impl PresenceDirector {
             Some(marker.turn_handle),
             elapsed_bucket,
             false,
+            None,
         );
         if let Some(candidate) = candidate {
             self.admit(candidate);
@@ -612,10 +649,63 @@ impl PresenceDirector {
             turn_handle,
             elapsed_bucket,
             retrying,
+            None,
         );
         if let Some(candidate) = candidate {
             self.admit(candidate);
         }
+    }
+
+    fn submit_main_message(&self, event: &CodexEvent, item_handle: &str, text: &str) {
+        if !self.reserve_main_message_handle(event, item_handle) {
+            return;
+        }
+        let Some(message_excerpt) = sanitize_main_message_excerpt(text) else {
+            return;
+        };
+        let candidate = self.candidate(
+            event.workspace_id.clone(),
+            event.generation,
+            event.event_id.clone(),
+            PresenceTrigger::MainMessage,
+            None,
+            None,
+            PresenceElapsedBucket::None,
+            false,
+            Some(message_excerpt),
+        );
+        if let Some(candidate) = candidate {
+            self.admit(candidate);
+        }
+    }
+
+    fn reserve_main_message_handle(&self, event: &CodexEvent, item_handle: &str) -> bool {
+        if !valid_opaque(item_handle) {
+            return false;
+        }
+        let mut data = self.inner.data.lock().expect("presence data lock poisoned");
+        if data.shutting_down
+            || data.scope.as_ref().is_none_or(|scope| {
+                scope.workspace_id != event.workspace_id
+                    || scope.workspace_generation != event.generation
+            })
+            || data.active_turn.as_ref().is_none_or(|turn| {
+                turn.workspace_id != event.workspace_id
+                    || turn.workspace_generation != event.generation
+            })
+            || data.seen_main_message_handles.contains(item_handle)
+        {
+            return false;
+        }
+        if data.seen_main_message_order.len() == MAIN_MESSAGE_SEEN_CAPACITY {
+            if let Some(expired) = data.seen_main_message_order.pop_front() {
+                data.seen_main_message_handles.remove(&expired);
+            }
+        }
+        let item_handle = item_handle.to_owned();
+        data.seen_main_message_handles.insert(item_handle.clone());
+        data.seen_main_message_order.push_back(item_handle);
+        true
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -629,6 +719,7 @@ impl PresenceDirector {
         turn_handle: Option<String>,
         elapsed_bucket: PresenceElapsedBucket,
         retrying: bool,
+        message_excerpt: Option<String>,
     ) -> Option<PresenceCandidate> {
         let (scope, inferred_turn_handle) = {
             let data = self.inner.data.lock().expect("presence data lock poisoned");
@@ -648,20 +739,25 @@ impl PresenceDirector {
         }
         let (semantic_state, priority, rank) = trigger_policy(trigger);
         let request_id = format!("presence-{}", uuid::Uuid::new_v4());
-        Some(PresenceCandidate {
-            request: SupportPresenceRequest {
-                request_id,
-                workspace_id,
-                workspace_generation,
-                input: PresenceDirectorInputV1 {
-                    schema_version: PRESENCE_SCHEMA_VERSION,
-                    locale: scope.locale,
-                    trigger,
-                    semantic_state,
-                    retrying,
-                    elapsed_bucket,
-                },
+        let request = SupportPresenceRequest {
+            request_id,
+            workspace_id,
+            workspace_generation,
+            input: PresenceDirectorInputV1 {
+                schema_version: PRESENCE_SCHEMA_VERSION,
+                locale: scope.locale,
+                trigger,
+                semantic_state,
+                retrying,
+                elapsed_bucket,
+                message_excerpt,
             },
+        };
+        if validate_presence_input(&request.input).is_err() {
+            return None;
+        }
+        Some(PresenceCandidate {
+            request,
             source_event_id,
             priority,
             rank,
@@ -679,19 +775,38 @@ impl PresenceDirector {
                     .scope
                     .as_ref()
                     .is_none_or(|scope| !candidate.scope_matches(scope))
-                || data.active.as_ref().is_some_and(|active| {
-                    !active.canceled.load(Ordering::Acquire)
-                        && active.request.input.trigger == candidate.request.input.trigger
-                })
+                || (candidate.request.input.trigger == PresenceTrigger::MainMessage
+                    && data.active_turn.as_ref().is_none_or(|turn| {
+                        turn.workspace_id != candidate.request.workspace_id
+                            || turn.workspace_generation != candidate.request.workspace_generation
+                            || candidate.turn_handle.as_deref() != Some(turn.turn_handle.as_str())
+                    }))
             {
                 return;
             }
-            match data.queued.as_ref() {
-                Some(queued) if queued.request.input.trigger == candidate.request.input.trigger => {
-                    data.queued = Some(candidate);
+            if candidate.request.input.trigger == PresenceTrigger::MainMessage {
+                if data.main_messages.len() >= MAIN_MESSAGE_QUEUE_CAPACITY {
+                    data.audit.queue_overflow = data.audit.queue_overflow.saturating_add(1);
+                    data.audit.last_error_code = Some(PRESENCE_QUEUE_FULL_CODE);
+                    return;
                 }
-                Some(queued) if queued.rank > candidate.rank => return,
-                Some(_) | None => data.queued = Some(candidate),
+                data.main_messages.push_back(candidate);
+            } else {
+                if data.active.as_ref().is_some_and(|active| {
+                    !active.canceled.load(Ordering::Acquire)
+                        && active.request.input.trigger == candidate.request.input.trigger
+                }) {
+                    return;
+                }
+                match data.queued.as_ref() {
+                    Some(queued)
+                        if queued.request.input.trigger == candidate.request.input.trigger =>
+                    {
+                        data.queued = Some(candidate);
+                    }
+                    Some(queued) if queued.rank > candidate.rank => return,
+                    Some(_) | None => data.queued = Some(candidate),
+                }
             }
             if data.worker_running {
                 false
@@ -723,24 +838,38 @@ impl PresenceDirector {
                     Next::Stop
                 } else if data.active.is_some() {
                     Next::Wait(Duration::ZERO)
-                } else if let Some(candidate) = data.queued.as_ref() {
-                    let wait = cooldown_remaining_at(
-                        &data,
-                        candidate,
-                        self.inner.timing.cooldown,
-                        Instant::now(),
-                    );
-                    if wait.is_zero() {
-                        let candidate = data.queued.take().expect("queued candidate checked");
+                } else {
+                    let now = Instant::now();
+                    let queued_wait = data.queued.as_ref().map(|candidate| {
+                        cooldown_remaining_at(&data, candidate, self.inner.timing.cooldown, now)
+                    });
+                    let message_rank = data.main_messages.front().map(|candidate| candidate.rank);
+                    let take_queued =
+                        data.queued
+                            .as_ref()
+                            .zip(queued_wait)
+                            .is_some_and(|(queued, wait)| {
+                                wait.is_zero() && message_rank.is_none_or(|rank| queued.rank > rank)
+                            });
+                    let candidate = if take_queued {
+                        data.queued.take()
+                    } else if !data.main_messages.is_empty() {
+                        data.main_messages.pop_front()
+                    } else if queued_wait.is_some_and(|wait| wait.is_zero()) {
+                        data.queued.take()
+                    } else {
+                        None
+                    };
+                    if let Some(candidate) = candidate {
                         data.active = Some(candidate.clone());
                         data.audit.attempts = data.audit.attempts.saturating_add(1);
                         Next::Execute(candidate)
-                    } else {
+                    } else if let Some(wait) = queued_wait {
                         Next::Wait(wait)
+                    } else {
+                        data.worker_running = false;
+                        Next::Stop
                     }
-                } else {
-                    data.worker_running = false;
-                    Next::Stop
                 }
             };
             match next {
@@ -1128,14 +1257,74 @@ fn cancel_active_locked(data: &mut PresenceData) -> Option<String> {
     })
 }
 
+fn clear_seen_main_messages(data: &mut PresenceData) {
+    data.seen_main_message_handles.clear();
+    data.seen_main_message_order.clear();
+}
+
+fn sanitize_main_message_excerpt(value: &str) -> Option<String> {
+    static INLINE_CODE: OnceLock<Regex> = OnceLock::new();
+    let inline_code = INLINE_CODE.get_or_init(|| {
+        Regex::new(r"`{1,3}[^`\r\n]{1,4096}`{1,3}").expect("presence inline code regex")
+    });
+    let redacted = redact_text(value, None, MAIN_MESSAGE_SANITIZER_BYTES);
+    let mut in_fence = false;
+    let mut in_diff = false;
+    let mut safe_tokens = Vec::new();
+    for line in redacted.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if trimmed.starts_with("diff --git")
+            || (trimmed.starts_with("index ") && trimmed.contains(".."))
+            || trimmed.starts_with("@@")
+            || trimmed.starts_with("--- ")
+            || trimmed.starts_with("+++ ")
+        {
+            in_diff = true;
+            continue;
+        }
+        if in_fence || in_diff {
+            continue;
+        }
+        let without_inline_code = inline_code.replace_all(trimmed, " ");
+        safe_tokens.extend(
+            without_inline_code
+                .split_whitespace()
+                .filter(|token| presence_public_text_is_safe(token))
+                .map(str::to_owned),
+        );
+    }
+    let joined = safe_tokens.join(" ");
+    if joined.is_empty() {
+        return None;
+    }
+    let excerpt = if joined.chars().count() > MAIN_MESSAGE_EXCERPT_SCALARS {
+        let mut bounded = joined
+            .chars()
+            .take(MAIN_MESSAGE_EXCERPT_SCALARS.saturating_sub(1))
+            .collect::<String>();
+        bounded.push('…');
+        bounded
+    } else {
+        joined
+    };
+    presence_public_text_is_safe(&excerpt).then_some(excerpt)
+}
+
 fn trigger_policy(trigger: PresenceTrigger) -> (PresenceSemanticState, PresencePriority, u8) {
     match trigger {
-        PresenceTrigger::DecisionWait => (PresenceSemanticState::Asking, PresencePriority::High, 6),
+        PresenceTrigger::DecisionWait => (PresenceSemanticState::Asking, PresencePriority::High, 7),
         PresenceTrigger::TerminalFailure => {
-            (PresenceSemanticState::Error, PresencePriority::High, 5)
+            (PresenceSemanticState::Error, PresencePriority::High, 6)
         }
         PresenceTrigger::RecoverableFailure => {
-            (PresenceSemanticState::Warning, PresencePriority::High, 4)
+            (PresenceSemanticState::Warning, PresencePriority::High, 5)
+        }
+        PresenceTrigger::MainMessage => {
+            (PresenceSemanticState::Working, PresencePriority::Normal, 4)
         }
         PresenceTrigger::CommitReady => {
             (PresenceSemanticState::Success, PresencePriority::Normal, 3)
@@ -1314,11 +1503,19 @@ mod tests {
     }
 
     fn event(event_id: &str, payload: CodexEventPayload) -> CodexEvent {
+        event_in_generation(event_id, 7, payload)
+    }
+
+    fn event_in_generation(
+        event_id: &str,
+        generation: u64,
+        payload: CodexEventPayload,
+    ) -> CodexEvent {
         CodexEvent {
             schema_version: 1,
             event_id: event_id.to_owned(),
             workspace_id: "workspace-fixture".to_owned(),
-            generation: 7,
+            generation,
             sequence: 1,
             occurred_at: "2026-07-21T00:00:00Z".to_owned(),
             payload,
@@ -1366,6 +1563,7 @@ mod tests {
                     PresenceLocale::En => "Still working.".to_owned(),
                 },
                 cue: match request.input.trigger {
+                    PresenceTrigger::MainMessage => PresenceCue::Working,
                     PresenceTrigger::DecisionWait => PresenceCue::Asking,
                     PresenceTrigger::RecoverableFailure => PresenceCue::Warning,
                     PresenceTrigger::TerminalFailure => PresenceCue::Error,
@@ -1393,6 +1591,42 @@ mod tests {
             first_milestone: Duration::from_millis(10),
             second_milestone: Duration::from_millis(20),
         }
+    }
+
+    fn message_timing() -> PresenceTiming {
+        PresenceTiming {
+            cooldown: Duration::ZERO,
+            first_milestone: Duration::from_secs(3_600),
+            second_milestone: Duration::from_secs(7_200),
+        }
+    }
+
+    fn turn_event(event_id: &str, generation: u64, status: &str) -> CodexEvent {
+        event_in_generation(
+            event_id,
+            generation,
+            CodexEventPayload::TurnStatus {
+                thread_handle: format!("thread-{generation}"),
+                turn_handle: format!("turn-{generation}"),
+                status: status.to_owned(),
+            },
+        )
+    }
+
+    fn main_message_event(
+        event_id: &str,
+        generation: u64,
+        item_handle: &str,
+        text: &str,
+    ) -> CodexEvent {
+        event_in_generation(
+            event_id,
+            generation,
+            CodexEventPayload::AgentMessageCompleted {
+                item_handle: item_handle.to_owned(),
+                text: text.to_owned(),
+            },
+        )
     }
 
     async fn wait_until(predicate: impl Fn() -> bool) {
@@ -1590,6 +1824,7 @@ mod tests {
                 None,
                 PresenceElapsedBucket::None,
                 false,
+                None,
             )
             .expect("candidate");
         assert_eq!(
@@ -1623,6 +1858,7 @@ mod tests {
                 None,
                 PresenceElapsedBucket::None,
                 false,
+                None,
             )
             .expect("routine candidate");
         let urgent = director
@@ -1635,6 +1871,7 @@ mod tests {
                 None,
                 PresenceElapsedBucket::None,
                 false,
+                None,
             )
             .expect("urgent candidate");
         let published_at = Instant::now();
@@ -1705,6 +1942,215 @@ mod tests {
         assert!(data.queued.is_none());
         assert!(!data.worker_running);
         assert_eq!(data.audit.attempts, 0);
+    }
+
+    #[test]
+    fn main_message_sanitizer_removes_private_code_and_complete_diff_blocks() {
+        let excerpt = sanitize_main_message_excerpt(concat!(
+            "要点を整理しました。 README.md Bearer private-token\n",
+            "```rust\nfn main() {}\n```\n",
+            "続けて確認します。\n",
+            "diff --git old new\n@@ -1 +1 @@\n-return false;\n+return true;"
+        ))
+        .expect("safe prose remains");
+
+        assert_eq!(excerpt, "要点を整理しました。 続けて確認します。");
+        assert!(presence_public_text_is_safe(&excerpt));
+        assert_eq!(
+            sanitize_main_message_excerpt(
+                "diff --git old new\n@@ -1 +1 @@\n-return false;\n+return true;"
+            ),
+            None
+        );
+        let bounded = sanitize_main_message_excerpt(&"あ".repeat(300)).expect("bounded excerpt");
+        assert_eq!(bounded.chars().count(), MAIN_MESSAGE_EXCERPT_SCALARS);
+        assert!(bounded.ends_with('…'));
+    }
+
+    #[tokio::test]
+    async fn completed_main_messages_are_fifo_deduped_and_preserved_by_success_terminal() {
+        let executor = Arc::new(FakeExecutor::with_delay(Duration::from_millis(2)));
+        let events = Arc::new(CapturingEvents::default());
+        let director = director(executor.clone(), events.clone(), message_timing());
+        director
+            .set_scope(scope(PresenceLocale::Ja))
+            .expect("scope");
+        director.observe(&turn_event("turn-start", 7, "running"));
+        director.observe(&main_message_event(
+            "message-a",
+            7,
+            "item-a",
+            "最初の確認を終えました。",
+        ));
+        director.observe(&main_message_event(
+            "message-b",
+            7,
+            "item-b",
+            "次の要点を整理しました。",
+        ));
+        director.observe(&main_message_event(
+            "message-a-replayed",
+            7,
+            "item-a",
+            "再配送された本文です。",
+        ));
+        director.observe(&main_message_event(
+            "message-c",
+            7,
+            "item-c",
+            "最後の確認点です。",
+        ));
+        director.observe(&turn_event("turn-completed", 7, "completed"));
+
+        wait_until(|| events.0.lock().expect("events").len() == 4).await;
+        let requests = executor.requests.lock().await.clone();
+        assert_eq!(executor.max_active.load(Ordering::Acquire), 1);
+        assert_eq!(requests.len(), 4);
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.input.trigger)
+                .collect::<Vec<_>>(),
+            vec![
+                PresenceTrigger::MainMessage,
+                PresenceTrigger::MainMessage,
+                PresenceTrigger::MainMessage,
+                PresenceTrigger::TurnCompleted,
+            ]
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .take(3)
+                .map(|request| request.input.message_excerpt.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                Some("最初の確認を終えました。"),
+                Some("次の要点を整理しました。"),
+                Some("最後の確認点です。"),
+            ]
+        );
+        let emitted = events.0.lock().expect("events");
+        assert_eq!(
+            emitted
+                .iter()
+                .take(3)
+                .map(|event| event.source_event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["message-a", "message-b", "message-c"]
+        );
+    }
+
+    #[tokio::test]
+    async fn hydration_and_late_terminal_messages_never_start_luna() {
+        let executor = Arc::new(FakeExecutor::default());
+        let events = Arc::new(CapturingEvents::default());
+        let director = director(executor.clone(), events, message_timing());
+        director
+            .set_scope(scope(PresenceLocale::Ja))
+            .expect("scope");
+
+        director.observe(&main_message_event(
+            "history-message",
+            7,
+            "item-history",
+            "履歴から復元された本文です。",
+        ));
+        director.observe(&turn_event("turn-start", 7, "running"));
+        director.observe(&turn_event("turn-interrupted", 7, "interrupted"));
+        director.observe(&main_message_event(
+            "late-message",
+            7,
+            "item-late",
+            "終了後に届いた本文です。",
+        ));
+        tokio::task::yield_now().await;
+
+        assert!(executor.requests.lock().await.is_empty());
+        let data = director
+            .inner
+            .data
+            .lock()
+            .expect("presence data lock poisoned");
+        assert!(data.main_messages.is_empty());
+        assert!(data.seen_main_message_handles.is_empty());
+    }
+
+    #[tokio::test]
+    async fn item_handle_can_be_reused_after_scope_generation_changes() {
+        let executor = Arc::new(FakeExecutor::default());
+        let events = Arc::new(CapturingEvents::default());
+        let director = director(executor.clone(), events.clone(), message_timing());
+        director
+            .set_scope(scope(PresenceLocale::Ja))
+            .expect("scope");
+        director.observe(&turn_event("turn-7-start", 7, "running"));
+        director.observe(&main_message_event(
+            "message-7",
+            7,
+            "item-reused",
+            "第七世代の本文です。",
+        ));
+        wait_until(|| events.0.lock().expect("events").len() == 1).await;
+
+        director
+            .set_scope(PresenceScopeRequestV1 {
+                schema_version: 1,
+                workspace_id: "workspace-fixture".to_owned(),
+                workspace_generation: 8,
+                locale: PresenceLocale::Ja,
+            })
+            .expect("new generation scope");
+        director.observe(&turn_event("turn-8-start", 8, "running"));
+        director.observe(&main_message_event(
+            "message-8",
+            8,
+            "item-reused",
+            "第八世代の本文です。",
+        ));
+        wait_until(|| events.0.lock().expect("events").len() == 2).await;
+
+        let requests = executor.requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].workspace_generation, 7);
+        assert_eq!(requests[1].workspace_generation, 8);
+    }
+
+    #[tokio::test]
+    async fn main_message_overflow_is_nonblocking_and_audit_only() {
+        let executor = Arc::new(FakeExecutor::with_delay(Duration::from_secs(1)));
+        let events = Arc::new(CapturingEvents::default());
+        let director = director(executor.clone(), events, message_timing());
+        director
+            .set_scope(scope(PresenceLocale::Ja))
+            .expect("scope");
+        director.observe(&turn_event("turn-start", 7, "running"));
+        director.observe(&main_message_event(
+            "message-active",
+            7,
+            "item-active",
+            "実行中の完了メッセージです。",
+        ));
+        wait_until(|| executor.active.load(Ordering::Acquire) == 1).await;
+
+        for index in 0..(MAIN_MESSAGE_QUEUE_CAPACITY + 2) {
+            director.observe(&main_message_event(
+                &format!("message-{index}"),
+                7,
+                &format!("item-{index}"),
+                &format!("完了メッセージ{index}です。"),
+            ));
+        }
+
+        let data = director
+            .inner
+            .data
+            .lock()
+            .expect("presence data lock poisoned");
+        assert_eq!(data.main_messages.len(), MAIN_MESSAGE_QUEUE_CAPACITY);
+        assert_eq!(data.audit.queue_overflow, 2);
+        assert_eq!(data.audit.last_error_code, Some(PRESENCE_QUEUE_FULL_CODE));
+        assert_eq!(data.audit.attempts, 1);
     }
 
     #[tokio::test]
