@@ -22,7 +22,7 @@
     "format:check": "biome format .",
     "lint": "node scripts/live2d/verify-live2d.mjs && biome lint . --error-on-warnings",
     "typecheck": "node scripts/live2d/verify-live2d.mjs && node scripts/live2d/build-framework.mjs && tsc -b --pretty false",
-    "test": "node scripts/live2d/verify-live2d.mjs && node scripts/live2d/build-framework.mjs && node --test scripts/skills/*.test.mjs && node --test scripts/live2d/*.test.mjs && node --test scripts/release/check-diff-hygiene.test.mjs && node --test scripts/quality/*.test.mjs && vitest run --fileParallelism=false",
+    "test": "node scripts/live2d/verify-live2d.mjs && node scripts/live2d/build-framework.mjs && node --test scripts/skills/*.test.mjs && node --test scripts/live2d/*.test.mjs && node --test scripts/release/check-diff-hygiene.test.mjs scripts/release/validate-release-tag.test.mjs && node --test scripts/quality/*.test.mjs && vitest run --fileParallelism=false",
     "test:desktop": "VITE_DESKTOP_QA=true tauri build --debug --no-bundle --features desktop-qa --config src-tauri/tauri.qa.conf.json && wdio run wdio.conf.ts",
     "test:watch": "node scripts/live2d/verify-live2d.mjs && node scripts/live2d/build-framework.mjs && vitest",
     "test:release": "node --test --test-concurrency=1 --test-timeout=300000 scripts/release/build-macos-dmg.test.mjs scripts/release/macos-release.test.mjs scripts/release/production-bundle.test.mjs",
