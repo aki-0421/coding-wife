@@ -68,7 +68,7 @@ Required final files:
 | Screenshot 1 | `tmp/submission-video/evidence/screenshot-01-workspace.png` |
 | Screenshot 2 | `tmp/submission-video/evidence/screenshot-02-luna-presence.png` |
 | Screenshot 3 | `tmp/submission-video/evidence/screenshot-03-commit-changes.png` |
-| Screenshot 4 | `tmp/submission-video/evidence/screenshot-04-terra-explanation.png` |
+| Screenshot 4 | `tmp/submission-video/evidence/screenshot-04-terra-fail-closed.png` |
 | Final checksums | `tmp/submission-video/evidence/checksums.sha256` |
 
 Before any key or recording work, `git check-ignore -q tmp/.env` and `git check-ignore -q tmp/submission-video` must both succeed. Never stage anything below `tmp/`.
@@ -564,7 +564,7 @@ Discard the proof-chain take and reseed when any of these occurs:
 - tests fail or the expected commit is absent;
 - Commit changes does not show the same commit and real diff;
 - Explain changes does not start exactly one bounded `user_request` for the selected verified commit, or its terminal unavailable result is not retained for the audit overlay;
-- Terra receives tools or write access, the selected commit changes, or the explanation scope is unrelated;
+- Terra receives tools or write access, the selected commit changes, or the review-request scope is unrelated;
 - a key, email, personal path, notification, private URL, private repository label, or unrelated app appears even briefly;
 - an app crash, rendering corruption, missing character, cursor error, or unrecoverable visual pause damages the proof.
 
@@ -579,7 +579,7 @@ Use FFmpeg 7.1.1. Preserve the exact shot boundaries in section 4.
 1. Cut the accepted raw sources according to `evidence/edit-decision-list.tsv`.
 2. For each shot, normalize to 1920×1080, square pixels, and 30 fps with scale-to-fit and padding only when necessary.
 3. Use hard cuts for the live proof chain. A restrained six-frame dissolve is permitted only at 2:16 and 2:33, and it must occur **inside** the adjacent fixed shot durations rather than lengthening the master.
-4. Keep digital crops at or below the per-shot limits. Never crop out the context that proves which message, commit, or explanation is active.
+4. Keep digital crops at or below the per-shot limits. Never crop out the context that proves which message, commit, or request audit is active.
 5. Add only the submission-owned overlays defined for shots 8 and 9.
 6. Do not speed up character motion, tool execution, scrolling, or caption appearance. Cut waiting instead.
 
