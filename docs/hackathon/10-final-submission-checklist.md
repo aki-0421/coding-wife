@@ -23,8 +23,8 @@ last_verified: 2026-07-22 JST
 - [x] `v0.1.5` は現行3-model/UIの証拠ではなく、older previewとして区別する
 - [x] `gpt-5.6-sol` がmain coding sessionを担う
 - [x] `gpt-5.6-luna` がprivacy checkを通るlive completed main messageからcaption・Live2D expression/motion・任意TTSを作る
-- [x] Reachable commit verification後、native controllerが`gpt-5.6-terra`をbounded read-only evidenceでsilent background startする
-- [x] **Explain changes**はcached explanationをpresentするか同じrunning Terra jobをreuseし、最初のhandoffを開始しない
+- [x] Newly verified main-session commitでは、reachable commit verification後にnative controllerが`gpt-5.6-terra`をbounded read-only evidenceでsilent background startする
+- [x] **Explain changes**は、newly verified pathではcached explanationをpresentするか同じrunning Terra jobへjoinする。まだ生成されていないexisting commitではbounded `user_request`を開始でき、failure後はbounded `user_retry`を開始できる
 - [x] Chat UIは名前・時刻・成功checkを省き、failureだけを控えめな赤背景で示す
 - [x] Git UIはGitHub-style **Commit changes**としてcommit・file・`+/-`・unified diffへ情報を絞る
 - [x] Primary current full three-model judge targetはmacOS 14+ Apple Silicon
@@ -41,7 +41,7 @@ last_verified: 2026-07-22 JST
 - [ ] Frozen sourceから**現行full-flowを含むmacOS 14+ Apple Silicon release**を作る
 - [ ] Release artifactのSHA-256を計算し、download後のSHA-256と一致させる
 - [ ] Release notesへmacOS full-flow scope、Windows/Linux preview scope、TTS macOS-only、署名・notarization・既知制約を書く
-- [ ] macOS 14+ Apple Siliconのfresh installでSol → Luna → reachable commit verification → silent Terra background generation → Commit changes → explicit explanation presentationを確認する
+- [ ] macOS 14+ Apple Siliconのfresh installでSol → Luna → newly verified main-session commit → silent Terra background generation → Commit changes → explicit explanation presentationを確認する
 - [ ] Current macOS Apple Silicon judge release URLとSHA-256を最終提出資料へ記録する
 
 `v0.1.5`だけで提出を閉じないでください。Developer Toolsはjudgeがゼロからrebuildせず試せるpathを必要とするため、現行macOS 14+ Apple Silicon full-flow releaseがsource-only説明より優先です。Windows/Linux previewをfull three-model judge pathの代替にしません。
@@ -54,8 +54,8 @@ last_verified: 2026-07-22 JST
 - [ ] 少なくとも2回、eligible completed main messageごとのLuna captionとLive2D expression/motionを見せる
 - [ ] macOS-only TTSを見せる場合、設定済みにしてkey画面は録画しない
 - [ ] GitHub-style **Commit changes**でcommit、file、`+/-`、diffを見せる
-- [ ] Reachable commit verification後にTerraがsilent background startすることを説明する
-- [ ] **Explain changes**を押し、cached resultのpresentationまたは同じrunning jobのreuseを見せる。最初のTerra handoffとして説明しない
+- [ ] このfresh-commit demoでは、newly verified main-session commitのreachable verification後にTerraがsilent background startすることを説明する
+- [ ] このfresh-commit demoで**Explain changes**を押し、cached resultのpresentationまたは同じrunning jobへのjoinを見せる。今回のpathでは最初のTerra handoffとして説明しない
 - [ ] Codexをどう使って構築したかとhuman decisionsを音声で具体的に説明する
 - [ ] English audioが明瞭で、最終尺が**3:00未満**である
 - [ ] key、token、email、notification、personal path、private URLが映っていない
@@ -123,7 +123,7 @@ Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updat
 次がすべてYesなら提出完了です。
 
 - [ ] Current frozen macOS 14+ Apple Silicon releaseをjudgeがrebuildせず試せる
-- [ ] VideoでSol、Luna、silent automatic Terra generation、explicit presentationの役割とworking flowが分かる
+- [ ] Videoのfresh-commit demoでSol、Luna、silent automatic Terra generation、explicit presentationの役割とworking flowが分かる
 - [ ] Root READMEだけでsetup、testing、model integration、Codex contribution、limitationsが分かる
 - [ ] Session IDがformへ入っている
 - [ ] DevpostがSubmittedになっている
