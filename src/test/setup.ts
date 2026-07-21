@@ -48,6 +48,25 @@ Object.defineProperty(globalThis, "ResizeObserver", {
   value: TestResizeObserver,
 })
 
+Object.defineProperties(HTMLElement.prototype, {
+  scrollIntoView: {
+    configurable: true,
+    value() {},
+  },
+  setPointerCapture: {
+    configurable: true,
+    value() {},
+  },
+  releasePointerCapture: {
+    configurable: true,
+    value() {},
+  },
+  hasPointerCapture: {
+    configurable: true,
+    value: () => false,
+  },
+})
+
 Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
   configurable: true,
   value: () => null,
