@@ -1,10 +1,10 @@
 ---
 title: Git review runtime 実装・検証ガイド
 description: main Codex が作成した commit を read-only で観測し、commit evidence、lazy diff、app-owned 説明導線を安全に変更・検証するためのガイド。
-updated: 2026-07-21
+updated: 2026-07-22
 read_when:
   - Git observer、work unit correlation、commit evidence を実装または変更するとき。
-  - Commit tab の list、detail、filter、lazy diff、4 gate を接続または検証するとき。
+  - Commit tab の compact list、file filter、unified lazy diff、内部保持する4 gateを接続または検証するとき。
   - commit 説明 controller、pathless evidence、履歴永続化の境界を変更するとき。
 ---
 
@@ -46,8 +46,8 @@ commit、stage、restore、revert、compare checkpoint、branch/ref 更新、che
 | `src/lib/contracts/git-review.ts` | exact-key IPC parser、説明 request/state/presentation contract |
 | `src/features/git-review/transport.ts` | Tauri 境界と private native error の安全な正規化 |
 | `src/features/git-review/store.ts` | active view observation、filter、selection、stale response 破棄、lazy diff |
-| `src/features/git-review/EvidenceView.tsx` | list/detail layout、responsive drawer、controller state subscription |
-| `src/features/git-review/components/` | commit list、summary、changes、4 gate と evidence section |
+| `src/features/git-review/EvidenceView.tsx` | compact commit drawer、changes-only layout、controller state subscription |
+| `src/features/git-review/components/` | compact commit list、selected identity、file navigator、unified diff projection |
 
 ## native observer の不変条件
 
@@ -69,7 +69,9 @@ commit、stage、restore、revert、compare checkpoint、branch/ref 更新、che
 | `read_commit_diff_file` | 選択 file の sanitized diff | binary / oversize / invalid UTF-8 は状態だけ返す |
 | `prepare_commit_explanation_evidence` | pathless `CommitEvidenceV1` | relative path、diff content、absolute pathを含めない |
 
-Commit tab は読み取り専用 badge を常時表示する。restore、checkpoint、compare、revert、delete 等の mutation action を追加しない。list option は ArrowUp / ArrowDown で選択でき、840px未満では不透明な drawer に切り替える。
+Commit tabはbranch/HEAD/Fresh/観測理由・時刻/filter/read-only badgeと監査propertyを通常表示せず、changesを唯一の主面にする。restore、checkpoint、compare、revert、delete 等の mutation action を追加しない。commit listは常にcompact triggerから開くdrawerとし、optionはArrowUp / ArrowDownで選択する。
+
+detail取得後は先頭fileを自動選択し、その1 fileだけをlazy loadする。desktopはlocal path filter付きfile navigator、primary surfaceが760px以下または200% text zoom時はcompact file selectorを使う。frontend parserはhunk headerからold/new line numberを採番し、Git metadata headerを除外してaddition/deletion/contextをmarkerと背景の両方で表す。backend contract、HIST、4 gate、verification、decision、risk、skill auditの収集は削除しない。
 
 selection、filter、active workspace が変わった後に返った古い detail/diff は generation check で破棄する。view を離れても app-owned の説明生成自体は cancel しない。表示対象だけを現在の workspace generation と commit evidence ID でscopeする。
 
@@ -94,7 +96,7 @@ workspace history が writable でなければ、新しい observation/evidence 
 - `git.work_unit.observed`
 - `git.commit_evidence.recorded`
 
-native failure は `code`、`operation`、`recoverable`、`userMessageKey`、optional `detailRef` だけの envelope へ正規化する。raw error を UI、timeline、clipboardへ出さない。観測またはdiffが失敗しても、取得済みの commit evidence は閲覧可能なままにする。
+native failure は `code`、`operation`、`recoverable`、`userMessageKey`、optional `detailRef` だけの envelope へ正規化する。raw errorとinternal error codeを通常UI、timeline、clipboardへ出さない。観測またはdiffが失敗しても、取得済みの commit changes は閲覧可能なままにする。
 
 ## 検証
 
@@ -109,7 +111,7 @@ pnpm exec biome lint src/features/git-review src/lib/contracts/git-review.ts --e
 agent-docs lint
 ```
 
-Rust testは`/tmp`の使い捨てrepositoryを使い、実workspaceのindex/worktree/ref fingerprintが変化しないことを検証する。UI変更後はWebdriverIOで実Tauri windowを1470×836、1280×800、960×640にして操作し、list/detail、4 gate、file選択前後のlazy diff、filter、Arrow key、drawer、mutation action非露出、frontend/backend errorを確認する。
+Rust testは`/tmp`の使い捨てrepositoryを使い、実workspaceのindex/worktree/ref fingerprintが変化しないことを検証する。UI変更後はWebdriverIOで実Tauri windowを1470×836、1280×800、960×640にして操作し、compact commit drawer、selected identity、file path filter、最初の1 fileだけのlazy diff、old/new line number、hunk/addition/deletion/context、file keyboard移動、compact selector、mutation/internal property非露出、frontend/backend errorを確認する。
 
 ## 安全に変更するための注意
 

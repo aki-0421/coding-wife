@@ -1,7 +1,7 @@
 ---
 title: "GIT Gitレビュー観測要件定義"
 description: "main Codexが作るcommitをnative backendがread-only観測し、commit evidence、skill監査、説明導線を提供する。"
-updated: 2026-07-21
+updated: 2026-07-22
 read_when:
   - "Git observer、commit evidence、Commit tabを実装するとき。"
   - "commit skill注入、work unitとcommitの相関、native Git権限を検証するとき。"
@@ -15,7 +15,7 @@ read_when:
 | 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 2026-07-21 |
+| 最終レビュー日 | 2026-07-22 |
 
 ## 背景
 
@@ -29,7 +29,7 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 |---|---|
 | producerを一つにする | commitは`coding-wife-commit-work`を明示注入されたmain Codexだけが作り、native command surfaceにGit mutationが0件である |
 | 利用者変更を保護する | turn前から存在したstaged/unstaged/untrackedを観測・表示し、main skillが無関係な変更をcommitしない |
-| evidenceを確認可能にする | commit list、選択、metadata、sanitized diff、verification/decision/risk evidenceをread-only表示する |
+| evidenceを確認可能にする | GitHub commit changes型のcompact commit selector、selected identity、file tree、old/new line number付きsanitized unified diffをread-only表示する。監査propertyは収集しても通常UIへ表示しない |
 | 説明を安全に補う | verified commit後にredacted `CommitEvidenceV1`を隔離supportへ自動で渡してJA/EN説明を生成・cacheし、対象commitの「詳しく教えて」後だけcaptionへstreamする。UI request/retryもmainではなくapp controllerへ送る |
 
 ## スコープ
@@ -41,7 +41,7 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 | Read-only observation | HEAD、branch/detached、status、pre-existing change、commit list/metadata、diff、new commit detection |
 | Correlation | work unit、turn、source event、commit SHA、verification、decision、risk、skill injection auditのHIST相関 |
 | Main commit skill | app bundle内の`coding-wife-commit-work`、version/digest、各main turnへの明示注入 |
-| Commit evidence | list/select、metadata、file summary、sanitized lazy diff、gate evidence、empty/error/stale state |
+| Commit evidence | compact list/select、selected identity、file summary、path filter、1 fileずつのsanitized lazy unified diff、empty/error state。gate等は内部収集だけを維持 |
 | Commit explanation | verified commit trigger、redacted structured evidence、app-owned controller、isolated support、streamed caption、optional same-transcript TTS |
 
 ### 含めない
@@ -94,10 +94,10 @@ Commit画面は「アプリがcheckpointを作る場所」ではない。main Co
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 |
 |---|---|---|---|
-| `GIT-F-084` | Commit tabはcommit listとselectionをread-only表示する | current repositoryの観測済みcommitを新しい順で表示し、選択SHA、subject、author、authored time、parents、work unit相関を表示する。mutation button/shortcutが0件である | Approved |
-| `GIT-F-085` | 選択commitのdiffを安全に表示する | file change kindとline countを先に表示し、file diffをlazy loadする。binary/oversize/invalid UTF-8は本文を返さずtyped stateを表示し、repository外pathを開かない | Approved |
-| `GIT-F-086` | gateは観測evidenceとして表示する | Scope、Ownership、Verification、RiskをPass/Fail/Unknown/Needs reviewで表示し、source event ID、実行test、decision、known riskを参照できる。gateはnative commit可否を制御せず、main commitを後から評価する | Approved |
-| `GIT-F-087` | evidenceはHISTの確定状態だけを表示する | commit observation、skill audit、verification/decision/risk相関をappendして再読できた時だけPersisted表示にし、pending/invalid/oversizeはUnknownまたはUnavailableとする | Approved |
+| `GIT-F-084` | Commit tabはcompact commit listとselectionをread-only表示する | current repositoryの観測済みcommitを新しい順のdrawerで表示し、rowはsubject、short SHA、author、relative authored timeだけにする。selected headerは同identityと`N files changed +A −D`だけを示し、mutation button/shortcutが0件である | Approved |
+| `GIT-F-085` | 選択commitのdiffをGitHub型で安全に表示する | local path filter付きfile navigatorから先頭または選択した1 fileだけをlazy loadし、old/new line number、hunk、addition、deletion、contextをunified diff表示する。binary/oversize/invalid UTF-8は本文を返さずtyped stateを表示し、repository外pathを開かない | Approved |
+| `GIT-F-086` | gateは観測evidenceとして内部保持する | Scope、Ownership、Verification、Risk、reason、source、decision、known riskをHIST/detail contractで保持するが通常UIへ描画しない。gateはnative commit可否を制御しない | Approved |
+| `GIT-F-087` | evidenceはHISTの確定状態を内部で保持する | commit observation、skill audit、verification/decision/risk相関のappend/replayを維持するが、Persisted、producer、internal ID、duration、digest等を通常UIへ描画しない | Approved |
 | `GIT-F-088` | 非active panelはnative observationを開始しない | force-mountedだがhiddenのCommit tabはGit readを0件とし、active表示、明示refresh、terminal work unitだけがobserverを起動する | Approved |
 | `GIT-F-089` | 大規模repositoryでも段階表示する | 500 filesまたは50,000 changed linesまでsummaryを5秒以内に表示し、本文は1fileずつcancel可能にloadする | Approved |
 
@@ -183,7 +183,7 @@ restore SHA、branch name、restore confirmation、commit messageの入力欄は
 | 監査・ログ | observation、new commit correlation、request trigger、skill ID/version/digest/mode、controller statusを記録する。raw support transcriptは永続化しない |
 | 性能 | 500 files/50,000 lines summaryを5秒、説明の最初のcaptionを起動後3秒目標で表示する |
 | 信頼性・復旧 | observer failureはmainを止めずUnavailable、skill注入failureはturn前fail closed、support failureはcaption fallback |
-| アクセシビリティ | commit/gate/statusを色だけで表現せず、captionは音声設定に関係なく表示する |
+| アクセシビリティ | diffはold/new line gutterと`+/-` markerを持ち、icon-only actionはtooltip/accessible name/focusを維持する。captionは音声設定に関係なく表示する |
 | 多言語・地域 | UI/captionはja/en、commit messageとtechnical IDは原文表示する |
 
 ## 依存関係・前提
