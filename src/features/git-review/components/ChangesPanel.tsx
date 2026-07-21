@@ -78,6 +78,7 @@ function FileOptions({
           aria-current={
             selectedFileEvidenceId === file.fileEvidenceId ? "true" : undefined
           }
+          aria-label={`${file.relativePath} ${copy.fileStats(file.additions, file.deletions)}`}
           aria-selected={selectedFileEvidenceId === file.fileEvidenceId}
           className="flex min-h-11 w-full items-center gap-sm border-b border-divider px-sm py-xs text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-current:bg-selected-row"
           key={file.fileEvidenceId}
@@ -186,6 +187,10 @@ function DiffContent({
     >
       <div className="min-w-max py-xs font-mono text-code leading-relaxed text-code-text">
         {parsed.lines.map((line, index) => {
+          const positions = [
+            line.oldLine === null ? null : copy.oldLine(line.oldLine),
+            line.newLine === null ? null : copy.newLine(line.newLine),
+          ].filter((position): position is string => position !== null)
           const marker =
             line.kind === "addition"
               ? "+"
@@ -237,7 +242,13 @@ function DiffContent({
                 {marker}
               </span>
               <code className="whitespace-pre pr-md">
-                <span className="sr-only">{copy.diffKinds[line.kind]}: </span>
+                <span className="sr-only">
+                  {copy.diffKinds[line.kind]}
+                  {positions.length > 0
+                    ? `${copy.diffMetadataSeparator}${positions.join(copy.diffMetadataSeparator)}`
+                    : ""}
+                  :{" "}
+                </span>
                 {renderedText || " "}
               </code>
             </div>
@@ -264,7 +275,8 @@ export function ChangesPanel({
   const selectedIndex = detail.files.findIndex(
     (file) => file.fileEvidenceId === selectedFileEvidenceId,
   )
-  const selectedFile = selectedIndex < 0 ? null : detail.files[selectedIndex]
+  const selectedFile =
+    selectedIndex < 0 ? null : (detail.files[selectedIndex] ?? null)
   const normalizedFilter = filter.trim().toLocaleLowerCase()
   const filteredFiles = useMemo(
     () =>
@@ -416,6 +428,12 @@ export function ChangesPanel({
                   <span className="text-destructive">
                     −{selectedFile.deletions}
                   </span>
+                </span>
+                <span className="sr-only">
+                  {copy.fileStats(
+                    selectedFile.additions,
+                    selectedFile.deletions,
+                  )}
                 </span>
                 <Tooltip>
                   <TooltipTrigger asChild>

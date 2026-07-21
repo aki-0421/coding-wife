@@ -37,6 +37,7 @@ export interface GitReviewCopy {
   readonly selectFile: string
   readonly previousFile: string
   readonly nextFile: string
+  readonly fileStats: (additions: number, deletions: number) => string
   readonly collapseFile: string
   readonly expandFile: string
   readonly diffLoading: string
@@ -45,6 +46,9 @@ export interface GitReviewCopy {
   readonly diffEmpty: string
   readonly diffRenderLimit: string
   readonly noNewline: string
+  readonly oldLine: (line: number) => string
+  readonly newLine: (line: number) => string
+  readonly diffMetadataSeparator: string
   readonly diffKinds: {
     readonly hunk: string
     readonly context: string
@@ -97,6 +101,8 @@ const en: GitReviewCopy = {
   selectFile: "Select changed file",
   previousFile: "Previous changed file",
   nextFile: "Next changed file",
+  fileStats: (additions, deletions) =>
+    `${additions} ${additions === 1 ? "addition" : "additions"}, ${deletions} ${deletions === 1 ? "deletion" : "deletions"}`,
   collapseFile: "Collapse file diff",
   expandFile: "Expand file diff",
   diffLoading: "Loading file diff…",
@@ -105,6 +111,9 @@ const en: GitReviewCopy = {
   diffEmpty: "No text changes to display.",
   diffRenderLimit: "This diff is too large to render safely.",
   noNewline: "No newline at end of file",
+  oldLine: (line) => `old line ${line}`,
+  newLine: (line) => `new line ${line}`,
+  diffMetadataSeparator: ", ",
   diffKinds: {
     hunk: "Diff hunk",
     context: "Context line",
@@ -160,6 +169,7 @@ const ja: GitReviewCopy = {
   selectFile: "変更ファイルを選択",
   previousFile: "前の変更ファイル",
   nextFile: "次の変更ファイル",
+  fileStats: (additions, deletions) => `追加${additions}行、削除${deletions}行`,
   collapseFile: "ファイル差分を折りたたむ",
   expandFile: "ファイル差分を展開する",
   diffLoading: "ファイル差分を読み込んでいます…",
@@ -168,6 +178,9 @@ const ja: GitReviewCopy = {
   diffEmpty: "表示できるテキスト変更はありません。",
   diffRenderLimit: "差分が大きすぎるため安全に描画できません。",
   noNewline: "ファイル末尾に改行がありません",
+  oldLine: (line) => `変更前${line}行目`,
+  newLine: (line) => `変更後${line}行目`,
+  diffMetadataSeparator: "、",
   diffKinds: {
     hunk: "差分ハンク",
     context: "前後の行",

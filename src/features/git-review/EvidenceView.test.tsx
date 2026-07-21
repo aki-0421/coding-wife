@@ -197,14 +197,47 @@ describe("EvidenceView", () => {
     const hunk = container.querySelector('[data-diff-kind="hunk"]')
     const deletion = container.querySelector('[data-diff-kind="deletion"]')
     const additions = container.querySelectorAll('[data-diff-kind="addition"]')
+    const context = container.querySelector('[data-diff-kind="context"]')
+    expect(
+      screen.getByRole("option", {
+        name: "src/features/git-review/store.ts 286 additions, 451 deletions",
+      }),
+    ).toBeVisible()
     expect(hunk).toHaveAttribute("data-old-line", "")
     expect(deletion).toHaveAttribute("data-old-line", "21")
     expect(deletion).toHaveAttribute("data-new-line", "")
     expect(deletion).toHaveClass("bg-destructive/10")
+    expect(deletion).toHaveTextContent("Deleted line, old line 21:")
     expect(additions[0]).toHaveAttribute("data-new-line", "21")
     expect(additions[1]).toHaveAttribute("data-new-line", "22")
     expect(additions[0]).toHaveClass("bg-success/10")
+    expect(additions[0]).toHaveTextContent("Added line, new line 21:")
+    expect(context).toHaveTextContent("Context line, old line 22, new line 23:")
+    expect(
+      container.querySelector("[data-git-file-header] .sr-only"),
+    ).toHaveTextContent("286 additions, 451 deletions")
     expect(container.querySelector("[data-git-diff-scroll]")).not.toBeNull()
+  })
+
+  it("localizes accessible file stats and diff line positions", async () => {
+    const { container } = renderEvidence({ locale: "ja" })
+
+    expect(
+      await screen.findByRole("option", {
+        name: "src/features/git-review/store.ts 追加286行、削除451行",
+      }),
+    ).toBeVisible()
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-diff-kind="deletion"]'),
+      ).toHaveTextContent("削除された行、変更前21行目:"),
+    )
+    expect(
+      container.querySelector('[data-diff-kind="addition"]'),
+    ).toHaveTextContent("追加された行、変更後21行目:")
+    expect(
+      container.querySelector('[data-diff-kind="context"]'),
+    ).toHaveTextContent("前後の行、変更前22行目、変更後23行目:")
   })
 
   it("filters files locally and supports keyboard file navigation", async () => {
@@ -219,23 +252,23 @@ describe("EvidenceView", () => {
     await user.type(filter, "EvidenceView")
     expect(
       screen.getByRole("option", {
-        name: "src/features/git-review/EvidenceView.tsx",
+        name: /^src\/features\/git-review\/EvidenceView\.tsx /,
       }),
     ).toBeVisible()
     expect(
       screen.queryByRole("option", {
-        name: "src/features/git-review/store.ts",
+        name: /^src\/features\/git-review\/store\.ts /,
       }),
     ).not.toBeInTheDocument()
 
     await user.clear(filter)
     const first = screen.getByRole("option", {
-      name: "src/features/git-review/store.ts",
+      name: /^src\/features\/git-review\/store\.ts /,
     })
     first.focus()
     await user.keyboard("{ArrowDown}")
     const second = screen.getByRole("option", {
-      name: "src/features/git-review/EvidenceView.tsx",
+      name: /^src\/features\/git-review\/EvidenceView\.tsx /,
     })
     await waitFor(() => expect(second).toHaveAttribute("aria-selected", "true"))
     await waitFor(() =>
@@ -252,7 +285,9 @@ describe("EvidenceView", () => {
     renderEvidence()
 
     await user.click(
-      await screen.findByRole("option", { name: "docs/thinking/demo.png" }),
+      await screen.findByRole("option", {
+        name: /^docs\/thinking\/demo\.png /,
+      }),
     )
     expect(
       await screen.findByText("Binary file — preview unavailable."),
@@ -295,7 +330,9 @@ describe("EvidenceView", () => {
       renderEvidence({ transport })
 
       await user.click(
-        await screen.findByRole("option", { name: "docs/thinking/demo.png" }),
+        await screen.findByRole("option", {
+          name: /^docs\/thinking\/demo\.png /,
+        }),
       )
       expect(await screen.findByText(text)).toBeVisible()
       expect(screen.queryByText(/824,018 bytes/)).not.toBeInTheDocument()
@@ -324,7 +361,9 @@ describe("EvidenceView", () => {
     renderEvidence({ transport })
 
     await user.click(
-      await screen.findByRole("option", { name: "docs/thinking/demo.png" }),
+      await screen.findByRole("option", {
+        name: /^docs\/thinking\/demo\.png /,
+      }),
     )
     expect(
       await screen.findByText("This file diff could not be loaded."),
@@ -405,7 +444,7 @@ describe("EvidenceView", () => {
               schemaVersion: 1,
               items: [],
               nextCursor: "offset-50",
-            } as GitReviewResponseMap[K]
+            } as unknown as GitReviewResponseMap[K]
           }
         }
         return delegate.request(command, request)
