@@ -1,7 +1,7 @@
 ---
 title: "HIST アクティビティ履歴要件定義"
 description: "構造化イベントの追記保存、秘匿化、再構築、検索・削除、破損復旧を定義する。"
-updated: 2026-07-21
+updated: 2026-07-22
 read_when:
   - "SQLite schema、event timeline、crash recoveryを実装するとき。"
   - "保存対象、redaction、retention、query性能を検証するとき。"
@@ -95,7 +95,7 @@ read_when:
 | `HIST-F-054` | writerは一つのtransaction queueで順序を保つ | 1,000 event concurrent input testでsequence重複・欠番・partial payloadが0件になる | Approved | 非該当 |
 | `HIST-F-055` | appはevent schema versionを保持する | 各eventにinteger versionがあり、unknown future versionをraw表示せずUnsupported event placeholderとdiagnosticへ隔離する | Approved | 非該当 |
 | `HIST-F-056` | appはsupport利用を透明に記録する | support invocationごとにrole、trigger、model family、token usage、latency、statusを記録し、prompt/response本文を記録しない | Approved | 非該当 |
-| `HIST-F-057` | event表示時刻はlocaleへ適応する | 保存UTC値をja/en localeで表示し、timezone変更後も同一instantとsequenceを維持する | Approved | 非該当 |
+| `HIST-F-057` | event時刻はlocale非依存の正本として保存する | UTC値とsequenceを保存し、timezone変更後も同一instantと順序を維持する。S-002 Chatは会話と実行経過の視覚ノイズを減らすためmessage / operation rowへ時刻を描画せず、時刻が必要な監査・証拠surfaceだけでja/en localeへ適応して表示する | Approved | 非該当 |
 | `HIST-F-058` | app-private履歴のpermissionをfail closedにする | DB directory、DB/WAL/SHM、migration/recovery backupのowner-only permission適用に失敗するとwrite-readyで起動せず、既存dataを保持して構造化errorまたはread-only recoveryへ移行する | Approved | 非該当 |
 | `HIST-F-059` | appは履歴のdurabilityを実態どおり扱う | native SQLiteの`ready`、`read_only`、`recovery_required`と、browser demoの`ephemeral`を別状態として契約する。S-002 Chatには正常時のdurability badgeを表示せず、`read_only` / `recovery_required`だけを回復alertとして示す。browser runtimeはheaderのpreview表示、履歴の詳細状態はDiagnosticsを正本とし、`ephemeral`を`Persisted locally`または再起動後も残る履歴として表示しない | Approved | 非該当 |
 | `HIST-F-060` | 外部mutation producerはexact eventを事前検証する | native Git mutation producerを廃止したため使用しない | Deprecated | `HIST-F-061`へ置換 |
@@ -146,7 +146,7 @@ read_when:
 | 性能 | 100,000 eventでpage query p95 200ms、20,000 event rehydrate 3秒以下、1event 256KiB以下 |
 | 信頼性・復旧 | append-only、single writer、transaction migration、read-only recovery、exact replay only。履歴失敗時もGitを変更しない |
 | アクセシビリティ | semantic list/table、filter label、error heading、keyboard paginationを提供する。S-002 Chatの空状態には不要なfocus targetや読み上げを追加しない |
-| 多言語・地域 | app copy ja/en、UTC保存、locale表示、user/agent本文は翻訳しない |
+| 多言語・地域 | app copy ja/en、UTC保存、監査・証拠surfaceでのlocale表示、user/agent本文は翻訳しない。S-002 Chatのmessage / operation rowには時刻を描画しない |
 
 ## 依存関係・前提
 

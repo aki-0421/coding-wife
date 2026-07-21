@@ -1,7 +1,7 @@
 ---
 title: "S-002 コーディングワークスペース"
 description: "Codex main session、構造化tool event、意思決定、read-only Context、Live2D characterを一つの安全な作業面で扱う画面仕様。"
-updated: 2026-07-21
+updated: 2026-07-22
 read_when:
   - "Chat tab、composer、Codex event timeline、decision、Live2D characterを実装するとき。"
   - "S-002とWORK、CODE、SUP、GIT、HIST、LIVE、NARR、APP要件の対応を確認するとき。"
@@ -109,21 +109,21 @@ Chatは保存済みeventの監査一覧ではなく、現在の会話を理解�
 
 | event kind | compact表示 | 展開表示 | 主要action |
 |---|---|---|---|
-| User instruction | avatarなしのtext block、送信時刻 | attachment名、参照context version | copy |
-| Assistant commentary | plain text、phase label | related work unit / support result | copy |
-| Tool activity | icon、利用者が識別できる提供元と実tool名、目的またはtarget、running/result、duration | sanitized args summary、result/error category、detail ref | expand、copy summary |
+| User instruction | 右寄せの淡いtext block。名前、avatar、時刻なし | attachment名、参照context version | hover / focusで現れるicon-only copy |
+| Assistant commentary | 左寄せplain text。名前、avatar、時刻なし | related work unit / support result | hover / focusで現れるicon-only copy |
+| Tool activity | 種類別iconと実行したcommand/tool名だけのneutralな一行。成功check、status、provider、duration、時刻なし | sanitized args summary、result/error category、detail ref | expand、icon-only copy |
 | File change | create/update/delete、relative path、line count | redacted patch summary、ownership | Commit tabで確認 |
 | Verification | tool rowのtest/lint/build名、pass/fail、duration | command allowlist名、failure excerpt、artifact ref | evidenceを開く |
 | Decision / Approval | question、reason、impact、reversibility | options、Other、hold/interrupt/approve条件 | answer |
 | Error / Interrupted | code、影響、保持data、回復操作 | safe detail、retry condition、diagnostic ref | retry、modify、stop、diagnostic |
 
-MCP toolはApp Server itemの`server`と`tool`をredact・長さ制限したsemantic fieldへ分離し、compact rowを`提供元 · 実tool名 · 安全な対象要約 · 状態 · 所要時間 · 時刻`の順に構成する。内部item typeの`mcpToolCall`をtool名として表示しない。引数はtop-level scalarを最大4件まで一行要約し、`title`、`query`、`ref_id`等の人向けtargetを優先する。credential相当keyは値を常に`[redacted]`へ置換し、`code`、`script`、`expression`等のsource bodyは本文でなく文字数だけを示す。array/objectは内容を展開せず件数だけを示し、raw JSON、MCP result content、secret、absolute private pathをWebViewまたは履歴へ渡さない。commandとweb searchも同じsemantic tool statusへ正規化し、commandはredact済み一行command、web searchはredact済みqueryをtarget summaryにする。旧`code.item.status.changed` tool履歴は互換表示できるが、新規tool statusはprovider/tool/summary/durationを持つ`code.tool.status.changed`を正本にする。
+MCP toolはApp Server itemの`server`と`tool`をredact・長さ制限したsemantic fieldへ分離するが、compact rowは種類別iconと実`tool`名だけを表示する。command executionはredact済み一行command summaryを優先し、欠落時だけcommand名へfallbackする。web searchも種類別iconと実tool名だけを表示する。provider、引数要約、result、status、duration、時刻はcompact rowへ描画せず、sanitized detail内へ保持する。内部item typeの`mcpToolCall`をtool名として表示しない。引数はtop-level scalarを最大4件まで一行要約し、`title`、`query`、`ref_id`等の人向けtargetを優先する。credential相当keyは値を常に`[redacted]`へ置換し、`code`、`script`、`expression`等のsource bodyは本文でなく文字数だけを示す。array/objectは内容を展開せず件数だけを示し、raw JSON、MCP result content、secret、absolute private pathをWebViewまたは履歴へ渡さない。旧`code.item.status.changed` tool履歴は互換表示できるが、新規tool statusはprovider/tool/summary/durationを持つ`code.tool.status.changed`を正本にする。
 
 App Serverの`agentMessage.phase=commentary`はturn途中のassistant messageとして会話へ表示し、後続toolまたは最終回答を待つ。commentary itemの完了を最終Structured Output違反として`CODEX-TURN-INTERRUPTED`へ変換してはならない。`phase=final_answer`またはphaseなしの完了itemだけを最終回答として扱い、厳格検証済み`result.message`を会話の最後へ表示する。
 
 連続する同種tool eventは同一work unit内だけgroup化し、running数とterminal数を見出しへ出す。groupを閉じてもerror、decision、verification failureを隠さない。toolのstdout/stderr全文、hidden reasoning、secret、home directory、unredacted promptは表示・保存しない。
 
-timeline rendererは表示対象を`message`、`operation`、`intervention`の三つへ分類する。User / Assistantは会話本文を主役にし、tool / file / diff / plan / errorは一行summaryと展開可能なsanitized detail、decision / approvalは単独の介入surfaceとして描画する。completed operationは初期状態で閉じ、running、failed、interruptedは開く。展開前もkind、targetまたは結果、terminal state、error code、時刻を確認できなければならない。
+timeline rendererは表示対象を`message`、`operation`、`intervention`の三つへ分類する。User / Assistantは名前、avatar、時刻を置かず会話本文を主役にし、semantic roleとja/enのaccessible nameで種別を伝える。tool / file / diff / plan / errorは種類別iconと実行名の一行summary、展開可能なsanitized detail、decision / approvalは単独の介入surfaceとして描画する。completed operationはneutralかつ初期状態で閉じ、check、success色、`Completed / 完了`を表示しない。running、failed、interruptedは開き、failed operationだけrow全体をdestructive tokenの薄い背景にし、iconとscreen-reader用textでも失敗を伝える。
 
 表示対象eventが0件で回復alertもない場合、timeline領域にはplaceholder、見出し、説明、icon、枠、CTAを一切描画しない。last summaryのcard、見出し、説明、本文も描画しない。composerは通常位置に残し、初期focusもcomposerとする。
 
@@ -323,7 +323,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 
 - focus順はheaderのrepository / workspace / branch copy control、header tabs、new updates、events、decision、composer controls、Character controlsとする。空のChat timelineはfocus targetを追加しない。
 - timelineは`role=feed`相当を使う場合も追加eventごとに読み上げず、完了、decision、errorだけをlive regionへ要約する。
-- tool groupのcollapsed/expanded、running/failed、file create/update/deleteをtextでも示す。
+- tool groupのcollapsed/expandedはnative details semanticsで示し、runningは`aria-busy`、failedは種類icon、薄いdestructive背景、screen-reader用textで示す。成功operationへ状態textを追加しない。
 - decisionはheading、説明、option、Other、Hold/Interrupt/Approve、submitのDOM順とし、keyboardだけで完結する。
 - Live2D canvasはpresentation扱いとし、state、uncertainty、waiting、verificationをvisible HTML captionへ複製する。
 - Context conflictは手元draftを保持し、Reload/CancelのDOM順、section単位のfocus return、polite saved/assertive error regionをja/enで同等にする。

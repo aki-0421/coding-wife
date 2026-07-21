@@ -1,7 +1,7 @@
 ---
 title: "CODE Codexメインセッション要件定義"
 description: "固定GPT-5.6 SolによるApp Server会話、構造化イベント、判断・承認、停止・復旧を定義する。"
-updated: 2026-07-21
+updated: 2026-07-22
 read_when:
   - "Codex App Server supervisor、protocol adapter、Chat composerを実装するとき。"
   - "判断カード、approval、attachment、stop、reconnectを検証するとき。"
@@ -84,8 +84,8 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | `CODE-F-058` | 利用者はstreaming進捗を構造化eventで確認できる | plan、tool start/result、file change、diff、error、decision、approvalをversion付きpayloadとしてsequence順に表示する。`agentMessage.phase=commentary`の完了itemは途中経過としてredact・長さ制限して表示・保存し、Structured Output envelopeなら検証済み`result.message`だけを取り出す。commentaryを最終回答違反としてturn interruptしてはならない。`final_answer`またはphaseなしの完了itemだけを最終Structured Outputとして厳格検証し、検証・redactした`result.message`を会話の最後の可視出力にする。assistant deltaのJSON断片は表示・保存しない。terminal `completion`は順序と復旧の正本として保存してもChatへ描画せず、最終出力の代替にしない。再起動後も同じsemantic card、stable ID、順序へexactに再構築し、unknown versionまたはinvalid payloadはgeneric成功表示へ落とさずUnsupportedとしてfail closedにする | Approved | 非該当 |
-| `CODE-F-059` | tool実行はread-only eventとして表示される | MCPはredact済み`server`と実`tool`名、最大4件の安全なtop-level引数要約、状態、所要時間を表示し、内部型`mcpToolCall`をtool名として表示しない。`title`、`query`、`ref_id`など人が識別できるtargetを優先し、`code`、`script`、`expression`などのsource bodyは本文でなく文字数だけを表示する。commandはredact済み一行command、web searchはredact済みqueryを同じsemantic tool statusへ正規化する。raw引数JSON、MCP result content、credential値、absolute private pathをWebViewまたは履歴へ渡さず、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
-| `CODE-F-060` | 利用者は長いtool eventを展開・copyできる | 120文字超を一行ellipsisにし、keyboardで全文展開とcopyへ到達し、copy内容が表示全文と一致する | Approved | 非該当 |
+| `CODE-F-059` | tool実行はread-only eventとして表示される | compact rowはcommand/shell、file/read-write、web/browser、search、generic toolを区別するiconと実行名だけを表示する。command executionはredact済み一行command summaryを優先し欠落時だけcommand名へfallbackし、MCP/webは実`tool`名を表示する。provider、引数要約、result、status、所要時間、時刻はcompact rowへ描画せずsanitized detailへ保持し、内部型`mcpToolCall`をtool名として表示しない。成功時はcheck、success色、`Completed / 完了`を表示せずneutralに戻し、失敗時だけrow全体を薄いdestructive背景にしてiconとaccessible textでも伝える。raw引数JSON、MCP result content、credential値、absolute private pathをWebViewまたは履歴へ渡さず、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
+| `CODE-F-060` | 利用者は長いtool eventを展開・copyできる | 長い実行名を一行ellipsisにしてtooltipで全文へ到達でき、keyboardでsanitized detailの展開とcopyへ到達する。copyは文字labelを描画しないicon-only actionとし、通常は視覚的に隠すがrow hover、focus-within、button自身のfocus-visibleで表示し、ja/enの`aria-label`とtooltip、accessibleな成功・失敗通知を持つ。copy内容は展開した表示全文と一致する | Approved | 非該当 |
 | `CODE-F-061` | scroll中の利用者を自動で最下部へ戻さない | 利用者がbottomから48px超上へ移動中にeventが届いてもscroll位置を維持し、「最新へ」を表示する | Approved | 非該当 |
 | `CODE-F-062` | errorは成功と区別して回復操作を示す | error rowにcode、短い原因、影響、retry/modify/stop/detailsの利用可能操作を表示し、completionへ自動変換しない | Approved | 非該当 |
 
