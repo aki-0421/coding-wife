@@ -928,7 +928,6 @@ export function WorkspaceShell({
               copy={copy}
               draft={view.selectedDraft}
               history={view.history}
-              lastSummary={view.lastSummary}
               muted={view.muted}
               onAnswerApproval={view.answerApproval}
               onAnswerDecision={view.answerDecision}

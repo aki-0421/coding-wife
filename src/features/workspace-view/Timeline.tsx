@@ -4,23 +4,13 @@ import {
   CheckCircle2Icon,
   ChevronDownIcon,
   CircleXIcon,
-  ClipboardCheckIcon,
   CopyIcon,
   FileCode2Icon,
   GitCompareArrowsIcon,
-  HelpCircleIcon,
   ListChecksIcon,
-  MessageSquareTextIcon,
-  ShieldAlertIcon,
   TerminalSquareIcon,
 } from "lucide-react"
-import {
-  type KeyboardEvent,
-  type ReactNode,
-  useId,
-  useMemo,
-  useState,
-} from "react"
+import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,7 +44,6 @@ interface TimelineProps {
   readonly events: readonly ChatTimelineEvent[]
   readonly history: WorkspaceAdapterState["history"]
   readonly interruptAvailable: boolean
-  readonly lastSummary: WorkspaceAdapterState["lastSummary"]
   readonly pendingRequestIds: readonly string[]
   readonly onAnswerApproval: (
     request: PendingRequestView,
@@ -86,7 +75,6 @@ export type ChatTimelineEvent = Extract<
       | "decision"
       | "approval"
       | "error"
-      | "completion"
   }
 >
 
@@ -103,12 +91,12 @@ export function isChatTimelineEvent(
     case "decision":
     case "approval":
     case "error":
-    case "completion":
       return true
     case "history":
     case "status":
     case "thread":
     case "turn":
+    case "completion":
     case "request_resolved":
       return false
   }
@@ -201,12 +189,7 @@ function eventFailed(event: WorkspaceTimelineItem): boolean {
 }
 
 function eventCompleted(event: WorkspaceTimelineItem): boolean {
-  return (
-    event.status === "completed" ||
-    event.status === "done" ||
-    event.kind === "completion" ||
-    event.kind === "request_resolved"
-  )
+  return event.status === "completed" || event.status === "done"
 }
 
 function eventInterrupted(event: WorkspaceTimelineItem): boolean {
@@ -265,7 +248,7 @@ function eventSummary(
   }
 }
 
-function EventIcon({ event }: { readonly event: WorkspaceTimelineItem }) {
+function EventIcon({ event }: { readonly event: OperationTimelineEvent }) {
   switch (event.kind) {
     case "tool":
       return <TerminalSquareIcon aria-hidden="true" className="size-3" />
@@ -275,19 +258,8 @@ function EventIcon({ event }: { readonly event: WorkspaceTimelineItem }) {
       return <GitCompareArrowsIcon aria-hidden="true" className="size-3" />
     case "plan":
       return <ListChecksIcon aria-hidden="true" className="size-3" />
-    case "decision":
-      return <HelpCircleIcon aria-hidden="true" className="size-3" />
-    case "approval":
-      return <ShieldAlertIcon aria-hidden="true" className="size-3" />
-    case "completion":
-    case "request_resolved":
-      return <CheckCircle2Icon aria-hidden="true" className="size-3" />
     case "error":
       return <AlertTriangleIcon aria-hidden="true" className="size-3" />
-    case "history":
-      return <ClipboardCheckIcon aria-hidden="true" className="size-3" />
-    default:
-      return <ActivityIcon aria-hidden="true" className="size-3" />
   }
 }
 
@@ -700,11 +672,6 @@ type OperationTimelineEvent = Extract<
   }
 >
 
-type BoundaryTimelineEvent = Extract<
-  WorkspaceTimelineItem,
-  { readonly kind: "completion" }
->
-
 interface FormattedEventTime {
   readonly accessible: string
   readonly visible: string
@@ -1000,45 +967,6 @@ function OperationEventRow({
   )
 }
 
-function BoundaryEventRow({
-  copy,
-  event,
-  time,
-}: {
-  readonly copy: WorkspaceCopy
-  readonly event: BoundaryTimelineEvent
-  readonly time: FormattedEventTime
-}) {
-  return (
-    <article
-      aria-posinset={eventSequence(event)}
-      className="my-xs flex min-w-0 items-center gap-xs px-xs py-xs text-label"
-      data-event-id={eventId(event) ?? undefined}
-      data-event-kind={event.kind}
-      data-event-layout="boundary"
-      data-event-sequence={eventSequence(event)}
-    >
-      <span
-        className={cn(
-          "flex size-4 shrink-0 items-center justify-center",
-          eventFailed(event)
-            ? "text-destructive"
-            : eventCompleted(event)
-              ? "text-success"
-              : "text-muted-foreground",
-        )}
-      >
-        <EventIcon event={event} />
-      </span>
-      <span className="shrink-0 text-text-secondary">
-        {eventLabel(copy, event)}
-      </span>
-      <span aria-hidden="true" className="h-px min-w-sm flex-1 bg-divider/70" />
-      <EventTime occurredAt={event.occurredAt} time={time} />
-    </article>
-  )
-}
-
 function TimelineEventRow({
   activePendingIds,
   copy,
@@ -1069,8 +997,6 @@ function TimelineEventRow({
     case "diff":
     case "error":
       return <OperationEventRow copy={copy} event={event} time={time} />
-    case "completion":
-      return <BoundaryEventRow copy={copy} event={event} time={time} />
     case "decision":
     case "approval":
       return (
@@ -1102,14 +1028,12 @@ export function Timeline({
   events,
   history,
   interruptAvailable,
-  lastSummary,
   pendingRequestIds,
   onAnswerApproval,
   onAnswerDecision,
   onInterrupt,
   onOpenDiagnostics,
 }: TimelineProps) {
-  const summaryHeadingId = useId()
   const historyUnavailable =
     history.mode === "read_only" || history.mode === "recovery_required"
   const activePendingIds = useMemo(
@@ -1125,40 +1049,6 @@ export function Timeline({
         >
           {compactStatus}
         </div>
-      ) : null}
-
-      {lastSummary !== null &&
-      lastSummary !== undefined &&
-      lastSummary.text.trim().length > 0 ? (
-        <section
-          aria-labelledby={summaryHeadingId}
-          className="mb-md rounded-panel border border-divider bg-surface px-md py-sm shadow-sm"
-          data-last-summary=""
-        >
-          <div className="flex items-start gap-sm">
-            <MessageSquareTextIcon
-              aria-hidden="true"
-              className="mt-xxs size-4 shrink-0 text-muted-foreground"
-            />
-            <div className="min-w-0">
-              <h3
-                className="m-0 text-title text-text-strong"
-                id={summaryHeadingId}
-              >
-                {copy.lastSummaryTitle}
-              </h3>
-              <p className="m-0 mt-xxs text-caption text-muted-foreground">
-                {copy.lastSummaryDescription}
-              </p>
-              <p
-                className="m-0 mt-sm whitespace-pre-wrap break-words text-body text-foreground [overflow-wrap:anywhere]"
-                data-last-summary-text=""
-              >
-                {lastSummary.text}
-              </p>
-            </div>
-          </div>
-        </section>
       ) : null}
 
       {historyUnavailable ? (

@@ -38,7 +38,6 @@ interface ChatViewProps {
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
   readonly history: WorkspaceAdapterState["history"]
-  readonly lastSummary: WorkspaceAdapterState["lastSummary"]
   readonly muted: boolean
   readonly reducedMotion: boolean
   readonly readiness: WorkspaceCodexState["readiness"]
@@ -176,7 +175,6 @@ export function ChatView({
   copy,
   draft,
   history,
-  lastSummary,
   muted,
   reducedMotion,
   readiness,
@@ -448,7 +446,6 @@ export function ChatView({
               events={visibleTimeline}
               history={history}
               interruptAvailable={turnState === "running"}
-              lastSummary={lastSummary}
               onAnswerApproval={onAnswerApproval}
               onAnswerDecision={onAnswerDecision}
               onInterrupt={onStop}

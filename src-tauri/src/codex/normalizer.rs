@@ -13,7 +13,6 @@ use super::types::{
 };
 
 const MAX_EVENT_BYTES: usize = 256 * 1024;
-const MAX_DELTA_BYTES: usize = 8 * 1024;
 const MAX_TOOL_EXCERPT_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
@@ -284,16 +283,11 @@ impl EventNormalizer {
                 }
             }
             "item/agentMessage/delta" => {
-                let item_id =
+                // Structured-output deltas are JSON envelope fragments; publish only the
+                // validated message from item/completed.
+                let _item_id =
                     string_at(params, &["itemId"]).ok_or(NormalizeError::InvalidParams)?;
-                let delta = string_at(params, &["delta"]).ok_or(NormalizeError::InvalidParams)?;
-                let item_handle = self.item_handle(item_id);
-                outcome
-                    .events
-                    .push(self.event(CodexEventPayload::AgentMessageDelta {
-                        item_handle,
-                        delta: redact_text(delta, Some(&self.workspace_root), MAX_DELTA_BYTES),
-                    })?);
+                let _delta = string_at(params, &["delta"]).ok_or(NormalizeError::InvalidParams)?;
             }
             "turn/plan/updated" => {
                 let step_count = params
@@ -576,6 +570,40 @@ mod tests {
         assert!(outcome.decision_violation);
         assert!(encoded.contains("CODEX-DECISION-OUTPUT-INVALID"));
         assert!(!encoded.contains("Approve this request"));
+    }
+
+    #[test]
+    fn structured_output_deltas_are_not_rendered_and_result_boolean_is_accepted() {
+        let mut normalizer =
+            EventNormalizer::new("workspace-1".to_owned(), PathBuf::from("/workspace"), 1);
+        let delta = normalizer
+            .normalize(
+                "item/agentMessage/delta",
+                &json!({
+                    "itemId": "raw-item-id",
+                    "delta": r#"{"allowFreeform":true,"kind":"result""#
+                }),
+                100,
+            )
+            .expect("delta");
+        assert!(delta.events.is_empty());
+
+        let completed = normalizer
+            .normalize(
+                "item/completed",
+                &json!({"item": {
+                    "id": "raw-item-id",
+                    "type": "agentMessage",
+                    "text": r#"{"schemaVersion":1,"kind":"result","message":"リポジトリを確認します。","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":true}"#
+                }}),
+                200,
+            )
+            .expect("completed");
+        assert!(!completed.decision_violation);
+        assert_eq!(completed.events.len(), 1);
+        let encoded = serde_json::to_string(&completed.events).expect("serialize");
+        assert!(encoded.contains("リポジトリを確認します。"));
+        assert!(!encoded.contains("allowFreeform"));
     }
 
     #[test]

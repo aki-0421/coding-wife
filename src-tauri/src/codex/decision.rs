@@ -354,7 +354,7 @@ pub fn parse_completed_output(
                 || !output.question.is_null()
                 || !output.options.is_null()
                 || !output.context.is_null()
-                || !output.allow_freeform.is_null()
+                || !(output.allow_freeform.is_null() || output.allow_freeform.is_boolean())
             {
                 return Err(DecisionOutputError::Invalid);
             }
@@ -628,17 +628,21 @@ mod tests {
 
     #[test]
     fn exact_result_and_decision_are_accepted() {
-        let result = parse_completed_output(
-            r#"{"schemaVersion":1,"kind":"result","message":"Done","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":null}"#,
-            Path::new("/workspace"),
-        )
-        .expect("result");
-        assert_eq!(
-            result,
-            DecisionOutput::Result {
-                message: "Done".to_owned()
-            }
-        );
+        for allow_freeform in ["null", "false", "true"] {
+            let result = parse_completed_output(
+                &format!(
+                    r#"{{"schemaVersion":1,"kind":"result","message":"Done","decisionId":null,"question":null,"options":null,"context":null,"allowFreeform":{allow_freeform}}}"#
+                ),
+                Path::new("/workspace"),
+            )
+            .expect("result");
+            assert_eq!(
+                result,
+                DecisionOutput::Result {
+                    message: "Done".to_owned()
+                }
+            );
+        }
 
         let decision =
             parse_completed_output(&decision_json(), Path::new("/workspace")).expect("decision");

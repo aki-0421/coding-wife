@@ -27,7 +27,7 @@ read_when:
 8. workspaceの絶対pathと明示Codex binary pathはapp-private recordにだけ保存する。WebViewはworkspaceについてnative folder pickerが返すopaque workspace ID、alias、boolean preflightだけを受け取る。Codex pathだけは利用者が設定formへ入力した値をbounded requestとしてRustへ渡せるが、canonical pathをresponse、snapshot、history、通常logへ返さない。
 9. thread開始・再開はresponseのmodel、canonical cwd、thread cwd、approval policy、sandbox type、ephemeral=falseを全て照合する。不足・不一致時はhandleを保存せずchildを停止する。
 10. pending responseはresponse variantと値をimmutable recordに対して検証してからatomicに消費する。invalid responseはpendingを残し、TypeScript側もpending kindとresponse typeを一致させてからsingle-claimする。
-11. native RUIが使えない場合のassistant完了文は`result`または`decision_request`のJSON全体だけを受理する。Codexへ渡す`outputSchema`はStructured Outputsが受理する単一root objectとし、全fieldをrequiredにしたうえでvariant固有fieldをnullableにする。`result`ではdecision固有fieldがすべてnull、`decision_request`では必要な値がすべてnon-nullであることをRustでも再検証する。root `oneOf`、自由文、freeform、approval代替、不正optionは受理せずactive turnをinterruptする。
+11. native RUIが使えない場合のassistant完了文は`result`または`decision_request`のJSON全体だけを受理する。Codexへ渡す`outputSchema`はStructured Outputsが受理する単一root objectとし、全fieldをrequiredにしたうえでvariant固有fieldをnullableにする。`result`では`decisionId`、`question`、`options`、`context`をnullに限定し、booleanまたはnullの`allowFreeform`はdecisionへ影響しない互換fieldとして無視する。`decision_request`では必要な値がすべてnon-nullかつ`allowFreeform=false`であることをRustでも再検証する。Structured Outputのassistant deltaはJSON envelopeのtransport断片なのでWebView eventへ出さず、完了後に検証・redactした`result.message`だけを会話へ出す。root `oneOf`、自由文、freeform decision、approval代替、不正optionは受理せずactive turnをinterruptする。
 12. fallback decisionはnative server request ledgerへ入れず、workspace、generation、source thread/turn、元のreasoning effortへ束縛した専用ledgerで管理する。source turnの正常完了後だけ、opaque decision handleとoption IDだけを含む固定JSONを同じthreadの新しいturnへ送る。invalid optionはcardを残し、同時応答は1件だけを開始し、開始失敗やchild crash後に自動再送しない。
 13. binary discovery、version、schema、identity、capability probeのいずれかが失敗した時点で、以前のbinary/schema cacheとdiagnostic上のversion、hash、fingerprint、capability/account証跡を一括消去し、active childを停止する。次のconnectは必ず新しいdiscoveryとprobeから始める。connectionまたはauth/model handshakeだけの失敗では、metadata identityが一致するbinary/schema evidenceを再利用できる。
 14. public textはfield別に検証する。identifier/aliasはsingle-line、prompt/assistant/tool excerpt/effect/evidenceは正規化済み`\n`と`\t`だけをcontrol例外として許可し、NUL、その他control、secret、private pathを拒否する。RustとTypeScriptはUnicode scalarで同じ上限を数える。
@@ -83,7 +83,7 @@ public `WorkspaceRegistration`にraw pathを追加してはならない。`Pendi
 | thread           | Codex supervisor                          | workspace activationごとにconnect後、compositionが開始した所有threadを再利用し、所有handleが無い時だけ1件開始する。他clientの一覧結果を自動採用しない        |
 | turn受理         | `codex_turn_start` response               | responseを受け取った後だけdraft clearをUIへ返す。validation、connect、thread、transport、受理拒否ではdraftとattachmentを保持し、安全なerror codeを表示する      |
 | live state       | generation別`CodexSessionStore`           | workspace ID、generation、sequenceを全て照合し、旧workspaceまたは旧generation eventを現在表示へ混ぜない                                                      |
-| durable timeline | workspace history writer                  | CodexEventをallowlist済みsemantic eventへ投影してから追記する。deltaは表示用にcoalesceし、completed/error/decision/approval/terminalを永続正本にする         |
+| durable timeline | workspace history writer                  | CodexEventをallowlist済みsemantic eventへ投影してから追記する。Structured Outputのassistant deltaは破棄し、検証済みcompleted message、error、decision、approval、terminalを永続正本にする |
 | pending response | `CodexSessionClient`のsingle-claim ledger | approval、native user input、fallback decisionをkind一致で1回だけ応答する。unknown/invalidは操作UIを出さずfail closedにする                                  |
 | stop/recovery    | supervisorのinterruptとterminal event     | Stop操作から1秒以内にinterrupt requestを開始し、5秒でackが無ければ明示errorにする。ackだけでterminalにせず、crash/EOFはInterruptedとして保持し自動再送しない |
 
@@ -96,7 +96,7 @@ window focusとSendはどちらもrepository healthを再確認できるが、�
 UI/HISTへ渡すCodex eventは、少なくとも次へ分類する。
 
 - thread/turn status: idle、running、waiting、completed、failed、interrupted。
-- assistant: streaming deltaはmemory上でitem単位に連結し、completed textを永続化する。
+- assistant: Structured Outputのstreaming deltaはJSON envelope断片として破棄し、検証・redact済みcompleted `result.message`だけを表示・永続化する。decision requestはassistant本文を作らずdecision cardだけを作る。
 - `userMessage`と`agentMessage`の内部item lifecycleは監査用HISTへ保存するが、accepted user行とassistant行に加えて重複するアクティビティ行を表示しない。特にturn完了後に内部`agentMessage: running`を残してはならない。
 - plan、tool、file、diff: raw command/stdout/stderr/pathを出さず、件数、sanitized excerpt、path alias、change kind、detail refだけを使う。
 - decision/approval: 検証済みquestion/optionsまたはversioned approval contextとpending handleだけを使う。
@@ -171,11 +171,11 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | `src-tauri/src/codex/binary.rs`       | binary discovery、canonical実体検査、hash、同じbinaryによるschema probe                 |
 | `jsonl.rs`                            | incremental framing、UTF-8、line/buffer上限                                             |
 | `rpc.rs`                              | request ID相関、timeout、server request/notification signal                             |
-| `protocol.rs`                         | 使用するApp Server subset、固定outbound parameter、model gate                           |
-| `decision.rs`                         | 完了assistant JSONのexact parse、context-bound fallback decision ledgerとsingle-claim   |
+| `protocol.rs`                         | 使用するApp Server subset、固定outbound parameter、decision output schema、model gate   |
+| `decision.rs`                         | 完了assistant JSONのvariant検証、context-bound fallback decision ledgerとsingle-claim    |
 | `process.rs`                          | 子process、環境allowlist、redacted stderr ring、5秒以内の段階的終了                     |
 | `requests.rs`                         | approval/RUI exact validation、duplicate request ledger                                 |
-| `normalizer.rs`                       | opaque handle、redaction済みCodexEventとDomainEvent                                     |
+| `normalizer.rs`                       | Structured Output deltaの破棄、opaque handle、redaction済みCodexEventとDomainEvent       |
 | `supervisor.rs`                       | handshake、thread/turn/review、single active turn、restart budget                       |
 | `support.rs`                          | support公開contract、single-use explain turn、strict output/event policy、fallback      |
 | `support_isolation.rs`                | exact release/schema検証、native sandbox・mock wire・malicious canary preflight         |
@@ -205,6 +205,8 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | `src/test/fixtures/codex-attachments.v1.json`             | absolute pathを含まないattachment public contract fixture            |
 
 `CodexEvent`はbase fieldだけでなくvariant payloadもcamelCaseでserializeする。Rust round-tripとTypeScript parser testが同じfixtureを読むため、一方だけのfield名変更はgateで失敗する。
+
+decision envelopeまたはassistant event正規化を変更した時は、`cargo test --manifest-path src-tauri/Cargo.toml codex::decision::tests`と`cargo test --manifest-path src-tauri/Cargo.toml codex::normalizer::tests`を実行する。前者は`result`互換fieldとdecision requestのfail-closed検証、後者はJSON delta非公開、完了messageのredaction、invalid outputのinterrupt要求を確認する。output schemaを変更した時は`cargo test --manifest-path src-tauri/Cargo.toml codex::protocol::tests::decision_output_schema_uses_a_structured_outputs_root_object`も実行し、単一root objectとrequired field契約を確認する。
 
 ## Fake App Server
 

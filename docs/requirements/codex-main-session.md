@@ -1,7 +1,7 @@
 ---
 title: "CODE Codexメインセッション要件定義"
 description: "固定GPT-5.6 SolによるApp Server会話、構造化イベント、判断・承認、停止・復旧を定義する。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "Codex App Server supervisor、protocol adapter、Chat composerを実装するとき。"
   - "判断カード、approval、attachment、stop、reconnectを検証するとき。"
@@ -15,7 +15,7 @@ read_when:
 | 状態 | Approved |
 | 仕様責任者 | プロダクトオーナー |
 | 作成日 | 2026-07-18 |
-| 最終レビュー日 | 2026-07-18 |
+| 最終レビュー日 | 2026-07-21 |
 
 ## 背景
 
@@ -38,7 +38,7 @@ read_when:
 | App Server | user-installed Codexのstdio lifecycle、initialize、capability detection |
 | Main model | `gpt-5.6-sol`固定、supported reasoning effort |
 | Composer | multiline prompt、file/image、read-only context、Command+Enter、stop |
-| Timeline | plan、assistant、tool、file、error、decision、completion event |
+| Timeline | plan、assistant、tool、file、error、decision eventの会話向けprojection |
 | Commit interception | normalized Git commit command terminal、read-only SHA verification、app-owned explanation handoff |
 | Human input | structured decision、approval、Other、hold、interrupt、fallback |
 | Recovery | auth/model/process failure、reconnect、no automatic replay |
@@ -83,7 +83,7 @@ read_when:
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `CODE-F-058` | 利用者はstreaming進捗を構造化eventで確認できる | plan、assistant text、tool start/result、file change、diff、error、decision、approval、completionをversion付きpayloadとしてsequence順に表示・保存し、再起動後も同じsemantic card、stable ID、順序へexactに再構築する。unknown versionまたはinvalid payloadはgeneric成功表示へ落とさずUnsupportedとしてfail closedにする | Approved | 非該当 |
+| `CODE-F-058` | 利用者はstreaming進捗を構造化eventで確認できる | plan、tool start/result、file change、diff、error、decision、approvalをversion付きpayloadとしてsequence順に表示する。assistant本文はStructured Output envelopeのstreaming JSON断片を表示・保存せず、完了時に検証・redactした`result.message`だけをsemantic eventとして表示・保存し、会話の最後の可視出力にする。terminal `completion`は順序と復旧の正本として保存してもChatへ描画せず、最終出力の代替にしない。再起動後も同じsemantic card、stable ID、順序へexactに再構築し、unknown versionまたはinvalid payloadはgeneric成功表示へ落とさずUnsupportedとしてfail closedにする | Approved | 非該当 |
 | `CODE-F-059` | tool実行はread-only eventとして表示される | command summaryをBash/tool rowとcode chipで表示し、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
 | `CODE-F-060` | 利用者は長いtool eventを展開・copyできる | 120文字超を一行ellipsisにし、keyboardで全文展開とcopyへ到達し、copy内容が表示全文と一致する | Approved | 非該当 |
 | `CODE-F-061` | scroll中の利用者を自動で最下部へ戻さない | 利用者がbottomから48px超上へ移動中にeventが届いてもscroll位置を維持し、「最新へ」を表示する | Approved | 非該当 |
@@ -97,7 +97,7 @@ read_when:
 | `CODE-F-064` | 利用者は既定選択肢以外を入力できる | Otherを選ぶと1〜2,000文字の入力欄が開き、送信またはcancelまでcardと入力を保持する | Approved | 非該当 |
 | `CODE-F-065` | 利用者はdecisionを保留またはturnを中断できる | Holdは回答を送らずwaiting状態を維持し、Interruptは確認後にturn interruptを要求する | Approved | 非該当 |
 | `CODE-F-066` | 利用者はapproval対象を確認して許可・拒否できる | `item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/permissions/requestApproval`だけをoperation、scope、対象path/host、risk、可逆性、推奨付きcardへ正規化し、Approve once、Reject、Stopを元request IDへ1回だけ返す。未知methodは許可せずBlockedにする | Approved | 非該当 |
-| `CODE-F-067` | experimental user-input APIがない時も質問を失わない | initializeでexperimental APIを明示交渉し、`item/tool/requestUserInput`がない場合は通常assistant出力のversion付きdecision schemaだけを同じcardへ正規化し、schema不正や自由文だけの曖昧なapprovalは回答UIにせず安全に停止する | Approved | 非該当 |
+| `CODE-F-067` | experimental user-input APIがない時も質問を失わない | initializeでexperimental APIを明示交渉し、`item/tool/requestUserInput`がない場合は通常assistant出力のversion付きdecision schemaだけを同じcardへ正規化する。`result`では`decisionId`、`question`、`options`、`context`をnullに限定し、decisionに影響しないbooleanの`allowFreeform`は無視して`message`を受理する。`decision_request`では全decision fieldと`allowFreeform=false`を厳格検証し、schema不正や自由文だけの曖昧なapprovalは回答UIにせず安全に停止する | Approved | 非該当 |
 | `CODE-F-068` | UIはキャラクターの感情で回答を誘導しない | option順、推奨根拠、riskを文字で示し、Live2D表情・音声を選択肢の有利不利に対応させない | Approved | 非該当 |
 
 ### Attachment・context・停止・復旧

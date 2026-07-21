@@ -71,10 +71,7 @@ function safeErrorCode(error: unknown, fallback: string): string {
   ) {
     return error.code
   }
-  if (
-    error instanceof Error &&
-    safeErrorCodePattern.test(error.message)
-  ) {
+  if (error instanceof Error && safeErrorCodePattern.test(error.message)) {
     return error.message
   }
   return fallback
@@ -288,9 +285,6 @@ export function useWorkspaceViewModel(
   const [pendingWorkspaceTransition, setPendingWorkspaceTransition] =
     useState<PendingWorkspaceTransition | null>(null)
   const [timeline, setTimeline] = useState<readonly WorkspaceTimelineItem[]>([])
-  const [lastSummary, setLastSummary] = useState<NonNullable<
-    WorkspaceAdapterState["lastSummary"]
-  > | null>(null)
   const [timelineAnchor, setTimelineAnchor] = useState<NonNullable<
     WorkspaceAdapterState["timelineAnchor"]
   > | null>(null)
@@ -331,7 +325,6 @@ export function useWorkspaceViewModel(
     setProjects(state.projects ?? projectsForWorkspaces(state.workspaces))
     setWorkspaces(state.workspaces)
     setTimeline(state.timeline)
-    setLastSummary(state.lastSummary ?? null)
     setTimelineAnchor(state.timelineAnchor ?? null)
     setNextBeforeSequence(state.nextBeforeSequence ?? null)
     setHistory(state.history)
@@ -1549,7 +1542,6 @@ export function useWorkspaceViewModel(
     projects,
     history,
     initializeProjectGit,
-    lastSummary,
     recheckSelectedWorkspace,
     repairSelectedWorkspace,
     confirmWorkspaceTransition,

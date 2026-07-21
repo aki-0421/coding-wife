@@ -122,9 +122,6 @@ const en = {
   runtimeErrorTitle: "The local runtime could not be reached",
   retry: "Retry",
   diagnostics: "Diagnostics",
-  lastSummaryTitle: "Last session summary",
-  lastSummaryDescription:
-    "Restored from this workspace's redacted local history.",
   historyUnavailable: "History requires recovery",
   timelineEvent: {
     kind: {
@@ -601,9 +598,6 @@ const ja: typeof en = {
   runtimeErrorTitle: "ローカル実行環境へ接続できませんでした",
   retry: "再試行",
   diagnostics: "診断",
-  lastSummaryTitle: "前回セッションの要約",
-  lastSummaryDescription:
-    "このワークスペースの秘匿化済みローカル履歴から復元しました。",
   historyUnavailable: "履歴の復旧が必要です",
   timelineEvent: {
     kind: {

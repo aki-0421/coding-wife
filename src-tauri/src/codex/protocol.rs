@@ -434,8 +434,14 @@ pub fn decision_output_schema() -> Value {
             "schemaVersion": {"type": "integer", "enum": [1]},
             "kind": {"type": "string", "enum": ["result", "decision_request"]},
             "message": {"type": "string"},
-            "decisionId": {"type": ["string", "null"]},
-            "question": {"type": ["string", "null"]},
+            "decisionId": {
+                "type": ["string", "null"],
+                "description": "Use null for result; provide a stable ID for decision_request."
+            },
+            "question": {
+                "type": ["string", "null"],
+                "description": "Use null for result; provide the user question for decision_request."
+            },
             "options": {
                 "type": ["array", "null"],
                 "items": {
@@ -495,7 +501,10 @@ pub fn decision_output_schema() -> Value {
                     {"type": "null"}
                 ]
             },
-            "allowFreeform": {"type": ["boolean", "null"]}
+            "allowFreeform": {
+                "type": ["boolean", "null"],
+                "description": "Use null for result and false for decision_request."
+            }
         }
     })
 }
@@ -910,6 +919,10 @@ mod tests {
         assert_eq!(
             schema["properties"]["decisionId"]["type"],
             json!(["string", "null"])
+        );
+        assert_eq!(
+            schema["properties"]["allowFreeform"]["description"],
+            "Use null for result and false for decision_request."
         );
         assert_eq!(schema["required"].as_array().map(Vec::len), Some(8));
     }

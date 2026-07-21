@@ -228,9 +228,7 @@ describe("useWorkspaceViewModel workspace transitions", () => {
         code: "CODEX-TURN-PREFLIGHT-BLOCKED",
       }),
     )
-    const { result } = renderHook(() =>
-      useWorkspaceViewModel(fixture.adapter),
-    )
+    const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
     await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
 
     await act(async () => {
@@ -250,9 +248,7 @@ describe("useWorkspaceViewModel workspace transitions", () => {
     fixture.sendTurn.mockRejectedValueOnce(
       new Error("/Users/private/.codex/auth.json"),
     )
-    const { result } = renderHook(() =>
-      useWorkspaceViewModel(fixture.adapter),
-    )
+    const { result } = renderHook(() => useWorkspaceViewModel(fixture.adapter))
     await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
 
     await act(async () => {
@@ -266,12 +262,6 @@ describe("useWorkspaceViewModel workspace transitions", () => {
   it("rechecks the active repository on window focus and restores native anchor state", async () => {
     const initial: WorkspaceAdapterState = {
       ...state(),
-      lastSummary: {
-        eventId: "event-summary",
-        sequence: 8,
-        text: "Workspace summary",
-        updatedAt: "2026-07-18T00:01:00.000Z",
-      },
       timelineAnchor: {
         eventId: "event-anchor",
         sequence: 7,
@@ -300,7 +290,6 @@ describe("useWorkspaceViewModel workspace transitions", () => {
     }
     const { result } = renderHook(() => useWorkspaceViewModel(adapter))
     await waitFor(() => expect(result.current.adapterStatus).toBe("ready"))
-    expect(result.current.lastSummary?.text).toBe("Workspace summary")
     expect(result.current.timelineAnchor).toMatchObject({
       eventId: "event-anchor",
       sequence: 7,

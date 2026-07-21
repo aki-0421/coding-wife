@@ -33,7 +33,7 @@ status: "Approved"
 | 対象 | 内容 |
 |---|---|
 | Main session | Codex App Serverのinitialize、thread、turn、stop、reconnect、resume |
-| Timeline | user/assistant text、plan/tool、file/diff、decision/approval、error、completionの会話向けprojection |
+| Timeline | user/assistant text、plan/tool、file/diff、decision/approval、errorの会話向けprojection |
 | Composer | multiline指示、attachment、project context参照、reasoning effort、send、stop |
 | Decision | 選択肢、自由入力、保留、中断、明示承認、理由・影響・可逆性 |
 | Character | default/custom Live2D、状態表現、mute、visible caption、static/text fallback |
@@ -60,7 +60,7 @@ status: "Approved"
 | 正常完了 | validated terminal work-unit eventを1回だけread-only Git observerへ渡し、before/after HEAD、new commit、verification/decision/risk相関をHISTへ追記する。success commit commandと新しいSHAを検証できた時はapp-owned explanation controllerへ`auto_verified_commit`を渡し、main conversationを変更しない |
 | キャンセル |未送信draftとtimeline位置を維持する。running turnのStopは別操作として確認する |
 | 閉じる操作 | [共通close契約](desktop-common-specification.md#windowとtitlebar)に従う |
-| 再表示 | Project ID、workspace、tab、draft、last summary、timeline anchor ID/sequence/offset、repository health、unanswered decisionをworkspace storeから、app-global character選択をcharacter library storeから復元する |
+| 再表示 | Project ID、workspace、tab、draft、timeline anchor ID/sequence/offset、repository health、unanswered decisionをworkspace storeから、app-global character選択をcharacter library storeから復元する。互換性のため保存済みlast summaryを読込結果に含めても、Chatでは消費・表示しない |
 
 ## 利用者と権限
 
@@ -105,7 +105,7 @@ status: "Approved"
 
 eventはworkspace内のvalidated `sequence`順に表示する。live/HISTは共通のversioned projectorでstable IDとsemantic cardを復元する。pending actionはsupervisorが同じworkspace/thread/generationを所有する時だけ操作可能にする。unknown/invalid payloadは生値やgeneric成功行へ落とさずChatでは描画せずに診断へ隔離する。
 
-Chatは保存済みeventの監査一覧ではなく、現在の会話を理解して次の操作を決めるためのprojectionとする。tab名が領域名を担うため、本文上端に`Activity / アクティビティ`見出しと説明を置かない。Chatへ表示するのは`user`、`assistant`、`plan`、`tool`、`file`、`diff`、`decision`、`approval`、`error`、`completion`だけとし、raw `history`、generic `status`、`thread` / `turn` lifecycle、`request_resolved`は永続化しても描画しない。成功した同一tool itemの開始・終了更新はstable IDで一行へ統合し、異なるtool itemはcompact rowのまま保持する。検証結果は対応するtool/error、Git evidenceはCommit tab、support状態は専用controller surfaceを正本にする。
+Chatは保存済みeventの監査一覧ではなく、現在の会話を理解して次の操作を決めるためのprojectionとする。tab名が領域名を担うため、本文上端に`Activity / アクティビティ`見出しと説明を置かない。Chatへ表示するのは`user`、`assistant`、`plan`、`tool`、`file`、`diff`、`decision`、`approval`、`error`だけとし、raw `history`、generic `status`、`thread` / `turn` lifecycle、`completion`、`request_resolved`は永続化しても描画しない。成功した同一tool itemの開始・終了更新はstable IDで一行へ統合し、異なるtool itemはcompact rowのまま保持する。検証結果は対応するtool/error、Git evidenceはCommit tab、support状態は専用controller surfaceを正本にする。turnの正常終了では検証・redact済み`result.message`のAssistant本文を会話の最後に表示し、`completion`を最終出力の代替にしない。
 
 | event kind | compact表示 | 展開表示 | 主要action |
 |---|---|---|---|
@@ -116,13 +116,12 @@ Chatは保存済みeventの監査一覧ではなく、現在の会話を理解�
 | Verification | tool rowのtest/lint/build名、pass/fail、duration | command allowlist名、failure excerpt、artifact ref | evidenceを開く |
 | Decision / Approval | question、reason、impact、reversibility | options、Other、hold/interrupt/approve条件 | answer |
 | Error / Interrupted | code、影響、保持data、回復操作 | safe detail、retry condition、diagnostic ref | retry、modify、stop、diagnostic |
-| Completion | conversation終端を示す細い境界行、時刻 | 非該当 | 非該当 |
 
 連続する同種tool eventは同一work unit内だけgroup化し、running数とterminal数を見出しへ出す。groupを閉じてもerror、decision、verification failureを隠さない。toolのstdout/stderr全文、hidden reasoning、secret、home directory、unredacted promptは表示・保存しない。
 
-timeline rendererは表示対象を`message`、`operation`、`boundary`、`intervention`の四つへ分類する。User / Assistantは会話本文を主役にし、tool / file / diff / plan / errorは一行summaryと展開可能なsanitized detail、completionは細い状態境界、decision / approvalは単独の介入surfaceとして描画する。completed operationは初期状態で閉じ、running、failed、interruptedは開く。展開前もkind、targetまたは結果、terminal state、error code、時刻を確認できなければならない。
+timeline rendererは表示対象を`message`、`operation`、`intervention`の三つへ分類する。User / Assistantは会話本文を主役にし、tool / file / diff / plan / errorは一行summaryと展開可能なsanitized detail、decision / approvalは単独の介入surfaceとして描画する。completed operationは初期状態で閉じ、running、failed、interruptedは開く。展開前もkind、targetまたは結果、terminal state、error code、時刻を確認できなければならない。
 
-表示対象eventが0件でlast summaryと回復alertもない場合、timeline領域にはplaceholder、見出し、説明、icon、枠、CTAを一切描画しない。composerは通常位置に残し、初期focusもcomposerとする。
+表示対象eventが0件で回復alertもない場合、timeline領域にはplaceholder、見出し、説明、icon、枠、CTAを一切描画しない。last summaryのcard、見出し、説明、本文も描画しない。composerは通常位置に残し、初期focusもcomposerとする。
 
 commit explainerのrequest、status、delta、result、failureはChat timelineとmain conversationへ追加しない。これらはapp-owned explanation controller、S-003の状態表示、Character captionだけで扱う。
 
@@ -229,7 +228,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | decision回答 | unanswered、option valid | idempotent answer event、turn resume | Holdなら未回答維持 |重複送信せず選択を保持 | `CODE-F-062`〜`CODE-F-069` |
 | interrupt | decisionまたはrunning turn | main/support停止、completed/partial/unknownを分類 |確認cancelで継続 | Interruptedとしてreviewへ誘導 | `SUP-F-057`〜`SUP-F-061` |
 | attachment追加 | picker起動可能 | validated handleをdraftへ追加 | draft不変、errorなし | chipを追加せずreason表示 | `CODE-F-053`, `APP-F-066`〜`APP-F-069` |
-| workspace切替 | 別workspace選択、old active/pending turnなし、または確認済みinterrupt | old presentation/audio停止後、new workspaceのdraft、last summary、anchor ID/sequence/offsetをatomic復元。app-globalなcharacter選択とpack-scoped設定は維持 | `戻る`でold state完全維持 | old workspaceをactiveのままerror、new activation 0件 | `WORK-F-058`〜`WORK-F-060` |
+| workspace切替 | 別workspace選択、old active/pending turnなし、または確認済みinterrupt | old presentation/audio停止後、new workspaceのdraft、anchor ID/sequence/offsetをatomic復元。app-globalなcharacter選択とpack-scoped設定は維持 | `戻る`でold state完全維持 | old workspaceをactiveのままerror、new activation 0件 | `WORK-F-058`〜`WORK-F-060` |
 | mute切替 | audio/character利用可能 |即時再生停止または次eligible textから再開、設定保存 | 非該当 | text表示は継続 | `NARR-F-068`〜`NARR-F-075` |
 | Commit tabを開く | workspace valid | same workspaceの[S-003](S-003_session-evidence.md)を表示し、初回active表示時だけread-only observationを取得 | 非該当 | Chatを維持してerror | `GIT-F-072`〜`GIT-F-089` |
 
@@ -297,11 +296,11 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | データ | 正本・保存先 | 保存契機 | 復元契機 | 破棄条件 | 失敗時 |
 |---|---|---|---|---|---|
 | thread/turn/work unit | Codex + Rust SQLite mapping | validated lifecycle event | route return/restart | history明示削除 | Interrupted/read-only |
-| normalized event | append-only SQLite + hash | versioned semantic schema/redaction合格後 | exact projectorでstable ID・sequence順にassistant/tool/file/diff/plan/completion/error/decision/approvalを復元 | workspace history明示削除 | unknown/invalidはUnsupportedへ隔離、raw event非保存 |
+| normalized event | append-only SQLite + hash | versioned semantic schema/redaction合格後 | exact projectorでstable ID・sequence順にassistant/tool/file/diff/plan/completion/error/decision/approvalを復元し、completionはChatへ描画しない | workspace history明示削除 | unknown/invalidはUnsupportedへ隔離、raw event非保存 |
 | draft/attachment handle/effort | Rust SQLite | debounce、valid変更、route leave | workspace選択 | send成功または明示clear | UI入力保持とretry |
 | project context | Rust SQLite project row | App settingsのproject detailでexpected-version save | project detail/turn開始 | project登録解除契約 | expected version conflict |
 | character context | Rust SQLite opaque pack ID-scoped row | App settings > Character detailのexpected-version save | character detail/選択packのturn開始 | app data reset契約 | expected version conflict |
-| last summary/timeline anchor/tab | Rust SQLite | terminal summary、scroll settle/tab移動 | route return/restart | history削除契約 | 同workspaceのnearest valid sequenceだけへ補正 |
+| last summary/timeline anchor/tab | Rust SQLite | terminal summary、scroll settle/tab移動 | route return/restart。last summaryはschema互換のため保持するがChatでは消費しない | history削除契約 | 同workspaceのnearest valid sequenceだけへ補正 |
 | repository identity/health snapshot | Rust SQLite、Git read-only再検査 | window focus、selection、Send直前 | route return/restart | project登録解除 | stale status、Repair/Recheck |
 | selected character | app-global state → app-private library pack ID | App settingsのatomic選択成功 | startup/全workspaceへ即時同期 | 選択変更後だけ旧packを削除可 | invalid legacy値はbundled Hiyori、render失敗はstatic/text fallback |
 | audio byte | owner-only temporary file | provider response完了後から再生中だけ |復元しない | playback/stop/route/quitの全terminal path | textは保持 |
@@ -377,6 +376,6 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 - [x] normal、empty、loading、processing、offline、error、permission、cancel、restartを定義した。
 - [x] timeline、decision、Context、Live2D、audio、native boundary、data retentionを定義した。
 - [x] verified commitからapp-owned explanation controllerへのbackground handoffとmain conversation非介入を定義した。
-- [x] App SettingsのContext conflict/next-turn、repository health、active-turn切替、summary/anchor、app-global semantic mappingの状態とfocusを定義した。
+- [x] App SettingsのContext conflict/next-turn、repository health、active-turn切替、timeline anchor、app-global semantic mappingの状態とfocusを定義した。
 - [x] 関連要件IDを要件定義書のS-002対応と一致させた。
 - [x] 着手ブロックが「はい」または「不明」の未確定事項は0件である。

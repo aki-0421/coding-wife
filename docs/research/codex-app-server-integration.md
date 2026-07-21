@@ -383,6 +383,12 @@ native requestUserInput が unavailable の場合は、turn/start の outputSche
 schemaVersion: 1
 kind: result | decision_request
 message: string
+result の場合:
+  decisionId: null
+  question: null
+  options: null
+  context: null
+  allowFreeform: null | boolean（互換fieldとして無視）
 decision_request の場合:
   decisionId: string
   question: string
@@ -393,7 +399,7 @@ decision_request の場合:
   allowFreeform: false
 ~~~
 
-assistant の最終出力がこの schema を完全に満たす場合だけ decision UI を出す。Markdown、コードブロック、自然文から JSON らしき部分を抽出しない。approval はこの envelope で代替しない。
+assistant のStructured Output deltaはJSON envelopeのtransport断片なのでWebViewへ表示・保存しない。最終出力を検証し、`result`ならredact済み`message`だけを会話へ出し、`decision_request`なら全decision fieldと`allowFreeform=false`を満たす場合だけdecision UIを出す。Markdown、コードブロック、自然文からJSONらしき部分を抽出しない。approvalはこのenvelopeで代替しない。
 
 ### dynamic tools
 

@@ -1921,7 +1921,7 @@ describe("WorkspaceShell", () => {
     expect(saveDraft).not.toHaveBeenCalledWith("workspace-b", "", "off")
   })
 
-  it("hydrates the persisted draft and timeline before saving later edits", async () => {
+  it("hydrates the persisted draft before saving later edits", async () => {
     const restoredState: WorkspaceAdapterState = {
       workspaces: [
         {
@@ -1941,24 +1941,7 @@ describe("WorkspaceShell", () => {
         revision: 4,
         contextSnapshots: [],
       },
-      timeline: [
-        {
-          id: "event-restored",
-          sequence: 9,
-          producer: "code",
-          kind: "history",
-          domainKind: "code.session.status.changed",
-          occurredAt: "2026-07-18T00:00:45.000Z",
-          status: "failed",
-          errorCode: "CODEX-TURN-FAILED",
-        },
-      ],
-      lastSummary: {
-        eventId: "event-summary",
-        sequence: 8,
-        text: "Restored summary after restart.",
-        updatedAt: "2026-07-18T00:00:40.000Z",
-      },
+      timeline: [],
       history: { mode: "ready", errorCode: null, backupName: null },
     }
     const saveDraft = vi.fn().mockResolvedValue(undefined)
@@ -1982,11 +1965,6 @@ describe("WorkspaceShell", () => {
       "Ask Codex to plan, build, explain, or fix anything…",
     )
     await waitFor(() => expect(composer).toHaveValue("Restored after reload"))
-    expect(
-      screen.getByRole("region", { name: "Last session summary" }),
-    ).toHaveTextContent("Restored summary after restart.")
-    expect(screen.getByText("code.session.status.changed")).toBeVisible()
-    expect(screen.getByText("CODEX-TURN-FAILED")).toBeVisible()
 
     fireEvent.change(composer, { target: { value: "Persist this edit" } })
     await waitFor(() =>
@@ -2015,8 +1993,8 @@ describe("WorkspaceShell", () => {
     ).toBeVisible()
   })
 
-  it("renders a restored summary as text in an accessible English recovery region", async () => {
-    const unsafeMarkup = '<img src="x" alt="private-probe">'
+  it("does not render a persisted last summary in Chat", async () => {
+    const persistedSummary = "Legacy persisted summary must stay hidden."
     const adapter: WorkspaceViewAdapter = {
       hydrationMode: "native",
       loadState: () =>
@@ -2025,166 +2003,8 @@ describe("WorkspaceShell", () => {
           lastSummary: {
             eventId: "event-safe-summary",
             sequence: 4,
-            text: `Completed safely.\n${unsafeMarkup}`,
+            text: persistedSummary,
             updatedAt: "2026-07-18T00:00:04.000Z",
-          },
-        }),
-    }
-
-    renderWorkspace(adapter)
-
-    const summary = await screen.findByRole("region", {
-      name: "Last session summary",
-    })
-    expect(summary).toHaveTextContent("Completed safely.")
-    expect(summary.textContent).toContain(unsafeMarkup)
-    expect(screen.queryByAltText("private-probe")).not.toBeInTheDocument()
-    expect(summary).toHaveTextContent(
-      "Restored from this workspace's redacted local history.",
-    )
-  })
-
-  it("localizes the restored summary region in Japanese", async () => {
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () =>
-        Promise.resolve({
-          ...nativeWorkspaceState(),
-          lastSummary: {
-            eventId: "event-ja-summary",
-            sequence: 3,
-            text: "再起動後も要約を復元しました。",
-            updatedAt: "2026-07-18T00:00:03.000Z",
-          },
-        }),
-    }
-
-    render(
-      <App
-        localeStore={japaneseLocaleStore}
-        readinessController={readyNativeReadinessController()}
-        transport={new DemoTransport()}
-        workspaceAdapter={adapter}
-      />,
-    )
-
-    const summary = await screen.findByRole("region", {
-      name: "前回セッションの要約",
-    })
-    expect(summary).toHaveTextContent("再起動後も要約を復元しました。")
-    expect(summary).toHaveTextContent(
-      "このワークスペースの秘匿化済みローカル履歴から復元しました。",
-    )
-  })
-
-  it.each([
-    ["missing repository", "missing", "ready"],
-    ["read-only recovery", "read_only", "read_only"],
-  ] as const)(
-    "keeps the last summary visible during %s",
-    async (_label, health, historyMode) => {
-      const adapter: WorkspaceViewAdapter = {
-        hydrationMode: "native",
-        loadState: () =>
-          Promise.resolve({
-            ...nativeWorkspaceState(),
-            workspaces: nativeWorkspaceState().workspaces.map((workspace) => ({
-              ...workspace,
-              health,
-            })),
-            lastSummary: {
-              eventId: `event-${health}-summary`,
-              sequence: 2,
-              text: "Recovery keeps this workspace summary available.",
-              updatedAt: "2026-07-18T00:00:02.000Z",
-            },
-            history: {
-              mode: historyMode,
-              errorCode: historyMode === "read_only" ? "HIST-READ-ONLY" : null,
-              backupName: null,
-            },
-          }),
-      }
-
-      renderWorkspace(adapter)
-
-      expect(
-        await screen.findByRole("region", { name: "Last session summary" }),
-      ).toHaveTextContent("Recovery keeps this workspace summary available.")
-    },
-  )
-
-  it("clears a workspace-local summary when switching to a workspace without one", async () => {
-    const stateFor = (activeWorkspaceId: string): WorkspaceAdapterState => ({
-      ...nativeWorkspaceState(),
-      workspaces: [
-        {
-          id: "workspace-native",
-          repository: "fixture",
-          name: "workspace-a",
-          branch: "main",
-          lifecycle: "in_progress",
-          health: "ready",
-        },
-        {
-          id: "workspace-b",
-          repository: "fixture",
-          name: "workspace-b",
-          branch: "main",
-          lifecycle: "backlog",
-          health: "ready",
-        },
-      ],
-      activeWorkspaceId,
-      lastSummary:
-        activeWorkspaceId === "workspace-native"
-          ? {
-              eventId: "event-workspace-a-summary",
-              sequence: 2,
-              text: "Workspace A private recovery summary.",
-              updatedAt: "2026-07-18T00:00:02.000Z",
-            }
-          : null,
-    })
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () => Promise.resolve(stateFor("workspace-native")),
-      selectWorkspace: (workspaceId) => Promise.resolve(stateFor(workspaceId)),
-    }
-
-    renderWorkspace(adapter)
-    expect(
-      await screen.findByRole("region", { name: "Last session summary" }),
-    ).toHaveTextContent("Workspace A private recovery summary.")
-
-    const navigation = screen.getByRole("navigation", { name: "Workspaces" })
-    fireEvent.click(
-      within(navigation).getByRole("button", {
-        name: /main, fixture, Backlog/u,
-      }),
-    )
-
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("region", { name: "Last session summary" }),
-      ).not.toBeInTheDocument(),
-    )
-    expect(
-      screen.queryByText("Workspace A private recovery summary."),
-    ).not.toBeInTheDocument()
-  })
-
-  it("omits the recovery region when the summary is empty", async () => {
-    const adapter: WorkspaceViewAdapter = {
-      hydrationMode: "native",
-      loadState: () =>
-        Promise.resolve({
-          ...nativeWorkspaceState(),
-          lastSummary: {
-            eventId: "event-empty-summary",
-            sequence: 1,
-            text: "   \n\t",
-            updatedAt: "2026-07-18T00:00:01.000Z",
           },
         }),
     }
@@ -2196,10 +2016,8 @@ describe("WorkspaceShell", () => {
     expect(
       screen.queryByRole("region", { name: "Last session summary" }),
     ).not.toBeInTheDocument()
+    expect(screen.queryByText(persistedSummary)).not.toBeInTheDocument()
     expect(screen.queryByRole("feed")).not.toBeInTheDocument()
-    expect(
-      screen.queryByText("No persisted activity yet"),
-    ).not.toBeInTheDocument()
   })
 
   it("keeps the latest ten captured context items in the UI", async () => {
@@ -2978,7 +2796,7 @@ describe("WorkspaceShell", () => {
     )
   })
 
-  it("projects conversation events without rendering internal activity", async () => {
+  it("keeps the assistant result visible without rendering internal activity", async () => {
     const baseSnapshot = richCodexState()
     const internalBase = {
       workspaceId: "workspace-native",
@@ -3092,20 +2910,19 @@ describe("WorkspaceShell", () => {
     expect(assistant).not.toBeNull()
     expect(assistant).toHaveAttribute("data-event-layout", "message")
     expect(assistant).toHaveTextContent("All checks passed.")
-    expect(
-      container.querySelector('[data-event-kind="completion"]'),
-    ).toHaveAttribute("data-event-layout", "boundary")
     for (const hiddenKind of [
       "history",
       "status",
       "thread",
       "turn",
+      "completion",
       "request_resolved",
     ]) {
       expect(
         container.querySelector(`[data-event-kind="${hiddenKind}"]`),
       ).not.toBeInTheDocument()
     }
+    expect(screen.queryByText("Turn completed")).not.toBeInTheDocument()
     expect(screen.queryByText("internal-status-detail")).not.toBeInTheDocument()
     expect(screen.queryByText("CODEX-INTERNAL-HISTORY")).not.toBeInTheDocument()
 
@@ -3192,15 +3009,29 @@ describe("WorkspaceShell", () => {
       screen.queryByRole("button", { name: /New updates/u }),
     ).not.toBeInTheDocument()
 
-    const completion = {
+    const assistant = {
       workspaceId: "workspace-native",
       generation: 1,
       occurredAt: "2026-07-18T00:01:00.000Z",
       durable: true,
+      id: "event-final-assistant",
+      stableId: "final-assistant-message",
+      sourceEventId: "event-final-assistant",
+      sourceSequence: 7,
+      kind: "assistant" as const,
+      status: "completed",
+      itemHandle: "item-final-assistant",
+      text: "Final verified response.",
+    }
+    const completion = {
+      workspaceId: "workspace-native",
+      generation: 1,
+      occurredAt: "2026-07-18T00:01:01.000Z",
+      durable: true,
       id: "event-completion",
       stableId: "turn-completion",
       sourceEventId: "event-completion",
-      sourceSequence: 6,
+      sourceSequence: 8,
       kind: "completion" as const,
       status: "completed",
       threadHandle: "thread-fixture",
@@ -3209,7 +3040,7 @@ describe("WorkspaceShell", () => {
     act(() =>
       publish({
         ...snapshot,
-        timeline: [...snapshot.timeline, internalStatus, completion],
+        timeline: [...snapshot.timeline, internalStatus, assistant, completion],
       }),
     )
 
