@@ -12,9 +12,11 @@ import {
 } from "@/features/character"
 import { useI18n } from "@/features/localization"
 import {
+  PresenceDirectionCaption,
   useNarrationController,
   useNarrationSnapshot,
 } from "@/features/narration"
+import type { PresenceDirectionCue } from "@/features/narration/contracts"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type {
   CharacterStageRenderer,
@@ -29,6 +31,7 @@ interface CharacterStageSlotProps {
   readonly renderer?: CharacterStageRenderer | undefined
   readonly state: CharacterSemanticState
   readonly visible: boolean
+  readonly workspaceGeneration: number | null
   readonly workspaceId: string
   readonly onMutedChange: (muted: boolean) => void
   readonly onRetryCharacter: () => void
@@ -42,6 +45,7 @@ export function CharacterStageSlot({
   renderer,
   state,
   visible,
+  workspaceGeneration,
   workspaceId,
   onMutedChange,
   onRetryCharacter,
@@ -59,11 +63,26 @@ export function CharacterStageSlot({
     presentation?.status === "preparing" ||
     presentation?.status === "streaming" ||
     presentation?.status === "ready"
+  const presence =
+    presentation === null &&
+    workspaceGeneration !== null &&
+    narration.presence?.workspaceId === workspaceId &&
+    narration.presence.workspaceGeneration === workspaceGeneration &&
+    narration.presence.locale === locale &&
+    narration.presence.requestId === narration.latestPresenceRequestId
+      ? narration.presence
+      : null
   const speaking =
     presentation?.speechStatus === "queued" ||
-    presentation?.speechStatus === "playing"
+    presentation?.speechStatus === "playing" ||
+    presence?.speechStatus === "queued" ||
+    presence?.speechStatus === "playing"
   const effectiveMuted = narration.settingsSnapshot?.settings.muted ?? muted
-  const semanticState = presentationActive ? "reviewing" : state
+  const semanticState = presentationActive
+    ? "reviewing"
+    : presence === null
+      ? state
+      : characterStateForPresenceCue(presence.cue)
   const stateLabel = copy.character.semanticState[semanticState]
   const runtimeDetail = (() => {
     if (characterRuntime.rendererKind === "external") {
@@ -100,6 +119,7 @@ export function CharacterStageSlot({
       className="character-pane relative min-h-0 overflow-hidden bg-app-bg"
       data-narration-presentation={presentation?.status ?? "inactive"}
       data-narration-speech={presentation?.speechStatus ?? "idle"}
+      data-presence-direction={presence?.cue ?? "inactive"}
       hidden={!visible}
     >
       {CharacterRenderer ? (
@@ -132,63 +152,91 @@ export function CharacterStageSlot({
         </div>
       )}
 
-      <div className="absolute inset-x-xl bottom-lg flex items-end justify-between gap-md">
-        <div
-          aria-live="polite"
-          className="min-w-0 max-w-[34ch] rounded-control bg-app-bg/90 px-xs py-xxs"
-          data-character-runtime-readiness={characterRuntime.readiness}
-          role={characterRuntime.currentErrorCode ? "alert" : "status"}
-        >
-          <p className="m-0 text-label text-muted-foreground">
-            {copy.character.state}
-          </p>
-          <p
-            className="m-0 truncate text-caption text-foreground"
-            id="character-state"
-          >
-            {stateLabel} ·{" "}
-            {effectiveMuted ? copy.character.muted : copy.character.unmuted}
-          </p>
-          {runtimeDetail ? (
-            <p className="m-0 text-caption text-muted-foreground">
-              {runtimeDetail}
-            </p>
-          ) : null}
-          {characterRuntime.canRetry ? (
-            <Button
-              className="mt-xs"
-              onClick={onRetryCharacter}
-              size="xs"
-              type="button"
-              variant="secondary"
-            >
-              {copy.character.retryRenderer}
-            </Button>
-          ) : null}
-        </div>
+      <div className="absolute inset-x-xl bottom-lg flex flex-col gap-sm">
+        {presence ? (
+          <div className="flex min-w-0 justify-center">
+            <PresenceDirectionCaption
+              onVisible={narrationController.acknowledgePresenceCaptionVisible}
+              presentation={presence}
+            />
+          </div>
+        ) : null}
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              aria-label={
-                effectiveMuted ? copy.character.unmute : copy.character.mute
-              }
-              aria-pressed={effectiveMuted}
-              className="shrink-0 rounded-circle border-white/10 bg-selected-row/80"
-              disabled={narration.settingsStatus === "saving"}
-              onClick={() => void toggleMuted()}
-              size="icon-sm"
-              type="button"
-              variant="secondary"
+        <div className="flex items-end justify-between gap-md">
+          <div
+            aria-live="polite"
+            className="min-w-0 max-w-[34ch] rounded-control bg-app-bg/90 px-xs py-xxs"
+            data-character-runtime-readiness={characterRuntime.readiness}
+            role={characterRuntime.currentErrorCode ? "alert" : "status"}
+          >
+            <p className="m-0 text-label text-muted-foreground">
+              {copy.character.state}
+            </p>
+            <p
+              className="m-0 truncate text-caption text-foreground"
+              id="character-state"
             >
-              {effectiveMuted ? <VolumeXIcon /> : <Volume2Icon />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left">
-            {effectiveMuted ? copy.character.unmute : copy.character.mute}
-          </TooltipContent>
-        </Tooltip>
+              {stateLabel} ·{" "}
+              {effectiveMuted ? copy.character.muted : copy.character.unmuted}
+            </p>
+            {runtimeDetail ? (
+              <p className="m-0 text-caption text-muted-foreground">
+                {runtimeDetail}
+              </p>
+            ) : null}
+            {characterRuntime.canRetry ? (
+              <Button
+                className="mt-xs"
+                onClick={onRetryCharacter}
+                size="xs"
+                type="button"
+                variant="secondary"
+              >
+                {copy.character.retryRenderer}
+              </Button>
+            ) : null}
+          </div>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={
+                  effectiveMuted ? copy.character.unmute : copy.character.mute
+                }
+                aria-pressed={effectiveMuted}
+                className="shrink-0 rounded-circle border-white/10 bg-selected-row/80"
+                disabled={narration.settingsStatus === "saving"}
+                onClick={() => void toggleMuted()}
+                size="icon-sm"
+                type="button"
+                variant="secondary"
+              >
+                {effectiveMuted ? <VolumeXIcon /> : <Volume2Icon />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              {effectiveMuted ? copy.character.unmute : copy.character.mute}
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </aside>
   )
+}
+
+const characterStateByPresenceCue = {
+  neutral: "idle",
+  working: "acting",
+  asking: "waiting_for_user",
+  success: "completed",
+  warning: "disconnected",
+  error: "error",
+} as const satisfies Readonly<
+  Record<PresenceDirectionCue, CharacterSemanticState>
+>
+
+function characterStateForPresenceCue(
+  cue: PresenceDirectionCue,
+): CharacterSemanticState {
+  return characterStateByPresenceCue[cue]
 }

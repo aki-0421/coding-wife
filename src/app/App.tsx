@@ -16,8 +16,10 @@ import {
 import {
   createNarrationGateway,
   NarrationController,
+  TauriPresenceDirectionSource,
   type CommitNarrationConsumerPort,
   type NarrationGateway,
+  type PresenceDirectionConsumerPort,
 } from "@/features/narration"
 import {
   DemoCommitExplanationRuntime,
@@ -53,6 +55,7 @@ export interface AppProps {
   readonly narrationController?: NarrationController
   readonly narrationGateway?: NarrationGateway
   readonly narrationSource?: CommitNarrationConsumerPort | null
+  readonly presenceDirectionSource?: PresenceDirectionConsumerPort | null
   readonly readinessController?: NativeReadinessController
   readonly transport?: AppTransport
   readonly workspaceAdapter?: WorkspaceViewAdapter
@@ -91,6 +94,7 @@ export function App({
   narrationController,
   narrationGateway,
   narrationSource,
+  presenceDirectionSource,
   readinessController,
   transport,
   workspaceAdapter,
@@ -162,6 +166,17 @@ export function App({
   )
   const activeNarrationController =
     narrationController ?? fallbackNarrationController
+  const fallbackPresenceDirectionSource = useMemo(
+    () =>
+      activeTransport.kind === "tauri"
+        ? new TauriPresenceDirectionSource()
+        : null,
+    [activeTransport.kind],
+  )
+  const activePresenceDirectionSource =
+    presenceDirectionSource === undefined
+      ? fallbackPresenceDirectionSource
+      : presenceDirectionSource
   const fallbackCommitExplanationRuntime = useMemo(
     () =>
       activeTransport.kind === "tauri"
@@ -190,6 +205,7 @@ export function App({
       narrationController={activeNarrationController}
       narrationGateway={activeNarrationGateway}
       narrationSource={narrationSource}
+      presenceDirectionSource={activePresenceDirectionSource}
       readinessController={activeReadinessController}
       transport={activeTransport}
       workspaceAdapter={workspaceAdapter ?? fallbackWorkspaceAdapter}

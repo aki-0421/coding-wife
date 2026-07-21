@@ -347,7 +347,10 @@ export function WorkspaceShell({
       })
       .then(async () => {
         commitExplanationController?.revokePresentationIntent("close")
-        await narrationController.dismissPresentation("app_close")
+        await Promise.all([
+          narrationController.dismissPresentation("app_close"),
+          narrationController.dismissPresence("app_close"),
+        ])
         await appLifecycleGateway.confirmQuit(request.requestId)
       })
       .catch(() => {
@@ -422,6 +425,7 @@ export function WorkspaceShell({
     void narrationController.setScope({
       workspaceId: scope.workspaceId,
       generation: scope.workspaceGeneration,
+      locale: scope.locale,
     })
     void commitExplanationController
       ?.setScope({
@@ -444,6 +448,7 @@ export function WorkspaceShell({
     const [mainTurn] = await Promise.allSettled([
       view.stopTurn(),
       narrationController.dismissPresentation("turn_stop"),
+      narrationController.dismissPresence("turn_stop"),
     ])
     return mainTurn.status === "fulfilled" ? mainTurn.value : false
   }, [commitExplanationController, narrationController, view])
@@ -479,7 +484,10 @@ export function WorkspaceShell({
         commitExplanationController?.revokePresentationIntent(
           "selection_change",
         )
-        await narrationController.dismissPresentation("explicit_cancel")
+        await Promise.all([
+          narrationController.dismissPresentation("explicit_cancel"),
+          narrationController.dismissPresence("explicit_cancel"),
+        ])
         return true
       } finally {
         setArchivePendingWorkspaceId((current) =>
@@ -985,6 +993,7 @@ export function WorkspaceShell({
             reducedMotion={reducedMotion}
             state={characterState}
             visible={!appSettingsOpen}
+            workspaceGeneration={workspaceGeneration}
             workspaceId={selectedWorkspace.id}
             {...(characterRenderer ? { renderer: characterRenderer } : {})}
           />

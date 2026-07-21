@@ -1,5 +1,6 @@
 export * from "@/features/narration/components/NarrationSettings"
 export * from "@/features/narration/components/CommitNarrationCaption"
+export * from "@/features/narration/components/PresenceDirectionCaption"
 export * from "@/features/narration/contracts"
 export * from "@/features/narration/controller"
 export * from "@/features/narration/hooks"

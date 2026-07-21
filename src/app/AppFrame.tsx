@@ -9,7 +9,10 @@ import type { CommitExplanationAppRuntime } from "@/features/git-review/commit-e
 import type { GitReviewTransport } from "@/features/git-review/transport"
 import type { LocalePreferenceStore } from "@/features/localization"
 import type { NarrationController } from "@/features/narration/controller"
-import type { CommitNarrationConsumerPort } from "@/features/narration/contracts"
+import type {
+  CommitNarrationConsumerPort,
+  PresenceDirectionConsumerPort,
+} from "@/features/narration/contracts"
 import { NarrationProvider } from "@/features/narration/provider"
 import type { NarrationGateway } from "@/features/narration/transport"
 import type { AppPreferencesController } from "@/features/preferences/controller"
@@ -34,6 +37,10 @@ export interface AppFrameProps {
   readonly narrationController: NarrationController
   readonly narrationGateway: NarrationGateway
   readonly narrationSource?: CommitNarrationConsumerPort | null | undefined
+  readonly presenceDirectionSource?:
+    | PresenceDirectionConsumerPort
+    | null
+    | undefined
   readonly readinessController: NativeReadinessController
   readonly transport: AppTransport
   readonly workspaceAdapter: WorkspaceViewAdapter
@@ -51,6 +58,7 @@ export function AppFrame({
   narrationController,
   narrationGateway,
   narrationSource,
+  presenceDirectionSource,
   readinessController,
   transport,
   workspaceAdapter,
@@ -63,6 +71,7 @@ export function AppFrame({
     narrationSource === undefined
       ? (commitExplanationRuntime?.narrationSource ?? null)
       : narrationSource
+  const activePresenceDirectionSource = presenceDirectionSource ?? null
 
   useEffect(() => {
     if (commitExplanationRuntime === null) return
@@ -91,6 +100,7 @@ export function AppFrame({
       <NarrationProvider
         controller={narrationController}
         gateway={narrationGateway}
+        presenceSource={activePresenceDirectionSource}
         source={activeNarrationSource}
       >
         <CharacterRuntimeStatusProvider rendererKind={characterRendererKind}>
