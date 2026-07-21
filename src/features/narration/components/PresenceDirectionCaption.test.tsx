@@ -9,7 +9,9 @@ const originalElementFromPoint = Object.getOwnPropertyDescriptor(
   "elementFromPoint",
 )
 
-function presentation(): PresenceDirectionPresentationSnapshot {
+function presentation(
+  overrides: Partial<PresenceDirectionPresentationSnapshot> = {},
+): PresenceDirectionPresentationSnapshot {
   return {
     requestId: "presence-1",
     workspaceId: "workspace-1",
@@ -24,6 +26,7 @@ function presentation(): PresenceDirectionPresentationSnapshot {
     presentationGeneration: 4,
     speechStatus: "queued",
     errorCode: null,
+    ...overrides,
   }
 }
 
@@ -45,7 +48,13 @@ function installAnimationFrames() {
   }
 }
 
-function mockVisibleLayout(element: HTMLElement): void {
+function mockVisibleLayout(
+  element: HTMLElement,
+  options: {
+    readonly bounds?: Partial<DOMRect>
+    readonly textRects?: readonly DOMRect[]
+  } = {},
+): void {
   const bounds = {
     x: 100,
     y: 100,
@@ -56,6 +65,7 @@ function mockVisibleLayout(element: HTMLElement): void {
     width: 400,
     height: 30,
     toJSON: () => ({}),
+    ...options.bounds,
   } satisfies DOMRect
   Object.defineProperties(element, {
     getBoundingClientRect: {
@@ -71,10 +81,20 @@ function mockVisibleLayout(element: HTMLElement): void {
     configurable: true,
     value: () => element,
   })
+  if (options.textRects !== undefined) {
+    vi.spyOn(document, "createRange").mockImplementation(
+      () =>
+        ({
+          getClientRects: () => options.textRects,
+          selectNodeContents: () => undefined,
+        }) as unknown as Range,
+    )
+  }
 }
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   if (originalElementFromPoint === undefined) {
     Reflect.deleteProperty(document, "elementFromPoint")
   } else {
@@ -87,7 +107,7 @@ afterEach(() => {
 })
 
 describe("PresenceDirectionCaption", () => {
-  it("renders one polite visible sentence without alert semantics", () => {
+  it("renders one polite wrapping sentence without alert semantics", () => {
     render(
       <PresenceDirectionCaption
         onVisible={vi.fn()}
@@ -99,7 +119,12 @@ describe("PresenceDirectionCaption", () => {
     expect(caption).toHaveTextContent("確認が必要なところで待っています。")
     expect(caption).toHaveAttribute("aria-live", "polite")
     expect(caption).toHaveAttribute("aria-atomic", "true")
-    expect(caption).toHaveClass("whitespace-nowrap")
+    expect(caption).toHaveClass(
+      "whitespace-normal",
+      "break-words",
+      "[overflow-wrap:anywhere]",
+    )
+    expect(caption).not.toHaveClass("whitespace-nowrap")
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
@@ -123,5 +148,46 @@ describe("PresenceDirectionCaption", () => {
       requestId: "presence-1",
       presentationGeneration: 4,
     })
+  })
+
+  it("keeps a 160-scalar caption fully visible in a narrow pane at 200% zoom", () => {
+    const frames = installAnimationFrames()
+    const onVisible = vi.fn()
+    const utterance = "W".repeat(160)
+    vi.stubGlobal("devicePixelRatio", 2)
+    render(
+      <PresenceDirectionCaption
+        onVisible={onVisible}
+        presentation={presentation({ utterance })}
+      />,
+    )
+    const caption = screen.getByRole("status")
+    const textRects = Array.from({ length: 10 }, (_, index) => ({
+      x: 104,
+      y: 104 + index * 18,
+      top: 104 + index * 18,
+      right: 296,
+      bottom: 120 + index * 18,
+      left: 104,
+      width: 192,
+      height: 16,
+      toJSON: () => ({}),
+    })) satisfies DOMRect[]
+    mockVisibleLayout(caption, {
+      bounds: {
+        right: 300,
+        bottom: 286,
+        width: 200,
+        height: 186,
+      },
+      textRects,
+    })
+
+    expect(caption).toHaveTextContent(utterance)
+    expect(caption).toHaveClass("max-w-[min(65ch,100%)]")
+    act(() => frames.flush())
+    act(() => frames.flush())
+
+    expect(onVisible).toHaveBeenCalledOnce()
   })
 })

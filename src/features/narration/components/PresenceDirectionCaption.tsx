@@ -68,7 +68,7 @@ export function PresenceDirectionCaption({
     <p
       aria-atomic="true"
       aria-live="polite"
-      className="m-0 max-w-full whitespace-nowrap rounded-control border border-divider bg-app-bg/95 px-sm py-xs text-caption text-foreground shadow-overlay backdrop-blur-sm"
+      className="m-0 w-fit min-w-0 max-w-[min(65ch,100%)] whitespace-normal break-words rounded-control border border-divider bg-app-bg/95 px-sm py-xs text-pretty text-caption leading-relaxed text-foreground shadow-overlay backdrop-blur-sm [overflow-wrap:anywhere]"
       data-presence-direction-cue={presentation.cue}
       data-presence-direction-request={presentation.requestId}
       data-presence-direction-speech={presentation.speechStatus}

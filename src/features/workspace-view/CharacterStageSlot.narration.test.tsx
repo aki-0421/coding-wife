@@ -133,7 +133,7 @@ function renderStage({
 }
 
 describe("CharacterStageSlot narration", () => {
-  it("renders a matching Luna caption as polite one-line semantic presence", async () => {
+  it("renders a matching Luna caption as polite wrapping semantic presence", async () => {
     const gateway = new DemoNarrationGateway()
     const controller = new NarrationController(gateway)
     await controller.initialize()
@@ -156,7 +156,8 @@ describe("CharacterStageSlot narration", () => {
     const caption = screen.getByText("確認が必要なところで待っています。")
     expect(caption).toHaveAttribute("aria-live", "polite")
     expect(caption).toHaveAttribute("role", "status")
-    expect(caption).toHaveClass("whitespace-nowrap")
+    expect(caption).toHaveClass("whitespace-normal", "break-words")
+    expect(caption).not.toHaveClass("whitespace-nowrap")
     expect(caption).not.toHaveAttribute("role", "alert")
     expect(screen.getByTestId("renderer")).toHaveAttribute(
       "data-state",
