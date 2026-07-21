@@ -471,7 +471,9 @@ export function ChatView({
         ) : null}
 
         <Composer
-          backgroundExecutionWorkspaceLabel={backgroundExecutionWorkspaceLabel}
+          {...(backgroundExecutionWorkspaceLabel === undefined
+            ? {}
+            : { backgroundExecutionWorkspaceLabel })}
           connected={connected}
           copy={copy}
           draft={draft}

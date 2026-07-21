@@ -29,6 +29,7 @@ class CompositionCodexTransport implements CodexTransport {
   }[] = []
   readonly connectFailures = new Map<string, Error>()
   connectGate: Promise<void> | null = null
+  turnStartGate: Promise<void> | null = null
   interruptFailure: Error | null = null
   private callbacks: CodexEventCallbacks | null = null
 
@@ -58,7 +59,9 @@ class CompositionCodexTransport implements CodexTransport {
       case codexCommands.threadResume:
         return Promise.resolve(fixture.thread as CodexResponseMap[K])
       case codexCommands.turnStart:
-        return Promise.resolve(fixture.turn as CodexResponseMap[K])
+        return this.turnStartGate === null
+          ? Promise.resolve(fixture.turn as CodexResponseMap[K])
+          : this.turnStartGate.then(() => fixture.turn as CodexResponseMap[K])
       case codexCommands.pickAttachments:
         return Promise.resolve({
           items: [
@@ -414,8 +417,10 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     if (running.kind !== "turn_status" || pending.kind !== "pending_request") {
       throw new Error("turn fixtures")
     }
-    codex.emit({ ...running, workspaceId: fromWorkspaceId })
-    codex.emit({ ...pending, workspaceId: fromWorkspaceId })
+    expect(adapter.codexSnapshot()).toMatchObject({
+      activeWorkspaceId: fromWorkspaceId,
+      phase: "running",
+    })
 
     await expect(adapter.selectWorkspace(toWorkspaceId)).resolves.toMatchObject(
       {
@@ -427,6 +432,13 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
         ({ command }) => command === codexCommands.turnInterrupt,
       ),
     ).toHaveLength(0)
+    expect(adapter.codexSnapshot()).toMatchObject({
+      activeWorkspaceId: fromWorkspaceId,
+      phase: "running",
+      pendingRequests: [],
+    })
+
+    codex.emit({ ...pending, workspaceId: fromWorkspaceId })
     expect(adapter.codexSnapshot()).toMatchObject({
       activeWorkspaceId: fromWorkspaceId,
       phase: "waiting",
@@ -465,6 +477,67 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
     expect(terminalAppendIndex).toBeGreaterThanOrEqual(0)
     expect(targetSelectIndex).toBeGreaterThanOrEqual(0)
     expect(targetSelectIndex).toBeLessThan(terminalAppendIndex)
+  })
+
+  it("keeps the source execution owned while turn start is still in flight", async () => {
+    const history = new DemoWorkspaceHistoryTransport()
+    const codex = new CompositionCodexTransport()
+    let releaseTurnStart!: () => void
+    codex.turnStartGate = new Promise<void>((resolve) => {
+      releaseTurnStart = resolve
+    })
+    const adapter = new CodexComposedWorkspaceViewAdapter(history, codex)
+    const state = await adapter.loadState()
+    const fromWorkspaceId = state.activeWorkspaceId
+    if (fromWorkspaceId === null) throw new Error("active fixture workspace")
+    const toWorkspaceId = "sol-desktop"
+
+    const sending = adapter.sendTurn({
+      workspaceId: fromWorkspaceId,
+      instruction: "Keep ownership before the turn response arrives.",
+      effort: "off",
+      attachments: [],
+      contextSnapshots: [],
+      editableContextSnapshot:
+        await adapter.getTurnContextSnapshot(fromWorkspaceId),
+    })
+    await vi.waitFor(() =>
+      expect(codex.calls.at(-1)?.command).toBe(codexCommands.turnStart),
+    )
+
+    await expect(adapter.selectWorkspace(toWorkspaceId)).resolves.toMatchObject(
+      { activeWorkspaceId: toWorkspaceId },
+    )
+    expect(
+      codex.calls.some(
+        ({ command, request }) =>
+          command === codexCommands.connect &&
+          isRecord(request) &&
+          request.workspaceId === toWorkspaceId,
+      ),
+    ).toBe(false)
+
+    releaseTurnStart()
+    await expect(sending).resolves.toEqual({ accepted: true })
+    expect(adapter.codexSnapshot()).toMatchObject({
+      activeWorkspaceId: fromWorkspaceId,
+      phase: "running",
+    })
+
+    const running = parseCodexEvent(fixture.events[0])
+    if (running.kind !== "turn_status") throw new Error("turn fixture")
+    codex.emit({
+      ...running,
+      workspaceId: fromWorkspaceId,
+      eventId: "event-in-flight-terminal",
+      payload: { ...running.payload, status: "interrupted" },
+    })
+    await vi.waitFor(() =>
+      expect(adapter.codexSnapshot()).toMatchObject({
+        activeWorkspaceId: toWorkspaceId,
+        phase: "ready",
+      }),
+    )
   })
 
   it("waits for exact terminal cleanup and history flush before canceling once", async () => {

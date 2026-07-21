@@ -910,11 +910,11 @@ export function WorkspaceShell({
             value="chat"
           >
             <ChatView
-              backgroundExecutionWorkspaceLabel={
-                view.backgroundExecutionWorkspace === null
-                  ? undefined
-                  : `${view.backgroundExecutionWorkspace.repository}/${view.backgroundExecutionWorkspace.name}`
-              }
+              {...(view.backgroundExecutionWorkspace === null
+                ? {}
+                : {
+                    backgroundExecutionWorkspaceLabel: `${view.backgroundExecutionWorkspace.repository}/${view.backgroundExecutionWorkspace.name}`,
+                  })}
               characterState={characterState}
               connected={connected}
               copy={copy}

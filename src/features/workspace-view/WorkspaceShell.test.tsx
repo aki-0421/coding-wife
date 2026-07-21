@@ -3453,7 +3453,7 @@ describe("WorkspaceShell", () => {
       pendingRequests: [],
     }
     const selectWorkspace = vi.fn((workspaceId: string) =>
-      Promise.resolve({
+      Promise.resolve<WorkspaceAdapterState>({
         ...state,
         activeWorkspaceId: workspaceId,
         draft: {

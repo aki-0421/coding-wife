@@ -84,6 +84,7 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     readonly operation: Promise<void>
   } | null = null
   private desiredCodexState: WorkspaceAdapterState | null = null
+  private activeExecutionWorkspaceId: string | null = null
 
   constructor(
     historyTransport: WorkspaceHistoryTransport,
@@ -96,6 +97,13 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
       new WorkspaceHistoryCodexSink(historyTransport),
     )
     this.codex.subscribe((snapshot) => {
+      if (
+        this.activeExecutionWorkspaceId !== null &&
+        snapshot.activeWorkspaceId === this.activeExecutionWorkspaceId &&
+        ["completed", "interrupted"].includes(snapshot.phase)
+      ) {
+        this.activeExecutionWorkspaceId = null
+      }
       const desired = this.desiredCodexState
       if (
         desired?.activeWorkspaceId === null ||
@@ -340,21 +348,30 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
     request: SendTurnRequest,
   ): Promise<{ readonly accepted: boolean }> {
     const readiness = this.codex.snapshot().readiness
-    await this.codex.sendTurn({
-      workspaceId: request.workspaceId,
-      text: composeTurnInstruction(
-        request.instruction,
-        request.editableContextSnapshot,
-      ),
-      publicText: request.instruction,
-      effort: request.effort === "off" ? null : request.effort,
-      serviceTier: request.fastMode ? readiness.fastServiceTier : null,
-      planMode: request.planMode ?? false,
-      goalObjective: request.goalMode ? request.instruction.trim() : null,
-      attachmentHandles: request.attachments
-        .filter((attachment) => attachment.valid)
-        .map((attachment) => attachment.id),
-    })
+    const previousExecutionWorkspaceId = this.activeExecutionWorkspaceId
+    this.activeExecutionWorkspaceId = request.workspaceId
+    try {
+      await this.codex.sendTurn({
+        workspaceId: request.workspaceId,
+        text: composeTurnInstruction(
+          request.instruction,
+          request.editableContextSnapshot,
+        ),
+        publicText: request.instruction,
+        effort: request.effort === "off" ? null : request.effort,
+        serviceTier: request.fastMode ? readiness.fastServiceTier : null,
+        planMode: request.planMode ?? false,
+        goalObjective: request.goalMode ? request.instruction.trim() : null,
+        attachmentHandles: request.attachments
+          .filter((attachment) => attachment.valid)
+          .map((attachment) => attachment.id),
+      })
+    } catch (error) {
+      if (this.activeExecutionWorkspaceId === request.workspaceId) {
+        this.activeExecutionWorkspaceId = previousExecutionWorkspaceId
+      }
+      throw error
+    }
     return { accepted: true }
   }
 
@@ -413,6 +430,12 @@ export class CodexComposedWorkspaceViewAdapter implements WorkspaceViewAdapter {
           ? "recovery_required"
           : "read_only"
     const current = this.codex.snapshot()
+    if (
+      this.activeExecutionWorkspaceId !== null &&
+      this.activeExecutionWorkspaceId !== state.activeWorkspaceId
+    ) {
+      return
+    }
     if (
       current.activeWorkspaceId !== null &&
       current.activeWorkspaceId !== state.activeWorkspaceId &&
