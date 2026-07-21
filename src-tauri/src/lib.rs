@@ -340,6 +340,9 @@ pub fn run() {
             window_state_controller.configure_startup(&mut window_config);
             let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &window_config)?
                 .on_web_resource_request(|request, response| {
+                    character::webview_assets::correct_reviewed_live2d_content_type(
+                        &request, response,
+                    );
                     allow_opaque_preview_module_request(&request, response);
                 })
                 .build()?;
