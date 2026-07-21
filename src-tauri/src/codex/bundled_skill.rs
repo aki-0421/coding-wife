@@ -15,7 +15,7 @@ use super::types::MainSkillInjectionAudit;
 pub const COMMIT_SKILL_NAME: &str = "coding-wife-commit-work";
 pub const EXPLAIN_COMMIT_SKILL_NAME: &str = "coding-wife-explain-commit";
 const EXPECTED_MANIFEST_SHA256: &str =
-    "680aa60c1d5e6e774c8cbbcfbecbf2f45c743b44e1ffa7a463ec26bee9210f0f";
+    "f90d2543949f7c3ac01bb75a93b6bacb016f19e3c71be8b331462be3fc51100c";
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024;
 const MAX_SKILL_FILE_BYTES: u64 = 128 * 1024;
 const MAX_SKILLS: usize = 16;
@@ -456,7 +456,7 @@ mod tests {
         let audit = serde_json::to_value(skill.audit()).expect("serialize audit");
 
         assert_eq!(skill.name, COMMIT_SKILL_NAME);
-        assert_eq!(skill.version, "1.1.0");
+        assert_eq!(skill.version, "1.2.0");
         assert!(skill.path.is_absolute());
         assert_eq!(audit.as_object().expect("audit object").len(), 3);
         assert!(audit.get("name").is_some());
@@ -495,6 +495,10 @@ mod tests {
             "multiple `git commit -m` arguments",
             "git log -1 --format=%B",
             "subject, blank separator, and body bullets occupy distinct physical lines",
+            "nodeRepl.setResponseMeta",
+            "codingWifeGitCommitProof",
+            "beforeHead",
+            "commitSha",
         ] {
             assert!(
                 commit.contains(required),

@@ -4,14 +4,14 @@
   "skills": [
     {
       "name": "coding-wife-commit-work",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "entrypoint": "coding-wife-commit-work/SKILL.md",
-      "contentDigest": "sha256:4f44290b34228f17d204bd09c7869c8c4976444437e1dd5f18e7613c8484aea8",
+      "contentDigest": "sha256:8fe099d0601a636be301e18799f4d57d828e580079faf582eb1d37f47efe4c8e",
       "implicitInvocation": false,
       "files": [
         {
           "path": "coding-wife-commit-work/SKILL.md",
-          "sha256": "4f44290b34228f17d204bd09c7869c8c4976444437e1dd5f18e7613c8484aea8"
+          "sha256": "8fe099d0601a636be301e18799f4d57d828e580079faf582eb1d37f47efe4c8e"
         },
         {
           "path": "coding-wife-commit-work/agents/openai.yaml",

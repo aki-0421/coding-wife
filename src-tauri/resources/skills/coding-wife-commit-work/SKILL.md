@@ -33,6 +33,16 @@ Create at most one commit for the cohesive work completed in the current turn.
 7. Create no repeated commit. If the intended work is already committed, report the existing commit instead of committing or amending again.
 8. After committing, read the stored message with `git log -1 --format=%B`. Verify the subject, blank separator, and body bullets occupy distinct physical lines, inspect the resulting bytes, and reject any literal `\n` sequence before reporting success.
 
+## Return a Typed Proof from node_repl
+
+When the Git commit runs inside the `node_repl` `js` tool:
+
+1. Immediately before the commit mutation, read the full HEAD with `git rev-parse --verify HEAD`. Preserve that exact lowercase SHA as `beforeHead`; use the literal value `unborn` only when the repository has no HEAD.
+2. After the commit and all stored-message checks succeed, read the full resulting commit SHA with `git rev-parse --verify HEAD` as `commitSha`.
+3. Before the `js` call returns, attach exactly this versioned marker with `nodeRepl.setResponseMeta({ codingWifeGitCommitProof: { schemaVersion: 1, operation: "git_commit", beforeHead, commitSha } })`.
+4. Keep exactly those four fields inside `codingWifeGitCommitProof`. Do not put paths, commit output, diffs, credentials, or other repository data in the marker.
+5. Do not attach the marker when the commit failed, HEAD did not change, either full SHA is unknown, stored-message verification failed, or the commit cannot be attributed to this work unit.
+
 ## Report the Result
 
 Report the commit SHA and subject, the committed owned paths, verification results, and any protected or unresolved changes. If a safe isolated commit is impossible, leave Git history unchanged and report the exact safe reason.

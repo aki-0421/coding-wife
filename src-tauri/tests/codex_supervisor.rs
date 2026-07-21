@@ -677,7 +677,7 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
         .expect("main skill audit");
     let encoded_audit = serde_json::to_string(&audit).expect("serialize skill audit");
     assert_eq!(audit.name, "coding-wife-commit-work");
-    assert_eq!(audit.version, "1.1.0");
+    assert_eq!(audit.version, "1.2.0");
     assert!(audit.content_digest.starts_with("sha256:"));
     assert!(!encoded_audit.contains("SKILL.md"));
     assert!(!encoded_audit.contains("resources"));
@@ -698,6 +698,71 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
     assert!(!state.contains("commit_skill_exactly_once_invalid"));
     assert!(!state.contains("SKILL.md"));
     assert!(state.contains("interrupt_received"));
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn node_repl_commit_result_shape_completes_through_the_app_server_boundary() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("node_repl_commit");
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &fixture.workspace)
+        .await
+        .expect("register workspace");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor.connect().await.expect("connect fixture");
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("thread start");
+    let turn = supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            client_user_message_id: "node-repl-message".to_owned(),
+            text: "Create one reviewable fixture commit.".to_owned(),
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
+            attachment_handles: vec![],
+        })
+        .await;
+    assert!(
+        turn.is_ok(),
+        "turn start failed: {turn:?}; fixture state: {}",
+        read_state(&fixture.state).await
+    );
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let state = loop {
+        let state = read_state(&fixture.state).await;
+        if state.contains("node_repl_commit_result_shape_emitted") {
+            break state;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "node repl result shape was not emitted: {state}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert!(state.contains("turn_contract_ok"));
+    assert!(!state.contains("node_repl_commit_workspace_invalid"));
+    assert_eq!(supervisor.diagnostic().await.health, CodexHealth::Ready);
+    let commit_sha = std::process::Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(&fixture.workspace)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .expect("read fixture HEAD");
+    assert!(commit_sha.status.success());
+    assert_eq!(String::from_utf8_lossy(&commit_sha.stdout).trim().len(), 40);
     supervisor.shutdown().await;
 }
 

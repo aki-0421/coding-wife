@@ -193,6 +193,47 @@ impl GitReviewService {
         raw_turn_id: &str,
         item_id: &str,
     ) -> Result<Option<TrustedCommitProof>, GitReviewError> {
+        self.complete_trusted_commit_candidate_with_expected_heads(
+            candidate,
+            workspace_generation,
+            raw_thread_id,
+            raw_turn_id,
+            item_id,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn complete_trusted_commit_candidate_exact(
+        &self,
+        candidate: TrustedCommitCandidate,
+        workspace_generation: u64,
+        raw_thread_id: &str,
+        raw_turn_id: &str,
+        item_id: &str,
+        expected_before_head: &str,
+        expected_commit_sha: &str,
+    ) -> Result<Option<TrustedCommitProof>, GitReviewError> {
+        self.complete_trusted_commit_candidate_with_expected_heads(
+            candidate,
+            workspace_generation,
+            raw_thread_id,
+            raw_turn_id,
+            item_id,
+            Some((expected_before_head, expected_commit_sha)),
+        )
+        .await
+    }
+
+    async fn complete_trusted_commit_candidate_with_expected_heads(
+        &self,
+        candidate: TrustedCommitCandidate,
+        workspace_generation: u64,
+        raw_thread_id: &str,
+        raw_turn_id: &str,
+        item_id: &str,
+        expected_heads: Option<(&str, &str)>,
+    ) -> Result<Option<TrustedCommitProof>, GitReviewError> {
         if !candidate.matches_completion(workspace_generation, raw_thread_id, raw_turn_id, item_id)
         {
             return Err(git_error(
@@ -210,6 +251,18 @@ impl GitReviewService {
                 OPERATION_TRUSTED,
                 false,
             ));
+        }
+        if let Some((expected_before_head, expected_commit_sha)) = expected_heads {
+            if candidate.before_sha() != expected_before_head {
+                return Err(git_error(
+                    "GIT-COMMIT-PROOF-BEFORE",
+                    OPERATION_TRUSTED,
+                    false,
+                ));
+            }
+            if layout.head_sha != expected_commit_sha {
+                return Err(git_error("GIT-COMMIT-PROOF-SHA", OPERATION_TRUSTED, false));
+            }
         }
         if layout.head_sha == "unborn" || layout.head_sha == candidate.before_sha() {
             return Ok(None);

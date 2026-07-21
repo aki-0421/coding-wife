@@ -8,8 +8,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::codex::main_work_unit::{
-    MainCommandCompleted, MainCommandStarted, MainWorkUnitRuntime, MainWorkUnitStart,
-    MainWorkUnitTerminal, MainWorkUnitTerminalState,
+    MainCommandCompleted, MainCommandStarted, MainCommitProofIntent, MainCommitSource,
+    MainWorkUnitRuntime, MainWorkUnitStart, MainWorkUnitTerminal, MainWorkUnitTerminalState,
 };
 use crate::codex::types::MainSkillInjectionAudit;
 
@@ -196,6 +196,7 @@ async fn production_work_unit_runtime_enqueues_only_the_exact_verified_commit() 
                 raw_thread_id: "thread-fixture".to_owned(),
                 raw_turn_id: "turn-fixture".to_owned(),
                 item_id: "item-runtime-auto".to_owned(),
+                source: MainCommitSource::CommandExecution,
             },
         )
         .await;
@@ -209,7 +210,8 @@ async fn production_work_unit_runtime_enqueues_only_the_exact_verified_commit() 
                 raw_thread_id: "thread-fixture".to_owned(),
                 raw_turn_id: "turn-fixture".to_owned(),
                 item_id: "item-runtime-auto".to_owned(),
-                successful: true,
+                source: MainCommitSource::CommandExecution,
+                proof_intent: Some(MainCommitProofIntent::ObserveCurrentHead),
             },
         )
         .await;
@@ -248,6 +250,152 @@ async fn production_work_unit_runtime_enqueues_only_the_exact_verified_commit() 
 }
 
 #[tokio::test]
+async fn production_work_unit_runtime_accepts_exact_node_repl_commit_metadata() {
+    let fixture = RepositoryFixture::new("work-unit-runtime-node-repl");
+    let history = Arc::new(MemoryGitReviewHistory::new());
+    let service = service(&fixture.root, history.clone());
+    let sink = Arc::new(RecordingExplanationSink::active("ja"));
+    let runtime = GitReviewMainWorkUnitRuntime::with_dependencies(service, sink.clone());
+    let lease = runtime
+        .begin(runtime_start())
+        .await
+        .expect("work unit lease");
+    let before_head = fixture.git_text(&["rev-parse", "HEAD"]);
+
+    runtime
+        .command_started(
+            lease.clone(),
+            MainCommandStarted {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-fixture".to_owned(),
+                item_id: "item-node-repl".to_owned(),
+                source: MainCommitSource::NodeReplJs,
+            },
+        )
+        .await;
+    std::fs::write(fixture.root.join("node-repl.txt"), "typed MCP proof\n")
+        .expect("write node repl fixture");
+    fixture.git(&["add", "node-repl.txt"]);
+    fixture.git(&["commit", "-q", "-m", "feat: record node repl proof"]);
+    let commit_sha = fixture.git_text(&["rev-parse", "HEAD"]);
+    runtime
+        .command_completed(
+            lease.clone(),
+            MainCommandCompleted {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-fixture".to_owned(),
+                item_id: "item-node-repl".to_owned(),
+                source: MainCommitSource::NodeReplJs,
+                proof_intent: Some(MainCommitProofIntent::Exact {
+                    before_head,
+                    commit_sha: commit_sha.clone(),
+                }),
+            },
+        )
+        .await;
+    runtime
+        .terminal(
+            lease,
+            MainWorkUnitTerminal {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-fixture".to_owned(),
+                state: MainWorkUnitTerminalState::Completed,
+            },
+        )
+        .await;
+
+    let evidence = sink.evidence.lock().await;
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0].commit_id, format!("commit-{commit_sha}"));
+    assert_eq!(history.commit_count(), 1);
+}
+
+#[tokio::test]
+async fn production_work_unit_runtime_rejects_missing_mismatched_and_cross_source_proofs() {
+    for case in ["missing", "wrong_before", "wrong_sha", "cross_source"] {
+        let fixture = RepositoryFixture::new(case);
+        let history = Arc::new(MemoryGitReviewHistory::new());
+        let service = service(&fixture.root, history.clone());
+        let sink = Arc::new(RecordingExplanationSink::active("en"));
+        let runtime = GitReviewMainWorkUnitRuntime::with_dependencies(service, sink.clone());
+        let lease = runtime
+            .begin(runtime_start())
+            .await
+            .expect("work unit lease");
+        let before_head = fixture.git_text(&["rev-parse", "HEAD"]);
+        runtime
+            .command_started(
+                lease.clone(),
+                MainCommandStarted {
+                    workspace_generation: 1,
+                    raw_thread_id: "thread-fixture".to_owned(),
+                    raw_turn_id: "turn-fixture".to_owned(),
+                    item_id: format!("item-{case}"),
+                    source: MainCommitSource::NodeReplJs,
+                },
+            )
+            .await;
+        std::fs::write(fixture.root.join("untrusted.txt"), format!("{case}\n"))
+            .expect("write untrusted fixture");
+        fixture.git(&["add", "untrusted.txt"]);
+        fixture.git(&["commit", "-q", "-m", "chore: untrusted fixture"]);
+        let commit_sha = fixture.git_text(&["rev-parse", "HEAD"]);
+        let (source, proof_intent) = match case {
+            "missing" => (MainCommitSource::NodeReplJs, None),
+            "wrong_before" => (
+                MainCommitSource::NodeReplJs,
+                Some(MainCommitProofIntent::Exact {
+                    before_head: "a".repeat(40),
+                    commit_sha,
+                }),
+            ),
+            "wrong_sha" => (
+                MainCommitSource::NodeReplJs,
+                Some(MainCommitProofIntent::Exact {
+                    before_head,
+                    commit_sha: "b".repeat(40),
+                }),
+            ),
+            "cross_source" => (
+                MainCommitSource::CommandExecution,
+                Some(MainCommitProofIntent::ObserveCurrentHead),
+            ),
+            _ => unreachable!(),
+        };
+        runtime
+            .command_completed(
+                lease.clone(),
+                MainCommandCompleted {
+                    workspace_generation: 1,
+                    raw_thread_id: "thread-fixture".to_owned(),
+                    raw_turn_id: "turn-fixture".to_owned(),
+                    item_id: format!("item-{case}"),
+                    source,
+                    proof_intent,
+                },
+            )
+            .await;
+        runtime
+            .terminal(
+                lease,
+                MainWorkUnitTerminal {
+                    workspace_generation: 1,
+                    raw_thread_id: "thread-fixture".to_owned(),
+                    raw_turn_id: "turn-fixture".to_owned(),
+                    state: MainWorkUnitTerminalState::Completed,
+                },
+            )
+            .await;
+
+        assert!(sink.evidence.lock().await.is_empty(), "accepted {case}");
+        assert_eq!(history.commit_count(), 0, "persisted {case}");
+    }
+}
+
+#[tokio::test]
 async fn production_work_unit_runtime_drops_no_change_failure_and_invalidated_generation() {
     let fixture = RepositoryFixture::new("work-unit-runtime-negative");
     let history = Arc::new(MemoryGitReviewHistory::new());
@@ -266,6 +414,7 @@ async fn production_work_unit_runtime_drops_no_change_failure_and_invalidated_ge
                 raw_thread_id: "thread-fixture".to_owned(),
                 raw_turn_id: "turn-unchanged".to_owned(),
                 item_id: "item-unchanged".to_owned(),
+                source: MainCommitSource::CommandExecution,
             },
         )
         .await;
@@ -277,7 +426,8 @@ async fn production_work_unit_runtime_drops_no_change_failure_and_invalidated_ge
                 raw_thread_id: "thread-fixture".to_owned(),
                 raw_turn_id: "turn-unchanged".to_owned(),
                 item_id: "item-unchanged".to_owned(),
-                successful: true,
+                source: MainCommitSource::CommandExecution,
+                proof_intent: Some(MainCommitProofIntent::ObserveCurrentHead),
             },
         )
         .await;
@@ -306,7 +456,8 @@ async fn production_work_unit_runtime_drops_no_change_failure_and_invalidated_ge
                 raw_thread_id: "thread-fixture".to_owned(),
                 raw_turn_id: "turn-invalidated".to_owned(),
                 item_id: "item-invalidated".to_owned(),
-                successful: false,
+                source: MainCommitSource::CommandExecution,
+                proof_intent: None,
             },
         )
         .await;

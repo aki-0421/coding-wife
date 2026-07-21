@@ -255,9 +255,12 @@ def validate_skill(inputs, expected_name):
             return False, None
         entry = entries[0]
         digest = "sha256:" + hashlib.sha256(skill_path.read_bytes()).hexdigest()
+        expected_version = (
+            "1.2.0" if expected_name == "coding-wife-commit-work" else "1.1.0"
+        )
         valid = (
             manifest.get("authority") == "app_bundle"
-            and entry.get("version") == "1.1.0"
+            and entry.get("version") == expected_version
             and entry.get("entrypoint")
             == f"{expected_name}/SKILL.md"
             and entry.get("contentDigest") == digest
@@ -321,6 +324,104 @@ def send_support_item(item_type, text):
         )
 
 
+def git_text(workspace, arguments):
+    completed = subprocess.run(
+        ["/usr/bin/git", "-C", str(workspace), *arguments],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(workspace), "LC_ALL": "C"},
+    )
+    return completed.stdout.strip()
+
+
+def send_node_repl_commit(thread_id, turn_id, workspace):
+    item_id = "item-node-repl-commit"
+    common = {
+        "id": item_id,
+        "type": "mcpToolCall",
+        "server": "node_repl",
+        "tool": "js",
+        "arguments": {
+            "code": "nodeRepl.write('raw Git source is not a proof')",
+            "title": "Create reviewable commit",
+        },
+        "appContext": None,
+        "pluginId": None,
+        "mcpAppResourceUri": None,
+    }
+    send(
+        {
+            "method": "item/started",
+            "params": {
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "item": {
+                    **common,
+                    "status": "inProgress",
+                    "result": None,
+                    "error": None,
+                    "durationMs": None,
+                },
+            },
+        }
+    )
+    try:
+        before_head = git_text(workspace, ["rev-parse", "--verify", "HEAD"])
+    except subprocess.CalledProcessError:
+        before_head = "unborn"
+    fixture_path = workspace / "node-repl-proof.txt"
+    fixture_path.write_text("exact node repl commit proof\n", encoding="utf-8")
+    git_text(workspace, ["add", "--", "node-repl-proof.txt"])
+    git_text(
+        workspace,
+        [
+            "-c",
+            "user.name=Coding Wife Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "feat: record node repl commit proof",
+        ],
+    )
+    commit_sha = git_text(workspace, ["rev-parse", "--verify", "HEAD"])
+    send(
+        {
+            "method": "item/completed",
+            "params": {
+                "threadId": thread_id,
+                "turnId": turn_id,
+                "item": {
+                    **common,
+                    "status": "completed",
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{ ok: true, kind: 'git_commit' }",
+                            }
+                        ],
+                        "structuredContent": None,
+                        "_meta": {
+                            "codingWifeGitCommitProof": {
+                                "schemaVersion": 1,
+                                "operation": "git_commit",
+                                "beforeHead": before_head,
+                                "commitSha": commit_sha,
+                            }
+                        },
+                    },
+                    "error": None,
+                    "durationMs": 12,
+                },
+            },
+        }
+    )
+    record("node_repl_commit_result_shape_emitted")
+
+
 def main():
     args = sys.argv[1:]
     if args == ["--version"]:
@@ -377,6 +478,7 @@ def main():
     pending_fixture = []
     main_runtime_workspace_roots = None
     main_additional_writable_roots = []
+    thread_workspaces = {}
     for raw_line in sys.stdin.buffer:
         try:
             message = json.loads(raw_line)
@@ -695,6 +797,7 @@ def main():
                 message_id,
                 response,
             )
+            thread_workspaces[thread_id] = pathlib.Path(params.get("cwd", ""))
             continue
         if method == "turn/start":
             input_text = ""
@@ -1058,6 +1161,52 @@ def main():
                 result(
                     message_id,
                     {"turn": {"id": "turn-fixture", "status": "inProgress"}},
+                )
+                continue
+            if MODE == "node_repl_commit":
+                workspace = thread_workspaces.get(params["threadId"])
+                if workspace is None or not workspace.is_absolute():
+                    record("node_repl_commit_workspace_invalid")
+                    continue
+                send_node_repl_commit(params["threadId"], "turn-fixture", workspace)
+                output = json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "response": {
+                            "kind": "result",
+                            "message": "The reviewable commit is ready.",
+                            "decisionId": None,
+                            "question": None,
+                            "options": None,
+                            "context": None,
+                            "allowFreeform": None,
+                        },
+                    },
+                    separators=(",", ":"),
+                )
+                send(
+                    {
+                        "method": "item/completed",
+                        "params": {
+                            "threadId": params["threadId"],
+                            "turnId": "turn-fixture",
+                            "item": {
+                                "id": "item-node-repl-result",
+                                "type": "agentMessage",
+                                "text": output,
+                                "phase": "final_answer",
+                            },
+                        },
+                    }
+                )
+                send(
+                    {
+                        "method": "turn/completed",
+                        "params": {
+                            "threadId": params["threadId"],
+                            "turn": {"id": "turn-fixture", "status": "completed"},
+                        },
+                    }
                 )
                 continue
             if MODE == "unknown_request":
