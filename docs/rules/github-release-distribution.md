@@ -22,6 +22,8 @@ Apple Developer Programの有料membership、Developer ID Application certificat
 
 Tauri公式が明記するとおり、ad-hoc署名はmacOSの初回起動時に利用者がPrivacy & Securityから明示許可する操作を不要にはしない。したがって「DMGを開いてApplicationsへcopyする」までは標準GUIだけで完了するが、download後の初回launchではGatekeeperの**Open Anyway**が必要になり得る。無料配布と、Gatekeeper例外が一切不要な初回起動を同時に達成したとは表示しない。
 
+GitHub公式では、public repositoryがstandard GitHub-hosted runnerを使うActions実行は無料である。現在のpublic repositoryではstandard `macos-14`だけを使い、常時課金のlarger runnerや外部配布serviceを要求しない。将来private repositoryへ変更した場合はplanのincluded minutesと超過課金が適用され得るため、その状態を「無条件に無料」とは扱わない。
+
 ## 正本と責務境界
 
 - `.github/workflows/release.yml`を外部配布用workflowの正本とする。
@@ -52,9 +54,10 @@ tag不一致、`develop`外commit、既存のpublic release、依存準備、bui
 1. Full historyをcredential永続化なしでcheckoutし、tag/version/develop ancestryを検証する。
 2. Node.js `22.12.0`、pnpm `10.12.2`、`rust-toolchain.toml`、両lockfileから依存を準備する。
 3. Apple Silicon targetのlocked Cargo dependencyをfetchする。
-4. `pnpm release:macos`を実行し、production `.app`、ad-hoc seal、Finder非依存DMG、2回のcandidate mount、canonical snapshot verificationを完走する。
-5. canonical DMGをtagを含む安定名へcopyし、そのexact byte列のSHA-256 sidecarを作る。
-6. 同じtagのdraft Releaseを作成または更新し、DMGとSHA-256 sidecarだけをuploadする。
+4. `pnpm test:release`でreal arm64 fixtureによるrelease packaging境界を検証する。
+5. `pnpm release:macos`を実行し、production `.app`、ad-hoc seal、Finder非依存DMG、2回のcandidate mount、canonical snapshot verificationを完走する。
+6. canonical DMGをtagを含む安定名へcopyし、そのexact byte列のSHA-256 sidecarを作る。
+7. 同じtagのdraft Releaseを作成または更新し、DMGとSHA-256 sidecarだけをuploadする。
 
 Tauri公式はGitHub上のbuild・uploadに`tauri-action`を利用できるとしているが、このリポジトリでは既存のresource inventory、private-path hygiene、rollback、複数mount検証をupload前に必須とする。このため固定済みproject CLIとrepository-owned release scriptを直接実行し、最後のGitHub Release操作だけを分離する。未検証bundleを先にrelease assetへ置かない。
 
@@ -76,7 +79,7 @@ automatic updater用signatureや`latest.json`は生成しない。checksumはdow
 
 ## ライセンス境界
 
-root `LICENSE`はCoding Wife contributorsが保有する独自コードをMIT Licenseで利用・再配布可能にする。third-party dependency、Live2D Cubism SDK、Hiyori modelなど、リポジトリ内で別のNOTICE、terms、licenseを持つ素材にはそれぞれの条件が優先して適用される。配布物は生成済み第三者依存台帳と既存の原文NOTICE・termsを保持する。
+root `LICENSE`はCoding Wife contributorsが保有する独自コードをMIT Licenseで利用・再配布可能にする。Tauri appはrootとbyte一致する`CODING-WIFE-LICENSE.txt`をlegal resource treeへ含み、release verifierが欠落・改変を拒否する。third-party dependency、Live2D Cubism SDK、Hiyori modelなど、リポジトリ内で別のNOTICE、terms、licenseを持つ素材にはそれぞれの条件が優先して適用される。配布物は生成済み第三者依存台帳と既存の原文NOTICE・termsも保持する。
 
 ## 公開前の手動gate
 
@@ -108,3 +111,6 @@ workflow成功は公開可能なdraftを作るが、次を自動で証明しな�
 - [Tauri: GitHub Actions pipeline](https://v2.tauri.app/distribute/pipelines/github/)
 - [Apple: Safely open apps on your Mac](https://support.apple.com/en-us/102445)
 - [GitHub-hosted runners reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+- [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+- [GitHub CLI: `gh release create`](https://cli.github.com/manual/gh_release_create)
+- [GitHub CLI: `gh release upload`](https://cli.github.com/manual/gh_release_upload)

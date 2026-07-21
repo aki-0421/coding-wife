@@ -273,7 +273,7 @@ The verified output path is:
 src-tauri/target/release/bundle/dmg/Coding-Wife.dmg
 ```
 
-The release workflow applies an ad-hoc integrity seal and verifies every resource, but the application has no Developer ID identity and is not notarized. Build from reviewed source whenever possible. If Gatekeeper blocks a verified local build, follow the bounded System Settings procedure in [the testing guide](docs/testing.md); do not disable Gatekeeper or remove quarantine globally. Developer ID signing, notarization, stapling, Intel/universal packaging, auto-update, a public checksum, and a public artifact URL are not complete and must not be claimed.
+The release workflow applies an ad-hoc integrity seal and verifies every resource, but the application has no Developer ID identity and is not notarized. A matching `v<version>` tag on `develop` now builds the same verified DMG on GitHub's Apple Silicon runner and places it with its SHA-256 in a draft GitHub Release. Build from reviewed source whenever possible. If Gatekeeper blocks a verified local or downloaded build, follow the bounded System Settings procedure in [the testing guide](docs/testing.md); do not disable Gatekeeper or remove quarantine globally. Developer ID signing, notarization, stapling, Intel/universal packaging, auto-update, a public checksum, and a public artifact URL are not complete until a tagged draft passes download and install smoke and is manually published.
 
 ## Privacy and security
 
@@ -297,7 +297,7 @@ The release workflow applies an ad-hoc integrity seal and verifies every resourc
 
 The generated inventory conservatively covers all 395 packages in the pnpm declared production closure and the 235 effective Cargo normal dependencies reported for `aarch64-apple-darwin`; it is not a claim that every npm package contributed bytes to the final Vite bundle. Generation is offline, resolves every Cargo tree display to one exact metadata package ID, parses license expressions with a strict SPDX grammar, and fails when either lock changes, a committed notice is stale, a Cargo identity is ambiguous, an expression is malformed, or required source, integrity/checksum, license, or attribution metadata is missing, unknown, or forbidden. The existing Live2D and Hiyori terms remain byte-verified and linked from the same packaged index.
 
-A repository-level project `LICENSE` does **not** exist yet. Selecting one is an explicit owner decision and submission blocker, not permission to copy or redistribute the project; the dependency inventory does not license Coding Wife itself.
+Project-owned code is available under the repository's [MIT License](LICENSE). Third-party dependencies, the Live2D Cubism SDK, and the bundled Hiyori model remain governed by their own notices and terms; the project license does not replace those conditions.
 
 ## Honest limitations
 
@@ -306,7 +306,7 @@ A repository-level project `LICENSE` does **not** exist yet. Selecting one is an
 - The current artifact has only an ad-hoc integrity seal, no Developer ID signature or notarization, and no public binary URL or checksum is recorded.
 - Workspace history is local; there is no account, cloud sync, remote collaboration, or automatic backup service.
 - Locale UI supports English and Japanese, but this README does not claim native preference persistence beyond the behavior verified in the app.
-- The project license, external submission URLs, primary Codex Session ID, and independent install evidence remain pending.
+- External submission URLs, the primary Codex Session ID, and independent install evidence remain pending.
 
 ## Submission completion checklist
 
@@ -314,7 +314,7 @@ A repository-level project `LICENSE` does **not** exist yet. Selecting one is an
 - [x] Reproducible macOS source build and honest deterministic UI demo documented.
 - [x] Locked dependency inventory, attribution notice, and Live2D/Hiyori terms are generated and packaged.
 - [ ] Confirm **Developer Tools** as the final Devpost track selection.
-- [ ] Add and review a repository-level project license.
+- [x] Add and review a repository-level project license.
 - [ ] Record a public, under-three-minute YouTube demo and replace the pending status above.
 - [ ] Create the Devpost project and record its public URL.
 - [ ] Submit the actual primary Codex `/feedback` Session ID in Devpost.

@@ -1,7 +1,7 @@
 ---
 title: Coding Wife Final Submission Materials
 description: Paste-ready English copy, judging instructions, video script, field map, evidence ledger, and final smoke checklist for the Coding Wife OpenAI Build Week submission.
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - Preparing, reviewing, or entering the final Coding Wife submission in Devpost.
   - Recording the public demo video or capturing final submission screenshots.
@@ -109,7 +109,7 @@ The distinctive combination is a local developer command center with normalized 
 
 ### Honest limitations
 
-The supported release target is macOS 14 or later on Apple Silicon. Real GPT work requires a compatible, authenticated local Codex installation and a current-user-owned writable Git repository. The browser interaction demo is synthetic and does not call GPT, read or write Git, use native SQLite, or persist after restart. The current app is unsigned and not notarized, and no public binary URL or checksum is recorded yet. There is no cloud sync, remote collaboration, automatic backup, Intel Mac support, Windows support, or Linux support. A project license, public video, public artifact, primary Codex Session ID, final team record, and independent install evidence remain `PENDING` until separately completed and verified.
+The supported release target is macOS 14 or later on Apple Silicon. Real GPT work requires a compatible, authenticated local Codex installation and a current-user-owned writable Git repository. The browser interaction demo is synthetic and does not call GPT, read or write Git, use native SQLite, or persist after restart. The current app is ad-hoc signed and not notarized; version-tag automation can prepare a draft DMG and checksum, but no public binary URL or checksum is recorded yet. There is no cloud sync, remote collaboration, automatic backup, Intel Mac support, Windows support, or Linux support. The project-owned code now uses the MIT License. A public video, public artifact, primary Codex Session ID, final team record, and independent install evidence remain `PENDING` until separately completed and verified.
 
 ## 3. Judge testing instructions
 
@@ -119,7 +119,7 @@ The supported release target is macOS 14 or later on Apple Silicon. Real GPT wor
 |---|---|---|
 | Deterministic browser interaction demo | None | Available from a development checkout; visibly marked as non-production |
 | Production native path | The judge's compatible authenticated local Codex installation | Available from source on the supported macOS target |
-| Public downloadable DMG | None planned for download; Gatekeeper warning still applies | URL and checksum are `PENDING` |
+| Public downloadable DMG | Version-tag workflow prepares a free ad-hoc-signed draft; Gatekeeper warning still applies | Public URL and checksum are `PENDING` |
 | Hosted production demo | `PENDING` | No hosted production instance is currently claimed |
 | Judge test account | `PENDING` | Not required for either documented local path |
 
@@ -138,7 +138,7 @@ The supported release target is macOS 14 or later on Apple Silicon. Real GPT wor
 | Application environment variables | None |
 | Application API key | None; the app uses the user's authenticated local Codex installation |
 
-Windows, Linux, Intel Mac, signing, notarization, stapling, automatic updates, and a hosted production service are not supported claims for this submission.
+Windows, Linux, Intel Mac, Developer ID signing, notarization, stapling, automatic updates, and a hosted production service are not supported claims for this submission.
 
 ### Path A: two-minute deterministic interaction demo
 
@@ -270,7 +270,7 @@ The public pages do not expose every logged-in form label or character limit. Cr
 | Built with / technology tags | If shown | Codex, `gpt-5.6-sol`, React, TypeScript, Tauri, Rust, SQLite, Live2D | `PENDING_FORM_CONFIRMATION` |
 | Screenshots / gallery | If shown | Screenshot ledger in section 6 | `PENDING_FORM_CONFIRMATION` |
 | Cover image / thumbnail | If shown | Final approved screenshot or composed cover | `PENDING_FORM_CONFIRMATION` |
-| Project license | Required before a public repository submission | Repository-level license review | `PENDING` |
+| Project license | Required before a public repository submission | Root MIT License and byte-identical packaged copy | Ready |
 | Prior work / Build Week boundary | Required for an existing project | README Build Week section and audit boundary | Ready; final commit range is `PENDING` |
 | Private repository invitations | Required before the deadline only if repository remains private | `testing@devpost.com` and `build-week-event@openai.com` | `PENDING` if the final repository is private; otherwise not applicable |
 | Submission/project URL | Generated externally | Save after draft creation and after submit | `PENDING` |
@@ -284,8 +284,8 @@ The public pages do not expose every logged-in form label or character limit. Cr
 | Audit boundary | `fbd7be97fe3805f916bb2cbe6f78f842caee3630` | Git commit identity | Repository history | Recorded; not a claim about the official period start |
 | Locked dependency inventory | `third-party/THIRD-PARTY-DEPENDENCIES.json` (439,410 bytes) | `f3e0d65d20cebc9da230f190c930a243d4d63ef5bdec2ac521d028f64680222f`; pnpm lock `9bfdf659e2f3c877b8df97abff0281043f7f03048df2d5df2d069f0129b23036`; Cargo lock `e76110259ad5a5f9a5bcd9480e192fcbbde3a345251348071169b1e0d7fccffc` | Repository and packaged app resources | Generated and verified: npm production closure 397, effective Cargo normal graph 235, unknown/forbidden/missing 0 |
 | Locked dependency notice | `third-party/THIRD-PARTY-DEPENDENCIES.md` (971,131 bytes) | `7f295a759b96d6b21111855c4b2d68456bbc919adff541b71718779c4ee944ca` | Repository and packaged app resources | Generated and verified; Cargo identities and SPDX grammar fail closed, and the npm closure is conservative package-manager classification rather than bundle attribution |
-| Coding Wife project license | Root `LICENSE` | `PENDING` owner legal decision | Repository root | `PENDING`; blocks public submission and redistribution |
-| macOS DMG | `src-tauri/target/release/bundle/dmg/Coding-Wife.dmg` | `PENDING` | `PENDING_PUBLIC_DEMO_OR_ARTIFACT_URL` | Build/publication/install smoke `PENDING` |
+| Coding Wife project license | Root `LICENSE` (1,081 bytes) | `70aa5f92ad3307ec6c1cdfcc69938131c24081fbe31572f63119c89fb38f8d54` | Repository root | MIT License recorded; third-party terms remain separate |
+| macOS DMG | `src-tauri/target/release/bundle/dmg/Coding-Wife.dmg`; tagged draft name `Coding-Wife-v<version>-macOS-arm64.dmg` | `PENDING` | `PENDING_PUBLIC_DEMO_OR_ARTIFACT_URL` | Draft automation implemented; build/publication/install smoke `PENDING` |
 | Video master | `PENDING` | `PENDING` | Local controlled storage | `PENDING` |
 | Public video | Same approved bytes as the final master where platform processing permits comparison | Local master SHA-256 `PENDING` | `PENDING_PUBLIC_VIDEO_URL` | `PENDING` |
 | Screenshot S01 | English workspace and normalized timeline | `PENDING` | Devpost gallery `PENDING` | `PENDING` |
@@ -317,8 +317,8 @@ Do not paste a checksum copied from a different build, renamed draft, transcoded
 | App-owned Git review is read-only | `src-tauri/src/git_review/`; `src/features/git-review/`; typed Git review contracts | Git runner, repository boundary, evidence, integration, store, and transport tests | Video 1:29–1:45; S03 | Final gate and S03 `PENDING` |
 | Commit explanation is isolated and explicitly presented | `src-tauri/src/codex/commit_explanation.rs`; `src-tauri/src/codex/support_isolation.rs`; `src/features/git-review/commit-explanation-adapter.ts`; narration policy | Support isolation, commit explanation, intent-race, narration, and demo composition tests | Video 1:45–2:01; S04 | Final gate and S04 `PENDING` |
 | Production history is local SQLite; browser demo is deterministic | `src-tauri/src/workspace_history/store.rs`; explicit demo transport/runtime selection in `src/app/` and `src/features/git-review/demo-transport.ts` | Workspace history tests and App demo tests | Path A preview label plus native Path B | Final smoke `PENDING` |
-| Release target is macOS 14+ Apple Silicon | `src-tauri/tauri.conf.json`; release scripts; `docs/testing.md` | Release-script tests, debug native build, final DMG/install smoke | Closing card | Final DMG/install smoke `PENDING` |
-| Locked third-party dependencies are attributable and packaged | `scripts/licenses/dependency-notices.mjs`; `third-party/THIRD-PARTY-DEPENDENCIES.*`; `src-tauri/resources/legal/`; both lockfiles | Offline license gate; stale/unknown/forbidden/missing fixtures; Live2D supply-chain verification | Repository/testing evidence only | Dependency notice Ready; project license remains `PENDING` |
+| Release target is macOS 14+ Apple Silicon | `src-tauri/tauri.conf.json`; `.github/workflows/release.yml`; release scripts; `docs/testing.md` | Release-tag validation, release-script tests, debug native build, final DMG/install smoke | Closing card | Automation implemented; final DMG/install smoke `PENDING` |
+| Project and third-party licensing are explicit | Root `LICENSE`; `scripts/licenses/dependency-notices.mjs`; `third-party/THIRD-PARTY-DEPENDENCIES.*`; `src-tauri/resources/legal/`; both lockfiles | MIT license identity; offline dependency gate; stale/unknown/forbidden/missing fixtures; Live2D supply-chain verification | Repository/testing evidence only | Project license and dependency notice Ready; final artifact review `PENDING` |
 | Live2D is presentation-only and optional speech is explicit | Character runtime and context contracts; `src-tauri/src/narration/`; native OpenAI Speech policy | Character security, supply-chain, narration policy, caption, and settings tests | Main workspace and optional caption shot | Final gate `PENDING` |
 | Build Week work is separable from the audit boundary | Root README; Git history after `fbd7be97fe3805f916bb2cbe6f78f842caee3630` | `git diff --stat` and `git log` for the frozen range | Codex/test montage 2:19–2:33 | Final submission commit `PENDING` |
 
@@ -368,12 +368,12 @@ Run this after the source commit, README, DMG, video, screenshots, and Devpost d
 
 ### D. DMG install smoke, if submitted
 
-- [ ] Build `Coding-Wife.dmg` from the frozen source commit with `pnpm release:macos`.
+- [ ] Build `Coding-Wife.dmg` from the frozen source commit with `pnpm release:macos`, or push its matching `v<version>` tag and wait for the draft Release workflow.
 - [ ] Record its SHA-256 before upload.
 - [ ] Download the public artifact into a clean location and record its SHA-256.
 - [ ] Confirm the downloaded checksum matches the recorded artifact.
 - [ ] Open the DMG, drag the app to Applications, and launch it.
-- [ ] Follow only the bounded System Settings **Open Anyway** process if Gatekeeper blocks the unsigned app.
+- [ ] Follow only the bounded System Settings **Open Anyway** process if Gatekeeper blocks the ad-hoc-signed, unnotarized app.
 - [ ] Do not disable Gatekeeper or remove quarantine globally.
 - [ ] Confirm the built-in Hiyori model renders and the first native workspace flow starts.
 

@@ -1,7 +1,7 @@
 ---
 title: Final Submission Checklist
 description: "参加資格からDevpost送信、デモ、リポジトリ、締切までを確認する最終チェックリスト。"
-updated: 2026-07-19
+updated: 2026-07-21
 read_when:
   - "提出前の最終確認を行うとき。"
   - "Devpost、動画、リポジトリ、審査アクセスをスモークテストするとき。"
@@ -62,7 +62,7 @@ last_verified: 2026-07-18 JST
 ## E. Repository
 
 - [ ] repository URL が正しい
-- [ ] public repo の場合 `LICENSE` がある
+- [x] public repo の場合 `LICENSE` がある（MIT License）
 - [ ] private repo の場合、次の両方へ共有済み
   - [ ] `testing@devpost.com`
   - [ ] `build-week-event@openai.com`
