@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path};
 
 use chrono::Utc;
 use sha2::{Digest, Sha256};
 
 use crate::codex::workspace::validate_git_repository;
+use crate::platform_fs::{current_user_id, MetadataExt, PermissionsExt};
 
 use super::error::{git_error, GitReviewError};
 pub(crate) use super::git_layout::is_object_id;
@@ -365,7 +365,6 @@ pub(crate) async fn worktree_mode(
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
         if metadata.permissions().mode() & 0o111 != 0 {
             return Ok(Some("100755".to_owned()));
         }
@@ -460,7 +459,7 @@ pub(crate) fn read_local_config_value(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(git_error("GIT-CONFIG-READ", OPERATION_INSPECT, true)),
     };
-    let uid = unsafe { libc::geteuid() };
+    let uid = current_user_id();
     if !metadata.is_file()
         || metadata.file_type().is_symlink()
         || metadata.len() > 1024 * 1024
@@ -595,7 +594,7 @@ fn read_index_state(index_file: &Path) -> Result<IndexState, GitReviewError> {
 }
 
 fn validate_index_metadata(metadata: &fs::Metadata) -> Result<(), GitReviewError> {
-    let uid = unsafe { libc::geteuid() };
+    let uid = current_user_id();
     if !metadata.is_file()
         || metadata.file_type().is_symlink()
         || metadata.len() > MAX_INDEX_BYTES

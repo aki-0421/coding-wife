@@ -358,12 +358,27 @@ fn os_app_check_for(
             .clone()
             .unwrap_or_else(|| "unavailable".to_owned()),
     ));
-    if platform != "macos" || architecture != "aarch64" {
+    let supported_tuple = matches!(
+        (platform, architecture),
+        ("macos", "aarch64") | ("windows", "x86_64") | ("linux", "x86_64")
+    );
+    if !supported_tuple {
         return check(
             ReadinessCheckId::OsApp,
             ReadinessStatus::Blocked,
             checked_at,
             "READINESS-OS-UNSUPPORTED",
+            false,
+            ReadinessRecoveryAction::None,
+            facts,
+        );
+    }
+    if platform != "macos" {
+        return check(
+            ReadinessCheckId::OsApp,
+            ReadinessStatus::Ready,
+            checked_at,
+            "READINESS-OS-READY",
             false,
             ReadinessRecoveryAction::None,
             facts,
@@ -1163,7 +1178,7 @@ mod tests {
     }
 
     #[test]
-    fn macos_support_uses_numeric_major_and_fails_closed() {
+    fn release_platform_support_uses_exact_tuples_and_macos_version() {
         let checked_at = "2026-07-18T00:00:00.000Z";
         for version in ["14", "14.0", "15.5"] {
             assert_eq!(
@@ -1179,6 +1194,23 @@ mod tests {
             assert_eq!(
                 os_app_check_for(checked_at, "macos", "aarch64", version).status,
                 ReadinessStatus::Unavailable,
+            );
+        }
+        for (platform, architecture) in [("windows", "x86_64"), ("linux", "x86_64")] {
+            assert_eq!(
+                os_app_check_for(checked_at, platform, architecture, None).status,
+                ReadinessStatus::Ready,
+            );
+        }
+        for (platform, architecture) in [
+            ("macos", "x86_64"),
+            ("windows", "aarch64"),
+            ("linux", "aarch64"),
+            ("freebsd", "x86_64"),
+        ] {
+            assert_eq!(
+                os_app_check_for(checked_at, platform, architecture, None).status,
+                ReadinessStatus::Blocked,
             );
         }
     }

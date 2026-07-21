@@ -1,6 +1,5 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -8,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
+
+use crate::platform_fs::{current_user_id, MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use super::error::{narration_error, NarrationResult};
 use super::process::{terminate_owned_child, NarrationProcessControl};
@@ -408,6 +409,5 @@ fn verify_audio_file(path: &Path) -> NarrationResult<()> {
 }
 
 fn effective_uid() -> u32 {
-    // SAFETY: geteuid has no arguments and returns the current process identity.
-    unsafe { libc::geteuid() }
+    current_user_id()
 }

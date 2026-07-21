@@ -11,5 +11,5 @@ pub use types::{
     AppPreferencesGetRequestV2, AppPreferencesSnapshotV2, AppPreferencesUpdateRequestV2,
 };
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod integration_tests;

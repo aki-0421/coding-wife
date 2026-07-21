@@ -3,16 +3,23 @@ use std::ffi::OsString;
 use std::ffi::{CStr, OsStr};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
 #[cfg(target_os = "macos")]
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex as StdMutex;
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+
+use crate::platform_fs::{
+    current_user_id, MetadataExt, OpenOptionsExt, PermissionsExt, O_CLOEXEC, O_DIRECTORY,
+    O_NOFOLLOW,
+};
 
 use super::bundled_skill::{ResolvedBundledSkill, EXPLAIN_COMMIT_SKILL_NAME};
 use super::support::{SupportRuntimeError, SUPPORT_PERMISSION_PROFILE};
@@ -491,7 +498,7 @@ fn create_lock_file(path: &Path) -> Result<File, SupportRuntimeError> {
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(O_NOFOLLOW | O_CLOEXEC)
         .open(path)
         .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
     validate_lock_file(&file)?;
@@ -507,7 +514,7 @@ fn open_existing_lock_file(path: &Path) -> Result<File, SupportRuntimeError> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(O_NOFOLLOW | O_CLOEXEC)
         .open(path)
         .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
     validate_lock_file(&file)?;
@@ -529,16 +536,44 @@ fn validate_lock_file(file: &File) -> Result<(), SupportRuntimeError> {
 }
 
 fn try_lock_file(file: &File) -> Result<bool, SupportRuntimeError> {
-    // SAFETY: flock only observes the valid descriptor owned by `file`.
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if result == 0 {
-        return Ok(true);
+    #[cfg(unix)]
+    {
+        // SAFETY: flock only observes the valid descriptor owned by `file`.
+        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if result == 0 {
+            return Ok(true);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            Ok(false)
+        } else {
+            Err(SupportRuntimeError::PrivateRuntime)
+        }
     }
-    let error = std::io::Error::last_os_error();
-    if error.kind() == std::io::ErrorKind::WouldBlock {
-        Ok(false)
-    } else {
-        Err(SupportRuntimeError::PrivateRuntime)
+
+    #[cfg(windows)]
+    {
+        type Handle = *mut std::ffi::c_void;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn LockFile(
+                file: Handle,
+                offset_low: u32,
+                offset_high: u32,
+                bytes_low: u32,
+                bytes_high: u32,
+            ) -> i32;
+        }
+
+        // SAFETY: the handle is borrowed from a live File and LockFile does not retain it.
+        let locked = unsafe { LockFile(file.as_raw_handle().cast(), 0, 0, u32::MAX, u32::MAX) };
+        if locked != 0 {
+            return Ok(true);
+        }
+        match std::io::Error::last_os_error().raw_os_error() {
+            Some(32 | 33) => Ok(false),
+            _ => Err(SupportRuntimeError::PrivateRuntime),
+        }
     }
 }
 
@@ -551,7 +586,7 @@ impl Drop for PrivateRunDirectory {
 fn open_directory_descriptor(path: &Path) -> Result<File, SupportRuntimeError> {
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         .open(path)
         .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
     let metadata = file
@@ -596,7 +631,7 @@ pub(super) fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), Sup
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(O_NOFOLLOW | O_CLOEXEC)
         .open(path)
         .map_err(|_| SupportRuntimeError::PrivateRuntime)?;
     file.write_all(contents)
@@ -626,7 +661,7 @@ pub(super) fn bridge_auth(source: &Path, codex_home: &Path) -> Result<(), Suppor
     }
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(O_NOFOLLOW | O_CLOEXEC)
         .open(source)
         .map_err(|_| SupportRuntimeError::AuthBridge)?;
     let opened = file
@@ -699,13 +734,8 @@ fn file_identity(metadata: &std::fs::Metadata) -> (u64, u64, u64, i64, i64, u32,
     )
 }
 
-unsafe extern "C" {
-    fn getuid() -> u32;
-}
-
 fn current_uid() -> u32 {
-    // SAFETY: getuid has no arguments and cannot fail.
-    unsafe { getuid() }
+    current_user_id()
 }
 
 pub(super) fn support_config(mock_base_url: Option<&str>) -> String {

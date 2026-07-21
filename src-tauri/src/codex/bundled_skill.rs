@@ -1,13 +1,14 @@
 use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::Read;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+use crate::platform_fs::{MetadataExt, OpenOptionsExt, O_CLOEXEC, O_NOFOLLOW};
 
 use super::types::MainSkillInjectionAudit;
 
@@ -302,7 +303,7 @@ fn read_regular_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, BundledSkill
     }
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(O_NOFOLLOW | O_CLOEXEC)
         .open(path)
         .map_err(|_| BundledSkillError::Missing)?;
     let opened = file.metadata().map_err(|_| BundledSkillError::Missing)?;

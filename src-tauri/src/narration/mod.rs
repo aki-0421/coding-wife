@@ -17,5 +17,5 @@ pub use types::{
     NarrationVoiceListV1,
 };
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod integration_tests;

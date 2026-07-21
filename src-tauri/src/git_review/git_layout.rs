@@ -1,8 +1,9 @@
 //! Direct, non-executing inspection of validated Git metadata.
 
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
+
+use crate::platform_fs::{current_user_id, MetadataExt, PermissionsExt};
 
 const MAX_CONTROL_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -222,7 +223,7 @@ fn validate_private_file(path: &Path, max_bytes: u64) -> Result<(), GitLayoutErr
 }
 
 fn validate_owner_mode(metadata: &fs::Metadata) -> Result<(), GitLayoutError> {
-    let uid = unsafe { libc::geteuid() };
+    let uid = current_user_id();
     if !matches!(metadata.uid(), owner if owner == uid || owner == 0)
         || metadata.permissions().mode() & 0o022 != 0
     {

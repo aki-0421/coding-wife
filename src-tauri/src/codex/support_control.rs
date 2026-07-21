@@ -3,16 +3,26 @@
 //! The required model policy is app-owned and has no user-facing settings boundary.
 //! Prompts, responses, paths, credentials, and transcripts are deliberately absent.
 
+#[cfg(unix)]
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+#[cfg(windows)]
+use std::os::windows::ffi::OsStringExt;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
+
+use crate::platform_fs::{
+    current_user_id, DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt, O_CLOEXEC,
+    O_DIRECTORY, O_NOFOLLOW,
+};
 
 pub const SUPPORT_CONTROL_SCHEMA_VERSION: u16 = 1;
 pub const SUPPORT_MAX_QUEUE_CAPACITY: usize = 10;
@@ -734,6 +744,7 @@ fn open_audit_connection(path: &Path) -> rusqlite::Result<Connection> {
     Ok(connection)
 }
 
+#[cfg(unix)]
 fn open_audit_connection_from_file(file: &File, read_only: bool) -> rusqlite::Result<Connection> {
     let descriptor_path = format!("/dev/fd/{}", file.as_raw_fd());
     let access = if read_only {
@@ -753,6 +764,34 @@ fn open_audit_connection_from_file(file: &File, read_only: bool) -> rusqlite::Re
     } else {
         // This connection targets a brand-new private inode. The complete database
         // is synced and atomically installed only after the transaction commits.
+        connection.execute_batch(
+            "PRAGMA journal_mode = OFF;
+             PRAGMA synchronous = FULL;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA trusted_schema = OFF;
+             PRAGMA max_page_count = 1024;",
+        )?;
+    }
+    Ok(connection)
+}
+
+#[cfg(windows)]
+fn open_audit_connection_from_file(file: &File, read_only: bool) -> rusqlite::Result<Connection> {
+    let path = windows_file_path(file).map_err(|_| rusqlite::Error::InvalidPath(PathBuf::new()))?;
+    let access = if read_only {
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+    } else {
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+    };
+    let connection = Connection::open_with_flags(path, access | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    connection.busy_timeout(std::time::Duration::from_secs(1))?;
+    if read_only {
+        connection.execute_batch(
+            "PRAGMA query_only = ON;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA trusted_schema = OFF;",
+        )?;
+    } else {
         connection.execute_batch(
             "PRAGMA journal_mode = OFF;
              PRAGMA synchronous = FULL;
@@ -858,7 +897,7 @@ fn ensure_private_directory(path: &Path) -> Result<File, &'static str> {
     let mut options = OpenOptions::new();
     options
         .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+        .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     let directory = options.open(path).map_err(|_| SUPPORT_SETTINGS_UNSAFE)?;
     verify_directory_identity(path, &directory)?;
     if created {
@@ -929,7 +968,7 @@ fn validate_private_regular_entry(
     metadata: &PrivateEntryMetadata,
     maximum_bytes: u64,
 ) -> Result<(), &'static str> {
-    if metadata.mode & libc::S_IFMT as u32 != libc::S_IFREG as u32
+    if metadata.mode & 0o170000 != 0o100000
         || metadata.uid != effective_uid()
         || metadata.mode & 0o777 != 0o600
         || metadata.size > maximum_bytes
@@ -939,6 +978,7 @@ fn validate_private_regular_entry(
     Ok(())
 }
 
+#[cfg(unix)]
 fn entry_metadata_at(
     directory: &File,
     name: &str,
@@ -976,6 +1016,26 @@ fn entry_metadata_at(
     }))
 }
 
+#[cfg(windows)]
+fn entry_metadata_at(
+    directory: &File,
+    name: &str,
+) -> std::io::Result<Option<PrivateEntryMetadata>> {
+    let path = windows_entry_path(directory, name)?;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(Some(PrivateEntryMetadata {
+        identity: file_identity(&metadata),
+        mode: metadata.mode(),
+        uid: metadata.uid(),
+        size: metadata.len(),
+    }))
+}
+
+#[cfg(unix)]
 fn open_verified_regular_at(
     directory: &File,
     name: &str,
@@ -1007,6 +1067,31 @@ fn open_verified_regular_at(
         expected_identity,
         maximum_bytes,
     )?;
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn open_verified_regular_at(
+    directory: &File,
+    name: &str,
+    expected_identity: FileIdentity,
+    maximum_bytes: u64,
+) -> Result<File, &'static str> {
+    let path = windows_entry_path(directory, name).map_err(|_| SUPPORT_SETTINGS_UNSAFE)?;
+    let source = fs::symlink_metadata(&path).map_err(|_| SUPPORT_SETTINGS_UNSAFE)?;
+    if source.file_type().is_symlink() {
+        return Err(SUPPORT_SETTINGS_UNSAFE);
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW | O_CLOEXEC)
+        .open(path)
+        .map_err(|_| SUPPORT_SETTINGS_UNSAFE)?;
+    let opened = private_file_metadata(&file, maximum_bytes)?;
+    if opened.identity != expected_identity {
+        return Err(SUPPORT_SETTINGS_UNSAFE);
+    }
+    verify_entry_identity_at(directory, name, expected_identity, maximum_bytes)?;
     Ok(file)
 }
 
@@ -1049,6 +1134,7 @@ fn verify_optional_entry_identity_at(
     }
 }
 
+#[cfg(unix)]
 fn open_private_temporary(directory: &File, name: &str) -> std::io::Result<File> {
     let entry_name = name;
     let name = CString::new(entry_name)
@@ -1076,6 +1162,21 @@ fn open_private_temporary(directory: &File, name: &str) -> std::io::Result<File>
     Ok(file)
 }
 
+#[cfg(windows)]
+fn open_private_temporary(directory: &File, name: &str) -> std::io::Result<File> {
+    let path = windows_entry_path(directory, name)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(O_NOFOLLOW | O_CLOEXEC)
+        .open(path)?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    Ok(file)
+}
+
+#[cfg(unix)]
 fn rename_entry_at(directory: &File, source: &str, destination: &str) -> std::io::Result<()> {
     let source =
         CString::new(source).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
@@ -1097,6 +1198,15 @@ fn rename_entry_at(directory: &File, source: &str, destination: &str) -> std::io
     }
 }
 
+#[cfg(windows)]
+fn rename_entry_at(directory: &File, source: &str, destination: &str) -> std::io::Result<()> {
+    fs::rename(
+        windows_entry_path(directory, source)?,
+        windows_entry_path(directory, destination)?,
+    )
+}
+
+#[cfg(unix)]
 fn link_entry_at(directory: &File, source: &str, destination: &str) -> std::io::Result<()> {
     let source =
         CString::new(source).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
@@ -1118,6 +1228,14 @@ fn link_entry_at(directory: &File, source: &str, destination: &str) -> std::io::
     } else {
         Err(std::io::Error::last_os_error())
     }
+}
+
+#[cfg(windows)]
+fn link_entry_at(directory: &File, source: &str, destination: &str) -> std::io::Result<()> {
+    fs::hard_link(
+        windows_entry_path(directory, source)?,
+        windows_entry_path(directory, destination)?,
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -1411,6 +1529,7 @@ where
         .map_err(|_| AtomicPublishError::NamespaceUnsafe)
 }
 
+#[cfg(unix)]
 fn unlink_entry_at(directory: &File, name: &str) -> std::io::Result<()> {
     let name =
         CString::new(name).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
@@ -1420,6 +1539,52 @@ fn unlink_entry_at(directory: &File, name: &str) -> std::io::Result<()> {
     } else {
         Err(std::io::Error::last_os_error())
     }
+}
+
+#[cfg(windows)]
+fn unlink_entry_at(directory: &File, name: &str) -> std::io::Result<()> {
+    fs::remove_file(windows_entry_path(directory, name)?)
+}
+
+#[cfg(windows)]
+fn windows_entry_path(directory: &File, name: &str) -> std::io::Result<PathBuf> {
+    let mut components = Path::new(name).components();
+    let is_single_normal = matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none();
+    if !is_single_normal {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
+    Ok(windows_file_path(directory)?.join(name))
+}
+
+#[cfg(windows)]
+fn windows_file_path(file: &File) -> std::io::Result<PathBuf> {
+    type Handle = *mut std::ffi::c_void;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetFinalPathNameByHandleW(
+            file: Handle,
+            path: *mut u16,
+            path_length: u32,
+            flags: u32,
+        ) -> u32;
+    }
+
+    let mut path = vec![0_u16; 32_768];
+    // SAFETY: the handle is borrowed from a live File and the output buffer is writable.
+    let length = unsafe {
+        GetFinalPathNameByHandleW(
+            file.as_raw_handle().cast(),
+            path.as_mut_ptr(),
+            u32::try_from(path.len()).unwrap_or(u32::MAX),
+            0,
+        )
+    };
+    if length == 0 || usize::try_from(length).unwrap_or(usize::MAX) >= path.len() {
+        return Err(std::io::Error::last_os_error());
+    }
+    path.truncate(usize::try_from(length).map_err(|_| std::io::ErrorKind::InvalidData)?);
+    Ok(PathBuf::from(std::ffi::OsString::from_wide(&path)))
 }
 
 fn atomic_write(
@@ -1529,8 +1694,7 @@ where
 }
 
 fn effective_uid() -> u32 {
-    // SAFETY: geteuid has no arguments and returns the current process identity.
-    unsafe { libc::geteuid() }
+    current_user_id()
 }
 
 #[cfg(test)]

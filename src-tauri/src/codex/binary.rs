@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
-use std::ffi::{CStr, OsString};
+#[cfg(unix)]
+use std::ffi::CStr;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufReader, Read};
+#[cfg(unix)]
 use std::mem::MaybeUninit;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -16,6 +17,9 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
+
+use crate::platform_fs::{current_user_id, MetadataExt, PermissionsExt};
+use crate::platform_process::configure_process_group;
 
 use super::process::{process_group_exists, run_bounded_command, ProcessGroupDropGuard};
 use super::types::{BinarySource, CapabilityState, CodexCapabilities};
@@ -135,20 +139,18 @@ impl FileIdentity {
     }
 }
 
-unsafe extern "C" {
-    fn getuid() -> u32;
-}
-
 fn current_uid() -> u32 {
-    // SAFETY: getuid has no parameters, does not dereference memory, and always succeeds.
-    unsafe { getuid() }
+    current_user_id()
 }
 
 fn inherited_path_candidates() -> Vec<(PathBuf, BinarySource)> {
     let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("PATH") {
         for directory in std::env::split_paths(&path) {
-            candidates.push((directory.join("codex"), BinarySource::Path));
+            candidates.push((
+                directory.join(if cfg!(windows) { "codex.exe" } else { "codex" }),
+                BinarySource::Path,
+            ));
         }
     }
     candidates
@@ -160,14 +162,17 @@ fn fallback_candidates(shell_candidate: Option<&Path>) -> Vec<(PathBuf, BinarySo
         candidates.push((path.to_path_buf(), BinarySource::Path));
     }
 
-    candidates.push((
-        PathBuf::from("/opt/homebrew/bin/codex"),
-        BinarySource::KnownInstall,
-    ));
-    candidates.push((
-        PathBuf::from("/usr/local/bin/codex"),
-        BinarySource::KnownInstall,
-    ));
+    #[cfg(unix)]
+    {
+        candidates.push((
+            PathBuf::from("/opt/homebrew/bin/codex"),
+            BinarySource::KnownInstall,
+        ));
+        candidates.push((
+            PathBuf::from("/usr/local/bin/codex"),
+            BinarySource::KnownInstall,
+        ));
+    }
     if let Some(home) = std::env::var_os("HOME") {
         candidates.push((
             PathBuf::from(&home).join(".local/bin/codex"),
@@ -179,9 +184,23 @@ fn fallback_candidates(shell_candidate: Option<&Path>) -> Vec<(PathBuf, BinarySo
         ));
     }
 
+    #[cfg(windows)]
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push((
+            PathBuf::from(local_app_data)
+                .join("Programs")
+                .join("OpenAI")
+                .join("Codex")
+                .join("bin")
+                .join("codex.exe"),
+            BinarySource::KnownInstall,
+        ));
+    }
+
     candidates
 }
 
+#[cfg(unix)]
 fn account_login_shell() -> Option<PathBuf> {
     let mut record = MaybeUninit::<libc::passwd>::uninit();
     let mut result = std::ptr::null_mut();
@@ -213,6 +232,7 @@ fn account_login_shell() -> Option<PathBuf> {
     path.is_absolute().then_some(path)
 }
 
+#[cfg(unix)]
 fn default_login_shell() -> Option<PathBuf> {
     account_login_shell().or_else(|| {
         std::env::var_os("SHELL")
@@ -236,10 +256,18 @@ fn parse_login_shell_candidate(stdout: &[u8]) -> Option<PathBuf> {
 }
 
 async fn login_shell_codex_candidate() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return None;
+
+    #[cfg(unix)]
     let shell = default_login_shell()?;
+    #[cfg(unix)]
     let identity = inspect_trusted_identity(&shell).await.ok()?;
+    #[cfg(unix)]
     let mut command = Command::new(&identity.canonical_path);
+    #[cfg(unix)]
     command.args(["-i", "-l", "-c", "command -v codex"]);
+    #[cfg(unix)]
     let output = run_bounded_command(
         command,
         LOGIN_SHELL_TIMEOUT,
@@ -248,9 +276,11 @@ async fn login_shell_codex_candidate() -> Option<PathBuf> {
     )
     .await
     .ok()?;
+    #[cfg(unix)]
     if !output.status.success() || identity.revalidate_metadata().await.is_err() {
         return None;
     }
+    #[cfg(unix)]
     parse_login_shell_candidate(&output.stdout)
 }
 
@@ -287,9 +317,9 @@ async fn sha256_file(path: &Path) -> Result<String, BinaryError> {
     }
     let expected = FileIdentity::from_metadata(&metadata);
     let mut options = tokio::fs::OpenOptions::new();
-    options
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
     let mut file = options.open(path).await.map_err(|_| BinaryError::Io)?;
     let opened = file.metadata().await.map_err(|_| BinaryError::Io)?;
     if !opened.is_file() || FileIdentity::from_metadata(&opened) != expected {
@@ -347,9 +377,20 @@ async fn inspect_trusted_metadata(path: &Path) -> Result<(PathBuf, FileIdentity)
         || !metadata.is_file()
         || identity.size == 0
         || identity.size > MAX_VERIFIED_BINARY_BYTES
-        || identity.mode & 0o111 == 0
         || identity.mode & 0o022 != 0
         || !owner_is_trusted(identity.owner_uid, user_uid)
+    {
+        return Err(BinaryError::Untrusted);
+    }
+    #[cfg(unix)]
+    if identity.mode & 0o111 == 0 {
+        return Err(BinaryError::Untrusted);
+    }
+    #[cfg(windows)]
+    if canonical_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        != Some("exe")
     {
         return Err(BinaryError::Untrusted);
     }
@@ -484,7 +525,7 @@ async fn run_bounded(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    command.as_std_mut().process_group(0);
+    configure_process_group(&mut command);
 
     let mut child = command.spawn().map_err(|_| BinaryError::ProbeFailed)?;
     let pid = child.id().ok_or(BinaryError::ProbeFailed)?;

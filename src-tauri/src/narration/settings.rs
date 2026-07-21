@@ -1,9 +1,10 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::platform_fs::{current_user_id, MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use super::error::{narration_error, NarrationCommandError, NarrationResult};
 use super::types::{
@@ -342,6 +343,5 @@ pub(crate) fn remap_settings_error(
 }
 
 fn effective_uid() -> u32 {
-    // SAFETY: geteuid has no arguments and returns the current process identity.
-    unsafe { libc::geteuid() }
+    current_user_id()
 }

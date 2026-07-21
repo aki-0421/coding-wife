@@ -1,11 +1,11 @@
 ---
 title: "APP デスクトップシェル要件定義"
-description: "Coding Wifeの単一Tauriウィンドウ、言語、アクセシビリティ、ライフサイクル、信頼境界、macOS配布物を定義する。"
+description: "Coding Wifeの単一Tauriウィンドウ、言語、アクセシビリティ、ライフサイクル、信頼境界、3 OS配布物を定義する。"
 updated: 2026-07-21
 read_when:
   - "デスクトップシェル、共通ナビゲーション、言語、アクセシビリティを実装するとき。"
   - "TauriのCapability、CSP、終了、復旧の契約を確認するとき。"
-  - "macOSの.app・DMG配布物、release手順、diff hygieneを変更するとき。"
+  - "macOS、Windows、Linuxの配布物、release手順、diff hygieneを変更するとき。"
 ---
 
 # デスクトップシェル 要件定義
@@ -51,7 +51,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | Intel Mac、Windows Arm、Linux Arm | 初回の無料配布は各OS一つの検証済みarchitectureへ限定する | 将来のplatform validation |
 | 複数window | demoの単一作業面と状態一貫性を優先する | 将来検討 |
 | 自動update | 署名・配布基盤を今回のMVPに含めない | 将来のrelease要件 |
-| Developer ID署名・Apple公証 | 無料配布を優先し、ad-hoc署名・未公証状態とbounded Gatekeeper手順を明示する | [GitHub Release macOS無料配布仕様](../rules/github-release-distribution.md) |
+| Developer ID署名・Apple公証 | 無料配布を優先し、ad-hoc署名・未公証状態とbounded Gatekeeper手順を明示する | [GitHub Release無料マルチプラットフォーム配布仕様](../rules/github-release-distribution.md) |
 | 内蔵terminal | 任意shellをWebViewへ公開しない | [Codex main session](codex-main-session.md)のread-only tool event |
 | light theme | Figma node 8:2のdark restrained systemを正本とする | [DESIGN.md](../../DESIGN.md) |
 
@@ -70,7 +70,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
-| `APP-F-052` | 利用者はmacOS 14以降で単一main windowを起動できる | cold startでmain windowが1枚だけ表示される。native windowは初期React shellとCSSのlayoutが確定するまで非表示とし、1文字ずつ折り返す狭幅frame、unstyled content、空のWebViewを利用者へ見せない。frontend moduleの読込に失敗した場合もraw errorを出さず、OS localeに応じたja/enの再起動案内をstyled shellで表示する。app-private single-instance lockを保持中の二重起動要求は新しいWebView、Codex/App Server、support runtime、audio controller、DB writerを作らず、既存windowをunminimizeしてfocus/raiseしてから新processを終了する。stale lockはowner/process identityを検証した場合だけ回収する | Approved | 非該当 |
+| `APP-F-052` | 利用者は配布対象OSで単一main windowを起動できる | macOS 14以降Apple Silicon、Windows 11 x64、Ubuntu 22.04 / Debian 12相当Linux x64のcold startでmain windowが1枚だけ表示される。native windowは初期React shellとCSSのlayoutが確定するまで非表示とし、1文字ずつ折り返す狭幅frame、unstyled content、空のWebViewを利用者へ見せない。frontend moduleの読込に失敗した場合もraw errorを出さず、OS localeに応じたja/enの再起動案内をstyled shellで表示する。app-private single-instance lockを保持中の二重起動要求は新しいWebView、Codex/App Server、support runtime、audio controller、DB writerを作らず、既存windowをunminimizeしてfocus/raiseしてから新processを終了する。stale lockはowner/process identityを検証した場合だけ回収する | Approved | 非該当 |
 | `APP-F-053` | 利用者はFigma基準の三領域を表示できる | 1470×836 CSS pxでsidebar 255.04px、header 81px、Chat 607.11px、Character 607.84pxとなり、主要境界が各基準値の±2px以内になる。起動画面の利用可能領域が標準geometryより小さい場合はwindow全体をwork area内へ収め、native resize edgeとtraffic lightsを画面外へ出さない | Approved | 非該当 |
 | `APP-F-054` | 利用者はminimum window sizeでも主要操作を継続できる | windowは960×640 CSS px未満へ縮小できず、960×640でtab、timeline、composer、Send、停止操作が欠落しない | Approved | 非該当 |
 | `APP-F-055` | 利用者は現行画面へ同じwindow内で移動できる | sidebar、Chat/Commit tab、app settings gearからS-001〜S-003、S-005へ移動し、戻った時にworkspace選択とcomposer draftが保たれる。workspace tabのallowlistは`chat` / `commit`だけとし、旧`context` / `settings`値、表示trigger、subview、keyboard順、route aliasを公開しない | Approved | 非該当 |
@@ -147,7 +147,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 領域 | 要件 | 対象要件ID |
 |---|---|---|
-| 対象OS・OS差分 | MVP対象はmacOS 14以降。Windows/Linuxは非対応表示とする | `APP-F-052` |
+| 対象OS・OS差分 | macOS/aarch64、Windows/x86_64、Linux/x86_64だけを対応tupleとし、Unix mode・descriptor・process groupとWindows file identity・reparse point・process treeをcompile時に分離する | `APP-F-052`, `APP-F-088` |
 | ウィンドウ生成・再利用 | 単一main windowを再利用し、二重起動で増やさない。初回はfullscreenにせず標準zoomし、以後は最後の安全な通常windowサイズとzoom状態を復元する | `APP-F-052`, `APP-F-056`, `APP-F-085` |
 | 閉じる・アプリ終了 | idleは通常終了し、実行中turnは停止して終了するか終了を取り消す。Codex/audio/support/DBをbounded cleanupする | `APP-F-063`〜`APP-F-065` |
 | 未保存データ | composer draftはworkspace単位で保存し、送信成功まで消去しない | `APP-F-055`, `APP-F-065` |
@@ -185,7 +185,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 権限 | Tauri Capabilityはmain windowと目的別commandへ限定し、任意shell/fs APIを公開しない |
 | プライバシー | telemetryはMVPで送信しない。診断exportを実装する場合も利用者の明示操作前に外部送信しない |
 | 監査・ログ | app lifecycle、migration、redacted error codeを記録し、secretとraw reasoningを記録しない |
-| 配布信頼性 | appは全resourceをad-hoc sealしてstrict検証し、DMGはFinder/AppleEventに依存せず2回のread-only mountで正規化inventoryを検証する。検証済みDMGのexact SHA-256を凍結し、未公証状態を明記したdraft Releaseへ置く |
+| 配布信頼性 | macOSは全resourceをad-hoc sealしてDMGを2回read-only mount検証する。WindowsはNSISを一時install/uninstallし、Linuxは`.deb`をinstall/removeしてAppImageを展開検証する。全artifactのexact SHA-256を凍結し、未署名・未公証状態を明記した一つのdraft Releaseへ置く |
 | 性能 | 起動p95 3,000ms、通常操作p95 100ms、最低window 960×640 |
 | 信頼性・復旧 | 未完了turnを自動再送せず、DB transactionは終了時commitまたはrollbackする |
 | アクセシビリティ | WCAG 2.2 AA、keyboard-only、visible focus、200% text zoom、reduced motionを満たす |
@@ -196,7 +196,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 依存・前提 | 内容 | 状態 | 未解決時の影響 |
 |---|---|---|---|
 | Tauri v2 | React + TypeScript + Vite assetを単一WebViewへbundleする | 解決済み（採用決定） | 非該当 |
-| macOS 14以降 | Build Week MVPの検証対象 | 解決済み（MVP範囲） | 他OSは対応済みと表示しない |
+| 対象OS baseline | macOS 14以降Apple Silicon、Windows 11 x64、Ubuntu 22.04 / Debian 12相当Linux x64 | 解決済み（初回配布範囲） | 対象外tupleは対応済みと表示しない |
 | macOS `hdiutil` / `ditto` | `.app`を保持したDMG作成とread-only mount検証 | 解決済み（macOS 14+標準tool） | 不在または失敗時はartifactを公開しない |
 | PRODUCT / DESIGN | product registerとFigma tokenの正本 | 解決済み | 非該当 |
 | 画面詳細仕様 | 現行S-001〜S-003、S-005とdesktop commonを相互参照する | 解決済み（同時レビュー） | 実装は承認済み画面仕様に従う |
@@ -217,7 +217,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | [Tauriアーキテクチャ調査](../research/08-tauri-architecture.md) | WebView/Rust境界とlifecycle |
 | [セキュリティ・プライバシー調査](../research/09-security-privacy.md) | Capability、CSP、secret、recovery |
 | [macOS release packaging調査](../research/macos-release-packaging.md) | Finder非依存DMG、read-only検証、Gatekeeperと未署名配布の境界 |
-| [GitHub Release macOS配布仕様](../rules/github-release-distribution.md) | 無料ad-hoc署名DMG、draft Release、Gatekeeper案内、公開前gate |
+| [GitHub Release無料マルチプラットフォーム配布仕様](../rules/github-release-distribution.md) | 3 OSの無料artifact、draft Release、署名警告、公開前gate |
 | [Testing instructions](../testing.md) | release command、synthetic smoke、install/launch検証の実行手順 |
 
 ## レビュー・合意

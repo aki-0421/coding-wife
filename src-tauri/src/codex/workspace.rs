@@ -714,11 +714,11 @@ async fn repository_identity(
     };
     #[cfg(not(unix))]
     let (root_device, root_inode, git_device, git_inode, common_git_device, common_git_inode) = (
-        0,
+        0_u64,
         root_metadata.len(),
-        0,
+        0_u64,
         git_metadata.len(),
-        0,
+        0_u64,
         common_git_metadata.len(),
     );
 

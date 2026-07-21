@@ -7,18 +7,21 @@ pub mod preferences;
 pub mod readiness;
 pub mod workspace_history;
 
+mod platform_fs;
+mod platform_process;
 mod window_state;
 
 #[cfg(all(feature = "desktop-qa", not(debug_assertions)))]
 compile_error!("the desktop-qa feature is restricted to debug builds");
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::{http, Manager, State};
+
+use platform_fs::PermissionsExt;
 
 use app_lifecycle::{
     app_quit_cancel, app_quit_confirm, app_quit_retry_cleanup, raise_main_window,

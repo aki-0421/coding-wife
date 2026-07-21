@@ -1,6 +1,5 @@
 use std::ffi::OsString;
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -8,6 +7,7 @@ use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
 use crate::codex::process::{run_bounded_command, BoundedCommandError, BoundedCommandOutput};
+use crate::platform_fs::{MetadataExt, PermissionsExt};
 
 use super::git_layout::{is_object_id, is_safe_head_reference, GitRepositoryLayout};
 
@@ -162,9 +162,16 @@ pub(crate) struct GitRunner {
 
 impl GitRunner {
     pub fn production() -> Result<Self, GitRunnerError> {
-        Ok(Self {
-            binary: GitBinaryIdentity::inspect(Path::new("/usr/bin/git"))?,
-        })
+        #[cfg(unix)]
+        let binary = GitBinaryIdentity::inspect(Path::new("/usr/bin/git"))?;
+        #[cfg(windows)]
+        let binary = std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+            .map(|directory| directory.join("git.exe"))
+            .find_map(|candidate| GitBinaryIdentity::inspect(&candidate).ok())
+            .ok_or(GitRunnerError::BinaryUnavailable)?;
+        Ok(Self { binary })
     }
 
     async fn run(

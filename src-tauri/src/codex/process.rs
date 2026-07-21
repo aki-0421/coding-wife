@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
-use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,6 +10,9 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, Mutex};
+
+pub(crate) use crate::platform_process::process_group_exists;
+use crate::platform_process::{configure_process_group, signal_process_group, SIGKILL, SIGTERM};
 
 use super::binary::BinaryInfo;
 use super::redaction::redact_text;
@@ -184,7 +186,7 @@ pub(crate) async fn run_bounded_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    command.as_std_mut().process_group(0);
+    configure_process_group(&mut command);
 
     let mut child = command.spawn().map_err(|_| BoundedCommandError::Spawn)?;
     let pid = child.id().ok_or(BoundedCommandError::Spawn)?;
@@ -406,7 +408,7 @@ async fn spawn_process_with_environment(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    command.as_std_mut().process_group(0);
+    configure_process_group(&mut command);
 
     let mut child = command.spawn().map_err(|_| ProcessError::Spawn)?;
     let pid = child.id().ok_or(ProcessError::Spawn)?;
@@ -587,28 +589,6 @@ async fn process_tree_exited(child: &Arc<Mutex<Child>>, pid: u32) -> Result<bool
     Ok(child_exited && !process_group_exists(pid))
 }
 
-const SIGTERM: i32 = 15;
-const SIGKILL: i32 = 9;
-
-unsafe extern "C" {
-    fn kill(pid: i32, signal: i32) -> i32;
-}
-
-fn signal_process_group(pid: u32, signal: i32) -> Result<(), ()> {
-    let pid = i32::try_from(pid).map_err(|_| ())?;
-    // SAFETY: a negative pid targets the process group. No pointers cross the FFI boundary.
-    let result = unsafe { kill(-pid, signal) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
-pub(crate) fn process_group_exists(pid: u32) -> bool {
-    signal_process_group(pid, 0).is_ok()
-}
-
 async fn terminate_child_process_group(
     child: &mut Child,
     pid: u32,
@@ -645,12 +625,14 @@ async fn terminate_child_process_group(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::os::unix::process::CommandExt;
     use std::path::{Path, PathBuf};
 
+    use libc::kill;
     use tokio::task::AbortHandle;
 
     const FIXTURE_READY_WAIT: Duration = Duration::from_secs(2);

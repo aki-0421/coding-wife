@@ -1,9 +1,10 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+
+use crate::platform_fs::{current_user_id, MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use super::error::{preferences_error, AppPreferencesResult};
 use super::types::{
@@ -312,6 +313,5 @@ fn sync_directory(path: &Path, operation: &'static str) -> AppPreferencesResult<
 }
 
 fn effective_uid() -> u32 {
-    // SAFETY: geteuid has no arguments and returns the current process identity.
-    unsafe { libc::geteuid() }
+    current_user_id()
 }

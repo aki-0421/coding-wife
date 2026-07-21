@@ -1,9 +1,11 @@
-use std::os::unix::process::CommandExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use tokio::process::{Child, Command};
+
+pub(crate) use crate::platform_process::process_group_exists;
+use crate::platform_process::{configure_process_group, signal_process_group, SIGKILL, SIGTERM};
 
 use super::error::{narration_error, NarrationResult};
 
@@ -39,7 +41,7 @@ impl NarrationProcessControl {
             ));
         }
         command.kill_on_drop(true);
-        command.as_std_mut().process_group(0);
+        configure_process_group(command);
         let child = command
             .spawn()
             .map_err(|_| narration_error("narration_speak", "NARRATION-PROCESS-SPAWN", true))?;
@@ -92,7 +94,7 @@ impl NarrationProcessControl {
             let Some(pid) = pid else {
                 return true;
             };
-            let _ = signal_process_group(pid, libc::SIGKILL);
+            let _ = signal_process_group(pid, SIGKILL);
             if !process_group_exists(pid) {
                 self.clear(pid);
                 return true;
@@ -125,7 +127,7 @@ impl NarrationProcessControl {
             return true;
         };
         let started = tokio::time::Instant::now();
-        let _ = signal_process_group(pid, libc::SIGTERM);
+        let _ = signal_process_group(pid, SIGTERM);
         while started.elapsed() < TERM_GRACE {
             if !process_group_exists(pid) {
                 self.clear(pid);
@@ -133,7 +135,7 @@ impl NarrationProcessControl {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        let _ = signal_process_group(pid, libc::SIGKILL);
+        let _ = signal_process_group(pid, SIGKILL);
         while started.elapsed() < TOTAL_CANCEL_BUDGET {
             if !process_group_exists(pid) {
                 self.clear(pid);
@@ -150,7 +152,7 @@ pub(crate) async fn terminate_owned_child(
     child: &mut Child,
     pid: u32,
 ) {
-    let _ = signal_process_group(pid, libc::SIGTERM);
+    let _ = signal_process_group(pid, SIGTERM);
     let term_deadline = tokio::time::Instant::now() + TERM_GRACE;
     while tokio::time::Instant::now() < term_deadline {
         if matches!(child.try_wait(), Ok(Some(_))) || !process_group_exists(pid) {
@@ -159,23 +161,8 @@ pub(crate) async fn terminate_owned_child(
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    let _ = signal_process_group(pid, libc::SIGKILL);
+    let _ = signal_process_group(pid, SIGKILL);
     let _ = child.kill().await;
     let _ = tokio::time::timeout(Duration::from_millis(50), child.wait()).await;
     control.clear(pid);
-}
-
-fn signal_process_group(pid: u32, signal: i32) -> Result<(), ()> {
-    let pid = i32::try_from(pid).map_err(|_| ())?;
-    // SAFETY: kill receives a value-only pid/signal pair. A negative pid targets the child group.
-    let result = unsafe { libc::kill(-pid, signal) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(())
-    }
-}
-
-pub(crate) fn process_group_exists(pid: u32) -> bool {
-    signal_process_group(pid, 0).is_ok()
 }
