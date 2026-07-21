@@ -252,7 +252,7 @@ async function createFakeTauriBuilder(root, appPath) {
     [
       "#!/usr/bin/env bash",
       "set -euo pipefail",
-      "if [[ \"${1:-}\" != 'tauri' || \"${2:-}\" != 'build' ]]; then",
+      "if [[ \"${1:-}\" != 'exec' || \"${2:-}\" != 'tauri' || \"${3:-}\" != 'build' ]]; then",
       '  exec "$FAKE_REAL_PNPM" "$@"',
       "fi",
       "if [[ \"${FAKE_TAURI_MODE:-success}\" == 'failure' ]]; then",
