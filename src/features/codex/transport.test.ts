@@ -144,7 +144,7 @@ describe("DemoCodexTransport", () => {
         "plan_updated",
         "agent_message_delta",
         "agent_message_delta",
-        "item_status",
+        "tool_status",
         "tool_output",
         "file_change",
         "diff_updated",

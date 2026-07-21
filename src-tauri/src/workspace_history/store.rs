@@ -59,6 +59,7 @@ const CURRENT_DATABASE_VERSION: i64 = 11;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENT_ARRAY_ITEMS: usize = 512;
 const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
+const MAX_TOOL_DURATION_MS: u64 = 24 * 60 * 60 * 1_000;
 const MAX_TIMELINE_PAGE: u32 = 200;
 const MAX_WORKSPACES: i64 = 200;
 const MAX_TIMELINE_ANCHOR_OFFSET: i64 = 1_000_000;
@@ -3738,11 +3739,24 @@ fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Val
             .and_then(Value::as_str)
             .is_some_and(|value| public_multiline(value, maximum, allow_empty))
     };
+    let nullable_single_line = |key: &str, maximum: usize| {
+        object.get(key).is_some_and(|value| {
+            value.is_null()
+                || value
+                    .as_str()
+                    .is_some_and(|text| public_single_line(text, maximum, false))
+        })
+    };
     let unsigned = |key: &str, maximum: u64| {
         object
             .get(key)
             .and_then(Value::as_u64)
             .is_some_and(|value| value <= maximum)
+    };
+    let nullable_unsigned = |key: &str, maximum: u64| {
+        object.get(key).is_some_and(|value| {
+            value.is_null() || value.as_u64().is_some_and(|number| number <= maximum)
+        })
     };
     let one_of = |key: &str, values: &[&str]| {
         object
@@ -3814,6 +3828,26 @@ fn validate_codex_history_event(kind: &str, object: &serde_json::Map<String, Val
                     ],
                 )
                 && one_of("status", &["running", "completed"])
+        }
+        "code.tool.status.changed" => {
+            exact(&[
+                "itemHandle",
+                "toolKind",
+                "providerName",
+                "toolName",
+                "summary",
+                "durationMs",
+                "status",
+            ]) && bounded_single_line("itemHandle", 128, false)
+                && one_of(
+                    "toolKind",
+                    &["commandExecution", "mcpToolCall", "webSearch"],
+                )
+                && nullable_single_line("providerName", 128)
+                && bounded_single_line("toolName", 128, false)
+                && nullable_single_line("summary", 512)
+                && nullable_unsigned("durationMs", MAX_TOOL_DURATION_MS)
+                && one_of("status", &["running", "completed", "failed"])
         }
         "code.message.completed" => {
             exact(&["itemHandle", "text"])
@@ -6154,28 +6188,32 @@ mod tests {
                 json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 4, "itemHandle": "item-safe", "itemType": "commandExecution", "status": "running"}),
             ),
             (
+                "code.tool.status.changed",
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 5, "itemHandle": "item-tool-safe", "toolKind": "mcpToolCall", "providerName": "browser", "toolName": "open", "summary": "authorization=[redacted] · ref_id=page-safe", "durationMs": 240, "status": "completed"}),
+            ),
+            (
                 "code.message.completed",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 5, "itemHandle": "item-message", "text": "Done\nVerified 😀"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 6, "itemHandle": "item-message", "text": "Done\nVerified 😀"}),
             ),
             (
                 "code.plan.updated",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 6, "stepCount": 3}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 7, "stepCount": 3}),
             ),
             (
                 "code.diff.updated",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 7, "byteCount": 42, "detailRef": "detail-diff"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 8, "byteCount": 42, "detailRef": "detail-diff"}),
             ),
             (
                 "code.tool.output",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 8, "itemHandle": "item-tool", "excerpt": "checks passed\n\t32 total 😀"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 9, "itemHandle": "item-tool", "excerpt": "checks passed\n\t32 total 😀"}),
             ),
             (
                 "code.file_change.updated",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 9, "itemHandle": "item-file", "pathAlias": "project/src/main.rs", "changeKind": "update"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 10, "itemHandle": "item-file", "pathAlias": "project/src/main.rs", "changeKind": "update"}),
             ),
             (
                 "code.decision.requested",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 10, "request": {
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 11, "request": {
                     "pendingId": "pending-decision",
                     "kind": "user_input",
                     "responseKind": "fallback_decision",
@@ -6209,7 +6247,7 @@ mod tests {
             ),
             (
                 "code.approval.requested",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 11, "request": {
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 12, "request": {
                     "pendingId": "pending-approval",
                     "kind": "command_approval",
                     "responseKind": "native_server_request",
@@ -6235,19 +6273,19 @@ mod tests {
             ),
             (
                 "code.pending.resolved",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 12, "pendingId": "pending-approval", "status": "accepted"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 13, "pendingId": "pending-approval", "status": "accepted"}),
             ),
             (
                 "code.session.diagnostic",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 13, "code": "CODEX-WARNING", "willRetry": true, "detailRef": "detail-warning"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 14, "code": "CODEX-WARNING", "willRetry": true, "detailRef": "detail-warning"}),
             ),
             (
                 "code.model.violation",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 14, "fromModel": "unexpected", "toModel": "gpt-5.6-sol"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 15, "fromModel": "unexpected", "toModel": "gpt-5.6-sol"}),
             ),
             (
                 "code.protocol.unsupported",
-                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 15, "methodHash": "method-deadbeef", "byteCount": 24, "detailRef": "detail-protocol"}),
+                json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 16, "methodHash": "method-deadbeef", "byteCount": 24, "detailRef": "detail-protocol"}),
             ),
         ];
 
@@ -6285,6 +6323,21 @@ mod tests {
         };
         assert_eq!(
             store.append_event(&rejected).unwrap_err().code,
+            "HIST-EVENT-PAYLOAD"
+        );
+
+        let rejected_tool_status = NormalizedDomainEvent {
+            schema_version: DOMAIN_EVENT_SCHEMA_VERSION,
+            event_id: "event-codex-invalid-tool-status".to_owned(),
+            workspace_id: workspace.workspace_id.clone(),
+            session_id: None,
+            producer: "code".to_owned(),
+            kind: "code.tool.status.changed".to_owned(),
+            occurred_at: "2026-07-18T00:01:01.000Z".to_owned(),
+            payload: json!({"semanticVersion": 1, "generation": 1, "sourceSequence": 17, "itemHandle": "item-tool", "toolKind": "mcpToolCall", "providerName": "browser", "toolName": "open", "summary": "ref_id=page-safe", "durationMs": 240, "status": "completed", "rawArguments": {"token": "hidden"}}),
+        };
+        assert_eq!(
+            store.append_event(&rejected_tool_status).unwrap_err().code,
             "HIST-EVENT-PAYLOAD"
         );
 

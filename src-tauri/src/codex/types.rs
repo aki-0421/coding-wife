@@ -464,6 +464,15 @@ pub enum CodexEventPayload {
         item_type: String,
         status: String,
     },
+    ToolStatus {
+        item_handle: String,
+        tool_kind: String,
+        provider_name: Option<String>,
+        tool_name: String,
+        summary: Option<String>,
+        duration_ms: Option<u64>,
+        status: String,
+    },
     AgentMessageDelta {
         item_handle: String,
         delta: String,

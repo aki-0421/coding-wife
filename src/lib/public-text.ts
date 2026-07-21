@@ -10,6 +10,9 @@ const privateMaterialPatterns = [
   /chain-of-thought/iu,
 ] as const
 
+const safelyRedactedCredentialPattern =
+  /\b(?:authorization|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|id[_ -]?token|token|password|passwd|secret|client[_ -]?secret|auth[_ -]?cookie|cookie|set-cookie|session[_ -]?id|sessionid)\b\s*[:=]\s*\[redacted\]/giu
+
 export function unicodeScalarCount(value: string): number {
   return Array.from(value).length
 }
@@ -24,7 +27,13 @@ export function hasDisallowedMultilineControl(value: string): boolean {
 }
 
 export function containsPrivateMaterial(value: string): boolean {
-  return privateMaterialPatterns.some((pattern) => pattern.test(value))
+  const withoutSafeRedactions = value.replace(
+    safelyRedactedCredentialPattern,
+    "[redacted]",
+  )
+  return privateMaterialPatterns.some((pattern) =>
+    pattern.test(withoutSafeRedactions),
+  )
 }
 
 export function isPublicText(

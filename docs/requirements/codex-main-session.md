@@ -84,7 +84,7 @@ read_when:
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
 | `CODE-F-058` | 利用者はstreaming進捗を構造化eventで確認できる | plan、tool start/result、file change、diff、error、decision、approvalをversion付きpayloadとしてsequence順に表示する。assistant本文はStructured Output envelopeのstreaming JSON断片を表示・保存せず、完了時に検証・redactした`result.message`だけをsemantic eventとして表示・保存し、会話の最後の可視出力にする。terminal `completion`は順序と復旧の正本として保存してもChatへ描画せず、最終出力の代替にしない。再起動後も同じsemantic card、stable ID、順序へexactに再構築し、unknown versionまたはinvalid payloadはgeneric成功表示へ落とさずUnsupportedとしてfail closedにする | Approved | 非該当 |
-| `CODE-F-059` | tool実行はread-only eventとして表示される | command summaryをBash/tool rowとcode chipで表示し、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
+| `CODE-F-059` | tool実行はread-only eventとして表示される | MCPはredact済み`server`と実`tool`名、最大4件の安全なtop-level引数要約、状態、所要時間を表示し、内部型`mcpToolCall`をtool名として表示しない。commandはredact済み一行command、web searchはredact済みqueryを同じsemantic tool statusへ正規化する。raw引数JSON、MCP result content、credential値、absolute private pathをWebViewまたは履歴へ渡さず、利用者がそのrowからshell入力または任意command実行を開始できない | Approved | 非該当 |
 | `CODE-F-060` | 利用者は長いtool eventを展開・copyできる | 120文字超を一行ellipsisにし、keyboardで全文展開とcopyへ到達し、copy内容が表示全文と一致する | Approved | 非該当 |
 | `CODE-F-061` | scroll中の利用者を自動で最下部へ戻さない | 利用者がbottomから48px超上へ移動中にeventが届いてもscroll位置を維持し、「最新へ」を表示する | Approved | 非該当 |
 | `CODE-F-062` | errorは成功と区別して回復操作を示す | error rowにcode、短い原因、影響、retry/modify/stop/detailsの利用可能操作を表示し、completionへ自動変換しない | Approved | 非該当 |

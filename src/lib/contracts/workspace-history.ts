@@ -159,6 +159,7 @@ export interface PersistedTimelineEvent {
     | "code.session.status.changed"
     | "code.user.instruction.accepted"
     | "code.item.status.changed"
+    | "code.tool.status.changed"
     | "code.message.completed"
     | "code.plan.updated"
     | "code.diff.updated"
@@ -860,6 +861,34 @@ function parseCodexHistoryPayload(
       "contextCompaction",
     ] as const) &&
     oneOf(payload.status, ["running", "completed"] as const)
+  ) {
+    return { ...payload }
+  }
+  if (
+    kind === "code.tool.status.changed" &&
+    hasCodexHistoryShape(payload, [
+      "itemHandle",
+      "toolKind",
+      "providerName",
+      "toolName",
+      "summary",
+      "durationMs",
+      "status",
+    ]) &&
+    validatePublicString(payload.itemHandle, 128) &&
+    oneOf(payload.toolKind, [
+      "commandExecution",
+      "mcpToolCall",
+      "webSearch",
+    ] as const) &&
+    (payload.providerName === null ||
+      validatePublicString(payload.providerName, 128)) &&
+    validatePublicString(payload.toolName, 128) &&
+    (payload.summary === null || validatePublicString(payload.summary, 512)) &&
+    (payload.durationMs === null ||
+      (isSafeUnsignedInteger(payload.durationMs) &&
+        payload.durationMs <= 24 * 60 * 60 * 1_000)) &&
+    oneOf(payload.status, ["running", "completed", "failed"] as const)
   ) {
     return { ...payload }
   }

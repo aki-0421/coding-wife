@@ -14,6 +14,9 @@ use super::types::{
 
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_TOOL_EXCERPT_BYTES: usize = 4 * 1024;
+const MAX_TOOL_NAME_BYTES: usize = 128;
+const MAX_TOOL_SUMMARY_BYTES: usize = 512;
+const MAX_TOOL_DURATION_MS: u64 = 24 * 60 * 60 * 1_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub enum NormalizeError {
@@ -268,6 +271,22 @@ impl EventNormalizer {
                             );
                         }
                     }
+                } else if ["commandExecution", "mcpToolCall", "webSearch"].contains(&item_type) {
+                    let metadata = tool_metadata(item_type, item, &self.workspace_root)?;
+                    outcome.events.push(
+                        self.event(CodexEventPayload::ToolStatus {
+                            item_handle,
+                            tool_kind: item_type.to_owned(),
+                            provider_name: metadata.provider_name,
+                            tool_name: metadata.tool_name,
+                            summary: metadata.summary,
+                            duration_ms: item
+                                .get("durationMs")
+                                .and_then(Value::as_u64)
+                                .map(|duration| duration.min(MAX_TOOL_DURATION_MS)),
+                            status: tool_status(item, method),
+                        })?,
+                    );
                 } else {
                     outcome
                         .events
@@ -324,6 +343,23 @@ impl EventNormalizer {
                         item_handle,
                         excerpt: redact_text(
                             delta,
+                            Some(&self.workspace_root),
+                            MAX_TOOL_EXCERPT_BYTES,
+                        ),
+                    })?);
+            }
+            "item/mcpToolCall/progress" => {
+                let item_id =
+                    string_at(params, &["itemId"]).ok_or(NormalizeError::InvalidParams)?;
+                let message =
+                    string_at(params, &["message"]).ok_or(NormalizeError::InvalidParams)?;
+                let item_handle = self.item_handle(item_id);
+                outcome
+                    .events
+                    .push(self.event(CodexEventPayload::ToolOutput {
+                        item_handle,
+                        excerpt: redact_text(
+                            message,
                             Some(&self.workspace_root),
                             MAX_TOOL_EXCERPT_BYTES,
                         ),
@@ -489,6 +525,172 @@ fn string_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
     current.as_str()
 }
 
+struct ToolMetadata {
+    provider_name: Option<String>,
+    tool_name: String,
+    summary: Option<String>,
+}
+
+fn safe_single_line(value: &str, workspace_root: &Path, maximum: usize) -> Option<String> {
+    let sanitized = redact_text(value, Some(workspace_root), maximum)
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!sanitized.is_empty()).then_some(sanitized)
+}
+
+fn credential_argument_key(key: &str) -> bool {
+    let normalized = key
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(|character| character.to_lowercase())
+        .collect::<String>();
+    [
+        "authorization",
+        "apikey",
+        "accesstoken",
+        "refreshtoken",
+        "idtoken",
+        "token",
+        "password",
+        "passwd",
+        "secret",
+        "clientsecret",
+        "privatekey",
+        "authcookie",
+        "cookie",
+        "setcookie",
+        "sessionid",
+    ]
+    .iter()
+    .any(|sensitive| normalized == *sensitive || normalized.ends_with(sensitive))
+}
+
+fn summarize_argument_value(value: &Value, workspace_root: &Path) -> String {
+    match value {
+        Value::String(text) => {
+            safe_single_line(text, workspace_root, 160).unwrap_or_else(|| "[empty]".to_owned())
+        }
+        Value::Number(number) => number.to_string(),
+        Value::Bool(boolean) => boolean.to_string(),
+        Value::Null => "null".to_owned(),
+        Value::Array(items) => format!("[{}]", items.len()),
+        Value::Object(fields) => format!("{{{}}}", fields.len()),
+    }
+}
+
+fn summarize_arguments(arguments: &Value, workspace_root: &Path) -> Option<String> {
+    let summary = match arguments {
+        Value::Object(fields) => fields
+            .iter()
+            .take(4)
+            .filter_map(|(key, value)| {
+                let safe_key = safe_single_line(key, workspace_root, 64)?;
+                let safe_value = if credential_argument_key(key) {
+                    "[redacted]".to_owned()
+                } else {
+                    summarize_argument_value(value, workspace_root)
+                };
+                Some(format!("{safe_key}={safe_value}"))
+            })
+            .collect::<Vec<_>>()
+            .join(" · "),
+        value => summarize_argument_value(value, workspace_root),
+    };
+    safe_single_line(&summary, workspace_root, MAX_TOOL_SUMMARY_BYTES)
+}
+
+fn tool_metadata(
+    item_type: &str,
+    item: &serde_json::Map<String, Value>,
+    workspace_root: &Path,
+) -> Result<ToolMetadata, NormalizeError> {
+    match item_type {
+        "mcpToolCall" => {
+            let provider_name = item
+                .get("server")
+                .and_then(Value::as_str)
+                .and_then(|value| safe_single_line(value, workspace_root, MAX_TOOL_NAME_BYTES))
+                .ok_or(NormalizeError::InvalidParams)?;
+            let tool_name = item
+                .get("tool")
+                .and_then(Value::as_str)
+                .and_then(|value| safe_single_line(value, workspace_root, MAX_TOOL_NAME_BYTES))
+                .ok_or(NormalizeError::InvalidParams)?;
+            let arguments = item.get("arguments").ok_or(NormalizeError::InvalidParams)?;
+            Ok(ToolMetadata {
+                provider_name: Some(provider_name),
+                tool_name,
+                summary: summarize_arguments(arguments, workspace_root),
+            })
+        }
+        "commandExecution" => {
+            let tool_name = item
+                .get("commandActions")
+                .and_then(Value::as_array)
+                .and_then(|actions| actions.first())
+                .and_then(|action| action.get("type"))
+                .and_then(Value::as_str)
+                .and_then(|value| safe_single_line(value, workspace_root, MAX_TOOL_NAME_BYTES))
+                .unwrap_or_else(|| "shell".to_owned());
+            Ok(ToolMetadata {
+                provider_name: None,
+                tool_name,
+                summary: item
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .and_then(|value| {
+                        safe_single_line(value, workspace_root, MAX_TOOL_SUMMARY_BYTES)
+                    }),
+            })
+        }
+        "webSearch" => {
+            let action = item.get("action").and_then(Value::as_object);
+            let tool_name = action
+                .and_then(|value| value.get("type"))
+                .and_then(Value::as_str)
+                .and_then(|value| safe_single_line(value, workspace_root, MAX_TOOL_NAME_BYTES))
+                .unwrap_or_else(|| "search".to_owned());
+            let summary = item
+                .get("query")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    action.and_then(|value| {
+                        ["query", "url", "pattern"]
+                            .iter()
+                            .find_map(|key| value.get(*key).and_then(Value::as_str))
+                    })
+                })
+                .and_then(|value| safe_single_line(value, workspace_root, MAX_TOOL_SUMMARY_BYTES));
+            Ok(ToolMetadata {
+                provider_name: None,
+                tool_name,
+                summary,
+            })
+        }
+        _ => Err(NormalizeError::InvalidParams),
+    }
+}
+
+fn tool_status(item: &serde_json::Map<String, Value>, method: &str) -> String {
+    match item.get("status").and_then(Value::as_str) {
+        Some("inProgress") | Some("running") => "running".to_owned(),
+        Some("completed") => "completed".to_owned(),
+        Some("failed") => "failed".to_owned(),
+        _ if method == "item/started" => "running".to_owned(),
+        _ => "completed".to_owned(),
+    }
+}
+
 fn safe_enum(value: &str, allowed: &[&str]) -> String {
     if allowed.contains(&value) {
         value.to_owned()
@@ -652,5 +854,100 @@ mod tests {
             assert!(outcome.events.is_empty());
             assert!(!outcome.unsupported_terminal);
         }
+    }
+
+    #[test]
+    fn mcp_tool_status_exposes_safe_identity_without_raw_arguments_or_results() {
+        let workspace_root = PathBuf::from("/\u{0055}sers/alice/project");
+        let mut normalizer =
+            EventNormalizer::new("workspace-1".to_owned(), workspace_root.clone(), 1);
+        let started = normalizer
+            .normalize(
+                "item/started",
+                &json!({"item": {
+                    "id": "raw-mcp-item",
+                    "type": "mcpToolCall",
+                    "server": "browser",
+                    "tool": "open",
+                    "arguments": {
+                        "authorization": "Bearer private-token",
+                        "nested": {"private": "value"},
+                        "path": workspace_root.join("src/main.rs").to_string_lossy(),
+                        "ref_id": "page-safe"
+                    },
+                    "status": "inProgress",
+                    "result": {"content": "private result"}
+                }}),
+                400,
+            )
+            .expect("MCP start");
+        let encoded = serde_json::to_string(&started.events).expect("serialize");
+
+        assert!(encoded.contains("\"kind\":\"tool_status\""));
+        assert!(encoded.contains("\"toolKind\":\"mcpToolCall\""));
+        assert!(encoded.contains("\"providerName\":\"browser\""));
+        assert!(encoded.contains("\"toolName\":\"open\""));
+        assert!(encoded.contains("authorization=[redacted]"));
+        assert!(encoded.contains("nested={1}"));
+        assert!(encoded.contains("path=<workspace>/src/main.rs"));
+        assert!(encoded.contains("ref_id=page-safe"));
+        assert!(!encoded.contains("raw-mcp-item"));
+        assert!(!encoded.contains("private-token"));
+        assert!(!encoded.contains("private result"));
+        assert!(!encoded.contains("/\u{0055}sers/alice"));
+
+        let completed = normalizer
+            .normalize(
+                "item/completed",
+                &json!({"item": {
+                    "id": "raw-mcp-item",
+                    "type": "mcpToolCall",
+                    "server": "browser",
+                    "tool": "open",
+                    "arguments": {"ref_id": "page-safe"},
+                    "durationMs": 240,
+                    "status": "failed"
+                }}),
+                200,
+            )
+            .expect("MCP completion");
+        let completed = serde_json::to_value(&completed.events[0]).expect("completion JSON");
+        assert_eq!(completed["payload"]["status"], "failed");
+        assert_eq!(completed["payload"]["durationMs"], 240);
+    }
+
+    #[test]
+    fn mcp_progress_is_redacted_and_missing_tool_identity_fails_closed() {
+        let mut normalizer = EventNormalizer::new(
+            "workspace-1".to_owned(),
+            PathBuf::from("/\u{0055}sers/alice/project"),
+            1,
+        );
+        let progress = normalizer
+            .normalize(
+                "item/mcpToolCall/progress",
+                &json!({
+                    "itemId": "raw-mcp-item",
+                    "message": "Authorization: Bearer private-token /\u{0055}sers/alice/project/src/main.rs"
+                }),
+                120,
+            )
+            .expect("MCP progress");
+        let encoded = serde_json::to_string(&progress.events).expect("serialize");
+        assert!(encoded.contains("\"kind\":\"tool_output\""));
+        assert!(!encoded.contains("private-token"));
+        assert!(!encoded.contains("/\u{0055}sers/alice"));
+
+        let missing_identity = normalizer.normalize(
+            "item/started",
+            &json!({"item": {
+                "id": "raw-mcp-item",
+                "type": "mcpToolCall",
+                "arguments": {},
+                "status": "inProgress"
+            }}),
+            100,
+        );
+        assert_eq!(missing_identity.unwrap_err(), NormalizeError::InvalidParams);
     }
 }

@@ -140,9 +140,13 @@ describe("PersistentWorkspaceViewAdapter", () => {
         schemaVersion: 1,
         nextBeforeSequence: null,
         items: [
-          codeEvent(1, "code.item.status.changed", {
+          codeEvent(1, "code.tool.status.changed", {
             itemHandle: "item-tool",
-            itemType: "mcpToolCall",
+            toolKind: "mcpToolCall",
+            providerName: "browser",
+            toolName: "open",
+            summary: "ref_id=page-safe",
+            durationMs: null,
             status: "running",
           }),
           codeEvent(2, "code.tool.output", {
@@ -153,9 +157,13 @@ describe("PersistentWorkspaceViewAdapter", () => {
             itemHandle: "item-tool",
             excerpt: "second 😀",
           }),
-          codeEvent(4, "code.item.status.changed", {
+          codeEvent(4, "code.tool.status.changed", {
             itemHandle: "item-tool",
-            itemType: "mcpToolCall",
+            toolKind: "mcpToolCall",
+            providerName: "browser",
+            toolName: "open",
+            summary: "ref_id=page-safe",
+            durationMs: 240,
             status: "completed",
           }),
           codeEvent(5, "code.file_change.updated", {
@@ -219,6 +227,10 @@ describe("PersistentWorkspaceViewAdapter", () => {
       kind: "tool",
       status: "completed",
       toolKind: "mcpToolCall",
+      providerName: "browser",
+      toolName: "open",
+      summary: "ref_id=page-safe",
+      durationMs: 240,
       excerpt: "first line\nsecond 😀",
       sourceSequence: 4,
     })

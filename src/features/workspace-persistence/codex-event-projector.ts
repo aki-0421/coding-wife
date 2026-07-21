@@ -106,9 +106,33 @@ export function isHiddenCodexHistoryEvent(
   )
 }
 
+function legacyToolMetadata(toolKind: string) {
+  return {
+    toolKind,
+    providerName: null,
+    toolName:
+      toolKind === "commandExecution"
+        ? "shell"
+        : toolKind === "webSearch"
+          ? "search"
+          : "MCP",
+    summary: null,
+    durationMs: null,
+  } as const
+}
+
 export class PersistedCodexEventProjector {
   private readonly toolText = new Map<string, string>()
-  private readonly toolKinds = new Map<string, string>()
+  private readonly toolMetadata = new Map<
+    string,
+    {
+      readonly toolKind: string
+      readonly providerName: string | null
+      readonly toolName: string
+      readonly summary: string | null
+      readonly durationMs: number | null
+    }
+  >()
   private readonly fileChanges = new Map<
     string,
     { readonly pathAlias: string; readonly changeKind: string }
@@ -187,12 +211,13 @@ export class PersistedCodexEventProjector {
         if (
           ["commandExecution", "mcpToolCall", "webSearch"].includes(itemType)
         ) {
-          this.toolKinds.set(stable, itemType)
+          const metadata = legacyToolMetadata(itemType)
+          this.toolMetadata.set(stable, metadata)
           return {
             ...base(event, generation, sourceSequence, status, stable),
             kind: "tool",
             itemHandle,
-            toolKind: itemType,
+            ...metadata,
             excerpt: this.toolText.get(stable) ?? null,
           }
         }
@@ -212,6 +237,31 @@ export class PersistedCodexEventProjector {
           itemHandle,
           itemType,
           detailRef: null,
+        }
+      }
+      case "code.tool.status.changed": {
+        const itemHandle = stringField(payload, "itemHandle")
+        const stable = stableId(event, generation, "item", itemHandle)
+        const metadata = {
+          toolKind: stringField(payload, "toolKind"),
+          providerName: payload.providerName as string | null,
+          toolName: stringField(payload, "toolName"),
+          summary: payload.summary as string | null,
+          durationMs: payload.durationMs as number | null,
+        }
+        this.toolMetadata.set(stable, metadata)
+        return {
+          ...base(
+            event,
+            generation,
+            sourceSequence,
+            stringField(payload, "status"),
+            stable,
+          ),
+          kind: "tool",
+          itemHandle,
+          ...metadata,
+          excerpt: this.toolText.get(stable) ?? null,
         }
       }
       case "code.message.completed": {
@@ -263,11 +313,18 @@ export class PersistedCodexEventProjector {
           maxToolTextScalars,
         )
         this.toolText.set(stable, excerpt)
+        const metadata = this.toolMetadata.get(stable) ?? {
+          toolKind: "commandExecution",
+          providerName: null,
+          toolName: "shell",
+          summary: null,
+          durationMs: null,
+        }
         return {
           ...base(event, generation, sourceSequence, "streaming", stable),
           kind: "tool",
           itemHandle,
-          toolKind: this.toolKinds.get(stable) ?? "commandExecution",
+          ...metadata,
           excerpt,
         }
       }

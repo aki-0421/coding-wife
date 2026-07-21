@@ -390,7 +390,11 @@ function richCodexState(): WorkspaceCodexState {
         kind: "tool",
         status: "completed",
         itemHandle: "item-tool",
-        toolKind: "commandExecution",
+        toolKind: "mcpToolCall",
+        providerName: "browser",
+        toolName: "open",
+        summary: "ref_id=page-safe",
+        durationMs: 840,
         excerpt: "46 focused tests passed",
       },
       {
@@ -2535,12 +2539,11 @@ describe("WorkspaceShell", () => {
     expect(
       within(assistantEvent as HTMLElement).getByText("Codex"),
     ).toBeVisible()
-    expect(within(toolEvent as HTMLElement).getByText("Tool run")).toBeVisible()
+    expect(within(toolEvent as HTMLElement).getByText("browser")).toBeVisible()
     const toolSummary = (toolEvent as HTMLElement).querySelector("summary")
     expect(toolSummary).not.toBeNull()
-    expect(
-      within(toolSummary as HTMLElement).getByText("46 focused tests passed"),
-    ).toBeVisible()
+    expect(within(toolSummary as HTMLElement).getByText("open")).toBeVisible()
+    expect(toolSummary).toHaveTextContent("ref_id=page-safe · 840 ms")
     const compactCharacter = container.querySelector<HTMLElement>(
       "[data-character-status-mobile]",
     )
@@ -2936,14 +2939,18 @@ describe("WorkspaceShell", () => {
     expect(operationDetails).not.toBeNull()
     expect(operationSummary).not.toBeNull()
     expect(operationDetails?.open).toBe(false)
-    expect(operationSummary).toHaveTextContent("46 focused tests passed")
+    expect(operationSummary).toHaveTextContent("browser")
+    expect(operationSummary).toHaveTextContent("open")
+    expect(operationSummary).toHaveTextContent("ref_id=page-safe · 840 ms")
 
     await user.click(operationSummary as HTMLElement)
     expect(operationDetails?.open).toBe(true)
     const details = within(tool as HTMLElement)
     await user.click(details.getByRole("button", { name: "Copy safe details" }))
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce())
-    expect(writeText).toHaveBeenCalledWith("46 focused tests passed")
+    expect(writeText).toHaveBeenCalledWith(
+      "ref_id=page-safe\n46 focused tests passed",
+    )
     expect(
       details.getByRole("button", { name: "Copy safe details" }),
     ).toHaveTextContent("Copied")

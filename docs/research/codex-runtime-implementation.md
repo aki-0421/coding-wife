@@ -98,7 +98,7 @@ UI/HISTへ渡すCodex eventは、少なくとも次へ分類する。
 - thread/turn status: idle、running、waiting、completed、failed、interrupted。
 - assistant: Structured Outputのstreaming deltaはJSON envelope断片として破棄し、検証・redact済みcompleted `result.message`だけを表示・永続化する。decision requestはassistant本文を作らずdecision cardだけを作る。
 - `userMessage`と`agentMessage`の内部item lifecycleは監査用HISTへ保存するが、accepted user行とassistant行に加えて重複するアクティビティ行を表示しない。特にturn完了後に内部`agentMessage: running`を残してはならない。
-- plan、tool、file、diff: raw command/stdout/stderr/pathを出さず、件数、sanitized excerpt、path alias、change kind、detail refだけを使う。
+- plan、tool、file、diff: raw command/stdout/stderr/pathを出さず、件数、sanitized excerpt、path alias、change kind、detail refだけを使う。tool lifecycleは`tool_status`へ分離し、MCPではredact・長さ制限済みprovider/tool name、credential値を除く最大4件のtop-level引数要約、durationだけを公開する。commandとweb searchも同じfieldへ正規化し、App Server内部型`mcpToolCall`を実tool名として表示しない。永続化は`code.tool.status.changed`を新規正本とし、旧`code.item.status.changed` tool rowは読込互換だけを維持する。
 - decision/approval: 検証済みquestion/optionsまたはversioned approval contextとpending handleだけを使う。
 - diagnostic/protocol/model violation: safe code、willRetry、detail refと復旧可否を使い、raw payloadへfallbackしない。
 - completion/error/interrupt: turn terminal authorityをstatus eventとして保存し、interrupt ackをcompletionへ変換しない。
@@ -175,7 +175,7 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | `decision.rs`                         | 完了assistant JSONのvariant検証、context-bound fallback decision ledgerとsingle-claim    |
 | `process.rs`                          | 子process、環境allowlist、redacted stderr ring、5秒以内の段階的終了                     |
 | `requests.rs`                         | approval/RUI exact validation、duplicate request ledger                                 |
-| `normalizer.rs`                       | Structured Output deltaの破棄、opaque handle、redaction済みCodexEventとDomainEvent       |
+| `normalizer.rs`                       | Structured Output deltaの破棄、opaque handle、tool identity/summaryを含むredaction済みCodexEvent |
 | `supervisor.rs`                       | handshake、thread/turn/review、single active turn、restart budget                       |
 | `support.rs`                          | support公開contract、single-use explain turn、strict output/event policy、fallback      |
 | `support_isolation.rs`                | exact release/schema検証、native sandbox・mock wire・malicious canary preflight         |
@@ -185,6 +185,7 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | `commands.rs`                         | WebViewへ公開するtyped Tauri command                                                    |
 | `types.rs`                            | adapter v1のpublic DTOとserde contract                                                  |
 | `workspace.rs`                        | native folder picker、Git/owner preflight、opaque workspace登録、app-private record復元 |
+| `src-tauri/src/workspace_history/store.rs` | `code.tool.status.changed`を含む永続eventのexact allowlistとpublic text検証          |
 | `src-tauri/tests/codex_supervisor.rs` | fake process integrationとopt-in live smoke                                             |
 
 ### TypeScript
@@ -192,10 +193,13 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 | ファイル                                                  | 責務                                                                 |
 | --------------------------------------------------------- | -------------------------------------------------------------------- |
 | `src/lib/contracts/codex.ts`                              | response/eventのexact-key parserとpublic DTO                         |
+| `src/lib/contracts/workspace-history.ts`                  | 永続semantic eventのexact-key parserとpublic text検証                |
 | `src/features/codex/transport.ts`                         | Tauri invoke/listen境界と決定的demo transport                        |
+| `src/features/codex/event-projection.ts`                  | live CodexEventを表示行と永続semantic eventへ投影                    |
 | `src/features/codex/session-store.ts`                     | generation、sequence、duplicate、pending response state              |
 | `src/features/codex/workspace-session-adapter.ts`         | workspace activation、turn受理、terminal Stop、HIST追記のcomposition |
 | `src/features/workspace-persistence/codex-composition.ts` | historyとCodex sessionをS-002用`WorkspaceViewAdapter`へ束ねる        |
+| `src/features/workspace-persistence/codex-event-projector.ts` | 永続semantic eventからliveと同じ表示行を復元                     |
 | `src/features/workspace-view/Timeline.tsx`                | semantic row、decision/approval、Other/Hold、safe detail操作         |
 | `src/features/workspace-view/ChatView.tsx`                | 48px scroll lock、未読更新、composerとLive2D stageの配置             |
 | `src/features/codex/workspace-store.ts`                   | native pickerのsingle-flight、opaque registration、safe error state  |
@@ -207,6 +211,8 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 `CodexEvent`はbase fieldだけでなくvariant payloadもcamelCaseでserializeする。Rust round-tripとTypeScript parser testが同じfixtureを読むため、一方だけのfield名変更はgateで失敗する。
 
 decision envelopeまたはassistant event正規化を変更した時は、`cargo test --manifest-path src-tauri/Cargo.toml codex::decision::tests`と`cargo test --manifest-path src-tauri/Cargo.toml codex::normalizer::tests`を実行する。前者は`result`互換fieldとdecision requestのfail-closed検証、後者はJSON delta非公開、完了messageのredaction、invalid outputのinterrupt要求を確認する。output schemaを変更した時は`cargo test --manifest-path src-tauri/Cargo.toml codex::protocol::tests::decision_output_schema_uses_a_structured_outputs_root_object`も実行し、単一root objectとrequired field契約を確認する。
+
+tool eventの正規化、表示field、永続payloadを変更した時は、`cargo test --manifest-path src-tauri/Cargo.toml codex::normalizer::tests`と`cargo test --manifest-path src-tauri/Cargo.toml workspace_history::store::tests::rich_codex_events_use_an_exact_bounded_allowlist_and_are_redacted`でApp Server itemからraw ID・result・credential・private pathが漏れず、HISTがexact allowlistだけを受理することを確認する。続けて`pnpm exec vitest run src/lib/contracts/codex.test.ts src/lib/contracts/workspace-history.test.ts src/features/codex/event-projection.test.ts src/features/workspace-persistence/adapter.test.ts src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`でlive/HISTのprovider、実tool名、summary、duration、safe detailが同じ表示へ収束し、旧`mcpToolCall` item typeが実tool名として描画されないことを確認する。
 
 ## Fake App Server
 

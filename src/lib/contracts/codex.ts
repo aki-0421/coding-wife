@@ -366,6 +366,18 @@ export type CodexEvent = CodexEventBase &
         }
       }
     | {
+        readonly kind: "tool_status"
+        readonly payload: {
+          readonly itemHandle: string
+          readonly toolKind: "commandExecution" | "mcpToolCall" | "webSearch"
+          readonly providerName: string | null
+          readonly toolName: string
+          readonly summary: string | null
+          readonly durationMs: number | null
+          readonly status: "running" | "completed" | "failed"
+        }
+      }
+    | {
         readonly kind: "agent_message_delta"
         readonly payload: {
           readonly itemHandle: string
@@ -1311,6 +1323,55 @@ export function parseCodexEvent(value: unknown): CodexEvent {
         payload: {
           itemHandle: payload.itemHandle,
           itemType: payload.itemType,
+          status: payload.status,
+        },
+      }
+    }
+    case "tool_status": {
+      const payload = parseSimplePayload(value.payload, [
+        "itemHandle",
+        "toolKind",
+        "providerName",
+        "toolName",
+        "summary",
+        "durationMs",
+        "status",
+      ])
+      if (
+        !isPublicSingleLineText(payload.itemHandle, 128) ||
+        !oneOf(payload.toolKind, [
+          "commandExecution",
+          "mcpToolCall",
+          "webSearch",
+        ] as const) ||
+        !(
+          payload.providerName === null ||
+          isPublicSingleLineText(payload.providerName, 128)
+        ) ||
+        !isPublicSingleLineText(payload.toolName, 128) ||
+        !(
+          payload.summary === null ||
+          isPublicSingleLineText(payload.summary, 512)
+        ) ||
+        !(
+          payload.durationMs === null ||
+          (safeInteger(payload.durationMs) &&
+            payload.durationMs <= 24 * 60 * 60 * 1_000)
+        ) ||
+        !oneOf(payload.status, ["running", "completed", "failed"] as const)
+      ) {
+        return violation()
+      }
+      return {
+        ...base,
+        kind: value.kind,
+        payload: {
+          itemHandle: payload.itemHandle,
+          toolKind: payload.toolKind,
+          providerName: payload.providerName,
+          toolName: payload.toolName,
+          summary: payload.summary,
+          durationMs: payload.durationMs,
           status: payload.status,
         },
       }

@@ -149,6 +149,15 @@ function eventCode(event: WorkspaceTimelineItem): string | undefined {
 
 function eventLabel(copy: WorkspaceCopy, event: WorkspaceTimelineItem): string {
   if (event.kind === "history") return copy.timelineEvent.history
+  if (event.kind === "tool") {
+    if (event.providerName !== null) return event.providerName
+    if (event.toolKind === "commandExecution") {
+      return copy.timelineEvent.toolProvider.terminal
+    }
+    if (event.toolKind === "webSearch") {
+      return copy.timelineEvent.toolProvider.webSearch
+    }
+  }
   return copy.timelineEvent.kind[event.kind]
 }
 
@@ -165,8 +174,12 @@ function eventDetail(
       return event.text
     case "plan":
       return null
-    case "tool":
-      return event.excerpt
+    case "tool": {
+      const details = [event.summary, event.excerpt].filter(
+        (detail): detail is string => detail !== null && detail.length > 0,
+      )
+      return [...new Set(details)].join("\n") || null
+    }
     case "file":
       return null
     case "diff":
@@ -212,7 +225,7 @@ function eventTag(event: WorkspaceTimelineItem): string | null {
     case "history":
       return event.domainKind
     case "tool":
-      return event.toolKind
+      return event.toolName
     case "file":
       return event.changeKind
     case "error":
@@ -233,8 +246,15 @@ function eventSummary(
       return event.errorCode ?? null
     case "plan":
       return copy.timelineEvent.steps(event.stepCount)
-    case "tool":
-      return event.excerpt?.split("\n", 1)[0]?.trim() || null
+    case "tool": {
+      const detail =
+        event.summary ?? event.excerpt?.split("\n", 1)[0]?.trim() ?? null
+      const duration =
+        event.durationMs === null
+          ? null
+          : copy.timelineEvent.duration(event.durationMs)
+      return [detail, duration].filter(Boolean).join(" · ") || null
+    }
     case "file":
       return event.pathAlias
     case "diff":
@@ -884,13 +904,13 @@ function OperationSummary({
         <EventIcon event={event} />
       </span>
       <span className="flex min-w-0 items-center gap-xs">
-        <span className="shrink-0 text-title text-foreground">
+        <span className="max-w-28 shrink truncate text-title text-foreground">
           {eventLabel(copy, event)}
         </span>
         {tag ? (
           <code
             className={cn(
-              "max-w-36 shrink truncate rounded-control bg-code-chip px-xs py-xxs font-mono text-label",
+              "max-w-44 shrink truncate rounded-control bg-code-chip px-xs py-xxs font-mono text-label",
               eventFailed(event) ? "text-destructive" : "text-text-secondary",
             )}
           >

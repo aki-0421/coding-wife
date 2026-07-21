@@ -68,6 +68,10 @@ export type CodexSemanticTimelineEvent = CodexTimelineEventBase &
         readonly kind: "tool"
         readonly itemHandle: string
         readonly toolKind: string
+        readonly providerName: string | null
+        readonly toolName: string
+        readonly summary: string | null
+        readonly durationMs: number | null
         readonly excerpt: string | null
       }
     | {
@@ -108,6 +112,7 @@ export type CodexHistoryEventKind =
   | "code.session.status.changed"
   | "code.user.instruction.accepted"
   | "code.item.status.changed"
+  | "code.tool.status.changed"
   | "code.message.completed"
   | "code.plan.updated"
   | "code.diff.updated"
@@ -217,9 +222,34 @@ function turnKind(status: string): "turn" | "completion" | "error" {
   return "error"
 }
 
+function legacyToolMetadata(toolKind: string) {
+  return {
+    toolKind,
+    providerName: null,
+    toolName:
+      toolKind === "commandExecution"
+        ? "shell"
+        : toolKind === "webSearch"
+          ? "search"
+          : "MCP",
+    summary: null,
+    durationMs: null,
+  } as const
+}
+
 export class CodexEventProjector {
   private readonly assistantText = new Map<string, string>()
   private readonly toolText = new Map<string, string>()
+  private readonly toolMetadata = new Map<
+    string,
+    {
+      readonly toolKind: string
+      readonly providerName: string | null
+      readonly toolName: string
+      readonly summary: string | null
+      readonly durationMs: number | null
+    }
+  >()
 
   project(event: CodexEvent): CodexEventProjection {
     switch (event.kind) {
@@ -274,11 +304,13 @@ export class CodexEventProjector {
         if (
           ["commandExecution", "mcpToolCall", "webSearch"].includes(itemType)
         ) {
+          const metadata = legacyToolMetadata(itemType)
+          this.toolMetadata.set(stable, metadata)
           timeline = {
             ...base(event, "tool", event.payload.status, stable, true),
             kind: "tool",
             itemHandle: event.payload.itemHandle,
-            toolKind: itemType,
+            ...metadata,
             excerpt: this.toolText.get(stable) ?? null,
           }
         } else if (itemType === "fileChange") {
@@ -305,6 +337,31 @@ export class CodexEventProjector {
           history: history(event, "code.item.status.changed", {
             itemHandle: event.payload.itemHandle,
             itemType,
+            status: event.payload.status,
+          }),
+        }
+      }
+      case "tool_status": {
+        const stable = stableId(event, "item", event.payload.itemHandle)
+        const metadata = {
+          toolKind: event.payload.toolKind,
+          providerName: event.payload.providerName,
+          toolName: event.payload.toolName,
+          summary: event.payload.summary,
+          durationMs: event.payload.durationMs,
+        }
+        this.toolMetadata.set(stable, metadata)
+        return {
+          timeline: {
+            ...base(event, "tool", event.payload.status, stable, true),
+            kind: "tool",
+            itemHandle: event.payload.itemHandle,
+            ...metadata,
+            excerpt: this.toolText.get(stable) ?? null,
+          },
+          history: history(event, "code.tool.status.changed", {
+            itemHandle: event.payload.itemHandle,
+            ...metadata,
             status: event.payload.status,
           }),
         }
@@ -376,12 +433,19 @@ export class CodexEventProjector {
           maxToolText,
         )
         this.toolText.set(stable, excerpt)
+        const metadata = this.toolMetadata.get(stable) ?? {
+          toolKind: "commandExecution",
+          providerName: null,
+          toolName: "shell",
+          summary: null,
+          durationMs: null,
+        }
         return {
           timeline: {
             ...base(event, "tool", "streaming", stable, true),
             kind: "tool",
             itemHandle: event.payload.itemHandle,
-            toolKind: "commandExecution",
+            ...metadata,
             excerpt,
           },
           history: history(event, "code.tool.output", {

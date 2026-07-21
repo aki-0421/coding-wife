@@ -523,10 +523,14 @@ export class DemoCodexTransport implements CodexTransport {
     )
     this.schedule(280, () =>
       this.emit(
-        "item_status",
+        "tool_status",
         {
           itemHandle: `${turnHandle}-tool`,
-          itemType: "commandExecution",
+          toolKind: "commandExecution",
+          providerName: null,
+          toolName: "shell",
+          summary: "pnpm test",
+          durationMs: null,
           status: "running",
         },
         workspaceId,

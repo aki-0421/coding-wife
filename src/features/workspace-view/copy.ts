@@ -124,6 +124,11 @@ const en = {
   diagnostics: "Diagnostics",
   historyUnavailable: "History requires recovery",
   timelineEvent: {
+    toolProvider: {
+      terminal: "Terminal",
+      webSearch: "Web search",
+    },
+    duration: (milliseconds: number) => `${String(milliseconds)} ms`,
     kind: {
       thread: "Codex session",
       turn: "Turn",
@@ -600,6 +605,11 @@ const ja: typeof en = {
   diagnostics: "診断",
   historyUnavailable: "履歴の復旧が必要です",
   timelineEvent: {
+    toolProvider: {
+      terminal: "ターミナル",
+      webSearch: "Web検索",
+    },
+    duration: (milliseconds: number) => `${String(milliseconds)} ms`,
     kind: {
       thread: "Codexセッション",
       turn: "ターン",
