@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { presenceDirectionEventChannel } from "@/features/narration/contracts"
+import {
+  narrationSchemaVersion,
+  presenceDirectionEventChannel,
+  presenceDirectionScopeCommand,
+} from "@/features/narration/contracts"
 import {
   TauriPresenceDirectionSource,
   type PresenceDirectionEventListener,
+  type PresenceDirectionScopeInvoker,
 } from "@/features/narration/presence-source"
 
 describe("TauriPresenceDirectionSource", () => {
@@ -49,5 +54,24 @@ describe("TauriPresenceDirectionSource", () => {
     await Promise.resolve()
 
     expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it("sends the exact fail-isolated Luna scope command envelope", async () => {
+    const invoke = vi.fn<PresenceDirectionScopeInvoker>(() =>
+      Promise.resolve(null),
+    )
+    const source = new TauriPresenceDirectionSource({ invoke })
+    const request = {
+      schemaVersion: narrationSchemaVersion,
+      workspaceId: "workspace-1",
+      workspaceGeneration: 7,
+      locale: "ja" as const,
+    }
+
+    await source.setScope(request)
+
+    expect(invoke).toHaveBeenCalledWith(presenceDirectionScopeCommand, {
+      request,
+    })
   })
 })

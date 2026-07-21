@@ -21,6 +21,7 @@ import {
   type PresenceDirectionCue,
   type PresenceDirectionEventV1,
   type PresenceDirectionPriority,
+  type PresenceDirectionScopeRequestV1,
   type PresenceDirectionTrigger,
 } from "@/features/narration/contracts"
 import {
@@ -262,6 +263,7 @@ export class NarrationController {
   #initialization: Promise<void> | null = null
   #sourceDisconnect: (() => void) | null = null
   #presenceSourceDisconnect: (() => void) | null = null
+  #presenceSource: PresenceDirectionConsumerPort | null = null
   #scopeEpoch = 0
   #presentationGeneration = 0
   #speechEpoch = 0
@@ -300,11 +302,21 @@ export class NarrationController {
     source: PresenceDirectionConsumerPort | null,
   ): () => void {
     this.#presenceSourceDisconnect?.()
-    this.#presenceSourceDisconnect =
+    this.#presenceSource = source
+    const disconnect =
       source?.subscribe((event) => this.consumePresence(event)) ?? null
+    this.#presenceSourceDisconnect = disconnect
+    this.syncPresenceScope(this.#snapshot.scope)
     return () => {
-      this.#presenceSourceDisconnect?.()
+      if (
+        this.#presenceSourceDisconnect !== disconnect ||
+        this.#presenceSource !== source
+      ) {
+        return
+      }
+      disconnect?.()
       this.#presenceSourceDisconnect = null
+      this.#presenceSource = null
     }
   }
 
@@ -469,11 +481,13 @@ export class NarrationController {
       this.#snapshot.scope?.workspaceId === scope.workspaceId &&
       this.#snapshot.scope.generation === scope.generation
     if (sameNativeScope && this.#snapshot.scope?.locale === scope.locale) {
+      this.syncPresenceScope(scope)
       return true
     }
     if (sameNativeScope) {
       await this.dismissPresence("workspace_switch")
       this.update({ scope, lastErrorCode: null })
+      this.syncPresenceScope(scope)
       return true
     }
     this.#scopeGenerationHighWater.set(scope.workspaceId, scope.generation)
@@ -494,6 +508,7 @@ export class NarrationController {
       if (epoch !== this.#scopeEpoch) return false
       this.dropStalePrepared(scope)
       this.update({ scope, lastErrorCode: null })
+      this.syncPresenceScope(scope)
       return true
     } catch (error) {
       if (epoch === this.#scopeEpoch) {
@@ -1001,6 +1016,24 @@ export class NarrationController {
       const oldest = this.#presenceDedupeOrder.shift()
       if (oldest !== undefined) this.#presenceDedupe.delete(oldest)
     }
+  }
+
+  private syncPresenceScope(scope: NarrationScope | null): void {
+    if (
+      scope?.locale === undefined ||
+      this.#presenceSource?.setScope === undefined
+    ) {
+      return
+    }
+    const request: PresenceDirectionScopeRequestV1 = {
+      schemaVersion: narrationSchemaVersion,
+      workspaceId: scope.workspaceId,
+      workspaceGeneration: scope.generation,
+      locale: scope.locale,
+    }
+    void this.#presenceSource.setScope(request).catch(() => {
+      // Luna scheduling is optional and must not block the main workspace scope.
+    })
   }
 
   private preparePresenceCaptionSpeech(): void {

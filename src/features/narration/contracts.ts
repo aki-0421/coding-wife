@@ -4,6 +4,7 @@ export const narrationMaxTextScalars = 240
 export const presenceDirectionMaxUtteranceScalars = 160
 export const presenceDirectionEventChannel =
   "coding-wife://presence-direction" as const
+export const presenceDirectionScopeCommand = "presence_set_scope" as const
 
 export const narrationCommands = {
   getSettings: "narration_get_settings",
@@ -245,8 +246,16 @@ export interface PresenceDirectionEventV1 {
   readonly occurredAt: string
 }
 
+export interface PresenceDirectionScopeRequestV1 {
+  readonly schemaVersion: typeof narrationSchemaVersion
+  readonly workspaceId: string
+  readonly workspaceGeneration: number
+  readonly locale: NarrationLocale
+}
+
 export interface PresenceDirectionConsumerPort {
   subscribe(listener: (event: unknown) => void): () => void
+  setScope?(request: PresenceDirectionScopeRequestV1): Promise<void>
 }
 
 export class NarrationContractError extends Error {

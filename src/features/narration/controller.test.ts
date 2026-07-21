@@ -16,6 +16,7 @@ import {
   type NarrationSpeakResponseV1,
   type NarrationVoiceListV1,
   type PresenceDirectionEventV1,
+  type PresenceDirectionConsumerPort,
 } from "@/features/narration/contracts"
 import { NarrationController } from "@/features/narration/controller"
 import type { NarrationGateway } from "@/features/narration/transport"
@@ -254,6 +255,59 @@ function acknowledge(
 }
 
 describe("NarrationController", () => {
+  it("synchronizes Luna scope without coupling its failure to the main scope", async () => {
+    const { controller, gateway } = await ready(true)
+    const setScope = vi.fn<
+      NonNullable<PresenceDirectionConsumerPort["setScope"]>
+    >(() => Promise.reject(new Error("optional Luna scope unavailable")))
+    controller.connectPresence({
+      subscribe: () => () => undefined,
+      setScope,
+    })
+
+    await expect(
+      controller.setScope({
+        workspaceId: "workspace-1",
+        generation: 3,
+        locale: "ja",
+      }),
+    ).resolves.toBe(true)
+    await Promise.resolve()
+
+    expect(gateway.scopes).toHaveLength(1)
+    expect(setScope).toHaveBeenCalledWith({
+      schemaVersion: narrationSchemaVersion,
+      workspaceId: "workspace-1",
+      workspaceGeneration: 3,
+      locale: "ja",
+    })
+    expect(controller.getSnapshot().lastErrorCode).toBeNull()
+  })
+
+  it("replays the current Luna scope when its native source connects late", async () => {
+    const { controller } = await ready(true)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "en",
+    })
+    const setScope = vi.fn<
+      NonNullable<PresenceDirectionConsumerPort["setScope"]>
+    >(() => Promise.resolve())
+
+    controller.connectPresence({
+      subscribe: () => () => undefined,
+      setScope,
+    })
+
+    expect(setScope).toHaveBeenCalledWith({
+      schemaVersion: narrationSchemaVersion,
+      workspaceId: "workspace-1",
+      workspaceGeneration: 3,
+      locale: "en",
+    })
+  })
+
   it("releases a visible Luna caption to byte-identical event speech after its lead", async () => {
     const leads: Array<() => void> = []
     const pauseDurations: number[] = []
