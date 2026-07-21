@@ -1,6 +1,6 @@
 ---
 title: Coding Wife Final Submission Materials
-description: Paste-ready English copy, judge instructions, a three-model demo script, claim-to-evidence map, and final external values for the Coding Wife OpenAI Build Week submission.
+description: Paste-ready English copy, judge instructions, accepted 165-second demo evidence, a claim-to-evidence map, and final external values for the Coding Wife OpenAI Build Week submission.
 updated: 2026-07-22
 read_when:
   - Preparing, reviewing, or entering the final Coding Wife submission in Devpost.
@@ -62,13 +62,13 @@ Three GPT-5.6 models act as one bounded orchestration pipeline:
 
 1. **GPT-5.6 Sol (`gpt-5.6-sol`)** runs the main Codex session. It understands the repository request, plans the work, uses tools, edits code, verifies the result, and creates the commit.
 2. **GPT-5.6 Luna (`gpt-5.6-luna`)** is an isolated, zero-tool presence director. After each eligible live completed Sol progress message, it receives only a bounded sanitized excerpt and returns a short validated reaction. That reaction drives the visible caption, Live2D expression and motion, and optional OpenAI text-to-speech. Unsafe code-, path-, diff-, or secret-like text is rejected instead of narrated.
-3. **GPT-5.6 Terra (`gpt-5.6-terra`)** is an isolated, zero-tool commit explainer. For a newly verified main-session commit, the native controller starts Terra silently in the background with bounded read-only Git evidence; **Explain changes** then presents the cache or joins that running job. For an existing commit with no generated explanation, the action can start a bounded `user_request`; after a failed generation, it can start a bounded `user_retry`. Terra never joins the write-capable main session.
+3. **GPT-5.6 Terra (`gpt-5.6-terra`)** is an isolated, zero-tool commit explainer. The implemented controller can auto-dispatch bounded read-only evidence for a newly verified main-session commit; **Explain changes** can present or join that job, start `user_request` for an existing ungenerated commit, or start `user_retry` after failure. Terra never joins the write-capable main session. In the accepted video take, the provider rejects both the bounded `user_request` and its single `user_retry` before generation, so Coding Wife records analysis as unavailable and fails closed with zero tool or write authority. The video does not claim a generated Terra explanation.
 
 The workspace chat removes speaker labels, timestamps, and decorative execution status so the work stays readable. Tool rows show the tool kind and executed command; success is visually quiet, while failures receive a restrained red treatment. The **Commit changes** tab follows the information density of GitHub's commit view: choose a commit, search and select a file, inspect additions and deletions, and read a unified diff with old and new line numbers. It intentionally omits internal orchestration properties that do not help a developer review code.
 
 ### Why the model orchestration matters
 
-The three roles have different authority and latency needs. Sol needs the complete coding context and tools. Luna needs a fast, privacy-bounded signal for human presence, but no repository tools. Terra needs only verified immutable Git evidence: the native controller starts generation automatically and silently for a newly verified main-session commit, while explicit action can present or join that job, request a missing explanation for an existing commit, or retry after failure. Keeping those roles isolated makes the experience more expressive without giving presentation features coding authority or mixing support output into the main work history.
+The three roles have different authority and latency needs. Sol needs the complete coding context and tools. Luna needs a fast, privacy-bounded signal for human presence, but no repository tools. Terra needs only verified immutable Git evidence. Its controller supports automatic silent dispatch for a newly verified main-session commit plus explicit presentation, request, and retry paths. Keeping those roles isolated makes the experience more expressive without giving presentation features coding authority or mixing support output into the main work history. The accepted take also demonstrates why that separation matters: an unsupported Terra provider event becomes a typed unavailable result instead of gaining authority, contaminating Sol's session, or being presented as generated review output.
 
 Deterministic TypeScript and Rust contracts pin each exact model, validate inputs and outputs, bound scalar sizes, redact unsafe content, deduplicate live events, and fail closed on unsupported protocol data. The WebView has typed native commands rather than generic shell, filesystem, or Git authority. Optional speech is off unless configured; its API key stays behind the native boundary and generated audio is deleted after playback.
 
@@ -82,7 +82,7 @@ Human decisions remained explicit. We chose three isolated model roles instead o
 
 Coding Wife aims to reduce the mental work of following and reviewing a long coding session while making the experience feel more like working beside a teammate. It combines a usable coding workspace, continuous Live2D presence, and concise commit review in one local app. We have not yet run a controlled productivity study, so we claim a demonstrated workflow improvement rather than a measured time-saving percentage.
 
-The primary current full three-model judge target is macOS 14+ on Apple Silicon. It requires a compatible authenticated local Codex installation and a writable Git repository. Windows 11 x64 and Ubuntu 22.04 / Debian 12-compatible Linux x64 artifacts are packaging previews with install or extraction smoke evidence; they do not carry an equivalent production Luna/Terra workflow guarantee. Optional OpenAI TTS requires a user-supplied API key and playback is macOS-only. The app does not provide cloud sync or remote collaboration. The frozen macOS release notes must state the exact signing and notarization status.
+The primary current full three-model judge target is macOS 14+ on Apple Silicon. It requires a compatible authenticated local Codex installation and a writable Git repository. Windows 11 x64 and Ubuntu 22.04 / Debian 12-compatible Linux x64 artifacts are packaging previews with install or extraction smoke evidence; they do not carry an equivalent production Luna/Terra workflow guarantee. Optional OpenAI TTS requires a user-supplied API key and playback is macOS-only. The app does not provide cloud sync or remote collaboration. In the accepted capture environment, Terra's support event was not accepted by the provider, so that take proves the read-only fail-closed boundary but does not prove a generated commit explanation. The frozen macOS release notes must state the exact signing and notarization status.
 
 ## 3. Judge testing instructions
 
@@ -93,10 +93,10 @@ The primary current full three-model judge target is macOS 14+ on Apple Silicon.
 3. Launch Coding Wife and add a disposable writable Git repository.
 4. Start a workspace and send: `Add a short Usage section to README.md, verify the change, and commit it.`
 5. While Sol works, confirm that each eligible completed progress message produces a short Luna caption and a matching Live2D expression or motion. Speech is optional and should occur only if TTS was configured; unsafe excerpts are expected to remain silent.
-6. When this new main-session commit becomes reachable and verified, confirm the app starts Terra silently in the background, then open **Commit changes** and inspect a changed file in the unified diff.
-7. Select **Explain changes** and confirm that, in this fresh-commit path, it presents a cached explanation or waits for the already-running Terra job.
+6. When this new main-session commit becomes reachable and verified, open **Commit changes** and inspect a changed file in the unified diff. The implemented controller should attempt silent Terra dispatch for the newly verified commit when the connected provider accepts the support event.
+7. Select **Explain changes**. On a compatible provider, confirm it presents cached output or joins the running Terra job. If the provider rejects the event, confirm the app records a typed unavailable result, grants no tools or write authority, and remains separate from Sol; one bounded retry may be attempted for the same commit.
 
-Expected result for this fresh-commit test: Sol completes real repository work, Luna keeps the character visibly responsive without gaining tools, verification of the new main-session commit starts one silent Terra background job, the Git tab shows the reviewable patch, and **Explain changes** presents or joins that job's result.
+Expected result: Sol completes real repository work, Luna keeps the character visibly responsive without gaining tools, and the Git tab shows the reviewable patch. Terra remains bounded to immutable read-only commit evidence. A compatible provider returns a validated explanation through the automatic or explicit path; an incompatible event is recorded as unavailable and fails closed with zero tool and write authority. The accepted video demonstrates the latter outcome for one `user_request` and one `user_retry` against the same verified commit.
 
 The already-public `v0.1.5` release is an **older preview**. It proves that public distribution exists, but it must not be used as evidence for the current three-model orchestration, completed-message reactions, distilled chat UI, or GitHub-style Commit changes UX. Publish and link a current frozen release before submission.
 
@@ -128,33 +128,24 @@ printf '%s\n' "$JUDGE_REPO_PATH"
 
 No application account or bundled OpenAI API key is required for the core Codex path. The judge's local Codex installation must already be compatible and authenticated. Never test against a repository containing private or valuable work.
 
-## 4. Exact 2:50 demo plan and English voiceover
+## 4. Accepted 2:45 demo record
 
-The final video must remain under 3:00 and contain clear English audio. Record the current macOS 14+ Apple Silicon native build on a disposable repository. Configure optional macOS-only TTS before recording and never show its key. Cut loading and typing pauses rather than speeding up the explanatory moments.
+The exact 165-second shot timing, 293-word English narration, screen operations, caption text, edit contract, and retry rules are frozen in the [final video production runbook](./13-final-video-production-runbook.md). Do not reuse the superseded 2:50 draft.
 
-| Time | Screen action | Exact English voiceover |
-|---:|---|---|
-| 0:00–0:12 | Show the clean workspace with Live2D visible. | “Coding Wife is a Live2D coding partner for developers who want agent work to feel collaborative and stay easy to review.” |
-| 0:12–0:28 | Enter the README task and send it in the main session. | “I give the main session a real repository task: add a Usage section, verify it, and commit the result. GPT-5.6 Sol is the only role with coding tools and write authority.” |
-| 0:28–0:58 | Show Sol planning and completing the first progress message. Keep the caption and character large enough to read. | “As Sol works, the app converts its activity into a focused timeline. There are no speaker labels, timestamps, or success badges competing with the actual work.” |
-| 0:58–1:22 | Show two eligible completed progress messages. For each, capture Luna caption plus expression or motion; let one optional TTS reaction play. | “Each safe completed Sol message triggers a separate GPT-5.6 Luna turn. Luna sees only a bounded sanitized excerpt, has no tools, and returns a short reaction that drives the caption, Live2D expression, motion, and optional speech.” |
-| 1:22–1:35 | Show a tool row and, if available, a rehearsed failed command with the restrained red background. | “Tool activity is reduced to its type and command. Successful execution stays quiet; a failure is the only state that receives a warning background.” |
-| 1:35–2:00 | Open **Commit changes**, choose the commit and one file, then scroll a small unified diff. | “After Sol commits, the Git tab uses the information density of GitHub’s commit changes view: commit summary, changed files, additions and deletions, and a unified diff with old and new line numbers.” |
-| 2:00–2:18 | Note that verification of this new main-session commit already started Terra silently, then select **Explain changes** and show the cached or running result. | “In this fresh-commit demo, when the new main-session commit became reachable and verified, the native controller started Terra silently in the background. Explain changes presents that cache, or waits for the same running job, without granting write access.” |
-| 2:18–2:36 | Show a simple three-role architecture card or readable code snippets containing all three model IDs. | “Sol builds, Luna maintains presence, and Terra reduces review effort. Typed TypeScript and Rust contracts pin all three models, validate their inputs and outputs, redact unsafe text, and fail closed.” |
-| 2:36–2:50 | Show a short commit/test montage, then a platform-accurate closing card. | “We used Codex to implement, debug, test, and QA this pipeline, while humans chose its trust boundaries. The full judge path targets macOS 14 on Apple Silicon; Windows and Linux packages are install-smoked previews.” |
+| Artifact | Accepted value |
+|---|---|
+| Master | `tmp/submission-video/render/coding-wife-openai-build-week-2026-master.mp4` |
+| Master identity | 165.000 seconds; 1920×1080; constant 30 fps; H.264 High `yuv420p`; AAC stereo 48 kHz; SHA-256 `81feb8eb068c4e3f087845beff2b8bc94c95364786c1ac750ecc8ba57d86b94b` |
+| Audio | OpenAI TTS, `gpt-4o-mini-tts`, `marin`, shot-synchronized WAV sources; −16.05 LUFS integrated; −4.30 dBTP true peak |
+| Captions | Burned English captions plus `tmp/submission-video/captions/coding-wife-openai-build-week-2026-en.srt`; SHA-256 `c6a49d706887bacf1e34b95efbd7b4af4cc9e3916949351a32dced71eab7353d` |
+| Screenshots | Four accepted 1920×1080 PNGs under `tmp/submission-video/evidence/screenshots/` |
+| Inspection | `tmp/submission-video/evidence/media-inspection.md`; overall PASS |
 
-### Recording acceptance
+The accepted causal run shows real Sol repository work through commit `d68adc0`, all three tests passing, two distinct Luna caption/Live2D reactions, and the same real diff in Commit changes. For Terra, it truthfully shows one bounded `user_request` followed by one bounded `user_retry`; both are rejected by the provider before generation and fail closed with no tools or writes. It does not show or claim a generated Terra review.
 
-- Show the current UI, not an older preview or fixture presented as production.
-- Show Sol, Luna, and Terra doing their actual distinct jobs.
-- Capture at least two eligible completed-message Luna reactions; avoid token-stream chatter.
-- Keep the Git shot on subject, changed files, line statistics, and diff. Do not narrate removed internal properties.
-- For this fresh-commit demo, state that verification of the new main-session commit starts Terra silently in the background. Show **Explain changes** presenting cached output or joining the running job; do not describe it as the trigger for this demo's first Terra handoff.
-- Do not describe Sol as the commit explainer.
-- Remove keys, tokens, email, notifications, personal paths, private repository names, and unrelated trademarks.
-- Use a Public YouTube video as the safest setting. The July 22 update says an Unlisted link is acceptable, while the Official Rules require the video to be publicly visible and the FAQ says public; Public avoids that conflict.
-- Verify duration, audio, visibility, and playback while logged out.
+Two fresh isolated `pnpm tauri:dev` launches retained the exact prompt but left Send disabled. Production capture therefore used the repository-owned desktop-QA native Tauri binary with the real WKWebView, typed Tauri IPC, Rust backend, authenticated Codex runtime, and disposable Git repository. No demo transport or fabricated agent output was used. Final QA decoded all 4,950 frames, found zero black intervals, produced 4,950/4,950 privacy OCR evidence rows with zero high-risk findings, and passed full-resolution screenshot, subtitle, metadata, secret, and content review.
+
+Upload this unchanged master to YouTube with **Public** visibility, the conservative interpretation of the Official Rules. After upload, verify duration, audio, captions, visibility, and playback while logged out, then record the final URL below.
 
 ## 5. Three-model architecture
 
@@ -162,7 +153,7 @@ The final video must remain under 3:00 and contain clear English audio. Record t
 |---|---|---|---|---|
 | Main coding session | `gpt-5.6-sol` | User task, approved context, repository/tool results | Plans, completed messages, edits, verification, commit | Write-capable within the bounded Codex session |
 | Presence director | `gpt-5.6-luna` | Live-only bounded sanitized excerpt from each eligible completed main message | Validated short utterance and presentation cue | Zero tools; no repository authority |
-| Commit explainer | `gpt-5.6-terra` | Bounded read-only evidence: native auto-dispatch for a newly verified main-session commit, `user_request` for an existing ungenerated commit, or `user_retry` after failure | Silent cached explanation; explicit action can present or join a job, request missing output, or retry | Zero tools; no repository authority |
+| Commit explainer | `gpt-5.6-terra` | Bounded read-only evidence: native auto-dispatch for a newly verified main-session commit, `user_request` for an existing ungenerated commit, or `user_retry` after failure | Validated explanation when supported, or a typed unavailable result; the accepted video shows the fail-closed unavailable path | Zero tools; no repository authority |
 
 The main process, Luna support runtime, and Terra support runtime are distinct. Presentation output does not become technical evidence, and support output does not enter the write-capable session history.
 
@@ -171,11 +162,11 @@ The main process, Luna support runtime, and Terra support runtime are distinct. 
 | Submission claim | Repository evidence | Verification to cite or capture |
 |---|---|---|
 | Sol performs the real coding workflow | `src/lib/contracts/codex.ts`; `src-tauri/src/codex/types.rs`; native Codex protocol, supervisor, and workspace adapters | Main-session contract/integration tests and the recorded disposable-repository run |
-| Each eligible completed main message can drive Luna presence | `src-tauri/src/codex/presence.rs`; `src-tauri/src/codex/support.rs`; `src-tauri/resources/skills/coding-wife-direct-presence/SKILL.md`; frontend narration contracts | FIFO, dedupe, live-only, sanitization, caption, motion, expression, and TTS tests; video 0:58–1:22 |
-| A newly verified main-session commit starts Terra silently; explicit action presents or joins that job, starts `user_request` for an existing ungenerated commit, or starts `user_retry` after failure | `src-tauri/src/codex/commit_explanation.rs`; `src-tauri/src/codex/support_isolation.rs`; Git review explanation adapter | Auto-generation, silent cache, running-job join, `user_request`, `user_retry`, presentation, and isolation tests; video 2:00–2:18 |
+| Each eligible completed main message can drive Luna presence | `src-tauri/src/codex/presence.rs`; `src-tauri/src/codex/support.rs`; `src-tauri/resources/skills/coding-wife-direct-presence/SKILL.md`; frontend narration contracts | FIFO, dedupe, live-only, sanitization, caption, motion, expression, and TTS tests; video 0:46–1:14 |
+| Terra review stays bounded to immutable read-only commit evidence across automatic dispatch, `user_request`, `user_retry`, success, and unavailable outcomes | `src-tauri/src/codex/commit_explanation.rs`; `src-tauri/src/codex/support_isolation.rs`; Git review explanation adapter | Auto-generation, silent cache, running-job join, request, retry, presentation, and isolation tests; video 1:54–2:16 truthfully captures one request and one retry failing closed before generation |
 | The three exact GPT-5.6 models are pinned | `src-tauri/src/codex/types.rs`; matching TypeScript contracts and tests | Model-routing and construction tests; architecture shot |
 | The chat favors content over metadata | workspace timeline components and `src/features/workspace-view/WorkspaceShell.test.tsx` | UI tests and real Tauri screenshots showing no names, times, or success checks |
-| Commit review follows a GitHub-style changes hierarchy | `src/features/git-review/`; `src/features/workspace-view/WorkspaceShell.test.tsx`; read-only native Git review | Commit/file selection, search, lazy diff, line-number, compact-layout, and real IPC QA evidence; video 1:35–2:00 |
+| Commit review follows a GitHub-style changes hierarchy | `src/features/git-review/`; `src/features/workspace-view/WorkspaceShell.test.tsx`; read-only native Git review | Commit/file selection, search, lazy diff, line-number, compact-layout, and real IPC QA evidence; video 1:30–1:54 |
 | The WebView lacks generic shell/Git authority | Tauri capabilities, typed IPC commands, native repository boundary checks | Transport, request-validation, and repository-boundary tests |
 | Live2D and third-party terms are explicit | `src-tauri/resources/legal/THIRD-PARTY-NOTICES.md`; bundled character notices; lock-derived dependency notices | Supply-chain and notice-generation checks |
 | The repository is openly licensed | Root `LICENSE` | Anonymous repository check |
@@ -201,7 +192,10 @@ Final external record:
 |---|---|
 | Source commit | `PENDING` |
 | Current macOS Apple Silicon full-flow release and artifact SHA-256 | `PENDING` |
-| Video URL, duration, visibility, and master SHA-256 | `PENDING` |
+| Video URL, duration, visibility, and master SHA-256 | YouTube URL `PENDING`; intended visibility Public; local accepted master `tmp/submission-video/render/coding-wife-openai-build-week-2026-master.mp4`; 165.000 seconds; SHA-256 `81feb8eb068c4e3f087845beff2b8bc94c95364786c1ac750ecc8ba57d86b94b` |
+| English SRT | `tmp/submission-video/captions/coding-wife-openai-build-week-2026-en.srt`; SHA-256 `c6a49d706887bacf1e34b95efbd7b4af4cc9e3916949351a32dced71eab7353d` |
+| Four submission screenshots | `tmp/submission-video/evidence/screenshots/`; accepted identities recorded in the [production runbook](./13-final-video-production-runbook.md#13-accepted-production-record) |
+| Final media QA and checksums | `tmp/submission-video/evidence/media-inspection.md`; `tmp/submission-video/evidence/checksums.sha256`; PASS |
 | Primary Codex Session ID | `PENDING` |
 | Devpost URL and submitted confirmation | `PENDING` |
 | Entrant / team record | `PENDING` |
@@ -212,7 +206,7 @@ Final external record:
 - [ ] Open the Devpost project while logged out and confirm it is marked submitted.
 - [ ] Open https://github.com/aki-0421/coding-wife without a maintainer session and confirm the frozen commit, README, MIT license, and notices are visible.
 - [ ] On macOS 14+ Apple Silicon, download the current submission release without authentication, verify its SHA-256, install it, and complete the primary flow without rebuilding.
-- [ ] Confirm the macOS release shows the same Sol/Luna flow, automatic silent Terra generation for the newly verified main-session commit, explicit explanation presentation, and Git review behavior claimed in the fresh-commit video demo.
+- [ ] Confirm the macOS release shows the same Sol/Luna and Git review behavior. Test Terra conditionally: accept a validated explanation when the connected provider supports the event, or verify a typed unavailable result with zero tool/write authority when it does not. Do not claim the video shows successful automatic Terra generation; it shows one `user_request` and one `user_retry` failing closed before generation.
 - [ ] Treat Windows and Linux artifacts only as install-smoked packaging previews; do not record their presence as proof of production Luna/Terra parity.
 - [ ] Play the YouTube video while logged out; confirm it is under 3:00, has audible English narration, and contains no private data.
 - [ ] Confirm every Devpost link resolves and every factual field matches the frozen source and release.

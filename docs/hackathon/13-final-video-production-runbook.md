@@ -23,7 +23,7 @@ The Official Rules require a clear working-project demo with audio, publicly vis
 | Story duration | Exactly **165 seconds / 2:45** on the edit timeline |
 | Safety ceiling | Target must remain at or below **175 seconds / 2:55** after any emergency adjustment; **180 seconds is never acceptable** |
 | Language | English narration and English burned captions; matching English SRT |
-| Working proof | One causal repository run from a real Sol task through Luna reactions, a verified commit, Commit changes, and one explicit bounded Terra review request for that selected commit whose unsupported provider event is recorded as a fail-closed unavailable result |
+| Working proof | One causal repository run from a real Sol task through Luna reactions, a verified commit, Commit changes, and one bounded Terra evidence sequence for that selected commit: one `user_request` followed by one `user_retry`, both rejected before generation and recorded as fail-closed unavailable results |
 | Required technology proof | Meaningful Codex use in construction and real runtime use of `gpt-5.6-sol`, `gpt-5.6-luna`, and `gpt-5.6-terra` |
 | Judge platform claim | macOS 14+ on Apple Silicon |
 | Raster | 1920×1080, square pixels, 30 fps constant frame rate |
@@ -145,7 +145,7 @@ Expected proof, not prerecorded output:
 - At least two eligible completed, path-free Sol messages produce distinct Luna caption/expression/motion reactions.
 - The native observer verifies the new reachable main-session commit.
 - Commit changes shows the same commit and its real unified diff.
-- Explain changes starts one isolated, bounded `user_request` Terra job for that selected existing commit. In the accepted take, the provider rejects the unsupported event before generation, the product records analysis as unavailable, and tool/write authority remains zero.
+- Explain changes starts one isolated, bounded `user_request` Terra job for that selected existing commit. The accepted evidence then records one bounded `user_retry` for the same commit. The provider rejects both unsupported events before generation, the product records analysis as unavailable, and tool/write authority remains zero.
 
 Shots 1 through 6 must come from this **same repository run and same resulting commit**. Shot 7 must target that exact resulting commit, even if the native app must relaunch into an anonymous review copy to recover the verified Git state. Waiting may be cut, but agent output from unrelated proof-chain takes must not be combined.
 
@@ -325,11 +325,11 @@ The following JSON block is the canonical input for TTS and edit automation. `st
 
 ### Shot 7 — Terra boundary and fail-closed audit
 
-- **Production operation:** Begin with the verified fresh commit selected. Select **Explain changes** once to start one bounded `user_request` Terra job for that existing commit, then retain the typed terminal result without retrying.
-- **Raw capture requirement:** Capture the selected commit before the click, the single click, the request state, and the recorded unavailable result. The accepted take ends with `CODEX-SUPPORT-POLICY-VIOLATION`, zero generated tokens, zero tool authority, and zero write authority because the provider rejects the unsupported event before generation.
+- **Production operation:** Begin with the verified fresh commit selected. Select **Explain changes** to start one bounded `user_request` Terra job for that existing commit. After its typed unavailable result, perform one bounded `user_retry` for the same commit and retain that terminal result. Do not retry again.
+- **Raw capture requirement:** Capture the selected commit, the `user_request`, its unavailable result, the single `user_retry`, and its unavailable result. Both accepted attempts end with `CODEX-SUPPORT-POLICY-VIOLATION`, zero generated tokens, zero tool authority, and zero write authority because the provider rejects each unsupported event before generation.
 - **Edit:** Keep the same real commit and diff as the primary visual. Add a clearly labeled submission-owned **Capture audit** overlay stating `bounded user request`, `provider event unsupported`, `analysis unavailable`, `tools: none`, `writes: none`, and `fail closed`. The actual unavailable state may appear briefly as evidence but must not become the hero screen. Do not imply a generated review or automatic background handoff.
 - **Privacy risk:** Raw provider payloads, identifiers, paths, code, diff text copied into an overlay, secrets, or an unsupported claim that Terra generated a review.
-- **Success/fallback:** The take is valid only if exactly one bounded request targets the selected verified commit, Terra stays read-only and tool-free, and the typed failure is truthfully recorded. Do not retry after the support-policy violation. If the commit changes, the action duplicates, or any write/tool authority is granted, reject the take.
+- **Success/fallback:** The take is valid only if one bounded `user_request` and one bounded `user_retry` target the same selected verified commit, Terra stays read-only and tool-free, and both typed failures are truthfully recorded. Do not perform a further retry. If the commit changes, either action duplicates, or any write/tool authority is granted, reject the take.
 
 ### Shot 8 — Three-role authority summary
 
@@ -505,10 +505,10 @@ Rehearse and record selectors/coordinates for:
 3. Focus the composer, enter the exact prompt, and send once.
 4. Keep the newest completed message and character caption visible without excessive scrolling.
 5. Open Commit, select the same commit, select each changed file, and scroll the diff.
-6. Select Explain changes once, confirm the bounded `user_request` pathway, and retain the typed terminal result without retrying.
+6. Select Explain changes, confirm the bounded `user_request` pathway, retain its typed unavailable result, perform one `user_retry` for the same commit, and retain the second unavailable result without retrying again.
 7. Restore the clean hero state.
 
-Save the reproducible sequence, viewport, selector names, and safe coordinate fallbacks to `evidence/rehearsal-map.json`. The rehearsal is successful only when one causal repository run produces Sol work, two Luna reactions, the verified commit, and the matching diff, and when one bounded Terra `user_request` for that exact commit records its terminal generated-or-unavailable result without granting tool or write authority. The accepted take records an unavailable result before generation.
+Save the reproducible sequence, viewport, selector names, and safe coordinate fallbacks to `evidence/rehearsal-map.json`. The rehearsal is successful only when one causal repository run produces Sol work, two Luna reactions, the verified commit, and the matching diff, and when the Terra evidence sequence for that exact commit records its terminal generated-or-unavailable results without granting tool or write authority. The accepted take records one `user_request` followed by one `user_retry`; both become unavailable before generation.
 
 WDIO must own the QA binary lifecycle. If interrupted, terminate only the QA processes it started. Never stop the user's production `pnpm tauri:dev` process or terminate Coding Wife processes indiscriminately.
 
@@ -563,7 +563,7 @@ Discard the proof-chain take and reseed when any of these occurs:
 - a Luna caption is clipped, duplicated, stale, or not paired with expression/motion;
 - tests fail or the expected commit is absent;
 - Commit changes does not show the same commit and real diff;
-- Explain changes does not start exactly one bounded `user_request` for the selected verified commit, or its terminal unavailable result is not retained for the audit overlay;
+- Explain changes does not record one bounded `user_request` followed by one bounded `user_retry` for the same selected verified commit, or either terminal unavailable result is not retained for the audit overlay;
 - Terra receives tools or write access, the selected commit changes, or the review-request scope is unrelated;
 - a key, email, personal path, notification, private URL, private repository label, or unrelated app appears even briefly;
 - an app crash, rendering corruption, missing character, cursor error, or unrecoverable visual pause damages the proof.
@@ -691,7 +691,7 @@ Process frames in batches and delete decoded scratch frames after each batch. OC
 - Sol, Luna, and Terra exact model IDs and distinct authority are accurate;
 - Luna is tied to safe live completed messages, not token streaming or replay;
 - Terra starts only from the recorded explicit Explain changes action for the selected verified commit;
-- Explain changes is described as a bounded `user_request`; the provider's pre-generation rejection and unavailable analysis are stated plainly, with no generated-review claim;
+- Explain changes is described as one bounded `user_request` followed by one bounded `user_retry` for the same commit; both provider rejections and the unavailable analysis are stated plainly, with no generated-review claim;
 - Terra remains tool-free and read-only, and the recorded audit shows zero generated tokens and zero tool/write authority;
 - the Commit UI displays user-relevant commit review information, not internal orchestration properties;
 - the primary platform claim is macOS 14+ on Apple Silicon;
@@ -713,15 +713,41 @@ After all gates pass:
 
 Production is complete only when all statements are true:
 
-- [ ] One accepted causal repository run proves Sol → two Luna reactions → verified commit → Commit changes, and one explicit bounded Terra `user_request` for that commit is truthfully recorded as unavailable before generation with zero tool/write authority.
-- [ ] The final master is 1920×1080, 30 fps, H.264/AAC 48 kHz, and 2:45 long.
-- [ ] English narration is complete, synchronized, approximately −16 LUFS, and at or below −1.5 dBTP.
-- [ ] English captions are burned in and the separate SRT matches them exactly.
-- [ ] Four 1920×1080 submission screenshots were extracted from the accepted master.
-- [ ] Full-frame every-frame OCR/privacy scanning, black-frame scanning, human contact-sheet review, and media probing passed.
-- [ ] No secret, personal data, notification, private URL, private repository, or unrelated third-party asset appears.
-- [ ] Final SHA-256 values and the complete acceptance record exist under `tmp/submission-video/evidence/`.
-- [ ] The master is ready to upload to a Public YouTube entry and remains below the Official Rules' three-minute limit.
+- [x] One accepted causal repository run proves Sol → two Luna reactions → verified commit → Commit changes, and one bounded Terra `user_request` followed by one bounded `user_retry` for that commit is truthfully recorded as unavailable before generation with zero tool/write authority.
+- [x] The final master is 1920×1080, 30 fps, H.264/AAC 48 kHz, and 2:45 long.
+- [x] English narration is complete, synchronized, approximately −16 LUFS, and at or below −1.5 dBTP.
+- [x] English captions are burned in and the separate SRT matches them exactly.
+- [x] Four 1920×1080 submission screenshots were extracted from the accepted master.
+- [x] Full-frame every-frame OCR/privacy scanning, black-frame scanning, human contact-sheet review, and media probing passed.
+- [x] No secret, personal data, notification, private URL, private repository, or unrelated third-party asset appears.
+- [x] Final SHA-256 values and the complete acceptance record exist under `tmp/submission-video/evidence/`.
+- [x] The master is ready to upload to a Public YouTube entry and remains below the Official Rules' three-minute limit.
+
+## 13. Accepted production record
+
+The accepted local production artifacts are immutable. Uploading the master to YouTube and recording its public URL remain external submission steps; no public URL is claimed here.
+
+| Artifact | Accepted identity |
+|---|---|
+| Burned-caption master | `tmp/submission-video/render/coding-wife-openai-build-week-2026-master.mp4`; SHA-256 `81feb8eb068c4e3f087845beff2b8bc94c95364786c1ac750ecc8ba57d86b94b` |
+| Master media | 165.000 seconds; 1920×1080; constant 30 fps; H.264 High `yuv420p`; AAC stereo 48 kHz; faststart |
+| Master audio | −16.05 LUFS integrated; −4.30 dBTP true peak |
+| English SRT | `tmp/submission-video/captions/coding-wife-openai-build-week-2026-en.srt`; SHA-256 `c6a49d706887bacf1e34b95efbd7b4af4cc9e3916949351a32dced71eab7353d` |
+| Inspection record | `tmp/submission-video/evidence/media-inspection.md`; overall result PASS |
+| Checksum manifest | `tmp/submission-video/evidence/checksums.sha256`; verification PASS |
+
+The accepted capture uses a repository-owned desktop-QA native Tauri binary after two fresh isolated `pnpm tauri:dev` launches retained the prompt but left Send disabled. The fallback ran the real WKWebView, typed Tauri IPC, Rust backend, authenticated Codex runtime, and disposable Git repository; it did not use demo transport or fabricated agent output. Product source at capture had no code difference from the QA binary's product commit `042e114`.
+
+The causal demo begins at seed commit `baeb62d` and ends at real Sol commit `d68adc0` (`feat: validate greeting names`), with two changed files, 19 additions, one deletion, and all three Node tests passing. Two distinct safe Luna reactions drive visible captions and Live2D behavior. For the same verified commit, the accepted Terra evidence records one `user_request` followed by one `user_retry`; both terminate unavailable with `CODEX-SUPPORT-POLICY-VIOLATION` before generation. No generated Terra review is shown or claimed, and Terra retains zero tool and write authority.
+
+| Screenshot | Timestamp | SHA-256 |
+|---|---:|---|
+| `tmp/submission-video/evidence/screenshots/screenshot-01-workspace.png` | 6.500s | `0862c592687802b2012cb404ca50d9ae9475dcf2b267b036edcb1c6fca0b14a4` |
+| `tmp/submission-video/evidence/screenshots/screenshot-02-luna-presence.png` | 61.500s | `fd2c81bba1b90f5139920389cd1213ed69b792343df1c4cba8614fd4e5b6f054` |
+| `tmp/submission-video/evidence/screenshots/screenshot-03-commit-changes.png` | 103.500s | `d0b0f7b627901e5fc20dc1da7241c753c3369af70efc4546c4d5abb20f9ea7bb` |
+| `tmp/submission-video/evidence/screenshots/screenshot-04-terra-fail-closed.png` | 127.000s | `c9979f4db50ba9debad242cbe38147f3b6c6818aaae2b2b509cbbf5d9f93aa5f` |
+
+Final inspection decoded all 4,950 frames, found zero black intervals, and produced 4,950/4,950 full-frame OCR evidence rows with zero high-risk findings. Exact-key scanning, non-media-box scanning, metadata scanning, full-resolution screenshot review, shot-boundary review, contact-sheet review, and full decode all passed. The four selected screenshots are 1920×1080 and each passed an independent OCR privacy scan.
 
 ## Official sources reverified on 2026-07-22 JST
 
