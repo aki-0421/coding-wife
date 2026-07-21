@@ -457,6 +457,7 @@ describe("NarrationController", () => {
       ["recoverable_failure", "warning", "error", "high"],
       ["terminal_failure", "error", "error", "high"],
       ["long_milestone", "working", "progress", "low"],
+      ["main_message", "working", "progress", "normal"],
       ["commit_ready", "success", "commit_observed", "normal"],
       ["turn_completed", "success", "progress", "normal"],
     ] as const
@@ -487,8 +488,71 @@ describe("NarrationController", () => {
         }),
       ).toBe(true)
       await vi.waitFor(() => expect(gateway.speech).toHaveLength(1))
-      expect(gateway.speech[0]).toMatchObject({ semanticType, priority })
+      expect(gateway.speech[0]).toMatchObject({
+        semanticType,
+        priority,
+        text: "確認が必要なところで待っています。",
+      })
     }
+  })
+
+  it("ranks main messages below failures and above commit and completion captions", async () => {
+    const { controller } = await ready(true)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+
+    expect(
+      controller.consumePresence(
+        presenceEvent({
+          requestId: "main-message",
+          sourceEventId: "main-message-source",
+          trigger: "main_message",
+          cue: "working",
+          priority: "normal",
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      controller.consumePresence(
+        presenceEvent({
+          requestId: "commit-ready",
+          sourceEventId: "commit-ready-source",
+          trigger: "commit_ready",
+          cue: "success",
+          priority: "normal",
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      controller.consumePresence(
+        presenceEvent({
+          requestId: "turn-completed",
+          sourceEventId: "turn-completed-source",
+          trigger: "turn_completed",
+          cue: "success",
+          priority: "normal",
+        }),
+      ),
+    ).toBe(false)
+    expect(controller.getSnapshot().presence?.requestId).toBe("main-message")
+
+    expect(
+      controller.consumePresence(
+        presenceEvent({
+          requestId: "recoverable-failure",
+          sourceEventId: "recoverable-failure-source",
+          trigger: "recoverable_failure",
+          cue: "warning",
+          priority: "high",
+        }),
+      ),
+    ).toBe(true)
+    expect(controller.getSnapshot().presence?.requestId).toBe(
+      "recoverable-failure",
+    )
   })
 
   it("rejects stale, duplicate, locale-mismatched, and lower-priority Luna captions", async () => {

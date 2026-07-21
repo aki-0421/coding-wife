@@ -51,6 +51,7 @@ export type PresenceDirectionTrigger =
   | "recoverable_failure"
   | "terminal_failure"
   | "long_milestone"
+  | "main_message"
   | "commit_ready"
   | "turn_completed"
 export type PresenceDirectionCue =
@@ -357,6 +358,7 @@ function isPresenceDirectionTrigger(
     value === "recoverable_failure" ||
     value === "terminal_failure" ||
     value === "long_milestone" ||
+    value === "main_message" ||
     value === "commit_ready" ||
     value === "turn_completed"
   )
@@ -650,6 +652,7 @@ const presenceCueAllowlist: Readonly<
   recoverable_failure: ["warning", "neutral"],
   terminal_failure: ["error", "warning", "neutral"],
   long_milestone: ["working", "neutral"],
+  main_message: ["working", "neutral"],
   commit_ready: ["success", "neutral"],
   turn_completed: ["success", "neutral"],
 }
@@ -661,6 +664,7 @@ const presencePriorityByTrigger: Readonly<
   recoverable_failure: "high",
   terminal_failure: "high",
   long_milestone: "low",
+  main_message: "normal",
   commit_ready: "normal",
   turn_completed: "normal",
 }

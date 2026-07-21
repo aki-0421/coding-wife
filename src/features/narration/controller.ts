@@ -230,10 +230,12 @@ function sameSourceKey(
 function presencePriority(trigger: PresenceDirectionTrigger): number {
   switch (trigger) {
     case "decision_wait":
-      return 6
+      return 7
     case "terminal_failure":
-      return 5
+      return 6
     case "recoverable_failure":
+      return 5
+    case "main_message":
       return 4
     case "commit_ready":
       return 3
@@ -255,6 +257,7 @@ function presenceSemanticType(
       return "error"
     case "commit_ready":
       return "commit_observed"
+    case "main_message":
     case "long_milestone":
     case "turn_completed":
       return "progress"

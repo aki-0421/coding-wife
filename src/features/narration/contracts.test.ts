@@ -128,6 +128,7 @@ describe("narration contracts", () => {
       ["recoverable_failure", "warning", "high"],
       ["terminal_failure", "error", "high"],
       ["long_milestone", "working", "low"],
+      ["main_message", "working", "normal"],
       ["commit_ready", "success", "normal"],
       ["turn_completed", "neutral", "normal"],
     ] as const
@@ -148,6 +149,16 @@ describe("narration contracts", () => {
       presenceDirection({ workspaceGeneration: 0 }),
       presenceDirection({ trigger: "routine_tool" }),
       presenceDirection({ trigger: "decision_wait", cue: "success" }),
+      presenceDirection({
+        trigger: "main_message",
+        cue: "success",
+        priority: "normal",
+      }),
+      presenceDirection({
+        trigger: "main_message",
+        cue: "working",
+        priority: "low",
+      }),
       presenceDirection({ trigger: "decision_wait", priority: "normal" }),
       presenceDirection({
         trigger: "recoverable_failure",
