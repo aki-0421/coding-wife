@@ -142,27 +142,27 @@ Run this stress suite before creating the immutable tag. The tag workflow starts
 First update all three application versions to the same SemVer value on `develop`. After the required CI checks pass for the exact commit, create and push the matching tag:
 
 ```bash
-git tag v0.1.3
-git push origin v0.1.3
+git tag v0.1.4
+git push origin v0.1.4
 ```
 
-Do not reuse or move an existing tag. The version-tag workflow creates or refreshes a draft named `Coding Wife v0.1.3` with exactly these assets:
+Do not reuse or move an existing tag. The version-tag workflow creates or refreshes a draft named `Coding Wife v0.1.4` with exactly these assets:
 
 ```text
-Coding-Wife-v0.1.3-macOS-arm64.dmg
-Coding-Wife-v0.1.3-macOS-arm64.dmg.sha256
-Coding-Wife-v0.1.3-Windows-x64-setup.exe
-Coding-Wife-v0.1.3-Windows-x64-setup.exe.sha256
-Coding-Wife-v0.1.3-Linux-x64.deb
-Coding-Wife-v0.1.3-Linux-x64.deb.sha256
-Coding-Wife-v0.1.3-Linux-x64.AppImage
-Coding-Wife-v0.1.3-Linux-x64.AppImage.sha256
+Coding-Wife-v0.1.4-macOS-arm64.dmg
+Coding-Wife-v0.1.4-macOS-arm64.dmg.sha256
+Coding-Wife-v0.1.4-Windows-x64-setup.exe
+Coding-Wife-v0.1.4-Windows-x64-setup.exe.sha256
+Coding-Wife-v0.1.4-Linux-x64.deb
+Coding-Wife-v0.1.4-Linux-x64.deb.sha256
+Coding-Wife-v0.1.4-Linux-x64.AppImage
+Coding-Wife-v0.1.4-Linux-x64.AppImage.sha256
 ```
 
 Download all eight draft assets into a clean directory and verify the exact bytes:
 
 ```bash
-shasum -a 256 --check Coding-Wife-v0.1.3-*.sha256
+shasum -a 256 --check Coding-Wife-v0.1.4-*.sha256
 ```
 
 Before changing the draft to public, review the bilingual release notes and complete a downloaded-artifact smoke on every available target. CI already performs package install/removal on each native runner, but it does not prove that Gatekeeper or SmartScreen allowed a human first launch without the documented bounded exception.
@@ -179,7 +179,7 @@ If Gatekeeper blocks this reviewed local or downloaded artifact, first try to op
 
 ### Windows
 
-Run `Coding-Wife-v0.1.3-Windows-x64-setup.exe`; the NSIS package installs for the current user without administrator rights. If SmartScreen warns, first verify the release URL and SHA-256, then choose **More info > Run anyway** for this installer only. Do not disable SmartScreen globally. Launch Coding Wife from the installed shortcut and uninstall it through Windows Settings after the smoke.
+Run `Coding-Wife-v0.1.4-Windows-x64-setup.exe`; the NSIS package installs for the current user without administrator rights. If SmartScreen warns, first verify the release URL and SHA-256, then choose **More info > Run anyway** for this installer only. Do not disable SmartScreen globally. Launch Coding Wife from the installed shortcut and uninstall it through Windows Settings after the smoke.
 
 ### Linux
 
