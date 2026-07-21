@@ -145,7 +145,11 @@ describe("App interactive commit explanation demo", () => {
       { timeout: 3_000 },
     )
     expect(
-      await screen.findByText("Explanation ready", {}, { timeout: 3_000 }),
+      await screen.findByRole(
+        "button",
+        { name: "Show explanation" },
+        { timeout: 3_000 },
+      ),
     ).toBeVisible()
     const historyBeforePresentation = timelineEventCount()
 
@@ -188,7 +192,11 @@ describe("App interactive commit explanation demo", () => {
     })
     expect(settingsSaved).toBe(true)
 
-    await user.click(screen.getByRole("button", { name: "Read aloud again" }))
+    await user.click(screen.getByRole("button", { name: "Close explanation" }))
+    await waitFor(() =>
+      expect(controller.getSnapshot().presentation).toBeNull(),
+    )
+    await user.click(screen.getByRole("button", { name: "Show explanation" }))
     await waitFor(() => {
       expect(controller.getSnapshot().presentation?.speechStatus).toBe("queued")
     })
@@ -226,7 +234,11 @@ describe("App interactive commit explanation demo", () => {
       "true",
     )
     expect(
-      await screen.findByText("Explanation ready", {}, { timeout: 3_000 }),
+      await screen.findByRole(
+        "button",
+        { name: "Show explanation" },
+        { timeout: 3_000 },
+      ),
     ).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Show explanation" }))
 
@@ -244,18 +256,23 @@ describe("App interactive commit explanation demo", () => {
 
     await user.click(screen.getByRole("tab", { name: "Commit" }))
     expect(
-      await screen.findByText("Explanation ready", {}, { timeout: 3_000 }),
+      await screen.findByRole(
+        "button",
+        { name: "Show explanation" },
+        { timeout: 3_000 },
+      ),
     ).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Show explanation" }))
     await waitFor(() =>
       expect(controller.getSnapshot().presentation).not.toBeNull(),
     )
 
-    const previousCommit = screen
-      .getByText("chore: update local project metadata")
-      .closest("button")
-    if (previousCommit === null) throw new Error("previous commit is missing")
-    fireEvent.click(previousCommit)
+    await user.click(screen.getByRole("button", { name: "Open commit list" }))
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: /chore: update local project metadata/u,
+      }),
+    )
     await waitFor(() =>
       expect(controller.getSnapshot().presentation).toBeNull(),
     )
@@ -265,10 +282,10 @@ describe("App interactive commit explanation demo", () => {
       }),
     ).toBeVisible()
     expect(
-      screen.getByRole("button", { name: "Explain this commit" }),
+      screen.getByRole("button", { name: "Explain changes" }),
     ).toBeVisible()
     const initialExplanationTrigger = screen.getByRole("button", {
-      name: "Explain this commit",
+      name: "Explain changes",
     })
     initialExplanationTrigger.focus()
     await user.keyboard("{Enter}")
@@ -290,18 +307,13 @@ describe("App interactive commit explanation demo", () => {
     expect(
       screen.getByRole("button", { name: "Show explanation" }),
     ).toBeVisible()
-    expect(initialExplanationTrigger.isConnected).toBe(false)
+    expect(initialExplanationTrigger.isConnected).toBe(true)
+    expect(initialExplanationTrigger).toHaveTextContent("Show explanation")
     fireEvent.click(screen.getByRole("button", { name: "Close explanation" }))
     await waitFor(() =>
       expect(controller.getSnapshot().presentation).toBeNull(),
     )
-    await waitFor(() =>
-      expect(
-        screen.getByRole("heading", {
-          name: "chore: update local project metadata",
-        }),
-      ).toHaveFocus(),
-    )
+    await waitFor(() => expect(initialExplanationTrigger).toHaveFocus())
     expect(
       runtime.getState(workspaceId, 1, `commit-${"b".repeat(40)}`),
     ).toMatchObject({ status: "generated", trigger: "user_request" })

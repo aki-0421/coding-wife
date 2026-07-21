@@ -156,10 +156,10 @@ native presentation eventは最新controller stateとworkspace ID、workspace ge
 
 | state | 画面契約 | action / recovery |
 |---|---|---|
-| `not_generated` | empty helperと`詳しく教えて / Explain this commit`。caption/live region/TTS 0件 | 1回の操作で`user_request`とintentを作る。redaction不成立時はdisabled理由を表示 |
+| `not_generated` | empty helperと`詳しく教えて / Explain changes`。caption/live region/TTS 0件 | 1回の操作で`user_request`とintentを作る。redaction不成立時はdisabled理由を表示 |
 | background `queued` / `running`、intentなし | `準備中 / Preparing in background`をCommit detailだけへ表示。caption/live region/TTS 0件 | `詳しく教えて`でpresent-on-complete。`生成をキャンセル / Cancel generation`は確認後だけjobを止める |
 | background `queued` / `running`、intentあり | 対象commitのloading captionを表示し、検証済みchunkからstream | `説明を閉じる / Close explanation`でintentだけrevoke。job/cacheは継続 |
-| `generated`、intentなし | `説明の準備ができました / Explanation ready`。caption/live region/TTS 0件 | `詳しく教えて`1回でcacheをsequence順にpresentation |
+| `generated`、intentなし | 単一actionを`説明を表示 / Show explanation`へ切り替える。独立したstatus propertyは追加せず、caption/live region/TTS 0件 | 1回の操作でcacheをsequence順にpresentation |
 | active presentation | visible HTML captionが正本。TTSはcaption paint ack後の同一chunkだけ | Close、selection/locale/workspace/main Stopでintent revoke。再表示は新epoch |
 | `failed` / `canceled` / `unavailable` | localized code、保持evidence、retry可否。Git/main state不変 | retryable時だけ`再試行 / Retry`。生成cancel後は新requestまで旧cache replay不可 |
 | stale / scope mismatch | 旧caption/TTSを即時停止し、後着chunkを破棄 | current selectionのactionへ戻る。自動reopenしない |
