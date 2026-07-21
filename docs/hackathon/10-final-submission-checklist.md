@@ -1,149 +1,132 @@
 ---
 title: Final Submission Checklist
-description: "参加資格からDevpost送信、デモ、リポジトリ、締切までを確認する最終チェックリスト。"
-updated: 2026-07-21
+description: "Coding Wifeの確定済みリポジトリ要件と、締切前に残る外部提出アクションを分離した最終チェックリスト。"
+updated: 2026-07-22
 read_when:
-  - "提出前の最終確認を行うとき。"
-  - "Devpost、動画、リポジトリ、審査アクセスをスモークテストするとき。"
-last_verified: 2026-07-18 JST
+  - "提出前の残作業を優先順に確認するとき。"
+  - "release、動画、Session ID、Devpost、匿名スモークを完了するとき。"
+last_verified: 2026-07-22 JST
 ---
 
 # 最終提出チェックリスト
 
-## A. Eligibility / rules
+締切は **2026-07-22 09:00 JST** です。現在の完了・未完了を混ぜず、上から順に止めずに閉じます。外部値の記録先とpaste-ready本文は [12-final-submission-materials.md](./12-final-submission-materials.md) です。
 
-- [ ] 各チームメンバーが居住国・年齢の eligibility を満たす
-- [ ] team / organization の Representative が決まっている
-- [ ] Sponsor、Administrator、judge との conflict of interest がない
-- [ ] track を1つだけ選んだ
-- [ ] project が track と theme に明確に合う
-- [ ] Codex を実質的に使用した
-- [ ] GPT-5.6 を実質的に使用した
-- [ ] 既存プロジェクトの場合、prior work と new work を分離した
-- [ ] third-party tools、data、assets の権利・terms を確認した
-- [ ] public repo の license を確認した
+## 1. リポジトリ内で完了済み
 
-## B. Working product
+- [x] Track は **Developer Tools**
+- [x] Public repository は https://github.com/aki-0421/coding-wife
+- [x] Project-owned code に root MIT `LICENSE` がある
+- [x] `.env`、API key、credentialを提出物へ含めない方針とignore設定がある
+- [x] Lockfile由来のnpm/Cargo inventory・noticeと、Live2D/Hiyoriの利用条件・provenanceがある
+- [x] 公開release `v0.1.5` が存在する
+- [x] `v0.1.5` は現行3-model/UIの証拠ではなく、older previewとして区別する
+- [x] `gpt-5.6-sol` がmain coding sessionを担う
+- [x] `gpt-5.6-luna` がprivacy checkを通るlive completed main messageからcaption・Live2D expression/motion・任意TTSを作る
+- [x] `gpt-5.6-terra` が**Explain changes**からread-only commit evidenceを説明する
+- [x] Chat UIは名前・時刻・成功checkを省き、failureだけを控えめな赤背景で示す
+- [x] Git UIはGitHub-style **Commit changes**としてcommit・file・`+/-`・unified diffへ情報を絞る
+- [x] Hosted demoとjudge accountは必須の構成要素ではない
 
-- [ ] 動画で示す全機能が実際に動く
-- [ ] fresh environment または clean browser で動作確認した
-- [ ] setup command が成功する
-- [ ] sample data / seed が機能する
-- [ ] primary happy path が3分以内で試せる
-- [ ] major error state を処理する
-- [ ] API timeout / quota / auth failure を処理する
-- [ ] hosted demo の cold start を確認した
-- [ ] judge test account が有効
-- [ ] judge access は無料
-- [ ] demo / account / hosting を winner announcement まで維持できる
+## 2. Source freezeとcurrent release — 最優先
 
-## C. GPT-5.6 evidence
+- [ ] Root README、hackathon docs、実装、動画台本のmodel role・UI名・操作を一致させる
+- [ ] `git status --short` で意図しない変更がないことを確認する
+- [ ] 最終source commitをpushし、公開repositoryから取得できることを確認する
+- [ ] Frozen source SHAを記録する
+- [ ] Frozen sourceから**現行機能を含む新しいrelease**を作る
+- [ ] Release artifactのSHA-256を計算し、download後のSHA-256と一致させる
+- [ ] Release notesへsupported platformsと、署名・notarization・既知制約の正確な状態を書く
+- [ ] Fresh installでSol → Luna → Commit changes → Terraの流れを確認する
+- [ ] Current release URLとSHA-256を最終提出資料へ記録する
 
-- [ ] exact model ID が README にある
-- [ ] model call の code path が分かる
-- [ ] GPT-5.6 が core workflow に必要
-- [ ] input / output / validation が説明されている
-- [ ] demo で GPT-5.6 の結果を見せる
-- [ ] other model を併用する場合、役割を明確にした
-- [ ] API key は server-side のみ
-- [ ] key、token、PII が repo / logs / video にない
+`v0.1.5`だけで提出を閉じないでください。Developer Toolsはjudgeがゼロからrebuildせず試せるpathを必要とするため、現行releaseがsource-only説明より優先です。
 
-## D. Codex evidence
+## 3. 3分未満のデモ動画
 
-- [ ] primary build thread を特定した
-- [ ] その thread で core functionality の大部分を作った
-- [ ] `/feedback` を実行した
-- [ ] Session ID を保存した
-- [ ] Session ID を Devpost draft に入力した
-- [ ] README に Codex の具体的な貢献がある
-- [ ] human decisions と trade-offs がある
-- [ ] evidence log と commit history が整合する
+- [ ] [08-demo-video-plan.md](./08-demo-video-plan.md) の現行2:50 scriptで収録する
+- [ ] 実native appとdisposable repositoryを使う
+- [ ] Solがmain taskを実行する場面を見せる
+- [ ] 少なくとも2回、eligible completed main messageごとのLuna captionとLive2D expression/motionを見せる
+- [ ] TTSを見せる場合、設定済みにしてkey画面は録画しない
+- [ ] GitHub-style **Commit changes**でcommit、file、`+/-`、diffを見せる
+- [ ] **Explain changes**を押し、Terraの結果を見せる
+- [ ] Codexをどう使って構築したかとhuman decisionsを音声で具体的に説明する
+- [ ] English audioが明瞭で、最終尺が**3:00未満**である
+- [ ] key、token、email、notification、personal path、private URLが映っていない
+- [ ] YouTubeへ早めにuploadし、processing完了を待つ
+- [ ] Visibilityは安全側で**Public**にする
+- [ ] ログアウト状態で映像・音声・URLを確認する
+- [ ] Video URLを最終提出資料へ記録する
 
-## E. Repository
+最新UpdateはUnlisted可と案内しますが、Official Rulesはpublicly visible、FAQはpublicと記載します。矛盾を避ける最も安全な設定はPublicです。
 
-- [ ] repository URL が正しい
-- [x] public repo の場合 `LICENSE` がある（MIT License）
-- [ ] private repo の場合、次の両方へ共有済み
-  - [ ] `testing@devpost.com`
-  - [ ] `build-week-event@openai.com`
-- [ ] private repo の共有を公式締切前に完了した
-- [ ] private invite が pending / expired でない
-- [ ] README 冒頭に problem、solution、track、demo がある
-- [ ] setup instructions がある
-- [ ] supported platforms がある
-- [ ] sample data instructions がある
-- [ ] testing instructions がある
-- [ ] fastest judging path がある
-- [ ] architecture と GPT-5.6 integration がある
-- [ ] Codex collaboration がある
-- [ ] prior / new work の境界がある
-- [x] lockから再生成・検証できるnpm/Cargoのthird-party inventory/noticeとLive2D/Hiyori termsがある
-- [ ] `.env.example` がある
-- [ ] `.env`、secret、credential、private data が Git history にない
-- [ ] clean worktreeの`pnpm quality:check`でlint / typecheck / tests / build / license / docs / diff gateが連続して通る
+## 4. Codex Session ID
 
-## F. Demo video
+- [ ] Majority of core functionalityを作ったprimary threadを特定する
+- [ ] そのthreadでまず `/feedback` を実行する
+- [ ] `/feedback` がIDを表示しない場合は、同じthreadで `/status` を実行してSession IDを確認する
+- [ ] Session ID、取得日時、frozen sourceとの対応をprivate evidenceへ保存する
+- [ ] DevpostのSession ID fieldへ正確に入力する
 
-- [ ] 長さが3分未満
-- [ ] public YouTube（visibility は **Public**。Unlisted / Private にしない）
-- [ ] ログアウト状態で再生できる
-- [ ] voiceover が聞き取れる
-- [ ] 何を作ったか説明する
-- [ ] Codex をどう使ったか説明する
-- [ ] GPT-5.6 をどう使ったか説明する
-- [ ] working end-to-end demo がある
-- [ ] 英語、または完全な英語訳がある
-- [ ] 無許可の音楽・素材・商標がない
-- [ ] key、email、notification、private URL が映っていない
-- [ ] README / current build と一致する
+Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updateは`/feedback`を実行するよう案内します。一方FAQの取得手順は`/status`と書かれています。上記の順序なら両方を安全に満たせます。
 
-## G. Devpost form
+## 5. Devpost form
 
-- [ ] project title と tagline
-- [ ] correct track
-- [ ] English description
-- [ ] public YouTube URL
-- [ ] repository URL
-- [ ] live demo URL
-- [ ] `/feedback` Session ID
-- [ ] team members
-- [ ] 全 team member が公式締切前に invitation を accept 済み
-- [ ] testing instructions / credentials
-- [ ] technology tags（フォームに表示された場合）
-- [ ] screenshots / images（フォームに表示された場合）
-- [ ] all required fields
-- [ ] draft を一度保存した
-- [ ] preview で layout と links を確認した
+- [ ] Project title: **Coding Wife**
+- [ ] Taglineを入力する
+- [ ] Track: **Developer Tools**
+- [ ] English descriptionを本人の声として読み直して入力する
+- [ ] Repository URL: https://github.com/aki-0421/coding-wife
+- [ ] Current release URLとtesting instructionsを入力する
+- [ ] Public YouTube URLを入力する
+- [ ] Primary Codex Session IDを入力する
+- [ ] Entrant情報、または全team memberとRepresentativeを確定する
+- [ ] Teamの場合、全invitationが締切前にacceptedであることを確認する
+- [ ] Formに表示された全required fieldを埋める
+- [ ] Hosted demo、judge account、screenshotsは、formが要求するか実際に提供する場合だけ入力する
+- [ ] Previewで改行、リンク、model名、制約を確認する
+- [ ] Draftではなく**Submitted**にする
+- [ ] My ProjectsでSubmitted表示を確認する
+- [ ] Devpost URLとconfirmation evidenceを保存する
 
-## H. Submission smoke test
+## 6. 匿名スモーク
 
-別ブラウザまたは別メンバーで確認します。
+ログアウトした別browser profileで行います。
 
-- [ ] Devpost submission page が開く
-- [ ] video が再生できる
-- [ ] repo にアクセスできる
-- [ ] demo が起動する
-- [ ] judge account で login できる
-- [ ] sample scenario が完了する
-- [ ] expected result が出る
-- [ ] instructions は英語だけで理解できる
+- [ ] Devpost projectが開き、Submitted状態と全リンクを確認できる
+- [ ] Public repositoryが開き、frozen commit、README、MIT license、noticesが確認できる
+- [ ] Current releaseを認証なしでdownloadできる
+- [ ] Downloaded artifactのSHA-256が公開値と一致する
+- [ ] Fresh installから主要flowを完了できる
+- [ ] Videoをログアウト状態で再生でき、3分未満・English audio・privacyを確認できる
+- [ ] Session IDがprimary threadの記録と一致する
+- [ ] Description、video、README、releaseが同じmodel rolesとUIを説明している
+- [ ] Anonymous smokeの実施者・時刻・結果を保存する
 
-## I. 締切管理
+## 7. Conditional — 未該当ならblockerにしない
 
-- [ ] 内部締切: 2026-07-21 23:00 JST までに submit
-- [ ] 公式締切: **2026-07-22 09:00 JST**
-- [ ] 締切後に submission を変更できないことを理解した
-- [ ] confirmation / submission URL を保存した
-- [ ] 最終 submission のスクリーンショットを保存した
+- [ ] **Hosted demo:** 実際に提供する場合だけURL、uptime、free accessを確認する
+- [ ] **Judge account:** Loginが必要な構成の場合だけcredentialとfresh loginを確認する
+- [ ] **Screenshots / gallery:** Formが要求するか、評価に使う場合だけcurrent buildから作る
+- [ ] **Private repository sharing:** Repositoryをprivateへ変更した場合だけ `testing@devpost.com` と `build-week-event@openai.com` へ締切前に共有する
+- [ ] **Team invitations:** 個人提出なら未該当。Team提出の場合だけ全員のaccepted状態を確認する
 
-## J. 最終判断
+## 8. 最終Go条件
 
-次の質問にすべて1文で答えられること。
+次がすべてYesなら提出完了です。
 
-- [ ] 誰の、どんな問題を解くのか
-- [ ] 何が動くのか
-- [ ] なぜ GPT-5.6 が必要なのか
-- [ ] Codex が何を加速したのか
-- [ ] 人間が行った重要判断は何か
-- [ ] 既存解決策と何が違うのか
-- [ ] 審査員はどう試すのか
+- [ ] Current frozen releaseをjudgeがrebuildせず試せる
+- [ ] VideoでSol、Luna、Terraの役割とworking flowが分かる
+- [ ] Root READMEだけでsetup、testing、model integration、Codex contribution、limitationsが分かる
+- [ ] Session IDがformへ入っている
+- [ ] DevpostがSubmittedになっている
+- [ ] Logged-out smokeが通っている
+- [ ] 公式締切 **2026-07-22 09:00 JST** より前である
+
+## Sources reverified on 2026-07-22 JST
+
+- https://openai.devpost.com/rules
+- https://openai.devpost.com/details/faqs
+- https://openai.devpost.com/
+- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips

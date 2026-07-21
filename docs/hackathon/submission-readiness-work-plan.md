@@ -1,13 +1,16 @@
 ---
-title: "Coding Wife 提出準備完了までの作業計画"
-description: "現行実装から全デモ機能、macOS配布物、審査導線、Devpost提出証跡までを依存順に完了させる実行計画。"
-updated: 2026-07-21
+title: "Coding Wife 提出準備作業計画 — Historical"
+description: "2026-07-18時点の実装計画を保存したhistorical record。現在の提出状態と残作業には最終チェックリストと提出資料を使う。"
+updated: 2026-07-22
 read_when:
-  - "残存するアプリ機能の実装順、コミット単位、完了条件を確認するとき。"
-  - "OpenAI Build Week提出前のGo/No-Go判断、配布物、審査導線、外部依存を確認するとき。"
+  - "2026-07-18時点で採用した実装順と設計判断をhistorical contextとして確認するとき。"
+  - "過去の計画と現在の提出チェックリストを区別するとき。"
 ---
 
 # Coding Wife 提出準備完了までの作業計画
+
+> [!WARNING]
+> **Historical / superseded:** この文書のstatus、UI名、残作業、release前提は2026-07-18時点の計画を保存したもので、現在状態を表しません。提出判断には [10-final-submission-checklist.md](./10-final-submission-checklist.md)、paste-ready本文・動画・evidenceには [12-final-submission-materials.md](./12-final-submission-materials.md) を使用してください。以下は実装経緯の参照用であり、未チェック項目を現行blockerとして数えません。
 
 ## 目的と基準点
 

@@ -1,11 +1,11 @@
 ---
 title: Codebase Setup for OpenAI Build Week
 description: "Build Week向けのGit、Codex証跡、再現可能性、秘密情報管理の初期設定を定義する。"
-updated: 2026-07-18
+updated: 2026-07-22
 read_when:
   - "ハッカソン実装を始める前にコードベースを整備するとき。"
   - "Codex利用証跡、再現手順、APIキー管理を設計するとき。"
-last_verified: 2026-07-18 JST
+last_verified: 2026-07-22 JST
 ---
 
 # コードベース初期設定
@@ -108,17 +108,17 @@ Codex 内で実行します。
 - 中核機能を作るメインスレッドを1本決める。
 - brainstorming、雑談、軽い調査だけのスレッドを primary にしない。
 - core architecture、主要実装、debug、test、polish をできるだけ同じスレッドで継続する。
-- 最終的にそのスレッドで `/feedback` を実行する。
+- 最終的にそのスレッドで `/feedback` を実行する。FAQの取得手順は`/status`と記載しているため、`/feedback`でIDを取得できない場合は同じprimary threadで`/status`も実行し、同一Session IDを記録する。
 
 ## 4. GPT-5.6 model の選択と記録
 
 公式 model docs では次の model ID が公開されています。
 
-| Tier | Model ID | 用途の目安 | 2026-07-18 時点の API price / 1M tokens |
-|---|---|---|---|
-| Sol | `gpt-5.6-sol` / alias `gpt-5.6` | 最も複雑な coding、reasoning、polish | input $5 / output $30 |
-| Terra | `gpt-5.6-terra` | intelligence と cost のバランス | input $2.50 / output $15 |
-| Luna | `gpt-5.6-luna` | cost-sensitive、高頻度処理 | input $1 / output $6 |
+| Tier | Model ID | 用途の目安 |
+|---|---|---|
+| Sol | `gpt-5.6-sol` / alias `gpt-5.6` | 最も複雑なcoding、reasoning、polish |
+| Terra | `gpt-5.6-terra` | intelligenceとcostのバランス |
+| Luna | `gpt-5.6-luna` | cost-sensitive、高頻度処理 |
 
 Codex CLI では例として次が使えます。
 
@@ -133,12 +133,13 @@ codex exec -m gpt-5.6 "Review the current changes"
 - `gpt-5.6` は公式 model catalog 上で `gpt-5.6-sol` の alias であり、要件名と一致するため証跡上は分かりやすい。ただし、これが唯一の許容 tier だと規約に明記されているわけではない。
 - Terra / Luna を使う場合も、正確な model ID、役割、GPT-5.6 family である根拠を README に書く。現行 FAQ は Free plan の Codex で Terra を利用できると明記している。
 - ハッカソン規約は GPT-5.6 tier を明示的に限定していない。実際に使った GPT-5.6 family の model ID と実質的な役割を提出資料に残す。
+- Coding Wifeでは、`gpt-5.6-sol`をwrite-capable main session、`gpt-5.6-luna`をzero-tool presence director、`gpt-5.6-terra`をzero-tool commit explainerとして分離する。READMEと動画では、この入力・出力・authority境界まで説明する。
 
 ## 5. Codex credits と API credits を分ける
 
 ### Codex credits
 
-- 登録済み参加者向けの $100 Codex credits 申請は終了し、2026-07-18 時点で全 credits 配布済みと案内されている。
+- 登録済み参加者向けの $100 Codex credits 申請は終了し、2026-07-22の再確認でも全credits配布済みと案内されている。
 - request deadline は **2026-07-18 04:00 JST** だった。
 - FAQ では one code per Entrant。
 - 現行 Official Rules 上、配布済み credits は **2026-07-22 09:00 JST** までに使用する。
@@ -148,12 +149,15 @@ codex exec -m gpt-5.6 "Review the current changes"
 ### OpenAI API credits
 
 - Build Week では別の API credits は配布されないと FAQ に明記されている。
+- 2026-07-22 の最新 Update は、参加要件を満たすために OpenAI API または API credits 自体は必須ではないと明記している。
 - 製品 runtime から GPT-5.6 API を呼ぶ場合、OpenAI Platform 側の billing が必要。
 - Codex credits が API の `insufficient_quota` を解消するものではない。
 
 ## 6. Runtime API の安全な初期設定
 
 ### `.env.example`
+
+実際に必要な変数だけを列挙します。Codexのauthenticated local sessionだけでmain pathが動くprojectに、存在しないAPI key要件を追加してはいけません。次はruntime APIを直接使うprojectの例です。
 
 ```dotenv
 OPENAI_API_KEY=
@@ -190,6 +194,8 @@ make test
 
 README 冒頭には、5分以内で確認できる最短手順を書きます。
 
+Developer Toolでは、source build手順だけでなく、current frozen featureを含むrelease、demo、sandboxのいずれかを用意し、judgeがゼロからrebuildせず試せるようにします。古い公開releaseをcurrent機能の証拠として案内してはいけません。
+
 ### 推奨
 
 - `.env.example`
@@ -200,6 +206,8 @@ README 冒頭には、5分以内で確認できる最短手順を書きます。
 - supported OS / runtime version
 - exact dependency lockfile
 - screenshots of expected result
+
+READMEへ未確定の内部placeholderを公開しません。外部URLがまだ存在しない場合は、未解決markerを載せるのではなく、そのlink行を省き、limitationsに現在利用できないことを平文で説明します。
 
 ## 8. Hosted demo と fallback
 
@@ -276,3 +284,4 @@ Keep GPT-5.6 central to the product's primary user workflow.
 - https://developers.openai.com/api/docs/models
 - https://openai.devpost.com/details/faqs
 - https://openai.devpost.com/resources
+- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips

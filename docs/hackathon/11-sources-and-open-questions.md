@@ -1,12 +1,12 @@
 ---
 title: Sources, Conflicts, and Open Questions
 description: "公式情報源の優先順位、確認済みの矛盾、未確認事項、再検証項目を管理する。"
-updated: 2026-07-20
+updated: 2026-07-22
 read_when:
   - "ハッカソン情報の根拠や矛盾を確認するとき。"
   - "Web検索またはHTTP取得で公式情報を再検証するとき。"
   - "未確認事項を公式窓口へ問い合わせるか判断するとき。"
-last_verified: 2026-07-18 JST
+last_verified: 2026-07-22 JST
 ---
 
 # 情報源・矛盾・未確認事項
@@ -34,7 +34,7 @@ Discussion Board のコメントは、公式運営者であることが明確で
 - Schedule: https://openai.devpost.com/details/dates
 - FAQ: https://openai.devpost.com/details/faqs
 - Updates: https://openai.devpost.com/updates
-- Latest deadline update (2026-07-18 verification): https://openai.devpost.com/updates/45371-tuesday-last-minute-tips
+- Latest deadline update (2026-07-22 verification): https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
 - Discussions: https://openai.devpost.com/forum_topics
 
 ### OpenAI
@@ -81,9 +81,16 @@ Discussion Board のコメントは、公式運営者であることが明確で
 ### 3.5 YouTube visibility
 
 - Official Rules は publicly visible on YouTube、Overview と FAQ は public YouTube と記載。
-- 2026-07-18 の最新 Update は “Unlisted is fine” と記載。
+- Update 45402 は “Unlisted OK” と記載。
 
 **Working decision:** Official Rules を優先し、visibility は **Public** にする。Unlisted を唯一の提出動画にしない。
+
+### 3.6 Session ID の取得コマンド
+
+- Official Rules、Overview、Update 45402 は提出項目を `/feedback` Codex Session ID とし、Update 45402 は主要 thread で `/feedback` を実行するよう案内している。
+- FAQ の取得手順は `/status` を実行して Session ID を表示すると案内している。
+
+**Working decision:** 主要 build thread で `/feedback` を先に実行する。IDが表示されない場合や照合が必要な場合だけ、同じ thread で `/status` を実行し、別 thread のIDで代用しない。
 
 ## 4. Important clarifications already available
 
@@ -91,9 +98,10 @@ Discussion Board のコメントは、公式運営者であることが明確で
 
 - $100 は Codex credits。
 - OpenAI API credits / tokens は別途配布されない。
+- OpenAI API と API credits は project 要件ではない。ただし Codex と GPT-5.6 の両方を project 構築に実質的に使う必要がある。
 - product runtime で OpenAI API を使う場合は、自分の API billing が必要。
 - credit request は registered participant が対象、在庫・承認条件付きだった。
-- request deadline は 2026-07-18 04:00 JST。2026-07-18 時点で Resources と最新 Update は全 credits 配布済みと案内している。
+- request deadline は 2026-07-18 04:00 JST。2026-07-22の再確認でもResourcesと最新Updateは全credits配布済みと案内している。
 - 現行 Official Rules 上、配布済み Codex credits の使用期限は **2026-07-22 09:00 JST**。
 - one code per Entrant。
 
@@ -103,11 +111,14 @@ Discussion Board のコメントは、公式運営者であることが明確で
 - 現行 FAQ と最新 Update は、Free plan の Codex で GPT-5.6 Terra を利用できること、他モデルを併用しつつ project の一部で GPT-5.6 を使えることを明記している。
 - 同じ FAQ は Codex と GPT-5.6 を incidental / decorative にできないとも記載する。
 
-**Working decision:** submission では実際に使った exact model ID と実質的な code path を記録する。Coding Wife は `gpt-5.6-sol` を主要 path として証明するため、tier の未確認リスクはない。
+**Coding Wife の現行 contract:** `gpt-5.6-sol` は main coder、`gpt-5.6-terra` は isolated commit explainer、`gpt-5.6-luna` は isolated presence director。submission では3モデルの exact ID、分離された役割、実質的な code path を、frozen source・動画・現行 release で一致させる。
+
+Public release v0.1.5 は古い preview であり、現行3モデル連携や最新UIを含む証拠として扱えない。v0.1.5 の artifact を現行機能の testing path や demo evidence に流用しない。
 
 ### Codex usage proof
 
-- primary build thread で `/feedback` を実行する。
+- primary build thread でまず `/feedback` を実行する。
+- IDの表示・照合が必要な場合は、FAQ に従い同じ thread で `/status` を実行する。
 - majority of core functionality を作った thread を選ぶ。
 - 複数 thread を使った場合は最も代表的な1本。
 
@@ -122,23 +133,23 @@ Discussion Board のコメントは、公式運営者であることが明確で
 ### Hosting
 
 - hosting そのものを一律必須とはしていない。
-- ただし working project への access が必要。
-- judge は rebuild する義務がない。
-- plugin / developer tool は、rebuild 不要で試せる demo / sandbox / test account が必要。
+- project は intended platform で install・起動でき、説明と動画どおりに動く必要がある。
+- plugin / developer tool は、installation instructions、supported platforms、rebuild 不要の testing path が必要。
+- hosted demo / sandbox / test account は選択肢であり一律必須ではない。Coding Wife は frozen source と一致する prebuilt release を testing path にする。
 
 ## 5. Open questions
 
-### 5.1 GPT-5.6 は runtime 必須か
+### 5.1 GPT-5.6 の meaningful-use 境界
 
-FAQ は「project must use GPT-5.6」「code repository と demo video で evidence を見る」「Codex と GPT-5.6 は incidental / decorative ではいけない」と記載しています。
+FAQ と Update 45402 は OpenAI API の利用を必須としていません。一方、FAQ は「project must use GPT-5.6」「code repository と demo video で evidence を見る」「Codex と GPT-5.6 は incidental / decorative ではいけない」と記載しています。
 
-**安全側:** Codex の内部モデルとして使っただけではなく、製品 runtime / core workflow に GPT-5.6 を統合する。
+**安全側:** Coding Wife の3モデル orchestration を core workflow として demo し、各モデルの役割が source と product behavior に反映されることを示す。API 自体を要件とは説明しない。
 
 ### 5.2 Submission form の正確なフィールド
 
 ログイン前の公開ページからは、submission form の全フィールドと文字数制限を確認できません。
 
-**対応:** 早めに Devpost draft を作り、必須欄と制限を確認する。
+**対応:** Devpost にログインして直ちに draft を作り、必須欄と制限を確認する。
 
 ### 5.3 Pro Account prize の人数
 
@@ -166,23 +177,43 @@ Support:
 - OpenAI Build Week Discord: OpenAI Build Week page または Devpost Resources から参加
 - Devpost Discussion Board: https://openai.devpost.com/forum_topics
 
-## 7. Re-verification before submission
+## 7. Coding Wife current readiness — 2026-07-22 JST
 
-提出前日に次を再確認します。
+| 項目 | 状態 | 根拠・次のアクション |
+|---|---|---|
+| Developer Tools track | 完了 | submission の track として使用 |
+| Public repository | 完了 | public URL を提出 |
+| MIT license / third-party notices | 完了 | repository に含まれる |
+| Public release v0.1.5 | 古い preview | 現行3モデル連携・最新UIの証拠には使わない |
+| Frozen source commit / tag | 未完了 | 審査対象を固定する |
+| Current no-rebuild release | 未完了 | frozen source と一致する artifact を公開する |
+| Public YouTube video | 未完了 | 3分未満・音声付き・Public で公開する |
+| Primary Codex Session ID | 未取得 | 主要 build thread から取得する |
+| Devpost form / Submitted state | 未完了 | form を submit し、My Projects で確認する |
+| Anonymous smoke | 未完了 | video・repo・release・提出URLをログアウト状態で確認する |
 
-- [ ] Official Rules の更新日時・内容
-- [ ] Updates の新規告知
-- [ ] FAQ の追加・修正
-- [ ] deadline 表示
-- [ ] repository sharing addresses
-- [ ] video requirement
-- [ ] `/feedback` Session ID field
-- [ ] judging dates / test access requirement
-- [ ] prize details
+hosted demo、judge account、screenshots は、選んだ testing path または logged-in submission form が要求する場合だけ用意します。絶対パス、API key、個人情報を提出資料へ記載しません。
 
-## 8. 2026-07-18 public re-verification record
+## 8. Re-verification before submission
 
-- Official Rules、Overview、FAQ、Schedule、Resources、Updates と最新 Update を公式pageで確認した。
-- deadline、eligibility、4 tracks、private repository の共有先、3分未満の public video、Codex / GPT-5.6、`/feedback` Session ID、submission freeze、English materials、judging access の要件は、上記の明示した差異を除き現行文書と一致した。
-- OpenAI Build Week page は Cloudflare challenge により本文取得不可だった。Devpost の Official Rules を source of truth として採用した。
-- logged-in submission form の fields、文字数、private repository の具体的な招待 UI は未確認であり、推測せず `PENDING` を維持する。
+2026-07-22 JST の public re-verification と、提出者本人が行う logged-in / artifact 確認を分けます。
+
+- [x] Official Rules の内容
+- [x] Updates の最新告知
+- [x] FAQ の内容
+- [x] deadline 表示
+- [x] repository sharing addresses
+- [x] video requirement
+- [x] judging dates / test access requirement
+- [ ] logged-in submission form の正確な fields
+- [ ] 実際に提出する Session ID
+- [ ] frozen source と current no-rebuild release の対応
+- [ ] Devpost の Submitted 表示
+
+## 9. 2026-07-22 public re-verification record
+
+- Official Rules、Overview、FAQ、Schedule、Resources、Updates、Update 45402 を公式 page で確認した。
+- OpenAI Build Week page は 2026-07-22 JST に取得可能で、同 page の judging 表示 Jul 22–Aug 7 を再確認した。
+- deadline、4 tracks、public / private repository、3分未満の public video、Codex / GPT-5.6、Session ID、submission freeze、Developer Tools の no-rebuild testing path を再確認した。
+- Update 45402 は、OpenAI API / API credits が必須ではないこと、動画の早期 upload、fresh testing、`/feedback`、My Projects の Submitted 表示確認を明記している。
+- logged-in submission form の fields・文字数と、実際の video URL・Session ID・Devpost submission URL は提出者の操作が必要なため未確認。

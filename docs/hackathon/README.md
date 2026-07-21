@@ -1,12 +1,12 @@
 ---
 title: OpenAI Build Week 2026 — Hackathon Guide
 description: "OpenAI Build Week 2026の要件、期限、提出準備資料への入口をまとめるハッカソンガイド。"
-updated: 2026-07-20
+updated: 2026-07-22
 read_when:
   - "OpenAI Build Weekの要件や提出準備の全体像を確認するとき。"
   - "ハッカソン関連文書の参照先を選ぶとき。"
   - "Web検索またはHTTP取得で公式情報を再確認するとき。"
-last_verified: 2026-07-18 JST
+last_verified: 2026-07-22 JST
 source_of_truth: https://openai.devpost.com/rules
 ---
 
@@ -27,24 +27,32 @@ source_of_truth: https://openai.devpost.com/rules
 ## 最重要事項
 
 - **提出期限:** 2026-07-21 17:00 PDT = **2026-07-22 09:00 JST**
-- **Codex credits:** 申請は終了し、2026-07-18 時点で全 credits 配布済み。配布済み credits の使用期限は **2026-07-22 09:00 JST**
+- **Codex credits:** 申請は終了し、2026-07-22の再確認でも全credits配布済み。配布済みcreditsの使用期限は **2026-07-22 09:00 JST**
 - **必須技術:** Codex と GPT-5.6 を、どちらも実質的に使う
+- **API:** OpenAI API の利用と API credits は必須ではない。製品 runtime で API を使う場合だけ、自分の API key と billing が必要
 - **提出物:** 動くプロジェクト、1つのトラック、説明文、公開 YouTube デモ、コードリポジトリ、主要 Codex スレッドの `/feedback` Session ID
 - **動画:** Official Rules に合わせて **3分未満**。音声で「何を作ったか」「Codex をどう使ったか」「GPT-5.6 をどう使ったか」を説明する
+- **動画公開範囲:** Update 45402 は Unlisted 可としているが、Rules / Overview / FAQ を優先して安全側の **Public** にする
 - **リポジトリ:** 公開なら適切なライセンスを付ける。非公開なら `testing@devpost.com` と `build-week-event@openai.com` に共有する
 - **README:** セットアップ、必要なサンプルデータ、実行・テスト方法、Codex が加速した箇所、人間が行った重要判断、GPT-5.6 の統合箇所を明記する
+- **Session ID:** 主要 build thread で `/feedback` を先に実行し、IDが表示されない場合や照合時だけ同じ thread で `/status` を使う
+- **Developer Tools:** installation、supported platforms、審査員が rebuild せず試せる testing path が追加で必要
 - **審査:** 4基準が等配点。技術実装、デザイン、潜在的インパクト、アイデアの質
-- **注意:** $100 の付与枠は Codex credits で、OpenAI API credits ではない。製品内で GPT-5.6 API を呼ぶ場合は、別途 API 課金・キー管理が必要
 
-## 今すぐ行うこと
+## Coding Wife の現在地
 
-1. 配布済み Codex credits がある場合は残高を確認し、使用期限までの Build Week 作業に割り当てる。申請受付は終了している。
-2. トラックを1つ決め、対象ユーザーと解決する問題を1文で固定する。
-3. Codex の主要開発スレッドを1本作り、そのスレッドで中核機能を継続して実装する。
-4. GPT-5.6 が製品の中核価値に必要になる設計にする。単なる飾りや付随機能にしない。
-5. Git の開始点を固定し、既存プロジェクトならハッカソン前の部分と新規部分を明確に分ける。
-6. 最初の1日で、審査員が触れる縦切りの動作デモを作る。
-7. デモ動画素材と Codex 利用証跡を、実装と並行して保存する。
+Developer Tools track、public repository、MIT license、third-party notices は準備済みです。現行productは`gpt-5.6-sol`のmain coding session、`gpt-5.6-luna`のpresence director、`gpt-5.6-terra`のcommit explainerを分離しています。Public release v0.1.5 は古い preview で、この3モデル連携や最新UIを証明できないため、現行提出物として扱いません。
+
+締切までの critical path は次の順です。
+
+1. 審査対象 source commit / tag を freeze する。
+2. frozen source と一致する現行 prebuilt release を no-rebuild testing path として公開する。
+3. 3分未満・音声付きの demo video を早く upload し、YouTube の visibility を Public にする。
+4. 主要 build thread の Session ID を取得し、source・release・video の内容を一致させる。
+5. Devpost form を submit し、My Projects で緑の **Submitted** 表示を確認する。
+6. video、repo、release、submission URL を logged-out / fresh environment で確認する。
+
+hosted demo、judge account、screenshots は一律必須ではありません。選んだ testing path または logged-in form が要求する場合だけ用意します。
 
 ## ファイル一覧
 
@@ -78,4 +86,5 @@ source_of_truth: https://openai.devpost.com/rules
 - FAQ: https://openai.devpost.com/details/faqs
 - Resources: https://openai.devpost.com/resources
 - Schedule: https://openai.devpost.com/details/dates
+- Deadline update: https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
 - OpenAI Build Week: https://openai.com/build-week/

@@ -1,14 +1,17 @@
 ---
 title: Submission Requirements
 description: "Devpost提出物、デモ動画、リポジトリ、審査アクセスの必須要件を整理する。"
-updated: 2026-07-18
+updated: 2026-07-22
 read_when:
   - "提出物やDevpost入力項目を準備するとき。"
   - "動画、リポジトリ、審査アクセスの条件を確認するとき。"
-last_verified: 2026-07-18 JST
+last_verified: 2026-07-22 JST
 ---
 
 # 提出要件
+
+> [!IMPORTANT]
+> 公開ページ間で内容が食い違う場合は Official Rules を優先します。提出期限は **2026-07-22 09:00 JST** です。
 
 ## 1. 必須提出物
 
@@ -19,6 +22,8 @@ last_verified: 2026-07-18 JST
 - [ ] Code repository URL
 - [ ] 主要開発スレッドの `/feedback` Codex Session ID
 - [ ] plugin / developer tool の場合、追加の installation・platform・testing 情報
+
+OpenAI API の利用と API credits は必須ではありません。一方、Codex と GPT-5.6 の両方を project の構築に実質的に使い、incidental / decorative な利用にしないことは必須です。製品 runtime で OpenAI API を使う場合だけ、自分の API key と billing を用意します。
 
 ## 2. Project description
 
@@ -54,7 +59,7 @@ last_verified: 2026-07-18 JST
 
 - 長さは **2分40秒〜2分50秒**を目標にする。
 - 日本語話者でも、AI-assisted の英語 voiceover が許可されているため、英語音声で作ると翻訳要件の曖昧さを減らせる。
-- 2026-07-18 の Update は Unlisted でもよいとしているが、Official Rules は publicly visible、Overview と FAQ は public としている。情報源の優先順位に従い、**YouTube の visibility は Public** にする。
+- 提出直前の Update 45402 は Unlisted でもよいとしているが、Official Rules は publicly visible、Overview と FAQ は public としている。情報源の優先順位に従い、**YouTube の visibility は Public** にする。
 - 音楽は使わないか、権利を明確に確認できるものだけにする。
 - Codex 画面の表示は必須ではないが、短く見せると Technological Implementation の証拠になる。
 - product demo を最優先し、スライド説明だけで終わらせない。
@@ -97,9 +102,12 @@ last_verified: 2026-07-18 JST
 
 ### 必須
 
-- 中核機能の大部分を作った Codex thread で `/feedback` を実行する。
-- 生成された Session ID を Devpost submission form に入力する。
+- Official Rules、Overview、提出当日 Update が要求する提出項目名は `/feedback` Codex Session ID。
+- 中核機能の大部分を作った Codex thread で、まず `/feedback` を実行する。
+- 取得した Session ID を Devpost submission form に入力する。
 - test thread や横道の会話ではなく、主な build thread を選ぶ。
+
+FAQ の取得手順だけは `/status` で Session ID を表示すると案内しています。安全側では、**主要 thread で `/feedback` を先に実行し、IDが表示されない場合や照合が必要な場合だけ、同じ thread で `/status` を実行**します。別 thread のIDで代用しません。
 
 ### 複数スレッドを使った場合
 
@@ -109,17 +117,17 @@ last_verified: 2026-07-18 JST
 ### 安全側の推奨
 
 - 最初から主要スレッドを1本決める。
-- 定期的に `/status` でモデル・ディレクトリ・設定を確認する。
-- 最終日より前に `/feedback` が実行できることを確認する。
+- `/feedback` と、必要時の `/status` が同じ Session ID を指すことを確認する。
 - Session ID、取得日時、対応 commit を evidence log に保存する。
 
 ## 6. Testing access
 
-### 必須
+### 全 project の必須条件
 
-- website、working demo、test build のいずれかで動作確認できるようにする。
-- private site ならログイン情報を testing instructions に含める。
-- 審査期間終了まで、無料かつ制限なく利用できるようにする。
+- intended platform で正常に install・起動でき、動画と説明どおりに動く状態にする。
+- website、functioning demo、test buildのいずれかでworking projectへのaccessを提供する。
+- 審査用に選んだ access path は、Official RulesのJudging Period終了まで無料かつ制限なく利用できる状態を保つ。
+- Private siteを使う場合だけ、testing instructionsへjudge用login情報を記載する。
 
 ### Plugin / Developer Tool の追加要件
 
@@ -131,10 +139,14 @@ last_verified: 2026-07-18 JST
   - test account
   - prebuilt binary / package など
 
-### 安全側の推奨
+Coding Wife は Developer Tools track の desktop app なので、installation instructions、supported platforms に加え、**frozen source と一致する prebuilt release を no-rebuild testing path として用意**します。
 
-- judges が API key を用意しなくても、主要フローを試せる hosted demo を用意する。
-- test account の資格情報は審査用に限定し、他のデータへアクセスできないようにする。
+### 条件付き項目と安全側の推奨
+
+- hosted demo は一律必須ではありません。選んだ testing path が hosted service の場合だけ、judge account と利用手順を用意します。
+- test account を使う場合は審査用に限定し、他のデータへアクセスできないようにします。
+- screenshots は公開要件に明記されていません。Devpost の logged-in form が要求する場合だけ用意します。
+- judge が private API key を用意しなくても、少なくとも提出動画と no-rebuild artifact から中核フローを評価できる状態にします。
 - rate limit、quota、期限、sleep、cold start を提出前に確認する。
 - 審査日程に不一致があるため、少なくとも winner announcement までは demo を維持する。
 
@@ -163,7 +175,7 @@ last_verified: 2026-07-18 JST
 
 ## 9. 提出フォームで要確認の項目
 
-公開ページだけでは、ログイン後の submission form の全フィールドを確認できません。早めに draft を作り、次を確認してください。
+公開ページだけでは、ログイン後の submission form の全フィールドを確認できません。Devpost にログインして draft を作り、次を確認してください。
 
 - title / tagline の文字数
 - description の欄構成
@@ -178,7 +190,33 @@ last_verified: 2026-07-18 JST
 - screenshots / image requirements
 - private testing instructions の入力場所
 
-## 10. 提出直後
+## 10. Coding Wife の提出準備状況 — 2026-07-22 JST
+
+| 項目 | 状態 | 提出判断 |
+|---|---|---|
+| Track | 完了 | Developer Tools |
+| Public repository | 完了 | 公開 repository URL を提出する |
+| License / notices | 完了 | MIT license と第三者 notice を維持する |
+| Public release v0.1.5 | 参考用のみ | 古い preview のため、現行3モデル連携や最新UIの証拠には使わない |
+| Frozen source | 未完了 | 審査対象 commit / tag を固定する |
+| No-rebuild release | 未完了 | frozen source から現行 prebuilt artifact を公開し、fresh environment で確認する |
+| Public YouTube video | 未完了 | 3分未満、音声付き、Public で upload する |
+| Primary Session ID | 未取得 | 主要 build thread から取得する |
+| Devpost submission | 未完了 | form 入力後、draft ではなく Submitted を確認する |
+| Anonymous smoke test | 未完了 | video・repo・release・提出URLをログアウト状態で確認する |
+
+## 11. 提出当日の順序
+
+提出直前の Update 45402 は、動画を早く upload し、project を fresh に test し、提出後に Devpost の My Projects で **Submitted** 表示を確認するよう案内しています。
+
+1. frozen source を確定し、それと一致する no-rebuild release を公開する。
+2. 動画を早めに YouTube へ upload し、処理完了後に Public URL を取得する。
+3. project、release、repo、動画を fresh / logged-out 状態で確認する。
+4. 主要 thread の Session ID と最終 commit を照合する。
+5. Devpost form を submit し、My Projects で緑の **Submitted** 表示を確認する。
+6. deadline 前に、公開リンクと repository permissions をもう一度確認する。
+
+## 12. 提出直後
 
 - confirmation page と submission URL を保存する。
 - ログアウト状態で video、public repo、demo URL を開く。
@@ -192,4 +230,4 @@ last_verified: 2026-07-18 JST
 - https://openai.devpost.com/rules
 - https://openai.devpost.com/details/faqs
 - https://openai.devpost.com/
-- https://openai.devpost.com/updates
+- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips

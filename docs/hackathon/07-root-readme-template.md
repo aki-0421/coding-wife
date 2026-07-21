@@ -1,212 +1,200 @@
 ---
 title: Root README Submission Template
-description: "ハッカソン提出用の英語ルートREADMEを作成するための構成テンプレート。"
-updated: 2026-07-15
+description: "現行製品、複数GPT-5.6 role、Codex contribution、no-rebuild judge pathを英語で説明する提出用root READMEテンプレート。"
+updated: 2026-07-22
 read_when:
   - "提出用READMEを新規作成または更新するとき。"
-  - "審査員向けのセットアップ、デモ、技術説明を整理するとき。"
-last_verified: 2026-07-15 JST
+  - "審査員向けのsetup、demo、model orchestration、testingを整理するとき。"
+last_verified: 2026-07-22 JST
 ---
 
-# 提出用ルート README テンプレート
+# 提出用root READMEテンプレート
 
-以下をプロジェクトの `README.md` にコピーし、英語で完成させることを推奨します。日本語併記は可能ですが、審査員が英語だけで setup と評価を完了できる状態にしてください。
-
----
+以下の構成を英語で完成させます。角括弧のplaceholderや未解決markerを公開READMEへ残してはいけません。未提供のhosted demo、judge account、screenshotsは無理に作らず、該当するlinkやsectionを省きます。
 
 ````markdown
 # [Project Name]
 
-> [One-sentence tagline: audience + problem + outcome]
+> [One sentence: audience + problem + outcome]
 
-**OpenAI Build Week 2026 Track:** [Apps for Your Life / Work and Productivity / Developer Tools / Education]
+**OpenAI Build Week 2026 Track:** Developer Tools
 
-- **Live demo:** [URL]
-- **Demo video:** [Public YouTube URL]
-- **Repository:** [URL]
-- **Supported platforms:** [Web / macOS / Windows / Linux / iOS / Android / etc.]
+- **Demo video:** [final YouTube URL]
+- **Current release:** [final release URL]
+- **Repository:** https://github.com/aki-0421/coding-wife
+- **Supported platforms:** [exact platforms of the current frozen release]
 
 ## Problem
 
-[Describe one real problem for one specific audience. Explain the current workflow, pain, frequency, and why existing solutions are insufficient.]
+[Describe the specific review or workflow problem for developers.]
 
 ## Solution
 
-[Explain the product in 2–4 sentences. State the primary workflow and outcome.]
+[Explain the complete user journey in two to four sentences.]
 
 ## What it does
 
-1. [User action]
-2. [GPT-5.6-powered processing]
-3. [Result and user control]
+1. [The developer starts real work.]
+2. [The main model performs the bounded coding workflow.]
+3. [Support models improve presence and review without gaining write authority.]
+4. [The developer inspects the actual commit and decides what to do next.]
 
-## Why GPT-5.6 is essential
+## Three-model GPT-5.6 orchestration
 
-- **Model:** `[exact model ID, e.g. gpt-5.6 or gpt-5.6-sol]`
-- **Where it is used:** [file / service / workflow]
-- **What it does:** [reasoning, generation, tool use, classification, transformation, etc.]
-- **Why a simpler approach is insufficient:** [specific reason]
-- **Validation / guardrails:** [structured output, schema validation, retries, human review, tests]
+| Role | Exact model | Input | Product output | Authority |
+|---|---|---|---|---|
+| Main coding session | `gpt-5.6-sol` | [task and approved repository context] | [plan, tools, edits, verification, commit] | [bounded write authority] |
+| Presence director | `gpt-5.6-luna` | [bounded sanitized completed-message excerpt] | [caption, expression/motion cue, optional speech] | [zero tools] |
+| Commit explainer | `gpt-5.6-terra` | [bounded read-only Git evidence after user request] | [concise explanation] | [zero tools] |
+
+Explain why each role is necessary, how its schema is validated, and how unsupported or unsafe output fails closed. Do not present three model names without their distinct contribution.
 
 ## How we used Codex
 
-We used Codex through [ChatGPT desktop app / CLI / IDE extension / SDK].
+We used Codex through [official interface or interfaces].
 
 Codex accelerated:
 
-- [Architecture / scaffold]
-- [Core implementation]
-- [Debugging]
-- [Tests / evaluation]
-- [Security / accessibility / performance review]
+- [architecture and contracts]
+- [core implementation]
+- [debugging a concrete failure]
+- [focused tests and real-app QA]
 
-Key decisions made by the team rather than delegated blindly:
+Humans retained these decisions:
 
-- [Decision, alternatives, rationale]
-- [Decision, alternatives, rationale]
-- [Decision, alternatives, rationale]
+- [authority boundary and rejected alternative]
+- [privacy or review trade-off]
+- [product and interaction decision]
 
-The primary Codex thread used for the majority of core functionality is submitted through the Devpost `/feedback` Session ID field.
+The representative primary-thread Session ID is provided in the Devpost submission. Do not publish private session content in the README.
+
+## Fastest judging path
+
+1. Download the **current frozen release** from [release URL].
+2. Verify [published checksum or release provenance].
+3. Install it using [platform-specific instructions].
+4. Add [safe disposable project or sample].
+5. Run [one short representative task].
+6. Confirm [main result, support reaction, and review result].
+
+Estimated time: under three minutes.
+
+The no-rebuild path must exercise the same features claimed in the video. If an older public release exists, label it as historical rather than sending judges to it.
+
+## Source quick start
+
+### Prerequisites
+
+- [runtime and exact version]
+- [package manager]
+- [platform build tools]
+- [authenticated external runtime, if genuinely required]
+
+```bash
+git clone https://github.com/aki-0421/coding-wife.git
+cd coding-wife
+[install command]
+[development command]
+```
+
+List only real configuration requirements. Do not claim that an OpenAI API key is required if the main path uses an authenticated local Codex session. If optional TTS uses a key, document it as optional and keep it behind the native/server boundary.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    U[User] --> A[App]
-    A --> V[Validation]
-    V --> O[OpenAI Responses API / GPT-5.6]
-    O --> P[Post-processing / tools]
-    P --> A
+    U[Developer] --> UI[Desktop workspace]
+    UI --> S[GPT-5.6 Sol\nmain coding session]
+    S --> R[Repository and verification]
+    S --> L[GPT-5.6 Luna\nzero-tool presence]
+    R --> G[Read-only commit evidence]
+    G --> T[GPT-5.6 Terra\nzero-tool explanation]
+    L --> UI
+    T --> UI
 ```
 
-[Explain components, data flow, persistence, external services, and trust boundaries.]
+[Explain IPC, persistence, trust boundaries, and error handling in a short paragraph.]
+
+## Review experience
+
+- [How the chat reduces noise without hiding failures]
+- [How human decisions and interruption work]
+- [How commit/file selection and unified diff work]
+- [How the explanation is triggered and bounded]
+
+## Live2D companion
+
+[Explain caption, expression, motion, and optional speech. State that the character has no technical, safety, approval, or Git authority and that equivalent text remains visible.]
+
+## Testing
+
+```bash
+[focused test command]
+[typecheck command]
+[build command]
+[canonical release-candidate command, only if documented and actually run]
+```
+
+Never report a command as passed unless it was run against the stated commit. Link to the full testing guide for platform-specific or release checks.
 
 ## Built during OpenAI Build Week
 
 ### Before the submission period
 
-- [Pre-existing code / assets / research]
+- [Pre-existing code, assets, or research]
 
 ### Added during the submission period
 
-- [New core feature]
-- [GPT-5.6 integration]
-- [UX / tests / deployment]
+- [Current core feature]
+- [Model orchestration]
+- [Review UX, tests, distribution]
 
 Evidence:
 
-- Baseline commit or tag: `[commit / tag]`
-- Build Week commit range: `[commit..commit]`
-- Development log: `[path]`
-
-## Quick start
-
-### Prerequisites
-
-- [Runtime and version]
-- [Package manager]
-- [Database / external service]
-
-### 1. Clone
-
-```bash
-git clone [repository URL]
-cd [repository]
-```
-
-### 2. Configure
-
-```bash
-cp .env.example .env
-```
-
-Required variables:
-
-| Variable | Required | Purpose |
-|---|---:|---|
-| `OPENAI_API_KEY` | Yes for local API use | Server-side OpenAI API access |
-| `OPENAI_MODEL` | No | Defaults to `gpt-5.6` |
-
-Never expose an API key in the browser or commit it to Git.
-
-### 3. Install and run
-
-```bash
-[install command]
-[development command]
-```
-
-Open: [local URL]
-
-## Fastest judging path
-
-1. Open [demo URL].
-2. Sign in with:
-   - Email: `[judge account]`
-   - Password: `[provided securely in Devpost testing instructions]`
-3. Select `[sample scenario]`.
-4. Click `[primary action]`.
-5. Expected result: `[clear result]`.
-
-Estimated time: [under 3 minutes].
-
-## Sample data
-
-- [How to seed / import]
-- [Where it comes from]
-- [License / permission]
-
-## Testing
-
-```bash
-[lint command]
-[typecheck command]
-[test command]
-[build command]
-```
-
-Known test scope:
-
-- [Unit]
-- [Integration]
-- [End-to-end]
-- [Model output / evaluation]
+- Baseline commit or tag: `[verified immutable identity]`
+- Frozen submission commit: `[final immutable identity]`
 
 ## Security and privacy
 
-- API keys are server-side only.
-- [Data retention policy]
-- [PII handling]
-- [Prompt injection / untrusted content handling]
-- [Rate limits and abuse controls]
+- [Typed boundary instead of generic shell/filesystem/Git authority]
+- [Secret storage and redaction]
+- [Untrusted model output validation]
+- [Data retention and cleanup]
 
 ## Third-party services and licenses
 
-| Component | Purpose | License / Terms |
+| Component | Purpose | License / terms |
 |---|---|---|
-| [Library / API / data] | [Purpose] | [License / URL] |
+| [Component] | [Purpose] | [Repository-relative notice or official URL] |
 
-Project license: [LICENSE]
+Project-owned code: [root license]
 
 ## Limitations
 
-- [Known limitation]
-- [Known limitation]
-- [What would be done next]
+- [Exact platform, signing, or notarization limitation]
+- [External runtime requirement]
+- [Unsupported features]
 
 ## Team
 
 - [Name — role — contribution]
 ````
 
----
+## README acceptance
 
-## README の審査最適化
+- 冒頭30行でproblem、solution、Developer Tools、video、current release、repositoryが分かる。
+- Sol、Luna、Terraのexact model ID、input、output、authority、essentialityが分かる。
+- Codexの具体的な貢献とhuman decisionsを対比している。
+- Judgeはcurrent featureをrebuildせず試せる。
+- Source setup、testing、supported platforms、limitationsが英語だけで分かる。
+- Current chat/Git/Live2D UXと動画の操作名が一致する。
+- Older release、古いUI、古いmodel roleをcurrentとして案内していない。
+- API key、private credential、personal path、private promptを含まない。
+- Placeholder、未解決marker、未実施testの成功claimを含まない。
+- Root `LICENSE`、dependency notices、Live2D/Hiyori termsへ到達できる。
 
-- 冒頭30行だけで、問題、価値、track、demo、GPT-5.6 が分かるようにする。
-- setup の前に `Fastest judging path` を置く。
-- 「Codex を使った」だけでなく、具体的な task と human decision を対比する。
-- GPT-5.6 の exact model ID、code path、input/output、validation を書く。
-- screenshots、短い GIF、architecture diagram は有効だが、README を重くし過ぎない。
-- private credential は README に書かず、Devpost testing instructions に記載する。
-- public repo には `LICENSE` と `.env.example` を必ず確認する。
+## Sources reverified on 2026-07-22 JST
+
+- https://openai.devpost.com/rules
+- https://openai.devpost.com/details/faqs
+- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
