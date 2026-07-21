@@ -190,6 +190,30 @@ export class CodexWorkspaceSessionStore {
     })
   }
 
+  beginRecovery(workspaceId: string, historyMode: CodexHistoryMode): void {
+    if (this.current.activeWorkspaceId !== workspaceId) {
+      this.beginActivation(workspaceId, historyMode)
+      return
+    }
+    const readiness =
+      this.current.diagnostic === null
+        ? unavailableReadiness
+        : evaluateCodexReadiness(this.current.diagnostic, historyMode)
+    this.update({
+      ...this.current,
+      phase: "connecting",
+      connected: false,
+      historyMode,
+      historyWritable: historyMode === "ready",
+      readiness: { ...readiness, ready: false },
+      generation: null,
+      threadHandle: null,
+      turnHandle: null,
+      pendingRequests: [],
+      errorCode: null,
+    })
+  }
+
   applyDiagnostic(diagnostic: CodexDiagnostic): CodexReadiness {
     const readiness = evaluateCodexReadiness(
       diagnostic,

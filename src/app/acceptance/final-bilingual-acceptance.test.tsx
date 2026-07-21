@@ -53,7 +53,6 @@ const copy: Readonly<
       readonly closeCaption: string
       readonly loadError: string
       readonly retry: string
-      readonly preview: string
       readonly pickerUnavailable: string
       readonly repositoryMissing: string
       readonly dontQuit: string
@@ -83,7 +82,6 @@ const copy: Readonly<
     closeCaption: "Close explanation",
     loadError: "Workspace history could not be restored",
     retry: "Retry",
-    preview: "Preview only",
     pickerUnavailable:
       "The native operation is not connected in this preview. No local project state changed.",
     repositoryMissing: "Repository missing",
@@ -112,7 +110,6 @@ const copy: Readonly<
     closeCaption: "説明を閉じる",
     loadError: "ワークスペース履歴を復元できませんでした",
     retry: "再試行",
-    preview: "プレビューのみ",
     pickerUnavailable:
       "このプレビューではnative操作が未接続です。ローカルproject状態は変更していません。",
     repositoryMissing: "リポジトリが見つかりません",
@@ -173,7 +170,7 @@ describe("final bilingual App acceptance", () => {
         />,
       )
 
-      expect(await screen.findByText(localized.preview)).toBeVisible()
+      await screen.findByPlaceholderText(localized.composer)
       expect(document.documentElement).toHaveAttribute(
         "data-reduced-motion",
         "true",
@@ -533,7 +530,7 @@ describe("final bilingual App acceptance", () => {
         />,
       )
 
-      expect(await screen.findByText(localized.preview)).toBeVisible()
+      await screen.findByPlaceholderText(localized.composer)
       const addAttachment = screen.getByRole("button", {
         name: localized.add,
       })
@@ -669,7 +666,7 @@ describe("final bilingual App acceptance", () => {
         workspaceAdapter={workspace}
       />,
     )
-    expect(await screen.findByText(copy.ja.preview)).toBeVisible()
+    await screen.findByPlaceholderText(copy.ja.composer)
     expect(
       (await screen.findAllByText(copy.ja.repositoryMissing)).length,
     ).toBeGreaterThan(0)

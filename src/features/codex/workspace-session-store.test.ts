@@ -157,4 +157,26 @@ describe("CodexWorkspaceSessionStore", () => {
       },
     })
   })
+
+  it("preserves the selected workspace timeline during automatic recovery", () => {
+    const store = new CodexWorkspaceSessionStore()
+    const projector = new CodexEventProjector()
+    store.beginActivation("workspace-fixture", "ready")
+    store.applyDiagnostic(readyDiagnostic)
+    store.markThreadReady("thread_handle_fixture", 7)
+    const projection = projector.project(parseCodexEvent(fixture.events[0]))
+    if (projection.timeline === null) throw new Error("timeline fixture")
+    store.applyTimeline(projection.timeline)
+
+    store.beginRecovery("workspace-fixture", "ready")
+
+    expect(store.snapshot()).toMatchObject({
+      activeWorkspaceId: "workspace-fixture",
+      phase: "connecting",
+      connected: false,
+      generation: null,
+      threadHandle: null,
+      timeline: [{ sourceEventId: projection.timeline.sourceEventId }],
+    })
+  })
 })

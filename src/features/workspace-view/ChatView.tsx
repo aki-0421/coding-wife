@@ -33,7 +33,6 @@ import { cn } from "@/lib/utils"
 interface ChatViewProps {
   readonly backgroundExecutionWorkspaceLabel?: string
   readonly characterState: CharacterSemanticState
-  readonly connected: boolean
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
   readonly history: WorkspaceAdapterState["history"]
@@ -43,7 +42,6 @@ interface ChatViewProps {
   readonly repositoryHealth?: WorkspaceRecord["health"]
   readonly runtimeError: boolean
   readonly turnState: TurnUiState
-  readonly workspaceThreadErrorCode?: string
   readonly workspaceThreadReady: boolean
   readonly timeline: readonly WorkspaceTimelineItem[]
   readonly timelineAnchor?: {
@@ -80,11 +78,9 @@ interface ChatViewProps {
     | undefined
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onRemoveContext: (snapshotId: string) => void
-  readonly onReconnect: () => void | Promise<void>
   readonly onRetryRuntime: () => void
   readonly onSend: () => Promise<boolean>
   readonly onStop: () => boolean | void | Promise<boolean | void>
-  readonly reconnecting: boolean
   readonly onTimelineAnchorChange?: (
     eventId: string,
     sequence: number,
@@ -173,7 +169,6 @@ function restoreTimelineAnchor(
 export function ChatView({
   backgroundExecutionWorkspaceLabel,
   characterState,
-  connected,
   copy,
   draft,
   history,
@@ -183,7 +178,6 @@ export function ChatView({
   repositoryHealth,
   runtimeError,
   turnState,
-  workspaceThreadErrorCode,
   workspaceThreadReady,
   timeline,
   timelineAnchor,
@@ -203,11 +197,9 @@ export function ChatView({
   onRegisterAttachmentPaths,
   onRemoveAttachment,
   onRemoveContext,
-  onReconnect,
   onRetryRuntime,
   onSend,
   onStop,
-  reconnecting,
   onTimelineAnchorChange,
 }: ChatViewProps) {
   const narrationController = useNarrationController()
@@ -478,7 +470,6 @@ export function ChatView({
           {...(backgroundExecutionWorkspaceLabel === undefined
             ? {}
             : { backgroundExecutionWorkspaceLabel })}
-          connected={connected}
           copy={copy}
           draft={draft}
           onCaptureContext={onCaptureContext}
@@ -491,16 +482,11 @@ export function ChatView({
           onRegisterAttachmentPaths={onRegisterAttachmentPaths}
           onRemoveAttachment={onRemoveAttachment}
           onRemoveContext={onRemoveContext}
-          onReconnect={onReconnect}
           onSend={onSend}
           onStop={onStop}
-          reconnecting={reconnecting}
           readiness={readiness}
           repositoryHealth={repositoryHealth}
           turnState={turnState}
-          {...(workspaceThreadErrorCode === undefined
-            ? {}
-            : { workspaceThreadErrorCode })}
           workspaceThreadReady={workspaceThreadReady}
         />
       </section>

@@ -2161,9 +2161,8 @@ describe("WorkspaceShell", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("keeps the native workspace shell when the workspace Codex handshake is disconnected", async () => {
+  it("keeps the native workspace shell without exposing App Server connection state", async () => {
     const user = userEvent.setup()
-    const recheckWorkspace = vi.fn().mockResolvedValue(nativeWorkspaceState())
     const codex: WorkspaceCodexState = {
       activeWorkspaceId: "workspace-native",
       generation: null,
@@ -2184,7 +2183,6 @@ describe("WorkspaceShell", () => {
       hydrationMode: "native",
       loadState: () => Promise.resolve(nativeWorkspaceState()),
       codexSnapshot: () => codex,
-      recheckWorkspace,
     }
     renderWorkspace(adapter)
 
@@ -2195,15 +2193,14 @@ describe("WorkspaceShell", () => {
       screen.queryByRole("heading", { name: "Finish the local setup" }),
     ).toBeNull()
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
-    expect(screen.getByText("CODEX-IPC-UNAVAILABLE")).toBeVisible()
+    expect(screen.queryByText("CODEX-IPC-UNAVAILABLE")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull()
     await user.type(
       screen.getByPlaceholderText(
         "Ask Codex to plan, build, explain, or fix anything…",
       ),
       "Keep this draft",
     )
-    await user.click(screen.getByRole("button", { name: "Reconnect" }))
-    expect(recheckWorkspace).toHaveBeenCalledWith("workspace-native")
     expect(
       screen.getByPlaceholderText(
         "Ask Codex to plan, build, explain, or fix anything…",
@@ -2212,9 +2209,8 @@ describe("WorkspaceShell", () => {
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
   })
 
-  it("reports a workspace thread failure without disconnecting the app server", async () => {
+  it("keeps workspace thread recovery internal and preserves its draft", async () => {
     const user = userEvent.setup()
-    const recheckWorkspace = vi.fn().mockResolvedValue(nativeWorkspaceState())
     const codex: WorkspaceCodexState = {
       activeWorkspaceId: "workspace-native",
       generation: null,
@@ -2235,30 +2231,26 @@ describe("WorkspaceShell", () => {
       hydrationMode: "native",
       loadState: () => Promise.resolve(nativeWorkspaceState()),
       codexSnapshot: () => codex,
-      recheckWorkspace,
     }
     renderWorkspace(adapter)
 
-    const [threadRecovery] = await screen.findAllByText(
-      "Codex could not open this workspace thread. Your draft is preserved.",
+    await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
     )
-    expect(threadRecovery).toBeVisible()
-    expect(screen.getByText("CODEX-SERVER-ERROR")).toBeVisible()
+    expect(screen.queryByText("CODEX-SERVER-ERROR")).toBeNull()
     expect(
       screen.queryByText(
         "Codex is not connected. Your draft will be preserved.",
       ),
     ).toBeNull()
     expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Retry thread" })).toBeNull()
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
 
     const composer = screen.getByPlaceholderText(
       "Ask Codex to plan, build, explain, or fix anything…",
     )
     await user.type(composer, "Keep this workspace draft")
-    await user.click(screen.getByRole("button", { name: "Retry thread" }))
-
-    expect(recheckWorkspace).toHaveBeenCalledWith("workspace-native")
     expect(composer).toHaveValue("Keep this workspace draft")
   })
 
@@ -2436,7 +2428,7 @@ describe("WorkspaceShell", () => {
     expect(
       screen.queryByRole("heading", { name: "Activity" }),
     ).not.toBeInTheDocument()
-    expect(characterStatus).toHaveTextContent("Disconnected")
+    expect(characterStatus).toHaveTextContent("Idle")
 
     const mute = within(characterStatus as HTMLElement).getByRole("button", {
       name: "Mute character",

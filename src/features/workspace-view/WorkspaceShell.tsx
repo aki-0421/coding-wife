@@ -64,7 +64,6 @@ import {
 } from "@/features/workspace-view/types"
 import { useEditableSettingsContext } from "@/features/workspace-view/useEditableSettingsContext"
 import { useWorkspaceViewModel } from "@/features/workspace-view/useWorkspaceViewModel"
-import type { HeaderConnectionState } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceHeader } from "@/features/workspace-view/WorkspaceHeader"
 import { WorkspaceProjectSelection } from "@/features/workspace-view/WorkspaceProjectSelection"
 import { WorkspaceSidebar } from "@/features/workspace-view/WorkspaceSidebar"
@@ -175,17 +174,6 @@ export function WorkspaceShell({
   }, [adapter?.hydrationMode, runtime.state.status])
 
   const connected = view.codex.connected && runtime.state.status === "ready"
-  const connection: HeaderConnectionState =
-    runtime.state.status === "loading" ||
-    (!view.codex.connected && view.codex.phase === "connecting")
-      ? "checking"
-      : runtime.state.status === "error"
-        ? "offline"
-        : adapter?.hydrationMode === "demo" || adapter === undefined
-          ? "preview"
-          : connected
-            ? "ready"
-            : "offline"
   const reducedMotion = systemReducedMotion
   const turnActive =
     view.turnState === "sending" ||
@@ -206,9 +194,8 @@ export function WorkspaceShell({
   const selectedOwnsExecution =
     selectedWorkspaceId !== null &&
     view.codex.activeWorkspaceId === selectedWorkspaceId
-  const characterState = !connected
-    ? "disconnected"
-    : selectedOwnsExecution && view.codex.pendingRequests.length > 0
+  const characterState =
+    selectedOwnsExecution && view.codex.pendingRequests.length > 0
       ? "waiting_for_user"
       : view.turnState === "sending"
         ? "thinking"
@@ -226,15 +213,7 @@ export function WorkspaceShell({
       ? codexGeneration
       : null
   const workspaceThreadReady =
-    !observesCodexConnection || workspaceGeneration !== null
-  const workspaceThreadErrorCode =
-    selectedOwnsExecution &&
-    workspaceGeneration === null &&
-    view.codex.phase === "failed" &&
-    view.codex.connected &&
-    view.codex.errorCode !== null
-      ? view.codex.errorCode
-      : undefined
+    !observesCodexConnection || (connected && workspaceGeneration !== null)
   const commitPresentation =
     narration.presentation?.key.workspaceId === selectedWorkspaceId &&
     narration.presentation.key.workspaceGeneration === workspaceGeneration &&
@@ -483,10 +462,6 @@ export function WorkspaceShell({
       reportWorkspaceAction(await view.unregisterProject(projectId)),
     [reportWorkspaceAction, view],
   )
-
-  const reconnectCodex = useCallback(async () => {
-    reportWorkspaceAction(await view.recheckSelectedWorkspace())
-  }, [reportWorkspaceAction, view])
 
   const executeArchiveWorkspace = useCallback(
     async (workspaceId: string, expectedGeneration: number | null) => {
@@ -774,11 +749,6 @@ export function WorkspaceShell({
   }
 
   const selectedWorkspace = view.selectedWorkspace
-  const codexReconnectRequired =
-    observesCodexConnection &&
-    selectedWorkspace !== undefined &&
-    !view.codex.connected &&
-    view.codex.phase !== "connecting"
   const runtimeSetupRequired =
     adapter?.hydrationMode === "native" &&
     (runtime.state.status === "error" || runtimeSetupRecovery)
@@ -793,9 +763,6 @@ export function WorkspaceShell({
   )
   const recheckSetup = async () => {
     if (runtimeSetupRequired) runtime.refresh()
-    if (codexReconnectRequired) {
-      await reconnectCodex()
-    }
   }
   const projectSetupDialog =
     view.projectSetup === null ? null : (
@@ -840,7 +807,7 @@ export function WorkspaceShell({
     <main
       className="workspace-shell"
       data-reduced-motion={reducedMotion || undefined}
-      data-runtime={connection}
+      data-runtime={runtime.state.status}
       data-workspace-viewport={viewportLayout}
     >
       <WorkspaceSidebar
@@ -910,7 +877,6 @@ export function WorkspaceShell({
         >
           <WorkspaceHeader
             activeTab={view.activeTab}
-            connection={connection}
             copy={copy}
             workspace={selectedWorkspace}
           />
@@ -927,7 +893,6 @@ export function WorkspaceShell({
                     backgroundExecutionWorkspaceLabel: `${view.backgroundExecutionWorkspace.repository}/${view.backgroundExecutionWorkspace.name}`,
                   })}
               characterState={characterState}
-              connected={connected}
               copy={copy}
               draft={view.selectedDraft}
               history={view.history}
@@ -956,7 +921,6 @@ export function WorkspaceShell({
               }
               onRemoveAttachment={view.removeAttachment}
               onRemoveContext={view.removeContext}
-              onReconnect={reconnectCodex}
               onRetryRuntime={runtime.refresh}
               onSend={view.sendTurn}
               onStop={stopTurn}
@@ -974,14 +938,7 @@ export function WorkspaceShell({
                     )
                   : []
               }
-              reconnecting={
-                view.workspaceAction === "recheck" ||
-                view.codex.phase === "connecting"
-              }
               turnState={view.turnState}
-              {...(workspaceThreadErrorCode === undefined
-                ? {}
-                : { workspaceThreadErrorCode })}
               workspaceThreadReady={workspaceThreadReady}
               workspaceId={selectedWorkspace.id}
             />

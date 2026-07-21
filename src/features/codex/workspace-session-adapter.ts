@@ -16,6 +16,7 @@ import {
 import { CodexSessionClient } from "@/features/codex/client"
 import {
   CodexEventProjector,
+  isInternalConnectionDiagnosticCode,
   projectAcceptedUserTurn,
   type CodexHistoryEvent,
 } from "@/features/codex/event-projection"
@@ -107,6 +108,7 @@ const globalConnectionErrorCodes = new Set([
   "CODEX-BINARY-IDENTITY-CHANGED",
   "CODEX-BINARY-MISSING",
   "CODEX-BINARY-UNTRUSTED",
+  "CODEX-CONNECTION-LOST",
   "CODEX-CONNECTION-STALE",
   "CODEX-DISCONNECTED",
   "CODEX-IPC-CONTRACT-MISMATCH",
@@ -115,6 +117,18 @@ const globalConnectionErrorCodes = new Set([
   "CODEX-PROTOCOL-MISMATCH",
   "CODEX-SCHEMA-UNSUPPORTED",
   "CODEX-THREAD-POLICY-MISMATCH",
+])
+
+const automaticRecoveryErrorCodes = new Set([
+  ...globalConnectionErrorCodes,
+  "CODEX-CONNECT-FAILED",
+  "CODEX-PROBE-FAILED",
+  "CODEX-PROBE-TIMEOUT",
+  "CODEX-READINESS-TIMEOUT",
+  "CODEX-SERVER-ERROR",
+  "CODEX-SPAWN-FAILED",
+  "CODEX-THREAD-RESUME-FAILED",
+  "CODEX-THREAD-START-FAILED",
 ])
 
 interface ActivationIdentity {
@@ -163,6 +177,20 @@ function safeErrorCode(error: unknown, fallback: string): string {
     return error.code
   }
   return fallback
+}
+
+function isRecoverableActivationError(error: unknown): boolean {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "recoverable" in error &&
+    typeof error.recoverable === "boolean"
+  ) {
+    return error.recoverable
+  }
+  return automaticRecoveryErrorCodes.has(
+    safeErrorCode(error, "CODEX-ACTIVATION-FAILED"),
+  )
 }
 
 function validateWorkspaceId(workspaceId: string): void {
@@ -217,6 +245,10 @@ export class CodexWorkspaceSessionAdapter {
   private readonly acceptedWorkUnits = new Map<string, AcceptedWorkUnit>()
   private readonly observedTerminalEvents = new Map<string, TerminalTurnEvent>()
   private readonly notifiedTerminalEventIds = new Set<string>()
+  private recoveryTarget: ActivateCodexWorkspaceRequest | null = null
+  private recoveryTimer: unknown | null = null
+  private recoveryAttempt = 0
+  private recoveryInFlight = false
 
   constructor(
     readonly transport: CodexTransport,
@@ -287,6 +319,8 @@ export class CodexWorkspaceSessionAdapter {
 
   stop(): void {
     this.activation += 1
+    this.recoveryTarget = null
+    this.clearRecoveryTimer()
     this.client.stop()
     this.started = false
     this.appDiagnostic = null
@@ -299,11 +333,32 @@ export class CodexWorkspaceSessionAdapter {
   async activateWorkspace(
     request: ActivateCodexWorkspaceRequest,
   ): Promise<CodexWorkspaceSessionSnapshot> {
+    this.recoveryTarget = request
+    this.recoveryAttempt = 0
+    this.clearRecoveryTimer()
+    try {
+      const snapshot = await this.activateWorkspaceOnce(request, false)
+      if (snapshot.phase === "ready") this.recoveryAttempt = 0
+      return snapshot
+    } catch (error) {
+      this.scheduleAutomaticRecovery(request, error)
+      throw error
+    }
+  }
+
+  private async activateWorkspaceOnce(
+    request: ActivateCodexWorkspaceRequest,
+    preserveTimeline: boolean,
+  ): Promise<CodexWorkspaceSessionSnapshot> {
     validateWorkspaceId(request.workspaceId)
     const activation = ++this.activation
     this.historyBlocked.delete(request.workspaceId)
     this.sessionStore.activateWorkspace(request.workspaceId)
-    this.store.beginActivation(request.workspaceId, request.historyMode)
+    if (preserveTimeline) {
+      this.store.beginRecovery(request.workspaceId, request.historyMode)
+    } else {
+      this.store.beginActivation(request.workspaceId, request.historyMode)
+    }
     let diagnostic: CodexDiagnostic
     try {
       diagnostic = await this.start()
@@ -358,6 +413,7 @@ export class CodexWorkspaceSessionAdapter {
       if (activation === this.activation) {
         const errorCode = safeErrorCode(error, "CODEX-THREAD-START-FAILED")
         if (globalConnectionErrorCodes.has(errorCode)) {
+          this.appDiagnostic = null
           this.store.markOperationError(errorCode)
         } else {
           this.store.markWorkspaceThreadError(errorCode)
@@ -365,6 +421,59 @@ export class CodexWorkspaceSessionAdapter {
       }
       throw error
     }
+  }
+
+  private scheduleAutomaticRecovery(
+    request: ActivateCodexWorkspaceRequest,
+    error: unknown,
+  ): void {
+    if (
+      this.transport.kind !== "tauri" ||
+      !isRecoverableActivationError(error) ||
+      this.recoveryInFlight ||
+      this.recoveryTimer !== null ||
+      this.recoveryTarget?.workspaceId !== request.workspaceId ||
+      this.store.snapshot().activeWorkspaceId !== request.workspaceId
+    ) {
+      return
+    }
+    const exponent = Math.min(this.recoveryAttempt, 6)
+    const delay = Math.min(10_000, 250 * 2 ** exponent)
+    this.recoveryAttempt += 1
+    this.recoveryTimer = this.clock.setTimeout(() => {
+      this.recoveryTimer = null
+      void this.runAutomaticRecovery(request)
+    }, delay)
+  }
+
+  private async runAutomaticRecovery(
+    request: ActivateCodexWorkspaceRequest,
+  ): Promise<void> {
+    if (
+      this.recoveryTarget?.workspaceId !== request.workspaceId ||
+      this.store.snapshot().activeWorkspaceId !== request.workspaceId
+    ) {
+      return
+    }
+    this.recoveryInFlight = true
+    let retryError: unknown = null
+    try {
+      const snapshot = await this.activateWorkspaceOnce(request, true)
+      if (snapshot.phase === "ready") this.recoveryAttempt = 0
+    } catch (error) {
+      retryError = error
+    } finally {
+      this.recoveryInFlight = false
+    }
+    if (retryError !== null) {
+      this.scheduleAutomaticRecovery(request, retryError)
+    }
+  }
+
+  private clearRecoveryTimer(): void {
+    if (this.recoveryTimer === null) return
+    this.clock.clearTimeout(this.recoveryTimer)
+    this.recoveryTimer = null
   }
 
   async sendTurn(
@@ -498,10 +607,16 @@ export class CodexWorkspaceSessionAdapter {
       })
       .catch((error: unknown) => {
         if (this.isCurrent(identity)) {
-          this.store.markOperationError(
-            safeErrorCode(error, "CODEX-TURN-START-FAILED"),
-            true,
-          )
+          const errorCode = safeErrorCode(error, "CODEX-TURN-START-FAILED")
+          if (globalConnectionErrorCodes.has(errorCode)) {
+            this.appDiagnostic = null
+            this.store.markOperationError(errorCode)
+            if (this.recoveryTarget !== null) {
+              this.scheduleAutomaticRecovery(this.recoveryTarget, error)
+            }
+          } else {
+            this.store.markOperationError(errorCode, true)
+          }
         }
         throw error
       })
@@ -748,6 +863,24 @@ export class CodexWorkspaceSessionAdapter {
       | "out_of_order"
       | "workspace_mismatch",
   ): void {
+    if (
+      event.kind === "diagnostic" &&
+      isInternalConnectionDiagnosticCode(event.payload.code) &&
+      (result === "applied" || result === "generation_advanced")
+    ) {
+      this.appDiagnostic = null
+      const recoveryTarget = this.recoveryTarget
+      if (
+        this.store.snapshot().activeWorkspaceId === event.workspaceId &&
+        recoveryTarget?.workspaceId === event.workspaceId
+      ) {
+        this.store.markOperationError(event.payload.code)
+        this.scheduleAutomaticRecovery(
+          recoveryTarget,
+          codedError(event.payload.code),
+        )
+      }
+    }
     if (
       event.kind === "turn_status" &&
       terminalTurnStatuses.has(event.payload.status)

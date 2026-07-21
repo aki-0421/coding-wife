@@ -151,7 +151,7 @@ function DuplicateRefreshProbe() {
 }
 
 describe("App workspace shell", () => {
-  it("keeps the localized loading state visible while runtime checks are pending", () => {
+  it("does not expose App Server status while runtime checks are pending", () => {
     render(
       <App
         localeStore={createLocalePreferenceStore("tauri")}
@@ -159,11 +159,11 @@ describe("App workspace shell", () => {
       />,
     )
 
-    expect(screen.getByText("Checking runtime")).toBeVisible()
+    expect(screen.queryByText("Checking runtime")).toBeNull()
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
   })
 
-  it("labels browser execution as demo mode instead of native success", async () => {
+  it("keeps browser preview connection state out of the workspace header", async () => {
     render(
       <App
         localeStore={createLocalePreferenceStore("tauri")}
@@ -171,7 +171,10 @@ describe("App workspace shell", () => {
       />,
     )
 
-    expect(await screen.findByText("Preview only")).toBeVisible()
+    await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    expect(screen.queryByText("Preview only")).toBeNull()
     expect(screen.queryByText("Demo memory")).not.toBeInTheDocument()
     expect(screen.queryByText(/Codex and Git are not connected/)).toBeNull()
     expect(
@@ -205,7 +208,7 @@ describe("App workspace shell", () => {
       await screen.findByText("The local runtime could not be reached"),
     ).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
-    expect(screen.getByText("Checking runtime")).toBeVisible()
+    expect(screen.queryByText("Checking runtime")).toBeNull()
 
     await act(async () => {
       healthRetry.resolve(demoHealth)
@@ -213,7 +216,10 @@ describe("App workspace shell", () => {
       await Promise.all([healthRetry.promise, metadataRetry.promise])
     })
 
-    expect(await screen.findByText("Preview only")).toBeVisible()
+    await screen.findByPlaceholderText(
+      "Ask Codex to plan, build, explain, or fix anything…",
+    )
+    expect(screen.queryByText("Preview only")).toBeNull()
   })
 
   it("keeps the recovery operation after a retry fails again", async () => {

@@ -101,12 +101,6 @@ const en = {
     chat: "Chat",
     commit: "Commit",
   },
-  connection: {
-    checking: "Checking runtime",
-    preview: "Preview only",
-    offline: "Offline",
-    ready: "Ready",
-  },
   runtimeErrorTitle: "The local runtime could not be reached",
   retry: "Retry",
   diagnostics: "Diagnostics",
@@ -273,14 +267,7 @@ const en = {
   commandSend: "⌘↵ send",
   removeAttachment: "Remove attachment",
   attachmentRejected: "Files over 25 MiB remain visible but cannot be sent.",
-  sendUnavailable: "Codex is not connected. Your draft will be preserved.",
-  sendNotReady: "Sending is unavailable until the app readiness checks pass.",
-  reconnectCodex: "Reconnect",
-  reconnectingCodex: "Reconnecting…",
-  threadUnavailable:
-    "Codex could not open this workspace thread. Your draft is preserved.",
-  retryThread: "Retry thread",
-  reopeningThread: "Opening thread…",
+  sendNotReady: "Sending is temporarily unavailable. Your draft is preserved.",
   sendEmpty: "Enter an instruction or attach valid context.",
   sendBusy: "Wait for the current turn to finish or stop it.",
   sendBusyOtherWorkspace: (workspace: string) =>
@@ -577,12 +564,6 @@ const ja: typeof en = {
     chat: "チャット",
     commit: "コミット",
   },
-  connection: {
-    checking: "実行環境を確認中",
-    preview: "プレビューのみ",
-    offline: "オフライン",
-    ready: "準備完了",
-  },
   runtimeErrorTitle: "ローカル実行環境へ接続できませんでした",
   retry: "再試行",
   diagnostics: "診断",
@@ -748,14 +729,7 @@ const ja: typeof en = {
   removeAttachment: "添付を削除",
   attachmentRejected:
     "25 MiBを超えるファイルは表示を残しますが送信できません。",
-  sendUnavailable: "Codexは未接続です。下書きは保持されます。",
-  sendNotReady: "アプリの準備確認が完了するまで送信できません。",
-  reconnectCodex: "再接続",
-  reconnectingCodex: "再接続中…",
-  threadUnavailable:
-    "このワークスペースのCodex threadを開けませんでした。下書きは保持されます。",
-  retryThread: "threadを再試行",
-  reopeningThread: "threadを開いています…",
+  sendNotReady: "現在は送信できません。下書きは保持されます。",
   sendEmpty: "指示を入力するか、有効なコンテキストを追加してください。",
   sendBusy: "現在のturnを完了するか、停止してください。",
   sendBusyOtherWorkspace: (workspace: string) =>

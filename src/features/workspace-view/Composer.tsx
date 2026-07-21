@@ -10,7 +10,6 @@ import {
   InfoIcon,
   MapIcon,
   PlusIcon,
-  RefreshCwIcon,
   SquareIcon,
   TargetIcon,
   TerminalSquareIcon,
@@ -42,13 +41,11 @@ import type {
 
 interface ComposerProps {
   readonly backgroundExecutionWorkspaceLabel?: string
-  readonly connected: boolean
   readonly copy: WorkspaceCopy
   readonly draft: WorkspaceDraft
   readonly readiness: WorkspaceCodexState["readiness"]
   readonly repositoryHealth?: WorkspaceRecord["health"]
   readonly turnState: TurnUiState
-  readonly workspaceThreadErrorCode?: string
   readonly workspaceThreadReady: boolean
   readonly onCaptureContext: (
     source: ContextSnapshotItem["source"],
@@ -67,10 +64,8 @@ interface ComposerProps {
     | undefined
   readonly onRemoveAttachment: (attachmentId: string) => void
   readonly onRemoveContext: (snapshotId: string) => void
-  readonly onReconnect: () => void | Promise<void>
   readonly onSend: () => Promise<boolean>
   readonly onStop: () => boolean | void | Promise<boolean | void>
-  readonly reconnecting: boolean
 }
 
 const contextSources: readonly ContextSnapshotItem["source"][] = [
@@ -118,22 +113,13 @@ function clipboardFilePaths(data: DataTransfer): string[] {
   return [...new Set(paths)]
 }
 
-function safeConnectionReason(reasonCode: string | null): string {
-  return reasonCode !== null &&
-    /^(?:CODEX|HIST)-[A-Z0-9-]{1,96}$/u.test(reasonCode)
-    ? reasonCode
-    : "CODEX-NOT-CONNECTED"
-}
-
 export function Composer({
   backgroundExecutionWorkspaceLabel,
-  connected,
   copy,
   draft,
   readiness,
   repositoryHealth,
   turnState,
-  workspaceThreadErrorCode,
   workspaceThreadReady,
   onCaptureContext,
   onDraftChange,
@@ -145,10 +131,8 @@ export function Composer({
   onRegisterAttachmentPaths,
   onRemoveAttachment,
   onRemoveContext,
-  onReconnect,
   onSend,
   onStop,
-  reconnecting,
 }: ComposerProps) {
   const [addOpen, setAddOpen] = useState(false)
   const attachmentCapabilitiesAvailable =
@@ -166,9 +150,7 @@ export function Composer({
     !draft.goalMode || (goalObjectiveLength > 0 && goalObjectiveLength <= 4_000)
   const repositoryReady =
     repositoryHealth === undefined || repositoryHealth === "ready"
-  const connectionReason = safeConnectionReason(readiness.reasonCode)
   const canSend =
-    connected &&
     readiness.ready &&
     workspaceThreadReady &&
     repositoryReady &&
@@ -176,23 +158,20 @@ export function Composer({
     goalObjectiveValid &&
     !backgroundExecutionActive &&
     turnState === "idle"
-  const disabledReason = !connected
-    ? copy.sendUnavailable
-    : !workspaceThreadReady
-      ? copy.threadUnavailable
-      : !readiness.ready
-        ? copy.sendNotReady
-        : repositoryHealth !== undefined && repositoryHealth !== "ready"
-          ? copy.workspaceHealth[repositoryHealth]
-          : backgroundExecutionWorkspaceLabel !== undefined
-            ? copy.sendBusyOtherWorkspace(backgroundExecutionWorkspaceLabel)
-            : isBusy
-              ? copy.sendBusy
-              : !goalObjectiveValid
-                ? copy.goalInstructionRequired
-                : !hasContent
-                  ? copy.sendEmpty
-                  : ""
+  const disabledReason =
+    !workspaceThreadReady || !readiness.ready
+      ? copy.sendNotReady
+      : repositoryHealth !== undefined && repositoryHealth !== "ready"
+        ? copy.workspaceHealth[repositoryHealth]
+        : backgroundExecutionWorkspaceLabel !== undefined
+          ? copy.sendBusyOtherWorkspace(backgroundExecutionWorkspaceLabel)
+          : isBusy
+            ? copy.sendBusy
+            : !goalObjectiveValid
+              ? copy.goalInstructionRequired
+              : !hasContent
+                ? copy.sendEmpty
+                : ""
   const availableReasoningLevels = reasoningOrder.filter(
     (effort) =>
       effort === "off" ||
@@ -365,72 +344,6 @@ export function Composer({
               : copy.pickerUnavailable}
           </span>
         </p>
-
-        {!connected ? (
-          <div
-            className="mt-xs flex min-h-8 items-center gap-sm rounded-control bg-muted/60 px-sm py-xs max-[520px]:items-start"
-            data-composer-connection-recovery=""
-            role="status"
-          >
-            <p className="m-0 min-w-0 flex-1 text-pretty text-caption text-muted-foreground">
-              {copy.sendUnavailable}{" "}
-              <code className="whitespace-nowrap font-mono text-label text-foreground">
-                {connectionReason}
-              </code>
-            </p>
-            <Button
-              className="shrink-0"
-              disabled={reconnecting}
-              onClick={() => void onReconnect()}
-              size="xs"
-              type="button"
-              variant="ghost"
-            >
-              <RefreshCwIcon
-                className={
-                  reconnecting
-                    ? "animate-spin motion-reduce:animate-none"
-                    : undefined
-                }
-                data-icon="inline-start"
-              />
-              {reconnecting ? copy.reconnectingCodex : copy.reconnectCodex}
-            </Button>
-          </div>
-        ) : null}
-
-        {connected && workspaceThreadErrorCode !== undefined ? (
-          <div
-            className="mt-xs flex min-h-8 items-center gap-sm rounded-control bg-muted/60 px-sm py-xs max-[520px]:items-start"
-            data-composer-thread-recovery=""
-            role="status"
-          >
-            <p className="m-0 min-w-0 flex-1 text-pretty text-caption text-muted-foreground">
-              {copy.threadUnavailable}{" "}
-              <code className="whitespace-nowrap font-mono text-label text-foreground">
-                {workspaceThreadErrorCode}
-              </code>
-            </p>
-            <Button
-              className="shrink-0"
-              disabled={reconnecting}
-              onClick={() => void onReconnect()}
-              size="xs"
-              type="button"
-              variant="ghost"
-            >
-              <RefreshCwIcon
-                className={
-                  reconnecting
-                    ? "animate-spin motion-reduce:animate-none"
-                    : undefined
-                }
-                data-icon="inline-start"
-              />
-              {reconnecting ? copy.reopeningThread : copy.retryThread}
-            </Button>
-          </div>
-        ) : null}
 
         {backgroundExecutionWorkspaceLabel !== undefined ? (
           <p
