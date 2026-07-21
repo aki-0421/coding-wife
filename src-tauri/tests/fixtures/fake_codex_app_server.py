@@ -366,6 +366,47 @@ def send_support_item(item_type, text):
         )
 
 
+def send_support_thread_settings(model):
+    settings = {
+        "activePermissionProfile": {
+            "id": "coding-wife-support-zero",
+            "extends": None,
+        },
+        "approvalPolicy": "never",
+        "approvalsReviewer": "user",
+        "collaborationMode": {
+            "mode": "default",
+            "settings": {
+                "developer_instructions": None,
+                "model": model,
+                "reasoning_effort": "low",
+            },
+        },
+        "cwd": str(pathlib.Path.cwd()),
+        "effort": "low",
+        "model": model,
+        "modelProvider": "openai",
+        "multiAgentMode": "explicitRequestOnly",
+        "personality": "pragmatic",
+        "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
+        "serviceTier": None,
+        "summary": None,
+    }
+    if MODE == "support_settings_policy_changed":
+        settings["sandboxPolicy"]["networkAccess"] = True
+    elif MODE == "support_settings_unknown_field":
+        settings["unexpectedAuthority"] = False
+    send(
+        {
+            "method": "thread/settings/updated",
+            "params": {
+                "threadId": "support-thread-fixture",
+                "threadSettings": settings,
+            },
+        }
+    )
+
+
 def git_text(workspace, arguments):
     completed = subprocess.run(
         ["/usr/bin/git", "-C", str(workspace), *arguments],
@@ -1052,6 +1093,8 @@ def main():
                         },
                     }
                 )
+                if not probe_turn and not policy_probe_turn:
+                    send_support_thread_settings(support_model)
                 if MODE == "support_probe_slow_grandchild" and probe_turn:
                     spawn_support_grandchild()
                     continue

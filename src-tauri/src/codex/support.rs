@@ -23,7 +23,7 @@ use super::process::{spawn_support_process, ProcessRuntime};
 use super::protocol::{
     account_read_params, parse_support_thread_policy_response, presence_turn_start_params,
     server_error, support_thread_start_params, support_turn_start_params, turn_interrupt_params,
-    InboundMessage,
+    validate_support_thread_settings_notification, InboundMessage,
 };
 use super::redaction::redact_text;
 #[cfg(test)]
@@ -1589,6 +1589,16 @@ impl SupportRuntime {
                                     return Err(SupportRuntimeError::Policy);
                                 }
                             }
+                            "thread/settings/updated" => {
+                                validate_support_thread_settings_notification(
+                                    &params,
+                                    thread_id,
+                                    &self.cleanup.run_directory().workspace,
+                                    &self.audit.model,
+                                    Some("openai"),
+                                )
+                                .map_err(|_| SupportRuntimeError::Policy)?;
+                            }
                             "turn/started" => {
                                 if !matches_context(&params, thread_id, turn_id) {
                                     return Err(SupportRuntimeError::Protocol);
@@ -1655,9 +1665,7 @@ impl SupportRuntime {
                                     return Err(SupportRuntimeError::Protocol);
                                 }
                             }
-                            _ => {
-                                return Err(SupportRuntimeError::Policy);
-                            }
+                            _ => return Err(SupportRuntimeError::Policy),
                         }
                     }
                     InboundMessage::Response { .. } => return Err(SupportRuntimeError::Protocol),

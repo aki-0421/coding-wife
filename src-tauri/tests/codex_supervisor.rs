@@ -1132,6 +1132,38 @@ async fn real_support_release_probe_uses_the_production_turn_envelope() {
 }
 
 #[tokio::test]
+#[ignore = "requires the pinned local Codex release and a configured local account"]
+async fn real_presence_release_probe_uses_the_production_turn_envelope() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let binary = discover_binary(Some(Path::new("/opt/homebrew/bin/codex")))
+        .await
+        .expect("installed Codex binary");
+    let schema = probe_schema(&binary).await.expect("installed Codex schema");
+    let before = current_support_run_directories();
+    let runtime = SupportRuntime::construct_presence(
+        &binary,
+        &schema,
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug"),
+        None,
+    )
+    .await
+    .expect("production-equivalent presence release probe");
+    assert_eq!(runtime.audit().skill_name, "coding-wife-direct-presence");
+    assert_eq!(
+        runtime.audit().model_role,
+        SupportModelRole::PresenceDirector
+    );
+    assert_eq!(runtime.audit().model, "gpt-5.6-luna");
+    let result = runtime
+        .direct_presence(support_presence_request("real-presence-request"))
+        .await
+        .unwrap_or_else(|error| panic!("real presence turn failed: {}", error.code()));
+    assert_eq!(result.direction.schema_version, 1);
+    assert_eq!(result.direction.locale, PresenceLocale::Ja);
+    assert_eq!(current_support_run_directories(), before);
+}
+
+#[tokio::test]
 async fn failed_support_release_probe_leaves_no_process_or_private_directory() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
     let fixture = FixtureEnvironment::new("support_probe_policy_completed");
@@ -1394,6 +1426,14 @@ async fn invalid_support_output_and_plan_events_publish_no_result() {
     for (mode, expected) in [
         ("support_invalid_output", SupportRuntimeError::Output),
         ("support_plan_call", SupportRuntimeError::Policy),
+        (
+            "support_settings_policy_changed",
+            SupportRuntimeError::Policy,
+        ),
+        (
+            "support_settings_unknown_field",
+            SupportRuntimeError::Policy,
+        ),
     ] {
         let fixture = FixtureEnvironment::new(mode);
         let binary = support_fixture_binary().await;

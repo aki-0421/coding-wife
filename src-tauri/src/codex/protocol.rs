@@ -441,6 +441,117 @@ pub(crate) fn parse_support_thread_policy_response(
     Ok(SupportThreadPolicyResponse { thread_id })
 }
 
+pub(crate) fn validate_support_thread_settings_notification(
+    params: &Value,
+    thread_id: &str,
+    cwd: &Path,
+    model: &str,
+    model_provider: Option<&str>,
+) -> Result<(), SupportThreadPolicyError> {
+    const PARAM_KEYS: &[&str] = &["threadId", "threadSettings"];
+    const SETTINGS_KEYS: &[&str] = &[
+        "activePermissionProfile",
+        "approvalPolicy",
+        "approvalsReviewer",
+        "collaborationMode",
+        "cwd",
+        "effort",
+        "model",
+        "modelProvider",
+        "multiAgentMode",
+        "personality",
+        "sandboxPolicy",
+        "serviceTier",
+        "summary",
+    ];
+    const COLLABORATION_KEYS: &[&str] = &["mode", "settings"];
+    const COLLABORATION_SETTINGS_KEYS: &[&str] =
+        &["developer_instructions", "model", "reasoning_effort"];
+    const PERMISSION_PROFILE_KEYS: &[&str] = &["extends", "id"];
+    const SANDBOX_KEYS: &[&str] = &["networkAccess", "type"];
+
+    let settings = params
+        .get("threadSettings")
+        .and_then(Value::as_object)
+        .ok_or(SupportThreadPolicyError::MissingField)?;
+    if !value_has_exact_keys(params, PARAM_KEYS)
+        || !value_has_exact_keys(&params["threadSettings"], SETTINGS_KEYS)
+        || !value_has_exact_keys(
+            &params["threadSettings"]["activePermissionProfile"],
+            PERMISSION_PROFILE_KEYS,
+        )
+        || !value_has_exact_keys(&params["threadSettings"]["sandboxPolicy"], SANDBOX_KEYS)
+        || !value_has_exact_keys(
+            &params["threadSettings"]["collaborationMode"],
+            COLLABORATION_KEYS,
+        )
+        || !value_has_exact_keys(
+            &params["threadSettings"]["collaborationMode"]["settings"],
+            COLLABORATION_SETTINGS_KEYS,
+        )
+        || params.get("threadId").and_then(Value::as_str) != Some(thread_id)
+        || settings.get("model").and_then(Value::as_str) != Some(model)
+        || settings.get("approvalPolicy").and_then(Value::as_str) != Some("never")
+        || settings.get("approvalsReviewer").and_then(Value::as_str) != Some("user")
+        || params
+            .pointer("/threadSettings/activePermissionProfile/id")
+            .and_then(Value::as_str)
+            != Some("coding-wife-support-zero")
+        || !params
+            .pointer("/threadSettings/activePermissionProfile/extends")
+            .is_some_and(Value::is_null)
+        || params
+            .pointer("/threadSettings/sandboxPolicy/type")
+            .and_then(Value::as_str)
+            != Some("readOnly")
+        || params
+            .pointer("/threadSettings/sandboxPolicy/networkAccess")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || settings.get("effort").and_then(Value::as_str) != Some("low")
+        || settings.get("multiAgentMode").and_then(Value::as_str) != Some("explicitRequestOnly")
+        || params
+            .pointer("/threadSettings/collaborationMode/mode")
+            .and_then(Value::as_str)
+            != Some("default")
+        || params
+            .pointer("/threadSettings/collaborationMode/settings/model")
+            .and_then(Value::as_str)
+            != Some(model)
+        || params
+            .pointer("/threadSettings/collaborationMode/settings/reasoning_effort")
+            .and_then(Value::as_str)
+            != Some("low")
+        || !params
+            .pointer("/threadSettings/collaborationMode/settings/developer_instructions")
+            .is_some_and(Value::is_null)
+        || settings.get("personality").and_then(Value::as_str) != Some("pragmatic")
+        || !settings.get("serviceTier").is_some_and(Value::is_null)
+        || !settings.get("summary").is_some_and(Value::is_null)
+        || model_provider.is_some_and(|expected| {
+            settings.get("modelProvider").and_then(Value::as_str) != Some(expected)
+        })
+    {
+        return Err(SupportThreadPolicyError::Policy);
+    }
+    let expected_cwd = std::fs::canonicalize(cwd).map_err(|_| SupportThreadPolicyError::Path)?;
+    let actual_cwd = settings
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|value| Path::new(value).is_absolute())
+        .and_then(|value| std::fs::canonicalize(value).ok())
+        .ok_or(SupportThreadPolicyError::Path)?;
+    (actual_cwd == expected_cwd)
+        .then_some(())
+        .ok_or(SupportThreadPolicyError::Policy)
+}
+
+fn value_has_exact_keys(value: &Value, expected: &[&str]) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.len() == expected.len() && expected.iter().all(|key| object.contains_key(*key))
+    })
+}
+
 pub fn decision_output_schema() -> Value {
     let result = json!({
         "type": "object",
@@ -973,6 +1084,40 @@ mod tests {
             ),
             verified_entrypoint: std::sync::Arc::from([]),
         }
+    }
+
+    fn support_settings_notification(cwd: &Path, model: &str) -> Value {
+        json!({
+            "threadId": "support-thread",
+            "threadSettings": {
+                "activePermissionProfile": {
+                    "id": "coding-wife-support-zero",
+                    "extends": null
+                },
+                "approvalPolicy": "never",
+                "approvalsReviewer": "user",
+                "collaborationMode": {
+                    "mode": "default",
+                    "settings": {
+                        "developer_instructions": null,
+                        "model": model,
+                        "reasoning_effort": "low"
+                    }
+                },
+                "cwd": cwd.to_string_lossy(),
+                "effort": "low",
+                "model": model,
+                "modelProvider": "openai",
+                "multiAgentMode": "explicitRequestOnly",
+                "personality": "pragmatic",
+                "sandboxPolicy": {
+                    "type": "readOnly",
+                    "networkAccess": false
+                },
+                "serviceTier": null,
+                "summary": null
+            }
+        })
     }
 
     #[test]
@@ -1565,6 +1710,102 @@ mod tests {
             parse_support_thread_policy_response(&response, &cwd, CODEX_MODEL, Some("openai"),)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn support_settings_update_requires_the_exact_effective_policy_and_shape() {
+        let cwd = std::fs::canonicalize(env!("CARGO_MANIFEST_DIR")).expect("fixture cwd");
+        let notification = support_settings_notification(&cwd, CODEX_COMMIT_EXPLAINER_MODEL);
+        assert_eq!(
+            validate_support_thread_settings_notification(
+                &notification,
+                "support-thread",
+                &cwd,
+                CODEX_COMMIT_EXPLAINER_MODEL,
+                Some("openai"),
+            ),
+            Ok(())
+        );
+
+        let luna = support_settings_notification(&cwd, CODEX_PRESENCE_DIRECTOR_MODEL);
+        assert_eq!(
+            validate_support_thread_settings_notification(
+                &luna,
+                "support-thread",
+                &cwd,
+                CODEX_PRESENCE_DIRECTOR_MODEL,
+                Some("openai"),
+            ),
+            Ok(())
+        );
+
+        for pointer in [
+            "/threadId",
+            "/threadSettings/model",
+            "/threadSettings/modelProvider",
+            "/threadSettings/approvalPolicy",
+            "/threadSettings/approvalsReviewer",
+            "/threadSettings/activePermissionProfile/id",
+            "/threadSettings/activePermissionProfile/extends",
+            "/threadSettings/sandboxPolicy/type",
+            "/threadSettings/sandboxPolicy/networkAccess",
+            "/threadSettings/cwd",
+            "/threadSettings/effort",
+            "/threadSettings/multiAgentMode",
+            "/threadSettings/collaborationMode/mode",
+            "/threadSettings/collaborationMode/settings/model",
+            "/threadSettings/collaborationMode/settings/reasoning_effort",
+            "/threadSettings/collaborationMode/settings/developer_instructions",
+            "/threadSettings/personality",
+            "/threadSettings/serviceTier",
+            "/threadSettings/summary",
+        ] {
+            let mut mutated = notification.clone();
+            *mutated
+                .pointer_mut(pointer)
+                .expect("support settings field") = match pointer {
+                "/threadSettings/activePermissionProfile/extends"
+                | "/threadSettings/collaborationMode/settings/developer_instructions"
+                | "/threadSettings/serviceTier"
+                | "/threadSettings/summary" => json!("unexpected"),
+                "/threadSettings/sandboxPolicy/networkAccess" => json!(true),
+                "/threadSettings/cwd" => json!("relative/path"),
+                _ => json!("unexpected"),
+            };
+            assert!(
+                validate_support_thread_settings_notification(
+                    &mutated,
+                    "support-thread",
+                    &cwd,
+                    CODEX_COMMIT_EXPLAINER_MODEL,
+                    Some("openai"),
+                )
+                .is_err(),
+                "{pointer}"
+            );
+        }
+
+        let mut unknown_top_level = notification.clone();
+        unknown_top_level["turnId"] = json!("support-turn");
+        assert!(validate_support_thread_settings_notification(
+            &unknown_top_level,
+            "support-thread",
+            &cwd,
+            CODEX_COMMIT_EXPLAINER_MODEL,
+            Some("openai"),
+        )
+        .is_err());
+
+        let mut unknown_nested = notification;
+        unknown_nested["threadSettings"]["unexpectedAuthority"] = json!(false);
+        assert!(validate_support_thread_settings_notification(
+            &unknown_nested,
+            "support-thread",
+            &cwd,
+            CODEX_COMMIT_EXPLAINER_MODEL,
+            Some("openai"),
+        )
+        .is_err());
     }
 
     #[test]
