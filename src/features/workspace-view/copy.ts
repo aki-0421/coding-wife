@@ -106,10 +106,16 @@ const en = {
   diagnostics: "Diagnostics",
   historyUnavailable: "History requires recovery",
   timelineEvent: {
+    messageRole: {
+      user: "User message",
+      assistant: "Assistant response",
+    },
     toolProvider: {
       terminal: "Terminal",
       webSearch: "Web search",
     },
+    provider: "Provider",
+    durationLabel: "Duration",
     duration: (milliseconds: number) => `${String(milliseconds)} ms`,
     kind: {
       thread: "Codex session",
@@ -569,10 +575,16 @@ const ja: typeof en = {
   diagnostics: "診断",
   historyUnavailable: "履歴の復旧が必要です",
   timelineEvent: {
+    messageRole: {
+      user: "ユーザーのメッセージ",
+      assistant: "アシスタントの応答",
+    },
     toolProvider: {
       terminal: "ターミナル",
       webSearch: "Web検索",
     },
+    provider: "提供元",
+    durationLabel: "所要時間",
     duration: (milliseconds: number) => `${String(milliseconds)} ms`,
     kind: {
       thread: "Codexセッション",

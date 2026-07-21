@@ -1,14 +1,14 @@
 import {
-  ActivityIcon,
   AlertTriangleIcon,
-  CheckCircle2Icon,
   ChevronDownIcon,
-  CircleXIcon,
   CopyIcon,
   FileCode2Icon,
   GitCompareArrowsIcon,
+  Globe2Icon,
   ListChecksIcon,
+  SearchIcon,
   TerminalSquareIcon,
+  WrenchIcon,
 } from "lucide-react"
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react"
 
@@ -26,13 +26,16 @@ import {
 } from "@/components/ui/dialog"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import type { CodexSemanticTimelineEvent } from "@/features/codex"
-import { useI18n } from "@/features/localization"
 import type { ChatTimelineEvent } from "@/features/workspace-view/chat-timeline"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type {
   WorkspaceAdapterState,
-  WorkspaceLifecycle,
   WorkspaceTimelineItem,
 } from "@/features/workspace-view/types"
 import type {
@@ -69,35 +72,6 @@ type PendingTimelineEvent = Extract<
 
 const otherAnswerId = "__coding_wife_other__"
 
-const lifecycleValues: readonly WorkspaceLifecycle[] = [
-  "done",
-  "in_review",
-  "in_progress",
-  "backlog",
-  "canceled",
-]
-
-function isLifecycle(value: string): value is WorkspaceLifecycle {
-  return lifecycleValues.some((lifecycle) => lifecycle === value)
-}
-
-function eventStatus(
-  copy: WorkspaceCopy,
-  event: WorkspaceTimelineItem,
-): string {
-  if (isLifecycle(event.status)) return copy.lifecycle[event.status]
-  if (event.status === "completed") return copy.completed
-  if (event.status === "failed") return copy.failed
-  if (event.status === "streaming") return copy.timelineEvent.streaming
-  if (event.status === "running" || event.status === "inProgress") {
-    return copy.timelineEvent.running
-  }
-  if (event.status === "interrupted" || event.status === "canceled") {
-    return copy.timelineEvent.interrupted
-  }
-  return event.status.replaceAll("_", " ")
-}
-
 function eventSequence(event: WorkspaceTimelineItem): number {
   return event.kind === "history" ? event.sequence : event.sourceSequence
 }
@@ -110,20 +84,6 @@ function eventId(event: WorkspaceTimelineItem): string | null {
 function eventCode(event: WorkspaceTimelineItem): string | undefined {
   if (event.kind === "history") return event.errorCode
   return event.kind === "error" ? event.errorCode : undefined
-}
-
-function eventLabel(copy: WorkspaceCopy, event: WorkspaceTimelineItem): string {
-  if (event.kind === "history") return copy.timelineEvent.history
-  if (event.kind === "tool") {
-    if (event.providerName !== null) return event.providerName
-    if (event.toolKind === "commandExecution") {
-      return copy.timelineEvent.toolProvider.terminal
-    }
-    if (event.toolKind === "webSearch") {
-      return copy.timelineEvent.toolProvider.webSearch
-    }
-  }
-  return copy.timelineEvent.kind[event.kind]
 }
 
 function eventDetail(
@@ -140,7 +100,16 @@ function eventDetail(
     case "plan":
       return null
     case "tool": {
-      const details = [event.summary, event.excerpt].filter(
+      const details = [
+        event.providerName === null
+          ? null
+          : `${copy.timelineEvent.provider}: ${event.providerName}`,
+        event.summary,
+        event.excerpt,
+        event.durationMs === null
+          ? null
+          : `${copy.timelineEvent.durationLabel}: ${copy.timelineEvent.duration(event.durationMs)}`,
+      ].filter(
         (detail): detail is string => detail !== null && detail.length > 0,
       )
       return [...new Set(details)].join("\n") || null
@@ -166,10 +135,6 @@ function eventFailed(event: WorkspaceTimelineItem): boolean {
   return event.status === "failed" || eventCode(event) !== undefined
 }
 
-function eventCompleted(event: WorkspaceTimelineItem): boolean {
-  return event.status === "completed" || event.status === "done"
-}
-
 function eventInterrupted(event: WorkspaceTimelineItem): boolean {
   return event.status === "interrupted" || event.status === "canceled"
 }
@@ -183,69 +148,6 @@ function eventActive(event: WorkspaceTimelineItem): boolean {
     "waiting",
     "warning",
   ].includes(event.status)
-}
-
-function eventTag(event: WorkspaceTimelineItem): string | null {
-  switch (event.kind) {
-    case "history":
-      return event.domainKind
-    case "tool":
-      return event.toolName
-    case "file":
-      return event.changeKind
-    case "error":
-      return event.errorCode
-    case "status":
-      return event.itemType
-    default:
-      return null
-  }
-}
-
-function eventSummary(
-  copy: WorkspaceCopy,
-  event: WorkspaceTimelineItem,
-): string | null {
-  switch (event.kind) {
-    case "history":
-      return event.errorCode ?? null
-    case "plan":
-      return copy.timelineEvent.steps(event.stepCount)
-    case "tool": {
-      const detail =
-        event.summary ?? event.excerpt?.split("\n", 1)[0]?.trim() ?? null
-      const duration =
-        event.durationMs === null
-          ? null
-          : copy.timelineEvent.duration(event.durationMs)
-      return [detail, duration].filter(Boolean).join(" · ") || null
-    }
-    case "file":
-      return event.pathAlias
-    case "diff":
-      return copy.timelineEvent.bytesChanged(event.byteCount)
-    case "error":
-      return event.detailRef
-    case "status":
-      return event.detailRef
-    default:
-      return null
-  }
-}
-
-function EventIcon({ event }: { readonly event: OperationTimelineEvent }) {
-  switch (event.kind) {
-    case "tool":
-      return <TerminalSquareIcon aria-hidden="true" className="size-3" />
-    case "file":
-      return <FileCode2Icon aria-hidden="true" className="size-3" />
-    case "diff":
-      return <GitCompareArrowsIcon aria-hidden="true" className="size-3" />
-    case "plan":
-      return <ListChecksIcon aria-hidden="true" className="size-3" />
-    case "error":
-      return <AlertTriangleIcon aria-hidden="true" className="size-3" />
-  }
 }
 
 function PendingRequestCard({
@@ -658,85 +560,96 @@ type OperationTimelineEvent = Extract<
   }
 >
 
-interface FormattedEventTime {
-  readonly accessible: string
-  readonly visible: string
+type OperationCategory =
+  | "command"
+  | "file"
+  | "web"
+  | "search"
+  | "generic"
+  | "plan"
+  | "diff"
+  | "error"
+
+function toolCategory(
+  event: Extract<OperationTimelineEvent, { readonly kind: "tool" }>,
+): OperationCategory {
+  if (event.toolKind === "commandExecution") return "command"
+  if (event.toolKind === "webSearch") return "search"
+
+  const identity = `${event.providerName ?? ""} ${event.toolName}`.toLowerCase()
+  if (/(?:search|find|query|grep|ripgrep)/u.test(identity)) return "search"
+  if (/(?:browser|web|navigate|screenshot|click)/u.test(identity)) return "web"
+  if (/(?:file|read|write|edit|patch|folder|directory)/u.test(identity)) {
+    return "file"
+  }
+  if (/(?:shell|terminal|command|exec|repl)/u.test(identity)) return "command"
+  return "generic"
 }
 
-function formatEventTime(
-  locale: string,
-  occurredAt: string,
-): FormattedEventTime {
-  const date = new Date(occurredAt)
-  return {
-    accessible: new Intl.DateTimeFormat(locale, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(date),
-    visible: new Intl.DateTimeFormat(locale, {
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(date),
+function operationCategory(event: OperationTimelineEvent): OperationCategory {
+  switch (event.kind) {
+    case "tool":
+      return toolCategory(event)
+    case "file":
+      return "file"
+    case "diff":
+      return "diff"
+    case "plan":
+      return "plan"
+    case "error":
+      return "error"
   }
 }
 
-function EventTime({
-  occurredAt,
-  time,
-}: {
-  readonly occurredAt: string
-  readonly time: FormattedEventTime
-}) {
-  return (
-    <time
-      aria-label={time.accessible}
-      className="shrink-0 whitespace-nowrap text-label tabular-nums text-muted-foreground"
-      dateTime={occurredAt}
-    >
-      {time.visible}
-    </time>
-  )
+function operationName(
+  copy: WorkspaceCopy,
+  event: OperationTimelineEvent,
+): string {
+  switch (event.kind) {
+    case "tool":
+      return event.toolKind === "commandExecution" && event.summary !== null
+        ? event.summary
+        : event.toolName
+    case "file":
+      return event.pathAlias ?? event.changeKind ?? copy.timelineEvent.kind.file
+    case "diff":
+      return copy.timelineEvent.kind.diff
+    case "plan":
+      return copy.timelineEvent.kind.plan
+    case "error":
+      return event.errorCode
+  }
 }
 
-function EventState({
-  copy,
-  event,
-}: {
-  readonly copy: WorkspaceCopy
-  readonly event: WorkspaceTimelineItem
-}) {
-  const failed = eventFailed(event)
-  const completed = eventCompleted(event)
-  const interrupted = eventInterrupted(event)
-  const active = eventActive(event)
+function operationStateText(
+  copy: WorkspaceCopy,
+  event: OperationTimelineEvent,
+): string | null {
+  if (eventFailed(event)) return copy.failed
+  if (eventInterrupted(event)) return copy.timelineEvent.interrupted
+  if (eventActive(event)) return copy.timelineEvent.running
+  return null
+}
 
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-xxs text-label",
-        failed
-          ? "text-destructive"
-          : completed
-            ? "text-success"
-            : interrupted
-              ? "text-muted-foreground"
-              : active
-                ? "text-running"
-                : "text-muted-foreground",
-      )}
-    >
-      {failed ? (
-        <CircleXIcon aria-hidden="true" className="size-3" />
-      ) : completed ? (
-        <CheckCircle2Icon aria-hidden="true" className="size-3" />
-      ) : interrupted ? (
-        <AlertTriangleIcon aria-hidden="true" className="size-3" />
-      ) : (
-        <ActivityIcon aria-hidden="true" className="size-3" />
-      )}
-      <span>{eventStatus(copy, event)}</span>
-    </span>
-  )
+function EventIcon({ category }: { readonly category: OperationCategory }) {
+  switch (category) {
+    case "command":
+      return <TerminalSquareIcon aria-hidden="true" className="size-3" />
+    case "file":
+      return <FileCode2Icon aria-hidden="true" className="size-3" />
+    case "web":
+      return <Globe2Icon aria-hidden="true" className="size-3" />
+    case "search":
+      return <SearchIcon aria-hidden="true" className="size-3" />
+    case "generic":
+      return <WrenchIcon aria-hidden="true" className="size-3" />
+    case "diff":
+      return <GitCompareArrowsIcon aria-hidden="true" className="size-3" />
+    case "plan":
+      return <ListChecksIcon aria-hidden="true" className="size-3" />
+    case "error":
+      return <AlertTriangleIcon aria-hidden="true" className="size-3" />
+  }
 }
 
 function CopyDetailsButton({
@@ -763,64 +676,69 @@ function CopyDetailsButton({
     }
   }
 
+  const announcement =
+    copyState === "copied"
+      ? copy.timelineEvent.copied
+      : copyState === "failed"
+        ? copy.timelineEvent.copyFailed
+        : ""
+
   return (
-    <Button
-      aria-label={copy.timelineEvent.copyDetails}
-      className="text-muted-foreground"
-      onClick={() => void copyDetail()}
-      size="xs"
-      type="button"
-      variant="ghost"
-    >
-      <CopyIcon data-icon="inline-start" />
-      {copyState === "copied"
-        ? copy.timelineEvent.copied
-        : copyState === "failed"
-          ? copy.timelineEvent.copyFailed
-          : copy.timelineEvent.copy}
-    </Button>
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-label={copy.timelineEvent.copyDetails}
+            className="pointer-events-none opacity-0 text-muted-foreground transition-opacity duration-150 group-hover/timeline-row:pointer-events-auto group-hover/timeline-row:opacity-100 group-focus-within/timeline-row:pointer-events-auto group-focus-within/timeline-row:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 motion-reduce:transition-none"
+            data-copy-action=""
+            onClick={() => void copyDetail()}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            <CopyIcon aria-hidden="true" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {copy.timelineEvent.copyDetails}
+        </TooltipContent>
+      </Tooltip>
+      <span aria-live="polite" className="sr-only">
+        {announcement}
+      </span>
+    </>
   )
 }
 
 function MessageEventRow({
   copy,
   event,
-  time,
 }: {
   readonly copy: WorkspaceCopy
   readonly event: MessageTimelineEvent
-  readonly time: FormattedEventTime
 }) {
-  const showState =
-    eventFailed(event) || eventInterrupted(event) || eventActive(event)
-
   return (
     <article
+      aria-busy={eventActive(event) || undefined}
+      aria-label={copy.timelineEvent.messageRole[event.kind]}
       aria-posinset={eventSequence(event)}
       className={cn(
-        "group min-w-0",
+        "group/timeline-row min-w-0",
         event.kind === "user"
-          ? "my-sm rounded-composer bg-warm-active/5 px-md py-md"
-          : "px-sm py-lg",
+          ? "my-sm ml-auto w-fit max-w-[85%] rounded-composer bg-warm-active/5 px-md py-md"
+          : "w-full px-sm py-lg",
       )}
       data-event-id={eventId(event) ?? undefined}
       data-event-kind={event.kind}
       data-event-layout="message"
       data-event-sequence={eventSequence(event)}
+      data-message-role={event.kind}
+      data-timeline-row=""
     >
-      <header className="flex min-w-0 items-center gap-xs">
-        <span className="text-title text-text-strong">
-          {eventLabel(copy, event)}
-        </span>
-        {showState ? <EventState copy={copy} event={event} /> : null}
-        <span className="ml-auto">
-          <EventTime occurredAt={event.occurredAt} time={time} />
-        </span>
-      </header>
-      <p className="m-0 mt-xs whitespace-pre-wrap break-words text-pretty text-body leading-relaxed text-foreground [overflow-wrap:anywhere]">
+      <p className="m-0 whitespace-pre-wrap break-words text-pretty text-body leading-relaxed text-foreground [overflow-wrap:anywhere]">
         {event.text}
       </p>
-      <footer className="mt-xs flex min-h-6 flex-wrap items-center gap-xs">
+      <footer className="mt-xxs flex min-h-6 flex-wrap items-center gap-xs">
         {event.kind === "user" ? (
           <span className="min-w-0 text-label text-muted-foreground">
             {copy.timelineEvent.effort}: {copy.reasoningLevels[event.effort]}
@@ -841,18 +759,17 @@ function OperationSummary({
   copy,
   event,
   expandable,
-  time,
 }: {
   readonly copy: WorkspaceCopy
   readonly event: OperationTimelineEvent
   readonly expandable: boolean
-  readonly time: FormattedEventTime
 }) {
-  const tag = eventTag(event)
-  const summary = eventSummary(copy, event)
+  const category = operationCategory(event)
+  const name = operationName(copy, event)
+  const stateText = operationStateText(copy, event)
 
   return (
-    <div className="grid min-h-8 min-w-0 grid-cols-[12px_16px_minmax(0,1fr)_max-content_max-content] items-center gap-xs px-xs py-xxs">
+    <div className="grid min-h-8 min-w-0 grid-cols-[12px_16px_minmax(0,1fr)] items-center gap-xs px-xs py-xxs">
       <span className="flex size-3 items-center justify-center text-muted-foreground">
         {expandable ? (
           <ChevronDownIcon
@@ -866,31 +783,21 @@ function OperationSummary({
           "flex size-4 items-center justify-center",
           eventFailed(event) ? "text-destructive" : "text-muted-foreground",
         )}
+        data-operation-category={category}
       >
-        <EventIcon event={event} />
+        <EventIcon category={category} />
       </span>
-      <span className="flex min-w-0 items-center gap-xs">
-        <span className="max-w-28 shrink truncate text-title text-foreground">
-          {eventLabel(copy, event)}
-        </span>
-        {tag ? (
-          <code
-            className={cn(
-              "max-w-44 shrink truncate rounded-control bg-code-chip px-xs py-xxs font-mono text-label",
-              eventFailed(event) ? "text-destructive" : "text-text-secondary",
-            )}
-          >
-            {tag}
-          </code>
-        ) : null}
-        {summary ? (
-          <span className="min-w-0 truncate text-caption text-text-secondary">
-            {summary}
-          </span>
-        ) : null}
-      </span>
-      <EventState copy={copy} event={event} />
-      <EventTime occurredAt={event.occurredAt} time={time} />
+      <code
+        className={cn(
+          "min-w-0 truncate font-mono text-caption",
+          eventFailed(event) ? "text-destructive" : "text-text-secondary",
+        )}
+        data-operation-name=""
+        title={name}
+      >
+        {name}
+      </code>
+      {stateText ? <span className="sr-only">{stateText}</span> : null}
     </div>
   )
 }
@@ -898,34 +805,38 @@ function OperationSummary({
 function OperationEventRow({
   copy,
   event,
-  time,
 }: {
   readonly copy: WorkspaceCopy
   readonly event: OperationTimelineEvent
-  readonly time: FormattedEventTime
 }) {
   const detail = eventDetail(copy, event)
-  const openByDefault =
-    eventFailed(event) || eventInterrupted(event) || eventActive(event)
+  const failed = eventFailed(event)
+  const openByDefault = failed || eventInterrupted(event) || eventActive(event)
 
   return (
     <article
+      aria-busy={eventActive(event) || undefined}
       aria-posinset={eventSequence(event)}
-      className="min-w-0 border-b border-divider/60 last:border-b-0"
+      className={cn(
+        "group/timeline-row min-w-0 border-b border-divider/60 last:border-b-0",
+        failed && "rounded-control bg-destructive/10",
+      )}
       data-event-id={eventId(event) ?? undefined}
       data-event-kind={event.kind}
       data-event-layout="operation"
       data-event-sequence={eventSequence(event)}
+      data-operation-category={operationCategory(event)}
+      data-timeline-row=""
     >
       {detail ? (
         <details className="timeline-operation group" open={openByDefault}>
-          <summary className="cursor-pointer list-none rounded-control outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
-            <OperationSummary
-              copy={copy}
-              event={event}
-              expandable
-              time={time}
-            />
+          <summary
+            className={cn(
+              "cursor-pointer list-none rounded-control outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+              failed ? "hover:bg-destructive/15" : "hover:bg-muted/40",
+            )}
+          >
+            <OperationSummary copy={copy} event={event} expandable />
           </summary>
           <div className="pb-sm pl-[34px] pr-xs">
             <p
@@ -942,12 +853,7 @@ function OperationEventRow({
           </div>
         </details>
       ) : (
-        <OperationSummary
-          copy={copy}
-          event={event}
-          expandable={false}
-          time={time}
-        />
+        <OperationSummary copy={copy} event={event} expandable={false} />
       )}
     </article>
   )
@@ -970,19 +876,16 @@ function TimelineEventRow({
   readonly onAnswerDecision: TimelineProps["onAnswerDecision"]
   readonly onInterrupt: TimelineProps["onInterrupt"]
 }) {
-  const { locale } = useI18n()
-  const time = formatEventTime(locale, event.occurredAt)
-
   switch (event.kind) {
     case "user":
     case "assistant":
-      return <MessageEventRow copy={copy} event={event} time={time} />
+      return <MessageEventRow copy={copy} event={event} />
     case "plan":
     case "tool":
     case "file":
     case "diff":
     case "error":
-      return <OperationEventRow copy={copy} event={event} time={time} />
+      return <OperationEventRow copy={copy} event={event} />
     case "decision":
     case "approval":
       return (
