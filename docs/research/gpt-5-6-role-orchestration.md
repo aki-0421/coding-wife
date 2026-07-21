@@ -55,7 +55,7 @@ Lunaへ渡すmodel inputは次のexact objectだけである。correlation IDと
 | `elapsedBucket` | `none`, `45s_plus`, `120s_plus`。`long_milestone`以外では`none` |
 | `messageExcerpt` | `main_message`でのみ必須。trim済み単一行の1〜240 Unicode scalar。他triggerではfield自体を含めない |
 
-`messageExcerpt`はnormalized `CodexEventPayload::AgentMessageCompleted`の完了済み本文だけから作る。streaming delta、reasoning、tool argument、tool output、raw diff、code blockをsourceにしない。presence専用sanitizerはcredential/private token、absolute/relative path、file/path alias、URL、workspace/repository名、redaction markerを除去し、空白を単一spaceへ畳み、Unicode scalar単位で上限を適用する。privacy scanを通過する内容が残らなければ候補を生成しない。
+`messageExcerpt`はlive App Server notificationからnormalizedされた`CodexEventPayload::AgentMessageCompleted`の完了済み本文だけから作る。workspace history、DB hydration、session restore、streaming delta、reasoning、tool argument、tool output、raw diff、code blockをsourceにしない。presence専用sanitizerはcredential/private token、absolute/relative path、bare filenameを含むfile/path alias、URL、workspace/repository名、redaction marker、code/diff formを除去し、空白を単一spaceへ畳み、Unicode scalar単位で上限を適用する。privacy scanを通過する内容が残らなければ候補を生成しない。model boundary validatorもsanitizerから独立して、複数space・改行を含む非正規形、code fence、diff header/hunk、代表的なcode form、private materialを拒否する。
 
 `main_message`以外の入力へuser/assistant text、tool名、command、tool output、diff、file/path alias、commit message、decision question/option、error message、raw protocol、raw reasoning、absolute/relative path、URL、secret、credential、workspace/repository名を含めない。triggerはnormalized `CodexEvent`またはnative verified-commit proofから決定論的に投影し、`main_message`以外の文字列をmodel向けsummaryへ変換しない。
 
@@ -97,7 +97,7 @@ LunaはMarkdownや周辺proseを付けず、次のexact objectを返す。
 
 ## Admission、coalescing、stale cancellation
 
-Luna schedulerはApp lifetimeに1個、実行capacity 1とする。完了した各`agentMessage`は`main_message`候補として到着順を維持する専用FIFOへ追加し、最大16件まで待機させる。typical pathでは同一triggerでもcoalesceや置換をせず各件を一度ずつ処理する。admissionはmain event処理をawaitせず、満杯時はその1件だけをsafe audit counterへ記録して破棄する。routine tool start/completion、file change、diff update、streaming assistant delta、connection statusはtriggerにしない。
+Luna schedulerはApp lifetimeに1個、実行capacity 1とする。完了した各`agentMessage`は`main_message`候補として到着順を維持する専用FIFOへ追加し、最大16件まで待機させる。native admissionは`(workspace generation, opaque item_handle)`を最大256件のbounded seen setで照合し、同じraw completionの再配送をsanitizerとenqueueより前に破棄する。scope/generation変更と明示的なturn stop・interruption・失敗でseen setを失効し、新generationでは同じopaque handleを再利用できる。typical pathでは同一triggerでもcoalesceや置換をせず各件を一度ずつ処理する。admissionはmain event処理をawaitせず、満杯時はその1件だけをsafe audit counterへ記録して破棄する。routine tool start/completion、file change、diff update、streaming assistant delta、connection statusはtriggerにしない。
 
 priorityは`decision_wait` > `terminal_failure` > `recoverable_failure` > `main_message` > `commit_ready` > `turn_completed` > `long_milestone`とする。urgent eventはFIFOの間へ先行できるが、`main_message`同士の到着順を変えず、`commit_ready`と`turn_completed`は先行する`main_message`を置換しない。同一workspace generationでは通常caption開始間隔を30秒以上にし、`main_message`、`decision_wait`、`terminal_failure`はcooldownを迂回できる。`main_message`以外の同じtriggerの重複は1件へまとめる。active中の非message候補は待機slotをlatest candidateへ置換し、低priority candidateが高priority candidateを置換してはならない。
 
@@ -164,9 +164,9 @@ Luna unavailable、queue overflow、timeout、cancel、schema/privacy violation�
 最低限、次を独立したtestで固定する。
 
 1. Sol/Terra/Lunaのconfig、thread、turn、response、wire、auditが各exact modelと一致し、cross-role modelとfallbackを拒否する。
-2. `main_message` excerptが完了済みnormalized `agentMessage`だけから生成され、delta、reasoning、tool argument/output、code/diff、path、URL、secretを除去し、240 scalar上限と条件付きfieldをfail closedで検証する。
+2. `main_message` excerptがlive完了済みnormalized `agentMessage`だけから生成され、history/hydration、delta、reasoning、tool argument/output、code/diff、path、URL、secretを除去し、single-space正規形、240 scalar上限、条件付きfieldをproducerとmodel boundary validatorの両方でfail closedに検証する。
 3. Luna outputのunknown field、wrong locale、overlong/control/private text、disallowed cueを拒否する。
-4. capacity 1、16件FIFO、全`main_message`の順序と一度だけの処理、overflow audit、priority、cooldown迂回、45/120秒milestone、generation/decision/stop cancel、正常terminalでのmessage保持を決定論的clockで検証する。
+4. capacity 1、16件FIFO、全`main_message`の順序と一度だけの処理、`item_handle`再配送のdedupe、new generationでのhandle再利用、overflow audit、priority、cooldown迂回、45/120秒milestone、generation/decision/stop cancel、正常terminalでのmessage保持を決定論的clockで検証する。
 5. tool event、reasoning、streaming delta、routine progressではLunaを起動しない。完了済み`agentMessage`だけが`main_message`となり、verified commitだけが`commit_ready`になる。
 6. active commit explanationがLuna caption/TTSより優先され、caption visible ack前、reduced motion、mute、stale workspaceではspeech/motionを開始しない。
 7. Lunaのrelease verification、sandbox probe、isolation probe、runtime初期化の各構築段階でapp closeとforce cleanupを再現し、process tree、private run directory、scheduler active ownershipが期限内に0件へ収束する。
