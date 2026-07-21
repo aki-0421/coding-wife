@@ -1,6 +1,6 @@
 [package]
 name = "coding-wife"
-version = "0.1.4"
+version = "0.1.5"
 description = "Evidence-centered Codex supervision with a Live2D character"
 authors = ["Coding Wife contributors"]
 license = "MIT"
