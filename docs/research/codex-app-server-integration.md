@@ -397,39 +397,44 @@ native requestUserInput が unavailable の場合は、turn/start の outputSche
 
 ~~~text
 schemaVersion: 1
-kind: result | decision_request
-message: string
-result の場合:
-  decisionId: null
-  question: null
-  options: null
-  context: null
-  allowFreeform: null | boolean（互換fieldとして無視）
-decision_request の場合:
-  decisionId: string
-  question: string
-  options:
-    - id: string
-      label: string
-      description: string
-  context:
-    schemaVersion: 1
-    category: user_decision
-    targetKind: active_turn
-    targetAlias: active_turn
-    effect: continue_turn
-    scope: turn
-    risk: low | medium | high
-    reversibility: reversible | partially_reversible | not_reversible | unknown
-    recommendation: option id | null
-    evidence: string[]
-    uncertainty: none | limited_context | unknown_effects
-  allowFreeform: false
+response:
+  kind: result | decision_request
+  message: string
+  result の場合:
+    decisionId: null
+    question: null
+    options: null
+    context: null
+    allowFreeform: null | boolean（互換fieldとして無視）
+  decision_request の場合:
+    decisionId: string
+    question: string
+    options:
+      - id: string
+        label: string
+        description: string
+    context:
+      schemaVersion: 1
+      category: user_decision
+      targetKind: active_turn
+      targetAlias: active_turn
+      effect: continue_turn
+      scope: turn
+      risk: low | medium | high
+      reversibility: reversible | partially_reversible | not_reversible | unknown
+      recommendation: option id | null
+      evidence: string[]
+      uncertainty: none | limited_context | unknown_effects
+    allowFreeform: false
 ~~~
 
-`outputSchema`とRust parserは、選択binaryのStructured Output backendが受理するJSON Schema subsetの範囲で同じ制約を持つ。共通rootは`additionalProperties=false`かつ全8 fieldをrequiredにし、各nested objectもunknown fieldを拒否する。`schemaVersion`は1固定で、`kind`は`result`または`decision_request`だけを許可する。`result.message`は1〜65,536 scalar、`decision_request`のmessageとquestionは1〜4,096 scalar、decision IDとoption IDは1〜128 scalar、option labelは1〜256 scalar、descriptionは0〜1,024 scalar、optionsは2〜3件、evidenceは1〜8件かつ各1〜512 scalarとする。
+`outputSchema`とRust parserは、選択binaryのStructured Output backendが受理するJSON Schema subsetの範囲で同じ制約を持つ。rootは`additionalProperties=false`かつ`schemaVersion`と`response`をrequiredにする。`schemaVersion`は1固定で、`response`内のnested `anyOf`が`result`と`decision_request`のexact objectを分離し、各branchとnested objectもunknown fieldを拒否する。`result.message`は1〜65,536 scalar、`decision_request`のmessageとquestionは1〜4,096 scalar、decision IDとoption IDは1〜128 scalar、option labelは1〜256 scalar、descriptionは0〜1,024 scalar、optionsは2〜3件、evidenceは1〜8件かつ各1〜512 scalarとする。
 
-variant間のnull/non-null関係を表すroot `oneOf`等のkeywordは、0.144.5のproduction dataを使わない最小turn probeで受理を確認できた場合だけ採用する。backendが拒否するkeywordを送ってturn自体を失敗させず、未表現のvariant制約はRust parserでfail closedにする。option IDとlabelの横断unique、recommendationが同じoptionsに属すること、evidenceのunique、control character・secret・private pathを含むprivacy判定、表示前redactionはJSON Schemaだけへ委ねずparserを最終正本とする。
+このwrapperはApp Serverへ渡す生成schemaとRust内のraw final parserだけのtransport契約である。raw final JSONは永続化せず、検証後のassistant message、decision card、履歴のpublic DTOは変更しない。旧flat shapeを互換入力として黙って受理せず、schemaとparserが同じ新shapeだけを正本にする。
+
+0.144.5のproduction dataを使わないephemeral・read-only最小turn probeでは、`const`、`minLength`、`maxLength`、`minItems`、`maxItems`、nested exact objectを含むschemaと、root exact objectのrequired property内に置いた`anyOf` unionが受理された。root `oneOf`は`invalid_json_schema`としてHTTP 400で拒否されたため採用しない。このprobeは空workspaceと固定文字列だけをmodelへ渡し、repository、account、prompt等のproduction dataを入力または記録しない。Codex binary versionまたはmodel backendが変わるまで、未確認keywordを追加してturn自体を失敗させない。
+
+option IDとlabelの横断unique、recommendationが同じoptionsに属すること、evidenceのunique、control character・secret・private pathを含むprivacy判定、表示前redactionはJSON Schemaだけへ委ねずparserを最終正本とする。
 
 assistant のStructured Output deltaはJSON envelopeのtransport断片なのでWebViewへ表示・保存しない。最終出力を検証し、`result`ならredact済み`message`だけを会話へ出し、`decision_request`なら全decision fieldと`allowFreeform=false`を満たす場合だけdecision UIを出す。Markdown、コードブロック、自然文からJSONらしき部分を抽出しない。approvalはこのenvelopeで代替しない。
 
