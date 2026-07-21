@@ -21,7 +21,7 @@ read_when:
 したがって、秒数を緩和したりtimeoutを延ばしたりするのではなく、表示・接続・検証の所有境界を変更する。
 
 - workspace履歴を復元した時点でshellを描画し、Codex activationは購読可能なbackground stateとして開始する。
-- supervisorは同じworkspaceのready runtimeを冪等に再利用する。
+- supervisorはapp-wideのready runtimeを全workspaceで冪等に再利用する。
 - setup probeと通常connectを同じlifecycle lockへ入れ、直前に検証したbinary evidenceを共有する。
 - SHA-256はbinary observation epochの開始時に一度取得する。その後の直近process境界はcanonical path、owner、device、inode、size、mtime、ctime、mode、親directory trustを照合し、metadataが変化した場合だけcacheを破棄してfull verificationへ戻る。
 - schemaはexact verified binary identityへ束縛したin-memory cacheとして再利用し、binary metadataまたは選択pathが変わった場合だけ再生成する。
@@ -34,13 +34,13 @@ read_when:
 
 | 公式契約 | Coding Wifeの修正前実装 | 判断 |
 | --- | --- | --- |
-| transport connectionごとに`initialize`を1回送り、`initialized`通知後に他methodを使う。再initializeは拒否される | workspace recheckや重複activationでready processを終了し、新しいconnectionを初期化し直せる | 同一workspace・同一binary・ready runtimeへの`connect`を冪等化する |
+| transport connectionごとに`initialize`を1回送り、`initialized`通知後に他methodを使う。再initializeは拒否される | workspace recheckや重複activationでready processを終了し、新しいconnectionを初期化し直せる | request bodyのないapp-wide `connect`をapp lifecycleで1回だけ行い、workspace activationはthread contextだけを切り替える |
 | 1 connection上でthread APIとserver notificationを継続利用できる | setup診断とmain sessionを別processにすること自体は正しいが、同じ起動barrierで無調整に競合していた | setupとmainをlifecycle single-flight化し、mainが既にreadyならsetup processを作らない |
 | `thread/resume`は`excludeTurns: true`で過去turn本体を除外できる | 既に`excludeTurns: true`を送っている | 維持する。履歴本体はapp-owned HISTから復元する |
 | `generate-json-schema` / `generate-ts`はversion固有client artifactを生成するcommand | 通常connectのたびにschemaを再生成していた | exact binary identity単位で生成・構造検証し、同一process世代内でcacheする |
 | account、config、modelは各専用methodで取得する | 通常handshakeで毎回取得していた | 新connectionのpreflightとして維持するが、ready connectionの再要求では繰り返さない |
 
-公式仕様は複数workspaceを1 processで扱うことも妨げない。しかし現行supervisorはevent、opaque handle、approval、turnを1 active workspace generationへ強く束縛している。今回processをworkspace横断で共有すると安全性の再設計が必要になるため、常駐processは引き続きactive workspace単位とし、binary/schema evidenceだけを安全に共有する。
+公式仕様は複数workspaceを1 processで扱うことを妨げない。Coding Wifeはmain App Server processとconnectionをアプリ全体で1件だけ所有し、event、opaque handle、approval、turnのauthorityはworkspace contextとgenerationへ分離して束縛する。workspace選択・作成・repository recheckはprocess lifecycleを変更せず、thread start/resumeだけが同じconnection上のworkspace contextをactivateする。
 
 ## 公開実装との比較
 
@@ -76,10 +76,10 @@ workspace restore barrier
 ```text
 workspace restore barrier
   ├─ history snapshot ──> shellを描画
-  │                         └─ background activationを状態表示
-  └─ supervisor lifecycle single-flight
-       ├─ setupが先: verify once -> short initialize -> cache evidence -> main connect
-       └─ mainが先: verify/schema/connect -> setupはready evidenceを再利用
+  │                         └─ background thread activationを状態表示
+  └─ app-wide supervisor lifecycle single-flight
+       └─ app-private runtime root -> verify/schema/connect/initialize once
+            └─ all workspace thread contexts share the connection
 ```
 
 通常接続の完了前はSendだけを無効にし、timeline、draft、workspace navigationは利用可能にする。接続失敗はsetup overviewへ巻き戻さず、Composerの安全なerror codeとReconnectに反映する。
@@ -101,10 +101,10 @@ setup App Serverのstable initialize成功もexact verified binary identityへ�
 ## 実装後の構造検証
 
 - native workspace adapterは履歴snapshotだけを待ってshellを返し、Codex activationをbackground single-flightとして開始する。
-- 同一workspaceへのready connectは、既存runtime、generation、binary/schema evidenceを変更しない。
-- workspace切替はruntimeだけを置換し、同じbinary identityに束縛したversion/schema evidenceを再利用する。
+- app-wide ready connectの重複要求は、既存runtime、generation、binary/schema evidenceを変更しない。
+- workspace切替はconnectを要求せず、同じruntime内のnormalizer、opaque handle、sequence contextだけを退避・復元する。
 - setupを先に実行した後の通常connectは、version discoveryを繰り返さず、通常接続に必要なschemaだけを1回生成する。
-- 実Tauri + fake App Serverの新規app-data検証では、setupと通常sessionを通して`--version` 1回、schema生成1回、short-lived setup process 1件、long-lived session process 1件、各connectionのinitialize 1回ずつを観測した。
+- fake App Serverのworkspace横断検証では、`--version` 1回、schema生成1回、long-lived App Server process 1件、initialize 1回を観測し、2つのworkspaceでthreadを開始して最初のopaque handleを再開できることを確認する。
 
 回帰testはこれらの呼出回数とPromiseの依存関係だけを検証する。wall clock、CPU速度、disk cache状態を合否条件にしない。
 
@@ -114,4 +114,4 @@ setup App Serverのstable initialize成功もexact verified binary identityへ�
 - wall clockの秒数をassertするtestを追加しない。
 - auth fileやtokenをアプリ側cacheへコピーしない。
 - readyでないconnection、binary identityが変化したcache、別workspaceのthread handleを再利用しない。
-- 今回の変更で複数workspaceを一つのApp Server processへ多重化しない。
+- workspace IDをapp-wide connection requestやprocess cwdへ再導入しない。
