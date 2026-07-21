@@ -12,7 +12,14 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldGroup } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { WorkspaceCopy } from "@/features/workspace-view/copy"
 import type { ProjectSetupState } from "@/features/workspace-view/useWorkspaceViewModel"
 
@@ -155,21 +162,29 @@ export function ProjectSetupDialog({
                 className="min-w-0 flex-1"
                 data-disabled={!githubReady || processing}
               >
-                <NativeSelect
-                  aria-label={copy.projectSetup.ownerAccessibilityLabel}
-                  className="w-full"
+                <Select
                   disabled={!githubReady || processing}
-                  id="project-setup-owner"
-                  onChange={(event) => setOwner(event.currentTarget.value)}
-                  size="sm"
+                  onValueChange={setOwner}
                   value={selectedOwner}
                 >
-                  {candidate.githubOwners.map((githubOwner) => (
-                    <NativeSelectOption key={githubOwner} value={githubOwner}>
-                      {githubOwner}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                  <SelectTrigger
+                    aria-label={copy.projectSetup.ownerAccessibilityLabel}
+                    className="w-full"
+                    id="project-setup-owner"
+                    size="sm"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {candidate.githubOwners.map((githubOwner) => (
+                        <SelectItem key={githubOwner} value={githubOwner}>
+                          {githubOwner}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </Field>
               <span
                 aria-hidden="true"

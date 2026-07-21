@@ -17,7 +17,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -277,28 +284,26 @@ function NarrationSettingsForm({
 
         <Field data-disabled={!providerAvailable || undefined}>
           <FieldLabel htmlFor="narration-provider">{copy.provider}</FieldLabel>
-          <NativeSelect
-            className="w-full max-w-72"
+          <Select
             disabled={saving || !providerAvailable}
-            id="narration-provider"
-            onChange={(event) => {
+            onValueChange={(value) => {
               const provider: NarrationTtsProvider | null =
-                event.currentTarget.value === "openai" ? "openai" : null
+                value === "openai" ? "openai" : null
               const nextDraft = { ...draft, provider }
               setDraft(nextDraft)
               void persistDraft(nextDraft)
             }}
             value={providerAvailable ? (draft.provider ?? "openai") : ""}
           >
-            {!providerAvailable ? (
-              <NativeSelectOption value="">
-                {copy.noProvider}
-              </NativeSelectOption>
-            ) : null}
-            {providerAvailable ? (
-              <NativeSelectOption value="openai">OpenAI</NativeSelectOption>
-            ) : null}
-          </NativeSelect>
+            <SelectTrigger className="w-full max-w-72" id="narration-provider">
+              <SelectValue placeholder={copy.noProvider} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="openai">OpenAI</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </Field>
       </FieldGroup>
 
@@ -388,46 +393,62 @@ function NarrationSettingsForm({
             <div className="grid gap-lg sm:grid-cols-2">
               <Field>
                 <FieldLabel htmlFor="narration-model">{copy.model}</FieldLabel>
-                <NativeSelect
-                  className="w-52 max-w-full"
+                <Select
                   disabled={saving}
-                  id="narration-model"
-                  onChange={(event) => {
-                    const model = event.currentTarget.value as OpenAiTtsModel
+                  onValueChange={(value) => {
+                    const model = value as OpenAiTtsModel
                     const nextDraft = { ...draft, model }
                     setDraft(nextDraft)
                     void persistDraft(nextDraft)
                   }}
                   value={draft.model}
                 >
-                  {openAiTtsModels.map((model) => (
-                    <NativeSelectOption key={model} value={model}>
-                      {model}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                  <SelectTrigger
+                    className="w-52 max-w-full"
+                    id="narration-model"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {openAiTtsModels.map((model) => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </Field>
 
               <Field>
                 <FieldLabel htmlFor="narration-voice">{copy.voice}</FieldLabel>
-                <NativeSelect
-                  className="w-52 max-w-full"
+                <Select
                   disabled={saving}
-                  id="narration-voice"
-                  onChange={(event) => {
-                    const voice = event.currentTarget.value as OpenAiTtsVoice
+                  onValueChange={(value) => {
+                    const voice = value as OpenAiTtsVoice
                     const nextDraft = { ...draft, voice }
                     setDraft(nextDraft)
                     void persistDraft(nextDraft)
                   }}
                   value={draft.voice}
                 >
-                  {openAiTtsVoices.map((voice) => (
-                    <NativeSelectOption key={voice} value={voice}>
-                      {voice}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                  <SelectTrigger
+                    className="w-52 max-w-full"
+                    id="narration-voice"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {openAiTtsVoices.map((voice) => (
+                        <SelectItem key={voice} value={voice}>
+                          {voice}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
 

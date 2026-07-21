@@ -307,6 +307,7 @@ Sidebarは255.04px幅と49.5px itemに合わせた固定4段階を使う。**Sid
 - **Style:** composer は 571.11×128.25px の surface、9px radius、12.75px padding。textarea は上部 48px から伸長し、footer control を押し出さない。
 - **Focus:** container border を warm-active へ変更し、2px focus ring を外側へ置く。placeholder は `text-muted-accessible` を使う。
 - **Error / Disabled:** error は保持した draft の下へ icon、短い理由、回復操作を表示する。空入力かつ attachment/context がない時は Send を disabled にする。
+- **Selection:** 有限の単一選択は共通のshadcn `Select`を使い、候補をbody-level portalへ描画する。production UI、設定、dialog、開発用previewを含む`src/`配下でnative `<select>`と`NativeSelect`を使わない。triggerはcompact controlのdensity、visible focus、disabled / invalid state、accessible nameを維持し、候補は`SelectGroup`単位で構成する。
 - **Attachments:** Add、drop、paste を一つの attachment model へ統合し、Context menu は portal して composer の overflow に clip させない。
 
 ### Chat Timeline
@@ -363,4 +364,5 @@ file summaryを先に表示し、sanitized diffはfile selection後に1件ずつ
 - **Don't** 「emotional coercion」によって、キャラクターへの好意や罪悪感から推奨や継続を選ばせる。
 - **Don't** colored side stripe、gradient text、decorative grid background、32px 以上の card radius、border と 16px 以上の soft shadow を組み合わせる。
 - **Don't** dropdown を overflow container 内へ absolute 配置する。portal を使う。
+- **Don't** native `<select>`または`NativeSelect`を使う。有限の単一選択は共通のshadcn `Select`へ統一する。
 - **Don't** Inter / Noto Sans JP / JetBrains Mono 以外の font、Tailwind class 名、shadcn default の大 radius を design vocabulary として持ち込む。
