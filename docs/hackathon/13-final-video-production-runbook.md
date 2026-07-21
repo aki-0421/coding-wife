@@ -721,11 +721,11 @@ Production is complete only when all statements are true:
 - [x] Full-frame every-frame OCR/privacy scanning, black-frame scanning, human contact-sheet review, and media probing passed.
 - [x] No secret, personal data, notification, private URL, private repository, or unrelated third-party asset appears.
 - [x] Final SHA-256 values and the complete acceptance record exist under `tmp/submission-video/evidence/`.
-- [x] The master is ready to upload to a Public YouTube entry and remains below the Official Rules' three-minute limit.
+- [x] The master is published at https://youtu.be/t3oyxB0aa9M; anonymous playback, `isUnlisted=false`, and a 165-second duration were verified at 2026-07-22 08:11 JST.
 
 ## 13. Accepted production record
 
-The accepted local production artifacts are immutable. Uploading the master to YouTube and recording its public URL remain external submission steps; no public URL is claimed here.
+The accepted local production artifacts are immutable. The published YouTube URL is https://youtu.be/t3oyxB0aa9M; the title, description, and manually uploaded SRT state remain unverified.
 
 | Artifact | Accepted identity |
 |---|---|
@@ -761,17 +761,17 @@ The local media record above is frozen. The current external handoff is:
 | Judge DMG | `Coding-Wife.dmg`; 22,433,345 bytes; SHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f` |
 | Release verification | Release suite 39/39 PASS; anonymous three-asset download, sidecar, manifest, byte identity, canonical DMG verification, install copy, ten-second production launch, and graceful shutdown PASS |
 | Primary Codex evidence | Representative thread verified privately; `/feedback` upload succeeded without logs or recorded authentication material; Session ID is ready for private Devpost entry |
-| Public YouTube URL | `PENDING — entrant manual handoff` |
+| Public YouTube URL | https://youtu.be/t3oyxB0aa9M — anonymous playback, `isUnlisted=false`, and 165 seconds verified at 2026-07-22 08:11 JST |
 | Devpost URL and Submitted confirmation | `PENDING — entrant manual handoff` |
 
-The judge release targets macOS 14+ on Apple Silicon, is ad-hoc signed, and is not notarized. Its release notes provide a bounded per-app Gatekeeper **Open Anyway** path. Repository default `develop` and the normal `v0.1.5` release are older previews; use the immutable product source and judge prerelease above. YouTube publication and Devpost submission now remain explicit entrant-operated manual handoffs; no automated submit is planned. This publication state does not change the accepted Terra claim: the video shows one bounded request and one bounded retry failing closed with zero tool and write authority, not a generated explanation.
+The judge release targets macOS 14+ on Apple Silicon, is ad-hoc signed, and is not notarized. Its release notes provide a bounded per-app Gatekeeper **Open Anyway** path. Repository default `develop` and the normal `v0.1.5` release are older previews; use the immutable product source and judge prerelease above. Devpost submission remains an explicit entrant-operated manual handoff; no automated submit is planned. This publication state does not change the accepted Terra claim: the video shows one bounded request and one bounded retry failing closed with zero tool and write authority, not a generated explanation.
 
 ## Official sources reverified on 2026-07-22 JST
 
 - https://openai.devpost.com/rules
 - https://openai.devpost.com/
 - https://openai.devpost.com/details/faqs
-- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
+- https://openai.devpost.com/updates/45371-tuesday-last-minute-tips
 
 Repository contracts consulted:
 

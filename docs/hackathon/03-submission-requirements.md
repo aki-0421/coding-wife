@@ -18,7 +18,7 @@ last_verified: 2026-07-22 JST
 - [ ] Codex と GPT-5.6 で作った working project
 - [ ] 4トラックから1つ選択
 - [ ] Project description
-- [ ] 公開 YouTube demo video
+- [x] 公開 YouTube demo video — https://youtu.be/t3oyxB0aa9M
 - [ ] Code repository URL
 - [ ] 主要開発スレッドの `/feedback` Codex Session ID
 - [ ] plugin / developer tool の場合、追加の installation・platform・testing 情報
@@ -59,7 +59,7 @@ OpenAI API の利用と API credits は必須ではありません。一方、Co
 
 - 長さは **2分40秒〜2分50秒**を目標にする。
 - 日本語話者でも、AI-assisted の英語 voiceover が許可されているため、英語音声で作ると翻訳要件の曖昧さを減らせる。
-- 提出直前の Update 45402 は Unlisted でもよいとしているが、Official Rules は publicly visible、Overview と FAQ は public としている。情報源の優先順位に従い、**YouTube の visibility は Public** にする。
+- 提出直前の Update 45371 は Unlisted でもよいとしているが、Official Rules は publicly visible、Overview と FAQ は public としている。情報源の優先順位に従い、**YouTube の visibility は Public** にする。
 - 音楽は使わないか、権利を明確に確認できるものだけにする。
 - Codex 画面の表示は必須ではないが、短く見せると Technological Implementation の証拠になる。
 - product demo を最優先し、スライド説明だけで終わらせない。
@@ -200,21 +200,20 @@ Coding Wife は Developer Tools track の desktop app なので、installation i
 | Public release v0.1.5 | 参考用のみ | default `develop`と同様に古いpreviewのため、現行3モデル連携や最新UIの証拠には使わない |
 | Frozen product source | 完了 | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3)をimmutable judge sourceとして公開済み |
 | No-rebuild release | 完了 | [macOS judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)を公開し、匿名download・SHA/manifest/byte一致・canonical verify・install/first-launch smokeを確認済み。release suiteは39/39 PASS |
-| Public YouTube video | manual handoff未完了 | 提出者が3分未満、音声付きのmasterをPublicでuploadする |
+| Public YouTube video | 完了 | https://youtu.be/t3oyxB0aa9M — 2026-07-22 08:11 JSTに匿名再生、`isUnlisted=false`、165秒を確認済み |
 | Primary Session ID | 入力待ち | 主要build threadを照合し、`/feedback` upload成功とSession IDをprivate evidenceへ保存済み。Devpost fieldへ入力する |
 | Devpost submission | manual handoff未完了 | 提出者がformを手動入力・submitし、draftではなくSubmittedを確認する |
-| Anonymous smoke test | 一部完了 | repository・immutable source・release・3 assetsはPASS。video・提出URLは公開後に確認する |
+| Anonymous smoke test | 一部完了 | repository・immutable source・release・3 assets・Public videoの再生/visibility/尺はPASS。Devpost提出URLは提出後に確認する |
 
 ## 11. 提出当日の順序
 
-提出直前の Update 45402 は、動画を早く upload し、project を fresh に test し、提出後に Devpost の My Projects で **Submitted** 表示を確認するよう案内しています。
+提出直前の Update 45371 は、動画を早く upload し、project を fresh に test し、提出後に Devpost の My Projects で **Submitted** 表示を確認するよう案内しています。
 
-1. 提出者が完成済み動画を早めにYouTubeへmanual uploadし、処理完了後にPublic URLを取得する。
-2. 動画をlogged-out状態で再生し、3分未満・音声・字幕・privacyを確認する。
-3. 提出者がDevpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを手動入力する。
-4. 提出者がDevpost formを手動submitし、My Projectsで緑の**Submitted**表示を確認する。
-5. project、release、repository、動画をfresh / logged-out状態で確認する。
-6. deadline前に、公開リンクとrepository permissionsをもう一度確認する。
+1. 公開済み動画をlogged-out状態で再生し、音声・字幕・privacyを最終確認する。Public visibility、165秒、匿名再生は確認済み。
+2. 提出者がDevpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを手動入力する。
+3. 提出者がDevpost formを手動submitし、My Projectsで緑の**Submitted**表示を確認する。
+4. project、release、repository、動画をfresh / logged-out状態で確認する。
+5. deadline前に、公開リンクとrepository permissionsをもう一度確認する。
 
 ## 12. 提出直後
 
@@ -230,4 +229,4 @@ Coding Wife は Developer Tools track の desktop app なので、installation i
 - https://openai.devpost.com/rules
 - https://openai.devpost.com/details/faqs
 - https://openai.devpost.com/
-- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
+- https://openai.devpost.com/updates/45371-tuesday-last-minute-tips

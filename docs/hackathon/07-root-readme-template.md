@@ -197,4 +197,4 @@ Project-owned code: [root license]
 
 - https://openai.devpost.com/rules
 - https://openai.devpost.com/details/faqs
-- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
+- https://openai.devpost.com/updates/45371-tuesday-last-minute-tips

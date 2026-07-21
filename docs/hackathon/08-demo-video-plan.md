@@ -117,10 +117,10 @@ last_verified: 2026-07-22 JST
 | Windows/Linux are labeled packaging previews | Record after release review |
 | Current macOS UI and full-flow release match | Record after freeze |
 | No secret or private data appears | Record after frame review |
-| YouTube plays while logged out | Record after publication |
+| YouTube plays while logged out | PASS — https://youtu.be/t3oyxB0aa9M; `isUnlisted=false`; 165 seconds; verified 2026-07-22 08:11 JST |
 
 ## Sources reverified on 2026-07-22 JST
 
 - https://openai.devpost.com/rules
 - https://openai.devpost.com/details/faqs
-- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
+- https://openai.devpost.com/updates/45371-tuesday-last-minute-tips

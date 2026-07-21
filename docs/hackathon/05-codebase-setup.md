@@ -284,4 +284,4 @@ Keep GPT-5.6 central to the product's primary user workflow.
 - https://developers.openai.com/api/docs/models
 - https://openai.devpost.com/details/faqs
 - https://openai.devpost.com/resources
-- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
+- https://openai.devpost.com/updates/45371-tuesday-last-minute-tips

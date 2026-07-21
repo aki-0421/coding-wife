@@ -11,7 +11,7 @@ last_verified: 2026-07-22 JST
 
 # Coding Wife final submission materials
 
-This is the current handoff for the OpenAI Build Week submission. It describes the implemented three-model product, records completed public artifacts, and keeps the remaining manual YouTube and Devpost handoff values visibly marked `PENDING`. Review the English description aloud and make only factual, voice-preserving edits before pasting it into Devpost.
+This is the current handoff for the OpenAI Build Week submission. It describes the implemented three-model product, records completed public artifacts, and keeps the remaining manual Devpost handoff values visibly marked `PENDING`. Review the English description aloud and make only factual, voice-preserving edits before pasting it into Devpost.
 
 Authority order:
 
@@ -32,13 +32,13 @@ Authority order:
 | Primary full three-model judge platform | macOS 14+ Apple Silicon |
 | Packaging previews | Windows 11 x64 and Ubuntu 22.04 / Debian 12-compatible Linux x64; install-smoked artifacts only, without a production Luna/Terra parity claim |
 | Current macOS Apple Silicon judge release URL and SHA-256 | https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22 — `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f` |
-| Demo video URL | `PENDING — entrant manual handoff` |
+| Demo video URL | https://youtu.be/t3oyxB0aa9M |
 | Primary Codex Session ID | **READY — verified private evidence; copy into Devpost without publishing it here** |
 | Devpost project URL | `PENDING — entrant manual handoff` |
 | Entrant / team record | `PENDING` |
 | Submission state and confirmation evidence | `PENDING — entrant manual handoff` |
 | Frozen product source commit | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3) |
-| Logged-out anonymous smoke result | Repository, immutable source, release, all three assets, checksum, manifest, byte identity, canonical DMG verification, and install/first-launch smoke: **PASS**. YouTube and Devpost: `PENDING` |
+| Logged-out anonymous smoke result | Repository, immutable source, release, all three assets, checksum, manifest, byte identity, canonical DMG verification, install/first-launch smoke, and YouTube public playback/165-second duration: **PASS**. Devpost: `PENDING` |
 
 The public repository, Developer Tools track, product title, MIT license, and implemented model roles are settled facts rather than placeholders.
 
@@ -147,7 +147,7 @@ The accepted causal run shows real Sol repository work through commit `d68adc0`,
 
 Two fresh isolated `pnpm tauri:dev` launches retained the exact prompt but left Send disabled. Production capture therefore used the repository-owned desktop-QA native Tauri binary with the real WKWebView, typed Tauri IPC, Rust backend, authenticated Codex runtime, and disposable Git repository. No demo transport or fabricated agent output was used. Final QA decoded all 4,950 frames, found zero black intervals, produced 4,950/4,950 privacy OCR evidence rows with zero high-risk findings, and passed full-resolution screenshot, subtitle, metadata, secret, and content review.
 
-Upload this unchanged master to YouTube with **Public** visibility, the conservative interpretation of the Official Rules. After upload, verify duration, audio, captions, visibility, and playback while logged out, then record the final URL below.
+The accepted master is published at https://youtu.be/t3oyxB0aa9M with **Public** visibility, the conservative interpretation of the Official Rules. Anonymous playback, `isUnlisted=false`, and a 165-second duration were verified at 2026-07-22 08:11 JST. The YouTube title, description, and manually uploaded SRT state have not been verified and must not be claimed as complete.
 
 ## 5. Three-model architecture
 
@@ -195,14 +195,14 @@ Final external record:
 | Frozen product source commit | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3) |
 | Current macOS Apple Silicon judge release | https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22; `Coding-Wife.dmg`; 22,433,345 bytes; SHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f` |
 | Release verification | Public prerelease and exact tag target verified anonymously; all three assets downloaded; sidecar, manifest, byte identity, canonical DMG verification, and install/ten-second launch/graceful shutdown smoke PASS; release suite 39/39 PASS |
-| Video URL, duration, visibility, and master SHA-256 | YouTube URL `PENDING`; intended visibility Public; local accepted master `tmp/submission-video/render/coding-wife-openai-build-week-2026-master.mp4`; 165.000 seconds; SHA-256 `81feb8eb068c4e3f087845beff2b8bc94c95364786c1ac750ecc8ba57d86b94b` |
+| Video URL, duration, visibility, and master SHA-256 | https://youtu.be/t3oyxB0aa9M; anonymous playback and `isUnlisted=false` verified at 2026-07-22 08:11 JST; YouTube duration 165 seconds; local accepted master `tmp/submission-video/render/coding-wife-openai-build-week-2026-master.mp4`; 165.000 seconds; SHA-256 `81feb8eb068c4e3f087845beff2b8bc94c95364786c1ac750ecc8ba57d86b94b` |
 | English SRT | `tmp/submission-video/captions/coding-wife-openai-build-week-2026-en.srt`; SHA-256 `c6a49d706887bacf1e34b95efbd7b4af4cc9e3916949351a32dced71eab7353d` |
 | Four submission screenshots | `tmp/submission-video/evidence/screenshots/`; accepted identities recorded in the [production runbook](./13-final-video-production-runbook.md#13-accepted-production-record) |
 | Final media QA and checksums | `tmp/submission-video/evidence/media-inspection.md`; `tmp/submission-video/evidence/checksums.sha256`; PASS |
 | Primary Codex Session ID | Verified against the representative thread and stored in private evidence; `/feedback` upload succeeded; Devpost field entry `PENDING` |
 | Devpost URL and submitted confirmation | `PENDING` |
 | Entrant / team record | `PENDING` |
-| Anonymous repository, release, video, and submission smoke | Repository/source/release/downloaded DMG: PASS. Public YouTube and submitted Devpost project: `PENDING` |
+| Anonymous repository, release, video, and submission smoke | Repository/source/release/downloaded DMG/Public YouTube playback, visibility, and duration: PASS. Submitted Devpost project: `PENDING` |
 
 ## 8. Final anonymous smoke
 
@@ -212,6 +212,7 @@ Final external record:
 - [x] Install the anonymously downloaded DMG, launch the production app for ten seconds, and shut it down gracefully without rebuilding.
 - [ ] Confirm the macOS release shows the same Sol/Luna and Git review behavior. Test Terra conditionally: accept a validated explanation when the connected provider supports the event, or verify a typed unavailable result with zero tool/write authority when it does not. Do not claim the video shows successful automatic Terra generation; it shows one `user_request` and one `user_retry` failing closed before generation.
 - [x] Treat Windows and Linux artifacts only as install-smoked packaging previews; do not record their presence as proof of production Luna/Terra parity.
+- [x] Open https://youtu.be/t3oyxB0aa9M while logged out and confirm public playback, `isUnlisted=false`, and a 165-second duration.
 - [ ] Play the YouTube video while logged out; confirm it is under 3:00, has audible English narration, and contains no private data.
 - [ ] Confirm every Devpost link resolves and every factual field matches the frozen source and release.
 - [x] Confirm the primary Session ID was copied from the representative thread and stored only in private evidence; `/feedback` upload succeeded.
@@ -224,5 +225,5 @@ Final external record:
 - https://openai.devpost.com/details/faqs
 - https://openai.devpost.com/
 - https://openai.devpost.com/details/dates
-- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
+- https://openai.devpost.com/updates/45371-tuesday-last-minute-tips
 - https://openai.com/build-week/

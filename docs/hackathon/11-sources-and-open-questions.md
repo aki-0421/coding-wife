@@ -34,7 +34,7 @@ Discussion Board のコメントは、公式運営者であることが明確で
 - Schedule: https://openai.devpost.com/details/dates
 - FAQ: https://openai.devpost.com/details/faqs
 - Updates: https://openai.devpost.com/updates
-- Latest deadline update (2026-07-22 verification): https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
+- Latest deadline update (2026-07-22 verification): https://openai.devpost.com/updates/45371-tuesday-last-minute-tips
 - Discussions: https://openai.devpost.com/forum_topics
 
 ### OpenAI
@@ -81,13 +81,13 @@ Discussion Board のコメントは、公式運営者であることが明確で
 ### 3.5 YouTube visibility
 
 - Official Rules は publicly visible on YouTube、Overview と FAQ は public YouTube と記載。
-- Update 45402 は “Unlisted OK” と記載。
+- Update 45371 は “Unlisted OK” と記載。
 
 **Working decision:** Official Rules を優先し、visibility は **Public** にする。Unlisted を唯一の提出動画にしない。
 
 ### 3.6 Session ID の取得コマンド
 
-- Official Rules、Overview、Update 45402 は提出項目を `/feedback` Codex Session ID とし、Update 45402 は主要 thread で `/feedback` を実行するよう案内している。
+- Official Rules、Overview、Update 45371 は提出項目を `/feedback` Codex Session ID とし、Update 45371 は主要 thread で `/feedback` を実行するよう案内している。
 - FAQ の取得手順は `/status` を実行して Session ID を表示すると案内している。
 
 **Working decision:** 主要 build thread で `/feedback` を先に実行する。IDが表示されない場合や照合が必要な場合だけ、同じ thread で `/status` を実行し、別 thread のIDで代用しない。
@@ -141,7 +141,7 @@ Public release v0.1.5 は古い preview であり、現行3モデル連携や最
 
 ### 5.1 GPT-5.6 の meaningful-use 境界
 
-FAQ と Update 45402 は OpenAI API の利用を必須としていません。一方、FAQ は「project must use GPT-5.6」「code repository と demo video で evidence を見る」「Codex と GPT-5.6 は incidental / decorative ではいけない」と記載しています。
+FAQ と Update 45371 は OpenAI API の利用を必須としていません。一方、FAQ は「project must use GPT-5.6」「code repository と demo video で evidence を見る」「Codex と GPT-5.6 は incidental / decorative ではいけない」と記載しています。
 
 **安全側:** Coding Wife の3モデル orchestration を core workflow として demo し、各モデルの役割が source と product behavior に反映されることを示す。API 自体を要件とは説明しない。
 
@@ -188,10 +188,10 @@ Support:
 | Frozen product source | 完了 | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3)をimmutable judge sourceとして公開済み |
 | Current no-rebuild release | 完了 | [macOS judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)、SHA-256、匿名3 asset検証、39/39 release suite、install/first-launch smokeがPASS |
 | Accepted local video master | 完了 | 165.000秒、H.264/AAC、英語音声・焼き込み字幕、全4,950 frame privacy検査、4 screenshotsを受理済み |
-| Public YouTube video | manual handoff未完了 | 提出者が3分未満・音声付きmasterをPublicで公開する |
+| Public YouTube video | 完了 | https://youtu.be/t3oyxB0aa9M — 2026-07-22 08:11 JSTに匿名再生、`isUnlisted=false`、165秒を確認済み。title、description、手動SRTは未確認 |
 | Primary Codex Session ID | 入力待ち | primary thread照合・private evidence保存・`/feedback` upload成功。値はpublic docsへ書かずDevpostへ転記する |
 | Devpost form / Submitted state | manual handoff未完了 | 提出者がlogged-in formを手動submitし、My Projectsで確認する |
-| Anonymous smoke | 一部完了 | repository・immutable source・release・downloaded DMGはPASS。video・提出URLは公開後に確認する |
+| Anonymous smoke | 一部完了 | repository・immutable source・release・downloaded DMG・Public videoの再生/visibility/尺はPASS。Devpost提出URLは提出後に確認する |
 
 hosted demo、judge account、screenshots は、選んだ testing path または logged-in submission form が要求する場合だけ用意します。絶対パス、API key、個人情報を提出資料へ記載しません。
 
@@ -213,10 +213,10 @@ hosted demo、judge account、screenshots は、選んだ testing path または
 
 ## 9. 2026-07-22 public re-verification record
 
-- Official Rules、Overview、FAQ、Schedule、Resources、Updates、Update 45402 を公式 page で確認した。
+- Official Rules、Overview、FAQ、Schedule、Resources、Updates、Update 45371 を公式 page で確認した。
 - OpenAI Build Week page は 2026-07-22 JST に取得可能で、同 page の judging 表示 Jul 22–Aug 7 を再確認した。
 - deadline、4 tracks、public / private repository、3分未満の public video、Codex / GPT-5.6、Session ID、submission freeze、Developer Tools の no-rebuild testing path を再確認した。
-- Update 45402 は、OpenAI API / API credits が必須ではないこと、動画の早期 upload、fresh testing、`/feedback`、My Projects の Submitted 表示確認を明記している。
+- Update 45371 は、OpenAI API / API credits が必須ではないこと、動画の早期 upload、fresh testing、`/feedback`、My Projects の Submitted 表示確認を明記している。
 - Product source `44d9aab779b9a66ed3f02d0016af061a71ba79c3`、public judge prerelease、DMG SHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f`を匿名環境で再検証した。downloaded artifactのsidecar・manifest・bytes・canonical verifierとinstall/first-launch smokeはPASS。
 - Primary Session IDはprivate evidenceで照合し、`/feedback` upload成功を確認した。値はpublic documentへ記載しない。
 - logged-in submission formのfields・文字数、実際のvideo URL、Devpost submission URLは未確認。Session IDのDevpost fieldへの転記も未完了。

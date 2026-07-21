@@ -32,7 +32,7 @@ source_of_truth: https://openai.devpost.com/rules
 - **API:** OpenAI API の利用と API credits は必須ではない。製品 runtime で API を使う場合だけ、自分の API key と billing が必要
 - **提出物:** 動くプロジェクト、1つのトラック、説明文、公開 YouTube デモ、コードリポジトリ、主要 Codex スレッドの `/feedback` Session ID
 - **動画:** Official Rules に合わせて **3分未満**。音声で「何を作ったか」「Codex をどう使ったか」「GPT-5.6 をどう使ったか」を説明する
-- **動画公開範囲:** Update 45402 は Unlisted 可としているが、Rules / Overview / FAQ を優先して安全側の **Public** にする
+- **動画公開範囲:** Update 45371 は Unlisted 可としているが、Rules / Overview / FAQ を優先して安全側の **Public** にする
 - **リポジトリ:** 公開なら適切なライセンスを付ける。非公開なら `testing@devpost.com` と `build-week-event@openai.com` に共有する
 - **README:** セットアップ、必要なサンプルデータ、実行・テスト方法、Codex が加速した箇所、人間が行った重要判断、GPT-5.6 の統合箇所を明記する
 - **Session ID:** 主要 build thread で `/feedback` を先に実行し、IDが表示されない場合や照合時だけ同じ thread で `/status` を使う
@@ -43,15 +43,14 @@ source_of_truth: https://openai.devpost.com/rules
 
 Developer Tools track、public repository、MIT license、third-party notices は準備済みです。現行productは`gpt-5.6-sol`のmain coding session、`gpt-5.6-luna`のpresence director、`gpt-5.6-terra`のcommit explainerを分離しています。Product source は commit [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3) に固定し、同commitを指す[macOS judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)を公開・匿名検証済みです。主要build threadの`/feedback` uploadも成功し、Session IDはprivate evidenceへ保存済みです。
 
-Repository defaultの`develop`と通常release `v0.1.5`は古いpreviewです。現行3モデル連携や最新UIの審査には、上記immutable sourceとjudge prereleaseだけを使います。受理済み2:45 masterはlocalで完成していますが、Public YouTube公開とDevpost formのsubmitは提出者によるmanual handoffとして未完了です。
+Repository defaultの`develop`と通常release `v0.1.5`は古いpreviewです。現行3モデル連携や最新UIの審査には、上記immutable sourceとjudge prereleaseだけを使います。受理済み2:45 masterは[YouTube](https://youtu.be/t3oyxB0aa9M)でPublic公開され、2026-07-22 08:11 JSTに匿名再生、`isUnlisted=false`、165秒を確認済みです。Devpost formのsubmitは提出者によるmanual handoffとして未完了です。
 
 締切までの critical path は次の順です。
 
-1. 提出者が受理済みの3分未満・音声付きmasterをYouTubeへmanual uploadし、visibilityを**Public**にする。
-2. 処理済みvideoをlogged-out状態で再生し、映像・音声・字幕・URLを確認する。
-3. 提出者がDevpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを手動入力する。
-4. 提出者がDevpost formを手動submitし、My Projectsで緑の**Submitted**表示を確認する。
-5. video、repository、release、submission URLをlogged-out / fresh environmentで最終確認する。
+1. 提出者が公開済みvideoの映像・音声・字幕をlogged-out状態で最終確認する。
+2. 提出者がDevpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを手動入力する。
+3. 提出者がDevpost formを手動submitし、My Projectsで緑の**Submitted**表示を確認する。
+4. video、repository、release、submission URLをlogged-out / fresh environmentで最終確認する。
 
 hosted demo、judge account、screenshots は一律必須ではありません。選んだ testing path または logged-in form が要求する場合だけ用意します。
 
@@ -88,5 +87,5 @@ hosted demo、judge account、screenshots は一律必須ではありません�
 - FAQ: https://openai.devpost.com/details/faqs
 - Resources: https://openai.devpost.com/resources
 - Schedule: https://openai.devpost.com/details/dates
-- Deadline update: https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
+- Deadline update: https://openai.devpost.com/updates/45371-tuesday-last-minute-tips
 - OpenAI Build Week: https://openai.com/build-week/

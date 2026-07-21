@@ -48,7 +48,7 @@ last_verified: 2026-07-22 JST
 
 ## 3. 3分未満のデモ動画
 
-YouTubeへのupload・visibility設定・公開確認は、提出者が行うmanual handoffです。自動upload予定として扱いません。
+YouTubeへのupload・visibility設定は提出者が完了しました。2026-07-22 08:11 JSTに https://youtu.be/t3oyxB0aa9M の匿名再生、`isUnlisted=false`、165秒を確認済みです。title、description、YouTubeへ手動追加したSRTの状態は未確認のため完了扱いにしません。
 
 - [x] [13-final-video-production-runbook.md](./13-final-video-production-runbook.md) の受理済み2:45 scriptで収録する
 - [x] 実native Tauri app、real WKWebView / IPC / Rust backend、authenticated Codex runtime、disposable repositoryを使う
@@ -62,10 +62,11 @@ YouTubeへのupload・visibility設定・公開確認は、提出者が行うman
 - [x] 4枚の1920×1080 screenshotをaccepted masterから抽出する
 - [x] 全4,950 frameのblack/privacy OCR、secret、metadata、full decode検査を通す
 - [x] key、token、email、notification、personal path、private URLが映っていない
-- [ ] YouTubeへ早めにuploadし、processing完了を待つ
-- [ ] Visibilityは安全側で**Public**にする
+- [x] YouTubeへ早めにuploadし、processing完了を待つ
+- [x] Visibilityは安全側で**Public**にする
+- [x] ログアウト状態で匿名再生、`isUnlisted=false`、165秒を確認する
 - [ ] ログアウト状態で映像・音声・URLを確認する
-- [ ] Video URLを最終提出資料へ記録する
+- [x] Video URLを最終提出資料へ記録する
 
 最新UpdateはUnlisted可と案内しますが、Official Rulesはpublicly visible、FAQはpublicと記載します。矛盾を避ける最も安全な設定はPublicです。
 
@@ -139,4 +140,4 @@ Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updat
 - https://openai.devpost.com/rules
 - https://openai.devpost.com/details/faqs
 - https://openai.devpost.com/
-- https://openai.devpost.com/updates/45402-deadline-tomorrow-last-minute-tips
+- https://openai.devpost.com/updates/45371-tuesday-last-minute-tips
