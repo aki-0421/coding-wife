@@ -93,7 +93,7 @@ LunaはMarkdownや周辺proseを付けず、次のexact objectを返す。
 | `utterance` | trim済み1〜160 Unicode scalar、1文を推奨 |
 | `cue` | triggerごとのallowlist内にあるsemantic cue |
 
-`main_message`の`utterance`はexcerptに根拠を持つ短いpair-programming reactionとし、単なる復唱にしない。その他の`utterance`は短い現在地だけを伝える。どちらも技術的成功、検証済み、承認済み、安全、commit作成済み等をinput以上に推測しない。利用者の選択を誘導する推奨、好意・罪悪感による誘導、大げさな称賛、人格的所有、raw identifier、path、URL、secretらしい文字列を含めない。schema、locale、scalar bound、control文字、privacy scan、cue allowlistのどれかに失敗したoutputは公開しない。
+`main_message`の`utterance`はexcerptに根拠を持つ短いpair-programming reactionとし、単なる復唱にしない。その他の`utterance`は短い現在地だけを伝える。どちらも技術的成功、検証済み、承認済み、安全、commit作成済み等をinput以上に推測しない。利用者の選択を誘導する推奨、好意・罪悪感による誘導、大げさな称賛、人格的所有、raw identifier、bare filenameを含むpath alias、URL、secretらしい文字列、code fence、diff header/hunk、代表的なcode formを含めず、single-space単一行の正規形にする。Rust output validatorとFrontend public event validatorの両方で同じprivacy boundaryを適用し、schema、locale、scalar bound、control文字、privacy scan、cue allowlistのどれかに失敗したoutputは公開しない。
 
 ## Admission、coalescing、stale cancellation
 
