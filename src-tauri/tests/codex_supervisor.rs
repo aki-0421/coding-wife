@@ -19,7 +19,7 @@ use coding_wife_lib::codex::types::{
     BinarySource, CapabilityState, ChildState, CodexFallbackDecisionRequest, CodexHealth,
     CodexPendingResponseRequest, CodexReviewStartRequest, CodexThreadResumeRequest,
     CodexThreadStartRequest, CodexTurnInterruptRequest, CodexTurnStartRequest, PendingResponse,
-    ReasoningPreset, ReviewTarget,
+    PendingUserInputAnswer, ReasoningPreset, ReviewTarget,
 };
 use coding_wife_lib::codex::workspace::{
     AppPrivateBinaryRecord, FolderPicker, PickerFuture, WorkspaceService,
@@ -215,6 +215,19 @@ fn pending_id(rpc_id: &str, params: &serde_json::Value) -> String {
     ));
     let digest = Sha256::digest(format!("s:{rpc_id}:{params_hash}").as_bytes());
     format!("pending-{}", &hex::encode(digest)[..20])
+}
+
+fn user_input_option_id(params: &serde_json::Value, question_id: &str, index: usize) -> String {
+    let params_hash = hex::encode(Sha256::digest(
+        serde_json::to_vec(params).expect("serialize params"),
+    ));
+    let mut digest = Sha256::new();
+    for component in [params_hash.as_bytes(), question_id.as_bytes()] {
+        digest.update((component.len() as u64).to_be_bytes());
+        digest.update(component);
+    }
+    digest.update((index as u64).to_be_bytes());
+    format!("option-{}", &hex::encode(digest.finalize())[..20])
 }
 
 fn contextual_handle(prefix: &str, components: &[&str]) -> String {
@@ -1922,37 +1935,8 @@ async fn each_thread_policy_mismatch_stops_without_storing_a_handle() {
 }
 
 #[tokio::test]
-async fn native_rui_round_trips_one_bounded_other_answer() {
+async fn native_rui_round_trips_option_label_and_bounded_other_answer() {
     let _guard = ENVIRONMENT_LOCK.lock().await;
-    let fixture = FixtureEnvironment::new("native_rui");
-    let supervisor = test_supervisor();
-    supervisor.start_signal_loop();
-    supervisor
-        .register_workspace_root("workspace", &fixture.workspace)
-        .await
-        .expect("register workspace");
-    supervisor.set_explicit_binary(Some(fixture_binary())).await;
-    supervisor.connect().await.expect("connect");
-    let thread = supervisor
-        .thread_start(CodexThreadStartRequest {
-            workspace_id: "workspace".to_owned(),
-        })
-        .await
-        .expect("thread");
-    supervisor
-        .turn_start(CodexTurnStartRequest {
-            workspace_id: "workspace".to_owned(),
-            thread_handle: thread.thread_handle,
-            client_user_message_id: "message-rui".to_owned(),
-            text: "Request a choice.".to_owned(),
-            effort: Some(ReasoningPreset::Low),
-            service_tier: None,
-            plan_mode: false,
-            goal_objective: None,
-            attachment_handles: vec![],
-        })
-        .await
-        .expect("turn");
     let params = serde_json::json!({
         "threadId": "thread-fixture",
         "turnId": "turn-fixture",
@@ -1970,45 +1954,88 @@ async fn native_rui_round_trips_one_bounded_other_answer() {
         }],
         "autoResolutionMs": null
     });
-    let pending_id = pending_id("server-rui", &params);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        match supervisor
-            .respond_pending(CodexPendingResponseRequest {
+    for (mode, marker) in [
+        ("native_rui", "native_rui_option_answered"),
+        ("native_rui_other", "native_rui_other_answered"),
+    ] {
+        let fixture = FixtureEnvironment::new(mode);
+        let supervisor = test_supervisor();
+        supervisor.start_signal_loop();
+        supervisor
+            .register_workspace_root("workspace", &fixture.workspace)
+            .await
+            .expect("register workspace");
+        supervisor.set_explicit_binary(Some(fixture_binary())).await;
+        supervisor.connect().await.expect("connect");
+        let thread = supervisor
+            .thread_start(CodexThreadStartRequest {
                 workspace_id: "workspace".to_owned(),
-                pending_id: pending_id.clone(),
-                response: PendingResponse::UserInput {
-                    answers: std::collections::BTreeMap::from([(
-                        "choice".to_owned(),
-                        vec!["Another safe path".to_owned()],
-                    )]),
-                },
             })
             .await
-        {
-            Ok(_) => break,
-            Err(error) if error.code == "CODEX-PENDING-INVALID" => {
-                assert!(
-                    tokio::time::Instant::now() < deadline,
-                    "pending RUI missing"
-                );
-                tokio::time::sleep(Duration::from_millis(20)).await;
+            .expect("thread");
+        supervisor
+            .turn_start(CodexTurnStartRequest {
+                workspace_id: "workspace".to_owned(),
+                thread_handle: thread.thread_handle,
+                client_user_message_id: format!("message-rui-{mode}"),
+                text: "Request a choice.".to_owned(),
+                effort: Some(ReasoningPreset::Low),
+                service_tier: None,
+                plan_mode: false,
+                goal_objective: None,
+                attachment_handles: vec![],
+            })
+            .await
+            .expect("turn");
+        let pending_id = pending_id("server-rui", &params);
+        let answer = if mode == "native_rui" {
+            PendingUserInputAnswer::Option {
+                option_id: user_input_option_id(&params, "choice", 0),
             }
-            Err(error) => panic!("unexpected RUI error: {}", error.code),
+        } else {
+            PendingUserInputAnswer::Other {
+                text: "Another safe path".to_owned(),
+            }
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match supervisor
+                .respond_pending(CodexPendingResponseRequest {
+                    workspace_id: "workspace".to_owned(),
+                    pending_id: pending_id.clone(),
+                    response: PendingResponse::UserInput {
+                        answers: std::collections::BTreeMap::from([(
+                            "choice".to_owned(),
+                            answer.clone(),
+                        )]),
+                    },
+                })
+                .await
+            {
+                Ok(_) => break,
+                Err(error) if error.code == "CODEX-PENDING-INVALID" => {
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "pending RUI missing for {mode}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("unexpected RUI error for {mode}: {}", error.code),
+            }
         }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while {
+            let state = read_state(&fixture.state).await;
+            !(state.contains(marker) && state.contains("native_rui_resolved_sent"))
+        } {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "RUI response missing for {mode}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        supervisor.shutdown().await;
     }
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while {
-        let state = read_state(&fixture.state).await;
-        !(state.contains("native_rui_answered") && state.contains("native_rui_resolved_sent"))
-    } {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "RUI response missing"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    supervisor.shutdown().await;
 }
 
 #[tokio::test]

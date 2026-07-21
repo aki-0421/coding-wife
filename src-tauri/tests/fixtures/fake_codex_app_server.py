@@ -1004,7 +1004,7 @@ def main():
                         },
                     }
                 )
-            if MODE == "native_rui":
+            if MODE in ("native_rui", "native_rui_other"):
                 send(
                     {
                         "id": "server-rui",
@@ -1153,10 +1153,17 @@ def main():
                 record("unknown_request_rejected")
             continue
         if message_id == "server-rui":
+            expected_answer = (
+                "Another safe path" if MODE == "native_rui_other" else "Continue"
+            )
             if message.get("result", {}).get("answers", {}).get("choice") == {
-                "answers": ["Another safe path"]
+                "answers": [expected_answer]
             }:
-                record("native_rui_answered")
+                record(
+                    "native_rui_other_answered"
+                    if MODE == "native_rui_other"
+                    else "native_rui_option_answered"
+                )
                 send(
                     {
                         "method": "serverRequest/resolved",

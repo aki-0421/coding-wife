@@ -2643,7 +2643,9 @@ describe("WorkspaceShell", () => {
         pendingId: "pending-decision",
         response: {
           type: "user_input",
-          answers: { scope: ["bounded"] },
+          answers: {
+            scope: { type: "option", optionId: "bounded" },
+          },
         },
       }),
     )
@@ -2836,7 +2838,9 @@ describe("WorkspaceShell", () => {
         pendingId: "pending-decision",
         response: {
           type: "user_input",
-          answers: { scope: ["Keep the public API unchanged"] },
+          answers: {
+            scope: { type: "other", text: "Keep the public API unchanged" },
+          },
         },
       }),
     )

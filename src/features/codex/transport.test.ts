@@ -158,7 +158,9 @@ describe("DemoCodexTransport", () => {
           pendingId: "demo-turn-1-decision",
           response: {
             type: "user_input",
-            answers: { scope: ["Keep the public API unchanged"] },
+            answers: {
+              scope: { type: "other", text: "Keep the public API unchanged" },
+            },
           },
         }),
       ).resolves.toEqual({ accepted: true })

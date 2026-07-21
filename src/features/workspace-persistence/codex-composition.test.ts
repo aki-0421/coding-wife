@@ -365,7 +365,9 @@ describe("CodexComposedWorkspaceViewAdapter", () => {
           pendingId: decision.pendingId,
           response: {
             type: "user_input",
-            answers: { scope: ["Keep the public API unchanged"] },
+            answers: {
+              scope: { type: "other", text: "Keep the public API unchanged" },
+            },
           },
         }),
       ).resolves.toBe(true)

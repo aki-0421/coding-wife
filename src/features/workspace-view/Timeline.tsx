@@ -35,7 +35,11 @@ import type {
   WorkspaceLifecycle,
   WorkspaceTimelineItem,
 } from "@/features/workspace-view/types"
-import type { ApprovalDecision, PendingRequestView } from "@/lib/contracts"
+import type {
+  ApprovalDecision,
+  PendingRequestView,
+  PendingUserInputAnswer,
+} from "@/lib/contracts"
 import { unicodeScalarCount } from "@/lib/public-text"
 import { cn } from "@/lib/utils"
 
@@ -52,7 +56,7 @@ interface TimelineProps {
   ) => Promise<boolean>
   readonly onAnswerDecision: (
     request: PendingRequestView,
-    answers: Readonly<Record<string, readonly string[]>>,
+    answers: Readonly<Record<string, PendingUserInputAnswer>>,
   ) => Promise<boolean>
   readonly onInterrupt: () => boolean | void | Promise<boolean | void>
   readonly onOpenDiagnostics: () => void
@@ -306,11 +310,12 @@ function PendingRequestCard({
       Object.fromEntries(
         request.questions.map((question) => [
           question.id,
-          [
-            answers[question.id] === otherAnswerId
-              ? (otherAnswers[question.id]?.trim() ?? "")
-              : (answers[question.id] ?? ""),
-          ],
+          answers[question.id] === otherAnswerId
+            ? {
+                type: "other",
+                text: otherAnswers[question.id]?.trim() ?? "",
+              }
+            : { type: "option", optionId: answers[question.id] ?? "" },
         ]),
       ),
     )

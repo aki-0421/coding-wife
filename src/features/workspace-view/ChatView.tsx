@@ -27,7 +27,11 @@ import type {
   WorkspaceRecord,
   WorkspaceTimelineItem,
 } from "@/features/workspace-view/types"
-import type { ApprovalDecision, PendingRequestView } from "@/lib/contracts"
+import type {
+  ApprovalDecision,
+  PendingRequestView,
+  PendingUserInputAnswer,
+} from "@/lib/contracts"
 import { cn } from "@/lib/utils"
 
 interface ChatViewProps {
@@ -57,7 +61,7 @@ interface ChatViewProps {
   ) => Promise<boolean>
   readonly onAnswerDecision: (
     request: PendingRequestView,
-    answers: Readonly<Record<string, readonly string[]>>,
+    answers: Readonly<Record<string, PendingUserInputAnswer>>,
   ) => Promise<boolean>
   readonly onCaptureContext: (
     source: ContextSnapshotItem["source"],
