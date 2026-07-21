@@ -48,6 +48,8 @@ last_verified: 2026-07-22 JST
 
 ## 3. 3分未満のデモ動画
 
+YouTubeへのupload・visibility設定・公開確認は、提出者が行うmanual handoffです。自動upload予定として扱いません。
+
 - [x] [13-final-video-production-runbook.md](./13-final-video-production-runbook.md) の受理済み2:45 scriptで収録する
 - [x] 実native Tauri app、real WKWebView / IPC / Rust backend、authenticated Codex runtime、disposable repositoryを使う
 - [x] Solがmain taskを実行し、real commitと3件のpassing testを作る場面を見せる
@@ -77,6 +79,8 @@ last_verified: 2026-07-22 JST
 Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updateは`/feedback`を実行するよう案内します。今回のprimary threadはprivate evidenceで照合済みで、`/feedback` uploadも成功しました。ID値はpublic documentationへ書かず、Devpost formへprivate recordから転記します。
 
 ## 5. Devpost form
+
+このsectionは提出者がlogged-in formで手動実施します。自動入力・自動submit予定として扱いません。
 
 - [ ] Project title: **Coding Wife**
 - [ ] Taglineを入力する

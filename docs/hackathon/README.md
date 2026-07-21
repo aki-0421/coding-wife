@@ -43,14 +43,14 @@ source_of_truth: https://openai.devpost.com/rules
 
 Developer Tools track、public repository、MIT license、third-party notices は準備済みです。現行productは`gpt-5.6-sol`のmain coding session、`gpt-5.6-luna`のpresence director、`gpt-5.6-terra`のcommit explainerを分離しています。Product source は commit [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3) に固定し、同commitを指す[macOS judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)を公開・匿名検証済みです。主要build threadの`/feedback` uploadも成功し、Session IDはprivate evidenceへ保存済みです。
 
-Repository defaultの`develop`と通常release `v0.1.5`は古いpreviewです。現行3モデル連携や最新UIの審査には、上記immutable sourceとjudge prereleaseだけを使います。受理済み2:45 masterはlocalで完成していますが、Public YouTube公開とDevpost formのsubmitはまだ完了していません。
+Repository defaultの`develop`と通常release `v0.1.5`は古いpreviewです。現行3モデル連携や最新UIの審査には、上記immutable sourceとjudge prereleaseだけを使います。受理済み2:45 masterはlocalで完成していますが、Public YouTube公開とDevpost formのsubmitは提出者によるmanual handoffとして未完了です。
 
 締切までの critical path は次の順です。
 
-1. 受理済みの3分未満・音声付きmasterをYouTubeへuploadし、visibilityを**Public**にする。
+1. 提出者が受理済みの3分未満・音声付きmasterをYouTubeへmanual uploadし、visibilityを**Public**にする。
 2. 処理済みvideoをlogged-out状態で再生し、映像・音声・字幕・URLを確認する。
-3. Devpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを入力する。
-4. Devpost formをsubmitし、My Projectsで緑の**Submitted**表示を確認する。
+3. 提出者がDevpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを手動入力する。
+4. 提出者がDevpost formを手動submitし、My Projectsで緑の**Submitted**表示を確認する。
 5. video、repository、release、submission URLをlogged-out / fresh environmentで最終確認する。
 
 hosted demo、judge account、screenshots は一律必須ではありません。選んだ testing path または logged-in form が要求する場合だけ用意します。

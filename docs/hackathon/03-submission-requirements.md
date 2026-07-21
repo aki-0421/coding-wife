@@ -200,19 +200,19 @@ Coding Wife は Developer Tools track の desktop app なので、installation i
 | Public release v0.1.5 | 参考用のみ | default `develop`と同様に古いpreviewのため、現行3モデル連携や最新UIの証拠には使わない |
 | Frozen product source | 完了 | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3)をimmutable judge sourceとして公開済み |
 | No-rebuild release | 完了 | [macOS judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)を公開し、匿名download・SHA/manifest/byte一致・canonical verify・install/first-launch smokeを確認済み。release suiteは39/39 PASS |
-| Public YouTube video | 未完了 | 3分未満、音声付き、Public で upload する |
+| Public YouTube video | manual handoff未完了 | 提出者が3分未満、音声付きのmasterをPublicでuploadする |
 | Primary Session ID | 入力待ち | 主要build threadを照合し、`/feedback` upload成功とSession IDをprivate evidenceへ保存済み。Devpost fieldへ入力する |
-| Devpost submission | 未完了 | form 入力後、draft ではなく Submitted を確認する |
+| Devpost submission | manual handoff未完了 | 提出者がformを手動入力・submitし、draftではなくSubmittedを確認する |
 | Anonymous smoke test | 一部完了 | repository・immutable source・release・3 assetsはPASS。video・提出URLは公開後に確認する |
 
 ## 11. 提出当日の順序
 
 提出直前の Update 45402 は、動画を早く upload し、project を fresh に test し、提出後に Devpost の My Projects で **Submitted** 表示を確認するよう案内しています。
 
-1. 完成済み動画を早めにYouTubeへuploadし、処理完了後にPublic URLを取得する。
+1. 提出者が完成済み動画を早めにYouTubeへmanual uploadし、処理完了後にPublic URLを取得する。
 2. 動画をlogged-out状態で再生し、3分未満・音声・字幕・privacyを確認する。
-3. Devpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを入力する。
-4. Devpost formをsubmitし、My Projectsで緑の**Submitted**表示を確認する。
+3. 提出者がDevpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを手動入力する。
+4. 提出者がDevpost formを手動submitし、My Projectsで緑の**Submitted**表示を確認する。
 5. project、release、repository、動画をfresh / logged-out状態で確認する。
 6. deadline前に、公開リンクとrepository permissionsをもう一度確認する。
 

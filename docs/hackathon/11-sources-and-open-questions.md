@@ -188,9 +188,9 @@ Support:
 | Frozen product source | 完了 | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3)をimmutable judge sourceとして公開済み |
 | Current no-rebuild release | 完了 | [macOS judge prerelease](https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22)、SHA-256、匿名3 asset検証、39/39 release suite、install/first-launch smokeがPASS |
 | Accepted local video master | 完了 | 165.000秒、H.264/AAC、英語音声・焼き込み字幕、全4,950 frame privacy検査、4 screenshotsを受理済み |
-| Public YouTube video | 未完了 | 3分未満・音声付き・Public で公開する |
+| Public YouTube video | manual handoff未完了 | 提出者が3分未満・音声付きmasterをPublicで公開する |
 | Primary Codex Session ID | 入力待ち | primary thread照合・private evidence保存・`/feedback` upload成功。値はpublic docsへ書かずDevpostへ転記する |
-| Devpost form / Submitted state | 未完了 | form を submit し、My Projects で確認する |
+| Devpost form / Submitted state | manual handoff未完了 | 提出者がlogged-in formを手動submitし、My Projectsで確認する |
 | Anonymous smoke | 一部完了 | repository・immutable source・release・downloaded DMGはPASS。video・提出URLは公開後に確認する |
 
 hosted demo、judge account、screenshots は、選んだ testing path または logged-in submission form が要求する場合だけ用意します。絶対パス、API key、個人情報を提出資料へ記載しません。

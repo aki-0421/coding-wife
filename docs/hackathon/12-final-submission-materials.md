@@ -11,7 +11,7 @@ last_verified: 2026-07-22 JST
 
 # Coding Wife final submission materials
 
-This is the current handoff for the OpenAI Build Week submission. It describes the implemented three-model product, records completed public artifacts, and keeps the remaining YouTube and Devpost values visibly marked `PENDING`. Review the English description aloud and make only factual, voice-preserving edits before pasting it into Devpost.
+This is the current handoff for the OpenAI Build Week submission. It describes the implemented three-model product, records completed public artifacts, and keeps the remaining manual YouTube and Devpost handoff values visibly marked `PENDING`. Review the English description aloud and make only factual, voice-preserving edits before pasting it into Devpost.
 
 Authority order:
 
@@ -32,11 +32,11 @@ Authority order:
 | Primary full three-model judge platform | macOS 14+ Apple Silicon |
 | Packaging previews | Windows 11 x64 and Ubuntu 22.04 / Debian 12-compatible Linux x64; install-smoked artifacts only, without a production Luna/Terra parity claim |
 | Current macOS Apple Silicon judge release URL and SHA-256 | https://github.com/aki-0421/coding-wife/releases/tag/build-week-submission-2026-07-22 — `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f` |
-| Demo video URL | `PENDING` |
+| Demo video URL | `PENDING — entrant manual handoff` |
 | Primary Codex Session ID | **READY — verified private evidence; copy into Devpost without publishing it here** |
-| Devpost project URL | `PENDING` |
+| Devpost project URL | `PENDING — entrant manual handoff` |
 | Entrant / team record | `PENDING` |
-| Submission state and confirmation evidence | `PENDING` |
+| Submission state and confirmation evidence | `PENDING — entrant manual handoff` |
 | Frozen product source commit | [`44d9aab779b9a66ed3f02d0016af061a71ba79c3`](https://github.com/aki-0421/coding-wife/tree/44d9aab779b9a66ed3f02d0016af061a71ba79c3) |
 | Logged-out anonymous smoke result | Repository, immutable source, release, all three assets, checksum, manifest, byte identity, canonical DMG verification, and install/first-launch smoke: **PASS**. YouTube and Devpost: `PENDING` |
 
