@@ -171,12 +171,14 @@ capabilities:
 ### プロセス所有
 
 - Rust が codex app-server --listen stdio:// を直接 spawn する。
+- startup restore後にtrusted active workspaceとverified binaryが揃った時点でmain App Serverを1件起動し、workspaceごとのthreadを同じstdio connection上で管理する。workspace選択ではprocessを停止・再spawn・再initializeしない。
+- active/pending turn中のworkspaceと表示中workspaceは異なってよい。process supervisorはactive turnのworkspace contextをterminalまで保持し、UI selectionだけを切り替える。terminal後に現在selectionのcontextへ移る。
 - analytics-default-enabled は指定せず、App Server の既定 off を維持する。
 - stdout は JSONL protocol 専用、stderr は診断専用として別 task で読む。
 - stdin 書き込みは単一 writer task に直列化する。
 - active workspace generation を全 request、pending call、normalized event に関連付ける。
-- workspace 切替時は進行中 turn を止め、旧 generation の通知を UI と履歴へ流さない。
-- schema に shutdown method は無い。終了は stdin close、最大 2 秒待機、SIGTERM、残り時間で待機、起動から 5 秒以内に process tree を強制終了する。
+- workspace切替後も進行中turnは旧workspaceで継続し、通知は旧workspace履歴へ保存するが選択中workspaceのUIへ投影しない。
+- schema に shutdown method は無い。通常終了はアプリ終了時にだけ行い、stdin close、最大 2 秒待機、SIGTERM、残り時間で待機、shutdown開始から5秒以内にprocess treeを強制終了する。binary identity変更、crash、protocol violation時のreplacementも旧process treeの終了収束後にだけ開始する。
 
 子プロセスへ渡す環境変数は allowlist 化する。ただし主 Codex がユーザーの開発ツールを実行できるよう、PATH、HOME、SHELL、locale、temporary directory、明示された CODEX_HOME と必要な proxy / certificate 変数は保持できる設計にする。値はログへ出さない。binary自動探索時だけ、利用者がterminalで利用するPATHを復元する目的でdefault shell profileをbounded実行できるが、その環境とprofile出力をCodex child、WebView、履歴、通常logへ転用しない。CODEX_ACCESS_TOKEN 等を許可する場合も名称だけを診断し、値は絶対に保持・表示しない。
 

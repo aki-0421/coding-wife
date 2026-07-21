@@ -216,7 +216,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | stale event | sequence gap、duplicate、workspace mismatch | affected pointでingestion pause、diagnostic | local history、Stop | supervisorがgap解消またはterminal error |
 | character fallback | WebGL/model/render/audio failure | staticまたはtext-only、visible reason、Chatは継続 | Chat全操作、Settings | retryまたは別model選択 |
 | repository blocked | healthが`missing` / `changed` / `unreadable` / `read_only` / `stale_branch` | header/rowのlocalized status、保持timeline/draft、Send不可理由 | Commit/Settings、Repair/Recheck | `healthy`のfresh snapshot |
-| workspace切替確認 | old workspaceにactive/pending turnがあり別workspaceを選択/Send | new selectionを保留し、old workspaceをactive表示したまま`停止して切替 / Stop and Switch`、`戻る / Back`だけ | 明示2操作だけ | exact old terminal interrupt + cleanup、またはBack |
+| background execution閲覧 | old workspaceにactive/pending turnがある状態で別workspaceを選択 | dialogを出さずnew workspaceへ移動し、old rowのrunning表示を維持する。new viewはworkspace固有timeline/draftだけを表示し、Composerはold workspace名を伴うbusy理由でSendをdisabledにする | read-only閲覧、draft/context編集、old workspaceへ戻る | old turn terminal後にcurrent selectionを同じApp Serverへactivate |
 | commit説明準備中 | app controllerがverified commitを`queued` / `running`としているが明示presentation intentはない | background生成status、「詳しく教えて」、`Cancel explanation generation`。caption/live region/TTSは0件でmain timelineへmessageを追加しない | read-only tab、詳しく教えて、生成cancel | 明示intent、generated/canceled/failed/unavailable/selection変更 |
 | commit説明表示中 | `user_request` / `user_retry` / 明示Showのintentとcontroller stateがexact一致する | semantic `working`、streamed HTML caption、`Close explanation`、queued/running時だけ`Cancel explanation generation`、mute。active tabは維持 | read-only tab、Close、条件付き生成Cancel、mute | generated/canceled/failed/unavailable/selection/locale/workspace変更、Stop、Close |
 | demo memory | browser previewの決定的memory adapter | Chatには履歴badgeを表示せず、headerの`Preview only`とDiagnosticsでruntime/durabilityを識別する | preview内のworkspace、draft、timeline操作 | native adapterへ切替またはpreview再起動 |
@@ -232,7 +232,7 @@ evidence failure、blocking decision、permission errorはCharacterより表示�
 | decision回答 | unanswered、option valid | idempotent answer event、turn resume | Holdなら未回答維持 |重複送信せず選択を保持 | `CODE-F-062`〜`CODE-F-069` |
 | interrupt | decisionまたはrunning turn | main/support停止、completed/partial/unknownを分類 |確認cancelで継続 | Interruptedとしてreviewへ誘導 | `SUP-F-057`〜`SUP-F-061` |
 | attachment追加 | picker起動可能 | validated handleをdraftへ追加 | draft不変、errorなし | chipを追加せずreason表示 | `CODE-F-053`, `APP-F-066`〜`APP-F-069` |
-| workspace切替 | 別workspace選択、old active/pending turnなし、または確認済みinterrupt | old presentation/audio停止後、new workspaceのdraft、anchor ID/sequence/offsetをatomic復元。app-globalなcharacter選択とpack-scoped設定は維持 | `戻る`でold state完全維持 | old workspaceをactiveのままerror、new activation 0件 | `WORK-F-058`〜`WORK-F-060` |
+| workspace切替 | 別workspace選択 | old presentation/audio停止後、new workspaceのdraft、anchor ID/sequence/offsetをatomic復元。old turnがrunningならexecutionは背景継続し、app-globalなcharacter選択とpack-scoped設定は維持 | 非該当 | selectionだけoldへ戻し、old executionは変更しない | `WORK-F-058`〜`WORK-F-060` |
 | mute切替 | audio/character利用可能 |即時再生停止または次eligible textから再開、設定保存 | 非該当 | text表示は継続 | `NARR-F-068`〜`NARR-F-075` |
 | Commit tabを開く | workspace valid | same workspaceの[S-003](S-003_session-evidence.md)を表示し、初回active表示時だけread-only observationを取得 | 非該当 | Chatを維持してerror | `GIT-F-072`〜`GIT-F-089` |
 
@@ -262,7 +262,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 | session開始/turn送信 | Rust → Codex stdio | `start_or_send_main_turn` | active workspace、Codex executable、typed payload、1 active execution。public instruction 32,000 scalarとcomposed text 80,000 scalarを別々に検証し、imageは`localImage`、fileは`mention`へRust内で変換し、`coding-wife-commit-work`を各turnのexplicit skill inputへ1件注入する | spawn前ならdraft維持 | 上限/NUL/control違反またはskill version/digest/注入を証明できなければturnを開始せず、thread自動重複作成なし |
 | Stop | WorkspaceShell → Rust supervisor / NarrationController | `codex_turn_interrupt` + narration `turn_stop` dismiss | owned process/thread/turn ID、active narration presentation generation。support explanation controller cancelへは転送しない | confirmation cancelは継続 | timeout後process tree停止、Interrupted。caption/TTS失敗でもmain interruptを妨げない |
 | event購読 | Rust event bridge | `subscribe_workspace_events` | workspace ID、monotonic sequence、schema allowlist | route leaveでUI購読だけ解除 | gapでpauseし診断表示 |
-| workspace切替 | WorkspaceShell → Rust supervisor/DB | `interrupt_and_switch_workspace` | old workspace/thread/turn/generation、pending new workspace、terminal cleanup proof | old selection/draft/anchor/caption/TTS維持 | old workspaceをactiveのままtyped error |
+| workspace切替 | WorkspaceShell → history selection / Rust supervisor | `workspace_select` + idle時`codex_connect` | new workspace ID。active turn中はhistory selectionだけ、terminal後は同じApp Server processのworkspace contextをactivate | selection失敗時だけold viewへ戻す | old executionを変更せずtyped selection/connect error |
 | terminal Git observation handoff | Codex composition → Rust Git observer | `observe_terminal_work_unit` | validated terminal authority、work unit ID、workspace ID/generation、source event ID/sequence/time。observerがbefore/after HEAD、status、new commitとverification/decision/risk evidenceをread-onlyで相関し、同一eventをexact replayだけに制限 | terminal前は開始しない | observation/HIST失敗をUnavailable/Unknownにし、main resultとGit状態を変更しない |
 | verified commit explanation handoff | App Server event bridge → Rust Git observer → app-owned explanation controller | `intercept_auto_verified_commit_for_explanation` | normalized Git commit command success、workspace generation、before/after HEAD、新しい到達可能SHA、commit evidence ID。`CommitExplanationRequestedV1(trigger=auto_verified_commit)`をmain session外で1件だけ作る | SHA検証前は開始しない | controllerを`failed` / `unavailable`にし、main conversationへrequest/result/failureを注入しない |
 | attachment選択 | Tauri dialog → Rust | `select_workspace_attachments` | file picker、canonical workspace root、size/type |変更なし | invalid fileをhandle化しない |
@@ -327,7 +327,7 @@ composerへsecret patternを検出した場合は送信前に対象範囲とreda
 - decisionはheading、説明、option、Other、Hold/Interrupt/Approve、submitのDOM順とし、keyboardだけで完結する。
 - Live2D canvasはpresentation扱いとし、state、uncertainty、waiting、verificationをvisible HTML captionへ複製する。
 - Context conflictは手元draftを保持し、Reload/CancelのDOM順、section単位のfocus return、polite saved/assertive error regionをja/enで同等にする。
-- workspace切替確認は`戻る`へ初期focus、dialog内focus trap、Escape=`戻る`とし、成功後はnew view heading、失敗/Cancel後は起点workspace itemまたはSendへfocusを戻す。
+- workspace切替は確認dialogを挟まず、選択したworkspace rowを`aria-current`にしてnew view headingへ移る。background executionは旧rowのrunning iconとaccessible nameで識別し、新viewへStopやpending response controlを誤表示しない。
 - commit background生成statusはcaption live regionへ流さず、明示presentation開始後の確定chunkだけをpolite、terminal errorだけをassertiveに1回通知する。
 - muteは音量iconだけにせず`Mute / ミュート`と現在値をaccessible nameへ含める。
 - 200% text zoomではChatを維持し、Characterが消えてもstatusとmuteへ到達できる。
