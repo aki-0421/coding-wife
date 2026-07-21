@@ -96,13 +96,16 @@ Luna schedulerはApp lifetimeに1個、実行capacity 1、待機slot 1とする�
 
 priorityは`decision_wait` > `terminal_failure` > `recoverable_failure` > `commit_ready` > `turn_completed` > `long_milestone`とする。同一workspace generationでは通常caption開始間隔を30秒以上にし、`decision_wait`と`terminal_failure`だけcooldownを迂回できる。同じtriggerの重複は1件へまとめる。active中の新候補は待機slotをlatest candidateへ置換し、低priority candidateが高priority candidateを置換してはならない。
 
-`long_milestone`はturn開始45秒後に一度だけ候補化し、まだactiveなら120秒後に一度だけ再候補化する。新しいworkspace generation、workspace切替、turn stop/interruption、app closeでactiveとqueued requestをstale化する。support processをbounded cancelし、late responseをevent、caption、cue、TTSへ適用しない。decision解決後のlate `decision_wait`も同様に破棄する。
+`long_milestone`はturn開始45秒後に一度だけ候補化し、まだactiveなら120秒後に一度だけ再候補化する。新しいworkspace generation、workspace切替、turn stop/interruption、app closeでactiveとqueued requestをstale化する。Support runtimeのrelease verification、sandbox probe、isolation probe、runtime初期化を含む構築開始時点からcancel tokenとprocess ownershipを登録し、通常終了は5秒以内、force cleanupは500ms以内にprocess treeとprivate run directoryを収束させる。security probeをskipまたは弱化してはならない。late responseをevent、caption、cue、TTSへ適用せず、decision解決後のlate `decision_wait`も同様に破棄する。
 
 verified commitの`commit_ready`は、main work unit、repository identity、before/current HEAD、exact commit SHAをnativeが検証した後だけ候補化する。App Server text、raw JavaScript、tool output、HEAD差分単体をtriggerにしない。
+`commit_ready`は正常完了したwork unitのterminal proof内で確定するため、その直後の同じ`turn_completed`通知だけではstale化しない。failed、stop、interruption、cancelで終わったwork unitからは`commit_ready`を候補化せず、既存候補も通常どおりstale化する。
 
 ## Public event and frontend gate
 
 strict validation済みのLuna resultだけをTauri channel `coding-wife://presence-direction`へ次のeventとして出す。unknown fieldを許可しない。
+
+Frontendはactive workspaceとlocaleが変わるたび、Tauri command `presence_set_scope`へ`{ request: { schemaVersion: 1, workspaceId, workspaceGeneration, locale } }`だけを送る。native schedulerはこのscopeと完全一致するnormalized eventだけを受理し、scope変更時はactive process、待機slot、milestone timerをstale化する。command失敗はmain session、deterministic character state、Terraのcommit説明を停止しない。
 
 ```ts
 interface PresenceDirectionEventV1 {
@@ -160,4 +163,5 @@ Luna unavailable、queue overflow、timeout、cancel、schema/privacy violation�
 4. capacity 1、latest coalesce、priority、30秒cooldown、45/120秒milestone、generation/decision/stop cancelを決定論的clockで検証する。
 5. tool event、reasoning、routine progressではLunaを起動しない。verified commitだけが`commit_ready`になる。
 6. active commit explanationがLuna caption/TTSより優先され、caption visible ack前、reduced motion、mute、stale workspaceではspeech/motionを開始しない。
+7. Lunaのrelease verification、sandbox probe、isolation probe、runtime初期化の各構築段階でapp closeとforce cleanupを再現し、process tree、private run directory、scheduler active ownershipが期限内に0件へ収束する。
 7. support release proofがrole別model、tool 0、permission、skill/schema hashを照合し、失敗時もmain turnが完走する。

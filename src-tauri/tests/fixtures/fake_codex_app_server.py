@@ -494,6 +494,9 @@ def main():
         return 0
     if args and args[0] == "sandbox":
         record("support_sandbox_denied")
+        if MODE == "support_sandbox_slow_grandchild":
+            spawn_support_grandchild()
+            time.sleep(120)
         return 1
     if not args or args[0] != "app-server":
         return 2
@@ -567,6 +570,9 @@ def main():
                 record("readiness_account_read_ignored")
                 continue
             if EXECUTION_CLASS == "support":
+                if MODE == "support_initialization_slow_grandchild":
+                    spawn_support_grandchild()
+                    continue
                 auth = pathlib.Path(os.environ.get("CODEX_HOME", "")) / "auth.json"
                 try:
                     auth_valid = (
@@ -1037,6 +1043,9 @@ def main():
                         },
                     }
                 )
+                if MODE == "support_probe_slow_grandchild" and probe_turn:
+                    spawn_support_grandchild()
+                    continue
                 if (
                     MODE == "support_ignore_interrupt_grandchild"
                     and not probe_turn

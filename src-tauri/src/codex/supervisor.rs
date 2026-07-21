@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, RwLock};
+use std::sync::{Arc, Mutex as StdMutex, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -23,6 +23,7 @@ use super::main_work_unit::{
     MainWorkUnitRuntime, MainWorkUnitStart, MainWorkUnitTerminal, MainWorkUnitTerminalState,
 };
 use super::normalizer::EventNormalizer;
+use super::presence::PresenceEventObserver;
 use super::process::{spawn_process, ProcessError, ProcessRuntime};
 use super::protocol::{
     account_read_params, client_notification, config_read_params, initialize_params,
@@ -156,6 +157,7 @@ struct SupervisorInner {
     app_handle: RwLock<Option<AppHandle>>,
     resource_directory: RwLock<Option<PathBuf>>,
     main_work_unit_runtime: RwLock<Option<Arc<dyn MainWorkUnitRuntime>>>,
+    presence_observer: RwLock<Option<Weak<dyn PresenceEventObserver>>>,
     dynamic_tools: DynamicToolRegistry,
 }
 
@@ -319,6 +321,7 @@ impl CodexSupervisor {
                 app_handle: RwLock::new(None),
                 resource_directory: RwLock::new(None),
                 main_work_unit_runtime: RwLock::new(None),
+                presence_observer: RwLock::new(None),
                 dynamic_tools: DynamicToolRegistry,
             }),
         }
@@ -345,6 +348,23 @@ impl CodexSupervisor {
             .main_work_unit_runtime
             .write()
             .expect("main work unit runtime lock poisoned") = Some(runtime);
+    }
+
+    pub(crate) fn attach_presence_observer(&self, observer: &Arc<dyn PresenceEventObserver>) {
+        *self
+            .inner
+            .presence_observer
+            .write()
+            .expect("presence observer lock poisoned") = Some(Arc::downgrade(observer));
+    }
+
+    fn presence_observer(&self) -> Option<Arc<dyn PresenceEventObserver>> {
+        self.inner
+            .presence_observer
+            .read()
+            .expect("presence observer lock poisoned")
+            .as_ref()
+            .and_then(Weak::upgrade)
     }
 
     fn main_work_unit_runtime(&self) -> Option<Arc<dyn MainWorkUnitRuntime>> {
@@ -384,6 +404,9 @@ impl CodexSupervisor {
     async fn invalidate_main_work_unit_generation(&self, generation: u64) {
         if let Some(runtime) = self.main_work_unit_runtime() {
             runtime.invalidate_generation(generation).await;
+        }
+        if let Some(observer) = self.presence_observer() {
+            observer.invalidate_generation(generation).await;
         }
     }
 
@@ -2144,10 +2167,14 @@ impl CodexSupervisor {
             (state.runtime.clone(), state.generation)
         };
         self.invalidate_main_work_unit_generation(generation).await;
-        let converged = if let Some(runtime) = runtime.as_ref() {
+        let runtime_converged = if let Some(runtime) = runtime.as_ref() {
             runtime.shutdown_checked().await.is_ok()
         } else {
             true
+        };
+        let presence_converged = match self.presence_observer() {
+            Some(observer) => observer.shutdown().await,
+            None => true,
         };
         let mut state = self.inner.state.lock().await;
         if let (Some(current), Some(stopped)) = (state.runtime.as_ref(), runtime.as_ref()) {
@@ -2157,11 +2184,11 @@ impl CodexSupervisor {
         }
         state.diagnostic.child_state = ChildState::Stopped;
         state.diagnostic.health = CodexHealth::Disconnected;
-        converged
+        runtime_converged && presence_converged
     }
 
     pub async fn force_shutdown_now(&self) -> bool {
-        let runtime = {
+        let (runtime, generation) = {
             let mut state = self.inner.state.lock().await;
             state.shutdown_requested = true;
             state.restart_times.clear();
@@ -2173,15 +2200,23 @@ impl CodexSupervisor {
             state.main_work_units.clear();
             state.diagnostic.child_state = ChildState::Stopped;
             state.diagnostic.health = CodexHealth::Disconnected;
-            state.runtime.take()
+            (state.runtime.take(), state.generation)
         };
-        if let Some(runtime) = runtime {
+        if let Some(main_work_unit) = self.main_work_unit_runtime() {
+            main_work_unit.invalidate_generation(generation).await;
+        }
+        let runtime_converged = if let Some(runtime) = runtime {
             runtime
                 .force_shutdown_and_wait(Duration::from_millis(400))
                 .await
         } else {
             true
-        }
+        };
+        let presence_converged = match self.presence_observer() {
+            Some(observer) => observer.force_shutdown_now().await,
+            None => true,
+        };
+        runtime_converged && presence_converged
     }
 
     async fn run_signal_loop(&self, mut receiver: mpsc::Receiver<RuntimeSignal>) {
@@ -2795,6 +2830,9 @@ impl CodexSupervisor {
     }
 
     fn emit_event(&self, event: &CodexEvent) {
+        if let Some(observer) = self.presence_observer() {
+            observer.observe(event);
+        }
         let app = self
             .inner
             .app_handle

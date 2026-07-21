@@ -14,6 +14,7 @@ use crate::codex::main_work_unit::{
     MainWorkUnitFuture, MainWorkUnitLease, MainWorkUnitRuntime, MainWorkUnitStart,
     MainWorkUnitTerminal, MainWorkUnitTerminalState,
 };
+use crate::codex::presence::VerifiedCommitPresenceSink;
 
 use super::service::GitReviewService;
 use super::trusted::{TrustedCommitCandidate, TrustedCommitCandidateInput, TrustedCommitProof};
@@ -39,6 +40,22 @@ pub(crate) trait VerifiedCommitExplanationSink: Send + Sync {
         commit_evidence_id: String,
         evidence: CommitEvidenceV1,
     ) -> ExplanationSinkFuture<'a, Result<(), ()>>;
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct NoopVerifiedCommitPresenceSink;
+
+#[cfg(test)]
+impl VerifiedCommitPresenceSink for NoopVerifiedCommitPresenceSink {
+    fn verified_commit<'a>(
+        &'a self,
+        _workspace_id: String,
+        _workspace_generation: u64,
+        _source_event_id: String,
+    ) -> ExplanationSinkFuture<'a, ()> {
+        Box::pin(async move {})
+    }
 }
 
 impl VerifiedCommitExplanationSink for CommitExplanationTrustedEnqueuer {
@@ -97,6 +114,7 @@ struct RuntimeData {
 pub(crate) struct GitReviewMainWorkUnitRuntime {
     git_review: GitReviewService,
     explanation: Arc<dyn VerifiedCommitExplanationSink>,
+    presence: Arc<dyn VerifiedCommitPresenceSink>,
     data: Mutex<RuntimeData>,
 }
 
@@ -104,17 +122,32 @@ impl GitReviewMainWorkUnitRuntime {
     pub(crate) fn production(
         git_review: GitReviewService,
         explanation: CommitExplanationTrustedEnqueuer,
+        presence: Arc<dyn VerifiedCommitPresenceSink>,
     ) -> Self {
-        Self::with_dependencies(git_review, Arc::new(explanation))
+        Self::with_all_dependencies(git_review, Arc::new(explanation), presence)
     }
 
+    #[cfg(test)]
     pub(crate) fn with_dependencies(
         git_review: GitReviewService,
         explanation: Arc<dyn VerifiedCommitExplanationSink>,
     ) -> Self {
+        Self::with_all_dependencies(
+            git_review,
+            explanation,
+            Arc::new(NoopVerifiedCommitPresenceSink),
+        )
+    }
+
+    pub(crate) fn with_all_dependencies(
+        git_review: GitReviewService,
+        explanation: Arc<dyn VerifiedCommitExplanationSink>,
+        presence: Arc<dyn VerifiedCommitPresenceSink>,
+    ) -> Self {
         Self {
             git_review,
             explanation,
+            presence,
             data: Mutex::new(RuntimeData::default()),
         }
     }
@@ -259,6 +292,7 @@ impl GitReviewMainWorkUnitRuntime {
     }
 
     async fn finish_work_unit(&self, lease: MainWorkUnitLease, event: MainWorkUnitTerminal) {
+        let presence_commit_ready = event.state == MainWorkUnitTerminalState::Completed;
         let context = self.data.lock().await.contexts.remove(lease.token());
         let Some(context) = context else {
             return;
@@ -308,6 +342,18 @@ impl GitReviewMainWorkUnitRuntime {
             return;
         };
         let _ = result.response;
+        let verified_commits = result.verified_commits;
+        if presence_commit_ready {
+            for verified in &verified_commits {
+                self.presence
+                    .verified_commit(
+                        context.start.workspace_id.clone(),
+                        context.start.workspace_generation,
+                        verified.commit_evidence_id.clone(),
+                    )
+                    .await;
+            }
+        }
         let Some(locale) = self
             .explanation
             .locale_for_scope(
@@ -318,7 +364,7 @@ impl GitReviewMainWorkUnitRuntime {
         else {
             return;
         };
-        for verified in result.verified_commits {
+        for verified in verified_commits {
             let evidence = self
                 .git_review
                 .prepare_explanation_evidence(PrepareCommitExplanationEvidenceRequest {

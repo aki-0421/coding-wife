@@ -47,6 +47,9 @@ use codex::commit_explanation::{
     commit_explanation_cancel, commit_explanation_get_state, commit_explanation_present,
     commit_explanation_request, commit_explanation_set_scope, CommitExplanationController,
 };
+use codex::presence::{
+    presence_set_scope, PresenceDirector, PresenceEventObserver, VerifiedCommitPresenceSink,
+};
 use codex::supervisor::CodexSupervisor;
 use codex::workspace::WorkspaceService;
 use git_review::commands::{
@@ -311,15 +314,25 @@ pub fn run() {
                 &app_data_directory,
                 &resource_directory,
             );
+            let presence_director = Arc::new(PresenceDirector::production(
+                setup_supervisor.clone(),
+                app.handle().clone(),
+            ));
+            let presence_observer: Arc<dyn PresenceEventObserver> = presence_director.clone();
+            setup_supervisor.attach_presence_observer(&presence_observer);
+            let verified_commit_presence: Arc<dyn VerifiedCommitPresenceSink> =
+                Arc::new(presence_director.verified_commit_enqueuer());
             setup_supervisor.attach_main_work_unit_runtime(Arc::new(
                 GitReviewMainWorkUnitRuntime::production(
                     git_review_service.clone(),
                     explanation_controller.trusted_enqueuer(),
+                    verified_commit_presence,
                 ),
             ));
             app.manage(history_service.clone());
             app.manage(git_review_service);
             app.manage(explanation_controller);
+            app.manage(presence_director);
             let startup_history_service = history_service.clone();
             tauri::async_runtime::spawn(async move {
                 startup_history_service.restore_startup().await;
@@ -425,6 +438,7 @@ pub fn run() {
             commit_explanation_present,
             commit_explanation_get_state,
             commit_explanation_set_scope,
+            presence_set_scope,
             character_library_get,
             character_import_pick,
             character_read_asset,

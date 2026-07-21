@@ -11,6 +11,7 @@ use crate::codex::main_work_unit::{
     MainCommandCompleted, MainCommandStarted, MainCommitProofIntent, MainCommitSource,
     MainWorkUnitRuntime, MainWorkUnitStart, MainWorkUnitTerminal, MainWorkUnitTerminalState,
 };
+use crate::codex::presence::VerifiedCommitPresenceSink;
 use crate::codex::types::MainSkillInjectionAudit;
 
 use super::history::MemoryGitReviewHistory;
@@ -61,6 +62,27 @@ impl VerifiedCommitExplanationSink for RecordingExplanationSink {
         Box::pin(async move {
             self.evidence.lock().await.push(evidence);
             Ok(())
+        })
+    }
+}
+
+#[derive(Default)]
+struct RecordingPresenceSink {
+    verified: Mutex<Vec<(String, u64, String)>>,
+}
+
+impl VerifiedCommitPresenceSink for RecordingPresenceSink {
+    fn verified_commit<'a>(
+        &'a self,
+        workspace_id: String,
+        workspace_generation: u64,
+        source_event_id: String,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            self.verified
+                .lock()
+                .await
+                .push((workspace_id, workspace_generation, source_event_id));
         })
     }
 }
@@ -179,7 +201,12 @@ async fn production_work_unit_runtime_enqueues_only_the_exact_verified_commit() 
     let history = Arc::new(MemoryGitReviewHistory::new());
     let service = service(&fixture.root, history.clone());
     let sink = Arc::new(RecordingExplanationSink::active("ja"));
-    let runtime = GitReviewMainWorkUnitRuntime::with_dependencies(service, sink.clone());
+    let presence = Arc::new(RecordingPresenceSink::default());
+    let runtime = GitReviewMainWorkUnitRuntime::with_all_dependencies(
+        service,
+        sink.clone(),
+        presence.clone(),
+    );
     let lease = runtime
         .begin(runtime_start())
         .await
@@ -234,6 +261,12 @@ async fn production_work_unit_runtime_enqueues_only_the_exact_verified_commit() 
     assert_eq!(evidence[0].selection_version, 1);
     assert_eq!(history.commit_count(), 1);
     drop(evidence);
+    let verified_presence = presence.verified.lock().await;
+    assert_eq!(verified_presence.len(), 1);
+    assert_eq!(verified_presence[0].0, "workspace-fixture");
+    assert_eq!(verified_presence[0].1, 1);
+    assert_eq!(verified_presence[0].2, format!("commit-{committed_sha}"));
+    drop(verified_presence);
 
     runtime
         .terminal(
@@ -247,6 +280,53 @@ async fn production_work_unit_runtime_enqueues_only_the_exact_verified_commit() 
         )
         .await;
     assert_eq!(sink.evidence.lock().await.len(), 1);
+    assert_eq!(presence.verified.lock().await.len(), 1);
+
+    let failed = runtime
+        .begin(runtime_start())
+        .await
+        .expect("failed work unit lease");
+    std::fs::write(fixture.root.join("failed.txt"), "commit before failure\n")
+        .expect("write failed fixture");
+    fixture.git(&["add", "failed.txt"]);
+    runtime
+        .command_started(
+            failed.clone(),
+            MainCommandStarted {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-failed".to_owned(),
+                item_id: "item-runtime-failed".to_owned(),
+                source: MainCommitSource::CommandExecution,
+            },
+        )
+        .await;
+    fixture.git(&["commit", "-q", "-m", "test: commit before failed terminal"]);
+    runtime
+        .command_completed(
+            failed.clone(),
+            MainCommandCompleted {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-failed".to_owned(),
+                item_id: "item-runtime-failed".to_owned(),
+                source: MainCommitSource::CommandExecution,
+                proof_intent: Some(MainCommitProofIntent::ObserveCurrentHead),
+            },
+        )
+        .await;
+    runtime
+        .terminal(
+            failed,
+            MainWorkUnitTerminal {
+                workspace_generation: 1,
+                raw_thread_id: "thread-fixture".to_owned(),
+                raw_turn_id: "turn-failed".to_owned(),
+                state: MainWorkUnitTerminalState::Failed,
+            },
+        )
+        .await;
+    assert_eq!(presence.verified.lock().await.len(), 1);
 }
 
 #[tokio::test]
