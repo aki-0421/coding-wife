@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { chmod, cp, mkdir, rm, writeFile } from "node:fs/promises"
+import { chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -37,6 +37,15 @@ export async function createProductFixture(
   root,
   { includeRuntimeMarkers = true, runId = randomUUID() } = {},
 ) {
+  const bundleVersion = JSON.parse(
+    await readFile(
+      path.join(projectRoot, "src-tauri", "tauri.conf.json"),
+      "utf8",
+    ),
+  ).version
+  if (typeof bundleVersion !== "string" || bundleVersion.length === 0) {
+    throw new Error("PRODUCT_FIXTURE_VERSION_INVALID")
+  }
   const appPath = path.join(root, "Coding Wife.app")
   const executablePath = path.join(appPath, "Contents", "MacOS", "coding-wife")
   const resources = path.join(appPath, "Contents", "Resources", "resources")
@@ -61,8 +70,8 @@ export async function createProductFixture(
       "<key>CFBundleIdentifier</key><string>app.codingwife.desktop</string>",
       "<key>CFBundleName</key><string>Coding Wife</string>",
       "<key>CFBundlePackageType</key><string>APPL</string>",
-      "<key>CFBundleShortVersionString</key><string>0.1.0</string>",
-      "<key>CFBundleVersion</key><string>0.1.0</string>",
+      `<key>CFBundleShortVersionString</key><string>${bundleVersion}</string>`,
+      `<key>CFBundleVersion</key><string>${bundleVersion}</string>`,
       "<key>LSMinimumSystemVersion</key><string>14.0</string>",
       "</dict></plist>",
       "",

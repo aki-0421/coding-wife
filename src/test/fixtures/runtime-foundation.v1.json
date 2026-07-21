@@ -8,7 +8,7 @@
   "runtimeMetadata": {
     "schemaVersion": 1,
     "runtime": "tauri",
-    "appVersion": "0.1.0",
+    "appVersion": "0.1.1",
     "platform": "macos",
     "architecture": "aarch64",
     "integrations": {

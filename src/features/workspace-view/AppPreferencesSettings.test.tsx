@@ -31,7 +31,7 @@ const runtimeState: RuntimeState = {
   metadata: {
     schemaVersion: 1,
     runtime: "demo",
-    appVersion: "0.1.0",
+    appVersion: "0.1.1",
     platform: "browser",
     architecture: "web",
     integrations: {
@@ -142,7 +142,7 @@ describe("AppPreferencesSettings", () => {
 
     expect(await screen.findByText("Language")).toBeVisible()
     expect(screen.getByText("App version")).toBeVisible()
-    expect(screen.getByText("0.1.0")).toBeVisible()
+    expect(screen.getByText("0.1.1")).toBeVisible()
     expect(screen.queryByText("Reduced motion")).toBeNull()
     expect(screen.queryByText("Character visibility")).toBeNull()
     expect(
@@ -164,7 +164,7 @@ describe("AppPreferencesSettings", () => {
     ).toBeVisible()
     expect(screen.queryByText("ネイティブ設定 · バージョン 9")).toBeNull()
     expect(screen.getByText("アプリバージョン")).toBeVisible()
-    expect(screen.getByText("0.1.0")).toBeVisible()
+    expect(screen.getByText("0.1.1")).toBeVisible()
   })
 
   it("applies locale copy only after the native save succeeds", async () => {
