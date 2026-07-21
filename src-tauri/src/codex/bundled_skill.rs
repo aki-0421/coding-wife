@@ -8,7 +8,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::platform_fs::{MetadataExt, OpenOptionsExt, O_CLOEXEC, O_NOFOLLOW};
+use crate::platform_fs::{current_user_id, MetadataExt, OpenOptionsExt, O_CLOEXEC, O_NOFOLLOW};
 
 use super::types::MainSkillInjectionAudit;
 
@@ -347,7 +347,7 @@ fn trusted_regular_file(metadata: &fs::Metadata, limit: u64) -> bool {
 }
 
 fn trusted_owner(owner: u32) -> bool {
-    owner == 0 || owner == current_uid()
+    owner == 0 || owner == current_user_id()
 }
 
 fn file_identity(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64, u32, u32, u64) {
@@ -361,15 +361,6 @@ fn file_identity(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64, u32, u32,
         metadata.mode(),
         metadata.nlink(),
     )
-}
-
-unsafe extern "C" {
-    fn getuid() -> u32;
-}
-
-fn current_uid() -> u32 {
-    // SAFETY: getuid has no parameters and cannot fail.
-    unsafe { getuid() }
 }
 
 fn safe_relative(value: &str) -> Result<PathBuf, BundledSkillError> {
