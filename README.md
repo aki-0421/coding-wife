@@ -148,6 +148,7 @@ For a disposable judge project, initialize a small repository, create one seed c
 Common focused checks are:
 
 ~~~bash
+pnpm check:diff
 pnpm typecheck
 pnpm test
 pnpm test:desktop
