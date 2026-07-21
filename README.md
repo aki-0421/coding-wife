@@ -14,7 +14,7 @@ Coding Wife keeps the real coding session, human intervention points, and review
 
 ## Two-minute judge path
 
-After launching the current source build:
+On macOS 14 or later with Apple Silicon, after launching the current source build:
 
 1. Select **Add project** and choose a current-user-owned, writable Git repository. A disposable repository is recommended.
 2. Send: “Add a Usage section to README.md with one example command, run a relevant verification, and commit the result.”
@@ -108,19 +108,22 @@ The character can make long work feel like pair programming, but it cannot appro
 - SQLite is local and app-owned. Support prompts, support responses, Luna captions, Terra transcripts, credentials, generated audio, and raw tool streams are excluded from durable history.
 - Optional TTS is **off by default**. It uses **gpt-4o-mini-tts** only after a user enters an OpenAI API key in App Settings.
 - The TTS key is stored by the native app in owner-readable private settings and is never returned to the WebView. Only the already validated visible caption is sent to the fixed Speech endpoint.
-- Native audio playback is currently implemented and end-to-end tested on macOS. English/Japanese caption fallback remains available on every packaging target when TTS is off or unavailable.
+- Native audio playback is implemented and end-to-end tested only on the current macOS judge target. Captions remain an independent fallback in current source, but the Windows/Linux v0.1.5 previews do not claim current Terra/Luna behavior.
 - Temporary speech audio is bounded, played by the native layer, and deleted on completion, cancellation, mute, workspace switch, or app exit.
 
 See the approved [audio commentary contract](docs/requirements/audio-commentary.md) for the exact provider and fallback boundary.
 
 ## Run the current Build Week source
 
+The full current three-model judging path targets **macOS 14 or later on Apple Silicon**. The Windows and Linux assets described below are older packaging previews and are not equivalent production-path substitutes for this source workflow.
+
 ### Prerequisites
 
+- macOS 14 or later on Apple Silicon
 - Node.js 22.12.0 or later and Corepack
 - pnpm 10.12.2, pinned by the repository
 - rustup; [rust-toolchain.toml](rust-toolchain.toml) selects the Rust toolchain
-- the native build tools for your operating system
+- Xcode Command Line Tools
 - a compatible local Codex installation authenticated with ChatGPT or the user’s Codex configuration
 - access to **gpt-5.6-sol**, **gpt-5.6-terra**, and **gpt-5.6-luna**
 - a current-user-owned, writable Git repository for a real coding turn
@@ -167,19 +170,19 @@ See [Testing Coding Wife](docs/testing.md) for CI coverage, desktop QA, packagin
 
 Packaging availability is broader than end-to-end QA:
 
-| Target | Package workflow | Primary app E2E QA | Optional TTS playback |
+| Target | Published v0.1.5 package evidence | Current three-model judge path | Optional TTS playback |
 | --- | --- | --- | --- |
-| macOS 14+ Apple Silicon | Built, mounted, and verified | Yes, real Tauri/WKWebView workflow | Yes |
-| Windows 11 x64 | Native install/uninstall workflow | Not the primary E2E target | No; captions remain |
-| Ubuntu 22.04 / Debian 12 x64 | Native package install/extract workflow | Not the primary E2E target | No; captions remain |
+| macOS 14+ Apple Silicon | DMG built, mounted, and verified | Yes, current source with real Tauri/WKWebView E2E | Yes |
+| Windows 11 x64 | Preview installer install/uninstall smoke | No equivalent production Terra/Luna path guarantee | No |
+| Ubuntu 22.04 / Debian 12 x64 | Preview package install/extract smoke | No equivalent production Terra/Luna path guarantee | No |
 
-The packages are free of paid signing identities. macOS uses an ad-hoc integrity seal and is not notarized; Windows and Linux packages are unsigned. Verify the release URL, matching checksum, and reviewed source before using a downloaded preview. Bounded installation guidance is in [docs/testing.md](docs/testing.md).
+All v0.1.5 artifacts are older previews and do not contain the current Terra/Luna implementation. Their existence and package smoke results are not a claim of full three-model behavioral equivalence. The packages are free of paid signing identities. macOS uses an ad-hoc integrity seal and is not notarized; Windows and Linux packages are unsigned. Verify the release URL, matching checksum, and reviewed source before using a downloaded preview. Bounded installation guidance is in [docs/testing.md](docs/testing.md).
 
 ## Built during OpenAI Build Week
 
-This repository existed as planning and research before the event. The runnable product was built during Build Week.
+This repository was initialized during the Build Week submission period. Its early commits, also made during that period, established the repository, product thesis, research, requirements, and screen specifications; the runnable product followed in later Build Week commits. Coding Wife is not presented as a pre-existing product.
 
-| Before the implementation sprint | Build Week implementation |
+| Early Build Week foundation | Later Build Week runnable implementation |
 | --- | --- |
 | Repository setup, product thesis, research, requirements, and screen specifications | React/Tauri application, local Codex integration, typed IPC, SQLite recovery, bounded decisions and approvals, read-only Git review, Live2D runtime, three-model orchestration, bilingual UI, QA, packaging, and submission documentation |
 
@@ -213,7 +216,7 @@ Humans retained the consequential choices:
 
 - The current three-model Build Week source must be built locally; the public v0.1.5 installers are an older preview.
 - Real coding requires a compatible authenticated Codex installation and availability of all three exact GPT-5.6 models. Unsupported or rerouted roles fail closed.
-- Primary end-to-end desktop QA is macOS Apple Silicon. Windows and Linux have packaging verification, not equivalent full-workflow QA.
+- The full current three-model judge target and primary end-to-end desktop QA environment are macOS 14+ on Apple Silicon. Windows and Linux v0.1.5 artifacts have packaging smoke evidence, not equivalent production Terra/Luna validation.
 - Optional OpenAI speech playback is macOS-only today. Captions, expression cues, and the core coding workflow do not depend on speech.
 - Published packages are not backed by paid platform signing identities or notarization.
 - Workspace history is local; there is no account, cloud sync, remote collaboration, or automatic backup service.
