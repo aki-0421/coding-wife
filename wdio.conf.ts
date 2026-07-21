@@ -49,6 +49,7 @@ export const config: WebdriverIO.Config = {
         commandTimeout: 30_000,
         env: {
           CODING_WIFE_DESKTOP_QA_DATA_DIR: appDataDirectory,
+          CODING_WIFE_DESKTOP_QA_HIDDEN: "1",
         },
       },
     ],

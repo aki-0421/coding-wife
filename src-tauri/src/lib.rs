@@ -139,6 +139,10 @@ fn health_check() -> HealthCheckResponse {
 
 #[tauri::command]
 fn app_window_ready(app: tauri::AppHandle) {
+    #[cfg(feature = "desktop-qa")]
+    if std::env::var("CODING_WIFE_DESKTOP_QA_HIDDEN").as_deref() == Ok("1") {
+        return;
+    }
     raise_main_window(&app);
 }
 
