@@ -83,6 +83,45 @@ def result(message_id, value):
     send({"id": message_id, "result": value})
 
 
+def expected_runtime_workspace_roots(cwd_value):
+    try:
+        cwd = pathlib.Path(cwd_value)
+        if not cwd.is_absolute():
+            return None
+        cwd = cwd.resolve(strict=True)
+        completed = subprocess.run(
+            [
+                "/usr/bin/git",
+                "-C",
+                str(cwd),
+                "rev-parse",
+                "--absolute-git-dir",
+                "--git-common-dir",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        lines = completed.stdout.splitlines()
+        if len(lines) != 2:
+            return None
+        git_directory = pathlib.Path(lines[0])
+        common_directory = pathlib.Path(lines[1])
+        git_directory = git_directory.resolve(strict=True)
+        common_directory = (
+            common_directory if common_directory.is_absolute() else cwd / common_directory
+        ).resolve(strict=True)
+        roots = [str(cwd)]
+        if git_directory != cwd / ".git":
+            roots.append(str(git_directory))
+            if common_directory != git_directory:
+                roots.append(str(common_directory))
+        return roots
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        return None
+
+
 def validate_attachment_inputs(inputs, expected_image, expected_notes):
     try:
         if not isinstance(inputs, list):
@@ -277,6 +316,8 @@ def main():
         if MODE == "support_drop_grandchild":
             spawn_support_grandchild()
     pending_fixture = []
+    main_runtime_workspace_roots = None
+    main_additional_writable_roots = []
     for raw_line in sys.stdin.buffer:
         try:
             message = json.loads(raw_line)
@@ -540,6 +581,30 @@ def main():
                         }
                     )
                     continue
+                main_runtime_workspace_roots = None
+                main_additional_writable_roots = []
+            else:
+                expected_roots = expected_runtime_workspace_roots(params.get("cwd"))
+                runtime_roots_valid = (
+                    expected_roots is not None
+                    and params.get("runtimeWorkspaceRoots") == expected_roots
+                )
+                if MODE == "managed_worktree_roots":
+                    record(
+                        "managed_write_roots_thread_ok"
+                        if runtime_roots_valid and len(expected_roots) == 3
+                        else "managed_write_roots_thread_invalid"
+                    )
+                if not runtime_roots_valid:
+                    send(
+                        {
+                            "id": message_id,
+                            "error": {"code": -32602, "message": "Invalid params"},
+                        }
+                    )
+                    continue
+                main_runtime_workspace_roots = expected_roots
+                main_additional_writable_roots = expected_roots[1:]
             response = {
                 "thread": {
                     "id": thread_id,
@@ -637,6 +702,31 @@ def main():
                     and collaboration_valid
                     and "multiAgentMode" not in params
                 )
+                sandbox_policy = params.get("sandboxPolicy")
+                workspace_roots_valid = (
+                    (
+                        main_runtime_workspace_roots is None
+                        and "runtimeWorkspaceRoots" not in params
+                    )
+                    or params.get("runtimeWorkspaceRoots")
+                    == main_runtime_workspace_roots
+                )
+                write_policy_valid = (
+                    isinstance(sandbox_policy, dict)
+                    and sandbox_policy.get("type") == "workspaceWrite"
+                    and sandbox_policy.get("writableRoots")
+                    == main_additional_writable_roots
+                    and sandbox_policy.get("networkAccess") is False
+                )
+                if MODE == "managed_worktree_roots":
+                    record(
+                        "managed_write_roots_turn_ok"
+                        if workspace_roots_valid
+                        and write_policy_valid
+                        and len(main_additional_writable_roots) == 2
+                        else "managed_write_roots_turn_invalid"
+                    )
+                valid = valid and workspace_roots_valid and write_policy_valid
             expected_skill = (
                 "coding-wife-explain-commit"
                 if EXECUTION_CLASS == "support"

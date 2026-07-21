@@ -1623,6 +1623,7 @@ impl WorkspaceHistoryStore {
                             GitRepositoryIdentity {
                                 canonical_root: workspace_root,
                                 canonical_git_dir: project_root.join(".git"),
+                                canonical_common_git_dir: project_root.join(".git"),
                                 root_device: row.get::<_, i64>(2)? as u64,
                                 root_inode: row.get::<_, i64>(3)? as u64,
                                 git_device: row.get::<_, i64>(5)? as u64,

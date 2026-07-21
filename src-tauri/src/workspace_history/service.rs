@@ -2785,6 +2785,7 @@ mod tests {
         let git_inode = u64::from_le_bytes(digest[8..16].try_into().expect("git identity bytes"));
         GitRepositoryIdentity {
             canonical_git_dir: canonical_root.join(".git"),
+            canonical_common_git_dir: canonical_root.join(".git"),
             canonical_root,
             root_device: 1,
             root_inode,

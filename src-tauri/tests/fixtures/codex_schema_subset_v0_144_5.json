@@ -393,7 +393,27 @@
         "type": ["array", "null"],
         "items": { "$ref": "#/definitions/DynamicToolSpec" }
       },
-      "ephemeral": { "type": ["boolean", "null"] }
+      "ephemeral": { "type": ["boolean", "null"] },
+      "runtimeWorkspaceRoots": {
+        "type": ["array", "null"],
+        "items": { "$ref": "#/definitions/AbsolutePathBuf" }
+      }
+    },
+    "definitions": {
+      "AbsolutePathBuf": { "type": "string" }
+    }
+  },
+  "v2/ThreadResumeParams.json": {
+    "title": "ThreadResumeParams",
+    "type": "object",
+    "properties": {
+      "runtimeWorkspaceRoots": {
+        "type": ["array", "null"],
+        "items": { "$ref": "#/definitions/AbsolutePathBuf" }
+      }
+    },
+    "definitions": {
+      "AbsolutePathBuf": { "type": "string" }
     }
   },
   "v2/TurnStartParams.json": {
@@ -405,9 +425,40 @@
         "type": "array",
         "items": { "$ref": "#/definitions/UserInput" }
       },
+      "runtimeWorkspaceRoots": {
+        "type": ["array", "null"],
+        "items": { "$ref": "#/definitions/AbsolutePathBuf" }
+      },
+      "sandboxPolicy": {
+        "anyOf": [
+          { "$ref": "#/definitions/SandboxPolicy" },
+          { "type": "null" }
+        ]
+      },
       "threadId": { "type": "string" }
     },
     "definitions": {
+      "AbsolutePathBuf": { "type": "string" },
+      "SandboxPolicy": {
+        "oneOf": [
+          {
+            "title": "WorkspaceWriteSandboxPolicy",
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "networkAccess": { "type": "boolean" },
+              "type": {
+                "type": "string",
+                "enum": ["workspaceWrite"]
+              },
+              "writableRoots": {
+                "type": "array",
+                "items": { "$ref": "#/definitions/AbsolutePathBuf" }
+              }
+            }
+          }
+        ]
+      },
       "UserInput": {
         "oneOf": [
           {

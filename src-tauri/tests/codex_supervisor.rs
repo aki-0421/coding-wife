@@ -256,6 +256,62 @@ impl Drop for FixtureEnvironment {
     }
 }
 
+struct ManagedWorktreeFixture {
+    root: PathBuf,
+    worktree: PathBuf,
+}
+
+impl ManagedWorktreeFixture {
+    fn new() -> Self {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root")
+            .join(".context")
+            .join(format!("test-managed-worktree-{}", uuid::Uuid::new_v4()));
+        let project = root.join("project");
+        let worktree = root.join("managed");
+        std::fs::create_dir_all(&project).expect("managed project directory");
+        let initialized = std::process::Command::new("/usr/bin/git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(&project)
+            .status()
+            .expect("initialize managed project");
+        assert!(initialized.success());
+        let committed = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&project)
+            .args([
+                "-c",
+                "user.name=Coding Wife Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                "fixture",
+            ])
+            .status()
+            .expect("commit managed project fixture");
+        assert!(committed.success());
+        let added = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&project)
+            .args(["worktree", "add", "-q", "-b", "managed-fixture"])
+            .arg(&worktree)
+            .status()
+            .expect("create managed linked worktree");
+        assert!(added.success());
+        Self { root, worktree }
+    }
+}
+
+impl Drop for ManagedWorktreeFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
 async fn direct_runtime(
     workspace: &Path,
 ) -> (
@@ -629,6 +685,58 @@ async fn fragmented_process_completes_handshake_turn_and_interrupt_contract() {
     assert!(!state.contains("commit_skill_exactly_once_invalid"));
     assert!(!state.contains("SKILL.md"));
     assert!(state.contains("interrupt_received"));
+    supervisor.shutdown().await;
+}
+
+#[tokio::test]
+async fn managed_worktree_turn_sends_only_verified_git_metadata_roots() {
+    let _guard = ENVIRONMENT_LOCK.lock().await;
+    let fixture = FixtureEnvironment::new("managed_worktree_roots");
+    let managed = ManagedWorktreeFixture::new();
+    let supervisor = test_supervisor();
+    supervisor.start_signal_loop();
+    supervisor
+        .register_workspace_root("workspace", &managed.worktree)
+        .await
+        .expect("register managed linked worktree");
+    supervisor.set_explicit_binary(Some(fixture_binary())).await;
+    supervisor.connect().await.expect("connect fixture");
+
+    let thread = supervisor
+        .thread_start(CodexThreadStartRequest {
+            workspace_id: "workspace".to_owned(),
+        })
+        .await
+        .expect("managed worktree thread start");
+    let turn = supervisor
+        .turn_start(CodexTurnStartRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle.clone(),
+            client_user_message_id: "managed-worktree-message".to_owned(),
+            text: "Stage the managed worktree change.".to_owned(),
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            goal_objective: None,
+            attachment_handles: vec![],
+        })
+        .await
+        .expect("managed worktree turn start");
+    let state = read_state(&fixture.state).await;
+    assert!(state.contains("managed_write_roots_thread_ok"));
+    assert!(state.contains("managed_write_roots_turn_ok"));
+    assert!(!state.contains("managed_write_roots_thread_invalid"));
+    assert!(!state.contains("managed_write_roots_turn_invalid"));
+    assert!(state.contains("turn_contract_ok"));
+
+    supervisor
+        .turn_interrupt(CodexTurnInterruptRequest {
+            workspace_id: "workspace".to_owned(),
+            thread_handle: thread.thread_handle,
+            turn_handle: turn.turn_handle,
+        })
+        .await
+        .expect("interrupt managed worktree turn");
     supervisor.shutdown().await;
 }
 

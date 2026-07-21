@@ -100,11 +100,13 @@ pub struct AppPrivateBinaryRecord {
     pub canonical_path: PathBuf,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitRepositoryIdentity {
     pub canonical_root: PathBuf,
     /// The worktree-specific Git directory reported by `--absolute-git-dir`.
     pub canonical_git_dir: PathBuf,
+    /// The shared Git directory reported by `--git-common-dir`.
+    pub canonical_common_git_dir: PathBuf,
     pub root_device: u64,
     pub root_inode: u64,
     pub git_device: u64,
@@ -117,6 +119,21 @@ pub struct GitRepositoryIdentity {
     pub branch: String,
     pub head: String,
     pub detached: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct WorkspaceWriteAuthority {
+    pub workspace_root: PathBuf,
+    pub additional_writable_roots: Vec<PathBuf>,
+}
+
+impl WorkspaceWriteAuthority {
+    pub fn runtime_workspace_roots(&self) -> Vec<PathBuf> {
+        let mut roots = Vec::with_capacity(self.additional_writable_roots.len() + 1);
+        roots.push(self.workspace_root.clone());
+        roots.extend(self.additional_writable_roots.iter().cloned());
+        roots
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -460,6 +477,70 @@ pub async fn validate_git_repository(
     repository_identity(canonical, git_directory, common_git_directory).await
 }
 
+pub(crate) async fn validate_workspace_write_authority(
+    expected: &GitRepositoryIdentity,
+) -> Result<WorkspaceWriteAuthority, CodexCommandError> {
+    let live = validate_git_repository(&expected.canonical_root).await?;
+    if live.canonical_root != expected.canonical_root
+        || live.canonical_git_dir != expected.canonical_git_dir
+        || live.canonical_common_git_dir != expected.canonical_common_git_dir
+        || !same_repository_identity(expected, &live)
+    {
+        return Err(workspace_error("CODEX-WORKSPACE-IDENTITY-CHANGED", false));
+    }
+
+    let in_tree_git_directory = live.canonical_root.join(".git");
+    if live.canonical_git_dir == in_tree_git_directory {
+        return Ok(WorkspaceWriteAuthority {
+            workspace_root: live.canonical_root,
+            additional_writable_roots: Vec::new(),
+        });
+    }
+
+    validate_private_directory_ancestry(&live.canonical_git_dir).await?;
+    validate_private_directory_ancestry(&live.canonical_common_git_dir).await?;
+    let mut additional_writable_roots = vec![live.canonical_git_dir.clone()];
+    if live.canonical_common_git_dir != live.canonical_git_dir {
+        additional_writable_roots.push(live.canonical_common_git_dir);
+    }
+    Ok(WorkspaceWriteAuthority {
+        workspace_root: live.canonical_root,
+        additional_writable_roots,
+    })
+}
+
+async fn validate_private_directory_ancestry(path: &Path) -> Result<(), CodexCommandError> {
+    let canonical = tokio::fs::canonicalize(path)
+        .await
+        .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+    if canonical != path {
+        return Err(workspace_error("CODEX-WORKSPACE-GIT-CLOSURE", false));
+    }
+
+    for ancestor in canonical.ancestors() {
+        let metadata = tokio::fs::symlink_metadata(ancestor)
+            .await
+            .map_err(|_| workspace_error("CODEX-WORKSPACE-GIT-INVALID", false))?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(workspace_error("CODEX-WORKSPACE-GIT-CLOSURE", false));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+            let uid = unsafe { libc::geteuid() };
+            if metadata.uid() != uid && metadata.uid() != 0 {
+                return Err(workspace_error("CODEX-WORKSPACE-OWNER-MISMATCH", false));
+            }
+            if metadata.permissions().mode() & 0o022 != 0 {
+                return Err(workspace_error("CODEX-WORKSPACE-WRITABLE-POLICY", false));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_private_regular_file(metadata: &std::fs::Metadata) -> Result<(), CodexCommandError> {
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err(workspace_error("CODEX-WORKSPACE-GIT-INVALID", false));
@@ -732,6 +813,7 @@ async fn repository_identity(
     Ok(GitRepositoryIdentity {
         canonical_root,
         canonical_git_dir,
+        canonical_common_git_dir,
         root_device,
         root_inode,
         git_device,
@@ -898,6 +980,43 @@ mod tests {
             .expect("git init");
         assert!(status.success());
         root
+    }
+
+    fn secure_fixture_directory(label: &str) -> PathBuf {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root")
+            .join(".context")
+            .join(format!("codex-{label}-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("secure fixture directory");
+        root
+    }
+
+    fn committed_repository(root: &Path) {
+        fs::create_dir_all(root).expect("repository fixture root");
+        let init = std::process::Command::new("/usr/bin/git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(root)
+            .status()
+            .expect("initialize repository fixture");
+        assert!(init.success());
+        let commit = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(root)
+            .args([
+                "-c",
+                "user.name=Coding Wife Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                "fixture",
+            ])
+            .status()
+            .expect("commit repository fixture");
+        assert!(commit.success());
     }
 
     #[test]
@@ -1170,6 +1289,98 @@ mod tests {
             .expect("git worktree remove");
         assert!(remove.success());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn write_authority_adds_only_linked_worktree_git_metadata_roots() {
+        let fixture = secure_fixture_directory("write-authority");
+        let project = fixture.join("project");
+        let worktree = fixture.join("managed-worktree");
+        committed_repository(&project);
+        let add_worktree = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&project)
+            .args(["worktree", "add", "-q", "-b", "managed-fixture"])
+            .arg(&worktree)
+            .status()
+            .expect("create managed worktree fixture");
+        assert!(add_worktree.success());
+
+        let project_identity = validate_git_repository(&project)
+            .await
+            .expect("project identity");
+        let project_authority = validate_workspace_write_authority(&project_identity)
+            .await
+            .expect("ordinary repository authority");
+        assert!(project_authority.additional_writable_roots.is_empty());
+
+        let worktree_identity = validate_git_repository(&worktree)
+            .await
+            .expect("worktree identity");
+        let authority = validate_workspace_write_authority(&worktree_identity)
+            .await
+            .expect("managed worktree authority");
+        assert_eq!(authority.workspace_root, worktree_identity.canonical_root);
+        assert_eq!(
+            authority.additional_writable_roots,
+            vec![
+                worktree_identity.canonical_git_dir.clone(),
+                worktree_identity.canonical_common_git_dir.clone(),
+            ]
+        );
+        assert!(!authority.additional_writable_roots.contains(&project));
+        assert_eq!(
+            authority.runtime_workspace_roots(),
+            vec![
+                worktree_identity.canonical_root,
+                worktree_identity.canonical_git_dir,
+                worktree_identity.canonical_common_git_dir,
+            ]
+        );
+
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[tokio::test]
+    async fn write_authority_rejects_a_retargeted_external_git_directory() {
+        let fixture = secure_fixture_directory("write-authority-retarget");
+        let first_project = fixture.join("first-project");
+        let first_worktree = fixture.join("first-worktree");
+        let second_project = fixture.join("second-project");
+        let second_worktree = fixture.join("second-worktree");
+        committed_repository(&first_project);
+        committed_repository(&second_project);
+        for (project, worktree, branch) in [
+            (&first_project, &first_worktree, "first-managed"),
+            (&second_project, &second_worktree, "second-managed"),
+        ] {
+            let status = std::process::Command::new("/usr/bin/git")
+                .arg("-C")
+                .arg(project)
+                .args(["worktree", "add", "-q", "-b", branch])
+                .arg(worktree)
+                .status()
+                .expect("create retarget fixture worktree");
+            assert!(status.success());
+        }
+        let expected = validate_git_repository(&first_worktree)
+            .await
+            .expect("expected worktree identity");
+        let replacement = validate_git_repository(&second_worktree)
+            .await
+            .expect("replacement worktree identity");
+        fs::write(
+            first_worktree.join(".git"),
+            format!("gitdir: {}\n", replacement.canonical_git_dir.display()),
+        )
+        .expect("retarget worktree marker");
+
+        let error = validate_workspace_write_authority(&expected)
+            .await
+            .expect_err("retargeted metadata must fail closed");
+        assert_eq!(error.code, "CODEX-WORKSPACE-IDENTITY-CHANGED");
+
+        let _ = fs::remove_dir_all(fixture);
     }
 
     #[cfg(unix)]

@@ -269,7 +269,11 @@ pub fn thread_list_params(cwd: &Path, cursor: Option<&str>) -> Value {
     })
 }
 
-pub fn thread_start_params(cwd: &Path, profile: OutboundProfile) -> Value {
+pub fn thread_start_params(
+    cwd: &Path,
+    runtime_workspace_roots: Option<&[PathBuf]>,
+    profile: OutboundProfile,
+) -> Value {
     let mut params = json!({
         "model": CODEX_MODEL,
         "cwd": cwd.to_string_lossy(),
@@ -280,10 +284,15 @@ pub fn thread_start_params(cwd: &Path, profile: OutboundProfile) -> Value {
     if profile == OutboundProfile::Experimental {
         let object = params.as_object_mut().expect("thread params object");
         object.insert("allowProviderModelFallback".to_owned(), Value::Bool(false));
-        object.insert(
-            "runtimeWorkspaceRoots".to_owned(),
-            json!([cwd.to_string_lossy()]),
-        );
+        if let Some(runtime_workspace_roots) = runtime_workspace_roots {
+            object.insert(
+                "runtimeWorkspaceRoots".to_owned(),
+                json!(runtime_workspace_roots
+                    .iter()
+                    .map(|root| root.to_string_lossy())
+                    .collect::<Vec<_>>()),
+            );
+        }
         object.insert("experimentalRawEvents".to_owned(), Value::Bool(false));
         object.insert("dynamicTools".to_owned(), json!([]));
         object.insert("environments".to_owned(), json!([]));
@@ -291,7 +300,12 @@ pub fn thread_start_params(cwd: &Path, profile: OutboundProfile) -> Value {
     params
 }
 
-pub fn thread_resume_params(cwd: &Path, thread_id: &str, profile: OutboundProfile) -> Value {
+pub fn thread_resume_params(
+    cwd: &Path,
+    thread_id: &str,
+    runtime_workspace_roots: Option<&[PathBuf]>,
+    profile: OutboundProfile,
+) -> Value {
     let mut params = json!({
         "threadId": thread_id,
         "model": CODEX_MODEL,
@@ -301,13 +315,18 @@ pub fn thread_resume_params(cwd: &Path, thread_id: &str, profile: OutboundProfil
         "excludeTurns": true,
     });
     if profile == OutboundProfile::Experimental {
-        params
-            .as_object_mut()
-            .expect("thread params object")
-            .insert(
-                "runtimeWorkspaceRoots".to_owned(),
-                json!([cwd.to_string_lossy()]),
-            );
+        if let Some(runtime_workspace_roots) = runtime_workspace_roots {
+            params
+                .as_object_mut()
+                .expect("thread params object")
+                .insert(
+                    "runtimeWorkspaceRoots".to_owned(),
+                    json!(runtime_workspace_roots
+                        .iter()
+                        .map(|root| root.to_string_lossy())
+                        .collect::<Vec<_>>()),
+                );
+        }
     }
     params
 }
@@ -625,6 +644,8 @@ pub(crate) struct TurnStartRequest<'a> {
     pub attachments: &'a [ResolvedAttachment],
     pub commit_skill: &'a ResolvedBundledSkill,
     pub execution_class: TurnExecutionClass,
+    pub runtime_workspace_roots: Option<&'a [PathBuf]>,
+    pub additional_writable_roots: Option<&'a [PathBuf]>,
 }
 
 pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, TurnContractError> {
@@ -638,6 +659,8 @@ pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, 
         attachments,
         commit_skill,
         execution_class,
+        runtime_workspace_roots,
+        additional_writable_roots,
     } = request;
     if !execution_skill_matches(execution_class, commit_skill)
         || (execution_class == TurnExecutionClass::Support && !attachments.is_empty())
@@ -673,7 +696,7 @@ pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, 
     } else {
         Value::Null
     };
-    Ok(json!({
+    let mut params = json!({
         "threadId": thread_id,
         "clientUserMessageId": client_user_message_id,
         "input": input,
@@ -682,7 +705,30 @@ pub(crate) fn turn_start_params(request: TurnStartRequest<'_>) -> Result<Value, 
         "serviceTier": service_tier,
         "collaborationMode": collaboration_mode,
         "outputSchema": decision_output_schema(),
-    }))
+    });
+    if let Some(additional_writable_roots) = additional_writable_roots {
+        params.as_object_mut().expect("turn params object").insert(
+            "sandboxPolicy".to_owned(),
+            json!({
+                "type": "workspaceWrite",
+                "writableRoots": additional_writable_roots
+                    .iter()
+                    .map(|root| root.to_string_lossy())
+                    .collect::<Vec<_>>(),
+                "networkAccess": false,
+            }),
+        );
+    }
+    if let Some(runtime_workspace_roots) = runtime_workspace_roots {
+        params.as_object_mut().expect("turn params object").insert(
+            "runtimeWorkspaceRoots".to_owned(),
+            json!(runtime_workspace_roots
+                .iter()
+                .map(|root| root.to_string_lossy())
+                .collect::<Vec<_>>()),
+        );
+    }
+    Ok(params)
 }
 
 pub fn thread_goal_set_params(thread_id: &str, objective: &str) -> Value {
@@ -886,6 +932,8 @@ mod tests {
             attachments: &[],
             commit_skill: &skill,
             execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: None,
+            additional_writable_roots: Some(&[]),
         })
         .expect("main turn contract");
         let max = turn_start_params(TurnStartRequest {
@@ -898,6 +946,8 @@ mod tests {
             attachments: &[],
             commit_skill: &skill,
             execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: None,
+            additional_writable_roots: Some(&[]),
         })
         .expect("main turn contract");
 
@@ -918,6 +968,64 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0]["name"], "coding-wife-commit-work");
+    }
+
+    #[test]
+    fn main_turn_scopes_runtime_and_write_roots_to_validated_git_metadata() {
+        let runtime_roots = [
+            PathBuf::from("/workspace"),
+            PathBuf::from("/project/.git/worktrees/workspace"),
+            PathBuf::from("/project/.git"),
+        ];
+        let writable_roots = [
+            PathBuf::from("/project/.git/worktrees/workspace"),
+            PathBuf::from("/project/.git"),
+        ];
+        let params = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "stage and commit",
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            attachments: &[],
+            commit_skill: &commit_skill(),
+            execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: Some(&runtime_roots),
+            additional_writable_roots: Some(&writable_roots),
+        })
+        .expect("managed worktree turn contract");
+
+        assert_eq!(params["runtimeWorkspaceRoots"], json!(runtime_roots));
+        assert_eq!(
+            params["sandboxPolicy"],
+            json!({
+                "type": "workspaceWrite",
+                "writableRoots": writable_roots,
+                "networkAccess": false,
+            })
+        );
+    }
+
+    #[test]
+    fn main_turn_omits_unverified_workspace_root_extensions() {
+        let params = turn_start_params(TurnStartRequest {
+            thread_id: "thread",
+            client_user_message_id: "message",
+            text: "inspect",
+            effort: Some(ReasoningPreset::Low),
+            service_tier: None,
+            plan_mode: false,
+            attachments: &[],
+            commit_skill: &commit_skill(),
+            execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: None,
+            additional_writable_roots: None,
+        })
+        .expect("legacy main turn contract");
+
+        assert!(params.get("runtimeWorkspaceRoots").is_none());
+        assert!(params.get("sandboxPolicy").is_none());
     }
 
     #[test]
@@ -953,6 +1061,8 @@ mod tests {
                 attachments: &[],
                 commit_skill: &explain_skill(),
                 execution_class: TurnExecutionClass::Main,
+                runtime_workspace_roots: None,
+                additional_writable_roots: Some(&[]),
             }),
             Err(TurnContractError::SkillClass)
         );
@@ -1046,6 +1156,8 @@ mod tests {
             attachments: &attachments,
             commit_skill: &commit_skill(),
             execution_class: TurnExecutionClass::Main,
+            runtime_workspace_roots: None,
+            additional_writable_roots: Some(&[]),
         })
         .expect("main turn contract");
 
@@ -1061,7 +1173,11 @@ mod tests {
 
     #[test]
     fn thread_disables_provider_fallback_and_raw_events() {
-        let params = thread_start_params(Path::new("/workspace"), OutboundProfile::Experimental);
+        let params = thread_start_params(
+            Path::new("/workspace"),
+            Some(&[PathBuf::from("/workspace")]),
+            OutboundProfile::Experimental,
+        );
 
         assert_eq!(params["model"], CODEX_MODEL);
         assert_eq!(params["allowProviderModelFallback"], false);
@@ -1071,7 +1187,11 @@ mod tests {
 
     #[test]
     fn stable_profile_omits_every_experimental_thread_field() {
-        let params = thread_start_params(Path::new("/workspace"), OutboundProfile::Stable);
+        let params = thread_start_params(
+            Path::new("/workspace"),
+            Some(&[PathBuf::from("/workspace")]),
+            OutboundProfile::Stable,
+        );
         for field in [
             "allowProviderModelFallback",
             "runtimeWorkspaceRoots",

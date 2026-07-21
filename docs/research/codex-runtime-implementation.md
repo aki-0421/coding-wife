@@ -71,6 +71,16 @@ probe失敗後のdiagnosticを調べるとき、以前の成功時の`cliVersion
 
 public `WorkspaceRegistration`にraw pathを追加してはならない。`PendingRequestView`のapproval cardもraw command、cwd、environment ID、host、reasonを公開せず、versioned `ApprovalContext`のcategory、hashed/path alias、scope、risk、reversibility、recommendation、固定evidence codeだけを公開する。
 
+### app管理linked worktreeのwrite authority
+
+Codex CLI 0.144.5の同一binaryから生成したexperimental schemaで、`thread/start`・`thread/resume`・`turn/start`の`runtimeWorkspaceRoots`と、`turn/start.sandboxPolicy.workspaceWrite.writableRoots`を構造検証する。いずれかが欠けるschemaまたはstable initialize fallbackでは、通常のin-tree `.git` repositoryをworkspace rootだけで使えるが、root外Git metadataを必要とするlinked worktreeのthread/turnを開始しない。
+
+`workspace.rs`は登録時と各wire call直前にnon-symlink `.git` marker、Git plumbing、canonical root、per-worktree Git directory、common Git directory、filesystem identity、owner、mode、writeability、directory ancestryを再検証する。登録時identityとlive identityが一致するapp管理linked worktreeだけが、per-worktree Git directoryと重複排除したcommon Git directoryを`additional_writable_roots`として返す。通常repositoryは空配列を返す。project working tree、他worktreeのroot、保存pathだけから復元したdirectoryを追加してはならない。
+
+`supervisor.rs`はapp-private `GitRepositoryIdentity`をworkspace登録と同時に保持し、thread start/resume、main turn、fallback decision continuationの直前に同じauthorityを再取得する。`protocol.rs`はworkspace rootと追加Git metadata rootを`runtimeWorkspaceRoots`へ、追加rootだけをnetwork disabledの`sandboxPolicy.writableRoots`へ送る。pathはpublic DTO、semantic event、履歴、logへ投影しない。
+
+`cargo test --manifest-path src-tauri/Cargo.toml write_authority_`は通常repositoryに追加rootがないこと、linked worktreeがexact gitdir/common-dirだけを得ること、`.git` markerの外部retargetをwire前に拒否することを確認する。`cargo test --manifest-path src-tauri/Cargo.toml codex::protocol::tests`はApp Server payloadが同じroot集合を保持することを確認する。
+
 ## 通常Workspaceへのcomposition契約
 
 通常起動のS-002は、履歴adapterとCodex runtimeを別々の成功表示として扱わず、`CodexWorkspaceSessionAdapter`相当のcomposition層で一つの`WorkspaceViewAdapter`へ束ねる。この層はReact UIへwire protocolを公開せず、既存の`TauriCodexTransport`、`CodexSessionClient`、workspace history transportをtyped portとして組み合わせる。
