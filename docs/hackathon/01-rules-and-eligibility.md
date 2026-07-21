@@ -65,7 +65,7 @@ last_verified: 2026-07-22 JST
 - GPT-5.6 の利用も必須。
 - 他モデル、他社サービス、標準ライブラリ、SDK を併用できるが、Codex と GPT-5.6 が付随的・装飾的であってはならない。
 - 現行 FAQ は、他モデルを併用しながら project の一部で GPT-5.6 を使うことを認め、Free plan の Codex では GPT-5.6 Terra を利用できると明記している。OpenAI の現行 model catalog は Sol、Terra、Luna をいずれも GPT-5.6 family として掲載している。
-- 2026-07-22 の最新 Update は、要件を満たすために OpenAI API または API credits 自体は必須ではないと明記している。ただし、Codex と GPT-5.6 の実質的な利用を README、コード、動画で証明する要件は変わらない。
+- 現行 FAQ は、要件を満たすために OpenAI API または API credits 自体は必須ではないと明記している。ただし、Codex と GPT-5.6 の実質的な利用を README、コード、動画で証明する要件は変わらない。
 - README、説明文、デモ動画、コードから、両者をどのように使ったか確認できるようにする。
 - 中核機能の大部分を作った主要 Codex スレッドで `/feedback` を実行し、Session ID を提出する。
 

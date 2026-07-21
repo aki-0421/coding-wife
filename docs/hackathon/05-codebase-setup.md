@@ -149,7 +149,7 @@ codex exec -m gpt-5.6 "Review the current changes"
 ### OpenAI API credits
 
 - Build Week では別の API credits は配布されないと FAQ に明記されている。
-- 2026-07-22 の最新 Update は、参加要件を満たすために OpenAI API または API credits 自体は必須ではないと明記している。
+- 現行 FAQ は、参加要件を満たすために OpenAI API または API credits 自体は必須ではないと明記している。
 - 製品 runtime から GPT-5.6 API を呼ぶ場合、OpenAI Platform 側の billing が必要。
 - Codex credits が API の `insufficient_quota` を解消するものではない。
 

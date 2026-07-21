@@ -87,7 +87,7 @@ Discussion Board のコメントは、公式運営者であることが明確で
 
 ### 3.6 Session ID の取得コマンド
 
-- Official Rules、Overview、Update 45371 は提出項目を `/feedback` Codex Session ID とし、Update 45371 は主要 thread で `/feedback` を実行するよう案内している。
+- Official Rules、Overview、[Update 45282](https://openai.devpost.com/updates/45282-openai-build-week-submissions-are-open-plugin-launch)、[Update 45362](https://openai.devpost.com/updates/45362-openai-build-week-halfway-there-where-are-you)は提出項目を`/feedback` Codex Session IDとし、主要build threadから取得するよう案内している。
 - FAQ の取得手順は `/status` を実行して Session ID を表示すると案内している。
 
 **Working decision:** 主要 build thread で `/feedback` を先に実行する。IDが表示されない場合や照合が必要な場合だけ、同じ thread で `/status` を実行し、別 thread のIDで代用しない。
@@ -141,7 +141,7 @@ Public release v0.1.5 は古い preview であり、現行3モデル連携や最
 
 ### 5.1 GPT-5.6 の meaningful-use 境界
 
-FAQ と Update 45371 は OpenAI API の利用を必須としていません。一方、FAQ は「project must use GPT-5.6」「code repository と demo video で evidence を見る」「Codex と GPT-5.6 は incidental / decorative ではいけない」と記載しています。
+FAQ は OpenAI API の利用を必須としていません。一方、FAQ は「project must use GPT-5.6」「code repository と demo video で evidence を見る」「Codex と GPT-5.6 は incidental / decorative ではいけない」と記載しています。
 
 **安全側:** Coding Wife の3モデル orchestration を core workflow として demo し、各モデルの役割が source と product behavior に反映されることを示す。API 自体を要件とは説明しない。
 
@@ -216,7 +216,7 @@ hosted demo、judge account、screenshots は、選んだ testing path または
 - Official Rules、Overview、FAQ、Schedule、Resources、Updates、Update 45371 を公式 page で確認した。
 - OpenAI Build Week page は 2026-07-22 JST に取得可能で、同 page の judging 表示 Jul 22–Aug 7 を再確認した。
 - deadline、4 tracks、public / private repository、3分未満の public video、Codex / GPT-5.6、Session ID、submission freeze、Developer Tools の no-rebuild testing path を再確認した。
-- Update 45371 は、OpenAI API / API credits が必須ではないこと、動画の早期 upload、fresh testing、`/feedback`、My Projects の Submitted 表示確認を明記している。
+- Update 45371 は、free tierとCodex credits、repositoryとteam確認、Devpostへの早期着手、動画の早期upload・incognito確認・Unlisted許容を案内している。
 - Product source `44d9aab779b9a66ed3f02d0016af061a71ba79c3`、public judge prerelease、DMG SHA-256 `4f7e69832bf994d4a6935f95315532b52e6374b47fea9a48e23ac63a4322a27f`を匿名環境で再検証した。downloaded artifactのsidecar・manifest・bytes・canonical verifierとinstall/first-launch smokeはPASS。
 - Primary Session IDはprivate evidenceで照合し、`/feedback` upload成功を確認した。値はpublic documentへ記載しない。
 - logged-in submission formのfields・文字数、実際のvideo URL、Devpost submission URLは未確認。Session IDのDevpost fieldへの転記も未完了。

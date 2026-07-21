@@ -102,7 +102,7 @@ OpenAI API の利用と API credits は必須ではありません。一方、Co
 
 ### 必須
 
-- Official Rules、Overview、提出当日 Update が要求する提出項目名は `/feedback` Codex Session ID。
+- Official Rules、Overview、[Update 45282](https://openai.devpost.com/updates/45282-openai-build-week-submissions-are-open-plugin-launch)、[Update 45362](https://openai.devpost.com/updates/45362-openai-build-week-halfway-there-where-are-you) が要求する提出項目名は `/feedback` Codex Session ID。
 - 中核機能の大部分を作った Codex thread で、まず `/feedback` を実行する。
 - 取得した Session ID を Devpost submission form に入力する。
 - test thread や横道の会話ではなく、主な build thread を選ぶ。
@@ -207,7 +207,7 @@ Coding Wife は Developer Tools track の desktop app なので、installation i
 
 ## 11. 提出当日の順序
 
-提出直前の Update 45371 は、動画を早く upload し、project を fresh に test し、提出後に Devpost の My Projects で **Submitted** 表示を確認するよう案内しています。
+提出当日の運用として、projectをfreshにtestし、提出後にDevpostのMy Projectsで**Submitted**表示を確認します。
 
 1. 公開済み動画をlogged-out状態で再生し、音声・字幕・privacyを最終確認する。Public visibility、165秒、匿名再生は確認済み。
 2. 提出者がDevpost formへimmutable source、judge prerelease、Public YouTube URL、private evidenceのSession IDを手動入力する。

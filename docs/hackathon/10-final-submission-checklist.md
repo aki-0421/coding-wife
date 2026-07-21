@@ -77,7 +77,7 @@ YouTubeへのupload・visibility設定は提出者が完了しました。2026-0
 - [x] Session ID、取得日時、frozen product sourceとの対応をprivate evidenceへ保存する
 - [ ] DevpostのSession ID fieldへ正確に入力する
 
-Official Rulesと最新Updateは`/feedback` Session IDを要求し、最新Updateは`/feedback`を実行するよう案内します。今回のprimary threadはprivate evidenceで照合済みで、`/feedback` uploadも成功しました。ID値はpublic documentationへ書かず、Devpost formへprivate recordから転記します。
+Official Rules、[Update 45282](https://openai.devpost.com/updates/45282-openai-build-week-submissions-are-open-plugin-launch)、[Update 45362](https://openai.devpost.com/updates/45362-openai-build-week-halfway-there-where-are-you)は`/feedback` Session IDを要求し、主要build threadから取得するよう案内します。今回のprimary threadはprivate evidenceで照合済みで、`/feedback` uploadも成功しました。ID値はpublic documentationへ書かず、Devpost formへprivate recordから転記します。
 
 ## 5. Devpost form
 

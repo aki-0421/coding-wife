@@ -79,7 +79,7 @@ Support / announcements:
 
 ## 4. 提出当日の critical path
 
-提出直前の公式 Update 45371 は、deadline の約3時間前までの submit、動画の早期 upload、fresh testing、Devpost の **Submitted** 表示確認を推奨しています。残り時間が3時間未満なら、順番を保ったまま即時に進めます。
+次の表は締切事故を避けるための内部運用です。残り時間が3時間未満なら、順番を保ったまま即時に進めます。
 
 | Deadline まで | 完了状態 |
 |---|---|
