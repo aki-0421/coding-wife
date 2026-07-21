@@ -1,7 +1,7 @@
 ---
 title: "デスクトップ共通仕様"
 description: "Coding Wifeの単一macOSウィンドウ、共通レイアウト、状態、操作、信頼境界、復旧、アクセシビリティを定義する。"
-updated: 2026-07-20
+updated: 2026-07-21
 read_when:
   - "現行S-001〜S-003、S-005の共通window、navigation、state、keyboard、native boundaryを実装するとき。"
   - "個別画面仕様とdesktop-shell要件の整合を確認するとき。"
@@ -150,6 +150,7 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 | main tabs | `Tabs` | 二段header、81px寸法、active underline、route同期 |
 | action | `Button` | compact density、warm active、icon hit area、loading policy |
 | composer / Other | `Textarea` | auto-grow、Send/decision validation、draft persistence |
+| finite single selection | `Select` | compact trigger、body-level portal、group label、viewport collision、trigger focus復帰 |
 | timeline / list / setting | `ScrollArea` | scroll owner、virtualization、anchor復元、new-event threshold |
 | Context / effort / filter | `Popover` | body-level portal、viewport collision、trigger focus復帰 |
 | confirmation / destructive action | `Dialog` | typed native operation、fingerprint、cancel invariants |
@@ -158,6 +159,8 @@ closeのnative/frontend handoffは次の一つのcoordinatorを正本とし、We
 | loading | `Skeleton` | 各領域の最終形に合わせ、全画面spinnerを避ける |
 
 shadcnはinteractionとkeyboard behaviorだけに使う。shell、sidebar、event row、evidence/diff、Live2D canvasはcustom componentとし、shadcn既定のlayout、色、大きなradius、shadow、typographyを持ち込まない。
+
+有限の単一選択はowner、TTS provider / model / voice、character semantic cue、開発用previewを含めて共通`Select`へ統一し、native `<select>`と`NativeSelect`を使わない。triggerは現在値を表示する`combobox`としてvisible labelまたはaccessible nameと結び、`Enter` / `Space` / `ArrowDown`で候補を開き、矢印keyで移動、`Enter`で確定、`Escape`で入力を変えず閉じてtriggerへfocusを戻す。候補は`SelectGroup`内へ置き、contentはoverflow containerにclipされないbody-level portalとする。disabled / invalidはcontrolと`Field`の両方へ伝え、値変更契機と永続化契約は各画面仕様を維持する。
 
 ## scroll ownership
 
