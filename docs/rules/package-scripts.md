@@ -1,7 +1,7 @@
 ---
 title: package scripts 仕様
 description: Coding Wifeの開発、CI、リリースで公開するpnpmコマンドと、内部処理をpackage scriptsへ公開しない基準を定義する。
-updated: 2026-07-19
+updated: 2026-07-22
 read_when:
   - package.jsonのscriptsを追加、削除、改名するとき。
   - ローカル開発、CI、またはリリースの正規コマンドを判断するとき。
@@ -32,6 +32,7 @@ read_when:
 | `pnpm check:diff` | repository差分のhygieneを検査する |
 | `pnpm licenses:generate` | dependency noticeを明示的に再生成する |
 | `pnpm licenses:check` | dependency noticeのbyte一致と完全性を検査する |
+| `pnpm licenses:check:packaged` | release workflow内でpackaged legal inventoryのlock hashとcommitted bytesをhost非依存で検査する |
 | `pnpm quality:check` | cleanなrelease候補に対する全品質gateを順番に実行する |
 | `pnpm release:macos` | sealed appとDMGをbuild、検証、transactional publishする |
 
@@ -47,7 +48,7 @@ read_when:
 
 ## 受け入れ条件
 
-- `package.json`のscriptsは上記17個だけである。
+- `package.json`のscriptsは上記18個だけである。
 - `pnpm tauri:dev`だけでVite serverとnative appの起動が始まり、別terminalで`pnpm dev`を先に実行する必要がない。
 - `pnpm test`はrelease integrationを含まず、CIのPR向けtest集合と一致する。
 - `pnpm quality:check`はlicense test、clean-checkout再現、release integration、Rust、documentation、Tauri build、diff hygieneを引き続き含む。
