@@ -1,14 +1,15 @@
 use std::fmt;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 
 use crate::git_review::public_evidence::contains_private_public_material;
 use crate::git_review::types::CommitEvidenceV1;
@@ -29,7 +30,7 @@ use super::redaction::redact_text;
 use super::rpc::SUPPORT_MAX_JSONL_BUFFER_BYTES;
 use super::rpc::{RuntimeSignal, SUPPORT_MAX_FRAME_BYTES};
 use super::support_isolation::{
-    initialize_support_process, map_rpc_error, run_isolation_probe, verify_release,
+    initialize_support_process, map_rpc_error, run_isolation_probe_controlled, verify_release,
 };
 use super::support_private::{bridge_auth, support_config, PrivateRunDirectory};
 use super::support_probe::EXPECTED_SUPPORT_TOOL_HASH;
@@ -48,6 +49,10 @@ const MAX_SUPPORT_REASONING_BYTES: usize = 64 * 1024;
 pub(super) const SUPPORT_SIGNAL_QUEUE_CAPACITY: usize = 8;
 pub(crate) const SUPPORT_TASK_TIMEOUT: Duration = Duration::from_secs(15);
 const SUPPORT_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(1);
+const SUPPORT_CONSTRUCTION_GRACEFUL_TIMEOUT: Duration = Duration::from_millis(1_500);
+const SUPPORT_CONSTRUCTION_FORCE_WAIT: Duration = Duration::from_millis(400);
+const SUPPORT_CONSTRUCTION_FORCE_BUDGET: Duration = Duration::from_millis(450);
+const SUPPORT_CONSTRUCTION_CANCEL_BUDGET: Duration = Duration::from_secs(4);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -407,7 +412,7 @@ pub(crate) struct SupportRuntimeCleanup {
 }
 
 impl SupportRuntimeCleanup {
-    fn new(
+    pub(super) fn new(
         runtime: Arc<ProcessRuntime>,
         run_directory: Arc<PrivateRunDirectory>,
         defer_graceful_once: bool,
@@ -450,7 +455,7 @@ impl SupportRuntimeCleanup {
         let process = self
             .inner
             .runtime
-            .force_shutdown_and_wait(Duration::from_millis(400))
+            .force_shutdown_and_wait(SUPPORT_CONSTRUCTION_FORCE_WAIT)
             .await;
         let directory = self.inner.run_directory.cleanup().is_ok();
         let converged = process && directory;
@@ -474,12 +479,374 @@ impl SupportRuntimeCleanup {
         }
     }
 
+    pub(crate) fn signal_force_now(&self) {
+        self.inner.runtime.force_shutdown_now();
+    }
+
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     fn runtime(&self) -> &Arc<ProcessRuntime> {
         &self.inner.runtime
     }
 
     fn run_directory(&self) -> &PrivateRunDirectory {
         &self.inner.run_directory
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SupportConstructionPhase {
+    Idle,
+    Constructing,
+    Ready,
+    Released,
+    Finished,
+}
+
+struct SupportConstructionState {
+    phase: SupportConstructionPhase,
+    active_cleanup: Option<SupportRuntimeCleanup>,
+}
+
+struct SupportConstructionControlInner {
+    cancel_requested: AtomicBool,
+    force_requested: AtomicBool,
+    state: StdMutex<SupportConstructionState>,
+    changed: Notify,
+}
+
+/// Owns construction cancellation and every process spawned before runtime handoff.
+#[derive(Clone)]
+pub(crate) struct SupportConstructionControl {
+    inner: Arc<SupportConstructionControlInner>,
+}
+
+impl Default for SupportConstructionControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SupportConstructionControl {
+    pub(crate) fn new() -> Self {
+        Self {
+            inner: Arc::new(SupportConstructionControlInner {
+                cancel_requested: AtomicBool::new(false),
+                force_requested: AtomicBool::new(false),
+                state: StdMutex::new(SupportConstructionState {
+                    phase: SupportConstructionPhase::Idle,
+                    active_cleanup: None,
+                }),
+                changed: Notify::new(),
+            }),
+        }
+    }
+
+    pub(crate) async fn cancel(&self) -> bool {
+        let deadline = tokio::time::Instant::now() + SUPPORT_CONSTRUCTION_CANCEL_BUDGET;
+        let (phase, cleanup) = self.request_shutdown(false);
+        if let Some(cleanup) = cleanup.as_ref() {
+            let converged = self.cleanup_with_requested_policy(cleanup).await;
+            if phase == SupportConstructionPhase::Ready {
+                self.finish_ready_cleanup(cleanup, converged);
+            }
+        }
+        let terminal = self.wait_for_terminal(deadline).await;
+        terminal && self.active_cleanup_converged()
+    }
+
+    pub(crate) async fn force_shutdown_now(&self) -> bool {
+        let deadline = tokio::time::Instant::now() + SUPPORT_CONSTRUCTION_FORCE_BUDGET;
+        let (phase, cleanup) = self.request_shutdown(true);
+        let mut converged = cleanup.is_none();
+        if let Some(cleanup) = cleanup.as_ref() {
+            cleanup.signal_force_now();
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            converged = tokio::time::timeout(remaining, cleanup.force_shutdown_now())
+                .await
+                .unwrap_or(false);
+            if phase == SupportConstructionPhase::Ready {
+                self.finish_ready_cleanup(cleanup, converged);
+            }
+        }
+        let terminal = self.wait_for_terminal(deadline).await;
+        converged && terminal && self.active_cleanup_converged()
+    }
+
+    pub(crate) fn begin(&self) -> Result<(), SupportRuntimeError> {
+        let mut state = self.lock_state();
+        if self.cancel_requested() {
+            state.phase = SupportConstructionPhase::Finished;
+            drop(state);
+            self.inner.changed.notify_waiters();
+            return Err(SupportRuntimeError::Canceled);
+        }
+        if state.phase != SupportConstructionPhase::Idle {
+            return Err(SupportRuntimeError::Process);
+        }
+        state.phase = SupportConstructionPhase::Constructing;
+        Ok(())
+    }
+
+    pub(crate) async fn run_stage<F, T>(&self, stage: F) -> Result<T, SupportRuntimeError>
+    where
+        F: Future<Output = Result<T, SupportRuntimeError>>,
+    {
+        if self.cancel_requested() {
+            return Err(SupportRuntimeError::Canceled);
+        }
+        tokio::select! {
+            biased;
+            _ = self.wait_for_cancel_request() => Err(SupportRuntimeError::Canceled),
+            result = stage => result,
+        }
+    }
+
+    pub(crate) fn register_cleanup(
+        &self,
+        cleanup: SupportRuntimeCleanup,
+    ) -> Result<(), SupportRuntimeError> {
+        let mut state = self.lock_state();
+        if state.phase != SupportConstructionPhase::Constructing || state.active_cleanup.is_some() {
+            return Err(SupportRuntimeError::Process);
+        }
+        state.active_cleanup = Some(cleanup);
+        if self.cancel_requested() {
+            Err(SupportRuntimeError::Canceled)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn unregister_cleanup(
+        &self,
+        cleanup: &SupportRuntimeCleanup,
+    ) -> Result<(), SupportRuntimeError> {
+        let mut state = self.lock_state();
+        if !state
+            .active_cleanup
+            .as_ref()
+            .is_some_and(|active| active.same_identity(cleanup))
+        {
+            return Err(SupportRuntimeError::Process);
+        }
+        state.active_cleanup = None;
+        if self.cancel_requested() {
+            Err(SupportRuntimeError::Canceled)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn mark_ready(&self, cleanup: &SupportRuntimeCleanup) -> Result<(), SupportRuntimeError> {
+        let mut state = self.lock_state();
+        if state.phase != SupportConstructionPhase::Constructing
+            || !state
+                .active_cleanup
+                .as_ref()
+                .is_some_and(|active| active.same_identity(cleanup))
+        {
+            return Err(SupportRuntimeError::Process);
+        }
+        if self.cancel_requested() {
+            return Err(SupportRuntimeError::Canceled);
+        }
+        state.phase = SupportConstructionPhase::Ready;
+        drop(state);
+        self.inner.changed.notify_waiters();
+        Ok(())
+    }
+
+    fn release(&self, cleanup: &SupportRuntimeCleanup) -> Result<(), SupportRuntimeError> {
+        let mut state = self.lock_state();
+        if self.cancel_requested() {
+            return Err(SupportRuntimeError::Canceled);
+        }
+        if state.phase != SupportConstructionPhase::Ready
+            || !state
+                .active_cleanup
+                .as_ref()
+                .is_some_and(|active| active.same_identity(cleanup))
+        {
+            return Err(SupportRuntimeError::Process);
+        }
+        state.active_cleanup = None;
+        state.phase = SupportConstructionPhase::Released;
+        drop(state);
+        self.inner.changed.notify_waiters();
+        Ok(())
+    }
+
+    fn request_shutdown(
+        &self,
+        force: bool,
+    ) -> (SupportConstructionPhase, Option<SupportRuntimeCleanup>) {
+        if force {
+            self.inner.force_requested.store(true, Ordering::Release);
+        }
+        self.inner.cancel_requested.store(true, Ordering::Release);
+        let mut state = self.lock_state();
+        if state.phase == SupportConstructionPhase::Idle {
+            state.phase = SupportConstructionPhase::Finished;
+        }
+        let phase = state.phase;
+        let cleanup = state.active_cleanup.clone();
+        if force {
+            if let Some(cleanup) = cleanup.as_ref() {
+                cleanup.signal_force_now();
+            }
+        }
+        drop(state);
+        self.inner.changed.notify_waiters();
+        (phase, cleanup)
+    }
+
+    fn request_force_without_waiting(&self) {
+        let _ = self.request_shutdown(true);
+    }
+
+    async fn cleanup_with_requested_policy(&self, cleanup: &SupportRuntimeCleanup) -> bool {
+        if self.force_requested() {
+            cleanup.signal_force_now();
+            return cleanup.force_shutdown_now().await;
+        }
+        match tokio::time::timeout(SUPPORT_CONSTRUCTION_GRACEFUL_TIMEOUT, cleanup.shutdown()).await
+        {
+            Ok(Ok(())) => true,
+            Ok(Err(_)) | Err(_) => {
+                cleanup.signal_force_now();
+                cleanup.force_shutdown_now().await
+            }
+        }
+    }
+
+    async fn cleanup_after_failure(&self) -> (bool, Option<SupportRuntimeCleanup>) {
+        let cleanup = self.lock_state().active_cleanup.clone();
+        let Some(cleanup) = cleanup else {
+            return (true, None);
+        };
+        let converged = if self.cancel_requested() {
+            self.cleanup_with_requested_policy(&cleanup).await
+        } else {
+            cleanup.shutdown().await.is_ok()
+        };
+        (converged, Some(cleanup))
+    }
+
+    fn finish_ready_cleanup(&self, cleanup: &SupportRuntimeCleanup, converged: bool) {
+        let mut state = self.lock_state();
+        if state.phase == SupportConstructionPhase::Ready
+            && state
+                .active_cleanup
+                .as_ref()
+                .is_some_and(|active| active.same_identity(cleanup))
+        {
+            if converged {
+                state.active_cleanup = None;
+            }
+            state.phase = SupportConstructionPhase::Finished;
+        }
+        drop(state);
+        self.inner.changed.notify_waiters();
+    }
+
+    fn mark_finished(&self, cleanup_converged: bool) {
+        let mut state = self.lock_state();
+        if cleanup_converged {
+            state.active_cleanup = None;
+        }
+        if state.phase != SupportConstructionPhase::Released {
+            state.phase = SupportConstructionPhase::Finished;
+        }
+        drop(state);
+        self.inner.changed.notify_waiters();
+    }
+
+    async fn wait_for_cancel_request(&self) {
+        loop {
+            let notified = self.inner.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.cancel_requested() {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    async fn wait_for_terminal(&self, deadline: tokio::time::Instant) -> bool {
+        loop {
+            let notified = self.inner.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if matches!(
+                self.lock_state().phase,
+                SupportConstructionPhase::Released | SupportConstructionPhase::Finished
+            ) {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline
+                || tokio::time::timeout_at(deadline, notified).await.is_err()
+            {
+                return false;
+            }
+        }
+    }
+
+    fn active_cleanup_converged(&self) -> bool {
+        self.lock_state()
+            .active_cleanup
+            .as_ref()
+            .is_none_or(SupportRuntimeCleanup::cleanup_converged)
+    }
+
+    fn cancel_requested(&self) -> bool {
+        self.inner.cancel_requested.load(Ordering::Acquire)
+    }
+
+    fn force_requested(&self) -> bool {
+        self.inner.force_requested.load(Ordering::Acquire)
+    }
+
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, SupportConstructionState> {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+pub(crate) struct SupportRuntimeConstructionLease {
+    runtime: Option<Arc<SupportRuntime>>,
+    control: SupportConstructionControl,
+    released: bool,
+}
+
+impl SupportRuntimeConstructionLease {
+    pub(crate) fn runtime(&self) -> Arc<SupportRuntime> {
+        self.runtime
+            .as_ref()
+            .expect("construction lease must own its runtime")
+            .clone()
+    }
+
+    pub(crate) fn release_after_registration(
+        mut self,
+    ) -> Result<Arc<SupportRuntime>, SupportRuntimeError> {
+        let runtime = self.runtime.as_ref().ok_or(SupportRuntimeError::Process)?;
+        self.control.release(&runtime.cleanup)?;
+        self.released = true;
+        self.runtime.take().ok_or(SupportRuntimeError::Process)
+    }
+}
+
+impl Drop for SupportRuntimeConstructionLease {
+    fn drop(&mut self) {
+        if !self.released {
+            self.control.request_force_without_waiting();
+        }
     }
 }
 
@@ -545,7 +912,7 @@ impl SupportRuntime {
         resource_directory: &Path,
         auth_source: Option<&Path>,
     ) -> Result<Self, SupportRuntimeConstructionError> {
-        Self::construct_inner(
+        Self::construct_compat(
             binary,
             schema,
             resource_directory,
@@ -563,7 +930,7 @@ impl SupportRuntime {
         resource_directory: &Path,
         auth_source: Option<&Path>,
     ) -> Result<Self, SupportRuntimeConstructionError> {
-        Self::construct_inner(
+        Self::construct_compat(
             binary,
             schema,
             resource_directory,
@@ -571,6 +938,26 @@ impl SupportRuntime {
             SupportModelRole::PresenceDirector,
             false,
             false,
+        )
+        .await
+    }
+
+    pub(crate) async fn construct_presence_controlled(
+        binary: &BinaryInfo,
+        schema: &SchemaProbe,
+        resource_directory: &Path,
+        auth_source: Option<&Path>,
+        control: SupportConstructionControl,
+    ) -> Result<SupportRuntimeConstructionLease, SupportRuntimeConstructionError> {
+        Self::construct_controlled(
+            binary,
+            schema,
+            resource_directory,
+            auth_source,
+            SupportModelRole::PresenceDirector,
+            false,
+            false,
+            control,
         )
         .await
     }
@@ -588,7 +975,7 @@ impl SupportRuntime {
         if binary.source != super::types::BinarySource::TestFixture {
             return Err(SupportRuntimeError::UnsupportedRelease.into());
         }
-        Self::construct_inner(
+        Self::construct_compat(
             binary,
             schema,
             resource_directory,
@@ -600,7 +987,8 @@ impl SupportRuntime {
         .await
     }
 
-    async fn construct_inner(
+    #[allow(clippy::too_many_arguments)]
+    async fn construct_compat(
         binary: &BinaryInfo,
         schema: &SchemaProbe,
         resource_directory: &Path,
@@ -609,6 +997,107 @@ impl SupportRuntime {
         inject_initialization_failure: bool,
         defer_graceful_cleanup_once: bool,
     ) -> Result<Self, SupportRuntimeConstructionError> {
+        let control = SupportConstructionControl::new();
+        let lease = Self::construct_controlled(
+            binary,
+            schema,
+            resource_directory,
+            auth_source,
+            model_role,
+            inject_initialization_failure,
+            defer_graceful_cleanup_once,
+            control,
+        )
+        .await?;
+        let runtime = lease
+            .release_after_registration()
+            .map_err(SupportRuntimeConstructionError::clean)?;
+        match Arc::try_unwrap(runtime) {
+            Ok(runtime) => Ok(runtime),
+            Err(runtime) => {
+                let cleanup = runtime.cleanup.clone();
+                drop(runtime);
+                if cleanup.force_shutdown_now().await {
+                    Err(SupportRuntimeConstructionError::clean(
+                        SupportRuntimeError::Process,
+                    ))
+                } else {
+                    Err(SupportRuntimeConstructionError::unconverged(
+                        SupportRuntimeError::Process,
+                        cleanup,
+                    ))
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn construct_controlled(
+        binary: &BinaryInfo,
+        schema: &SchemaProbe,
+        resource_directory: &Path,
+        auth_source: Option<&Path>,
+        model_role: SupportModelRole,
+        inject_initialization_failure: bool,
+        defer_graceful_cleanup_once: bool,
+        control: SupportConstructionControl,
+    ) -> Result<SupportRuntimeConstructionLease, SupportRuntimeConstructionError> {
+        control
+            .begin()
+            .map_err(SupportRuntimeConstructionError::clean)?;
+        let construction = control
+            .run_stage(Self::construct_inner_controlled(
+                binary,
+                schema,
+                resource_directory,
+                auth_source,
+                model_role,
+                inject_initialization_failure,
+                defer_graceful_cleanup_once,
+                &control,
+            ))
+            .await;
+        match construction {
+            Ok(runtime) => {
+                if let Err(error) = control.mark_ready(&runtime.cleanup) {
+                    let construction_error =
+                        Self::finish_controlled_construction_failure(&control, error).await;
+                    drop(runtime);
+                    return Err(construction_error);
+                }
+                Ok(SupportRuntimeConstructionLease {
+                    runtime: Some(Arc::new(runtime)),
+                    control,
+                    released: false,
+                })
+            }
+            Err(error) => Err(Self::finish_controlled_construction_failure(&control, error).await),
+        }
+    }
+
+    async fn finish_controlled_construction_failure(
+        control: &SupportConstructionControl,
+        error: SupportRuntimeError,
+    ) -> SupportRuntimeConstructionError {
+        let (converged, cleanup) = control.cleanup_after_failure().await;
+        control.mark_finished(converged);
+        match (converged, cleanup) {
+            (true, _) | (false, None) => SupportRuntimeConstructionError::clean(error),
+            (false, Some(cleanup)) => SupportRuntimeConstructionError::unconverged(error, cleanup),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn construct_inner_controlled(
+        binary: &BinaryInfo,
+        schema: &SchemaProbe,
+        resource_directory: &Path,
+        auth_source: Option<&Path>,
+        model_role: SupportModelRole,
+        inject_initialization_failure: bool,
+        defer_graceful_cleanup_once: bool,
+        control: &SupportConstructionControl,
+    ) -> Result<Self, SupportRuntimeError> {
         verify_release(binary, schema).await?;
         let skill_name = match model_role {
             SupportModelRole::CommitExplainer => EXPLAIN_COMMIT_SKILL_NAME,
@@ -616,7 +1105,7 @@ impl SupportRuntime {
         };
         let verified_skill = resolve_bundled_skill(resource_directory, skill_name)
             .map_err(|_| SupportRuntimeError::Skill)?;
-        run_isolation_probe(binary, &verified_skill, model_role).await?;
+        run_isolation_probe_controlled(binary, &verified_skill, model_role, control).await?;
 
         let run_directory = PrivateRunDirectory::create("runtime")?;
         let skill = run_directory.snapshot_support_skill(&verified_skill)?;
@@ -646,6 +1135,7 @@ impl SupportRuntime {
             run_directory.clone(),
             defer_graceful_cleanup_once,
         );
+        control.register_cleanup(cleanup.clone())?;
         let thread = async {
             if inject_initialization_failure {
                 return Err(SupportRuntimeError::Protocol);
@@ -689,15 +1179,7 @@ impl SupportRuntime {
             Ok(thread)
         }
         .await;
-        let thread = match thread {
-            Ok(thread) => thread,
-            Err(error) => {
-                return match cleanup.shutdown().await {
-                    Ok(()) => Err(SupportRuntimeConstructionError::clean(error)),
-                    Err(_) => Err(SupportRuntimeConstructionError::unconverged(error, cleanup)),
-                };
-            }
-        };
+        let thread = thread?;
 
         Ok(Self {
             cleanup,

@@ -19,8 +19,9 @@ use super::protocol::{
 use super::rpc::{RpcRequestError, RuntimeSignal};
 use super::support::{
     parse_explanation, parse_presence_direction, PresenceDirectorInputV1, PresenceElapsedBucket,
-    PresenceLocale, PresenceSemanticState, PresenceTrigger, SupportModelRole, SupportRuntimeError,
-    SUPPORT_PERMISSION_PROFILE, SUPPORT_SIGNAL_QUEUE_CAPACITY,
+    PresenceLocale, PresenceSemanticState, PresenceTrigger, SupportConstructionControl,
+    SupportModelRole, SupportRuntimeCleanup, SupportRuntimeError, SUPPORT_PERMISSION_PROFILE,
+    SUPPORT_SIGNAL_QUEUE_CAPACITY,
 };
 use super::support_private::{support_config, write_private_file, PrivateRunDirectory};
 use super::support_probe::{canonical_json_hash, ProbeCaptureServer};
@@ -77,15 +78,16 @@ pub(super) async fn verify_release(
     Ok(())
 }
 
-pub(super) async fn run_isolation_probe(
+pub(super) async fn run_isolation_probe_controlled(
     binary: &BinaryInfo,
     support_skill: &ResolvedBundledSkill,
     model_role: SupportModelRole,
+    control: &SupportConstructionControl,
 ) -> Result<(), SupportRuntimeError> {
     if !support_skill_matches_role(support_skill, model_role) {
         return Err(SupportRuntimeError::Skill);
     }
-    let run_directory = PrivateRunDirectory::create("probe")?;
+    let run_directory = Arc::new(PrivateRunDirectory::create("probe")?);
     let support_skill = run_directory.snapshot_support_skill(support_skill)?;
     let repository_canary = run_directory.root.join("repository-canary.txt");
     let auth_canary = run_directory.codex_home.join("auth-canary.json");
@@ -127,6 +129,8 @@ pub(super) async fn run_isolation_probe(
         .await
         .map_err(|_| SupportRuntimeError::IsolationProbe)?,
     );
+    let cleanup = SupportRuntimeCleanup::new(runtime.clone(), run_directory.clone(), false);
+    control.register_cleanup(cleanup.clone())?;
     let protocol_probe = tokio::time::timeout(SUPPORT_PROTOCOL_PROBE_TIMEOUT, async {
         initialize_support_process(&runtime).await?;
         let thread = runtime
@@ -208,7 +212,10 @@ pub(super) async fn run_isolation_probe(
     .await
     .map_err(|_| SupportRuntimeError::IsolationProbe)
     .and_then(|result| result);
-    runtime.shutdown().await;
+    runtime
+        .shutdown_checked()
+        .await
+        .map_err(|_| SupportRuntimeError::IsolationProbe)?;
     let process_exited = runtime.has_exited().await;
     if !process_exited {
         return Err(SupportRuntimeError::IsolationProbe);
@@ -221,7 +228,8 @@ pub(super) async fn run_isolation_probe(
         if execution_marker.exists() || server.tool_canary_requests() != 0 {
             return Err(SupportRuntimeError::IsolationProbe);
         }
-        return run_directory.cleanup();
+        cleanup.shutdown().await?;
+        return control.unregister_cleanup(&cleanup);
     }
     if captured.len() != 3
         || captured
@@ -257,7 +265,8 @@ pub(super) async fn run_isolation_probe(
     {
         return Err(SupportRuntimeError::IsolationProbe);
     }
-    run_directory.cleanup()
+    cleanup.shutdown().await?;
+    control.unregister_cleanup(&cleanup)
 }
 
 fn support_probe_input(request_id: &str) -> String {
