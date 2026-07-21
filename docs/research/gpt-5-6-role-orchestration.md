@@ -1,7 +1,7 @@
 ---
 title: "GPT-5.6 役割別オーケストレーション実装契約"
 description: "Sol・Terra・Lunaのexact model routingと、隔離support、presence direction、字幕・TTS・Live2D cueの安全な接続境界を定義する。"
-updated: 2026-07-21
+updated: 2026-07-22
 read_when:
   - "GPT-5.6 Sol・Terra・Lunaのmodel routing、support isolation、release proofを変更するとき。"
   - "意味あるmain eventをLunaの短いcaption、OpenAI TTS、Live2D semantic cueへ接続するとき。"
@@ -13,7 +13,7 @@ read_when:
 
 Coding Wifeは三つのGPT-5.6 modelを一つのapp-owned orchestrationとして使う。利用者が直接会話し、repositoryへ変更権限を持つのはSolだけである。TerraとLunaはmain conversationから分離した短命support processで動き、repository、shell、file、Git、MCP、network、dynamic tool、main sessionへのwriteback権限を持たない。
 
-MVPでは、Solは実装、Terraは検証済みcommitの説明、Lunaは意味あるmain eventの短いpresence directionだけを担当する。Lunaを常時実況、進捗要約、技術判断、承認、error recoveryの正本として使わない。modelが使えない場合もmain turn、決定card、error表示、deterministic Live2D stateは継続する。
+MVPでは、Solは実装、Terraは検証済みcommitの説明、Lunaは完了したmain agent messageと意味あるmain eventへの短いpresence directionだけを担当する。Lunaをstreaming tokenの実況、技術判断、承認、error recoveryの正本として使わない。modelが使えない場合もmain turn、決定card、error表示、deterministic Live2D stateは継続する。
 
 ## Exact model role
 
@@ -35,10 +35,11 @@ Lunaへ渡すmodel inputは次のexact objectだけである。correlation IDと
 {
   "schemaVersion": 1,
   "locale": "ja",
-  "trigger": "decision_wait",
-  "semanticState": "asking",
+  "trigger": "main_message",
+  "semanticState": "working",
   "retrying": false,
-  "elapsedBucket": "none"
+  "elapsedBucket": "none",
+  "messageExcerpt": "実装の要点を整理しました。"
 }
 ```
 
@@ -48,17 +49,21 @@ Lunaへ渡すmodel inputは次のexact objectだけである。correlation IDと
 | --- | --- |
 | `schemaVersion` | literal `1` |
 | `locale` | `ja` or `en` |
-| `trigger` | `decision_wait`, `recoverable_failure`, `terminal_failure`, `long_milestone`, `commit_ready`, `turn_completed` |
+| `trigger` | `main_message`, `decision_wait`, `recoverable_failure`, `terminal_failure`, `long_milestone`, `commit_ready`, `turn_completed` |
 | `semanticState` | `neutral`, `working`, `asking`, `success`, `warning`, `error` |
 | `retrying` | boolean。error以外では`false` |
 | `elapsedBucket` | `none`, `45s_plus`, `120s_plus`。`long_milestone`以外では`none` |
+| `messageExcerpt` | `main_message`でのみ必須。trim済み単一行の1〜240 Unicode scalar。他triggerではfield自体を含めない |
 
-入力へuser/assistant text、tool名、command、tool output、diff、file/path alias、commit message、decision question/option、error message、raw protocol、raw reasoning、absolute/relative path、URL、secret、credential、workspace/repository名を含めない。triggerはnormalized `CodexEvent`またはnative verified-commit proofから決定論的に投影し、文字列をmodel向けsummaryへ変換しない。
+`messageExcerpt`はnormalized `CodexEventPayload::AgentMessageCompleted`の完了済み本文だけから作る。streaming delta、reasoning、tool argument、tool output、raw diff、code blockをsourceにしない。presence専用sanitizerはcredential/private token、absolute/relative path、file/path alias、URL、workspace/repository名、redaction markerを除去し、空白を単一spaceへ畳み、Unicode scalar単位で上限を適用する。privacy scanを通過する内容が残らなければ候補を生成しない。
+
+`main_message`以外の入力へuser/assistant text、tool名、command、tool output、diff、file/path alias、commit message、decision question/option、error message、raw protocol、raw reasoning、absolute/relative path、URL、secret、credential、workspace/repository名を含めない。triggerはnormalized `CodexEvent`またはnative verified-commit proofから決定論的に投影し、`main_message`以外の文字列をmodel向けsummaryへ変換しない。
 
 triggerとsemantic stateの組合せは次だけを許可する。
 
 | trigger | input state | Lunaが返せるcue |
 | --- | --- | --- |
+| `main_message` | `working` | `working`, `neutral` |
 | `decision_wait` | `asking` | `asking`, `neutral` |
 | `recoverable_failure` | `warning` | `warning`, `neutral` |
 | `terminal_failure` | `error` | `error`, `warning`, `neutral` |
@@ -88,15 +93,15 @@ LunaはMarkdownや周辺proseを付けず、次のexact objectを返す。
 | `utterance` | trim済み1〜160 Unicode scalar、1文を推奨 |
 | `cue` | triggerごとのallowlist内にあるsemantic cue |
 
-`utterance`は短い現在地だけを伝え、技術的成功、検証済み、承認済み、安全、commit作成済み等をinput以上に推測しない。利用者の選択を誘導する推奨、好意・罪悪感による誘導、大げさな称賛、人格的所有、raw identifier、path、URL、secretらしい文字列を含めない。schema、locale、scalar bound、control文字、privacy scan、cue allowlistのどれかに失敗したoutputは公開しない。
+`main_message`の`utterance`はexcerptに根拠を持つ短いpair-programming reactionとし、単なる復唱にしない。その他の`utterance`は短い現在地だけを伝える。どちらも技術的成功、検証済み、承認済み、安全、commit作成済み等をinput以上に推測しない。利用者の選択を誘導する推奨、好意・罪悪感による誘導、大げさな称賛、人格的所有、raw identifier、path、URL、secretらしい文字列を含めない。schema、locale、scalar bound、control文字、privacy scan、cue allowlistのどれかに失敗したoutputは公開しない。
 
 ## Admission、coalescing、stale cancellation
 
-Luna schedulerはApp lifetimeに1個、実行capacity 1、待機slot 1とする。routine tool start/completion、file change、diff update、assistant commentary、connection statusはtriggerにしない。
+Luna schedulerはApp lifetimeに1個、実行capacity 1とする。完了した各`agentMessage`は`main_message`候補として到着順を維持する専用FIFOへ追加し、最大16件まで待機させる。typical pathでは同一triggerでもcoalesceや置換をせず各件を一度ずつ処理する。admissionはmain event処理をawaitせず、満杯時はその1件だけをsafe audit counterへ記録して破棄する。routine tool start/completion、file change、diff update、streaming assistant delta、connection statusはtriggerにしない。
 
-priorityは`decision_wait` > `terminal_failure` > `recoverable_failure` > `commit_ready` > `turn_completed` > `long_milestone`とする。同一workspace generationでは通常caption開始間隔を30秒以上にし、`decision_wait`と`terminal_failure`だけcooldownを迂回できる。同じtriggerの重複は1件へまとめる。active中の新候補は待機slotをlatest candidateへ置換し、低priority candidateが高priority candidateを置換してはならない。
+priorityは`decision_wait` > `terminal_failure` > `recoverable_failure` > `main_message` > `commit_ready` > `turn_completed` > `long_milestone`とする。urgent eventはFIFOの間へ先行できるが、`main_message`同士の到着順を変えず、`commit_ready`と`turn_completed`は先行する`main_message`を置換しない。同一workspace generationでは通常caption開始間隔を30秒以上にし、`main_message`、`decision_wait`、`terminal_failure`はcooldownを迂回できる。`main_message`以外の同じtriggerの重複は1件へまとめる。active中の非message候補は待機slotをlatest candidateへ置換し、低priority candidateが高priority candidateを置換してはならない。
 
-`long_milestone`はturn開始45秒後に一度だけ候補化し、まだactiveなら120秒後に一度だけ再候補化する。新しいworkspace generation、workspace切替、turn stop/interruption、app closeでactiveとqueued requestをstale化する。Support runtimeのrelease verification、sandbox probe、isolation probe、runtime初期化を含む構築開始時点からcancel tokenとprocess ownershipを登録し、通常終了は5秒以内、force cleanupは500ms以内にprocess treeとprivate run directoryを収束させる。force cleanupではmain runtime、main work unit、Luna runtimeを同時に停止し、各componentの失敗を保ったまま全体deadlineへ合成する。security probeをskipまたは弱化してはならない。late responseをevent、caption、cue、TTSへ適用せず、decision解決後のlate `decision_wait`も同様に破棄する。
+`long_milestone`はturn開始45秒後に一度だけ候補化し、まだactiveなら120秒後に一度だけ再候補化する。新しいworkspace generation、workspace切替、明示的なturn stop/interruption、失敗・cancel terminal、app closeでactiveとqueued requestをstale化する。正常なturn completionだけは直前までに受理した`main_message` FIFOを保持し、各messageの後に`turn_completed`を処理する。Support runtimeのrelease verification、sandbox probe、isolation probe、runtime初期化を含む構築開始時点からcancel tokenとprocess ownershipを登録し、通常終了は5秒以内、force cleanupは500ms以内にprocess treeとprivate run directoryを収束させる。force cleanupではmain runtime、main work unit、Luna runtimeを同時に停止し、各componentの失敗を保ったまま全体deadlineへ合成する。security probeをskipまたは弱化してはならない。late responseをevent、caption、cue、TTSへ適用せず、decision解決後のlate `decision_wait`も同様に破棄する。
 
 verified commitの`commit_ready`は、main work unit、repository identity、before/current HEAD、exact commit SHAをnativeが検証した後だけ候補化する。App Server text、raw JavaScript、tool output、HEAD差分単体をtriggerにしない。
 `commit_ready`は正常完了したwork unitのterminal proof内で確定するため、その直後の同じ`turn_completed`通知だけではstale化しない。failed、stop、interruption、cancelで終わったwork unitからは`commit_ready`を候補化せず、既存候補も通常どおりstale化する。
@@ -119,6 +124,7 @@ interface PresenceDirectionEventV1 {
     | "recoverable_failure"
     | "terminal_failure"
     | "long_milestone"
+    | "main_message"
     | "commit_ready"
     | "turn_completed"
   readonly locale: "ja" | "en"
@@ -139,7 +145,7 @@ interface PresenceDirectionEventV1 {
 
 Frontendはactive workspace ID、実Codex generation、latest request ID、localeをevent受理直前と描画直前に照合する。mismatch、duplicate、unknown field、rollback generationは破棄する。Luna eventをmain Chat timeline、main conversation、commit evidence、workspace historyへ追加しない。
 
-captionの優先順位は、明示的なcommit explanation presentation > Lunaの`decision_wait` / failure > Lunaの`commit_ready` / completion > Lunaのmilestoneとする。Luna captionは既存のLuna captionだけを置換し、active commit explanationを閉じたり上書きしたりしない。commit explanation開始時はLuna captionとLuna speechをstale化する。decision card、error banner、commit evidence、deterministic character stateをcaptionで置換しない。
+captionの優先順位は、明示的なcommit explanation presentation > Lunaの`decision_wait` / failure > Lunaの`main_message` > Lunaの`commit_ready` / completion > Lunaのmilestoneとする。Luna captionは既存のLuna captionだけを置換し、active commit explanationを閉じたり上書きしたりしない。commit explanation開始時はLuna captionとLuna speechをstale化する。decision card、error banner、commit evidence、deterministic character stateをcaptionで置換しない。
 
 Luna captionはcharacter pane内のvisible HTML textとして1文を表示し、`aria-live=polite`とする。blocking/error semanticsは既存のdecision card/error UIが所有するため、Luna caption自体を`alert`にしない。captionを先にlayoutし、windowと内側viewportで全文がvisible、frontmostであることをpaint後に確認する。eventごとのack deadlineは1秒で、ack後100ms以上表示してからだけ既存`narration_speak`を呼ぶ。hidden、clip、occlusion、timeoutではcaption-onlyへterminal化する。
 
@@ -149,7 +155,7 @@ TTSへ渡すtextは表示済み`utterance`とbyte-for-byte同じ値とし、再�
 
 ## Failure、privacy、persistence
 
-Luna unavailable、queue overflow、timeout、cancel、schema/privacy violation、support policy violationではcaption、speech、model cueを0件にし、既存の決定論的character stateを維持する。Luna failureはmain turnとTerraのcommit説明を停止しない。利用者向けにsupport failureを新しいChat errorとして表示しない。
+Luna unavailable、queue overflow、timeout、cancel、schema/privacy violation、support policy violationでは対象候補のcaption、speech、model cueを0件にし、既存の決定論的character stateを維持する。overflowはsafe counter以外を記録せず、main eventをblockしない。Luna failureはmain turnとTerraのcommit説明を停止しない。利用者向けにsupport failureを新しいChat errorとして表示しない。
 
 `PresenceDirectorInputV1`、prompt、raw response、utterance、caption、audio、support thread IDは永続化しない。owner-only auditへ保存できるのはrole、exact model ID、attempt/success/failure/cancel/unavailable counter、latency、token count、safe error code、skill/schema digest prefixだけである。通常logにはworkspace/repository/path、prompt/response、caption text、credentialを出さない。
 
@@ -158,10 +164,10 @@ Luna unavailable、queue overflow、timeout、cancel、schema/privacy violation�
 最低限、次を独立したtestで固定する。
 
 1. Sol/Terra/Lunaのconfig、thread、turn、response、wire、auditが各exact modelと一致し、cross-role modelとfallbackを拒否する。
-2. Luna inputにtext/path/diff/secret fieldを追加できず、trigger/state/bucketの不正組合せを拒否する。
+2. `main_message` excerptが完了済みnormalized `agentMessage`だけから生成され、delta、reasoning、tool argument/output、code/diff、path、URL、secretを除去し、240 scalar上限と条件付きfieldをfail closedで検証する。
 3. Luna outputのunknown field、wrong locale、overlong/control/private text、disallowed cueを拒否する。
-4. capacity 1、latest coalesce、priority、30秒cooldown、45/120秒milestone、generation/decision/stop cancelを決定論的clockで検証する。
-5. tool event、reasoning、routine progressではLunaを起動しない。verified commitだけが`commit_ready`になる。
+4. capacity 1、16件FIFO、全`main_message`の順序と一度だけの処理、overflow audit、priority、cooldown迂回、45/120秒milestone、generation/decision/stop cancel、正常terminalでのmessage保持を決定論的clockで検証する。
+5. tool event、reasoning、streaming delta、routine progressではLunaを起動しない。完了済み`agentMessage`だけが`main_message`となり、verified commitだけが`commit_ready`になる。
 6. active commit explanationがLuna caption/TTSより優先され、caption visible ack前、reduced motion、mute、stale workspaceではspeech/motionを開始しない。
 7. Lunaのrelease verification、sandbox probe、isolation probe、runtime初期化の各構築段階でapp closeとforce cleanupを再現し、process tree、private run directory、scheduler active ownershipが期限内に0件へ収束する。
-7. support release proofがrole別model、tool 0、permission、skill/schema hashを照合し、失敗時もmain turnが完走する。
+8. support release proofがrole別model、tool 0、permission、skill/schema hashを照合し、失敗時もmain turnが完走する。
