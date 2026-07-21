@@ -15,6 +15,7 @@ import {
   type NarrationSpeakRequestV1,
   type NarrationSpeakResponseV1,
   type NarrationVoiceListV1,
+  type PresenceDirectionEventV1,
 } from "@/features/narration/contracts"
 import { NarrationController } from "@/features/narration/controller"
 import type { NarrationGateway } from "@/features/narration/transport"
@@ -79,6 +80,27 @@ function initialSnapshot(enabled = false): NarrationSettingsSnapshotV1 {
       lastErrorCode: null,
     },
     loadWarningCode: null,
+  }
+}
+
+function presenceEvent(
+  overrides: Partial<PresenceDirectionEventV1> = {},
+): PresenceDirectionEventV1 {
+  return {
+    schemaVersion: narrationSchemaVersion,
+    requestId: "presence-1",
+    workspaceId: "workspace-1",
+    workspaceGeneration: 3,
+    sourceEventId: "source-event-1",
+    trigger: "decision_wait",
+    locale: "ja",
+    utterance: "確認が必要なところで待っています。",
+    cue: "asking",
+    priority: "high",
+    modelRole: "presence_director",
+    model: "gpt-5.6-luna",
+    occurredAt: "2026-07-21T10:00:00.000Z",
+    ...overrides,
   }
 }
 
@@ -232,6 +254,197 @@ function acknowledge(
 }
 
 describe("NarrationController", () => {
+  it("releases a visible Luna caption to byte-identical event speech after its lead", async () => {
+    const leads: Array<() => void> = []
+    const pauseDurations: number[] = []
+    const gateway = new FakeNarrationGateway(true)
+    const controller = new NarrationController(gateway, (milliseconds) => {
+      pauseDurations.push(milliseconds)
+      return new Promise<void>((resolve) => leads.push(resolve))
+    })
+    await controller.initialize()
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+
+    expect(controller.consumePresence(presenceEvent())).toBe(true)
+    const presence = controller.getSnapshot().presence
+    expect(presence).toMatchObject({
+      requestId: "presence-1",
+      cue: "asking",
+      speechStatus: "queued",
+    })
+    expect(gateway.speech).toHaveLength(0)
+    expect(
+      controller.acknowledgePresenceCaptionVisible({
+        requestId: "other-request",
+        presentationGeneration: presence?.presentationGeneration ?? 0,
+      }),
+    ).toBe(false)
+    expect(
+      controller.acknowledgePresenceCaptionVisible({
+        requestId: "presence-1",
+        presentationGeneration: presence?.presentationGeneration ?? 0,
+      }),
+    ).toBe(true)
+    expect(pauseDurations).toEqual([100])
+    expect(gateway.speech).toHaveLength(0)
+
+    leads[0]?.()
+    await vi.waitFor(() => expect(gateway.speech).toHaveLength(1))
+    expect(gateway.speech[0]).toMatchObject({
+      workspaceId: "workspace-1",
+      generation: 3,
+      sequence: 0,
+      locale: "ja",
+      kind: "event",
+      semanticType: "waiting_for_user",
+      priority: "high",
+      text: "確認が必要なところで待っています。",
+    })
+  })
+
+  it("maps each Luna trigger to deterministic narration semantics", async () => {
+    const cases = [
+      ["decision_wait", "asking", "waiting_for_user", "high"],
+      ["recoverable_failure", "warning", "error", "normal"],
+      ["terminal_failure", "error", "error", "high"],
+      ["long_milestone", "working", "progress", "low"],
+      ["commit_ready", "success", "commit_observed", "normal"],
+      ["turn_completed", "success", "progress", "low"],
+    ] as const
+
+    for (const [trigger, cue, semanticType, priority] of cases) {
+      const { controller, gateway } = await ready(true)
+      await controller.setScope({
+        workspaceId: "workspace-1",
+        generation: 3,
+        locale: "ja",
+      })
+      expect(
+        controller.consumePresence(
+          presenceEvent({
+            requestId: `presence-${trigger}`,
+            sourceEventId: `source-${trigger}`,
+            trigger,
+            cue,
+            priority,
+          }),
+        ),
+      ).toBe(true)
+      const presence = controller.getSnapshot().presence
+      expect(
+        controller.acknowledgePresenceCaptionVisible({
+          requestId: `presence-${trigger}`,
+          presentationGeneration: presence?.presentationGeneration ?? 0,
+        }),
+      ).toBe(true)
+      await vi.waitFor(() => expect(gateway.speech).toHaveLength(1))
+      expect(gateway.speech[0]).toMatchObject({ semanticType, priority })
+    }
+  })
+
+  it("rejects stale, duplicate, locale-mismatched, and lower-priority Luna captions", async () => {
+    const { controller } = await ready(true)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+
+    expect(
+      controller.consumePresence(
+        presenceEvent({ workspaceGeneration: 2, requestId: "stale" }),
+      ),
+    ).toBe(false)
+    expect(
+      controller.consumePresence(
+        presenceEvent({ locale: "en", requestId: "wrong-locale" }),
+      ),
+    ).toBe(false)
+    expect(controller.getSnapshot().presence).toBeNull()
+
+    expect(controller.consumePresence(presenceEvent())).toBe(true)
+    expect(controller.consumePresence(presenceEvent())).toBe(false)
+    expect(
+      controller.consumePresence(
+        presenceEvent({
+          requestId: "milestone-2",
+          sourceEventId: "milestone-source-2",
+          trigger: "long_milestone",
+          cue: "working",
+          priority: "low",
+        }),
+      ),
+    ).toBe(false)
+    expect(controller.getSnapshot().presence?.requestId).toBe("presence-1")
+  })
+
+  it("gives explicit commit presentation priority over Luna caption and cue", async () => {
+    const { controller, gateway } = await ready(true)
+    await controller.setScope({
+      workspaceId: "workspace-1",
+      generation: 3,
+      locale: "ja",
+    })
+    expect(controller.consumePresence(presenceEvent())).toBe(true)
+    const key = prepare(controller, ["明示的なコミット説明です。"])
+
+    await expect(controller.activatePresentation(key)).resolves.toBe(true)
+    expect(controller.getSnapshot().presence).toBeNull()
+    expect(controller.getSnapshot().presentation).not.toBeNull()
+    expect(
+      controller.consumePresence(
+        presenceEvent({ requestId: "presence-2", sourceEventId: "source-2" }),
+      ),
+    ).toBe(false)
+    expect(gateway.speech).toHaveLength(0)
+  })
+
+  it("keeps a timed-out or muted Luna caption without replaying speech", async () => {
+    vi.useFakeTimers()
+    try {
+      const gateway = new FakeNarrationGateway(true)
+      const controller = new NarrationController(gateway)
+      await controller.initialize()
+      await controller.setScope({
+        workspaceId: "workspace-1",
+        generation: 3,
+        locale: "ja",
+      })
+      expect(controller.consumePresence(presenceEvent())).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(controller.getSnapshot().presence).toMatchObject({
+        requestId: "presence-1",
+        speechStatus: "unavailable",
+        errorCode: "NARRATION-CAPTION-NOT-VISIBLE",
+      })
+      expect(gateway.speech).toHaveLength(0)
+
+      expect(
+        controller.consumePresence(
+          presenceEvent({
+            requestId: "presence-2",
+            sourceEventId: "source-2",
+          }),
+        ),
+      ).toBe(true)
+      await controller.setMuted(true)
+      expect(controller.getSnapshot().presence).toMatchObject({
+        requestId: "presence-2",
+        speechStatus: "muted",
+      })
+      await controller.setMuted(false)
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(gateway.speech).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("buffers automatic generation without exposing caption or speech", async () => {
     const { controller, gateway } = await ready(true)
     prepare(controller)

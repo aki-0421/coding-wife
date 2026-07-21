@@ -4,6 +4,7 @@ import {
   narrationSchemaVersion,
   narrationSettingsSchemaVersion,
   parseCommitNarrationConsumerEvent,
+  parsePresenceDirectionEvent,
   parseNarrationSettings,
   sourceKeyFromCommitNarrationEvent,
   type CommitNarrationConsumerEventV1,
@@ -16,6 +17,11 @@ import {
   type NarrationSettingsSnapshotV1,
   type NarrationSettingsUpdateV2,
   type NarrationVoiceV1,
+  type PresenceDirectionConsumerPort,
+  type PresenceDirectionCue,
+  type PresenceDirectionEventV1,
+  type PresenceDirectionPriority,
+  type PresenceDirectionTrigger,
 } from "@/features/narration/contracts"
 import {
   NarrationBoundaryError,
@@ -49,6 +55,7 @@ export type NarrationSpeechStatus =
 export interface NarrationScope {
   readonly workspaceId: string
   readonly generation: number
+  readonly locale?: NarrationLocale
 }
 
 export interface CaptionVisibilityAcknowledgment {
@@ -59,6 +66,11 @@ export interface CaptionVisibilityAcknowledgment {
 
 export interface TestCaptionVisibilityAcknowledgment {
   readonly testGeneration: number
+}
+
+export interface PresenceCaptionVisibilityAcknowledgment {
+  readonly requestId: string
+  readonly presentationGeneration: number
 }
 
 export interface CommitNarrationPresentationSnapshot {
@@ -79,6 +91,22 @@ export interface NarrationTestSnapshot {
   readonly errorCode: string | null
 }
 
+export interface PresenceDirectionPresentationSnapshot {
+  readonly requestId: string
+  readonly workspaceId: string
+  readonly workspaceGeneration: number
+  readonly sourceEventId: string
+  readonly trigger: PresenceDirectionTrigger
+  readonly locale: NarrationLocale
+  readonly utterance: string
+  readonly cue: PresenceDirectionCue
+  readonly priority: PresenceDirectionPriority
+  readonly occurredAt: string
+  readonly presentationGeneration: number
+  readonly speechStatus: NarrationSpeechStatus
+  readonly errorCode: string | null
+}
+
 export interface NarrationControllerSnapshot {
   readonly settingsStatus: NarrationLoadStatus
   readonly voiceStatus: NarrationVoiceStatus
@@ -86,6 +114,8 @@ export interface NarrationControllerSnapshot {
   readonly voices: readonly NarrationVoiceV1[]
   readonly scope: NarrationScope | null
   readonly presentation: CommitNarrationPresentationSnapshot | null
+  readonly presence: PresenceDirectionPresentationSnapshot | null
+  readonly latestPresenceRequestId: string | null
   readonly test: NarrationTestSnapshot
   readonly lastErrorCode: string | null
 }
@@ -122,12 +152,20 @@ interface TestCaptionGate {
   timer: ReturnType<typeof setTimeout> | null
 }
 
+interface PresenceCaptionGate {
+  readonly requestId: string
+  readonly presentationGeneration: number
+  state: "waiting" | "leading" | "scheduled" | "terminal"
+  acknowledgmentTimer: ReturnType<typeof setTimeout> | null
+}
+
 const maximumPreparedPresentations = 12
 const speechPollMilliseconds = 125
 const speechTimeoutMilliseconds = 50_000
 const testSpeechTimeoutMilliseconds = speechTimeoutMilliseconds
 const captionAcknowledgmentTimeoutMilliseconds = 1_000
 const captionSpeechLeadMilliseconds = 100
+const maximumPresenceDedupeEntries = 64
 
 function initialSnapshot(): NarrationControllerSnapshot {
   return {
@@ -137,6 +175,8 @@ function initialSnapshot(): NarrationControllerSnapshot {
     voices: [],
     scope: null,
     presentation: null,
+    presence: null,
+    latestPresenceRequestId: null,
     test: { status: "idle", generation: 0, text: null, errorCode: null },
     lastErrorCode: null,
   }
@@ -170,6 +210,50 @@ function sameSourceKey(
   return commitNarrationSourceKey(left) === commitNarrationSourceKey(right)
 }
 
+function presencePriority(trigger: PresenceDirectionTrigger): number {
+  switch (trigger) {
+    case "decision_wait":
+      return 6
+    case "terminal_failure":
+      return 5
+    case "recoverable_failure":
+      return 4
+    case "commit_ready":
+      return 3
+    case "turn_completed":
+      return 2
+    case "long_milestone":
+      return 1
+  }
+}
+
+function presenceSemanticType(
+  trigger: PresenceDirectionTrigger,
+): "progress" | "waiting_for_user" | "error" | "commit_observed" {
+  switch (trigger) {
+    case "decision_wait":
+      return "waiting_for_user"
+    case "recoverable_failure":
+    case "terminal_failure":
+      return "error"
+    case "commit_ready":
+      return "commit_observed"
+    case "long_milestone":
+    case "turn_completed":
+      return "progress"
+  }
+}
+
+function presenceDedupeKeys(
+  event: PresenceDirectionEventV1,
+): readonly string[] {
+  const scope = [event.workspaceId, event.workspaceGeneration]
+  return [
+    JSON.stringify([...scope, "request", event.requestId]),
+    JSON.stringify([...scope, "source", event.sourceEventId]),
+  ]
+}
+
 export class NarrationController {
   readonly #listeners = new Set<Listener>()
   readonly #prepared = new Map<string, PreparedCommitNarration>()
@@ -177,12 +261,17 @@ export class NarrationController {
   #snapshot = initialSnapshot()
   #initialization: Promise<void> | null = null
   #sourceDisconnect: (() => void) | null = null
+  #presenceSourceDisconnect: (() => void) | null = null
   #scopeEpoch = 0
   #presentationGeneration = 0
   #speechEpoch = 0
   #speechChain: Promise<void> = Promise.resolve()
+  #presenceCancellation: Promise<void> = Promise.resolve()
   #captionSpeechGate: CaptionSpeechGate | null = null
   #testCaptionGate: TestCaptionGate | null = null
+  #presenceCaptionGate: PresenceCaptionGate | null = null
+  readonly #presenceDedupe = new Set<string>()
+  readonly #presenceDedupeOrder: string[] = []
   #testSequence = 0
 
   public constructor(
@@ -204,6 +293,18 @@ export class NarrationController {
     return () => {
       this.#sourceDisconnect?.()
       this.#sourceDisconnect = null
+    }
+  }
+
+  public connectPresence(
+    source: PresenceDirectionConsumerPort | null,
+  ): () => void {
+    this.#presenceSourceDisconnect?.()
+    this.#presenceSourceDisconnect =
+      source?.subscribe((event) => this.consumePresence(event)) ?? null
+    return () => {
+      this.#presenceSourceDisconnect?.()
+      this.#presenceSourceDisconnect = null
     }
   }
 
@@ -364,14 +465,20 @@ export class NarrationController {
       this.update({ lastErrorCode: "NARRATION-SCOPE-ROLLBACK" })
       return false
     }
-    if (
+    const sameNativeScope =
       this.#snapshot.scope?.workspaceId === scope.workspaceId &&
       this.#snapshot.scope.generation === scope.generation
-    ) {
+    if (sameNativeScope && this.#snapshot.scope?.locale === scope.locale) {
+      return true
+    }
+    if (sameNativeScope) {
+      await this.dismissPresence("workspace_switch")
+      this.update({ scope, lastErrorCode: null })
       return true
     }
     this.#scopeGenerationHighWater.set(scope.workspaceId, scope.generation)
     const epoch = ++this.#scopeEpoch
+    await this.dismissPresence("workspace_switch")
     if (
       this.#snapshot.scope !== null &&
       this.#snapshot.presentation?.status !== "canceled"
@@ -477,9 +584,86 @@ export class NarrationController {
     return true
   }
 
+  public consumePresence(value: unknown): boolean {
+    let event: PresenceDirectionEventV1
+    try {
+      event = parsePresenceDirectionEvent(value)
+    } catch {
+      return false
+    }
+
+    const scope = this.#snapshot.scope
+    const highestGeneration = this.#scopeGenerationHighWater.get(
+      event.workspaceId,
+    )
+    if (
+      scope === null ||
+      scope.locale === undefined ||
+      event.workspaceId !== scope.workspaceId ||
+      event.workspaceGeneration !== scope.generation ||
+      event.locale !== scope.locale ||
+      (highestGeneration !== undefined &&
+        event.workspaceGeneration < highestGeneration) ||
+      this.#snapshot.presentation !== null
+    ) {
+      return false
+    }
+
+    const dedupeKeys = presenceDedupeKeys(event)
+    if (dedupeKeys.some((key) => this.#presenceDedupe.has(key))) return false
+
+    const active = this.#snapshot.presence
+    if (
+      active !== null &&
+      presencePriority(event.trigger) < presencePriority(active.trigger)
+    ) {
+      return false
+    }
+
+    this.recordPresenceDedupe(dedupeKeys)
+    this.clearPresenceCaptionGate()
+    this.#speechEpoch++
+    this.#speechChain = Promise.resolve()
+    if (
+      active !== null &&
+      (active.speechStatus === "queued" || active.speechStatus === "playing")
+    ) {
+      this.#presenceCancellation =
+        this.cancelPresenceNativeSpeech("explicit_cancel")
+    } else {
+      this.#presenceCancellation = Promise.resolve()
+    }
+
+    const presentationGeneration = ++this.#presentationGeneration
+    const speechStatus = this.resolveInactiveSpeechStatus()
+    this.#snapshot = {
+      ...this.#snapshot,
+      presence: {
+        requestId: event.requestId,
+        workspaceId: event.workspaceId,
+        workspaceGeneration: event.workspaceGeneration,
+        sourceEventId: event.sourceEventId,
+        trigger: event.trigger,
+        locale: event.locale,
+        utterance: event.utterance,
+        cue: event.cue,
+        priority: event.priority,
+        occurredAt: event.occurredAt,
+        presentationGeneration,
+        speechStatus,
+        errorCode: null,
+      },
+      latestPresenceRequestId: event.requestId,
+    }
+    this.emit()
+    this.preparePresenceCaptionSpeech()
+    return true
+  }
+
   public async activatePresentation(
     key: CommitNarrationSourceKey,
   ): Promise<boolean> {
+    await this.dismissPresence("explicit_cancel")
     if (this.#snapshot.presentation !== null) {
       if (!sameSourceKey(this.#snapshot.presentation.key, key)) {
         await this.dismissPresentation("explicit_cancel")
@@ -558,6 +742,63 @@ export class NarrationController {
     )
     void this.drainCaptionSpeech(gate)
     return true
+  }
+
+  public readonly acknowledgePresenceCaptionVisible = (
+    acknowledgment: PresenceCaptionVisibilityAcknowledgment,
+  ): boolean => {
+    const presence = this.#snapshot.presence
+    const gate = this.#presenceCaptionGate
+    const scope = this.#snapshot.scope
+    if (
+      presence === null ||
+      gate === null ||
+      gate.state !== "waiting" ||
+      acknowledgment.requestId !== presence.requestId ||
+      acknowledgment.requestId !== gate.requestId ||
+      acknowledgment.requestId !== this.#snapshot.latestPresenceRequestId ||
+      acknowledgment.presentationGeneration !==
+        presence.presentationGeneration ||
+      acknowledgment.presentationGeneration !== gate.presentationGeneration ||
+      scope === null ||
+      scope.workspaceId !== presence.workspaceId ||
+      scope.generation !== presence.workspaceGeneration ||
+      scope.locale !== presence.locale ||
+      this.#snapshot.presentation !== null
+    ) {
+      return false
+    }
+
+    gate.state = "leading"
+    if (gate.acknowledgmentTimer !== null) {
+      clearTimeout(gate.acknowledgmentTimer)
+      gate.acknowledgmentTimer = null
+    }
+    void this.releasePresenceSpeech(gate)
+    return true
+  }
+
+  public async dismissPresence(
+    reason: NarrationCancelReason = "explicit_cancel",
+  ): Promise<void> {
+    const presence = this.#snapshot.presence
+    if (presence === null) return
+    const shouldCancelNative =
+      presence.speechStatus === "queued" || presence.speechStatus === "playing"
+    this.clearPresenceCaptionGate()
+    this.#speechEpoch++
+    this.#speechChain = Promise.resolve()
+    this.#presentationGeneration++
+    this.#snapshot = {
+      ...this.#snapshot,
+      presence: null,
+      latestPresenceRequestId: null,
+    }
+    this.emit()
+    this.#presenceCancellation = shouldCancelNative
+      ? this.cancelPresenceNativeSpeech(reason)
+      : Promise.resolve()
+    await this.#presenceCancellation
   }
 
   public async cancelPresentation(
@@ -745,6 +986,174 @@ export class NarrationController {
         ? voice.locale === "ja_JP"
         : voice.locale.startsWith("en_"),
     )
+  }
+
+  private recordPresenceDedupe(keys: readonly string[]): void {
+    for (const key of keys) {
+      if (this.#presenceDedupe.has(key)) continue
+      this.#presenceDedupe.add(key)
+      this.#presenceDedupeOrder.push(key)
+    }
+    while (
+      this.#presenceDedupeOrder.length >
+      maximumPresenceDedupeEntries * 2
+    ) {
+      const oldest = this.#presenceDedupeOrder.shift()
+      if (oldest !== undefined) this.#presenceDedupe.delete(oldest)
+    }
+  }
+
+  private preparePresenceCaptionSpeech(): void {
+    const presence = this.#snapshot.presence
+    const settings = this.#snapshot.settingsSnapshot?.settings
+    if (presence === null || settings === undefined) return
+    if (!settings.enabled || settings.muted) {
+      this.updatePresence({
+        speechStatus: settings.muted ? "muted" : "off",
+      })
+      return
+    }
+
+    const gate: PresenceCaptionGate = {
+      requestId: presence.requestId,
+      presentationGeneration: presence.presentationGeneration,
+      state: "waiting",
+      acknowledgmentTimer: null,
+    }
+    gate.acknowledgmentTimer = setTimeout(() => {
+      if (this.#presenceCaptionGate !== gate || gate.state !== "waiting") return
+      gate.state = "terminal"
+      gate.acknowledgmentTimer = null
+      this.updatePresence({
+        speechStatus: "unavailable",
+        errorCode: "NARRATION-CAPTION-NOT-VISIBLE",
+      })
+    }, captionAcknowledgmentTimeoutMilliseconds)
+    this.#presenceCaptionGate = gate
+    this.updatePresence({ speechStatus: "queued" })
+  }
+
+  private clearPresenceCaptionGate(): void {
+    const gate = this.#presenceCaptionGate
+    if (gate !== null) {
+      gate.state = "terminal"
+      if (gate.acknowledgmentTimer !== null) {
+        clearTimeout(gate.acknowledgmentTimer)
+        gate.acknowledgmentTimer = null
+      }
+    }
+    this.#presenceCaptionGate = null
+  }
+
+  private async releasePresenceSpeech(
+    gate: PresenceCaptionGate,
+  ): Promise<void> {
+    const epoch = this.#speechEpoch
+    await this.pause(captionSpeechLeadMilliseconds)
+    await this.#presenceCancellation
+    if (!this.presenceStillCurrent(epoch, gate, "leading")) return
+
+    const presence = this.#snapshot.presence
+    const settings = this.#snapshot.settingsSnapshot?.settings
+    if (presence === null || settings === undefined) return
+    if (!settings.enabled || settings.muted) {
+      gate.state = "terminal"
+      this.updatePresence({
+        speechStatus: settings.muted ? "muted" : "off",
+      })
+      return
+    }
+
+    gate.state = "scheduled"
+    try {
+      const response = await this.gateway.speak({
+        schemaVersion: narrationSchemaVersion,
+        requestId: `presence-${presence.requestId.slice(0, 96)}-${presence.presentationGeneration}`,
+        workspaceId: presence.workspaceId,
+        generation: presence.workspaceGeneration,
+        sequence: 0,
+        locale: presence.locale,
+        kind: "event",
+        semanticType: presenceSemanticType(presence.trigger),
+        priority: presence.priority,
+        text: presence.utterance,
+      })
+      if (!this.presenceStillCurrent(epoch, gate, "scheduled")) return
+      if (response.disposition !== "queued") {
+        gate.state = "terminal"
+        this.updatePresence({
+          speechStatus:
+            response.disposition === "muted"
+              ? "muted"
+              : response.disposition === "disabled"
+                ? "off"
+                : "unavailable",
+          errorCode:
+            response.disposition === "muted" ||
+            response.disposition === "disabled"
+              ? null
+              : (response.code ?? `NARRATION-${response.disposition}`),
+        })
+        return
+      }
+      this.updatePresence({ speechStatus: "playing" })
+      await this.waitForPlaybackEnd(epoch)
+      if (this.presenceStillCurrent(epoch, gate, "scheduled")) {
+        gate.state = "terminal"
+        this.updatePresence({ speechStatus: "idle" })
+      }
+    } catch (error) {
+      if (!this.presenceStillCurrent(epoch, gate, "scheduled")) return
+      gate.state = "terminal"
+      const code = errorCode(error)
+      this.updatePresence({ speechStatus: "unavailable", errorCode: code })
+      if (code !== "NARRATION-PLAYBACK-TIMEOUT") {
+        await this.cancelPresenceNativeSpeech("explicit_cancel")
+      }
+    }
+  }
+
+  private presenceStillCurrent(
+    epoch: number,
+    gate: PresenceCaptionGate,
+    state: PresenceCaptionGate["state"],
+  ): boolean {
+    const presence = this.#snapshot.presence
+    const scope = this.#snapshot.scope
+    return (
+      epoch === this.#speechEpoch &&
+      this.#presenceCaptionGate === gate &&
+      gate.state === state &&
+      presence !== null &&
+      presence.requestId === gate.requestId &&
+      presence.requestId === this.#snapshot.latestPresenceRequestId &&
+      presence.presentationGeneration === gate.presentationGeneration &&
+      scope?.workspaceId === presence.workspaceId &&
+      scope.generation === presence.workspaceGeneration &&
+      scope.locale === presence.locale &&
+      this.#snapshot.presentation === null
+    )
+  }
+
+  private updatePresence(
+    update: Partial<PresenceDirectionPresentationSnapshot>,
+  ): void {
+    if (this.#snapshot.presence === null) return
+    this.#snapshot = {
+      ...this.#snapshot,
+      presence: { ...this.#snapshot.presence, ...update },
+    }
+    this.emit()
+  }
+
+  private async cancelPresenceNativeSpeech(
+    reason: NarrationCancelReason,
+  ): Promise<void> {
+    try {
+      await this.gateway.cancel(reason)
+    } catch {
+      // Optional presence failures stay isolated from the main session UI.
+    }
   }
 
   private prepareCaptionSpeech(): void {
@@ -1088,6 +1497,7 @@ export class NarrationController {
     if (this.#captionSpeechGate !== null) {
       this.skipPendingCaptionSpeech(this.#captionSpeechGate)
     }
+    this.clearPresenceCaptionGate()
     this.#speechEpoch++
     this.#speechChain = Promise.resolve()
     try {
@@ -1096,6 +1506,15 @@ export class NarrationController {
       this.update({ lastErrorCode: errorCode(error) })
     }
     const settings = this.#snapshot.settingsSnapshot?.settings
+    if (this.#snapshot.presence !== null) {
+      this.updatePresence({
+        speechStatus: settings?.muted
+          ? "muted"
+          : settings?.enabled
+            ? "idle"
+            : "off",
+      })
+    }
     if (
       this.#snapshot.presentation !== null &&
       this.#snapshot.presentation.status !== "unavailable" &&
