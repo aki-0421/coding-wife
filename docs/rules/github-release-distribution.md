@@ -79,7 +79,7 @@ automatic updater用signatureや`latest.json`は生成しない。checksumはdow
 
 ## ライセンス境界
 
-root `LICENSE`はCoding Wife contributorsが保有する独自コードをMIT Licenseで利用・再配布可能にする。Tauri appはrootとbyte一致する`CODING-WIFE-LICENSE.txt`をlegal resource treeへ含み、release verifierが欠落・改変を拒否する。third-party dependency、Live2D Cubism SDK、Hiyori modelなど、リポジトリ内で別のNOTICE、terms、licenseを持つ素材にはそれぞれの条件が優先して適用される。配布物は生成済み第三者依存台帳と既存の原文NOTICE・termsも保持する。
+root `LICENSE`はCoding Wife contributorsが保有する独自コードをMIT Licenseで利用・再配布可能にする。`pnpm licenses:generate`は第三者通知とともにroot `LICENSE`を`CODING-WIFE-LICENSE.txt`としてlegal resource treeへ同期し、release notice verifierとrelease verifierがrootとのbyte一致、欠落、想定外ファイルを拒否する。third-party dependency、Live2D Cubism SDK、Hiyori modelなど、リポジトリ内で別のNOTICE、terms、licenseを持つ素材にはそれぞれの条件が優先して適用される。配布物は生成済み第三者依存台帳と既存の原文NOTICE・termsも保持する。
 
 ## 公開前の手動gate
 
