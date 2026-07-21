@@ -3,6 +3,7 @@ name = "coding-wife"
 version = "0.1.0"
 description = "Evidence-centered Codex supervision with a Live2D character"
 authors = ["Coding Wife contributors"]
+license = "MIT"
 edition = "2021"
 rust-version = "1.88"
 

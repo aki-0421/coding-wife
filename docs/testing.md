@@ -1,7 +1,7 @@
 ---
 title: "Testing Coding Wife"
 description: "Judge-facing setup, CI, release-candidate verification, macOS packaging, installation, and Gatekeeper instructions for Coding Wife."
-updated: 2026-07-19
+updated: 2026-07-21
 read_when:
   - "Reproducing the hackathon build or verifying Coding Wife on macOS."
   - "Changing release commands, the DMG layout, or repository quality gates."
@@ -28,6 +28,8 @@ The explicit Cargo fetch installs the locked Apple Silicon registry metadata bef
 GitHub Actions runs the repository CI for every Pull Request into `develop`, every push to `develop`, and manual dispatches. `CI / Frontend and repository` checks diff hygiene before dependency installation, then verifies formatting, managed documentation, lint, types, the PR-scoped test suite, and the production frontend build on Linux. After it passes, `CI / Native` verifies the locked dependency-license inventory plus Rust formatting, Clippy, and serial tests on a macOS 14 Apple Silicon runner. Both checks must be required by the `develop` branch ruleset.
 
 PR CI intentionally does not run `pnpm quality:check`, clean-checkout reconstruction, any test behind `pnpm test:release`, a Tauri bundle, or DMG packaging. Release tests remain together because filesystem semantics such as symlink modes vary by runner OS. Those release-candidate checks remain in the canonical quality sequence below. CI has read-only repository permission and does not publish an app or DMG. See the [continuous integration specification](rules/continuous-integration.md) for the exact triggers, versions, cache policy, and release boundary.
+
+The separate `Release macOS / Package and draft` workflow runs only for a `v<version>` tag. It requires the tag commit to be in `develop` history and the tag to match the versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`. On a macOS 14 Apple Silicon runner it runs `pnpm test:release`, builds and verifies the real DMG with `pnpm release:macos`, and uploads only that DMG and its SHA-256 sidecar to a draft GitHub Release. It uses no Apple signing or notarization credential and will not overwrite assets in a public release. See the [free GitHub Release distribution specification](rules/github-release-distribution.md) for the publication boundary.
 
 ## Run the development build
 
@@ -133,6 +135,30 @@ pnpm test:release
 
 This creates a minimal real arm64 Mach-O product fixture, feeds it through a controlled Tauri-builder boundary, applies the ad-hoc seal, exercises the real app verifier and top-level release scripts, builds and independently mounts a real DMG twice, injects build/license/legal/publish failures and repeated signals, attempts path swaps and private-path fixtures, verifies exact four-path rollback and crash-stale recovery, and checks lock, process, mount, temporary-prefix, and transaction cleanup.
 
+## Create a draft GitHub Release
+
+First update all three application versions to the same SemVer value and merge that change into `develop`. After the required CI checks pass for the exact commit, create and push the matching tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Do not reuse an existing public tag or move a published tag. The version-tag workflow creates or refreshes a draft named `Coding Wife v0.1.0` with these assets:
+
+```text
+Coding-Wife-v0.1.0-macOS-arm64.dmg
+Coding-Wife-v0.1.0-macOS-arm64.dmg.sha256
+```
+
+Download both draft assets into a clean directory and verify the exact bytes:
+
+```bash
+shasum -a 256 --check Coding-Wife-v0.1.0-macOS-arm64.dmg.sha256
+```
+
+Before changing the draft to public, complete the install and launch steps below on a fresh profile or a second Apple Silicon Mac, review the bilingual release notes, and record the final URL and checksum in the submission ledger. A successful Actions run proves packaging and repository-owned artifact verification; it does not prove that the downloaded artifact was installed or that Gatekeeper allowed first launch without the documented exception.
+
 ## Install and launch
 
 1. Open `Coding-Wife.dmg` on a macOS 14+ test Mac.
@@ -140,10 +166,10 @@ This creates a minimal real arm64 Mach-O product fixture, feeds it through a con
 3. Launch Coding Wife from Applications.
 4. Confirm the bundled Hiyori model renders, add or create a Git project, pass the Codex preflight, complete one primary turn, inspect its commit, and quit the app.
 
-The hackathon artifact is ad-hoc signed for resource integrity, but it is not Developer ID signed or notarized. The ad-hoc signature does not identify a trusted distributor. Apple warns that running software without a trusted signature and notarization can expose the computer and personal information to malware. Proceed only after verifying the repository source, commit, frozen artifact SHA-256, and artifact provenance.
+The hackathon artifact is ad-hoc signed for resource integrity, but it is not Developer ID signed or notarized. The ad-hoc signature does not identify a trusted distributor. This limitation applies equally to a local build and the free GitHub Release asset. Apple warns that running software without a trusted signature and notarization can expose the computer and personal information to malware. Proceed only after verifying the repository source, commit, frozen artifact SHA-256, and artifact provenance.
 
-If Gatekeeper blocks this reviewed local build, first try to open the app once. Then open **System Settings > Privacy & Security**, scroll down, choose **Open Anyway**, and confirm **Open** in the warning. This creates an exception for that app. Do not disable Gatekeeper or remove quarantine attributes globally. See Apple's [current safety guidance](https://support.apple.com/en-us/102445).
+If Gatekeeper blocks this reviewed local or downloaded artifact, first try to open the app once. Then open **System Settings > Privacy & Security**, scroll down, choose **Open Anyway**, and confirm **Open** in the warning. This creates an exception for that app. Do not disable Gatekeeper or remove quarantine attributes globally. See Apple's [current safety guidance](https://support.apple.com/en-us/102445).
 
 ## Release evidence still required
 
-Before external judging, record a fresh-profile or second-Mac install and first-launch smoke. Developer ID signing, notarization, stapling, Intel/universal packaging, and automatic updates are outside the current MVP artifact and must not be claimed as complete.
+Before external judging, publish the reviewed draft URL and checksum and record a fresh-profile or second-Mac install and first-launch smoke. Developer ID signing, notarization, stapling, Intel/universal packaging, and automatic updates are outside the current MVP artifact and must not be claimed as complete.

@@ -12,6 +12,7 @@ import { SDK_VERSION } from "./constants.mjs"
 import { assertExactFiles, fail, readJson, sha256 } from "./file-utils.mjs"
 
 export const RELEASE_NOTICE_INDEX = "THIRD-PARTY-NOTICES.md"
+export const PROJECT_LICENSE = "CODING-WIFE-LICENSE.txt"
 
 const packagedSources = Object.freeze([
   {
@@ -153,6 +154,10 @@ export function syncReleaseNotices(projectRoot) {
       mkdirSync(path.dirname(target), { recursive: true })
       copyFileSync(entry.sourcePath, target)
     }
+    copyFileSync(
+      path.join(projectRoot, "LICENSE"),
+      path.join(staging, PROJECT_LICENSE),
+    )
     writeFileSync(
       path.join(staging, RELEASE_NOTICE_INDEX),
       buildReleaseNoticeIndex(projectRoot),
@@ -175,9 +180,21 @@ export function verifyReleaseNotices(
   const legalEntries = entries.filter((entry) => entry.copyToLegal !== false)
   assertExactFiles(
     legalRoot,
-    [RELEASE_NOTICE_INDEX, ...legalEntries.map((entry) => entry.destination)],
-    "packaged third-party notices",
+    [
+      PROJECT_LICENSE,
+      RELEASE_NOTICE_INDEX,
+      ...legalEntries.map((entry) => entry.destination),
+    ],
+    "packaged legal resources",
   )
+
+  const projectLicense = readFileSync(path.join(projectRoot, "LICENSE"))
+  const packagedProjectLicense = readFileSync(
+    path.join(legalRoot, PROJECT_LICENSE),
+  )
+  if (!projectLicense.equals(packagedProjectLicense)) {
+    fail("packaged project license differs from root LICENSE")
+  }
 
   for (const entry of entries) {
     const source = readFileSync(entry.sourcePath)

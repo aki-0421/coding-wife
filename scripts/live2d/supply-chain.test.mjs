@@ -60,6 +60,14 @@ test("the release notice verifier rejects missing files and byte drift", () => {
       () => verifyReleaseNotices(projectRoot, legalRoot),
       /differs from canonical source/,
     )
+
+    rmSync(legalRoot, { force: true, recursive: true })
+    cpSync(getReleaseNoticeRoot(projectRoot), legalRoot, { recursive: true })
+    writeFileSync(path.join(legalRoot, "CODING-WIFE-LICENSE.txt"), "drift\n")
+    assert.throws(
+      () => verifyReleaseNotices(projectRoot, legalRoot),
+      /project license differs from root LICENSE/,
+    )
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true })
   }
