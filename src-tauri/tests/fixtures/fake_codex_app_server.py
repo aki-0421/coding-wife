@@ -658,7 +658,7 @@ def main():
                 cwd = pathlib.Path(params.get("cwd", ""))
                 support_valid = (
                     method == "thread/start"
-                    and params.get("model") == "gpt-5.6-sol"
+                    and params.get("model") == "gpt-5.6-terra"
                     and params.get("approvalPolicy") == "never"
                     and params.get("permissions") == "coding-wife-support-zero"
                     and params.get("ephemeral") is True
@@ -819,7 +819,7 @@ def main():
                 required_output = params.get("outputSchema", {}).get("required")
                 valid = (
                     params.get("threadId") == "support-thread-fixture"
-                    and params.get("model") == "gpt-5.6-sol"
+                    and params.get("model") == "gpt-5.6-terra"
                     and params.get("effort") == "low"
                     and isinstance(params.get("clientUserMessageId"), str)
                     and params.get("approvalPolicy") == "never"

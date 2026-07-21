@@ -12,8 +12,8 @@ use coding_wife_lib::codex::protocol::{client_notification, initialize_params};
 use coding_wife_lib::codex::rpc::{RpcRequestError, RuntimeSignal};
 use coding_wife_lib::codex::supervisor::CodexSupervisor;
 use coding_wife_lib::codex::support::{
-    CommitExplanationTrigger, SupportExplainRequest, SupportRuntime, SupportRuntimeError,
-    SUPPORT_MAX_SESSION_CAPACITY,
+    CommitExplanationTrigger, SupportExplainRequest, SupportModelRole, SupportRuntime,
+    SupportRuntimeError, SUPPORT_MAX_SESSION_CAPACITY,
 };
 use coding_wife_lib::codex::types::{
     BinarySource, CapabilityState, ChildState, CodexFallbackDecisionRequest, CodexHealth,
@@ -945,6 +945,11 @@ async fn dedicated_support_runtime_proves_authority_and_injects_only_the_explain
     };
 
     assert_eq!(runtime.audit().capacity, SUPPORT_MAX_SESSION_CAPACITY);
+    assert_eq!(
+        runtime.audit().model_role,
+        SupportModelRole::CommitExplainer
+    );
+    assert_eq!(runtime.audit().model, "gpt-5.6-terra");
     assert_eq!(runtime.audit().skill_name, "coding-wife-explain-commit");
     assert_eq!(runtime.audit().skill_version, "1.1.0");
     assert_eq!(
@@ -1040,6 +1045,11 @@ async fn real_support_release_probe_uses_the_production_turn_envelope() {
     .await
     .expect("production-equivalent release probe");
     assert_eq!(runtime.audit().skill_name, "coding-wife-explain-commit");
+    assert_eq!(
+        runtime.audit().model_role,
+        SupportModelRole::CommitExplainer
+    );
+    assert_eq!(runtime.audit().model, "gpt-5.6-terra");
     runtime.shutdown().await.expect("real probe cleanup");
     assert_eq!(current_support_run_directories(), before);
 }

@@ -31,7 +31,7 @@ use super::support_isolation::{
 };
 use super::support_private::{bridge_auth, support_config, PrivateRunDirectory};
 use super::support_probe::EXPECTED_SUPPORT_TOOL_HASH;
-use super::types::{TurnExecutionClass, CODEX_MODEL};
+use super::types::{TurnExecutionClass, CODEX_COMMIT_EXPLAINER_MODEL};
 
 pub const SUPPORT_MAX_SESSION_CAPACITY: usize = 1;
 pub const SUPPORT_PERMISSION_PROFILE: &str = "coding-wife-support-zero";
@@ -52,6 +52,22 @@ pub enum SupportFallbackRole {
     Narration,
     DecisionExplainer,
     CommitExplainer,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportModelRole {
+    CommitExplainer,
+    PresenceDirector,
+}
+
+impl SupportModelRole {
+    pub fn exact_model(self) -> &'static str {
+        match self {
+            Self::CommitExplainer => CODEX_COMMIT_EXPLAINER_MODEL,
+            Self::PresenceDirector => super::types::CODEX_PRESENCE_DIRECTOR_MODEL,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -132,6 +148,8 @@ pub struct SupportExplainResult {
 pub struct SupportIsolationAudit {
     pub capacity: usize,
     pub execution_class: TurnExecutionClass,
+    pub model_role: SupportModelRole,
+    pub model: String,
     pub cli_version: String,
     pub binary_hash_prefix: String,
     pub schema_fingerprint_prefix: String,
@@ -482,7 +500,7 @@ impl SupportRuntime {
             .or_else(default_auth_source)
             .ok_or(SupportRuntimeError::AuthBridge)?;
         bridge_auth(&auth_source, &run_directory.codex_home)?;
-        run_directory.write_config(&support_config(None))?;
+        run_directory.write_config(&support_config(CODEX_COMMIT_EXPLAINER_MODEL, None))?;
         let run_directory = Arc::new(run_directory);
 
         let (signals, receiver) = mpsc::channel(SUPPORT_SIGNAL_QUEUE_CAPACITY);
@@ -526,7 +544,7 @@ impl SupportRuntime {
                     "thread/start",
                     support_thread_start_params(
                         &run_directory.workspace,
-                        CODEX_MODEL,
+                        CODEX_COMMIT_EXPLAINER_MODEL,
                         Some("openai"),
                     ),
                     Duration::from_secs(5),
@@ -536,7 +554,7 @@ impl SupportRuntime {
             let thread = parse_support_thread_policy_response(
                 &thread,
                 &run_directory.workspace,
-                CODEX_MODEL,
+                CODEX_COMMIT_EXPLAINER_MODEL,
                 Some("openai"),
             )
             .map_err(|_| SupportRuntimeError::Policy)?;
@@ -563,6 +581,8 @@ impl SupportRuntime {
             audit: SupportIsolationAudit {
                 capacity: SUPPORT_MAX_SESSION_CAPACITY,
                 execution_class: TurnExecutionClass::Support,
+                model_role: SupportModelRole::CommitExplainer,
+                model: CODEX_COMMIT_EXPLAINER_MODEL.to_owned(),
                 cli_version: binary.cli_version.clone(),
                 binary_hash_prefix: prefix(&binary.executable_sha256),
                 schema_fingerprint_prefix: prefix(&schema.fingerprint),
@@ -614,7 +634,7 @@ impl SupportRuntime {
             &request.request_id,
             &input,
             &request.evidence.locale,
-            CODEX_MODEL,
+            CODEX_COMMIT_EXPLAINER_MODEL,
             &self.skill,
         ) {
             Ok(params) => params,
@@ -1174,6 +1194,22 @@ fn prefix(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn support_model_roles_have_distinct_exact_models() {
+        assert_eq!(
+            SupportModelRole::CommitExplainer.exact_model(),
+            "gpt-5.6-terra"
+        );
+        assert_eq!(
+            SupportModelRole::PresenceDirector.exact_model(),
+            "gpt-5.6-luna"
+        );
+        assert_ne!(
+            SupportModelRole::CommitExplainer.exact_model(),
+            SupportModelRole::PresenceDirector.exact_model()
+        );
+    }
 
     fn explanation(locale: &str) -> String {
         serde_json::to_string(&json!({

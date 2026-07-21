@@ -5,6 +5,8 @@ use thiserror::Error;
 
 use super::attachment::ResolvedAttachment;
 use super::bundled_skill::{ResolvedBundledSkill, COMMIT_SKILL_NAME, EXPLAIN_COMMIT_SKILL_NAME};
+#[cfg(test)]
+use super::types::CODEX_COMMIT_EXPLAINER_MODEL;
 use super::types::{ReasoningPreset, ReviewTarget, TurnExecutionClass, CODEX_MODEL};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1170,7 +1172,7 @@ mod tests {
                 "message",
                 "{}",
                 "ja",
-                CODEX_MODEL,
+                CODEX_COMMIT_EXPLAINER_MODEL,
                 &commit_skill(),
             ),
             Err(TurnContractError::SkillClass)
@@ -1185,7 +1187,7 @@ mod tests {
             "message",
             "{}",
             "ja",
-            CODEX_MODEL,
+            CODEX_COMMIT_EXPLAINER_MODEL,
             &explain_skill(),
         )
         .expect("support turn contract");
@@ -1202,6 +1204,15 @@ mod tests {
         assert_eq!(params["permissions"], "coding-wife-support-zero");
         assert_eq!(params["environments"], json!([]));
         assert_eq!(params["runtimeWorkspaceRoots"], json!([]));
+        assert_eq!(params["model"], CODEX_COMMIT_EXPLAINER_MODEL);
+
+        let thread = support_thread_start_params(
+            Path::new("/private/support"),
+            CODEX_COMMIT_EXPLAINER_MODEL,
+            Some("openai"),
+        );
+        assert_eq!(thread["model"], CODEX_COMMIT_EXPLAINER_MODEL);
+        assert_eq!(thread["allowProviderModelFallback"], false);
     }
 
     #[test]
@@ -1341,7 +1352,7 @@ mod tests {
                 "ephemeral": true,
                 "modelProvider": "openai"
             },
-            "model": CODEX_MODEL,
+            "model": CODEX_COMMIT_EXPLAINER_MODEL,
             "modelProvider": "openai",
             "cwd": cwd_text,
             "runtimeWorkspaceRoots": [],
@@ -1354,7 +1365,12 @@ mod tests {
             }
         });
         assert_eq!(
-            parse_support_thread_policy_response(&response, &cwd, CODEX_MODEL, Some("openai")),
+            parse_support_thread_policy_response(
+                &response,
+                &cwd,
+                CODEX_COMMIT_EXPLAINER_MODEL,
+                Some("openai"),
+            ),
             Ok(SupportThreadPolicyResponse {
                 thread_id: "support-thread".to_owned()
             })
@@ -1390,11 +1406,20 @@ mod tests {
                 _ => json!("unexpected"),
             };
             assert!(
-                parse_support_thread_policy_response(&mutated, &cwd, CODEX_MODEL, Some("openai"))
-                    .is_err(),
+                parse_support_thread_policy_response(
+                    &mutated,
+                    &cwd,
+                    CODEX_COMMIT_EXPLAINER_MODEL,
+                    Some("openai"),
+                )
+                .is_err(),
                 "{pointer}"
             );
         }
+        assert!(
+            parse_support_thread_policy_response(&response, &cwd, CODEX_MODEL, Some("openai"),)
+                .is_err()
+        );
     }
 
     #[test]

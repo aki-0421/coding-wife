@@ -20,7 +20,9 @@ use super::support::{
 };
 use super::support_private::{support_config, write_private_file, PrivateRunDirectory};
 use super::support_probe::{canonical_json_hash, ProbeCaptureServer};
-use super::types::{BinarySource, CapabilityState, CODEX_MODEL};
+use super::types::{BinarySource, CapabilityState, CODEX_COMMIT_EXPLAINER_MODEL};
+#[cfg(test)]
+use super::types::{CODEX_MAIN_MODEL, CODEX_PRESENCE_DIRECTOR_MODEL};
 
 pub(crate) const SUPPORTED_CLI_VERSION: &str = "0.144.5";
 pub(crate) const SUPPORTED_ARM64_BINARY_SHA256: &str =
@@ -79,7 +81,10 @@ pub(super) async fn run_isolation_probe(
     write_private_file(&auth_canary, b"AUTH-CANARY-MUST-NOT-LEAK")?;
     let mut server = ProbeCaptureServer::start(&repository_canary, &auth_canary, &execution_marker)
         .map_err(|_| SupportRuntimeError::IsolationProbe)?;
-    run_directory.write_config(&support_config(Some(&server.base_url())))?;
+    run_directory.write_config(&support_config(
+        CODEX_COMMIT_EXPLAINER_MODEL,
+        Some(&server.base_url()),
+    ))?;
 
     let sandbox = sandbox_probe(binary, &run_directory, server.malicious_command()).await?;
     if sandbox.status.success()
@@ -112,7 +117,7 @@ pub(super) async fn run_isolation_probe(
                 "thread/start",
                 support_thread_start_params(
                     &run_directory.workspace,
-                    CODEX_MODEL,
+                    CODEX_COMMIT_EXPLAINER_MODEL,
                     Some("mock_provider"),
                 ),
                 Duration::from_secs(5),
@@ -122,7 +127,7 @@ pub(super) async fn run_isolation_probe(
         let thread = parse_support_thread_policy_response(
             &thread,
             &run_directory.workspace,
-            CODEX_MODEL,
+            CODEX_COMMIT_EXPLAINER_MODEL,
             Some("mock_provider"),
         )
         .map_err(|_| SupportRuntimeError::IsolationProbe)?;
@@ -136,7 +141,7 @@ pub(super) async fn run_isolation_probe(
                     "support-release-probe",
                     &support_probe_input("support-release-probe"),
                     "ja",
-                    CODEX_MODEL,
+                    CODEX_COMMIT_EXPLAINER_MODEL,
                     &support_skill,
                 )
                 .map_err(|_| SupportRuntimeError::Skill)?,
@@ -162,7 +167,7 @@ pub(super) async fn run_isolation_probe(
                     "support-release-policy-probe",
                     &support_probe_input("support-release-policy-probe"),
                     "ja",
-                    CODEX_MODEL,
+                    CODEX_COMMIT_EXPLAINER_MODEL,
                     &support_skill,
                 )
                 .map_err(|_| SupportRuntimeError::Skill)?,
@@ -274,7 +279,7 @@ fn production_request_envelope_is_exact(request: &Value) -> bool {
     request.get("tools").is_none()
         && request.get("tool_choice").and_then(Value::as_str) == Some("auto")
         && request.get("parallel_tool_calls").and_then(Value::as_bool) == Some(false)
-        && request.get("model").and_then(Value::as_str) == Some(CODEX_MODEL)
+        && request.get("model").and_then(Value::as_str) == Some(CODEX_COMMIT_EXPLAINER_MODEL)
         && request.pointer("/reasoning/effort").and_then(Value::as_str) == Some("low")
         && output_schema == Some(&commit_explanation_output_schema("ja"))
         && output_schema
@@ -455,7 +460,7 @@ mod tests {
 
     fn exact_request() -> Value {
         json!({
-            "model": CODEX_MODEL,
+            "model": CODEX_COMMIT_EXPLAINER_MODEL,
             "parallel_tool_calls": false,
             "reasoning": {"effort": "low"},
             "tool_choice": "auto",
@@ -514,5 +519,20 @@ mod tests {
         let mut changed_parallel = request;
         changed_parallel["parallel_tool_calls"] = json!(true);
         assert!(!production_request_envelope_is_exact(&changed_parallel));
+    }
+
+    #[test]
+    fn production_commit_explainer_envelope_rejects_cross_role_models() {
+        let request = exact_request();
+        assert!(production_request_envelope_is_exact(&request));
+
+        for model in [CODEX_MAIN_MODEL, CODEX_PRESENCE_DIRECTOR_MODEL] {
+            let mut changed = request.clone();
+            changed["model"] = json!(model);
+            assert!(
+                !production_request_envelope_is_exact(&changed),
+                "accepted cross-role model {model}"
+            );
+        }
     }
 }

@@ -23,7 +23,6 @@ use crate::platform_fs::{
 
 use super::bundled_skill::{ResolvedBundledSkill, EXPLAIN_COMMIT_SKILL_NAME};
 use super::support::{SupportRuntimeError, SUPPORT_PERMISSION_PROFILE};
-use super::types::CODEX_MODEL;
 
 const MAX_AUTH_BYTES: u64 = 1024 * 1024;
 const RUN_DIRECTORY_PREFIX: &str = "coding-wife-support-";
@@ -738,13 +737,12 @@ fn current_uid() -> u32 {
     current_user_id()
 }
 
-pub(super) fn support_config(mock_base_url: Option<&str>) -> String {
+pub(super) fn support_config(model: &str, mock_base_url: Option<&str>) -> String {
     let provider = mock_base_url.map_or_else(String::new, |base_url| {
         format!(
             "\n[model_providers.mock_provider]\nname = \"Support probe\"\nbase_url = \"{base_url}\"\nwire_api = \"responses\"\nrequest_max_retries = 0\nstream_max_retries = 0\nsupports_websockets = false\n"
         )
     });
-    let model = CODEX_MODEL;
     let model_provider = if mock_base_url.is_some() {
         "model_provider = \"mock_provider\"\n"
     } else {
@@ -758,6 +756,16 @@ pub(super) fn support_config(mock_base_url: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn support_config_pins_the_requested_role_model_and_zero_authority() {
+        let config = support_config(crate::codex::types::CODEX_COMMIT_EXPLAINER_MODEL, None);
+
+        assert!(config.contains("model = \"gpt-5.6-terra\""));
+        assert!(!config.contains("gpt-5.6-sol"));
+        assert!(!config.contains("gpt-5.6-luna"));
+        assert!(config.contains("default_permissions = \"coding-wife-support-zero\""));
+    }
 
     fn write_auth_copy(run: &PrivateRunDirectory) -> PathBuf {
         let auth = run.codex_home.join("auth.json");
