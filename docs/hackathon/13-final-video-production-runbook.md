@@ -23,7 +23,7 @@ The Official Rules require a clear working-project demo with audio, publicly vis
 | Story duration | Exactly **165 seconds / 2:45** on the edit timeline |
 | Safety ceiling | Target must remain at or below **175 seconds / 2:55** after any emergency adjustment; **180 seconds is never acceptable** |
 | Language | English narration and English burned captions; matching English SRT |
-| Working proof | One causal live run from real Sol task through Luna reactions, verified commit, Commit changes, automatic Terra background work, and explicit explanation presentation |
+| Working proof | One causal repository run from a real Sol task through Luna reactions, a verified commit, Commit changes, and one explicit bounded Terra explanation request for that selected commit |
 | Required technology proof | Meaningful Codex use in construction and real runtime use of `gpt-5.6-sol`, `gpt-5.6-luna`, and `gpt-5.6-terra` |
 | Judge platform claim | macOS 14+ on Apple Silicon |
 | Raster | 1920×1080, square pixels, 30 fps constant frame rate |
@@ -131,7 +131,7 @@ Create one seed commit with subject `chore: seed greeting demo`. Confirm `npm te
 
 ### 3.3 Exact live prompt
 
-Paste this exact prompt into the production app:
+Paste this exact prompt into the accepted native app:
 
 > Update the greeting helper so it trims names and throws TypeError for empty input. Add tests for both cases, run npm test, and commit as feat: validate greeting names. Send one short path-free, code-free progress update before editing and one after verification.
 
@@ -143,15 +143,15 @@ Expected proof, not prerecorded output:
 - `npm test` passes.
 - Sol creates the commit `feat: validate greeting names`.
 - At least two eligible completed, path-free Sol messages produce distinct Luna caption/expression/motion reactions.
-- The native observer verifies the new reachable main-session commit and starts Terra silently in the background.
+- The native observer verifies the new reachable main-session commit.
 - Commit changes shows the same commit and its real unified diff.
-- Explain changes presents the cached Terra result or joins the already-running Terra job.
+- Explain changes starts one isolated `user_request` Terra job for that selected existing commit and presents its validated result.
 
 Shots 1 through 7 must come from this **same repository run and same resulting commit**. Waiting may be cut, but output from different proof-chain takes must not be combined. If the chain fails, discard it and restart from a fresh copy of the seed.
 
 ## 4. Exact 165-second shot table
 
-Word counts use whitespace-delimited words. The exact narration contains **292 words** across **9 shots**.
+Word counts use whitespace-delimited words. The exact narration contains **291 words** across **9 shots**.
 
 | Shot | In–out | Duration | Words | Exact English narration | Primary screen state |
 |---:|---:|---:|---:|---|---|
@@ -161,8 +161,8 @@ Word counts use whitespace-delimited words. The exact narration contains **292 w
 | 4 | 0:46–1:14 | 28s | 47 | Every eligible completed Sol message starts a separate GPT-5.6 Luna turn. Luna receives only a bounded, sanitized excerpt and has no tools. Its validated reaction drives the visible caption, optional speech, Live2D expression, and motion, creating a responsive pair-programming presence without exposing code, paths, diffs, or secrets. | Two real completed-message Luna reactions with matching Live2D behavior |
 | 5 | 1:14–1:30 | 16s | 30 | The verification passes and Sol creates a reviewable commit. Tool rows show only their type and command; successful work stays visually quiet, while failures alone receive a restrained red background. | Passing verification, quiet tool rows, final result, and commit |
 | 6 | 1:30–1:54 | 24s | 36 | In Commit changes, the result follows a familiar code-review order: commit summary, changed files, additions and deletions, then one unified diff with old and new line numbers. Review stays centered on the patch, not orchestration metadata. | Same commit in Commit changes; file navigation and real diff |
-| 7 | 1:54–2:16 | 22s | 43 | As soon as this new Sol commit became reachable and verified, the native controller started GPT-5.6 Terra silently in the background. Explain changes only presents the cache or joins that same running job. Terra sees bounded read-only evidence and never receives write access. | Background-ready/running state, Explain changes, Terra caption |
-| 8 | 2:16–2:33 | 17s | 35 | The three roles form one bounded pipeline: Sol builds, Luna maintains presence, and Terra reduces review effort. Typed TypeScript and Rust contracts pin each model, validate inputs and outputs, redact private material, and fail closed. | Production app remains visible behind a simple three-role authority overlay |
+| 7 | 1:54–2:16 | 22s | 42 | GPT-5.6 Terra is an isolated commit explainer with no tools. Here, Explain changes sends a bounded user request for this existing commit. Terra receives only read-only evidence, generates a concise review, and never gains write access or joins Sol’s main coding session. | Selected verified commit, Explain changes action, and validated Terra caption |
+| 8 | 2:16–2:33 | 17s | 35 | The three roles form one bounded pipeline: Sol builds, Luna maintains presence, and Terra reduces review effort. Typed TypeScript and Rust contracts pin each model, validate inputs and outputs, redact private material, and fail closed. | Accepted native app remains visible behind a simple three-role authority overlay |
 | 9 | 2:33–2:45 | 12s | 23 | Codex helped us implement, debug, test, and QA the product; humans chose the trust boundaries. Coding Wife targets macOS 14 on Apple Silicon. | Product hero and platform-accurate closing card |
 
 ### Machine-readable shot manifest
@@ -244,9 +244,9 @@ The following JSON block is the canonical input for TTS and edit automation. `st
     "startSeconds": 114,
     "endSeconds": 136,
     "durationSeconds": 22,
-    "wordCount": 43,
+    "wordCount": 42,
     "audioFile": "audio/07-terra-explanation.wav",
-    "narration": "As soon as this new Sol commit became reachable and verified, the native controller started GPT-5.6 Terra silently in the background. Explain changes only presents the cache or joins that same running job. Terra sees bounded read-only evidence and never receives write access."
+    "narration": "GPT-5.6 Terra is an isolated commit explainer with no tools. Here, Explain changes sends a bounded user request for this existing commit. Terra receives only read-only evidence, generates a concise review, and never gains write access or joins Sol’s main coding session."
   },
   {
     "shot": 8,
@@ -325,15 +325,15 @@ The following JSON block is the canonical input for TTS and edit automation. `st
 
 ### Shot 7 — Terra review reduction
 
-- **Production operation:** Begin with the selected fresh commit and its background explanation state visible. Select **Explain changes** once, then let the current cached result present or let the action join the same running job.
-- **Raw capture requirement:** Capture the state before the click, the click, and enough validated Terra caption to demonstrate a concrete summary. Retain the exact commit selection throughout.
-- **Edit:** Keep Commit changes and the character caption visible together. Do not imply that the button starts the first fresh-commit handoff.
+- **Production operation:** Begin with the verified fresh commit selected. Select **Explain changes** once to start one bounded `user_request` Terra job for that existing commit, then wait for its validated presentation.
+- **Raw capture requirement:** Capture the selected commit before the click, the single click, the request state, and enough validated Terra caption to demonstrate a concrete summary. Retain the exact commit selection throughout.
+- **Edit:** Keep Commit changes and the character caption visible together. Describe the action as the explicit user-request pathway; do not imply an automatic background handoff.
 - **Privacy risk:** Terra output containing a path, code, raw diff, secret, unsupported technical claim, or content for a different commit.
-- **Success/fallback:** The take is valid only if the native controller already started Terra after reachable verified commit proof. If the action starts an unrelated `user_request`, the caption is unavailable, or scope changes, discard the proof-chain take.
+- **Success/fallback:** The take is valid only if the action starts exactly one `user_request` for the selected verified commit, Terra stays read-only and tool-free, and the validated caption is safe. If the commit changes, the action duplicates, or the caption is unavailable or unsafe, discard the take.
 
 ### Shot 8 — Three-role authority summary
 
-- **Production operation:** Hold the production app on the accepted commit review and character state. No new runtime action is needed.
+- **Production operation:** Hold the accepted native app on the commit review and character state. No new runtime action is needed.
 - **Raw capture requirement:** At least 18 stable seconds from the accepted app state. This may be recorded separately after the live proof chain is secured.
 - **Edit:** Dim the app no more than 25% and add a simple submission-owned text overlay labeled **One bounded pipeline** with exactly these rows: `gpt-5.6-sol — builds — write-capable main session`; `gpt-5.6-luna — presence — zero tools`; `gpt-5.6-terra — review — zero tools`. Label the graphic **Architecture** so it is not mistaken for a product screen.
 - **Privacy risk:** Wrong model ID, implied tool access for a support role, a generic “GPT-5.6” alias, or overlaying unsupported claims.
@@ -454,17 +454,17 @@ then one unified diff with old and new line numbers.
 Review stays centered on the patch, not orchestration metadata.
 
 15
-00:01:54,500 --> 00:02:03,500
-As soon as this new Sol commit became reachable and verified,
-the native controller started GPT-5.6 Terra silently in the background.
+00:01:54,500 --> 00:02:01,500
+GPT-5.6 Terra is an isolated commit explainer with no tools.
 
 16
-00:02:03,500 --> 00:02:10,500
-Explain changes only presents the cache or joins that same running job.
+00:02:01,500 --> 00:02:08,500
+Here, Explain changes sends a bounded user request for this existing commit.
 
 17
-00:02:10,500 --> 00:02:15,500
-Terra sees bounded read-only evidence and never receives write access.
+00:02:08,500 --> 00:02:15,500
+Terra receives only read-only evidence, generates a concise review,
+and never gains write access or joins Sol’s main coding session.
 
 18
 00:02:16,500 --> 00:02:23,500
@@ -486,7 +486,7 @@ humans chose the trust boundaries.
 Coding Wife targets macOS 14 on Apple Silicon.
 ```
 
-The concatenated SRT cue text, after replacing line breaks with spaces, must exactly reproduce the 292-word narration in section 4. No caption may overlap another cue or extend beyond 2:45.
+The concatenated SRT cue text, after replacing line breaks with spaces, must exactly reproduce the 291-word narration in section 4. No caption may overlap another cue or extend beyond 2:45.
 
 ## 8. Rehearsal and capture procedure
 
@@ -505,26 +505,28 @@ Rehearse and record selectors/coordinates for:
 3. Focus the composer, enter the exact prompt, and send once.
 4. Keep the newest completed message and character caption visible without excessive scrolling.
 5. Open Commit, select the same commit, select each changed file, and scroll the diff.
-6. Select Explain changes once and wait for presentation.
+6. Select Explain changes once, confirm the bounded `user_request` pathway, and wait for presentation.
 7. Restore the clean hero state.
 
-Save the reproducible sequence, viewport, selector names, and safe coordinate fallbacks to `evidence/rehearsal-map.json`. The rehearsal is successful only when one causal run produces Sol work, two Luna reactions, the verified commit, the matching diff, and Terra presentation.
+Save the reproducible sequence, viewport, selector names, and safe coordinate fallbacks to `evidence/rehearsal-map.json`. The rehearsal is successful only when one causal repository run produces Sol work, two Luna reactions, the verified commit, the matching diff, and a Terra `user_request` presentation for that commit.
 
 WDIO must own the QA binary lifecycle. If interrupted, terminate only the QA processes it started. Never stop the user's production `pnpm tauri:dev` process or terminate Coding Wife processes indiscriminately.
 
-### 8.3 Production app preparation
+### 8.3 Native app preparation and recorded fallback
 
-Final recording uses the real production development launch:
+Attempt final recording first with the real production development launch:
 
 ```bash
 pnpm tauri:dev
 ```
 
+If a fresh isolated `tauri:dev` app remains unable to send despite Codex diagnostics reporting ready, retain that failure evidence and use the repository's QA-specific debug Tauri binary as the recording fallback. The fallback is acceptable only when it is built from the frozen product source, runs the real WKWebView, typed Tauri IPC, Rust backend, authenticated Codex runtime, and disposable Git repository, and does not use demo transport or fabricated agent output. The accepted 2026-07-22 take used this fallback after two isolated `tauri:dev` attempts reproduced a disabled Send action.
+
 Before recording:
 
 - Freeze and record the source commit in `evidence/capture-manifest.json`.
 - Use macOS 14+ on Apple Silicon.
-- Confirm the production app is English and the exact three models are available.
+- Confirm the accepted native app is English and the exact three models are available.
 - Confirm Live2D renders, captions fit, expression/motion mappings work, and the Commit changes diff is readable.
 - Configure optional product TTS before capture if desired, but never show its key or settings screen. Screen capture itself remains silent.
 - Enable Do Not Disturb. Close Mail, Calendar, password managers, chat apps, private terminals, browser windows, and notification sources.
@@ -561,8 +563,8 @@ Discard the proof-chain take and reseed when any of these occurs:
 - a Luna caption is clipped, duplicated, stale, or not paired with expression/motion;
 - tests fail or the expected commit is absent;
 - Commit changes does not show the same commit and real diff;
-- Terra was not automatically started by the new reachable verified commit;
-- Explain changes starts an unrelated first handoff rather than presenting/joining the existing fresh-commit job;
+- Explain changes does not start exactly one bounded `user_request` for the selected verified commit;
+- Terra receives tools or write access, the selected commit changes, or the explanation scope is unrelated;
 - a key, email, personal path, notification, private URL, private repository label, or unrelated app appears even briefly;
 - an app crash, rendering corruption, missing character, cursor error, or unrecoverable visual pause damages the proof.
 
@@ -688,8 +690,8 @@ Process frames in batches and delete decoded scratch frames after each batch. OC
 - audio explains what was built, how Codex contributed, and how GPT-5.6 is used;
 - Sol, Luna, and Terra exact model IDs and distinct authority are accurate;
 - Luna is tied to safe live completed messages, not token streaming or replay;
-- Terra starts automatically only after the fresh main-session commit is reachable and verified;
-- Explain changes is described only as presenting cached output or joining that same running fresh-commit job;
+- Terra starts only from the recorded explicit Explain changes action for the selected verified commit;
+- Explain changes is described as a bounded `user_request`, and Terra remains tool-free and read-only;
 - the Commit UI displays user-relevant commit review information, not internal orchestration properties;
 - the primary platform claim is macOS 14+ on Apple Silicon;
 - no older release is shown or implied to contain the current three-model flow;
@@ -710,7 +712,7 @@ After all gates pass:
 
 Production is complete only when all statements are true:
 
-- [ ] One accepted causal live run proves Sol → two Luna reactions → verified commit → Commit changes → automatic silent Terra generation → Explain changes presentation.
+- [ ] One accepted causal repository run proves Sol → two Luna reactions → verified commit → Commit changes → one explicit bounded Terra `user_request` → explanation presentation.
 - [ ] The final master is 1920×1080, 30 fps, H.264/AAC 48 kHz, and 2:45 long.
 - [ ] English narration is complete, synchronized, approximately −16 LUFS, and at or below −1.5 dBTP.
 - [ ] English captions are burned in and the separate SRT matches them exactly.
