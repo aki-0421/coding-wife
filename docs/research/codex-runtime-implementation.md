@@ -134,7 +134,7 @@ Codex 0.144.5が接続直後またはturn実行中に送る`mcpServer/startupSta
 
 - `Approve once`、`Reject`、`Hold`、`Other`、`Interrupt`はpending kindが許す時だけ表示する。Holdはwire応答を送らずcardを維持する。
 - approvalの`Other`や自由文accept、未知methodの近似許可は実装しない。
-- native user inputのOtherはUIで1〜2,000文字のtrim済み自由回答として構築し、typed `user_input.answers`だけへ渡す。Holdはwire応答を送らずcardと入力を維持する。fallback decisionはcontractどおり自由文を許可しない。
+- native user inputの通常選択はquestion-scoped opaque option IDを`{type: "option", optionId}`として送り、Rust ledgerだけが元のApp Server labelへexact変換する。OtherはUIで1〜2,000 Unicode scalarのtrim済み自由回答を構築し、`{type: "other", text}`として送る。unknown ID、別questionのID、複数回答をOtherへ丸めない。Holdはwire応答を送らずcardと入力を維持する。fallback decisionはcontractどおり自由文を許可しない。
 - assistant/tool/plan/file/error/completionはsemantic rowとして表示し、120文字超のsanitized本文は展開とcopyを提供する。raw terminalとreasoningは表示しない。
 - bottomから48px超離れている間はscrollを固定し、新event件数と`最新へ`を表示する。
 
@@ -223,6 +223,8 @@ support turnへはapp bundleでowner/mode/identity/digest検証した`coding-wif
 `CodexEvent`はbase fieldだけでなくvariant payloadもcamelCaseでserializeする。Rust round-tripとTypeScript parser testが同じfixtureを読むため、一方だけのfield名変更はgateで失敗する。
 
 decision envelopeまたはassistant event正規化を変更した時は、`cargo test --manifest-path src-tauri/Cargo.toml codex::decision::tests`と`cargo test --manifest-path src-tauri/Cargo.toml codex::normalizer::tests`を実行する。前者は`result`互換fieldとdecision requestのfail-closed検証、後者はJSON delta非公開、commentaryのplain textまたはexact `result.message`だけがredact済みで表示されturnをinterruptしないこと、最終完了messageのredaction、invalid final outputのinterrupt要求を確認する。output schemaを変更した時は`cargo test --manifest-path src-tauri/Cargo.toml codex::protocol::tests::decision_output_schema_uses_a_structured_outputs_root_object`も実行し、単一root objectとrequired field契約を確認する。
+
+native requestUserInputの回答contractまたはledgerを変更した時は、`cargo test --manifest-path src-tauri/Cargo.toml --lib current_user_input_`でknown option IDのexact label変換、明示Otherの文字数境界、unknown IDとquestion swapのfail-closedを確認し、`cargo test --manifest-path src-tauri/Cargo.toml --test codex_supervisor native_rui_round_trips_option_label_and_bounded_other_answer -- --exact`でfake App Serverが通常labelとOther本文を受け取ることを確認する。UI側は`pnpm exec vitest run src/features/codex/session-store.test.ts src/features/codex/transport.test.ts src/features/workspace-persistence/codex-composition.test.ts src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`でtyped transport、single-claim、通常option、Other操作の契約を確認する。
 
 tool eventの正規化、表示field、永続payloadを変更した時は、`cargo test --manifest-path src-tauri/Cargo.toml codex::normalizer::tests`と`cargo test --manifest-path src-tauri/Cargo.toml workspace_history::store::tests::rich_codex_events_use_an_exact_bounded_allowlist_and_are_redacted`でApp Server itemからraw ID・result・credential・private pathが漏れず、HISTがexact allowlistだけを受理することを確認する。続けて`pnpm exec vitest run src/lib/contracts/codex.test.ts src/lib/contracts/workspace-history.test.ts src/features/codex/event-projection.test.ts src/features/workspace-persistence/adapter.test.ts src/features/workspace-view/WorkspaceShell.test.tsx --fileParallelism=false`でlive/HISTのprovider、実tool名、summary、duration、safe detailが同じ表示へ収束し、旧`mcpToolCall` item typeが実tool名として描画されないことを確認する。
 
