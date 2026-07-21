@@ -5,7 +5,7 @@ updated: 2026-07-21
 read_when:
   - "GitHub Actions、ブランチ保護、またはリポジトリ品質ゲートを変更するとき。"
   - "CI失敗の検証範囲と担当jobを特定するとき。"
-  - "macOSリリース検証と通常CIの責務境界を判断するとき。"
+  - "desktopリリース検証と通常CIの責務境界を判断するとき。"
 ---
 
 # 継続的インテグレーション仕様
@@ -20,7 +20,7 @@ read_when:
 - CIは`.github/workflows/ci.yml`に列挙したformat、documentation、frontend、native、dependency inventoryだけを固定依存のclean checkoutで実行する。
 - 通常のローカル開発では、これらのCI検証やリリース候補向け検証を変更後の確認として自動実行しない。ローカル検証は、ユーザーが明示的に依頼した場合、または依頼された作業自体がリリース候補の作成・検証である場合に限定する。
 - `pnpm quality:check`はrelease候補用の完全ゲートとして維持する。clean-checkout再構築、macOS release integration、Tauri bundle、最終diff再検査を含むため、PRごとのCIでは実行しない。
-- `.github/workflows/ci.yml`は`.app`とDMGの生成・公開、Developer ID署名、公証、stapling、fresh-profileまたは別Macでのinstall smoke、Devpost提出を行わない。無料DMGのdraft作成はversion tag専用の`.github/workflows/release.yml`へ分離し、詳細は[GitHub Release macOS無料配布仕様](github-release-distribution.md)を正本とする。
+- `.github/workflows/ci.yml`はdesktop bundleの生成・公開、platform installer smoke、署名・公証、Devpost提出を行わない。3 OSの無料installer draft作成はversion tag専用の`.github/workflows/release.yml`へ分離し、詳細は[GitHub Release無料マルチプラットフォーム配布仕様](github-release-distribution.md)を正本とする。
 
 ## トリガー
 
@@ -34,9 +34,9 @@ read_when:
 
 ## 分離したrelease workflow
 
-`.github/workflows/release.yml`は`v<version>` tagのpushだけで起動し、通常CIとは別の`Release macOS / Package and draft` jobを実行する。full historyからtag commitが`origin/develop`上にあることと、tagが`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`のversionへ一致することを先に検証する。
+`.github/workflows/release.yml`は`v<version>` tagのpushだけで起動し、通常CIとは別のplatform build jobsとdraft publish jobを実行する。full historyからtag commitが`origin/develop`上にあることと、tagが`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`のversionへ一致することを各build前に検証する。
 
-release jobは`macos-14` Apple Silicon runnerで`pnpm test:release`と`pnpm release:macos`を順に実行し、ad-hoc seal、resource inventory、Finder非依存DMG、read-only mount、canonical snapshot verificationを通したDMGだけをSHA-256 sidecarとともにdraft GitHub Releaseへ置く。Apple certificate、notarization credential、application API keyを使わない。既存public releaseは変更せず、draftだけを同tagの再実行で置換できる。public化はdownload後checksum、bounded Gatekeeper手順、別Macまたはfresh-profile install smokeの記録後に手動で行う。
+release workflowは`macos-14`、`windows-2025`、`ubuntu-22.04`のstandard runnerでDMG、NSIS setup、`.deb`、AppImageをbuildし、platform固有のinstall/package smokeを通した成果物だけをretention 1日のworkflow artifactへstageする。全build job成功後だけwrite権限を持つpublish jobがSHA-256とexact asset setを検証し、一つのdraft GitHub Releaseへ置く。Apple/Windows/GPG certificate、notarization credential、application API keyを使わない。既存public releaseは変更せず、修正は新version tagで行う。public化はdownload後checksumと日英のplatform警告を確認した後に手動で行う。
 
 ## 必須job
 

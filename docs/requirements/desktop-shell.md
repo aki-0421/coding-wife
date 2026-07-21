@@ -26,10 +26,10 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 目的 | 達成したと判断できる状態 |
 |---|---|
-| 一つの作業面を提供する | macOSで単一main windowが起動し、現行S-001〜S-003、S-005へ移動できる |
+| 一つの作業面を提供する | 対応するmacOS、Windows、Linuxで単一main windowが起動し、現行S-001〜S-003、S-005へ移動できる |
 | ローカル権限を限定する | 許可された目的別操作だけがRust境界を通り、任意shell・任意filesystem操作をWebViewから実行できない |
 | 作業状態を保護する | close、crash、再起動後に未完了処理を再実行せず、安全な回復概要を表示する |
-| 審査用macOS配布物を再現する | Finder自動化に依存せず、検証済み`.app`とread-only DMGを明示commandで生成できる |
+| 審査用配布物を再現する | macOS DMG、Windows NSIS setup、Linux Debian packageとAppImageを固定runner上で生成・install検証できる |
 
 ## スコープ
 
@@ -37,18 +37,18 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | 対象 | 内容 |
 |---|---|
-| Desktop shell | Tauri v2の単一main window、macOS chrome、minimum size、navigation |
+| Desktop shell | Tauri v2の単一main window、platform native chrome、minimum size、navigation |
 | 共通状態 | loading、empty、offline、permission denied、error、recovery |
 | 言語 | 日本語・英語の初期選択、即時切替、永続化 |
 | Accessibility | keyboard、focus、contrast、200% text zoom、reduced motion、screen reader |
 | Trust boundary | typed command、最小Capability、CSP、secret redaction |
-| macOS release | Apple Silicon用`.app`、development demo分離、ad-hoc resource seal、Finder非依存DMG、GitHub draft Release、artifact検証、固定依存ライセンス台帳、diff hygiene |
+| Desktop release | Apple Silicon DMG、Windows x64 NSIS setup、Linux x64 `.deb` / AppImage、development demo分離、GitHub draft Release、artifact検証、固定依存ライセンス台帳、diff hygiene |
 
 ### 含めない
 
 | 非対象 | 理由 | 扱う機能・文書 |
 |---|---|---|
-| Windows / Linux配布 | Build Week MVPは検証済みmacOS artifactへ集中する | 将来のplatform validation |
+| Intel Mac、Windows Arm、Linux Arm | 初回の無料配布は各OS一つの検証済みarchitectureへ限定する | 将来のplatform validation |
 | 複数window | demoの単一作業面と状態一貫性を優先する | 将来検討 |
 | 自動update | 署名・配布基盤を今回のMVPに含めない | 将来のrelease要件 |
 | Developer ID署名・Apple公証 | 無料配布を優先し、ad-hoc署名・未公証状態とbounded Gatekeeper手順を明示する | [GitHub Release macOS無料配布仕様](../rules/github-release-distribution.md) |
@@ -59,10 +59,10 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 
 | アクター | 説明 | 許可する操作 | 拒否時の動作 |
 |---|---|---|---|
-| ローカル利用者 | macOSへログインしてアプリを操作する本人 | 画面移動、設定、許可されたnative操作、終了 | OS権限または入力条件を満たさない操作を実行せず、理由と回復操作を表示する |
+| ローカル利用者 | 対応OSへログインしてアプリを操作する本人 | 画面移動、設定、許可されたnative操作、終了 | OS権限または入力条件を満たさない操作を実行せず、理由と回復操作を表示する |
 | React WebView | 表示と入力を担当する非信頼境界 | allowlist済みtyped commandの呼び出し | 未登録command、scope外path、無効payloadをRust側で拒否する |
 | Rust core | OS、process、Git、DB、assetの信頼境界 | 検証済み入力に対する目的別処理 | 失敗を構造化errorとして返し、secretとabsolute private pathを表示用payloadから除く |
-| Release maintainer / CI | リポジトリ所有の手順でmacOS artifactを作る実行者 | 検証済み`.app`からDMGを作る、明示指定でartifactを置換する、diff hygieneを検査する | 不正引数・不完全入力・既存出力への暗黙上書きは処理開始前に拒否する |
+| Release maintainer / CI | リポジトリ所有の手順で3 OSのartifactを作る実行者 | platform別bundleを作る、installer smokeを行う、draft Releaseへ集約する | 不正tag・不完全入力・buildまたはinstall検証失敗ではpublic releaseを作らない |
 
 ## 機能要件
 
@@ -111,7 +111,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-071` | アプリは基準端末で作業面を短時間に表示する | Apple Silicon・16GB RAM・release build・既存workspace 20件の条件で、process開始からskeletonを持つ操作可能なshell表示までのp95が3,000ms以下になる。workspace Git再検証はsetupをblockせず非同期で開始し、各processを期限内に終了する | Approved | 非該当 |
 | `APP-F-072` | UIは通常操作へ短時間に反応する | tab、workspace、settings toggleの入力からvisual state更新までのp95が100ms以下になり、測定中のsampleを100回以上記録する | Approved | 非該当 |
 
-### macOS release・差分品質
+### Desktop release・差分品質
 
 | 要件ID | 要件 | 受け入れ条件 | 状態 | 廃止理由・後継ID |
 |---|---|---|---|---|
@@ -126,6 +126,10 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `APP-F-081` | Release maintainerは一つの正本commandでappとDMGを検証できる | `pnpm release:macos`は同じhost-global lockとUUID run IDの下でapp、DMG、両sidecar manifestをmode `0700`のprivate candidateへbuildし、`scripts/release/verify-macos-release.sh`相当のcanonical verificationが全candidateへ成功した後だけ4成果物を一つのpublish transactionで置換する。既存4pathの内容と不在状態を同一filesystemのprivate backup/journalへ退避し、publish途中または全path移動後のfailure・HUP・INT・TERMではexact旧pairへrollbackし、新規buildなら4pathを0件へ戻す。process crashでstale backup/journalが残った場合、次のlock ownerは新規build前に一意で整合したjournalだけを有限処理で復旧し、曖昧・不正な状態をsafe codeで拒否する。app、DMG、manifestのmixed run IDを受理しない。nested codeを先に、最後に`.app`全体をtimestampなしのad-hoc署名でsealし、`codesign --verify --deep --strict`成功、TeamIdentifierなし、Developer ID署名なし、Apple公証なしを区別して報告する。sorted inventoryはrelative path、file type、permission mode、symlink target、regular file size、SHA-256を含み、app inventory digest、arm64、minimum macOS 14.0、bundle ID/version、Hiyori runtime 17file、legal notice、2 bundled skills、schema/migration、source map/demo/private path/quarantine/credential不在を検証する。entry path、link target、file bytesの先頭またはPOSIX path component境界にあるUNC pathも拒否する。DMGは別々の2回のread-only mountで同じapp inventoryを再現し、final DMGのsizeとSHA-256を出力する。成功・失敗・signal後にmount、child process、lock、private workを0件へ収束する | Approved | 非該当 |
 | `APP-F-082` | Release maintainerは配布対象の第三者依存とライセンス帰属を再現できる | `pnpm-lock.yaml`のproduction closureと、`LC_ALL=C`・color無効で実行する`cargo tree --locked --offline --target aarch64-apple-darwin --edges normal`の実効graphを、networkを使わずlockfile・installed package metadata・Cargo registry source metadataと照合する。Cargo treeの各name/version表示は`cargo metadata`のexact package IDへ一意に解決し、rootとworkspace memberはexact IDで除外する。同じname/versionの候補が複数ある曖昧表示、未知の表示、root欠落は誤mergeせず非0にする。license expressionはlegacyの`/`を`OR`へ正規化した上でSPDX ID、`AND`、`OR`、balanced parentheses、単一`WITH` exception、`LicenseRef`だけをstrict grammarで受理し、未知・禁止IDとmalformed expressionをfail closedにする。すべての依存にecosystem、name、固定version、source、integrity/checksum、license expression、attributionを持つsorted JSON inventoryと可読NOTICEを決定論的に生成し、lockまたはmetadataが生成物と一致しない場合とlicense/source/integrityのunknown・forbidden・missingを非0にする。`.app`はroot `LICENSE`とbyte一致するMIT License、生成済み依存JSONとNOTICE、既存Live2D/Hiyoriの原文notice・termsをすべてresourcesに含む | Approved | 非該当 |
 | `APP-F-087` | Release maintainerは無料のApple Silicon DMGをGitHub Releaseへ準備できる | `develop`上の`v<version>` tag pushではApple Silicon GitHub runnerがtagとTauri・package・Cargo versionの一致を確認し、credential不要の`pnpm release:macos`でproduction app、ad-hoc seal、Finder非依存DMG、resource inventory、2回のread-only candidate mount、canonical snapshotとSHA-256を検証する。成功したDMGとchecksumだけを同tagのdraft GitHub Releaseへ置き、失敗時はasset、partial image、mountを残さない。public releaseは別Mac install smokeとthird-party条件確認後に手動承認し、公開済みassetを同tagで置換しない。利用者向け手順は未公証状態とbounded Open Anywayを明記し、Gatekeeper無効化やquarantine一括削除を案内しない | Approved | 非該当 |
+| `APP-F-088` | 対応runtimeは配布対象OSとarchitectureを安全に判定できる | production shellは`macos/aarch64`、`windows/x86_64`、`linux/x86_64`だけを配布対応tupleとして扱う。macOSは14以上を数値検証し、Windows/Linuxはinstallerが検証したplatform tupleをreadyとして表示する。その他のtupleは`READINESS-OS-UNSUPPORTED`へfail closedする。process、filesystem permission、binary identityのOS差はcompile時に明示分岐し、Unix APIをWindows buildへ漏らさない | Approved | 非該当 |
+| `APP-F-089` | Release maintainerは無料のWindows installerを準備できる | `windows-2025` x64 standard runnerがTauri NSIS current-user setupを生成し、署名credentialなしで一時directoryへsilent install、実行file・legal resource存在、silent uninstall、残留不在を検証する。成功した`Coding-Wife-v<version>-Windows-x64-setup.exe`とSHA-256だけをdraftへ集約し、無署名とSmartScreenの**More info > Run anyway**が必要になり得ることを日英で明記する | Approved | 非該当 |
+| `APP-F-090` | Release maintainerは無料のLinux installerとportable artifactを準備できる | `ubuntu-22.04` x64 standard runnerがTauri `.deb`とAppImageを生成する。`.deb`は`apt`でinstall、package/executable/legal resource確認、removeを完走し、AppImageは展開して同じresourceを検証する。成功した`Coding-Wife-v<version>-Linux-x64.deb`、`Coding-Wife-v<version>-Linux-x64.AppImage`と各SHA-256だけをdraftへ集約し、Ubuntu 22.04 / Debian 12相当のWebKitGTK 4.1 baselineとAppImage実行bit要件を明記する | Approved | 非該当 |
+| `APP-F-091` | Release workflowは3 OSの検証済みartifactだけを一つのdraftへ集約する | platform build jobはread-only permissionで互いに独立し、全job成功後だけwrite permissionを持つpublish jobが全成果物名、SHA-256、重複・欠落を再検証して同tagのdraftを作成または更新する。いずれかのbuild/install smoke失敗時はpublish jobを実行せず、public releaseを作らない。公開済みtagのassetは上書きせず修正は新しいpatch versionを使う | Approved | 非該当 |
 
 ## 入力項目要件
 
@@ -155,7 +159,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | 通知 | app内statusとtoastだけ。OS通知はMVP非対象 | `APP-F-055` |
 | Capability・認可 | window、dialog、process、filesystemのscopeを目的別に最小化 | `APP-F-067`, `APP-F-068` |
 | アップデート・互換性 | 自動updateは非該当。DB migrationはforward-onlyかつ失敗時rollback | `APP-F-065` |
-| 配布物生成 | Tauri `.app`とrepository scriptによるad-hoc seal・Finder非依存DMGを維持し、検証済みDMGとSHA-256をversion tagごとのdraft GitHub Releaseへ置く | `APP-F-073`, `APP-F-074`, `APP-F-080`〜`APP-F-082`, `APP-F-087` |
+| 配布物生成 | macOS DMG、Windows NSIS setup、Linux `.deb` / AppImageをplatform runnerでbuild・install検証し、SHA-256とともにversion tagごとの一つのdraft GitHub Releaseへ置く | `APP-F-073`, `APP-F-074`, `APP-F-080`〜`APP-F-082`, `APP-F-087`〜`APP-F-091` |
 | 差分品質 | byte-exact Hiyori NOTICEだけをwhitespace検査から除外し、他のrepository-owned textは除外しない | `APP-F-075` |
 | 設定・診断 | app preferenceとreadinessはversioned native sourceを正本にし、WebView/demo値を永続・readyとして扱わない | `APP-F-070`, `APP-F-076` |
 | 配布物受け入れ | clean final HEADのsealed resource inventory、固定依存NOTICE、実DMG mount/copy/launch、fresh-profile相当、ja/en/a11y/privacy/offline/performanceをinstalled artifactで検証する | `APP-F-077`〜`APP-F-082` |
@@ -171,7 +175,7 @@ Codex、Git、Live2D、履歴を一つのデスクトップ画面で安全に調
 | `S-005` | アプリ設定・診断 | `APP-F-055`, `APP-F-057`〜`APP-F-072`, `APP-F-076` | 追加 | [画面詳細仕様](../screen-design/S-005_app-settings-diagnostics.md) |
 | `S-006` | ワークスペース設定（廃止） | `APP-F-083` | 廃止 | [画面詳細仕様](../screen-design/S-006_project-settings.md) |
 
-`APP-F-073`〜`APP-F-075`、`APP-F-077`〜`APP-F-082`、`APP-F-087`はrelease/CI/installed artifact境界の要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
+`APP-F-073`〜`APP-F-075`、`APP-F-077`〜`APP-F-082`、`APP-F-087`〜`APP-F-091`はrelease/CI/installed artifact境界の要件であり、アプリ画面への追加を伴わないため画面IDは非該当とする。
 
 ## 非機能要件
 
